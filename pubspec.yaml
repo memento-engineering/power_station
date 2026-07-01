@@ -1,0 +1,41 @@
+name: power_station_workspace
+publish_to: none
+environment:
+  sdk: ^3.11.0
+workspace:
+  - packages/grid_assets
+  - packages/butane_grid_assets
+  - packages/dart_grid_assets
+
+# Cross-repo linkage: the the_grid framework packages (grid_engine, grid_cli,
+# grid_controller, …) are declared `any` in each pack and resolved via the
+# machine-local `pubspec_overrides.yaml` at this root (path deps into the
+# sibling ../the_grid checkout during dev; hosted/git refs at stabilization).
+# That file is gitignored — the dart domain's `grid dart link` generates it.
+# genesis_tree stays hosted (^0.1.3).
+# See the_grid docs/SCRATCH-pub-capability-and-repo-split.md.
+
+dev_dependencies:
+  melos: ^7.7.0
+
+melos:
+  scripts:
+    # ---------- primary scripts ----------
+    test:
+      description: >-
+        Run the offline unit suite (excludes `integration`-tagged tests, which
+        need out-of-process dependencies). All packs are pure Dart.
+      exec: dart test -x integration
+      packageFilters:
+        flutter: false
+        dirExists: test
+
+    analyze:
+      description: >-
+        Run dart analyze on the entire workspace.
+      run: dart analyze
+
+    format:
+      description: >-
+        Check formatting for all Dart files. Fails if any file needs changes.
+      run: dart format --output=none --set-exit-if-changed .
