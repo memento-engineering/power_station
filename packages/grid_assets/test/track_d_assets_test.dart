@@ -8,8 +8,10 @@
 // prompt renders with no leftover mustache holes, and the manifest declares the
 // same four rubrics + the critic prompt (parsed as REAL yaml, not string-matched).
 //
-// Offline only — reads bundled files from a temp-free `extension/` dir resolved
-// by walking up from the cwd; no live anything.
+// Offline only — reads bundled files from a temp-free `extension/` dir. The
+// manifest tests pin an explicit root walked up from the cwd; a separate group
+// proves the loader ALSO resolves `extension/` via the package config with the
+// cwd set to a foreign dir (the repo-split fix). No live anything.
 import 'dart:io';
 
 import 'package:grid_assets/grid_assets.dart';
@@ -64,6 +66,33 @@ void main() {
     test('an unknown rubric throws (fail-loud — a packaging bug, never a silent '
         'empty prompt)', () {
       expect(() => loader.loadRubric('does-not-exist'), throwsArgumentError);
+    });
+  });
+
+  group('PackagedAssetLoader — cwd-independent resolution (the repo-split fix)',
+      () {
+    test('resolves rubrics with the cwd set to a foreign temp dir — via the '
+        'package config, since no cwd walk-up from there can ever reach the '
+        'assets (the post-split space_station runner)', () {
+      // A dir that shares no ancestry with power_station's checkout: the cwd
+      // walk-up is guaranteed to miss, so a passing load PROVES the package
+      // config resolved it (not an accidental walk-up hit).
+      final foreign =
+          Directory.systemTemp.createTempSync('grid_assets_foreign_cwd_');
+      final saved = Directory.current;
+      try {
+        Directory.current = foreign;
+        // No explicit root — resolution runs for real from the foreign cwd.
+        final resolved = PackagedAssetLoader();
+        for (final rubricId in kCommitteeRubrics) {
+          final text = resolved.loadRubric(rubricId);
+          expect(text, isNotEmpty);
+          expect(text, contains(rubricId));
+        }
+      } finally {
+        Directory.current = saved;
+        foreign.deleteSync(recursive: true);
+      }
     });
   });
 
