@@ -16,11 +16,21 @@
 /// `terminateGroup`/pgid reaper. The host runs a SCRIPTED [DriveScenario] (zero
 /// inference) and collects a domain [TestReport].
 ///
+/// The LIVE-LOCAL entry pieces (the away-run M-C): [ProcessLeonardDrive] (the
+/// real drive — shells lenny's credential-free `leonard_drive` per call),
+/// [burnDispatchHandler] (the server-side `burn`-kind dispatch a lessor plugs
+/// into a `StationServer`), and [LocalDartFollowerLauncher] (the
+/// pipeline-proof follower: a hermetic pure-Dart exploration-hosting daemon in
+/// its own process group — butane stays untouched).
+///
 /// In-repo home for M6; the sibling-to-`butane_flutter` placement is the later
 /// split (ADR-0011 build-order placement decision).
 library;
 
 export 'src/burn/burn_capabilities.dart';
+export 'src/burn/burn_dispatch_handler.dart';
 export 'src/burn/burn_report.dart';
 export 'src/burn/burn_scenario.dart';
 export 'src/burn/follower.dart';
+export 'src/burn/local_follower_launcher.dart';
+export 'src/burn/process_leonard_drive.dart';

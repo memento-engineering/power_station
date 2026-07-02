@@ -1,0 +1,13 @@
+# butane_grid_assets test configuration.
+#
+# The offline unit suite runs anywhere (`dart test -x integration` — the melos
+# `test` script's default). The `integration` tag marks the live-local burn
+# test, which spawns a real follower daemon under its own VM service and shells
+# lenny's `leonard_drive`: run it with `dart test -t integration`. It
+# self-skips when leonard_drive is not discoverable.
+tags:
+  integration:
+    description: >-
+      Spawns a real exploration-hosting follower daemon (loopback VM service)
+      and drives it with lenny's credential-free leonard_drive over a real
+      federation StationServer. Self-skips when leonard_drive is absent.

@@ -23,5 +23,10 @@ dependencies:
   meta: ^1.16.0
 
 dev_dependencies:
+  # grid_controller + grid_exploration back the pipeline-proof live-local
+  # follower daemon (tool/follower_daemon.dart) — the hermetic in-memory
+  # exploration-hosting app-under-test; dev-only (never a lib dep).
+  grid_controller: any
+  grid_exploration: any
   lints: ^5.1.0
   test: ^1.25.0
