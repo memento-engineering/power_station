@@ -52,7 +52,7 @@ Future<StepOutcome> _route(Map<String, String> grades) {
 
 void main() {
   group('Track C3 — the route matrix', () {
-    test('all A–C ⇒ Ok(advance)', () async {
+    test('all A–C ⇒ Ok(advance) — with route provenance (FT-2)', () async {
       final out = await _route(const {
         'code-validation': 'A',
         'spec-adherence': 'B',
@@ -60,7 +60,16 @@ void main() {
         'test-coverage': 'C',
       });
       expect(out, isA<Ok>());
-      expect((out as Ok).payload, {'verdict': 'advance'});
+      // FT-2: the advance payload is now self-contained — it carries the grade
+      // vector it consumed (CSV in kCommitteeRubrics order), the computed spread
+      // (A..C ⇒ index 0..2 ⇒ 2), and the matrix arm that fired.
+      expect((out as Ok).payload, {
+        'verdict': 'advance',
+        'grades': 'code-validation=A,spec-adherence=B,regression-risk=A,'
+            'test-coverage=C',
+        'spread': '2',
+        'rule': 'all-approve',
+      });
     });
 
     test('the gating critic at F ⇒ Gate (hard block)', () async {

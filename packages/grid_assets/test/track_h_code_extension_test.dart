@@ -8,11 +8,15 @@
 // by circuit_acceptance_test.dart), so this file is the Agent/Land/GitSourceControl
 // capability-UNIT file.
 //
-// ADR-0008 D2 / M4-P1 §6, Track H. Zero I/O — fakes only.
+// ADR-0008 D2 / M4-P1 §6, Track H. Zero I/O — fakes only (the FT-2 result()
+// tests read usage files a test writes into a temp dir; no real claude/git).
+import 'dart:io';
+
 import 'package:grid_assets/grid_assets.dart';
 import 'package:grid_controller/grid_controller.dart';
 import 'package:grid_engine/grid_engine.dart';
 import 'package:grid_runtime/grid_runtime.dart';
+import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
 import 'support/asset_fakes.dart';
@@ -100,16 +104,28 @@ class _FakeSourceControl implements SourceControl {
 
 void main() {
   group('Track H — the capabilities reproduce P0 configs/orchestration', () {
-    test('AgentCapability spawns headless `claude -p <prompt>` in the worktree',
-        () {
+    test('AgentCapability spawns headless claude WRAPPED for usage capture in '
+        'the worktree (FT-2)', () {
       final c = _capCtx();
       final cfg = const AgentCapability().spawn(c.context, c.args);
-      expect(cfg.command, 'claude');
-      // Headless print mode + skip-permissions, then the rich prompt as argv[2].
-      expect(cfg.args.length, 3);
-      expect(cfg.args[0], '--dangerously-skip-permissions');
-      expect(cfg.args[1], '-p');
-      expect(cfg.args[2], contains('Bead `tg-1`'));
+      // FT-2: the claude invocation is wrapped in `sh -c` so its
+      // `--output-format json` result envelope redirects to the per-step
+      // telemetry file; the claude argv (the rendered brief included) rides as
+      // sh positional params ("$@"), byte-identical — only the output format +
+      // the stdout redirection change.
+      expect(cfg.command, 'sh');
+      expect(cfg.args[0], '-c');
+      expect(cfg.args[1], contains('.grid/telemetry/tg-1_agent.usage.json'));
+      expect(cfg.args[1], contains(r'exec "$@"'));
+      expect(cfg.args[2], 'grid-claude'); // $0 label
+      // $1.. — the exact claude invocation ("$@" execs it verbatim).
+      expect(cfg.args[3], 'claude');
+      expect(cfg.args[4], '--dangerously-skip-permissions');
+      expect(cfg.args[5], '--output-format');
+      expect(cfg.args[6], 'json');
+      expect(cfg.args[7], '-p');
+      // The rich prompt rides as the FINAL positional (byte-identical brief).
+      expect(cfg.args.last, contains('Bead `tg-1`'));
       expect(cfg.workDir, '/w/tg-1');
       expect(cfg.lifecycle, Lifecycle.oneTurn);
     });
@@ -239,6 +255,63 @@ void main() {
       expect(emptyRoot.workspaceFor('tg-1'), '/grid/worktrees/tg-1');
       expect(emptyRoot.workspaceFor('tg-1').startsWith('/'), isTrue,
           reason: 'must be absolute — never spawn against the CWD');
+    });
+  });
+
+  group('Track H — AgentCapability.result() usage telemetry (FT-2)', () {
+    // The result() hook reads the harness's `--output-format json` envelope from
+    // the per-step telemetry file; here a test writes it into a temp workspace.
+    ({FakeTreeContext context, StepArgs args}) resultCtx(String workspaceDir) => (
+      context: FakeTreeContext(values: {
+        Workspace: testWorkspace(
+          'tg-1',
+          workspaceDir: workspaceDir,
+          branch: 'grid/tg-1',
+        ),
+      }),
+      args: stepArgs('tg-1/agent'),
+    );
+
+    void writeUsage(String workspaceDir, String content) {
+      File(p.join(workspaceDir, usageReportPath('tg-1/agent')))
+        ..createSync(recursive: true)
+        ..writeAsStringSync(content);
+    }
+
+    test('returns tokens/cost/turns/duration when the harness wrote an envelope',
+        () async {
+      final dir = Directory.systemTemp.createTempSync('agent-usage-');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      writeUsage(
+        dir.path,
+        '{"duration_ms": 900, "num_turns": 4, "total_cost_usd": 0.03, '
+        '"usage": {"input_tokens": 12, "output_tokens": 34}}',
+      );
+      final c = resultCtx(dir.path);
+      final out = await const AgentCapability().result(c.context, c.args);
+      expect(out, {
+        'tokensIn': '12',
+        'tokensOut': '34',
+        'costUsd': '0.03',
+        'numTurns': '4',
+        'harnessDurationMs': '900',
+      });
+    });
+
+    test('an ABSENT envelope ⇒ null (telemetry never fails the step)', () async {
+      final dir = Directory.systemTemp.createTempSync('agent-usage-absent-');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final c = resultCtx(dir.path);
+      expect(await const AgentCapability().result(c.context, c.args), isNull);
+    });
+
+    test('a MALFORMED envelope ⇒ null (telemetry never fails the step)',
+        () async {
+      final dir = Directory.systemTemp.createTempSync('agent-usage-bad-');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      writeUsage(dir.path, '{ not json');
+      final c = resultCtx(dir.path);
+      expect(await const AgentCapability().result(c.context, c.args), isNull);
     });
   });
 }

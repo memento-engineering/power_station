@@ -21,6 +21,7 @@ library;
 
 export 'src/agent/agent_domain.dart';
 export 'src/agent/agent_harness.dart';
+export 'src/agent/usage_report.dart';
 export 'src/assets/asset_loader.dart';
 export 'src/code/code_capabilities.dart';
 export 'src/code/code_run_command.dart';

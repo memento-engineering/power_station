@@ -143,13 +143,19 @@ void main() {
             reason: 'critic $critic fanned out after the agent',
           );
         }
-        // The gating lane spawns `sh` (the Validation Plan); the LLM lanes `claude`.
+        // Both lanes spawn `sh` (FT-2 wraps claude for usage capture): the
+        // gating lane runs the Validation Plan, an LLM lane exec's claude.
         final gating = f.provider.started
             .firstWhere((s) => s.name == _step(kCriticNodes.first));
         expect(gating.config.command, 'sh');
+        expect(
+          gating.config.args[1],
+          contains('.grid/critique/code-validation.rc'),
+        );
         final llm = f.provider.started
             .firstWhere((s) => s.name == _step(kCriticNodes[1]));
-        expect(llm.config.command, 'claude');
+        expect(llm.config.command, 'sh');
+        expect(llm.config.args, contains('claude'));
 
         // 3) all four critics complete with PASSING grades → the route joins
         //    (await-all), reads the grades via the SiblingView, and advances (Ok).

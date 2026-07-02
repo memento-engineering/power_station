@@ -112,7 +112,10 @@ void main() {
 
         expect(f.provider.started, hasLength(1), reason: 'the agent spawned');
         final agentStart = f.provider.started.single;
-        expect(agentStart.config.command, 'claude');
+        // FT-2: the claude invocation is wrapped in `sh -c` for usage capture;
+        // claude is exec'd from the positionals (`"$@"`).
+        expect(agentStart.config.command, 'sh');
+        expect(agentStart.config.args, contains('claude'));
         expect(agentStart.name, _step('agent'));
         // The engine-minted per-incarnation token rides config.env on the spawn.
         expect(
@@ -148,13 +151,17 @@ void main() {
         }
         expect(f.provider.started, hasLength(5),
             reason: 'the agent + the four critics started, nothing else');
-        // The gating lane spawns `sh` (the Validation Plan); an LLM lane `claude`.
+        // Both lanes spawn `sh` now (FT-2 wraps claude for usage capture): the
+        // gating lane runs the Validation Plan, an LLM lane exec's claude.
         final gating = f.provider.started
             .firstWhere((s) => s.name == _step(kCriticNodes.first));
         expect(gating.config.command, 'sh');
+        expect(gating.config.args[1], contains('.grid/critique/code-validation.rc'));
         final llm = f.provider.started
             .firstWhere((s) => s.name == _step(kCriticNodes[1]));
-        expect(llm.config.command, 'claude');
+        expect(llm.config.command, 'sh');
+        expect(llm.config.args, contains('claude'));
+        expect(llm.config.args[1], contains('.grid/telemetry/'));
 
         // 3) All four critics complete with PASSING grades → the route joins
         //    (await-all), reads the grades via the SiblingView, and advances; the

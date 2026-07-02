@@ -21,6 +21,7 @@ import 'package:grid_runtime/grid_runtime.dart';
 
 import '../agent/agent_domain.dart';
 import '../agent/agent_harness.dart';
+import '../agent/usage_report.dart';
 import '../assets/asset_loader.dart';
 import 'committee.dart';
 
@@ -88,11 +89,26 @@ class AgentCapability extends ProcessCapability {
       config: config,
       brief: buildAgentBrief(bead, workspace),
       workspace: workspace,
+      usageOut: usageReportPath(args.nodePath),
     );
   }
 
   @override
   StepSignal interpretEvent(RuntimeEvent event) => _jobSignal(event);
+
+  /// The CAPTURE-ONLY usage telemetry (FT-2): on a clean completion, read the
+  /// harness's `--output-format json` envelope the resolved harness redirected
+  /// (claude) and contribute tokensIn/tokensOut/costUsd/numTurns/
+  /// harnessDurationMs to `grid.result.<nodePath>.*`. FAIL-SAFE: an absent /
+  /// malformed / harness-without-usage envelope yields no fields (null), NEVER a
+  /// throw — telemetry can never fail, gate, or delay the agent step.
+  @override
+  Future<Map<String, String>?> result(TreeContext context, StepArgs args) async {
+    final workspace = context.getInheritedSeedOfExactType<Workspace>();
+    if (workspace == null) return null;
+    final usage = readUsageFields(workspace.workspaceDir, args.nodePath);
+    return usage.isEmpty ? null : usage;
+  }
 }
 
 /// Assembles the agent's full-bead brief + local-first working agreement (the

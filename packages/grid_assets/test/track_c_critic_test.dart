@@ -110,14 +110,26 @@ void main() {
   });
 
   group('Track C2 — the LLM critics (one rubric each, isolated)', () {
-    test('spawns `claude --dangerously-skip-permissions -p <prompt>` in the '
-        'workspace', () {
+    test('spawns claude WRAPPED for usage capture, carrying only its own rubric '
+        '(FT-2)', () {
       final c = _ctx(rubric: 'spec-adherence');
       final cfg = const CriticCapability().spawn(c.context, c.args);
-      expect(cfg.command, 'claude');
-      expect(cfg.args[0], '--dangerously-skip-permissions');
-      expect(cfg.args[1], '-p');
-      expect(cfg.args[2], contains('spec-adherence'));
+      // The LLM lane rides the SAME wrapped claude invocation as the agent: the
+      // `--output-format json` envelope redirects to the per-step telemetry file.
+      expect(cfg.command, 'sh');
+      expect(cfg.args[0], '-c');
+      expect(
+        cfg.args[1],
+        contains('.grid/telemetry/tg-1_review_spec-adherence.usage.json'),
+      );
+      expect(cfg.args[2], 'grid-claude');
+      expect(cfg.args[3], 'claude');
+      expect(cfg.args[4], '--dangerously-skip-permissions');
+      expect(cfg.args[5], '--output-format');
+      expect(cfg.args[6], 'json');
+      expect(cfg.args[7], '-p');
+      // The prompt (its own rubric only) rides as the final positional.
+      expect(cfg.args.last, contains('spec-adherence'));
       expect(cfg.workDir, '/w/tg-1');
       expect(cfg.lifecycle, Lifecycle.oneTurn);
     });
@@ -194,6 +206,78 @@ void main() {
       final prompt = cap.buildCriticPrompt(bead('tg-1'), 'spec-adherence');
       expect(prompt, contains('CUSTOM BANDS for spec-adherence'));
       expect(prompt, isNot(contains('Packaged-AI-Asset loader')));
+    });
+  });
+
+  group('Track C2 — the LLM critic result() merges usage telemetry (FT-2)', () {
+    void writeVerdict(String workspaceDir, String rubric, String content) {
+      File('$workspaceDir/.grid/critique/$rubric.json')
+        ..createSync(recursive: true)
+        ..writeAsStringSync(content);
+    }
+
+    void writeUsage(String workspaceDir, String rubric, String content) {
+      File('$workspaceDir/${usageReportPath('tg-1/review/$rubric')}')
+        ..createSync(recursive: true)
+        ..writeAsStringSync(content);
+    }
+
+    test('MERGES tokens/cost into the grade + rationale (collision-safe keys)',
+        () async {
+      final dir = Directory.systemTemp.createTempSync('critic-usage-');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      const rubric = 'regression-risk';
+      writeVerdict(dir.path, rubric,
+          jsonEncode({'grade': 'B', 'rationale': 'narrow'}));
+      writeUsage(dir.path, rubric,
+          '{"total_cost_usd": 0.02, "usage": {"input_tokens": 9, "output_tokens": 8}}');
+      final c = _ctx(rubric: rubric, workspaceDir: dir.path);
+      final out = await const CriticCapability().result(c.context, c.args);
+      expect(out, {
+        'grade': 'B',
+        'rationale': 'narrow',
+        'tokensIn': '9',
+        'tokensOut': '8',
+        'costUsd': '0.02',
+      });
+    });
+
+    test('still grades F on a MALFORMED verdict but merges usage if present',
+        () async {
+      final dir = Directory.systemTemp.createTempSync('critic-usage-badverdict-');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      const rubric = 'test-coverage';
+      writeVerdict(dir.path, rubric, 'not json');
+      writeUsage(dir.path, rubric, '{"num_turns": 2}');
+      final c = _ctx(rubric: rubric, workspaceDir: dir.path);
+      final out = await const CriticCapability().result(c.context, c.args);
+      expect(out, {'grade': 'F', 'numTurns': '2'});
+    });
+
+    test('a MALFORMED usage file never fails the step — just the grade',
+        () async {
+      final dir = Directory.systemTemp.createTempSync('critic-usage-badusage-');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      const rubric = 'spec-adherence';
+      writeVerdict(dir.path, rubric, jsonEncode({'grade': 'A'}));
+      writeUsage(dir.path, rubric, 'garbage not json');
+      final c = _ctx(rubric: rubric, workspaceDir: dir.path);
+      final out = await const CriticCapability().result(c.context, c.args);
+      expect(out, {'grade': 'A'});
+    });
+
+    test('the GATING lane never merges usage (it is not an agent)', () async {
+      final dir = Directory.systemTemp.createTempSync('critic-gate-usage-');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      // A passing rc + a STRAY telemetry file at the gating nodePath: the gating
+      // result() must ignore it (the gating lane spawns `sh`, never the harness).
+      File('${dir.path}/.grid/critique/$kGatingRubric.rc')
+        ..createSync(recursive: true)
+        ..writeAsStringSync('0\n');
+      writeUsage(dir.path, kGatingRubric, '{"usage": {"input_tokens": 5}}');
+      final c = _ctx(rubric: kGatingRubric, workspaceDir: dir.path);
+      final out = await const CriticCapability().result(c.context, c.args);
+      expect(out, {'grade': 'A'}, reason: 'no usage merge on the gating lane');
     });
   });
 }
