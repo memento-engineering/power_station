@@ -2,10 +2,11 @@
 //
 // `code-validation` is the GATING lane: it runs the bead's OWN Validation Plan
 // via `sh`, capturing the plan's exit code so the step always `complete`s and
-// the grade (A iff zero, else F) rides `result()`. The three LLM lanes spawn
-// `claude` with ONLY their own rubric (anti-anchoring) and write a verdict JSON
-// `result()` parses. Zero I/O — no real `claude`/`sh`: the spawn config is
-// inspected directly and `result()` reads files a test writes into a temp dir.
+// the grade (A iff zero, else F) rides `result()`. The three LLM lanes ride the
+// resolved agent harness (claude by default — same argv shape) with ONLY their
+// own rubric (anti-anchoring) and write a verdict JSON `result()` parses. Zero
+// I/O — no real `claude`/`sh`: the spawn config is inspected directly and
+// `result()` reads files a test writes into a temp dir.
 import 'dart:convert';
 import 'dart:io';
 
@@ -17,20 +18,25 @@ import 'package:test/test.dart';
 
 import 'support/asset_fakes.dart';
 
-CapabilityContext _ctx({
+/// The critic's (ambient tree, per-step args) pair — the context rip-out shape:
+/// the work Bead + Workspace ride the tree; the rubric rides the step params.
+({FakeTreeContext context, StepArgs args}) _ctx({
   required String rubric,
   String workspaceDir = '/w/tg-1',
   Bead? beadOverride,
   String? nodePath,
-}) => CapabilityContext(
-  params: {'rubric': rubric},
-  bead: beadOverride ?? bead('tg-1'),
-  workspaceDir: workspaceDir,
-  branch: 'grid/tg-1',
-  baseBranch: 'main',
-  services: const ServiceBundle(),
-  cancel: CancelToken(),
-  nodePath: nodePath ?? 'tg-1/review/$rubric',
+}) => (
+  context: FakeTreeContext(
+    values: {
+      Bead: beadOverride ?? bead('tg-1'),
+      Workspace: testWorkspace(
+        'tg-1',
+        workspaceDir: workspaceDir,
+        branch: 'grid/tg-1',
+      ),
+    },
+  ),
+  args: stepArgs(nodePath ?? 'tg-1/review/$rubric', params: {'rubric': rubric}),
 );
 
 void main() {
@@ -40,8 +46,8 @@ void main() {
       final withPlan = bead('tg-1').copyWith(
         metadata: const {'validation_plan': 'melos analyze && melos test'},
       );
-      final cfg = const CriticCapability()
-          .spawn(_ctx(rubric: kGatingRubric, beadOverride: withPlan));
+      final c = _ctx(rubric: kGatingRubric, beadOverride: withPlan);
+      final cfg = const CriticCapability().spawn(c.context, c.args);
       expect(cfg.command, 'sh');
       expect(cfg.args[0], '-c');
       expect(cfg.args[1], contains('melos analyze && melos test'));
@@ -54,7 +60,8 @@ void main() {
 
     test('a plan-less bead defaults to an explicit `false` (never silently '
         'passes)', () {
-      final cfg = const CriticCapability().spawn(_ctx(rubric: kGatingRubric));
+      final c = _ctx(rubric: kGatingRubric);
+      final cfg = const CriticCapability().spawn(c.context, c.args);
       // `( false )` ⇒ a non-zero rc ⇒ result() grades F.
       expect(cfg.args[1], contains('( false )'));
     });
@@ -85,28 +92,28 @@ void main() {
       addTearDown(() => dir.deleteSync(recursive: true));
       const cap = CriticCapability();
 
+      final c = _ctx(rubric: kGatingRubric, workspaceDir: dir.path);
+
       // Absent rc ⇒ fail-closed F.
-      expect(await cap.result(_ctx(rubric: kGatingRubric, workspaceDir: dir.path)),
-          {'grade': 'F'});
+      expect(await cap.result(c.context, c.args), {'grade': 'F'});
 
       // rc "0" ⇒ A.
       final rcFile = File('${dir.path}/.grid/critique/code-validation.rc')
         ..createSync(recursive: true)
         ..writeAsStringSync('0\n');
-      expect(await cap.result(_ctx(rubric: kGatingRubric, workspaceDir: dir.path)),
-          {'grade': 'A'});
+      expect(await cap.result(c.context, c.args), {'grade': 'A'});
 
       // rc non-zero ⇒ F.
       rcFile.writeAsStringSync('1\n');
-      expect(await cap.result(_ctx(rubric: kGatingRubric, workspaceDir: dir.path)),
-          {'grade': 'F'});
+      expect(await cap.result(c.context, c.args), {'grade': 'F'});
     });
   });
 
   group('Track C2 — the LLM critics (one rubric each, isolated)', () {
     test('spawns `claude --dangerously-skip-permissions -p <prompt>` in the '
         'workspace', () {
-      final cfg = const CriticCapability().spawn(_ctx(rubric: 'spec-adherence'));
+      final c = _ctx(rubric: 'spec-adherence');
+      final cfg = const CriticCapability().spawn(c.context, c.args);
       expect(cfg.command, 'claude');
       expect(cfg.args[0], '--dangerously-skip-permissions');
       expect(cfg.args[1], '-p');
@@ -127,7 +134,7 @@ void main() {
 
     test('the prompt names ONLY its own rubric (anti-anchoring)', () {
       final prompt =
-          const CriticCapability().buildCriticPrompt(_ctx(rubric: 'spec-adherence'));
+          const CriticCapability().buildCriticPrompt(bead('tg-1'), 'spec-adherence');
       expect(prompt, contains('spec-adherence'));
       // The other lanes' concerns must NOT leak into this critic's prompt.
       expect(prompt, isNot(contains('regression-risk')));
@@ -143,8 +150,8 @@ void main() {
         description: 'Connect The Studio to The Dashboard.',
         design: 'A lossy inter-station gossip bus.',
       );
-      final prompt = const CriticCapability()
-          .buildCriticPrompt(_ctx(rubric: 'test-coverage', beadOverride: rich));
+      final prompt =
+          const CriticCapability().buildCriticPrompt(rich, 'test-coverage');
       expect(prompt, contains('Wire the federation bus'));
       expect(prompt, contains('Connect The Studio to The Dashboard.'));
       expect(prompt, contains('A lossy inter-station gossip bus.'));
@@ -161,9 +168,8 @@ void main() {
           'grade': 'b',
           'rationale': 'a narrow blast radius',
         }));
-      final out = await const CriticCapability().result(
-        _ctx(rubric: 'regression-risk', workspaceDir: dir.path),
-      );
+      final c = _ctx(rubric: 'regression-risk', workspaceDir: dir.path);
+      final out = await const CriticCapability().result(c.context, c.args);
       expect(out, {'grade': 'B', 'rationale': 'a narrow blast radius'});
     });
 
@@ -171,22 +177,21 @@ void main() {
       final dir = Directory.systemTemp.createTempSync('critic-llm-bad-');
       addTearDown(() => dir.deleteSync(recursive: true));
       const cap = CriticCapability();
+      final c = _ctx(rubric: 'test-coverage', workspaceDir: dir.path);
       // Missing verdict ⇒ F.
-      expect(await cap.result(_ctx(rubric: 'test-coverage', workspaceDir: dir.path)),
-          {'grade': 'F'});
+      expect(await cap.result(c.context, c.args), {'grade': 'F'});
       // Malformed verdict ⇒ F.
       File('${dir.path}/.grid/critique/test-coverage.json')
         ..createSync(recursive: true)
         ..writeAsStringSync('not json');
-      expect(await cap.result(_ctx(rubric: 'test-coverage', workspaceDir: dir.path)),
-          {'grade': 'F'});
+      expect(await cap.result(c.context, c.args), {'grade': 'F'});
     });
 
     test('an injected rubric source replaces the inline placeholder', () {
       final cap = CriticCapability(
         rubrics: (id) => 'CUSTOM BANDS for $id',
       );
-      final prompt = cap.buildCriticPrompt(_ctx(rubric: 'spec-adherence'));
+      final prompt = cap.buildCriticPrompt(bead('tg-1'), 'spec-adherence');
       expect(prompt, contains('CUSTOM BANDS for spec-adherence'));
       expect(prompt, isNot(contains('Packaged-AI-Asset loader')));
     });

@@ -194,7 +194,7 @@ void main() {
           value: joined,
           child: InheritedSeed<StationServices>(
             value: f.ctx,
-            child: StableInheritedSeed<CapabilityRegistry>(
+            child: InheritedSeed<CapabilityRegistry>(
               value: buildCodeRegistry(),
               child: InheritedSeed<SessionResolver>(
                 value: kCodeResolver,

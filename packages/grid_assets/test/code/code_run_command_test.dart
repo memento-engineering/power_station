@@ -1,13 +1,17 @@
+import 'package:args/args.dart' show ArgParserException;
 import 'package:grid_assets/grid_assets.dart';
 import 'package:grid_cli/grid_cli.dart' show RuntimeProviderKind;
+import 'package:grid_engine/grid_engine.dart' show ServiceBundle;
 import 'package:grid_runtime/grid_runtime.dart';
 import 'package:test/test.dart';
 
 /// Offline proofs for the code asset's [CodeRunCommand] (moved here from
-/// the_grid's `grid_cli` at the `power_station` repo split) — Fakes, not mocks,
-/// no live state, no real `claude`, no real `git`.
+/// the_grid's `grid_cli` at the `power_station` repo split; now COMPOSED over
+/// the station-runner library pieces — a plain `Command<int>` +
+/// `addStationFlags`, ADR-0008 Decision 2's composition inversion) — Fakes,
+/// not mocks, no live state, no real `claude`, no real `git`.
 void main() {
-  group('CodeRunCommand flag parsing (via the StationRunCommand base)', () {
+  group('CodeRunCommand flag parsing (via addStationFlags)', () {
     test('--dry-run is the SAFE DEFAULT (true when unspecified)', () {
       final cmd = CodeRunCommand();
       final parsed = cmd.argParser.parse(['--substation', 'tgdog']);
@@ -49,30 +53,54 @@ void main() {
       expect(parsed.flag('dry-run'), isFalse);
     });
 
-    test('the CODE ASSET carries the opinion, not the framework: the trio + a '
-        'git-SourceControl servicesFor live on CodeRunCommand', () {
+    test('the agent-scope flags ride the command: --harness defaults to claude, '
+        'the endpoint flags are optional', () {
       final cmd = CodeRunCommand();
-      // The trio is the command's (the composer requires it, defaults nothing).
-      expect(cmd.resolver, isNotNull);
+      final parsed = cmd.argParser.parse(['--substation', 'tgdog']);
+      expect(parsed.option('harness'), 'claude');
+      expect(parsed.option('model'), isNull);
+      expect(parsed.option('openai-base'), isNull);
+      expect(parsed.option('swift-base'), isNull);
+      // The harness id is a closed set (the four shipped harnesses).
       expect(
-        cmd.registry.formula('code'),
-        isNotNull,
-        reason: 'the code registry (agent/review/land) rides the command',
+        () => cmd.argParser.parse(['--harness', 'vim']),
+        throwsA(isA<ArgParserException>()),
       );
-      // servicesFor builds the git SourceControl from the live wiring.
-      final services = cmd.servicesFor!((
-        git: StationGitService(
-          runner: FakeGitRunner(),
-          prOpener: _FakePrOpener(),
+    });
+
+    test('the CODE ASSET carries the opinion, not the framework: the code '
+        'registry (with the committee) + the git SourceControl are built by '
+        'the asset, composed in run() (the composition inversion — no '
+        'StationRunCommand base, no servicesFor hook)', () {
+      // The trio's registry half: buildCodeRegistry carries the code formula +
+      // the committee sub-formula the command wires via a FormulaResolver.
+      final registry = buildCodeRegistry();
+      expect(
+        registry.formula('code'),
+        isNotNull,
+        reason: 'the code registry (agent/review/land) is the asset\'s',
+      );
+      expect(
+        registry.formula('code_review'),
+        isNotNull,
+        reason: 'the adversarial committee rides the same registry',
+      );
+      // The services half: the asset's OWN git SourceControl — provisioning
+      // works even when land is NOT armed (gitOps/prOpener null), exactly the
+      // bundle the command constructs from the live wiring.
+      final services = ServiceBundle(
+        sourceControl: GitSourceControl(
+          provisioner: StationGitService(
+            runner: FakeGitRunner(),
+            prOpener: _FakePrOpener(),
+          ),
+          root: const RootCheckout(
+            path: '/tmp/r',
+            defaultBranch: 'main',
+            substation: 'tgdog',
+          ),
         ),
-        workRoot: const RootCheckout(
-          path: '/tmp/r',
-          defaultBranch: 'main',
-          substation: 'tgdog',
-        ),
-        gitOps: null,
-        prOpener: null,
-      ));
+      );
       expect(
         services.sourceControl,
         isNotNull,

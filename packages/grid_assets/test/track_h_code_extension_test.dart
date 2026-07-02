@@ -17,17 +17,30 @@ import 'package:test/test.dart';
 
 import 'support/asset_fakes.dart';
 
-CapabilityContext _capCtx({SourceControl? sourceControl, Bead? beadOverride}) =>
-    CapabilityContext(
-      params: const {},
-      bead: beadOverride ?? bead('tg-1'),
-      workspaceDir: '/w/tg-1',
-      branch: 'grid/tg-1',
-      baseBranch: 'main',
-      services: ServiceBundle(sourceControl: sourceControl),
-      cancel: CancelToken(),
-      nodePath: 'tg-1/agent',
-    );
+/// The capability's (ambient tree, per-step args) pair — the context rip-out
+/// shape: the Bead/Workspace/ServiceBundle ride the tree as ambient values; the
+/// per-step nodePath/cancel ride the args.
+({FakeTreeContext context, StepArgs args}) _capCtx({
+  SourceControl? sourceControl,
+  Bead? beadOverride,
+}) => (
+  context: FakeTreeContext(
+    values: {
+      Bead: beadOverride ?? bead('tg-1'),
+      Workspace: testWorkspace(
+        'tg-1',
+        workspaceDir: '/w/tg-1',
+        branch: 'grid/tg-1',
+      ),
+      ServiceBundle: ServiceBundle(sourceControl: sourceControl),
+    },
+  ),
+  args: stepArgs('tg-1/agent'),
+);
+
+/// The ambient Workspace [_capCtx] mounts (for the brief-parity assertions).
+Workspace _workspace() =>
+    testWorkspace('tg-1', workspaceDir: '/w/tg-1', branch: 'grid/tg-1');
 
 /// A recording [SourceControl] (the land + provision Service, faked).
 class _FakeSourceControl implements SourceControl {
@@ -89,7 +102,8 @@ void main() {
   group('Track H — the capabilities reproduce P0 configs/orchestration', () {
     test('AgentCapability spawns headless `claude -p <prompt>` in the worktree',
         () {
-      final cfg = const AgentCapability().spawn(_capCtx());
+      final c = _capCtx();
+      final cfg = const AgentCapability().spawn(c.context, c.args);
       expect(cfg.command, 'claude');
       // Headless print mode + skip-permissions, then the rich prompt as argv[2].
       expect(cfg.args.length, 3);
@@ -110,7 +124,7 @@ void main() {
         notes: 'Coexistence-safe; do not touch gc.',
         metadata: const {'rig': 'tgdog'},
       );
-      final prompt = buildAgentPrompt(_capCtx(beadOverride: rich));
+      final prompt = buildAgentBrief(rich, _workspace()).render();
       // The full bead — a title-only prompt would starve the agent (A36).
       expect(prompt, contains('# Wire the federation bus'));
       expect(prompt, contains('substation `tgdog`'));
@@ -131,7 +145,7 @@ void main() {
     test('AgentCapability prompt omits empty bead sections + the substation '
         'parenthetical', () {
       // An empty bead: only the header + the working agreement, no Task/Design.
-      final prompt = buildAgentPrompt(_capCtx());
+      final prompt = buildAgentBrief(bead('tg-1'), _workspace()).render();
       expect(prompt, contains('# work bead tg-1'));
       expect(prompt, contains('Bead `tg-1`.'));
       expect(prompt, isNot(contains('## Task')));
@@ -156,7 +170,8 @@ void main() {
 
     test('LandCapability drives commit → push → PR and returns Ok(pr_url)', () async {
       final sc = _FakeSourceControl();
-      final outcome = await const LandCapability().run(_capCtx(sourceControl: sc));
+      final c = _capCtx(sourceControl: sc);
+      final outcome = await const LandCapability().run(c.context, c.args);
       expect(outcome, isA<Ok>());
       expect((outcome as Ok).payload, {'pr_url': 'https://github.com/memento/x/pull/7'});
       expect(sc.calls, [
@@ -168,13 +183,15 @@ void main() {
 
     test('LandCapability with NO source control no-ops to Ok (offline-safe)',
         () async {
-      final outcome = await const LandCapability().run(_capCtx());
+      final c = _capCtx();
+      final outcome = await const LandCapability().run(c.context, c.args);
       expect(outcome, isA<Ok>());
     });
 
     test('LandCapability fails when the PR does not open', () async {
       final sc = _FakeSourceControl()..prOpens = false;
-      final outcome = await const LandCapability().run(_capCtx(sourceControl: sc));
+      final c = _capCtx(sourceControl: sc);
+      final outcome = await const LandCapability().run(c.context, c.args);
       expect(outcome, isA<Failed>());
     });
 
@@ -183,7 +200,8 @@ void main() {
       // A provision-only GitSourceControl (no gitOps/prOpener) ⇒ canLand false.
       const sc = GitSourceControl();
       expect(sc.canLand, isFalse);
-      final outcome = await const LandCapability().run(_capCtx(sourceControl: sc));
+      final c = _capCtx(sourceControl: sc);
+      final outcome = await const LandCapability().run(c.context, c.args);
       expect(outcome, isA<Ok>(), reason: 'deferred land is Ok, not Failed');
     });
 

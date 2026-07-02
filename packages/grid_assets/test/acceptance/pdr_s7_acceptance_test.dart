@@ -100,7 +100,7 @@ Seed _root({
   value: joined,
   child: InheritedSeed<StationServices>(
     value: ctx,
-    child: StableInheritedSeed<CapabilityRegistry>(
+    child: InheritedSeed<CapabilityRegistry>(
       value: registry,
       child: InheritedSeed<SessionResolver>(
         value: kCodeResolver,
@@ -211,10 +211,22 @@ void main() {
         final wb1Id = _workBead(root, 'tg-1')!.branchId;
         final wb2Id = _workBead(root, 'tg-2')!.branchId;
         final workListId = _workListId(root);
-        // The WorkBead's child is the bead-keyed SessionScope subtree root.
+        // The bead-keyed SessionScope subtree root beneath the WorkBead. Since
+        // the context rip-out, WorkBead first mounts the ambient
+        // `InheritedSeed<Bead>` (unkeyed), so the session root is the first
+        // KEYED descendant, no longer the immediate child.
         Branch effectChild(Branch wb) {
           Branch? found;
-          wb.visitChildren((c) => found = c);
+          void walk(Branch b) {
+            if (found != null) return;
+            if (b.key != null) {
+              found = b;
+              return;
+            }
+            b.visitChildren(walk);
+          }
+
+          wb.visitChildren(walk);
           return found!;
         }
 
@@ -473,14 +485,20 @@ void main() {
         addTearDown(provider.close);
 
         // Mount the real reentrant subtree root (a SessionScope rooting the
-        // `code` formula) with NO existing session ⇒ it MINTS.
+        // `code` formula) with NO existing session ⇒ it MINTS. The ambient
+        // Bead is mounted above (as WorkBead does since the context rip-out)
+        // so a leaked spawn WOULD succeed — keeping the no-leak assertion
+        // non-vacuous.
         final owner = TreeOwner();
         owner.mountRoot(
           InheritedSeed<StationServices>(
             value: ctx,
-            child: StableInheritedSeed<CapabilityRegistry>(
+            child: InheritedSeed<CapabilityRegistry>(
               value: buildCodeRegistry(),
-              child: kCodeResolver.sessionFor(bead: bead('tg-1')),
+              child: InheritedSeed<Bead>(
+                value: bead('tg-1'),
+                child: kCodeResolver.sessionFor(bead: bead('tg-1')),
+              ),
             ),
           ),
         );
@@ -517,17 +535,22 @@ void main() {
     // is pinned by its own assertion.
 
     /// Mounts the agent step host (an ADOPTED session so it resolves + spawns
-    /// synchronously), returning the owner + root.
+    /// synchronously), returning the owner + root. The ambient Bead is mounted
+    /// above the sessionFor subtree (as WorkBead does since the context
+    /// rip-out) — the agent capability reads it with the effect verb.
     ({TreeOwner owner, Branch root}) mountAgent(Fakes f) {
       final owner = TreeOwner();
       final root = owner.mountRoot(
         InheritedSeed<StationServices>(
           value: f.ctx,
-          child: StableInheritedSeed<CapabilityRegistry>(
+          child: InheritedSeed<CapabilityRegistry>(
             value: buildCodeRegistry(),
-            child: kCodeResolver.sessionFor(
-              bead: bead('tg-1'),
-              session: _session('tg-1', 'tgdog-sess1'),
+            child: InheritedSeed<Bead>(
+              value: bead('tg-1'),
+              child: kCodeResolver.sessionFor(
+                bead: bead('tg-1'),
+                session: _session('tg-1', 'tgdog-sess1'),
+              ),
             ),
           ),
         ),

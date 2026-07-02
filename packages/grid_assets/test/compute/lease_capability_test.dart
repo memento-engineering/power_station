@@ -94,31 +94,31 @@ class FakeStationClient implements StationClient {
   bool any(String prefix) => calls.any((c) => c.startsWith(prefix));
 }
 
-CapabilityContext _ctx({CancelToken? cancel, String nodePath = 'tg-1/lease'}) =>
-    CapabilityContext(
-      params: const {},
-      bead: bead('tg-1'),
-      workspaceDir: '/w/tg-1',
-      branch: 'grid/tg-1',
-      baseBranch: 'main',
-      services: const ServiceBundle(),
-      cancel: cancel ?? CancelToken(),
-      nodePath: nodePath,
-    );
+/// The lease node's (ambient tree, per-step args) pair — the context rip-out
+/// shape (the compute lease reads nothing ambient; the beadId derives from the
+/// nodePath's root segment).
+({FakeTreeContext context, StepArgs args}) _ctx({
+  CancelToken? cancel,
+  String nodePath = 'tg-1/lease',
+}) => (
+  context: FakeTreeContext(),
+  args: stepArgs(nodePath, cancel: cancel),
+);
 
 /// Drives [cap] as the engine would — a JOB LeaseAllocation (mount → acquire →
 /// dispatch), returning the pushed reports + the allocation (so the test can
 /// dispose it, releasing the lease). The compute use is a job (never adopts).
 Future<({List<AllocationReport> reports, LeaseAllocation<BusLease> alloc})> _run(
   ComputeLeaseCapability cap,
-  CapabilityContext ctx,
+  ({FakeTreeContext context, StepArgs args}) c,
 ) async {
   final reports = <AllocationReport>[];
   final alloc = cap.createAllocation(
     AllocationContext(
-      capContext: ctx,
+      treeContext: c.context,
+      args: c.args,
       transport: FakeRuntimeProvider(),
-      address: AllocationAddress('tgdog-s', ctx.nodePath),
+      address: AllocationAddress('tgdog-s', c.args.nodePath),
       env: const {},
       sink: reports.add,
       kind: StepKind.job,

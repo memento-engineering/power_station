@@ -46,7 +46,7 @@ class _Committee {
         value: joined,
         child: InheritedSeed<StationServices>(
           value: fakes.ctx,
-          child: StableInheritedSeed<CapabilityRegistry>(
+          child: InheritedSeed<CapabilityRegistry>(
             value: reg,
             child: InheritedSeed<SessionResolver>(
               value: FormulaResolver((_) => kCodeReviewFormula),

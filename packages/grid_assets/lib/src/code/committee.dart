@@ -14,18 +14,23 @@
 ///    the workspace (a real `sh` command); grade A iff every command was zero,
 ///    else F. A non-zero plan is a HARD block, decided by the route.
 ///  - `spec-adherence` / `regression-risk` / `test-coverage` — three LLM critics:
-///    each spawns `claude` with ONLY its own rubric and writes a verdict JSON the
-///    `result()` hook parses into a grade.
+///    each RIDES the resolved agent harness (ADR-0008 Decision 10 — critics are
+///    agents; `claude` by default) with ONLY its own rubric and writes a verdict
+///    JSON the `result()` hook parses into a grade.
 library;
 
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
 
+import 'package:genesis_tree/genesis_tree.dart';
 import 'package:grid_controller/grid_controller.dart';
 import 'package:grid_engine/grid_engine.dart';
 import 'package:grid_runtime/grid_runtime.dart';
 import 'package:path/path.dart' as p;
+
+import '../agent/agent_domain.dart';
+import '../agent/agent_harness.dart';
 
 /// The gating rubric id — its grade `F` is a hard block (a non-zero Validation
 /// Plan command), decided by the route's matrix.
@@ -105,12 +110,17 @@ const Formula kCodeReviewFormula = Formula(
 ///    `sh`: it wraps the plan so the plan's exit code is captured to an rc file,
 ///    so ANY terminal exit `complete`s the step (the grade — A iff the plan was
 ///    zero, else F — rides the [result] hook, leaving the route as the single
-///    decision point: no retry storm on a deterministic command failure);
-///  - the three LLM lanes spawn `claude` with ONLY their own rubric and write a
-///    verdict JSON the [result] hook parses.
+///    decision point: no retry storm on a deterministic command failure). It is
+///    a VALIDATION RUNNER, not an agent — it keeps its direct `sh -c` config;
+///  - the three LLM lanes RIDE THE HARNESS (ADR-0008 Decision 10 — critics are
+///    agents): the effective [AgentConfig] resolves through the same ladder as
+///    the coding agent, and the resolved harness carries the critic's prompt
+///    (ONLY its own rubric); the verdict JSON is parsed by the [result] hook.
 ///
-/// A capability sees only the sandboxed [CapabilityContext] (no writer/notifier)
-/// — the four derailment-invariants hold by construction.
+/// A capability reads its ambient values — the work [Bead], the [Workspace],
+/// the agent scope — with the effect verb (`getInheritedSeedOfExactType`) at
+/// entry, and holds no writer/notifier: the four derailment-invariants hold by
+/// layering + the host's single write-locus.
 class CriticCapability extends ProcessCapability {
   /// Creates the critic, optionally over a [rubrics] source (D-9 wires the
   /// Packaged-AI-Asset loader; absent ⇒ an inline placeholder so C is testable
@@ -119,24 +129,48 @@ class CriticCapability extends ProcessCapability {
 
   final RubricSource? _rubrics;
 
-  String _rubricOf(CapabilityContext ctx) => ctx.params['rubric'] ?? '';
+  String _rubricOf(StepArgs args) => args.params['rubric'] ?? '';
 
   @override
-  RuntimeConfig spawn(CapabilityContext ctx) {
-    final rubric = _rubricOf(ctx);
+  RuntimeConfig spawn(TreeContext context, StepArgs args) {
+    // Read the ambient values at ENTRY (synchronously, while mounted).
+    final rubric = _rubricOf(args);
+    final bead = context.getInheritedSeedOfExactType<Bead>();
+    final workspace = context.getInheritedSeedOfExactType<Workspace>();
+    if (bead == null || workspace == null) {
+      throw StateError(
+        'CriticCapability requires the ambient Bead + Workspace '
+        '(WorkBead/SessionScope mount them)',
+      );
+    }
     if (rubric == kGatingRubric) {
+      // The validation runner — a deterministic `sh -c`, NOT an agent.
       return RuntimeConfig(
-        workDir: ctx.workspaceDir,
+        workDir: workspace.workspaceDir,
         command: 'sh',
-        args: ['-c', _gatingScript(_validationPlan(ctx.bead))],
+        args: ['-c', _gatingScript(_validationPlan(bead))],
         lifecycle: Lifecycle.oneTurn,
       );
     }
-    return RuntimeConfig(
-      workDir: ctx.workspaceDir,
-      command: 'claude',
-      args: ['--dangerously-skip-permissions', '-p', buildCriticPrompt(ctx)],
-      lifecycle: Lifecycle.oneTurn,
+    // The critic lanes are agents (ADR-0008 Decision 10): resolve the
+    // effective config through the ladder and delegate the invocation to the
+    // resolved harness — exactly like AgentCapability.spawn.
+    final ambient =
+        context.getInheritedSeedOfExactType<AgentConfig>() ??
+        const AgentConfig();
+    final registry =
+        context.getInheritedSeedOfExactType<AgentHarnessRegistry>() ??
+        buildAgentHarnessRegistry();
+    final config = resolveAgentConfig(
+      ambient: ambient,
+      beadMetadata: bead.metadata,
+      stepParams: args.params,
+      registry: registry,
+    );
+    return registry.harness(config.harness)!.spawnFor(
+      config: config,
+      brief: AgentBrief(task: buildCriticPrompt(bead, rubric)),
+      workspace: workspace,
     );
   }
 
@@ -163,13 +197,23 @@ class CriticCapability extends ProcessCapability {
   }
 
   @override
-  Future<Map<String, String>?> result(CapabilityContext ctx) async {
-    final rubric = _rubricOf(ctx);
+  Future<Map<String, String>?> result(TreeContext context, StepArgs args) async {
+    // Read the ambient workspace at ENTRY (while mounted); only the captured
+    // value is touched below.
+    final rubric = _rubricOf(args);
+    final workspace = context.getInheritedSeedOfExactType<Workspace>();
+    if (workspace == null) {
+      throw StateError(
+        'CriticCapability.result requires the ambient Workspace '
+        '(SessionScope mounts it)',
+      );
+    }
+    final workspaceDir = workspace.workspaceDir;
     if (rubric == kGatingRubric) {
       // The plan's exit code, captured by the spawn wrapper. Fail-closed: a
       // missing rc (the plan never ran) grades F — a plan-less bead must NEVER
       // silently pass.
-      final rc = File(p.join(ctx.workspaceDir, _critiqueDir, '$kGatingRubric.rc'));
+      final rc = File(p.join(workspaceDir, _critiqueDir, '$kGatingRubric.rc'));
       if (!rc.existsSync()) return const {'grade': 'F'};
       final code = rc.readAsStringSync().trim();
       return {'grade': code == '0' ? 'A' : 'F'};
@@ -177,7 +221,7 @@ class CriticCapability extends ProcessCapability {
     // An LLM critic's verdict JSON. Fail-closed: a missing / malformed verdict
     // grades F (a critic that did not produce a readable grade can never
     // advance).
-    final verdict = File(p.join(ctx.workspaceDir, _critiqueDir, '$rubric.json'));
+    final verdict = File(p.join(workspaceDir, _critiqueDir, '$rubric.json'));
     if (!verdict.existsSync()) return const {'grade': 'F'};
     try {
       final json = jsonDecode(verdict.readAsStringSync()) as Map<String, dynamic>;
@@ -199,12 +243,13 @@ class CriticCapability extends ProcessCapability {
       '(rubric `$rubric` — the Packaged-AI-Asset loader supplies the bands in '
           'Track D)';
 
-  /// Assembles the LLM critic's prompt for [ctx]'s rubric — names ONLY its own
-  /// rubric (anti-anchoring: a critic must not see the other lanes' concerns or
-  /// grades), carries the full bead, and instructs a single A–F grade written as
-  /// a verdict JSON. Exposed for unit tests.
-  String buildCriticPrompt(CapabilityContext ctx) {
-    final rubric = _rubricOf(ctx);
+  /// Assembles the LLM critic's prompt for [rubric] over the work [bead] —
+  /// names ONLY its own rubric (anti-anchoring: a critic must not see the other
+  /// lanes' concerns or grades), carries the full bead, and instructs a single
+  /// A–F grade written as a verdict JSON. Rides the harness as a bare
+  /// `AgentBrief(task: …)` (no working agreement, no context blocks — so the
+  /// rendered brief IS this prompt, byte-identical). Exposed for unit tests.
+  String buildCriticPrompt(Bead bead, String rubric) {
     final b = StringBuffer()
       ..writeln('# Code review — rubric: `$rubric`')
       ..writeln()
@@ -215,7 +260,7 @@ class CriticCapability extends ProcessCapability {
       ..writeln()
       ..writeln('## Rubric: $rubric')
       ..writeln(_rubricText(rubric))
-      ..write(_beadBlock(ctx.bead))
+      ..write(_beadBlock(bead))
       ..writeln()
       ..writeln('## Your verdict')
       ..writeln(
@@ -230,9 +275,9 @@ class CriticCapability extends ProcessCapability {
 }
 
 /// The route/aggregate step — a [ServiceCapability] that reads its sibling
-/// critics' grades through the threaded-down [SiblingView] (D-5; never a
-/// subscription/re-query) and applies the deterministic matrix (C3, asset
-/// policy):
+/// critics' grades through the AMBIENT [SiblingView] (mounted by
+/// `SessionScope`; read with the effect verb — D-5, never a subscription/
+/// re-query) and applies the deterministic matrix (C3, asset policy):
 ///
 ///  - the gating critic grade `F` (a non-zero Validation Plan) → [Gate] (hard
 ///    block);
@@ -248,10 +293,15 @@ class RouteCapability extends ServiceCapability {
   const RouteCapability();
 
   @override
-  Future<StepOutcome> run(CapabilityContext ctx) async {
-    final parent = _parentPath(ctx.nodePath);
-    final gating = ctx.params['gating'] ?? '';
-    final criticIds = (ctx.params['critics'] ?? '')
+  Future<StepOutcome> run(TreeContext context, StepArgs args) async {
+    // Read the ambient sibling view at ENTRY (while mounted); the matrix below
+    // is pure over the captured values.
+    final siblings =
+        context.getInheritedSeedOfExactType<SiblingView>() ??
+        const SiblingView();
+    final parent = _parentPath(args.nodePath);
+    final gating = args.params['gating'] ?? '';
+    final criticIds = (args.params['critics'] ?? '')
         .split(',')
         .map((s) => s.trim())
         .where((s) => s.isNotEmpty)
@@ -261,7 +311,7 @@ class RouteCapability extends ServiceCapability {
     // fail-closed grade used by the block rules (missing ⇒ F).
     final rawGrades = <String, String?>{
       for (final id in criticIds)
-        id: ctx.siblings.resultOf('$parent/$id')['grade'],
+        id: siblings.resultOf('$parent/$id')['grade'],
     };
     final grades = <String, String>{
       for (final entry in rawGrades.entries)

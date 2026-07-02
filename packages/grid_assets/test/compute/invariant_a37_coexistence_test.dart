@@ -29,18 +29,12 @@ class _Store {
       writes.add((key: key, via: via));
 }
 
-/// A [CapabilityContext] for a leased work node (mirrors the lease_capability
-/// suite — the SAME instance reaches `run` + `teardown`, like the host).
-CapabilityContext _ctx({String nodePath = 'tg-1/lease'}) => CapabilityContext(
-  params: const {},
-  bead: bead('tg-1'),
-  workspaceDir: '/w/tg-1',
-  branch: 'grid/tg-1',
-  baseBranch: 'main',
-  services: const ServiceBundle(),
-  cancel: CancelToken(),
-  nodePath: nodePath,
-);
+/// The leased work node's (ambient tree, per-step args) pair (mirrors the
+/// lease_capability suite — the SAME args instance reaches every hook, like the
+/// host).
+({FakeTreeContext context, StepArgs args}) _ctx({
+  String nodePath = 'tg-1/lease',
+}) => (context: FakeTreeContext(), args: stepArgs(nodePath));
 
 /// Drives [cap] as the engine would — a job [LeaseAllocation] (mount → acquire →
 /// dispatch over the bus), returning the reports + the allocation (so the test
@@ -48,14 +42,15 @@ CapabilityContext _ctx({String nodePath = 'tg-1/lease'}) => CapabilityContext(
 /// its REAL engine carrier, not the retired `run`/`teardown` interface.
 Future<({List<AllocationReport> reports, LeaseAllocation<BusLease> alloc})> _run(
   ComputeLeaseCapability cap,
-  CapabilityContext ctx,
+  ({FakeTreeContext context, StepArgs args}) c,
 ) async {
   final reports = <AllocationReport>[];
   final alloc = cap.createAllocation(
     AllocationContext(
-      capContext: ctx,
+      treeContext: c.context,
+      args: c.args,
       transport: FakeRuntimeProvider(),
-      address: AllocationAddress('tgdog-s', ctx.nodePath),
+      address: AllocationAddress('tgdog-s', c.args.nodePath),
       env: const {},
       sink: reports.add,
       kind: StepKind.job,

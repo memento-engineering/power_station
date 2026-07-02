@@ -15,6 +15,7 @@
 /// carrier's discipline; [release] is idempotent (a re-reaped lease is fine).
 library;
 
+import 'package:genesis_tree/genesis_tree.dart';
 import 'package:grid_engine/grid_engine.dart';
 import 'package:grid_federation/grid_federation.dart';
 
@@ -53,16 +54,19 @@ class ComputeLeaseCapability extends LeaseCapability<BusLease> {
 
   /// A stable per-node idempotency key so a retried lease/dispatch dedups at the
   /// owner (never a second grant or a second run — the lossy-bus hazard).
-  String _idem(CapabilityContext ctx) =>
-      '${lessee.isEmpty ? ctx.beadId : lessee}/${ctx.nodePath}';
+  String _idem(StepArgs args) =>
+      '${lessee.isEmpty ? args.beadId : lessee}/${args.nodePath}';
 
   @override
-  Future<LeaseResolution<BusLease>> acquire(CapabilityContext ctx) async {
-    final who = lessee.isEmpty ? ctx.beadId : lessee;
+  Future<LeaseResolution<BusLease>> acquire(
+    TreeContext context,
+    StepArgs args,
+  ) async {
+    final who = lessee.isEmpty ? args.beadId : lessee;
     final LeaseGrant grant;
     try {
       grant = await client.requestLease(
-        LeaseRequest(lessee: who, kind: kind, idempotencyKey: _idem(ctx)),
+        LeaseRequest(lessee: who, kind: kind, idempotencyKey: _idem(args)),
       );
     } on LeaseDeniedException catch (e) {
       return LeaseUnavailable('lease denied: ${e.message}');
@@ -74,13 +78,17 @@ class ComputeLeaseCapability extends LeaseCapability<BusLease> {
   }
 
   @override
-  Future<StepOutcome> dispatchOn(BusLease handle, CapabilityContext ctx) async {
+  Future<StepOutcome> dispatchOn(
+    BusLease handle,
+    TreeContext context,
+    StepArgs args,
+  ) async {
     final Map<String, dynamic> raw;
     try {
       raw = await handle.client.dispatch(
         handle.grant,
         command.toJson(),
-        idempotencyKey: _idem(ctx),
+        idempotencyKey: _idem(args),
       );
     } on LeaseInvalidException catch (e) {
       return Failed('dispatch failed: ${e.message}');
