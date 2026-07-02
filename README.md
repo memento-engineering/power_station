@@ -6,8 +6,11 @@ each pack exports **domain components + CLI components** (the CLI-SDK model):
 | Pack | Domain |
 |---|---|
 | `packages/grid_assets` | the `code` asset (agent/verify/land + the `code` formula + the git `SourceControl` + the exported `CodeRunCommand`) and the `compute` asset (bounded dispatch over a federation lease) |
-| `packages/butane_grid_assets` | the butane `burn` asset (cross-station burn formula: host + leased follower) |
 | `packages/dart_grid_assets` | the DART domain (the typed `grid.dart` envelope + pub dev-time linkage + the exported `DartCommand`) |
+
+The butane `burn` asset (`butane_grid_assets`) moved to its system's repo —
+`butane_flutter/packages/butane_grid_assets` (grid assets live with their
+system; the ADR-0011 placement split).
 
 Extracted from `the_grid@17ea50a90d39791e8bad7a16c28a93711b44abf2` at the repo split.
 

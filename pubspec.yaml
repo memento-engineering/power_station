@@ -4,7 +4,6 @@ environment:
   sdk: ^3.11.0
 workspace:
   - packages/grid_assets
-  - packages/butane_grid_assets
   - packages/dart_grid_assets
 
 # Cross-repo linkage: the the_grid framework packages (grid_engine, grid_cli,
