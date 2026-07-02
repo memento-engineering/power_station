@@ -8,13 +8,17 @@
 /// source; [renderCriticPrompt] is the standalone, format-faithful renderer of
 /// the `prompts/critic.md` template (the portable mirror).
 ///
-/// Asset resolution walks up from the cwd to the package's own `extension/` dir
-/// (works from the repo root or the package dir, like the structural fence's
-/// walk). The live-arm `package:` URI resolution is a follow-up — the assets ship
-/// inside the package.
+/// Asset resolution resolves the package's own `extension/` dir via the package
+/// config (`Isolate.resolvePackageUriSync` — cwd-independent, the live-arm path),
+/// falling back to a cwd walk-up (works from the repo root or the package dir,
+/// like the structural fence's walk) where no package config is present. This is
+/// the follow-up flagged when only the cwd walk existed: the assets ship inside
+/// the package, so a runner whose cwd is a foreign checkout (the post-split
+/// `space_station` runner) still finds them.
 library;
 
 import 'dart:io';
+import 'dart:isolate';
 
 import 'package:grid_controller/grid_controller.dart';
 import 'package:path/path.dart' as p;
@@ -22,13 +26,14 @@ import 'package:path/path.dart' as p;
 /// Loads grid_assets' bundled rubric/prompt assets from `extension/`.
 class PackagedAssetLoader {
   /// Creates a loader. [root] explicitly points at the `extension/` dir (tests
-  /// inject it); absent ⇒ the dir is discovered by walking up from the cwd.
+  /// inject it); absent ⇒ the dir is discovered via the package config (with a
+  /// cwd walk-up fallback — see [_resolveRoot]).
   PackagedAssetLoader({String? root}) : _explicitRoot = root;
 
   final String? _explicitRoot;
 
   /// The resolved `extension/` directory (discovered once, lazily).
-  late final String _root = _explicitRoot ?? _discoverRoot();
+  late final String _root = _explicitRoot ?? _resolveRoot();
 
   /// The prose bands for [rubricId] (`extension/rubrics/<id>.md`). Throws an
   /// [ArgumentError] for an unknown rubric (fail-loud — a missing rubric is a
@@ -93,10 +98,70 @@ class PackagedAssetLoader {
     return b.toString().trimRight();
   }
 
+  /// Locates this package's `extension/` dir, trying resolution strategies in
+  /// order and failing loud with every probe attempted (a missing `extension/`
+  /// is a packaging bug, never a silent empty prompt):
+  ///
+  ///   1. the package config (`Isolate.resolvePackageUriSync`) — cwd-independent,
+  ///      so a runner whose cwd is a foreign checkout still finds the assets;
+  ///   2. a cwd walk-up — the fallback for contexts with no package config
+  ///      (e.g. an AOT/compiled process), robust whether the process runs from
+  ///      the repo root or the package dir.
+  static String _resolveRoot() {
+    final probes = <String>[];
+    final viaPackageConfig = _discoverRootViaPackageConfig(probes);
+    if (viaPackageConfig != null) return viaPackageConfig;
+    final viaCwd = _discoverRootViaCwd(probes);
+    if (viaCwd != null) return viaCwd;
+    throw StateError(
+      'could not locate packages/grid_assets/extension — probed:\n'
+      '${probes.map((probe) => '  - $probe').join('\n')}',
+    );
+  }
+
+  /// Resolves `extension/` from the package config: resolves a `package:` URI
+  /// into this package's `lib/`, walks up to the package root (the dir whose
+  /// `pubspec.yaml` is named `grid_assets`), then into `extension/`. Returns null
+  /// (recording the failed probe in [probes]) when there is no package config or
+  /// the resolved package holds no `extension/rubrics`.
+  static String? _discoverRootViaPackageConfig(List<String> probes) {
+    Uri? libUri;
+    try {
+      libUri = Isolate.resolvePackageUriSync(
+        Uri.parse('package:grid_assets/src/assets/asset_loader.dart'),
+      );
+    } on Object catch (error) {
+      probes.add('package config: resolvePackageUriSync threw ($error)');
+      return null;
+    }
+    if (libUri == null || !libUri.isScheme('file')) {
+      probes.add('package config: package:grid_assets did not resolve to a '
+          'file URI (no package config?)');
+      return null;
+    }
+    var dir = Directory.fromUri(libUri).parent;
+    for (var i = 0; i < 8; i++) {
+      if (_isGridAssetsPackageRoot(dir)) {
+        final probe = Directory(p.join(dir.path, 'extension'));
+        if (_hasRubrics(probe)) return probe.path;
+        probes.add('package config: ${probe.path} has no rubrics/ '
+            '(package root ${dir.path})');
+        return null;
+      }
+      final parent = dir.parent;
+      if (parent.path == dir.path) break;
+      dir = parent;
+    }
+    probes.add('package config: no grid_assets pubspec.yaml above '
+        '${libUri.toFilePath()}');
+    return null;
+  }
+
   /// Walks up from the cwd to locate this package's `extension/` dir — robust
-  /// whether the suite/process runs from the repo root or the package dir
-  /// (mirrors the structural fence's `_libSrc` walk).
-  static String _discoverRoot() {
+  /// whether the process runs from the repo root or the package dir (mirrors the
+  /// structural fence's `_libSrc` walk). Returns null (recording the failed probe
+  /// in [probes]) when the walk reaches the filesystem root without a hit.
+  static String? _discoverRootViaCwd(List<String> probes) {
     final candidates = <String>[
       'extension',
       p.join('packages', 'grid_assets', 'extension'),
@@ -105,18 +170,31 @@ class PackagedAssetLoader {
     for (var i = 0; i < 6; i++) {
       for (final rel in candidates) {
         final probe = Directory(p.join(dir.path, rel));
-        if (probe.existsSync() &&
-            Directory(p.join(probe.path, 'rubrics')).existsSync()) {
-          return probe.path;
-        }
+        if (_hasRubrics(probe)) return probe.path;
       }
       final parent = dir.parent;
       if (parent.path == dir.path) break;
       dir = parent;
     }
-    throw StateError(
-      'could not locate packages/grid_assets/extension from '
-      '${Directory.current.path}',
-    );
+    probes.add('cwd walk-up from ${Directory.current.path} '
+        '(probing extension/, packages/grid_assets/extension/)');
+    return null;
   }
+
+  /// Whether [dir] is grid_assets' package root — has a `pubspec.yaml` declaring
+  /// `name: grid_assets`. A line scan (not a yaml parse) keeps lib code free of a
+  /// yaml dependency; the top-level `name:` field is unambiguous at column 0.
+  static bool _isGridAssetsPackageRoot(Directory dir) {
+    final pubspec = File(p.join(dir.path, 'pubspec.yaml'));
+    if (!pubspec.existsSync()) return false;
+    return pubspec
+        .readAsLinesSync()
+        .any((line) => RegExp(r'^name:\s*grid_assets\s*$').hasMatch(line));
+  }
+
+  /// Whether [extensionDir] is a usable assets root — it exists and holds the
+  /// `rubrics/` subtree (the load-bearing marker both resolution paths gate on).
+  static bool _hasRubrics(Directory extensionDir) =>
+      extensionDir.existsSync() &&
+      Directory(p.join(extensionDir.path, 'rubrics')).existsSync();
 }
