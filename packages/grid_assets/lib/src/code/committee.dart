@@ -31,6 +31,7 @@ import 'package:path/path.dart' as p;
 
 import '../agent/agent_domain.dart';
 import '../agent/agent_harness.dart';
+import '../agent/usage_report.dart';
 
 /// The gating rubric id — its grade `F` is a hard block (a non-zero Validation
 /// Plan command), decided by the route's matrix.
@@ -115,7 +116,10 @@ const Formula kCodeReviewFormula = Formula(
 ///  - the three LLM lanes RIDE THE HARNESS (ADR-0008 Decision 10 — critics are
 ///    agents): the effective [AgentConfig] resolves through the same ladder as
 ///    the coding agent, and the resolved harness carries the critic's prompt
-///    (ONLY its own rubric); the verdict JSON is parsed by the [result] hook.
+///    (ONLY its own rubric); the verdict JSON is parsed by the [result] hook,
+///    which also merges the harness's CAPTURE-ONLY usage telemetry (FT-2 —
+///    tokens/cost/turns/duration) alongside the grade (fail-safe: no usage ⇒
+///    just the grade).
 ///
 /// A capability reads its ambient values — the work [Bead], the [Workspace],
 /// the agent scope — with the effect verb (`getInheritedSeedOfExactType`) at
@@ -171,6 +175,11 @@ class CriticCapability extends ProcessCapability {
       config: config,
       brief: AgentBrief(task: buildCriticPrompt(bead, rubric)),
       workspace: workspace,
+      // CAPTURE-ONLY usage telemetry (FT-2): the resolved harness (claude)
+      // redirects its `--output-format json` envelope here; result() merges the
+      // fields into the critic's payload. The verdict file the critic writes is
+      // a separate path, so capture never touches the grade.
+      usageOut: usageReportPath(args.nodePath),
     );
   }
 
@@ -222,18 +231,29 @@ class CriticCapability extends ProcessCapability {
     // grades F (a critic that did not produce a readable grade can never
     // advance).
     final verdict = File(p.join(workspaceDir, _critiqueDir, '$rubric.json'));
-    if (!verdict.existsSync()) return const {'grade': 'F'};
-    try {
-      final json = jsonDecode(verdict.readAsStringSync()) as Map<String, dynamic>;
-      final grade = (json['grade'] as String?)?.trim().toUpperCase();
-      final rationale = (json['rationale'] as String?)?.trim() ?? '';
-      return {
-        'grade': (grade == null || grade.isEmpty) ? 'F' : grade,
-        if (rationale.isNotEmpty) 'rationale': rationale,
-      };
-    } catch (_) {
-      return const {'grade': 'F'};
+    Map<String, String> graded;
+    if (!verdict.existsSync()) {
+      graded = const {'grade': 'F'};
+    } else {
+      try {
+        final json =
+            jsonDecode(verdict.readAsStringSync()) as Map<String, dynamic>;
+        final grade = (json['grade'] as String?)?.trim().toUpperCase();
+        final rationale = (json['rationale'] as String?)?.trim() ?? '';
+        graded = {
+          'grade': (grade == null || grade.isEmpty) ? 'F' : grade,
+          if (rationale.isNotEmpty) 'rationale': rationale,
+        };
+      } catch (_) {
+        graded = const {'grade': 'F'};
+      }
     }
+    // Merge the CAPTURE-ONLY usage telemetry (FT-2) into the payload. FAIL-SAFE:
+    // an absent / malformed envelope yields no fields, NEVER a throw — the grade
+    // (fail-closed above) is unaffected. Collision-safe keys (grade/rationale vs
+    // tokensIn/…), so the merge never shadows the verdict.
+    final usage = readUsageFields(workspaceDir, args.nodePath);
+    return usage.isEmpty ? graded : {...graded, ...usage};
   }
 
   /// The rubric prose embedded in a critic's prompt — the injected [rubrics]
@@ -286,6 +306,13 @@ class CriticCapability extends ProcessCapability {
 ///    transitive re-key is deferred, so a D/F parks at a gate for now);
 ///  - else (all A–C, gating not F, spread < 3) → [Ok] (advance to land).
 ///
+/// The advance [Ok] payload carries ROUTE PROVENANCE (FT-2, CAPTURE-ONLY): the
+/// grade vector consumed (`grades` — `lane=grade` CSV in [kCommitteeRubrics]
+/// order), the computed `spread`, and the matrix arm that fired (`rule` =
+/// `all-approve`) — making the keep/kill export self-contained without changing
+/// the matrix. Gate outcomes are UNCHANGED (their reason string already names
+/// the rule).
+///
 /// Fail-closed: an unread / missing sibling grade is treated as `F`, so a forged
 /// or absent grade can NEVER advance (the mutation-tested property).
 class RouteCapability extends ServiceCapability {
@@ -333,10 +360,10 @@ class RouteCapability extends ServiceCapability {
         if (entry.value != null && entry.value!.trim().isNotEmpty)
           _gradeIndex(_normalizeGrade(entry.value)),
     ];
-    if (indices.isNotEmpty) {
-      final spread = indices.reduce(math.max) - indices.reduce(math.min);
-      if (spread >= 3) return const Gate('grade spread ≥ 3 — human ultimatum');
-    }
+    final spread = indices.isEmpty
+        ? 0
+        : indices.reduce(math.max) - indices.reduce(math.min);
+    if (spread >= 3) return const Gate('grade spread ≥ 3 — human ultimatum');
 
     // 3. any non-gating critic at D/F — rework → restForOne re-key is deferred
     // (build-order); a D/F parks at a gate for now.
@@ -347,8 +374,18 @@ class RouteCapability extends ServiceCapability {
       }
     }
 
-    // 4. all A–C, gating clean, spread < 3 — advance.
-    return const Ok({'verdict': 'advance'});
+    // 4. all A–C, gating clean, spread < 3 — advance. The advance payload
+    // carries the ROUTE PROVENANCE (FT-2): the per-lane grade vector it consumed
+    // (CSV `lane=grade` in kCommitteeRubrics order), the computed spread, and the
+    // matrix arm that fired (`all-approve`) — so the keep/kill export is
+    // self-contained. Gate outcomes keep their reason string (it names the rule).
+    final gradesCsv = criticIds.map((id) => '$id=${grades[id]}').join(',');
+    return Ok({
+      'verdict': 'advance',
+      'grades': gradesCsv,
+      'spread': '$spread',
+      'rule': 'all-approve',
+    });
   }
 }
 

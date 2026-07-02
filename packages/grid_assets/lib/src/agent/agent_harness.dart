@@ -30,6 +30,7 @@ library;
 
 import 'package:grid_engine/grid_engine.dart';
 import 'package:grid_runtime/grid_runtime.dart';
+import 'package:path/path.dart' as p;
 
 /// Where inference runs (ADR-0008 Decision 10 / D-E). Sealed — consumers
 /// switch exhaustively (house style).
@@ -210,10 +211,18 @@ abstract interface class AgentHarness {
   /// Maps the resolved [config] + rendered [brief] into the process invocation
   /// rooted at [workspace]. The harness owns the brief TRANSPORT (argv today;
   /// stdin / a workspace file are per-impl choices).
+  ///
+  /// [usageOut] is the workspace-relative file the harness should redirect its
+  /// run's usage/cost telemetry into (FT-2 flow telemetry — CAPTURE-ONLY). A
+  /// harness that has a JSON usage surface ([ClaudeHarness]) wraps its
+  /// invocation so the envelope lands there; a harness with no such surface
+  /// IGNORES it (its `result()` merges no usage). Null ⇒ no capture requested
+  /// (the plain, byte-identical invocation).
   RuntimeConfig spawnFor({
     required AgentConfig config,
     required AgentBrief brief,
     required Workspace workspace,
+    String? usageOut,
   });
 
   /// Maps a runtime [event] to a step signal. All four shipped harnesses are
@@ -286,6 +295,17 @@ Map<String, String> _targetEnv(ModelTarget target) => switch (target) {
 
 /// `claude` — the proven live harness (A36/A38): print mode, headless
 /// permissions, keychain auth, one-turn. Brief transport: argv.
+///
+/// The operative harness for the code circuit's runs, so it is the one that
+/// captures usage telemetry (FT-2). When a [usageOut] path is supplied the
+/// invocation is WRAPPED (the gating lane's `sh -c` rc-file precedent): claude
+/// runs with `--output-format json` and its result envelope is redirected to
+/// that file, from which `AgentCapability`/`CriticCapability`'s `result()` parse
+/// tokens/cost/turns/duration. The claude argv — INCLUDING the byte-identical
+/// rendered brief — rides as sh positional params (`"$@"`), so nothing about the
+/// brief or the behavior contract is re-quoted; only the output format and the
+/// stdout redirection change. `exec` makes claude's exit code the process exit
+/// code, so [interpret] is byte-identical to the unwrapped run.
 class ClaudeHarness implements AgentHarness {
   /// Const-constructible.
   const ClaudeHarness();
@@ -298,16 +318,42 @@ class ClaudeHarness implements AgentHarness {
     required AgentConfig config,
     required AgentBrief brief,
     required Workspace workspace,
+    String? usageOut,
   }) {
     final model = config.params['model'];
+    if (usageOut == null) {
+      // No usage capture requested — the plain, direct invocation.
+      return RuntimeConfig(
+        workDir: workspace.workspaceDir,
+        command: 'claude',
+        args: [
+          '--dangerously-skip-permissions',
+          if (model != null) ...['--model', model],
+          '-p',
+          brief.render(),
+        ],
+        lifecycle: Lifecycle.oneTurn,
+      );
+    }
+    // Usage capture (FT-2): claude with the JSON result envelope, redirected to
+    // the per-step telemetry file. The claude argv rides as sh positionals so
+    // `exec "$@"` runs it verbatim (the rendered brief is byte-identical).
+    final claudeArgs = <String>[
+      '--dangerously-skip-permissions',
+      if (model != null) ...['--model', model],
+      '--output-format', 'json',
+      '-p',
+      brief.render(),
+    ];
     return RuntimeConfig(
       workDir: workspace.workspaceDir,
-      command: 'claude',
+      command: 'sh',
       args: [
-        '--dangerously-skip-permissions',
-        if (model != null) ...['--model', model],
-        '-p',
-        brief.render(),
+        '-c',
+        _usageWrapperScript(usageOut),
+        'grid-claude',
+        'claude',
+        ...claudeArgs,
       ],
       lifecycle: Lifecycle.oneTurn,
     );
@@ -317,10 +363,27 @@ class ClaudeHarness implements AgentHarness {
   StepSignal interpret(RuntimeEvent event) => jobSignal(event);
 }
 
+/// The `sh -c` script that captures a harness run's usage: ensure the telemetry
+/// dir, then `exec` the claude argv (passed as positionals `"$@"`) with its
+/// stdout redirected to [usageOut]. `exec` (not a pipe) preserves the child's
+/// exit code, so the step's terminal mapping is unchanged. [usageOut] is a
+/// sanitized workspace-relative path ([usageReportPath]) — only `[A-Za-z0-9._-]`
+/// + `/`, so single-quoting is safe.
+String _usageWrapperScript(String usageOut) =>
+    'mkdir -p ${_sq(p.dirname(usageOut))}; exec "\$@" > ${_sq(usageOut)}';
+
+/// Single-quotes [s] for the shell. Safe without an inner-quote escaper because
+/// its only caller passes a [usageReportPath], which contains no single quote.
+String _sq(String s) => "'$s'";
+
 /// `copilot` — GitHub Copilot CLI: provider-managed (auth rides `gh`), print
 /// mode, tools allowed headless. Brief transport: argv. (Exact flag shape
 /// confirmed at the live arm — the human gate; the SEAM is what this pass
 /// ships.)
+///
+/// Usage-telemetry SKIP (FT-2): the Copilot CLI exposes no confirmed JSON usage
+/// surface, so [usageOut] is ignored — claude is the operative harness for the
+/// code circuit's runs. Wire capture here once its flag shape is confirmed.
 class CopilotHarness implements AgentHarness {
   /// Const-constructible.
   const CopilotHarness();
@@ -333,6 +396,7 @@ class CopilotHarness implements AgentHarness {
     required AgentConfig config,
     required AgentBrief brief,
     required Workspace workspace,
+    String? usageOut,
   }) {
     final model = config.params['model'];
     return RuntimeConfig(
@@ -355,6 +419,9 @@ class CopilotHarness implements AgentHarness {
 /// `pi` — the python coding agent, over an endpoint target (llama.cpp /
 /// swift-infer via the OpenAI-compatible env). Brief transport: argv. (Exact
 /// flag shape confirmed at the live arm.)
+///
+/// Usage-telemetry SKIP (FT-2): no confirmed JSON usage surface, so [usageOut]
+/// is ignored (claude is the operative harness for the code circuit's runs).
 class PiHarness implements AgentHarness {
   /// Const-constructible.
   const PiHarness();
@@ -368,6 +435,7 @@ class PiHarness implements AgentHarness {
     required AgentConfig config,
     required AgentBrief brief,
     required Workspace workspace,
+    String? usageOut,
   }) {
     final model = config.params['model'];
     return RuntimeConfig(
@@ -390,6 +458,9 @@ class PiHarness implements AgentHarness {
 /// `opencode` — provider-pluggable: managed auth or an OpenAI-compatible
 /// endpoint (llama.cpp). Brief transport: argv (`run`). (Exact flag shape
 /// confirmed at the live arm.)
+///
+/// Usage-telemetry SKIP (FT-2): no confirmed JSON usage surface, so [usageOut]
+/// is ignored (claude is the operative harness for the code circuit's runs).
 class OpencodeHarness implements AgentHarness {
   /// Const-constructible.
   const OpencodeHarness();
@@ -403,6 +474,7 @@ class OpencodeHarness implements AgentHarness {
     required AgentConfig config,
     required AgentBrief brief,
     required Workspace workspace,
+    String? usageOut,
   }) {
     final model = config.params['model'];
     return RuntimeConfig(

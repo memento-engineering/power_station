@@ -203,10 +203,16 @@ void main() {
         await pumpEventQueue();
 
         // Both beads mounted + spawned their agent (the live `code` capability).
+        // FT-2 wraps claude in `sh -c` for usage capture, so the command is `sh`
+        // and claude is exec'd from the positionals.
         expect(f.provider.started, hasLength(2));
         expect(
           f.provider.started.map((s) => s.config.command),
-          ['claude', 'claude'],
+          ['sh', 'sh'],
+        );
+        expect(
+          f.provider.started.every((s) => s.config.args.contains('claude')),
+          isTrue,
         );
         final wb1Id = _workBead(root, 'tg-1')!.branchId;
         final wb2Id = _workBead(root, 'tg-2')!.branchId;
@@ -259,19 +265,19 @@ void main() {
           expect(f.provider.started.map((s) => s.name), contains(critic),
               reason: 'critic $critic fanned out IN PARALLEL');
         }
-        // The gating lane spawns `sh` (the Validation Plan); an LLM lane `claude`.
+        // Both lanes spawn `sh` (FT-2 wraps claude for usage capture): the
+        // gating lane runs the Validation Plan, an LLM lane exec's claude.
         expect(
           f.provider.started.firstWhere((s) => s.name == tg1Critics.first)
               .config.command,
           'sh',
           reason: 'the gating critic runs the bead\'s Validation Plan',
         );
-        expect(
-          f.provider.started.firstWhere((s) => s.name == tg1Critics[1])
-              .config.command,
-          'claude',
-          reason: 'an LLM critic spawns claude',
-        );
+        final tg1Llm = f.provider.started
+            .firstWhere((s) => s.name == tg1Critics[1]).config;
+        expect(tg1Llm.command, 'sh');
+        expect(tg1Llm.args, contains('claude'),
+            reason: 'an LLM critic exec\'s claude from the sh wrapper');
         expect(
           f.provider.stopped,
           contains('tgdog-1/tg-1/agent'),
