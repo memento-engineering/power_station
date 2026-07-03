@@ -12,9 +12,9 @@ environment:
   sdk: ^3.11.0
 
 dependencies:
+  beads_dart: any
   dart_grid_assets: any
   genesis_tree: ^0.1.3
-  grid_controller: any
   grid_engine: any
   grid_federation: any
   grid_runtime: any

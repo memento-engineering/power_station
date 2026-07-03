@@ -20,7 +20,7 @@ library;
 import 'dart:io';
 import 'dart:isolate';
 
-import 'package:grid_controller/grid_controller.dart';
+import 'package:beads_dart/beads_dart.dart';
 import 'package:path/path.dart' as p;
 
 /// Loads grid_assets' bundled rubric/prompt assets from `extension/`.

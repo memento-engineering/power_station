@@ -6,7 +6,7 @@
 // live tg/gc/claude/git/network.
 export 'package:grid_engine/testing.dart';
 
-import 'package:grid_controller/grid_controller.dart';
+import 'package:beads_dart/beads_dart.dart';
 import 'package:grid_engine/grid_engine.dart';
 // Imported (not just re-exported) so this library can USE the shared fakes
 // (`stateSubstation`, etc.) in its own committee helpers.
