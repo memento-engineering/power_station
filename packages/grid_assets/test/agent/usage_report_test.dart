@@ -186,4 +186,44 @@ void main() {
       expect(readUsageFields(dir.path, nodePath), isEmpty);
     });
   });
+
+  group('tg-291 readEnvelopeResultText — the stdout RESULT TEXT (fail-safe)',
+      () {
+    test('recovers the `result` string field of a well-formed envelope', () {
+      final dir = Directory.systemTemp.createTempSync('usage-resulttext-');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      const nodePath = 'tg-1/review/regression-risk';
+      File(p.join(dir.path, usageReportPath(nodePath)))
+        ..createSync(recursive: true)
+        ..writeAsStringSync(_wellFormed);
+      expect(readEnvelopeResultText(dir.path, nodePath), 'Done.');
+    });
+
+    test('an ABSENT file ⇒ null (never throws)', () {
+      final dir = Directory.systemTemp.createTempSync('usage-resulttext-abs-');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      expect(readEnvelopeResultText(dir.path, 'tg-1/review/spec-adherence'),
+          isNull);
+    });
+
+    test('a MALFORMED envelope ⇒ null (never throws)', () {
+      final dir = Directory.systemTemp.createTempSync('usage-resulttext-bad-');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      const nodePath = 'tg-1/review/test-coverage';
+      File(p.join(dir.path, usageReportPath(nodePath)))
+        ..createSync(recursive: true)
+        ..writeAsStringSync('{ not json');
+      expect(readEnvelopeResultText(dir.path, nodePath), isNull);
+    });
+
+    test('a well-formed envelope with a blank / missing `result` ⇒ null', () {
+      final dir = Directory.systemTemp.createTempSync('usage-resulttext-blk-');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      const nodePath = 'tg-1/review/spec-adherence';
+      File(p.join(dir.path, usageReportPath(nodePath)))
+        ..createSync(recursive: true)
+        ..writeAsStringSync('{"usage": {"input_tokens": 1}, "result": "   "}');
+      expect(readEnvelopeResultText(dir.path, nodePath), isNull);
+    });
+  });
 }
