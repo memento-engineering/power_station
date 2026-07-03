@@ -500,9 +500,23 @@ Map<String, String>? _verdictFromResultText(String? text) {
   return _verdictFromEmbeddedJson(trimmed) ?? _verdictFromHeading(trimmed);
 }
 
-/// Scans [text] for a balanced-brace `{...}` substring that decodes as JSON
-/// carrying a non-blank `grade` string — the first such substring wins.
+/// A single-letter A-F grade — the same strict shape [_verdictHeading]
+/// enforces via its capture group. [buildCriticPrompt] hands the critic a
+/// LITERAL `"grade":"<A-F>"` template; without this check, an echoed
+/// template/example object in a stdout preamble would parse as a "valid"
+/// verdict (tg-291 rework round 1). `grade` is already upper-cased by the
+/// caller before this check runs.
+final RegExp _validGradeLetter = RegExp(r'^[A-F]$');
+
+/// Scans [text] for EVERY balanced-brace `{...}` substring that decodes as
+/// JSON carrying a `grade` matching [_validGradeLetter] exactly, and returns
+/// the LAST such match. A verdict concludes a critic's output — any earlier
+/// object (an echoed prompt template, a worked example in prose) is a
+/// preamble, not the verdict, so the first match must NOT win (tg-291 rework
+/// round 1: a false ADVANCE was possible when a real F verdict followed an
+/// earlier template/example echo with a matched-looking grade).
 Map<String, String>? _verdictFromEmbeddedJson(String text) {
+  Map<String, String>? last;
   for (var start = 0; start < text.length; start++) {
     if (text[start] != '{') continue;
     var depth = 0;
@@ -515,9 +529,9 @@ Map<String, String>? _verdictFromEmbeddedJson(String text) {
           final json = jsonDecode(text.substring(start, end + 1));
           if (json is Map) {
             final grade = (json['grade'] as String?)?.trim().toUpperCase();
-            if (grade != null && grade.isNotEmpty) {
+            if (grade != null && _validGradeLetter.hasMatch(grade)) {
               final rationale = (json['rationale'] as String?)?.trim() ?? '';
-              return {
+              last = {
                 'grade': grade,
                 'rationale': rationale.isEmpty
                     ? '[from result envelope]'
@@ -532,7 +546,7 @@ Map<String, String>? _verdictFromEmbeddedJson(String text) {
       }
     }
   }
-  return null;
+  return last;
 }
 
 /// A `Verdict: <A-F>` heading (case-insensitive) — the prose-heading shape a

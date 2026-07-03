@@ -431,6 +431,71 @@ void main() {
       );
     });
 
+    test('(rework 1) a template echo `"grade":"<A-F>"` before a real verdict '
+        'object -> the REAL verdict wins (the template grade is not a single '
+        'A-F letter, so it never matches)', () async {
+      final dir =
+          Directory.systemTemp.createTempSync('critic-fallback-template-');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      const rubric = 'regression-risk';
+      writeEnvelope(
+        dir.path,
+        rubric,
+        'Your verdict is JSON of this exact shape:\n'
+        '{"rubric":"regression-risk","version":1,"grade":"<A-F>",'
+        '"rationale":"<why>"}\n\n'
+        'Reviewed the diff — narrow blast radius.\n'
+        '{"rubric":"regression-risk","version":1,"grade":"A",'
+        '"rationale":"well covered"}',
+      );
+      final c = _ctx(rubric: rubric, workspaceDir: dir.path);
+      final out = await const CriticCapability().result(c.context, c.args);
+      expect(out?['grade'], 'A');
+      expect(out?['rationale'], contains('well covered'));
+    });
+
+    test('(rework 1) an example object with grade A in prose followed by a '
+        'real F verdict -> the LAST (real) object wins, F', () async {
+      final dir =
+          Directory.systemTemp.createTempSync('critic-fallback-example-');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      const rubric = 'test-coverage';
+      writeEnvelope(
+        dir.path,
+        rubric,
+        'For example, a clean pass might look like '
+        '{"grade":"A","rationale":"example only"}.\n\n'
+        'Having actually reviewed this diff, coverage is missing entirely.\n'
+        '{"rubric":"test-coverage","version":1,"grade":"F",'
+        '"rationale":"no tests for the new path"}',
+      );
+      final c = _ctx(rubric: rubric, workspaceDir: dir.path);
+      final out = await const CriticCapability().result(c.context, c.args);
+      expect(out?['grade'], 'F');
+      expect(out?['rationale'], contains('no tests for the new path'));
+    });
+
+    test('(rework 1) a template-echo-only envelope (no real verdict object '
+        'or heading) -> F (fail-closed — the template grade is not a valid '
+        'A-F letter)', () async {
+      final dir =
+          Directory.systemTemp.createTempSync('critic-fallback-templateonly-');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      const rubric = 'spec-adherence';
+      writeEnvelope(
+        dir.path,
+        rubric,
+        'Your verdict is JSON of this exact shape:\n'
+        '{"rubric":"spec-adherence","version":1,"grade":"<A-F>",'
+        '"rationale":"<why>"}',
+      );
+      final c = _ctx(rubric: rubric, workspaceDir: dir.path);
+      expect(
+        await const CriticCapability().result(c.context, c.args),
+        {'grade': 'F'},
+      );
+    });
+
     test('a recovered fallback grade still merges FT-2 usage telemetry when '
         'present', () async {
       final dir =
