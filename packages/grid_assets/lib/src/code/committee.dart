@@ -228,26 +228,18 @@ class CriticCapability extends ProcessCapability {
       return {'grade': code == '0' ? 'A' : 'F'};
     }
     // An LLM critic's verdict JSON. Fail-closed: a missing / malformed verdict
-    // grades F (a critic that did not produce a readable grade can never
-    // advance).
+    // (no file, unparseable JSON, or no readable `grade`) falls back to the
+    // captured harness RESULT TEXT (tg-291 — the verdict-transport brittleness:
+    // a critic that graded cleanly but wrote its verdict into stdout instead of
+    // the file must not be scored F on a transport slip alone). The FILE wins
+    // whenever it parses; only an absent/malformed file consults the fallback.
+    // No parseable verdict ANYWHERE still grades F.
     final verdict = File(p.join(workspaceDir, _critiqueDir, '$rubric.json'));
-    Map<String, String> graded;
-    if (!verdict.existsSync()) {
-      graded = const {'grade': 'F'};
-    } else {
-      try {
-        final json =
-            jsonDecode(verdict.readAsStringSync()) as Map<String, dynamic>;
-        final grade = (json['grade'] as String?)?.trim().toUpperCase();
-        final rationale = (json['rationale'] as String?)?.trim() ?? '';
-        graded = {
-          'grade': (grade == null || grade.isEmpty) ? 'F' : grade,
-          if (rationale.isNotEmpty) 'rationale': rationale,
-        };
-      } catch (_) {
-        graded = const {'grade': 'F'};
-      }
-    }
+    final graded = _verdictFromFile(verdict) ??
+        _verdictFromResultText(
+          readEnvelopeResultText(workspaceDir, args.nodePath),
+        ) ??
+        const {'grade': 'F'};
     // Merge the CAPTURE-ONLY usage telemetry (FT-2) into the payload. FAIL-SAFE:
     // an absent / malformed envelope yields no fields, NEVER a throw — the grade
     // (fail-closed above) is unaffected. Collision-safe keys (grade/rationale vs
@@ -268,8 +260,20 @@ class CriticCapability extends ProcessCapability {
   /// lanes' concerns or grades), carries the full bead, and instructs a single
   /// A–F grade written as a verdict JSON. Rides the harness as a bare
   /// `AgentBrief(task: …)` (no working agreement, no context blocks — so the
-  /// rendered brief IS this prompt, byte-identical). Exposed for unit tests.
+  /// rendered brief IS this prompt, byte-identical).
+  ///
+  /// The file-write instruction is deliberately the LAST thing the prompt says
+  /// (tg-291 — recency: a model observed to state a clean verdict in its
+  /// response prose while skipping the file write, tripping a false gate on the
+  /// fail-closed missing-file rule). It is imperative, names the exact path, and
+  /// is explicit that stating the verdict in prose does NOT satisfy it — the
+  /// file write is REQUIRED regardless. `result()` still has a stdout-envelope
+  /// fallback for when a critic slips anyway; this hardening is to make the
+  /// slip rarer, not to rely on the fallback.
+  ///
+  /// Exposed for unit tests.
   String buildCriticPrompt(Bead bead, String rubric) {
+    final path = '$_critiqueDir/$rubric.json';
     final b = StringBuffer()
       ..writeln('# Code review — rubric: `$rubric`')
       ..writeln()
@@ -284,11 +288,18 @@ class CriticCapability extends ProcessCapability {
       ..writeln()
       ..writeln('## Your verdict')
       ..writeln(
-        'Grade the work A (best) through F (worst) against `$rubric` ONLY, then '
-        'write your verdict as JSON to `$_critiqueDir/$rubric.json`:',
+        'Grade the work A (best) through F (worst) against `$rubric` ONLY. '
+        'Your verdict is JSON of this exact shape:',
       )
       ..writeln(
         '{"rubric":"$rubric","version":1,"grade":"<A-F>","rationale":"<why>"}',
+      )
+      ..writeln()
+      ..writeln(
+        'You MUST write that JSON to the exact path `$path` before you finish. '
+        'This is REQUIRED even if you also state your verdict in your response '
+        'text — stating the grade in prose alone does NOT satisfy this '
+        'instruction. Write the file at `$path`.',
       );
     return b.toString();
   }
@@ -446,4 +457,120 @@ String _beadBlock(Bead bead) {
   section('Acceptance criteria', bead.acceptanceCriteria);
   section('Notes', bead.notes);
   return b.toString();
+}
+
+/// The verdict file's grade, when it parses — `null` for an absent file,
+/// invalid JSON, or a missing/blank `grade` field (all treated as "unparseable"
+/// so [CriticCapability.result] falls through to the RESULT TEXT fallback,
+/// tg-291). Never throws.
+Map<String, String>? _verdictFromFile(File verdict) {
+  if (!verdict.existsSync()) return null;
+  try {
+    final json = jsonDecode(verdict.readAsStringSync()) as Map<String, dynamic>;
+    final grade = (json['grade'] as String?)?.trim().toUpperCase();
+    if (grade == null || grade.isEmpty) return null;
+    final rationale = (json['rationale'] as String?)?.trim() ?? '';
+    return {
+      'grade': grade,
+      if (rationale.isNotEmpty) 'rationale': rationale,
+    };
+  } catch (_) {
+    return null;
+  }
+}
+
+/// Recovers a verdict from a critic's raw harness RESULT TEXT (tg-291) — the
+/// fallback transport [CriticCapability.result] consults when the verdict file
+/// is absent or unparseable. FT-2 already captures the harness's
+/// `--output-format json` result envelope for telemetry; its `result` field is
+/// the critic's full stdout text, which sometimes carries the verdict the
+/// critic forgot to also write to disk.
+///
+/// Recognizes, in order:
+///  1. an embedded JSON verdict object (fenced or inline — `{"grade":...}`);
+///  2. a `Verdict: <A-F>` heading, with the prose that follows it as rationale.
+///
+/// Every recovered rationale is marked `[from result envelope]` so a grade
+/// that rode this fallback is visibly distinguishable downstream. `null` when
+/// neither shape yields a parseable grade (the caller then fail-closes to F).
+Map<String, String>? _verdictFromResultText(String? text) {
+  if (text == null) return null;
+  final trimmed = text.trim();
+  if (trimmed.isEmpty) return null;
+  return _verdictFromEmbeddedJson(trimmed) ?? _verdictFromHeading(trimmed);
+}
+
+/// A single-letter A-F grade — the same strict shape [_verdictHeading]
+/// enforces via its capture group. [buildCriticPrompt] hands the critic a
+/// LITERAL `"grade":"<A-F>"` template; without this check, an echoed
+/// template/example object in a stdout preamble would parse as a "valid"
+/// verdict (tg-291 rework round 1). `grade` is already upper-cased by the
+/// caller before this check runs.
+final RegExp _validGradeLetter = RegExp(r'^[A-F]$');
+
+/// Scans [text] for EVERY balanced-brace `{...}` substring that decodes as
+/// JSON carrying a `grade` matching [_validGradeLetter] exactly, and returns
+/// the LAST such match. A verdict concludes a critic's output — any earlier
+/// object (an echoed prompt template, a worked example in prose) is a
+/// preamble, not the verdict, so the first match must NOT win (tg-291 rework
+/// round 1: a false ADVANCE was possible when a real F verdict followed an
+/// earlier template/example echo with a matched-looking grade).
+Map<String, String>? _verdictFromEmbeddedJson(String text) {
+  Map<String, String>? last;
+  for (var start = 0; start < text.length; start++) {
+    if (text[start] != '{') continue;
+    var depth = 0;
+    for (var end = start; end < text.length; end++) {
+      if (text[end] == '{') depth++;
+      if (text[end] == '}') {
+        depth--;
+        if (depth != 0) continue;
+        try {
+          final json = jsonDecode(text.substring(start, end + 1));
+          if (json is Map) {
+            final grade = (json['grade'] as String?)?.trim().toUpperCase();
+            if (grade != null && _validGradeLetter.hasMatch(grade)) {
+              final rationale = (json['rationale'] as String?)?.trim() ?? '';
+              last = {
+                'grade': grade,
+                'rationale': rationale.isEmpty
+                    ? '[from result envelope]'
+                    : '$rationale [from result envelope]',
+              };
+            }
+          }
+        } catch (_) {
+          // not a decodable/relevant object at this start — keep scanning.
+        }
+        break; // matched braces exhausted for this start; try the next '{'.
+      }
+    }
+  }
+  return last;
+}
+
+/// A `Verdict: <A-F>` heading (case-insensitive) — the prose-heading shape a
+/// critic falls back to when it states its verdict in plain text (tg-291).
+final RegExp _verdictHeading =
+    RegExp(r'verdict\s*:\s*([A-Fa-f])\b', caseSensitive: false);
+
+/// The prose that follows the LAST `Verdict: <A-F>` heading in [text], as a
+/// grade + marked rationale — `null` when no heading is present. A verdict
+/// concludes a critic's output, so an earlier heading (a worked example, a
+/// restated instruction) must not win over a later, real one — mirrors
+/// [_verdictFromEmbeddedJson]'s last-match scan (tg-291 rework round 2: an
+/// early "Verdict: A" followed by a real, later "Verdict: F" must yield F, not
+/// the earlier A).
+Map<String, String>? _verdictFromHeading(String text) {
+  final matches = _verdictHeading.allMatches(text);
+  if (matches.isEmpty) return null;
+  final match = matches.last;
+  final grade = match.group(1)!.toUpperCase();
+  final rationale = text.substring(match.end).trim();
+  return {
+    'grade': grade,
+    'rationale': rationale.isEmpty
+        ? '[from result envelope]'
+        : '$rationale [from result envelope]',
+  };
 }

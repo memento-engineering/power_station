@@ -132,6 +132,25 @@ Map<String, String> readUsageFields(String workspaceDir, String nodePath) {
   }
 }
 
+/// Reads the RAW `result` text field out of the harness's `--output-format
+/// json` envelope for the step at [nodePath] under [workspaceDir] — the
+/// verdict-transport fallback (tg-291): a critic that graded cleanly but wrote
+/// its verdict into stdout instead of `.grid/critique/<rubric>.json` still has
+/// that text recoverable here, so a caller can attempt to parse a verdict out
+/// of it. FAIL-SAFE: an absent/unreadable/malformed envelope, or one with no
+/// non-blank string `result` field, yields `null` — NEVER a throw.
+String? readEnvelopeResultText(String workspaceDir, String nodePath) {
+  try {
+    final file = File(p.join(workspaceDir, usageReportPath(nodePath)));
+    if (!file.existsSync()) return null;
+    final envelope = _resultObject(jsonDecode(file.readAsStringSync()));
+    final result = envelope?['result'];
+    return (result is String && result.trim().isNotEmpty) ? result : null;
+  } catch (_) {
+    return null; // any I/O or decode surprise — fail-safe omit.
+  }
+}
+
 /// Normalizes [decoded] to the result-envelope object: the object itself, or —
 /// defensively, should a future flag emit an array of stream events — the last
 /// array member that looks like a result envelope (carries a usage/cost/turns/

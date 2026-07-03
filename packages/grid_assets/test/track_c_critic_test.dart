@@ -207,6 +207,30 @@ void main() {
       expect(prompt, contains('CUSTOM BANDS for spec-adherence'));
       expect(prompt, isNot(contains('Packaged-AI-Asset loader')));
     });
+
+    test('(tg-291 d) the file-write instruction is the LAST thing in the '
+        'prompt, imperative, exact-path, and required even if a verdict '
+        'appears in prose', () {
+      final prompt = const CriticCapability()
+          .buildCriticPrompt(bead('tg-1'), 'spec-adherence');
+      expect(
+        prompt.trimRight(),
+        endsWith(
+          'Write the file at `.grid/critique/spec-adherence.json`.',
+        ),
+      );
+      expect(
+        prompt,
+        contains(
+          'You MUST write that JSON to the exact path '
+          '`.grid/critique/spec-adherence.json` before you finish.',
+        ),
+      );
+      expect(
+        prompt,
+        contains('even if you also state your verdict in your response text'),
+      );
+    });
   });
 
   group('Track C2 — the LLM critic result() merges usage telemetry (FT-2)', () {
@@ -278,6 +302,237 @@ void main() {
       final c = _ctx(rubric: kGatingRubric, workspaceDir: dir.path);
       final out = await const CriticCapability().result(c.context, c.args);
       expect(out, {'grade': 'A'}, reason: 'no usage merge on the gating lane');
+    });
+  });
+
+  group('Track C2 — tg-291 verdict-transport fallback to the harness RESULT '
+      'TEXT (the missing-file false-gate fix)', () {
+    void writeVerdict(String workspaceDir, String rubric, String content) {
+      File('$workspaceDir/.grid/critique/$rubric.json')
+        ..createSync(recursive: true)
+        ..writeAsStringSync(content);
+    }
+
+    void writeEnvelope(String workspaceDir, String rubric, String resultText) {
+      File('$workspaceDir/${usageReportPath('tg-1/review/$rubric')}')
+        ..createSync(recursive: true)
+        ..writeAsStringSync(jsonEncode({'result': resultText}));
+    }
+
+    test('(a) file-absent + envelope "Verdict: X" heading -> grade X, '
+        'rationale marked [from result envelope]', () async {
+      final dir =
+          Directory.systemTemp.createTempSync('critic-fallback-heading-');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      const rubric = 'regression-risk';
+      writeEnvelope(
+        dir.path,
+        rubric,
+        'Reviewed the diff — narrow blast radius, well covered.\n\n'
+        'Verdict: A',
+      );
+      final c = _ctx(rubric: rubric, workspaceDir: dir.path);
+      final out = await const CriticCapability().result(c.context, c.args);
+      expect(out?['grade'], 'A');
+      expect(out?['rationale'], contains('[from result envelope]'));
+    });
+
+    test('(a) file-absent + an embedded JSON verdict in the envelope -> '
+        'grade + rationale, marked', () async {
+      final dir = Directory.systemTemp.createTempSync('critic-fallback-json-');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      const rubric = 'test-coverage';
+      writeEnvelope(
+        dir.path,
+        rubric,
+        'Here is my verdict:\n```json\n{"rubric":"test-coverage",'
+        '"grade":"B","rationale":"missing an edge case"}\n```\n',
+      );
+      final c = _ctx(rubric: rubric, workspaceDir: dir.path);
+      final out = await const CriticCapability().result(c.context, c.args);
+      expect(out?['grade'], 'B');
+      expect(out?['rationale'], contains('missing an edge case'));
+      expect(out?['rationale'], contains('[from result envelope]'));
+    });
+
+    test('(b) the FILE verdict wins when both a file and an envelope verdict '
+        'exist', () async {
+      final dir =
+          Directory.systemTemp.createTempSync('critic-fallback-filewins-');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      const rubric = 'spec-adherence';
+      writeVerdict(
+        dir.path,
+        rubric,
+        jsonEncode({'grade': 'C', 'rationale': 'from the file'}),
+      );
+      writeEnvelope(dir.path, rubric, 'Verdict: A');
+      final c = _ctx(rubric: rubric, workspaceDir: dir.path);
+      final out = await const CriticCapability().result(c.context, c.args);
+      expect(out, {'grade': 'C', 'rationale': 'from the file'});
+    });
+
+    test('a MALFORMED file falls back to a valid envelope verdict', () async {
+      final dir =
+          Directory.systemTemp.createTempSync('critic-fallback-filebad-');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      const rubric = 'regression-risk';
+      writeVerdict(dir.path, rubric, 'not json');
+      writeEnvelope(dir.path, rubric, 'Verdict: B');
+      final c = _ctx(rubric: rubric, workspaceDir: dir.path);
+      final out = await const CriticCapability().result(c.context, c.args);
+      expect(out?['grade'], 'B');
+      expect(out?['rationale'], contains('[from result envelope]'));
+    });
+
+    test('(c) no parseable verdict anywhere (no file, no envelope) -> F '
+        '(fail-closed pinned)', () async {
+      final dir = Directory.systemTemp.createTempSync('critic-fallback-none-');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final c = _ctx(rubric: 'regression-risk', workspaceDir: dir.path);
+      expect(
+        await const CriticCapability().result(c.context, c.args),
+        {'grade': 'F'},
+      );
+    });
+
+    test('malformed file + malformed envelope -> F (fail-closed pinned)',
+        () async {
+      final dir =
+          Directory.systemTemp.createTempSync('critic-fallback-bothbad-');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      const rubric = 'test-coverage';
+      writeVerdict(dir.path, rubric, 'not json');
+      File('${dir.path}/${usageReportPath('tg-1/review/$rubric')}')
+        ..createSync(recursive: true)
+        ..writeAsStringSync('{ not json either');
+      final c = _ctx(rubric: rubric, workspaceDir: dir.path);
+      expect(
+        await const CriticCapability().result(c.context, c.args),
+        {'grade': 'F'},
+      );
+    });
+
+    test('missing file + an envelope with no parseable verdict -> F '
+        '(fail-closed pinned)', () async {
+      final dir =
+          Directory.systemTemp.createTempSync('critic-fallback-noverdict-');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      const rubric = 'spec-adherence';
+      writeEnvelope(
+        dir.path,
+        rubric,
+        'I looked at the diff, seems fine, no complaints.',
+      );
+      final c = _ctx(rubric: rubric, workspaceDir: dir.path);
+      expect(
+        await const CriticCapability().result(c.context, c.args),
+        {'grade': 'F'},
+      );
+    });
+
+    test('(rework 1) a template echo `"grade":"<A-F>"` before a real verdict '
+        'object -> the REAL verdict wins (the template grade is not a single '
+        'A-F letter, so it never matches)', () async {
+      final dir =
+          Directory.systemTemp.createTempSync('critic-fallback-template-');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      const rubric = 'regression-risk';
+      writeEnvelope(
+        dir.path,
+        rubric,
+        'Your verdict is JSON of this exact shape:\n'
+        '{"rubric":"regression-risk","version":1,"grade":"<A-F>",'
+        '"rationale":"<why>"}\n\n'
+        'Reviewed the diff — narrow blast radius.\n'
+        '{"rubric":"regression-risk","version":1,"grade":"A",'
+        '"rationale":"well covered"}',
+      );
+      final c = _ctx(rubric: rubric, workspaceDir: dir.path);
+      final out = await const CriticCapability().result(c.context, c.args);
+      expect(out?['grade'], 'A');
+      expect(out?['rationale'], contains('well covered'));
+    });
+
+    test('(rework 1) an example object with grade A in prose followed by a '
+        'real F verdict -> the LAST (real) object wins, F', () async {
+      final dir =
+          Directory.systemTemp.createTempSync('critic-fallback-example-');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      const rubric = 'test-coverage';
+      writeEnvelope(
+        dir.path,
+        rubric,
+        'For example, a clean pass might look like '
+        '{"grade":"A","rationale":"example only"}.\n\n'
+        'Having actually reviewed this diff, coverage is missing entirely.\n'
+        '{"rubric":"test-coverage","version":1,"grade":"F",'
+        '"rationale":"no tests for the new path"}',
+      );
+      final c = _ctx(rubric: rubric, workspaceDir: dir.path);
+      final out = await const CriticCapability().result(c.context, c.args);
+      expect(out?['grade'], 'F');
+      expect(out?['rationale'], contains('no tests for the new path'));
+    });
+
+    test('(rework 1) a template-echo-only envelope (no real verdict object '
+        'or heading) -> F (fail-closed — the template grade is not a valid '
+        'A-F letter)', () async {
+      final dir =
+          Directory.systemTemp.createTempSync('critic-fallback-templateonly-');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      const rubric = 'spec-adherence';
+      writeEnvelope(
+        dir.path,
+        rubric,
+        'Your verdict is JSON of this exact shape:\n'
+        '{"rubric":"spec-adherence","version":1,"grade":"<A-F>",'
+        '"rationale":"<why>"}',
+      );
+      final c = _ctx(rubric: rubric, workspaceDir: dir.path);
+      expect(
+        await const CriticCapability().result(c.context, c.args),
+        {'grade': 'F'},
+      );
+    });
+
+    test('(rework 2) an early "Verdict: A" heading followed by a later, real '
+        '"Verdict: F" heading -> the LAST heading wins, F', () async {
+      final dir =
+          Directory.systemTemp.createTempSync('critic-fallback-headtail-');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      const rubric = 'regression-risk';
+      writeEnvelope(
+        dir.path,
+        rubric,
+        'A clean pass typically reads like: Verdict: A\n\n'
+        'Having actually reviewed this diff, the blast radius is unbounded.\n'
+        'Verdict: F',
+      );
+      final c = _ctx(rubric: rubric, workspaceDir: dir.path);
+      final out = await const CriticCapability().result(c.context, c.args);
+      expect(out?['grade'], 'F');
+    });
+
+    test('a recovered fallback grade still merges FT-2 usage telemetry when '
+        'present', () async {
+      final dir =
+          Directory.systemTemp.createTempSync('critic-fallback-usage-');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      const rubric = 'test-coverage';
+      File('${dir.path}/${usageReportPath('tg-1/review/$rubric')}')
+        ..createSync(recursive: true)
+        ..writeAsStringSync(jsonEncode({
+          'result': 'Verdict: A',
+          'num_turns': 36,
+        }));
+      final c = _ctx(rubric: rubric, workspaceDir: dir.path);
+      final out = await const CriticCapability().result(c.context, c.args);
+      expect(out, {
+        'grade': 'A',
+        'rationale': '[from result envelope]',
+        'numTurns': '36',
+      });
     });
   });
 }
