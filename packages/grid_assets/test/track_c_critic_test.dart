@@ -496,6 +496,24 @@ void main() {
       );
     });
 
+    test('(rework 2) an early "Verdict: A" heading followed by a later, real '
+        '"Verdict: F" heading -> the LAST heading wins, F', () async {
+      final dir =
+          Directory.systemTemp.createTempSync('critic-fallback-headtail-');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      const rubric = 'regression-risk';
+      writeEnvelope(
+        dir.path,
+        rubric,
+        'A clean pass typically reads like: Verdict: A\n\n'
+        'Having actually reviewed this diff, the blast radius is unbounded.\n'
+        'Verdict: F',
+      );
+      final c = _ctx(rubric: rubric, workspaceDir: dir.path);
+      final out = await const CriticCapability().result(c.context, c.args);
+      expect(out?['grade'], 'F');
+    });
+
     test('a recovered fallback grade still merges FT-2 usage telemetry when '
         'present', () async {
       final dir =

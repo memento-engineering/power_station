@@ -554,11 +554,17 @@ Map<String, String>? _verdictFromEmbeddedJson(String text) {
 final RegExp _verdictHeading =
     RegExp(r'verdict\s*:\s*([A-Fa-f])\b', caseSensitive: false);
 
-/// The prose that follows a `Verdict: <A-F>` heading in [text], as a grade +
-/// marked rationale — `null` when no heading is present.
+/// The prose that follows the LAST `Verdict: <A-F>` heading in [text], as a
+/// grade + marked rationale — `null` when no heading is present. A verdict
+/// concludes a critic's output, so an earlier heading (a worked example, a
+/// restated instruction) must not win over a later, real one — mirrors
+/// [_verdictFromEmbeddedJson]'s last-match scan (tg-291 rework round 2: an
+/// early "Verdict: A" followed by a real, later "Verdict: F" must yield F, not
+/// the earlier A).
 Map<String, String>? _verdictFromHeading(String text) {
-  final match = _verdictHeading.firstMatch(text);
-  if (match == null) return null;
+  final matches = _verdictHeading.allMatches(text);
+  if (matches.isEmpty) return null;
+  final match = matches.last;
   final grade = match.group(1)!.toUpperCase();
   final rationale = text.substring(match.end).trim();
   return {
