@@ -21,8 +21,8 @@
 //      per-incarnation subscription-cancel AND the _cancelled/mounted handler
 //      guard, each isolated + combined).
 //
-// (a)/(b)/(c) drive the real Station→…→WorkBead→SessionScope→FormulaScope→
-// CapabilityHost tree (FormulaResolver + buildCodeRegistry, an StationServices +
+// (a)/(b)/(c) drive the real Station→…→WorkBead→SessionScope→CircuitScope→
+// CapabilityHost tree (CircuitResolver + buildCodeRegistry, an StationServices +
 // git ServiceBundle over the offline fakes) under a TreeOwner so branch identity
 // is walkable; (d)/(e)/(f) re-drive the Track C/D/E mechanisms through the same
 // integrated path.
@@ -88,7 +88,7 @@ SessionProjection _session(
 );
 
 /// The integrated root: the work-axis notifier + the StationServices + the live
-/// `code` registry + the FormulaResolver above the Station; one rig owning `tg`.
+/// `code` registry + the CircuitResolver above the Station; one rig owning `tg`.
 /// The git ServiceBundle is provided AT THE SubstationScope (ADR-0008 D5: source
 /// control is a per-substation responsibility).
 Seed _root({
@@ -474,7 +474,7 @@ void main() {
   group('PDR §7 (e) — risk 5: spawn-in-flight vs unmount', () {
     test(
       'a SessionScope disposed DURING the async createSession never inflates the '
-      'formula → never leaks a SPAWN (the cancel-flag contract); the mid-mint '
+      'circuit → never leaks a SPAWN (the cancel-flag contract); the mid-mint '
       'session bead is intentionally reaped later by the RestartReconciler',
       () async {
         // Gate the create so dispose lands mid-mint.
@@ -491,7 +491,7 @@ void main() {
         addTearDown(provider.close);
 
         // Mount the real reentrant subtree root (a SessionScope rooting the
-        // `code` formula) with NO existing session ⇒ it MINTS. The ambient
+        // `code` circuit) with NO existing session ⇒ it MINTS. The ambient
         // Bead is mounted above (as WorkBead does since the context rip-out)
         // so a leaked spawn WOULD succeed — keeping the no-leak assertion
         // non-vacuous.
@@ -515,7 +515,7 @@ void main() {
         owner.dispose();
 
         // Resolve the create — the post-create guard must abort before the
-        // SessionScope resolves, so the formula never inflates and no leaf spawns.
+        // SessionScope resolves, so the circuit never inflates and no leaf spawns.
         runner.releaseCreate('tgdog-sess1');
         await pumpEventQueue();
 

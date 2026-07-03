@@ -8,7 +8,7 @@
 // Idle leaf.
 //
 // This drives a FULL agent→committee→land cycle through the REAL StationKernel +
-// the REAL `code` formula (FormulaResolver + buildCodeRegistry — agent → the four
+// the REAL `code` circuit (CircuitResolver + buildCodeRegistry — agent → the four
 // adversarial critics → route → land) with a RecordingBdRunner-backed
 // StationBeadWriter (the chokepoint) + the fake provider/git/PR, emitting
 // SessionStarted + a clean completion per step and advancing the per-node cursor
@@ -127,7 +127,7 @@ void main() {
         await _settle();
 
         // agent completes → its host writes agent=complete (a chokepoint update);
-        // the STATE source surfaces the advance → the `review` sub-formula inflates
+        // the STATE source surfaces the advance → the `review` sub-circuit inflates
         // its four critic lanes IN PARALLEL.
         f.provider.emit(Exited(name: _step('agent'), exitCode: 0));
         await _settle();
@@ -250,7 +250,7 @@ void main() {
         // Mount a work bead. The agent spawns from the host lifecycle — a write
         // (the session mint) lands. But that write came from the lifecycle, not a
         // build: re-pushing the SAME snapshot (a redundant work tick) re-runs
-        // WorkList/WorkBead/SessionScope/FormulaScope build() — and produces ZERO
+        // WorkList/WorkBead/SessionScope/CircuitScope build() — and produces ZERO
         // new bd writes, because build() never writes.
         work.push(_graph(beads: [bead('tg-1')], ready: {'tg-1'}));
         await pumpEventQueue();

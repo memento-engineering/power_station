@@ -5,7 +5,7 @@ each pack exports **domain components + CLI components** (the CLI-SDK model):
 
 | Pack | Domain |
 |---|---|
-| `packages/grid_assets` | the `code` asset (agent/verify/land + the `code` formula + the git `SourceControl` + the exported `CodeRunCommand`) and the `compute` asset (bounded dispatch over a federation lease) |
+| `packages/grid_assets` | the `code` asset (agent/verify/land + the `code` circuit + the git `SourceControl` + the exported `CodeRunCommand`) and the `compute` asset (bounded dispatch over a federation lease) |
 | `packages/dart_grid_assets` | the DART domain (the typed `grid.dart` envelope + pub dev-time linkage + the exported `DartCommand`) |
 
 The butane `burn` asset (`butane_grid_assets`) moved to its system's repo —

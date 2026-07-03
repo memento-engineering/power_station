@@ -72,16 +72,16 @@ void main() {
         'registry (with the committee) + the git SourceControl are built by '
         'the asset, composed in run() (the composition inversion — no '
         'StationRunCommand base, no servicesFor hook)', () {
-      // The trio's registry half: buildCodeRegistry carries the code formula +
-      // the committee sub-formula the command wires via a FormulaResolver.
+      // The trio's registry half: buildCodeRegistry carries the code circuit +
+      // the committee sub-circuit the command wires via a CircuitResolver.
       final registry = buildCodeRegistry();
       expect(
-        registry.formula('code'),
+        registry.circuit('code'),
         isNotNull,
         reason: 'the code registry (agent/review/land) is the asset\'s',
       );
       expect(
-        registry.formula('code_review'),
+        registry.circuit('code_review'),
         isNotNull,
         reason: 'the adversarial committee rides the same registry',
       );

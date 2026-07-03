@@ -1,11 +1,11 @@
-/// The adversarial code-committee — a reentrant sub-formula composed at the
-/// existing `FormulaScope` seam (ADR-0008 D2/D4 / M5 "The Circuit" Track C).
+/// The adversarial code-committee — a reentrant sub-circuit composed at the
+/// existing `CircuitScope` seam (ADR-0008 D2/D4 / M5 "The Circuit" Track C).
 ///
 /// factoryskills' code review runs ONE critic per rubric in ISOLATION
 /// (anti-anchoring: a critic sees only its own rubric, never the others' grades),
 /// fans the four critics out in parallel, then a `route` step aggregates their
 /// grades through a deterministic matrix (asset policy, never engine). The
-/// committee is just formula wiring + two `Capability` leaves — the parallelism +
+/// committee is just circuit wiring + two `Capability` leaves — the parallelism +
 /// await-all join is already proven by the Burn (M4-P1 Track J); no new engine
 /// machinery is introduced here.
 ///
@@ -56,14 +56,14 @@ const String _critiqueDir = '.grid/critique';
 /// prompt embeds.
 typedef RubricSource = String Function(String rubricId);
 
-/// The adversarial code-committee formula (id `code_review`) — four dep-free
+/// The adversarial code-committee circuit (id `code_review`) — four dep-free
 /// critic lanes fanned out in parallel, then a `route` step that joins on all
 /// four and aggregates their grades (M5 Track C / C1).
 ///
-/// Reentrant: composed at the same `FormulaScope` seam as any other formula, so
-/// Track E can drop it in as the `code` formula's `verify` via a `SubFormulaStep`
+/// Reentrant: composed at the same `CircuitScope` seam as any other circuit, so
+/// Track E can drop it in as the `code` circuit's `verify` via a `SubCircuitStep`
 /// with zero engine changes.
-const Formula kCodeReviewFormula = Formula(
+const Circuit kCodeReviewCircuit = Circuit(
   id: 'code_review',
   terminalStepId: 'route',
   steps: [

@@ -1,5 +1,5 @@
 // Code-asset test support — the helpers that reference the moved `code`
-// opinions (`kCodeFormula`/`buildCodeRegistry`), which do NOT belong in the
+// opinions (`kCodeCircuit`/`buildCodeRegistry`), which do NOT belong in the
 // engine's testing lib. Re-exports `package:grid_engine/testing.dart` so a
 // moved test gets the SAME shared engine fakes (a drop-in for the old
 // `support/engine_fakes.dart`), plus the `code` resolver below. Pure-Dart: no
@@ -13,13 +13,13 @@ import 'package:grid_engine/grid_engine.dart';
 import 'package:grid_engine/testing.dart';
 import 'package:grid_assets/grid_assets.dart';
 
-/// The live `code` resolver (all work → the `code` formula) for the integrated
+/// The live `code` resolver (all work → the `code` circuit) for the integrated
 /// acceptance tests — pair it with [buildCodeRegistry] as the ambient
 /// `CapabilityRegistry`. Mirrors `composeRunTree`'s production wiring.
-const FormulaResolver kCodeResolver = FormulaResolver(_codeFormula);
-Formula _codeFormula(Bead bead) => kCodeFormula;
+const CircuitResolver kCodeResolver = CircuitResolver(_codeCircuit);
+Circuit _codeCircuit(Bead bead) => kCodeCircuit;
 
-/// The committee-wired `code` formula's node paths (relative to the work bead),
+/// The committee-wired `code` circuit's node paths (relative to the work bead),
 /// in declaration order — `agent` → the four `review/<critic>` lanes → `review/route`
 /// → `land`. The drive helpers + acceptance tests key the cursor off these.
 const String kAgentNode = 'agent';
@@ -32,7 +32,7 @@ const List<String> kCriticNodes = [
 const String kRouteNode = 'review/route';
 const String kLandNode = 'land';
 
-/// A STATE session bead for the COMMITTEE-wired `code` formula (M5 Track E):
+/// A STATE session bead for the COMMITTEE-wired `code` circuit (M5 Track E):
 /// marks each relative path in [completed] `complete` in the per-node cursor AND
 /// attaches each grade in [grades] (relative nodePath → letter) under
 /// `grid.result.*` — so a mounted `route` reads its siblings' grades through the

@@ -9,7 +9,7 @@
 //
 // Track A's track_a_reconcile_test asserts the predicate at the WorkBead
 // child-set level; THIS formalizes it at the kernel/effect-SPAWN level — driven
-// through the real StationKernel + the real `code` formula, the allow-list is
+// through the real StationKernel + the real `code` circuit, the allow-list is
 // proven by what does (and does not) reach the provider.
 //
 // Offline only — FAKES, no live tg/gc/claude/git/network.

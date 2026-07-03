@@ -1,10 +1,10 @@
 /// The_grid's opinion assets — the agent/verify/land [Capability] impls + the
-/// `code` [Formula] + the git [SourceControl] (ADR-0008 D2 / M4-P1 §6).
+/// `code` [Circuit] + the git [SourceControl] (ADR-0008 D2 / M4-P1 §6).
 ///
 /// These are the OPINIONS the opinion-free engine (grid_engine) must not carry
 /// (ADR-0007 §1): the coding agent it spawns (`claude`), the check it runs, the
 /// PR it opens. A station runner wires them via [buildCodeRegistry] + a
-/// `FormulaResolver` — or just assembles the asset's exported [CodeRunCommand]
+/// `CircuitResolver` — or just assembles the asset's exported [CodeRunCommand]
 /// (the CLI-SDK model: an asset's offering = {domain components + CLI
 /// components}). The `power_station` home of the first-party assets (extracted
 /// from the_grid at the repo split).

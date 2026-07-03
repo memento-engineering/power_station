@@ -22,13 +22,13 @@ import 'package:grid_engine/grid_engine.dart';
 import '../agent/agent_harness.dart';
 import 'code_capabilities.dart';
 
-/// The bead→formula policy for the `code` asset — all coding work roots the
-/// `code` formula (agent → review → land). A top-level tear-off so
-/// [FormulaResolver] stays const.
-Formula _codeFormula(Bead bead) => kCodeFormula;
+/// The bead→circuit policy for the `code` asset — all coding work roots the
+/// `code` circuit (agent → review → land). A top-level tear-off so
+/// [CircuitResolver] stays const.
+Circuit _codeCircuit(Bead bead) => kCodeCircuit;
 
 /// `grid run` for the `code` asset: the reentrant tree engine spawning a coding
-/// agent per ready bead, wired with the `code` formula + [buildCodeRegistry] +
+/// agent per ready bead, wired with the `code` circuit + [buildCodeRegistry] +
 /// the git `SourceControl`, parameterized over the agent scope (ADR-0008
 /// Decision 10): `--harness claude|copilot|pi|opencode` picks the tool,
 /// `--openai-base`/`--swift-base` point endpoint harnesses at llama.cpp /
@@ -163,7 +163,7 @@ class CodeRunCommand extends Command<int> {
         workRoot: live.workRoot,
         groups: live.groups,
         freshnessBarrier: live.freshnessBarrier,
-        resolver: const FormulaResolver(_codeFormula),
+        resolver: const CircuitResolver(_codeCircuit),
         registry: buildCodeRegistry(),
         services: services,
         // D-C rung 1: the asset mounts its station-default config VALUES as

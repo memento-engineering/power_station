@@ -1,7 +1,7 @@
 // M5 "The Circuit" — Track E2: the verify-first committee, offline end-to-end.
 //
 // Drives the FULL committee-wired `code` path through the REAL StationKernel +
-// FormulaResolver + buildCodeRegistry (agent → review[4 critics ∥ → route] →
+// CircuitResolver + buildCodeRegistry (agent → review[4 critics ∥ → route] →
 // land), advancing the per-node cursor via the fake STATE source (the bridge
 // re-projecting each chokepoint write) and feeding the critics' grades through
 // the same STATE source's `grid.result.*` keys (what the host's result() would
@@ -127,7 +127,7 @@ void main() {
         expect(f.provider.started.map((s) => s.name), [_step('agent')]);
 
         // 2) agent completes → its host writes agent=complete (+ flares); the
-        //    STATE source surfaces the advance → the `review` sub-formula inflates
+        //    STATE source surfaces the advance → the `review` sub-circuit inflates
         //    its FOUR critic lanes IN PARALLEL.
         f.provider.emit(Exited(name: _step('agent'), exitCode: 0));
         await _settle();

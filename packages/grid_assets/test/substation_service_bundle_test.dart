@@ -141,7 +141,7 @@ void main() {
       expect(
         f.provider.started.map((s) => s.name),
         unorderedEquals(<String>['tgdog-a/sa-1/agent', 'tgdog-b/sb-1/agent']),
-        reason: 'one agent per substation spawned through the real code formula',
+        reason: 'one agent per substation spawned through the real code circuit',
       );
 
       // The routing proof: each substation provisioned ONLY its own bead's

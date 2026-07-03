@@ -1,7 +1,7 @@
-// Track C4 — the committee formula's frontier (fan-out + await-all join).
+// Track C4 — the committee circuit's frontier (fan-out + await-all join).
 //
-// Mounts the `code_review` formula through the FULL new path (FormulaResolver →
-// SessionScope → FormulaScope → CapabilityHosts), with the per-node cursor
+// Mounts the `code_review` circuit through the FULL new path (CircuitResolver →
+// SessionScope → CircuitScope → CapabilityHosts), with the per-node cursor
 // advanced via the join (simulating the bridge re-projecting each chokepoint
 // write). The four critics are dep-free ⇒ they fan out IN PARALLEL; the `route`
 // step depends on all four ⇒ it is withheld until every critic reaches a
@@ -24,7 +24,7 @@ class _Committee {
   _Committee(this.beadId)
     : fakes = buildFakes(),
       reg = RecordingCapabilityRegistry(
-        formulas: const {'code_review': kCodeReviewFormula},
+        circuits: const {'code_review': kCodeReviewCircuit},
       ),
       joined = JoinedSnapshotNotifier(JoinedSnapshot.empty()),
       owner = TreeOwner();
@@ -49,7 +49,7 @@ class _Committee {
           child: InheritedSeed<CapabilityRegistry>(
             value: reg,
             child: InheritedSeed<SessionResolver>(
-              value: FormulaResolver((_) => kCodeReviewFormula),
+              value: CircuitResolver((_) => kCodeReviewCircuit),
               child: Station([
                 SubstationScope(
                   configNotifier: SubstationConfigNotifier(_tgConfig),
