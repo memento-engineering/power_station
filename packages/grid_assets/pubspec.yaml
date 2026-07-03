@@ -1,10 +1,10 @@
 name: grid_assets
 description: >-
   The_grid's opinion assets — the agent/verify/land Capability impls + the
-  `code` formula + the git SourceControl, extracted out of the opinion-free
+  `code` circuit + the git SourceControl, extracted out of the opinion-free
   engine (grid_engine) so the engine holds no landing/VCS/provider opinion
   (ADR-0007 §1). A station runner wires these via `buildCodeRegistry` + a
-  `FormulaResolver`, or assembles the exported `CodeRunCommand`. The
+  `CircuitResolver`, or assembles the exported `CodeRunCommand`. The
   power_station home of the first-party assets.
 publish_to: none
 resolution: workspace

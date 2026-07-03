@@ -1,15 +1,15 @@
 /// The `code` extension — agent/verify/land as Capability impls + the linear
-/// `code` formula (ADR-0008 D2 / M4-P1 §6, Track H).
+/// `code` circuit (ADR-0008 D2 / M4-P1 §6, Track H).
 ///
 /// The agent/verify/land OPINIONS live here as opaque [Capability] leaves (never
-/// a `Seed`), composed into a linear [Formula] whose always-1-wide frontier
+/// a `Seed`), composed into a linear [Circuit] whose always-1-wide frontier
 /// reproduces the original agent→verify→land sequence. The kernel/effect core
 /// references none of this — only this asset package does (the opinion-free
 /// kernel invariant, ADR-0007 §1; a structural fence keeps it out of the engine).
 ///
 /// This is the LIVE work path: `composeRunTree` wires it via the
-/// [buildCodeRegistry] registry + a [FormulaResolver] that roots the `code`
-/// formula per coding bead.
+/// [buildCodeRegistry] registry + a [CircuitResolver] that roots the `code`
+/// circuit per coding bead.
 library;
 
 import 'dart:io';
@@ -25,22 +25,22 @@ import '../agent/usage_report.dart';
 import '../assets/asset_loader.dart';
 import 'committee.dart';
 
-/// agent → review → land — the live `code` formula (M5 "The Circuit" Track E).
+/// agent → review → land — the live `code` circuit (M5 "The Circuit" Track E).
 ///
 /// The toy `verify` step (`sh -c 'melos test'`) is GONE: `verify` is now the
-/// adversarial code-committee, a [SubFormulaStep] the engine inflates one level
-/// down ([kCodeReviewFormula] — four critics in parallel → a `route` join). A
+/// adversarial code-committee, a [SubCircuitStep] the engine inflates one level
+/// down ([kCodeReviewCircuit] — four critics in parallel → a `route` join). A
 /// `dependsOn` on `review` resolves to its terminal-step descendant
 /// (`<bead>/review/route`'s positive terminal), so `land` waits for the route to
 /// advance; a route `Gate` parks the work (no `land`) instead.
-const Formula kCodeFormula = Formula(
+const Circuit kCodeCircuit = Circuit(
   id: 'code',
   terminalStepId: 'land',
   steps: [
     CapabilityStep(stepId: 'agent', capabilityId: 'agent'),
-    SubFormulaStep(
+    SubCircuitStep(
       stepId: 'review',
-      formulaId: 'code_review',
+      circuitId: 'code_review',
       dependsOn: {'agent'},
     ),
     CapabilityStep(stepId: 'land', capabilityId: 'land', dependsOn: {'review'}),
@@ -156,7 +156,7 @@ AgentBrief buildAgentBrief(Bead bead, Workspace workspace) {
 }
 
 // The toy VERIFY capability (a fixed test command) was DELETED in M5 Track E:
-// `verify` is now the adversarial code-committee ([kCodeReviewFormula]), whose
+// `verify` is now the adversarial code-committee ([kCodeReviewCircuit]), whose
 // gating `code-validation` lane runs the bead's OWN Validation Plan — real
 // verification, not one hard-coded command. (The opinion-free engine names no
 // build tool at all; the structural fence guards it.)
@@ -319,12 +319,12 @@ class GitSourceControl implements SourceControl {
 }
 
 /// Builds the `code` registry: the agent/land capabilities + the adversarial
-/// committee (`critic`/`route` + the `code_review` formula), with an optional
+/// committee (`critic`/`route` + the `code_review` circuit), with an optional
 /// injected [clock] (the backoff seam). The composer provides it as a stable
 /// `InheritedSeed<CapabilityRegistry>` above `Station`, alongside a
-/// `FormulaResolver((_) => kCodeFormula)`.
+/// `CircuitResolver((_) => kCodeCircuit)`.
 ///
-/// The `code` formula's `verify` step is the committee (M5 Track E): the toy
+/// The `code` circuit's `verify` step is the committee (M5 Track E): the toy
 /// `verify` capability is gone, and the `critic` capability is wired to the
 /// Packaged-AI-Asset rubric loader (D-9) — [rubrics] overrides it for a test
 /// that wants inline rubric text (absent ⇒ the on-disk `extension/rubrics/`).
@@ -340,7 +340,7 @@ DefaultCapabilityRegistry buildCodeRegistry({
       'critic': CriticCapability(rubrics: rubricSource),
       'route': const RouteCapability(),
     },
-    formulas: const {'code': kCodeFormula, 'code_review': kCodeReviewFormula},
+    circuits: const {'code': kCodeCircuit, 'code_review': kCodeReviewCircuit},
     clock: clock,
   );
 }

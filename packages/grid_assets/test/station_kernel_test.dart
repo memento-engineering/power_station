@@ -5,8 +5,8 @@
 // (WorkList) dirty, the kernel's microtask flush reconciles the work set, mount =
 // spawn (the agent), and a per-node cursor advance swaps the running frontier
 // (stop old + start new) — the agent retiring fans the four critics out IN
-// PARALLEL, then route + land swap through. The live `code` formula
-// (FormulaResolver + buildCodeRegistry) supplies the capabilities; the
+// PARALLEL, then route + land swap through. The live `code` circuit
+// (CircuitResolver + buildCodeRegistry) supplies the capabilities; the
 // StationServices is over the offline fakes (no live tg/gc/claude/git).
 //
 // Unlike Track A's reconcile test (which calls owner.flush() directly), THIS test
@@ -105,7 +105,7 @@ void main() {
 
         // 1) A ready owned task arrives on the WORK source → WorkList dirties →
         //    the kernel mints the session + spawns the agent (the 1-wide head of
-        //    the `code` formula). The step's provider name is
+        //    the `code` circuit). The step's provider name is
         //    '<sessionId>/<nodePath>'.
         work.push(_graph(beads: [bead('tg-1')], ready: {'tg-1'}));
         await _settle();
@@ -129,7 +129,7 @@ void main() {
         //    the per-node cursor (A40: the cursor lives on the_grid's own session
         //    bead) via the STATE source re-joins, WorkList dirties, and the flush
         //    SWAPS the frontier: the agent retires (killed) and the `review`
-        //    sub-formula inflates its FOUR critic lanes IN PARALLEL.
+        //    sub-circuit inflates its FOUR critic lanes IN PARALLEL.
         f.provider.emit(Exited(name: _step('agent'), exitCode: 0));
         await _settle();
         state.push(_stateAt(completed: {kAgentNode}));
