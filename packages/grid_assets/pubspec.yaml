@@ -4,8 +4,7 @@ description: >-
   `code` circuit + the git SourceControl, extracted out of the opinion-free
   engine (grid_engine) so the engine holds no landing/VCS/provider opinion
   (ADR-0007 §1). A station runner wires these via `buildCodeRegistry` + a
-  `CircuitResolver`, or assembles the exported `CodeRunCommand`. The
-  power_station home of the first-party assets.
+  `CircuitResolver`. The power_station home of the first-party assets.
 publish_to: none
 resolution: workspace
 
@@ -13,15 +12,9 @@ environment:
   sdk: ^3.11.0
 
 dependencies:
-  # The exported CLI components (the asset's Command offering — the CLI-SDK
-  # model): CodeRunCommand extends the CLI-SDK's StationRunCommand (grid_cli is
-  # a the_grid framework lib; no cycle — grid_cli no longer depends on
-  # grid_assets).
-  args: ^2.6.0
+  beads_dart: any
   dart_grid_assets: any
   genesis_tree: ^0.1.3
-  grid_cli: any
-  grid_controller: any
   grid_engine: any
   grid_federation: any
   grid_runtime: any

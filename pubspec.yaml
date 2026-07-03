@@ -7,7 +7,7 @@ workspace:
   - packages/dart_grid_assets
 
 # Cross-repo linkage: the the_grid framework packages (grid_engine, grid_cli,
-# grid_controller, …) are declared `any` in each pack and resolved via the
+# beads_dart, …) are declared `any` in each pack and resolved via the
 # machine-local `pubspec_overrides.yaml` at this root (path deps into the
 # sibling ../the_grid checkout during dev; hosted/git refs at stabilization).
 # That file is gitignored — the dart domain's `grid dart link` generates it.
