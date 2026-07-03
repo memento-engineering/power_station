@@ -164,7 +164,7 @@ class CodeRunCommand extends Command<int> {
         groups: live.groups,
         freshnessBarrier: live.freshnessBarrier,
         resolver: const CircuitResolver(_codeCircuit),
-        registry: buildCodeRegistry(),
+        registry: buildCodeRegistry(devRoot: live.workRoot.path),
         services: services,
         // D-C rung 1: the asset mounts its station-default config VALUES as
         // ancestors of everything (Theme-of-context; the effect boundary

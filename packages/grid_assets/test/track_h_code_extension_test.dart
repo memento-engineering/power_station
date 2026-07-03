@@ -12,6 +12,7 @@
 // tests read usage files a test writes into a temp dir; no real claude/git).
 import 'dart:io';
 
+import 'package:dart_grid_assets/dart_grid_assets.dart';
 import 'package:grid_assets/grid_assets.dart';
 import 'package:grid_controller/grid_controller.dart';
 import 'package:grid_engine/grid_engine.dart';
@@ -312,6 +313,128 @@ void main() {
       writeUsage(dir.path, '{ not json');
       final c = resultCtx(dir.path);
       expect(await const AgentCapability().result(c.context, c.args), isNull);
+    });
+  });
+
+  group('AgentCapability materializes the grid.dart pub linkage at provision '
+      'time (tg-ucz — the "provision-time pub linkage" gap)', () {
+    late Directory worktree;
+
+    setUp(() {
+      worktree = Directory.systemTemp.createTempSync('agent-link-worktree-');
+    });
+
+    tearDown(() {
+      if (worktree.existsSync()) worktree.deleteSync(recursive: true);
+    });
+
+    ({FakeTreeContext context, StepArgs args}) ctxAt(
+      String workspaceDir, {
+      Map<String, dynamic> metadata = const {},
+    }) => (
+      context: FakeTreeContext(
+        values: {
+          Bead: bead('tg-1').copyWith(metadata: metadata),
+          Workspace: testWorkspace(
+            'tg-1',
+            workspaceDir: workspaceDir,
+            branch: 'grid/tg-1',
+          ),
+        },
+      ),
+      args: stepArgs('tg-1/agent'),
+    );
+
+    Map<String, dynamic> envelopeWith(
+      List<PubLink> links, {
+      String version = kDartAssetsVersion,
+    }) => {
+      kDartDomainKey: {
+        'assets_version': version,
+        'payload': {'pub': PubLinkConfig(links: links).toJson()},
+      },
+    };
+
+    File overridesFile() =>
+        File(p.join(worktree.path, kPubspecOverridesFile));
+
+    test('(a) envelope + links → pubspec_overrides.yaml at the worktree root '
+        'with an absolutized path', () {
+      final c = ctxAt(
+        worktree.path,
+        metadata: envelopeWith(const [
+          PubLink(package: 'genesis_tree', devPath: '../genesis/packages/tree'),
+        ]),
+      );
+      const cap = AgentCapability(devRoot: '/dev/root');
+      cap.spawn(c.context, c.args);
+      expect(overridesFile().existsSync(), isTrue);
+      expect(
+        overridesFile().readAsStringSync(),
+        contains("path: '/dev/genesis/packages/tree'"),
+      );
+    });
+
+    test('(b) no grid.dart envelope on the bead → spawn succeeds, no file '
+        'written', () {
+      final c = ctxAt(worktree.path);
+      const cap = AgentCapability(devRoot: '/dev/root');
+      expect(() => cap.spawn(c.context, c.args), returnsNormally);
+      expect(overridesFile().existsSync(), isFalse);
+    });
+
+    test('(b) an envelope with only PINNED (no dev-path) links → a stale '
+        'GENERATED overrides file is cleared', () {
+      // A prior spawn (or `dart link`) generated the file for a dev link…
+      const service = DartLinkService();
+      service.applySync(
+        metadata: envelopeWith(const [
+          PubLink(package: 'genesis_tree', devPath: '/abs/genesis/packages/tree'),
+        ]),
+        context: PubLinkContext.worktree,
+        workspaceDir: worktree.path,
+      );
+      expect(overridesFile().existsSync(), isTrue);
+
+      // …a later bead revision drops the dev override (pins-only): the stale
+      // generated file is cleared, never left dangling.
+      final c = ctxAt(
+        worktree.path,
+        metadata: envelopeWith(const [
+          PubLink(package: 'genesis_tree', hosted: '^0.1.3'),
+        ]),
+      );
+      const cap = AgentCapability(devRoot: '/dev/root');
+      cap.spawn(c.context, c.args);
+      expect(overridesFile().existsSync(), isFalse);
+    });
+
+    test('(c) a breaking assets_version is refused WHOLE — spawn THROWS '
+        '(routes Failed to supervision, ADR-0008 Decision 10); never a '
+        'half-applied file', () {
+      final c = ctxAt(
+        worktree.path,
+        metadata: envelopeWith(const [
+          PubLink(package: 'genesis_tree', devPath: '/abs/genesis/packages/tree'),
+        ], version: '9.9.9'),
+      );
+      const cap = AgentCapability(devRoot: '/dev/root');
+      expect(() => cap.spawn(c.context, c.args), throwsStateError);
+      expect(overridesFile().existsSync(), isFalse);
+    });
+
+    test('a workspace that does not exist yet (offline/dry-run — '
+        'GitSourceControl never materializes one there) skips silently, '
+        'never throws', () {
+      final missing = p.join(worktree.path, 'does-not-exist');
+      final c = ctxAt(
+        missing,
+        metadata: envelopeWith(const [
+          PubLink(package: 'genesis_tree', devPath: '/abs/genesis/packages/tree'),
+        ]),
+      );
+      const cap = AgentCapability(devRoot: '/dev/root');
+      expect(() => cap.spawn(c.context, c.args), returnsNormally);
     });
   });
 }

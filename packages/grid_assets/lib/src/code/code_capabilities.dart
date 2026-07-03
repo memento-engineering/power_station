@@ -14,6 +14,7 @@ library;
 
 import 'dart:io';
 
+import 'package:dart_grid_assets/dart_grid_assets.dart';
 import 'package:genesis_tree/genesis_tree.dart';
 import 'package:grid_controller/grid_controller.dart';
 import 'package:grid_engine/grid_engine.dart';
@@ -59,9 +60,27 @@ const Circuit kCodeCircuit = Circuit(
 /// COMMIT, do NOT push, do NOT open a PR. Landing is an explicit OPT-IN
 /// (`--land`; ADR-0006 D3) and OFF by default. (claude's auth seam is the
 /// macOS keychain — A38; no token rides argv.)
+///
+/// Also materializes the bead's declared `grid.dart` pub linkage into the
+/// worktree ([_linkWorkspace] — ADR-0000 A1): the DART domain's envelope is
+/// part of the work DEFINITION, read here alongside the rest of the bead, and
+/// applied via the [DartLinkService] the_grid's dart_grid_assets pack ships
+/// (grid_assets → dart_grid_assets, the pub-subordinate-to-Dart direction).
 class AgentCapability extends ProcessCapability {
-  /// Creates the agent capability.
-  const AgentCapability();
+  /// Creates the agent capability. [devRoot] is the station's registered root
+  /// checkout path ([RootCheckout.path] — "the registered root checkout's
+  /// path") relative `grid.dart` dev-path links absolutize against in the
+  /// per-bead worktree; null in an offline/dry-run build (no root
+  /// registered — a relative link then refuses, never silently applies a
+  /// broken override). [linkService] is injectable for tests.
+  const AgentCapability({
+    String? devRoot,
+    DartLinkService linkService = const DartLinkService(),
+  }) : _devRoot = devRoot,
+       _linkService = linkService;
+
+  final String? _devRoot;
+  final DartLinkService _linkService;
 
   @override
   RuntimeConfig spawn(TreeContext context, StepArgs args) {
@@ -73,6 +92,7 @@ class AgentCapability extends ProcessCapability {
         '(WorkBead/SessionScope mount them)',
       );
     }
+    _linkWorkspace(bead, workspace);
     final ambient =
         context.getInheritedSeedOfExactType<AgentConfig>() ??
         const AgentConfig();
@@ -91,6 +111,37 @@ class AgentCapability extends ProcessCapability {
       workspace: workspace,
       usageOut: usageReportPath(args.nodePath),
     );
+  }
+
+  /// Decodes [bead]'s `grid.dart` envelope and applies its pub linkage into
+  /// [workspace] — right after [GitSourceControl.provisionWorkspace] cut the
+  /// worktree (ADR-0008 D5: provisioning is this asset's opinion; the_grid
+  /// engine carries no pub/dart-domain concept, so this lives here rather
+  /// than in grid_engine). A SYNCHRONOUS [DartLinkService] call
+  /// ([ProcessCapability.spawn] returns a `RuntimeConfig` directly, not a
+  /// `Future` — it cannot await).
+  ///
+  /// A worktree dir that does not yet exist (offline/dry-run —
+  /// [GitSourceControl] never materializes one there) skips silently, same
+  /// posture as `GitSourceControl.provisionWorkspace`'s own offline no-op. A
+  /// breaking `grid.dart` envelope THROWS, which [ProcessAllocation] (the
+  /// existing `capability.spawn` fail-closed contract, ADR-0008 Decision 10)
+  /// routes to supervision as a per-work `Failed` — never a half-applied
+  /// override file.
+  void _linkWorkspace(Bead bead, Workspace workspace) {
+    if (!Directory(workspace.workspaceDir).existsSync()) return;
+    final outcome = _linkService.applySync(
+      metadata: bead.metadata,
+      context: PubLinkContext.worktree,
+      workspaceDir: workspace.workspaceDir,
+      devRoot: _devRoot,
+    );
+    if (outcome is LinkRefused) {
+      throw StateError(
+        'AgentCapability: grid.dart pub linkage refused (fail-closed): '
+        '${outcome.reason}',
+      );
+    }
   }
 
   @override
@@ -328,14 +379,18 @@ class GitSourceControl implements SourceControl {
 /// `verify` capability is gone, and the `critic` capability is wired to the
 /// Packaged-AI-Asset rubric loader (D-9) — [rubrics] overrides it for a test
 /// that wants inline rubric text (absent ⇒ the on-disk `extension/rubrics/`).
+/// [devRoot] threads the station's registered root checkout path into
+/// [AgentCapability] (the `grid.dart` pub-link worktree absolutize root; null
+/// ⇒ offline/dry-run, no root registered).
 DefaultCapabilityRegistry buildCodeRegistry({
   DateTime Function()? clock,
   RubricSource? rubrics,
+  String? devRoot,
 }) {
   final rubricSource = rubrics ?? PackagedAssetLoader().rubricSource;
   return DefaultCapabilityRegistry(
     capabilities: {
-      'agent': const AgentCapability(),
+      'agent': AgentCapability(devRoot: devRoot),
       'land': const LandCapability(),
       'critic': CriticCapability(rubrics: rubricSource),
       'route': const RouteCapability(),

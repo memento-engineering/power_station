@@ -400,6 +400,116 @@ void main() {
     });
   });
 
+  group('DartLinkService.applySync — the synchronous counterpart (the '
+      'ProcessCapability.spawn edge, which cannot await)', () {
+    late Directory temp;
+
+    setUp(() async {
+      temp = await Directory.systemTemp.createTemp('grid-dart-link-sync-');
+    });
+
+    tearDown(() async {
+      if (temp.existsSync()) await temp.delete(recursive: true);
+    });
+
+    File overridesFile() => File('${temp.path}/$kPubspecOverridesFile');
+
+    test('applies a dev link exactly like apply() — writes '
+        'pubspec_overrides.yaml at the workspace root', () {
+      final outcome = const DartLinkService().applySync(
+        metadata: _metadataWith(const [_genesisLink]),
+        context: PubLinkContext.dev,
+        workspaceDir: temp.path,
+      );
+      expect(outcome, isA<LinkApplied>());
+      expect((outcome as LinkApplied).packages, ['genesis_tree']);
+      expect(overridesFile().existsSync(), isTrue);
+      expect(
+        overridesFile().readAsStringSync(),
+        contains("path: '../genesis/packages/tree'"),
+      );
+    });
+
+    test('no envelope / empty links → no file; a stale GENERATED file is '
+        'cleared', () {
+      const service = DartLinkService();
+      service.applySync(
+        metadata: _metadataWith(const [_genesisLink]),
+        context: PubLinkContext.dev,
+        workspaceDir: temp.path,
+      );
+      expect(overridesFile().existsSync(), isTrue);
+
+      // An envelope declaring NO dev-carrying links (empty list) → clears the
+      // stale file (pubspecOverridesFor: dev.isEmpty ⇒ null ⇒ _clearSync).
+      final outcome = service.applySync(
+        metadata: _metadataWith(const []),
+        context: PubLinkContext.worktree,
+        workspaceDir: temp.path,
+      );
+      expect(outcome, isA<LinkCleared>());
+      expect((outcome as LinkCleared).removed, isTrue);
+      expect(overridesFile().existsSync(), isFalse);
+    });
+
+    test('no grid.dart on the bead at all touches nothing (does not probe a '
+        'pre-existing file) — byte-identical to apply()', () {
+      overridesFile().writeAsStringSync('# pre-existing, untouched\n');
+      final outcome = const DartLinkService().applySync(
+        metadata: const {'gc.other': 'x'},
+        context: PubLinkContext.worktree,
+        workspaceDir: temp.path,
+      );
+      expect(outcome, isA<LinkNoConfig>());
+      expect(overridesFile().readAsStringSync(), '# pre-existing, untouched\n');
+    });
+
+    test('NEVER deletes a hand-authored pubspec_overrides.yaml', () {
+      overridesFile().writeAsStringSync(
+        'dependency_overrides:\n  mine:\n    path: ../mine\n',
+      );
+      final outcome = const DartLinkService().applySync(
+        metadata: _metadataWith(const []),
+        context: PubLinkContext.worktree,
+        workspaceDir: temp.path,
+      );
+      expect((outcome as LinkCleared).removed, isFalse);
+      expect(overridesFile().existsSync(), isTrue);
+    });
+
+    test('a breaking assets_version is refused WHOLE — never a half-applied '
+        'file', () {
+      final outcome = const DartLinkService().applySync(
+        metadata: _metadataWith(const [_genesisLink], version: '9.9.9'),
+        context: PubLinkContext.worktree,
+        workspaceDir: temp.path,
+        devRoot: temp.path,
+      );
+      expect(outcome, isA<LinkRefused>());
+      expect((outcome as LinkRefused).reason, contains('9.9.9'));
+      expect(overridesFile().existsSync(), isFalse);
+    });
+
+    test('the worktree scenario end-to-end: absolutizes a relative dev path '
+        'against devRoot', () {
+      final devRoot = Directory('${temp.path}/power_station')..createSync();
+      final worktree = Directory(
+        '${temp.path}/power_station/.grid/worktrees/tg/tg-abc',
+      )..createSync(recursive: true);
+
+      final outcome = const DartLinkService().applySync(
+        metadata: _metadataWith(const [_genesisLink]),
+        context: PubLinkContext.worktree,
+        workspaceDir: worktree.path,
+        devRoot: devRoot.path,
+      );
+      expect(outcome, isA<LinkApplied>());
+      final yaml =
+          File('${worktree.path}/$kPubspecOverridesFile').readAsStringSync();
+      expect(yaml, contains("path: '${temp.path}/genesis/packages/tree'"));
+    });
+  });
+
   group('DartCommand / dart link — the THIN exported Command', () {
     late Directory temp;
 
