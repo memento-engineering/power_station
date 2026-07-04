@@ -10,6 +10,16 @@ description: >-
   (the honesty-pass D-A9 split, 2026-07-03 — moved out of the_grid's
   `grid_federation`, which dissolves in AL-5b). Transport is an abstract seam —
   HTTP impl #1, MQTT/WS droppable in later.
+  AL-6b (D-B1/D-B2/D-B3, 2026-07-03) adds the bus: the abstract single-writer
+  `Broker` seam + an offline `InMemoryBroker` (no adequate pub.dev MQTT broker
+  found on vet — see `src/broker/broker.dart`'s doc), the ACP-shaped JSON-RPC
+  2.0 wire envelope (`src/protocol/`), and the D-A3 claim protocol
+  (`ClaimBroadcaster`/`ClaimResponder`/`ClaimLeaseCapability`, `src/claim/`)
+  consuming the engine's AL-6a `onUnclaimedFrontier`/`claimCapabilityFor`
+  hooks. No MQTT wire transport yet (D-B5: none in the engine, ever; this pack
+  proves the protocol offline first — a real wire transport is a follow-up
+  behind the SAME `Broker` seam, exactly as HTTP shipped as impl #1 of
+  `StationClient`).
 publish_to: none
 resolution: workspace
 
@@ -18,6 +28,7 @@ environment:
 
 dependencies:
   args: ^2.6.0
+  genesis_tree: ^0.1.3
   grid_engine: any
   meta: ^1.16.0
 

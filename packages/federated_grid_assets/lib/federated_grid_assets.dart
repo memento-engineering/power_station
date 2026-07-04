@@ -35,6 +35,23 @@
 /// CLI-SDK model): a station runner composes them alongside its own domain
 /// Commands (`..addCommand(ServeCommand(...))`) — moved out of `grid_cli`
 /// because the seam stays core (the engine SDK), the Commands are asset surface.
+///
+/// **The bus** (AL-6b, `docs/SCRATCH-grid-alignment.md` D-B1/D-B2/D-B3,
+/// 2026-07-03) — layered ABOVE the lease bus above, for the D-A3 claim flow
+/// (whatever is unclaimed locally at the end of a reconciliation phase gets
+/// broadcast for pickup): [Broker] is the abstract, single-writer
+/// publish-own seam (`src/broker/broker.dart`'s doc records the pub.dev vet —
+/// none adequate), [InMemoryBroker] its offline discharge. The wire envelope
+/// (`src/protocol/`) is ACP-shaped (agentclientprotocol.com's JSON-RPC 2.0 +
+/// method namespacing — NOT MCP): [AcpRequest]/[AcpNotification]/
+/// [AcpResultResponse]/[AcpErrorResponse] over [BusMethods]/[BusTopics].
+/// [ClaimBroadcaster] is the claim's OWNER role (consumes `grid_engine`'s
+/// AL-6a `onUnclaimedFrontier` hook, arbitrates, confirms, and IS
+/// `DefaultCapabilityRegistry`'s `claimCapabilityFor`); [ClaimResponder] is
+/// the PEER role (evaluates an advertisement by [CapabilityFacts] containment,
+/// responds). [ClaimLeaseCapability] is the confirmed claim's dispatch — a
+/// kind-agnostic [LeaseCapability] over the SAME lease bus above ("claim →
+/// lease is two-phase," D-A4).
 library;
 
 export 'package:grid_engine/grid_engine.dart'
@@ -62,10 +79,18 @@ export 'package:grid_engine/grid_engine.dart'
         kTargetChain,
         parseToolchainOs;
 
+export 'src/broker/broker.dart';
+export 'src/broker/in_memory_broker.dart';
+export 'src/claim/claim_broadcaster.dart';
+export 'src/claim/claim_lease_capability.dart';
+export 'src/claim/claim_responder.dart';
+export 'src/claim/claim_types.dart';
 export 'src/git_sync.dart';
 export 'src/lease_command.dart';
 export 'src/lease_manager.dart';
 export 'src/membership.dart';
+export 'src/protocol/acp_envelope.dart';
+export 'src/protocol/bus_protocol.dart';
 export 'src/serve_command.dart';
 export 'src/station_client.dart';
 export 'src/station_server.dart';
