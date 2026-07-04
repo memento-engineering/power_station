@@ -18,7 +18,8 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:grid_federation/grid_federation.dart' show DispatchHandler;
+import 'package:federated_grid_assets/federated_grid_assets.dart'
+    show DispatchHandler;
 import 'package:grid_runtime/grid_runtime.dart'
     show
         GroupTerminateResult,

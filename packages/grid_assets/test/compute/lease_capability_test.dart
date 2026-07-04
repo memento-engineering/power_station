@@ -5,7 +5,6 @@
 // (Fakes, not mocks) + a hand-built AllocationContext. Zero I/O.
 import 'package:grid_assets/grid_assets.dart';
 import 'package:grid_engine/grid_engine.dart';
-import 'package:grid_federation/grid_federation.dart';
 import 'package:test/test.dart';
 
 import '../support/asset_fakes.dart';

@@ -14,9 +14,9 @@ environment:
 dependencies:
   beads_dart: any
   dart_grid_assets: any
+  federated_grid_assets: any
   genesis_tree: ^0.1.3
   grid_engine: any
-  grid_federation: any
   grid_runtime: any
   meta: ^1.16.0
   path: ^1.9.0

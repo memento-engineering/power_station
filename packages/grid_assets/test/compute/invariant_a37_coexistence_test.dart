@@ -12,9 +12,10 @@
 //
 // Offline only: loopback (127.0.0.1) + fakes. No real network beyond loopback, no
 // claude, no cross-machine, no SQL, no gc-owned beads touched.
+import 'package:federated_grid_assets/federated_grid_assets.dart'
+    show StationServer, HttpStationClient;
 import 'package:grid_assets/grid_assets.dart';
 import 'package:grid_engine/grid_engine.dart';
-import 'package:grid_federation/grid_federation.dart';
 import 'package:test/test.dart';
 
 import '../support/asset_fakes.dart';
