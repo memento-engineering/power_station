@@ -7,8 +7,10 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:federated_grid_assets/federated_grid_assets.dart'
+    show StationServer, HttpStationClient;
 import 'package:grid_assets/grid_assets.dart';
-import 'package:grid_federation/grid_federation.dart';
+import 'package:grid_engine/grid_engine.dart' show LeaseRequest;
 import 'package:grid_runtime/grid_runtime.dart' show ProcessGroupController;
 import 'package:test/test.dart';
 

@@ -5,6 +5,7 @@ environment:
 workspace:
   - packages/grid_assets
   - packages/dart_grid_assets
+  - packages/federated_grid_assets
 
 # Cross-repo linkage: the the_grid framework packages (grid_engine, grid_cli,
 # beads_dart, …) are declared `any` in each pack and resolved via the

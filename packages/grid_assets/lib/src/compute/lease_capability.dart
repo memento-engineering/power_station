@@ -17,7 +17,6 @@ library;
 
 import 'package:genesis_tree/genesis_tree.dart';
 import 'package:grid_engine/grid_engine.dart';
-import 'package:grid_federation/grid_federation.dart';
 
 import '../lease/bus_lease.dart';
 import 'compute_command.dart';

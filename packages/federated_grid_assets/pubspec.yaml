@@ -1,0 +1,26 @@
+name: federated_grid_assets
+description: >-
+  Cross-station federation IMPLS (ADR-0011): the HTTP bus (StationServer /
+  HttpStationClient), the owner-authoritative LeaseManager, static membership
+  (Membership/Peer/MembershipLoader), and the git-over-LAN GitSyncService — plus
+  the `serve`/`lease` CLI Commands, asset-exported the CLI-SDK way. The
+  transport-free contracts (Presence/CapabilityFacts/the claim-lease protocol/
+  the StationClient seam) live in `grid_engine`'s SDK ("the engine knows
+  federation in concept, not detail"); this pack supplies the impls over them
+  (the honesty-pass D-A9 split, 2026-07-03 — moved out of the_grid's
+  `grid_federation`, which dissolves in AL-5b). Transport is an abstract seam —
+  HTTP impl #1, MQTT/WS droppable in later.
+publish_to: none
+resolution: workspace
+
+environment:
+  sdk: ^3.11.0
+
+dependencies:
+  args: ^2.6.0
+  grid_engine: any
+  meta: ^1.16.0
+
+dev_dependencies:
+  lints: ^5.1.0
+  test: ^1.25.0
