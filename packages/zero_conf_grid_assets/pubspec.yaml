@@ -1,0 +1,25 @@
+name: zero_conf_grid_assets
+description: >-
+  Zero-conf discovery + topology opinions for the office grid (AL-7,
+  the_grid docs/SCRATCH-grid-alignment.md D-B1 + SCRATCH-multi-root-federation.md
+  D-Z6/D-Z8): mDNS/DNS-SD advertise + browse of station brokers (service type
+  `_grid._tcp`; TXT: station id, broker endpoint, hosted substations, trust
+  hints), the MESH/GRIDHUB topology opinions applied as configuration over
+  `federated_grid_assets`' `Membership` seam, and the discovered-is-not-blessed
+  TRUST GATE (allow-list this round, matching `Peer.token`'s LAN-trust posture).
+  Federation primitives stay in `federated_grid_assets`; this pack is the
+  discovery + topology OPINION over them — the engine never sees mDNS (D-B5).
+publish_to: none
+resolution: workspace
+
+environment:
+  sdk: ^3.11.0
+
+dependencies:
+  federated_grid_assets: any
+  meta: ^1.16.0
+  multicast_dns: ^0.3.3
+
+dev_dependencies:
+  lints: ^5.1.0
+  test: ^1.25.0
