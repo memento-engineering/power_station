@@ -55,6 +55,7 @@ StationKernel _buildKernel(
   FakeSnapshotSource work,
   FakeSnapshotSource state, {
   ExplorationTransport? transport,
+  ShellRunner? shellRunner,
 }) {
   final bridge = StationJoinBridge(work: work, state: state);
   return StationKernel(
@@ -63,7 +64,14 @@ StationKernel _buildKernel(
     resolver: kCodeResolver,
     // Inject an inline rubric source so the committee is hermetic (no disk read);
     // the on-disk Packaged-AI-Asset loader is exercised by track_d_assets_test.
-    registry: buildCodeRegistry(rubrics: (id) => '($id rubric bands)'),
+    // The landing circuit's rebase/revalidate (`tg-rm5`) reuse the SAME
+    // recording git fake `land` already lands through, plus a recording shell
+    // fake so `revalidate` never spawns a real process.
+    registry: buildCodeRegistry(
+      rubrics: (id) => '($id rubric bands)',
+      gitRunner: f.git,
+      shellRunner: shellRunner ?? RecordingShellRunner(),
+    ),
     substations: [
       SubstationScope(
         configNotifier: SubstationConfigNotifier(
@@ -175,18 +183,68 @@ void main() {
         );
         expect(_gateMinted(f), isFalse, reason: 'no gate on the happy path');
 
-        // 4) route complete → land runs (a ServiceCapability — git orchestration).
+        // 4) route complete → the `land` SubCircuitStep inflates (`tg-rm5`):
+        //    rebase → revalidate → land, each a ServiceCapability (no
+        //    provider spawn) running for real through the fakes.
         state.push(_state(committeeSession(
           completed: {kAgentNode, ...kCriticNodes, kRouteNode},
           grades: {for (final n in kCriticNodes) n: 'A'},
         )));
         await _settle();
-        expect(f.git.subcommands, containsAll(<String>['add', 'commit', 'push']));
+        expect(
+          _wroteCursor(f, kRebaseNode, 'complete'),
+          isTrue,
+          reason: 'rebase ran clean (the recording git fake is ok by default)',
+        );
+
+        state.push(_state(committeeSession(
+          completed: {kAgentNode, ...kCriticNodes, kRouteNode, kRebaseNode},
+          grades: {for (final n in kCriticNodes) n: 'A'},
+        )));
+        await _settle();
+        expect(
+          _wroteCursor(f, kRevalidateNode, 'complete'),
+          isTrue,
+          reason: 'revalidate ran clean (the recording shell fake is ok by default)',
+        );
+
+        state.push(_state(committeeSession(
+          completed: {
+            kAgentNode,
+            ...kCriticNodes,
+            kRouteNode,
+            kRebaseNode,
+            kRevalidateNode,
+          },
+          grades: {for (final n in kCriticNodes) n: 'A'},
+        )));
+        await _settle();
+        expect(
+          f.git.subcommands,
+          containsAll(<String>['fetch', 'rebase', 'add', 'commit', 'push']),
+        );
         expect(f.pr.opened, isNotEmpty, reason: 'land opened the PR');
+        // The FULL circuit receipt rides the PR body (item 4 — the
+        // receipt-regression callout): the landing circuit's own outcomes.
+        // (The review route's OWN grade-CSV payload isn't reproducible by this
+        // offline harness's synthetic STATE pushes — `committeeSession` fakes
+        // only the per-critic grades the route reads, not the route's own
+        // advance payload — so the receipt's `review:` line is exercised at
+        // the unit level, `landing_circuit_test.dart`.)
+        expect(f.pr.opened.last.body, contains('## Circuit receipt'));
+        expect(f.pr.opened.last.body, contains('rebase: clean'));
+        expect(f.pr.opened.last.body, contains('revalidate: passed'));
 
         // 5) land complete (the terminal step) → SessionScope closes the session.
         state.push(_state(committeeSession(
-          completed: {kAgentNode, ...kCriticNodes, kRouteNode, kLandNode},
+          completed: {
+            kAgentNode,
+            ...kCriticNodes,
+            kRouteNode,
+            kRebaseNode,
+            kRevalidateNode,
+            kLandNode,
+          },
           grades: {for (final n in kCriticNodes) n: 'A'},
         )));
         await _settle();

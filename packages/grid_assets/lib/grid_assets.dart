@@ -24,6 +24,7 @@ export 'src/agent/usage_report.dart';
 export 'src/assets/asset_loader.dart';
 export 'src/code/code_capabilities.dart';
 export 'src/code/committee.dart';
+export 'src/code/landing.dart';
 export 'src/compute/bounded_use.dart';
 export 'src/compute/compute_command.dart';
 export 'src/compute/lease_capability.dart';

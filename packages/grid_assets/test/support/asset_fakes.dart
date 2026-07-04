@@ -30,7 +30,35 @@ const List<String> kCriticNodes = [
   'review/test-coverage',
 ];
 const String kRouteNode = 'review/route';
-const String kLandNode = 'land';
+
+/// The landing circuit's own node paths (`tg-rm5`), relative to the work bead
+/// — `land/rebase` → `land/revalidate` → `land/land` (the innermost
+/// `LandCapability`, since `land` at the `code` circuit level is itself a
+/// [SubCircuitStep] over `landing`, not a leaf).
+const String kRebaseNode = 'land/rebase';
+const String kRevalidateNode = 'land/revalidate';
+const String kLandNode = 'land/land';
+
+/// A recording [ShellRunner] (the `revalidate` seam, `tg-rm5`): records every
+/// (workingDirectory, command) call and returns a configurable [exitCode] (0
+/// ⇒ ok) — mirrors [RecordingGitRunner]'s shape/posture (Fakes, not mocks).
+class RecordingShellRunner implements ShellRunner {
+  /// Every (workingDirectory, command) call, in call order.
+  final List<({String workingDirectory, String command})> calls = [];
+
+  /// The exit code the next runs return (0 ⇒ `ok`). Settable so a test can
+  /// make revalidate fail (Gate).
+  int exitCode = 0;
+
+  @override
+  Future<ShellRunResult> run({
+    required String workingDirectory,
+    required String command,
+  }) async {
+    calls.add((workingDirectory: workingDirectory, command: command));
+    return ShellRunResult(exitCode: exitCode, output: '');
+  }
+}
 
 /// A STATE session bead for the COMMITTEE-wired `code` circuit (M5 Track E):
 /// marks each relative path in [completed] `complete` in the per-node cursor AND

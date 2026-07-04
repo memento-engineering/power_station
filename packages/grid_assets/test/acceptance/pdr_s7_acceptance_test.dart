@@ -172,6 +172,7 @@ void main() {
       () async {
         final f = buildFakes(createdId: 'tgdog-sess1');
         f.pr.url = 'https://github.com/memento/genesis/pull/7';
+        final shell = RecordingShellRunner();
         // The four tg-1 committee critic step names, in declaration order.
         final tg1Critics = [for (final n in kCriticNodes) 'tgdog-1/tg-1/$n'];
         final allA = {for (final n in kCriticNodes) n: 'A'};
@@ -196,7 +197,15 @@ void main() {
             ctx: f.ctx,
             // Inline rubrics so the committee critics build their prompts without
             // a disk read (the on-disk loader is exercised by track_d_assets_test).
-            registry: buildCodeRegistry(rubrics: (id) => '($id rubric bands)'),
+            // The landing circuit's rebase/revalidate reuse the SAME recording
+            // git fake `land` already lands through, plus a recording shell
+            // fake so `revalidate` (the bead's Validation Plan) never spawns a
+            // real process (`tg-rm5`).
+            registry: buildCodeRegistry(
+              rubrics: (id) => '($id rubric bands)',
+              gitRunner: f.git,
+              shellRunner: shell,
+            ),
             services: _gitServices(f),
           ),
         );
@@ -329,7 +338,9 @@ void main() {
         expect(f.provider.started, hasLength(6),
             reason: 'the route does not spawn a process');
 
-        // --- (a) continued: route → land (the final transition) ---
+        // --- (a) continued: route → land (the final transition — `tg-rm5`'s
+        // landing sub-circuit: rebase → revalidate → land, each a
+        // ServiceCapability, so no NEW provider spawn lands at any hop) ---
         joined.push(
           _joined(
             beads: [_bead('tg-1'), _bead('tg-2')],
@@ -337,6 +348,47 @@ void main() {
             sessions: {
               'tg-1': _session('tg-1', 'tgdog-1',
                   completed: {kAgentNode, ...kCriticNodes, kRouteNode},
+                  grades: allA),
+              'tg-2': _session('tg-2', 'tgdog-2'),
+            },
+          ),
+        );
+        owner.flush();
+        await pumpEventQueue();
+
+        joined.push(
+          _joined(
+            beads: [_bead('tg-1'), _bead('tg-2')],
+            ready: {'tg-1', 'tg-2'},
+            sessions: {
+              'tg-1': _session('tg-1', 'tgdog-1',
+                  completed: {
+                    kAgentNode,
+                    ...kCriticNodes,
+                    kRouteNode,
+                    kRebaseNode,
+                  },
+                  grades: allA),
+              'tg-2': _session('tg-2', 'tgdog-2'),
+            },
+          ),
+        );
+        owner.flush();
+        await pumpEventQueue();
+
+        joined.push(
+          _joined(
+            beads: [_bead('tg-1'), _bead('tg-2')],
+            ready: {'tg-1', 'tg-2'},
+            sessions: {
+              'tg-1': _session('tg-1', 'tgdog-1',
+                  completed: {
+                    kAgentNode,
+                    ...kCriticNodes,
+                    kRouteNode,
+                    kRebaseNode,
+                    kRevalidateNode,
+                  },
                   grades: allA),
               'tg-2': _session('tg-2', 'tgdog-2'),
             },

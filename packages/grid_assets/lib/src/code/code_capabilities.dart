@@ -25,8 +25,10 @@ import '../agent/agent_harness.dart';
 import '../agent/usage_report.dart';
 import '../assets/asset_loader.dart';
 import 'committee.dart';
+import 'landing.dart';
 
-/// agent → review → land — the live `code` circuit (M5 "The Circuit" Track E).
+/// agent → review → land — the live `code` circuit (M5 "The Circuit" Track E;
+/// the `land` step is itself the landing circuit as of bead `tg-rm5`).
 ///
 /// The toy `verify` step (`sh -c 'melos test'`) is GONE: `verify` is now the
 /// adversarial code-committee, a [SubCircuitStep] the engine inflates one level
@@ -34,6 +36,15 @@ import 'committee.dart';
 /// `dependsOn` on `review` resolves to its terminal-step descendant
 /// (`<bead>/review/route`'s positive terminal), so `land` waits for the route to
 /// advance; a route `Gate` parks the work (no `land`) instead.
+///
+/// `land` is likewise a [SubCircuitStep] (`tg-rm5`, `landing.dart`'s
+/// [kLandingCircuit]): `rebase → revalidate → land` — rebase the bead
+/// branch onto the CURRENT base before re-running the bead's OWN Validation
+/// Plan against the rebased tree (closing the stale-base hole: with N
+/// parallel beads on one repo, the second-to-land would otherwise validate
+/// against a `main` that already moved), commit/push, then open the PR. A
+/// `dependsOn` on `land` resolves through the SAME one-hop terminal
+/// resolution to `<bead>/land/land`'s positive terminal.
 const Circuit kCodeCircuit = Circuit(
   id: 'code',
   terminalStepId: 'land',
@@ -44,7 +55,7 @@ const Circuit kCodeCircuit = Circuit(
       circuitId: 'code_review',
       dependsOn: {'agent'},
     ),
-    CapabilityStep(stepId: 'land', capabilityId: 'land', dependsOn: {'review'}),
+    SubCircuitStep(stepId: 'land', circuitId: 'landing', dependsOn: {'review'}),
   ],
 );
 
@@ -226,6 +237,15 @@ StepSignal _jobSignal(RuntimeEvent event) => switch (event) {
 /// (it never touches real git/GitHub); a PR that does not open is [Failed]
 /// (an honest "land did not complete"). The pr url rides the [Ok] payload, which
 /// the engine records on the session bead — never used as a pipeline signal.
+///
+/// The PR opens with the FULL circuit receipt as its body (`tg-rm5`,
+/// [buildCircuitReceipt]) — the code-review committee's grade/route
+/// provenance plus this landing circuit's own rebase/revalidate outcomes, read
+/// via the ambient [SiblingView]. [SourceControl.openPr] itself carries no
+/// `body` param (the receipt-regression gap — see `landing.dart`'s header);
+/// when [sc] is ALSO a [ReceiptCapableSourceControl] (the real [GitSourceControl]
+/// always is), the richer overload is called instead so the receipt actually
+/// reaches the real PR today.
 class LandCapability extends ServiceCapability {
   /// Creates the land capability.
   const LandCapability();
@@ -238,6 +258,9 @@ class LandCapability extends ServiceCapability {
         context.getInheritedSeedOfExactType<ServiceBundle>() ??
         const ServiceBundle();
     final workspace = context.getInheritedSeedOfExactType<Workspace>();
+    final siblings =
+        context.getInheritedSeedOfExactType<SiblingView>() ??
+        const SiblingView();
     final sc = services.sourceControl;
     // Land not wired (no SourceControl, or provisioning-only for an early arm
     // whose working agreement is commit-only) — no-op rather than touch real
@@ -257,18 +280,48 @@ class LandCapability extends ServiceCapability {
     );
     if (args.cancel.isCancelled) return const Failed('cancelled');
 
-    final pr = await sc.openPr(
-      workspaceDir: workspace.workspaceDir,
-      branch: workspace.branch,
-      baseBranch: workspace.baseBranch,
-      title: 'grid: ${args.beadId}',
-    );
+    final title = 'grid: ${args.beadId}';
+    final pr = sc is ReceiptCapableSourceControl
+        ? await sc.openPr(
+            workspaceDir: workspace.workspaceDir,
+            branch: workspace.branch,
+            baseBranch: workspace.baseBranch,
+            title: title,
+            body: buildCircuitReceipt(beadId: args.beadId, siblings: siblings),
+          )
+        : await sc.openPr(
+            workspaceDir: workspace.workspaceDir,
+            branch: workspace.branch,
+            baseBranch: workspace.baseBranch,
+            title: title,
+          );
     // Check cancellation after EVERY async gap (P0 LandEffectSeed parity) — a
     // dispose mid-land must not record a stale terminal.
     if (args.cancel.isCancelled) return const Failed('cancelled');
     if (pr == null) return const Failed('pr open did not complete');
     return Ok({'pr_url': pr.url});
   }
+}
+
+/// A [SourceControl] that can ALSO carry a PR body (`tg-rm5` — the "circuit
+/// receipt", grades/route-provenance/rebase+revalidate outcomes). The
+/// receipt-regression gap: `PrOpener.open`/`GhPrOpener` (grid_runtime) already
+/// thread a `body` through to `gh pr create --body`, but the engine's own
+/// [SourceControl.openPr] (grid_engine) never grew one — so `land` has only
+/// ever opened empty-body PRs. This is the power_station-local STOPGAP: until
+/// a future the_grid change widens `SourceControl.openPr` itself,
+/// [LandCapability] detects this marker via `is` and calls the richer
+/// overload. A plain [SourceControl] (e.g. a bare test fake) still lands
+/// correctly through the unwidened interface method — just without a body.
+abstract interface class ReceiptCapableSourceControl implements SourceControl {
+  @override
+  Future<PrRef?> openPr({
+    required String workspaceDir,
+    required String branch,
+    required String baseBranch,
+    required String title,
+    String body,
+  });
 }
 
 /// The git [SourceControl] impl over grid_runtime (the detail the engine knows
@@ -280,7 +333,11 @@ class LandCapability extends ServiceCapability {
 ///    agent spawns. Absent ⇒ `provisionWorkspace` no-ops (offline).
 ///  - **land** — [gitOps] (commit/push) + [prOpener] (PR). Absent ⇒ [canLand] is
 ///    false and [LandCapability] no-ops (the early-arm commit-only posture).
-class GitSourceControl implements SourceControl {
+///
+/// Also [ReceiptCapableSourceControl] (`tg-rm5`): [openPr] carries an optional
+/// `body` beyond what the [SourceControl] interface itself declares, so `land`
+/// can thread the circuit receipt into the real PR today.
+class GitSourceControl implements SourceControl, ReceiptCapableSourceControl {
   /// Wraps the optional land ops ([gitOps]/[prOpener]) and the optional
   /// provisioning seam ([provisioner]/[root]).
   const GitSourceControl({
@@ -358,21 +415,24 @@ class GitSourceControl implements SourceControl {
     required String branch,
     required String baseBranch,
     required String title,
+    String body = '',
   }) async {
     final result = await _prOpener!.open(
       workDir: workspaceDir,
       branch: branch,
       baseBranch: baseBranch,
       title: title,
+      body: body,
     );
     return result.isOpened ? PrRef(result.ref!.url) : null;
   }
 }
 
 /// Builds the `code` registry: the agent/land capabilities + the adversarial
-/// committee (`critic`/`route` + the `code_review` circuit), with an optional
-/// injected [clock] (the backoff seam). The composer provides it as a stable
-/// `InheritedSeed<CapabilityRegistry>` above `Station`, alongside a
+/// committee (`critic`/`route` + the `code_review` circuit) + the landing
+/// circuit (`rebase`/`revalidate` + the `landing` circuit, `tg-rm5`), with an
+/// optional injected [clock] (the backoff seam). The composer provides it as a
+/// stable `InheritedSeed<CapabilityRegistry>` above `Station`, alongside a
 /// `CircuitResolver((_) => kCodeCircuit)`.
 ///
 /// The `code` circuit's `verify` step is the committee (M5 Track E): the toy
@@ -381,11 +441,15 @@ class GitSourceControl implements SourceControl {
 /// that wants inline rubric text (absent ⇒ the on-disk `extension/rubrics/`).
 /// [devRoot] threads the station's registered root checkout path into
 /// [AgentCapability] (the `grid.dart` pub-link worktree absolutize root; null
-/// ⇒ offline/dry-run, no root registered).
+/// ⇒ offline/dry-run, no root registered). [gitRunner]/[shellRunner] override
+/// `rebase`/`revalidate`'s real git/shell seams (tests inject recording fakes —
+/// Fakes, not mocks; absent ⇒ the real [SystemGitRunner]/[SystemShellRunner]).
 DefaultCapabilityRegistry buildCodeRegistry({
   DateTime Function()? clock,
   RubricSource? rubrics,
   String? devRoot,
+  GitRunner? gitRunner,
+  ShellRunner? shellRunner,
 }) {
   final rubricSource = rubrics ?? PackagedAssetLoader().rubricSource;
   return DefaultCapabilityRegistry(
@@ -394,8 +458,14 @@ DefaultCapabilityRegistry buildCodeRegistry({
       'land': const LandCapability(),
       'critic': CriticCapability(rubrics: rubricSource),
       'route': const RouteCapability(),
+      'rebase': RebaseCapability(runner: gitRunner),
+      'revalidate': RevalidateCapability(runner: shellRunner),
     },
-    circuits: const {'code': kCodeCircuit, 'code_review': kCodeReviewCircuit},
+    circuits: const {
+      'code': kCodeCircuit,
+      'code_review': kCodeReviewCircuit,
+      'landing': kLandingCircuit,
+    },
     clock: clock,
   );
 }

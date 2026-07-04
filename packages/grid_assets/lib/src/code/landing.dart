@@ -1,0 +1,259 @@
+/// The LANDING circuit (bead `tg-rm5`) — `rebase → revalidate → land`, a
+/// [SubCircuitStep] the `code` circuit's own `land` step now inflates
+/// (replacing the flat `land` [CapabilityStep] M5 Track E shipped).
+///
+/// **Why**: with N parallel beads landing against one repo, the second bead to
+/// land was validated against a `main` that has since moved (its own
+/// Validation Plan ran BEFORE the first bead's PR merged) — the stale-base
+/// hole. This circuit closes it: rebase the bead branch onto the CURRENT base
+/// before re-running the bead's OWN Validation Plan against the REBASED tree,
+/// gating (never silently forcing through) on either a rebase conflict or a
+/// revalidation failure. Both `rebase` and `revalidate` are [ServiceCapability]s
+/// (not spawned jobs): each is a short, bounded, deterministic operation —
+/// consistent with [LandCapability]'s own commit/push/PR orchestration, and it
+/// lets both skip to a clean, PROCESS-FREE [Ok] when land isn't wired (the
+/// commit-only early arm), exactly like [LandCapability] already does.
+///
+/// **Design ruling (Nico + operator, 2026-07-03) — supersedes the original
+/// `grid.base` design-note ask**: there is NO `grid.base` metadata key, and
+/// none is planned. (1) A hard `dependsOn` already suffices for STACKING
+/// today: a dependent bead's worktree is cut from a root head that already
+/// contains its parent once the parent lands (dependency serialization), and
+/// the factory's circuit latency (minutes, not the human-review-latency a
+/// stacked-branch workflow exists to avoid) removes the usual motive for
+/// stacking. (2) IF stacking ever earns its way in (long dependent chains
+/// where circuit latency compounds), it is a TYPED DEPENDENCY EDGE — e.g.
+/// `stacks-on:<bead>` — carrying both ordering AND a base pointer, consumed by
+/// THIS landing circuit (the worktree cuts from the target bead's branch, the
+/// branch name derived via `beadId -> grid/<beadId>`, never carried as bead
+/// metadata) — landing a stack in dependency order. Never a metadata key;
+/// branch names never appear in bead data.
+///
+/// **The receipt-regression callout**: `PrOpener.open`/`GhPrOpener` (grid_runtime)
+/// already carry a `body` param through to `gh pr create --body`, but the
+/// engine's `SourceControl.openPr` (grid_engine) never grew one — so `land`
+/// has only ever opened EMPTY-body PRs, dropping the code-review committee's
+/// grade/route provenance (and now this circuit's rebase/revalidate outcome)
+/// on the floor. [buildCircuitReceipt] assembles that provenance; until a
+/// future the_grid change widens `SourceControl.openPr` itself,
+/// [ReceiptCapableSourceControl] (`code_capabilities.dart`) is the power_station-
+/// local stopgap `LandCapability` detects via `is` to actually thread it into
+/// the real PR body today.
+library;
+
+import 'dart:io';
+
+import 'package:beads_dart/beads_dart.dart';
+import 'package:genesis_tree/genesis_tree.dart';
+import 'package:grid_engine/grid_engine.dart';
+import 'package:grid_runtime/grid_runtime.dart';
+
+/// The landing circuit (id `landing`) — `code`'s own `land` step now inflates
+/// this as a [SubCircuitStep] instead of a flat [CapabilityStep] (M5 Track E's
+/// shape). `rebase` and `revalidate` each gate (never silently force) on
+/// failure; `land` (unchanged: commit → push → open PR) only runs once both
+/// have advanced clean.
+const Circuit kLandingCircuit = Circuit(
+  id: 'landing',
+  terminalStepId: 'land',
+  steps: [
+    CapabilityStep(stepId: 'rebase', capabilityId: 'rebase'),
+    CapabilityStep(
+      stepId: 'revalidate',
+      capabilityId: 'revalidate',
+      dependsOn: {'rebase'},
+    ),
+    CapabilityStep(stepId: 'land', capabilityId: 'land', dependsOn: {'revalidate'}),
+  ],
+);
+
+/// The REBASE step — rebases the bead branch onto the CURRENT base branch tip.
+/// A conflict (or any other rebase failure) ABORTS the rebase (never leaves
+/// the worktree mid-rebase) and [Gate]s with the git output as provenance —
+/// never a silent force-through. Offline-safe: mirrors [LandCapability]'s own
+/// no-op posture — when land isn't wired (`--land` off, the commit-only early
+/// arm), this skips straight to [Ok] with NO git call at all.
+class RebaseCapability extends ServiceCapability {
+  /// Creates the capability, optionally over an injected [runner] (tests
+  /// inject the SAME [RecordingGitRunner] fake `GitSourceControl`'s `GitOps`
+  /// already uses — Fakes, not mocks); defaults to the real [SystemGitRunner].
+  const RebaseCapability({GitRunner? runner}) : _runner = runner;
+
+  final GitRunner? _runner;
+
+  @override
+  Future<StepOutcome> run(TreeContext context, StepArgs args) async {
+    final services =
+        context.getInheritedSeedOfExactType<ServiceBundle>() ??
+        const ServiceBundle();
+    final workspace = context.getInheritedSeedOfExactType<Workspace>();
+    final sc = services.sourceControl;
+    if (sc == null || !sc.canLand || workspace == null) return const Ok();
+
+    final runner = _runner ?? SystemGitRunner();
+    final workDir = workspace.workspaceDir;
+    final base = workspace.baseBranch;
+
+    final fetch = await runner.run(
+      workingDirectory: workDir,
+      args: ['fetch', 'origin', base],
+    );
+    if (args.cancel.isCancelled) return const Failed('cancelled');
+    if (!fetch.ok) {
+      return Failed('git fetch origin $base failed: ${fetch.output.trim()}');
+    }
+
+    final rebase = await runner.run(
+      workingDirectory: workDir,
+      args: ['rebase', 'origin/$base'],
+    );
+    if (args.cancel.isCancelled) return const Failed('cancelled');
+    if (rebase.ok) return const Ok({'outcome': 'clean'});
+
+    // Never leave the worktree mid-rebase; the abort result is best-effort
+    // (the Gate below is what matters — the conflict provenance).
+    await runner.run(workingDirectory: workDir, args: ['rebase', '--abort']);
+    return Gate('rebase onto $base conflicted: ${rebase.output.trim()}');
+  }
+}
+
+/// The REVALIDATE step — re-runs the bead's OWN Validation Plan (the SAME
+/// command the code-review committee's gating lane runs,
+/// `committee.dart`'s `kGatingRubric`) against the REBASED tree, closing the
+/// stale-base hole (a plan that passed pre-rebase may fail post-rebase). A
+/// non-zero plan [Gate]s with the captured output as provenance — never a
+/// silent advance. Offline-safe: mirrors [RebaseCapability] — when land isn't
+/// wired, skips straight to [Ok] with NO shell exec at all (a plan re-run
+/// only matters when a rebase actually moved the tree to re-validate
+/// against).
+class RevalidateCapability extends ServiceCapability {
+  /// Creates the capability, optionally over an injected [runner] (tests
+  /// inject a recording fake — Fakes, not mocks); defaults to the real
+  /// [SystemShellRunner].
+  const RevalidateCapability({ShellRunner? runner}) : _runner = runner;
+
+  final ShellRunner? _runner;
+
+  @override
+  Future<StepOutcome> run(TreeContext context, StepArgs args) async {
+    final services =
+        context.getInheritedSeedOfExactType<ServiceBundle>() ??
+        const ServiceBundle();
+    final bead = context.getInheritedSeedOfExactType<Bead>();
+    final workspace = context.getInheritedSeedOfExactType<Workspace>();
+    final sc = services.sourceControl;
+    if (sc == null || !sc.canLand || workspace == null || bead == null) {
+      return const Ok();
+    }
+
+    final runner = _runner ?? const SystemShellRunner();
+    final result = await runner.run(
+      workingDirectory: workspace.workspaceDir,
+      command: _validationPlan(bead),
+    );
+    if (args.cancel.isCancelled) return const Failed('cancelled');
+    if (result.ok) return const Ok({'outcome': 'passed'});
+    return Gate('revalidate failed: ${_truncate(result.output)}');
+  }
+}
+
+/// The injectable shell-exec seam [RevalidateCapability] runs the bead's
+/// Validation Plan through — mirrors [GitRunner]'s shape (Fakes, not mocks),
+/// but for an arbitrary shell command rather than `git`.
+abstract interface class ShellRunner {
+  /// Runs [command] via `sh -c` with [workingDirectory] as the cwd. Never
+  /// throws — a launch failure is reported as a non-zero [ShellRunResult].
+  Future<ShellRunResult> run({
+    required String workingDirectory,
+    required String command,
+  });
+}
+
+/// The result of one [ShellRunner.run] — the exit code and combined
+/// stdout+stderr.
+class ShellRunResult {
+  /// Creates the result.
+  const ShellRunResult({required this.exitCode, required this.output});
+
+  /// The process exit code.
+  final int exitCode;
+
+  /// stdout and stderr combined.
+  final String output;
+
+  /// Whether the command succeeded (exit 0).
+  bool get ok => exitCode == 0;
+}
+
+/// The real [ShellRunner]: execs `sh -c <command>` via `dart:io`. Constructed
+/// as [RevalidateCapability]'s default; the offline test suite always injects
+/// a fake.
+class SystemShellRunner implements ShellRunner {
+  /// Creates the runner.
+  const SystemShellRunner();
+
+  @override
+  Future<ShellRunResult> run({
+    required String workingDirectory,
+    required String command,
+  }) async {
+    final result = await Process.run(
+      'sh',
+      ['-c', command],
+      workingDirectory: workingDirectory,
+    );
+    final stdout = result.stdout.toString();
+    final stderr = result.stderr.toString();
+    return ShellRunResult(
+      exitCode: result.exitCode,
+      output: stderr.isEmpty ? stdout : '$stdout$stderr',
+    );
+  }
+}
+
+/// Assembles the landing circuit's PR-body "circuit receipt" (item 4 — the
+/// receipt-regression callout): the code-review committee's route provenance
+/// (`grades`/`spread`/`rule`, `committee.dart`'s [RouteCapability]) plus this
+/// circuit's own rebase/revalidate outcomes, read via the ambient
+/// [SiblingView] at [beadId]'s absolute node paths. Pure + deterministic (no
+/// I/O) so it is unit-testable in isolation.
+String buildCircuitReceipt({
+  required String beadId,
+  required SiblingView siblings,
+}) {
+  final review = siblings.resultOf('$beadId/review/route');
+  final rebase = siblings.resultOf('$beadId/land/rebase');
+  final revalidate = siblings.resultOf('$beadId/land/revalidate');
+  final b = StringBuffer()
+    ..writeln('## Circuit receipt')
+    ..writeln()
+    ..writeln('- rebase: ${rebase['outcome'] ?? 'clean'}')
+    ..writeln('- revalidate: ${revalidate['outcome'] ?? 'passed'}');
+  if (review.isNotEmpty) {
+    b.writeln(
+      '- review: grades=${review['grades'] ?? ''} '
+      'spread=${review['spread'] ?? ''} rule=${review['rule'] ?? ''}',
+    );
+  }
+  return b.toString();
+}
+
+/// The bead's OWN Validation Plan command — mirrors `committee.dart`'s
+/// identical private helper (duplicated rather than shared, so this file
+/// doesn't couple to the review committee's file layout for one four-line
+/// pure function). A plan-less bead defaults to `false` (an explicit
+/// non-zero) so it Gates rather than silently passing.
+String _validationPlan(Bead bead) {
+  final plan = bead.metadata['validation_plan'];
+  if (plan is String && plan.trim().isNotEmpty) return plan.trim();
+  return 'false';
+}
+
+/// Caps captured process output embedded in a [Gate] reason — a runaway
+/// Validation Plan log must not blow up a gate bead's metadata.
+String _truncate(String s, [int max = 2000]) {
+  final trimmed = s.trim();
+  return trimmed.length <= max
+      ? trimmed
+      : '${trimmed.substring(0, max)}\n… (truncated)';
+}
