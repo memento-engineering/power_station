@@ -78,6 +78,7 @@ void main() {
       () async {
         final f = buildFakes(createdId: _sid);
         f.pr.url = 'https://github.com/memento/genesis/pull/7';
+        final shell = RecordingShellRunner();
         final work = FakeSnapshotSource(
           _graph(beads: const [], ready: const {}),
         );
@@ -91,7 +92,14 @@ void main() {
           resolver: kCodeResolver,
           // Inline rubrics so the committee critics build their prompts without a
           // disk read (the on-disk loader is exercised by track_d_assets_test).
-          registry: buildCodeRegistry(rubrics: (id) => '($id rubric bands)'),
+          // The landing circuit's rebase/revalidate reuse the SAME recording git
+          // fake `land` already lands through, plus a recording shell fake so
+          // `revalidate` (the bead's Validation Plan) never spawns a real process.
+          registry: buildCodeRegistry(
+            rubrics: (id) => '($id rubric bands)',
+            gitRunner: f.git,
+            shellRunner: shell,
+          ),
           substations: [
             SubstationScope(
               configNotifier: SubstationConfigNotifier(
@@ -148,11 +156,27 @@ void main() {
         );
         await _settle();
 
-        // 3) LAND — route complete → the land capability (a ServiceCapability — no
-        //    spawn) runs its commit→push→PR through the fakes; its host writes
-        //    land=complete.
+        // 3) LANDING — route complete → the `land` SubCircuitStep inflates
+        //    (`tg-rm5`): rebase → revalidate → land, each a ServiceCapability (no
+        //    provider spawn) running for real through the fakes.
         state.push(_stateAt(
           completed: {kAgentNode, ...kCriticNodes, kRouteNode},
+          grades: _allA,
+        ));
+        await _settle();
+        state.push(_stateAt(
+          completed: {kAgentNode, ...kCriticNodes, kRouteNode, kRebaseNode},
+          grades: _allA,
+        ));
+        await _settle();
+        state.push(_stateAt(
+          completed: {
+            kAgentNode,
+            ...kCriticNodes,
+            kRouteNode,
+            kRebaseNode,
+            kRevalidateNode,
+          },
           grades: _allA,
         ));
         await _settle();
@@ -160,7 +184,14 @@ void main() {
         // 4) The terminal (land) is complete; the STATE source surfaces it and
         //    SessionScope closes the session.
         state.push(_stateAt(
-          completed: {kAgentNode, ...kCriticNodes, kRouteNode, kLandNode},
+          completed: {
+            kAgentNode,
+            ...kCriticNodes,
+            kRouteNode,
+            kRebaseNode,
+            kRevalidateNode,
+            kLandNode,
+          },
           grades: _allA,
         ));
         await _settle();

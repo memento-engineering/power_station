@@ -198,6 +198,60 @@ void main() {
       ]);
     });
 
+    test('LandCapability threads the FULL circuit receipt into the PR body '
+        'when sc is a ReceiptCapableSourceControl (GitSourceControl always is '
+        '— tg-rm5, the receipt-regression fix)', () async {
+      final git = RecordingGitRunner();
+      final pr = FakePrOpener();
+      final sc = GitSourceControl(gitOps: GitOps(git), prOpener: pr);
+      final context = FakeTreeContext(
+        values: {
+          Bead: bead('tg-1'),
+          Workspace: testWorkspace(
+            'tg-1',
+            workspaceDir: '/w/tg-1',
+            branch: 'grid/tg-1',
+          ),
+          ServiceBundle: ServiceBundle(sourceControl: sc),
+          SiblingView: const SiblingView(
+            results: {
+              'tg-1/review/route': {
+                'grades': 'code-validation=A',
+                'spread': '0',
+                'rule': 'all-approve',
+              },
+              'tg-1/land/rebase': {'outcome': 'clean'},
+              'tg-1/land/revalidate': {'outcome': 'passed'},
+            },
+          ),
+        },
+      );
+      final outcome = await const LandCapability().run(
+        context,
+        stepArgs('tg-1/land/land'),
+      );
+      expect(outcome, isA<Ok>());
+      expect(pr.opened, hasLength(1));
+      expect(pr.opened.single.body, contains('## Circuit receipt'));
+      expect(pr.opened.single.body, contains('- rebase: clean'));
+      expect(pr.opened.single.body, contains('- revalidate: passed'));
+      expect(
+        pr.opened.single.body,
+        contains('grades=code-validation=A spread=0 rule=all-approve'),
+      );
+    });
+
+    test('LandCapability does NOT thread a body when sc is a plain '
+        'SourceControl (a bare test fake, or a future non-Git impl) — it '
+        'still lands correctly through the unwidened interface method',
+        () async {
+      final sc = _FakeSourceControl();
+      final c = _capCtx(sourceControl: sc);
+      final outcome = await const LandCapability().run(c.context, c.args);
+      expect(outcome, isA<Ok>());
+      expect(sc.calls.last, 'pr:grid/tg-1->main:grid: tg-1');
+    });
+
     test('LandCapability with NO source control no-ops to Ok (offline-safe)',
         () async {
       final c = _capCtx();
