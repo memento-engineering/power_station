@@ -205,6 +205,9 @@ void main() {
               rubrics: (id) => '($id rubric bands)',
               gitRunner: f.git,
               shellRunner: shell,
+              // A no-op clearer (gate-integrity #3): offline — never a real
+              // filesystem touch.
+              critiqueDirClearer: (_) {},
             ),
             services: _gitServices(f),
           ),
@@ -258,6 +261,26 @@ void main() {
             ready: {'tg-1', 'tg-2'},
             sessions: {
               'tg-1': _session('tg-1', 'tgdog-1', completed: {kAgentNode}),
+              'tg-2': _session('tg-2', 'tgdog-2'),
+            },
+          ),
+        );
+        owner.flush();
+        await pumpEventQueue();
+
+        // clear-critique (gate-integrity #3, dep-free) ran for real — no
+        // provider spawn (a ServiceCapability); re-project its completion so
+        // the four critics, which now `dependsOn` it, become ready.
+        joined.push(
+          _joined(
+            beads: [_bead('tg-1'), _bead('tg-2')],
+            ready: {'tg-1', 'tg-2'},
+            sessions: {
+              'tg-1': _session(
+                'tg-1',
+                'tgdog-1',
+                completed: {kAgentNode, kClearCritiqueNode},
+              ),
               'tg-2': _session('tg-2', 'tgdog-2'),
             },
           ),

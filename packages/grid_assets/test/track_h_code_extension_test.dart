@@ -103,6 +103,48 @@ class _FakeSourceControl implements SourceControl {
   }
 }
 
+/// A [GitRunner] fake whose `git status --porcelain` reports residue
+/// (uncommitted paths remain) while every other command (add/commit/push)
+/// succeeds clean — the "botched land silently committed a SUBSET" scenario
+/// (tg-x1j r1).
+class _ResidueGitRunner implements GitRunner {
+  final List<({String workDir, List<String> args})> calls = [];
+
+  @override
+  Future<GitRunResult> run({
+    required String workingDirectory,
+    required List<String> args,
+  }) async {
+    calls.add((workDir: workingDirectory, args: List.unmodifiable(args)));
+    if (args.isNotEmpty && args.first == 'status') {
+      return const GitRunResult(
+        exitCode: 0,
+        output: ' M lib/src/circuit/session_scope.dart',
+      );
+    }
+    return const GitRunResult(exitCode: 0, output: '');
+  }
+}
+
+/// A [GitRunner] fake whose `git status --porcelain` probe itself fails (a
+/// non-zero exit) while every other command succeeds — the fail-closed
+/// "couldn't verify" path, distinct from a confirmed-dirty result.
+class _ProbeFailGitRunner implements GitRunner {
+  final List<({String workDir, List<String> args})> calls = [];
+
+  @override
+  Future<GitRunResult> run({
+    required String workingDirectory,
+    required List<String> args,
+  }) async {
+    calls.add((workDir: workingDirectory, args: List.unmodifiable(args)));
+    if (args.isNotEmpty && args.first == 'status') {
+      return const GitRunResult(exitCode: 1, output: 'fatal: not a git repository');
+    }
+    return const GitRunResult(exitCode: 0, output: '');
+  }
+}
+
 void main() {
   group('Track H — the capabilities reproduce P0 configs/orchestration', () {
     test('AgentCapability spawns headless claude WRAPPED for usage capture in '
@@ -241,6 +283,48 @@ void main() {
       );
     });
 
+    test('LandCapability GATES when commitAll left the tree a SUBSET of the '
+        'reviewed tree (tg-x1j r1 — a botched land silently committed a '
+        'subset, stripping edits from the PR) — never pushes, never opens a '
+        'PR', () async {
+      final git = _ResidueGitRunner();
+      final pr = FakePrOpener();
+      final sc = GitSourceControl(gitOps: GitOps(git), prOpener: pr);
+      final c = _capCtx(sourceControl: sc);
+      final outcome = await const LandCapability().run(c.context, c.args);
+      expect(outcome, isA<Gate>());
+      expect((outcome as Gate).reason, contains('SUBSET'));
+      expect(
+        git.calls.map((c) => c.args.first),
+        isNot(contains('push')),
+        reason: 'never pushes a tree with uncommitted residue',
+      );
+      expect(pr.opened, isEmpty, reason: 'never opens a PR on residue');
+    });
+
+    test('LandCapability GATES when the post-commit clean-tree probe itself '
+        'fails (fail-closed — an unreadable status is never silently trusted '
+        'clean)', () async {
+      final git = _ProbeFailGitRunner();
+      final pr = FakePrOpener();
+      final sc = GitSourceControl(gitOps: GitOps(git), prOpener: pr);
+      final c = _capCtx(sourceControl: sc);
+      final outcome = await const LandCapability().run(c.context, c.args);
+      expect(outcome, isA<Gate>());
+      expect(pr.opened, isEmpty);
+    });
+
+    test('LandCapability skips the residue check entirely when sc is a plain '
+        'SourceControl (a bare test fake) — the SAME opt-in posture as the '
+        'circuit-receipt check', () async {
+      // _FakeSourceControl is NOT a TreeVerifiableSourceControl — proceeds
+      // straight to push/PR exactly as before this bead.
+      final sc = _FakeSourceControl();
+      final c = _capCtx(sourceControl: sc);
+      final outcome = await const LandCapability().run(c.context, c.args);
+      expect(outcome, isA<Ok>());
+    });
+
     test('LandCapability does NOT thread a body when sc is a plain '
         'SourceControl (a bare test fake, or a future non-Git impl) — it '
         'still lands correctly through the unwidened interface method',
@@ -310,6 +394,33 @@ void main() {
       expect(emptyRoot.workspaceFor('tg-1'), '/grid/worktrees/tg-1');
       expect(emptyRoot.workspaceFor('tg-1').startsWith('/'), isTrue,
           reason: 'must be absolute — never spawn against the CWD');
+    });
+  });
+
+  group('GitSourceControl implements TreeVerifiableSourceControl (bead '
+      'tg-bns — land must verify it committed the WHOLE reviewed tree, not '
+      'just no-op-ed commitAll)', () {
+    test('a clean `git status --porcelain` -> null (nothing to report)',
+        () async {
+      final sc = GitSourceControl(gitOps: GitOps(RecordingGitRunner()));
+      expect(
+        await sc.uncommittedResidue(workspaceDir: '/w/tg-1'),
+        isNull,
+      );
+    });
+
+    test('a dirty status -> a non-null residue description', () async {
+      final sc = GitSourceControl(gitOps: GitOps(_ResidueGitRunner()));
+      final residue = await sc.uncommittedResidue(workspaceDir: '/w/tg-1');
+      expect(residue, isNotNull);
+      expect(residue, contains('uncommitted'));
+    });
+
+    test('a status probe error fails closed — never silently trusted clean',
+        () async {
+      final sc = GitSourceControl(gitOps: GitOps(_ProbeFailGitRunner()));
+      final residue = await sc.uncommittedResidue(workspaceDir: '/w/tg-1');
+      expect(residue, isNotNull);
     });
   });
 

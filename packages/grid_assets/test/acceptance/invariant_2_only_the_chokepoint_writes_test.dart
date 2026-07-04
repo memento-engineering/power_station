@@ -99,6 +99,9 @@ void main() {
             rubrics: (id) => '($id rubric bands)',
             gitRunner: f.git,
             shellRunner: shell,
+            // A no-op clearer (gate-integrity #3): offline — never a real
+            // filesystem touch.
+            critiqueDirClearer: (_) {},
           ),
           substations: [
             SubstationScope(
@@ -140,6 +143,11 @@ void main() {
         f.provider.emit(Exited(name: _step('agent'), exitCode: 0));
         await _settle();
         state.push(_stateAt(completed: {kAgentNode}));
+        await _settle();
+        // clear-critique (gate-integrity #3) ran for real through the
+        // chokepoint (a ServiceCapability, no provider spawn); re-project its
+        // completion so the four critics — which now `dependsOn` it — mount.
+        state.push(_stateAt(completed: {kAgentNode, kClearCritiqueNode}));
         await _settle();
         expect(f.provider.started, hasLength(5),
             reason: 'the four committee critics fanned out after the agent');
