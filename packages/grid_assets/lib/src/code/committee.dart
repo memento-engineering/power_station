@@ -17,6 +17,56 @@
 ///    each RIDES the resolved agent harness (ADR-0008 Decision 10 — critics are
 ///    agents; `claude` by default) with ONLY its own rubric and writes a verdict
 ///    JSON the `result()` hook parses into a grade.
+///
+/// **Gate-integrity #3 — the stale-shadow + no-file transport miss (bead
+/// `tg-bns`)**: a rework round reuses the SAME workspace directory, so
+/// `.grid/critique/<rubric>.json` (and the gating lane's `.rc`) from a PRIOR
+/// round survives on disk. When the CURRENT round's critic exits clean but
+/// (tg-291's residual risk) never writes its file, `result()` was reading the
+/// PREVIOUS round's file — a stale grade impersonating a fresh one, not a
+/// recognized miss. Two independent, defense-in-depth fixes:
+///  1. [ClearCritiqueCapability] (`clear-critique`) — a dep-free step every
+///     critic lane `dependsOn` — wipes `.grid/critique/` at the START of every
+///     round, before any lane can read or write.
+///  2. Every LLM verdict JSON carries a `nodePath` freshness stamp (the
+///     round-qualified step path — round is embedded in the bead id via the
+///     rework re-key, `<bead>#rN`); [_verdictFromFile] REJECTS a file whose
+///     stamp doesn't match the CURRENT step's `nodePath`, falling through to
+///     the envelope/fail-closed transports exactly as if the file were absent.
+///     (The gating lane's `.rc` needs no stamp — fix 1 alone already clears it
+///     every round, and it carries no separate fallback transport.)
+///  Every verdict's result payload also carries a `transport` field
+///  (`file`/`envelope`/`fail-closed-default`) naming which of the three
+///  channels actually produced the grade — durable, queryable provenance
+///  (visible on `grid.result.<nodePath>.transport`) rather than a silent
+///  choice, so a false-gate post-mortem never again has to guess which path
+///  fired (case B: a fail-closed default with NO rationale was itself a gap —
+///  it now always carries one).
+///
+/// **The flaky write path itself (item 4, root-cause)**: the two live
+/// incidents this fixes (tg-x1j r3 regression-risk: 346s/28-turns/no file;
+/// tg-42f r1 test-coverage: 13-turns/no file, no stale shadow) have no
+/// captured transcript to confirm WHY the critic's own file-write tool call
+/// never landed — cwd drift, a turn-budget cutoff before the write, or prompt
+/// drift are all plausible and NOT distinguishable from static review alone.
+/// Left as an open question for whoever has the transcripts; the two fixes
+/// above close the SYMPTOM (a stale/absent file being mis-scored) regardless
+/// of which hypothesis turns out to be true — a critic that keeps failing to
+/// write now reliably grades a LOUD, provenanced fail-closed F every round,
+/// never a silently-recycled stale grade.
+///
+/// **A third, DISTINCT incident class (tg-83y r3, 2026-07-04) is OUT OF SCOPE
+/// here**: the LLM lanes graded against a tree the agent was still editing
+/// (its final commit landed AFTER the grading window), and the gating lane's
+/// re-run still F'd against what looked like the committed tree — an
+/// intra-round ORDERING bug (the review sub-circuit mounting before the
+/// agent's completion is truly durable), not a transport miss. Nothing in
+/// this file can fix it: every capability here reads the ambient [Workspace]
+/// / bead state the_grid's engine hands it at entry and trusts it; the fix is
+/// upstream, in the_grid's own session/reconcile sequencing (gating the
+/// `review` mount on the agent step's durable completion — a fence/commit —
+/// and running against the COMMITTED tree state), tracked alongside
+/// `SCRATCH-orchestration-determinism.md`'s I-catalog in that repo.
 library;
 
 import 'dart:convert';
@@ -51,14 +101,25 @@ const List<String> kCommitteeRubrics = [kGatingRubric, ...kLlmRubrics];
 /// The workspace-relative directory each critic writes its verdict / rc into.
 const String _critiqueDir = '.grid/critique';
 
+/// The hygiene step id every critic lane `dependsOn` (gate-integrity #3) —
+/// wipes [_critiqueDir] before any lane can read or write this round.
+const String kClearCritiqueStep = 'clear-critique';
+
 /// A pluggable source of a rubric's prose text by id (D-9: the Packaged-AI-Asset
 /// loader replaces the inline placeholder). Returns the rubric body a critic's
 /// prompt embeds.
 typedef RubricSource = String Function(String rubricId);
 
-/// The adversarial code-committee circuit (id `code_review`) — four dep-free
-/// critic lanes fanned out in parallel, then a `route` step that joins on all
-/// four and aggregates their grades (M5 Track C / C1).
+/// The pluggable critique-dir hygiene seam [ClearCritiqueCapability] uses
+/// (D-9-style injection, mirrors [RubricSource]) — defaults to the real
+/// delete+recreate; tests inject a no-op so the offline suite never touches a
+/// real filesystem at a synthetic workspace path.
+typedef DirectoryClearer = void Function(String dir);
+
+/// The adversarial code-committee circuit (id `code_review`) — a hygiene step
+/// (gate-integrity #3, [ClearCritiqueCapability]) followed by four critic
+/// lanes fanned out in parallel, then a `route` step that joins on all four
+/// and aggregates their grades (M5 Track C / C1).
 ///
 /// Reentrant: composed at the same `CircuitScope` seam as any other circuit, so
 /// Track E can drop it in as the `code` circuit's `verify` via a `SubCircuitStep`
@@ -67,25 +128,30 @@ const Circuit kCodeReviewCircuit = Circuit(
   id: 'code_review',
   terminalStepId: 'route',
   steps: [
+    CapabilityStep(stepId: kClearCritiqueStep, capabilityId: kClearCritiqueStep),
     CapabilityStep(
       stepId: kGatingRubric,
       capabilityId: 'critic',
       params: {'rubric': kGatingRubric},
+      dependsOn: {kClearCritiqueStep},
     ),
     CapabilityStep(
       stepId: 'spec-adherence',
       capabilityId: 'critic',
       params: {'rubric': 'spec-adherence'},
+      dependsOn: {kClearCritiqueStep},
     ),
     CapabilityStep(
       stepId: 'regression-risk',
       capabilityId: 'critic',
       params: {'rubric': 'regression-risk'},
+      dependsOn: {kClearCritiqueStep},
     ),
     CapabilityStep(
       stepId: 'test-coverage',
       capabilityId: 'critic',
       params: {'rubric': 'test-coverage'},
+      dependsOn: {kClearCritiqueStep},
     ),
     CapabilityStep(
       stepId: 'route',
@@ -103,6 +169,48 @@ const Circuit kCodeReviewCircuit = Circuit(
     ),
   ],
 );
+
+/// Wipes [_critiqueDir] at the START of every committee round — a
+/// [ServiceCapability] all four critic lanes `dependsOn`, so it always
+/// completes before any lane can read OR write a verdict (gate-integrity #3).
+/// A rework round reuses the SAME workspace directory, so a prior round's
+/// verdict/rc file otherwise survives on disk; clearing first turns a
+/// critic's missing write back into a recognizable miss instead of a stale
+/// grade impersonating a fresh one.
+///
+/// Best-effort BY DESIGN: a delete/recreate failure never Gates the round —
+/// [_verdictFromFile]'s `nodePath` freshness stamp is the fail-safe backstop
+/// for the LLM lanes when the clear itself couldn't run; the gating lane's own
+/// `sh -c` script always `mkdir -p`s the dir again regardless.
+class ClearCritiqueCapability extends ServiceCapability {
+  /// Creates the capability, optionally over an injected [clearer] (tests
+  /// inject a no-op so the offline suite never touches a real filesystem at a
+  /// synthetic workspace path — Fakes, not mocks); defaults to the real
+  /// delete+recreate.
+  const ClearCritiqueCapability({DirectoryClearer? clearer}) : _clearer = clearer;
+
+  final DirectoryClearer? _clearer;
+
+  @override
+  Future<StepOutcome> run(TreeContext context, StepArgs args) async {
+    final workspace = context.getInheritedSeedOfExactType<Workspace>();
+    if (workspace == null) return const Ok();
+    try {
+      (_clearer ?? _clearDirectory)(p.join(workspace.workspaceDir, _critiqueDir));
+    } catch (_) {
+      // Best-effort hygiene — the freshness stamp is the fail-safe backstop.
+    }
+    return const Ok();
+  }
+}
+
+/// The real [DirectoryClearer]: deletes [dir] (if present) and recreates it
+/// empty.
+void _clearDirectory(String dir) {
+  final d = Directory(dir);
+  if (d.existsSync()) d.deleteSync(recursive: true);
+  d.createSync(recursive: true);
+}
 
 /// One critic, in isolation — a [ProcessCapability] whose `params['rubric']`
 /// selects the lane (C2). Two flavors behind the single `critic` capability id:
@@ -173,7 +281,7 @@ class CriticCapability extends ProcessCapability {
     );
     return registry.harness(config.harness)!.spawnFor(
       config: config,
-      brief: AgentBrief(task: buildCriticPrompt(bead, rubric)),
+      brief: AgentBrief(task: buildCriticPrompt(bead, rubric, args.nodePath)),
       workspace: workspace,
       // CAPTURE-ONLY usage telemetry (FT-2): the resolved harness (claude)
       // redirects its `--output-format json` envelope here; result() merges the
@@ -221,25 +329,41 @@ class CriticCapability extends ProcessCapability {
     if (rubric == kGatingRubric) {
       // The plan's exit code, captured by the spawn wrapper. Fail-closed: a
       // missing rc (the plan never ran) grades F — a plan-less bead must NEVER
-      // silently pass.
+      // silently pass. [ClearCritiqueCapability] wipes this file every round,
+      // so an rc found here is guaranteed fresh — no separate stamp needed.
       final rc = File(p.join(workspaceDir, _critiqueDir, '$kGatingRubric.rc'));
-      if (!rc.existsSync()) return const {'grade': 'F'};
+      if (!rc.existsSync()) {
+        return const {
+          'grade': 'F',
+          'transport': 'fail-closed-default',
+          'rationale': 'no validation-plan rc file — fail-closed default',
+        };
+      }
       final code = rc.readAsStringSync().trim();
-      return {'grade': code == '0' ? 'A' : 'F'};
+      return {'grade': code == '0' ? 'A' : 'F', 'transport': 'file'};
     }
-    // An LLM critic's verdict JSON. Fail-closed: a missing / malformed verdict
-    // (no file, unparseable JSON, or no readable `grade`) falls back to the
-    // captured harness RESULT TEXT (tg-291 — the verdict-transport brittleness:
-    // a critic that graded cleanly but wrote its verdict into stdout instead of
-    // the file must not be scored F on a transport slip alone). The FILE wins
-    // whenever it parses; only an absent/malformed file consults the fallback.
-    // No parseable verdict ANYWHERE still grades F.
+    // An LLM critic's verdict JSON. Fail-closed: a missing / malformed / STALE
+    // verdict (no file, unparseable JSON, no readable `grade`, or a `nodePath`
+    // stamp that doesn't match THIS round — gate-integrity #3) falls back to
+    // the captured harness RESULT TEXT (tg-291 — the verdict-transport
+    // brittleness: a critic that graded cleanly but wrote its verdict into
+    // stdout instead of the file must not be scored F on a transport slip
+    // alone). The FILE wins whenever it parses AND is fresh; only an
+    // absent/malformed/stale file consults the fallback. No parseable verdict
+    // ANYWHERE still grades F — every path now names its own `transport`
+    // (`file`/`envelope`/`fail-closed-default`), so a false-gate post-mortem
+    // never has to guess which channel produced the grade.
     final verdict = File(p.join(workspaceDir, _critiqueDir, '$rubric.json'));
-    final graded = _verdictFromFile(verdict) ??
+    final graded = _verdictFromFile(verdict, expectedNodePath: args.nodePath) ??
         _verdictFromResultText(
           readEnvelopeResultText(workspaceDir, args.nodePath),
         ) ??
-        const {'grade': 'F'};
+        const {
+          'grade': 'F',
+          'transport': 'fail-closed-default',
+          'rationale':
+              'no parseable verdict via file or envelope — fail-closed default',
+        };
     // Merge the CAPTURE-ONLY usage telemetry (FT-2) into the payload. FAIL-SAFE:
     // an absent / malformed envelope yields no fields, NEVER a throw — the grade
     // (fail-closed above) is unaffected. Collision-safe keys (grade/rationale vs
@@ -271,8 +395,14 @@ class CriticCapability extends ProcessCapability {
   /// fallback for when a critic slips anyway; this hardening is to make the
   /// slip rarer, not to rely on the fallback.
   ///
+  /// The verdict JSON also carries a `nodePath` FRESHNESS STAMP — [nodePath]
+  /// copied byte-for-byte (gate-integrity #3) — so [_verdictFromFile] can
+  /// reject a file left over from an earlier round (the SAME workspace
+  /// directory is reused across rework rounds) instead of silently reading it
+  /// as this round's verdict.
+  ///
   /// Exposed for unit tests.
-  String buildCriticPrompt(Bead bead, String rubric) {
+  String buildCriticPrompt(Bead bead, String rubric, String nodePath) {
     final path = '$_critiqueDir/$rubric.json';
     final b = StringBuffer()
       ..writeln('# Code review — rubric: `$rubric`')
@@ -292,7 +422,14 @@ class CriticCapability extends ProcessCapability {
         'Your verdict is JSON of this exact shape:',
       )
       ..writeln(
-        '{"rubric":"$rubric","version":1,"grade":"<A-F>","rationale":"<why>"}',
+        '{"rubric":"$rubric","version":1,"grade":"<A-F>","rationale":"<why>",'
+        '"nodePath":"$nodePath"}',
+      )
+      ..writeln()
+      ..writeln(
+        'The `nodePath` value above is FIXED — copy it byte-for-byte into your '
+        'verdict; it is how the reviewer confirms your verdict belongs to THIS '
+        'round, not a leftover from an earlier one.',
       )
       ..writeln()
       ..writeln(
@@ -459,19 +596,28 @@ String _beadBlock(Bead bead) {
   return b.toString();
 }
 
-/// The verdict file's grade, when it parses — `null` for an absent file,
-/// invalid JSON, or a missing/blank `grade` field (all treated as "unparseable"
-/// so [CriticCapability.result] falls through to the RESULT TEXT fallback,
-/// tg-291). Never throws.
-Map<String, String>? _verdictFromFile(File verdict) {
+/// The verdict file's grade, when it parses AND is FRESH — `null` for an
+/// absent file, invalid JSON, a missing/blank `grade` field, OR a `nodePath`
+/// stamp that doesn't match [expectedNodePath] (gate-integrity #3: a rework
+/// round reuses the same workspace, so a prior round's file can otherwise
+/// survive on disk and be misread as this round's verdict). Every one of
+/// these is treated as "unparseable" so [CriticCapability.result] falls
+/// through to the RESULT TEXT fallback (tg-291). Never throws.
+Map<String, String>? _verdictFromFile(
+  File verdict, {
+  required String expectedNodePath,
+}) {
   if (!verdict.existsSync()) return null;
   try {
     final json = jsonDecode(verdict.readAsStringSync()) as Map<String, dynamic>;
     final grade = (json['grade'] as String?)?.trim().toUpperCase();
     if (grade == null || grade.isEmpty) return null;
+    final stampedNodePath = (json['nodePath'] as String?)?.trim();
+    if (stampedNodePath != expectedNodePath) return null; // stale — not ours.
     final rationale = (json['rationale'] as String?)?.trim() ?? '';
     return {
       'grade': grade,
+      'transport': 'file',
       if (rationale.isNotEmpty) 'rationale': rationale,
     };
   } catch (_) {
@@ -533,6 +679,7 @@ Map<String, String>? _verdictFromEmbeddedJson(String text) {
               final rationale = (json['rationale'] as String?)?.trim() ?? '';
               last = {
                 'grade': grade,
+                'transport': 'envelope',
                 'rationale': rationale.isEmpty
                     ? '[from result envelope]'
                     : '$rationale [from result envelope]',
@@ -569,6 +716,7 @@ Map<String, String>? _verdictFromHeading(String text) {
   final rationale = text.substring(match.end).trim();
   return {
     'grade': grade,
+    'transport': 'envelope',
     'rationale': rationale.isEmpty
         ? '[from result envelope]'
         : '$rationale [from result envelope]',

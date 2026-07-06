@@ -273,6 +273,26 @@ class LandCapability extends ServiceCapability {
     );
     if (args.cancel.isCancelled) return const Failed('cancelled');
 
+    // Verify land committed the WHOLE reviewed tree (the tg-x1j r1 incident —
+    // a botched land silently committed a SUBSET, stripping session_scope.dart
+    // edits from the PR). `SourceControl.commitAll` returns void, so when [sc]
+    // is ALSO a [TreeVerifiableSourceControl] (the real [GitSourceControl]
+    // always is), this is the only signal available; a plain [SourceControl]
+    // (a bare test fake, or a future non-Git impl) skips the check, same
+    // opt-in posture as [ReceiptCapableSourceControl].
+    if (sc is TreeVerifiableSourceControl) {
+      final residue = await sc.uncommittedResidue(
+        workspaceDir: workspace.workspaceDir,
+      );
+      if (args.cancel.isCancelled) return const Failed('cancelled');
+      if (residue != null) {
+        return Gate(
+          'land committed a SUBSET of the reviewed tree (the tg-x1j r1 class '
+          'of incident) — never pushed: $residue',
+        );
+      }
+    }
+
     await sc.push(
       workspaceDir: workspace.workspaceDir,
       remote: 'origin',
@@ -324,6 +344,23 @@ abstract interface class ReceiptCapableSourceControl implements SourceControl {
   });
 }
 
+/// A [SourceControl] that can ALSO report whether its own [SourceControl.
+/// commitAll] left residue behind (bead `tg-bns`, the tg-x1j r1 incident — a
+/// botched land silently committed a SUBSET of the reviewed tree, dropping
+/// `session_scope.dart` edits from the PR). `commitAll` returns `void`, so
+/// [LandCapability] has no other signal that its own commit actually captured
+/// everything. This is the power_station-local STOPGAP, same posture as
+/// [ReceiptCapableSourceControl]: [LandCapability] detects this marker via
+/// `is` and Gates when residue is reported; a plain [SourceControl] (a bare
+/// test fake, or a future non-Git impl) skips the check entirely.
+abstract interface class TreeVerifiableSourceControl implements SourceControl {
+  /// Returns `null` when [workspaceDir] is clean (nothing left uncommitted
+  /// after `commitAll`); otherwise a human-readable description of the residue
+  /// — including when the check itself couldn't run (fail-closed: an
+  /// unreadable probe is treated as unsafe, never silently trusted clean).
+  Future<String?> uncommittedResidue({required String workspaceDir});
+}
+
 /// The git [SourceControl] impl over grid_runtime (the detail the engine knows
 /// only in CONCEPT — ADR-0008 D5; ships in the asset package). Two independent
 /// halves:
@@ -336,8 +373,13 @@ abstract interface class ReceiptCapableSourceControl implements SourceControl {
 ///
 /// Also [ReceiptCapableSourceControl] (`tg-rm5`): [openPr] carries an optional
 /// `body` beyond what the [SourceControl] interface itself declares, so `land`
-/// can thread the circuit receipt into the real PR today.
-class GitSourceControl implements SourceControl, ReceiptCapableSourceControl {
+/// can thread the circuit receipt into the real PR today. Also
+/// [TreeVerifiableSourceControl] (`tg-bns`): [uncommittedResidue] reuses
+/// [GitOps.hasUncommittedWork] (the SAME three-gate `git status --porcelain`
+/// probe the worktree-reap gate already trusts) — no new git call, just a new
+/// consumer of an existing one.
+class GitSourceControl
+    implements SourceControl, ReceiptCapableSourceControl, TreeVerifiableSourceControl {
   /// Wraps the optional land ops ([gitOps]/[prOpener]) and the optional
   /// provisioning seam ([provisioner]/[root]).
   const GitSourceControl({
@@ -410,6 +452,19 @@ class GitSourceControl implements SourceControl, ReceiptCapableSourceControl {
   );
 
   @override
+  Future<String?> uncommittedResidue({required String workspaceDir}) async {
+    final outcome = await _gitOps!.hasUncommittedWork(workspaceDir);
+    return switch (outcome) {
+      GateOutcome.clear => null,
+      GateOutcome.present =>
+        'uncommitted changes remain in the workspace after commitAll',
+      GateOutcome.probeError =>
+        'could not verify a clean tree after commitAll (git status probe '
+            'failed) — fail-closed, treated as unsafe',
+    };
+  }
+
+  @override
   Future<PrRef?> openPr({
     required String workspaceDir,
     required String branch,
@@ -444,12 +499,17 @@ class GitSourceControl implements SourceControl, ReceiptCapableSourceControl {
 /// ⇒ offline/dry-run, no root registered). [gitRunner]/[shellRunner] override
 /// `rebase`/`revalidate`'s real git/shell seams (tests inject recording fakes —
 /// Fakes, not mocks; absent ⇒ the real [SystemGitRunner]/[SystemShellRunner]).
+/// [critiqueDirClearer] overrides [ClearCritiqueCapability]'s real
+/// delete+recreate (gate-integrity #3, bead `tg-bns`) — tests inject a no-op
+/// so the offline suite never touches a real filesystem at a synthetic
+/// workspace path.
 DefaultCapabilityRegistry buildCodeRegistry({
   DateTime Function()? clock,
   RubricSource? rubrics,
   String? devRoot,
   GitRunner? gitRunner,
   ShellRunner? shellRunner,
+  DirectoryClearer? critiqueDirClearer,
 }) {
   final rubricSource = rubrics ?? PackagedAssetLoader().rubricSource;
   return DefaultCapabilityRegistry(
@@ -460,6 +520,7 @@ DefaultCapabilityRegistry buildCodeRegistry({
       'route': const RouteCapability(),
       'rebase': RebaseCapability(runner: gitRunner),
       'revalidate': RevalidateCapability(runner: shellRunner),
+      kClearCritiqueStep: ClearCritiqueCapability(clearer: critiqueDirClearer),
     },
     circuits: const {
       'code': kCodeCircuit,

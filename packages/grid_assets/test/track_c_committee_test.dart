@@ -97,10 +97,20 @@ String _c(String stepId) => 'critic(tgdog-s/tg-1/$stepId)';
 
 void main() {
   group('Track C4 — the code_review committee frontier', () {
-    test('at mount the four critics fan out IN PARALLEL; route is withheld', () {
+    test('at mount, clear-critique starts ALONE (gate-integrity #3) — the '
+        'four critics `dependsOn` it and wait', () {
       final c = _Committee('tg-1')..mount();
       addTearDown(c.dispose);
-      // All four critic lanes mount together (dep-free → parallel fan-out).
+      expect(c.events, ['START clear-critique(tgdog-s/tg-1/clear-critique)']);
+    });
+
+    test('once clear-critique completes, the four critics fan out IN '
+        'PARALLEL; route is withheld', () {
+      final c = _Committee('tg-1')..mount();
+      addTearDown(c.dispose);
+      c.advance({'tg-1/clear-critique': _done()});
+      // All four critic lanes mount together (dependsOn ONLY clear-critique →
+      // parallel fan-out amongst themselves).
       expect(
         c.events,
         containsAll([
@@ -118,6 +128,7 @@ void main() {
         '(await-all barrier, with a positive control)', () {
       final c = _Committee('tg-1')..mount();
       addTearDown(c.dispose);
+      c.advance({'tg-1/clear-critique': _done()});
 
       // Three of four complete — the barrier stays closed (negative control).
       c.advance({

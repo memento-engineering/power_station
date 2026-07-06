@@ -71,6 +71,9 @@ StationKernel _buildKernel(
       rubrics: (id) => '($id rubric bands)',
       gitRunner: f.git,
       shellRunner: shellRunner ?? RecordingShellRunner(),
+      // A no-op clearer (gate-integrity #3): offline — fakes only, never a
+      // real filesystem touch at the synthetic `/grid/worktrees/...` path.
+      critiqueDirClearer: (_) {},
     ),
     substations: [
       SubstationScope(
@@ -140,6 +143,15 @@ void main() {
         f.provider.emit(Exited(name: _step('agent'), exitCode: 0));
         await _settle();
         state.push(_state(committeeSession(completed: {kAgentNode})));
+        await _settle();
+
+        // clear-critique (gate-integrity #3, dep-free) mounted + ran for real
+        // — no provider spawn (a ServiceCapability, like rebase/revalidate);
+        // the bridge re-projects its completion before the four critics
+        // (which now `dependsOn` it) become ready.
+        state.push(_state(committeeSession(
+          completed: {kAgentNode, kClearCritiqueNode},
+        )));
         await _settle();
 
         final startedAfterAgent =
@@ -290,6 +302,12 @@ void main() {
         f.provider.emit(Exited(name: _step('agent'), exitCode: 0));
         await _settle();
         state.push(_state(committeeSession(completed: {kAgentNode})));
+        await _settle();
+        // clear-critique (gate-integrity #3) ran for real; re-project its
+        // completion so the four critics — which now dependsOn it — mount.
+        state.push(_state(committeeSession(
+          completed: {kAgentNode, kClearCritiqueNode},
+        )));
         await _settle();
         for (final critic in _criticSteps) {
           f.provider.emit(Exited(name: critic, exitCode: 0));

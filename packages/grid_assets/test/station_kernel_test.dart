@@ -83,7 +83,12 @@ void main() {
           resolver: kCodeResolver,
           // Inline rubrics so the committee critics build their prompts without a
           // disk read (the on-disk loader is exercised by track_d_assets_test).
-          registry: buildCodeRegistry(rubrics: (id) => '($id rubric bands)'),
+          // A no-op critique-dir clearer (gate-integrity #3): offline — never a
+          // real filesystem touch at the synthetic `/grid/workspaces/...` path.
+          registry: buildCodeRegistry(
+            rubrics: (id) => '($id rubric bands)',
+            critiqueDirClearer: (_) {},
+          ),
           substations: [
             SubstationScope(
               configNotifier: SubstationConfigNotifier(
@@ -133,6 +138,11 @@ void main() {
         f.provider.emit(Exited(name: _step('agent'), exitCode: 0));
         await _settle();
         state.push(_stateAt(completed: {kAgentNode}));
+        await _settle();
+        // clear-critique (gate-integrity #3, dep-free) ran for real — no
+        // provider spawn (a ServiceCapability); re-project its completion so
+        // the four critics, which now `dependsOn` it, become ready.
+        state.push(_stateAt(completed: {kAgentNode, kClearCritiqueNode}));
         await _settle();
 
         expect(
