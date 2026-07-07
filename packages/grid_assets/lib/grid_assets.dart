@@ -8,6 +8,13 @@
 /// resident composition is the only consumer now). The `power_station` home of
 /// the first-party assets (extracted from the_grid at the repo split).
 ///
+/// The v3 COMPOSITION ASSETS (Track F, `tg-5r9`, `composition_assets.dart`) are
+/// how those opinions mount into the grid tree at a SCOPE — the replacement for
+/// the runner-built `ServiceBundle` map: [GitGridAssets] / [GitHubGridAssets]
+/// (substation-scoped source control), [HarnessProvider] (station-scoped harness
+/// provision), [CircuitProvider] (the Q8 circuit provider/scope), and
+/// [sourceControlOf] (bead → substation → root resolution, no string-keyed map).
+///
 /// The COMPUTE asset domain (ADR-0011 D2/D3, M6 Track D) also lives here: the
 /// `DispatchCommand`/`CommandResult` payloads + the bounded "use" + the capacity
 /// predicate moved OUT of the kind-agnostic `grid_federation` core, and the
@@ -22,6 +29,7 @@ export 'src/agent/agent_domain.dart';
 export 'src/agent/agent_harness.dart';
 export 'src/agent/usage_report.dart';
 export 'src/assets/asset_loader.dart';
+export 'src/assets/composition_assets.dart';
 export 'src/code/code_capabilities.dart';
 export 'src/code/committee.dart';
 export 'src/code/landing.dart';
