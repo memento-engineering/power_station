@@ -44,16 +44,32 @@
 ///  it now always carries one).
 ///
 /// **The flaky write path itself (item 4, root-cause)**: the two live
-/// incidents this fixes (tg-x1j r3 regression-risk: 346s/28-turns/no file;
-/// tg-42f r1 test-coverage: 13-turns/no file, no stale shadow) have no
-/// captured transcript to confirm WHY the critic's own file-write tool call
-/// never landed — cwd drift, a turn-budget cutoff before the write, or prompt
-/// drift are all plausible and NOT distinguishable from static review alone.
-/// Left as an open question for whoever has the transcripts; the two fixes
-/// above close the SYMPTOM (a stale/absent file being mis-scored) regardless
-/// of which hypothesis turns out to be true — a critic that keeps failing to
-/// write now reliably grades a LOUD, provenanced fail-closed F every round,
-/// never a silently-recycled stale grade.
+/// incidents #3 addressed (tg-x1j r3 regression-risk: 346s/28-turns/no file;
+/// tg-42f r1 test-coverage: 13-turns/no file, no stale shadow) had no captured
+/// transcript to confirm WHY the critic's own file-write tool call never landed
+/// — cwd drift, a turn-budget cutoff before the write, or prompt drift were all
+/// plausible and not distinguishable from static review alone; the #3 fixes
+/// close the SYMPTOM (a stale/absent file being mis-scored) regardless of which.
+///
+/// **Gate-integrity #4 — the cwd-relative write path, confirmed (bead
+/// `tg-r66`)**: a later live incident (session `tgdog-snp`/`tg-m2q` r1,
+/// 2026-07-07) DID capture the cwd-drift hypothesis in the act: the critic
+/// prompt asked for the RELATIVE path `.grid/critique/<rubric>.json`, and a
+/// `test-coverage` critic that `cd`d into a package to run `dart test`
+/// resolved it against its new cwd, writing a STRAY verdict at
+/// `packages/grid_assets/.grid/critique/test-coverage.json` — so the canonical
+/// path was empty AND the stdout envelope parse missed the critic's
+/// `## Grade: A` summary shape ⇒ a false fail-closed F ⇒ ps#11's false gate.
+/// Three defense-in-depth fixes: (1) [CriticCapability.buildCriticPrompt] now
+/// interpolates the workspace-derived ABSOLUTE canonical path, so the write is
+/// cwd-invariant; (2) [_strayVerdict] is a read-side belt that accepts a
+/// round-fresh stray `.grid/critique/<rubric>.json` found anywhere under the
+/// worktree (the `nodePath` freshness stamp keeps it safe); (3) the envelope
+/// fallback ([_verdictFromHeading]) now also recognizes a `Grade: <A-F>`
+/// heading, not just `Verdict:`. A critic that keeps failing to write a
+/// canonical file now reliably grades a LOUD, provenanced fail-closed F every
+/// round (or is recovered from the stray/envelope), never a silently-recycled
+/// stale grade.
 ///
 /// **A third, DISTINCT incident class (tg-83y r3, 2026-07-04) is OUT OF SCOPE
 /// here**: the LLM lanes graded against a tree the agent was still editing
@@ -281,7 +297,14 @@ class CriticCapability extends ProcessCapability {
     );
     return registry.harness(config.harness)!.spawnFor(
       config: config,
-      brief: AgentBrief(task: buildCriticPrompt(bead, rubric, args.nodePath)),
+      brief: AgentBrief(
+        task: buildCriticPrompt(
+          bead,
+          rubric,
+          args.nodePath,
+          workspace.workspaceDir,
+        ),
+      ),
       workspace: workspace,
       // CAPTURE-ONLY usage telemetry (FT-2): the resolved harness (claude)
       // redirects its `--output-format json` envelope here; result() merges the
@@ -344,17 +367,21 @@ class CriticCapability extends ProcessCapability {
     }
     // An LLM critic's verdict JSON. Fail-closed: a missing / malformed / STALE
     // verdict (no file, unparseable JSON, no readable `grade`, or a `nodePath`
-    // stamp that doesn't match THIS round — gate-integrity #3) falls back to
-    // the captured harness RESULT TEXT (tg-291 — the verdict-transport
-    // brittleness: a critic that graded cleanly but wrote its verdict into
-    // stdout instead of the file must not be scored F on a transport slip
-    // alone). The FILE wins whenever it parses AND is fresh; only an
-    // absent/malformed/stale file consults the fallback. No parseable verdict
-    // ANYWHERE still grades F — every path now names its own `transport`
-    // (`file`/`envelope`/`fail-closed-default`), so a false-gate post-mortem
-    // never has to guess which channel produced the grade.
+    // stamp that doesn't match THIS round — gate-integrity #3) falls back, in
+    // order, to a round-fresh STRAY verdict (gate-integrity #4 — a critic that
+    // cd'd mid-run wrote the file under a subdir instead of the canonical path;
+    // [_strayVerdict]) then to the captured harness RESULT TEXT (tg-291 — the
+    // verdict-transport brittleness: a critic that graded cleanly but wrote its
+    // verdict into stdout instead of the file must not be scored F on a
+    // transport slip alone). The canonical FILE wins whenever it parses AND is
+    // fresh; only an absent/malformed/stale canonical file consults the
+    // fallbacks. No parseable verdict ANYWHERE still grades F — every path now
+    // names its own `transport` (`file`/`file-stray`/`envelope`/
+    // `fail-closed-default`), so a false-gate post-mortem never has to guess
+    // which channel produced the grade.
     final verdict = File(p.join(workspaceDir, _critiqueDir, '$rubric.json'));
     final graded = _verdictFromFile(verdict, expectedNodePath: args.nodePath) ??
+        _strayVerdict(workspaceDir, rubric, args.nodePath) ??
         _verdictFromResultText(
           readEnvelopeResultText(workspaceDir, args.nodePath),
         ) ??
@@ -401,9 +428,27 @@ class CriticCapability extends ProcessCapability {
   /// directory is reused across rework rounds) instead of silently reading it
   /// as this round's verdict.
   ///
+  /// **Gate-integrity #4 — the cwd-relative write path (bead `tg-r66`)**: the
+  /// path handed to the critic is the workspace-derived ABSOLUTE canonical
+  /// path (`[workspaceDir]/.grid/critique/<rubric>.json`), NOT a
+  /// workspace-relative one. A critic that `cd`s mid-run (`test-coverage` cd's
+  /// into a package to run `dart test` — the chronically flaky lane) would
+  /// resolve a relative `.grid/critique/<rubric>.json` against its CURRENT cwd
+  /// and write a STRAY verdict under the package (observed live:
+  /// `packages/grid_assets/.grid/critique/test-coverage.json`), leaving the
+  /// canonical path empty ⇒ a false fail-closed gate. An absolute path is
+  /// cwd-invariant, so the write lands where `result()` reads regardless of
+  /// where the critic wandered. ([_strayVerdict] is the read-side belt for a
+  /// critic that still writes off-path some other way.)
+  ///
   /// Exposed for unit tests.
-  String buildCriticPrompt(Bead bead, String rubric, String nodePath) {
-    final path = '$_critiqueDir/$rubric.json';
+  String buildCriticPrompt(
+    Bead bead,
+    String rubric,
+    String nodePath,
+    String workspaceDir,
+  ) {
+    final path = p.join(workspaceDir, _critiqueDir, '$rubric.json');
     final b = StringBuffer()
       ..writeln('# Code review — rubric: `$rubric`')
       ..writeln()
@@ -433,10 +478,13 @@ class CriticCapability extends ProcessCapability {
       )
       ..writeln()
       ..writeln(
-        'You MUST write that JSON to the exact path `$path` before you finish. '
-        'This is REQUIRED even if you also state your verdict in your response '
-        'text — stating the grade in prose alone does NOT satisfy this '
-        'instruction. Write the file at `$path`.',
+        'You MUST write that JSON to the exact ABSOLUTE path `$path` before you '
+        'finish. It is an absolute path on purpose — write it there regardless '
+        'of your current working directory (if you `cd` elsewhere to run a '
+        'command, this path still resolves to the right file). This is REQUIRED '
+        'even if you also state your verdict in your response text — stating the '
+        'grade in prose alone does NOT satisfy this instruction. Write the file '
+        'at `$path`.',
       );
     return b.toString();
   }
@@ -625,6 +673,73 @@ Map<String, String>? _verdictFromFile(
   }
 }
 
+/// A round-fresh verdict a critic wrote to a STRAY
+/// `.../.grid/critique/<rubric>.json` somewhere OTHER than the canonical
+/// workspace-root path — the read-side belt for gate-integrity #4 (bead
+/// `tg-r66`). A critic that `cd`s mid-run (`test-coverage` cd's into a package
+/// to run `dart test`) can resolve the verdict path against its current cwd and
+/// write it under the package instead of at the worktree root (observed live:
+/// `packages/grid_assets/.grid/critique/test-coverage.json`). [buildCriticPrompt]
+/// now hands the critic the ABSOLUTE path so the write lands correctly, but this
+/// belt recovers a verdict a critic still writes off-path some other way.
+///
+/// Walks [workspaceDir] for every `.grid/critique/<rubric>.json` and returns the
+/// FIRST whose `nodePath` stamp matches THIS round — the stamp (gate-integrity
+/// #3) is exactly what makes accepting an off-path file safe: a stale or foreign
+/// stray can never match, so a leftover from an earlier round is never misread
+/// as this round's verdict. The canonical path is skipped (the caller already
+/// consulted it). `null` when no fresh stray exists. Best-effort: never throws.
+Map<String, String>? _strayVerdict(
+  String workspaceDir,
+  String rubric,
+  String expectedNodePath,
+) {
+  final canonical =
+      p.canonicalize(p.join(workspaceDir, _critiqueDir, '$rubric.json'));
+  for (final file in _strayVerdictFiles(workspaceDir, rubric)) {
+    if (p.canonicalize(file.path) == canonical) continue; // the canonical path.
+    final graded = _verdictFromFile(file, expectedNodePath: expectedNodePath);
+    if (graded != null) return {...graded, 'transport': 'file-stray'};
+  }
+  return null;
+}
+
+/// Every `.../.grid/critique/<rubric>.json` file under [root], found by a
+/// bounded DFS that prunes VCS/build/dependency dirs (`.git`, `.dart_tool`,
+/// `node_modules`, `build`) so the fallback walk stays cheap. Symlinks are not
+/// followed. Best-effort: an unreadable directory is skipped, never thrown.
+Iterable<File> _strayVerdictFiles(String root, String rubric) sync* {
+  const prune = {'.git', '.dart_tool', 'node_modules', 'build'};
+  final target = p.join(_critiqueDir, '$rubric.json'); // '.grid/critique/<r>.json'
+  final stack = <Directory>[Directory(root)];
+  while (stack.isNotEmpty) {
+    final dir = stack.removeLast();
+    final List<FileSystemEntity> entries;
+    try {
+      entries = dir.listSync(followLinks: false);
+    } catch (_) {
+      continue; // unreadable — skip this subtree.
+    }
+    for (final entry in entries) {
+      if (entry is Directory) {
+        if (!prune.contains(p.basename(entry.path))) stack.add(entry);
+      } else if (entry is File && _endsWithPath(entry.path, target)) {
+        yield entry;
+      }
+    }
+  }
+}
+
+/// Whether [path] ends with the relative [suffix] on a path-separator boundary
+/// (so `.../pkg/.grid/critique/r.json` matches `.grid/critique/r.json`, but
+/// `.../x.grid/critique/r.json` would not spuriously match `grid/critique/…`).
+bool _endsWithPath(String path, String suffix) {
+  if (!path.endsWith(suffix)) return false;
+  if (path.length == suffix.length) return true;
+  final boundary = path[path.length - suffix.length - 1];
+  return boundary == p.separator || boundary == '/';
+}
+
 /// Recovers a verdict from a critic's raw harness RESULT TEXT (tg-291) — the
 /// fallback transport [CriticCapability.result] consults when the verdict file
 /// is absent or unparseable. FT-2 already captures the harness's
@@ -634,7 +749,11 @@ Map<String, String>? _verdictFromFile(
 ///
 /// Recognizes, in order:
 ///  1. an embedded JSON verdict object (fenced or inline — `{"grade":...}`);
-///  2. a `Verdict: <A-F>` heading, with the prose that follows it as rationale.
+///  2. a `Verdict: <A-F>` OR `Grade: <A-F>` heading (markdown `##` and other
+///     lead-ins allowed), with the prose that follows it as rationale — a
+///     critic that summarizes with `## Grade: A` instead of `Verdict:` was
+///     silently missed before (gate-integrity #4, bead `tg-r66`: the live
+///     false gate whose stray file the belt above now also recovers).
 ///
 /// Every recovered rationale is marked `[from result envelope]` so a grade
 /// that rode this fallback is visibly distinguishable downstream. `null` when
@@ -696,13 +815,19 @@ Map<String, String>? _verdictFromEmbeddedJson(String text) {
   return last;
 }
 
-/// A `Verdict: <A-F>` heading (case-insensitive) — the prose-heading shape a
-/// critic falls back to when it states its verdict in plain text (tg-291).
+/// A `Verdict: <A-F>` or `Grade: <A-F>` heading (case-insensitive) — the
+/// prose-heading shapes a critic falls back to when it states its verdict in
+/// plain text (tg-291), including the markdown `## Grade: A` summary a critic
+/// was observed to emit while skipping the file write (gate-integrity #4,
+/// bead `tg-r66`). The keyword is immediately followed by `:` (optional
+/// whitespace only), so the `"grade":"A"` inside an echoed JSON template — where
+/// a `"` sits between the word and the colon — never matches here (that shape is
+/// already handled by [_verdictFromEmbeddedJson]).
 final RegExp _verdictHeading =
-    RegExp(r'verdict\s*:\s*([A-Fa-f])\b', caseSensitive: false);
+    RegExp(r'(?:verdict|grade)\s*:\s*([A-Fa-f])\b', caseSensitive: false);
 
-/// The prose that follows the LAST `Verdict: <A-F>` heading in [text], as a
-/// grade + marked rationale — `null` when no heading is present. A verdict
+/// The prose that follows the LAST `Verdict:`/`Grade: <A-F>` heading in [text],
+/// as a grade + marked rationale — `null` when no heading is present. A verdict
 /// concludes a critic's output, so an earlier heading (a worked example, a
 /// restated instruction) must not win over a later, real one — mirrors
 /// [_verdictFromEmbeddedJson]'s last-match scan (tg-291 rework round 2: an

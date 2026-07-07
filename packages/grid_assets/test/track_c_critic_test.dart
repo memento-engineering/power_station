@@ -160,14 +160,16 @@ void main() {
         bead('tg-1'),
         'spec-adherence',
         'tg-1/review/spec-adherence',
+        '/w/tg-1',
       );
       expect(prompt, contains('spec-adherence'));
       // The other lanes' concerns must NOT leak into this critic's prompt.
       expect(prompt, isNot(contains('regression-risk')));
       expect(prompt, isNot(contains('test-coverage')));
       expect(prompt, isNot(contains('code-validation')));
-      // It carries the verdict-file instruction for its own rubric only.
-      expect(prompt, contains('.grid/critique/spec-adherence.json'));
+      // It carries the verdict-file instruction for its own rubric only, as the
+      // workspace-derived ABSOLUTE path (gate-integrity #4 — cwd-invariant).
+      expect(prompt, contains('/w/tg-1/.grid/critique/spec-adherence.json'));
     });
 
     test('the prompt carries a nodePath freshness stamp (gate-integrity #3) '
@@ -176,6 +178,7 @@ void main() {
         bead('tg-1'),
         'spec-adherence',
         'tg-1#r3/review/spec-adherence',
+        '/w/tg-1',
       );
       expect(prompt, contains('"nodePath":"tg-1#r3/review/spec-adherence"'));
       expect(prompt, contains('copy it byte-for-byte'));
@@ -191,6 +194,7 @@ void main() {
         rich,
         'test-coverage',
         'tg-1/review/test-coverage',
+        '/w/tg-1',
       );
       expect(prompt, contains('Wire the federation bus'));
       expect(prompt, contains('Connect The Studio to The Dashboard.'));
@@ -282,30 +286,34 @@ void main() {
         bead('tg-1'),
         'spec-adherence',
         'tg-1/review/spec-adherence',
+        '/w/tg-1',
       );
       expect(prompt, contains('CUSTOM BANDS for spec-adherence'));
       expect(prompt, isNot(contains('Packaged-AI-Asset loader')));
     });
 
     test('(tg-291 d) the file-write instruction is the LAST thing in the '
-        'prompt, imperative, exact-path, and required even if a verdict '
-        'appears in prose', () {
+        'prompt, imperative, exact ABSOLUTE path, and required even if a '
+        'verdict appears in prose', () {
       final prompt = const CriticCapability().buildCriticPrompt(
         bead('tg-1'),
         'spec-adherence',
         'tg-1/review/spec-adherence',
+        '/w/tg-1',
       );
+      // The path is the workspace-derived ABSOLUTE canonical path
+      // (gate-integrity #4 — cwd-invariant), not a workspace-relative one.
       expect(
         prompt.trimRight(),
         endsWith(
-          'Write the file at `.grid/critique/spec-adherence.json`.',
+          'Write the file at `/w/tg-1/.grid/critique/spec-adherence.json`.',
         ),
       );
       expect(
         prompt,
         contains(
-          'You MUST write that JSON to the exact path '
-          '`.grid/critique/spec-adherence.json` before you finish.',
+          'You MUST write that JSON to the exact ABSOLUTE path '
+          '`/w/tg-1/.grid/critique/spec-adherence.json` before you finish.',
         ),
       );
       expect(
@@ -431,6 +439,26 @@ void main() {
       final c = _ctx(rubric: rubric, workspaceDir: dir.path);
       final out = await const CriticCapability().result(c.context, c.args);
       expect(out?['grade'], 'A');
+      expect(out?['rationale'], contains('[from result envelope]'));
+    });
+
+    test('(gate-integrity #4) file-absent + envelope "## Grade: X" markdown '
+        'heading -> grade X (the summary shape a critic emits instead of '
+        '"Verdict:", missed live in tg-m2q r1)', () async {
+      final dir =
+          Directory.systemTemp.createTempSync('critic-fallback-grade-');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      const rubric = 'test-coverage';
+      writeEnvelope(
+        dir.path,
+        rubric,
+        'Reviewed the diff. Coverage is complete for the new path.\n\n'
+        '## Grade: A',
+      );
+      final c = _ctx(rubric: rubric, workspaceDir: dir.path);
+      final out = await const CriticCapability().result(c.context, c.args);
+      expect(out?['grade'], 'A');
+      expect(out?['transport'], 'envelope');
       expect(out?['rationale'], contains('[from result envelope]'));
     });
 
@@ -658,6 +686,118 @@ void main() {
         'transport': 'envelope',
         'rationale': '[from result envelope]',
         'numTurns': '36',
+      });
+    });
+  });
+
+  group('Track C — gate-integrity #4 (bead tg-r66): the cwd-relative STRAY '
+      'verdict read-side belt', () {
+    // A critic that cd's mid-run resolves its (formerly relative) verdict path
+    // against the NEW cwd, writing .grid/critique/<rubric>.json under a SUBDIR
+    // instead of at the worktree root. result() recovers a ROUND-FRESH such
+    // stray (the nodePath stamp keeps it safe), naming transport `file-stray`.
+    void writeStray(
+      String workspaceDir,
+      String subdir,
+      String rubric,
+      Map<String, dynamic> verdict,
+    ) {
+      File('$workspaceDir/$subdir/.grid/critique/$rubric.json')
+        ..createSync(recursive: true)
+        ..writeAsStringSync(jsonEncode(verdict));
+    }
+
+    test('a round-fresh stray under a package subdir is recovered, transport '
+        'file-stray', () async {
+      final dir = Directory.systemTemp.createTempSync('critic-stray-fresh-');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      const rubric = 'test-coverage';
+      const nodePath = 'tg-1/review/test-coverage';
+      // The observed live location: the critic cd'd into the package.
+      writeStray(dir.path, 'packages/grid_assets', rubric, {
+        'rubric': rubric,
+        'version': 1,
+        'grade': 'B',
+        'rationale': 'covered the new path',
+        'nodePath': nodePath,
+      });
+      final c = _ctx(rubric: rubric, workspaceDir: dir.path, nodePath: nodePath);
+      final out = await const CriticCapability().result(c.context, c.args);
+      expect(out, {
+        'grade': 'B',
+        'transport': 'file-stray',
+        'rationale': 'covered the new path',
+      });
+    });
+
+    test('a STALE stray (nodePath from a prior round) is NOT recovered -> F '
+        '(the freshness stamp is what makes accepting an off-path file safe)',
+        () async {
+      final dir = Directory.systemTemp.createTempSync('critic-stray-stale-');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      const rubric = 'test-coverage';
+      writeStray(dir.path, 'packages/grid_assets', rubric, {
+        'grade': 'A',
+        'rationale': 'a stale round-1 stray',
+        'nodePath': 'tg-1#r1/review/test-coverage',
+      });
+      final c = _ctx(
+        rubric: rubric,
+        workspaceDir: dir.path,
+        nodePath: 'tg-1#r2/review/test-coverage',
+      );
+      expect(await const CriticCapability().result(c.context, c.args), {
+        'grade': 'F',
+        'transport': 'fail-closed-default',
+        'rationale':
+            'no parseable verdict via file or envelope — fail-closed default',
+      });
+    });
+
+    test('the canonical verdict still WINS over a fresh stray', () async {
+      final dir = Directory.systemTemp.createTempSync('critic-stray-canon-');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      const rubric = 'test-coverage';
+      const nodePath = 'tg-1/review/test-coverage';
+      File('${dir.path}/.grid/critique/$rubric.json')
+        ..createSync(recursive: true)
+        ..writeAsStringSync(jsonEncode({
+          'grade': 'C',
+          'rationale': 'from the canonical file',
+          'nodePath': nodePath,
+        }));
+      // A fresh stray with a DIFFERENT grade — must never be consulted.
+      writeStray(dir.path, 'packages/grid_assets', rubric, {
+        'grade': 'A',
+        'rationale': 'from the stray',
+        'nodePath': nodePath,
+      });
+      final c = _ctx(rubric: rubric, workspaceDir: dir.path, nodePath: nodePath);
+      final out = await const CriticCapability().result(c.context, c.args);
+      expect(out, {
+        'grade': 'C',
+        'transport': 'file',
+        'rationale': 'from the canonical file',
+      });
+    });
+
+    test('a stray buried in a pruned dir (.dart_tool) is ignored -> F '
+        '(the fallback walk stays bounded)', () async {
+      final dir = Directory.systemTemp.createTempSync('critic-stray-pruned-');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      const rubric = 'test-coverage';
+      const nodePath = 'tg-1/review/test-coverage';
+      writeStray(dir.path, '.dart_tool/x', rubric, {
+        'grade': 'A',
+        'rationale': 'inside a pruned tree',
+        'nodePath': nodePath,
+      });
+      final c = _ctx(rubric: rubric, workspaceDir: dir.path, nodePath: nodePath);
+      expect(await const CriticCapability().result(c.context, c.args), {
+        'grade': 'F',
+        'transport': 'fail-closed-default',
+        'rationale':
+            'no parseable verdict via file or envelope — fail-closed default',
       });
     });
   });

@@ -12,7 +12,10 @@ how the other critics might grade.
 
 ## Your verdict
 Grade the work A (best) through F (worst) against `{{rubric}}` ONLY, then write
-your verdict as JSON to `.grid/critique/{{rubric}}.json`:
+your verdict as JSON to `.grid/critique/{{rubric}}.json`, resolved from the
+worktree root — write it there regardless of your current working directory (if
+you `cd` elsewhere to run a command, resolve the path back to the worktree root,
+not your new cwd):
 
 ```json
 {"rubric":"{{rubric}}","version":1,"grade":"<A-F>","rationale":"<why>"}
