@@ -186,23 +186,30 @@ void main() {
     });
 
     // ---------------------------------------------------------------------
-    // 3. buildCriticPrompt — the critic brief takes no Workspace at all, so it
-    //    can carry no absolute path; its only path is a workspace-RELATIVE
-    //    constant. It must still leak no bead-stamped path.
+    // 3. buildCriticPrompt — the critic brief's only path is the verdict
+    //    path, derived from the WORKSPACE dir passed in by the activation
+    //    (absolute + cwd-invariant since tg-r66). It must still leak no
+    //    bead-stamped path.
     // ---------------------------------------------------------------------
     group('buildCriticPrompt reads no path off the bead (the critic brief)', () {
+      const workspaceDir = '/activations/tg-m2q';
       final prompt = const CriticCapability().buildCriticPrompt(
         _poisonedBead(),
         'spec-adherence',
         'tg-m2q/review/spec-adherence',
+        workspaceDir,
       );
 
       test('no bead-stamped path leaks into the critic prompt (Q3′)', () {
         expect(prompt, isNot(contains(_poison)));
       });
 
-      test('its only path is the workspace-relative critique constant (§8.1)', () {
-        expect(prompt, contains('.grid/critique/spec-adherence.json'));
+      test('its verdict path derives from the activation workspace, '
+          'never the bead (§8.1, tg-r66)', () {
+        expect(
+          prompt,
+          contains('$workspaceDir/.grid/critique/spec-adherence.json'),
+        );
       });
 
       test('the bead CONTENT flows through (reference-only reads, §8.5)', () {
