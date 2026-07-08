@@ -394,6 +394,101 @@ void main() {
       expect(scope, const sdk.SubstationScope(name: 'the_grid', root: '/work/the_grid'));
     });
   });
+
+  group('GitHubGridAssets OBSERVES the ambient bundle (D-H watch-deps, tg-kx1)',
+      () {
+    test('a substation re-provision re-derives land — GitHubGridAssets '
+        're-enriches over the NEW root, never a stale wrap of the old one', () {
+      SourceControl? sc;
+      final scope = _ScopeController('sa', '/work/before');
+      final owner = TreeOwner();
+      owner.mountRoot(
+        _ReprovidingScope(
+          scope,
+          Nest(
+            children: [
+              GitGridAssets(gitOps: GitOps(_FakeGitRunner())),
+              GitHubGridAssets(prOpener: _FakePrOpener()),
+            ],
+            // The leaf OBSERVES the enriched bundle, so it re-runs when
+            // GitHubGridAssets re-provides — and (the discriminator) stays put
+            // when a non-subscribing GitHubGridAssets wrongly doesn't.
+            child: _Probe(
+              (ctx) => sc = ctx
+                  .dependOnInheritedSeedOfExactType<ServiceBundle>()
+                  ?.sourceControl,
+            ),
+          ),
+        ),
+      );
+      owner.flush();
+      // First mount: land-capable over the BEFORE root.
+      expect(sc!.canLand, isTrue);
+      expect(sc!.workspaceFor('x'), '/work/before/.grid/worktrees/sa/x');
+
+      // Re-provision the substation onto a NEW name + root. GitGridAssets watches
+      // SubstationScope, so it re-provides a fresh ServiceBundle; GitHubGridAssets
+      // must OBSERVE that (D-H) and re-enrich over the new source control.
+      scope.retarget('sb', '/work/after');
+      owner.flush();
+      expect(sc!.canLand, isTrue, reason: 'land stays enriched after re-provision');
+      expect(
+        sc!.workspaceFor('x'),
+        '/work/after/.grid/worktrees/sb/x',
+        reason: 'a non-subscribing (get*) read here would keep wrapping the '
+            'STALE /work/before source control — the sync-notifier-read class',
+      );
+    });
+  });
+}
+
+/// A [StatefulSeed] that re-provides an ambient [sdk.SubstationScope] on demand
+/// (via [_ScopeController.retarget]) — lets a test flip the substation name+root
+/// AFTER first mount and prove the downstream composition assets re-derive (the
+/// D-H watch-deps invariant, bead tg-kx1). [child] is a fixed subtree (built
+/// once), so ONLY the provided scope VALUE changes across a re-provision.
+class _ReprovidingScope extends StatefulSeed {
+  _ReprovidingScope(this.controller, this.child);
+
+  final _ScopeController controller;
+  final Seed child;
+
+  @override
+  State<_ReprovidingScope> createState() => _ReprovidingScopeState();
+}
+
+/// The test-side handle that drives a [_ReprovidingScope] re-provision.
+class _ScopeController {
+  _ScopeController(this._name, this._root);
+
+  String _name;
+  String _root;
+  void Function()? _apply;
+
+  /// Points the scope at a NEW substation name+root and re-provisions the tree.
+  void retarget(String name, String root) {
+    _name = name;
+    _root = root;
+    _apply!();
+  }
+}
+
+class _ReprovidingScopeState extends State<_ReprovidingScope> {
+  @override
+  void initState() {
+    super.initState();
+    // Re-provision = a setState that re-reads the controller's current values.
+    seed.controller._apply = () => setState(() {});
+  }
+
+  @override
+  Seed build(TreeContext context) => InheritedSeed<sdk.SubstationScope>(
+        value: sdk.SubstationScope(
+          name: seed.controller._name,
+          root: seed.controller._root,
+        ),
+        child: seed.child,
+      );
 }
 
 /// A distinct-from-null sentinel so a test can tell "assigned null" from "never

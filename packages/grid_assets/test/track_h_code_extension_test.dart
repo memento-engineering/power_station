@@ -201,6 +201,30 @@ void main() {
       expect(prompt, isNot(contains('grid step --advance')));
     });
 
+    test('the working agreement closes with the D-H genesis_tree doctrine — '
+        'every coding agent this station spawns carries it (bead tg-kx1)', () {
+      // Companion to the_grid's GridDelegate D-H fix (ADR-0008): the doctrine
+      // rides the ONE prompt every coding agent receives, so it reaches every
+      // spawned agent. Static text — no bead/path interpolation, so it survives
+      // the Q3′ reference-inflation fence (track_e) untouched.
+      final agreement = buildAgentBrief(bead('tg-1'), _workspace()).workingAgreement;
+      expect(agreement, contains('D-H doctrine'));
+      expect(agreement, contains('Always watch deps'));
+      expect(agreement, contains(r'never snapshot-and-`??=`-cache reactive state'));
+      expect(
+        agreement,
+        contains(r'No public synchronous accessor over `StateNotifier` state'),
+      );
+      expect(agreement, contains(r'observe it in `build`'));
+      expect(agreement, contains('Config = VALUES in the tree; impls = DI'));
+      expect(agreement, contains('Guards LOUD or GONE'));
+      // The doctrine rides the AGREEMENT, so it renders under ## Working agreement.
+      expect(
+        buildAgentBrief(bead('tg-1'), _workspace()).render(),
+        contains('## Working agreement'),
+      );
+    });
+
     test('AgentCapability prompt omits empty bead sections + the substation '
         'parenthetical', () {
       // An empty bead: only the header + the working agreement, no Task/Design.

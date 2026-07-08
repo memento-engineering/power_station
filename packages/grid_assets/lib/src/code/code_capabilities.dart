@@ -174,11 +174,14 @@ class AgentCapability extends ProcessCapability {
 }
 
 /// Assembles the agent's full-bead brief + local-first working agreement (the
-/// live dogfood contract — exposed for unit tests). Model/params are AgentConfig,
-/// NOT brief (OQ-a) — one brief replays across harnesses. Completion is
-/// OBSERVED via process-exit (the host writes the node cursor through the
-/// chokepoint when the agent's process exits clean) — the agent never DECLARES
-/// it (tg-p9q).
+/// live dogfood contract — exposed for unit tests). The agreement closes with
+/// the **D-H genesis_tree doctrine** (ADR-0008; companion to the_grid
+/// `GridDelegate` D-H fix): watch deps / no sync accessor over `StateNotifier`
+/// state / config = values, impls = DI / guards LOUD or GONE — every coding
+/// agent this station spawns carries it. Model/params are AgentConfig, NOT brief
+/// (OQ-a) — one brief replays across harnesses. Completion is OBSERVED via
+/// process-exit (the host writes the node cursor through the chokepoint when the
+/// agent's process exits clean) — the agent never DECLARES it (tg-p9q).
 AgentBrief buildAgentBrief(Bead bead, Workspace workspace) {
   final title = bead.title.isNotEmpty ? bead.title : 'work bead ${bead.id}';
   final substation = bead.metadata['rig'];
@@ -213,7 +216,30 @@ AgentBrief buildAgentBrief(Bead bead, Workspace workspace) {
       '- Do NOT push and do NOT open a pull request — leave the commit for '
       'human review.',
     )
-    ..write('- When the work is committed you are done; exit.');
+    ..writeln('- When the work is committed you are done; exit.')
+    ..writeln()
+    ..writeln(
+      'When you touch genesis_tree / grid code, hold the D-H doctrine '
+      '(ADR-0008):',
+    )
+    ..writeln(
+      '- Always watch deps: read ambient tree values in `build` via '
+      '`dependOn*`; never snapshot-and-`??=`-cache reactive state.',
+    )
+    ..writeln(
+      '- No public synchronous accessor over `StateNotifier` state — `.state`/'
+      '`current` never escapes; re-project it as an `InheritedSeed` and observe '
+      'it in `build`.',
+    )
+    ..writeln(
+      '- Config = VALUES in the tree; impls = DI (no services in a branch '
+      'except injected).',
+    )
+    ..write(
+      '- Guards LOUD or GONE: a guard exists only if it protects a NAMED '
+      'invariant and is loud (throws/refuses) when violated — otherwise delete '
+      'it.',
+    );
   return AgentBrief(task: p.toString(), workingAgreement: agreement.toString());
 }
 
