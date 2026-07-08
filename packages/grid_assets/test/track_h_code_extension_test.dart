@@ -269,7 +269,9 @@ void main() {
         '— tg-rm5, the receipt-regression fix)', () async {
       final git = RecordingGitRunner();
       final pr = FakePrOpener();
-      final sc = GitSourceControl(gitOps: GitOps(git), prOpener: pr);
+      // gitRunner: the SAME recording fake gitOps wraps — the rework-aware
+      // force-with-lease push (`tg-w3c`) records offline (never real git).
+      final sc = GitSourceControl(gitOps: GitOps(git), gitRunner: git, prOpener: pr);
       final context = FakeTreeContext(
         values: {
           Bead: bead('tg-1'),

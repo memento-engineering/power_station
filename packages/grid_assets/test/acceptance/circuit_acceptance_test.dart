@@ -83,7 +83,13 @@ StationKernel _buildKernel(
         // The land SourceControl + the flare transport are provided AT THE SCOPE
         // (ADR-0008 D5 / D-8).
         services: ServiceBundle(
-          sourceControl: GitSourceControl(gitOps: GitOps(f.git), prOpener: f.pr),
+          // gitRunner: the SAME recording fake gitOps wraps, so the rework-aware
+          // force-with-lease push (`tg-w3c`) records offline (never real git).
+          sourceControl: GitSourceControl(
+            gitOps: GitOps(f.git),
+            gitRunner: f.git,
+            prOpener: f.pr,
+          ),
           transport: transport,
         ),
         key: const ValueKey('scope.tg'),

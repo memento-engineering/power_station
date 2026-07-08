@@ -272,6 +272,17 @@ StepSignal _jobSignal(RuntimeEvent event) => switch (event) {
 /// when [sc] is ALSO a [ReceiptCapableSourceControl] (the real [GitSourceControl]
 /// always is), the richer overload is called instead so the receipt actually
 /// reaches the real PR today.
+///
+/// **Rework-aware delivery (`tg-w3c`)** — a preceding rework round REBASES the
+/// bead branch and leaves round one's PR open, which wedged the plain
+/// commit→push→PR path (push refused non-fast-forward, `gh pr create` errored
+/// "already exists", the DONE+approved bead escalated). When [sc] is a
+/// [ReworkAwareSourceControl] (the real [GitSourceControl] always is), land
+/// force-pushes with `--force-with-lease`, reuses an already-open PR as
+/// success, and — on a genuine git/gh failure — [Failed]s with the stderr TAIL
+/// as the reason, which FT-1 stamps as the node's `failureReason` so an
+/// operator sees WHY without forensics. A bare [SourceControl] still lands
+/// through the plain, unwidened methods.
 class LandCapability extends ServiceCapability {
   /// Creates the land capability.
   const LandCapability();
@@ -319,6 +330,46 @@ class LandCapability extends ServiceCapability {
       }
     }
 
+    final title = 'grid: ${args.beadId}';
+    final body = buildCircuitReceipt(beadId: args.beadId, siblings: siblings);
+
+    // REWORK-AWARE delivery (bead `tg-w3c`): a preceding rework round rebased
+    // the branch and left round one's PR open, so a plain push is refused and
+    // `gh pr create` errors "already exists". When [sc] supports it (the real
+    // [GitSourceControl] always does), force-with-lease push + reuse the open
+    // PR, and stamp the git/gh stderr tail as the `failureReason` (FT-1) so an
+    // operator sees WHY without forensics. A bare/non-git [SourceControl] (a
+    // test fake) still lands through the plain, unwidened methods below.
+    if (sc is ReworkAwareSourceControl) {
+      final pushed = await sc.pushForBranch(
+        workspaceDir: workspace.workspaceDir,
+        remote: 'origin',
+        branch: workspace.branch,
+      );
+      if (args.cancel.isCancelled) return const Failed('cancelled');
+      if (!pushed.ok) {
+        return Failed(
+          'grid land ${args.beadId}: force-with-lease push refused — '
+          '${landReasonTail(pushed.output)}',
+        );
+      }
+      final pr = await sc.openOrReusePr(
+        workspaceDir: workspace.workspaceDir,
+        branch: workspace.branch,
+        baseBranch: workspace.baseBranch,
+        title: title,
+        body: body,
+      );
+      if (args.cancel.isCancelled) return const Failed('cancelled');
+      if (!pr.ok) {
+        return Failed(
+          'grid land ${args.beadId}: pr open failed — '
+          '${landReasonTail(pr.failureReason ?? '')}',
+        );
+      }
+      return Ok({'pr_url': pr.url!});
+    }
+
     await sc.push(
       workspaceDir: workspace.workspaceDir,
       remote: 'origin',
@@ -326,14 +377,13 @@ class LandCapability extends ServiceCapability {
     );
     if (args.cancel.isCancelled) return const Failed('cancelled');
 
-    final title = 'grid: ${args.beadId}';
     final pr = sc is ReceiptCapableSourceControl
         ? await sc.openPr(
             workspaceDir: workspace.workspaceDir,
             branch: workspace.branch,
             baseBranch: workspace.baseBranch,
             title: title,
-            body: buildCircuitReceipt(beadId: args.beadId, siblings: siblings),
+            body: body,
           )
         : await sc.openPr(
             workspaceDir: workspace.workspaceDir,
@@ -403,25 +453,39 @@ abstract interface class TreeVerifiableSourceControl implements SourceControl {
 /// [TreeVerifiableSourceControl] (`tg-bns`): [uncommittedResidue] reuses
 /// [GitOps.hasUncommittedWork] (the SAME three-gate `git status --porcelain`
 /// probe the worktree-reap gate already trusts) — no new git call, just a new
-/// consumer of an existing one.
+/// consumer of an existing one. Also [ReworkAwareSourceControl] (`tg-w3c`):
+/// [pushForBranch] force-pushes with `--force-with-lease` (a rework round
+/// rebased the branch, so a plain push is refused) and [openOrReusePr] treats
+/// an already-open PR as success — both returning the git/gh output so `land`
+/// can stamp the stderr tail as the `failureReason`.
 class GitSourceControl
-    implements SourceControl, ReceiptCapableSourceControl, TreeVerifiableSourceControl {
+    implements
+        SourceControl,
+        ReceiptCapableSourceControl,
+        TreeVerifiableSourceControl,
+        ReworkAwareSourceControl {
   /// Wraps the optional land ops ([gitOps]/[prOpener]) and the optional
-  /// provisioning seam ([provisioner]/[root]).
+  /// provisioning seam ([provisioner]/[root]). [gitRunner] is the raw `git`
+  /// seam the rework-aware force-push runs through — `null` ⇒ a real
+  /// [SystemGitRunner] (the live default; tests inject the SAME recording fake
+  /// [gitOps] wraps, so the force-push argv is asserted offline).
   const GitSourceControl({
     GitOps? gitOps,
     PrOpener? prOpener,
     StationGitService? provisioner,
     RootCheckout? root,
+    GitRunner? gitRunner,
   }) : _gitOps = gitOps,
        _prOpener = prOpener,
        _provisioner = provisioner,
-       _root = root;
+       _root = root,
+       _gitRunner = gitRunner;
 
   final GitOps? _gitOps;
   final PrOpener? _prOpener;
   final StationGitService? _provisioner;
   final RootCheckout? _root;
+  final GitRunner? _gitRunner;
 
   /// Returns a copy with [prOpener] wired for land — the composition seam the
   /// substation-scoped `GitHubGridAssets` uses to ADD PR-opening onto the git
@@ -436,6 +500,7 @@ class GitSourceControl
     prOpener: prOpener,
     provisioner: _provisioner,
     root: _root,
+    gitRunner: _gitRunner,
   );
 
   @override
@@ -521,6 +586,61 @@ class GitSourceControl
       body: body,
     );
     return result.isOpened ? PrRef(result.ref!.url) : null;
+  }
+
+  @override
+  Future<LandPushOutcome> pushForBranch({
+    required String workspaceDir,
+    required String remote,
+    required String branch,
+  }) async {
+    // `--force-with-lease` ALWAYS (`tg-w3c`): a rework round rebased this
+    // branch, so a plain `git push` is refused non-fast-forward. It is the
+    // circuit's OWN branch, so forcing is safe; the lease still refuses if a
+    // racing writer moved `origin/$branch` since the last fetch. `-u` keeps
+    // upstream set (so a later `hasUnpushedCommits` reads clear), matching
+    // [GitOps.pushSetUpstream]. A `null` runner ⇒ the real, clean-env
+    // [SystemGitRunner] (mirrors [RebaseCapability]'s own default).
+    final runner = _gitRunner ?? SystemGitRunner();
+    final result = await runner.run(
+      workingDirectory: workspaceDir,
+      args: ['push', '--force-with-lease', '-u', remote, branch],
+    );
+    return LandPushOutcome(ok: result.ok, output: result.output);
+  }
+
+  @override
+  Future<LandPrOutcome> openOrReusePr({
+    required String workspaceDir,
+    required String branch,
+    required String baseBranch,
+    required String title,
+    String body = '',
+  }) async {
+    final result = await _prOpener!.open(
+      workDir: workspaceDir,
+      branch: branch,
+      baseBranch: baseBranch,
+      title: title,
+      body: body,
+    );
+    if (result.isOpened) return LandPrOutcome.opened(result.ref!.url);
+    // Idempotent (`tg-w3c`): `gh pr create` refusing because round one's PR is
+    // still OPEN is a SUCCESS, not a failure — the branch is delivered and the
+    // PR is there. Reuse its url (parsed from gh's refusal, which prints it);
+    // an "already exists" without a parseable url still counts as reused (the
+    // PR exists) rather than escalating a DONE bead.
+    //
+    // Refreshing the reused PR's BODY with the new round's receipt (the task's
+    // OPTIONAL `gh pr edit`) is deferred: [PrOpener] only OPENS, so an edit
+    // would need a gh-runner seam threaded through the composition — out of
+    // scope for the escalation fix. The force-push already updated the PR's
+    // diff; only the receipt text lags a round.
+    final reason = result.failure?.reason ?? 'pr open did not complete';
+    if (isPrAlreadyOpen(reason)) {
+      return LandPrOutcome.reused(extractPrUrl(reason) ?? '');
+    }
+    return LandPrOutcome.failed(reason);
   }
 }
 
