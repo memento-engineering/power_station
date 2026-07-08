@@ -158,7 +158,13 @@ String _workListId(Branch root) =>
     _branchWhere(root, (s) => s is WorkList).branchId;
 
 ServiceBundle _gitServices(Fakes f) => ServiceBundle(
-  sourceControl: GitSourceControl(gitOps: GitOps(f.git), prOpener: f.pr),
+  // gitRunner: the SAME recording fake gitOps wraps — the rework-aware
+  // force-with-lease push (`tg-w3c`) records offline (never real git).
+  sourceControl: GitSourceControl(
+    gitOps: GitOps(f.git),
+    gitRunner: f.git,
+    prOpener: f.pr,
+  ),
 );
 
 const _tgConfig = SubstationConfig(substationId: 'tg', ownedSubstations: {'tg'});

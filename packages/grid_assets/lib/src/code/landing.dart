@@ -39,6 +39,14 @@
 /// [ReceiptCapableSourceControl] (`code_capabilities.dart`) is the power_station-
 /// local stopgap `LandCapability` detects via `is` to actually thread it into
 /// the real PR body today.
+///
+/// **Rework-aware delivery (`tg-w3c`)**: after a rework round REBASES the
+/// branch, the `land` step's plain push is refused non-fast-forward and its
+/// `gh pr create` errors "already exists" — wedging a DONE, approved bead into
+/// escalation. [ReworkAwareSourceControl] is the SAME `is`-detected stopgap
+/// posture: force-with-lease push + idempotent (reuse-an-open-PR) open, each
+/// returning the git/gh output so the land step stamps the stderr tail as the
+/// FT-1 `failureReason`.
 library;
 
 import 'dart:io';
@@ -236,6 +244,123 @@ String buildCircuitReceipt({
     );
   }
   return b.toString();
+}
+
+/// A [SourceControl] widened for REWORK-AWARE delivery (bead `tg-w3c`) — the
+/// same power_station-local, `is`-detected stopgap posture as
+/// [ReceiptCapableSourceControl] / [TreeVerifiableSourceControl]
+/// (`code_capabilities.dart`), but for the two land-step operations a
+/// preceding REWORK ROUND breaks once it rebases the bead branch (live
+/// evidence: tg-hsh round 2, session tgdog-6d8):
+///
+///  1. **push** — a rework round REBASES the branch, so its plain `git push`
+///     (`SourceControl.push`, `git push -u`) is refused NON-FAST-FORWARD.
+///     [pushForBranch] force-pushes with `--force-with-lease` ALWAYS — safe
+///     because it is the CIRCUIT'S OWN branch (`grid/<beadId>`), and the lease
+///     still refuses if a racing writer moved the remote out from under it.
+///     It returns the git result (ok + combined output) — the engine's
+///     `SourceControl.push` is `void`, dropping BOTH the force semantics and
+///     the stderr the land step must stamp as its `failureReason`.
+///  2. **PR open** — round one's PR is still OPEN, so `gh pr create`
+///     (`SourceControl.openPr`) errors "a pull request already exists".
+///     [openOrReusePr] treats an already-open PR as SUCCESS (returns its url)
+///     instead of a null that becomes a generic `Failed` → retry →
+///     breaker-exhausted → escalation of a bead whose work was DONE and
+///     approved.
+///
+/// [LandCapability] detects this via `is` and prefers these over the plain
+/// [SourceControl.push] / [SourceControl.openPr]; a bare [SourceControl] (a
+/// test fake, or a future non-Git impl) still lands through the unwidened
+/// interface methods.
+abstract interface class ReworkAwareSourceControl implements SourceControl {
+  /// Force-with-lease push of [branch] to [remote] from [workspaceDir] — the
+  /// rework-safe replacement for [SourceControl.push]. Returns the push's
+  /// success plus the git combined output (the land step stamps its
+  /// [LandPushOutcome.output] TAIL as the FT-1 `failureReason` on failure).
+  Future<LandPushOutcome> pushForBranch({
+    required String workspaceDir,
+    required String remote,
+    required String branch,
+  });
+
+  /// Opens a PR for [branch] against [baseBranch] with [body], or — when one is
+  /// already OPEN for [branch] — REUSES it (idempotent). Returns the url on an
+  /// open OR a reuse, or a failure reason (the gh stderr) when neither.
+  Future<LandPrOutcome> openOrReusePr({
+    required String workspaceDir,
+    required String branch,
+    required String baseBranch,
+    required String title,
+    String body,
+  });
+}
+
+/// The result of [ReworkAwareSourceControl.pushForBranch] — the push's success
+/// and its combined git stdout+stderr, so the land step can stamp the
+/// [output] tail as the FT-1 `failureReason` on a non-[ok] push.
+class LandPushOutcome {
+  /// Creates the outcome.
+  const LandPushOutcome({required this.ok, required this.output});
+
+  /// Whether the force-with-lease push succeeded.
+  final bool ok;
+
+  /// The git combined stdout+stderr (empty on a clean push).
+  final String output;
+}
+
+/// The result of [ReworkAwareSourceControl.openOrReusePr] — a [url] on a fresh
+/// open OR a reuse ([reused] true when an already-open PR was adopted), or a
+/// [failureReason] (the gh stderr) when neither.
+class LandPrOutcome {
+  const LandPrOutcome._({this.url, this.reused = false, this.failureReason});
+
+  /// A PR was freshly opened at [url].
+  factory LandPrOutcome.opened(String url) => LandPrOutcome._(url: url);
+
+  /// An already-open PR for the branch was REUSED (idempotent land) at [url].
+  factory LandPrOutcome.reused(String url) =>
+      LandPrOutcome._(url: url, reused: true);
+
+  /// Neither open nor reuse — [reason] is the gh stderr the land step stamps.
+  factory LandPrOutcome.failed(String reason) =>
+      LandPrOutcome._(failureReason: reason);
+
+  /// The opened/reused PR url; null on failure.
+  final String? url;
+
+  /// Whether an already-open PR was reused rather than freshly opened.
+  final bool reused;
+
+  /// The failure reason (gh stderr); null on success.
+  final String? failureReason;
+
+  /// Whether the land delivered a PR (opened or reused).
+  bool get ok => url != null;
+}
+
+/// Whether [ghOutput] is `gh pr create`'s "a pull request … already exists"
+/// refusal — the rework-round symptom (round one's PR is still open). Detected
+/// so [ReworkAwareSourceControl.openOrReusePr] treats it as success rather than
+/// a failure that escalates a DONE bead.
+bool isPrAlreadyOpen(String ghOutput) => ghOutput.contains('already exists');
+
+/// The PR url embedded in gh output — both a successful `gh pr create` (stdout)
+/// and its "already exists" refusal (which prints the open PR's url) carry one.
+/// Returns null when none is present.
+String? extractPrUrl(String output) =>
+    RegExp(r'https?://\S+/pull/\d+').firstMatch(output)?.group(0);
+
+/// The TAIL of git/gh combined output — what the land step stamps as its FT-1
+/// `failureReason` so an operator sees WHY without forensics. The useful line
+/// is at the END (git/gh print progress first, the fatal message last) and the
+/// engine truncates a `failureReason` to its FIRST `kMaxReasonChars`; taking
+/// the tail keeps the diagnosis, not the noise. A leading `…` marks a cut.
+String landReasonTail(String output, [int max = 400]) {
+  final trimmed = output.trim();
+  return trimmed.length <= max
+      ? trimmed
+      : '…${trimmed.substring(trimmed.length - max)}';
 }
 
 /// The bead's OWN Validation Plan command — mirrors `committee.dart`'s

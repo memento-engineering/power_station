@@ -60,7 +60,13 @@ final Map<String, String> _allA = {for (final n in kCriticNodes) n: 'A'};
 /// The live `code` registry + a git ServiceBundle so the land capability runs
 /// its commit→push→PR through the fakes.
 ServiceBundle _gitServices(Fakes f) => ServiceBundle(
-  sourceControl: GitSourceControl(gitOps: GitOps(f.git), prOpener: f.pr),
+  // gitRunner: the SAME recording fake gitOps wraps — the rework-aware
+  // force-with-lease push (`tg-w3c`) records offline (never real git).
+  sourceControl: GitSourceControl(
+    gitOps: GitOps(f.git),
+    gitRunner: f.git,
+    prOpener: f.pr,
+  ),
 );
 
 Future<void> _settle() async {
