@@ -50,7 +50,7 @@ class _Probe extends StatelessSeed {
 /// asset without the full RawAssetGrid → Station → Substations spine.
 Seed _underSubstation(String name, String root, Seed child) =>
     InheritedSeed<sdk.SubstationScope>(
-      value: sdk.SubstationScope(name: name, root: root),
+      value: sdk.SubstationScope(name: name, root: root, prefix: name),
       child: child,
     );
 
@@ -131,28 +131,29 @@ void main() {
       expect(sc!.canLand, isFalse);
     });
 
-    test('the provided ServiceBundle carries an EMPTY sourceControlsByRoot — a '
-        'stray root name resolves back to the ONE substation source control '
-        '(no string-keyed bundle map)', () {
+    test('the provided ServiceBundle carries the substation\'s ONE source '
+        'control, and sourceControlOf resolves it by TREE POSITION — the '
+        'string-keyed bundle map is GONE from the type itself (the fossil '
+        'track deleted sourceControlsByRoot/sourceControlFor outright)', () {
       ServiceBundle? bundle;
+      SourceControl? resolved;
       mount(
         _underSubstation(
           'power_station',
           '/work/ps',
           GitGridAssets(
-            child: _Probe(
-              (ctx) => bundle =
-                  ctx.getInheritedSeedOfExactType<ServiceBundle>(),
-            ),
+            child: _Probe((ctx) {
+              bundle = ctx.getInheritedSeedOfExactType<ServiceBundle>();
+              resolved = sourceControlOf(ctx);
+            }),
           ),
         ),
       );
       expect(bundle, isNotNull);
-      expect(bundle!.sourceControlsByRoot, isEmpty);
-      // Any name — including a non-existent one — collapses to the substation's
-      // single source control (the fallback IS the resolution now).
-      expect(bundle!.sourceControlFor('whatever'), same(bundle!.sourceControl));
-      expect(bundle!.sourceControlFor(null), same(bundle!.sourceControl));
+      expect(bundle!.sourceControl, isNotNull);
+      // The v3 resolution: bead → substation → root — the nearest bundle IS
+      // the substation's own; no name ever selects against a map.
+      expect(resolved, same(bundle!.sourceControl));
     });
 
     test('mounted outside a Substation it refuses LOUD (an asset without a '
@@ -391,7 +392,7 @@ void main() {
       expect(reg, isNotNull);
       expect(reg!.ids, contains('claude'));
       // The substation scope the asset resolved against.
-      expect(scope, const sdk.SubstationScope(name: 'the_grid', root: '/work/the_grid'));
+      expect(scope, const sdk.SubstationScope(name: 'the_grid', root: '/work/the_grid', prefix: 'the_grid'));
     });
   });
 
@@ -486,6 +487,7 @@ class _ReprovidingScopeState extends State<_ReprovidingScope> {
         value: sdk.SubstationScope(
           name: seed.controller._name,
           root: seed.controller._root,
+          prefix: seed.controller._name,
         ),
         child: seed.child,
       );
