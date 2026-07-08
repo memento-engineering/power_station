@@ -397,6 +397,21 @@ class GitSourceControl
   final StationGitService? _provisioner;
   final RootCheckout? _root;
 
+  /// Returns a copy with [prOpener] wired for land — the composition seam the
+  /// substation-scoped `GitHubGridAssets` uses to ADD PR-opening onto the git
+  /// asset (Track F, `tg-5r9`): `GitGridAssets` provides the provision +
+  /// commit/push half (`canLand` false until a PR opener exists); mounting
+  /// `GitHubGridAssets` below it enriches THIS source control with the opener,
+  /// flipping [canLand] true. The provisioner / gitOps / root are carried
+  /// through unchanged, so the enriched impl provisions the SAME worktree it
+  /// lands from.
+  GitSourceControl withPrOpener(PrOpener prOpener) => GitSourceControl(
+    gitOps: _gitOps,
+    prOpener: prOpener,
+    provisioner: _provisioner,
+    root: _root,
+  );
+
   @override
   bool get canLand => _gitOps != null && _prOpener != null;
 
