@@ -120,8 +120,9 @@ class GitGridAssets extends SingleChildStatelessSeed {
 ///
 /// Authored BELOW [GitGridAssets] in the substation's `Nest`
 /// (`[GitGridAssets(...), GitHubGridAssets()]` folds outermost-first, so
-/// GitGridAssets is the ancestor and this is its descendant). It reads the
-/// ambient [ServiceBundle] GitGridAssets provided, enriches its
+/// GitGridAssets is the ancestor and this is its descendant). It OBSERVES the
+/// ambient [ServiceBundle] GitGridAssets provided (`dependOn*`, so a
+/// re-provisioned bundle re-enriches — D-H, ADR-0008), enriches its
 /// [GitSourceControl] with the PR [prOpener] ([GitSourceControl.withPrOpener] →
 /// [canLand] true), and RE-provides the bundle so the work subtree below sees
 /// the land-capable source control.
@@ -141,7 +142,12 @@ class GitHubGridAssets extends SingleChildStatelessSeed {
 
   @override
   Seed buildWithChild(TreeContext context, Seed child) {
-    final ambient = context.getInheritedSeedOfExactType<ServiceBundle>();
+    // OBSERVE the ambient bundle (D-H: watch deps in `build`, ADR-0008) — a
+    // non-subscribing `get*` here would leave this asset re-providing a bundle
+    // that wraps the STALE source control after GitGridAssets (which watches
+    // `SubstationScope`) re-provides a fresh one. The subscribing read rebuilds
+    // this node so land stays enriched onto the CURRENT source control.
+    final ambient = context.dependOnInheritedSeedOfExactType<ServiceBundle>();
     final sourceControl = ambient?.sourceControl;
     final opener = prOpener;
     if (opener != null && sourceControl is GitSourceControl) {
