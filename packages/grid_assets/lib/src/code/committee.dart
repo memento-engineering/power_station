@@ -117,9 +117,31 @@ const List<String> kCommitteeRubrics = [kGatingRubric, ...kLlmRubrics];
 /// The workspace-relative directory each critic writes its verdict / rc into.
 const String _critiqueDir = '.grid/critique';
 
-/// The hygiene step id every critic lane `dependsOn` (gate-integrity #3) —
-/// wipes [_critiqueDir] before any lane can read or write this round.
+/// The hygiene step id every critic lane transitively `dependsOn`
+/// (gate-integrity #3) — wipes [_critiqueDir] before any lane can read or
+/// write this round.
 const String kClearCritiqueStep = 'clear-critique';
+
+/// The diff-pinning pre-critic step id (bead `pow-6wo`) every critic lane
+/// `dependsOn`. [PinDiffCapability] computes the bead BRANCH'S OWN delta
+/// (`git diff origin/<base>...HEAD`) and pins it as the critics' review scope —
+/// and, when that delta is EMPTY, [Gate]s the whole round (a stale/no-op bead)
+/// so the critics never grade PRE-EXISTING mainline work as if it were the
+/// bead's diff (the live finding this step exists to close). Runs AFTER
+/// [kClearCritiqueStep] so its pinned-diff file survives that round's wipe.
+const String kPinDiffStep = 'pin-diff';
+
+/// The file [PinDiffCapability] pins the review scope into — the bead branch's
+/// own diff, under [_critiqueDir] (round-fresh: cleared every round by
+/// [kClearCritiqueStep], which [kPinDiffStep] `dependsOn`, then rewritten). Each
+/// LLM critic's prompt points here as its EXCLUSIVE review scope.
+const String _pinnedDiffName = 'pinned.diff';
+
+/// The absolute path the pinned review-scope diff lives at under [workspaceDir]
+/// — derived identically by [PinDiffCapability] (the writer) and
+/// [CriticCapability.buildCriticPrompt] (which names it to the critic).
+String pinnedDiffPath(String workspaceDir) =>
+    p.join(workspaceDir, _critiqueDir, _pinnedDiffName);
 
 /// A pluggable source of a rubric's prose text by id (D-9: the Packaged-AI-Asset
 /// loader replaces the inline placeholder). Returns the rubric body a critic's
@@ -133,9 +155,20 @@ typedef RubricSource = String Function(String rubricId);
 typedef DirectoryClearer = void Function(String dir);
 
 /// The adversarial code-committee circuit (id `code_review`) — a hygiene step
-/// (gate-integrity #3, [ClearCritiqueCapability]) followed by four critic
-/// lanes fanned out in parallel, then a `route` step that joins on all four
-/// and aggregates their grades (M5 Track C / C1).
+/// (gate-integrity #3, [ClearCritiqueCapability]) → a diff-pinning pre-critic
+/// step (bead `pow-6wo`, [PinDiffCapability]) → four critic lanes fanned out in
+/// parallel → a `route` step that joins on all four and aggregates their grades
+/// (M5 Track C / C1).
+///
+/// **Scope-pinning (bead `pow-6wo`)**: [kPinDiffStep] runs BEFORE any critic and
+/// computes the bead branch's OWN delta (`git diff origin/<base>...HEAD`). An
+/// EMPTY delta — the live-arm finding: a branch with ZERO commits beyond
+/// origin/main whose work was already shipped in mainline, yet whose critics
+/// graded that PRE-EXISTING mainline work A/B — [Gate]s the whole round for a
+/// human ruling INSTEAD of reaching the critics. A non-empty delta is pinned to
+/// a file each critic reviews as its EXCLUSIVE scope (never free rein of the
+/// worktree). The four critics `dependsOn` [kPinDiffStep], so its [Gate]
+/// withholds them.
 ///
 /// Reentrant: composed at the same `CircuitScope` seam as any other circuit, so
 /// Track E can drop it in as the `code` circuit's `verify` via a `SubCircuitStep`
@@ -146,28 +179,33 @@ const Circuit kCodeReviewCircuit = Circuit(
   steps: [
     CapabilityStep(stepId: kClearCritiqueStep, capabilityId: kClearCritiqueStep),
     CapabilityStep(
+      stepId: kPinDiffStep,
+      capabilityId: kPinDiffStep,
+      dependsOn: {kClearCritiqueStep},
+    ),
+    CapabilityStep(
       stepId: kGatingRubric,
       capabilityId: 'critic',
       params: {'rubric': kGatingRubric},
-      dependsOn: {kClearCritiqueStep},
+      dependsOn: {kPinDiffStep},
     ),
     CapabilityStep(
       stepId: 'spec-adherence',
       capabilityId: 'critic',
       params: {'rubric': 'spec-adherence'},
-      dependsOn: {kClearCritiqueStep},
+      dependsOn: {kPinDiffStep},
     ),
     CapabilityStep(
       stepId: 'regression-risk',
       capabilityId: 'critic',
       params: {'rubric': 'regression-risk'},
-      dependsOn: {kClearCritiqueStep},
+      dependsOn: {kPinDiffStep},
     ),
     CapabilityStep(
       stepId: 'test-coverage',
       capabilityId: 'critic',
       params: {'rubric': 'test-coverage'},
-      dependsOn: {kClearCritiqueStep},
+      dependsOn: {kPinDiffStep},
     ),
     CapabilityStep(
       stepId: 'route',
@@ -226,6 +264,177 @@ void _clearDirectory(String dir) {
   final d = Directory(dir);
   if (d.existsSync()) d.deleteSync(recursive: true);
   d.createSync(recursive: true);
+}
+
+/// Pins the CRITICS' REVIEW SCOPE to the bead branch's OWN delta (bead
+/// `pow-6wo`) — a [ServiceCapability] every critic lane `dependsOn`, so it
+/// always runs BEFORE any critic and can withhold them.
+///
+/// **The invariant it protects (LOUD-or-gone)**: a critic must grade the
+/// **bead branch's own delta**, never the ambient worktree. The live-arm
+/// finding: 4 of 6 ready beads were already shipped in mainline; for two the
+/// branch had ZERO commits beyond origin/main, yet the critics graded that
+/// PRE-EXISTING mainline work A/B-range as if it were the bead's diff (one
+/// spec-adherence A explicitly cited a months-old mainline commit). Nothing
+/// pinned the review to the branch's own delta.
+///
+/// This step computes that delta once, up front:
+///  - `git log --oneline origin/<base>..HEAD` — the commit list under review
+///    (provenance);
+///  - `git diff origin/<base>...HEAD` — the branch's own change from the
+///    MERGE-BASE (three-dot: a base that moved forward while the bead ran can
+///    never widen the scope), pinned to [pinnedDiffPath] for the critics.
+///
+/// Three terminals:
+///  - **EMPTY delta ⇒ [Gate]** — the distinct no-op outcome. A branch with no
+///    reviewable change routes to a human ruling INSTEAD of reaching the
+///    critics (a stale bead whose work is already in mainline, or a net-zero
+///    diff). The critics `dependsOn` this step, so the [Gate] withholds them —
+///    they never run against a scope that isn't the bead's.
+///  - **git could not compute the delta ⇒ [Failed]** — LOUD. An unresolvable
+///    `origin/<base>` (or a `git` that won't launch) means the scope is
+///    UNKNOWN; failing closed routes to supervision rather than silently
+///    gating (a false stale-bead flag) or silently advancing (critics with an
+///    empty scope).
+///  - **non-empty delta ⇒ [Ok]** — the pinned diff is written and the round
+///    proceeds; the [Ok] payload carries route-style provenance
+///    (`base`/`commits`/`diffBytes`).
+///
+/// Offline/dry-run posture: a null [Workspace], or a workspace directory that
+/// does not exist on disk (the synthetic `/grid/worktrees/...` path an offline
+/// suite mounts, or a build with no worktree materialized), skips straight to
+/// [Ok] with NO git call — the same no-op posture as
+/// [GitSourceControl.provisionWorkspace] / [AgentCapability] pub-linkage. A
+/// LIVE review always has a real worktree the agent just worked in, so the
+/// scope guard runs when it matters.
+class PinDiffCapability extends ServiceCapability {
+  /// Creates the capability, optionally over an injected [runner] (tests
+  /// inject a recording/canned fake — Fakes, not mocks); defaults to the real
+  /// [SystemGitRunner], mirroring [RebaseCapability]'s own seam.
+  const PinDiffCapability({GitRunner? runner}) : _runner = runner;
+
+  final GitRunner? _runner;
+
+  @override
+  Future<StepOutcome> run(TreeContext context, StepArgs args) async {
+    // Read the ambient workspace at ENTRY (while mounted); after every await
+    // only the captured values + the cancel token are touched.
+    final workspace = context.getInheritedSeedOfExactType<Workspace>();
+    if (workspace == null) return const Ok();
+    final workspaceDir = workspace.workspaceDir;
+    // Offline/dry-run: no real worktree to diff — no-op (same posture as
+    // GitSourceControl.provisionWorkspace / AgentCapability._linkWorkspace).
+    if (!Directory(workspaceDir).existsSync()) return const Ok();
+
+    final runner = _runner ?? SystemGitRunner();
+    final baseRef = 'origin/${workspace.baseBranch}';
+
+    // The commit list on THIS branch beyond the base (provenance; `log base..HEAD`).
+    final log = await runner.run(
+      workingDirectory: workspaceDir,
+      args: ['log', '--oneline', '$baseRef..HEAD'],
+    );
+    if (args.cancel.isCancelled) return const Failed('cancelled');
+
+    // The pinned review scope — the branch's OWN delta from the merge-base
+    // (`diff base...HEAD`, three-dot).
+    final diff = await runner.run(
+      workingDirectory: workspaceDir,
+      args: ['diff', '$baseRef...HEAD'],
+    );
+    if (args.cancel.isCancelled) return const Failed('cancelled');
+
+    // git could not compute the delta (unresolvable base ref, or a git that
+    // won't launch) — the scope is UNKNOWN. Fail LOUD (never a silent gate that
+    // masquerades as a stale bead, nor a silent advance handing critics an
+    // empty scope).
+    if (!diff.ok) {
+      return Failed(
+        'pin-diff: could not compute `git diff $baseRef...HEAD` in '
+        '$workspaceDir — ${_reasonTail(diff.output)}',
+      );
+    }
+
+    final commits = _commitLines(log.output);
+    final diffText = diff.output;
+
+    // EMPTY delta ⇒ the distinct no-op terminal: a human GATE, not the critics.
+    if (diffText.trim().isEmpty) {
+      return Gate(
+        commits.isEmpty
+            ? 'pin-diff: stale/no-op bead — the branch has ZERO commits beyond '
+                  '$baseRef, so `git diff $baseRef...HEAD` is EMPTY. Nothing for '
+                  'the critics to review (the work is likely already in '
+                  'mainline). Routed for a human ruling instead of critique.'
+            : 'pin-diff: no-op bead — ${commits.length} commit(s) beyond '
+                  '$baseRef, but their net `git diff $baseRef...HEAD` is EMPTY. '
+                  'Nothing for the critics to review. Routed for a human ruling '
+                  'instead of critique.',
+      );
+    }
+
+    // Pin the scope for the critics (round-fresh — clear-critique wiped
+    // .grid/critique first, and this step `dependsOn` it). A write that cannot
+    // land means the critics would fall back to free rein of the worktree — the
+    // exact failure being closed — so it fails LOUD, never a silent advance.
+    try {
+      _writePinnedDiff(workspaceDir, baseRef, workspace.branch, commits, diffText);
+    } catch (e) {
+      return Failed('pin-diff: could not write the pinned diff — $e');
+    }
+
+    return Ok({
+      'base': baseRef,
+      'commits': '${commits.length}',
+      'diffBytes': '${diffText.length}',
+    });
+  }
+
+  /// Writes the pinned review scope to [pinnedDiffPath]: a short header naming
+  /// the branch, the base, and the commits under review, followed by the raw
+  /// `git diff` body the critics read.
+  void _writePinnedDiff(
+    String workspaceDir,
+    String baseRef,
+    String branch,
+    List<String> commits,
+    String diff,
+  ) {
+    final header = StringBuffer()
+      ..writeln('# Pinned review scope: $branch vs $baseRef')
+      ..writeln('# `git diff $baseRef...HEAD` — the ONLY code this bead changed.')
+      ..writeln('# Commits under review (`git log $baseRef..HEAD`):');
+    if (commits.isEmpty) {
+      header.writeln('#   (none)');
+    } else {
+      for (final c in commits) {
+        header.writeln('#   $c');
+      }
+    }
+    header.writeln();
+    File(pinnedDiffPath(workspaceDir))
+      ..createSync(recursive: true)
+      ..writeAsStringSync('$header$diff');
+  }
+}
+
+/// The non-empty, trimmed lines of a `git log --oneline` body — the commits on
+/// the branch beyond the base, in `<sha> <subject>` form.
+List<String> _commitLines(String logOutput) => logOutput
+    .split('\n')
+    .map((l) => l.trim())
+    .where((l) => l.isNotEmpty)
+    .toList();
+
+/// The TAIL of git combined output — the useful diagnosis is the LAST line
+/// (git prints progress first, the fatal message last), and a `Failed` reason
+/// is truncated to its FIRST chars downstream; taking the tail keeps the
+/// diagnosis, not the noise. A leading `…` marks a cut.
+String _reasonTail(String output, [int max = 300]) {
+  final trimmed = output.trim();
+  return trimmed.length <= max
+      ? trimmed
+      : '…${trimmed.substring(trimmed.length - max)}';
 }
 
 /// One critic, in isolation — a [ProcessCapability] whose `params['rubric']`
@@ -441,6 +650,16 @@ class CriticCapability extends ProcessCapability {
   /// where the critic wandered. ([_strayVerdict] is the read-side belt for a
   /// critic that still writes off-path some other way.)
   ///
+  /// **Scope-pinning (bead `pow-6wo`)**: the prompt names the pinned-diff file
+  /// ([pinnedDiffPath]) [PinDiffCapability] wrote — the bead branch's OWN delta
+  /// (`git diff origin/<base>...HEAD`) — as the critic's EXCLUSIVE review scope.
+  /// The live finding this closes: with the bead's work already in mainline,
+  /// critics graded PRE-EXISTING mainline code A/B as if it were the bead's
+  /// diff. The instruction is explicit that code outside the pinned diff is OUT
+  /// OF SCOPE, so a critic cannot credit (or blame) work the bead did not do.
+  /// (An EMPTY delta never reaches here — [PinDiffCapability] gates the round
+  /// upstream.)
+  ///
   /// Exposed for unit tests.
   String buildCriticPrompt(
     Bead bead,
@@ -449,6 +668,7 @@ class CriticCapability extends ProcessCapability {
     String workspaceDir,
   ) {
     final path = p.join(workspaceDir, _critiqueDir, '$rubric.json');
+    final diffPath = pinnedDiffPath(workspaceDir);
     final b = StringBuffer()
       ..writeln('# Code review — rubric: `$rubric`')
       ..writeln()
@@ -460,6 +680,20 @@ class CriticCapability extends ProcessCapability {
       ..writeln('## Rubric: $rubric')
       ..writeln(_rubricText(rubric))
       ..write(_beadBlock(bead))
+      ..writeln()
+      ..writeln('## Review scope — the pinned diff (READ THIS FIRST)')
+      ..writeln(
+        'Your review is scoped to EXACTLY this bead branch\'s OWN change — its '
+        'delta from the base branch (`git diff origin/<base>...HEAD`), pinned '
+        'at the ABSOLUTE path `$diffPath`. Read that file FIRST: it is the ONLY '
+        'code this bead changed.',
+      )
+      ..writeln(
+        'Grade ONLY what that diff changes. Code the diff does not touch is OUT '
+        'OF SCOPE — do NOT grade pre-existing code, and do NOT credit (or blame) '
+        'work that is already in mainline outside this diff. If you cannot point '
+        'a claim to a hunk of the pinned diff, it does not belong in your grade.',
+      )
       ..writeln()
       ..writeln('## Your verdict')
       ..writeln(

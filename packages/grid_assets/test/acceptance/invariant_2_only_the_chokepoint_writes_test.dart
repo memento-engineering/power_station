@@ -150,10 +150,13 @@ void main() {
         await _settle();
         state.push(_stateAt(completed: {kAgentNode}));
         await _settle();
-        // clear-critique (gate-integrity #3) ran for real through the
-        // chokepoint (a ServiceCapability, no provider spawn); re-project its
-        // completion so the four critics — which now `dependsOn` it — mount.
-        state.push(_stateAt(completed: {kAgentNode, kClearCritiqueNode}));
+        // clear-critique (gate-integrity #3) then pin-diff (scope-pinning, bead
+        // pow-6wo) each ran for real through the chokepoint (ServiceCapabilities,
+        // no provider spawn); re-project both completions so the four critics —
+        // which now transitively `dependsOn` them — mount.
+        state.push(
+          _stateAt(completed: {kAgentNode, kClearCritiqueNode, kPinDiffNode}),
+        );
         await _settle();
         expect(f.provider.started, hasLength(5),
             reason: 'the four committee critics fanned out after the agent');

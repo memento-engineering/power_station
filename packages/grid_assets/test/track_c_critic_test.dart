@@ -184,6 +184,25 @@ void main() {
       expect(prompt, contains('copy it byte-for-byte'));
     });
 
+    test('the prompt pins the review scope to the pinned diff (bead pow-6wo) — '
+        'the critic reviews the bead branch delta, not the worktree', () {
+      final prompt = const CriticCapability().buildCriticPrompt(
+        bead('tg-1'),
+        'spec-adherence',
+        'tg-1/review/spec-adherence',
+        '/w/tg-1',
+      );
+      // The critic is pointed at the pinned-diff file as its EXCLUSIVE scope
+      // (the ABSOLUTE path PinDiffCapability wrote it to).
+      expect(prompt, contains('/w/tg-1/.grid/critique/pinned.diff'));
+      expect(prompt, contains('Review scope'));
+      expect(prompt, contains('git diff origin/<base>...HEAD'));
+      // The load-bearing instruction: pre-existing / already-in-mainline code
+      // outside the diff is OUT OF SCOPE (the live-finding fix).
+      expect(prompt, contains('OUT OF SCOPE'));
+      expect(prompt, contains('already in mainline'));
+    });
+
     test('the prompt carries the full bead', () {
       final rich = bead('tg-1').copyWith(
         title: 'Wire the federation bus',
