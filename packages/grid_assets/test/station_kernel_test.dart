@@ -139,10 +139,14 @@ void main() {
         await _settle();
         state.push(_stateAt(completed: {kAgentNode}));
         await _settle();
-        // clear-critique (gate-integrity #3, dep-free) ran for real — no
-        // provider spawn (a ServiceCapability); re-project its completion so
-        // the four critics, which now `dependsOn` it, become ready.
-        state.push(_stateAt(completed: {kAgentNode, kClearCritiqueNode}));
+        // clear-critique (gate-integrity #3, dep-free) then pin-diff
+        // (scope-pinning, bead pow-6wo) each ran for real — no provider spawn
+        // (both ServiceCapabilities; pin-diff no-ops to Ok since the synthetic
+        // worktree does not exist on disk). Re-project their completions so the
+        // four critics, which now transitively `dependsOn` them, become ready.
+        state.push(_stateAt(
+          completed: {kAgentNode, kClearCritiqueNode, kPinDiffNode},
+        ));
         await _settle();
 
         expect(

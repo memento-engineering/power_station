@@ -97,19 +97,33 @@ String _c(String stepId) => 'critic(tgdog-s/tg-1/$stepId)';
 
 void main() {
   group('Track C4 — the code_review committee frontier', () {
-    test('at mount, clear-critique starts ALONE (gate-integrity #3) — the '
-        'four critics `dependsOn` it and wait', () {
+    test('at mount, clear-critique starts ALONE (gate-integrity #3) — pin-diff '
+        'and the four critics `dependsOn` it and wait', () {
       final c = _Committee('tg-1')..mount();
       addTearDown(c.dispose);
       expect(c.events, ['START clear-critique(tgdog-s/tg-1/clear-critique)']);
     });
 
-    test('once clear-critique completes, the four critics fan out IN '
+    test('once clear-critique completes, pin-diff starts ALONE (scope-pinning, '
+        'bead pow-6wo) — the four critics `dependsOn` it and wait', () {
+      final c = _Committee('tg-1')..mount();
+      addTearDown(c.dispose);
+      c.advance({'tg-1/clear-critique': _done()});
+      // pin-diff is the sole dependent of clear-critique — the critics wait on
+      // IT, so pin-diff START is the only mount (clear-critique also STOPs on
+      // the reconcile); no critic or route mounts yet.
+      expect(c.events, contains('START pin-diff(tgdog-s/tg-1/pin-diff)'));
+      expect(c.events.any((e) => e.contains('critic(')), isFalse);
+      expect(c.events.any((e) => e.contains('route(')), isFalse);
+    });
+
+    test('once pin-diff completes, the four critics fan out IN '
         'PARALLEL; route is withheld', () {
       final c = _Committee('tg-1')..mount();
       addTearDown(c.dispose);
       c.advance({'tg-1/clear-critique': _done()});
-      // All four critic lanes mount together (dependsOn ONLY clear-critique →
+      c.advance({'tg-1/clear-critique': _done(), 'tg-1/pin-diff': _done()});
+      // All four critic lanes mount together (dependsOn ONLY pin-diff →
       // parallel fan-out amongst themselves).
       expect(
         c.events,
@@ -129,6 +143,7 @@ void main() {
       final c = _Committee('tg-1')..mount();
       addTearDown(c.dispose);
       c.advance({'tg-1/clear-critique': _done()});
+      c.advance({'tg-1/clear-critique': _done(), 'tg-1/pin-diff': _done()});
 
       // Three of four complete — the barrier stays closed (negative control).
       c.advance({

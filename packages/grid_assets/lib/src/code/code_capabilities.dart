@@ -682,6 +682,10 @@ DefaultCapabilityRegistry buildCodeRegistry({
       'rebase': RebaseCapability(runner: gitRunner),
       'revalidate': RevalidateCapability(runner: shellRunner),
       kClearCritiqueStep: ClearCritiqueCapability(clearer: critiqueDirClearer),
+      // The diff-pinning pre-critic step (bead `pow-6wo`) shares the `code`
+      // registry's git seam ([gitRunner]) — the SAME recording fake `rebase`
+      // rides offline; absent ⇒ the real [SystemGitRunner].
+      kPinDiffStep: PinDiffCapability(runner: gitRunner),
     },
     circuits: const {
       'code': kCodeCircuit,

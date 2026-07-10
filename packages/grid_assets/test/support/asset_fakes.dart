@@ -21,10 +21,12 @@ Circuit _codeCircuit(Bead bead) => kCodeCircuit;
 
 /// The committee-wired `code` circuit's node paths (relative to the work bead),
 /// in declaration order — `agent` → `review/clear-critique` (gate-integrity
-/// #3) → the four `review/<critic>` lanes → `review/route` → `land`. The
-/// drive helpers + acceptance tests key the cursor off these.
+/// #3) → `review/pin-diff` (scope-pinning, bead `pow-6wo`) → the four
+/// `review/<critic>` lanes → `review/route` → `land`. The drive helpers +
+/// acceptance tests key the cursor off these.
 const String kAgentNode = 'agent';
 const String kClearCritiqueNode = 'review/clear-critique';
+const String kPinDiffNode = 'review/pin-diff';
 const List<String> kCriticNodes = [
   'review/code-validation',
   'review/spec-adherence',
