@@ -14,10 +14,14 @@ and this lane verifies the structure landed whole.
 - **The design field carries all four sections** —
   `## Implementation Plan` (with numbered steps), `## Touches`,
   `## ADR Alignment`, and `## Validation Plan` (with at least one item).
-- **No placeholder tokens** anywhere in the spec — TBD, TODO,
+- **No placeholder tokens** anywhere in the spec's PROSE — TBD, TODO,
   "implement later", "fill in later", "as needed",
   "appropriate error handling", "similar to step N". A spec that defers its own
-  content is not implementation-ready.
+  content is not implementation-ready. Markdown QUOTATION contexts are exempt:
+  fenced code blocks, inline code spans, and `>` blockquote lines are stripped
+  before matching, because a spec that quotes a token as evidence (a `// TODO`
+  comment its plan deletes, an ADR clause cited verbatim) is pointing at work,
+  not deferring it.
 
 ## Bands
 

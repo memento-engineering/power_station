@@ -589,6 +589,12 @@ String specBeadBlock(Bead bead) {
 /// stage can never be silently skipped. Fail-closed: a missing ambient bead
 /// grades F too.
 ///
+/// The placeholder fence reads the spec's PROSE only: markdown quotation
+/// contexts — fenced ``` blocks, inline `code` spans, `>` blockquote lines —
+/// are stripped before matching, so a spec that QUOTES a banned token as
+/// evidence (a `// TODO` comment the plan deletes, an ADR clause or gate note
+/// cited verbatim) is pointing at work, not deferring it, and never parks.
+///
 /// What the structure check does NOT judge — whether the criteria are truly
 /// testable, the plan truly complete, the ADR citations truly load-bearing —
 /// is exactly what the four LLM lanes own.
@@ -624,7 +630,8 @@ class SpecValidationCapability extends ServiceCapability {
 /// says "fill in later" in any spelling is not implementation-ready. Word
 /// tokens (`tbd`/`todo`) match on word boundaries so an identifier that
 /// merely contains the letters never trips; the phrases match verbatim
-/// (case-insensitive).
+/// (case-insensitive). Matched against [_proseOnly] output — a token inside a
+/// markdown quotation context (quoted code, a cited clause) never trips.
 final List<RegExp> _placeholderPatterns = [
   RegExp(r'\btbd\b', caseSensitive: false),
   RegExp(r'\btodo\b', caseSensitive: false),
@@ -672,16 +679,32 @@ List<String> specStructuralFindings(Bead bead) {
     }
   }
 
-  // Placeholder tokens anywhere in the spec.
-  final spec = '$acceptance\n$design';
+  // Placeholder tokens anywhere in the spec's PROSE — quotation contexts
+  // (quoted code, cited clauses) are evidence, not deferral, and never trip.
+  final prose = _proseOnly('$acceptance\n$design');
   for (final pattern in _placeholderPatterns) {
-    final match = pattern.firstMatch(spec);
+    final match = pattern.firstMatch(prose);
     if (match != null) {
       findings.add('placeholder: "${match.group(0)}" — not implementation-ready');
     }
   }
   return findings;
 }
+
+/// [spec] with its markdown QUOTATION contexts blanked — fenced ``` blocks,
+/// `>` blockquote lines, then inline `code` spans (in that order, so a fence's
+/// own backticks are never re-paired as inline spans). Quoted material is what
+/// a spec points AT (code carrying a `// TODO` the plan deletes, an ADR clause
+/// cited verbatim), not a commitment the author defers, so the placeholder
+/// fence never reads it. Each region is replaced by a TWO-space seam: wide
+/// enough that stripping can only ever break a token across it, never splice
+/// one together (every banned phrase joins its words with a single space).
+/// An unterminated fence is left as-is (its content stays scannable —
+/// fail-closed), and inline spans never cross a newline.
+String _proseOnly(String spec) => spec
+    .replaceAll(RegExp('```.*?```', dotAll: true), '  ')
+    .replaceAll(RegExp(r'^[ \t]*>.*$', multiLine: true), '  ')
+    .replaceAll(RegExp('`[^`\n]*`'), '  ');
 
 /// The body of the section whose `## ` heading starts at [headingAt] — the
 /// text after the heading line up to the next `## ` heading (or the end).

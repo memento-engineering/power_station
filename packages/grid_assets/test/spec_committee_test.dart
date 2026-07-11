@@ -257,11 +257,56 @@ void main() {
           contains('appropriate error handling'),
         );
 
-        // "mastodon"/"autodial" must NOT trip the tbd/todo word tokens.
+        // "mastodon"/"autodial" must NOT trip the tbd/todo word tokens —
+        // in the DESIGN field, which the fence actually scans (a notes-only
+        // control would be vacuous: the fence never reads notes).
         final safe = _specced().copyWith(
-          notes: 'the mastodon bridge autodials the relay',
+          design:
+              '${_specced().design}\n'
+              'The mastodon bridge autodials the relay.\n',
         );
         expect(specStructuralFindings(safe), isEmpty);
+      });
+
+      test(
+          'quotation contexts never trip the fence — quoted code and cited '
+          'clauses are evidence, not deferral (negative control)', () {
+        // A fenced block carrying the very comment the plan deletes, inline
+        // spans naming the token, and a blockquote citing a gate note that
+        // uses the banned phrases verbatim.
+        final quoting = _specced().copyWith(
+          design:
+              '${_specced().design}\n'
+              'Delete the stale comment:\n'
+              '```dart\n'
+              '// TODO(tg-32r): migrate to the positional form — TBD.\n'
+              '```\n'
+              'Sweep the residue with `grep -rn TODO lib/` and remove every '
+              'surviving `// TODO` hit.\n'
+              '> Gate note, cited verbatim: rework the fence "as needed" and\n'
+              '> add appropriate error handling around the loader.\n',
+        );
+        expect(specStructuralFindings(quoting), isEmpty);
+
+        // Stripping must never SPLICE a phrase across the seam: the span in
+        // as`retryPolicy`needed is replaced two-spaces-wide, so the banned
+        // single-space "as needed" cannot be manufactured by the strip.
+        final seam = _specced().copyWith(
+          design:
+              '${_specced().design}\n'
+              'Frames retry as`retryPolicy`needed dictates.\n',
+        );
+        expect(specStructuralFindings(seam), isEmpty);
+
+        // The SAME token in plain prose still parks — stripping quotation
+        // never widens what the fence forgives.
+        final deferring = quoting.copyWith(
+          design: '${quoting.design}\nHandle malformed frames as needed.\n',
+        );
+        expect(
+          specStructuralFindings(deferring).single,
+          contains('placeholder: "as needed"'),
+        );
       });
     });
   });
