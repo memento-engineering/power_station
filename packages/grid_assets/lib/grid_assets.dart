@@ -32,6 +32,14 @@
 /// (`space search <query>`) — the substrate agentic skills (`discover`) CALL
 /// instead of reinventing search by inference.
 ///
+/// The VENDED SKILLS (bead `pow-88p`, `extension/skills/`) are those agentic
+/// halves: `discover` is the grid home's HITL front door — it dispatches on
+/// arg shape (topic research / bead advisory / bead directed), researches via
+/// the vended `search` Command, and on the human's yes files an ephemeral
+/// staged bead and hands to `specify`. [kVendedSkills] enumerates them;
+/// [PackagedAssetLoader.renderSkill] renders one for a composing station
+/// (delivery leg: `pow-kzx`).
+///
 /// The DART domain (the typed `grid.dart` envelope + pub dev-time linkage +
 /// `DartCommand`) lives in its sibling pack `dart_grid_assets`.
 library;
