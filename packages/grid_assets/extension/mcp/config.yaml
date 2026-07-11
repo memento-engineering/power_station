@@ -28,6 +28,28 @@ resources:
     description: Are the changes covered by MEANINGFUL (non-vacuous) tests?
     path: rubrics/test-coverage.md
     visibility: public
+  # The spec-readiness pack (bead pow-6ao) — the committee that gates the
+  # SPECIFY stage, upstream of the build. Same loader, same critic machine.
+  - id: spec-validation
+    description: The GATING spec lane — a deterministic structural check over the bead's spec; F on any missing section or placeholder.
+    path: rubrics/spec-validation.md
+    visibility: public
+  - id: coherence
+    description: Does the spec carve scope cleanly from sibling beads AND extend existing code rather than duplicate it?
+    path: rubrics/coherence.md
+    visibility: public
+  - id: adr-alignment
+    description: Does the spec cite and align with the substation's docs/adr register (ADR-0000 amendments included)?
+    path: rubrics/adr-alignment.md
+    visibility: public
+  - id: acceptance-testability
+    description: Are the acceptance criteria testable by exact commands, with a 1:1 validation-plan mapping?
+    path: rubrics/acceptance-testability.md
+    visibility: public
+  - id: plan-completeness
+    description: Is the implementation plan literal and decision-free — exact Dart code, file paths, test commands, commits?
+    path: rubrics/plan-completeness.md
+    visibility: public
 
 # Prompts — the critic prompt template, mustache-templated. `{{rubric}}` /
 # `{{rubricText}}` / `{{bead}}` are substituted per lane (the asset loader's
@@ -46,6 +68,20 @@ prompts:
         required: true
       - name: bead
         description: The full work bead under review (title/task/design/acceptance/notes).
+        required: true
+  - id: spec-critic
+    description: One adversarial spec-readiness critic, grading the bead's SPEC (not a diff) against a single rubric in isolation.
+    path: prompts/spec-critic.md
+    visibility: public
+    args:
+      - name: rubric
+        description: The rubric id this critic grades against (the lane).
+        required: true
+      - name: rubricText
+        description: The rubric's prose bands, loaded from resources/<rubric>.
+        required: true
+      - name: bead
+        description: The full work bead whose acceptance + design fields are the spec under review.
         required: true
 
 # Skills — front-of-house agentic assets in the agentskills SKILL.md format

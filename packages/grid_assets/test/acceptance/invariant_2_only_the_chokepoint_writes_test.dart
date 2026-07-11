@@ -39,12 +39,21 @@ GraphSnapshot _graph({
 
 /// A one-bead STATE snapshot carrying the committee session for `tg-1` at the
 /// given [completed] node set + [grades] (the shared `committeeSession` builds
-/// the per-node cursor + the `grid.result.*` grades the route reads).
+/// the per-node cursor + the `grid.result.*` grades the route reads). The
+/// SPEC phase (bead `pow-6ao`) rides every push fully complete + all-A —
+/// its writes are the same chokepoint mutations this invariant audits, and
+/// its choreography is proven in `spec_stage_acceptance_test.dart`.
 GraphSnapshot _stateAt({
   Set<String> completed = const {},
   Map<String, String> grades = const {},
 }) => _graph(
-  beads: [committeeSession(id: _sid, completed: completed, grades: grades)],
+  beads: [
+    committeeSession(
+      id: _sid,
+      completed: {...kSpecPhaseNodes, ...completed},
+      grades: {...kSpecGradesAllA, ...grades},
+    ),
+  ],
   ready: const {},
 );
 
@@ -129,13 +138,20 @@ void main() {
         kernel.start();
         await _settle();
 
-        // 1) AGENT — a ready owned task mounts the agent; the chokepoint mints the
-        //    session bead (create + the birth stamp = one update). The step's
-        //    provider name is '<sessionId>/<nodePath>'.
+        // 1) SPECIFY → AGENT — a ready owned task mounts specify (the head,
+        //    bead `pow-6ao`); the chokepoint mints the session bead (create +
+        //    the birth stamp = one update). Fast-forward the spec phase (an
+        //    all-pass spec committee via cursor adoption) → the agent swaps
+        //    in. The step's provider name is '<sessionId>/<nodePath>'.
         work.push(_graph(beads: [bead('tg-1')], ready: {'tg-1'}));
         await _settle();
         expect(f.provider.started, hasLength(1));
-        expect(f.provider.started.single.name, _step('agent'));
+        expect(f.provider.started.single.name, _step('specify'));
+        f.provider.emit(Exited(name: _step('specify'), exitCode: 0));
+        await _settle();
+        state.push(_stateAt());
+        await _settle();
+        expect(f.provider.started.last.name, _step('agent'));
 
         // SessionStarted → per-node identity stamped through the chokepoint.
         f.provider.emit(
@@ -158,8 +174,9 @@ void main() {
           _stateAt(completed: {kAgentNode, kClearCritiqueNode, kPinDiffNode}),
         );
         await _settle();
-        expect(f.provider.started, hasLength(5),
-            reason: 'the four committee critics fanned out after the agent');
+        expect(f.provider.started, hasLength(6),
+            reason: 'the four committee critics fanned out after specify + '
+                'the agent');
 
         // 2) COMMITTEE — every critic completes; the STATE source surfaces the
         //    advanced cursor + all-pass grades, and the route joins (await-all),

@@ -39,12 +39,21 @@ GraphSnapshot _graph({
 
 /// A one-bead STATE snapshot carrying the committee session for `tg-1` at the
 /// given [completed] node set + [grades] (the shared `committeeSession` builds
-/// the per-node cursor + the `grid.result.*` grades the route reads).
+/// the per-node cursor + the `grid.result.*` grades the route reads). The
+/// SPEC phase (bead `pow-6ao`) rides every push fully complete + all-A — this
+/// test's focus is the code committee's reactive loop; the spec phase's own
+/// choreography is proven in `acceptance/spec_stage_acceptance_test.dart`.
 GraphSnapshot _stateAt({
   Set<String> completed = const {},
   Map<String, String> grades = const {},
 }) => _graph(
-  beads: [committeeSession(id: _sid, completed: completed, grades: grades)],
+  beads: [
+    committeeSession(
+      id: _sid,
+      completed: {...kSpecPhaseNodes, ...completed},
+      grades: {...kSpecGradesAllA, ...grades},
+    ),
+  ],
   ready: const {},
 );
 
@@ -109,14 +118,25 @@ void main() {
         expect(f.provider.started, isEmpty);
 
         // 1) A ready owned task arrives on the WORK source → WorkList dirties →
-        //    the kernel mints the session + spawns the agent (the 1-wide head of
-        //    the `code` circuit). The step's provider name is
+        //    the kernel mints the session + spawns SPECIFY (the 1-wide head of
+        //    the `code` circuit, bead `pow-6ao`). The step's provider name is
         //    '<sessionId>/<nodePath>'.
         work.push(_graph(beads: [bead('tg-1')], ready: {'tg-1'}));
         await _settle();
 
-        expect(f.provider.started, hasLength(1), reason: 'the agent spawned');
-        final agentStart = f.provider.started.single;
+        expect(f.provider.started, hasLength(1), reason: 'specify spawned');
+        expect(f.provider.started.single.name, _step('specify'));
+
+        // Fast-forward the spec phase (specify complete + an all-pass spec
+        // committee — cursor adoption: already-complete steps never mount) →
+        // the frontier SWAPS to the build agent.
+        f.provider.emit(Exited(name: _step('specify'), exitCode: 0));
+        await _settle();
+        state.push(_stateAt());
+        await _settle();
+
+        expect(f.provider.started, hasLength(2), reason: 'the agent spawned');
+        final agentStart = f.provider.started.last;
         // FT-2: the claude invocation is wrapped in `sh -c` for usage capture;
         // claude is exec'd from the positionals (`"$@"`).
         expect(agentStart.config.command, 'sh');
@@ -163,8 +183,9 @@ void main() {
             reason: 'critic $critic fanned out IN PARALLEL after the agent',
           );
         }
-        expect(f.provider.started, hasLength(5),
-            reason: 'the agent + the four critics started, nothing else');
+        expect(f.provider.started, hasLength(6),
+            reason: 'specify + the agent + the four critics started, nothing '
+                'else');
         // Both lanes spawn `sh` now (FT-2 wraps claude for usage capture): the
         // gating lane runs the Validation Plan, an LLM lane exec's claude.
         final gating = f.provider.started
@@ -192,7 +213,7 @@ void main() {
           containsAll(_criticSteps),
           reason: 'every critic step was unmounted → killed once the route mounted',
         );
-        expect(f.provider.started, hasLength(5),
+        expect(f.provider.started, hasLength(6),
             reason: 'the route is a ServiceCapability — it never spawns a process');
 
         // 4) route complete → land (a ServiceCapability — git/PR orchestration)
@@ -203,7 +224,7 @@ void main() {
           grades: _allA,
         ));
         await _settle();
-        expect(f.provider.started, hasLength(5),
+        expect(f.provider.started, hasLength(6),
             reason: 'land does not spawn a process (it is git/PR orchestration)');
 
         // The whole committee ran under ONE session: a single mint, never a

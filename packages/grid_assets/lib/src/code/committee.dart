@@ -93,6 +93,7 @@ import 'package:genesis_tree/genesis_tree.dart';
 import 'package:beads_dart/beads_dart.dart';
 import 'package:grid_engine/grid_engine.dart';
 import 'package:grid_runtime/grid_runtime.dart';
+import 'package:meta/meta.dart';
 import 'package:path/path.dart' as p;
 
 import '../agent/agent_domain.dart';
@@ -466,6 +467,12 @@ class CriticCapability extends ProcessCapability {
 
   final RubricSource? _rubrics;
 
+  /// The injected rubric source (D-9) — exposed for subclasses: the
+  /// spec-readiness committee's `SpecCriticCapability` (bead `pow-6ao`)
+  /// embeds prose from the SAME source into its own prompt shape.
+  @protected
+  RubricSource? get rubricSource => _rubrics;
+
   String _rubricOf(StepArgs args) => args.params['rubric'] ?? '';
 
   @override
@@ -745,6 +752,12 @@ class CriticCapability extends ProcessCapability {
 ///
 /// Fail-closed: an unread / missing sibling grade is treated as `F`, so a forged
 /// or absent grade can NEVER advance (the mutation-tested property).
+///
+/// GENERIC over its `critics`/`gating` params (bead `pow-6ao`): the SAME
+/// capability joins the spec-readiness committee (`specify.dart`'s
+/// `kSpecReviewCircuit` — gating `spec-validation` + four spec critics) with
+/// its own param set; the matrix, the fail-closed defaults, and the provenance
+/// payload are committee-agnostic.
 class RouteCapability extends ServiceCapability {
   /// Creates the route capability.
   const RouteCapability();
@@ -775,10 +788,12 @@ class RouteCapability extends ServiceCapability {
         entry.key: _normalizeGrade(entry.value),
     };
 
-    // 1. the gating lane failed (a non-zero Validation Plan, or a missing
-    // gating grade) — a hard block.
+    // 1. the gating lane failed (a non-zero Validation Plan / a structurally
+    // broken spec, or a missing gating grade) — a hard block. The reason names
+    // the gating LANE (this route serves both the code and the spec committee,
+    // bead `pow-6ao`), so the parked gate says which gate fired.
     if (grades[gating] == 'F') {
-      return const Gate('code-validation failed: hard block');
+      return Gate('$gating failed: hard block');
     }
 
     // 2. a grade spread ≥ 3 letters across the PRESENT lanes — a human

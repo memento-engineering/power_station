@@ -20,10 +20,21 @@ const CircuitResolver kCodeResolver = CircuitResolver(_codeCircuit);
 Circuit _codeCircuit(Bead bead) => kCodeCircuit;
 
 /// The committee-wired `code` circuit's node paths (relative to the work bead),
-/// in declaration order — `agent` → `review/clear-critique` (gate-integrity
+/// in declaration order — `specify` → the `spec_review/<lane>` spec committee
+/// (bead `pow-6ao`) → `agent` → `review/clear-critique` (gate-integrity
 /// #3) → `review/pin-diff` (scope-pinning, bead `pow-6wo`) → the four
 /// `review/<critic>` lanes → `review/route` → `land`. The drive helpers +
 /// acceptance tests key the cursor off these.
+const String kSpecifyNode = 'specify';
+const String kSpecClearCritiqueNode = 'spec_review/clear-critique';
+const String kSpecGateNode = 'spec_review/spec-validation';
+const List<String> kSpecCriticNodes = [
+  'spec_review/coherence',
+  'spec_review/adr-alignment',
+  'spec_review/acceptance-testability',
+  'spec_review/plan-completeness',
+];
+const String kSpecRouteNode = 'spec_review/route';
 const String kAgentNode = 'agent';
 const String kClearCritiqueNode = 'review/clear-critique';
 const String kPinDiffNode = 'review/pin-diff';
@@ -34,6 +45,29 @@ const List<String> kCriticNodes = [
   'review/test-coverage',
 ];
 const String kRouteNode = 'review/route';
+
+/// EVERY spec-phase node complete — prepend this to a `completed` set (with
+/// [kSpecGradesAllA] as grades) to FAST-FORWARD a test past the spec phase via
+/// cursor adoption (the cursor is data; already-complete steps never mount),
+/// so the code-committee choreography stays the test's focus. The spec phase's
+/// own fan-out/gate proofs live in `spec_stage_acceptance_test.dart`.
+const Set<String> kSpecPhaseNodes = {
+  kSpecifyNode,
+  kSpecClearCritiqueNode,
+  kSpecGateNode,
+  'spec_review/coherence',
+  'spec_review/adr-alignment',
+  'spec_review/acceptance-testability',
+  'spec_review/plan-completeness',
+  kSpecRouteNode,
+};
+
+/// All-pass spec grades (the happy spec committee) — pair with
+/// [kSpecPhaseNodes].
+final Map<String, String> kSpecGradesAllA = {
+  kSpecGateNode: 'A',
+  for (final n in kSpecCriticNodes) n: 'A',
+};
 
 /// The landing circuit's own node paths (`tg-rm5`), relative to the work bead
 /// — `land/rebase` → `land/revalidate` → `land/land` (the innermost
