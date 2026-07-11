@@ -47,3 +47,29 @@ prompts:
       - name: bead
         description: The full work bead under review (title/task/design/acceptance/notes).
         required: true
+
+# Skills — front-of-house agentic assets in the agentskills SKILL.md format
+# (the same community shape lenny's leonard_cli assets ship). The upstream
+# proposal defines only resources/prompts; this section is this manifest's
+# forward extension of it, reusing the prompts' arg-declaration shape. Each
+# skill dir under extension/skills/<id>/ holds a mustache-templated SKILL.md
+# the asset loader renders (`renderSkill`) and the composing station
+# materializes into a seat's skills dir (delivery: `pow-kzx`). The coupled
+# skill+command pattern (ADR-0001): the skill CALLS the vended deterministic
+# Command instead of re-deriving the operation by inference.
+skills:
+  - id: discover
+    description: >
+      The grid home's HITL front door — dispatches on arg shape
+      (topic research / bead advisory / bead directed), researches via the
+      vended `search` Command, and on the human's yes files an ephemeral
+      staged bead and starts the design conversation (hand-off: specify).
+    path: skills/discover/SKILL.md
+    visibility: public
+    args:
+      - name: runner
+        description: The composing station's executable name (e.g. `space`) — the verb the skill's search calls ride.
+        required: true
+      - name: gridHome
+        description: The grid-home root — the fallback store a new bead files into when no substation clearly owns it.
+        required: true

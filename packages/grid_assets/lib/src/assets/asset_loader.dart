@@ -8,6 +8,14 @@
 /// source; [renderCriticPrompt] is the standalone, format-faithful renderer of
 /// the `prompts/critic.md` template (the portable mirror).
 ///
+/// The vended SKILLS (`extension/skills/<id>/SKILL.md`, bead `pow-88p`) ride
+/// the same loader: the agentic halves of the coupled skill+command pairs
+/// (ADR-0001 — the skill CALLS the vended deterministic Command, e.g.
+/// `discover` calls `search --json`). Each SKILL.md is mustache-templated on
+/// its manifest-declared args (`runner`, `gridHome`); [renderSkill] renders it
+/// for the composing station at materialization time (delivery: `pow-kzx`)
+/// and fails LOUD on any unbound hole.
+///
 /// Asset resolution resolves the package's own `extension/` dir via the package
 /// config (`Isolate.resolvePackageUriSync` — cwd-independent, the live-arm path),
 /// falling back to a cwd walk-up (works from the repo root or the package dir,
@@ -22,6 +30,11 @@ import 'dart:isolate';
 
 import 'package:beads_dart/beads_dart.dart';
 import 'package:path/path.dart' as p;
+
+/// The skill ids this package vends (`extension/skills/<id>/SKILL.md`) — the
+/// agentic halves of the coupled skill+command pairs (ADR-0001). A station's
+/// skill-delivery leg (`pow-kzx`) enumerates this to materialize them.
+const List<String> kVendedSkills = ['discover'];
 
 /// Loads grid_assets' bundled rubric/prompt assets from `extension/`.
 class PackagedAssetLoader {
@@ -66,6 +79,40 @@ class PackagedAssetLoader {
       'bead': beadBlock(bead),
     },
   );
+
+  /// The mustache-templated SKILL.md body for [skillId]
+  /// (`extension/skills/<skillId>/SKILL.md`). Throws an [ArgumentError] for an
+  /// unknown skill (fail-loud — a missing skill is a packaging bug, never a
+  /// silent empty install).
+  String loadSkillTemplate(String skillId) {
+    final file = File(p.join(_root, 'skills', skillId, 'SKILL.md'));
+    if (!file.existsSync()) {
+      throw ArgumentError('unknown skill "$skillId" (no ${file.path})');
+    }
+    return file.readAsStringSync();
+  }
+
+  /// Renders the SKILL.md for [skillId], substituting every `{{key}}` from
+  /// [args] (the manifest's declared skill args — e.g. `runner`, `gridHome`
+  /// for `discover`). The composing station's delivery leg calls this at
+  /// materialization time.
+  ///
+  /// Throws a [StateError] when any `{{…}}` hole survives substitution — an
+  /// installed skill has NO unbound template holes (a leftover `{{runner}}`
+  /// would read as a literal in the seat's skill, a silent packaging bug).
+  String renderSkill(String skillId, {required Map<String, String> args}) {
+    final rendered = _mustache(loadSkillTemplate(skillId), args);
+    final residue = RegExp(r'\{\{[^}]*\}\}').allMatches(rendered);
+    if (residue.isNotEmpty) {
+      final holes = {for (final m in residue) m.group(0)!};
+      throw StateError(
+        'renderSkill("$skillId"): unbound template hole(s) '
+        '${holes.join(', ')} — bind every declared arg '
+        '(got: ${args.keys.join(', ')})',
+      );
+    }
+    return rendered;
+  }
 
   /// A `RubricSource` tear-off bound to this loader (wire into `CriticCapability`).
   String Function(String) get rubricSource => loadRubric;
