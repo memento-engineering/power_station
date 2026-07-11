@@ -94,30 +94,31 @@ void main() {
           reason: 'the foreign work bead mounted + spawned',
         );
 
-        // Drive identity + a completion (cursor advance to verify) on the agent
-        // step (provider name '<sessionId>/<nodePath>').
+        // Drive identity + a completion (cursor advance) on the SPECIFY step
+        // — the circuit's head since bead `pow-6ao` (provider name
+        // '<sessionId>/<nodePath>').
         f.provider.emit(
           const SessionStarted(
-            name: 'tgdog-sess1/genesis-7r9/agent',
+            name: 'tgdog-sess1/genesis-7r9/specify',
             pid: 9,
             pgid: 8,
           ),
         );
         await pumpEventQueue();
         f.provider.emit(
-          const Exited(name: 'tgdog-sess1/genesis-7r9/agent', exitCode: 0),
+          const Exited(name: 'tgdog-sess1/genesis-7r9/specify', exitCode: 0),
         );
         await pumpEventQueue();
 
-        // 2) verify surfaces via the STATE source (the_grid's own bead — the
-        //    per-node cursor with the agent step complete).
+        // 2) the advance surfaces via the STATE source (the_grid's own bead —
+        //    the per-node cursor with the specify step complete).
         state.push(
           _graph(
             beads: [
               sessionBead(
                 id: 'tgdog-sess1',
                 workBeadId: 'genesis-7r9',
-                completed: {'agent'},
+                completed: {'specify'},
               ),
             ],
             ready: const {},

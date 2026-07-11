@@ -6,9 +6,11 @@
 // The 0(b) audit (`the_grid/docs/SCRATCH-station-config-model.md` §8, landed
 // PR#30) found the brief path ALREADY structurally clean: no brief/prompt
 // builder anywhere reads a resolved filesystem path off a bead. There are
-// exactly two brief builders org-wide, both in this package —
-// `buildAgentBrief` (code_capabilities.dart) and
-// `CriticCapability.buildCriticPrompt` (committee.dart) — and every path that
+// exactly four brief builders org-wide, all in this package —
+// `buildAgentBrief` (code_capabilities.dart), `CriticCapability.
+// buildCriticPrompt` (committee.dart), and the spec stage's pair (bead
+// `pow-6ao`, specify.dart): `buildSpecifyBrief` +
+// `SpecCriticCapability.buildSpecCriticPrompt` — and every path that
 // reaches a spawned agent (the process cwd AND any path interpolated into the
 // brief text) comes from the ambient `Workspace` seed, never a bead field.
 //
@@ -216,6 +218,41 @@ void main() {
         expect(prompt, contains('Wire the federation bus'));
         expect(prompt, contains('Connect The Studio to The Dashboard.'));
         expect(prompt, contains('A lossy inter-station gossip bus.'));
+      });
+    });
+
+    // ---------------------------------------------------------------------
+    // 3b. The spec stage's brief builders (bead `pow-6ao`) hold the same
+    //     fence: buildSpecifyBrief + buildSpecCriticPrompt inflate from the
+    //     activation, never a bead stamp.
+    // ---------------------------------------------------------------------
+    group('the spec-stage builders read no path off the bead (pow-6ao)', () {
+      test('buildSpecifyBrief: no bead-stamped path; the Workspace\'s paths + '
+          'the bead CONTENT flow through', () {
+        final brief = buildSpecifyBrief(_poisonedBead(), _activation());
+        final rendered = brief.render();
+        expect(rendered, isNot(contains(_poison)));
+        expect(rendered, contains('/real/activation/worktree/tg-m2q'));
+        expect(rendered, contains('grid/tg-m2q'));
+        expect(rendered, contains('Wire the federation bus'));
+        expect(rendered, contains('substation `tgdog`'));
+      });
+
+      test('buildSpecCriticPrompt: no bead-stamped path; its verdict path '
+          'derives from the activation workspace', () {
+        const workspaceDir = '/activations/tg-m2q';
+        final prompt = const SpecCriticCapability().buildSpecCriticPrompt(
+          _poisonedBead(),
+          'coherence',
+          'tg-m2q/spec_review/coherence',
+          workspaceDir,
+        );
+        expect(prompt, isNot(contains(_poison)));
+        expect(
+          prompt,
+          contains('$workspaceDir/.grid/critique/coherence.json'),
+        );
+        expect(prompt, contains('Wire the federation bus'));
       });
     });
 

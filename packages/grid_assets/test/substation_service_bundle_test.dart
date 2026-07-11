@@ -136,12 +136,15 @@ void main() {
       );
       await pumpEventQueue();
 
-      // Sanity (non-vacuous): both agents actually mounted + spawned, so both
-      // hosts ran their provision step.
+      // Sanity (non-vacuous): both circuit heads (specify, bead `pow-6ao`)
+      // actually mounted + spawned, so both hosts ran their provision step.
       expect(
         f.provider.started.map((s) => s.name),
-        unorderedEquals(<String>['tgdog-a/sa-1/agent', 'tgdog-b/sb-1/agent']),
-        reason: 'one agent per substation spawned through the real code circuit',
+        unorderedEquals(
+          <String>['tgdog-a/sa-1/specify', 'tgdog-b/sb-1/specify'],
+        ),
+        reason: 'one head step per substation spawned through the real code '
+            'circuit',
       );
 
       // The routing proof: each substation provisioned ONLY its own bead's
@@ -195,8 +198,9 @@ void main() {
       work.push(_graph(beads: [bead('sa-1')], ready: {'sa-1'}));
       await pumpEventQueue();
 
-      // The agent spawned even with no SourceControl wired (provision no-op).
-      expect(f.provider.started.map((s) => s.name), ['tgdog-a/sa-1/agent']);
+      // The circuit head spawned even with no SourceControl wired (provision
+      // no-op).
+      expect(f.provider.started.map((s) => s.name), ['tgdog-a/sa-1/specify']);
     },
   );
 }

@@ -52,7 +52,10 @@ void main() {
   final loader = PackagedAssetLoader(root: root);
 
   group('PackagedAssetLoader — the committee rubrics', () {
-    for (final rubricId in kCommitteeRubrics) {
+    // BOTH committees' packs ride the one loader (bead `pow-6ao`): the code
+    // rubrics + the spec-readiness rubrics resolve by id from the same
+    // `extension/rubrics/`.
+    for (final rubricId in [...kCommitteeRubrics, ...kSpecCommitteeRubrics]) {
       test('loadRubric("$rubricId") returns non-empty prose that names itself',
           () {
         final text = loader.loadRubric(rubricId);
@@ -136,8 +139,9 @@ void main() {
       final resourceIds = {for (final r in resources) r['id'] as String};
       expect(
         resourceIds,
-        containsAll(kCommitteeRubrics),
-        reason: 'every committee rubric is declared as a resource',
+        containsAll([...kCommitteeRubrics, ...kSpecCommitteeRubrics]),
+        reason: 'every committee rubric — code AND spec-readiness — is '
+            'declared as a resource',
       );
       for (final r in resources) {
         expect(

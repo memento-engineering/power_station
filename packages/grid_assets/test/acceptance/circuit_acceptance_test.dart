@@ -50,6 +50,22 @@ String _step(String relPath) => '$_sid/tg-1/$relPath';
 // The committee critic provider names, in committee order.
 final List<String> _criticSteps = [for (final n in kCriticNodes) _step(n)];
 
+/// The committee session with the SPEC phase (bead `pow-6ao`) fast-forwarded
+/// (fully complete + all-A — cursor adoption: already-complete steps never
+/// mount). This test's focus is the CODE committee; the spec phase's own
+/// choreography is `spec_stage_acceptance_test.dart`.
+Bead _session({
+  Set<String> completed = const {},
+  Set<String> gated = const {},
+  Map<String, String> grades = const {},
+  bool closed = false,
+}) => committeeSession(
+  completed: {...kSpecPhaseNodes, ...completed},
+  gated: gated,
+  grades: {...kSpecGradesAllA, ...grades},
+  closed: closed,
+);
+
 StationKernel _buildKernel(
   Fakes f,
   FakeSnapshotSource work,
@@ -138,24 +154,31 @@ void main() {
         kernel.start();
         await _settle();
 
-        // 1) a ready owned task → the agent spawns (the 1-wide head of `code`).
+        // 1) a ready owned task → SPECIFY spawns (the 1-wide head of `code`,
+        //    bead `pow-6ao`); fast-forward its phase (an all-pass spec
+        //    committee via cursor adoption) → the build agent swaps in.
         work.push(_graph(beads: [bead('tg-1')], ready: {'tg-1'}));
         await _settle();
-        expect(f.provider.started.map((s) => s.name), [_step('agent')]);
+        expect(f.provider.started.map((s) => s.name), [_step('specify')]);
+        f.provider.emit(Exited(name: _step('specify'), exitCode: 0));
+        await _settle();
+        state.push(_state(_session()));
+        await _settle();
+        expect(f.provider.started.map((s) => s.name).last, _step('agent'));
 
         // 2) agent completes → its host writes agent=complete (+ flares); the
         //    STATE source surfaces the advance → the `review` sub-circuit inflates
         //    its FOUR critic lanes IN PARALLEL.
         f.provider.emit(Exited(name: _step('agent'), exitCode: 0));
         await _settle();
-        state.push(_state(committeeSession(completed: {kAgentNode})));
+        state.push(_state(_session(completed: {kAgentNode})));
         await _settle();
 
         // clear-critique (gate-integrity #3, dep-free) mounted + ran for real
         // — no provider spawn (a ServiceCapability, like rebase/revalidate);
         // the bridge re-projects its completion so pin-diff (which `dependsOn`
         // it) becomes ready.
-        state.push(_state(committeeSession(
+        state.push(_state(_session(
           completed: {kAgentNode, kClearCritiqueNode},
         )));
         await _settle();
@@ -164,7 +187,7 @@ void main() {
         // ServiceCapability, no provider spawn; the synthetic worktree does not
         // exist on disk so it no-ops to Ok. Re-project its completion before
         // the four critics (which now `dependsOn` it) become ready.
-        state.push(_state(committeeSession(
+        state.push(_state(_session(
           completed: {kAgentNode, kClearCritiqueNode, kPinDiffNode},
         )));
         await _settle();
@@ -198,7 +221,7 @@ void main() {
           f.provider.emit(Exited(name: critic, exitCode: 0));
         }
         await _settle();
-        state.push(_state(committeeSession(
+        state.push(_state(_session(
           completed: {kAgentNode, ...kCriticNodes},
           grades: {for (final n in kCriticNodes) n: 'A'},
         )));
@@ -213,7 +236,7 @@ void main() {
         // 4) route complete → the `land` SubCircuitStep inflates (`tg-rm5`):
         //    rebase → revalidate → land, each a ServiceCapability (no
         //    provider spawn) running for real through the fakes.
-        state.push(_state(committeeSession(
+        state.push(_state(_session(
           completed: {kAgentNode, ...kCriticNodes, kRouteNode},
           grades: {for (final n in kCriticNodes) n: 'A'},
         )));
@@ -224,7 +247,7 @@ void main() {
           reason: 'rebase ran clean (the recording git fake is ok by default)',
         );
 
-        state.push(_state(committeeSession(
+        state.push(_state(_session(
           completed: {kAgentNode, ...kCriticNodes, kRouteNode, kRebaseNode},
           grades: {for (final n in kCriticNodes) n: 'A'},
         )));
@@ -235,7 +258,7 @@ void main() {
           reason: 'revalidate ran clean (the recording shell fake is ok by default)',
         );
 
-        state.push(_state(committeeSession(
+        state.push(_state(_session(
           completed: {
             kAgentNode,
             ...kCriticNodes,
@@ -263,7 +286,7 @@ void main() {
         expect(f.pr.opened.last.body, contains('revalidate: passed'));
 
         // 5) land complete (the terminal step) → SessionScope closes the session.
-        state.push(_state(committeeSession(
+        state.push(_state(_session(
           completed: {
             kAgentNode,
             ...kCriticNodes,
@@ -314,14 +337,20 @@ void main() {
         await _settle();
         work.push(_graph(beads: [bead('tg-1')], ready: {'tg-1'}));
         await _settle();
+        // Fast-forward the spec phase (bead `pow-6ao`): specify exits, the
+        // spec committee all-passes via cursor adoption → the agent swaps in.
+        f.provider.emit(Exited(name: _step('specify'), exitCode: 0));
+        await _settle();
+        state.push(_state(_session()));
+        await _settle();
         f.provider.emit(Exited(name: _step('agent'), exitCode: 0));
         await _settle();
-        state.push(_state(committeeSession(completed: {kAgentNode})));
+        state.push(_state(_session(completed: {kAgentNode})));
         await _settle();
         // clear-critique (gate-integrity #3) then pin-diff (scope-pinning, bead
         // pow-6wo) ran for real; re-project both completions so the four
         // critics — which now transitively dependsOn them — mount.
-        state.push(_state(committeeSession(
+        state.push(_state(_session(
           completed: {kAgentNode, kClearCritiqueNode, kPinDiffNode},
         )));
         await _settle();
@@ -332,7 +361,7 @@ void main() {
 
         // The gating lane (code-validation) graded F (a non-zero Validation Plan);
         // the others passed → the route's matrix is a HARD BLOCK.
-        state.push(_state(committeeSession(
+        state.push(_state(_session(
           completed: {kAgentNode, ...kCriticNodes},
           grades: {
             kCriticNodes.first: 'F', // code-validation
@@ -361,7 +390,7 @@ void main() {
         // parks, land's dep is never satisfied → land NEVER runs, the session
         // NEVER closes. (Positive control: the happy-path test proves land DOES
         // run + close when the route advances.)
-        state.push(_state(committeeSession(
+        state.push(_state(_session(
           completed: {kAgentNode, ...kCriticNodes},
           gated: {kRouteNode},
           grades: {

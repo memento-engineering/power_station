@@ -1,5 +1,6 @@
-/// The `code` extension — agent/verify/land as Capability impls + the linear
-/// `code` circuit (ADR-0008 D2 / M4-P1 §6, Track H).
+/// The `code` extension — specify/agent/verify/land as Capability impls + the
+/// linear `code` circuit (ADR-0008 D2 / M4-P1 §6, Track H; the specify stage
+/// is bead `pow-6ao`, `specify.dart`).
 ///
 /// The agent/verify/land OPINIONS live here as opaque [Capability] leaves (never
 /// a `Seed`), composed into a linear [Circuit] whose always-1-wide frontier
@@ -26,9 +27,25 @@ import '../agent/usage_report.dart';
 import '../assets/asset_loader.dart';
 import 'committee.dart';
 import 'landing.dart';
+import 'specify.dart';
 
-/// agent → review → land — the live `code` circuit (M5 "The Circuit" Track E;
-/// the `land` step is itself the landing circuit as of bead `tg-rm5`).
+/// specify → spec_review → agent → review → land — the live `code` circuit
+/// (M5 "The Circuit" Track E; the spec stage is bead `pow-6ao`, the `land`
+/// step is itself the landing circuit as of bead `tg-rm5`).
+///
+/// **The spec stage (bead `pow-6ao`)**: the worktree drive loop gains
+/// [specify agent → SPEC committee gate] UPSTREAM of the build. `specify`
+/// ([SpecifyCapability]) is the architect-equivalent harness ride that writes
+/// the implementation-ready spec INTO the bead (acceptance / plan / touches /
+/// ADR alignment / validation plan, via the bd CLI); `spec_review` is the
+/// spec-readiness committee ([kSpecReviewCircuit] — the gating structural
+/// lane + four spec critics → the same route matrix). `agent`'s `dependsOn:
+/// {'spec_review'}` resolves — through the engine's existing one-hop terminal
+/// resolution, no new machinery — to `<bead>/spec_review/route`'s positive
+/// terminal, so ONLY a spec that passes its committee proceeds to the build;
+/// a spec-route `Gate` parks the bead in the SAME `gated` state (the
+/// `type=gate` bead + the `<bead>#rN` rework re-key) the code committee uses,
+/// reusing the existing rework machinery rather than a new state.
 ///
 /// The toy `verify` step (`sh -c 'melos test'`) is GONE: `verify` is now the
 /// adversarial code-committee, a [SubCircuitStep] the engine inflates one level
@@ -49,7 +66,13 @@ const Circuit kCodeCircuit = Circuit(
   id: 'code',
   terminalStepId: 'land',
   steps: [
-    CapabilityStep(stepId: 'agent', capabilityId: 'agent'),
+    CapabilityStep(stepId: 'specify', capabilityId: 'specify'),
+    SubCircuitStep(
+      stepId: 'spec_review',
+      circuitId: 'spec_review',
+      dependsOn: {'specify'},
+    ),
+    CapabilityStep(stepId: 'agent', capabilityId: 'agent', dependsOn: {'spec_review'}),
     SubCircuitStep(
       stepId: 'review',
       circuitId: 'code_review',
@@ -644,12 +667,16 @@ class GitSourceControl
   }
 }
 
-/// Builds the `code` registry: the agent/land capabilities + the adversarial
-/// committee (`critic`/`route` + the `code_review` circuit) + the landing
+/// Builds the `code` registry: the specify stage + spec-readiness committee
+/// (`specify`/`spec-critic`/`spec-validation` + the `spec_review` circuit,
+/// bead `pow-6ao`) + the agent/land capabilities + the adversarial committee
+/// (`critic`/`route` + the `code_review` circuit) + the landing
 /// circuit (`rebase`/`revalidate` + the `landing` circuit, `tg-rm5`), with an
 /// optional injected [clock] (the backoff seam). The composer provides it as a
 /// stable `InheritedSeed<CapabilityRegistry>` above `Station`, alongside a
-/// `CircuitResolver((_) => kCodeCircuit)`.
+/// `CircuitResolver((_) => kCodeCircuit)`. The spec critics share [rubrics]
+/// with the code critics — ONE RubricSource serves both committees (the
+/// loader resolves any `extension/rubrics/<id>.md` by id).
 ///
 /// The `code` circuit's `verify` step is the committee (M5 Track E): the toy
 /// `verify` capability is gone, and the `critic` capability is wired to the
@@ -675,6 +702,10 @@ DefaultCapabilityRegistry buildCodeRegistry({
   final rubricSource = rubrics ?? PackagedAssetLoader().rubricSource;
   return DefaultCapabilityRegistry(
     capabilities: {
+      // The spec stage + its committee lanes (bead `pow-6ao`).
+      'specify': const SpecifyCapability(),
+      'spec-critic': SpecCriticCapability(rubrics: rubricSource),
+      kSpecGatingRubric: const SpecValidationCapability(),
       'agent': AgentCapability(devRoot: devRoot),
       'land': const LandCapability(),
       'critic': CriticCapability(rubrics: rubricSource),
@@ -689,6 +720,7 @@ DefaultCapabilityRegistry buildCodeRegistry({
     },
     circuits: const {
       'code': kCodeCircuit,
+      'spec_review': kSpecReviewCircuit,
       'code_review': kCodeReviewCircuit,
       'landing': kLandingCircuit,
     },

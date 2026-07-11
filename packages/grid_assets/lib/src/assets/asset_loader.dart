@@ -80,6 +80,18 @@ class PackagedAssetLoader {
     },
   );
 
+  /// Renders the `spec-critic` prompt template for [rubricId] + [bead] — the
+  /// spec-readiness committee's portable mirror (of `buildSpecCriticPrompt`,
+  /// bead `pow-6ao`); same three substitutions as [renderCriticPrompt].
+  String renderSpecCriticPrompt(String rubricId, Bead bead) => _mustache(
+    loadPromptTemplate('spec-critic'),
+    {
+      'rubric': rubricId,
+      'rubricText': loadRubric(rubricId),
+      'bead': beadBlock(bead),
+    },
+  );
+
   /// The mustache-templated SKILL.md body for [skillId]
   /// (`extension/skills/<skillId>/SKILL.md`). Throws an [ArgumentError] for an
   /// unknown skill (fail-loud — a missing skill is a packaging bug, never a

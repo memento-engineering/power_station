@@ -68,7 +68,11 @@ JoinedSnapshot _joined({
 /// An adopted session for [workBead] (sessionId [id]) at the given [completed]
 /// node set + [grades] (relative nodePath → letter) — the JOIN row the bridge
 /// would surface (the per-node cursor + the `grid.result.*` grades a `route`
-/// reads through its SiblingView, D-5).
+/// reads through its SiblingView, D-5). The SPEC phase (bead `pow-6ao`) rides
+/// every projection fully complete + all-A, so the adopted sessions resolve
+/// straight to the BUILD agent and this test's frontier counts stay focused
+/// on the code committee (the spec phase's own choreography is
+/// `spec_stage_acceptance_test.dart`).
 SessionProjection _session(
   String workBead,
   String id, {
@@ -78,11 +82,11 @@ SessionProjection _session(
   workBeadId: workBead,
   sessionId: id,
   cursor: {
-    for (final step in completed)
+    for (final step in {...kSpecPhaseNodes, ...completed})
       '$workBead/$step': const NodeCursor(state: StepState.complete),
   },
   results: {
-    for (final entry in grades.entries)
+    for (final entry in {...kSpecGradesAllA, ...grades}.entries)
       '$workBead/${entry.key}': {'grade': entry.value},
   },
 );
