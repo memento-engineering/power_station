@@ -22,6 +22,16 @@
 /// `LeaseCapability` wraps a federation lease as an engine [Capability]
 /// (mount = acquire + dispatch, unmount = release).
 ///
+/// The SEARCH domain (bead `pow-ovh`, the first coupled skill+command pair)
+/// also lives here: deterministic, READ-ONLY (A37) cross-store search over the
+/// station's attached substations. [mountedRosterOf] resolves the roster from
+/// the resident-station context (the composing station's `GridDelegate` tree,
+/// mounted offline); [StationSearchService] queries each seat's `.beads/`
+/// store (backlog + decision beads) through a read-only-by-construction seam;
+/// [SearchCommand] is the THIN exported CLI adapter a station composes
+/// (`space search <query>`) — the substrate agentic skills (`discover`) CALL
+/// instead of reinventing search by inference.
+///
 /// The DART domain (the typed `grid.dart` envelope + pub dev-time linkage +
 /// `DartCommand`) lives in its sibling pack `dart_grid_assets`.
 library;
@@ -38,3 +48,5 @@ export 'src/compute/bounded_use.dart';
 export 'src/compute/compute_command.dart';
 export 'src/compute/lease_capability.dart';
 export 'src/lease/bus_lease.dart';
+export 'src/search/search_command.dart';
+export 'src/search/station_search.dart';

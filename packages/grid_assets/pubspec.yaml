@@ -12,6 +12,7 @@ environment:
   sdk: ^3.11.0
 
 dependencies:
+  args: ^2.6.0
   beads_dart: any
   dart_grid_assets: any
   federated_grid_assets: any

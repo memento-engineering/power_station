@@ -357,8 +357,8 @@ void main() {
                   child: sdk.Substations(
                     substations: [
                       sdk.Substation(
-                        name: 'the_grid',
-                        root: '/work/the_grid',
+                        'the_grid',
+                        '/work/the_grid',
                         assets: [
                           Nest(
                             children: [
