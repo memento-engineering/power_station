@@ -40,6 +40,41 @@ import 'package:grid_sdk/grid_sdk.dart' as sdk;
 import '../agent/agent_harness.dart';
 import '../code/code_capabilities.dart';
 
+/// **GitServices** — the station's git-execution machinery as ONE ambient
+/// value: the shared [StationGitService] provisioner + the [GitOps]
+/// commit/push half (bead `pow-72b`).
+///
+/// The delegate mounts it ONCE (an `InheritedSeed<GitServices>` above the
+/// substation fan-out); each seat's [GitGridAssets] then constructs BARE —
+/// `Substation(name, root, assets: [GitGridAssets(), GitHubGridAssets()])` —
+/// sourcing both halves from context instead of per-seat constructor
+/// threading. Defined here (not in the delegate) so grid_assets READS it and
+/// the space-station delegate PROVIDES it against the same type.
+///
+/// Absence is NOT an error: no carrier — like a carrier with null halves — IS
+/// the documented offline/dry-run posture (provisioning + land no-op), so the
+/// read is the quiet [maybeOf] only; a loud `of` would turn the valid offline
+/// build into a refusal (guards LOUD or GONE — there is no invariant here).
+class GitServices {
+  /// Bundles the optional [provisioner] and [gitOps] halves; a null half is
+  /// the offline posture for that half.
+  const GitServices({this.provisioner, this.gitOps});
+
+  /// The station's shared worktree-provisioning service (leased per
+  /// substation); null ⇒ provisioning no-ops (offline).
+  final StationGitService? provisioner;
+
+  /// Commit/push ops; null ⇒ land no-ops (`canLand` false — commit-only).
+  final GitOps? gitOps;
+
+  /// The ambient [GitServices], or null when no carrier encloses [context]
+  /// (the offline posture). SUBSCRIBES (the D-H build verb, ADR-0008): a
+  /// re-provided carrier rebuilds the dependent, so every substation's source
+  /// control re-derives over the new machinery.
+  static GitServices? maybeOf(TreeContext context) =>
+      context.dependOnInheritedSeedOfExactType<GitServices>();
+}
+
 /// **GitGridAssets** — the substation-scoped SOURCE-CONTROL asset (v3 §3).
 ///
 /// Mounted under the `Substation` it serves, it reads that substation's ambient
@@ -54,15 +89,21 @@ import '../code/code_capabilities.dart';
 /// A substation with only `GitGridAssets` commits its work; adding
 /// `GitHubGridAssets` lets it land.
 ///
-/// [provisioner] (the station's shared [StationGitService] — "the station
-/// supplies the git-execution machinery the substation leases") and [gitOps]
-/// (commit/push) are injected by the runner; both null is the offline/dry-run
-/// build (provisioning + land no-op, but `workspaceFor`/`branchFor`/`baseBranch`
-/// still resolve from the root — the layout is deterministic + pure).
+/// The git-execution machinery ("the station supplies the machinery the
+/// substation leases" — the shared [StationGitService] provisioner + the
+/// [GitOps] commit/push half) is sourced from the ambient [GitServices]
+/// carrier the delegate mounts once above the substation fan-out, so a bare
+/// `GitGridAssets()` seat works (bead `pow-72b`). The [provisioner]/[gitOps]
+/// ctor params stay as per-seat OVERRIDES (tests inject; a set ctor field wins
+/// over the carrier's). A half supplied by neither is the offline/dry-run
+/// build (provisioning + land no-op, but `workspaceFor`/`branchFor`/
+/// `baseBranch` still resolve from the root — the layout is deterministic +
+/// pure).
 class GitGridAssets extends SingleChildStatelessSeed {
-  /// Creates the git asset over the optional station machinery
-  /// ([provisioner]/[gitOps]) for the enclosing substation's root; [child] is
-  /// supplied by an enclosing [Nest] (or set for standalone use).
+  /// Creates the git asset for the enclosing substation's root.
+  /// [provisioner]/[gitOps] are optional per-seat overrides of the ambient
+  /// [GitServices] machinery; [child] is supplied by an enclosing [Nest] (or
+  /// set for standalone use).
   const GitGridAssets({
     this.provisioner,
     this.gitOps,
@@ -73,10 +114,12 @@ class GitGridAssets extends SingleChildStatelessSeed {
   });
 
   /// The station's shared worktree-provisioning service (leased per substation);
-  /// null ⇒ provisioning no-ops (offline).
+  /// null ⇒ the ambient [GitServices]'s (absent there too ⇒ provisioning
+  /// no-ops, offline).
   final StationGitService? provisioner;
 
-  /// Commit/push ops; null ⇒ land no-ops (`canLand` false — the commit-only arm).
+  /// Commit/push ops; null ⇒ the ambient [GitServices]'s (absent there too ⇒
+  /// land no-ops — `canLand` false, the commit-only arm).
   final GitOps? gitOps;
 
   /// The base branch per-bead worktrees rebase/PR against — the substation
@@ -93,6 +136,11 @@ class GitGridAssets extends SingleChildStatelessSeed {
     // root. `.of` refuses LOUD when no `Substation` encloses — an asset mounted
     // outside a substation is an authoring error, not a default (v3 §0).
     final scope = sdk.SubstationScope.of(context);
+    // The station machinery: an explicit ctor override wins (tests inject),
+    // else the ambient GitServices carrier. The subscribing read (D-H,
+    // ADR-0008): re-provided machinery re-derives this substation's source
+    // control rather than leaving a stale snapshot mounted below.
+    final services = GitServices.maybeOf(context);
     final root = RootCheckout(
       path: scope.root,
       substation: scope.name,
@@ -100,8 +148,8 @@ class GitGridAssets extends SingleChildStatelessSeed {
       remote: remote,
     );
     final sourceControl = GitSourceControl(
-      provisioner: provisioner,
-      gitOps: gitOps,
+      provisioner: provisioner ?? services?.provisioner,
+      gitOps: gitOps ?? services?.gitOps,
       root: root,
       // No prOpener → canLand false. GitHubGridAssets adds the PR half below.
     );

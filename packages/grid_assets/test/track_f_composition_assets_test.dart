@@ -7,6 +7,8 @@
 // Pure + offline: the assets are mounted in a bare genesis tree and their
 // PROVIDED ambient values are read back at a leaf — no kernel, no live
 // tg/gc/claude/git (Track F depends only on B, the composition Seeds).
+import 'dart:io';
+
 import 'package:beads_dart/beads_dart.dart';
 import 'package:genesis_tree/genesis_tree.dart';
 import 'package:grid_assets/grid_assets.dart';
@@ -396,6 +398,137 @@ void main() {
     });
   });
 
+  group('GitServices — the ambient git-machinery carrier (pow-72b)', () {
+    test('a BARE GitGridAssets() sources gitOps from the carrier — the clean '
+        'substation seat (with GitHub below, the substation can land), and '
+        'the layout is the SAME source control it produces today', () {
+      SourceControl? sc;
+      mount(
+        _underSubstation(
+          'ps',
+          '/work/ps',
+          InheritedSeed<GitServices>(
+            value: GitServices(gitOps: GitOps(_FakeGitRunner())),
+            child: Nest(
+              children: [
+                const GitGridAssets(),
+                GitHubGridAssets(prOpener: _FakePrOpener()),
+              ],
+              child: _Probe((ctx) => sc = sourceControlOf(ctx)),
+            ),
+          ),
+        ),
+      );
+      expect(sc, isA<GitSourceControl>());
+      expect(sc!.canLand, isTrue, reason: 'context gitOps + GitHub prOpener');
+      expect(sc!.workspaceFor('pow-1'), '/work/ps/.grid/worktrees/ps/pow-1');
+      expect(sc!.branchFor('pow-1'), 'grid/pow-1');
+      expect(sc!.baseBranch, 'main');
+    });
+
+    test('a BARE GitGridAssets() sources the provisioner from the carrier — '
+        'provisionWorkspace drives the carrier machinery, not a no-op', () async {
+      final runner = _RecordingGitRunner();
+      // A real root dir: provisionWorktree creates the substation parent dir
+      // on disk before its (faked) `git worktree add`.
+      final rootDir = Directory.systemTemp.createTempSync('pow72b-root');
+      addTearDown(() => rootDir.deleteSync(recursive: true));
+      SourceControl? sc;
+      mount(
+        _underSubstation(
+          'ps',
+          rootDir.path,
+          InheritedSeed<GitServices>(
+            value: GitServices(
+              provisioner: StationGitService(
+                runner: runner,
+                prOpener: _FakePrOpener(),
+              ),
+            ),
+            child: GitGridAssets(
+              child: _Probe((ctx) => sc = sourceControlOf(ctx)),
+            ),
+          ),
+        ),
+      );
+      await sc!.provisionWorkspace(
+        beadId: 'pow-1',
+        workspaceDir: sc!.workspaceFor('pow-1'),
+      );
+      expect(
+        runner.calls,
+        isNotEmpty,
+        reason: 'the context-sourced provisioner ran git for the worktree — '
+            'a null provisioner would have no-opped (offline)',
+      );
+    });
+
+    test('an explicit ctor arg WINS over the carrier (tests inject)', () async {
+      final carrierRunner = _RecordingGitRunner();
+      final ctorRunner = _RecordingGitRunner();
+      SourceControl? sc;
+      mount(
+        _underSubstation(
+          'ps',
+          '/work/ps',
+          InheritedSeed<GitServices>(
+            value: GitServices(gitOps: GitOps(carrierRunner)),
+            child: GitGridAssets(
+              gitOps: GitOps(ctorRunner),
+              child: _Probe((ctx) => sc = sourceControlOf(ctx)),
+            ),
+          ),
+        ),
+      );
+      await sc!.commitAll(workspaceDir: '/work/ps/x', message: 'm');
+      expect(ctorRunner.calls, isNotEmpty, reason: 'the ctor gitOps committed');
+      expect(carrierRunner.calls, isEmpty, reason: 'the carrier half lost');
+    });
+
+    test('the carrier read is SUBSCRIBING (D-H watch-deps) — re-provided '
+        'machinery re-derives the substation source control (offline → live '
+        'flips canLand)', () {
+      SourceControl? sc;
+      final services = _ServicesController(const GitServices());
+      final owner = TreeOwner();
+      owner.mountRoot(
+        _underSubstation(
+          'ps',
+          '/work/ps',
+          _ReprovidingServices(
+            services,
+            Nest(
+              children: [
+                const GitGridAssets(),
+                GitHubGridAssets(prOpener: _FakePrOpener()),
+              ],
+              child: _Probe(
+                (ctx) => sc = ctx
+                    .dependOnInheritedSeedOfExactType<ServiceBundle>()
+                    ?.sourceControl,
+              ),
+            ),
+          ),
+        ),
+      );
+      owner.flush();
+      // First mount: an empty carrier — offline, commit-only.
+      expect(sc!.canLand, isFalse);
+
+      // The delegate re-provides live machinery. GitGridAssets must OBSERVE
+      // the carrier (D-H) and re-derive; GitHubGridAssets then re-enriches.
+      services.set(GitServices(gitOps: GitOps(_FakeGitRunner())));
+      owner.flush();
+      expect(
+        sc!.canLand,
+        isTrue,
+        reason: 'a non-subscribing (get*) carrier read in GitGridAssets would '
+            'keep the STALE offline source control mounted — the '
+            'sync-notifier-read class',
+      );
+    });
+  });
+
   group('GitHubGridAssets OBSERVES the ambient bundle (D-H watch-deps, tg-kx1)',
       () {
     test('a substation re-provision re-derives land — GitHubGridAssets '
@@ -489,6 +622,62 @@ class _ReprovidingScopeState extends State<_ReprovidingScope> {
           root: seed.controller._root,
           prefix: seed.controller._name,
         ),
+        child: seed.child,
+      );
+}
+
+/// A recording [GitRunner] — argv capture proves WHICH machinery actually ran
+/// (the carrier's vs a ctor override's) without any real git.
+class _RecordingGitRunner implements GitRunner {
+  final List<List<String>> calls = [];
+
+  @override
+  Future<GitRunResult> run({
+    required String workingDirectory,
+    required List<String> args,
+  }) async {
+    calls.add(args);
+    return const GitRunResult(exitCode: 0, output: '');
+  }
+}
+
+/// A [StatefulSeed] that re-provides an ambient [GitServices] on demand (via
+/// [_ServicesController.set]) — proves `GitGridAssets` OBSERVES the machinery
+/// carrier (D-H watch-deps, bead pow-72b), mirroring [_ReprovidingScope].
+class _ReprovidingServices extends StatefulSeed {
+  _ReprovidingServices(this.controller, this.child);
+
+  final _ServicesController controller;
+  final Seed child;
+
+  @override
+  State<_ReprovidingServices> createState() => _ReprovidingServicesState();
+}
+
+/// The test-side handle that drives a [_ReprovidingServices] re-provision.
+class _ServicesController {
+  _ServicesController(this._value);
+
+  GitServices _value;
+  void Function()? _apply;
+
+  /// Swaps the provided machinery and re-provisions the tree.
+  void set(GitServices value) {
+    _value = value;
+    _apply!();
+  }
+}
+
+class _ReprovidingServicesState extends State<_ReprovidingServices> {
+  @override
+  void initState() {
+    super.initState();
+    seed.controller._apply = () => setState(() {});
+  }
+
+  @override
+  Seed build(TreeContext context) => InheritedSeed<GitServices>(
+        value: seed.controller._value,
         child: seed.child,
       );
 }

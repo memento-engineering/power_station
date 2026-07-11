@@ -11,7 +11,8 @@
 /// The v3 COMPOSITION ASSETS (Track F, `tg-5r9`, `composition_assets.dart`) are
 /// how those opinions mount into the grid tree at a SCOPE — the replacement for
 /// the runner-built `ServiceBundle` map: [GitGridAssets] / [GitHubGridAssets]
-/// (substation-scoped source control), [HarnessProvider] (station-scoped harness
+/// (substation-scoped source control, over the ambient [GitServices] machinery
+/// carrier the delegate mounts once), [HarnessProvider] (station-scoped harness
 /// provision), [CircuitProvider] (the Q8 circuit provider/scope), and
 /// [sourceControlOf] (bead → substation → root resolution, no string-keyed map).
 ///
