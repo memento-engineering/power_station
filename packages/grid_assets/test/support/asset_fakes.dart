@@ -13,11 +13,14 @@ import 'package:grid_engine/grid_engine.dart';
 import 'package:grid_engine/testing.dart';
 import 'package:grid_assets/grid_assets.dart';
 
-/// The live `code` resolver (all work → the `code` circuit) for the integrated
-/// acceptance tests — pair it with [buildCodeRegistry] as the ambient
-/// `CapabilityRegistry`. Mirrors `composeRunTree`'s production wiring.
-const CircuitResolver kCodeResolver = CircuitResolver(_codeCircuit);
-Circuit _codeCircuit(Bead bead) => kCodeCircuit;
+/// The live `code` resolver for the integrated acceptance tests — the SAME
+/// migration-aware resolver the production composition mounts (bead `pow-3p4`):
+/// fresh work and any session carrying a FOLDED cursor root the current
+/// [kCodeCircuit]; an adopted OLD-shape in-flight session (a pre-fold cursor)
+/// roots the frozen shape it was minted under, so a bounce never re-enters
+/// `specify`. Pair it with [buildCodeRegistry] as the ambient
+/// `CapabilityRegistry`.
+const SessionResolver kCodeResolver = CodeCircuitResolver(kCodeCircuit);
 
 /// The committee-wired `code` circuit's node paths (relative to the work bead),
 /// in declaration order — the `spec_review/<lane>` spec committee, `specify`
