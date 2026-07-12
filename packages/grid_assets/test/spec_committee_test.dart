@@ -362,6 +362,92 @@ void main() {
         );
       });
     });
+
+    group('the brief ↔ gate ROUND TRIP (`pow-77g`)', () {
+      test('the exemplar the brief SHIPS passes the gate that grades it — the '
+          'contract is one string, not two', () {
+        final exemplar = bead('tg-1').copyWith(
+          acceptanceCriteria: kSpecExemplarAcceptance,
+          design: kSpecExemplarDesign,
+        );
+        expect(specStructuralFindings(exemplar), isEmpty);
+      });
+
+      test('an ORDINAL-HEADING plan grades A — the `pow-kzx` shape the '
+          'plan-completeness critic graded A and this lane F\'d on format', () {
+        final headed = _specced().copyWith(
+          design: _specced().design.replaceFirst(
+            '1. Add `Heartbeat` — `lib/src/heartbeat.dart`',
+            '### Step 1 — Add `Heartbeat` in `lib/src/heartbeat.dart`',
+          ),
+        );
+        expect(specStructuralFindings(headed), isEmpty);
+      });
+
+      test('a BULLETED plan still F\'s — the ordinal stays MANDATORY', () {
+        final bulleted = _specced().copyWith(
+          design: _specced().design.replaceFirst('1. Add', '- Add'),
+        );
+        expect(
+          specStructuralFindings(bulleted).single,
+          contains('has no numbered steps'),
+        );
+      });
+
+      test('an ordinal OUTSIDE the plan section no longer rescues a step-less '
+          'plan — the check reads the `## Implementation Plan` body', () {
+        final elsewhere = _specced().copyWith(
+          design: _specced().design
+              .replaceFirst('1. Add', '- Add')
+              .replaceFirst(
+                '## Validation Plan\n',
+                '## Validation Plan\n1. run the suite\n',
+              ),
+        );
+        expect(
+          specStructuralFindings(elsewhere).single,
+          contains('has no numbered steps'),
+        );
+      });
+
+      test('a heading quoted inside a fenced block is evidence, not a section',
+          () {
+        final quotedOnly = _specced().copyWith(
+          design: _specced().design.replaceFirst(
+            '## Touches\n',
+            '```markdown\n## Touches\n```\n',
+          ),
+        );
+        expect(
+          specStructuralFindings(quotedOnly).single,
+          contains('no `## Touches` section'),
+        );
+      });
+
+      test('every banned token is DERIVED from one list: each trips the fence '
+          'in prose, and the brief names all seven', () {
+        final rendered = buildSpecifyBrief(
+          _specced(),
+          testWorkspace('tg-1', workspaceDir: '/w/tg-1', branch: 'grid/tg-1'),
+        ).render();
+        for (final token in kSpecPlaceholderTokens) {
+          final tripped = _specced().copyWith(
+            design: '${_specced().design}\nThe loader handles $token.\n',
+          );
+          expect(
+            specStructuralFindings(tripped).single,
+            contains('placeholder:'),
+            reason: '$token must trip the fence in prose',
+          );
+          expect(
+            rendered,
+            contains('`$token`'),
+            reason: 'the brief must NAME $token — a token the fence bans and '
+                'the brief omits is a silent F',
+          );
+        }
+      });
+    });
   });
 
   group('SpecCriticCapability — one spec rubric, in isolation', () {

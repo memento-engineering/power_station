@@ -103,6 +103,109 @@ const List<String> kSpecCommitteeRubrics = [
   ...kSpecLlmRubrics,
 ];
 
+/// A structurally WHOLE spec — the acceptance half of the exemplar the specify
+/// brief ships. Round-tripped through [specStructuralFindings] in test: what the
+/// architect is told to copy is PROVEN to pass the gate that grades it.
+const String kSpecExemplarAcceptance = '''
+- [ ] `Heartbeat` parses a well-formed peer frame
+- [ ] A malformed peer frame is refused LOUDLY (throws, never returns null)''';
+
+/// The design half of that exemplar — one complete step in the ordinal-heading
+/// shape, all four sections, every element the four LLM lanes look for.
+const String kSpecExemplarDesign = '''
+## Implementation Plan
+
+### Step 1 — Add the `Heartbeat` frame
+
+Create `packages/grid_assets/lib/src/bus/heartbeat.dart`:
+
+```dart
+/// One peer heartbeat frame.
+class Heartbeat {
+  /// Creates a heartbeat from [peerId].
+  const Heartbeat(this.peerId);
+
+  /// Parses [frame] — throws [FormatException] on a malformed frame (LOUD;
+  /// never a null return).
+  factory Heartbeat.parse(String frame) => frame.isEmpty
+      ? throw const FormatException('empty heartbeat frame')
+      : Heartbeat(frame);
+
+  /// The peer that sent it.
+  final String peerId;
+}
+```
+
+Test: `cd packages/grid_assets && dart test test/heartbeat_test.dart` → expect
+`All tests passed!`.
+Commit: `feat(bus): add the peer heartbeat frame`
+
+## Touches
+- `packages/grid_assets/lib/src/bus/heartbeat.dart` — created;
+  `lib/src/bus/heartbeat.dart:Heartbeat`
+
+Re-validated against the live tree: `Heartbeat` has no caller yet and no sibling
+bead adds one.
+
+## ADR Alignment
+No ADR applies — verified via grep on `heartbeat`, `bus`, `frame`.
+
+## Validation Plan
+- [ ] `Heartbeat` parses a well-formed peer frame → `cd packages/grid_assets && dart test test/heartbeat_test.dart` → `All tests passed!`
+- [ ] A malformed peer frame is refused LOUDLY → `cd packages/grid_assets && dart test test/heartbeat_test.dart` → `All tests passed!`''';
+
+/// [kSpecPlaceholderTokens] as one backticked line — the brief names EVERY token
+/// the fence bans.
+final String _bannedTokenLine = kSpecPlaceholderTokens
+    .map((token) => '`$token`')
+    .join(', ');
+
+/// The EXACT structural contract the deterministic `spec-validation` lane
+/// enforces ([specStructuralFindings]), in the words the specify agent reads.
+/// [buildSpecifyBrief] renders it VERBATIM, so the gate's contract and the
+/// architect's instructions are literally ONE string.
+///
+/// Bead `pow-77g`: `pow-kzx`'s plan was graded **A** by `plan-completeness` and
+/// **F** here, for lacking a step FORMAT the brief never named. A gate whose
+/// contract the brief does not state is a trap. The round-trip fence in test —
+/// the exemplar below PASSES [specStructuralFindings] — is what keeps the two
+/// honest as either side moves.
+final String kSpecStructuralContract =
+    '''
+### The structural contract (a DETERMINISTIC gate, run before any critic reads your spec)
+
+`spec-validation` is not a critic and holds no opinion: it greps the bead you
+write and hard-blocks the build on any miss. It checks EXACTLY this, and nothing
+else:
+
+1. **Acceptance** carries at least one `- [ ]` checkbox line.
+2. **The design carries all four `## ` headings**, spelled exactly:
+   `## Implementation Plan`, `## Touches`, `## ADR Alignment`,
+   `## Validation Plan`.
+3. **`## Implementation Plan` carries NUMBERED steps.** Every step opens with an
+   ordinal — an ordered-list item (`1. …` / `1) …`) or an ordinal heading
+   (`### Step 1 — …` / `### 1. …`). A bulleted or prose-only plan has no ordinal
+   and FAILS however complete it is. Steps carrying fenced code read best as
+   `### Step N — …` headings.
+4. **`## Validation Plan` carries at least one `- ` item.**
+5. **No placeholder token in PROSE.** These exact tokens, case-insensitively:
+   $_bannedTokenLine.
+
+Headings and ordinals are read from PROSE, and so are those tokens: markdown
+QUOTATION is exempt (fenced blocks, `inline code` spans, `>` blockquote lines).
+A token you QUOTE as evidence — a comment your plan deletes, a gate note cited
+verbatim — points at work rather than deferring it, so backtick any banned token
+you must name. The same cuts the other way: a `## Touches` heading that exists
+only inside a code block is evidence, not a section.
+
+Below is a COMPLETE spec that passes this gate. Copy its SHAPE.
+
+`````markdown
+$kSpecExemplarAcceptance
+
+$kSpecExemplarDesign
+`````''';
+
 /// The spec-readiness committee circuit (id `spec_review`) — SPECIFY (the
 /// architect harness ride) → a hygiene step ([ClearCritiqueCapability], shared
 /// with the code committee so a round's verdict files are always round-fresh) →
@@ -380,9 +483,8 @@ AgentBrief buildSpecifyBrief(
       'grid code, spec it to the D-H doctrine (ADR-0008): watch deps in '
       '`build` via `dependOn*`; no public synchronous accessor over '
       '`StateNotifier` state; config = VALUES in the tree, impls = DI; guards '
-      'LOUD or GONE. No placeholders — "TBD", "add appropriate error '
-      'handling", "similar to step N" are spec failures the committee '
-      'F-gates.',
+      'LOUD or GONE. No placeholders: the structural contract below enumerates '
+      'every banned token, and a spec that defers its own content is F-gated.',
     )
     ..writeln()
     ..writeln(
@@ -410,6 +512,8 @@ AgentBrief buildSpecifyBrief(
       'gaps — every criterion has its validation, every validation names its '
       'criterion.',
     )
+    ..writeln()
+    ..writeln(kSpecStructuralContract)
     ..writeln()
     ..writeln('### 3. The machine gate')
     ..writeln(
@@ -650,19 +754,25 @@ String specBeadBlock(Bead bead) {
 /// **The invariant it protects (LOUD-or-gone)**: a bead may only reach the
 /// build stage carrying a structurally complete, placeholder-free spec —
 /// testable `- [ ]` acceptance checkboxes and a design with all four sections
-/// (`## Implementation Plan` with numbered steps, `## Touches`,
+/// (`## Implementation Plan` with ordinal-led steps, `## Touches`,
 /// `## ADR Alignment`, `## Validation Plan` with at least one item), free of
-/// the placeholder tokens the pack bans (TBD / TODO / "implement later" /
-/// "as needed" / "appropriate error handling" / "similar to step"). A bead
-/// with no spec at all — the pre-specify state — grades F, so the specify
-/// stage can never be silently skipped. Fail-closed: a missing ambient bead
-/// grades F too.
+/// the [kSpecPlaceholderTokens]. A bead with no spec at all — the pre-specify
+/// state — grades F, so the specify stage can never be silently skipped.
+/// Fail-closed: a missing ambient bead grades F too.
+///
+/// Every rule it enforces is STATED to the agent it judges: the specify brief
+/// renders [kSpecStructuralContract] verbatim, and the exemplar that contract
+/// ships is round-tripped through [specStructuralFindings] in test (bead
+/// `pow-77g` — a gate whose contract the brief does not state is a trap, and
+/// this one had F'd an A-graded plan for a step FORMAT nobody named).
 ///
 /// The placeholder fence reads the spec's PROSE only: markdown quotation
 /// contexts — fenced ``` blocks, inline `code` spans, `>` blockquote lines —
 /// are stripped before matching, so a spec that QUOTES a banned token as
 /// evidence (a `// TODO` comment the plan deletes, an ADR clause or gate note
-/// cited verbatim) is pointing at work, not deferring it, and never parks.
+/// cited verbatim) is pointing at work, not deferring it, and never parks. The
+/// same strip governs the STRUCTURE check — a `## ` heading or a step ordinal
+/// quoted inside a fence is evidence, not structure.
 ///
 /// What the structure check does NOT judge — whether the criteria are truly
 /// testable, the plan truly complete, the ADR citations truly load-bearing —
@@ -696,20 +806,68 @@ class SpecValidationCapability extends ServiceCapability {
 }
 
 /// The placeholder tokens that anchor an automatic structural F — a spec that
-/// says "fill in later" in any spelling is not implementation-ready. Word
-/// tokens (`tbd`/`todo`) match on word boundaries so an identifier that
-/// merely contains the letters never trips; the phrases match verbatim
-/// (case-insensitive). Matched against [_proseOnly] output — a token inside a
-/// markdown quotation context (quoted code, a cited clause) never trips.
-final List<RegExp> _placeholderPatterns = [
-  RegExp(r'\btbd\b', caseSensitive: false),
-  RegExp(r'\btodo\b', caseSensitive: false),
-  RegExp('implement later', caseSensitive: false),
-  RegExp('fill in later', caseSensitive: false),
-  RegExp('as needed', caseSensitive: false),
-  RegExp('appropriate error handling', caseSensitive: false),
-  RegExp('similar to step', caseSensitive: false),
+/// defers its own content is not implementation-ready.
+///
+/// This list is the ONE source: [_placeholderPatterns] compiles it (single
+/// words on word boundaries, so an identifier that merely CONTAINS the letters
+/// never trips; the phrases verbatim, all case-insensitive) and
+/// [kSpecStructuralContract] enumerates it to the specify agent — so the fence
+/// can never ban a token the brief never named. Before bead `pow-77g` the brief
+/// named three of these seven, and the four it omitted are ordinary English an
+/// architect writes without thinking: a good plan parked on a rule nobody
+/// stated.
+const List<String> kSpecPlaceholderTokens = [
+  'TBD',
+  'TODO',
+  'implement later',
+  'fill in later',
+  'as needed',
+  'appropriate error handling',
+  'similar to step',
 ];
+
+/// [kSpecPlaceholderTokens] compiled — single words word-bounded, phrases
+/// verbatim, all case-insensitive. Matched against [_proseOnly] output, so a
+/// token inside a markdown quotation context (quoted code, a cited clause) is
+/// evidence, not deferral, and never trips.
+final List<RegExp> _placeholderPatterns = [
+  for (final token in kSpecPlaceholderTokens)
+    RegExp(
+      token.contains(' ')
+          ? RegExp.escape(token)
+          : '\\b${RegExp.escape(token)}\\b',
+      caseSensitive: false,
+    ),
+];
+
+/// A NUMBERED step's opening line inside `## Implementation Plan` — the two
+/// shapes a real plan takes, BOTH carrying an explicit ordinal:
+///
+///  * an ordered-list item — `1. …` / `1) …`
+///  * an ordinal heading or bold lead-in — `### Step 1 — …`, `### 1. …`,
+///    `**Step 1:** …`
+///
+/// The heading form is what a plan with a fenced Dart block per step must take
+/// (a `1.` list item has to indent every following block to stay inside the
+/// item) and it is what the specify agent writes when left to itself: bead
+/// `pow-kzx`'s 1226-line plan, graded **A** by the `plan-completeness` critic,
+/// carried `### Step 1 — …` headings and not one `1.`-led line, and F'd here on
+/// FORMAT alone (bead `pow-77g`).
+///
+/// Recognizing it is not a loosening — the ordinal is still MANDATORY, so a
+/// bulleted or prose-only plan (steps neither ordered nor addressable) still
+/// fails LOUD. In a heading or bold lead-in a bare ordinal IS the step number,
+/// so no trailing `.`/`)` is required there; in running prose one is, which is
+/// why `2026-07-11 …` and `3.5x faster` do not match.
+final RegExp _numberedStep = RegExp(
+  r'^[ \t]*(?:'
+  r'\d+[.)]\s' // 1. …  /  1) …
+  r'|#{1,6}[ \t]*(?:step[ \t]*)?\d+\b' // ### Step 1 — …  /  ### 1. …
+  r'|\*\*[ \t]*(?:step[ \t]*)?\d+\b' // **Step 1:** …  /  **1.** …
+  r')',
+  multiLine: true,
+  caseSensitive: false,
+);
 
 /// The structural findings for [bead]'s spec — empty iff the spec is whole.
 /// Pure and exposed for unit tests; [SpecValidationCapability] grades A iff
@@ -720,6 +878,11 @@ List<String> specStructuralFindings(Bead bead) {
   final findings = <String>[];
   final acceptance = bead.acceptanceCriteria;
   final design = bead.design;
+  // The SHAPE is read from PROSE, the same way the placeholder fence is
+  // (A13(10)): a `## ` heading or a step ordinal quoted inside a fenced block —
+  // this pack's own specs quote all four headings verbatim — is evidence, not
+  // structure.
+  final structure = _proseOnly(design);
 
   // Testable acceptance: at least one `- [ ]` checkbox criterion.
   if (!RegExp(r'^\s*-\s*\[[ xX]\]\s*\S', multiLine: true).hasMatch(acceptance)) {
@@ -727,22 +890,27 @@ List<String> specStructuralFindings(Bead bead) {
   }
 
   // The four design sections.
-  if (!design.contains('## Implementation Plan')) {
+  final planAt = structure.indexOf('## Implementation Plan');
+  if (planAt < 0) {
     findings.add('design: no `## Implementation Plan` section');
-  } else if (!RegExp(r'^\s*1[.)]\s', multiLine: true).hasMatch(design)) {
-    findings.add('design: `## Implementation Plan` has no numbered steps');
+  } else if (!_numberedStep.hasMatch(_sectionBody(structure, planAt))) {
+    findings.add(
+      'design: `## Implementation Plan` has no numbered steps — every step '
+      'must open with an ordinal (`1.` / `1)` list items, or `### Step 1 — …` '
+      'headings)',
+    );
   }
-  if (!design.contains('## Touches')) {
+  if (!structure.contains('## Touches')) {
     findings.add('design: no `## Touches` section');
   }
-  if (!design.contains('## ADR Alignment')) {
+  if (!structure.contains('## ADR Alignment')) {
     findings.add('design: no `## ADR Alignment` section');
   }
-  final validationAt = design.indexOf('## Validation Plan');
+  final validationAt = structure.indexOf('## Validation Plan');
   if (validationAt < 0) {
     findings.add('design: no `## Validation Plan` section');
   } else {
-    final body = _sectionBody(design, validationAt);
+    final body = _sectionBody(structure, validationAt);
     if (!RegExp(r'^\s*-\s*\S', multiLine: true).hasMatch(body)) {
       findings.add('design: `## Validation Plan` has no items');
     }
