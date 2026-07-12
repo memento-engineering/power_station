@@ -27,7 +27,10 @@ import '../agent/usage_report.dart';
 import '../assets/asset_loader.dart';
 import 'circuit_migration.dart';
 import 'committee.dart';
+import 'conventional_commit.dart';
 import 'landing.dart';
+import 'pr_composition.dart';
+import 'pr_describe.dart';
 import 'respec.dart';
 import 'specify.dart';
 
@@ -142,6 +145,12 @@ class AgentCapability extends ProcessCapability {
     final registry =
         context.getInheritedSeedOfExactType<AgentHarnessRegistry>() ??
         buildAgentHarnessRegistry();
+    // The commit policy the brief teaches rides the station's composition knob
+    // (bead `pow-8dx`) — read with the effect verb at the spawn edge (ADR-0008
+    // D3); absent ⇒ the default `Refs` token.
+    final composition =
+        context.getInheritedSeedOfExactType<PrComposition>() ??
+        const PrComposition();
     final config = resolveAgentConfig(
       ambient: ambient,
       beadMetadata: bead.metadata,
@@ -150,7 +159,11 @@ class AgentCapability extends ProcessCapability {
     );
     return registry.harness(config.harness)!.spawnFor(
       config: config,
-      brief: buildAgentBrief(bead, workspace),
+      brief: buildAgentBrief(
+        bead,
+        workspace,
+        trailerToken: composition.trailerToken,
+      ),
       workspace: workspace,
       usageOut: usageReportPath(args.nodePath),
     );
@@ -214,7 +227,19 @@ class AgentCapability extends ProcessCapability {
 /// (OQ-a) — one brief replays across harnesses. Completion is OBSERVED via
 /// process-exit (the host writes the node cursor through the chokepoint when the
 /// agent's process exits clean) — the agent never DECLARES it (tg-p9q).
-AgentBrief buildAgentBrief(Bead bead, Workspace workspace) {
+///
+/// The agreement also carries the **commit policy** (bead `pow-8dx`): every
+/// commit is Conventional Commits v1.0.0, its subject describes WHAT CHANGED IN
+/// THIS REPO, and the bead id rides ONE git TRAILER (`<trailerToken>: <bead>`)
+/// at the bottom — never the subject, never the body prose. The git log is the
+/// primary artifact; a reader must learn what changed and why WITHOUT leaving
+/// the repo. (What agents write today — `feat(scope): <bead> — …` — is the exact
+/// anti-pattern.)
+AgentBrief buildAgentBrief(
+  Bead bead,
+  Workspace workspace, {
+  String trailerToken = kDefaultTrailerToken,
+}) {
   final title = bead.title.isNotEmpty ? bead.title : 'work bead ${bead.id}';
   final substation = bead.metadata['rig'];
   final p = StringBuffer()
@@ -244,6 +269,41 @@ AgentBrief buildAgentBrief(Bead bead, Workspace workspace) {
       'for this bead.',
     )
     ..writeln('- Implement the task and COMMIT your work on that branch.')
+    ..writeln(
+      '- Every commit message is CONVENTIONAL COMMITS v1.0.0: '
+      '`<type>[(scope)][!]: <description>`, type one of '
+      '${kConventionalTypes.join(' | ')}. The description is IMPERATIVE, '
+      'lowercase, carries NO trailing period, and the whole subject line stays '
+      'under $kMaxSubjectChars characters.',
+    )
+    ..writeln(
+      '- The subject says WHAT CHANGED IN THIS REPO, in the repo\'s own terms. '
+      'NEVER put the bead id (`${bead.id}`) — or any other foreign reference — '
+      'in the subject or in the body prose. The git log is the primary '
+      'artifact: a reader must learn what changed and why WITHOUT leaving the '
+      'repo.',
+    )
+    ..writeln(
+      '- The bead id rides ONE git TRAILER at the very bottom, after a blank '
+      'line: `$trailerToken: ${bead.id}`. That is the ONLY place it may appear.',
+    )
+    ..writeln(
+      '- The body (optional, after a blank line) explains WHAT changed and a '
+      'HIGH-LEVEL WHY — self-contained, no ticket narrative.',
+    )
+    ..writeln(
+      '- A BREAKING change puts `!` after the type/scope AND a '
+      '`BREAKING CHANGE: <what breaks>` footer at the bottom.',
+    )
+    ..writeln('- The shape, end to end:')
+    ..writeln()
+    ..writeln('      feat(landing): infer the pr title from the branch diff')
+    ..writeln()
+    ..writeln('      The land step templated its title off the bead, so every')
+    ..writeln('      PR read `grid: <id>`. It now describes the actual diff.')
+    ..writeln()
+    ..writeln('      $trailerToken: ${bead.id}')
+    ..writeln()
     ..writeln(
       '- Do NOT push and do NOT open a pull request — leave the commit for '
       'human review.',
@@ -296,14 +356,22 @@ StepSignal _jobSignal(RuntimeEvent event) => switch (event) {
 /// (an honest "land did not complete"). The pr url rides the [Ok] payload, which
 /// the engine records on the session bead — never used as a pipeline signal.
 ///
-/// The PR opens with the FULL circuit receipt as its body (`tg-rm5`,
-/// [buildCircuitReceipt]) — the code-review committee's grade/route
-/// provenance plus this landing circuit's own rebase/revalidate outcomes, read
-/// via the ambient [SiblingView]. [SourceControl.openPr] itself carries no
-/// `body` param (the receipt-regression gap — see `landing.dart`'s header);
-/// when [sc] is ALSO a [ReceiptCapableSourceControl] (the real [GitSourceControl]
-/// always is), the richer overload is called instead so the receipt actually
-/// reaches the real PR today.
+/// The PR opens with an INFERRED, strict Conventional Commits v1.0.0 TITLE and
+/// a section-COMPOSED body (bead `pow-8dx`): `pr_describe.dart` runs ONE cheap
+/// inference pass over the branch's ACTUAL delta and `pr_composition.dart`
+/// renders it — the what/why summary FIRST, then the circuit receipt (`tg-rm5`,
+/// [buildCircuitReceipt]), the committee grades, the bead's validation plan,
+/// and LAST the footers, where the bead id rides its git TRAILER
+/// (`Refs: <bead>`) and NOWHERE else. The shape is the configurable
+/// [PrComposition] knob (`GitHubGridAssets(composition: …)`), defaulting to
+/// `const PrComposition()`. Every inference failure path (not wired, offline, a
+/// failed run, unparseable output) falls back to a DETERMINISTIC, id-free
+/// conventional subject — a land never fails, or gates, over PR prose.
+/// [SourceControl.openPr] itself carries no `body` param (the receipt-regression
+/// gap — see `landing.dart`'s header); when [sc] is ALSO a
+/// [ReceiptCapableSourceControl] (the real [GitSourceControl] always is), the
+/// richer overload is called instead, so the composed body actually reaches the
+/// real PR today.
 ///
 /// **Rework-aware delivery (`tg-w3c`)** — a preceding rework round REBASES the
 /// bead branch and leaves round one's PR open, which wedged the plain
@@ -316,8 +384,18 @@ StepSignal _jobSignal(RuntimeEvent event) => switch (event) {
 /// operator sees WHY without forensics. A bare [SourceControl] still lands
 /// through the plain, unwidened methods.
 class LandCapability extends ServiceCapability {
-  /// Creates the land capability.
-  const LandCapability();
+  /// Creates the land capability over the optional [gitRunner] (the describe
+  /// pass's branch-delta reads; null ⇒ the real [SystemGitRunner], reached only
+  /// once the describe guards pass) and the optional [inference] runner (null ⇒
+  /// NO describe pass at all: the deterministic fallback title/body with ZERO
+  /// git and ZERO inference — what a bare `const LandCapability()` gets, which
+  /// is every offline unit test).
+  const LandCapability({GitRunner? gitRunner, InferenceRunner? inference})
+    : _gitRunner = gitRunner,
+      _inference = inference;
+
+  final GitRunner? _gitRunner;
+  final InferenceRunner? _inference;
 
   @override
   Future<StepOutcome> run(TreeContext context, StepArgs args) async {
@@ -330,15 +408,42 @@ class LandCapability extends ServiceCapability {
     final siblings =
         context.getInheritedSeedOfExactType<SiblingView>() ??
         const SiblingView();
+    // The PR-composition inputs (bead `pow-8dx`), read with the EFFECT verb at
+    // the run edge (ADR-0008 D3 / A8(3)): the work definition (the fallback
+    // title's source + the describe prompt's why-context), the station's
+    // composition knob, and the agent scope the describe pass rides.
+    final bead =
+        context.getInheritedSeedOfExactType<Bead>() ?? Bead(id: args.beadId);
+    final composition =
+        context.getInheritedSeedOfExactType<PrComposition>() ??
+        const PrComposition();
+    final agentConfig =
+        context.getInheritedSeedOfExactType<AgentConfig>() ??
+        const AgentConfig();
+    final harnesses =
+        context.getInheritedSeedOfExactType<AgentHarnessRegistry>() ??
+        buildAgentHarnessRegistry();
     final sc = services.sourceControl;
     // Land not wired (no SourceControl, or provisioning-only for an early arm
     // whose working agreement is commit-only) — no-op rather than touch real
     // git. `canLand` distinguishes "deferred" (Ok) from "tried + failed" (Failed).
     if (sc == null || !sc.canLand || workspace == null) return const Ok();
 
+    // The land commit obeys the SAME policy the build agent is briefed with
+    // (bead `pow-8dx`, directive item 5): a conventional subject, the bead id in
+    // a git TRAILER, never in the subject — the old `grid: land <bead>` was
+    // neither. It only produces a commit at all when the agent left residue
+    // (`git add -A && git commit` no-ops on a clean tree), but when it does, that
+    // commit is in the git log forever.
     await sc.commitAll(
       workspaceDir: workspace.workspaceDir,
-      message: 'grid: land ${args.beadId}',
+      message: composeCommitMessage(
+        subject: const ConventionalSubject(
+          type: 'chore',
+          description: 'commit residual review changes',
+        ),
+        trailers: {composition.trailerToken: args.beadId},
+      ),
     );
     if (args.cancel.isCancelled) return const Failed('cancelled');
 
@@ -362,8 +467,33 @@ class LandCapability extends ServiceCapability {
       }
     }
 
-    final title = 'grid: ${args.beadId}';
-    final body = buildCircuitReceipt(beadId: args.beadId, siblings: siblings);
+    // THE DESCRIBE PASS (bead `pow-8dx`): one cheap inference call over the
+    // branch's ACTUAL delta — AFTER the residue commit (so the diff is the final
+    // tree) and AFTER the residue gate (so a gating land never spends a token).
+    // Fail-safe by construction: every failure path yields the deterministic,
+    // id-free fallback subject; the PR still opens.
+    final described = await describeBranch(
+      bead: bead,
+      beadId: args.beadId,
+      workspace: workspace,
+      composition: composition,
+      ambient: agentConfig,
+      registry: harnesses,
+      git: _gitRunner,
+      inference: _inference,
+    );
+    if (args.cancel.isCancelled) return const Failed('cancelled');
+
+    final prContext = PrCompositionContext(
+      beadId: args.beadId,
+      bead: bead,
+      siblings: siblings,
+      description: described.description,
+      commits: described.commits,
+      titleSource: described.source,
+    );
+    final title = composition.titleOf(prContext);
+    final body = composition.bodyOf(prContext);
 
     // REWORK-AWARE delivery (bead `tg-w3c`): a preceding rework round rebased
     // the branch and left round one's PR open, so a plain push is refused and
@@ -700,6 +830,12 @@ class GitSourceControl
 /// delete+recreate (gate-integrity #3, bead `tg-bns`) — tests inject a no-op
 /// so the offline suite never touches a real filesystem at a synthetic
 /// workspace path.
+///
+/// [inference] overrides the land step's one-shot describe runner (bead
+/// `pow-8dx`; tests inject a fake — Fakes, not mocks); absent ⇒ the real
+/// [SystemInferenceRunner]. The describe pass is doubly fail-safe (no worktree
+/// on disk ⇒ no call at all), so the offline suite never reaches a real `claude`
+/// even under the live default.
 DefaultCapabilityRegistry buildCodeRegistry({
   DateTime Function()? clock,
   RubricSource? rubrics,
@@ -707,6 +843,7 @@ DefaultCapabilityRegistry buildCodeRegistry({
   GitRunner? gitRunner,
   ShellRunner? shellRunner,
   DirectoryClearer? critiqueDirClearer,
+  InferenceRunner? inference,
 }) {
   final rubricSource = rubrics ?? PackagedAssetLoader().rubricSource;
   return DefaultCapabilityRegistry(
@@ -722,7 +859,10 @@ DefaultCapabilityRegistry buildCodeRegistry({
       // which departs from A13(5)'s shared-route posture).
       'spec-route': const SpecRouteCapability(),
       'agent': AgentCapability(devRoot: devRoot),
-      'land': const LandCapability(),
+      'land': LandCapability(
+        gitRunner: gitRunner,
+        inference: inference ?? const SystemInferenceRunner(),
+      ),
       'critic': CriticCapability(rubrics: rubricSource),
       'route': const RouteCapability(),
       'rebase': RebaseCapability(runner: gitRunner),
