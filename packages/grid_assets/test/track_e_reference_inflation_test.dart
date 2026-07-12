@@ -6,13 +6,14 @@
 // The 0(b) audit (`the_grid/docs/SCRATCH-station-config-model.md` §8, landed
 // PR#30) found the brief path ALREADY structurally clean: no brief/prompt
 // builder anywhere reads a resolved filesystem path off a bead. There are
-// exactly four brief builders org-wide, all in this package —
+// exactly five brief builders org-wide, all in this package —
 // `buildAgentBrief` (code_capabilities.dart), `CriticCapability.
-// buildCriticPrompt` (committee.dart), and the spec stage's pair (bead
+// buildCriticPrompt` (committee.dart), the spec stage's pair (bead
 // `pow-6ao`, specify.dart): `buildSpecifyBrief` +
-// `SpecCriticCapability.buildSpecCriticPrompt` — and every path that
-// reaches a spawned agent (the process cwd AND any path interpolated into the
-// brief text) comes from the ambient `Workspace` seed, never a bead field.
+// `SpecCriticCapability.buildSpecCriticPrompt`, and the landing describe pass's
+// `buildDescribePrompt` (bead `pow-8dx`, pr_composition.dart) — and every path
+// that reaches a spawned agent (the process cwd AND any path interpolated into
+// the brief text) comes from the ambient `Workspace` seed, never a bead field.
 //
 // This file is the REGRESSION FENCE that pins that invariant so a future edit
 // cannot silently re-inflate a bead stamp back into a brief or a spawn cwd:
@@ -253,6 +254,26 @@ void main() {
           contains('$workspaceDir/.grid/critique/coherence.json'),
         );
         expect(prompt, contains('Wire the federation bus'));
+      });
+
+      test('buildDescribePrompt (pow-8dx): no bead-stamped path — its branch '
+          'comes from the ACTIVATION and its delta from git; the bead is '
+          'CONTENT-only why-context', () {
+        final prompt = buildDescribePrompt(
+          bead: _poisonedBead(),
+          beadId: 'tg-m2q',
+          baseBranch: _activation().baseBranch,
+          commitLog: 'feat(x): do a thing',
+          diffStat: ' lib/x.dart | 2 +-',
+          diff: '+the change',
+        );
+        expect(prompt, isNot(contains(_poison)));
+        // The one ref in the prompt is the activation's base branch (§8.1).
+        expect(prompt, contains('origin/main...HEAD'));
+        // Bead CONTENT flows through as why-context (a REFERENCE read, §8.5)…
+        expect(prompt, contains('Wire the federation bus'));
+        // …and the bead id appears ONLY in the never-write-it rule (pow-8dx).
+        expect(prompt, contains('NEVER write the tracker id `tg-m2q`'));
       });
     });
 
