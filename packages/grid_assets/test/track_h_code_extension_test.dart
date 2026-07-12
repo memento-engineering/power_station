@@ -242,6 +242,34 @@ void main() {
       expect(prompt, contains('## Working agreement'));
     });
 
+    test('the brief carries the COMMIT POLICY (pow-8dx): conventional-commit '
+        'subjects, the bead as a git TRAILER, never a foreign reference in the '
+        'subject or the body', () {
+      final brief = buildAgentBrief(bead('tg-1'), _workspace()).render();
+      expect(brief, contains('CONVENTIONAL COMMITS v1.0.0'));
+      expect(brief, contains('`<type>[(scope)][!]: <description>`'));
+      expect(brief, contains('NEVER put the bead id (`tg-1`)'));
+      expect(brief, contains('Refs: tg-1'));
+      expect(brief, contains('BREAKING CHANGE: <what breaks>'));
+      // The worked example is itself compliant (it is what the agent copies).
+      expect(
+        lintConventionalSubject(
+          'feat(landing): infer the pr title from the branch diff',
+        ),
+        isEmpty,
+      );
+    });
+
+    test('a station\'s trailer token flows into the brief', () {
+      final brief = buildAgentBrief(
+        bead('tg-1'),
+        _workspace(),
+        trailerToken: 'Bead',
+      ).render();
+      expect(brief, contains('Bead: tg-1'));
+      expect(brief, isNot(contains('Refs: tg-1')));
+    });
+
     test('AgentCapability interpretEvent: clean exit completes, non-zero / death '
         'fails', () {
       const cap = AgentCapability();
@@ -262,10 +290,14 @@ void main() {
       final outcome = await const LandCapability().run(c.context, c.args);
       expect(outcome, isA<Ok>());
       expect((outcome as Ok).payload, {'pr_url': 'https://github.com/memento/x/pull/7'});
+      // The POLICY shape (bead pow-8dx): a conventional land-commit subject
+      // with the bead in a git TRAILER, and a deterministic, id-free fallback
+      // PR title (`bead('tg-1')` is a title-less task bead with no rig, and no
+      // inference is wired) — never the old `grid: land tg-1` / `grid: tg-1`.
       expect(sc.calls, [
-        'commit:/w/tg-1:grid: land tg-1',
+        'commit:/w/tg-1:chore: commit residual review changes\n\nRefs: tg-1',
         'push:origin:grid/tg-1',
-        'pr:grid/tg-1->main:grid: tg-1',
+        'pr:grid/tg-1->main:chore: $kFallbackDescription',
       ]);
     });
 
@@ -364,7 +396,7 @@ void main() {
       final c = _capCtx(sourceControl: sc);
       final outcome = await const LandCapability().run(c.context, c.args);
       expect(outcome, isA<Ok>());
-      expect(sc.calls.last, 'pr:grid/tg-1->main:grid: tg-1');
+      expect(sc.calls.last, 'pr:grid/tg-1->main:chore: $kFallbackDescription');
     });
 
     test('LandCapability with NO source control no-ops to Ok (offline-safe)',

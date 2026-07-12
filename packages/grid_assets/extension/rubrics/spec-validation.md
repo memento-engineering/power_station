@@ -11,17 +11,30 @@ and this lane verifies the structure landed whole.
 
 - **Acceptance criteria** — at least one testable `- [ ]` checkbox criterion in
   the bead's acceptance field.
-- **The design field carries all four sections** —
-  `## Implementation Plan` (with numbered steps), `## Touches`,
-  `## ADR Alignment`, and `## Validation Plan` (with at least one item).
-- **No placeholder tokens** anywhere in the spec's PROSE — TBD, TODO,
-  "implement later", "fill in later", "as needed",
-  "appropriate error handling", "similar to step N". A spec that defers its own
-  content is not implementation-ready. Markdown QUOTATION contexts are exempt:
-  fenced code blocks, inline code spans, and `>` blockquote lines are stripped
-  before matching, because a spec that quotes a token as evidence (a `// TODO`
-  comment its plan deletes, an ADR clause cited verbatim) is pointing at work,
-  not deferring it.
+- **The design carries all four sections** — `## Implementation Plan`,
+  `## Touches`, `## ADR Alignment`, and `## Validation Plan` (with at least one
+  `- ` item).
+- **`## Implementation Plan` carries ORDINAL-LED steps.** Every step opens with
+  an ordinal: an ordered-list item (`1. …` / `1) …`) or an ordinal heading
+  (`### Step 1 — …` / `### 1. …` / `**Step 1:** …`). Both are ordered and
+  addressable; a bulleted or prose-only plan is neither and fails, however
+  complete it is. The check reads the `## Implementation Plan` section's own
+  body — an ordinal in another section does not stand in for a step.
+- **No placeholder token in PROSE** — `TBD`, `TODO`, `implement later`,
+  `fill in later`, `as needed`, `appropriate error handling`,
+  `similar to step`. A spec that defers its own content is not
+  implementation-ready.
+- Structure and tokens are read from PROSE alike: markdown QUOTATION contexts
+  (fenced code blocks, `inline code` spans, `>` blockquote lines) are stripped
+  before matching. A spec that QUOTES a token as evidence — a `// TODO` comment
+  its plan deletes, an ADR clause cited verbatim — is pointing at work, not
+  deferring it; and a heading that exists only inside a code block is evidence,
+  not a section.
+
+The contract is not this lane's secret: `kSpecStructuralContract` states it
+verbatim in the specify agent's own brief, and the exemplar the brief ships is
+round-tripped through this check in test. A spec F'd here failed a rule it was
+told.
 
 ## Bands
 

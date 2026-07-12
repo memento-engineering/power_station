@@ -53,6 +53,15 @@
 /// [PackagedAssetLoader.renderSkill] renders one for a composing station
 /// (delivery leg: `pow-kzx`).
 ///
+/// The SPEC-READINESS INTAKE LENS (bead `pow-q7n`, `src/code/readiness.dart`)
+/// heads that spec circuit: a deterministic intake contract ([IntakeCapability]
+/// — a driveable type + a real brief, ZERO agents) then ONE cheap agent grading
+/// the BEAD ([ReadinessCriticCapability], the `bead-readiness` rubric) and a
+/// decision point ([ReadinessRouteCapability]). A bead that is not spec-ready is
+/// HELD for refinement BEFORE `specify` spawns, so a coarse brief never burns the
+/// architect + the 4-critic committee — the ~18-agent round the 2026-07-11 wide
+/// run spent discovering that at the committee.
+///
 /// The DART domain (the typed `grid.dart` envelope + pub dev-time linkage +
 /// `DartCommand`) lives in its sibling pack `dart_grid_assets`.
 library;
@@ -65,7 +74,11 @@ export 'src/assets/composition_assets.dart';
 export 'src/code/circuit_migration.dart';
 export 'src/code/code_capabilities.dart';
 export 'src/code/committee.dart';
+export 'src/code/conventional_commit.dart';
 export 'src/code/landing.dart';
+export 'src/code/pr_composition.dart';
+export 'src/code/pr_describe.dart';
+export 'src/code/readiness.dart';
 export 'src/code/respec.dart';
 export 'src/code/specify.dart';
 export 'src/compute/bounded_use.dart';

@@ -116,24 +116,38 @@ Future<StepOutcome> _specRoute(
 
 void main() {
   group('kSpecReviewCircuit — the shape', () {
-    test('specify → hygiene → gating lane + four isolated spec critics → route; '
-        'the route is the terminal', () {
+    test('readiness ladder → specify → hygiene → gating lane + four isolated '
+        'spec critics → route; the route is the terminal', () {
       expect(kSpecReviewCircuit.id, 'spec_review');
       expect(kSpecReviewCircuit.terminalStepId, 'route');
       final byId = {
         for (final s in kSpecReviewCircuit.steps) s.stepId: s,
       };
       expect(byId.keys, {
+        kIntakeStep,
+        kReadinessStep,
+        kReadinessRouteStep,
         kSpecifyStep,
         kClearCritiqueStep,
         kSpecGatingRubric,
         ...kSpecLlmRubrics,
         'route',
       });
-      // `specify` is the HEAD (bead `pow-ui8`) — the route's SIBLING, so the
-      // RESPEC arm can name it in a `StepOutcome.Rewind`.
+      // The READINESS LADDER is the head (bead `pow-q7n`) — cheapest first, and
+      // `specify` only mounts behind it, so a not-ready bead HOLDS before any
+      // architect or committee agent is ever spawned.
+      expect(byId[kIntakeStep]!.dependsOn, isEmpty);
+      expect(byId[kReadinessStep]!.dependsOn, {kIntakeStep});
+      expect(
+        (byId[kReadinessStep]! as CapabilityStep).params,
+        {'rubric': kReadinessRubric},
+      );
+      expect(byId[kReadinessRouteStep]!.dependsOn, {kReadinessStep});
+      // `specify` is still the route's SIBLING (bead `pow-ui8`), so the RESPEC
+      // arm can name it in a `StepOutcome.Rewind` — it just no longer heads the
+      // circuit.
       expect((byId[kSpecifyStep]! as CapabilityStep).capabilityId, kSpecifyStep);
-      expect(byId[kSpecifyStep]!.dependsOn, isEmpty);
+      expect(byId[kSpecifyStep]!.dependsOn, {kReadinessRouteStep});
       // The hygiene wipe waits on specify, which is what puts EVERY lane
       // downstream of it (see the rewind-set test below).
       expect(byId[kClearCritiqueStep]!.dependsOn, {kSpecifyStep});
@@ -192,6 +206,18 @@ void main() {
             'file. The critique WIPE is the whole guarantee — it must be in the '
             'rewind set, which is exactly what `clear-critique dependsOn '
             'specify` buys.',
+      );
+      // The readiness ladder is UPSTREAM of `specify`, so an auto-respec never
+      // re-runs it: a respec rewrites the SPEC, not the BEAD (bead `pow-q7n`).
+      expect(
+        rewound,
+        isNot(anyOf(
+          contains(kIntakeStep),
+          contains(kReadinessStep),
+          contains(kReadinessRouteStep),
+        )),
+        reason: 'a respec round must not burn an agent re-grading an unchanged '
+            'bead',
       );
     });
 
@@ -360,6 +386,92 @@ void main() {
           specStructuralFindings(deferring).single,
           contains('placeholder: "as needed"'),
         );
+      });
+    });
+
+    group('the brief ↔ gate ROUND TRIP (`pow-77g`)', () {
+      test('the exemplar the brief SHIPS passes the gate that grades it — the '
+          'contract is one string, not two', () {
+        final exemplar = bead('tg-1').copyWith(
+          acceptanceCriteria: kSpecExemplarAcceptance,
+          design: kSpecExemplarDesign,
+        );
+        expect(specStructuralFindings(exemplar), isEmpty);
+      });
+
+      test('an ORDINAL-HEADING plan grades A — the `pow-kzx` shape the '
+          'plan-completeness critic graded A and this lane F\'d on format', () {
+        final headed = _specced().copyWith(
+          design: _specced().design.replaceFirst(
+            '1. Add `Heartbeat` — `lib/src/heartbeat.dart`',
+            '### Step 1 — Add `Heartbeat` in `lib/src/heartbeat.dart`',
+          ),
+        );
+        expect(specStructuralFindings(headed), isEmpty);
+      });
+
+      test('a BULLETED plan still F\'s — the ordinal stays MANDATORY', () {
+        final bulleted = _specced().copyWith(
+          design: _specced().design.replaceFirst('1. Add', '- Add'),
+        );
+        expect(
+          specStructuralFindings(bulleted).single,
+          contains('has no numbered steps'),
+        );
+      });
+
+      test('an ordinal OUTSIDE the plan section no longer rescues a step-less '
+          'plan — the check reads the `## Implementation Plan` body', () {
+        final elsewhere = _specced().copyWith(
+          design: _specced().design
+              .replaceFirst('1. Add', '- Add')
+              .replaceFirst(
+                '## Validation Plan\n',
+                '## Validation Plan\n1. run the suite\n',
+              ),
+        );
+        expect(
+          specStructuralFindings(elsewhere).single,
+          contains('has no numbered steps'),
+        );
+      });
+
+      test('a heading quoted inside a fenced block is evidence, not a section',
+          () {
+        final quotedOnly = _specced().copyWith(
+          design: _specced().design.replaceFirst(
+            '## Touches\n',
+            '```markdown\n## Touches\n```\n',
+          ),
+        );
+        expect(
+          specStructuralFindings(quotedOnly).single,
+          contains('no `## Touches` section'),
+        );
+      });
+
+      test('every banned token is DERIVED from one list: each trips the fence '
+          'in prose, and the brief names all seven', () {
+        final rendered = buildSpecifyBrief(
+          _specced(),
+          testWorkspace('tg-1', workspaceDir: '/w/tg-1', branch: 'grid/tg-1'),
+        ).render();
+        for (final token in kSpecPlaceholderTokens) {
+          final tripped = _specced().copyWith(
+            design: '${_specced().design}\nThe loader handles $token.\n',
+          );
+          expect(
+            specStructuralFindings(tripped).single,
+            contains('placeholder:'),
+            reason: '$token must trip the fence in prose',
+          );
+          expect(
+            rendered,
+            contains('`$token`'),
+            reason: 'the brief must NAME $token — a token the fence bans and '
+                'the brief omits is a silent F',
+          );
+        }
       });
     });
   });

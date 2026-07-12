@@ -144,6 +144,31 @@ const String _pinnedDiffName = 'pinned.diff';
 String pinnedDiffPath(String workspaceDir) =>
     p.join(workspaceDir, _critiqueDir, _pinnedDiffName);
 
+/// The absolute path of the round's critique dir under [workspaceDir] — the
+/// canonical home of every lane's verdict file (`<rubric>.json`). Derived
+/// identically by [ClearCritiqueCapability] (the code + spec committees' wipe)
+/// and by `IntakeCapability` (the readiness lane's own wipe, bead `pow-q7n`),
+/// so the two can never drift.
+String critiqueDirPath(String workspaceDir) =>
+    p.join(workspaceDir, _critiqueDir);
+
+/// The real [DirectoryClearer]: deletes [dir] (if present) and recreates it
+/// empty. Public so every hygiene step that wipes the critique dir shares ONE
+/// implementation (tests inject a no-op instead).
+void clearDirectory(String dir) {
+  final d = Directory(dir);
+  if (d.existsSync()) d.deleteSync(recursive: true);
+  d.createSync(recursive: true);
+}
+
+/// The parent node path of [nodePath] (`'a/b/route'` → `'a/b'`), so a join step
+/// computes its sibling lane paths (`'$parentPath/$laneId'`). ONE definition —
+/// every route in this pack derives its siblings the same way.
+String parentPath(String nodePath) {
+  final i = nodePath.lastIndexOf('/');
+  return i < 0 ? '' : nodePath.substring(0, i);
+}
+
 /// A pluggable source of a rubric's prose text by id (D-9: the Packaged-AI-Asset
 /// loader replaces the inline placeholder). Returns the rubric body a critic's
 /// prompt embeds.
@@ -261,20 +286,12 @@ class ClearCritiqueCapability extends ServiceCapability {
     final workspace = context.getInheritedSeedOfExactType<Workspace>();
     if (workspace == null) return const Ok();
     try {
-      (_clearer ?? _clearDirectory)(p.join(workspace.workspaceDir, _critiqueDir));
+      (_clearer ?? clearDirectory)(critiqueDirPath(workspace.workspaceDir));
     } catch (_) {
       // Best-effort hygiene — the freshness stamp is the fail-safe backstop.
     }
     return const Ok();
   }
-}
-
-/// The real [DirectoryClearer]: deletes [dir] (if present) and recreates it
-/// empty.
-void _clearDirectory(String dir) {
-  final d = Directory(dir);
-  if (d.existsSync()) d.deleteSync(recursive: true);
-  d.createSync(recursive: true);
 }
 
 /// Pins the CRITICS' REVIEW SCOPE to the bead branch's OWN delta (bead
@@ -784,7 +801,7 @@ class RouteCapability extends ServiceCapability {
     final siblings =
         context.getInheritedSeedOfExactType<SiblingView>() ??
         const SiblingView();
-    final parent = _parentPath(args.nodePath);
+    final parent = parentPath(args.nodePath);
     final gating = args.params['gating'] ?? '';
     final criticIds = (args.params['critics'] ?? '')
         .split(',')
@@ -861,13 +878,6 @@ int _gradeIndex(String grade) {
 /// null/empty grade to `F`.
 String _normalizeGrade(String? grade) =>
     (grade == null || grade.trim().isEmpty) ? 'F' : grade.trim().toUpperCase();
-
-/// The parent node path of [nodePath] (`'a/b/route'` → `'a/b'`), so a route
-/// computes its sibling critic paths (`'$parent/$criticId'`).
-String _parentPath(String nodePath) {
-  final i = nodePath.lastIndexOf('/');
-  return i < 0 ? '' : nodePath.substring(0, i);
-}
 
 /// The bead's OWN Validation Plan — the `validation_plan` metadata command. A
 /// plan-less bead defaults to `false` (an explicit non-zero) so it grades F
