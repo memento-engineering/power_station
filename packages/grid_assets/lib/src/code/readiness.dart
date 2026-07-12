@@ -304,11 +304,11 @@ class IntakeCapability extends ServiceCapability {
 ///
 /// Subclasses [CriticCapability] to inherit the ENTIRE verdict-transport stack
 /// unchanged (canonical file → round-fresh stray → result-envelope → fail-closed
-/// F, each with its `nodePath` stamp and named `transport`; plus the FT-2 usage
-/// merge) — ADR-0000 A13(3)'s doctrine: ONE transport stack, so a hardening
-/// landed for the critics holds here too. Only the SPAWN differs: the review
-/// subject is the BEAD (no spec exists yet, and no diff — the build has not run),
-/// and the prompt is [buildReadinessPrompt].
+/// F, each with its `nodePath` + `round` stamps and named `transport`; plus the
+/// FT-2 usage merge) — ADR-0000 A13(3)'s doctrine: ONE transport stack, so a
+/// hardening landed for the critics holds here too. Only the SPAWN differs: the
+/// review subject is the BEAD (no spec exists yet, and no diff — the build has
+/// not run), and the prompt is [buildReadinessPrompt].
 ///
 /// It resolves its agent config through the SAME [resolveAgentConfig] ladder as
 /// every other lane, so it carries NO model opinion of its own — ADR-0000
@@ -367,6 +367,7 @@ class ReadinessCriticCapability extends CriticCapability {
           rubric,
           args.nodePath,
           workspace.workspaceDir,
+          round: roundOf(context, args.nodePath),
         ),
       ),
       workspace: workspace,
@@ -386,7 +387,10 @@ class ReadinessCriticCapability extends CriticCapability {
   ///
   /// Carries the SAME hardening as [CriticCapability.buildCriticPrompt]: the
   /// verdict JSON's `nodePath` stamp (the foreign-node fence, ADR-0000 A4 as
-  /// re-scoped by A15(5)), the workspace-derived ABSOLUTE canonical write path
+  /// re-scoped by A15(5)) and the `round` stamp (A15(5) alt-A) — this lane is
+  /// upstream of every rewind set, so its round is always 0, but it stamps
+  /// because it shares ONE reader with the lanes that do rewind; the
+  /// workspace-derived ABSOLUTE canonical write path
   /// (gate-integrity #4 — cwd-invariant), and the file-write instruction as the
   /// LAST thing the prompt says (tg-291 — recency). What differs is the SUBJECT
   /// and the BUDGET: it grades the BEAD (there is no spec and no diff), and it
@@ -398,8 +402,9 @@ class ReadinessCriticCapability extends CriticCapability {
     Bead bead,
     String rubric,
     String nodePath,
-    String workspaceDir,
-  ) {
+    String workspaceDir, {
+    required int round,
+  }) {
     final path = p.join(critiqueDirPath(workspaceDir), '$rubric.json');
     final b = StringBuffer()
       ..writeln('# Spec-readiness intake — rubric: `$rubric`')
@@ -440,15 +445,15 @@ class ReadinessCriticCapability extends CriticCapability {
       )
       ..writeln('Your verdict is JSON of this exact shape:')
       ..writeln(
-        '{"rubric":"$rubric","version":1,"grade":"<A-F>","rationale":"<why + '
-        'what would fix it>","nodePath":"$nodePath"}',
+        verdictJsonTemplate(
+          rubric: rubric,
+          nodePath: nodePath,
+          round: round,
+          rationaleHint: '<why + what would fix it>',
+        ),
       )
       ..writeln()
-      ..writeln(
-        'The `nodePath` value above is FIXED — copy it byte-for-byte into your '
-        'verdict; it is how the reviewer confirms the verdict belongs to THIS '
-        'node.',
-      )
+      ..writeln(kVerdictStampInstruction)
       ..writeln()
       ..writeln(
         'You MUST write that JSON to the exact ABSOLUTE path `$path` before you '

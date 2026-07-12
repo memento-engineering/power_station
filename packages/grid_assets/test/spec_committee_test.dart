@@ -62,22 +62,28 @@ No ADR applies — verified via grep on `heartbeat`, `bus`.
   Bead? beadOverride,
   String workspaceDir = '/w/tg-1',
   String? nodePath,
-}) => (
-  context: FakeTreeContext(
-    values: {
-      Bead: beadOverride ?? _specced(),
-      Workspace: testWorkspace(
-        'tg-1',
-        workspaceDir: workspaceDir,
-        branch: 'grid/tg-1',
-      ),
-    },
-  ),
-  args: stepArgs(
-    nodePath ?? 'tg-1/spec_review/$rubric',
-    params: {'rubric': rubric},
-  ),
-);
+  int round = 0,
+}) {
+  final path = nodePath ?? 'tg-1/spec_review/$rubric';
+  return (
+    context: FakeTreeContext(
+      values: {
+        Bead: beadOverride ?? _specced(),
+        Workspace: testWorkspace(
+          'tg-1',
+          workspaceDir: workspaceDir,
+          branch: 'grid/tg-1',
+        ),
+        // The ROUND the engine bumped this node to (tg-o90) — the honest counter
+        // the critic stamps and result() verifies (A15(5) alt-A).
+        SiblingView: SiblingView(
+          cursor: {path: NodeCursor(rewindCount: round)},
+        ),
+      },
+    ),
+    args: stepArgs(path, params: {'rubric': rubric}),
+  );
+}
 
 /// Runs the SPEC route (bead `pow-7nm` — the three-way matrix) over the
 /// fabricated [grades], with [rationales] where a critic returned one. No
@@ -200,12 +206,14 @@ void main() {
         rewound,
         contains(kClearCritiqueStep),
         reason:
-            'ROUND-FRESHNESS (ADR-0000 A4, amended by pow-ui8): a Rewind does '
-            'NOT re-key the bead id, so a critic\'s nodePath stamp is '
-            'byte-identical across rounds and cannot fence a stale verdict '
-            'file. The critique WIPE is the whole guarantee — it must be in the '
-            'rewind set, which is exactly what `clear-critique dependsOn '
-            'specify` buys.',
+            'ROUND-FRESHNESS (ADR-0000 A15(5) alt-A): a Rewind does NOT re-key '
+            'the bead id, so a critic\'s nodePath stamp is byte-identical '
+            'across rounds and cannot fence a stale verdict file — that is the '
+            'verdict\'s own `round` stamp\'s job now. The critique WIPE is the '
+            'BELT behind it: it stays in the rewind set so a round still starts '
+            'with a clean workspace (and it remains the gating lane\'s only '
+            'freshness fence — the `.rc` carries no stamp), which is exactly '
+            'what `clear-critique dependsOn specify` buys.',
       );
       // The readiness ladder is UPSTREAM of `specify`, so an auto-respec never
       // re-runs it: a respec rewrites the SPEC, not the BEAD (bead `pow-q7n`).
@@ -499,6 +507,7 @@ void main() {
         'coherence',
         'tg-1/spec_review/coherence',
         '/w/tg-1',
+        round: 0,
       );
       expect(prompt, contains('# Spec review — rubric: `coherence`'));
       expect(prompt, contains('NOT been built'));
@@ -513,15 +522,19 @@ void main() {
     });
 
     test('the prompt carries the SAME verdict hardening as the code critics: '
-        'nodePath freshness stamp + the ABSOLUTE canonical path, write-file '
-        'last (tg-291 / gate-integrity #3+#4)', () {
+        'nodePath + round freshness stamps, the ABSOLUTE canonical path, '
+        'write-file last (tg-291 / gate-integrity #3+#4 / A15(5) alt-A)', () {
       final prompt = const SpecCriticCapability().buildSpecCriticPrompt(
         _specced(),
         'plan-completeness',
         'tg-1#r2/spec_review/plan-completeness',
         '/w/tg-1',
+        round: 2,
       );
-      expect(prompt, contains('"nodePath":"tg-1#r2/spec_review/plan-completeness"'));
+      expect(
+        prompt,
+        contains('"nodePath":"tg-1#r2/spec_review/plan-completeness","round":2}'),
+      );
       expect(prompt, contains('byte-for-byte'));
       expect(
         prompt,
@@ -537,6 +550,7 @@ void main() {
         'adr-alignment',
         'tg-1/spec_review/adr-alignment',
         '/w/tg-1',
+        round: 0,
       );
       for (final other in kSpecCommitteeRubrics) {
         if (other == 'adr-alignment') continue;
@@ -562,6 +576,7 @@ void main() {
           'grade': 'B',
           'rationale': 'scope carved cleanly',
           'nodePath': 'tg-1/spec_review/coherence',
+          'round': 0,
         }));
       expect(await cap.result(c.context, c.args), {
         'grade': 'B',
@@ -575,10 +590,72 @@ void main() {
         'version': 1,
         'grade': 'A',
         'nodePath': 'tg-1#r1/spec_review/coherence',
+        'round': 0,
       }));
       final graded = await cap.result(c.context, c.args);
       expect(graded!['grade'], 'F');
       expect(graded['transport'], 'fail-closed-default');
+    });
+
+    test('A15(5) alt-A: a stale round-0 verdict surviving into round 1 is '
+        'REJECTED even though the critique wipe NEVER RAN — the wipe is a '
+        'BELT, the round stamp is the guarantee', () async {
+      final dir = Directory.systemTemp.createTempSync('spec-critic-round-');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      const nodePath = 'tg-1/spec_review/coherence';
+      // Round 0's verdict, left on disk: ClearCritiqueCapability is NEVER
+      // invoked in this test. Under a Rewind the nodePath is BYTE-IDENTICAL, so
+      // A4's stamp still MATCHES — only the round stamp can tell them apart.
+      File('${dir.path}/.grid/critique/coherence.json')
+        ..createSync(recursive: true)
+        ..writeAsStringSync(jsonEncode({
+          'rubric': 'coherence',
+          'version': 1,
+          'grade': 'A',
+          'rationale': 'round 0 said the spec was clean',
+          'nodePath': nodePath,
+          'round': 0,
+        }));
+      final c = _laneCtx(
+        rubric: 'coherence',
+        workspaceDir: dir.path,
+        nodePath: nodePath,
+        round: 1, // the engine bumped rewindCount: this is the RESPEC round.
+      );
+      final graded =
+          await const SpecCriticCapability().result(c.context, c.args);
+      expect(graded!['grade'], 'F');
+      expect(graded['transport'], 'fail-closed-default');
+      expect(
+        graded['rationale'],
+        'no parseable verdict via file or envelope — fail-closed default',
+      );
+    });
+
+    test('the SAME file stamped with the CURRENT round parses (the fence is '
+        'positive verification, not blanket rejection)', () async {
+      final dir = Directory.systemTemp.createTempSync('spec-critic-round-ok-');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      const nodePath = 'tg-1/spec_review/coherence';
+      File('${dir.path}/.grid/critique/coherence.json')
+        ..createSync(recursive: true)
+        ..writeAsStringSync(jsonEncode({
+          'grade': 'B',
+          'rationale': 'the respec landed',
+          'nodePath': nodePath,
+          'round': 1,
+        }));
+      final c = _laneCtx(
+        rubric: 'coherence',
+        workspaceDir: dir.path,
+        nodePath: nodePath,
+        round: 1,
+      );
+      expect(await const SpecCriticCapability().result(c.context, c.args), {
+        'grade': 'B',
+        'transport': 'file',
+        'rationale': 'the respec landed',
+      });
     });
   });
 

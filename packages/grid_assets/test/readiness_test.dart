@@ -338,14 +338,15 @@ void main() {
   });
 
   group('buildReadinessPrompt — the lens brief', () {
-    test('grades the BEAD (no spec, no diff), stamps the nodePath, and names '
-        'the ABSOLUTE verdict path LAST (tg-291 recency + gate-integrity #4)',
-        () {
+    test('grades the BEAD (no spec, no diff), stamps the nodePath + round, and '
+        'names the ABSOLUTE verdict path LAST (tg-291 recency + '
+        'gate-integrity #4)', () {
       final prompt = const ReadinessCriticCapability().buildReadinessPrompt(
         _refined(),
         kReadinessRubric,
         'pow-kzx/spec_review/readiness',
         '/w/pow-kzx',
+        round: 0,
       );
       expect(prompt, contains('grading the WORK BEAD ITSELF'));
       expect(prompt, contains('has NOT been specified'));
@@ -354,8 +355,13 @@ void main() {
       expect(prompt, contains('pow-kzx'));
       expect(prompt, contains('SKILL-FILE INSTALL'));
       expect(prompt, contains('type: `feature`'));
-      // The freshness stamp + the cheapness budget.
-      expect(prompt, contains('"nodePath":"pow-kzx/spec_review/readiness"'));
+      // The freshness stamps + the cheapness budget. The lens sits upstream of
+      // every rewind set, so 0 is its permanent round — it stamps because it
+      // shares ONE reader with the lanes that DO rewind (A15(5) alt-A).
+      expect(
+        prompt,
+        contains('"nodePath":"pow-kzx/spec_review/readiness","round":0}'),
+      );
       expect(prompt, contains('Stay cheap'));
       expect(
         prompt.trimRight(),
@@ -372,6 +378,7 @@ void main() {
         kReadinessRubric,
         'pow-kzx/spec_review/readiness',
         '/w/pow-kzx',
+        round: 0,
       );
       for (final other in kSpecLlmRubrics) {
         expect(prompt, isNot(contains(other)));
