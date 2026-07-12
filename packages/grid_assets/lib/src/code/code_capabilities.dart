@@ -105,7 +105,14 @@ const Circuit kCodeCircuit = Circuit(
 /// the `AgentHarnessRegistry` with the effect verb, resolves the effective
 /// config through the ladder ([resolveAgentConfig] — step params > bead
 /// `grid.agent` envelope > ambient; fail-closed → a per-work `Failed`), and
-/// delegates the INVOCATION to the resolved harness. The POLICY stays here:
+/// delegates the INVOCATION to the resolved harness.
+///
+/// It spawns in the **BUILD role** ([AgentRole.build], bead `pow-edp`): absent a
+/// bead or station override, the coding agent rides [kBuildModelDefault]
+/// (`opus`) — the committee's critics resolve their own, cheaper grade rung off
+/// the same ambient config.
+///
+/// The POLICY stays here:
 /// [buildAgentBrief] renders the full bead (a title-only brief starves the
 /// agent, A36) + the **local-first working agreement**: work in the worktree,
 /// COMMIT, do NOT push, do NOT open a PR. Landing is an explicit OPT-IN
@@ -157,6 +164,7 @@ class AgentCapability extends ProcessCapability {
         context.getInheritedSeedOfExactType<PrComposition>() ??
         const PrComposition();
     final config = resolveAgentConfig(
+      role: AgentRole.build,
       ambient: ambient,
       beadMetadata: bead.metadata,
       stepParams: args.params,
@@ -211,7 +219,8 @@ class AgentCapability extends ProcessCapability {
   /// The CAPTURE-ONLY usage telemetry (FT-2): on a clean completion, read the
   /// harness's `--output-format json` envelope the resolved harness redirected
   /// (claude) and contribute tokensIn/tokensOut/costUsd/numTurns/
-  /// harnessDurationMs to `grid.result.<nodePath>.*`. FAIL-SAFE: an absent /
+  /// harnessDurationMs/model to `grid.result.<nodePath>.*` — `model` being the
+  /// id(s) that ACTUALLY ran (bead `pow-edp`). FAIL-SAFE: an absent /
   /// malformed / harness-without-usage envelope yields no fields (null), NEVER a
   /// throw — telemetry can never fail, gate, or delay the agent step.
   @override

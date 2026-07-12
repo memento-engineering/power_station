@@ -475,12 +475,16 @@ String _reasonTail(String output, [int max = 300]) {
 ///    decision point: no retry storm on a deterministic command failure). It is
 ///    a VALIDATION RUNNER, not an agent — it keeps its direct `sh -c` config;
 ///  - the three LLM lanes RIDE THE HARNESS (ADR-0008 Decision 10 — critics are
-///    agents): the effective [AgentConfig] resolves through the same ladder as
-///    the coding agent, and the resolved harness carries the critic's prompt
-///    (ONLY its own rubric); the verdict JSON is parsed by the [result] hook,
-///    which also merges the harness's CAPTURE-ONLY usage telemetry (FT-2 —
-///    tokens/cost/turns/duration) alongside the grade (fail-safe: no usage ⇒
-///    just the grade).
+///    agents), in the **GRADE role** ([AgentRole.grade], bead `pow-edp`): the
+///    effective [AgentConfig] resolves through the same ladder as the coding
+///    agent but off the GRADER rung — a critic reads a pinned diff against ONE
+///    rubric and writes a letter, so absent a bead or `--grader-model` override
+///    it rides [kGraderModelDefault] (`sonnet`) while the build runs
+///    [kBuildModelDefault] (`opus`). The resolved harness carries the critic's
+///    prompt (ONLY its own rubric); the verdict JSON is parsed by the [result]
+///    hook, which also merges the harness's CAPTURE-ONLY usage telemetry (FT-2 —
+///    tokens/cost/turns/duration, and the `model` that actually ran) alongside
+///    the grade (fail-safe: no usage ⇒ just the grade).
 ///
 /// A capability reads its ambient values — the work [Bead], the [Workspace],
 /// the agent scope — with the effect verb (`getInheritedSeedOfExactType`) at
@@ -533,6 +537,7 @@ class CriticCapability extends ProcessCapability {
         context.getInheritedSeedOfExactType<AgentHarnessRegistry>() ??
         buildAgentHarnessRegistry();
     final config = resolveAgentConfig(
+      role: AgentRole.grade,
       ambient: ambient,
       beadMetadata: bead.metadata,
       stepParams: args.params,

@@ -352,6 +352,10 @@ const Circuit kSpecReviewCircuit = Circuit(
 /// [AgentHarnessRegistry] with the effect verb, resolves the effective config
 /// through the ladder, and delegates the INVOCATION to the resolved harness.
 ///
+/// The architect is a BUILD-role spawner ([AgentRole.build], bead `pow-edp`) —
+/// it writes the spec two independent builds must converge on, so it rides
+/// [kBuildModelDefault] (`opus`) by default, not the graders' cheap rung.
+///
 /// The POLICY stays here: [buildSpecifyBrief] renders the full bead (a
 /// title-only brief starves the agent, A36) + the spec-writing contract — the
 /// agent writes the spec INTO the bead via the bd CLI (`--acceptance`, the
@@ -383,6 +387,7 @@ class SpecifyCapability extends ProcessCapability {
         context.getInheritedSeedOfExactType<AgentHarnessRegistry>() ??
         buildAgentHarnessRegistry();
     final config = resolveAgentConfig(
+      role: AgentRole.build,
       ambient: ambient,
       beadMetadata: bead.metadata,
       stepParams: args.params,
@@ -625,9 +630,11 @@ AgentBrief buildSpecifyBrief(
 /// each with the `nodePath` freshness stamp and a named `transport`; plus the
 /// FT-2 usage merge): one transport stack serves both committees, so a
 /// hardening landed for the code critics (gate-integrity #3/#4, tg-291)
-/// automatically holds here. Only the SPAWN differs — a spec critic is always
-/// an agent (there is no `sh -c` validation-runner flavor; the spec gate is
-/// [SpecValidationCapability]) and its prompt is [buildSpecCriticPrompt]: the
+/// automatically holds here. Only the SPAWN differs — it is a GRADE-role spawner
+/// ([AgentRole.grade], bead `pow-edp`), like its superclass, so absent an
+/// override it grades on [kGraderModelDefault] (`sonnet`); and a spec critic is
+/// always an agent (there is no `sh -c` validation-runner flavor; the spec gate
+/// is [SpecValidationCapability]) and its prompt is [buildSpecCriticPrompt]: the
 /// review subject is the bead's SPEC, never a pinned diff (no code exists
 /// yet).
 class SpecCriticCapability extends CriticCapability {
@@ -655,6 +662,7 @@ class SpecCriticCapability extends CriticCapability {
         context.getInheritedSeedOfExactType<AgentHarnessRegistry>() ??
         buildAgentHarnessRegistry();
     final config = resolveAgentConfig(
+      role: AgentRole.grade,
       ambient: ambient,
       beadMetadata: bead.metadata,
       stepParams: args.params,

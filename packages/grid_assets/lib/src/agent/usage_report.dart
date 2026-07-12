@@ -10,7 +10,11 @@
 ///    ([usageReportPath]) — the gating lane's rc-file `sh -c` wrapper precedent;
 ///  - a step's `result()` hook reads that file back through [readUsageFields]
 ///    ([UsageReport.tryParse] + [UsageReport.toResultFields]) and merges the
-///    fields into the durable `grid.result.<nodePath>.*` payload.
+///    fields into the durable `grid.result.<nodePath>.*` payload;
+///  - the envelope's `modelUsage` names the model(s) that ACTUALLY ran, captured
+///    as the `model` field (beads `pow-edp` + `pow-efv`) — the ledger-side proof
+///    that a critic graded on sonnet and a build ran on opus, and the only place
+///    a silent mid-run model fallback would be visible.
 ///
 /// Everything here is FAIL-SAFE: an absent, empty, or malformed envelope yields
 /// NO fields — telemetry can never fail, gate, or delay a step (the acceptance
@@ -51,6 +55,7 @@ class UsageReport {
     this.costUsd,
     this.numTurns,
     this.harnessDurationMs,
+    this.model,
   });
 
   /// `usage.input_tokens` — prompt tokens the run consumed.
@@ -68,13 +73,27 @@ class UsageReport {
   /// `duration_ms` — the harness-observed wall-clock duration of the run.
   final int? harnessDurationMs;
 
+  /// The envelope's top-level `modelUsage` map KEYS — the model id(s) that
+  /// ACTUALLY served the run (e.g. `claude-opus-4-8`), comma-joined in envelope
+  /// key order when more than one contributed (a subagent or a FALLBACK route).
+  /// Observed identity, NOT the configured `--model` param (beads `pow-edp` +
+  /// `pow-efv`): the argv proves what we asked for, this proves what ran, and
+  /// two ids here is exactly the silent mid-run fallback shape the role-model
+  /// split exists to prevent (the fable/opus incident — an unpinned run resolved
+  /// to opus, then fell back to fable). Durable on
+  /// `grid.result.<nodePath>.model`, so per-bead model attribution survives
+  /// worktree reaping and "did the critic really grade on sonnet?" is answerable
+  /// from the ledger.
+  final String? model;
+
   /// True when NO field was recovered (an envelope with no recognizable usage).
   bool get isEmpty =>
       tokensIn == null &&
       tokensOut == null &&
       costUsd == null &&
       numTurns == null &&
-      harnessDurationMs == null;
+      harnessDurationMs == null &&
+      model == null;
 
   /// Parses a `claude --output-format json` result envelope [content],
   /// FAIL-SAFE: `null`/blank/malformed content, a non-object shape, or an
@@ -101,19 +120,22 @@ class UsageReport {
       costUsd: _asNum(envelope['total_cost_usd']),
       numTurns: _asInt(envelope['num_turns']),
       harnessDurationMs: _asInt(envelope['duration_ms']),
+      model: _modelNames(envelope['modelUsage']),
     );
     return report.isEmpty ? null : report;
   }
 
   /// The string map merged into a step's `result()` payload — collision-safe
-  /// key names (`tokensIn`/`tokensOut`/`costUsd`/`numTurns`/`harnessDurationMs`,
-  /// distinct from `grade`/`rationale`/`verdict`). Only present fields appear.
+  /// key names (`tokensIn`/`tokensOut`/`costUsd`/`numTurns`/`harnessDurationMs`/
+  /// `model`, distinct from `grade`/`rationale`/`verdict`/`transport`). Only
+  /// present fields appear.
   Map<String, String> toResultFields() => {
     if (tokensIn != null) 'tokensIn': '$tokensIn',
     if (tokensOut != null) 'tokensOut': '$tokensOut',
     if (costUsd != null) 'costUsd': '$costUsd',
     if (numTurns != null) 'numTurns': '$numTurns',
     if (harnessDurationMs != null) 'harnessDurationMs': '$harnessDurationMs',
+    if (model != null) 'model': model!,
   };
 }
 
@@ -161,6 +183,7 @@ Map<String, dynamic>? _resultObject(Object? decoded) {
     for (final item in decoded.reversed) {
       if (item is Map &&
           (item.containsKey('usage') ||
+              item.containsKey('modelUsage') ||
               item.containsKey('total_cost_usd') ||
               item.containsKey('num_turns') ||
               item.containsKey('duration_ms'))) {
@@ -169,6 +192,21 @@ Map<String, dynamic>? _resultObject(Object? decoded) {
     }
   }
   return null;
+}
+
+/// The `modelUsage` map's keys — the model id(s) the envelope attributes the run
+/// to — comma-joined in envelope key order. Capture-only: keys ride VERBATIM (no
+/// allowlist — interpretation belongs to the reader), blank/non-string keys are
+/// dropped defensively, and a missing / non-map / keyless `modelUsage` yields
+/// `null` — NEVER a throw (the FT-2 fail-safe property).
+String? _modelNames(Object? modelUsage) {
+  if (modelUsage is! Map) return null;
+  final names = modelUsage.keys
+      .whereType<String>()
+      .map((key) => key.trim())
+      .where((key) => key.isNotEmpty)
+      .toList();
+  return names.isEmpty ? null : names.join(',');
 }
 
 int? _asInt(Object? value) => switch (value) {

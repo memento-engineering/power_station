@@ -340,6 +340,7 @@ class ReadinessCriticCapability extends CriticCapability {
         context.getInheritedSeedOfExactType<AgentHarnessRegistry>() ??
         buildAgentHarnessRegistry();
     final config = resolveAgentConfig(
+      role: AgentRole.grade,
       ambient: ambient,
       beadMetadata: bead.metadata,
       stepParams: args.params,

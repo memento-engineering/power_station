@@ -16,6 +16,19 @@
 /// provision), [CircuitProvider] (the Q8 circuit provider/scope), and
 /// [sourceControlOf] (bead → substation → root resolution, no string-keyed map).
 ///
+/// The AGENT SCOPE's model resolution is ROLE-SPLIT (bead `pow-edp`): a spawner
+/// declares its [AgentRole], and [resolveAgentConfig] resolves its model as
+/// *bead `grid.agent` `params.model` > the station's rung for that role
+/// ([AgentConfig.params]`['model']` for build, [AgentConfig.graderModel] for
+/// grade) > the asset's own default ([kBuildModelDefault] `opus` /
+/// [kGraderModelDefault] `sonnet`)*, stamping the winner into the harness
+/// transport key. So the committee grades cheap while the build runs strong, and
+/// the most explicit rung always wins. The resolved model is ALWAYS explicit —
+/// never the harness CLI's own default (which silently fell back to fable when a
+/// weekly limit blew) — and [UsageReport.model] captures the id(s) that ACTUALLY
+/// ran, so `grid.result.<node>.model` proves it from the ledger (subsuming bead
+/// `pow-efv`).
+///
 /// The COMPUTE asset domain (ADR-0011 D2/D3, M6 Track D) also lives here: the
 /// `DispatchCommand`/`CommandResult` payloads + the bounded "use" + the capacity
 /// predicate moved OUT of the kind-agnostic `grid_federation` core, and the

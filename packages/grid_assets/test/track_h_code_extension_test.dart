@@ -161,12 +161,17 @@ void main() {
       expect(cfg.args[1], contains('.grid/telemetry/tg-1_agent.usage.json'));
       expect(cfg.args[1], contains(r'exec "$@"'));
       expect(cfg.args[2], 'grid-claude'); // $0 label
-      // $1.. — the exact claude invocation ("$@" execs it verbatim).
+      // $1.. — the exact claude invocation ("$@" execs it verbatim). The model
+      // is ALWAYS named (bead `pow-edp`): a build spawns in the BUILD role, so
+      // absent a station/bead override it rides the build default (opus) — never
+      // the claude CLI's own default, which silently fell back to fable.
       expect(cfg.args[3], 'claude');
       expect(cfg.args[4], '--dangerously-skip-permissions');
-      expect(cfg.args[5], '--output-format');
-      expect(cfg.args[6], 'json');
-      expect(cfg.args[7], '-p');
+      expect(cfg.args[5], '--model');
+      expect(cfg.args[6], kBuildModelDefault);
+      expect(cfg.args[7], '--output-format');
+      expect(cfg.args[8], 'json');
+      expect(cfg.args[9], '-p');
       // The rich prompt rides as the FINAL positional (byte-identical brief).
       expect(cfg.args.last, contains('Bead `tg-1`'));
       expect(cfg.workDir, '/w/tg-1');
@@ -502,14 +507,15 @@ void main() {
         ..writeAsStringSync(content);
     }
 
-    test('returns tokens/cost/turns/duration when the harness wrote an envelope',
-        () async {
+    test('returns tokens/cost/turns/duration/model when the harness wrote an '
+        'envelope', () async {
       final dir = Directory.systemTemp.createTempSync('agent-usage-');
       addTearDown(() => dir.deleteSync(recursive: true));
       writeUsage(
         dir.path,
         '{"duration_ms": 900, "num_turns": 4, "total_cost_usd": 0.03, '
-        '"usage": {"input_tokens": 12, "output_tokens": 34}}',
+        '"usage": {"input_tokens": 12, "output_tokens": 34}, '
+        '"modelUsage": {"claude-opus-4-8": {"outputTokens": 34}}}',
       );
       final c = resultCtx(dir.path);
       final out = await const AgentCapability().result(c.context, c.args);
@@ -519,6 +525,7 @@ void main() {
         'costUsd': '0.03',
         'numTurns': '4',
         'harnessDurationMs': '900',
+        'model': 'claude-opus-4-8',
       });
     });
 
