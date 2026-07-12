@@ -233,10 +233,20 @@ const Circuit kCodeReviewCircuit = Circuit(
 /// critic's missing write back into a recognizable miss instead of a stale
 /// grade impersonating a fresh one.
 ///
-/// Best-effort BY DESIGN: a delete/recreate failure never Gates the round —
-/// [_verdictFromFile]'s `nodePath` freshness stamp is the fail-safe backstop
-/// for the LLM lanes when the clear itself couldn't run; the gating lane's own
-/// `sh -c` script always `mkdir -p`s the dir again regardless.
+/// Best-effort BY DESIGN: a delete/recreate failure never Gates the round — the
+/// gating lane's own `sh -c` script always `mkdir -p`s the dir again regardless.
+///
+/// **This wipe IS the round-freshness guarantee** (ADR-0000 A4, amended by
+/// `pow-ui8`). A4 made [_verdictFromFile]'s `nodePath` stamp the fail-safe
+/// backstop on the premise that a round re-keys the bead id to `<bead>#rN`, so
+/// the stamp carried the ROUND. It does not: neither a `grid rework` round
+/// (A14(5) — `SessionScope` re-mints with `workBeadId: bead.id`) nor a
+/// `StepOutcome.Rewind` wave (tg-o90 — no re-mint at all, only a `rewindCount`
+/// bump) changes a node's path. The stamp is therefore a FOREIGN-NODE fence (it
+/// still rejects a verdict file some OTHER node wrote — the stray-file case) and
+/// carries no round. So round-freshness rests on this wipe alone, which is why
+/// the spec circuit wires it DOWNSTREAM of `specify` (`kSpecReviewCircuit`): that
+/// puts it in the REWIND SET, so it re-runs on every auto-respec wave.
 class ClearCritiqueCapability extends ServiceCapability {
   /// Creates the capability, optionally over an injected [clearer] (tests
   /// inject a no-op so the offline suite never touches a real filesystem at a
@@ -895,11 +905,13 @@ String _beadBlock(Bead bead) {
 
 /// The verdict file's grade, when it parses AND is FRESH — `null` for an
 /// absent file, invalid JSON, a missing/blank `grade` field, OR a `nodePath`
-/// stamp that doesn't match [expectedNodePath] (gate-integrity #3: a rework
-/// round reuses the same workspace, so a prior round's file can otherwise
-/// survive on disk and be misread as this round's verdict). Every one of
-/// these is treated as "unparseable" so [CriticCapability.result] falls
-/// through to the RESULT TEXT fallback (tg-291). Never throws.
+/// stamp that doesn't match [expectedNodePath] (gate-integrity #3). The stamp
+/// fences a FOREIGN node's file (a stray write, a mis-keyed lane); it does NOT
+/// fence a stale ROUND — a node's path is byte-identical across rework and rewind
+/// rounds alike, so [ClearCritiqueCapability]'s wipe is what makes a round's
+/// files fresh (ADR-0000 A4 as amended by `pow-ui8`). Every one of these is
+/// treated as "unparseable" so [CriticCapability.result] falls through to the
+/// RESULT TEXT fallback (tg-291). Never throws.
 Map<String, String>? _verdictFromFile(
   File verdict, {
   required String expectedNodePath,

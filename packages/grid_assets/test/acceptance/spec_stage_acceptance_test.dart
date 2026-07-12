@@ -103,6 +103,19 @@ String? _resultField(Fakes f, String relPath, String field) {
   return null;
 }
 
+/// The `grid.cursor.tg-1/<relPath>.<field>` value some chokepoint `update` wrote
+/// — the rewind wave's per-node `rewindCount` bump (tg-o90) is read through this.
+String? _cursorField(Fakes f, String relPath, String field) {
+  for (final c in f.runner.callsFor('update')) {
+    final i = c.indexOf('--metadata');
+    if (i < 0 || i + 1 >= c.length) continue;
+    final md = jsonDecode(c[i + 1]) as Map<String, dynamic>;
+    final v = md['grid.cursor.tg-1/$relPath.$field'];
+    if (v != null) return '$v';
+  }
+  return null;
+}
+
 bool _gateMinted(Fakes f) =>
     f.runner.callsFor('create').any((c) => c.join(' ').contains('gate'));
 
@@ -150,7 +163,7 @@ void main() {
         //    the build agent does NOT).
         work.push(_graph(beads: [bead('tg-1')], ready: {'tg-1'}));
         await _settle();
-        expect(f.provider.started.map((s) => s.name), [_step('specify')]);
+        expect(f.provider.started.map((s) => s.name), [_step(kSpecifyNode)]);
         final specify = f.provider.started.single.config;
         // The architect brief rides the argv: the bd CLI spec writes, the
         // mandatory ADR-alignment grep of the substation register, and the
@@ -166,7 +179,7 @@ void main() {
 
         // 2) specify completes → the spec committee's hygiene step runs for
         //    real (a ServiceCapability, no spawn); re-project its completion.
-        f.provider.emit(Exited(name: _step('specify'), exitCode: 0));
+        f.provider.emit(Exited(name: _step(kSpecifyNode), exitCode: 0));
         await _settle();
         state.push(_state(committeeSession(completed: {kSpecifyNode})));
         await _settle();
@@ -267,7 +280,7 @@ void main() {
         await _settle();
         work.push(_graph(beads: [bead('tg-1')], ready: {'tg-1'}));
         await _settle();
-        f.provider.emit(Exited(name: _step('specify'), exitCode: 0));
+        f.provider.emit(Exited(name: _step(kSpecifyNode), exitCode: 0));
         await _settle();
         state.push(_state(committeeSession(
           completed: {kSpecifyNode, kSpecClearCritiqueNode},
@@ -297,6 +310,11 @@ void main() {
         expect(_gateMinted(f), isTrue,
             reason: 'a real type=gate bead was minted — the existing gated '
                 'machinery, not a new state');
+        // The ESCALATE arm's reason reaches the parked bead and NAMES the lane
+        // that hard-blocked (ADR-0000 A13(5)) — a structural F is a human
+        // ruling, never an auto-respec.
+        expect(_gateReason(f), contains('spec-validation'));
+        expect(_gateReason(f), contains('hard block'));
 
         // Surface the gated cursor → the build agent's dep is never
         // satisfied: no build spawn, no session close.
@@ -322,11 +340,12 @@ void main() {
     );
   });
 
-  group('the spec stage — a FIXABLE spec AUTO-RESPECS (bead `pow-7nm`)', () {
+  group('the spec stage — a FIXABLE spec REWINDS the specify sub-DAG '
+      '(beads `pow-7nm` + `pow-ui8`)', () {
     test(
-      'a critic D WITH a rationale parks with a MACHINE-ACTIONABLE `respec:` '
-      'gate carrying the correction guidance — NOT a human ultimatum; the '
-      'build agent never spawns and the session never closes',
+      'a critic D WITH a rationale re-keys `specify` + everything downstream '
+      'back to pending IN-SESSION — no type=gate bead, no human, no session '
+      're-mint; the build agent never spawns and the session never closes',
       () async {
         final f = buildFakes(createdId: _sid);
         final work = FakeSnapshotSource(_graph(beads: const [], ready: const {}));
@@ -341,7 +360,7 @@ void main() {
         await _settle();
         work.push(_graph(beads: [bead('tg-1')], ready: {'tg-1'}));
         await _settle();
-        f.provider.emit(Exited(name: _step('specify'), exitCode: 0));
+        f.provider.emit(Exited(name: _step(kSpecifyNode), exitCode: 0));
         await _settle();
         state.push(_state(committeeSession(
           completed: {kSpecifyNode, kSpecClearCritiqueNode},
@@ -371,41 +390,46 @@ void main() {
         )));
         await _settle();
 
-        expect(_wroteCursor(f, kSpecRouteNode, 'gated'), isTrue,
-            reason: 'a fixable spec still PARKS — the engine owns the loop '
-                'edge (split bead `tg-b3k`); what changed is the gate KIND');
-        expect(_wroteCursor(f, kSpecRouteNode, 'complete'), isFalse);
-        expect(_gateMinted(f), isTrue);
-        // The minted gate is MACHINE-ACTIONABLE — the engine (`tg-b3k`) may
-        // auto-resolve it into a rework round — and it CARRIES the critic's
-        // recommendation, so even a governor's bare `grid rework` today lands
-        // the correction guidance in the next specify brief.
-        final reason = _gateReason(f);
-        expect(reason, isNotNull);
-        expect(reason, startsWith(kRespecGatePrefix),
-            reason: 'a fixable spec mints an AUTO-RESPEC gate, not a human '
-                'ultimatum');
-        expect(reason, contains('step 3 names no test command'));
+        // The RESPEC arm ACTUATES: one chokepoint write flips the rewind set
+        // (`specify` ∪ its transitive dependents ∪ the route itself) back to
+        // `pending` with a bumped per-node `rewindCount` — the re-key that makes
+        // keyed reconcile re-run the sub-DAG VIRGIN.
+        expect(_wroteCursor(f, kSpecifyNode, 'pending'), isTrue,
+            reason: 'the route rewound its `specify` sibling');
+        expect(_cursorField(f, kSpecifyNode, 'rewindCount'), '1',
+            reason: 'the rewindCount bump RE-KEYS the node (tg-o90)');
+        expect(_wroteCursor(f, kSpecClearCritiqueNode, 'pending'), isTrue,
+            reason: 'the hygiene wipe is DOWNSTREAM of specify, so it re-runs '
+                'on the wave — and since a Rewind never re-keys the bead id, '
+                'that wipe is the WHOLE round-freshness guarantee (ADR-0000 A4 '
+                'as amended by pow-ui8)');
+        expect(_wroteCursor(f, kSpecGateNode, 'pending'), isTrue,
+            reason: 'every lane re-runs virgin — the route can never re-decide '
+                'on stale grades');
+        expect(_wroteCursor(f, kSpecRouteNode, 'pending'), isTrue,
+            reason: 'the rewinding node writes ITSELF pending too — that is '
+                'what makes the round a loop, not a race');
+        expect(_cursorField(f, kSpecRouteNode, 'rewindCount'), '1',
+            reason: 'the route\'s own count is the asset\'s ROUND counter');
 
-        // Surface the gated cursor → the build agent's dep is never satisfied.
-        state.push(_state(committeeSession(
-          completed: {
-            kSpecifyNode,
-            kSpecClearCritiqueNode,
-            kSpecGateNode,
-            ...kSpecCriticNodes,
-          },
-          gated: {kSpecRouteNode},
-          grades: {...kSpecGradesAllA, 'spec_review/plan-completeness': 'D'},
-        )));
-        await _settle();
+        // NOT a park: no gate bead, no gated cursor. This is the whole point of
+        // the bead — a fixable spec no longer waits on a human.
+        expect(_gateMinted(f), isFalse,
+            reason: 'a rewind mints NO type=gate bead (that is Gate — a human '
+                'park)');
+        expect(_wroteCursor(f, kSpecRouteNode, 'gated'), isFalse);
+        expect(_wroteCursor(f, kSpecRouteNode, 'complete'), isFalse);
+
+        // The build agent's dep (spec_review → its terminal route) regressed to
+        // pending → the build is WITHHELD while the spec is re-specified.
         expect(
           f.provider.started.map((s) => s.name),
           isNot(contains(_step(kAgentNode))),
           reason: 'a fixable spec re-specs — it NEVER reaches the build',
         );
         expect(f.runner.callsFor('close'), isEmpty,
-            reason: 'a parked session never closes — the work stays gated');
+            reason: 'the session stays LIVE across the rewind — a rewind is '
+                'not a re-mint');
       },
     );
   });

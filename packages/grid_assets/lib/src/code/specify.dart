@@ -3,18 +3,19 @@
 /// The corrected model (Nico, 2026-07-10): specify is a station ASSET — pure
 /// agentic work AFTER discovery — that mounts as a stage in the PER-BEAD
 /// WORKTREE upstream of the build stage, with its own committee review. The
-/// `code` circuit's drive loop is now
+/// `code` circuit's drive loop is
 ///
-///   [specify agent → SPEC committee gate] → [build agent → CODE committee
-///   gate → land]
+///   [specify agent → SPEC committee → advance | RESPEC | escalate] → [build
+///   agent → CODE committee gate → land]
 ///
-/// with zero engine change: `specify` and `spec_review` are two more steps in
-/// [kCodeCircuit] (`code_capabilities.dart`), and `agent`'s `dependsOn:
-/// {'spec_review'}` resolves through the engine's existing one-hop terminal
-/// resolution to `<bead>/spec_review/route`'s positive terminal — a route
-/// [Gate] parks the bead in the SAME `gated` state (the `type=gate` bead + the
-/// `<bead>#rN` rework re-key) the code committee already uses, so spec rework
-/// reuses the existing gated machinery rather than a new state.
+/// with `specify` FOLDED INTO the spec circuit as the route's sibling (bead
+/// `pow-ui8`): [kCodeCircuit] (`code_capabilities.dart`) drops in `spec_review`
+/// as its head [SubCircuitStep], and `agent`'s `dependsOn: {'spec_review'}`
+/// resolves through the engine's existing one-hop terminal resolution to
+/// `<bead>/spec_review/route`'s positive terminal, so only a spec that passes its
+/// committee reaches the build. An ESCALATION parks the bead in the SAME `gated`
+/// state the code committee uses (the `type=gate` bead + the `<bead>#rN` rework
+/// re-key).
 ///
 /// **The stage** ([SpecifyCapability]): an architect-equivalent harness ride —
 /// the resolved agent (claude by default, ADR-0008 Decision 10) runs in the
@@ -50,12 +51,13 @@
 ///    verifying its claims against the live worktree.
 ///
 /// A FIXABLE fail (an actionable critic `D`/`E` carrying a rationale, under the
-/// round cap) now AUTO-RESPECS (bead `pow-7nm`, `respec.dart`) — the route writes
-/// the failing lanes' rationales into the worktree ledger and parks with a
-/// machine-actionable gate the engine resolves (bead `tg-b3k`), and the next
-/// specify ride reads that ledger back as its correction guidance. A structural
-/// `F`, a critic `F`, a rationale-less fail, or the round cap still flares to a
-/// human.
+/// round cap) AUTO-RESPECS with NO human in the loop (beads `pow-7nm` +
+/// `pow-ui8`, `respec.dart`): the route writes the failing lanes' rationales into
+/// the worktree ledger and returns [Rewind] naming its `specify` SIBLING, so the
+/// engine re-keys the whole spec sub-DAG back to `pending` INSIDE the live session
+/// (no gate bead, no session re-mint) and the next specify ride reads that ledger
+/// back as its correction guidance. A structural `F`, a critic `F`, a
+/// rationale-less fail, or the round cap still flares to a human [Gate].
 ///
 /// **Freshness posture**: the committee grades the ambient [Bead] the engine
 /// re-provides after specify's bd mutation lands — the same bd-watch →
@@ -101,12 +103,33 @@ const List<String> kSpecCommitteeRubrics = [
   ...kSpecLlmRubrics,
 ];
 
-/// The spec-readiness committee circuit (id `spec_review`) — a hygiene step
-/// ([ClearCritiqueCapability], shared with the code committee so a rework
-/// round's verdict files are always round-fresh) → the deterministic gating
-/// lane + four LLM critics fanned out in parallel → a `route` join running the
-/// SPEC matrix ([SpecRouteCapability], bead `pow-7nm`) — advance | AUTO-RESPEC |
-/// escalate — over the spec grades.
+/// The spec-readiness committee circuit (id `spec_review`) — SPECIFY (the
+/// architect harness ride) → a hygiene step ([ClearCritiqueCapability], shared
+/// with the code committee so a round's verdict files are always round-fresh) →
+/// the deterministic gating lane + four LLM critics fanned out in parallel → a
+/// `route` join running the SPEC matrix ([SpecRouteCapability], bead `pow-7nm`) —
+/// advance | AUTO-RESPEC | escalate — over the spec grades.
+///
+/// **`specify` is FOLDED IN as the route's SIBLING (bead `pow-ui8`)** — it was a
+/// step of the PARENT `code` circuit until the engine gained routing as a
+/// first-class primitive (`StepOutcome.Rewind`, the_grid `tg-o90`). A [Rewind]
+/// may only name steps of the rewinding node's OWN circuit, so the RESPEC arm can
+/// only re-key `specify` if `specify` lives HERE. The fold is what makes the
+/// auto-respec loop ACTUATE with no human and no session re-mint: the route
+/// rewinds, the engine re-keys the sub-DAG (`specify` ∪ its transitive dependents
+/// ∪ the route itself), keyed reconcile disposes the old incarnations, and the
+/// committee re-runs VIRGIN in the SAME worktree with the ledger's correction
+/// guidance in the next specify brief.
+///
+/// EVERY lane is transitively downstream of `specify` (the hygiene step depends
+/// on it, and every lane depends on the hygiene step), so the rewind set is the
+/// WHOLE circuit. That carries TWO invariants, not one: the route can never
+/// re-decide over a previous round's grades, and — because a [Rewind] does not
+/// re-key the bead id — [ClearCritiqueCapability]'s wipe is the ONLY thing that
+/// makes a round's verdict files fresh (ADR-0000 A4's `nodePath` stamp is
+/// byte-identical across rewind rounds; see `committee.dart`).
+/// `spec_committee_test.dart` fences both with the engine's own
+/// `transitiveDependents` predicate.
 ///
 /// No `pin-diff` here: the review subject is the bead's OWN spec (its
 /// acceptance + design fields), not a code delta — there is no diff to pin
@@ -119,7 +142,12 @@ const Circuit kSpecReviewCircuit = Circuit(
   id: 'spec_review',
   terminalStepId: 'route',
   steps: [
-    CapabilityStep(stepId: kClearCritiqueStep, capabilityId: kClearCritiqueStep),
+    CapabilityStep(stepId: kSpecifyStep, capabilityId: kSpecifyStep),
+    CapabilityStep(
+      stepId: kClearCritiqueStep,
+      capabilityId: kClearCritiqueStep,
+      dependsOn: {kSpecifyStep},
+    ),
     CapabilityStep(
       stepId: kSpecGatingRubric,
       capabilityId: kSpecGatingRubric,

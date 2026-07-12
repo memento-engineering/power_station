@@ -35,7 +35,7 @@ import 'support/asset_fakes.dart';
       ),
     },
   ),
-  args: stepArgs('tg-1/specify'),
+  args: stepArgs('tg-1/spec_review/specify'),
 );
 
 Bead _fullBead() => bead('tg-1').copyWith(
@@ -55,7 +55,7 @@ void main() {
       final cfg = const SpecifyCapability().spawn(c.context, c.args);
       expect(cfg.command, 'sh');
       expect(cfg.args[0], '-c');
-      expect(cfg.args[1], contains('.grid/telemetry/tg-1_specify.usage.json'));
+      expect(cfg.args[1], contains('.grid/telemetry/tg-1_spec_review_specify.usage.json'));
       expect(cfg.args, contains('claude'));
       expect(cfg.workDir, '/w/tg-1');
       expect(cfg.lifecycle, Lifecycle.oneTurn);
@@ -69,14 +69,14 @@ void main() {
         values: {Workspace: testWorkspace('tg-1', workspaceDir: '/w/tg-1')},
       );
       expect(
-        () => const SpecifyCapability().spawn(noBead, stepArgs('tg-1/specify')),
+        () => const SpecifyCapability().spawn(noBead, stepArgs('tg-1/spec_review/specify')),
         throwsStateError,
       );
     });
 
     test('a clean exit completes; a non-zero exit / death fails', () {
       const cap = SpecifyCapability();
-      const name = 'tgdog-s/tg-1/specify';
+      const name = 'tgdog-s/tg-1/spec_review/specify';
       expect(
         cap.interpretEvent(const Exited(name: name, exitCode: 0)),
         StepSignal.complete,
@@ -192,7 +192,7 @@ void main() {
     test('a captured envelope merges the usage fields', () async {
       final dir = Directory.systemTemp.createTempSync('specify-usage-');
       addTearDown(() => dir.deleteSync(recursive: true));
-      File('${dir.path}/${usageReportPath('tg-1/specify')}')
+      File('${dir.path}/${usageReportPath('tg-1/spec_review/specify')}')
         ..createSync(recursive: true)
         ..writeAsStringSync(
           '{"type":"result","duration_ms":100,"num_turns":2,'

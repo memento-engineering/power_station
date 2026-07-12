@@ -30,23 +30,30 @@ import 'landing.dart';
 import 'respec.dart';
 import 'specify.dart';
 
-/// specify → spec_review → agent → review → land — the live `code` circuit
-/// (M5 "The Circuit" Track E; the spec stage is bead `pow-6ao`, the `land`
-/// step is itself the landing circuit as of bead `tg-rm5`).
+/// spec_review → agent → review → land — the live `code` circuit (M5 "The
+/// Circuit" Track E; the spec stage is bead `pow-6ao`, the `land` step is itself
+/// the landing circuit as of bead `tg-rm5`).
 ///
-/// **The spec stage (bead `pow-6ao`)**: the worktree drive loop gains
-/// [specify agent → SPEC committee gate] UPSTREAM of the build. `specify`
-/// ([SpecifyCapability]) is the architect-equivalent harness ride that writes
-/// the implementation-ready spec INTO the bead (acceptance / plan / touches /
-/// ADR alignment / validation plan, via the bd CLI); `spec_review` is the
-/// spec-readiness committee ([kSpecReviewCircuit] — the gating structural
-/// lane + four spec critics → the same route matrix). `agent`'s `dependsOn:
-/// {'spec_review'}` resolves — through the engine's existing one-hop terminal
-/// resolution, no new machinery — to `<bead>/spec_review/route`'s positive
-/// terminal, so ONLY a spec that passes its committee proceeds to the build;
-/// a spec-route `Gate` parks the bead in the SAME `gated` state (the
-/// `type=gate` bead + the `<bead>#rN` rework re-key) the code committee uses,
-/// reusing the existing rework machinery rather than a new state.
+/// **The spec stage (beads `pow-6ao` + `pow-ui8`)**: the worktree drive loop
+/// opens with the spec circuit — [specify agent → SPEC committee → advance |
+/// RESPEC | escalate] — UPSTREAM of the build. `specify` ([SpecifyCapability])
+/// is the architect-equivalent harness ride that writes the implementation-ready
+/// spec INTO the bead (acceptance / plan / touches / ADR alignment / validation
+/// plan, via the bd CLI); it is a STEP OF [kSpecReviewCircuit] (folded in by
+/// `pow-ui8` so the route can name it in a `StepOutcome.Rewind` — a rewind may
+/// only name siblings in the rewinding node's own circuit), not of this circuit.
+/// `agent`'s `dependsOn: {'spec_review'}` resolves — through the engine's
+/// existing one-hop terminal resolution, no new machinery — to
+/// `<bead>/spec_review/route`'s positive terminal, so ONLY a spec that passes its
+/// committee proceeds to the build; a FIXABLE spec REWINDS the spec sub-DAG in
+/// place (no human, no gate bead), and only an ESCALATION parks the bead in the
+/// SAME `gated` state the code committee uses.
+///
+/// NOTE (bead `pow-3p4`): the fold MOVED the persisted cursor key
+/// `<bead>/specify` → `<bead>/spec_review/specify`, so an in-flight session
+/// minted under the pre-fold shape has no key at the new path and the frontier
+/// would read it `pending`. Guarding the first BOUNCE onto this shape is
+/// `pow-3p4`'s migration bead (deferred), NOT this circuit's job.
 ///
 /// The toy `verify` step (`sh -c 'melos test'`) is GONE: `verify` is now the
 /// adversarial code-committee, a [SubCircuitStep] the engine inflates one level
@@ -67,13 +74,12 @@ const Circuit kCodeCircuit = Circuit(
   id: 'code',
   terminalStepId: 'land',
   steps: [
-    CapabilityStep(stepId: 'specify', capabilityId: 'specify'),
-    SubCircuitStep(
-      stepId: 'spec_review',
-      circuitId: 'spec_review',
-      dependsOn: {'specify'},
+    SubCircuitStep(stepId: 'spec_review', circuitId: 'spec_review'),
+    CapabilityStep(
+      stepId: 'agent',
+      capabilityId: 'agent',
+      dependsOn: {'spec_review'},
     ),
-    CapabilityStep(stepId: 'agent', capabilityId: 'agent', dependsOn: {'spec_review'}),
     SubCircuitStep(
       stepId: 'review',
       circuitId: 'code_review',
@@ -703,8 +709,9 @@ DefaultCapabilityRegistry buildCodeRegistry({
   final rubricSource = rubrics ?? PackagedAssetLoader().rubricSource;
   return DefaultCapabilityRegistry(
     capabilities: {
-      // The spec stage + its committee lanes (bead `pow-6ao`).
-      'specify': const SpecifyCapability(),
+      // The spec stage + its committee lanes (bead `pow-6ao`; `specify` folded
+      // into the spec circuit by `pow-ui8`).
+      kSpecifyStep: const SpecifyCapability(),
       'spec-critic': SpecCriticCapability(rubrics: rubricSource),
       kSpecGatingRubric: const SpecValidationCapability(),
       // The SPEC committee's own route (bead `pow-7nm`) — the three-way

@@ -116,19 +116,27 @@ Future<StepOutcome> _specRoute(
 
 void main() {
   group('kSpecReviewCircuit — the shape', () {
-    test('hygiene → gating lane + four isolated spec critics → route; the '
-        'route is the terminal', () {
+    test('specify → hygiene → gating lane + four isolated spec critics → route; '
+        'the route is the terminal', () {
       expect(kSpecReviewCircuit.id, 'spec_review');
       expect(kSpecReviewCircuit.terminalStepId, 'route');
       final byId = {
         for (final s in kSpecReviewCircuit.steps) s.stepId: s,
       };
       expect(byId.keys, {
+        kSpecifyStep,
         kClearCritiqueStep,
         kSpecGatingRubric,
         ...kSpecLlmRubrics,
         'route',
       });
+      // `specify` is the HEAD (bead `pow-ui8`) — the route's SIBLING, so the
+      // RESPEC arm can name it in a `StepOutcome.Rewind`.
+      expect((byId[kSpecifyStep]! as CapabilityStep).capabilityId, kSpecifyStep);
+      expect(byId[kSpecifyStep]!.dependsOn, isEmpty);
+      // The hygiene wipe waits on specify, which is what puts EVERY lane
+      // downstream of it (see the rewind-set test below).
+      expect(byId[kClearCritiqueStep]!.dependsOn, {kSpecifyStep});
       // Every lane waits on the hygiene wipe (round-fresh verdict files).
       for (final rubric in kSpecCommitteeRubrics) {
         expect(
@@ -156,6 +164,37 @@ void main() {
       expect(route.params['critics'], _specCritics);
     });
 
+    test('ONE Rewind naming `specify` re-runs the WHOLE committee virgin — every '
+        'other step is transitively DOWNSTREAM of it (bead `pow-ui8`)', () {
+      // The engine's OWN rewind-set predicate (grid_engine `sdk/rewind.dart`).
+      final rewound = transitiveDependents(kSpecReviewCircuit, {kSpecifyStep});
+      expect(rewound, {
+        kClearCritiqueStep,
+        kSpecGatingRubric,
+        ...kSpecLlmRubrics,
+        'route',
+      });
+      // TWO invariants ride this, not one.
+      expect(
+        rewound,
+        containsAll(<String>[kSpecGatingRubric, ...kSpecLlmRubrics]),
+        reason:
+            'every lane re-runs, so the route can NEVER re-decide over a '
+            'previous round\'s grades',
+      );
+      expect(
+        rewound,
+        contains(kClearCritiqueStep),
+        reason:
+            'ROUND-FRESHNESS (ADR-0000 A4, amended by pow-ui8): a Rewind does '
+            'NOT re-key the bead id, so a critic\'s nodePath stamp is '
+            'byte-identical across rounds and cannot fence a stale verdict '
+            'file. The critique WIPE is the whole guarantee — it must be in the '
+            'rewind set, which is exactly what `clear-critique dependsOn '
+            'specify` buys.',
+      );
+    });
+
     test('no pin-diff lane: the review subject is the bead\'s spec, not a '
         'code delta', () {
       expect(
@@ -164,16 +203,20 @@ void main() {
       );
     });
 
-    test('the code circuit sequences specify → spec_review → agent: only a '
-        'passing spec proceeds to build', () {
+    test('the code circuit is spec_review → agent → review → land: the spec '
+        'circuit is the HEAD (specify folded inside it) and only a passing spec '
+        'proceeds to build', () {
       final byId = {for (final s in kCodeCircuit.steps) s.stepId: s};
       expect(
         byId.keys.toList(),
-        ['specify', 'spec_review', 'agent', 'review', 'land'],
+        ['spec_review', 'agent', 'review', 'land'],
       );
-      expect(byId['spec_review']!.dependsOn, {'specify'});
+      expect(byId['spec_review']!.dependsOn, isEmpty);
       expect(byId['agent']!.dependsOn, {'spec_review'});
       expect((byId['spec_review']! as SubCircuitStep).circuitId, 'spec_review');
+      // `specify` is no longer a step of THIS circuit — it lives in the spec
+      // circuit as the route's rewindable sibling.
+      expect(byId.keys, isNot(contains(kSpecifyStep)));
     });
   });
 
@@ -451,23 +494,23 @@ void main() {
       expect(out.reason, contains('hard block'));
     });
 
-    test('an LLM spec lane at D WITH a rationale ⇒ an AUTO-RESPEC gate (bead '
-        '`pow-7nm`) — machine-actionable, never a human ultimatum', () async {
+    test('an LLM spec lane at D WITH a rationale ⇒ a REWIND of the `specify` '
+        'sibling (beads `pow-7nm` + `pow-ui8`) — the loop actuates, no human',
+        () async {
       final out = await _specRoute(
         {...allA(), 'plan-completeness': 'D'},
         rationales: const {'plan-completeness': 'step 3 names no test command'},
       );
-      expect(out, isA<Gate>());
-      expect((out as Gate).reason, startsWith(kRespecGatePrefix));
-      expect(out.reason, contains('step 3 names no test command'));
+      expect(out, isA<Rewind>());
+      expect((out as Rewind).stepIds, {kSpecifyStep});
+      expect(out.reason, contains('plan-completeness=D'));
     });
 
     test('an LLM spec lane at D with NO rationale ⇒ a HUMAN gate — nothing to '
-        'respec against', () async {
+        'respec against, so never a rewind', () async {
       final out = await _specRoute({...allA(), 'plan-completeness': 'D'});
       expect(out, isA<Gate>());
-      expect((out as Gate).reason, isNot(startsWith(kRespecGatePrefix)));
-      expect(out.reason, contains('NO rationale'));
+      expect((out as Gate).reason, contains('NO rationale'));
     });
 
     test('a missing spec grade fail-closes (never advances)', () async {

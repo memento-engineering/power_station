@@ -141,7 +141,7 @@ void main() {
       expect(
         f.provider.started.map((s) => s.name),
         unorderedEquals(
-          <String>['tgdog-a/sa-1/specify', 'tgdog-b/sb-1/specify'],
+          <String>['tgdog-a/sa-1/spec_review/specify', 'tgdog-b/sb-1/spec_review/specify'],
         ),
         reason: 'one head step per substation spawned through the real code '
             'circuit',
@@ -200,7 +200,7 @@ void main() {
 
       // The circuit head spawned even with no SourceControl wired (provision
       // no-op).
-      expect(f.provider.started.map((s) => s.name), ['tgdog-a/sa-1/specify']);
+      expect(f.provider.started.map((s) => s.name), ['tgdog-a/sa-1/spec_review/specify']);
     },
   );
 }

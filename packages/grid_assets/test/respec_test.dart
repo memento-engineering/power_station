@@ -2,10 +2,12 @@
 // (advance | RESPEC | escalate), the worktree guidance ledger that survives the
 // session re-mint, the bound, and the LOUD write failure.
 //
-// The layering (the bead's SCOPE question): the loop EDGE is grid_engine's
-// (`StepOutcome` is sealed over Ok/Failed/Gate; a CapabilityHost writes only its
-// OWN node's cursor) — split bead `tg-b3k`. What is proven here is everything
-// power_station owns: the DECISION, the GUIDANCE, and the BOUND.
+// The layering (settled by the_grid `tg-o90`): the engine owns the loop edge and
+// now HAS it — `StepOutcome.Rewind` re-keys the named siblings + everything
+// downstream + self, in-session. What is proven here is what power_station owns:
+// the DECISION, the GUIDANCE ledger, the BOUND read off the route's own
+// `rewindCount`, and the ACTUATION (a Rewind naming the folded `specify`
+// sibling).
 import 'dart:io';
 
 import 'package:grid_assets/grid_assets.dart';
@@ -32,13 +34,16 @@ List<SpecLane> _lanes(
 
 Map<String, String> _allA() => {for (final id in kSpecCommitteeRubrics) id: 'A'};
 
-/// Runs the SPEC route over the fabricated [grades]/[rationales], with the
-/// ambient [Workspace] pointed at [workspaceDir] (null ⇒ the offline posture: no
-/// ambient workspace, so no ledger I/O at all).
+/// Runs the SPEC route over the fabricated [grades]/[rationales], with the route
+/// node's own `rewindCount` at [rewindCount] (the ROUND COUNTER the engine bumps
+/// on every rewind wave — bead `pow-ui8`) and the ambient [Workspace] pointed at
+/// [workspaceDir] (null ⇒ the offline posture: no ambient workspace, so no ledger
+/// I/O at all).
 Future<StepOutcome> _route(
   Map<String, String> grades, {
   Map<String, String> rationales = const {},
   String? workspaceDir,
+  int rewindCount = 0,
 }) {
   const parent = 'tg-1/spec_review';
   final context = FakeTreeContext(
@@ -47,6 +52,10 @@ Future<StepOutcome> _route(
         cursor: {
           for (final id in grades.keys)
             '$parent/$id': const NodeCursor(state: StepState.complete),
+          '$parent/route': NodeCursor(
+            state: StepState.running,
+            rewindCount: rewindCount,
+          ),
         },
         results: {
           for (final entry in grades.entries)
@@ -209,7 +218,7 @@ void main() {
     });
   });
 
-  group('the guidance ledger — the channel that survives the session re-mint', () {
+  group('the guidance ledger — the channel that survives the critique wipe', () {
     late Directory ws;
     setUp(() => ws = Directory.systemTemp.createTempSync('pow7nm'));
     tearDown(() => ws.deleteSync(recursive: true));
@@ -243,38 +252,61 @@ void main() {
       expect(readRespecLedger(ws.path), isNull);
     });
 
-    test('a fixable fail WRITES the ledger and parks with a MACHINE-ACTIONABLE '
-        'gate — not a human ultimatum', () async {
+    test('a fixable fail WRITES the ledger and REWINDS the specify sibling — no '
+        'gate, no human, no session re-mint (bead `pow-ui8`)', () async {
       final out = await _route(
         {..._allA(), 'plan-completeness': 'D'},
         rationales: const {'plan-completeness': 'step 3 names no test command'},
         workspaceDir: ws.path,
       );
-      expect(out, isA<Gate>());
-      expect((out as Gate).reason, startsWith(kRespecGatePrefix));
-      expect(out.reason, contains('round 1/2'));
-      expect(out.reason, contains('step 3 names no test command'));
+      expect(out, isA<Rewind>());
+      final rewind = out as Rewind;
+      expect(rewind.stepIds, {kSpecifyStep});
+      // The engine LOUD-fails a dangling step id (tg-o90): the step the route
+      // names MUST exist in the rewinding node's own circuit.
+      expect(
+        kSpecReviewCircuit.steps.map((s) => s.stepId),
+        contains(kSpecifyStep),
+      );
+      expect(rewind.reason, contains('RESPEC round 1/2'));
+      expect(rewind.reason, contains('plan-completeness=D'));
+      // The RATIONALES ride the LEDGER (the reason is telemetry the engine
+      // truncates; the ledger is what the next specify brief reads).
       final ledger = readRespecLedger(ws.path)!;
       expect(ledger.round, 1);
       expect(ledger.lanes.single.rationale, 'step 3 names no test command');
     });
 
-    test('the round COUNTS UP across rounds, then the cap flares to a HUMAN '
-        'gate (no `respec:` prefix)', () async {
+    test('the round counter is the route node\'s `rewindCount`, and at the cap '
+        'the route flares to a HUMAN gate — the asset escalates on its OWN '
+        'policy before the engine belt', () async {
       final grades = {..._allA(), 'coherence': 'D'};
       const why = {'coherence': 'the plan still contradicts the acceptance'};
-      await _route(grades, rationales: why, workspaceDir: ws.path);
+
+      final first = await _route(grades, rationales: why, workspaceDir: ws.path);
+      expect(first, isA<Rewind>());
       expect(readRespecLedger(ws.path)!.round, 1);
-      await _route(grades, rationales: why, workspaceDir: ws.path);
+
+      // The engine bumped the route's rewindCount to 1 → round 2.
+      final second = await _route(
+        grades,
+        rationales: why,
+        workspaceDir: ws.path,
+        rewindCount: 1,
+      );
+      expect(second, isA<Rewind>());
       expect(readRespecLedger(ws.path)!.round, 2);
+
+      // At the cap: a human rules — a Gate, never a Rewind.
       final capped = await _route(
         grades,
         rationales: why,
         workspaceDir: ws.path,
+        rewindCount: kMaxRespecRounds,
       );
       expect(capped, isA<Gate>());
-      expect((capped as Gate).reason, isNot(startsWith(kRespecGatePrefix)));
-      expect(capped.reason, startsWith('respec-cap'));
+      expect((capped as Gate).reason, startsWith('respec-cap'));
+      expect(kMaxRespecRounds, lessThan(kMaxReworkRounds));
     });
 
     test('an ADVANCE deletes the ledger — a later rework never re-injects stale '
@@ -309,16 +341,24 @@ void main() {
       expect((out as Failed).reason, contains('respec guidance ledger'));
     });
 
-    test('offline/dry-run (a workspace dir that does not exist) skips the '
-        'ledger I/O but still names the rationales on the gate', () async {
+    test('offline/dry-run (a workspace dir that does not exist) skips the ledger '
+        'I/O but still REWINDS — and the BOUND still holds, because the counter '
+        'is the cursor, not the file', () async {
       final out = await _route(
         {..._allA(), 'coherence': 'D'},
         rationales: const {'coherence': 'the plan contradicts the acceptance'},
         workspaceDir: '/grid/worktrees/tg-1',
       );
-      expect(out, isA<Gate>());
-      expect((out as Gate).reason, startsWith(kRespecGatePrefix));
-      expect(out.reason, contains('the plan contradicts the acceptance'));
+      expect(out, isA<Rewind>());
+      expect((out as Rewind).stepIds, {kSpecifyStep});
+      final capped = await _route(
+        {..._allA(), 'coherence': 'D'},
+        rationales: const {'coherence': 'the plan contradicts the acceptance'},
+        workspaceDir: '/grid/worktrees/tg-1',
+        rewindCount: kMaxRespecRounds,
+      );
+      expect(capped, isA<Gate>());
+      expect((capped as Gate).reason, startsWith('respec-cap'));
     });
   });
 
