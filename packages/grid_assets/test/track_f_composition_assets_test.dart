@@ -574,6 +574,77 @@ void main() {
       );
     });
   });
+
+  group('GitHubGridAssets — the PR composition knob (pow-8dx)', () {
+    test('a composition set on the asset is mounted for the work subtree — '
+        'LandCapability/AgentCapability read it at their run/spawn edges', () {
+      PrComposition? seen;
+      const knob = PrComposition(
+        trailerToken: 'Bead',
+        sections: [PrSection.circuitReceipt],
+        model: 'sonnet',
+      );
+      mount(
+        _underSubstation(
+          'power_station',
+          '/work/ps',
+          Nest(
+            children: [
+              GitGridAssets(gitOps: GitOps(_FakeGitRunner())),
+              GitHubGridAssets(prOpener: _FakePrOpener(), composition: knob),
+            ],
+            child: _Probe(
+              (ctx) => seen = ctx.dependOnInheritedSeedOfExactType<PrComposition>(),
+            ),
+          ),
+        ),
+      );
+      expect(seen, same(knob));
+    });
+
+    test('the knob mounts INDEPENDENTLY of land enrichment (a value, not a '
+        'service): no prOpener ⇒ still mounted', () {
+      PrComposition? seen;
+      const knob = PrComposition(trailerToken: 'Bead');
+      mount(
+        _underSubstation(
+          'power_station',
+          '/work/ps',
+          Nest(
+            children: [
+              GitGridAssets(gitOps: GitOps(_FakeGitRunner())),
+              const GitHubGridAssets(composition: knob),
+            ],
+            child: _Probe(
+              (ctx) => seen = ctx.dependOnInheritedSeedOfExactType<PrComposition>(),
+            ),
+          ),
+        ),
+      );
+      expect(seen, same(knob));
+    });
+
+    test('no knob set ⇒ nothing mounted (both capabilities fall back to the '
+        'default const PrComposition())', () {
+      PrComposition? seen;
+      mount(
+        _underSubstation(
+          'power_station',
+          '/work/ps',
+          Nest(
+            children: [
+              GitGridAssets(gitOps: GitOps(_FakeGitRunner())),
+              GitHubGridAssets(prOpener: _FakePrOpener()),
+            ],
+            child: _Probe(
+              (ctx) => seen = ctx.dependOnInheritedSeedOfExactType<PrComposition>(),
+            ),
+          ),
+        ),
+      );
+      expect(seen, isNull);
+    });
+  });
 }
 
 /// A [StatefulSeed] that re-provides an ambient [sdk.SubstationScope] on demand

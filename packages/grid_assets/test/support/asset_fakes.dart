@@ -12,6 +12,7 @@ import 'package:grid_engine/grid_engine.dart';
 // (`stateSubstation`, etc.) in its own committee helpers.
 import 'package:grid_engine/testing.dart';
 import 'package:grid_assets/grid_assets.dart';
+import 'package:grid_runtime/grid_runtime.dart';
 
 /// The live `code` resolver for the integrated acceptance tests — the SAME
 /// migration-aware resolver the production composition mounts (bead `pow-3p4`):
@@ -191,6 +192,73 @@ class RecordingShellRunner implements ShellRunner {
   }) async {
     calls.add((workingDirectory: workingDirectory, command: command));
     return ShellRunResult(exitCode: exitCode, output: '');
+  }
+}
+
+/// A [GitRunner] with canned per-subcommand answers (Fakes, not mocks) — the
+/// describe pass's branch-delta reads (bead `pow-8dx`): `git log` returns [log],
+/// `git diff --stat` a fixed one-file stat, and `git diff` returns [diff] with
+/// [diffOk] deciding whether the read succeeded at all.
+///
+/// EVERY OTHER call — `status`/`add`/`commit`/`push`/`fetch`, the source-control
+/// half — succeeds with EMPTY output, i.e. a CLEAN tree and a clean push. That
+/// matters when this same runner also backs a [GitSourceControl]: the land step's
+/// residue gate probes `git status --porcelain`, and a fake that echoed the
+/// canned diff there would read as uncommitted residue and Gate the land.
+class CannedGitRunner implements GitRunner {
+  /// Creates the runner over its canned log/diff answers.
+  CannedGitRunner({this.log = '', this.diff = '', this.diffOk = true});
+
+  /// The `git log --format=…%x00` body (NUL-separated commit records).
+  final String log;
+
+  /// The `git diff origin/<base>...HEAD` body.
+  final String diff;
+
+  /// Whether the `git diff` read succeeds (false ⇒ a non-zero git).
+  final bool diffOk;
+
+  /// Every argv, in call order.
+  final List<List<String>> calls = [];
+
+  @override
+  Future<GitRunResult> run({
+    required String workingDirectory,
+    required List<String> args,
+  }) async {
+    calls.add(List.unmodifiable(args));
+    if (args.first == 'log') return GitRunResult(exitCode: 0, output: log);
+    if (args.first == 'diff') {
+      if (args.contains('--stat')) {
+        return const GitRunResult(exitCode: 0, output: ' lib/x.dart | 2 +-');
+      }
+      return GitRunResult(exitCode: diffOk ? 0 : 128, output: diff);
+    }
+    return const GitRunResult(exitCode: 0, output: '');
+  }
+}
+
+/// An [InferenceRunner] recording its invocation and returning [output] (Fakes,
+/// not mocks) — the describe pass's one-shot inference seam (bead `pow-8dx`).
+/// The offline suite ALWAYS injects one of these; a real `claude` is never
+/// reached.
+class FakeInferenceRunner implements InferenceRunner {
+  /// Creates the runner over the canned model [output] and run outcome [ok].
+  FakeInferenceRunner({this.output = '', this.ok = true});
+
+  /// The stdout the fake `claude` returns (the model's answer).
+  final String output;
+
+  /// Whether the run exited clean.
+  final bool ok;
+
+  /// Every rendered invocation, in call order.
+  final List<RuntimeConfig> calls = [];
+
+  @override
+  Future<InferenceResult> run(RuntimeConfig config) async {
+    calls.add(config);
+    return InferenceResult(ok: ok, output: output);
   }
 }
 
