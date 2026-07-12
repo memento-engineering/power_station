@@ -307,8 +307,8 @@ void main() {
     );
 
     test(
-      'POSITIVE control: a fresh bead still enters the FOLDED specify FIRST — '
-      'the guard is inert for new work, and the harness DOES detect a specify '
+      'POSITIVE control: a fresh bead still enters the LADDERED specify — the '
+      'guard is inert for new work, and the harness DOES detect a specify '
       'spawn (the negative controls are non-vacuous)',
       () async {
         final f = buildFakes(createdId: _sid);
@@ -330,13 +330,19 @@ void main() {
         work.push(_graph(beads: [bead('tg-1')], ready: {'tg-1'}));
         await _settle();
 
+        // Fresh work roots the CURRENT (laddered) circuit, so the readiness
+        // ladder's zero-agent `intake` head runs first (bead `pow-q7n`).
+        // Re-project it complete → the architect spawns, exactly as before.
+        state.push(_state(ladderDoneSession(id: _sid)));
+        await _settle();
+
         expect(f.provider.started.map((s) => s.name), [_step(kSpecifyNode)]);
         expect(_spawnedSpecify(f), isTrue);
       },
     );
 
     test(
-      'an adopted FOLDED session stays on the current circuit — the spec '
+      'an adopted LADDERED session stays on the current circuit — the spec '
       'critics fan out, specify does not respawn, the build agent stays held',
       () async {
         final f = buildFakes(createdId: _sid);
@@ -355,9 +361,19 @@ void main() {
         kernel.start();
         await _settle();
 
+        // A CURRENT-shape survivor: the ladder keys ARE present (that is what
+        // makes it laddered, not a pre-ladder survivor rooted on the frozen
+        // circuit — bead `pow-q7n`), and it is already past `specify`.
         state.push(
           _state(
-            committeeSession(completed: {kSpecifyNode, kSpecClearCritiqueNode}),
+            committeeSession(
+              completed: {
+                ...kReadinessLadderNodes,
+                kSpecifyNode,
+                kSpecClearCritiqueNode,
+              },
+              grades: kReadinessGradeA,
+            ),
           ),
         );
         await _settle();
@@ -369,7 +385,7 @@ void main() {
           expect(
             started,
             contains(_step(n)),
-            reason: 'a folded session keeps its spec committee ($n)',
+            reason: 'a laddered session keeps its spec committee ($n)',
           );
         }
         expect(

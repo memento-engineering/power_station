@@ -31,6 +31,7 @@ import 'conventional_commit.dart';
 import 'landing.dart';
 import 'pr_composition.dart';
 import 'pr_describe.dart';
+import 'readiness.dart';
 import 'respec.dart';
 import 'specify.dart';
 
@@ -38,9 +39,13 @@ import 'specify.dart';
 /// Circuit" Track E; the spec stage is bead `pow-6ao`, the `land` step is itself
 /// the landing circuit as of bead `tg-rm5`).
 ///
-/// **The spec stage (beads `pow-6ao` + `pow-ui8`)**: the worktree drive loop
-/// opens with the spec circuit — [specify agent → SPEC committee → advance |
-/// RESPEC | escalate] — UPSTREAM of the build. `specify` ([SpecifyCapability])
+/// **The spec stage (beads `pow-6ao` + `pow-ui8` + `pow-q7n`)**: the worktree
+/// drive loop opens with the spec circuit — [READINESS LADDER → specify agent →
+/// SPEC committee → advance | RESPEC | escalate] — UPSTREAM of the build. The
+/// ladder ([IntakeCapability] → [ReadinessCriticCapability] →
+/// [ReadinessRouteCapability], bead `pow-q7n`) is the CHEAP pre-specify lens: it
+/// grades the BEAD and HOLDS one that is not spec-ready, so `specify` and the
+/// 4-critic committee never run on a coarse brief. `specify` ([SpecifyCapability])
 /// is the architect-equivalent harness ride that writes the implementation-ready
 /// spec INTO the bead (acceptance / plan / touches / ADR alignment / validation
 /// plan, via the bd CLI); it is a STEP OF [kSpecReviewCircuit] (folded in by
@@ -806,7 +811,10 @@ class GitSourceControl
   }
 }
 
-/// Builds the `code` registry: the specify stage + spec-readiness committee
+/// Builds the `code` registry: the SPEC-READINESS INTAKE LENS
+/// (`intake`/`readiness`/`readiness-route`, bead `pow-q7n` — the cheap
+/// pre-specify ladder that HOLDS a bead that is not ready to specify) + the
+/// specify stage + spec-readiness committee
 /// (`specify`/`spec-critic`/`spec-validation` + the `spec_review` circuit,
 /// bead `pow-6ao`) + the agent/land capabilities + the adversarial committee
 /// (`critic`/`route` + the `code_review` circuit) + the landing
@@ -848,6 +856,14 @@ DefaultCapabilityRegistry buildCodeRegistry({
   final rubricSource = rubrics ?? PackagedAssetLoader().rubricSource;
   return DefaultCapabilityRegistry(
     capabilities: {
+      // The SPEC-READINESS INTAKE LENS (bead `pow-q7n`) — the cheap ladder at
+      // the head of the spec circuit. `intake` shares the [critiqueDirClearer]
+      // seam with the hygiene step: it owns the readiness lane's round-freshness
+      // (clear-critique only wipes DOWNSTREAM of specify), and the offline suite
+      // injects the same no-op clearer for both.
+      kIntakeStep: IntakeCapability(clearer: critiqueDirClearer),
+      kReadinessStep: ReadinessCriticCapability(rubrics: rubricSource),
+      kReadinessRouteStep: const ReadinessRouteCapability(),
       // The spec stage + its committee lanes (bead `pow-6ao`; `specify` folded
       // into the spec circuit by `pow-ui8`).
       kSpecifyStep: const SpecifyCapability(),
@@ -878,10 +894,12 @@ DefaultCapabilityRegistry buildCodeRegistry({
       'spec_review': kSpecReviewCircuit,
       'code_review': kCodeReviewCircuit,
       'landing': kLandingCircuit,
-      // The FROZEN pre-fold spec circuit (`spec_review_v1`, bead `pow-3p4`) —
-      // reachable ONLY from [kSpecHeadCodeCircuit], which the migration guard
-      // roots for a shape-2 survivor. Unreachable from [kCodeCircuit]; delete
-      // it with the guard.
+      // The FROZEN old-shape spec circuits (bead `pow-3p4`, extended by
+      // `pow-q7n`): `spec_review_v1` (pre-fold) is reachable ONLY from
+      // [kSpecHeadCodeCircuit], `spec_review_v2` (pre-ladder) ONLY from
+      // [kFoldedCodeCircuit] — the roots the migration guard picks for a shape-2
+      // / shape-3 survivor. Unreachable from [kCodeCircuit]; delete them with
+      // the guard.
       ...kMigrationCircuits,
     },
     clock: clock,

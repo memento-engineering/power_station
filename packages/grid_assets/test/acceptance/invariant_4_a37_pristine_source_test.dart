@@ -84,8 +84,24 @@ void main() {
         await pumpEventQueue();
 
         // 1) A FOREIGN work bead enters ready → mounts → mints a tgdog session.
+        //    The readiness ladder's `intake` head is deterministic (bead
+        //    `pow-q7n`, zero agents), so re-project the ladder complete before
+        //    the first AGENT (specify) can spawn.
         work.push(
           _graph(beads: [_foreignWork('genesis-7r9')], ready: {'genesis-7r9'}),
+        );
+        await pumpEventQueue();
+        state.push(
+          _graph(
+            beads: [
+              sessionBead(
+                id: 'tgdog-sess1',
+                workBeadId: 'genesis-7r9',
+                completed: kReadinessLadderNodes,
+              ),
+            ],
+            ready: const {},
+          ),
         );
         await pumpEventQueue();
         expect(
@@ -118,7 +134,7 @@ void main() {
               sessionBead(
                 id: 'tgdog-sess1',
                 workBeadId: 'genesis-7r9',
-                completed: {kSpecifyNode},
+                completed: {...kReadinessLadderNodes, kSpecifyNode},
               ),
             ],
             ready: const {},

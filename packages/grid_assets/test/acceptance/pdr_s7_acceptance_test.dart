@@ -544,8 +544,17 @@ void main() {
 
         kernel.start();
         await pumpEventQueue();
-        // Post-restart the live bead is still ready; the done bead is gone.
+        // Post-restart the live bead is still ready; the done bead is gone. The
+        // readiness ladder's `intake` head is deterministic (bead `pow-q7n`, zero
+        // agents), so re-project it complete before the first AGENT can spawn.
         work.push(_graph(beads: [_bead('tg-live')], ready: {'tg-live'}));
+        await pumpEventQueue();
+        state.push(
+          _graph(
+            beads: [ladderDoneSession(id: 'tgdog-l', workBeadId: 'tg-live')],
+            ready: const {},
+          ),
+        );
         await pumpEventQueue();
 
         expect(

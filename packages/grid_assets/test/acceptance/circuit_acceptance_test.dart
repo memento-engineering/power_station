@@ -154,10 +154,19 @@ void main() {
         kernel.start();
         await _settle();
 
-        // 1) a ready owned task → SPECIFY spawns (the 1-wide head of `code`,
-        //    bead `pow-6ao`); fast-forward its phase (an all-pass spec
-        //    committee via cursor adoption) → the build agent swaps in.
-        work.push(_graph(beads: [bead('tg-1')], ready: {'tg-1'}));
+        // 1) a ready owned task → the READINESS LADDER's `intake` head mounts
+        //    (bead `pow-q7n`, a zero-agent ServiceCapability — nothing spawns);
+        //    re-project it complete → SPECIFY spawns (bead `pow-6ao`);
+        //    fast-forward its phase (an all-pass spec committee via cursor
+        //    adoption) → the build agent swaps in.
+        work.push(_graph(beads: [workBead('tg-1')], ready: {'tg-1'}));
+        await _settle();
+        expect(
+          f.provider.started,
+          isEmpty,
+          reason: 'the ladder head spawns NO agent — intake is deterministic',
+        );
+        state.push(_state(ladderDoneSession(id: _sid)));
         await _settle();
         expect(f.provider.started.map((s) => s.name), [_step(kSpecifyNode)]);
         f.provider.emit(Exited(name: _step(kSpecifyNode), exitCode: 0));
@@ -335,7 +344,7 @@ void main() {
 
         kernel.start();
         await _settle();
-        work.push(_graph(beads: [bead('tg-1')], ready: {'tg-1'}));
+        work.push(_graph(beads: [workBead('tg-1')], ready: {'tg-1'}));
         await _settle();
         // Fast-forward the spec phase (bead `pow-6ao`): specify exits, the
         // spec committee all-passes via cursor adoption → the agent swaps in.

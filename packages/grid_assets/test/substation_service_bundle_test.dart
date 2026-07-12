@@ -88,12 +88,17 @@ void main() {
       // resolves synchronously and the agent spawns under the kernel's flush —
       // distinct session ids, no mint race. The session's own rig is the_grid's
       // state partition; the work beads route by id-prefix ownership.
+      //
+      // Each carries the READINESS LADDER complete (bead `pow-q7n`), so the
+      // ladder never mounts and `specify` is again the head that spawns — this
+      // suite's focus (per-substation ServiceBundle isolation) is downstream of
+      // the ladder and unchanged by it.
       final work = FakeSnapshotSource(_graph(beads: const [], ready: const {}));
       final state = FakeSnapshotSource(
         _graph(
           beads: [
-            sessionBead(id: 'tgdog-a', workBeadId: 'sa-1'),
-            sessionBead(id: 'tgdog-b', workBeadId: 'sb-1'),
+            ladderDoneSession(id: 'tgdog-a', workBeadId: 'sa-1'),
+            ladderDoneSession(id: 'tgdog-b', workBeadId: 'sb-1'),
           ],
           ready: const {},
         ),
@@ -166,7 +171,9 @@ void main() {
       final work = FakeSnapshotSource(_graph(beads: const [], ready: const {}));
       final state = FakeSnapshotSource(
         _graph(
-          beads: [sessionBead(id: 'tgdog-a', workBeadId: 'sa-1')],
+          // Ladder complete (bead `pow-q7n`) — `specify` stays the head that
+          // spawns, so the offline-build posture is what this asserts.
+          beads: [ladderDoneSession(id: 'tgdog-a', workBeadId: 'sa-1')],
           ready: const {},
         ),
       );

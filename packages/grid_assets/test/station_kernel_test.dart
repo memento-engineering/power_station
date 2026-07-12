@@ -118,10 +118,21 @@ void main() {
         expect(f.provider.started, isEmpty);
 
         // 1) A ready owned task arrives on the WORK source → WorkList dirties →
-        //    the kernel mints the session + spawns SPECIFY (the 1-wide head of
-        //    the `code` circuit, bead `pow-6ao`). The step's provider name is
-        //    '<sessionId>/<nodePath>'.
-        work.push(_graph(beads: [bead('tg-1')], ready: {'tg-1'}));
+        //    the kernel mints the session + mounts the READINESS LADDER's head
+        //    (bead `pow-q7n`): `intake` is a deterministic ServiceCapability, so
+        //    NOTHING spawns yet. Re-project the ladder complete (cursor adoption)
+        //    → SPECIFY swaps in as the first AGENT (bead `pow-6ao`). The step's
+        //    provider name is '<sessionId>/<nodePath>'. The ladder's own
+        //    choreography is proven in `acceptance/readiness_acceptance_test.dart`.
+        work.push(_graph(beads: [workBead('tg-1')], ready: {'tg-1'}));
+        await _settle();
+        expect(
+          f.provider.started,
+          isEmpty,
+          reason: 'the ladder head spawns NO agent — intake is deterministic',
+        );
+
+        state.push(_graph(beads: [ladderDoneSession(id: _sid)], ready: const {}));
         await _settle();
 
         expect(f.provider.started, hasLength(1), reason: 'specify spawned');
