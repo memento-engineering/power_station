@@ -11,6 +11,12 @@
 ///     "params": { "model": "qwen2.5-coder" } } } }
 /// ```
 ///
+/// The envelope's `params.model` is the TOP rung of the model ladder (bead
+/// `pow-edp`): it overrides the station's `--model`/`--grader-model` and the
+/// asset role defaults alike, for every agent that bead spawns — build and
+/// grader both. A blank model is a MALFORMATION, refused whole (never a silent
+/// fall-through to the role default).
+///
 /// Every payload field is optional (an override, not a full config). Decode is
 /// FAIL-CLOSED (the envelope precedent: refuse whole, never a partial parse of
 /// a newer/garbled shape) — and per OQ-c moment 2, a refused envelope fails
@@ -87,6 +93,13 @@ AgentConfigOverride _parsePayload(Map<String, Object?> payload) {
       return MapEntry(k, v);
     });
   }
+  final beadModel = params?['model'];
+  if (beadModel != null && beadModel.trim().isEmpty) {
+    throw const FormatException(
+      '"params.model" must be a non-empty model name (a blank model would '
+      'silently fall through to the role default — refused whole)',
+    );
+  }
   return AgentConfigOverride(
     harness: harness as String?,
     target: target,
@@ -121,25 +134,45 @@ ModelTarget _parseTarget(Map<String, Object?> target) {
   };
 }
 
-/// The effect-boundary resolution (the D-C ladder as a pure value merge):
-/// **step params > bead envelope > ambient**. Validates the resolved config
-/// against [registry] and FAILS CLOSED (throws [StateError]) on: an
-/// incompatible/malformed envelope, an unknown harness, or an illegal
-/// harness × target combo — the engine's allocation catches the throw and
-/// routes it to supervision as a per-work `Failed` (OQ-c moment 2: one bad
-/// bead parks loudly; the station never crashes).
+/// The effect-boundary resolution (the D-C ladder as a pure value merge).
+///
+/// TWO ladders, resolved together for the [role] the SPAWNING ASSET declares:
+///
+///  - **the config ladder** (harness / target / params) — *step params > bead
+///    envelope > ambient*, unchanged;
+///  - **the MODEL ladder** (bead `pow-edp`) — *bead `grid.agent` `params.model`
+///    > the station's rung for [role] ([AgentConfig.stationModelFor]) > the
+///    asset's role default ([defaultModelFor])*. The winner is STAMPED into the
+///    returned config's `params['model']` — the transport key every harness
+///    reads — so a grader rides sonnet while a builder rides opus off the same
+///    ambient config, and no harness needs to know a role exists.
+///
+/// The returned config ALWAYS names an explicit model (no silent fallback to the
+/// harness CLI's own default — the fable/opus incident).
+///
+/// Validates the resolved config against [registry] and FAILS CLOSED (throws
+/// [StateError]) on: an incompatible/malformed envelope (including a blank
+/// `params.model`), an unknown harness, or an illegal harness × target combo —
+/// the engine's allocation catches the throw and routes it to supervision as a
+/// per-work `Failed` (OQ-c moment 2: one bad bead parks loudly; the station
+/// never crashes).
 AgentConfig resolveAgentConfig({
+  required AgentRole role,
   required AgentConfig ambient,
   required Map<String, dynamic> beadMetadata,
   required Map<String, String> stepParams,
   required AgentHarnessRegistry registry,
 }) {
   var config = ambient;
+  String? beadModel;
 
-  // Rung 3 — the bead's grid.agent envelope (fail-closed, refuse whole).
+  // Rung 3 — the bead's grid.agent envelope (fail-closed, refuse whole). Its
+  // `params.model` is the MOST explicit rung of the model ladder: it overrides
+  // the station AND the asset default, for BOTH roles of that bead's agents.
   switch (decodeAgentEnvelope(beadMetadata)) {
     case DomainEnvelopeDecoded<AgentConfigOverride>(config: final override):
       config = override.applyTo(config);
+      beadModel = override.params?['model'];
     case DomainEnvelopeAbsent<AgentConfigOverride>():
       break; // the common case — no per-bead override.
     case DomainEnvelopeIncompatible<AgentConfigOverride>(:final version):
@@ -151,12 +184,23 @@ AgentConfig resolveAgentConfig({
       throw StateError('grid.agent envelope malformed: $reason');
   }
 
-  // Rung 4 — step params (highest precedence; harness-id only — a step
-  // diverges WHICH tool runs, never the machine's endpoint wiring).
+  // Rung 4 — step params (harness-id only — a step diverges WHICH tool runs,
+  // never the machine's endpoint wiring).
   final stepHarness = stepParams['harness'];
   if (stepHarness != null && stepHarness.isNotEmpty) {
     config = config.merge(harness: stepHarness);
   }
+
+  // The MODEL ladder, resolved for the spawner's ROLE and stamped into the
+  // harness transport key. The station rung is read off the AMBIENT (a bead
+  // envelope carries no per-role rung — its model, when present, already won
+  // above).
+  config = config.merge(
+    params: {
+      'model':
+          beadModel ?? ambient.stationModelFor(role) ?? defaultModelFor(role),
+    },
+  );
 
   // Legality — the shared OQ-c check.
   final error = registry.validate(config);

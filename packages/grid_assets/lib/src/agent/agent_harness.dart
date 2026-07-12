@@ -16,6 +16,14 @@
 /// [AgentHarnessRegistry] wired at `main()` — behavior is never derived from a
 /// service looked up in the tree.
 ///
+/// **The MODEL splits by ROLE (bead `pow-edp`).** A spawn's model is not one
+/// station-wide value: it resolves for the [AgentRole] the SPAWNING ASSET
+/// declares — `bead grid.agent params.model` > the station's rung for that role
+/// ([AgentConfig.stationModelFor]) > the asset's own default
+/// ([defaultModelFor]: build ⇒ [kBuildModelDefault], grade ⇒
+/// [kGraderModelDefault]). So the committee grades cheap while the build runs
+/// strong, and the most explicit rung always wins.
+///
 /// **Two-moment validation (OQ-c, ratified):** the composition root validates
 /// its station default eagerly ([AgentHarnessRegistry.validate] — a
 /// misconfigured machine fails before any work mounts); a per-work override
@@ -91,15 +99,60 @@ class SwiftInfer extends ModelTarget {
   String toString() => 'SwiftInfer($base)';
 }
 
+/// The ROLE an agent spawn plays — the axis the model default splits on (bead
+/// `pow-edp`). Until this split, EVERY spawner — the coding agent, the
+/// architect, and the committee's critics — resolved the one station-wide
+/// [AgentConfig], so a station could not grade cheap while building strong: it
+/// was all-or-nothing (the fable/opus incident, 2026-07-11 — pinning one model
+/// hit builders and critics alike). The role is declared by the SPAWNING ASSET
+/// and carries its own default model. Sealed by the enum — consumers switch
+/// exhaustively (house style).
+enum AgentRole {
+  /// The BUILD side — the coding agent (`AgentCapability`) and the architect
+  /// (`SpecifyCapability`). Strong by default: the build IS the work.
+  build,
+
+  /// The GRADE side — the committee critics (`CriticCapability` and its spec
+  /// subclass `SpecCriticCapability`). Cheap by default: a critic reads a
+  /// pinned diff against ONE rubric and writes a letter; it does not need a
+  /// frontier model.
+  grade,
+}
+
+/// The BUILD role's default model — the ASSET rung, the bottom of the model
+/// ladder.
+const String kBuildModelDefault = 'opus';
+
+/// The GRADE role's default model — the ASSET rung, the bottom of the model
+/// ladder.
+const String kGraderModelDefault = 'sonnet';
+
+/// The model [role] rides when nothing more explicit names one (the ASSET rung
+/// of the ladder — a station flag or a bead's `grid.agent` envelope overrides
+/// it).
+///
+/// ALWAYS an explicit model, never the harness CLI's own default: an unpinned
+/// `claude` resolved to opus and then SILENTLY fell back to fable once the
+/// weekly limit blew (the grid spawns ~10 agents per bead; it obliterates a
+/// limit fast), eating quota nobody asked for. A role default is an EXPLICIT
+/// model — every config [resolveAgentConfig] returns names one, so there is no
+/// fallback surprise to guard against.
+String defaultModelFor(AgentRole role) => switch (role) {
+  AgentRole.build => kBuildModelDefault,
+  AgentRole.grade => kGraderModelDefault,
+};
+
 /// The agent configuration — a pure VALUE the tree carries (never behavior).
 /// Watched by branches (`dependOn*`), snapshot-read by effects (`get*`).
 class AgentConfig {
-  /// Creates the config: which [harness] runs the work, against which
-  /// [target], with harness-opaque [params] tuning.
+  /// Creates the config: which [harness] runs the work, against which [target],
+  /// with harness-opaque [params] tuning and the critics' own [graderModel]
+  /// station rung.
   const AgentConfig({
     this.harness = 'claude',
     this.target = const ProviderManaged(),
     this.params = const {},
+    this.graderModel,
   });
 
   /// The registry id of the harness: `claude` | `copilot` | `pi` | `opencode`.
@@ -108,8 +161,36 @@ class AgentConfig {
   /// Where inference runs (D-E).
   final ModelTarget target;
 
-  /// Harness-opaque tuning (e.g. `model: ...` for a managed tool).
+  /// Harness-opaque tuning, and the TRANSPORT key for the model: every harness
+  /// reads `params['model']`.
+  ///
+  /// Two readings, by which config you hold (bead `pow-edp`):
+  ///  - on the AMBIENT (station) config, `params['model']` is the station's
+  ///    BUILD-role rung — what `space up --model` sets. Absent ⇒ the build
+  ///    role's asset default ([kBuildModelDefault]);
+  ///  - on a config RETURNED by [resolveAgentConfig], it is the fully-resolved
+  ///    model of the role that asked — the ladder's winner, stamped into the
+  ///    key the harness reads.
   final Map<String, String> params;
+
+  /// The station's GRADE-role model rung — what `space up --grader-model` sets
+  /// (bead `pow-edp`). Null ⇒ the grade role's asset default
+  /// ([kGraderModelDefault]).
+  ///
+  /// Split OUT of [params] on purpose: `params['model']` is the harness
+  /// transport key, so a single map cannot carry two roles' models at once.
+  /// This is a LADDER INPUT, never a transport key — no harness reads it;
+  /// [resolveAgentConfig] projects it into the resolved config's
+  /// `params['model']` when the spawner's role is [AgentRole.grade].
+  final String? graderModel;
+
+  /// The STATION rung's model for [role] — `params['model']` for a build
+  /// spawner, [graderModel] for a grader. Null ⇒ the station named no model for
+  /// that role, and the ladder falls through to [defaultModelFor].
+  String? stationModelFor(AgentRole role) => switch (role) {
+    AgentRole.build => params['model'],
+    AgentRole.grade => graderModel,
+  };
 
   /// A copy with the non-null overrides applied (the D-C ladder's merge —
   /// params MERGE key-wise, they don't replace whole).
@@ -117,10 +198,12 @@ class AgentConfig {
     String? harness,
     ModelTarget? target,
     Map<String, String>? params,
+    String? graderModel,
   }) => AgentConfig(
     harness: harness ?? this.harness,
     target: target ?? this.target,
     params: params == null ? this.params : {...this.params, ...params},
+    graderModel: graderModel ?? this.graderModel,
   );
 
   @override
@@ -128,12 +211,14 @@ class AgentConfig {
       other is AgentConfig &&
       other.harness == harness &&
       other.target == target &&
+      other.graderModel == graderModel &&
       _mapEquals(other.params, params);
 
   @override
   int get hashCode => Object.hash(
     harness,
     target,
+    graderModel,
     Object.hashAllUnordered(
       params.entries.map((e) => Object.hash(e.key, e.value)),
     ),
@@ -148,7 +233,9 @@ class AgentConfig {
   }
 
   @override
-  String toString() => 'AgentConfig($harness → $target, params: $params)';
+  String toString() =>
+      'AgentConfig($harness → $target, params: $params'
+      '${graderModel == null ? '' : ', graderModel: $graderModel'})';
 }
 
 /// The harness-agnostic WORK CONTENT handed to an agent (OQ-a, ratified):

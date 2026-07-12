@@ -32,6 +32,18 @@ const String _wellFormed = '''
     "output_tokens": 2841,
     "cache_creation_input_tokens": 0,
     "cache_read_input_tokens": 12000
+  },
+  "modelUsage": {
+    "claude-opus-4-8": {
+      "inputTokens": 15000,
+      "outputTokens": 2800,
+      "costUSD": 0.18
+    },
+    "claude-haiku-4-5-20251001": {
+      "inputTokens": 234,
+      "outputTokens": 41,
+      "costUSD": 0.0034
+    }
   }
 }
 ''';
@@ -46,6 +58,7 @@ void main() {
       expect(report.costUsd, 0.1834);
       expect(report.numTurns, 7);
       expect(report.harnessDurationMs, 45231);
+      expect(report.model, 'claude-opus-4-8,claude-haiku-4-5-20251001');
       // The exact map merged into grid.result.<nodePath>.* — collision-safe keys.
       expect(report.toResultFields(), {
         'tokensIn': '15234',
@@ -53,6 +66,7 @@ void main() {
         'costUsd': '0.1834',
         'numTurns': '7',
         'harnessDurationMs': '45231',
+        'model': 'claude-opus-4-8,claude-haiku-4-5-20251001',
       });
     });
   });
@@ -167,6 +181,7 @@ void main() {
         'costUsd': '0.1834',
         'numTurns': '7',
         'harnessDurationMs': '45231',
+        'model': 'claude-opus-4-8,claude-haiku-4-5-20251001',
       });
     });
 
@@ -224,6 +239,74 @@ void main() {
         ..createSync(recursive: true)
         ..writeAsStringSync('{"usage": {"input_tokens": 1}, "result": "   "}');
       expect(readEnvelopeResultText(dir.path, nodePath), isNull);
+    });
+  });
+
+  group('pow-edp / pow-efv — the model that ACTUALLY ran (modelUsage)', () {
+    test('a single-model envelope names that model', () {
+      final report = UsageReport.tryParse(
+        '{"type":"result","num_turns":3,"duration_ms":1200,'
+        '"total_cost_usd":0.12,'
+        '"usage":{"input_tokens":100,"output_tokens":20},'
+        '"modelUsage":{"claude-sonnet-5":{"inputTokens":100}}}',
+      );
+      expect(report, isNotNull);
+      expect(report!.model, 'claude-sonnet-5');
+      expect(report.toResultFields()['model'], 'claude-sonnet-5');
+    });
+
+    test('a TWO-model envelope reports BOTH, comma-joined in key order — the '
+        'silent-fallback shape is never collapsed', () {
+      final report = UsageReport.tryParse(
+        '{"type":"result","usage":{"input_tokens":1,"output_tokens":1},'
+        '"modelUsage":{"claude-opus-4-8":{"inputTokens":1},'
+        '"claude-fable-5":{"inputTokens":1}}}',
+      );
+      expect(report!.model, 'claude-opus-4-8,claude-fable-5');
+    });
+
+    test('a modelUsage-ONLY envelope still yields a report (model rescues '
+        'isEmpty)', () {
+      final report = UsageReport.tryParse(
+        '{"modelUsage": {"claude-opus-4-8": {"outputTokens": 10}}}',
+      );
+      expect(report, isNotNull);
+      expect(report!.isEmpty, isFalse);
+      expect(report.toResultFields(), {'model': 'claude-opus-4-8'});
+    });
+
+    test('a missing / non-map / empty / junk modelUsage yields NO model field, '
+        'never a throw (the FT-2 fail-safe)', () {
+      expect(UsageReport.tryParse('{"modelUsage": "nope"}'), isNull);
+      expect(UsageReport.tryParse('{"modelUsage": {}}'), isNull);
+      expect(UsageReport.tryParse('{"modelUsage": []}'), isNull);
+      final withUsage = UsageReport.tryParse(
+        '{"usage": {"input_tokens": 1}, "modelUsage": 7}',
+      );
+      expect(withUsage, isNotNull);
+      expect(withUsage!.model, isNull);
+      expect(withUsage.toResultFields(), {'tokensIn': '1'});
+    });
+
+    test('blank keys are dropped defensively', () {
+      final report = UsageReport.tryParse(
+        '{"modelUsage": {"   ": {}, "claude-opus-4-8": {}}}',
+      );
+      expect(report, isNotNull);
+      expect(report!.model, 'claude-opus-4-8');
+    });
+
+    test('a stream-json ARRAY member is result-shaped by modelUsage alone', () {
+      final arr = jsonEncode([
+        {'type': 'assistant', 'message': 'thinking'},
+        {
+          'type': 'result',
+          'modelUsage': {'claude-opus-4-8': <String, Object?>{}},
+        },
+      ]);
+      final report = UsageReport.tryParse(arr);
+      expect(report, isNotNull);
+      expect(report!.model, 'claude-opus-4-8');
     });
   });
 }

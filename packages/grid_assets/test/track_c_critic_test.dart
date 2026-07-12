@@ -136,9 +136,14 @@ void main() {
       expect(cfg.args[2], 'grid-claude');
       expect(cfg.args[3], 'claude');
       expect(cfg.args[4], '--dangerously-skip-permissions');
-      expect(cfg.args[5], '--output-format');
-      expect(cfg.args[6], 'json');
-      expect(cfg.args[7], '-p');
+      // A critic spawns in the GRADE role (bead `pow-edp`): absent a station or
+      // bead override it grades on the CHEAP default (sonnet) while the build
+      // runs strong (opus) — the split this argv is the proof of.
+      expect(cfg.args[5], '--model');
+      expect(cfg.args[6], kGraderModelDefault);
+      expect(cfg.args[7], '--output-format');
+      expect(cfg.args[8], 'json');
+      expect(cfg.args[9], '-p');
       // The prompt (its own rubric only) rides as the final positional.
       expect(cfg.args.last, contains('spec-adherence'));
       expect(cfg.workDir, '/w/tg-1');
@@ -365,10 +370,18 @@ void main() {
         'rationale': 'narrow',
         'nodePath': 'tg-1/review/$rubric',
       }));
-      writeUsage(dir.path, rubric,
-          '{"total_cost_usd": 0.02, "usage": {"input_tokens": 9, "output_tokens": 8}}');
+      writeUsage(
+        dir.path,
+        rubric,
+        '{"total_cost_usd": 0.02, '
+        '"usage": {"input_tokens": 9, "output_tokens": 8}, '
+        '"modelUsage": {"claude-sonnet-5": {}}}',
+      );
       final c = _ctx(rubric: rubric, workspaceDir: dir.path);
       final out = await const CriticCapability().result(c.context, c.args);
+      // The critic graded on SONNET — the ledger-side proof of the role split
+      // (bead `pow-edp`): the argv says what we asked for, `modelUsage` says
+      // what ran.
       expect(out, {
         'grade': 'B',
         'transport': 'file',
@@ -376,6 +389,7 @@ void main() {
         'tokensIn': '9',
         'tokensOut': '8',
         'costUsd': '0.02',
+        'model': 'claude-sonnet-5',
       });
     });
 
