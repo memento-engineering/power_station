@@ -23,19 +23,35 @@ SessionProjection _session(CircuitCursor cursor) => SessionProjection(
 );
 
 void main() {
-  group('classifyCodeShape — the three-way cursor classifier', () {
+  group('classifyCodeShape — the four-way cursor classifier', () {
     CodeCircuitShape c(CircuitCursor cursor) =>
         classifyCodeShape(beadId: 'tg-1', cursor: cursor);
 
-    test('an empty cursor (fresh mint / rework round) is FOLDED', () {
-      expect(c(const {}), CodeCircuitShape.folded);
+    test('an empty cursor (fresh mint / rework round) is LADDERED', () {
+      expect(c(const {}), CodeCircuitShape.laddered);
     });
 
-    test("only another bead's keys — nothing of ours — is FOLDED", () {
-      expect(c(const {'tg-9/agent': _complete}), CodeCircuitShape.folded);
+    test("only another bead's keys — nothing of ours — is LADDERED", () {
+      expect(c(const {'tg-9/agent': _complete}), CodeCircuitShape.laddered);
     });
 
-    test('the FOLDED specify key classifies folded, in ANY state', () {
+    test('the LADDER head key (pow-q7n) classifies laddered, in ANY state', () {
+      expect(
+        c(const {'tg-1/spec_review/intake': _running}),
+        CodeCircuitShape.laddered,
+      );
+      expect(
+        c(const {
+          'tg-1/spec_review/intake': _complete,
+          'tg-1/spec_review/specify': _complete,
+          'tg-1/agent': _complete,
+        }),
+        CodeCircuitShape.laddered,
+      );
+    });
+
+    test('the FOLDED specify key with NO ladder key is a PRE-LADDER survivor, '
+        'in ANY state', () {
       expect(
         c(const {'tg-1/spec_review/specify': _running}),
         CodeCircuitShape.folded,
@@ -89,6 +105,18 @@ void main() {
         CodeCircuitShape.folded,
       );
     });
+
+    test('the LADDER key WINS over both older specify keys — newest shape '
+        'first', () {
+      expect(
+        c(const {
+          'tg-1/spec_review/intake': _complete,
+          'tg-1/spec_review/specify': _complete,
+          'tg-1/specify': _complete,
+        }),
+        CodeCircuitShape.laddered,
+      );
+    });
   });
 
   group('CodeCircuitResolver — the migration-aware circuit dispatch', () {
@@ -109,11 +137,24 @@ void main() {
       expect(identical(scope.circuit, kCodeCircuit), isTrue);
     });
 
-    test('a FOLDED session stays on kCodeCircuit', () {
+    test('a LADDERED session stays on kCodeCircuit', () {
       final scope = scopeFor(
-        _session(const {'tg-1/spec_review/specify': _complete}),
+        _session(const {'tg-1/spec_review/intake': _complete}),
       );
       expect(identical(scope.circuit, kCodeCircuit), isTrue);
+      expect(scope.key, const ValueKey('tg-1:session'));
+    });
+
+    test('a shape-3 PRE-LADDER folded session roots kFoldedCodeCircuit — the '
+        'readiness ladder never mounts for an in-flight survivor', () {
+      final scope = scopeFor(
+        _session(const {
+          'tg-1/spec_review/specify': _complete,
+          'tg-1/agent': _running,
+        }),
+      );
+      expect(identical(scope.circuit, kFoldedCodeCircuit), isTrue);
+      expect(identical(scope.circuit, kCodeCircuit), isFalse);
       expect(scope.key, const ValueKey('tg-1:session'));
     });
 
@@ -179,18 +220,62 @@ void main() {
       },
     );
 
-    test('the CURRENT spec circuit still owns specify (the contrast)', () {
+    test(
+      'kFoldedSpecReviewCircuit has NO readiness ladder and KEEPS the three-way '
+      'spec route (specify IS its sibling here, so a Rewind naming it is legal)',
+      () {
+        expect(kFoldedSpecReviewCircuit.id, kFoldedSpecReviewCircuitId);
+        expect(kFoldedSpecReviewCircuit.terminalStepId, 'route');
+        expect(kFoldedSpecReviewCircuit.stepById('intake'), isNull);
+        expect(kFoldedSpecReviewCircuit.stepById('readiness'), isNull);
+        expect(kFoldedSpecReviewCircuit.stepById('readiness-route'), isNull);
+        expect(kFoldedSpecReviewCircuit.stepById('specify'), isNotNull);
+        expect(kFoldedSpecReviewCircuit.stepById('specify')!.dependsOn, isEmpty);
+        final route =
+            kFoldedSpecReviewCircuit.stepById('route')! as CapabilityStep;
+        expect(route.capabilityId, 'spec-route');
+      },
+    );
+
+    test('kFoldedCodeCircuit points spec_review at the FROZEN pre-ladder body',
+        () {
+      expect(kFoldedCodeCircuit.id, 'code');
+      expect(kFoldedCodeCircuit.terminalStepId, 'land');
+      expect(kFoldedCodeCircuit.steps.map((s) => s.stepId), [
+        'spec_review',
+        'agent',
+        'review',
+        'land',
+      ]);
+      final sub = kFoldedCodeCircuit.stepById('spec_review')! as SubCircuitStep;
+      expect(sub.circuitId, kFoldedSpecReviewCircuitId);
+      expect(sub.circuitId, isNot('spec_review'));
+    });
+
+    test('the CURRENT spec circuit is the LADDERED one (the contrast)', () {
       expect(kSpecReviewCircuit.stepById('specify'), isNotNull);
+      expect(kSpecReviewCircuit.stepById(kIntakeStep), isNotNull);
+      expect(
+        kSpecReviewCircuit.stepById(kSpecifyStep)!.dependsOn,
+        {kReadinessRouteStep},
+      );
     });
   });
 
   group('the registry', () {
-    test('registers the frozen sub-circuit beside the current one', () {
+    test('registers BOTH frozen sub-circuits beside the current one', () {
       final registry = buildCodeRegistry();
       expect(
         identical(
           registry.circuit(kSpecHeadSpecReviewCircuitId),
           kSpecHeadSpecReviewCircuit,
+        ),
+        isTrue,
+      );
+      expect(
+        identical(
+          registry.circuit(kFoldedSpecReviewCircuitId),
+          kFoldedSpecReviewCircuit,
         ),
         isTrue,
       );

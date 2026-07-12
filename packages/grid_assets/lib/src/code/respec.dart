@@ -486,7 +486,7 @@ class SpecRouteCapability extends ServiceCapability {
         context.getInheritedSeedOfExactType<SiblingView>() ??
         const SiblingView();
     final workspace = context.getInheritedSeedOfExactType<Workspace>();
-    final parent = _parentPath(args.nodePath);
+    final parent = parentPath(args.nodePath);
     final gating = args.params['gating'] ?? '';
     final criticIds = (args.params['critics'] ?? '')
         .split(',')
@@ -546,11 +546,4 @@ class SpecRouteCapability extends ServiceCapability {
         return Gate(reason);
     }
   }
-}
-
-/// The parent node path of [nodePath] (`'a/b/route'` → `'a/b'`), so the route
-/// computes its sibling lane paths (`'$parent/$laneId'`).
-String _parentPath(String nodePath) {
-  final i = nodePath.lastIndexOf('/');
-  return i < 0 ? '' : nodePath.substring(0, i);
 }

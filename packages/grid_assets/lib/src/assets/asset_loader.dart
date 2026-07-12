@@ -92,6 +92,21 @@ class PackagedAssetLoader {
     },
   );
 
+  /// Renders the `readiness` prompt template for [rubricId] + [bead] — the
+  /// spec-readiness INTAKE lens's portable mirror (of
+  /// `ReadinessCriticCapability.buildReadinessPrompt`, bead `pow-q7n`); same
+  /// three substitutions as [renderCriticPrompt]. Its own template, not
+  /// `spec-critic`'s: the lens grades the BEAD, where the spec critics grade a
+  /// SPEC and the code critics a DIFF — three prompt SHAPES, three mirrors.
+  String renderReadinessPrompt(String rubricId, Bead bead) => _mustache(
+    loadPromptTemplate('readiness'),
+    {
+      'rubric': rubricId,
+      'rubricText': loadRubric(rubricId),
+      'bead': beadBlock(bead),
+    },
+  );
+
   /// The mustache-templated SKILL.md body for [skillId]
   /// (`extension/skills/<skillId>/SKILL.md`). Throws an [ArgumentError] for an
   /// unknown skill (fail-loud — a missing skill is a packaging bug, never a

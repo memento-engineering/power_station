@@ -1,6 +1,10 @@
 // The LANDING circuit (bead `tg-rm5`) — rebase → revalidate → land, unit-level
 // (the full-kernel wiring is proven end-to-end by
-// `acceptance/circuit_acceptance_test.dart`). Zero I/O — fakes only.
+// `acceptance/circuit_acceptance_test.dart`). Fakes only — the sole real I/O is
+// a temp dir in the pow-8dx composition group (the describe pass's
+// worktree-exists guard reads the real filesystem).
+import 'dart:io';
+
 import 'package:grid_assets/grid_assets.dart';
 import 'package:beads_dart/beads_dart.dart';
 import 'package:grid_engine/grid_engine.dart';
@@ -205,8 +209,8 @@ void main() {
   });
 
   group('buildCircuitReceipt', () {
-    test('assembles the rebase/revalidate outcomes + the review route\'s '
-        'grade provenance when all three are present', () {
+    test('assembles the landing circuit\'s OWN provenance — rebase/revalidate; '
+        'the review grades line MOVED to PrSection.committeeGrades (pow-8dx)', () {
       const siblings = SiblingView(
         results: {
           'tg-1/review/route': {
@@ -218,30 +222,22 @@ void main() {
           'tg-1/land/revalidate': {'outcome': 'passed'},
         },
       );
-      final receipt =
-          buildCircuitReceipt(beadId: 'tg-1', siblings: siblings);
+      final receipt = buildCircuitReceipt(beadId: 'tg-1', siblings: siblings);
       expect(receipt, contains('## Circuit receipt'));
       expect(receipt, contains('- rebase: clean'));
       expect(receipt, contains('- revalidate: passed'));
-      expect(
-        receipt,
-        contains(
-          '- review: grades=code-validation=A,spec-adherence=B '
-          'spread=1 rule=all-approve',
-        ),
-      );
+      expect(receipt, isNot(contains('- review:')));
     });
 
-    test('defaults to clean/passed and omits the review line when siblings '
-        'carry no data (the offline test-harness gap, never a real gap in '
-        'production — land only runs once rebase/revalidate genuinely '
-        'advanced)', () {
-      const receipt = SiblingView();
-      final body =
-          buildCircuitReceipt(beadId: 'tg-1', siblings: receipt);
-      expect(body, contains('- rebase: clean'));
-      expect(body, contains('- revalidate: passed'));
-      expect(body, isNot(contains('- review:')));
+    test('defaults to clean/passed when siblings carry no data (the offline '
+        'test-harness gap, never a real gap in production — land only runs once '
+        'rebase/revalidate genuinely advanced)', () {
+      final receipt = buildCircuitReceipt(
+        beadId: 'tg-1',
+        siblings: const SiblingView(),
+      );
+      expect(receipt, contains('- rebase: clean'));
+      expect(receipt, contains('- revalidate: passed'));
     });
   });
 
@@ -368,6 +364,181 @@ void main() {
       expect(tail, startsWith('…'));
       expect(tail, endsWith('FATAL: the real error'));
       expect(tail.length, 41, reason: '… + the last 40 chars');
+    });
+  });
+
+  group('LandCapability — the PR composition (pow-8dx: an INFERRED '
+      'conventional-commit title + a composed body; the bead id ONLY as a git '
+      'trailer; pow-yny\'s clobber closed)', () {
+    late Directory work;
+
+    setUp(() => work = Directory.systemTemp.createTempSync('pow8dx-land'));
+    tearDown(() => work.deleteSync(recursive: true));
+
+    /// The land step's context over [workspaceDir], optionally with the
+    /// composition knob mounted.
+    FakeTreeContext landContext({
+      required SourceControl sourceControl,
+      required String workspaceDir,
+      Bead? beadOverride,
+      PrComposition? composition,
+    }) => FakeTreeContext(
+      values: {
+        Bead: beadOverride ?? bead('tg-1'),
+        Workspace: testWorkspace(
+          'tg-1',
+          workspaceDir: workspaceDir,
+          branch: 'grid/tg-1',
+          baseBranch: 'main',
+        ),
+        ServiceBundle: ServiceBundle(sourceControl: sourceControl),
+        if (composition != null) PrComposition: composition,
+      },
+    );
+
+    StepArgs landArgs() => stepArgs('tg-1/land/land');
+
+    test('the land COMMIT follows the policy: a conventional subject with the '
+        'bead in a TRAILER — never the old `grid: land <id>`', () async {
+      final git = RecordingGitRunner();
+      final pr = FakePrOpener();
+      final sc = GitSourceControl(
+        gitOps: GitOps(git),
+        gitRunner: git,
+        prOpener: pr,
+      );
+      await const LandCapability().run(
+        landContext(sourceControl: sc, workspaceDir: '/w/tg-1'),
+        landArgs(),
+      );
+      final commit = git.calls
+          .map((c) => c.args)
+          .firstWhere((a) => a.isNotEmpty && a.first == 'commit');
+      expect(commit.last, 'chore: commit residual review changes\n\nRefs: tg-1');
+      expect(commit.last, isNot(contains('grid: land')));
+    });
+
+    test('NO inference wired (the offline posture) ⇒ the deterministic, id-free '
+        'fallback title, ZERO git reads beyond the land itself, and the PR '
+        'still opens', () async {
+      final git = RecordingGitRunner();
+      final pr = FakePrOpener();
+      final sc = GitSourceControl(
+        gitOps: GitOps(git),
+        gitRunner: git,
+        prOpener: pr,
+      );
+      final outcome = await const LandCapability().run(
+        landContext(
+          sourceControl: sc,
+          workspaceDir: '/w/tg-1',
+          beadOverride: bead('tg-1').copyWith(
+            title: 'better + configurable PR titles',
+            issueType: IssueType.feature,
+            metadata: const {'rig': 'power_station'},
+          ),
+        ),
+        landArgs(),
+      );
+      expect(outcome, isA<Ok>());
+      final opened = pr.opened.single;
+      expect(opened.title, 'feat(power_station): better + configurable PR titles');
+      expect(lintConventionalSubject(opened.title, foreignRef: 'tg-1'), isEmpty);
+      expect(git.subcommands, isNot(contains('diff')));
+      expect(opened.body, contains('- description: fallback'));
+      expect(opened.body.trimRight(), endsWith('Refs: tg-1'));
+    });
+
+    test('inference wired over a REAL worktree: the title is the INFERRED '
+        'conventional subject, the body COMPOSES the inferred prose WITH the '
+        'circuit receipt, and the bead id appears ONLY in the trailer', () async {
+      final git = CannedGitRunner(
+        log: 'feat(landing): read the branch delta\n\nRefs: tg-1\x00',
+        diff: '--- a/lib/x.dart\n+++ b/lib/x.dart\n+the change',
+      );
+      final pr = FakePrOpener();
+      final sc = GitSourceControl(
+        gitOps: GitOps(git),
+        gitRunner: git,
+        prOpener: pr,
+      );
+      final outcome = await LandCapability(
+        gitRunner: git,
+        inference: FakeInferenceRunner(
+          output:
+              '{"type":"feat","scope":"landing","breaking":false,'
+              '"description":"Infer the pr title from the branch diff.",'
+              '"body":"The land step now describes the actual diff.",'
+              '"breakingChange":""}',
+        ),
+      ).run(landContext(sourceControl: sc, workspaceDir: work.path), landArgs());
+
+      expect(outcome, isA<Ok>());
+      final opened = pr.opened.single;
+      expect(
+        opened.title,
+        'feat(landing): infer the pr title from the branch diff',
+      );
+      expect(lintConventionalSubject(opened.title, foreignRef: 'tg-1'), isEmpty);
+      // COMPOSED, not clobbered (pow-yny): the prose AND the receipt.
+      expect(
+        opened.body,
+        contains('The land step now describes the actual diff.'),
+      );
+      expect(opened.body, contains('## Circuit receipt'));
+      expect(opened.body, contains('- description: inference'));
+      expect(opened.body, contains('- commits: 1 (1 conventional, 1 trailered)'));
+      // THE POLICY: the bead id appears EXACTLY once, on the trailer line.
+      expect('tg-1'.allMatches(opened.body).length, 1);
+      expect(opened.body.trimRight(), endsWith('Refs: tg-1'));
+    });
+
+    test('a mounted PrComposition reshapes the trailer token and the sections '
+        'at the run edge (the configurable knob)', () async {
+      final git = RecordingGitRunner();
+      final pr = FakePrOpener();
+      final sc = GitSourceControl(
+        gitOps: GitOps(git),
+        gitRunner: git,
+        prOpener: pr,
+      );
+      await const LandCapability().run(
+        landContext(
+          sourceControl: sc,
+          workspaceDir: '/w/tg-1',
+          composition: const PrComposition(
+            trailerToken: 'Bead',
+            sections: [PrSection.circuitReceipt, PrSection.trailers],
+          ),
+        ),
+        landArgs(),
+      );
+      final opened = pr.opened.single;
+      expect(opened.body, contains('## Circuit receipt'));
+      expect(opened.body.trimRight(), endsWith('Bead: tg-1'));
+      // The knob also re-tokens the LAND COMMIT's trailer.
+      final commit = git.calls
+          .map((c) => c.args)
+          .firstWhere((a) => a.isNotEmpty && a.first == 'commit');
+      expect(commit.last, endsWith('Bead: tg-1'));
+    });
+
+    test('an inference run that FAILS still lands — the description is '
+        'decoration, never a land blocker', () async {
+      final git = CannedGitRunner(diff: 'a diff');
+      final pr = FakePrOpener();
+      final sc = GitSourceControl(
+        gitOps: GitOps(git),
+        gitRunner: git,
+        prOpener: pr,
+      );
+      final outcome = await LandCapability(
+        gitRunner: git,
+        inference: FakeInferenceRunner(output: 'I refuse.', ok: false),
+      ).run(landContext(sourceControl: sc, workspaceDir: work.path), landArgs());
+      expect(outcome, isA<Ok>());
+      expect(pr.opened.single.title, 'chore: $kFallbackDescription');
+      expect(pr.opened.single.body, contains('- description: fallback'));
     });
   });
 }

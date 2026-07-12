@@ -5,8 +5,15 @@
 /// WORKTREE upstream of the build stage, with its own committee review. The
 /// `code` circuit's drive loop is
 ///
-///   [specify agent → SPEC committee → advance | RESPEC | escalate] → [build
-///   agent → CODE committee gate → land]
+///   [intake → readiness → readiness-route] → [specify agent → SPEC committee →
+///   advance | RESPEC | escalate] → [build agent → CODE committee gate → land]
+///
+/// The READINESS LADDER at the head (bead `pow-q7n`, `readiness.dart`) is the
+/// CHEAP pre-specify lens: a deterministic intake contract (zero agents) then ONE
+/// agent grading the BEAD itself. A bead that is not spec-ready is HELD for
+/// refinement there, so no specify agent and no 4-critic committee ever runs on
+/// it. It is UPSTREAM of `specify` and therefore OUTSIDE the auto-respec rewind
+/// set.
 ///
 /// with `specify` FOLDED INTO the spec circuit as the route's sibling (bead
 /// `pow-ui8`): [kCodeCircuit] (`code_capabilities.dart`) drops in `spec_review`
@@ -80,6 +87,7 @@ import '../agent/agent_domain.dart';
 import '../agent/agent_harness.dart';
 import '../agent/usage_report.dart';
 import 'committee.dart';
+import 'readiness.dart';
 import 'respec.dart';
 
 /// The spec committee's gating rubric id — a deterministic structural check
@@ -206,12 +214,22 @@ $kSpecExemplarAcceptance
 $kSpecExemplarDesign
 `````''';
 
-/// The spec-readiness committee circuit (id `spec_review`) — SPECIFY (the
-/// architect harness ride) → a hygiene step ([ClearCritiqueCapability], shared
-/// with the code committee so a round's verdict files are always round-fresh) →
-/// the deterministic gating lane + four LLM critics fanned out in parallel → a
-/// `route` join running the SPEC matrix ([SpecRouteCapability], bead `pow-7nm`) —
-/// advance | AUTO-RESPEC | escalate — over the spec grades.
+
+/// The spec-readiness committee circuit (id `spec_review`) — the READINESS
+/// LADDER (bead `pow-q7n`: `intake` → `readiness` → `readiness-route`, the cheap
+/// pre-specify lens) → SPECIFY (the architect harness ride) → a hygiene step
+/// ([ClearCritiqueCapability], shared with the code committee so a round's
+/// verdict files are always round-fresh) → the deterministic gating lane + four
+/// LLM critics fanned out in parallel → a `route` join running the SPEC matrix
+/// ([SpecRouteCapability], bead `pow-7nm`) — advance | AUTO-RESPEC | escalate —
+/// over the spec grades.
+///
+/// **The ladder is the CHEAP head (bead `pow-q7n`, `readiness.dart`)**: `specify`
+/// `dependsOn` [kReadinessRouteStep], so a bead HELD as not-ready spawns NO
+/// architect and NO committee. It is deliberately UPSTREAM of `specify` and so
+/// OUTSIDE the rewind set below — a respec rewrites the SPEC, not the BEAD, and
+/// re-grading an unchanged bead every round would burn the very agents the lens
+/// exists to save.
 ///
 /// **`specify` is FOLDED IN as the route's SIBLING (bead `pow-ui8`)** — it was a
 /// step of the PARENT `code` circuit until the engine gained routing as a
@@ -226,7 +244,10 @@ $kSpecExemplarDesign
 ///
 /// EVERY lane is transitively downstream of `specify` (the hygiene step depends
 /// on it, and every lane depends on the hygiene step), so the rewind set is the
-/// WHOLE circuit. That carries TWO invariants, not one: the route can never
+/// whole circuit FROM `specify` DOWN — the readiness ladder above it is an
+/// ANCESTOR, not a dependent, and stays complete across a rewind wave (which is
+/// exactly why `specify`'s new dep is still satisfied when the wave re-keys it).
+/// That carries TWO invariants, not one: the route can never
 /// re-decide over a previous round's grades, and — because a [Rewind] does not
 /// re-key the bead id — [ClearCritiqueCapability]'s wipe is the ONLY thing that
 /// makes a round's verdict files fresh (ADR-0000 A4's `nodePath` stamp is
@@ -245,7 +266,29 @@ const Circuit kSpecReviewCircuit = Circuit(
   id: 'spec_review',
   terminalStepId: 'route',
   steps: [
-    CapabilityStep(stepId: kSpecifyStep, capabilityId: kSpecifyStep),
+    // The SPEC-READINESS INTAKE LENS (bead `pow-q7n`) — the cheap ladder, ahead
+    // of everything expensive. `intake` is deterministic (zero agents) and gates
+    // a non-driveable / brief-less bead outright; `readiness` is ONE agent
+    // grading the BEAD; `readiness-route` holds it or lets it drive. All three
+    // are UPSTREAM of `specify`, so they are NOT in the auto-respec rewind set.
+    CapabilityStep(stepId: kIntakeStep, capabilityId: kIntakeStep),
+    CapabilityStep(
+      stepId: kReadinessStep,
+      capabilityId: kReadinessStep,
+      params: {'rubric': kReadinessRubric},
+      dependsOn: {kIntakeStep},
+    ),
+    CapabilityStep(
+      stepId: kReadinessRouteStep,
+      capabilityId: kReadinessRouteStep,
+      params: {'lane': kReadinessStep},
+      dependsOn: {kReadinessStep},
+    ),
+    CapabilityStep(
+      stepId: kSpecifyStep,
+      capabilityId: kSpecifyStep,
+      dependsOn: {kReadinessRouteStep},
+    ),
     CapabilityStep(
       stepId: kClearCritiqueStep,
       capabilityId: kClearCritiqueStep,

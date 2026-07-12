@@ -31,8 +31,15 @@ GraphSnapshot _graph({
   capturedAt: DateTime(2026),
 );
 
-Bead _typed(String id, IssueType type) =>
-    Bead(id: id, issueType: type, status: BeadStatus.open);
+/// A typed bead carrying a real brief — non-empty on purpose, so the plain task
+/// PASSES the intake contract (bead `pow-q7n`) and this suite's zero-spawn proof
+/// stays about the TYPE gate, never about a missing description.
+Bead _typed(String id, IssueType type) => Bead(
+  id: id,
+  issueType: type,
+  status: BeadStatus.open,
+  description: 'A real brief, so intake holds only on the type.',
+);
 
 StationKernel _kernel(StationJoinBridge bridge, Fakes f) => StationKernel(
   bridge: bridge,
@@ -107,6 +114,20 @@ void main() {
         );
         await pumpEventQueue();
 
+        // The plain task mounts the READINESS LADDER's head (bead `pow-q7n`) —
+        // `intake` is a zero-agent ServiceCapability, so no effect has reached
+        // the provider YET. Re-project the ladder complete (cursor adoption) and
+        // the plain task's AGENT swaps in; every non-core type stays unmounted
+        // throughout, which is what this invariant is about.
+        expect(f.provider.started, isEmpty, reason: 'the ladder head is deterministic');
+        state.push(
+          _graph(
+            beads: [ladderDoneSession(id: 'tgdog-sess1', workBeadId: 'tg-1')],
+            ready: const {},
+          ),
+        );
+        await pumpEventQueue();
+
         // Exactly ONE effect reached the provider — the plain task's agent.
         expect(
           f.provider.started,
@@ -165,7 +186,9 @@ void main() {
         );
 
         // Sanity (non-vacuous): the SAME kernel DOES spawn for a plain task, so
-        // the zero-spawn above is the type gate, not a dead kernel.
+        // the zero-spawn above is the type gate, not a dead kernel. The task
+        // mints its session and mounts the ladder's zero-agent head first (bead
+        // `pow-q7n`); re-project it complete and the agent swaps in.
         work.push(
           _graph(
             beads: [
@@ -173,6 +196,13 @@ void main() {
               _typed('tg-1', IssueType.task),
             ],
             ready: {'tg-conv', 'tg-1'},
+          ),
+        );
+        await pumpEventQueue();
+        state.push(
+          _graph(
+            beads: [ladderDoneSession(id: 'tgdog-sess1', workBeadId: 'tg-1')],
+            ready: const {},
           ),
         );
         await pumpEventQueue();

@@ -219,17 +219,17 @@ class SystemShellRunner implements ShellRunner {
   }
 }
 
-/// Assembles the landing circuit's PR-body "circuit receipt" (item 4 — the
-/// receipt-regression callout): the code-review committee's route provenance
-/// (`grades`/`spread`/`rule`, `committee.dart`'s [RouteCapability]) plus this
-/// circuit's own rebase/revalidate outcomes, read via the ambient
-/// [SiblingView] at [beadId]'s absolute node paths. Pure + deterministic (no
-/// I/O) so it is unit-testable in isolation.
+/// Assembles the landing circuit's OWN PR-body provenance section (`tg-rm5`):
+/// the rebase/revalidate outcomes, read via the ambient [SiblingView] at
+/// [beadId]'s absolute node paths. The code-review committee's grade line MOVED
+/// to `PrSection.committeeGrades` and the description/commit-policy provenance
+/// lines are appended by that section's renderer (`pr_composition.dart`, bead
+/// `pow-8dx`) — this receipt now carries ONLY what the landing circuit itself
+/// did. Pure + deterministic (no I/O) so it is unit-testable in isolation.
 String buildCircuitReceipt({
   required String beadId,
   required SiblingView siblings,
 }) {
-  final review = siblings.resultOf('$beadId/review/route');
   final rebase = siblings.resultOf('$beadId/land/rebase');
   final revalidate = siblings.resultOf('$beadId/land/revalidate');
   final b = StringBuffer()
@@ -237,12 +237,6 @@ String buildCircuitReceipt({
     ..writeln()
     ..writeln('- rebase: ${rebase['outcome'] ?? 'clean'}')
     ..writeln('- revalidate: ${revalidate['outcome'] ?? 'passed'}');
-  if (review.isNotEmpty) {
-    b.writeln(
-      '- review: grades=${review['grades'] ?? ''} '
-      'spread=${review['spread'] ?? ''} rule=${review['rule'] ?? ''}',
-    );
-  }
   return b.toString();
 }
 

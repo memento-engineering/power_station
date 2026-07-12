@@ -116,24 +116,38 @@ Future<StepOutcome> _specRoute(
 
 void main() {
   group('kSpecReviewCircuit — the shape', () {
-    test('specify → hygiene → gating lane + four isolated spec critics → route; '
-        'the route is the terminal', () {
+    test('readiness ladder → specify → hygiene → gating lane + four isolated '
+        'spec critics → route; the route is the terminal', () {
       expect(kSpecReviewCircuit.id, 'spec_review');
       expect(kSpecReviewCircuit.terminalStepId, 'route');
       final byId = {
         for (final s in kSpecReviewCircuit.steps) s.stepId: s,
       };
       expect(byId.keys, {
+        kIntakeStep,
+        kReadinessStep,
+        kReadinessRouteStep,
         kSpecifyStep,
         kClearCritiqueStep,
         kSpecGatingRubric,
         ...kSpecLlmRubrics,
         'route',
       });
-      // `specify` is the HEAD (bead `pow-ui8`) — the route's SIBLING, so the
-      // RESPEC arm can name it in a `StepOutcome.Rewind`.
+      // The READINESS LADDER is the head (bead `pow-q7n`) — cheapest first, and
+      // `specify` only mounts behind it, so a not-ready bead HOLDS before any
+      // architect or committee agent is ever spawned.
+      expect(byId[kIntakeStep]!.dependsOn, isEmpty);
+      expect(byId[kReadinessStep]!.dependsOn, {kIntakeStep});
+      expect(
+        (byId[kReadinessStep]! as CapabilityStep).params,
+        {'rubric': kReadinessRubric},
+      );
+      expect(byId[kReadinessRouteStep]!.dependsOn, {kReadinessStep});
+      // `specify` is still the route's SIBLING (bead `pow-ui8`), so the RESPEC
+      // arm can name it in a `StepOutcome.Rewind` — it just no longer heads the
+      // circuit.
       expect((byId[kSpecifyStep]! as CapabilityStep).capabilityId, kSpecifyStep);
-      expect(byId[kSpecifyStep]!.dependsOn, isEmpty);
+      expect(byId[kSpecifyStep]!.dependsOn, {kReadinessRouteStep});
       // The hygiene wipe waits on specify, which is what puts EVERY lane
       // downstream of it (see the rewind-set test below).
       expect(byId[kClearCritiqueStep]!.dependsOn, {kSpecifyStep});
@@ -192,6 +206,18 @@ void main() {
             'file. The critique WIPE is the whole guarantee — it must be in the '
             'rewind set, which is exactly what `clear-critique dependsOn '
             'specify` buys.',
+      );
+      // The readiness ladder is UPSTREAM of `specify`, so an auto-respec never
+      // re-runs it: a respec rewrites the SPEC, not the BEAD (bead `pow-q7n`).
+      expect(
+        rewound,
+        isNot(anyOf(
+          contains(kIntakeStep),
+          contains(kReadinessStep),
+          contains(kReadinessRouteStep),
+        )),
+        reason: 'a respec round must not burn an agent re-grading an unchanged '
+            'bead',
       );
     });
 
