@@ -79,7 +79,14 @@ No ADR applies — verified via grep on `heartbeat`, `bus`.
   ),
 );
 
-Future<StepOutcome> _specRoute(Map<String, String> grades) {
+/// Runs the SPEC route (bead `pow-7nm` — the three-way matrix) over the
+/// fabricated [grades], with [rationales] where a critic returned one. No
+/// ambient `Workspace` ⇒ the offline posture (no ledger I/O; the round counter
+/// reads 0).
+Future<StepOutcome> _specRoute(
+  Map<String, String> grades, {
+  Map<String, String> rationales = const {},
+}) {
   const parent = 'tg-1/spec_review';
   final context = FakeTreeContext(
     values: {
@@ -90,12 +97,15 @@ Future<StepOutcome> _specRoute(Map<String, String> grades) {
         },
         results: {
           for (final entry in grades.entries)
-            '$parent/${entry.key}': {'grade': entry.value},
+            '$parent/${entry.key}': {
+              'grade': entry.value,
+              if (rationales[entry.key] case final r?) 'rationale': r,
+            },
         },
       ),
     },
   );
-  return const RouteCapability().run(
+  return const SpecRouteCapability().run(
     context,
     stepArgs(
       '$parent/route',
@@ -441,19 +451,23 @@ void main() {
       expect(out.reason, contains('hard block'));
     });
 
-    test('an LLM spec lane at D ⇒ Gate (spec rework — the SAME gated state '
-        'the code committee uses)', () async {
-      final out = await _specRoute({
-        ...allA(),
-        'plan-completeness': 'D',
-        // Keep the spread < 3 so the REWORK rule (not the spread rule) fires.
-        'coherence': 'C',
-        'adr-alignment': 'C',
-        'acceptance-testability': 'C',
-        kSpecGatingRubric: 'C',
-      });
+    test('an LLM spec lane at D WITH a rationale ⇒ an AUTO-RESPEC gate (bead '
+        '`pow-7nm`) — machine-actionable, never a human ultimatum', () async {
+      final out = await _specRoute(
+        {...allA(), 'plan-completeness': 'D'},
+        rationales: const {'plan-completeness': 'step 3 names no test command'},
+      );
       expect(out, isA<Gate>());
-      expect((out as Gate).reason, contains('rework'));
+      expect((out as Gate).reason, startsWith(kRespecGatePrefix));
+      expect(out.reason, contains('step 3 names no test command'));
+    });
+
+    test('an LLM spec lane at D with NO rationale ⇒ a HUMAN gate — nothing to '
+        'respec against', () async {
+      final out = await _specRoute({...allA(), 'plan-completeness': 'D'});
+      expect(out, isA<Gate>());
+      expect((out as Gate).reason, isNot(startsWith(kRespecGatePrefix)));
+      expect(out.reason, contains('NO rationale'));
     });
 
     test('a missing spec grade fail-closes (never advances)', () async {

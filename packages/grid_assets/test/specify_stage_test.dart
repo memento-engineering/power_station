@@ -207,4 +207,90 @@ void main() {
       expect(fields['numTurns'], '2');
     });
   });
+
+  group('buildSpecifyBrief — the AUTO-RESPEC correction guidance (`pow-7nm`)', () {
+    const ledger = RespecLedger(
+      round: 2,
+      lanes: [
+        RespecLane(
+          rubric: 'acceptance-testability',
+          grade: 'D',
+          rationale: 'criterion 2 names no command that proves it',
+        ),
+      ],
+    );
+
+    test('with a ledger: the failing lane\'s rationale rides the brief VERBATIM, '
+        'ahead of the job contract', () {
+      final rendered = buildSpecifyBrief(
+        _fullBead(),
+        testWorkspace('tg-1', workspaceDir: '/w/tg-1', branch: 'grid/tg-1'),
+        guidance: ledger,
+      ).render();
+      expect(rendered, contains('RESPEC round 2 of 2'));
+      expect(rendered, contains('`acceptance-testability` — grade D'));
+      expect(rendered, contains('criterion 2 names no command that proves it'));
+      expect(
+        rendered.indexOf('Correction guidance'),
+        lessThan(rendered.indexOf('## Your job')),
+        reason: 'the correction guidance is read BEFORE the job contract',
+      );
+    });
+
+    test('without a ledger: no correction-guidance section at all (a first '
+        'round is byte-identical to the pre-pow-7nm brief)', () {
+      final rendered = buildSpecifyBrief(
+        _fullBead(),
+        testWorkspace('tg-1', workspaceDir: '/w/tg-1', branch: 'grid/tg-1'),
+      ).render();
+      expect(rendered, isNot(contains('Correction guidance')));
+      expect(rendered, isNot(contains('RESPEC')));
+    });
+  });
+
+  // The SEAM (the bead's load-bearing criterion, proven end-of-wire): the ledger
+  // the spec route left in the WORKTREE reaches the re-specify agent's ARGV.
+  // This spawns over a REAL temp worktree, so `SpecifyCapability.spawn`'s ledger
+  // read is LIVE — delete it and the first test here goes red.
+  group('SpecifyCapability.spawn — the respec ledger reaches the ARGV '
+      '(`pow-7nm`)', () {
+    late Directory ws;
+    setUp(() => ws = Directory.systemTemp.createTempSync('pow7nm-spawn'));
+    tearDown(() => ws.deleteSync(recursive: true));
+
+    RuntimeConfig spawnIn(Directory dir) {
+      final c = _ctx(workspaceDir: dir.path);
+      return const SpecifyCapability().spawn(c.context, c.args);
+    }
+
+    test('a ledger in the LIVE worktree rides the spawned brief VERBATIM — the '
+        'critic\'s recommendation reaches the re-specify agent', () {
+      writeRespecLedger(
+        ws.path,
+        const RespecLedger(
+          round: 1,
+          lanes: [
+            RespecLane(
+              rubric: 'plan-completeness',
+              grade: 'D',
+              rationale: 'step 3 names no test command',
+            ),
+          ],
+        ),
+      );
+      final cfg = spawnIn(ws);
+      expect(cfg.args.last, contains('Correction guidance'));
+      expect(cfg.args.last, contains('RESPEC round 1 of 2'));
+      expect(cfg.args.last, contains('step 3 names no test command'));
+      expect(cfg.args.last, contains('`plan-completeness` — grade D'));
+    });
+
+    test('the SAME live worktree with NO ledger ⇒ no guidance on the argv (a '
+        'first round spawns the unchanged brief)', () {
+      final cfg = spawnIn(ws);
+      expect(cfg.args.last, isNot(contains('Correction guidance')));
+      expect(cfg.args.last, isNot(contains('RESPEC')));
+      expect(cfg.args.last, contains('bd update tg-1'));
+    });
+  });
 }

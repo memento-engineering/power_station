@@ -49,6 +49,14 @@
 ///    grading the bead's SPEC (never a diff — there is no code yet) and
 ///    verifying its claims against the live worktree.
 ///
+/// A FIXABLE fail (an actionable critic `D`/`E` carrying a rationale, under the
+/// round cap) now AUTO-RESPECS (bead `pow-7nm`, `respec.dart`) — the route writes
+/// the failing lanes' rationales into the worktree ledger and parks with a
+/// machine-actionable gate the engine resolves (bead `tg-b3k`), and the next
+/// specify ride reads that ledger back as its correction guidance. A structural
+/// `F`, a critic `F`, a rationale-less fail, or the round cap still flares to a
+/// human.
+///
 /// **Freshness posture**: the committee grades the ambient [Bead] the engine
 /// re-provides after specify's bd mutation lands — the same bd-watch →
 /// diff → reconcile loop that made the bead ready in the first place. Every
@@ -57,6 +65,8 @@
 /// construction — a stale or empty spec grades F and gates (a false PARK a
 /// human unwinds), never a false advance to the build.
 library;
+
+import 'dart:io';
 
 import 'package:beads_dart/beads_dart.dart';
 import 'package:genesis_tree/genesis_tree.dart';
@@ -68,6 +78,7 @@ import '../agent/agent_domain.dart';
 import '../agent/agent_harness.dart';
 import '../agent/usage_report.dart';
 import 'committee.dart';
+import 'respec.dart';
 
 /// The spec committee's gating rubric id — a deterministic structural check
 /// whose grade `F` is a hard block, decided by the route's matrix (the
@@ -93,8 +104,9 @@ const List<String> kSpecCommitteeRubrics = [
 /// The spec-readiness committee circuit (id `spec_review`) — a hygiene step
 /// ([ClearCritiqueCapability], shared with the code committee so a rework
 /// round's verdict files are always round-fresh) → the deterministic gating
-/// lane + four LLM critics fanned out in parallel → a `route` join running
-/// the SAME deterministic matrix ([RouteCapability]) over the spec grades.
+/// lane + four LLM critics fanned out in parallel → a `route` join running the
+/// SPEC matrix ([SpecRouteCapability], bead `pow-7nm`) — advance | AUTO-RESPEC |
+/// escalate — over the spec grades.
 ///
 /// No `pin-diff` here: the review subject is the bead's OWN spec (its
 /// acceptance + design fields), not a code delta — there is no diff to pin
@@ -139,7 +151,10 @@ const Circuit kSpecReviewCircuit = Circuit(
     ),
     CapabilityStep(
       stepId: 'route',
-      capabilityId: 'route',
+      // The SPEC route (bead `pow-7nm`) — the three-way matrix (advance |
+      // RESPEC | escalate), NOT the code committee's binary [RouteCapability].
+      // The stepId stays `route` (the circuit's terminal), so no node path moves.
+      capabilityId: 'spec-route',
       dependsOn: {
         kSpecGatingRubric,
         'coherence',
@@ -199,9 +214,18 @@ class SpecifyCapability extends ProcessCapability {
       stepParams: args.params,
       registry: registry,
     );
+    // The AUTO-RESPEC guidance (bead `pow-7nm`): on a rework round the spec
+    // route left the failing lanes' rationales in the worktree ledger — the one
+    // channel that survives the session re-mint (the SiblingView it graded
+    // through does not). Absent (a first round, or an offline/dry-run worktree
+    // that was never materialized) ⇒ a plain first-round brief.
+    final workspaceDir = workspace.workspaceDir;
+    final guidance = Directory(workspaceDir).existsSync()
+        ? readRespecLedger(workspaceDir)
+        : null;
     return registry.harness(config.harness)!.spawnFor(
       config: config,
-      brief: buildSpecifyBrief(bead, workspace),
+      brief: buildSpecifyBrief(bead, workspace, guidance: guidance),
       workspace: workspace,
       // CAPTURE-ONLY usage telemetry (FT-2), same as the build agent.
       usageOut: usageReportPath(args.nodePath),
@@ -233,10 +257,22 @@ class SpecifyCapability extends ProcessCapability {
 /// — but the contract is the ARCHITECT's, not the builder's: write the spec
 /// into the bead, verify it against the live tree, touch no code.
 ///
+/// **AUTO-RESPEC (bead `pow-7nm`)**: when [guidance] is present this is a
+/// REWRITE, not a fresh spec — the previous round's spec was rejected and the
+/// ledger carries the failing lanes' rationales VERBATIM. They render as a
+/// `## Correction guidance` block between the bead and the job contract, so the
+/// re-specify agent corrects against the committee's own words with no human in
+/// the loop. Absent ⇒ the brief is byte-identical to the pre-pow-7nm one.
+///
 /// Q3′ (Track E): the only paths interpolated are the ambient [Workspace]'s
 /// (`workspaceDir`/`branch`); bead reads are content + the bead ID (a
-/// reference, never a path).
-AgentBrief buildSpecifyBrief(Bead bead, Workspace workspace) {
+/// reference, never a path). The ledger contributes rubric ids, grades and
+/// critic prose — never a path.
+AgentBrief buildSpecifyBrief(
+  Bead bead,
+  Workspace workspace, {
+  RespecLedger? guidance,
+}) {
   final title = bead.title.isNotEmpty ? bead.title : 'work bead ${bead.id}';
   final substation = bead.metadata['rig'];
   final id = bead.id;
@@ -260,6 +296,11 @@ AgentBrief buildSpecifyBrief(Bead bead, Workspace workspace) {
   section('Design', bead.design);
   section('Acceptance criteria', bead.acceptanceCriteria);
   section('Notes', bead.notes);
+  if (guidance != null) {
+    t
+      ..writeln()
+      ..write(renderRespecGuidance(guidance));
+  }
   t
     ..writeln()
     ..writeln('## Your job — the SPECIFY stage')

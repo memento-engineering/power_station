@@ -106,6 +106,21 @@ String? _resultField(Fakes f, String relPath, String field) {
 bool _gateMinted(Fakes f) =>
     f.runner.callsFor('create').any((c) => c.join(' ').contains('gate'));
 
+/// The `reason` the chokepoint stamped on the minted gate bead. The reason is
+/// NOT in the `create` argv — `StationBeadWriter.createGate` mints the bead with
+/// a `grid gate <session>@<node>` title and then stamps `reason` (with the
+/// substation + `blocks`/`node` linkage) in a follow-up `update --metadata`.
+String? _gateReason(Fakes f) {
+  for (final c in f.runner.callsFor('update')) {
+    final i = c.indexOf('--metadata');
+    if (i < 0 || i + 1 >= c.length) continue;
+    final md = jsonDecode(c[i + 1]) as Map<String, dynamic>;
+    final reason = md['reason'];
+    if (reason is String) return reason;
+  }
+  return null;
+}
+
 Future<void> _settle() async {
   for (var i = 0; i < 6; i++) {
     await pumpEventQueue();
@@ -303,6 +318,94 @@ void main() {
         );
         expect(f.runner.callsFor('close'), isEmpty,
             reason: 'a parked session never closes');
+      },
+    );
+  });
+
+  group('the spec stage — a FIXABLE spec AUTO-RESPECS (bead `pow-7nm`)', () {
+    test(
+      'a critic D WITH a rationale parks with a MACHINE-ACTIONABLE `respec:` '
+      'gate carrying the correction guidance — NOT a human ultimatum; the '
+      'build agent never spawns and the session never closes',
+      () async {
+        final f = buildFakes(createdId: _sid);
+        final work = FakeSnapshotSource(_graph(beads: const [], ready: const {}));
+        final state = FakeSnapshotSource(_graph(beads: const [], ready: const {}));
+        final kernel = _buildKernel(f, work, state);
+        addTearDown(kernel.dispose);
+        addTearDown(f.provider.close);
+        addTearDown(work.close);
+        addTearDown(state.close);
+
+        kernel.start();
+        await _settle();
+        work.push(_graph(beads: [bead('tg-1')], ready: {'tg-1'}));
+        await _settle();
+        f.provider.emit(Exited(name: _step('specify'), exitCode: 0));
+        await _settle();
+        state.push(_state(committeeSession(
+          completed: {kSpecifyNode, kSpecClearCritiqueNode},
+        )));
+        await _settle();
+        for (final critic in _specCriticSteps) {
+          f.provider.emit(Exited(name: critic, exitCode: 0));
+        }
+        await _settle();
+
+        // The gating lane is clean; ONE judgement lane graded D and said WHY —
+        // an actionable critic grade carrying a rationale: the FIXABLE arm.
+        state.push(_state(committeeSession(
+          completed: {
+            kSpecifyNode,
+            kSpecClearCritiqueNode,
+            kSpecGateNode,
+            ...kSpecCriticNodes,
+          },
+          grades: {...kSpecGradesAllA, 'spec_review/plan-completeness': 'D'},
+          results: const {
+            'spec_review/plan-completeness': {
+              'grade': 'D',
+              'rationale': 'step 3 names no test command',
+            },
+          },
+        )));
+        await _settle();
+
+        expect(_wroteCursor(f, kSpecRouteNode, 'gated'), isTrue,
+            reason: 'a fixable spec still PARKS — the engine owns the loop '
+                'edge (split bead `tg-b3k`); what changed is the gate KIND');
+        expect(_wroteCursor(f, kSpecRouteNode, 'complete'), isFalse);
+        expect(_gateMinted(f), isTrue);
+        // The minted gate is MACHINE-ACTIONABLE — the engine (`tg-b3k`) may
+        // auto-resolve it into a rework round — and it CARRIES the critic's
+        // recommendation, so even a governor's bare `grid rework` today lands
+        // the correction guidance in the next specify brief.
+        final reason = _gateReason(f);
+        expect(reason, isNotNull);
+        expect(reason, startsWith(kRespecGatePrefix),
+            reason: 'a fixable spec mints an AUTO-RESPEC gate, not a human '
+                'ultimatum');
+        expect(reason, contains('step 3 names no test command'));
+
+        // Surface the gated cursor → the build agent's dep is never satisfied.
+        state.push(_state(committeeSession(
+          completed: {
+            kSpecifyNode,
+            kSpecClearCritiqueNode,
+            kSpecGateNode,
+            ...kSpecCriticNodes,
+          },
+          gated: {kSpecRouteNode},
+          grades: {...kSpecGradesAllA, 'spec_review/plan-completeness': 'D'},
+        )));
+        await _settle();
+        expect(
+          f.provider.started.map((s) => s.name),
+          isNot(contains(_step(kAgentNode))),
+          reason: 'a fixable spec re-specs — it NEVER reaches the build',
+        );
+        expect(f.runner.callsFor('close'), isEmpty,
+            reason: 'a parked session never closes — the work stays gated');
       },
     );
   });
