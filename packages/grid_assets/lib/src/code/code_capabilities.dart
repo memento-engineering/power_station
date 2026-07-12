@@ -27,6 +27,7 @@ import '../agent/usage_report.dart';
 import '../assets/asset_loader.dart';
 import 'committee.dart';
 import 'landing.dart';
+import 'respec.dart';
 import 'specify.dart';
 
 /// specify → spec_review → agent → review → land — the live `code` circuit
@@ -706,6 +707,11 @@ DefaultCapabilityRegistry buildCodeRegistry({
       'specify': const SpecifyCapability(),
       'spec-critic': SpecCriticCapability(rubrics: rubricSource),
       kSpecGatingRubric: const SpecValidationCapability(),
+      // The SPEC committee's own route (bead `pow-7nm`) — the three-way
+      // advance | RESPEC | escalate matrix. The code committee keeps the binary
+      // `route` below; the two matrices are now independent (ADR-0000 A14,
+      // which departs from A13(5)'s shared-route posture).
+      'spec-route': const SpecRouteCapability(),
       'agent': AgentCapability(devRoot: devRoot),
       'land': const LandCapability(),
       'critic': CriticCapability(rubrics: rubricSource),

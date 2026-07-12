@@ -112,6 +112,11 @@ Bead committeeSession({
   Set<String> completed = const {},
   Set<String> gated = const {},
   Map<String, String> grades = const {},
+  // FULL result payloads (relative nodePath → payload), for a lane that must
+  // carry more than a bare grade (bead `pow-7nm`: the spec route reads each
+  // critic's `rationale` to build the respec guidance). Merged AFTER [grades],
+  // so a path in both wins here.
+  Map<String, Map<String, String>> results = const {},
   bool closed = false,
 }) => Bead(
   id: id,
@@ -126,5 +131,7 @@ Bead committeeSession({
       ...nodeStateMetadata('$workBeadId/$step', StepState.gated),
     for (final entry in grades.entries)
       ...nodeResultMetadata('$workBeadId/${entry.key}', {'grade': entry.value}),
+    for (final entry in results.entries)
+      ...nodeResultMetadata('$workBeadId/${entry.key}', entry.value),
   },
 );
