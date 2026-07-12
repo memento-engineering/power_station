@@ -39,6 +39,7 @@ import 'package:grid_sdk/grid_sdk.dart' as sdk;
 
 import '../agent/agent_harness.dart';
 import '../code/code_capabilities.dart';
+import '../code/pr_composition.dart';
 
 /// **GitServices** — the station's git-execution machinery as ONE ambient
 /// value: the shared [StationGitService] provisioner + the [GitOps]
@@ -180,13 +181,21 @@ class GitGridAssets extends SingleChildStatelessSeed {
 /// it passes the ambient bundle through unchanged — GitHub can only ADD land to
 /// a git checkout it can commit from, never conjure one.
 class GitHubGridAssets extends SingleChildStatelessSeed {
-  /// Creates the GitHub asset over the optional [prOpener] (the runner injects a
-  /// live `GhPrOpener`; null ⇒ offline, land stays deferred); [child] is
-  /// supplied by an enclosing [Nest].
-  const GitHubGridAssets({this.prOpener, super.child, super.key});
+  /// Creates the GitHub asset over the optional [prOpener] (the runner injects
+  /// a live `GhPrOpener`; null ⇒ offline, land stays deferred) and the optional
+  /// [composition] PR-shaping knob; [child] is supplied by an enclosing [Nest].
+  const GitHubGridAssets({this.prOpener, this.composition, super.child, super.key});
 
   /// The PR-opening seam (a live `GhPrOpener`); null ⇒ no land added (offline).
   final PrOpener? prOpener;
+
+  /// The substation's PR title/body composition knob (bead `pow-8dx`) — the
+  /// trailer token, the body sections, and the describe model — mounted as
+  /// `InheritedSeed<PrComposition>` for the work subtree and read by
+  /// `LandCapability`/`AgentCapability` at their run/spawn edges. Null ⇒ nothing
+  /// mounted; both fall back to `const PrComposition()` (the better-by-default
+  /// shape). Config = VALUES in the tree (ADR-0008).
+  final PrComposition? composition;
 
   @override
   Seed buildWithChild(TreeContext context, Seed child) {
@@ -198,14 +207,21 @@ class GitHubGridAssets extends SingleChildStatelessSeed {
     final ambient = context.dependOnInheritedSeedOfExactType<ServiceBundle>();
     final sourceControl = ambient?.sourceControl;
     final opener = prOpener;
+    var wired = child;
     if (opener != null && sourceControl is GitSourceControl) {
-      return InheritedSeed<ServiceBundle>(
+      wired = InheritedSeed<ServiceBundle>(
         value: ServiceBundle(sourceControl: sourceControl.withPrOpener(opener)),
         child: child,
       );
     }
-    // Nothing to add — the ambient bundle (if any) stays visible from above.
-    return child;
+    // The composition knob mounts INDEPENDENTLY of land enrichment (it is a
+    // VALUE, not a service): a pass-through build still carries the substation's
+    // PR shaping — and the build agent's commit policy — for whatever source
+    // control is ambient.
+    final knob = composition;
+    return knob == null
+        ? wired
+        : InheritedSeed<PrComposition>(value: knob, child: wired);
   }
 }
 
