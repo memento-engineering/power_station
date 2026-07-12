@@ -50,6 +50,12 @@ resources:
     description: Is the implementation plan literal and decision-free — exact Dart code, file paths, test commands, commits?
     path: rubrics/plan-completeness.md
     visibility: public
+  # The spec-readiness INTAKE lens (bead pow-q7n) — the cheap pre-specify ladder
+  # that grades the BEAD (not the spec, not a diff) before the architect runs.
+  - id: bead-readiness
+    description: The INTAKE lens — is the BEAD ready to specify (scope, acceptance shape, cited constraints, a decided approach)? D or worse HOLDS it for refinement.
+    path: rubrics/bead-readiness.md
+    visibility: public
 
 # Prompts — the critic prompt template, mustache-templated. `{{rubric}}` /
 # `{{rubricText}}` / `{{bead}}` are substituted per lane (the asset loader's
@@ -82,6 +88,20 @@ prompts:
         required: true
       - name: bead
         description: The full work bead whose acceptance + design fields are the spec under review.
+        required: true
+  - id: readiness
+    description: The cheap pre-specify intake lens, grading the work BEAD itself (no spec and no diff exists yet).
+    path: prompts/readiness.md
+    visibility: public
+    args:
+      - name: rubric
+        description: The rubric id this lens grades against.
+        required: true
+      - name: rubricText
+        description: The rubric's prose bands, loaded from resources/<rubric>.
+        required: true
+      - name: bead
+        description: The full work bead under intake (title/task/design/acceptance/notes).
         required: true
 
 # Skills — front-of-house agentic assets in the agentskills SKILL.md format

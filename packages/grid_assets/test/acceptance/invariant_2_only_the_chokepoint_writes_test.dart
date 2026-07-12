@@ -138,12 +138,21 @@ void main() {
         kernel.start();
         await _settle();
 
-        // 1) SPECIFY → AGENT — a ready owned task mounts specify (the head,
-        //    bead `pow-6ao`); the chokepoint mints the session bead (create +
-        //    the birth stamp = one update). Fast-forward the spec phase (an
-        //    all-pass spec committee via cursor adoption) → the agent swaps
+        // 1) LADDER → SPECIFY → AGENT — a ready owned task mounts the readiness
+        //    ladder's head (`intake`, a zero-agent ServiceCapability — bead
+        //    `pow-q7n`); the chokepoint mints the session bead (create + the
+        //    birth stamp = one update). Re-project the ladder complete → SPECIFY
+        //    is the first agent (bead `pow-6ao`); fast-forward the spec phase (an
+        //    all-pass spec committee via cursor adoption) → the build agent swaps
         //    in. The step's provider name is '<sessionId>/<nodePath>'.
-        work.push(_graph(beads: [bead('tg-1')], ready: {'tg-1'}));
+        work.push(_graph(beads: [workBead('tg-1')], ready: {'tg-1'}));
+        await _settle();
+        expect(
+          f.provider.started,
+          isEmpty,
+          reason: 'the ladder head spawns NO agent — intake is deterministic',
+        );
+        state.push(_graph(beads: [ladderDoneSession(id: _sid)], ready: const {}));
         await _settle();
         expect(f.provider.started, hasLength(1));
         expect(f.provider.started.single.name, _step(kSpecifyNode));
@@ -312,12 +321,18 @@ void main() {
         kernel.start();
         await pumpEventQueue();
 
-        // Mount a work bead. The agent spawns from the host lifecycle — a write
-        // (the session mint) lands. But that write came from the lifecycle, not a
-        // build: re-pushing the SAME snapshot (a redundant work tick) re-runs
-        // WorkList/WorkBead/SessionScope/CircuitScope build() — and produces ZERO
-        // new bd writes, because build() never writes.
-        work.push(_graph(beads: [bead('tg-1')], ready: {'tg-1'}));
+        // Mount a work bead, then re-project the readiness ladder complete (bead
+        // `pow-q7n` — its `intake` head is a zero-agent ServiceCapability, so
+        // `specify` only mounts behind it). The agent spawns from the host
+        // lifecycle — a write (the session mint) lands. But that write came from
+        // the lifecycle, not a build: re-pushing the SAME snapshot (a redundant
+        // work tick) re-runs WorkList/WorkBead/SessionScope/CircuitScope build()
+        // — and produces ZERO new bd writes, because build() never writes.
+        work.push(_graph(beads: [workBead('tg-1')], ready: {'tg-1'}));
+        await pumpEventQueue();
+        state.push(
+          _graph(beads: [ladderDoneSession(id: 'tgdog-sess1')], ready: const {}),
+        );
         await pumpEventQueue();
         final writesAfterMount = f.runner.calls.length;
         expect(writesAfterMount, greaterThan(0), reason: 'the mint landed');
@@ -326,9 +341,9 @@ void main() {
         // A redundant identical work tick → the subtree rebuilds (same keys, same
         // config) → NO new writes (build() is side-effect-free) and NO effect
         // churn (the keyed reconcile preserves the branches).
-        work.push(_graph(beads: [bead('tg-1')], ready: {'tg-1'}));
+        work.push(_graph(beads: [workBead('tg-1')], ready: {'tg-1'}));
         await pumpEventQueue();
-        work.push(_graph(beads: [bead('tg-1')], ready: {'tg-1'}));
+        work.push(_graph(beads: [workBead('tg-1')], ready: {'tg-1'}));
         await pumpEventQueue();
 
         expect(
