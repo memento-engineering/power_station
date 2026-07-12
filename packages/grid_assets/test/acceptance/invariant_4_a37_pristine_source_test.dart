@@ -99,14 +99,14 @@ void main() {
         // '<sessionId>/<nodePath>').
         f.provider.emit(
           const SessionStarted(
-            name: 'tgdog-sess1/genesis-7r9/specify',
+            name: 'tgdog-sess1/genesis-7r9/spec_review/specify',
             pid: 9,
             pgid: 8,
           ),
         );
         await pumpEventQueue();
         f.provider.emit(
-          const Exited(name: 'tgdog-sess1/genesis-7r9/specify', exitCode: 0),
+          const Exited(name: 'tgdog-sess1/genesis-7r9/spec_review/specify', exitCode: 0),
         );
         await pumpEventQueue();
 
@@ -118,7 +118,7 @@ void main() {
               sessionBead(
                 id: 'tgdog-sess1',
                 workBeadId: 'genesis-7r9',
-                completed: {'specify'},
+                completed: {kSpecifyNode},
               ),
             ],
             ready: const {},

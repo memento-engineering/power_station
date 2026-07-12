@@ -146,8 +146,8 @@ void main() {
         work.push(_graph(beads: [bead('tg-1')], ready: {'tg-1'}));
         await _settle();
         expect(f.provider.started, hasLength(1));
-        expect(f.provider.started.single.name, _step('specify'));
-        f.provider.emit(Exited(name: _step('specify'), exitCode: 0));
+        expect(f.provider.started.single.name, _step(kSpecifyNode));
+        f.provider.emit(Exited(name: _step(kSpecifyNode), exitCode: 0));
         await _settle();
         state.push(_stateAt());
         await _settle();

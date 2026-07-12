@@ -159,8 +159,8 @@ void main() {
         //    committee via cursor adoption) → the build agent swaps in.
         work.push(_graph(beads: [bead('tg-1')], ready: {'tg-1'}));
         await _settle();
-        expect(f.provider.started.map((s) => s.name), [_step('specify')]);
-        f.provider.emit(Exited(name: _step('specify'), exitCode: 0));
+        expect(f.provider.started.map((s) => s.name), [_step(kSpecifyNode)]);
+        f.provider.emit(Exited(name: _step(kSpecifyNode), exitCode: 0));
         await _settle();
         state.push(_state(_session()));
         await _settle();
@@ -339,7 +339,7 @@ void main() {
         await _settle();
         // Fast-forward the spec phase (bead `pow-6ao`): specify exits, the
         // spec committee all-passes via cursor adoption → the agent swaps in.
-        f.provider.emit(Exited(name: _step('specify'), exitCode: 0));
+        f.provider.emit(Exited(name: _step(kSpecifyNode), exitCode: 0));
         await _settle();
         state.push(_state(_session()));
         await _settle();

@@ -20,12 +20,15 @@ const CircuitResolver kCodeResolver = CircuitResolver(_codeCircuit);
 Circuit _codeCircuit(Bead bead) => kCodeCircuit;
 
 /// The committee-wired `code` circuit's node paths (relative to the work bead),
-/// in declaration order — `specify` → the `spec_review/<lane>` spec committee
-/// (bead `pow-6ao`) → `agent` → `review/clear-critique` (gate-integrity
-/// #3) → `review/pin-diff` (scope-pinning, bead `pow-6wo`) → the four
-/// `review/<critic>` lanes → `review/route` → `land`. The drive helpers +
+/// in declaration order — the `spec_review/<lane>` spec committee, `specify`
+/// INCLUDED (beads `pow-6ao` + `pow-ui8`) → `agent` → `review/clear-critique`
+/// (gate-integrity #3) → `review/pin-diff` (scope-pinning, bead `pow-6wo`) → the
+/// four `review/<critic>` lanes → `review/route` → `land`. The drive helpers +
 /// acceptance tests key the cursor off these.
-const String kSpecifyNode = 'specify';
+///
+/// The specify stage's node path is INSIDE the spec circuit as of bead `pow-ui8`
+/// (folded in so the spec route's `Rewind` can name it as a sibling).
+const String kSpecifyNode = 'spec_review/specify';
 const String kSpecClearCritiqueNode = 'spec_review/clear-critique';
 const String kSpecGateNode = 'spec_review/spec-validation';
 const List<String> kSpecCriticNodes = [

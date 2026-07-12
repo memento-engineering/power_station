@@ -125,12 +125,12 @@ void main() {
         await _settle();
 
         expect(f.provider.started, hasLength(1), reason: 'specify spawned');
-        expect(f.provider.started.single.name, _step('specify'));
+        expect(f.provider.started.single.name, _step(kSpecifyNode));
 
         // Fast-forward the spec phase (specify complete + an all-pass spec
         // committee — cursor adoption: already-complete steps never mount) →
         // the frontier SWAPS to the build agent.
-        f.provider.emit(Exited(name: _step('specify'), exitCode: 0));
+        f.provider.emit(Exited(name: _step(kSpecifyNode), exitCode: 0));
         await _settle();
         state.push(_stateAt());
         await _settle();
