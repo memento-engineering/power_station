@@ -181,6 +181,18 @@ void main() {
       expect(r, isNot(contains(poison)));
       expect(r, contains('/real/activation/worktree/tg-1'));
     });
+
+    test('renders the DETERMINISTIC structural contract + the round-tripped '
+        'exemplar, so the gate\'s rules and the architect\'s brief are one '
+        'string (`pow-77g`)', () {
+      expect(rendered, contains(kSpecStructuralContract));
+      expect(rendered, contains(kSpecExemplarDesign));
+      expect(rendered, contains('DETERMINISTIC'));
+      // Both accepted ordinal shapes are NAMED — the format-only F this bead
+      // closes was an agent writing the heading form the brief never mentioned.
+      expect(rendered, contains('1. …'));
+      expect(rendered, contains('### Step 1 — …'));
+    });
   });
 
   group('SpecifyCapability.result — FT-2 usage merge (capture-only)', () {
