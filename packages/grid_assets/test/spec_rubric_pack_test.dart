@@ -85,6 +85,9 @@ void main() {
       for (final rubricId in kSpecCommitteeRubrics)
         'rubrics/$rubricId.md': loader.loadRubric(rubricId),
       'prompts/spec-critic.md': loader.loadPromptTemplate('spec-critic'),
+      // The spec-readiness INTAKE lens (bead `pow-q7n`) — same pack, same fence.
+      'rubrics/bead-readiness.md': loader.loadRubric(kReadinessRubric),
+      'prompts/readiness.md': loader.loadPromptTemplate('readiness'),
     };
 
     for (final entry in files.entries) {
@@ -170,9 +173,66 @@ void main() {
     });
   });
 
+  group('the INTAKE lens rubric (bead `pow-q7n`) — it grades the BEAD', () {
+    test('bead-readiness loads, names itself, and states the ONE question it '
+        'asks (not "is there a spec" — that is the committee, downstream)', () {
+      final text = loader.loadRubric(kReadinessRubric);
+      expect(text, isNotEmpty);
+      expect(text, contains(kReadinessRubric));
+      expect(text, contains('WORK BEAD'));
+      expect(text, contains('HELD for refinement'));
+      // The four axes ARE the bar the bead's brief must clear.
+      expect(text, contains('Scope'));
+      expect(text, contains('Acceptance shape'));
+      expect(text, contains('Cited constraints'));
+      expect(text, contains('Decided approach'));
+    });
+
+    test('it bands A-C as DRIVE and D-F as HOLD — the matrix decideReadiness '
+        'actually applies', () {
+      final text = loader.loadRubric(kReadinessRubric);
+      expect(text, contains('**D**'));
+      expect(text, contains('**F**'));
+      expect(text, contains('HOLD'));
+    });
+
+    test('it is generous about STYLE — a terse brief is not a finding (the '
+        'false-HOLD correction the deterministic tier also honors)', () {
+      final text = loader.loadRubric(kReadinessRubric);
+      expect(text, contains('strict about SUBSTANCE'));
+      expect(
+        text,
+        contains('Do not hold a bead for being short'),
+        reason: 'length is NOT an axis — a terse chore bead is real work',
+      );
+    });
+  });
+
+  group('renderReadinessPrompt — the portable mirror (bead `pow-q7n`)', () {
+    test('substitutes every hole (no `{{` survives), embeds the bead + the '
+        'rubric bands, and carries the INTAKE framing (no spec, no diff)', () {
+      final review = bead('tg-1').copyWith(
+        title: 'Wire the federation bus',
+        description: 'DECIDED: extend the existing bus; no new transport.',
+      );
+      final prompt = loader.renderReadinessPrompt(kReadinessRubric, review);
+      expect(prompt, isNot(contains('{{')));
+      expect(prompt, contains(kReadinessRubric));
+      expect(prompt, contains('tg-1'));
+      expect(prompt, contains('Wire the federation bus'));
+      expect(prompt, contains(loader.loadRubric(kReadinessRubric)));
+      // This mirror grades the BEAD — never a spec (spec-critic) and never a
+      // diff (critic). Three prompt SHAPES, three mirrors.
+      expect(prompt, contains('NOT been specified'));
+      expect(prompt, contains('WORK BEAD ITSELF'));
+      // It is a LENS, not a committee — the budget instruction is load-bearing.
+      expect(prompt, contains('Stay cheap'));
+    });
+  });
+
   group('extension/mcp/config.yaml declares the spec pack', () {
-    test('the five spec rubrics ride as resources; the spec-critic prompt is '
-        'declared', () {
+    test('the five spec rubrics + the INTAKE rubric ride as resources; the '
+        'spec-critic and readiness prompts are declared', () {
       final manifest =
           File(p.join(root, 'mcp', 'config.yaml')).readAsStringSync();
       for (final rubricId in kSpecCommitteeRubrics) {
@@ -183,6 +243,9 @@ void main() {
         );
       }
       expect(manifest, contains('prompts/spec-critic.md'));
+      // The spec-readiness INTAKE lens (bead `pow-q7n`).
+      expect(manifest, contains('rubrics/bead-readiness.md'));
+      expect(manifest, contains('prompts/readiness.md'));
     });
   });
 }

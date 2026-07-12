@@ -44,6 +44,24 @@ GraphSnapshot _graph({
 
 GraphSnapshot _state(Bead session) => _graph(beads: [session], ready: const {});
 
+/// Every state push in this suite carries the READINESS LADDER complete (bead
+/// `pow-q7n`) — dropping its keys would re-mount the ladder AND re-classify the
+/// session onto the FROZEN pre-ladder circuit (`circuit_migration.dart`), so the
+/// suite would silently drive a shape it is not testing. The ladder's own
+/// choreography is `readiness_acceptance_test.dart`; here it is fast-forwarded so
+/// the SPEC stage stays the focus.
+Bead _session({
+  Set<String> completed = const {},
+  Set<String> gated = const {},
+  Map<String, String> grades = const {},
+  Map<String, Map<String, String>> results = const {},
+}) => committeeSession(
+  completed: {...kReadinessLadderNodes, ...completed},
+  gated: gated,
+  grades: {...kReadinessGradeA, ...grades},
+  results: results,
+);
+
 const _sid = 'tgdog-sess1';
 String _step(String relPath) => '$_sid/tg-1/$relPath';
 
@@ -159,9 +177,18 @@ void main() {
         kernel.start();
         await _settle();
 
-        // 1) a ready owned task → SPECIFY spawns (the 1-wide head of `code`;
-        //    the build agent does NOT).
-        work.push(_graph(beads: [bead('tg-1')], ready: {'tg-1'}));
+        // 1) a ready owned task → the READINESS LADDER's `intake` head mounts
+        //    (bead `pow-q7n`) — deterministic, ZERO agents. Re-project the ladder
+        //    complete (cursor adoption) → SPECIFY spawns as the first AGENT (the
+        //    1-wide head of the spec phase; the build agent does NOT).
+        work.push(_graph(beads: [workBead('tg-1')], ready: {'tg-1'}));
+        await _settle();
+        expect(
+          f.provider.started,
+          isEmpty,
+          reason: 'the ladder head spawns NO agent — intake is deterministic',
+        );
+        state.push(_state(ladderDoneSession(id: _sid)));
         await _settle();
         expect(f.provider.started.map((s) => s.name), [_step(kSpecifyNode)]);
         final specify = f.provider.started.single.config;
@@ -181,9 +208,9 @@ void main() {
         //    real (a ServiceCapability, no spawn); re-project its completion.
         f.provider.emit(Exited(name: _step(kSpecifyNode), exitCode: 0));
         await _settle();
-        state.push(_state(committeeSession(completed: {kSpecifyNode})));
+        state.push(_state(_session(completed: {kSpecifyNode})));
         await _settle();
-        state.push(_state(committeeSession(
+        state.push(_state(_session(
           completed: {kSpecifyNode, kSpecClearCritiqueNode},
         )));
         await _settle();
@@ -230,7 +257,7 @@ void main() {
           f.provider.emit(Exited(name: critic, exitCode: 0));
         }
         await _settle();
-        state.push(_state(committeeSession(
+        state.push(_state(_session(
           completed: {
             kSpecifyNode,
             kSpecClearCritiqueNode,
@@ -247,7 +274,7 @@ void main() {
         // 5) the spec route's advance unblocks the BUILD agent (`agent`
         //    dependsOn spec_review → its terminal route) — the spec phase
         //    complete, the build phase begins.
-        state.push(_state(committeeSession(
+        state.push(_state(_session(
           completed: kSpecPhaseNodes,
           grades: kSpecGradesAllA,
         )));
@@ -278,11 +305,11 @@ void main() {
 
         kernel.start();
         await _settle();
-        work.push(_graph(beads: [bead('tg-1')], ready: {'tg-1'}));
+        work.push(_graph(beads: [workBead('tg-1')], ready: {'tg-1'}));
         await _settle();
         f.provider.emit(Exited(name: _step(kSpecifyNode), exitCode: 0));
         await _settle();
-        state.push(_state(committeeSession(
+        state.push(_state(_session(
           completed: {kSpecifyNode, kSpecClearCritiqueNode},
         )));
         await _settle();
@@ -293,7 +320,7 @@ void main() {
 
         // The gating lane graded F (a placeholder / spec-less bead); the
         // judgement lanes passed → the route's matrix is a HARD BLOCK.
-        state.push(_state(committeeSession(
+        state.push(_state(_session(
           completed: {
             kSpecifyNode,
             kSpecClearCritiqueNode,
@@ -318,7 +345,7 @@ void main() {
 
         // Surface the gated cursor → the build agent's dep is never
         // satisfied: no build spawn, no session close.
-        state.push(_state(committeeSession(
+        state.push(_state(_session(
           completed: {
             kSpecifyNode,
             kSpecClearCritiqueNode,
@@ -358,11 +385,11 @@ void main() {
 
         kernel.start();
         await _settle();
-        work.push(_graph(beads: [bead('tg-1')], ready: {'tg-1'}));
+        work.push(_graph(beads: [workBead('tg-1')], ready: {'tg-1'}));
         await _settle();
         f.provider.emit(Exited(name: _step(kSpecifyNode), exitCode: 0));
         await _settle();
-        state.push(_state(committeeSession(
+        state.push(_state(_session(
           completed: {kSpecifyNode, kSpecClearCritiqueNode},
         )));
         await _settle();
@@ -373,7 +400,7 @@ void main() {
 
         // The gating lane is clean; ONE judgement lane graded D and said WHY —
         // an actionable critic grade carrying a rationale: the FIXABLE arm.
-        state.push(_state(committeeSession(
+        state.push(_state(_session(
           completed: {
             kSpecifyNode,
             kSpecClearCritiqueNode,

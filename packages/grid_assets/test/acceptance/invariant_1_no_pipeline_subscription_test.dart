@@ -45,8 +45,18 @@ void main() {
         final work = CountingSnapshotSource(
           _graph(beads: const [], ready: const {}),
         );
+        // Adopted sessions carrying the READINESS LADDER complete (bead
+        // `pow-q7n`), so each work bead's agent spawns under one flush — the
+        // ladder head is a zero-agent ServiceCapability, and this suite's proof
+        // (the listener count) is about the work AXIS, not the circuit head.
         final state = CountingSnapshotSource(
-          _graph(beads: const [], ready: const {}),
+          _graph(
+            beads: [
+              ladderDoneSession(id: 'tgdog-1', workBeadId: 'tg-1'),
+              ladderDoneSession(id: 'tgdog-2', workBeadId: 'tg-2'),
+            ],
+            ready: const {},
+          ),
         );
         // The bridge drives our counting notifier — but does NOT own it (we
         // pass it in), so the count reflects tree listeners + the WorkList only.
@@ -124,8 +134,16 @@ void main() {
         final work = CountingSnapshotSource(
           _graph(beads: const [], ready: const {}),
         );
+        // Ladder-complete adopted sessions (bead `pow-q7n`) so the tree is
+        // provably LIVE (an agent spawns) — the non-vacuity check below.
         final state = CountingSnapshotSource(
-          _graph(beads: const [], ready: const {}),
+          _graph(
+            beads: [
+              ladderDoneSession(id: 'tgdog-1', workBeadId: 'tg-1'),
+              ladderDoneSession(id: 'tgdog-2', workBeadId: 'tg-2'),
+            ],
+            ready: const {},
+          ),
         );
         final bridge = StationJoinBridge(work: work, state: state);
         final kernel = StationKernel(
@@ -217,11 +235,17 @@ void main() {
 
         // First work tick: tg-1 arrives with an ADOPTED session (so the
         // SessionScope resolves synchronously and the agent spawns under one
-        // flush — the manual owner has no kernel self-flush). → ONE agent spawn.
+        // flush — the manual owner has no kernel self-flush). The session
+        // carries the READINESS LADDER complete (bead `pow-q7n`), so the head
+        // that spawns is `specify`, not the ladder's zero-agent `intake`.
+        // → ONE agent spawn.
         joined.push(JoinedSnapshot(
           graph: _graph(beads: [bead('tg-1')], ready: {'tg-1'}),
-          sessionsByWorkBead: const {
-            'tg-1': SessionProjection(workBeadId: 'tg-1', sessionId: 'tgdog-1'),
+          sessionsByWorkBead: {
+            'tg-1': ladderDoneProjection(
+              workBeadId: 'tg-1',
+              sessionId: 'tgdog-1',
+            ),
           },
         ));
         owner.flush();
@@ -241,9 +265,15 @@ void main() {
         // the effect-churn signal AND the structural branch-identity signal.
         joined.push(JoinedSnapshot(
           graph: _graph(beads: [bead('tg-1'), bead('tg-2')], ready: {'tg-1', 'tg-2'}),
-          sessionsByWorkBead: const {
-            'tg-1': SessionProjection(workBeadId: 'tg-1', sessionId: 'tgdog-1'),
-            'tg-2': SessionProjection(workBeadId: 'tg-2', sessionId: 'tgdog-2'),
+          sessionsByWorkBead: {
+            'tg-1': ladderDoneProjection(
+              workBeadId: 'tg-1',
+              sessionId: 'tgdog-1',
+            ),
+            'tg-2': ladderDoneProjection(
+              workBeadId: 'tg-2',
+              sessionId: 'tgdog-2',
+            ),
           },
         ));
         owner.flush();
