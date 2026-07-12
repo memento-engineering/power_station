@@ -49,6 +49,7 @@ export 'src/agent/agent_harness.dart';
 export 'src/agent/usage_report.dart';
 export 'src/assets/asset_loader.dart';
 export 'src/assets/composition_assets.dart';
+export 'src/code/circuit_migration.dart';
 export 'src/code/code_capabilities.dart';
 export 'src/code/committee.dart';
 export 'src/code/landing.dart';

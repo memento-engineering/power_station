@@ -25,6 +25,7 @@ import '../agent/agent_domain.dart';
 import '../agent/agent_harness.dart';
 import '../agent/usage_report.dart';
 import '../assets/asset_loader.dart';
+import 'circuit_migration.dart';
 import 'committee.dart';
 import 'landing.dart';
 import 'respec.dart';
@@ -50,10 +51,11 @@ import 'specify.dart';
 /// SAME `gated` state the code committee uses.
 ///
 /// NOTE (bead `pow-3p4`): the fold MOVED the persisted cursor key
-/// `<bead>/specify` → `<bead>/spec_review/specify`, so an in-flight session
-/// minted under the pre-fold shape has no key at the new path and the frontier
-/// would read it `pending`. Guarding the first BOUNCE onto this shape is
-/// `pow-3p4`'s migration bead (deferred), NOT this circuit's job.
+/// `<bead>/specify` → `<bead>/spec_review/specify`, so a session minted under
+/// either older shape has no key at the new path and the frontier would read it
+/// `pending`. Bouncing onto this circuit is GUARDED by `circuit_migration.dart`:
+/// [CodeCircuitResolver] roots the frozen [kLegacyCodeCircuit] /
+/// [kSpecHeadCodeCircuit] for such a survivor, so it never re-enters `specify`.
 ///
 /// The toy `verify` step (`sh -c 'melos test'`) is GONE: `verify` is now the
 /// adversarial code-committee, a [SubCircuitStep] the engine inflates one level
@@ -736,6 +738,11 @@ DefaultCapabilityRegistry buildCodeRegistry({
       'spec_review': kSpecReviewCircuit,
       'code_review': kCodeReviewCircuit,
       'landing': kLandingCircuit,
+      // The FROZEN pre-fold spec circuit (`spec_review_v1`, bead `pow-3p4`) —
+      // reachable ONLY from [kSpecHeadCodeCircuit], which the migration guard
+      // roots for a shape-2 survivor. Unreachable from [kCodeCircuit]; delete
+      // it with the guard.
+      ...kMigrationCircuits,
     },
     clock: clock,
   );
