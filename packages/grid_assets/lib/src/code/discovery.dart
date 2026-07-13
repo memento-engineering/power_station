@@ -83,6 +83,7 @@ import '../agent/usage_report.dart';
 import '../search/station_search.dart';
 import 'committee.dart';
 import 'readiness.dart';
+import 'route_failure.dart';
 
 /// The discovery circuit's registry id — and the [SubCircuitStep] id that
 /// inflates it inside `spec_review`.
@@ -1417,27 +1418,28 @@ typedef LensReportReader =
 /// and its OWN cursor (through the ambient [SiblingView] — the effect verb, never
 /// a re-query), applies the pure [decideDiscovery] matrix, and:
 ///
-///  - [DiscoveryHold] ⇒ [Gate] — the CITED refinement ask. `specify` dependsOn
-///    this circuit's terminal, so the hold WITHHOLDS the architect entirely (the
-///    A9 [PinDiffCapability] posture: the whole value of this gate IS the agent it
-///    prevents).
+///  - [DiscoveryHold] ⇒ [Escalate] — the CITED refinement ask. `specify`
+///    dependsOn this circuit's terminal, so the hold WITHHOLDS the architect
+///    entirely (the A9 [PinDiffCapability] posture: the whole value of this gate
+///    IS the agent it prevents).
 ///  - [DiscoveryRegather] ⇒ [Rewind] naming the silent LENS siblings — the engine
 ///    re-keys them (and this route) back to `pending`, so they re-run VIRGIN in
 ///    the SAME session. No human, no gate bead, no session re-mint.
-///  - [DiscoveryAdvance] ⇒ the dossier is WRITTEN, then [Ok]. A dossier write that
-///    cannot land is [Failed] — LOUD: the architect would get NO context and this
-///    whole circuit would have run for nothing (guards LOUD or GONE).
+///  - [DiscoveryAdvance] ⇒ the dossier is WRITTEN, then [Advance]. A dossier write
+///    that cannot land throws a [RouteFailure] — LOUD: the architect would get NO
+///    context and this whole circuit would have run for nothing (guards LOUD or
+///    GONE).
 ///
 /// Offline/dry-run posture: a workspace that does not exist on disk skips the
 /// dossier WRITE (the `SpecRouteCapability` posture). The verdict is unchanged.
-class DiscoveryRouteCapability extends ServiceCapability {
+class DiscoveryRouteCapability extends RouteCapability {
   /// Creates the route over its report reader (null ⇒ the real [readLensReport]).
   const DiscoveryRouteCapability({LensReportReader? reader}) : _reader = reader;
 
   final LensReportReader? _reader;
 
   @override
-  Future<StepOutcome> run(TreeContext context, StepArgs args) async {
+  Future<RouteVerdict> route(TreeContext context, StepArgs args) async {
     // Read the ambient values at ENTRY (while mounted); the matrix is pure over
     // the captured values.
     final siblings =
@@ -1471,7 +1473,7 @@ class DiscoveryRouteCapability extends ServiceCapability {
       priorRound: priorRound,
     )) {
       case DiscoveryHold(:final reason):
-        return Gate(reason);
+        return Escalate(reason);
       case DiscoveryRegather(lenses: final silent, :final reason):
         return Rewind(silent, reason);
       case DiscoveryAdvance(:final dossier):
@@ -1479,7 +1481,7 @@ class DiscoveryRouteCapability extends ServiceCapability {
           try {
             _writeJson(discoveryDossierPath(dir), dossier.toJson());
           } catch (e) {
-            return Failed(
+            throw RouteFailure(
               'discovery-route: could not write the dossier at '
               '${discoveryDossierPath(dir)} — $e. Refusing to advance blind (the '
               'architect would get NO gathered context, which is this circuit\'s '
@@ -1487,7 +1489,7 @@ class DiscoveryRouteCapability extends ServiceCapability {
             );
           }
         }
-        return Ok({
+        return Advance({
           'verdict': 'advance',
           'rule': 'no-cited-offence',
           'lenses': lenses.join(','),
