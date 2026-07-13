@@ -280,7 +280,15 @@ class AgentCapability extends ProcessCapability {
       },
     );
     _excludeOverlayFromGit(claudeDir, report.writtenEntryDirs);
-    return report.installedSkillIds;
+    // AUDIENCE: the overlay is ONE tree with two consumers, so a worktree gets
+    // the operator skills too — but the brief must not OFFER them.
+    // `harvest-review` pushes and opens PRs; this brief forbids both. A skill
+    // the brief never names cannot be invoked (print mode selects none on its
+    // own — ADR-0001), so withholding the name is the whole guard.
+    return [
+      for (final id in report.installedSkillIds)
+        if (!kOperatorSkills.contains(id)) id,
+    ];
   }
 
   /// Keeps what we just materialized OUT of the bead's commit: [LandCapability]

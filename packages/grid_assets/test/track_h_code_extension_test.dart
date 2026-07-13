@@ -731,6 +731,11 @@ void main() {
           // `brief.render()`).
           expect(cfg.args.last, contains('`/discover`'));
           expect(cfg.args.last, contains('.claude/skills/'));
+          // The OPERATOR skills ride the same overlay into the worktree, but
+          // the brief must never OFFER them: harvest-review pushes + opens PRs,
+          // which this very agreement forbids.
+          expect(cfg.args.last, isNot(contains('`/harvest-review`')));
+          expect(cfg.args.last, isNot(contains('`/station-operations`')));
         },
       );
 

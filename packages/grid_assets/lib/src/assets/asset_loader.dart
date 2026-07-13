@@ -42,7 +42,39 @@ import 'package:path/path.dart' as p;
 /// the coupled skill+command pairs (ADR-0001). `OverlayMaterializer` does not
 /// read this constant (it installs whatever files exist under the overlay); it
 /// is the by-id render surface's own index, and the skill-manifest test's.
-const List<String> kVendedSkills = ['discover'];
+const List<String> kVendedSkills = [
+  'discover',
+  'gate-medicine',
+  'harvest-review',
+  'intake-grooming',
+  'station-operations',
+];
+
+/// The vended skills whose AUDIENCE is the OPERATOR — the human at the grid
+/// home, whose `.claude/` the `install` Command fills. The provision wire
+/// installs them into a per-bead worktree like any other overlay file (one
+/// tree, two consumers), but NEVER names them in a build agent's brief
+/// (`buildAgentBrief`). The mirror of each skill's `audience:` in
+/// `extension/mcp/config.yaml`, fenced by test.
+///
+/// The split is load-bearing, not cosmetic. These four drive the STATION (boot
+/// it, land its work, clear its gates) — and `harvest-review` teaches "push and
+/// open a PR with receipts", which the very brief that would offer it FORBIDS
+/// ("Do NOT push and do NOT open a pull request"). Offering a build agent a
+/// skill that contradicts its working agreement is a live hazard.
+///
+/// A DENY-list, not an allow-list of agent skills: the wire materializes
+/// whatever overlay it is handed, so a skill this package does not vend (a
+/// third-party asset pack's, an injected fixture's) is a skill whose pack meant
+/// it for its agents. Naming it is what makes it invocable — dropping it
+/// silently is the failure this doctrine forbids. Only a DECLARED operator
+/// audience withholds a skill.
+const List<String> kOperatorSkills = [
+  'gate-medicine',
+  'harvest-review',
+  'intake-grooming',
+  'station-operations',
+];
 
 /// Loads grid_assets' bundled rubric/prompt assets from `extension/`.
 class PackagedAssetLoader {
