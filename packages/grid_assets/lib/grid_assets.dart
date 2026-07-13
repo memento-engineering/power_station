@@ -126,6 +126,7 @@ export 'src/code/pr_composition.dart';
 export 'src/code/pr_describe.dart';
 export 'src/code/readiness.dart';
 export 'src/code/respec.dart';
+export 'src/code/route_failure.dart';
 export 'src/code/specify.dart';
 export 'src/compute/bounded_use.dart';
 export 'src/compute/compute_command.dart';
