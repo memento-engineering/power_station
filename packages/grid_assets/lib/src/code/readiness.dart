@@ -311,10 +311,23 @@ class IntakeCapability extends ServiceCapability {
 /// and the prompt is [buildReadinessPrompt].
 ///
 /// It resolves its agent config through the SAME [resolveAgentConfig] ladder as
-/// every other lane, so it carries NO model opinion of its own: sibling bead
-/// `pow-edp` (per-role model selection — grade on sonnet, build on opus) is the
-/// rung that will make this lane's model cheap, and this lane picks it up with
-/// no change here.
+/// every other lane, so it carries NO model opinion of its own — ADR-0000
+/// A17(6): *"`ReadinessCriticCapability` resolves through the SAME ladder as
+/// every other lane, so the day `pow-edp`'s role defaults land, this lane
+/// inherits the cheap model for free. Cheapness TODAY is STRUCTURAL (1 agent
+/// instead of ~18), not a model pin."* That day came: it declares
+/// [AgentRole.grade], so it rides the MID tier ([kMidModelDefault], `sonnet`) —
+/// the ladder's cheaper rung, inherited with no change here, never the build's
+/// frontier model.
+///
+/// Whether the lens should ride the CHEAP tier ([kCheapModelDefault], `haiku`)
+/// now that bead `pow-2c9` mints one is a BEHAVIOR change on a live governance
+/// lane, not an axis change, and it is NOT [AgentRole.gather] when it comes: a
+/// gatherer reads and decides nothing, while this lane emits a verdict letter.
+/// It is one line — a cheap-tier JUDGEMENT role, or a `tierFor` retune — and it
+/// belongs to its own bead. The rung it rides TODAY is pinned at the argv in
+/// `test/agent/model_tier_test.dart`, so the flip is deliberate and reviewed,
+/// never drift.
 class ReadinessCriticCapability extends CriticCapability {
   /// Creates the readiness lane, optionally over a rubric source (D-9 wires the
   /// Packaged-AI-Asset loader; absent ⇒ an inline placeholder so the circuit is

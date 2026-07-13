@@ -6,10 +6,10 @@
 // (2026-07-11) pinned one model and hit builders and critics alike.
 //
 // The ladder, most-explicit first:
-//   1. the bead's `grid.agent` envelope `params.model` — both roles, that bead;
-//   2. the STATION's rung for the role — `params['model']` (what `space up
-//      --model` sets) for BUILD, `graderModel` (`--grader-model`) for GRADE;
-//   3. the SPAWNING ASSET's role default — build ⇒ opus, grade ⇒ sonnet.
+//   1. the bead's `grid.agent` envelope `params.model` — every role, that bead;
+//   2. the STATION's arming of the role's TIER — `tiers` (bead `pow-2c9`), plus
+//      the PRE-TIER knobs `params['model']` → frontier and `graderModel` → mid;
+//   3. the TIER's asset default — frontier ⇒ opus, mid ⇒ sonnet, cheap ⇒ haiku.
 //
 // The winner is stamped into `params['model']`, the transport key every harness
 // reads, so these tests assert the CLAUDE ARGV each capability actually spawns —
@@ -101,7 +101,7 @@ void main() {
       _buildSpawns(bead('tg-1'), station).forEach((lane, cfg) {
         expect(
           _modelOf(cfg),
-          kBuildModelDefault,
+          kFrontierModelDefault,
           reason: '$lane must build strong',
         );
         expect(_modelOf(cfg), 'opus');
@@ -109,17 +109,22 @@ void main() {
       _gradeSpawns(bead('tg-1'), station).forEach((lane, cfg) {
         expect(
           _modelOf(cfg),
-          kGraderModelDefault,
+          kMidModelDefault,
           reason: '$lane must grade cheap',
         );
         expect(_modelOf(cfg), 'sonnet');
       });
     });
 
-    test('defaultModelFor is exhaustive over the role', () {
+    test('the role resolves its model through its TIER (role → tier → model)', () {
       expect(defaultModelFor(AgentRole.build), 'opus');
       expect(defaultModelFor(AgentRole.grade), 'sonnet');
-      expect(AgentRole.values, [AgentRole.build, AgentRole.grade]);
+      expect(defaultModelFor(AgentRole.gather), 'haiku');
+      expect(AgentRole.values, [
+        AgentRole.build,
+        AgentRole.grade,
+        AgentRole.gather,
+      ]);
     });
   });
 
@@ -184,7 +189,9 @@ void main() {
   });
 
   group('pow-edp — the precedence table, per role, at the resolver', () {
-    // (bead model, station build rung, station grade rung) → (build, grade).
+    // (bead model, station build knob, station grade knob) → (build, grade,
+    // gather). Neither PRE-TIER knob arms the CHEAP tier (bead `pow-2c9`), so a
+    // gatherer rides its asset default unless the BEAD pins one.
     final rows =
         <({
           String label,
@@ -193,6 +200,7 @@ void main() {
           String? stationGrade,
           String build,
           String grade,
+          String gather,
         })>[
           (
             label: 'nothing set',
@@ -201,6 +209,7 @@ void main() {
             stationGrade: null,
             build: 'opus',
             grade: 'sonnet',
+            gather: 'haiku',
           ),
           (
             label: '--model only',
@@ -209,6 +218,7 @@ void main() {
             stationGrade: null,
             build: 'X',
             grade: 'sonnet',
+            gather: 'haiku',
           ),
           (
             label: '--grader-model only',
@@ -217,6 +227,7 @@ void main() {
             stationGrade: 'Y',
             build: 'opus',
             grade: 'Y',
+            gather: 'haiku',
           ),
           (
             label: 'both flags',
@@ -225,6 +236,7 @@ void main() {
             stationGrade: 'Y',
             build: 'X',
             grade: 'Y',
+            gather: 'haiku',
           ),
           (
             label: 'bead over nothing',
@@ -233,6 +245,7 @@ void main() {
             stationGrade: null,
             build: 'Z',
             grade: 'Z',
+            gather: 'Z',
           ),
           (
             label: 'bead over --model',
@@ -241,6 +254,7 @@ void main() {
             stationGrade: null,
             build: 'Z',
             grade: 'Z',
+            gather: 'Z',
           ),
           (
             label: 'bead over --grader-model',
@@ -249,6 +263,7 @@ void main() {
             stationGrade: 'Y',
             build: 'Z',
             grade: 'Z',
+            gather: 'Z',
           ),
           (
             label: 'bead over both',
@@ -257,11 +272,13 @@ void main() {
             stationGrade: 'Y',
             build: 'Z',
             grade: 'Z',
+            gather: 'Z',
           ),
         ];
 
     for (final row in rows) {
-      test('${row.label}: build=${row.build}, grade=${row.grade}', () {
+      test('${row.label}: build=${row.build}, grade=${row.grade}, '
+          'gather=${row.gather}', () {
         final ambient = AgentConfig(
           params: {if (row.stationBuild != null) 'model': row.stationBuild!},
           graderModel: row.stationGrade,
@@ -273,6 +290,7 @@ void main() {
         for (final (role, expected) in [
           (AgentRole.build, row.build),
           (AgentRole.grade, row.grade),
+          (AgentRole.gather, row.gather),
         ]) {
           final resolved = resolveAgentConfig(
             role: role,

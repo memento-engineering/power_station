@@ -140,12 +140,14 @@ ModelTarget _parseTarget(Map<String, Object?> target) {
 ///
 ///  - **the config ladder** (harness / target / params) — *step params > bead
 ///    envelope > ambient*, unchanged;
-///  - **the MODEL ladder** (bead `pow-edp`) — *bead `grid.agent` `params.model`
-///    > the station's rung for [role] ([AgentConfig.stationModelFor]) > the
-///    asset's role default ([defaultModelFor])*. The winner is STAMPED into the
-///    returned config's `params['model']` — the transport key every harness
-///    reads — so a grader rides sonnet while a builder rides opus off the same
-///    ambient config, and no harness needs to know a role exists.
+///  - **the MODEL ladder** (beads `pow-edp` / `pow-2c9`) — *bead `grid.agent`
+///    `params.model` > the STATION's arming of the role's TIER
+///    ([AgentConfig.modelForRole]: [tierFor] the role, then [ModelTiers] —
+///    which falls through to that tier's asset default)*. The winner is STAMPED
+///    into the returned config's `params['model']` — the transport key every
+///    harness reads — so a grader rides the mid tier while a builder rides the
+///    frontier off the same ambient config, a gatherer rides cheap, and no
+///    harness needs to know a role or a tier exists.
 ///
 /// The returned config ALWAYS names an explicit model (no silent fallback to the
 /// harness CLI's own default — the fable/opus incident).
@@ -191,15 +193,15 @@ AgentConfig resolveAgentConfig({
     config = config.merge(harness: stepHarness);
   }
 
-  // The MODEL ladder, resolved for the spawner's ROLE and stamped into the
-  // harness transport key. The station rung is read off the AMBIENT (a bead
-  // envelope carries no per-role rung — its model, when present, already won
-  // above).
+  // The MODEL ladder, resolved for the spawner's ROLE through the TIER axis
+  // (bead `pow-2c9`) and stamped into the harness transport key: the bead's
+  // pinned model, else the STATION's arming of the role's tier — which itself
+  // falls through to that tier's asset default, so the result is TOTAL (there
+  // is no third `??` and no unpinned spawn). Read off the AMBIENT: a bead
+  // envelope carries no tier arming, and its model — when present — already won
+  // above.
   config = config.merge(
-    params: {
-      'model':
-          beadModel ?? ambient.stationModelFor(role) ?? defaultModelFor(role),
-    },
+    params: {'model': beadModel ?? ambient.modelForRole(role)},
   );
 
   // Legality — the shared OQ-c check.

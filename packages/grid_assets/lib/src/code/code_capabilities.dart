@@ -108,9 +108,9 @@ const Circuit kCodeCircuit = Circuit(
 /// delegates the INVOCATION to the resolved harness.
 ///
 /// It spawns in the **BUILD role** ([AgentRole.build], bead `pow-edp`): absent a
-/// bead or station override, the coding agent rides [kBuildModelDefault]
-/// (`opus`) — the committee's critics resolve their own, cheaper grade rung off
-/// the same ambient config.
+/// bead or station override, the coding agent rides the FRONTIER tier ([tierFor]
+/// — [kFrontierModelDefault], `opus`) — the committee's critics resolve their
+/// own, cheaper tier off the same ambient config.
 ///
 /// The POLICY stays here:
 /// [buildAgentBrief] renders the full bead (a title-only brief starves the

@@ -16,17 +16,20 @@
 /// provision), [CircuitProvider] (the Q8 circuit provider/scope), and
 /// [sourceControlOf] (bead → substation → root resolution, no string-keyed map).
 ///
-/// The AGENT SCOPE's model resolution is ROLE-SPLIT (bead `pow-edp`): a spawner
-/// declares its [AgentRole], and [resolveAgentConfig] resolves its model as
-/// *bead `grid.agent` `params.model` > the station's rung for that role
-/// ([AgentConfig.params]`['model']` for build, [AgentConfig.graderModel] for
-/// grade) > the asset's own default ([kBuildModelDefault] `opus` /
-/// [kGraderModelDefault] `sonnet`)*, stamping the winner into the harness
-/// transport key. So the committee grades cheap while the build runs strong, and
-/// the most explicit rung always wins. The resolved model is ALWAYS explicit —
-/// never the harness CLI's own default (which silently fell back to fable when a
-/// weekly limit blew) — and [UsageReport.model] captures the id(s) that ACTUALLY
-/// ran, so `grid.result.<node>.model` proves it from the ledger (subsuming bead
+/// The AGENT SCOPE's model resolution is ROLE → TIER → MODEL (beads `pow-edp`,
+/// `pow-2c9`): a spawner declares its [AgentRole]; the role points at an
+/// [AgentTier] ([tierFor] — build ⇒ frontier, grade ⇒ mid, gather ⇒ cheap); and
+/// the STATION arms tier → model ([AgentConfig.tiers], a [ModelTiers] value —
+/// an unarmed tier rides [defaultModelForTier]: [kFrontierModelDefault] `opus`,
+/// [kMidModelDefault] `sonnet`, [kCheapModelDefault] `haiku`).
+/// [resolveAgentConfig] resolves *bead `grid.agent` `params.model` > the
+/// station's arming of the role's tier*, stamping the winner into the harness
+/// transport key. So the committee grades cheap while the build runs strong, a
+/// NEW role costs one `tierFor` case (never a new config field), and a retune is
+/// one arming change. The resolved model is ALWAYS explicit — never the harness
+/// CLI's own default (which silently fell back to fable when a weekly limit
+/// blew) — and [UsageReport.model] captures the id(s) that ACTUALLY ran, so
+/// `grid.result.<node>.model` proves it from the ledger (subsuming bead
 /// `pow-efv`).
 ///
 /// The COMPUTE asset domain (ADR-0011 D2/D3, M6 Track D) also lives here: the
@@ -68,6 +71,7 @@ library;
 
 export 'src/agent/agent_domain.dart';
 export 'src/agent/agent_harness.dart';
+export 'src/agent/model_tier.dart';
 export 'src/agent/usage_report.dart';
 export 'src/assets/asset_loader.dart';
 export 'src/assets/composition_assets.dart';

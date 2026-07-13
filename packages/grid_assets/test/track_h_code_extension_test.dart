@@ -163,12 +163,12 @@ void main() {
       expect(cfg.args[2], 'grid-claude'); // $0 label
       // $1.. — the exact claude invocation ("$@" execs it verbatim). The model
       // is ALWAYS named (bead `pow-edp`): a build spawns in the BUILD role, so
-      // absent a station/bead override it rides the build default (opus) — never
+      // absent a station/bead override it rides the FRONTIER tier (opus) — never
       // the claude CLI's own default, which silently fell back to fable.
       expect(cfg.args[3], 'claude');
       expect(cfg.args[4], '--dangerously-skip-permissions');
       expect(cfg.args[5], '--model');
-      expect(cfg.args[6], kBuildModelDefault);
+      expect(cfg.args[6], kFrontierModelDefault);
       expect(cfg.args[7], '--output-format');
       expect(cfg.args[8], 'json');
       expect(cfg.args[9], '-p');

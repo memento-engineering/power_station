@@ -353,8 +353,9 @@ const Circuit kSpecReviewCircuit = Circuit(
 /// through the ladder, and delegates the INVOCATION to the resolved harness.
 ///
 /// The architect is a BUILD-role spawner ([AgentRole.build], bead `pow-edp`) —
-/// it writes the spec two independent builds must converge on, so it rides
-/// [kBuildModelDefault] (`opus`) by default, not the graders' cheap rung.
+/// it writes the spec two independent builds must converge on, so it rides the
+/// FRONTIER tier ([kFrontierModelDefault], `opus`) by default, not the graders'
+/// cheaper tier.
 ///
 /// The POLICY stays here: [buildSpecifyBrief] renders the full bead (a
 /// title-only brief starves the agent, A36) + the spec-writing contract — the
@@ -632,11 +633,11 @@ AgentBrief buildSpecifyBrief(
 /// hardening landed for the code critics (gate-integrity #3/#4, tg-291)
 /// automatically holds here. Only the SPAWN differs — it is a GRADE-role spawner
 /// ([AgentRole.grade], bead `pow-edp`), like its superclass, so absent an
-/// override it grades on [kGraderModelDefault] (`sonnet`); and a spec critic is
-/// always an agent (there is no `sh -c` validation-runner flavor; the spec gate
-/// is [SpecValidationCapability]) and its prompt is [buildSpecCriticPrompt]: the
-/// review subject is the bead's SPEC, never a pinned diff (no code exists
-/// yet).
+/// override it grades on the MID tier ([kMidModelDefault], `sonnet`); and a spec
+/// critic is always an agent (there is no `sh -c` validation-runner flavor; the
+/// spec gate is [SpecValidationCapability]) and its prompt is
+/// [buildSpecCriticPrompt]: the review subject is the bead's SPEC, never a
+/// pinned diff (no code exists yet).
 class SpecCriticCapability extends CriticCapability {
   /// Creates the spec critic, optionally over a rubric source (D-9 wires
   /// the Packaged-AI-Asset loader; absent ⇒ an inline placeholder so the

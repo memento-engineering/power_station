@@ -479,12 +479,12 @@ String _reasonTail(String output, [int max = 300]) {
 ///    effective [AgentConfig] resolves through the same ladder as the coding
 ///    agent but off the GRADER rung — a critic reads a pinned diff against ONE
 ///    rubric and writes a letter, so absent a bead or `--grader-model` override
-///    it rides [kGraderModelDefault] (`sonnet`) while the build runs
-///    [kBuildModelDefault] (`opus`). The resolved harness carries the critic's
-///    prompt (ONLY its own rubric); the verdict JSON is parsed by the [result]
-///    hook, which also merges the harness's CAPTURE-ONLY usage telemetry (FT-2 —
-///    tokens/cost/turns/duration, and the `model` that actually ran) alongside
-///    the grade (fail-safe: no usage ⇒ just the grade).
+///    it rides the MID tier ([kMidModelDefault], `sonnet`) while the build rides
+///    the FRONTIER tier ([kFrontierModelDefault], `opus`). The resolved harness
+///    carries the critic's prompt (ONLY its own rubric); the verdict JSON is
+///    parsed by the [result] hook, which also merges the harness's CAPTURE-ONLY
+///    usage telemetry (FT-2 — tokens/cost/turns/duration, and the `model` that
+///    actually ran) alongside the grade (fail-safe: no usage ⇒ just the grade).
 ///
 /// A capability reads its ambient values — the work [Bead], the [Workspace],
 /// the agent scope — with the effect verb (`getInheritedSeedOfExactType`) at
