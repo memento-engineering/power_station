@@ -16,13 +16,15 @@
 /// [AgentHarnessRegistry] wired at `main()` — behavior is never derived from a
 /// service looked up in the tree.
 ///
-/// **The MODEL splits by ROLE (bead `pow-edp`).** A spawn's model is not one
-/// station-wide value: it resolves for the [AgentRole] the SPAWNING ASSET
-/// declares — `bead grid.agent params.model` > the station's rung for that role
-/// ([AgentConfig.stationModelFor]) > the asset's own default
-/// ([defaultModelFor]: build ⇒ [kBuildModelDefault], grade ⇒
-/// [kGraderModelDefault]). So the committee grades cheap while the build runs
-/// strong, and the most explicit rung always wins.
+/// **The MODEL resolves ROLE → TIER → MODEL (beads `pow-edp`, `pow-2c9`).** A
+/// spawn's model is not one station-wide value and not a per-role field: the
+/// SPAWNING ASSET declares an [AgentRole], the role points at an [AgentTier]
+/// ([tierFor]: build ⇒ frontier, grade ⇒ mid, gather ⇒ cheap), and the STATION
+/// arms tier → model ([AgentConfig.tiers], a [ModelTiers] value; unarmed tiers
+/// ride [defaultModelForTier] — opus / sonnet / haiku). The bead's `grid.agent`
+/// `params.model` still outranks both. So the committee grades cheap while the
+/// build runs strong, a new role costs one `tierFor` case, and a retune is one
+/// arming change.
 ///
 /// **Two-moment validation (OQ-c, ratified):** the composition root validates
 /// its station default eagerly ([AgentHarnessRegistry.validate] — a
@@ -39,6 +41,8 @@ library;
 import 'package:grid_engine/grid_engine.dart';
 import 'package:grid_runtime/grid_runtime.dart';
 import 'package:path/path.dart' as p;
+
+import 'model_tier.dart';
 
 /// Where inference runs (ADR-0008 Decision 10 / D-E). Sealed — consumers
 /// switch exhaustively (house style).
@@ -99,59 +103,61 @@ class SwiftInfer extends ModelTarget {
   String toString() => 'SwiftInfer($base)';
 }
 
-/// The ROLE an agent spawn plays — the axis the model default splits on (bead
-/// `pow-edp`). Until this split, EVERY spawner — the coding agent, the
-/// architect, and the committee's critics — resolved the one station-wide
-/// [AgentConfig], so a station could not grade cheap while building strong: it
-/// was all-or-nothing (the fable/opus incident, 2026-07-11 — pinning one model
-/// hit builders and critics alike). The role is declared by the SPAWNING ASSET
-/// and carries its own default model. Sealed by the enum — consumers switch
-/// exhaustively (house style).
+/// The ROLE an agent spawn plays — the DOMAIN semantic, declared by the
+/// SPAWNING ASSET (bead `pow-edp`). It is NOT the model axis: a role points at
+/// an [AgentTier] ([tierFor]) and the station arms the tier (bead `pow-2c9`),
+/// so a new role costs ONE `tierFor` case and no config field. Sealed by the
+/// enum — consumers switch exhaustively (house style).
 enum AgentRole {
   /// The BUILD side — the coding agent (`AgentCapability`) and the architect
-  /// (`SpecifyCapability`). Strong by default: the build IS the work.
+  /// (`SpecifyCapability`). Rides [AgentTier.frontier]: the build IS the work.
   build,
 
-  /// The GRADE side — the committee critics (`CriticCapability` and its spec
-  /// subclass `SpecCriticCapability`). Cheap by default: a critic reads a
-  /// pinned diff against ONE rubric and writes a letter; it does not need a
-  /// frontier model.
+  /// The GRADE side — the committee critics (`CriticCapability`, its spec
+  /// subclass `SpecCriticCapability`, and the readiness lane
+  /// `ReadinessCriticCapability`). Rides [AgentTier.mid]: a critic reads a
+  /// pinned diff against ONE rubric and writes a letter.
   grade,
+
+  /// The GATHER side — read-only discovery: it reads the tree, cites what it
+  /// finds, and DECIDES NOTHING. Rides [AgentTier.cheap]. The discovery circuit
+  /// (bead `pow-96y`, which this bead unblocks) is its first spawner. It is NOT
+  /// the home for a cheap JUDGEMENT lane (a lane that emits a verdict letter is
+  /// grading, not gathering — see `readiness.dart`).
+  gather,
 }
 
-/// The BUILD role's default model — the ASSET rung, the bottom of the model
-/// ladder.
-const String kBuildModelDefault = 'opus';
-
-/// The GRADE role's default model — the ASSET rung, the bottom of the model
-/// ladder.
-const String kGraderModelDefault = 'sonnet';
-
-/// The model [role] rides when nothing more explicit names one (the ASSET rung
-/// of the ladder — a station flag or a bead's `grid.agent` envelope overrides
-/// it).
+/// The ROLE → TIER policy (bead `pow-2c9`) — the ENTIRE per-role surface of
+/// model selection.
 ///
-/// ALWAYS an explicit model, never the harness CLI's own default: an unpinned
-/// `claude` resolved to opus and then SILENTLY fell back to fable once the
-/// weekly limit blew (the grid spawns ~10 agents per bead; it obliterates a
-/// limit fast), eating quota nobody asked for. A role default is an EXPLICIT
-/// model — every config [resolveAgentConfig] returns names one, so there is no
-/// fallback surprise to guard against.
-String defaultModelFor(AgentRole role) => switch (role) {
-  AgentRole.build => kBuildModelDefault,
-  AgentRole.grade => kGraderModelDefault,
+/// This is the map that scales: a new role points at an EXISTING tier (one case
+/// here), and a retune ("grading is cheap now") is one arming change on the
+/// station ([ModelTiers]) that touches no role at all. Consumed with an
+/// exhaustive `switch`, so a role that names no tier does not compile.
+AgentTier tierFor(AgentRole role) => switch (role) {
+  AgentRole.build => AgentTier.frontier,
+  AgentRole.grade => AgentTier.mid,
+  AgentRole.gather => AgentTier.cheap,
 };
+
+/// The model [role] rides when nothing more explicit names one — role → tier →
+/// model ([tierFor], then [defaultModelForTier]): the ASSET rung, the bottom of
+/// the ladder. A20's per-role defaults (build ⇒ opus, grade ⇒ sonnet) are
+/// preserved exactly, now DERIVED through the tier rather than hardcoded per
+/// role.
+String defaultModelFor(AgentRole role) => defaultModelForTier(tierFor(role));
 
 /// The agent configuration — a pure VALUE the tree carries (never behavior).
 /// Watched by branches (`dependOn*`), snapshot-read by effects (`get*`).
 class AgentConfig {
   /// Creates the config: which [harness] runs the work, against which [target],
-  /// with harness-opaque [params] tuning and the critics' own [graderModel]
-  /// station rung.
+  /// with harness-opaque [params] tuning, the station's [tiers] arming, and the
+  /// PRE-TIER [graderModel] knob.
   const AgentConfig({
     this.harness = 'claude',
     this.target = const ProviderManaged(),
     this.params = const {},
+    this.tiers = const ModelTiers(),
     this.graderModel,
   });
 
@@ -164,45 +170,72 @@ class AgentConfig {
   /// Harness-opaque tuning, and the TRANSPORT key for the model: every harness
   /// reads `params['model']`.
   ///
-  /// Two readings, by which config you hold (bead `pow-edp`):
-  ///  - on the AMBIENT (station) config, `params['model']` is the station's
-  ///    BUILD-role rung — what `space up --model` sets. Absent ⇒ the build
-  ///    role's asset default ([kBuildModelDefault]);
+  /// Two readings, by which config you hold (beads `pow-edp`, `pow-2c9`):
+  ///  - on the AMBIENT (station) config, `params['model']` is the PRE-TIER BUILD
+  ///    knob — what `space up --model` sets. It arms the FRONTIER tier
+  ///    ([armedTiers]); absent, that tier rides [kFrontierModelDefault];
   ///  - on a config RETURNED by [resolveAgentConfig], it is the fully-resolved
   ///    model of the role that asked — the ladder's winner, stamped into the
   ///    key the harness reads.
   final Map<String, String> params;
 
-  /// The station's GRADE-role model rung — what `space up --grader-model` sets
-  /// (bead `pow-edp`). Null ⇒ the grade role's asset default
-  /// ([kGraderModelDefault]).
-  ///
-  /// Split OUT of [params] on purpose: `params['model']` is the harness
-  /// transport key, so a single map cannot carry two roles' models at once.
-  /// This is a LADDER INPUT, never a transport key — no harness reads it;
-  /// [resolveAgentConfig] projects it into the resolved config's
-  /// `params['model']` when the spawner's role is [AgentRole.grade].
+  /// The station's TIER ARMING (bead `pow-2c9`) — the model-selection surface:
+  /// tier → model, sparse (an unarmed tier rides its asset default). Selection
+  /// reads it through the SPAWNER's role ([tierFor]), so a new role costs a
+  /// `tierFor` case and NOTHING here — the field count follows the TIERS, never
+  /// the roles.
+  final ModelTiers tiers;
+
+  /// The PRE-TIER grade knob (`space up --grader-model` — ADR-0000 A20's GRADE
+  /// rung). Kept so an UNMIGRATED station keeps arming its critics: it projects
+  /// onto the MID tier ([armedTiers]). No harness reads it; it is a ladder
+  /// INPUT. A station migrates by arming [tiers] directly, and it retires here
+  /// at that point.
   final String? graderModel;
 
-  /// The STATION rung's model for [role] — `params['model']` for a build
-  /// spawner, [graderModel] for a grader. Null ⇒ the station named no model for
-  /// that role, and the ladder falls through to [defaultModelFor].
-  String? stationModelFor(AgentRole role) => switch (role) {
-    AgentRole.build => params['model'],
-    AgentRole.grade => graderModel,
-  };
+  /// The tier map this station ACTUALLY arms: [tiers], with the two PRE-TIER
+  /// knobs projected onto the tiers they arm — `params['model']` (`space up
+  /// --model`, A20's BUILD rung) onto [AgentTier.frontier], and [graderModel]
+  /// onto [AgentTier.mid].
+  ///
+  /// A pre-tier knob OUT-RANKS an armed tier on purpose: an operator who passes
+  /// `--model X` to a station must never be SILENTLY ignored (A20(2)'s no-wedge
+  /// rule — the flag regression that would wedge the live station); a migrated
+  /// station simply stops setting the knob and arms [tiers].
+  ModelTiers get armedTiers =>
+      tiers.merge(frontier: params['model'], mid: graderModel);
 
-  /// A copy with the non-null overrides applied (the D-C ladder's merge —
-  /// params MERGE key-wise, they don't replace whole).
+  /// The model [role] rides on THIS station — role → tier → model, resolved
+  /// through [armedTiers]. NEVER null (every tier names a real model), which is
+  /// why [resolveAgentConfig] can stamp an explicit `--model` on every spawn
+  /// with no fallback and no guard.
+  String modelForRole(AgentRole role) => armedTiers.modelFor(tierFor(role));
+
+  /// The station's EXPLICIT rung for [role] — the arming of [role]'s tier, or
+  /// null when the station armed neither that tier nor its pre-tier knob (⇒ the
+  /// role falls through to [defaultModelFor]). Consumed by a station's `up`
+  /// banner; [modelForRole] is the total form this pack resolves with.
+  String? stationModelFor(AgentRole role) => armedTiers.armed(tierFor(role));
+
+  /// A copy with the non-null overrides applied (the D-C ladder's merge — both
+  /// [params] and [tiers] merge key-wise, they don't replace whole).
   AgentConfig merge({
     String? harness,
     ModelTarget? target,
     Map<String, String>? params,
+    ModelTiers? tiers,
     String? graderModel,
   }) => AgentConfig(
     harness: harness ?? this.harness,
     target: target ?? this.target,
     params: params == null ? this.params : {...this.params, ...params},
+    tiers: tiers == null
+        ? this.tiers
+        : this.tiers.merge(
+            cheap: tiers.cheap,
+            mid: tiers.mid,
+            frontier: tiers.frontier,
+          ),
     graderModel: graderModel ?? this.graderModel,
   );
 
@@ -211,6 +244,7 @@ class AgentConfig {
       other is AgentConfig &&
       other.harness == harness &&
       other.target == target &&
+      other.tiers == tiers &&
       other.graderModel == graderModel &&
       _mapEquals(other.params, params);
 
@@ -218,6 +252,7 @@ class AgentConfig {
   int get hashCode => Object.hash(
     harness,
     target,
+    tiers,
     graderModel,
     Object.hashAllUnordered(
       params.entries.map((e) => Object.hash(e.key, e.value)),
@@ -234,7 +269,7 @@ class AgentConfig {
 
   @override
   String toString() =>
-      'AgentConfig($harness → $target, params: $params'
+      'AgentConfig($harness → $target, params: $params, tiers: $tiers'
       '${graderModel == null ? '' : ', graderModel: $graderModel'})';
 }
 
