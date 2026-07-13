@@ -88,6 +88,9 @@ void main() {
       // The spec-readiness INTAKE lens (bead `pow-q7n`) — same pack, same fence.
       'rubrics/bead-readiness.md': loader.loadRubric(kReadinessRubric),
       'prompts/readiness.md': loader.loadPromptTemplate('readiness'),
+      // The DISCOVERY explorer (`discovery.dart`) — same pack, same fence. It
+      // carries NO rubric: a lens gathers and cites, it does not grade.
+      'prompts/discovery.md': loader.loadPromptTemplate('discovery'),
     };
 
     for (final entry in files.entries) {
@@ -230,9 +233,41 @@ void main() {
     });
   });
 
+  group('renderDiscoveryPrompt — the portable mirror of the explorer lens', () {
+    test('substitutes every hole (no `{{` survives), embeds the bead + the lens '
+        'brief, and carries the CITE-THE-OFFENCE contract — it GRADES nothing',
+        () {
+      final review = bead('tg-1').copyWith(
+        title: 'Wire the federation bus',
+        description: 'DECIDED: extend the existing bus; no new transport.',
+      );
+      final prompt = loader.renderDiscoveryPrompt(
+        kDecisionLens,
+        lensBrief(kDecisionLens),
+        review,
+      );
+      expect(prompt, isNot(contains('{{')));
+      expect(prompt, contains(kDecisionLens));
+      expect(prompt, contains('tg-1'));
+      expect(prompt, contains('Wire the federation bus'));
+      expect(prompt, contains('DECISION CONTEXT'));
+      // The gate's three rules, as the lens reads them.
+      expect(prompt, contains('CITE-THE-OFFENCE'));
+      expect(prompt, contains('The departure clause'));
+      expect(prompt, contains('NAME the precedent'));
+      // A lens REPORTS; it does not grade — no letter anywhere in the mirror.
+      expect(prompt, contains('You DECIDE nothing'));
+      expect(prompt, isNot(contains('A (best) through F')));
+      // READ-ONLY (A37), and CHEAP.
+      expect(prompt, contains('You are READ-ONLY'));
+      expect(prompt, contains('no `bd update`'));
+      expect(prompt, contains('Stay CHEAP'));
+    });
+  });
+
   group('extension/mcp/config.yaml declares the spec pack', () {
     test('the five spec rubrics + the INTAKE rubric ride as resources; the '
-        'spec-critic and readiness prompts are declared', () {
+        'spec-critic, readiness and discovery prompts are declared', () {
       final manifest =
           File(p.join(root, 'mcp', 'config.yaml')).readAsStringSync();
       for (final rubricId in kSpecCommitteeRubrics) {
@@ -246,6 +281,8 @@ void main() {
       // The spec-readiness INTAKE lens (bead `pow-q7n`).
       expect(manifest, contains('rubrics/bead-readiness.md'));
       expect(manifest, contains('prompts/readiness.md'));
+      // The DISCOVERY explorer — no rubric, so a prompt entry only.
+      expect(manifest, contains('prompts/discovery.md'));
     });
   });
 }

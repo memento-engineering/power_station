@@ -103,6 +103,20 @@ prompts:
       - name: bead
         description: The full work bead under intake (title/task/design/acceptance/notes).
         required: true
+  - id: discovery
+    description: One read-only explorer in the discovery circuit — gathers context and CITES any offence; it grades nothing.
+    path: prompts/discovery.md
+    visibility: public
+    args:
+      - name: lens
+        description: The lens this explorer runs (explore-code | explore-decision | explore-prior-art).
+        required: true
+      - name: lensBrief
+        description: The lens's angle — what this explorer looks for.
+        required: true
+      - name: bead
+        description: The full work bead being explored (title/task/design/acceptance/notes).
+        required: true
 
 # Skills — front-of-house agentic assets in the agentskills SKILL.md format
 # (the same community shape lenny's leonard_cli assets ship). The upstream

@@ -107,6 +107,17 @@ class PackagedAssetLoader {
     },
   );
 
+  /// Renders the `discovery` prompt template for [lens] + [bead] — the discovery
+  /// circuit's portable mirror (of `DiscoveryLensCapability.buildLensPrompt`).
+  /// It takes a LENS BRIEF, not a rubric: an explorer gathers and cites, it does
+  /// not grade, so there are no bands to load.
+  String renderDiscoveryPrompt(String lens, String lensBrief, Bead bead) =>
+      _mustache(loadPromptTemplate('discovery'), {
+        'lens': lens,
+        'lensBrief': lensBrief,
+        'bead': beadBlock(bead),
+      });
+
   /// The mustache-templated SKILL.md body for [skillId]
   /// (`extension/skills/<skillId>/SKILL.md`). Throws an [ArgumentError] for an
   /// unknown skill (fail-loud — a missing skill is a packaging bug, never a
