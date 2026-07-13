@@ -667,4 +667,253 @@ void main() {
       expect(() => cap.spawn(c.context, c.args), returnsNormally);
     });
   });
+
+  group(
+    'AgentCapability materializes the station_overlay into .claude/ at provision '
+    "(pow-kzx — ADR-0001's skill-DELIVERY leg)",
+    () {
+      late Directory worktree;
+
+      setUp(() {
+        worktree = Directory.systemTemp.createTempSync('agent-overlay-');
+      });
+
+      tearDown(() {
+        if (worktree.existsSync()) worktree.deleteSync(recursive: true);
+      });
+
+      ({FakeTreeContext context, StepArgs args}) ctxAt(String workspaceDir) => (
+        context: FakeTreeContext(
+          values: {
+            Bead: bead('tg-1'),
+            Workspace: testWorkspace(
+              'tg-1',
+              workspaceDir: workspaceDir,
+              branch: 'grid/tg-1',
+            ),
+          },
+        ),
+        args: stepArgs('tg-1/agent'),
+      );
+
+      File discoverSkill(Directory root) =>
+          File(p.join(root.path, '.claude', 'skills', 'discover', 'SKILL.md'));
+
+      test(
+        'the REAL vended discover skill lands at .claude/skills/discover/ FULLY '
+        'RENDERED — every {{hole}} bound, so the agent gets a runnable skill, '
+        'not literal template text',
+        () {
+          final c = ctxAt(worktree.path);
+          const cap = AgentCapability(devRoot: '/dev/root');
+          cap.spawn(c.context, c.args);
+
+          final installed = discoverSkill(worktree);
+          expect(installed.existsSync(), isTrue);
+          final body = installed.readAsStringSync();
+          expect(body, startsWith('---\n'));
+          // The default binding: kDefaultOverlayRunner + the registered root.
+          expect(body, contains('space search --json'));
+          expect(body, contains('/dev/root'));
+          expect(body, isNot(contains('{{')));
+        },
+      );
+
+      test(
+        'the BRIEF names the installed skill, so a print-mode claude -p can '
+        '/invoke it (print mode selects no skill on its own — ADR-0001)',
+        () {
+          final c = ctxAt(worktree.path);
+          const cap = AgentCapability(devRoot: '/dev/root');
+          final cfg = cap.spawn(c.context, c.args);
+          // The rendered brief rides as the FINAL positional of the sh-wrapped
+          // claude invocation (FT-2 — `agent_harness.dart`'s claudeArgs end with
+          // `brief.render()`).
+          expect(cfg.args.last, contains('`/discover`'));
+          expect(cfg.args.last, contains('.claude/skills/'));
+        },
+      );
+
+      test(
+        'the materialized asset dir is git-EXCLUDED by a SELF-IGNORING '
+        '.gitignore — land commits with `git add -A`, so without this every '
+        "bead's PR would carry the vended skills",
+        () {
+          final c = ctxAt(worktree.path);
+          const cap = AgentCapability(devRoot: '/dev/root');
+          cap.spawn(c.context, c.args);
+
+          final ignore = File(
+            p.join(
+              worktree.path,
+              '.claude',
+              'skills',
+              'discover',
+              '.gitignore',
+            ),
+          );
+          expect(ignore.existsSync(), isTrue);
+          // A bare `*` matches every file in the dir INCLUDING this file, so the
+          // exclusion is not residue either.
+          expect(ignore.readAsStringSync(), endsWith('*\n'));
+        },
+      );
+
+      test(
+        'the exclusion is SCOPED to the asset dir — no blanket .claude/.gitignore '
+        "is written, so ADR-0000 A5's residue gate still sees everything else in "
+        "the worktree (including the agent's own .claude/ files)",
+        () {
+          final c = ctxAt(worktree.path);
+          const cap = AgentCapability(devRoot: '/dev/root');
+          cap.spawn(c.context, c.args);
+
+          expect(
+            File(p.join(worktree.path, '.claude', '.gitignore')).existsSync(),
+            isFalse,
+            reason:
+                'a shared .claude/.gitignore could collide with one the repo '
+                'itself tracks, and would over-hide',
+          );
+          expect(
+            File(
+              p.join(worktree.path, '.claude', 'skills', '.gitignore'),
+            ).existsSync(),
+            isFalse,
+            reason:
+                'never ignore the whole skills/ dir — a repo-owned skill and '
+                "the agent's own work must stay visible",
+          );
+        },
+      );
+
+      test(
+        'NON-DESTRUCTIVE: a pre-existing .claude/skills/discover/SKILL.md '
+        'survives provision byte-unchanged',
+        () {
+          final existing = discoverSkill(worktree)..createSync(recursive: true);
+          existing.writeAsStringSync('OPERATOR-AUTHORED — do not touch');
+
+          final c = ctxAt(worktree.path);
+          const cap = AgentCapability(devRoot: '/dev/root');
+          cap.spawn(c.context, c.args);
+
+          expect(
+            existing.readAsStringSync(),
+            'OPERATOR-AUTHORED — do not touch',
+          );
+        },
+      );
+
+      test("a station's overlayArgs override the wire's default binding", () {
+        final c = ctxAt(worktree.path);
+        const cap = AgentCapability(
+          devRoot: '/dev/root',
+          overlayArgs: {'runner': 'grid', 'gridHome': '/grid/home'},
+        );
+        cap.spawn(c.context, c.args);
+
+        final body = discoverSkill(worktree).readAsStringSync();
+        expect(body, contains('grid search --json'));
+        expect(body, contains('/grid/home'));
+        expect(body, isNot(contains('space search --json')));
+      });
+
+      test(
+        'an injected overlayRoot materializes a FIXTURE instead of the real tree '
+        '(the offline test-isolation seam)',
+        () {
+          final fixture = Directory.systemTemp.createTempSync(
+            'overlay-fixture-',
+          );
+          addTearDown(() {
+            if (fixture.existsSync()) fixture.deleteSync(recursive: true);
+          });
+          File(p.join(fixture.path, 'skills', 'fixture-skill', 'SKILL.md'))
+            ..createSync(recursive: true)
+            ..writeAsStringSync('fixture body');
+
+          final c = ctxAt(worktree.path);
+          final cap = AgentCapability(
+            devRoot: '/dev/root',
+            overlayRoot: fixture.path,
+          );
+          final cfg = cap.spawn(c.context, c.args);
+
+          expect(
+            File(
+              p.join(
+                worktree.path,
+                '.claude',
+                'skills',
+                'fixture-skill',
+                'SKILL.md',
+              ),
+            ).readAsStringSync(),
+            'fixture body',
+          );
+          expect(discoverSkill(worktree).existsSync(), isFalse);
+          expect(cfg.args.last, contains('`/fixture-skill`'));
+        },
+      );
+
+      test(
+        'an asset whose holes are UNBOUND is never installed and never fails the '
+        'spawn — and the brief does not name it',
+        () {
+          final fixture = Directory.systemTemp.createTempSync(
+            'overlay-unbound-',
+          );
+          addTearDown(() {
+            if (fixture.existsSync()) fixture.deleteSync(recursive: true);
+          });
+          File(p.join(fixture.path, 'skills', 'half-bound', 'SKILL.md'))
+            ..createSync(recursive: true)
+            ..writeAsStringSync('call {{nobodyBindsThis}}');
+
+          final c = ctxAt(worktree.path);
+          final cap = AgentCapability(
+            devRoot: '/dev/root',
+            overlayRoot: fixture.path,
+          );
+          late final RuntimeConfig cfg;
+          expect(() => cfg = cap.spawn(c.context, c.args), returnsNormally);
+
+          expect(
+            File(
+              p.join(
+                worktree.path,
+                '.claude',
+                'skills',
+                'half-bound',
+                'SKILL.md',
+              ),
+            ).existsSync(),
+            isFalse,
+          );
+          expect(cfg.args.last, isNot(contains('`/half-bound`')));
+        },
+      );
+
+      test(
+        'a spawn that installs NO skills carries no skills paragraph — the brief '
+        'only names what is actually there',
+        () {
+          final empty = Directory.systemTemp.createTempSync('overlay-empty-');
+          addTearDown(() {
+            if (empty.existsSync()) empty.deleteSync(recursive: true);
+          });
+
+          final c = ctxAt(worktree.path);
+          final cap = AgentCapability(
+            devRoot: '/dev/root',
+            overlayRoot: empty.path,
+          );
+          final cfg = cap.spawn(c.context, c.args);
+
+          expect(cfg.args.last, isNot(contains('VENDED skills')));
+        },
+      );
+    },
+  );
 }
