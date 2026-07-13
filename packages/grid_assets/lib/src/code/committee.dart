@@ -35,7 +35,7 @@
 ///     (A15(5) alt-A — the node's own `rewindCount`, read via the ambient
 ///     [SiblingView]) fences a verdict THIS node wrote in an EARLIER round. The
 ///     round stamp is what makes fix 1 a BELT rather than the guarantee: under
-///     `StepOutcome.Rewind` the node path does not move, so `nodePath` alone
+///     `RouteVerdict.Rewind` the node path does not move, so `nodePath` alone
 ///     cannot tell round N's surviving file from round N+1's.
 ///     (The gating lane's `.rc` needs no stamp — fix 1 alone clears it every
 ///     round, and it carries no separate fallback transport.)
@@ -103,6 +103,7 @@ import 'package:path/path.dart' as p;
 import '../agent/agent_domain.dart';
 import '../agent/agent_harness.dart';
 import '../agent/usage_report.dart';
+import 'route_failure.dart';
 
 /// The gating rubric id — its grade `F` is a hard block (a non-zero Validation
 /// Plan command), decided by the route's matrix.
@@ -130,7 +131,7 @@ const String kClearCritiqueStep = 'clear-critique';
 /// The diff-pinning pre-critic step id (bead `pow-6wo`) every critic lane
 /// `dependsOn`. [PinDiffCapability] computes the bead BRANCH'S OWN delta
 /// (`git diff origin/<base>...HEAD`) and pins it as the critics' review scope —
-/// and, when that delta is EMPTY, [Gate]s the whole round (a stale/no-op bead)
+/// and, when that delta is EMPTY, [Escalate]s the whole round (a stale/no-op bead)
 /// so the critics never grade PRE-EXISTING mainline work as if it were the
 /// bead's diff (the live finding this step exists to close). Runs AFTER
 /// [kClearCritiqueStep] so its pinned-diff file survives that round's wipe.
@@ -248,10 +249,10 @@ typedef DirectoryClearer = void Function(String dir);
 /// computes the bead branch's OWN delta (`git diff origin/<base>...HEAD`). An
 /// EMPTY delta — the live-arm finding: a branch with ZERO commits beyond
 /// origin/main whose work was already shipped in mainline, yet whose critics
-/// graded that PRE-EXISTING mainline work A/B — [Gate]s the whole round for a
+/// graded that PRE-EXISTING mainline work A/B — [Escalate]s the whole round for a
 /// human ruling INSTEAD of reaching the critics. A non-empty delta is pinned to
 /// a file each critic reviews as its EXCLUSIVE scope (never free rein of the
-/// worktree). The four critics `dependsOn` [kPinDiffStep], so its [Gate]
+/// worktree). The four critics `dependsOn` [kPinDiffStep], so its [Escalate]
 /// withholds them.
 ///
 /// Reentrant: composed at the same `CircuitScope` seam as any other circuit, so
@@ -323,7 +324,7 @@ const Circuit kCodeReviewCircuit = Circuit(
 /// whole round-freshness guarantee for exactly one amendment: A4 made the
 /// `nodePath` stamp the round fence on the premise that a round re-keys the
 /// bead id to `<bead>#rN` — and neither a `grid rework` round (A14(5)) nor a
-/// `StepOutcome.Rewind` wave (tg-o90 — only a `rewindCount` bump) does, so the
+/// `RouteVerdict.Rewind` wave (tg-o90 — only a `rewindCount` bump) does, so the
 /// path is byte-identical round to round. The verdict now STAMPS ITS ROUND
 /// ([verdictJsonTemplate], [roundOf]) and [_verdictFromFile] VERIFIES it, so a
 /// stale verdict file that SURVIVES a failed wipe is caught positively at the
@@ -375,28 +376,28 @@ class ClearCritiqueCapability extends ServiceCapability {
 ///    never widen the scope), pinned to [pinnedDiffPath] for the critics.
 ///
 /// Three terminals:
-///  - **EMPTY delta ⇒ [Gate]** — the distinct no-op outcome. A branch with no
-///    reviewable change routes to a human ruling INSTEAD of reaching the
+///  - **EMPTY delta ⇒ [Escalate]** — the distinct no-op outcome. A branch with
+///    no reviewable change routes to a human ruling INSTEAD of reaching the
 ///    critics (a stale bead whose work is already in mainline, or a net-zero
-///    diff). The critics `dependsOn` this step, so the [Gate] withholds them —
-///    they never run against a scope that isn't the bead's.
-///  - **git could not compute the delta ⇒ [Failed]** — LOUD. An unresolvable
-///    `origin/<base>` (or a `git` that won't launch) means the scope is
-///    UNKNOWN; failing closed routes to supervision rather than silently
-///    gating (a false stale-bead flag) or silently advancing (critics with an
+///    diff). The critics `dependsOn` this step, so the escalation withholds them
+///    — they never run against a scope that isn't the bead's.
+///  - **git could not compute the delta ⇒ a thrown [RouteFailure]** — LOUD. An
+///    unresolvable `origin/<base>` (or a `git` that won't launch) means the scope
+///    is UNKNOWN; failing closed routes to supervision rather than silently
+///    escalating (a false stale-bead flag) or silently advancing (critics with an
 ///    empty scope).
-///  - **non-empty delta ⇒ [Ok]** — the pinned diff is written and the round
-///    proceeds; the [Ok] payload carries route-style provenance
+///  - **non-empty delta ⇒ [Advance]** — the pinned diff is written and the round
+///    proceeds; the payload carries route-style provenance
 ///    (`base`/`commits`/`diffBytes`).
 ///
 /// Offline/dry-run posture: a null [Workspace], or a workspace directory that
 /// does not exist on disk (the synthetic `/grid/worktrees/...` path an offline
 /// suite mounts, or a build with no worktree materialized), skips straight to
-/// [Ok] with NO git call — the same no-op posture as
+/// [Advance] with NO git call — the same no-op posture as
 /// [GitSourceControl.provisionWorkspace] / [AgentCapability] pub-linkage. A
 /// LIVE review always has a real worktree the agent just worked in, so the
 /// scope guard runs when it matters.
-class PinDiffCapability extends ServiceCapability {
+class PinDiffCapability extends RouteCapability {
   /// Creates the capability, optionally over an injected [runner] (tests
   /// inject a recording/canned fake — Fakes, not mocks); defaults to the real
   /// [SystemGitRunner], mirroring [RebaseCapability]'s own seam.
@@ -405,15 +406,15 @@ class PinDiffCapability extends ServiceCapability {
   final GitRunner? _runner;
 
   @override
-  Future<StepOutcome> run(TreeContext context, StepArgs args) async {
+  Future<RouteVerdict> route(TreeContext context, StepArgs args) async {
     // Read the ambient workspace at ENTRY (while mounted); after every await
     // only the captured values + the cancel token are touched.
     final workspace = context.getInheritedSeedOfExactType<Workspace>();
-    if (workspace == null) return const Ok();
+    if (workspace == null) return const Advance();
     final workspaceDir = workspace.workspaceDir;
     // Offline/dry-run: no real worktree to diff — no-op (same posture as
     // GitSourceControl.provisionWorkspace / AgentCapability._linkWorkspace).
-    if (!Directory(workspaceDir).existsSync()) return const Ok();
+    if (!Directory(workspaceDir).existsSync()) return const Advance();
 
     final runner = _runner ?? SystemGitRunner();
     final baseRef = 'origin/${workspace.baseBranch}';
@@ -423,7 +424,7 @@ class PinDiffCapability extends ServiceCapability {
       workingDirectory: workspaceDir,
       args: ['log', '--oneline', '$baseRef..HEAD'],
     );
-    if (args.cancel.isCancelled) return const Failed('cancelled');
+    if (args.cancel.isCancelled) throw kRouteCancelled;
 
     // The pinned review scope — the branch's OWN delta from the merge-base
     // (`diff base...HEAD`, three-dot).
@@ -431,14 +432,14 @@ class PinDiffCapability extends ServiceCapability {
       workingDirectory: workspaceDir,
       args: ['diff', '$baseRef...HEAD'],
     );
-    if (args.cancel.isCancelled) return const Failed('cancelled');
+    if (args.cancel.isCancelled) throw kRouteCancelled;
 
     // git could not compute the delta (unresolvable base ref, or a git that
-    // won't launch) — the scope is UNKNOWN. Fail LOUD (never a silent gate that
-    // masquerades as a stale bead, nor a silent advance handing critics an
+    // won't launch) — the scope is UNKNOWN. Fail LOUD (never a silent escalation
+    // that masquerades as a stale bead, nor a silent advance handing critics an
     // empty scope).
     if (!diff.ok) {
-      return Failed(
+      throw RouteFailure(
         'pin-diff: could not compute `git diff $baseRef...HEAD` in '
         '$workspaceDir — ${_reasonTail(diff.output)}',
       );
@@ -447,9 +448,10 @@ class PinDiffCapability extends ServiceCapability {
     final commits = _commitLines(log.output);
     final diffText = diff.output;
 
-    // EMPTY delta ⇒ the distinct no-op terminal: a human GATE, not the critics.
+    // EMPTY delta ⇒ the distinct no-op terminal: a human ruling, not the critics
+    // (A9's empty-delta gate, re-homed onto Escalate — the SAME park).
     if (diffText.trim().isEmpty) {
-      return Gate(
+      return Escalate(
         commits.isEmpty
             ? 'pin-diff: stale/no-op bead — the branch has ZERO commits beyond '
                   '$baseRef, so `git diff $baseRef...HEAD` is EMPTY. Nothing for '
@@ -469,10 +471,10 @@ class PinDiffCapability extends ServiceCapability {
     try {
       _writePinnedDiff(workspaceDir, baseRef, workspace.branch, commits, diffText);
     } catch (e) {
-      return Failed('pin-diff: could not write the pinned diff — $e');
+      throw RouteFailure('pin-diff: could not write the pinned diff — $e');
     }
 
-    return Ok({
+    return Advance({
       'base': baseRef,
       'commits': '${commits.length}',
       'diffBytes': '${diffText.length}',
@@ -838,19 +840,19 @@ class CriticCapability extends ProcessCapability {
 /// `SessionScope`; read with the effect verb — D-5, never a subscription/
 /// re-query) and applies the deterministic matrix (C3, asset policy):
 ///
-///  - the gating critic grade `F` (a non-zero Validation Plan) → [Gate] (hard
-///    block);
-///  - a grade SPREAD ≥ 3 letters across the lanes → [Gate] (human ultimatum);
-///  - any NON-gating critic at `D`/`F` → [Gate] (rework — the `restForOne`
-///    transitive re-key is deferred, so a D/F parks at a gate for now);
-///  - else (all A–C, gating not F, spread < 3) → [Ok] (advance to land).
+///  - the gating critic grade `F` (a non-zero Validation Plan) → [Escalate]
+///    (hard block);
+///  - a grade SPREAD ≥ 3 letters across the lanes → [Escalate] (human ultimatum);
+///  - any NON-gating critic at `D`/`F` → [Escalate] (rework — the `restForOne`
+///    transitive re-key is deferred, so a D/F parks at the bound handler for now);
+///  - else (all A–C, gating not F, spread < 3) → [Advance] (on to delivery).
 ///
-/// The advance [Ok] payload carries ROUTE PROVENANCE (FT-2, CAPTURE-ONLY): the
+/// The [Advance] payload carries ROUTE PROVENANCE (FT-2, CAPTURE-ONLY): the
 /// grade vector consumed (`grades` — `lane=grade` CSV in [kCommitteeRubrics]
 /// order), the computed `spread`, and the matrix arm that fired (`rule` =
 /// `all-approve`) — making the keep/kill export self-contained without changing
-/// the matrix. Gate outcomes are UNCHANGED (their reason string already names
-/// the rule).
+/// the matrix. Escalations are UNCHANGED (their reason string already names the
+/// rule).
 ///
 /// Fail-closed: an unread / missing sibling grade is treated as `F`, so a forged
 /// or absent grade can NEVER advance (the mutation-tested property).
@@ -860,12 +862,16 @@ class CriticCapability extends ProcessCapability {
 /// `kSpecReviewCircuit` — gating `spec-validation` + four spec critics) with
 /// its own param set; the matrix, the fail-closed defaults, and the provenance
 /// payload are committee-agnostic.
-class RouteCapability extends ServiceCapability {
-  /// Creates the route capability.
-  const RouteCapability();
+///
+/// NAMED `CodeRouteCapability`, not `RouteCapability`: the engine now EXPORTS an
+/// abstract `RouteCapability` (the route primitive this extends), so the short
+/// name is taken. The STEP id stays `route` — it is a persisted cursor key.
+class CodeRouteCapability extends RouteCapability {
+  /// Creates the code committee's route.
+  const CodeRouteCapability();
 
   @override
-  Future<StepOutcome> run(TreeContext context, StepArgs args) async {
+  Future<RouteVerdict> route(TreeContext context, StepArgs args) async {
     // Read the ambient sibling view at ENTRY (while mounted); the matrix below
     // is pure over the captured values.
     final siblings =
@@ -895,7 +901,7 @@ class RouteCapability extends ServiceCapability {
     // the gating LANE (this route serves both the code and the spec committee,
     // bead `pow-6ao`), so the parked gate says which gate fired.
     if (grades[gating] == 'F') {
-      return Gate('$gating failed: hard block');
+      return Escalate('$gating failed: hard block');
     }
 
     // 2. a grade spread ≥ 3 letters across the PRESENT lanes — a human
@@ -910,14 +916,14 @@ class RouteCapability extends ServiceCapability {
     final spread = indices.isEmpty
         ? 0
         : indices.reduce(math.max) - indices.reduce(math.min);
-    if (spread >= 3) return const Gate('grade spread ≥ 3 — human ultimatum');
+    if (spread >= 3) return const Escalate('grade spread ≥ 3 — human ultimatum');
 
     // 3. any non-gating critic at D/F — rework → restForOne re-key is deferred
-    // (build-order); a D/F parks at a gate for now.
+    // (build-order); a D/F parks at the bound handler for now.
     for (final entry in grades.entries) {
       if (entry.key == gating) continue;
       if (entry.value == 'D' || entry.value == 'F') {
-        return const Gate('a critic returned D/F — rework');
+        return const Escalate('a critic returned D/F — rework');
       }
     }
 
@@ -925,9 +931,9 @@ class RouteCapability extends ServiceCapability {
     // carries the ROUTE PROVENANCE (FT-2): the per-lane grade vector it consumed
     // (CSV `lane=grade` in kCommitteeRubrics order), the computed spread, and the
     // matrix arm that fired (`all-approve`) — so the keep/kill export is
-    // self-contained. Gate outcomes keep their reason string (it names the rule).
+    // self-contained. Escalations keep their reason string (it names the rule).
     final gradesCsv = criticIds.map((id) => '$id=${grades[id]}').join(',');
-    return Ok({
+    return Advance({
       'verdict': 'advance',
       'grades': gradesCsv,
       'spread': '$spread',
@@ -1004,7 +1010,7 @@ int? _stampedRound(Object? raw) => switch (raw) {
 /// [expectedRound]. The TWO stamps fence two DIFFERENT staleness modes and both
 /// are load-bearing: `nodePath` rejects a verdict some OTHER node wrote (a stray
 /// write, a mis-keyed lane — A4); `round` rejects a verdict THIS node wrote in
-/// an EARLIER round (A15(5) alt-A — under `StepOutcome.Rewind` the node path is
+/// an EARLIER round (A15(5) alt-A — under `RouteVerdict.Rewind` the node path is
 /// byte-identical round to round, so `nodePath` alone cannot see it). An absent
 /// or unreadable round stamp is a MISS, not a pass. Every miss is treated as
 /// "unparseable" so [CriticCapability.result] falls through to the stray /
