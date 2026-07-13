@@ -1,5 +1,6 @@
 /// The DESCRIBE pass (bead `pow-8dx`) — ONE cheap inference call over the bead
-/// branch's ACTUAL delta, producing the PR title/body parts ([PrDescription]).
+/// branch's ACTUAL delta, producing the PR title + the human digest
+/// ([PrDescription]).
 ///
 /// **Why a call and not a template** (Nico, 2026-07-12): a title derived from
 /// the bead can only ever restate the bead. A title derived from the DIFF says

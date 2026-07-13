@@ -468,7 +468,7 @@ void main() {
           output:
               '{"type":"feat","scope":"landing","breaking":false,'
               '"description":"Infer the pr title from the branch diff.",'
-              '"body":"The land step now describes the actual diff.",'
+              '"summary":"The land step now describes the actual diff.",'
               '"breakingChange":""}',
         ),
       ).run(landContext(sourceControl: sc, workspaceDir: work.path), landArgs());
@@ -480,7 +480,8 @@ void main() {
         'feat(landing): infer the pr title from the branch diff',
       );
       expect(lintConventionalSubject(opened.title, foreignRef: 'tg-1'), isEmpty);
-      // COMPOSED, not clobbered (pow-yny): the prose AND the receipt.
+      // COMPOSED, not clobbered (pow-yny): the DIGEST leads, then the receipt.
+      expect(opened.body, startsWith('## Summary'));
       expect(
         opened.body,
         contains('The land step now describes the actual diff.'),

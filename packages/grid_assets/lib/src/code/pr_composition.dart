@@ -16,15 +16,19 @@
 ///    ([fallbackSubjectFor]) — the description is decoration, never a land
 ///    blocker.
 ///  - **the BODY is a SECTION-composed document** ([PrSection], rendered
-///    through ONE exhaustive `switch`): the inferred what/why summary FIRST
-///    (composed, never overwritten), then the landing circuit's receipt, the
-///    committee's grades, the bead's validation plan, and — LAST — the FOOTERS.
-///    A section whose data is absent is OMITTED, never a bare heading.
+///    through ONE exhaustive `switch`): the inferred HUMAN DIGEST first, under
+///    its own `## Summary` heading (composed, never overwritten), then the
+///    landing circuit's receipt, the committee's grades, the bead's validation
+///    plan, and — LAST — the FOOTERS. A section whose data is absent is OMITTED,
+///    never a bare heading. The digest is what a reader who never opens the diff
+///    actually reads; the receipt below it is PROVENANCE, and was never a
+///    description.
 ///  - **the bead id is a git TRAILER, and nowhere else** — `Refs: <bead>` in
 ///    the trailer block ([PrSection.trailers]). A foreign reference in the
 ///    subject or the body prose is the exact anti-pattern the policy fixes, so
-///    [sanitizeConventionalSubject] strips it from the subject and the describe
-///    prompt forbids it in the body.
+///    [sanitizeConventionalSubject] strips it from the subject and
+///    [sanitizeDigest] strips it from the digest — BY CONSTRUCTION on both
+///    sides, not merely forbidden by the prompt.
 ///
 /// [PrComposition] is the knob — a config VALUE a station/substation mounts
 /// (`GitHubGridAssets(composition: …)` → `InheritedSeed<PrComposition>`; config
@@ -59,13 +63,19 @@ const int kMaxDiffChars = 60000;
 /// The bead's own prose the describe prompt carries as WHY-context, capped.
 const int kMaxContextChars = 1200;
 
+/// The human DIGEST the PR body leads with, capped — a model that answers with a
+/// whole essay (or a pasted diff) must not become the PR body. Truncation is the
+/// belt; the prompt asks for 2–5 sentences.
+const int kMaxSummaryChars = 2000;
+
 /// The composable PR-body sections — the landing asset's body is a CONFIGURABLE
 /// composition of these (bead `pow-8dx`), rendered through ONE exhaustive
 /// `switch` ([renderPrSection]).
 enum PrSection {
-  /// The INFERRED what/why prose ([PrDescription.body]) — the human-readable
-  /// description a reader wants first. Absent inference ⇒ omitted (`pow-yny`:
-  /// composed with the provenance below, never clobbered by it).
+  /// The HUMAN DIGEST ([PrDescription.summary]) under a `## Summary` heading —
+  /// 2–5 sentences of WHAT changed and WHY, the section a reader wants first
+  /// (composed with the provenance below, never clobbered by it). Absent
+  /// inference ⇒ omitted.
   summary,
 
   /// The landing circuit's own provenance ([buildCircuitReceipt] — rebase /
@@ -100,7 +110,7 @@ const List<PrSection> kDefaultPrSections = [
 /// What the describe pass INFERRED about the branch's change — the JSON object
 /// the model returns, parsed. The asset never renders these strings raw: the
 /// title goes through [sanitizeConventionalSubject] (compliant by construction)
-/// and the body rides [PrSection.summary].
+/// and the digest rides [PrSection.summary] through [sanitizeDigest].
 class PrDescription {
   /// Creates the description.
   const PrDescription({
@@ -108,7 +118,7 @@ class PrDescription {
     this.scope,
     this.breaking = false,
     required this.description,
-    this.body = '',
+    this.summary = '',
     this.breakingChange = '',
   });
 
@@ -125,8 +135,11 @@ class PrDescription {
   /// The subject's description (imperative, lowercase — re-sanitized anyway).
   final String description;
 
-  /// The PR body prose: WHAT changed + a HIGH-LEVEL WHY, self-contained.
-  final String body;
+  /// The HUMAN DIGEST: 2–5 sentences of prose saying WHAT changed and WHY, for
+  /// a reader who skims the PR and never opens the diff. Rendered FIRST, under
+  /// [PrSection.summary]'s own `## Summary` heading and through
+  /// [sanitizeDigest]; blank ⇒ the section is dropped.
+  final String summary;
 
   /// One sentence naming what breaks (the `BREAKING CHANGE:` footer's text).
   final String breakingChange;
@@ -164,7 +177,13 @@ class PrDescription {
                 scope: scope.isEmpty ? null : scope,
                 breaking: decoded['breaking'] == true,
                 description: description,
-                body: _str(decoded['body']),
+                // The digest. The older `body` key is still ACCEPTED — a model
+                // that answers in the shape it half-remembers still yields a
+                // digest, and a lost digest is the exact defect this fixes.
+                // `parse` is lenient by contract (never a throw).
+                summary: _str(decoded['summary']).isEmpty
+                    ? _str(decoded['body'])
+                    : _str(decoded['summary']),
                 breakingChange: _str(decoded['breakingChange']),
               );
             }
@@ -346,7 +365,7 @@ String renderPrSection(
   String trailerToken = kDefaultTrailerToken,
 }) =>
     switch (section) {
-      PrSection.summary => context.description?.body.trim() ?? '',
+      PrSection.summary => _summary(context),
       PrSection.circuitReceipt => _circuitReceipt(context),
       PrSection.committeeGrades => _committeeGrades(context),
       PrSection.validation => _validation(context),
@@ -430,14 +449,24 @@ String buildDescribePrompt({
     )
     ..writeln(
       '- NEVER write the tracker id `$beadId` — or any other foreign reference '
-      '(an issue number, a ticket, a bead) — in the title or in the body. It '
+      '(an issue number, a ticket, a bead) — in the title or in the summary. It '
       'is attached separately, as a `$trailerToken:` git trailer. A reader '
       'must learn what changed and why WITHOUT leaving the repo.',
     )
     ..writeln(
-      '- The body is prose (a short paragraph or two, or bullets): WHAT '
-      'changed, and a HIGH-LEVEL WHY. Self-contained. No "this bead", no "per '
-      'the spec", no ticket narrative.',
+      '- The `summary` is the PR\'s HUMAN DIGEST: 2 to 5 complete sentences of '
+      'plain prose, for a reviewer who reads the pull request and NEVER opens '
+      'the diff. Say WHAT changed — name the code\'s own types, files and '
+      'behaviour — and WHY the change was worth making.',
+    )
+    ..writeln(
+      '- The digest does NOT restate the title, does NOT narrate your process '
+      '("first I…", "the tests now pass"), and carries NO ticket narrative '
+      '("this bead", "per the spec"). Write it in the repository\'s own terms.',
+    )
+    ..writeln(
+      '- The digest is PROSE ONLY — no heading, no bullet list, no code fence. '
+      'The asset renders it under its own `## Summary` heading.',
     )
     ..writeln(
       '- A BREAKING public-API change sets `"breaking": true` AND fills '
@@ -476,9 +505,67 @@ String buildDescribePrompt({
     ..writeln(
       '{"type":"feat","scope":"landing","breaking":false,'
       '"description":"infer the pr title from the branch diff",'
-      '"body":"What changed and why, in a sentence or three.",'
+      '"summary":"The land step now reads its own branch delta and hands it to '
+      'a single cheap completion, so the title and the description say what the '
+      'code actually does. The title was previously templated from the tracker, '
+      'which could only ever restate the task it was filed under. A reader of '
+      'the git log now learns what changed, and why, without leaving the '
+      'repository.",'
       '"breakingChange":""}',
     );
+  return b.toString();
+}
+
+/// The digest as it is RENDERED: every occurrence of [foreignRef] — its `#rN`
+/// rework form, the brackets that wrap it and the separator it orphans —
+/// REMOVED, inline whitespace tidied, paragraph breaks preserved, the whole
+/// capped at [maxChars].
+///
+/// The BELT behind the prompt's never-write-the-tracker-id rule, on the side the
+/// subject's [sanitizeConventionalSubject] does not cover: the bead id is a git
+/// TRAILER **and nothing else**, so a model that writes it into the narrative
+/// anyway still cannot land it in the PR body. Pure; '' in ⇒ '' out (the section
+/// then renders nothing — never a bare heading).
+String sanitizeDigest(
+  String digest, {
+  required String foreignRef,
+  int maxChars = kMaxSummaryChars,
+}) {
+  var text = digest.trim();
+  if (text.isEmpty) return '';
+  final ref = foreignRef.trim();
+  if (ref.isNotEmpty) {
+    text = text.replaceAll(
+      RegExp(
+        '[(\\[]?${RegExp.escape(ref)}(#r\\d+)?[)\\]]?[ \\t]*[-—:,]?[ \\t]*',
+        caseSensitive: false,
+      ),
+      '',
+    );
+  }
+  text = text
+      .replaceAll(RegExp(r'[ \t]{2,}'), ' ')
+      // Trailing spaces before a newline are noise — and two of them are a
+      // markdown hard-break a model never meant to author.
+      .replaceAll(RegExp(r'[ \t]+\n'), '\n')
+      .replaceAll(RegExp(r'\n{3,}'), '\n\n')
+      .trim();
+  return _truncate(text, maxChars);
+}
+
+/// The human DIGEST, under its own heading — the FIRST thing a reader of the PR
+/// meets (the receipt is PROVENANCE; it was never a description). A blank digest
+/// renders '' — the section is dropped, never a bare heading.
+String _summary(PrCompositionContext context) {
+  final digest = sanitizeDigest(
+    context.description?.summary ?? '',
+    foreignRef: context.beadId,
+  );
+  if (digest.isEmpty) return '';
+  final b = StringBuffer()
+    ..writeln('## Summary')
+    ..writeln()
+    ..writeln(digest);
   return b.toString();
 }
 

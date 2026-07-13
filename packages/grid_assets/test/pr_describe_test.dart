@@ -30,7 +30,8 @@ class _ExplodingInferenceRunner implements InferenceRunner {
 const String _answer =
     '{"type":"feat","scope":"landing","breaking":false,'
     '"description":"infer the pr title from the branch diff",'
-    '"body":"The land step reads the branch delta.","breakingChange":""}';
+    '"summary":"The land step reads the branch delta and describes it. '
+    'The title no longer restates the tracker.","breakingChange":""}';
 
 Future<DescribeOutcome> _describe({
   required String workspaceDir,
@@ -109,6 +110,7 @@ void main() {
         expect(outcome.source, 'inference');
         expect(outcome.description!.type, 'feat');
         expect(outcome.description!.scope, 'landing');
+        expect(outcome.description!.summary, startsWith('The land step reads'));
         expect(outcome.commits.total, 1);
         expect(outcome.commits.compliant, 1);
         expect(outcome.commits.trailered, 1);

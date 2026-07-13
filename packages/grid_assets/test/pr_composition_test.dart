@@ -10,7 +10,8 @@ const PrDescription _inferred = PrDescription(
   type: 'feat',
   scope: 'landing',
   description: 'Infer the pr title from the branch diff.',
-  body: 'The land step now reads the branch delta.\n\nWhy: titles were terse.',
+  summary: 'The land step now reads the branch delta and describes it. '
+      'Titles were terse and templated off the tracker.',
 );
 
 PrCompositionContext _context({
@@ -144,9 +145,19 @@ void main() {
         expect(parsed!.type, 'fix');
         expect(parsed.scope, 'land');
         expect(parsed.description, 'stop clobbering the design note');
-        expect(parsed.body, 'prose');
+        // The LEGACY `body` key still yields a digest — a model answering in the
+        // shape it half-remembers must not lose its prose.
+        expect(parsed.summary, 'prose');
       },
     );
+
+    test('reads the `summary` key — the digest the prompt now asks for', () {
+      final parsed = PrDescription.parse(
+        '{"type":"fix","description":"stop the clobber",'
+        '"summary":"The receipt no longer writes the body."}',
+      );
+      expect(parsed!.summary, 'The receipt no longer writes the body.');
+    });
 
     test(
       'null for absent / blank / unparseable output, and for an object with no '
@@ -196,7 +207,8 @@ void main() {
           ),
         );
         final order = [
-          body.indexOf('The land step now reads the branch delta.'),
+          body.indexOf('## Summary'),
+          body.indexOf('The land step now reads the branch delta and describes'),
           body.indexOf('## Circuit receipt'),
           body.indexOf('## Committee'),
           body.indexOf('## Validation'),
@@ -258,6 +270,99 @@ void main() {
     );
   });
 
+  group('the human DIGEST leads the body', () {
+    test(
+      'an inferred digest renders under `## Summary`, ABOVE the receipt — the '
+      'reader meets the change before its provenance',
+      () {
+        final body = const PrComposition().bodyOf(
+          _context(description: _inferred, titleSource: 'inference'),
+        );
+        expect(body, startsWith('## Summary\n\n'));
+        expect(
+          body,
+          contains('The land step now reads the branch delta and describes it.'),
+        );
+        expect(
+          body.indexOf('## Summary'),
+          lessThan(body.indexOf('## Circuit receipt')),
+        );
+      },
+    );
+
+    test(
+      'a digest that smuggles the bead id is STRIPPED — the id rides the '
+      'trailer and nothing else',
+      () {
+        final body = const PrComposition().bodyOf(
+          _context(
+            description: const PrDescription(
+              type: 'feat',
+              description: 'add the digest',
+              summary: 'tg-1 — the land step now writes a digest. '
+                  'Fixes tg-1 (tg-1#r2) for good.',
+            ),
+            titleSource: 'inference',
+          ),
+        );
+        expect(body, contains('## Summary'));
+        expect(body, contains('the land step now writes a digest.'));
+        expect('tg-1'.allMatches(body).length, 1);
+        expect(body.trimRight(), endsWith('Refs: tg-1'));
+      },
+    );
+
+    test('NO digest ⇒ NO heading (an absent section is dropped, never bare)', () {
+      const bare = PrComposition();
+      expect(bare.bodyOf(_context()), isNot(contains('## Summary')));
+      expect(
+        bare.bodyOf(
+          _context(
+            description: const PrDescription(
+              type: 'feat',
+              description: 'add the thing',
+            ),
+            titleSource: 'inference',
+          ),
+        ),
+        isNot(contains('## Summary')),
+      );
+      expect(
+        bare.bodyOf(
+          _context(
+            description: const PrDescription(
+              type: 'feat',
+              description: 'add the thing',
+              summary: '   \n  ',
+            ),
+            titleSource: 'inference',
+          ),
+        ),
+        isNot(contains('## Summary')),
+      );
+    });
+
+    test('a runaway digest is CAPPED (an essay must not become the PR body)', () {
+      final long = 'word ' * (kMaxSummaryChars ~/ 2);
+      final digest = sanitizeDigest(long, foreignRef: 'tg-1');
+      expect(digest.length, lessThan(kMaxSummaryChars + 32));
+      expect(digest, endsWith('… (truncated)'));
+    });
+
+    test(
+      'sanitizeDigest is pure prose surgery: paragraphs survive, the ref does '
+      'not',
+      () {
+        expect(sanitizeDigest('', foreignRef: 'tg-1'), isEmpty);
+        expect(sanitizeDigest('One. \n\nTwo.', foreignRef: 'tg-1'), 'One.\n\nTwo.');
+        expect(
+          sanitizeDigest('The tg-1 work adds x.', foreignRef: 'tg-1'),
+          'The work adds x.',
+        );
+      },
+    );
+  });
+
   group('PrComposition — the configurable knob (pow-8dx)', () {
     test('a custom trailer token re-tokens the footer', () {
       final body = const PrComposition(trailerToken: 'Bead').bodyOf(_context());
@@ -304,6 +409,29 @@ void main() {
         expect(prompt, contains('+the change'));
         expect(prompt, contains('lib/x.dart | 2 +-'));
         expect(prompt, contains('CONTEXT ONLY'));
+      },
+    );
+
+    test(
+      'asks for a 2-5 sentence human digest, prose-only, and EXEMPLIFIES it in '
+      'the answer object',
+      () {
+        final prompt = buildDescribePrompt(
+          bead: const Bead(id: 'tg-1', title: 'better titles'),
+          beadId: 'tg-1',
+          baseBranch: 'main',
+          commitLog: 'feat(x): do a thing',
+          diffStat: ' lib/x.dart | 2 +-',
+          diff: '+the change',
+        );
+        expect(prompt, contains('HUMAN DIGEST'));
+        expect(prompt, contains('2 to 5 complete sentences'));
+        expect(prompt, contains('NEVER opens the diff'));
+        expect(prompt, contains('no heading, no bullet list, no code fence'));
+        expect(prompt, contains('"summary":"The land step now reads its own'));
+        // The old, weak contract ("a short paragraph or two, or bullets") is
+        // GONE — the exemplar is the contract a model actually copies.
+        expect(prompt, isNot(contains('or bullets')));
       },
     );
   });
