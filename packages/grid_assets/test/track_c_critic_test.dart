@@ -137,10 +137,10 @@ void main() {
       expect(cfg.args[3], 'claude');
       expect(cfg.args[4], '--dangerously-skip-permissions');
       // A critic spawns in the GRADE role (bead `pow-edp`): absent a station or
-      // bead override it grades on the CHEAP default (sonnet) while the build
-      // runs strong (opus) — the split this argv is the proof of.
+      // bead override it grades on the MID tier (sonnet) while the build rides
+      // the FRONTIER tier (opus) — the split this argv is the proof of.
       expect(cfg.args[5], '--model');
-      expect(cfg.args[6], kGraderModelDefault);
+      expect(cfg.args[6], kMidModelDefault);
       expect(cfg.args[7], '--output-format');
       expect(cfg.args[8], 'json');
       expect(cfg.args[9], '-p');
