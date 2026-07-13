@@ -249,10 +249,10 @@ $kSpecExemplarDesign
 /// exactly why `specify`'s new dep is still satisfied when the wave re-keys it).
 /// That carries TWO invariants, not one: the route can never
 /// re-decide over a previous round's grades, and — because a [Rewind] does not
-/// re-key the bead id — [ClearCritiqueCapability]'s wipe is the ONLY thing that
-/// makes a round's verdict files fresh (ADR-0000 A4's `nodePath` stamp is
-/// byte-identical across rewind rounds; see `committee.dart`).
-/// `spec_committee_test.dart` fences both with the engine's own
+/// re-key the bead id — a round's verdict files are made fresh by the VERDICT'S
+/// OWN ROUND STAMP (the node's `rewindCount`, A15(5) alt-A; see
+/// `committee.dart`), with [ClearCritiqueCapability]'s wipe as the belt behind
+/// it. `spec_committee_test.dart` fences both with the engine's own
 /// `transitiveDependents` predicate.
 ///
 /// No `pin-diff` here: the review subject is the bead's OWN spec (its
@@ -628,8 +628,8 @@ AgentBrief buildSpecifyBrief(
 /// One SPEC critic, in isolation — the spec committee's LLM lane. Subclasses
 /// [CriticCapability] to inherit the ENTIRE verdict-transport stack unchanged
 /// (canonical file → round-fresh stray → result-envelope → fail-closed F,
-/// each with the `nodePath` freshness stamp and a named `transport`; plus the
-/// FT-2 usage merge): one transport stack serves both committees, so a
+/// each with the `nodePath` + `round` freshness stamps and a named `transport`;
+/// plus the FT-2 usage merge): one transport stack serves both committees, so a
 /// hardening landed for the code critics (gate-integrity #3/#4, tg-291)
 /// automatically holds here. Only the SPAWN differs — it is a GRADE-role spawner
 /// ([AgentRole.grade], bead `pow-edp`), like its superclass, so absent an
@@ -677,6 +677,7 @@ class SpecCriticCapability extends CriticCapability {
           rubric,
           args.nodePath,
           workspace.workspaceDir,
+          round: roundOf(context, args.nodePath),
         ),
       ),
       workspace: workspace,
@@ -698,7 +699,10 @@ class SpecCriticCapability extends CriticCapability {
   ///
   /// Carries the SAME hardening as [CriticCapability.buildCriticPrompt]: the
   /// verdict JSON's `nodePath` FRESHNESS STAMP (gate-integrity #3 — a rework
-  /// round reuses the workspace directory), the workspace-derived ABSOLUTE
+  /// round reuses the workspace directory), plus the ROUND stamp (A15(5) alt-A)
+  /// — the critic node's own `rewindCount`, read via the ambient [SiblingView],
+  /// which is what fences a stale verdict across an auto-respec wave (the node
+  /// path does not move); the workspace-derived ABSOLUTE
   /// canonical write path (gate-integrity #4 — cwd-invariant), and the
   /// file-write instruction as the LAST thing the prompt says (tg-291 —
   /// recency). What differs is the SCOPE: the review subject is the bead's
@@ -712,8 +716,9 @@ class SpecCriticCapability extends CriticCapability {
     Bead bead,
     String rubric,
     String nodePath,
-    String workspaceDir,
-  ) {
+    String workspaceDir, {
+    required int round,
+  }) {
     final path = p.join(workspaceDir, '.grid', 'critique', '$rubric.json');
     final b = StringBuffer()
       ..writeln('# Spec review — rubric: `$rubric`')
@@ -748,15 +753,10 @@ class SpecCriticCapability extends CriticCapability {
         'Your verdict is JSON of this exact shape:',
       )
       ..writeln(
-        '{"rubric":"$rubric","version":1,"grade":"<A-F>","rationale":"<why>",'
-        '"nodePath":"$nodePath"}',
+        verdictJsonTemplate(rubric: rubric, nodePath: nodePath, round: round),
       )
       ..writeln()
-      ..writeln(
-        'The `nodePath` value above is FIXED — copy it byte-for-byte into '
-        'your verdict; it is how the reviewer confirms your verdict belongs '
-        'to THIS round, not a leftover from an earlier one.',
-      )
+      ..writeln(kVerdictStampInstruction)
       ..writeln()
       ..writeln(
         'You MUST write that JSON to the exact ABSOLUTE path `$path` before '

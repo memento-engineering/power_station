@@ -20,24 +20,34 @@ import 'support/asset_fakes.dart';
 
 /// The critic's (ambient tree, per-step args) pair — the context rip-out shape:
 /// the work Bead + Workspace ride the tree; the rubric rides the step params.
+/// [round] is the node's own `rewindCount` — the round the critic stamps and
+/// `result()` verifies (A15(5) alt-A) — mounted on the ambient SiblingView the
+/// engine provides.
 ({FakeTreeContext context, StepArgs args}) _ctx({
   required String rubric,
   String workspaceDir = '/w/tg-1',
   Bead? beadOverride,
   String? nodePath,
-}) => (
-  context: FakeTreeContext(
-    values: {
-      Bead: beadOverride ?? bead('tg-1'),
-      Workspace: testWorkspace(
-        'tg-1',
-        workspaceDir: workspaceDir,
-        branch: 'grid/tg-1',
-      ),
-    },
-  ),
-  args: stepArgs(nodePath ?? 'tg-1/review/$rubric', params: {'rubric': rubric}),
-);
+  int round = 0,
+}) {
+  final path = nodePath ?? 'tg-1/review/$rubric';
+  return (
+    context: FakeTreeContext(
+      values: {
+        Bead: beadOverride ?? bead('tg-1'),
+        Workspace: testWorkspace(
+          'tg-1',
+          workspaceDir: workspaceDir,
+          branch: 'grid/tg-1',
+        ),
+        SiblingView: SiblingView(
+          cursor: {path: NodeCursor(rewindCount: round)},
+        ),
+      },
+    ),
+    args: stepArgs(path, params: {'rubric': rubric}),
+  );
+}
 
 void main() {
   group('Track C2 — code-validation (the GATING lane)', () {
@@ -166,6 +176,7 @@ void main() {
         'spec-adherence',
         'tg-1/review/spec-adherence',
         '/w/tg-1',
+        round: 0,
       );
       expect(prompt, contains('spec-adherence'));
       // The other lanes' concerns must NOT leak into this critic's prompt.
@@ -184,9 +195,32 @@ void main() {
         'spec-adherence',
         'tg-1#r3/review/spec-adherence',
         '/w/tg-1',
+        round: 0,
       );
       expect(prompt, contains('"nodePath":"tg-1#r3/review/spec-adherence"'));
-      expect(prompt, contains('copy it byte-for-byte'));
+      expect(prompt, contains('copy them byte-for-byte'));
+    });
+
+    test('the prompt stamps the ROUND beside the nodePath (A15(5) alt-A)', () {
+      final prompt = const CriticCapability().buildCriticPrompt(
+        bead('tg-1'),
+        'spec-adherence',
+        'tg-1/review/spec-adherence',
+        '/w/tg-1',
+        round: 2,
+      );
+      expect(
+        prompt,
+        contains('"nodePath":"tg-1/review/spec-adherence","round":2}'),
+      );
+      expect(prompt, contains('copy them byte-for-byte'));
+    });
+
+    test('spawn reads the round off the ambient SiblingView (the node\'s own '
+        'rewindCount) — never a file, never a re-derivation', () {
+      final c = _ctx(rubric: 'regression-risk', round: 2);
+      final cfg = const CriticCapability().spawn(c.context, c.args);
+      expect(cfg.args.last, contains('"round":2}'));
     });
 
     test('the prompt pins the review scope to the pinned diff (bead pow-6wo) — '
@@ -196,6 +230,7 @@ void main() {
         'spec-adherence',
         'tg-1/review/spec-adherence',
         '/w/tg-1',
+        round: 0,
       );
       // The critic is pointed at the pinned-diff file as its EXCLUSIVE scope
       // (the ABSOLUTE path PinDiffCapability wrote it to).
@@ -219,6 +254,7 @@ void main() {
         'test-coverage',
         'tg-1/review/test-coverage',
         '/w/tg-1',
+        round: 0,
       );
       expect(prompt, contains('Wire the federation bus'));
       expect(prompt, contains('Connect The Studio to The Dashboard.'));
@@ -236,6 +272,7 @@ void main() {
           'grade': 'b',
           'rationale': 'a narrow blast radius',
           'nodePath': 'tg-1/review/regression-risk',
+          'round': 0,
         }));
       final c = _ctx(rubric: 'regression-risk', workspaceDir: dir.path);
       final out = await const CriticCapability().result(c.context, c.args);
@@ -282,6 +319,9 @@ void main() {
           'grade': 'A',
           'rationale': 'a stale round-1 verdict',
           'nodePath': 'tg-1#r1/review/regression-risk',
+          // Round-FRESH: only the nodePath is foreign, so this proves A4's fence
+          // still rejects ON ITS OWN, independent of the round check.
+          'round': 0,
         }));
       final c = _ctx(
         rubric: 'regression-risk',
@@ -302,6 +342,78 @@ void main() {
       );
     });
 
+    test('a STALE round verdict under a BYTE-IDENTICAL nodePath is REJECTED — '
+        'the Rewind case A4\'s stamp cannot see (A15(5))', () async {
+      final dir = Directory.systemTemp.createTempSync('critic-stale-round-');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      const nodePath = 'tg-1/review/regression-risk';
+      File('${dir.path}/.grid/critique/regression-risk.json')
+        ..createSync(recursive: true)
+        ..writeAsStringSync(jsonEncode({
+          'grade': 'A',
+          'rationale': 'round 0 approved it',
+          'nodePath': nodePath, // IDENTICAL — a Rewind does not move the path.
+          'round': 0,
+        }));
+      final c = _ctx(
+        rubric: 'regression-risk',
+        workspaceDir: dir.path,
+        nodePath: nodePath,
+        round: 1,
+      );
+      final out = await const CriticCapability().result(c.context, c.args);
+      expect(out!['grade'], 'F');
+      expect(out['transport'], 'fail-closed-default');
+    });
+
+    test('an ABSENT or non-numeric round stamp reads as MISSING (fail-closed)',
+        () async {
+      final dir = Directory.systemTemp.createTempSync('critic-noround-');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      const nodePath = 'tg-1/review/test-coverage';
+      final verdict = File('${dir.path}/.grid/critique/test-coverage.json')
+        ..createSync(recursive: true)
+        ..writeAsStringSync(jsonEncode({'grade': 'A', 'nodePath': nodePath}));
+      final c = _ctx(
+        rubric: 'test-coverage',
+        workspaceDir: dir.path,
+        nodePath: nodePath,
+      );
+      const cap = CriticCapability();
+      expect((await cap.result(c.context, c.args))!['grade'], 'F');
+
+      verdict.writeAsStringSync(
+        jsonEncode({'grade': 'A', 'nodePath': nodePath, 'round': 'later'}),
+      );
+      expect((await cap.result(c.context, c.args))!['grade'], 'F');
+    });
+
+    test('a round-fresh verdict at round 2 still parses (transport file)',
+        () async {
+      final dir = Directory.systemTemp.createTempSync('critic-fresh-round-');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      const nodePath = 'tg-1/review/regression-risk';
+      File('${dir.path}/.grid/critique/regression-risk.json')
+        ..createSync(recursive: true)
+        ..writeAsStringSync(jsonEncode({
+          'grade': 'B',
+          'rationale': 'a narrow blast radius',
+          'nodePath': nodePath,
+          'round': 2,
+        }));
+      final c = _ctx(
+        rubric: 'regression-risk',
+        workspaceDir: dir.path,
+        nodePath: nodePath,
+        round: 2,
+      );
+      expect(await const CriticCapability().result(c.context, c.args), {
+        'grade': 'B',
+        'transport': 'file',
+        'rationale': 'a narrow blast radius',
+      });
+    });
+
     test('an injected rubric source replaces the inline placeholder', () {
       final cap = CriticCapability(
         rubrics: (id) => 'CUSTOM BANDS for $id',
@@ -311,6 +423,7 @@ void main() {
         'spec-adherence',
         'tg-1/review/spec-adherence',
         '/w/tg-1',
+        round: 0,
       );
       expect(prompt, contains('CUSTOM BANDS for spec-adherence'));
       expect(prompt, isNot(contains('Packaged-AI-Asset loader')));
@@ -324,6 +437,7 @@ void main() {
         'spec-adherence',
         'tg-1/review/spec-adherence',
         '/w/tg-1',
+        round: 0,
       );
       // The path is the workspace-derived ABSOLUTE canonical path
       // (gate-integrity #4 — cwd-invariant), not a workspace-relative one.
@@ -369,6 +483,7 @@ void main() {
         'grade': 'B',
         'rationale': 'narrow',
         'nodePath': 'tg-1/review/$rubric',
+        'round': 0,
       }));
       writeUsage(
         dir.path,
@@ -417,7 +532,7 @@ void main() {
       addTearDown(() => dir.deleteSync(recursive: true));
       const rubric = 'spec-adherence';
       writeVerdict(dir.path, rubric,
-          jsonEncode({'grade': 'A', 'nodePath': 'tg-1/review/$rubric'}));
+          jsonEncode({'grade': 'A', 'nodePath': 'tg-1/review/$rubric', 'round': 0}));
       writeUsage(dir.path, rubric, 'garbage not json');
       final c = _ctx(rubric: rubric, workspaceDir: dir.path);
       final out = await const CriticCapability().result(c.context, c.args);
@@ -526,6 +641,7 @@ void main() {
           'grade': 'C',
           'rationale': 'from the file',
           'nodePath': 'tg-1/review/$rubric',
+          'round': 0,
         }),
       );
       writeEnvelope(dir.path, rubric, 'Verdict: A');
@@ -753,6 +869,7 @@ void main() {
         'grade': 'B',
         'rationale': 'covered the new path',
         'nodePath': nodePath,
+        'round': 0,
       });
       final c = _ctx(rubric: rubric, workspaceDir: dir.path, nodePath: nodePath);
       final out = await const CriticCapability().result(c.context, c.args);
@@ -773,6 +890,8 @@ void main() {
         'grade': 'A',
         'rationale': 'a stale round-1 stray',
         'nodePath': 'tg-1#r1/review/test-coverage',
+        // Round-FRESH: the foreign nodePath alone must reject it.
+        'round': 0,
       });
       final c = _ctx(
         rubric: rubric,
@@ -798,12 +917,14 @@ void main() {
           'grade': 'C',
           'rationale': 'from the canonical file',
           'nodePath': nodePath,
+          'round': 0,
         }));
       // A fresh stray with a DIFFERENT grade — must never be consulted.
       writeStray(dir.path, 'packages/grid_assets', rubric, {
         'grade': 'A',
         'rationale': 'from the stray',
         'nodePath': nodePath,
+        'round': 0,
       });
       final c = _ctx(rubric: rubric, workspaceDir: dir.path, nodePath: nodePath);
       final out = await const CriticCapability().result(c.context, c.args);
@@ -824,6 +945,7 @@ void main() {
         'grade': 'A',
         'rationale': 'inside a pruned tree',
         'nodePath': nodePath,
+        'round': 0,
       });
       final c = _ctx(rubric: rubric, workspaceDir: dir.path, nodePath: nodePath);
       expect(await const CriticCapability().result(c.context, c.args), {
@@ -890,7 +1012,8 @@ void main() {
     });
 
     test('a throwing clearer never Gates the round — best-effort hygiene, '
-        'the nodePath stamp is the fail-safe backstop', () async {
+        'the verdict\'s nodePath + round stamps are the fail-safe backstop',
+        () async {
       final c = ctx('/w/tg-1');
       final outcome = await const ClearCritiqueCapability(
         clearer: _throwingClearer,

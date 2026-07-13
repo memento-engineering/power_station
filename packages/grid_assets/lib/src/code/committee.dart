@@ -28,13 +28,17 @@
 ///  1. [ClearCritiqueCapability] (`clear-critique`) — a dep-free step every
 ///     critic lane `dependsOn` — wipes `.grid/critique/` at the START of every
 ///     round, before any lane can read or write.
-///  2. Every LLM verdict JSON carries a `nodePath` freshness stamp (the
-///     round-qualified step path — round is embedded in the bead id via the
-///     rework re-key, `<bead>#rN`); [_verdictFromFile] REJECTS a file whose
-///     stamp doesn't match the CURRENT step's `nodePath`, falling through to
-///     the envelope/fail-closed transports exactly as if the file were absent.
-///     (The gating lane's `.rc` needs no stamp — fix 1 alone already clears it
-///     every round, and it carries no separate fallback transport.)
+///  2. Every LLM verdict JSON carries TWO freshness stamps, and
+///     [_verdictFromFile] REJECTS a file that fails EITHER — falling through to
+///     the envelope/fail-closed transports exactly as if the file were absent:
+///     `nodePath` (A4) fences a verdict some OTHER node wrote, and `round`
+///     (A15(5) alt-A — the node's own `rewindCount`, read via the ambient
+///     [SiblingView]) fences a verdict THIS node wrote in an EARLIER round. The
+///     round stamp is what makes fix 1 a BELT rather than the guarantee: under
+///     `StepOutcome.Rewind` the node path does not move, so `nodePath` alone
+///     cannot tell round N's surviving file from round N+1's.
+///     (The gating lane's `.rc` needs no stamp — fix 1 alone clears it every
+///     round, and it carries no separate fallback transport.)
 ///  Every verdict's result payload also carries a `transport` field
 ///  (`file`/`envelope`/`fail-closed-default`) naming which of the three
 ///  channels actually produced the grade — durable, queryable provenance
@@ -169,6 +173,60 @@ String parentPath(String nodePath) {
   return i < 0 ? '' : nodePath.substring(0, i);
 }
 
+/// The verdict JSON's ROUND stamp key (A15(5) alt-A) — ONE name, written by
+/// every critic prompt ([verdictJsonTemplate]) and read by the verdict parser,
+/// so the writer and reader can never drift apart.
+const String kVerdictRoundKey = 'round';
+
+/// THIS node's ROUND — the `rewindCount` the engine bumps on every rewind wave
+/// that re-keys it (the_grid `tg-o90`), read off the ambient [SiblingView] with
+/// the EFFECT verb at a capability's spawn/result edge (ADR-0008 D3 — never a
+/// subscription). It is the HONEST counter A15(2) established: a [Rewind] does
+/// not re-mint the session, so the cursor SURVIVES the round. It is the SAME
+/// counter `SpecRouteCapability` escalates on (`respec.dart`), so the round a
+/// critic stamps and the round the route bounds are one number.
+///
+/// A node the cursor does not know yet (a first, never-rewound incarnation) is
+/// round 0 — [SiblingView.cursorOf]'s own default. ZERO I/O, so it holds in the
+/// offline/dry-run posture too.
+int roundOf(TreeContext context, String nodePath) =>
+    (context.getInheritedSeedOfExactType<SiblingView>() ?? const SiblingView())
+        .cursorOf(nodePath)
+        .rewindCount;
+
+/// The verdict JSON SHAPE every critic prompt hands its critic — the TWO
+/// freshness stamps side by side: [nodePath] (A4's FOREIGN-NODE fence — WHOSE
+/// verdict is this?) and [round] (A15(5) alt-A's ROUND fence — WHICH round's?).
+/// [rationaleHint] lets a lane phrase its own rationale ask (the readiness lens
+/// wants the fix, not just the why) without forking the shape.
+///
+/// ONE writer-side definition, shared by all three critic families (code, spec,
+/// readiness), because they share ONE reader ([_verdictFromFile]; ADR-0000
+/// A13(3)): a lane that omitted the round stamp would fail-close every verdict
+/// it wrote.
+String verdictJsonTemplate({
+  required String rubric,
+  required String nodePath,
+  required int round,
+  String rationaleHint = '<why>',
+}) =>
+    '{"rubric":"$rubric","version":1,"grade":"<A-F>",'
+    '"rationale":"$rationaleHint","nodePath":"$nodePath",'
+    '"$kVerdictRoundKey":$round}';
+
+/// The stamp instruction that follows [verdictJsonTemplate] in every critic
+/// prompt: both stamps are FIXED and copied verbatim. LOUD about the
+/// consequence — a verdict carrying the wrong stamps is DISCARDED, never
+/// repaired.
+const String kVerdictStampInstruction =
+    'The `nodePath` and `round` values above are FIXED — copy them '
+    'byte-for-byte into your verdict. `nodePath` proves the verdict is YOURS '
+    'and not another node\'s stray file; `round` proves it is THIS round\'s — a '
+    'rework wave re-runs you in the SAME worktree under the SAME node path, so '
+    'an earlier round\'s verdict file is otherwise indistinguishable from '
+    'yours. A verdict carrying the wrong stamps (or none) is DISCARDED and the '
+    'lane grades F.';
+
 /// A pluggable source of a rubric's prose text by id (D-9: the Packaged-AI-Asset
 /// loader replaces the inline placeholder). Returns the rubric body a critic's
 /// prompt embeds.
@@ -261,17 +319,20 @@ const Circuit kCodeReviewCircuit = Circuit(
 /// Best-effort BY DESIGN: a delete/recreate failure never Gates the round — the
 /// gating lane's own `sh -c` script always `mkdir -p`s the dir again regardless.
 ///
-/// **This wipe IS the round-freshness guarantee** (ADR-0000 A4, amended by
-/// `pow-ui8`). A4 made [_verdictFromFile]'s `nodePath` stamp the fail-safe
-/// backstop on the premise that a round re-keys the bead id to `<bead>#rN`, so
-/// the stamp carried the ROUND. It does not: neither a `grid rework` round
-/// (A14(5) — `SessionScope` re-mints with `workBeadId: bead.id`) nor a
-/// `StepOutcome.Rewind` wave (tg-o90 — no re-mint at all, only a `rewindCount`
-/// bump) changes a node's path. The stamp is therefore a FOREIGN-NODE fence (it
-/// still rejects a verdict file some OTHER node wrote — the stray-file case) and
-/// carries no round. So round-freshness rests on this wipe alone, which is why
-/// the spec circuit wires it DOWNSTREAM of `specify` (`kSpecReviewCircuit`): that
-/// puts it in the REWIND SET, so it re-runs on every auto-respec wave.
+/// **A BELT, not the guarantee (A15(5) alt-A, bead `pow-05f`)**. It was the
+/// whole round-freshness guarantee for exactly one amendment: A4 made the
+/// `nodePath` stamp the round fence on the premise that a round re-keys the
+/// bead id to `<bead>#rN` — and neither a `grid rework` round (A14(5)) nor a
+/// `StepOutcome.Rewind` wave (tg-o90 — only a `rewindCount` bump) does, so the
+/// path is byte-identical round to round. The verdict now STAMPS ITS ROUND
+/// ([verdictJsonTemplate], [roundOf]) and [_verdictFromFile] VERIFIES it, so a
+/// stale verdict file that SURVIVES a failed wipe is caught positively at the
+/// READ. The wipe stays and still earns its place — it keeps the workspace
+/// honest (a critic that writes nothing this round leaves no shadow at all),
+/// and the gating lane's `.rc` carries NO stamp, so the wipe remains ITS
+/// freshness fence — but a failed wipe can no longer produce a stale LLM grade.
+/// The spec circuit still wires it DOWNSTREAM of `specify` (`kSpecReviewCircuit`)
+/// so it re-runs on every auto-respec wave.
 class ClearCritiqueCapability extends ServiceCapability {
   /// Creates the capability, optionally over an injected [clearer] (tests
   /// inject a no-op so the offline suite never touches a real filesystem at a
@@ -551,6 +612,7 @@ class CriticCapability extends ProcessCapability {
           rubric,
           args.nodePath,
           workspace.workspaceDir,
+          round: roundOf(context, args.nodePath),
         ),
       ),
       workspace: workspace,
@@ -597,6 +659,10 @@ class CriticCapability extends ProcessCapability {
       );
     }
     final workspaceDir = workspace.workspaceDir;
+    // THIS round — the node's own `rewindCount` (A15(5) alt-A), read at ENTRY
+    // with the workspace. The gating lane ignores it: its `.rc` carries no
+    // stamp and the wipe is still ITS freshness fence.
+    final round = roundOf(context, args.nodePath);
     if (rubric == kGatingRubric) {
       // The plan's exit code, captured by the spawn wrapper. Fail-closed: a
       // missing rc (the plan never ran) grades F — a plan-less bead must NEVER
@@ -614,8 +680,9 @@ class CriticCapability extends ProcessCapability {
       return {'grade': code == '0' ? 'A' : 'F', 'transport': 'file'};
     }
     // An LLM critic's verdict JSON. Fail-closed: a missing / malformed / STALE
-    // verdict (no file, unparseable JSON, no readable `grade`, or a `nodePath`
-    // stamp that doesn't match THIS round — gate-integrity #3) falls back, in
+    // verdict (no file, unparseable JSON, no readable `grade`, a `nodePath`
+    // stamp naming ANOTHER node — gate-integrity #3 — or a `round` stamp naming
+    // an EARLIER round of THIS node — A15(5) alt-A) falls back, in
     // order, to a round-fresh STRAY verdict (gate-integrity #4 — a critic that
     // cd'd mid-run wrote the file under a subdir instead of the canonical path;
     // [_strayVerdict]) then to the captured harness RESULT TEXT (tg-291 — the
@@ -628,8 +695,13 @@ class CriticCapability extends ProcessCapability {
     // `fail-closed-default`), so a false-gate post-mortem never has to guess
     // which channel produced the grade.
     final verdict = File(p.join(workspaceDir, _critiqueDir, '$rubric.json'));
-    final graded = _verdictFromFile(verdict, expectedNodePath: args.nodePath) ??
-        _strayVerdict(workspaceDir, rubric, args.nodePath) ??
+    final graded =
+        _verdictFromFile(
+          verdict,
+          expectedNodePath: args.nodePath,
+          expectedRound: round,
+        ) ??
+        _strayVerdict(workspaceDir, rubric, args.nodePath, round) ??
         _verdictFromResultText(
           readEnvelopeResultText(workspaceDir, args.nodePath),
         ) ??
@@ -670,11 +742,13 @@ class CriticCapability extends ProcessCapability {
   /// fallback for when a critic slips anyway; this hardening is to make the
   /// slip rarer, not to rely on the fallback.
   ///
-  /// The verdict JSON also carries a `nodePath` FRESHNESS STAMP — [nodePath]
-  /// copied byte-for-byte (gate-integrity #3) — so [_verdictFromFile] can
-  /// reject a file left over from an earlier round (the SAME workspace
-  /// directory is reused across rework rounds) instead of silently reading it
-  /// as this round's verdict.
+  /// The verdict JSON also carries TWO FRESHNESS STAMPS ([verdictJsonTemplate]),
+  /// both copied byte-for-byte: [nodePath] (gate-integrity #3 — WHOSE verdict is
+  /// this?) and [round] (A15(5) alt-A — WHICH round's?, this node's own
+  /// `rewindCount` via [roundOf]). [_verdictFromFile] rejects a file that fails
+  /// EITHER, so a verdict left over from an earlier round in the SAME reused
+  /// workspace directory — where the node path is byte-identical, and only the
+  /// round differs — is never silently read as this round's.
   ///
   /// **Gate-integrity #4 — the cwd-relative write path (bead `tg-r66`)**: the
   /// path handed to the critic is the workspace-derived ABSOLUTE canonical
@@ -704,8 +778,9 @@ class CriticCapability extends ProcessCapability {
     Bead bead,
     String rubric,
     String nodePath,
-    String workspaceDir,
-  ) {
+    String workspaceDir, {
+    required int round,
+  }) {
     final path = p.join(workspaceDir, _critiqueDir, '$rubric.json');
     final diffPath = pinnedDiffPath(workspaceDir);
     final b = StringBuffer()
@@ -740,15 +815,10 @@ class CriticCapability extends ProcessCapability {
         'Your verdict is JSON of this exact shape:',
       )
       ..writeln(
-        '{"rubric":"$rubric","version":1,"grade":"<A-F>","rationale":"<why>",'
-        '"nodePath":"$nodePath"}',
+        verdictJsonTemplate(rubric: rubric, nodePath: nodePath, round: round),
       )
       ..writeln()
-      ..writeln(
-        'The `nodePath` value above is FIXED — copy it byte-for-byte into your '
-        'verdict; it is how the reviewer confirms your verdict belongs to THIS '
-        'round, not a leftover from an earlier one.',
-      )
+      ..writeln(kVerdictStampInstruction)
       ..writeln()
       ..writeln(
         'You MUST write that JSON to the exact ABSOLUTE path `$path` before you '
@@ -918,18 +988,31 @@ String _beadBlock(Bead bead) {
   return b.toString();
 }
 
-/// The verdict file's grade, when it parses AND is FRESH — `null` for an
-/// absent file, invalid JSON, a missing/blank `grade` field, OR a `nodePath`
-/// stamp that doesn't match [expectedNodePath] (gate-integrity #3). The stamp
-/// fences a FOREIGN node's file (a stray write, a mis-keyed lane); it does NOT
-/// fence a stale ROUND — a node's path is byte-identical across rework and rewind
-/// rounds alike, so [ClearCritiqueCapability]'s wipe is what makes a round's
-/// files fresh (ADR-0000 A4 as amended by `pow-ui8`). Every one of these is
-/// treated as "unparseable" so [CriticCapability.result] falls through to the
-/// RESULT TEXT fallback (tg-291). Never throws.
+/// The verdict's ROUND stamp as an int — `null` when the stamp is ABSENT or
+/// unreadable. A JSON number and its string form both read (a critic that wrote
+/// `"round":"2"` made a formatting slip, not a stale verdict); anything else is
+/// a MISS, which fail-closes exactly like a foreign `nodePath` does.
+int? _stampedRound(Object? raw) => switch (raw) {
+  final num round => round.toInt(),
+  final String round => int.tryParse(round.trim()),
+  _ => null,
+};
+
+/// The verdict file's grade, when it parses AND is FRESH — `null` for an absent
+/// file, invalid JSON, a missing/blank `grade`, a `nodePath` stamp that doesn't
+/// match [expectedNodePath], OR a `round` stamp that doesn't match
+/// [expectedRound]. The TWO stamps fence two DIFFERENT staleness modes and both
+/// are load-bearing: `nodePath` rejects a verdict some OTHER node wrote (a stray
+/// write, a mis-keyed lane — A4); `round` rejects a verdict THIS node wrote in
+/// an EARLIER round (A15(5) alt-A — under `StepOutcome.Rewind` the node path is
+/// byte-identical round to round, so `nodePath` alone cannot see it). An absent
+/// or unreadable round stamp is a MISS, not a pass. Every miss is treated as
+/// "unparseable" so [CriticCapability.result] falls through to the stray /
+/// RESULT TEXT / fail-closed chain (tg-291). Never throws.
 Map<String, String>? _verdictFromFile(
   File verdict, {
   required String expectedNodePath,
+  required int expectedRound,
 }) {
   if (!verdict.existsSync()) return null;
   try {
@@ -937,7 +1020,10 @@ Map<String, String>? _verdictFromFile(
     final grade = (json['grade'] as String?)?.trim().toUpperCase();
     if (grade == null || grade.isEmpty) return null;
     final stampedNodePath = (json['nodePath'] as String?)?.trim();
-    if (stampedNodePath != expectedNodePath) return null; // stale — not ours.
+    if (stampedNodePath != expectedNodePath) return null; // a FOREIGN node's.
+    if (_stampedRound(json[kVerdictRoundKey]) != expectedRound) {
+      return null; // a STALE round's — same node, earlier wave.
+    }
     final rationale = (json['rationale'] as String?)?.trim() ?? '';
     return {
       'grade': grade,
@@ -960,21 +1046,27 @@ Map<String, String>? _verdictFromFile(
 /// belt recovers a verdict a critic still writes off-path some other way.
 ///
 /// Walks [workspaceDir] for every `.grid/critique/<rubric>.json` and returns the
-/// FIRST whose `nodePath` stamp matches THIS round — the stamp (gate-integrity
-/// #3) is exactly what makes accepting an off-path file safe: a stale or foreign
-/// stray can never match, so a leftover from an earlier round is never misread
-/// as this round's verdict. The canonical path is skipped (the caller already
-/// consulted it). `null` when no fresh stray exists. Best-effort: never throws.
+/// FIRST whose stamps match THIS node and THIS round — the `nodePath` + `round`
+/// stamps (gate-integrity #3, A15(5) alt-A) are exactly what makes accepting an
+/// off-path file safe: a stale or foreign stray can never match, so a leftover
+/// from an earlier round is never misread as this round's verdict. The canonical
+/// path is skipped (the caller already consulted it). `null` when no fresh stray
+/// exists. Best-effort: never throws.
 Map<String, String>? _strayVerdict(
   String workspaceDir,
   String rubric,
   String expectedNodePath,
+  int expectedRound,
 ) {
   final canonical =
       p.canonicalize(p.join(workspaceDir, _critiqueDir, '$rubric.json'));
   for (final file in _strayVerdictFiles(workspaceDir, rubric)) {
     if (p.canonicalize(file.path) == canonical) continue; // the canonical path.
-    final graded = _verdictFromFile(file, expectedNodePath: expectedNodePath);
+    final graded = _verdictFromFile(
+      file,
+      expectedNodePath: expectedNodePath,
+      expectedRound: expectedRound,
+    );
     if (graded != null) return {...graded, 'transport': 'file-stray'};
   }
   return null;

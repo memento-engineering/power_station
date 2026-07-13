@@ -201,6 +201,7 @@ void main() {
         'spec-adherence',
         'tg-m2q/review/spec-adherence',
         workspaceDir,
+        round: 0,
       );
 
       test('no bead-stamped path leaks into the critic prompt (Q3′)', () {
@@ -247,6 +248,7 @@ void main() {
           'coherence',
           'tg-m2q/spec_review/coherence',
           workspaceDir,
+          round: 0,
         );
         expect(prompt, isNot(contains(_poison)));
         expect(
