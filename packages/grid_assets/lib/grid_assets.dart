@@ -48,13 +48,20 @@
 /// (`space search <query>`) — the substrate agentic skills (`discover`) CALL
 /// instead of reinventing search by inference.
 ///
-/// The VENDED SKILLS (bead `pow-88p`, `extension/skills/`) are those agentic
-/// halves: `discover` is the grid home's HITL front door — it dispatches on
-/// arg shape (topic research / bead advisory / bead directed), researches via
-/// the vended `search` Command, and on the human's yes files an ephemeral
-/// staged bead and hands to `specify`. [kVendedSkills] enumerates them;
-/// [PackagedAssetLoader.renderSkill] renders one for a composing station
-/// (delivery leg: `pow-kzx`).
+/// The VENDED SKILLS (bead `pow-88p`, `extension/station_overlay/skills/`) are
+/// those agentic halves: `discover` is the grid home's HITL front door — it
+/// dispatches on arg shape (topic research / bead advisory / bead directed),
+/// researches via the vended `search` Command, and on the human's yes files an
+/// ephemeral staged bead and hands to `specify`. [kVendedSkills] enumerates
+/// them; [PackagedAssetLoader.renderSkill] renders one by id.
+///
+/// The DELIVERY leg (bead `pow-kzx`) is [OverlayMaterializer]: the CLI-free,
+/// non-destructive lib that expands a `station_overlay/{skills,agents}` tree
+/// onto a target `.claude/` dir, rendering each file and REFUSING to install
+/// one whose holes are unbound. Both consumers ride it — this package's OWN
+/// provision-time wire ([AgentCapability], which materializes the overlay into
+/// every per-bead worktree so a station-spawned `claude -p` can `/invoke` a
+/// vended skill) and the operator install Command (`pow-a74`).
 ///
 /// The SPEC-READINESS INTAKE LENS (bead `pow-q7n`, `src/code/readiness.dart`)
 /// heads that spec circuit: a deterministic intake contract ([IntakeCapability]
@@ -93,6 +100,7 @@ export 'src/agent/model_tier.dart';
 export 'src/agent/usage_report.dart';
 export 'src/assets/asset_loader.dart';
 export 'src/assets/composition_assets.dart';
+export 'src/assets/overlay_materializer.dart';
 export 'src/code/circuit_migration.dart';
 export 'src/code/code_capabilities.dart';
 export 'src/code/committee.dart';
