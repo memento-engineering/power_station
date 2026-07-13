@@ -3,7 +3,7 @@
 // session re-mint, the bound, and the LOUD write failure.
 //
 // The layering (settled by the_grid `tg-o90`): the engine owns the loop edge and
-// now HAS it — `StepOutcome.Rewind` re-keys the named siblings + everything
+// now HAS it — `RouteVerdict.Rewind` re-keys the named siblings + everything
 // downstream + self, in-session. What is proven here is what power_station owns:
 // the DECISION, the GUIDANCE ledger, the BOUND read off the route's own
 // `rewindCount`, and the ACTUATION (a Rewind naming the folded `specify`
@@ -39,7 +39,7 @@ Map<String, String> _allA() => {for (final id in kSpecCommitteeRubrics) id: 'A'}
 /// on every rewind wave — bead `pow-ui8`) and the ambient [Workspace] pointed at
 /// [workspaceDir] (null ⇒ the offline posture: no ambient workspace, so no ledger
 /// I/O at all).
-Future<StepOutcome> _route(
+Future<RouteVerdict> _route(
   Map<String, String> grades, {
   Map<String, String> rationales = const {},
   String? workspaceDir,
@@ -73,7 +73,7 @@ Future<StepOutcome> _route(
         ),
     },
   );
-  return const SpecRouteCapability().run(
+  return const SpecRouteCapability().route(
     context,
     stepArgs(
       '$parent/route',
@@ -304,8 +304,8 @@ void main() {
         workspaceDir: ws.path,
         rewindCount: kMaxRespecRounds,
       );
-      expect(capped, isA<Gate>());
-      expect((capped as Gate).reason, startsWith('respec-cap'));
+      expect(capped, isA<Escalate>());
+      expect((capped as Escalate).reason, startsWith('respec-cap'));
       expect(kMaxRespecRounds, lessThan(kMaxReworkRounds));
     });
 
@@ -321,24 +321,33 @@ void main() {
         ),
       );
       final out = await _route(_allA(), workspaceDir: ws.path);
-      expect(out, isA<Ok>());
-      expect((out as Ok).payload!['verdict'], 'advance');
+      expect(out, isA<Advance>());
+      expect((out as Advance).payload!['verdict'], 'advance');
       expect(readRespecLedger(ws.path), isNull);
     });
 
-    test('a ledger write that cannot land is LOUD (Failed) — never a respec '
-        'whose guidance silently never arrives', () async {
+    test('a ledger write that cannot land is LOUD (a thrown RouteFailure) — '
+        'never a respec whose guidance silently never arrives', () async {
       // `.grid/spec` occupied by a FILE ⇒ createSync(recursive: true) throws.
       File(p.join(ws.path, '.grid', 'spec'))
         ..createSync(recursive: true)
         ..writeAsStringSync('not a directory');
-      final out = await _route(
-        {..._allA(), 'coherence': 'D'},
-        rationales: const {'coherence': 'incoherent'},
-        workspaceDir: ws.path,
+      // A route has NO failure arm: a throwing body is what RouteAllocation
+      // sinks to supervision.
+      await expectLater(
+        _route(
+          {..._allA(), 'coherence': 'D'},
+          rationales: const {'coherence': 'incoherent'},
+          workspaceDir: ws.path,
+        ),
+        throwsA(
+          isA<RouteFailure>().having(
+            (e) => e.reason,
+            'reason',
+            contains('respec guidance ledger'),
+          ),
+        ),
       );
-      expect(out, isA<Failed>());
-      expect((out as Failed).reason, contains('respec guidance ledger'));
     });
 
     test('offline/dry-run (a workspace dir that does not exist) skips the ledger '
@@ -357,8 +366,8 @@ void main() {
         workspaceDir: '/grid/worktrees/tg-1',
         rewindCount: kMaxRespecRounds,
       );
-      expect(capped, isA<Gate>());
-      expect((capped as Gate).reason, startsWith('respec-cap'));
+      expect(capped, isA<Escalate>());
+      expect((capped as Escalate).reason, startsWith('respec-cap'));
     });
   });
 

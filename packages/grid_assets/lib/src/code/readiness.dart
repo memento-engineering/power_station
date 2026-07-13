@@ -13,8 +13,8 @@
 ///
 /// **The ladder, cheapest first** (each tier withholds the next):
 ///  1. [IntakeCapability] — the INTAKE CONTRACT, deterministic, ZERO agents: a
-///     driveable [IssueType] + a non-empty description. It [Gate]s directly (the
-///     [PinDiffCapability] posture, ADR-0000 A9: a pre-lane step whose gate
+///     driveable [IssueType] + a non-empty description. It [Escalate]s directly
+///     (the [PinDiffCapability] posture, ADR-0000 A9: a pre-lane step whose hold
 ///     withholds the lanes), so a `decision`/`epic` bead — or an empty brief —
 ///     never spawns ANY agent.
 ///  2. [ReadinessCriticCapability] — the JUDGEMENT, ONE agent, riding the
@@ -42,10 +42,12 @@
 /// mounts and DRIVES an `epic`/`decision`/`spike`/`story`/`milestone` bead today.
 /// This is the circuit-level contract that holds in both arming modes.
 ///
-/// **The HOLD is a [Gate], honestly.** The station has ONE park primitive
-/// (ADR-0000 A13(1) reuses `gated` rather than minting a state), so mechanically
-/// a hold parks the bead exactly as a spec escalation does. What makes it a
-/// REFINEMENT ASK and not a ruling is its CONTENT: [renderIntakeHold] /
+/// **The HOLD is an [Escalate], honestly.** The station has ONE park primitive
+/// (ADR-0000 A13(1) reuses `gated` rather than minting a state — and an escalate
+/// with no bound `EscalationHandler` falls to the engine's default `HumanGate`,
+/// which parks exactly there), so mechanically a hold parks the bead exactly as a
+/// spec escalation does. What makes it a REFINEMENT ASK and not a ruling is its
+/// CONTENT: [renderIntakeHold] /
 /// [renderRefinementAsk] name every finding and the lens's rationale verbatim,
 /// addressed to the governor's refine lever. It carries NO machine-actionable
 /// token — ADR-0000 A15(3) deleted exactly such a prefix on the grounds that "a
@@ -250,10 +252,10 @@ String renderIntakeHold(Bead bead, List<String> findings) {
 /// TIER 1 — the deterministic INTAKE CONTRACT (zero agents), the ladder's head.
 ///
 /// **The invariant it protects (LOUD-or-gone)**: a bead may only reach an AGENT
-/// carrying a driveable type and a real brief. It [Gate]s directly rather than
-/// grading into a route — the [PinDiffCapability] posture (ADR-0000 A9): a
-/// pre-lane step whose gate WITHHOLDS the lanes is the whole point when the
-/// saving IS the un-spawned agent. Fail-closed: a missing ambient bead gates too.
+/// carrying a driveable type and a real brief. It [Escalate]s directly rather
+/// than grading into a route — the [PinDiffCapability] posture (ADR-0000 A9): a
+/// pre-lane step whose HOLD withholds the lanes is the whole point when the
+/// saving IS the un-spawned agent. Fail-closed: a missing ambient bead holds too.
 ///
 /// It also owns the readiness lane's ROUND-FRESHNESS. [ClearCritiqueCapability]
 /// wipes `.grid/critique/` only DOWNSTREAM of `specify` (that dependency is
@@ -265,8 +267,8 @@ String renderIntakeHold(Bead bead, List<String> findings) {
 /// immediately before the lane, so its wipe is that lane's guarantee. Two wipes,
 /// two lane-sets, neither weakened. Best-effort, same posture as
 /// [ClearCritiqueCapability]: a wipe that throws never gates the round.
-class IntakeCapability extends ServiceCapability {
-  /// Creates the intake gate, optionally over an injected [clearer] (tests
+class IntakeCapability extends RouteCapability {
+  /// Creates the intake lens, optionally over an injected [clearer] (tests
   /// inject a no-op so the offline suite never touches a real filesystem at a
   /// synthetic workspace path — Fakes, not mocks); defaults to [clearDirectory].
   const IntakeCapability({DirectoryClearer? clearer}) : _clearer = clearer;
@@ -274,13 +276,13 @@ class IntakeCapability extends ServiceCapability {
   final DirectoryClearer? _clearer;
 
   @override
-  Future<StepOutcome> run(TreeContext context, StepArgs args) async {
+  Future<RouteVerdict> route(TreeContext context, StepArgs args) async {
     // Read the ambient values at ENTRY (while mounted); the check below is pure
     // over the captured value.
     final bead = context.getInheritedSeedOfExactType<Bead>();
     final workspace = context.getInheritedSeedOfExactType<Workspace>();
     if (bead == null) {
-      return const Gate(
+      return const Escalate(
         'INTAKE HOLD — no ambient work bead to check (fail-closed): a bead '
         'reaches an agent only on a verdict that SAYS it is driveable.',
       );
@@ -294,9 +296,9 @@ class IntakeCapability extends ServiceCapability {
     }
     final findings = intakeFindings(bead);
     if (findings.isEmpty) {
-      return Ok({'verdict': 'driveable', 'type': bead.issueType.wire});
+      return Advance({'verdict': 'driveable', 'type': bead.issueType.wire});
     }
-    return Gate(renderIntakeHold(bead, findings));
+    return Escalate(renderIntakeHold(bead, findings));
   }
 }
 
@@ -494,18 +496,18 @@ String beadUnderIntake(Bead bead) {
 /// TIER 3 — the readiness DECISION point (zero agents). Reads the readiness
 /// lane's grade + rationale off the ambient [SiblingView] (the effect verb —
 /// never a subscription/re-query, D-5), applies the pure [decideReadiness]
-/// matrix, and either advances ([Ok], with the route-style provenance the code
-/// and spec routes emit) or HOLDS ([Gate], carrying the refinement ask).
+/// matrix, and either advances ([Advance], with the route-style provenance the
+/// code and spec routes emit) or HOLDS ([Escalate], carrying the refinement ask).
 ///
 /// The lane it reads is its `lane` param (default [kReadinessStep]) — the same
 /// honesty the committee routes carry in their `critics`/`gating` params: a
 /// route NAMES the lanes it decided over.
-class ReadinessRouteCapability extends ServiceCapability {
+class ReadinessRouteCapability extends RouteCapability {
   /// Creates the readiness route.
   const ReadinessRouteCapability();
 
   @override
-  Future<StepOutcome> run(TreeContext context, StepArgs args) async {
+  Future<RouteVerdict> route(TreeContext context, StepArgs args) async {
     // Read the ambient value at ENTRY (while mounted); the matrix is pure over
     // the captured values.
     final siblings =
@@ -518,13 +520,13 @@ class ReadinessRouteCapability extends ServiceCapability {
       grade: lane['grade'],
       rationale: lane['rationale'] ?? '',
     )) {
-      ReadinessDrive(:final grade) => Ok({
+      ReadinessDrive(:final grade) => Advance({
         'verdict': 'drive',
         'grade': grade,
         'lane': laneId,
         'rule': 'ready',
       }),
-      ReadinessHold(:final reason) => Gate(reason),
+      ReadinessHold(:final reason) => Escalate(reason),
     };
   }
 }

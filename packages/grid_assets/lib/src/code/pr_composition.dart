@@ -32,7 +32,8 @@
 ///
 /// [PrComposition] is the knob — a config VALUE a station/substation mounts
 /// (`GitHubGridAssets(composition: …)` → `InheritedSeed<PrComposition>`; config
-/// = values in the tree, ADR-0008), read by `LandCapability` at its run edge
+/// = values in the tree, ADR-0008), read by `DeliverRouteCapability` at its route
+/// edge
 /// with the non-binding effect verb (ADR-0008 D3). Everything in this library is
 /// PURE + deterministic (no I/O); the git reads and the inference call live in
 /// `pr_describe.dart` and are threaded in here as DATA.
@@ -299,7 +300,8 @@ class PrCompositionContext {
 
 /// The PR title/body composition knob (bead `pow-8dx`) — a config VALUE a
 /// station/substation mounts (`GitHubGridAssets(composition: …)`) to shape the
-/// landing asset's PRs; `LandCapability` reads it at its run edge and falls back
+/// landing asset's PRs; `DeliverRouteCapability` reads it at its route edge and
+/// falls back
 /// to `const PrComposition()` when none is mounted. A plain const class (the
 /// A10(3) carrier posture): the TITLE GRAMMAR is policy (not a knob — a station
 /// cannot opt out of v1.0.0), while the trailer TOKEN, the body SECTIONS, and

@@ -63,6 +63,8 @@ import 'package:beads_dart/beads_dart.dart';
 import 'package:genesis_tree/genesis_tree.dart';
 import 'package:grid_engine/grid_engine.dart';
 
+import 'delivery.dart';
+
 /// The FROZEN **legacy** root shape — `agent → review → land`, the shape of
 /// `kCodeCircuit` before `pow-6ao` (git `a67feb8~1`). The migration target for
 /// a shape-1 survivor.
@@ -75,7 +77,7 @@ import 'package:grid_engine/grid_engine.dart';
 /// NEW work.
 const Circuit kLegacyCodeCircuit = Circuit(
   id: 'code',
-  terminalStepId: 'land',
+  terminalStepId: kDeliverStep,
   steps: [
     CapabilityStep(stepId: 'agent', capabilityId: 'agent'),
     SubCircuitStep(
@@ -84,6 +86,11 @@ const Circuit kLegacyCodeCircuit = Circuit(
       dependsOn: {'agent'},
     ),
     SubCircuitStep(stepId: 'land', circuitId: 'landing', dependsOn: {'review'}),
+    CapabilityStep(
+      stepId: kDeliverStep,
+      capabilityId: kDeliverStep,
+      dependsOn: {'land'},
+    ),
   ],
 );
 
@@ -181,7 +188,7 @@ const Circuit kSpecHeadSpecReviewCircuit = Circuit(
 /// that has no `specify` in it.
 const Circuit kSpecHeadCodeCircuit = Circuit(
   id: 'code',
-  terminalStepId: 'land',
+  terminalStepId: kDeliverStep,
   steps: [
     CapabilityStep(stepId: 'specify', capabilityId: 'specify'),
     SubCircuitStep(
@@ -200,6 +207,11 @@ const Circuit kSpecHeadCodeCircuit = Circuit(
       dependsOn: {'agent'},
     ),
     SubCircuitStep(stepId: 'land', circuitId: 'landing', dependsOn: {'review'}),
+    CapabilityStep(
+      stepId: kDeliverStep,
+      capabilityId: kDeliverStep,
+      dependsOn: {'land'},
+    ),
   ],
 );
 
@@ -289,7 +301,7 @@ const Circuit kFoldedSpecReviewCircuit = Circuit(
 /// The migration target for a shape-3 survivor.
 const Circuit kFoldedCodeCircuit = Circuit(
   id: 'code',
-  terminalStepId: 'land',
+  terminalStepId: kDeliverStep,
   steps: [
     SubCircuitStep(
       stepId: 'spec_review',
@@ -306,6 +318,11 @@ const Circuit kFoldedCodeCircuit = Circuit(
       dependsOn: {'agent'},
     ),
     SubCircuitStep(stepId: 'land', circuitId: 'landing', dependsOn: {'review'}),
+    CapabilityStep(
+      stepId: kDeliverStep,
+      capabilityId: kDeliverStep,
+      dependsOn: {'land'},
+    ),
   ],
 );
 
@@ -412,7 +429,7 @@ const Circuit kLadderedSpecReviewCircuit = Circuit(
 /// [kLadderedSpecReviewCircuitId]. The migration target for a shape-4 survivor.
 const Circuit kLadderedCodeCircuit = Circuit(
   id: 'code',
-  terminalStepId: 'land',
+  terminalStepId: kDeliverStep,
   steps: [
     SubCircuitStep(
       stepId: 'spec_review',
@@ -429,6 +446,11 @@ const Circuit kLadderedCodeCircuit = Circuit(
       dependsOn: {'agent'},
     ),
     SubCircuitStep(stepId: 'land', circuitId: 'landing', dependsOn: {'review'}),
+    CapabilityStep(
+      stepId: kDeliverStep,
+      capabilityId: kDeliverStep,
+      dependsOn: {'land'},
+    ),
   ],
 );
 

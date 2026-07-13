@@ -135,7 +135,7 @@ class DescribeOutcome {
 ///
 /// The two guards that keep the WHOLE offline suite free of real git and real
 /// claude are the first two lines: an unwired [inference] (a bare
-/// `const LandCapability()` — every existing unit test) and a workspace dir that
+/// `const DeliverRouteCapability()` — every offline unit test) and a workspace dir
 /// does not exist on disk (the synthetic `/grid/worktrees/…` and `/w/tg-1` paths
 /// every offline fixture mounts) each return before ANY subprocess. The
 /// dir-existence posture is the same one `PinDiffCapability` and

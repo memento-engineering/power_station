@@ -86,9 +86,9 @@ Bead _preDiscoverySession() => committeeSession(
 );
 
 /// A [SourceControl] that hands every bead the SAME real temp worktree — the one
-/// this suite plants lens reports into and reads the dossier back out of. Land is
-/// NOT wired (`canLand` false), so the land step no-ops and no git is ever
-/// touched (Fakes, not mocks).
+/// this suite plants lens reports into and reads the dossier back out of. NO
+/// delivery method is bound on the bundle, so the terminal route advances bare and
+/// no git is ever touched (Fakes, not mocks).
 class _TempWorkspace implements SourceControl {
   const _TempWorkspace(this.dir);
 
@@ -104,34 +104,11 @@ class _TempWorkspace implements SourceControl {
   String get baseBranch => 'main';
 
   @override
-  bool get canLand => false;
-
-  @override
   Future<void> provisionWorkspace({
     required String beadId,
     required String workspaceDir,
   }) async {}
 
-  @override
-  Future<void> commitAll({
-    required String workspaceDir,
-    required String message,
-  }) async {}
-
-  @override
-  Future<void> push({
-    required String workspaceDir,
-    required String remote,
-    required String branch,
-  }) async {}
-
-  @override
-  Future<PrRef?> openPr({
-    required String workspaceDir,
-    required String branch,
-    required String baseBranch,
-    required String title,
-  }) async => null;
 }
 
 StationKernel _buildKernel(

@@ -16,9 +16,10 @@
 /// source-control asset ([GitGridAssets] / [GitHubGridAssets]) IS its
 /// substation's own — a capability's `getInheritedSeedOfExactType<ServiceBundle>`
 /// resolves it by TREE POSITION, never by a root name. [sourceControlOf] names
-/// that resolution (the v3 successor to `ServiceBundle.sourceControlFor(rootName)`);
-/// the provided bundle carries an EMPTY `sourceControlsByRoot`, so a stray
-/// rootName can only ever resolve back to the one substation source control.
+/// that resolution: the substation has ONE source control, and there is no name
+/// to select it by. (The engine's [ServiceBundle] declares no root-keyed map at
+/// all now — it is five plain fields: source control, delivery, escalation,
+/// trust, transport.)
 ///
 /// **The assets are `SingleChildStatelessSeed`s** — each wraps the downstream
 /// subtree, so they chain in a `Nest` exactly as the v3 sketch authors them:
@@ -39,6 +40,7 @@ import 'package:grid_sdk/grid_sdk.dart' as sdk;
 
 import '../agent/agent_harness.dart';
 import '../code/code_capabilities.dart';
+import '../code/delivery.dart';
 import '../code/pr_composition.dart';
 
 /// **GitServices** — the station's git-execution machinery as ONE ambient
@@ -65,7 +67,8 @@ class GitServices {
   /// substation); null ⇒ provisioning no-ops (offline).
   final StationGitService? provisioner;
 
-  /// Commit/push ops; null ⇒ land no-ops (`canLand` false — commit-only).
+  /// Commit/push ops — the half [GitHubGridAssets] needs to bind a delivery
+  /// method; null ⇒ no delivery bound (commit-only).
   final GitOps? gitOps;
 
   /// The ambient [GitServices], or null when no carrier encloses [context]
@@ -84,30 +87,26 @@ class GitServices {
 /// builds the git [SourceControl] for that root, and provides it to the work
 /// subtree as `InheritedSeed<ServiceBundle>`.
 ///
-/// It provisions + commits/pushes but does NOT open PRs on its own: [canLand] on
-/// the provided [GitSourceControl] stays false (the early-arm, commit-only
-/// posture) until [GitHubGridAssets] is mounted below it to add the PR opener.
-/// A substation with only `GitGridAssets` commits its work; adding
-/// `GitHubGridAssets` lets it land.
+/// It PROVISIONS but binds NO delivery on its own: the provided [ServiceBundle]
+/// carries a source control and a null `delivery` (the commit-only posture) until
+/// [GitHubGridAssets] is mounted below it to bind one. A substation with only
+/// `GitGridAssets` commits its work; adding `GitHubGridAssets` lets it deliver.
 ///
 /// The git-execution machinery ("the station supplies the machinery the
-/// substation leases" — the shared [StationGitService] provisioner + the
-/// [GitOps] commit/push half) is sourced from the ambient [GitServices]
-/// carrier the delegate mounts once above the substation fan-out, so a bare
-/// `GitGridAssets()` seat works (bead `pow-72b`). The [provisioner]/[gitOps]
-/// ctor params stay as per-seat OVERRIDES (tests inject; a set ctor field wins
-/// over the carrier's). A half supplied by neither is the offline/dry-run
-/// build (provisioning + land no-op, but `workspaceFor`/`branchFor`/
-/// `baseBranch` still resolve from the root — the layout is deterministic +
-/// pure).
+/// substation leases" — the shared [StationGitService] provisioner) is sourced
+/// from the ambient [GitServices] carrier the delegate mounts once above the
+/// substation fan-out, so a bare `GitGridAssets()` seat works (bead `pow-72b`).
+/// The [provisioner] ctor param stays a per-seat OVERRIDE (tests inject; a set
+/// ctor field wins over the carrier's). Supplied by neither is the offline/dry-run
+/// build (provisioning no-ops, but `workspaceFor`/`branchFor`/`baseBranch` still
+/// resolve from the root — the layout is deterministic + pure). The carrier's
+/// `gitOps` half is consumed by [GitHubGridAssets], the node that now needs it.
 class GitGridAssets extends SingleChildStatelessSeed {
-  /// Creates the git asset for the enclosing substation's root.
-  /// [provisioner]/[gitOps] are optional per-seat overrides of the ambient
-  /// [GitServices] machinery; [child] is supplied by an enclosing [Nest] (or
-  /// set for standalone use).
+  /// Creates the git asset for the enclosing substation's root. [provisioner] is
+  /// an optional per-seat override of the ambient [GitServices] machinery;
+  /// [child] is supplied by an enclosing [Nest] (or set for standalone use).
   const GitGridAssets({
     this.provisioner,
-    this.gitOps,
     this.defaultBranch = 'main',
     this.remote = 'origin',
     super.child,
@@ -118,10 +117,6 @@ class GitGridAssets extends SingleChildStatelessSeed {
   /// null ⇒ the ambient [GitServices]'s (absent there too ⇒ provisioning
   /// no-ops, offline).
   final StationGitService? provisioner;
-
-  /// Commit/push ops; null ⇒ the ambient [GitServices]'s (absent there too ⇒
-  /// land no-ops — `canLand` false, the commit-only arm).
-  final GitOps? gitOps;
 
   /// The base branch per-bead worktrees rebase/PR against — the substation
   /// root's mainline. A live [StationGitService.registerRootCheckout] PROBES
@@ -150,51 +145,73 @@ class GitGridAssets extends SingleChildStatelessSeed {
     );
     final sourceControl = GitSourceControl(
       provisioner: provisioner ?? services?.provisioner,
-      gitOps: gitOps ?? services?.gitOps,
       root: root,
-      // No prOpener → canLand false. GitHubGridAssets adds the PR half below.
     );
     return InheritedSeed<ServiceBundle>(
-      // A single sourceControl, EMPTY sourceControlsByRoot: the v3 "no
-      // string-keyed bundle map" — resolution is the substation's one root,
-      // never a name selected against a map.
+      // ONE source control, resolved by TREE POSITION (the v3 "no string-keyed
+      // bundle map"): the substation's own root, never a name selected against a
+      // map. No delivery bound — GitHubGridAssets binds it below.
       value: ServiceBundle(sourceControl: sourceControl),
       child: child,
     );
   }
 }
 
-/// **GitHubGridAssets** — the substation-scoped asset that adds GitHub
-/// PR-opening (land) onto the substation's git asset (v3 §3).
+/// **GitHubGridAssets** — the substation-scoped asset that BINDS the GitHub
+/// DELIVERY METHOD onto the substation's git asset (v3 §3).
 ///
 /// Authored BELOW [GitGridAssets] in the substation's `Nest`
 /// (`[GitGridAssets(...), GitHubGridAssets()]` folds outermost-first, so
 /// GitGridAssets is the ancestor and this is its descendant). It OBSERVES the
 /// ambient [ServiceBundle] GitGridAssets provided (`dependOn*`, so a
-/// re-provisioned bundle re-enriches — D-H, ADR-0008), enriches its
-/// [GitSourceControl] with the PR [prOpener] ([GitSourceControl.withPrOpener] →
-/// [canLand] true), and RE-provides the bundle so the work subtree below sees
-/// the land-capable source control.
+/// re-provisioned bundle re-binds — D-H, ADR-0008), binds a [GitHubPrDelivery]
+/// onto [ServiceBundle.delivery], and RE-provides the bundle so the work subtree
+/// below delivers at its terminal advance.
 ///
-/// Fail-safe: with no PR [prOpener] wired (offline), or no git asset above (a
-/// `GitHubGridAssets` without a `GitGridAssets`), or a non-git [SourceControl],
-/// it passes the ambient bundle through unchanged — GitHub can only ADD land to
-/// a git checkout it can commit from, never conjure one.
+/// M5 D-4a is what moved the binding: delivery is a bundle FIELD now, not a
+/// `SourceControl` verb, so there is no source control to "enrich" with a PR
+/// opener. The fold-order argument is unchanged and still load-bearing — the
+/// binding must happen at the INNER GitHub node, which reads its ancestor's
+/// bundle and re-provides it downward.
+///
+/// Fail-safe: delivery is bound only when BOTH halves are present — a [prOpener]
+/// AND commit/push [GitOps] (its own, or the ambient [GitServices] carrier's).
+/// With either missing it passes the ambient bundle through unchanged: GitHub can
+/// only ADD delivery to a git checkout it can commit from, never conjure one.
 class GitHubGridAssets extends SingleChildStatelessSeed {
-  /// Creates the GitHub asset over the optional [prOpener] (the runner injects
-  /// a live `GhPrOpener`; null ⇒ offline, land stays deferred) and the optional
-  /// [composition] PR-shaping knob; [child] is supplied by an enclosing [Nest].
-  const GitHubGridAssets({this.prOpener, this.composition, super.child, super.key});
+  /// Creates the GitHub asset over the optional [prOpener] (the runner injects a
+  /// live `GhPrOpener`; null ⇒ NO delivery bound — the commit-only arm), the
+  /// optional [gitOps] per-seat override, the optional [gitRunner] the
+  /// force-push runs through, and the optional [composition] PR-shaping knob;
+  /// [child] is supplied by an enclosing [Nest].
+  const GitHubGridAssets({
+    this.prOpener,
+    this.gitOps,
+    this.gitRunner,
+    this.composition,
+    super.child,
+    super.key,
+  });
 
-  /// The PR-opening seam (a live `GhPrOpener`); null ⇒ no land added (offline).
+  /// The PR-opening seam (a live `GhPrOpener`); null ⇒ no delivery bound
+  /// (offline / commit-only).
   final PrOpener? prOpener;
+
+  /// Commit/push ops — a per-seat override of the ambient [GitServices]'s (ctor
+  /// wins when present, else the carrier — merged per FIELD). Absent in both ⇒
+  /// no delivery bound.
+  final GitOps? gitOps;
+
+  /// The raw `git` seam the force-with-lease push runs through; null ⇒ the real
+  /// [SystemGitRunner].
+  final GitRunner? gitRunner;
 
   /// The substation's PR title/body composition knob (bead `pow-8dx`) — the
   /// trailer token, the body sections, and the describe model — mounted as
   /// `InheritedSeed<PrComposition>` for the work subtree and read by
-  /// `LandCapability`/`AgentCapability` at their run/spawn edges. Null ⇒ nothing
-  /// mounted; both fall back to `const PrComposition()` (the better-by-default
-  /// shape). Config = VALUES in the tree (ADR-0008).
+  /// `DeliverRouteCapability`/`AgentCapability` at their route/spawn edges. Null
+  /// ⇒ nothing mounted; both fall back to `const PrComposition()` (the
+  /// better-by-default shape). Config = VALUES in the tree (ADR-0008).
   final PrComposition? composition;
 
   @override
@@ -203,22 +220,43 @@ class GitHubGridAssets extends SingleChildStatelessSeed {
     // non-subscribing `get*` here would leave this asset re-providing a bundle
     // that wraps the STALE source control after GitGridAssets (which watches
     // `SubstationScope`) re-provides a fresh one. The subscribing read rebuilds
-    // this node so land stays enriched onto the CURRENT source control.
+    // this node so delivery stays bound alongside the CURRENT source control.
     final ambient = context.dependOnInheritedSeedOfExactType<ServiceBundle>();
-    final sourceControl = ambient?.sourceControl;
+    // The carrier read is the QUIET, SUBSCRIBING `maybeOf` (absence is the
+    // documented offline posture, not an error). It happens HERE — not only in
+    // GitGridAssets — because THIS is the node that consumes the gitOps half, and
+    // re-provided machinery must RE-DERIVE the binding rather than leave a stale
+    // one mounted.
+    final services = GitServices.maybeOf(context);
+    final ops = gitOps ?? services?.gitOps;
     final opener = prOpener;
+    final knob = composition;
+
     var wired = child;
-    if (opener != null && sourceControl is GitSourceControl) {
+    // BOTH halves, or nothing is bound (commit-only).
+    if (ops != null && opener != null) {
       wired = InheritedSeed<ServiceBundle>(
-        value: ServiceBundle(sourceControl: sourceControl.withPrOpener(opener)),
+        // Carry through EVERY field the bundle declares — silently dropping one
+        // here would unbind an unrelated service.
+        value: ServiceBundle(
+          sourceControl: ambient?.sourceControl,
+          delivery: GitHubPrDelivery(
+            gitOps: ops,
+            prOpener: opener,
+            gitRunner: gitRunner,
+            composition: knob ?? const PrComposition(),
+          ),
+          escalation: ambient?.escalation,
+          trust: ambient?.trust,
+          transport: ambient?.transport,
+        ),
         child: child,
       );
     }
-    // The composition knob mounts INDEPENDENTLY of land enrichment (it is a
+    // The composition knob mounts INDEPENDENTLY of the delivery binding (it is a
     // VALUE, not a service): a pass-through build still carries the substation's
     // PR shaping — and the build agent's commit policy — for whatever source
     // control is ambient.
-    final knob = composition;
     return knob == null
         ? wired
         : InheritedSeed<PrComposition>(value: knob, child: wired);
@@ -301,15 +339,15 @@ class CircuitProvider extends SingleChildStatelessSeed {
 }
 
 /// Resolves the [SourceControl] a bead's work runs under — the v3 successor to
-/// `ServiceBundle.sourceControlFor(rootName)` (bead `tg-5r9`).
+/// the retired root-keyed bundle map (bead `tg-5r9`).
 ///
-/// **`sourceControlFor(bead)` becomes pure resolution over bead → substation →
-/// root, with no string-keyed bundle map.** A work bead is mounted UNDER its
-/// owning substation's scope, so the nearest ambient [ServiceBundle] — provided
-/// by that substation's own [GitGridAssets] / [GitHubGridAssets] — carries its
-/// source control. The bead's identity enters through its TREE POSITION (which
+/// **Source-control resolution is pure over bead → substation → root, with no
+/// string-keyed bundle map.** A work bead is mounted UNDER its owning
+/// substation's scope, so the nearest ambient [ServiceBundle] — provided by that
+/// substation's own [GitGridAssets] / [GitHubGridAssets] — carries its source
+/// control. The bead's identity enters through its TREE POSITION (which
 /// substation owns it), not through a root name looked up in a map. Returns null
 /// when no source-control asset is mounted above (the offline / no-git posture,
-/// where provisioning + land no-op).
+/// where provisioning no-ops).
 SourceControl? sourceControlOf(TreeContext context) =>
     context.getInheritedSeedOfExactType<ServiceBundle>()?.sourceControl;

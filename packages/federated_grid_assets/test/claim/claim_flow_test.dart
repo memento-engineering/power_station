@@ -34,18 +34,31 @@ UnclaimedRequirement _burnFollowerReq({
   ),
 );
 
-StepMount _mountFor(UnclaimedStep step) => StepMount(
-  step: CapabilityStep(
+StepMount _mountFor(UnclaimedStep step) {
+  final capabilityStep = CapabilityStep(
     stepId: step.stepId,
     capabilityId: step.capabilityId,
     params: const {'target': 'linux'},
     requires: step.requires,
-  ),
-  nodePath: step.nodePath,
-  session: const SessionHandle('tgdog-s'),
-  node: const NodeCursor(),
-  key: ValueKey('${step.nodePath}#0'),
-);
+  );
+  return StepMount(
+    step: capabilityStep,
+    nodePath: step.nodePath,
+    // A step always belongs to a circuit: the engine threads the member circuit
+    // (+ its path) through the mount so a route can resolve a `Rewind`'s named
+    // siblings, and so the host can tell whether an advance is the ROOT
+    // circuit's DELIVERY TERMINAL. A claim step is the whole graph here.
+    circuit: Circuit(
+      id: 'claim',
+      terminalStepId: step.stepId,
+      steps: [capabilityStep],
+    ),
+    circuitPath: step.nodePath.substring(0, step.nodePath.lastIndexOf('/')),
+    session: const SessionHandle('tgdog-s'),
+    node: const NodeCursor(),
+    key: ValueKey('${step.nodePath}#0'),
+  );
+}
 
 Future<void> _settle() async {
   // Flushes the microtask chain a claim round-trip drives (ad delivery →

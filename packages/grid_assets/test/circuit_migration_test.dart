@@ -234,13 +234,15 @@ void main() {
   });
 
   group('the FROZEN shapes', () {
-    test('kLegacyCodeCircuit: agent → review → land, no spec steps', () {
+    test('kLegacyCodeCircuit: agent → review → land → deliver, no spec steps',
+        () {
       expect(kLegacyCodeCircuit.id, 'code');
-      expect(kLegacyCodeCircuit.terminalStepId, 'land');
+      expect(kLegacyCodeCircuit.terminalStepId, kDeliverStep);
       expect(kLegacyCodeCircuit.steps.map((s) => s.stepId), [
         'agent',
         'review',
         'land',
+        kDeliverStep,
       ]);
       expect(kLegacyCodeCircuit.stepById('specify'), isNull);
       expect(kLegacyCodeCircuit.stepById('spec_review'), isNull);
@@ -251,13 +253,14 @@ void main() {
       'with spec_review pointing at the FROZEN sub-circuit',
       () {
         expect(kSpecHeadCodeCircuit.id, 'code');
-        expect(kSpecHeadCodeCircuit.terminalStepId, 'land');
+        expect(kSpecHeadCodeCircuit.terminalStepId, kDeliverStep);
         expect(kSpecHeadCodeCircuit.steps.map((s) => s.stepId), [
           'specify',
           'spec_review',
           'agent',
           'review',
           'land',
+          kDeliverStep,
         ]);
         final sub =
             kSpecHeadCodeCircuit.stepById('spec_review')! as SubCircuitStep;
@@ -300,12 +303,13 @@ void main() {
     test('kFoldedCodeCircuit points spec_review at the FROZEN pre-ladder body',
         () {
       expect(kFoldedCodeCircuit.id, 'code');
-      expect(kFoldedCodeCircuit.terminalStepId, 'land');
+      expect(kFoldedCodeCircuit.terminalStepId, kDeliverStep);
       expect(kFoldedCodeCircuit.steps.map((s) => s.stepId), [
         'spec_review',
         'agent',
         'review',
         'land',
+        kDeliverStep,
       ]);
       final sub = kFoldedCodeCircuit.stepById('spec_review')! as SubCircuitStep;
       expect(sub.circuitId, kFoldedSpecReviewCircuitId);
@@ -338,12 +342,13 @@ void main() {
     test('kLadderedCodeCircuit points spec_review at the FROZEN pre-discovery '
         'body', () {
       expect(kLadderedCodeCircuit.id, 'code');
-      expect(kLadderedCodeCircuit.terminalStepId, 'land');
+      expect(kLadderedCodeCircuit.terminalStepId, kDeliverStep);
       expect(kLadderedCodeCircuit.steps.map((s) => s.stepId), [
         'spec_review',
         'agent',
         'review',
         'land',
+        kDeliverStep,
       ]);
       final sub =
           kLadderedCodeCircuit.stepById('spec_review')! as SubCircuitStep;

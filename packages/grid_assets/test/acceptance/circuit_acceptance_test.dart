@@ -99,12 +99,15 @@ StationKernel _buildKernel(
         // The land SourceControl + the flare transport are provided AT THE SCOPE
         // (ADR-0008 D5 / D-8).
         services: ServiceBundle(
-          // gitRunner: the SAME recording fake gitOps wraps, so the rework-aware
-          // force-with-lease push (`tg-w3c`) records offline (never real git).
-          sourceControl: GitSourceControl(
+          // The source control PROVISIONS; the bound DELIVERY METHOD is what a
+          // terminal advance actuates (M5 D-4a). gitRunner: the SAME recording
+          // fake gitOps wraps, so the force-with-lease push records offline
+          // (never real git).
+          sourceControl: const GitSourceControl(),
+          delivery: GitHubPrDelivery(
             gitOps: GitOps(f.git),
-            gitRunner: f.git,
             prOpener: f.pr,
+            gitRunner: f.git,
           ),
           transport: transport,
         ),
@@ -282,17 +285,21 @@ void main() {
           f.git.subcommands,
           containsAll(<String>['fetch', 'rebase', 'add', 'commit', 'push']),
         );
-        expect(f.pr.opened, isNotEmpty, reason: 'land opened the PR');
-        // The FULL circuit receipt rides the PR body (item 4 — the
-        // receipt-regression callout): the landing circuit's own outcomes.
-        // (The review route's OWN grade-CSV payload isn't reproducible by this
-        // offline harness's synthetic STATE pushes — `committeeSession` fakes
-        // only the per-critic grades the route reads, not the route's own
-        // advance payload — so the receipt's `review:` line is exercised at
-        // the unit level, `landing_circuit_test.dart`.)
-        expect(f.pr.opened.last.body, contains('## Circuit receipt'));
-        expect(f.pr.opened.last.body, contains('rebase: clean'));
-        expect(f.pr.opened.last.body, contains('revalidate: passed'));
+        expect(f.pr.opened, isNotEmpty, reason: 'the terminal advance delivered');
+        // The PR TITLE is composed by the terminal route and crosses the
+        // value-only DeliveryRequest payload, so it rides this offline drive.
+        expect(f.pr.opened.last.title, isNotEmpty);
+        // The BODY does NOT: it crosses a WORKTREE LEDGER (`.grid/pr-body.md`,
+        // M5 D-4a — a multi-KB body must not ride the terminal payload into the
+        // session bead's metadata), and this drive's worktree is the SYNTHETIC
+        // `/grid/worktrees/...` path that never exists on disk, so the route
+        // skips the write and delivery opens with an EMPTY body. That is the
+        // documented fail-SAFE posture — a land never fails over PR prose — and
+        // it is exactly what this harness's other I/O (the critique clearer, the
+        // pinned diff) already does offline. The receipt actually REACHING the
+        // PR body is proven over a REAL worktree, route → method, in
+        // `delivery_test.dart`'s end-to-end group.
+        expect(f.pr.opened.last.body, isEmpty);
 
         // 5) land complete (the terminal step) → SessionScope closes the session.
         state.push(_state(_session(
@@ -302,7 +309,7 @@ void main() {
             kRouteNode,
             kRebaseNode,
             kRevalidateNode,
-            kLandNode,
+            kDeliverNode,
           },
           grades: {for (final n in kCriticNodes) n: 'A'},
         )));
@@ -410,7 +417,7 @@ void main() {
         await _settle();
         expect(f.git.subcommands, isEmpty, reason: 'land never committed');
         expect(f.pr.opened, isEmpty, reason: 'land never opened a PR');
-        expect(_wroteCursor(f, kLandNode, 'complete'), isFalse);
+        expect(_wroteCursor(f, kDeliverNode, 'complete'), isFalse);
         expect(
           f.runner.callsFor('close'),
           isEmpty,
