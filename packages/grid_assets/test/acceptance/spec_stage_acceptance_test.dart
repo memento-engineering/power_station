@@ -44,19 +44,20 @@ GraphSnapshot _graph({
 
 GraphSnapshot _state(Bead session) => _graph(beads: [session], ready: const {});
 
-/// Every state push in this suite carries the READINESS LADDER complete (bead
-/// `pow-q7n`) — dropping its keys would re-mount the ladder AND re-classify the
-/// session onto the FROZEN pre-ladder circuit (`circuit_migration.dart`), so the
-/// suite would silently drive a shape it is not testing. The ladder's own
-/// choreography is `readiness_acceptance_test.dart`; here it is fast-forwarded so
-/// the SPEC stage stays the focus.
+/// Every state push in this suite carries the spec circuit's whole CHEAP HEAD
+/// complete ([kSpecHeadNodes]: the readiness ladder + the discovery circuit) —
+/// dropping those keys would re-mount the head AND re-classify the session onto a
+/// FROZEN older circuit (`circuit_migration.dart`), so the suite would silently
+/// drive a shape it is not testing. Their own choreography lives in
+/// `readiness_acceptance_test.dart` and `discovery_acceptance_test.dart`; here
+/// the head is fast-forwarded so the SPEC stage stays the focus.
 Bead _session({
   Set<String> completed = const {},
   Set<String> gated = const {},
   Map<String, String> grades = const {},
   Map<String, Map<String, String>> results = const {},
 }) => committeeSession(
-  completed: {...kReadinessLadderNodes, ...completed},
+  completed: {...kSpecHeadNodes, ...completed},
   gated: gated,
   grades: {...kReadinessGradeA, ...grades},
   results: results,

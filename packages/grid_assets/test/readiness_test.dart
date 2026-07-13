@@ -323,17 +323,39 @@ void main() {
       expect(const ReadinessCriticCapability(), isA<ProcessCapability>());
     });
 
-    test('exactly ONE step upstream of `specify` is the agent lane — the ladder '
-        'replaces an ~18-agent round (specify + committee + up to 2 respecs) '
+    test('the LADDER contributes exactly ONE agent lane upstream of `specify` — '
+        'it replaces an ~18-agent round (specify + committee + up to 2 respecs) '
         'with one', () {
+      // Everything upstream of the architect: the ladder's three steps, plus the
+      // DISCOVERY sub-circuit spliced in behind them (`discovery.dart`).
       final upstream = _ancestorsOf(kSpecReviewCircuit, kSpecifyStep);
-      expect(upstream, {kIntakeStep, kReadinessStep, kReadinessRouteStep});
+      expect(upstream, {
+        kIntakeStep,
+        kReadinessStep,
+        kReadinessRouteStep,
+        kDiscoveryCircuitId,
+      });
       final byId = {for (final s in kSpecReviewCircuit.steps) s.stepId: s};
-      final agentLanes = [
+      // The LADDER's own steps carry exactly ONE agent lane; its other two are
+      // deterministic (zero agents). Discovery's cost is its own circuit's, and
+      // its three explorers ride the CHEAP tier (`discovery_test.dart`).
+      final ladder = [
         for (final id in upstream)
-          if ((byId[id]! as CapabilityStep).capabilityId == kReadinessStep) id,
+          if (byId[id] case final CapabilityStep step) step,
       ];
-      expect(agentLanes, [kReadinessStep]);
+      expect(
+        ladder.map((s) => s.stepId),
+        {kIntakeStep, kReadinessStep, kReadinessRouteStep},
+        reason: 'the ladder is the only CapabilityStep run upstream of specify; '
+            'discovery is a SubCircuitStep',
+      );
+      expect(
+        [
+          for (final step in ladder)
+            if (step.capabilityId == kReadinessStep) step.stepId,
+        ],
+        [kReadinessStep],
+      );
     });
   });
 

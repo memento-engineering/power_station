@@ -1,7 +1,7 @@
-// The pow-3p4 migration guard's PURE halves — the three-way cursor classifier,
-// the resolver's circuit dispatch, the frozen shapes, and the frozen
-// sub-circuit's registry entry. No kernel, no tree mount, no IO (pure logic
-// tested before IO is wired — the house set).
+// The migration guard's PURE halves — the five-way cursor classifier, the
+// resolver's circuit dispatch, the frozen shapes, and the frozen sub-circuits'
+// registry entries. No kernel, no tree mount, no IO (pure logic tested before IO
+// is wired — the house set).
 import 'package:genesis_tree/genesis_tree.dart';
 import 'package:grid_assets/grid_assets.dart';
 import 'package:grid_engine/grid_engine.dart';
@@ -23,30 +23,63 @@ SessionProjection _session(CircuitCursor cursor) => SessionProjection(
 );
 
 void main() {
-  group('classifyCodeShape — the four-way cursor classifier', () {
+  group('classifyCodeShape — the five-way cursor classifier', () {
     CodeCircuitShape c(CircuitCursor cursor) =>
         classifyCodeShape(beadId: 'tg-1', cursor: cursor);
 
-    test('an empty cursor (fresh mint / rework round) is LADDERED', () {
-      expect(c(const {}), CodeCircuitShape.laddered);
+    test('an empty cursor (fresh mint / rework round) is the CURRENT shape', () {
+      expect(c(const {}), CodeCircuitShape.discovery);
     });
 
-    test("only another bead's keys — nothing of ours — is LADDERED", () {
-      expect(c(const {'tg-9/agent': _complete}), CodeCircuitShape.laddered);
+    test("only another bead's keys — nothing of ours — is the CURRENT shape",
+        () {
+      expect(c(const {'tg-9/agent': _complete}), CodeCircuitShape.discovery);
     });
 
-    test('the LADDER head key (pow-q7n) classifies laddered, in ANY state', () {
+    test('the DISCOVERY head key classifies the CURRENT shape, in ANY state',
+        () {
       expect(
-        c(const {'tg-1/spec_review/intake': _running}),
-        CodeCircuitShape.laddered,
+        c(const {'tg-1/spec_review/discovery/anchors': _running}),
+        CodeCircuitShape.discovery,
       );
       expect(
         c(const {
           'tg-1/spec_review/intake': _complete,
+          'tg-1/spec_review/discovery/anchors': _complete,
           'tg-1/spec_review/specify': _complete,
           'tg-1/agent': _complete,
         }),
+        CodeCircuitShape.discovery,
+      );
+    });
+
+    test('a PRE-DISCOVERY survivor that already SPECIFIED is FROZEN laddered — '
+        'the gather never mounts and its three agents never spawn', () {
+      expect(
+        c(const {
+          'tg-1/spec_review/intake': _complete,
+          'tg-1/spec_review/specify': _complete,
+          'tg-1/agent': _running,
+        }),
         CodeCircuitShape.laddered,
+      );
+    });
+
+    test('a pre-discovery session still IN the ladder MIGRATES FORWARD — it '
+        'gains discovery, and nothing downstream has run', () {
+      expect(
+        c(const {'tg-1/spec_review/intake': _running}),
+        CodeCircuitShape.discovery,
+      );
+      expect(
+        c(const {
+          'tg-1/spec_review/intake': _complete,
+          'tg-1/spec_review/readiness': _complete,
+          'tg-1/spec_review/readiness-route': _complete,
+        }),
+        CodeCircuitShape.discovery,
+        reason: 'discovery mounts exactly where it belongs — after '
+            '`readiness-route`, before `specify`',
       );
     });
 
@@ -106,8 +139,20 @@ void main() {
       );
     });
 
-    test('the LADDER key WINS over both older specify keys — newest shape '
+    test('the DISCOVERY key WINS over every older specify key — newest shape '
         'first', () {
+      expect(
+        c(const {
+          'tg-1/spec_review/discovery/anchors': _complete,
+          'tg-1/spec_review/intake': _complete,
+          'tg-1/spec_review/specify': _complete,
+          'tg-1/specify': _complete,
+        }),
+        CodeCircuitShape.discovery,
+      );
+    });
+
+    test('the LADDER key WINS over both older specify keys', () {
       expect(
         c(const {
           'tg-1/spec_review/intake': _complete,
@@ -137,11 +182,26 @@ void main() {
       expect(identical(scope.circuit, kCodeCircuit), isTrue);
     });
 
-    test('a LADDERED session stays on kCodeCircuit', () {
+    test('a CURRENT-shape session stays on kCodeCircuit', () {
       final scope = scopeFor(
-        _session(const {'tg-1/spec_review/intake': _complete}),
+        _session(const {'tg-1/spec_review/discovery/anchors': _complete}),
       );
       expect(identical(scope.circuit, kCodeCircuit), isTrue);
+      expect(scope.key, const ValueKey('tg-1:session'));
+    });
+
+    test('a shape-4 PRE-DISCOVERY survivor past `specify` roots '
+        'kLadderedCodeCircuit — the gather never mounts, so its three explorers '
+        'never spawn and its route can never park a building bead', () {
+      final scope = scopeFor(
+        _session(const {
+          'tg-1/spec_review/intake': _complete,
+          'tg-1/spec_review/specify': _complete,
+          'tg-1/agent': _running,
+        }),
+      );
+      expect(identical(scope.circuit, kLadderedCodeCircuit), isTrue);
+      expect(identical(scope.circuit, kCodeCircuit), isFalse);
       expect(scope.key, const ValueKey('tg-1:session'));
     });
 
@@ -252,18 +312,58 @@ void main() {
       expect(sub.circuitId, isNot('spec_review'));
     });
 
-    test('the CURRENT spec circuit is the LADDERED one (the contrast)', () {
+    test(
+      'kLadderedSpecReviewCircuit KEEPS the readiness ladder but has NO '
+      'discovery step — nothing to inflate, so a survivor spawns no explorer — '
+      'and it keeps the three-way spec route (specify IS its sibling here)',
+      () {
+        expect(kLadderedSpecReviewCircuit.id, kLadderedSpecReviewCircuitId);
+        expect(kLadderedSpecReviewCircuit.terminalStepId, 'route');
+        expect(kLadderedSpecReviewCircuit.stepById('intake'), isNotNull);
+        expect(
+          kLadderedSpecReviewCircuit.steps.map((s) => s.stepId),
+          isNot(contains(kDiscoveryCircuitId)),
+        );
+        // Under shape 4, `specify` depended on `readiness-route` DIRECTLY.
+        expect(
+          kLadderedSpecReviewCircuit.stepById('specify')!.dependsOn,
+          {'readiness-route'},
+        );
+        final route =
+            kLadderedSpecReviewCircuit.stepById('route')! as CapabilityStep;
+        expect(route.capabilityId, 'spec-route');
+      },
+    );
+
+    test('kLadderedCodeCircuit points spec_review at the FROZEN pre-discovery '
+        'body', () {
+      expect(kLadderedCodeCircuit.id, 'code');
+      expect(kLadderedCodeCircuit.terminalStepId, 'land');
+      expect(kLadderedCodeCircuit.steps.map((s) => s.stepId), [
+        'spec_review',
+        'agent',
+        'review',
+        'land',
+      ]);
+      final sub =
+          kLadderedCodeCircuit.stepById('spec_review')! as SubCircuitStep;
+      expect(sub.circuitId, kLadderedSpecReviewCircuitId);
+      expect(sub.circuitId, isNot('spec_review'));
+    });
+
+    test('the CURRENT spec circuit is the DISCOVERY one (the contrast)', () {
       expect(kSpecReviewCircuit.stepById('specify'), isNotNull);
       expect(kSpecReviewCircuit.stepById(kIntakeStep), isNotNull);
+      expect(kSpecReviewCircuit.stepById(kDiscoveryCircuitId), isNotNull);
       expect(
         kSpecReviewCircuit.stepById(kSpecifyStep)!.dependsOn,
-        {kReadinessRouteStep},
+        {kDiscoveryCircuitId},
       );
     });
   });
 
   group('the registry', () {
-    test('registers BOTH frozen sub-circuits beside the current one', () {
+    test('registers ALL THREE frozen sub-circuits beside the current one', () {
       final registry = buildCodeRegistry();
       expect(
         identical(
@@ -280,7 +380,18 @@ void main() {
         isTrue,
       );
       expect(
+        identical(
+          registry.circuit(kLadderedSpecReviewCircuitId),
+          kLadderedSpecReviewCircuit,
+        ),
+        isTrue,
+      );
+      expect(
         identical(registry.circuit('spec_review'), kSpecReviewCircuit),
+        isTrue,
+      );
+      expect(
+        identical(registry.circuit(kDiscoveryCircuitId), kDiscoveryCircuit),
         isTrue,
       );
     });

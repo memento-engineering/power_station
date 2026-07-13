@@ -1,0 +1,475 @@
+// The DISCOVERY circuit, offline end-to-end.
+//
+// Drives the nested gather + CITE-THE-OFFENCE gate — the spec circuit's second
+// head, between the readiness ladder and `specify` — through the REAL
+// StationKernel + CodeCircuitResolver + buildCodeRegistry, advancing the per-node
+// cursor via the fake STATE source (the bridge re-projecting each chokepoint
+// write). The worktree is a REAL temp dir, so the gather's `anchors.json`, the
+// lenses' reports and the route's `dossier.json` are real files on disk; the lens
+// PROCESSES are the fake runtime provider's recorded spawns.
+//
+// Four proofs — the bead's acceptance criteria:
+//  - THE GATHER SPAWNS NOTHING: `anchors` is deterministic (ZERO agents) and its
+//    output lands in the worktree; only then do the three READ-ONLY explorers fan
+//    out IN PARALLEL, on the CHEAP tier.
+//  - AN OFFENDER SPAWNS NO ARCHITECT: a lens reporting a CITED, unacknowledged
+//    contradiction of a ratified decision GATES at `discovery-route` — the gate
+//    NAMES the offence, and `specify` never mounts.
+//  - A CLEAN BEAD ADVANCES: the curated dossier lands in the worktree, `specify`
+//    spawns, and the architect's brief RENDERS the dossier — the rubrics it will
+//    be graded by included.
+//  - PRE-DISCOVERY (the MIGRATION negative control): a session minted under the
+//    pre-discovery shape and surviving a station BOUNCE roots the FROZEN circuit
+//    — the gather NEVER mounts, its three agents NEVER spawn, and its route can
+//    never PARK a bead whose build is already running.
+//
+// Offline — FAKES, no live tg/gc/claude/bd/git/network.
+import 'dart:convert';
+import 'dart:io';
+
+import 'package:beads_dart/beads_dart.dart';
+import 'package:genesis_tree/genesis_tree.dart';
+import 'package:grid_assets/grid_assets.dart';
+import 'package:grid_engine/grid_engine.dart';
+import 'package:grid_runtime/grid_runtime.dart';
+import 'package:test/test.dart';
+
+import '../support/asset_fakes.dart';
+
+GraphSnapshot _graph({
+  required List<Bead> beads,
+  required Set<String> ready,
+}) => GraphSnapshot.fromParts(
+  beads: beads,
+  dependencies: const [],
+  readyIds: ready,
+  capturedAt: DateTime(2026),
+);
+
+GraphSnapshot _state(Bead session) => _graph(beads: [session], ready: const {});
+
+const _sid = 'tgdog-sess1';
+String _step(String relPath) => '$_sid/tg-1/$relPath';
+
+/// The ADR clause the decision lens cites — a REAL clause of the live register,
+/// so the proof can never pass on a fabricated citation.
+const String _adr = 'docs/adr/ADR-0000-ai-decision-register.md A17(3)';
+
+/// A session whose READINESS LADDER is complete and nothing else — the bead is
+/// released into DISCOVERY, which is this suite's focus.
+Bead _ladderDone({Set<String> completed = const {}}) => committeeSession(
+  id: _sid,
+  completed: {...kReadinessLadderNodes, ...completed},
+  grades: kReadinessGradeA,
+);
+
+/// A session minted under the PRE-DISCOVERY shape (`pow-q7n`): its cursor carries
+/// the ladder AND `spec_review/specify`, but NO `spec_review/discovery/anchors`.
+/// That absence IS the migration signal — `classifyCodeShape` reads it as
+/// `laddered` and roots the FROZEN pre-discovery circuit. The bead is already past
+/// the spec phase and into its build.
+Bead _preDiscoverySession() => committeeSession(
+  id: _sid,
+  completed: {
+    ...kReadinessLadderNodes,
+    kSpecifyNode,
+    kSpecClearCritiqueNode,
+    kSpecGateNode,
+    ...kSpecCriticNodes,
+    kSpecRouteNode,
+  },
+  grades: {
+    ...kReadinessGradeA,
+    kSpecGateNode: 'A',
+    for (final n in kSpecCriticNodes) n: 'A',
+  },
+);
+
+/// A [SourceControl] that hands every bead the SAME real temp worktree — the one
+/// this suite plants lens reports into and reads the dossier back out of. Land is
+/// NOT wired (`canLand` false), so the land step no-ops and no git is ever
+/// touched (Fakes, not mocks).
+class _TempWorkspace implements SourceControl {
+  const _TempWorkspace(this.dir);
+
+  final String dir;
+
+  @override
+  String workspaceFor(String beadId) => dir;
+
+  @override
+  String branchFor(String beadId) => 'grid/$beadId';
+
+  @override
+  String get baseBranch => 'main';
+
+  @override
+  bool get canLand => false;
+
+  @override
+  Future<void> provisionWorkspace({
+    required String beadId,
+    required String workspaceDir,
+  }) async {}
+
+  @override
+  Future<void> commitAll({
+    required String workspaceDir,
+    required String message,
+  }) async {}
+
+  @override
+  Future<void> push({
+    required String workspaceDir,
+    required String remote,
+    required String branch,
+  }) async {}
+
+  @override
+  Future<PrRef?> openPr({
+    required String workspaceDir,
+    required String branch,
+    required String baseBranch,
+    required String title,
+  }) async => null;
+}
+
+StationKernel _buildKernel(
+  Fakes f,
+  FakeSnapshotSource work,
+  FakeSnapshotSource state,
+  String workspaceDir,
+) {
+  final bridge = StationJoinBridge(work: work, state: state);
+  return StationKernel(
+    bridge: bridge,
+    stationServices: f.ctx,
+    resolver: kCodeResolver,
+    registry: buildCodeRegistry(
+      rubrics: (id) => '($id rubric bands)',
+      gitRunner: f.git,
+      shellRunner: RecordingShellRunner(),
+      // A no-op clearer: this suite PLANTS the lens reports the fake lens
+      // processes would have written, so the round-freshness wipe must not race
+      // them. The wipe's own contract is fenced in `discovery_test.dart`.
+      critiqueDirClearer: (_) {},
+    ),
+    substations: [
+      SubstationScope(
+        configNotifier: SubstationConfigNotifier(
+          const SubstationConfig(substationId: 'tg', ownedSubstations: {'tg'}),
+        ),
+        services: ServiceBundle(sourceControl: _TempWorkspace(workspaceDir)),
+        key: const ValueKey('scope.tg'),
+      ),
+    ],
+  );
+}
+
+/// True iff some chokepoint `update` wrote `grid.cursor.tg-1/<relPath>.state`
+/// == [stateName].
+bool _wroteCursor(Fakes f, String relPath, String stateName) =>
+    f.runner.callsFor('update').any((c) {
+      final i = c.indexOf('--metadata');
+      if (i < 0 || i + 1 >= c.length) return false;
+      final md = jsonDecode(c[i + 1]) as Map<String, dynamic>;
+      return md['grid.cursor.tg-1/$relPath.state'] == stateName;
+    });
+
+/// The `reason` the chokepoint stamped on the minted gate bead.
+String? _gateReason(Fakes f) {
+  for (final c in f.runner.callsFor('update')) {
+    final i = c.indexOf('--metadata');
+    if (i < 0 || i + 1 >= c.length) continue;
+    final md = jsonDecode(c[i + 1]) as Map<String, dynamic>;
+    final reason = md['reason'];
+    if (reason is String) return reason;
+  }
+  return null;
+}
+
+Iterable<String> _spawned(Fakes f) => f.provider.started.map((s) => s.name);
+
+/// Writes the report a lens process would have written — at the canonical
+/// absolute path its own prompt names, stamped with its own `nodePath`.
+void _plantReport(String dir, String lens, LensReport report) {
+  final json = {...report.toJson(), 'nodePath': 'tg-1/spec_review/discovery/$lens'};
+  File(lensReportPath(dir, lens))
+    ..createSync(recursive: true)
+    ..writeAsStringSync(jsonEncode(json));
+}
+
+Future<void> _settle() async {
+  for (var i = 0; i < 6; i++) {
+    await pumpEventQueue();
+  }
+}
+
+void main() {
+  late Directory tmp;
+  setUp(() => tmp = Directory.systemTemp.createTempSync('discovery-acc'));
+  tearDown(() => tmp.deleteSync(recursive: true));
+
+  /// Drives the kernel to the point where the three lenses have spawned and
+  /// exited, with [reports] planted in the worktree — leaving the route as the
+  /// next thing to mount.
+  Future<Fakes> driveToRoute(Map<String, LensReport> reports) async {
+    final f = buildFakes(createdId: _sid);
+    final work = FakeSnapshotSource(_graph(beads: const [], ready: const {}));
+    final state = FakeSnapshotSource(_graph(beads: const [], ready: const {}));
+    final kernel = _buildKernel(f, work, state, tmp.path);
+    addTearDown(kernel.dispose);
+    addTearDown(f.provider.close);
+    addTearDown(work.close);
+    addTearDown(state.close);
+
+    kernel.start();
+    await _settle();
+
+    // The ladder is fast-forwarded (its own choreography is
+    // `readiness_acceptance_test.dart`) → the bead is released into DISCOVERY.
+    work.push(_graph(beads: [workBead('tg-1')], ready: {'tg-1'}));
+    await _settle();
+    state.push(_state(_ladderDone()));
+    await _settle();
+
+    // TIER 1: the deterministic gather ran, spawned NOTHING, and left its output
+    // in the worktree for every lens to read.
+    expect(_wroteCursor(f, kAnchorsNode, 'complete'), isTrue);
+    expect(
+      _spawned(f),
+      isEmpty,
+      reason: 'the gather is a ServiceCapability — ZERO agents',
+    );
+    expect(File(anchorsPath(tmp.path)).existsSync(), isTrue);
+
+    // TIER 2: the three READ-ONLY explorers fan out IN PARALLEL, on the CHEAP
+    // tier — and the architect is still withheld.
+    state.push(_state(_ladderDone(completed: {kAnchorsNode})));
+    await _settle();
+    expect(_spawned(f).toSet(), kDiscoveryLensNodes.map(_step).toSet());
+    for (final spawn in f.provider.started) {
+      final args = spawn.config.args;
+      expect(args[args.indexOf('--model') + 1], kCheapModelDefault);
+      expect(args.join('\n'), contains('You are READ-ONLY'));
+    }
+    expect(
+      _spawned(f),
+      isNot(contains(_step(kSpecifyNode))),
+      reason: 'the architect is withheld behind the violation gate',
+    );
+
+    // Each lens writes its report and exits clean.
+    for (final entry in reports.entries) {
+      _plantReport(tmp.path, entry.key, entry.value);
+    }
+    for (final lens in kDiscoveryLensNodes) {
+      f.provider.emit(Exited(name: _step(lens), exitCode: 0));
+    }
+    await _settle();
+    state.push(
+      _state(_ladderDone(completed: {kAnchorsNode, ...kDiscoveryLensNodes})),
+    );
+    await _settle();
+    return f;
+  }
+
+  group('the discovery circuit — an OFFENDER spawns NO architect', () {
+    test(
+      'a CITED, unacknowledged contradiction of a ratified decision GATES at '
+      'discovery-route with the offence NAMED, and specify NEVER spawns',
+      () async {
+        final f = await driveToRoute({
+          for (final lens in kDiscoveryLenses)
+            lens: LensReport(
+              lens: lens,
+              violations: lens == kDecisionLens
+                  ? const [
+                      DiscoveryFinding(
+                        kind: ViolationKind.decision,
+                        standard: _adr,
+                        quote: 'a false HOLD STALLS the governance track itself',
+                        contradiction:
+                            'this bead gates the track on an absent verdict',
+                      ),
+                    ]
+                  : const [],
+            ),
+        });
+
+        // The HOLD: parked at the route, CITING the standard it offends.
+        expect(_wroteCursor(f, kDiscoveryRouteNode, 'gated'), isTrue);
+        final reason = _gateReason(f);
+        expect(reason, isNotNull);
+        expect(reason, contains('DISCOVERY HOLD'));
+        expect(
+          reason,
+          contains(_adr),
+          reason: 'the gate CITES the offence — a hold with no citation is '
+              'exactly what this circuit forbids',
+        );
+        expect(
+          reason,
+          contains('DECLARE the departure'),
+          reason: 'the ask states both exits — revise, or declare',
+        );
+
+        // The saving, asserted: the expensive fan-out never happened.
+        final started = _spawned(f);
+        expect(
+          started,
+          isNot(contains(_step(kSpecifyNode))),
+          reason: 'an offending bead must not reach the specify architect',
+        );
+        for (final critic in kSpecCriticNodes) {
+          expect(started, isNot(contains(_step(critic))));
+        }
+        expect(
+          started.toSet(),
+          kDiscoveryLensNodes.map(_step).toSet(),
+          reason: 'exactly THREE cheap agents ran — the explorers themselves',
+        );
+      },
+    );
+  });
+
+  group('the discovery circuit — a CLEAN bead advances with its dossier', () {
+    test(
+      'the route ADVANCES, the curated dossier lands in the worktree, and the '
+      'architect brief RENDERS it — the grading rubrics included',
+      () async {
+        final f = await driveToRoute({
+          for (final lens in kDiscoveryLenses)
+            lens: LensReport(
+              lens: lens,
+              context: [
+                ContextNote(
+                  note: 'the $lens angle: this pack is a genesis_tree consumer',
+                  source: 'CLAUDE.md',
+                ),
+              ],
+              // A concern the lens could NOT cite: it rides as a FLAG, and it
+              // must NOT hold the bead.
+              violations: lens == kCodeLens
+                  ? const [
+                      DiscoveryFinding(
+                        kind: ViolationKind.pattern,
+                        standard: '',
+                        quote: '',
+                        contradiction: 'this feels like it duplicates the route',
+                      ),
+                    ]
+                  : const [],
+            ),
+        });
+
+        expect(_wroteCursor(f, kDiscoveryRouteNode, 'complete'), isTrue);
+        expect(
+          _wroteCursor(f, kDiscoveryRouteNode, 'gated'),
+          isFalse,
+          reason: 'an UNCITED concern is a vibe — it can never hold a bead',
+        );
+
+        // The dossier is REAL: the route wrote it into the worktree.
+        expect(File(discoveryDossierPath(tmp.path)).existsSync(), isTrue);
+        final dossier = readDiscoveryDossier(tmp.path);
+        expect(dossier, isNotNull);
+        expect(dossier!.context, hasLength(3));
+        expect(dossier.flags, hasLength(1));
+        expect(dossier.anchors.rubrics.keys, containsAll(kSpecCommitteeRubrics));
+
+        // And the ARCHITECT reads it: the brief the specify stage builds renders
+        // the dossier — the rubrics its spec is graded by FIRST (the whole point
+        // of the gather).
+        final brief = buildSpecifyBrief(
+          workBead('tg-1'),
+          testWorkspace('tg-1', workspaceDir: tmp.path),
+          dossier: dossier,
+        );
+        expect(brief.task, contains('Discovery dossier'));
+        expect(brief.task, contains('How your spec will be graded'));
+        for (final rubric in kSpecCommitteeRubrics) {
+          expect(brief.task, contains('($rubric rubric bands)'));
+        }
+        expect(brief.task, contains('genesis_tree consumer'));
+        expect(brief.task, contains('Flags — ANSWER these'));
+      },
+    );
+
+    test('with discovery complete, the architect finally spawns', () async {
+      final f = buildFakes(createdId: _sid);
+      final work = FakeSnapshotSource(_graph(beads: const [], ready: const {}));
+      final state = FakeSnapshotSource(_graph(beads: const [], ready: const {}));
+      final kernel = _buildKernel(f, work, state, tmp.path);
+      addTearDown(kernel.dispose);
+      addTearDown(f.provider.close);
+      addTearDown(work.close);
+      addTearDown(state.close);
+
+      kernel.start();
+      await _settle();
+      work.push(_graph(beads: [workBead('tg-1')], ready: {'tg-1'}));
+      await _settle();
+      state.push(_state(ladderDoneSession(id: _sid)));
+      await _settle();
+
+      expect(
+        _spawned(f),
+        [_step(kSpecifyNode)],
+        reason: 'the gather cleared the bead — ONLY THEN the architect',
+      );
+    });
+  });
+
+  group('the discovery circuit — the MIGRATION negative control', () {
+    test(
+      'a PRE-DISCOVERY in-flight session surviving a bounce roots the FROZEN '
+      'circuit: the gather never mounts, its three explorers never spawn, and '
+      'the route can never park a bead that is already building',
+      () async {
+        final f = buildFakes(createdId: _sid);
+        final work = FakeSnapshotSource(
+          _graph(beads: const [], ready: const {}),
+        );
+        // The BOUNCE: the station restarts and ADOPTS an in-flight session whose
+        // cursor was minted under the pre-discovery shape (no `anchors` key).
+        final state = FakeSnapshotSource(_state(_preDiscoverySession()));
+        final kernel = _buildKernel(f, work, state, tmp.path);
+        addTearDown(kernel.dispose);
+        addTearDown(f.provider.close);
+        addTearDown(work.close);
+        addTearDown(state.close);
+
+        kernel.start();
+        await _settle();
+        work.push(_graph(beads: [workBead('tg-1')], ready: {'tg-1'}));
+        await _settle();
+
+        final started = _spawned(f);
+
+        // The gather NEVER mounts for a survivor — the three agents that would
+        // have been spawned (and billed) never are.
+        expect(
+          started.where((s) => s.contains('/discovery/')),
+          isEmpty,
+          reason: 'a pre-discovery survivor must NEVER spawn an explorer',
+        );
+        expect(_wroteCursor(f, kAnchorsNode, 'complete'), isFalse);
+        expect(
+          _wroteCursor(f, kDiscoveryRouteNode, 'gated'),
+          isFalse,
+          reason: 'the gate can never PARK a bead that is already building',
+        );
+        expect(File(anchorsPath(tmp.path)).existsSync(), isFalse);
+
+        // Non-vacuous: the session CONTINUES where it left off — the frozen
+        // circuit's spec phase is complete, so the BUILD agent is what mounts.
+        expect(
+          started,
+          contains(_step(kAgentNode)),
+          reason: 'the survivor resumes its build, proving the kernel is live',
+        );
+      },
+    );
+  });
+}

@@ -87,6 +87,7 @@ import '../agent/agent_domain.dart';
 import '../agent/agent_harness.dart';
 import '../agent/usage_report.dart';
 import 'committee.dart';
+import 'discovery.dart';
 import 'readiness.dart';
 import 'respec.dart';
 
@@ -224,12 +225,19 @@ $kSpecExemplarDesign
 /// ([SpecRouteCapability], bead `pow-7nm`) — advance | AUTO-RESPEC | escalate —
 /// over the spec grades.
 ///
-/// **The ladder is the CHEAP head (bead `pow-q7n`, `readiness.dart`)**: `specify`
-/// `dependsOn` [kReadinessRouteStep], so a bead HELD as not-ready spawns NO
-/// architect and NO committee. It is deliberately UPSTREAM of `specify` and so
-/// OUTSIDE the rewind set below — a respec rewrites the SPEC, not the BEAD, and
-/// re-grading an unchanged bead every round would burn the very agents the lens
-/// exists to save.
+/// **The ladder is the CHEAP head (bead `pow-q7n`, `readiness.dart`)**: it is
+/// deliberately UPSTREAM of `specify` and so OUTSIDE the rewind set below — a
+/// respec rewrites the SPEC, not the BEAD, and re-grading an unchanged bead every
+/// round would burn the very agents the lens exists to save.
+///
+/// **The DISCOVERY circuit is the second head (`discovery.dart`)**: a nested
+/// [SubCircuitStep] between the ladder and `specify` — a deterministic gather
+/// (rubrics, resolved anchors, prior art) plus three READ-ONLY cheap-tier
+/// explorers, terminating in a CITE-THE-OFFENCE gate. `specify` `dependsOn` it,
+/// so a bead that contradicts a ratified decision WITHOUT acknowledging the
+/// departure spawns NO architect and NO committee, and a clean bead reaches the
+/// architect with a curated dossier instead of a bare worktree. It is upstream of
+/// `specify` for the same reason the ladder is, and stays out of the rewind set.
 ///
 /// **`specify` is FOLDED IN as the route's SIBLING (bead `pow-ui8`)** — it was a
 /// step of the PARENT `code` circuit until the engine gained routing as a
@@ -284,10 +292,24 @@ const Circuit kSpecReviewCircuit = Circuit(
       params: {'lane': kReadinessStep},
       dependsOn: {kReadinessStep},
     ),
+    // The DISCOVERY circuit (`discovery.dart`) — the nested read-only gather +
+    // the cite-the-offence violation gate. `specify` dependsOn it, so an
+    // unacknowledged offender spawns NO architect; the engine's one-hop terminal
+    // resolution resolves the dep to
+    // `<bead>/spec_review/discovery/discovery-route`'s positive terminal.
+    // It is UPSTREAM of `specify` and therefore OUTSIDE the auto-respec rewind
+    // set: a respec rewrites the SPEC, not the bead, so re-running three
+    // explorers per round would burn the very agents this circuit exists to save
+    // (the A17(9) posture).
+    SubCircuitStep(
+      stepId: kDiscoveryCircuitId,
+      circuitId: kDiscoveryCircuitId,
+      dependsOn: {kReadinessRouteStep},
+    ),
     CapabilityStep(
       stepId: kSpecifyStep,
       capabilityId: kSpecifyStep,
-      dependsOn: {kReadinessRouteStep},
+      dependsOn: {kDiscoveryCircuitId},
     ),
     CapabilityStep(
       stepId: kClearCritiqueStep,
@@ -400,12 +422,20 @@ class SpecifyCapability extends ProcessCapability {
     // through does not). Absent (a first round, or an offline/dry-run worktree
     // that was never materialized) ⇒ a plain first-round brief.
     final workspaceDir = workspace.workspaceDir;
-    final guidance = Directory(workspaceDir).existsSync()
-        ? readRespecLedger(workspaceDir)
-        : null;
+    final live = Directory(workspaceDir).existsSync();
+    final guidance = live ? readRespecLedger(workspaceDir) : null;
+    // The DISCOVERY dossier (`discovery.dart`) — the curated context the gather
+    // circuit left in the worktree. Absent (offline, or a session on a frozen
+    // pre-discovery shape) ⇒ a brief byte-identical to the pre-discovery one.
+    final dossier = live ? readDiscoveryDossier(workspaceDir) : null;
     return registry.harness(config.harness)!.spawnFor(
       config: config,
-      brief: buildSpecifyBrief(bead, workspace, guidance: guidance),
+      brief: buildSpecifyBrief(
+        bead,
+        workspace,
+        guidance: guidance,
+        dossier: dossier,
+      ),
       workspace: workspace,
       // CAPTURE-ONLY usage telemetry (FT-2), same as the build agent.
       usageOut: usageReportPath(args.nodePath),
@@ -452,6 +482,7 @@ AgentBrief buildSpecifyBrief(
   Bead bead,
   Workspace workspace, {
   RespecLedger? guidance,
+  DiscoveryDossier? dossier,
 }) {
   final title = bead.title.isNotEmpty ? bead.title : 'work bead ${bead.id}';
   final substation = bead.metadata['rig'];
@@ -480,6 +511,15 @@ AgentBrief buildSpecifyBrief(
     t
       ..writeln()
       ..write(renderRespecGuidance(guidance));
+  }
+  // The DISCOVERY dossier (`discovery.dart`) — the gather's curated context: the
+  // rubrics this spec will be GRADED by, the bead's resolved anchors, the prior
+  // art, what the explorers found, the flags to answer, and any departure the
+  // bead declared (which the architect must carry into `## ADR Alignment`).
+  if (dossier != null) {
+    t
+      ..writeln()
+      ..write(renderDiscoveryDossier(dossier));
   }
   t
     ..writeln()

@@ -84,9 +84,9 @@ void main() {
         await pumpEventQueue();
 
         // 1) A FOREIGN work bead enters ready → mounts → mints a tgdog session.
-        //    The readiness ladder's `intake` head is deterministic (bead
-        //    `pow-q7n`, zero agents), so re-project the ladder complete before
-        //    the first AGENT (specify) can spawn.
+        //    The spec circuit's cheap head (the readiness ladder + the discovery
+        //    circuit) runs upstream of the architect, so re-project the WHOLE head
+        //    complete before the first AGENT (specify) can spawn.
         work.push(
           _graph(beads: [_foreignWork('genesis-7r9')], ready: {'genesis-7r9'}),
         );
@@ -97,7 +97,7 @@ void main() {
               sessionBead(
                 id: 'tgdog-sess1',
                 workBeadId: 'genesis-7r9',
-                completed: kReadinessLadderNodes,
+                completed: kSpecHeadNodes,
               ),
             ],
             ready: const {},
@@ -131,10 +131,15 @@ void main() {
         state.push(
           _graph(
             beads: [
+              // The whole cheap head + `specify`. Carrying the DISCOVERY keys is
+              // load-bearing beyond the mount: a cursor holding `specify` with NO
+              // discovery key is a PRE-DISCOVERY survivor, which the migration
+              // guard correctly freezes onto `spec_review_v3` — so this suite
+              // would silently drive the frozen shape.
               sessionBead(
                 id: 'tgdog-sess1',
                 workBeadId: 'genesis-7r9',
-                completed: {...kReadinessLadderNodes, kSpecifyNode},
+                completed: {...kSpecHeadNodes, kSpecifyNode},
               ),
             ],
             ready: const {},

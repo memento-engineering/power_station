@@ -1,8 +1,8 @@
 /// The `code`-circuit MIGRATION GUARD (bead `pow-3p4`) — the edge ADR-0000
 /// A15(6) carved out of the fold rather than absorbing.
 ///
-/// [kCodeCircuit]'s head has been reshaped THREE times, and each reshape MOVED a
-/// persisted cursor key:
+/// [kCodeCircuit]'s spec head has been reshaped FOUR times, and each reshape
+/// moved (or added) a persisted cursor key:
 ///
 ///  1. **legacy** (pre-`pow-6ao`) — `agent → review → land`. No spec phase.
 ///  2. **spec-head** (`pow-6ao`, A13(1)) — `specify → spec_review → agent →
@@ -12,19 +12,29 @@
 ///     with `specify` folded INSIDE the spec circuit so the spec route's
 ///     `Rewind` may name it as a sibling. The key MOVED to
 ///     `<bead>/spec_review/specify`.
-///  4. **laddered** (`pow-q7n`, A17; CURRENT) — the SPEC-READINESS INTAKE LENS
-///     re-heads the spec circuit (`intake` → `readiness` → `readiness-route` →
-///     `specify` → …), so the spec circuit's only dep-free step is now `intake`
-///     and the head key MOVED again, to `<bead>/spec_review/intake`.
+///  4. **laddered** (`pow-q7n`, A17) — the SPEC-READINESS INTAKE LENS re-heads
+///     the spec circuit (`intake` → `readiness` → `readiness-route` → `specify`
+///     → …), so the spec circuit's only dep-free step is now `intake` and the
+///     head key MOVED again, to `<bead>/spec_review/intake`.
+///  5. **discovery** (`discovery.dart`; CURRENT) — the DISCOVERY circuit is
+///     spliced BETWEEN the ladder and `specify` (`readiness-route` → `discovery`
+///     → `specify`), so `specify` gains a new dependency and the discovery
+///     circuit's own dep-free step appears at
+///     `<bead>/spec_review/discovery/anchors`. This is the FIRST reshape that did
+///     NOT move the circuit's head — `intake` is still the spec circuit's only
+///     dep-free step — which is why [classifyCodeShape] discriminates on
+///     `specify`, not on the head (see its doc).
 ///
 /// The frontier reads a MISSING cursor key as `pending` (`cursorNodeAt`), so a
-/// session minted under shape 1, 2 or 3 and still in flight across a station
-/// BOUNCE has no key at the current head: the current circuit would mount a
-/// dep-free head step for a bead already mid-review or mid-land. Under shapes 1–2
+/// session minted under an OLDER shape and still in flight across a station
+/// BOUNCE has no key where the current circuit expects one: the current circuit
+/// would mount a step for a bead already mid-review or mid-land. Under shapes 1–2
 /// that spawns a spurious `specify` architect which MUTATES the work bead's
 /// acceptance and design via bd; under shape 3 it mounts the readiness ladder,
 /// whose `readiness` tier SPAWNS A REAL AGENT and whose `readiness-route` can
-/// PARK (`Gate`) a bead whose build is already running.
+/// PARK (`Gate`) a bead whose build is already running; under shape 4 it mounts
+/// the DISCOVERY circuit, which SPAWNS THREE READ-ONLY AGENTS and whose route can
+/// likewise PARK a bead whose build is already running.
 ///
 /// The NAMED invariant this file protects: **a session that already advanced
 /// past its own circuit's head never re-enters the spec phase.** The guard is
@@ -37,10 +47,10 @@
 ///
 /// **RETIREMENT.** This is a MIGRATION, not a permanent seam: it exists only
 /// while old-shape sessions are in flight. Once no OPEN session carries a
-/// shape-1, shape-2 **or shape-3** cursor (every survivor landed, closed, or was
-/// reworked into a fresh round), DELETE this file, drop `...kMigrationCircuits`
-/// from `buildCodeRegistry`, and put the production composition back to
-/// `CircuitResolver((_) => kCodeCircuit)`.
+/// shape-1, shape-2, shape-3 **or shape-4** cursor (every survivor landed,
+/// closed, or was reworked into a fresh round), DELETE this file, drop
+/// `...kMigrationCircuits` from `buildCodeRegistry`, and put the production
+/// composition back to `CircuitResolver((_) => kCodeCircuit)`.
 ///
 /// **Layering note (do not "fix" into a cycle).** This library imports NOTHING
 /// from `code_capabilities.dart`: the CURRENT circuit arrives as a constructor
@@ -299,6 +309,129 @@ const Circuit kFoldedCodeCircuit = Circuit(
   ],
 );
 
+/// The registry id of [kLadderedSpecReviewCircuit] — the FROZEN pre-DISCOVERY
+/// spec circuit. Deliberately NOT `spec_review` (that id now resolves to the
+/// CURRENT circuit, whose `specify` dependsOn the discovery circuit).
+const String kLadderedSpecReviewCircuitId = 'spec_review_v3';
+
+/// The FROZEN **pre-discovery laddered** spec circuit (`pow-q7n`, git `4f9d5c1`)
+/// — `intake` → `readiness` → `readiness-route` → `specify` → `clear-critique` →
+/// the gating lane + four LLM critics → `route`. The DISCOVERY circuit is NOT in
+/// it: under shape 4 `specify` depended directly on `readiness-route`.
+///
+/// Registered under [kLadderedSpecReviewCircuitId] and reachable ONLY from
+/// [kLadderedCodeCircuit]. Pointing shape 4's `spec_review` step at the CURRENT
+/// `spec_review` would inflate a circuit whose `specify` dependsOn a `discovery`
+/// sub-circuit the survivor's cursor has never seen — the frontier reads those
+/// missing keys as `pending`, mounts the gather, SPAWNS THREE REAL AGENTS, and
+/// its route could PARK a bead whose build is already running. That is precisely
+/// the spawn this guard exists to prevent.
+///
+/// Its `route` keeps `capabilityId: 'spec-route'` (the three-way matrix):
+/// `specify` IS a sibling here, so a `Rewind` naming it is legal and a shape-4
+/// survivor keeps its auto-respec — no capability degrades.
+const Circuit kLadderedSpecReviewCircuit = Circuit(
+  id: kLadderedSpecReviewCircuitId,
+  terminalStepId: 'route',
+  steps: [
+    CapabilityStep(stepId: 'intake', capabilityId: 'intake'),
+    CapabilityStep(
+      stepId: 'readiness',
+      capabilityId: 'readiness',
+      params: {'rubric': 'bead-readiness'},
+      dependsOn: {'intake'},
+    ),
+    CapabilityStep(
+      stepId: 'readiness-route',
+      capabilityId: 'readiness-route',
+      params: {'lane': 'readiness'},
+      dependsOn: {'readiness'},
+    ),
+    CapabilityStep(
+      stepId: 'specify',
+      capabilityId: 'specify',
+      dependsOn: {'readiness-route'},
+    ),
+    CapabilityStep(
+      stepId: 'clear-critique',
+      capabilityId: 'clear-critique',
+      dependsOn: {'specify'},
+    ),
+    CapabilityStep(
+      stepId: 'spec-validation',
+      capabilityId: 'spec-validation',
+      dependsOn: {'clear-critique'},
+    ),
+    CapabilityStep(
+      stepId: 'coherence',
+      capabilityId: 'spec-critic',
+      params: {'rubric': 'coherence'},
+      dependsOn: {'clear-critique'},
+    ),
+    CapabilityStep(
+      stepId: 'adr-alignment',
+      capabilityId: 'spec-critic',
+      params: {'rubric': 'adr-alignment'},
+      dependsOn: {'clear-critique'},
+    ),
+    CapabilityStep(
+      stepId: 'acceptance-testability',
+      capabilityId: 'spec-critic',
+      params: {'rubric': 'acceptance-testability'},
+      dependsOn: {'clear-critique'},
+    ),
+    CapabilityStep(
+      stepId: 'plan-completeness',
+      capabilityId: 'spec-critic',
+      params: {'rubric': 'plan-completeness'},
+      dependsOn: {'clear-critique'},
+    ),
+    CapabilityStep(
+      stepId: 'route',
+      capabilityId: 'spec-route',
+      dependsOn: {
+        'spec-validation',
+        'coherence',
+        'adr-alignment',
+        'acceptance-testability',
+        'plan-completeness',
+      },
+      params: {
+        'critics': 'spec-validation,coherence,adr-alignment,'
+            'acceptance-testability,plan-completeness',
+        'gating': 'spec-validation',
+      },
+    ),
+  ],
+);
+
+/// The FROZEN **pre-discovery laddered** root shape (`pow-q7n`, git `4f9d5c1`) —
+/// `spec_review → agent → review → land`, whose `spec_review` step keeps
+/// `stepId: 'spec_review'` (so every child node path lines up key-for-key with
+/// the adopted cursor) but points its `circuitId` at
+/// [kLadderedSpecReviewCircuitId]. The migration target for a shape-4 survivor.
+const Circuit kLadderedCodeCircuit = Circuit(
+  id: 'code',
+  terminalStepId: 'land',
+  steps: [
+    SubCircuitStep(
+      stepId: 'spec_review',
+      circuitId: kLadderedSpecReviewCircuitId,
+    ),
+    CapabilityStep(
+      stepId: 'agent',
+      capabilityId: 'agent',
+      dependsOn: {'spec_review'},
+    ),
+    SubCircuitStep(
+      stepId: 'review',
+      circuitId: 'code_review',
+      dependsOn: {'agent'},
+    ),
+    SubCircuitStep(stepId: 'land', circuitId: 'landing', dependsOn: {'review'}),
+  ],
+);
+
 /// The registry entries the frozen shapes need, spread into `buildCodeRegistry`.
 /// Only the frozen SPEC circuits need registering — the legacy shape's
 /// `code_review`/`landing` sub-circuits are the CURRENT ones, unchanged by any
@@ -307,14 +440,19 @@ const Circuit kFoldedCodeCircuit = Circuit(
 const Map<String, Circuit> kMigrationCircuits = {
   kSpecHeadSpecReviewCircuitId: kSpecHeadSpecReviewCircuit,
   kFoldedSpecReviewCircuitId: kFoldedSpecReviewCircuit,
+  kLadderedSpecReviewCircuitId: kLadderedSpecReviewCircuit,
 };
 
 /// Which shape of the `code` circuit a session's cursor was MINTED under.
 enum CodeCircuitShape {
-  /// The CURRENT circuit (`pow-q7n`): the spec circuit's head is the readiness
-  /// LADDER, so `intake` lives at `<bead>/spec_review/intake`. Also the shape
-  /// for a fresh bead and for a freshly-minted / reworked (empty-cursor)
-  /// session.
+  /// The CURRENT circuit: the DISCOVERY circuit sits between the readiness ladder
+  /// and `specify`, so a session that reached `specify` has written
+  /// `<bead>/spec_review/discovery/anchors`. Also the shape for a fresh bead and
+  /// for a freshly-minted / reworked (empty-cursor) session.
+  discovery,
+
+  /// The `pow-q7n` circuit: the readiness ladder heads the spec circuit and
+  /// `specify` dependsOn `readiness-route` DIRECTLY — no discovery circuit.
   laddered,
 
   /// The `pow-ui8` circuit: `specify` is the spec circuit's head, at
@@ -330,49 +468,72 @@ enum CodeCircuitShape {
 
 /// Classifies the shape [cursor] was minted under, for the session of [beadId].
 ///
-/// PRESENCE, not state, is the signal. Every persisted cursor key was written by
-/// a host that actually MOUNTED (running or terminal — and D-7's gate re-arm
-/// flips a parked node back to an explicit `pending`, key still present), and in
-/// every shape the spec/build head is the circuit's only dep-free step. So a
-/// non-empty LADDERED cursor ALWAYS holds `<bead>/spec_review/intake` (the
-/// current spec circuit's only dep-free step), a non-empty folded cursor ALWAYS
-/// holds `<bead>/spec_review/specify`, a non-empty spec-head cursor ALWAYS holds
-/// `<bead>/specify`, and a non-empty legacy cursor holds none — making presence a
-/// total signal. Reading the STATE instead would misclassify a re-armed `pending`
-/// head.
+/// PRESENCE, not state, is the signal (A16) — every persisted cursor key was
+/// written by a host that actually MOUNTED (running or terminal; D-7's gate
+/// re-arm flips a parked node back to an explicit `pending`, key still present),
+/// so reading the STATE instead would misclassify a re-armed head.
+///
+/// But the DISCOVERY reshape is the first that did NOT move the circuit's head:
+/// `intake` is still the spec circuit's only dep-free step, so `intake`-presence
+/// no longer separates shape 4 from shape 5. The discriminator is therefore the
+/// step DOWNSTREAM of the insertion point:
+///
+///  - a cursor holding `spec_review/discovery/anchors` is shape 5 (the discovery
+///    circuit's only dep-free step — any session that reached `specify` under
+///    this shape necessarily wrote it, so presence stays TOTAL);
+///  - a cursor holding the LADDER but ALSO `spec_review/specify`, with NO
+///    discovery key, is a shape-4 SURVIVOR that already specified: it is FROZEN
+///    on [kLadderedCodeCircuit], so the gather never mounts, its three agents
+///    never spawn, and its route can never PARK a bead whose build is running;
+///  - a cursor holding the LADDER and NOT `specify` is still IN the ladder. It
+///    adopts the CURRENT shape and MIGRATES FORWARD — it gains the discovery
+///    circuit, which mounts exactly where it belongs (after `readiness-route`,
+///    before `specify`). Nothing downstream has run, so there is no spurious
+///    spawn and nothing to re-do: the ONLY safe direction, and the reason the
+///    discriminator is `specify` rather than `intake`.
 ///
 /// Keys rooted at another bead's id are IGNORED (they say nothing about this
-/// session), so a cursor with no keys of our own is [CodeCircuitShape.laddered] —
-/// a fresh mint, or a bead that never started, both of which correctly get the
+/// session), so a cursor with no keys of our own is [CodeCircuitShape.discovery]
+/// — a fresh mint, or a bead that never started, both of which correctly get the
 /// current spec stage. A rework round also lands here: `grid rework` re-keys the
 /// prior session's `work_bead` to `<bead>#rN`, so the tree finds no session at
 /// `bead.id` and MINTS one with an empty cursor.
 ///
-/// The final fall-through to [CodeCircuitShape.legacy] is FAIL-CLOSED: given
-/// keys of our own and no `specify`/`intake` node at ANY path, the one thing we
-/// must never do is root a circuit that can mount `specify`. The legacy shape has
-/// no spec phase at all, so the named invariant holds even for a cursor state
-/// that should not be reachable.
+/// The final fall-through to [CodeCircuitShape.legacy] is FAIL-CLOSED: given keys
+/// of our own and no `specify`/`intake` node at ANY path, the one thing we must
+/// never do is root a circuit that can mount `specify`. The legacy shape has no
+/// spec phase at all, so the named invariant holds even for a cursor state that
+/// should not be reachable.
 CodeCircuitShape classifyCodeShape({
   required String beadId,
   required CircuitCursor cursor,
 }) {
   final prefix = '$beadId/';
   final ours = cursor.keys.where((k) => k.startsWith(prefix));
-  if (ours.isEmpty) return CodeCircuitShape.laddered;
+  if (ours.isEmpty) return CodeCircuitShape.discovery;
 
   final specReview = stepPath(beadId, 'spec_review');
+  final specify = stepPath(specReview, 'specify');
 
-  // Shape 4 (CURRENT) — the readiness ladder's head. Literal 'intake': a
+  // Shape 5 (CURRENT) — the discovery circuit's own head. Literal ids: a
   // persisted cursor key is a WIRE fact and must not follow a source rename.
+  if (cursor.containsKey(
+    stepPath(stepPath(specReview, 'discovery'), 'anchors'),
+  )) {
+    return CodeCircuitShape.discovery;
+  }
+
+  // Shapes 4/5 both carry the ladder. Only a session that already SPECIFIED under
+  // the pre-discovery shape must be frozen; one still in the ladder migrates
+  // forward.
   if (cursor.containsKey(stepPath(specReview, 'intake'))) {
-    return CodeCircuitShape.laddered;
+    return cursor.containsKey(specify)
+        ? CodeCircuitShape.laddered
+        : CodeCircuitShape.discovery;
   }
 
   // Shape 3 — folded, PRE-ladder: `specify` inside spec_review, no ladder keys.
-  if (cursor.containsKey(stepPath(specReview, 'specify'))) {
-    return CodeCircuitShape.folded;
-  }
+  if (cursor.containsKey(specify)) return CodeCircuitShape.folded;
 
   // Shape 2 — spec-head: `specify` at the ROOT circuit.
   if (cursor.containsKey(stepPath(beadId, 'specify'))) {
@@ -409,13 +570,14 @@ class CodeCircuitResolver implements SessionResolver {
   /// Creates the migration-aware `code` resolver over the [current] root shape.
   const CodeCircuitResolver(this.current);
 
-  /// The CURRENT (laddered) root circuit — `kCodeCircuit` in production.
+  /// The CURRENT (discovery) root circuit — `kCodeCircuit` in production.
   final Circuit current;
 
-  /// The root circuit for [shape] — [current] for the laddered shape, else the
+  /// The root circuit for [shape] — [current] for the current shape, else the
   /// frozen shape the session was minted under.
   Circuit circuitFor(CodeCircuitShape shape) => switch (shape) {
-    CodeCircuitShape.laddered => current,
+    CodeCircuitShape.discovery => current,
+    CodeCircuitShape.laddered => kLadderedCodeCircuit,
     CodeCircuitShape.folded => kFoldedCodeCircuit,
     CodeCircuitShape.specHead => kSpecHeadCodeCircuit,
     CodeCircuitShape.legacy => kLegacyCodeCircuit,

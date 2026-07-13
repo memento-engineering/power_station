@@ -266,7 +266,8 @@ void main() {
   });
 
   group('the readiness ladder — a REFINED bead drives', () {
-    test('intake finds nothing and the lens grades A → specify spawns', () async {
+    test('intake finds nothing and the lens grades A → the bead DRIVES into '
+        'DISCOVERY, and only with discovery done does specify spawn', () async {
       final f = buildFakes(createdId: _sid);
       final work = FakeSnapshotSource(_graph(beads: const [], ready: const {}));
       final state = FakeSnapshotSource(_graph(beads: const [], ready: const {}));
@@ -303,16 +304,50 @@ void main() {
       expect(_wroteCursor(f, kReadinessRouteNode, 'complete'), isTrue);
       expect(_wroteCursor(f, kReadinessRouteNode, 'gated'), isFalse);
 
-      // And the bead DRIVES: specify is the next agent to spawn.
+      // And the bead DRIVES — but into DISCOVERY, not into `specify`: the
+      // discovery circuit now heads the spec circuit between the ladder and the
+      // architect. Its deterministic gather (`anchors`) mounts first and spawns
+      // NOTHING; the architect is still withheld.
       state.push(_state(committeeSession(
         completed: kReadinessLadderNodes,
         grades: kReadinessGradeA,
       )));
       await _settle();
+      expect(_wroteCursor(f, kAnchorsNode, 'complete'), isTrue,
+          reason: 'the ladder released the bead into the deterministic gather');
       expect(
         f.provider.started.map((s) => s.name),
-        [_step(kReadinessNode), _step(kSpecifyNode)],
-        reason: 'the lens ran, then handed the bead to the architect',
+        [_step(kReadinessNode)],
+        reason: 'the gather is a ServiceCapability — still ONE agent so far',
+      );
+
+      // The gather complete → the three READ-ONLY explorers fan out. The
+      // architect is STILL withheld: discovery gates before it.
+      state.push(_state(committeeSession(
+        completed: {...kReadinessLadderNodes, kAnchorsNode},
+        grades: kReadinessGradeA,
+      )));
+      await _settle();
+      final exploring = f.provider.started.map((s) => s.name);
+      expect(exploring, containsAll(kDiscoveryLensNodes.map(_step)));
+      expect(
+        exploring,
+        isNot(contains(_step(kSpecifyNode))),
+        reason: 'the architect is withheld until the discovery route advances',
+      );
+
+      // …and with the whole discovery circuit complete, `specify` is the next
+      // agent to spawn: the ladder's job is to let the bead PROCEED, and what it
+      // proceeds into is the gather.
+      state.push(_state(committeeSession(
+        completed: kSpecHeadNodes,
+        grades: kReadinessGradeA,
+      )));
+      await _settle();
+      expect(
+        f.provider.started.map((s) => s.name),
+        contains(_step(kSpecifyNode)),
+        reason: 'the lens ran, the gather ran, then the architect',
       );
     });
   });
