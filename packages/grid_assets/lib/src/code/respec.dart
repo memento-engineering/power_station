@@ -1,22 +1,24 @@
 /// The spec-route's AUTO-RESPEC arm (bead `pow-7nm`) — the third verdict
 /// between "advance to build" and "flare to a human".
 ///
-/// **The gap.** The spec route was BINARY: all-pass → advance, else → [Gate]. A
-/// fixable spec (pow-kzx graded A/A/B/D) parked for a human operator who read
-/// the D rationale, corrected the bead by hand, and re-keyed a rework round —
-/// exactly the toil this automates. A gated spec should route back to
+/// **The gap.** The spec route was BINARY: all-pass → advance, else → a human
+/// park. A fixable spec (pow-kzx graded A/A/B/D) parked for a human operator who
+/// read the D rationale, corrected the bead by hand, and re-keyed a rework round
+/// — exactly the toil this automates. A held spec should route back to
 /// spec-rework AUTOMATICALLY with the failing lanes' RECOMMENDATIONS as the
 /// correction guidance; a human is the ESCALATION, not the default.
 ///
-/// **The layering (settled by the_grid `tg-o90`).** The loop EDGE is the
-/// engine's, and it now EXISTS: [StepOutcome] gained a fourth arm, [Rewind]
-/// ({stepIds}, reason) — routing as a first-class primitive. The host flips the
+/// **The layering (settled by the_grid `tg-o90`, re-homed onto the verdict).**
+/// The loop EDGE is the engine's, and it now EXISTS: a route emits a
+/// [RouteVerdict], and [Rewind] ({stepIds}, reason) is one of its three arms —
+/// routing as a first-class primitive. The host flips the
 /// named SIBLING steps, everything transitively downstream of them, and the
 /// rewinding node itself back to `state=pending` with a bumped per-node
 /// `rewindCount`, in ONE chokepoint write onto the_grid's OWN session bead (A37).
 /// The bump RE-KEYS each node, so keyed reconcile disposes the old incarnations
-/// and the sub-DAG re-runs VIRGIN — with NO `type=gate` bead (that is [Gate], a
-/// human park) and NO session re-mint (that is `grid rework`, the operator verb).
+/// and the sub-DAG re-runs VIRGIN — with NO `type=gate` bead (that is [Escalate],
+/// a human park) and NO session re-mint (that is `grid rework`, the operator
+/// verb).
 /// So the RESPEC arm ACTUATES: it returns `Rewind({kSpecifyStep}, …)` naming its
 /// `specify` sibling (bead `pow-ui8` folded `specify` into [kSpecReviewCircuit]
 /// for exactly this — a rewind may only name steps of the rewinding node's own
@@ -26,17 +28,17 @@
 /// **The BOUND.** [kMaxRespecRounds] (2) is the asset's own cap, read off the
 /// route node's `rewindCount` through the ambient [SiblingView] — the route
 /// escalates on its OWN policy first, and the engine's belt (`kMaxReworkRounds`,
-/// 3 — the host refuses a rewind at the cap and parks at a human [Gate]) never
-/// has to fire.
+/// 3 — the host refuses a rewind at the cap and [Escalate]s to the bound handler
+/// instead) never has to fire.
 ///
 /// **The fork (ADR-0000 A13(5), and the pending A14 that departs from it).**
-/// A13(5) made ONE [RouteCapability] serve BOTH committees, honest about which
-/// gate fired via its `gating` param. This file FORKS the DECISION MATRIX (not
+/// A13(5) made ONE [CodeRouteCapability] serve BOTH committees, honest about
+/// which gate fired via its `gating` param. This file FORKS the DECISION MATRIX (not
 /// the shared verdict-transport stack of A13(3), which is untouched): the two
 /// committees must now decide DIFFERENTLY over the same grades — a code `D`
 /// parks for a human, a spec `D` with a rationale auto-respecs — and no string
-/// param can express that. [RouteCapability] stays byte-unchanged for the code
-/// committee; A13(5)'s actual invariant (a hard block NAMES its lane) is
+/// param can express that. [CodeRouteCapability] keeps the binary matrix for the
+/// code committee; A13(5)'s actual invariant (a hard block NAMES its lane) is
 /// preserved here too.
 ///
 /// **The channel.** A rewind re-runs the committee VIRGIN, so the verdict files
@@ -55,12 +57,13 @@ import 'package:grid_engine/grid_engine.dart';
 import 'package:path/path.dart' as p;
 
 import 'committee.dart';
+import 'route_failure.dart';
 
 /// The max AUTO-respec rounds a spec may take before the route flares to a human
 /// (the bead's bound). Round 1 and round 2 auto-loop; a third fixable fail
 /// ESCALATES. Strictly below the engine's own `kMaxReworkRounds` (3) — the belt
-/// that makes `CapabilityHost` REFUSE a [Rewind] and park at a human [Gate] — so
-/// the asset's cap always fires first, on its own policy.
+/// that makes `CapabilityHost` REFUSE a [Rewind] and [Escalate] instead — so the
+/// asset's cap always fires first, on its own policy.
 const int kMaxRespecRounds = 2;
 
 /// The `specify` step id — the step the RESPEC arm rewinds, and the step
@@ -182,7 +185,8 @@ RespecLedger? readRespecLedger(String workspaceDir) {
 }
 
 /// Writes [ledger] into [workspaceDir]. THROWS on a write that cannot land — the
-/// caller ([SpecRouteCapability]) turns that into a LOUD [Failed]: a respec whose
+/// caller ([SpecRouteCapability]) turns that into a LOUD [RouteFailure]: a respec
+/// whose
 /// guidance never reaches the next brief would re-specify blind and re-park,
 /// which is precisely the toil this bead removes (guards LOUD or GONE).
 void writeRespecLedger(String workspaceDir, RespecLedger ledger) =>
@@ -204,8 +208,9 @@ void clearRespecLedger(String workspaceDir) {
 }
 
 /// The spec route's THREE-way verdict (bead `pow-7nm`) — the code committee's
-/// binary `advance | Gate` matrix ([RouteCapability]) is unchanged; the SPEC
-/// committee gains a middle arm. Sealed: consumed with an exhaustive `switch`.
+/// binary `advance | escalate` matrix ([CodeRouteCapability]) is unchanged; the
+/// SPEC committee gains a middle arm. Sealed: consumed with an exhaustive
+/// `switch`.
 sealed class SpecRouteVerdict {
   const SpecRouteVerdict();
 }
@@ -275,7 +280,8 @@ typedef SpecLane = ({String id, String? grade, String rationale});
 ///  6. else ⇒ [SpecRespec] for round `priorRound + 1`.
 ///
 /// **The spread rule is GONE from the spec route** (it survives untouched in the
-/// code committee's [RouteCapability]). A spread ≥ 3 across A..F necessarily puts
+/// code committee's [CodeRouteCapability]). A spread ≥ 3 across A..F necessarily
+/// puts
 /// some lane at `D` or worse, so arms 2/3 already cover every case it caught —
 /// and what it did with them ("human ultimatum") is exactly what this bead exists
 /// to stop doing by default. The spread still rides [SpecAdvance] as provenance.
@@ -449,13 +455,14 @@ String renderRespecGuidance(RespecLedger ledger) {
 }
 
 /// The SPEC committee's route (beads `pow-7nm` + `pow-ui8`) — the spec-side
-/// counterpart of the code committee's [RouteCapability], with a THIRD arm
+/// counterpart of the code committee's [CodeRouteCapability], with a THIRD arm
 /// between advance and a human gate. It reads its sibling lanes' grades AND
 /// rationales — and its OWN cursor — through the ambient [SiblingView] (the
 /// effect verb — never a subscription/re-query, D-5), applies the deterministic
 /// [decideSpecRoute] matrix, and:
 ///
-///  - [SpecAdvance] ⇒ [Ok] with the SAME provenance payload the code route emits
+///  - [SpecAdvance] ⇒ [Advance] with the SAME provenance payload the code route
+///    emits
 ///    (`verdict`/`grades`/`spread`/`rule`), and the guidance ledger is DELETED (a
 ///    later rework round must never re-inject a stale spec correction).
 ///  - [SpecRespec] ⇒ the ledger is WRITTEN into the worktree, then a [Rewind]
@@ -463,10 +470,11 @@ String renderRespecGuidance(RespecLedger ledger) {
 ///    ∪ everything downstream of it ∪ this route back to `pending`, so the
 ///    committee re-runs VIRGIN in the SAME session and the next specify ride
 ///    reads the ledger back as its correction guidance. NO human, no gate bead,
-///    no session re-mint. A ledger write that cannot land is [Failed] — LOUD,
-///    never a respec whose guidance silently never arrives.
-///  - [SpecEscalate] ⇒ [Gate] — the human flare (a structural F, a critic F, a
-///    rationale-less fail, or the round cap).
+///    no session re-mint. A ledger write that cannot land throws a
+///    [RouteFailure] — LOUD, never a respec whose guidance silently never
+///    arrives.
+///  - [SpecEscalate] ⇒ [Escalate] — the human flare (a structural F, a critic F,
+///    a rationale-less fail, or the round cap).
 ///
 /// Offline/dry-run posture: an absent [Workspace], or a workspace directory that
 /// does not exist on disk (the synthetic `/grid/worktrees/...` an offline suite
@@ -474,12 +482,12 @@ String renderRespecGuidance(RespecLedger ledger) {
 /// [ClearCritiqueCapability] takes. The verdict is unchanged, and so is the
 /// BOUND: the round counter is the node's `rewindCount`, not the ledger file, so
 /// it holds with zero I/O.
-class SpecRouteCapability extends ServiceCapability {
+class SpecRouteCapability extends RouteCapability {
   /// Creates the spec route.
   const SpecRouteCapability();
 
   @override
-  Future<StepOutcome> run(TreeContext context, StepArgs args) async {
+  Future<RouteVerdict> route(TreeContext context, StepArgs args) async {
     // Read the ambient values at ENTRY (while mounted); the matrix below is pure
     // over the captured values.
     final siblings =
@@ -523,7 +531,7 @@ class SpecRouteCapability extends ServiceCapability {
     )) {
       case SpecAdvance(:final gradesCsv, :final spread):
         if (live) clearRespecLedger(dir);
-        return Ok({
+        return Advance({
           'verdict': 'advance',
           'grades': gradesCsv,
           'spread': '$spread',
@@ -534,7 +542,7 @@ class SpecRouteCapability extends ServiceCapability {
           try {
             writeRespecLedger(dir, ledger);
           } catch (e) {
-            return Failed(
+            throw RouteFailure(
               'spec-route: could not write the respec guidance ledger at '
               '${respecLedgerPath(dir)} — $e. Refusing to respec blind (the '
               'next specify brief would carry no correction guidance).',
@@ -543,7 +551,7 @@ class SpecRouteCapability extends ServiceCapability {
         }
         return Rewind(const {kSpecifyStep}, respecRewindReason(ledger));
       case SpecEscalate(:final reason):
-        return Gate(reason);
+        return Escalate(reason);
     }
   }
 }
