@@ -65,6 +65,24 @@
 /// architect + the 4-critic committee — the ~18-agent round the 2026-07-11 wide
 /// run spent discovering that at the committee.
 ///
+/// The DISCOVERY circuit (`src/code/discovery.dart`) is the spec circuit's second
+/// head, nested between that ladder and `specify` — a gather AND a gate. The
+/// gather is deterministic ([AnchorsCapability], ZERO agents): the committee's own
+/// grading rubrics, the bead's code anchors resolved against the worktree, and
+/// prior art through the read-only [StationSearchService] the `search` Command
+/// already vends. Three READ-ONLY explorers ([DiscoveryLensCapability]) then run
+/// in parallel on the CHEAP tier — the [AgentRole.gather] role's first spawner —
+/// and, because that role DECIDES NOTHING, a lens emits no letter: it emits a
+/// [LensReport] of context notes and CITED violations. [DiscoveryRouteCapability]
+/// makes the call, deterministically ([decideDiscovery]): a bead that contradicts
+/// a ratified ADR or an applicable skill WITHOUT acknowledging the departure is
+/// HELD with the offence CITED, so no architect and no committee ever runs on it;
+/// a clean bead ADVANCES with a curated [DiscoveryDossier] that
+/// [buildSpecifyBrief] renders — the architect specs against the rubrics it will
+/// be graded by. The gate is CITE-THE-OFFENCE by construction ([gatesTheBead]): no
+/// citation is a vibe and can never hold a bead, a DECLARED departure passes, and
+/// a pattern deviation needs a NAMED precedent.
+///
 /// The DART domain (the typed `grid.dart` envelope + pub dev-time linkage +
 /// `DartCommand`) lives in its sibling pack `dart_grid_assets`.
 library;
@@ -79,6 +97,7 @@ export 'src/code/circuit_migration.dart';
 export 'src/code/code_capabilities.dart';
 export 'src/code/committee.dart';
 export 'src/code/conventional_commit.dart';
+export 'src/code/discovery.dart';
 export 'src/code/landing.dart';
 export 'src/code/pr_composition.dart';
 export 'src/code/pr_describe.dart';

@@ -342,7 +342,7 @@ void main() {
     );
 
     test(
-      'an adopted LADDERED session stays on the current circuit — the spec '
+      'an adopted CURRENT-SHAPE session stays on the current circuit — the spec '
       'critics fan out, specify does not respawn, the build agent stays held',
       () async {
         final f = buildFakes(createdId: _sid);
@@ -361,14 +361,15 @@ void main() {
         kernel.start();
         await _settle();
 
-        // A CURRENT-shape survivor: the ladder keys ARE present (that is what
-        // makes it laddered, not a pre-ladder survivor rooted on the frozen
-        // circuit — bead `pow-q7n`), and it is already past `specify`.
+        // A CURRENT-shape survivor: the whole cheap head's keys ARE present — the
+        // ladder AND the discovery circuit (that is what makes it CURRENT, not a
+        // pre-discovery survivor rooted on the frozen circuit), and it is already
+        // past `specify`.
         state.push(
           _state(
             committeeSession(
               completed: {
-                ...kReadinessLadderNodes,
+                ...kSpecHeadNodes,
                 kSpecifyNode,
                 kSpecClearCritiqueNode,
               },

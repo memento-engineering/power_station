@@ -28,6 +28,7 @@ import '../assets/asset_loader.dart';
 import 'circuit_migration.dart';
 import 'committee.dart';
 import 'conventional_commit.dart';
+import 'discovery.dart';
 import 'landing.dart';
 import 'pr_composition.dart';
 import 'pr_describe.dart';
@@ -861,6 +862,8 @@ DefaultCapabilityRegistry buildCodeRegistry({
   ShellRunner? shellRunner,
   DirectoryClearer? critiqueDirClearer,
   InferenceRunner? inference,
+  AnchorResolver? anchorResolver,
+  PriorArtSource? priorArt,
 }) {
   final rubricSource = rubrics ?? PackagedAssetLoader().rubricSource;
   return DefaultCapabilityRegistry(
@@ -873,6 +876,25 @@ DefaultCapabilityRegistry buildCodeRegistry({
       kIntakeStep: IntakeCapability(clearer: critiqueDirClearer),
       kReadinessStep: ReadinessCriticCapability(rubrics: rubricSource),
       kReadinessRouteStep: const ReadinessRouteCapability(),
+      // The DISCOVERY circuit (`discovery.dart`) — the nested gather + violation
+      // gate between the readiness ladder and `specify`. `anchors` shares the
+      // [critiqueDirClearer] seam (it owns the discovery round's freshness wipe,
+      // the A17(8) posture one level down) and the [rubrics] source, and it is
+      // handed the spec committee's OWN rubric ids: the architect is shown the
+      // FULL rubrics its spec is graded by (ADR-0000 A19's Status footer names
+      // this circuit as the generalization of that principle). The ids arrive as
+      // a VALUE, which is what keeps `discovery.dart` free of `specify.dart`.
+      kAnchorsStep: AnchorsCapability(
+        rubricIds: kSpecCommitteeRubrics,
+        rubrics: rubricSource,
+        resolver: anchorResolver,
+        priorArt: priorArt,
+        clearer: critiqueDirClearer,
+      ),
+      // ONE capability, three lens lanes (`params['lens']`) — the id is the
+      // circuit's own, so a lens step reads `capabilityId: 'discovery'`.
+      kDiscoveryCircuitId: const DiscoveryLensCapability(),
+      kDiscoveryRouteStep: const DiscoveryRouteCapability(),
       // The spec stage + its committee lanes (bead `pow-6ao`; `specify` folded
       // into the spec circuit by `pow-ui8`).
       kSpecifyStep: const SpecifyCapability(),
@@ -901,6 +923,7 @@ DefaultCapabilityRegistry buildCodeRegistry({
     circuits: const {
       'code': kCodeCircuit,
       'spec_review': kSpecReviewCircuit,
+      kDiscoveryCircuitId: kDiscoveryCircuit,
       'code_review': kCodeReviewCircuit,
       'landing': kLandingCircuit,
       // The FROZEN old-shape spec circuits (bead `pow-3p4`, extended by

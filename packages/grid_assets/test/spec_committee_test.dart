@@ -133,6 +133,7 @@ void main() {
         kIntakeStep,
         kReadinessStep,
         kReadinessRouteStep,
+        kDiscoveryCircuitId,
         kSpecifyStep,
         kClearCritiqueStep,
         kSpecGatingRubric,
@@ -151,9 +152,9 @@ void main() {
       expect(byId[kReadinessRouteStep]!.dependsOn, {kReadinessStep});
       // `specify` is still the route's SIBLING (bead `pow-ui8`), so the RESPEC
       // arm can name it in a `StepOutcome.Rewind` — it just no longer heads the
-      // circuit.
+      // circuit, and it now sits behind the DISCOVERY gate as well.
       expect((byId[kSpecifyStep]! as CapabilityStep).capabilityId, kSpecifyStep);
-      expect(byId[kSpecifyStep]!.dependsOn, {kReadinessRouteStep});
+      expect(byId[kSpecifyStep]!.dependsOn, {kDiscoveryCircuitId});
       // The hygiene wipe waits on specify, which is what puts EVERY lane
       // downstream of it (see the rewind-set test below).
       expect(byId[kClearCritiqueStep]!.dependsOn, {kSpecifyStep});
@@ -227,6 +228,61 @@ void main() {
         reason: 'a respec round must not burn an agent re-grading an unchanged '
             'bead',
       );
+      // DISCOVERY is upstream of `specify` for exactly the same reason.
+      expect(
+        rewound,
+        isNot(contains(kDiscoveryCircuitId)),
+        reason:
+            'a respec re-runs `specify` and its dependents; re-running three '
+            'explorers per round would burn the very agents the discovery '
+            'circuit exists to save',
+      );
+    });
+
+    test('the DISCOVERY circuit heads the spec circuit and `specify` dependsOn '
+        'it — a HELD bead spawns NO architect', () {
+      final byId = {for (final s in kSpecReviewCircuit.steps) s.stepId: s};
+      final discovery = byId[kDiscoveryCircuitId]! as SubCircuitStep;
+      expect(discovery.circuitId, kDiscoveryCircuitId);
+      expect(
+        discovery.dependsOn,
+        {kReadinessRouteStep},
+        reason: 'the gather runs only once the ladder released the bead',
+      );
+      expect(
+        (byId[kSpecifyStep]! as CapabilityStep).dependsOn,
+        {kDiscoveryCircuitId},
+        reason: 'the architect is withheld behind the violation gate',
+      );
+      // The engine's one-hop terminal resolution: the dep is satisfied by the
+      // discovery circuit's TERMINAL, so a Gate there withholds `specify`.
+      expect(kDiscoveryCircuit.terminalStepId, kDiscoveryRouteStep);
+    });
+
+    test('the discovery circuit is gather → 3 read-only lenses in parallel → '
+        'the route: the lenses join on the gather, the route on all three', () {
+      final byId = {for (final s in kDiscoveryCircuit.steps) s.stepId: s};
+      expect(byId.keys.toList(), [
+        kAnchorsStep,
+        ...kDiscoveryLenses,
+        kDiscoveryRouteStep,
+      ]);
+      // The gather is the circuit's ONLY dep-free step — its wipe + its gather
+      // always land before any lens can read or write.
+      expect((byId[kAnchorsStep]! as CapabilityStep).dependsOn, isEmpty);
+      for (final lens in kDiscoveryLenses) {
+        final step = byId[lens]! as CapabilityStep;
+        expect(
+          step.capabilityId,
+          kDiscoveryCircuitId,
+          reason: 'ONE capability, three lanes (the `params[rubric]` idiom)',
+        );
+        expect(step.params, {'lens': lens});
+        expect(step.dependsOn, {kAnchorsStep});
+      }
+      final route = byId[kDiscoveryRouteStep]! as CapabilityStep;
+      expect(route.dependsOn, kDiscoveryLenses.toSet());
+      expect(route.params['lenses'], kDiscoveryLenses.join(','));
     });
 
     test('no pin-diff lane: the review subject is the bead\'s spec, not a '
