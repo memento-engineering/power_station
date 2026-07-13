@@ -63,6 +63,18 @@
 /// every per-bead worktree so a station-spawned `claude -p` can `/invoke` a
 /// vended skill) and the operator install Command (`pow-a74`).
 ///
+/// The OPERATOR leg of that delivery is [InstallCommand] over
+/// `src/assets/overlay_install.dart`: `<cli> install` resolves the in-scope
+/// overlay roots NON-PRESCRIPTIVELY ([resolveStationOverlayRoots] —
+/// `package:extension_discovery` over the grid home's package config; every
+/// pack shipping the asset manifest AND a `station_overlay/` is in scope, none
+/// is hardcoded), expands them onto the operator's own `.claude/`
+/// ([OverlayInstallService], non-destructive), and prints the DIFF
+/// ([renderInstallReport]). It COMMITS NOTHING — the operator reviews and
+/// commits. [mountedValuesOf] is the one offline delegate-mount walker both
+/// this leg (for the grid home) and [mountedRosterOf] (for the substation
+/// roster) ride.
+///
 /// The SPEC-READINESS INTAKE LENS (bead `pow-q7n`, `src/code/readiness.dart`)
 /// heads that spec circuit: a deterministic intake contract ([IntakeCapability]
 /// — a driveable type + a real brief, ZERO agents) then ONE cheap agent grading
@@ -100,6 +112,9 @@ export 'src/agent/model_tier.dart';
 export 'src/agent/usage_report.dart';
 export 'src/assets/asset_loader.dart';
 export 'src/assets/composition_assets.dart';
+export 'src/assets/install_command.dart';
+export 'src/assets/mounted_tree.dart';
+export 'src/assets/overlay_install.dart';
 export 'src/assets/overlay_materializer.dart';
 export 'src/code/circuit_migration.dart';
 export 'src/code/code_capabilities.dart';

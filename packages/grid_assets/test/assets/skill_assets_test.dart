@@ -197,4 +197,63 @@ void main() {
       );
     });
   });
+
+  group('the re-homed OPERATOR skills', () {
+    const reHomed = <String, Set<String>>{
+      'station-operations': {'runner', 'gridHome'},
+      'gate-medicine': {'runner', 'gridHome'},
+      'harvest-review': {'runner'},
+      'intake-grooming': <String>{},
+    };
+
+    test(
+        'each is VENDED, declared in the manifest, and carries EXACTLY the '
+        'holes it declares', () {
+      final manifest = loadYaml(
+        File(p.join(root, 'mcp', 'config.yaml')).readAsStringSync(),
+      ) as YamlMap;
+      final skills = (manifest['skills'] as YamlList).cast<YamlMap>();
+
+      for (final entry in reHomed.entries) {
+        expect(kVendedSkills, contains(entry.key));
+        final template = loader.loadSkillTemplate(entry.key);
+        final holes = {
+          for (final m in RegExp(r'\{\{(\w+)\}\}').allMatches(template))
+            m.group(1)!,
+        };
+        expect(holes, entry.value,
+            reason: '${entry.key} carries exactly its declared args');
+
+        final declared = skills.firstWhere(
+          (s) => s['id'] == entry.key,
+          orElse: () => fail('${entry.key} must be declared in the manifest'),
+        );
+        expect(declared['path'], 'station_overlay/skills/${entry.key}/SKILL.md');
+        expect(declared['audience'], 'operator');
+        final args =
+            (declared['args'] as YamlList?)?.cast<YamlMap>() ?? const <YamlMap>[];
+        expect({for (final a in args) a['name'] as String}, entry.value);
+      }
+    });
+
+    test(
+        'station-operations renders against the installer binding — the runner '
+        'verb and the grid home bound, no residue', () {
+      final rendered = loader.renderSkill(
+        'station-operations',
+        args: {'runner': 'space', 'gridHome': '/grid/home'},
+      );
+      expect(rendered, isNot(contains('{{')));
+      expect(rendered, contains('space up'));
+      expect(rendered, contains('/grid/home/.grid'));
+    });
+
+    test(
+        'the AUDIENCE split: an operator skill is never named in a build '
+        "agent's brief — one of them PUSHES, which the brief forbids", () {
+      expect(kOperatorSkills, reHomed.keys.toSet());
+      expect(kOperatorSkills, isNot(contains('discover')),
+          reason: 'discover is the agent-audience skill the brief DOES name');
+    });
+  });
 }
