@@ -26,8 +26,9 @@ library;
 
 import 'package:beads_dart/beads_dart.dart'
     show Bead, BdCliService, BdRunner, ProcessBdRunner;
-import 'package:genesis_tree/genesis_tree.dart';
 import 'package:grid_sdk/grid_sdk.dart' as sdk;
+
+import '../assets/mounted_tree.dart';
 
 /// Enumerates the mounted substation roster of [delegate] — the ATTACHED
 /// substations, resolved from the resident-station context at run time.
@@ -45,36 +46,10 @@ import 'package:grid_sdk/grid_sdk.dart' as sdk;
 List<sdk.SubstationScope> mountedRosterOf(
   sdk.GridDelegate delegate, {
   sdk.GridConfiguration configuration = const sdk.GridConfiguration(),
-}) {
-  final owner = TreeOwner();
-  try {
-    final root = owner.mountRoot(_RosterAuthor(delegate, configuration));
-    owner.flush();
-    final seats = <sdk.SubstationScope>[];
-    void walk(Branch b) {
-      if (b is InheritedBranch<sdk.SubstationScope>) seats.add(b.value);
-      b.visitChildren(walk);
-    }
-
-    walk(root);
-    return seats;
-  } finally {
-    owner.dispose();
-  }
-}
-
-/// Calls [sdk.GridDelegate.build] with a live [TreeContext] during mount —
-/// the offline stand-in for `runGrid`'s delegate root (the same shape the
-/// roster tests use).
-class _RosterAuthor extends StatelessSeed {
-  const _RosterAuthor(this.delegate, this.configuration);
-
-  final sdk.GridDelegate delegate;
-  final sdk.GridConfiguration configuration;
-
-  @override
-  Seed build(TreeContext context) => delegate.build(context, configuration);
-}
+}) => mountedValuesOf<sdk.SubstationScope>(
+  delegate,
+  configuration: configuration,
+);
 
 /// The per-store read seam — READ-ONLY by construction (A37): one read
 /// method, no mutation surface. The service is built on this seam so a search
