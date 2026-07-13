@@ -120,6 +120,7 @@ export 'src/code/circuit_migration.dart';
 export 'src/code/code_capabilities.dart';
 export 'src/code/committee.dart';
 export 'src/code/conventional_commit.dart';
+export 'src/code/delivery.dart';
 export 'src/code/discovery.dart';
 export 'src/code/landing.dart';
 export 'src/code/pr_composition.dart';

@@ -30,6 +30,7 @@ import '../assets/overlay_materializer.dart';
 import 'circuit_migration.dart';
 import 'committee.dart';
 import 'conventional_commit.dart';
+import 'delivery.dart';
 import 'discovery.dart';
 import 'landing.dart';
 import 'pr_composition.dart';
@@ -73,19 +74,24 @@ import 'specify.dart';
 /// down ([kCodeReviewCircuit] — four critics in parallel → a `route` join). A
 /// `dependsOn` on `review` resolves to its terminal-step descendant
 /// (`<bead>/review/route`'s positive terminal), so `land` waits for the route to
-/// advance; a route `Gate` parks the work (no `land`) instead.
+/// advance; a route [Escalate] parks the work instead.
 ///
 /// `land` is likewise a [SubCircuitStep] (`tg-rm5`, `landing.dart`'s
-/// [kLandingCircuit]): `rebase → revalidate → land` — rebase the bead
-/// branch onto the CURRENT base before re-running the bead's OWN Validation
-/// Plan against the rebased tree (closing the stale-base hole: with N
-/// parallel beads on one repo, the second-to-land would otherwise validate
-/// against a `main` that already moved), commit/push, then open the PR. A
-/// `dependsOn` on `land` resolves through the SAME one-hop terminal
-/// resolution to `<bead>/land/land`'s positive terminal.
+/// [kLandingCircuit]), and it PREPARES: `rebase → revalidate` — rebase the bead
+/// branch onto the CURRENT base before re-running the bead's OWN Validation Plan
+/// against the rebased tree (closing the stale-base hole: with N parallel beads
+/// on one repo, the second-to-land would otherwise validate against a `main` that
+/// already moved).
+///
+/// `deliver` is the TERMINAL ROUTE ([DeliverRouteCapability], `delivery.dart`)
+/// whose [Advance] ACTUATES the substation's bound [DeliveryMethod] (M5 D-4a) —
+/// commit residue, push, open or reuse the PR. It MUST be a FLAT route step:
+/// [isDeliveryTerminal] is false at a [SubCircuitStep], and a sub-circuit's own
+/// terminal advance never delivers, so a sub-circuit tail would silently degrade
+/// the station to commit-only.
 const Circuit kCodeCircuit = Circuit(
   id: 'code',
-  terminalStepId: 'land',
+  terminalStepId: kDeliverStep,
   steps: [
     SubCircuitStep(stepId: 'spec_review', circuitId: 'spec_review'),
     CapabilityStep(
@@ -99,6 +105,11 @@ const Circuit kCodeCircuit = Circuit(
       dependsOn: {'agent'},
     ),
     SubCircuitStep(stepId: 'land', circuitId: 'landing', dependsOn: {'review'}),
+    CapabilityStep(
+      stepId: kDeliverStep,
+      capabilityId: kDeliverStep,
+      dependsOn: {'land'},
+    ),
   ],
 );
 
@@ -499,324 +510,29 @@ StepSignal _jobSignal(RuntimeEvent event) => switch (event) {
   _ => StepSignal.none,
 };
 
-/// The LAND capability — commit → push → open the PR via the pluggable
-/// [SourceControl] Service (migrated from `LandEffectSeed`; the positive
-/// terminal). Offline-safe: when no [SourceControl] is wired it no-ops to [Ok]
-/// (it never touches real git/GitHub); a PR that does not open is [Failed]
-/// (an honest "land did not complete"). The pr url rides the [Ok] payload, which
-/// the engine records on the session bead — never used as a pipeline signal.
+/// The git [SourceControl] impl over grid_runtime — WORKSPACE PROVISIONING ONLY
+/// (the detail the engine knows only in CONCEPT — ADR-0008 D5; ships in the asset
+/// package).
 ///
-/// The PR opens with an INFERRED, strict Conventional Commits v1.0.0 TITLE and
-/// a section-COMPOSED body (bead `pow-8dx`): `pr_describe.dart` runs ONE cheap
-/// inference pass over the branch's ACTUAL delta and `pr_composition.dart`
-/// renders it — the what/why summary FIRST, then the circuit receipt (`tg-rm5`,
-/// [buildCircuitReceipt]), the committee grades, the bead's validation plan,
-/// and LAST the footers, where the bead id rides its git TRAILER
-/// (`Refs: <bead>`) and NOWHERE else. The shape is the configurable
-/// [PrComposition] knob (`GitHubGridAssets(composition: …)`), defaulting to
-/// `const PrComposition()`. Every inference failure path (not wired, offline, a
-/// failed run, unparseable output) falls back to a DETERMINISTIC, id-free
-/// conventional subject — a land never fails, or gates, over PR prose.
-/// [SourceControl.openPr] itself carries no `body` param (the receipt-regression
-/// gap — see `landing.dart`'s header); when [sc] is ALSO a
-/// [ReceiptCapableSourceControl] (the real [GitSourceControl] always is), the
-/// richer overload is called instead, so the composed body actually reaches the
-/// real PR today.
+/// M5 D-4a stripped commit/push/PR off the [SourceControl] interface: that is
+/// DELIVERY detail, and it lives behind the substation's bound [DeliveryMethod]
+/// (`delivery.dart`'s [GitHubPrDelivery]). What remains here is provisioning —
+/// [provisioner] ([StationGitService]) + [root] ([RootCheckout]) cut the per-bead
+/// worktree, so the host can materialize the workspace before the agent spawns.
+/// Absent ⇒ [provisionWorkspace] no-ops (the offline/dry-run build), while
+/// `workspaceFor`/`branchFor`/`baseBranch` still resolve — the layout is
+/// deterministic + pure.
 ///
-/// **Rework-aware delivery (`tg-w3c`)** — a preceding rework round REBASES the
-/// bead branch and leaves round one's PR open, which wedged the plain
-/// commit→push→PR path (push refused non-fast-forward, `gh pr create` errored
-/// "already exists", the DONE+approved bead escalated). When [sc] is a
-/// [ReworkAwareSourceControl] (the real [GitSourceControl] always is), land
-/// force-pushes with `--force-with-lease`, reuses an already-open PR as
-/// success, and — on a genuine git/gh failure — [Failed]s with the stderr TAIL
-/// as the reason, which FT-1 stamps as the node's `failureReason` so an
-/// operator sees WHY without forensics. A bare [SourceControl] still lands
-/// through the plain, unwidened methods.
-class LandCapability extends ServiceCapability {
-  /// Creates the land capability over the optional [gitRunner] (the describe
-  /// pass's branch-delta reads; null ⇒ the real [SystemGitRunner], reached only
-  /// once the describe guards pass) and the optional [inference] runner (null ⇒
-  /// NO describe pass at all: the deterministic fallback title/body with ZERO
-  /// git and ZERO inference — what a bare `const LandCapability()` gets, which
-  /// is every offline unit test).
-  const LandCapability({GitRunner? gitRunner, InferenceRunner? inference})
-    : _gitRunner = gitRunner,
-      _inference = inference;
+/// The layout ("one git worktree per bead, cut from the substation's root") is
+/// THIS impl's opinion, not the engine's — the engine's concept is "a workspace".
+class GitSourceControl implements SourceControl {
+  /// Wraps the optional provisioning seam ([provisioner]/[root]).
+  const GitSourceControl({StationGitService? provisioner, RootCheckout? root})
+    : _provisioner = provisioner,
+      _root = root;
 
-  final GitRunner? _gitRunner;
-  final InferenceRunner? _inference;
-
-  @override
-  Future<StepOutcome> run(TreeContext context, StepArgs args) async {
-    // Read the ambient values at ENTRY (synchronously, while mounted); after
-    // every await only the captured values + the cancel token are touched.
-    final services =
-        context.getInheritedSeedOfExactType<ServiceBundle>() ??
-        const ServiceBundle();
-    final workspace = context.getInheritedSeedOfExactType<Workspace>();
-    final siblings =
-        context.getInheritedSeedOfExactType<SiblingView>() ??
-        const SiblingView();
-    // The PR-composition inputs (bead `pow-8dx`), read with the EFFECT verb at
-    // the run edge (ADR-0008 D3 / A8(3)): the work definition (the fallback
-    // title's source + the describe prompt's why-context), the station's
-    // composition knob, and the agent scope the describe pass rides.
-    final bead =
-        context.getInheritedSeedOfExactType<Bead>() ?? Bead(id: args.beadId);
-    final composition =
-        context.getInheritedSeedOfExactType<PrComposition>() ??
-        const PrComposition();
-    final agentConfig =
-        context.getInheritedSeedOfExactType<AgentConfig>() ??
-        const AgentConfig();
-    final harnesses =
-        context.getInheritedSeedOfExactType<AgentHarnessRegistry>() ??
-        buildAgentHarnessRegistry();
-    final sc = services.sourceControl;
-    // Land not wired (no SourceControl, or provisioning-only for an early arm
-    // whose working agreement is commit-only) — no-op rather than touch real
-    // git. `canLand` distinguishes "deferred" (Ok) from "tried + failed" (Failed).
-    if (sc == null || !sc.canLand || workspace == null) return const Ok();
-
-    // The land commit obeys the SAME policy the build agent is briefed with
-    // (bead `pow-8dx`, directive item 5): a conventional subject, the bead id in
-    // a git TRAILER, never in the subject — the old `grid: land <bead>` was
-    // neither. It only produces a commit at all when the agent left residue
-    // (`git add -A && git commit` no-ops on a clean tree), but when it does, that
-    // commit is in the git log forever.
-    await sc.commitAll(
-      workspaceDir: workspace.workspaceDir,
-      message: composeCommitMessage(
-        subject: const ConventionalSubject(
-          type: 'chore',
-          description: 'commit residual review changes',
-        ),
-        trailers: {composition.trailerToken: args.beadId},
-      ),
-    );
-    if (args.cancel.isCancelled) return const Failed('cancelled');
-
-    // Verify land committed the WHOLE reviewed tree (the tg-x1j r1 incident —
-    // a botched land silently committed a SUBSET, stripping session_scope.dart
-    // edits from the PR). `SourceControl.commitAll` returns void, so when [sc]
-    // is ALSO a [TreeVerifiableSourceControl] (the real [GitSourceControl]
-    // always is), this is the only signal available; a plain [SourceControl]
-    // (a bare test fake, or a future non-Git impl) skips the check, same
-    // opt-in posture as [ReceiptCapableSourceControl].
-    if (sc is TreeVerifiableSourceControl) {
-      final residue = await sc.uncommittedResidue(
-        workspaceDir: workspace.workspaceDir,
-      );
-      if (args.cancel.isCancelled) return const Failed('cancelled');
-      if (residue != null) {
-        return Gate(
-          'land committed a SUBSET of the reviewed tree (the tg-x1j r1 class '
-          'of incident) — never pushed: $residue',
-        );
-      }
-    }
-
-    // THE DESCRIBE PASS (bead `pow-8dx`): one cheap inference call over the
-    // branch's ACTUAL delta — AFTER the residue commit (so the diff is the final
-    // tree) and AFTER the residue gate (so a gating land never spends a token).
-    // Fail-safe by construction: every failure path yields the deterministic,
-    // id-free fallback subject; the PR still opens.
-    final described = await describeBranch(
-      bead: bead,
-      beadId: args.beadId,
-      workspace: workspace,
-      composition: composition,
-      ambient: agentConfig,
-      registry: harnesses,
-      git: _gitRunner,
-      inference: _inference,
-    );
-    if (args.cancel.isCancelled) return const Failed('cancelled');
-
-    final prContext = PrCompositionContext(
-      beadId: args.beadId,
-      bead: bead,
-      siblings: siblings,
-      description: described.description,
-      commits: described.commits,
-      titleSource: described.source,
-    );
-    final title = composition.titleOf(prContext);
-    final body = composition.bodyOf(prContext);
-
-    // REWORK-AWARE delivery (bead `tg-w3c`): a preceding rework round rebased
-    // the branch and left round one's PR open, so a plain push is refused and
-    // `gh pr create` errors "already exists". When [sc] supports it (the real
-    // [GitSourceControl] always does), force-with-lease push + reuse the open
-    // PR, and stamp the git/gh stderr tail as the `failureReason` (FT-1) so an
-    // operator sees WHY without forensics. A bare/non-git [SourceControl] (a
-    // test fake) still lands through the plain, unwidened methods below.
-    if (sc is ReworkAwareSourceControl) {
-      final pushed = await sc.pushForBranch(
-        workspaceDir: workspace.workspaceDir,
-        remote: 'origin',
-        branch: workspace.branch,
-      );
-      if (args.cancel.isCancelled) return const Failed('cancelled');
-      if (!pushed.ok) {
-        return Failed(
-          'grid land ${args.beadId}: force-with-lease push refused — '
-          '${landReasonTail(pushed.output)}',
-        );
-      }
-      final pr = await sc.openOrReusePr(
-        workspaceDir: workspace.workspaceDir,
-        branch: workspace.branch,
-        baseBranch: workspace.baseBranch,
-        title: title,
-        body: body,
-      );
-      if (args.cancel.isCancelled) return const Failed('cancelled');
-      if (!pr.ok) {
-        return Failed(
-          'grid land ${args.beadId}: pr open failed — '
-          '${landReasonTail(pr.failureReason ?? '')}',
-        );
-      }
-      return Ok({'pr_url': pr.url!});
-    }
-
-    await sc.push(
-      workspaceDir: workspace.workspaceDir,
-      remote: 'origin',
-      branch: workspace.branch,
-    );
-    if (args.cancel.isCancelled) return const Failed('cancelled');
-
-    final pr = sc is ReceiptCapableSourceControl
-        ? await sc.openPr(
-            workspaceDir: workspace.workspaceDir,
-            branch: workspace.branch,
-            baseBranch: workspace.baseBranch,
-            title: title,
-            body: body,
-          )
-        : await sc.openPr(
-            workspaceDir: workspace.workspaceDir,
-            branch: workspace.branch,
-            baseBranch: workspace.baseBranch,
-            title: title,
-          );
-    // Check cancellation after EVERY async gap (P0 LandEffectSeed parity) — a
-    // dispose mid-land must not record a stale terminal.
-    if (args.cancel.isCancelled) return const Failed('cancelled');
-    if (pr == null) return const Failed('pr open did not complete');
-    return Ok({'pr_url': pr.url});
-  }
-}
-
-/// A [SourceControl] that can ALSO carry a PR body (`tg-rm5` — the "circuit
-/// receipt", grades/route-provenance/rebase+revalidate outcomes). The
-/// receipt-regression gap: `PrOpener.open`/`GhPrOpener` (grid_runtime) already
-/// thread a `body` through to `gh pr create --body`, but the engine's own
-/// [SourceControl.openPr] (grid_engine) never grew one — so `land` has only
-/// ever opened empty-body PRs. This is the power_station-local STOPGAP: until
-/// a future the_grid change widens `SourceControl.openPr` itself,
-/// [LandCapability] detects this marker via `is` and calls the richer
-/// overload. A plain [SourceControl] (e.g. a bare test fake) still lands
-/// correctly through the unwidened interface method — just without a body.
-abstract interface class ReceiptCapableSourceControl implements SourceControl {
-  @override
-  Future<PrRef?> openPr({
-    required String workspaceDir,
-    required String branch,
-    required String baseBranch,
-    required String title,
-    String body,
-  });
-}
-
-/// A [SourceControl] that can ALSO report whether its own [SourceControl.
-/// commitAll] left residue behind (bead `tg-bns`, the tg-x1j r1 incident — a
-/// botched land silently committed a SUBSET of the reviewed tree, dropping
-/// `session_scope.dart` edits from the PR). `commitAll` returns `void`, so
-/// [LandCapability] has no other signal that its own commit actually captured
-/// everything. This is the power_station-local STOPGAP, same posture as
-/// [ReceiptCapableSourceControl]: [LandCapability] detects this marker via
-/// `is` and Gates when residue is reported; a plain [SourceControl] (a bare
-/// test fake, or a future non-Git impl) skips the check entirely.
-abstract interface class TreeVerifiableSourceControl implements SourceControl {
-  /// Returns `null` when [workspaceDir] is clean (nothing left uncommitted
-  /// after `commitAll`); otherwise a human-readable description of the residue
-  /// — including when the check itself couldn't run (fail-closed: an
-  /// unreadable probe is treated as unsafe, never silently trusted clean).
-  Future<String?> uncommittedResidue({required String workspaceDir});
-}
-
-/// The git [SourceControl] impl over grid_runtime (the detail the engine knows
-/// only in CONCEPT — ADR-0008 D5; ships in the asset package). Two independent
-/// halves:
-///  - **provisioning** — [provisioner] ([StationGitService]) + [root]
-///    ([RootCheckout]) cut the per-bead worktree. Provided whenever a root is
-///    registered (live), so the host can materialize the workspace before the
-///    agent spawns. Absent ⇒ `provisionWorkspace` no-ops (offline).
-///  - **land** — [gitOps] (commit/push) + [prOpener] (PR). Absent ⇒ [canLand] is
-///    false and [LandCapability] no-ops (the early-arm commit-only posture).
-///
-/// Also [ReceiptCapableSourceControl] (`tg-rm5`): [openPr] carries an optional
-/// `body` beyond what the [SourceControl] interface itself declares, so `land`
-/// can thread the circuit receipt into the real PR today. Also
-/// [TreeVerifiableSourceControl] (`tg-bns`): [uncommittedResidue] reuses
-/// [GitOps.hasUncommittedWork] (the SAME three-gate `git status --porcelain`
-/// probe the worktree-reap gate already trusts) — no new git call, just a new
-/// consumer of an existing one. Also [ReworkAwareSourceControl] (`tg-w3c`):
-/// [pushForBranch] force-pushes with `--force-with-lease` (a rework round
-/// rebased the branch, so a plain push is refused) and [openOrReusePr] treats
-/// an already-open PR as success — both returning the git/gh output so `land`
-/// can stamp the stderr tail as the `failureReason`.
-class GitSourceControl
-    implements
-        SourceControl,
-        ReceiptCapableSourceControl,
-        TreeVerifiableSourceControl,
-        ReworkAwareSourceControl {
-  /// Wraps the optional land ops ([gitOps]/[prOpener]) and the optional
-  /// provisioning seam ([provisioner]/[root]). [gitRunner] is the raw `git`
-  /// seam the rework-aware force-push runs through — `null` ⇒ a real
-  /// [SystemGitRunner] (the live default; tests inject the SAME recording fake
-  /// [gitOps] wraps, so the force-push argv is asserted offline).
-  const GitSourceControl({
-    GitOps? gitOps,
-    PrOpener? prOpener,
-    StationGitService? provisioner,
-    RootCheckout? root,
-    GitRunner? gitRunner,
-  }) : _gitOps = gitOps,
-       _prOpener = prOpener,
-       _provisioner = provisioner,
-       _root = root,
-       _gitRunner = gitRunner;
-
-  final GitOps? _gitOps;
-  final PrOpener? _prOpener;
   final StationGitService? _provisioner;
   final RootCheckout? _root;
-  final GitRunner? _gitRunner;
-
-  /// Returns a copy with [prOpener] wired for land — the composition seam the
-  /// substation-scoped `GitHubGridAssets` uses to ADD PR-opening onto the git
-  /// asset (Track F, `tg-5r9`): `GitGridAssets` provides the provision +
-  /// commit/push half (`canLand` false until a PR opener exists); mounting
-  /// `GitHubGridAssets` below it enriches THIS source control with the opener,
-  /// flipping [canLand] true. The provisioner / gitOps / root are carried
-  /// through unchanged, so the enriched impl provisions the SAME worktree it
-  /// lands from.
-  GitSourceControl withPrOpener(PrOpener prOpener) => GitSourceControl(
-    gitOps: _gitOps,
-    prOpener: prOpener,
-    provisioner: _provisioner,
-    root: _root,
-    gitRunner: _gitRunner,
-  );
-
-  @override
-  bool get canLand => _gitOps != null && _prOpener != null;
 
   @override
   String workspaceFor(String beadId) {
@@ -852,108 +568,6 @@ class GitSourceControl
     await provisioner.provisionWorktree(root: root, beadId: beadId);
   }
 
-  @override
-  Future<void> commitAll({
-    required String workspaceDir,
-    required String message,
-  }) => _gitOps!.commitAll(workDir: workspaceDir, message: message);
-
-  @override
-  Future<void> push({
-    required String workspaceDir,
-    required String remote,
-    required String branch,
-  }) => _gitOps!.pushSetUpstream(
-    workDir: workspaceDir,
-    remote: remote,
-    branch: branch,
-  );
-
-  @override
-  Future<String?> uncommittedResidue({required String workspaceDir}) async {
-    final outcome = await _gitOps!.hasUncommittedWork(workspaceDir);
-    return switch (outcome) {
-      GateOutcome.clear => null,
-      GateOutcome.present =>
-        'uncommitted changes remain in the workspace after commitAll',
-      GateOutcome.probeError =>
-        'could not verify a clean tree after commitAll (git status probe '
-            'failed) — fail-closed, treated as unsafe',
-    };
-  }
-
-  @override
-  Future<PrRef?> openPr({
-    required String workspaceDir,
-    required String branch,
-    required String baseBranch,
-    required String title,
-    String body = '',
-  }) async {
-    final result = await _prOpener!.open(
-      workDir: workspaceDir,
-      branch: branch,
-      baseBranch: baseBranch,
-      title: title,
-      body: body,
-    );
-    return result.isOpened ? PrRef(result.ref!.url) : null;
-  }
-
-  @override
-  Future<LandPushOutcome> pushForBranch({
-    required String workspaceDir,
-    required String remote,
-    required String branch,
-  }) async {
-    // `--force-with-lease` ALWAYS (`tg-w3c`): a rework round rebased this
-    // branch, so a plain `git push` is refused non-fast-forward. It is the
-    // circuit's OWN branch, so forcing is safe; the lease still refuses if a
-    // racing writer moved `origin/$branch` since the last fetch. `-u` keeps
-    // upstream set (so a later `hasUnpushedCommits` reads clear), matching
-    // [GitOps.pushSetUpstream]. A `null` runner ⇒ the real, clean-env
-    // [SystemGitRunner] (mirrors [RebaseCapability]'s own default).
-    final runner = _gitRunner ?? SystemGitRunner();
-    final result = await runner.run(
-      workingDirectory: workspaceDir,
-      args: ['push', '--force-with-lease', '-u', remote, branch],
-    );
-    return LandPushOutcome(ok: result.ok, output: result.output);
-  }
-
-  @override
-  Future<LandPrOutcome> openOrReusePr({
-    required String workspaceDir,
-    required String branch,
-    required String baseBranch,
-    required String title,
-    String body = '',
-  }) async {
-    final result = await _prOpener!.open(
-      workDir: workspaceDir,
-      branch: branch,
-      baseBranch: baseBranch,
-      title: title,
-      body: body,
-    );
-    if (result.isOpened) return LandPrOutcome.opened(result.ref!.url);
-    // Idempotent (`tg-w3c`): `gh pr create` refusing because round one's PR is
-    // still OPEN is a SUCCESS, not a failure — the branch is delivered and the
-    // PR is there. Reuse its url (parsed from gh's refusal, which prints it);
-    // an "already exists" without a parseable url still counts as reused (the
-    // PR exists) rather than escalating a DONE bead.
-    //
-    // Refreshing the reused PR's BODY with the new round's receipt (the task's
-    // OPTIONAL `gh pr edit`) is deferred: [PrOpener] only OPENS, so an edit
-    // would need a gh-runner seam threaded through the composition — out of
-    // scope for the escalation fix. The force-push already updated the PR's
-    // diff; only the receipt text lags a round.
-    final reason = result.failure?.reason ?? 'pr open did not complete';
-    if (isPrAlreadyOpen(reason)) {
-      return LandPrOutcome.reused(extractPrUrl(reason) ?? '');
-    }
-    return LandPrOutcome.failed(reason);
-  }
 }
 
 /// Builds the `code` registry: the SPEC-READINESS INTAKE LENS
@@ -1047,12 +661,15 @@ DefaultCapabilityRegistry buildCodeRegistry({
       // which departs from A13(5)'s shared-route posture).
       'spec-route': const SpecRouteCapability(),
       'agent': AgentCapability(devRoot: devRoot, overlayArgs: overlayArgs),
-      'land': LandCapability(
+      // The old `land` binding is GONE: the PR is no longer a step. The TERMINAL
+      // route advances and the engine actuates the substation's bound
+      // DeliveryMethod (M5 D-4a).
+      kDeliverStep: DeliverRouteCapability(
         gitRunner: gitRunner,
         inference: inference ?? const SystemInferenceRunner(),
       ),
       'critic': CriticCapability(rubrics: rubricSource),
-      'route': const RouteCapability(),
+      'route': const CodeRouteCapability(),
       'rebase': RebaseCapability(runner: gitRunner),
       'revalidate': RevalidateCapability(runner: shellRunner),
       kClearCritiqueStep: ClearCritiqueCapability(clearer: critiqueDirClearer),
