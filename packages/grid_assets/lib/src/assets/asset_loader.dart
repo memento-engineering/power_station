@@ -8,13 +8,19 @@
 /// source; [renderCriticPrompt] is the standalone, format-faithful renderer of
 /// the `prompts/critic.md` template (the portable mirror).
 ///
-/// The vended SKILLS (`extension/skills/<id>/SKILL.md`, bead `pow-88p`) ride
-/// the same loader: the agentic halves of the coupled skill+command pairs
-/// (ADR-0001 — the skill CALLS the vended deterministic Command, e.g.
-/// `discover` calls `search --json`). Each SKILL.md is mustache-templated on
-/// its manifest-declared args (`runner`, `gridHome`); [renderSkill] renders it
-/// for the composing station at materialization time (delivery: `pow-kzx`)
-/// and fails LOUD on any unbound hole.
+/// The vended SKILLS (`extension/station_overlay/skills/<id>/SKILL.md`, bead
+/// `pow-88p`) ride the same loader: the agentic halves of the coupled
+/// skill+command pairs (ADR-0001 — the skill CALLS the vended deterministic
+/// Command, e.g. `discover` calls `search --json`). Each SKILL.md is
+/// mustache-templated on its manifest-declared args (`runner`, `gridHome`);
+/// [renderSkill] renders ONE skill by id and fails LOUD on any unbound hole.
+/// The `station_overlay/{skills,agents}` FORMAT and the non-destructive
+/// TREE-level expansion of it onto a target `.claude/` dir ship next door in
+/// `overlay_materializer.dart` (bead `pow-kzx`, the delivery leg): this loader
+/// stays the by-id render surface, `OverlayMaterializer` is the whole-tree
+/// install. Two callers ride the latter — the operator install Command
+/// (`pow-a74`) and this package's OWN provision-time wire
+/// (`AgentCapability._linkWorkspace`, `code_capabilities.dart`, ADR-0000 A1).
 ///
 /// Asset resolution resolves the package's own `extension/` dir via the package
 /// config (`Isolate.resolvePackageUriSync` — cwd-independent, the live-arm path),
@@ -31,9 +37,11 @@ import 'dart:isolate';
 import 'package:beads_dart/beads_dart.dart';
 import 'package:path/path.dart' as p;
 
-/// The skill ids this package vends (`extension/skills/<id>/SKILL.md`) — the
-/// agentic halves of the coupled skill+command pairs (ADR-0001). A station's
-/// skill-delivery leg (`pow-kzx`) enumerates this to materialize them.
+/// The skill ids this package vends
+/// (`extension/station_overlay/skills/<id>/SKILL.md`) — the agentic halves of
+/// the coupled skill+command pairs (ADR-0001). `OverlayMaterializer` does not
+/// read this constant (it installs whatever files exist under the overlay); it
+/// is the by-id render surface's own index, and the skill-manifest test's.
 const List<String> kVendedSkills = ['discover'];
 
 /// Loads grid_assets' bundled rubric/prompt assets from `extension/`.
@@ -47,6 +55,14 @@ class PackagedAssetLoader {
 
   /// The resolved `extension/` directory (discovered once, lazily).
   late final String _root = _explicitRoot ?? _resolveRoot();
+
+  /// The resolved `extension/` directory this loader reads from — exposed so a
+  /// sibling caller that must build a path relative to it (the station_overlay
+  /// materialization wire, bead `pow-kzx`) reuses this ONE resolution
+  /// (package-config first, cwd walk-up fallback) instead of re-deriving it.
+  /// Throws (via [_resolveRoot]) when no `extension/` can be located at all —
+  /// the same fail-loud packaging-bug posture every other read here holds.
+  String get root => _root;
 
   /// The prose bands for [rubricId] (`extension/rubrics/<id>.md`). Throws an
   /// [ArgumentError] for an unknown rubric (fail-loud — a missing rubric is a
@@ -119,11 +135,14 @@ class PackagedAssetLoader {
       });
 
   /// The mustache-templated SKILL.md body for [skillId]
-  /// (`extension/skills/<skillId>/SKILL.md`). Throws an [ArgumentError] for an
-  /// unknown skill (fail-loud — a missing skill is a packaging bug, never a
-  /// silent empty install).
+  /// (`extension/station_overlay/skills/<skillId>/SKILL.md` — the vended-asset
+  /// overlay format, bead `pow-kzx`). Throws an [ArgumentError] for an unknown
+  /// skill (fail-loud — a missing skill is a packaging bug, never a silent
+  /// empty install).
   String loadSkillTemplate(String skillId) {
-    final file = File(p.join(_root, 'skills', skillId, 'SKILL.md'));
+    final file = File(
+      p.join(_root, 'station_overlay', 'skills', skillId, 'SKILL.md'),
+    );
     if (!file.existsSync()) {
       throw ArgumentError('unknown skill "$skillId" (no ${file.path})');
     }

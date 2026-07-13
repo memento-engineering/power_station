@@ -20,11 +20,13 @@ import 'package:genesis_tree/genesis_tree.dart';
 import 'package:beads_dart/beads_dart.dart';
 import 'package:grid_engine/grid_engine.dart';
 import 'package:grid_runtime/grid_runtime.dart';
+import 'package:path/path.dart' as p;
 
 import '../agent/agent_domain.dart';
 import '../agent/agent_harness.dart';
 import '../agent/usage_report.dart';
 import '../assets/asset_loader.dart';
+import '../assets/overlay_materializer.dart';
 import 'circuit_migration.dart';
 import 'committee.dart';
 import 'conventional_commit.dart';
@@ -100,6 +102,13 @@ const Circuit kCodeCircuit = Circuit(
   ],
 );
 
+/// The executable name the vended overlay's skills render `{{runner}}` against
+/// (the skill's own `<runner> search --json` call — the coupled skill+command
+/// pattern, ADR-0001). The first-party station composing this pack is
+/// `space_station`, whose binary is `space`; any station with another verb
+/// overrides it — `buildCodeRegistry(overlayArgs: {'runner': '<verb>'})`.
+const String kDefaultOverlayRunner = 'space';
+
 /// The IMPLEMENT capability — spawn the coding agent in the bead's workspace,
 /// parameterized over the AMBIENT agent scope (ADR-0008 Decision 10): it reads
 /// the work `Bead`, the `Workspace`, the station's `AgentConfig` default, and
@@ -132,14 +141,36 @@ class AgentCapability extends ProcessCapability {
   /// per-bead worktree; null in an offline/dry-run build (no root
   /// registered — a relative link then refuses, never silently applies a
   /// broken override). [linkService] is injectable for tests.
+  ///
+  /// [materializer]/[overlayRoot]/[overlayArgs] are the station_overlay delivery
+  /// seam (bead `pow-kzx`): the vended skills materialized into the per-bead
+  /// worktree at provision, so the spawned `claude -p` can `/invoke` them.
   const AgentCapability({
     String? devRoot,
     DartLinkService linkService = const DartLinkService(),
+    OverlayMaterializer materializer = const OverlayMaterializer(),
+    String? overlayRoot,
+    Map<String, String> overlayArgs = const {},
   }) : _devRoot = devRoot,
-       _linkService = linkService;
+       _linkService = linkService,
+       _materializer = materializer,
+       _overlayRoot = overlayRoot,
+       _overlayArgs = overlayArgs;
 
   final String? _devRoot;
   final DartLinkService _linkService;
+  final OverlayMaterializer _materializer;
+
+  /// The `station_overlay` dir [_linkWorkspace] expands into every provisioned
+  /// worktree's `.claude/` (bead `pow-kzx`); null ⇒ this package's OWN vended
+  /// overlay (`<PackagedAssetLoader.root>/station_overlay`). Tests inject a
+  /// fixture so the wire is provable without the live tree.
+  final String? _overlayRoot;
+
+  /// The station's overrides for the overlay's template args — merged OVER the
+  /// wire's own binding (`runner`/`gridHome`), so a station with a different
+  /// runner verb or a real grid home wins.
+  final Map<String, String> _overlayArgs;
 
   @override
   RuntimeConfig spawn(TreeContext context, StepArgs args) {
@@ -151,7 +182,7 @@ class AgentCapability extends ProcessCapability {
         '(WorkBead/SessionScope mount them)',
       );
     }
-    _linkWorkspace(bead, workspace);
+    final skills = _linkWorkspace(bead, workspace);
     final ambient =
         context.getInheritedSeedOfExactType<AgentConfig>() ??
         const AgentConfig();
@@ -177,6 +208,7 @@ class AgentCapability extends ProcessCapability {
         bead,
         workspace,
         trailerToken: composition.trailerToken,
+        skills: skills,
       ),
       workspace: workspace,
       usageOut: usageReportPath(args.nodePath),
@@ -198,8 +230,10 @@ class AgentCapability extends ProcessCapability {
   /// existing `capability.spawn` fail-closed contract, ADR-0008 Decision 10)
   /// routes to supervision as a per-work `Failed` — never a half-applied
   /// override file.
-  void _linkWorkspace(Bead bead, Workspace workspace) {
-    if (!Directory(workspace.workspaceDir).existsSync()) return;
+  /// Returns the vended skill ids [_materializeStationOverlay] left installed in
+  /// the worktree (empty when there is no worktree on disk yet).
+  List<String> _linkWorkspace(Bead bead, Workspace workspace) {
+    if (!Directory(workspace.workspaceDir).existsSync()) return const [];
     final outcome = _linkService.applySync(
       metadata: bead.metadata,
       context: PubLinkContext.worktree,
@@ -210,6 +244,76 @@ class AgentCapability extends ProcessCapability {
       throw StateError(
         'AgentCapability: grid.dart pub linkage refused (fail-closed): '
         '${outcome.reason}',
+      );
+    }
+    return _materializeStationOverlay(workspace);
+  }
+
+  /// Expands the vended `station_overlay` into `<workspaceDir>/.claude/` and
+  /// returns the skill ids now installed there (bead `pow-kzx` — ADR-0001's
+  /// delivery leg: `claude --dangerously-skip-permissions -p` is NON-bare, so it
+  /// discovers `.claude/skills/`, and print mode invokes a skill only when the
+  /// brief names it explicitly — hence the returned ids ride [buildAgentBrief]).
+  ///
+  /// Same synchronous constraint as the pub-link write above, and the same
+  /// non-destructive posture ([OverlayMaterializer] never overwrites a file it
+  /// did not write, and REFUSES to install one whose holes are unbound rather
+  /// than shipping literal `{{runner}}` text to an agent). A missing overlay dir
+  /// contributes nothing rather than erroring — the empty-overlay case, not a
+  /// violated invariant.
+  List<String> _materializeStationOverlay(Workspace workspace) {
+    final overlayRoot =
+        _overlayRoot ?? p.join(PackagedAssetLoader().root, 'station_overlay');
+    if (!Directory(overlayRoot).existsSync()) return const [];
+    final claudeDir = p.join(workspace.workspaceDir, '.claude');
+    final report = _materializer.materializeSync(
+      overlayRoots: [overlayRoot],
+      targetRoot: claudeDir,
+      args: {
+        'runner': kDefaultOverlayRunner,
+        // The station's registered root checkout is the closest thing this
+        // capability holds to a grid home; a station that knows its real one
+        // overrides it (`buildCodeRegistry(overlayArgs:)`). Never null — an
+        // unbound hole would REFUSE the skill instead of installing it.
+        'gridHome': _devRoot ?? workspace.workspaceDir,
+        ..._overlayArgs,
+      },
+    );
+    _excludeOverlayFromGit(claudeDir, report.writtenEntryDirs);
+    return report.installedSkillIds;
+  }
+
+  /// Keeps what we just materialized OUT of the bead's commit: [LandCapability]
+  /// commits with `git add -A` (`GitOps.commitAll`), so an untracked
+  /// `.claude/skills/**` would ride every bead's PR into whatever repo the bead
+  /// belongs to. Writes a SELF-IGNORING `.gitignore` — a single `*` — INSIDE
+  /// each asset dir this call wrote into: `*` matches every file in that dir
+  /// INCLUDING the `.gitignore` itself, so the whole vended asset is invisible
+  /// to git (`git status --porcelain` stays EMPTY there and `git add -A` stages
+  /// none of it), and the exclusion file is not residue either.
+  ///
+  /// SCOPED to the asset dirs, never a blanket `.claude/` ignore, and never a
+  /// shared `.claude/.gitignore`: `.claude/` is repo-owned territory in the very
+  /// repos the grid provisions worktrees from (the_grid TRACKS
+  /// `.claude/skills/grid-porting/`; power_station and lenny track
+  /// `.claude/settings.json`), so a shared file could be one the repo already
+  /// owns. Per-asset-dir files cannot collide with it. Because a git ignore
+  /// cannot hide TRACKED files, and because nothing outside the materialized
+  /// asset dirs is ignored, `land`'s post-commit residue gate
+  /// (`uncommittedResidue` → `GitOps.hasUncommittedWork` → plain
+  /// `git status --porcelain`, ADR-0000 A5) still detects every other change in
+  /// the worktree — including new files the coding agent itself writes under
+  /// `.claude/`.
+  void _excludeOverlayFromGit(String claudeDir, List<String> writtenEntryDirs) {
+    for (final entryDir in writtenEntryDirs) {
+      final ignore = File(p.join(claudeDir, entryDir, '.gitignore'));
+      if (ignore.existsSync()) continue;
+      ignore.writeAsStringSync(
+        '# Per-worktree AGENT CONTEXT materialized at provision by the vended\n'
+        '# station_overlay (grid_assets) — never repo content.\n'
+        "# `*` ignores this whole asset dir INCLUDING this file, so land's\n"
+        "# `git add -A` cannot carry it into the bead's PR.\n"
+        '*\n',
       );
     }
   }
@@ -250,14 +354,21 @@ class AgentCapability extends ProcessCapability {
 /// primary artifact; a reader must learn what changed and why WITHOUT leaving
 /// the repo. (What agents write today — `feat(scope): <bead> — …` — is the exact
 /// anti-pattern.)
+///
+/// [skills] are the vended skill ids the provision wire actually materialized
+/// into this worktree's `.claude/skills/` ([AgentCapability], bead `pow-kzx`).
+/// The agreement NAMES them, because a print-mode `claude -p` selects no skill
+/// on its own — only an explicit `/skill-name` invocation reaches one (ADR-0001).
+/// Empty ⇒ no skills paragraph at all: the brief only ever names what is there.
 AgentBrief buildAgentBrief(
   Bead bead,
   Workspace workspace, {
   String trailerToken = kDefaultTrailerToken,
+  List<String> skills = const [],
 }) {
   final title = bead.title.isNotEmpty ? bead.title : 'work bead ${bead.id}';
   final substation = bead.metadata['rig'];
-  final p = StringBuffer()
+  final task = StringBuffer()
     ..writeln('# $title')
     ..writeln()
     ..writeln(
@@ -267,7 +378,7 @@ AgentBrief buildAgentBrief(
     );
   void section(String heading, String body) {
     if (body.trim().isEmpty) return;
-    p
+    task
       ..writeln()
       ..writeln('## $heading')
       ..writeln(body.trim());
@@ -347,7 +458,23 @@ AgentBrief buildAgentBrief(
       'invariant and is loud (throws/refuses) when violated — otherwise delete '
       'it.',
     );
-  return AgentBrief(task: p.toString(), workingAgreement: agreement.toString());
+  if (skills.isNotEmpty) {
+    agreement
+      ..writeln()
+      ..writeln()
+      ..writeln(
+        "The station materialized these VENDED skills into this worktree's "
+        '`.claude/skills/` at provision — invoke one EXPLICITLY by name when '
+        'the task calls for it (print mode selects no skill on its own). They '
+        'are per-worktree agent context, not repo content — already '
+        'git-excluded, never commit them:',
+      )
+      ..write(skills.map((id) => '- `/$id`').join('\n'));
+  }
+  return AgentBrief(
+    task: task.toString(),
+    workingAgreement: agreement.toString(),
+  );
 }
 
 // The toy VERIFY capability (a fixed test command) was DELETED in M5 Track E:
@@ -854,6 +981,11 @@ class GitSourceControl
 /// [SystemInferenceRunner]. The describe pass is doubly fail-safe (no worktree
 /// on disk ⇒ no call at all), so the offline suite never reaches a real `claude`
 /// even under the live default.
+///
+/// [overlayArgs] overrides the template args the station_overlay's vended skills
+/// render against in each provisioned worktree ([AgentCapability], bead
+/// `pow-kzx`) — a station whose runner verb is not [kDefaultOverlayRunner], or
+/// which knows its real grid-home root, passes them here.
 DefaultCapabilityRegistry buildCodeRegistry({
   DateTime Function()? clock,
   RubricSource? rubrics,
@@ -864,6 +996,7 @@ DefaultCapabilityRegistry buildCodeRegistry({
   InferenceRunner? inference,
   AnchorResolver? anchorResolver,
   PriorArtSource? priorArt,
+  Map<String, String> overlayArgs = const {},
 }) {
   final rubricSource = rubrics ?? PackagedAssetLoader().rubricSource;
   return DefaultCapabilityRegistry(
@@ -905,7 +1038,7 @@ DefaultCapabilityRegistry buildCodeRegistry({
       // `route` below; the two matrices are now independent (ADR-0000 A14,
       // which departs from A13(5)'s shared-route posture).
       'spec-route': const SpecRouteCapability(),
-      'agent': AgentCapability(devRoot: devRoot),
+      'agent': AgentCapability(devRoot: devRoot, overlayArgs: overlayArgs),
       'land': LandCapability(
         gitRunner: gitRunner,
         inference: inference ?? const SystemInferenceRunner(),

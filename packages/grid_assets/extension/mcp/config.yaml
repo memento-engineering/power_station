@@ -122,11 +122,14 @@ prompts:
 # (the same community shape lenny's leonard_cli assets ship). The upstream
 # proposal defines only resources/prompts; this section is this manifest's
 # forward extension of it, reusing the prompts' arg-declaration shape. Each
-# skill dir under extension/skills/<id>/ holds a mustache-templated SKILL.md
-# the asset loader renders (`renderSkill`) and the composing station
-# materializes into a seat's skills dir (delivery: `pow-kzx`). The coupled
-# skill+command pattern (ADR-0001): the skill CALLS the vended deterministic
-# Command instead of re-deriving the operation by inference.
+# skill dir under extension/station_overlay/skills/<id>/ holds a mustache-
+# templated SKILL.md. Two legs install the rendered tree (bead `pow-kzx`'s
+# OverlayMaterializer — non-destructive, and it REFUSES to write a file whose
+# holes are unbound): this package's own provision-time wire
+# (AgentCapability._linkWorkspace -> a per-bead worktree's .claude/skills/) and
+# the operator install Command (`pow-a74` -> the operator's own .claude/). The
+# coupled skill+command pattern (ADR-0001): the skill CALLS the vended
+# deterministic Command instead of re-deriving the operation by inference.
 skills:
   - id: discover
     description: >
@@ -134,7 +137,7 @@ skills:
       (topic research / bead advisory / bead directed), researches via the
       vended `search` Command, and on the human's yes files an ephemeral
       staged bead and starts the design conversation (hand-off: specify).
-    path: skills/discover/SKILL.md
+    path: station_overlay/skills/discover/SKILL.md
     visibility: public
     args:
       - name: runner

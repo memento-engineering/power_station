@@ -1,6 +1,7 @@
 // The vended SKILLS (bead `pow-88p`) — the agentic halves of the coupled
 // skill+command pairs (ADR-0001), shipped as Packaged AI Assets under
-// `extension/skills/<id>/SKILL.md` and rendered by [PackagedAssetLoader].
+// `extension/station_overlay/skills/<id>/SKILL.md` and rendered by
+// [PackagedAssetLoader].
 //
 // Pins the bead's acceptance:
 //   - `discover` is VENDED from grid_assets (loads, renders, is in the
@@ -184,7 +185,7 @@ void main() {
         (s) => s['id'] == 'discover',
         orElse: () => fail('the `discover` skill must be declared'),
       );
-      expect(discover['path'], 'skills/discover/SKILL.md');
+      expect(discover['path'], 'station_overlay/skills/discover/SKILL.md');
       expect(discover['visibility'], isNotNull,
           reason: 'the discover skill declares a visibility');
       final args = (discover['args'] as YamlList).cast<YamlMap>();

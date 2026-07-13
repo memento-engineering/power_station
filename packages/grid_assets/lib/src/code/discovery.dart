@@ -63,8 +63,8 @@
 /// `respec.dart` already hold.
 ///
 /// Naming, once: the `discovery` CIRCUIT is not the `discover` SKILL
-/// (`extension/skills/discover/`). The skill is the human front door; this
-/// circuit is the in-pipeline gather. They never touch.
+/// (`extension/station_overlay/skills/discover/`). The skill is the human front
+/// door; this circuit is the in-pipeline gather. They never touch.
 library;
 
 import 'dart:convert';
