@@ -76,7 +76,7 @@ void main() {
         diffOut: '--- a/x\n+++ b/x\n+work',
       );
       final c = _ctx(dir.path);
-      await PinDiffCapability(runner: runner).run(c.context, c.args);
+      await PinDiffCapability(runner: runner).route(c.context, c.args);
       // `equals` for deep list comparison (a bare List matches by identity).
       expect(runner.calls, contains(equals(['log', '--oneline', 'origin/main..HEAD'])));
       expect(runner.calls, contains(equals(['diff', 'origin/main...HEAD'])));
@@ -91,9 +91,9 @@ void main() {
         diffOut: '--- a/x.dart\n+++ b/x.dart\n+final x = 1;',
       );
       final c = _ctx(dir.path);
-      final outcome = await PinDiffCapability(runner: runner).run(c.context, c.args);
-      expect(outcome, isA<Ok>());
-      expect((outcome as Ok).payload, {
+      final outcome = await PinDiffCapability(runner: runner).route(c.context, c.args);
+      expect(outcome, isA<Advance>());
+      expect((outcome as Advance).payload, {
         'base': 'origin/main',
         'commits': '2',
         'diffBytes': '${'--- a/x.dart\n+++ b/x.dart\n+final x = 1;'.length}',
@@ -112,10 +112,10 @@ void main() {
       addTearDown(() => dir.deleteSync(recursive: true));
       final runner = _CannedGitRunner(logOut: '', diffOut: '');
       final c = _ctx(dir.path);
-      final outcome = await PinDiffCapability(runner: runner).run(c.context, c.args);
-      expect(outcome, isA<Gate>());
+      final outcome = await PinDiffCapability(runner: runner).route(c.context, c.args);
+      expect(outcome, isA<Escalate>());
       expect(
-        (outcome as Gate).reason,
+        (outcome as Escalate).reason,
         contains('ZERO commits beyond origin/main'),
         reason: 'the exact live-finding condition, named for the human ruling',
       );
@@ -135,40 +135,47 @@ void main() {
         diffOut: '   \n',
       );
       final c = _ctx(dir.path);
-      final outcome = await PinDiffCapability(runner: runner).run(c.context, c.args);
-      expect(outcome, isA<Gate>());
-      final reason = (outcome as Gate).reason;
+      final outcome = await PinDiffCapability(runner: runner).route(c.context, c.args);
+      expect(outcome, isA<Escalate>());
+      final reason = (outcome as Escalate).reason;
       expect(reason, contains('2 commit'));
       expect(reason, contains('net'));
     });
 
-    test('git cannot compute the delta -> Failed (LOUD), never a silent Gate '
-        'that would masquerade as a stale bead', () async {
+    test('git cannot compute the delta -> a thrown RouteFailure (LOUD), never '
+        'a silent Escalate that would masquerade as a stale bead', () async {
       final dir = Directory.systemTemp.createTempSync('pin-diff-giterr-');
       addTearDown(() => dir.deleteSync(recursive: true));
       final runner = _CannedGitRunner(diffOk: false);
       final c = _ctx(dir.path);
-      final outcome = await PinDiffCapability(runner: runner).run(c.context, c.args);
-      expect(outcome, isA<Failed>());
-      final reason = (outcome as Failed).reason;
-      expect(reason, contains('could not compute'));
-      expect(reason, contains('bad revision'), reason: 'the git output tail');
+      // A route has NO failure arm: a throwing body is what RouteAllocation
+      // sinks to supervision.
+      await expectLater(
+        PinDiffCapability(runner: runner).route(c.context, c.args),
+        throwsA(
+          isA<RouteFailure>().having(
+            (e) => e.reason,
+            'reason',
+            allOf(contains('could not compute'), contains('bad revision')),
+          ),
+        ),
+      );
     });
 
-    test('no ambient Workspace -> Ok no-op (offline, never throws)', () async {
-      final outcome = await const PinDiffCapability().run(
+    test('no ambient Workspace -> Advance no-op (offline, never throws)', () async {
+      final outcome = await const PinDiffCapability().route(
         FakeTreeContext(values: const {}),
         stepArgs('tg-1/review/pin-diff'),
       );
-      expect(outcome, isA<Ok>());
+      expect(outcome, isA<Advance>());
     });
 
-    test('a workspace dir that does not exist -> Ok no-op with NO git call '
+    test('a workspace dir that does not exist -> Advance no-op with NO git call '
         '(offline/dry-run posture, mirrors provisionWorkspace)', () async {
       final runner = _CannedGitRunner(diffOut: 'should never be read');
       final c = _ctx('/grid/worktrees/pin-diff-does-not-exist-tg-1');
-      final outcome = await PinDiffCapability(runner: runner).run(c.context, c.args);
-      expect(outcome, isA<Ok>());
+      final outcome = await PinDiffCapability(runner: runner).route(c.context, c.args);
+      expect(outcome, isA<Advance>());
       expect(runner.calls, isEmpty, reason: 'no worktree on disk -> no git run');
     });
   });

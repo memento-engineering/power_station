@@ -263,11 +263,11 @@ void main() {
         expect(_spawnedSpecify(f), isFalse);
         expect(_touchedSpecifyNode(f), isFalse);
         expect(
-          _wroteCursor(f, kLandNode, 'complete'),
+          _wroteCursor(f, kDeliverNode, 'complete'),
           isTrue,
           reason:
-              'land ran under the legacy shape (offline: LandCapability '
-              'Ok-no-ops with no SourceControl wired)',
+              'the terminal route ran under the legacy shape (offline: it '
+              'advances BARE with no delivery method bound)',
         );
 
         // The chokepoint write does not feed back into the fake STATE source,
@@ -285,7 +285,7 @@ void main() {
                 kRouteNode,
                 kRebaseNode,
                 kRevalidateNode,
-                kLandNode,
+                kDeliverNode,
               },
             ),
           ),

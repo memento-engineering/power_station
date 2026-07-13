@@ -47,8 +47,8 @@ DiscoveryVerdict _decide(Map<String, LensReport?> lanes, {int priorRound = 0}) =
 LensReportReader _reader(Map<String, LensReport?> canned) =>
     (_, lens, __) => canned[lens];
 
-Future<StepOutcome> _runRoute(Map<String, LensReport?> canned) =>
-    DiscoveryRouteCapability(reader: _reader(canned)).run(
+Future<RouteVerdict> _runRoute(Map<String, LensReport?> canned) =>
+    DiscoveryRouteCapability(reader: _reader(canned)).route(
       FakeTreeContext(
         values: {
           Bead: workBead('tg-1'),
@@ -187,8 +187,8 @@ void main() {
             ],
           ),
       });
-      expect(outcome, isA<Ok>());
-      final payload = (outcome as Ok).payload!;
+      expect(outcome, isA<Advance>());
+      final payload = (outcome as Advance).payload!;
       expect(payload['verdict'], 'advance');
       expect(payload['rule'], 'no-cited-offence');
       expect(payload['lenses'], kDiscoveryLenses.join(','));
@@ -203,8 +203,8 @@ void main() {
             violations: lens == kDecisionLens ? [_cited()] : const [],
           ),
       });
-      expect(outcome, isA<Gate>());
-      expect((outcome as Gate).reason, contains(_adr));
+      expect(outcome, isA<Escalate>());
+      expect((outcome as Escalate).reason, contains(_adr));
       expect((outcome).reason, contains('DISCOVERY HOLD'));
     });
   });

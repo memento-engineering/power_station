@@ -51,8 +51,8 @@ Set<String> _ancestorsOf(Circuit circuit, String stepId) {
   return seen;
 }
 
-Future<StepOutcome> _runIntake(Bead b, {DirectoryClearer clearer = _noop}) =>
-    IntakeCapability(clearer: clearer).run(
+Future<RouteVerdict> _runIntake(Bead b, {DirectoryClearer clearer = _noop}) =>
+    IntakeCapability(clearer: clearer).route(
       FakeTreeContext(
         values: {
           Bead: b,
@@ -62,9 +62,9 @@ Future<StepOutcome> _runIntake(Bead b, {DirectoryClearer clearer = _noop}) =>
       stepArgs('tg-1/$kIntakeNode'),
     );
 
-Future<StepOutcome> _runRoute({String? grade, String rationale = ''}) {
+Future<RouteVerdict> _runRoute({String? grade, String rationale = ''}) {
   const parent = 'tg-1/spec_review';
-  return const ReadinessRouteCapability().run(
+  return const ReadinessRouteCapability().route(
     FakeTreeContext(
       values: {
         SiblingView: SiblingView(
@@ -242,16 +242,16 @@ void main() {
   group('IntakeCapability — gates BEFORE any agent (tier 1)', () {
     test('a driveable bead advances with provenance', () async {
       final out = await _runIntake(_refined());
-      expect(out, isA<Ok>());
-      expect((out as Ok).payload, {'verdict': 'driveable', 'type': 'feature'});
+      expect(out, isA<Advance>());
+      expect((out as Advance).payload, {'verdict': 'driveable', 'type': 'feature'});
     });
 
     test('a `decision` bead GATES — the hold NAMES the finding', () async {
       final out = await _runIntake(
         _refined().copyWith(issueType: IssueType.decision),
       );
-      expect(out, isA<Gate>());
-      expect((out as Gate).reason, contains('INTAKE HOLD'));
+      expect(out, isA<Escalate>());
+      expect((out as Escalate).reason, contains('INTAKE HOLD'));
       expect(out.reason, contains('not a driveable type'));
       expect(
         out.reason,
@@ -261,11 +261,11 @@ void main() {
     });
 
     test('a missing ambient bead GATES (fail-closed)', () async {
-      final out = await const IntakeCapability(clearer: _noop).run(
+      final out = await const IntakeCapability(clearer: _noop).route(
         FakeTreeContext(values: const {}),
         stepArgs('tg-1/$kIntakeNode'),
       );
-      expect(out, isA<Gate>());
+      expect(out, isA<Escalate>());
     });
 
     test('it WIPES the critique dir — the readiness lane\'s round-freshness '
@@ -280,8 +280,8 @@ void main() {
   group('ReadinessRouteCapability — the decision point (tier 3)', () {
     test('grade A ⇒ Ok(drive) with route provenance', () async {
       final out = await _runRoute(grade: 'A');
-      expect(out, isA<Ok>());
-      expect((out as Ok).payload!['verdict'], 'drive');
+      expect(out, isA<Advance>());
+      expect((out as Advance).payload!['verdict'], 'drive');
       expect(out.payload!['grade'], 'A');
       expect(out.payload!['lane'], kReadinessStep);
       expect(out.payload!['rule'], 'ready');
@@ -292,30 +292,30 @@ void main() {
         grade: 'D',
         rationale: 'no acceptance shape; name the surfaces it touches',
       );
-      expect(out, isA<Gate>());
-      expect((out as Gate).reason, contains('no acceptance shape'));
+      expect(out, isA<Escalate>());
+      expect((out as Escalate).reason, contains('no acceptance shape'));
       expect(out.reason, contains('SPEC-READINESS HOLD'));
     });
 
     test('NO verdict ⇒ Gate (fail-closed)', () async {
-      expect(await _runRoute(grade: null), isA<Gate>());
+      expect(await _runRoute(grade: null), isA<Escalate>());
     });
   });
 
   group('the lens is CHEAP — at most ONE agent upstream of specify', () {
-    // A `ServiceCapability` runs IN-PROCESS (it has no `spawn`); only a
-    // `ProcessCapability` can start an agent. So the two facts below —
+    // A `RouteCapability` runs IN-PROCESS and NEVER spawns (the engine's own
+    // contract — spawning is a `ProcessCapability`). So the two facts below —
     // (1) which of the ladder's capabilities can spawn at all, and (2) which
     // steps of the circuit sit upstream of `specify` — together bound the
     // ladder's agent cost at ONE. (That the REGISTRY wires these classes at
     // these ids is proven end-to-end, through the real kernel, in
     // `acceptance/readiness_acceptance_test.dart`: nothing spawns until intake
     // completes, and then exactly one process starts before specify.)
-    test('intake + readiness-route CANNOT spawn (ServiceCapability); readiness '
+    test('intake + readiness-route CANNOT spawn (RouteCapability); readiness '
         'is the single agent-backed tier', () {
-      expect(const IntakeCapability(), isA<ServiceCapability>());
+      expect(const IntakeCapability(), isA<RouteCapability>());
       expect(const IntakeCapability(), isNot(isA<ProcessCapability>()));
-      expect(const ReadinessRouteCapability(), isA<ServiceCapability>());
+      expect(const ReadinessRouteCapability(), isA<RouteCapability>());
       expect(
         const ReadinessRouteCapability(),
         isNot(isA<ProcessCapability>()),

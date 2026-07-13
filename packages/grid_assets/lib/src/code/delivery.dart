@@ -13,14 +13,13 @@
 /// receipt and committee grades come from, the [PrComposition] knob, the agent
 /// scope the describe pass rides — is read by the ROUTE, at its entry.
 ///
-/// This library SUPERSEDES the three `is`-detected `SourceControl` widenings —
-/// ADR-0000 A5's `TreeVerifiableSourceControl`, `tg-rm5`'s
-/// `ReceiptCapableSourceControl`, `tg-w3c`'s `ReworkAwareSourceControl` — and
-/// A7(3)'s `GitSourceControl.withPrOpener` enrichment seam. Each existed ONLY
-/// because the ENGINE's `SourceControl` could not carry the verb, and M5 D-4a
-/// stripped those verbs off the interface entirely. Git ownership is now
-/// UNCONDITIONAL here, not opt-in-detected — the exact retirement A5's own
-/// `Affects` note named.
+/// This library SUPERSEDES the three `is`-detected `SourceControl` widenings and
+/// the PR-opener enrichment seam that preceded it (the retirements are recorded,
+/// with their governing amendments, in ADR-0000 A25). Each existed ONLY because
+/// the ENGINE's `SourceControl` could not carry the verb, and M5 D-4a stripped
+/// those verbs off the interface entirely. Git ownership is now UNCONDITIONAL
+/// here, not opt-in-detected — a bare source-control fake can no longer skip the
+/// committed-the-WHOLE-tree guarantee.
 library;
 
 import 'dart:io';

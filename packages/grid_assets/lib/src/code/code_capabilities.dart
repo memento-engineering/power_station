@@ -302,8 +302,9 @@ class AgentCapability extends ProcessCapability {
     ];
   }
 
-  /// Keeps what we just materialized OUT of the bead's commit: [LandCapability]
-  /// commits with `git add -A` (`GitOps.commitAll`), so an untracked
+  /// Keeps what we just materialized OUT of the bead's commit: the bound
+  /// `DeliveryMethod` commits residue with `git add -A` (`GitOps.commitAll`), so
+  /// an untracked
   /// `.claude/skills/**` would ride every bead's PR into whatever repo the bead
   /// belongs to. Writes a SELF-IGNORING `.gitignore` — a single `*` — INSIDE
   /// each asset dir this call wrote into: `*` matches every file in that dir
@@ -318,11 +319,10 @@ class AgentCapability extends ProcessCapability {
   /// `.claude/settings.json`), so a shared file could be one the repo already
   /// owns. Per-asset-dir files cannot collide with it. Because a git ignore
   /// cannot hide TRACKED files, and because nothing outside the materialized
-  /// asset dirs is ignored, `land`'s post-commit residue gate
-  /// (`uncommittedResidue` → `GitOps.hasUncommittedWork` → plain
-  /// `git status --porcelain`, ADR-0000 A5) still detects every other change in
-  /// the worktree — including new files the coding agent itself writes under
-  /// `.claude/`.
+  /// asset dirs is ignored, delivery's post-commit residue fence
+  /// (`GitOps.hasUncommittedWork` → plain `git status --porcelain`, ADR-0000 A5)
+  /// still detects every other change in the worktree — including new files the
+  /// coding agent itself writes under `.claude/`.
   void _excludeOverlayFromGit(String claudeDir, List<String> writtenEntryDirs) {
     for (final entryDir in writtenEntryDirs) {
       final ignore = File(p.join(claudeDir, entryDir, '.gitignore'));

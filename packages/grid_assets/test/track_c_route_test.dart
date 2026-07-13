@@ -2,8 +2,8 @@
 //
 // `route` reads its sibling critics' grades through the AMBIENT SiblingView
 // (D-5; read with the effect verb — never a subscription/re-query) and decides:
-//   gating-F → Gate · spread ≥ 3 → Gate · any non-gating D/F → Gate ·
-//   all A–C → Ok.
+//   gating-F → Escalate · spread ≥ 3 → Escalate · any non-gating D/F →
+//   Escalate · all A–C → Advance.
 // Fail-closed: a missing/forged grade is F, so it can NEVER advance. Zero I/O.
 import 'package:grid_assets/grid_assets.dart';
 import 'package:grid_engine/grid_engine.dart';
@@ -45,25 +45,25 @@ const _critics = 'code-validation,spec-adherence,regression-risk,test-coverage';
 }
 
 /// Runs the route over the fabricated [grades].
-Future<StepOutcome> _route(Map<String, String> grades) {
+Future<RouteVerdict> _route(Map<String, String> grades) {
   final c = _routeCtx(grades);
-  return const RouteCapability().run(c.context, c.args);
+  return const CodeRouteCapability().route(c.context, c.args);
 }
 
 void main() {
   group('Track C3 — the route matrix', () {
-    test('all A–C ⇒ Ok(advance) — with route provenance (FT-2)', () async {
+    test('all A–C ⇒ Advance — with route provenance (FT-2)', () async {
       final out = await _route(const {
         'code-validation': 'A',
         'spec-adherence': 'B',
         'regression-risk': 'A',
         'test-coverage': 'C',
       });
-      expect(out, isA<Ok>());
+      expect(out, isA<Advance>());
       // FT-2: the advance payload is now self-contained — it carries the grade
       // vector it consumed (CSV in kCommitteeRubrics order), the computed spread
       // (A..C ⇒ index 0..2 ⇒ 2), and the matrix arm that fired.
-      expect((out as Ok).payload, {
+      expect((out as Advance).payload, {
         'verdict': 'advance',
         'grades': 'code-validation=A,spec-adherence=B,regression-risk=A,'
             'test-coverage=C',
@@ -79,8 +79,8 @@ void main() {
         'regression-risk': 'A',
         'test-coverage': 'A',
       });
-      expect(out, isA<Gate>());
-      expect((out as Gate).reason, contains('hard block'));
+      expect(out, isA<Escalate>());
+      expect((out as Escalate).reason, contains('hard block'));
     });
 
     test('a grade spread ≥ 3 (A + D) ⇒ Gate', () async {
@@ -90,10 +90,10 @@ void main() {
         'regression-risk': 'A',
         'test-coverage': 'D',
       });
-      expect(out, isA<Gate>());
+      expect(out, isA<Escalate>());
       // The spread rule (rule 2) fires before the D/F rule — assert the REASON
       // so a gate firing for the WRONG rule is caught (review finding C-1).
-      expect((out as Gate).reason, contains('spread'));
+      expect((out as Escalate).reason, contains('spread'));
     });
 
     test('a non-gating critic at F (spread < 3) ⇒ Gate (rework rule, the F '
@@ -107,8 +107,8 @@ void main() {
         'regression-risk': 'E',
         'test-coverage': 'D',
       });
-      expect(out, isA<Gate>());
-      expect((out as Gate).reason, contains('rework'));
+      expect(out, isA<Escalate>());
+      expect((out as Escalate).reason, contains('rework'));
     });
 
     test('a non-gating critic at D (spread < 3) ⇒ Gate (rework, deferred)',
@@ -121,8 +121,8 @@ void main() {
         'regression-risk': 'C',
         'test-coverage': 'D',
       });
-      expect(out, isA<Gate>());
-      expect((out as Gate).reason, contains('rework'));
+      expect(out, isA<Escalate>());
+      expect((out as Escalate).reason, contains('rework'));
     });
 
     test('a MISSING sibling grade ⇒ Gate (fail-closed — can never advance)',
@@ -133,9 +133,9 @@ void main() {
         'spec-adherence': 'A',
         'regression-risk': 'A',
       });
-      expect(out, isA<Gate>(), reason: 'an unread/forged-missing grade is F');
+      expect(out, isA<Escalate>(), reason: 'an unread/forged-missing grade is F');
       // A missing non-gating grade is F → the D/F rework rule (review C-1).
-      expect((out as Gate).reason, contains('rework'));
+      expect((out as Escalate).reason, contains('rework'));
     });
 
     test('the gating critic MISSING ⇒ Gate (fail-closed)', () async {
@@ -144,9 +144,9 @@ void main() {
         'regression-risk': 'A',
         'test-coverage': 'A',
       });
-      expect(out, isA<Gate>());
+      expect(out, isA<Escalate>());
       // A missing gating grade is F → the hard-block rule, not spread (review C-1).
-      expect((out as Gate).reason, contains('hard block'));
+      expect((out as Escalate).reason, contains('hard block'));
     });
   });
 }

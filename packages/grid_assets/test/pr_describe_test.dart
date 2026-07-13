@@ -63,7 +63,7 @@ void main() {
 
   group('the two FAIL-SAFE guards (no real git, no real claude, ever)', () {
     test(
-      'no InferenceRunner wired (a bare `const LandCapability()`) ⇒ the '
+      'no InferenceRunner wired (a bare `const DeliverRouteCapability()`) ⇒ the '
       'fallback, with ZERO git calls',
       () async {
         final outcome = await _describe(

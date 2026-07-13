@@ -162,12 +162,14 @@ String _workListId(Branch root) =>
     _branchWhere(root, (s) => s is WorkList).branchId;
 
 ServiceBundle _gitServices(Fakes f) => ServiceBundle(
-  // gitRunner: the SAME recording fake gitOps wraps — the rework-aware
-  // force-with-lease push (`tg-w3c`) records offline (never real git).
-  sourceControl: GitSourceControl(
+  // The source control PROVISIONS; the bound DELIVERY METHOD is what a terminal
+  // advance actuates (M5 D-4a). gitRunner: the SAME recording fake gitOps wraps
+  // — the force-with-lease push records offline (never real git).
+  sourceControl: const GitSourceControl(),
+  delivery: GitHubPrDelivery(
     gitOps: GitOps(f.git),
-    gitRunner: f.git,
     prOpener: f.pr,
+    gitRunner: f.git,
   ),
 );
 

@@ -204,13 +204,18 @@ final Map<String, String> kSpecGradesAllA = {
   for (final n in kSpecCriticNodes) n: 'A',
 };
 
-/// The landing circuit's own node paths (`tg-rm5`), relative to the work bead
-/// — `land/rebase` → `land/revalidate` → `land/land` (the innermost
-/// `LandCapability`, since `land` at the `code` circuit level is itself a
-/// [SubCircuitStep] over `landing`, not a leaf).
+/// The landing PREPARATION circuit's own node paths (`tg-rm5`), relative to the
+/// work bead — `land/rebase` → `land/revalidate`. (`land` at the `code` circuit
+/// level is a [SubCircuitStep] over `landing`, not a leaf.) The PR is no longer a
+/// step here: `land/land` is GONE (M5 D-4a).
 const String kRebaseNode = 'land/rebase';
 const String kRevalidateNode = 'land/revalidate';
-const String kLandNode = 'land/land';
+
+/// The ROOT circuit's TERMINAL node — the flat route whose advance ACTUATES the
+/// substation's bound `DeliveryMethod`. It replaced `land/land`, and it is a
+/// ROOT-level step (a sub-circuit tail could never deliver: `isDeliveryTerminal`
+/// is false at a [SubCircuitStep]).
+const String kDeliverNode = kDeliverStep;
 
 /// A recording [ShellRunner] (the `revalidate` seam, `tg-rm5`): records every
 /// (workingDirectory, command) call and returns a configurable [exitCode] (0

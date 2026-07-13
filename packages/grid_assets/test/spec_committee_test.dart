@@ -89,7 +89,7 @@ No ADR applies — verified via grep on `heartbeat`, `bus`.
 /// fabricated [grades], with [rationales] where a critic returned one. No
 /// ambient `Workspace` ⇒ the offline posture (no ledger I/O; the round counter
 /// reads 0).
-Future<StepOutcome> _specRoute(
+Future<RouteVerdict> _specRoute(
   Map<String, String> grades, {
   Map<String, String> rationales = const {},
 }) {
@@ -111,7 +111,7 @@ Future<StepOutcome> _specRoute(
       ),
     },
   );
-  return const SpecRouteCapability().run(
+  return const SpecRouteCapability().route(
     context,
     stepArgs(
       '$parent/route',
@@ -151,7 +151,7 @@ void main() {
       );
       expect(byId[kReadinessRouteStep]!.dependsOn, {kReadinessStep});
       // `specify` is still the route's SIBLING (bead `pow-ui8`), so the RESPEC
-      // arm can name it in a `StepOutcome.Rewind` — it just no longer heads the
+      // arm can name it in a `RouteVerdict.Rewind` — it just no longer heads the
       // circuit, and it now sits behind the DISCOVERY gate as well.
       expect((byId[kSpecifyStep]! as CapabilityStep).capabilityId, kSpecifyStep);
       expect(byId[kSpecifyStep]!.dependsOn, {kDiscoveryCircuitId});
@@ -293,13 +293,13 @@ void main() {
       );
     });
 
-    test('the code circuit is spec_review → agent → review → land: the spec '
-        'circuit is the HEAD (specify folded inside it) and only a passing spec '
-        'proceeds to build', () {
+    test('the code circuit is spec_review → agent → review → land → deliver: '
+        'the spec circuit is the HEAD (specify folded inside it) and only a '
+        'passing spec proceeds to build', () {
       final byId = {for (final s in kCodeCircuit.steps) s.stepId: s};
       expect(
         byId.keys.toList(),
-        ['spec_review', 'agent', 'review', 'land'],
+        ['spec_review', 'agent', 'review', 'land', kDeliverStep],
       );
       expect(byId['spec_review']!.dependsOn, isEmpty);
       expect(byId['agent']!.dependsOn, {'spec_review'});
@@ -722,8 +722,8 @@ void main() {
 
     test('all pass ⇒ Ok(advance) with the spec grade vector (FT-2)', () async {
       final out = await _specRoute(allA());
-      expect(out, isA<Ok>());
-      expect((out as Ok).payload!['verdict'], 'advance');
+      expect(out, isA<Advance>());
+      expect((out as Advance).payload!['verdict'], 'advance');
       expect(
         out.payload!['grades'],
         'spec-validation=A,coherence=A,adr-alignment=A,'
@@ -734,8 +734,8 @@ void main() {
     test('the gating spec-validation at F ⇒ Gate, and the reason NAMES the '
         'gating lane (this route serves both committees)', () async {
       final out = await _specRoute({...allA(), kSpecGatingRubric: 'F'});
-      expect(out, isA<Gate>());
-      expect((out as Gate).reason, contains('spec-validation'));
+      expect(out, isA<Escalate>());
+      expect((out as Escalate).reason, contains('spec-validation'));
       expect(out.reason, contains('hard block'));
     });
 
@@ -754,14 +754,14 @@ void main() {
     test('an LLM spec lane at D with NO rationale ⇒ a HUMAN gate — nothing to '
         'respec against, so never a rewind', () async {
       final out = await _specRoute({...allA(), 'plan-completeness': 'D'});
-      expect(out, isA<Gate>());
-      expect((out as Gate).reason, contains('NO rationale'));
+      expect(out, isA<Escalate>());
+      expect((out as Escalate).reason, contains('NO rationale'));
     });
 
     test('a missing spec grade fail-closes (never advances)', () async {
       final grades = allA()..remove('adr-alignment');
       final out = await _specRoute(grades);
-      expect(out, isA<Gate>());
+      expect(out, isA<Escalate>());
     });
   });
 }

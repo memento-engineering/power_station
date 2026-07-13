@@ -32,13 +32,11 @@ GraphSnapshot _graph({
 );
 
 /// A recording [SourceControl] that captures the bead ids it was asked to
-/// provision. Land is deferred (`canLand == false`); the test never reaches it.
+/// provision. NO delivery is bound on the bundle, so nothing ever leaves the
+/// station; the test never reaches delivery anyway.
 class _RecordingSourceControl implements SourceControl {
   /// Every bead id passed to [provisionWorkspace], in call order.
   final List<String> provisioned = [];
-
-  @override
-  bool get canLand => false;
 
   @override
   String workspaceFor(String beadId) => '/w/$beadId';
@@ -53,26 +51,6 @@ class _RecordingSourceControl implements SourceControl {
     required String workspaceDir,
   }) async => provisioned.add(beadId);
 
-  @override
-  Future<void> commitAll({
-    required String workspaceDir,
-    required String message,
-  }) async {}
-
-  @override
-  Future<void> push({
-    required String workspaceDir,
-    required String remote,
-    required String branch,
-  }) async {}
-
-  @override
-  Future<PrRef?> openPr({
-    required String workspaceDir,
-    required String branch,
-    required String baseBranch,
-    required String title,
-  }) async => null;
 }
 
 void main() {
