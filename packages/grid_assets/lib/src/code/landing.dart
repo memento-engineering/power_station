@@ -1,18 +1,24 @@
-/// The LANDING circuit (bead `tg-rm5`) — `rebase → revalidate → land`, a
-/// [SubCircuitStep] the `code` circuit's own `land` step now inflates
-/// (replacing the flat `land` [CapabilityStep] M5 Track E shipped).
+/// The LANDING PREPARATION circuit (bead `tg-rm5`) — `rebase → revalidate`, a
+/// [SubCircuitStep] the `code` circuit's own `land` step inflates.
 ///
 /// **Why**: with N parallel beads landing against one repo, the second bead to
 /// land was validated against a `main` that has since moved (its own
 /// Validation Plan ran BEFORE the first bead's PR merged) — the stale-base
 /// hole. This circuit closes it: rebase the bead branch onto the CURRENT base
 /// before re-running the bead's OWN Validation Plan against the REBASED tree,
-/// gating (never silently forcing through) on either a rebase conflict or a
-/// revalidation failure. Both `rebase` and `revalidate` are [ServiceCapability]s
-/// (not spawned jobs): each is a short, bounded, deterministic operation —
-/// consistent with [LandCapability]'s own commit/push/PR orchestration, and it
-/// lets both skip to a clean, PROCESS-FREE [Ok] when land isn't wired (the
-/// commit-only early arm), exactly like [LandCapability] already does.
+/// ESCALATING (never silently forcing through) on either a rebase conflict or a
+/// revalidation failure. Both `rebase` and `revalidate` are [RouteCapability]s
+/// (not spawned jobs): each is a short, bounded, deterministic operation, and it
+/// lets both skip to a clean, PROCESS-FREE [Advance] when no delivery method is
+/// bound (the commit-only arm).
+///
+/// **The PR itself is no longer a step** (M5 D-4a): `deliver` — the ROOT `code`
+/// circuit's TERMINAL route (`delivery.dart`) — actuates the substation's bound
+/// `DeliveryMethod` on its advance. Delivery is the ACTUATION of a terminal
+/// advance, never a step and never a verdict of its own, so this circuit prepares
+/// and the root delivers. Its `rebase`/`revalidate` step ids are unchanged, so
+/// the `<bead>/land/*` node paths [buildCircuitReceipt] reads still resolve (the
+/// root keeps its sub-circuit step id `land`).
 ///
 /// **Design ruling (Nico + operator, 2026-07-03) — supersedes the original
 /// `grid.base` design-note ask**: there is NO `grid.base` metadata key, and
@@ -29,24 +35,17 @@
 /// metadata) — landing a stack in dependency order. Never a metadata key;
 /// branch names never appear in bead data.
 ///
-/// **The receipt-regression callout**: `PrOpener.open`/`GhPrOpener` (grid_runtime)
-/// already carry a `body` param through to `gh pr create --body`, but the
-/// engine's `SourceControl.openPr` (grid_engine) never grew one — so `land`
-/// has only ever opened EMPTY-body PRs, dropping the code-review committee's
-/// grade/route provenance (and now this circuit's rebase/revalidate outcome)
-/// on the floor. [buildCircuitReceipt] assembles that provenance; until a
-/// future the_grid change widens `SourceControl.openPr` itself,
-/// [ReceiptCapableSourceControl] (`code_capabilities.dart`) is the power_station-
-/// local stopgap `LandCapability` detects via `is` to actually thread it into
-/// the real PR body today.
-///
-/// **Rework-aware delivery (`tg-w3c`)**: after a rework round REBASES the
-/// branch, the `land` step's plain push is refused non-fast-forward and its
-/// `gh pr create` errors "already exists" — wedging a DONE, approved bead into
-/// escalation. [ReworkAwareSourceControl] is the SAME `is`-detected stopgap
-/// posture: force-with-lease push + idempotent (reuse-an-open-PR) open, each
-/// returning the git/gh output so the land step stamps the stderr tail as the
-/// FT-1 `failureReason`.
+/// **The receipt** ([buildCircuitReceipt]): this circuit's rebase/revalidate
+/// outcomes, read off the ambient `SiblingView` at the bead's absolute node
+/// paths. It rides the PR body `GitHubPrDelivery` opens with. The three
+/// `is`-detected `SourceControl` widenings that used to thread it there — the
+/// receipt-regression, tree-verification and rework-aware stopgaps — are GONE:
+/// each existed only because the ENGINE's `SourceControl` could not carry the
+/// verb, and M5 D-4a stripped those verbs off the interface entirely. A delivery
+/// method owns git DIRECTLY now, so the outcome shapes below ([LandPushOutcome],
+/// [LandPrOutcome], [isPrAlreadyOpen], [extractPrUrl], [landReasonTail]) survive
+/// as ITS vocabulary — force-with-lease push, reuse-an-open-PR, and the stderr
+/// tail an operator reads as the FT-1 `failureReason`.
 library;
 
 import 'dart:io';
@@ -56,14 +55,19 @@ import 'package:genesis_tree/genesis_tree.dart';
 import 'package:grid_engine/grid_engine.dart';
 import 'package:grid_runtime/grid_runtime.dart';
 
-/// The landing circuit (id `landing`) — `code`'s own `land` step now inflates
-/// this as a [SubCircuitStep] instead of a flat [CapabilityStep] (M5 Track E's
-/// shape). `rebase` and `revalidate` each gate (never silently force) on
-/// failure; `land` (unchanged: commit → push → open PR) only runs once both
-/// have advanced clean.
+import 'route_failure.dart';
+
+/// The landing PREPARATION circuit (id `landing`) — `rebase → revalidate`, which
+/// `code`'s own `land` step inflates as a [SubCircuitStep]. Each step ESCALATES
+/// (never silently forces) on failure.
+///
+/// The PR itself is NOT a step here: `deliver` — the ROOT circuit's terminal
+/// route — actuates the substation's bound `DeliveryMethod` on its advance (M5
+/// D-4a), and it `dependsOn` this circuit's terminal, so nothing leaves the
+/// station until both preparation steps advance clean.
 const Circuit kLandingCircuit = Circuit(
   id: 'landing',
-  terminalStepId: 'land',
+  terminalStepId: 'revalidate',
   steps: [
     CapabilityStep(stepId: 'rebase', capabilityId: 'rebase'),
     CapabilityStep(
@@ -71,32 +75,33 @@ const Circuit kLandingCircuit = Circuit(
       capabilityId: 'revalidate',
       dependsOn: {'rebase'},
     ),
-    CapabilityStep(stepId: 'land', capabilityId: 'land', dependsOn: {'revalidate'}),
   ],
 );
 
 /// The REBASE step — rebases the bead branch onto the CURRENT base branch tip.
 /// A conflict (or any other rebase failure) ABORTS the rebase (never leaves
-/// the worktree mid-rebase) and [Gate]s with the git output as provenance —
-/// never a silent force-through. Offline-safe: mirrors [LandCapability]'s own
-/// no-op posture — when land isn't wired (`--land` off, the commit-only early
-/// arm), this skips straight to [Ok] with NO git call at all.
-class RebaseCapability extends ServiceCapability {
+/// the worktree mid-rebase) and [Escalate]s with the git output as provenance —
+/// never a silent force-through.
+///
+/// Offline-safe: with NO delivery method bound, nothing will leave the station,
+/// so there is nothing to rebase ONTO — this skips straight to [Advance] with NO
+/// git call at all. ("Is landing armed?" became "which delivery method did this
+/// substation bind?", and none is a valid binding — M5 D-4a.)
+class RebaseCapability extends RouteCapability {
   /// Creates the capability, optionally over an injected [runner] (tests
-  /// inject the SAME [RecordingGitRunner] fake `GitSourceControl`'s `GitOps`
+  /// inject the SAME [RecordingGitRunner] fake `GitHubPrDelivery`'s `GitOps`
   /// already uses — Fakes, not mocks); defaults to the real [SystemGitRunner].
   const RebaseCapability({GitRunner? runner}) : _runner = runner;
 
   final GitRunner? _runner;
 
   @override
-  Future<StepOutcome> run(TreeContext context, StepArgs args) async {
+  Future<RouteVerdict> route(TreeContext context, StepArgs args) async {
     final services =
         context.getInheritedSeedOfExactType<ServiceBundle>() ??
         const ServiceBundle();
     final workspace = context.getInheritedSeedOfExactType<Workspace>();
-    final sc = services.sourceControl;
-    if (sc == null || !sc.canLand || workspace == null) return const Ok();
+    if (services.delivery == null || workspace == null) return const Advance();
 
     final runner = _runner ?? SystemGitRunner();
     final workDir = workspace.workspaceDir;
@@ -106,22 +111,24 @@ class RebaseCapability extends ServiceCapability {
       workingDirectory: workDir,
       args: ['fetch', 'origin', base],
     );
-    if (args.cancel.isCancelled) return const Failed('cancelled');
+    if (args.cancel.isCancelled) throw kRouteCancelled;
     if (!fetch.ok) {
-      return Failed('git fetch origin $base failed: ${fetch.output.trim()}');
+      throw RouteFailure(
+        'git fetch origin $base failed: ${fetch.output.trim()}',
+      );
     }
 
     final rebase = await runner.run(
       workingDirectory: workDir,
       args: ['rebase', 'origin/$base'],
     );
-    if (args.cancel.isCancelled) return const Failed('cancelled');
-    if (rebase.ok) return const Ok({'outcome': 'clean'});
+    if (args.cancel.isCancelled) throw kRouteCancelled;
+    if (rebase.ok) return const Advance({'outcome': 'clean'});
 
     // Never leave the worktree mid-rebase; the abort result is best-effort
-    // (the Gate below is what matters — the conflict provenance).
+    // (the Escalate below is what matters — the conflict provenance).
     await runner.run(workingDirectory: workDir, args: ['rebase', '--abort']);
-    return Gate('rebase onto $base conflicted: ${rebase.output.trim()}');
+    return Escalate('rebase onto $base conflicted: ${rebase.output.trim()}');
   }
 }
 
@@ -129,12 +136,12 @@ class RebaseCapability extends ServiceCapability {
 /// command the code-review committee's gating lane runs,
 /// `committee.dart`'s `kGatingRubric`) against the REBASED tree, closing the
 /// stale-base hole (a plan that passed pre-rebase may fail post-rebase). A
-/// non-zero plan [Gate]s with the captured output as provenance — never a
-/// silent advance. Offline-safe: mirrors [RebaseCapability] — when land isn't
-/// wired, skips straight to [Ok] with NO shell exec at all (a plan re-run
-/// only matters when a rebase actually moved the tree to re-validate
+/// non-zero plan [Escalate]s with the captured output as provenance — never a
+/// silent advance. Offline-safe: mirrors [RebaseCapability] — with no delivery
+/// method bound, skips straight to [Advance] with NO shell exec at all (a plan
+/// re-run only matters when a rebase actually moved the tree to re-validate
 /// against).
-class RevalidateCapability extends ServiceCapability {
+class RevalidateCapability extends RouteCapability {
   /// Creates the capability, optionally over an injected [runner] (tests
   /// inject a recording fake — Fakes, not mocks); defaults to the real
   /// [SystemShellRunner].
@@ -143,15 +150,14 @@ class RevalidateCapability extends ServiceCapability {
   final ShellRunner? _runner;
 
   @override
-  Future<StepOutcome> run(TreeContext context, StepArgs args) async {
+  Future<RouteVerdict> route(TreeContext context, StepArgs args) async {
     final services =
         context.getInheritedSeedOfExactType<ServiceBundle>() ??
         const ServiceBundle();
     final bead = context.getInheritedSeedOfExactType<Bead>();
     final workspace = context.getInheritedSeedOfExactType<Workspace>();
-    final sc = services.sourceControl;
-    if (sc == null || !sc.canLand || workspace == null || bead == null) {
-      return const Ok();
+    if (services.delivery == null || workspace == null || bead == null) {
+      return const Advance();
     }
 
     final runner = _runner ?? const SystemShellRunner();
@@ -159,9 +165,9 @@ class RevalidateCapability extends ServiceCapability {
       workingDirectory: workspace.workspaceDir,
       command: _validationPlan(bead),
     );
-    if (args.cancel.isCancelled) return const Failed('cancelled');
-    if (result.ok) return const Ok({'outcome': 'passed'});
-    return Gate('revalidate failed: ${_truncate(result.output)}');
+    if (args.cancel.isCancelled) throw kRouteCancelled;
+    if (result.ok) return const Advance({'outcome': 'passed'});
+    return Escalate('revalidate failed: ${_truncate(result.output)}');
   }
 }
 
@@ -240,58 +246,15 @@ String buildCircuitReceipt({
   return b.toString();
 }
 
-/// A [SourceControl] widened for REWORK-AWARE delivery (bead `tg-w3c`) — the
-/// same power_station-local, `is`-detected stopgap posture as
-/// [ReceiptCapableSourceControl] / [TreeVerifiableSourceControl]
-/// (`code_capabilities.dart`), but for the two land-step operations a
-/// preceding REWORK ROUND breaks once it rebases the bead branch (live
-/// evidence: tg-hsh round 2, session tgdog-6d8):
+/// The result of a delivery method's force-with-lease push — the push's success
+/// and its combined git stdout+stderr, so delivery can stamp the [output] tail as
+/// the FT-1 `failureReason` on a non-[ok] push.
 ///
-///  1. **push** — a rework round REBASES the branch, so its plain `git push`
-///     (`SourceControl.push`, `git push -u`) is refused NON-FAST-FORWARD.
-///     [pushForBranch] force-pushes with `--force-with-lease` ALWAYS — safe
-///     because it is the CIRCUIT'S OWN branch (`grid/<beadId>`), and the lease
-///     still refuses if a racing writer moved the remote out from under it.
-///     It returns the git result (ok + combined output) — the engine's
-///     `SourceControl.push` is `void`, dropping BOTH the force semantics and
-///     the stderr the land step must stamp as its `failureReason`.
-///  2. **PR open** — round one's PR is still OPEN, so `gh pr create`
-///     (`SourceControl.openPr`) errors "a pull request already exists".
-///     [openOrReusePr] treats an already-open PR as SUCCESS (returns its url)
-///     instead of a null that becomes a generic `Failed` → retry →
-///     breaker-exhausted → escalation of a bead whose work was DONE and
-///     approved.
-///
-/// [LandCapability] detects this via `is` and prefers these over the plain
-/// [SourceControl.push] / [SourceControl.openPr]; a bare [SourceControl] (a
-/// test fake, or a future non-Git impl) still lands through the unwidened
-/// interface methods.
-abstract interface class ReworkAwareSourceControl implements SourceControl {
-  /// Force-with-lease push of [branch] to [remote] from [workspaceDir] — the
-  /// rework-safe replacement for [SourceControl.push]. Returns the push's
-  /// success plus the git combined output (the land step stamps its
-  /// [LandPushOutcome.output] TAIL as the FT-1 `failureReason` on failure).
-  Future<LandPushOutcome> pushForBranch({
-    required String workspaceDir,
-    required String remote,
-    required String branch,
-  });
-
-  /// Opens a PR for [branch] against [baseBranch] with [body], or — when one is
-  /// already OPEN for [branch] — REUSES it (idempotent). Returns the url on an
-  /// open OR a reuse, or a failure reason (the gh stderr) when neither.
-  Future<LandPrOutcome> openOrReusePr({
-    required String workspaceDir,
-    required String branch,
-    required String baseBranch,
-    required String title,
-    String body,
-  });
-}
-
-/// The result of [ReworkAwareSourceControl.pushForBranch] — the push's success
-/// and its combined git stdout+stderr, so the land step can stamp the
-/// [output] tail as the FT-1 `failureReason` on a non-[ok] push.
+/// Force-with-lease ALWAYS (bead `tg-w3c`, live evidence tg-hsh round 2, session
+/// tgdog-6d8): a preceding REWORK ROUND rebases the bead branch, so a plain push
+/// is refused NON-FAST-FORWARD. Forcing is safe — it is the circuit's OWN branch
+/// (`grid/<beadId>`) — and the lease still refuses if a racing writer moved the
+/// remote out from under it.
 class LandPushOutcome {
   /// Creates the outcome.
   const LandPushOutcome({required this.ok, required this.output});
@@ -303,9 +266,14 @@ class LandPushOutcome {
   final String output;
 }
 
-/// The result of [ReworkAwareSourceControl.openOrReusePr] — a [url] on a fresh
-/// open OR a reuse ([reused] true when an already-open PR was adopted), or a
+/// The result of a delivery method's open-or-REUSE — a [url] on a fresh open OR a
+/// reuse ([reused] true when an already-open PR was adopted), or a
 /// [failureReason] (the gh stderr) when neither.
+///
+/// Reuse is what makes delivery IDEMPOTENT across a rework round (bead `tg-w3c`):
+/// round one's PR is still OPEN, so `gh pr create` errors "already exists" — a
+/// SUCCESS (the branch is delivered and the PR is there), not a failure that
+/// escalates a DONE, approved bead.
 class LandPrOutcome {
   const LandPrOutcome._({this.url, this.reused = false, this.failureReason});
 
@@ -316,7 +284,7 @@ class LandPrOutcome {
   factory LandPrOutcome.reused(String url) =>
       LandPrOutcome._(url: url, reused: true);
 
-  /// Neither open nor reuse — [reason] is the gh stderr the land step stamps.
+  /// Neither open nor reuse — [reason] is the gh stderr delivery stamps.
   factory LandPrOutcome.failed(String reason) =>
       LandPrOutcome._(failureReason: reason);
 
@@ -329,14 +297,13 @@ class LandPrOutcome {
   /// The failure reason (gh stderr); null on success.
   final String? failureReason;
 
-  /// Whether the land delivered a PR (opened or reused).
+  /// Whether delivery produced a PR (opened or reused).
   bool get ok => url != null;
 }
 
 /// Whether [ghOutput] is `gh pr create`'s "a pull request … already exists"
-/// refusal — the rework-round symptom (round one's PR is still open). Detected
-/// so [ReworkAwareSourceControl.openOrReusePr] treats it as success rather than
-/// a failure that escalates a DONE bead.
+/// refusal — the rework-round symptom (round one's PR is still open). Detected so
+/// delivery treats it as success rather than a failure that escalates a DONE bead.
 bool isPrAlreadyOpen(String ghOutput) => ghOutput.contains('already exists');
 
 /// The PR url embedded in gh output — both a successful `gh pr create` (stdout)
@@ -345,7 +312,7 @@ bool isPrAlreadyOpen(String ghOutput) => ghOutput.contains('already exists');
 String? extractPrUrl(String output) =>
     RegExp(r'https?://\S+/pull/\d+').firstMatch(output)?.group(0);
 
-/// The TAIL of git/gh combined output — what the land step stamps as its FT-1
+/// The TAIL of git/gh combined output — what delivery stamps as its FT-1
 /// `failureReason` so an operator sees WHY without forensics. The useful line
 /// is at the END (git/gh print progress first, the fatal message last) and the
 /// engine truncates a `failureReason` to its FIRST `kMaxReasonChars`; taking
@@ -361,14 +328,14 @@ String landReasonTail(String output, [int max = 400]) {
 /// identical private helper (duplicated rather than shared, so this file
 /// doesn't couple to the review committee's file layout for one four-line
 /// pure function). A plan-less bead defaults to `false` (an explicit
-/// non-zero) so it Gates rather than silently passing.
+/// non-zero) so it ESCALATES rather than silently passing.
 String _validationPlan(Bead bead) {
   final plan = bead.metadata['validation_plan'];
   if (plan is String && plan.trim().isNotEmpty) return plan.trim();
   return 'false';
 }
 
-/// Caps captured process output embedded in a [Gate] reason — a runaway
+/// Caps captured process output embedded in an [Escalate] reason — a runaway
 /// Validation Plan log must not blow up a gate bead's metadata.
 String _truncate(String s, [int max = 2000]) {
   final trimmed = s.trim();
