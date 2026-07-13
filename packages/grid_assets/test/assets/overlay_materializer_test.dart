@@ -11,31 +11,15 @@ import 'package:grid_assets/grid_assets.dart';
 import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
-/// Resolves this package's `extension/` dir with the same cwd walk the other
-/// asset suites use, so the live-tree test never disagrees with the loader.
-String _extensionDir() {
-  final candidates = <String>[
-    'extension',
-    p.join('packages', 'grid_assets', 'extension'),
-  ];
-  var dir = Directory.current;
-  for (var i = 0; i < 6; i++) {
-    for (final rel in candidates) {
-      final probe = Directory(p.join(dir.path, rel));
-      if (probe.existsSync() &&
-          Directory(p.join(probe.path, 'rubrics')).existsSync()) {
-        return probe.path;
-      }
-    }
-    final parent = dir.parent;
-    if (parent.path == dir.path) break;
-    dir = parent;
-  }
-  fail(
-    'could not locate packages/grid_assets/extension from '
-    '${Directory.current.path}',
-  );
-}
+/// Resolves this package's `extension/` dir the CWD-INDEPENDENT way (the
+/// loader's own package-config resolution), so the live-tree test never
+/// disagrees with the loader.
+///
+/// Never a cwd walk: `Directory.current` is process-global and the suites run
+/// concurrently, so the sibling suite that chdirs to a foreign dir to prove
+/// cwd-independent resolution (`track_d_assets_test`) would race a walk done
+/// from inside a test body here.
+String _extensionDir() => PackagedAssetLoader().root;
 
 /// Writes [contents] at [segments] under [root] (creating parents).
 File _write(Directory root, List<String> segments, String contents) =>
