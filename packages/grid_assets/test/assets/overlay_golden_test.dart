@@ -17,6 +17,7 @@ import 'package:grid_engine/grid_engine.dart';
 import 'package:grid_engine/testing.dart';
 import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
+import 'package:yaml/yaml.dart';
 
 /// Every path the wire is allowed to write under a worktree — the 5 vended
 /// skills' `SKILL.md` plus the self-ignoring `.gitignore` that keeps each out of
@@ -90,6 +91,33 @@ void main() {
         final body = File(p.join(worktree.path, rel)).readAsStringSync();
         expect(body, startsWith('---\n'), reason: '$rel opens its frontmatter');
         expect(body, isNot(contains('{{')), reason: '$rel has no residue');
+      }
+    },
+  );
+
+  test(
+    'a STAMPED SKILL.md still parses as agentskills frontmatter — the harness '
+    'discovers a skill by yaml-parsing the `---` block, so a stamp that broke '
+    'it would silently un-discover every vended skill',
+    () {
+      const cap = AgentCapability(devRoot: '/dev/root');
+      final c = ctx();
+
+      cap.spawn(c.context, c.args);
+
+      for (final rel in kWorktreeOverlayGolden.where((r) => r.endsWith('.md'))) {
+        final body = File(p.join(worktree.path, rel)).readAsStringSync();
+        expect(hasProvenance(body), isTrue, reason: '$rel is stamped');
+
+        final fenceEnd = body.indexOf('\n---', 3);
+        expect(fenceEnd, greaterThan(0), reason: '$rel closes its frontmatter');
+        final frontmatter = loadYaml(body.substring(4, fenceEnd)) as YamlMap;
+        expect(
+          frontmatter['name'],
+          p.basename(p.dirname(rel)),
+          reason: '$rel still names itself through the stamp',
+        );
+        expect(frontmatter['description'], isNotEmpty);
       }
     },
   );

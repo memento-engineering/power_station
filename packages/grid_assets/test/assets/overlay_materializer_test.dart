@@ -318,6 +318,109 @@ void main() {
     );
 
     test(
+      'a SYMLINK at the target is BLOCKED, never followed — writing through one '
+      'would mutate a file OUTSIDE the target root (and this is exactly how an '
+      'operator seat hand-wires its assets today)',
+      () async {
+        _write(overlay, ['.claude', 'skills', 'a', 'SKILL.md'], _skill('a'));
+        // The seat's shape: `.claude/skills/a/SKILL.md -> <outside>/SKILL.md`.
+        final outside = _write(
+          Directory(p.join(temp.path, 'extension')),
+          ['skills', 'a', 'SKILL.md'],
+          'the REAL file, outside the target root',
+        );
+        Link(p.join(target.path, '.claude', 'skills', 'a', 'SKILL.md'))
+          ..parent.createSync(recursive: true)
+          ..createSync(outside.path);
+
+        final report = await const OverlayMaterializer().materialize(
+          overlayRoots: [overlay.path],
+          targetRoot: target.path,
+          sourceRef: 'testref',
+        );
+
+        expect(report.blocked.single.symlink, isTrue);
+        expect(report.blocked.single.reason, contains('SYMLINK'));
+        expect(report.written, isEmpty);
+        expect(
+          outside.readAsStringSync(),
+          'the REAL file, outside the target root',
+          reason: 'the lib writes NOTHING outside the target root',
+        );
+      },
+    );
+
+    test(
+      'a symlinked ANCESTOR DIR is BLOCKED too — the file under it is not itself '
+      'a link, but a write would still land outside the target root. This is '
+      "the operator seat's REAL shape (`.claude/skills/x -> "
+      '../../extension/skills/x`)',
+      () async {
+        _write(overlay, ['.claude', 'skills', 'a', 'SKILL.md'], _skill('a'));
+        // The real file lives OUTSIDE the target root, and — the dangerous part
+        // — it already carries a stamp, so only the ancestor check can stop the
+        // write from following the dir link and mutating it.
+        final outside = _write(
+          Directory(p.join(temp.path, 'extension')),
+          ['skills', 'a', 'SKILL.md'],
+          stampProvenance(
+            _skill('a', 'OLD body'),
+            relativePath: '.claude/skills/a/SKILL.md',
+            sourceRef: 'old',
+            runner: 'space',
+          ),
+        );
+        Directory(p.join(target.path, '.claude', 'skills')).createSync(
+          recursive: true,
+        );
+        Link(
+          p.join(target.path, '.claude', 'skills', 'a'),
+        ).createSync(p.join(temp.path, 'extension', 'skills', 'a'));
+
+        final report = await const OverlayMaterializer().materialize(
+          overlayRoots: [overlay.path],
+          targetRoot: target.path,
+          sourceRef: 'testref',
+        );
+
+        expect(report.blocked.single.symlink, isTrue);
+        expect(report.written, isEmpty);
+        expect(report.updated, isEmpty);
+        expect(
+          outside.readAsStringSync(),
+          contains('OLD body'),
+          reason:
+              'a stamped file behind a symlinked DIR is still outside the '
+              'target root — the lib writes nothing there',
+        );
+      },
+    );
+
+    test(
+      'a DANGLING symlink is BLOCKED too, not a crash — existsSync() is false '
+      'through a broken link, so a naive write would follow it and throw',
+      () async {
+        _write(overlay, ['.claude', 'skills', 'a', 'SKILL.md'], _skill('a'));
+        Link(p.join(target.path, '.claude', 'skills', 'a', 'SKILL.md'))
+          ..parent.createSync(recursive: true)
+          ..createSync(p.join(temp.path, 'nowhere', 'SKILL.md'));
+
+        late final OverlayMaterializeReport report;
+        expect(
+          () async => report = await const OverlayMaterializer().materialize(
+            overlayRoots: [overlay.path],
+            targetRoot: target.path,
+            sourceRef: 'testref',
+          ),
+          returnsNormally,
+        );
+
+        await pumpEventQueue();
+        expect(report.blocked.single.symlink, isTrue);
+      },
+    );
+
+    test(
       'a vended file that cannot carry a stamp THROWS — never installed '
       'indistinguishably from a hand-authored one',
       () {
