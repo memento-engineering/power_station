@@ -55,25 +55,34 @@
 /// ephemeral staged bead and hands to `specify`. [kVendedSkills] enumerates
 /// them; [PackagedAssetLoader.renderSkill] renders one by id.
 ///
-/// The DELIVERY leg (bead `pow-kzx`) is [OverlayMaterializer]: the CLI-free,
-/// non-destructive lib that expands a `station_overlay/{skills,agents}` tree
-/// onto a target `.claude/` dir, rendering each file and REFUSING to install
-/// one whose holes are unbound. Both consumers ride it — this package's OWN
-/// provision-time wire ([AgentCapability], which materializes the overlay into
-/// every per-bead worktree so a station-spawned `claude -p` can `/invoke` a
-/// vended skill) and the operator install Command (`pow-a74`).
+/// The DELIVERY leg is [OverlayMaterializer]: the CLI-free lib that expands a
+/// `station_overlay` tree onto a target ROOT, PATH-PRESERVING. The overlay is
+/// ROOT-RELATIVE — its internal layout MIRRORS the target, so
+/// `station_overlay/.claude/skills/discover/SKILL.md` lands at
+/// `<root>/.claude/skills/discover/SKILL.md` with no kind mapping anywhere: the
+/// overlay AUTHOR decides where an asset lands by where it sits in the tree.
+/// ONE root-parametric materializer, two callers, two roots — this package's OWN
+/// provision-time wire ([AgentCapability], onto a per-bead WORKTREE root, so a
+/// station-spawned `claude -p` can `/invoke` a vended skill; SCOPED to
+/// [kClaudeSkillsSubtree], because a loose `.claude/settings.json` is repo-owned
+/// territory) and the operator install Command (onto a STATION repo root, whole
+/// tree). It renders each file, REFUSES to install one whose holes are unbound,
+/// and NEVER clobbers a file it did not generate.
 ///
-/// The OPERATOR leg of that delivery is [InstallCommand] over
-/// `src/assets/overlay_install.dart`: `<cli> install` resolves the in-scope
-/// overlay roots NON-PRESCRIPTIVELY ([resolveStationOverlayRoots] —
-/// `package:extension_discovery` over the grid home's package config; every
-/// pack shipping the asset manifest AND a `station_overlay/` is in scope, none
-/// is hardcoded), expands them onto the operator's own `.claude/`
-/// ([OverlayInstallService], non-destructive), and prints the DIFF
-/// ([renderInstallReport]). It COMMITS NOTHING — the operator reviews and
-/// commits. [mountedValuesOf] is the one offline delegate-mount walker both
-/// this leg (for the grid home) and [mountedRosterOf] (for the substation
-/// roster) ride.
+/// The OPERATOR leg of that delivery is [AssetsCommand] over
+/// `src/assets/overlay_install.dart`: `<cli> assets install` resolves the
+/// in-scope overlay roots NON-PRESCRIPTIVELY ([resolveStationOverlayRoots] —
+/// `package:extension_discovery` over the grid home's package config; every pack
+/// shipping the asset manifest AND a `station_overlay/` is in scope, none is
+/// hardcoded), expands them onto a repo root ([OverlayInstallService]), and
+/// prints the DIFF ([renderInstallReport]). It COMMITS NOTHING — the operator
+/// reviews and commits. Each installed file carries a PROVENANCE stamp
+/// (`overlay_provenance.dart`) naming the grid_assets ref it came from, which is
+/// what lets the vended assets be COMMITTED rather than gitignored: the stamp
+/// tells a generated file from a hand-authored one, and `assets install --check`
+/// FAILS on any file that is missing or has drifted from source. [mountedValuesOf]
+/// is the one offline delegate-mount walker both this leg (for the grid home) and
+/// [mountedRosterOf] (for the substation roster) ride.
 ///
 /// The SPEC-READINESS INTAKE LENS (bead `pow-q7n`, `src/code/readiness.dart`)
 /// heads that spec circuit: a deterministic intake contract ([IntakeCapability]
@@ -111,8 +120,8 @@ export 'src/agent/agent_harness.dart';
 export 'src/agent/model_tier.dart';
 export 'src/agent/usage_report.dart';
 export 'src/assets/asset_loader.dart';
+export 'src/assets/assets_command.dart';
 export 'src/assets/composition_assets.dart';
-export 'src/assets/install_command.dart';
 export 'src/assets/mounted_tree.dart';
 export 'src/assets/overlay_install.dart';
 export 'src/assets/overlay_materializer.dart';

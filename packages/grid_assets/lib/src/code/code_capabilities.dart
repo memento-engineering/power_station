@@ -27,6 +27,7 @@ import '../agent/agent_harness.dart';
 import '../agent/usage_report.dart';
 import '../assets/asset_loader.dart';
 import '../assets/overlay_materializer.dart';
+import '../assets/overlay_provenance.dart';
 import 'circuit_migration.dart';
 import 'committee.dart';
 import 'conventional_commit.dart';
@@ -113,13 +114,6 @@ const Circuit kCodeCircuit = Circuit(
   ],
 );
 
-/// The executable name the vended overlay's skills render `{{runner}}` against
-/// (the skill's own `<runner> search --json` call — the coupled skill+command
-/// pattern, ADR-0001). The first-party station composing this pack is
-/// `space_station`, whose binary is `space`; any station with another verb
-/// overrides it — `buildCodeRegistry(overlayArgs: {'runner': '<verb>'})`.
-const String kDefaultOverlayRunner = 'space';
-
 /// The IMPLEMENT capability — spawn the coding agent in the bead's workspace,
 /// parameterized over the AMBIENT agent scope (ADR-0008 Decision 10): it reads
 /// the work `Bead`, the `Workspace`, the station's `AgentConfig` default, and
@@ -161,11 +155,13 @@ class AgentCapability extends ProcessCapability {
     DartLinkService linkService = const DartLinkService(),
     OverlayMaterializer materializer = const OverlayMaterializer(),
     String? overlayRoot,
+    String? overlaySourceRef,
     Map<String, String> overlayArgs = const {},
   }) : _devRoot = devRoot,
        _linkService = linkService,
        _materializer = materializer,
        _overlayRoot = overlayRoot,
+       _overlaySourceRef = overlaySourceRef,
        _overlayArgs = overlayArgs;
 
   final String? _devRoot;
@@ -173,10 +169,16 @@ class AgentCapability extends ProcessCapability {
   final OverlayMaterializer _materializer;
 
   /// The `station_overlay` dir [_linkWorkspace] expands into every provisioned
-  /// worktree's `.claude/` (bead `pow-kzx`); null ⇒ this package's OWN vended
-  /// overlay (`<PackagedAssetLoader.root>/station_overlay`). Tests inject a
-  /// fixture so the wire is provable without the live tree.
+  /// worktree (bead `pow-kzx`); null ⇒ this package's OWN vended overlay
+  /// (`<PackagedAssetLoader.root>/station_overlay`). Tests inject a fixture so
+  /// the wire is provable without the live tree.
   final String? _overlayRoot;
+
+  /// The grid_assets ref every materialized file's provenance header records;
+  /// null ⇒ probed from the overlay's own checkout
+  /// ([resolveOverlaySourceRefSync]). Tests inject a fixed ref so the wire is
+  /// provable without a git checkout.
+  final String? _overlaySourceRef;
 
   /// The station's overrides for the overlay's template args — merged OVER the
   /// wire's own binding (`runner`/`gridHome`), so a station with a different
@@ -260,15 +262,27 @@ class AgentCapability extends ProcessCapability {
     return _materializeStationOverlay(workspace);
   }
 
-  /// Expands the vended `station_overlay` into `<workspaceDir>/.claude/` and
-  /// returns the skill ids now installed there (bead `pow-kzx` — ADR-0001's
-  /// delivery leg: `claude --dangerously-skip-permissions -p` is NON-bare, so it
-  /// discovers `.claude/skills/`, and print mode invokes a skill only when the
-  /// brief names it explicitly — hence the returned ids ride [buildAgentBrief]).
+  /// Expands the vended `station_overlay` into the worktree ROOT — PATH-
+  /// PRESERVING, so the overlay's own `.claude/skills/<id>/` lands at
+  /// `<workspaceDir>/.claude/skills/<id>/` with no mapping in this wire — and
+  /// returns the skill ids now installed there (ADR-0001's delivery leg:
+  /// `claude --dangerously-skip-permissions -p` is NON-bare, so it discovers
+  /// `.claude/skills/`, and print mode invokes a skill only when the brief names
+  /// it explicitly — hence the returned ids ride [buildAgentBrief]).
+  ///
+  /// SCOPED to [kClaudeSkillsSubtree]: the overlay is ONE tree with two
+  /// consumers, but a per-bead worktree gets the SKILL tree only. The
+  /// operator-seat assets (`.claude/agents/governor.md`, `.claude/settings.json`)
+  /// belong to the human's seat, and a LOOSE file under `.claude/` cannot be
+  /// git-fenced per-asset-dir — A23(6) rejected a shared `.claude/.gitignore`
+  /// precisely because `.claude/` is repo-owned territory in the repos the grid
+  /// cuts worktrees from (power_station and lenny TRACK `.claude/settings.json`).
+  /// Installing one there would either leak into the bead's PR or overwrite a
+  /// tracked repo file from a provision hook.
   ///
   /// Same synchronous constraint as the pub-link write above, and the same
-  /// non-destructive posture ([OverlayMaterializer] never overwrites a file it
-  /// did not write, and REFUSES to install one whose holes are unbound rather
+  /// never-clobber posture ([OverlayMaterializer] refuses to overwrite a file it
+  /// did not generate, and REFUSES to install one whose holes are unbound rather
   /// than shipping literal `{{runner}}` text to an agent). A missing overlay dir
   /// contributes nothing rather than erroring — the empty-overlay case, not a
   /// violated invariant.
@@ -276,10 +290,11 @@ class AgentCapability extends ProcessCapability {
     final overlayRoot =
         _overlayRoot ?? p.join(PackagedAssetLoader().root, 'station_overlay');
     if (!Directory(overlayRoot).existsSync()) return const [];
-    final claudeDir = p.join(workspace.workspaceDir, '.claude');
     final report = _materializer.materializeSync(
       overlayRoots: [overlayRoot],
-      targetRoot: claudeDir,
+      targetRoot: workspace.workspaceDir,
+      sourceRef: _overlaySourceRef ?? resolveOverlaySourceRefSync(overlayRoot),
+      subtrees: const [kClaudeSkillsSubtree],
       args: {
         'runner': kDefaultOverlayRunner,
         // The station's registered root checkout is the closest thing this
@@ -290,14 +305,17 @@ class AgentCapability extends ProcessCapability {
         ..._overlayArgs,
       },
     );
-    _excludeOverlayFromGit(claudeDir, report.writtenEntryDirs);
+    _excludeOverlayFromGit(
+      workspace.workspaceDir,
+      report.writtenAssetDirsUnder(kClaudeSkillsSubtree),
+    );
     // AUDIENCE: the overlay is ONE tree with two consumers, so a worktree gets
     // the operator skills too — but the brief must not OFFER them.
     // `harvest-review` pushes and opens PRs; this brief forbids both. A skill
     // the brief never names cannot be invoked (print mode selects none on its
     // own — ADR-0001), so withholding the name is the whole guard.
     return [
-      for (final id in report.installedSkillIds)
+      for (final id in report.installedSkillIdsUnder(kClaudeSkillsSubtree))
         if (!kOperatorSkills.contains(id)) id,
     ];
   }
@@ -323,9 +341,9 @@ class AgentCapability extends ProcessCapability {
   /// (`GitOps.hasUncommittedWork` → plain `git status --porcelain`, ADR-0000 A5)
   /// still detects every other change in the worktree — including new files the
   /// coding agent itself writes under `.claude/`.
-  void _excludeOverlayFromGit(String claudeDir, List<String> writtenEntryDirs) {
-    for (final entryDir in writtenEntryDirs) {
-      final ignore = File(p.join(claudeDir, entryDir, '.gitignore'));
+  void _excludeOverlayFromGit(String workspaceDir, List<String> assetDirs) {
+    for (final assetDir in assetDirs) {
+      final ignore = File(p.join(workspaceDir, assetDir, '.gitignore'));
       if (ignore.existsSync()) continue;
       ignore.writeAsStringSync(
         '# Per-worktree AGENT CONTEXT materialized at provision by the vended\n'

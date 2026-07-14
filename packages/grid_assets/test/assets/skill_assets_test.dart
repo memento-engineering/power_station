@@ -13,6 +13,7 @@
 //     and can kick off `specify`.
 //
 // Offline only — reads the bundled `extension/` files; no live anything.
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:grid_assets/grid_assets.dart';
@@ -185,7 +186,10 @@ void main() {
         (s) => s['id'] == 'discover',
         orElse: () => fail('the `discover` skill must be declared'),
       );
-      expect(discover['path'], 'station_overlay/skills/discover/SKILL.md');
+      expect(
+        discover['path'],
+        'station_overlay/.claude/skills/discover/SKILL.md',
+      );
       expect(discover['visibility'], isNotNull,
           reason: 'the discover skill declares a visibility');
       final args = (discover['args'] as YamlList).cast<YamlMap>();
@@ -228,7 +232,10 @@ void main() {
           (s) => s['id'] == entry.key,
           orElse: () => fail('${entry.key} must be declared in the manifest'),
         );
-        expect(declared['path'], 'station_overlay/skills/${entry.key}/SKILL.md');
+        expect(
+          declared['path'],
+          'station_overlay/.claude/skills/${entry.key}/SKILL.md',
+        );
         expect(declared['audience'], 'operator');
         final args =
             (declared['args'] as YamlList?)?.cast<YamlMap>() ?? const <YamlMap>[];
@@ -254,6 +261,67 @@ void main() {
       expect(kOperatorSkills, reHomed.keys.toSet());
       expect(kOperatorSkills, isNot(contains('discover')),
           reason: 'discover is the agent-audience skill the brief DOES name');
+    });
+  });
+
+  group('the vended overlay is ROOT-RELATIVE and COMPLETE', () {
+    final overlay = p.join(root, 'station_overlay');
+
+    test(
+        'it MIRRORS the target repo root — the legacy kind-dir home is gone, so '
+        'a dumb path-preserving overlay lands every asset where the harness '
+        'discovers it', () {
+      expect(
+        Directory(p.join(overlay, 'skills')).existsSync(),
+        isFalse,
+        reason: 'the pre-root-relative `station_overlay/skills/` home is gone',
+      );
+      for (final id in kVendedSkills) {
+        expect(
+          File(p.join(overlay, '.claude', 'skills', id, 'SKILL.md'))
+              .existsSync(),
+          isTrue,
+          reason: '$id is vended root-relative',
+        );
+      }
+    });
+
+    test(
+        'it carries the COMPLETE operator asset set — the governor agent-def '
+        'and the harness settings, not just the skills. These were hand-copied '
+        'into the station and drifted; vending them is what ends that', () {
+      final governor = File(p.join(overlay, '.claude', 'agents', 'governor.md'));
+      expect(governor.existsSync(), isTrue);
+      expect(governor.readAsStringSync(), startsWith('---\n'),
+          reason: 'stampable: the frontmatter must open on line 1');
+      expect(governor.readAsStringSync(), contains('name: governor'));
+
+      final settings = File(p.join(overlay, '.claude', 'settings.json'));
+      expect(settings.existsSync(), isTrue);
+      expect(
+        jsonDecode(settings.readAsStringSync()),
+        isA<Map<String, dynamic>>(),
+        reason: 'stampable: a JSON object',
+      );
+      expect(settings.readAsStringSync(), contains('bd prime --hook-json'));
+    });
+
+    test(
+        'EVERY vended file can carry a provenance stamp — an unstampable one '
+        'could never be told from a hand-authored file, so it could never be '
+        'installed', () {
+      final files = Directory(overlay)
+          .listSync(recursive: true)
+          .whereType<File>();
+      expect(files, isNotEmpty);
+      for (final file in files) {
+        final rel = p.relative(file.path, from: overlay);
+        expect(
+          () => provenanceSyntaxFor(rel, file.readAsStringSync()),
+          returnsNormally,
+          reason: '$rel is stampable',
+        );
+      }
     });
   });
 }

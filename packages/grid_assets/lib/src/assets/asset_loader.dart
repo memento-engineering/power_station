@@ -8,19 +8,19 @@
 /// source; [renderCriticPrompt] is the standalone, format-faithful renderer of
 /// the `prompts/critic.md` template (the portable mirror).
 ///
-/// The vended SKILLS (`extension/station_overlay/skills/<id>/SKILL.md`, bead
-/// `pow-88p`) ride the same loader: the agentic halves of the coupled
+/// The vended SKILLS (`extension/station_overlay/.claude/skills/<id>/SKILL.md`,
+/// bead `pow-88p`) ride the same loader: the agentic halves of the coupled
 /// skill+command pairs (ADR-0001 — the skill CALLS the vended deterministic
 /// Command, e.g. `discover` calls `search --json`). Each SKILL.md is
 /// mustache-templated on its manifest-declared args (`runner`, `gridHome`);
 /// [renderSkill] renders ONE skill by id and fails LOUD on any unbound hole.
-/// The `station_overlay/{skills,agents}` FORMAT and the non-destructive
-/// TREE-level expansion of it onto a target `.claude/` dir ship next door in
-/// `overlay_materializer.dart` (bead `pow-kzx`, the delivery leg): this loader
-/// stays the by-id render surface, `OverlayMaterializer` is the whole-tree
-/// install. Two callers ride the latter — the operator install Command
-/// (`pow-a74`) and this package's OWN provision-time wire
-/// (`AgentCapability._linkWorkspace`, `code_capabilities.dart`, ADR-0000 A1).
+/// The ROOT-RELATIVE `station_overlay` FORMAT — a tree that MIRRORS its target
+/// repo root — and the path-preserving expansion of it ship next door in
+/// `overlay_materializer.dart`: this loader stays the by-id render surface,
+/// `OverlayMaterializer` is the whole-tree install. Two callers ride the latter
+/// — the operator install Command (`assets install`, onto a station repo root)
+/// and this package's OWN provision-time wire (`AgentCapability`,
+/// `code_capabilities.dart`, onto a per-bead worktree root).
 ///
 /// Asset resolution resolves the package's own `extension/` dir via the package
 /// config (`Isolate.resolvePackageUriSync` — cwd-independent, the live-arm path),
@@ -167,13 +167,14 @@ class PackagedAssetLoader {
       });
 
   /// The mustache-templated SKILL.md body for [skillId]
-  /// (`extension/station_overlay/skills/<skillId>/SKILL.md` — the vended-asset
-  /// overlay format, bead `pow-kzx`). Throws an [ArgumentError] for an unknown
-  /// skill (fail-loud — a missing skill is a packaging bug, never a silent
-  /// empty install).
+  /// (`extension/station_overlay/.claude/skills/<skillId>/SKILL.md` — the
+  /// ROOT-RELATIVE vended-asset overlay format: the tree mirrors the target repo
+  /// root, so it already carries the harness's own `.claude/skills/` layout).
+  /// Throws an [ArgumentError] for an unknown skill (fail-loud — a missing skill
+  /// is a packaging bug, never a silent empty install).
   String loadSkillTemplate(String skillId) {
     final file = File(
-      p.join(_root, 'station_overlay', 'skills', skillId, 'SKILL.md'),
+      p.join(_root, 'station_overlay', '.claude', 'skills', skillId, 'SKILL.md'),
     );
     if (!file.existsSync()) {
       throw ArgumentError('unknown skill "$skillId" (no ${file.path})');
