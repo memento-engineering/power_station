@@ -116,6 +116,7 @@ export 'src/assets/install_command.dart';
 export 'src/assets/mounted_tree.dart';
 export 'src/assets/overlay_install.dart';
 export 'src/assets/overlay_materializer.dart';
+export 'src/assets/overlay_provenance.dart';
 export 'src/code/circuit_migration.dart';
 export 'src/code/code_capabilities.dart';
 export 'src/code/committee.dart';
