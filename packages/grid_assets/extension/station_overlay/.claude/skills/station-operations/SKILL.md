@@ -43,8 +43,8 @@ existing you should see `mounted`/`live sessions` > 0, per-bead worktrees under
 ## Bounce / down
 
 ```
-./{{runner}} down --state-workspace {{gridHome}}    # scoped stop via the lock
-./{{runner}} up ...                                 # same arming
+{{runner}} down --state-workspace {{gridHome}}    # scoped stop via the lock
+{{runner}} up ...                                 # same arming
 ```
 
 Bounce whenever station-side state is latched (see the silent-death runbook) or
