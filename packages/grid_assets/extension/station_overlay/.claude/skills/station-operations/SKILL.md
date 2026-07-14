@@ -7,7 +7,7 @@ description: >
   station, when a boot looks healthy but ready > 0 with mounted 0 and no
   output, or when preparing a fresh grid home — even if the symptom is just
   "nothing is happening."
-compatibility: Requires the compiled `{{runner}}` binary, bd (beads CLI), dart, git.
+compatibility: Requires dart + the `{{runner}}` runner (the station runs JIT via `dart run`, never an AOT binary), bd (beads CLI), git.
 metadata:
   author: memento-engineering
 ---
@@ -19,17 +19,19 @@ metadata:
 From the grid home (the repo whose `.grid/` holds the state store and lock):
 
 ```
-./{{runner}} up --no-dry-run \
+{{runner}} up --no-dry-run \
   --grid-home {{gridHome}} \
   --substation '<name>[@<prefix>]=<abs work-repo root>' ...
-  [--land] [--max-agents N]
+  [--max-agents N]
 ```
 
 - One `--substation` per work repo; `@prefix` only when the store's issue-id
   prefix differs from the name (`the_grid@tg=…`). Names and prefixes must be
   disjoint across substations — assembly refuses collisions.
-- `--land` arms PR-opening; omit for a commit-only arm (agents commit to
-  `grid/<bead>` branches, humans land). `--land` + `--dry-run` is refused.
+- Delivery is a per-substation BINDING, not a flag (the_grid ADR-0000 A51): every
+  coded seat authors `GitHubGridAssets`, so a LIVE arm (`--no-dry-run`) pushes and
+  opens a PR per landed bead. `--dry-run` binds nothing (the commit-only posture).
+  There is no land flag to omit.
 - The station is resident: it runs until `{{runner}} down`. Run it in the
   background and read the banner from its log.
 
@@ -109,8 +111,10 @@ timeout heartbeat (~45min while work is in flight, ~3h idle). Scan gates via
 
 - The banner's "work-driving: ARMED" is derived from config, not from the tree
   actually driving — trust only effects.
-- A recompiled engine/sdk needs a recompiled `{{runner}}` binary; `dart run` works
-  but a resident station should run the AOT binary.
+- A landed engine/sdk change is picked up by re-running from source on a bounce or
+  hot-reload — there is no recompile step. Run the `{{runner}}` station JIT (via
+  `dart run`), never a compiled binary: a binary loses the VM service, hot-reload,
+  and the current-source guarantee (space is JIT-only — see its CLAUDE.md).
 - The dry smoke CANNOT prove the write path (dry = no-op bd writer): the first
   live boot of any new composition is the only prover — treat it as an
   instrumented experiment, not a formality.

@@ -79,9 +79,10 @@ elsewhere.
 - `bd -C <store-root> <verb> … --actor operator` — a leading `cd` in a
   compound command re-routes the whole thing through permission classifiers;
   `-C` keeps it deterministic.
-- `space up|down|status|rework` from the compiled binary at the grid home —
-  recompile after any engine/sdk change (`dart compile exe bin/space.dart -o
-  space`); a stale binary boots yesterday's station.
+- `space up|down|status|rework` — run the station JIT from source (`dart run
+  bin/space.dart …`) at the grid home, never a compiled binary; a landed
+  engine/sdk change is picked up on a bounce or hot-reload (`space reload`), so
+  there is no recompile step.
 - Temp probes and watch scripts live in the scratchpad, never in a repo.
 
 ## The skills
