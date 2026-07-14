@@ -1,57 +1,53 @@
 /// The vended-asset OVERLAY format + its non-destructive materialization LIB
-/// (bead `pow-kzx` — ADR-0001's "missing leg": a vended skill is inert until it
-/// is INSTALLED where the agent runs).
+/// (ADR-0001's "missing leg": a vended skill is inert until it is INSTALLED
+/// where the agent runs).
 ///
-/// **The format.** A package that vends agentic assets ships them under
-/// `extension/station_overlay/{skills,agents}/<name>/…`. The ASSET DIR —
-/// `<kind>/<name>/` — is the format's unit: everything inside one is installed
-/// onto the target `.claude/` tree file-for-file, and the format imposes nothing
-/// on an asset's internal shape beyond living in its own dir under its kind. A
-/// file sitting LOOSE directly under a kind dir has no asset dir, so it THROWS
-/// (see [OverlayMaterializer.materializeSync]).
+/// **The format is a PATH-PRESERVING OVERLAY onto a target ROOT.** A package
+/// that vends agentic assets ships them under `extension/station_overlay/`, a
+/// directory tree whose internal layout MIRRORS THE TARGET. A file at
+/// `station_overlay/<rel>` lands at `<targetRoot>/<rel>` — so the vended tree
+/// already carries the harness's own layout
+/// (`station_overlay/.claude/skills/discover/SKILL.md`). There is NO kind
+/// mapping and no install-target translation in this lib: the overlay AUTHOR
+/// decides where an asset lands by where it sits in the tree.
 ///
-/// **One tree, two consumers.** The SAME overlay serves both legs ADR-0001
-/// names: a per-bead WORKTREE's `.claude/` (this package's own provision wire —
-/// `AgentCapability._linkWorkspace`, `code_capabilities.dart`, ADR-0000 A1) and
-/// the OPERATOR's `.claude/` (bead `pow-a74`'s `space install` Command). There
-/// is no separate worktree-only format.
+/// **One tree, two consumers, two ROOTS.** The SAME overlay serves both legs
+/// ADR-0001 names: a per-bead WORKTREE root (this package's own provision wire —
+/// `AgentCapability`, `code_capabilities.dart`) and an operator STATION repo
+/// root (the `assets install` Command). One root-parametric materializer, two
+/// callers. They differ only in root and in [OverlayMaterializer.materializeSync]'s
+/// `subtrees` SCOPE: the worktree leg takes [kClaudeSkillsSubtree] alone, because
+/// a loose `.claude/settings.json` is repo-owned territory a per-asset-dir
+/// `.gitignore` cannot fence (ADR-0000 A23(6)).
 ///
 /// **The lib.** [OverlayMaterializer] is the CLI-FREE, git-free, UI-drivable
 /// substrate both legs ride. It takes the ALREADY-RESOLVED, ORDERED overlay
-/// roots — deciding WHICH packages are in scope (walking the composing station's
-/// `GridDelegate`, the way `mountedRosterOf` does for search) is the CALLER's
-/// job; this lib mounts no tree — and expands their `skills/`+`agents/` subtrees
-/// onto one target dir. Four rules:
+/// roots — deciding WHICH packages are in scope is the CALLER's job; this lib
+/// mounts no tree. Its rules, per file:
 ///
-/// - **Non-destructive** (mirrors `DartLinkService`'s never-overwrite posture):
-///   a target file that already exists is SKIPPED — whether it pre-existed
-///   (operator-authored, or a previous run) or an EARLIER overlay root wrote it
-///   in this same call. That one skip-if-exists rule is what gives "union by
-///   tree position" its precedence: roots expand IN THE GIVEN ORDER, so the
-///   first root to offer a path wins.
-/// - **Rendered, never half-bound.** Each file's contents is substituted against
-///   [OverlayMaterializer.materializeSync]'s `args` (the manifest-declared skill
-///   args — `runner`, `gridHome`). A file left carrying an unbound `{{hole}}` is
-///   REFUSED — reported, never written. A literal `{{runner}}` in an installed
-///   skill is a silent packaging bug (the tree-level counterpart of
-///   [PackagedAssetLoader.renderSkill]'s LOUD guard, ADR-0000 A12); refusing is
-///   loud in the returned report and safe at a provision hook, which must not
-///   fail a bead's agent over one unconfigured operator arg.
-/// - **The format is enforced LOUD.** A malformed overlay (a file with no asset
-///   dir) THROWS rather than half-installing — a first-party packaging bug, the
-///   same fail-closed posture A1 gives a breaking `grid.dart` envelope.
+/// - **Rendered, never half-bound.** Each file is substituted against `args`. One
+///   left carrying an unbound `{{hole}}` is REFUSED — reported, never written. A
+///   literal `{{runner}}` in an installed skill is a silent packaging bug (the
+///   tree-level counterpart of [PackagedAssetLoader.renderSkill]'s LOUD guard,
+///   ADR-0000 A12); refusing is loud in the returned report and safe at a
+///   provision hook, which must not fail a bead's agent over one unconfigured
+///   operator arg.
+/// - **Never clobber what we did not generate.** A target file with NO provenance
+///   stamp is hand-authored: BLOCKED, reported, never overwritten.
+/// - **Idempotent, and drift-correcting.** A stamped target whose BODY matches
+///   source is UNCHANGED (left byte-for-byte alone — a stale ref alone is not
+///   drift, so a re-install never churns the tree); one whose body DRIFTED is
+///   regenerated (UPDATED).
 /// - **Sync core, async wrapper.** [OverlayMaterializer.materializeSync] is the
-///   implementation (plain `dart:io`); [OverlayMaterializer.materialize]
-///   delegates to it for a caller that wants a `Future` (a Flutter UI,
-///   `pow-a74`'s Command). The sync entry point exists because the provision
-///   wire CANNOT await: `ProcessCapability.spawn` returns a `RuntimeConfig`
-///   directly — the same constraint `DartLinkService.applySync` was added for
-///   (ADR-0000 A1).
+///   implementation; [OverlayMaterializer.materialize] delegates for a caller
+///   that wants a `Future` (a Flutter UI, the `assets install` Command). The sync
+///   entry point exists because the provision wire CANNOT await:
+///   `ProcessCapability.spawn` returns a `RuntimeConfig` directly (ADR-0000 A1).
 ///
 /// Keeping a materialized overlay OUT of git is deliberately NOT this lib's job:
-/// the operator's own `~/.claude` is not a repo, and only the worktree leg has a
-/// commit to protect. The wire owns that (`_excludeOverlayFromGit`), reading
-/// [OverlayMaterializeReport.writtenEntryDirs].
+/// only the worktree leg has a commit to protect, and the operator's install is
+/// meant to be committed. The wire owns that (`_excludeOverlayFromGit`), reading
+/// [OverlayMaterializeReport.writtenAssetDirsUnder].
 library;
 
 import 'dart:io';
@@ -59,46 +55,103 @@ import 'dart:io';
 import 'package:path/path.dart' as p;
 
 import 'asset_loader.dart';
+import 'overlay_provenance.dart';
 
-/// The overlay kinds a `station_overlay` root carries, walked in this fixed
-/// order (deterministic output).
-const List<String> kOverlayKinds = ['skills', 'agents'];
+/// Where Claude Code discovers a skill inside a repo root
+/// (`<root>/.claude/skills/<id>/SKILL.md`). The overlay MIRRORS the target, so
+/// the vended tree carries the same path — this constant names the harness's
+/// layout ONCE, for the callers that must scope to it (the worktree wire) or
+/// read skill ids back out of it.
+const String kClaudeSkillsSubtree = '.claude/skills';
+
+/// The executable name the vended overlay's skills render `{{runner}}` against
+/// (the skill's own `<runner> search --json` call — the coupled skill+command
+/// pattern, ADR-0001). The first-party station composing this pack is
+/// `space_station`, whose binary is `space`; any station with another verb
+/// overrides it. Homed here because it is an OVERLAY binding, and the
+/// materializer names it in every provenance stamp.
+const String kDefaultOverlayRunner = 'space';
 
 /// Any `{{key}}` hole left in a rendered file — an installed asset has none.
 final RegExp _templateHole = RegExp(r'\{\{[^}]*\}\}');
 
-/// What became of ONE file in a materialization call — sealed, so a caller (a
-/// `space install` diff renderer, the provision wire) faces every case with an
-/// exhaustive `switch`.
+/// What became of ONE file — sealed, so a caller (the `assets install` renderer,
+/// the provision wire) faces every case with an exhaustive `switch`.
 sealed class OverlayFileOutcome {
   /// Creates the outcome for the file at [relativePath].
   const OverlayFileOutcome(this.relativePath);
 
-  /// The file's path relative to the target root, kind-prefixed (e.g.
-  /// `skills/discover/SKILL.md`).
+  /// The file's path relative to BOTH roots — the overlay is path-preserving, so
+  /// `<overlayRoot>/<relativePath>` mirrors to `<targetRoot>/<relativePath>`
+  /// (e.g. `.claude/skills/discover/SKILL.md`).
   final String relativePath;
-
-  /// The `<kind>/<name>` ASSET DIR this file belongs to — the format's unit
-  /// (e.g. `skills/discover`). Always well-formed: the materializer throws on a
-  /// file that has no asset dir, so every outcome has one.
-  String get entryDir => p.joinAll(p.split(relativePath).take(2).toList());
 }
 
-/// [relativePath] was written from [sourceRoot] — the target had no file there.
+/// [relativePath] did not exist at the target: this call WROTE it (or, in a
+/// `dryRun`, found it MISSING).
 class OverlayFileWritten extends OverlayFileOutcome {
   /// Creates the written outcome.
-  const OverlayFileWritten(super.relativePath, {required this.sourceRoot});
+  const OverlayFileWritten(
+    super.relativePath, {
+    required this.sourceRoot,
+    required this.contents,
+  });
 
-  /// The overlay root it came from (an element of the call's `overlayRoots`).
+  /// The overlay root it came from.
   final String sourceRoot;
+
+  /// The final, STAMPED bytes — what is on disk, or (in a `dryRun`) what would
+  /// be. Carried so a renderer diffs the exact file without re-reading it, and
+  /// says the same thing in both modes.
+  final String contents;
 }
 
-/// [relativePath] already existed at the target and was left alone (never
-/// overwritten): operator-authored, a previous run, or an earlier overlay root
-/// in the same call. The asset IS present at the target — just not this call's.
-class OverlayFileSkipped extends OverlayFileOutcome {
-  /// Creates the skipped outcome.
-  const OverlayFileSkipped(super.relativePath);
+/// [relativePath] was GENERATED by this tooling (it carries the provenance
+/// stamp) and its body DRIFTED from source: this call regenerated it (or, in a
+/// `dryRun`, reported the drift). Only the BODY decides — a stale source ref in
+/// an otherwise-identical file is not drift.
+class OverlayFileUpdated extends OverlayFileOutcome {
+  /// Creates the updated outcome.
+  const OverlayFileUpdated(
+    super.relativePath, {
+    required this.sourceRoot,
+    required this.contents,
+  });
+
+  /// The overlay root it came from.
+  final String sourceRoot;
+
+  /// The final, STAMPED bytes — see [OverlayFileWritten.contents].
+  final String contents;
+}
+
+/// [relativePath] is already generated AND identical to source — nothing was
+/// written. A re-install is idempotent: the file is left byte-for-byte alone.
+class OverlayFileUnchanged extends OverlayFileOutcome {
+  /// Creates the unchanged outcome.
+  const OverlayFileUnchanged(super.relativePath);
+}
+
+/// [relativePath] exists at the target but was NOT generated by this tooling —
+/// a hand-authored file (no provenance stamp) or a SYMLINK. NEVER clobbered,
+/// always reported, and non-zero at the CLI (guards LOUD or GONE: the named
+/// invariants are "this tooling never overwrites a file it did not generate" and
+/// "it writes nothing outside the target root").
+class OverlayFileBlocked extends OverlayFileOutcome {
+  /// Creates the blocked outcome. [symlink] ⇒ the target path is a link.
+  const OverlayFileBlocked(super.relativePath, {this.symlink = false});
+
+  /// Whether the target path is a SYMLINK (rather than an unstamped file).
+  final bool symlink;
+
+  /// Why it was blocked, and how the operator clears it (the renderer prints
+  /// this).
+  String get reason => symlink
+      ? 'is a SYMLINK — never generated by this tooling, and writing through it '
+            'would mutate a file OUTSIDE the target root; remove the link to '
+            'let the vended file install'
+      : 'exists WITHOUT a provenance header — hand-authored, never clobbered; '
+            'delete it to let the vended file install';
 }
 
 /// [relativePath] was NOT installed: after substitution it still carried
@@ -117,120 +170,159 @@ class OverlayFileRefused extends OverlayFileOutcome {
   /// The arg names the caller DID bind (diagnostics).
   final List<String> boundArgs;
 
-  /// Why it was refused (human-readable; the `space install` renderer prints
-  /// this).
+  /// Why it was refused.
   String get reason =>
       'unbound template hole(s) ${holes.join(', ')} — not installed '
       '(bound args: ${boundArgs.isEmpty ? 'none' : boundArgs.join(', ')})';
 }
 
 /// One materialization's result: an outcome per file, in processing order
-/// (overlay-root order, then [kOverlayKinds] order, then sorted path).
+/// (overlay-root order, then subtree order, then sorted path).
 class OverlayMaterializeReport {
-  /// Creates the report.
-  const OverlayMaterializeReport({required this.files});
+  /// Creates the report. [dryRun] ⇒ nothing was written; every outcome is what
+  /// WOULD happen (the `--check` mode).
+  const OverlayMaterializeReport({required this.files, required this.dryRun});
 
   /// Every file outcome, in processing order.
   final List<OverlayFileOutcome> files;
 
-  /// The files this call wrote.
-  List<OverlayFileWritten> get written => [
-    for (final f in files)
-      if (f is OverlayFileWritten) f,
-  ];
+  /// Whether this was a PLAN (`--check`) rather than a write.
+  final bool dryRun;
 
-  /// The files left untouched because the target already had them.
-  List<OverlayFileSkipped> get skipped => [
-    for (final f in files)
-      if (f is OverlayFileSkipped) f,
-  ];
+  /// The files this call wrote (or, dry, would create).
+  List<OverlayFileWritten> get written =>
+      files.whereType<OverlayFileWritten>().toList();
+
+  /// The generated files whose body drifted from source.
+  List<OverlayFileUpdated> get updated =>
+      files.whereType<OverlayFileUpdated>().toList();
+
+  /// The generated files already identical to source.
+  List<OverlayFileUnchanged> get unchanged =>
+      files.whereType<OverlayFileUnchanged>().toList();
+
+  /// The hand-authored files this call refused to clobber.
+  List<OverlayFileBlocked> get blocked =>
+      files.whereType<OverlayFileBlocked>().toList();
 
   /// The files refused for unbound holes — installed NOWHERE.
-  List<OverlayFileRefused> get refused => [
-    for (final f in files)
-      if (f is OverlayFileRefused) f,
-  ];
+  List<OverlayFileRefused> get refused =>
+      files.whereType<OverlayFileRefused>().toList();
 
-  /// The `<kind>/<name>` asset dirs this call WROTE at least one file into —
-  /// the unit a caller excludes from git (the provision wire's
-  /// `_excludeOverlayFromGit`). An asset dir whose every file was SKIPPED is
-  /// absent: this call put nothing new there, so there is nothing new to
-  /// exclude.
-  List<String> get writtenEntryDirs =>
-      {for (final f in written) f.entryDir}.toList()..sort();
+  /// The ASSET DIRS under [subtree] this call wrote or updated at least one file
+  /// into — the unit the provision wire excludes from git (its per-asset-dir
+  /// self-ignoring `.gitignore`, A23(6)). An asset dir is ONE level below
+  /// [subtree] (`.claude/skills/discover`).
+  ///
+  /// THROWS a [StateError] when a written file sits LOOSE directly under
+  /// [subtree] with no asset dir: the caller asked for the dirs it must fence,
+  /// and a loose file cannot be fenced per-asset-dir without ignoring repo-owned
+  /// territory — A23(6)'s own reason for rejecting a shared `.claude/.gitignore`.
+  /// This is A23(7)'s LOUD malformed-tree guard, RE-HOMED from the walk (where
+  /// the path-preserving format now legitimately carries loose files like
+  /// `.claude/settings.json`) to the one caller whose invariant it protects.
+  List<String> writtenAssetDirsUnder(String subtree) {
+    final dirs = <String>{};
+    for (final file in files) {
+      if (file is! OverlayFileWritten && file is! OverlayFileUpdated) continue;
+      final within = _within(file.relativePath, subtree);
+      if (within == null) continue;
+      final segments = p.split(within);
+      if (segments.length < 2) {
+        throw StateError(
+          'malformed overlay: "${file.relativePath}" sits directly under '
+          '"$subtree" with no asset dir — the wire cannot git-fence a loose '
+          'file there without ignoring repo-owned territory (A23(6))',
+        );
+      }
+      dirs.add(p.join(subtree, segments.first));
+    }
+    return dirs.toList()..sort();
+  }
 
-  /// The skill ids PRESENT at the target after this call — a `skills/<id>/`
-  /// asset whose `SKILL.md` this call WROTE, or which was ALREADY there (an
-  /// operator's own copy is still an installed skill). A skill whose SKILL.md
-  /// was REFUSED is absent: it was not installed, so a brief must never name
-  /// it. The harness discovers a skill by its `SKILL.md`, so that file — not
-  /// merely the dir — is the test. The provision wire uses this to tell the
-  /// agent what it may `/invoke`.
-  List<String> get installedSkillIds {
+  /// The skill ids PRESENT under [subtree] after this call — a
+  /// `<subtree>/<id>/SKILL.md` this call wrote, updated, or found already
+  /// generated and current.
+  ///
+  /// A REFUSED or BLOCKED skill is ABSENT: it is not installed FROM THE VENDED
+  /// SOURCE, so a brief that promises "the station materialized these VENDED
+  /// skills" must never name it. (A blocked path holds a hand-authored file
+  /// whose body this tooling neither wrote nor vetted — naming it would be a
+  /// claim we cannot make.) The harness discovers a skill by its `SKILL.md`, so
+  /// that file — not merely the dir — is the test.
+  List<String> installedSkillIdsUnder(String subtree) {
     final ids = <String>{};
-    for (final f in files) {
-      if (f is OverlayFileRefused) continue;
-      final segments = p.split(f.relativePath);
-      if (segments.length == 3 &&
-          segments.first == 'skills' &&
-          segments.last == 'SKILL.md') {
-        ids.add(segments[1]);
+    for (final file in files) {
+      if (file is OverlayFileRefused || file is OverlayFileBlocked) continue;
+      final within = _within(file.relativePath, subtree);
+      if (within == null) continue;
+      final segments = p.split(within);
+      if (segments.length == 2 && segments.last == 'SKILL.md') {
+        ids.add(segments.first);
       }
     }
     return ids.toList()..sort();
   }
+
+  /// [relativePath] with [subtree] stripped, or null when it is not under it.
+  static String? _within(String relativePath, String subtree) {
+    final prefix = '${p.normalize(subtree)}${p.separator}';
+    final normalized = p.normalize(relativePath);
+    if (!normalized.startsWith(prefix)) return null;
+    return normalized.substring(prefix.length);
+  }
 }
 
-/// Expands `station_overlay`-shaped source roots onto a target `.claude/`-shaped
-/// dir — stateless, and safe to construct anywhere (a CLI Command, a Flutter
-/// interactor, a synchronous engine Capability hook). This class has NO CLI and
-/// NO git dependency.
+/// Expands `station_overlay`-shaped source roots onto a target ROOT,
+/// PATH-PRESERVING — stateless, and safe to construct anywhere (a CLI Command, a
+/// Flutter interactor, a synchronous engine Capability hook). This class has NO
+/// CLI and NO git dependency.
 class OverlayMaterializer {
   /// Creates the materializer.
   const OverlayMaterializer();
 
-  /// The synchronous core. Expands [overlayRoots] (already resolved and ORDERED
-  /// by the caller — earlier roots win a same-path conflict) onto [targetRoot]:
-  /// every file under `<root>/skills/<name>/**` then `<root>/agents/<name>/**`
-  /// is rendered against [args] and mirrored to
-  /// `<targetRoot>/<kind>/<relative path>`, UNLESS a file already exists there
-  /// (skipped, never overwritten) or the render leaves an unbound `{{hole}}`
-  /// (refused, never written). An overlay root with neither subdir, or an empty
-  /// [overlayRoots], contributes nothing and is not an error.
+  /// The synchronous core. Mirrors every file under [overlayRoots] (ORDERED by
+  /// the caller — the FIRST root to offer a path wins) onto [targetRoot],
+  /// rendering it against [args] and STAMPING it with [sourceRef].
   ///
-  /// THROWS a [StateError] when a source file sits LOOSE directly under a kind
-  /// dir (`skills/stray.md`) instead of inside its own asset dir
-  /// (`skills/<name>/stray.md`) — a malformed vended tree is a packaging bug,
-  /// and silently installing it would leave the caller unable to name the asset
-  /// it just installed (or to exclude it from git).
+  /// [subtrees] scopes the expansion to those overlay-relative prefixes (e.g.
+  /// `['.claude/skills']`); empty ⇒ the WHOLE overlay. The worktree wire scopes;
+  /// the operator install does not.
+  ///
+  /// [dryRun] plans WITHOUT writing — every outcome is what WOULD happen (the
+  /// `--check` drift mode).
+  ///
+  /// Per file: an unbound `{{hole}}` is REFUSED (never written); an absent target
+  /// is WRITTEN; a stamped target whose body matches is UNCHANGED (byte-for-byte
+  /// untouched); one whose body drifted is UPDATED; and a target with NO stamp is
+  /// BLOCKED, never clobbered. A missing overlay root or subtree contributes
+  /// nothing and is not an error.
+  ///
+  /// THROWS a [StateError] (via [stampProvenance]) on a vended file type that
+  /// cannot carry a provenance stamp — a packaging bug, fail-closed.
   OverlayMaterializeReport materializeSync({
     required List<String> overlayRoots,
     required String targetRoot,
+    required String sourceRef,
+    List<String> subtrees = const [],
     Map<String, String> args = const {},
+    bool dryRun = false,
   }) {
     final files = <OverlayFileOutcome>[];
+    final seen = <String>{};
+    final runner = args['runner'] ?? kDefaultOverlayRunner;
     for (final overlayRoot in overlayRoots) {
-      for (final kind in kOverlayKinds) {
-        final kindDir = Directory(p.join(overlayRoot, kind));
-        if (!kindDir.existsSync()) continue;
-        final sources =
-            kindDir.listSync(recursive: true).whereType<File>().toList()
-              ..sort((a, b) => a.path.compareTo(b.path));
+      for (final scope in subtrees.isEmpty ? const [''] : subtrees) {
+        final dir = scope.isEmpty
+            ? Directory(overlayRoot)
+            : Directory(p.join(overlayRoot, scope));
+        if (!dir.existsSync()) continue;
+        final sources = dir.listSync(recursive: true).whereType<File>().toList()
+          ..sort((a, b) => a.path.compareTo(b.path));
         for (final source in sources) {
-          final relativeToKind = p.relative(source.path, from: kindDir.path);
-          if (p.split(relativeToKind).length < 2) {
-            throw StateError(
-              'malformed overlay: "$kind/$relativeToKind" (in $overlayRoot) '
-              'sits directly under the kind dir — every asset lives in its own '
-              '"$kind/<name>/" dir (the station_overlay format, bead `pow-kzx`)',
-            );
-          }
-          final relativePath = p.join(kind, relativeToKind);
-          final target = File(p.join(targetRoot, relativePath));
-          if (target.existsSync()) {
-            files.add(OverlayFileSkipped(relativePath));
-            continue;
-          }
+          final relativePath = p.relative(source.path, from: overlayRoot);
+          // Union by tree position: an earlier root already decided this path.
+          if (!seen.add(relativePath)) continue;
           final rendered = _render(source.readAsStringSync(), args);
           final residue = _templateHole.allMatches(rendered);
           if (residue.isNotEmpty) {
@@ -243,28 +335,98 @@ class OverlayMaterializer {
             );
             continue;
           }
-          target.parent.createSync(recursive: true);
-          target.writeAsStringSync(rendered);
-          files.add(OverlayFileWritten(relativePath, sourceRoot: overlayRoot));
+          final target = File(p.join(targetRoot, relativePath));
+          // A SYMLINK — at the file OR at any ancestor dir — is never something
+          // this tooling generated (it only ever writes regular files), and
+          // writing THROUGH one would mutate a file outside the target root,
+          // breaking this lib's "writes nothing outside targetRoot" promise. It
+          // is also exactly how an operator seat hand-wires its assets today
+          // (`.claude/skills/x -> ../../extension/skills/x` — a symlinked DIR,
+          // so the file under it is not itself a link), and a DANGLING link
+          // would crash the write outright. Blocked, never followed.
+          if (_escapesTargetRoot(targetRoot, relativePath)) {
+            files.add(OverlayFileBlocked(relativePath, symlink: true));
+            continue;
+          }
+          final existing = target.existsSync()
+              ? target.readAsStringSync()
+              : null;
+          if (existing != null && !hasProvenance(existing)) {
+            files.add(OverlayFileBlocked(relativePath));
+            continue;
+          }
+          if (existing != null && stripProvenance(existing) == rendered) {
+            files.add(OverlayFileUnchanged(relativePath));
+            continue;
+          }
+          final stamped = stampProvenance(
+            rendered,
+            relativePath: relativePath,
+            sourceRef: sourceRef,
+            runner: runner,
+          );
+          if (!dryRun) {
+            target.parent.createSync(recursive: true);
+            target.writeAsStringSync(stamped);
+          }
+          files.add(
+            existing == null
+                ? OverlayFileWritten(
+                    relativePath,
+                    sourceRoot: overlayRoot,
+                    contents: stamped,
+                  )
+                : OverlayFileUpdated(
+                    relativePath,
+                    sourceRoot: overlayRoot,
+                    contents: stamped,
+                  ),
+          );
         }
       }
     }
-    return OverlayMaterializeReport(files: files);
+    return OverlayMaterializeReport(files: files, dryRun: dryRun);
   }
 
-  /// The async counterpart of [materializeSync] — for a caller that CAN await
-  /// (a Flutter UI, `pow-a74`'s CLI Command). Every underlying op is synchronous
-  /// `dart:io`, so this only shapes the call as a `Future`; see
+  /// The async counterpart of [materializeSync] — for a caller that CAN await (a
+  /// Flutter UI, the `assets install` Command). Every underlying op is
+  /// synchronous `dart:io`, so this only shapes the call as a `Future`; see
   /// [materializeSync] for the whole behavior contract.
   Future<OverlayMaterializeReport> materialize({
     required List<String> overlayRoots,
     required String targetRoot,
+    required String sourceRef,
+    List<String> subtrees = const [],
     Map<String, String> args = const {},
+    bool dryRun = false,
   }) async => materializeSync(
     overlayRoots: overlayRoots,
     targetRoot: targetRoot,
+    sourceRef: sourceRef,
+    subtrees: subtrees,
     args: args,
+    dryRun: dryRun,
   );
+
+  /// Whether writing `<targetRoot>/<relativePath>` would land OUTSIDE
+  /// [targetRoot] by following a symlink — the file itself being a link, or any
+  /// EXISTING ancestor dir under the root being one.
+  ///
+  /// Guards the named invariant "this lib writes nothing outside the target
+  /// root". A dangling link counts: `File.existsSync()` is false through one, so
+  /// an unguarded write would follow it and throw instead of reporting.
+  static bool _escapesTargetRoot(String targetRoot, String relativePath) {
+    if (FileSystemEntity.isLinkSync(p.join(targetRoot, relativePath))) {
+      return true;
+    }
+    var dir = targetRoot;
+    for (final segment in p.split(p.dirname(relativePath))) {
+      if (segment == '.' || segment.isEmpty) continue;
+      dir = p.join(dir, segment);
+      if (FileSystemEntity.isLinkSync(dir)) return true;
+    }
+    return false;
+  }
 
   /// Substitutes every `{{key}}` from [args] — the same dependency-free flat
   /// mustache `PackagedAssetLoader` renders skills with.

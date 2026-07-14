@@ -440,7 +440,10 @@ void main() {
         'not literal template text',
         () {
           final c = ctxAt(worktree.path);
-          const cap = AgentCapability(devRoot: '/dev/root');
+          const cap = AgentCapability(
+            devRoot: '/dev/root',
+            overlaySourceRef: 'testref',
+          );
           cap.spawn(c.context, c.args);
 
           final installed = discoverSkill(worktree);
@@ -459,7 +462,10 @@ void main() {
         '/invoke it (print mode selects no skill on its own — ADR-0001)',
         () {
           final c = ctxAt(worktree.path);
-          const cap = AgentCapability(devRoot: '/dev/root');
+          const cap = AgentCapability(
+            devRoot: '/dev/root',
+            overlaySourceRef: 'testref',
+          );
           final cfg = cap.spawn(c.context, c.args);
           // The rendered brief rides as the FINAL positional of the sh-wrapped
           // claude invocation (FT-2 — `agent_harness.dart`'s claudeArgs end with
@@ -480,7 +486,10 @@ void main() {
         "bead's PR would carry the vended skills",
         () {
           final c = ctxAt(worktree.path);
-          const cap = AgentCapability(devRoot: '/dev/root');
+          const cap = AgentCapability(
+            devRoot: '/dev/root',
+            overlaySourceRef: 'testref',
+          );
           cap.spawn(c.context, c.args);
 
           final ignore = File(
@@ -505,7 +514,10 @@ void main() {
         "the worktree (including the agent's own .claude/ files)",
         () {
           final c = ctxAt(worktree.path);
-          const cap = AgentCapability(devRoot: '/dev/root');
+          const cap = AgentCapability(
+            devRoot: '/dev/root',
+            overlaySourceRef: 'testref',
+          );
           cap.spawn(c.context, c.args);
 
           expect(
@@ -535,7 +547,10 @@ void main() {
           existing.writeAsStringSync('OPERATOR-AUTHORED — do not touch');
 
           final c = ctxAt(worktree.path);
-          const cap = AgentCapability(devRoot: '/dev/root');
+          const cap = AgentCapability(
+            devRoot: '/dev/root',
+            overlaySourceRef: 'testref',
+          );
           cap.spawn(c.context, c.args);
 
           expect(
@@ -549,6 +564,7 @@ void main() {
         final c = ctxAt(worktree.path);
         const cap = AgentCapability(
           devRoot: '/dev/root',
+          overlaySourceRef: 'testref',
           overlayArgs: {'runner': 'grid', 'gridHome': '/grid/home'},
         );
         cap.spawn(c.context, c.args);
@@ -569,14 +585,23 @@ void main() {
           addTearDown(() {
             if (fixture.existsSync()) fixture.deleteSync(recursive: true);
           });
-          File(p.join(fixture.path, 'skills', 'fixture-skill', 'SKILL.md'))
+          File(
+            p.join(
+              fixture.path,
+              '.claude',
+              'skills',
+              'fixture-skill',
+              'SKILL.md',
+            ),
+          )
             ..createSync(recursive: true)
-            ..writeAsStringSync('fixture body');
+            ..writeAsStringSync('---\nname: fixture-skill\n---\nfixture body\n');
 
           final c = ctxAt(worktree.path);
           final cap = AgentCapability(
             devRoot: '/dev/root',
             overlayRoot: fixture.path,
+            overlaySourceRef: 'testref',
           );
           final cfg = cap.spawn(c.context, c.args);
 
@@ -590,7 +615,7 @@ void main() {
                 'SKILL.md',
               ),
             ).readAsStringSync(),
-            'fixture body',
+            contains('fixture body'),
           );
           expect(discoverSkill(worktree).existsSync(), isFalse);
           expect(cfg.args.last, contains('`/fixture-skill`'));
@@ -607,14 +632,19 @@ void main() {
           addTearDown(() {
             if (fixture.existsSync()) fixture.deleteSync(recursive: true);
           });
-          File(p.join(fixture.path, 'skills', 'half-bound', 'SKILL.md'))
+          File(
+            p.join(fixture.path, '.claude', 'skills', 'half-bound', 'SKILL.md'),
+          )
             ..createSync(recursive: true)
-            ..writeAsStringSync('call {{nobodyBindsThis}}');
+            ..writeAsStringSync(
+              '---\nname: half-bound\n---\ncall {{nobodyBindsThis}}\n',
+            );
 
           final c = ctxAt(worktree.path);
           final cap = AgentCapability(
             devRoot: '/dev/root',
             overlayRoot: fixture.path,
+            overlaySourceRef: 'testref',
           );
           late final RuntimeConfig cfg;
           expect(() => cfg = cap.spawn(c.context, c.args), returnsNormally);
@@ -648,6 +678,7 @@ void main() {
           final cap = AgentCapability(
             devRoot: '/dev/root',
             overlayRoot: empty.path,
+            overlaySourceRef: 'testref',
           );
           final cfg = cap.spawn(c.context, c.args);
 
