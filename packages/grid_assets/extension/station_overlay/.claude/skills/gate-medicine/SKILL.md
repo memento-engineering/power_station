@@ -56,7 +56,7 @@ stale data and re-gates immediately — the critique dir's unchanged mtimes are
 the tell. The only fresh-round path is the rework re-key:
 
 ```
-./{{runner}} rework <bead-id> \
+{{runner}} rework <bead-id> \
   --grid-root {{gridHome}} --prefix <state-store prefix> \
   --note "<honest operator finding>" --note-root <work repo root>
 ```
