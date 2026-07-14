@@ -6,7 +6,7 @@ description: >
   with a rework round — never a bare gate-close. Use when a session parks at
   review/route, when gate beads open in the state store, when several sessions
   gate at once, or when sessions and gates look stuck, orphaned, or duplicated.
-compatibility: Requires the `{{runner}}` binary, bd (beads CLI), dart, git.
+compatibility: Requires dart + the `{{runner}}` runner, bd (beads CLI), git.
 metadata:
   author: memento-engineering
 ---
