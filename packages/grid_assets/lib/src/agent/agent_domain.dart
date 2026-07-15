@@ -7,9 +7,13 @@
 /// ```json
 /// { "grid.agent": { "assets_version": "0.0.1", "payload": {
 ///     "harness": "opencode",
-///     "target": { "kind": "openai", "base": "http://dashboard:8080/v1" },
 ///     "params": { "model": "qwen2.5-coder" } } } }
 /// ```
+///
+/// A bead names an ENVIRONMENT via `harness`; WHERE inference runs is the
+/// environment's own `target` bound to a machine-local endpoint by the site
+/// binding (ADR-0002 D3/D4). A stale `target` key in the envelope is REFUSED
+/// WHOLE — the endpoint never rides a bead.
 ///
 /// The envelope's `params.model` is the TOP rung of the model ladder (bead
 /// `pow-edp`): it overrides the station's `--model`/`--grader-model` and the
@@ -26,7 +30,9 @@ library;
 
 import 'package:dart_grid_assets/dart_grid_assets.dart';
 
+import 'agent_environment.dart';
 import 'agent_harness.dart';
+import 'environment_registry.dart';
 
 /// The `grid.agent` metadata key (one slot per domain — the top-level-key
 /// merge granularity).
@@ -39,20 +45,17 @@ const String kAgentAssetsVersion = '0.0.1';
 /// optional; merged over the ambient value in ladder order.
 class AgentConfigOverride {
   /// Creates the override.
-  const AgentConfigOverride({this.harness, this.target, this.params});
+  const AgentConfigOverride({this.harness, this.params});
 
   /// Overrides the harness id (null ⇒ keep ambient).
   final String? harness;
-
-  /// Overrides the model target (null ⇒ keep ambient).
-  final ModelTarget? target;
 
   /// Merged key-wise over the ambient params (null ⇒ keep ambient).
   final Map<String, String>? params;
 
   /// Applies this override onto [base].
   AgentConfig applyTo(AgentConfig base) =>
-      base.merge(harness: harness, target: target, params: params);
+      base.merge(harness: harness, params: params);
 }
 
 /// Decodes a bead's `grid.agent` envelope off its [metadata] — fail-closed via
@@ -72,13 +75,12 @@ AgentConfigOverride _parsePayload(Map<String, Object?> payload) {
   if (harness != null && harness is! String) {
     throw const FormatException('"harness" must be a string');
   }
-  ModelTarget? target;
-  final rawTarget = payload['target'];
-  if (rawTarget != null) {
-    if (rawTarget is! Map) {
-      throw const FormatException('"target" must be an object');
-    }
-    target = _parseTarget(rawTarget.cast<String, Object?>());
+  if (payload.containsKey('target')) {
+    throw const FormatException(
+      '"target" is no longer a bead override (ADR-0002 D3/D4): a bead names an '
+      'environment via "harness"; the endpoint is a machine-local site-binding '
+      'fact, never a bead. Remove "target" and name a target-bound environment.',
+    );
   }
   Map<String, String>? params;
   final rawParams = payload['params'];
@@ -102,36 +104,8 @@ AgentConfigOverride _parsePayload(Map<String, Object?> payload) {
   }
   return AgentConfigOverride(
     harness: harness as String?,
-    target: target,
     params: params,
   );
-}
-
-ModelTarget _parseTarget(Map<String, Object?> target) {
-  final kind = target['kind'];
-  if (kind is! String) {
-    throw const FormatException('"target.kind" must be a string');
-  }
-  Uri base() {
-    final raw = target['base'];
-    if (raw is! String || raw.isEmpty) {
-      throw FormatException('"target.base" is required for kind "$kind"');
-    }
-    final uri = Uri.tryParse(raw);
-    if (uri == null || !uri.hasScheme) {
-      throw FormatException('"target.base" is not an absolute url: "$raw"');
-    }
-    return uri;
-  }
-
-  return switch (kind) {
-    'provider' => const ProviderManaged(),
-    'openai' => OpenAiCompatible(base()),
-    'swift' => SwiftInfer(base()),
-    _ => throw FormatException(
-      'unknown "target.kind" "$kind" (provider | openai | swift)',
-    ),
-  };
 }
 
 /// The effect-boundary resolution (the D-C ladder as a pure value merge).
@@ -163,7 +137,7 @@ AgentConfig resolveAgentConfig({
   required AgentConfig ambient,
   required Map<String, dynamic> beadMetadata,
   required Map<String, String> stepParams,
-  required AgentHarnessRegistry registry,
+  required EnvironmentRegistry registry,
 }) {
   var config = ambient;
   String? beadModel;
@@ -204,8 +178,19 @@ AgentConfig resolveAgentConfig({
     params: {'model': beadModel ?? ambient.modelForRole(role)},
   );
 
-  // Legality — the shared OQ-c check.
-  final error = registry.validate(config);
-  if (error != null) throw StateError('agent config: $error');
+  // Legality (OQ-c moment 2, fail-closed): the resolved harness must name an armed,
+  // self-consistent environment. resolve THROWS on unknown/cyclic/dangling; the
+  // engine's allocation routes the throw to supervision as a per-work Failed.
+  final AgentEnvironment env;
+  try {
+    env = registry.resolve(config.harness);
+  } on EnvironmentRegistryError catch (e) {
+    throw StateError('agent config: ${e.message}');
+  }
+  final selfCheck = env.validate();
+  if (selfCheck != null) {
+    throw StateError('agent config: environment "${config.harness}" is illegal: '
+        '$selfCheck');
+  }
   return config;
 }
