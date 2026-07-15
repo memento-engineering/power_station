@@ -39,7 +39,7 @@ AgentConfig _resolve(AgentRole role, AgentConfig ambient) => resolveAgentConfig(
   ambient: ambient,
   beadMetadata: const {},
   stepParams: const {},
-  registry: buildAgentHarnessRegistry(),
+  registry: buildBuiltinEnvironmentRegistry(),
 );
 
 /// The ambient tree a spawner reads at entry: the work bead, the activation, and
@@ -53,7 +53,7 @@ FakeTreeContext _ctx(AgentConfig config) => FakeTreeContext(
       branch: 'grid/tg-1',
     ),
     AgentConfig: config,
-    AgentHarnessRegistry: buildAgentHarnessRegistry(),
+    EnvironmentRegistry: buildBuiltinEnvironmentRegistry(),
   },
 );
 
@@ -231,8 +231,9 @@ void main() {
     test('a gather spawn stamps --model haiku into the claude invocation', () {
       final config = _resolve(AgentRole.gather, const AgentConfig());
       expect(config.params['model'], 'haiku');
-      final cfg = const ClaudeHarness().spawnFor(
-        config: config,
+      final cfg = spawnFor(
+        environment: kBuiltinEnvironments['claude']!,
+        model: config.params['model'],
         brief: const AgentBrief(task: 'read the tree; cite what you find'),
         workspace: testWorkspace(
           'tg-1',
@@ -259,7 +260,7 @@ void main() {
         ambient: const AgentConfig(),
         beadMetadata: pinned.metadata,
         stepParams: const {},
-        registry: buildAgentHarnessRegistry(),
+        registry: buildBuiltinEnvironmentRegistry(),
       );
       expect(config.params['model'], 'Z');
     });

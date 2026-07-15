@@ -85,6 +85,8 @@ import 'package:path/path.dart' as p;
 
 import '../agent/agent_domain.dart';
 import '../agent/agent_harness.dart';
+import '../agent/environment_registry.dart';
+import '../agent/site_binding.dart';
 import '../agent/usage_report.dart';
 import '../search/station_search.dart';
 import 'committee.dart';
@@ -1198,8 +1200,10 @@ class DiscoveryLensCapability extends ProcessCapability {
         context.getInheritedSeedOfExactType<AgentConfig>() ??
         const AgentConfig();
     final registry =
-        context.getInheritedSeedOfExactType<AgentHarnessRegistry>() ??
-        buildAgentHarnessRegistry();
+        context.getInheritedSeedOfExactType<EnvironmentRegistry>() ??
+        buildBuiltinEnvironmentRegistry();
+    final siteBinding =
+        context.getInheritedSeedOfExactType<SiteBinding>() ?? SiteBinding.none;
     // The GATHER role — the ONLY read-only role. It rides the CHEAP tier by
     // policy ([tierFor]), so this lane carries no model opinion of its own and a
     // station that retunes `cheap` moves all three lenses with it.
@@ -1210,12 +1214,15 @@ class DiscoveryLensCapability extends ProcessCapability {
       stepParams: args.params,
       registry: registry,
     );
+    final environment = registry.resolve(config.harness);
     final workspaceDir = workspace.workspaceDir;
     final gather = Directory(workspaceDir).existsSync()
         ? readDiscoveryAnchors(workspaceDir)
         : null;
-    return registry.harness(config.harness)!.spawnFor(
-      config: config,
+    return spawnFor(
+      environment: environment,
+      model: config.params['model'],
+      endpoint: siteBinding.endpointFor(name: config.harness, environment: environment),
       brief: AgentBrief(
         task: buildLensPrompt(
           bead: bead,

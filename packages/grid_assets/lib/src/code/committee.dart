@@ -102,6 +102,8 @@ import 'package:path/path.dart' as p;
 
 import '../agent/agent_domain.dart';
 import '../agent/agent_harness.dart';
+import '../agent/environment_registry.dart';
+import '../agent/site_binding.dart';
 import '../agent/usage_report.dart';
 import 'route_failure.dart';
 
@@ -597,8 +599,10 @@ class CriticCapability extends ProcessCapability {
         context.getInheritedSeedOfExactType<AgentConfig>() ??
         const AgentConfig();
     final registry =
-        context.getInheritedSeedOfExactType<AgentHarnessRegistry>() ??
-        buildAgentHarnessRegistry();
+        context.getInheritedSeedOfExactType<EnvironmentRegistry>() ??
+        buildBuiltinEnvironmentRegistry();
+    final siteBinding =
+        context.getInheritedSeedOfExactType<SiteBinding>() ?? SiteBinding.none;
     final config = resolveAgentConfig(
       role: AgentRole.grade,
       ambient: ambient,
@@ -606,8 +610,11 @@ class CriticCapability extends ProcessCapability {
       stepParams: args.params,
       registry: registry,
     );
-    return registry.harness(config.harness)!.spawnFor(
-      config: config,
+    final environment = registry.resolve(config.harness);
+    return spawnFor(
+      environment: environment,
+      model: config.params['model'],
+      endpoint: siteBinding.endpointFor(name: config.harness, environment: environment),
       brief: AgentBrief(
         task: buildCriticPrompt(
           bead,

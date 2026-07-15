@@ -24,6 +24,8 @@ import 'package:path/path.dart' as p;
 
 import '../agent/agent_domain.dart';
 import '../agent/agent_harness.dart';
+import '../agent/environment_registry.dart';
+import '../agent/site_binding.dart';
 import '../agent/usage_report.dart';
 import '../assets/asset_loader.dart';
 import '../assets/overlay_materializer.dart';
@@ -200,8 +202,10 @@ class AgentCapability extends ProcessCapability {
         context.getInheritedSeedOfExactType<AgentConfig>() ??
         const AgentConfig();
     final registry =
-        context.getInheritedSeedOfExactType<AgentHarnessRegistry>() ??
-        buildAgentHarnessRegistry();
+        context.getInheritedSeedOfExactType<EnvironmentRegistry>() ??
+        buildBuiltinEnvironmentRegistry();
+    final siteBinding =
+        context.getInheritedSeedOfExactType<SiteBinding>() ?? SiteBinding.none;
     // The commit policy the brief teaches rides the station's composition knob
     // (bead `pow-8dx`) — read with the effect verb at the spawn edge (ADR-0008
     // D3); absent ⇒ the default `Refs` token.
@@ -215,8 +219,11 @@ class AgentCapability extends ProcessCapability {
       stepParams: args.params,
       registry: registry,
     );
-    return registry.harness(config.harness)!.spawnFor(
-      config: config,
+    final environment = registry.resolve(config.harness);
+    return spawnFor(
+      environment: environment,
+      model: config.params['model'],
+      endpoint: siteBinding.endpointFor(name: config.harness, environment: environment),
       brief: buildAgentBrief(
         bead,
         workspace,

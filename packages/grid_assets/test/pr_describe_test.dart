@@ -50,7 +50,7 @@ Future<DescribeOutcome> _describe({
   ),
   composition: composition,
   ambient: const AgentConfig(),
-  registry: buildAgentHarnessRegistry(),
+  registry: buildBuiltinEnvironmentRegistry(),
   git: git,
   inference: inference,
 );
