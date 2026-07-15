@@ -152,12 +152,12 @@ String defaultModelFor(AgentRole role) => defaultModelForTier(tierFor(role));
 /// The agent configuration — a pure VALUE the tree carries (never behavior).
 /// Watched by branches (`dependOn*`), snapshot-read by effects (`get*`).
 class AgentConfig {
-  /// Creates the config: which [harness] runs the work, against which [target],
-  /// with harness-opaque [params] tuning, the station's [tiers] arming, and the
-  /// PRE-TIER [graderModel] knob.
+  /// Creates the config: which [harness] runs the work, with harness-opaque
+  /// [params] tuning, the station's [tiers] arming, and the PRE-TIER
+  /// [graderModel] knob. WHERE inference runs is the named environment's own
+  /// `target` (ADR-0002 D3), not a config axis.
   const AgentConfig({
     this.harness = 'claude',
-    this.target = const ProviderManaged(),
     this.params = const {},
     this.tiers = const ModelTiers(),
     this.graderModel,
@@ -165,9 +165,6 @@ class AgentConfig {
 
   /// The registry id of the harness: `claude` | `copilot` | `pi` | `opencode`.
   final String harness;
-
-  /// Where inference runs (D-E).
-  final ModelTarget target;
 
   /// Harness-opaque tuning, and the TRANSPORT key for the model: every harness
   /// reads `params['model']`.
@@ -223,13 +220,11 @@ class AgentConfig {
   /// [params] and [tiers] merge key-wise, they don't replace whole).
   AgentConfig merge({
     String? harness,
-    ModelTarget? target,
     Map<String, String>? params,
     ModelTiers? tiers,
     String? graderModel,
   }) => AgentConfig(
     harness: harness ?? this.harness,
-    target: target ?? this.target,
     params: params == null ? this.params : {...this.params, ...params},
     tiers: tiers == null
         ? this.tiers
@@ -245,7 +240,6 @@ class AgentConfig {
   bool operator ==(Object other) =>
       other is AgentConfig &&
       other.harness == harness &&
-      other.target == target &&
       other.tiers == tiers &&
       other.graderModel == graderModel &&
       _mapEquals(other.params, params);
@@ -253,7 +247,6 @@ class AgentConfig {
   @override
   int get hashCode => Object.hash(
     harness,
-    target,
     tiers,
     graderModel,
     Object.hashAllUnordered(
@@ -271,7 +264,7 @@ class AgentConfig {
 
   @override
   String toString() =>
-      'AgentConfig($harness → $target, params: $params, tiers: $tiers'
+      'AgentConfig($harness, params: $params, tiers: $tiers'
       '${graderModel == null ? '' : ', graderModel: $graderModel'})';
 }
 
