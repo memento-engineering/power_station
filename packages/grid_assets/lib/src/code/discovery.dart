@@ -34,8 +34,8 @@
 ///     explorers) joins as a third role at the cheap tier.")
 ///
 /// **The CITE-THE-OFFENCE gate.** The route holds a bead ONLY on a violation that
-/// NAMES its standard — a ratified ADR/amendment, or an applicable SKILL's
-/// instructions ([ViolationKind]). Three rules keep it honest, and each is a
+/// NAMES its standard — a RATIFIED ADR/amendment, or an applicable SKILL's
+/// instructions ([ViolationKind]). These rules keep it honest, and each is a
 /// clause of [gatesTheBead]:
 ///  - **no citation, no hold.** A finding with an empty `standard` is a VIBE. It
 ///    can never gate; it rides the dossier as a FLAG.
@@ -43,6 +43,12 @@
 ///    from X because Y") passes — a considered departure is not an offender, and
 ///    it is judged downstream by `adr-alignment`. Only an UNWITTING contradiction
 ///    gates.
+///  - **intent, not presence.** A finding the bead's own plan/acceptance REMOVES
+///    (the bead IS the fix) passes — discovery runs pre-specify, so the offending
+///    text is necessarily still present.
+///  - **ratified-only holds.** A [ViolationKind.decision] gates only on a RATIFIED
+///    standard; a PENDING ADR-0000 amendment is ADVISORY and rides as a FLAG,
+///    never a hold (the 2026-07-14 register foot).
 ///  - **a pattern needs a precedent.** A [ViolationKind.pattern] deviation gates
 ///    only when the lens NAMES the precedent it deviates from; otherwise it is a
 ///    FLAG in the ask, never a hold.
@@ -149,7 +155,9 @@ String discoveryDossierPath(String workspaceDir) =>
 /// What KIND of standard a violation cites. Sealed by the enum — consumed with an
 /// exhaustive `switch` (house style), so a new kind cannot skip the gate matrix.
 enum ViolationKind {
-  /// A ratified ADR, or a pending ADR-0000 `A<n>` amendment (they bind too).
+  /// A ratified ADR, or an ADR-0000 `A<n>` amendment whose Status is Ratified. A
+  /// PENDING amendment is ADVISORY — it can never HOLD (2026-07-14 register foot);
+  /// it rides as a flag for `adr-alignment`.
   decision,
 
   /// An applicable SKILL's instructions (skills TEACH how; ADRs RATIFY the
@@ -181,6 +189,8 @@ class DiscoveryFinding {
     required this.quote,
     required this.contradiction,
     this.acknowledged = false,
+    this.ratified = false,
+    this.removesOffence = false,
     this.precedent = '',
   });
 
@@ -201,6 +211,19 @@ class DiscoveryFinding {
   /// Y"). A declared departure PASSES.
   final bool acknowledged;
 
+  /// Whether the cited standard is RATIFIED — a ratified ADR, or an ADR-0000
+  /// amendment whose Status is Ratified. For [ViolationKind.decision] ONLY: a
+  /// PENDING amendment (`false`) is ADVISORY and can never HOLD (the 2026-07-14
+  /// register-foot ratification). Default `false` — fail-open on holds (A17(3): a
+  /// false HOLD is strictly worse than a wasted round).
+  final bool ratified;
+
+  /// Whether the bead's OWN plan/acceptance REMOVES this cited offence — the bead
+  /// IS the fix. `true` ⇒ it PASSES (INTENT, NOT PRESENCE): discovery runs
+  /// pre-specify, so a fix-the-violation bead necessarily still HAS the offending
+  /// text present. Default `false`.
+  final bool removesOffence;
+
   /// For [ViolationKind.pattern] ONLY: the precedent deviated from
   /// (`lib/src/code/committee.dart:CriticCapability`). Empty ⇒ a FLAG, never a
   /// hold.
@@ -213,6 +236,8 @@ class DiscoveryFinding {
     'quote': quote,
     'contradiction': contradiction,
     'acknowledged': acknowledged,
+    'ratified': ratified,
+    'removesOffence': removesOffence,
     'precedent': precedent,
   };
 
@@ -230,6 +255,8 @@ class DiscoveryFinding {
       quote: (json['quote'] as String?)?.trim() ?? '',
       contradiction: contradiction,
       acknowledged: json['acknowledged'] == true,
+      ratified: json['ratified'] == true,
+      removesOffence: json['removesOffence'] == true,
       precedent: (json['precedent'] as String?)?.trim() ?? '',
     );
   }
@@ -570,12 +597,27 @@ class DiscoveryDossier {
 ///
 ///  1. NO CITATION, NO HOLD. An empty `standard` is a vibe; a vibe never gates.
 ///  2. THE DEPARTURE CLAUSE. A departure the bead DECLARES is not an offence.
-///  3. A PATTERN NEEDS A PRECEDENT. Absent one it is a FLAG, never a hold.
+///  3. INTENT, NOT PRESENCE. A bead whose plan/acceptance REMOVES the cited
+///     offence IS the fix — it passes. (The CLASS-1 false-positive: a
+///     fix-the-violation bead necessarily HAS the offending text present at
+///     discovery time, since discovery runs pre-specify.)
+///  4. RATIFIED-ONLY HOLDS. A `decision` gates only when the cited standard is
+///     RATIFIED (a ratified ADR, or an ADR-0000 amendment whose Status is
+///     Ratified). A PENDING amendment is ADVISORY — it rides as a FLAG, never a
+///     hold (the CLASS-2 false-positive). A `skill` always gates when cited; a
+///     `pattern` needs a named precedent.
+///
+/// Ratified basis: the 2026-07-14 register-foot ratification ("DISCOVERY GATE:
+/// pending amendments are ADVISORY, not binding") supersedes A21(2)'s "pending
+/// `A<n>` amendments … they bind" clause, and adds the intent grade per A21's own
+/// principle "only an unwitting contradiction gates".
 bool gatesTheBead(DiscoveryFinding finding) {
   if (finding.standard.trim().isEmpty) return false;
   if (finding.acknowledged) return false;
+  if (finding.removesOffence) return false;
   return switch (finding.kind) {
-    ViolationKind.decision || ViolationKind.skill => true,
+    ViolationKind.decision => finding.ratified,
+    ViolationKind.skill => true,
     ViolationKind.pattern => finding.precedent.trim().isNotEmpty,
   };
 }
@@ -1286,16 +1328,25 @@ class DiscoveryLensCapability extends ProcessCapability {
       ..writeln()
       ..writeln('## What counts as an OFFENCE (the gate is CITE-THE-OFFENCE)')
       ..writeln(
-        'The citable standard is: a ratified ADR under `docs/adr/` (the '
-        'register\'s ADR-0000 is the living AI-decision register — its pending '
-        '`A<n>` amendments BIND too), or an applicable SKILL\'s instructions. '
-        'Skills TEACH how; ADRs RATIFY the specific.',
+        'The citable standard is: a RATIFIED ADR under `docs/adr/`, or a RATIFIED '
+        'ADR-0000 `A<n>` amendment (its Status line reads Ratified), or an '
+        'applicable SKILL\'s instructions. Skills TEACH how; ADRs RATIFY the '
+        'specific.',
+      )
+      ..writeln(
+        '- **RATIFIED-ONLY HOLDS.** A PENDING ADR-0000 amendment (Status: '
+        'pending) is ADVISORY, NOT binding: cite it if the bead contradicts it, '
+        'but set `"ratified": false` — it rides to the architect as a flag for '
+        'the `adr-alignment` lane and NEVER holds the bead. Set `"ratified": '
+        'true` ONLY for a ratified ADR or an amendment whose Status is Ratified. '
+        '(A `skill` or `pattern` citation ignores this field.)',
       )
       ..writeln(
         '- You MUST cite the STANDARD and the CLAUSE, and the clause MUST EXIST: '
-        'quote it VERBATIM from the file you actually read. A citation you cannot '
-        'quote is not a citation — the register is edited and amendments are '
-        'REMOVED, so an `A<n>` you remember is not an `A<n>` that exists. A '
+        'quote it VERBATIM from the file you actually read, INCLUDING its Status '
+        'line so ratified-vs-pending is grounded, not guessed. A citation you '
+        'cannot quote is not a citation — the register is edited and amendments '
+        'are REMOVED, so an `A<n>` you remember is not an `A<n>` that exists. A '
         'concern you cannot cite is NOT an offence: report it as a violation with '
         'an EMPTY `standard` and it rides to the architect as a flag, never held '
         'against the bead. Do not inflate a preference into a citation.',
@@ -1305,6 +1356,14 @@ class DiscoveryLensCapability extends ProcessCapability {
         'departure ("this departs from X because Y"), set `"acknowledged": true`. '
         'A considered departure is NOT an offence — it passes. Only an UNWITTING '
         'contradiction holds the bead.',
+      )
+      ..writeln(
+        '- **INTENT, NOT PRESENCE**: a bead whose OWN plan/acceptance/description '
+        'REMOVES this cited offence IS the fix — set `"removesOffence": true` and '
+        'it passes. Discovery runs BEFORE the bead is built, so a '
+        'fix-the-violation bead still HAS the offending text present; grade the '
+        'bead\'s STANCE, not the text. Set it false when the bead LEAVES or ADDS '
+        'the offence.',
       )
       ..writeln(
         '- A `pattern` deviation holds the bead ONLY if you NAME the precedent it '
@@ -1320,9 +1379,10 @@ class DiscoveryLensCapability extends ProcessCapability {
         '"source":"<file / bead / ADR clause>"}],'
         '"violations":[{"kind":"decision|skill|pattern",'
         '"standard":"<docs/adr/ADR-0000-ai-decision-register.md A17(4)>",'
-        '"quote":"<the clause, verbatim>",'
+        '"quote":"<the clause, verbatim, including its Status line>",'
         '"contradiction":"<what this bead does that contradicts it>",'
-        '"acknowledged":false,"precedent":""}]}',
+        '"acknowledged":false,"ratified":false,"removesOffence":false,'
+        '"precedent":""}]}',
       )
       ..writeln()
       ..writeln(
@@ -1359,12 +1419,14 @@ String lensBrief(String lens) => switch (lens) {
         'NAMED precedent in the tree.',
   kDecisionLens =>
     'DECISION CONTEXT. Read `docs/adr/` (every ADR, and every `A<n>` amendment of '
-        'the ADR-0000 register — pending amendments BIND) and the skills that '
-        'apply to this work. Report the decisions the architect must honour, and '
-        'CITE any this bead contradicts. This is the lens the violation gate is '
-        'mostly built on: be precise, and be QUOTED — grep the heading before you '
-        'cite it, because an amendment that was removed from the register does '
-        'not bind anything.',
+        'the ADR-0000 register) and the skills that apply to this work. Report '
+        'the decisions the architect must honour, and CITE any this bead '
+        'contradicts. Only a RATIFIED standard can HOLD the bead: a PENDING '
+        'amendment is ADVISORY (set `"ratified": false` and it rides as a flag). '
+        'This is the lens the violation gate is mostly built on: be precise, and '
+        'be QUOTED — grep the heading AND its Status line before you cite it, '
+        'because an amendment that was removed from the register does not bind '
+        'anything.',
   kPriorArtLens =>
     'PRIOR ART. What has already been done, decided, or attempted here? Read the '
         'prior-art hits above, the git history of the surfaces the bead names, '

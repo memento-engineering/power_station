@@ -265,6 +265,7 @@ void main() {
                       DiscoveryFinding(
                         kind: ViolationKind.decision,
                         standard: _adr,
+                        ratified: true,
                         quote: 'a false HOLD STALLS the governance track itself',
                         contradiction:
                             'this bead gates the track on an absent verdict',

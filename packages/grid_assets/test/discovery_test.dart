@@ -20,6 +20,8 @@ DiscoveryFinding _cited({
   ViolationKind kind = ViolationKind.decision,
   String standard = _adr,
   bool acknowledged = false,
+  bool ratified = true,
+  bool removesOffence = false,
   String precedent = '',
 }) => DiscoveryFinding(
   kind: kind,
@@ -27,6 +29,8 @@ DiscoveryFinding _cited({
   quote: 'determinism is confined to the tier where a hold is NEVER wrong',
   contradiction: 'this bead adds a deterministic quality bar on human prose',
   acknowledged: acknowledged,
+  ratified: ratified,
+  removesOffence: removesOffence,
   precedent: precedent,
 );
 
@@ -147,6 +151,58 @@ void main() {
         expect(named, isA<DiscoveryHold>());
       },
     );
+
+    test(
+      'RATIFIED-ONLY: a cited contradiction of a PENDING amendment does NOT hold '
+      '— it rides as a FLAG (the CLASS-2 false-positive fix)',
+      () {
+        final verdict = _decide({
+          kDecisionLens: _report(violations: [_cited(ratified: false)]),
+        });
+        expect(verdict, isA<DiscoveryAdvance>());
+        expect((verdict as DiscoveryAdvance).dossier.flags, hasLength(1));
+        expect(gatesTheBead(_cited(ratified: false)), isFalse);
+        expect(gatesTheBead(_cited(ratified: true)), isTrue);
+      },
+    );
+
+    test(
+      'INTENT, NOT PRESENCE: a fix-the-violation finding (the bead REMOVES the '
+      'cited offence) does NOT hold, even on a RATIFIED standard (CLASS-1)',
+      () {
+        final verdict = _decide({
+          kDecisionLens: _report(
+            violations: [_cited(ratified: true, removesOffence: true)],
+          ),
+        });
+        expect(verdict, isA<DiscoveryAdvance>());
+        expect(gatesTheBead(_cited(removesOffence: true)), isFalse);
+      },
+    );
+
+    test('a PERPETUATE finding (ratified, not fixed, not acknowledged) HOLDS', () {
+      final verdict = _decide({
+        kDecisionLens: _report(
+          violations: [_cited(ratified: true, removesOffence: false)],
+        ),
+      });
+      expect(verdict, isA<DiscoveryHold>());
+    });
+
+    test('the two new gate fields round-trip through the wire', () {
+      final back = DiscoveryFinding.fromJson(
+        _cited(ratified: true, removesOffence: true).toJson(),
+      )!;
+      expect(back.ratified, isTrue);
+      expect(back.removesOffence, isTrue);
+      final bare = DiscoveryFinding.fromJson({
+        'kind': 'decision',
+        'standard': _adr,
+        'contradiction': 'x',
+      })!;
+      expect(bare.ratified, isFalse, reason: 'fail-open on holds');
+      expect(bare.removesOffence, isFalse);
+    });
   });
 
   group('the route (a broken LANE is never a verdict)', () {
@@ -345,6 +401,24 @@ void main() {
         //    derives from `discoveryDirPath`: the circuit's whole write surface
         //    is its own `.grid/discovery/` dir.
         expect(RegExp('writeAsStringSync').allMatches(source), hasLength(1));
+      },
+    );
+
+    test(
+      'the lens prompt teaches RATIFIED-ONLY and INTENT-NOT-PRESENCE, and its '
+      'JSON shape carries the two new fields',
+      () {
+        final prompt = const DiscoveryLensCapability().buildLensPrompt(
+          bead: workBead('tg-1'),
+          lens: kDecisionLens,
+          nodePath: 'tg-1/spec_review/discovery/$kDecisionLens',
+          workspaceDir: '/w/tg-1',
+        );
+        expect(prompt, contains('RATIFIED-ONLY HOLDS'));
+        expect(prompt, contains('INTENT, NOT PRESENCE'));
+        expect(prompt, contains('"ratified":false'));
+        expect(prompt, contains('"removesOffence":false'));
+        expect(prompt, isNot(contains('amendments BIND too')));
       },
     );
   });
