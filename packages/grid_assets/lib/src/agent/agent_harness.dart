@@ -42,6 +42,8 @@ import 'package:grid_engine/grid_engine.dart';
 import 'package:grid_runtime/grid_runtime.dart';
 import 'package:path/path.dart' as p;
 
+import 'agent_environment.dart';
+import 'environment_registry.dart';
 import 'model_tier.dart';
 
 /// Where inference runs (ADR-0008 Decision 10 / D-E). Sealed — consumers
@@ -408,8 +410,10 @@ StepSignal jobSignal(RuntimeEvent event) => switch (event) {
 };
 
 /// The env a harness layers for a [ModelTarget] it reaches over an endpoint.
-/// A [ProviderManaged] tool needs nothing (it owns its auth/routing).
-Map<String, String> _targetEnv(ModelTarget target) => switch (target) {
+/// A [ProviderManaged] tool needs nothing (it owns its auth/routing). Doomed
+/// with the four classes (bead `pow-ebf.4`); the successor is the [InferenceTarget]
+/// [_targetEnv] below.
+Map<String, String> _modelTargetEnv(ModelTarget target) => switch (target) {
   ProviderManaged() => const {},
   OpenAiCompatible(:final base) => {'OPENAI_BASE_URL': '$base'},
   SwiftInfer(:final base) => {'SWIFT_INFER_BASE_URL': '$base'},
@@ -498,6 +502,144 @@ String _usageWrapperScript(String usageOut) =>
 /// its only caller passes a [usageReportPath], which contains no single quote.
 String _sq(String s) => "'$s'";
 
+/// The SINGLE spawn renderer (ADR-0002 D1; the harness collapse, bead
+/// `pow-ebf.4`): render one resolved [environment] + [brief] into the process
+/// invocation rooted at [workspace], reading the environment's DATA
+/// (`command`/`args`/`argsAppend`/`promptMode`/`promptFlag`/`env`/`target`). There
+/// is no per-harness class — a new tool is a declared [AgentEnvironment].
+///
+/// [model] is the ladder's resolved model; it OVERRIDES [AgentEnvironment.model]
+/// and renders as `--model <model>` in the slot BETWEEN [AgentEnvironment.args]
+/// (REPLACE) and [AgentEnvironment.argsAppend] (ACCUMULATE) — the byte-identical
+/// position the four deleted classes emitted. [endpoint] is the site-binding
+/// machine fact (ADR-0002 D3) injected into `OPENAI_BASE_URL`/`SWIFT_INFER_BASE_URL`
+/// per [AgentEnvironment.target] (the `_targetEnv` successor). [usageOut] triggers
+/// the FT-2 wrapper ONLY when the environment declares a surface
+/// ([AgentEnvironment.usageJsonArgs] != null); a tool with no surface IGNORES it.
+RuntimeConfig spawnFor({
+  required AgentEnvironment environment,
+  required AgentBrief brief,
+  required Workspace workspace,
+  String? model,
+  String? usageOut,
+  Uri? endpoint,
+}) {
+  final command = environment.command;
+  if (command == null || command.isEmpty) {
+    throw StateError(
+      'environment is not spawnable: no command resolved '
+      '(declare a command in the environment or a base ancestor)',
+    );
+  }
+  final effectiveModel = model ?? environment.model;
+  final promptSegment = switch (environment.promptMode ?? PromptMode.arg) {
+    PromptMode.arg => [brief.render()],
+    PromptMode.flag => [environment.promptFlag!, brief.render()],
+    PromptMode.none => const <String>[],
+  };
+  final wantUsage = usageOut != null && environment.usageJsonArgs != null;
+  final inner = <String>[
+    ...?environment.args,
+    if (effectiveModel != null) ...['--model', effectiveModel],
+    ...environment.argsAppend,
+    if (wantUsage) ...environment.usageJsonArgs!,
+    ...promptSegment,
+  ];
+  final processEnv = <String, String>{
+    ...environment.env,
+    ..._targetEnv(environment.target, endpoint),
+  };
+  if (!wantUsage) {
+    return RuntimeConfig(
+      workDir: workspace.workspaceDir,
+      command: command,
+      args: inner,
+      env: processEnv,
+      lifecycle: Lifecycle.oneTurn,
+    );
+  }
+  // FT-2 usage capture (uniform, spec-driven): wrap in `sh -c`, redirecting the
+  // JSON usage envelope to [usageOut]. `exec "$@"` preserves the child exit code
+  // (the step's terminal mapping is unchanged) and the real argv rides as
+  // positionals byte-identically — gc's `path_check` shell-wrapper case.
+  return RuntimeConfig(
+    workDir: workspace.workspaceDir,
+    command: 'sh',
+    args: ['-c', _usageWrapperScript(usageOut), 'grid-$command', command, ...inner],
+    env: processEnv,
+    lifecycle: Lifecycle.oneTurn,
+  );
+}
+
+/// The env a resolved [target] layers over its site [endpoint] (the `_targetEnv`
+/// successor — ADR-0002 D3: the URL is a MACHINE FACT the site binding supplies,
+/// never in code/argv/bead). Provider-managed needs nothing; an endpoint-needing
+/// target with a null [endpoint] injects nothing (the LOUD refusal for an unbound
+/// fact is `SiteBinding.endpointFor`'s at the spawn edge, not this pure fold).
+/// Exhaustive switch (house style).
+Map<String, String> _targetEnv(InferenceTarget? target, Uri? endpoint) =>
+    switch (target ?? InferenceTarget.providerManaged) {
+      InferenceTarget.providerManaged => const {},
+      InferenceTarget.openAiCompatible =>
+        endpoint == null ? const {} : {'OPENAI_BASE_URL': '$endpoint'},
+      InferenceTarget.swiftInfer =>
+        endpoint == null ? const {} : {'SWIFT_INFER_BASE_URL': '$endpoint'},
+    };
+
+/// The first-party inference environments as DATA (ADR-0002 D1; the harness
+/// collapse, bead `pow-ebf.4`). Each is byte-identical in its emitted
+/// [RuntimeConfig] to the class it replaces; `codex` is the fifth, its argv +
+/// usage surface confirmed against `codex-cli 0.144.4`. `model` is `null` on every
+/// builtin (the ladder stamps it at spawn). The grid's own harness stays a parked
+/// epic — a sixth entry here, zero code.
+const Map<String, AgentEnvironment> kBuiltinEnvironments = {
+  'claude': AgentEnvironment(
+    command: 'claude',
+    args: ['--dangerously-skip-permissions'],
+    promptMode: PromptMode.flag,
+    promptFlag: '-p',
+    target: InferenceTarget.providerManaged,
+    usageJsonArgs: ['--output-format', 'json'],
+    resumeFlag: '--resume',
+  ),
+  'copilot': AgentEnvironment(
+    command: 'copilot',
+    argsAppend: ['--allow-all-tools'],
+    promptMode: PromptMode.flag,
+    promptFlag: '-p',
+    target: InferenceTarget.providerManaged,
+  ),
+  'pi': AgentEnvironment(
+    command: 'pi',
+    promptMode: PromptMode.flag,
+    promptFlag: '-p',
+    target: InferenceTarget.openAiCompatible,
+  ),
+  'opencode': AgentEnvironment(
+    command: 'opencode',
+    args: ['run'],
+    promptMode: PromptMode.arg,
+    target: InferenceTarget.providerManaged,
+  ),
+  'codex': AgentEnvironment(
+    command: 'codex',
+    args: ['exec'],
+    argsAppend: ['--dangerously-bypass-approvals-and-sandbox', '--skip-git-repo-check'],
+    promptMode: PromptMode.arg,
+    target: InferenceTarget.providerManaged,
+    usageJsonArgs: ['--json'],
+    resumeFlag: 'resume',
+    resumeStyle: ResumeStyle.subcommand,
+  ),
+};
+
+/// The station-default environment registry — the five builtins as `builtins`,
+/// no custom authoring (a station/substation adds `custom` at its `HarnessProvider`).
+/// Replaces `buildAgentHarnessRegistry` (bead `pow-ebf.3` reserved
+/// `EnvironmentRegistry.builtins` for exactly this).
+EnvironmentRegistry buildBuiltinEnvironmentRegistry() =>
+    const EnvironmentRegistry(custom: {}, builtins: kBuiltinEnvironments);
+
 /// `copilot` — GitHub Copilot CLI: provider-managed (auth rides `gh`), print
 /// mode, tools allowed headless. Brief transport: argv. (Exact flag shape
 /// confirmed at the live arm — the human gate; the SEAM is what this pass
@@ -568,7 +710,7 @@ class PiHarness implements AgentHarness {
         '-p',
         brief.render(),
       ],
-      env: _targetEnv(config.target),
+      env: _modelTargetEnv(config.target),
       lifecycle: Lifecycle.oneTurn,
     );
   }
@@ -607,7 +749,7 @@ class OpencodeHarness implements AgentHarness {
         if (model != null) ...['--model', model],
         brief.render(),
       ],
-      env: _targetEnv(config.target),
+      env: _modelTargetEnv(config.target),
       lifecycle: Lifecycle.oneTurn,
     );
   }
