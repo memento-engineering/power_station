@@ -39,7 +39,9 @@ import 'package:beads_dart/beads_dart.dart';
 import 'package:grid_engine/grid_engine.dart';
 import 'package:grid_runtime/grid_runtime.dart';
 
+import '../agent/agent_environment.dart';
 import '../agent/agent_harness.dart';
+import '../agent/environment_registry.dart';
 import 'pr_composition.dart';
 
 /// The injectable ONE-SHOT inference seam (Fakes, not mocks — the offline suite
@@ -147,7 +149,7 @@ Future<DescribeOutcome> describeBranch({
   required Workspace workspace,
   required PrComposition composition,
   required AgentConfig ambient,
-  required AgentHarnessRegistry registry,
+  required EnvironmentRegistry registry,
   GitRunner? git,
   InferenceRunner? inference,
 }) async {
@@ -196,14 +198,18 @@ Future<DescribeOutcome> describeBranch({
   // FALLS BACK (this is decoration; `resolveAgentConfig`'s fail-closed throw is
   // for WORK, not for prose).
   final config = ambient.merge(params: {'model': composition.model});
-  final harness = registry.harness(config.harness);
-  if (harness == null || registry.validate(config) != null) {
+  final AgentEnvironment env;
+  try {
+    env = registry.resolve(config.harness);
+  } on EnvironmentRegistryError {
     return DescribeOutcome(commits: commits);
   }
+  if (env.validate() != null) return DescribeOutcome(commits: commits);
 
   final run = await inference.run(
-    harness.spawnFor(
-      config: config,
+    spawnFor(
+      environment: env,
+      model: config.params['model'],
       brief: AgentBrief(
         task: buildDescribePrompt(
           bead: bead,
@@ -216,6 +222,7 @@ Future<DescribeOutcome> describeBranch({
         ),
       ),
       workspace: workspace,
+      // describe is ambient claude (provider-managed): no endpoint, no usageOut.
     ),
   );
   final described = run.ok ? PrDescription.parse(run.output) : null;

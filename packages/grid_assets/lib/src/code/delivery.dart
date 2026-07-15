@@ -31,6 +31,7 @@ import 'package:grid_runtime/grid_runtime.dart';
 import 'package:path/path.dart' as p;
 
 import '../agent/agent_harness.dart';
+import '../agent/environment_registry.dart';
 import 'conventional_commit.dart';
 import 'landing.dart';
 import 'pr_composition.dart';
@@ -102,8 +103,8 @@ class DeliverRouteCapability extends RouteCapability {
         context.getInheritedSeedOfExactType<AgentConfig>() ??
         const AgentConfig();
     final harnesses =
-        context.getInheritedSeedOfExactType<AgentHarnessRegistry>() ??
-        buildAgentHarnessRegistry();
+        context.getInheritedSeedOfExactType<EnvironmentRegistry>() ??
+        buildBuiltinEnvironmentRegistry();
 
     // Commit-only: no method bound, or no workspace to deliver FROM. The engine
     // completes the terminal node and delivers nothing.

@@ -39,6 +39,7 @@ import 'package:grid_runtime/grid_runtime.dart';
 import 'package:grid_sdk/grid_sdk.dart' as sdk;
 
 import '../agent/agent_harness.dart';
+import '../agent/environment_registry.dart';
 import '../code/code_capabilities.dart';
 import '../code/delivery.dart';
 import '../code/pr_composition.dart';
@@ -265,18 +266,19 @@ class GitHubGridAssets extends SingleChildStatelessSeed {
 
 /// **HarnessProvider** — harness provision as a STATION-scoped asset (v3 §3).
 ///
-/// Provides the station's default [AgentHarnessRegistry] (which coding harnesses
-/// the machine can run) and its ambient [AgentConfig] (the default harness /
-/// model / params — the bottom rung of the agent-config ladder, ADR-0008
+/// Provides the station's default [EnvironmentRegistry] (which named inference
+/// environments the machine arms) and its ambient [AgentConfig] (the default
+/// harness / model / params — the bottom rung of the agent-config ladder, ADR-0008
 /// Decision 10) to everything mounted below. Station scope, because these serve
 /// the MACHINE, not a single project (v3 §3: station-level assets serve the
 /// machine). Mounted above the `Substations` fan-out, every substation's work
 /// inherits it; a bead's `grid.agent` envelope and a step's params still
 /// override it per-work at the effect boundary ([resolveAgentConfig]).
 ///
-/// [registry] defaults to [buildAgentHarnessRegistry] (the first-party
-/// claude/copilot/pi/opencode set) — a `const` value, so the default is
-/// canonical (repeated resolution is the SAME instance, no dependent churn).
+/// [registry] defaults to [buildBuiltinEnvironmentRegistry] (the first-party
+/// claude/copilot/pi/opencode/codex set as data) — a `const` value, so the
+/// default is canonical (repeated resolution is the SAME instance, no dependent
+/// churn).
 class HarnessProvider extends SingleChildStatelessSeed {
   /// Creates the harness asset over the station-default [registry] and ambient
   /// [config]; [child] is supplied by an enclosing [Nest].
@@ -287,16 +289,16 @@ class HarnessProvider extends SingleChildStatelessSeed {
     super.key,
   });
 
-  /// The station's harness DI registry; null ⇒ [buildAgentHarnessRegistry].
-  final AgentHarnessRegistry? registry;
+  /// The station's environment registry; null ⇒ [buildBuiltinEnvironmentRegistry].
+  final EnvironmentRegistry? registry;
 
   /// The station-default agent config (the ladder's ambient rung).
   final AgentConfig config;
 
   @override
   Seed buildWithChild(TreeContext context, Seed child) =>
-      InheritedSeed<AgentHarnessRegistry>(
-        value: registry ?? buildAgentHarnessRegistry(),
+      InheritedSeed<EnvironmentRegistry>(
+        value: registry ?? buildBuiltinEnvironmentRegistry(),
         child: InheritedSeed<AgentConfig>(value: config, child: child),
       );
 }

@@ -85,6 +85,8 @@ import 'package:path/path.dart' as p;
 
 import '../agent/agent_domain.dart';
 import '../agent/agent_harness.dart';
+import '../agent/environment_registry.dart';
+import '../agent/site_binding.dart';
 import '../agent/usage_report.dart';
 import 'committee.dart';
 import 'discovery.dart';
@@ -407,8 +409,10 @@ class SpecifyCapability extends ProcessCapability {
         context.getInheritedSeedOfExactType<AgentConfig>() ??
         const AgentConfig();
     final registry =
-        context.getInheritedSeedOfExactType<AgentHarnessRegistry>() ??
-        buildAgentHarnessRegistry();
+        context.getInheritedSeedOfExactType<EnvironmentRegistry>() ??
+        buildBuiltinEnvironmentRegistry();
+    final siteBinding =
+        context.getInheritedSeedOfExactType<SiteBinding>() ?? SiteBinding.none;
     final config = resolveAgentConfig(
       role: AgentRole.build,
       ambient: ambient,
@@ -416,6 +420,7 @@ class SpecifyCapability extends ProcessCapability {
       stepParams: args.params,
       registry: registry,
     );
+    final environment = registry.resolve(config.harness);
     // The AUTO-RESPEC guidance (bead `pow-7nm`): on a rework round the spec
     // route left the failing lanes' rationales in the worktree ledger — the one
     // channel that survives the session re-mint (the SiblingView it graded
@@ -428,8 +433,10 @@ class SpecifyCapability extends ProcessCapability {
     // circuit left in the worktree. Absent (offline, or a session on a frozen
     // pre-discovery shape) ⇒ a brief byte-identical to the pre-discovery one.
     final dossier = live ? readDiscoveryDossier(workspaceDir) : null;
-    return registry.harness(config.harness)!.spawnFor(
-      config: config,
+    return spawnFor(
+      environment: environment,
+      model: config.params['model'],
+      endpoint: siteBinding.endpointFor(name: config.harness, environment: environment),
       brief: buildSpecifyBrief(
         bead,
         workspace,
@@ -700,8 +707,10 @@ class SpecCriticCapability extends CriticCapability {
         context.getInheritedSeedOfExactType<AgentConfig>() ??
         const AgentConfig();
     final registry =
-        context.getInheritedSeedOfExactType<AgentHarnessRegistry>() ??
-        buildAgentHarnessRegistry();
+        context.getInheritedSeedOfExactType<EnvironmentRegistry>() ??
+        buildBuiltinEnvironmentRegistry();
+    final siteBinding =
+        context.getInheritedSeedOfExactType<SiteBinding>() ?? SiteBinding.none;
     final config = resolveAgentConfig(
       role: AgentRole.grade,
       ambient: ambient,
@@ -709,8 +718,11 @@ class SpecCriticCapability extends CriticCapability {
       stepParams: args.params,
       registry: registry,
     );
-    return registry.harness(config.harness)!.spawnFor(
-      config: config,
+    final environment = registry.resolve(config.harness);
+    return spawnFor(
+      environment: environment,
+      model: config.params['model'],
+      endpoint: siteBinding.endpointFor(name: config.harness, environment: environment),
       brief: AgentBrief(
         task: buildSpecCriticPrompt(
           bead,
