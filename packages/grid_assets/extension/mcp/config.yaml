@@ -205,3 +205,17 @@ skills:
       - name: gridHome
         description: The grid-home root — the `--grid-root` its rework passes.
         required: true
+  - id: release
+    description: >
+      Cut a disciplined pub.dev release — the consolidated genesis+lenny
+      publishing playbook. Owns the judgement (when to publish, patch vs.
+      breaking, breaking-CHANGELOG framing, tag-drift reconciliation) and CALLS
+      the vended `dart release` Command for the deterministic work (version
+      math, scrub gate, dry-run, pub.dev poll, dependency order).
+    path: station_overlay/.claude/skills/release/SKILL.md
+    visibility: public
+    audience: operator
+    args:
+      - name: runner
+        description: The composing station's executable name — the verb the skill's `dart release` calls ride.
+        required: true

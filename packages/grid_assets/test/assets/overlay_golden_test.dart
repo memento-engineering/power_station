@@ -31,6 +31,8 @@ const List<String> kWorktreeOverlayGolden = [
   '.claude/skills/harvest-review/SKILL.md',
   '.claude/skills/intake-grooming/.gitignore',
   '.claude/skills/intake-grooming/SKILL.md',
+  '.claude/skills/release/.gitignore',
+  '.claude/skills/release/SKILL.md',
   '.claude/skills/station-operations/.gitignore',
   '.claude/skills/station-operations/SKILL.md',
 ];
