@@ -261,6 +261,7 @@ class AgentEnvironment {
     this.pathCheck,
     this.resumeFlag,
     this.resumeStyle,
+    this.usageJsonArgs,
   });
 
   /// The inheritance pointer (gc `base`) — tri-state, LOAD-BEARING. Default
@@ -310,6 +311,13 @@ class AgentEnvironment {
   /// How [resumeFlag] is applied (gc `resume_style`). `null` inherits; the
   /// default when [resumeFlag] is set is [ResumeStyle.flag].
   final ResumeStyle? resumeStyle;
+
+  /// The argv that turns ON this tool's JSON usage surface (FT-2 — a the_grid
+  /// addition beside gc's shell-wrapper `pathCheck`): claude `['--output-format',
+  /// 'json']`, codex `['--json']`. `null` ⇒ NO usage surface, so a `usageOut` is
+  /// IGNORED (the single `spawnFor` renders the plain invocation). REPLACE across
+  /// layers (last non-null wins), like [args].
+  final List<String>? usageJsonArgs;
 
   /// A NAMED-invariant guard (guards LOUD or GONE — ADR-0000 A8): a
   /// [PromptMode.flag] transport with no [promptFlag] is unspawnable, and a
@@ -379,6 +387,7 @@ class AgentEnvironment {
     String? pathCheck;
     String? resumeFlag;
     ResumeStyle? resumeStyle;
+    List<String>? usageJsonArgs;
 
     for (final layer in effective) {
       command = layer.command ?? command;
@@ -392,6 +401,7 @@ class AgentEnvironment {
       pathCheck = layer.pathCheck ?? pathCheck;
       resumeFlag = layer.resumeFlag ?? resumeFlag;
       resumeStyle = layer.resumeStyle ?? resumeStyle;
+      if (layer.usageJsonArgs != null) usageJsonArgs = layer.usageJsonArgs;
     }
 
     return AgentEnvironment(
@@ -407,6 +417,7 @@ class AgentEnvironment {
       pathCheck: pathCheck,
       resumeFlag: resumeFlag,
       resumeStyle: resumeStyle,
+      usageJsonArgs: usageJsonArgs,
     );
   }
 
@@ -424,7 +435,8 @@ class AgentEnvironment {
       other.target == target &&
       other.pathCheck == pathCheck &&
       other.resumeFlag == resumeFlag &&
-      other.resumeStyle == resumeStyle;
+      other.resumeStyle == resumeStyle &&
+      _listEq(other.usageJsonArgs, usageJsonArgs);
 
   @override
   int get hashCode {
@@ -444,6 +456,7 @@ class AgentEnvironment {
       pathCheck,
       resumeFlag,
       resumeStyle,
+      usageJsonArgs == null ? null : Object.hashAll(usageJsonArgs!),
     );
   }
 
@@ -453,7 +466,7 @@ class AgentEnvironment {
       'argsAppend: $argsAppend, promptMode: $promptMode, '
       'promptFlag: $promptFlag, env: $env, model: $model, target: $target, '
       'pathCheck: $pathCheck, resumeFlag: $resumeFlag, '
-      'resumeStyle: $resumeStyle)';
+      'resumeStyle: $resumeStyle, usageJsonArgs: $usageJsonArgs)';
 }
 
 bool _listEq(List<String>? a, List<String>? b) {

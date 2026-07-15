@@ -79,6 +79,15 @@ void main() {
       expect(r.env, {'ROOT': '1', 'SHARED': 'mid', 'MID': '1', 'LEAF': '1'});
     });
 
+    test('usageJsonArgs REPLACE across the fold (last non-null wins)', () {
+      final r = AgentEnvironment.resolve(const [
+        AgentEnvironment(usageJsonArgs: ['--output-format', 'json']),
+        AgentEnvironment(),
+        AgentEnvironment(usageJsonArgs: ['--json']),
+      ]);
+      expect(r.usageJsonArgs, ['--json']);
+    });
+
     test('the resolved env is flattened (standalone base)', () {
       final r = AgentEnvironment.resolve([root(), mid(), leaf]);
       expect(r.base, const EnvBaseStandalone());
