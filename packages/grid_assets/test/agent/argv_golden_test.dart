@@ -15,39 +15,6 @@ void main() {
   const brief = AgentBrief(task: 'BODY');
   final rendered = brief.render();
 
-  group('claude — byte-identical across the collapse', () {
-    test('with model, no usage', () {
-      final old = const ClaudeHarness().spawnFor(
-        config: const AgentConfig(params: {'model': 'opus'}),
-        brief: brief,
-        workspace: ws,
-      );
-      expect(
-        old,
-        RuntimeConfig(
-          workDir: '/w/tg-1',
-          command: 'claude',
-          args: ['--dangerously-skip-permissions', '--model', 'opus', '-p', rendered],
-          lifecycle: Lifecycle.oneTurn,
-        ),
-      );
-    });
-
-    test('usage-wrapped (FT-2)', () {
-      final old = const ClaudeHarness().spawnFor(
-        config: const AgentConfig(params: {'model': 'opus'}),
-        brief: brief,
-        workspace: ws,
-        usageOut: '.grid/telemetry/tg-1_agent.usage.json',
-      );
-      expect(old.command, 'sh');
-      expect(old.args.sublist(2), [
-        'grid-claude', 'claude', '--dangerously-skip-permissions', '--model', 'opus',
-        '--output-format', 'json', '-p', rendered,
-      ]);
-    });
-  });
-
   group('the single spawnFor matches the collapsed classes byte-for-byte', () {
     RuntimeConfig render(String name, {String? model, String? usageOut, Uri? endpoint}) =>
         spawnFor(

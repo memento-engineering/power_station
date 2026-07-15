@@ -1,19 +1,23 @@
-/// The **agent scope** — Theme-of-context for agentic harnesses (ADR-0008
-/// Decision 10, ratified 2026-07-02; design surface
-/// `the_grid/docs/SCRATCH-agent-scope.md`).
+/// The **agent scope** — the surviving surface after the harness collapse
+/// (ADR-0002 D1, bead `pow-ebf.4`; ADR-0008 Decision 10, ratified 2026-07-02).
 ///
-/// A **harness** is a turn/tool harness: it renders a brief + config into ONE
-/// tool's invocation and interprets its runtime events. The seam is "Agent",
-/// not "Coding" — the committee's critics ride the identical harness; coding is
-/// one client.
+/// Harnesses are DATA. There is no per-tool class and no interface: a tool is a
+/// declared [AgentEnvironment] (`agent_environment.dart`) armed by name in the
+/// [EnvironmentRegistry] (`environment_registry.dart`), and ONE [spawnFor]
+/// renders `(environment, brief, workspace)` into the process invocation —
+/// reading the environment's `command`/`args`/`argsAppend`/`promptMode`/
+/// `promptFlag`/`env`/`target` and its FT-2 `usageJsonArgs` usage surface.
+/// [kBuiltinEnvironments] ships the five first-party environments as values
+/// (claude / copilot / pi / opencode / codex); [buildBuiltinEnvironmentRegistry]
+/// is the station default.
 ///
 /// **Config is a VALUE in the tree; impls are DI.** [AgentConfig] rides a plain
 /// `InheritedSeed<AgentConfig>` mounted by the asset's `main()` (station
 /// default), overridable per-substation, per-bead (the `grid.agent` domain
 /// envelope — `agent_domain.dart`), and per-step (`StepArgs.params`) — the
 /// D-C ladder, resolved as a pure value merge at the effect boundary
-/// ([resolveAgentConfig]). Harness IMPLEMENTATIONS resolve from the
-/// [AgentHarnessRegistry] wired at `main()` — behavior is never derived from a
+/// ([resolveAgentConfig]). The named environment is resolved from the
+/// [EnvironmentRegistry] mounted at `main()`; behavior is never derived from a
 /// service looked up in the tree.
 ///
 /// **The MODEL resolves ROLE → TIER → MODEL (beads `pow-edp`, `pow-2c9`).** A
@@ -26,16 +30,13 @@
 /// build runs strong, a new role costs one `tierFor` case, and a retune is one
 /// arming change.
 ///
-/// **Two-moment validation (OQ-c, ratified):** the composition root validates
-/// its station default eagerly ([AgentHarnessRegistry.validate] — a
-/// misconfigured machine fails before any work mounts); a per-work override
-/// that resolves to an illegal combo throws in [resolveAgentConfig], which the
-/// engine's allocation catches and routes to supervision as a `Failed` — one
-/// bad bead parks loudly, the station never crashes.
-///
-/// The grid's OWN harness (`GridHarness`, name reserved) is PARKED as its own
-/// epic — this pass ships the four external harnesses. The registry keeps that
-/// epic purely additive (a new id + impl, zero seam changes).
+/// **Two-moment validation (OQ-c, ratified)** now lives on the registry: the
+/// composition root validates its station default eagerly
+/// ([EnvironmentRegistry.validate] — a misconfigured machine fails before any
+/// work mounts); a per-work override that resolves to an illegal environment
+/// throws in [resolveAgentConfig], which the engine's allocation catches and
+/// routes to supervision as a `Failed` — one bad bead parks loudly, the station
+/// never crashes.
 library;
 
 import 'package:grid_engine/grid_engine.dart';
@@ -45,65 +46,6 @@ import 'package:path/path.dart' as p;
 import 'agent_environment.dart';
 import 'environment_registry.dart';
 import 'model_tier.dart';
-
-/// Where inference runs (ADR-0008 Decision 10 / D-E). Sealed — consumers
-/// switch exhaustively (house style).
-sealed class ModelTarget {
-  const ModelTarget();
-}
-
-/// The tool owns its own auth/routing — claude via the macOS keychain (A38),
-/// copilot via `gh` auth. Model *selection* for a managed tool rides
-/// [AgentConfig.params] (`model: ...`), not the target.
-class ProviderManaged extends ModelTarget {
-  /// Const-constructible.
-  const ProviderManaged();
-
-  @override
-  bool operator ==(Object other) => other is ProviderManaged;
-
-  @override
-  int get hashCode => (ProviderManaged).hashCode;
-
-  @override
-  String toString() => 'ProviderManaged()';
-}
-
-/// An OpenAI-compatible inference endpoint (e.g. a llama.cpp server).
-class OpenAiCompatible extends ModelTarget {
-  /// Targets the endpoint at [base].
-  const OpenAiCompatible(this.base);
-
-  /// The endpoint base url.
-  final Uri base;
-
-  @override
-  bool operator ==(Object other) => other is OpenAiCompatible && other.base == base;
-
-  @override
-  int get hashCode => Object.hash(OpenAiCompatible, base);
-
-  @override
-  String toString() => 'OpenAiCompatible($base)';
-}
-
-/// A swift-infer server endpoint.
-class SwiftInfer extends ModelTarget {
-  /// Targets the swift-infer server at [base].
-  const SwiftInfer(this.base);
-
-  /// The endpoint base url.
-  final Uri base;
-
-  @override
-  bool operator ==(Object other) => other is SwiftInfer && other.base == base;
-
-  @override
-  int get hashCode => Object.hash(SwiftInfer, base);
-
-  @override
-  String toString() => 'SwiftInfer($base)';
-}
 
 /// The ROLE an agent spawn plays — the DOMAIN semantic, declared by the
 /// SPAWNING ASSET (bead `pow-edp`). It is NOT the model axis: a role points at
@@ -317,171 +259,6 @@ class AgentBrief {
   }
 }
 
-/// A turn/tool harness — renders ([AgentConfig], [AgentBrief]) into one tool's
-/// invocation and interprets its runtime events. Pure description
-/// (delegate-class): no I/O, no state; the engine's allocation owns the spawn.
-abstract interface class AgentHarness {
-  /// Whether this harness can reach [target] (the legality half the registry
-  /// validates — OQ-c).
-  bool supports(ModelTarget target);
-
-  /// Maps the resolved [config] + rendered [brief] into the process invocation
-  /// rooted at [workspace]. The harness owns the brief TRANSPORT (argv today;
-  /// stdin / a workspace file are per-impl choices).
-  ///
-  /// [usageOut] is the workspace-relative file the harness should redirect its
-  /// run's usage/cost telemetry into (FT-2 flow telemetry — CAPTURE-ONLY). A
-  /// harness that has a JSON usage surface ([ClaudeHarness]) wraps its
-  /// invocation so the envelope lands there; a harness with no such surface
-  /// IGNORES it (its `result()` merges no usage). Null ⇒ no capture requested
-  /// (the plain, byte-identical invocation).
-  RuntimeConfig spawnFor({
-    required AgentConfig config,
-    required AgentBrief brief,
-    required Workspace workspace,
-    String? usageOut,
-  });
-
-  /// Maps a runtime [event] to a step signal. All four shipped harnesses are
-  /// one-turn jobs (clean exit → complete); a future daemon/interactive
-  /// harness overrides this with its own semantics.
-  StepSignal interpret(RuntimeEvent event);
-}
-
-/// The harness DI registry — wired at the asset's `main()`, mounted as a plain
-/// `InheritedSeed<AgentHarnessRegistry>` (a fixed-at-mount handle). Impls
-/// resolve by [AgentConfig.harness] at the effect boundary.
-class AgentHarnessRegistry {
-  /// Creates the registry over [harnesses] (id → impl).
-  const AgentHarnessRegistry(Map<String, AgentHarness> harnesses)
-    : _harnesses = harnesses;
-
-  final Map<String, AgentHarness> _harnesses;
-
-  /// The registered harness ids.
-  Iterable<String> get ids => _harnesses.keys;
-
-  /// Resolves [id]; null when unregistered (callers fail closed).
-  AgentHarness? harness(String id) => _harnesses[id];
-
-  /// Validates [config] against the registry — the OQ-c legality check,
-  /// shared by BOTH moments: the composition root calls it eagerly on the
-  /// station default (boot fails loud); [resolveAgentConfig] calls it on every
-  /// per-work resolution (an illegal override fails THAT work). Returns the
-  /// human-readable error, or null when legal.
-  String? validate(AgentConfig config) {
-    final h = _harnesses[config.harness];
-    if (h == null) {
-      return 'unknown harness "${config.harness}" '
-          '(registered: ${_harnesses.keys.join(', ')})';
-    }
-    if (!h.supports(config.target)) {
-      return 'harness "${config.harness}" cannot reach ${config.target} '
-          '(fail-closed — pick a target the harness supports, or another '
-          'harness)';
-    }
-    return null;
-  }
-}
-
-/// Builds the standard four-harness registry (ADR-0008 Decision 10):
-/// claude, copilot, pi, opencode. The grid's own harness is a PARKED epic —
-/// when it lands it is one more entry here, zero seam changes.
-AgentHarnessRegistry buildAgentHarnessRegistry() => const AgentHarnessRegistry({
-  'claude': ClaudeHarness(),
-  'copilot': CopilotHarness(),
-  'pi': PiHarness(),
-  'opencode': OpencodeHarness(),
-});
-
-/// A job's terminal mapping shared by the one-turn harnesses: a clean
-/// `Exited(0)` completes; any other terminal fails (routes to supervision).
-StepSignal jobSignal(RuntimeEvent event) => switch (event) {
-  Exited(:final exitCode) when exitCode == 0 => StepSignal.complete,
-  Exited() || Died() => StepSignal.failed,
-  _ => StepSignal.none,
-};
-
-/// The env a harness layers for a [ModelTarget] it reaches over an endpoint.
-/// A [ProviderManaged] tool needs nothing (it owns its auth/routing). Doomed
-/// with the four classes (bead `pow-ebf.4`); the successor is the [InferenceTarget]
-/// [_targetEnv] below.
-Map<String, String> _modelTargetEnv(ModelTarget target) => switch (target) {
-  ProviderManaged() => const {},
-  OpenAiCompatible(:final base) => {'OPENAI_BASE_URL': '$base'},
-  SwiftInfer(:final base) => {'SWIFT_INFER_BASE_URL': '$base'},
-};
-
-/// `claude` — the proven live harness (A36/A38): print mode, headless
-/// permissions, keychain auth, one-turn. Brief transport: argv.
-///
-/// The operative harness for the code circuit's runs, so it is the one that
-/// captures usage telemetry (FT-2). When a [usageOut] path is supplied the
-/// invocation is WRAPPED (the gating lane's `sh -c` rc-file precedent): claude
-/// runs with `--output-format json` and its result envelope is redirected to
-/// that file, from which `AgentCapability`/`CriticCapability`'s `result()` parse
-/// tokens/cost/turns/duration. The claude argv — INCLUDING the byte-identical
-/// rendered brief — rides as sh positional params (`"$@"`), so nothing about the
-/// brief or the behavior contract is re-quoted; only the output format and the
-/// stdout redirection change. `exec` makes claude's exit code the process exit
-/// code, so [interpret] is byte-identical to the unwrapped run.
-class ClaudeHarness implements AgentHarness {
-  /// Const-constructible.
-  const ClaudeHarness();
-
-  @override
-  bool supports(ModelTarget target) => target is ProviderManaged;
-
-  @override
-  RuntimeConfig spawnFor({
-    required AgentConfig config,
-    required AgentBrief brief,
-    required Workspace workspace,
-    String? usageOut,
-  }) {
-    final model = config.params['model'];
-    if (usageOut == null) {
-      // No usage capture requested — the plain, direct invocation.
-      return RuntimeConfig(
-        workDir: workspace.workspaceDir,
-        command: 'claude',
-        args: [
-          '--dangerously-skip-permissions',
-          if (model != null) ...['--model', model],
-          '-p',
-          brief.render(),
-        ],
-        lifecycle: Lifecycle.oneTurn,
-      );
-    }
-    // Usage capture (FT-2): claude with the JSON result envelope, redirected to
-    // the per-step telemetry file. The claude argv rides as sh positionals so
-    // `exec "$@"` runs it verbatim (the rendered brief is byte-identical).
-    final claudeArgs = <String>[
-      '--dangerously-skip-permissions',
-      if (model != null) ...['--model', model],
-      '--output-format', 'json',
-      '-p',
-      brief.render(),
-    ];
-    return RuntimeConfig(
-      workDir: workspace.workspaceDir,
-      command: 'sh',
-      args: [
-        '-c',
-        _usageWrapperScript(usageOut),
-        'grid-claude',
-        'claude',
-        ...claudeArgs,
-      ],
-      lifecycle: Lifecycle.oneTurn,
-    );
-  }
-
-  @override
-  StepSignal interpret(RuntimeEvent event) => jobSignal(event);
-}
-
 /// The `sh -c` script that captures a harness run's usage: ensure the telemetry
 /// dir, then `exec` the claude argv (passed as positionals `"$@"`) with its
 /// stdout redirected to [usageOut]. `exec` (not a pipe) preserves the child's
@@ -628,125 +405,7 @@ const Map<String, AgentEnvironment> kBuiltinEnvironments = {
 
 /// The station-default environment registry — the five builtins as `builtins`,
 /// no custom authoring (a station/substation adds `custom` at its `HarnessProvider`).
-/// Replaces `buildAgentHarnessRegistry` (bead `pow-ebf.3` reserved
+/// The station-default arming (bead `pow-ebf.3` reserved
 /// `EnvironmentRegistry.builtins` for exactly this).
 EnvironmentRegistry buildBuiltinEnvironmentRegistry() =>
     const EnvironmentRegistry(custom: {}, builtins: kBuiltinEnvironments);
-
-/// `copilot` — GitHub Copilot CLI: provider-managed (auth rides `gh`), print
-/// mode, tools allowed headless. Brief transport: argv. (Exact flag shape
-/// confirmed at the live arm — the human gate; the SEAM is what this pass
-/// ships.)
-///
-/// Usage-telemetry SKIP (FT-2): the Copilot CLI exposes no confirmed JSON usage
-/// surface, so [usageOut] is ignored — claude is the operative harness for the
-/// code circuit's runs. Wire capture here once its flag shape is confirmed.
-class CopilotHarness implements AgentHarness {
-  /// Const-constructible.
-  const CopilotHarness();
-
-  @override
-  bool supports(ModelTarget target) => target is ProviderManaged;
-
-  @override
-  RuntimeConfig spawnFor({
-    required AgentConfig config,
-    required AgentBrief brief,
-    required Workspace workspace,
-    String? usageOut,
-  }) {
-    final model = config.params['model'];
-    return RuntimeConfig(
-      workDir: workspace.workspaceDir,
-      command: 'copilot',
-      args: [
-        if (model != null) ...['--model', model],
-        '--allow-all-tools',
-        '-p',
-        brief.render(),
-      ],
-      lifecycle: Lifecycle.oneTurn,
-    );
-  }
-
-  @override
-  StepSignal interpret(RuntimeEvent event) => jobSignal(event);
-}
-
-/// `pi` — the python coding agent, over an endpoint target (llama.cpp /
-/// swift-infer via the OpenAI-compatible env). Brief transport: argv. (Exact
-/// flag shape confirmed at the live arm.)
-///
-/// Usage-telemetry SKIP (FT-2): no confirmed JSON usage surface, so [usageOut]
-/// is ignored (claude is the operative harness for the code circuit's runs).
-class PiHarness implements AgentHarness {
-  /// Const-constructible.
-  const PiHarness();
-
-  @override
-  bool supports(ModelTarget target) =>
-      target is OpenAiCompatible || target is SwiftInfer;
-
-  @override
-  RuntimeConfig spawnFor({
-    required AgentConfig config,
-    required AgentBrief brief,
-    required Workspace workspace,
-    String? usageOut,
-  }) {
-    final model = config.params['model'];
-    return RuntimeConfig(
-      workDir: workspace.workspaceDir,
-      command: 'pi',
-      args: [
-        if (model != null) ...['--model', model],
-        '-p',
-        brief.render(),
-      ],
-      env: _modelTargetEnv(config.target),
-      lifecycle: Lifecycle.oneTurn,
-    );
-  }
-
-  @override
-  StepSignal interpret(RuntimeEvent event) => jobSignal(event);
-}
-
-/// `opencode` — provider-pluggable: managed auth or an OpenAI-compatible
-/// endpoint (llama.cpp). Brief transport: argv (`run`). (Exact flag shape
-/// confirmed at the live arm.)
-///
-/// Usage-telemetry SKIP (FT-2): no confirmed JSON usage surface, so [usageOut]
-/// is ignored (claude is the operative harness for the code circuit's runs).
-class OpencodeHarness implements AgentHarness {
-  /// Const-constructible.
-  const OpencodeHarness();
-
-  @override
-  bool supports(ModelTarget target) =>
-      target is ProviderManaged || target is OpenAiCompatible;
-
-  @override
-  RuntimeConfig spawnFor({
-    required AgentConfig config,
-    required AgentBrief brief,
-    required Workspace workspace,
-    String? usageOut,
-  }) {
-    final model = config.params['model'];
-    return RuntimeConfig(
-      workDir: workspace.workspaceDir,
-      command: 'opencode',
-      args: [
-        'run',
-        if (model != null) ...['--model', model],
-        brief.render(),
-      ],
-      env: _modelTargetEnv(config.target),
-      lifecycle: Lifecycle.oneTurn,
-    );
-  }
-
-  @override
-  StepSignal interpret(RuntimeEvent event) => jobSignal(event);
-}
