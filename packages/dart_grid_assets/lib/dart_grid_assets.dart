@@ -12,4 +12,6 @@ export 'src/dart/dart_command.dart';
 export 'src/dart/dart_domain.dart';
 export 'src/dart/dart_link_service.dart';
 export 'src/dart/pub_links.dart';
+export 'src/dart/release_command.dart';
+export 'src/dart/release_service.dart';
 export 'src/domain/domain_envelope.dart';

@@ -208,6 +208,7 @@ void main() {
       'gate-medicine': {'runner', 'gridHome'},
       'harvest-review': {'runner'},
       'intake-grooming': <String>{},
+      'release': {'runner'},
     };
 
     test(

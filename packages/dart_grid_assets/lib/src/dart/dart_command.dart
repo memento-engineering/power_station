@@ -16,12 +16,18 @@ import 'package:args/command_runner.dart';
 
 import 'dart_link_service.dart';
 import 'pub_links.dart';
+import 'release_command.dart';
+import 'release_service.dart';
 
 /// `dart` — the DART domain umbrella command (subcommands carry the verbs).
 class DartCommand extends Command<int> {
   /// Creates the umbrella with its subcommands.
-  DartCommand({DartLinkService service = const DartLinkService()}) {
+  DartCommand({
+    DartLinkService service = const DartLinkService(),
+    ReleaseService releaseService = const ReleaseService(),
+  }) {
     addSubcommand(DartLinkCommand(service: service));
+    addSubcommand(ReleaseCommand(service: releaseService));
   }
 
   @override
