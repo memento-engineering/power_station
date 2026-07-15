@@ -104,13 +104,7 @@ class UsageReport {
     if (content == null) return null;
     final trimmed = content.trim();
     if (trimmed.isEmpty) return null;
-    Object? decoded;
-    try {
-      decoded = jsonDecode(trimmed);
-    } catch (_) {
-      return null; // not JSON — fail-safe omit.
-    }
-    final envelope = _resultObject(decoded);
+    final envelope = _resultObject(_decode(trimmed));
     if (envelope == null) return null;
     final rawUsage = envelope['usage'];
     final usage = rawUsage is Map ? rawUsage : const <dynamic, dynamic>{};
@@ -170,6 +164,28 @@ String? readEnvelopeResultText(String workspaceDir, String nodePath) {
     return (result is String && result.trim().isNotEmpty) ? result : null;
   } catch (_) {
     return null; // any I/O or decode surprise — fail-safe omit.
+  }
+}
+
+/// Decodes harness usage output: a single JSON object/array (claude
+/// `--output-format json`) OR a JSONL event stream (codex `exec --json`, one JSON
+/// object per line). FAIL-SAFE — non-JSON, or a JSONL with any non-JSON line,
+/// yields `null` (telemetry never throws; the FT-2 property).
+Object? _decode(String trimmed) {
+  try {
+    return jsonDecode(trimmed);
+  } catch (_) {
+    final events = <Object?>[];
+    for (final line in const LineSplitter().convert(trimmed)) {
+      final t = line.trim();
+      if (t.isEmpty) continue;
+      try {
+        events.add(jsonDecode(t));
+      } catch (_) {
+        return null; // a non-JSON line — not JSONL either; fail-safe omit.
+      }
+    }
+    return events.isEmpty ? null : events;
   }
 }
 

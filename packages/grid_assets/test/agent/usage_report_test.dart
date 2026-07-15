@@ -71,6 +71,22 @@ void main() {
     });
   });
 
+  group('FT-2 UsageReport.tryParse — codex exec --json JSONL', () {
+    const codexJsonl = '{"type":"thread.started","thread_id":"019f"}\n'
+        '{"type":"turn.started"}\n'
+        '{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"OK"}}\n'
+        '{"type":"turn.completed","usage":{"input_tokens":13574,"cached_input_tokens":8960,"output_tokens":5,"reasoning_output_tokens":0}}\n';
+
+    test('codex exec --json JSONL usage parses (FT-2 for codex)', () {
+      final r = UsageReport.tryParse(codexJsonl)!;
+      expect(r.tokensIn, 13574);
+      expect(r.tokensOut, 5);
+      expect(r.costUsd, isNull); // codex (ChatGPT auth) reports no cost
+      expect(r.model, isNull); // codex has no modelUsage attribution
+      expect(r.toResultFields(), {'tokensIn': '13574', 'tokensOut': '5'});
+    });
+  });
+
   group('FT-2 UsageReport.tryParse — fail-safe (never throws, omits fields)', () {
     test('null / empty / whitespace content ⇒ null', () {
       expect(UsageReport.tryParse(null), isNull);
