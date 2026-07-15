@@ -34,8 +34,8 @@
 ///     explorers) joins as a third role at the cheap tier.")
 ///
 /// **The CITE-THE-OFFENCE gate.** The route holds a bead ONLY on a violation that
-/// NAMES its standard — a ratified ADR/amendment, or an applicable SKILL's
-/// instructions ([ViolationKind]). Three rules keep it honest, and each is a
+/// NAMES its standard — a RATIFIED ADR/amendment, or an applicable SKILL's
+/// instructions ([ViolationKind]). These rules keep it honest, and each is a
 /// clause of [gatesTheBead]:
 ///  - **no citation, no hold.** A finding with an empty `standard` is a VIBE. It
 ///    can never gate; it rides the dossier as a FLAG.
@@ -43,6 +43,12 @@
 ///    from X because Y") passes — a considered departure is not an offender, and
 ///    it is judged downstream by `adr-alignment`. Only an UNWITTING contradiction
 ///    gates.
+///  - **intent, not presence.** A finding the bead's own plan/acceptance REMOVES
+///    (the bead IS the fix) passes — discovery runs pre-specify, so the offending
+///    text is necessarily still present.
+///  - **ratified-only holds.** A [ViolationKind.decision] gates only on a RATIFIED
+///    standard; a PENDING ADR-0000 amendment is ADVISORY and rides as a FLAG,
+///    never a hold (the 2026-07-14 register foot).
 ///  - **a pattern needs a precedent.** A [ViolationKind.pattern] deviation gates
 ///    only when the lens NAMES the precedent it deviates from; otherwise it is a
 ///    FLAG in the ask, never a hold.
