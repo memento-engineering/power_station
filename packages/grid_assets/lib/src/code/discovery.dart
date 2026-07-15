@@ -1322,16 +1322,25 @@ class DiscoveryLensCapability extends ProcessCapability {
       ..writeln()
       ..writeln('## What counts as an OFFENCE (the gate is CITE-THE-OFFENCE)')
       ..writeln(
-        'The citable standard is: a ratified ADR under `docs/adr/` (the '
-        'register\'s ADR-0000 is the living AI-decision register — its pending '
-        '`A<n>` amendments BIND too), or an applicable SKILL\'s instructions. '
-        'Skills TEACH how; ADRs RATIFY the specific.',
+        'The citable standard is: a RATIFIED ADR under `docs/adr/`, or a RATIFIED '
+        'ADR-0000 `A<n>` amendment (its Status line reads Ratified), or an '
+        'applicable SKILL\'s instructions. Skills TEACH how; ADRs RATIFY the '
+        'specific.',
+      )
+      ..writeln(
+        '- **RATIFIED-ONLY HOLDS.** A PENDING ADR-0000 amendment (Status: '
+        'pending) is ADVISORY, NOT binding: cite it if the bead contradicts it, '
+        'but set `"ratified": false` — it rides to the architect as a flag for '
+        'the `adr-alignment` lane and NEVER holds the bead. Set `"ratified": '
+        'true` ONLY for a ratified ADR or an amendment whose Status is Ratified. '
+        '(A `skill` or `pattern` citation ignores this field.)',
       )
       ..writeln(
         '- You MUST cite the STANDARD and the CLAUSE, and the clause MUST EXIST: '
-        'quote it VERBATIM from the file you actually read. A citation you cannot '
-        'quote is not a citation — the register is edited and amendments are '
-        'REMOVED, so an `A<n>` you remember is not an `A<n>` that exists. A '
+        'quote it VERBATIM from the file you actually read, INCLUDING its Status '
+        'line so ratified-vs-pending is grounded, not guessed. A citation you '
+        'cannot quote is not a citation — the register is edited and amendments '
+        'are REMOVED, so an `A<n>` you remember is not an `A<n>` that exists. A '
         'concern you cannot cite is NOT an offence: report it as a violation with '
         'an EMPTY `standard` and it rides to the architect as a flag, never held '
         'against the bead. Do not inflate a preference into a citation.',
@@ -1341,6 +1350,14 @@ class DiscoveryLensCapability extends ProcessCapability {
         'departure ("this departs from X because Y"), set `"acknowledged": true`. '
         'A considered departure is NOT an offence — it passes. Only an UNWITTING '
         'contradiction holds the bead.',
+      )
+      ..writeln(
+        '- **INTENT, NOT PRESENCE**: a bead whose OWN plan/acceptance/description '
+        'REMOVES this cited offence IS the fix — set `"removesOffence": true` and '
+        'it passes. Discovery runs BEFORE the bead is built, so a '
+        'fix-the-violation bead still HAS the offending text present; grade the '
+        'bead\'s STANCE, not the text. Set it false when the bead LEAVES or ADDS '
+        'the offence.',
       )
       ..writeln(
         '- A `pattern` deviation holds the bead ONLY if you NAME the precedent it '
@@ -1356,9 +1373,10 @@ class DiscoveryLensCapability extends ProcessCapability {
         '"source":"<file / bead / ADR clause>"}],'
         '"violations":[{"kind":"decision|skill|pattern",'
         '"standard":"<docs/adr/ADR-0000-ai-decision-register.md A17(4)>",'
-        '"quote":"<the clause, verbatim>",'
+        '"quote":"<the clause, verbatim, including its Status line>",'
         '"contradiction":"<what this bead does that contradicts it>",'
-        '"acknowledged":false,"precedent":""}]}',
+        '"acknowledged":false,"ratified":false,"removesOffence":false,'
+        '"precedent":""}]}',
       )
       ..writeln()
       ..writeln(
@@ -1395,12 +1413,14 @@ String lensBrief(String lens) => switch (lens) {
         'NAMED precedent in the tree.',
   kDecisionLens =>
     'DECISION CONTEXT. Read `docs/adr/` (every ADR, and every `A<n>` amendment of '
-        'the ADR-0000 register — pending amendments BIND) and the skills that '
-        'apply to this work. Report the decisions the architect must honour, and '
-        'CITE any this bead contradicts. This is the lens the violation gate is '
-        'mostly built on: be precise, and be QUOTED — grep the heading before you '
-        'cite it, because an amendment that was removed from the register does '
-        'not bind anything.',
+        'the ADR-0000 register) and the skills that apply to this work. Report '
+        'the decisions the architect must honour, and CITE any this bead '
+        'contradicts. Only a RATIFIED standard can HOLD the bead: a PENDING '
+        'amendment is ADVISORY (set `"ratified": false` and it rides as a flag). '
+        'This is the lens the violation gate is mostly built on: be precise, and '
+        'be QUOTED — grep the heading AND its Status line before you cite it, '
+        'because an amendment that was removed from the register does not bind '
+        'anything.',
   kPriorArtLens =>
     'PRIOR ART. What has already been done, decided, or attempted here? Read the '
         'prior-art hits above, the git history of the surfaces the bead names, '

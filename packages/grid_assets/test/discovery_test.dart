@@ -403,6 +403,24 @@ void main() {
         expect(RegExp('writeAsStringSync').allMatches(source), hasLength(1));
       },
     );
+
+    test(
+      'the lens prompt teaches RATIFIED-ONLY and INTENT-NOT-PRESENCE, and its '
+      'JSON shape carries the two new fields',
+      () {
+        final prompt = const DiscoveryLensCapability().buildLensPrompt(
+          bead: workBead('tg-1'),
+          lens: kDecisionLens,
+          nodePath: 'tg-1/spec_review/discovery/$kDecisionLens',
+          workspaceDir: '/w/tg-1',
+        );
+        expect(prompt, contains('RATIFIED-ONLY HOLDS'));
+        expect(prompt, contains('INTENT, NOT PRESENCE'));
+        expect(prompt, contains('"ratified":false'));
+        expect(prompt, contains('"removesOffence":false'));
+        expect(prompt, isNot(contains('amendments BIND too')));
+      },
+    );
   });
 }
 
