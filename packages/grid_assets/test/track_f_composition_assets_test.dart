@@ -292,33 +292,33 @@ void main() {
 
   group('HarnessProvider — station-scoped harness provision', () {
     test('provides the default registry + ambient AgentConfig below it', () {
-      AgentHarnessRegistry? reg;
+      EnvironmentRegistry? reg;
       AgentConfig? cfg;
       mount(
         HarnessProvider(
           child: _Probe((ctx) {
-            reg = ctx.getInheritedSeedOfExactType<AgentHarnessRegistry>();
+            reg = ctx.getInheritedSeedOfExactType<EnvironmentRegistry>();
             cfg = ctx.getInheritedSeedOfExactType<AgentConfig>();
           }),
         ),
       );
       expect(reg, isNotNull);
       // The default is the first-party set (claude at minimum).
-      expect(reg!.ids, contains('claude'));
+      expect(reg!.names, contains('claude'));
       expect(cfg, const AgentConfig());
     });
 
     test('a custom registry + config flow through', () {
       const custom = AgentConfig(harness: 'opencode');
-      AgentHarnessRegistry? reg;
+      EnvironmentRegistry? reg;
       AgentConfig? cfg;
-      final registry = buildAgentHarnessRegistry();
+      final registry = buildBuiltinEnvironmentRegistry();
       mount(
         HarnessProvider(
           registry: registry,
           config: custom,
           child: _Probe((ctx) {
-            reg = ctx.getInheritedSeedOfExactType<AgentHarnessRegistry>();
+            reg = ctx.getInheritedSeedOfExactType<EnvironmentRegistry>();
             cfg = ctx.getInheritedSeedOfExactType<AgentConfig>();
           }),
         ),
@@ -374,7 +374,7 @@ void main() {
         'harness registry AND the substation scope', () {
       SourceControl? sc;
       DeliveryMethod? delivery;
-      AgentHarnessRegistry? reg;
+      EnvironmentRegistry? reg;
       sdk.SubstationScope? scope;
       mount(
         sdk.RawAssetGrid(
@@ -405,7 +405,7 @@ void main() {
                                   ?.delivery;
                               reg = ctx
                                   .getInheritedSeedOfExactType<
-                                      AgentHarnessRegistry>();
+                                      EnvironmentRegistry>();
                               scope = sdk.SubstationScope.maybeOf(ctx);
                             }),
                           ),
@@ -428,7 +428,7 @@ void main() {
       );
       // Station-scoped: the machine's harness registry reaches the leaf.
       expect(reg, isNotNull);
-      expect(reg!.ids, contains('claude'));
+      expect(reg!.names, contains('claude'));
       // The substation scope the asset resolved against.
       expect(scope, const sdk.SubstationScope(name: 'the_grid', root: '/work/the_grid', prefix: 'the_grid'));
     });

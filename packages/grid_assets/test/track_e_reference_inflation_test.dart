@@ -286,34 +286,24 @@ void main() {
       final brief = buildAgentBrief(_poisonedBead(), _activation());
       final ws = _activation();
 
-      // (harness impl, a legal config for it). `pi` reaches only endpoint
-      // targets, so it gets an OpenAI-compatible one; the rest are managed.
-      final cases = <String, ({AgentHarness harness, AgentConfig config})>{
-        'claude': (harness: const ClaudeHarness(), config: const AgentConfig()),
-        'copilot': (
-          harness: const CopilotHarness(),
-          config: const AgentConfig(harness: 'copilot'),
-        ),
-        'pi': (
-          harness: const PiHarness(),
-          config: AgentConfig(
-            harness: 'pi',
-            target: OpenAiCompatible(Uri.parse('http://127.0.0.1:8080')),
-          ),
-        ),
-        'opencode': (
-          harness: const OpencodeHarness(),
-          config: const AgentConfig(harness: 'opencode'),
-        ),
+      // (builtin environment name, the site endpoint it reaches). `pi` reaches
+      // only endpoint targets, so it gets an OpenAI-compatible one; the rest are
+      // provider-managed (no endpoint).
+      final cases = <String, Uri?>{
+        'claude': null,
+        'copilot': null,
+        'pi': Uri.parse('http://127.0.0.1:8080'),
+        'opencode': null,
       };
 
       for (final entry in cases.entries) {
         test('${entry.key}: workDir == workspace.workspaceDir; no bead path in '
             'the invocation', () {
-          final cfg = entry.value.harness.spawnFor(
-            config: entry.value.config,
+          final cfg = spawnFor(
+            environment: kBuiltinEnvironments[entry.key]!,
             brief: brief,
             workspace: ws,
+            endpoint: entry.value,
           );
           expect(cfg.workDir, ws.workspaceDir);
           expect(cfg.workDir, '/real/activation/worktree/tg-m2q');
@@ -324,8 +314,8 @@ void main() {
 
       test('claude usage-capture wrapper keeps workDir at the activation (FT-2)',
           () {
-        final cfg = const ClaudeHarness().spawnFor(
-          config: const AgentConfig(),
+        final cfg = spawnFor(
+          environment: kBuiltinEnvironments['claude']!,
           brief: brief,
           workspace: ws,
           usageOut: usageReportPath('tg-m2q/agent'),
@@ -336,10 +326,10 @@ void main() {
         expect(cfg.args.join('\n'), isNot(contains(_poison)));
       });
 
-      test('the standard registry wires exactly the four harnesses this fence '
+      test('the standard registry wires exactly the five environments this fence '
           'covers', () {
-        expect(buildAgentHarnessRegistry().ids.toSet(),
-            {'claude', 'copilot', 'pi', 'opencode'});
+        expect(buildBuiltinEnvironmentRegistry().names.toSet(),
+            {'claude', 'copilot', 'pi', 'opencode', 'codex'});
       });
     });
 

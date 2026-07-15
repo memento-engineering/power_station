@@ -51,7 +51,7 @@ FakeTreeContext _ctx(Bead b, AgentConfig config) => FakeTreeContext(
       branch: 'grid/tg-1',
     ),
     AgentConfig: config,
-    AgentHarnessRegistry: buildAgentHarnessRegistry(),
+    EnvironmentRegistry: buildBuiltinEnvironmentRegistry(),
   },
 );
 
@@ -286,7 +286,7 @@ void main() {
         final metadata = row.beadModel == null
             ? const <String, dynamic>{}
             : _beadPinning(row.beadModel!).metadata;
-        final registry = buildAgentHarnessRegistry();
+        final registry = buildBuiltinEnvironmentRegistry();
         for (final (role, expected) in [
           (AgentRole.build, row.build),
           (AgentRole.grade, row.grade),
@@ -317,7 +317,7 @@ void main() {
             ambient: const AgentConfig(),
             beadMetadata: _beadPinning(blank).metadata,
             stepParams: const {},
-            registry: buildAgentHarnessRegistry(),
+            registry: buildBuiltinEnvironmentRegistry(),
           ),
           throwsA(
             isA<StateError>().having(
