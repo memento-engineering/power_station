@@ -181,6 +181,8 @@ class DiscoveryFinding {
     required this.quote,
     required this.contradiction,
     this.acknowledged = false,
+    this.ratified = false,
+    this.removesOffence = false,
     this.precedent = '',
   });
 
@@ -201,6 +203,19 @@ class DiscoveryFinding {
   /// Y"). A declared departure PASSES.
   final bool acknowledged;
 
+  /// Whether the cited standard is RATIFIED — a ratified ADR, or an ADR-0000
+  /// amendment whose Status is Ratified. For [ViolationKind.decision] ONLY: a
+  /// PENDING amendment (`false`) is ADVISORY and can never HOLD (the 2026-07-14
+  /// register-foot ratification). Default `false` — fail-open on holds (A17(3): a
+  /// false HOLD is strictly worse than a wasted round).
+  final bool ratified;
+
+  /// Whether the bead's OWN plan/acceptance REMOVES this cited offence — the bead
+  /// IS the fix. `true` ⇒ it PASSES (INTENT, NOT PRESENCE): discovery runs
+  /// pre-specify, so a fix-the-violation bead necessarily still HAS the offending
+  /// text present. Default `false`.
+  final bool removesOffence;
+
   /// For [ViolationKind.pattern] ONLY: the precedent deviated from
   /// (`lib/src/code/committee.dart:CriticCapability`). Empty ⇒ a FLAG, never a
   /// hold.
@@ -213,6 +228,8 @@ class DiscoveryFinding {
     'quote': quote,
     'contradiction': contradiction,
     'acknowledged': acknowledged,
+    'ratified': ratified,
+    'removesOffence': removesOffence,
     'precedent': precedent,
   };
 
@@ -230,6 +247,8 @@ class DiscoveryFinding {
       quote: (json['quote'] as String?)?.trim() ?? '',
       contradiction: contradiction,
       acknowledged: json['acknowledged'] == true,
+      ratified: json['ratified'] == true,
+      removesOffence: json['removesOffence'] == true,
       precedent: (json['precedent'] as String?)?.trim() ?? '',
     );
   }
