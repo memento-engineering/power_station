@@ -149,7 +149,9 @@ String discoveryDossierPath(String workspaceDir) =>
 /// What KIND of standard a violation cites. Sealed by the enum — consumed with an
 /// exhaustive `switch` (house style), so a new kind cannot skip the gate matrix.
 enum ViolationKind {
-  /// A ratified ADR, or a pending ADR-0000 `A<n>` amendment (they bind too).
+  /// A ratified ADR, or an ADR-0000 `A<n>` amendment whose Status is Ratified. A
+  /// PENDING amendment is ADVISORY — it can never HOLD (2026-07-14 register foot);
+  /// it rides as a flag for `adr-alignment`.
   decision,
 
   /// An applicable SKILL's instructions (skills TEACH how; ADRs RATIFY the
@@ -589,12 +591,27 @@ class DiscoveryDossier {
 ///
 ///  1. NO CITATION, NO HOLD. An empty `standard` is a vibe; a vibe never gates.
 ///  2. THE DEPARTURE CLAUSE. A departure the bead DECLARES is not an offence.
-///  3. A PATTERN NEEDS A PRECEDENT. Absent one it is a FLAG, never a hold.
+///  3. INTENT, NOT PRESENCE. A bead whose plan/acceptance REMOVES the cited
+///     offence IS the fix — it passes. (The CLASS-1 false-positive: a
+///     fix-the-violation bead necessarily HAS the offending text present at
+///     discovery time, since discovery runs pre-specify.)
+///  4. RATIFIED-ONLY HOLDS. A `decision` gates only when the cited standard is
+///     RATIFIED (a ratified ADR, or an ADR-0000 amendment whose Status is
+///     Ratified). A PENDING amendment is ADVISORY — it rides as a FLAG, never a
+///     hold (the CLASS-2 false-positive). A `skill` always gates when cited; a
+///     `pattern` needs a named precedent.
+///
+/// Ratified basis: the 2026-07-14 register-foot ratification ("DISCOVERY GATE:
+/// pending amendments are ADVISORY, not binding") supersedes A21(2)'s "pending
+/// `A<n>` amendments … they bind" clause, and adds the intent grade per A21's own
+/// principle "only an unwitting contradiction gates".
 bool gatesTheBead(DiscoveryFinding finding) {
   if (finding.standard.trim().isEmpty) return false;
   if (finding.acknowledged) return false;
+  if (finding.removesOffence) return false;
   return switch (finding.kind) {
-    ViolationKind.decision || ViolationKind.skill => true,
+    ViolationKind.decision => finding.ratified,
+    ViolationKind.skill => true,
     ViolationKind.pattern => finding.precedent.trim().isNotEmpty,
   };
 }
