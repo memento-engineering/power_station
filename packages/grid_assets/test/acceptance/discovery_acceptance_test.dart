@@ -266,6 +266,7 @@ void main() {
                         kind: ViolationKind.decision,
                         standard: _adr,
                         ratified: true,
+                        contradicts: true,
                         quote: 'a false HOLD STALLS the governance track itself',
                         contradiction:
                             'this bead gates the track on an absent verdict',

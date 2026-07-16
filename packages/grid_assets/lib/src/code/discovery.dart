@@ -190,6 +190,7 @@ class DiscoveryFinding {
     required this.standard,
     required this.quote,
     required this.contradiction,
+    this.contradicts = false,
     this.acknowledged = false,
     this.ratified = false,
     this.removesOffence = false,
@@ -208,6 +209,17 @@ class DiscoveryFinding {
 
   /// What the bead does that contradicts it.
   final String contradiction;
+
+  /// Whether the finding POSITIVELY asserts a real, unwitting contradiction. A
+  /// lens may name a standard and quote it yet conclude there is NO conflict —
+  /// writing "None identified" / "aligned with …" prose into [contradiction]
+  /// (non-empty, so it survives [fromJson]). Such a non-finding must NEVER hold
+  /// a bead (pow-hf2: the flaky false-hold that taxed pow-ebf.3 / pow-8b3 /
+  /// pow-hf2 itself). [gatesTheBead] therefore REQUIRES this to be `true`;
+  /// absent/`false` fails OPEN (ADR-0000 A17(3): a false HOLD is strictly worse
+  /// than a wasted round, and the spec committee's `adr-alignment` lane
+  /// backstops a genuine contradiction downstream).
+  final bool contradicts;
 
   /// Whether the BEAD ITSELF declares the departure ("this departs from X because
   /// Y"). A declared departure PASSES.
@@ -237,6 +249,7 @@ class DiscoveryFinding {
     'standard': standard,
     'quote': quote,
     'contradiction': contradiction,
+    'contradicts': contradicts,
     'acknowledged': acknowledged,
     'ratified': ratified,
     'removesOffence': removesOffence,
@@ -256,6 +269,7 @@ class DiscoveryFinding {
       standard: (json['standard'] as String?)?.trim() ?? '',
       quote: (json['quote'] as String?)?.trim() ?? '',
       contradiction: contradiction,
+      contradicts: json['contradicts'] == true,
       acknowledged: json['acknowledged'] == true,
       ratified: json['ratified'] == true,
       removesOffence: json['removesOffence'] == true,
@@ -598,6 +612,11 @@ class DiscoveryDossier {
 /// Whether [finding] may HOLD the bead — the whole gate, in one predicate.
 ///
 ///  1. NO CITATION, NO HOLD. An empty `standard` is a vibe; a vibe never gates.
+///  1b. NO ASSERTED CONTRADICTION, NO HOLD. A finding must POSITIVELY assert a
+///     real conflict (`contradicts == true`). A finding that names a standard but
+///     concludes there is NO conflict — "None identified", "aligned with …" — is
+///     a non-finding and can never gate (pow-hf2). Fails OPEN: absent/`false`
+///     advises, never holds.
 ///  2. THE DEPARTURE CLAUSE. A departure the bead DECLARES is not an offence.
 ///  3. INTENT, NOT PRESENCE. A bead whose plan/acceptance REMOVES the cited
 ///     offence IS the fix — it passes. (The CLASS-1 false-positive: a
@@ -615,6 +634,7 @@ class DiscoveryDossier {
 /// principle "only an unwitting contradiction gates".
 bool gatesTheBead(DiscoveryFinding finding) {
   if (finding.standard.trim().isEmpty) return false;
+  if (!finding.contradicts) return false;
   if (finding.acknowledged) return false;
   if (finding.removesOffence) return false;
   return switch (finding.kind) {

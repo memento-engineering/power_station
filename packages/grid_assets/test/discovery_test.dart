@@ -19,6 +19,9 @@ const String _adr = 'docs/adr/ADR-0000-ai-decision-register.md A17(4)';
 DiscoveryFinding _cited({
   ViolationKind kind = ViolationKind.decision,
   String standard = _adr,
+  bool contradicts = true,
+  String contradiction =
+      'this bead adds a deterministic quality bar on human prose',
   bool acknowledged = false,
   bool ratified = true,
   bool removesOffence = false,
@@ -27,7 +30,8 @@ DiscoveryFinding _cited({
   kind: kind,
   standard: standard,
   quote: 'determinism is confined to the tier where a hold is NEVER wrong',
-  contradiction: 'this bead adds a deterministic quality bar on human prose',
+  contradiction: contradiction,
+  contradicts: contradicts,
   acknowledged: acknowledged,
   ratified: ratified,
   removesOffence: removesOffence,
@@ -76,6 +80,30 @@ void main() {
       expect(hold.reason, contains(_adr));
       expect(hold.reason, contains('DECLARE the departure'));
     });
+
+    test(
+      'a finding that asserts NO contradiction cannot gate — even cited + '
+      'ratified (pow-hf2: the "None identified" false-hold)',
+      () {
+        // The flaky lens named a ratified standard and wrote a NON-empty
+        // "no conflict" explanation into `contradiction`, but did not assert
+        // `contradicts`. It must NEVER hold the bead (fails open).
+        expect(
+          gatesTheBead(
+            _cited(
+              contradicts: false,
+              contradiction:
+                  'None identified. The bead correctly references the ADR and '
+                  'is aligned with its design.',
+            ),
+          ),
+          isFalse,
+        );
+        // The positive control: the SAME citation WITH an asserted
+        // contradiction still holds.
+        expect(gatesTheBead(_cited(contradicts: true)), isTrue);
+      },
+    );
 
     test('a violation with NO citation cannot gate — it is a FLAG', () {
       final verdict = _decide({
