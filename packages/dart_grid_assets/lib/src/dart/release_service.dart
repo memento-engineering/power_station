@@ -22,6 +22,8 @@ import 'dart:io';
 import 'package:path/path.dart' as p;
 import 'package:pub_semver/pub_semver.dart';
 
+import 'pub_links.dart';
+
 /// The class of change a release carries — the input to the version bump
 /// (genesis `publishing.md`: "Additive API, fixes, docs -> patch"; "Breaking ->
 /// minor").
@@ -36,7 +38,10 @@ enum ReleaseChange {
   fix,
 
   /// A breaking change — MINOR pre-1.0 (`0.y.z` -> `0.(y+1).0`), MAJOR from 1.0.
-  breaking;
+  breaking,
+
+  /// A breaking-release candidate — the next breaking stable base as `rc.N`.
+  rc;
 
   /// Parses a wire/flag [value]; null for an unknown one (the caller refuses
   /// rather than guessing — fail-closed, matching `PubLinkContext.parse`).
@@ -45,12 +50,19 @@ enum ReleaseChange {
     'additive' => ReleaseChange.additive,
     'fix' => ReleaseChange.fix,
     'breaking' => ReleaseChange.breaking,
+    'rc' => ReleaseChange.rc,
     _ => null,
   };
 
   /// Whether this change breaks consumers (the MINOR/MAJOR bump + the leading
   /// `Breaking:` CHANGELOG entry). docs/additive/fix are all a PATCH.
-  bool get isBreaking => this == ReleaseChange.breaking;
+  bool get isBreaking => switch (this) {
+    ReleaseChange.breaking || ReleaseChange.rc => true,
+    ReleaseChange.docs || ReleaseChange.additive || ReleaseChange.fix => false,
+  };
+
+  /// Whether this change plans a pre-release version.
+  bool get isPreRelease => this == ReleaseChange.rc;
 }
 
 /// The computed version move for a release — the result of
@@ -84,6 +96,198 @@ class ReleaseVersionPlan {
     'change': change.name,
     'requiresBreakingChangelog': requiresBreakingChangelog,
   };
+}
+
+/// The private git-tag operation's structured result.
+class ReleaseTagResult {
+  /// Wraps the tag attempt for [tag] inside [repoDir].
+  const ReleaseTagResult({
+    required this.tag,
+    required this.repoDir,
+    required this.exitCode,
+    required this.stdout,
+    required this.stderr,
+  });
+
+  /// The tag that was requested.
+  final String tag;
+
+  /// The repository directory where `git tag` ran.
+  final String repoDir;
+
+  /// The `git tag` process exit code.
+  final int exitCode;
+
+  /// The process stdout.
+  final String stdout;
+
+  /// The process stderr.
+  final String stderr;
+
+  /// True iff the tag command succeeded.
+  bool get created => exitCode == 0;
+
+  /// JSON form.
+  Map<String, dynamic> toJson() => {
+    'tag': tag,
+    'repoDir': repoDir,
+    'exitCode': exitCode,
+    'created': created,
+    'stdout': stdout,
+    'stderr': stderr,
+  };
+}
+
+/// One downstream consumer to validate against a candidate rc tag.
+class ReleaseConsumer {
+  /// Creates a consumer manifest entry.
+  const ReleaseConsumer({
+    required this.name,
+    required this.directory,
+    required this.links,
+  });
+
+  /// A human-readable consumer name for reports.
+  final String name;
+
+  /// The consumer checkout directory where commands run.
+  final String directory;
+
+  /// The producer package links to pin to the candidate rc.
+  final List<PubLink> links;
+
+  /// Parses a consumer manifest entry.
+  static ReleaseConsumer fromJson(Map<String, Object?> json) {
+    final name = json['name'];
+    final directory = json['directory'];
+    final rawLinks = json['links'];
+    if (name is! String || name.isEmpty) {
+      throw const FormatException('consumer requires a non-empty name');
+    }
+    if (directory is! String || directory.isEmpty) {
+      throw const FormatException('consumer requires a non-empty directory');
+    }
+    if (rawLinks is! List) {
+      throw const FormatException('consumer requires a links list');
+    }
+    return ReleaseConsumer(
+      name: name,
+      directory: directory,
+      links: [
+        for (final entry in rawLinks)
+          if (entry is Map)
+            PubLink.fromJson(entry.cast<String, Object?>())
+          else
+            throw const FormatException(
+              'consumer link entries must be objects',
+            ),
+      ],
+    );
+  }
+
+  /// JSON form.
+  Map<String, dynamic> toJson() => {
+    'name': name,
+    'directory': directory,
+    'links': [for (final link in links) link.toJson()],
+  };
+}
+
+/// The validation result for one consumer.
+class ConsumerValidationResult {
+  /// Wraps the analyze/test results for one consumer.
+  const ConsumerValidationResult({
+    required this.name,
+    required this.directory,
+    required this.overridePath,
+    required this.analyzeExitCode,
+    required this.testExitCode,
+    required this.stdout,
+    required this.stderr,
+  });
+
+  /// The consumer name.
+  final String name;
+
+  /// The consumer checkout directory.
+  final String directory;
+
+  /// The `pubspec_overrides.yaml` path written for the rc pin.
+  final String overridePath;
+
+  /// The `dart analyze` exit code.
+  final int analyzeExitCode;
+
+  /// The `dart test` exit code, or null when analyze failed and tests were
+  /// skipped.
+  final int? testExitCode;
+
+  /// Combined stdout from analyze and test.
+  final String stdout;
+
+  /// Combined stderr from analyze and test.
+  final String stderr;
+
+  /// True iff both analyze and test passed.
+  bool get passed => analyzeExitCode == 0 && testExitCode == 0;
+
+  /// JSON form.
+  Map<String, dynamic> toJson() => {
+    'name': name,
+    'directory': directory,
+    'overridePath': overridePath,
+    'analyzeExitCode': analyzeExitCode,
+    'testExitCode': testExitCode,
+    'passed': passed,
+    'stdout': stdout,
+    'stderr': stderr,
+  };
+
+  /// Parses a validation result emitted by the command.
+  static ConsumerValidationResult fromJson(Map<String, Object?> json) =>
+      ConsumerValidationResult(
+        name: json['name'] as String,
+        directory: json['directory'] as String,
+        overridePath: json['overridePath'] as String,
+        analyzeExitCode: json['analyzeExitCode'] as int,
+        testExitCode: json['testExitCode'] as int?,
+        stdout: json['stdout'] as String? ?? '',
+        stderr: json['stderr'] as String? ?? '',
+      );
+}
+
+/// The all-consumer validation report for a candidate rc tag.
+class ConsumerValidationReport {
+  /// Creates a report for [rcTag].
+  const ConsumerValidationReport({required this.rcTag, required this.results});
+
+  /// The candidate rc tag that consumers resolved against.
+  final String rcTag;
+
+  /// One result per consumer.
+  final List<ConsumerValidationResult> results;
+
+  /// True iff there is at least one consumer and every consumer passed.
+  bool get allPassed => results.isNotEmpty && results.every((r) => r.passed);
+
+  /// JSON form.
+  Map<String, dynamic> toJson() => {
+    'rcTag': rcTag,
+    'allPassed': allPassed,
+    'results': [for (final result in results) result.toJson()],
+  };
+
+  /// Parses a validation report emitted by the command.
+  static ConsumerValidationReport fromJson(Map<String, Object?> json) =>
+      ConsumerValidationReport(
+        rcTag: json['rcTag'] as String,
+        results: [
+          for (final entry in json['results'] as List)
+            ConsumerValidationResult.fromJson(
+              (entry as Map).cast<String, Object?>(),
+            ),
+        ],
+      );
 }
 
 /// One scrub-gate offence: a [file] + 1-based [line] where an internal
@@ -328,11 +532,40 @@ class ReleaseService {
         'not a semantic version: ${e.message}',
       );
     }
-    final next = switch (change.isBreaking) {
-      false => now.nextPatch,
-      true => now.major == 0 ? now.nextMinor : now.nextMajor,
+    final next = switch (change) {
+      ReleaseChange.docs ||
+      ReleaseChange.additive ||
+      ReleaseChange.fix => now.nextPatch,
+      ReleaseChange.breaking => now.major == 0 ? now.nextMinor : now.nextMajor,
+      ReleaseChange.rc => _nextRc(now),
     };
     return ReleaseVersionPlan(current: now, next: next, change: change);
+  }
+
+  Version _nextRc(Version now) {
+    if (now.preRelease.isEmpty) {
+      final stableBase = now.major == 0 ? now.nextMinor : now.nextMajor;
+      return Version(
+        stableBase.major,
+        stableBase.minor,
+        stableBase.patch,
+        pre: 'rc.1',
+      );
+    }
+    final pre = now.preRelease;
+    if (pre.length == 2 && pre[0] == 'rc' && pre[1] is int) {
+      return Version(
+        now.major,
+        now.minor,
+        now.patch,
+        pre: 'rc.${(pre[1] as int) + 1}',
+      );
+    }
+    throw ArgumentError.value(
+      now.toString(),
+      'current',
+      'pre-release current must be an rc.N version to plan the next rc',
+    );
   }
 
   /// The per-package git tag `<package>-v<version>` (genesis `publishing.md`:
@@ -340,6 +573,96 @@ class ReleaseService {
   /// repo-level `v0.1.1` (the anti-pattern the skill migrates away from).
   String tagFor({required String package, required String version}) =>
       '$package-v$version';
+
+  /// Cuts a private git release [tag] in [repoDir].
+  Future<ReleaseTagResult> createGitTag({
+    required String repoDir,
+    required String tag,
+  }) async {
+    final result = await _run('git', ['tag', tag], workingDirectory: repoDir);
+    return ReleaseTagResult(
+      tag: tag,
+      repoDir: repoDir,
+      exitCode: result.exitCode,
+      stdout: result.stdout.toString(),
+      stderr: result.stderr.toString(),
+    );
+  }
+
+  /// Pins every [consumers] link to [rcTag], writes `pubspec_overrides.yaml`,
+  /// then runs `dart analyze && dart test` per consumer.
+  Future<ConsumerValidationReport> validateConsumers({
+    required String rcTag,
+    required List<ReleaseConsumer> consumers,
+  }) async {
+    final results = <ConsumerValidationResult>[];
+    for (final consumer in consumers) {
+      final pinned = PubLinkConfig(
+        links: [
+          for (final link in consumer.links)
+            PubLink(
+              package: link.package,
+              devPath: link.devPath,
+              hosted: link.hosted,
+              gitUrl: link.gitUrl,
+              gitRef: rcTag,
+            ),
+        ],
+      );
+      final overrides = pubspecOverridesFor(pinned, PubLinkContext.stable);
+      if (overrides == null) {
+        throw StateError(
+          'consumer "${consumer.name}" has no git-pinned links to validate '
+          'against $rcTag',
+        );
+      }
+      final overrideFile = File(
+        p.join(consumer.directory, 'pubspec_overrides.yaml'),
+      );
+      overrideFile.writeAsStringSync(overrides);
+      final analyze = await _run('dart', const [
+        'analyze',
+      ], workingDirectory: consumer.directory);
+      ProcessResult? test;
+      if (analyze.exitCode == 0) {
+        test = await _run('dart', const [
+          'test',
+        ], workingDirectory: consumer.directory);
+      }
+      results.add(
+        ConsumerValidationResult(
+          name: consumer.name,
+          directory: consumer.directory,
+          overridePath: overrideFile.path,
+          analyzeExitCode: analyze.exitCode,
+          testExitCode: test?.exitCode,
+          stdout: '${analyze.stdout}\n${test?.stdout ?? ''}',
+          stderr: '${analyze.stderr}\n${test?.stderr ?? ''}',
+        ),
+      );
+    }
+    return ConsumerValidationReport(rcTag: rcTag, results: results);
+  }
+
+  /// Cuts [stableTag] only after [validation] reports every consumer passed.
+  Future<ReleaseTagResult> promoteTag({
+    required String repoDir,
+    required String stableTag,
+    required ConsumerValidationReport validation,
+  }) async {
+    if (!validation.allPassed) {
+      final failed = validation.results
+          .where((result) => !result.passed)
+          .map((result) => result.name)
+          .join(', ');
+      throw StateError(
+        failed.isEmpty
+            ? 'promote refused: no passing consumer validation results'
+            : 'promote refused: failing consumers: $failed',
+      );
+    }
+    return createGitTag(repoDir: repoDir, tag: stableTag);
+  }
 
   /// Scans one file's [content] for internal refs, line by line — the pure
   /// heart of the scrub gate. A line carrying `A2UI` is exempt WHOLE (the
@@ -417,7 +740,10 @@ class ReleaseService {
         dependents[dep]!.add(node);
       }
     }
-    final ready = [for (final n in nodes) if (indegree[n] == 0) n]..sort();
+    final ready = [
+      for (final n in nodes)
+        if (indegree[n] == 0) n,
+    ]..sort();
     final order = <String>[];
     while (ready.isNotEmpty) {
       final node = ready.removeAt(0);
@@ -432,7 +758,10 @@ class ReleaseService {
       }
     }
     if (order.length != nodes.length) {
-      final cyclic = [for (final n in nodes) if (!order.contains(n)) n];
+      final cyclic = [
+        for (final n in nodes)
+          if (!order.contains(n)) n,
+      ];
       throw StateError(
         'publish order has a dependency cycle among: ${cyclic.join(', ')}',
       );
@@ -447,11 +776,11 @@ class ReleaseService {
     required String packageDir,
     String package = '',
   }) async {
-    final result = await _run(
-      'dart',
-      const ['pub', 'publish', '--dry-run'],
-      workingDirectory: packageDir,
-    );
+    final result = await _run('dart', const [
+      'pub',
+      'publish',
+      '--dry-run',
+    ], workingDirectory: packageDir);
     final text = '${result.stdout}\n${result.stderr}';
     final match = _warningCount.firstMatch(text);
     final warningCount = match != null
