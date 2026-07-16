@@ -14,8 +14,9 @@
 /// declared), [PubLinkContext.worktree] (a deep per-bead worktree at
 /// `.grid/worktrees/<sub>/<bead>` — relative `../` paths break there, so
 /// declared paths are ABSOLUTIZED against the station's dev root, fail-closed
-/// when they can't be), and [PubLinkContext.stable] (no overrides — the
-/// pubspec's own hosted/git refs stand).
+/// when they can't be), and [PubLinkContext.stable] (git-pinned links emit
+/// `git: {url, ref}` overrides — ADR-0003 D2; a link with no git pin resolves
+/// from its own `pubspec.yaml` pin).
 ///
 /// Hand-written immutable value types + JSON (the grid_assets payload style —
 /// `DispatchCommand`/`LaunchSpec`; dependency-light, no codegen).
@@ -34,7 +35,8 @@ enum PubLinkContext {
   /// `.grid/worktrees/<sub>/<bead>`).
   worktree,
 
-  /// Stable: no overrides — the pubspec's hosted/git refs stand.
+  /// Stable: git-pinned links emit `git: {url, ref}` overrides (ADR-0003 D2);
+  /// a link with no git pin resolves from its own `pubspec.yaml` pin (D5).
   stable;
 
   /// Parses a wire/flag [value]; null for an unknown one (fail-closed — the
@@ -48,8 +50,9 @@ enum PubLinkContext {
 }
 
 /// One package's declared linkage: the dev-time [devPath] source (the override
-/// applied in dev/worktree contexts) and the informational stable pins
-/// ([hosted] / [gitUrl]+[gitRef]) that stand when no override is applied.
+/// applied in dev/worktree contexts), the informational [hosted] pin, and the
+/// [gitUrl]+[gitRef] git-tag pin the stable context emits as a `git:` override
+/// (ADR-0003 D2).
 @immutable
 class PubLink {
   /// Creates the linkage declaration for [package].
@@ -72,11 +75,13 @@ class PubLink {
   /// proper; recorded here so the intent is complete/auditable).
   final String? hosted;
 
-  /// The stable git url (reserved — a git-ref stable pin; not applied as an
-  /// override in this prototype).
+  /// The stable git url — applied in [PubLinkContext.stable] as a
+  /// `git: {url, ref}` override (ADR-0003 D2). Pairs with [gitRef]: both, or
+  /// the stable emitter refuses LOUDLY.
   final String? gitUrl;
 
-  /// The stable git ref (reserved, with [gitUrl]).
+  /// The stable git ref (the git tag pinned in [PubLinkContext.stable]). Pairs
+  /// with [gitUrl]: both, or the stable emitter refuses LOUDLY.
   final String? gitRef;
 
   /// JSON form (the envelope payload wire).
