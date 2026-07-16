@@ -34,6 +34,14 @@ instructions. Skills TEACH how; ADRs RATIFY the specific.
   NOT an offence: report it as a violation with an EMPTY `standard` and it rides
   to the architect as a flag, never held against the bead. Do not inflate a
   preference into a citation.
+- **ASSERT the contradiction, or it is NOT a violation** (the #1 false-hold): a
+  `violations[]` entry must POSITIVELY name a REAL conflict — set
+  `"contradicts": true` AND describe it in `contradiction`. If you inspect the
+  bead and find it CONSISTENT with the standard — you would write "None
+  identified", "aligned with …", "correctly implements …" — it is NOT a
+  violation: put the observation in `context[]`, or set `"contradicts": false`.
+  A finding without `"contradicts": true` can NEVER hold the bead. Do not file a
+  non-contradiction into `violations[]`.
 - **The departure clause**: if the bead ITSELF acknowledges the departure ("this
   departs from X because Y"), set `"acknowledged": true`. A considered departure
   is NOT an offence — it passes. Only an UNWITTING contradiction holds the bead.
@@ -60,7 +68,7 @@ Write your report as JSON to `.grid/discovery/{{lens}}.json`, resolved from the
 worktree root — write it there regardless of your current working directory:
 
 ```json
-{"lens":"{{lens}}","version":1,"context":[{"note":"<what the architect needs to know>","source":"<file / bead / ADR clause>"}],"violations":[{"kind":"decision|skill|pattern","standard":"<docs/adr/ADR-0000-ai-decision-register.md A17(4)>","quote":"<the clause, verbatim, including its Status line>","contradiction":"<what this bead does that contradicts it>","acknowledged":false,"ratified":false,"removesOffence":false,"precedent":""}]}
+{"lens":"{{lens}}","version":1,"context":[{"note":"<what the architect needs to know>","source":"<file / bead / ADR clause>"}],"violations":[{"kind":"decision|skill|pattern","standard":"<docs/adr/ADR-0000-ai-decision-register.md A17(4)>","quote":"<the clause, verbatim, including its Status line>","contradiction":"<what this bead does that contradicts it>","contradicts":true,"acknowledged":false,"ratified":false,"removesOffence":false,"precedent":""}]}
 ```
 
 Both arrays may be EMPTY — a clean bead with no findings is a real, expected
