@@ -14,8 +14,9 @@
 /// declared), [PubLinkContext.worktree] (a deep per-bead worktree at
 /// `.grid/worktrees/<sub>/<bead>` — relative `../` paths break there, so
 /// declared paths are ABSOLUTIZED against the station's dev root, fail-closed
-/// when they can't be), and [PubLinkContext.stable] (no overrides — the
-/// pubspec's own hosted/git refs stand).
+/// when they can't be), and [PubLinkContext.stable] (git-pinned links emit
+/// `git: {url, ref}` overrides — ADR-0003 D2; a link with no git pin resolves
+/// from its own `pubspec.yaml` pin).
 ///
 /// Hand-written immutable value types + JSON (the grid_assets payload style —
 /// `DispatchCommand`/`LaunchSpec`; dependency-light, no codegen).
@@ -34,7 +35,8 @@ enum PubLinkContext {
   /// `.grid/worktrees/<sub>/<bead>`).
   worktree,
 
-  /// Stable: no overrides — the pubspec's hosted/git refs stand.
+  /// Stable: git-pinned links emit `git: {url, ref}` overrides (ADR-0003 D2);
+  /// a link with no git pin resolves from its own `pubspec.yaml` pin (D5).
   stable;
 
   /// Parses a wire/flag [value]; null for an unknown one (fail-closed — the
@@ -48,8 +50,9 @@ enum PubLinkContext {
 }
 
 /// One package's declared linkage: the dev-time [devPath] source (the override
-/// applied in dev/worktree contexts) and the informational stable pins
-/// ([hosted] / [gitUrl]+[gitRef]) that stand when no override is applied.
+/// applied in dev/worktree contexts), the informational [hosted] pin, and the
+/// [gitUrl]+[gitRef] git-tag pin the stable context emits as a `git:` override
+/// (ADR-0003 D2).
 @immutable
 class PubLink {
   /// Creates the linkage declaration for [package].
@@ -72,11 +75,13 @@ class PubLink {
   /// proper; recorded here so the intent is complete/auditable).
   final String? hosted;
 
-  /// The stable git url (reserved — a git-ref stable pin; not applied as an
-  /// override in this prototype).
+  /// The stable git url — applied in [PubLinkContext.stable] as a
+  /// `git: {url, ref}` override (ADR-0003 D2). Pairs with [gitRef]: both, or
+  /// the stable emitter refuses LOUDLY.
   final String? gitUrl;
 
-  /// The stable git ref (reserved, with [gitUrl]).
+  /// The stable git ref (the git tag pinned in [PubLinkContext.stable]). Pairs
+  /// with [gitUrl]: both, or the stable emitter refuses LOUDLY.
   final String? gitRef;
 
   /// JSON form (the envelope payload wire).
@@ -180,10 +185,8 @@ class PubLinkConfig {
 
 /// Derives the `pubspec_overrides.yaml` CONTENT for [config] under [context] —
 /// the pure heart of the domain (no I/O; deterministic: links sorted by
-/// package).
+/// package). Exhaustive over [PubLinkContext]:
 ///
-/// - [PubLinkContext.stable] → null (no overrides file — the caller removes an
-///   existing one; the pubspec's own pins stand).
 /// - [PubLinkContext.dev] → path overrides exactly as declared (a relative
 ///   path resolves naturally from the root checkout).
 /// - [PubLinkContext.worktree] → path overrides ABSOLUTIZED: an absolute
@@ -192,20 +195,41 @@ class PubLinkConfig {
 ///   that is itself relative (which would silently yield a still-relative,
 ///   broken override) — throws [StateError]: fail-closed, never a silently
 ///   broken override.
+/// - [PubLinkContext.stable] → a `git: {url, ref, path: packages/<pkg>}`
+///   override per git-pinned link (ADR-0003 D2). A link with a PARTIAL git pin
+///   (one of [PubLink.gitUrl]/[PubLink.gitRef] but not both) is a LOUD
+///   [StateError] refusal — never a silent path fallback (D2). A link with NO
+///   git pin contributes nothing (its `pubspec.yaml` hosted/git pin stands —
+///   ADR-0003 D5); no git-pinned links → null (the caller removes a stale
+///   generated file).
 ///
-/// Paths are emitted as single-quoted YAML scalars (embedded quotes doubled),
-/// so a path carrying YAML-hostile characters (`: `, ` #`, leading/trailing
+/// Values are emitted as single-quoted YAML scalars (embedded quotes doubled),
+/// so a value carrying YAML-hostile characters (`: `, ` #`, leading/trailing
 /// spaces) can never corrupt the file. Package names are identifier-validated
 /// at decode, so they need no quoting.
 ///
-/// Links with no [PubLink.devPath] contribute nothing. No dev links at all →
-/// null (nothing to override).
+/// In dev/worktree, links with no [PubLink.devPath] contribute nothing; no dev
+/// links at all → null (nothing to override).
 String? pubspecOverridesFor(
   PubLinkConfig config,
   PubLinkContext context, {
   String? devRoot,
+}) =>
+    switch (context) {
+      PubLinkContext.dev ||
+      PubLinkContext.worktree =>
+        _pathOverridesFor(config, context, devRoot: devRoot),
+      PubLinkContext.stable => _gitOverridesFor(config),
+    };
+
+/// The dev/worktree path-override emission — UNCHANGED behavior from before the
+/// stable-git work (ADR-0003 D5 keeps the co-development escape hatch:
+/// dev/worktree still emit path overrides).
+String? _pathOverridesFor(
+  PubLinkConfig config,
+  PubLinkContext context, {
+  String? devRoot,
 }) {
-  if (context == PubLinkContext.stable) return null;
   final dev = config.links.where((l) => l.devPath != null).toList()
     ..sort((a, b) => a.package.compareTo(b.package));
   if (dev.isEmpty) return null;
@@ -242,6 +266,50 @@ String? pubspecOverridesFor(
     buffer
       ..writeln('  ${link.package}:')
       ..writeln('    path: ${_yamlQuote(path)}');
+  }
+  return buffer.toString();
+}
+
+/// The stable git-ref emission (ADR-0003 D2): each link that declares a git pin
+/// resolves to a `git: {url, ref, path: packages/<pkg>}` override. A link with
+/// a PARTIAL git pin (exactly one of [PubLink.gitUrl]/[PubLink.gitRef]) is a
+/// LOUD [StateError] refusal — never a silent path fallback (D2 + the house
+/// "guards LOUD or GONE"). A link with NEITHER git field contributes nothing:
+/// its hosted/git pin in `pubspec.yaml` proper stands (ADR-0003 D5). No
+/// git-pinned links → null (nothing to override; the caller clears a stale
+/// generated file). Deterministic: git links emit sorted by package.
+String? _gitOverridesFor(PubLinkConfig config) {
+  final git = <PubLink>[];
+  for (final link in config.links) {
+    final hasUrl = link.gitUrl != null;
+    final hasRef = link.gitRef != null;
+    if (!hasUrl && !hasRef) continue;
+    if (!hasUrl || !hasRef) {
+      throw StateError(
+        'PubLink "${link.package}" declares a PARTIAL git pin in the stable '
+        'context (git_url: ${link.gitUrl}, git_ref: ${link.gitRef}) — a stable '
+        'git dependency needs BOTH url and ref; refusing rather than silently '
+        'falling back to a path override (fail-closed).',
+      );
+    }
+    git.add(link);
+  }
+  git.sort((a, b) => a.package.compareTo(b.package));
+  if (git.isEmpty) return null;
+
+  final buffer = StringBuffer()
+    ..writeln(
+      '# Generated by the grid.dart domain '
+      '(context: ${PubLinkContext.stable.name}). Do not hand-edit.',
+    )
+    ..writeln('dependency_overrides:');
+  for (final link in git) {
+    buffer
+      ..writeln('  ${link.package}:')
+      ..writeln('    git:')
+      ..writeln('      url: ${_yamlQuote(link.gitUrl!)}')
+      ..writeln('      ref: ${_yamlQuote(link.gitRef!)}')
+      ..writeln('      path: ${_yamlQuote('packages/${link.package}')}');
   }
   return buffer.toString();
 }
