@@ -103,6 +103,7 @@ class AgentConfig {
     this.params = const {},
     this.tiers = const ModelTiers(),
     this.graderModel,
+    this.roleEnvironments = const {},
   });
 
   /// The registry id of the harness: `claude` | `copilot` | `pi` | `opencode`.
@@ -133,6 +134,15 @@ class AgentConfig {
   /// INPUT. A station migrates by arming [tiers] directly, and it retires here
   /// at that point.
   final String? graderModel;
+
+  /// The station's ROLE → ENVIRONMENT arming — role → env NAME, the successor
+  /// selection path to role → tier → model (ADR-0002 "the ladder"; ADR-0000 A20
+  /// REFINED FORWARD). An entry names an [EnvironmentRegistry] environment;
+  /// [resolveAgentConfig] resolves it to the full {harness, target, model} for
+  /// that role. EMPTY ⇒ the role falls through to role → tier → model (the
+  /// [tiers]/[graderModel] shims, still functioning until the shim-deletion bead
+  /// removes them). A station arms this like it arms [tiers].
+  final Map<AgentRole, String> roleEnvironments;
 
   /// The tier map this station ACTUALLY arms: [tiers], with the two PRE-TIER
   /// knobs projected onto the tiers they arm — `params['model']` (`space up
@@ -165,6 +175,7 @@ class AgentConfig {
     Map<String, String>? params,
     ModelTiers? tiers,
     String? graderModel,
+    Map<AgentRole, String>? roleEnvironments,
   }) => AgentConfig(
     harness: harness ?? this.harness,
     params: params == null ? this.params : {...this.params, ...params},
@@ -176,6 +187,9 @@ class AgentConfig {
             frontier: tiers.frontier,
           ),
     graderModel: graderModel ?? this.graderModel,
+    roleEnvironments: roleEnvironments == null
+        ? this.roleEnvironments
+        : {...this.roleEnvironments, ...roleEnvironments},
   );
 
   @override
@@ -184,7 +198,8 @@ class AgentConfig {
       other.harness == harness &&
       other.tiers == tiers &&
       other.graderModel == graderModel &&
-      _mapEquals(other.params, params);
+      _mapEquals(other.params, params) &&
+      _mapEquals(other.roleEnvironments, roleEnvironments);
 
   @override
   int get hashCode => Object.hash(
@@ -194,9 +209,12 @@ class AgentConfig {
     Object.hashAllUnordered(
       params.entries.map((e) => Object.hash(e.key, e.value)),
     ),
+    Object.hashAllUnordered(
+      roleEnvironments.entries.map((e) => Object.hash(e.key, e.value)),
+    ),
   );
 
-  static bool _mapEquals(Map<String, String> a, Map<String, String> b) {
+  static bool _mapEquals<K>(Map<K, String> a, Map<K, String> b) {
     if (a.length != b.length) return false;
     for (final e in a.entries) {
       if (b[e.key] != e.value) return false;
@@ -207,7 +225,8 @@ class AgentConfig {
   @override
   String toString() =>
       'AgentConfig($harness, params: $params, tiers: $tiers'
-      '${graderModel == null ? '' : ', graderModel: $graderModel'})';
+      '${graderModel == null ? '' : ', graderModel: $graderModel'}'
+      '${roleEnvironments.isEmpty ? '' : ', roleEnvironments: $roleEnvironments'})';
 }
 
 /// The harness-agnostic WORK CONTENT handed to an agent (OQ-a, ratified):
