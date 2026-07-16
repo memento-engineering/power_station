@@ -10,10 +10,12 @@
 ///     "params": { "model": "qwen2.5-coder" } } } }
 /// ```
 ///
-/// A bead names an ENVIRONMENT via `harness`; WHERE inference runs is the
-/// environment's own `target` bound to a machine-local endpoint by the site
-/// binding (ADR-0002 D3/D4). A stale `target` key in the envelope is REFUSED
-/// WHOLE — the endpoint never rides a bead.
+/// A bead names a COMPLETE ENVIRONMENT via `env` (the full {harness, target,
+/// model} the registry resolves it to) or diverges a SINGLE axis via `harness`
+/// (the tool) or `params.model` (the model); `env` outranks `harness` within a
+/// rung. WHERE inference runs is the environment's own `target` bound to a
+/// machine-local endpoint by the site binding (ADR-0002 D3/D4). A stale `target`
+/// key in the envelope is REFUSED WHOLE — the endpoint never rides a bead.
 ///
 /// The envelope's `params.model` is the TOP rung of the model ladder (bead
 /// `pow-edp`): it overrides the station's `--model`/`--grader-model` and the
@@ -45,7 +47,13 @@ const String kAgentAssetsVersion = '0.0.1';
 /// optional; merged over the ambient value in ladder order.
 class AgentConfigOverride {
   /// Creates the override.
-  const AgentConfigOverride({this.harness, this.params});
+  const AgentConfigOverride({this.env, this.harness, this.params});
+
+  /// Overrides the environment NAME — the full {harness, target, model} the
+  /// registry resolves it to (null ⇒ keep ambient). Names a COMPLETE
+  /// environment; [harness] names only the tool. Which wins across rungs is
+  /// [resolveAgentConfig]'s precedence, not this type's.
+  final String? env;
 
   /// Overrides the harness id (null ⇒ keep ambient).
   final String? harness;
@@ -53,7 +61,9 @@ class AgentConfigOverride {
   /// Merged key-wise over the ambient params (null ⇒ keep ambient).
   final Map<String, String>? params;
 
-  /// Applies this override onto [base].
+  /// Applies this override onto [base]. The environment NAME (env/harness) is
+  /// resolved by [resolveAgentConfig]'s rung precedence, not here; this applies
+  /// the [params] merge and the legacy [harness] axis.
   AgentConfig applyTo(AgentConfig base) =>
       base.merge(harness: harness, params: params);
 }
@@ -82,6 +92,10 @@ AgentConfigOverride _parsePayload(Map<String, Object?> payload) {
       'fact, never a bead. Remove "target" and name a target-bound environment.',
     );
   }
+  final env = payload['env'];
+  if (env != null && env is! String) {
+    throw const FormatException('"env" must be a string');
+  }
   Map<String, String>? params;
   final rawParams = payload['params'];
   if (rawParams != null) {
@@ -103,6 +117,7 @@ AgentConfigOverride _parsePayload(Map<String, Object?> payload) {
     );
   }
   return AgentConfigOverride(
+    env: env as String?,
     harness: harness as String?,
     params: params,
   );
@@ -112,10 +127,16 @@ AgentConfigOverride _parsePayload(Map<String, Object?> payload) {
 ///
 /// TWO ladders, resolved together for the [role] the SPAWNING ASSET declares:
 ///
-///  - **the config ladder** (harness / target / params) — *step params > bead
-///    envelope > ambient*, unchanged;
+///  - **the NAME ladder** (which environment/harness runs) — a rung names a
+///    COMPLETE environment via `env`, or diverges the tool only via `harness`;
+///    *step env/harness > bead env/harness > role → env
+///    ([AgentConfig.roleEnvironments]) > ambient.harness*, the more-specific rung
+///    winning. The winner is resolved through [registry] to the full {harness,
+///    target, model}. WHERE inference runs is that environment's own `target`
+///    bound by the site binding (ADR-0002 D3), never a step/bead rung;
 ///  - **the MODEL ladder** (beads `pow-edp` / `pow-2c9`) — *bead `grid.agent`
-///    `params.model` > the STATION's arming of the role's TIER
+///    `params.model` > the NAMED environment's own model (role → env's model;
+///    null on every builtin) > the STATION's arming of the role's TIER
 ///    ([AgentConfig.modelForRole]: [tierFor] the role, then [ModelTiers] —
 ///    which falls through to that tier's asset default)*. The winner is STAMPED
 ///    into the returned config's `params['model']` — the transport key every
@@ -128,10 +149,10 @@ AgentConfigOverride _parsePayload(Map<String, Object?> payload) {
 ///
 /// Validates the resolved config against [registry] and FAILS CLOSED (throws
 /// [StateError]) on: an incompatible/malformed envelope (including a blank
-/// `params.model`), an unknown harness, or an illegal harness × target combo —
-/// the engine's allocation catches the throw and routes it to supervision as a
-/// per-work `Failed` (OQ-c moment 2: one bad bead parks loudly; the station
-/// never crashes).
+/// `params.model`), an unknown environment name, or an illegal harness × target
+/// combo — the engine's allocation catches the throw and routes it to
+/// supervision as a per-work `Failed` (OQ-c moment 2: one bad bead parks loudly;
+/// the station never crashes).
 AgentConfig resolveAgentConfig({
   required AgentRole role,
   required AgentConfig ambient,
@@ -141,14 +162,16 @@ AgentConfig resolveAgentConfig({
 }) {
   var config = ambient;
   String? beadModel;
+  String? beadName; // bead env ?? bead harness (rung 3), empty-safe.
 
   // Rung 3 — the bead's grid.agent envelope (fail-closed, refuse whole). Its
-  // `params.model` is the MOST explicit rung of the model ladder: it overrides
-  // the station AND the asset default, for BOTH roles of that bead's agents.
+  // `params.model` is the MOST explicit rung of the model ladder; its `env`/
+  // `harness` name the environment for this bead's agents.
   switch (decodeAgentEnvelope(beadMetadata)) {
     case DomainEnvelopeDecoded<AgentConfigOverride>(config: final override):
       config = override.applyTo(config);
       beadModel = override.params?['model'];
+      beadName = _nonEmpty(override.env) ?? _nonEmpty(override.harness);
     case DomainEnvelopeAbsent<AgentConfigOverride>():
       break; // the common case — no per-bead override.
     case DomainEnvelopeIncompatible<AgentConfigOverride>(:final version):
@@ -160,25 +183,22 @@ AgentConfig resolveAgentConfig({
       throw StateError('grid.agent envelope malformed: $reason');
   }
 
-  // Rung 4 — step params (harness-id only — a step diverges WHICH tool runs,
-  // never the machine's endpoint wiring).
-  final stepHarness = stepParams['harness'];
-  if (stepHarness != null && stepHarness.isNotEmpty) {
-    config = config.merge(harness: stepHarness);
-  }
+  // Rung 4 — step params: `env` names the whole environment, `harness` the tool
+  // only. A step diverges WHICH environment/tool runs, never the machine's
+  // endpoint wiring (no `target` rung — ADR-0002 D3).
+  final stepName =
+      _nonEmpty(stepParams['env']) ?? _nonEmpty(stepParams['harness']);
 
-  // The MODEL ladder, resolved for the spawner's ROLE through the TIER axis
-  // (bead `pow-2c9`) and stamped into the harness transport key: the bead's
-  // pinned model, else the STATION's arming of the role's tier — which itself
-  // falls through to that tier's asset default, so the result is TOTAL (there
-  // is no third `??` and no unpinned spawn). Read off the AMBIENT: a bead
-  // envelope carries no tier arming, and its model — when present — already won
-  // above.
-  config = config.merge(
-    params: {'model': beadModel ?? ambient.modelForRole(role)},
-  );
+  // Rung 5 — role → env (the station's arming; the successor to role → tier).
+  final roleName = ambient.roleEnvironments[role];
 
-  // Legality (OQ-c moment 2, fail-closed): the resolved harness must name an armed,
+  // The resolved environment NAME → config.harness (the registry key every
+  // caller resolves and the site binding keys on). Most-specific rung wins;
+  // TOTAL because ambient.harness is a non-null default.
+  final name = stepName ?? beadName ?? roleName ?? ambient.harness;
+  config = config.merge(harness: name);
+
+  // Legality (OQ-c moment 2, fail-closed): the resolved name must be an armed,
   // self-consistent environment. resolve THROWS on unknown/cyclic/dangling; the
   // engine's allocation routes the throw to supervision as a per-work Failed.
   final AgentEnvironment env;
@@ -192,5 +212,18 @@ AgentConfig resolveAgentConfig({
     throw StateError('agent config: environment "${config.harness}" is illegal: '
         '$selfCheck');
   }
+
+  // The MODEL ladder, stamped into the harness transport key: the bead's pinned
+  // model (TOP, every role of that bead) > the NAMED environment's own model
+  // (role → env's model; null on every builtin) > role → tier → model
+  // (ambient.modelForRole — the pre-env ladder, STILL FUNCTIONING until the
+  // shim-deletion bead removes it). TOTAL: modelForRole never returns null.
+  config = config.merge(
+    params: {'model': beadModel ?? env.model ?? ambient.modelForRole(role)},
+  );
   return config;
 }
+
+/// Null when [s] is null or empty, else [s] — an empty rung value NAMES nothing
+/// (the `stepHarness.isNotEmpty` precedent), so it never shadows a lower rung.
+String? _nonEmpty(String? s) => (s == null || s.isEmpty) ? null : s;
