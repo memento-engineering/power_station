@@ -107,6 +107,31 @@ void main() {
       expect(prompt, isNot(contains('grid step --advance')));
     });
 
+    test('the agreement FORBIDS touching the bead — an agent that closes its own '
+        'work bead unmounts its own session mid-turn', () {
+      // THE BUG (2026-07-16, pow-8b3 + pow-2c6): a codex build agent ran
+      // `bd update --claim` then `bd close <bead>` — faithfully following the
+      // SOLO workflow taught by the repo's own CLAUDE.md ("Claim work" /
+      // "Complete work"), which is the wrong workflow under a station. Closing
+      // the bead drops it from the work frontier, so SessionScope took the
+      // DESIGNED positive-terminal unmount — on the agent's OWN live session.
+      // The host disposed, the cancel token fired, and the agent's subsequent
+      // exit was dropped by the isCancelled guards: the node froze at
+      // `agent.state: running` forever and a bounce could not recover it (the
+      // bead was already closed, so there was nothing left to re-drive).
+      //
+      // The agreement already fences the station-owned verbs it knew about
+      // (push, PR). The bead lifecycle is the same class and was simply missing.
+      final prompt = buildAgentBrief(bead('tg-1'), _workspace()).render();
+      expect(prompt, contains('Do NOT TOUCH THE BEAD'));
+      expect(prompt, contains('bd close'));
+      expect(prompt, contains('--claim'));
+      // It must say WHY: an agent that is following CLAUDE.md needs to know THIS
+      // repo's instructions are superseded here, or it will just obey them.
+      expect(prompt, contains('CLAUDE.md'));
+      expect(prompt, contains('CLOSES YOUR OWN SESSION OUT FROM UNDER YOU'));
+    });
+
     test('the working agreement closes with the D-H genesis_tree doctrine — '
         'every coding agent this station spawns carries it (bead tg-kx1)', () {
       // Companion to the_grid's GridDelegate D-H fix (ADR-0008): the doctrine
