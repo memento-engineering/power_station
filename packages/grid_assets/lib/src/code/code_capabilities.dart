@@ -479,15 +479,15 @@ AgentBrief buildAgentBrief(
       'human review.',
     )
     ..writeln(
-      '- Do NOT TOUCH THE BEAD: no `bd close`, no `bd update`, no `--claim`, no '
-      'bd mutation of ANY kind, ever. The STATION owns this bead\'s lifecycle: '
-      'it opened this session, and it closes the bead only after the committee '
-      'has graded your work and a human has landed it. This repo\'s CLAUDE.md '
-      'teaches the SOLO workflow (`bd update --claim` … `bd close`) — that '
-      'workflow is NOT yours here. Following it CLOSES YOUR OWN SESSION OUT '
-      'FROM UNDER YOU mid-turn: the bead leaves the frontier, the station '
-      'unmounts this session, your exit is dropped, and your finished work is '
-      'stranded ungraded and unlanded.',
+      '- Your ONE deliverable is the COMMIT. It is how you report completion, '
+      'and it is the only thing this turn is graded on — so spend the whole '
+      'turn on the code.',
+    )
+    ..writeln(
+      '- The bead above is INPUT, and the tracker is the STATION\'s: the '
+      'station opened this session against that bead, and it is the station '
+      'that advances the bead once the committee has graded your commit. Read '
+      'the bead; leave the tracker to the station.',
     )
     ..writeln('- When the work is committed you are done; exit.')
     ..writeln()
