@@ -27,6 +27,11 @@ class ReleaseCommand extends Command<int> {
     final o = out ?? stdout;
     final e = err ?? stderr;
     addSubcommand(ReleasePlanCommand(service: service, out: o, err: e));
+    addSubcommand(ReleaseTagCommand(service: service, out: o));
+    addSubcommand(
+      ReleaseValidateConsumersCommand(service: service, out: o, err: e),
+    );
+    addSubcommand(ReleasePromoteCommand(service: service, out: o, err: e));
     addSubcommand(ReleaseScrubCommand(service: service, out: o, err: e));
     addSubcommand(ReleaseOrderCommand(service: service, out: o, err: e));
     addSubcommand(ReleaseDryRunCommand(service: service, out: o, err: e));
@@ -67,10 +72,10 @@ class ReleasePlanCommand extends Command<int> {
       ..addOption(
         'change',
         mandatory: true,
-        allowed: ['docs', 'additive', 'fix', 'breaking'],
+        allowed: ['docs', 'additive', 'fix', 'breaking', 'rc'],
         help:
             'docs/additive/fix -> PATCH; breaking -> MINOR pre-1.0 / MAJOR '
-            'from 1.0.',
+            'from 1.0; rc -> next breaking base as rc.N.',
       )
       ..addFlag(
         'json',
@@ -119,6 +124,204 @@ class ReleasePlanCommand extends Command<int> {
       _out.writeln('${plan.current} -> ${plan.next}  tag: $tag');
     }
     return 0;
+  }
+}
+
+/// `dart release tag` — cut a private git release tag.
+class ReleaseTagCommand extends Command<int> {
+  /// Creates the op over [service], rendering to [out].
+  ReleaseTagCommand({required ReleaseService service, required StringSink out})
+    : _service = service,
+      _out = out {
+    argParser
+      ..addOption('repo-dir', mandatory: true, help: 'The git repository dir.')
+      ..addOption('tag', mandatory: true, help: 'The release tag to create.')
+      ..addFlag(
+        'json',
+        negatable: false,
+        help: 'Emit the structured result as one JSON object.',
+      );
+  }
+
+  final ReleaseService _service;
+  final StringSink _out;
+
+  @override
+  final String name = 'tag';
+  @override
+  final String description = 'Cut a private git release tag.';
+
+  @override
+  Future<int> run() async {
+    final args = argResults!;
+    final result = await _service.createGitTag(
+      repoDir: args.option('repo-dir')!,
+      tag: args.option('tag')!,
+    );
+    if (args.flag('json')) {
+      _out.writeln(jsonEncode(result.toJson()));
+    } else {
+      _out.writeln(
+        result.created
+            ? 'tag created: ${result.tag}'
+            : 'tag failed: ${result.tag}',
+      );
+    }
+    return result.exitCode;
+  }
+}
+
+/// `dart release validate-consumers` — validate consumers against an rc tag.
+class ReleaseValidateConsumersCommand extends Command<int> {
+  /// Creates the op over [service], rendering to [out]/[err].
+  ReleaseValidateConsumersCommand({
+    required ReleaseService service,
+    required StringSink out,
+    required StringSink err,
+  }) : _service = service,
+       _out = out,
+       _err = err {
+    argParser
+      ..addOption('rc-tag', mandatory: true, help: 'The candidate rc tag.')
+      ..addOption(
+        'manifest',
+        mandatory: true,
+        help: 'JSON manifest containing a consumers list.',
+      )
+      ..addFlag(
+        'json',
+        negatable: false,
+        help: 'Emit the structured result as one JSON object.',
+      );
+  }
+
+  final ReleaseService _service;
+  final StringSink _out;
+  final StringSink _err;
+
+  @override
+  final String name = 'validate-consumers';
+  @override
+  final String description =
+      'Resolve every consumer against an rc tag and run analyze/test.';
+
+  @override
+  Future<int> run() async {
+    final args = argResults!;
+    final file = File(args.option('manifest')!);
+    if (!file.existsSync()) {
+      _err.writeln(
+        'release validate-consumers: no such manifest: ${file.path}',
+      );
+      return 64;
+    }
+    final List<ReleaseConsumer> consumers;
+    try {
+      final decoded =
+          jsonDecode(file.readAsStringSync()) as Map<String, dynamic>;
+      consumers = [
+        for (final entry in decoded['consumers'] as List)
+          ReleaseConsumer.fromJson((entry as Map).cast<String, Object?>()),
+      ];
+    } on Object catch (e) {
+      _err.writeln('release validate-consumers: invalid manifest: $e');
+      return 64;
+    }
+    try {
+      final report = await _service.validateConsumers(
+        rcTag: args.option('rc-tag')!,
+        consumers: consumers,
+      );
+      if (args.flag('json')) {
+        _out.writeln(jsonEncode(report.toJson()));
+      } else {
+        _out.writeln(
+          report.allPassed
+              ? 'all consumers passed'
+              : 'consumer validation failed',
+        );
+      }
+      return report.allPassed ? 0 : 1;
+    } on StateError catch (e) {
+      _err.writeln('release validate-consumers: ${e.message}');
+      return 1;
+    }
+  }
+}
+
+/// `dart release promote` — cut the stable tag after green consumer validation.
+class ReleasePromoteCommand extends Command<int> {
+  /// Creates the op over [service], rendering to [out]/[err].
+  ReleasePromoteCommand({
+    required ReleaseService service,
+    required StringSink out,
+    required StringSink err,
+  }) : _service = service,
+       _out = out,
+       _err = err {
+    argParser
+      ..addOption('repo-dir', mandatory: true, help: 'The git repository dir.')
+      ..addOption(
+        'stable-tag',
+        mandatory: true,
+        help: 'The stable release tag to create.',
+      )
+      ..addOption(
+        'validation',
+        mandatory: true,
+        help: 'A JSON validation report emitted by validate-consumers.',
+      )
+      ..addFlag(
+        'json',
+        negatable: false,
+        help: 'Emit the structured result as one JSON object.',
+      );
+  }
+
+  final ReleaseService _service;
+  final StringSink _out;
+  final StringSink _err;
+
+  @override
+  final String name = 'promote';
+  @override
+  final String description =
+      'Cut the stable git tag only after all consumers passed.';
+
+  @override
+  Future<int> run() async {
+    final args = argResults!;
+    final file = File(args.option('validation')!);
+    if (!file.existsSync()) {
+      _err.writeln('release promote: no such validation file: ${file.path}');
+      return 64;
+    }
+    try {
+      final validation = ConsumerValidationReport.fromJson(
+        jsonDecode(file.readAsStringSync()) as Map<String, Object?>,
+      );
+      final result = await _service.promoteTag(
+        repoDir: args.option('repo-dir')!,
+        stableTag: args.option('stable-tag')!,
+        validation: validation,
+      );
+      if (args.flag('json')) {
+        _out.writeln(jsonEncode(result.toJson()));
+      } else {
+        _out.writeln(
+          result.created
+              ? 'stable tag created: ${result.tag}'
+              : 'stable tag failed: ${result.tag}',
+        );
+      }
+      return result.exitCode;
+    } on StateError catch (e) {
+      _err.writeln('release promote: ${e.message}');
+      return 1;
+    } on Object catch (e) {
+      _err.writeln('release promote: invalid validation report: $e');
+      return 64;
+    }
   }
 }
 
@@ -307,11 +510,9 @@ class ReleaseDryRunCommand extends Command<int> {
 class ReleasePollCommand extends Command<int> {
   /// Creates the op over [service], rendering to [out] (poll has no error
   /// path — the mandatory options are enforced by the arg parser).
-  ReleasePollCommand({
-    required ReleaseService service,
-    required StringSink out,
-  }) : _service = service,
-       _out = out {
+  ReleasePollCommand({required ReleaseService service, required StringSink out})
+    : _service = service,
+      _out = out {
     argParser
       ..addOption('package', mandatory: true, help: 'The pub package name.')
       ..addOption('version', mandatory: true, help: 'The version to wait for.')
