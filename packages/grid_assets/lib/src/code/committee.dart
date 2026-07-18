@@ -391,6 +391,16 @@ class ClearCritiqueCapability extends ServiceCapability {
 ///  - **non-empty delta ⇒ [Advance]** — the pinned diff is written and the round
 ///    proceeds; the payload carries route-style provenance
 ///    (`base`/`commits`/`diffBytes`).
+///  - **a workspace dir that EXISTS but is not itself the checkout root ⇒ a
+///    thrown [RouteFailure]** — the checkout-root guard (bead `pow-4pr`). When
+///    provisioning fails sourceless (scaffold residue without a checkout, bead
+///    `pow-2ts`), `git` walks UP from the workspace dir to an ANCESTOR checkout
+///    and computes the WRONG delta — the live space-ojl incident held a real,
+///    validation-green branch as 'stale/no-op — ZERO commits'. Before any
+///    log/diff, the guard probes `git rev-parse --show-toplevel` in the
+///    workspace dir and requires it to resolve to the workspace dir ITSELF.
+///    Both sides are SYMLINK-resolved before comparing: `git` resolves `/tmp`
+///    → `/private/tmp` on macOS, a lexical canonicalize does not.
 ///
 /// Offline/dry-run posture: a null [Workspace], or a workspace directory that
 /// does not exist on disk (the synthetic `/grid/worktrees/...` path an offline
@@ -398,7 +408,8 @@ class ClearCritiqueCapability extends ServiceCapability {
 /// [Advance] with NO git call — the same no-op posture as
 /// [GitSourceControl.provisionWorkspace] / [AgentCapability] pub-linkage. A
 /// LIVE review always has a real worktree the agent just worked in, so the
-/// scope guard runs when it matters.
+/// scope guard runs when it matters; the checkout-root guard fires ONLY for a
+/// present-but-wrong dir, so this posture is untouched.
 class PinDiffCapability extends RouteCapability {
   /// Creates the capability, optionally over an injected [runner] (tests
   /// inject a recording/canned fake — Fakes, not mocks); defaults to the real
@@ -420,6 +431,36 @@ class PinDiffCapability extends RouteCapability {
 
     final runner = _runner ?? SystemGitRunner();
     final baseRef = 'origin/${workspace.baseBranch}';
+
+    // The checkout-root guard (bead pow-4pr): the dir EXISTS — before trusting
+    // it as the diff scope, require it to BE the checkout root. `git` walks up
+    // to an ancestor checkout from a sourceless scaffold dir (the space-ojl
+    // shape), so `--is-inside-work-tree` would pass exactly when it must not.
+    final toplevel = await runner.run(
+      workingDirectory: workspaceDir,
+      args: ['rev-parse', '--show-toplevel'],
+    );
+    if (args.cancel.isCancelled) throw kRouteCancelled;
+    if (!toplevel.ok) {
+      throw RouteFailure(
+        'pin-diff: $workspaceDir exists but holds no git checkout '
+        '(`git rev-parse --show-toplevel` failed: '
+        '${_reasonTail(toplevel.output)}) — a sourceless workspace '
+        '(provisioning failure, bead pow-2ts). Refusing rather than minting a '
+        'false stale/no-op verdict.',
+      );
+    }
+    final expectedRoot = _resolvedPath(workspaceDir);
+    final resolvedTopLevel = _resolvedPath(toplevel.output.trim());
+    if (!p.equals(expectedRoot, resolvedTopLevel)) {
+      throw RouteFailure(
+        'pin-diff: the checkout root for $workspaceDir is resolved toplevel '
+        '$resolvedTopLevel — the workspace dir sits INSIDE an ancestor '
+        'checkout instead of being one (expected $expectedRoot). The diff '
+        'would be computed against the WRONG tree. Refusing rather than '
+        'minting a false stale/no-op verdict (the space-ojl shape).',
+      );
+    }
 
     // The commit list on THIS branch beyond the base (provenance; `log base..HEAD`).
     final log = await runner.run(
@@ -508,6 +549,22 @@ class PinDiffCapability extends RouteCapability {
     File(pinnedDiffPath(workspaceDir))
       ..createSync(recursive: true)
       ..writeAsStringSync('$header$diff');
+  }
+
+  /// A path prepared for root comparison: SYMLINKS RESOLVED, then lexically
+  /// canonicalized. `git rev-parse --show-toplevel` reports the symlink-resolved
+  /// root (`/private/tmp/...` on macOS) while the ambient workspace dir is
+  /// usually unresolved (`/tmp/...`); `p.canonicalize` alone is purely lexical
+  /// and would read those as DIFFERENT roots — a spurious refusal on every
+  /// genuine checkout under a symlinked parent. A path that cannot resolve
+  /// (vanished mid-route) falls back to the lexical form so the refusal message
+  /// carries the literal path.
+  static String _resolvedPath(String path) {
+    try {
+      return p.canonicalize(Directory(path).resolveSymbolicLinksSync());
+    } on FileSystemException {
+      return p.canonicalize(path);
+    }
   }
 }
 
