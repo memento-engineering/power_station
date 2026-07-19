@@ -232,6 +232,189 @@ void main() {
       // Reaching here without throwing is the assertion (offline no-op).
     });
 
+    test('GitSourceControl.provisionWorkspace stashes scaffold residue, provisions '
+        'the worktree, and restores the residue inside it', () async {
+      final rootDir = Directory.systemTemp.createTempSync('pow2ts-root-');
+      addTearDown(() => rootDir.deleteSync(recursive: true));
+      final workspaceDir = WorktreeLayout.worktreePath(
+        rootDir.path,
+        'ps',
+        'pow-1',
+      );
+      final residue = File(p.join(workspaceDir, '.grid', 'critique', 'pinned.diff'));
+      residue.createSync(recursive: true);
+      residue.writeAsStringSync('pinned');
+
+      final runner = _MaterializingWorktreeRunner(
+        checkoutEntries: {'lib/source.dart': 'void source() {}'},
+      );
+      final sc = GitSourceControl(
+        provisioner: StationGitService(
+          runner: runner,
+          prOpener: _NoopPrOpener(),
+        ),
+        root: RootCheckout(
+          path: rootDir.path,
+          defaultBranch: 'main',
+          substation: 'ps',
+        ),
+      );
+
+      await sc.provisionWorkspace(beadId: 'pow-1', workspaceDir: workspaceDir);
+
+      expect(File(p.join(workspaceDir, '.git')).existsSync(), isTrue);
+      expect(File(p.join(workspaceDir, 'lib', 'source.dart')).existsSync(), isTrue);
+      expect(
+        File(p.join(workspaceDir, '.grid', 'critique', 'pinned.diff')).readAsStringSync(),
+        'pinned',
+      );
+      expect(Directory('$workspaceDir.scaffold-stash').existsSync(), isFalse);
+      expect(
+        runner.calls.any(
+          (args) => args.length >= 2 && args[0] == 'worktree' && args[1] == 'add',
+        ),
+        isTrue,
+      );
+    });
+
+    test('GitSourceControl.provisionWorkspace treats an existing .git entry as '
+        'already provisioned', () async {
+      final rootDir = Directory.systemTemp.createTempSync('pow2ts-root-');
+      addTearDown(() => rootDir.deleteSync(recursive: true));
+      final workspaceDir = WorktreeLayout.worktreePath(
+        rootDir.path,
+        'ps',
+        'pow-1',
+      );
+      File(p.join(workspaceDir, '.git'))
+        ..createSync(recursive: true)
+        ..writeAsStringSync('gitdir: fake');
+      final runner = CannedGitRunner();
+      final sc = GitSourceControl(
+        provisioner: StationGitService(
+          runner: runner,
+          prOpener: _NoopPrOpener(),
+        ),
+        root: RootCheckout(
+          path: rootDir.path,
+          defaultBranch: 'main',
+          substation: 'ps',
+        ),
+      );
+
+      await sc.provisionWorkspace(beadId: 'pow-1', workspaceDir: workspaceDir);
+
+      expect(runner.calls, isEmpty);
+    });
+
+    test('GitSourceControl.provisionWorkspace restores scaffold residue when '
+        'the provisioner throws', () async {
+      final rootDir = Directory.systemTemp.createTempSync('pow2ts-root-');
+      addTearDown(() => rootDir.deleteSync(recursive: true));
+      final workspaceDir = WorktreeLayout.worktreePath(
+        rootDir.path,
+        'ps',
+        'pow-1',
+      );
+      final residue = File(p.join(workspaceDir, '.grid', 'telemetry', 'agent.json'));
+      residue.createSync(recursive: true);
+      residue.writeAsStringSync('{"ok":true}');
+      final sc = GitSourceControl(
+        provisioner: StationGitService(
+          runner: _MaterializingWorktreeRunner(failWorktreeAdd: true),
+          prOpener: _NoopPrOpener(),
+        ),
+        root: RootCheckout(
+          path: rootDir.path,
+          defaultBranch: 'main',
+          substation: 'ps',
+        ),
+      );
+
+      await expectLater(
+        sc.provisionWorkspace(beadId: 'pow-1', workspaceDir: workspaceDir),
+        throwsStateError,
+      );
+
+      expect(Directory(workspaceDir).existsSync(), isTrue);
+      expect(
+        File(p.join(workspaceDir, '.grid', 'telemetry', 'agent.json')).readAsStringSync(),
+        '{"ok":true}',
+      );
+      expect(Directory('$workspaceDir.scaffold-stash').existsSync(), isFalse);
+    });
+
+    test('GitSourceControl.provisionWorkspace refuses scaffold collisions in '
+        'the fresh checkout', () async {
+      final rootDir = Directory.systemTemp.createTempSync('pow2ts-root-');
+      addTearDown(() => rootDir.deleteSync(recursive: true));
+      final workspaceDir = WorktreeLayout.worktreePath(
+        rootDir.path,
+        'ps',
+        'pow-1',
+      );
+      final residue = File(p.join(workspaceDir, '.grid', 'critique', 'pinned.diff'));
+      residue.createSync(recursive: true);
+      residue.writeAsStringSync('scaffold');
+      final sc = GitSourceControl(
+        provisioner: StationGitService(
+          runner: _MaterializingWorktreeRunner(
+            checkoutEntries: {'.grid/critique/pinned.diff': 'checkout'},
+          ),
+          prOpener: _NoopPrOpener(),
+        ),
+        root: RootCheckout(
+          path: rootDir.path,
+          defaultBranch: 'main',
+          substation: 'ps',
+        ),
+      );
+
+      await expectLater(
+        sc.provisionWorkspace(beadId: 'pow-1', workspaceDir: workspaceDir),
+        throwsA(
+          isA<StateError>().having(
+            (error) => error.message,
+            'message',
+            contains('scaffold path collision'),
+          ),
+        ),
+      );
+    });
+
+    test('GitSourceControl.provisionWorkspace refuses a provisioner that leaves '
+        'no .git entry', () async {
+      final rootDir = Directory.systemTemp.createTempSync('pow2ts-root-');
+      addTearDown(() => rootDir.deleteSync(recursive: true));
+      final workspaceDir = WorktreeLayout.worktreePath(
+        rootDir.path,
+        'ps',
+        'pow-1',
+      );
+      final sc = GitSourceControl(
+        provisioner: StationGitService(
+          runner: CannedGitRunner(),
+          prOpener: _NoopPrOpener(),
+        ),
+        root: RootCheckout(
+          path: rootDir.path,
+          defaultBranch: 'main',
+          substation: 'ps',
+        ),
+      );
+
+      await expectLater(
+        sc.provisionWorkspace(beadId: 'pow-1', workspaceDir: workspaceDir),
+        throwsA(
+          isA<StateError>().having(
+            (error) => error.message,
+            'message',
+            contains('missing .git entry'),
+          ),
+        ),
+      );
+    });
+
     test('workspaceFor/branchFor/baseBranch derive the layout — and an EMPTY '
         'root path yields the ABSOLUTE synthetic, never a CWD-relative path '
         '(the E3 review fix)', () {
@@ -725,4 +908,49 @@ void main() {
       );
     },
   );
+}
+
+class _MaterializingWorktreeRunner extends CannedGitRunner {
+  _MaterializingWorktreeRunner({
+    this.checkoutEntries = const {},
+    this.failWorktreeAdd = false,
+  });
+
+  final Map<String, String> checkoutEntries;
+  final bool failWorktreeAdd;
+
+  @override
+  Future<GitRunResult> run({
+    required String workingDirectory,
+    required List<String> args,
+  }) async {
+    if (args.length >= 2 && args[0] == 'worktree' && args[1] == 'add') {
+      calls.add(List.unmodifiable(args));
+      if (failWorktreeAdd) {
+        return const GitRunResult(exitCode: 128, output: 'worktree add failed');
+      }
+      final target = args.contains('-b') ? args[4] : args[2];
+      Directory(target).createSync(recursive: true);
+      File(p.join(target, '.git')).writeAsStringSync('gitdir: fake');
+      for (final entry in checkoutEntries.entries) {
+        final file = File(p.join(target, entry.key));
+        file.createSync(recursive: true);
+        file.writeAsStringSync(entry.value);
+      }
+      return const GitRunResult(exitCode: 0, output: '');
+    }
+    return super.run(workingDirectory: workingDirectory, args: args);
+  }
+}
+
+class _NoopPrOpener implements PrOpener {
+  @override
+  Future<PullRequestResult> open({
+    required String workDir,
+    required String branch,
+    required String baseBranch,
+    required String title,
+    String body = '',
+  }) async =>
+      PullRequestResult.opened(const PullRequestRef(url: 'https://example.test/pr/1'));
 }
