@@ -126,9 +126,7 @@ void main() {
         'spec critics → route; the route is the terminal', () {
       expect(kSpecReviewCircuit.id, 'spec_review');
       expect(kSpecReviewCircuit.terminalStepId, 'route');
-      final byId = {
-        for (final s in kSpecReviewCircuit.steps) s.stepId: s,
-      };
+      final byId = {for (final s in kSpecReviewCircuit.steps) s.stepId: s};
       expect(byId.keys, {
         kIntakeStep,
         kReadinessStep,
@@ -145,15 +143,17 @@ void main() {
       // architect or committee agent is ever spawned.
       expect(byId[kIntakeStep]!.dependsOn, isEmpty);
       expect(byId[kReadinessStep]!.dependsOn, {kIntakeStep});
-      expect(
-        (byId[kReadinessStep]! as CapabilityStep).params,
-        {'rubric': kReadinessRubric},
-      );
+      expect((byId[kReadinessStep]! as CapabilityStep).params, {
+        'rubric': kReadinessRubric,
+      });
       expect(byId[kReadinessRouteStep]!.dependsOn, {kReadinessStep});
       // `specify` is still the route's SIBLING (bead `pow-ui8`), so the RESPEC
       // arm can name it in a `RouteVerdict.Rewind` — it just no longer heads the
       // circuit, and it now sits behind the DISCOVERY gate as well.
-      expect((byId[kSpecifyStep]! as CapabilityStep).capabilityId, kSpecifyStep);
+      expect(
+        (byId[kSpecifyStep]! as CapabilityStep).capabilityId,
+        kSpecifyStep,
+      );
       expect(byId[kSpecifyStep]!.dependsOn, {kDiscoveryCircuitId});
       // The hygiene wipe waits on specify, which is what puts EVERY lane
       // downstream of it (see the rewind-set test below).
@@ -220,12 +220,15 @@ void main() {
       // re-runs it: a respec rewrites the SPEC, not the BEAD (bead `pow-q7n`).
       expect(
         rewound,
-        isNot(anyOf(
-          contains(kIntakeStep),
-          contains(kReadinessStep),
-          contains(kReadinessRouteStep),
-        )),
-        reason: 'a respec round must not burn an agent re-grading an unchanged '
+        isNot(
+          anyOf(
+            contains(kIntakeStep),
+            contains(kReadinessStep),
+            contains(kReadinessRouteStep),
+          ),
+        ),
+        reason:
+            'a respec round must not burn an agent re-grading an unchanged '
             'bead',
       );
       // DISCOVERY is upstream of `specify` for exactly the same reason.
@@ -297,10 +300,13 @@ void main() {
         'the spec circuit is the HEAD (specify folded inside it) and only a '
         'passing spec proceeds to build', () {
       final byId = {for (final s in kCodeCircuit.steps) s.stepId: s};
-      expect(
-        byId.keys.toList(),
-        ['spec_review', 'agent', 'review', 'land', kDeliverStep],
-      );
+      expect(byId.keys.toList(), [
+        'spec_review',
+        'agent',
+        'review',
+        'land',
+        kDeliverStep,
+      ]);
       expect(byId['spec_review']!.dependsOn, isEmpty);
       expect(byId['agent']!.dependsOn, {'spec_review'});
       expect((byId['spec_review']! as SubCircuitStep).circuitId, 'spec_review');
@@ -359,10 +365,7 @@ void main() {
         final b = _specced().copyWith(
           design: _specced().design.replaceFirst('1. Add', 'Add'),
         );
-        expect(
-          specStructuralFindings(b).single,
-          contains('no numbered steps'),
-        );
+        expect(specStructuralFindings(b).single, contains('no numbered steps'));
       });
 
       test('a validation plan without items', () {
@@ -411,8 +414,7 @@ void main() {
         expect(specStructuralFindings(safe), isEmpty);
       });
 
-      test(
-          'quotation contexts never trip the fence — quoted code and cited '
+      test('quotation contexts never trip the fence — quoted code and cited '
           'clauses are evidence, not deferral (negative control)', () {
         // A fenced block carrying the very comment the plan deletes, inline
         // spans naming the token, and a blockquote citing a gate note that
@@ -500,19 +502,21 @@ void main() {
         );
       });
 
-      test('a heading quoted inside a fenced block is evidence, not a section',
-          () {
-        final quotedOnly = _specced().copyWith(
-          design: _specced().design.replaceFirst(
-            '## Touches\n',
-            '```markdown\n## Touches\n```\n',
-          ),
-        );
-        expect(
-          specStructuralFindings(quotedOnly).single,
-          contains('no `## Touches` section'),
-        );
-      });
+      test(
+        'a heading quoted inside a fenced block is evidence, not a section',
+        () {
+          final quotedOnly = _specced().copyWith(
+            design: _specced().design.replaceFirst(
+              '## Touches\n',
+              '```markdown\n## Touches\n```\n',
+            ),
+          );
+          expect(
+            specStructuralFindings(quotedOnly).single,
+            contains('no `## Touches` section'),
+          );
+        },
+      );
 
       test('every banned token is DERIVED from one list: each trips the fence '
           'in prose, and the brief names all seven', () {
@@ -532,7 +536,8 @@ void main() {
           expect(
             rendered,
             contains('`$token`'),
-            reason: 'the brief must NAME $token — a token the fence bans and '
+            reason:
+                'the brief must NAME $token — a token the fence bans and '
                 'the brief omits is a silent F',
           );
         }
@@ -589,14 +594,19 @@ void main() {
       );
       expect(
         prompt,
-        contains('"nodePath":"tg-1#r2/spec_review/plan-completeness","round":2}'),
+        contains(
+          '"nodePath":"tg-1#r2/spec_review/plan-completeness","round":2}',
+        ),
       );
       expect(prompt, contains('byte-for-byte'));
+      expect(prompt, contains('REQUIRED freshness stamps'));
+      expect(prompt, contains('the lane fails and re-runs'));
+      expect(prompt, contains('the unstamped grade is never recorded'));
+      expect(prompt, contains('/w/tg-1/.grid/critique/plan-completeness.json'));
       expect(
-        prompt,
-        contains('/w/tg-1/.grid/critique/plan-completeness.json'),
+        prompt.trim(),
+        endsWith('.grid/critique/plan-completeness.json`.'),
       );
-      expect(prompt.trim(), endsWith('.grid/critique/plan-completeness.json`.'));
     });
 
     test('anti-anchoring: the prompt names ONLY its own rubric, never the '
@@ -610,8 +620,11 @@ void main() {
       );
       for (final other in kSpecCommitteeRubrics) {
         if (other == 'adr-alignment') continue;
-        expect(prompt, isNot(contains('`$other`')),
-            reason: 'the $other lane must not leak into this prompt');
+        expect(
+          prompt,
+          isNot(contains('`$other`')),
+          reason: 'the $other lane must not leak into this prompt',
+        );
       }
     });
 
@@ -626,14 +639,16 @@ void main() {
       // Fresh verdict (stamp matches this round's nodePath) ⇒ the file wins.
       final verdict = File('${dir.path}/.grid/critique/coherence.json')
         ..createSync(recursive: true)
-        ..writeAsStringSync(jsonEncode({
-          'rubric': 'coherence',
-          'version': 1,
-          'grade': 'B',
-          'rationale': 'scope carved cleanly',
-          'nodePath': 'tg-1/spec_review/coherence',
-          'round': 0,
-        }));
+        ..writeAsStringSync(
+          jsonEncode({
+            'rubric': 'coherence',
+            'version': 1,
+            'grade': 'B',
+            'rationale': 'scope carved cleanly',
+            'nodePath': 'tg-1/spec_review/coherence',
+            'round': 0,
+          }),
+        );
       expect(await cap.result(c.context, c.args), {
         'grade': 'B',
         'transport': 'file',
@@ -641,16 +656,74 @@ void main() {
       });
 
       // A STALE stamp (a prior round's file) is rejected ⇒ fail-closed F.
-      verdict.writeAsStringSync(jsonEncode({
-        'rubric': 'coherence',
-        'version': 1,
-        'grade': 'A',
-        'nodePath': 'tg-1#r1/spec_review/coherence',
-        'round': 0,
-      }));
+      verdict.writeAsStringSync(
+        jsonEncode({
+          'rubric': 'coherence',
+          'version': 1,
+          'grade': 'A',
+          'nodePath': 'tg-1#r1/spec_review/coherence',
+          'round': 0,
+        }),
+      );
       final graded = await cap.result(c.context, c.args);
       expect(graded!['grade'], 'F');
       expect(graded['transport'], 'fail-closed-default');
+    });
+
+    test('an unstamped parseable spec-critic verdict fails the lane, while a '
+        'fresh stamped verdict still parses', () async {
+      final dir = Directory.systemTemp.createTempSync('spec-critic-unstamped-');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      const nodePath = 'tg-1/spec_review/coherence';
+      final verdict = File('${dir.path}/.grid/critique/coherence.json')
+        ..createSync(recursive: true)
+        ..writeAsStringSync(
+          jsonEncode({
+            'rubric': 'coherence',
+            'version': 1,
+            'grade': 'C',
+            'rationale': 'scope is close but the sibling carve-out is thin',
+          }),
+        );
+      final c = _laneCtx(
+        rubric: 'coherence',
+        workspaceDir: dir.path,
+        nodePath: nodePath,
+      );
+      await expectLater(
+        const SpecCriticCapability().result(c.context, c.args),
+        throwsA(
+          isA<RouteFailure>()
+              .having(
+                (e) => e.reason,
+                'reason',
+                'verdict present at ${verdict.path} but missing the freshness '
+                    'stamp (nodePath/round)',
+              )
+              .having(
+                (e) => e.toString(),
+                'toString',
+                'verdict present at ${verdict.path} but missing the freshness '
+                    'stamp (nodePath/round)',
+              ),
+        ),
+      );
+
+      verdict.writeAsStringSync(
+        jsonEncode({
+          'rubric': 'coherence',
+          'version': 1,
+          'grade': 'B',
+          'rationale': 'scope carved cleanly',
+          'nodePath': nodePath,
+          'round': 0,
+        }),
+      );
+      expect(await const SpecCriticCapability().result(c.context, c.args), {
+        'grade': 'B',
+        'transport': 'file',
+        'rationale': 'scope carved cleanly',
+      });
     });
 
     test('A15(5) alt-A: a stale round-0 verdict surviving into round 1 is '
@@ -664,22 +737,26 @@ void main() {
       // A4's stamp still MATCHES — only the round stamp can tell them apart.
       File('${dir.path}/.grid/critique/coherence.json')
         ..createSync(recursive: true)
-        ..writeAsStringSync(jsonEncode({
-          'rubric': 'coherence',
-          'version': 1,
-          'grade': 'A',
-          'rationale': 'round 0 said the spec was clean',
-          'nodePath': nodePath,
-          'round': 0,
-        }));
+        ..writeAsStringSync(
+          jsonEncode({
+            'rubric': 'coherence',
+            'version': 1,
+            'grade': 'A',
+            'rationale': 'round 0 said the spec was clean',
+            'nodePath': nodePath,
+            'round': 0,
+          }),
+        );
       final c = _laneCtx(
         rubric: 'coherence',
         workspaceDir: dir.path,
         nodePath: nodePath,
         round: 1, // the engine bumped rewindCount: this is the RESPEC round.
       );
-      final graded =
-          await const SpecCriticCapability().result(c.context, c.args);
+      final graded = await const SpecCriticCapability().result(
+        c.context,
+        c.args,
+      );
       expect(graded!['grade'], 'F');
       expect(graded['transport'], 'fail-closed-default');
       expect(
@@ -695,12 +772,14 @@ void main() {
       const nodePath = 'tg-1/spec_review/coherence';
       File('${dir.path}/.grid/critique/coherence.json')
         ..createSync(recursive: true)
-        ..writeAsStringSync(jsonEncode({
-          'grade': 'B',
-          'rationale': 'the respec landed',
-          'nodePath': nodePath,
-          'round': 1,
-        }));
+        ..writeAsStringSync(
+          jsonEncode({
+            'grade': 'B',
+            'rationale': 'the respec landed',
+            'nodePath': nodePath,
+            'round': 1,
+          }),
+        );
       final c = _laneCtx(
         rubric: 'coherence',
         workspaceDir: dir.path,
@@ -739,17 +818,21 @@ void main() {
       expect(out.reason, contains('hard block'));
     });
 
-    test('an LLM spec lane at D WITH a rationale ⇒ a REWIND of the `specify` '
-        'sibling (beads `pow-7nm` + `pow-ui8`) — the loop actuates, no human',
-        () async {
-      final out = await _specRoute(
-        {...allA(), 'plan-completeness': 'D'},
-        rationales: const {'plan-completeness': 'step 3 names no test command'},
-      );
-      expect(out, isA<Rewind>());
-      expect((out as Rewind).stepIds, {kSpecifyStep});
-      expect(out.reason, contains('plan-completeness=D'));
-    });
+    test(
+      'an LLM spec lane at D WITH a rationale ⇒ a REWIND of the `specify` '
+      'sibling (beads `pow-7nm` + `pow-ui8`) — the loop actuates, no human',
+      () async {
+        final out = await _specRoute(
+          {...allA(), 'plan-completeness': 'D'},
+          rationales: const {
+            'plan-completeness': 'step 3 names no test command',
+          },
+        );
+        expect(out, isA<Rewind>());
+        expect((out as Rewind).stepIds, {kSpecifyStep});
+        expect(out.reason, contains('plan-completeness=D'));
+      },
+    );
 
     test('an LLM spec lane at D with NO rationale ⇒ a HUMAN gate — nothing to '
         'respec against, so never a rewind', () async {

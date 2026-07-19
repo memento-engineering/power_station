@@ -218,17 +218,20 @@ String verdictJsonTemplate({
     '"$kVerdictRoundKey":$round}';
 
 /// The stamp instruction that follows [verdictJsonTemplate] in every critic
-/// prompt: both stamps are FIXED and copied verbatim. LOUD about the
-/// consequence — a verdict carrying the wrong stamps is DISCARDED, never
-/// repaired.
+/// prompt: both stamps are REQUIRED and copied verbatim. LOUD about the
+/// consequence — a verdict carrying the wrong stamps is discarded as stale, and
+/// a verdict missing either stamp is discarded as an unverifiable transport
+/// defect so the lane fails and re-runs.
 const String kVerdictStampInstruction =
-    'The `nodePath` and `round` values above are FIXED — copy them '
-    'byte-for-byte into your verdict. `nodePath` proves the verdict is YOURS '
-    'and not another node\'s stray file; `round` proves it is THIS round\'s — a '
-    'rework wave re-runs you in the SAME worktree under the SAME node path, so '
-    'an earlier round\'s verdict file is otherwise indistinguishable from '
-    'yours. A verdict carrying the wrong stamps (or none) is DISCARDED and the '
-    'lane grades F.';
+    'The `nodePath` and `round` values above are REQUIRED freshness stamps — '
+    'copy them byte-for-byte into your verdict. `nodePath` proves the verdict '
+    'is YOURS and not another node\'s stray file; `round` proves it is THIS '
+    'round\'s — a rework wave re-runs you in the SAME worktree under the SAME '
+    'node path, so an earlier round\'s verdict file is otherwise '
+    'indistinguishable from yours. A verdict carrying the wrong stamps is '
+    'discarded as stale and the lane grades F. A verdict missing either stamp '
+    'is discarded as an unverifiable transport defect; the lane fails and '
+    're-runs, and the unstamped grade is never recorded.';
 
 /// A pluggable source of a rubric's prose text by id (D-9: the Packaged-AI-Asset
 /// loader replaces the inline placeholder). Returns the rubric body a critic's
@@ -264,7 +267,10 @@ const Circuit kCodeReviewCircuit = Circuit(
   id: 'code_review',
   terminalStepId: 'route',
   steps: [
-    CapabilityStep(stepId: kClearCritiqueStep, capabilityId: kClearCritiqueStep),
+    CapabilityStep(
+      stepId: kClearCritiqueStep,
+      capabilityId: kClearCritiqueStep,
+    ),
     CapabilityStep(
       stepId: kPinDiffStep,
       capabilityId: kPinDiffStep,
@@ -304,7 +310,8 @@ const Circuit kCodeReviewCircuit = Circuit(
         'test-coverage',
       },
       params: {
-        'critics': 'code-validation,spec-adherence,regression-risk,test-coverage',
+        'critics':
+            'code-validation,spec-adherence,regression-risk,test-coverage',
         'gating': kGatingRubric,
       },
     ),
@@ -341,7 +348,8 @@ class ClearCritiqueCapability extends ServiceCapability {
   /// inject a no-op so the offline suite never touches a real filesystem at a
   /// synthetic workspace path — Fakes, not mocks); defaults to the real
   /// delete+recreate.
-  const ClearCritiqueCapability({DirectoryClearer? clearer}) : _clearer = clearer;
+  const ClearCritiqueCapability({DirectoryClearer? clearer})
+    : _clearer = clearer;
 
   final DirectoryClearer? _clearer;
 
@@ -512,7 +520,13 @@ class PinDiffCapability extends RouteCapability {
     // land means the critics would fall back to free rein of the worktree — the
     // exact failure being closed — so it fails LOUD, never a silent advance.
     try {
-      _writePinnedDiff(workspaceDir, baseRef, workspace.branch, commits, diffText);
+      _writePinnedDiff(
+        workspaceDir,
+        baseRef,
+        workspace.branch,
+        commits,
+        diffText,
+      );
     } catch (e) {
       throw RouteFailure('pin-diff: could not write the pinned diff — $e');
     }
@@ -536,7 +550,9 @@ class PinDiffCapability extends RouteCapability {
   ) {
     final header = StringBuffer()
       ..writeln('# Pinned review scope: $branch vs $baseRef')
-      ..writeln('# `git diff $baseRef...HEAD` — the ONLY code this bead changed.')
+      ..writeln(
+        '# `git diff $baseRef...HEAD` — the ONLY code this bead changed.',
+      )
       ..writeln('# Commits under review (`git log $baseRef..HEAD`):');
     if (commits.isEmpty) {
       header.writeln('#   (none)');
@@ -671,7 +687,10 @@ class CriticCapability extends ProcessCapability {
     return spawnFor(
       environment: environment,
       model: config.params['model'],
-      endpoint: siteBinding.endpointFor(name: config.harness, environment: environment),
+      endpoint: siteBinding.endpointFor(
+        name: config.harness,
+        environment: environment,
+      ),
       brief: AgentBrief(
         task: buildCriticPrompt(
           bead,
@@ -713,7 +732,10 @@ class CriticCapability extends ProcessCapability {
   }
 
   @override
-  Future<Map<String, String>?> result(TreeContext context, StepArgs args) async {
+  Future<Map<String, String>?> result(
+    TreeContext context,
+    StepArgs args,
+  ) async {
     // Read the ambient workspace at ENTRY (while mounted); only the captured
     // value is touched below.
     final rubric = _rubricOf(args);
@@ -748,26 +770,33 @@ class CriticCapability extends ProcessCapability {
     // An LLM critic's verdict JSON. Fail-closed: a missing / malformed / STALE
     // verdict (no file, unparseable JSON, no readable `grade`, a `nodePath`
     // stamp naming ANOTHER node — gate-integrity #3 — or a `round` stamp naming
-    // an EARLIER round of THIS node — A15(5) alt-A) falls back, in
-    // order, to a round-fresh STRAY verdict (gate-integrity #4 — a critic that
-    // cd'd mid-run wrote the file under a subdir instead of the canonical path;
+    // an EARLIER round of THIS node — A15(5) alt-A) falls back, in order, to a
+    // round-fresh STRAY verdict (gate-integrity #4 — a critic that cd'd mid-run
+    // wrote the file under a subdir instead of the canonical path;
     // [_strayVerdict]) then to the captured harness RESULT TEXT (tg-291 — the
     // verdict-transport brittleness: a critic that graded cleanly but wrote its
     // verdict into stdout instead of the file must not be scored F on a
-    // transport slip alone). The canonical FILE wins whenever it parses AND is
-    // fresh; only an absent/malformed/stale canonical file consults the
-    // fallbacks. No parseable verdict ANYWHERE still grades F — every path now
-    // names its own `transport` (`file`/`file-stray`/`envelope`/
-    // `fail-closed-default`), so a false-gate post-mortem never has to guess
-    // which channel produced the grade.
+    // transport slip alone). A PRESENT, parseable verdict with a grade but
+    // missing `nodePath` or `round` is different: the critic decided, but the
+    // transport freshness envelope is unverifiable, so [_verdictFromFile] throws
+    // [RouteFailure] and the process lane fails/retries instead of recording a
+    // fake F. The canonical FILE wins whenever it parses AND is fresh; only an
+    // absent/malformed/stale canonical file consults the fallbacks. No parseable
+    // verdict ANYWHERE still grades F — every path names its own `transport`
+    // (`file`/`file-stray`/`envelope`/`fail-closed-default`), so a false-gate
+    // post-mortem never has to guess which channel produced the grade.
     final verdict = File(p.join(workspaceDir, _critiqueDir, '$rubric.json'));
     final graded =
-        _verdictFromFile(
-          verdict,
-          expectedNodePath: args.nodePath,
-          expectedRound: round,
+        _payloadOrNull(
+          _verdictFromFile(
+            verdict,
+            expectedNodePath: args.nodePath,
+            expectedRound: round,
+          ),
         ) ??
-        _strayVerdict(workspaceDir, rubric, args.nodePath, round) ??
+        _payloadOrNull(
+          _strayVerdict(workspaceDir, rubric, args.nodePath, round),
+        ) ??
         _verdictFromResultText(
           readEnvelopeResultText(workspaceDir, args.nodePath),
         ) ??
@@ -952,8 +981,7 @@ class CodeRouteCapability extends RouteCapability {
     // Read each lane's RAW grade once (null/empty ⇒ missing), then the
     // fail-closed grade used by the block rules (missing ⇒ F).
     final rawGrades = <String, String?>{
-      for (final id in criticIds)
-        id: siblings.resultOf('$parent/$id')['grade'],
+      for (final id in criticIds) id: siblings.resultOf('$parent/$id')['grade'],
     };
     final grades = <String, String>{
       for (final entry in rawGrades.entries)
@@ -980,7 +1008,9 @@ class CodeRouteCapability extends RouteCapability {
     final spread = indices.isEmpty
         ? 0
         : indices.reduce(math.max) - indices.reduce(math.min);
-    if (spread >= 3) return const Escalate('grade spread ≥ 3 — human ultimatum');
+    if (spread >= 3) {
+      return const Escalate('grade spread ≥ 3 — human ultimatum');
+    }
 
     // 3. any non-gating critic at D/F — rework → restForOne re-key is deferred
     // (build-order); a D/F parks at the bound handler for now.
@@ -1068,40 +1098,85 @@ int? _stampedRound(Object? raw) => switch (raw) {
   _ => null,
 };
 
+sealed class _VerdictFileRead {
+  const _VerdictFileRead();
+}
+
+final class _VerdictFileAccepted extends _VerdictFileRead {
+  const _VerdictFileAccepted(this.payload);
+
+  final Map<String, String> payload;
+}
+
+final class _VerdictFileMissing extends _VerdictFileRead {
+  const _VerdictFileMissing();
+}
+
+final class _VerdictFileRejected extends _VerdictFileRead {
+  const _VerdictFileRejected();
+}
+
+final class _VerdictFileUnstamped extends _VerdictFileRead {
+  const _VerdictFileUnstamped(this.path);
+
+  final String path;
+
+  String get reason =>
+      'verdict present at $path but missing the freshness stamp (nodePath/round)';
+}
+
+Map<String, String>? _payloadOrNull(_VerdictFileRead read) => switch (read) {
+  _VerdictFileAccepted(:final payload) => payload,
+  _VerdictFileMissing() || _VerdictFileRejected() => null,
+  _VerdictFileUnstamped(:final reason) => throw RouteFailure(reason),
+};
+
 /// The verdict file's grade, when it parses AND is FRESH — `null` for an absent
-/// file, invalid JSON, a missing/blank `grade`, a `nodePath` stamp that doesn't
-/// match [expectedNodePath], OR a `round` stamp that doesn't match
-/// [expectedRound]. The TWO stamps fence two DIFFERENT staleness modes and both
-/// are load-bearing: `nodePath` rejects a verdict some OTHER node wrote (a stray
+/// file, invalid JSON, or a missing/blank `grade`. It rejects a `nodePath` stamp
+/// that doesn't match [expectedNodePath], OR a `round` stamp that doesn't match
+/// [expectedRound], so stale or foreign stamps continue to the fallback chain
+/// per A4/A15. The TWO stamps fence two DIFFERENT staleness modes and both are
+/// load-bearing: `nodePath` rejects a verdict some OTHER node wrote (a stray
 /// write, a mis-keyed lane — A4); `round` rejects a verdict THIS node wrote in
 /// an EARLIER round (A15(5) alt-A — under `RouteVerdict.Rewind` the node path is
-/// byte-identical round to round, so `nodePath` alone cannot see it). An absent
-/// or unreadable round stamp is a MISS, not a pass. Every miss is treated as
-/// "unparseable" so [CriticCapability.result] falls through to the stray /
-/// RESULT TEXT / fail-closed chain (tg-291). Never throws.
-Map<String, String>? _verdictFromFile(
+/// byte-identical round to round, so `nodePath` alone cannot see it). A present
+/// parseable verdict with a readable grade but missing either stamp is discarded
+/// and surfaced as [_VerdictFileUnstamped]; [_payloadOrNull] turns that into a
+/// [RouteFailure] so the process lane fails and is retried. Absent, malformed,
+/// stale, or foreign verdicts are treated as misses so [CriticCapability.result]
+/// falls through to the stray / RESULT TEXT / fail-closed chain (tg-291).
+_VerdictFileRead _verdictFromFile(
   File verdict, {
   required String expectedNodePath,
   required int expectedRound,
 }) {
-  if (!verdict.existsSync()) return null;
+  if (!verdict.existsSync()) return const _VerdictFileMissing();
   try {
     final json = jsonDecode(verdict.readAsStringSync()) as Map<String, dynamic>;
     final grade = (json['grade'] as String?)?.trim().toUpperCase();
-    if (grade == null || grade.isEmpty) return null;
+    if (grade == null || grade.isEmpty) return const _VerdictFileRejected();
     final stampedNodePath = (json['nodePath'] as String?)?.trim();
-    if (stampedNodePath != expectedNodePath) return null; // a FOREIGN node's.
+    final hasNodePathStamp =
+        stampedNodePath != null && stampedNodePath.isNotEmpty;
+    final hasRoundStamp =
+        json.containsKey(kVerdictRoundKey) && json[kVerdictRoundKey] != null;
+    if (!hasNodePathStamp || !hasRoundStamp) {
+      return _VerdictFileUnstamped(verdict.path);
+    }
+    if (stampedNodePath != expectedNodePath) {
+      return const _VerdictFileRejected(); // a FOREIGN node's.
+    }
     if (_stampedRound(json[kVerdictRoundKey]) != expectedRound) {
-      return null; // a STALE round's — same node, earlier wave.
+      return const _VerdictFileRejected(); // a STALE round's.
     }
     final rationale = (json['rationale'] as String?)?.trim() ?? '';
-    return {
+    return _VerdictFileAccepted({
       'grade': grade,
       'transport': 'file',
       if (rationale.isNotEmpty) 'rationale': rationale,
-    };
+    });
   } catch (_) {
-    return null;
+    return const _VerdictFileRejected();
   }
 }
 
@@ -1120,26 +1195,38 @@ Map<String, String>? _verdictFromFile(
 /// stamps (gate-integrity #3, A15(5) alt-A) are exactly what makes accepting an
 /// off-path file safe: a stale or foreign stray can never match, so a leftover
 /// from an earlier round is never misread as this round's verdict. The canonical
-/// path is skipped (the caller already consulted it). `null` when no fresh stray
-/// exists. Best-effort: never throws.
-Map<String, String>? _strayVerdict(
+/// path is skipped (the caller already consulted it). Absent or malformed stray
+/// verdicts continue the fallback chain; stale or foreign stamps continue the
+/// fallback chain per A4/A15; a present parseable stray verdict missing the
+/// freshness stamp is discarded as [_VerdictFileUnstamped], which fails the lane
+/// through [RouteFailure] so the process lane retries. Best-effort for directory
+/// traversal; parse outcomes remain explicit.
+_VerdictFileRead _strayVerdict(
   String workspaceDir,
   String rubric,
   String expectedNodePath,
   int expectedRound,
 ) {
-  final canonical =
-      p.canonicalize(p.join(workspaceDir, _critiqueDir, '$rubric.json'));
+  final canonical = p.canonicalize(
+    p.join(workspaceDir, _critiqueDir, '$rubric.json'),
+  );
   for (final file in _strayVerdictFiles(workspaceDir, rubric)) {
     if (p.canonicalize(file.path) == canonical) continue; // the canonical path.
-    final graded = _verdictFromFile(
+    final read = _verdictFromFile(
       file,
       expectedNodePath: expectedNodePath,
       expectedRound: expectedRound,
     );
-    if (graded != null) return {...graded, 'transport': 'file-stray'};
+    switch (read) {
+      case _VerdictFileAccepted(:final payload):
+        return _VerdictFileAccepted({...payload, 'transport': 'file-stray'});
+      case _VerdictFileUnstamped():
+        return read;
+      case _VerdictFileMissing() || _VerdictFileRejected():
+        continue;
+    }
   }
-  return null;
+  return const _VerdictFileMissing();
 }
 
 /// Every `.../.grid/critique/<rubric>.json` file under [root], found by a
@@ -1148,7 +1235,10 @@ Map<String, String>? _strayVerdict(
 /// followed. Best-effort: an unreadable directory is skipped, never thrown.
 Iterable<File> _strayVerdictFiles(String root, String rubric) sync* {
   const prune = {'.git', '.dart_tool', 'node_modules', 'build'};
-  final target = p.join(_critiqueDir, '$rubric.json'); // '.grid/critique/<r>.json'
+  final target = p.join(
+    _critiqueDir,
+    '$rubric.json',
+  ); // '.grid/critique/<r>.json'
   final stack = <Directory>[Directory(root)];
   while (stack.isNotEmpty) {
     final dir = stack.removeLast();
@@ -1261,8 +1351,10 @@ Map<String, String>? _verdictFromEmbeddedJson(String text) {
 /// whitespace only), so the `"grade":"A"` inside an echoed JSON template — where
 /// a `"` sits between the word and the colon — never matches here (that shape is
 /// already handled by [_verdictFromEmbeddedJson]).
-final RegExp _verdictHeading =
-    RegExp(r'(?:verdict|grade)\s*:\s*([A-Fa-f])\b', caseSensitive: false);
+final RegExp _verdictHeading = RegExp(
+  r'(?:verdict|grade)\s*:\s*([A-Fa-f])\b',
+  caseSensitive: false,
+);
 
 /// The prose that follows the LAST `Verdict:`/`Grade: <A-F>` heading in [text],
 /// as a grade + marked rationale — `null` when no heading is present. A verdict
