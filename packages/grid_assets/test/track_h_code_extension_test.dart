@@ -13,6 +13,7 @@
 import 'dart:io';
 
 import 'package:dart_grid_assets/dart_grid_assets.dart';
+import 'package:genesis_tree/genesis_tree.dart' show ValueKey;
 import 'package:grid_assets/grid_assets.dart';
 import 'package:beads_dart/beads_dart.dart';
 import 'package:grid_engine/grid_engine.dart';
@@ -25,9 +26,7 @@ import 'support/asset_fakes.dart';
 /// The capability's (ambient tree, per-step args) pair — the context rip-out
 /// shape: the Bead/Workspace/ServiceBundle ride the tree as ambient values; the
 /// per-step nodePath/cancel ride the args.
-({FakeTreeContext context, StepArgs args}) _capCtx({
-  Bead? beadOverride,
-}) => (
+({FakeTreeContext context, StepArgs args}) _capCtx({Bead? beadOverride}) => (
   context: FakeTreeContext(
     values: {
       Bead: beadOverride ?? bead('tg-1'),
@@ -45,6 +44,22 @@ import 'support/asset_fakes.dart';
 /// The ambient Workspace [_capCtx] mounts (for the brief-parity assertions).
 Workspace _workspace() =>
     testWorkspace('tg-1', workspaceDir: '/w/tg-1', branch: 'grid/tg-1');
+
+const _registryAgentCircuit = Circuit(
+  id: 'code',
+  terminalStepId: 'agent',
+  steps: [CapabilityStep(stepId: 'agent', capabilityId: 'agent')],
+);
+
+StepMount _registryAgentMount() => StepMount(
+  step: const CapabilityStep(stepId: 'agent', capabilityId: 'agent'),
+  nodePath: 'tg-1/agent',
+  circuit: _registryAgentCircuit,
+  circuitPath: 'tg-1',
+  session: const SessionHandle('tgdog-s'),
+  node: const NodeCursor(),
+  key: const ValueKey('tg-1/agent#0.0'),
+);
 
 void main() {
   group('Track H — the capabilities reproduce P0 configs/orchestration', () {
@@ -79,33 +94,44 @@ void main() {
       expect(cfg.lifecycle, Lifecycle.oneTurn);
     });
 
-    test('AgentCapability carries the FULL bead + local-first working agreement',
-        () {
-      final rich = bead('tg-1').copyWith(
-        title: 'Wire the federation bus',
-        description: 'Connect The Studio to The Dashboard.',
-        design: 'Use a lossy inter-station gossip bus.',
-        acceptanceCriteria: 'A peer heartbeat surfaces within 1s.',
-        notes: 'Coexistence-safe; do not touch gc.',
-        metadata: const {'rig': 'tgdog'},
-      );
-      final prompt = buildAgentBrief(rich, _workspace()).render();
-      // The full bead — a title-only prompt would starve the agent (A36).
-      expect(prompt, contains('# Wire the federation bus'));
-      expect(prompt, contains('substation `tgdog`'));
-      expect(prompt, contains('## Task\nConnect The Studio to The Dashboard.'));
-      expect(prompt, contains('## Design\nUse a lossy inter-station gossip bus.'));
-      expect(prompt, contains('## Acceptance criteria'));
-      expect(prompt, contains('## Notes\nCoexistence-safe; do not touch gc.'));
-      // The local-first working agreement (commit, no push, no PR).
-      expect(prompt, contains('/w/tg-1'));
-      expect(prompt, contains('branch `grid/tg-1`'));
-      expect(prompt, contains('COMMIT'));
-      expect(prompt, contains('Do NOT push and do NOT open a pull request'));
-      // tg-p9q: completion is OBSERVED via process-exit, never DECLARED — the
-      // dangling `grid step --advance` instruction is gone.
-      expect(prompt, isNot(contains('grid step --advance')));
-    });
+    test(
+      'AgentCapability carries the FULL bead + local-first working agreement',
+      () {
+        final rich = bead('tg-1').copyWith(
+          title: 'Wire the federation bus',
+          description: 'Connect The Studio to The Dashboard.',
+          design: 'Use a lossy inter-station gossip bus.',
+          acceptanceCriteria: 'A peer heartbeat surfaces within 1s.',
+          notes: 'Coexistence-safe; do not touch gc.',
+          metadata: const {'rig': 'tgdog'},
+        );
+        final prompt = buildAgentBrief(rich, _workspace()).render();
+        // The full bead — a title-only prompt would starve the agent (A36).
+        expect(prompt, contains('# Wire the federation bus'));
+        expect(prompt, contains('substation `tgdog`'));
+        expect(
+          prompt,
+          contains('## Task\nConnect The Studio to The Dashboard.'),
+        );
+        expect(
+          prompt,
+          contains('## Design\nUse a lossy inter-station gossip bus.'),
+        );
+        expect(prompt, contains('## Acceptance criteria'));
+        expect(
+          prompt,
+          contains('## Notes\nCoexistence-safe; do not touch gc.'),
+        );
+        // The local-first working agreement (commit, no push, no PR).
+        expect(prompt, contains('/w/tg-1'));
+        expect(prompt, contains('branch `grid/tg-1`'));
+        expect(prompt, contains('COMMIT'));
+        expect(prompt, contains('Do NOT push and do NOT open a pull request'));
+        // tg-p9q: completion is OBSERVED via process-exit, never DECLARED — the
+        // dangling `grid step --advance` instruction is gone.
+        expect(prompt, isNot(contains('grid step --advance')));
+      },
+    );
 
     test('the agreement DEMANDS the commit and gives the tracker to the station '
         '— stated as focus + ownership, never as a prohibition', () {
@@ -151,10 +177,16 @@ void main() {
       // rides the ONE prompt every coding agent receives, so it reaches every
       // spawned agent. Static text — no bead/path interpolation, so it survives
       // the Q3′ reference-inflation fence (track_e) untouched.
-      final agreement = buildAgentBrief(bead('tg-1'), _workspace()).workingAgreement;
+      final agreement = buildAgentBrief(
+        bead('tg-1'),
+        _workspace(),
+      ).workingAgreement;
       expect(agreement, contains('D-H doctrine'));
       expect(agreement, contains('Always watch deps'));
-      expect(agreement, contains(r'never snapshot-and-`??=`-cache reactive state'));
+      expect(
+        agreement,
+        contains(r'never snapshot-and-`??=`-cache reactive state'),
+      );
       expect(
         agreement,
         contains(r'No public synchronous accessor over `StateNotifier` state'),
@@ -209,19 +241,22 @@ void main() {
       expect(brief, isNot(contains('Refs: tg-1')));
     });
 
-    test('AgentCapability interpretEvent: clean exit completes, non-zero / death '
-        'fails', () {
-      const cap = AgentCapability();
-      expect(
-        cap.interpretEvent(const Exited(name: 'x', exitCode: 0)),
-        StepSignal.complete,
-      );
-      expect(
-        cap.interpretEvent(const Exited(name: 'x', exitCode: 1)),
-        StepSignal.failed,
-      );
-      expect(cap.interpretEvent(const Died(name: 'x')), StepSignal.failed);
-    });
+    test(
+      'AgentCapability interpretEvent: clean exit completes, non-zero / death '
+      'fails',
+      () {
+        const cap = AgentCapability();
+        expect(
+          cap.interpretEvent(const Exited(name: 'x', exitCode: 0)),
+          StepSignal.complete,
+        );
+        expect(
+          cap.interpretEvent(const Exited(name: 'x', exitCode: 1)),
+          StepSignal.failed,
+        );
+        expect(cap.interpretEvent(const Died(name: 'x')), StepSignal.failed);
+      },
+    );
 
     test('GitSourceControl.provisionWorkspace no-ops when provisioning is not '
         'wired (no provisioner) — never throws', () async {
@@ -232,50 +267,64 @@ void main() {
       // Reaching here without throwing is the assertion (offline no-op).
     });
 
-    test('GitSourceControl.provisionWorkspace stashes scaffold residue, provisions '
-        'the worktree, and restores the residue inside it', () async {
-      final rootDir = Directory.systemTemp.createTempSync('pow2ts-root-');
-      addTearDown(() => rootDir.deleteSync(recursive: true));
-      final workspaceDir = WorktreeLayout.worktreePath(
-        rootDir.path,
-        'ps',
-        'pow-1',
-      );
-      final residue = File(p.join(workspaceDir, '.grid', 'critique', 'pinned.diff'));
-      residue.createSync(recursive: true);
-      residue.writeAsStringSync('pinned');
+    test(
+      'GitSourceControl.provisionWorkspace stashes scaffold residue, provisions '
+      'the worktree, and restores the residue inside it',
+      () async {
+        final rootDir = Directory.systemTemp.createTempSync('pow2ts-root-');
+        addTearDown(() => rootDir.deleteSync(recursive: true));
+        final workspaceDir = WorktreeLayout.worktreePath(
+          rootDir.path,
+          'ps',
+          'pow-1',
+        );
+        final residue = File(
+          p.join(workspaceDir, '.grid', 'critique', 'pinned.diff'),
+        );
+        residue.createSync(recursive: true);
+        residue.writeAsStringSync('pinned');
 
-      final runner = _MaterializingWorktreeRunner(
-        checkoutEntries: {'lib/source.dart': 'void source() {}'},
-      );
-      final sc = GitSourceControl(
-        provisioner: StationGitService(
-          runner: runner,
-          prOpener: _NoopPrOpener(),
-        ),
-        root: RootCheckout(
-          path: rootDir.path,
-          defaultBranch: 'main',
-          substation: 'ps',
-        ),
-      );
+        final runner = _MaterializingWorktreeRunner(
+          checkoutEntries: {'lib/source.dart': 'void source() {}'},
+        );
+        final sc = GitSourceControl(
+          provisioner: StationGitService(
+            runner: runner,
+            prOpener: _NoopPrOpener(),
+          ),
+          root: RootCheckout(
+            path: rootDir.path,
+            defaultBranch: 'main',
+            substation: 'ps',
+          ),
+        );
 
-      await sc.provisionWorkspace(beadId: 'pow-1', workspaceDir: workspaceDir);
+        await sc.provisionWorkspace(
+          beadId: 'pow-1',
+          workspaceDir: workspaceDir,
+        );
 
-      expect(File(p.join(workspaceDir, '.git')).existsSync(), isTrue);
-      expect(File(p.join(workspaceDir, 'lib', 'source.dart')).existsSync(), isTrue);
-      expect(
-        File(p.join(workspaceDir, '.grid', 'critique', 'pinned.diff')).readAsStringSync(),
-        'pinned',
-      );
-      expect(Directory('$workspaceDir.scaffold-stash').existsSync(), isFalse);
-      expect(
-        runner.calls.any(
-          (args) => args.length >= 2 && args[0] == 'worktree' && args[1] == 'add',
-        ),
-        isTrue,
-      );
-    });
+        expect(File(p.join(workspaceDir, '.git')).existsSync(), isTrue);
+        expect(
+          File(p.join(workspaceDir, 'lib', 'source.dart')).existsSync(),
+          isTrue,
+        );
+        expect(
+          File(
+            p.join(workspaceDir, '.grid', 'critique', 'pinned.diff'),
+          ).readAsStringSync(),
+          'pinned',
+        );
+        expect(Directory('$workspaceDir.scaffold-stash').existsSync(), isFalse);
+        expect(
+          runner.calls.any(
+            (args) =>
+                args.length >= 2 && args[0] == 'worktree' && args[1] == 'add',
+          ),
+          isTrue,
+        );
+      },
+    );
 
     test('GitSourceControl.provisionWorkspace treats an existing .git entry as '
         'already provisioned', () async {
@@ -316,7 +365,9 @@ void main() {
         'ps',
         'pow-1',
       );
-      final residue = File(p.join(workspaceDir, '.grid', 'telemetry', 'agent.json'));
+      final residue = File(
+        p.join(workspaceDir, '.grid', 'telemetry', 'agent.json'),
+      );
       residue.createSync(recursive: true);
       residue.writeAsStringSync('{"ok":true}');
       final sc = GitSourceControl(
@@ -338,7 +389,9 @@ void main() {
 
       expect(Directory(workspaceDir).existsSync(), isTrue);
       expect(
-        File(p.join(workspaceDir, '.grid', 'telemetry', 'agent.json')).readAsStringSync(),
+        File(
+          p.join(workspaceDir, '.grid', 'telemetry', 'agent.json'),
+        ).readAsStringSync(),
         '{"ok":true}',
       );
       expect(Directory('$workspaceDir.scaffold-stash').existsSync(), isFalse);
@@ -353,7 +406,9 @@ void main() {
         'ps',
         'pow-1',
       );
-      final residue = File(p.join(workspaceDir, '.grid', 'critique', 'pinned.diff'));
+      final residue = File(
+        p.join(workspaceDir, '.grid', 'critique', 'pinned.diff'),
+      );
       residue.createSync(recursive: true);
       residue.writeAsStringSync('scaffold');
       final sc = GitSourceControl(
@@ -382,38 +437,41 @@ void main() {
       );
     });
 
-    test('GitSourceControl.provisionWorkspace refuses a provisioner that leaves '
-        'no .git entry', () async {
-      final rootDir = Directory.systemTemp.createTempSync('pow2ts-root-');
-      addTearDown(() => rootDir.deleteSync(recursive: true));
-      final workspaceDir = WorktreeLayout.worktreePath(
-        rootDir.path,
-        'ps',
-        'pow-1',
-      );
-      final sc = GitSourceControl(
-        provisioner: StationGitService(
-          runner: CannedGitRunner(),
-          prOpener: _NoopPrOpener(),
-        ),
-        root: RootCheckout(
-          path: rootDir.path,
-          defaultBranch: 'main',
-          substation: 'ps',
-        ),
-      );
-
-      await expectLater(
-        sc.provisionWorkspace(beadId: 'pow-1', workspaceDir: workspaceDir),
-        throwsA(
-          isA<StateError>().having(
-            (error) => error.message,
-            'message',
-            contains('missing .git entry'),
+    test(
+      'GitSourceControl.provisionWorkspace refuses a provisioner that leaves '
+      'no .git entry',
+      () async {
+        final rootDir = Directory.systemTemp.createTempSync('pow2ts-root-');
+        addTearDown(() => rootDir.deleteSync(recursive: true));
+        final workspaceDir = WorktreeLayout.worktreePath(
+          rootDir.path,
+          'ps',
+          'pow-1',
+        );
+        final sc = GitSourceControl(
+          provisioner: StationGitService(
+            runner: CannedGitRunner(),
+            prOpener: _NoopPrOpener(),
           ),
-        ),
-      );
-    });
+          root: RootCheckout(
+            path: rootDir.path,
+            defaultBranch: 'main',
+            substation: 'ps',
+          ),
+        );
+
+        await expectLater(
+          sc.provisionWorkspace(beadId: 'pow-1', workspaceDir: workspaceDir),
+          throwsA(
+            isA<StateError>().having(
+              (error) => error.message,
+              'message',
+              contains('missing .git entry'),
+            ),
+          ),
+        );
+      },
+    );
 
     test('workspaceFor/branchFor/baseBranch derive the layout — and an EMPTY '
         'root path yields the ABSOLUTE synthetic, never a CWD-relative path '
@@ -421,41 +479,58 @@ void main() {
       // A real root → the canonical per-bead worktree layout (byte-identical to
       // the deleted EffectContext.worktreeFor).
       const real = GitSourceControl(
-        root: RootCheckout(path: '/root', defaultBranch: 'trunk', substation: 'tgdog'),
+        root: RootCheckout(
+          path: '/root',
+          defaultBranch: 'trunk',
+          substation: 'tgdog',
+        ),
       );
       expect(real.workspaceFor('tg-1'), '/root/.grid/worktrees/tgdog/tg-1');
       expect(real.branchFor('tg-1'), 'grid/tg-1');
       expect(real.baseBranch, 'trunk');
 
       // No root → the absolute synthetic.
-      expect(const GitSourceControl().workspaceFor('tg-1'), '/grid/worktrees/tg-1');
+      expect(
+        const GitSourceControl().workspaceFor('tg-1'),
+        '/grid/worktrees/tg-1',
+      );
       expect(const GitSourceControl().baseBranch, 'main');
 
       // EMPTY-path root (the dry-run synthetic) → STILL the absolute synthetic,
       // NOT a CWD-relative `.grid/worktrees/...` (p.join would drop the empty
       // leading segment). This is the E3 latent-footgun fix + byte-parity restore.
       const emptyRoot = GitSourceControl(
-        root: RootCheckout(path: '', defaultBranch: 'main', substation: 'tgdog'),
+        root: RootCheckout(
+          path: '',
+          defaultBranch: 'main',
+          substation: 'tgdog',
+        ),
       );
       expect(emptyRoot.workspaceFor('tg-1'), '/grid/worktrees/tg-1');
-      expect(emptyRoot.workspaceFor('tg-1').startsWith('/'), isTrue,
-          reason: 'must be absolute — never spawn against the CWD');
+      expect(
+        emptyRoot.workspaceFor('tg-1').startsWith('/'),
+        isTrue,
+        reason: 'must be absolute — never spawn against the CWD',
+      );
     });
   });
 
   group('Track H — AgentCapability.result() usage telemetry (FT-2)', () {
     // The result() hook reads the harness's `--output-format json` envelope from
     // the per-step telemetry file; here a test writes it into a temp workspace.
-    ({FakeTreeContext context, StepArgs args}) resultCtx(String workspaceDir) => (
-      context: FakeTreeContext(values: {
-        Workspace: testWorkspace(
-          'tg-1',
-          workspaceDir: workspaceDir,
-          branch: 'grid/tg-1',
-        ),
-      }),
-      args: stepArgs('tg-1/agent'),
-    );
+    ({FakeTreeContext context, StepArgs args}) resultCtx(String workspaceDir) =>
+        (
+          context: FakeTreeContext(
+            values: {
+              Workspace: testWorkspace(
+                'tg-1',
+                workspaceDir: workspaceDir,
+                branch: 'grid/tg-1',
+              ),
+            },
+          ),
+          args: stepArgs('tg-1/agent'),
+        );
 
     void writeUsage(String workspaceDir, String content) {
       File(p.join(workspaceDir, usageReportPath('tg-1/agent')))
@@ -485,21 +560,26 @@ void main() {
       });
     });
 
-    test('an ABSENT envelope ⇒ null (telemetry never fails the step)', () async {
-      final dir = Directory.systemTemp.createTempSync('agent-usage-absent-');
-      addTearDown(() => dir.deleteSync(recursive: true));
-      final c = resultCtx(dir.path);
-      expect(await const AgentCapability().result(c.context, c.args), isNull);
-    });
+    test(
+      'an ABSENT envelope ⇒ null (telemetry never fails the step)',
+      () async {
+        final dir = Directory.systemTemp.createTempSync('agent-usage-absent-');
+        addTearDown(() => dir.deleteSync(recursive: true));
+        final c = resultCtx(dir.path);
+        expect(await const AgentCapability().result(c.context, c.args), isNull);
+      },
+    );
 
-    test('a MALFORMED envelope ⇒ null (telemetry never fails the step)',
-        () async {
-      final dir = Directory.systemTemp.createTempSync('agent-usage-bad-');
-      addTearDown(() => dir.deleteSync(recursive: true));
-      writeUsage(dir.path, '{ not json');
-      final c = resultCtx(dir.path);
-      expect(await const AgentCapability().result(c.context, c.args), isNull);
-    });
+    test(
+      'a MALFORMED envelope ⇒ null (telemetry never fails the step)',
+      () async {
+        final dir = Directory.systemTemp.createTempSync('agent-usage-bad-');
+        addTearDown(() => dir.deleteSync(recursive: true));
+        writeUsage(dir.path, '{ not json');
+        final c = resultCtx(dir.path);
+        expect(await const AgentCapability().result(c.context, c.args), isNull);
+      },
+    );
   });
 
   group('AgentCapability materializes the grid.dart pub linkage at provision '
@@ -541,8 +621,7 @@ void main() {
       },
     };
 
-    File overridesFile() =>
-        File(p.join(worktree.path, kPubspecOverridesFile));
+    File overridesFile() => File(p.join(worktree.path, kPubspecOverridesFile));
 
     test('(a) envelope + links → pubspec_overrides.yaml at the worktree root '
         'with an absolutized path', () {
@@ -575,7 +654,10 @@ void main() {
       const service = DartLinkService();
       service.applySync(
         metadata: envelopeWith(const [
-          PubLink(package: 'genesis_tree', devPath: '/abs/genesis/packages/tree'),
+          PubLink(
+            package: 'genesis_tree',
+            devPath: '/abs/genesis/packages/tree',
+          ),
         ]),
         context: PubLinkContext.worktree,
         workspaceDir: worktree.path,
@@ -601,7 +683,10 @@ void main() {
       final c = ctxAt(
         worktree.path,
         metadata: envelopeWith(const [
-          PubLink(package: 'genesis_tree', devPath: '/abs/genesis/packages/tree'),
+          PubLink(
+            package: 'genesis_tree',
+            devPath: '/abs/genesis/packages/tree',
+          ),
         ], version: '9.9.9'),
       );
       const cap = AgentCapability(devRoot: '/dev/root');
@@ -616,7 +701,10 @@ void main() {
       final c = ctxAt(
         missing,
         metadata: envelopeWith(const [
-          PubLink(package: 'genesis_tree', devPath: '/abs/genesis/packages/tree'),
+          PubLink(
+            package: 'genesis_tree',
+            devPath: '/abs/genesis/packages/tree',
+          ),
         ]),
       );
       const cap = AgentCapability(devRoot: '/dev/root');
@@ -624,189 +712,186 @@ void main() {
     });
   });
 
-  group(
-    'AgentCapability materializes the station_overlay into .claude/ at provision '
-    "(pow-kzx — ADR-0001's skill-DELIVERY leg)",
-    () {
-      late Directory worktree;
+  group('AgentCapability materializes the station_overlay into .claude/ at provision '
+      "(pow-kzx — ADR-0001's skill-DELIVERY leg)", () {
+    late Directory worktree;
 
-      setUp(() {
-        worktree = Directory.systemTemp.createTempSync('agent-overlay-');
-      });
+    setUp(() {
+      worktree = Directory.systemTemp.createTempSync('agent-overlay-');
+    });
 
-      tearDown(() {
-        if (worktree.existsSync()) worktree.deleteSync(recursive: true);
-      });
+    tearDown(() {
+      if (worktree.existsSync()) worktree.deleteSync(recursive: true);
+    });
 
-      ({FakeTreeContext context, StepArgs args}) ctxAt(String workspaceDir) => (
-        context: FakeTreeContext(
-          values: {
-            Bead: bead('tg-1'),
-            Workspace: testWorkspace(
-              'tg-1',
-              workspaceDir: workspaceDir,
-              branch: 'grid/tg-1',
-            ),
-          },
-        ),
-        args: stepArgs('tg-1/agent'),
-      );
-
-      File discoverSkill(Directory root) =>
-          File(p.join(root.path, '.claude', 'skills', 'discover', 'SKILL.md'));
-
-      test(
-        'the REAL vended discover skill lands at .claude/skills/discover/ FULLY '
-        'RENDERED — every {{hole}} bound, so the agent gets a runnable skill, '
-        'not literal template text',
-        () {
-          final c = ctxAt(worktree.path);
-          const cap = AgentCapability(
-            devRoot: '/dev/root',
-            overlaySourceRef: 'testref',
-          );
-          cap.spawn(c.context, c.args);
-
-          final installed = discoverSkill(worktree);
-          expect(installed.existsSync(), isTrue);
-          final body = installed.readAsStringSync();
-          expect(body, startsWith('---\n'));
-          // The default binding: kDefaultOverlayRunner + the registered root.
-          expect(body, contains('space search --json'));
-          expect(body, contains('/dev/root'));
-          expect(body, isNot(contains('{{')));
+    ({FakeTreeContext context, StepArgs args}) ctxAt(String workspaceDir) => (
+      context: FakeTreeContext(
+        values: {
+          Bead: bead('tg-1'),
+          Workspace: testWorkspace(
+            'tg-1',
+            workspaceDir: workspaceDir,
+            branch: 'grid/tg-1',
+          ),
         },
+      ),
+      args: stepArgs('tg-1/agent'),
+    );
+
+    File discoverSkill(Directory root) =>
+        File(p.join(root.path, '.claude', 'skills', 'discover', 'SKILL.md'));
+
+    test('buildCodeRegistry binds overlaySourceRef once and the agent spawn '
+        'reuses it', () {
+      final host =
+          buildCodeRegistry(
+                devRoot: '/dev/root',
+                overlaySourceRef: 'stationref',
+              ).host(_registryAgentMount())
+              as CapabilityHost;
+      final cap = host.capability as AgentCapability;
+
+      final c = ctxAt(worktree.path);
+      cap.spawn(c.context, c.args);
+
+      expect(
+        discoverSkill(worktree).readAsStringSync(),
+        contains('${kProvenanceMarker}stationref'),
       );
+    });
 
-      test(
-        'the BRIEF names the installed skill, so a print-mode claude -p can '
-        '/invoke it (print mode selects no skill on its own — ADR-0001)',
-        () {
-          final c = ctxAt(worktree.path);
-          const cap = AgentCapability(
-            devRoot: '/dev/root',
-            overlaySourceRef: 'testref',
-          );
-          final cfg = cap.spawn(c.context, c.args);
-          // The rendered brief rides as the FINAL positional of the sh-wrapped
-          // claude invocation (FT-2 — `agent_harness.dart`'s claudeArgs end with
-          // `brief.render()`).
-          expect(cfg.args.last, contains('`/discover`'));
-          expect(cfg.args.last, contains('.claude/skills/'));
-          // The OPERATOR skills ride the same overlay into the worktree, but
-          // the brief must never OFFER them: harvest-review pushes + opens PRs,
-          // which this very agreement forbids.
-          expect(cfg.args.last, isNot(contains('`/harvest-review`')));
-          expect(cfg.args.last, isNot(contains('`/station-operations`')));
-        },
-      );
-
-      test(
-        'the materialized asset dir is git-EXCLUDED by a SELF-IGNORING '
-        '.gitignore — land commits with `git add -A`, so without this every '
-        "bead's PR would carry the vended skills",
-        () {
-          final c = ctxAt(worktree.path);
-          const cap = AgentCapability(
-            devRoot: '/dev/root',
-            overlaySourceRef: 'testref',
-          );
-          cap.spawn(c.context, c.args);
-
-          final ignore = File(
-            p.join(
-              worktree.path,
-              '.claude',
-              'skills',
-              'discover',
-              '.gitignore',
-            ),
-          );
-          expect(ignore.existsSync(), isTrue);
-          // A bare `*` matches every file in the dir INCLUDING this file, so the
-          // exclusion is not residue either.
-          expect(ignore.readAsStringSync(), endsWith('*\n'));
-        },
-      );
-
-      test(
-        'the exclusion is SCOPED to the asset dir — no blanket .claude/.gitignore '
-        "is written, so ADR-0000 A5's residue gate still sees everything else in "
-        "the worktree (including the agent's own .claude/ files)",
-        () {
-          final c = ctxAt(worktree.path);
-          const cap = AgentCapability(
-            devRoot: '/dev/root',
-            overlaySourceRef: 'testref',
-          );
-          cap.spawn(c.context, c.args);
-
-          expect(
-            File(p.join(worktree.path, '.claude', '.gitignore')).existsSync(),
-            isFalse,
-            reason:
-                'a shared .claude/.gitignore could collide with one the repo '
-                'itself tracks, and would over-hide',
-          );
-          expect(
-            File(
-              p.join(worktree.path, '.claude', 'skills', '.gitignore'),
-            ).existsSync(),
-            isFalse,
-            reason:
-                'never ignore the whole skills/ dir — a repo-owned skill and '
-                "the agent's own work must stay visible",
-          );
-        },
-      );
-
-      test(
-        'NON-DESTRUCTIVE: a pre-existing .claude/skills/discover/SKILL.md '
-        'survives provision byte-unchanged',
-        () {
-          final existing = discoverSkill(worktree)..createSync(recursive: true);
-          existing.writeAsStringSync('OPERATOR-AUTHORED — do not touch');
-
-          final c = ctxAt(worktree.path);
-          const cap = AgentCapability(
-            devRoot: '/dev/root',
-            overlaySourceRef: 'testref',
-          );
-          cap.spawn(c.context, c.args);
-
-          expect(
-            existing.readAsStringSync(),
-            'OPERATOR-AUTHORED — do not touch',
-          );
-        },
-      );
-
-      test("a station's overlayArgs override the wire's default binding", () {
+    test(
+      'the REAL vended discover skill lands at .claude/skills/discover/ FULLY '
+      'RENDERED — every {{hole}} bound, so the agent gets a runnable skill, '
+      'not literal template text',
+      () {
         final c = ctxAt(worktree.path);
         const cap = AgentCapability(
           devRoot: '/dev/root',
           overlaySourceRef: 'testref',
-          overlayArgs: {'runner': 'grid', 'gridHome': '/grid/home'},
         );
         cap.spawn(c.context, c.args);
 
-        final body = discoverSkill(worktree).readAsStringSync();
-        expect(body, contains('grid search --json'));
-        expect(body, contains('/grid/home'));
-        expect(body, isNot(contains('space search --json')));
-      });
+        final installed = discoverSkill(worktree);
+        expect(installed.existsSync(), isTrue);
+        final body = installed.readAsStringSync();
+        expect(body, startsWith('---\n'));
+        // The default binding: kDefaultOverlayRunner + the registered root.
+        expect(body, contains('space search --json'));
+        expect(body, contains('/dev/root'));
+        expect(body, isNot(contains('{{')));
+      },
+    );
 
-      test(
-        'an injected overlayRoot materializes a FIXTURE instead of the real tree '
-        '(the offline test-isolation seam)',
-        () {
-          final fixture = Directory.systemTemp.createTempSync(
-            'overlay-fixture-',
-          );
-          addTearDown(() {
-            if (fixture.existsSync()) fixture.deleteSync(recursive: true);
-          });
+    test('the BRIEF names the installed skill, so a print-mode claude -p can '
+        '/invoke it (print mode selects no skill on its own — ADR-0001)', () {
+      final c = ctxAt(worktree.path);
+      const cap = AgentCapability(
+        devRoot: '/dev/root',
+        overlaySourceRef: 'testref',
+      );
+      final cfg = cap.spawn(c.context, c.args);
+      // The rendered brief rides as the FINAL positional of the sh-wrapped
+      // claude invocation (FT-2 — `agent_harness.dart`'s claudeArgs end with
+      // `brief.render()`).
+      expect(cfg.args.last, contains('`/discover`'));
+      expect(cfg.args.last, contains('.claude/skills/'));
+      // The OPERATOR skills ride the same overlay into the worktree, but
+      // the brief must never OFFER them: harvest-review pushes + opens PRs,
+      // which this very agreement forbids.
+      expect(cfg.args.last, isNot(contains('`/harvest-review`')));
+      expect(cfg.args.last, isNot(contains('`/station-operations`')));
+    });
+
+    test('the materialized asset dir is git-EXCLUDED by a SELF-IGNORING '
+        '.gitignore — land commits with `git add -A`, so without this every '
+        "bead's PR would carry the vended skills", () {
+      final c = ctxAt(worktree.path);
+      const cap = AgentCapability(
+        devRoot: '/dev/root',
+        overlaySourceRef: 'testref',
+      );
+      cap.spawn(c.context, c.args);
+
+      final ignore = File(
+        p.join(worktree.path, '.claude', 'skills', 'discover', '.gitignore'),
+      );
+      expect(ignore.existsSync(), isTrue);
+      // A bare `*` matches every file in the dir INCLUDING this file, so the
+      // exclusion is not residue either.
+      expect(ignore.readAsStringSync(), endsWith('*\n'));
+    });
+
+    test(
+      'the exclusion is SCOPED to the asset dir — no blanket .claude/.gitignore '
+      "is written, so ADR-0000 A5's residue gate still sees everything else in "
+      "the worktree (including the agent's own .claude/ files)",
+      () {
+        final c = ctxAt(worktree.path);
+        const cap = AgentCapability(
+          devRoot: '/dev/root',
+          overlaySourceRef: 'testref',
+        );
+        cap.spawn(c.context, c.args);
+
+        expect(
+          File(p.join(worktree.path, '.claude', '.gitignore')).existsSync(),
+          isFalse,
+          reason:
+              'a shared .claude/.gitignore could collide with one the repo '
+              'itself tracks, and would over-hide',
+        );
+        expect(
           File(
+            p.join(worktree.path, '.claude', 'skills', '.gitignore'),
+          ).existsSync(),
+          isFalse,
+          reason:
+              'never ignore the whole skills/ dir — a repo-owned skill and '
+              "the agent's own work must stay visible",
+        );
+      },
+    );
+
+    test('NON-DESTRUCTIVE: a pre-existing .claude/skills/discover/SKILL.md '
+        'survives provision byte-unchanged', () {
+      final existing = discoverSkill(worktree)..createSync(recursive: true);
+      existing.writeAsStringSync('OPERATOR-AUTHORED — do not touch');
+
+      final c = ctxAt(worktree.path);
+      const cap = AgentCapability(
+        devRoot: '/dev/root',
+        overlaySourceRef: 'testref',
+      );
+      cap.spawn(c.context, c.args);
+
+      expect(existing.readAsStringSync(), 'OPERATOR-AUTHORED — do not touch');
+    });
+
+    test("a station's overlayArgs override the wire's default binding", () {
+      final c = ctxAt(worktree.path);
+      const cap = AgentCapability(
+        devRoot: '/dev/root',
+        overlaySourceRef: 'testref',
+        overlayArgs: {'runner': 'grid', 'gridHome': '/grid/home'},
+      );
+      cap.spawn(c.context, c.args);
+
+      final body = discoverSkill(worktree).readAsStringSync();
+      expect(body, contains('grid search --json'));
+      expect(body, contains('/grid/home'));
+      expect(body, isNot(contains('space search --json')));
+    });
+
+    test(
+      'an injected overlayRoot materializes a FIXTURE instead of the real tree '
+      '(the offline test-isolation seam)',
+      () {
+        final fixture = Directory.systemTemp.createTempSync('overlay-fixture-');
+        addTearDown(() {
+          if (fixture.existsSync()) fixture.deleteSync(recursive: true);
+        });
+        File(
             p.join(
               fixture.path,
               '.claude',
@@ -815,99 +900,96 @@ void main() {
               'SKILL.md',
             ),
           )
-            ..createSync(recursive: true)
-            ..writeAsStringSync('---\nname: fixture-skill\n---\nfixture body\n');
+          ..createSync(recursive: true)
+          ..writeAsStringSync('---\nname: fixture-skill\n---\nfixture body\n');
 
-          final c = ctxAt(worktree.path);
-          final cap = AgentCapability(
-            devRoot: '/dev/root',
-            overlayRoot: fixture.path,
-            overlaySourceRef: 'testref',
-          );
-          final cfg = cap.spawn(c.context, c.args);
+        final c = ctxAt(worktree.path);
+        final cap = AgentCapability(
+          devRoot: '/dev/root',
+          overlayRoot: fixture.path,
+          overlaySourceRef: 'testref',
+        );
+        final cfg = cap.spawn(c.context, c.args);
 
-          expect(
-            File(
-              p.join(
-                worktree.path,
-                '.claude',
-                'skills',
-                'fixture-skill',
-                'SKILL.md',
-              ),
-            ).readAsStringSync(),
-            contains('fixture body'),
-          );
-          expect(discoverSkill(worktree).existsSync(), isFalse);
-          expect(cfg.args.last, contains('`/fixture-skill`'));
-        },
-      );
-
-      test(
-        'an asset whose holes are UNBOUND is never installed and never fails the '
-        'spawn — and the brief does not name it',
-        () {
-          final fixture = Directory.systemTemp.createTempSync(
-            'overlay-unbound-',
-          );
-          addTearDown(() {
-            if (fixture.existsSync()) fixture.deleteSync(recursive: true);
-          });
+        expect(
           File(
+            p.join(
+              worktree.path,
+              '.claude',
+              'skills',
+              'fixture-skill',
+              'SKILL.md',
+            ),
+          ).readAsStringSync(),
+          contains('fixture body'),
+        );
+        expect(discoverSkill(worktree).existsSync(), isFalse);
+        expect(cfg.args.last, contains('`/fixture-skill`'));
+      },
+    );
+
+    test(
+      'an asset whose holes are UNBOUND is never installed and never fails the '
+      'spawn — and the brief does not name it',
+      () {
+        final fixture = Directory.systemTemp.createTempSync('overlay-unbound-');
+        addTearDown(() {
+          if (fixture.existsSync()) fixture.deleteSync(recursive: true);
+        });
+        File(
             p.join(fixture.path, '.claude', 'skills', 'half-bound', 'SKILL.md'),
           )
-            ..createSync(recursive: true)
-            ..writeAsStringSync(
-              '---\nname: half-bound\n---\ncall {{nobodyBindsThis}}\n',
-            );
-
-          final c = ctxAt(worktree.path);
-          final cap = AgentCapability(
-            devRoot: '/dev/root',
-            overlayRoot: fixture.path,
-            overlaySourceRef: 'testref',
+          ..createSync(recursive: true)
+          ..writeAsStringSync(
+            '---\nname: half-bound\n---\ncall {{nobodyBindsThis}}\n',
           );
-          late final RuntimeConfig cfg;
-          expect(() => cfg = cap.spawn(c.context, c.args), returnsNormally);
 
-          expect(
-            File(
-              p.join(
-                worktree.path,
-                '.claude',
-                'skills',
-                'half-bound',
-                'SKILL.md',
-              ),
-            ).existsSync(),
-            isFalse,
-          );
-          expect(cfg.args.last, isNot(contains('`/half-bound`')));
-        },
-      );
+        final c = ctxAt(worktree.path);
+        final cap = AgentCapability(
+          devRoot: '/dev/root',
+          overlayRoot: fixture.path,
+          overlaySourceRef: 'testref',
+        );
+        late final RuntimeConfig cfg;
+        expect(() => cfg = cap.spawn(c.context, c.args), returnsNormally);
 
-      test(
-        'a spawn that installs NO skills carries no skills paragraph — the brief '
-        'only names what is actually there',
-        () {
-          final empty = Directory.systemTemp.createTempSync('overlay-empty-');
-          addTearDown(() {
-            if (empty.existsSync()) empty.deleteSync(recursive: true);
-          });
+        expect(
+          File(
+            p.join(
+              worktree.path,
+              '.claude',
+              'skills',
+              'half-bound',
+              'SKILL.md',
+            ),
+          ).existsSync(),
+          isFalse,
+        );
+        expect(cfg.args.last, isNot(contains('`/half-bound`')));
+      },
+    );
 
-          final c = ctxAt(worktree.path);
-          final cap = AgentCapability(
-            devRoot: '/dev/root',
-            overlayRoot: empty.path,
-            overlaySourceRef: 'testref',
-          );
-          final cfg = cap.spawn(c.context, c.args);
+    test(
+      'a spawn that installs NO skills carries no skills paragraph — the brief '
+      'only names what is actually there',
+      () {
+        final empty = Directory.systemTemp.createTempSync('overlay-empty-');
+        addTearDown(() {
+          if (empty.existsSync()) empty.deleteSync(recursive: true);
+        });
 
-          expect(cfg.args.last, isNot(contains('VENDED skills')));
-        },
-      );
-    },
-  );
+        final c = ctxAt(worktree.path);
+        final cap = AgentCapability(
+          devRoot: '/dev/root',
+          overlayRoot: empty.path,
+          overlaySourceRef: 'testref',
+        );
+        final cfg = cap.spawn(c.context, c.args);
+
+        expect(cfg.args.last, isNot(contains('VENDED skills')));
+      },
+    );
+  });
 }
 
 class _MaterializingWorktreeRunner extends CannedGitRunner {
@@ -951,6 +1033,7 @@ class _NoopPrOpener implements PrOpener {
     required String baseBranch,
     required String title,
     String body = '',
-  }) async =>
-      PullRequestResult.opened(const PullRequestRef(url: 'https://example.test/pr/1'));
+  }) async => PullRequestResult.opened(
+    const PullRequestRef(url: 'https://example.test/pr/1'),
+  );
 }
