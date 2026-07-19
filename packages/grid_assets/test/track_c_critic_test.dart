@@ -13,6 +13,7 @@ import 'dart:io';
 import 'package:grid_assets/grid_assets.dart';
 import 'package:beads_dart/beads_dart.dart';
 import 'package:grid_engine/grid_engine.dart';
+import 'package:grid_engine/testing.dart';
 import 'package:grid_runtime/grid_runtime.dart';
 import 'package:test/test.dart';
 
@@ -49,24 +50,61 @@ import 'support/asset_fakes.dart';
   );
 }
 
+Future<List<AllocationReport>> _runCriticAllocation({
+  required Directory dir,
+  required String rubric,
+  required String nodePath,
+  int round = 0,
+}) async {
+  final c = _ctx(
+    rubric: rubric,
+    workspaceDir: dir.path,
+    nodePath: nodePath,
+    round: round,
+  );
+  final provider = FakeRuntimeProvider();
+  final reports = <AllocationReport>[];
+  final alloc = ProcessAllocation(
+    const CriticCapability(),
+    AllocationContext(
+      treeContext: c.context,
+      args: c.args,
+      transport: provider,
+      address: AllocationAddress('sess-1', nodePath),
+      env: const {},
+      sink: reports.add,
+    ),
+  );
+  addTearDown(() async {
+    await alloc.dispose();
+    await provider.close();
+  });
+  await alloc.startOrAdopt();
+  alloc.deliverEventForTest(Exited(name: 'sess-1/$nodePath', exitCode: 0));
+  await Future<void>.delayed(Duration.zero);
+  return reports;
+}
+
 void main() {
   group('Track C2 — code-validation (the GATING lane)', () {
-    test('spawns `sh -c` running the bead\'s Validation Plan, capturing its rc',
-        () {
-      final withPlan = bead('tg-1').copyWith(
-        metadata: const {'validation_plan': 'melos analyze && melos test'},
-      );
-      final c = _ctx(rubric: kGatingRubric, beadOverride: withPlan);
-      final cfg = const CriticCapability().spawn(c.context, c.args);
-      expect(cfg.command, 'sh');
-      expect(cfg.args[0], '-c');
-      expect(cfg.args[1], contains('melos analyze && melos test'));
-      // The rc is captured to the critique dir so result() can read the grade.
-      expect(cfg.args[1], contains('.grid/critique/code-validation.rc'));
-      expect(cfg.args[1], contains(r'echo $?'));
-      expect(cfg.workDir, '/w/tg-1');
-      expect(cfg.lifecycle, Lifecycle.oneTurn);
-    });
+    test(
+      'spawns `sh -c` running the bead\'s Validation Plan, capturing its rc',
+      () {
+        final withPlan = bead('tg-1').copyWith(
+          metadata: const {'validation_plan': 'melos analyze && melos test'},
+        );
+        final c = _ctx(rubric: kGatingRubric, beadOverride: withPlan);
+        final cfg = const CriticCapability().spawn(c.context, c.args);
+        expect(cfg.command, 'sh');
+        expect(cfg.args[0], '-c');
+        expect(cfg.args[1], contains('melos analyze && melos test'));
+        // The rc is captured to the critique dir so result() can read the grade.
+        expect(cfg.args[1], contains('.grid/critique/code-validation.rc'));
+        expect(cfg.args[1], contains(r'echo $?'));
+        expect(cfg.workDir, '/w/tg-1');
+        expect(cfg.lifecycle, Lifecycle.oneTurn);
+      },
+    );
 
     test('a plan-less bead defaults to an explicit `false` (never silently '
         'passes)', () {
@@ -90,10 +128,7 @@ void main() {
         cap.interpretEvent(const Exited(name: name, exitCode: 1)),
         StepSignal.complete,
       );
-      expect(
-        cap.interpretEvent(const Died(name: name)),
-        StepSignal.failed,
-      );
+      expect(cap.interpretEvent(const Died(name: name)), StepSignal.failed);
     });
 
     test('result() grades A on rc 0, F on a non-zero rc, F when the rc is '
@@ -116,17 +151,17 @@ void main() {
       final rcFile = File('${dir.path}/.grid/critique/code-validation.rc')
         ..createSync(recursive: true)
         ..writeAsStringSync('0\n');
-      expect(
-        await cap.result(c.context, c.args),
-        {'grade': 'A', 'transport': 'file'},
-      );
+      expect(await cap.result(c.context, c.args), {
+        'grade': 'A',
+        'transport': 'file',
+      });
 
       // rc non-zero ⇒ F.
       rcFile.writeAsStringSync('1\n');
-      expect(
-        await cap.result(c.context, c.args),
-        {'grade': 'F', 'transport': 'file'},
-      );
+      expect(await cap.result(c.context, c.args), {
+        'grade': 'F',
+        'transport': 'file',
+      });
     });
   });
 
@@ -163,10 +198,14 @@ void main() {
     test('a clean exit completes; a non-zero exit / death fails', () {
       const cap = CriticCapability();
       const name = 'tgdog-s/tg-1/review/spec-adherence';
-      expect(cap.interpretEvent(const Exited(name: name, exitCode: 0)),
-          StepSignal.complete);
-      expect(cap.interpretEvent(const Exited(name: name, exitCode: 2)),
-          StepSignal.failed);
+      expect(
+        cap.interpretEvent(const Exited(name: name, exitCode: 0)),
+        StepSignal.complete,
+      );
+      expect(
+        cap.interpretEvent(const Exited(name: name, exitCode: 2)),
+        StepSignal.failed,
+      );
       expect(cap.interpretEvent(const Died(name: name)), StepSignal.failed);
     });
 
@@ -261,86 +300,99 @@ void main() {
       expect(prompt, contains('A lossy inter-station gossip bus.'));
     });
 
-    test('result() parses a written verdict JSON into a grade + rationale', () async {
-      final dir = Directory.systemTemp.createTempSync('critic-llm-');
-      addTearDown(() => dir.deleteSync(recursive: true));
-      File('${dir.path}/.grid/critique/regression-risk.json')
-        ..createSync(recursive: true)
-        ..writeAsStringSync(jsonEncode({
-          'rubric': 'regression-risk',
-          'version': 1,
-          'grade': 'b',
+    test(
+      'result() parses a written verdict JSON into a grade + rationale',
+      () async {
+        final dir = Directory.systemTemp.createTempSync('critic-llm-');
+        addTearDown(() => dir.deleteSync(recursive: true));
+        File('${dir.path}/.grid/critique/regression-risk.json')
+          ..createSync(recursive: true)
+          ..writeAsStringSync(
+            jsonEncode({
+              'rubric': 'regression-risk',
+              'version': 1,
+              'grade': 'b',
+              'rationale': 'a narrow blast radius',
+              'nodePath': 'tg-1/review/regression-risk',
+              'round': 0,
+            }),
+          );
+        final c = _ctx(rubric: 'regression-risk', workspaceDir: dir.path);
+        final out = await const CriticCapability().result(c.context, c.args);
+        expect(out, {
+          'grade': 'B',
+          'transport': 'file',
           'rationale': 'a narrow blast radius',
-          'nodePath': 'tg-1/review/regression-risk',
-          'round': 0,
-        }));
-      final c = _ctx(rubric: 'regression-risk', workspaceDir: dir.path);
-      final out = await const CriticCapability().result(c.context, c.args);
-      expect(out, {
-        'grade': 'B',
-        'transport': 'file',
-        'rationale': 'a narrow blast radius',
-      });
-    });
+        });
+      },
+    );
 
-    test('result() fail-closes to F on a missing or malformed verdict', () async {
-      final dir = Directory.systemTemp.createTempSync('critic-llm-bad-');
-      addTearDown(() => dir.deleteSync(recursive: true));
-      const cap = CriticCapability();
-      final c = _ctx(rubric: 'test-coverage', workspaceDir: dir.path);
-      // Missing verdict ⇒ F.
-      expect(await cap.result(c.context, c.args), {
-        'grade': 'F',
-        'transport': 'fail-closed-default',
-        'rationale':
-            'no parseable verdict via file or envelope — fail-closed default',
-      });
-      // Malformed verdict ⇒ F.
-      File('${dir.path}/.grid/critique/test-coverage.json')
-        ..createSync(recursive: true)
-        ..writeAsStringSync('not json');
-      expect(await cap.result(c.context, c.args), {
-        'grade': 'F',
-        'transport': 'fail-closed-default',
-        'rationale':
-            'no parseable verdict via file or envelope — fail-closed default',
-      });
-    });
-
-    test('result() fail-closes to F on a STALE verdict — a nodePath that '
-        'does not match this round (gate-integrity #3: a rework round reuses '
-        'the SAME workspace, so a prior round\'s file otherwise survives)',
-        () async {
-      final dir = Directory.systemTemp.createTempSync('critic-llm-stale-');
-      addTearDown(() => dir.deleteSync(recursive: true));
-      File('${dir.path}/.grid/critique/regression-risk.json')
-        ..createSync(recursive: true)
-        ..writeAsStringSync(jsonEncode({
-          'grade': 'A',
-          'rationale': 'a stale round-1 verdict',
-          'nodePath': 'tg-1#r1/review/regression-risk',
-          // Round-FRESH: only the nodePath is foreign, so this proves A4's fence
-          // still rejects ON ITS OWN, independent of the round check.
-          'round': 0,
-        }));
-      final c = _ctx(
-        rubric: 'regression-risk',
-        workspaceDir: dir.path,
-        nodePath: 'tg-1#r2/review/regression-risk',
-      );
-      final out = await const CriticCapability().result(c.context, c.args);
-      expect(
-        out,
-        {
+    test(
+      'result() fail-closes to F on a missing or malformed verdict',
+      () async {
+        final dir = Directory.systemTemp.createTempSync('critic-llm-bad-');
+        addTearDown(() => dir.deleteSync(recursive: true));
+        const cap = CriticCapability();
+        final c = _ctx(rubric: 'test-coverage', workspaceDir: dir.path);
+        // Missing verdict ⇒ F.
+        expect(await cap.result(c.context, c.args), {
           'grade': 'F',
           'transport': 'fail-closed-default',
           'rationale':
               'no parseable verdict via file or envelope — fail-closed default',
-        },
-        reason: 'a stale nodePath stamp must be treated as a MISSING file, '
-            'never silently read as this round\'s verdict',
-      );
-    });
+        });
+        // Malformed verdict ⇒ F.
+        File('${dir.path}/.grid/critique/test-coverage.json')
+          ..createSync(recursive: true)
+          ..writeAsStringSync('not json');
+        expect(await cap.result(c.context, c.args), {
+          'grade': 'F',
+          'transport': 'fail-closed-default',
+          'rationale':
+              'no parseable verdict via file or envelope — fail-closed default',
+        });
+      },
+    );
+
+    test(
+      'result() fail-closes to F on a STALE verdict — a nodePath that '
+      'does not match this round (gate-integrity #3: a rework round reuses '
+      'the SAME workspace, so a prior round\'s file otherwise survives)',
+      () async {
+        final dir = Directory.systemTemp.createTempSync('critic-llm-stale-');
+        addTearDown(() => dir.deleteSync(recursive: true));
+        File('${dir.path}/.grid/critique/regression-risk.json')
+          ..createSync(recursive: true)
+          ..writeAsStringSync(
+            jsonEncode({
+              'grade': 'A',
+              'rationale': 'a stale round-1 verdict',
+              'nodePath': 'tg-1#r1/review/regression-risk',
+              // Round-FRESH: only the nodePath is foreign, so this proves A4's fence
+              // still rejects ON ITS OWN, independent of the round check.
+              'round': 0,
+            }),
+          );
+        final c = _ctx(
+          rubric: 'regression-risk',
+          workspaceDir: dir.path,
+          nodePath: 'tg-1#r2/review/regression-risk',
+        );
+        final out = await const CriticCapability().result(c.context, c.args);
+        expect(
+          out,
+          {
+            'grade': 'F',
+            'transport': 'fail-closed-default',
+            'rationale':
+                'no parseable verdict via file or envelope — fail-closed default',
+          },
+          reason:
+              'a stale nodePath stamp must be treated as a MISSING file, '
+              'never silently read as this round\'s verdict',
+        );
+      },
+    );
 
     test('a STALE round verdict under a BYTE-IDENTICAL nodePath is REJECTED — '
         'the Rewind case A4\'s stamp cannot see (A15(5))', () async {
@@ -349,12 +401,15 @@ void main() {
       const nodePath = 'tg-1/review/regression-risk';
       File('${dir.path}/.grid/critique/regression-risk.json')
         ..createSync(recursive: true)
-        ..writeAsStringSync(jsonEncode({
-          'grade': 'A',
-          'rationale': 'round 0 approved it',
-          'nodePath': nodePath, // IDENTICAL — a Rewind does not move the path.
-          'round': 0,
-        }));
+        ..writeAsStringSync(
+          jsonEncode({
+            'grade': 'A',
+            'rationale': 'round 0 approved it',
+            'nodePath':
+                nodePath, // IDENTICAL — a Rewind does not move the path.
+            'round': 0,
+          }),
+        );
       final c = _ctx(
         rubric: 'regression-risk',
         workspaceDir: dir.path,
@@ -366,58 +421,100 @@ void main() {
       expect(out['transport'], 'fail-closed-default');
     });
 
-    test('an ABSENT or non-numeric round stamp reads as MISSING (fail-closed)',
-        () async {
-      final dir = Directory.systemTemp.createTempSync('critic-noround-');
+    test('a parseable verdict missing a freshness stamp fails the lane with '
+        'the honest persisted reason and no grade payload', () async {
+      final dir = Directory.systemTemp.createTempSync('critic-unstamped-');
       addTearDown(() => dir.deleteSync(recursive: true));
+      const rubric = 'test-coverage';
       const nodePath = 'tg-1/review/test-coverage';
       final verdict = File('${dir.path}/.grid/critique/test-coverage.json')
         ..createSync(recursive: true)
-        ..writeAsStringSync(jsonEncode({'grade': 'A', 'nodePath': nodePath}));
-      final c = _ctx(
-        rubric: 'test-coverage',
-        workspaceDir: dir.path,
+        ..writeAsStringSync(
+          jsonEncode({
+            'rubric': rubric,
+            'version': 1,
+            'grade': 'A',
+            'rationale': 'the tests cover the new path',
+          }),
+        );
+      final reason =
+          'verdict present at ${verdict.path} but missing the freshness stamp '
+          '(nodePath/round)';
+
+      final reports = await _runCriticAllocation(
+        dir: dir,
+        rubric: rubric,
         nodePath: nodePath,
       );
-      const cap = CriticCapability();
-      expect((await cap.result(c.context, c.args))!['grade'], 'F');
 
-      verdict.writeAsStringSync(
-        jsonEncode({'grade': 'A', 'nodePath': nodePath, 'round': 'later'}),
-      );
-      expect((await cap.result(c.context, c.args))!['grade'], 'F');
+      expect(reports.whereType<AllocationCompleted>(), isEmpty);
+      final failed = reports.whereType<AllocationFailed>().single;
+      expect(failed.reason, 'result threw: $reason');
+      expect(failed.reason, isNot(contains('Bad state:')));
     });
 
-    test('a round-fresh verdict at round 2 still parses (transport file)',
-        () async {
-      final dir = Directory.systemTemp.createTempSync('critic-fresh-round-');
-      addTearDown(() => dir.deleteSync(recursive: true));
-      const nodePath = 'tg-1/review/regression-risk';
-      File('${dir.path}/.grid/critique/regression-risk.json')
-        ..createSync(recursive: true)
-        ..writeAsStringSync(jsonEncode({
+    test(
+      'a non-numeric round stamp still reads as MISSING and fail-closes',
+      () async {
+        final dir = Directory.systemTemp.createTempSync('critic-badround-');
+        addTearDown(() => dir.deleteSync(recursive: true));
+        const nodePath = 'tg-1/review/test-coverage';
+        File('${dir.path}/.grid/critique/test-coverage.json')
+          ..createSync(recursive: true)
+          ..writeAsStringSync(
+            jsonEncode({
+              'grade': 'A',
+              'rationale': 'bad wire stamp',
+              'nodePath': nodePath,
+              'round': 'not-a-number',
+            }),
+          );
+        final c = _ctx(
+          rubric: 'test-coverage',
+          workspaceDir: dir.path,
+          nodePath: nodePath,
+        );
+        expect(await const CriticCapability().result(c.context, c.args), {
+          'grade': 'F',
+          'transport': 'fail-closed-default',
+          'rationale':
+              'no parseable verdict via file or envelope — fail-closed default',
+        });
+      },
+    );
+
+    test(
+      'a round-fresh verdict at round 2 still parses (transport file)',
+      () async {
+        final dir = Directory.systemTemp.createTempSync('critic-fresh-round-');
+        addTearDown(() => dir.deleteSync(recursive: true));
+        const nodePath = 'tg-1/review/regression-risk';
+        File('${dir.path}/.grid/critique/regression-risk.json')
+          ..createSync(recursive: true)
+          ..writeAsStringSync(
+            jsonEncode({
+              'grade': 'B',
+              'rationale': 'a narrow blast radius',
+              'nodePath': nodePath,
+              'round': 2,
+            }),
+          );
+        final c = _ctx(
+          rubric: 'regression-risk',
+          workspaceDir: dir.path,
+          nodePath: nodePath,
+          round: 2,
+        );
+        expect(await const CriticCapability().result(c.context, c.args), {
           'grade': 'B',
+          'transport': 'file',
           'rationale': 'a narrow blast radius',
-          'nodePath': nodePath,
-          'round': 2,
-        }));
-      final c = _ctx(
-        rubric: 'regression-risk',
-        workspaceDir: dir.path,
-        nodePath: nodePath,
-        round: 2,
-      );
-      expect(await const CriticCapability().result(c.context, c.args), {
-        'grade': 'B',
-        'transport': 'file',
-        'rationale': 'a narrow blast radius',
-      });
-    });
+        });
+      },
+    );
 
     test('an injected rubric source replaces the inline placeholder', () {
-      final cap = CriticCapability(
-        rubrics: (id) => 'CUSTOM BANDS for $id',
-      );
+      final cap = CriticCapability(rubrics: (id) => 'CUSTOM BANDS for $id');
       final prompt = cap.buildCriticPrompt(
         bead('tg-1'),
         'spec-adherence',
@@ -474,70 +571,91 @@ void main() {
         ..writeAsStringSync(content);
     }
 
-    test('MERGES tokens/cost into the grade + rationale (collision-safe keys)',
-        () async {
-      final dir = Directory.systemTemp.createTempSync('critic-usage-');
-      addTearDown(() => dir.deleteSync(recursive: true));
-      const rubric = 'regression-risk';
-      writeVerdict(dir.path, rubric, jsonEncode({
-        'grade': 'B',
-        'rationale': 'narrow',
-        'nodePath': 'tg-1/review/$rubric',
-        'round': 0,
-      }));
-      writeUsage(
-        dir.path,
-        rubric,
-        '{"total_cost_usd": 0.02, '
-        '"usage": {"input_tokens": 9, "output_tokens": 8}, '
-        '"modelUsage": {"claude-sonnet-5": {}}}',
-      );
-      final c = _ctx(rubric: rubric, workspaceDir: dir.path);
-      final out = await const CriticCapability().result(c.context, c.args);
-      // The critic graded on SONNET — the ledger-side proof of the role split
-      // (bead `pow-edp`): the argv says what we asked for, `modelUsage` says
-      // what ran.
-      expect(out, {
-        'grade': 'B',
-        'transport': 'file',
-        'rationale': 'narrow',
-        'tokensIn': '9',
-        'tokensOut': '8',
-        'costUsd': '0.02',
-        'model': 'claude-sonnet-5',
-      });
-    });
+    test(
+      'MERGES tokens/cost into the grade + rationale (collision-safe keys)',
+      () async {
+        final dir = Directory.systemTemp.createTempSync('critic-usage-');
+        addTearDown(() => dir.deleteSync(recursive: true));
+        const rubric = 'regression-risk';
+        writeVerdict(
+          dir.path,
+          rubric,
+          jsonEncode({
+            'grade': 'B',
+            'rationale': 'narrow',
+            'nodePath': 'tg-1/review/$rubric',
+            'round': 0,
+          }),
+        );
+        writeUsage(
+          dir.path,
+          rubric,
+          '{"total_cost_usd": 0.02, '
+          '"usage": {"input_tokens": 9, "output_tokens": 8}, '
+          '"modelUsage": {"claude-sonnet-5": {}}}',
+        );
+        final c = _ctx(rubric: rubric, workspaceDir: dir.path);
+        final out = await const CriticCapability().result(c.context, c.args);
+        // The critic graded on SONNET — the ledger-side proof of the role split
+        // (bead `pow-edp`): the argv says what we asked for, `modelUsage` says
+        // what ran.
+        expect(out, {
+          'grade': 'B',
+          'transport': 'file',
+          'rationale': 'narrow',
+          'tokensIn': '9',
+          'tokensOut': '8',
+          'costUsd': '0.02',
+          'model': 'claude-sonnet-5',
+        });
+      },
+    );
 
-    test('still grades F on a MALFORMED verdict but merges usage if present',
-        () async {
-      final dir = Directory.systemTemp.createTempSync('critic-usage-badverdict-');
-      addTearDown(() => dir.deleteSync(recursive: true));
-      const rubric = 'test-coverage';
-      writeVerdict(dir.path, rubric, 'not json');
-      writeUsage(dir.path, rubric, '{"num_turns": 2}');
-      final c = _ctx(rubric: rubric, workspaceDir: dir.path);
-      final out = await const CriticCapability().result(c.context, c.args);
-      expect(out, {
-        'grade': 'F',
-        'transport': 'fail-closed-default',
-        'rationale':
-            'no parseable verdict via file or envelope — fail-closed default',
-        'numTurns': '2',
-      });
-    });
+    test(
+      'still grades F on a MALFORMED verdict but merges usage if present',
+      () async {
+        final dir = Directory.systemTemp.createTempSync(
+          'critic-usage-badverdict-',
+        );
+        addTearDown(() => dir.deleteSync(recursive: true));
+        const rubric = 'test-coverage';
+        writeVerdict(dir.path, rubric, 'not json');
+        writeUsage(dir.path, rubric, '{"num_turns": 2}');
+        final c = _ctx(rubric: rubric, workspaceDir: dir.path);
+        final out = await const CriticCapability().result(c.context, c.args);
+        expect(out, {
+          'grade': 'F',
+          'transport': 'fail-closed-default',
+          'rationale':
+              'no parseable verdict via file or envelope — fail-closed default',
+          'numTurns': '2',
+        });
+      },
+    );
 
-    test('a MALFORMED usage file never fails the step — just the grade',
-        () async {
-      final dir = Directory.systemTemp.createTempSync('critic-usage-badusage-');
-      addTearDown(() => dir.deleteSync(recursive: true));
-      const rubric = 'spec-adherence';
-      writeVerdict(dir.path, rubric,
-          jsonEncode({'grade': 'A', 'nodePath': 'tg-1/review/$rubric', 'round': 0}));
-      writeUsage(dir.path, rubric, 'garbage not json');
-      final c = _ctx(rubric: rubric, workspaceDir: dir.path);
-      final out = await const CriticCapability().result(c.context, c.args);
-      expect(out, {'grade': 'A', 'transport': 'file'});
-    });
+    test(
+      'a MALFORMED usage file never fails the step — just the grade',
+      () async {
+        final dir = Directory.systemTemp.createTempSync(
+          'critic-usage-badusage-',
+        );
+        addTearDown(() => dir.deleteSync(recursive: true));
+        const rubric = 'spec-adherence';
+        writeVerdict(
+          dir.path,
+          rubric,
+          jsonEncode({
+            'grade': 'A',
+            'nodePath': 'tg-1/review/$rubric',
+            'round': 0,
+          }),
+        );
+        writeUsage(dir.path, rubric, 'garbage not json');
+        final c = _ctx(rubric: rubric, workspaceDir: dir.path);
+        final out = await const CriticCapability().result(c.context, c.args);
+        expect(out, {'grade': 'A', 'transport': 'file'});
+      },
+    );
 
     test('the GATING lane never merges usage (it is not an agent)', () async {
       final dir = Directory.systemTemp.createTempSync('critic-gate-usage-');
@@ -550,11 +668,10 @@ void main() {
       writeUsage(dir.path, kGatingRubric, '{"usage": {"input_tokens": 5}}');
       final c = _ctx(rubric: kGatingRubric, workspaceDir: dir.path);
       final out = await const CriticCapability().result(c.context, c.args);
-      expect(
-        out,
-        {'grade': 'A', 'transport': 'file'},
-        reason: 'no usage merge on the gating lane',
-      );
+      expect(out, {
+        'grade': 'A',
+        'transport': 'file',
+      }, reason: 'no usage merge on the gating lane');
     });
   });
 
@@ -574,8 +691,9 @@ void main() {
 
     test('(a) file-absent + envelope "Verdict: X" heading -> grade X, '
         'rationale marked [from result envelope]', () async {
-      final dir =
-          Directory.systemTemp.createTempSync('critic-fallback-heading-');
+      final dir = Directory.systemTemp.createTempSync(
+        'critic-fallback-heading-',
+      );
       addTearDown(() => dir.deleteSync(recursive: true));
       const rubric = 'regression-risk';
       writeEnvelope(
@@ -593,8 +711,7 @@ void main() {
     test('(gate-integrity #4) file-absent + envelope "## Grade: X" markdown '
         'heading -> grade X (the summary shape a critic emits instead of '
         '"Verdict:", missed live in tg-m2q r1)', () async {
-      final dir =
-          Directory.systemTemp.createTempSync('critic-fallback-grade-');
+      final dir = Directory.systemTemp.createTempSync('critic-fallback-grade-');
       addTearDown(() => dir.deleteSync(recursive: true));
       const rubric = 'test-coverage';
       writeEnvelope(
@@ -630,8 +747,9 @@ void main() {
 
     test('(b) the FILE verdict wins when both a file and an envelope verdict '
         'exist', () async {
-      final dir =
-          Directory.systemTemp.createTempSync('critic-fallback-filewins-');
+      final dir = Directory.systemTemp.createTempSync(
+        'critic-fallback-filewins-',
+      );
       addTearDown(() => dir.deleteSync(recursive: true));
       const rubric = 'spec-adherence';
       writeVerdict(
@@ -655,8 +773,9 @@ void main() {
     });
 
     test('a MALFORMED file falls back to a valid envelope verdict', () async {
-      final dir =
-          Directory.systemTemp.createTempSync('critic-fallback-filebad-');
+      final dir = Directory.systemTemp.createTempSync(
+        'critic-fallback-filebad-',
+      );
       addTearDown(() => dir.deleteSync(recursive: true));
       const rubric = 'regression-risk';
       writeVerdict(dir.path, rubric, 'not json');
@@ -672,43 +791,41 @@ void main() {
       final dir = Directory.systemTemp.createTempSync('critic-fallback-none-');
       addTearDown(() => dir.deleteSync(recursive: true));
       final c = _ctx(rubric: 'regression-risk', workspaceDir: dir.path);
-      expect(
-        await const CriticCapability().result(c.context, c.args),
-        {
-          'grade': 'F',
-          'transport': 'fail-closed-default',
-          'rationale':
-              'no parseable verdict via file or envelope — fail-closed default',
-        },
-      );
+      expect(await const CriticCapability().result(c.context, c.args), {
+        'grade': 'F',
+        'transport': 'fail-closed-default',
+        'rationale':
+            'no parseable verdict via file or envelope — fail-closed default',
+      });
     });
 
-    test('malformed file + malformed envelope -> F (fail-closed pinned)',
-        () async {
-      final dir =
-          Directory.systemTemp.createTempSync('critic-fallback-bothbad-');
-      addTearDown(() => dir.deleteSync(recursive: true));
-      const rubric = 'test-coverage';
-      writeVerdict(dir.path, rubric, 'not json');
-      File('${dir.path}/${usageReportPath('tg-1/review/$rubric')}')
-        ..createSync(recursive: true)
-        ..writeAsStringSync('{ not json either');
-      final c = _ctx(rubric: rubric, workspaceDir: dir.path);
-      expect(
-        await const CriticCapability().result(c.context, c.args),
-        {
+    test(
+      'malformed file + malformed envelope -> F (fail-closed pinned)',
+      () async {
+        final dir = Directory.systemTemp.createTempSync(
+          'critic-fallback-bothbad-',
+        );
+        addTearDown(() => dir.deleteSync(recursive: true));
+        const rubric = 'test-coverage';
+        writeVerdict(dir.path, rubric, 'not json');
+        File('${dir.path}/${usageReportPath('tg-1/review/$rubric')}')
+          ..createSync(recursive: true)
+          ..writeAsStringSync('{ not json either');
+        final c = _ctx(rubric: rubric, workspaceDir: dir.path);
+        expect(await const CriticCapability().result(c.context, c.args), {
           'grade': 'F',
           'transport': 'fail-closed-default',
           'rationale':
               'no parseable verdict via file or envelope — fail-closed default',
-        },
-      );
-    });
+        });
+      },
+    );
 
     test('missing file + an envelope with no parseable verdict -> F '
         '(fail-closed pinned)', () async {
-      final dir =
-          Directory.systemTemp.createTempSync('critic-fallback-noverdict-');
+      final dir = Directory.systemTemp.createTempSync(
+        'critic-fallback-noverdict-',
+      );
       addTearDown(() => dir.deleteSync(recursive: true));
       const rubric = 'spec-adherence';
       writeEnvelope(
@@ -717,22 +834,20 @@ void main() {
         'I looked at the diff, seems fine, no complaints.',
       );
       final c = _ctx(rubric: rubric, workspaceDir: dir.path);
-      expect(
-        await const CriticCapability().result(c.context, c.args),
-        {
-          'grade': 'F',
-          'transport': 'fail-closed-default',
-          'rationale':
-              'no parseable verdict via file or envelope — fail-closed default',
-        },
-      );
+      expect(await const CriticCapability().result(c.context, c.args), {
+        'grade': 'F',
+        'transport': 'fail-closed-default',
+        'rationale':
+            'no parseable verdict via file or envelope — fail-closed default',
+      });
     });
 
     test('(rework 1) a template echo `"grade":"<A-F>"` before a real verdict '
         'object -> the REAL verdict wins (the template grade is not a single '
         'A-F letter, so it never matches)', () async {
-      final dir =
-          Directory.systemTemp.createTempSync('critic-fallback-template-');
+      final dir = Directory.systemTemp.createTempSync(
+        'critic-fallback-template-',
+      );
       addTearDown(() => dir.deleteSync(recursive: true));
       const rubric = 'regression-risk';
       writeEnvelope(
@@ -753,8 +868,9 @@ void main() {
 
     test('(rework 1) an example object with grade A in prose followed by a '
         'real F verdict -> the LAST (real) object wins, F', () async {
-      final dir =
-          Directory.systemTemp.createTempSync('critic-fallback-example-');
+      final dir = Directory.systemTemp.createTempSync(
+        'critic-fallback-example-',
+      );
       addTearDown(() => dir.deleteSync(recursive: true));
       const rubric = 'test-coverage';
       writeEnvelope(
@@ -775,8 +891,9 @@ void main() {
     test('(rework 1) a template-echo-only envelope (no real verdict object '
         'or heading) -> F (fail-closed — the template grade is not a valid '
         'A-F letter)', () async {
-      final dir =
-          Directory.systemTemp.createTempSync('critic-fallback-templateonly-');
+      final dir = Directory.systemTemp.createTempSync(
+        'critic-fallback-templateonly-',
+      );
       addTearDown(() => dir.deleteSync(recursive: true));
       const rubric = 'spec-adherence';
       writeEnvelope(
@@ -787,21 +904,19 @@ void main() {
         '"rationale":"<why>"}',
       );
       final c = _ctx(rubric: rubric, workspaceDir: dir.path);
-      expect(
-        await const CriticCapability().result(c.context, c.args),
-        {
-          'grade': 'F',
-          'transport': 'fail-closed-default',
-          'rationale':
-              'no parseable verdict via file or envelope — fail-closed default',
-        },
-      );
+      expect(await const CriticCapability().result(c.context, c.args), {
+        'grade': 'F',
+        'transport': 'fail-closed-default',
+        'rationale':
+            'no parseable verdict via file or envelope — fail-closed default',
+      });
     });
 
     test('(rework 2) an early "Verdict: A" heading followed by a later, real '
         '"Verdict: F" heading -> the LAST heading wins, F', () async {
-      final dir =
-          Directory.systemTemp.createTempSync('critic-fallback-headtail-');
+      final dir = Directory.systemTemp.createTempSync(
+        'critic-fallback-headtail-',
+      );
       addTearDown(() => dir.deleteSync(recursive: true));
       const rubric = 'regression-risk';
       writeEnvelope(
@@ -818,16 +933,14 @@ void main() {
 
     test('a recovered fallback grade still merges FT-2 usage telemetry when '
         'present', () async {
-      final dir =
-          Directory.systemTemp.createTempSync('critic-fallback-usage-');
+      final dir = Directory.systemTemp.createTempSync('critic-fallback-usage-');
       addTearDown(() => dir.deleteSync(recursive: true));
       const rubric = 'test-coverage';
       File('${dir.path}/${usageReportPath('tg-1/review/$rubric')}')
         ..createSync(recursive: true)
-        ..writeAsStringSync(jsonEncode({
-          'result': 'Verdict: A',
-          'num_turns': 36,
-        }));
+        ..writeAsStringSync(
+          jsonEncode({'result': 'Verdict: A', 'num_turns': 36}),
+        );
       final c = _ctx(rubric: rubric, workspaceDir: dir.path);
       final out = await const CriticCapability().result(c.context, c.args);
       expect(out, {
@@ -871,7 +984,11 @@ void main() {
         'nodePath': nodePath,
         'round': 0,
       });
-      final c = _ctx(rubric: rubric, workspaceDir: dir.path, nodePath: nodePath);
+      final c = _ctx(
+        rubric: rubric,
+        workspaceDir: dir.path,
+        nodePath: nodePath,
+      );
       final out = await const CriticCapability().result(c.context, c.args);
       expect(out, {
         'grade': 'B',
@@ -880,31 +997,33 @@ void main() {
       });
     });
 
-    test('a STALE stray (nodePath from a prior round) is NOT recovered -> F '
-        '(the freshness stamp is what makes accepting an off-path file safe)',
-        () async {
-      final dir = Directory.systemTemp.createTempSync('critic-stray-stale-');
-      addTearDown(() => dir.deleteSync(recursive: true));
-      const rubric = 'test-coverage';
-      writeStray(dir.path, 'packages/grid_assets', rubric, {
-        'grade': 'A',
-        'rationale': 'a stale round-1 stray',
-        'nodePath': 'tg-1#r1/review/test-coverage',
-        // Round-FRESH: the foreign nodePath alone must reject it.
-        'round': 0,
-      });
-      final c = _ctx(
-        rubric: rubric,
-        workspaceDir: dir.path,
-        nodePath: 'tg-1#r2/review/test-coverage',
-      );
-      expect(await const CriticCapability().result(c.context, c.args), {
-        'grade': 'F',
-        'transport': 'fail-closed-default',
-        'rationale':
-            'no parseable verdict via file or envelope — fail-closed default',
-      });
-    });
+    test(
+      'a STALE stray (nodePath from a prior round) is NOT recovered -> F '
+      '(the freshness stamp is what makes accepting an off-path file safe)',
+      () async {
+        final dir = Directory.systemTemp.createTempSync('critic-stray-stale-');
+        addTearDown(() => dir.deleteSync(recursive: true));
+        const rubric = 'test-coverage';
+        writeStray(dir.path, 'packages/grid_assets', rubric, {
+          'grade': 'A',
+          'rationale': 'a stale round-1 stray',
+          'nodePath': 'tg-1#r1/review/test-coverage',
+          // Round-FRESH: the foreign nodePath alone must reject it.
+          'round': 0,
+        });
+        final c = _ctx(
+          rubric: rubric,
+          workspaceDir: dir.path,
+          nodePath: 'tg-1#r2/review/test-coverage',
+        );
+        expect(await const CriticCapability().result(c.context, c.args), {
+          'grade': 'F',
+          'transport': 'fail-closed-default',
+          'rationale':
+              'no parseable verdict via file or envelope — fail-closed default',
+        });
+      },
+    );
 
     test('the canonical verdict still WINS over a fresh stray', () async {
       final dir = Directory.systemTemp.createTempSync('critic-stray-canon-');
@@ -913,12 +1032,14 @@ void main() {
       const nodePath = 'tg-1/review/test-coverage';
       File('${dir.path}/.grid/critique/$rubric.json')
         ..createSync(recursive: true)
-        ..writeAsStringSync(jsonEncode({
-          'grade': 'C',
-          'rationale': 'from the canonical file',
-          'nodePath': nodePath,
-          'round': 0,
-        }));
+        ..writeAsStringSync(
+          jsonEncode({
+            'grade': 'C',
+            'rationale': 'from the canonical file',
+            'nodePath': nodePath,
+            'round': 0,
+          }),
+        );
       // A fresh stray with a DIFFERENT grade — must never be consulted.
       writeStray(dir.path, 'packages/grid_assets', rubric, {
         'grade': 'A',
@@ -926,7 +1047,11 @@ void main() {
         'nodePath': nodePath,
         'round': 0,
       });
-      final c = _ctx(rubric: rubric, workspaceDir: dir.path, nodePath: nodePath);
+      final c = _ctx(
+        rubric: rubric,
+        workspaceDir: dir.path,
+        nodePath: nodePath,
+      );
       final out = await const CriticCapability().result(c.context, c.args);
       expect(out, {
         'grade': 'C',
@@ -947,7 +1072,11 @@ void main() {
         'nodePath': nodePath,
         'round': 0,
       });
-      final c = _ctx(rubric: rubric, workspaceDir: dir.path, nodePath: nodePath);
+      final c = _ctx(
+        rubric: rubric,
+        workspaceDir: dir.path,
+        nodePath: nodePath,
+      );
       expect(await const CriticCapability().result(c.context, c.args), {
         'grade': 'F',
         'transport': 'fail-closed-default',
@@ -986,7 +1115,10 @@ void main() {
         ..writeAsStringSync('0\n');
 
       final c = ctx(dir.path);
-      final outcome = await const ClearCritiqueCapability().run(c.context, c.args);
+      final outcome = await const ClearCritiqueCapability().run(
+        c.context,
+        c.args,
+      );
       expect(outcome, isA<Ok>());
       expect(critiqueDir.existsSync(), isTrue);
       expect(critiqueDir.listSync(), isEmpty);
@@ -997,7 +1129,10 @@ void main() {
       final dir = Directory.systemTemp.createTempSync('clear-critique-first-');
       addTearDown(() => dir.deleteSync(recursive: true));
       final c = ctx(dir.path);
-      final outcome = await const ClearCritiqueCapability().run(c.context, c.args);
+      final outcome = await const ClearCritiqueCapability().run(
+        c.context,
+        c.args,
+      );
       expect(outcome, isA<Ok>());
       expect(Directory('${dir.path}/.grid/critique').existsSync(), isTrue);
     });
@@ -1007,19 +1142,24 @@ void main() {
         context: FakeTreeContext(values: const {}),
         args: stepArgs('tg-1/review/clear-critique'),
       );
-      final outcome = await const ClearCritiqueCapability().run(c.context, c.args);
+      final outcome = await const ClearCritiqueCapability().run(
+        c.context,
+        c.args,
+      );
       expect(outcome, isA<Ok>());
     });
 
-    test('a throwing clearer never Gates the round — best-effort hygiene, '
-        'the verdict\'s nodePath + round stamps are the fail-safe backstop',
-        () async {
-      final c = ctx('/w/tg-1');
-      final outcome = await const ClearCritiqueCapability(
-        clearer: _throwingClearer,
-      ).run(c.context, c.args);
-      expect(outcome, isA<Ok>());
-    });
+    test(
+      'a throwing clearer never Gates the round — best-effort hygiene, '
+      'the verdict\'s nodePath + round stamps are the fail-safe backstop',
+      () async {
+        final c = ctx('/w/tg-1');
+        final outcome = await const ClearCritiqueCapability(
+          clearer: _throwingClearer,
+        ).run(c.context, c.args);
+        expect(outcome, isA<Ok>());
+      },
+    );
 
     test('an injected clearer replaces the real delete+recreate (the '
         'offline-suite seam — never touches a real filesystem)', () async {
