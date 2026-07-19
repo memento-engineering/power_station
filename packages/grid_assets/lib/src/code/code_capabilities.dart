@@ -599,11 +599,99 @@ class GitSourceControl implements SourceControl {
     final root = _root;
     // Provisioning not wired (offline) — nothing to do.
     if (provisioner == null || root == null) return;
-    // Idempotent: a later step (verify/land) reuses the agent's worktree.
-    if (Directory(workspaceDir).existsSync()) return;
-    await provisioner.provisionWorktree(root: root, beadId: beadId);
+    // Idempotent only when the directory is already a git checkout.
+    if (_hasGitEntry(workspaceDir)) return;
+
+    final workspace = Directory(workspaceDir);
+    if (!workspace.existsSync()) {
+      await provisioner.provisionWorktree(root: root, beadId: beadId);
+      _assertGitCheckout(workspaceDir, beadId);
+      return;
+    }
+
+    final stash = Directory('$workspaceDir.scaffold-stash');
+    if (stash.existsSync()) {
+      throw StateError(
+        'provisionWorkspace: scaffold stash already exists for $beadId at '
+        '"${stash.path}"',
+      );
+    }
+
+    workspace.renameSync(stash.path);
+    try {
+      await provisioner.provisionWorktree(root: root, beadId: beadId);
+      _assertGitCheckout(workspaceDir, beadId);
+      _restoreStashedEntries(
+        stash: stash,
+        workspace: workspace,
+        beadId: beadId,
+      );
+    } catch (error, stackTrace) {
+      _restoreWorkspaceAfterProvisionFailure(
+        workspace: workspace,
+        stash: stash,
+        beadId: beadId,
+        error: error,
+      );
+      Error.throwWithStackTrace(error, stackTrace);
+    }
   }
 
+  static bool _hasGitEntry(String workspaceDir) {
+    final gitEntry = p.join(workspaceDir, '.git');
+    return FileSystemEntity.typeSync(gitEntry, followLinks: false) !=
+        FileSystemEntityType.notFound;
+  }
+
+  static void _assertGitCheckout(String workspaceDir, String beadId) {
+    if (_hasGitEntry(workspaceDir)) return;
+    throw StateError(
+      'provisionWorkspace: provisioner completed for $beadId but '
+      '"$workspaceDir" is not a git checkout (missing .git entry)',
+    );
+  }
+
+  static void _restoreStashedEntries({
+    required Directory stash,
+    required Directory workspace,
+    required String beadId,
+  }) {
+    final entries = stash.listSync(followLinks: false);
+    for (final entry in entries) {
+      final target = p.join(workspace.path, p.basename(entry.path));
+      if (FileSystemEntity.typeSync(target, followLinks: false) !=
+          FileSystemEntityType.notFound) {
+        throw StateError(
+          'provisionWorkspace: scaffold path collision for $beadId at '
+          '"$target"',
+        );
+      }
+    }
+    for (final entry in entries) {
+      entry.renameSync(p.join(workspace.path, p.basename(entry.path)));
+    }
+    stash.deleteSync();
+  }
+
+  static void _restoreWorkspaceAfterProvisionFailure({
+    required Directory workspace,
+    required Directory stash,
+    required String beadId,
+    required Object error,
+  }) {
+    if (!stash.existsSync()) return;
+    try {
+      if (workspace.existsSync()) {
+        workspace.deleteSync(recursive: true);
+      }
+      stash.renameSync(workspace.path);
+    } on Object catch (restoreError) {
+      throw StateError(
+        'provisionWorkspace: failed to restore scaffold for $beadId after '
+        'provisioning failed with $error: $restoreError',
+      );
+    }
+  }
 }
 
 /// Builds the `code` registry: the SPEC-READINESS INTAKE LENS

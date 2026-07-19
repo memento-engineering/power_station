@@ -15,6 +15,7 @@ import 'package:grid_assets/grid_assets.dart';
 import 'package:grid_engine/grid_engine.dart';
 import 'package:grid_runtime/grid_runtime.dart';
 import 'package:grid_sdk/grid_sdk.dart' as sdk;
+import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
 import 'support/asset_fakes.dart';
@@ -787,6 +788,11 @@ class _RecordingGitRunner implements GitRunner {
     required List<String> args,
   }) async {
     calls.add(args);
+    if (args.length >= 2 && args[0] == 'worktree' && args[1] == 'add') {
+      final target = args.contains('-b') ? args[4] : args[2];
+      Directory(target).createSync(recursive: true);
+      File(p.join(target, '.git')).writeAsStringSync('gitdir: fake');
+    }
     return const GitRunResult(exitCode: 0, output: '');
   }
 }
