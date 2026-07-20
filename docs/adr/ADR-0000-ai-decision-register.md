@@ -122,7 +122,7 @@ Entry format: `A<n> (date) — title` · Decision · Why · Affects (docs/code t
 (7) **The specify handoff is conditional:** on the human's continue-signal the skill invokes `/specify <id>` where the station vends it (pow-6ao is independent and not yet built), else it reports the design as recorded + staged and hands back. The acceptance's "can kick off specify" is thus content-true today and mechanically true the day pow-6ao lands, with no dependency edge.
 **Why:** ADR-0001 (draft) prescribes the pattern and resolves delivery to skill-file install but leaves the skills' on-disk home, manifest shape, render seam, and the discover adaptation itself to this bead; each call above reuses the nearest established idiom (the D-9 loader + mustache for rendering, lenny's shipped agentskills precedent for format, A11's report contract for the research surface, the governor manual's `--defer` staging for filing) rather than inventing new machinery. The skill+manifest+loader trio keeps grid_assets the single source of truth: `pow-kzx`'s installer only enumerates `kVendedSkills`, renders, and writes.
 **Affects (if promoted):** power_station code (built this bead): `packages/grid_assets/extension/skills/discover/SKILL.md`, `packages/grid_assets/extension/mcp/config.yaml` (the `skills:` section), `packages/grid_assets/lib/src/assets/asset_loader.dart` (`kVendedSkills`, `loadSkillTemplate`, `renderSkill` + guard), `packages/grid_assets/lib/grid_assets.dart` (library doc), `packages/grid_assets/test/assets/skill_assets_test.dart`. Downstream: `pow-kzx` (delivery) consumes `kVendedSkills` + `renderSkill(runner:, gridHome:)`; `pow-6ao` (specify) is the named hand-off and should vend under the same `skills/` home; ADR-0001's "extension/ still needs a skills/ home added" note is now satisfied and its ratification can fold this shape in.
-**Status:** pending.
+**Status:** Ratified (2026-07-14, Nico) — part of the SKILLS-HOME RULE (register foot).
 
 ## A13 (2026-07-11) — bead `pow-6ao`: the specify stage + spec-readiness committee land as two more `code`-circuit steps; the spec gate is a DETERMINISTIC structural lane; the spec critics SUBCLASS `CriticCapability` for one shared verdict-transport stack
 
@@ -285,7 +285,7 @@ A13(2)'s posture is preserved exactly: the lane stays a deterministic `ServiceCa
 **Why:** (1)/(5)/(6) are correctness, not polish: without them the leg installs a broken skill, an agent never invokes it, and every PR the grid opens carries stray vended files. (2)/(3)/(7) reuse the nearest proven idiom in this package (A11's restraint, A1's sync constraint, the existing sealed-outcome shape). (4) is the one genuine judgement call — a hardcoded default runner verb — taken because the alternative (defer the binding to the composing station) reproduces exactly the cross-store deferral this bead was re-specced to fix.
 **Affects (if promoted):** `packages/grid_assets/lib/src/assets/overlay_materializer.dart` (new), `…/lib/src/assets/asset_loader.dart` (`PackagedAssetLoader.root`, the skill path), `…/lib/src/code/code_capabilities.dart` (`kDefaultOverlayRunner`; `AgentCapability`'s `materializer`/`overlayRoot`/`overlayArgs`; `_linkWorkspace` returns the installed skill ids; `_materializeStationOverlay`/`_excludeOverlayFromGit`; `buildAgentBrief(skills:)`; `buildCodeRegistry(overlayArgs:)`), `…/lib/src/code/discovery.dart` (doc path), `lib/grid_assets.dart`, `extension/station_overlay/skills/discover/SKILL.md` (relocated), `extension/mcp/config.yaml`, `test/assets/skill_assets_test.dart`, new `test/assets/overlay_materializer_test.dart`, `test/track_h_code_extension_test.dart`. `pow-a74` consumes the same lib as its thin CLI adapter and owns the OPERATOR leg's roster resolution (its target, `~/.claude`, is not a repo, so it needs none of (6)).
 
-**Status:** pending — only Nico promotes.
+**Status:** Ratified (2026-07-14, Nico) — part of the SKILLS-HOME RULE (register foot).
 
 ## A24 (2026-07-13) — bead `pow-a74`: the operator install leg discovers its overlay roots NON-PRESCRIPTIVELY via `package:extension_discovery` over the GRID HOME's package config; its target defaults to `<gridHome>/.claude`, not `~/.claude`; the vended skills gain an AUDIENCE, held as a DENY-list so the build agent's brief never offers an operator skill
 
@@ -305,7 +305,7 @@ A13(2)'s posture is preserved exactly: the lane stays a deterministic `ServiceCa
 
 **Affects (if promoted):** `packages/grid_assets/lib/src/assets/overlay_install.dart` (new), `…/lib/src/assets/install_command.dart` (new), `…/lib/src/assets/mounted_tree.dart` (new), `…/lib/src/search/station_search.dart` (`mountedRosterOf` rides the extracted walker; the private `_RosterAuthor` deleted), `…/lib/src/assets/asset_loader.dart` (`kVendedSkills` grows to five; new `kOperatorSkills`), `…/lib/src/code/code_capabilities.dart` (`_materializeStationOverlay` withholds operator-audience ids from the brief), `lib/grid_assets.dart`, `pubspec.yaml` (`extension_discovery`), `extension/station_overlay/skills/{station-operations,intake-grooming,harvest-review,gate-medicine}/SKILL.md` (re-homed + templated), `extension/mcp/config.yaml` (four declarations + `audience:`), new `test/assets/overlay_install_test.dart`, new `test/assets/install_command_test.dart`, `test/assets/skill_assets_test.dart`, `test/assets/overlay_materializer_test.dart`, `test/track_h_code_extension_test.dart`. The composing station's own hand-committed `extension/skills/` copies are left in place (a different repo); deleting them and composing `..addCommand(InstallCommand(...))` on its runner is that repo's own follow-up.
 
-**Status:** pending — only Nico promotes.
+**Status:** Ratified (2026-07-14, Nico) — part of the SKILLS-HOME RULE (register foot).
 
 ## A25 (2026-07-13) — bead `pow-wbe`: the ROOT circuit grows a FLAT `deliver` terminal whose advance ACTUATES a bound `DeliveryMethod`; a route's failure channel is a THROWN `RouteFailure`; the composed PR body crosses the value-only delivery seam as a WORKTREE LEDGER — RETIRING pending A5 and pending A7(3), RE-HOMING pending A10's proof point, and RECORDING Nico's ruling that ratified A18(2)'s mechanism relocates
 
@@ -363,4 +363,27 @@ A13(2)'s posture is preserved exactly: the lane stays a deterministic `ServiceCa
 
 **Affects (if promoted):** `packages/grid_assets/lib/src/assets/overlay_provenance.dart` (new — the stamp, the strip, the sync ref probe), `…/lib/src/assets/overlay_materializer.dart` (root-parametric + path-preserving + `subtrees`/`sourceRef`/`dryRun`; `kOverlayKinds`/`OverlayFileSkipped`/`writtenEntryDirs`/`installedSkillIds` DELETED; `OverlayFileUpdated`/`Unchanged`/`Blocked` added; `kDefaultOverlayRunner` re-homed here from `code_capabilities.dart`), `…/lib/src/assets/overlay_install.dart` (installs onto a ROOT; `check`; `operatorClaudeDir` DELETED), `…/lib/src/assets/assets_command.dart` (was `install_command.dart` — the `assets` GROUP; `--root` replaces `--target`; `--check`/`--source-ref` new), `…/lib/src/code/code_capabilities.dart` (the wire targets the worktree ROOT, scoped to `.claude/skills`), `…/lib/src/assets/asset_loader.dart`, `…/extension/station_overlay/.claude/**` (re-rooted; GAINS `agents/governor.md` + `settings.json` — the complete operator asset set), `…/extension/mcp/config.yaml`, and the migrated suites + `test/assets/overlay_golden_test.dart` (new — the live worktree path's regression gate). space_station: the consumer half (compose the command, install onto its root, retire its hand-copies) is a companion bead in another repo.
 
-**Status:** pending — only Nico promotes.
+**Status:** Ratified (2026-07-14, Nico) — part of the SKILLS-HOME RULE (register foot).
+
+---
+
+## RATIFIED CROSS-AMENDMENT RULE — SKILLS-HOME (2026-07-14, Nico)
+
+Nico's ratification. Promotes **A12, A23, A24, A26** to **Ratified**. A vended skill's on-disk home follows its declared `audience` (`extension/mcp/config.yaml`):
+
+- **agent** (invoked by a build agent; named in its brief) → `packages/grid_assets/extension/skills/<name>/SKILL.md` (A12).
+- **operator** (for the human/governor operating a station; NEVER named in a build agent's brief) → `packages/grid_assets/extension/station_overlay/.claude/skills/<name>/SKILL.md` (A23 established the overlay tree → A24 the audience split → A26 the root-relative `.claude/` form).
+
+Audience is declared in the manifest and enforced as a deny-list so a build agent's brief never offers an operator skill (A24(3)). Consequence: the `release` skill (pow-vvr) and the four station-operator skills are OPERATOR-audience; `discover` is AGENT-audience.
+
+---
+
+## RATIFIED — DISCOVERY GATE: pending amendments are ADVISORY, not binding (2026-07-14, Nico)
+
+Nico's ratification, resolving the A21-vs-CLAUDE.md conflict that thrashed the pow-vvr / vendor-content work. At the discovery/violation gate (A21 / pow-96y), a **PENDING** ADR-0000 amendment is **ADVISORY ONLY** — surfaced as context for the spec committee's `adr-alignment` lane, NEVER grounds for a discovery HOLD. Only a **RATIFIED** standard (a ratified ADR, or an amendment whose Status is Ratified) can trigger a hold.
+
+This **supersedes A21(2)'s** clause "the citable standard is a ratified ADR (its pending `A<n>` amendments included — they bind)", and aligns the gate with the org CLAUDE.md (amendments are candidates for ratification, not binding until ratified).
+
+The gate additionally grades a bead's **INTENT** — a bead whose plan/acceptance REMOVES a cited offence PASSES (it is the fix), rather than holding on mere text-presence — per A21's own principle that "only an unwitting contradiction gates."
+
+Implemented by **pow-d7i**.
