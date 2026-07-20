@@ -306,13 +306,28 @@ class FakeInferenceRunner implements InferenceRunner {
 }
 
 /// A STATE session bead for the COMMITTEE-wired `code` circuit (M5 Track E):
-/// marks each relative path in [completed] `complete` in the per-node cursor AND
 /// attaches each grade in [grades] (relative nodePath → letter) under
 /// `grid.result.*` — so a mounted `route` reads its siblings' grades through the
 /// threaded `SiblingView` (D-5). [closed] marks the session terminal.
 ///
+/// **tg-eli phase 2 note:** [completed]/[gated] used to stamp each relative
+/// path `complete`/`gated` into the flat per-node `grid.cursor.*` cursor (via
+/// the engine's own, now-DELETED `nodeStateMetadata`). That model is RETIRED —
+/// `projectSession` never fills `SessionProjection.cursor` off bead metadata
+/// again, so a value here is now permanently INERT no matter what this helper
+/// writes (`session_bead.dart`: "a HISTORICAL session bead still bearing
+/// `grid.cursor.*` metadata is INERT ... nothing here throws on one"). Kept as
+/// accepted-but-unused parameters ONLY for source compatibility with existing
+/// callers of this shared fixture — a caller that needs a genuinely
+/// fast-forwarded MOLECULE session must mint its own `type=step` beads
+/// alongside this one (per-node progress lives on each step's OWN bead now,
+/// `grid.step.*`/`MoleculeStepKeys` — a SEPARATE bead this single-bead helper
+/// has no way to mint; see `invariant_4_a37_pristine_source_test.dart`'s local
+/// step-bead builder, mirroring `the_grid`'s own
+/// `molecule/molecule_join_test.dart` `_stepBead` fixture).
+///
 /// Paths are RELATIVE to [workBeadId] (e.g. `'review/route'`); the helper prefixes
-/// the bead id, matching the engine's `<beadId>/<...>` cursor keying.
+/// the bead id, matching the engine's `<beadId>/<...>` result keying.
 Bead committeeSession({
   String id = 'tgdog-sess1',
   String workBeadId = 'tg-1',
@@ -332,10 +347,6 @@ Bead committeeSession({
   metadata: {
     'rig': stateSubstation,
     SessionBeadKeys.workBead: workBeadId,
-    for (final step in completed)
-      ...nodeStateMetadata('$workBeadId/$step', StepState.complete),
-    for (final step in gated)
-      ...nodeStateMetadata('$workBeadId/$step', StepState.gated),
     for (final entry in grades.entries)
       ...nodeResultMetadata('$workBeadId/${entry.key}', {'grade': entry.value}),
     for (final entry in results.entries)

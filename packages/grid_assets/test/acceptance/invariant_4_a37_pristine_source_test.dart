@@ -27,21 +27,72 @@ import 'package:test/test.dart';
 
 import '../support/asset_fakes.dart';
 
-GraphSnapshot _graph({
-  required List<Bead> beads,
-  required Set<String> ready,
-}) => GraphSnapshot.fromParts(
-  beads: beads,
-  dependencies: const [],
-  readyIds: ready,
-  capturedAt: DateTime(2026),
-);
+GraphSnapshot _graph({required List<Bead> beads, required Set<String> ready}) =>
+    GraphSnapshot.fromParts(
+      beads: beads,
+      dependencies: const [],
+      readyIds: ready,
+      capturedAt: DateTime(2026),
+    );
 
 Bead _foreignWork(String id) =>
     Bead(id: id, issueType: IssueType.feature, status: BeadStatus.open);
 
 /// The bead id every recorded mutation targets (the arg after the subcommand).
 String? _targetOf(List<String> call) => call.length >= 2 ? call[1] : null;
+
+/// A `type=step` bead at [relativePath] (relative to [workBeadId]) for
+/// [sessionId] — the molecule model's per-node durable state (tg-eli phase 2:
+/// `grid.step.*` on the step's OWN bead; the retired flat `grid.cursor.*`
+/// never projects again, `session_bead.dart`). Mirrors the_grid's own
+/// `molecule/molecule_join_test.dart` `_stepBead` fixture shape.
+///
+/// `CapabilityHost._stepBeadId` refuses LOUD (a contained, per-work supervised
+/// failure — never a crash) when `InheritedCircuit.beadIdByNodePath` has no
+/// entry for the node it is about to mount, so EVERY node a live circuit will
+/// ever spawn — not just the already-`complete` ones — needs its OWN step bead
+/// staged in the state snapshot BEFORE that mount, hence [state] defaults to
+/// [StepState.pending] rather than [StepState.complete].
+Bead _stepBead(
+  String relativePath, {
+  required String sessionId,
+  required String workBeadId,
+  StepState state = StepState.pending,
+}) => Bead(
+  id: '$sessionId-${relativePath.replaceAll('/', '-')}',
+  issueType: IssueType.step,
+  status: BeadStatus.open,
+  metadata: {
+    'rig': stateSubstation,
+    MoleculeStepKeys.stepId: relativePath.split('/').last,
+    MoleculeStepKeys.capability: 'agent',
+    MoleculeStepKeys.kind: StepKind.job.name,
+    MoleculeStepKeys.path: '$workBeadId/$relativePath',
+    MoleculeStepKeys.session: sessionId,
+    MoleculeStepKeys.state: state.name,
+  },
+);
+
+/// One [_stepBead] per relative node path in [paths], all owned by
+/// [sessionId] — the fast-forward fixture: an already-[StepState.complete]
+/// step's OWN bead is what keeps `CapabilityHost` from ever re-mounting it
+/// (`projectMoleculeCursor` reads `grid.step.state` per STEP bead now, never a
+/// session-level cursor) — the molecule-model replacement for the retired flat
+/// `completed:` cursor set this suite used to push directly on the session
+/// bead.
+Iterable<Bead> _stepBeads(
+  Set<String> paths, {
+  required String sessionId,
+  required String workBeadId,
+  StepState state = StepState.complete,
+}) => paths.map(
+  (path) => _stepBead(
+    path,
+    sessionId: sessionId,
+    workBeadId: workBeadId,
+    state: state,
+  ),
+);
 
 void main() {
   group('invariant 4 — A37: the engine never writes the pristine work source', () {
@@ -69,7 +120,10 @@ void main() {
                 // the_grid builds the genesis backlog), so the genesis-* bead
                 // MOUNTS. The chokepoint's allow-set is still {tgdog} — that
                 // split is exactly what A37 protects.
-                const SubstationConfig(substationId: 'genesis', ownedSubstations: {'genesis'}),
+                const SubstationConfig(
+                  substationId: 'genesis',
+                  ownedSubstations: {'genesis'},
+                ),
               ),
               key: const ValueKey('scope.genesis'),
             ),
@@ -97,13 +151,38 @@ void main() {
               sessionBead(
                 id: 'tgdog-sess1',
                 workBeadId: 'genesis-7r9',
-                completed: kSpecHeadNodes,
+                metadata: const {SessionBeadKeys.model: kSessionModelMolecule},
+              ),
+              // The whole cheap head already COMPLETE (one `type=step` bead per
+              // node, tg-eli phase 2) — PLUS `specify`'s own step bead (still
+              // PENDING): a live molecule mount needs a step bead to already
+              // exist for the node it is about to spawn, not only for the
+              // already-finished ones.
+              ..._stepBeads(
+                kSpecHeadNodes,
+                sessionId: 'tgdog-sess1',
+                workBeadId: 'genesis-7r9',
+              ),
+              _stepBead(
+                kSpecifyNode,
+                sessionId: 'tgdog-sess1',
+                workBeadId: 'genesis-7r9',
               ),
             ],
             ready: const {},
           ),
         );
         await pumpEventQueue();
+        // A molecule-mode mint (tg-eli phase 2) is a LONGER async chain than
+        // the retired flat model's single `bd create` — mint the session, stamp
+        // `grid.session.model`, dedup-probe via `export --all`, then pour the
+        // WHOLE circuit's `type=step` beads via `create --graph` — each hop its
+        // own scheduled continuation. A single `pumpEventQueue` only drains the
+        // FIRST hop; settle the rest (bounded, so a genuine regression still
+        // fails instead of hanging) before asserting the mount/spawn.
+        for (var i = 0; i < 20 && f.provider.started.isEmpty; i++) {
+          await pumpEventQueue();
+        }
         expect(
           f.provider.started,
           hasLength(1),
@@ -122,7 +201,10 @@ void main() {
         );
         await pumpEventQueue();
         f.provider.emit(
-          const Exited(name: 'tgdog-sess1/genesis-7r9/spec_review/specify', exitCode: 0),
+          const Exited(
+            name: 'tgdog-sess1/genesis-7r9/spec_review/specify',
+            exitCode: 0,
+          ),
         );
         await pumpEventQueue();
 
@@ -131,15 +213,21 @@ void main() {
         state.push(
           _graph(
             beads: [
-              // The whole cheap head + `specify`. Carrying the DISCOVERY keys is
+              sessionBead(
+                id: 'tgdog-sess1',
+                workBeadId: 'genesis-7r9',
+                metadata: const {SessionBeadKeys.model: kSessionModelMolecule},
+              ),
+              // The whole cheap head + `specify`, EVERY one now its own
+              // COMPLETE step bead. Carrying the DISCOVERY keys is
               // load-bearing beyond the mount: a cursor holding `specify` with NO
               // discovery key is a PRE-DISCOVERY survivor, which the migration
               // guard correctly freezes onto `spec_review_v3` — so this suite
               // would silently drive the frozen shape.
-              sessionBead(
-                id: 'tgdog-sess1',
+              ..._stepBeads(
+                {...kSpecHeadNodes, kSpecifyNode},
+                sessionId: 'tgdog-sess1',
                 workBeadId: 'genesis-7r9',
-                completed: {...kSpecHeadNodes, kSpecifyNode},
               ),
             ],
             ready: const {},
@@ -211,13 +299,15 @@ void main() {
           expect(
             target!.startsWith('tgdog'),
             isTrue,
-            reason: 'A37 violated — bd write targeted a non-state-rig bead: '
+            reason:
+                'A37 violated — bd write targeted a non-state-rig bead: '
                 '$call',
           );
           expect(
             target.startsWith('genesis'),
             isFalse,
-            reason: 'A37 violated — bd write targeted the foreign work source: '
+            reason:
+                'A37 violated — bd write targeted the foreign work source: '
                 '$call',
           );
         }
@@ -239,9 +329,13 @@ void main() {
 
         // A write to an OWNED tgdog bead succeeds (proves the refusal is the
         // FOREIGN-ness, not a dead writer).
+        // The molecule model's step-bead payload shape (tg-eli phase 2): NO
+        // `{nodePath}` infix — the bead itself IS the node — so, unlike the
+        // retired `nodeStateMetadata`, this write carries no nodePath
+        // argument; only the TARGET bead id says which node it is.
         await writer.update(
           'tgdog-sess1',
-          metadata: nodeStateMetadata('tgdog-sess1/agent', StepState.complete),
+          metadata: {MoleculeStepKeys.state: StepState.complete.name},
         );
         expect(runner.callsFor('update'), hasLength(1));
 
@@ -250,7 +344,7 @@ void main() {
         await expectLater(
           writer.update(
             'genesis-7r9',
-            metadata: nodeStateMetadata('genesis-7r9/agent', StepState.complete),
+            metadata: {MoleculeStepKeys.state: StepState.complete.name},
           ),
           throwsA(isA<OwnershipRefused>()),
         );
@@ -275,7 +369,9 @@ void main() {
         // NONE of the refused writes reached the bd runner (fail-closed: refused
         // BEFORE the bd call, not after).
         expect(
-          runner.calls.every((c) => _targetOf(c)?.startsWith('genesis') != true),
+          runner.calls.every(
+            (c) => _targetOf(c)?.startsWith('genesis') != true,
+          ),
           isTrue,
           reason: 'no refused foreign write leaked to bd',
         );
