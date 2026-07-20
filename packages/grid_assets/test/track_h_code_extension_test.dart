@@ -760,6 +760,60 @@ void main() {
       );
     });
 
+    test('buildCodeRegistry with no explicit overlaySourceRef resolves the '
+        'station ref once at composition and every spawn reuses it (the '
+        'null/default PRODUCTION branch — per-spawn re-resolution is gone)', () {
+      // The production path: real station composition passes NO explicit ref,
+      // so buildCodeRegistry falls to
+      // `overlaySourceRef ?? resolveOverlaySourceRefSync(stationOverlayRoot)`.
+      // Recompute that composition-time value the SAME way the registry does,
+      // so the assertion pins the EXACT ref the null branch must resolve.
+      final stationOverlayRoot = p.join(
+        PackagedAssetLoader().root,
+        'station_overlay',
+      );
+      final expectedRef = resolveOverlaySourceRefSync(stationOverlayRoot);
+      // Non-vacuity guard: the house test tree is a git worktree, so the probe
+      // returns a real short sha — never kUnknownSourceRef. That default is also
+      // what a bare AgentCapability() records, so an 'unknown' here would make
+      // the provenance assertion pass WITHOUT exercising the git-probe branch.
+      expect(
+        expectedRef,
+        isNot(kUnknownSourceRef),
+        reason: 'the test tree must be a git checkout for the null branch to '
+            'probe a real ref',
+      );
+
+      // ONE registry composition with NO explicit ref → ONE resolution, bound
+      // into the composed 'agent' capability.
+      final host =
+          buildCodeRegistry(devRoot: '/dev/root').host(_registryAgentMount())
+              as CapabilityHost;
+      final cap = host.capability as AgentCapability;
+
+      // Spawn the SAME composed capability into TWO worktrees. If the ref were
+      // still resolved per-spawn, this is where a second probe would show;
+      // instead both spawns materialize the one composition-time ref.
+      final second = Directory.systemTemp.createTempSync('agent-overlay-2-');
+      addTearDown(() {
+        if (second.existsSync()) second.deleteSync(recursive: true);
+      });
+
+      final c1 = ctxAt(worktree.path);
+      cap.spawn(c1.context, c1.args);
+      final c2 = ctxAt(second.path);
+      cap.spawn(c2.context, c2.args);
+
+      expect(
+        discoverSkill(worktree).readAsStringSync(),
+        contains('$kProvenanceMarker$expectedRef'),
+      );
+      expect(
+        discoverSkill(second).readAsStringSync(),
+        contains('$kProvenanceMarker$expectedRef'),
+      );
+    });
+
     test(
       'the REAL vended discover skill lands at .claude/skills/discover/ FULLY '
       'RENDERED — every {{hole}} bound, so the agent gets a runnable skill, '
