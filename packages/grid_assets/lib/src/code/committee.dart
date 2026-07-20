@@ -111,6 +111,16 @@ import 'route_failure.dart';
 /// Plan command), decided by the route's matrix.
 const String kGatingRubric = 'code-validation';
 
+/// The gating lane's absolute-from-spawn deadline (the_grid audit §4,
+/// `tg-uad` follow-through): the deterministic `code-validation` lane runs the
+/// bead's OWN Validation Plan via `sh -c`, which is minutes-scale by
+/// definition — never the multi-hour agentic build/critic lanes — so it must
+/// NOT ride the runtime provider's 2-hour default watchdog. Ten minutes bounds
+/// every future validation-latched variant of this lane without crowding a
+/// legitimately slow (but still deterministic) plan. Deliberately NOT applied
+/// to the LLM critic/build lanes, which legitimately ride the long default.
+const Duration kGatingDeadline = Duration(minutes: 10);
+
 /// The three LLM critic rubric ids (each graded in isolation by a `claude`
 /// critic; anti-anchoring).
 const List<String> kLlmRubrics = [
@@ -663,6 +673,7 @@ class CriticCapability extends ProcessCapability {
         command: 'sh',
         args: ['-c', _gatingScript(_validationPlan(bead))],
         lifecycle: Lifecycle.oneTurn,
+        deadline: kGatingDeadline,
       );
     }
     // The critic lanes are agents (ADR-0008 Decision 10): resolve the

@@ -41,59 +41,6 @@ Bead _foreignWork(String id) =>
 /// The bead id every recorded mutation targets (the arg after the subcommand).
 String? _targetOf(List<String> call) => call.length >= 2 ? call[1] : null;
 
-/// A `type=step` bead at [relativePath] (relative to [workBeadId]) for
-/// [sessionId] — the molecule model's per-node durable state (tg-eli phase 2:
-/// `grid.step.*` on the step's OWN bead; the retired flat `grid.cursor.*`
-/// never projects again, `session_bead.dart`). Mirrors the_grid's own
-/// `molecule/molecule_join_test.dart` `_stepBead` fixture shape.
-///
-/// `CapabilityHost._stepBeadId` refuses LOUD (a contained, per-work supervised
-/// failure — never a crash) when `InheritedCircuit.beadIdByNodePath` has no
-/// entry for the node it is about to mount, so EVERY node a live circuit will
-/// ever spawn — not just the already-`complete` ones — needs its OWN step bead
-/// staged in the state snapshot BEFORE that mount, hence [state] defaults to
-/// [StepState.pending] rather than [StepState.complete].
-Bead _stepBead(
-  String relativePath, {
-  required String sessionId,
-  required String workBeadId,
-  StepState state = StepState.pending,
-}) => Bead(
-  id: '$sessionId-${relativePath.replaceAll('/', '-')}',
-  issueType: IssueType.step,
-  status: BeadStatus.open,
-  metadata: {
-    'rig': stateSubstation,
-    MoleculeStepKeys.stepId: relativePath.split('/').last,
-    MoleculeStepKeys.capability: 'agent',
-    MoleculeStepKeys.kind: StepKind.job.name,
-    MoleculeStepKeys.path: '$workBeadId/$relativePath',
-    MoleculeStepKeys.session: sessionId,
-    MoleculeStepKeys.state: state.name,
-  },
-);
-
-/// One [_stepBead] per relative node path in [paths], all owned by
-/// [sessionId] — the fast-forward fixture: an already-[StepState.complete]
-/// step's OWN bead is what keeps `CapabilityHost` from ever re-mounting it
-/// (`projectMoleculeCursor` reads `grid.step.state` per STEP bead now, never a
-/// session-level cursor) — the molecule-model replacement for the retired flat
-/// `completed:` cursor set this suite used to push directly on the session
-/// bead.
-Iterable<Bead> _stepBeads(
-  Set<String> paths, {
-  required String sessionId,
-  required String workBeadId,
-  StepState state = StepState.complete,
-}) => paths.map(
-  (path) => _stepBead(
-    path,
-    sessionId: sessionId,
-    workBeadId: workBeadId,
-    state: state,
-  ),
-);
-
 void main() {
   group('invariant 4 — A37: the engine never writes the pristine work source', () {
     test(
@@ -158,12 +105,12 @@ void main() {
               // PENDING): a live molecule mount needs a step bead to already
               // exist for the node it is about to spawn, not only for the
               // already-finished ones.
-              ..._stepBeads(
+              ...stepBeads(
                 kSpecHeadNodes,
                 sessionId: 'tgdog-sess1',
                 workBeadId: 'genesis-7r9',
               ),
-              _stepBead(
+              stepBead(
                 kSpecifyNode,
                 sessionId: 'tgdog-sess1',
                 workBeadId: 'genesis-7r9',
@@ -178,11 +125,10 @@ void main() {
         // `grid.session.model`, dedup-probe via `export --all`, then pour the
         // WHOLE circuit's `type=step` beads via `create --graph` — each hop its
         // own scheduled continuation. A single `pumpEventQueue` only drains the
-        // FIRST hop; settle the rest (bounded, so a genuine regression still
-        // fails instead of hanging) before asserting the mount/spawn.
-        for (var i = 0; i < 20 && f.provider.started.isEmpty; i++) {
-          await pumpEventQueue();
-        }
+        // FIRST hop; settle the rest (the shared bounded helper: still fails
+        // instead of hanging on a genuine regression) before asserting the
+        // mount/spawn.
+        await settle(() => f.provider.started.isNotEmpty);
         expect(
           f.provider.started,
           hasLength(1),
@@ -224,7 +170,7 @@ void main() {
               // discovery key is a PRE-DISCOVERY survivor, which the migration
               // guard correctly freezes onto `spec_review_v3` — so this suite
               // would silently drive the frozen shape.
-              ..._stepBeads(
+              ...stepBeads(
                 {...kSpecHeadNodes, kSpecifyNode},
                 sessionId: 'tgdog-sess1',
                 workBeadId: 'genesis-7r9',

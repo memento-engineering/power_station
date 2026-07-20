@@ -43,18 +43,37 @@ import '../support/asset_fakes.dart';
 // Builders + branch-walk helpers (the integrated tree, REAL capabilities).
 // ---------------------------------------------------------------------------
 
-GraphSnapshot _graph({
-  required List<Bead> beads,
-  required Set<String> ready,
-}) => GraphSnapshot.fromParts(
-  beads: beads,
-  dependencies: const [],
-  readyIds: ready,
-  capturedAt: DateTime(2026),
-);
+GraphSnapshot _graph({required List<Bead> beads, required Set<String> ready}) =>
+    GraphSnapshot.fromParts(
+      beads: beads,
+      dependencies: const [],
+      readyIds: ready,
+      capturedAt: DateTime(2026),
+    );
 
 Bead _bead(String id) =>
     Bead(id: id, issueType: IssueType.task, status: BeadStatus.open);
+
+/// Polls [condition] with a REAL short delay, up to [maxTries] — the robust
+/// variant the shared [settle] (a bounded `pumpEventQueue` loop, default
+/// `maxPumps: 20`) cannot guarantee for a FRESH molecule mint: the mint's
+/// `createMolecule` pour rides the REAL `BdCliService.applyGraph`, which
+/// writes a genuine temp file (`dart:io`) before the FAKE `BdRunner` boundary
+/// is ever reached (`migration_guard_acceptance_test.dart`'s `_pumpUntilReal`
+/// documents the same hazard) — a fixed microtask-queue pump count is not
+/// reliably enough turns of the REAL event loop for that I/O to settle,
+/// especially under full-suite CPU contention (many parallel isolates'
+/// dart:io ops competing for the same background thread pool). Bounded, so a
+/// genuine regression still FAILS (its [condition] stays false) instead of
+/// hanging.
+Future<void> _pumpUntilReal(
+  bool Function() condition, {
+  int maxTries = 500,
+}) async {
+  for (var i = 0; i < maxTries && !condition(); i++) {
+    await Future<void>.delayed(const Duration(milliseconds: 1));
+  }
+}
 
 JoinedSnapshot _joined({
   required List<Bead> beads,
@@ -65,36 +84,80 @@ JoinedSnapshot _joined({
   sessionsByWorkBead: sessions,
 );
 
-/// An adopted session for [workBead] (sessionId [id]) at the given [completed]
-/// node set + [grades] (relative nodePath → letter) — the JOIN row the bridge
-/// would surface (the per-node cursor + the `grid.result.*` grades a `route`
-/// reads through its SiblingView, D-5). The SPEC phase (bead `pow-6ao`) rides
-/// every projection fully complete + all-A, so the adopted sessions resolve
+/// An adopted MOLECULE session for [workBead] (sessionId [id]) at the given
+/// [completed] node set + [grades] (relative nodePath → letter) — the JOIN row
+/// the bridge would surface, built DIRECTLY (this suite talks straight to a
+/// `JoinedSnapshotNotifier`, bypassing the join bridge / `GraphSnapshot`, so
+/// `isMolecule`/`moleculeBeads` are populated here rather than via
+/// `committeeSession`'s Bead-list shape). Every node in
+/// [kAllCodeCircuitNodes] gets its own `type=step` bead — the whole universe
+/// a live molecule mount might reach (`CapabilityHost._stepBeadId` refuses
+/// LOUD otherwise) — staged COMPLETE for the whole SPEC phase (bead `pow-6ao`)
+/// plus [completed], PENDING everywhere else, so the adopted sessions resolve
 /// straight to the BUILD agent and this test's frontier counts stay focused
 /// on the code committee (the spec phase's own choreography is
 /// `spec_stage_acceptance_test.dart`).
+///
+/// [grades] stamp `grid.result.<path>.grade` on the GRADED node's OWN step
+/// bead, never a session-bead slice: `SessionScope`'s molecule branch derives
+/// `results` SOLELY from `moleculeBeads` (R1 re-homed the write off the
+/// session bead), so that is the only shape `CodeRouteCapability`'s ambient
+/// `SiblingView` actually reads live.
 SessionProjection _session(
   String workBead,
   String id, {
   Set<String> completed = const {},
   Map<String, String> grades = const {},
-}) => SessionProjection(
-  workBeadId: workBead,
-  sessionId: id,
-  cursor: {
-    for (final step in {...kSpecPhaseNodes, ...completed})
-      '$workBead/$step': const NodeCursor(state: StepState.complete),
-  },
-  results: {
-    for (final entry in {...kSpecGradesAllA, ...grades}.entries)
-      '$workBead/${entry.key}': {'grade': entry.value},
-  },
-);
+}) {
+  final done = {...kSpecPhaseNodes, ...completed};
+  final allGrades = {...kSpecGradesAllA, ...grades};
+  return SessionProjection(
+    workBeadId: workBead,
+    sessionId: id,
+    isMolecule: true,
+    moleculeBeads: [
+      for (final node in kAllCodeCircuitNodes)
+        _gradedStep(
+          stepBead(
+            node,
+            sessionId: id,
+            workBeadId: workBead,
+            state: done.contains(node) ? StepState.complete : StepState.pending,
+          ),
+          node,
+          workBead,
+          allGrades,
+        ),
+    ],
+  );
+}
+
+/// Stamps [b]'s own `grid.result.<workBead>/<node>.grade` when [node] carries
+/// a grade in [grades] (the shape [CodeRouteCapability]'s ambient
+/// `SiblingView` reads live); returns [b] unchanged otherwise.
+Bead _gradedStep(
+  Bead b,
+  String node,
+  String workBead,
+  Map<String, String> grades,
+) {
+  final grade = grades[node];
+  if (grade == null) return b;
+  return b.copyWith(
+    metadata: {
+      ...b.metadata,
+      ...nodeResultMetadata('$workBead/$node', {'grade': grade}),
+    },
+  );
+}
 
 /// The integrated root: the work-axis notifier + the StationServices + the live
 /// `code` registry + the CircuitResolver above the Station; one rig owning `tg`.
 /// The git ServiceBundle is provided AT THE SubstationScope (ADR-0008 D5: source
-/// control is a per-substation responsibility).
+/// control is a per-substation responsibility). `ProcessLeaseVendor` is
+/// mounted automatically by `StationKernel`; this manual TreeOwner-driven
+/// tree bypasses the kernel entirely, so the molecule process path needs its
+/// own vendor here — the SAME default the kernel installs at its root.
 Seed _root({
   required JoinedSnapshotNotifier joined,
   required StationServices ctx,
@@ -104,17 +167,20 @@ Seed _root({
   value: joined,
   child: InheritedSeed<StationServices>(
     value: ctx,
-    child: InheritedSeed<CapabilityRegistry>(
-      value: registry,
-      child: InheritedSeed<SessionResolver>(
-        value: kCodeResolver,
-        child: Station([
-          SubstationScope(
-            configNotifier: SubstationConfigNotifier(_tgConfig),
-            services: services,
-            key: const ValueKey('scope.tg'),
-          ),
-        ]),
+    child: InheritedSeed<ProcessLeaseVendor>(
+      value: defaultProcessLeaseVendor(ctx),
+      child: InheritedSeed<CapabilityRegistry>(
+        value: registry,
+        child: InheritedSeed<SessionResolver>(
+          value: kCodeResolver,
+          child: Station([
+            SubstationScope(
+              configNotifier: SubstationConfigNotifier(_tgConfig),
+              services: services,
+              key: const ValueKey('scope.tg'),
+            ),
+          ]),
+        ),
       ),
     ),
   ),
@@ -161,11 +227,25 @@ CapabilityHostState capabilityHostState(Branch root) {
 String _workListId(Branch root) =>
     _branchWhere(root, (s) => s is WorkList).branchId;
 
-ServiceBundle _gitServices(Fakes f) => ServiceBundle(
+/// ROOTED at a real temp dir ([workspaceRoot], [_provisionCheckout]'d with a
+/// `.git` marker BEFORE the kernel ever mounts an agent step) rather than the
+/// bare `/grid/worktrees/...` synthetic placeholder: the molecule model's live
+/// process allocation now runs `assertProvisionedCheckout` (ADR-0009 D3, bead
+/// `tg-6jn`) before EVERY agent spawn, which fail-closed REFUSES a workspace
+/// with no on-disk `.git` — a real check the retired flat model's capability
+/// mount never performed. The land STAGE's own git calls still ride the
+/// recording fake (`f.git`), never real git.
+ServiceBundle _gitServices(Fakes f, String workspaceRoot) => ServiceBundle(
   // The source control PROVISIONS; the bound DELIVERY METHOD is what a terminal
   // advance actuates (M5 D-4a). gitRunner: the SAME recording fake gitOps wraps
   // — the force-with-lease push records offline (never real git).
-  sourceControl: const GitSourceControl(),
+  sourceControl: GitSourceControl(
+    root: RootCheckout(
+      path: workspaceRoot,
+      substation: 'tg',
+      defaultBranch: 'main',
+    ),
+  ),
   delivery: GitHubPrDelivery(
     gitOps: GitOps(f.git),
     prOpener: f.pr,
@@ -173,7 +253,22 @@ ServiceBundle _gitServices(Fakes f) => ServiceBundle(
   ),
 );
 
-const _tgConfig = SubstationConfig(substationId: 'tg', ownedSubstations: {'tg'});
+/// Pre-provisions a FAKE git checkout for [beadId] under [root] — a bare
+/// `.git` marker directory at the exact path a real [RootCheckout] resolves
+/// (`WorktreeLayout.worktreePath`) — so `assertProvisionedCheckout` (ADR-0009
+/// D3) sees a real checkout and lets an agent capability mount, instead of
+/// fail-closed refusing the offline synthetic worktree. Only the on-disk
+/// marker is real; every git INVOCATION still rides the recording fake
+/// (`f.git`), never real git.
+void _provisionCheckout(String root, String beadId) {
+  final path = WorktreeLayout.worktreePath(root, 'tg', beadId);
+  Directory('$path/.git').createSync(recursive: true);
+}
+
+const _tgConfig = SubstationConfig(
+  substationId: 'tg',
+  ownedSubstations: {'tg'},
+);
 
 void main() {
   group('PDR §7 (a)+(b)+(c) — transitions, sibling isolation, config quiet', () {
@@ -185,6 +280,10 @@ void main() {
         final f = buildFakes(createdId: 'tgdog-sess1');
         f.pr.url = 'https://github.com/memento/genesis/pull/7';
         final shell = RecordingShellRunner();
+        final tmp = Directory.systemTemp.createTempSync('pdr-s7-acc');
+        addTearDown(() => tmp.deleteSync(recursive: true));
+        _provisionCheckout(tmp.path, 'tg-1');
+        _provisionCheckout(tmp.path, 'tg-2');
         // The four tg-1 committee critic step names, in declaration order.
         final tg1Critics = [for (final n in kCriticNodes) 'tgdog-1/tg-1/$n'];
         final allA = {for (final n in kCriticNodes) n: 'A'};
@@ -221,7 +320,7 @@ void main() {
               // filesystem touch.
               critiqueDirClearer: (_) {},
             ),
-            services: _gitServices(f),
+            services: _gitServices(f, tmp.path),
           ),
         );
         await pumpEventQueue();
@@ -230,14 +329,26 @@ void main() {
         // FT-2 wraps claude in `sh -c` for usage capture, so the command is `sh`
         // and claude is exec'd from the positionals.
         expect(f.provider.started, hasLength(2));
-        expect(
-          f.provider.started.map((s) => s.config.command),
-          ['sh', 'sh'],
-        );
+        expect(f.provider.started.map((s) => s.config.command), ['sh', 'sh']);
         expect(
           f.provider.started.every((s) => s.config.args.contains('claude')),
           isTrue,
         );
+        // The molecule lease's own acquire (`stationProcessSpawner`) binds
+        // the process handle ONLY once a `SessionStarted` event lands (fails
+        // LOUD on Exited/Died first) — unlike the retired flat model, whose
+        // `_started` flag went true synchronously at the `transport.start`
+        // call. Without it the lease never binds (`_hasHandle` stays false),
+        // so a later unmount's release never reaches `transport.stop` — the
+        // swap this test proves would go unobserved. Emit it for both
+        // spawned agents before driving either further.
+        f.provider.emit(
+          const SessionStarted(name: 'tgdog-1/tg-1/agent', pid: 101, pgid: 101),
+        );
+        f.provider.emit(
+          const SessionStarted(name: 'tgdog-2/tg-2/agent', pid: 102, pgid: 102),
+        );
+        await pumpEventQueue();
         final wb1Id = _workBead(root, 'tg-1')!.branchId;
         final wb2Id = _workBead(root, 'tg-2')!.branchId;
         final workListId = _workListId(root);
@@ -261,8 +372,10 @@ void main() {
         }
 
         final sessionRootId = effectChild(_workBead(root, 'tg-1')!).branchId;
-        expect(effectChild(_workBead(root, 'tg-1')!).key,
-            const ValueKey('tg-1:session'));
+        expect(
+          effectChild(_workBead(root, 'tg-1')!).key,
+          const ValueKey('tg-1:session'),
+        );
 
         // --- (a) agent → committee (a reconcile transition: the agent retires
         // and the four critic lanes fan out IN PARALLEL) ---
@@ -300,45 +413,74 @@ void main() {
           ),
         );
         owner.flush();
-        await pumpEventQueue();
+        // The unmount's kill is a fire-and-forget Future chain (cancel → lease
+        // release → `transport.stop` → clear the breadcrumb) `CapabilityHost
+        // .dispose()` never awaits — settle bounded-conditionally on the swap's
+        // own signal rather than a single pump.
+        await settle(
+          () =>
+              f.provider.started.length >= 6 &&
+              f.provider.stopped.contains('tgdog-1/tg-1/agent'),
+        );
 
         // The running frontier SWAPPED: the agent step was killed and the four
         // critics spawned; the WorkBead branch + its bead-keyed subtree root
         // PERSISTED.
-        expect(f.provider.started, hasLength(6),
-            reason: 'the four committee critics fanned out (the swap)');
+        expect(
+          f.provider.started,
+          hasLength(6),
+          reason: 'the four committee critics fanned out (the swap)',
+        );
         for (final critic in tg1Critics) {
-          expect(f.provider.started.map((s) => s.name), contains(critic),
-              reason: 'critic $critic fanned out IN PARALLEL');
+          expect(
+            f.provider.started.map((s) => s.name),
+            contains(critic),
+            reason: 'critic $critic fanned out IN PARALLEL',
+          );
         }
         // Both lanes spawn `sh` (FT-2 wraps claude for usage capture): the
         // gating lane runs the Validation Plan, an LLM lane exec's claude.
         expect(
-          f.provider.started.firstWhere((s) => s.name == tg1Critics.first)
-              .config.command,
+          f.provider.started
+              .firstWhere((s) => s.name == tg1Critics.first)
+              .config
+              .command,
           'sh',
           reason: 'the gating critic runs the bead\'s Validation Plan',
         );
         final tg1Llm = f.provider.started
-            .firstWhere((s) => s.name == tg1Critics[1]).config;
+            .firstWhere((s) => s.name == tg1Critics[1])
+            .config;
         expect(tg1Llm.command, 'sh');
-        expect(tg1Llm.args, contains('claude'),
-            reason: 'an LLM critic exec\'s claude from the sh wrapper');
+        expect(
+          tg1Llm.args,
+          contains('claude'),
+          reason: 'an LLM critic exec\'s claude from the sh wrapper',
+        );
         expect(
           f.provider.stopped,
           contains('tgdog-1/tg-1/agent'),
           reason: 'the agent step was unmounted → killed',
         );
-        expect(_workBead(root, 'tg-1')!.branchId, wb1Id,
-            reason: 'WorkBead branch persists across the transition');
-        expect(effectChild(_workBead(root, 'tg-1')!).branchId, sessionRootId,
-            reason: 'the bead-keyed subtree root persists (config threaded down)');
+        expect(
+          _workBead(root, 'tg-1')!.branchId,
+          wb1Id,
+          reason: 'WorkBead branch persists across the transition',
+        );
+        expect(
+          effectChild(_workBead(root, 'tg-1')!).branchId,
+          sessionRootId,
+          reason: 'the bead-keyed subtree root persists (config threaded down)',
+        );
         // No new mint (the sessions are adopted; the happy path mints no gate).
         expect(f.runner.callsFor('create'), isEmpty);
 
         // --- (b) the sibling tg-2 was untouched across tg-1's transition ---
-        expect(_workBead(root, 'tg-2')!.branchId, wb2Id,
-            reason: 'sibling WorkBead branch unchanged');
+        expect(
+          _workBead(root, 'tg-2')!.branchId,
+          wb2Id,
+          reason: 'sibling WorkBead branch unchanged',
+        );
         // No spurious sibling fan-out: tg-2 started exactly once (its agent) and
         // never appears in stopped. The new starts are all tg-1's critics.
         expect(
@@ -349,8 +491,20 @@ void main() {
         expect(f.provider.stopped, isNot(contains('tgdog-2/tg-2/agent')));
 
         // --- (c) the config subtree did NOT rebuild on the work tick ---
-        expect(_workListId(root), workListId,
-            reason: 'a work tick does not rebuild the config ancestors');
+        expect(
+          _workListId(root),
+          workListId,
+          reason: 'a work tick does not rebuild the config ancestors',
+        );
+
+        // The four critics' own leases likewise need their `SessionStarted`
+        // before their later unmount can release (see the agent's above).
+        for (var i = 0; i < tg1Critics.length; i++) {
+          f.provider.emit(
+            SessionStarted(name: tg1Critics[i], pid: 200 + i, pgid: 200 + i),
+          );
+        }
+        await pumpEventQueue();
 
         // --- (a) continued: committee → route (the critics retire, the route
         // joins on all four, reads the all-pass grades, and advances) ---
@@ -359,21 +513,31 @@ void main() {
             beads: [_bead('tg-1'), _bead('tg-2')],
             ready: {'tg-1', 'tg-2'},
             sessions: {
-              'tg-1': _session('tg-1', 'tgdog-1',
-                  completed: {kAgentNode, ...kCriticNodes}, grades: allA),
+              'tg-1': _session(
+                'tg-1',
+                'tgdog-1',
+                completed: {kAgentNode, ...kCriticNodes},
+                grades: allA,
+              ),
               'tg-2': _session('tg-2', 'tgdog-2'),
             },
           ),
         );
         owner.flush();
-        await pumpEventQueue();
+        await settle(() => tg1Critics.every(f.provider.stopped.contains));
 
         // The four critic steps were killed on the swap; the route is a
         // ServiceCapability (no provider spawn), so no new start lands.
-        expect(f.provider.stopped, containsAll(tg1Critics),
-            reason: 'every critic step was unmounted → killed once the route ran');
-        expect(f.provider.started, hasLength(6),
-            reason: 'the route does not spawn a process');
+        expect(
+          f.provider.stopped,
+          containsAll(tg1Critics),
+          reason: 'every critic step was unmounted → killed once the route ran',
+        );
+        expect(
+          f.provider.started,
+          hasLength(6),
+          reason: 'the route does not spawn a process',
+        );
 
         // --- (a) continued: route → land (the final transition — `tg-rm5`'s
         // landing sub-circuit: rebase → revalidate → land, each a
@@ -383,9 +547,12 @@ void main() {
             beads: [_bead('tg-1'), _bead('tg-2')],
             ready: {'tg-1', 'tg-2'},
             sessions: {
-              'tg-1': _session('tg-1', 'tgdog-1',
-                  completed: {kAgentNode, ...kCriticNodes, kRouteNode},
-                  grades: allA),
+              'tg-1': _session(
+                'tg-1',
+                'tgdog-1',
+                completed: {kAgentNode, ...kCriticNodes, kRouteNode},
+                grades: allA,
+              ),
               'tg-2': _session('tg-2', 'tgdog-2'),
             },
           ),
@@ -398,14 +565,17 @@ void main() {
             beads: [_bead('tg-1'), _bead('tg-2')],
             ready: {'tg-1', 'tg-2'},
             sessions: {
-              'tg-1': _session('tg-1', 'tgdog-1',
-                  completed: {
-                    kAgentNode,
-                    ...kCriticNodes,
-                    kRouteNode,
-                    kRebaseNode,
-                  },
-                  grades: allA),
+              'tg-1': _session(
+                'tg-1',
+                'tgdog-1',
+                completed: {
+                  kAgentNode,
+                  ...kCriticNodes,
+                  kRouteNode,
+                  kRebaseNode,
+                },
+                grades: allA,
+              ),
               'tg-2': _session('tg-2', 'tgdog-2'),
             },
           ),
@@ -418,15 +588,18 @@ void main() {
             beads: [_bead('tg-1'), _bead('tg-2')],
             ready: {'tg-1', 'tg-2'},
             sessions: {
-              'tg-1': _session('tg-1', 'tgdog-1',
-                  completed: {
-                    kAgentNode,
-                    ...kCriticNodes,
-                    kRouteNode,
-                    kRebaseNode,
-                    kRevalidateNode,
-                  },
-                  grades: allA),
+              'tg-1': _session(
+                'tg-1',
+                'tgdog-1',
+                completed: {
+                  kAgentNode,
+                  ...kCriticNodes,
+                  kRouteNode,
+                  kRebaseNode,
+                  kRevalidateNode,
+                },
+                grades: allA,
+              ),
               'tg-2': _session('tg-2', 'tgdog-2'),
             },
           ),
@@ -437,11 +610,20 @@ void main() {
         // land is a ServiceCapability (git/PR orchestration) — NOT a provider
         // spawn (still 6 starts); the land Service ran its real orchestration
         // through the fakes; the WorkBead branch still persists.
-        expect(f.provider.started, hasLength(6),
-            reason: 'land does not spawn a process');
-        expect(_workBead(root, 'tg-1')!.branchId, wb1Id,
-            reason: 'the WorkBead branch still persists at land');
-        expect(f.git.subcommands, containsAll(<String>['add', 'commit', 'push']));
+        expect(
+          f.provider.started,
+          hasLength(6),
+          reason: 'land does not spawn a process',
+        );
+        expect(
+          _workBead(root, 'tg-1')!.branchId,
+          wb1Id,
+          reason: 'the WorkBead branch still persists at land',
+        );
+        expect(
+          f.git.subcommands,
+          containsAll(<String>['add', 'commit', 'push']),
+        );
         expect(f.pr.opened, isNotEmpty);
       },
     );
@@ -453,6 +635,10 @@ void main() {
       'then the re-mounted tree respawns the non-skipped — no double-work',
       () async {
         // --- the restart reconciler pass (Track D), through the real type ---
+        // Built FIRST (not just for the re-mount below) — the molecule lease
+        // sweep needs a real `StationBeadWriter` chokepoint (the vendor's
+        // breadcrumb clear) via `f.ctx`.
+        final f = buildFakes(createdId: 'tgdog-l');
         final reaped = <String>[];
         final signals = <int>[];
         final reconciler = RestartReconciler(
@@ -479,6 +665,12 @@ void main() {
           ),
           groups: _RecordingGroups(signals, alivePids: {4243}),
           freshnessBarrier: () async {},
+          // The molecule model is the ONE process-identity reconciliation
+          // (tg-eli phase 2 retired the flat per-session scalar `pgid`/`pid`
+          // kill walk `_reconcileWorktree` used to drive — `RestartDisposition
+          // .killed` is HISTORICAL and no pass emits it any more): the
+          // reconciler's own `sweepOrphanedLeases` pass needs a vendor.
+          leaseVendor: defaultProcessLeaseVendor(f.ctx),
           stateSnapshot: () => _graph(
             beads: [
               // tg-done: terminal owned session ⇒ SKIP.
@@ -488,7 +680,7 @@ void main() {
                 status: BeadStatus.closed,
                 metadata: const {'rig': 'tgdog', 'work_bead': 'tg-done'},
               ),
-              // tg-live: a live orphan with a usable pgid ⇒ KILL + respawn.
+              // tg-live: a live MOLECULE session backing a surviving worktree.
               Bead(
                 id: 'tgdog-l',
                 issueType: IssueType.session,
@@ -496,8 +688,28 @@ void main() {
                 metadata: const {
                   'rig': 'tgdog',
                   'work_bead': 'tg-live',
-                  'pgid': '4242',
-                  'pid': '4243',
+                  SessionBeadKeys.model: kSessionModelMolecule,
+                },
+              ),
+              // Its OWN `type=step` bead carries the vendor's `grid.lease.*`
+              // breadcrumb (Decided item 5) for a still-RUNNING job whose
+              // process group nothing will re-adopt (a job lease never
+              // adopts, D5) — a live orphan the sweep kills + clears.
+              Bead(
+                id: 'tgdog-l-agent',
+                issueType: IssueType.step,
+                status: BeadStatus.open,
+                metadata: const {
+                  'rig': 'tgdog',
+                  MoleculeStepKeys.stepId: 'agent',
+                  MoleculeStepKeys.capability: 'agent',
+                  MoleculeStepKeys.kind: 'job',
+                  MoleculeStepKeys.path: 'tg-live/agent',
+                  MoleculeStepKeys.session: 'tgdog-l',
+                  MoleculeStepKeys.state: 'running',
+                  'grid.lease.pgid': '4242',
+                  'grid.lease.pid': '4243',
+                  'grid.lease.token': 'restart-tok-1',
                 },
               ),
             ],
@@ -507,17 +719,33 @@ void main() {
         final report = await reconciler.reconcile();
 
         expect(report.skipped.map((e) => e.beadId), ['tg-done']);
-        expect(report.killed.map((e) => e.beadId), ['tg-live']);
+        // The lease sweep — not `report.killed` (HISTORICAL, always empty
+        // since tg-eli phase 2) — is the molecule kill proof.
+        final swept = report.sweptLeases;
+        expect(
+          swept.map((g) => g.stepBeadId),
+          ['tgdog-l-agent'],
+          reason: "the live orphan's OWN step bead was swept",
+        );
+        expect(swept.single.disposition.name, 'killed');
         expect(reaped, ['tg-done'], reason: 'only the done bead is reaped');
         expect(signals, [4242], reason: 'only the live orphan is signalled');
-        // The done bead does NOT respawn; the killed orphan does.
+        // The breadcrumb clear rides the SAME chokepoint every other molecule
+        // write does.
+        expect(
+          f.runner.callsFor('update').any((c) => c.contains('tgdog-l-agent')),
+          isTrue,
+          reason:
+              'the swept lease\'s breadcrumb was cleared through the '
+              'chokepoint',
+        );
+        // The done bead does NOT respawn; the live (swept) bead does.
         expect(report.respawnCount, 1);
 
         // --- the re-mount (the tree comes back) ---
         // The kernel re-mounts: only the non-skipped bead is still in the work
         // graph (the done bead's work is complete). The respawn is a single fresh
         // spawn — no double-work (the orphan group was killed first).
-        final f = buildFakes(createdId: 'tgdog-l');
         final work = FakeSnapshotSource(
           _graph(beads: const [], ready: const {}),
         );
@@ -533,7 +761,10 @@ void main() {
           substations: [
             SubstationScope(
               configNotifier: SubstationConfigNotifier(
-                const SubstationConfig(substationId: 'tg', ownedSubstations: {'tg'}),
+                const SubstationConfig(
+                  substationId: 'tg',
+                  ownedSubstations: {'tg'},
+                ),
               ),
               key: const ValueKey('scope.tg'),
             ),
@@ -553,11 +784,18 @@ void main() {
         await pumpEventQueue();
         state.push(
           _graph(
-            beads: [ladderDoneSession(id: 'tgdog-l', workBeadId: 'tg-live')],
+            beads: ladderDoneSession(id: 'tgdog-l', workBeadId: 'tg-live'),
             ready: const {},
           ),
         );
-        await pumpEventQueue();
+        // The molecule mint chain (mint → stamp model → dedup export probe →
+        // pour steps via `create --graph`) is a longer async chain than one
+        // pump, and its `applyGraph` leg does REAL `dart:io` temp-file I/O —
+        // a bounded `pumpEventQueue` loop (the shared [settle]) is not
+        // reliably enough turns of the real event loop under full-suite CPU
+        // load (the exact `_pumpUntilReal` hazard `migration_guard_acceptance_
+        // test.dart` documents), so poll on REAL wall-clock ticks instead.
+        await _pumpUntilReal(() => f.provider.started.isNotEmpty);
 
         expect(
           f.provider.started,
@@ -617,10 +855,16 @@ void main() {
         runner.releaseCreate('tgdog-sess1');
         await pumpEventQueue();
 
-        expect(provider.started, isEmpty,
-            reason: 'spawn never leaks after a mid-mint dispose');
-        expect(provider.stopped, isEmpty,
-            reason: 'never spawned ⇒ dispose issues no stop');
+        expect(
+          provider.started,
+          isEmpty,
+          reason: 'spawn never leaks after a mid-mint dispose',
+        );
+        expect(
+          provider.stopped,
+          isEmpty,
+          reason: 'never spawned ⇒ dispose issues no stop',
+        );
         // NB: the `bd create` of the session bead is ALREADY issued to the runner
         // before the post-create dispose guard fires — by design. A mid-mint
         // dispose intentionally leaves an orphan session bead that the
@@ -647,13 +891,19 @@ void main() {
       final root = owner.mountRoot(
         InheritedSeed<StationServices>(
           value: f.ctx,
-          child: InheritedSeed<CapabilityRegistry>(
-            value: buildCodeRegistry(),
-            child: InheritedSeed<Bead>(
-              value: bead('tg-1'),
-              child: kCodeResolver.sessionFor(
-                bead: bead('tg-1'),
-                session: _session('tg-1', 'tgdog-sess1'),
+          // Mounted automatically by StationKernel; this manual TreeOwner-driven
+          // tree bypasses the kernel entirely, so the molecule process path
+          // needs its own vendor here — the SAME default the kernel installs.
+          child: InheritedSeed<ProcessLeaseVendor>(
+            value: defaultProcessLeaseVendor(f.ctx),
+            child: InheritedSeed<CapabilityRegistry>(
+              value: buildCodeRegistry(),
+              child: InheritedSeed<Bead>(
+                value: bead('tg-1'),
+                child: kCodeResolver.sessionFor(
+                  bead: bead('tg-1'),
+                  session: _session('tg-1', 'tgdog-sess1'),
+                ),
               ),
             ),
           ),
@@ -662,29 +912,40 @@ void main() {
       return (owner: owner, root: root);
     }
 
-    test(
-      '(i) the per-incarnation event subscription is CANCELLED on dispose — '
-      'no event is delivered to the disposed host at all',
-      () async {
-        final f = buildFakes(createdId: 'tgdog-sess1');
-        final m = mountAgent(f);
-        addTearDown(f.provider.close);
-        await pumpEventQueue();
-        expect(f.provider.started, hasLength(1));
-        // The live host holds exactly ONE subscription to the event stream.
-        expect(f.provider.eventListenerCount, 1,
-            reason: 'the mounted host subscribes to its step events');
+    test('(i) the per-incarnation event subscription is CANCELLED on dispose — '
+        'no event is delivered to the disposed host at all', () async {
+      final f = buildFakes(createdId: 'tgdog-sess1');
+      final m = mountAgent(f);
+      addTearDown(f.provider.close);
+      await pumpEventQueue();
+      expect(f.provider.started, hasLength(1));
+      // The live host holds exactly ONE subscription to the event stream.
+      expect(
+        f.provider.eventListenerCount,
+        1,
+        reason: 'the mounted host subscribes to its step events',
+      );
+      // The molecule lease's acquire (`stationProcessSpawner`) binds the
+      // process handle only once `SessionStarted` lands — without it the
+      // lease never binds, so dispose's release path (which cancels the
+      // tap) never reaches it either. Emit it before the restart boundary.
+      f.provider.emit(
+        const SessionStarted(name: 'tgdog-sess1/tg-1/agent', pid: 9, pgid: 8),
+      );
+      await pumpEventQueue();
 
-        // The restart boundary: the prior incarnation's branch is disposed.
-        m.owner.dispose();
-        await pumpEventQueue();
+      // The restart boundary: the prior incarnation's branch is disposed.
+      m.owner.dispose();
+      await pumpEventQueue();
 
-        // The subscription is gone — a future edit that drops the dispose-time
-        // `_sub.cancel()` would leave this at 1 and fail HERE.
-        expect(f.provider.eventListenerCount, 0,
-            reason: 'dispose cancels the per-incarnation subscription');
-      },
-    );
+      // The subscription is gone — a future edit that drops the dispose-time
+      // `_sub.cancel()` would leave this at 1 and fail HERE.
+      expect(
+        f.provider.eventListenerCount,
+        0,
+        reason: 'dispose cancels the per-incarnation subscription',
+      );
+    });
 
     test(
       '(ii) even if a stale event is delivered, the _cancelled/mounted guard in '
@@ -711,8 +972,11 @@ void main() {
         );
         await expectLater(pumpEventQueue(), completes);
 
-        expect(f.runner.callsFor('update'), hasLength(updatesBefore),
-            reason: 'the handler guard drops a delivered stale completion');
+        expect(
+          f.runner.callsFor('update'),
+          hasLength(updatesBefore),
+          reason: 'the handler guard drops a delivered stale completion',
+        );
       },
     );
 
@@ -741,8 +1005,11 @@ void main() {
         // No throw escapes (an unhandled async error would fail the test), and
         // the stale completion advanced NO cursor.
         await expectLater(pumpEventQueue(), completes);
-        expect(f.runner.callsFor('update'), hasLength(updatesBefore),
-            reason: 'a stale prior-incarnation completion writes nothing');
+        expect(
+          f.runner.callsFor('update'),
+          hasLength(updatesBefore),
+          reason: 'a stale prior-incarnation completion writes nothing',
+        );
       },
     );
   });

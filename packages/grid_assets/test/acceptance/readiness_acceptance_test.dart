@@ -43,10 +43,15 @@ GraphSnapshot _graph({
   capturedAt: DateTime(2026),
 );
 
-GraphSnapshot _state(Bead session) => _graph(beads: [session], ready: const {});
+GraphSnapshot _state(List<Bead> beads) => _graph(beads: beads, ready: const {});
 
 const _sid = 'tgdog-sess1';
 String _step(String relPath) => '$_sid/tg-1/$relPath';
+
+/// The molecule step-bead id for [relPath] under [_sid] (mirrors `stepBead`'s
+/// own id-shape, `asset_fakes.dart`) — the bead itself IS the node now, so a
+/// write is identified by its TARGET id, never an embedded cursor key.
+String _stepBeadId(String relPath) => '$_sid-${relPath.replaceAll('/', '-')}';
 
 /// A NON-DRIVEABLE work bead carrying a REAL brief — the live `pow-p94` shape
 /// (type `decision`). Its description is substantive on purpose: the ONLY thing
@@ -71,9 +76,19 @@ Bead _decisionBead() => Bead(
 /// (`spec_review/intake` is absent). That absence IS the migration signal —
 /// `classifyCodeShape` reads it as `folded` and roots the FROZEN pre-ladder
 /// circuit. The bead is already PAST the spec phase and into its build.
-Bead _preLadderSession() => committeeSession(
+///
+/// **`omit: kSpecHeadNodes` is load-bearing, not cosmetic.** Presence, not
+/// state, is `classifyCodeShape`'s signal (A16): a step bead for
+/// `spec_review/discovery/anchors` staged merely `pending` (the shared
+/// `committeeSession` default, absent an omission) would still make the
+/// cursor's `containsKey` read true and misclassify this survivor onto the
+/// CURRENT (discovery) shape — silently defeating the whole negative control
+/// below. Omitting the WHOLE cheap head (the ladder AND the discovery
+/// circuit) is what actually roots the frozen pre-ladder circuit.
+List<Bead> _preLadderSession() => committeeSession(
   id: _sid,
   workBeadId: 'tg-1',
+  omit: kSpecHeadNodes,
   completed: {
     kSpecifyNode,
     kSpecClearCritiqueNode,
@@ -114,15 +129,103 @@ StationKernel _buildKernel(
   );
 }
 
-/// True iff some chokepoint `update` wrote `grid.cursor.tg-1/<relPath>.state`
-/// == [stateName].
+/// True iff some chokepoint `update` TARGETED the step bead for [relPath]
+/// with `grid.step.state` == [stateName] — the molecule-model replacement for
+/// the retired flat `grid.cursor.tg-1/<relPath>.state` read: the bead itself
+/// IS the node now (no `{nodePath}` infix in its metadata), so the write is
+/// identified by its target id, not by an embedded key.
 bool _wroteCursor(Fakes f, String relPath, String stateName) =>
     f.runner.callsFor('update').any((c) {
+      if (c.length < 2 || c[1] != _stepBeadId(relPath)) return false;
       final i = c.indexOf('--metadata');
       if (i < 0 || i + 1 >= c.length) return false;
       final md = jsonDecode(c[i + 1]) as Map<String, dynamic>;
-      return md['grid.cursor.tg-1/$relPath.state'] == stateName;
+      return md[MoleculeStepKeys.state] == stateName;
     });
+
+/// Polls [condition] with a REAL short delay, up to [maxTries] — the robust
+/// variant the shared [settle] (a bounded `pumpEventQueue` loop) cannot
+/// guarantee here: a fresh MOLECULE mint's `createMolecule` pour rides the
+/// REAL `BdCliService.applyGraph`, which writes a genuine temp file
+/// (`dart:io`) before the FAKE `BdRunner` boundary is ever reached (the same
+/// hazard `the_grid`'s own `grid_engine/test/molecule/drain_seam_test.dart`
+/// documents) — a microtask-queue pump is not reliably enough turns of the
+/// real event loop for that I/O to settle, which is why waiting on
+/// `graphApplyCalls` via [settle] alone was still intermittently flaky.
+/// Bounded, so a genuine regression still fails instead of hanging.
+Future<void> _pumpUntilReal(
+  bool Function() condition, {
+  int maxTries = 500,
+}) async {
+  for (var i = 0; i < maxTries && !condition(); i++) {
+    await Future<void>.delayed(const Duration(milliseconds: 1));
+  }
+}
+
+/// Stages the MOLECULE session + `intake`'s OWN step bead — the shape a fresh
+/// mint's very FIRST mount needs. `CapabilityHost._stepBeadId` refuses LOUD
+/// when `InheritedCircuit.beadIdByNodePath` lacks the node it is about to
+/// MOUNT, and — unlike an ADOPTED bounce — a brand-new mint's own
+/// `createMolecule` pour is never echoed back through this fake STATE source
+/// (its returned bead-id map is simply discarded here); the live circuit
+/// still needs SOME step bead present before `intake` can mount at all. So a
+/// fresh-mint scenario stages the shape a real pour would have landed, under
+/// the SAME session id the fake bd runner is pinned to mint
+/// (`buildFakes(createdId: _sid)`) — mirroring
+/// `invariant_4_a37_pristine_source_test.dart`'s own post-mint restage.
+///
+/// Awaits the REAL (in-flight, background) mint's own graph-apply pour
+/// attempt FIRST — `createMolecule`'s pour is the LAST hop of the mint chain
+/// (mint → stamp model → dedup export probe → pour), so waiting for it
+/// avoids a race where this fixture's OWN state push lands mid-chain,
+/// interleaving unpredictably with the real (here, deliberately id-less and
+/// discarded) mint's own writes.
+Future<void> _stageFreshMint(Fakes f, FakeSnapshotSource state) async {
+  await _pumpUntilReal(() => f.runner.graphApplyCalls.isNotEmpty);
+  state.push(
+    _state([
+      sessionBead(
+        id: _sid,
+        workBeadId: 'tg-1',
+        metadata: const {SessionBeadKeys.model: kSessionModelMolecule},
+      ),
+      stepBead(kIntakeNode, sessionId: _sid, workBeadId: 'tg-1'),
+    ]),
+  );
+}
+
+/// Rebuilds a [committeeSession] return with the step bead at [relativePath]
+/// carrying [result] (a grade/rationale payload) merged into its OWN
+/// `grid.result.*` metadata.
+///
+/// **Load-bearing, not cosmetic.** `committeeSession`'s `grades`/`results`
+/// params stamp the SESSION bead (`asset_fakes.dart`'s own doc: "unchanged
+/// from the flat model") — but a MOLECULE session's live read
+/// (`session_scope.dart`'s `SessionScope.build`) computes `results` by
+/// scanning ONLY `type=step` beads' OWN `grid.result.*` keys
+/// (`stepResults.addAll(projectCircuitResults(b))` over `joined.moleculeBeads`)
+/// and never unions in the session bead's metadata for a molecule session. So
+/// a route that reads a sibling's grade through the threaded `SiblingView`
+/// (D-5) — `readiness-route` reading the readiness lens's verdict, here —
+/// needs the grade on the STEP bead itself; `committeeSession`'s own params
+/// are silently inert for that read. `stepBead` has no metadata-merge hook,
+/// so this rebuilds the ONE affected bead in place (`asset_fakes.dart` stays
+/// unedited).
+List<Bead> _withResult(
+  List<Bead> beads,
+  String relativePath, {
+  required Map<String, String> result,
+  required String workBeadId,
+}) {
+  final path = '$workBeadId/$relativePath';
+  return [
+    for (final b in beads)
+      if (b.issueType == IssueType.step && b.metadata[MoleculeStepKeys.path] == path)
+        b.copyWith(metadata: {...b.metadata, ...nodeResultMetadata(path, result)})
+      else
+        b,
+  ];
+}
 
 /// The `reason` the chokepoint stamped on the minted gate bead (the refinement
 /// ask a governor reads).
@@ -135,12 +238,6 @@ String? _gateReason(Fakes f) {
     if (reason is String) return reason;
   }
   return null;
-}
-
-Future<void> _settle() async {
-  for (var i = 0; i < 6; i++) {
-    await pumpEventQueue();
-  }
 }
 
 void main() {
@@ -159,10 +256,15 @@ void main() {
         addTearDown(state.close);
 
         kernel.start();
-        await _settle();
+        await pumpEventQueue();
 
         work.push(_graph(beads: [_decisionBead()], ready: {'tg-1'}));
-        await _settle();
+        await pumpEventQueue();
+        await _stageFreshMint(f, state);
+        // Bounded-conditional (the molecule mint chain — mint → stamp model
+        // → dedup probe → pour steps — is longer than one pump); still fails
+        // (exhausts at maxPumps) instead of hanging on a genuine regression.
+        await settle(() => _wroteCursor(f, kIntakeNode, 'gated'));
 
         // The WHOLE point of tier 1: the saving IS the un-spawned agent.
         expect(
@@ -204,35 +306,37 @@ void main() {
         addTearDown(state.close);
 
         kernel.start();
-        await _settle();
+        await pumpEventQueue();
 
         // 1) A driveable bead with a real brief PASSES the deterministic intake
         //    contract — and `intake` spawns nothing (it is a ServiceCapability).
         work.push(_graph(beads: [workBead('tg-1')], ready: {'tg-1'}));
-        await _settle();
+        await pumpEventQueue();
+        await _stageFreshMint(f, state);
+        await settle(() => _wroteCursor(f, kIntakeNode, 'complete'));
         expect(f.provider.started, isEmpty, reason: 'intake is deterministic');
         expect(_wroteCursor(f, kIntakeNode, 'complete'), isTrue);
 
         // 2) Re-project intake complete → the readiness LENS mounts. It is the
         //    ONE agent the ladder ever spawns.
         state.push(_state(committeeSession(completed: {kIntakeNode})));
-        await _settle();
+        await settle(() => f.provider.started.isNotEmpty);
         expect(f.provider.started.map((s) => s.name), [_step(kReadinessNode)]);
 
         f.provider.emit(Exited(name: _step(kReadinessNode), exitCode: 0));
-        await _settle();
+        await settle(() => _wroteCursor(f, kReadinessNode, 'complete'));
 
         // 3) The lens graded D, with a rationale that IS the refinement ask.
         const rationale =
             'no acceptance shape — name the surfaces it touches and decide the '
             'layering before an architect can plan this';
-        state.push(_state(committeeSession(
-          completed: {kIntakeNode, kReadinessNode},
-          results: {
-            kReadinessNode: {'grade': 'D', 'rationale': rationale},
-          },
+        state.push(_state(_withResult(
+          committeeSession(completed: {kIntakeNode, kReadinessNode}),
+          kReadinessNode,
+          result: {'grade': 'D', 'rationale': rationale},
+          workBeadId: 'tg-1',
         )));
-        await _settle();
+        await settle(() => _wroteCursor(f, kReadinessRouteNode, 'gated'));
 
         // The HOLD: parked at the route, carrying the lens's own words.
         expect(_wroteCursor(f, kReadinessRouteNode, 'gated'), isTrue);
@@ -278,10 +382,12 @@ void main() {
       addTearDown(state.close);
 
       kernel.start();
-      await _settle();
+      await pumpEventQueue();
 
       work.push(_graph(beads: [workBead('tg-1')], ready: {'tg-1'}));
-      await _settle();
+      await pumpEventQueue();
+      await _stageFreshMint(f, state);
+      await settle(() => _wroteCursor(f, kIntakeNode, 'complete'));
       expect(_wroteCursor(f, kIntakeNode, 'complete'), isTrue);
       expect(
         _wroteCursor(f, kIntakeNode, 'gated'),
@@ -290,17 +396,19 @@ void main() {
       );
 
       state.push(_state(committeeSession(completed: {kIntakeNode})));
-      await _settle();
+      await settle(() => f.provider.started.isNotEmpty);
       expect(f.provider.started.map((s) => s.name), [_step(kReadinessNode)]);
       f.provider.emit(Exited(name: _step(kReadinessNode), exitCode: 0));
-      await _settle();
+      await settle(() => _wroteCursor(f, kReadinessNode, 'complete'));
 
       // Grade A ⇒ the route ADVANCES (no gate).
-      state.push(_state(committeeSession(
-        completed: {kIntakeNode, kReadinessNode},
-        grades: {kReadinessNode: 'A'},
+      state.push(_state(_withResult(
+        committeeSession(completed: {kIntakeNode, kReadinessNode}),
+        kReadinessNode,
+        result: {'grade': 'A'},
+        workBeadId: 'tg-1',
       )));
-      await _settle();
+      await settle(() => _wroteCursor(f, kReadinessRouteNode, 'complete'));
       expect(_wroteCursor(f, kReadinessRouteNode, 'complete'), isTrue);
       expect(_wroteCursor(f, kReadinessRouteNode, 'gated'), isFalse);
 
@@ -312,7 +420,7 @@ void main() {
         completed: kReadinessLadderNodes,
         grades: kReadinessGradeA,
       )));
-      await _settle();
+      await settle(() => _wroteCursor(f, kAnchorsNode, 'complete'));
       expect(_wroteCursor(f, kAnchorsNode, 'complete'), isTrue,
           reason: 'the ladder released the bead into the deterministic gather');
       expect(
@@ -327,7 +435,11 @@ void main() {
         completed: {...kReadinessLadderNodes, kAnchorsNode},
         grades: kReadinessGradeA,
       )));
-      await _settle();
+      await settle(
+        () => kDiscoveryLensNodes.every(
+          (n) => f.provider.started.map((s) => s.name).contains(_step(n)),
+        ),
+      );
       final exploring = f.provider.started.map((s) => s.name);
       expect(exploring, containsAll(kDiscoveryLensNodes.map(_step)));
       expect(
@@ -343,7 +455,9 @@ void main() {
         completed: kSpecHeadNodes,
         grades: kReadinessGradeA,
       )));
-      await _settle();
+      await settle(
+        () => f.provider.started.map((s) => s.name).contains(_step(kSpecifyNode)),
+      );
       expect(
         f.provider.started.map((s) => s.name),
         contains(_step(kSpecifyNode)),
@@ -370,10 +484,15 @@ void main() {
         addTearDown(state.close);
 
         kernel.start();
-        await _settle();
+        await pumpEventQueue();
 
         work.push(_graph(beads: [workBead('tg-1')], ready: {'tg-1'}));
-        await _settle();
+        // The one POSITIVE signal this survivor must reach — bounded-
+        // conditional, so a genuine regression (the build agent never
+        // mounting) still fails instead of racing a fixed pump count.
+        await settle(
+          () => f.provider.started.map((s) => s.name).contains(_step(kAgentNode)),
+        );
 
         final started = f.provider.started.map((s) => s.name);
 

@@ -37,23 +37,75 @@ GraphSnapshot _graph({
   capturedAt: DateTime(2026),
 );
 
+/// Stamps [results] (relative nodePath → its `grid.result.*` payload) onto the
+/// OWN metadata of each matching `type=step` bead in [beads] — LOCAL to this
+/// file (never `asset_fakes.dart`). `committeeSession`'s own `grades:`/
+/// `results:` params stamp `grid.result.*` onto the SESSION bead (R1's
+/// pre-molecule habit, `nodeResultMetadata`), but a molecule session's
+/// `SessionScope` reads `results` EXCLUSIVELY off each `type=step` bead's OWN
+/// `grid.result.*` (`session_scope.dart`'s `stepResults` scan) — the session
+/// bead's copy is never read. Without this: (a) every critic reads as "no
+/// parseable verdict" and fails CLOSED to `F` — a route gate the ORIGINAL
+/// flat-cursor test never triggered; (b) the terminal `deliver` step's own
+/// `delivery` result key is invisible, so `_deliveryOutcomeReady` never sees
+/// it and the session never closes even after `deliver` genuinely ran.
+List<Bead> _stampStepResults(
+  List<Bead> beads, {
+  required String workBeadId,
+  required Map<String, Map<String, String>> results,
+}) => [
+  for (final b in beads)
+    if (b.issueType == IssueType.step &&
+        (b.metadata[MoleculeStepKeys.path] as String?)?.startsWith(
+              '$workBeadId/',
+            ) ==
+            true &&
+        results.containsKey(
+          (b.metadata[MoleculeStepKeys.path] as String).substring(
+            workBeadId.length + 1,
+          ),
+        ))
+      b.copyWith(
+        metadata: {
+          ...b.metadata,
+          ...nodeResultMetadata(
+            b.metadata[MoleculeStepKeys.path] as String,
+            results[(b.metadata[MoleculeStepKeys.path] as String).substring(
+              workBeadId.length + 1,
+            )],
+          ),
+        },
+      )
+    else
+      b,
+];
+
 /// A one-bead STATE snapshot carrying the committee session for `tg-1` at the
 /// given [completed] node set + [grades] (the shared `committeeSession` builds
-/// the per-node cursor + the `grid.result.*` grades the route reads). The
-/// SPEC phase (bead `pow-6ao`) rides every push fully complete + all-A —
-/// its writes are the same chokepoint mutations this invariant audits, and
-/// its choreography is proven in `spec_stage_acceptance_test.dart`.
+/// the per-node cursor; [_stampStepResults] re-homes the grades — and, once
+/// [deliverDone], the terminal delivery result — onto each node's OWN step
+/// bead, see its doc). The SPEC phase (bead `pow-6ao`) rides every push fully
+/// complete + all-A — its writes are the same chokepoint mutations this
+/// invariant audits, and its choreography is proven in
+/// `spec_stage_acceptance_test.dart`.
 GraphSnapshot _stateAt({
   Set<String> completed = const {},
   Map<String, String> grades = const {},
+  bool deliverDone = false,
 }) => _graph(
-  beads: [
+  beads: _stampStepResults(
     committeeSession(
       id: _sid,
       completed: {...kSpecPhaseNodes, ...completed},
       grades: {...kSpecGradesAllA, ...grades},
     ),
-  ],
+    workBeadId: 'tg-1',
+    results: {
+      for (final entry in {...kSpecGradesAllA, ...grades}.entries)
+        entry.key: {ResultKeys.grade: entry.value},
+      if (deliverDone) kDeliverNode: {ResultKeys.delivery: 'github-pr'},
+    },
+  ),
   ready: const {},
 );
 
@@ -68,23 +120,26 @@ final Map<String, String> _allA = {for (final n in kCriticNodes) n: 'A'};
 
 /// The live `code` registry + a git ServiceBundle so the land capability runs
 /// its commit→push→PR through the fakes.
+///
+/// NO [ServiceBundle.sourceControl] here (`const GitSourceControl()` — the
+/// original wiring — was removed): `allocation.dart` calls
+/// `assertProvisionedCheckout` unconditionally whenever `sourceControl` is
+/// non-null, requiring a REAL `.git` on disk at the workspace path, which
+/// `GitSourceControl()` (no provisioner/root — the offline shape) never
+/// creates (`provisionWorkspace` no-ops: "Provisioning not wired"). Leaving
+/// `sourceControl` null skips that call entirely (`SessionScope` still mounts
+/// the SYNTHETIC placeholder `Workspace`, `code_capabilities.dart`), which is
+/// also the shape [PinDiffCapability] itself assumes offline — it no-ops the
+/// SAME way ("the synthetic worktree does not exist on disk") only when the
+/// workspace directory does not exist at all. Land still runs for real through
+/// the fake git ops below (`GitOps(f.git)`), independent of `sourceControl`.
 ServiceBundle _gitServices(Fakes f) => ServiceBundle(
-  // The source control PROVISIONS; the bound DELIVERY METHOD is what a terminal
-  // advance actuates (M5 D-4a). gitRunner: the SAME recording fake gitOps wraps
-  // — the force-with-lease push records offline (never real git).
-  sourceControl: const GitSourceControl(),
   delivery: GitHubPrDelivery(
     gitOps: GitOps(f.git),
     prOpener: f.pr,
     gitRunner: f.git,
   ),
 );
-
-Future<void> _settle() async {
-  for (var i = 0; i < 6; i++) {
-    await pumpEventQueue();
-  }
-}
 
 void main() {
   group('invariant 2 — only the chokepoint writes', () {
@@ -138,7 +193,7 @@ void main() {
         addTearDown(state.close);
 
         kernel.start();
-        await _settle();
+        await pumpEventQueue();
 
         // 1) LADDER → SPECIFY → AGENT — a ready owned task mounts the readiness
         //    ladder's head (`intake`, a zero-agent ServiceCapability — bead
@@ -147,36 +202,43 @@ void main() {
         //    is the first agent (bead `pow-6ao`); fast-forward the spec phase (an
         //    all-pass spec committee via cursor adoption) → the build agent swaps
         //    in. The step's provider name is '<sessionId>/<nodePath>'.
+        //
+        // The molecule mint (tg-eli phase 2: mint → stamp model → dedup export
+        // probe → pour steps via `create --graph`) is a LONGER async chain than
+        // a fixed small pump count settles — [settle] bounds it on the mint's
+        // own `create` call landing.
         work.push(_graph(beads: [workBead('tg-1')], ready: {'tg-1'}));
-        await _settle();
+        await settle(() => f.runner.callsFor('create').isNotEmpty);
         expect(
           f.provider.started,
           isEmpty,
           reason: 'the ladder head spawns NO agent — intake is deterministic',
         );
-        state.push(_graph(beads: [ladderDoneSession(id: _sid)], ready: const {}));
-        await _settle();
+        state.push(
+          _graph(beads: [...ladderDoneSession(id: _sid)], ready: const {}),
+        );
+        await settle(() => f.provider.started.isNotEmpty);
         expect(f.provider.started, hasLength(1));
         expect(f.provider.started.single.name, _step(kSpecifyNode));
         f.provider.emit(Exited(name: _step(kSpecifyNode), exitCode: 0));
-        await _settle();
+        await pumpEventQueue();
         state.push(_stateAt());
-        await _settle();
+        await settle(() => f.provider.started.length >= 2);
         expect(f.provider.started.last.name, _step('agent'));
 
         // SessionStarted → per-node identity stamped through the chokepoint.
         f.provider.emit(
           SessionStarted(name: _step('agent'), pid: 112, pgid: 111),
         );
-        await _settle();
+        await pumpEventQueue();
 
         // agent completes → its host writes agent=complete (a chokepoint update);
         // the STATE source surfaces the advance → the `review` sub-circuit inflates
         // its four critic lanes IN PARALLEL.
         f.provider.emit(Exited(name: _step('agent'), exitCode: 0));
-        await _settle();
+        await pumpEventQueue();
         state.push(_stateAt(completed: {kAgentNode}));
-        await _settle();
+        await pumpEventQueue();
         // clear-critique (gate-integrity #3) then pin-diff (scope-pinning, bead
         // pow-6wo) each ran for real through the chokepoint (ServiceCapabilities,
         // no provider spawn); re-project both completions so the four critics —
@@ -184,7 +246,7 @@ void main() {
         state.push(
           _stateAt(completed: {kAgentNode, kClearCritiqueNode, kPinDiffNode}),
         );
-        await _settle();
+        await settle(() => f.provider.started.length >= 6);
         expect(f.provider.started, hasLength(6),
             reason: 'the four committee critics fanned out after specify + '
                 'the agent');
@@ -192,31 +254,74 @@ void main() {
         // 2) COMMITTEE — every critic completes; the STATE source surfaces the
         //    advanced cursor + all-pass grades, and the route joins (await-all),
         //    reads the grades, and advances (a chokepoint update; no gate minted).
+        //
+        // SessionStarted BEFORE Exited for EACH critic — the molecule model's
+        // process lifecycle now treats an `Exited` with no prior
+        // `SessionStarted` as a crash ("process exited before SessionStarted"),
+        // unlike the retired flat model, which never enforced the ordering.
+        var pid = 200;
+        for (final critic in _criticSteps) {
+          f.provider.emit(SessionStarted(name: critic, pid: pid, pgid: pid));
+          pid++;
+        }
+        await pumpEventQueue();
         for (final critic in _criticSteps) {
           f.provider.emit(Exited(name: critic, exitCode: 0));
         }
-        await _settle();
+        await pumpEventQueue();
+        // completed sets from here on are CUMULATIVE (never let clear-critique
+        // /pin-diff regress complete→pending in a later push — the molecule
+        // model persists each node on its OWN step bead, so a push that omits a
+        // previously-complete node re-stages it `pending`, a real regression
+        // the flat single-cursor model never had a way to express).
+        var writesBefore = f.runner.calls.length;
         state.push(
-          _stateAt(completed: {kAgentNode, ...kCriticNodes}, grades: _allA),
+          _stateAt(
+            completed: {
+              kAgentNode,
+              kClearCritiqueNode,
+              kPinDiffNode,
+              ...kCriticNodes,
+            },
+            grades: _allA,
+          ),
         );
-        await _settle();
+        await settle(() => f.runner.calls.length > writesBefore);
 
         // 3) LANDING — route complete → the `land` SubCircuitStep inflates
         //    (`tg-rm5`): rebase → revalidate → land, each a ServiceCapability (no
         //    provider spawn) running for real through the fakes.
-        state.push(_stateAt(
-          completed: {kAgentNode, ...kCriticNodes, kRouteNode},
-          grades: _allA,
-        ));
-        await _settle();
-        state.push(_stateAt(
-          completed: {kAgentNode, ...kCriticNodes, kRouteNode, kRebaseNode},
-          grades: _allA,
-        ));
-        await _settle();
+        writesBefore = f.runner.calls.length;
         state.push(_stateAt(
           completed: {
             kAgentNode,
+            kClearCritiqueNode,
+            kPinDiffNode,
+            ...kCriticNodes,
+            kRouteNode,
+          },
+          grades: _allA,
+        ));
+        await settle(() => f.runner.calls.length > writesBefore);
+        writesBefore = f.runner.calls.length;
+        state.push(_stateAt(
+          completed: {
+            kAgentNode,
+            kClearCritiqueNode,
+            kPinDiffNode,
+            ...kCriticNodes,
+            kRouteNode,
+            kRebaseNode,
+          },
+          grades: _allA,
+        ));
+        await settle(() => f.runner.calls.length > writesBefore);
+        writesBefore = f.runner.calls.length;
+        state.push(_stateAt(
+          completed: {
+            kAgentNode,
+            kClearCritiqueNode,
+            kPinDiffNode,
             ...kCriticNodes,
             kRouteNode,
             kRebaseNode,
@@ -224,13 +329,15 @@ void main() {
           },
           grades: _allA,
         ));
-        await _settle();
+        await settle(() => f.runner.calls.length > writesBefore);
 
         // 4) The terminal (land) is complete; the STATE source surfaces it and
         //    SessionScope closes the session.
         state.push(_stateAt(
           completed: {
             kAgentNode,
+            kClearCritiqueNode,
+            kPinDiffNode,
             ...kCriticNodes,
             kRouteNode,
             kRebaseNode,
@@ -238,15 +345,18 @@ void main() {
             kDeliverNode,
           },
           grades: _allA,
+          deliverDone: true,
         ));
-        await _settle();
+        await settle(() => f.runner.callsFor('close').isNotEmpty);
 
         // --- The chokepoint discipline over the WHOLE recorded log ---
 
         // The cycle actually produced writes (else the assertions are vacuous):
-        // create (mint), updates (birth stamp + identity + cursor advances), and a
+        // TWO creates (the molecule mint's own two hops, tg-eli phase 2: the
+        // session bead itself, then `create --graph` pouring its `type=step`
+        // beads), updates (birth stamp + identity + cursor advances), and a
         // close (the positive terminal).
-        expect(f.runner.callsFor('create'), hasLength(1));
+        expect(f.runner.callsFor('create'), hasLength(2));
         expect(f.runner.callsFor('update'), isNotEmpty);
         expect(f.runner.callsFor('close'), hasLength(1));
         // The land Service really ran its orchestration through the fakes.
@@ -276,8 +386,14 @@ void main() {
 
         // (c) every bd call is one of the chokepoint's allowed subcommands —
         //     nothing else (a positive whitelist, so an unexpected escape is
-        //     caught even if it is not `show`/`sql`).
-        const allowed = {'create', 'update', 'close', 'delete', 'batch'};
+        //     caught even if it is not `show`/`sql`). `export` joins the
+        //     mutation verbs here (tg-eli phase 2): `StationBeadWriter`'s OWN
+        //     molecule mint issues `export --all` as its mint-dedup probe
+        //     (`asset_fakes.dart`'s "mint → stamp model → dedup export probe →
+        //     pour steps" chain) — still issued FROM INSIDE the one chokepoint,
+        //     never a bypass of it, just not a WRITE (so (a)/(b) above rightly
+        //     leave it out of `mutations`).
+        const allowed = {'create', 'update', 'close', 'delete', 'batch', 'export'};
         for (final c in f.runner.calls) {
           expect(
             c.isNotEmpty && allowed.contains(c.first),
@@ -331,11 +447,14 @@ void main() {
         // work tick) re-runs WorkList/WorkBead/SessionScope/CircuitScope build()
         // — and produces ZERO new bd writes, because build() never writes.
         work.push(_graph(beads: [workBead('tg-1')], ready: {'tg-1'}));
-        await pumpEventQueue();
+        await settle(() => f.runner.callsFor('create').isNotEmpty);
         state.push(
-          _graph(beads: [ladderDoneSession(id: 'tgdog-sess1')], ready: const {}),
+          _graph(
+            beads: [...ladderDoneSession(id: 'tgdog-sess1')],
+            ready: const {},
+          ),
         );
-        await pumpEventQueue();
+        await settle(() => f.provider.started.isNotEmpty);
         final writesAfterMount = f.runner.calls.length;
         expect(writesAfterMount, greaterThan(0), reason: 'the mint landed');
         expect(f.provider.started, hasLength(1));

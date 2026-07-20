@@ -40,10 +40,33 @@ GraphSnapshot _graph({
   capturedAt: DateTime(2026),
 );
 
-GraphSnapshot _state(Bead session) => _graph(beads: [session], ready: const {});
+GraphSnapshot _state(List<Bead> beads) => _graph(beads: beads, ready: const {});
 
 const _sid = 'tgdog-sess1';
 String _step(String relPath) => '$_sid/tg-1/$relPath';
+
+/// The molecule step-bead id for [relPath] under [_sid] (mirrors `stepBead`'s
+/// own id-shape, `asset_fakes.dart`) — the bead itself IS the node now, so a
+/// write is identified by its TARGET id, never an embedded cursor key.
+String _stepBeadId(String relPath) => '$_sid-${relPath.replaceAll('/', '-')}';
+
+/// Polls [condition] with a REAL short delay, up to [maxTries] — the robust
+/// variant the shared [settle] (a bounded `pumpEventQueue` loop) cannot
+/// guarantee here: a fresh MOLECULE mint's `createMolecule` pour rides the
+/// REAL `BdCliService.applyGraph`, which writes a genuine temp file
+/// (`dart:io`) before the FAKE `BdRunner` boundary is ever reached (the same
+/// hazard `the_grid`'s own `grid_engine/test/molecule/drain_seam_test.dart`
+/// documents) — a microtask-queue pump is not reliably enough turns of the
+/// real event loop for that I/O to settle. Bounded, so a genuine regression
+/// still fails instead of hanging.
+Future<void> _pumpUntilReal(
+  bool Function() condition, {
+  int maxTries = 500,
+}) async {
+  for (var i = 0; i < maxTries && !condition(); i++) {
+    await Future<void>.delayed(const Duration(milliseconds: 1));
+  }
+}
 
 StationKernel _buildKernel(
   Fakes f,
@@ -72,44 +95,38 @@ StationKernel _buildKernel(
   );
 }
 
-/// Every `--metadata` object the chokepoint wrote, decoded.
-Iterable<Map<String, dynamic>> _updates(Fakes f) sync* {
-  for (final c in f.runner.callsFor('update')) {
-    final i = c.indexOf('--metadata');
-    if (i < 0 || i + 1 >= c.length) continue;
-    yield jsonDecode(c[i + 1]) as Map<String, dynamic>;
-  }
-}
-
-/// True iff some chokepoint `update` wrote `grid.cursor.tg-1/<relPath>.state`
-/// == [stateName].
-bool _wroteCursor(Fakes f, String relPath, String stateName) => _updates(
-  f,
-).any((md) => md['grid.cursor.tg-1/$relPath.state'] == stateName);
+/// True iff some chokepoint `update` TARGETED the step bead for [relPath]
+/// with `grid.step.state` == [stateName] — the molecule-model replacement for
+/// the retired flat `grid.cursor.tg-1/<relPath>.state` read: the bead itself
+/// IS the node now (no `{nodePath}` infix in its metadata), so the write is
+/// identified by its target id, not by an embedded key.
+bool _wroteCursor(Fakes f, String relPath, String stateName) =>
+    f.runner.callsFor('update').any((c) {
+      if (c.length < 2 || c[1] != _stepBeadId(relPath)) return false;
+      final i = c.indexOf('--metadata');
+      if (i < 0 || i + 1 >= c.length) return false;
+      final md = jsonDecode(c[i + 1]) as Map<String, dynamic>;
+      return md[MoleculeStepKeys.state] == stateName;
+    });
 
 /// True iff the station SPAWNED a specify architect — at EITHER node path
 /// (`<bead>/specify` or `<bead>/spec_review/specify`).
 bool _spawnedSpecify(Fakes f) =>
     f.provider.started.any((s) => s.name.endsWith('/specify'));
 
-/// True iff ANY chokepoint update touched a specify node — the spawn-free half
+/// True iff ANY chokepoint update TARGETED the specify node's OWN step bead —
+/// at EITHER path (`specify` or `spec_review/specify`) — the spawn-free half
 /// of the control. A `ServiceCapability` runs WITHOUT a provider spawn, so
-/// `provider.started` alone cannot prove the spec phase stayed unmounted.
-bool _touchedSpecifyNode(Fakes f) => _updates(f).any(
-  (md) => md.keys.any(
-    (k) =>
-        k.startsWith('grid.cursor.tg-1/specify') ||
-        k.startsWith('grid.result.tg-1/specify') ||
-        k.startsWith('grid.cursor.tg-1/spec_review/specify') ||
-        k.startsWith('grid.result.tg-1/spec_review/specify'),
-  ),
+/// `provider.started` alone cannot prove the spec phase stayed unmounted; a
+/// molecule-mode write is identified by its TARGET id (the bead IS the node),
+/// never an embedded cursor key, so this checks the update's target rather
+/// than scanning its metadata keys.
+bool _touchedSpecifyNode(Fakes f) => f.runner.callsFor('update').any(
+  (c) =>
+      c.length >= 2 &&
+      (c[1] == _stepBeadId(kSpecHeadSpecifyNode) ||
+          c[1] == _stepBeadId(kSpecifyNode)),
 );
-
-Future<void> _settle() async {
-  for (var i = 0; i < 6; i++) {
-    await pumpEventQueue();
-  }
-}
 
 /// The mid-review cursor of a shape-1 LEGACY survivor: past the legacy head,
 /// with NO spec-phase node at either path.
@@ -127,6 +144,65 @@ Set<String> _specHeadMidReview() => {
   kSpecRouteNode,
   kAgentNode,
 };
+
+/// The node universe every `code`-circuit shape (legacy, spec-head, folded,
+/// laddered, discovery) mounts IDENTICALLY once its own spec phase clears —
+/// the review committee, landing, and the terminal deliver route
+/// (`circuit_migration.dart`: a frozen shape's `code_review`/`landing`
+/// sub-circuits are the SAME registry entries the current circuit uses, so an
+/// adopted survivor continues exactly as it would have). [kAgentNode] is
+/// deliberately NOT included — every survivor's OWN node set below names it
+/// explicitly (it sits BEFORE this tail, not after).
+const Set<String> _kSharedTailNodes = {
+  ...kCodeReviewNodes,
+  ...kLandingNodes,
+  kDeliverNode,
+};
+
+/// A MOLECULE session fast-forwarded onto a BESPOKE node universe [ownNodes]
+/// — a frozen shape's OWN spec-phase node paths (`circuit_migration.dart`),
+/// which [kAllCodeCircuitNodes] cannot represent (shape-2's `specify` lives at
+/// the ROOT path, never `spec_review/specify`; shape-1 has no spec phase at
+/// all) — PLUS the shared post-spec tail every shape mounts identically
+/// ([_kSharedTailNodes]). The local-helper escape hatch this suite's bespoke
+/// survivor shapes need (`asset_fakes.dart` stays unedited): mirrors
+/// [committeeSession]'s own shape (the molecule-stamped session bead first,
+/// then one `type=step` bead per staged node), restricted to a node set that
+/// falls OUTSIDE the current circuit's universe.
+///
+/// A node in [completed] stages [StepState.complete]; every other staged node
+/// stages [StepState.pending] — the same "every node the live circuit might
+/// reach needs its own bead" contract [committeeSession] documents
+/// (`CapabilityHost._stepBeadId` refuses LOUD otherwise). [completed] must be
+/// a subset of `ownNodes ∪ _kSharedTailNodes` — asserted, so a caller can
+/// never silently drive a node this fixture never staged.
+List<Bead> _survivorSession({
+  required Set<String> ownNodes,
+  required Set<String> completed,
+}) {
+  final staged = {...ownNodes, ..._kSharedTailNodes};
+  assert(
+    completed.every(staged.contains),
+    '_survivorSession: a completed node must be staged: '
+    '${completed.difference(staged)}',
+  );
+  return [
+    sessionBead(
+      id: _sid,
+      workBeadId: 'tg-1',
+      metadata: const {SessionBeadKeys.model: kSessionModelMolecule},
+    ),
+    for (final node in staged)
+      stepBead(
+        node,
+        sessionId: _sid,
+        workBeadId: 'tg-1',
+        state: completed.contains(node)
+            ? StepState.complete
+            : StepState.pending,
+      ),
+  ];
+}
 
 void main() {
   group('the migration guard — bouncing onto the folded circuit (pow-3p4)', () {
@@ -151,14 +227,20 @@ void main() {
       addTearDown(state.close);
 
       kernel.start();
-      await _settle();
+      await pumpEventQueue();
 
       // The persisted survivor lands BEFORE the work bead — the restoration
       // ADOPT seam (a mint would defeat the whole test).
-      state.push(_state(committeeSession(completed: survivor)));
-      await _settle();
+      state.push(
+        _state(_survivorSession(ownNodes: survivor, completed: survivor)),
+      );
+      await pumpEventQueue();
       work.push(_graph(beads: [bead('tg-1')], ready: {'tg-1'}));
-      await _settle();
+      // The adopted session drives the review phase's hygiene step for
+      // real — bounded-conditional (the molecule mint/adopt chain is longer
+      // than one pump); still fails (exhausts at maxPumps) if a genuine
+      // regression never writes it.
+      await settle(() => _wroteCursor(f, kClearCritiqueNode, 'complete'));
 
       // THE GATE — no spurious architect, by EITHER channel.
       expect(
@@ -189,12 +271,17 @@ void main() {
       // One more SAME-SHAPE cursor tick: the code committee fans out for real.
       state.push(
         _state(
-          committeeSession(
+          _survivorSession(
+            ownNodes: survivor,
             completed: {...survivor, kClearCritiqueNode, kPinDiffNode},
           ),
         ),
       );
-      await _settle();
+      await settle(
+        () => kCriticNodes.every(
+          (n) => f.provider.started.map((s) => s.name).contains(_step(n)),
+        ),
+      );
       final started = f.provider.started.map((s) => s.name).toSet();
       for (final n in kCriticNodes) {
         expect(
@@ -239,11 +326,12 @@ void main() {
         addTearDown(state.close);
 
         kernel.start();
-        await _settle();
+        await pumpEventQueue();
 
         state.push(
           _state(
-            committeeSession(
+            _survivorSession(
+              ownNodes: _legacyMidReview(),
               completed: {
                 kAgentNode,
                 kClearCritiqueNode,
@@ -256,9 +344,12 @@ void main() {
             ),
           ),
         );
-        await _settle();
+        await pumpEventQueue();
         work.push(_graph(beads: [bead('tg-1')], ready: {'tg-1'}));
-        await _settle();
+        // The terminal `deliver` route runs BARE (no delivery method bound)
+        // and writes complete — bounded-conditional, so a genuine regression
+        // still fails instead of racing a fixed pump count.
+        await settle(() => _wroteCursor(f, kDeliverNode, 'complete'));
 
         expect(_spawnedSpecify(f), isFalse);
         expect(_touchedSpecifyNode(f), isFalse);
@@ -276,7 +367,8 @@ void main() {
         // FROZEN legacy circuit's terminalStepId, so SessionScope closes here.
         state.push(
           _state(
-            committeeSession(
+            _survivorSession(
+              ownNodes: _legacyMidReview(),
               completed: {
                 kAgentNode,
                 kClearCritiqueNode,
@@ -290,7 +382,11 @@ void main() {
             ),
           ),
         );
-        await _settle();
+        await settle(
+          () => f.runner
+              .callsFor('close')
+              .any((c) => c.length > 1 && c[1] == _sid),
+        );
 
         expect(
           f.runner.callsFor('close').where((c) => c[1] == _sid),
@@ -325,16 +421,21 @@ void main() {
         addTearDown(state.close);
 
         kernel.start();
-        await _settle();
+        await pumpEventQueue();
 
         work.push(_graph(beads: [bead('tg-1')], ready: {'tg-1'}));
-        await _settle();
+        // Let the fresh-work MINT (molecule: mint session → stamp model →
+        // dedup probe → pour steps) land before adopting the ladder-done
+        // re-projection below — waiting for the pour (the LAST hop) avoids a
+        // race where the re-projection lands mid-chain, interleaving
+        // unpredictably with the real (here, id-less and discarded) mint.
+        await _pumpUntilReal(() => f.runner.graphApplyCalls.isNotEmpty);
 
         // Fresh work roots the CURRENT (laddered) circuit, so the readiness
         // ladder's zero-agent `intake` head runs first (bead `pow-q7n`).
         // Re-project it complete → the architect spawns, exactly as before.
         state.push(_state(ladderDoneSession(id: _sid)));
-        await _settle();
+        await settle(() => f.provider.started.isNotEmpty);
 
         expect(f.provider.started.map((s) => s.name), [_step(kSpecifyNode)]);
         expect(_spawnedSpecify(f), isTrue);
@@ -359,7 +460,7 @@ void main() {
         addTearDown(state.close);
 
         kernel.start();
-        await _settle();
+        await pumpEventQueue();
 
         // A CURRENT-shape survivor: the whole cheap head's keys ARE present — the
         // ladder AND the discovery circuit (that is what makes it CURRENT, not a
@@ -377,9 +478,13 @@ void main() {
             ),
           ),
         );
-        await _settle();
+        await pumpEventQueue();
         work.push(_graph(beads: [bead('tg-1')], ready: {'tg-1'}));
-        await _settle();
+        await settle(
+          () => kSpecCriticNodes.every(
+            (n) => f.provider.started.map((s) => s.name).contains(_step(n)),
+          ),
+        );
 
         final started = f.provider.started.map((s) => s.name).toSet();
         for (final n in kSpecCriticNodes) {

@@ -4,6 +4,17 @@
 // moved test gets the SAME shared engine fakes (a drop-in for the old
 // `support/engine_fakes.dart`), plus the `code` resolver below. Pure-Dart: no
 // live tg/gc/claude/git/network.
+//
+// **The molecule model (tg-eli phase 2).** Per-node circuit progress is no
+// longer a flat cursor on the session bead — it lives on each node's OWN
+// `type=step` bead ([MoleculeStepKeys], re-exported from
+// `package:grid_engine/testing.dart`). [stepBead]/[stepBeads] mint that shape
+// directly; [committeeSession] is the molecule-faithful session+steps
+// fast-forward built on top of them ([kAllCodeCircuitNodes] is the `code`
+// circuit's whole flat node universe, so a live mount always finds a staged
+// step bead for whatever it is about to reach); [ladderDoneSession] is the
+// cheap-head-complete convenience over it. [settle] is the shared bounded
+// pump helper the molecule mint's longer async chain needs.
 export 'package:grid_engine/testing.dart';
 
 import 'package:beads_dart/beads_dart.dart';
@@ -13,6 +24,7 @@ import 'package:grid_engine/grid_engine.dart';
 import 'package:grid_engine/testing.dart';
 import 'package:grid_assets/grid_assets.dart';
 import 'package:grid_runtime/grid_runtime.dart';
+import 'package:test/test.dart' show pumpEventQueue;
 
 /// The live `code` resolver for the integrated acceptance tests — the SAME
 /// migration-aware resolver the production composition mounts (bead `pow-3p4`):
@@ -135,15 +147,20 @@ SessionProjection ladderDoneProjection({
   },
 );
 
-/// A session whose whole CHEAP SPEC HEAD is already COMPLETE — the readiness
-/// ladder (grade A) AND the discovery circuit — and NOTHING else: the cold-start
+/// A MOLECULE session bead + its `type=step` beads, whole CHEAP SPEC HEAD
+/// already COMPLETE — the readiness ladder (grade A) AND the discovery circuit
+/// — and every OTHER `code`-circuit node staged `pending`: the cold-start
 /// fast-forward a suite whose focus is DOWNSTREAM of the head pushes right after
 /// its first `work.push`, so `specify` is again the first agent to spawn.
 ///
 /// It ALSO keeps the session on the CURRENT circuit shape — see [kSpecHeadNodes]
 /// for why dropping the discovery keys would silently drive the FROZEN
 /// pre-discovery circuit instead.
-Bead ladderDoneSession({
+///
+/// Same return shape as [committeeSession] (which this is built on): the
+/// molecule-stamped session bead first, then one `type=step` bead per staged
+/// node — splat the whole list into a pushed [GraphSnapshot]'s `beads`.
+List<Bead> ladderDoneSession({
   String id = 'tgdog-sess1',
   String workBeadId = 'tg-1',
 }) => committeeSession(
@@ -216,6 +233,40 @@ const String kRevalidateNode = 'land/revalidate';
 /// ROOT-level step (a sub-circuit tail could never deliver: `isDeliveryTerminal`
 /// is false at a [SubCircuitStep]).
 const String kDeliverNode = kDeliverStep;
+
+/// The `code_review` sub-circuit's whole node set (`committee.dart`):
+/// `clear-critique` (gate-integrity #3) → `pin-diff` → the four critics (in
+/// parallel) → `route`. Pair with [kLandingNodes] + [kSpecPhaseNodes] to build
+/// [kAllCodeCircuitNodes].
+const Set<String> kCodeReviewNodes = {
+  kClearCritiqueNode,
+  kPinDiffNode,
+  ...kCriticNodes,
+  kRouteNode,
+};
+
+/// The `landing` sub-circuit's whole node set (`tg-rm5`, `landing.dart`):
+/// `rebase` → `revalidate`.
+const Set<String> kLandingNodes = {kRebaseNode, kRevalidateNode};
+
+/// The `code` circuit's ENTIRE flat node-path universe, in circuit declaration
+/// order: [kSpecPhaseNodes] (the whole `spec_review` sub-circuit, itself
+/// [kSpecHeadNodes] + `specify` + the spec committee) → [kAgentNode] →
+/// [kCodeReviewNodes] → [kLandingNodes] → [kDeliverNode].
+///
+/// A live molecule mount needs a `type=step` bead staged for EVERY node it
+/// might ever reach — `CapabilityHost._stepBeadId` refuses LOUD when
+/// `InheritedCircuit.beadIdByNodePath` lacks the node it is about to MOUNT —
+/// so this is the default universe [committeeSession] pours one step bead per
+/// (an `omit` argument narrows it for a suite staging a deliberately-partial,
+/// frozen-shape survivor).
+const Set<String> kAllCodeCircuitNodes = {
+  ...kSpecPhaseNodes,
+  kAgentNode,
+  ...kCodeReviewNodes,
+  ...kLandingNodes,
+  kDeliverNode,
+};
 
 /// A recording [ShellRunner] (the `revalidate` seam, `tg-rm5`): records every
 /// (workingDirectory, command) call and returns a configurable [exitCode] (0
@@ -305,51 +356,162 @@ class FakeInferenceRunner implements InferenceRunner {
   }
 }
 
-/// A STATE session bead for the COMMITTEE-wired `code` circuit (M5 Track E):
-/// attaches each grade in [grades] (relative nodePath → letter) under
-/// `grid.result.*` — so a mounted `route` reads its siblings' grades through the
-/// threaded `SiblingView` (D-5). [closed] marks the session terminal.
+/// A `type=step` bead at [relativePath] (relative to [workBeadId]) for
+/// [sessionId] — the molecule model's per-node durable state (tg-eli phase 2:
+/// `grid.step.*` on the step's OWN bead; the retired flat `grid.cursor.*`
+/// never projects again, `session_bead.dart`). The id shape
+/// (`'{sessionId}-{path, dashes for slashes}'`) and metadata shape mirror
+/// the_grid's own
+/// `molecule/molecule_join_test.dart` `_stepBead` fixture, and are the SAME
+/// shape `invariant_4_a37_pristine_source_test.dart`'s local `_stepBead`
+/// builder used before this helper was promoted here.
 ///
-/// **tg-eli phase 2 note:** [completed]/[gated] used to stamp each relative
-/// path `complete`/`gated` into the flat per-node `grid.cursor.*` cursor (via
-/// the engine's own, now-DELETED `nodeStateMetadata`). That model is RETIRED —
-/// `projectSession` never fills `SessionProjection.cursor` off bead metadata
-/// again, so a value here is now permanently INERT no matter what this helper
-/// writes (`session_bead.dart`: "a HISTORICAL session bead still bearing
-/// `grid.cursor.*` metadata is INERT ... nothing here throws on one"). Kept as
-/// accepted-but-unused parameters ONLY for source compatibility with existing
-/// callers of this shared fixture — a caller that needs a genuinely
-/// fast-forwarded MOLECULE session must mint its own `type=step` beads
-/// alongside this one (per-node progress lives on each step's OWN bead now,
-/// `grid.step.*`/`MoleculeStepKeys` — a SEPARATE bead this single-bead helper
-/// has no way to mint; see `invariant_4_a37_pristine_source_test.dart`'s local
-/// step-bead builder, mirroring `the_grid`'s own
-/// `molecule/molecule_join_test.dart` `_stepBead` fixture).
+/// `CapabilityHost._stepBeadId` refuses LOUD (a contained, per-work supervised
+/// failure — never a crash) when `InheritedCircuit.beadIdByNodePath` has no
+/// entry for the node it is about to mount, so EVERY node a live circuit will
+/// ever spawn — not just the already-`complete` ones — needs its OWN step bead
+/// staged in the state snapshot BEFORE that mount, hence [state] defaults to
+/// [StepState.pending] rather than [StepState.complete].
 ///
-/// Paths are RELATIVE to [workBeadId] (e.g. `'review/route'`); the helper prefixes
-/// the bead id, matching the engine's `<beadId>/<...>` result keying.
-Bead committeeSession({
+/// [capability] is the `grid.step.capability` value recorded on the bead —
+/// audit-only (the actual routing resolves the capability from the LIVE
+/// `Circuit` definition, never from this metadata field), so the default
+/// (`'agent'`) is fine for every node; override it only if a test asserts on
+/// the recorded value itself.
+Bead stepBead(
+  String relativePath, {
+  required String sessionId,
+  required String workBeadId,
+  StepState state = StepState.pending,
+  String capability = 'agent',
+}) => Bead(
+  id: '$sessionId-${relativePath.replaceAll('/', '-')}',
+  issueType: IssueType.step,
+  status: BeadStatus.open,
+  metadata: {
+    'rig': stateSubstation,
+    MoleculeStepKeys.stepId: relativePath.split('/').last,
+    MoleculeStepKeys.capability: capability,
+    MoleculeStepKeys.kind: StepKind.job.name,
+    MoleculeStepKeys.path: '$workBeadId/$relativePath',
+    MoleculeStepKeys.session: sessionId,
+    MoleculeStepKeys.state: state.name,
+  },
+);
+
+/// One [stepBead] per relative node path in [paths], all owned by
+/// [sessionId] — the fast-forward fixture: an already-[StepState.complete]
+/// step's OWN bead is what keeps `CapabilityHost` from ever re-mounting it
+/// (`projectMoleculeCursor` reads `grid.step.state` per STEP bead now, never a
+/// session-level cursor) — the molecule-model replacement for the retired flat
+/// `completed:` cursor set this suite used to push directly on the session
+/// bead.
+Iterable<Bead> stepBeads(
+  Set<String> paths, {
+  required String sessionId,
+  required String workBeadId,
+  StepState state = StepState.complete,
+  String capability = 'agent',
+}) => paths.map(
+  (path) => stepBead(
+    path,
+    sessionId: sessionId,
+    workBeadId: workBeadId,
+    state: state,
+    capability: capability,
+  ),
+);
+
+/// A MOLECULE-minted STATE session for the COMMITTEE-wired `code` circuit (M5
+/// Track E / tg-eli phase 2) — the session bead ([sessionBead], stamped
+/// `grid.session.model=molecule`) PLUS one `type=step` bead per node in
+/// `code`'s whole flat universe ([kAllCodeCircuitNodes], narrowed by [omit]):
+/// a node in [completed] stages [StepState.complete], a node in [gated] stages
+/// [StepState.gated] (a molecule-faithful reading of "parked at a human
+/// gate" — `StepState` already carries that value natively, D-7), and every
+/// other staged node is [StepState.pending] (the honest "nothing has run yet"
+/// default — never silently promoted to `complete`, or a live circuit's real
+/// completions would be shadowed).
+///
+/// [grades]/[results] attach each entry (relative nodePath → letter / full
+/// payload) under `grid.result.*` on the SESSION bead — unchanged from the
+/// flat model (R1: `ResultKeys` reused verbatim, only its HOST bead moved for
+/// results recorded live; a fast-forward that PRE-seeds a grade still stages it
+/// here) — so a mounted `route` reads its siblings' grades through the
+/// threaded `SiblingView` (D-5). [results] merges AFTER [grades], so a path in
+/// both wins there. [closed] marks the session terminal.
+///
+/// **The omission escape hatch.** [omit] drops nodes out of the staged
+/// universe ENTIRELY — no step bead at all, not even `pending` — for a suite
+/// that fast-forwards onto a deliberately-partial, frozen circuit shape (e.g.
+/// the migration guard's pre-fold survivor, which must present with NO
+/// `spec_review/discovery/*` key so the resolver roots the FROZEN circuit
+/// instead of silently driving the live one). [completed]/[gated] must name
+/// only STAGED (non-omitted) nodes — asserted.
+///
+/// Returns the full staged set: the molecule-stamped session bead FIRST, then
+/// one step bead per staged node — splat the whole list into a pushed
+/// [GraphSnapshot]'s `beads`.
+List<Bead> committeeSession({
   String id = 'tgdog-sess1',
   String workBeadId = 'tg-1',
   Set<String> completed = const {},
   Set<String> gated = const {},
   Map<String, String> grades = const {},
-  // FULL result payloads (relative nodePath → payload), for a lane that must
-  // carry more than a bare grade (bead `pow-7nm`: the spec route reads each
-  // critic's `rationale` to build the respec guidance). Merged AFTER [grades],
-  // so a path in both wins here.
   Map<String, Map<String, String>> results = const {},
   bool closed = false,
-}) => Bead(
-  id: id,
-  issueType: IssueType.session,
-  status: closed ? BeadStatus.closed : BeadStatus.open,
-  metadata: {
-    'rig': stateSubstation,
-    SessionBeadKeys.workBead: workBeadId,
-    for (final entry in grades.entries)
-      ...nodeResultMetadata('$workBeadId/${entry.key}', {'grade': entry.value}),
-    for (final entry in results.entries)
-      ...nodeResultMetadata('$workBeadId/${entry.key}', entry.value),
-  },
-);
+  Set<String> omit = const {},
+}) {
+  final staged = kAllCodeCircuitNodes.difference(omit);
+  assert(
+    completed.every(staged.contains),
+    'committeeSession: a completed node must be staged, not omitted: '
+    '${completed.difference(staged)}',
+  );
+  assert(
+    gated.every(staged.contains),
+    'committeeSession: a gated node must be staged, not omitted: '
+    '${gated.difference(staged)}',
+  );
+  return [
+    sessionBead(
+      id: id,
+      workBeadId: workBeadId,
+      closed: closed,
+      metadata: {
+        SessionBeadKeys.model: kSessionModelMolecule,
+        for (final entry in grades.entries)
+          ...nodeResultMetadata('$workBeadId/${entry.key}', {
+            'grade': entry.value,
+          }),
+        for (final entry in results.entries)
+          ...nodeResultMetadata('$workBeadId/${entry.key}', entry.value),
+      },
+    ),
+    for (final node in staged)
+      stepBead(
+        node,
+        sessionId: id,
+        workBeadId: workBeadId,
+        state: gated.contains(node)
+            ? StepState.gated
+            : completed.contains(node)
+            ? StepState.complete
+            : StepState.pending,
+      ),
+  ];
+}
+
+/// Pumps the event queue until [condition] holds, or [maxPumps] pumps have run
+/// (default 20) — a molecule-mode mint (tg-eli phase 2) is a LONGER async
+/// chain than the retired flat model's single `bd create` (mint the session →
+/// stamp `grid.session.model` → a dedup export probe → pour the whole
+/// circuit's `type=step` beads via `create --graph`, each hop its own
+/// scheduled continuation), so a single `pumpEventQueue` — or a fixed small
+/// pump count — under-settles it. Bounded so a genuine regression still FAILS
+/// (its [condition] stays false) instead of hanging.
+Future<void> settle(bool Function() condition, {int maxPumps = 20}) async {
+  for (var i = 0; i < maxPumps && !condition(); i++) {
+    await pumpEventQueue();
+  }
+}

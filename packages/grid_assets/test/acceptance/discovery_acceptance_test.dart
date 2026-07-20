@@ -46,7 +46,7 @@ GraphSnapshot _graph({
   capturedAt: DateTime(2026),
 );
 
-GraphSnapshot _state(Bead session) => _graph(beads: [session], ready: const {});
+GraphSnapshot _state(List<Bead> beads) => _graph(beads: beads, ready: const {});
 
 const _sid = 'tgdog-sess1';
 String _step(String relPath) => '$_sid/tg-1/$relPath';
@@ -57,7 +57,7 @@ const String _adr = 'docs/adr/ADR-0000-ai-decision-register.md A17(3)';
 
 /// A session whose READINESS LADDER is complete and nothing else — the bead is
 /// released into DISCOVERY, which is this suite's focus.
-Bead _ladderDone({Set<String> completed = const {}}) => committeeSession(
+List<Bead> _ladderDone({Set<String> completed = const {}}) => committeeSession(
   id: _sid,
   completed: {...kReadinessLadderNodes, ...completed},
   grades: kReadinessGradeA,
@@ -68,7 +68,15 @@ Bead _ladderDone({Set<String> completed = const {}}) => committeeSession(
 /// That absence IS the migration signal — `classifyCodeShape` reads it as
 /// `laddered` and roots the FROZEN pre-discovery circuit. The bead is already past
 /// the spec phase and into its build.
-Bead _preDiscoverySession() => committeeSession(
+///
+/// `omit: kDiscoveryNodes` is load-bearing, not cosmetic: [committeeSession]
+/// stages a `type=step` bead for EVERY node in [kAllCodeCircuitNodes] by
+/// default (`pending` unless named in `completed`/`gated`), so WITHOUT the
+/// omission a survivor would present with a PENDING `anchors` step bead — a
+/// staged, live discovery node, not an ABSENT one — and the resolver would
+/// (correctly, given that shape) root the CURRENT circuit instead of the
+/// frozen one this negative control exists to prove.
+List<Bead> _preDiscoverySession() => committeeSession(
   id: _sid,
   completed: {
     ...kReadinessLadderNodes,
@@ -83,6 +91,7 @@ Bead _preDiscoverySession() => committeeSession(
     kSpecGateNode: 'A',
     for (final n in kSpecCriticNodes) n: 'A',
   },
+  omit: kDiscoveryNodes,
 );
 
 /// A [SourceControl] that hands every bead the SAME real temp worktree — the one
@@ -143,15 +152,22 @@ StationKernel _buildKernel(
   );
 }
 
-/// True iff some chokepoint `update` wrote `grid.cursor.tg-1/<relPath>.state`
-/// == [stateName].
-bool _wroteCursor(Fakes f, String relPath, String stateName) =>
-    f.runner.callsFor('update').any((c) {
-      final i = c.indexOf('--metadata');
-      if (i < 0 || i + 1 >= c.length) return false;
-      final md = jsonDecode(c[i + 1]) as Map<String, dynamic>;
-      return md['grid.cursor.tg-1/$relPath.state'] == stateName;
-    });
+/// True iff some chokepoint `update` targeting [relPath]'s OWN `type=step`
+/// bead (id `'$_sid-${relPath with dashes}'`, [stepBead]'s shape) wrote
+/// `grid.step.state` == [stateName] — the molecule model's per-node cursor
+/// write (tg-eli phase 2): NO `{nodePath}` infix (the bead IS the node), so
+/// this checks the TARGET bead id, not a nodePath-keyed metadata field, unlike
+/// the retired flat model's `grid.cursor.<nodePath>.state`.
+bool _wroteCursor(Fakes f, String relPath, String stateName) {
+  final targetId = '$_sid-${relPath.replaceAll('/', '-')}';
+  return f.runner.callsFor('update').any((c) {
+    if (c.length < 2 || c[1] != targetId) return false;
+    final i = c.indexOf('--metadata');
+    if (i < 0 || i + 1 >= c.length) return false;
+    final md = jsonDecode(c[i + 1]) as Map<String, dynamic>;
+    return md[MoleculeStepKeys.state] == stateName;
+  });
+}
 
 /// The `reason` the chokepoint stamped on the minted gate bead.
 String? _gateReason(Fakes f) {
@@ -176,15 +192,60 @@ void _plantReport(String dir, String lens, LensReport report) {
     ..writeAsStringSync(jsonEncode(json));
 }
 
-Future<void> _settle() async {
-  for (var i = 0; i < 6; i++) {
-    await pumpEventQueue();
-  }
+/// Pumps the event queue until the fake harness reaches a FIXED POINT — no new
+/// provider spawn/exit AND no new bd runner call across [stableRounds]
+/// CONSECUTIVE checks — or [maxPumps] pumps have run, whichever comes first.
+/// Built on the shared bounded [settle] helper (`asset_fakes.dart`).
+///
+/// The molecule model's per-push reconcile is a materially LONGER async chain
+/// than the retired flat cursor's single write (tg-eli phase 2): a fresh
+/// mint's own pour (`create --graph`) can sit through many consecutive
+/// no-visible-change pumps before its reply lands and the cascade resumes, so
+/// a single quiet pump is NOT proof of quiescence — [stableRounds] guards
+/// against declaring victory on a plateau that is still mid-flight. Still
+/// fails a genuine regression (it never quiesces, so it exhausts [maxPumps]).
+Future<void> _settle(Fakes f, {int maxPumps = 1000, int stableRounds = 50}) async {
+  var stable = 0;
+  var prevStarted = -1;
+  var prevCalls = -1;
+  await settle(() {
+    final started = f.provider.started.length;
+    final calls = f.runner.calls.length;
+    if (started == prevStarted && calls == prevCalls) {
+      stable++;
+    } else {
+      stable = 0;
+    }
+    prevStarted = started;
+    prevCalls = calls;
+    return stable >= stableRounds;
+  }, maxPumps: maxPumps);
+}
+
+/// Marks [name] STARTED before this drive emits its `Exited` — the
+/// completion-fence contract (`270f9c6`, "prove inferred exits before
+/// advancing"): an `Exited` for a name the allocation never observed
+/// `SessionStarted` for is a STALE/unproven exit and is correctly dropped,
+/// never advancing the step. Mirrors `invariant_4_a37_pristine_source_test
+/// .dart`'s own `SessionStarted` emission ahead of its `Exited`.
+Future<void> _markStarted(Fakes f, String name) async {
+  f.provider.emit(SessionStarted(name: name, pid: 1, pgid: 1));
+  await pumpEventQueue();
 }
 
 void main() {
   late Directory tmp;
-  setUp(() => tmp = Directory.systemTemp.createTempSync('discovery-acc'));
+  setUp(() {
+    tmp = Directory.systemTemp.createTempSync('discovery-acc');
+    // A bare `.git` marker — the molecule model's live ProcessLeaseVendor
+    // allocation now runs `assertProvisionedCheckout` (ADR-0009 D3, bead
+    // `tg-6jn`) before EVERY agent spawn (the three explorer lenses here),
+    // which fail-closed REFUSES a workspace with no on-disk `.git` — a real
+    // check the retired flat model's capability mount never performed. No
+    // real git init needed: the lenses never shell git themselves, only read
+    // plain files under this dir.
+    Directory('${tmp.path}/.git').createSync(recursive: true);
+  });
   tearDown(() => tmp.deleteSync(recursive: true));
 
   /// Drives the kernel to the point where the three lenses have spawned and
@@ -201,14 +262,14 @@ void main() {
     addTearDown(state.close);
 
     kernel.start();
-    await _settle();
+    await _settle(f);
 
     // The ladder is fast-forwarded (its own choreography is
     // `readiness_acceptance_test.dart`) → the bead is released into DISCOVERY.
     work.push(_graph(beads: [workBead('tg-1')], ready: {'tg-1'}));
-    await _settle();
+    await _settle(f);
     state.push(_state(_ladderDone()));
-    await _settle();
+    await _settle(f);
 
     // TIER 1: the deterministic gather ran, spawned NOTHING, and left its output
     // in the worktree for every lens to read.
@@ -223,7 +284,7 @@ void main() {
     // TIER 2: the three READ-ONLY explorers fan out IN PARALLEL, on the CHEAP
     // tier — and the architect is still withheld.
     state.push(_state(_ladderDone(completed: {kAnchorsNode})));
-    await _settle();
+    await _settle(f);
     expect(_spawned(f).toSet(), kDiscoveryLensNodes.map(_step).toSet());
     for (final spawn in f.provider.started) {
       final args = spawn.config.args;
@@ -241,13 +302,14 @@ void main() {
       _plantReport(tmp.path, entry.key, entry.value);
     }
     for (final lens in kDiscoveryLensNodes) {
+      await _markStarted(f, _step(lens));
       f.provider.emit(Exited(name: _step(lens), exitCode: 0));
     }
-    await _settle();
+    await _settle(f);
     state.push(
       _state(_ladderDone(completed: {kAnchorsNode, ...kDiscoveryLensNodes})),
     );
-    await _settle();
+    await _settle(f);
     return f;
   }
 
@@ -386,11 +448,11 @@ void main() {
       addTearDown(state.close);
 
       kernel.start();
-      await _settle();
+      await _settle(f);
       work.push(_graph(beads: [workBead('tg-1')], ready: {'tg-1'}));
-      await _settle();
+      await _settle(f);
       state.push(_state(ladderDoneSession(id: _sid)));
-      await _settle();
+      await _settle(f);
 
       expect(
         _spawned(f),
@@ -420,9 +482,9 @@ void main() {
         addTearDown(state.close);
 
         kernel.start();
-        await _settle();
+        await _settle(f);
         work.push(_graph(beads: [workBead('tg-1')], ready: {'tg-1'}));
-        await _settle();
+        await _settle(f);
 
         final started = _spawned(f);
 

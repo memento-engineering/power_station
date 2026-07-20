@@ -13,6 +13,8 @@
 // routing signal. If a single shared station bundle still existed, BOTH beads
 // would hit ONE SourceControl; the per-substation isolation is exactly that they
 // do not. Zero I/O — offline fakes (no live tg/gc/claude/git).
+import 'dart:io';
+
 import 'package:genesis_tree/genesis_tree.dart';
 import 'package:grid_assets/grid_assets.dart';
 import 'package:beads_dart/beads_dart.dart';
@@ -34,12 +36,24 @@ GraphSnapshot _graph({
 /// A recording [SourceControl] that captures the bead ids it was asked to
 /// provision. NO delivery is bound on the bundle, so nothing ever leaves the
 /// station; the test never reaches delivery anyway.
+///
+/// ROOTED at a real temp dir: the molecule model's live process allocation
+/// runs `assertProvisionedCheckout` (ADR-0009 D3, bead `tg-6jn`) before EVERY
+/// agent spawn, which fail-closed REFUSES a workspace with no on-disk
+/// `.git` — a real check the retired flat model's capability mount never
+/// performed. So [provisionWorkspace] MATERIALIZES the `.git` marker it
+/// claims to provision, exactly like the recorded bead id, so a live mount
+/// can actually spawn. Call [dispose] to clean up the temp root.
 class _RecordingSourceControl implements SourceControl {
+  _RecordingSourceControl() : _root = Directory.systemTemp.createTempSync('grid-svc-bundle');
+
+  final Directory _root;
+
   /// Every bead id passed to [provisionWorkspace], in call order.
   final List<String> provisioned = [];
 
   @override
-  String workspaceFor(String beadId) => '/w/$beadId';
+  String workspaceFor(String beadId) => '${_root.path}/$beadId';
   @override
   String branchFor(String beadId) => 'grid/$beadId';
   @override
@@ -49,8 +63,15 @@ class _RecordingSourceControl implements SourceControl {
   Future<void> provisionWorkspace({
     required String beadId,
     required String workspaceDir,
-  }) async => provisioned.add(beadId);
+  }) async {
+    provisioned.add(beadId);
+    Directory('$workspaceDir/.git').createSync(recursive: true);
+  }
 
+  /// Removes the real temp checkout root (test hygiene).
+  void dispose() {
+    if (_root.existsSync()) _root.deleteSync(recursive: true);
+  }
 }
 
 void main() {
@@ -61,6 +82,8 @@ void main() {
       final f = buildFakes();
       final scA = _RecordingSourceControl();
       final scB = _RecordingSourceControl();
+      addTearDown(scA.dispose);
+      addTearDown(scB.dispose);
 
       // Adopted sessions (carried on the STATE axis) so each SessionScope
       // resolves synchronously and the agent spawns under the kernel's flush —
@@ -75,8 +98,8 @@ void main() {
       final state = FakeSnapshotSource(
         _graph(
           beads: [
-            ladderDoneSession(id: 'tgdog-a', workBeadId: 'sa-1'),
-            ladderDoneSession(id: 'tgdog-b', workBeadId: 'sb-1'),
+            ...ladderDoneSession(id: 'tgdog-a', workBeadId: 'sa-1'),
+            ...ladderDoneSession(id: 'tgdog-b', workBeadId: 'sb-1'),
           ],
           ready: const {},
         ),
@@ -151,7 +174,7 @@ void main() {
         _graph(
           // Ladder complete (bead `pow-q7n`) — `specify` stays the head that
           // spawns, so the offline-build posture is what this asserts.
-          beads: [ladderDoneSession(id: 'tgdog-a', workBeadId: 'sa-1')],
+          beads: ladderDoneSession(id: 'tgdog-a', workBeadId: 'sa-1'),
           ready: const {},
         ),
       );

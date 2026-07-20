@@ -122,11 +122,11 @@ void main() {
         expect(f.provider.started, isEmpty, reason: 'the ladder head is deterministic');
         state.push(
           _graph(
-            beads: [ladderDoneSession(id: 'tgdog-sess1', workBeadId: 'tg-1')],
+            beads: [...ladderDoneSession(id: 'tgdog-sess1', workBeadId: 'tg-1')],
             ready: const {},
           ),
         );
-        await pumpEventQueue();
+        await settle(() => f.provider.started.isNotEmpty);
 
         // Exactly ONE effect reached the provider — the plain task's agent.
         expect(
@@ -138,8 +138,11 @@ void main() {
 
         // And exactly ONE session was minted — for the plain task only. (A
         // convergence/orchestration mount would have minted its own session.)
+        // TWO creates: the molecule mint's own two hops (tg-eli phase 2) — the
+        // session bead itself, then `create --graph` pouring its `type=step`
+        // beads — both for the SAME one session.
         final creates = f.runner.callsFor('create');
-        expect(creates, hasLength(1));
+        expect(creates, hasLength(2));
 
         // The birth stamp links the minted session to tg-1, proving the one
         // spawn was the plain task (and not, say, the convergence root).
@@ -201,11 +204,11 @@ void main() {
         await pumpEventQueue();
         state.push(
           _graph(
-            beads: [ladderDoneSession(id: 'tgdog-sess1', workBeadId: 'tg-1')],
+            beads: [...ladderDoneSession(id: 'tgdog-sess1', workBeadId: 'tg-1')],
             ready: const {},
           ),
         );
-        await pumpEventQueue();
+        await settle(() => f.provider.started.isNotEmpty);
         expect(f.provider.started, hasLength(1));
         expect(f.provider.started.single.config.env['GRID_BEAD_ID'], 'tg-1');
       },

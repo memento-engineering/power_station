@@ -52,8 +52,8 @@ void main() {
         final state = CountingSnapshotSource(
           _graph(
             beads: [
-              ladderDoneSession(id: 'tgdog-1', workBeadId: 'tg-1'),
-              ladderDoneSession(id: 'tgdog-2', workBeadId: 'tg-2'),
+              ...ladderDoneSession(id: 'tgdog-1', workBeadId: 'tg-1'),
+              ...ladderDoneSession(id: 'tgdog-2', workBeadId: 'tg-2'),
             ],
             ready: const {},
           ),
@@ -116,7 +116,7 @@ void main() {
         work.push(
           _graph(beads: [bead('tg-1'), bead('tg-2')], ready: {'tg-1', 'tg-2'}),
         );
-        await pumpEventQueue();
+        await settle(() => f.provider.started.length >= 2);
         expect(notifier.liveListenerCount, 1);
         expect(
           f.provider.started.length,
@@ -139,8 +139,8 @@ void main() {
         final state = CountingSnapshotSource(
           _graph(
             beads: [
-              ladderDoneSession(id: 'tgdog-1', workBeadId: 'tg-1'),
-              ladderDoneSession(id: 'tgdog-2', workBeadId: 'tg-2'),
+              ...ladderDoneSession(id: 'tgdog-1', workBeadId: 'tg-1'),
+              ...ladderDoneSession(id: 'tgdog-2', workBeadId: 'tg-2'),
             ],
             ready: const {},
           ),
@@ -176,7 +176,7 @@ void main() {
         work.push(
           _graph(beads: [bead('tg-1'), bead('tg-2')], ready: {'tg-1', 'tg-2'}),
         );
-        await pumpEventQueue();
+        await settle(() => f.provider.started.isNotEmpty);
 
         expect(
           work.listenCount,
@@ -212,18 +212,25 @@ void main() {
           value: joined,
           child: InheritedSeed<StationServices>(
             value: f.ctx,
-            child: InheritedSeed<CapabilityRegistry>(
-              value: buildCodeRegistry(),
-              child: InheritedSeed<SessionResolver>(
-                value: kCodeResolver,
-                child: Station([
-                  SubstationScope(
-                    configNotifier: SubstationConfigNotifier(
-                      const SubstationConfig(substationId: 'tg', ownedSubstations: {'tg'}),
+            // Mounted automatically by StationKernel (tg-h4u); this manual
+            // TreeOwner-driven tree bypasses the kernel entirely, so the
+            // molecule process path needs its own vendor here — the SAME
+            // default the kernel installs at its root.
+            child: InheritedSeed<ProcessLeaseVendor>(
+              value: defaultProcessLeaseVendor(f.ctx),
+              child: InheritedSeed<CapabilityRegistry>(
+                value: buildCodeRegistry(),
+                child: InheritedSeed<SessionResolver>(
+                  value: kCodeResolver,
+                  child: Station([
+                    SubstationScope(
+                      configNotifier: SubstationConfigNotifier(
+                        const SubstationConfig(substationId: 'tg', ownedSubstations: {'tg'}),
+                      ),
+                      key: const ValueKey('scope.tg'),
                     ),
-                    key: const ValueKey('scope.tg'),
-                  ),
-                ]),
+                  ]),
+                ),
               ),
             ),
           ),
@@ -242,7 +249,7 @@ void main() {
         joined.push(JoinedSnapshot(
           graph: _graph(beads: [bead('tg-1')], ready: {'tg-1'}),
           sessionsByWorkBead: {
-            'tg-1': ladderDoneProjection(
+            'tg-1': _moleculeLadderDoneProjection(
               workBeadId: 'tg-1',
               sessionId: 'tgdog-1',
             ),
@@ -266,11 +273,11 @@ void main() {
         joined.push(JoinedSnapshot(
           graph: _graph(beads: [bead('tg-1'), bead('tg-2')], ready: {'tg-1', 'tg-2'}),
           sessionsByWorkBead: {
-            'tg-1': ladderDoneProjection(
+            'tg-1': _moleculeLadderDoneProjection(
               workBeadId: 'tg-1',
               sessionId: 'tgdog-1',
             ),
-            'tg-2': ladderDoneProjection(
+            'tg-2': _moleculeLadderDoneProjection(
               workBeadId: 'tg-2',
               sessionId: 'tgdog-2',
             ),
@@ -308,6 +315,39 @@ void main() {
       },
     );
   });
+}
+
+/// A MOLECULE-mode [SessionProjection] for [workBeadId] — the whole `code`
+/// circuit's cheap head ([kSpecHeadNodes]) complete (grade A), every other node
+/// staged `pending` — bucketing [ladderDoneSession]'s session + step beads the
+/// SAME way [StationJoinBridge]'s `_attachMoleculeBeads` does (a `type=step`
+/// bead's `grid.step.session` stamp), for a test that hand-builds a
+/// [JoinedSnapshot] directly (bypassing the bridge, so nothing does that
+/// bucketing for it).
+///
+/// LOCAL to this file — not promoted to `asset_fakes.dart` (house rule: this
+/// suite owns only its own file). [ladderDoneProjection] (the shared fixture)
+/// stays legacy-shaped (`isMolecule: false`, `cursor` populated directly): that
+/// is now DEAD WEIGHT for any suite that expects an actual spawn —
+/// `CapabilityHost._stepBeadId` refuses LOUD (no ambient `InheritedCircuit`)
+/// for every non-molecule session, since `SessionScope` only threads
+/// `InheritedCircuit` `if (isMolecule)` (tg-eli phase 2: the molecule model is
+/// the ONLY circuit engine that ever spawns). This helper adopts molecule mode
+/// instead so `specify` genuinely mounts.
+SessionProjection _moleculeLadderDoneProjection({
+  required String workBeadId,
+  required String sessionId,
+}) {
+  final beads = ladderDoneSession(id: sessionId, workBeadId: workBeadId);
+  return SessionProjection(
+    workBeadId: workBeadId,
+    sessionId: sessionId,
+    isMolecule: true,
+    // beads[0] is the session bead itself (type=session, not type=molecule) —
+    // the bridge's own bucketing only folds type=molecule/type=step beads, so
+    // drop it here too (`beads.skip(1)`).
+    moleculeBeads: beads.skip(1).toList(),
+  );
 }
 
 /// All branches under [root], pre-order.

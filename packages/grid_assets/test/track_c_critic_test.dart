@@ -103,6 +103,10 @@ void main() {
         expect(cfg.args[1], contains(r'echo $?'));
         expect(cfg.workDir, '/w/tg-1');
         expect(cfg.lifecycle, Lifecycle.oneTurn);
+        // tg-uad follow-through: the gating lane is minutes-scale by
+        // definition — it must NOT ride the runtime provider's 2-hour
+        // default watchdog.
+        expect(cfg.deadline, kGatingDeadline);
       },
     );
 
@@ -193,6 +197,9 @@ void main() {
       expect(cfg.args.last, contains('spec-adherence'));
       expect(cfg.workDir, '/w/tg-1');
       expect(cfg.lifecycle, Lifecycle.oneTurn);
+      // The LLM lanes legitimately ride the runtime provider's long default —
+      // only the deterministic gating lane gets the minutes-scale deadline.
+      expect(cfg.deadline, isNull);
     });
 
     test('a clean exit completes; a non-zero exit / death fails', () {
