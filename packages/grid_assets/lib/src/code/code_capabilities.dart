@@ -157,7 +157,7 @@ class AgentCapability extends ProcessCapability {
     DartLinkService linkService = const DartLinkService(),
     OverlayMaterializer materializer = const OverlayMaterializer(),
     String? overlayRoot,
-    String? overlaySourceRef,
+    String overlaySourceRef = kUnknownSourceRef,
     Map<String, String> overlayArgs = const {},
   }) : _devRoot = devRoot,
        _linkService = linkService,
@@ -176,11 +176,11 @@ class AgentCapability extends ProcessCapability {
   /// the wire is provable without the live tree.
   final String? _overlayRoot;
 
-  /// The grid_assets ref every materialized file's provenance header records;
-  /// null ⇒ probed from the overlay's own checkout
-  /// ([resolveOverlaySourceRefSync]). Tests inject a fixed ref so the wire is
-  /// provable without a git checkout.
-  final String? _overlaySourceRef;
+  /// The grid_assets ref every materialized file's provenance header records.
+  /// The code registry resolves this once at station composition; direct
+  /// constructor use records [kUnknownSourceRef] unless a test/station injects a
+  /// fixed value.
+  final String _overlaySourceRef;
 
   /// The station's overrides for the overlay's template args — merged OVER the
   /// wire's own binding (`runner`/`gridHome`), so a station with a different
@@ -223,7 +223,10 @@ class AgentCapability extends ProcessCapability {
     return spawnFor(
       environment: environment,
       model: config.params['model'],
-      endpoint: siteBinding.endpointFor(name: config.harness, environment: environment),
+      endpoint: siteBinding.endpointFor(
+        name: config.harness,
+        environment: environment,
+      ),
       brief: buildAgentBrief(
         bead,
         workspace,
@@ -300,7 +303,7 @@ class AgentCapability extends ProcessCapability {
     final report = _materializer.materializeSync(
       overlayRoots: [overlayRoot],
       targetRoot: workspace.workspaceDir,
-      sourceRef: _overlaySourceRef ?? resolveOverlaySourceRefSync(overlayRoot),
+      sourceRef: _overlaySourceRef,
       subtrees: const [kClaudeSkillsSubtree],
       args: {
         'runner': kDefaultOverlayRunner,
@@ -373,7 +376,10 @@ class AgentCapability extends ProcessCapability {
   /// malformed / harness-without-usage envelope yields no fields (null), NEVER a
   /// throw — telemetry can never fail, gate, or delay the agent step.
   @override
-  Future<Map<String, String>?> result(TreeContext context, StepArgs args) async {
+  Future<Map<String, String>?> result(
+    TreeContext context,
+    StepArgs args,
+  ) async {
     final workspace = context.getInheritedSeedOfExactType<Workspace>();
     if (workspace == null) return null;
     final usage = readUsageFields(workspace.workspaceDir, args.nodePath);
@@ -732,6 +738,11 @@ class GitSourceControl implements SourceControl {
 /// render against in each provisioned worktree ([AgentCapability], bead
 /// `pow-kzx`) — a station whose runner verb is not [kDefaultOverlayRunner], or
 /// which knows its real grid-home root, passes them here.
+///
+/// [overlaySourceRef] overrides the provenance ref stamped into each
+/// materialized overlay file. Null resolves this package's own station overlay
+/// ref once while the code registry is composed, then threads that stable value
+/// into [AgentCapability], so per-bead agent spawn never shells out for it.
 DefaultCapabilityRegistry buildCodeRegistry({
   DateTime Function()? clock,
   RubricSource? rubrics,
@@ -742,9 +753,14 @@ DefaultCapabilityRegistry buildCodeRegistry({
   InferenceRunner? inference,
   AnchorResolver? anchorResolver,
   PriorArtSource? priorArt,
+  String? overlaySourceRef,
   Map<String, String> overlayArgs = const {},
 }) {
-  final rubricSource = rubrics ?? PackagedAssetLoader().rubricSource;
+  final loader = PackagedAssetLoader();
+  final rubricSource = rubrics ?? loader.rubricSource;
+  final stationOverlayRoot = p.join(loader.root, 'station_overlay');
+  final resolvedOverlaySourceRef =
+      overlaySourceRef ?? resolveOverlaySourceRefSync(stationOverlayRoot);
   return DefaultCapabilityRegistry(
     capabilities: {
       // The SPEC-READINESS INTAKE LENS (bead `pow-q7n`) — the cheap ladder at
@@ -784,7 +800,11 @@ DefaultCapabilityRegistry buildCodeRegistry({
       // `route` below; the two matrices are now independent (ADR-0000 A14,
       // which departs from A13(5)'s shared-route posture).
       'spec-route': const SpecRouteCapability(),
-      'agent': AgentCapability(devRoot: devRoot, overlayArgs: overlayArgs),
+      'agent': AgentCapability(
+        devRoot: devRoot,
+        overlaySourceRef: resolvedOverlaySourceRef,
+        overlayArgs: overlayArgs,
+      ),
       // The old `land` binding is GONE: the PR is no longer a step. The TERMINAL
       // route advances and the engine actuates the substation's bound
       // DeliveryMethod (M5 D-4a).
