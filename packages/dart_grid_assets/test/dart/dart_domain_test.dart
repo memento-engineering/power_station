@@ -255,14 +255,11 @@ void main() {
       final yaml = pubspecOverridesFor(
         config,
         PubLinkContext.worktree,
-        devRoot: '/Users/nico/development/engineering.memento/the_grid',
+        devRoot: '/work/umbrella/the_grid',
       );
       expect(
         yaml,
-        contains(
-          "path: '/Users/nico/development/engineering.memento/genesis/"
-          "packages/tree'",
-        ),
+        contains("path: '/work/umbrella/genesis/packages/tree'"),
         reason: 'the ../ collapses through normalize — an absolute path '
             'resolves from ANY worktree depth',
       );
@@ -301,13 +298,13 @@ void main() {
       const hostile = PubLinkConfig(links: [
         PubLink(
           package: 'genesis_tree',
-          devPath: "/Users/nico/My Documents: a #dir/it's here",
+          devPath: "/home/dev/My Documents: a #dir/it's here",
         ),
       ]);
       final yaml = pubspecOverridesFor(hostile, PubLinkContext.dev)!;
       expect(
         yaml,
-        contains("path: '/Users/nico/My Documents: a #dir/it''s here'"),
+        contains("path: '/home/dev/My Documents: a #dir/it''s here'"),
         reason: 'single-quoted scalar; embedded quote doubled per YAML spec',
       );
     });
