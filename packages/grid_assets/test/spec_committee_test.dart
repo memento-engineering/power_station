@@ -148,7 +148,7 @@ void main() {
       });
       expect(byId[kReadinessRouteStep]!.dependsOn, {kReadinessStep});
       // `specify` is still the route's SIBLING (bead `pow-ui8`), so the RESPEC
-      // arm can name it in a `RouteVerdict.Rewind` — it just no longer heads the
+      // arm can name it in a `validates` edge — it just no longer heads the
       // circuit, and it now sits behind the DISCOVERY gate as well.
       expect(
         (byId[kSpecifyStep]! as CapabilityStep).capabilityId,
@@ -156,7 +156,7 @@ void main() {
       );
       expect(byId[kSpecifyStep]!.dependsOn, {kDiscoveryCircuitId});
       // The hygiene wipe waits on specify, which is what puts EVERY lane
-      // downstream of it (see the rewind-set test below).
+      // downstream of it (see the invalidated-closure test below).
       expect(byId[kClearCritiqueStep]!.dependsOn, {kSpecifyStep});
       // Every lane waits on the hygiene wipe (round-fresh verdict files).
       for (final rubric in kSpecCommitteeRubrics) {
@@ -178,16 +178,29 @@ void main() {
         expect(step.capabilityId, 'spec-critic');
         expect(step.params, {'rubric': rubric});
       }
-      // The route joins on ALL five lanes and names the gating lane.
+      // The route joins on ALL five lanes, names the gating lane, and DECLARES
+      // the backward-motion edge the engine's derivation walks: a `grade: 'F'`
+      // stamped by THIS step invalidates `specify` ∪ its transitive dependents
+      // ∪ this route.
       final route = byId['route']! as CapabilityStep;
       expect(route.dependsOn, {kSpecGatingRubric, ...kSpecLlmRubrics});
       expect(route.params['gating'], kSpecGatingRubric);
       expect(route.params['critics'], _specCritics);
+      expect(route.params[kValidatesParamKey], kSpecifyStep);
+      // NO critic or gate step declares one: the derivation invalidates on a
+      // SOURCE grade of `F`, and a critic `F` is a HUMAN ruling in this
+      // committee's matrix, never an auto-respec. Edges there would INVERT the
+      // matrix.
+      for (final rubric in kSpecCommitteeRubrics) {
+        expect((byId[rubric]! as CapabilityStep).params[kValidatesParamKey],
+            isNull);
+      }
     });
 
-    test('ONE Rewind naming `specify` re-runs the WHOLE committee virgin — every '
+    test('INVALIDATING `specify` re-runs the WHOLE committee virgin — every '
         'other step is transitively DOWNSTREAM of it (bead `pow-ui8`)', () {
-      // The engine's OWN rewind-set predicate (grid_engine `sdk/rewind.dart`).
+      // The engine's OWN closure predicate (grid_engine `sdk/rewind.dart`) —
+      // the same one the `validates` derivation expands its edge through.
       final rewound = transitiveDependents(kSpecReviewCircuit, {kSpecifyStep});
       expect(rewound, {
         kClearCritiqueStep,
@@ -207,17 +220,18 @@ void main() {
         rewound,
         contains(kClearCritiqueStep),
         reason:
-            'ROUND-FRESHNESS (ADR-0000 A15(5) alt-A): a Rewind does NOT re-key '
-            'the bead id, so a critic\'s nodePath stamp is byte-identical '
-            'across rounds and cannot fence a stale verdict file — that is the '
-            'verdict\'s own `round` stamp\'s job now. The critique WIPE is the '
-            'BELT behind it: it stays in the rewind set so a round still starts '
+            'ROUND-FRESHNESS: a critic\'s nodePath stamp is byte-identical '
+            'across rounds and cannot by itself fence a stale verdict file — '
+            'the successor re-key is what makes a round virgin. The critique '
+            'WIPE is the BELT behind it: it stays in the closure so a round '
+            'still starts '
             'with a clean workspace (and it remains the gating lane\'s only '
             'freshness fence — the `.rc` carries no stamp), which is exactly '
             'what `clear-critique dependsOn specify` buys.',
       );
-      // The readiness ladder is UPSTREAM of `specify`, so an auto-respec never
-      // re-runs it: a respec rewrites the SPEC, not the BEAD (bead `pow-q7n`).
+      // The readiness ladder is UPSTREAM of `specify`, so it is outside the
+      // invalidated closure and an auto-respec never re-runs it: a respec
+      // rewrites the SPEC, not the BEAD (bead `pow-q7n`).
       expect(
         rewound,
         isNot(
@@ -819,8 +833,9 @@ void main() {
     });
 
     test(
-      'an LLM spec lane at D WITH a rationale ⇒ a REWIND of the `specify` '
-      'sibling (beads `pow-7nm` + `pow-ui8`) — the loop actuates, no human',
+      'an LLM spec lane at D WITH a rationale ⇒ an ADVANCE carrying the '
+      'invalidating `grade: F` stamp — the loop actuates through the declared '
+      '`validates` edge, with no human and no reported rewind',
       () async {
         final out = await _specRoute(
           {...allA(), 'plan-completeness': 'D'},
@@ -828,14 +843,16 @@ void main() {
             'plan-completeness': 'step 3 names no test command',
           },
         );
-        expect(out, isA<Rewind>());
-        expect((out as Rewind).stepIds, {kSpecifyStep});
-        expect(out.reason, contains('plan-completeness=D'));
+        expect(out, isA<Advance>());
+        final payload = (out as Advance).payload!;
+        expect(payload['grade'], 'F');
+        expect(payload['verdict'], 'respec');
+        expect(payload['rationale'], contains('plan-completeness=D'));
       },
     );
 
     test('an LLM spec lane at D with NO rationale ⇒ a HUMAN gate — nothing to '
-        'respec against, so never a rewind', () async {
+        'respec against, so never a respec stamp', () async {
       final out = await _specRoute({...allA(), 'plan-completeness': 'D'});
       expect(out, isA<Escalate>());
       expect((out as Escalate).reason, contains('NO rationale'));

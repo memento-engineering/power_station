@@ -19,6 +19,11 @@
 //  - the REAL structural gate's provenance: driven against a bead with NO
 //    spec, the gating lane's own chokepoint write records grade=F with the
 //    findings — the fail direction is a safe PARK, never a silent advance.
+//  - the RESPEC path: a critic D WITH a rationale makes the route COMPLETE
+//    carrying an invalidating `grade: F` on its own result, and the engine
+//    DERIVES the backward wave off the route's declared `validates` edge —
+//    `specify` re-mints as a successor incarnation on a `supersedes` chain,
+//    with no gate bead, no human, no session re-mint.
 //
 // Offline — FAKES, no live tg/gc/claude/bd/git/network.
 import 'dart:convert';
@@ -123,19 +128,6 @@ String? _resultField(Fakes f, String relPath, String field) {
     final md = jsonDecode(c[i + 1]) as Map<String, dynamic>;
     final v = md['grid.result.tg-1/$relPath.$field'];
     if (v is String) return v;
-  }
-  return null;
-}
-
-/// The `grid.cursor.tg-1/<relPath>.<field>` value some chokepoint `update` wrote
-/// — the rewind wave's per-node `rewindCount` bump (tg-o90) is read through this.
-String? _cursorField(Fakes f, String relPath, String field) {
-  for (final c in f.runner.callsFor('update')) {
-    final i = c.indexOf('--metadata');
-    if (i < 0 || i + 1 >= c.length) continue;
-    final md = jsonDecode(c[i + 1]) as Map<String, dynamic>;
-    final v = md['grid.cursor.tg-1/$relPath.$field'];
-    if (v != null) return '$v';
   }
   return null;
 }
@@ -267,6 +259,10 @@ void main() {
       );
       state.push(_state(ladderDoneSession(id: _sid)));
       await _settle(f);
+      // The mount→spawn chain makes no observable fake call until the spawn
+      // ITSELF, so pure quiescence can declare victory a beat early. Wait for
+      // the spawn — bounded, so a specify that never mounts still FAILS below.
+      await settle(() => f.provider.started.isNotEmpty, maxPumps: 1000);
       expect(f.provider.started.map((s) => s.name), [_step(kSpecifyNode)]);
       final specify = f.provider.started.single.config;
       // The architect brief rides the argv: the bd CLI spec writes, the
@@ -431,6 +427,12 @@ void main() {
         ),
       );
       await _settle(f);
+      // Same beat: the route's async prelude is silent, so wait for its
+      // chokepoint write rather than for quiescence alone.
+      await settle(
+        () => _wroteCursor(f, kSpecRouteNode, 'gated'),
+        maxPumps: 1000,
+      );
 
       expect(
         _wroteCursor(f, kSpecRouteNode, 'gated'),
@@ -481,11 +483,12 @@ void main() {
     });
   });
 
-  group('the spec stage — a FIXABLE spec REWINDS the specify sub-DAG '
+  group('the spec stage — a FIXABLE spec INVALIDATES the specify sub-DAG '
       '(beads `pow-7nm` + `pow-ui8`)', () {
     test(
-      'a critic D WITH a rationale re-keys `specify` + everything downstream '
-      'back to pending IN-SESSION — no type=gate bead, no human, no session '
+      'a critic D WITH a rationale stamps an invalidating F on the route, and '
+      'the engine DERIVES a successor incarnation for `specify` + everything '
+      'downstream IN-SESSION — no type=gate bead, no human, no session '
       're-mint; the build agent never spawns and the session never closes',
       () async {
         final f = buildFakes(createdId: _sid);
@@ -541,63 +544,88 @@ void main() {
         );
         await _settle(f);
 
-        // The RESPEC arm ACTUATES: one chokepoint write flips the rewind set
-        // (`specify` ∪ its transitive dependents ∪ the route itself) back to
-        // `pending` with a bumped per-node `rewindCount` — the re-key that makes
-        // keyed reconcile re-run the sub-DAG VIRGIN.
-        expect(
-          _wroteCursor(f, kSpecifyNode, 'pending'),
-          isTrue,
-          reason: 'the route rewound its `specify` sibling',
-        );
-        expect(
-          _cursorField(f, kSpecifyNode, 'rewindCount'),
-          '1',
-          reason: 'the rewindCount bump RE-KEYS the node (tg-o90)',
-        );
-        expect(
-          _wroteCursor(f, kSpecClearCritiqueNode, 'pending'),
-          isTrue,
-          reason:
-              'the hygiene wipe is DOWNSTREAM of specify, so it re-runs '
-              'on the wave — and since a Rewind never re-keys the bead id, '
-              'that wipe is the WHOLE round-freshness guarantee (ADR-0000 A4 '
-              'as amended by pow-ui8)',
-        );
-        expect(
-          _wroteCursor(f, kSpecGateNode, 'pending'),
-          isTrue,
-          reason:
-              'every lane re-runs virgin — the route can never re-decide '
-              'on stale grades',
-        );
-        expect(
-          _wroteCursor(f, kSpecRouteNode, 'pending'),
-          isTrue,
-          reason:
-              'the rewinding node writes ITSELF pending too — that is '
-              'what makes the round a loop, not a race',
-        );
-        expect(
-          _cursorField(f, kSpecRouteNode, 'rewindCount'),
-          '1',
-          reason: 'the route\'s own count is the asset\'s ROUND counter',
+        // The route's own async prelude makes NO observable fake call, so
+        // pure quiescence can declare victory before its chokepoint write
+        // lands. Wait for the write ITSELF — bounded, so a route that never
+        // completes still FAILS the expectation below instead of hanging.
+        await settle(
+          () => _wroteCursor(f, kSpecRouteNode, 'complete'),
+          maxPumps: 1000,
         );
 
-        // NOT a park: no gate bead, no gated cursor. This is the whole point of
-        // the bead — a fixable spec no longer waits on a human.
+        // The RESPEC arm STAMPS: the route COMPLETES and records the
+        // invalidating structured verdict on its OWN result node. It reports NO
+        // rewind (the engine routes a reported one to a supervised failure) and
+        // parks NOTHING.
+        expect(
+          _wroteCursor(f, kSpecRouteNode, 'complete'),
+          isTrue,
+          reason: 'the route terminalises POSITIVELY — that is exactly what '
+              'makes it a valid `validates` SOURCE for the derivation',
+        );
+        expect(_resultField(f, kSpecRouteNode, 'grade'), 'F');
+        expect(_resultField(f, kSpecRouteNode, 'verdict'), 'respec');
         expect(
           _gateMinted(f),
           isFalse,
-          reason:
-              'a rewind mints NO type=gate bead (that is Gate — a human '
-              'park)',
+          reason: 'a respec mints NO type=gate bead (that is Escalate — a '
+              'human park)',
         );
         expect(_wroteCursor(f, kSpecRouteNode, 'gated'), isFalse);
-        expect(_wroteCursor(f, kSpecRouteNode, 'complete'), isFalse);
 
-        // The build agent's dep (spec_review → its terminal route) regressed to
-        // pending → the build is WITHHELD while the spec is re-specified.
+        // Re-project the stamp: the route's OWN step bead now carries
+        // `state=complete` + `grade=F`. That snapshot is what the engine's
+        // derivation reads off the route step's declared `validates` edge.
+        state.push(
+          _state(
+            _withGraded(
+              _session(
+                completed: {
+                  kSpecifyNode,
+                  kSpecClearCritiqueNode,
+                  kSpecGateNode,
+                  ...kSpecCriticNodes,
+                  kSpecRouteNode,
+                },
+              ),
+              grades: {...kSpecGradesAllA, kSpecRouteNode: 'F'},
+              results: const {
+                'spec_review/plan-completeness': {
+                  'grade': 'D',
+                  'rationale': 'step 3 names no test command',
+                },
+              },
+            ),
+          ),
+        );
+        await _settle(f);
+
+        // Same posture for the mint: it is scheduled off `build` as a
+        // microtask chain that only becomes observable at the `bd dep` call.
+        bool mintedSuccessor() => f.runner.callsFor('dep').any(
+          (c) =>
+              c.contains('supersedes') &&
+              c.contains('$_sid-${kSpecifyNode.replaceAll('/', '-')}'),
+        );
+        await settle(mintedSuccessor, maxPumps: 1000);
+
+        // BACKWARD MOTION IS DERIVED: the engine mints a SUCCESSOR incarnation
+        // `type=step` bead for the invalidated `specify` node and links it to
+        // the prior incarnation with a `supersedes` dependency — the new bead
+        // id is the re-key that makes keyed reconcile re-run the sub-DAG
+        // VIRGIN. No chokepoint rewind write exists any more.
+        expect(
+          mintedSuccessor(),
+          isTrue,
+          reason: 'the derivation minted `specify`\'s successor incarnation',
+        );
+
+        // NOT a park: still no gate bead, still no human.
+        expect(_gateMinted(f), isFalse);
+
+        // The build agent's dep (spec_review → its terminal route) never
+        // clears: the route is itself inside `specify`'s invalidated closure,
+        // so it is withheld from the frontier while the spec is re-specified.
         expect(
           f.provider.started.map((s) => s.name),
           isNot(contains(_step(kAgentNode))),
@@ -606,18 +634,10 @@ void main() {
         expect(
           f.runner.callsFor('close'),
           isEmpty,
-          reason:
-              'the session stays LIVE across the rewind — a rewind is '
-              'not a re-mint',
+          reason: 'the session stays LIVE across the derived wave — a respec '
+              'is not a re-mint',
         );
       },
-      skip:
-          'pow-sl5: the molecule engine retired Rewind-verdict actuation '
-          '(the_grid 37cb488 routes every AllocationRewound to a supervised '
-          'failure — backward motion is DERIVED from validates-edge stamps). '
-          'The auto-respec feature this test pins is non-functional against '
-          'the live engine until respec.dart migrates to validates-edge '
-          'derivation. Un-skip with pow-sl5.',
     );
   });
 }
