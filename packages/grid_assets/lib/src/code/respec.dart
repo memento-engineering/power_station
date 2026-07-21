@@ -8,28 +8,35 @@
 /// spec-rework AUTOMATICALLY with the failing lanes' RECOMMENDATIONS as the
 /// correction guidance; a human is the ESCALATION, not the default.
 ///
-/// **The layering (settled by the_grid `tg-o90`, re-homed onto the verdict).**
-/// The loop EDGE is the engine's, and it now EXISTS: a route emits a
-/// [RouteVerdict], and [Rewind] ({stepIds}, reason) is one of its three arms —
-/// routing as a first-class primitive. The host flips the
-/// named SIBLING steps, everything transitively downstream of them, and the
-/// rewinding node itself back to `state=pending` with a bumped per-node
-/// `rewindCount`, in ONE chokepoint write onto the_grid's OWN session bead (A37).
-/// The bump RE-KEYS each node, so keyed reconcile disposes the old incarnations
-/// and the sub-DAG re-runs VIRGIN — with NO `type=gate` bead (that is [Escalate],
-/// a human park) and NO session re-mint (that is `grid rework`, the operator
-/// verb).
-/// So the RESPEC arm ACTUATES: it returns `Rewind({kSpecifyStep}, …)` naming its
-/// `specify` sibling (bead `pow-ui8` folded `specify` into [kSpecReviewCircuit]
-/// for exactly this — a rewind may only name steps of the rewinding node's own
-/// circuit). The superseded `respec:` gate-reason convention (the held `tg-b3k`
+/// **The layering.** The loop EDGE is the engine's, and backward motion there is
+/// a pure DERIVATION, never a decision a route reports: the engine routes every
+/// reported rewind to a supervised failure. What actuates the loop instead is a
+/// DECLARED edge plus a STRUCTURED stamp — a step whose
+/// `params[kValidatesParamKey]` names a SIBLING step of its own circuit, and a
+/// recorded `grade` of `F` on that step once it reaches a POSITIVE TERMINAL.
+/// The engine then invalidates the named target ∪ its transitive dependents ∪
+/// the source itself, minting a SUCCESSOR incarnation bead per invalidated node
+/// on a `supersedes` chain. The new ids RE-KEY each node, so keyed reconcile
+/// disposes the old incarnations and the sub-DAG re-runs VIRGIN — with NO
+/// `type=gate` bead (that is [Escalate], a human park) and NO session re-mint
+/// (that is `grid rework`, the operator verb).
+///
+/// So the RESPEC arm does not report backward motion — it COMPLETES and STAMPS:
+/// an [Advance] carrying `grade: 'F'`, on a route step that declares
+/// `validates: specify` (bead `pow-ui8` folded `specify` into
+/// [kSpecReviewCircuit] for exactly this — a `validates` edge, like the rewind
+/// it replaced, may only name steps of the source's own circuit). The ADVANCE
+/// arm deliberately carries NO `grade` key, so a passing round invalidates
+/// nothing. The superseded `respec:` gate-reason convention (the held `tg-b3k`
 /// workaround) is GONE.
 ///
-/// **The BOUND.** [kMaxRespecRounds] (2) is the asset's own cap, read off the
-/// route node's `rewindCount` through the ambient [SiblingView] — the route
-/// escalates on its OWN policy first, and the engine's belt (`kMaxReworkRounds`,
-/// 3 — the host refuses a rewind at the cap and [Escalate]s to the bound handler
-/// instead) never has to fire.
+/// **The BOUND.** [kMaxRespecRounds] (2) is the asset's own cap, counted off the
+/// guidance ledger's own `round` field — the route escalates on its OWN policy
+/// first, and the engine's belt (`kMaxReworkRounds`, 3 — the derived generation
+/// off the `supersedes` chain depth, which gates the node and surfaces a derived
+/// escalation) never has to fire. In the offline/dry-run posture there is no
+/// ledger and the asset's counter cannot advance; the engine's belt is then the
+/// only bound, and it holds because it reads graph STRUCTURE, not asset I/O.
 ///
 /// **The fork (ADR-0000 A13(5), and the pending A14 that departs from it).**
 /// A13(5) made ONE [CodeRouteCapability] serve BOTH committees, honest about
@@ -41,10 +48,11 @@
 /// code committee; A13(5)'s actual invariant (a hard block NAMES its lane) is
 /// preserved here too.
 ///
-/// **The channel.** A rewind re-runs the committee VIRGIN, so the verdict files
-/// [ClearCritiqueCapability] wipes are round-fresh and the [SiblingView] the
-/// route graded through is gone. The WORKTREE is not: the rewind happens in the
-/// SAME directory, in the SAME session. So the guidance rides a file in it —
+/// **The channel.** The derived wave re-runs the committee VIRGIN, so the
+/// verdict files [ClearCritiqueCapability] wipes are round-fresh and the
+/// [SiblingView] the route graded through is gone. The WORKTREE is not: the
+/// wave happens in the SAME directory, in the SAME session. So the guidance
+/// rides a file in it —
 /// [respecLedgerPath], a sibling of (never inside) `.grid/critique/`, which
 /// [ClearCritiqueCapability] wipes every round.
 library;
@@ -62,20 +70,35 @@ import 'route_failure.dart';
 /// The max AUTO-respec rounds a spec may take before the route flares to a human
 /// (the bead's bound). Round 1 and round 2 auto-loop; a third fixable fail
 /// ESCALATES. Strictly below the engine's own `kMaxReworkRounds` (3) — the belt
-/// that makes `CapabilityHost` REFUSE a [Rewind] and [Escalate] instead — so the
-/// asset's cap always fires first, on its own policy.
+/// that gates a node whose derived generation reaches the cap — so the asset's
+/// cap always fires first, on its own policy.
 const int kMaxRespecRounds = 2;
 
-/// The `specify` step id — the step the RESPEC arm rewinds, and the step
+/// The `specify` step id — the step the RESPEC arm invalidates, and the step
 /// [kSpecReviewCircuit] authors at its head (bead `pow-ui8`). ONE definition, so
-/// the [Rewind]'s target and the circuit's step can never drift: a dangling step
-/// id is not a no-op in the engine — `CapabilityHost` routes it to a supervised
-/// [Failed] (tg-o90).
+/// the declared `validates` target and the circuit's step can never drift: a
+/// dangling target mints NO edge at all, so a drift would silently disarm the
+/// whole auto-respec loop.
 ///
 /// Homed here rather than in `specify.dart` because `specify.dart` already
 /// imports this library (the ledger + the brief guidance); the reverse edge would
 /// make the import graph cyclic.
 const String kSpecifyStep = 'specify';
+
+/// The engine's DECLARATIVE params key naming a backward-motion edge (the_grid
+/// `molecule_schema.dart`'s `kValidatesParam`): a step whose
+/// `params[kValidatesParamKey]` names a SIBLING step id of its OWN circuit gets
+/// that edge minted when the molecule is instantiated, and the engine's
+/// derivation invalidates the named target ∪ its transitive dependents ∪ the
+/// source itself whenever the SOURCE reaches a positive terminal carrying a
+/// recorded `grade` of `F`.
+///
+/// Mirrored here rather than imported: `grid_engine` exports its molecule schema
+/// with a `show` list that does not carry this key, so it is off this pack's
+/// import surface. The `Key` suffix keeps the name free if that export is ever
+/// widened. The literal is pinned in test, so an engine-side rename fails LOUD
+/// here rather than silently minting no edge.
+const String kValidatesParamKey = 'validates';
 
 /// The workspace-relative directory the respec guidance ledger lives in —
 /// deliberately NOT under `.grid/critique/` (which [ClearCritiqueCapability]
@@ -130,10 +153,9 @@ class RespecLane {
 
 /// The auto-respec ROUND LEDGER — the round number plus every failing lane,
 /// written into the bead's worktree by [SpecRouteCapability] and read back by
-/// `SpecifyCapability` on the NEXT round. It is the GUIDANCE channel; the round
-/// COUNTER is the route node's own `rewindCount` (bead `pow-ui8` — a [Rewind]
-/// does not re-mint the session, so the cursor survives the round and is the
-/// honest, zero-I/O counter). The `round` it carries is what the next brief
+/// `SpecifyCapability` on the NEXT round. It is BOTH channels: the correction
+/// GUIDANCE the next brief embeds, and the round COUNTER [SpecRouteCapability]
+/// reads back to apply its cap. The `round` it carries is what the next brief
 /// renders ("RESPEC round N of 2").
 class RespecLedger {
   /// Creates a ledger for [round] over the failing [lanes].
@@ -406,15 +428,16 @@ int _gradeIndex(String grade) {
   return i < 0 ? ladder.length - 1 : i;
 }
 
-/// The [Rewind]'s human-readable REASON (bead `pow-ui8`). Diagnostics and
-/// telemetry ONLY: the engine never parses it — `CapabilityHost` truncates it
-/// into the `step.rewound` flare — and the correction guidance the next `specify`
-/// actually reads is the durable ledger at [respecLedgerPath], which carries
-/// every rationale in FULL. So this line is deliberately COMPACT: the round, the
-/// bound, the failing lanes, and where the guidance lives. (The superseded gate
-/// reason it replaces had to inline every rationale, because a parked gate bead
-/// was the only thing a governor could read; a rewind parks nothing.)
-String respecRewindReason(RespecLedger ledger) =>
+/// The RESPEC decision's compact human-readable REASON, recorded as result
+/// PROVENANCE beside the invalidating `grade: 'F'` stamp. Diagnostics and
+/// telemetry ONLY: the engine's derivation reads the STRUCTURED grade and never
+/// this prose, and the correction guidance the next `specify` actually reads is
+/// the durable ledger at [respecLedgerPath], which carries every rationale in
+/// FULL. So this line is deliberately COMPACT: the round, the bound, the failing
+/// lanes, and where the guidance lives. (The superseded gate reason it replaces
+/// had to inline every rationale, because a parked gate bead was the only thing
+/// a governor could read; a respec parks nothing.)
+String respecStampReason(RespecLedger ledger) =>
     'RESPEC round ${ledger.round}/$kMaxRespecRounds — the spec is FIXABLE '
     '(${ledger.lanes.map((l) => '${l.rubric}=${l.grade}').join(', ')}). '
     'Re-running `specify` with the failing lanes\' rationales as the correction '
@@ -465,23 +488,25 @@ String renderRespecGuidance(RespecLedger ledger) {
 ///    emits
 ///    (`verdict`/`grades`/`spread`/`rule`), and the guidance ledger is DELETED (a
 ///    later rework round must never re-inject a stale spec correction).
-///  - [SpecRespec] ⇒ the ledger is WRITTEN into the worktree, then a [Rewind]
-///    naming the `specify` SIBLING ([kSpecifyStep]): the engine re-keys `specify`
-///    ∪ everything downstream of it ∪ this route back to `pending`, so the
-///    committee re-runs VIRGIN in the SAME session and the next specify ride
-///    reads the ledger back as its correction guidance. NO human, no gate bead,
-///    no session re-mint. A ledger write that cannot land throws a
-///    [RouteFailure] — LOUD, never a respec whose guidance silently never
-///    arrives.
+///  - [SpecRespec] ⇒ the ledger is WRITTEN into the worktree, then an [Advance]
+///    carrying the INVALIDATING stamp `grade: 'F'` on this route's OWN result.
+///    This step declares `validates: `[kSpecifyStep], so the engine DERIVES the
+///    wave off that edge the moment the stamp lands on a positively-terminal
+///    source: `specify` ∪ everything downstream of it ∪ this route re-mint as
+///    successor incarnations, the committee re-runs VIRGIN in the SAME session,
+///    and the next specify ride reads the ledger back as its correction
+///    guidance. NO human, no gate bead, no session re-mint. A ledger write that
+///    cannot land throws a [RouteFailure] — LOUD, never a respec whose guidance
+///    silently never arrives.
 ///  - [SpecEscalate] ⇒ [Escalate] — the human flare (a structural F, a critic F,
 ///    a rationale-less fail, or the round cap).
 ///
 /// Offline/dry-run posture: an absent [Workspace], or a workspace directory that
 /// does not exist on disk (the synthetic `/grid/worktrees/...` an offline suite
 /// mounts), skips the ledger I/O entirely — the same no-op posture
-/// [ClearCritiqueCapability] takes. The verdict is unchanged, and so is the
-/// BOUND: the round counter is the node's `rewindCount`, not the ledger file, so
-/// it holds with zero I/O.
+/// [ClearCritiqueCapability] takes. The verdict is unchanged; the asset's own
+/// round counter cannot advance there (it IS the ledger), so the bound falls
+/// back to the engine's derived belt, which needs no asset I/O at all.
 class SpecRouteCapability extends RouteCapability {
   /// Creates the spec route.
   const SpecRouteCapability();
@@ -511,18 +536,19 @@ class SpecRouteCapability extends RouteCapability {
         ),
     ];
 
-    // The ROUND COUNT is THIS node's own `rewindCount` (bead `pow-ui8`) — the
-    // engine bumps it on every rewind wave that re-keys this route, and a
-    // [Rewind] does NOT re-mint the session (that is `grid rework`, the operator
-    // verb), so the CURSOR survives the round and the ledger no longer has to be
-    // the counter. This is the route's own-policy escalation the engine's
-    // `Rewind` doc prescribes, and it is ZERO I/O: the bound holds even in the
-    // offline/dry-run posture, where the ledger is skipped entirely and the old
-    // file-derived counter silently read 0 forever.
-    final priorRound = siblings.cursorOf(args.nodePath).rewindCount;
-
     final dir = workspace?.workspaceDir;
     final live = dir != null && dir.isNotEmpty && Directory(dir).existsSync();
+
+    // The ROUND COUNT is the LEDGER's own `round`. The node's `rewindCount` is
+    // not a candidate: the engine only ever sets it WHILE a node is currently
+    // invalidated, and by the time this route re-runs its successor incarnation
+    // is pending/running with nothing invalidating it — the projection yields 0
+    // forever, so a cap read from there could never fire. The ledger is the
+    // asset's own durable round record, and counting off it also BOUNDS a
+    // spurious re-invalidation. Offline there is no ledger and this reads 0
+    // every round; the bound is then the ENGINE's, derived from the successor
+    // chain depth, which is graph structure and needs no asset I/O.
+    final priorRound = live ? (readRespecLedger(dir)?.round ?? 0) : 0;
 
     switch (decideSpecRoute(
       lanes: lanes,
@@ -549,7 +575,19 @@ class SpecRouteCapability extends RouteCapability {
             );
           }
         }
-        return Rewind(const {kSpecifyStep}, respecRewindReason(ledger));
+        // The route COMPLETES and stamps the INVALIDATING verdict on its OWN
+        // result node. It reports NO backward motion: the engine derives the
+        // wave off this step's declared `validates` edge the moment this
+        // `grade: 'F'` lands on a positively-terminal source. The ADVANCE arm
+        // above deliberately carries NO `grade` key, so a passing round never
+        // invalidates anything.
+        return Advance({
+          'verdict': 'respec',
+          'grade': 'F',
+          'rule': 'respec',
+          'round': '${ledger.round}',
+          'rationale': respecStampReason(ledger),
+        });
       case SpecEscalate(:final reason):
         return Escalate(reason);
     }

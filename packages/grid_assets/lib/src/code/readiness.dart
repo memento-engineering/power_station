@@ -53,9 +53,10 @@
 /// token — ADR-0000 A15(3) deleted exactly such a prefix on the grounds that "a
 /// machine-actionable gate prefix nothing reads is a doc that lies".
 ///
-/// **The lens is NOT in the rewind set.** Every readiness step is UPSTREAM of
-/// `specify`, so the auto-respec [Rewind] (beads `pow-7nm`/`pow-ui8`, which
-/// re-keys `specify` ∪ its transitive dependents ∪ the route) never re-runs it:
+/// **The lens is NOT in the invalidated closure.** Every readiness step is
+/// UPSTREAM of `specify`, so the auto-respec wave (beads `pow-7nm`/`pow-ui8` —
+/// derived from the spec route's `validates` edge, which invalidates `specify` ∪
+/// its transitive dependents ∪ the route) never re-runs it:
 /// a respec round rewrites the SPEC, not the BEAD, so re-grading the bead would
 /// burn an agent per round to re-derive the same verdict. `spec_committee_test`
 /// fences this with the engine's own `transitiveDependents` predicate.

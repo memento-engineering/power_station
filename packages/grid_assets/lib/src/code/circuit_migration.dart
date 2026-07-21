@@ -10,7 +10,7 @@
 ///     key is `<bead>/specify`.
 ///  3. **folded** (`pow-ui8`, A15(1)) — `spec_review → agent → review → land`,
 ///     with `specify` folded INSIDE the spec circuit so the spec route's
-///     `Rewind` may name it as a sibling. The key MOVED to
+///     `validates` edge may name it as a sibling. The key MOVED to
 ///     `<bead>/spec_review/specify`.
 ///  4. **laddered** (`pow-q7n`, A17) — the SPEC-READINESS INTAKE LENS re-heads
 ///     the spec circuit (`intake` → `readiness` → `readiness-route` → `specify`
@@ -64,6 +64,7 @@ import 'package:genesis_tree/genesis_tree.dart';
 import 'package:grid_engine/grid_engine.dart';
 
 import 'delivery.dart';
+import 'respec.dart';
 
 /// The FROZEN **legacy** root shape — `agent → review → land`, the shape of
 /// `kCodeCircuit` before `pow-6ao` (git `a67feb8~1`). The migration target for
@@ -112,14 +113,16 @@ const String kSpecHeadSpecReviewCircuitId = 'spec_review_v1';
 ///
 /// Its `route` runs `capabilityId: 'route'` — the pre-fold BINARY matrix
 /// (`RouteCapability`: advance | gate), NOT the current `spec-route`. That is
-/// load-bearing, not incidental: `SpecRouteCapability` actuates a
-/// `StepOutcome.Rewind` naming `specify`, and a `Rewind` may only name steps of
-/// the rewinding node's OWN circuit — `specify` is not a sibling here. A
-/// shape-2 session minted between `pow-7nm` and the fold (same node paths, a
-/// three-way route) therefore degrades to the binary matrix: a fixable spec
-/// PARKS at a gate instead of auto-respec-ing. That is the deliberate
-/// fail-SAFE call for a migration path — these sessions are already past
-/// `specify`, and a park is a human unwind, never a spurious mutation.
+/// load-bearing, not incidental: `SpecRouteCapability`'s respec arm actuates
+/// through a `validates` edge onto `specify`, and such an edge may only name a
+/// step of the source's OWN circuit — `specify` is not a sibling here, so the
+/// edge would DANGLE and mint nothing, leaving the route to stamp an `F` that
+/// invalidates nobody and advances a rejected spec to the build. A shape-2
+/// session minted between `pow-7nm` and the fold (same node paths, a three-way
+/// route) therefore degrades to the binary matrix instead: a fixable spec PARKS
+/// at a gate. That is the deliberate fail-SAFE call for a migration path —
+/// these sessions are already past `specify`, and a park is a human unwind,
+/// never a spurious mutation.
 const Circuit kSpecHeadSpecReviewCircuit = Circuit(
   id: kSpecHeadSpecReviewCircuitId,
   terminalStepId: 'route',
@@ -233,8 +236,11 @@ const String kFoldedSpecReviewCircuitId = 'spec_review_v2';
 ///
 /// Unlike the shape-2 freeze, its `route` KEEPS `capabilityId: 'spec-route'`
 /// (the three-way advance | RESPEC | escalate matrix): `specify` IS a sibling in
-/// this circuit, so a `StepOutcome.Rewind` naming it is legal here. A shape-3
-/// survivor therefore keeps its auto-respec — no capability degrades.
+/// this circuit, so its `validates` edge onto `specify` is in scope and mints.
+/// A shape-3 survivor therefore keeps its auto-respec — no capability degrades.
+/// The edge must be DECLARED here for that to hold: without it the route's
+/// invalidating `F` stamp would no-op and a REJECTED spec would advance to the
+/// build — fail-OPEN, the opposite of the shape-2 park below.
 const Circuit kFoldedSpecReviewCircuit = Circuit(
   id: kFoldedSpecReviewCircuitId,
   terminalStepId: 'route',
@@ -288,6 +294,7 @@ const Circuit kFoldedSpecReviewCircuit = Circuit(
         'critics': 'spec-validation,coherence,adr-alignment,'
             'acceptance-testability,plan-completeness',
         'gating': 'spec-validation',
+        kValidatesParamKey: kSpecifyStep,
       },
     ),
   ],
@@ -344,9 +351,11 @@ const String kLadderedSpecReviewCircuitId = 'spec_review_v3';
 /// its route could PARK a bead whose build is already running. That is precisely
 /// the spawn this guard exists to prevent.
 ///
-/// Its `route` keeps `capabilityId: 'spec-route'` (the three-way matrix):
-/// `specify` IS a sibling here, so a `Rewind` naming it is legal and a shape-4
-/// survivor keeps its auto-respec — no capability degrades.
+/// Its `route` keeps `capabilityId: 'spec-route'` (the three-way matrix) AND
+/// declares the `validates` edge onto `specify`, which is a sibling here — so a
+/// shape-4 survivor keeps its auto-respec, no capability degrades, and the
+/// route's invalidating `F` stamp cannot no-op into a rejected spec reaching
+/// the build.
 const Circuit kLadderedSpecReviewCircuit = Circuit(
   id: kLadderedSpecReviewCircuitId,
   terminalStepId: 'route',
@@ -417,6 +426,7 @@ const Circuit kLadderedSpecReviewCircuit = Circuit(
         'critics': 'spec-validation,coherence,adr-alignment,'
             'acceptance-testability,plan-completeness',
         'gating': 'spec-validation',
+        kValidatesParamKey: kSpecifyStep,
       },
     ),
   ],

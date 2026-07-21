@@ -12,8 +12,8 @@
 /// CHEAP pre-specify lens: a deterministic intake contract (zero agents) then ONE
 /// agent grading the BEAD itself. A bead that is not spec-ready is HELD for
 /// refinement there, so no specify agent and no 4-critic committee ever runs on
-/// it. It is UPSTREAM of `specify` and therefore OUTSIDE the auto-respec rewind
-/// set.
+/// it. It is UPSTREAM of `specify` and therefore OUTSIDE the auto-respec
+/// invalidated closure.
 ///
 /// with `specify` FOLDED INTO the spec circuit as the route's sibling (bead
 /// `pow-ui8`): [kCodeCircuit] (`code_capabilities.dart`) drops in `spec_review`
@@ -60,10 +60,11 @@
 /// A FIXABLE fail (an actionable critic `D`/`E` carrying a rationale, under the
 /// round cap) AUTO-RESPECS with NO human in the loop (beads `pow-7nm` +
 /// `pow-ui8`, `respec.dart`): the route writes the failing lanes' rationales into
-/// the worktree ledger and returns [Rewind] naming its `specify` SIBLING, so the
-/// engine re-keys the whole spec sub-DAG back to `pending` INSIDE the live session
-/// (no gate bead, no session re-mint) and the next specify ride reads that ledger
-/// back as its correction guidance. A structural `F`, a critic `F`, a
+/// the worktree ledger and stamps an invalidating `grade: 'F'` on its own
+/// result; the route declares a `validates` edge onto its `specify` SIBLING, so
+/// the engine DERIVES the wave and re-keys the whole spec sub-DAG INSIDE the
+/// live session (no gate bead, no session re-mint) and the next specify ride
+/// reads that ledger back as its correction guidance. A structural `F`, a critic `F`, a
 /// rationale-less fail, or the round cap still flares to a human [Gate].
 ///
 /// **Freshness posture**: the committee grades the ambient [Bead] the engine
@@ -228,7 +229,8 @@ $kSpecExemplarDesign
 /// over the spec grades.
 ///
 /// **The ladder is the CHEAP head (bead `pow-q7n`, `readiness.dart`)**: it is
-/// deliberately UPSTREAM of `specify` and so OUTSIDE the rewind set below — a
+/// deliberately UPSTREAM of `specify` and so OUTSIDE the invalidated closure
+/// below — a
 /// respec rewrites the SPEC, not the BEAD, and re-grading an unchanged bead every
 /// round would burn the very agents the lens exists to save.
 ///
@@ -239,30 +241,29 @@ $kSpecExemplarDesign
 /// so a bead that contradicts a ratified decision WITHOUT acknowledging the
 /// departure spawns NO architect and NO committee, and a clean bead reaches the
 /// architect with a curated dossier instead of a bare worktree. It is upstream of
-/// `specify` for the same reason the ladder is, and stays out of the rewind set.
+/// `specify` for the same reason the ladder is, and stays out of the
+/// invalidated closure.
 ///
 /// **`specify` is FOLDED IN as the route's SIBLING (bead `pow-ui8`)** — it was a
-/// step of the PARENT `code` circuit until the engine gained routing as a
-/// first-class primitive (`StepOutcome.Rewind`, the_grid `tg-o90`). A [Rewind]
-/// may only name steps of the rewinding node's OWN circuit, so the RESPEC arm can
-/// only re-key `specify` if `specify` lives HERE. The fold is what makes the
-/// auto-respec loop ACTUATE with no human and no session re-mint: the route
-/// rewinds, the engine re-keys the sub-DAG (`specify` ∪ its transitive dependents
-/// ∪ the route itself), keyed reconcile disposes the old incarnations, and the
-/// committee re-runs VIRGIN in the SAME worktree with the ledger's correction
-/// guidance in the next specify brief.
+/// step of the PARENT `code` circuit. A backward-motion edge may only name a
+/// step of the SOURCE's OWN circuit, so the RESPEC arm can only invalidate
+/// `specify` if `specify` lives HERE. The fold is what makes the auto-respec
+/// loop ACTUATE with no human and no session re-mint: the route declares
+/// `validates: specify` and stamps an `F`, the engine derives the invalidated
+/// closure (`specify` ∪ its transitive dependents ∪ the route itself) and mints
+/// a successor incarnation per node, keyed reconcile disposes the old
+/// incarnations, and the committee re-runs VIRGIN in the SAME worktree with the
+/// ledger's correction guidance in the next specify brief.
 ///
 /// EVERY lane is transitively downstream of `specify` (the hygiene step depends
-/// on it, and every lane depends on the hygiene step), so the rewind set is the
-/// whole circuit FROM `specify` DOWN — the readiness ladder above it is an
-/// ANCESTOR, not a dependent, and stays complete across a rewind wave (which is
-/// exactly why `specify`'s new dep is still satisfied when the wave re-keys it).
-/// That carries TWO invariants, not one: the route can never
-/// re-decide over a previous round's grades, and — because a [Rewind] does not
-/// re-key the bead id — a round's verdict files are made fresh by the VERDICT'S
-/// OWN ROUND STAMP (the node's `rewindCount`, A15(5) alt-A; see
-/// `committee.dart`), with [ClearCritiqueCapability]'s wipe as the belt behind
-/// it. `spec_committee_test.dart` fences both with the engine's own
+/// on it, and every lane depends on the hygiene step), so the invalidated
+/// closure is the whole circuit FROM `specify` DOWN — the readiness ladder above
+/// it is an ANCESTOR, not a dependent, and stays complete across the derived
+/// wave (which is exactly why `specify`'s new dep is still satisfied when the
+/// wave re-keys it). So the route can never re-decide over a previous round's
+/// grades, and a round's verdict files are made fresh by the successor re-key
+/// with [ClearCritiqueCapability]'s wipe as the belt behind it.
+/// `spec_committee_test.dart` fences the closure with the engine's own
 /// `transitiveDependents` predicate.
 ///
 /// No `pin-diff` here: the review subject is the bead's OWN spec (its
@@ -280,7 +281,7 @@ const Circuit kSpecReviewCircuit = Circuit(
     // of everything expensive. `intake` is deterministic (zero agents) and gates
     // a non-driveable / brief-less bead outright; `readiness` is ONE agent
     // grading the BEAD; `readiness-route` holds it or lets it drive. All three
-    // are UPSTREAM of `specify`, so they are NOT in the auto-respec rewind set.
+    // are UPSTREAM of `specify`, so they are NOT in the auto-respec closure.
     CapabilityStep(stepId: kIntakeStep, capabilityId: kIntakeStep),
     CapabilityStep(
       stepId: kReadinessStep,
@@ -299,8 +300,8 @@ const Circuit kSpecReviewCircuit = Circuit(
     // unacknowledged offender spawns NO architect; the engine's one-hop terminal
     // resolution resolves the dep to
     // `<bead>/spec_review/discovery/discovery-route`'s positive terminal.
-    // It is UPSTREAM of `specify` and therefore OUTSIDE the auto-respec rewind
-    // set: a respec rewrites the SPEC, not the bead, so re-running three
+    // It is UPSTREAM of `specify` and therefore OUTSIDE the auto-respec
+    // closure: a respec rewrites the SPEC, not the bead, so re-running three
     // explorers per round would burn the very agents this circuit exists to save
     // (the A17(9) posture).
     SubCircuitStep(
@@ -364,6 +365,15 @@ const Circuit kSpecReviewCircuit = Circuit(
         'critics': 'spec-validation,coherence,adr-alignment,'
             'acceptance-testability,plan-completeness',
         'gating': kSpecGatingRubric,
+        // The DECLARATIVE backward-motion edge. The route does not REPORT a
+        // rewind — the engine refuses a reported one outright. It stamps
+        // `grade: 'F'` on its own result and the engine DERIVES the wave off
+        // this edge: `specify` ∪ its transitive dependents ∪ this route are
+        // invalidated and re-mint as successor incarnations. The target MUST be
+        // a sibling of THIS circuit (which is why `specify` is folded in here);
+        // a dangling name mints no edge at all, so the committee suite fences
+        // that the named step exists.
+        kValidatesParamKey: kSpecifyStep,
       },
     ),
   ],

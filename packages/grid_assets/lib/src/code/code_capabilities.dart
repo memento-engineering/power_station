@@ -56,14 +56,15 @@ import 'specify.dart';
 /// is the architect-equivalent harness ride that writes the implementation-ready
 /// spec INTO the bead (acceptance / plan / touches / ADR alignment / validation
 /// plan, via the bd CLI); it is a STEP OF [kSpecReviewCircuit] (folded in by
-/// `pow-ui8` so the route can name it in a `StepOutcome.Rewind` — a rewind may
-/// only name siblings in the rewinding node's own circuit), not of this circuit.
+/// `pow-ui8` so the route can name it in a `validates` edge — such an edge may
+/// only name siblings in the source's own circuit), not of this circuit.
 /// `agent`'s `dependsOn: {'spec_review'}` resolves — through the engine's
 /// existing one-hop terminal resolution, no new machinery — to
 /// `<bead>/spec_review/route`'s positive terminal, so ONLY a spec that passes its
-/// committee proceeds to the build; a FIXABLE spec REWINDS the spec sub-DAG in
-/// place (no human, no gate bead), and only an ESCALATION parks the bead in the
-/// SAME `gated` state the code committee uses.
+/// committee proceeds to the build; a FIXABLE spec INVALIDATES the spec sub-DAG
+/// in place (no human, no gate bead) — the route itself is inside that closure,
+/// so the build's dep stays unresolved across the wave — and only an ESCALATION
+/// parks the bead in the SAME `gated` state the code committee uses.
 ///
 /// NOTE (bead `pow-3p4`): the fold MOVED the persisted cursor key
 /// `<bead>/specify` → `<bead>/spec_review/specify`, so a session minted under
