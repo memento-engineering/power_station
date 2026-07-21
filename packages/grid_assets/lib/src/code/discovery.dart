@@ -54,11 +54,13 @@
 ///    FLAG in the ask, never a hold.
 ///
 /// **The fail directions.** A lens that produces no parseable report is a broken
-/// LANE, not a verdict: the route [Rewind]s that lens ONCE ([kMaxRegatherRounds])
-/// and, at the cap, ADVANCES with the miss recorded LOUDLY in the dossier. It
-/// never gates on absence (a gate with no cited offence is exactly what this
-/// circuit forbids) and it never wedges the governance track (ADR-0000 A17(3): a
-/// false HOLD is strictly worse than a wasted specify round).
+/// LANE, not a verdict: the route STAMPS an invalidating `grade: 'F'` and, via
+/// the `validates: `[kAnchorsStep] edge it declares, the engine re-runs the whole
+/// gather sub-DAG VIRGIN — ONCE ([kMaxRegatherRounds]) — and, at the cap, ADVANCES
+/// with the miss recorded LOUDLY in the dossier. It never gates on absence (a gate
+/// with no cited offence is exactly what this circuit forbids) and it never wedges
+/// the governance track (ADR-0000 A17(3): a false HOLD is strictly worse than a
+/// wasted specify round).
 ///
 /// **Layering note (do not "fix" into a cycle).** This library imports NOTHING
 /// from `specify.dart`: `specify.dart` imports THIS one (for the dossier its
@@ -91,6 +93,7 @@ import '../agent/usage_report.dart';
 import '../search/station_search.dart';
 import 'committee.dart';
 import 'readiness.dart';
+import 'respec.dart';
 import 'route_failure.dart';
 
 /// The discovery circuit's registry id — and the [SubCircuitStep] id that
@@ -153,6 +156,16 @@ String anchorsPath(String workspaceDir) =>
 /// the reader, the `respecLedgerPath` precedent).
 String discoveryDossierPath(String workspaceDir) =>
     p.join(discoveryDirPath(workspaceDir), 'dossier.json');
+
+/// The REGATHER round ledger under [workspaceDir] — the durable round counter
+/// [DiscoveryRouteCapability] reads back to apply [kMaxRegatherRounds].
+/// Deliberately a SIBLING of `.grid/discovery/` (which [AnchorsCapability] WIPES
+/// virgin at the head of every round), so it OUTLIVES that wipe: the full
+/// regather wave re-runs `anchors`, which would clobber any counter kept inside
+/// the gather dir and restart the bound at 0 forever. The `respecLedgerPath`
+/// precedent — derived identically by the writer and the reader.
+String discoveryRegatherLedgerPath(String workspaceDir) =>
+    p.join(workspaceDir, '.grid', 'discovery-regather.json');
 
 /// What KIND of standard a violation cites. Sealed by the enum — consumed with an
 /// exhaustive `switch` (house style), so a new kind cannot skip the gate matrix.
@@ -1044,6 +1057,63 @@ void _writeJson(String path, Map<String, Object?> json) =>
       ..createSync(recursive: true)
       ..writeAsStringSync(jsonEncode(json));
 
+/// The REGATHER round LEDGER — just the round number, written into the bead's
+/// worktree by [DiscoveryRouteCapability] on a [DiscoveryRegather] and read back
+/// on the NEXT round to apply the [kMaxRegatherRounds] bound. Unlike the respec
+/// ledger it carries NO guidance: a re-gather re-runs the gather VIRGIN, so there
+/// is nothing to correct.
+class DiscoveryRegatherLedger {
+  /// Creates a ledger for [round].
+  const DiscoveryRegatherLedger({required this.round});
+
+  /// The regather round this ledger opens (1-based; capped at
+  /// [kMaxRegatherRounds]).
+  final int round;
+
+  /// The wire shape (hand-rolled — this pack carries no `json_serializable`).
+  Map<String, Object?> toJson() => {'version': 1, 'round': round};
+
+  /// Decodes a ledger; null for anything unreadable (no round, bad JSON) — the
+  /// caller then treats it as "no prior round".
+  static DiscoveryRegatherLedger? fromJson(Object? json) {
+    if (json is! Map) return null;
+    final round = json['round'];
+    if (round is! int || round < 1) return null;
+    return DiscoveryRegatherLedger(round: round);
+  }
+}
+
+/// The regather ledger at [workspaceDir], or null when there is none / it is
+/// unreadable. Best-effort: a corrupt ledger degrades to "no prior round" (the
+/// counter restarts) — it can never throw into a route.
+DiscoveryRegatherLedger? readDiscoveryRegatherLedger(String workspaceDir) =>
+    _readJson(
+      discoveryRegatherLedgerPath(workspaceDir),
+      DiscoveryRegatherLedger.fromJson,
+    );
+
+/// Writes [ledger] into [workspaceDir]. THROWS on a write that cannot land — the
+/// caller ([DiscoveryRouteCapability]) turns that into a LOUD [RouteFailure]: a
+/// regather whose round counter never advances would re-run the gather sub-DAG
+/// unbounded until the engine's belt fires (guards LOUD or GONE).
+void writeDiscoveryRegatherLedger(
+  String workspaceDir,
+  DiscoveryRegatherLedger ledger,
+) => _writeJson(discoveryRegatherLedgerPath(workspaceDir), ledger.toJson());
+
+/// Deletes the regather ledger at [workspaceDir] — called on a [DiscoveryAdvance]
+/// so a LATER rework round can never re-inject a stale round count into a fresh
+/// gather. Best-effort: a delete that fails never gates an otherwise-clean
+/// advance.
+void clearDiscoveryRegatherLedger(String workspaceDir) {
+  try {
+    final file = File(discoveryRegatherLedgerPath(workspaceDir));
+    if (file.existsSync()) file.deleteSync();
+  } catch (_) {
+    // Hygiene only — a stale ledger is re-overwritten by the next regather anyway.
+  }
+}
+
 /// TIER 1 of the discovery circuit — the DETERMINISTIC gather (ZERO agents).
 ///
 /// It pulls what a machine can be RIGHT about, so no agent spends a token
@@ -1504,23 +1574,35 @@ typedef LensReportReader =
 /// The DISCOVERY decision point (ZERO agents) — the circuit's terminal.
 ///
 /// It reads its sibling lenses' REPORTS (through the injected [LensReportReader])
-/// and its OWN cursor (through the ambient [SiblingView] — the effect verb, never
-/// a re-query), applies the pure [decideDiscovery] matrix, and:
+/// and its round count off the durable regather LEDGER, applies the pure
+/// [decideDiscovery] matrix, and:
 ///
 ///  - [DiscoveryHold] ⇒ [Escalate] — the CITED refinement ask. `specify`
 ///    dependsOn this circuit's terminal, so the hold WITHHOLDS the architect
 ///    entirely (the A9 [PinDiffCapability] posture: the whole value of this gate
 ///    IS the agent it prevents).
-///  - [DiscoveryRegather] ⇒ [Rewind] naming the silent LENS siblings — the engine
-///    re-keys them (and this route) back to `pending`, so they re-run VIRGIN in
-///    the SAME session. No human, no gate bead, no session re-mint.
+///  - [DiscoveryRegather] ⇒ an [Advance] carrying the INVALIDATING stamp
+///    `grade: 'F'` on this route's OWN result. This step declares
+///    `validates: `[kAnchorsStep], so the engine DERIVES the wave off that edge
+///    the moment the stamp lands on a positively-terminal source: `anchors` ∪
+///    everything downstream of it (all three lenses + this route) re-run VIRGIN in
+///    the SAME session. No human, no gate bead, no session re-mint. The regather
+///    round ledger is WRITTEN first; a write that cannot land throws a
+///    [RouteFailure] — LOUD, never a regather whose bound silently never advances.
 ///  - [DiscoveryAdvance] ⇒ the dossier is WRITTEN, then [Advance]. A dossier write
 ///    that cannot land throws a [RouteFailure] — LOUD: the architect would get NO
 ///    context and this whole circuit would have run for nothing (guards LOUD or
 ///    GONE).
 ///
+/// The re-run is the WHOLE gather sub-DAG, not the silent lens alone: this
+/// circuit's own round-freshness guarantee already routes every round through the
+/// [AnchorsCapability] wipe + gather, so a full-regather round IS its designed
+/// semantics — one declared edge over three synthetic checker steps.
+///
 /// Offline/dry-run posture: a workspace that does not exist on disk skips the
-/// dossier WRITE (the `SpecRouteCapability` posture). The verdict is unchanged.
+/// ledger and dossier WRITES (the `SpecRouteCapability` posture). The verdict is
+/// unchanged; the asset's own round counter cannot advance there (it IS the
+/// ledger), so the bound falls back to the engine's derived belt.
 class DiscoveryRouteCapability extends RouteCapability {
   /// Creates the route over its report reader (null ⇒ the real [readLensReport]).
   const DiscoveryRouteCapability({LensReportReader? reader}) : _reader = reader;
@@ -1531,9 +1613,6 @@ class DiscoveryRouteCapability extends RouteCapability {
   Future<RouteVerdict> route(TreeContext context, StepArgs args) async {
     // Read the ambient values at ENTRY (while mounted); the matrix is pure over
     // the captured values.
-    final siblings =
-        context.getInheritedSeedOfExactType<SiblingView>() ??
-        const SiblingView();
     final workspace = context.getInheritedSeedOfExactType<Workspace>();
     final parent = parentPath(args.nodePath);
     final lenses = (args.params['lenses'] ?? '')
@@ -1549,11 +1628,15 @@ class DiscoveryRouteCapability extends RouteCapability {
       for (final lens in lenses) lens: read(dir, lens, '$parent/$lens'),
     };
 
-    // The ROUND COUNT is THIS node's own `rewindCount` (the `pow-ui8` idiom) —
-    // the engine bumps it on every rewind wave that re-keys this route, and a
-    // [Rewind] does not re-mint the session, so the cursor survives the round.
-    // ZERO I/O: the bound holds even in the offline posture.
-    final priorRound = siblings.cursorOf(args.nodePath).rewindCount;
+    // The ROUND COUNT is the durable REGATHER LEDGER's own `round` — NOT this
+    // node's `rewindCount`. Under the validates-edge derivation the engine
+    // re-keys this route into a SUCCESSOR incarnation whose `rewindCount`
+    // projects 0 forever, so a cap read off the cursor could never fire. The
+    // ledger is a SIBLING of `.grid/discovery/` (which `AnchorsCapability` WIPES
+    // every round) so it OUTLIVES the wipe. Offline there is no ledger and this
+    // reads 0; the bound is then the ENGINE's derived belt, graph structure that
+    // needs no asset I/O.
+    final priorRound = live ? (readDiscoveryRegatherLedger(dir)?.round ?? 0) : 0;
 
     switch (decideDiscovery(
       lanes: lanes,
@@ -1564,9 +1647,41 @@ class DiscoveryRouteCapability extends RouteCapability {
       case DiscoveryHold(:final reason):
         return Escalate(reason);
       case DiscoveryRegather(lenses: final silent, :final reason):
-        return Rewind(silent, reason);
+        final round = priorRound + 1;
+        if (live) {
+          try {
+            writeDiscoveryRegatherLedger(
+              dir,
+              DiscoveryRegatherLedger(round: round),
+            );
+          } catch (e) {
+            throw RouteFailure(
+              'discovery-route: could not write the regather round ledger at '
+              '${discoveryRegatherLedgerPath(dir)} — $e. Refusing to regather '
+              'blind (the round counter would never advance and the gather '
+              'sub-DAG would re-run unbounded until the engine belt fires).',
+            );
+          }
+        }
+        // The route COMPLETES and STAMPS the INVALIDATING verdict on its OWN
+        // result. It reports NO backward motion: this step declares
+        // `validates: anchors`, so the engine derives the wave off that edge the
+        // moment this `grade: 'F'` lands on a positively-terminal source —
+        // `anchors` ∪ its transitive dependents (all three lenses + this route) ∪
+        // the source re-run VIRGIN, one round through the anchors wipe + gather.
+        // The ADVANCE arm below carries NO `grade` key, so a passing round
+        // invalidates nothing.
+        return Advance({
+          'verdict': 'regather',
+          'grade': 'F',
+          'rule': 'regather',
+          'round': '$round',
+          'lenses': silent.join(','),
+          'rationale': reason,
+        });
       case DiscoveryAdvance(:final dossier):
         if (live) {
+          clearDiscoveryRegatherLedger(dir);
           try {
             _writeJson(discoveryDossierPath(dir), dossier.toJson());
           } catch (e) {
@@ -1634,7 +1749,10 @@ const Circuit kDiscoveryCircuit = Circuit(
       stepId: kDiscoveryRouteStep,
       capabilityId: kDiscoveryRouteStep,
       dependsOn: {kCodeLens, kDecisionLens, kPriorArtLens},
-      params: {'lenses': '$kCodeLens,$kDecisionLens,$kPriorArtLens'},
+      params: {
+        'lenses': '$kCodeLens,$kDecisionLens,$kPriorArtLens',
+        kValidatesParamKey: kAnchorsStep,
+      },
     ),
   ],
 );

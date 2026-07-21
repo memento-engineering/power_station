@@ -70,6 +70,25 @@ Future<RouteVerdict> _runRoute(Map<String, LensReport?> canned) =>
       ),
     );
 
+/// The same route, over a workspace dir that EXISTS on disk — the live posture,
+/// where the round ledger and the dossier actually land.
+Future<RouteVerdict> _runRouteAt(
+  Map<String, LensReport?> canned, {
+  required String workspaceDir,
+}) => DiscoveryRouteCapability(reader: _reader(canned)).route(
+  FakeTreeContext(
+    values: {
+      Bead: workBead('tg-1'),
+      Workspace: testWorkspace('tg-1', workspaceDir: workspaceDir),
+      SiblingView: const SiblingView(),
+    },
+  ),
+  stepArgs(
+    'tg-1/spec_review/discovery/$kDiscoveryRouteStep',
+    params: {'lenses': kDiscoveryLenses.join(',')},
+  ),
+);
+
 void main() {
   group('the CITE-THE-OFFENCE gate (a vibe can never hold a bead)', () {
     test('a CITED, unacknowledged contradiction of a decision HOLDS', () {
@@ -234,16 +253,23 @@ void main() {
   });
 
   group('the route (a broken LANE is never a verdict)', () {
-    test('a MISSING report re-gathers that lens ONCE — a Rewind, not a gate',
-        () async {
-      final outcome = await _runRoute({
-        kCodeLens: _report(lens: kCodeLens),
-        kDecisionLens: null,
-        kPriorArtLens: _report(lens: kPriorArtLens),
-      });
-      expect(outcome, isA<Rewind>());
-      expect((outcome as Rewind).stepIds, {kDecisionLens});
-    });
+    test(
+      'a MISSING report STAMPS an invalidating grade:F (verdict regather) — NOT '
+      'a Rewind; the engine derives the wave off the validates edge',
+      () async {
+        final outcome = await _runRoute({
+          kCodeLens: _report(lens: kCodeLens),
+          kDecisionLens: null,
+          kPriorArtLens: _report(lens: kPriorArtLens),
+        });
+        expect(outcome, isA<Advance>());
+        final payload = (outcome as Advance).payload!;
+        expect(payload['grade'], 'F');
+        expect(payload['verdict'], 'regather');
+        expect(payload['lenses'], kDecisionLens);
+        expect(payload['round'], '1');
+      },
+    );
 
     test(
       'at the cap, a still-missing lens ADVANCES with the miss recorded LOUDLY '
@@ -425,9 +451,10 @@ void main() {
           expect(source.contains(client), isFalse, reason: 'no bd client here');
         }
         // 3. It has exactly ONE writer (`_writeJson`), and every path handed to
-        //    it (`anchorsPath` / `lensReportPath` / `discoveryDossierPath`)
-        //    derives from `discoveryDirPath`: the circuit's whole write surface
-        //    is its own `.grid/discovery/` dir.
+        //    it (`anchorsPath` / `lensReportPath` / `discoveryDossierPath`, plus
+        //    the round ledger that must OUTLIVE the gather-dir wipe) is one of
+        //    this circuit's own derived paths under `.grid/`: its whole write
+        //    surface is its own artifacts.
         expect(RegExp('writeAsStringSync').allMatches(source), hasLength(1));
       },
     );
@@ -449,6 +476,89 @@ void main() {
         expect(prompt, isNot(contains('amendments BIND too')));
       },
     );
+  });
+
+  group('the route STAMPS the invalidating grade (no Rewind is emitted)', () {
+    late Directory ws;
+    setUp(() => ws = Directory.systemTemp.createTempSync('discovery-regather'));
+    tearDown(() => ws.deleteSync(recursive: true));
+
+    test('the clean arm ADVANCES with NO grade key + writes the dossier',
+        () async {
+      final outcome = await _runRouteAt({
+        for (final lens in kDiscoveryLenses) lens: _report(lens: lens),
+      }, workspaceDir: ws.path);
+      expect(outcome, isA<Advance>());
+      final payload = (outcome as Advance).payload!;
+      expect(payload['verdict'], 'advance');
+      expect(
+        payload.containsKey('grade'),
+        isFalse,
+        reason: 'a PASSING round must invalidate nothing',
+      );
+      expect(File(discoveryDossierPath(ws.path)).existsSync(), isTrue);
+    });
+
+    test('the hold arm ESCALATES — a human park, never a stamp', () async {
+      final outcome = await _runRouteAt({
+        for (final lens in kDiscoveryLenses)
+          lens: _report(
+            lens: lens,
+            violations: lens == kDecisionLens ? [_cited()] : const [],
+          ),
+      }, workspaceDir: ws.path);
+      expect(outcome, isA<Escalate>());
+      expect(outcome, isNot(isA<Advance>()));
+    });
+
+    test(
+      'the round counter is the REGATHER LEDGER own round — bounded at '
+      'kMaxRegatherRounds, then ADVANCES with the miss noted and clears it',
+      () async {
+        final canned = <String, LensReport?>{
+          kCodeLens: _report(lens: kCodeLens),
+          kDecisionLens: null,
+          kPriorArtLens: _report(lens: kPriorArtLens),
+        };
+        final r1 = await _runRouteAt(canned, workspaceDir: ws.path);
+        expect((r1 as Advance).payload!['grade'], 'F');
+        expect(readDiscoveryRegatherLedger(ws.path)!.round, 1);
+
+        final r2 = await _runRouteAt(canned, workspaceDir: ws.path);
+        expect(r2, isA<Advance>());
+        expect((r2 as Advance).payload!.containsKey('grade'), isFalse);
+        expect(r2.payload!['missing'], kDecisionLens);
+        expect(readDiscoveryRegatherLedger(ws.path), isNull);
+        expect(kMaxRegatherRounds, lessThan(kMaxReworkRounds));
+      },
+    );
+
+    test(
+      'kDiscoveryCircuit route step declares validates:anchors — a dangling '
+      'target silently disarms the loop (one-definition discipline)',
+      () {
+        expect(
+          (kDiscoveryCircuit.stepById(kDiscoveryRouteStep)! as CapabilityStep)
+              .params[kValidatesParamKey],
+          kAnchorsStep,
+        );
+        expect(kValidatesParamKey, 'validates');
+        expect(
+          kDiscoveryCircuit.steps.map((s) => s.stepId),
+          contains(kAnchorsStep),
+        );
+      },
+    );
+
+    test('the regather ledger OUTLIVES the anchors wipe (sibling of the dir)',
+        () {
+      expect(
+        p.isWithin(discoveryDirPath('/w'), discoveryRegatherLedgerPath('/w')),
+        isFalse,
+        reason: 'AnchorsCapability WIPES the gather dir at the head of every '
+            'round — a counter kept inside it restarts the bound at 0 forever',
+      );
+    });
   });
 }
 
