@@ -110,19 +110,27 @@ class EnvironmentRegistry {
             'is not armed (armed: ${_armedList()}) — arm "${entry.value}" in '
             'the environment registry, or point the role at an armed environment';
       }
-      // The claude-native tier defaults (opus/sonnet/haiku) are claude's: a
-      // model-less environment falls through to them, and any argv but claude's
-      // 400s on those names (bead `pow-a9o`: `codex --model opus` under a
-      // ChatGPT account). Guard LOUD or GONE (ADR-0000 A8) — a NAMED invariant,
-      // refused at boot, never at 400-per-spawn.
-      if (env.model == null && env.command != kTierDefaultCommand) {
+      // A claude-native tier default (opus/sonnet/haiku) is CLAUDE's model
+      // name; it 400s in any other tool's argv (`codex --model opus` is
+      // rejected on a ChatGPT account). An environment that PINS such a name
+      // yet does not spawn claude is a cross-environment composition error —
+      // refuse LOUD at boot (ADR-0000 A8), never at 400-per-spawn. A model-less
+      // non-claude env is NOT refused: it resolved to spawn before this guard
+      // and still does (copilot/opencode/pi stay armable). The codex pin's own
+      // regression to null is fenced by its builtin golden test, since at boot
+      // a model-less env cannot be told apart from a grandfathered one.
+      final crossing = env.model;
+      if (crossing != null &&
+          kClaudeNativeDefaults.contains(crossing) &&
+          env.command != kTierDefaultCommand) {
         return 'role "${entry.key}" names environment "${entry.value}" '
-            '(command "${env.command}") but it pins no model, so it would spawn '
-            'the claude-native tier defaults '
-            '(${kClaudeNativeDefaults.join('/')}) — illegal in a non-claude argv '
-            '(a "${env.command} --model opus" 400s). Pin a native model on '
-            '"${entry.value}" (its AgentEnvironment.model), or arm the role at an '
-            'environment that does.';
+            '(command "${env.command}") but pins the claude-native model '
+            '"$crossing" — a claude tier default '
+            '(${kClaudeNativeDefaults.join('/')}) 400s in a non-claude argv '
+            '(a "${env.command} --model $crossing" is rejected). Pin a model '
+            'native to "${env.command}" on "${entry.value}" '
+            '(its AgentEnvironment.model), or arm the role at the claude '
+            'environment.';
       }
     }
     return siteBinding.validate(resolved);

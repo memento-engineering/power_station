@@ -67,9 +67,15 @@ void main() {
   });
 
   group('pow-a9o — the boot-eager cross-environment guard', () {
-    test('a model-less non-claude env armed to a role is REFUSED LOUD', () {
+    test('a non-claude env pinning a claude-native model is REFUSED LOUD', () {
       const registry = EnvironmentRegistry(
-        custom: {'rogue': AgentEnvironment(command: 'codex', args: ['exec'])},
+        custom: {
+          'rogue': AgentEnvironment(
+            command: 'codex',
+            args: ['exec'],
+            model: 'opus', // a claude-tier name crossing into a codex argv
+          ),
+        },
       );
       final refusal = registry.validate(roleEnvironments: {'build': 'rogue'});
       expect(
@@ -78,15 +84,47 @@ void main() {
           contains('role "build"'),
           contains('"rogue"'),
           contains('codex'),
-          contains('pins no model'),
+          contains('opus'),
+          contains('claude-native'),
         ),
       );
     });
 
+    test('a model-less copilot builtin armed to a role PASSES', () {
+      final registry = EnvironmentRegistry(
+        custom: {'copilot': kBuiltinEnvironments['copilot']!},
+      );
+      expect(registry.validate(roleEnvironments: {'build': 'copilot'}), isNull);
+    });
+
+    test('a model-less opencode builtin armed to a role PASSES', () {
+      final registry = EnvironmentRegistry(
+        custom: {'opencode': kBuiltinEnvironments['opencode']!},
+      );
+      expect(registry.validate(roleEnvironments: {'build': 'opencode'}), isNull);
+    });
+
+    test('a model-less pi builtin (endpoint bound) armed to a role PASSES', () {
+      // pi is openAiCompatible, so it needs a bound endpoint; the MODEL guard
+      // never fires on it (model-less non-claude is grandfathered). Bind the
+      // endpoint so the whole boot validates clean.
+      final registry = EnvironmentRegistry(
+        custom: {'pi': kBuiltinEnvironments['pi']!},
+      );
+      final binding = SiteBinding({'pi': Uri.parse('http://localhost:8080')});
+      expect(
+        registry.validate(
+          roleEnvironments: {'build': 'pi'},
+          siteBinding: binding,
+        ),
+        isNull,
+      );
+    });
+
     test('the pinned codex builtin armed to a role PASSES', () {
-      // Just the codex builtin, so the guard is exercised in isolation (the full
-      // builtin registry drags in `pi`, whose unbound endpoint trips a separate
-      // site-binding check unrelated to this guard).
+      // Isolated so only the guard is exercised (the full builtin registry
+      // drags in `pi`, whose unbound endpoint trips a separate site-binding
+      // check unrelated to this guard).
       final registry = EnvironmentRegistry(
         custom: {'codex': kBuiltinEnvironments['codex']!},
       );
