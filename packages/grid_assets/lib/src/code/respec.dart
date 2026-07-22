@@ -216,10 +216,12 @@ void writeRespecLedger(String workspaceDir, RespecLedger ledger) =>
       ..createSync(recursive: true)
       ..writeAsStringSync(jsonEncode(ledger.toJson()));
 
-/// Deletes the ledger at [workspaceDir] — called on an ADVANCE so a LATER rework
-/// round (a code-committee gate, say) can never re-inject a stale spec
-/// correction into a fresh specify brief. Best-effort: a delete that fails never
-/// gates an otherwise-passing spec.
+/// Deletes the ledger at [workspaceDir] — called on EVERY terminal verdict that
+/// hands the bead on: an ADVANCE (the spec is ready) and an ESCALATE (a human now
+/// rules). Both exits SPEND the counter, so a LATER rework round can never
+/// re-inject a stale spec correction into a fresh specify brief, and a re-armed
+/// route after a gate resolve can never re-flare off a consumed round.
+/// Best-effort: a delete that fails never gates an otherwise-passing spec.
 void clearRespecLedger(String workspaceDir) {
   try {
     final file = File(respecLedgerPath(workspaceDir));
@@ -293,13 +295,21 @@ typedef SpecLane = ({String id, String? grade, String rationale});
 ///     verdict-transport miss whose fail-closed `F` carries no usable rationale.
 ///     Neither is respec-fixable.
 ///  3. the FIXABLE set = every non-gating lane at `D` or `E`. Empty ⇒
-///     [SpecAdvance].
+///     [SpecAdvance] — INCLUDING when [priorRound] has already reached
+///     [maxRounds]. A CONVERGED join advances no matter how many rounds were
+///     consumed: the cap bounds the LOOP, it never condemns the spec (bead
+///     `pow-p8w`).
 ///  4. a fixable lane with an EMPTY rationale ⇒ [SpecEscalate] (`no-rationale`)
 ///     — there is nothing to feed the re-specify agent, and a respec that re-runs
 ///     `specify` with no guidance would re-write the same spec and re-park. LOUD.
-///  5. [priorRound] already at [maxRounds] ⇒ [SpecEscalate] (`respec-cap`) — the
-///     bound. No infinite respec loop.
-///  6. else ⇒ [SpecRespec] for round `priorRound + 1`.
+///  5. a fixable join UNDER the bound ([priorRound] `<` [maxRounds]) ⇒
+///     [SpecRespec] for round `priorRound + 1`.
+///  6. else — a join that is fixable RIGHT NOW, at the bound ⇒ [SpecEscalate]
+///     (`respec-cap`). This arm is the FALL-THROUGH of arm 5, so the cap is the
+///     conjunction "the rounds are spent AND the CURRENT join still fails" by
+///     STRUCTURE rather than by a second read, and its reason quotes the same
+///     fresh vector the matrix just decided on — never a ledger-recorded last
+///     failure. (`decideDiscovery`'s regather arm carries the identical shape.)
 ///
 /// **The spread rule is GONE from the spec route** (it survives untouched in the
 /// code committee's [CodeRouteCapability]). A spread ≥ 3 across A..F necessarily
@@ -318,6 +328,12 @@ SpecRouteVerdict decideSpecRoute({
       (lane.grade == null || lane.grade!.trim().isEmpty)
       ? 'F'
       : lane.grade!.trim().toUpperCase();
+
+  // The FRESH grade vector — the ONE verdict source this matrix decides on, in
+  // `critics` order. Every arm that REPORTS a grade quotes this binding, so a
+  // flare can never cite a grade the decision did not read (bead `pow-p8w`: the
+  // cap flare and the respec decision must share one channel).
+  final gradesCsv = lanes.map((l) => '${l.id}=${gradeOf(l)}').join(',');
 
   // 1. the deterministic structural lane — a hard block (fail-closed on missing).
   final gate = lanes.where((l) => l.id == gating);
@@ -369,10 +385,7 @@ SpecRouteVerdict decideSpecRoute({
         ? 0
         : indices.reduce((a, b) => a > b ? a : b) -
               indices.reduce((a, b) => a < b ? a : b);
-    return SpecAdvance(
-      gradesCsv: lanes.map((l) => '${l.id}=${gradeOf(l)}').join(','),
-      spread: spread,
-    );
+    return SpecAdvance(gradesCsv: gradesCsv, spread: spread);
   }
 
   // 4. a fixable grade with NO rationale — nothing to correct against. LOUD.
@@ -391,31 +404,38 @@ SpecRouteVerdict decideSpecRoute({
     );
   }
 
-  // 5. the BOUND — auto-respec is capped; beyond it a human rules.
-  if (priorRound >= maxRounds) {
-    return SpecEscalate(
-      rule: 'respec-cap',
-      reason:
-          'respec-cap: $priorRound auto-respec round(s) already ran (cap '
-          '$maxRounds) and the spec still fails '
-          '(${fixable.map((l) => '${l.id}=${gradeOf(l)}').join(', ')}). Flaring '
-          'to a human — the committee and the specify agent are not converging.',
+  // 5. RESPEC — a fixable join UNDER the bound auto-loops with the failing
+  //    lanes' rationales as the correction guidance.
+  if (priorRound < maxRounds) {
+    return SpecRespec(
+      RespecLedger(
+        round: priorRound + 1,
+        lanes: [
+          for (final l in fixable)
+            RespecLane(
+              rubric: l.id,
+              grade: gradeOf(l),
+              rationale: l.rationale.trim(),
+            ),
+        ],
+      ),
     );
   }
 
-  // 6. RESPEC — auto-loop with the failing lanes' rationales as the guidance.
-  return SpecRespec(
-    RespecLedger(
-      round: priorRound + 1,
-      lanes: [
-        for (final l in fixable)
-          RespecLane(
-            rubric: l.id,
-            grade: gradeOf(l),
-            rationale: l.rationale.trim(),
-          ),
-      ],
-    ),
+  // 6. the BOUND — reachable ONLY as arm 5's fall-through, i.e. over a join that
+  //    is fixable RIGHT NOW (arm 3 already advanced a converged one). So the cap
+  //    IS "rounds spent AND the current join still fails", and the reason quotes
+  //    `fixable` plus the whole fresh `gradesCsv` the matrix decided on — a human
+  //    reading the parked gate can check the cited grade against the critique on
+  //    disk without trusting a second channel.
+  return SpecEscalate(
+    rule: 'respec-cap',
+    reason:
+        'respec-cap: $priorRound auto-respec round(s) already ran (cap '
+        '$maxRounds) and the spec STILL fails '
+        '(${fixable.map((l) => '${l.id}=${gradeOf(l)}').join(', ')}) — the '
+        'current join is $gradesCsv. Flaring to a human: the committee and the '
+        'specify agent are not converging.',
   );
 }
 
@@ -499,7 +519,10 @@ String renderRespecGuidance(RespecLedger ledger) {
 ///    cannot land throws a [RouteFailure] — LOUD, never a respec whose guidance
 ///    silently never arrives.
 ///  - [SpecEscalate] ⇒ [Escalate] — the human flare (a structural F, a critic F,
-///    a rationale-less fail, or the round cap).
+///    a rationale-less fail, or the round cap) — and the guidance ledger is
+///    DELETED. The flare hands the bead to a human, so the AUTOMATIC counter is
+///    spent: a gate-resolve re-arm decides on the CURRENT join alone instead of
+///    re-reading the consumed round and re-flaring forever (bead `pow-p8w`).
 ///
 /// Offline/dry-run posture: an absent [Workspace], or a workspace directory that
 /// does not exist on disk (the synthetic `/grid/worktrees/...` an offline suite
@@ -589,6 +612,18 @@ class SpecRouteCapability extends RouteCapability {
           'rationale': respecStampReason(ledger),
         });
       case SpecEscalate(:final reason):
+        // The AUTO-loop is over — a human holds this bead now. The ledger IS the
+        // auto-respec round counter, so leaving it behind is what made the flare
+        // DETERMINISTIC (bead `pow-p8w`): D-7's gate-resolve re-arms this node,
+        // the re-armed route re-reads the same consumed `round`, and it re-gates
+        // in seconds no matter what the current grades say. SPENDING it makes the
+        // human's ruling the reset — the re-armed route decides on the CURRENT
+        // join alone: converged ⇒ advance, still failing ⇒ one more BOUNDED wave,
+        // under the engine's derived `kMaxReworkRounds` belt either way. It also
+        // closes the hole [clearRespecLedger] already names: an escalate PARKS a
+        // gate, and a governor's `grid rework` off that gate IS a "LATER rework
+        // round" that must not re-inject a spent correction into a fresh brief.
+        if (live) clearRespecLedger(dir);
         return Escalate(reason);
     }
   }
