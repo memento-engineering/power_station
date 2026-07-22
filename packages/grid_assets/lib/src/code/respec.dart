@@ -216,10 +216,12 @@ void writeRespecLedger(String workspaceDir, RespecLedger ledger) =>
       ..createSync(recursive: true)
       ..writeAsStringSync(jsonEncode(ledger.toJson()));
 
-/// Deletes the ledger at [workspaceDir] — called on an ADVANCE so a LATER rework
-/// round (a code-committee gate, say) can never re-inject a stale spec
-/// correction into a fresh specify brief. Best-effort: a delete that fails never
-/// gates an otherwise-passing spec.
+/// Deletes the ledger at [workspaceDir] — called on EVERY terminal verdict that
+/// hands the bead on: an ADVANCE (the spec is ready) and an ESCALATE (a human now
+/// rules). Both exits SPEND the counter, so a LATER rework round can never
+/// re-inject a stale spec correction into a fresh specify brief, and a re-armed
+/// route after a gate resolve can never re-flare off a consumed round.
+/// Best-effort: a delete that fails never gates an otherwise-passing spec.
 void clearRespecLedger(String workspaceDir) {
   try {
     final file = File(respecLedgerPath(workspaceDir));
@@ -517,7 +519,10 @@ String renderRespecGuidance(RespecLedger ledger) {
 ///    cannot land throws a [RouteFailure] — LOUD, never a respec whose guidance
 ///    silently never arrives.
 ///  - [SpecEscalate] ⇒ [Escalate] — the human flare (a structural F, a critic F,
-///    a rationale-less fail, or the round cap).
+///    a rationale-less fail, or the round cap) — and the guidance ledger is
+///    DELETED. The flare hands the bead to a human, so the AUTOMATIC counter is
+///    spent: a gate-resolve re-arm decides on the CURRENT join alone instead of
+///    re-reading the consumed round and re-flaring forever (bead `pow-p8w`).
 ///
 /// Offline/dry-run posture: an absent [Workspace], or a workspace directory that
 /// does not exist on disk (the synthetic `/grid/worktrees/...` an offline suite
@@ -607,6 +612,18 @@ class SpecRouteCapability extends RouteCapability {
           'rationale': respecStampReason(ledger),
         });
       case SpecEscalate(:final reason):
+        // The AUTO-loop is over — a human holds this bead now. The ledger IS the
+        // auto-respec round counter, so leaving it behind is what made the flare
+        // DETERMINISTIC (bead `pow-p8w`): D-7's gate-resolve re-arms this node,
+        // the re-armed route re-reads the same consumed `round`, and it re-gates
+        // in seconds no matter what the current grades say. SPENDING it makes the
+        // human's ruling the reset — the re-armed route decides on the CURRENT
+        // join alone: converged ⇒ advance, still failing ⇒ one more BOUNDED wave,
+        // under the engine's derived `kMaxReworkRounds` belt either way. It also
+        // closes the hole [clearRespecLedger] already names: an escalate PARKS a
+        // gate, and a governor's `grid rework` off that gate IS a "LATER rework
+        // round" that must not re-inject a spent correction into a fresh brief.
+        if (live) clearRespecLedger(dir);
         return Escalate(reason);
     }
   }
