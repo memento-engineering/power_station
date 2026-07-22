@@ -14,7 +14,8 @@
 // circuit's whole flat node universe, so a live mount always finds a staged
 // step bead for whatever it is about to reach); [ladderDoneSession] is the
 // cheap-head-complete convenience over it. [settle] is the shared bounded
-// pump helper the molecule mint's longer async chain needs.
+// wait helper; it grants REAL wall clock per round because the molecule
+// mint's pour crosses the filesystem below the fake runner seam.
 export 'package:grid_engine/testing.dart';
 
 import 'package:beads_dart/beads_dart.dart';
@@ -502,16 +503,37 @@ List<Bead> committeeSession({
   ];
 }
 
-/// Pumps the event queue until [condition] holds, or [maxPumps] pumps have run
-/// (default 20) — a molecule-mode mint (tg-eli phase 2) is a LONGER async
-/// chain than the retired flat model's single `bd create` (mint the session →
-/// stamp `grid.session.model` → a dedup export probe → pour the whole
-/// circuit's `type=step` beads via `create --graph`, each hop its own
-/// scheduled continuation), so a single `pumpEventQueue` — or a fixed small
-/// pump count — under-settles it. Bounded so a genuine regression still FAILS
-/// (its [condition] stays false) instead of hanging.
-Future<void> settle(bool Function() condition, {int maxPumps = 20}) async {
-  for (var i = 0; i < maxPumps && !condition(); i++) {
+/// Waits until [condition] holds, or [maxPumps] bounded rounds have run
+/// (default 20). Each round drains the Dart event queue AND, when the
+/// condition is still unsatisfied, sleeps a REAL [ioSlice] (default 1ms).
+///
+/// The real slice is the load-bearing half, not the pump (bead `pow-d26`). A
+/// molecule mint's POUR crosses the actual filesystem BELOW the fake
+/// `BdRunner` seam: `BdCliService.applyGraph` writes the graph-apply plan to a
+/// temp file (`Directory.systemTemp.createTemp` → `File.writeAsString` →
+/// `Directory.delete`) around the runner call, so a fake runner does not make
+/// the pour offline. `pumpEventQueue` advances event-loop TURNS and grants
+/// only microseconds of wall clock, so it can never wait out an OS completion
+/// — and to a plateau-based fixed-point wrapper an in-flight filesystem call
+/// looks exactly like quiescence. That is why raising the pump budget alone
+/// never fixed the ~25%-per-run acceptance wedge, and why this helper now
+/// yields real time instead.
+///
+/// [condition] is evaluated EXACTLY ONCE per round (and once more, first, on
+/// entry — a satisfied condition costs one check and no sleep), which is what
+/// the private `_settle` fixed-point wrappers in the acceptance suites count
+/// their `stableRounds` plateau in.
+///
+/// Still bounded, so a genuine regression FAILS (its [condition] stays false
+/// through [maxPumps] rounds) instead of hanging.
+Future<void> settle(
+  bool Function() condition, {
+  int maxPumps = 20,
+  Duration ioSlice = const Duration(milliseconds: 1),
+}) async {
+  for (var i = 0; i < maxPumps; i++) {
+    if (condition()) return;
     await pumpEventQueue();
+    await Future<void>.delayed(ioSlice);
   }
 }
