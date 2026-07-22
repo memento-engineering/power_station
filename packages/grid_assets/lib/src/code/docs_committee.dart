@@ -32,10 +32,14 @@
 library;
 
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:beads_dart/beads_dart.dart';
+import 'package:genesis_tree/genesis_tree.dart';
+import 'package:grid_engine/grid_engine.dart';
 import 'package:path/path.dart' as p;
 
+import 'committee.dart';
 import 'specify.dart';
 
 /// The lane whose every CITED file path must resolve in the tree.
@@ -342,4 +346,103 @@ List<String> sectionFindings({
     }
   }
   return findings;
+}
+
+/// One deterministic docs lane, selected by `params['rubric']` — the same
+/// one-capability-many-lanes shape [CriticCapability] uses, and the same
+/// runner-not-agent posture as `code-validation` / `spec-validation`
+/// (ADR-0000 A13(2)): it ALWAYS completes, with the grade in its [Ok] payload,
+/// leaving the route as the single decision point.
+///
+/// It reads the round's PINNED DIFF ([pinnedDiffPath], written by
+/// [PinDiffCapability], which every lane `dependsOn`) rather than shelling out
+/// to git again — one git call per round, one review scope for every lane.
+///
+/// Three fail-closed refusals, each LOUD and each naming what it refused:
+///  - no ambient [Bead]/[Workspace] ⇒ F;
+///  - no pinned diff on disk ⇒ F (the lane cannot see what it must grade);
+///  - a pinned diff touching a NON-docs path ⇒ F, naming the files — the docs
+///    committee was selected from the bead's DECLARED surface, and this is the
+///    verification of the REAL one. A mis-declared bead hard-blocks; it never
+///    gets code reviewed by a prose committee.
+class DocsCheckCapability extends ServiceCapability {
+  /// Creates the lane.
+  const DocsCheckCapability();
+
+  @override
+  Future<StepOutcome> run(TreeContext context, StepArgs args) async {
+    // Read the ambient values at ENTRY (while mounted); everything below is
+    // pure over the captured values plus the workspace's own files.
+    final rubric = args.params['rubric'] ?? '';
+    final bead = context.getInheritedSeedOfExactType<Bead>();
+    final workspace = context.getInheritedSeedOfExactType<Workspace>();
+    if (bead == null || workspace == null) {
+      return const Ok({
+        'grade': 'F',
+        'transport': 'structural',
+        'rationale': 'no ambient work Bead / Workspace to check — fail-closed',
+      });
+    }
+    final workspaceDir = workspace.workspaceDir;
+    final pinned = File(pinnedDiffPath(workspaceDir));
+    if (!pinned.existsSync()) {
+      return Ok({
+        'grade': 'F',
+        'transport': 'structural',
+        'rationale':
+            'no pinned diff at ${pinned.path} — the `$rubric` lane cannot see '
+            'the change it grades; fail-closed',
+      });
+    }
+    final diff = pinned.readAsStringSync();
+    final changed = changedFilesIn(diff);
+    final nonDocs = changed.where((path) => !isDocsPath(path)).toList()..sort();
+    if (nonDocs.isNotEmpty) {
+      return Ok({
+        'grade': 'F',
+        'transport': 'structural',
+        'rationale':
+            'the docs committee was selected but the pinned diff touches '
+            '${nonDocs.length} non-docs file(s): ${nonDocs.join(', ')} — a code '
+            'change belongs to the code committee',
+      });
+    }
+    final added = addedLinesByFile(diff);
+    final findings = switch (rubric) {
+      kCitationPathsRubric => citationFindings(
+        addedLines: added,
+        exists: (path) => _existsUnder(workspaceDir, path),
+      ),
+      kTerminologyBanRubric => terminologyFindings(added),
+      kSectionStructureRubric => sectionFindings(
+        docBodies: _readDocs(workspaceDir, changed),
+        requiredSections: requiredDocSections(bead),
+      ),
+      _ => ['unknown docs rubric "$rubric" — the lane is misconfigured'],
+    };
+    return findings.isEmpty
+        ? const Ok({'grade': 'A', 'transport': 'structural'})
+        : Ok({
+            'grade': 'F',
+            'transport': 'structural',
+            'rationale': findings.join('; '),
+          });
+  }
+
+  /// Whether [path] resolves under [root] as a file OR a directory.
+  static bool _existsUnder(String root, String path) {
+    final full = p.join(root, path);
+    return File(full).existsSync() || Directory(full).existsSync();
+  }
+
+  /// The on-disk body of each changed doc that still EXISTS (a deleted doc has
+  /// no sections to carry, so it is not held to them).
+  static Map<String, String> _readDocs(String root, Iterable<String> paths) {
+    final bodies = <String, String>{};
+    for (final path in paths) {
+      final file = File(p.join(root, path));
+      if (file.existsSync()) bodies[path] = file.readAsStringSync();
+    }
+    return bodies;
+  }
 }
