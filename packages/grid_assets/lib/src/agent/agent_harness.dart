@@ -379,7 +379,9 @@ Map<String, String> _targetEnv(InferenceTarget? target, Uri? endpoint) =>
 /// collapse, bead `pow-ebf.4`). Each is byte-identical in its emitted
 /// [RuntimeConfig] to the class it replaces; `codex` is the fifth, its argv +
 /// usage surface confirmed against `codex-cli 0.144.4`. `model` is `null` on every
-/// builtin (the ladder stamps it at spawn). The grid's own harness stays a parked
+/// builtin EXCEPT codex, which pins its native `gpt-5.6-sol` (bead `pow-a9o`:
+/// claude's tier defaults 400 on codex under ChatGPT auth); the ladder stamps
+/// the rest at spawn. The grid's own harness stays a parked
 /// epic — a sixth entry here, zero code.
 const Map<String, AgentEnvironment> kBuiltinEnvironments = {
   'claude': AgentEnvironment(
@@ -416,6 +418,7 @@ const Map<String, AgentEnvironment> kBuiltinEnvironments = {
     argsAppend: ['--dangerously-bypass-approvals-and-sandbox', '--skip-git-repo-check'],
     promptMode: PromptMode.arg,
     target: InferenceTarget.providerManaged,
+    model: 'gpt-5.6-sol',
     usageJsonArgs: ['--json'],
     resumeFlag: 'resume',
     resumeStyle: ResumeStyle.subcommand,
