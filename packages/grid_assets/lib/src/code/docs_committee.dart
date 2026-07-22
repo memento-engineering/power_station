@@ -205,3 +205,141 @@ Map<String, List<String>> addedLinesByFile(String diff) {
   }
   return added;
 }
+
+/// Findings for [kCitationPathsRubric]: every path an ADDED doc line cites must
+/// resolve — relative to the repo root, or to the citing doc's own directory (a
+/// markdown link is doc-relative). [exists] is the injected probe (tests pass a
+/// pure set membership — Fakes, not mocks).
+List<String> citationFindings({
+  required Map<String, List<String>> addedLines,
+  required bool Function(String repoRelativePath) exists,
+}) {
+  final findings = <String>[];
+  for (final entry in addedLines.entries) {
+    final docDir = p.posix.dirname(entry.key);
+    for (final cited in citedPaths(entry.value.join('\n'))) {
+      final docRelative = p.posix.normalize(p.posix.join(docDir, cited));
+      if (exists(cited) || exists(docRelative)) continue;
+      findings.add(
+        '${entry.key}: cited path `$cited` does not exist in the tree',
+      );
+    }
+  }
+  return findings;
+}
+
+/// [line] with every markdown QUOTATION / EMPHASIS span blanked to spaces of
+/// the SAME length (so match offsets stay honest), and a `>` blockquote line
+/// blanked whole. A quoted word is a MENTION — the org rule itself is written
+/// as `never "plugin"` in two shipped rubrics, and stating a ban must never
+/// trip it. A word used BARE in prose is a USE, and that is the offence.
+String maskQuotations(String line) {
+  if (line.trimLeft().startsWith('>')) return ' ' * line.length;
+  return line.replaceAllMapped(
+    _quotationSpan,
+    (match) => ' ' * match.group(0)!.length,
+  );
+}
+
+final RegExp _quotationSpan = RegExp(
+  r'`[^`]*`' // an inline code span
+  r'|"[^"]*"' // a double-quoted mention
+  r"|'[^']*'" // a single-quoted mention
+  r'|\*\*[^*]+\*\*' // bold
+  r'|\*[^*]+\*', // italic
+);
+
+final RegExp _bannedTerm = RegExp(r'\bplugins?\b', caseSensitive: false);
+
+/// A Capitalized token — optionally followed by up to two lowercase modifier
+/// words — sitting immediately before the banned term (`Flutter platform ` in
+/// `Flutter platform plugins`). Group 1 is the capitalized token itself.
+final RegExp _properNounLead = RegExp(
+  r'([A-Z][A-Za-z0-9_.+-]*)'
+  r'(?:[ \t]+[a-z][A-Za-z0-9_.+-]*){0,2}'
+  r'[ \t]+$',
+);
+
+/// The closed class of English words whose capital is GRAMMAR, not a name — a
+/// determiner or quantifier capitalized only because it opens a sentence.
+/// Without it the exemption would swallow `The plugin model is wrong.`, the
+/// most ordinary shape of the offence. A short, closed, LANGUAGE-level list —
+/// never a vendor list, which is exactly what this lane refuses to maintain.
+const Set<String> _grammaticalCapitals = {
+  'a', 'an', 'the', 'this', 'that', 'these', 'those', 'each', 'every', 'any',
+  'no', 'some', 'one', 'its', 'their', 'our', 'your', 'his', 'her', 'my', 'it',
+};
+
+/// Whether the text [before] the banned term ends in a third-party PROPER NOUN
+/// — the org rule's own carve-out ("reserved for third-party artifacts named
+/// that way by their own ecosystems", e.g. `Flutter platform plugins`). The
+/// CAPITAL is the signal, so no vendor list is maintained; a capital that is
+/// merely grammatical ([_grammaticalCapitals]) is not a name and never exempts.
+bool _hasProperNounLead(String before) {
+  final match = _properNounLead.firstMatch(before);
+  if (match == null) return false;
+  return !_grammaticalCapitals.contains(match.group(1)!.toLowerCase());
+}
+
+/// Findings for [kTerminologyBanRubric] over the ADDED doc lines.
+List<String> terminologyFindings(Map<String, List<String>> addedLines) {
+  final findings = <String>[];
+  for (final entry in addedLines.entries) {
+    for (final line in entry.value) {
+      final masked = maskQuotations(line);
+      for (final match in _bannedTerm.allMatches(masked)) {
+        if (_hasProperNounLead(masked.substring(0, match.start))) continue;
+        findings.add(
+          '${entry.key}: banned term "${match.group(0)}" used bare in prose — '
+          'the seam word is `extension`; the banned word is reserved for a '
+          'third-party artifact named that way by its own ecosystem '
+          '(`Flutter platform plugins`). Offending line: ${line.trim()}',
+        );
+      }
+    }
+  }
+  return findings;
+}
+
+/// Every markdown heading TEXT in [markdown], read from PROSE — a heading that
+/// exists only inside a fenced block is evidence, not a section (the same rule
+/// the spec gate holds, ADR-0000 A19).
+Set<String> headingsOf(String markdown) => {
+  for (final match in _headingLine.allMatches(proseOnly(markdown)))
+    match.group(1)!.trim(),
+};
+
+final RegExp _headingLine = RegExp(r'^#{1,6}[ \t]+(.+)$', multiLine: true);
+
+/// The sections the bead REQUIRES of the docs it changes — the CSV
+/// [kDocsSectionsKey] metadata. Absent or blank ⇒ no requirement, so this lane
+/// is vacuously A. That is deliberate: the ruling says "required sections
+/// present WHEN THE BEAD NAMES THEM", and a lane that invented its own
+/// requirement would gate on taste.
+List<String> requiredDocSections(Bead bead) {
+  final raw = bead.metadata[kDocsSectionsKey];
+  if (raw is! String) return const [];
+  return raw
+      .split(',')
+      .map((section) => section.replaceFirst(RegExp(r'^#+\s*'), '').trim())
+      .where((section) => section.isNotEmpty)
+      .toList();
+}
+
+/// Findings for [kSectionStructureRubric]: when [requiredSections] is non-empty,
+/// every changed doc in [docBodies] must carry each one as a heading.
+List<String> sectionFindings({
+  required Map<String, String> docBodies,
+  required List<String> requiredSections,
+}) {
+  if (requiredSections.isEmpty) return const [];
+  final findings = <String>[];
+  for (final entry in docBodies.entries) {
+    final headings = headingsOf(entry.value);
+    for (final section in requiredSections) {
+      if (headings.contains(section)) continue;
+      findings.add('${entry.key}: required section `$section` is missing');
+    }
+  }
+  return findings;
+}
