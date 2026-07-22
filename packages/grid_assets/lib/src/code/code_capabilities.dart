@@ -35,6 +35,7 @@ import 'committee.dart';
 import 'conventional_commit.dart';
 import 'delivery.dart';
 import 'discovery.dart';
+import 'docs_committee.dart';
 import 'landing.dart';
 import 'pr_composition.dart';
 import 'pr_describe.dart';
@@ -814,6 +815,11 @@ DefaultCapabilityRegistry buildCodeRegistry({
         inference: inference ?? const SystemInferenceRunner(),
       ),
       'critic': CriticCapability(rubrics: rubricSource),
+      // The DOCS committee's three deterministic lanes — ONE capability, three
+      // lanes selected by `params['rubric']`, mirroring `critic`. No rubric
+      // source: the checks are mechanical, so the prose in `extension/rubrics/`
+      // documents the contract rather than feeding a model.
+      kDocsCheckCapabilityId: const DocsCheckCapability(),
       'route': const CodeRouteCapability(),
       'rebase': RebaseCapability(runner: gitRunner),
       'revalidate': RevalidateCapability(runner: shellRunner),
@@ -828,6 +834,7 @@ DefaultCapabilityRegistry buildCodeRegistry({
       'spec_review': kSpecReviewCircuit,
       kDiscoveryCircuitId: kDiscoveryCircuit,
       'code_review': kCodeReviewCircuit,
+      kDocsReviewCircuitId: kDocsReviewCircuit,
       'landing': kLandingCircuit,
       // The FROZEN old-shape spec circuits (bead `pow-3p4`, extended by
       // `pow-q7n`): `spec_review_v1` (pre-fold) is reachable ONLY from
