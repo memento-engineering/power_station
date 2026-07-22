@@ -149,4 +149,45 @@ void main() {
       expect((out as Escalate).reason, contains('hard block'));
     });
   });
+
+  group('the gating param is a lane SET', () {
+    /// The SAME route over the DOCS committee's param set — three deterministic
+    /// gating lanes instead of one.
+    Future<RouteVerdict> docsRoute(Map<String, String> grades) {
+      final c = _routeCtx(grades);
+      return const CodeRouteCapability().route(
+        c.context,
+        stepArgs(
+          'tg-1/review/route',
+          params: {
+            'critics': kDocsCommitteeRubrics.join(','),
+            'gating': kDocsGatingRubrics.join(','),
+          },
+        ),
+      );
+    }
+
+    test('ANY mechanical lane at F is a hard block', () async {
+      final out = await docsRoute(const {
+        'citation-paths-resolve': 'A',
+        'terminology-ban': 'F',
+        'section-structure': 'A',
+        'spec-adherence': 'A',
+      });
+      expect(out, isA<Escalate>());
+      expect((out as Escalate).reason, contains('terminology-ban'));
+    });
+
+    test('all lanes clean ⇒ Advance', () async {
+      expect(
+        await docsRoute(const {
+          'citation-paths-resolve': 'A',
+          'terminology-ban': 'A',
+          'section-structure': 'A',
+          'spec-adherence': 'B',
+        }),
+        isA<Advance>(),
+      );
+    });
+  });
 }
