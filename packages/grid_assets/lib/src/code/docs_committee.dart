@@ -39,6 +39,7 @@ import 'package:genesis_tree/genesis_tree.dart';
 import 'package:grid_engine/grid_engine.dart';
 import 'package:path/path.dart' as p;
 
+import 'circuit_migration.dart';
 import 'committee.dart';
 import 'specify.dart';
 
@@ -445,4 +446,146 @@ class DocsCheckCapability extends ServiceCapability {
     }
     return bodies;
   }
+}
+
+/// The DOCS review circuit (id [kDocsReviewCircuitId]) — the code committee's
+/// shape with its lane set replaced: the same hygiene step, the same diff pin,
+/// the same route. Four lanes: THREE deterministic gating checks + the
+/// `spec-adherence` critic. `test-coverage` and `regression-risk` are absent by
+/// construction — there is no test to cover and no runtime behaviour to regress
+/// on a prose diff, and the F they must otherwise return is the defect this
+/// circuit fixes.
+const Circuit kDocsReviewCircuit = Circuit(
+  id: kDocsReviewCircuitId,
+  terminalStepId: 'route',
+  steps: [
+    CapabilityStep(
+      stepId: kClearCritiqueStep,
+      capabilityId: kClearCritiqueStep,
+    ),
+    CapabilityStep(
+      stepId: kPinDiffStep,
+      capabilityId: kPinDiffStep,
+      dependsOn: {kClearCritiqueStep},
+    ),
+    CapabilityStep(
+      stepId: kCitationPathsRubric,
+      capabilityId: kDocsCheckCapabilityId,
+      params: {'rubric': kCitationPathsRubric},
+      dependsOn: {kPinDiffStep},
+    ),
+    CapabilityStep(
+      stepId: kTerminologyBanRubric,
+      capabilityId: kDocsCheckCapabilityId,
+      params: {'rubric': kTerminologyBanRubric},
+      dependsOn: {kPinDiffStep},
+    ),
+    CapabilityStep(
+      stepId: kSectionStructureRubric,
+      capabilityId: kDocsCheckCapabilityId,
+      params: {'rubric': kSectionStructureRubric},
+      dependsOn: {kPinDiffStep},
+    ),
+    CapabilityStep(
+      stepId: 'spec-adherence',
+      capabilityId: 'critic',
+      params: {'rubric': 'spec-adherence'},
+      dependsOn: {kPinDiffStep},
+    ),
+    CapabilityStep(
+      stepId: 'route',
+      capabilityId: 'route',
+      dependsOn: {
+        kCitationPathsRubric,
+        kTerminologyBanRubric,
+        kSectionStructureRubric,
+        'spec-adherence',
+      },
+      // LITERAL CSVs (a const context cannot join a list); a test asserts they
+      // equal `kDocsCommitteeRubrics.join(',')` / `kDocsGatingRubrics.join(',')`
+      // so the two can never drift.
+      params: {
+        'critics':
+            'citation-paths-resolve,terminology-ban,section-structure,'
+            'spec-adherence',
+        'gating': 'citation-paths-resolve,terminology-ban,section-structure',
+      },
+    ),
+  ],
+);
+
+/// [base] with its [kReviewStepId] [SubCircuitStep] re-pointed at [circuitId] —
+/// the ONE difference between the code root shape and the docs root shape.
+///
+/// DERIVED rather than duplicated: unlike `circuit_migration.dart`'s FROZEN
+/// shapes (which must never follow a future rename), the docs root shape must
+/// track `kCodeCircuit` step for step. It takes [base] as a VALUE so this
+/// library imports nothing from `code_capabilities.dart` (config = values,
+/// ADR-0008 D-H — the same anti-cycle posture [CodeCircuitResolver] holds).
+///
+/// LOUD or gone: a [base] with no `review` sub-circuit step means the root shape
+/// moved and the docs committee would silently never mount, so it throws.
+Circuit withReviewCircuitId(Circuit base, String circuitId) {
+  final steps = <CircuitStep>[];
+  var replaced = false;
+  for (final step in base.steps) {
+    if (step is SubCircuitStep && step.stepId == kReviewStepId) {
+      steps.add(
+        SubCircuitStep(
+          stepId: step.stepId,
+          circuitId: circuitId,
+          params: step.params,
+          dependsOn: step.dependsOn,
+        ),
+      );
+      replaced = true;
+    } else {
+      steps.add(step);
+    }
+  }
+  if (!replaced) {
+    throw StateError(
+      'withReviewCircuitId: circuit "${base.id}" carries no `$kReviewStepId` '
+      'SubCircuitStep to re-point at "$circuitId" — the root shape moved and '
+      'the docs committee would silently never mount',
+    );
+  }
+  return base.copyWith(steps: steps);
+}
+
+/// The bead → root-circuit policy that picks the REVIEW COMMITTEE by the bead's
+/// declared change shape — the production replacement for
+/// `CodeCircuitResolver(kCodeCircuit)`.
+///
+/// It WRAPS [CodeCircuitResolver] rather than replacing it: the migration guard
+/// still classifies an old-shape survivor and freezes it (such a session keeps
+/// the code committee, which is correct — its cursor was minted under it), and
+/// this class only chooses which CURRENT shape the guard is handed.
+///
+/// [code] arrives as a VALUE (production passes `kCodeCircuit`) so this library
+/// stays free of `code_capabilities.dart`, exactly as [CodeCircuitResolver]
+/// does. Stateless and const: it caches nothing, and the classification is
+/// recomputed on every `WorkBead.build` (D-H: never snapshot reactive state).
+///
+/// ARMING NOTE (out of this repo's diff): the live station composes the resolver
+/// in space_station `lib/src/up_command.dart`. The docs committee is armed only
+/// when that line becomes `const ChangeShapeCircuitResolver(kCodeCircuit)`.
+class ChangeShapeCircuitResolver implements SessionResolver {
+  /// Creates the resolver over the CURRENT code root circuit [code].
+  const ChangeShapeCircuitResolver(this.code);
+
+  /// The CURRENT code root circuit — `kCodeCircuit` in production.
+  final Circuit code;
+
+  /// The root circuit for [shape].
+  Circuit circuitFor(ChangeShape shape) => switch (shape) {
+    ChangeShape.docs => withReviewCircuitId(code, kDocsReviewCircuitId),
+    ChangeShape.code => code,
+  };
+
+  @override
+  Seed sessionFor({required Bead bead, SessionProjection? session}) =>
+      CodeCircuitResolver(
+        circuitFor(changeShapeOf(bead)),
+      ).sessionFor(bead: bead, session: session);
 }
