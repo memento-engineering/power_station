@@ -27,6 +27,7 @@
 library;
 
 import 'agent_environment.dart';
+import 'model_tier.dart';
 import 'site_binding.dart';
 
 /// A LOUD, fail-closed refusal (ADR-0000 A8 "guards LOUD or GONE") thrown by
@@ -103,10 +104,33 @@ class EnvironmentRegistry {
       resolved[name] = env;
     }
     for (final entry in roleEnvironments.entries) {
-      if (!resolved.containsKey(entry.value)) {
+      final env = resolved[entry.value];
+      if (env == null) {
         return 'role "${entry.key}" names environment "${entry.value}" but it '
             'is not armed (armed: ${_armedList()}) — arm "${entry.value}" in '
             'the environment registry, or point the role at an armed environment';
+      }
+      // A claude-native tier default (opus/sonnet/haiku) is CLAUDE's model
+      // name; it 400s in any other tool's argv (`codex --model opus` is
+      // rejected on a ChatGPT account). An environment that PINS such a name
+      // yet does not spawn claude is a cross-environment composition error —
+      // refuse LOUD at boot (ADR-0000 A8), never at 400-per-spawn. A model-less
+      // non-claude env is NOT refused: it resolved to spawn before this guard
+      // and still does (copilot/opencode/pi stay armable). The codex pin's own
+      // regression to null is fenced by its builtin golden test, since at boot
+      // a model-less env cannot be told apart from a grandfathered one.
+      final crossing = env.model;
+      if (crossing != null &&
+          kClaudeNativeDefaults.contains(crossing) &&
+          env.command != kTierDefaultCommand) {
+        return 'role "${entry.key}" names environment "${entry.value}" '
+            '(command "${env.command}") but pins the claude-native model '
+            '"$crossing" — a claude tier default '
+            '(${kClaudeNativeDefaults.join('/')}) 400s in a non-claude argv '
+            '(a "${env.command} --model $crossing" is rejected). Pin a model '
+            'native to "${env.command}" on "${entry.value}" '
+            '(its AgentEnvironment.model), or arm the role at the claude '
+            'environment.';
       }
     }
     return siteBinding.validate(resolved);

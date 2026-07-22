@@ -46,6 +46,25 @@ String defaultModelForTier(AgentTier tier) => switch (tier) {
   AgentTier.frontier => kFrontierModelDefault,
 };
 
+/// The models [defaultModelForTier] emits — the claude-native tier defaults.
+/// These are CLAUDE's names (opus/sonnet/haiku); a non-claude environment armed
+/// to a role must pin its OWN model, because these names 400 elsewhere (bead
+/// `pow-a9o`: `codex --model opus` is rejected on a ChatGPT account).
+const Set<String> kClaudeNativeDefaults = {
+  kCheapModelDefault,
+  kMidModelDefault,
+  kFrontierModelDefault,
+};
+
+/// The environment [defaultModelForTier]'s names belong to. The claude builtin
+/// (`command == kTierDefaultCommand`) rides the shared tier defaults with no
+/// per-environment `model`; every OTHER environment armed to a role must pin
+/// its own native model — enforced LOUD at boot by
+/// [EnvironmentRegistry.validate] (bead `pow-a9o`). Mirrors the claude builtin's
+/// `command` (`agent_harness.dart`), kept HERE beside the defaults it gates to
+/// avoid a `model_tier` -> `agent_harness` import cycle.
+const String kTierDefaultCommand = 'claude';
+
 /// The STATION's arming of tier → model — a pure VALUE the tree carries
 /// (config = VALUES in the tree, impls = DI). Every field is a SPARSE override:
 /// null ⇒ that tier rides [defaultModelForTier].
