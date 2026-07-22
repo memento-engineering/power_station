@@ -27,6 +27,7 @@
 library;
 
 import 'agent_environment.dart';
+import 'model_tier.dart';
 import 'site_binding.dart';
 
 /// A LOUD, fail-closed refusal (ADR-0000 A8 "guards LOUD or GONE") thrown by
@@ -103,10 +104,25 @@ class EnvironmentRegistry {
       resolved[name] = env;
     }
     for (final entry in roleEnvironments.entries) {
-      if (!resolved.containsKey(entry.value)) {
+      final env = resolved[entry.value];
+      if (env == null) {
         return 'role "${entry.key}" names environment "${entry.value}" but it '
             'is not armed (armed: ${_armedList()}) — arm "${entry.value}" in '
             'the environment registry, or point the role at an armed environment';
+      }
+      // The claude-native tier defaults (opus/sonnet/haiku) are claude's: a
+      // model-less environment falls through to them, and any argv but claude's
+      // 400s on those names (bead `pow-a9o`: `codex --model opus` under a
+      // ChatGPT account). Guard LOUD or GONE (ADR-0000 A8) — a NAMED invariant,
+      // refused at boot, never at 400-per-spawn.
+      if (env.model == null && env.command != kTierDefaultCommand) {
+        return 'role "${entry.key}" names environment "${entry.value}" '
+            '(command "${env.command}") but it pins no model, so it would spawn '
+            'the claude-native tier defaults '
+            '(${kClaudeNativeDefaults.join('/')}) — illegal in a non-claude argv '
+            '(a "${env.command} --model opus" 400s). Pin a native model on '
+            '"${entry.value}" (its AgentEnvironment.model), or arm the role at an '
+            'environment that does.';
       }
     }
     return siteBinding.validate(resolved);
