@@ -212,6 +212,17 @@ void main() {
       expect(capped, isA<SpecEscalate>());
       expect((capped as SpecEscalate).rule, 'respec-cap');
     });
+
+    test('CONVERGED AT THE CAP — a clean vector with every round consumed '
+        'ADVANCES; the cap bounds the LOOP, never the spec (bead `pow-p8w`)', () {
+      final v = decideSpecRoute(
+        lanes: _lanes(_allA()),
+        gating: _gating,
+        priorRound: kMaxRespecRounds,
+      );
+      expect(v, isA<SpecAdvance>());
+      expect((v as SpecAdvance).spread, 0);
+    });
   });
 
   group('the guidance ledger — the channel that survives the critique wipe', () {
@@ -317,6 +328,105 @@ void main() {
       expect(capped, isA<Escalate>());
       expect((capped as Escalate).reason, startsWith('respec-cap'));
       expect(kMaxRespecRounds, lessThan(kMaxReworkRounds));
+    });
+
+    test('a CONSUMED ledger + an ALL-CLEAN current join ADVANCES — the cap is '
+        '(rounds spent AND the join STILL fails), never rounds alone '
+        '(bead `pow-p8w`)', () async {
+      writeRespecLedger(
+        ws.path,
+        const RespecLedger(
+          round: kMaxRespecRounds,
+          lanes: [
+            RespecLane(
+              rubric: 'adr-alignment',
+              grade: 'D',
+              rationale: 'the ADR citation is not real',
+            ),
+          ],
+        ),
+      );
+      final out = await _route(_allA(), workspaceDir: ws.path);
+      expect(out, isA<Advance>());
+      final payload = (out as Advance).payload!;
+      expect(payload['verdict'], 'advance');
+      // NO `grade` key: a converged round invalidates nothing.
+      expect(payload.containsKey('grade'), isFalse);
+      expect(readRespecLedger(ws.path), isNull);
+    });
+
+    test('the CAP flare quotes the FRESH vector it decided on, never the '
+        'ledger\'s recorded last failure (bead `pow-p8w`)', () async {
+      // A SPENT ledger whose recorded last failure names `adr-alignment` …
+      writeRespecLedger(
+        ws.path,
+        const RespecLedger(
+          round: kMaxRespecRounds,
+          lanes: [
+            RespecLane(
+              rubric: 'adr-alignment',
+              grade: 'D',
+              rationale: 'the ADR citation is not real',
+            ),
+          ],
+        ),
+      );
+      // … while the CURRENT join fails on a DIFFERENT lane.
+      final capped = await _route(
+        {..._allA(), 'coherence': 'D'},
+        rationales: const {'coherence': 'the plan contradicts the acceptance'},
+        workspaceDir: ws.path,
+      );
+      expect(capped, isA<Escalate>());
+      final reason = (capped as Escalate).reason;
+      expect(reason, startsWith('respec-cap'));
+      expect(reason, contains('coherence=D'));
+      expect(reason, contains('adr-alignment=A'));
+      expect(reason, isNot(contains('adr-alignment=D')));
+    });
+
+    test('the CAP flare SPENDS the ledger — a governor gate-resolve re-arms this '
+        'route and it decides on the CURRENT join instead of re-flaring off the '
+        'consumed round forever (bead `pow-p8w`)', () async {
+      final grades = {..._allA(), 'coherence': 'D'};
+      const why = {'coherence': 'the plan still contradicts the acceptance'};
+
+      await _route(grades, rationales: why, workspaceDir: ws.path);
+      await _route(grades, rationales: why, workspaceDir: ws.path);
+      expect(readRespecLedger(ws.path)!.round, kMaxRespecRounds);
+
+      final capped = await _route(
+        grades,
+        rationales: why,
+        workspaceDir: ws.path,
+      );
+      expect(capped, isA<Escalate>());
+      expect(readRespecLedger(ws.path), isNull);
+
+      // The re-arm after the human ruling: a CONVERGED join advances.
+      final reArmed = await _route(_allA(), workspaceDir: ws.path);
+      expect(reArmed, isA<Advance>());
+      expect((reArmed as Advance).payload!['verdict'], 'advance');
+    });
+
+    test('a NON-cap escalate arm spends the ledger too — no stale correction '
+        'survives into a `grid rework` specify brief (bead `pow-p8w`)', () async {
+      writeRespecLedger(
+        ws.path,
+        const RespecLedger(
+          round: 1,
+          lanes: [
+            RespecLane(rubric: 'coherence', grade: 'D', rationale: 'spent'),
+          ],
+        ),
+      );
+      final out = await _route(
+        {..._allA(), 'coherence': 'F'},
+        rationales: const {'coherence': 'this bead needs decomposing first'},
+        workspaceDir: ws.path,
+      );
+      expect(out, isA<Escalate>());
+      expect(readRespecLedger(ws.path), isNull);
     });
 
     test('an ADVANCE deletes the ledger — a later rework never re-injects stale '
