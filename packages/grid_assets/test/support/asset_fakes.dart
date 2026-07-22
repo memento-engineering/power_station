@@ -519,10 +519,11 @@ List<Bead> committeeSession({
 /// never fixed the ~25%-per-run acceptance wedge, and why this helper now
 /// yields real time instead.
 ///
-/// [condition] is evaluated EXACTLY ONCE per round (and once more, first, on
-/// entry — a satisfied condition costs one check and no sleep), which is what
-/// the private `_settle` fixed-point wrappers in the acceptance suites count
-/// their `stableRounds` plateau in.
+/// [condition] is evaluated EXACTLY ONCE per round, at the TOP of the round —
+/// so an already-satisfied condition costs one check and no sleep, and a
+/// never-satisfied one costs exactly [maxPumps] checks. That one-check-per-
+/// round rate is what the private `_settle` fixed-point wrappers in the
+/// acceptance suites count their `stableRounds` plateau in.
 ///
 /// Still bounded, so a genuine regression FAILS (its [condition] stays false
 /// through [maxPumps] rounds) instead of hanging.
