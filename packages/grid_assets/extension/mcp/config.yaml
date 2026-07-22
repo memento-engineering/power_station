@@ -56,6 +56,21 @@ resources:
     description: The INTAKE lens — is the BEAD ready to specify (scope, acceptance shape, cited constraints, a decided approach)? D or worse HOLDS it for refinement.
     path: rubrics/bead-readiness.md
     visibility: public
+  # The DOCS-CHANGE pack — the committee that reviews a prose diff. Its three
+  # GATING lanes are mechanical checks run in Dart, so this prose documents the
+  # contract rather than feeding a model.
+  - id: citation-paths-resolve
+    description: The DOCS gating lane — every file path a changed doc cites must resolve in the tree.
+    path: rubrics/citation-paths-resolve.md
+    visibility: public
+  - id: terminology-ban
+    description: The DOCS gating lane — the org seam word is `extension`; the banned word is reserved for third-party proper nouns.
+    path: rubrics/terminology-ban.md
+    visibility: public
+  - id: section-structure
+    description: The DOCS gating lane — the sections a bead names (metadata.docs_sections) must be present in every changed doc.
+    path: rubrics/section-structure.md
+    visibility: public
 
 # Prompts — the critic prompt template, mustache-templated. `{{rubric}}` /
 # `{{rubricText}}` / `{{bead}}` are substituted per lane (the asset loader's

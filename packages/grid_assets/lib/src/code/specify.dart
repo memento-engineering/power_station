@@ -941,7 +941,7 @@ const List<String> kSpecPlaceholderTokens = [
 ];
 
 /// [kSpecPlaceholderTokens] compiled — single words word-bounded, phrases
-/// verbatim, all case-insensitive. Matched against [_proseOnly] output, so a
+/// verbatim, all case-insensitive. Matched against [proseOnly] output, so a
 /// token inside a markdown quotation context (quoted code, a cited clause) is
 /// evidence, not deferral, and never trips.
 final List<RegExp> _placeholderPatterns = [
@@ -996,7 +996,7 @@ List<String> specStructuralFindings(Bead bead) {
   // (A13(10)): a `## ` heading or a step ordinal quoted inside a fenced block —
   // this pack's own specs quote all four headings verbatim — is evidence, not
   // structure.
-  final structure = _proseOnly(design);
+  final structure = proseOnly(design);
 
   // Testable acceptance: at least one `- [ ]` checkbox criterion.
   if (!RegExp(r'^\s*-\s*\[[ xX]\]\s*\S', multiLine: true).hasMatch(acceptance)) {
@@ -1007,7 +1007,7 @@ List<String> specStructuralFindings(Bead bead) {
   final planAt = structure.indexOf('## Implementation Plan');
   if (planAt < 0) {
     findings.add('design: no `## Implementation Plan` section');
-  } else if (!_numberedStep.hasMatch(_sectionBody(structure, planAt))) {
+  } else if (!_numberedStep.hasMatch(sectionBodyAt(structure, planAt))) {
     findings.add(
       'design: `## Implementation Plan` has no numbered steps — every step '
       'must open with an ordinal (`1.` / `1)` list items, or `### Step 1 — …` '
@@ -1024,7 +1024,7 @@ List<String> specStructuralFindings(Bead bead) {
   if (validationAt < 0) {
     findings.add('design: no `## Validation Plan` section');
   } else {
-    final body = _sectionBody(structure, validationAt);
+    final body = sectionBodyAt(structure, validationAt);
     if (!RegExp(r'^\s*-\s*\S', multiLine: true).hasMatch(body)) {
       findings.add('design: `## Validation Plan` has no items');
     }
@@ -1032,7 +1032,7 @@ List<String> specStructuralFindings(Bead bead) {
 
   // Placeholder tokens anywhere in the spec's PROSE — quotation contexts
   // (quoted code, cited clauses) are evidence, not deferral, and never trip.
-  final prose = _proseOnly('$acceptance\n$design');
+  final prose = proseOnly('$acceptance\n$design');
   for (final pattern in _placeholderPatterns) {
     final match = pattern.firstMatch(prose);
     if (match != null) {
@@ -1052,14 +1052,20 @@ List<String> specStructuralFindings(Bead bead) {
 /// one together (every banned phrase joins its words with a single space).
 /// An unterminated fence is left as-is (its content stays scannable —
 /// fail-closed), and inline spans never cross a newline.
-String _proseOnly(String spec) => spec
+///
+/// PUBLIC because the DOCS committee (`docs_committee.dart`) reads headings
+/// from PROSE by the same rule — one definition, two readers.
+String proseOnly(String spec) => spec
     .replaceAll(RegExp('```.*?```', dotAll: true), '  ')
     .replaceAll(RegExp(r'^[ \t]*>.*$', multiLine: true), '  ')
     .replaceAll(RegExp('`[^`\n]*`'), '  ');
 
 /// The body of the section whose `## ` heading starts at [headingAt] — the
 /// text after the heading line up to the next `## ` heading (or the end).
-String _sectionBody(String design, int headingAt) {
+///
+/// PUBLIC for the same reason as [proseOnly]: `changeShapeOf` reads the bead's
+/// `## Touches` body with it.
+String sectionBodyAt(String design, int headingAt) {
   final afterHeading = design.indexOf('\n', headingAt);
   if (afterHeading < 0) return '';
   final next = design.indexOf('\n## ', afterHeading);

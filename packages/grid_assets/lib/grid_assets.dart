@@ -135,6 +135,7 @@ export 'src/code/committee.dart';
 export 'src/code/conventional_commit.dart';
 export 'src/code/delivery.dart';
 export 'src/code/discovery.dart';
+export 'src/code/docs_committee.dart';
 export 'src/code/landing.dart';
 export 'src/code/pr_composition.dart';
 export 'src/code/pr_describe.dart';
