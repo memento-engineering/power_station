@@ -944,8 +944,10 @@ class CriticCapability extends ProcessCapability {
 /// `SessionScope`; read with the effect verb — D-5, never a subscription/
 /// re-query) and applies the deterministic matrix (C3, asset policy):
 ///
-///  - the gating critic grade `F` (a non-zero Validation Plan) → [Escalate]
-///    (hard block);
+///  - a GATING lane at grade `F` (a non-zero Validation Plan) → [Escalate]
+///    (hard block). `gating` is a lane SET read as a CSV, so a committee whose
+///    gate is several deterministic checks (the docs committee's three) needs
+///    no second matrix — a single-id value is just a one-element set;
 ///  - a grade SPREAD ≥ 3 letters across the lanes → [Escalate] (human ultimatum);
 ///  - any NON-gating critic at `D`/`F` → [Escalate] (rework — the `restForOne`
 ///    transitive re-key is deferred, so a D/F parks at the bound handler for now);
@@ -982,7 +984,14 @@ class CodeRouteCapability extends RouteCapability {
         context.getInheritedSeedOfExactType<SiblingView>() ??
         const SiblingView();
     final parent = parentPath(args.nodePath);
-    final gating = args.params['gating'] ?? '';
+    // The GATING lane SET: the docs committee's gate is THREE deterministic
+    // checks, so `gating` is a CSV exactly like `critics`. A single-id value
+    // yields a one-element set — the code and spec committees are unchanged.
+    final gating = (args.params['gating'] ?? '')
+        .split(',')
+        .map((id) => id.trim())
+        .where((id) => id.isNotEmpty)
+        .toSet();
     final criticIds = (args.params['critics'] ?? '')
         .split(',')
         .map((s) => s.trim())
@@ -1003,8 +1012,9 @@ class CodeRouteCapability extends RouteCapability {
     // broken spec, or a missing gating grade) — a hard block. The reason names
     // the gating LANE (this route serves both the code and the spec committee,
     // bead `pow-6ao`), so the parked gate says which gate fired.
-    if (grades[gating] == 'F') {
-      return Escalate('$gating failed: hard block');
+    final failedGates = gating.where((id) => grades[id] == 'F').toList();
+    if (failedGates.isNotEmpty) {
+      return Escalate('${failedGates.join(', ')} failed: hard block');
     }
 
     // 2. a grade spread ≥ 3 letters across the PRESENT lanes — a human
@@ -1026,7 +1036,7 @@ class CodeRouteCapability extends RouteCapability {
     // 3. any non-gating critic at D/F — rework → restForOne re-key is deferred
     // (build-order); a D/F parks at the bound handler for now.
     for (final entry in grades.entries) {
-      if (entry.key == gating) continue;
+      if (gating.contains(entry.key)) continue;
       if (entry.value == 'D' || entry.value == 'F') {
         return const Escalate('a critic returned D/F — rework');
       }
