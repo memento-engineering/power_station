@@ -55,7 +55,7 @@ yours to do with normal tools — the command covers the bead stores, not the
 repos.
 
 Store roots in the report are as the station authored them — resolve a
-relative `root` against the grid home (`{{gridHome}}`).
+relative `root` against the grid home (the directory you run from).
 
 ## Dispatch
 
@@ -102,7 +102,7 @@ research first, file only on confirmation.
 
 - **Target store: the substation whose repo the work would change** (the
   search report's `root` for that seat is your `cd` target). No clear owner →
-  **the grid home's own store** (`{{gridHome}}`). Cross-store deps do not
+  **the grid home's own store** (`.grid/.beads` under it). Cross-store deps do not
   exist — coupled beads home together in ONE store.
 - **Ephemeral + staged, never ready:** a live station mounts a ready bead
   within seconds — a half-designed bead must never enter the frontier.

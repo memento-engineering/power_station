@@ -20,7 +20,7 @@ From the grid home (the repo whose `.grid/` holds the state store and lock):
 
 ```
 {{runner}} up --no-dry-run \
-  --grid-home {{gridHome}} \
+  --grid-home "$(pwd)" \
   --substation '<name>[@<prefix>]=<abs work-repo root>' ...
   [--max-agents N]
 ```
@@ -36,14 +36,14 @@ From the grid home (the repo whose `.grid/` holds the state store and lock):
   background and read the banner from its log.
 
 Verify the boot with effects, not the banner: `{{runner}} status --state-workspace
-{{gridHome}}` should show `station: UP`, and within a minute of ready work
+"$(pwd)"` should show `station: UP`, and within a minute of ready work
 existing you should see `mounted`/`live sessions` > 0, per-bead worktrees under
 `<work-repo>/.grid/worktrees/<substation>/<bead>`, and real agent processes.
 
 ## Bounce / down
 
 ```
-{{runner}} down --state-workspace {{gridHome}}    # scoped stop via the lock
+{{runner}} down --state-workspace "$(pwd)"        # scoped stop via the lock
 {{runner}} up ...                                 # same arming
 ```
 
@@ -66,11 +66,11 @@ group — never pkill by name.
 The station prints nothing when every session mint fails — the failure is
 latched per-scope with no retry. Work the chain from the store outward:
 
-1. **Sessions:** `bd -C {{gridHome}}/.grid export --include-infra` — zero beads
+1. **Sessions:** `bd -C .grid export --include-infra` — zero beads
    at all means no write ever landed (also check `.beads/last-touched` exists).
 2. **The mint seam:** `session` is NOT a core bd issue type. A state store
    seeded by bare `bd init` refuses `bd create -t session` ("invalid issue
-   type"). Fix: add to `{{gridHome}}/.grid/.beads/config.yaml`:
+   type"). Fix: add to `.grid/.beads/config.yaml` (under the grid home):
 
    ```yaml
    types:
@@ -90,7 +90,7 @@ latched per-scope with no retry. Work the chain from the store outward:
 
 ## Seeding a fresh grid home
 
-- State store lives EXACTLY at `{{gridHome}}/.grid/.beads` (never walk-up — a
+- State store lives EXACTLY at `.grid/.beads` under the grid home (never walk-up — a
   dual-role repo's root `.beads` is a WORK store; binding it lands sessions in
   the work source).
 - bd derives the minted id prefix from the store's `dolt_database` name — name
@@ -104,7 +104,7 @@ Run a background loop rather than polling by hand. Exit (and re-engage the
 governor) on ANY of: an open gate bead in the state store, live sessions
 returning to zero after being live ("harvest time"), station not UP, or a
 timeout heartbeat (~45min while work is in flight, ~3h idle). Scan gates via
-`bd -C {{gridHome}}/.grid export --include-infra` filtered to open
+`bd -C .grid export --include-infra` (from the grid home) filtered to open
 `issue_type: gate` — never `bd show` in the loop.
 
 ## Gotchas
