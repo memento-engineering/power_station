@@ -114,7 +114,7 @@ timeout heartbeat (~45min while work is in flight, ~3h idle). Scan gates via
 - A landed engine/sdk change is picked up by re-running from source on a bounce or
   hot-reload — there is no recompile step. Run the `{{runner}}` station JIT (via
   `dart run`), never a compiled binary: a binary loses the VM service, hot-reload,
-  and the current-source guarantee (space is JIT-only — see its CLAUDE.md).
+  and the current-source guarantee (the station is JIT-only — see its CLAUDE.md).
 - The dry smoke CANNOT prove the write path (dry = no-op bd writer): the first
   live boot of any new composition is the only prover — treat it as an
   instrumented experiment, not a formality.
