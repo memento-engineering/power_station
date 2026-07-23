@@ -1,4 +1,7 @@
 name: dart_grid_assets
+# Released as git tags per package (ADR-0003 D1: `<package>-v<version>`);
+# consumers pin `git: {url, ref, path}`.
+version: 0.1.0
 description: >-
   The DART domain grid assets — the typed grid.dart envelope + pub dev-time
   linkage + the exported DartCommand.

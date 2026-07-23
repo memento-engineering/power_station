@@ -16,7 +16,16 @@ environment:
   sdk: ^3.11.0
 
 dependencies:
-  federated_grid_assets: any
+  federated_grid_assets:
+    # Intra-repo sibling as a git SELF-REF tag pin (ADR-0003 D1): pub
+    # unifies git deps by REF STRING, so every route to a released
+    # package must carry the SAME tag ref (a path dep would normalize
+    # to a SHA descriptor and conflict with a consumer's pin).
+    # Workspace/dev resolution unchanged; tags move in lockstep.
+    git:
+      url: git@github.com:memento-engineering/power_station.git
+      ref: federated_grid_assets-v0.1.0
+      path: packages/federated_grid_assets
   meta: ^1.16.0
   multicast_dns: ^0.3.3
 

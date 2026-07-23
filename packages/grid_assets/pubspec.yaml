@@ -1,4 +1,7 @@
 name: grid_assets
+# Released as git tags per package (ADR-0003 D1: `<package>-v<version>`);
+# consumers pin `git: {url, ref, path}`.
+version: 0.1.0
 description: >-
   The_grid's opinion assets — the agent/verify/land Capability impls + the
   `code` circuit + the git SourceControl, extracted out of the opinion-free
@@ -13,14 +16,60 @@ environment:
 
 dependencies:
   args: ^2.6.0
-  beads_dart: any
-  dart_grid_assets: any
+  beads_dart:
+    # Cross-repo release pin (power_station ADR-0003 D1): adopt a
+    # the_grid change DELIBERATELY by bumping the ref. Dev co-editing
+    # still rides the gitignored pubspec_overrides.yaml (D5).
+    git:
+      url: git@github.com:memento-engineering/the_grid.git
+      ref: beads_dart-v0.1.0
+      path: packages/beads_dart
+  dart_grid_assets:
+    # Intra-repo sibling as a git SELF-REF tag pin (ADR-0003 D1): pub
+    # unifies git deps by REF STRING, so every route to a released
+    # package must carry the SAME tag ref (a path dep would normalize
+    # to a SHA descriptor and conflict with a consumer's pin).
+    # Workspace/dev resolution unchanged; tags move in lockstep.
+    git:
+      url: git@github.com:memento-engineering/power_station.git
+      ref: dart_grid_assets-v0.1.0
+      path: packages/dart_grid_assets
   extension_discovery: ^2.1.0
-  federated_grid_assets: any
+  federated_grid_assets:
+    # Intra-repo sibling as a git SELF-REF tag pin (ADR-0003 D1): pub
+    # unifies git deps by REF STRING, so every route to a released
+    # package must carry the SAME tag ref (a path dep would normalize
+    # to a SHA descriptor and conflict with a consumer's pin).
+    # Workspace/dev resolution unchanged; tags move in lockstep.
+    git:
+      url: git@github.com:memento-engineering/power_station.git
+      ref: federated_grid_assets-v0.1.0
+      path: packages/federated_grid_assets
   genesis_tree: ^0.1.3
-  grid_engine: any
-  grid_runtime: any
-  grid_sdk: any
+  grid_engine:
+    # Cross-repo release pin (power_station ADR-0003 D1): adopt a
+    # the_grid change DELIBERATELY by bumping the ref. Dev co-editing
+    # still rides the gitignored pubspec_overrides.yaml (D5).
+    git:
+      url: git@github.com:memento-engineering/the_grid.git
+      ref: grid_engine-v0.1.0
+      path: packages/grid_engine
+  grid_runtime:
+    # Cross-repo release pin (power_station ADR-0003 D1): adopt a
+    # the_grid change DELIBERATELY by bumping the ref. Dev co-editing
+    # still rides the gitignored pubspec_overrides.yaml (D5).
+    git:
+      url: git@github.com:memento-engineering/the_grid.git
+      ref: grid_runtime-v0.1.0
+      path: packages/grid_runtime
+  grid_sdk:
+    # Cross-repo release pin (power_station ADR-0003 D1): adopt a
+    # the_grid change DELIBERATELY by bumping the ref. Dev co-editing
+    # still rides the gitignored pubspec_overrides.yaml (D5).
+    git:
+      url: git@github.com:memento-engineering/the_grid.git
+      ref: grid_sdk-v0.1.0
+      path: packages/grid_sdk
   meta: ^1.16.0
   path: ^1.9.0
 
