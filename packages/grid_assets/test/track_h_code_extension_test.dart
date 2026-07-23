@@ -830,9 +830,10 @@ void main() {
         expect(installed.existsSync(), isTrue);
         final body = installed.readAsStringSync();
         expect(body, startsWith('---\n'));
-        // The default binding: kDefaultOverlayRunner + the registered root.
+        // The default binding: kDefaultOverlayRunner. (The wire still binds
+        // gridHome for compatibility; the overlay carries no such hole — the
+        // manual is PORTABLE, no absolute grid home baked in.)
         expect(body, contains('space search --json'));
-        expect(body, contains('/dev/root'));
         expect(body, isNot(contains('{{')));
       },
     );
@@ -927,13 +928,12 @@ void main() {
       const cap = AgentCapability(
         devRoot: '/dev/root',
         overlaySourceRef: 'testref',
-        overlayArgs: {'runner': 'grid', 'gridHome': '/grid/home'},
+        overlayArgs: {'runner': 'grid'},
       );
       cap.spawn(c.context, c.args);
 
       final body = discoverSkill(worktree).readAsStringSync();
       expect(body, contains('grid search --json'));
-      expect(body, contains('/grid/home'));
       expect(body, isNot(contains('space search --json')));
     });
 

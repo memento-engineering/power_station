@@ -624,7 +624,7 @@ void main() {
           overlayRoots: [overlayRoot],
           targetRoot: target.path,
           sourceRef: 'testref',
-          args: const {'runner': 'space', 'gridHome': '/grid/home'},
+          args: const {'runner': 'space'},
         );
 
         final installed = File(
@@ -634,7 +634,6 @@ void main() {
         final body = installed.readAsStringSync();
         expect(body, startsWith('---\n'));
         expect(body, contains('space search --json'));
-        expect(body, contains('/grid/home'));
         expect(body, isNot(contains('{{')));
         expect(
           report.installedSkillIdsUnder(kClaudeSkillsSubtree),

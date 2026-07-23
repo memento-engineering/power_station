@@ -81,22 +81,21 @@ void main() {
         () {
       final rendered = loader.renderSkill(
         'discover',
-        args: {'runner': 'space', 'gridHome': '/grid/home'},
+        args: {'runner': 'space'},
       );
       expect(rendered, isNot(contains('{{')));
       expect(rendered, contains('space search --json'));
-      expect(rendered, contains('/grid/home'));
     });
 
     test('renderSkill with an unbound hole throws LOUD (an installed skill '
         'has no template residue)', () {
       expect(
-        () => loader.renderSkill('discover', args: {'runner': 'space'}),
+        () => loader.renderSkill('discover', args: {}),
         throwsA(
           isA<StateError>().having(
             (e) => e.message,
             'message',
-            contains('{{gridHome}}'),
+            contains('{{runner}}'),
           ),
         ),
       );
@@ -106,7 +105,7 @@ void main() {
   group('the discover skill — the coupled skill+command acceptance', () {
     final rendered = PackagedAssetLoader(root: root).renderSkill(
       'discover',
-      args: {'runner': 'space', 'gridHome': '/grid/home'},
+      args: {'runner': 'space'},
     );
 
     test('dispatches on arg shape — topic research, bead-id advisory, '
@@ -151,7 +150,7 @@ void main() {
       expect(rendered, contains('--actor governor'));
       // Filing scope: target substation store first, grid-home fallback.
       expect(rendered, contains('the substation whose repo the work would change'));
-      expect(rendered, contains('/grid/home'));
+      expect(rendered, contains("the grid home's own store"));
       // Promote-later: the design conversation ends in the persistent flip.
       expect(rendered, contains('--persistent'));
     });
@@ -196,7 +195,7 @@ void main() {
       final argNames = {for (final a in args) a['name'] as String};
       expect(
         argNames,
-        {'runner', 'gridHome'},
+        {'runner'},
         reason: 'the manifest declares exactly the holes the template carries',
       );
     });
@@ -204,8 +203,8 @@ void main() {
 
   group('the re-homed OPERATOR skills', () {
     const reHomed = <String, Set<String>>{
-      'station-operations': {'runner', 'gridHome'},
-      'gate-medicine': {'runner', 'gridHome'},
+      'station-operations': {'runner'},
+      'gate-medicine': {'runner'},
       'harvest-review': {'runner'},
       'intake-grooming': <String>{},
       'release': {'runner'},
@@ -249,11 +248,11 @@ void main() {
         'verb and the grid home bound, no residue', () {
       final rendered = loader.renderSkill(
         'station-operations',
-        args: {'runner': 'space', 'gridHome': '/grid/home'},
+        args: {'runner': 'space'},
       );
       expect(rendered, isNot(contains('{{')));
       expect(rendered, contains('space up'));
-      expect(rendered, contains('/grid/home/.grid'));
+      expect(rendered, contains('.grid/.beads'));
     });
 
     test(

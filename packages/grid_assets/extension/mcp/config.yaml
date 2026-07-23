@@ -161,9 +161,6 @@ skills:
       - name: runner
         description: The composing station's executable name (e.g. `space`) — the verb the skill's search calls ride.
         required: true
-      - name: gridHome
-        description: The grid-home root — the fallback store a new bead files into when no substation clearly owns it.
-        required: true
   # The OPERATOR skill set — re-homed from the composing station's
   # hand-committed, installer-less `extension/skills/`. `<cli> install` expands
   # these into the operator's own `.claude/skills/`; the provision wire installs
@@ -181,9 +178,6 @@ skills:
     args:
       - name: runner
         description: The composing station's executable name (e.g. `space`) — the verb its boot/status/down calls ride.
-        required: true
-      - name: gridHome
-        description: The grid-home root — where the state store (`<gridHome>/.grid/.beads`) lives.
         required: true
   - id: intake-grooming
     description: >
@@ -216,9 +210,6 @@ skills:
     args:
       - name: runner
         description: The composing station's executable name — the verb its rework calls ride.
-        required: true
-      - name: gridHome
-        description: The grid-home root — the `--grid-root` its rework passes.
         required: true
   - id: release
     description: >
