@@ -57,15 +57,16 @@
 /// [ClearCritiqueCapability] wipes every round.
 library;
 
-import 'dart:convert';
 import 'dart:io';
 
 import 'package:genesis_tree/genesis_tree.dart';
 import 'package:grid_engine/grid_engine.dart';
-import 'package:path/path.dart' as p;
 
 import 'committee.dart';
+import 'respec_ledger.dart';
 import 'route_failure.dart';
+
+export 'respec_ledger.dart';
 
 /// The max AUTO-respec rounds a spec may take before the route flares to a human
 /// (the bead's bound). Round 1 and round 2 auto-loop; a third fixable fail
@@ -99,137 +100,6 @@ const String kSpecifyStep = 'specify';
 /// widened. The literal is pinned in test, so an engine-side rename fails LOUD
 /// here rather than silently minting no edge.
 const String kValidatesParamKey = 'validates';
-
-/// The workspace-relative directory the respec guidance ledger lives in —
-/// deliberately NOT under `.grid/critique/` (which [ClearCritiqueCapability]
-/// wipes at the start of every committee round; the ledger must outlive that
-/// wipe AND the session re-mint).
-const String _specDir = '.grid/spec';
-
-/// The absolute path of the respec guidance ledger under [workspaceDir] —
-/// derived identically by [SpecRouteCapability] (the writer) and
-/// `SpecifyCapability` (the reader).
-String respecLedgerPath(String workspaceDir) =>
-    p.join(workspaceDir, _specDir, 'respec.json');
-
-/// One FAILING committee lane, as the re-specify agent must see it: the rubric
-/// that rejected the spec, the grade it gave, and its RATIONALE verbatim (the
-/// "recommendation" the bead requires reach the next brief).
-class RespecLane {
-  /// Creates a failing lane record.
-  const RespecLane({
-    required this.rubric,
-    required this.grade,
-    required this.rationale,
-  });
-
-  /// The rubric id that failed (`coherence`, `plan-completeness`, …).
-  final String rubric;
-
-  /// The letter grade it returned (`D`/`E` — an `F` is never respec-fixable).
-  final String grade;
-
-  /// The critic's own rationale — the correction guidance, verbatim.
-  final String rationale;
-
-  /// The wire shape (hand-rolled — this pack carries no `json_serializable`).
-  Map<String, Object?> toJson() => {
-    'rubric': rubric,
-    'grade': grade,
-    'rationale': rationale,
-  };
-
-  /// Decodes one lane; a non-map / field-less entry yields null (best-effort — a
-  /// corrupt ledger degrades to "no guidance", never a throw).
-  static RespecLane? fromJson(Object? json) {
-    if (json is! Map) return null;
-    final rubric = (json['rubric'] as String?)?.trim() ?? '';
-    final grade = (json['grade'] as String?)?.trim().toUpperCase() ?? '';
-    final rationale = (json['rationale'] as String?)?.trim() ?? '';
-    if (rubric.isEmpty || grade.isEmpty || rationale.isEmpty) return null;
-    return RespecLane(rubric: rubric, grade: grade, rationale: rationale);
-  }
-}
-
-/// The auto-respec ROUND LEDGER — the round number plus every failing lane,
-/// written into the bead's worktree by [SpecRouteCapability] and read back by
-/// `SpecifyCapability` on the NEXT round. It is BOTH channels: the correction
-/// GUIDANCE the next brief embeds, and the round COUNTER [SpecRouteCapability]
-/// reads back to apply its cap. The `round` it carries is what the next brief
-/// renders ("RESPEC round N of 2").
-class RespecLedger {
-  /// Creates a ledger for [round] over the failing [lanes].
-  const RespecLedger({required this.round, required this.lanes});
-
-  /// The auto-respec round this ledger opens (1-based; capped at
-  /// [kMaxRespecRounds]).
-  final int round;
-
-  /// Every FIXABLE failing lane, in committee (`critics` param) order.
-  final List<RespecLane> lanes;
-
-  /// The wire shape.
-  Map<String, Object?> toJson() => {
-    'version': 1,
-    'round': round,
-    'lanes': [for (final lane in lanes) lane.toJson()],
-  };
-
-  /// Decodes a ledger; null for anything unreadable (no round, no lanes, bad
-  /// JSON) — the caller then treats it as "no prior round".
-  static RespecLedger? fromJson(Object? json) {
-    if (json is! Map) return null;
-    final round = json['round'];
-    if (round is! int || round < 1) return null;
-    final raw = json['lanes'];
-    if (raw is! List) return null;
-    final lanes = [
-      for (final entry in raw)
-        if (RespecLane.fromJson(entry) case final lane?) lane,
-    ];
-    if (lanes.isEmpty) return null;
-    return RespecLedger(round: round, lanes: lanes);
-  }
-}
-
-/// The ledger at [workspaceDir], or null when there is none / it is unreadable.
-/// Best-effort by design: a corrupt ledger degrades to "no prior round" (the
-/// next specify ride simply gets no correction guidance and the round counter
-/// restarts) — it can never throw into a spawn or a route.
-RespecLedger? readRespecLedger(String workspaceDir) {
-  final file = File(respecLedgerPath(workspaceDir));
-  if (!file.existsSync()) return null;
-  try {
-    return RespecLedger.fromJson(jsonDecode(file.readAsStringSync()));
-  } catch (_) {
-    return null;
-  }
-}
-
-/// Writes [ledger] into [workspaceDir]. THROWS on a write that cannot land — the
-/// caller ([SpecRouteCapability]) turns that into a LOUD [RouteFailure]: a respec
-/// whose
-/// guidance never reaches the next brief would re-specify blind and re-park,
-/// which is precisely the toil this bead removes (guards LOUD or GONE).
-void writeRespecLedger(String workspaceDir, RespecLedger ledger) =>
-    File(respecLedgerPath(workspaceDir))
-      ..createSync(recursive: true)
-      ..writeAsStringSync(jsonEncode(ledger.toJson()));
-
-/// Deletes the ledger at [workspaceDir] — called on EVERY terminal verdict that
-/// hands the bead on: an ADVANCE (the spec is ready) and an ESCALATE (a human now
-/// rules). Both exits SPEND the counter, so a LATER rework round can never
-/// re-inject a stale spec correction into a fresh specify brief, and a re-armed
-/// route after a gate resolve can never re-flare off a consumed round.
-/// Best-effort: a delete that fails never gates an otherwise-passing spec.
-void clearRespecLedger(String workspaceDir) {
-  try {
-    final file = File(respecLedgerPath(workspaceDir));
-    if (file.existsSync()) file.deleteSync();
-  } catch (_) {
-    // Hygiene only — a stale ledger is re-overwritten by the next respec anyway.
-  }
-}
 
 /// The spec route's THREE-way verdict (bead `pow-7nm`) — the code committee's
 /// binary `advance | escalate` matrix ([CodeRouteCapability]) is unchanged; the
@@ -461,7 +331,7 @@ String respecStampReason(RespecLedger ledger) =>
     'RESPEC round ${ledger.round}/$kMaxRespecRounds — the spec is FIXABLE '
     '(${ledger.lanes.map((l) => '${l.rubric}=${l.grade}').join(', ')}). '
     'Re-running `specify` with the failing lanes\' rationales as the correction '
-    'guidance ($_specDir/respec.json); NO human ruling is needed.';
+    'guidance ($kRespecSpecDir/respec.json); NO human ruling is needed.';
 
 /// The correction-guidance BLOCK the next specify brief embeds (bead `pow-7nm`'s
 /// load-bearing requirement: "the critic rationales MUST reach the re-specify
@@ -499,10 +369,13 @@ String renderRespecGuidance(RespecLedger ledger) {
 
 /// The SPEC committee's route (beads `pow-7nm` + `pow-ui8`) — the spec-side
 /// counterpart of the code committee's [CodeRouteCapability], with a THIRD arm
-/// between advance and a human gate. It reads its sibling lanes' grades AND
-/// rationales — and its OWN cursor — through the ambient [SiblingView] (the
-/// effect verb — never a subscription/re-query, D-5), applies the deterministic
-/// [decideSpecRoute] matrix, and:
+/// between advance and a human gate. It assembles ONE fresh lane vector at
+/// entry — the GATING lane's grade off the ambient [SiblingView] (the effect
+/// verb — never a subscription/re-query, D-5), and each JUDGEMENT lane's grade
+/// + rationale off that lane's CURRENT-ROUND verdict artifact on disk
+/// ([currentVerdictFromFile]; a lane with no current-round artifact does not
+/// join — bead `pow-96s`) — applies the deterministic [decideSpecRoute] matrix
+/// over it, and:
 ///
 ///  - [SpecAdvance] ⇒ [Advance] with the SAME provenance payload the code route
 ///    emits
@@ -550,15 +423,6 @@ class SpecRouteCapability extends RouteCapability {
         .where((s) => s.isNotEmpty)
         .toList();
 
-    final lanes = <SpecLane>[
-      for (final id in criticIds)
-        (
-          id: id,
-          grade: siblings.resultOf('$parent/$id')['grade'],
-          rationale: siblings.resultOf('$parent/$id')['rationale'] ?? '',
-        ),
-    ];
-
     final dir = workspace?.workspaceDir;
     final live = dir != null && dir.isNotEmpty && Directory(dir).existsSync();
 
@@ -570,8 +434,50 @@ class SpecRouteCapability extends RouteCapability {
     // asset's own durable round record, and counting off it also BOUNDS a
     // spurious re-invalidation. Offline there is no ledger and this reads 0
     // every round; the bound is then the ENGINE's, derived from the successor
-    // chain depth, which is graph structure and needs no asset I/O.
+    // chain depth, which is graph structure and needs no asset I/O. It is the
+    // SAME counter every critic stamped into its verdict this round
+    // (`roundOf`, A27(7)(a) follow-up — bead `pow-96s`): the ledger only moves
+    // when THIS route writes it, downstream of every lane, so the round the
+    // critics stamped and the round verified below are one number.
     final priorRound = live ? (readRespecLedger(dir)?.round ?? 0) : 0;
+
+    // THE JOIN (bead `pow-96s`). One fresh vector, assembled once, is all the
+    // matrix ever decides on (ADR-0000 A29 — the ledger's recorded lanes are
+    // NOT a candidate source). What changes here is each JUDGEMENT lane's
+    // per-lane source in the LIVE posture: the lane's CURRENT-ROUND verdict
+    // artifact on disk (`currentVerdictFromFile` — the same single parser and
+    // nodePath+round freshness fence `result()` reads through), never the
+    // SiblingView alone. A lane with NO current-round artifact does NOT join:
+    // it contributes no grade, so a flare can never cite a fabricated grade
+    // for a lane whose verdict is absent or stale (the observed incident —
+    // full five-lane joins replayed over an EMPTY critique dir). The GATING
+    // lane is the exception by construction: `SpecValidationCapability` is a
+    // deterministic structural check that writes no artifact — its grade rides
+    // its own step result, and a missing one still fail-closes to a hard block
+    // in the matrix. Offline (no real worktree) there are no artifacts at all,
+    // so every lane joins off the SiblingView — the same no-op posture as the
+    // ledger I/O above.
+    final lanes = <SpecLane>[
+      for (final id in criticIds)
+        if (!live || id == gating)
+          (
+            id: id,
+            grade: siblings.resultOf('$parent/$id')['grade'],
+            rationale: siblings.resultOf('$parent/$id')['rationale'] ?? '',
+          )
+        else if (currentVerdictFromFile(
+              workspaceDir: dir,
+              rubric: id,
+              nodePath: '$parent/$id',
+              round: priorRound,
+            )
+            case final verdict?)
+          (
+            id: id,
+            grade: verdict['grade'],
+            rationale: verdict['rationale'] ?? '',
+          ),
+    ];
 
     switch (decideSpecRoute(
       lanes: lanes,

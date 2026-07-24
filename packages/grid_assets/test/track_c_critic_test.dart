@@ -21,9 +21,12 @@ import 'support/asset_fakes.dart';
 
 /// The critic's (ambient tree, per-step args) pair — the context rip-out shape:
 /// the work Bead + Workspace ride the tree; the rubric rides the step params.
-/// [round] is the node's own `rewindCount` — the round the critic stamps and
-/// `result()` verifies (A15(5) alt-A) — mounted on the ambient SiblingView the
-/// engine provides.
+/// [round] is the respec LEDGER's own `round` (A27(3), re-sourced into the
+/// verdict stamp by A27(7)(a)'s follow-up, bead `pow-96s`) — the round the
+/// critic stamps and `result()` verifies. A non-zero round writes a REAL
+/// ledger into [workspaceDir] (callers pass a real temp dir for that); round 0
+/// is the no-ledger default, which also holds for the synthetic '/w/tg-1' dir
+/// (`roundOf` reads 0 off a worktree that does not exist).
 ({FakeTreeContext context, StepArgs args}) _ctx({
   required String rubric,
   String workspaceDir = '/w/tg-1',
@@ -32,6 +35,21 @@ import 'support/asset_fakes.dart';
   int round = 0,
 }) {
   final path = nodePath ?? 'tg-1/review/$rubric';
+  if (round > 0) {
+    writeRespecLedger(
+      workspaceDir,
+      RespecLedger(
+        round: round,
+        lanes: const [
+          RespecLane(
+            rubric: 'coherence',
+            grade: 'D',
+            rationale: 'the prior round\'s correction guidance (fixture)',
+          ),
+        ],
+      ),
+    );
+  }
   return (
     context: FakeTreeContext(
       values: {
@@ -40,9 +58,6 @@ import 'support/asset_fakes.dart';
           'tg-1',
           workspaceDir: workspaceDir,
           branch: 'grid/tg-1',
-        ),
-        SiblingView: SiblingView(
-          cursor: {path: NodeCursor(rewindCount: round)},
         ),
       },
     ),
@@ -262,11 +277,50 @@ void main() {
       expect(prompt, contains('copy them byte-for-byte'));
     });
 
-    test('spawn reads the round off the ambient SiblingView (the node\'s own '
-        'rewindCount) — never a file, never a re-derivation', () {
-      final c = _ctx(rubric: 'regression-risk', round: 2);
+    test('spawn reads the round off the respec LEDGER in the worktree '
+        '(A27(7)(a) follow-up, bead pow-96s) — never the cursor\'s dead '
+        'rewindCount, which the engine projects as 0 forever', () {
+      final dir = Directory.systemTemp.createTempSync('critic-spawn-round-');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final c = _ctx(
+        rubric: 'regression-risk',
+        workspaceDir: dir.path,
+        round: 2,
+      );
       final cfg = const CriticCapability().spawn(c.context, c.args);
       expect(cfg.args.last, contains('"round":2}'));
+    });
+
+    group('roundOf — the LEDGER-derived verdict round (bead pow-96s)', () {
+      test('no ambient Workspace, or a worktree that does not exist ⇒ 0 (the '
+          'offline/dry-run posture)', () {
+        expect(roundOf(FakeTreeContext(values: const {}), 'tg-1/review/x'), 0);
+        final c = _ctx(rubric: 'spec-adherence'); // synthetic '/w/tg-1'.
+        expect(roundOf(c.context, c.args.nodePath), 0);
+      });
+
+      test('a real worktree with NO ledger ⇒ 0 (a first round, or a fresh '
+          'session whose intake reset the counter)', () {
+        final dir = Directory.systemTemp.createTempSync('roundof-none-');
+        addTearDown(() => dir.deleteSync(recursive: true));
+        final c = _ctx(rubric: 'spec-adherence', workspaceDir: dir.path);
+        expect(roundOf(c.context, c.args.nodePath), 0);
+      });
+
+      test('a ledger on disk ⇒ ITS round — the same counter the spec route '
+          'bounds its auto-respec loop with', () {
+        final dir = Directory.systemTemp.createTempSync('roundof-ledger-');
+        addTearDown(() => dir.deleteSync(recursive: true));
+        final c = _ctx(
+          rubric: 'spec-adherence',
+          workspaceDir: dir.path,
+          round: 2,
+        );
+        expect(roundOf(c.context, c.args.nodePath), 2);
+        // Re-derives on every read: the ledger moving moves the round.
+        clearRespecLedger(dir.path);
+        expect(roundOf(c.context, c.args.nodePath), 0);
+      });
     });
 
     test('the prompt pins the review scope to the pinned diff (bead pow-6wo) — '

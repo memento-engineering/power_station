@@ -122,14 +122,16 @@ void main() {
     // The false-HOLD correction: tier 1 NEVER reads the human description
     // structurally. ADR-0000 A13(10)'s placeholder fence is for the fields the
     // specify AGENT writes to a known contract, not for a human's prose.
-    test('a TERSE chore bead PASSES — there is no length floor on human prose',
-        () {
-      final terse = _refined().copyWith(
-        issueType: IssueType.chore,
-        description: 'Delete the dead flag.',
-      );
-      expect(intakeFindings(terse), isEmpty);
-    });
+    test(
+      'a TERSE chore bead PASSES — there is no length floor on human prose',
+      () {
+        final terse = _refined().copyWith(
+          issueType: IssueType.chore,
+          description: 'Delete the dead flag.',
+        );
+        expect(intakeFindings(terse), isEmpty);
+      },
+    );
 
     test('an UNBACKTICKED placeholder token in the human description does NOT '
         'hold the bead — that is the LENS\'s judgement, not a machine\'s', () {
@@ -172,21 +174,23 @@ void main() {
       }
     });
 
-    test('grid_assets declares NO second driveable-type list — the engine\'s is '
-        'CONSUMED (two definitions would drift and park work nobody meant to)',
-        () {
-      final src = Directory('lib')
-          .listSync(recursive: true)
-          .whereType<File>()
-          .where((f) => f.path.endsWith('.dart'))
-          .map((f) => f.readAsStringSync())
-          .join('\n');
-      expect(
-        src,
-        isNot(contains('kDriveableTypes')),
-        reason: 'consume IssueTypeDriveability.isDriveable / driveableTypes',
-      );
-    });
+    test(
+      'grid_assets declares NO second driveable-type list — the engine\'s is '
+      'CONSUMED (two definitions would drift and park work nobody meant to)',
+      () {
+        final src = Directory('lib')
+            .listSync(recursive: true)
+            .whereType<File>()
+            .where((f) => f.path.endsWith('.dart'))
+            .map((f) => f.readAsStringSync())
+            .join('\n');
+        expect(
+          src,
+          isNot(contains('kDriveableTypes')),
+          reason: 'consume IssueTypeDriveability.isDriveable / driveableTypes',
+        );
+      },
+    );
   });
 
   group('decideReadiness — the pure matrix (tier 3)', () {
@@ -231,19 +235,24 @@ void main() {
       }
     });
 
-    test('a D with NO rationale still holds, and says how to refine anyway',
-        () {
-      final verdict = decideReadiness(grade: 'D', rationale: '');
-      expect(verdict, isA<ReadinessHold>());
-      expect((verdict as ReadinessHold).reason, contains('rubric bands'));
-    });
+    test(
+      'a D with NO rationale still holds, and says how to refine anyway',
+      () {
+        final verdict = decideReadiness(grade: 'D', rationale: '');
+        expect(verdict, isA<ReadinessHold>());
+        expect((verdict as ReadinessHold).reason, contains('rubric bands'));
+      },
+    );
   });
 
   group('IntakeCapability — gates BEFORE any agent (tier 1)', () {
     test('a driveable bead advances with provenance', () async {
       final out = await _runIntake(_refined());
       expect(out, isA<Advance>());
-      expect((out as Advance).payload, {'verdict': 'driveable', 'type': 'feature'});
+      expect((out as Advance).payload, {
+        'verdict': 'driveable',
+        'type': 'feature',
+      });
     });
 
     test('a `decision` bead GATES — the hold NAMES the finding', () async {
@@ -261,19 +270,58 @@ void main() {
     });
 
     test('a missing ambient bead GATES (fail-closed)', () async {
-      final out = await const IntakeCapability(clearer: _noop).route(
-        FakeTreeContext(values: const {}),
-        stepArgs('tg-1/$kIntakeNode'),
-      );
+      final out = await const IntakeCapability(
+        clearer: _noop,
+      ).route(FakeTreeContext(values: const {}), stepArgs('tg-1/$kIntakeNode'));
       expect(out, isA<Escalate>());
     });
 
-    test('it WIPES the critique dir — the readiness lane\'s round-freshness '
-        '(clear-critique only wipes DOWNSTREAM of specify, so it cannot)',
-        () async {
-      final wiped = <String>[];
-      await _runIntake(_refined(), clearer: wiped.add);
-      expect(wiped.single, endsWith('.grid/critique'));
+    test(
+      'it WIPES the critique dir — the readiness lane\'s round-freshness '
+      '(clear-critique only wipes DOWNSTREAM of specify, so it cannot)',
+      () async {
+        final wiped = <String>[];
+        await _runIntake(_refined(), clearer: wiped.add);
+        expect(wiped.single, endsWith('.grid/critique'));
+      },
+    );
+
+    test('it RESETS the respec-round ledger — the counter is SESSION-scoped '
+        '(bead pow-96s): a fresh session over a reused worktree starts at '
+        'round zero instead of inheriting a prior session\'s rounds', () async {
+      final dir = Directory.systemTemp.createTempSync('intake-ledger-');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      // The prior session's spent counter, left behind in the worktree.
+      writeRespecLedger(
+        dir.path,
+        const RespecLedger(
+          round: kMaxRespecRounds,
+          lanes: [
+            RespecLane(
+              rubric: 'coherence',
+              grade: 'D',
+              rationale: 'a prior session\'s correction',
+            ),
+          ],
+        ),
+      );
+      final out = await const IntakeCapability(clearer: _noop).route(
+        FakeTreeContext(
+          values: {
+            Bead: _refined(),
+            Workspace: testWorkspace('tg-1', workspaceDir: dir.path),
+          },
+        ),
+        stepArgs('tg-1/$kIntakeNode'),
+      );
+      expect(out, isA<Advance>());
+      expect(
+        readRespecLedger(dir.path),
+        isNull,
+        reason:
+            'every lane\'s verdict-round stamp (`roundOf`) and the spec '
+            'route\'s cap now start this session at round 0',
+      );
     });
   });
 
@@ -316,10 +364,7 @@ void main() {
       expect(const IntakeCapability(), isA<RouteCapability>());
       expect(const IntakeCapability(), isNot(isA<ProcessCapability>()));
       expect(const ReadinessRouteCapability(), isA<RouteCapability>());
-      expect(
-        const ReadinessRouteCapability(),
-        isNot(isA<ProcessCapability>()),
-      );
+      expect(const ReadinessRouteCapability(), isNot(isA<ProcessCapability>()));
       expect(const ReadinessCriticCapability(), isA<ProcessCapability>());
     });
 
@@ -346,7 +391,8 @@ void main() {
       expect(
         ladder.map((s) => s.stepId),
         {kIntakeStep, kReadinessStep, kReadinessRouteStep},
-        reason: 'the ladder is the only CapabilityStep run upstream of specify; '
+        reason:
+            'the ladder is the only CapabilityStep run upstream of specify; '
             'discovery is a SubCircuitStep',
       );
       expect(

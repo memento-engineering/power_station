@@ -32,8 +32,9 @@
 ///     [_verdictFromFile] REJECTS a file that fails EITHER — falling through to
 ///     the envelope/fail-closed transports exactly as if the file were absent:
 ///     `nodePath` (A4) fences a verdict some OTHER node wrote, and `round`
-///     (A15(5) alt-A — the node's own `rewindCount`, read via the ambient
-///     [SiblingView]) fences a verdict THIS node wrote in an EARLIER round. The
+///     (A15(5) alt-A as re-sourced by A27(7)(a)'s follow-up, bead `pow-96s` —
+///     the respec ledger's own `round`, read via [roundOf]) fences a verdict
+///     THIS node wrote in an EARLIER round. The
 ///     round stamp is what makes fix 1 a BELT rather than the guarantee: under
 ///     `RouteVerdict.Rewind` the node path does not move, so `nodePath` alone
 ///     cannot tell round N's surviving file from round N+1's.
@@ -105,6 +106,7 @@ import '../agent/agent_harness.dart';
 import '../agent/environment_registry.dart';
 import '../agent/site_binding.dart';
 import '../agent/usage_report.dart';
+import 'respec_ledger.dart';
 import 'route_failure.dart';
 
 /// The gating rubric id — its grade `F` is a hard block (a non-zero Validation
@@ -191,21 +193,35 @@ String parentPath(String nodePath) {
 /// so the writer and reader can never drift apart.
 const String kVerdictRoundKey = 'round';
 
-/// THIS node's ROUND — the `rewindCount` the engine bumps on every rewind wave
-/// that re-keys it (the_grid `tg-o90`), read off the ambient [SiblingView] with
-/// the EFFECT verb at a capability's spawn/result edge (ADR-0008 D3 — never a
-/// subscription). It is the HONEST counter A15(2) established: a [Rewind] does
-/// not re-mint the session, so the cursor SURVIVES the round. It is the SAME
-/// counter `SpecRouteCapability` escalates on (`respec.dart`), so the round a
-/// critic stamps and the round the route bounds are one number.
+/// THIS node's ROUND — the respec LEDGER's own `round` (ADR-0000 A27(3), and
+/// A27(7)(a)'s named follow-up, bead `pow-96s`), read off the ambient
+/// [Workspace]'s worktree at a capability's spawn/result edge.
 ///
-/// A node the cursor does not know yet (a first, never-rewound incarnation) is
-/// round 0 — [SiblingView.cursorOf]'s own default. ZERO I/O, so it holds in the
-/// offline/dry-run posture too.
-int roundOf(TreeContext context, String nodePath) =>
-    (context.getInheritedSeedOfExactType<SiblingView>() ?? const SiblingView())
-        .cursorOf(nodePath)
-        .rewindCount;
+/// The cursor's `rewindCount` is NOT a candidate: under the `validates`-edge
+/// derivation the engine only sets it WHILE a node is currently invalidated,
+/// and by the time a lane re-runs its successor incarnation is pending/running
+/// with nothing invalidating it — the projection yields 0 forever, so a round
+/// read from there stamped EVERY verdict `round=0` and made the freshness
+/// fence consistent-but-vacuous (stale verdicts from prior rounds replayed as
+/// fresh). The ledger is the asset's own durable round record, moved by
+/// `SpecRouteCapability` exactly once per auto-respec wave — downstream of
+/// every lane, so within a round the counter is stable — and it is the SAME
+/// counter that route bounds its loop with (`respec.dart`), so the round a
+/// critic stamps and the round the route verifies are one number.
+///
+/// Round 0 everywhere the ledger cannot exist: no ambient [Workspace], a
+/// worktree that was never materialized (the offline/dry-run posture — the
+/// synthetic `/grid/worktrees/...` path), or simply no ledger on disk (a first
+/// round, or a fresh session whose `IntakeCapability` reset the counter — the
+/// ledger is SESSION-scoped, never a prior session's count). [nodePath] rides
+/// along for provenance/symmetry with the other per-lane reads; the round is a
+/// per-WORKTREE fact, identical for every lane of the round.
+int roundOf(TreeContext context, String nodePath) {
+  final workspace = context.getInheritedSeedOfExactType<Workspace>();
+  final dir = workspace?.workspaceDir;
+  if (dir == null || dir.isEmpty || !Directory(dir).existsSync()) return 0;
+  return readRespecLedger(dir)?.round ?? 0;
+}
 
 /// The verdict JSON SHAPE every critic prompt hands its critic — the TWO
 /// freshness stamps side by side: [nodePath] (A4's FOREIGN-NODE fence — WHOSE
@@ -758,9 +774,9 @@ class CriticCapability extends ProcessCapability {
       );
     }
     final workspaceDir = workspace.workspaceDir;
-    // THIS round — the node's own `rewindCount` (A15(5) alt-A), read at ENTRY
-    // with the workspace. The gating lane ignores it: its `.rc` carries no
-    // stamp and the wipe is still ITS freshness fence.
+    // THIS round — the respec LEDGER's own `round` (A27(7)(a) follow-up, bead
+    // `pow-96s`), read at ENTRY with the workspace. The gating lane ignores
+    // it: its `.rc` carries no stamp and the wipe is still ITS freshness fence.
     final round = roundOf(context, args.nodePath);
     if (rubric == kGatingRubric) {
       // The plan's exit code, captured by the spawn wrapper. Fail-closed: a
@@ -850,8 +866,8 @@ class CriticCapability extends ProcessCapability {
   ///
   /// The verdict JSON also carries TWO FRESHNESS STAMPS ([verdictJsonTemplate]),
   /// both copied byte-for-byte: [nodePath] (gate-integrity #3 — WHOSE verdict is
-  /// this?) and [round] (A15(5) alt-A — WHICH round's?, this node's own
-  /// `rewindCount` via [roundOf]). [_verdictFromFile] rejects a file that fails
+  /// this?) and [round] (A15(5) alt-A — WHICH round's?, the respec ledger's own
+  /// `round` via [roundOf]). [_verdictFromFile] rejects a file that fails
   /// EITHER, so a verdict left over from an earlier round in the SAME reused
   /// workspace directory — where the node path is byte-identical, and only the
   /// round differs — is never silently read as this round's.
@@ -1200,6 +1216,32 @@ _VerdictFileRead _verdictFromFile(
     return const _VerdictFileRejected();
   }
 }
+
+/// [rubric]'s CANONICAL verdict payload under [workspaceDir], iff it parses AND
+/// carries THIS [nodePath] + THIS [round]'s freshness stamps — null for an
+/// absent, malformed, foreign, or PRIOR-ROUND file (bead `pow-96s`).
+///
+/// A thin public wrapper over the ONE parser+fence ([_verdictFromFile] via
+/// [_payloadOrNull]) so a route JOIN can apply the same current-round rule
+/// `result()` applies, without a second JSON parser: `SpecRouteCapability`
+/// (`respec.dart`) sources each judgement lane's grade + rationale from here,
+/// and a lane that returns null here does NOT join — the flare reason can never
+/// cite a grade for a lane with no current-round artifact on disk. A present,
+/// parseable verdict MISSING a freshness stamp throws [RouteFailure] (exactly
+/// as it does under `result()`): the critic decided, but the freshness
+/// envelope is unverifiable — LOUD, never a silent drop.
+Map<String, String>? currentVerdictFromFile({
+  required String workspaceDir,
+  required String rubric,
+  required String nodePath,
+  required int round,
+}) => _payloadOrNull(
+  _verdictFromFile(
+    File(p.join(workspaceDir, _critiqueDir, '$rubric.json')),
+    expectedNodePath: nodePath,
+    expectedRound: round,
+  ),
+);
 
 /// A round-fresh verdict a critic wrote to a STRAY
 /// `.../.grid/critique/<rubric>.json` somewhere OTHER than the canonical

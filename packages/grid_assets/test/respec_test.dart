@@ -8,6 +8,7 @@
 // off that ledger's own `round`, and the ACTUATION (a declared `validates` edge
 // onto the folded `specify` sibling plus the invalidating `grade: 'F'` stamp
 // the derivation consumes).
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:grid_assets/grid_assets.dart';
@@ -32,13 +33,52 @@ List<SpecLane> _lanes(
     (id: id, grade: grades[id], rationale: rationales[id] ?? ''),
 ];
 
-Map<String, String> _allA() => {for (final id in kSpecCommitteeRubrics) id: 'A'};
+Map<String, String> _allA() => {
+  for (final id in kSpecCommitteeRubrics) id: 'A',
+};
+
+/// Plants a canonical verdict ARTIFACT for each NON-gating lane in [grades] —
+/// the LIVE route's join requirement (bead `pow-96s`): a judgement lane joins
+/// only through a `.grid/critique/<lane>.json` stamped with THIS node path and
+/// THIS round. [round] defaults to the ledger's own `round` (the same
+/// derivation `roundOf` and the route use), so successive rounds stay fresh by
+/// re-calling this after the previous route moved the ledger; pass it
+/// explicitly to plant a STALE artifact. The gating lane (`spec-validation`)
+/// is never planted: it is a deterministic structural check with no artifact —
+/// its grade rides the SiblingView (`_route`'s grades param), like the other
+/// lanes' USED to.
+void _plantVerdicts(
+  String workspaceDir,
+  Map<String, String> grades, {
+  Map<String, String> rationales = const {},
+  int? round,
+}) {
+  final r = round ?? readRespecLedger(workspaceDir)?.round ?? 0;
+  for (final entry in grades.entries) {
+    if (entry.key == _gating) continue;
+    File(p.join(workspaceDir, '.grid', 'critique', '${entry.key}.json'))
+      ..createSync(recursive: true)
+      ..writeAsStringSync(
+        jsonEncode({
+          'rubric': entry.key,
+          'version': 1,
+          'grade': entry.value,
+          if (rationales[entry.key] case final why?) 'rationale': why,
+          'nodePath': 'tg-1/spec_review/${entry.key}',
+          'round': r,
+        }),
+      );
+  }
+}
 
 /// Runs the SPEC route over the fabricated [grades]/[rationales] with the
 /// ambient [Workspace] pointed at [workspaceDir] (null ⇒ the offline posture: no
-/// ambient workspace, so no ledger I/O at all). The ROUND COUNTER is the
-/// LEDGER's own `round`, so successive rounds are driven by re-running this over
-/// the SAME [workspaceDir] — there is no cursor counter to seed.
+/// ambient workspace, so no ledger I/O at all — every lane then joins off the
+/// SiblingView). LIVE, only the GATING lane's grade rides the SiblingView: the
+/// judgement lanes join through their on-disk artifacts ([_plantVerdicts]).
+/// The ROUND COUNTER is the LEDGER's own `round`, so successive rounds are
+/// driven by re-running this over the SAME [workspaceDir] — there is no cursor
+/// counter to seed.
 Future<RouteVerdict> _route(
   Map<String, String> grades, {
   Map<String, String> rationales = const {},
@@ -117,7 +157,9 @@ void main() {
       final v = decideSpecRoute(
         lanes: _lanes(
           {..._allA(), 'coherence': 'E'},
-          rationales: const {'coherence': 'the plan contradicts the acceptance'},
+          rationales: const {
+            'coherence': 'the plan contradicts the acceptance',
+          },
         ),
         gating: _gating,
         priorRound: 0,
@@ -137,7 +179,9 @@ void main() {
             'acceptance-testability': 'B',
             'plan-completeness': 'D',
           },
-          rationales: const {'plan-completeness': 'the ADR citation is not real'},
+          rationales: const {
+            'plan-completeness': 'the ADR citation is not real',
+          },
         ),
         gating: _gating,
         priorRound: 0,
@@ -145,44 +189,55 @@ void main() {
       expect(v, isA<SpecRespec>());
     });
 
-    test('ESCALATION — the structural gating lane at F is a hard block, never a '
-        'respec (and NAMES its lane — ADR-0000 A13(5))', () {
-      final v = decideSpecRoute(
-        lanes: _lanes({..._allA(), _gating: 'F'}),
-        gating: _gating,
-        priorRound: 0,
-      );
-      expect(v, isA<SpecEscalate>());
-      expect((v as SpecEscalate).rule, 'gating-hard-block');
-      expect(v.reason, contains('spec-validation'));
-      expect(v.reason, contains('hard block'));
-    });
+    test(
+      'ESCALATION — the structural gating lane at F is a hard block, never a '
+      'respec (and NAMES its lane — ADR-0000 A13(5))',
+      () {
+        final v = decideSpecRoute(
+          lanes: _lanes({..._allA(), _gating: 'F'}),
+          gating: _gating,
+          priorRound: 0,
+        );
+        expect(v, isA<SpecEscalate>());
+        expect((v as SpecEscalate).rule, 'gating-hard-block');
+        expect(v.reason, contains('spec-validation'));
+        expect(v.reason, contains('hard block'));
+      },
+    );
 
-    test('ESCALATION — a critic F (the scope/decompose-class ruling) is never a '
-        'respec', () {
-      final v = decideSpecRoute(
-        lanes: _lanes(
-          {..._allA(), 'coherence': 'F'},
-          rationales: const {'coherence': 'this bead needs decomposing first'},
-        ),
-        gating: _gating,
-        priorRound: 0,
-      );
-      expect(v, isA<SpecEscalate>());
-      expect((v as SpecEscalate).rule, 'critic-F');
-    });
+    test(
+      'ESCALATION — a critic F (the scope/decompose-class ruling) is never a '
+      'respec',
+      () {
+        final v = decideSpecRoute(
+          lanes: _lanes(
+            {..._allA(), 'coherence': 'F'},
+            rationales: const {
+              'coherence': 'this bead needs decomposing first',
+            },
+          ),
+          gating: _gating,
+          priorRound: 0,
+        );
+        expect(v, isA<SpecEscalate>());
+        expect((v as SpecEscalate).rule, 'critic-F');
+      },
+    );
 
-    test('ESCALATION — a MISSING critic grade fail-closes to F (never advances, '
-        'never respecs)', () {
-      final grades = _allA()..remove('adr-alignment');
-      final v = decideSpecRoute(
-        lanes: _lanes(grades),
-        gating: _gating,
-        priorRound: 0,
-      );
-      expect(v, isA<SpecEscalate>());
-      expect((v as SpecEscalate).rule, 'critic-F');
-    });
+    test(
+      'ESCALATION — a MISSING critic grade fail-closes to F (never advances, '
+      'never respecs)',
+      () {
+        final grades = _allA()..remove('adr-alignment');
+        final v = decideSpecRoute(
+          lanes: _lanes(grades),
+          gating: _gating,
+          priorRound: 0,
+        );
+        expect(v, isA<SpecEscalate>());
+        expect((v as SpecEscalate).rule, 'critic-F');
+      },
+    );
 
     test('ESCALATION — a fixable grade with NO rationale has nothing to respec '
         'against', () {
@@ -213,16 +268,19 @@ void main() {
       expect((capped as SpecEscalate).rule, 'respec-cap');
     });
 
-    test('CONVERGED AT THE CAP — a clean vector with every round consumed '
-        'ADVANCES; the cap bounds the LOOP, never the spec (bead `pow-p8w`)', () {
-      final v = decideSpecRoute(
-        lanes: _lanes(_allA()),
-        gating: _gating,
-        priorRound: kMaxRespecRounds,
-      );
-      expect(v, isA<SpecAdvance>());
-      expect((v as SpecAdvance).spread, 0);
-    });
+    test(
+      'CONVERGED AT THE CAP — a clean vector with every round consumed '
+      'ADVANCES; the cap bounds the LOOP, never the spec (bead `pow-p8w`)',
+      () {
+        final v = decideSpecRoute(
+          lanes: _lanes(_allA()),
+          gating: _gating,
+          priorRound: kMaxRespecRounds,
+        );
+        expect(v, isA<SpecAdvance>());
+        expect((v as SpecAdvance).spread, 0);
+      },
+    );
   });
 
   group('the guidance ledger — the channel that survives the critique wipe', () {
@@ -259,44 +317,50 @@ void main() {
       expect(readRespecLedger(ws.path), isNull);
     });
 
-    test('a fixable fail WRITES the ledger and stamps the INVALIDATING F on the '
-        'route\'s OWN result — the engine derives the wave off the declared '
-        '`validates` edge, with no gate, no human, no session re-mint', () async {
-      final out = await _route(
-        {..._allA(), 'plan-completeness': 'D'},
-        rationales: const {'plan-completeness': 'step 3 names no test command'},
-        workspaceDir: ws.path,
-      );
-      // The route COMPLETES (an Advance on a sub-circuit terminal is a plain
-      // `state=complete` + result write) carrying the structured stamp the
-      // derivation reads. It reports NO rewind — the engine routes a reported
-      // one to a supervised failure.
-      expect(out, isA<Advance>());
-      final payload = (out as Advance).payload!;
-      expect(payload['grade'], 'F');
-      expect(payload['verdict'], 'respec');
-      expect(payload['round'], '1');
-      expect(payload['rationale'], contains('RESPEC round 1/2'));
-      expect(payload['rationale'], contains('plan-completeness=D'));
-      // The edge the derivation walks is DECLARED on the route step, and its
-      // target is a real sibling of the SAME circuit — a dangling name mints no
-      // edge at all, so a drift here would silently disarm the loop.
-      expect(
-        (kSpecReviewCircuit.stepById('route')! as CapabilityStep)
-            .params[kValidatesParamKey],
-        kSpecifyStep,
-      );
-      expect(kValidatesParamKey, 'validates');
-      expect(
-        kSpecReviewCircuit.steps.map((s) => s.stepId),
-        contains(kSpecifyStep),
-      );
-      // The RATIONALES ride the LEDGER (the stamp's prose is telemetry; the
-      // ledger is what the next specify brief reads).
-      final ledger = readRespecLedger(ws.path)!;
-      expect(ledger.round, 1);
-      expect(ledger.lanes.single.rationale, 'step 3 names no test command');
-    });
+    test(
+      'a fixable fail WRITES the ledger and stamps the INVALIDATING F on the '
+      'route\'s OWN result — the engine derives the wave off the declared '
+      '`validates` edge, with no gate, no human, no session re-mint',
+      () async {
+        final grades = {..._allA(), 'plan-completeness': 'D'};
+        const why = {'plan-completeness': 'step 3 names no test command'};
+        _plantVerdicts(ws.path, grades, rationales: why);
+        final out = await _route(
+          grades,
+          rationales: why,
+          workspaceDir: ws.path,
+        );
+        // The route COMPLETES (an Advance on a sub-circuit terminal is a plain
+        // `state=complete` + result write) carrying the structured stamp the
+        // derivation reads. It reports NO rewind — the engine routes a reported
+        // one to a supervised failure.
+        expect(out, isA<Advance>());
+        final payload = (out as Advance).payload!;
+        expect(payload['grade'], 'F');
+        expect(payload['verdict'], 'respec');
+        expect(payload['round'], '1');
+        expect(payload['rationale'], contains('RESPEC round 1/2'));
+        expect(payload['rationale'], contains('plan-completeness=D'));
+        // The edge the derivation walks is DECLARED on the route step, and its
+        // target is a real sibling of the SAME circuit — a dangling name mints no
+        // edge at all, so a drift here would silently disarm the loop.
+        expect(
+          (kSpecReviewCircuit.stepById('route')! as CapabilityStep)
+              .params[kValidatesParamKey],
+          kSpecifyStep,
+        );
+        expect(kValidatesParamKey, 'validates');
+        expect(
+          kSpecReviewCircuit.steps.map((s) => s.stepId),
+          contains(kSpecifyStep),
+        );
+        // The RATIONALES ride the LEDGER (the stamp's prose is telemetry; the
+        // ledger is what the next specify brief reads).
+        final ledger = readRespecLedger(ws.path)!;
+        expect(ledger.round, 1);
+        expect(ledger.lanes.single.rationale, 'step 3 names no test command');
+      },
+    );
 
     test('the round counter is the LEDGER\'s own `round`, and at the cap the '
         'route flares to a HUMAN gate — the asset escalates on its OWN policy '
@@ -304,13 +368,20 @@ void main() {
       final grades = {..._allA(), 'coherence': 'D'};
       const why = {'coherence': 'the plan still contradicts the acceptance'};
 
-      final first = await _route(grades, rationales: why, workspaceDir: ws.path);
+      _plantVerdicts(ws.path, grades, rationales: why); // round 0's artifacts.
+      final first = await _route(
+        grades,
+        rationales: why,
+        workspaceDir: ws.path,
+      );
       expect((first as Advance).payload!['grade'], 'F');
       expect(readRespecLedger(ws.path)!.round, 1);
 
       // Round 2 reads back the ledger the previous round wrote — no cursor, no
       // engine-side counter (the engine no longer produces one a re-run node
-      // can read).
+      // can read). The re-planted artifacts stamp the ledger's OWN round (1) —
+      // exactly what the re-run critics stamp via `roundOf`.
+      _plantVerdicts(ws.path, grades, rationales: why);
       final second = await _route(
         grades,
         rationales: why,
@@ -320,6 +391,7 @@ void main() {
       expect(readRespecLedger(ws.path)!.round, 2);
 
       // At the cap: a human rules — an Escalate, never another F stamp.
+      _plantVerdicts(ws.path, grades, rationales: why);
       final capped = await _route(
         grades,
         rationales: why,
@@ -346,6 +418,7 @@ void main() {
           ],
         ),
       );
+      _plantVerdicts(ws.path, _allA()); // round-2 (the ledger's) artifacts.
       final out = await _route(_allA(), workspaceDir: ws.path);
       expect(out, isA<Advance>());
       final payload = (out as Advance).payload!;
@@ -372,9 +445,12 @@ void main() {
         ),
       );
       // … while the CURRENT join fails on a DIFFERENT lane.
+      final grades = {..._allA(), 'coherence': 'D'};
+      const why = {'coherence': 'the plan contradicts the acceptance'};
+      _plantVerdicts(ws.path, grades, rationales: why);
       final capped = await _route(
-        {..._allA(), 'coherence': 'D'},
-        rationales: const {'coherence': 'the plan contradicts the acceptance'},
+        grades,
+        rationales: why,
         workspaceDir: ws.path,
       );
       expect(capped, isA<Escalate>());
@@ -385,66 +461,88 @@ void main() {
       expect(reason, isNot(contains('adr-alignment=D')));
     });
 
-    test('the CAP flare SPENDS the ledger — a governor gate-resolve re-arms this '
-        'route and it decides on the CURRENT join instead of re-flaring off the '
-        'consumed round forever (bead `pow-p8w`)', () async {
-      final grades = {..._allA(), 'coherence': 'D'};
-      const why = {'coherence': 'the plan still contradicts the acceptance'};
+    test(
+      'the CAP flare SPENDS the ledger — a governor gate-resolve re-arms this '
+      'route and it decides on the CURRENT join instead of re-flaring off the '
+      'consumed round forever (bead `pow-p8w`)',
+      () async {
+        final grades = {..._allA(), 'coherence': 'D'};
+        const why = {'coherence': 'the plan still contradicts the acceptance'};
 
-      await _route(grades, rationales: why, workspaceDir: ws.path);
-      await _route(grades, rationales: why, workspaceDir: ws.path);
-      expect(readRespecLedger(ws.path)!.round, kMaxRespecRounds);
+        _plantVerdicts(ws.path, grades, rationales: why);
+        await _route(grades, rationales: why, workspaceDir: ws.path);
+        _plantVerdicts(ws.path, grades, rationales: why);
+        await _route(grades, rationales: why, workspaceDir: ws.path);
+        expect(readRespecLedger(ws.path)!.round, kMaxRespecRounds);
 
-      final capped = await _route(
-        grades,
-        rationales: why,
-        workspaceDir: ws.path,
-      );
-      expect(capped, isA<Escalate>());
-      expect(readRespecLedger(ws.path), isNull);
+        _plantVerdicts(ws.path, grades, rationales: why);
+        final capped = await _route(
+          grades,
+          rationales: why,
+          workspaceDir: ws.path,
+        );
+        expect(capped, isA<Escalate>());
+        expect(readRespecLedger(ws.path), isNull);
 
-      // The re-arm after the human ruling: a CONVERGED join advances.
-      final reArmed = await _route(_allA(), workspaceDir: ws.path);
-      expect(reArmed, isA<Advance>());
-      expect((reArmed as Advance).payload!['verdict'], 'advance');
-    });
+        // The re-arm after the human ruling: a CONVERGED join advances. The
+        // ledger is spent, so the re-run lanes stamp round 0 again.
+        _plantVerdicts(ws.path, _allA());
+        final reArmed = await _route(_allA(), workspaceDir: ws.path);
+        expect(reArmed, isA<Advance>());
+        expect((reArmed as Advance).payload!['verdict'], 'advance');
+      },
+    );
 
-    test('a NON-cap escalate arm spends the ledger too — no stale correction '
-        'survives into a `grid rework` specify brief (bead `pow-p8w`)', () async {
-      writeRespecLedger(
-        ws.path,
-        const RespecLedger(
-          round: 1,
-          lanes: [
-            RespecLane(rubric: 'coherence', grade: 'D', rationale: 'spent'),
-          ],
-        ),
-      );
-      final out = await _route(
-        {..._allA(), 'coherence': 'F'},
-        rationales: const {'coherence': 'this bead needs decomposing first'},
-        workspaceDir: ws.path,
-      );
-      expect(out, isA<Escalate>());
-      expect(readRespecLedger(ws.path), isNull);
-    });
+    test(
+      'a NON-cap escalate arm spends the ledger too — no stale correction '
+      'survives into a `grid rework` specify brief (bead `pow-p8w`)',
+      () async {
+        writeRespecLedger(
+          ws.path,
+          const RespecLedger(
+            round: 1,
+            lanes: [
+              RespecLane(rubric: 'coherence', grade: 'D', rationale: 'spent'),
+            ],
+          ),
+        );
+        final grades = {..._allA(), 'coherence': 'F'};
+        const why = {'coherence': 'this bead needs decomposing first'};
+        _plantVerdicts(
+          ws.path,
+          grades,
+          rationales: why,
+        ); // the ledger's round 1.
+        final out = await _route(
+          grades,
+          rationales: why,
+          workspaceDir: ws.path,
+        );
+        expect(out, isA<Escalate>());
+        expect(readRespecLedger(ws.path), isNull);
+      },
+    );
 
-    test('an ADVANCE deletes the ledger — a later rework never re-injects stale '
-        'guidance', () async {
-      writeRespecLedger(
-        ws.path,
-        const RespecLedger(
-          round: 1,
-          lanes: [
-            RespecLane(rubric: 'coherence', grade: 'D', rationale: 'stale'),
-          ],
-        ),
-      );
-      final out = await _route(_allA(), workspaceDir: ws.path);
-      expect(out, isA<Advance>());
-      expect((out as Advance).payload!['verdict'], 'advance');
-      expect(readRespecLedger(ws.path), isNull);
-    });
+    test(
+      'an ADVANCE deletes the ledger — a later rework never re-injects stale '
+      'guidance',
+      () async {
+        writeRespecLedger(
+          ws.path,
+          const RespecLedger(
+            round: 1,
+            lanes: [
+              RespecLane(rubric: 'coherence', grade: 'D', rationale: 'stale'),
+            ],
+          ),
+        );
+        _plantVerdicts(ws.path, _allA()); // the ledger's round 1.
+        final out = await _route(_allA(), workspaceDir: ws.path);
+        expect(out, isA<Advance>());
+        expect((out as Advance).payload!['verdict'], 'advance');
+        expect(readRespecLedger(ws.path), isNull);
+      },
+    );
 
     test('a ledger write that cannot land is LOUD (a thrown RouteFailure) — '
         'never a respec whose guidance silently never arrives', () async {
@@ -452,6 +550,11 @@ void main() {
       File(p.join(ws.path, '.grid', 'spec'))
         ..createSync(recursive: true)
         ..writeAsStringSync('not a directory');
+      _plantVerdicts(
+        ws.path,
+        {..._allA(), 'coherence': 'D'},
+        rationales: const {'coherence': 'incoherent'},
+      );
       // A route has NO failure arm: a throwing body is what RouteAllocation
       // sinks to supervision.
       await expectLater(
@@ -485,6 +588,101 @@ void main() {
       // reaches `kMaxReworkRounds` off the successor chain and gates the node.
       expect(readRespecLedger('/grid/worktrees/tg-1'), isNull);
       expect(kMaxRespecRounds, lessThan(kMaxReworkRounds));
+    });
+
+    test('THE JOIN RULE (bead `pow-96s`) — a lane joins the LIVE route only '
+        'through a CURRENT-ROUND artifact: the cap flare names ONLY the lanes '
+        'whose verdicts are on disk this round, never a SiblingView grade with '
+        'no artifact behind it', () async {
+      // The counter is SPENT: the next fixable join is the cap flare.
+      writeRespecLedger(
+        ws.path,
+        const RespecLedger(
+          round: kMaxRespecRounds,
+          lanes: [
+            RespecLane(rubric: 'coherence', grade: 'D', rationale: 'still off'),
+          ],
+        ),
+      );
+      // CURRENT-round (2) artifacts for TWO judgement lanes only…
+      _plantVerdicts(
+        ws.path,
+        const {'coherence': 'D', 'adr-alignment': 'A'},
+        rationales: const {'coherence': 'the plan contradicts the acceptance'},
+      );
+      // …a STALE (round-1) artifact for a third…
+      _plantVerdicts(
+        ws.path,
+        const {'plan-completeness': 'D'},
+        rationales: const {'plan-completeness': 'left over from round 1'},
+        round: kMaxRespecRounds - 1,
+      );
+      // …and NO artifact at all for `acceptance-testability`. The SiblingView
+      // still carries a full five-lane D-heavy vector (the replay shape): the
+      // gating lane's A is the ONLY grade the route may take from it.
+      final capped = await _route(
+        {
+          ..._allA(),
+          'coherence': 'D',
+          'plan-completeness': 'D',
+          'acceptance-testability': 'D',
+        },
+        rationales: const {
+          'coherence': 'the plan contradicts the acceptance',
+          'plan-completeness': 'left over from round 1',
+          'acceptance-testability': 'never graded this round',
+        },
+        workspaceDir: ws.path,
+      );
+      expect(capped, isA<Escalate>());
+      final reason = (capped as Escalate).reason;
+      expect(reason, startsWith('respec-cap'));
+      // The joined lanes — gating (SiblingView) + the two current-round files.
+      expect(reason, contains('coherence=D'));
+      expect(reason, contains('adr-alignment=A'));
+      expect(reason, contains('spec-validation=A'));
+      // The dropped lanes: absent artifact / stale artifact ⇒ NOT joined, so
+      // the flare cites NO grade for them — fabricating one was the incident.
+      expect(reason, isNot(contains('acceptance-testability')));
+      expect(reason, isNot(contains('plan-completeness')));
+    });
+
+    test('A FRESH session/ledger over a worktree littered with a PRIOR '
+        'session\'s round-stamped verdicts does NOT replay them '
+        '(bead `pow-96s`) — the observed incident: a five-lane join fabricated '
+        'over artifacts the current round never wrote', () async {
+      // The prior session ended at round 2; its verdicts survive on disk. The
+      // fresh session's intake CLEARED the ledger, so THIS round is 0.
+      _plantVerdicts(
+        ws.path,
+        {..._allA(), 'coherence': 'D', 'plan-completeness': 'D'},
+        rationales: const {
+          'coherence': 'a prior session said so',
+          'plan-completeness': 'a prior session said so',
+        },
+        round: kMaxRespecRounds,
+      );
+      expect(readRespecLedger(ws.path), isNull);
+      final out = await _route(
+        {..._allA(), 'coherence': 'D', 'plan-completeness': 'D'},
+        rationales: const {
+          'coherence': 'a prior session said so',
+          'plan-completeness': 'a prior session said so',
+        },
+        workspaceDir: ws.path,
+      );
+      // No judgement lane has a round-0 artifact ⇒ none joins: the stale D
+      // grades are never cited, never respec'd, never flared. The gating lane
+      // (deterministic, artifact-less by design) is the whole join.
+      expect(out, isA<Advance>());
+      final payload = (out as Advance).payload!;
+      expect(payload['verdict'], 'advance');
+      expect(payload['grades'], 'spec-validation=A');
+      expect(
+        payload.containsKey('grade'),
+        isFalse,
+        reason: 'no invalidating stamp off replayed verdicts',
+      );
     });
   });
 

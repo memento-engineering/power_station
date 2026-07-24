@@ -79,6 +79,7 @@ import '../agent/environment_registry.dart';
 import '../agent/site_binding.dart';
 import '../agent/usage_report.dart';
 import 'committee.dart';
+import 'respec_ledger.dart';
 
 /// The deterministic intake-contract step id (the ladder's head — zero agents).
 const String kIntakeStep = 'intake';
@@ -270,6 +271,20 @@ String renderIntakeHold(Bead bead, List<String> findings) {
 /// immediately before the lane, so its wipe is that lane's guarantee. Two wipes,
 /// two lane-sets, neither weakened. Best-effort, same posture as
 /// [ClearCritiqueCapability]: a wipe that throws never gates the round.
+///
+/// And it owns the SESSION SCOPE of the auto-respec ROUND COUNTER (bead
+/// `pow-96s`, ADR-0000 A27(7)(a)'s follow-up). The counter IS the worktree's
+/// respec ledger (`respec_ledger.dart`) — the file every critic family now
+/// derives its verdict-round stamp from (`roundOf`) — and the worktree is
+/// REUSED across sessions, so without a reset a fresh session over the same
+/// node path would inherit a PRIOR session's rounds (observed live: a spent
+/// counter re-flaring `respec-cap` with replayed grades). This step is the
+/// spec circuit's once-per-session head, UPSTREAM of `specify` and therefore
+/// OUTSIDE the auto-respec invalidated closure — it runs once when the session
+/// arms and never again during the session's respec waves — so clearing the
+/// ledger HERE is exactly "the counter starts at round zero per session"
+/// while leaving the in-session count untouched. Same best-effort posture as
+/// the critique wipe ([clearRespecLedger] swallows its own IO failures).
 class IntakeCapability extends RouteCapability {
   /// Creates the intake lens, optionally over an injected [clearer] (tests
   /// inject a no-op so the offline suite never touches a real filesystem at a
@@ -296,6 +311,12 @@ class IntakeCapability extends RouteCapability {
       } catch (_) {
         // Best-effort hygiene (the ClearCritiqueCapability posture).
       }
+      // The SESSION-scoped respec-round reset (bead `pow-96s`): a fresh
+      // session over a reused worktree starts the auto-respec counter — and
+      // therefore every lane's verdict-round stamp (`roundOf`) — at round
+      // zero. Best-effort inside `clearRespecLedger` itself; a no-op when no
+      // ledger (or no real worktree) exists.
+      clearRespecLedger(workspace.workspaceDir);
     }
     final findings = intakeFindings(bead);
     if (findings.isEmpty) {
@@ -370,7 +391,10 @@ class ReadinessCriticCapability extends CriticCapability {
     return spawnFor(
       environment: environment,
       model: config.params['model'],
-      endpoint: siteBinding.endpointFor(name: config.harness, environment: environment),
+      endpoint: siteBinding.endpointFor(
+        name: config.harness,
+        environment: environment,
+      ),
       brief: AgentBrief(
         task: buildReadinessPrompt(
           bead,
@@ -397,9 +421,11 @@ class ReadinessCriticCapability extends CriticCapability {
   ///
   /// Carries the SAME hardening as [CriticCapability.buildCriticPrompt]: the
   /// verdict JSON's `nodePath` stamp (the foreign-node fence, ADR-0000 A4 as
-  /// re-scoped by A15(5)) and the `round` stamp (A15(5) alt-A) — this lane is
-  /// upstream of every rewind set, so its round is always 0, but it stamps
-  /// because it shares ONE reader with the lanes that do rewind; the
+  /// re-scoped by A15(5)) and the `round` stamp (A15(5) alt-A, re-sourced to
+  /// the respec ledger by A27(7)(a)'s follow-up) — this lane runs upstream of
+  /// `specify`, after [IntakeCapability]'s session-scoped ledger reset, so its
+  /// round is always 0, but it stamps because it shares ONE reader with the
+  /// lanes whose rounds do move; the
   /// workspace-derived ABSOLUTE canonical write path
   /// (gate-integrity #4 — cwd-invariant), and the file-write instruction as the
   /// LAST thing the prompt says (tg-291 — recency). What differs is the SUBJECT
