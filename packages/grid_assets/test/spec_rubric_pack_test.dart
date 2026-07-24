@@ -39,8 +39,10 @@ String _extensionDir() {
     if (parent.path == dir.path) break;
     dir = parent;
   }
-  fail('could not locate packages/grid_assets/extension from '
-      '${Directory.current.path}');
+  fail(
+    'could not locate packages/grid_assets/extension from '
+    '${Directory.current.path}',
+  );
 }
 
 /// The residue fence: tokens from the pack's DEPRECATED source context that
@@ -65,12 +67,14 @@ void main() {
 
   group('the spec-readiness rubrics load through the SAME RubricSource', () {
     for (final rubricId in kSpecCommitteeRubrics) {
-      test('loadRubric("$rubricId") returns non-empty prose that names itself',
-          () {
-        final text = loader.loadRubric(rubricId);
-        expect(text, isNotEmpty);
-        expect(text, contains(rubricId));
-      });
+      test(
+        'loadRubric("$rubricId") returns non-empty prose that names itself',
+        () {
+          final text = loader.loadRubric(rubricId);
+          expect(text, isNotEmpty);
+          expect(text, contains(rubricId));
+        },
+      );
     }
 
     test('the gating rubric names its hard-block contract', () {
@@ -100,7 +104,8 @@ void main() {
           expect(
             match,
             isNull,
-            reason: '${entry.key} carries ${residue.key} '
+            reason:
+                '${entry.key} carries ${residue.key} '
                 '("${match?.group(0)}") — the port must be rewritten for the '
                 'station context, never copied verbatim',
           );
@@ -108,15 +113,18 @@ void main() {
       });
     }
 
-    test('the fence is non-vacuous: it WOULD catch the verbatim source prose',
-        () {
-      const verbatim = 'run go test ./internal/lint/ before fs convene '
-          '(see factoryskills ADR 0012 in docs/adrs)';
-      final tripped = _forbiddenResidue.values
-          .where((pattern) => pattern.hasMatch(verbatim))
-          .length;
-      expect(tripped, greaterThanOrEqualTo(4));
-    });
+    test(
+      'the fence is non-vacuous: it WOULD catch the verbatim source prose',
+      () {
+        const verbatim =
+            'run go test ./internal/lint/ before fs convene '
+            '(see factoryskills ADR 0012 in docs/adrs)';
+        final tripped = _forbiddenResidue.values
+            .where((pattern) => pattern.hasMatch(verbatim))
+            .length;
+        expect(tripped, greaterThanOrEqualTo(4));
+      },
+    );
   });
 
   group('the station-context rewrite is PRESENT (not just residue-free)', () {
@@ -143,17 +151,20 @@ void main() {
       expect(
         text.contains(RegExp(r'never\s+"plugin"')),
         isTrue,
-        reason: 'the terminology rule rides the rubric (naming the banned '
+        reason:
+            'the terminology rule rides the rubric (naming the banned '
             'word to ban it)',
       );
       expect(text, contains('PackagedAssetLoader'));
       expect(text, contains('bd dep list'));
     });
 
-    test('spec-validation names the station status model\'s gate (`gated`)',
-        () {
-      expect(loader.loadRubric(kSpecGatingRubric), contains('gated'));
-    });
+    test(
+      'spec-validation names the station status model\'s gate (`gated`)',
+      () {
+        expect(loader.loadRubric(kSpecGatingRubric), contains('gated'));
+      },
+    );
   });
 
   group('renderSpecCriticPrompt — the portable mirror', () {
@@ -162,7 +173,8 @@ void main() {
       final review = bead('tg-1').copyWith(
         title: 'Wire the federation bus',
         acceptanceCriteria: '- [ ] A peer heartbeat surfaces within 1s',
-        design: '## Implementation Plan\n1. step\n## Touches\nnone\n'
+        design:
+            '## Implementation Plan\n1. step\n## Touches\nnone\n'
             '## ADR Alignment\nnone\n## Validation Plan\n- check',
       );
       final prompt = loader.renderSpecCriticPrompt('coherence', review);
@@ -234,42 +246,45 @@ void main() {
   });
 
   group('renderDiscoveryPrompt — the portable mirror of the explorer lens', () {
-    test('substitutes every hole (no `{{` survives), embeds the bead + the lens '
-        'brief, and carries the CITE-THE-OFFENCE contract — it GRADES nothing',
-        () {
-      final review = bead('tg-1').copyWith(
-        title: 'Wire the federation bus',
-        description: 'DECIDED: extend the existing bus; no new transport.',
-      );
-      final prompt = loader.renderDiscoveryPrompt(
-        kDecisionLens,
-        lensBrief(kDecisionLens),
-        review,
-      );
-      expect(prompt, isNot(contains('{{')));
-      expect(prompt, contains(kDecisionLens));
-      expect(prompt, contains('tg-1'));
-      expect(prompt, contains('Wire the federation bus'));
-      expect(prompt, contains('DECISION CONTEXT'));
-      // The gate's three rules, as the lens reads them.
-      expect(prompt, contains('CITE-THE-OFFENCE'));
-      expect(prompt, contains('The departure clause'));
-      expect(prompt, contains('NAME the precedent'));
-      // A lens REPORTS; it does not grade — no letter anywhere in the mirror.
-      expect(prompt, contains('You DECIDE nothing'));
-      expect(prompt, isNot(contains('A (best) through F')));
-      // READ-ONLY (A37), and CHEAP.
-      expect(prompt, contains('You are READ-ONLY'));
-      expect(prompt, contains('no `bd update`'));
-      expect(prompt, contains('Stay CHEAP'));
-    });
+    test(
+      'substitutes every hole (no `{{` survives), embeds the bead + the lens '
+      'brief, and carries the CITE-THE-OFFENCE contract — it GRADES nothing',
+      () {
+        final review = bead('tg-1').copyWith(
+          title: 'Wire the federation bus',
+          description: 'DECIDED: extend the existing bus; no new transport.',
+        );
+        final prompt = loader.renderDiscoveryPrompt(
+          kDecisionLens,
+          lensBrief(kDecisionLens),
+          review,
+        );
+        expect(prompt, isNot(contains('{{')));
+        expect(prompt, contains(kDecisionLens));
+        expect(prompt, contains('tg-1'));
+        expect(prompt, contains('Wire the federation bus'));
+        expect(prompt, contains('DECISION CONTEXT'));
+        // The gate's three rules, as the lens reads them.
+        expect(prompt, contains('CITE-THE-OFFENCE'));
+        expect(prompt, contains('The departure clause'));
+        expect(prompt, contains('NAME the precedent'));
+        // A lens REPORTS; it does not grade — no letter anywhere in the mirror.
+        expect(prompt, contains('You DECIDE nothing'));
+        expect(prompt, isNot(contains('A (best) through F')));
+        // READ-ONLY (A37), and CHEAP.
+        expect(prompt, contains('You are READ-ONLY'));
+        expect(prompt, contains('no `bd update`'));
+        expect(prompt, contains('Stay CHEAP'));
+      },
+    );
   });
 
   group('extension/mcp/config.yaml declares the spec pack', () {
     test('the five spec rubrics + the INTAKE rubric ride as resources; the '
         'spec-critic, readiness and discovery prompts are declared', () {
-      final manifest =
-          File(p.join(root, 'mcp', 'config.yaml')).readAsStringSync();
+      final manifest = File(
+        p.join(root, 'mcp', 'config.yaml'),
+      ).readAsStringSync();
       for (final rubricId in kSpecCommitteeRubrics) {
         expect(
           manifest,
@@ -284,5 +299,27 @@ void main() {
       // The DISCOVERY explorer — no rubric, so a prompt entry only.
       expect(manifest, contains('prompts/discovery.md'));
     });
+  });
+
+  test('discovery prompts require structured FOREIGN bead citations', () {
+    final runtime = const DiscoveryLensCapability().buildLensPrompt(
+      bead: bead('tg-1'),
+      lens: kPriorArtLens,
+      nodePath: 'tg-1/spec_review/discovery/$kPriorArtLens',
+      workspaceDir: '/w/tg-1',
+    );
+    final packaged = loader.loadPromptTemplate('discovery');
+    for (final prompt in [runtime, packaged]) {
+      for (final token in [
+        'beadCitation',
+        'VERBATIM',
+        'FOREIGN',
+        'beadId',
+        'field',
+        'excerpt',
+      ]) {
+        expect(prompt, contains(token));
+      }
+    }
   });
 }

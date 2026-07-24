@@ -297,28 +297,102 @@ class DiscoveryFinding {
       '${precedent.isEmpty ? '' : ' (precedent: `$precedent`)'}';
 }
 
+/// A field on a bead that discovery may cite verbatim.
+enum BeadCitationField {
+  title,
+  description,
+  design,
+  acceptanceCriteria,
+  notes;
+
+  /// The stable JSON spelling used by beads/search.
+  String get wire => switch (this) {
+    BeadCitationField.title => 'title',
+    BeadCitationField.description => 'description',
+    BeadCitationField.design => 'design',
+    BeadCitationField.acceptanceCriteria => 'acceptance_criteria',
+    BeadCitationField.notes => 'notes',
+  };
+
+  /// Parses a supported bead-field spelling.
+  static BeadCitationField? fromWire(Object? wire) => switch (wire) {
+    'title' => BeadCitationField.title,
+    'description' => BeadCitationField.description,
+    'design' => BeadCitationField.design,
+    'acceptance_criteria' => BeadCitationField.acceptanceCriteria,
+    'notes' => BeadCitationField.notes,
+    _ => null,
+  };
+}
+
+/// A machine-checkable quotation from one bead field.
+class BeadFieldCitation {
+  /// Creates a citation of [excerpt] from [field] on [beadId].
+  const BeadFieldCitation({
+    required this.beadId,
+    required this.field,
+    required this.excerpt,
+  });
+
+  /// The bead whose field was quoted.
+  final String beadId;
+
+  /// The field that was quoted.
+  final BeadCitationField field;
+
+  /// The verbatim quotation.
+  final String excerpt;
+
+  /// The wire shape.
+  Map<String, Object?> toJson() => {
+    'beadId': beadId,
+    'field': field.wire,
+    'excerpt': excerpt,
+  };
+
+  /// Decodes a complete citation; incomplete or unsupported citations are null.
+  static BeadFieldCitation? fromJson(Object? json) {
+    if (json is! Map) return null;
+    final beadId = (json['beadId'] as String?)?.trim() ?? '';
+    final field = BeadCitationField.fromWire(json['field']);
+    final excerpt = (json['excerpt'] as String?)?.trim() ?? '';
+    if (beadId.isEmpty || field == null || excerpt.isEmpty) return null;
+    return BeadFieldCitation(beadId: beadId, field: field, excerpt: excerpt);
+  }
+}
+
 /// One context NOTE — what an explorer FOUND (never a judgement).
 class ContextNote {
   /// Creates a note.
-  const ContextNote({required this.note, this.source = ''});
+  const ContextNote({required this.note, this.source = '', this.beadCitation});
 
   /// The finding, in the explorer's own words.
   final String note;
 
-  /// Where it was found (a file path, a bead id, an ADR clause).
+  /// Where it was found (a non-bead file path or ADR clause).
   final String source;
 
+  /// The checked bead-field provenance, when this note cites a bead.
+  final BeadFieldCitation? beadCitation;
+
   /// The wire shape.
-  Map<String, Object?> toJson() => {'note': note, 'source': source};
+  Map<String, Object?> toJson() => {
+    'note': note,
+    'source': source,
+    if (beadCitation case final citation?) 'beadCitation': citation.toJson(),
+  };
 
   /// Decodes one note; a note-less entry yields null.
   static ContextNote? fromJson(Object? json) {
     if (json is! Map) return null;
     final note = (json['note'] as String?)?.trim() ?? '';
     if (note.isEmpty) return null;
+    final beadCitation = BeadFieldCitation.fromJson(json['beadCitation']);
+    if (json.containsKey('beadCitation') && beadCitation == null) return null;
     return ContextNote(
       note: note,
       source: (json['source'] as String?)?.trim() ?? '',
+      beadCitation: beadCitation,
     );
   }
 
@@ -430,6 +504,8 @@ class PriorArt {
     required this.store,
     required this.status,
     required this.title,
+    required this.field,
+    required this.snippet,
     required this.query,
   });
 
@@ -445,6 +521,12 @@ class PriorArt {
   /// Its title.
   final String title;
 
+  /// The bead field that matched.
+  final String field;
+
+  /// The verbatim search snippet from the matched field.
+  final String snippet;
+
   /// The query that surfaced it (provenance).
   final String query;
 
@@ -454,19 +536,25 @@ class PriorArt {
     'store': store,
     'status': status,
     'title': title,
+    'field': field,
+    'snippet': snippet,
     'query': query,
   };
 
-  /// Decodes one hit; an id-less entry yields null.
+  /// Decodes one hit; incomplete provenance yields null.
   static PriorArt? fromJson(Object? json) {
     if (json is! Map) return null;
     final beadId = (json['id'] as String?)?.trim() ?? '';
-    if (beadId.isEmpty) return null;
+    final field = BeadCitationField.fromWire(json['field']);
+    final snippet = (json['snippet'] as String?)?.trim() ?? '';
+    if (beadId.isEmpty || field == null || snippet.isEmpty) return null;
     return PriorArt(
       beadId: beadId,
       store: (json['store'] as String?)?.trim() ?? '',
       status: (json['status'] as String?)?.trim() ?? '',
       title: (json['title'] as String?)?.trim() ?? '',
+      field: field.wire,
+      snippet: snippet,
       query: (json['query'] as String?)?.trim() ?? '',
     );
   }
@@ -554,6 +642,7 @@ class DiscoveryDossier {
   /// Creates a dossier.
   const DiscoveryDossier({
     required this.anchors,
+    this.workBeadId = '',
     this.context = const [],
     this.flags = const [],
     this.departures = const [],
@@ -562,6 +651,9 @@ class DiscoveryDossier {
 
   /// The deterministic half.
   final DiscoveryAnchors anchors;
+
+  /// The bead this dossier was assembled for.
+  final String workBeadId;
 
   /// Every explorer's context notes, in lens order.
   final List<ContextNote> context;
@@ -582,6 +674,7 @@ class DiscoveryDossier {
   /// The wire shape.
   Map<String, Object?> toJson() => {
     'version': 1,
+    'workBeadId': workBeadId,
     'anchors': anchors.toJson(),
     'context': [for (final c in context) c.toJson()],
     'flags': [for (final f in flags) f.toJson()],
@@ -598,6 +691,7 @@ class DiscoveryDossier {
     if (anchors == null) return null;
     return DiscoveryDossier(
       anchors: anchors,
+      workBeadId: (json['workBeadId'] as String?)?.trim() ?? '',
       context: [
         if (json['context'] case final List<Object?> raw)
           for (final entry in raw)
@@ -709,6 +803,7 @@ final class DiscoveryRegather extends DiscoveryVerdict {
 DiscoveryVerdict decideDiscovery({
   required Map<String, LensReport?> lanes,
   required DiscoveryAnchors anchors,
+  required Bead workBead,
   required int priorRound,
   int maxRounds = kMaxRegatherRounds,
 }) {
@@ -750,7 +845,12 @@ DiscoveryVerdict decideDiscovery({
   return DiscoveryAdvance(
     DiscoveryDossier(
       anchors: anchors,
-      context: [for (final r in reports) ...r.context],
+      workBeadId: workBead.id,
+      context: verifiedContextNotes(
+        notes: [for (final r in reports) ...r.context],
+        workBead: workBead,
+        priorArt: anchors.priorArt,
+      ),
       flags: flags,
       departures: [
         for (final v in violations)
@@ -759,6 +859,52 @@ DiscoveryVerdict decideDiscovery({
       missingLenses: missing.toList()..sort(),
     ),
   );
+}
+
+/// Returns the live value of [field] on [bead].
+String beadFieldValue(Bead bead, BeadCitationField field) => switch (field) {
+  BeadCitationField.title => bead.title,
+  BeadCitationField.description => bead.description,
+  BeadCitationField.design => bead.design,
+  BeadCitationField.acceptanceCriteria => bead.acceptanceCriteria,
+  BeadCitationField.notes => bead.notes,
+};
+
+/// Whether [citation] exactly names evidence available to discovery.
+bool verifiesBeadCitation({
+  required BeadFieldCitation citation,
+  required Bead workBead,
+  required List<PriorArt> priorArt,
+}) {
+  if (citation.beadId == workBead.id) {
+    return beadFieldValue(workBead, citation.field).contains(citation.excerpt);
+  }
+  return priorArt.any(
+    (hit) =>
+        hit.beadId == citation.beadId &&
+        hit.field == citation.field.wire &&
+        hit.snippet == citation.excerpt,
+  );
+}
+
+/// Keeps only context whose bead attribution can be checked at assembly time.
+List<ContextNote> verifiedContextNotes({
+  required Iterable<ContextNote> notes,
+  required Bead workBead,
+  required List<PriorArt> priorArt,
+}) {
+  final knownIds = {workBead.id, for (final hit in priorArt) hit.beadId};
+  return notes.where((note) {
+    final citation = note.beadCitation;
+    if (citation != null) {
+      return verifiesBeadCitation(
+        citation: citation,
+        workBead: workBead,
+        priorArt: priorArt,
+      );
+    }
+    return !knownIds.any((id) => note.source.contains(id));
+  }).toList();
 }
 
 /// The REFINEMENT ASK an offending bead parks with — it CITES every offence, and
@@ -822,7 +968,9 @@ String renderDiscoveryDossier(DiscoveryDossier dossier) {
   if (a.rubrics.isNotEmpty) {
     b
       ..writeln()
-      ..writeln('### How your spec will be graded (the committee\'s own rubrics)');
+      ..writeln(
+        '### How your spec will be graded (the committee\'s own rubrics)',
+      );
     for (final entry in a.rubrics.entries) {
       b
         ..writeln()
@@ -873,7 +1021,7 @@ String renderDiscoveryDossier(DiscoveryDossier dossier) {
       ..writeln()
       ..writeln('### What the explorers found');
     for (final note in dossier.context) {
-      b.writeln('- ${note.line}');
+      b.writeln('- ${renderContextNote(note, dossier.workBeadId)}');
     }
   }
 
@@ -891,7 +1039,9 @@ String renderDiscoveryDossier(DiscoveryDossier dossier) {
   if (dossier.departures.isNotEmpty) {
     b
       ..writeln()
-      ..writeln('### Declared departures — CARRY these into `## ADR Alignment`');
+      ..writeln(
+        '### Declared departures — CARRY these into `## ADR Alignment`',
+      );
     for (final departure in dossier.departures) {
       b.writeln('- [${departure.kind.wire}] ${departure.line}');
     }
@@ -908,6 +1058,16 @@ String renderDiscoveryDossier(DiscoveryDossier dossier) {
       );
   }
   return b.toString();
+}
+
+/// Renders a context note with explicit bead ownership.
+String renderContextNote(ContextNote note, String workBeadId) {
+  final citation = note.beadCitation;
+  if (citation == null) return note.line;
+  final ownership = citation.beadId == workBeadId ? 'SELF' : 'FOREIGN';
+  return '${note.note} '
+      '($ownership ${citation.beadId}.${citation.field.wire}: '
+      '“${citation.excerpt}”)';
 }
 
 /// The pluggable ANCHOR resolution seam (mirrors [RubricSource]) — defaults to
@@ -969,6 +1129,8 @@ PriorArtSource stationPriorArt(
           store: hit.store,
           status: hit.status,
           title: hit.title,
+          field: hit.field,
+          snippet: hit.snippet,
           query: query,
         ),
       );
@@ -1052,10 +1214,9 @@ T? _readJson<T>(String path, T? Function(Object?) decode) {
   }
 }
 
-void _writeJson(String path, Map<String, Object?> json) =>
-    File(path)
-      ..createSync(recursive: true)
-      ..writeAsStringSync(jsonEncode(json));
+void _writeJson(String path, Map<String, Object?> json) => File(path)
+  ..createSync(recursive: true)
+  ..writeAsStringSync(jsonEncode(json));
 
 /// The REGATHER round LEDGER — just the round number, written into the bead's
 /// worktree by [DiscoveryRouteCapability] on a [DiscoveryRegather] and read back
@@ -1172,7 +1333,8 @@ class AnchorsCapability extends ServiceCapability {
       );
     }
     final workspaceDir = workspace?.workspaceDir ?? '';
-    final live = workspaceDir.isNotEmpty && Directory(workspaceDir).existsSync();
+    final live =
+        workspaceDir.isNotEmpty && Directory(workspaceDir).existsSync();
 
     // Round-freshness: wipe the PREVIOUS round's reports before any lens can read
     // one (best-effort — the A17(8) posture).
@@ -1312,7 +1474,10 @@ class DiscoveryLensCapability extends ProcessCapability {
     return spawnFor(
       environment: environment,
       model: config.params['model'],
-      endpoint: siteBinding.endpointFor(name: config.harness, environment: environment),
+      endpoint: siteBinding.endpointFor(
+        name: config.harness,
+        environment: environment,
+      ),
       brief: AgentBrief(
         task: buildLensPrompt(
           bead: bead,
@@ -1341,7 +1506,10 @@ class DiscoveryLensCapability extends ProcessCapability {
   /// usage merge. Fail-safe — an absent/malformed report yields no fields, NEVER
   /// a throw, and never a grade.
   @override
-  Future<Map<String, String>?> result(TreeContext context, StepArgs args) async {
+  Future<Map<String, String>?> result(
+    TreeContext context,
+    StepArgs args,
+  ) async {
     final workspace = context.getInheritedSeedOfExactType<Workspace>();
     if (workspace == null) return null;
     final workspaceDir = workspace.workspaceDir;
@@ -1468,12 +1636,25 @@ class DiscoveryLensCapability extends ProcessCapability {
         'CriticCapability"`). Without a named precedent it is a flag, not a hold.',
       )
       ..writeln()
+      ..writeln(
+        'BEAD-FIELD SOURCES ARE STRUCTURED. If a context note quotes or '
+        'paraphrases a bead field, `source` is not evidence: include '
+        '`beadCitation` with the bead\'s actual `beadId`, the exact `field`, and '
+        'a non-empty VERBATIM `excerpt`. Copy a prior-art hit\'s '
+        'id/field/snippet exactly. A hit whose id differs from the work bead is '
+        'FOREIGN content and must never be attributed to the work bead. If you '
+        'cannot supply the structured quotation, omit the bead-field claim.',
+      )
+      ..writeln()
       ..writeln('## Your report')
       ..writeln('Your report is JSON of this exact shape:')
       ..writeln(
         '{"lens":"$lens","version":1,"nodePath":"$nodePath",'
         '"context":[{"note":"<what the architect needs to know>",'
-        '"source":"<file / bead / ADR clause>"}],'
+        '"source":"<non-bead file or ADR source>",'
+        '"beadCitation":{"beadId":"<actual bead id>",'
+        '"field":"title|description|design|acceptance_criteria|notes",'
+        '"excerpt":"<verbatim field excerpt>"}}],'
         '"violations":[{"kind":"decision|skill|pattern",'
         '"standard":"<docs/adr/ADR-0000-ai-decision-register.md A17(4)>",'
         '"quote":"<the clause, verbatim, including its Status line>",'
@@ -1614,6 +1795,13 @@ class DiscoveryRouteCapability extends RouteCapability {
     // Read the ambient values at ENTRY (while mounted); the matrix is pure over
     // the captured values.
     final workspace = context.getInheritedSeedOfExactType<Workspace>();
+    final workBead = context.getInheritedSeedOfExactType<Bead>();
+    if (workBead == null) {
+      throw StateError(
+        'DiscoveryRouteCapability requires the ambient Bead '
+        '(WorkBead mounts it)',
+      );
+    }
     final parent = parentPath(args.nodePath);
     final lenses = (args.params['lenses'] ?? '')
         .split(',')
@@ -1636,12 +1824,15 @@ class DiscoveryRouteCapability extends RouteCapability {
     // every round) so it OUTLIVES the wipe. Offline there is no ledger and this
     // reads 0; the bound is then the ENGINE's derived belt, graph structure that
     // needs no asset I/O.
-    final priorRound = live ? (readDiscoveryRegatherLedger(dir)?.round ?? 0) : 0;
+    final priorRound = live
+        ? (readDiscoveryRegatherLedger(dir)?.round ?? 0)
+        : 0;
 
     switch (decideDiscovery(
       lanes: lanes,
       anchors:
           (live ? readDiscoveryAnchors(dir) : null) ?? const DiscoveryAnchors(),
+      workBead: workBead,
       priorRound: priorRound,
     )) {
       case DiscoveryHold(:final reason):

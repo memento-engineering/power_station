@@ -36,15 +36,13 @@ import 'package:test/test.dart';
 
 import '../support/asset_fakes.dart';
 
-GraphSnapshot _graph({
-  required List<Bead> beads,
-  required Set<String> ready,
-}) => GraphSnapshot.fromParts(
-  beads: beads,
-  dependencies: const [],
-  readyIds: ready,
-  capturedAt: DateTime(2026),
-);
+GraphSnapshot _graph({required List<Bead> beads, required Set<String> ready}) =>
+    GraphSnapshot.fromParts(
+      beads: beads,
+      dependencies: const [],
+      readyIds: ready,
+      capturedAt: DateTime(2026),
+    );
 
 GraphSnapshot _state(List<Bead> beads) => _graph(beads: beads, ready: const {});
 
@@ -117,15 +115,15 @@ class _TempWorkspace implements SourceControl {
     required String beadId,
     required String workspaceDir,
   }) async {}
-
 }
 
 StationKernel _buildKernel(
   Fakes f,
   FakeSnapshotSource work,
   FakeSnapshotSource state,
-  String workspaceDir,
-) {
+  String workspaceDir, {
+  PriorArtSource? priorArt,
+}) {
   final bridge = StationJoinBridge(work: work, state: state);
   return StationKernel(
     bridge: bridge,
@@ -139,6 +137,7 @@ StationKernel _buildKernel(
       // processes would have written, so the round-freshness wipe must not race
       // them. The wipe's own contract is fenced in `discovery_test.dart`.
       critiqueDirClearer: (_) {},
+      priorArt: priorArt,
     ),
     substations: [
       SubstationScope(
@@ -186,7 +185,10 @@ Iterable<String> _spawned(Fakes f) => f.provider.started.map((s) => s.name);
 /// Writes the report a lens process would have written — at the canonical
 /// absolute path its own prompt names, stamped with its own `nodePath`.
 void _plantReport(String dir, String lens, LensReport report) {
-  final json = {...report.toJson(), 'nodePath': 'tg-1/spec_review/discovery/$lens'};
+  final json = {
+    ...report.toJson(),
+    'nodePath': 'tg-1/spec_review/discovery/$lens',
+  };
   File(lensReportPath(dir, lens))
     ..createSync(recursive: true)
     ..writeAsStringSync(jsonEncode(json));
@@ -204,7 +206,11 @@ void _plantReport(String dir, String lens, LensReport report) {
 /// a single quiet pump is NOT proof of quiescence — [stableRounds] guards
 /// against declaring victory on a plateau that is still mid-flight. Still
 /// fails a genuine regression (it never quiesces, so it exhausts [maxPumps]).
-Future<void> _settle(Fakes f, {int maxPumps = 1000, int stableRounds = 50}) async {
+Future<void> _settle(
+  Fakes f, {
+  int maxPumps = 1000,
+  int stableRounds = 50,
+}) async {
   var stable = 0;
   var prevStarted = -1;
   var prevCalls = -1;
@@ -251,11 +257,14 @@ void main() {
   /// Drives the kernel to the point where the three lenses have spawned and
   /// exited, with [reports] planted in the worktree — leaving the route as the
   /// next thing to mount.
-  Future<Fakes> driveToRoute(Map<String, LensReport> reports) async {
+  Future<Fakes> driveToRoute(
+    Map<String, LensReport> reports, {
+    PriorArtSource? priorArt,
+  }) async {
     final f = buildFakes(createdId: _sid);
     final work = FakeSnapshotSource(_graph(beads: const [], ready: const {}));
     final state = FakeSnapshotSource(_graph(beads: const [], ready: const {}));
-    final kernel = _buildKernel(f, work, state, tmp.path);
+    final kernel = _buildKernel(f, work, state, tmp.path, priorArt: priorArt);
     addTearDown(kernel.dispose);
     addTearDown(f.provider.close);
     addTearDown(work.close);
@@ -329,7 +338,8 @@ void main() {
                         standard: _adr,
                         ratified: true,
                         contradicts: true,
-                        quote: 'a false HOLD STALLS the governance track itself',
+                        quote:
+                            'a false HOLD STALLS the governance track itself',
                         contradiction:
                             'this bead gates the track on an absent verdict',
                       ),
@@ -346,7 +356,8 @@ void main() {
         expect(
           reason,
           contains(_adr),
-          reason: 'the gate CITES the offence — a hold with no citation is '
+          reason:
+              'the gate CITES the offence — a hold with no citation is '
               'exactly what this circuit forbids',
         );
         expect(
@@ -376,71 +387,119 @@ void main() {
 
   group('the discovery circuit — a CLEAN bead advances with its dossier', () {
     test(
-      'the route ADVANCES, the curated dossier lands in the worktree, and the '
-      'architect brief RENDERS it — the grading rubrics included',
+      'clean bead A plus urgent sibling B keeps B FOREIGN in the written dossier',
       () async {
+        const sibling = PriorArt(
+          beadId: 'tg-b',
+          store: 'the_grid',
+          status: 'open',
+          title: 'urgent approved rename',
+          field: 'notes',
+          snippet: 'Approved with Nico',
+          query: 'work bead',
+        );
         final f = await driveToRoute({
           for (final lens in kDiscoveryLenses)
             lens: LensReport(
               lens: lens,
-              context: [
-                ContextNote(
-                  note: 'the $lens angle: this pack is a genesis_tree consumer',
-                  source: 'CLAUDE.md',
-                ),
-              ],
-              // A concern the lens could NOT cite: it rides as a FLAG, and it
-              // must NOT hold the bead.
-              violations: lens == kCodeLens
+              context: lens == kPriorArtLens
                   ? const [
-                      DiscoveryFinding(
-                        kind: ViolationKind.pattern,
-                        standard: '',
-                        quote: '',
-                        contradiction: 'this feels like it duplicates the route',
+                      ContextNote(
+                        note: 'the sibling has human approval',
+                        beadCitation: BeadFieldCitation(
+                          beadId: 'tg-b',
+                          field: BeadCitationField.notes,
+                          excerpt: 'Approved with Nico',
+                        ),
+                      ),
+                      ContextNote(
+                        note: 'the work bead has human approval',
+                        beadCitation: BeadFieldCitation(
+                          beadId: 'tg-1',
+                          field: BeadCitationField.notes,
+                          excerpt: 'Approved with Nico',
+                        ),
                       ),
                     ]
                   : const [],
             ),
-        });
+        }, priorArt: (_) async => const [sibling]);
 
         expect(_wroteCursor(f, kDiscoveryRouteNode, 'complete'), isTrue);
-        expect(
-          _wroteCursor(f, kDiscoveryRouteNode, 'gated'),
-          isFalse,
-          reason: 'an UNCITED concern is a vibe — it can never hold a bead',
-        );
-
-        // The dossier is REAL: the route wrote it into the worktree.
-        expect(File(discoveryDossierPath(tmp.path)).existsSync(), isTrue);
-        final dossier = readDiscoveryDossier(tmp.path);
-        expect(dossier, isNotNull);
-        expect(dossier!.context, hasLength(3));
-        expect(dossier.flags, hasLength(1));
-        expect(dossier.anchors.rubrics.keys, containsAll(kSpecCommitteeRubrics));
-
-        // And the ARCHITECT reads it: the brief the specify stage builds renders
-        // the dossier — the rubrics its spec is graded by FIRST (the whole point
-        // of the gather).
-        final brief = buildSpecifyBrief(
-          workBead('tg-1'),
-          testWorkspace('tg-1', workspaceDir: tmp.path),
-          dossier: dossier,
-        );
-        expect(brief.task, contains('Discovery dossier'));
-        expect(brief.task, contains('How your spec will be graded'));
-        for (final rubric in kSpecCommitteeRubrics) {
-          expect(brief.task, contains('($rubric rubric bands)'));
-        }
-        expect(brief.task, contains('genesis_tree consumer'));
-        expect(brief.task, contains('Flags — ANSWER these'));
+        final dossier = readDiscoveryDossier(tmp.path)!;
+        final rendered = renderDiscoveryDossier(dossier);
+        expect(rendered, contains('FOREIGN tg-b.notes'));
+        expect(rendered, contains('Approved with Nico'));
+        expect(rendered, isNot(contains('SELF tg-1.notes')));
+        expect(dossier.context, hasLength(1));
       },
     );
+
+    test('the route ADVANCES, the curated dossier lands in the worktree, and the '
+        'architect brief RENDERS it — the grading rubrics included', () async {
+      final f = await driveToRoute({
+        for (final lens in kDiscoveryLenses)
+          lens: LensReport(
+            lens: lens,
+            context: [
+              ContextNote(
+                note: 'the $lens angle: this pack is a genesis_tree consumer',
+                source: 'CLAUDE.md',
+              ),
+            ],
+            // A concern the lens could NOT cite: it rides as a FLAG, and it
+            // must NOT hold the bead.
+            violations: lens == kCodeLens
+                ? const [
+                    DiscoveryFinding(
+                      kind: ViolationKind.pattern,
+                      standard: '',
+                      quote: '',
+                      contradiction: 'this feels like it duplicates the route',
+                    ),
+                  ]
+                : const [],
+          ),
+      });
+
+      expect(_wroteCursor(f, kDiscoveryRouteNode, 'complete'), isTrue);
+      expect(
+        _wroteCursor(f, kDiscoveryRouteNode, 'gated'),
+        isFalse,
+        reason: 'an UNCITED concern is a vibe — it can never hold a bead',
+      );
+
+      // The dossier is REAL: the route wrote it into the worktree.
+      expect(File(discoveryDossierPath(tmp.path)).existsSync(), isTrue);
+      final dossier = readDiscoveryDossier(tmp.path);
+      expect(dossier, isNotNull);
+      expect(dossier!.context, hasLength(3));
+      expect(dossier.flags, hasLength(1));
+      expect(dossier.anchors.rubrics.keys, containsAll(kSpecCommitteeRubrics));
+
+      // And the ARCHITECT reads it: the brief the specify stage builds renders
+      // the dossier — the rubrics its spec is graded by FIRST (the whole point
+      // of the gather).
+      final brief = buildSpecifyBrief(
+        workBead('tg-1'),
+        testWorkspace('tg-1', workspaceDir: tmp.path),
+        dossier: dossier,
+      );
+      expect(brief.task, contains('Discovery dossier'));
+      expect(brief.task, contains('How your spec will be graded'));
+      for (final rubric in kSpecCommitteeRubrics) {
+        expect(brief.task, contains('($rubric rubric bands)'));
+      }
+      expect(brief.task, contains('genesis_tree consumer'));
+      expect(brief.task, contains('Flags — ANSWER these'));
+    });
 
     test('with discovery complete, the architect finally spawns', () async {
       final f = buildFakes(createdId: _sid);
       final work = FakeSnapshotSource(_graph(beads: const [], ready: const {}));
-      final state = FakeSnapshotSource(_graph(beads: const [], ready: const {}));
+      final state = FakeSnapshotSource(
+        _graph(beads: const [], ready: const {}),
+      );
       final kernel = _buildKernel(f, work, state, tmp.path);
       addTearDown(kernel.dispose);
       addTearDown(f.provider.close);
