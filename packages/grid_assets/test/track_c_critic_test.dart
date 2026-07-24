@@ -168,6 +168,7 @@ void main() {
       expect(await cap.result(c.context, c.args), {
         'grade': 'F',
         'transport': 'fail-closed-default',
+        'round': '0',
         'rationale': 'no validation-plan rc file — fail-closed default',
       });
 
@@ -178,6 +179,7 @@ void main() {
       expect(await cap.result(c.context, c.args), {
         'grade': 'A',
         'transport': 'file',
+        'round': '0',
       });
 
       // rc non-zero ⇒ F.
@@ -185,6 +187,7 @@ void main() {
       expect(await cap.result(c.context, c.args), {
         'grade': 'F',
         'transport': 'file',
+        'round': '0',
       });
     });
 
@@ -206,6 +209,7 @@ void main() {
       expect(await const CriticCapability().result(c.context, c.args), {
         'grade': 'F',
         'transport': 'file',
+        'round': '0',
         'rationale': 'exit 127 — candidate missing commands: rg',
       });
     });
@@ -410,6 +414,7 @@ void main() {
         expect(out, {
           'grade': 'B',
           'transport': 'file',
+          'round': '0',
           'rationale': 'a narrow blast radius',
         });
       },
@@ -426,6 +431,7 @@ void main() {
         expect(await cap.result(c.context, c.args), {
           'grade': 'F',
           'transport': 'fail-closed-default',
+          'round': '0',
           'rationale':
               'no parseable verdict via file or envelope — fail-closed default',
         });
@@ -436,6 +442,7 @@ void main() {
         expect(await cap.result(c.context, c.args), {
           'grade': 'F',
           'transport': 'fail-closed-default',
+          'round': '0',
           'rationale':
               'no parseable verdict via file or envelope — fail-closed default',
         });
@@ -472,6 +479,7 @@ void main() {
           {
             'grade': 'F',
             'transport': 'fail-closed-default',
+            'round': '0',
             'rationale':
                 'no parseable verdict via file or envelope — fail-closed default',
           },
@@ -565,6 +573,7 @@ void main() {
         expect(await const CriticCapability().result(c.context, c.args), {
           'grade': 'F',
           'transport': 'fail-closed-default',
+          'round': '0',
           'rationale':
               'no parseable verdict via file or envelope — fail-closed default',
         });
@@ -596,6 +605,7 @@ void main() {
         expect(await const CriticCapability().result(c.context, c.args), {
           'grade': 'B',
           'transport': 'file',
+          'round': '2',
           'rationale': 'a narrow blast radius',
         });
       },
@@ -690,6 +700,7 @@ void main() {
         expect(out, {
           'grade': 'B',
           'transport': 'file',
+          'round': '0',
           'rationale': 'narrow',
           'tokensIn': '9',
           'tokensOut': '8',
@@ -714,6 +725,7 @@ void main() {
         expect(out, {
           'grade': 'F',
           'transport': 'fail-closed-default',
+          'round': '0',
           'rationale':
               'no parseable verdict via file or envelope — fail-closed default',
           'numTurns': '2',
@@ -741,7 +753,7 @@ void main() {
         writeUsage(dir.path, rubric, 'garbage not json');
         final c = _ctx(rubric: rubric, workspaceDir: dir.path);
         final out = await const CriticCapability().result(c.context, c.args);
-        expect(out, {'grade': 'A', 'transport': 'file'});
+        expect(out, {'grade': 'A', 'transport': 'file', 'round': '0'});
       },
     );
 
@@ -759,6 +771,7 @@ void main() {
       expect(out, {
         'grade': 'A',
         'transport': 'file',
+        'round': '0',
       }, reason: 'no usage merge on the gating lane');
     });
   });
@@ -856,6 +869,7 @@ void main() {
       expect(out, {
         'grade': 'C',
         'transport': 'file',
+        'round': '0',
         'rationale': 'from the file',
       });
     });
@@ -882,6 +896,7 @@ void main() {
       expect(await const CriticCapability().result(c.context, c.args), {
         'grade': 'F',
         'transport': 'fail-closed-default',
+        'round': '0',
         'rationale':
             'no parseable verdict via file or envelope — fail-closed default',
       });
@@ -903,6 +918,7 @@ void main() {
         expect(await const CriticCapability().result(c.context, c.args), {
           'grade': 'F',
           'transport': 'fail-closed-default',
+          'round': '0',
           'rationale':
               'no parseable verdict via file or envelope — fail-closed default',
         });
@@ -925,6 +941,7 @@ void main() {
       expect(await const CriticCapability().result(c.context, c.args), {
         'grade': 'F',
         'transport': 'fail-closed-default',
+        'round': '0',
         'rationale':
             'no parseable verdict via file or envelope — fail-closed default',
       });
@@ -995,6 +1012,7 @@ void main() {
       expect(await const CriticCapability().result(c.context, c.args), {
         'grade': 'F',
         'transport': 'fail-closed-default',
+        'round': '0',
         'rationale':
             'no parseable verdict via file or envelope — fail-closed default',
       });
@@ -1034,6 +1052,7 @@ void main() {
       expect(out, {
         'grade': 'A',
         'transport': 'envelope',
+        'round': '0',
         'rationale': '[from result envelope]',
         'numTurns': '36',
       });
@@ -1081,6 +1100,7 @@ void main() {
       expect(out, {
         'grade': 'B',
         'transport': 'file-stray',
+        'round': '0',
         'rationale': 'covered the new path',
       });
     });
@@ -1107,6 +1127,7 @@ void main() {
         expect(await const CriticCapability().result(c.context, c.args), {
           'grade': 'F',
           'transport': 'fail-closed-default',
+          'round': '0',
           'rationale':
               'no parseable verdict via file or envelope — fail-closed default',
         });
@@ -1144,6 +1165,7 @@ void main() {
       expect(out, {
         'grade': 'C',
         'transport': 'file',
+        'round': '0',
         'rationale': 'from the canonical file',
       });
     });
@@ -1168,6 +1190,7 @@ void main() {
       expect(await const CriticCapability().result(c.context, c.args), {
         'grade': 'F',
         'transport': 'fail-closed-default',
+        'round': '0',
         'rationale':
             'no parseable verdict via file or envelope — fail-closed default',
       });

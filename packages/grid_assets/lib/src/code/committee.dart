@@ -370,11 +370,29 @@ const Circuit kCodeReviewCircuit = Circuit(
 /// freshness fence — but a failed wipe can no longer produce a stale LLM grade.
 /// The spec circuit still wires it DOWNSTREAM of `specify` (`kSpecReviewCircuit`)
 /// so it re-runs on every auto-respec wave.
+///
+/// **A ROUND-START SWEEP, not a blanket wipe (bridge fix, 2026-07-24 —
+/// the tg-60t committee race).** The engine's derived auto-respec wave re-keys
+/// the invalidated closure NODE BY NODE, and the stale positive terminals of
+/// the not-yet-re-keyed incarnations can let a re-keyed LANE run before this
+/// step's own successor does — observed live: two re-keyed lanes graded and
+/// wrote CURRENT-round verdicts minutes before clear-critique#2 ran, and the
+/// blanket wipe then DESTROYED that same round's finished work, wedging the
+/// route's join forever (the lanes were terminal and would never re-write).
+/// So the wipe is now round-aware: it deletes exactly what the one shared
+/// reader ([_verdictFromFile]) would refuse — a PRIOR round's verdicts, a
+/// foreign node's, unstamped/unparseable files, the gating `.rc`, the pinned
+/// diff — and KEEPS a verdict stamped with THIS committee's node paths and
+/// THIS round ([roundOf]'s ledger round). A wipe that lands mid-round is then
+/// harmless by construction ("the wipe only runs at round start" becomes a
+/// property of WHAT it deletes, not of WHEN it runs). Everything a fresh
+/// round must not see still dies here; everything this round already produced
+/// survives.
 class ClearCritiqueCapability extends ServiceCapability {
   /// Creates the capability, optionally over an injected [clearer] (tests
   /// inject a no-op so the offline suite never touches a real filesystem at a
   /// synthetic workspace path — Fakes, not mocks); defaults to the real
-  /// delete+recreate.
+  /// round-aware sweep ([sweepStaleCritique]).
   const ClearCritiqueCapability({DirectoryClearer? clearer})
     : _clearer = clearer;
 
@@ -385,11 +403,67 @@ class ClearCritiqueCapability extends ServiceCapability {
     final workspace = context.getInheritedSeedOfExactType<Workspace>();
     if (workspace == null) return const Ok();
     try {
-      (_clearer ?? clearDirectory)(critiqueDirPath(workspace.workspaceDir));
+      final clearer = _clearer;
+      if (clearer != null) {
+        clearer(critiqueDirPath(workspace.workspaceDir));
+      } else {
+        sweepStaleCritique(
+          workspace.workspaceDir,
+          committeePath: parentPath(args.nodePath),
+          round: roundOf(context, args.nodePath),
+        );
+      }
     } catch (_) {
       // Best-effort hygiene — the freshness stamp is the fail-safe backstop.
     }
     return const Ok();
+  }
+}
+
+/// The round-aware critique sweep [ClearCritiqueCapability] runs: ensures
+/// [critiqueDirPath] exists and deletes every entry in it EXCEPT a canonical
+/// verdict of THIS round — a `<rubric>.json` whose stamps pass the one shared
+/// fence ([_verdictFromFile]) for the sibling node path
+/// `<committeePath>/<rubric>` at [round]. Everything else — a prior round's
+/// verdict, a foreign node's, an unstamped or unparseable file, the gating
+/// `.rc`, `pinned.diff` — is deleted, exactly what the blanket wipe deleted.
+///
+/// KEEPING the current round's verdicts is the whole point (the tg-60t race):
+/// under the derived wave a re-keyed lane can legitimately finish before this
+/// step runs, and destroying its verdict wedges the route's join for the rest
+/// of the session (the lane is terminal; nothing will ever re-write the file).
+/// An unstamped file is deleted silently here — hygiene, never a throw: the
+/// LOUD unstamped-verdict refusal belongs to the read path (`result()` / the
+/// route join), not to the janitor.
+void sweepStaleCritique(
+  String workspaceDir, {
+  required String committeePath,
+  required int round,
+}) {
+  final dir = Directory(critiqueDirPath(workspaceDir));
+  if (!dir.existsSync()) {
+    dir.createSync(recursive: true);
+    return;
+  }
+  for (final entry in dir.listSync(followLinks: false)) {
+    var keep = false;
+    if (entry is File && entry.path.endsWith('.json')) {
+      final rubric = p.basenameWithoutExtension(entry.path);
+      keep =
+          _verdictFromFile(
+                entry,
+                expectedNodePath: '$committeePath/$rubric',
+                expectedRound: round,
+              )
+              is _VerdictFileAccepted;
+    }
+    if (!keep) {
+      try {
+        entry.deleteSync(recursive: true);
+      } catch (_) {
+        // Best-effort per entry — a survivor is caught by the read fence.
+      }
+    }
   }
 }
 
@@ -787,10 +861,11 @@ class CriticCapability extends ProcessCapability {
       // so an rc found here is guaranteed fresh — no separate stamp needed.
       final rc = File(p.join(workspaceDir, _critiqueDir, '$kGatingRubric.rc'));
       if (!rc.existsSync()) {
-        return const {
+        return {
           'grade': 'F',
           'transport': 'fail-closed-default',
           'rationale': 'no validation-plan rc file — fail-closed default',
+          kVerdictRoundKey: '$round',
         };
       }
       final code = rc.readAsStringSync().trim();
@@ -803,6 +878,7 @@ class CriticCapability extends ProcessCapability {
       return {
         'grade': code == '0' ? 'A' : 'F',
         'transport': 'file',
+        kVerdictRoundKey: '$round',
         if (diagnostic != null) 'rationale': diagnostic,
       };
     }
@@ -845,12 +921,18 @@ class CriticCapability extends ProcessCapability {
           'rationale':
               'no parseable verdict via file or envelope — fail-closed default',
         };
+    // Every LLM-lane payload carries the ROUND it was recorded against
+    // (bridge fix, 2026-07-24): the spec route's join needs to tell "this lane
+    // finished THIS round without a canonical artifact" (loud, once) from
+    // "this lane has not re-run for this round yet" (wait) — and the durable
+    // result is the only trace an envelope/fail-closed transport leaves.
+    final stamped = {...graded, kVerdictRoundKey: '$round'};
     // Merge the CAPTURE-ONLY usage telemetry (FT-2) into the payload. FAIL-SAFE:
     // an absent / malformed envelope yields no fields, NEVER a throw — the grade
     // (fail-closed above) is unaffected. Collision-safe keys (grade/rationale vs
     // tokensIn/…), so the merge never shadows the verdict.
     final usage = readUsageFields(workspaceDir, args.nodePath);
-    return usage.isEmpty ? graded : {...graded, ...usage};
+    return usage.isEmpty ? stamped : {...stamped, ...usage};
   }
 
   /// The rubric prose embedded in a critic's prompt — the injected [rubrics]
@@ -1263,6 +1345,28 @@ Map<String, String>? currentVerdictFromFile({
     expectedRound: round,
   ),
 );
+
+/// [currentVerdictFromFile] widened to the SAME transport reach `result()` has
+/// for on-disk artifacts: the canonical path first, then the round-fresh STRAY
+/// walk (gate-integrity #4 — a critic that `cd`d mid-run and wrote its verdict
+/// under a subdir). The route's join reads through THIS (bridge fix,
+/// 2026-07-24): a lane whose verdict `result()` accepted as `file-stray` still
+/// has a current-round artifact ON DISK, and refusing to join it would wedge
+/// the round on a lane that can never re-write. Same fence, same round, same
+/// single parser — only the search widens.
+Map<String, String>? currentVerdictOnDisk({
+  required String workspaceDir,
+  required String rubric,
+  required String nodePath,
+  required int round,
+}) =>
+    currentVerdictFromFile(
+      workspaceDir: workspaceDir,
+      rubric: rubric,
+      nodePath: nodePath,
+      round: round,
+    ) ??
+    _payloadOrNull(_strayVerdict(workspaceDir, rubric, nodePath, round));
 
 /// A round-fresh verdict a critic wrote to a STRAY
 /// `.../.grid/critique/<rubric>.json` somewhere OTHER than the canonical

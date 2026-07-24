@@ -83,6 +83,8 @@ Future<RouteVerdict> _route(
   Map<String, String> grades, {
   Map<String, String> rationales = const {},
   String? workspaceDir,
+  Map<String, Map<String, String>> resultExtras = const {},
+  SpecRouteCapability capability = const SpecRouteCapability(),
 }) {
   const parent = 'tg-1/spec_review';
   final context = FakeTreeContext(
@@ -98,6 +100,7 @@ Future<RouteVerdict> _route(
             '$parent/${entry.key}': {
               'grade': entry.value,
               if (rationales[entry.key] case final r?) 'rationale': r,
+              ...?resultExtras[entry.key],
             },
         },
       ),
@@ -109,7 +112,7 @@ Future<RouteVerdict> _route(
         ),
     },
   );
-  return const SpecRouteCapability().route(
+  return capability.route(
     context,
     stepArgs(
       '$parent/route',
@@ -117,6 +120,14 @@ Future<RouteVerdict> _route(
     ),
   );
 }
+
+/// A route tuned for tests that exercise the mid-wave WAIT: millisecond poll,
+/// sub-second budget — the refusal path fires fast instead of holding the
+/// suite for the production-scale wait.
+const SpecRouteCapability _impatientRoute = SpecRouteCapability(
+  lanePoll: Duration(milliseconds: 10),
+  laneWaitBudget: Duration(milliseconds: 150),
+);
 
 void main() {
   group('decideSpecRoute — the three-way spec matrix', () {
@@ -590,11 +601,12 @@ void main() {
       expect(kMaxRespecRounds, lessThan(kMaxReworkRounds));
     });
 
-    test('THE JOIN RULE (bead `pow-96s`) — a lane joins the LIVE route only '
-        'through a CURRENT-ROUND artifact: the cap flare names ONLY the lanes '
-        'whose verdicts are on disk this round, never a SiblingView grade with '
-        'no artifact behind it', () async {
-      // The counter is SPENT: the next fixable join is the cap flare.
+    test('THE JOIN RULE (bead `pow-96s`, hardened by the 2026-07-24 bridge '
+        'fix) — a lane joins the LIVE route only through a CURRENT-ROUND '
+        'artifact, and a lane WITHOUT one is never silently dropped: the '
+        'route WAITS for it and then refuses LOUDLY, citing no grade for the '
+        'un-joined lanes and leaving the round counter unspent', () async {
+      // The counter is SPENT: a full fixable join would be the cap flare.
       writeRespecLedger(
         ws.path,
         const RespecLedger(
@@ -618,72 +630,93 @@ void main() {
         round: kMaxRespecRounds - 1,
       );
       // …and NO artifact at all for `acceptance-testability`. The SiblingView
-      // still carries a full five-lane D-heavy vector (the replay shape): the
-      // gating lane's A is the ONLY grade the route may take from it.
-      final capped = await _route(
-        {
-          ..._allA(),
-          'coherence': 'D',
-          'plan-completeness': 'D',
-          'acceptance-testability': 'D',
-        },
-        rationales: const {
-          'coherence': 'the plan contradicts the acceptance',
-          'plan-completeness': 'left over from round 1',
-          'acceptance-testability': 'never graded this round',
-        },
-        workspaceDir: ws.path,
+      // still carries a full five-lane D-heavy vector (the replay shape — no
+      // this-round result stamps): the route may neither decide over the
+      // partial join (the tg-60t false advance) nor fabricate the missing
+      // grades into a flare (the pow-96s incident). It WAITS, then refuses.
+      await expectLater(
+        _route(
+          {
+            ..._allA(),
+            'coherence': 'D',
+            'plan-completeness': 'D',
+            'acceptance-testability': 'D',
+          },
+          rationales: const {
+            'coherence': 'the plan contradicts the acceptance',
+            'plan-completeness': 'left over from round 1',
+            'acceptance-testability': 'never graded this round',
+          },
+          workspaceDir: ws.path,
+          capability: _impatientRoute,
+        ),
+        throwsA(
+          isA<RouteFailure>().having(
+            (e) => e.reason,
+            'reason',
+            allOf(
+              contains('plan-completeness'),
+              contains('acceptance-testability'),
+              contains('round $kMaxRespecRounds'),
+              // The refusal cites NO grade — fabricating one was the incident.
+              isNot(contains('plan-completeness=D')),
+              isNot(contains('acceptance-testability=D')),
+            ),
+          ),
+        ),
       );
-      expect(capped, isA<Escalate>());
-      final reason = (capped as Escalate).reason;
-      expect(reason, startsWith('respec-cap'));
-      // The joined lanes — gating (SiblingView) + the two current-round files.
-      expect(reason, contains('coherence=D'));
-      expect(reason, contains('adr-alignment=A'));
-      expect(reason, contains('spec-validation=A'));
-      // The dropped lanes: absent artifact / stale artifact ⇒ NOT joined, so
-      // the flare cites NO grade for them — fabricating one was the incident.
-      expect(reason, isNot(contains('acceptance-testability')));
-      expect(reason, isNot(contains('plan-completeness')));
+      // The refusal never spends the counter: the round is still open for the
+      // re-keyed lanes to finish (supervision re-runs this route bounded).
+      expect(readRespecLedger(ws.path)?.round, kMaxRespecRounds);
     });
 
-    test('A FRESH session/ledger over a worktree littered with a PRIOR '
-        'session\'s round-stamped verdicts does NOT replay them '
-        '(bead `pow-96s`) — the observed incident: a five-lane join fabricated '
-        'over artifacts the current round never wrote', () async {
-      // The prior session ended at round 2; its verdicts survive on disk. The
-      // fresh session's intake CLEARED the ledger, so THIS round is 0.
-      _plantVerdicts(
-        ws.path,
-        {..._allA(), 'coherence': 'D', 'plan-completeness': 'D'},
-        rationales: const {
-          'coherence': 'a prior session said so',
-          'plan-completeness': 'a prior session said so',
-        },
-        round: kMaxRespecRounds,
-      );
-      expect(readRespecLedger(ws.path), isNull);
-      final out = await _route(
-        {..._allA(), 'coherence': 'D', 'plan-completeness': 'D'},
-        rationales: const {
-          'coherence': 'a prior session said so',
-          'plan-completeness': 'a prior session said so',
-        },
-        workspaceDir: ws.path,
-      );
-      // No judgement lane has a round-0 artifact ⇒ none joins: the stale D
-      // grades are never cited, never respec'd, never flared. The gating lane
-      // (deterministic, artifact-less by design) is the whole join.
-      expect(out, isA<Advance>());
-      final payload = (out as Advance).payload!;
-      expect(payload['verdict'], 'advance');
-      expect(payload['grades'], 'spec-validation=A');
-      expect(
-        payload.containsKey('grade'),
-        isFalse,
-        reason: 'no invalidating stamp off replayed verdicts',
-      );
-    });
+    test(
+      'A FRESH session over a worktree littered with a PRIOR session\'s '
+      'round-stamped verdicts does NOT replay them (bead `pow-96s`) — the '
+      'lanes\' own results fail-closed THIS round (their reader rejected '
+      'the stale files), so the route flares the transport miss LOUDLY '
+      'instead of deciding over grades no current-round artifact backs',
+      () async {
+        // The prior session ended at round 2; its verdicts survive on disk. The
+        // fresh session's intake CLEARED the ledger, so THIS round is 0.
+        _plantVerdicts(
+          ws.path,
+          {..._allA(), 'coherence': 'D', 'plan-completeness': 'D'},
+          rationales: const {
+            'coherence': 'a prior session said so',
+            'plan-completeness': 'a prior session said so',
+          },
+          round: kMaxRespecRounds,
+        );
+        expect(readRespecLedger(ws.path), isNull);
+        // THIS round's lanes ran and their `result()` REJECTED the stale files
+        // (the ledger-round fence): every judgement lane recorded a fail-closed
+        // F stamped round 0 — finished this round, no artifact behind it.
+        final out = await _route(
+          {..._allA(), 'coherence': 'F', 'plan-completeness': 'F'},
+          rationales: const {
+            'coherence': 'no parseable verdict — fail-closed',
+            'plan-completeness': 'no parseable verdict — fail-closed',
+          },
+          workspaceDir: ws.path,
+          resultExtras: {
+            for (final id in kSpecLlmRubrics)
+              id: const {'round': '0', 'transport': 'fail-closed-default'},
+          },
+          capability: _impatientRoute,
+        );
+        // The judgement lanes finished round 0 with NO round-0 artifact on disk
+        // ⇒ the loud, once, no-grades-cited flare (never a silent advance over
+        // a gating-only join, never a fabricated five-lane vector).
+        expect(out, isA<Escalate>());
+        final reason = (out as Escalate).reason;
+        expect(reason, contains('no current-round (round 0) verdict artifact'));
+        expect(reason, contains('coherence'));
+        expect(reason, contains('plan-completeness'));
+        expect(reason, isNot(contains('coherence=')));
+        expect(reason, isNot(contains('plan-completeness=')));
+      },
+    );
   });
 
   group('renderRespecGuidance — the recommendations reach the agent', () {
