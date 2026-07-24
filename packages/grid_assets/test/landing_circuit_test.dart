@@ -65,6 +65,22 @@ class _FakeDelivery implements DeliveryMethod {
   Future<StepOutcome> deliver(DeliveryRequest request) async => const Ok();
 }
 
+class _FixedShellRunner implements ShellRunner {
+  _FixedShellRunner(this.result);
+
+  final ShellRunResult result;
+  final calls = <({String workingDirectory, String command})>[];
+
+  @override
+  Future<ShellRunResult> run({
+    required String workingDirectory,
+    required String command,
+  }) async {
+    calls.add((workingDirectory: workingDirectory, command: command));
+    return result;
+  }
+}
+
 void main() {
   group('RebaseCapability', () {
     test(
@@ -258,7 +274,28 @@ void main() {
         runner: runner,
       ).route(c.context, c.args);
       expect(outcome, isA<Escalate>());
-      expect((outcome as Escalate).reason, contains('revalidate failed'));
+      expect((outcome as Escalate).reason, 'revalidate failed: ');
+      expect((outcome).reason, isNot(contains('candidate missing commands')));
+    });
+
+    test('exit 127 retains output and appends candidate commands', () async {
+      final runner = _FixedShellRunner(
+        const ShellRunResult(exitCode: 127, output: 'sh: rg: not found'),
+      );
+      final richBead = bead(
+        'tg-1',
+      ).copyWith(metadata: const {'validation_plan': 'rg needle'});
+      final c = _capCtx(delivery: _FakeDelivery(), beadOverride: richBead);
+      final outcome = await RevalidateCapability(
+        runner: runner,
+      ).route(c.context, c.args);
+      expect(outcome, isA<Escalate>());
+      expect(
+        (outcome as Escalate).reason,
+        'revalidate failed: sh: rg: not found; '
+        'exit 127 — candidate missing commands: rg',
+      );
+      expect(runner.calls.single.command, 'rg needle');
     });
   });
 

@@ -120,6 +120,7 @@ export 'src/agent/agent_environment.dart';
 export 'src/agent/agent_harness.dart';
 export 'src/agent/environment_registry.dart';
 export 'src/agent/model_tier.dart';
+export 'src/agent/path_check.dart';
 export 'src/agent/site_binding.dart';
 export 'src/agent/usage_report.dart';
 export 'src/assets/asset_loader.dart';

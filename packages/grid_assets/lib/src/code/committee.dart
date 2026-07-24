@@ -104,6 +104,7 @@ import 'package:path/path.dart' as p;
 import '../agent/agent_domain.dart';
 import '../agent/agent_harness.dart';
 import '../agent/environment_registry.dart';
+import '../agent/path_check.dart';
 import '../agent/site_binding.dart';
 import '../agent/usage_report.dart';
 import 'respec_ledger.dart';
@@ -763,9 +764,10 @@ class CriticCapability extends ProcessCapability {
     TreeContext context,
     StepArgs args,
   ) async {
-    // Read the ambient workspace at ENTRY (while mounted); only the captured
-    // value is touched below.
+    // Read ambient values at ENTRY (while mounted); only the captured values
+    // are touched below.
     final rubric = _rubricOf(args);
+    final bead = context.getInheritedSeedOfExactType<Bead>();
     final workspace = context.getInheritedSeedOfExactType<Workspace>();
     if (workspace == null) {
       throw StateError(
@@ -792,7 +794,17 @@ class CriticCapability extends ProcessCapability {
         };
       }
       final code = rc.readAsStringSync().trim();
-      return {'grade': code == '0' ? 'A' : 'F', 'transport': 'file'};
+      final diagnostic = bead == null
+          ? null
+          : pathCheckDiagnostic(
+              _validationPlan(bead),
+              int.tryParse(code) ?? -1,
+            );
+      return {
+        'grade': code == '0' ? 'A' : 'F',
+        'transport': 'file',
+        if (diagnostic != null) 'rationale': diagnostic,
+      };
     }
     // An LLM critic's verdict JSON. Fail-closed: a missing / malformed / STALE
     // verdict (no file, unparseable JSON, no readable `grade`, a `nodePath`
@@ -1030,7 +1042,16 @@ class CodeRouteCapability extends RouteCapability {
     // bead `pow-6ao`), so the parked gate says which gate fired.
     final failedGates = gating.where((id) => grades[id] == 'F').toList();
     if (failedGates.isNotEmpty) {
-      return Escalate('${failedGates.join(', ')} failed: hard block');
+      final failedRationales = [
+        for (final id in failedGates)
+          if (siblings.resultOf('$parent/$id')['rationale'] case final value?
+              when value.trim().isNotEmpty)
+            value.trim(),
+      ];
+      final suffix = failedRationales.isEmpty
+          ? ''
+          : ': ${failedRationales.join('; ')}';
+      return Escalate('${failedGates.join(', ')} failed: hard block$suffix');
     }
 
     // 2. a grade spread ≥ 3 letters across the PRESENT lanes — a human

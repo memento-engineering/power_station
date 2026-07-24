@@ -19,8 +19,9 @@ const _critics = 'code-validation,spec-adherence,regression-risk,test-coverage';
 /// realistic: `tg-1/review/route`, so the siblings live at
 /// `tg-1/review/<criticId>`.
 ({FakeTreeContext context, StepArgs args}) _routeCtx(
-  Map<String, String> grades,
-) {
+  Map<String, String> grades, {
+  Map<String, String> rationales = const {},
+}) {
   const parent = 'tg-1/review';
   return (
     context: FakeTreeContext(
@@ -32,7 +33,11 @@ const _critics = 'code-validation,spec-adherence,regression-risk,test-coverage';
           },
           results: {
             for (final entry in grades.entries)
-              '$parent/${entry.key}': {'grade': entry.value},
+              '$parent/${entry.key}': {
+                'grade': entry.value,
+                if (rationales[entry.key] case final rationale?)
+                  'rationale': rationale,
+              },
           },
         ),
       },
@@ -65,7 +70,8 @@ void main() {
       // (A..C ⇒ index 0..2 ⇒ 2), and the matrix arm that fired.
       expect((out as Advance).payload, {
         'verdict': 'advance',
-        'grades': 'code-validation=A,spec-adherence=B,regression-risk=A,'
+        'grades':
+            'code-validation=A,spec-adherence=B,regression-risk=A,'
             'test-coverage=C',
         'spread': '2',
         'rule': 'all-approve',
@@ -80,7 +86,28 @@ void main() {
         'test-coverage': 'A',
       });
       expect(out, isA<Escalate>());
-      expect((out as Escalate).reason, contains('hard block'));
+      expect((out as Escalate).reason, 'code-validation failed: hard block');
+    });
+
+    test('the gating critic appends an exit-127 candidate rationale', () async {
+      final c = _routeCtx(
+        const {
+          'code-validation': 'F',
+          'spec-adherence': 'A',
+          'regression-risk': 'A',
+          'test-coverage': 'A',
+        },
+        rationales: const {
+          'code-validation': 'exit 127 — candidate missing commands: rg',
+        },
+      );
+      final out = await const CodeRouteCapability().route(c.context, c.args);
+      expect(out, isA<Escalate>());
+      expect(
+        (out as Escalate).reason,
+        'code-validation failed: hard block: '
+        'exit 127 — candidate missing commands: rg',
+      );
     });
 
     test('a grade spread ≥ 3 (A + D) ⇒ Gate', () async {
@@ -111,32 +138,40 @@ void main() {
       expect((out as Escalate).reason, contains('rework'));
     });
 
-    test('a non-gating critic at D (spread < 3) ⇒ Gate (rework, deferred)',
-        () async {
-      // B..D is a spread of 2 (< 3) so the spread rule does NOT fire — the D/F
-      // rework rule does.
-      final out = await _route(const {
-        'code-validation': 'B',
-        'spec-adherence': 'C',
-        'regression-risk': 'C',
-        'test-coverage': 'D',
-      });
-      expect(out, isA<Escalate>());
-      expect((out as Escalate).reason, contains('rework'));
-    });
+    test(
+      'a non-gating critic at D (spread < 3) ⇒ Gate (rework, deferred)',
+      () async {
+        // B..D is a spread of 2 (< 3) so the spread rule does NOT fire — the D/F
+        // rework rule does.
+        final out = await _route(const {
+          'code-validation': 'B',
+          'spec-adherence': 'C',
+          'regression-risk': 'C',
+          'test-coverage': 'D',
+        });
+        expect(out, isA<Escalate>());
+        expect((out as Escalate).reason, contains('rework'));
+      },
+    );
 
-    test('a MISSING sibling grade ⇒ Gate (fail-closed — can never advance)',
-        () async {
-      // test-coverage has no recorded grade ⇒ treated as F ⇒ cannot advance.
-      final out = await _route(const {
-        'code-validation': 'A',
-        'spec-adherence': 'A',
-        'regression-risk': 'A',
-      });
-      expect(out, isA<Escalate>(), reason: 'an unread/forged-missing grade is F');
-      // A missing non-gating grade is F → the D/F rework rule (review C-1).
-      expect((out as Escalate).reason, contains('rework'));
-    });
+    test(
+      'a MISSING sibling grade ⇒ Gate (fail-closed — can never advance)',
+      () async {
+        // test-coverage has no recorded grade ⇒ treated as F ⇒ cannot advance.
+        final out = await _route(const {
+          'code-validation': 'A',
+          'spec-adherence': 'A',
+          'regression-risk': 'A',
+        });
+        expect(
+          out,
+          isA<Escalate>(),
+          reason: 'an unread/forged-missing grade is F',
+        );
+        // A missing non-gating grade is F → the D/F rework rule (review C-1).
+        expect((out as Escalate).reason, contains('rework'));
+      },
+    );
 
     test('the gating critic MISSING ⇒ Gate (fail-closed)', () async {
       final out = await _route(const {
