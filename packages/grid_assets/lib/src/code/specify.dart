@@ -218,7 +218,6 @@ $kSpecExemplarAcceptance
 $kSpecExemplarDesign
 `````''';
 
-
 /// The spec-readiness committee circuit (id `spec_review`) — the READINESS
 /// LADDER (bead `pow-q7n`: `intake` → `readiness` → `readiness-route`, the cheap
 /// pre-specify lens) → SPECIFY (the architect harness ride) → a hygiene step
@@ -362,7 +361,8 @@ const Circuit kSpecReviewCircuit = Circuit(
         'plan-completeness',
       },
       params: {
-        'critics': 'spec-validation,coherence,adr-alignment,'
+        'critics':
+            'spec-validation,coherence,adr-alignment,'
             'acceptance-testability,plan-completeness',
         'gating': kSpecGatingRubric,
         // The DECLARATIVE backward-motion edge. The route does not REPORT a
@@ -446,7 +446,10 @@ class SpecifyCapability extends ProcessCapability {
     return spawnFor(
       environment: environment,
       model: config.params['model'],
-      endpoint: siteBinding.endpointFor(name: config.harness, environment: environment),
+      endpoint: siteBinding.endpointFor(
+        name: config.harness,
+        environment: environment,
+      ),
       brief: buildSpecifyBrief(
         bead,
         workspace,
@@ -470,7 +473,10 @@ class SpecifyCapability extends ProcessCapability {
   /// [AgentCapability.result]: an absent/malformed envelope yields no fields,
   /// NEVER a throw.
   @override
-  Future<Map<String, String>?> result(TreeContext context, StepArgs args) async {
+  Future<Map<String, String>?> result(
+    TreeContext context,
+    StepArgs args,
+  ) async {
     final workspace = context.getInheritedSeedOfExactType<Workspace>();
     if (workspace == null) return null;
     final usage = readUsageFields(workspace.workspaceDir, args.nodePath);
@@ -732,7 +738,10 @@ class SpecCriticCapability extends CriticCapability {
     return spawnFor(
       environment: environment,
       model: config.params['model'],
-      endpoint: siteBinding.endpointFor(name: config.harness, environment: environment),
+      endpoint: siteBinding.endpointFor(
+        name: config.harness,
+        environment: environment,
+      ),
       brief: AgentBrief(
         task: buildSpecCriticPrompt(
           bead,
@@ -761,10 +770,11 @@ class SpecCriticCapability extends CriticCapability {
   ///
   /// Carries the SAME hardening as [CriticCapability.buildCriticPrompt]: the
   /// verdict JSON's `nodePath` FRESHNESS STAMP (gate-integrity #3 — a rework
-  /// round reuses the workspace directory), plus the ROUND stamp (A15(5) alt-A)
-  /// — the critic node's own `rewindCount`, read via the ambient [SiblingView],
-  /// which is what fences a stale verdict across an auto-respec wave (the node
-  /// path does not move); the workspace-derived ABSOLUTE
+  /// round reuses the workspace directory), plus the ROUND stamp (A15(5)
+  /// alt-A, re-sourced by A27(7)(a)'s follow-up, bead `pow-96s`) — the respec
+  /// ledger's own `round`, read via [roundOf] off the ambient [Workspace]'s
+  /// worktree, which is what fences a stale verdict across an auto-respec wave
+  /// (the node path does not move); the workspace-derived ABSOLUTE
   /// canonical write path (gate-integrity #4 — cwd-invariant), and the
   /// file-write instruction as the LAST thing the prompt says (tg-291 —
   /// recency). What differs is the SCOPE: the review subject is the bead's
@@ -840,7 +850,9 @@ String specBeadBlock(Bead bead) {
   final title = bead.title.isNotEmpty ? bead.title : 'work bead ${bead.id}';
   final b = StringBuffer()
     ..writeln()
-    ..writeln('## The work bead (its Acceptance criteria + Design ARE the spec)')
+    ..writeln(
+      '## The work bead (its Acceptance criteria + Design ARE the spec)',
+    )
     ..writeln('`${bead.id}` — $title');
   void section(String heading, String body) {
     if (body.trim().isEmpty) return;
@@ -999,7 +1011,10 @@ List<String> specStructuralFindings(Bead bead) {
   final structure = proseOnly(design);
 
   // Testable acceptance: at least one `- [ ]` checkbox criterion.
-  if (!RegExp(r'^\s*-\s*\[[ xX]\]\s*\S', multiLine: true).hasMatch(acceptance)) {
+  if (!RegExp(
+    r'^\s*-\s*\[[ xX]\]\s*\S',
+    multiLine: true,
+  ).hasMatch(acceptance)) {
     findings.add('acceptance: no testable `- [ ]` checkbox criteria');
   }
 
@@ -1036,7 +1051,9 @@ List<String> specStructuralFindings(Bead bead) {
   for (final pattern in _placeholderPatterns) {
     final match = pattern.firstMatch(prose);
     if (match != null) {
-      findings.add('placeholder: "${match.group(0)}" — not implementation-ready');
+      findings.add(
+        'placeholder: "${match.group(0)}" — not implementation-ready',
+      );
     }
   }
   return findings;

@@ -65,6 +65,27 @@ No ADR applies — verified via grep on `heartbeat`, `bus`.
   int round = 0,
 }) {
   final path = nodePath ?? 'tg-1/spec_review/$rubric';
+  // The ROUND is the respec LEDGER's own `round` (A27(3), re-sourced here by
+  // A27(7)(a)'s follow-up, bead `pow-96s`) — the counter the critic stamps and
+  // result() verifies. A non-zero round therefore writes a REAL ledger into
+  // [workspaceDir] (callers pass a real temp dir for that); round 0 is the
+  // no-ledger default, which also holds for the synthetic '/w/tg-1' dir
+  // (`roundOf` reads 0 off a worktree that does not exist).
+  if (round > 0) {
+    writeRespecLedger(
+      workspaceDir,
+      RespecLedger(
+        round: round,
+        lanes: const [
+          RespecLane(
+            rubric: 'coherence',
+            grade: 'D',
+            rationale: 'the prior round\'s correction guidance (fixture)',
+          ),
+        ],
+      ),
+    );
+  }
   return (
     context: FakeTreeContext(
       values: {
@@ -73,11 +94,6 @@ No ADR applies — verified via grep on `heartbeat`, `bus`.
           'tg-1',
           workspaceDir: workspaceDir,
           branch: 'grid/tg-1',
-        ),
-        // The ROUND the engine bumped this node to (tg-o90) — the honest counter
-        // the critic stamps and result() verifies (A15(5) alt-A).
-        SiblingView: SiblingView(
-          cursor: {path: NodeCursor(rewindCount: round)},
         ),
       },
     ),
@@ -192,8 +208,10 @@ void main() {
       // committee's matrix, never an auto-respec. Edges there would INVERT the
       // matrix.
       for (final rubric in kSpecCommitteeRubrics) {
-        expect((byId[rubric]! as CapabilityStep).params[kValidatesParamKey],
-            isNull);
+        expect(
+          (byId[rubric]! as CapabilityStep).params[kValidatesParamKey],
+          isNull,
+        );
       }
     });
 
@@ -765,7 +783,7 @@ void main() {
         rubric: 'coherence',
         workspaceDir: dir.path,
         nodePath: nodePath,
-        round: 1, // the engine bumped rewindCount: this is the RESPEC round.
+        round: 1, // the route moved the LEDGER: this is the RESPEC round.
       );
       final graded = await const SpecCriticCapability().result(
         c.context,
@@ -832,24 +850,19 @@ void main() {
       expect(out.reason, contains('hard block'));
     });
 
-    test(
-      'an LLM spec lane at D WITH a rationale ⇒ an ADVANCE carrying the '
-      'invalidating `grade: F` stamp — the loop actuates through the declared '
-      '`validates` edge, with no human and no reported rewind',
-      () async {
-        final out = await _specRoute(
-          {...allA(), 'plan-completeness': 'D'},
-          rationales: const {
-            'plan-completeness': 'step 3 names no test command',
-          },
-        );
-        expect(out, isA<Advance>());
-        final payload = (out as Advance).payload!;
-        expect(payload['grade'], 'F');
-        expect(payload['verdict'], 'respec');
-        expect(payload['rationale'], contains('plan-completeness=D'));
-      },
-    );
+    test('an LLM spec lane at D WITH a rationale ⇒ an ADVANCE carrying the '
+        'invalidating `grade: F` stamp — the loop actuates through the declared '
+        '`validates` edge, with no human and no reported rewind', () async {
+      final out = await _specRoute(
+        {...allA(), 'plan-completeness': 'D'},
+        rationales: const {'plan-completeness': 'step 3 names no test command'},
+      );
+      expect(out, isA<Advance>());
+      final payload = (out as Advance).payload!;
+      expect(payload['grade'], 'F');
+      expect(payload['verdict'], 'respec');
+      expect(payload['rationale'], contains('plan-completeness=D'));
+    });
 
     test('an LLM spec lane at D with NO rationale ⇒ a HUMAN gate — nothing to '
         'respec against, so never a respec stamp', () async {
