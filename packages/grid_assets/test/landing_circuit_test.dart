@@ -67,60 +67,142 @@ class _FakeDelivery implements DeliveryMethod {
 
 void main() {
   group('RebaseCapability', () {
-    test('NO delivery bound → Advance, no git call at all (the commit-only '
-        'arm: nothing leaves the station, so there is nothing to rebase ONTO)',
-        () async {
-      final runner = RecordingGitRunner();
-      final c = _capCtx();
-      final outcome = await RebaseCapability(runner: runner)
-          .route(c.context, c.args);
-      expect(outcome, isA<Advance>());
-      expect(runner.calls, isEmpty);
-    });
+    test(
+      'NO delivery bound → Advance, no git call at all (the commit-only '
+      'arm: nothing leaves the station, so there is nothing to rebase ONTO)',
+      () async {
+        final runner = RecordingGitRunner();
+        final c = _capCtx();
+        final outcome = await RebaseCapability(
+          runner: runner,
+        ).route(c.context, c.args);
+        expect(outcome, isA<Advance>());
+        expect(runner.calls, isEmpty);
+      },
+    );
 
     test('a clean fetch+rebase → Advance({outcome: clean})', () async {
       final runner = RecordingGitRunner();
       final c = _capCtx(delivery: _FakeDelivery());
-      final outcome = await RebaseCapability(runner: runner)
-          .route(c.context, c.args);
+      final outcome = await RebaseCapability(
+        runner: runner,
+      ).route(c.context, c.args);
       expect(outcome, isA<Advance>());
       expect((outcome as Advance).payload, {'outcome': 'clean'});
-      expect(runner.subcommands, ['fetch', 'rebase']);
-      expect(runner.calls[0].args, ['fetch', 'origin', 'main']);
-      expect(runner.calls[1].args, ['rebase', 'origin/main']);
+      expect(runner.subcommands, ['ls-files', 'status', 'fetch', 'rebase']);
+      expect(runner.calls[2].args, ['fetch', 'origin', 'main']);
+      expect(runner.calls[3].args, ['rebase', 'origin/main']);
     });
 
-    test('a fetch failure → a thrown RouteFailure (an operational error, not a '
-        'human hold; a route has no failure ARM, so throwing IS the channel)',
-        () async {
-      final runner = RecordingGitRunner()..exitCode = 1;
+    test('only materializer-owned dirt is restored before rebase', () async {
+      final runner = _MaterializerAwareRebaseRunner(
+        tracked: '.claude/skills/discover/SKILL.md\n',
+      );
+      final c = _capCtx(delivery: _FakeDelivery());
+      final outcome = await RebaseCapability(
+        runner: runner,
+      ).route(c.context, c.args);
+      expect(outcome, isA<Advance>());
+      expect(runner.subcommands, [
+        'ls-files',
+        'restore',
+        'status',
+        'fetch',
+        'rebase',
+      ]);
+      expect(runner.calls[0].args, [
+        'ls-files',
+        '--',
+        ...kWorktreeOverlaySubtrees,
+      ]);
+      expect(runner.calls[1].args, [
+        'restore',
+        '--source=HEAD',
+        '--staged',
+        '--worktree',
+        '--',
+        '.claude/skills/discover/SKILL.md',
+      ]);
+    });
+
+    test(
+      'rendered dirt plus real dirt blocks and names the real path',
+      () async {
+        final runner = _MaterializerAwareRebaseRunner(
+          tracked: '.claude/skills/discover/SKILL.md\n',
+          status: ' M lib/src/agent_work.dart\n',
+        );
+        final c = _capCtx(delivery: _FakeDelivery());
+        final outcome = await RebaseCapability(
+          runner: runner,
+        ).route(c.context, c.args);
+        expect(outcome, isA<Escalate>());
+        expect(
+          (outcome as Escalate).reason,
+          contains('lib/src/agent_work.dart'),
+        );
+        expect(runner.subcommands, ['ls-files', 'restore', 'status']);
+      },
+    );
+
+    test('materializer cleanup git failure is loud', () async {
+      final runner = _MaterializerAwareRebaseRunner(
+        tracked: '.claude/skills/discover/SKILL.md\n',
+        failSubcommand: 'restore',
+      );
       final c = _capCtx(delivery: _FakeDelivery());
       await expectLater(
         RebaseCapability(runner: runner).route(c.context, c.args),
         throwsA(isA<RouteFailure>()),
       );
-      expect(runner.subcommands, ['fetch'],
-          reason: 'a fetch failure never attempts the rebase');
+      expect(runner.subcommands, ['ls-files', 'restore']);
     });
 
-    test('a rebase conflict aborts the rebase and ESCALATES with the git output '
-        'as provenance — never a silent force', () async {
-      final runner = _ConflictingRebaseRunner();
-      final c = _capCtx(delivery: _FakeDelivery());
-      final outcome = await RebaseCapability(runner: runner)
-          .route(c.context, c.args);
-      expect(outcome, isA<Escalate>());
-      expect(
-        (outcome as Escalate).reason,
-        contains('CONFLICT (content): Merge conflict in a.txt'),
-      );
-      expect(
-        runner.subcommands,
-        ['fetch', 'rebase', 'rebase'],
-        reason: 'the second rebase call is the --abort',
-      );
-      expect(runner.calls.last.args, ['rebase', '--abort']);
-    });
+    test(
+      'a fetch failure → a thrown RouteFailure (an operational error, not a '
+      'human hold; a route has no failure ARM, so throwing IS the channel)',
+      () async {
+        final runner = _MaterializerAwareRebaseRunner(
+          tracked: '',
+          failSubcommand: 'fetch',
+        );
+        final c = _capCtx(delivery: _FakeDelivery());
+        await expectLater(
+          RebaseCapability(runner: runner).route(c.context, c.args),
+          throwsA(isA<RouteFailure>()),
+        );
+        expect(runner.subcommands, [
+          'ls-files',
+          'status',
+          'fetch',
+        ], reason: 'a fetch failure never attempts the rebase');
+      },
+    );
+
+    test(
+      'a rebase conflict aborts the rebase and ESCALATES with the git output '
+      'as provenance — never a silent force',
+      () async {
+        final runner = _ConflictingRebaseRunner();
+        final c = _capCtx(delivery: _FakeDelivery());
+        final outcome = await RebaseCapability(
+          runner: runner,
+        ).route(c.context, c.args);
+        expect(outcome, isA<Escalate>());
+        expect(
+          (outcome as Escalate).reason,
+          contains('CONFLICT (content): Merge conflict in a.txt'),
+        );
+        expect(runner.subcommands, [
+          'ls-files',
+          'status',
+          'fetch',
+          'rebase',
+          'rebase',
+        ], reason: 'the second rebase call is the --abort');
+        expect(runner.calls.last.args, ['rebase', '--abort']);
+      },
+    );
   });
 
   group('RevalidateCapability', () {
@@ -128,8 +210,9 @@ void main() {
         'arm)', () async {
       final runner = RecordingShellRunner();
       final c = _capCtx();
-      final outcome = await RevalidateCapability(runner: runner)
-          .route(c.context, c.args);
+      final outcome = await RevalidateCapability(
+        runner: runner,
+      ).route(c.context, c.args);
       expect(outcome, isA<Advance>());
       expect(runner.calls, isEmpty);
     });
@@ -137,12 +220,13 @@ void main() {
     test('re-runs the bead\'s OWN validation_plan; a clean exit → '
         'Advance({outcome: passed})', () async {
       final runner = RecordingShellRunner();
-      final richBead = bead('tg-1').copyWith(
-        metadata: const {'validation_plan': 'melos test'},
-      );
+      final richBead = bead(
+        'tg-1',
+      ).copyWith(metadata: const {'validation_plan': 'melos test'});
       final c = _capCtx(delivery: _FakeDelivery(), beadOverride: richBead);
-      final outcome = await RevalidateCapability(runner: runner)
-          .route(c.context, c.args);
+      final outcome = await RevalidateCapability(
+        runner: runner,
+      ).route(c.context, c.args);
       expect(outcome, isA<Advance>());
       expect((outcome as Advance).payload, {'outcome': 'passed'});
       expect(runner.calls.single.command, 'melos test');
@@ -156,8 +240,9 @@ void main() {
       // what a real `false` would do (never silently pass).
       final runner = RecordingShellRunner()..exitCode = 1;
       final c = _capCtx(delivery: _FakeDelivery());
-      final outcome = await RevalidateCapability(runner: runner)
-          .route(c.context, c.args);
+      final outcome = await RevalidateCapability(
+        runner: runner,
+      ).route(c.context, c.args);
       expect(outcome, isA<Escalate>());
       expect(runner.calls.single.command, 'false');
     });
@@ -165,37 +250,41 @@ void main() {
     test('a non-zero validation_plan ESCALATES with the captured output as '
         'provenance — never a silent advance', () async {
       final runner = RecordingShellRunner()..exitCode = 1;
-      final richBead = bead('tg-1').copyWith(
-        metadata: const {'validation_plan': 'melos test'},
-      );
+      final richBead = bead(
+        'tg-1',
+      ).copyWith(metadata: const {'validation_plan': 'melos test'});
       final c = _capCtx(delivery: _FakeDelivery(), beadOverride: richBead);
-      final outcome = await RevalidateCapability(runner: runner)
-          .route(c.context, c.args);
+      final outcome = await RevalidateCapability(
+        runner: runner,
+      ).route(c.context, c.args);
       expect(outcome, isA<Escalate>());
       expect((outcome as Escalate).reason, contains('revalidate failed'));
     });
   });
 
   group('buildCircuitReceipt', () {
-    test('assembles the landing circuit\'s OWN provenance — rebase/revalidate; '
-        'the review grades line MOVED to PrSection.committeeGrades (pow-8dx)', () {
-      const siblings = SiblingView(
-        results: {
-          'tg-1/review/route': {
-            'grades': 'code-validation=A,spec-adherence=B',
-            'spread': '1',
-            'rule': 'all-approve',
+    test(
+      'assembles the landing circuit\'s OWN provenance — rebase/revalidate; '
+      'the review grades line MOVED to PrSection.committeeGrades (pow-8dx)',
+      () {
+        const siblings = SiblingView(
+          results: {
+            'tg-1/review/route': {
+              'grades': 'code-validation=A,spec-adherence=B',
+              'spread': '1',
+              'rule': 'all-approve',
+            },
+            'tg-1/land/rebase': {'outcome': 'clean'},
+            'tg-1/land/revalidate': {'outcome': 'passed'},
           },
-          'tg-1/land/rebase': {'outcome': 'clean'},
-          'tg-1/land/revalidate': {'outcome': 'passed'},
-        },
-      );
-      final receipt = buildCircuitReceipt(beadId: 'tg-1', siblings: siblings);
-      expect(receipt, contains('## Circuit receipt'));
-      expect(receipt, contains('- rebase: clean'));
-      expect(receipt, contains('- revalidate: passed'));
-      expect(receipt, isNot(contains('- review:')));
-    });
+        );
+        final receipt = buildCircuitReceipt(beadId: 'tg-1', siblings: siblings);
+        expect(receipt, contains('## Circuit receipt'));
+        expect(receipt, contains('- rebase: clean'));
+        expect(receipt, contains('- revalidate: passed'));
+        expect(receipt, isNot(contains('- review:')));
+      },
+    );
 
     test('defaults to clean/passed when siblings carry no data (the offline '
         'test-harness gap, never a real gap in production — land only runs once '
@@ -262,7 +351,37 @@ void main() {
       expect(tail.length, 41, reason: '… + the last 40 chars');
     });
   });
+}
 
+class _MaterializerAwareRebaseRunner implements GitRunner {
+  _MaterializerAwareRebaseRunner({
+    required this.tracked,
+    this.status = '',
+    this.failSubcommand,
+  });
+
+  final String tracked;
+  final String status;
+  final String? failSubcommand;
+  final List<({String workDir, List<String> args})> calls = [];
+
+  List<String> get subcommands => [for (final call in calls) call.args.first];
+
+  @override
+  Future<GitRunResult> run({
+    required String workingDirectory,
+    required List<String> args,
+  }) async {
+    calls.add((workDir: workingDirectory, args: List.unmodifiable(args)));
+    if (args.first == failSubcommand) {
+      return GitRunResult(exitCode: 1, output: '${args.first} failed');
+    }
+    return switch (args.first) {
+      'ls-files' => GitRunResult(exitCode: 0, output: tracked),
+      'status' => GitRunResult(exitCode: 0, output: status),
+      _ => const GitRunResult(exitCode: 0, output: ''),
+    };
+  }
 }
 
 /// A [GitRunner] fake that fails ONLY the `rebase` (not `fetch`) call with a
@@ -285,6 +404,7 @@ class _ConflictingRebaseRunner implements GitRunner {
     return const GitRunResult(exitCode: 0, output: '');
   }
 
-  List<String> get subcommands =>
-      [for (final c in calls) c.args.isNotEmpty ? c.args.first : ''];
+  List<String> get subcommands => [
+    for (final c in calls) c.args.isNotEmpty ? c.args.first : '',
+  ];
 }
