@@ -112,7 +112,12 @@ void main() {
         final cfg = const CriticCapability().spawn(c.context, c.args);
         expect(cfg.command, 'sh');
         expect(cfg.args[0], '-c');
-        expect(cfg.args[1], contains('melos analyze && melos test'));
+        expect(
+          cfg.args[1],
+          'mkdir -p .grid/critique; ( melos analyze && melos test ) ; '
+          r'echo $? > .grid/critique/code-validation.rc',
+        );
+        expect(cfg.args[1], isNot(contains('command -v')));
         // The rc is captured to the critique dir so result() can read the grade.
         expect(cfg.args[1], contains('.grid/critique/code-validation.rc'));
         expect(cfg.args[1], contains(r'echo $?'));
@@ -180,6 +185,28 @@ void main() {
       expect(await cap.result(c.context, c.args), {
         'grade': 'F',
         'transport': 'file',
+      });
+    });
+
+    test('result() adds candidate commands only for rc 127', () async {
+      final dir = Directory.systemTemp.createTempSync('critic-gate-127-');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final withPlan = bead(
+        'tg-1',
+      ).copyWith(metadata: const {'validation_plan': 'rg needle'});
+      final c = _ctx(
+        rubric: kGatingRubric,
+        workspaceDir: dir.path,
+        beadOverride: withPlan,
+      );
+      File('${dir.path}/.grid/critique/code-validation.rc')
+        ..createSync(recursive: true)
+        ..writeAsStringSync('127\n');
+
+      expect(await const CriticCapability().result(c.context, c.args), {
+        'grade': 'F',
+        'transport': 'file',
+        'rationale': 'exit 127 — candidate missing commands: rg',
       });
     });
   });

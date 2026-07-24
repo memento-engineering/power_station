@@ -55,6 +55,7 @@ import 'package:genesis_tree/genesis_tree.dart';
 import 'package:grid_engine/grid_engine.dart';
 import 'package:grid_runtime/grid_runtime.dart';
 
+import '../agent/path_check.dart';
 import '../assets/overlay_materializer.dart';
 import 'route_failure.dart';
 
@@ -221,13 +222,16 @@ class RevalidateCapability extends RouteCapability {
     }
 
     final runner = _runner ?? const SystemShellRunner();
+    final plan = _validationPlan(bead);
     final result = await runner.run(
       workingDirectory: workspace.workspaceDir,
-      command: _validationPlan(bead),
+      command: plan,
     );
     if (args.cancel.isCancelled) throw kRouteCancelled;
     if (result.ok) return const Advance({'outcome': 'passed'});
-    return Escalate('revalidate failed: ${_truncate(result.output)}');
+    final diagnostic = pathCheckDiagnostic(plan, result.exitCode);
+    final suffix = diagnostic == null ? '' : '; $diagnostic';
+    return Escalate('revalidate failed: ${_truncate(result.output)}$suffix');
   }
 }
 
