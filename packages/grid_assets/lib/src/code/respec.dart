@@ -404,16 +404,26 @@ String renderRespecGuidance(RespecLedger ledger) {
 /// round counter cannot advance there (it IS the ledger), so the bound falls
 /// back to the engine's derived belt, which needs no asset I/O at all.
 class SpecRouteCapability extends RouteCapability {
-  /// Creates the spec route.
-  const SpecRouteCapability();
+  /// Creates the spec route, optionally over its mid-wave WAIT tuning: the
+  /// [lanePoll] interval between join re-reads, and the [laneWaitBudget] after
+  /// which a still-incomplete current-round join fails LOUD ([RouteFailure]).
+  /// The defaults cover a full derived wave (a frontier-tier specify re-ride
+  /// plus four critics) with margin; tests inject millisecond values.
+  const SpecRouteCapability({
+    this.lanePoll = const Duration(seconds: 15),
+    this.laneWaitBudget = const Duration(minutes: 60),
+  });
+
+  /// How often the WAIT re-reads the join (see [route]).
+  final Duration lanePoll;
+
+  /// How long the WAIT may last before the route refuses LOUDLY.
+  final Duration laneWaitBudget;
 
   @override
   Future<RouteVerdict> route(TreeContext context, StepArgs args) async {
-    // Read the ambient values at ENTRY (while mounted); the matrix below is pure
-    // over the captured values.
-    final siblings =
-        context.getInheritedSeedOfExactType<SiblingView>() ??
-        const SiblingView();
+    // Read the ambient values at ENTRY (while mounted); after every await only
+    // the captured values + the cancel token are touched before re-reading.
     final workspace = context.getInheritedSeedOfExactType<Workspace>();
     final parent = parentPath(args.nodePath);
     final gating = args.params['gating'] ?? '';
@@ -425,6 +435,10 @@ class SpecRouteCapability extends RouteCapability {
 
     final dir = workspace?.workspaceDir;
     final live = dir != null && dir.isNotEmpty && Directory(dir).existsSync();
+
+    var siblings =
+        context.getInheritedSeedOfExactType<SiblingView>() ??
+        const SiblingView();
 
     // The ROUND COUNT is the LEDGER's own `round`. The node's `rewindCount` is
     // not a candidate: the engine only ever sets it WHILE a node is currently
@@ -439,45 +453,131 @@ class SpecRouteCapability extends RouteCapability {
     // (`roundOf`, A27(7)(a) follow-up — bead `pow-96s`): the ledger only moves
     // when THIS route writes it, downstream of every lane, so the round the
     // critics stamped and the round verified below are one number.
-    final priorRound = live ? (readRespecLedger(dir)?.round ?? 0) : 0;
+    var priorRound = live ? (readRespecLedger(dir)?.round ?? 0) : 0;
 
-    // THE JOIN (bead `pow-96s`). One fresh vector, assembled once, is all the
-    // matrix ever decides on (ADR-0000 A29 — the ledger's recorded lanes are
-    // NOT a candidate source). What changes here is each JUDGEMENT lane's
-    // per-lane source in the LIVE posture: the lane's CURRENT-ROUND verdict
-    // artifact on disk (`currentVerdictFromFile` — the same single parser and
-    // nodePath+round freshness fence `result()` reads through), never the
-    // SiblingView alone. A lane with NO current-round artifact does NOT join:
-    // it contributes no grade, so a flare can never cite a fabricated grade
-    // for a lane whose verdict is absent or stale (the observed incident —
-    // full five-lane joins replayed over an EMPTY critique dir). The GATING
-    // lane is the exception by construction: `SpecValidationCapability` is a
-    // deterministic structural check that writes no artifact — its grade rides
-    // its own step result, and a missing one still fail-closes to a hard block
-    // in the matrix. Offline (no real worktree) there are no artifacts at all,
-    // so every lane joins off the SiblingView — the same no-op posture as the
-    // ledger I/O above.
-    final lanes = <SpecLane>[
-      for (final id in criticIds)
-        if (!live || id == gating)
-          (
-            id: id,
-            grade: siblings.resultOf('$parent/$id')['grade'],
-            rationale: siblings.resultOf('$parent/$id')['rationale'] ?? '',
-          )
-        else if (currentVerdictFromFile(
-              workspaceDir: dir,
-              rubric: id,
-              nodePath: '$parent/$id',
-              round: priorRound,
-            )
-            case final verdict?)
-          (
-            id: id,
-            grade: verdict['grade'],
-            rationale: verdict['rationale'] ?? '',
-          ),
-    ];
+    // THE JOIN (bead `pow-96s`, hardened by the 2026-07-24 bridge fix). One
+    // fresh vector is all the matrix ever decides on (ADR-0000 A29 — the
+    // ledger's recorded lanes are NOT a candidate source). In the LIVE posture
+    // each JUDGEMENT lane joins ONLY through its CURRENT-ROUND verdict
+    // artifact on disk (`currentVerdictOnDisk` — the same single parser and
+    // nodePath+round freshness fence `result()` reads through, canonical path
+    // first, round-fresh stray second), never the SiblingView alone — so a
+    // flare can never cite a fabricated grade for a lane whose verdict is
+    // absent or stale (the observed incident: full five-lane joins replayed
+    // over an EMPTY critique dir). The GATING lane is the exception by
+    // construction: `SpecValidationCapability` is a deterministic structural
+    // check that writes no artifact — its grade rides its own step result,
+    // and a missing one still fail-closes to a hard block in the matrix.
+    //
+    // What the bridge fix adds is what happens to a lane WITHOUT a
+    // current-round artifact — it no longer silently drops out (the tg-60t
+    // kill: the engine's derived respec wave re-keys the closure node by
+    // node, stale positive terminals of old incarnations let this route run
+    // MID-WAVE, and the one lane that had already re-run then decided the
+    // whole round: a false advance that also consumed the ledger). The lane's
+    // own recorded result carries the round it was recorded against
+    // (`CriticCapability.result`), which splits the miss honestly:
+    //  - result round == this round ⇒ the lane FINISHED this round with no
+    //    artifact on disk (an envelope/fail-closed transport, or a destroyed
+    //    file): waiting cannot help — fail LOUD, ONCE, via an [Escalate] that
+    //    names the lane and cites NO grade for it (the ledger is spent, as on
+    //    every human flare);
+    //  - anything else ⇒ the lane has NOT produced this round's verdict yet
+    //    (a mid-wave join, or a stale replay of a prior round/session): WAIT —
+    //    re-read the join every [lanePoll] until the wave catches up, bounded
+    //    by [laneWaitBudget], then refuse LOUDLY ([RouteFailure], bounded by
+    //    the engine's restart budget — never a silent partial decision). A
+    //    re-key that disposes this incarnation mid-wait cancels it cleanly.
+    //
+    // Offline (no real worktree) there are no artifacts at all, so every lane
+    // joins off the SiblingView — the same no-op posture as the ledger I/O.
+    final lanes = <SpecLane>[];
+    if (!live) {
+      for (final id in criticIds) {
+        lanes.add((
+          id: id,
+          grade: siblings.resultOf('$parent/$id')['grade'],
+          rationale: siblings.resultOf('$parent/$id')['rationale'] ?? '',
+        ));
+      }
+    } else {
+      final deadline = DateTime.now().add(laneWaitBudget);
+      while (true) {
+        priorRound = readRespecLedger(dir)?.round ?? 0;
+        lanes.clear();
+        final artifactless = <String>[]; // finished THIS round, no artifact.
+        final waiting = <String>[]; // no THIS-round trace at all yet.
+        for (final id in criticIds) {
+          if (id == gating) {
+            lanes.add((
+              id: id,
+              grade: siblings.resultOf('$parent/$id')['grade'],
+              rationale: siblings.resultOf('$parent/$id')['rationale'] ?? '',
+            ));
+            continue;
+          }
+          final verdict = currentVerdictOnDisk(
+            workspaceDir: dir,
+            rubric: id,
+            nodePath: '$parent/$id',
+            round: priorRound,
+          );
+          if (verdict != null) {
+            lanes.add((
+              id: id,
+              grade: verdict['grade'],
+              rationale: verdict['rationale'] ?? '',
+            ));
+            continue;
+          }
+          final recorded = siblings.resultOf('$parent/$id');
+          final recordedRound = int.tryParse(
+            (recorded[kVerdictRoundKey] ?? '').trim(),
+          );
+          if (recordedRound == priorRound) {
+            artifactless.add(
+              '$id (transport ${recorded['transport'] ?? 'unrecorded'})',
+            );
+          } else {
+            waiting.add(id);
+          }
+        }
+        if (waiting.isEmpty) {
+          // The join is as complete as it can ever get. A lane that finished
+          // THIS round with no artifact on disk is a verdict-transport defect
+          // no wait can cure — LOUD, ONCE, citing no grade (pow-96s: a flare
+          // may never cite a grade for a lane with no current-round artifact).
+          if (artifactless.isNotEmpty) {
+            clearRespecLedger(dir);
+            return Escalate(
+              'spec-route: no current-round (round $priorRound) verdict '
+              'artifact on disk for ${artifactless.join(', ')} although the '
+              'lane(s) finished this round — the verdict transport left '
+              'nothing the join may cite (an envelope/fail-closed grade, or a '
+              'destroyed file). A human rules; deciding over a partial '
+              'committee is withheld.',
+            );
+          }
+          break;
+        }
+        if (!DateTime.now().isBefore(deadline)) {
+          throw RouteFailure(
+            'spec-route: waited ${laneWaitBudget.inSeconds}s but '
+            '${waiting.join(', ')} still have no current-round (round '
+            '$priorRound) verdict artifact and no this-round result — a '
+            'mid-wave join (the derived respec wave has not re-run them yet) '
+            'or a stalled lane. Refusing to decide over a partial committee.',
+          );
+        }
+        await Future<void>.delayed(lanePoll);
+        if (args.cancel.isCancelled) throw kRouteCancelled;
+        // Re-read the ambient view for the next attempt (post-cancel-check —
+        // the effect verb is snapshot-at-read and safe across the wait).
+        siblings =
+            context.getInheritedSeedOfExactType<SiblingView>() ??
+            const SiblingView();
+      }
+    }
 
     switch (decideSpecRoute(
       lanes: lanes,

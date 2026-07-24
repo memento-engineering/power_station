@@ -684,6 +684,7 @@ void main() {
       expect(await cap.result(c.context, c.args), {
         'grade': 'B',
         'transport': 'file',
+        'round': '0',
         'rationale': 'scope carved cleanly',
       });
 
@@ -754,6 +755,7 @@ void main() {
       expect(await const SpecCriticCapability().result(c.context, c.args), {
         'grade': 'B',
         'transport': 'file',
+        'round': '0',
         'rationale': 'scope carved cleanly',
       });
     });
@@ -821,6 +823,7 @@ void main() {
       expect(await const SpecCriticCapability().result(c.context, c.args), {
         'grade': 'B',
         'transport': 'file',
+        'round': '1',
         'rationale': 'the respec landed',
       });
     });
