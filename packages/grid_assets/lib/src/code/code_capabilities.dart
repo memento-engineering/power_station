@@ -306,7 +306,7 @@ class AgentCapability extends ProcessCapability {
       overlayRoots: [overlayRoot],
       targetRoot: workspace.workspaceDir,
       sourceRef: _overlaySourceRef,
-      subtrees: const [kClaudeSkillsSubtree],
+      subtrees: kWorktreeOverlaySubtrees,
       args: {
         'runner': kDefaultOverlayRunner,
         // The station's registered root checkout is the closest thing this

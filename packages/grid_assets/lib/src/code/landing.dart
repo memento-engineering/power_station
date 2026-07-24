@@ -55,6 +55,7 @@ import 'package:genesis_tree/genesis_tree.dart';
 import 'package:grid_engine/grid_engine.dart';
 import 'package:grid_runtime/grid_runtime.dart';
 
+import '../assets/overlay_materializer.dart';
 import 'route_failure.dart';
 
 /// The landing PREPARATION circuit (id `landing`) — `rebase → revalidate`, which
@@ -91,9 +92,14 @@ class RebaseCapability extends RouteCapability {
   /// Creates the capability, optionally over an injected [runner] (tests
   /// inject the SAME [RecordingGitRunner] fake `GitHubPrDelivery`'s `GitOps`
   /// already uses — Fakes, not mocks); defaults to the real [SystemGitRunner].
-  const RebaseCapability({GitRunner? runner}) : _runner = runner;
+  const RebaseCapability({
+    GitRunner? runner,
+    List<String> materializedSubtrees = kWorktreeOverlaySubtrees,
+  }) : _runner = runner,
+       _materializedSubtrees = materializedSubtrees;
 
   final GitRunner? _runner;
+  final List<String> _materializedSubtrees;
 
   @override
   Future<RouteVerdict> route(TreeContext context, StepArgs args) async {
@@ -106,6 +112,60 @@ class RebaseCapability extends RouteCapability {
     final runner = _runner ?? SystemGitRunner();
     final workDir = workspace.workspaceDir;
     final base = workspace.baseBranch;
+
+    final tracked = await runner.run(
+      workingDirectory: workDir,
+      args: ['ls-files', '--', ..._materializedSubtrees],
+    );
+    if (args.cancel.isCancelled) throw kRouteCancelled;
+    if (!tracked.ok) {
+      throw RouteFailure(
+        'could not enumerate materializer-owned paths before rebase: '
+        '${tracked.output.trim()}',
+      );
+    }
+    final trackedPaths = tracked.output
+        .split('\n')
+        .map((path) => path.trim())
+        .where((path) => path.isNotEmpty)
+        .toList();
+    if (trackedPaths.isNotEmpty) {
+      final restore = await runner.run(
+        workingDirectory: workDir,
+        args: [
+          'restore',
+          '--source=HEAD',
+          '--staged',
+          '--worktree',
+          '--',
+          ...trackedPaths,
+        ],
+      );
+      if (args.cancel.isCancelled) throw kRouteCancelled;
+      if (!restore.ok) {
+        throw RouteFailure(
+          'could not restore materializer-owned paths before rebase: '
+          '${restore.output.trim()}',
+        );
+      }
+    }
+    final residue = await runner.run(
+      workingDirectory: workDir,
+      args: ['status', '--porcelain'],
+    );
+    if (args.cancel.isCancelled) throw kRouteCancelled;
+    if (!residue.ok) {
+      throw RouteFailure(
+        'could not verify a clean worktree before rebase: '
+        '${residue.output.trim()}',
+      );
+    }
+    if (residue.output.trim().isNotEmpty) {
+      return Escalate(
+        'rebase refused: uncommitted changes remain outside the materialized '
+        'overlay scopes: ${residue.output.trim()}',
+      );
+    }
 
     final fetch = await runner.run(
       workingDirectory: workDir,
@@ -211,11 +271,10 @@ class SystemShellRunner implements ShellRunner {
     required String workingDirectory,
     required String command,
   }) async {
-    final result = await Process.run(
-      'sh',
-      ['-c', command],
-      workingDirectory: workingDirectory,
-    );
+    final result = await Process.run('sh', [
+      '-c',
+      command,
+    ], workingDirectory: workingDirectory);
     final stdout = result.stdout.toString();
     final stderr = result.stderr.toString();
     return ShellRunResult(

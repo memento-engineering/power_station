@@ -64,6 +64,12 @@ import 'overlay_provenance.dart';
 /// read skill ids back out of it.
 const String kClaudeSkillsSubtree = '.claude/skills';
 
+/// Subtrees materialized into an agent worktree.
+///
+/// Landing consumes this same list, so a new worktree subtree is rendered and
+/// restored by changing this manifest once.
+const List<String> kWorktreeOverlaySubtrees = [kClaudeSkillsSubtree];
+
 /// The executable name the vended overlay's skills render `{{runner}}` against
 /// (the skill's own `<runner> search --json` call — the coupled skill+command
 /// pattern, ADR-0001). The first-party station composing this pack is
@@ -329,7 +335,8 @@ class OverlayMaterializer {
             files.add(
               OverlayFileRefused(
                 relativePath,
-                holes: ({for (final m in residue) m.group(0)!}.toList()..sort()),
+                holes: ({for (final m in residue) m.group(0)!}.toList()
+                  ..sort()),
                 boundArgs: args.keys.toList()..sort(),
               ),
             );
