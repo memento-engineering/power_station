@@ -53,6 +53,13 @@ instructions. Skills TEACH how; ADRs RATIFY the specific.
 - A `pattern` deviation holds the bead ONLY if you NAME the precedent it deviates
   from. Without a named precedent it is a flag, not a hold.
 
+BEAD-FIELD SOURCES ARE STRUCTURED. If a context note quotes or paraphrases a
+bead field, `source` is not evidence: include `beadCitation` with the bead's
+actual `beadId`, the exact `field`, and a non-empty VERBATIM `excerpt`. Copy a
+prior-art hit's id/field/snippet exactly. A hit whose id differs from the work
+bead is FOREIGN content and must never be attributed to the work bead. If you
+cannot supply the structured quotation, omit the bead-field claim.
+
 ## You DECIDE nothing
 You do not grade, you do not rule, and you do not spec. You REPORT what you found
 and you CITE where you found it — a deterministic route reads your report and
@@ -68,7 +75,7 @@ Write your report as JSON to `.grid/discovery/{{lens}}.json`, resolved from the
 worktree root — write it there regardless of your current working directory:
 
 ```json
-{"lens":"{{lens}}","version":1,"context":[{"note":"<what the architect needs to know>","source":"<file / bead / ADR clause>"}],"violations":[{"kind":"decision|skill|pattern","standard":"<docs/adr/ADR-0000-ai-decision-register.md A17(4)>","quote":"<the clause, verbatim, including its Status line>","contradiction":"<what this bead does that contradicts it>","contradicts":true,"acknowledged":false,"ratified":false,"removesOffence":false,"precedent":""}]}
+{"lens":"{{lens}}","version":1,"context":[{"note":"<what the architect needs to know>","source":"<non-bead file or ADR source>","beadCitation":{"beadId":"<actual bead id>","field":"title|description|design|acceptance_criteria|notes","excerpt":"<verbatim field excerpt>"}}],"violations":[{"kind":"decision|skill|pattern","standard":"<docs/adr/ADR-0000-ai-decision-register.md A17(4)>","quote":"<the clause, verbatim, including its Status line>","contradiction":"<what this bead does that contradicts it>","contradicts":true,"acknowledged":false,"ratified":false,"removesOffence":false,"precedent":""}]}
 ```
 
 Both arrays may be EMPTY — a clean bead with no findings is a real, expected

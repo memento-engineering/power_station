@@ -44,12 +44,15 @@ LensReport _report({
   List<ContextNote> context = const [],
 }) => LensReport(lens: lens, violations: violations, context: context);
 
-DiscoveryVerdict _decide(Map<String, LensReport?> lanes, {int priorRound = 0}) =>
-    decideDiscovery(
-      lanes: lanes,
-      anchors: const DiscoveryAnchors(),
-      priorRound: priorRound,
-    );
+DiscoveryVerdict _decide(
+  Map<String, LensReport?> lanes, {
+  int priorRound = 0,
+}) => decideDiscovery(
+  lanes: lanes,
+  anchors: const DiscoveryAnchors(),
+  workBead: workBead('tg-1'),
+  priorRound: priorRound,
+);
 
 /// A Fake [LensReportReader] over canned reports (Fakes, not mocks).
 LensReportReader _reader(Map<String, LensReport?> canned) =>
@@ -92,7 +95,9 @@ Future<RouteVerdict> _runRouteAt(
 void main() {
   group('the CITE-THE-OFFENCE gate (a vibe can never hold a bead)', () {
     test('a CITED, unacknowledged contradiction of a decision HOLDS', () {
-      final verdict = _decide({kDecisionLens: _report(violations: [_cited()])});
+      final verdict = _decide({
+        kDecisionLens: _report(violations: [_cited()]),
+      });
       expect(verdict, isA<DiscoveryHold>());
       final hold = verdict as DiscoveryHold;
       expect(hold.offenses, hasLength(1));
@@ -100,29 +105,26 @@ void main() {
       expect(hold.reason, contains('DECLARE the departure'));
     });
 
-    test(
-      'a finding that asserts NO contradiction cannot gate — even cited + '
-      'ratified (pow-hf2: the "None identified" false-hold)',
-      () {
-        // The flaky lens named a ratified standard and wrote a NON-empty
-        // "no conflict" explanation into `contradiction`, but did not assert
-        // `contradicts`. It must NEVER hold the bead (fails open).
-        expect(
-          gatesTheBead(
-            _cited(
-              contradicts: false,
-              contradiction:
-                  'None identified. The bead correctly references the ADR and '
-                  'is aligned with its design.',
-            ),
+    test('a finding that asserts NO contradiction cannot gate — even cited + '
+        'ratified (pow-hf2: the "None identified" false-hold)', () {
+      // The flaky lens named a ratified standard and wrote a NON-empty
+      // "no conflict" explanation into `contradiction`, but did not assert
+      // `contradicts`. It must NEVER hold the bead (fails open).
+      expect(
+        gatesTheBead(
+          _cited(
+            contradicts: false,
+            contradiction:
+                'None identified. The bead correctly references the ADR and '
+                'is aligned with its design.',
           ),
-          isFalse,
-        );
-        // The positive control: the SAME citation WITH an asserted
-        // contradiction still holds.
-        expect(gatesTheBead(_cited(contradicts: true)), isTrue);
-      },
-    );
+        ),
+        isFalse,
+      );
+      // The positive control: the SAME citation WITH an asserted
+      // contradiction still holds.
+      expect(gatesTheBead(_cited(contradicts: true)), isTrue);
+    });
 
     test('a violation with NO citation cannot gate — it is a FLAG', () {
       final verdict = _decide({
@@ -227,14 +229,17 @@ void main() {
       },
     );
 
-    test('a PERPETUATE finding (ratified, not fixed, not acknowledged) HOLDS', () {
-      final verdict = _decide({
-        kDecisionLens: _report(
-          violations: [_cited(ratified: true, removesOffence: false)],
-        ),
-      });
-      expect(verdict, isA<DiscoveryHold>());
-    });
+    test(
+      'a PERPETUATE finding (ratified, not fixed, not acknowledged) HOLDS',
+      () {
+        final verdict = _decide({
+          kDecisionLens: _report(
+            violations: [_cited(ratified: true, removesOffence: false)],
+          ),
+        });
+        expect(verdict, isA<DiscoveryHold>());
+      },
+    );
 
     test('the two new gate fields round-trip through the wire', () {
       final back = DiscoveryFinding.fromJson(
@@ -275,10 +280,10 @@ void main() {
       'at the cap, a still-missing lens ADVANCES with the miss recorded LOUDLY '
       '— the gate NEVER fires on absence',
       () {
-        final verdict = _decide(
-          {kCodeLens: _report(lens: kCodeLens), kDecisionLens: null},
-          priorRound: kMaxRegatherRounds,
-        );
+        final verdict = _decide({
+          kCodeLens: _report(lens: kCodeLens),
+          kDecisionLens: null,
+        }, priorRound: kMaxRegatherRounds);
         expect(verdict, isA<DiscoveryAdvance>());
         final dossier = (verdict as DiscoveryAdvance).dossier;
         expect(dossier.missingLenses, [kDecisionLens]);
@@ -286,24 +291,26 @@ void main() {
       },
     );
 
-    test('a clean sweep ADVANCES, and the route names what it decided over',
-        () async {
-      final outcome = await _runRoute({
-        for (final lens in kDiscoveryLenses)
-          lens: _report(
-            lens: lens,
-            context: [
-              const ContextNote(note: 'the pack is a genesis_tree consumer'),
-            ],
-          ),
-      });
-      expect(outcome, isA<Advance>());
-      final payload = (outcome as Advance).payload!;
-      expect(payload['verdict'], 'advance');
-      expect(payload['rule'], 'no-cited-offence');
-      expect(payload['lenses'], kDiscoveryLenses.join(','));
-      expect(payload['context'], '3');
-    });
+    test(
+      'a clean sweep ADVANCES, and the route names what it decided over',
+      () async {
+        final outcome = await _runRoute({
+          for (final lens in kDiscoveryLenses)
+            lens: _report(
+              lens: lens,
+              context: [
+                const ContextNote(note: 'the pack is a genesis_tree consumer'),
+              ],
+            ),
+        });
+        expect(outcome, isA<Advance>());
+        final payload = (outcome as Advance).payload!;
+        expect(payload['verdict'], 'advance');
+        expect(payload['rule'], 'no-cited-offence');
+        expect(payload['lenses'], kDiscoveryLenses.join(','));
+        expect(payload['context'], '3');
+      },
+    );
 
     test('a CITED offence GATES — and the gate cites it', () async {
       final outcome = await _runRoute({
@@ -320,8 +327,137 @@ void main() {
   });
 
   group('the deterministic gather (ZERO agents)', () {
-    test('the bead PATH + SYMBOL anchors are extracted, deduped and bounded',
-        () {
+    test(
+      'bead-field citation wire shape is strict and prior art preserves search '
+      'provenance',
+      () {
+        const citation = BeadFieldCitation(
+          beadId: 'tg-b',
+          field: BeadCitationField.notes,
+          excerpt: 'Approved with Nico',
+        );
+        final citationBack = BeadFieldCitation.fromJson(citation.toJson())!;
+        expect(citationBack.beadId, 'tg-b');
+        expect(citationBack.field, BeadCitationField.notes);
+        expect(citationBack.excerpt, 'Approved with Nico');
+        expect(
+          BeadFieldCitation.fromJson({
+            'beadId': 'tg-b',
+            'field': 'notes',
+            'excerpt': '',
+          }),
+          isNull,
+        );
+        expect(
+          BeadFieldCitation.fromJson({
+            'beadId': 'tg-b',
+            'field': 'priority',
+            'excerpt': 'urgent',
+          }),
+          isNull,
+        );
+
+        const note = ContextNote(
+          note: 'the sibling was approved',
+          beadCitation: citation,
+        );
+        final noteBack = ContextNote.fromJson(note.toJson())!;
+        expect(noteBack.beadCitation!.beadId, 'tg-b');
+        expect(noteBack.beadCitation!.field, BeadCitationField.notes);
+        expect(noteBack.beadCitation!.excerpt, 'Approved with Nico');
+
+        const hit = PriorArt(
+          beadId: 'tg-b',
+          store: 'the_grid',
+          status: 'open',
+          title: 'rename the command',
+          field: 'notes',
+          snippet: 'Approved with Nico',
+          query: 'command rename',
+        );
+        final hitBack = PriorArt.fromJson(hit.toJson())!;
+        expect(hitBack.field, 'notes');
+        expect(hitBack.snippet, 'Approved with Nico');
+        expect(
+          PriorArt.fromJson({...hit.toJson(), 'field': 'priority'}),
+          isNull,
+        );
+        expect(PriorArt.fromJson({...hit.toJson(), 'snippet': ''}), isNull);
+      },
+    );
+
+    test(
+      'dossier assembly verifies bead fields and marks sibling citations FOREIGN',
+      () {
+        final work = workBead('tg-a').copyWith(
+          description: 'Build the circuit step.',
+          notes: 'Circuit work only.',
+        );
+        const hit = PriorArt(
+          beadId: 'tg-b',
+          store: 'the_grid',
+          status: 'open',
+          title: 'rename the command',
+          field: 'notes',
+          snippet: 'Approved with Nico',
+          query: 'command rename',
+        );
+        final notes = verifiedContextNotes(
+          workBead: work,
+          priorArt: const [hit],
+          notes: const [
+            ContextNote(
+              note: 'the work builds a circuit step',
+              beadCitation: BeadFieldCitation(
+                beadId: 'tg-a',
+                field: BeadCitationField.description,
+                excerpt: 'circuit step',
+              ),
+            ),
+            ContextNote(
+              note: 'the work was approved',
+              beadCitation: BeadFieldCitation(
+                beadId: 'tg-a',
+                field: BeadCitationField.notes,
+                excerpt: 'Approved with Nico',
+              ),
+            ),
+            ContextNote(
+              note: 'legacy fabricated attribution',
+              source: 'tg-a notes',
+            ),
+            ContextNote(
+              note: 'the sibling was approved',
+              beadCitation: BeadFieldCitation(
+                beadId: 'tg-b',
+                field: BeadCitationField.notes,
+                excerpt: 'Approved with Nico',
+              ),
+            ),
+            ContextNote(
+              note: 'wrong sibling field',
+              beadCitation: BeadFieldCitation(
+                beadId: 'tg-b',
+                field: BeadCitationField.description,
+                excerpt: 'Approved with Nico',
+              ),
+            ),
+          ],
+        );
+        expect(notes, hasLength(2));
+        final dossier = DiscoveryDossier(
+          anchors: const DiscoveryAnchors(priorArt: [hit]),
+          workBeadId: 'tg-a',
+          context: notes,
+        );
+        final rendered = renderDiscoveryDossier(dossier);
+        expect(rendered, contains('SELF tg-a.description'));
+        expect(rendered, contains('FOREIGN tg-b.notes'));
+        expect(rendered, isNot(contains('SELF tg-a.notes')));
+      },
+    );
+
+    test('the bead PATH + SYMBOL anchors are extracted, deduped and bounded', () {
       final b = bead('tg-1').copyWith(
         description:
             'Touch `lib/src/code/specify.dart` and `lib/src/code/specify.dart` '
@@ -333,63 +469,65 @@ void main() {
       expect(anchors.symbols, ['buildSpecifyBrief', 'Heartbeat']);
     });
 
-    test(
-      'the gather pulls the committee RUBRICS, resolves the anchors and runs '
-      'the prior-art search through its seams',
-      () async {
-        final queried = <String>[];
-        final outcome = await AnchorsCapability(
-          rubricIds: kSpecCommitteeRubrics,
-          rubrics: (id) => '($id bands)',
-          resolver: (_, anchor) => ResolvedAnchor(
-            anchor: anchor,
-            resolved: true,
-            neighbors: const ['lib/src/code/committee.dart'],
-          ),
-          priorArt: (queries) async {
-            queried.addAll(queries);
-            return [
-              const PriorArt(
-                beadId: 'pow-q7n',
-                store: 'power_station',
-                status: 'closed',
-                title: 'the readiness ladder',
-                query: 'buildSpecifyBrief',
-              ),
-            ];
-          },
-          clearer: (_) {},
-        ).run(
-          FakeTreeContext(
-            values: {
-              Bead: bead('tg-1').copyWith(
-                description:
-                    'Extend `buildSpecifyBrief` in `lib/src/code/specify.dart`.',
-              ),
-              Workspace: testWorkspace('tg-1', workspaceDir: '/w/tg-1'),
+    test('the gather pulls the committee RUBRICS, resolves the anchors and runs '
+        'the prior-art search through its seams', () async {
+      final queried = <String>[];
+      final outcome =
+          await AnchorsCapability(
+            rubricIds: kSpecCommitteeRubrics,
+            rubrics: (id) => '($id bands)',
+            resolver: (_, anchor) => ResolvedAnchor(
+              anchor: anchor,
+              resolved: true,
+              neighbors: const ['lib/src/code/committee.dart'],
+            ),
+            priorArt: (queries) async {
+              queried.addAll(queries);
+              return [
+                const PriorArt(
+                  beadId: 'pow-q7n',
+                  store: 'power_station',
+                  status: 'closed',
+                  title: 'the readiness ladder',
+                  field: 'description',
+                  snippet: 'buildSpecifyBrief',
+                  query: 'buildSpecifyBrief',
+                ),
+              ];
             },
-          ),
-          stepArgs('tg-1/spec_review/discovery/$kAnchorsStep'),
-        );
-        expect(outcome, isA<Ok>());
-        final payload = (outcome as Ok).payload!;
-        expect(payload['rubrics'], '${kSpecCommitteeRubrics.length}');
-        expect(payload['anchors'], '1');
-        expect(payload['priorArt'], '1');
-        expect(
-          queried,
-          ['buildSpecifyBrief'],
-          reason: 'a SYMBOL is the high-signal prior-art query, not the title',
-        );
+            clearer: (_) {},
+          ).run(
+            FakeTreeContext(
+              values: {
+                Bead: bead('tg-1').copyWith(
+                  description:
+                      'Extend `buildSpecifyBrief` in `lib/src/code/specify.dart`.',
+                ),
+                Workspace: testWorkspace('tg-1', workspaceDir: '/w/tg-1'),
+              },
+            ),
+            stepArgs('tg-1/spec_review/discovery/$kAnchorsStep'),
+          );
+      expect(outcome, isA<Ok>());
+      final payload = (outcome as Ok).payload!;
+      expect(payload['rubrics'], '${kSpecCommitteeRubrics.length}');
+      expect(payload['anchors'], '1');
+      expect(payload['priorArt'], '1');
+      expect(
+        queried,
+        ['buildSpecifyBrief'],
+        reason: 'a SYMBOL is the high-signal prior-art query, not the title',
+      );
+    });
+
+    test(
+      'an UNWIRED prior-art source is reported LOUDLY, never as "no hits"',
+      () {
+        const dossier = DiscoveryDossier(anchors: DiscoveryAnchors());
+        expect(renderDiscoveryDossier(dossier), contains('NOT WIRED'));
+        expect(renderDiscoveryDossier(dossier), contains('nobody looked'));
       },
     );
-
-    test('an UNWIRED prior-art source is reported LOUDLY, never as "no hits"',
-        () {
-      const dossier = DiscoveryDossier(anchors: DiscoveryAnchors());
-      expect(renderDiscoveryDossier(dossier), contains('NOT WIRED'));
-      expect(renderDiscoveryDossier(dossier), contains('nobody looked'));
-    });
   });
 
   group('the lenses are READ-ONLY (A37) and CHEAP (the `gather` role)', () {
@@ -405,14 +543,16 @@ void main() {
           stepArgs('tg-1/spec_review/discovery/$lens', params: {'lens': lens}),
         );
 
-    test('a lens spawns on the CHEAP tier — --model haiku at the claude argv',
-        () {
-      final cfg = spawnLens(kCodeLens);
-      final i = cfg.args.indexOf('--model');
-      expect(i, greaterThanOrEqualTo(0), reason: 'the lens named NO --model');
-      expect(cfg.args[i + 1], kCheapModelDefault);
-      expect(tierFor(AgentRole.gather), AgentTier.cheap);
-    });
+    test(
+      'a lens spawns on the CHEAP tier — --model haiku at the claude argv',
+      () {
+        final cfg = spawnLens(kCodeLens);
+        final i = cfg.args.indexOf('--model');
+        expect(i, greaterThanOrEqualTo(0), reason: 'the lens named NO --model');
+        expect(cfg.args[i + 1], kCheapModelDefault);
+        expect(tierFor(AgentRole.gather), AgentTier.cheap);
+      },
+    );
 
     test(
       'every lens rides the READ-ONLY working agreement — no bd mutation, no '
@@ -429,35 +569,33 @@ void main() {
       },
     );
 
-    test(
-      'the circuit has NO write path to the bead — the fence is STRUCTURAL, not '
-      'a runtime check (A11(3): there is nothing to refuse)',
-      () {
-        final source = File(
-          p.join(_libSrc(), 'code', 'discovery.dart'),
-        ).readAsStringSync();
-        // 1. It constructs NO process invocation of its own (unlike the gating
-        //    critic's `sh -c`): every spawn is delegated to the resolved harness,
-        //    which runs the read-only agent. So no bd/git argv can exist here.
-        expect(
-          source.contains('RuntimeConfig('),
-          isFalse,
-          reason: 'the discovery circuit builds no invocation of its own — the '
-              'harness owns the spawn',
-        );
-        // 2. It holds NO bd client, so no bd write path exists to refuse (A37 by
-        //    construction — the A11(3) posture).
-        for (final client in ['BdCliService', 'BdRunner']) {
-          expect(source.contains(client), isFalse, reason: 'no bd client here');
-        }
-        // 3. It has exactly ONE writer (`_writeJson`), and every path handed to
-        //    it (`anchorsPath` / `lensReportPath` / `discoveryDossierPath`, plus
-        //    the round ledger that must OUTLIVE the gather-dir wipe) is one of
-        //    this circuit's own derived paths under `.grid/`: its whole write
-        //    surface is its own artifacts.
-        expect(RegExp('writeAsStringSync').allMatches(source), hasLength(1));
-      },
-    );
+    test('the circuit has NO write path to the bead — the fence is STRUCTURAL, not '
+        'a runtime check (A11(3): there is nothing to refuse)', () {
+      final source = File(
+        p.join(_libSrc(), 'code', 'discovery.dart'),
+      ).readAsStringSync();
+      // 1. It constructs NO process invocation of its own (unlike the gating
+      //    critic's `sh -c`): every spawn is delegated to the resolved harness,
+      //    which runs the read-only agent. So no bd/git argv can exist here.
+      expect(
+        source.contains('RuntimeConfig('),
+        isFalse,
+        reason:
+            'the discovery circuit builds no invocation of its own — the '
+            'harness owns the spawn',
+      );
+      // 2. It holds NO bd client, so no bd write path exists to refuse (A37 by
+      //    construction — the A11(3) posture).
+      for (final client in ['BdCliService', 'BdRunner']) {
+        expect(source.contains(client), isFalse, reason: 'no bd client here');
+      }
+      // 3. It has exactly ONE writer (`_writeJson`), and every path handed to
+      //    it (`anchorsPath` / `lensReportPath` / `discoveryDossierPath`, plus
+      //    the round ledger that must OUTLIVE the gather-dir wipe) is one of
+      //    this circuit's own derived paths under `.grid/`: its whole write
+      //    surface is its own artifacts.
+      expect(RegExp('writeAsStringSync').allMatches(source), hasLength(1));
+    });
 
     test(
       'the lens prompt teaches RATIFIED-ONLY and INTENT-NOT-PRESENCE, and its '
@@ -483,21 +621,23 @@ void main() {
     setUp(() => ws = Directory.systemTemp.createTempSync('discovery-regather'));
     tearDown(() => ws.deleteSync(recursive: true));
 
-    test('the clean arm ADVANCES with NO grade key + writes the dossier',
-        () async {
-      final outcome = await _runRouteAt({
-        for (final lens in kDiscoveryLenses) lens: _report(lens: lens),
-      }, workspaceDir: ws.path);
-      expect(outcome, isA<Advance>());
-      final payload = (outcome as Advance).payload!;
-      expect(payload['verdict'], 'advance');
-      expect(
-        payload.containsKey('grade'),
-        isFalse,
-        reason: 'a PASSING round must invalidate nothing',
-      );
-      expect(File(discoveryDossierPath(ws.path)).existsSync(), isTrue);
-    });
+    test(
+      'the clean arm ADVANCES with NO grade key + writes the dossier',
+      () async {
+        final outcome = await _runRouteAt({
+          for (final lens in kDiscoveryLenses) lens: _report(lens: lens),
+        }, workspaceDir: ws.path);
+        expect(outcome, isA<Advance>());
+        final payload = (outcome as Advance).payload!;
+        expect(payload['verdict'], 'advance');
+        expect(
+          payload.containsKey('grade'),
+          isFalse,
+          reason: 'a PASSING round must invalidate nothing',
+        );
+        expect(File(discoveryDossierPath(ws.path)).existsSync(), isTrue);
+      },
+    );
 
     test('the hold arm ESCALATES — a human park, never a stamp', () async {
       final outcome = await _runRouteAt({
@@ -533,32 +673,32 @@ void main() {
       },
     );
 
+    test('kDiscoveryCircuit route step declares validates:anchors — a dangling '
+        'target silently disarms the loop (one-definition discipline)', () {
+      expect(
+        (kDiscoveryCircuit.stepById(kDiscoveryRouteStep)! as CapabilityStep)
+            .params[kValidatesParamKey],
+        kAnchorsStep,
+      );
+      expect(kValidatesParamKey, 'validates');
+      expect(
+        kDiscoveryCircuit.steps.map((s) => s.stepId),
+        contains(kAnchorsStep),
+      );
+    });
+
     test(
-      'kDiscoveryCircuit route step declares validates:anchors — a dangling '
-      'target silently disarms the loop (one-definition discipline)',
+      'the regather ledger OUTLIVES the anchors wipe (sibling of the dir)',
       () {
         expect(
-          (kDiscoveryCircuit.stepById(kDiscoveryRouteStep)! as CapabilityStep)
-              .params[kValidatesParamKey],
-          kAnchorsStep,
-        );
-        expect(kValidatesParamKey, 'validates');
-        expect(
-          kDiscoveryCircuit.steps.map((s) => s.stepId),
-          contains(kAnchorsStep),
+          p.isWithin(discoveryDirPath('/w'), discoveryRegatherLedgerPath('/w')),
+          isFalse,
+          reason:
+              'AnchorsCapability WIPES the gather dir at the head of every '
+              'round — a counter kept inside it restarts the bound at 0 forever',
         );
       },
     );
-
-    test('the regather ledger OUTLIVES the anchors wipe (sibling of the dir)',
-        () {
-      expect(
-        p.isWithin(discoveryDirPath('/w'), discoveryRegatherLedgerPath('/w')),
-        isFalse,
-        reason: 'AnchorsCapability WIPES the gather dir at the head of every '
-            'round — a counter kept inside it restarts the bound at 0 forever',
-      );
-    });
   });
 }
 
