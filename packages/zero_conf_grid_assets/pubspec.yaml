@@ -1,32 +1,16 @@
 name: zero_conf_grid_assets
+version: 0.1.0
 description: >-
-  Zero-conf discovery + topology opinions for the office grid (AL-7,
-  the_grid docs/SCRATCH-grid-alignment.md D-B1 + SCRATCH-multi-root-federation.md
-  D-Z6/D-Z8): mDNS/DNS-SD advertise + browse of station brokers (service type
-  `_grid._tcp`; TXT: station id, broker endpoint, hosted substations, trust
-  hints), the MESH/GRIDHUB topology opinions applied as configuration over
-  `federated_grid_assets`' `Membership` seam, and the discovered-is-not-blessed
-  TRUST GATE (allow-list this round, matching `Peer.token`'s LAN-trust posture).
-  Federation primitives stay in `federated_grid_assets`; this pack is the
-  discovery + topology OPINION over them — the engine never sees mDNS (D-B5).
-publish_to: none
+  Zero-conf discovery and topology opinions for the office grid: mDNS/DNS-SD
+  advertise and browse of station brokers, applied over federated_grid_assets.
+repository: https://github.com/memento-engineering/power_station
 resolution: workspace
 
 environment:
   sdk: ^3.11.0
 
 dependencies:
-  federated_grid_assets:
-    # Intra-repo sibling as a git SELF-REF tag pin (ADR-0003 D1): pub
-    # unifies git deps by REF STRING, so every route to a released
-    # package must carry the SAME {url, tag_pattern, path} descriptor; the version
-    # CONSTRAINT then solves over the release tags.
-    # Workspace/dev resolution unchanged; tags move in lockstep.
-    git:
-      url: git@github.com:memento-engineering/power_station.git
-      tag_pattern: federated_grid_assets-v{{version}}
-      path: packages/federated_grid_assets
-    version: ^0.1.0
+  federated_grid_assets: ^0.1.0
   meta: ^1.16.0
   multicast_dns: ^0.3.3
 

@@ -1,0 +1,29 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  dart:
+    name: analyze + test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: stable
+      - name: Resolve workspace
+        run: dart pub get
+      - name: Format (workspace-wide)
+        run: dart format --output=none --set-exit-if-changed packages
+      - name: Analyze (workspace-wide)
+        run: dart analyze
+      - name: Test packages
+        run: |
+          for pkg in grid_assets dart_grid_assets federated_grid_assets zero_conf_grid_assets; do
+            echo "::group::$pkg"
+            (cd packages/$pkg && dart test)
+            echo "::endgroup::"
+          done
