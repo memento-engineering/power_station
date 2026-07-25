@@ -230,12 +230,14 @@ String renderInstallReport(OverlayInstallReport report, {bool diff = true}) {
     switch (file) {
       case OverlayFileWritten():
         b.writeln(report.dryRun ? 'MISSING $path' : 'installed $path');
-        if (diff)
+        if (diff) {
           _writeDiff(b, path, report.writtenContents[file.relativePath]);
+        }
       case OverlayFileUpdated():
         b.writeln(report.dryRun ? 'DRIFTED $path' : 'updated $path');
-        if (diff)
+        if (diff) {
           _writeDiff(b, path, report.writtenContents[file.relativePath]);
+        }
       case OverlayFileUnchanged():
         if (diff) b.writeln('current $path');
       case OverlayFileBlocked():

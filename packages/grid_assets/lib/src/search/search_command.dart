@@ -19,42 +19,59 @@ import 'dart:io';
 
 import 'package:args/command_runner.dart';
 import 'package:grid_sdk/grid_sdk.dart' as sdk;
+import 'package:path/path.dart' as p;
 
 import 'station_search.dart';
+
+String _currentDirectory() => Directory.current.path;
 
 /// `search <query…>` — deterministic cross-store search over the station's
 /// attached substations.
 ///
 /// A station composes it with ITS resident-station context:
-/// `runner.addCommand(SearchCommand(delegate: () => MyDelegate(...)))` —
-/// the [delegate] factory is invoked per run, its tree is mounted OFFLINE to
-/// enumerate the roster ([mountedRosterOf]), and the delegate is disposed
-/// after the run (this command owns the instance it asked for).
+/// `runner.addCommand(SearchCommand(delegate: (home) => MyDelegate(home)))` —
+/// the [delegate] factory receives the normalized absolute grid home and is
+/// invoked per run. Its tree is mounted OFFLINE to enumerate the roster
+/// ([mountedRosterOf]), and the delegate is disposed after the run.
 class SearchCommand extends Command<int> {
   /// Creates the command over the composing station's [delegate] factory (the
-  /// resident-station context the roster is resolved from) and the search
-  /// [service] (injectable for tests). [out]/[err] default to the real
-  /// stdout/stderr; tests capture them.
+  /// resident-station context the roster is resolved from). The factory
+  /// receives the selected grid home after trimming, absolute-path validation,
+  /// and normalization. [gridHomeDefault] defaults to the current directory
+  /// and is injectable for offline tests. The search [service] is also
+  /// injectable; [out]/[err] default to the real stdout/stderr.
   SearchCommand({
-    required sdk.GridDelegate Function() delegate,
+    required sdk.GridDelegate Function(String gridHome) delegate,
+    String Function() gridHomeDefault = _currentDirectory,
     StationSearchService service = const StationSearchService(),
     StringSink? out,
     StringSink? err,
   }) : _delegate = delegate,
+       _gridHomeDefault = gridHomeDefault,
        _service = service,
        _out = out ?? stdout,
        _err = err ?? stderr {
-    argParser.addFlag(
-      'json',
-      negatable: false,
-      help:
-          'Emit the structured report as ONE JSON object '
-          '({query, stores: [{substation, prefix, root, outcome, …}], '
-          'hitCount}) — the surface agentic skills consume.',
-    );
+    argParser
+      ..addFlag(
+        'json',
+        negatable: false,
+        help:
+            'Emit the structured report as ONE JSON object '
+            '({query, stores: [{substation, prefix, root, outcome, …}], '
+            'hitCount}) — the surface agentic skills consume.',
+      )
+      ..addOption(
+        'grid-home',
+        abbr: 'g',
+        help:
+            "The grid's HOME (ABSOLUTE): the root the coded roster's relative "
+            'substation seats resolve against. Defaults to the current '
+            'directory.',
+      );
   }
 
-  final sdk.GridDelegate Function() _delegate;
+  final sdk.GridDelegate Function(String gridHome) _delegate;
+  final String Function() _gridHomeDefault;
   final StationSearchService _service;
   final StringSink _out;
   final StringSink _err;
@@ -83,7 +100,19 @@ class SearchCommand extends Command<int> {
       return 64;
     }
 
-    final delegate = _delegate();
+    final flag = args.option('grid-home')?.trim();
+    final unresolvedHome = (flag == null || flag.isEmpty)
+        ? _gridHomeDefault()
+        : flag;
+    if (!p.isAbsolute(unresolvedHome)) {
+      usageException(
+        'search: --grid-home must be an ABSOLUTE path (got "$unresolvedHome") — '
+        'a cwd-relative grid home re-imports the ambience the v3 model kills '
+        '(the coded roster resolves its relative seats against it).',
+      );
+    }
+    final gridHome = p.normalize(unresolvedHome);
+    final delegate = _delegate(gridHome);
     try {
       final roster = mountedRosterOf(delegate);
       if (roster.isEmpty) {

@@ -86,16 +86,21 @@ void main() {
     StringBuffer out,
     StringBuffer err,
   })
-  harness({List<String>? roots, String? runnerInvocation}) {
+  harness({
+    List<String>? roots,
+    String? runnerInvocation,
+    String? delegateRoot,
+    Future<List<String>> Function(String gridHome)? resolveRoots,
+  }) {
     final out = StringBuffer();
     final err = StringBuffer();
     _StationDelegate? last;
     final runner = CommandRunner<int>('space', 'test station')
       ..addCommand(
         AssetsCommand(
-          delegate: () => last = _StationDelegate(temp.path),
+          delegate: () => last = _StationDelegate(delegateRoot ?? temp.path),
           runnerInvocation: runnerInvocation,
-          roots: (gridHome) async => roots ?? [overlay.path],
+          roots: resolveRoots ?? (gridHome) async => roots ?? [overlay.path],
           sourceRef: (_) => 'testref',
           out: out,
           err: err,
@@ -292,6 +297,63 @@ void main() {
 
       expect(code, 1);
       expect(h.err.toString(), contains('no package in ${temp.path} vends'));
+    },
+  );
+
+  test('grid-home override is trimmed and normalized before install', () async {
+    String? resolvedHome;
+    final h = harness(
+      resolveRoots: (gridHome) async {
+        resolvedHome = gridHome;
+        return [overlay.path];
+      },
+    );
+
+    expect(
+      await h.runner.run([
+        'assets',
+        'install',
+        '--grid-home',
+        '  ${temp.path}/nested/..  ',
+      ]),
+      0,
+    );
+    expect(resolvedHome, p.normalize(temp.path));
+  });
+
+  test('absent grid-home still resolves by mounted tree position', () async {
+    String? resolvedHome;
+    final authored = p.join(temp.path, 'authored', '..');
+    final h = harness(
+      delegateRoot: authored,
+      resolveRoots: (gridHome) async {
+        resolvedHome = gridHome;
+        return [overlay.path];
+      },
+    );
+
+    expect(await h.runner.run(['assets', 'install']), 0);
+    expect(resolvedHome, p.normalize(authored));
+  });
+
+  test(
+    'a relative grid home is a LOUD usage refusal with the stamping reason',
+    () async {
+      final h = harness(delegateRoot: 'relative/grid');
+
+      await expectLater(
+        h.runner.run(['assets', 'install']),
+        throwsA(
+          isA<UsageException>()
+              .having((error) => error.message, 'message', contains('ABSOLUTE'))
+              .having(
+                (error) => error.message,
+                'reason',
+                contains('baked into the committed manual'),
+              ),
+        ),
+      );
+      expect(h.lastDelegate().disposed, isTrue);
     },
   );
 
