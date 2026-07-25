@@ -46,7 +46,7 @@ const List<String> kVendedSkills = [
   'discover',
   'gate-medicine',
   'harvest-review',
-  'intake-grooming',
+  'intake-refinement',
   'release',
   'station-operations',
 ];
@@ -73,7 +73,7 @@ const List<String> kVendedSkills = [
 const List<String> kOperatorSkills = [
   'gate-medicine',
   'harvest-review',
-  'intake-grooming',
+  'intake-refinement',
   'release',
   'station-operations',
 ];

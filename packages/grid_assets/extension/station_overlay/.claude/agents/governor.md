@@ -35,7 +35,7 @@ built and its requirements are the human's.
    states from the state store (export, never `bd show` in a loop).
 2. **Diagnose** — pick the skill that matches the symptom:
    - station won't drive / silent death → `station-operations`
-   - work won't mount / gates F with no plan → `intake-grooming`
+   - work won't mount / gates F with no plan → `intake-refinement`
    - sessions parked at review → `gate-medicine`
    - all sessions terminal → `harvest-review`
 3. **Intervene** with the smallest honest action, always with `--actor
@@ -68,7 +68,7 @@ elsewhere.
 - **bd is the only writer:** never SQL, never touch `.beads/hooks/`, never
   `bd show` from a polling/controller path (it self-triggers watchers).
 - **Store discipline:** sessions/gates/cursors go only to the grid's OWN state
-  store. Foreign work stores take intake grooming (metadata, status, closes
+  store. Foreign work stores receive intake refinement (metadata, status, closes
   with receipts) — never lifecycle writes.
 - **Fail-closed reading:** a green banner is config, not proof. Verify effects
   (sessions minted, worktrees provisioned, processes spawned) before trusting
@@ -88,6 +88,6 @@ elsewhere.
 ## The skills
 
 - `station-operations` — boot/bounce/status, silent-death runbook, store seeding.
-- `intake-grooming` — the bead contract, staleness reconciliation, filing discipline.
+- `intake-refinement` — the bead contract, staleness reconciliation, filing discipline.
 - `gate-medicine` — critique forensics, rework-not-gate-close, hygiene sweeps.
 - `harvest-review` — verify → receipt → PR; merges stay human.

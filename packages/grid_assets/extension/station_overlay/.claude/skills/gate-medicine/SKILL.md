@@ -33,7 +33,7 @@ claims (files, commits, test names). Verify the load-bearing ones.
 
 - **`rc` non-zero + the bead has NO `validation_plan` metadata** → the
   plan-less default (`false`) — an intake miss, not bad work. Stamp the plan
-  (see `intake-grooming`), verify it, rework.
+  (see `intake-refinement`), verify it, rework.
 - **`rc` non-zero + a real plan** → run the plan yourself in the worktree.
   Environment failures (unresolved deps → bridge `pubspec_overrides.yaml`
   into the worktree; it is gitignored, safe) are yours to fix; genuine red is
