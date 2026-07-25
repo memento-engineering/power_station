@@ -18,10 +18,7 @@ typedef ServeHandlerFactory =
       String? banner,
       void Function(String leaseId)? onLeaseEnded,
     })
-    Function(
-      ArgResults args,
-      void Function(String) log,
-    );
+    Function(ArgResults args, void Function(String) log);
 
 /// `grid serve` — run as a LESSOR station: offer slots over the federation bus
 /// (ADR-0011). A peer leases a slot and dispatches a use to run HERE. GENERIC:

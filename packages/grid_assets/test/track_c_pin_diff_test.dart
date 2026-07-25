@@ -104,7 +104,10 @@ void main() {
       final c = _ctx(dir.path);
       await PinDiffCapability(runner: runner).route(c.context, c.args);
       // `equals` for deep list comparison (a bare List matches by identity).
-      expect(runner.calls, contains(equals(['log', '--oneline', 'origin/main..HEAD'])));
+      expect(
+        runner.calls,
+        contains(equals(['log', '--oneline', 'origin/main..HEAD'])),
+      );
       expect(runner.calls, contains(equals(['diff', 'origin/main...HEAD'])));
     });
 
@@ -117,7 +120,9 @@ void main() {
         diffOut: '--- a/x.dart\n+++ b/x.dart\n+final x = 1;',
       );
       final c = _ctx(dir.path);
-      final outcome = await PinDiffCapability(runner: runner).route(c.context, c.args);
+      final outcome = await PinDiffCapability(
+        runner: runner,
+      ).route(c.context, c.args);
       expect(outcome, isA<Advance>());
       expect((outcome as Advance).payload, {
         'base': 'origin/main',
@@ -129,7 +134,11 @@ void main() {
       expect(pinned.existsSync(), isTrue);
       final body = pinned.readAsStringSync();
       expect(body, contains('+final x = 1;'), reason: 'the raw diff body');
-      expect(body, contains('abc123 first'), reason: 'the commit provenance header');
+      expect(
+        body,
+        contains('abc123 first'),
+        reason: 'the commit provenance header',
+      );
     });
 
     test('an EMPTY delta with ZERO commits -> Gate (the stale-bead terminal); '
@@ -138,7 +147,9 @@ void main() {
       addTearDown(() => dir.deleteSync(recursive: true));
       final runner = _CannedGitRunner(logOut: '', diffOut: '');
       final c = _ctx(dir.path);
-      final outcome = await PinDiffCapability(runner: runner).route(c.context, c.args);
+      final outcome = await PinDiffCapability(
+        runner: runner,
+      ).route(c.context, c.args);
       expect(outcome, isA<Escalate>());
       expect(
         (outcome as Escalate).reason,
@@ -152,21 +163,25 @@ void main() {
       );
     });
 
-    test('commits present but a net-EMPTY diff -> Gate (the no-op terminal)',
-        () async {
-      final dir = Directory.systemTemp.createTempSync('pin-diff-noop-');
-      addTearDown(() => dir.deleteSync(recursive: true));
-      final runner = _CannedGitRunner(
-        logOut: 'abc123 add\ndef456 revert',
-        diffOut: '   \n',
-      );
-      final c = _ctx(dir.path);
-      final outcome = await PinDiffCapability(runner: runner).route(c.context, c.args);
-      expect(outcome, isA<Escalate>());
-      final reason = (outcome as Escalate).reason;
-      expect(reason, contains('2 commit'));
-      expect(reason, contains('net'));
-    });
+    test(
+      'commits present but a net-EMPTY diff -> Gate (the no-op terminal)',
+      () async {
+        final dir = Directory.systemTemp.createTempSync('pin-diff-noop-');
+        addTearDown(() => dir.deleteSync(recursive: true));
+        final runner = _CannedGitRunner(
+          logOut: 'abc123 add\ndef456 revert',
+          diffOut: '   \n',
+        );
+        final c = _ctx(dir.path);
+        final outcome = await PinDiffCapability(
+          runner: runner,
+        ).route(c.context, c.args);
+        expect(outcome, isA<Escalate>());
+        final reason = (outcome as Escalate).reason;
+        expect(reason, contains('2 commit'));
+        expect(reason, contains('net'));
+      },
+    );
 
     test('git cannot compute the delta -> a thrown RouteFailure (LOUD), never '
         'a silent Escalate that would masquerade as a stale bead', () async {
@@ -188,22 +203,34 @@ void main() {
       );
     });
 
-    test('no ambient Workspace -> Advance no-op (offline, never throws)', () async {
-      final outcome = await const PinDiffCapability().route(
-        FakeTreeContext(values: const {}),
-        stepArgs('tg-1/review/pin-diff'),
-      );
-      expect(outcome, isA<Advance>());
-    });
+    test(
+      'no ambient Workspace -> Advance no-op (offline, never throws)',
+      () async {
+        final outcome = await const PinDiffCapability().route(
+          FakeTreeContext(values: const {}),
+          stepArgs('tg-1/review/pin-diff'),
+        );
+        expect(outcome, isA<Advance>());
+      },
+    );
 
-    test('a workspace dir that does not exist -> Advance no-op with NO git call '
-        '(offline/dry-run posture, mirrors provisionWorkspace)', () async {
-      final runner = _CannedGitRunner(diffOut: 'should never be read');
-      final c = _ctx('/grid/worktrees/pin-diff-does-not-exist-tg-1');
-      final outcome = await PinDiffCapability(runner: runner).route(c.context, c.args);
-      expect(outcome, isA<Advance>());
-      expect(runner.calls, isEmpty, reason: 'no worktree on disk -> no git run');
-    });
+    test(
+      'a workspace dir that does not exist -> Advance no-op with NO git call '
+      '(offline/dry-run posture, mirrors provisionWorkspace)',
+      () async {
+        final runner = _CannedGitRunner(diffOut: 'should never be read');
+        final c = _ctx('/grid/worktrees/pin-diff-does-not-exist-tg-1');
+        final outcome = await PinDiffCapability(
+          runner: runner,
+        ).route(c.context, c.args);
+        expect(outcome, isA<Advance>());
+        expect(
+          runner.calls,
+          isEmpty,
+          reason: 'no worktree on disk -> no git run',
+        );
+      },
+    );
   });
 
   group('Track C — the checkout-root guard (bead pow-4pr)', () {
@@ -211,10 +238,7 @@ void main() {
         'log/diff', () async {
       final dir = Directory.systemTemp.createTempSync('pin-guard-argv-');
       addTearDown(() => dir.deleteSync(recursive: true));
-      final runner = _CannedGitRunner(
-        logOut: 'abc123 work',
-        diffOut: '+work',
-      );
+      final runner = _CannedGitRunner(logOut: 'abc123 work', diffOut: '+work');
       final c = _ctx(dir.path);
       await PinDiffCapability(runner: runner).route(c.context, c.args);
       expect(runner.calls.first, equals(['rev-parse', '--show-toplevel']));
@@ -281,31 +305,38 @@ void main() {
     // the unresolved `systemTemp` path. A lexical canonicalize reads those as
     // different roots and refuses every genuine checkout; only a live git can
     // pin that this comparison does not.
-    test('REAL git: a genuine checkout root under a symlinked temp parent '
-        'advances and pins the diff (the comparison symlink-resolves)', () async {
-      final origin = Directory.systemTemp.createTempSync('pin-real-origin-');
-      final work = Directory.systemTemp.createTempSync('pin-real-work-');
-      addTearDown(() => origin.deleteSync(recursive: true));
-      addTearDown(() => work.deleteSync(recursive: true));
-      _git(['init', '-q', '-b', 'main', '.'], origin.path);
-      File(p.join(origin.path, 'f.txt')).writeAsStringSync('base\n');
-      _git(['add', '.'], origin.path);
-      _commit(origin.path, 'base');
-      final clone = p.join(work.path, 'wt');
-      _git(['clone', '-q', origin.path, clone], work.path);
-      _git(['checkout', '-q', '-b', 'grid/tg-1'], clone);
-      File(p.join(clone, 'f.txt')).writeAsStringSync('base\nchange\n');
-      _commit(clone, 'change', all: true);
+    test(
+      'REAL git: a genuine checkout root under a symlinked temp parent '
+      'advances and pins the diff (the comparison symlink-resolves)',
+      () async {
+        final origin = Directory.systemTemp.createTempSync('pin-real-origin-');
+        final work = Directory.systemTemp.createTempSync('pin-real-work-');
+        addTearDown(() => origin.deleteSync(recursive: true));
+        addTearDown(() => work.deleteSync(recursive: true));
+        _git(['init', '-q', '-b', 'main', '.'], origin.path);
+        File(p.join(origin.path, 'f.txt')).writeAsStringSync('base\n');
+        _git(['add', '.'], origin.path);
+        _commit(origin.path, 'base');
+        final clone = p.join(work.path, 'wt');
+        _git(['clone', '-q', origin.path, clone], work.path);
+        _git(['checkout', '-q', '-b', 'grid/tg-1'], clone);
+        File(p.join(clone, 'f.txt')).writeAsStringSync('base\nchange\n');
+        _commit(clone, 'change', all: true);
 
-      final c = _ctx(clone);
-      final outcome = await const PinDiffCapability().route(c.context, c.args);
-      expect(
-        outcome,
-        isA<Advance>(),
-        reason: 'a genuine root must never be refused as an ancestor mismatch',
-      );
-      expect(File(pinnedDiffPath(clone)).existsSync(), isTrue);
-    });
+        final c = _ctx(clone);
+        final outcome = await const PinDiffCapability().route(
+          c.context,
+          c.args,
+        );
+        expect(
+          outcome,
+          isA<Advance>(),
+          reason:
+              'a genuine root must never be refused as an ancestor mismatch',
+        );
+        expect(File(pinnedDiffPath(clone)).existsSync(), isTrue);
+      },
+    );
 
     test('REAL git: a scaffold dir INSIDE a parent checkout (the exact '
         'incident layout) -> RouteFailure naming the ancestor root', () async {
@@ -364,8 +395,10 @@ void main() {
 void _git(List<String> args, String cwd) {
   final r = Process.runSync('git', args, workingDirectory: cwd);
   if (r.exitCode != 0) {
-    fail('git ${args.join(' ')} in $cwd failed (${r.exitCode}): '
-        '${r.stderr}\n${r.stdout}');
+    fail(
+      'git ${args.join(' ')} in $cwd failed (${r.exitCode}): '
+      '${r.stderr}\n${r.stdout}',
+    );
   }
 }
 

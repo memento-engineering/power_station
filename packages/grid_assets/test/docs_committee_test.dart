@@ -63,63 +63,66 @@ Future<Map<String, String>> _lane(
 }
 
 void main() {
-  group('the docs circuit mounts the mechanical lanes and NOT test-coverage', () {
-    test('its step ids are exactly the docs lane set', () {
-      expect(kDocsReviewCircuit.steps.map((s) => s.stepId), [
-        kClearCritiqueStep,
-        kPinDiffStep,
-        kCitationPathsRubric,
-        kTerminologyBanRubric,
-        kSectionStructureRubric,
-        'spec-adherence',
-        'route',
-      ]);
-      expect(
-        kDocsReviewCircuit.steps.map((s) => s.stepId),
-        isNot(contains('test-coverage')),
-      );
-      // The code committee is UNCHANGED — it still carries the lane.
-      expect(
-        kCodeReviewCircuit.steps.map((s) => s.stepId),
-        contains('test-coverage'),
-      );
-    });
+  group(
+    'the docs circuit mounts the mechanical lanes and NOT test-coverage',
+    () {
+      test('its step ids are exactly the docs lane set', () {
+        expect(kDocsReviewCircuit.steps.map((s) => s.stepId), [
+          kClearCritiqueStep,
+          kPinDiffStep,
+          kCitationPathsRubric,
+          kTerminologyBanRubric,
+          kSectionStructureRubric,
+          'spec-adherence',
+          'route',
+        ]);
+        expect(
+          kDocsReviewCircuit.steps.map((s) => s.stepId),
+          isNot(contains('test-coverage')),
+        );
+        // The code committee is UNCHANGED — it still carries the lane.
+        expect(
+          kCodeReviewCircuit.steps.map((s) => s.stepId),
+          contains('test-coverage'),
+        );
+      });
 
-    test('the route params match the declared rubric lists', () {
-      final route = kDocsReviewCircuit.stepById('route')! as CapabilityStep;
-      expect(route.params['critics'], kDocsCommitteeRubrics.join(','));
-      expect(route.params['gating'], kDocsGatingRubrics.join(','));
-      expect(route.dependsOn, kDocsCommitteeRubrics.toSet());
-    });
+      test('the route params match the declared rubric lists', () {
+        final route = kDocsReviewCircuit.stepById('route')! as CapabilityStep;
+        expect(route.params['critics'], kDocsCommitteeRubrics.join(','));
+        expect(route.params['gating'], kDocsGatingRubrics.join(','));
+        expect(route.dependsOn, kDocsCommitteeRubrics.toSet());
+      });
 
-    test('the frontier fans the four lanes out, then joins on the route', () {
-      const parent = 'pow-1/review';
-      CircuitCursor done(List<String> ids) => {
-        for (final id in ids)
-          '$parent/$id': const NodeCursor(state: StepState.complete),
-      };
-      List<String> frontier(CircuitCursor cursor) => eligibleSteps(
-        kDocsReviewCircuit,
-        cursor,
-        parent,
-        circuitById: (_) => null,
-        now: DateTime(2026),
-      ).map((s) => s.stepId).toList();
+      test('the frontier fans the four lanes out, then joins on the route', () {
+        const parent = 'pow-1/review';
+        CircuitCursor done(List<String> ids) => {
+          for (final id in ids)
+            '$parent/$id': const NodeCursor(state: StepState.complete),
+        };
+        List<String> frontier(CircuitCursor cursor) => eligibleSteps(
+          kDocsReviewCircuit,
+          cursor,
+          parent,
+          circuitById: (_) => null,
+          now: DateTime(2026),
+        ).map((s) => s.stepId).toList();
 
-      expect(frontier(done([kClearCritiqueStep, kPinDiffStep])), [
-        kCitationPathsRubric,
-        kTerminologyBanRubric,
-        kSectionStructureRubric,
-        'spec-adherence',
-      ]);
-      expect(
-        frontier(
-          done([kClearCritiqueStep, kPinDiffStep, ...kDocsCommitteeRubrics]),
-        ),
-        ['route'],
-      );
-    });
-  });
+        expect(frontier(done([kClearCritiqueStep, kPinDiffStep])), [
+          kCitationPathsRubric,
+          kTerminologyBanRubric,
+          kSectionStructureRubric,
+          'spec-adherence',
+        ]);
+        expect(
+          frontier(
+            done([kClearCritiqueStep, kPinDiffStep, ...kDocsCommitteeRubrics]),
+          ),
+          ['route'],
+        );
+      });
+    },
+  );
 
   group('change-shape selection picks the committee', () {
     test('a docs-only bead roots a circuit whose review is docs_review', () {
@@ -197,17 +200,19 @@ void main() {
       expect(payload['rationale'], contains('docs/a.md'));
     });
 
-    test('A when the word is QUOTED (a mention) or third-party qualified',
-        () async {
-      final dir = _worktree(
-        _diff('docs/a.md', [
-          'The seam word is extension, never "plugin".',
-          'A `plugin` is not the seam word here.',
-          'Flutter platform plugins keep their own name.',
-        ]),
-      );
-      expect((await _lane(kTerminologyBanRubric, dir))['grade'], 'A');
-    });
+    test(
+      'A when the word is QUOTED (a mention) or third-party qualified',
+      () async {
+        final dir = _worktree(
+          _diff('docs/a.md', [
+            'The seam word is extension, never "plugin".',
+            'A `plugin` is not the seam word here.',
+            'Flutter platform plugins keep their own name.',
+          ]),
+        );
+        expect((await _lane(kTerminologyBanRubric, dir))['grade'], 'A');
+      },
+    );
 
     test('a GRAMMATICAL capital is not a proper noun — the ordinary offence '
         'still fails', () {
@@ -273,23 +278,28 @@ void main() {
       expect(((out as Ok).payload)!['grade'], 'F');
     });
 
-    test('a diff touching a NON-docs file refuses the whole committee',
-        () async {
-      final dir = _worktree(
-        _diff('lib/src/code/committee.dart', ['// changed']),
-      );
-      final payload = await _lane(kTerminologyBanRubric, dir);
-      expect(payload['grade'], 'F');
-      expect(payload['rationale'], contains('non-docs file'));
-      expect(payload['rationale'], contains('lib/src/code/committee.dart'));
-    });
+    test(
+      'a diff touching a NON-docs file refuses the whole committee',
+      () async {
+        final dir = _worktree(
+          _diff('lib/src/code/committee.dart', ['// changed']),
+        );
+        final payload = await _lane(kTerminologyBanRubric, dir);
+        expect(payload['grade'], 'F');
+        expect(payload['rationale'], contains('non-docs file'));
+        expect(payload['rationale'], contains('lib/src/code/committee.dart'));
+      },
+    );
 
-    test('an unknown rubric id is a fail-closed F, not a silent pass', () async {
-      final dir = _worktree(_diff('docs/a.md', ['ordinary prose']));
-      final payload = await _lane('not-a-docs-lane', dir);
-      expect(payload['grade'], 'F');
-      expect(payload['rationale'], contains('misconfigured'));
-    });
+    test(
+      'an unknown rubric id is a fail-closed F, not a silent pass',
+      () async {
+        final dir = _worktree(_diff('docs/a.md', ['ordinary prose']));
+        final payload = await _lane('not-a-docs-lane', dir);
+        expect(payload['grade'], 'F');
+        expect(payload['rationale'], contains('misconfigured'));
+      },
+    );
   });
 
   group('the registry composes the pack', () {

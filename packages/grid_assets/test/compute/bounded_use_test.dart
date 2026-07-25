@@ -82,20 +82,23 @@ void main() {
       );
     });
 
-    test('a hung command is bounded by the timeout (non-zero result)', () async {
-      final bounded = BoundedCommandExecutor(
-        bounds: const ComputeBounds(
-          allowedCommands: {'sleep'},
-          timeout: Duration(milliseconds: 20),
-        ),
-        // Never completes — the timeout must fire.
-        executor: (cmd) => Completer<CommandResult>().future,
-      );
-      final r = await bounded.run(const DispatchCommand(command: 'sleep'));
-      expect(r.ok, isFalse);
-      expect(r.exitCode, 124);
-      expect(r.stderr, contains('timed out'));
-    });
+    test(
+      'a hung command is bounded by the timeout (non-zero result)',
+      () async {
+        final bounded = BoundedCommandExecutor(
+          bounds: const ComputeBounds(
+            allowedCommands: {'sleep'},
+            timeout: Duration(milliseconds: 20),
+          ),
+          // Never completes — the timeout must fire.
+          executor: (cmd) => Completer<CommandResult>().future,
+        );
+        final r = await bounded.run(const DispatchCommand(command: 'sleep'));
+        expect(r.ok, isFalse);
+        expect(r.exitCode, 124);
+        expect(r.stderr, contains('timed out'));
+      },
+    );
 
     test('a hung command is REAPED on timeout (the M4 group reaper fires, not '
         'just an abandoned wait)', () async {
@@ -127,23 +130,25 @@ void main() {
       );
     });
 
-    test('an unresolvable pgid falls back to a direct kill (never leaks)',
-        () async {
-      final groups = _FakeGroups(resolvesToNull: true);
-      final hung = _HungComputeProcess(pid: 4242);
-      final bounded = BoundedCommandExecutor(
-        bounds: const ComputeBounds(
-          allowedCommands: {'sleep'},
-          timeout: Duration(milliseconds: 20),
-        ),
-        spawn: (cmd) async => hung,
-        groups: groups,
-      );
-      final r = await bounded.run(const DispatchCommand(command: 'sleep'));
-      expect(r.exitCode, 124);
-      expect(groups.signals, isEmpty, reason: 'no pgid → no group signal');
-      expect(hung.killed, isTrue, reason: 'fell back to a direct kill');
-    });
+    test(
+      'an unresolvable pgid falls back to a direct kill (never leaks)',
+      () async {
+        final groups = _FakeGroups(resolvesToNull: true);
+        final hung = _HungComputeProcess(pid: 4242);
+        final bounded = BoundedCommandExecutor(
+          bounds: const ComputeBounds(
+            allowedCommands: {'sleep'},
+            timeout: Duration(milliseconds: 20),
+          ),
+          spawn: (cmd) async => hung,
+          groups: groups,
+        );
+        final r = await bounded.run(const DispatchCommand(command: 'sleep'));
+        expect(r.exitCode, 124);
+        expect(groups.signals, isEmpty, reason: 'no pgid → no group signal');
+        expect(hung.killed, isTrue, reason: 'fell back to a direct kill');
+      },
+    );
   });
 
   group('computeDispatchHandler — the lessor-side bus glue', () {
@@ -165,75 +170,79 @@ void main() {
       expect(r.stdout, 'federation');
     });
 
-    test('an out-of-bounds command surfaces as exit 126 (refused, never run)',
-        () async {
-      var ran = false;
-      final handler = computeDispatchHandler(
-        bounds: const ComputeBounds(allowedCommands: {'echo'}),
-        executor: (cmd) async {
-          ran = true;
-          return const CommandResult(
-            exitCode: 0,
-            stdout: '',
-            stderr: '',
-            durationMs: 0,
-          );
-        },
-      );
-      final r = CommandResult.fromJson(
-        await handler(const DispatchCommand(command: 'curl').toJson()),
-      );
-      expect(r.exitCode, 126);
-      expect(r.stderr, contains('allow-list'));
-      expect(ran, isFalse);
-    });
+    test(
+      'an out-of-bounds command surfaces as exit 126 (refused, never run)',
+      () async {
+        var ran = false;
+        final handler = computeDispatchHandler(
+          bounds: const ComputeBounds(allowedCommands: {'echo'}),
+          executor: (cmd) async {
+            ran = true;
+            return const CommandResult(
+              exitCode: 0,
+              stdout: '',
+              stderr: '',
+              durationMs: 0,
+            );
+          },
+        );
+        final r = CommandResult.fromJson(
+          await handler(const DispatchCommand(command: 'curl').toJson()),
+        );
+        expect(r.exitCode, 126);
+        expect(r.stderr, contains('allow-list'));
+        expect(ran, isFalse);
+      },
+    );
   });
 
   group('computeDispatchHandler over the federation bus (loopback)', () {
-    test('a lessor BOUNDS dispatched commands end-to-end over the wire',
-        () async {
-      final server = await StationServer.start(
-        station: 'lessor',
-        offered: 1,
-        host: '127.0.0.1',
-        kind: kComputeKind,
-        handler: computeDispatchHandler(
-          bounds: const ComputeBounds(allowedCommands: {'echo'}),
-          executor: (cmd) async => CommandResult(
-            exitCode: 0,
-            stdout: 'echoed:${cmd.args.join(',')}',
-            stderr: '',
-            durationMs: 1,
+    test(
+      'a lessor BOUNDS dispatched commands end-to-end over the wire',
+      () async {
+        final server = await StationServer.start(
+          station: 'lessor',
+          offered: 1,
+          host: '127.0.0.1',
+          kind: kComputeKind,
+          handler: computeDispatchHandler(
+            bounds: const ComputeBounds(allowedCommands: {'echo'}),
+            executor: (cmd) async => CommandResult(
+              exitCode: 0,
+              stdout: 'echoed:${cmd.args.join(',')}',
+              stderr: '',
+              durationMs: 1,
+            ),
           ),
-        ),
-      );
-      addTearDown(server.close);
-      final client = HttpStationClient(host: '127.0.0.1', port: server.port);
-      addTearDown(client.close);
+        );
+        addTearDown(server.close);
+        final client = HttpStationClient(host: '127.0.0.1', port: server.port);
+        addTearDown(client.close);
 
-      final grant = await client.requestLease(
-        const LeaseRequest(lessee: 'studio', kind: kComputeKind),
-      );
-      // In-bounds → runs on the lessor.
-      final ok = CommandResult.fromJson(
-        await client.dispatch(
-          grant,
-          const DispatchCommand(command: 'echo', args: ['hi']).toJson(),
-        ),
-      );
-      expect(ok.ok, isTrue);
-      expect(ok.stdout, 'echoed:hi');
-      // Out-of-bounds → refused (126); the lessor never runs it.
-      final refused = CommandResult.fromJson(
-        await client.dispatch(
-          grant,
-          const DispatchCommand(command: 'rm', args: ['-rf']).toJson(),
-        ),
-      );
-      expect(refused.exitCode, 126);
+        final grant = await client.requestLease(
+          const LeaseRequest(lessee: 'studio', kind: kComputeKind),
+        );
+        // In-bounds → runs on the lessor.
+        final ok = CommandResult.fromJson(
+          await client.dispatch(
+            grant,
+            const DispatchCommand(command: 'echo', args: ['hi']).toJson(),
+          ),
+        );
+        expect(ok.ok, isTrue);
+        expect(ok.stdout, 'echoed:hi');
+        // Out-of-bounds → refused (126); the lessor never runs it.
+        final refused = CommandResult.fromJson(
+          await client.dispatch(
+            grant,
+            const DispatchCommand(command: 'rm', args: ['-rf']).toJson(),
+          ),
+        );
+        expect(refused.exitCode, 126);
 
-      await client.release(grant);
-    });
+        await client.release(grant);
+      },
+    );
   });
 }
 

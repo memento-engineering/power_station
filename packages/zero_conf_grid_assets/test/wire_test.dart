@@ -22,7 +22,15 @@ class _Rec {
 /// A decoded packet's header + records — no name compression support (the
 /// encoder never emits it), which keeps this decoder small and independent.
 class _Packet {
-  _Packet(this.id, this.flags, this.qd, this.an, this.ns, this.ar, this.records);
+  _Packet(
+    this.id,
+    this.flags,
+    this.qd,
+    this.an,
+    this.ns,
+    this.ar,
+    this.records,
+  );
   final int id;
   final int flags;
   final int qd;
@@ -81,7 +89,11 @@ _Packet _decodePacket(Uint8List d) {
     o += rdlen;
     records.add(_Rec(name, type, klass, ttl, rdata));
   }
-  expect(o, d.length, reason: 'the whole packet was consumed, nothing left over');
+  expect(
+    o,
+    d.length,
+    reason: 'the whole packet was consumed, nothing left over',
+  );
   return _Packet(id, flags, qd, an, ns, ar, records);
 }
 
@@ -109,11 +121,14 @@ void main() {
       expect(p.ar, 0);
     });
 
-    test('carries PTR + SRV + TXT (no A record without a literal IPv4 host)', () {
-      final p = _decodePacket(encodeGridAnnouncement(withHostname));
-      expect(p.an, 3);
-      expect(p.records.map((r) => r.type), [12, 33, 16]); // PTR, SRV, TXT
-    });
+    test(
+      'carries PTR + SRV + TXT (no A record without a literal IPv4 host)',
+      () {
+        final p = _decodePacket(encodeGridAnnouncement(withHostname));
+        expect(p.an, 3);
+        expect(p.records.map((r) => r.type), [12, 33, 16]); // PTR, SRV, TXT
+      },
+    );
 
     test('adds an A record when the host is a literal IPv4 address', () {
       final p = _decodePacket(encodeGridAnnouncement(withIp));

@@ -10,7 +10,8 @@ const PrDescription _inferred = PrDescription(
   type: 'feat',
   scope: 'landing',
   description: 'Infer the pr title from the branch diff.',
-  summary: 'The land step now reads the branch delta and describes it. '
+  summary:
+      'The land step now reads the branch delta and describes it. '
       'Titles were terse and templated off the tracker.',
 );
 
@@ -34,17 +35,14 @@ PrCompositionContext _context({
 
 void main() {
   group('the TITLE is inferred, conventional, and id-free (pow-8dx)', () {
-    test(
-      'an inferred description renders a sanitized v1.0.0 subject — the '
-      "model's raw string never reaches GitHub",
-      () {
-        final title = const PrComposition().titleOf(
-          _context(description: _inferred, titleSource: 'inference'),
-        );
-        expect(title, 'feat(landing): infer the pr title from the branch diff');
-        expect(lintConventionalSubject(title, foreignRef: 'tg-1'), isEmpty);
-      },
-    );
+    test('an inferred description renders a sanitized v1.0.0 subject — the '
+        "model's raw string never reaches GitHub", () {
+      final title = const PrComposition().titleOf(
+        _context(description: _inferred, titleSource: 'inference'),
+      );
+      expect(title, 'feat(landing): infer the pr title from the branch diff');
+      expect(lintConventionalSubject(title, foreignRef: 'tg-1'), isEmpty);
+    });
 
     test('an inferred subject that smuggles the bead id in is STRIPPED', () {
       final title = const PrComposition().titleOf(
@@ -130,26 +128,23 @@ void main() {
   });
 
   group('PrDescription.parse — the LAST JSON object wins (pow-8dx)', () {
-    test(
-      'parses the answer object out of a chatty stdout, ignoring an echoed '
-      'template preamble',
-      () {
-        final parsed = PrDescription.parse(
-          'Here is the shape: {"type":"feat","description":"<the description>"}\n'
-          'And my answer:\n'
-          '{"type":"fix","scope":"land","breaking":false,'
-          '"description":"stop clobbering the design note","body":"prose",'
-          '"breakingChange":""}',
-        );
-        expect(parsed, isNotNull);
-        expect(parsed!.type, 'fix');
-        expect(parsed.scope, 'land');
-        expect(parsed.description, 'stop clobbering the design note');
-        // The LEGACY `body` key still yields a digest — a model answering in the
-        // shape it half-remembers must not lose its prose.
-        expect(parsed.summary, 'prose');
-      },
-    );
+    test('parses the answer object out of a chatty stdout, ignoring an echoed '
+        'template preamble', () {
+      final parsed = PrDescription.parse(
+        'Here is the shape: {"type":"feat","description":"<the description>"}\n'
+        'And my answer:\n'
+        '{"type":"fix","scope":"land","breaking":false,'
+        '"description":"stop clobbering the design note","body":"prose",'
+        '"breakingChange":""}',
+      );
+      expect(parsed, isNotNull);
+      expect(parsed!.type, 'fix');
+      expect(parsed.scope, 'land');
+      expect(parsed.description, 'stop clobbering the design note');
+      // The LEGACY `body` key still yields a digest — a model answering in the
+      // shape it half-remembers must not lose its prose.
+      expect(parsed.summary, 'prose');
+    });
 
     test('reads the `summary` key — the digest the prompt now asks for', () {
       final parsed = PrDescription.parse(
@@ -208,7 +203,9 @@ void main() {
         );
         final order = [
           body.indexOf('## Summary'),
-          body.indexOf('The land step now reads the branch delta and describes'),
+          body.indexOf(
+            'The land step now reads the branch delta and describes',
+          ),
           body.indexOf('## Circuit receipt'),
           body.indexOf('## Committee'),
           body.indexOf('## Validation'),
@@ -223,7 +220,9 @@ void main() {
         expect(body, contains('- commits: 2 (2 conventional, 2 trailered)'));
         expect(
           body,
-          contains('- review: grades=code-validation=A spread=0 rule=all-approve'),
+          contains(
+            '- review: grades=code-validation=A spread=0 rule=all-approve',
+          ),
         );
         expect(body, contains('- plan: `dart test`'));
         // THE POLICY: the bead id appears EXACTLY once — on the trailer line.
@@ -246,28 +245,22 @@ void main() {
       },
     );
 
-    test(
-      'off-policy branch commits are NAMED in the receipt (the build-agent '
-      'commit lint, directive item 5)',
-      () {
-        final report = lintCommitSubjects(
-          const [
-            'feat(landing): infer the pr title\n\nRefs: tg-1',
-            'feat(x): tg-1 — do a thing',
-            'wip',
-          ],
-          foreignRef: 'tg-1',
-        );
-        expect(report.total, 3);
-        expect(report.compliant, 1);
-        expect(report.trailered, 1);
-        expect(report.violations, hasLength(2));
-        final body = const PrComposition().bodyOf(_context(commits: report));
-        expect(body, contains('- commits: 3 (1 conventional, 1 trailered)'));
-        expect(body, contains('off-policy: `feat(x): tg-1 — do a thing`'));
-        expect(body, contains('off-policy: `wip`'));
-      },
-    );
+    test('off-policy branch commits are NAMED in the receipt (the build-agent '
+        'commit lint, directive item 5)', () {
+      final report = lintCommitSubjects(const [
+        'feat(landing): infer the pr title\n\nRefs: tg-1',
+        'feat(x): tg-1 — do a thing',
+        'wip',
+      ], foreignRef: 'tg-1');
+      expect(report.total, 3);
+      expect(report.compliant, 1);
+      expect(report.trailered, 1);
+      expect(report.violations, hasLength(2));
+      final body = const PrComposition().bodyOf(_context(commits: report));
+      expect(body, contains('- commits: 3 (1 conventional, 1 trailered)'));
+      expect(body, contains('off-policy: `feat(x): tg-1 — do a thing`'));
+      expect(body, contains('off-policy: `wip`'));
+    });
   });
 
   group('the human DIGEST leads the body', () {
@@ -281,7 +274,9 @@ void main() {
         expect(body, startsWith('## Summary\n\n'));
         expect(
           body,
-          contains('The land step now reads the branch delta and describes it.'),
+          contains(
+            'The land step now reads the branch delta and describes it.',
+          ),
         );
         expect(
           body.indexOf('## Summary'),
@@ -290,71 +285,78 @@ void main() {
       },
     );
 
-    test(
-      'a digest that smuggles the bead id is STRIPPED — the id rides the '
-      'trailer and nothing else',
-      () {
-        final body = const PrComposition().bodyOf(
-          _context(
-            description: const PrDescription(
-              type: 'feat',
-              description: 'add the digest',
-              summary: 'tg-1 — the land step now writes a digest. '
-                  'Fixes tg-1 (tg-1#r2) for good.',
-            ),
-            titleSource: 'inference',
+    test('a digest that smuggles the bead id is STRIPPED — the id rides the '
+        'trailer and nothing else', () {
+      final body = const PrComposition().bodyOf(
+        _context(
+          description: const PrDescription(
+            type: 'feat',
+            description: 'add the digest',
+            summary:
+                'tg-1 — the land step now writes a digest. '
+                'Fixes tg-1 (tg-1#r2) for good.',
           ),
+          titleSource: 'inference',
+        ),
+      );
+      expect(body, contains('## Summary'));
+      expect(body, contains('the land step now writes a digest.'));
+      expect('tg-1'.allMatches(body).length, 1);
+      expect(body.trimRight(), endsWith('Refs: tg-1'));
+    });
+
+    test(
+      'NO digest ⇒ NO heading (an absent section is dropped, never bare)',
+      () {
+        const bare = PrComposition();
+        expect(bare.bodyOf(_context()), isNot(contains('## Summary')));
+        expect(
+          bare.bodyOf(
+            _context(
+              description: const PrDescription(
+                type: 'feat',
+                description: 'add the thing',
+              ),
+              titleSource: 'inference',
+            ),
+          ),
+          isNot(contains('## Summary')),
         );
-        expect(body, contains('## Summary'));
-        expect(body, contains('the land step now writes a digest.'));
-        expect('tg-1'.allMatches(body).length, 1);
-        expect(body.trimRight(), endsWith('Refs: tg-1'));
+        expect(
+          bare.bodyOf(
+            _context(
+              description: const PrDescription(
+                type: 'feat',
+                description: 'add the thing',
+                summary: '   \n  ',
+              ),
+              titleSource: 'inference',
+            ),
+          ),
+          isNot(contains('## Summary')),
+        );
       },
     );
 
-    test('NO digest ⇒ NO heading (an absent section is dropped, never bare)', () {
-      const bare = PrComposition();
-      expect(bare.bodyOf(_context()), isNot(contains('## Summary')));
-      expect(
-        bare.bodyOf(
-          _context(
-            description: const PrDescription(
-              type: 'feat',
-              description: 'add the thing',
-            ),
-            titleSource: 'inference',
-          ),
-        ),
-        isNot(contains('## Summary')),
-      );
-      expect(
-        bare.bodyOf(
-          _context(
-            description: const PrDescription(
-              type: 'feat',
-              description: 'add the thing',
-              summary: '   \n  ',
-            ),
-            titleSource: 'inference',
-          ),
-        ),
-        isNot(contains('## Summary')),
-      );
-    });
-
-    test('a runaway digest is CAPPED (an essay must not become the PR body)', () {
-      final long = 'word ' * (kMaxSummaryChars ~/ 2);
-      final digest = sanitizeDigest(long, foreignRef: 'tg-1');
-      expect(digest.length, lessThan(kMaxSummaryChars + 32));
-      expect(digest, endsWith('… (truncated)'));
-    });
+    test(
+      'a runaway digest is CAPPED (an essay must not become the PR body)',
+      () {
+        final long = 'word ' * (kMaxSummaryChars ~/ 2);
+        final digest = sanitizeDigest(long, foreignRef: 'tg-1');
+        expect(digest.length, lessThan(kMaxSummaryChars + 32));
+        expect(digest, endsWith('… (truncated)'));
+      },
+    );
 
     test(
       'sanitizeDigest is pure prose surgery: paragraphs survive, the ref does '
       'not',
       () {
         expect(sanitizeDigest('', foreignRef: 'tg-1'), isEmpty);
-        expect(sanitizeDigest('One. \n\nTwo.', foreignRef: 'tg-1'), 'One.\n\nTwo.');
+        expect(
+          sanitizeDigest('One. \n\nTwo.', foreignRef: 'tg-1'),
+          'One.\n\nTwo.',
+        );
         expect(
           sanitizeDigest('The tg-1 work adds x.', foreignRef: 'tg-1'),
           'The work adds x.',
@@ -370,14 +372,17 @@ void main() {
       expect(body, isNot(contains('Refs:')));
     });
 
-    test('a custom section list is honored (a receipt-only body — no trailer)', () {
-      final body = const PrComposition(
-        sections: [PrSection.circuitReceipt],
-      ).bodyOf(_context(description: _inferred, titleSource: 'inference'));
-      expect(body, contains('## Circuit receipt'));
-      expect(body, isNot(contains('Refs: tg-1')));
-      expect(body, isNot(contains('The land step now reads')));
-    });
+    test(
+      'a custom section list is honored (a receipt-only body — no trailer)',
+      () {
+        final body = const PrComposition(
+          sections: [PrSection.circuitReceipt],
+        ).bodyOf(_context(description: _inferred, titleSource: 'inference'));
+        expect(body, contains('## Circuit receipt'));
+        expect(body, isNot(contains('Refs: tg-1')));
+        expect(body, isNot(contains('The land step now reads')));
+      },
+    );
 
     test('the describe model is a knob (cheap by default)', () {
       expect(const PrComposition().model, kDefaultDescribeModel);

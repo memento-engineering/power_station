@@ -44,15 +44,13 @@ Directory _libDir(String pkg) {
   fail('could not resolve package:$pkg/lib from ${Directory.current.path}');
 }
 
-String _allSource(
-  Directory libDir, {
-  bool Function(File f) exclude = _never,
-}) => libDir
-    .listSync(recursive: true)
-    .whereType<File>()
-    .where((f) => f.path.endsWith('.dart') && !exclude(f))
-    .map((f) => f.readAsStringSync())
-    .join('\n');
+String _allSource(Directory libDir, {bool Function(File f) exclude = _never}) =>
+    libDir
+        .listSync(recursive: true)
+        .whereType<File>()
+        .where((f) => f.path.endsWith('.dart') && !exclude(f))
+        .map((f) => f.readAsStringSync())
+        .join('\n');
 
 bool _never(File f) => false;
 

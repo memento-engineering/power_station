@@ -7,28 +7,31 @@ import 'package:test/test.dart';
 
 void main() {
   group('EnvironmentRegistry.resolve — base-chain folding', () {
-    test('provider: chain folds root → leaf (args REPLACE, append ACCUMULATE)', () {
-      const registry = EnvironmentRegistry(
-        custom: {
-          'root': AgentEnvironment(
-            command: 'claude',
-            args: ['--root'],
-            argsAppend: ['a-root'],
-            model: 'opus',
-          ),
-          'leaf': AgentEnvironment(
-            base: EnvBaseRef('root', scope: BaseScope.provider),
-            args: ['--leaf'],
-            argsAppend: ['a-leaf'],
-          ),
-        },
-      );
-      final env = registry.resolve('leaf');
-      expect(env.command, 'claude'); // inherited
-      expect(env.args, ['--leaf']); // REPLACE — last declaring layer wins
-      expect(env.argsAppend, ['a-root', 'a-leaf']); // ACCUMULATE root→leaf
-      expect(env.model, 'opus'); // inherited
-    });
+    test(
+      'provider: chain folds root → leaf (args REPLACE, append ACCUMULATE)',
+      () {
+        const registry = EnvironmentRegistry(
+          custom: {
+            'root': AgentEnvironment(
+              command: 'claude',
+              args: ['--root'],
+              argsAppend: ['a-root'],
+              model: 'opus',
+            ),
+            'leaf': AgentEnvironment(
+              base: EnvBaseRef('root', scope: BaseScope.provider),
+              args: ['--leaf'],
+              argsAppend: ['a-leaf'],
+            ),
+          },
+        );
+        final env = registry.resolve('leaf');
+        expect(env.command, 'claude'); // inherited
+        expect(env.args, ['--leaf']); // REPLACE — last declaring layer wins
+        expect(env.argsAppend, ['a-root', 'a-leaf']); // ACCUMULATE root→leaf
+        expect(env.model, 'opus'); // inherited
+      },
+    );
 
     test('bare auto base resolves custom first, then builtin', () {
       const registry = EnvironmentRegistry(
@@ -40,8 +43,12 @@ void main() {
 
     test('undeclared base layers a same-named builtin UNDER a custom env', () {
       const registry = EnvironmentRegistry(
-        builtins: {'claude': AgentEnvironment(command: 'claude', model: 'opus')},
-        custom: {'claude': AgentEnvironment(model: 'sonnet')}, // base undeclared
+        builtins: {
+          'claude': AgentEnvironment(command: 'claude', model: 'opus'),
+        },
+        custom: {
+          'claude': AgentEnvironment(model: 'sonnet'),
+        }, // base undeclared
       );
       final env = registry.resolve('claude');
       expect(env.command, 'claude'); // from the builtin, layered under
@@ -50,7 +57,9 @@ void main() {
 
     test('standalone base opts out of a same-named builtin', () {
       const registry = EnvironmentRegistry(
-        builtins: {'claude': AgentEnvironment(command: 'claude', model: 'opus')},
+        builtins: {
+          'claude': AgentEnvironment(command: 'claude', model: 'opus'),
+        },
         custom: {
           'claude': AgentEnvironment(base: EnvBaseStandalone(), command: 'c2'),
         },

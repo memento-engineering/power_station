@@ -27,31 +27,38 @@ void main() {
     CodeCircuitShape c(CircuitCursor cursor) =>
         classifyCodeShape(beadId: 'tg-1', cursor: cursor);
 
-    test('an empty cursor (fresh mint / rework round) is the CURRENT shape', () {
-      expect(c(const {}), CodeCircuitShape.discovery);
-    });
+    test(
+      'an empty cursor (fresh mint / rework round) is the CURRENT shape',
+      () {
+        expect(c(const {}), CodeCircuitShape.discovery);
+      },
+    );
 
-    test("only another bead's keys — nothing of ours — is the CURRENT shape",
-        () {
-      expect(c(const {'tg-9/agent': _complete}), CodeCircuitShape.discovery);
-    });
+    test(
+      "only another bead's keys — nothing of ours — is the CURRENT shape",
+      () {
+        expect(c(const {'tg-9/agent': _complete}), CodeCircuitShape.discovery);
+      },
+    );
 
-    test('the DISCOVERY head key classifies the CURRENT shape, in ANY state',
-        () {
-      expect(
-        c(const {'tg-1/spec_review/discovery/anchors': _running}),
-        CodeCircuitShape.discovery,
-      );
-      expect(
-        c(const {
-          'tg-1/spec_review/intake': _complete,
-          'tg-1/spec_review/discovery/anchors': _complete,
-          'tg-1/spec_review/specify': _complete,
-          'tg-1/agent': _complete,
-        }),
-        CodeCircuitShape.discovery,
-      );
-    });
+    test(
+      'the DISCOVERY head key classifies the CURRENT shape, in ANY state',
+      () {
+        expect(
+          c(const {'tg-1/spec_review/discovery/anchors': _running}),
+          CodeCircuitShape.discovery,
+        );
+        expect(
+          c(const {
+            'tg-1/spec_review/intake': _complete,
+            'tg-1/spec_review/discovery/anchors': _complete,
+            'tg-1/spec_review/specify': _complete,
+            'tg-1/agent': _complete,
+          }),
+          CodeCircuitShape.discovery,
+        );
+      },
+    );
 
     test('a PRE-DISCOVERY survivor that already SPECIFIED is FROZEN laddered — '
         'the gather never mounts and its three agents never spawn', () {
@@ -78,7 +85,8 @@ void main() {
           'tg-1/spec_review/readiness-route': _complete,
         }),
         CodeCircuitShape.discovery,
-        reason: 'discovery mounts exactly where it belongs — after '
+        reason:
+            'discovery mounts exactly where it belongs — after '
             '`readiness-route`, before `specify`',
       );
     });
@@ -234,54 +242,50 @@ void main() {
   });
 
   group('the FROZEN shapes', () {
-    test('kLegacyCodeCircuit: agent → review → land → deliver, no spec steps',
-        () {
-      expect(kLegacyCodeCircuit.id, 'code');
-      expect(kLegacyCodeCircuit.terminalStepId, kDeliverStep);
-      expect(kLegacyCodeCircuit.steps.map((s) => s.stepId), [
-        'agent',
-        'review',
-        'land',
-        kDeliverStep,
-      ]);
-      expect(kLegacyCodeCircuit.stepById('specify'), isNull);
-      expect(kLegacyCodeCircuit.stepById('spec_review'), isNull);
-    });
-
     test(
-      'kSpecHeadCodeCircuit: specify → spec_review → agent → review → land, '
-      'with spec_review pointing at the FROZEN sub-circuit',
+      'kLegacyCodeCircuit: agent → review → land → deliver, no spec steps',
       () {
-        expect(kSpecHeadCodeCircuit.id, 'code');
-        expect(kSpecHeadCodeCircuit.terminalStepId, kDeliverStep);
-        expect(kSpecHeadCodeCircuit.steps.map((s) => s.stepId), [
-          'specify',
-          'spec_review',
+        expect(kLegacyCodeCircuit.id, 'code');
+        expect(kLegacyCodeCircuit.terminalStepId, kDeliverStep);
+        expect(kLegacyCodeCircuit.steps.map((s) => s.stepId), [
           'agent',
           'review',
           'land',
           kDeliverStep,
         ]);
-        final sub =
-            kSpecHeadCodeCircuit.stepById('spec_review')! as SubCircuitStep;
-        expect(sub.circuitId, kSpecHeadSpecReviewCircuitId);
-        expect(sub.circuitId, isNot('spec_review'));
+        expect(kLegacyCodeCircuit.stepById('specify'), isNull);
+        expect(kLegacyCodeCircuit.stepById('spec_review'), isNull);
       },
     );
 
-    test(
-      'kSpecHeadSpecReviewCircuit has NO specify step and runs the pre-fold '
-      'BINARY route (a Rewind could not name a non-sibling specify)',
-      () {
-        expect(kSpecHeadSpecReviewCircuit.id, kSpecHeadSpecReviewCircuitId);
-        expect(kSpecHeadSpecReviewCircuit.terminalStepId, 'route');
-        expect(kSpecHeadSpecReviewCircuit.stepById('specify'), isNull);
-        final route =
-            kSpecHeadSpecReviewCircuit.stepById('route')! as CapabilityStep;
-        expect(route.capabilityId, 'route');
-        expect(route.capabilityId, isNot('spec-route'));
-      },
-    );
+    test('kSpecHeadCodeCircuit: specify → spec_review → agent → review → land, '
+        'with spec_review pointing at the FROZEN sub-circuit', () {
+      expect(kSpecHeadCodeCircuit.id, 'code');
+      expect(kSpecHeadCodeCircuit.terminalStepId, kDeliverStep);
+      expect(kSpecHeadCodeCircuit.steps.map((s) => s.stepId), [
+        'specify',
+        'spec_review',
+        'agent',
+        'review',
+        'land',
+        kDeliverStep,
+      ]);
+      final sub =
+          kSpecHeadCodeCircuit.stepById('spec_review')! as SubCircuitStep;
+      expect(sub.circuitId, kSpecHeadSpecReviewCircuitId);
+      expect(sub.circuitId, isNot('spec_review'));
+    });
+
+    test('kSpecHeadSpecReviewCircuit has NO specify step and runs the pre-fold '
+        'BINARY route (a Rewind could not name a non-sibling specify)', () {
+      expect(kSpecHeadSpecReviewCircuit.id, kSpecHeadSpecReviewCircuitId);
+      expect(kSpecHeadSpecReviewCircuit.terminalStepId, 'route');
+      expect(kSpecHeadSpecReviewCircuit.stepById('specify'), isNull);
+      final route =
+          kSpecHeadSpecReviewCircuit.stepById('route')! as CapabilityStep;
+      expect(route.capabilityId, 'route');
+      expect(route.capabilityId, isNot('spec-route'));
+    });
 
     test(
       'kFoldedSpecReviewCircuit has NO readiness ladder and KEEPS the three-way '
@@ -293,28 +297,34 @@ void main() {
         expect(kFoldedSpecReviewCircuit.stepById('readiness'), isNull);
         expect(kFoldedSpecReviewCircuit.stepById('readiness-route'), isNull);
         expect(kFoldedSpecReviewCircuit.stepById('specify'), isNotNull);
-        expect(kFoldedSpecReviewCircuit.stepById('specify')!.dependsOn, isEmpty);
+        expect(
+          kFoldedSpecReviewCircuit.stepById('specify')!.dependsOn,
+          isEmpty,
+        );
         final route =
             kFoldedSpecReviewCircuit.stepById('route')! as CapabilityStep;
         expect(route.capabilityId, 'spec-route');
       },
     );
 
-    test('kFoldedCodeCircuit points spec_review at the FROZEN pre-ladder body',
-        () {
-      expect(kFoldedCodeCircuit.id, 'code');
-      expect(kFoldedCodeCircuit.terminalStepId, kDeliverStep);
-      expect(kFoldedCodeCircuit.steps.map((s) => s.stepId), [
-        'spec_review',
-        'agent',
-        'review',
-        'land',
-        kDeliverStep,
-      ]);
-      final sub = kFoldedCodeCircuit.stepById('spec_review')! as SubCircuitStep;
-      expect(sub.circuitId, kFoldedSpecReviewCircuitId);
-      expect(sub.circuitId, isNot('spec_review'));
-    });
+    test(
+      'kFoldedCodeCircuit points spec_review at the FROZEN pre-ladder body',
+      () {
+        expect(kFoldedCodeCircuit.id, 'code');
+        expect(kFoldedCodeCircuit.terminalStepId, kDeliverStep);
+        expect(kFoldedCodeCircuit.steps.map((s) => s.stepId), [
+          'spec_review',
+          'agent',
+          'review',
+          'land',
+          kDeliverStep,
+        ]);
+        final sub =
+            kFoldedCodeCircuit.stepById('spec_review')! as SubCircuitStep;
+        expect(sub.circuitId, kFoldedSpecReviewCircuitId);
+        expect(sub.circuitId, isNot('spec_review'));
+      },
+    );
 
     test(
       'kLadderedSpecReviewCircuit KEEPS the readiness ladder but has NO '
@@ -329,10 +339,9 @@ void main() {
           isNot(contains(kDiscoveryCircuitId)),
         );
         // Under shape 4, `specify` depended on `readiness-route` DIRECTLY.
-        expect(
-          kLadderedSpecReviewCircuit.stepById('specify')!.dependsOn,
-          {'readiness-route'},
-        );
+        expect(kLadderedSpecReviewCircuit.stepById('specify')!.dependsOn, {
+          'readiness-route',
+        });
         final route =
             kLadderedSpecReviewCircuit.stepById('route')! as CapabilityStep;
         expect(route.capabilityId, 'spec-route');
@@ -360,10 +369,9 @@ void main() {
       expect(kSpecReviewCircuit.stepById('specify'), isNotNull);
       expect(kSpecReviewCircuit.stepById(kIntakeStep), isNotNull);
       expect(kSpecReviewCircuit.stepById(kDiscoveryCircuitId), isNotNull);
-      expect(
-        kSpecReviewCircuit.stepById(kSpecifyStep)!.dependsOn,
-        {kDiscoveryCircuitId},
-      );
+      expect(kSpecReviewCircuit.stepById(kSpecifyStep)!.dependsOn, {
+        kDiscoveryCircuitId,
+      });
     });
   });
 

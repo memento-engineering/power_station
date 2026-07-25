@@ -53,7 +53,12 @@ void main() {
       'lands at <root>/<rel>, with no kind mapping, including a nested '
       'multi-file asset dir and a LOOSE file outside any asset dir',
       () async {
-        _write(overlay, ['.claude', 'skills', 'foo', 'SKILL.md'], _skill('foo'));
+        _write(overlay, [
+          '.claude',
+          'skills',
+          'foo',
+          'SKILL.md',
+        ], _skill('foo'));
         _write(overlay, [
           '.claude',
           'skills',
@@ -66,10 +71,7 @@ void main() {
           'agents',
           'governor.md',
         ], _skill('governor'));
-        _write(overlay, [
-          '.claude',
-          'settings.json',
-        ], '{\n  "hooks": {}\n}\n');
+        _write(overlay, ['.claude', 'settings.json'], '{\n  "hooks": {}\n}\n');
 
         final report = await const OverlayMaterializer().materialize(
           overlayRoots: [overlay.path],
@@ -129,116 +131,113 @@ void main() {
       },
     );
 
-    test(
-      'an overlay root with nothing in scope contributes nothing (an empty '
-      'overlay is not an error)',
-      () async {
-        final empty = Directory(p.join(temp.path, 'empty'))
-          ..createSync(recursive: true);
-        final report = await const OverlayMaterializer().materialize(
-          overlayRoots: [empty.path],
-          targetRoot: target.path,
-          sourceRef: 'testref',
-          subtrees: const [kClaudeSkillsSubtree],
-        );
-        expect(report.files, isEmpty);
-      },
-    );
-
-    test('an empty overlayRoots list contributes nothing (not an error)', () async {
+    test('an overlay root with nothing in scope contributes nothing (an empty '
+        'overlay is not an error)', () async {
+      final empty = Directory(p.join(temp.path, 'empty'))
+        ..createSync(recursive: true);
       final report = await const OverlayMaterializer().materialize(
-        overlayRoots: const [],
+        overlayRoots: [empty.path],
         targetRoot: target.path,
         sourceRef: 'testref',
+        subtrees: const [kClaudeSkillsSubtree],
       );
       expect(report.files, isEmpty);
     });
 
     test(
-      'materializeSync — the entry point the provision wire rides, since '
-      'ProcessCapability.spawn cannot await — mirrors materialize',
-      () {
-        _write(overlay, ['.claude', 'skills', 'foo', 'SKILL.md'], _skill('foo'));
-
-        final report = const OverlayMaterializer().materializeSync(
-          overlayRoots: [overlay.path],
+      'an empty overlayRoots list contributes nothing (not an error)',
+      () async {
+        final report = await const OverlayMaterializer().materialize(
+          overlayRoots: const [],
           targetRoot: target.path,
           sourceRef: 'testref',
         );
-
-        expect(
-          File(
-            p.join(target.path, '.claude', 'skills', 'foo', 'SKILL.md'),
-          ).readAsStringSync(),
-          contains('name: foo'),
-        );
-        expect(
-          report.written.single.relativePath,
-          p.join('.claude', 'skills', 'foo', 'SKILL.md'),
-        );
-        expect(report.blocked, isEmpty);
-        expect(report.refused, isEmpty);
+        expect(report.files, isEmpty);
       },
     );
+
+    test('materializeSync — the entry point the provision wire rides, since '
+        'ProcessCapability.spawn cannot await — mirrors materialize', () {
+      _write(overlay, ['.claude', 'skills', 'foo', 'SKILL.md'], _skill('foo'));
+
+      final report = const OverlayMaterializer().materializeSync(
+        overlayRoots: [overlay.path],
+        targetRoot: target.path,
+        sourceRef: 'testref',
+      );
+
+      expect(
+        File(
+          p.join(target.path, '.claude', 'skills', 'foo', 'SKILL.md'),
+        ).readAsStringSync(),
+        contains('name: foo'),
+      );
+      expect(
+        report.written.single.relativePath,
+        p.join('.claude', 'skills', 'foo', 'SKILL.md'),
+      );
+      expect(report.blocked, isEmpty);
+      expect(report.refused, isEmpty);
+    });
   });
 
   group('OverlayMaterializer — provenance', () {
-    test('every written file carries the stamp, naming the source ref', () async {
-      _write(overlay, ['.claude', 'skills', 'a', 'SKILL.md'], _skill('a'));
-
-      await const OverlayMaterializer().materialize(
-        overlayRoots: [overlay.path],
-        targetRoot: target.path,
-        sourceRef: 'abc1234',
-        args: const {'runner': 'space'},
-      );
-
-      final body = File(
-        p.join(target.path, '.claude', 'skills', 'a', 'SKILL.md'),
-      ).readAsStringSync();
-      expect(hasProvenance(body), isTrue);
-      expect(body, contains('abc1234'));
-      expect(body, contains('`space assets install`'));
-      expect(
-        body,
-        startsWith('---\n'),
-        reason: 'the frontmatter still opens on line 1',
-      );
-    });
-
     test(
-      'a re-materialize is IDEMPOTENT: an unchanged generated file is left '
-      'byte-for-byte alone, even under a DIFFERENT source ref (a stale ref is '
-      'not drift — re-stamping would churn the tree for nothing)',
+      'every written file carries the stamp, naming the source ref',
       () async {
         _write(overlay, ['.claude', 'skills', 'a', 'SKILL.md'], _skill('a'));
-        const m = OverlayMaterializer();
-        final first = await m.materialize(
+
+        await const OverlayMaterializer().materialize(
           overlayRoots: [overlay.path],
           targetRoot: target.path,
-          sourceRef: 'ref1',
+          sourceRef: 'abc1234',
+          args: const {'runner': 'space'},
         );
-        final onDisk = File(
+
+        final body = File(
           p.join(target.path, '.claude', 'skills', 'a', 'SKILL.md'),
         ).readAsStringSync();
-
-        final second = await m.materialize(
-          overlayRoots: [overlay.path],
-          targetRoot: target.path,
-          sourceRef: 'ref2',
-        );
-
-        expect(first.written, hasLength(1));
-        expect(second.written, isEmpty);
-        expect(second.unchanged, hasLength(1));
+        expect(hasProvenance(body), isTrue);
+        expect(body, contains('abc1234'));
+        expect(body, contains('`space assets install`'));
         expect(
-          File(
-            p.join(target.path, '.claude', 'skills', 'a', 'SKILL.md'),
-          ).readAsStringSync(),
-          onDisk,
+          body,
+          startsWith('---\n'),
+          reason: 'the frontmatter still opens on line 1',
         );
       },
     );
+
+    test('a re-materialize is IDEMPOTENT: an unchanged generated file is left '
+        'byte-for-byte alone, even under a DIFFERENT source ref (a stale ref is '
+        'not drift — re-stamping would churn the tree for nothing)', () async {
+      _write(overlay, ['.claude', 'skills', 'a', 'SKILL.md'], _skill('a'));
+      const m = OverlayMaterializer();
+      final first = await m.materialize(
+        overlayRoots: [overlay.path],
+        targetRoot: target.path,
+        sourceRef: 'ref1',
+      );
+      final onDisk = File(
+        p.join(target.path, '.claude', 'skills', 'a', 'SKILL.md'),
+      ).readAsStringSync();
+
+      final second = await m.materialize(
+        overlayRoots: [overlay.path],
+        targetRoot: target.path,
+        sourceRef: 'ref2',
+      );
+
+      expect(first.written, hasLength(1));
+      expect(second.written, isEmpty);
+      expect(second.unchanged, hasLength(1));
+      expect(
+        File(
+          p.join(target.path, '.claude', 'skills', 'a', 'SKILL.md'),
+        ).readAsStringSync(),
+        onDisk,
+      );
+    });
 
     test(
       'a DRIFTED generated file is regenerated; a HAND-AUTHORED one (no stamp) '
@@ -292,30 +291,27 @@ void main() {
       },
     );
 
-    test(
-      'a dryRun writes NOTHING — every outcome is what WOULD happen (the '
-      '--check drift mode)',
-      () async {
-        _write(overlay, ['.claude', 'skills', 'a', 'SKILL.md'], _skill('a'));
+    test('a dryRun writes NOTHING — every outcome is what WOULD happen (the '
+        '--check drift mode)', () async {
+      _write(overlay, ['.claude', 'skills', 'a', 'SKILL.md'], _skill('a'));
 
-        final report = await const OverlayMaterializer().materialize(
-          overlayRoots: [overlay.path],
-          targetRoot: target.path,
-          sourceRef: 'testref',
-          dryRun: true,
-        );
+      final report = await const OverlayMaterializer().materialize(
+        overlayRoots: [overlay.path],
+        targetRoot: target.path,
+        sourceRef: 'testref',
+        dryRun: true,
+      );
 
-        expect(report.dryRun, isTrue);
-        expect(report.written, hasLength(1));
-        expect(
-          File(
-            p.join(target.path, '.claude', 'skills', 'a', 'SKILL.md'),
-          ).existsSync(),
-          isFalse,
-          reason: 'a --check is a PLAN',
-        );
-      },
-    );
+      expect(report.dryRun, isTrue);
+      expect(report.written, hasLength(1));
+      expect(
+        File(
+          p.join(target.path, '.claude', 'skills', 'a', 'SKILL.md'),
+        ).existsSync(),
+        isFalse,
+        reason: 'a --check is a PLAN',
+      );
+    });
 
     test(
       'a SYMLINK at the target is BLOCKED, never followed — writing through one '
@@ -370,9 +366,9 @@ void main() {
             runner: 'space',
           ),
         );
-        Directory(p.join(target.path, '.claude', 'skills')).createSync(
-          recursive: true,
-        );
+        Directory(
+          p.join(target.path, '.claude', 'skills'),
+        ).createSync(recursive: true);
         Link(
           p.join(target.path, '.claude', 'skills', 'a'),
         ).createSync(p.join(temp.path, 'extension', 'skills', 'a'));
@@ -420,28 +416,25 @@ void main() {
       },
     );
 
-    test(
-      'a vended file that cannot carry a stamp THROWS — never installed '
-      'indistinguishably from a hand-authored one',
-      () {
-        _write(overlay, ['.claude', 'notes.txt'], 'plain text');
+    test('a vended file that cannot carry a stamp THROWS — never installed '
+        'indistinguishably from a hand-authored one', () {
+      _write(overlay, ['.claude', 'notes.txt'], 'plain text');
 
-        expect(
-          () => const OverlayMaterializer().materializeSync(
-            overlayRoots: [overlay.path],
-            targetRoot: target.path,
-            sourceRef: 'testref',
+      expect(
+        () => const OverlayMaterializer().materializeSync(
+          overlayRoots: [overlay.path],
+          targetRoot: target.path,
+          sourceRef: 'testref',
+        ),
+        throwsA(
+          isA<StateError>().having(
+            (e) => e.message,
+            'message',
+            contains('no provenance syntax'),
           ),
-          throwsA(
-            isA<StateError>().having(
-              (e) => e.message,
-              'message',
-              contains('no provenance syntax'),
-            ),
-          ),
-        );
-      },
-    );
+        ),
+      );
+    });
   });
 
   group('OverlayMaterializer — render + refuse', () {

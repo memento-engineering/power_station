@@ -42,7 +42,10 @@ class CountingJoinedSnapshotNotifier extends JoinedSnapshotNotifier {
   }) {
     _live++;
     var removed = false;
-    final remove = super.addListener(listener, fireImmediately: fireImmediately);
+    final remove = super.addListener(
+      listener,
+      fireImmediately: fireImmediately,
+    );
     return () {
       if (!removed) {
         removed = true;

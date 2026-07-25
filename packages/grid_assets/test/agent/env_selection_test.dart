@@ -75,41 +75,57 @@ void main() {
           stepParams: const {},
           registry: _registry(),
         ),
-        throwsA(isA<StateError>().having(
-          (e) => e.message,
-          'message',
-          allOf(contains('unknown environment'), contains('no-such-env')),
-        )),
-      );
-    });
-  });
-
-  group('pow-k7l — the legacy rungs still function (coexistence, shims UNTOUCHED)', () {
-    test('a bead harness names only the tool; the model rides role → tier', () {
-      final config = resolveAgentConfig(
-        role: AgentRole.grade,
-        ambient: const AgentConfig(graderModel: 'sonnet-legacy'),
-        beadMetadata: _envelope({'harness': 'copilot'}),
-        stepParams: const {},
-        registry: _registry(),
-      );
-      expect(config.harness, 'copilot');
-      // graderModel projects onto the MID tier — the pre-env path is intact.
-      expect(config.params['model'], 'sonnet-legacy');
-    });
-
-    test('a bead-pinned params.model still tops every rung', () {
-      final config = resolveAgentConfig(
-        role: AgentRole.build,
-        ambient: const AgentConfig(
-          roleEnvironments: {AgentRole.build: 'codex-frontier'},
+        throwsA(
+          isA<StateError>().having(
+            (e) => e.message,
+            'message',
+            allOf(contains('unknown environment'), contains('no-such-env')),
+          ),
         ),
-        beadMetadata: _envelope({'params': {'model': 'Z'}}),
-        stepParams: const {},
-        registry: _registry(),
       );
-      expect(config.harness, 'codex-frontier'); // role → env still picks the env
-      expect(config.params['model'], 'Z'); // ...but the bead pin wins the model
     });
   });
+
+  group(
+    'pow-k7l — the legacy rungs still function (coexistence, shims UNTOUCHED)',
+    () {
+      test(
+        'a bead harness names only the tool; the model rides role → tier',
+        () {
+          final config = resolveAgentConfig(
+            role: AgentRole.grade,
+            ambient: const AgentConfig(graderModel: 'sonnet-legacy'),
+            beadMetadata: _envelope({'harness': 'copilot'}),
+            stepParams: const {},
+            registry: _registry(),
+          );
+          expect(config.harness, 'copilot');
+          // graderModel projects onto the MID tier — the pre-env path is intact.
+          expect(config.params['model'], 'sonnet-legacy');
+        },
+      );
+
+      test('a bead-pinned params.model still tops every rung', () {
+        final config = resolveAgentConfig(
+          role: AgentRole.build,
+          ambient: const AgentConfig(
+            roleEnvironments: {AgentRole.build: 'codex-frontier'},
+          ),
+          beadMetadata: _envelope({
+            'params': {'model': 'Z'},
+          }),
+          stepParams: const {},
+          registry: _registry(),
+        );
+        expect(
+          config.harness,
+          'codex-frontier',
+        ); // role → env still picks the env
+        expect(
+          config.params['model'],
+          'Z',
+        ); // ...but the bead pin wins the model
+      });
+    },
+  );
 }

@@ -43,8 +43,10 @@ String _extensionDir() {
     if (parent.path == dir.path) break;
     dir = parent;
   }
-  fail('could not locate packages/grid_assets/extension from '
-      '${Directory.current.path}');
+  fail(
+    'could not locate packages/grid_assets/extension from '
+    '${Directory.current.path}',
+  );
 }
 
 void main() {
@@ -56,48 +58,56 @@ void main() {
     // rubrics + the spec-readiness rubrics resolve by id from the same
     // `extension/rubrics/`.
     for (final rubricId in [...kCommitteeRubrics, ...kSpecCommitteeRubrics]) {
-      test('loadRubric("$rubricId") returns non-empty prose that names itself',
-          () {
-        final text = loader.loadRubric(rubricId);
-        expect(text, isNotEmpty);
-        // The rubric's own heading names it — a mis-wired path that loaded the
-        // wrong file would not contain the lane's id.
-        expect(text, contains(rubricId));
-      });
+      test(
+        'loadRubric("$rubricId") returns non-empty prose that names itself',
+        () {
+          final text = loader.loadRubric(rubricId);
+          expect(text, isNotEmpty);
+          // The rubric's own heading names it — a mis-wired path that loaded the
+          // wrong file would not contain the lane's id.
+          expect(text, contains(rubricId));
+        },
+      );
     }
 
-    test('an unknown rubric throws (fail-loud — a packaging bug, never a silent '
-        'empty prompt)', () {
-      expect(() => loader.loadRubric('does-not-exist'), throwsArgumentError);
-    });
+    test(
+      'an unknown rubric throws (fail-loud — a packaging bug, never a silent '
+      'empty prompt)',
+      () {
+        expect(() => loader.loadRubric('does-not-exist'), throwsArgumentError);
+      },
+    );
   });
 
-  group('PackagedAssetLoader — cwd-independent resolution (the repo-split fix)',
-      () {
-    test('resolves rubrics with the cwd set to a foreign temp dir — via the '
-        'package config, since no cwd walk-up from there can ever reach the '
-        'assets (the post-split space_station runner)', () {
-      // A dir that shares no ancestry with power_station's checkout: the cwd
-      // walk-up is guaranteed to miss, so a passing load PROVES the package
-      // config resolved it (not an accidental walk-up hit).
-      final foreign =
-          Directory.systemTemp.createTempSync('grid_assets_foreign_cwd_');
-      final saved = Directory.current;
-      try {
-        Directory.current = foreign;
-        // No explicit root — resolution runs for real from the foreign cwd.
-        final resolved = PackagedAssetLoader();
-        for (final rubricId in kCommitteeRubrics) {
-          final text = resolved.loadRubric(rubricId);
-          expect(text, isNotEmpty);
-          expect(text, contains(rubricId));
+  group(
+    'PackagedAssetLoader — cwd-independent resolution (the repo-split fix)',
+    () {
+      test('resolves rubrics with the cwd set to a foreign temp dir — via the '
+          'package config, since no cwd walk-up from there can ever reach the '
+          'assets (the post-split space_station runner)', () {
+        // A dir that shares no ancestry with power_station's checkout: the cwd
+        // walk-up is guaranteed to miss, so a passing load PROVES the package
+        // config resolved it (not an accidental walk-up hit).
+        final foreign = Directory.systemTemp.createTempSync(
+          'grid_assets_foreign_cwd_',
+        );
+        final saved = Directory.current;
+        try {
+          Directory.current = foreign;
+          // No explicit root — resolution runs for real from the foreign cwd.
+          final resolved = PackagedAssetLoader();
+          for (final rubricId in kCommitteeRubrics) {
+            final text = resolved.loadRubric(rubricId);
+            expect(text, isNotEmpty);
+            expect(text, contains(rubricId));
+          }
+        } finally {
+          Directory.current = saved;
+          foreign.deleteSync(recursive: true);
         }
-      } finally {
-        Directory.current = saved;
-        foreign.deleteSync(recursive: true);
-      }
-    });
-  });
+      });
+    },
+  );
 
   group('PackagedAssetLoader — renderCriticPrompt', () {
     test('substitutes every hole (no `{{` survives) and embeds the bead + the '
@@ -140,7 +150,8 @@ void main() {
       expect(
         resourceIds,
         containsAll([...kCommitteeRubrics, ...kSpecCommitteeRubrics]),
-        reason: 'every committee rubric — code AND spec-readiness — is '
+        reason:
+            'every committee rubric — code AND spec-readiness — is '
             'declared as a resource',
       );
       for (final r in resources) {
@@ -157,8 +168,11 @@ void main() {
         (pr) => pr['id'] == 'critic',
         orElse: () => fail('the `critic` prompt must be declared'),
       );
-      expect(critic['visibility'], isNotNull,
-          reason: 'the critic prompt declares a visibility');
+      expect(
+        critic['visibility'],
+        isNotNull,
+        reason: 'the critic prompt declares a visibility',
+      );
     });
   });
 }

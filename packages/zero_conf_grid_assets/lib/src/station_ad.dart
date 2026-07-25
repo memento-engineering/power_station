@@ -81,9 +81,7 @@ class StationAd {
       station: txt['id'] ?? '',
       host: host,
       port: port,
-      substations: (subs == null || subs.isEmpty)
-          ? const []
-          : subs.split(','),
+      substations: (subs == null || subs.isEmpty) ? const [] : subs.split(','),
       trustHint: txt['trust'],
     );
   }
@@ -104,13 +102,8 @@ class StationAd {
       other.trustHint == trustHint;
 
   @override
-  int get hashCode => Object.hash(
-    station,
-    host,
-    port,
-    Object.hashAll(substations),
-    trustHint,
-  );
+  int get hashCode =>
+      Object.hash(station, host, port, Object.hashAll(substations), trustHint);
 
   @override
   String toString() =>

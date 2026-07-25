@@ -76,8 +76,10 @@ File _packageConfig() {
     final config = File(p.join(dir.path, '.dart_tool', 'package_config.json'));
     if (config.existsSync()) return config;
   }
-  fail('no .dart_tool/package_config.json above ${Directory.current.path} — '
-      'run `dart pub get` first');
+  fail(
+    'no .dart_tool/package_config.json above ${Directory.current.path} — '
+    'run `dart pub get` first',
+  );
 }
 
 /// `grid_engine`'s resolved `lib` dir, read off that package config.
@@ -121,16 +123,19 @@ void main() {
       expect(defaultModelForTier(AgentTier.frontier), 'opus');
     });
 
-    test('an unarmed ModelTiers rides the asset defaults; arming one tier moves '
-        'ONLY that tier', () {
-      const unarmed = ModelTiers();
-      expect(unarmed.armed(AgentTier.mid), isNull);
-      expect(unarmed.modelFor(AgentTier.mid), 'sonnet');
-      const retuned = ModelTiers(mid: 'haiku');
-      expect(retuned.modelFor(AgentTier.mid), 'haiku');
-      expect(retuned.modelFor(AgentTier.frontier), 'opus');
-      expect(retuned.modelFor(AgentTier.cheap), 'haiku');
-    });
+    test(
+      'an unarmed ModelTiers rides the asset defaults; arming one tier moves '
+      'ONLY that tier',
+      () {
+        const unarmed = ModelTiers();
+        expect(unarmed.armed(AgentTier.mid), isNull);
+        expect(unarmed.modelFor(AgentTier.mid), 'sonnet');
+        const retuned = ModelTiers(mid: 'haiku');
+        expect(retuned.modelFor(AgentTier.mid), 'haiku');
+        expect(retuned.modelFor(AgentTier.frontier), 'opus');
+        expect(retuned.modelFor(AgentTier.cheap), 'haiku');
+      },
+    );
   });
 
   group('the ROLE → TIER policy (the whole per-role surface)', () {
@@ -157,24 +162,27 @@ void main() {
     });
   });
 
-  group('the STATION arms TIER → MODEL (one change retunes a class of work)', () {
-    test('arming the tiers moves every role that rides them', () {
-      const station = AgentConfig(
-        tiers: ModelTiers(cheap: 'c', mid: 'm', frontier: 'f'),
-      );
-      expect(station.modelForRole(AgentRole.build), 'f');
-      expect(station.modelForRole(AgentRole.grade), 'm');
-      expect(station.modelForRole(AgentRole.gather), 'c');
-    });
+  group(
+    'the STATION arms TIER → MODEL (one change retunes a class of work)',
+    () {
+      test('arming the tiers moves every role that rides them', () {
+        const station = AgentConfig(
+          tiers: ModelTiers(cheap: 'c', mid: 'm', frontier: 'f'),
+        );
+        expect(station.modelForRole(AgentRole.build), 'f');
+        expect(station.modelForRole(AgentRole.grade), 'm');
+        expect(station.modelForRole(AgentRole.gather), 'c');
+      });
 
-    test('"grading is cheap now" is ONE arming change — no role churn', () {
-      const station = AgentConfig(tiers: ModelTiers(mid: 'haiku'));
-      expect(_resolve(AgentRole.grade, station).params['model'], 'haiku');
-      // …and the other tiers are untouched.
-      expect(_resolve(AgentRole.build, station).params['model'], 'opus');
-      expect(_resolve(AgentRole.gather, station).params['model'], 'haiku');
-    });
-  });
+      test('"grading is cheap now" is ONE arming change — no role churn', () {
+        const station = AgentConfig(tiers: ModelTiers(mid: 'haiku'));
+        expect(_resolve(AgentRole.grade, station).params['model'], 'haiku');
+        // …and the other tiers are untouched.
+        expect(_resolve(AgentRole.build, station).params['model'], 'opus');
+        expect(_resolve(AgentRole.gather, station).params['model'], 'haiku');
+      });
+    },
+  );
 
   group('the PRE-TIER station knobs project onto tiers (A20, no wedge)', () {
     test('--model X arms FRONTIER only; --grader-model Y arms MID only', () {
@@ -244,26 +252,29 @@ void main() {
       expect(_modelOf(cfg), 'haiku');
     });
 
-    test('a bead-pinned model still outranks the tier, for the gather role too', () {
-      final pinned = bead('tg-1').copyWith(
-        metadata: {
-          'grid.agent': {
-            'assets_version': kAgentAssetsVersion,
-            'payload': {
-              'params': {'model': 'Z'},
+    test(
+      'a bead-pinned model still outranks the tier, for the gather role too',
+      () {
+        final pinned = bead('tg-1').copyWith(
+          metadata: {
+            'grid.agent': {
+              'assets_version': kAgentAssetsVersion,
+              'payload': {
+                'params': {'model': 'Z'},
+              },
             },
           },
-        },
-      );
-      final config = resolveAgentConfig(
-        role: AgentRole.gather,
-        ambient: const AgentConfig(),
-        beadMetadata: pinned.metadata,
-        stepParams: const {},
-        registry: buildBuiltinEnvironmentRegistry(),
-      );
-      expect(config.params['model'], 'Z');
-    });
+        );
+        final config = resolveAgentConfig(
+          role: AgentRole.gather,
+          ambient: const AgentConfig(),
+          beadMetadata: pinned.metadata,
+          stepParams: const {},
+          registry: buildBuiltinEnvironmentRegistry(),
+        );
+        expect(config.params['model'], 'Z');
+      },
+    );
 
     test('EVERY role resolves a non-empty model (no unpinned spawn)', () {
       for (final role in AgentRole.values) {
@@ -325,26 +336,38 @@ void main() {
       );
     });
 
-    test('the TIER axis is dependency-free — it names no engine and no role', () {
-      final src = File(
-        p.join('lib', 'src', 'agent', 'model_tier.dart'),
-      ).readAsStringSync();
-      expect(
-        src,
-        isNot(contains("import '")),
-        reason: 'the selection axis compiles standalone (SDK/composition edge)',
-      );
-    });
-
-    test('the ENGINE stays DOMAIN-FREE — it names no role, tier, or tier map', () {
-      final engine = _sourceUnder(_engineLibDir());
-      for (final domain in ['AgentRole', 'AgentTier', 'ModelTiers', 'tierFor']) {
+    test(
+      'the TIER axis is dependency-free — it names no engine and no role',
+      () {
+        final src = File(
+          p.join('lib', 'src', 'agent', 'model_tier.dart'),
+        ).readAsStringSync();
         expect(
-          engine,
-          isNot(contains(domain)),
-          reason: 'grid_engine must not learn the asset domain ($domain)',
+          src,
+          isNot(contains("import '")),
+          reason:
+              'the selection axis compiles standalone (SDK/composition edge)',
         );
-      }
-    });
+      },
+    );
+
+    test(
+      'the ENGINE stays DOMAIN-FREE — it names no role, tier, or tier map',
+      () {
+        final engine = _sourceUnder(_engineLibDir());
+        for (final domain in [
+          'AgentRole',
+          'AgentTier',
+          'ModelTiers',
+          'tierFor',
+        ]) {
+          expect(
+            engine,
+            isNot(contains(domain)),
+            reason: 'grid_engine must not learn the asset domain ($domain)',
+          );
+        }
+      },
+    );
   });
 }

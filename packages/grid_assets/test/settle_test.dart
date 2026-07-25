@@ -32,20 +32,23 @@ void main() {
       );
     });
 
-    test('an unsatisfied condition is checked ONCE per bounded round', () async {
-      var checks = 0;
-      await settle(() {
-        checks++;
-        return false;
-      }, maxPumps: 3);
-      expect(
-        checks,
-        3,
-        reason:
-            'the acceptance suites count their stableRounds plateau in '
-            'these checks — one per round, or the plateau silently halves',
-      );
-    });
+    test(
+      'an unsatisfied condition is checked ONCE per bounded round',
+      () async {
+        var checks = 0;
+        await settle(() {
+          checks++;
+          return false;
+        }, maxPumps: 3);
+        expect(
+          checks,
+          3,
+          reason:
+              'the acceptance suites count their stableRounds plateau in '
+              'these checks — one per round, or the plateau silently halves',
+        );
+      },
+    );
 
     test('each unsatisfied round sleeps a REAL slice', () async {
       final sw = Stopwatch()..start();
@@ -64,18 +67,21 @@ void main() {
       );
     });
 
-    test('a pending REAL filesystem round trip lands inside the budget', () async {
-      var landed = false;
-      unawaited(_tempPlanFileRoundTrip().then((_) => landed = true));
-      await settle(() => landed, maxPumps: 200);
-      expect(
-        landed,
-        isTrue,
-        reason:
-            'this is the exact IO shape BdCliService.applyGraph performs '
-            'for every molecule pour',
-      );
-    });
+    test(
+      'a pending REAL filesystem round trip lands inside the budget',
+      () async {
+        var landed = false;
+        unawaited(_tempPlanFileRoundTrip().then((_) => landed = true));
+        await settle(() => landed, maxPumps: 200);
+        expect(
+          landed,
+          isTrue,
+          reason:
+              'this is the exact IO shape BdCliService.applyGraph performs '
+              'for every molecule pour',
+        );
+      },
+    );
   });
 }
 

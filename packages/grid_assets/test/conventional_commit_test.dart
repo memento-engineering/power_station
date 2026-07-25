@@ -40,26 +40,26 @@ void main() {
       'the legacy `grid: <bead>` shape is NOT conventional — an unknown type '
       'AND a foreign reference in the subject',
       () {
-        final faults = lintConventionalSubject('grid: tg-1', foreignRef: 'tg-1');
+        final faults = lintConventionalSubject(
+          'grid: tg-1',
+          foreignRef: 'tg-1',
+        );
         expect(faults, hasLength(2));
         expect(faults.first, contains('unknown type "grid"'));
         expect(faults.last, contains('foreign reference "tg-1"'));
       },
     );
 
-    test(
-      'the inline `<type>(scope): <bead> — …` shape agents write today is a '
-      'foreign-reference violation',
-      () {
-        expect(
-          lintConventionalSubject(
-            'feat(grid_assets): pow-8dx — add the thing',
-            foreignRef: 'pow-8dx',
-          ),
-          contains(predicate<String>((f) => f.contains('foreign reference'))),
-        );
-      },
-    );
+    test('the inline `<type>(scope): <bead> — …` shape agents write today is a '
+        'foreign-reference violation', () {
+      expect(
+        lintConventionalSubject(
+          'feat(grid_assets): pow-8dx — add the thing',
+          foreignRef: 'pow-8dx',
+        ),
+        contains(predicate<String>((f) => f.contains('foreign reference'))),
+      );
+    });
 
     test(
       'an uppercase description, a trailing period, and an over-long subject '
@@ -74,7 +74,9 @@ void main() {
         );
         expect(
           lintConventionalSubject('feat: ${'x' * 80}'),
-          contains(predicate<String>((f) => f.contains('max $kMaxSubjectChars'))),
+          contains(
+            predicate<String>((f) => f.contains('max $kMaxSubjectChars')),
+          ),
         );
       },
     );
@@ -179,32 +181,29 @@ void main() {
   });
 
   group('composeCommitMessage + hasTrailer — the git-trailer policy', () {
-    test(
-      'subject, body, BREAKING CHANGE, then the trailer — blank-line '
-      'separated, footers LAST',
-      () {
-        final message = composeCommitMessage(
-          subject: const ConventionalSubject(
-            type: 'feat',
-            scope: 'landing',
-            breaking: true,
-            description: 'infer the pr title',
-          ),
-          body: 'What changed and why.',
-          breakingChange: 'the land commit message shape changed',
-          trailers: const {'Refs': 'pow-8dx'},
-        );
-        expect(message, '''
+    test('subject, body, BREAKING CHANGE, then the trailer — blank-line '
+        'separated, footers LAST', () {
+      final message = composeCommitMessage(
+        subject: const ConventionalSubject(
+          type: 'feat',
+          scope: 'landing',
+          breaking: true,
+          description: 'infer the pr title',
+        ),
+        body: 'What changed and why.',
+        breakingChange: 'the land commit message shape changed',
+        trailers: const {'Refs': 'pow-8dx'},
+      );
+      expect(message, '''
 feat(landing)!: infer the pr title
 
 What changed and why.
 
 BREAKING CHANGE: the land commit message shape changed
 Refs: pow-8dx''');
-        expect(hasTrailer(message), isTrue);
-        expect(hasTrailer(message, token: 'Bead'), isFalse);
-      },
-    );
+      expect(hasTrailer(message), isTrue);
+      expect(hasTrailer(message, token: 'Bead'), isFalse);
+    });
 
     test('a bare subject + trailer (the land commit shape)', () {
       expect(

@@ -119,7 +119,11 @@ void main() {
         );
         // The over-capacity requests were refused, not silently double-served.
         expect(results.where((g) => g == null), hasLength(fired - offered));
-        expect((await client(s).presence()).available, 0, reason: 'all consumed');
+        expect(
+          (await client(s).presence()).available,
+          0,
+          reason: 'all consumed',
+        );
       },
     );
   });
@@ -230,20 +234,28 @@ void main() {
         );
         // The waiter queues (capacity full) — fired, not awaited.
         LeaseGrant? waiterGrant;
-        final waiting = waiterC.requestLease(const LeaseRequest(lessee: 'late'));
+        final waiting = waiterC.requestLease(
+          const LeaseRequest(lessee: 'late'),
+        );
         unawaited(waiting.then((g) => waiterGrant = g));
         await until(() => s.leases.queued == 1);
 
         // The incumbent renews mid-life — a touch CANNOT push past the cap.
         clock.advance(const Duration(seconds: 50));
-        await greedyC.dispatch(greedy, const {}); // touch → expiry capped @ +100
+        await greedyC.dispatch(
+          greedy,
+          const {},
+        ); // touch → expiry capped @ +100
         // SANITY CONTROL: while the incumbent legitimately holds, the waiter is
         // NOT yet served — so the eventual grant proves it came FROM the cap.
         expect(waiterGrant, isNull, reason: 'still held inside the lifetime');
 
         // Past the max lifetime: a pump reaps the greedy despite its renewals.
-        clock.advance(const Duration(seconds: 51)); // total 101s > 100s lifetime
-        await greedyC.presence(); // pump the owner clock → reap + drain the queue
+        clock.advance(
+          const Duration(seconds: 51),
+        ); // total 101s > 100s lifetime
+        await greedyC
+            .presence(); // pump the owner clock → reap + drain the queue
 
         await until(() => waiterGrant != null); // the waiter IS served
         expect(
@@ -259,63 +271,60 @@ void main() {
     // deterministically over the wire by waiting for each request to ENQUEUE
     // before firing the next; under LIFO the first release would serve the
     // last-arrived waiter, failing `expect(order[0], 'A')`.
-    test(
-      'queued waiters are served in ARRIVAL order across real request/response '
-      'cycles — first-come first-served (FIFO fairness)',
-      () async {
-        final s = await serve(
-          offered: 1,
-          leaseWait: const Duration(seconds: 600),
-        );
-        final holderC = client(s);
-        final wA = client(s);
-        final wB = client(s);
-        final wC = client(s);
+    test('queued waiters are served in ARRIVAL order across real request/response '
+        'cycles — first-come first-served (FIFO fairness)', () async {
+      final s = await serve(
+        offered: 1,
+        leaseWait: const Duration(seconds: 600),
+      );
+      final holderC = client(s);
+      final wA = client(s);
+      final wB = client(s);
+      final wC = client(s);
 
-        final held = await holderC.requestLease(
-          const LeaseRequest(lessee: 'holder'),
-        );
+      final held = await holderC.requestLease(
+        const LeaseRequest(lessee: 'holder'),
+      );
 
-        // Fire waiters, fixing ARRIVAL ORDER over the real wire: poll the owner's
-        // queue depth so each request has enqueued before the next is fired.
-        final order = <String>[];
-        final grants = <String, LeaseGrant>{};
-        void record(String who, Future<LeaseGrant> f) =>
-            unawaited(f.then((g) {
-              grants[who] = g;
-              order.add(who);
-            }));
+      // Fire waiters, fixing ARRIVAL ORDER over the real wire: poll the owner's
+      // queue depth so each request has enqueued before the next is fired.
+      final order = <String>[];
+      final grants = <String, LeaseGrant>{};
+      void record(String who, Future<LeaseGrant> f) => unawaited(
+        f.then((g) {
+          grants[who] = g;
+          order.add(who);
+        }),
+      );
 
-        record('A', wA.requestLease(const LeaseRequest(lessee: 'A')));
-        await until(() => s.leases.queued == 1);
-        record('B', wB.requestLease(const LeaseRequest(lessee: 'B')));
-        await until(() => s.leases.queued == 2);
-        record('C', wC.requestLease(const LeaseRequest(lessee: 'C')));
-        await until(() => s.leases.queued == 3);
+      record('A', wA.requestLease(const LeaseRequest(lessee: 'A')));
+      await until(() => s.leases.queued == 1);
+      record('B', wB.requestLease(const LeaseRequest(lessee: 'B')));
+      await until(() => s.leases.queued == 2);
+      record('C', wC.requestLease(const LeaseRequest(lessee: 'C')));
+      await until(() => s.leases.queued == 3);
 
-        // SANITY CONTROL: all three really are waiting (not a vacuous empty queue).
-        expect(s.leases.queued, 3);
+      // SANITY CONTROL: all three really are waiting (not a vacuous empty queue).
+      expect(s.leases.queued, 3);
 
-        // Drain one slot at a time; each release frees the slot for the FIFO head.
-        await holderC.release(held);
-        await until(() => order.length == 1);
-        expect(order[0], 'A', reason: 'first-arrived served first');
+      // Drain one slot at a time; each release frees the slot for the FIFO head.
+      await holderC.release(held);
+      await until(() => order.length == 1);
+      expect(order[0], 'A', reason: 'first-arrived served first');
 
-        await wA.release(grants['A']!);
-        await until(() => order.length == 2);
-        expect(order[1], 'B');
+      await wA.release(grants['A']!);
+      await until(() => order.length == 2);
+      expect(order[1], 'B');
 
-        await wB.release(grants['B']!);
-        await until(() => order.length == 3);
-        expect(order[2], 'C');
-        await wC.release(grants['C']!);
+      await wB.release(grants['B']!);
+      await until(() => order.length == 3);
+      expect(order[2], 'C');
+      await wC.release(grants['C']!);
 
-        // Tokens monotonically increase in service order — no waiter starved.
-        expect(grants['A']!.fencingToken, lessThan(grants['B']!.fencingToken));
-        expect(grants['B']!.fencingToken, lessThan(grants['C']!.fencingToken));
-      },
-      timeout: const Timeout(Duration(seconds: 20)),
-    );
+      // Tokens monotonically increase in service order — no waiter starved.
+      expect(grants['A']!.fencingToken, lessThan(grants['B']!.fencingToken));
+      expect(grants['B']!.fencingToken, lessThan(grants['C']!.fencingToken));
+    }, timeout: const Timeout(Duration(seconds: 20)));
   });
 
   // ===========================================================================
@@ -340,14 +349,22 @@ void main() {
         );
         expect(g2.leaseId, g1.leaseId, reason: 'deduped to the live grant');
         expect(g2.fencingToken, g1.fencingToken);
-        expect((await c.presence()).available, 1, reason: 'only ONE slot consumed');
+        expect(
+          (await c.presence()).available,
+          1,
+          reason: 'only ONE slot consumed',
+        );
 
         // SANITY CONTROL: dedup is KEY-scoped, not "always the first grant".
         final g3 = await c.requestLease(
           const LeaseRequest(lessee: 'a', idempotencyKey: 'k2'),
         );
         expect(g3.leaseId, isNot(g1.leaseId));
-        expect((await c.presence()).available, 0, reason: 'a 2nd slot consumed');
+        expect(
+          (await c.presence()).available,
+          0,
+          reason: 'a 2nd slot consumed',
+        );
       },
     );
 

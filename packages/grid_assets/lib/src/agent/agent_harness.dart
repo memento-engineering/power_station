@@ -354,7 +354,13 @@ RuntimeConfig spawnFor({
   return RuntimeConfig(
     workDir: workspace.workspaceDir,
     command: 'sh',
-    args: ['-c', _usageWrapperScript(usageOut), 'grid-$command', command, ...inner],
+    args: [
+      '-c',
+      _usageWrapperScript(usageOut),
+      'grid-$command',
+      command,
+      ...inner,
+    ],
     env: processEnv,
     lifecycle: Lifecycle.oneTurn,
   );
@@ -415,7 +421,10 @@ const Map<String, AgentEnvironment> kBuiltinEnvironments = {
   'codex': AgentEnvironment(
     command: 'codex',
     args: ['exec'],
-    argsAppend: ['--dangerously-bypass-approvals-and-sandbox', '--skip-git-repo-check'],
+    argsAppend: [
+      '--dangerously-bypass-approvals-and-sandbox',
+      '--skip-git-repo-check',
+    ],
     promptMode: PromptMode.arg,
     target: InferenceTarget.providerManaged,
     model: 'gpt-5.6-sol',

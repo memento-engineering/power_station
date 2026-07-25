@@ -40,7 +40,9 @@ const List<String> kWorktreeOverlayGolden = [
 void main() {
   late Directory worktree;
 
-  setUp(() => worktree = Directory.systemTemp.createTempSync('overlay-golden-'));
+  setUp(
+    () => worktree = Directory.systemTemp.createTempSync('overlay-golden-'),
+  );
   tearDown(() {
     if (worktree.existsSync()) worktree.deleteSync(recursive: true);
   });
@@ -60,42 +62,37 @@ void main() {
   );
 
   /// Every file the spawn left under the worktree, worktree-relative + sorted.
-  List<String> materializedPaths() => Directory(p.join(worktree.path, '.claude'))
-      .listSync(recursive: true)
-      .whereType<File>()
-      .map((f) => p.relative(f.path, from: worktree.path))
-      .toList()
-    ..sort();
+  List<String> materializedPaths() =>
+      Directory(p.join(worktree.path, '.claude'))
+          .listSync(recursive: true)
+          .whereType<File>()
+          .map((f) => p.relative(f.path, from: worktree.path))
+          .toList()
+        ..sort();
 
-  test(
-    'the provision wire emits EXACTLY the golden set — no settings.json, no '
-    'agents/, nothing outside .claude/skills/',
-    () {
-      const cap = AgentCapability(devRoot: '/dev/root');
-      final c = ctx();
+  test('the provision wire emits EXACTLY the golden set — no settings.json, no '
+      'agents/, nothing outside .claude/skills/', () {
+    const cap = AgentCapability(devRoot: '/dev/root');
+    final c = ctx();
 
-      cap.spawn(c.context, c.args);
+    cap.spawn(c.context, c.args);
 
-      expect(materializedPaths(), kWorktreeOverlayGolden);
-    },
-  );
+    expect(materializedPaths(), kWorktreeOverlayGolden);
+  });
 
-  test(
-    'every materialized SKILL.md is frontmatter-led and fully bound — no '
-    'template residue ever reaches the agent',
-    () {
-      const cap = AgentCapability(devRoot: '/dev/root');
-      final c = ctx();
+  test('every materialized SKILL.md is frontmatter-led and fully bound — no '
+      'template residue ever reaches the agent', () {
+    const cap = AgentCapability(devRoot: '/dev/root');
+    final c = ctx();
 
-      cap.spawn(c.context, c.args);
+    cap.spawn(c.context, c.args);
 
-      for (final rel in kWorktreeOverlayGolden.where((r) => r.endsWith('.md'))) {
-        final body = File(p.join(worktree.path, rel)).readAsStringSync();
-        expect(body, startsWith('---\n'), reason: '$rel opens its frontmatter');
-        expect(body, isNot(contains('{{')), reason: '$rel has no residue');
-      }
-    },
-  );
+    for (final rel in kWorktreeOverlayGolden.where((r) => r.endsWith('.md'))) {
+      final body = File(p.join(worktree.path, rel)).readAsStringSync();
+      expect(body, startsWith('---\n'), reason: '$rel opens its frontmatter');
+      expect(body, isNot(contains('{{')), reason: '$rel has no residue');
+    }
+  });
 
   test(
     'a STAMPED SKILL.md still parses as agentskills frontmatter — the harness '
@@ -107,7 +104,9 @@ void main() {
 
       cap.spawn(c.context, c.args);
 
-      for (final rel in kWorktreeOverlayGolden.where((r) => r.endsWith('.md'))) {
+      for (final rel in kWorktreeOverlayGolden.where(
+        (r) => r.endsWith('.md'),
+      )) {
         final body = File(p.join(worktree.path, rel)).readAsStringSync();
         expect(hasProvenance(body), isTrue, reason: '$rel is stamped');
 
@@ -133,8 +132,9 @@ void main() {
 
       cap.spawn(c.context, c.args);
 
-      for (final rel
-          in kWorktreeOverlayGolden.where((r) => r.endsWith('.gitignore'))) {
+      for (final rel in kWorktreeOverlayGolden.where(
+        (r) => r.endsWith('.gitignore'),
+      )) {
         expect(
           File(p.join(worktree.path, rel)).readAsStringSync(),
           endsWith('*\n'),

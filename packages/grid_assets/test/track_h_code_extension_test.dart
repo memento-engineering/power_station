@@ -780,7 +780,8 @@ void main() {
       expect(
         expectedRef,
         isNot(kUnknownSourceRef),
-        reason: 'the test tree must be a git checkout for the null branch to '
+        reason:
+            'the test tree must be a git checkout for the null branch to '
             'probe a real ref',
       );
 

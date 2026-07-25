@@ -30,15 +30,13 @@ import '../support/asset_fakes.dart';
 /// any more; that is the whole hazard, so the test names it literally.
 const String kSpecHeadSpecifyNode = 'specify';
 
-GraphSnapshot _graph({
-  required List<Bead> beads,
-  required Set<String> ready,
-}) => GraphSnapshot.fromParts(
-  beads: beads,
-  dependencies: const [],
-  readyIds: ready,
-  capturedAt: DateTime(2026),
-);
+GraphSnapshot _graph({required List<Bead> beads, required Set<String> ready}) =>
+    GraphSnapshot.fromParts(
+      beads: beads,
+      dependencies: const [],
+      readyIds: ready,
+      capturedAt: DateTime(2026),
+    );
 
 GraphSnapshot _state(List<Bead> beads) => _graph(beads: beads, ready: const {});
 
@@ -121,12 +119,14 @@ bool _spawnedSpecify(Fakes f) =>
 /// molecule-mode write is identified by its TARGET id (the bead IS the node),
 /// never an embedded cursor key, so this checks the update's target rather
 /// than scanning its metadata keys.
-bool _touchedSpecifyNode(Fakes f) => f.runner.callsFor('update').any(
-  (c) =>
-      c.length >= 2 &&
-      (c[1] == _stepBeadId(kSpecHeadSpecifyNode) ||
-          c[1] == _stepBeadId(kSpecifyNode)),
-);
+bool _touchedSpecifyNode(Fakes f) => f.runner
+    .callsFor('update')
+    .any(
+      (c) =>
+          c.length >= 2 &&
+          (c[1] == _stepBeadId(kSpecHeadSpecifyNode) ||
+              c[1] == _stepBeadId(kSpecifyNode)),
+    );
 
 /// The mid-review cursor of a shape-1 LEGACY survivor: past the legacy head,
 /// with NO spec-phase node at either path.

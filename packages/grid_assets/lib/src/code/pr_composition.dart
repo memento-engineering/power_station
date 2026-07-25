@@ -344,16 +344,20 @@ class PrComposition {
       description: described.description,
       foreignRef: context.beadId,
       fallbackType: conventionalTypeFor(context.bead.issueType),
-      fallbackDescription:
-          fallbackDescriptionFor(context.bead, foreignRef: context.beadId),
+      fallbackDescription: fallbackDescriptionFor(
+        context.bead,
+        foreignRef: context.beadId,
+      ),
     );
   }
 
   /// The PR body over [context]: each section rendered via [renderPrSection],
   /// empties dropped, joined by a blank line.
   String bodyOf(PrCompositionContext context) => sections
-      .map((section) =>
-          renderPrSection(section, context, trailerToken: trailerToken))
+      .map(
+        (section) =>
+            renderPrSection(section, context, trailerToken: trailerToken),
+      )
       .where((rendered) => rendered.trim().isNotEmpty)
       .map((rendered) => rendered.trimRight())
       .join('\n\n');
@@ -365,14 +369,13 @@ String renderPrSection(
   PrSection section,
   PrCompositionContext context, {
   String trailerToken = kDefaultTrailerToken,
-}) =>
-    switch (section) {
-      PrSection.summary => _summary(context),
-      PrSection.circuitReceipt => _circuitReceipt(context),
-      PrSection.committeeGrades => _committeeGrades(context),
-      PrSection.validation => _validation(context),
-      PrSection.trailers => _trailers(context, trailerToken),
-    };
+}) => switch (section) {
+  PrSection.summary => _summary(context),
+  PrSection.circuitReceipt => _circuitReceipt(context),
+  PrSection.committeeGrades => _committeeGrades(context),
+  PrSection.validation => _validation(context),
+  PrSection.trailers => _trailers(context, trailerToken),
+};
 
 /// The conventional-commit TYPE a bead's `issueType` derives — the FALLBACK
 /// title's type ONLY (the inference picks its own type from the DIFF, which is
@@ -380,24 +383,26 @@ String renderPrSection(
 /// type over the wire string), so an unknown type falls back to `chore` rather
 /// than throwing.
 String conventionalTypeFor(IssueType issueType) => switch (issueType.wire) {
-      'feature' || 'epic' || 'story' => 'feat',
-      'bug' => 'fix',
-      _ => 'chore',
-    };
+  'feature' || 'epic' || 'story' => 'feat',
+  'bug' => 'fix',
+  _ => 'chore',
+};
 
 /// The DETERMINISTIC fallback subject when there is no inference (not wired,
 /// offline, a failed run, or unparseable output): type from the bead's
 /// `issueType`, scope from its substation (`metadata.rig`), description from
 /// its TITLE with the bead id stripped out — id-free, compliant, and never the
 /// old `grid: <id>`.
-ConventionalSubject fallbackSubjectFor(Bead bead, {required String foreignRef}) =>
-    sanitizeConventionalSubject(
-      type: conventionalTypeFor(bead.issueType),
-      scope: _rigOf(bead),
-      description: fallbackDescriptionFor(bead, foreignRef: foreignRef),
-      foreignRef: foreignRef,
-      fallbackType: conventionalTypeFor(bead.issueType),
-    );
+ConventionalSubject fallbackSubjectFor(
+  Bead bead, {
+  required String foreignRef,
+}) => sanitizeConventionalSubject(
+  type: conventionalTypeFor(bead.issueType),
+  scope: _rigOf(bead),
+  description: fallbackDescriptionFor(bead, foreignRef: foreignRef),
+  foreignRef: foreignRef,
+  fallbackType: conventionalTypeFor(bead.issueType),
+);
 
 /// The fallback description — the bead's title, id-stripped; [kFallbackDescription]
 /// for a title-less bead.
@@ -422,7 +427,10 @@ String buildDescribePrompt({
   String trailerToken = kDefaultTrailerToken,
 }) {
   final context = _truncate(
-    [bead.title, bead.description].where((s) => s.trim().isNotEmpty).join('\n\n'),
+    [
+      bead.title,
+      bead.description,
+    ].where((s) => s.trim().isNotEmpty).join('\n\n'),
     kMaxContextChars,
   );
   final b = StringBuffer()
@@ -495,7 +503,9 @@ String buildDescribePrompt({
   if (context.isNotEmpty) {
     b
       ..writeln()
-      ..writeln('## Why this work exists (CONTEXT ONLY — never quote or cite it)')
+      ..writeln(
+        '## Why this work exists (CONTEXT ONLY — never quote or cite it)',
+      )
       ..writeln(context);
   }
   b
@@ -572,12 +582,15 @@ String _summary(PrCompositionContext context) {
 }
 
 String _circuitReceipt(PrCompositionContext context) {
-  final b = StringBuffer(
-    buildCircuitReceipt(beadId: context.beadId, siblings: context.siblings)
-        .trimRight(),
-  )
-    ..writeln()
-    ..writeln('- description: ${context.titleSource}');
+  final b =
+      StringBuffer(
+          buildCircuitReceipt(
+            beadId: context.beadId,
+            siblings: context.siblings,
+          ).trimRight(),
+        )
+        ..writeln()
+        ..writeln('- description: ${context.titleSource}');
   final commits = context.commits;
   if (!commits.isEmpty) {
     b.writeln(

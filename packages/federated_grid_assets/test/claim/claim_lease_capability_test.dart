@@ -34,8 +34,12 @@ class FakeStationClient implements StationClient {
   int _seq = 0;
 
   @override
-  Future<Presence> presence() async =>
-      Presence(station: station, kinds: const ['burn-follower'], offered: 1, available: 1);
+  Future<Presence> presence() async => Presence(
+    station: station,
+    kinds: const ['burn-follower'],
+    offered: 1,
+    available: 1,
+  );
 
   @override
   Future<LeaseGrant> requestLease(LeaseRequest req) async {
@@ -76,7 +80,8 @@ class FakeStationClient implements StationClient {
   Future<void> close() async => calls.add('close');
 
   bool any(String prefix) => calls.any((c) => c.startsWith(prefix));
-  int countWith(String prefix) => calls.where((c) => c.startsWith(prefix)).length;
+  int countWith(String prefix) =>
+      calls.where((c) => c.startsWith(prefix)).length;
 }
 
 ({FakeTreeContext context, StepArgs args}) _ctx({
@@ -84,22 +89,27 @@ class FakeStationClient implements StationClient {
   String nodePath = 'tg-burn/follower',
 }) => (context: FakeTreeContext(), args: stepArgs(nodePath, cancel: cancel));
 
-Future<({List<AllocationReport> reports, LeaseAllocation<ClaimLeaseHandle> alloc})> _run(
+Future<
+  ({List<AllocationReport> reports, LeaseAllocation<ClaimLeaseHandle> alloc})
+>
+_run(
   ClaimLeaseCapability cap,
   ({FakeTreeContext context, StepArgs args}) c,
 ) async {
   final reports = <AllocationReport>[];
-  final alloc = cap.createAllocation(
-    AllocationContext(
-      treeContext: c.context,
-      args: c.args,
-      transport: FakeRuntimeProvider(),
-      address: AllocationAddress('tgdog-s', c.args.nodePath),
-      env: const {},
-      sink: reports.add,
-      kind: StepKind.job,
-    ),
-  ) as LeaseAllocation<ClaimLeaseHandle>;
+  final alloc =
+      cap.createAllocation(
+            AllocationContext(
+              treeContext: c.context,
+              args: c.args,
+              transport: FakeRuntimeProvider(),
+              address: AllocationAddress('tgdog-s', c.args.nodePath),
+              env: const {},
+              sink: reports.add,
+              kind: StepKind.job,
+            ),
+          )
+          as LeaseAllocation<ClaimLeaseHandle>;
   await alloc.startOrAdopt();
   return (reports: reports, alloc: alloc);
 }
@@ -127,8 +137,11 @@ void main() {
           ClaimResultKeys.fencingToken: '7',
           ClaimResultKeys.kind: 'burn-follower',
         });
-        expect(r.reports.whereType<AllocationReady>(), isEmpty,
-            reason: 'a job lease completes, it does not stay ready');
+        expect(
+          r.reports.whereType<AllocationReady>(),
+          isEmpty,
+          reason: 'a job lease completes, it does not stay ready',
+        );
         expect(client.calls, [
           'lease:studio:burn-follower:studio/tg-burn/follower',
           'dispatch:lease-0:studio/tg-burn/follower',
@@ -170,33 +183,38 @@ void main() {
       expect(client.any('release:'), isFalse);
     });
 
-    test('a dispatch against a vanished lease → Failed; dispose still releases',
-        () async {
-      final client = FakeStationClient()..dispatchInvalid = true;
-      final cap = ClaimLeaseCapability(
-        client: client,
-        kind: 'k',
-        capabilityId: 'k',
-        params: const {},
-      );
-      final r = await _run(cap, _ctx());
-      expect(r.reports.single, isA<AllocationFailed>());
-      await r.alloc.dispose();
-      expect(client.any('release:'), isTrue);
-    });
+    test(
+      'a dispatch against a vanished lease → Failed; dispose still releases',
+      () async {
+        final client = FakeStationClient()..dispatchInvalid = true;
+        final cap = ClaimLeaseCapability(
+          client: client,
+          kind: 'k',
+          capabilityId: 'k',
+          params: const {},
+        );
+        final r = await _run(cap, _ctx());
+        expect(r.reports.single, isA<AllocationFailed>());
+        await r.alloc.dispose();
+        expect(client.any('release:'), isTrue);
+      },
+    );
 
-    test('release on dispose swallows a federation error (idempotent)', () async {
-      final client = FakeStationClient()..releaseThrows = true;
-      final cap = ClaimLeaseCapability(
-        client: client,
-        kind: 'k',
-        capabilityId: 'k',
-        params: const {},
-      );
-      final r = await _run(cap, _ctx());
-      await r.alloc.dispose();
-      expect(client.any('release:'), isTrue);
-    });
+    test(
+      'release on dispose swallows a federation error (idempotent)',
+      () async {
+        final client = FakeStationClient()..releaseThrows = true;
+        final cap = ClaimLeaseCapability(
+          client: client,
+          kind: 'k',
+          capabilityId: 'k',
+          params: const {},
+        );
+        final r = await _run(cap, _ctx());
+        await r.alloc.dispose();
+        expect(client.any('release:'), isTrue);
+      },
+    );
 
     test('dispose releases ONCE (idempotent on a double dispose)', () async {
       final client = FakeStationClient();

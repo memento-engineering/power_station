@@ -68,23 +68,25 @@ DeliveryRequest _request({
 
 void main() {
   group('the ROOT circuit delivers at its TERMINAL', () {
-    test('`deliver` is a FLAT route step and IS the delivery terminal — a '
-        'SubCircuitStep tail would silently degrade the station to commit-only',
-        () {
-      final byId = {for (final s in kCodeCircuit.steps) s.stepId: s};
-      expect(byId[kDeliverStep], isA<CapabilityStep>());
-      expect(byId[kDeliverStep]!.dependsOn, {'land'});
-      expect(kCodeCircuit.terminalStepId, kDeliverStep);
-      expect(
-        isDeliveryTerminal(
-          circuit: kCodeCircuit,
-          circuitPath: 'tg-1',
-          stepId: kDeliverStep,
-          beadId: 'tg-1',
-        ),
-        isTrue,
-      );
-    });
+    test(
+      '`deliver` is a FLAT route step and IS the delivery terminal — a '
+      'SubCircuitStep tail would silently degrade the station to commit-only',
+      () {
+        final byId = {for (final s in kCodeCircuit.steps) s.stepId: s};
+        expect(byId[kDeliverStep], isA<CapabilityStep>());
+        expect(byId[kDeliverStep]!.dependsOn, {'land'});
+        expect(kCodeCircuit.terminalStepId, kDeliverStep);
+        expect(
+          isDeliveryTerminal(
+            circuit: kCodeCircuit,
+            circuitPath: 'tg-1',
+            stepId: kDeliverStep,
+            beadId: 'tg-1',
+          ),
+          isTrue,
+        );
+      },
+    );
 
     test('the landing sub-circuit no longer carries a `land` step — the PR is '
         'not a step at all', () {
@@ -180,27 +182,29 @@ void main() {
       expect(body.trimRight(), endsWith('Refs: tg-1'));
     });
 
-    test('an unwritable body ledger throws a RouteFailure — never a PR that '
-        'drops the committee grades and the circuit receipt on the floor',
-        () async {
-      // `.grid` occupied by a FILE ⇒ createSync(recursive: true) throws.
-      File(p.join(work.path, '.grid'))
-        ..createSync(recursive: true)
-        ..writeAsStringSync('not a directory');
-      await expectLater(
-        const DeliverRouteCapability().route(
-          _deliverContext(workspaceDir: work.path, delivery: _FakeDelivery()),
-          _deliverArgs(),
-        ),
-        throwsA(
-          isA<RouteFailure>().having(
-            (e) => e.reason,
-            'reason',
-            contains('PR body ledger'),
+    test(
+      'an unwritable body ledger throws a RouteFailure — never a PR that '
+      'drops the committee grades and the circuit receipt on the floor',
+      () async {
+        // `.grid` occupied by a FILE ⇒ createSync(recursive: true) throws.
+        File(p.join(work.path, '.grid'))
+          ..createSync(recursive: true)
+          ..writeAsStringSync('not a directory');
+        await expectLater(
+          const DeliverRouteCapability().route(
+            _deliverContext(workspaceDir: work.path, delivery: _FakeDelivery()),
+            _deliverArgs(),
           ),
-        ),
-      );
-    });
+          throwsA(
+            isA<RouteFailure>().having(
+              (e) => e.reason,
+              'reason',
+              contains('PR body ledger'),
+            ),
+          ),
+        );
+      },
+    );
 
     test('an OFFLINE workspace (no worktree on disk) still advances — the body '
         'ledger is skipped and delivery opens with an empty body; a land never '
@@ -259,12 +263,17 @@ void main() {
     test('the residue COMMIT follows the policy: a conventional subject with '
         'the bead in a TRAILER — never the old `grid: land <id>`', () async {
       final git = RecordingGitRunner();
-      await method(git: git, pr: FakePrOpener())
-          .deliver(_request(workspaceDir: work.path));
+      await method(
+        git: git,
+        pr: FakePrOpener(),
+      ).deliver(_request(workspaceDir: work.path));
       final commit = git.calls
           .map((c) => c.args)
           .firstWhere((a) => a.isNotEmpty && a.first == 'commit');
-      expect(commit.last, 'chore: commit residual review changes\n\nRefs: tg-1');
+      expect(
+        commit.last,
+        'chore: commit residual review changes\n\nRefs: tg-1',
+      );
       expect(commit.last, isNot(contains('grid: land')));
     });
 
@@ -273,11 +282,16 @@ void main() {
         '— A5\'s guarantee, now UNCONDITIONAL', () async {
       final git = _ResidueGitRunner();
       final pr = FakePrOpener();
-      final outcome = await method(git: git, pr: pr)
-          .deliver(_request(workspaceDir: work.path));
+      final outcome = await method(
+        git: git,
+        pr: pr,
+      ).deliver(_request(workspaceDir: work.path));
 
       expect(outcome, isA<Failed>());
-      expect((outcome as Failed).reason, contains('SUBSET of the reviewed tree'));
+      expect(
+        (outcome as Failed).reason,
+        contains('SUBSET of the reviewed tree'),
+      );
       expect(pr.opened, isEmpty, reason: 'a residual tree is NEVER pushed');
       expect(
         git.subcommands,
@@ -290,8 +304,10 @@ void main() {
         'clean), and the PR is never opened', () async {
       final git = _ProbeErrorGitRunner();
       final pr = FakePrOpener();
-      final outcome = await method(git: git, pr: pr)
-          .deliver(_request(workspaceDir: work.path));
+      final outcome = await method(
+        git: git,
+        pr: pr,
+      ).deliver(_request(workspaceDir: work.path));
 
       expect(outcome, isA<Failed>());
       expect((outcome as Failed).reason, contains('fail-closed'));
@@ -303,14 +319,19 @@ void main() {
         'failureReason), and NEVER opens a PR', () async {
       final git = _RejectedPushRunner();
       final pr = FakePrOpener();
-      final outcome = await method(git: git, pr: pr)
-          .deliver(_request(workspaceDir: work.path));
+      final outcome = await method(
+        git: git,
+        pr: pr,
+      ).deliver(_request(workspaceDir: work.path));
 
       expect(outcome, isA<Failed>());
       final reason = (outcome as Failed).reason;
       expect(reason, contains('force-with-lease push refused'));
-      expect(reason, contains('[rejected]'),
-          reason: 'the git stderr tail is stamped so the operator sees WHY');
+      expect(
+        reason,
+        contains('[rejected]'),
+        reason: 'the git stderr tail is stamped so the operator sees WHY',
+      );
       expect(pr.opened, isEmpty, reason: 'a refused push never opens a PR');
     });
 
@@ -319,8 +340,10 @@ void main() {
         'a DONE, approved bead', () async {
       final git = RecordingGitRunner();
       final pr = _AlreadyOpenPrOpener('https://github.com/memento/x/pull/9');
-      final outcome = await method(git: git, pr: pr)
-          .deliver(_request(workspaceDir: work.path));
+      final outcome = await method(
+        git: git,
+        pr: pr,
+      ).deliver(_request(workspaceDir: work.path));
 
       expect(outcome, isA<Ok>());
       expect((outcome as Ok).payload, {
@@ -329,17 +352,19 @@ void main() {
       });
     });
 
-    test('an already-open PR whose url gh did not print is STILL reused (the '
-        'branch is delivered, the PR exists) ⇒ Ok, never an escalation',
-        () async {
-      final outcome = await method(
-        git: RecordingGitRunner(),
-        pr: _AlreadyOpenPrOpener(''),
-      ).deliver(_request(workspaceDir: work.path));
+    test(
+      'an already-open PR whose url gh did not print is STILL reused (the '
+      'branch is delivered, the PR exists) ⇒ Ok, never an escalation',
+      () async {
+        final outcome = await method(
+          git: RecordingGitRunner(),
+          pr: _AlreadyOpenPrOpener(''),
+        ).deliver(_request(workspaceDir: work.path));
 
-      expect(outcome, isA<Ok>());
-      expect((outcome as Ok).payload, {'pr_url': '', 'reused': 'true'});
-    });
+        expect(outcome, isA<Ok>());
+        expect((outcome as Ok).payload, {'pr_url': '', 'reused': 'true'});
+      },
+    );
 
     test('an EMPTY payload ⇒ the DETERMINISTIC conventional fallback subject: '
         'it lints clean and carries NO bead id (never the retired '
@@ -367,8 +392,10 @@ void main() {
         ..parent.createSync(recursive: true)
         ..writeAsStringSync('## Summary\n\nthe composed body\n\nRefs: tg-1\n');
       final pr = FakePrOpener();
-      await method(git: RecordingGitRunner(), pr: pr)
-          .deliver(_request(workspaceDir: work.path));
+      await method(
+        git: RecordingGitRunner(),
+        pr: pr,
+      ).deliver(_request(workspaceDir: work.path));
       expect(
         pr.opened.single.body,
         '## Summary\n\nthe composed body\n\nRefs: tg-1\n',
@@ -378,8 +405,10 @@ void main() {
     test('an ABSENT body ledger opens with an EMPTY body — a land never fails '
         'over PR prose (fail-SAFE)', () async {
       final pr = FakePrOpener();
-      final outcome = await method(git: RecordingGitRunner(), pr: pr)
-          .deliver(_request(workspaceDir: work.path));
+      final outcome = await method(
+        git: RecordingGitRunner(),
+        pr: pr,
+      ).deliver(_request(workspaceDir: work.path));
       expect(outcome, isA<Ok>());
       expect(pr.opened.single.body, isEmpty);
     });
@@ -424,24 +453,25 @@ void main() {
         gitRunner: git,
         composition: composition ?? const PrComposition(),
       );
-      final verdict = await DeliverRouteCapability(
-        gitRunner: describeGit,
-        inference: inference,
-      ).route(
-        _deliverContext(
-          workspaceDir: work.path,
-          delivery: delivery,
-          beadOverride: beadOverride,
-          composition: composition,
-          siblings: const SiblingView(
-            results: {
-              'tg-1/land/rebase': {'outcome': 'clean'},
-              'tg-1/land/revalidate': {'outcome': 'passed'},
-            },
-          ),
-        ),
-        _deliverArgs(),
-      );
+      final verdict =
+          await DeliverRouteCapability(
+            gitRunner: describeGit,
+            inference: inference,
+          ).route(
+            _deliverContext(
+              workspaceDir: work.path,
+              delivery: delivery,
+              beadOverride: beadOverride,
+              composition: composition,
+              siblings: const SiblingView(
+                results: {
+                  'tg-1/land/rebase': {'outcome': 'clean'},
+                  'tg-1/land/revalidate': {'outcome': 'passed'},
+                },
+              ),
+            ),
+            _deliverArgs(),
+          );
       return delivery.deliver(
         _request(
           workspaceDir: work.path,
@@ -451,71 +481,89 @@ void main() {
       );
     }
 
-    test('NO inference wired (the offline posture) ⇒ the deterministic, id-free '
-        'fallback title, ZERO git READS beyond the delivery itself, and the PR '
-        'still opens', () async {
-      final git = RecordingGitRunner();
-      final pr = FakePrOpener();
-      final outcome = await deliverThrough(
-        git: git,
-        pr: pr,
-        beadOverride: bead('tg-1').copyWith(
-          title: 'better + configurable PR titles',
-          issueType: IssueType.feature,
-          metadata: const {'rig': 'power_station'},
-        ),
-      );
+    test(
+      'NO inference wired (the offline posture) ⇒ the deterministic, id-free '
+      'fallback title, ZERO git READS beyond the delivery itself, and the PR '
+      'still opens',
+      () async {
+        final git = RecordingGitRunner();
+        final pr = FakePrOpener();
+        final outcome = await deliverThrough(
+          git: git,
+          pr: pr,
+          beadOverride: bead('tg-1').copyWith(
+            title: 'better + configurable PR titles',
+            issueType: IssueType.feature,
+            metadata: const {'rig': 'power_station'},
+          ),
+        );
 
-      expect(outcome, isA<Ok>());
-      final opened = pr.opened.single;
-      expect(opened.title, 'feat(power_station): better + configurable PR titles');
-      expect(lintConventionalSubject(opened.title, foreignRef: 'tg-1'), isEmpty);
-      expect(git.subcommands, isNot(contains('diff')));
-      expect(opened.body, contains('- description: fallback'));
-      expect(opened.body.trimRight(), endsWith('Refs: tg-1'));
-    });
+        expect(outcome, isA<Ok>());
+        final opened = pr.opened.single;
+        expect(
+          opened.title,
+          'feat(power_station): better + configurable PR titles',
+        );
+        expect(
+          lintConventionalSubject(opened.title, foreignRef: 'tg-1'),
+          isEmpty,
+        );
+        expect(git.subcommands, isNot(contains('diff')));
+        expect(opened.body, contains('- description: fallback'));
+        expect(opened.body.trimRight(), endsWith('Refs: tg-1'));
+      },
+    );
 
-    test('inference wired over a REAL worktree: the title is the INFERRED '
-        'conventional subject, the body COMPOSES the inferred prose WITH the '
-        'circuit receipt, and the bead id appears ONLY in the trailer', () async {
-      final describeGit = CannedGitRunner(
-        log: 'feat(landing): read the branch delta\n\nRefs: tg-1\x00',
-        diff: '--- a/lib/x.dart\n+++ b/lib/x.dart\n+the change',
-      );
-      final pr = FakePrOpener();
-      final outcome = await deliverThrough(
-        git: RecordingGitRunner(),
-        pr: pr,
-        describeGit: describeGit,
-        inference: FakeInferenceRunner(
-          output:
-              '{"type":"feat","scope":"landing","breaking":false,'
-              '"description":"Infer the pr title from the branch diff.",'
-              '"summary":"The land step now describes the actual diff.",'
-              '"breakingChange":""}',
-        ),
-      );
+    test(
+      'inference wired over a REAL worktree: the title is the INFERRED '
+      'conventional subject, the body COMPOSES the inferred prose WITH the '
+      'circuit receipt, and the bead id appears ONLY in the trailer',
+      () async {
+        final describeGit = CannedGitRunner(
+          log: 'feat(landing): read the branch delta\n\nRefs: tg-1\x00',
+          diff: '--- a/lib/x.dart\n+++ b/lib/x.dart\n+the change',
+        );
+        final pr = FakePrOpener();
+        final outcome = await deliverThrough(
+          git: RecordingGitRunner(),
+          pr: pr,
+          describeGit: describeGit,
+          inference: FakeInferenceRunner(
+            output:
+                '{"type":"feat","scope":"landing","breaking":false,'
+                '"description":"Infer the pr title from the branch diff.",'
+                '"summary":"The land step now describes the actual diff.",'
+                '"breakingChange":""}',
+          ),
+        );
 
-      expect(outcome, isA<Ok>());
-      final opened = pr.opened.single;
-      expect(
-        opened.title,
-        'feat(landing): infer the pr title from the branch diff',
-      );
-      expect(lintConventionalSubject(opened.title, foreignRef: 'tg-1'), isEmpty);
-      // COMPOSED, not clobbered (pow-yny): the DIGEST leads, then the receipt.
-      expect(opened.body, startsWith('## Summary'));
-      expect(
-        opened.body,
-        contains('The land step now describes the actual diff.'),
-      );
-      expect(opened.body, contains('## Circuit receipt'));
-      expect(opened.body, contains('- description: inference'));
-      expect(opened.body, contains('- commits: 1 (1 conventional, 1 trailered)'));
-      // THE POLICY: the bead id appears EXACTLY once, on the trailer line.
-      expect('tg-1'.allMatches(opened.body).length, 1);
-      expect(opened.body.trimRight(), endsWith('Refs: tg-1'));
-    });
+        expect(outcome, isA<Ok>());
+        final opened = pr.opened.single;
+        expect(
+          opened.title,
+          'feat(landing): infer the pr title from the branch diff',
+        );
+        expect(
+          lintConventionalSubject(opened.title, foreignRef: 'tg-1'),
+          isEmpty,
+        );
+        // COMPOSED, not clobbered (pow-yny): the DIGEST leads, then the receipt.
+        expect(opened.body, startsWith('## Summary'));
+        expect(
+          opened.body,
+          contains('The land step now describes the actual diff.'),
+        );
+        expect(opened.body, contains('## Circuit receipt'));
+        expect(opened.body, contains('- description: inference'));
+        expect(
+          opened.body,
+          contains('- commits: 1 (1 conventional, 1 trailered)'),
+        );
+        // THE POLICY: the bead id appears EXACTLY once, on the trailer line.
+        expect('tg-1'.allMatches(opened.body).length, 1);
+        expect(opened.body.trimRight(), endsWith('Refs: tg-1'));
+      },
+    );
 
     test('a mounted PrComposition reshapes the trailer token and the sections '
         'at the route edge (the configurable knob)', () async {
@@ -583,8 +631,9 @@ class _ResidueGitRunner implements GitRunner {
     return const GitRunResult(exitCode: 0, output: '');
   }
 
-  List<String> get subcommands =>
-      [for (final c in calls) c.isNotEmpty ? c.first : ''];
+  List<String> get subcommands => [
+    for (final c in calls) c.isNotEmpty ? c.first : '',
+  ];
 }
 
 /// A [GitRunner] whose `status --porcelain` probe itself FAILS — the residue
@@ -612,7 +661,8 @@ class _RejectedPushRunner implements GitRunner {
     if (args.isNotEmpty && args.first == 'push') {
       return const GitRunResult(
         exitCode: 1,
-        output: 'To github.com:memento/x.git\n'
+        output:
+            'To github.com:memento/x.git\n'
             ' ! [rejected]        grid/tg-1 -> grid/tg-1 (stale info)\n'
             'error: failed to push some refs to '
             "'github.com:memento/x.git'",

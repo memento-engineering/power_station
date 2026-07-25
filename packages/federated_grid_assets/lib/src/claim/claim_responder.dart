@@ -48,9 +48,9 @@ class ClaimResponder {
     required this.myAddress,
     this.onConfirmed,
     void Function(String)? onLog,
-  })  : _broker = broker,
-        _facts = stationFacts,
-        _onLog = onLog ?? _noLog;
+  }) : _broker = broker,
+       _facts = stationFacts,
+       _onLog = onLog ?? _noLog;
 
   /// This station's own id.
   final String station;
@@ -82,17 +82,18 @@ class ClaimResponder {
   /// Subscribes this station to [broadcasterBroker]'s advertisements + confirms
   /// (per topology — call once per broadcaster peer). Idempotent: re-calling
   /// for the same [broadcasterStation] replaces the prior subscriptions.
-  void listenToBroadcaster(String broadcasterStation, Broker broadcasterBroker) {
+  void listenToBroadcaster(
+    String broadcasterStation,
+    Broker broadcasterBroker,
+  ) {
     unawaited(_adSubs.remove(broadcasterStation)?.cancel());
     unawaited(_confirmSubs.remove(broadcasterStation)?.cancel());
-    _adSubs[broadcasterStation] =
-        broadcasterBroker.subscribe(BusTopics.claimUnclaimedAll).listen(
-              _handleAdvertisement,
-            );
-    _confirmSubs[broadcasterStation] =
-        broadcasterBroker.subscribe(BusTopics.claimConfirm).listen(
-              _handleConfirm,
-            );
+    _adSubs[broadcasterStation] = broadcasterBroker
+        .subscribe(BusTopics.claimUnclaimedAll)
+        .listen(_handleAdvertisement);
+    _confirmSubs[broadcasterStation] = broadcasterBroker
+        .subscribe(BusTopics.claimConfirm)
+        .listen(_handleConfirm);
   }
 
   /// Stops listening to [broadcasterStation] (e.g. it left the topology).
@@ -115,7 +116,8 @@ class ClaimResponder {
     } on FormatException {
       return; // a foreign/malformed payload on the topic — ignore it
     }
-    if (decoded is! AcpNotification || decoded.method != BusMethods.claimUnclaimed) {
+    if (decoded is! AcpNotification ||
+        decoded.method != BusMethods.claimUnclaimed) {
       return;
     }
     final claimId = decoded.params['claimId'] as String?;
@@ -129,7 +131,8 @@ class ClaimResponder {
     }
     _responded.add(claimId);
     final id = '$station-${_seq++}';
-    final capabilityId = decoded.params['capabilityId'] as String? ?? kDefaultKind;
+    final capabilityId =
+        decoded.params['capabilityId'] as String? ?? kDefaultKind;
     _outstandingByRequestId[id] = claimId;
     _broker.publish(
       BusTopics.claimRespond,

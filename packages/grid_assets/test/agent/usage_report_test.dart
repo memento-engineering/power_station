@@ -72,7 +72,8 @@ void main() {
   });
 
   group('FT-2 UsageReport.tryParse — codex exec --json JSONL', () {
-    const codexJsonl = '{"type":"thread.started","thread_id":"019f"}\n'
+    const codexJsonl =
+        '{"type":"thread.started","thread_id":"019f"}\n'
         '{"type":"turn.started"}\n'
         '{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"OK"}}\n'
         '{"type":"turn.completed","usage":{"input_tokens":13574,"cached_input_tokens":8960,"output_tokens":5,"reasoning_output_tokens":0}}\n';
@@ -105,10 +106,13 @@ void main() {
       expect(UsageReport.tryParse('true'), isNull);
     });
 
-    test('a well-formed object with NO recognizable usage ⇒ null (isEmpty)', () {
-      expect(UsageReport.tryParse('{"foo": "bar", "result": "hi"}'), isNull);
-      expect(UsageReport.tryParse('{"usage": {}}'), isNull);
-    });
+    test(
+      'a well-formed object with NO recognizable usage ⇒ null (isEmpty)',
+      () {
+        expect(UsageReport.tryParse('{"foo": "bar", "result": "hi"}'), isNull);
+        expect(UsageReport.tryParse('{"usage": {}}'), isNull);
+      },
+    );
 
     test('a PARTIAL envelope contributes only the fields it carries', () {
       // usage present, but no cost/turns/duration at top level.
@@ -116,7 +120,10 @@ void main() {
         '{"usage": {"input_tokens": 10, "output_tokens": 20}}',
       );
       expect(onlyTokens, isNotNull);
-      expect(onlyTokens!.toResultFields(), {'tokensIn': '10', 'tokensOut': '20'});
+      expect(onlyTokens!.toResultFields(), {
+        'tokensIn': '10',
+        'tokensOut': '20',
+      });
 
       // no usage object, but the top-level cost/turns/duration are present.
       final noUsage = UsageReport.tryParse(
@@ -130,14 +137,17 @@ void main() {
       });
     });
 
-    test('a wrong-typed usage object ⇒ null (no field is coerced from junk)', () {
-      // usage is a string, tokens are objects — none survive the type checks.
-      expect(UsageReport.tryParse('{"usage": "nope"}'), isNull);
-      expect(
-        UsageReport.tryParse('{"usage": {"input_tokens": {"x": 1}}}'),
-        isNull,
-      );
-    });
+    test(
+      'a wrong-typed usage object ⇒ null (no field is coerced from junk)',
+      () {
+        // usage is a string, tokens are objects — none survive the type checks.
+        expect(UsageReport.tryParse('{"usage": "nope"}'), isNull);
+        expect(
+          UsageReport.tryParse('{"usage": {"input_tokens": {"x": 1}}}'),
+          isNull,
+        );
+      },
+    );
 
     test('numeric-as-string values are parsed defensively', () {
       final report = UsageReport.tryParse(
@@ -148,39 +158,46 @@ void main() {
       expect(report.costUsd, 0.02);
     });
 
-    test('a stream-json ARRAY: the last result-shaped member wins (defensive)',
-        () {
-      final arr = jsonEncode([
-        {'type': 'assistant', 'message': 'thinking'},
-        {
-          'type': 'result',
-          'num_turns': 2,
-          'usage': {'input_tokens': 5, 'output_tokens': 6},
-        },
-      ]);
-      final report = UsageReport.tryParse(arr);
-      expect(report, isNotNull);
-      expect(report!.tokensIn, 5);
-      expect(report.tokensOut, 6);
-      expect(report.numTurns, 2);
-    });
+    test(
+      'a stream-json ARRAY: the last result-shaped member wins (defensive)',
+      () {
+        final arr = jsonEncode([
+          {'type': 'assistant', 'message': 'thinking'},
+          {
+            'type': 'result',
+            'num_turns': 2,
+            'usage': {'input_tokens': 5, 'output_tokens': 6},
+          },
+        ]);
+        final report = UsageReport.tryParse(arr);
+        expect(report, isNotNull);
+        expect(report!.tokensIn, 5);
+        expect(report.tokensOut, 6);
+        expect(report.numTurns, 2);
+      },
+    );
   });
 
   group('FT-2 usageReportPath — filename sanitization', () {
-    test('collapses `/` (and hostile chars) so a nodePath is a flat filename',
-        () {
-      expect(
-        usageReportPath('tg-1/agent'),
-        '.grid/telemetry/tg-1_agent.usage.json',
-      );
-      expect(
-        usageReportPath('tg-1/review/spec-adherence'),
-        '.grid/telemetry/tg-1_review_spec-adherence.usage.json',
-      );
-      // Any non-[A-Za-z0-9._-] collapses to `_` (defensive — never escapes the
-      // telemetry dir or breaks the shell redirect).
-      expect(usageReportPath('a b/c:d'), '.grid/telemetry/a_b_c_d.usage.json');
-    });
+    test(
+      'collapses `/` (and hostile chars) so a nodePath is a flat filename',
+      () {
+        expect(
+          usageReportPath('tg-1/agent'),
+          '.grid/telemetry/tg-1_agent.usage.json',
+        );
+        expect(
+          usageReportPath('tg-1/review/spec-adherence'),
+          '.grid/telemetry/tg-1_review_spec-adherence.usage.json',
+        );
+        // Any non-[A-Za-z0-9._-] collapses to `_` (defensive — never escapes the
+        // telemetry dir or breaks the shell redirect).
+        expect(
+          usageReportPath('a b/c:d'),
+          '.grid/telemetry/a_b_c_d.usage.json',
+        );
+      },
+    );
   });
 
   group('FT-2 readUsageFields — the file-read half (temp dirs, fail-safe)', () {
@@ -218,45 +235,57 @@ void main() {
     });
   });
 
-  group('tg-291 readEnvelopeResultText — the stdout RESULT TEXT (fail-safe)',
-      () {
-    test('recovers the `result` string field of a well-formed envelope', () {
-      final dir = Directory.systemTemp.createTempSync('usage-resulttext-');
-      addTearDown(() => dir.deleteSync(recursive: true));
-      const nodePath = 'tg-1/review/regression-risk';
-      File(p.join(dir.path, usageReportPath(nodePath)))
-        ..createSync(recursive: true)
-        ..writeAsStringSync(_wellFormed);
-      expect(readEnvelopeResultText(dir.path, nodePath), 'Done.');
-    });
+  group(
+    'tg-291 readEnvelopeResultText — the stdout RESULT TEXT (fail-safe)',
+    () {
+      test('recovers the `result` string field of a well-formed envelope', () {
+        final dir = Directory.systemTemp.createTempSync('usage-resulttext-');
+        addTearDown(() => dir.deleteSync(recursive: true));
+        const nodePath = 'tg-1/review/regression-risk';
+        File(p.join(dir.path, usageReportPath(nodePath)))
+          ..createSync(recursive: true)
+          ..writeAsStringSync(_wellFormed);
+        expect(readEnvelopeResultText(dir.path, nodePath), 'Done.');
+      });
 
-    test('an ABSENT file ⇒ null (never throws)', () {
-      final dir = Directory.systemTemp.createTempSync('usage-resulttext-abs-');
-      addTearDown(() => dir.deleteSync(recursive: true));
-      expect(readEnvelopeResultText(dir.path, 'tg-1/review/spec-adherence'),
-          isNull);
-    });
+      test('an ABSENT file ⇒ null (never throws)', () {
+        final dir = Directory.systemTemp.createTempSync(
+          'usage-resulttext-abs-',
+        );
+        addTearDown(() => dir.deleteSync(recursive: true));
+        expect(
+          readEnvelopeResultText(dir.path, 'tg-1/review/spec-adherence'),
+          isNull,
+        );
+      });
 
-    test('a MALFORMED envelope ⇒ null (never throws)', () {
-      final dir = Directory.systemTemp.createTempSync('usage-resulttext-bad-');
-      addTearDown(() => dir.deleteSync(recursive: true));
-      const nodePath = 'tg-1/review/test-coverage';
-      File(p.join(dir.path, usageReportPath(nodePath)))
-        ..createSync(recursive: true)
-        ..writeAsStringSync('{ not json');
-      expect(readEnvelopeResultText(dir.path, nodePath), isNull);
-    });
+      test('a MALFORMED envelope ⇒ null (never throws)', () {
+        final dir = Directory.systemTemp.createTempSync(
+          'usage-resulttext-bad-',
+        );
+        addTearDown(() => dir.deleteSync(recursive: true));
+        const nodePath = 'tg-1/review/test-coverage';
+        File(p.join(dir.path, usageReportPath(nodePath)))
+          ..createSync(recursive: true)
+          ..writeAsStringSync('{ not json');
+        expect(readEnvelopeResultText(dir.path, nodePath), isNull);
+      });
 
-    test('a well-formed envelope with a blank / missing `result` ⇒ null', () {
-      final dir = Directory.systemTemp.createTempSync('usage-resulttext-blk-');
-      addTearDown(() => dir.deleteSync(recursive: true));
-      const nodePath = 'tg-1/review/spec-adherence';
-      File(p.join(dir.path, usageReportPath(nodePath)))
-        ..createSync(recursive: true)
-        ..writeAsStringSync('{"usage": {"input_tokens": 1}, "result": "   "}');
-      expect(readEnvelopeResultText(dir.path, nodePath), isNull);
-    });
-  });
+      test('a well-formed envelope with a blank / missing `result` ⇒ null', () {
+        final dir = Directory.systemTemp.createTempSync(
+          'usage-resulttext-blk-',
+        );
+        addTearDown(() => dir.deleteSync(recursive: true));
+        const nodePath = 'tg-1/review/spec-adherence';
+        File(p.join(dir.path, usageReportPath(nodePath)))
+          ..createSync(recursive: true)
+          ..writeAsStringSync(
+            '{"usage": {"input_tokens": 1}, "result": "   "}',
+          );
+        expect(readEnvelopeResultText(dir.path, nodePath), isNull);
+      });
+    },
+  );
 
   group('pow-edp / pow-efv — the model that ACTUALLY ran (modelUsage)', () {
     test('a single-model envelope names that model', () {

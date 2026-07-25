@@ -85,10 +85,12 @@ class ClaimBroadcaster {
     required Broker broker,
     StationClient Function(Peer peer)? clientFor,
     void Function(String)? onLog,
-  })  : _broker = broker,
-        _clientFor = clientFor ??
-            ((p) => HttpStationClient(host: p.host, port: p.port, token: p.token)),
-        _onLog = onLog ?? _noLog;
+  }) : _broker = broker,
+       _clientFor =
+           clientFor ??
+           ((p) =>
+               HttpStationClient(host: p.host, port: p.port, token: p.token)),
+       _onLog = onLog ?? _noLog;
 
   final Broker _broker;
   final StationClient Function(Peer peer) _clientFor;
@@ -145,7 +147,11 @@ class ClaimBroadcaster {
 
   void _retract(String claimId) {
     _pending.remove(claimId);
-    _broker.publish(BusTopics.claimUnclaimed(claimId), Uint8List(0), retain: true);
+    _broker.publish(
+      BusTopics.claimUnclaimed(claimId),
+      Uint8List(0),
+      retain: true,
+    );
   }
 
   /// Subscribes this station to [peerBroker]'s claim-resp requests (per
@@ -154,19 +160,20 @@ class ClaimBroadcaster {
   /// subscription.
   void listenToPeer(String peerStation, Broker peerBroker) {
     unawaited(_peerSubs.remove(peerStation)?.cancel());
-    _peerSubs[peerStation] = peerBroker.subscribe(BusTopics.claimRespond).listen(
-      (msg) {
-        final AcpMessage decoded;
-        try {
-          decoded = decodeAcp(msg.payload);
-        } on FormatException {
-          return; // a foreign/malformed payload on the topic — ignore it
-        }
-        if (decoded is AcpRequest && decoded.method == BusMethods.claimRespond) {
-          _handleRespond(peerStation, decoded);
-        }
-      },
-    );
+    _peerSubs[peerStation] = peerBroker
+        .subscribe(BusTopics.claimRespond)
+        .listen((msg) {
+          final AcpMessage decoded;
+          try {
+            decoded = decodeAcp(msg.payload);
+          } on FormatException {
+            return; // a foreign/malformed payload on the topic — ignore it
+          }
+          if (decoded is AcpRequest &&
+              decoded.method == BusMethods.claimRespond) {
+            _handleRespond(peerStation, decoded);
+          }
+        });
   }
 
   /// Stops listening to [peerStation] (e.g. it left the topology).
@@ -195,11 +202,18 @@ class ClaimBroadcaster {
     );
     // Clear the retained ad EAGERLY (do not wait for the next scan — a
     // running step stays in the engine's frontier, see the library doc).
-    _broker.publish(BusTopics.claimUnclaimed(claimId), Uint8List(0), retain: true);
+    _broker.publish(
+      BusTopics.claimUnclaimed(claimId),
+      Uint8List(0),
+      retain: true,
+    );
     _broker.publish(
       BusTopics.claimConfirm,
       encodeAcp(
-        AcpResultResponse(id: req.id, result: {'claimId': claimId, 'confirmed': true}),
+        AcpResultResponse(
+          id: req.id,
+          result: {'claimId': claimId, 'confirmed': true},
+        ),
       ),
     );
     _onLog('confirmed $claimId -> $peerStation');

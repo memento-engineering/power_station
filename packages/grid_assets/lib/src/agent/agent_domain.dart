@@ -209,8 +209,10 @@ AgentConfig resolveAgentConfig({
   }
   final selfCheck = env.validate();
   if (selfCheck != null) {
-    throw StateError('agent config: environment "${config.harness}" is illegal: '
-        '$selfCheck');
+    throw StateError(
+      'agent config: environment "${config.harness}" is illegal: '
+      '$selfCheck',
+    );
   }
 
   // The MODEL ladder, stamped into the harness transport key: the bead's pinned

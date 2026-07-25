@@ -47,19 +47,22 @@ void main() {
       expect(browser.browseCalls, 1);
     });
 
-    test('gridHub topology narrows the same discovery to just the hub', () async {
-      final browser = FakeMdnsBrowser([hub, spoke]);
-      final loop = ZeroConfMembership(
-        browser: browser,
-        resolver: TopologyResolver(
-          topology: Topology.gridHub,
-          trust: TrustGate(allowed: {'hub': null, 'studio': null}),
-        ),
-        selfStation: 'self',
-      );
+    test(
+      'gridHub topology narrows the same discovery to just the hub',
+      () async {
+        final browser = FakeMdnsBrowser([hub, spoke]);
+        final loop = ZeroConfMembership(
+          browser: browser,
+          resolver: TopologyResolver(
+            topology: Topology.gridHub,
+            trust: TrustGate(allowed: {'hub': null, 'studio': null}),
+          ),
+          selfStation: 'self',
+        );
 
-      expect((await loop.discover()).peers.map((p) => p.id), ['hub']);
-    });
+        expect((await loop.discover()).peers.map((p) => p.id), ['hub']);
+      },
+    );
 
     test('an unblessed discovery never reaches the Membership', () async {
       final log = <String>[];

@@ -115,35 +115,31 @@ void main() {
       );
 
       expect(runner.calls[0], ['remote', 'get-url', 'peer']);
-      expect(runner.calls[1], [
-        'remote',
-        'add',
-        'peer',
-        'ssh://host/repo.git',
-      ]);
+      expect(runner.calls[1], ['remote', 'add', 'peer', 'ssh://host/repo.git']);
     });
 
-    test('ensureRemote UPDATES the url when the remote exists but differs',
-        () async {
-      final runner = _RecordingRunner(
-        (args) =>
-            args[1] == 'get-url' ? _ok('ssh://host/old.git') : _ok(),
-      );
-      final svc = GitSyncService(runner: runner.call);
+    test(
+      'ensureRemote UPDATES the url when the remote exists but differs',
+      () async {
+        final runner = _RecordingRunner(
+          (args) => args[1] == 'get-url' ? _ok('ssh://host/old.git') : _ok(),
+        );
+        final svc = GitSyncService(runner: runner.call);
 
-      await svc.ensureRemote(
-        workingDirectory: '/work',
-        name: 'peer',
-        url: 'ssh://host/new.git',
-      );
+        await svc.ensureRemote(
+          workingDirectory: '/work',
+          name: 'peer',
+          url: 'ssh://host/new.git',
+        );
 
-      expect(runner.calls[1], [
-        'remote',
-        'set-url',
-        'peer',
-        'ssh://host/new.git',
-      ]);
-    });
+        expect(runner.calls[1], [
+          'remote',
+          'set-url',
+          'peer',
+          'ssh://host/new.git',
+        ]);
+      },
+    );
 
     test('ensureRemote is a NO-OP when the url already matches', () async {
       final runner = _RecordingRunner((_) => _ok('ssh://host/repo.git'));
@@ -242,42 +238,54 @@ void main() {
       expect(await _gitOut(['rev-parse', branch], bare), head);
     });
 
-    test('distribute (ensureRemote + push) lands the ref via a named remote',
-        () async {
-      final logs = <String>[];
-      final svc = GitSyncService(onLog: logs.add);
+    test(
+      'distribute (ensureRemote + push) lands the ref via a named remote',
+      () async {
+        final logs = <String>[];
+        final svc = GitSyncService(onLog: logs.add);
 
-      await svc.distribute(
-        workingDirectory: work,
-        remoteName: 'dashboard',
-        remoteUrl: bare,
-        refspec: branch,
-      );
+        await svc.distribute(
+          workingDirectory: work,
+          remoteName: 'dashboard',
+          remoteUrl: bare,
+          refspec: branch,
+        );
 
-      // The remote was created in the source repo...
-      expect(await _gitOut(['remote', 'get-url', 'dashboard'], work), bare);
-      // ...and the ref landed in the peer.
-      expect(await _gitOut(['rev-parse', branch], bare), head);
-    });
+        // The remote was created in the source repo...
+        expect(await _gitOut(['remote', 'get-url', 'dashboard'], work), bare);
+        // ...and the ref landed in the peer.
+        expect(await _gitOut(['rev-parse', branch], bare), head);
+      },
+    );
 
-    test('ensureRemote add → set-url is idempotent and updates the url',
-        () async {
-      final other = '${tmp.path}/other.git';
-      Directory(other).createSync();
-      await _git(['init', '--bare', '-q'], other);
-      final svc = GitSyncService();
+    test(
+      'ensureRemote add → set-url is idempotent and updates the url',
+      () async {
+        final other = '${tmp.path}/other.git';
+        Directory(other).createSync();
+        await _git(['init', '--bare', '-q'], other);
+        final svc = GitSyncService();
 
-      await svc.ensureRemote(workingDirectory: work, name: 'peer', url: bare);
-      expect(await _gitOut(['remote', 'get-url', 'peer'], work), bare);
+        await svc.ensureRemote(workingDirectory: work, name: 'peer', url: bare);
+        expect(await _gitOut(['remote', 'get-url', 'peer'], work), bare);
 
-      // Re-running with a new url updates it (set-url path).
-      await svc.ensureRemote(workingDirectory: work, name: 'peer', url: other);
-      expect(await _gitOut(['remote', 'get-url', 'peer'], work), other);
+        // Re-running with a new url updates it (set-url path).
+        await svc.ensureRemote(
+          workingDirectory: work,
+          name: 'peer',
+          url: other,
+        );
+        expect(await _gitOut(['remote', 'get-url', 'peer'], work), other);
 
-      // Re-running with the same url is a no-op and leaves it stable.
-      await svc.ensureRemote(workingDirectory: work, name: 'peer', url: other);
-      expect(await _gitOut(['remote', 'get-url', 'peer'], work), other);
-    });
+        // Re-running with the same url is a no-op and leaves it stable.
+        await svc.ensureRemote(
+          workingDirectory: work,
+          name: 'peer',
+          url: other,
+        );
+        expect(await _gitOut(['remote', 'get-url', 'peer'], work), other);
+      },
+    );
 
     test('push to a non-existent remote throws GitSyncException', () async {
       final svc = GitSyncService();

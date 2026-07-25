@@ -70,7 +70,10 @@ String _modelOf(RuntimeConfig cfg) {
 
 /// The build-role spawns (agent + specify) for the given bead + station config.
 Map<String, RuntimeConfig> _buildSpawns(Bead b, AgentConfig config) => {
-  'agent': const AgentCapability().spawn(_ctx(b, config), stepArgs('tg-1/agent')),
+  'agent': const AgentCapability().spawn(
+    _ctx(b, config),
+    stepArgs('tg-1/agent'),
+  ),
   'specify': const SpecifyCapability().spawn(
     _ctx(b, config),
     stepArgs('tg-1/spec_review/specify'),
@@ -116,42 +119,51 @@ void main() {
       });
     });
 
-    test('the role resolves its model through its TIER (role → tier → model)', () {
-      expect(defaultModelFor(AgentRole.build), 'opus');
-      expect(defaultModelFor(AgentRole.grade), 'sonnet');
-      expect(defaultModelFor(AgentRole.gather), 'haiku');
-      expect(AgentRole.values, [
-        AgentRole.build,
-        AgentRole.grade,
-        AgentRole.gather,
-      ]);
-    });
+    test(
+      'the role resolves its model through its TIER (role → tier → model)',
+      () {
+        expect(defaultModelFor(AgentRole.build), 'opus');
+        expect(defaultModelFor(AgentRole.grade), 'sonnet');
+        expect(defaultModelFor(AgentRole.gather), 'haiku');
+        expect(AgentRole.values, [
+          AgentRole.build,
+          AgentRole.grade,
+          AgentRole.gather,
+        ]);
+      },
+    );
   });
 
   group('pow-edp — the STATION rung (the two flags move the two roles)', () {
-    test('--model X moves BUILD only; the critics stay on the grade default', () {
-      const station = AgentConfig(params: {'model': 'X'});
-      _buildSpawns(
-        bead('tg-1'),
-        station,
-      ).forEach((_, cfg) => expect(_modelOf(cfg), 'X'));
-      _gradeSpawns(
-        bead('tg-1'),
-        station,
-      ).forEach((_, cfg) => expect(_modelOf(cfg), 'sonnet'));
-    });
+    test(
+      '--model X moves BUILD only; the critics stay on the grade default',
+      () {
+        const station = AgentConfig(params: {'model': 'X'});
+        _buildSpawns(
+          bead('tg-1'),
+          station,
+        ).forEach((_, cfg) => expect(_modelOf(cfg), 'X'));
+        _gradeSpawns(
+          bead('tg-1'),
+          station,
+        ).forEach((_, cfg) => expect(_modelOf(cfg), 'sonnet'));
+      },
+    );
 
-    test('--grader-model Y moves GRADE only; build stays on the build default', () {
-      const station = AgentConfig(graderModel: 'Y');
-      _buildSpawns(
-        bead('tg-1'),
-        station,
-      ).forEach((_, cfg) => expect(_modelOf(cfg), 'opus'));
-      _gradeSpawns(
-        bead('tg-1'),
-        station,
-      ).forEach((_, cfg) => expect(_modelOf(cfg), 'Y'));
-    });
+    test(
+      '--grader-model Y moves GRADE only; build stays on the build default',
+      () {
+        const station = AgentConfig(graderModel: 'Y');
+        _buildSpawns(
+          bead('tg-1'),
+          station,
+        ).forEach((_, cfg) => expect(_modelOf(cfg), 'opus'));
+        _gradeSpawns(
+          bead('tg-1'),
+          station,
+        ).forEach((_, cfg) => expect(_modelOf(cfg), 'Y'));
+      },
+    );
 
     test('both flags are independent', () {
       const station = AgentConfig(params: {'model': 'X'}, graderModel: 'Y');
@@ -166,42 +178,59 @@ void main() {
     });
   });
 
-  group('pow-edp — the BEAD rung (grid.agent.params.model wins over everything)', () {
-    test('a bead-pinned model overrides the station AND the role defaults, for '
-        'BOTH roles', () {
-      const station = AgentConfig(params: {'model': 'X'}, graderModel: 'Y');
-      final pinned = _beadPinning('Z');
-      _buildSpawns(pinned, station).forEach((_, cfg) => expect(_modelOf(cfg), 'Z'));
-      _gradeSpawns(pinned, station).forEach((_, cfg) => expect(_modelOf(cfg), 'Z'));
-    });
+  group(
+    'pow-edp — the BEAD rung (grid.agent.params.model wins over everything)',
+    () {
+      test(
+        'a bead-pinned model overrides the station AND the role defaults, for '
+        'BOTH roles',
+        () {
+          const station = AgentConfig(params: {'model': 'X'}, graderModel: 'Y');
+          final pinned = _beadPinning('Z');
+          _buildSpawns(
+            pinned,
+            station,
+          ).forEach((_, cfg) => expect(_modelOf(cfg), 'Z'));
+          _gradeSpawns(
+            pinned,
+            station,
+          ).forEach((_, cfg) => expect(_modelOf(cfg), 'Z'));
+        },
+      );
 
-    test('a bead-pinned model overrides the role defaults with no station flags', () {
-      const station = AgentConfig();
-      _buildSpawns(
-        _beadPinning('Z'),
-        station,
-      ).forEach((_, cfg) => expect(_modelOf(cfg), 'Z'));
-      _gradeSpawns(
-        _beadPinning('Z'),
-        station,
-      ).forEach((_, cfg) => expect(_modelOf(cfg), 'Z'));
-    });
-  });
+      test(
+        'a bead-pinned model overrides the role defaults with no station flags',
+        () {
+          const station = AgentConfig();
+          _buildSpawns(
+            _beadPinning('Z'),
+            station,
+          ).forEach((_, cfg) => expect(_modelOf(cfg), 'Z'));
+          _gradeSpawns(
+            _beadPinning('Z'),
+            station,
+          ).forEach((_, cfg) => expect(_modelOf(cfg), 'Z'));
+        },
+      );
+    },
+  );
 
   group('pow-edp — the precedence table, per role, at the resolver', () {
     // (bead model, station build knob, station grade knob) → (build, grade,
     // gather). Neither PRE-TIER knob arms the CHEAP tier (bead `pow-2c9`), so a
     // gatherer rides its asset default unless the BEAD pins one.
     final rows =
-        <({
-          String label,
-          String? beadModel,
-          String? stationBuild,
-          String? stationGrade,
-          String build,
-          String grade,
-          String gather,
-        })>[
+        <
+          ({
+            String label,
+            String? beadModel,
+            String? stationBuild,
+            String? stationGrade,
+            String build,
+            String grade,
+            String gather,
+          })
+        >[
           (
             label: 'nothing set',
             beadModel: null,

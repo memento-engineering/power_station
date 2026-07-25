@@ -235,6 +235,6 @@ Future<DescribeOutcome> describeBranch({
 
 /// The non-blank NUL-separated records of a `git log --format=…%x00` body.
 List<String> _records(String output) => [
-      for (final record in output.split('\x00'))
-        if (record.trim().isNotEmpty) record.trim(),
-    ];
+  for (final record in output.split('\x00'))
+    if (record.trim().isNotEmpty) record.trim(),
+];

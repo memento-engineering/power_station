@@ -50,7 +50,11 @@ void main() {
       final msg = AcpMessage.fromJson({
         'jsonrpc': '2.0',
         'id': 'abc',
-        'error': {'code': 1, 'message': 'nope', 'data': {'why': 'late'}},
+        'error': {
+          'code': 1,
+          'message': 'nope',
+          'data': {'why': 'late'},
+        },
       });
       expect(msg, isA<AcpErrorResponse>());
       final err = msg as AcpErrorResponse;

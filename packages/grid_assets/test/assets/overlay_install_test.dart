@@ -118,69 +118,75 @@ void main() {
       },
     );
 
-    test('union by tree position — the FIRST root to offer a path wins', () async {
-      final first = Directory(p.join(temp.path, 'first'));
-      final second = Directory(p.join(temp.path, 'second'));
-      _write(first, [
-        '.claude',
-        'skills',
-        'discover',
-        'SKILL.md',
-      ], _skill('discover', 'from first'));
-      _write(second, [
-        '.claude',
-        'skills',
-        'discover',
-        'SKILL.md',
-      ], _skill('discover', 'from second'));
-      _write(second, [
-        '.claude',
-        'skills',
-        'other',
-        'SKILL.md',
-      ], _skill('other', 'only in second'));
+    test(
+      'union by tree position — the FIRST root to offer a path wins',
+      () async {
+        final first = Directory(p.join(temp.path, 'first'));
+        final second = Directory(p.join(temp.path, 'second'));
+        _write(first, [
+          '.claude',
+          'skills',
+          'discover',
+          'SKILL.md',
+        ], _skill('discover', 'from first'));
+        _write(second, [
+          '.claude',
+          'skills',
+          'discover',
+          'SKILL.md',
+        ], _skill('discover', 'from second'));
+        _write(second, [
+          '.claude',
+          'skills',
+          'other',
+          'SKILL.md',
+        ], _skill('other', 'only in second'));
 
-      final report = await const OverlayInstallService().install(
-        overlayRoots: [first.path, second.path],
-        targetRoot: temp.path,
-        sourceRef: 'testref',
-      );
+        final report = await const OverlayInstallService().install(
+          overlayRoots: [first.path, second.path],
+          targetRoot: temp.path,
+          sourceRef: 'testref',
+        );
 
-      expect(
-        File(
-          p.join(temp.path, '.claude', 'skills', 'discover', 'SKILL.md'),
-        ).readAsStringSync(),
-        contains('from first'),
-      );
-      expect(report.installedSkillIds, ['discover', 'other']);
-    });
+        expect(
+          File(
+            p.join(temp.path, '.claude', 'skills', 'discover', 'SKILL.md'),
+          ).readAsStringSync(),
+          contains('from first'),
+        );
+        expect(report.installedSkillIds, ['discover', 'other']);
+      },
+    );
 
-    test('an UNBOUND hole is REFUSED — never written — and exits non-zero', () async {
-      final overlay = Directory(p.join(temp.path, 'pack'));
-      _write(overlay, [
-        '.claude',
-        'skills',
-        'ops',
-        'SKILL.md',
-      ], _skill('ops', 'boot {{gridHome}}'));
+    test(
+      'an UNBOUND hole is REFUSED — never written — and exits non-zero',
+      () async {
+        final overlay = Directory(p.join(temp.path, 'pack'));
+        _write(overlay, [
+          '.claude',
+          'skills',
+          'ops',
+          'SKILL.md',
+        ], _skill('ops', 'boot {{gridHome}}'));
 
-      final report = await const OverlayInstallService().install(
-        overlayRoots: [overlay.path],
-        targetRoot: temp.path,
-        sourceRef: 'testref',
-        args: {'runner': 'space'},
-      );
+        final report = await const OverlayInstallService().install(
+          overlayRoots: [overlay.path],
+          targetRoot: temp.path,
+          sourceRef: 'testref',
+          args: {'runner': 'space'},
+        );
 
-      expect(report.written, isEmpty);
-      expect(report.refused.single.holes, ['{{gridHome}}']);
-      expect(
-        File(
-          p.join(temp.path, '.claude', 'skills', 'ops', 'SKILL.md'),
-        ).existsSync(),
-        isFalse,
-      );
-      expect(report.exitCode, 1, reason: 'a half-bound asset is LOUD');
-    });
+        expect(report.written, isEmpty);
+        expect(report.refused.single.holes, ['{{gridHome}}']);
+        expect(
+          File(
+            p.join(temp.path, '.claude', 'skills', 'ops', 'SKILL.md'),
+          ).existsSync(),
+          isFalse,
+        );
+        expect(report.exitCode, 1, reason: 'a half-bound asset is LOUD');
+      },
+    );
 
     test(
       'installing twice is a clean ROUND-TRIP — the second run writes nothing, '
@@ -238,22 +244,25 @@ void main() {
           check: check,
         );
 
-    test('a MISSING file fails the check, and the check writes NOTHING', () async {
-      final overlay = pack();
+    test(
+      'a MISSING file fails the check, and the check writes NOTHING',
+      () async {
+        final overlay = pack();
 
-      final report = await run(overlay, check: true);
+        final report = await run(overlay, check: true);
 
-      expect(report.dryRun, isTrue);
-      expect(report.written, hasLength(1));
-      expect(report.exitCode, 1);
-      expect(
-        File(
-          p.join(temp.path, '.claude', 'skills', 'discover', 'SKILL.md'),
-        ).existsSync(),
-        isFalse,
-        reason: '--check is a PLAN — it writes nothing',
-      );
-    });
+        expect(report.dryRun, isTrue);
+        expect(report.written, hasLength(1));
+        expect(report.exitCode, 1);
+        expect(
+          File(
+            p.join(temp.path, '.claude', 'skills', 'discover', 'SKILL.md'),
+          ).existsSync(),
+          isFalse,
+          reason: '--check is a PLAN — it writes nothing',
+        );
+      },
+    );
 
     test('a clean install makes the check PASS', () async {
       final overlay = pack();
@@ -271,7 +280,9 @@ void main() {
       final installed = File(
         p.join(temp.path, '.claude', 'skills', 'discover', 'SKILL.md'),
       );
-      installed.writeAsStringSync('${installed.readAsStringSync()}\nhand edit\n');
+      installed.writeAsStringSync(
+        '${installed.readAsStringSync()}\nhand edit\n',
+      );
 
       final report = await run(overlay, check: true);
 
@@ -339,7 +350,10 @@ void main() {
         expect(text, contains(p.join('.claude', 'skills', 'mine', 'SKILL.md')));
         expect(text, contains('REFUSED '));
         expect(text, contains('{{gridHome}}'));
-        expect(text, contains('1 installed, 0 updated, 0 current, 1 blocked, 1 refused'));
+        expect(
+          text,
+          contains('1 installed, 0 updated, 0 current, 1 blocked, 1 refused'),
+        );
         expect(text, contains('NOTHING was committed'));
       },
     );
@@ -361,15 +375,18 @@ void main() {
       },
     );
 
-    test('--no-diff prints no diff body; a BLOCKED and a REFUSAL still do', () async {
-      final text = renderInstallReport(await report(), diff: false);
+    test(
+      '--no-diff prints no diff body; a BLOCKED and a REFUSAL still do',
+      () async {
+        final text = renderInstallReport(await report(), diff: false);
 
-      expect(text, isNot(contains('--- /dev/null')));
-      expect(text, isNot(contains('+run space')));
-      expect(text, contains('installed '));
-      expect(text, contains('BLOCKED '));
-      expect(text, contains('REFUSED '));
-    });
+        expect(text, isNot(contains('--- /dev/null')));
+        expect(text, isNot(contains('+run space')));
+        expect(text, contains('installed '));
+        expect(text, contains('BLOCKED '));
+        expect(text, contains('REFUSED '));
+      },
+    );
   });
 
   group('resolveStationOverlayRoots — NON-PRESCRIPTIVE discovery', () {
@@ -386,52 +403,47 @@ void main() {
       );
     });
 
-    test(
-      'discovers every package that ships the asset manifest AND a '
-      'station_overlay — sorted by package name, no pack hardcoded',
-      () async {
-        final alpha = Directory(p.join(temp.path, 'packs', 'alpha_assets'));
-        final beta = Directory(p.join(temp.path, 'packs', 'beta_assets'));
-        // Both vend the manifest; only alpha ships an overlay.
-        _write(alpha, [
-          'extension',
-          'mcp',
-          'config.yaml',
-        ], 'name: alpha_assets\n');
-        _write(alpha, [
-          'extension',
-          'station_overlay',
-          '.claude',
-          'skills',
-          'a',
-          'SKILL.md',
-        ], _skill('a'));
-        _write(beta, ['extension', 'mcp', 'config.yaml'], 'name: beta_assets\n');
-        _write(
-          Directory(temp.path),
-          ['.dart_tool', 'package_config.json'],
-          '{"configVersion":2,"packages":['
-          '{"name":"beta_assets","rootUri":"../packs/beta_assets","packageUri":"lib/"},'
-          '{"name":"alpha_assets","rootUri":"../packs/alpha_assets","packageUri":"lib/"}'
-          ']}',
-        );
+    test('discovers every package that ships the asset manifest AND a '
+        'station_overlay — sorted by package name, no pack hardcoded', () async {
+      final alpha = Directory(p.join(temp.path, 'packs', 'alpha_assets'));
+      final beta = Directory(p.join(temp.path, 'packs', 'beta_assets'));
+      // Both vend the manifest; only alpha ships an overlay.
+      _write(alpha, [
+        'extension',
+        'mcp',
+        'config.yaml',
+      ], 'name: alpha_assets\n');
+      _write(alpha, [
+        'extension',
+        'station_overlay',
+        '.claude',
+        'skills',
+        'a',
+        'SKILL.md',
+      ], _skill('a'));
+      _write(beta, ['extension', 'mcp', 'config.yaml'], 'name: beta_assets\n');
+      _write(
+        Directory(temp.path),
+        ['.dart_tool', 'package_config.json'],
+        '{"configVersion":2,"packages":['
+        '{"name":"beta_assets","rootUri":"../packs/beta_assets","packageUri":"lib/"},'
+        '{"name":"alpha_assets","rootUri":"../packs/alpha_assets","packageUri":"lib/"}'
+        ']}',
+      );
 
-        final roots = await resolveStationOverlayRoots(gridHome: temp.path);
+      final roots = await resolveStationOverlayRoots(gridHome: temp.path);
 
-        expect(
-          roots,
-          [p.join(alpha.path, 'extension', 'station_overlay')],
-          reason: 'beta vends no overlay, so it contributes no root',
-        );
-        expect(
-          Directory(
-            p.join(temp.path, '.dart_tool', 'extension_discovery'),
-          ).existsSync(),
-          isFalse,
-          reason: 'discovery leaves no cache artifact in the operator checkout',
-        );
-      },
-    );
+      expect(roots, [
+        p.join(alpha.path, 'extension', 'station_overlay'),
+      ], reason: 'beta vends no overlay, so it contributes no root');
+      expect(
+        Directory(
+          p.join(temp.path, '.dart_tool', 'extension_discovery'),
+        ).existsSync(),
+        isFalse,
+        reason: 'discovery leaves no cache artifact in the operator checkout',
+      );
+    });
   });
 
   group("the ROUND-TRIP — grid_assets' REAL vended overlay", () {

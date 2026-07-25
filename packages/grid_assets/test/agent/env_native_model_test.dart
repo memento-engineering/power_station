@@ -15,7 +15,11 @@ Map<String, dynamic> _envelope(Map<String, Object?> payload) => {
 };
 
 void main() {
-  final ws = testWorkspace('tg-1', workspaceDir: '/w/tg-1', branch: 'grid/tg-1');
+  final ws = testWorkspace(
+    'tg-1',
+    workspaceDir: '/w/tg-1',
+    branch: 'grid/tg-1',
+  );
   const brief = AgentBrief(task: 'BODY');
 
   group('pow-a9o — codex carries a native asset default', () {
@@ -38,16 +42,19 @@ void main() {
       expect(config.params['model'], isNot('opus'));
     });
 
-    test('the codex spawn argv carries --model gpt-5.6-sol from the default', () {
-      final cfg = spawnFor(
-        environment: kBuiltinEnvironments['codex']!,
-        brief: brief,
-        workspace: ws,
-      );
-      final i = cfg.args.indexOf('--model');
-      expect(i, greaterThanOrEqualTo(0), reason: 'no --model: ${cfg.args}');
-      expect(cfg.args[i + 1], 'gpt-5.6-sol');
-    });
+    test(
+      'the codex spawn argv carries --model gpt-5.6-sol from the default',
+      () {
+        final cfg = spawnFor(
+          environment: kBuiltinEnvironments['codex']!,
+          brief: brief,
+          workspace: ws,
+        );
+        final i = cfg.args.indexOf('--model');
+        expect(i, greaterThanOrEqualTo(0), reason: 'no --model: ${cfg.args}');
+        expect(cfg.args[i + 1], 'gpt-5.6-sol');
+      },
+    );
 
     test('an operator bead pin passes through into codex verbatim', () {
       final config = resolveAgentConfig(
@@ -101,7 +108,10 @@ void main() {
       final registry = EnvironmentRegistry(
         custom: {'opencode': kBuiltinEnvironments['opencode']!},
       );
-      expect(registry.validate(roleEnvironments: {'build': 'opencode'}), isNull);
+      expect(
+        registry.validate(roleEnvironments: {'build': 'opencode'}),
+        isNull,
+      );
     });
 
     test('a model-less pi builtin (endpoint bound) armed to a role PASSES', () {
@@ -131,11 +141,17 @@ void main() {
       expect(registry.validate(roleEnvironments: {'build': 'codex'}), isNull);
     });
 
-    test('claude (the tier-defaults owner, model-less) armed to a role PASSES', () {
-      const registry = EnvironmentRegistry(
-        custom: {'frontier': AgentEnvironment(command: 'claude')},
-      );
-      expect(registry.validate(roleEnvironments: {'build': 'frontier'}), isNull);
-    });
+    test(
+      'claude (the tier-defaults owner, model-less) armed to a role PASSES',
+      () {
+        const registry = EnvironmentRegistry(
+          custom: {'frontier': AgentEnvironment(command: 'claude')},
+        );
+        expect(
+          registry.validate(roleEnvironments: {'build': 'frontier'}),
+          isNull,
+        );
+      },
+    );
   });
 }

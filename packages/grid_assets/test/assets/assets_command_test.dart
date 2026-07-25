@@ -68,7 +68,7 @@ void main() {
       overlay,
       ['.claude', 'skills', 'discover', 'SKILL.md'],
       '---\nname: discover\n---\n'
-          'call {{runner}} search, file into {{gridHome}}\n',
+      'call {{runner}} search, file into {{gridHome}}\n',
     );
     _write(overlay, [
       '.claude',
@@ -123,7 +123,9 @@ void main() {
       expect(body, contains('testref'));
       expect(hasProvenance(body), isTrue);
       expect(
-        File(p.join(temp.path, '.claude', 'agents', 'governor.md')).existsSync(),
+        File(
+          p.join(temp.path, '.claude', 'agents', 'governor.md'),
+        ).existsSync(),
         isTrue,
         reason: 'the agent def expands alongside the skills',
       );
@@ -157,42 +159,51 @@ void main() {
     );
   });
 
-  test('--source-ref overrides the probed ref in every provenance header', () async {
-    final code = await harness().runner.run([
-      'assets',
-      'install',
-      '--source-ref',
-      'v1.2.3',
-    ]);
+  test(
+    '--source-ref overrides the probed ref in every provenance header',
+    () async {
+      final code = await harness().runner.run([
+        'assets',
+        'install',
+        '--source-ref',
+        'v1.2.3',
+      ]);
 
-    expect(code, 0);
-    expect(installedSkill(temp).readAsStringSync(), contains('v1.2.3'));
-  });
+      expect(code, 0);
+      expect(installedSkill(temp).readAsStringSync(), contains('v1.2.3'));
+    },
+  );
 
-  test('--no-diff prints no diff body but still names what it installed', () async {
-    final h = harness();
-
-    final code = await h.runner.run(['assets', 'install', '--no-diff']);
-
-    expect(code, 0);
-    expect(h.out.toString(), isNot(contains('--- /dev/null')));
-    expect(h.out.toString(), contains('installed '));
-  });
-
-  group('--check — the no-drift enforcement', () {
-    test('writes NOTHING and exits non-zero, naming each MISSING file', () async {
+  test(
+    '--no-diff prints no diff body but still names what it installed',
+    () async {
       final h = harness();
 
-      final code = await h.runner.run(['assets', 'install', '--check']);
+      final code = await h.runner.run(['assets', 'install', '--no-diff']);
 
-      expect(code, 1);
-      expect(h.out.toString(), contains('MISSING '));
-      expect(
-        installedSkill(temp).existsSync(),
-        isFalse,
-        reason: '--check is a PLAN — it writes nothing',
-      );
-    });
+      expect(code, 0);
+      expect(h.out.toString(), isNot(contains('--- /dev/null')));
+      expect(h.out.toString(), contains('installed '));
+    },
+  );
+
+  group('--check — the no-drift enforcement', () {
+    test(
+      'writes NOTHING and exits non-zero, naming each MISSING file',
+      () async {
+        final h = harness();
+
+        final code = await h.runner.run(['assets', 'install', '--check']);
+
+        expect(code, 1);
+        expect(h.out.toString(), contains('MISSING '));
+        expect(
+          installedSkill(temp).existsSync(),
+          isFalse,
+          reason: '--check is a PLAN — it writes nothing',
+        );
+      },
+    );
 
     test('a clean install makes --check PASS', () async {
       expect(await harness().runner.run(['assets', 'install']), 0);
@@ -256,14 +267,17 @@ void main() {
     );
   });
 
-  test('no overlay in scope is a LOUD non-answer, never a silent no-op', () async {
-    final h = harness(roots: const []);
+  test(
+    'no overlay in scope is a LOUD non-answer, never a silent no-op',
+    () async {
+      final h = harness(roots: const []);
 
-    final code = await h.runner.run(['assets', 'install']);
+      final code = await h.runner.run(['assets', 'install']);
 
-    expect(code, 1);
-    expect(h.err.toString(), contains('no package in ${temp.path} vends'));
-  });
+      expect(code, 1);
+      expect(h.err.toString(), contains('no package in ${temp.path} vends'));
+    },
+  );
 
   test(
     'a resident-station context with no grid root REFUSES and names the lever',
