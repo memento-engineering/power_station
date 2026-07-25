@@ -86,7 +86,7 @@ void main() {
     StringBuffer out,
     StringBuffer err,
   })
-  harness({List<String>? roots}) {
+  harness({List<String>? roots, String? runnerInvocation}) {
     final out = StringBuffer();
     final err = StringBuffer();
     _StationDelegate? last;
@@ -94,6 +94,7 @@ void main() {
       ..addCommand(
         AssetsCommand(
           delegate: () => last = _StationDelegate(temp.path),
+          runnerInvocation: runnerInvocation,
           roots: (gridHome) async => roots ?? [overlay.path],
           sourceRef: (_) => 'testref',
           out: out,
@@ -135,6 +136,21 @@ void main() {
         h.lastDelegate().disposed,
         isTrue,
         reason: 'the command owns the delegate it asked for',
+      );
+    },
+  );
+
+  test(
+    'runnerInvocation overrides the CLI executable name for JIT stations',
+    () async {
+      final h = harness(runnerInvocation: 'dart run lunar:lunar');
+
+      final code = await h.runner.run(['assets', 'install']);
+
+      expect(code, 0);
+      expect(
+        installedSkill(temp).readAsStringSync(),
+        contains('call dart run lunar:lunar search, file into ${temp.path}'),
       );
     },
   );
