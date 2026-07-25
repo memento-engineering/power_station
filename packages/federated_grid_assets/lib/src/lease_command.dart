@@ -116,9 +116,7 @@ class LeaseCommand extends Command<int> {
         'fence ${grant.fencingToken})',
       );
 
-      stdout.writeln(
-        'dispatching to "${p.station}": ${cmdline.join(' ')}',
-      );
+      stdout.writeln('dispatching to "${p.station}": ${cmdline.join(' ')}');
       final raw = await client.dispatch(
         grant,
         payloadFor(cmdline),

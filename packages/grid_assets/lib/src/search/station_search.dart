@@ -163,7 +163,8 @@ sealed class StoreSearchOutcome {
 /// The store resolved and was queried; [hits] may be empty.
 class StoreSearched extends StoreSearchOutcome {
   /// Creates the searched outcome.
-  const StoreSearched(super.store, {
+  const StoreSearched(
+    super.store, {
     required this.hits,
     required this.beadsSearched,
   });
@@ -293,9 +294,7 @@ class StationSearchService {
     for (final scope in roster) {
       final beadsDir = scope.workStore.beadsDir;
       if (!_dirExists(beadsDir)) {
-        outcomes.add(
-          StoreAbsent(scope, reason: 'no work store at $beadsDir'),
-        );
+        outcomes.add(StoreAbsent(scope, reason: 'no work store at $beadsDir'));
         continue;
       }
       try {
@@ -316,18 +315,16 @@ class StationSearchService {
     String query,
   ) {
     final needle = query.toLowerCase();
-    final searchable = [for (final b in beads) if (b.issueType.isCore) b]
-      ..sort((a, b) => a.id.compareTo(b.id));
+    final searchable = [
+      for (final b in beads)
+        if (b.issueType.isCore) b,
+    ]..sort((a, b) => a.id.compareTo(b.id));
     final hits = <SearchHit>[];
     for (final bead in searchable) {
       final hit = _matchBead(scope, bead, needle);
       if (hit != null) hits.add(hit);
     }
-    return StoreSearched(
-      scope,
-      hits: hits,
-      beadsSearched: searchable.length,
-    );
+    return StoreSearched(scope, hits: hits, beadsSearched: searchable.length);
   }
 
   /// Matches [needle] against [bead]'s searchable fields in precedence order;

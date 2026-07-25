@@ -121,7 +121,12 @@ abstract interface class Broker {
   /// (standard MQTT retained-clear semantics — the advertisement-retraction
   /// path the claim protocol uses). [qos] is carried through to subscribers.
   /// A no-op once [close]d (a torn-down broker accepts no further writes).
-  void publish(String topic, Uint8List payload, {bool retain = false, int qos = 0});
+  void publish(
+    String topic,
+    Uint8List payload, {
+    bool retain = false,
+    int qos = 0,
+  });
 
   /// Subscribes to [topicFilter] (MQTT wildcards: `+` matches exactly one
   /// topic level, `#` matches all remaining levels and must be the final

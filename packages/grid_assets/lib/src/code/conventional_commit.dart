@@ -51,7 +51,9 @@ const int kMaxSubjectChars = 72;
 const String kFallbackDescription = 'apply the reviewed change';
 
 /// The v1.0.0 subject grammar: `<type>[(scope)][!]: <description>`.
-final RegExp _subjectGrammar = RegExp(r'^([a-z]+)(?:\(([^()\n]+)\))?(!)?: (\S.*)$');
+final RegExp _subjectGrammar = RegExp(
+  r'^([a-z]+)(?:\(([^()\n]+)\))?(!)?: (\S.*)$',
+);
 
 /// A conventional-commit SUBJECT as PARTS — the shape the asset always composes
 /// from (never a free-form string), so what it emits is compliant BY
@@ -114,8 +116,10 @@ ConventionalSubject sanitizeConventionalSubject({
   final cleanType = kConventionalTypes.contains(candidate)
       ? candidate
       : (kConventionalTypes.contains(fallbackType) ? fallbackType : 'chore');
-  final rawScope =
-      (scope ?? '').replaceAll(RegExp(r'[()\n]'), ' ').trim().toLowerCase();
+  final rawScope = (scope ?? '')
+      .replaceAll(RegExp(r'[()\n]'), ' ')
+      .trim()
+      .toLowerCase();
   final cleanScope = rawScope.isEmpty ? null : rawScope;
 
   var text = stripForeignRef(description, foreignRef);
@@ -185,7 +189,9 @@ List<String> lintConventionalSubject(String subject, {String foreignRef = ''}) {
     violations.add('the description is not lowercase (imperative, lowercase)');
   }
   if (line.length > kMaxSubjectChars) {
-    violations.add('the subject is ${line.length} chars (max $kMaxSubjectChars)');
+    violations.add(
+      'the subject is ${line.length} chars (max $kMaxSubjectChars)',
+    );
   }
   final ref = foreignRef.trim();
   if (ref.isNotEmpty && line.toLowerCase().contains(ref.toLowerCase())) {
@@ -200,8 +206,10 @@ List<String> lintConventionalSubject(String subject, {String foreignRef = ''}) {
 /// Whether [message] carries the git trailer [token] (`Refs: <value>`) with a
 /// non-blank value — the INVERTED-tracking half of the policy.
 bool hasTrailer(String message, {String token = kDefaultTrailerToken}) =>
-    RegExp('^${RegExp.escape(token)}:[ \\t]*\\S', multiLine: true)
-        .hasMatch(message);
+    RegExp(
+      '^${RegExp.escape(token)}:[ \\t]*\\S',
+      multiLine: true,
+    ).hasMatch(message);
 
 /// A full commit/PR MESSAGE: the [subject], an optional [body], then the
 /// FOOTERS — the `BREAKING CHANGE:` entry (when [breakingChange] is non-blank)

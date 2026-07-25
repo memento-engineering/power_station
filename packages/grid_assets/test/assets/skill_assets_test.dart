@@ -42,8 +42,10 @@ String _extensionDir() {
     if (parent.path == dir.path) break;
     dir = parent;
   }
-  fail('could not locate packages/grid_assets/extension from '
-      '${Directory.current.path}');
+  fail(
+    'could not locate packages/grid_assets/extension from '
+    '${Directory.current.path}',
+  );
 }
 
 void main() {
@@ -60,8 +62,11 @@ void main() {
         // `---`-fenced yaml block and dispatches on `name:`.
         expect(template, startsWith('---\n'));
         final fenceEnd = template.indexOf('\n---', 3);
-        expect(fenceEnd, greaterThan(0),
-            reason: 'the frontmatter block is `---`-closed');
+        expect(
+          fenceEnd,
+          greaterThan(0),
+          reason: 'the frontmatter block is `---`-closed',
+        );
         final frontmatter =
             loadYaml(template.substring(4, fenceEnd)) as YamlMap;
         expect(frontmatter['name'], skillId);
@@ -77,15 +82,17 @@ void main() {
       );
     });
 
-    test('renderSkill substitutes every declared arg — no `{{` hole survives',
-        () {
-      final rendered = loader.renderSkill(
-        'discover',
-        args: {'runner': 'space'},
-      );
-      expect(rendered, isNot(contains('{{')));
-      expect(rendered, contains('space search --json'));
-    });
+    test(
+      'renderSkill substitutes every declared arg — no `{{` hole survives',
+      () {
+        final rendered = loader.renderSkill(
+          'discover',
+          args: {'runner': 'space'},
+        );
+        expect(rendered, isNot(contains('{{')));
+        expect(rendered, contains('space search --json'));
+      },
+    );
 
     test('renderSkill with an unbound hole throws LOUD (an installed skill '
         'has no template residue)', () {
@@ -103,10 +110,9 @@ void main() {
   });
 
   group('the discover skill — the coupled skill+command acceptance', () {
-    final rendered = PackagedAssetLoader(root: root).renderSkill(
-      'discover',
-      args: {'runner': 'space'},
-    );
+    final rendered = PackagedAssetLoader(
+      root: root,
+    ).renderSkill('discover', args: {'runner': 'space'});
 
     test('dispatches on arg shape — topic research, bead-id advisory, '
         'bead-id + instruction directed', () {
@@ -149,20 +155,24 @@ void main() {
       expect(rendered, contains('--defer'));
       expect(rendered, contains('--actor governor'));
       // Filing scope: target substation store first, grid-home fallback.
-      expect(rendered, contains('the substation whose repo the work would change'));
+      expect(
+        rendered,
+        contains('the substation whose repo the work would change'),
+      );
       expect(rendered, contains("the grid home's own store"));
       // Promote-later: the design conversation ends in the persistent flip.
       expect(rendered, contains('--persistent'));
     });
 
-    test('can kick off specify — the hand-off names the sibling vended asset',
-        () {
-      expect(rendered, contains('/specify'));
-      expect(rendered, contains('Hand off to specify'));
-    });
+    test(
+      'can kick off specify — the hand-off names the sibling vended asset',
+      () {
+        expect(rendered, contains('/specify'));
+        expect(rendered, contains('Hand off to specify'));
+      },
+    );
 
-    test('no bead before the yes — the no-junk-beads rule rides the skill',
-        () {
+    test('no bead before the yes — the no-junk-beads rule rides the skill', () {
       expect(rendered, contains('Do **not** file before the yes'));
     });
   });
@@ -189,8 +199,11 @@ void main() {
         discover['path'],
         'station_overlay/.claude/skills/discover/SKILL.md',
       );
-      expect(discover['visibility'], isNotNull,
-          reason: 'the discover skill declares a visibility');
+      expect(
+        discover['visibility'],
+        isNotNull,
+        reason: 'the discover skill declares a visibility',
+      );
       final args = (discover['args'] as YamlList).cast<YamlMap>();
       final argNames = {for (final a in args) a['name'] as String};
       expect(
@@ -210,12 +223,11 @@ void main() {
       'release': {'runner'},
     };
 
-    test(
-        'each is VENDED, declared in the manifest, and carries EXACTLY the '
+    test('each is VENDED, declared in the manifest, and carries EXACTLY the '
         'holes it declares', () {
-      final manifest = loadYaml(
-        File(p.join(root, 'mcp', 'config.yaml')).readAsStringSync(),
-      ) as YamlMap;
+      final manifest =
+          loadYaml(File(p.join(root, 'mcp', 'config.yaml')).readAsStringSync())
+              as YamlMap;
       final skills = (manifest['skills'] as YamlList).cast<YamlMap>();
 
       for (final entry in reHomed.entries) {
@@ -225,8 +237,11 @@ void main() {
           for (final m in RegExp(r'\{\{(\w+)\}\}').allMatches(template))
             m.group(1)!,
         };
-        expect(holes, entry.value,
-            reason: '${entry.key} carries exactly its declared args');
+        expect(
+          holes,
+          entry.value,
+          reason: '${entry.key} carries exactly its declared args',
+        );
 
         final declared = skills.firstWhere(
           (s) => s['id'] == entry.key,
@@ -238,29 +253,34 @@ void main() {
         );
         expect(declared['audience'], 'operator');
         final args =
-            (declared['args'] as YamlList?)?.cast<YamlMap>() ?? const <YamlMap>[];
+            (declared['args'] as YamlList?)?.cast<YamlMap>() ??
+            const <YamlMap>[];
         expect({for (final a in args) a['name'] as String}, entry.value);
       }
     });
 
     test(
-        'station-operations renders against the installer binding — the runner '
-        'verb and the grid home bound, no residue', () {
-      final rendered = loader.renderSkill(
-        'station-operations',
-        args: {'runner': 'space'},
-      );
-      expect(rendered, isNot(contains('{{')));
-      expect(rendered, contains('space up'));
-      expect(rendered, contains('.grid/.beads'));
-    });
+      'station-operations renders against the installer binding — the runner '
+      'verb and the grid home bound, no residue',
+      () {
+        final rendered = loader.renderSkill(
+          'station-operations',
+          args: {'runner': 'space'},
+        );
+        expect(rendered, isNot(contains('{{')));
+        expect(rendered, contains('space up'));
+        expect(rendered, contains('.grid/.beads'));
+      },
+    );
 
-    test(
-        'the AUDIENCE split: an operator skill is never named in a build '
+    test('the AUDIENCE split: an operator skill is never named in a build '
         "agent's brief — one of them PUSHES, which the brief forbids", () {
       expect(kOperatorSkills, reHomed.keys.toSet());
-      expect(kOperatorSkills, isNot(contains('discover')),
-          reason: 'discover is the agent-audience skill the brief DOES name');
+      expect(
+        kOperatorSkills,
+        isNot(contains('discover')),
+        reason: 'discover is the agent-audience skill the brief DOES name',
+      );
     });
   });
 
@@ -268,32 +288,40 @@ void main() {
     final overlay = p.join(root, 'station_overlay');
 
     test(
-        'it MIRRORS the target repo root — the legacy kind-dir home is gone, so '
-        'a dumb path-preserving overlay lands every asset where the harness '
-        'discovers it', () {
-      expect(
-        Directory(p.join(overlay, 'skills')).existsSync(),
-        isFalse,
-        reason: 'the pre-root-relative `station_overlay/skills/` home is gone',
-      );
-      for (final id in kVendedSkills) {
+      'it MIRRORS the target repo root — the legacy kind-dir home is gone, so '
+      'a dumb path-preserving overlay lands every asset where the harness '
+      'discovers it',
+      () {
         expect(
-          File(p.join(overlay, '.claude', 'skills', id, 'SKILL.md'))
-              .existsSync(),
-          isTrue,
-          reason: '$id is vended root-relative',
+          Directory(p.join(overlay, 'skills')).existsSync(),
+          isFalse,
+          reason:
+              'the pre-root-relative `station_overlay/skills/` home is gone',
         );
-      }
-    });
+        for (final id in kVendedSkills) {
+          expect(
+            File(
+              p.join(overlay, '.claude', 'skills', id, 'SKILL.md'),
+            ).existsSync(),
+            isTrue,
+            reason: '$id is vended root-relative',
+          );
+        }
+      },
+    );
 
-    test(
-        'it carries the COMPLETE operator asset set — the governor agent-def '
+    test('it carries the COMPLETE operator asset set — the governor agent-def '
         'and the harness settings, not just the skills. These were hand-copied '
         'into the station and drifted; vending them is what ends that', () {
-      final governor = File(p.join(overlay, '.claude', 'agents', 'governor.md'));
+      final governor = File(
+        p.join(overlay, '.claude', 'agents', 'governor.md'),
+      );
       expect(governor.existsSync(), isTrue);
-      expect(governor.readAsStringSync(), startsWith('---\n'),
-          reason: 'stampable: the frontmatter must open on line 1');
+      expect(
+        governor.readAsStringSync(),
+        startsWith('---\n'),
+        reason: 'stampable: the frontmatter must open on line 1',
+      );
       expect(governor.readAsStringSync(), contains('name: governor'));
 
       final settings = File(p.join(overlay, '.claude', 'settings.json'));
@@ -306,13 +334,12 @@ void main() {
       expect(settings.readAsStringSync(), contains('bd prime --hook-json'));
     });
 
-    test(
-        'EVERY vended file can carry a provenance stamp — an unstampable one '
+    test('EVERY vended file can carry a provenance stamp — an unstampable one '
         'could never be told from a hand-authored file, so it could never be '
         'installed', () {
-      final files = Directory(overlay)
-          .listSync(recursive: true)
-          .whereType<File>();
+      final files = Directory(
+        overlay,
+      ).listSync(recursive: true).whereType<File>();
       expect(files, isNotEmpty);
       for (final file in files) {
         final rel = p.relative(file.path, from: overlay);

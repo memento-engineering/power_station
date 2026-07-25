@@ -214,13 +214,14 @@ String? pubspecOverridesFor(
   PubLinkConfig config,
   PubLinkContext context, {
   String? devRoot,
-}) =>
-    switch (context) {
-      PubLinkContext.dev ||
-      PubLinkContext.worktree =>
-        _pathOverridesFor(config, context, devRoot: devRoot),
-      PubLinkContext.stable => _gitOverridesFor(config),
-    };
+}) => switch (context) {
+  PubLinkContext.dev || PubLinkContext.worktree => _pathOverridesFor(
+    config,
+    context,
+    devRoot: devRoot,
+  ),
+  PubLinkContext.stable => _gitOverridesFor(config),
+};
 
 /// The dev/worktree path-override emission — UNCHANGED behavior from before the
 /// stable-git work (ADR-0003 D5 keeps the co-development escape hatch:

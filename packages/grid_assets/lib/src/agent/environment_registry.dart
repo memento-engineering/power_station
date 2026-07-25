@@ -186,9 +186,10 @@ class EnvironmentRegistry {
       final base = current.base;
       final ({AgentEnvironment env, bool fromCustom})? parent = switch (base) {
         EnvBaseStandalone() => null,
-        EnvBaseUndeclared() => (fromCustom && builtins.containsKey(currentName))
-            ? (env: builtins[currentName]!, fromCustom: false)
-            : null,
+        EnvBaseUndeclared() =>
+          (fromCustom && builtins.containsKey(currentName))
+              ? (env: builtins[currentName]!, fromCustom: false)
+              : null,
         EnvBaseRef(name: final refName, scope: final refScope) => _lookup(
           refName,
           refScope,
@@ -226,14 +227,17 @@ class EnvironmentRegistry {
       final c = custom[name];
       return c == null ? null : (env: c, fromCustom: true);
     }
+
     ({AgentEnvironment env, bool fromCustom})? inBuiltin() {
       final b = builtins[name];
       return b == null ? null : (env: b, fromCustom: false);
     }
+
     return switch (scope) {
       BaseScope.builtin => inBuiltin(),
       BaseScope.provider => inCustom(),
-      BaseScope.auto => (name == excludeSelf ? null : inCustom()) ?? inBuiltin(),
+      BaseScope.auto =>
+        (name == excludeSelf ? null : inCustom()) ?? inBuiltin(),
     };
   }
 

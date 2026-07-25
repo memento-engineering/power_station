@@ -82,95 +82,99 @@ class _FakePrOpener implements PrOpener {
 }
 
 void main() {
-  group('GitGridAssets — source control resolved from the substation scope', () {
-    test('provides a GitSourceControl bound to the substation ONE root '
-        '(bead → substation → root, no root-name selector)', () {
-      SourceControl? sc;
-      mount(
-        _underSubstation(
-          'power_station',
-          '/work/ps',
-          GitGridAssets(child: _Probe((ctx) => sc = sourceControlOf(ctx))),
-        ),
-      );
-      expect(sc, isA<GitSourceControl>());
-      // The worktree layout is derived from the substation's root + name — a
-      // path, not a map lookup.
-      expect(
-        sc!.workspaceFor('tg-1'),
-        '/work/ps/.grid/worktrees/power_station/tg-1',
-      );
-      expect(sc!.branchFor('tg-1'), 'grid/tg-1');
-      expect(sc!.baseBranch, 'main');
-    });
-
-    test('an explicit defaultBranch drives the base branch (a live '
-        'registerRootCheckout probes this; an offline asset authors it)', () {
-      SourceControl? sc;
-      mount(
-        _underSubstation(
-          'tg',
-          '/work/tg',
-          GitGridAssets(
-            defaultBranch: 'm3-runtime',
-            child: _Probe((ctx) => sc = sourceControlOf(ctx)),
+  group(
+    'GitGridAssets — source control resolved from the substation scope',
+    () {
+      test('provides a GitSourceControl bound to the substation ONE root '
+          '(bead → substation → root, no root-name selector)', () {
+        SourceControl? sc;
+        mount(
+          _underSubstation(
+            'power_station',
+            '/work/ps',
+            GitGridAssets(child: _Probe((ctx) => sc = sourceControlOf(ctx))),
           ),
-        ),
-      );
-      expect(sc!.baseBranch, 'm3-runtime');
-    });
+        );
+        expect(sc, isA<GitSourceControl>());
+        // The worktree layout is derived from the substation's root + name — a
+        // path, not a map lookup.
+        expect(
+          sc!.workspaceFor('tg-1'),
+          '/work/ps/.grid/worktrees/power_station/tg-1',
+        );
+        expect(sc!.branchFor('tg-1'), 'grid/tg-1');
+        expect(sc!.baseBranch, 'main');
+      });
 
-    test('GitGridAssets alone is commit-only — NO delivery is bound until '
-        'GitHubGridAssets binds one', () {
-      ServiceBundle? bundle;
-      mount(
-        _underSubstation(
-          'power_station',
-          '/work/ps',
-          GitGridAssets(
-            child: _Probe(
-              (ctx) => bundle = ctx.getInheritedSeedOfExactType<ServiceBundle>(),
+      test('an explicit defaultBranch drives the base branch (a live '
+          'registerRootCheckout probes this; an offline asset authors it)', () {
+        SourceControl? sc;
+        mount(
+          _underSubstation(
+            'tg',
+            '/work/tg',
+            GitGridAssets(
+              defaultBranch: 'm3-runtime',
+              child: _Probe((ctx) => sc = sourceControlOf(ctx)),
             ),
           ),
-        ),
-      );
-      expect(bundle!.sourceControl, isA<GitSourceControl>());
-      expect(bundle!.delivery, isNull);
-    });
+        );
+        expect(sc!.baseBranch, 'm3-runtime');
+      });
 
-    test('the provided ServiceBundle carries the substation\'s ONE source '
-        'control, and sourceControlOf resolves it by TREE POSITION — the '
-        'string-keyed bundle map is GONE from the type itself (the fossil '
-        'track deleted sourceControlsByRoot/sourceControlFor outright)', () {
-      ServiceBundle? bundle;
-      SourceControl? resolved;
-      mount(
-        _underSubstation(
-          'power_station',
-          '/work/ps',
-          GitGridAssets(
-            child: _Probe((ctx) {
-              bundle = ctx.getInheritedSeedOfExactType<ServiceBundle>();
-              resolved = sourceControlOf(ctx);
-            }),
+      test('GitGridAssets alone is commit-only — NO delivery is bound until '
+          'GitHubGridAssets binds one', () {
+        ServiceBundle? bundle;
+        mount(
+          _underSubstation(
+            'power_station',
+            '/work/ps',
+            GitGridAssets(
+              child: _Probe(
+                (ctx) =>
+                    bundle = ctx.getInheritedSeedOfExactType<ServiceBundle>(),
+              ),
+            ),
           ),
-        ),
-      );
-      expect(bundle, isNotNull);
-      expect(bundle!.sourceControl, isNotNull);
-      // The v3 resolution: bead → substation → root — the nearest bundle IS
-      // the substation's own; no name ever selects against a map.
-      expect(resolved, same(bundle!.sourceControl));
-    });
+        );
+        expect(bundle!.sourceControl, isA<GitSourceControl>());
+        expect(bundle!.delivery, isNull);
+      });
 
-    test('mounted outside a Substation it refuses LOUD (an asset without a '
-        'scope is an authoring error, not a default)', () {
-      expect(
-        () => mount(GitGridAssets(child: _Probe((_) {}))),
-        throwsStateError,
-      );
-    });
-  });
+      test('the provided ServiceBundle carries the substation\'s ONE source '
+          'control, and sourceControlOf resolves it by TREE POSITION — the '
+          'string-keyed bundle map is GONE from the type itself (the fossil '
+          'track deleted sourceControlsByRoot/sourceControlFor outright)', () {
+        ServiceBundle? bundle;
+        SourceControl? resolved;
+        mount(
+          _underSubstation(
+            'power_station',
+            '/work/ps',
+            GitGridAssets(
+              child: _Probe((ctx) {
+                bundle = ctx.getInheritedSeedOfExactType<ServiceBundle>();
+                resolved = sourceControlOf(ctx);
+              }),
+            ),
+          ),
+        );
+        expect(bundle, isNotNull);
+        expect(bundle!.sourceControl, isNotNull);
+        // The v3 resolution: bead → substation → root — the nearest bundle IS
+        // the substation's own; no name ever selects against a map.
+        expect(resolved, same(bundle!.sourceControl));
+      });
+
+      test('mounted outside a Substation it refuses LOUD (an asset without a '
+          'scope is an authoring error, not a default)', () {
+        expect(
+          () => mount(GitGridAssets(child: _Probe((_) {}))),
+          throwsStateError,
+        );
+      });
+    },
+  );
 
   group('GitHubGridAssets — BINDS the delivery method onto the git asset', () {
     test('GitGridAssets + GitHubGridAssets (BOTH halves) in a Nest → a bound '
@@ -189,7 +193,8 @@ void main() {
               ),
             ],
             child: _Probe(
-              (ctx) => bundle = ctx.getInheritedSeedOfExactType<ServiceBundle>(),
+              (ctx) =>
+                  bundle = ctx.getInheritedSeedOfExactType<ServiceBundle>(),
             ),
           ),
         ),
@@ -204,57 +209,63 @@ void main() {
       );
     });
 
-    test('GitHubGridAssets with no git asset above binds NOTHING — GitHub can '
-        'only ADD delivery to a checkout it can commit from, never conjure one '
-        '(A7(3)\'s fold-order invariant, preserved across the mechanism change)',
-        () {
-      SourceControl? sc = _sentinel;
-      ServiceBundle? bundle;
-      mount(
-        _underSubstation(
-          'the_grid',
-          '/work/tg',
-          Nest(
-            children: [
-              GitHubGridAssets(
-                gitOps: GitOps(_FakeGitRunner()),
-                prOpener: _FakePrOpener(),
-              ),
-            ],
-            child: _Probe((ctx) {
-              sc = sourceControlOf(ctx);
-              bundle = ctx.getInheritedSeedOfExactType<ServiceBundle>();
-            }),
-          ),
-        ),
-      );
-      // The bundle GitHubGridAssets re-provides carries a NULL source control —
-      // there was no ancestor to read one from — so nothing can be delivered FROM.
-      expect(sc, isNull);
-      expect(bundle?.sourceControl, isNull);
-    });
-
-    test('GitHubGridAssets with only ONE half (no prOpener) binds NOTHING — the '
-        'substation stays commit-only', () {
-      ServiceBundle? bundle;
-      mount(
-        _underSubstation(
-          'the_grid',
-          '/work/tg',
-          Nest(
-            children: [
-              const GitGridAssets(),
-              GitHubGridAssets(gitOps: GitOps(_FakeGitRunner())),
-            ],
-            child: _Probe(
-              (ctx) => bundle = ctx.getInheritedSeedOfExactType<ServiceBundle>(),
+    test(
+      'GitHubGridAssets with no git asset above binds NOTHING — GitHub can '
+      'only ADD delivery to a checkout it can commit from, never conjure one '
+      '(A7(3)\'s fold-order invariant, preserved across the mechanism change)',
+      () {
+        SourceControl? sc = _sentinel;
+        ServiceBundle? bundle;
+        mount(
+          _underSubstation(
+            'the_grid',
+            '/work/tg',
+            Nest(
+              children: [
+                GitHubGridAssets(
+                  gitOps: GitOps(_FakeGitRunner()),
+                  prOpener: _FakePrOpener(),
+                ),
+              ],
+              child: _Probe((ctx) {
+                sc = sourceControlOf(ctx);
+                bundle = ctx.getInheritedSeedOfExactType<ServiceBundle>();
+              }),
             ),
           ),
-        ),
-      );
-      expect(bundle!.delivery, isNull);
-      expect(bundle!.sourceControl, isA<GitSourceControl>());
-    });
+        );
+        // The bundle GitHubGridAssets re-provides carries a NULL source control —
+        // there was no ancestor to read one from — so nothing can be delivered FROM.
+        expect(sc, isNull);
+        expect(bundle?.sourceControl, isNull);
+      },
+    );
+
+    test(
+      'GitHubGridAssets with only ONE half (no prOpener) binds NOTHING — the '
+      'substation stays commit-only',
+      () {
+        ServiceBundle? bundle;
+        mount(
+          _underSubstation(
+            'the_grid',
+            '/work/tg',
+            Nest(
+              children: [
+                const GitGridAssets(),
+                GitHubGridAssets(gitOps: GitOps(_FakeGitRunner())),
+              ],
+              child: _Probe(
+                (ctx) =>
+                    bundle = ctx.getInheritedSeedOfExactType<ServiceBundle>(),
+              ),
+            ),
+          ),
+        );
+        expect(bundle!.delivery, isNull);
+        expect(bundle!.sourceControl, isA<GitSourceControl>());
+      },
+    );
   });
 
   group('sourceControlOf — pure resolution, isolated per substation', () {
@@ -285,7 +296,11 @@ void main() {
         'posture — provisioning + land no-op)', () {
       SourceControl? sc = _sentinel;
       mount(
-        _underSubstation('sa', '/work/sa', _Probe((ctx) => sc = sourceControlOf(ctx))),
+        _underSubstation(
+          'sa',
+          '/work/sa',
+          _Probe((ctx) => sc = sourceControlOf(ctx)),
+        ),
       );
       expect(sc, isNull);
     });
@@ -346,94 +361,109 @@ void main() {
       expect(resolver, same(r));
     });
 
-    test('forCircuit sugar mounts a single circuit for every bead in scope', () {
-      CircuitResolver? resolver;
-      mount(
-        CircuitProvider.forCircuit(
-          kCodeCircuit,
-          child: _Probe(
-            (ctx) =>
-                resolver = ctx.getInheritedSeedOfExactType<CircuitResolver>(),
+    test(
+      'forCircuit sugar mounts a single circuit for every bead in scope',
+      () {
+        CircuitResolver? resolver;
+        mount(
+          CircuitProvider.forCircuit(
+            kCodeCircuit,
+            child: _Probe(
+              (ctx) =>
+                  resolver = ctx.getInheritedSeedOfExactType<CircuitResolver>(),
+            ),
           ),
-        ),
-      );
-      expect(resolver, isNotNull);
-      final anyBead = Bead(
-        id: 'any',
-        issueType: IssueType.task,
-        status: BeadStatus.open,
-      );
-      expect(resolver!.rootCircuitFor(anyBead).id, kCodeCircuit.id);
-    });
+        );
+        expect(resolver, isNotNull);
+        final anyBead = Bead(
+          id: 'any',
+          issueType: IssueType.task,
+          status: BeadStatus.open,
+        );
+        expect(resolver!.rootCircuitFor(anyBead).id, kCodeCircuit.id);
+      },
+    );
   });
 
-  group('the assets compose under the real grid_sdk Substation (v3 §2 shape)',
-      () {
-    test('RawAssetGrid → Station(HarnessProvider) → Substations → '
-        'Substation(Nest[GitGridAssets, GitHubGridAssets]) resolves, at the '
-        'leaf, the substation land-capable source control AND the station '
-        'harness registry AND the substation scope', () {
-      SourceControl? sc;
-      DeliveryMethod? delivery;
-      EnvironmentRegistry? reg;
-      sdk.SubstationScope? scope;
-      mount(
-        sdk.RawAssetGrid(
-          root: '/home/space_station',
-          assets: [
-            sdk.Station(
-              name: 'MBP',
-              assets: [
-                HarnessProvider(
-                  child: sdk.Substations(
-                    substations: [
-                      sdk.Substation(
-                        'the_grid',
-                        '/work/the_grid',
-                        assets: [
-                          Nest(
-                            children: [
-                              const GitGridAssets(),
-                              GitHubGridAssets(
-                                gitOps: GitOps(_FakeGitRunner()),
-                                prOpener: _FakePrOpener(),
-                              ),
-                            ],
-                            child: _Probe((ctx) {
-                              sc = sourceControlOf(ctx);
-                              delivery = ctx
-                                  .getInheritedSeedOfExactType<ServiceBundle>()
-                                  ?.delivery;
-                              reg = ctx
-                                  .getInheritedSeedOfExactType<
-                                      EnvironmentRegistry>();
-                              scope = sdk.SubstationScope.maybeOf(ctx);
-                            }),
-                          ),
-                        ],
-                      ),
-                    ],
+  group(
+    'the assets compose under the real grid_sdk Substation (v3 §2 shape)',
+    () {
+      test('RawAssetGrid → Station(HarnessProvider) → Substations → '
+          'Substation(Nest[GitGridAssets, GitHubGridAssets]) resolves, at the '
+          'leaf, the substation land-capable source control AND the station '
+          'harness registry AND the substation scope', () {
+        SourceControl? sc;
+        DeliveryMethod? delivery;
+        EnvironmentRegistry? reg;
+        sdk.SubstationScope? scope;
+        mount(
+          sdk.RawAssetGrid(
+            root: '/home/space_station',
+            assets: [
+              sdk.Station(
+                name: 'MBP',
+                assets: [
+                  HarnessProvider(
+                    child: sdk.Substations(
+                      substations: [
+                        sdk.Substation(
+                          'the_grid',
+                          '/work/the_grid',
+                          assets: [
+                            Nest(
+                              children: [
+                                const GitGridAssets(),
+                                GitHubGridAssets(
+                                  gitOps: GitOps(_FakeGitRunner()),
+                                  prOpener: _FakePrOpener(),
+                                ),
+                              ],
+                              child: _Probe((ctx) {
+                                sc = sourceControlOf(ctx);
+                                delivery = ctx
+                                    .getInheritedSeedOfExactType<
+                                      ServiceBundle
+                                    >()
+                                    ?.delivery;
+                                reg = ctx
+                                    .getInheritedSeedOfExactType<
+                                      EnvironmentRegistry
+                                    >();
+                                scope = sdk.SubstationScope.maybeOf(ctx);
+                              }),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
                   ),
-                ),
-              ],
-            ),
-          ],
-        ),
-      );
-      // Substation-scoped: the substation's own git, with delivery BOUND.
-      expect(sc, isA<GitSourceControl>());
-      expect(delivery, isA<GitHubPrDelivery>());
-      expect(
-        sc!.workspaceFor('tg-1'),
-        '/work/the_grid/.grid/worktrees/the_grid/tg-1',
-      );
-      // Station-scoped: the machine's harness registry reaches the leaf.
-      expect(reg, isNotNull);
-      expect(reg!.names, contains('claude'));
-      // The substation scope the asset resolved against.
-      expect(scope, const sdk.SubstationScope(name: 'the_grid', root: '/work/the_grid', prefix: 'the_grid'));
-    });
-  });
+                ],
+              ),
+            ],
+          ),
+        );
+        // Substation-scoped: the substation's own git, with delivery BOUND.
+        expect(sc, isA<GitSourceControl>());
+        expect(delivery, isA<GitHubPrDelivery>());
+        expect(
+          sc!.workspaceFor('tg-1'),
+          '/work/the_grid/.grid/worktrees/the_grid/tg-1',
+        );
+        // Station-scoped: the machine's harness registry reaches the leaf.
+        expect(reg, isNotNull);
+        expect(reg!.names, contains('claude'));
+        // The substation scope the asset resolved against.
+        expect(
+          scope,
+          const sdk.SubstationScope(
+            name: 'the_grid',
+            root: '/work/the_grid',
+            prefix: 'the_grid',
+          ),
+        );
+      });
+    },
+  );
 
   group('GitServices — the ambient git-machinery carrier (pow-72b)', () {
     test('BARE seat assets source the gitOps half from the CARRIER — the clean '
@@ -463,92 +493,105 @@ void main() {
         ),
       );
       expect(sc, isA<GitSourceControl>());
-      expect(delivery, isA<GitHubPrDelivery>(),
-          reason: 'carrier gitOps + GitHub prOpener'); 
+      expect(
+        delivery,
+        isA<GitHubPrDelivery>(),
+        reason: 'carrier gitOps + GitHub prOpener',
+      );
       expect(sc!.workspaceFor('pow-1'), '/work/ps/.grid/worktrees/ps/pow-1');
       expect(sc!.branchFor('pow-1'), 'grid/pow-1');
       expect(sc!.baseBranch, 'main');
     });
 
-    test('a BARE GitGridAssets() sources the provisioner from the carrier — '
-        'provisionWorkspace drives the carrier machinery, not a no-op', () async {
-      final runner = _RecordingGitRunner();
-      // A real root dir: provisionWorktree creates the substation parent dir
-      // on disk before its (faked) `git worktree add`.
-      final rootDir = Directory.systemTemp.createTempSync('pow72b-root');
-      addTearDown(() => rootDir.deleteSync(recursive: true));
-      SourceControl? sc;
-      mount(
-        _underSubstation(
-          'ps',
-          rootDir.path,
-          InheritedSeed<GitServices>(
-            value: GitServices(
-              provisioner: StationGitService(
-                runner: runner,
-                prOpener: _FakePrOpener(),
-              ),
-            ),
-            child: GitGridAssets(
-              child: _Probe((ctx) => sc = sourceControlOf(ctx)),
-            ),
-          ),
-        ),
-      );
-      await sc!.provisionWorkspace(
-        beadId: 'pow-1',
-        workspaceDir: sc!.workspaceFor('pow-1'),
-      );
-      expect(
-        runner.calls,
-        isNotEmpty,
-        reason: 'the context-sourced provisioner ran git for the worktree — '
-            'a null provisioner would have no-opped (offline)',
-      );
-    });
-
-    test('an explicit ctor arg WINS over the carrier, per FIELD (tests inject) '
-        '— now at GitHubGridAssets, the node that CONSUMES the gitOps half',
-        () async {
-      final carrierRunner = _RecordingGitRunner();
-      final ctorRunner = _RecordingGitRunner();
-      DeliveryMethod? delivery;
-      mount(
-        _underSubstation(
-          'ps',
-          '/work/ps',
-          InheritedSeed<GitServices>(
-            value: GitServices(gitOps: GitOps(carrierRunner)),
-            child: Nest(
-              children: [
-                const GitGridAssets(),
-                GitHubGridAssets(
-                  gitOps: GitOps(ctorRunner),
+    test(
+      'a BARE GitGridAssets() sources the provisioner from the carrier — '
+      'provisionWorkspace drives the carrier machinery, not a no-op',
+      () async {
+        final runner = _RecordingGitRunner();
+        // A real root dir: provisionWorktree creates the substation parent dir
+        // on disk before its (faked) `git worktree add`.
+        final rootDir = Directory.systemTemp.createTempSync('pow72b-root');
+        addTearDown(() => rootDir.deleteSync(recursive: true));
+        SourceControl? sc;
+        mount(
+          _underSubstation(
+            'ps',
+            rootDir.path,
+            InheritedSeed<GitServices>(
+              value: GitServices(
+                provisioner: StationGitService(
+                  runner: runner,
                   prOpener: _FakePrOpener(),
                 ),
-              ],
-              child: _Probe(
-                (ctx) => delivery = ctx
-                    .getInheritedSeedOfExactType<ServiceBundle>()
-                    ?.delivery,
+              ),
+              child: GitGridAssets(
+                child: _Probe((ctx) => sc = sourceControlOf(ctx)),
               ),
             ),
           ),
-        ),
-      );
-      // Drive the BOUND METHOD: whichever GitOps it closed over is the one that
-      // runs git.
-      await delivery!.deliver(
-        DeliveryRequest(
-          bead: bead('ps-1'),
-          sessionId: 's-1',
-          nodePath: 'ps-1/deliver',
-          workspace: testWorkspace('ps-1', workspaceDir: '/work/ps/x'),
-        ),
-      );
-      expect(ctorRunner.calls, isNotEmpty, reason: 'the ctor gitOps committed');
-      expect(carrierRunner.calls, isEmpty, reason: 'the carrier half lost');
-    });
+        );
+        await sc!.provisionWorkspace(
+          beadId: 'pow-1',
+          workspaceDir: sc!.workspaceFor('pow-1'),
+        );
+        expect(
+          runner.calls,
+          isNotEmpty,
+          reason:
+              'the context-sourced provisioner ran git for the worktree — '
+              'a null provisioner would have no-opped (offline)',
+        );
+      },
+    );
+
+    test(
+      'an explicit ctor arg WINS over the carrier, per FIELD (tests inject) '
+      '— now at GitHubGridAssets, the node that CONSUMES the gitOps half',
+      () async {
+        final carrierRunner = _RecordingGitRunner();
+        final ctorRunner = _RecordingGitRunner();
+        DeliveryMethod? delivery;
+        mount(
+          _underSubstation(
+            'ps',
+            '/work/ps',
+            InheritedSeed<GitServices>(
+              value: GitServices(gitOps: GitOps(carrierRunner)),
+              child: Nest(
+                children: [
+                  const GitGridAssets(),
+                  GitHubGridAssets(
+                    gitOps: GitOps(ctorRunner),
+                    prOpener: _FakePrOpener(),
+                  ),
+                ],
+                child: _Probe(
+                  (ctx) => delivery = ctx
+                      .getInheritedSeedOfExactType<ServiceBundle>()
+                      ?.delivery,
+                ),
+              ),
+            ),
+          ),
+        );
+        // Drive the BOUND METHOD: whichever GitOps it closed over is the one that
+        // runs git.
+        await delivery!.deliver(
+          DeliveryRequest(
+            bead: bead('ps-1'),
+            sessionId: 's-1',
+            nodePath: 'ps-1/deliver',
+            workspace: testWorkspace('ps-1', workspaceDir: '/work/ps/x'),
+          ),
+        );
+        expect(
+          ctorRunner.calls,
+          isNotEmpty,
+          reason: 'the ctor gitOps committed',
+        );
+        expect(carrierRunner.calls, isEmpty, reason: 'the carrier half lost');
+      },
+    );
 
     test('the carrier read is SUBSCRIBING (D-H watch-deps) — re-provided '
         'machinery re-derives the seat\'s binding (offline → live BINDS '
@@ -587,14 +630,14 @@ void main() {
       expect(
         bundle!.delivery,
         isA<GitHubPrDelivery>(),
-        reason: 'a non-subscribing (get*) carrier read would keep the STALE '
+        reason:
+            'a non-subscribing (get*) carrier read would keep the STALE '
             'unbound bundle mounted — the sync-notifier-read class',
       );
     });
   });
 
-  group('GitHubGridAssets OBSERVES the ambient bundle (D-H watch-deps, tg-kx1)',
-      () {
+  group('GitHubGridAssets OBSERVES the ambient bundle (D-H watch-deps, tg-kx1)', () {
     test('a substation re-provision re-derives the binding — GitHubGridAssets '
         're-provides over the NEW root, never a stale wrap of the old one', () {
       SourceControl? sc;
@@ -641,7 +684,8 @@ void main() {
       expect(
         sc!.workspaceFor('x'),
         '/work/after/.grid/worktrees/sb/x',
-        reason: 'a non-subscribing (get*) read here would keep wrapping the '
+        reason:
+            'a non-subscribing (get*) read here would keep wrapping the '
             'STALE /work/before source control — the sync-notifier-read class',
       );
     });
@@ -671,7 +715,8 @@ void main() {
               ),
             ],
             child: _Probe(
-              (ctx) => seen = ctx.dependOnInheritedSeedOfExactType<PrComposition>(),
+              (ctx) =>
+                  seen = ctx.dependOnInheritedSeedOfExactType<PrComposition>(),
             ),
           ),
         ),
@@ -693,7 +738,8 @@ void main() {
               const GitHubGridAssets(composition: knob),
             ],
             child: _Probe(
-              (ctx) => seen = ctx.dependOnInheritedSeedOfExactType<PrComposition>(),
+              (ctx) =>
+                  seen = ctx.dependOnInheritedSeedOfExactType<PrComposition>(),
             ),
           ),
         ),
@@ -717,7 +763,8 @@ void main() {
               ),
             ],
             child: _Probe(
-              (ctx) => seen = ctx.dependOnInheritedSeedOfExactType<PrComposition>(),
+              (ctx) =>
+                  seen = ctx.dependOnInheritedSeedOfExactType<PrComposition>(),
             ),
           ),
         ),
@@ -768,13 +815,13 @@ class _ReprovidingScopeState extends State<_ReprovidingScope> {
 
   @override
   Seed build(TreeContext context) => InheritedSeed<sdk.SubstationScope>(
-        value: sdk.SubstationScope(
-          name: seed.controller._name,
-          root: seed.controller._root,
-          prefix: seed.controller._name,
-        ),
-        child: seed.child,
-      );
+    value: sdk.SubstationScope(
+      name: seed.controller._name,
+      root: seed.controller._root,
+      prefix: seed.controller._name,
+    ),
+    child: seed.child,
+  );
 }
 
 /// A recording [GitRunner] — argv capture proves WHICH machinery actually ran
@@ -833,9 +880,9 @@ class _ReprovidingServicesState extends State<_ReprovidingServices> {
 
   @override
   Seed build(TreeContext context) => InheritedSeed<GitServices>(
-        value: seed.controller._value,
-        child: seed.child,
-      );
+    value: seed.controller._value,
+    child: seed.child,
+  );
 }
 
 /// A distinct-from-null sentinel so a test can tell "assigned null" from "never
@@ -851,5 +898,8 @@ class _SentinelSourceControl implements SourceControl {
   @override
   String workspaceFor(String beadId) => '';
   @override
-  Future<void> provisionWorkspace({required String beadId, required String workspaceDir}) async {}
+  Future<void> provisionWorkspace({
+    required String beadId,
+    required String workspaceDir,
+  }) async {}
 }

@@ -25,106 +25,104 @@ import 'package:test/test.dart';
 import '../support/asset_fakes.dart';
 import 'conformance_probes.dart';
 
-GraphSnapshot _graph({
-  required List<Bead> beads,
-  required Set<String> ready,
-}) => GraphSnapshot.fromParts(
-  beads: beads,
-  dependencies: const [],
-  readyIds: ready,
-  capturedAt: DateTime(2026),
-);
+GraphSnapshot _graph({required List<Bead> beads, required Set<String> ready}) =>
+    GraphSnapshot.fromParts(
+      beads: beads,
+      dependencies: const [],
+      readyIds: ready,
+      capturedAt: DateTime(2026),
+    );
 
 void main() {
   group('invariant 1 — no tree node subscribes into a pipeline', () {
-    test(
-      '(a) after mount the JoinedSnapshotNotifier has EXACTLY ONE persistent '
-      'listener — WorkList, the sole work-axis observer',
-      () async {
-        final f = buildFakes();
-        final work = CountingSnapshotSource(
-          _graph(beads: const [], ready: const {}),
-        );
-        // Adopted sessions carrying the READINESS LADDER complete (bead
-        // `pow-q7n`), so each work bead's agent spawns under one flush — the
-        // ladder head is a zero-agent ServiceCapability, and this suite's proof
-        // (the listener count) is about the work AXIS, not the circuit head.
-        final state = CountingSnapshotSource(
-          _graph(
-            beads: [
-              ...ladderDoneSession(id: 'tgdog-1', workBeadId: 'tg-1'),
-              ...ladderDoneSession(id: 'tgdog-2', workBeadId: 'tg-2'),
-            ],
-            ready: const {},
-          ),
-        );
-        // The bridge drives our counting notifier — but does NOT own it (we
-        // pass it in), so the count reflects tree listeners + the WorkList only.
-        final notifier = CountingJoinedSnapshotNotifier(JoinedSnapshot.empty());
-        final bridge = StationJoinBridge(
-          work: work,
-          state: state,
-          notifier: notifier,
-        );
-        final kernel = StationKernel(
-          bridge: bridge,
-          stationServices: f.ctx,
-          resolver: kCodeResolver,
-          registry: buildCodeRegistry(),
-          substations: [
-            SubstationScope(
-              configNotifier: SubstationConfigNotifier(
-                const SubstationConfig(substationId: 'tg', ownedSubstations: {'tg'}),
-              ),
-              key: const ValueKey('scope.tg'),
-            ),
+    test('(a) after mount the JoinedSnapshotNotifier has EXACTLY ONE persistent '
+        'listener — WorkList, the sole work-axis observer', () async {
+      final f = buildFakes();
+      final work = CountingSnapshotSource(
+        _graph(beads: const [], ready: const {}),
+      );
+      // Adopted sessions carrying the READINESS LADDER complete (bead
+      // `pow-q7n`), so each work bead's agent spawns under one flush — the
+      // ladder head is a zero-agent ServiceCapability, and this suite's proof
+      // (the listener count) is about the work AXIS, not the circuit head.
+      final state = CountingSnapshotSource(
+        _graph(
+          beads: [
+            ...ladderDoneSession(id: 'tgdog-1', workBeadId: 'tg-1'),
+            ...ladderDoneSession(id: 'tgdog-2', workBeadId: 'tg-2'),
           ],
-        );
-        addTearDown(kernel.dispose);
-        addTearDown(notifier.dispose);
-        addTearDown(f.provider.close);
-        addTearDown(work.close);
-        addTearDown(state.close);
+          ready: const {},
+        ),
+      );
+      // The bridge drives our counting notifier — but does NOT own it (we
+      // pass it in), so the count reflects tree listeners + the WorkList only.
+      final notifier = CountingJoinedSnapshotNotifier(JoinedSnapshot.empty());
+      final bridge = StationJoinBridge(
+        work: work,
+        state: state,
+        notifier: notifier,
+      );
+      final kernel = StationKernel(
+        bridge: bridge,
+        stationServices: f.ctx,
+        resolver: kCodeResolver,
+        registry: buildCodeRegistry(),
+        substations: [
+          SubstationScope(
+            configNotifier: SubstationConfigNotifier(
+              const SubstationConfig(
+                substationId: 'tg',
+                ownedSubstations: {'tg'},
+              ),
+            ),
+            key: const ValueKey('scope.tg'),
+          ),
+        ],
+      );
+      addTearDown(kernel.dispose);
+      addTearDown(notifier.dispose);
+      addTearDown(f.provider.close);
+      addTearDown(work.close);
+      addTearDown(state.close);
 
-        // Before mount: no tree listener at all.
-        expect(notifier.liveListenerCount, 0);
+      // Before mount: no tree listener at all.
+      expect(notifier.liveListenerCount, 0);
 
-        kernel.start();
-        await pumpEventQueue();
+      kernel.start();
+      await pumpEventQueue();
 
-        // After mounting the WHOLE tree: exactly ONE persistent listener — the
-        // WorkList. Every other node (Station/SubstationScope/Substation/WorkBead/effects)
-        // observes the work axis through NONE of its own subscriptions.
-        expect(
-          notifier.liveListenerCount,
-          1,
-          reason: 'WorkList is the only work-axis observer (invariant 1)',
-        );
+      // After mounting the WHOLE tree: exactly ONE persistent listener — the
+      // WorkList. Every other node (Station/SubstationScope/Substation/WorkBead/effects)
+      // observes the work axis through NONE of its own subscriptions.
+      expect(
+        notifier.liveListenerCount,
+        1,
+        reason: 'WorkList is the only work-axis observer (invariant 1)',
+      );
 
-        // A work tick changes the value but NOT the listener count (the single
-        // subscription is stable — no node opportunistically subscribes).
-        work.push(_graph(beads: [bead('tg-1')], ready: {'tg-1'}));
-        await pumpEventQueue();
-        expect(
-          notifier.liveListenerCount,
-          1,
-          reason: 'mounting a WorkBead+effect adds NO new pipeline listener',
-        );
+      // A work tick changes the value but NOT the listener count (the single
+      // subscription is stable — no node opportunistically subscribes).
+      work.push(_graph(beads: [bead('tg-1')], ready: {'tg-1'}));
+      await pumpEventQueue();
+      expect(
+        notifier.liveListenerCount,
+        1,
+        reason: 'mounting a WorkBead+effect adds NO new pipeline listener',
+      );
 
-        // Mounting a second work bead also adds no listener — WorkBeads/effects
-        // are pure-config-driven, never observers.
-        work.push(
-          _graph(beads: [bead('tg-1'), bead('tg-2')], ready: {'tg-1', 'tg-2'}),
-        );
-        await settle(() => f.provider.started.length >= 2);
-        expect(notifier.liveListenerCount, 1);
-        expect(
-          f.provider.started.length,
-          2,
-          reason: 'sanity: both work beads actually mounted+spawned',
-        );
-      },
-    );
+      // Mounting a second work bead also adds no listener — WorkBeads/effects
+      // are pure-config-driven, never observers.
+      work.push(
+        _graph(beads: [bead('tg-1'), bead('tg-2')], ready: {'tg-1', 'tg-2'}),
+      );
+      await settle(() => f.provider.started.length >= 2);
+      expect(notifier.liveListenerCount, 1);
+      expect(
+        f.provider.started.length,
+        2,
+        reason: 'sanity: both work beads actually mounted+spawned',
+      );
+    });
 
     test(
       '(b) the bridge is the ONLY subscriber to the SnapshotSources — no tree '
@@ -154,7 +152,10 @@ void main() {
           substations: [
             SubstationScope(
               configNotifier: SubstationConfigNotifier(
-                const SubstationConfig(substationId: 'tg', ownedSubstations: {'tg'}),
+                const SubstationConfig(
+                  substationId: 'tg',
+                  ownedSubstations: {'tg'},
+                ),
               ),
               key: const ValueKey('scope.tg'),
             ),
@@ -225,7 +226,10 @@ void main() {
                   child: Station([
                     SubstationScope(
                       configNotifier: SubstationConfigNotifier(
-                        const SubstationConfig(substationId: 'tg', ownedSubstations: {'tg'}),
+                        const SubstationConfig(
+                          substationId: 'tg',
+                          ownedSubstations: {'tg'},
+                        ),
                       ),
                       key: const ValueKey('scope.tg'),
                     ),
@@ -246,15 +250,17 @@ void main() {
         // carries the READINESS LADDER complete (bead `pow-q7n`), so the head
         // that spawns is `specify`, not the ladder's zero-agent `intake`.
         // → ONE agent spawn.
-        joined.push(JoinedSnapshot(
-          graph: _graph(beads: [bead('tg-1')], ready: {'tg-1'}),
-          sessionsByWorkBead: {
-            'tg-1': _moleculeLadderDoneProjection(
-              workBeadId: 'tg-1',
-              sessionId: 'tgdog-1',
-            ),
-          },
-        ));
+        joined.push(
+          JoinedSnapshot(
+            graph: _graph(beads: [bead('tg-1')], ready: {'tg-1'}),
+            sessionsByWorkBead: {
+              'tg-1': _moleculeLadderDoneProjection(
+                workBeadId: 'tg-1',
+                sessionId: 'tgdog-1',
+              ),
+            },
+          ),
+        );
         owner.flush();
         await pumpEventQueue();
         expect(f.provider.started, hasLength(1));
@@ -262,27 +268,31 @@ void main() {
         // Capture the config subtree's identity: the WorkList branch sits BELOW
         // the config ancestors (SubstationScope→Substation→WorkList). A config-ancestor
         // rebuild re-creates this child branch (a new branchId).
-        final workListId =
-            _branchWhere(mounted, (s) => s is WorkList).branchId;
+        final workListId = _branchWhere(mounted, (s) => s is WorkList).branchId;
 
         // SECOND work tick: ADD tg-2 (tg-1 unchanged). If a config ancestor
         // (SubstationScope/Substation) re-built on the work tick, the whole work subtree would
         // be re-created — tg-1's effect torn down+respawned (a stop + duplicate
         // start) AND the WorkList branch RE-CREATED. The guardrail asserts BOTH
         // the effect-churn signal AND the structural branch-identity signal.
-        joined.push(JoinedSnapshot(
-          graph: _graph(beads: [bead('tg-1'), bead('tg-2')], ready: {'tg-1', 'tg-2'}),
-          sessionsByWorkBead: {
-            'tg-1': _moleculeLadderDoneProjection(
-              workBeadId: 'tg-1',
-              sessionId: 'tgdog-1',
+        joined.push(
+          JoinedSnapshot(
+            graph: _graph(
+              beads: [bead('tg-1'), bead('tg-2')],
+              ready: {'tg-1', 'tg-2'},
             ),
-            'tg-2': _moleculeLadderDoneProjection(
-              workBeadId: 'tg-2',
-              sessionId: 'tgdog-2',
-            ),
-          },
-        ));
+            sessionsByWorkBead: {
+              'tg-1': _moleculeLadderDoneProjection(
+                workBeadId: 'tg-1',
+                sessionId: 'tgdog-1',
+              ),
+              'tg-2': _moleculeLadderDoneProjection(
+                workBeadId: 'tg-2',
+                sessionId: 'tgdog-2',
+              ),
+            },
+          ),
+        );
         owner.flush();
         await pumpEventQueue();
 

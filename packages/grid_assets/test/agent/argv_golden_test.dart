@@ -11,20 +11,28 @@ import 'package:test/test.dart';
 import '../support/asset_fakes.dart';
 
 void main() {
-  final ws = testWorkspace('tg-1', workspaceDir: '/w/tg-1', branch: 'grid/tg-1');
+  final ws = testWorkspace(
+    'tg-1',
+    workspaceDir: '/w/tg-1',
+    branch: 'grid/tg-1',
+  );
   const brief = AgentBrief(task: 'BODY');
   final rendered = brief.render();
 
   group('the single spawnFor matches the collapsed classes byte-for-byte', () {
-    RuntimeConfig render(String name, {String? model, String? usageOut, Uri? endpoint}) =>
-        spawnFor(
-          environment: kBuiltinEnvironments[name]!,
-          brief: brief,
-          workspace: ws,
-          model: model,
-          usageOut: usageOut,
-          endpoint: endpoint,
-        );
+    RuntimeConfig render(
+      String name, {
+      String? model,
+      String? usageOut,
+      Uri? endpoint,
+    }) => spawnFor(
+      environment: kBuiltinEnvironments[name]!,
+      brief: brief,
+      workspace: ws,
+      model: model,
+      usageOut: usageOut,
+      endpoint: endpoint,
+    );
 
     test('claude with model == the class output', () {
       expect(
@@ -32,22 +40,43 @@ void main() {
         RuntimeConfig(
           workDir: '/w/tg-1',
           command: 'claude',
-          args: ['--dangerously-skip-permissions', '--model', 'opus', '-p', rendered],
+          args: [
+            '--dangerously-skip-permissions',
+            '--model',
+            'opus',
+            '-p',
+            rendered,
+          ],
           lifecycle: Lifecycle.oneTurn,
         ),
       );
     });
     test('claude usage-wrapped == the class output', () {
-      final cfg = render('claude', model: 'opus', usageOut: '.grid/telemetry/tg-1_agent.usage.json');
+      final cfg = render(
+        'claude',
+        model: 'opus',
+        usageOut: '.grid/telemetry/tg-1_agent.usage.json',
+      );
       expect(cfg.command, 'sh');
       expect(cfg.args.sublist(2), [
-        'grid-claude', 'claude', '--dangerously-skip-permissions', '--model', 'opus',
-        '--output-format', 'json', '-p', rendered,
+        'grid-claude',
+        'claude',
+        '--dangerously-skip-permissions',
+        '--model',
+        'opus',
+        '--output-format',
+        'json',
+        '-p',
+        rendered,
       ]);
     });
     test('copilot places --model first, ignores usageOut (no surface)', () {
       expect(
-        render('copilot', model: 'opus', usageOut: '.grid/telemetry/x.usage.json'),
+        render(
+          'copilot',
+          model: 'opus',
+          usageOut: '.grid/telemetry/x.usage.json',
+        ),
         RuntimeConfig(
           workDir: '/w/tg-1',
           command: 'copilot',
@@ -58,7 +87,11 @@ void main() {
     });
     test('pi injects the endpoint env from the site binding', () {
       expect(
-        render('pi', model: 'qwen', endpoint: Uri.parse('http://127.0.0.1:8080')),
+        render(
+          'pi',
+          model: 'qwen',
+          endpoint: Uri.parse('http://127.0.0.1:8080'),
+        ),
         RuntimeConfig(
           workDir: '/w/tg-1',
           command: 'pi',
@@ -86,24 +119,44 @@ void main() {
           workDir: '/w/tg-1',
           command: 'codex',
           args: [
-            'exec', '--model', 'gpt-5-codex',
-            '--dangerously-bypass-approvals-and-sandbox', '--skip-git-repo-check', rendered,
+            'exec',
+            '--model',
+            'gpt-5-codex',
+            '--dangerously-bypass-approvals-and-sandbox',
+            '--skip-git-repo-check',
+            rendered,
           ],
           lifecycle: Lifecycle.oneTurn,
         ),
       );
     });
     test('codex usage-wrapped inserts --json before the prompt', () {
-      final cfg = render('codex', model: 'gpt-5-codex', usageOut: '.grid/telemetry/c.usage.json');
+      final cfg = render(
+        'codex',
+        model: 'gpt-5-codex',
+        usageOut: '.grid/telemetry/c.usage.json',
+      );
       expect(cfg.command, 'sh');
       expect(cfg.args.sublist(2), [
-        'grid-codex', 'codex', 'exec', '--model', 'gpt-5-codex',
-        '--dangerously-bypass-approvals-and-sandbox', '--skip-git-repo-check', '--json', rendered,
+        'grid-codex',
+        'codex',
+        'exec',
+        '--model',
+        'gpt-5-codex',
+        '--dangerously-bypass-approvals-and-sandbox',
+        '--skip-git-repo-check',
+        '--json',
+        rendered,
       ]);
     });
     test('the builtin roster is exactly the five', () {
-      expect(buildBuiltinEnvironmentRegistry().names.toSet(),
-          {'claude', 'copilot', 'pi', 'opencode', 'codex'});
+      expect(buildBuiltinEnvironmentRegistry().names.toSet(), {
+        'claude',
+        'copilot',
+        'pi',
+        'opencode',
+        'codex',
+      });
     });
   });
 }

@@ -105,8 +105,8 @@ class DartLinkCommand extends Command<int> {
     }
     final Map<String, dynamic> metadata;
     try {
-      metadata = jsonDecode(await metadataFile.readAsString())
-          as Map<String, dynamic>;
+      metadata =
+          jsonDecode(await metadataFile.readAsString()) as Map<String, dynamic>;
     } on Object catch (e) {
       stderr.writeln('dart link: metadata is not a JSON object: $e');
       return 64;

@@ -103,11 +103,10 @@ class ClaimLeaseCapability extends LeaseCapability<ClaimLeaseHandle> {
     StepArgs args,
   ) async {
     try {
-      await handle.client.dispatch(
-        handle.grant,
-        {'capabilityId': capabilityId, 'params': params},
-        idempotencyKey: _idem(args),
-      );
+      await handle.client.dispatch(handle.grant, {
+        'capabilityId': capabilityId,
+        'params': params,
+      }, idempotencyKey: _idem(args));
     } on FederationException catch (e) {
       return Failed('claim dispatch failed: ${e.message}');
     }

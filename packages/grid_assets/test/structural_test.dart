@@ -14,10 +14,7 @@ import 'package:test/test.dart';
 /// dir to find `packages/grid_assets/lib` (robust whether the suite runs from
 /// the repo root or the package dir).
 Directory _libDir() {
-  final candidates = <String>[
-    'lib',
-    p.join('packages', 'grid_assets', 'lib'),
-  ];
+  final candidates = <String>['lib', p.join('packages', 'grid_assets', 'lib')];
   var dir = Directory.current;
   for (var i = 0; i < 6; i++) {
     for (final rel in candidates) {
@@ -31,7 +28,9 @@ Directory _libDir() {
     if (parent.path == dir.path) break;
     dir = parent;
   }
-  fail('could not locate packages/grid_assets/lib from ${Directory.current.path}');
+  fail(
+    'could not locate packages/grid_assets/lib from ${Directory.current.path}',
+  );
 }
 
 void main() {

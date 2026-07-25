@@ -98,18 +98,27 @@ File _libFile(String relative) {
     if (parent.path == dir.path) break;
     dir = parent;
   }
-  fail('could not locate grid_assets/lib/$relative from ${Directory.current.path}');
+  fail(
+    'could not locate grid_assets/lib/$relative from ${Directory.current.path}',
+  );
 }
 
 /// The source text of the `AgentBrief` class body — sliced from its declaration
 /// to the next top-level declaration — for the structural field fence.
 String _agentBriefClassBody() {
-  final src = _libFile(p.join('src', 'agent', 'agent_harness.dart'))
-      .readAsStringSync();
+  final src = _libFile(
+    p.join('src', 'agent', 'agent_harness.dart'),
+  ).readAsStringSync();
   final start = src.indexOf('class AgentBrief {');
-  expect(start, greaterThanOrEqualTo(0),
-      reason: 'AgentBrief moved/renamed — update this Q3′ fence');
-  final end = src.indexOf(RegExp(r'\n(abstract |class |mixin |enum )'), start + 1);
+  expect(
+    start,
+    greaterThanOrEqualTo(0),
+    reason: 'AgentBrief moved/renamed — update this Q3′ fence',
+  );
+  final end = src.indexOf(
+    RegExp(r'\n(abstract |class |mixin |enum )'),
+    start + 1,
+  );
   return src.substring(start, end == -1 ? src.length : end);
 }
 
@@ -119,33 +128,53 @@ void main() {
     // 1. AgentBrief carries NO path-typed field (structural fence).
     // ---------------------------------------------------------------------
     group('AgentBrief declares no path-typed field (§8.1)', () {
-      test('its fields are content/policy only — none denotes a filesystem path',
-          () {
-        final body = _agentBriefClassBody();
-        // Every `final <Type> <name>` field, initialized or not (the type token
-        // excludes untyped locals like render()'s `final b = ...`).
-        final fields = RegExp(r'^\s*final\s+.+?\s+(\w+)\s*(?:=|;)', multiLine: true)
-            .allMatches(body)
-            .map((m) => m.group(1)!)
-            .toList();
-        // The known content/policy fields are present (the full set today —
-        // task + the working agreement + labeled context blocks).
-        expect(fields, containsAll(<String>['task', 'workingAgreement', 'context']),
-            reason: 'the brief carries rendered CONTENT + policy, nothing else');
-        // No field NAME denotes a path. A path-typed field is the Q3′
-        // regression: it would let a bead stamp ride the brief instead of
-        // resolving from the Workspace activation. (Dart can't type "path", so
-        // the field name is the enforceable proxy.)
-        const pathish = {
-          'workdir', 'workspacedir', 'root', 'worktree', 'cwd', 'repo',
-          'reporoot', 'path', 'dir', 'directory', 'home', 'basedir', 'checkout',
-        };
-        for (final f in fields) {
-          expect(pathish.contains(f.toLowerCase()), isFalse,
-              reason: 'AgentBrief.$f looks path-typed — paths must resolve from '
-                  'the Workspace activation (Q3′), never ride the brief');
-        }
-      });
+      test(
+        'its fields are content/policy only — none denotes a filesystem path',
+        () {
+          final body = _agentBriefClassBody();
+          // Every `final <Type> <name>` field, initialized or not (the type token
+          // excludes untyped locals like render()'s `final b = ...`).
+          final fields = RegExp(
+            r'^\s*final\s+.+?\s+(\w+)\s*(?:=|;)',
+            multiLine: true,
+          ).allMatches(body).map((m) => m.group(1)!).toList();
+          // The known content/policy fields are present (the full set today —
+          // task + the working agreement + labeled context blocks).
+          expect(
+            fields,
+            containsAll(<String>['task', 'workingAgreement', 'context']),
+            reason: 'the brief carries rendered CONTENT + policy, nothing else',
+          );
+          // No field NAME denotes a path. A path-typed field is the Q3′
+          // regression: it would let a bead stamp ride the brief instead of
+          // resolving from the Workspace activation. (Dart can't type "path", so
+          // the field name is the enforceable proxy.)
+          const pathish = {
+            'workdir',
+            'workspacedir',
+            'root',
+            'worktree',
+            'cwd',
+            'repo',
+            'reporoot',
+            'path',
+            'dir',
+            'directory',
+            'home',
+            'basedir',
+            'checkout',
+          };
+          for (final f in fields) {
+            expect(
+              pathish.contains(f.toLowerCase()),
+              isFalse,
+              reason:
+                  'AgentBrief.$f looks path-typed — paths must resolve from '
+                  'the Workspace activation (Q3′), never ride the brief',
+            );
+          }
+        },
+      );
     });
 
     // ---------------------------------------------------------------------
@@ -161,15 +190,22 @@ void main() {
       });
 
       test('no bead-stamped path leaks into the brief (Q3′)', () {
-        expect(rendered, isNot(contains(_poison)),
-            reason: 'a resolved path on the bead (grid.root/worktree/branch) '
-                'must never reach the brief — briefs inflate from the activation');
+        expect(
+          rendered,
+          isNot(contains(_poison)),
+          reason:
+              'a resolved path on the bead (grid.root/worktree/branch) '
+              'must never reach the brief — briefs inflate from the activation',
+        );
       });
 
       test('the working agreement interpolates the Workspace, not the bead', () {
         // The one path interpolated into brief text is the working agreement's
         // ${workspace.workspaceDir} + ${workspace.branch} (§8.1) — seed, not bead.
-        expect(brief.workingAgreement, contains('/real/activation/worktree/tg-m2q'));
+        expect(
+          brief.workingAgreement,
+          contains('/real/activation/worktree/tg-m2q'),
+        );
         expect(brief.workingAgreement, contains('grid/tg-m2q'));
         expect(brief.workingAgreement, isNot(contains(_poison)));
       });
@@ -194,34 +230,37 @@ void main() {
     //    (absolute + cwd-invariant since tg-r66). It must still leak no
     //    bead-stamped path.
     // ---------------------------------------------------------------------
-    group('buildCriticPrompt reads no path off the bead (the critic brief)', () {
-      const workspaceDir = '/activations/tg-m2q';
-      final prompt = const CriticCapability().buildCriticPrompt(
-        _poisonedBead(),
-        'spec-adherence',
-        'tg-m2q/review/spec-adherence',
-        workspaceDir,
-        round: 0,
-      );
-
-      test('no bead-stamped path leaks into the critic prompt (Q3′)', () {
-        expect(prompt, isNot(contains(_poison)));
-      });
-
-      test('its verdict path derives from the activation workspace, '
-          'never the bead (§8.1, tg-r66)', () {
-        expect(
-          prompt,
-          contains('$workspaceDir/.grid/critique/spec-adherence.json'),
+    group(
+      'buildCriticPrompt reads no path off the bead (the critic brief)',
+      () {
+        const workspaceDir = '/activations/tg-m2q';
+        final prompt = const CriticCapability().buildCriticPrompt(
+          _poisonedBead(),
+          'spec-adherence',
+          'tg-m2q/review/spec-adherence',
+          workspaceDir,
+          round: 0,
         );
-      });
 
-      test('the bead CONTENT flows through (reference-only reads, §8.5)', () {
-        expect(prompt, contains('Wire the federation bus'));
-        expect(prompt, contains('Connect The Studio to The Dashboard.'));
-        expect(prompt, contains('A lossy inter-station gossip bus.'));
-      });
-    });
+        test('no bead-stamped path leaks into the critic prompt (Q3′)', () {
+          expect(prompt, isNot(contains(_poison)));
+        });
+
+        test('its verdict path derives from the activation workspace, '
+            'never the bead (§8.1, tg-r66)', () {
+          expect(
+            prompt,
+            contains('$workspaceDir/.grid/critique/spec-adherence.json'),
+          );
+        });
+
+        test('the bead CONTENT flows through (reference-only reads, §8.5)', () {
+          expect(prompt, contains('Wire the federation bus'));
+          expect(prompt, contains('Connect The Studio to The Dashboard.'));
+          expect(prompt, contains('A lossy inter-station gossip bus.'));
+        });
+      },
+    );
 
     // ---------------------------------------------------------------------
     // 3b. The spec stage's brief builders (bead `pow-6ao`) hold the same
@@ -251,10 +290,7 @@ void main() {
           round: 0,
         );
         expect(prompt, isNot(contains(_poison)));
-        expect(
-          prompt,
-          contains('$workspaceDir/.grid/critique/coherence.json'),
-        );
+        expect(prompt, contains('$workspaceDir/.grid/critique/coherence.json'));
         expect(prompt, contains('Wire the federation bus'));
       });
 
@@ -312,45 +348,63 @@ void main() {
         });
       }
 
-      test('claude usage-capture wrapper keeps workDir at the activation (FT-2)',
-          () {
-        final cfg = spawnFor(
-          environment: kBuiltinEnvironments['claude']!,
-          brief: brief,
-          workspace: ws,
-          usageOut: usageReportPath('tg-m2q/agent'),
-        );
-        // The sh-wrapped invocation (FT-2) still cwds at the activation.
-        expect(cfg.command, 'sh');
-        expect(cfg.workDir, ws.workspaceDir);
-        expect(cfg.args.join('\n'), isNot(contains(_poison)));
-      });
+      test(
+        'claude usage-capture wrapper keeps workDir at the activation (FT-2)',
+        () {
+          final cfg = spawnFor(
+            environment: kBuiltinEnvironments['claude']!,
+            brief: brief,
+            workspace: ws,
+            usageOut: usageReportPath('tg-m2q/agent'),
+          );
+          // The sh-wrapped invocation (FT-2) still cwds at the activation.
+          expect(cfg.command, 'sh');
+          expect(cfg.workDir, ws.workspaceDir);
+          expect(cfg.args.join('\n'), isNot(contains(_poison)));
+        },
+      );
 
-      test('the standard registry wires exactly the five environments this fence '
-          'covers', () {
-        expect(buildBuiltinEnvironmentRegistry().names.toSet(),
-            {'claude', 'copilot', 'pi', 'opencode', 'codex'});
-      });
+      test(
+        'the standard registry wires exactly the five environments this fence '
+        'covers',
+        () {
+          expect(buildBuiltinEnvironmentRegistry().names.toSet(), {
+            'claude',
+            'copilot',
+            'pi',
+            'opencode',
+            'codex',
+          });
+        },
+      );
     });
 
     // ---------------------------------------------------------------------
     // 5. The FULL AgentCapability.spawn path — the cwd is the activation's,
     //    end to end (not just the isolated builder).
     // ---------------------------------------------------------------------
-    group('AgentCapability.spawn roots the cwd at the activation, end to end', () {
-      test('spawns claude in workspace.workspaceDir; no bead path in the config',
+    group(
+      'AgentCapability.spawn roots the cwd at the activation, end to end',
+      () {
+        test(
+          'spawns claude in workspace.workspaceDir; no bead path in the config',
           () {
-        final ctx = FakeTreeContext(
-          values: {
-            Bead: _poisonedBead(),
-            Workspace: _activation(),
-            ServiceBundle: const ServiceBundle(),
+            final ctx = FakeTreeContext(
+              values: {
+                Bead: _poisonedBead(),
+                Workspace: _activation(),
+                ServiceBundle: const ServiceBundle(),
+              },
+            );
+            final cfg = const AgentCapability().spawn(
+              ctx,
+              stepArgs('tg-m2q/agent'),
+            );
+            expect(cfg.workDir, '/real/activation/worktree/tg-m2q');
+            expect(cfg.args.join('\n'), isNot(contains(_poison)));
           },
         );
-        final cfg = const AgentCapability().spawn(ctx, stepArgs('tg-m2q/agent'));
-        expect(cfg.workDir, '/real/activation/worktree/tg-m2q');
-        expect(cfg.args.join('\n'), isNot(contains(_poison)));
-      });
-    });
+      },
+    );
   });
 }

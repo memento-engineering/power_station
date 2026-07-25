@@ -9,7 +9,10 @@ void main() {
     test('claimUnclaimed is scoped under the wildcard-matchable prefix', () {
       expect(BusTopics.claimUnclaimed('abc'), 'grid/claim/unclaimed/abc');
       expect(
-        topicMatches(BusTopics.claimUnclaimedAll, BusTopics.claimUnclaimed('abc')),
+        topicMatches(
+          BusTopics.claimUnclaimedAll,
+          BusTopics.claimUnclaimed('abc'),
+        ),
         isTrue,
       );
     });
@@ -41,40 +44,38 @@ void main() {
       expect(decoded.params['online'], isFalse);
     });
 
-    test(
-      'wired through a real broker: subscriber sees online then, on '
-      'close, the will (offline) retained',
-      () async {
-        const presence = Presence(
-          station: 'studio',
-          kinds: ['compute'],
-          offered: 1,
-          available: 1,
-        );
-        final broker = InMemoryBroker(
-          station: 'studio',
-          will: presenceWill('studio'),
-        );
-        broker.publish(BusTopics.presence, presenceOnline(presence), retain: true);
+    test('wired through a real broker: subscriber sees online then, on '
+        'close, the will (offline) retained', () async {
+      const presence = Presence(
+        station: 'studio',
+        kinds: ['compute'],
+        offered: 1,
+        available: 1,
+      );
+      final broker = InMemoryBroker(
+        station: 'studio',
+        will: presenceWill('studio'),
+      );
+      broker.publish(
+        BusTopics.presence,
+        presenceOnline(presence),
+        retain: true,
+      );
 
-        final events = <bool>[];
-        final sub = broker.subscribe(BusTopics.presence).listen((m) {
-          final note = decodeAcp(m.payload) as AcpNotification;
-          events.add(note.params['online'] as bool);
-        });
-        await broker.close();
-        expect(events, [true, false]);
-        await sub.cancel();
-      },
-    );
+      final events = <bool>[];
+      final sub = broker.subscribe(BusTopics.presence).listen((m) {
+        final note = decodeAcp(m.payload) as AcpNotification;
+        events.add(note.params['online'] as bool);
+      });
+      await broker.close();
+      expect(events, [true, false]);
+      await sub.cancel();
+    });
   });
 
   group('initialize-time capability negotiation', () {
     test('a matching protocol version is accepted', () {
-      final result = negotiate(
-        'b',
-        const InitializeParams(station: 'a'),
-      );
+      final result = negotiate('b', const InitializeParams(station: 'a'));
       expect(result.accepted, isTrue);
       expect(result.station, 'b');
       expect(result.protocolVersion, kBusProtocolVersion);
@@ -104,23 +105,26 @@ void main() {
       expect(decodedResult.accepted, isTrue);
     });
 
-    test('carried as an AcpRequest/AcpResultResponse pair over the envelope', () {
-      const params = InitializeParams(station: 'a');
-      final req = AcpRequest(
-        id: 'init-1',
-        method: BusMethods.initialize,
-        params: params.toJson(),
-      );
-      final decodedReq = decodeAcp(encodeAcp(req)) as AcpRequest;
-      expect(decodedReq.method, BusMethods.initialize);
-      final reParsed = InitializeParams.fromJson(decodedReq.params);
-      expect(reParsed.station, 'a');
+    test(
+      'carried as an AcpRequest/AcpResultResponse pair over the envelope',
+      () {
+        const params = InitializeParams(station: 'a');
+        final req = AcpRequest(
+          id: 'init-1',
+          method: BusMethods.initialize,
+          params: params.toJson(),
+        );
+        final decodedReq = decodeAcp(encodeAcp(req)) as AcpRequest;
+        expect(decodedReq.method, BusMethods.initialize);
+        final reParsed = InitializeParams.fromJson(decodedReq.params);
+        expect(reParsed.station, 'a');
 
-      final result = negotiate('b', reParsed);
-      final resp = AcpResultResponse(id: req.id, result: result.toJson());
-      final decodedResp = decodeAcp(encodeAcp(resp)) as AcpResultResponse;
-      expect(decodedResp.id, 'init-1');
-      expect(InitializeResult.fromJson(decodedResp.result).accepted, isTrue);
-    });
+        final result = negotiate('b', reParsed);
+        final resp = AcpResultResponse(id: req.id, result: result.toJson());
+        final decodedResp = decodeAcp(encodeAcp(resp)) as AcpResultResponse;
+        expect(decodedResp.id, 'init-1');
+        expect(InitializeResult.fromJson(decodedResp.result).accepted, isTrue);
+      },
+    );
   });
 }

@@ -186,9 +186,7 @@ class SiteBinding {
   /// mirrors `RespecLedger.toJson`). Round-trips through [SiteBinding.fromJson].
   Map<String, Object?> toJson() => {
     'version': kSiteBindingVersion,
-    'endpoints': {
-      for (final e in endpoints.entries) e.key: e.value.toString(),
-    },
+    'endpoints': {for (final e in endpoints.entries) e.key: e.value.toString()},
   };
 
   @override

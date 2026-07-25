@@ -190,10 +190,11 @@ class GitSyncService {
     required String name,
     required String url,
   }) async {
-    final existing = await _run(
-      ['remote', 'get-url', name],
-      workingDirectory: workingDirectory,
-    );
+    final existing = await _run([
+      'remote',
+      'get-url',
+      name,
+    ], workingDirectory: workingDirectory);
     final List<String> args;
     if (existing.ok) {
       if (existing.stdout.trim() == url) {
@@ -220,10 +221,12 @@ class GitSyncService {
     bool force = false,
   }) async {
     _onLog('pushing $refspec → $remote${force ? ' (force)' : ''}');
-    return _runOrThrow(
-      ['push', if (force) '--force', remote, refspec],
-      workingDirectory: workingDirectory,
-    );
+    return _runOrThrow([
+      'push',
+      if (force) '--force',
+      remote,
+      refspec,
+    ], workingDirectory: workingDirectory);
   }
 
   /// Distributes [refspec] from [workingDirectory] to a peer in one act:

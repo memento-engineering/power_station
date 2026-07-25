@@ -102,17 +102,16 @@ class InitializeParams {
 
   /// JSON form.
   Map<String, dynamic> toJson() => {
-        'station': station,
-        'protocolVersion': protocolVersion,
-        'capabilities': capabilities.toList()..sort(),
-      };
+    'station': station,
+    'protocolVersion': protocolVersion,
+    'capabilities': capabilities.toList()..sort(),
+  };
 
   /// Parses [json].
   static InitializeParams fromJson(Map<String, dynamic> json) =>
       InitializeParams(
         station: json['station'] as String,
-        protocolVersion:
-            json['protocolVersion'] as int? ?? kBusProtocolVersion,
+        protocolVersion: json['protocolVersion'] as int? ?? kBusProtocolVersion,
         capabilities: {
           for (final c in (json['capabilities'] as List? ?? const []))
             c as String,
@@ -142,17 +141,16 @@ class InitializeResult {
 
   /// JSON form.
   Map<String, dynamic> toJson() => {
-        'station': station,
-        'protocolVersion': protocolVersion,
-        'accepted': accepted,
-      };
+    'station': station,
+    'protocolVersion': protocolVersion,
+    'accepted': accepted,
+  };
 
   /// Parses [json].
   static InitializeResult fromJson(Map<String, dynamic> json) =>
       InitializeResult(
         station: json['station'] as String,
-        protocolVersion:
-            json['protocolVersion'] as int? ?? kBusProtocolVersion,
+        protocolVersion: json['protocolVersion'] as int? ?? kBusProtocolVersion,
         accepted: json['accepted'] as bool? ?? false,
       );
 }
@@ -171,22 +169,22 @@ InitializeResult negotiate(String station, InitializeParams params) =>
 /// [AcpNotification] carrying the SAME flat profile shape [Presence.toJson]
 /// already produces (no second serialization invented).
 Uint8List presenceOnline(Presence presence) => encodeAcp(
-      AcpNotification(
-        method: BusMethods.presence,
-        params: {...presence.toJson(), 'online': true},
-      ),
-    );
+  AcpNotification(
+    method: BusMethods.presence,
+    params: {...presence.toJson(), 'online': true},
+  ),
+);
 
 /// The [LastWill] a station registers at broker-start: the SAME presence
 /// topic, transitioning to `online: false` (D-B1's "presence = broker
 /// liveness + LWT" — see `../broker/broker.dart`'s library doc for why a
 /// graceful [Broker.close] is what actually fires it).
 LastWill presenceWill(String station) => LastWill(
-      topic: BusTopics.presence,
-      payload: encodeAcp(
-        AcpNotification(
-          method: BusMethods.presence,
-          params: {'station': station, 'online': false},
-        ),
-      ),
-    );
+  topic: BusTopics.presence,
+  payload: encodeAcp(
+    AcpNotification(
+      method: BusMethods.presence,
+      params: {'station': station, 'online': false},
+    ),
+  ),
+);

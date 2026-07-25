@@ -99,30 +99,30 @@ class FakeStationClient implements StationClient {
 ({FakeTreeContext context, StepArgs args}) _ctx({
   CancelToken? cancel,
   String nodePath = 'tg-1/lease',
-}) => (
-  context: FakeTreeContext(),
-  args: stepArgs(nodePath, cancel: cancel),
-);
+}) => (context: FakeTreeContext(), args: stepArgs(nodePath, cancel: cancel));
 
 /// Drives [cap] as the engine would — a JOB LeaseAllocation (mount → acquire →
 /// dispatch), returning the pushed reports + the allocation (so the test can
 /// dispose it, releasing the lease). The compute use is a job (never adopts).
-Future<({List<AllocationReport> reports, LeaseAllocation<BusLease> alloc})> _run(
+Future<({List<AllocationReport> reports, LeaseAllocation<BusLease> alloc})>
+_run(
   ComputeLeaseCapability cap,
   ({FakeTreeContext context, StepArgs args}) c,
 ) async {
   final reports = <AllocationReport>[];
-  final alloc = cap.createAllocation(
-    AllocationContext(
-      treeContext: c.context,
-      args: c.args,
-      transport: FakeRuntimeProvider(),
-      address: AllocationAddress('tgdog-s', c.args.nodePath),
-      env: const {},
-      sink: reports.add,
-      kind: StepKind.job,
-    ),
-  ) as LeaseAllocation<BusLease>;
+  final alloc =
+      cap.createAllocation(
+            AllocationContext(
+              treeContext: c.context,
+              args: c.args,
+              transport: FakeRuntimeProvider(),
+              address: AllocationAddress('tgdog-s', c.args.nodePath),
+              env: const {},
+              sink: reports.add,
+              kind: StepKind.job,
+            ),
+          )
+          as LeaseAllocation<BusLease>;
   await alloc.startOrAdopt();
   return (reports: reports, alloc: alloc);
 }
@@ -147,8 +147,11 @@ void main() {
       final done = r.reports.whereType<AllocationCompleted>().single;
       expect(done.payload?['exitCode'], '0');
       expect(done.payload?['lease'], 'lease-0');
-      expect(r.reports.whereType<AllocationReady>(), isEmpty,
-          reason: 'a job lease completes, it does not stay ready');
+      expect(
+        r.reports.whereType<AllocationReady>(),
+        isEmpty,
+        reason: 'a job lease completes, it does not stay ready',
+      );
       // Acquire then dispatch (with the per-node idempotency key) — not released.
       expect(client.calls, [
         'lease:studio:compute:studio/tg-1/lease',
@@ -185,19 +188,21 @@ void main() {
       expect(client.countWith('release:'), 1);
     });
 
-    test('a denied lease → Failed; no dispatch; dispose no-ops (nothing held)',
-        () async {
-      final client = FakeStationClient()..denyLease = true;
-      final cap = ComputeLeaseCapability(
-        client: client,
-        command: const DispatchCommand(command: 'echo'),
-      );
-      final r = await _run(cap, _ctx());
-      expect(r.reports.single, isA<AllocationFailed>());
-      expect(client.any('dispatch:'), isFalse);
-      await r.alloc.dispose();
-      expect(client.any('release:'), isFalse);
-    });
+    test(
+      'a denied lease → Failed; no dispatch; dispose no-ops (nothing held)',
+      () async {
+        final client = FakeStationClient()..denyLease = true;
+        final cap = ComputeLeaseCapability(
+          client: client,
+          command: const DispatchCommand(command: 'echo'),
+        );
+        final r = await _run(cap, _ctx());
+        expect(r.reports.single, isA<AllocationFailed>());
+        expect(client.any('dispatch:'), isFalse);
+        await r.alloc.dispose();
+        expect(client.any('release:'), isFalse);
+      },
+    );
 
     test('a dispose during acquire RELEASES the grant + skips the dispatch '
         '(release even if cancelled)', () async {
@@ -208,74 +213,88 @@ void main() {
       );
       final r = await _run(cap, _ctx(cancel: CancelToken()..cancel()));
       expect(r.reports, isEmpty, reason: 'a cancelled start reports nothing');
-      expect(client.any('dispatch:'), isFalse, reason: 'no dispatch after cancel');
+      expect(
+        client.any('dispatch:'),
+        isFalse,
+        reason: 'no dispatch after cancel',
+      );
       expect(client.any('release:'), isTrue, reason: 'released despite cancel');
       // dispose must NOT double-release (start released inline; no held grant).
       await r.alloc.dispose();
       expect(client.countWith('release:'), 1);
     });
 
-    test('a non-zero compute result → Failed; the lease still releases on dispose',
-        () async {
-      final client = FakeStationClient()
-        ..dispatchResult = const {
-          'exitCode': 2,
-          'stdout': '',
-          'stderr': 'boom',
-          'durationMs': 1,
-        };
-      final cap = ComputeLeaseCapability(
-        client: client,
-        command: const DispatchCommand(command: 'echo'),
-      );
-      final r = await _run(cap, _ctx());
-      final failed = r.reports.whereType<AllocationFailed>().single;
-      expect(failed.reason, contains('boom'));
-      await r.alloc.dispose();
-      expect(client.calls.last, 'release:lease-0');
-    });
+    test(
+      'a non-zero compute result → Failed; the lease still releases on dispose',
+      () async {
+        final client = FakeStationClient()
+          ..dispatchResult = const {
+            'exitCode': 2,
+            'stdout': '',
+            'stderr': 'boom',
+            'durationMs': 1,
+          };
+        final cap = ComputeLeaseCapability(
+          client: client,
+          command: const DispatchCommand(command: 'echo'),
+        );
+        final r = await _run(cap, _ctx());
+        final failed = r.reports.whereType<AllocationFailed>().single;
+        expect(failed.reason, contains('boom'));
+        await r.alloc.dispose();
+        expect(client.calls.last, 'release:lease-0');
+      },
+    );
 
-    test('a dispatch against a vanished lease → Failed; dispose still releases',
-        () async {
-      final client = FakeStationClient()..dispatchInvalid = true;
-      final cap = ComputeLeaseCapability(
-        client: client,
-        command: const DispatchCommand(command: 'echo'),
-      );
-      final r = await _run(cap, _ctx());
-      expect(r.reports.single, isA<AllocationFailed>());
-      // The grant was acquired before the failed dispatch → dispose releases it.
-      await r.alloc.dispose();
-      expect(client.any('release:'), isTrue);
-    });
+    test(
+      'a dispatch against a vanished lease → Failed; dispose still releases',
+      () async {
+        final client = FakeStationClient()..dispatchInvalid = true;
+        final cap = ComputeLeaseCapability(
+          client: client,
+          command: const DispatchCommand(command: 'echo'),
+        );
+        final r = await _run(cap, _ctx());
+        expect(r.reports.single, isA<AllocationFailed>());
+        // The grant was acquired before the failed dispatch → dispose releases it.
+        await r.alloc.dispose();
+        expect(client.any('release:'), isTrue);
+      },
+    );
 
-    test('release on dispose swallows a federation error (idempotent)', () async {
-      final client = FakeStationClient()..releaseThrows = true;
-      final cap = ComputeLeaseCapability(
-        client: client,
-        command: const DispatchCommand(command: 'echo'),
-      );
-      final r = await _run(cap, _ctx());
-      // Must not throw even though release errors.
-      await r.alloc.dispose();
-      expect(client.any('release:'), isTrue);
-    });
+    test(
+      'release on dispose swallows a federation error (idempotent)',
+      () async {
+        final client = FakeStationClient()..releaseThrows = true;
+        final cap = ComputeLeaseCapability(
+          client: client,
+          command: const DispatchCommand(command: 'echo'),
+        );
+        final r = await _run(cap, _ctx());
+        // Must not throw even though release errors.
+        await r.alloc.dispose();
+        expect(client.any('release:'), isTrue);
+      },
+    );
 
-    test('two concurrent mounts each hold + release their OWN lease (per-instance '
-        'allocation state — no Expando, no clobber)', () async {
-      final client = FakeStationClient();
-      final cap = ComputeLeaseCapability(
-        client: client,
-        command: const DispatchCommand(command: 'echo'),
-      );
-      final a = await _run(cap, _ctx(nodePath: 'a/lease')); // lease-0
-      final b = await _run(cap, _ctx(nodePath: 'b/lease')); // lease-1
-      expect(a.alloc.handle?.grant.leaseId, 'lease-0');
-      expect(b.alloc.handle?.grant.leaseId, 'lease-1');
-      await a.alloc.dispose();
-      await b.alloc.dispose();
-      final releases = client.calls.where((c) => c.startsWith('release:'));
-      expect(releases, containsAll(['release:lease-0', 'release:lease-1']));
-    });
+    test(
+      'two concurrent mounts each hold + release their OWN lease (per-instance '
+      'allocation state — no Expando, no clobber)',
+      () async {
+        final client = FakeStationClient();
+        final cap = ComputeLeaseCapability(
+          client: client,
+          command: const DispatchCommand(command: 'echo'),
+        );
+        final a = await _run(cap, _ctx(nodePath: 'a/lease')); // lease-0
+        final b = await _run(cap, _ctx(nodePath: 'b/lease')); // lease-1
+        expect(a.alloc.handle?.grant.leaseId, 'lease-0');
+        expect(b.alloc.handle?.grant.leaseId, 'lease-1');
+        await a.alloc.dispose();
+        await b.alloc.dispose();
+        final releases = client.calls.where((c) => c.startsWith('release:'));
+        expect(releases, containsAll(['release:lease-0', 'release:lease-1']));
+      },
+    );
   });
 }

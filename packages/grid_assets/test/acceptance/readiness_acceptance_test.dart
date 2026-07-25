@@ -33,15 +33,13 @@ import 'package:test/test.dart';
 
 import '../support/asset_fakes.dart';
 
-GraphSnapshot _graph({
-  required List<Bead> beads,
-  required Set<String> ready,
-}) => GraphSnapshot.fromParts(
-  beads: beads,
-  dependencies: const [],
-  readyIds: ready,
-  capturedAt: DateTime(2026),
-);
+GraphSnapshot _graph({required List<Bead> beads, required Set<String> ready}) =>
+    GraphSnapshot.fromParts(
+      beads: beads,
+      dependencies: const [],
+      readyIds: ready,
+      capturedAt: DateTime(2026),
+    );
 
 GraphSnapshot _state(List<Bead> beads) => _graph(beads: beads, ready: const {});
 
@@ -96,10 +94,7 @@ List<Bead> _preLadderSession() => committeeSession(
     ...kSpecCriticNodes,
     kSpecRouteNode,
   },
-  grades: {
-    kSpecGateNode: 'A',
-    for (final n in kSpecCriticNodes) n: 'A',
-  },
+  grades: {kSpecGateNode: 'A', for (final n in kSpecCriticNodes) n: 'A'},
 );
 
 StationKernel _buildKernel(
@@ -220,8 +215,11 @@ List<Bead> _withResult(
   final path = '$workBeadId/$relativePath';
   return [
     for (final b in beads)
-      if (b.issueType == IssueType.step && b.metadata[MoleculeStepKeys.path] == path)
-        b.copyWith(metadata: {...b.metadata, ...nodeResultMetadata(path, result)})
+      if (b.issueType == IssueType.step &&
+          b.metadata[MoleculeStepKeys.path] == path)
+        b.copyWith(
+          metadata: {...b.metadata, ...nodeResultMetadata(path, result)},
+        )
       else
         b,
   ];
@@ -241,14 +239,18 @@ String? _gateReason(Fakes f) {
 }
 
 void main() {
-  group('the readiness ladder — a NON-DRIVEABLE bead never spawns ANYTHING', () {
-    test(
-      'a `decision` bead gates at intake and starts ZERO processes — no '
-      'readiness lens, no specify agent, no spec committee',
-      () async {
+  group(
+    'the readiness ladder — a NON-DRIVEABLE bead never spawns ANYTHING',
+    () {
+      test('a `decision` bead gates at intake and starts ZERO processes — no '
+          'readiness lens, no specify agent, no spec committee', () async {
         final f = buildFakes(createdId: _sid);
-        final work = FakeSnapshotSource(_graph(beads: const [], ready: const {}));
-        final state = FakeSnapshotSource(_graph(beads: const [], ready: const {}));
+        final work = FakeSnapshotSource(
+          _graph(beads: const [], ready: const {}),
+        );
+        final state = FakeSnapshotSource(
+          _graph(beads: const [], ready: const {}),
+        );
         final kernel = _buildKernel(f, work, state);
         addTearDown(kernel.dispose);
         addTearDown(f.provider.close);
@@ -270,7 +272,8 @@ void main() {
         expect(
           f.provider.started,
           isEmpty,
-          reason: 'a non-driveable bead must not reach ANY agent — not even the '
+          reason:
+              'a non-driveable bead must not reach ANY agent — not even the '
               'cheap readiness lens',
         );
         expect(_wroteCursor(f, kIntakeNode, 'gated'), isTrue);
@@ -287,86 +290,88 @@ void main() {
           contains('HELD for refinement, not rejected'),
           reason: 'a hold is a refinement ask, not a ruling',
         );
-      },
-    );
-  });
+      });
+    },
+  );
 
   group('the readiness ladder — a NOT-READY bead holds before specify', () {
-    test(
-      'the lens grades D → the route parks with the rationale VERBATIM and '
-      'specify NEVER spawns',
-      () async {
-        final f = buildFakes(createdId: _sid);
-        final work = FakeSnapshotSource(_graph(beads: const [], ready: const {}));
-        final state = FakeSnapshotSource(_graph(beads: const [], ready: const {}));
-        final kernel = _buildKernel(f, work, state);
-        addTearDown(kernel.dispose);
-        addTearDown(f.provider.close);
-        addTearDown(work.close);
-        addTearDown(state.close);
+    test('the lens grades D → the route parks with the rationale VERBATIM and '
+        'specify NEVER spawns', () async {
+      final f = buildFakes(createdId: _sid);
+      final work = FakeSnapshotSource(_graph(beads: const [], ready: const {}));
+      final state = FakeSnapshotSource(
+        _graph(beads: const [], ready: const {}),
+      );
+      final kernel = _buildKernel(f, work, state);
+      addTearDown(kernel.dispose);
+      addTearDown(f.provider.close);
+      addTearDown(work.close);
+      addTearDown(state.close);
 
-        kernel.start();
-        await pumpEventQueue();
+      kernel.start();
+      await pumpEventQueue();
 
-        // 1) A driveable bead with a real brief PASSES the deterministic intake
-        //    contract — and `intake` spawns nothing (it is a ServiceCapability).
-        work.push(_graph(beads: [workBead('tg-1')], ready: {'tg-1'}));
-        await pumpEventQueue();
-        await _stageFreshMint(f, state);
-        await settle(() => _wroteCursor(f, kIntakeNode, 'complete'));
-        expect(f.provider.started, isEmpty, reason: 'intake is deterministic');
-        expect(_wroteCursor(f, kIntakeNode, 'complete'), isTrue);
+      // 1) A driveable bead with a real brief PASSES the deterministic intake
+      //    contract — and `intake` spawns nothing (it is a ServiceCapability).
+      work.push(_graph(beads: [workBead('tg-1')], ready: {'tg-1'}));
+      await pumpEventQueue();
+      await _stageFreshMint(f, state);
+      await settle(() => _wroteCursor(f, kIntakeNode, 'complete'));
+      expect(f.provider.started, isEmpty, reason: 'intake is deterministic');
+      expect(_wroteCursor(f, kIntakeNode, 'complete'), isTrue);
 
-        // 2) Re-project intake complete → the readiness LENS mounts. It is the
-        //    ONE agent the ladder ever spawns.
-        state.push(_state(committeeSession(completed: {kIntakeNode})));
-        await settle(() => f.provider.started.isNotEmpty);
-        expect(f.provider.started.map((s) => s.name), [_step(kReadinessNode)]);
+      // 2) Re-project intake complete → the readiness LENS mounts. It is the
+      //    ONE agent the ladder ever spawns.
+      state.push(_state(committeeSession(completed: {kIntakeNode})));
+      await settle(() => f.provider.started.isNotEmpty);
+      expect(f.provider.started.map((s) => s.name), [_step(kReadinessNode)]);
 
-        f.provider.emit(Exited(name: _step(kReadinessNode), exitCode: 0));
-        await settle(() => _wroteCursor(f, kReadinessNode, 'complete'));
+      f.provider.emit(Exited(name: _step(kReadinessNode), exitCode: 0));
+      await settle(() => _wroteCursor(f, kReadinessNode, 'complete'));
 
-        // 3) The lens graded D, with a rationale that IS the refinement ask.
-        const rationale =
-            'no acceptance shape — name the surfaces it touches and decide the '
-            'layering before an architect can plan this';
-        state.push(_state(_withResult(
-          committeeSession(completed: {kIntakeNode, kReadinessNode}),
-          kReadinessNode,
-          result: {'grade': 'D', 'rationale': rationale},
-          workBeadId: 'tg-1',
-        )));
-        await settle(() => _wroteCursor(f, kReadinessRouteNode, 'gated'));
+      // 3) The lens graded D, with a rationale that IS the refinement ask.
+      const rationale =
+          'no acceptance shape — name the surfaces it touches and decide the '
+          'layering before an architect can plan this';
+      state.push(
+        _state(
+          _withResult(
+            committeeSession(completed: {kIntakeNode, kReadinessNode}),
+            kReadinessNode,
+            result: {'grade': 'D', 'rationale': rationale},
+            workBeadId: 'tg-1',
+          ),
+        ),
+      );
+      await settle(() => _wroteCursor(f, kReadinessRouteNode, 'gated'));
 
-        // The HOLD: parked at the route, carrying the lens's own words.
-        expect(_wroteCursor(f, kReadinessRouteNode, 'gated'), isTrue);
-        final reason = _gateReason(f);
-        expect(reason, isNotNull);
-        expect(reason, contains('SPEC-READINESS HOLD'));
-        expect(
-          reason,
-          contains(rationale),
-          reason: 'the rationale rides VERBATIM — it is the governor\'s working '
-              'material, not a summary',
-        );
+      // The HOLD: parked at the route, carrying the lens's own words.
+      expect(_wroteCursor(f, kReadinessRouteNode, 'gated'), isTrue);
+      final reason = _gateReason(f);
+      expect(reason, isNotNull);
+      expect(reason, contains('SPEC-READINESS HOLD'));
+      expect(
+        reason,
+        contains(rationale),
+        reason:
+            'the rationale rides VERBATIM — it is the governor\'s working '
+            'material, not a summary',
+      );
 
-        // The saving, asserted: the expensive fan-out never happened.
-        final started = f.provider.started.map((s) => s.name);
-        expect(
-          started,
-          isNot(contains(_step(kSpecifyNode))),
-          reason: 'a coarse bead must not reach the specify architect',
-        );
-        for (final critic in kSpecCriticNodes) {
-          expect(started, isNot(contains(_step(critic))));
-        }
-        expect(
-          started,
-          [_step(kReadinessNode)],
-          reason: 'exactly ONE agent ran — the lens itself',
-        );
-      },
-    );
+      // The saving, asserted: the expensive fan-out never happened.
+      final started = f.provider.started.map((s) => s.name);
+      expect(
+        started,
+        isNot(contains(_step(kSpecifyNode))),
+        reason: 'a coarse bead must not reach the specify architect',
+      );
+      for (final critic in kSpecCriticNodes) {
+        expect(started, isNot(contains(_step(critic))));
+      }
+      expect(started, [
+        _step(kReadinessNode),
+      ], reason: 'exactly ONE agent ran — the lens itself');
+    });
   });
 
   group('the readiness ladder — a REFINED bead drives', () {
@@ -374,7 +379,9 @@ void main() {
         'DISCOVERY, and only with discovery done does specify spawn', () async {
       final f = buildFakes(createdId: _sid);
       final work = FakeSnapshotSource(_graph(beads: const [], ready: const {}));
-      final state = FakeSnapshotSource(_graph(beads: const [], ready: const {}));
+      final state = FakeSnapshotSource(
+        _graph(beads: const [], ready: const {}),
+      );
       final kernel = _buildKernel(f, work, state);
       addTearDown(kernel.dispose);
       addTearDown(f.provider.close);
@@ -402,12 +409,16 @@ void main() {
       await settle(() => _wroteCursor(f, kReadinessNode, 'complete'));
 
       // Grade A ⇒ the route ADVANCES (no gate).
-      state.push(_state(_withResult(
-        committeeSession(completed: {kIntakeNode, kReadinessNode}),
-        kReadinessNode,
-        result: {'grade': 'A'},
-        workBeadId: 'tg-1',
-      )));
+      state.push(
+        _state(
+          _withResult(
+            committeeSession(completed: {kIntakeNode, kReadinessNode}),
+            kReadinessNode,
+            result: {'grade': 'A'},
+            workBeadId: 'tg-1',
+          ),
+        ),
+      );
       await settle(() => _wroteCursor(f, kReadinessRouteNode, 'complete'));
       expect(_wroteCursor(f, kReadinessRouteNode, 'complete'), isTrue);
       expect(_wroteCursor(f, kReadinessRouteNode, 'gated'), isFalse);
@@ -416,13 +427,20 @@ void main() {
       // discovery circuit now heads the spec circuit between the ladder and the
       // architect. Its deterministic gather (`anchors`) mounts first and spawns
       // NOTHING; the architect is still withheld.
-      state.push(_state(committeeSession(
-        completed: kReadinessLadderNodes,
-        grades: kReadinessGradeA,
-      )));
+      state.push(
+        _state(
+          committeeSession(
+            completed: kReadinessLadderNodes,
+            grades: kReadinessGradeA,
+          ),
+        ),
+      );
       await settle(() => _wroteCursor(f, kAnchorsNode, 'complete'));
-      expect(_wroteCursor(f, kAnchorsNode, 'complete'), isTrue,
-          reason: 'the ladder released the bead into the deterministic gather');
+      expect(
+        _wroteCursor(f, kAnchorsNode, 'complete'),
+        isTrue,
+        reason: 'the ladder released the bead into the deterministic gather',
+      );
       expect(
         f.provider.started.map((s) => s.name),
         [_step(kReadinessNode)],
@@ -431,10 +449,14 @@ void main() {
 
       // The gather complete → the three READ-ONLY explorers fan out. The
       // architect is STILL withheld: discovery gates before it.
-      state.push(_state(committeeSession(
-        completed: {...kReadinessLadderNodes, kAnchorsNode},
-        grades: kReadinessGradeA,
-      )));
+      state.push(
+        _state(
+          committeeSession(
+            completed: {...kReadinessLadderNodes, kAnchorsNode},
+            grades: kReadinessGradeA,
+          ),
+        ),
+      );
       await settle(
         () => kDiscoveryLensNodes.every(
           (n) => f.provider.started.map((s) => s.name).contains(_step(n)),
@@ -451,12 +473,14 @@ void main() {
       // …and with the whole discovery circuit complete, `specify` is the next
       // agent to spawn: the ladder's job is to let the bead PROCEED, and what it
       // proceeds into is the gather.
-      state.push(_state(committeeSession(
-        completed: kSpecHeadNodes,
-        grades: kReadinessGradeA,
-      )));
+      state.push(
+        _state(
+          committeeSession(completed: kSpecHeadNodes, grades: kReadinessGradeA),
+        ),
+      );
       await settle(
-        () => f.provider.started.map((s) => s.name).contains(_step(kSpecifyNode)),
+        () =>
+            f.provider.started.map((s) => s.name).contains(_step(kSpecifyNode)),
       );
       expect(
         f.provider.started.map((s) => s.name),
@@ -467,58 +491,55 @@ void main() {
   });
 
   group('the readiness ladder — the MIGRATION negative control', () {
-    test(
-      'a PRE-LADDER in-flight session surviving a bounce roots the FROZEN '
-      'circuit: the ladder never mounts, its agent never spawns, and it can '
-      'never park a bead that is already building',
-      () async {
-        final f = buildFakes(createdId: _sid);
-        final work = FakeSnapshotSource(_graph(beads: const [], ready: const {}));
-        // The BOUNCE: the station restarts and ADOPTS an in-flight session whose
-        // cursor was minted under the pre-ladder shape (no `intake` key).
-        final state = FakeSnapshotSource(_state(_preLadderSession()));
-        final kernel = _buildKernel(f, work, state);
-        addTearDown(kernel.dispose);
-        addTearDown(f.provider.close);
-        addTearDown(work.close);
-        addTearDown(state.close);
+    test('a PRE-LADDER in-flight session surviving a bounce roots the FROZEN '
+        'circuit: the ladder never mounts, its agent never spawns, and it can '
+        'never park a bead that is already building', () async {
+      final f = buildFakes(createdId: _sid);
+      final work = FakeSnapshotSource(_graph(beads: const [], ready: const {}));
+      // The BOUNCE: the station restarts and ADOPTS an in-flight session whose
+      // cursor was minted under the pre-ladder shape (no `intake` key).
+      final state = FakeSnapshotSource(_state(_preLadderSession()));
+      final kernel = _buildKernel(f, work, state);
+      addTearDown(kernel.dispose);
+      addTearDown(f.provider.close);
+      addTearDown(work.close);
+      addTearDown(state.close);
 
-        kernel.start();
-        await pumpEventQueue();
+      kernel.start();
+      await pumpEventQueue();
 
-        work.push(_graph(beads: [workBead('tg-1')], ready: {'tg-1'}));
-        // The one POSITIVE signal this survivor must reach — bounded-
-        // conditional, so a genuine regression (the build agent never
-        // mounting) still fails instead of racing a fixed pump count.
-        await settle(
-          () => f.provider.started.map((s) => s.name).contains(_step(kAgentNode)),
-        );
+      work.push(_graph(beads: [workBead('tg-1')], ready: {'tg-1'}));
+      // The one POSITIVE signal this survivor must reach — bounded-
+      // conditional, so a genuine regression (the build agent never
+      // mounting) still fails instead of racing a fixed pump count.
+      await settle(
+        () => f.provider.started.map((s) => s.name).contains(_step(kAgentNode)),
+      );
 
-        final started = f.provider.started.map((s) => s.name);
+      final started = f.provider.started.map((s) => s.name);
 
-        // The ladder NEVER mounts for a survivor — the agent that would have
-        // been spawned (and billed) never is.
-        expect(
-          started,
-          isNot(contains(_step(kReadinessNode))),
-          reason: 'a pre-ladder survivor must NEVER spawn the readiness agent',
-        );
-        expect(_wroteCursor(f, kIntakeNode, 'complete'), isFalse);
-        expect(_wroteCursor(f, kIntakeNode, 'gated'), isFalse);
-        expect(
-          _wroteCursor(f, kReadinessRouteNode, 'gated'),
-          isFalse,
-          reason: 'the lens can never PARK a bead that is already building',
-        );
+      // The ladder NEVER mounts for a survivor — the agent that would have
+      // been spawned (and billed) never is.
+      expect(
+        started,
+        isNot(contains(_step(kReadinessNode))),
+        reason: 'a pre-ladder survivor must NEVER spawn the readiness agent',
+      );
+      expect(_wroteCursor(f, kIntakeNode, 'complete'), isFalse);
+      expect(_wroteCursor(f, kIntakeNode, 'gated'), isFalse);
+      expect(
+        _wroteCursor(f, kReadinessRouteNode, 'gated'),
+        isFalse,
+        reason: 'the lens can never PARK a bead that is already building',
+      );
 
-        // Non-vacuous: the session CONTINUES where it left off — the frozen
-        // circuit's spec phase is complete, so the BUILD agent is what mounts.
-        expect(
-          started,
-          contains(_step(kAgentNode)),
-          reason: 'the survivor resumes its build, proving the kernel is live',
-        );
-      },
-    );
+      // Non-vacuous: the session CONTINUES where it left off — the frozen
+      // circuit's spec phase is complete, so the BUILD agent is what mounts.
+      expect(
+        started,
+        contains(_step(kAgentNode)),
+        reason: 'the survivor resumes its build, proving the kernel is live',
+      );
+    });
   });
 }

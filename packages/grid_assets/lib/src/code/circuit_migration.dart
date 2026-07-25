@@ -168,7 +168,8 @@ const Circuit kSpecHeadSpecReviewCircuit = Circuit(
         'plan-completeness',
       },
       params: {
-        'critics': 'spec-validation,coherence,adr-alignment,'
+        'critics':
+            'spec-validation,coherence,adr-alignment,'
             'acceptance-testability,plan-completeness',
         'gating': 'spec-validation',
       },
@@ -291,7 +292,8 @@ const Circuit kFoldedSpecReviewCircuit = Circuit(
         'plan-completeness',
       },
       params: {
-        'critics': 'spec-validation,coherence,adr-alignment,'
+        'critics':
+            'spec-validation,coherence,adr-alignment,'
             'acceptance-testability,plan-completeness',
         'gating': 'spec-validation',
         kValidatesParamKey: kSpecifyStep,
@@ -423,7 +425,8 @@ const Circuit kLadderedSpecReviewCircuit = Circuit(
         'plan-completeness',
       },
       params: {
-        'critics': 'spec-validation,coherence,adr-alignment,'
+        'critics':
+            'spec-validation,coherence,adr-alignment,'
             'acceptance-testability,plan-completeness',
         'gating': 'spec-validation',
         kValidatesParamKey: kSpecifyStep,

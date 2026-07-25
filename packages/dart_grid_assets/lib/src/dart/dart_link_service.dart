@@ -158,11 +158,7 @@ class DartLinkService {
       case DomainEnvelopeDecoded(:final config):
         final String? content;
         try {
-          content = pubspecOverridesFor(
-            config.pub,
-            context,
-            devRoot: devRoot,
-          );
+          content = pubspecOverridesFor(config.pub, context, devRoot: devRoot);
         } on StateError catch (e) {
           return _Done(LinkRefused(e.message));
         }

@@ -28,9 +28,9 @@ void main() {
     test('a publish to a non-matching topic is not delivered', () async {
       final broker = InMemoryBroker(station: 'a');
       final events = <String>[];
-      final sub = broker.subscribe('grid/presence').listen(
-        (m) => events.add(_text(m.payload)),
-      );
+      final sub = broker
+          .subscribe('grid/presence')
+          .listen((m) => events.add(_text(m.payload)));
       broker.publish('grid/claim/unclaimed/x', _bytes('nope'));
       await Future<void>.delayed(Duration.zero);
       expect(events, isEmpty);
@@ -43,9 +43,9 @@ void main() {
       () async {
         final broker = InMemoryBroker(station: 'a');
         final events = <String>[];
-        final sub = broker.subscribe('grid/claim/#').listen(
-          (m) => events.add(m.topic),
-        );
+        final sub = broker
+            .subscribe('grid/claim/#')
+            .listen((m) => events.add(m.topic));
         broker.publish('grid/claim/unclaimed/x', _bytes('1'));
         broker.publish('grid/claim/respond', _bytes('2'));
         broker.publish('grid/presence', _bytes('ignored'));
@@ -75,11 +75,7 @@ void main() {
       'an EMPTY retained publish clears the retained store for that topic',
       () async {
         final broker = InMemoryBroker(station: 'a');
-        broker.publish(
-          'grid/claim/unclaimed/x',
-          _bytes('ad'),
-          retain: true,
-        );
+        broker.publish('grid/claim/unclaimed/x', _bytes('ad'), retain: true);
         broker.publish(
           'grid/claim/unclaimed/x',
           Uint8List(0),
@@ -102,9 +98,9 @@ void main() {
       broker.publish('grid/presence', _bytes('online'), retain: true);
 
       final events = <String>[];
-      final sub = broker.subscribe('grid/presence').listen(
-        (m) => events.add('${m.retained}:${_text(m.payload)}'),
-      );
+      final sub = broker
+          .subscribe('grid/presence')
+          .listen((m) => events.add('${m.retained}:${_text(m.payload)}'));
       broker.publish('grid/presence', _bytes('update'));
       await Future<void>.delayed(Duration.zero);
       expect(events, ['true:online', 'false:update']);
@@ -112,30 +108,33 @@ void main() {
       await broker.close();
     });
 
-    test('multiple subscribers each get their own independent fan-out', () async {
-      final broker = InMemoryBroker(station: 'a');
-      final e1 = <String>[];
-      final e2 = <String>[];
-      final s1 = broker.subscribe('grid/#').listen((m) => e1.add(m.topic));
-      final s2 = broker.subscribe('grid/presence').listen(
-        (m) => e2.add(m.topic),
-      );
-      broker.publish('grid/presence', _bytes('x'));
-      broker.publish('grid/claim/unclaimed/y', _bytes('y'));
-      await Future<void>.delayed(Duration.zero);
-      expect(e1, ['grid/presence', 'grid/claim/unclaimed/y']);
-      expect(e2, ['grid/presence']);
-      await s1.cancel();
-      await s2.cancel();
-      await broker.close();
-    });
+    test(
+      'multiple subscribers each get their own independent fan-out',
+      () async {
+        final broker = InMemoryBroker(station: 'a');
+        final e1 = <String>[];
+        final e2 = <String>[];
+        final s1 = broker.subscribe('grid/#').listen((m) => e1.add(m.topic));
+        final s2 = broker
+            .subscribe('grid/presence')
+            .listen((m) => e2.add(m.topic));
+        broker.publish('grid/presence', _bytes('x'));
+        broker.publish('grid/claim/unclaimed/y', _bytes('y'));
+        await Future<void>.delayed(Duration.zero);
+        expect(e1, ['grid/presence', 'grid/claim/unclaimed/y']);
+        expect(e2, ['grid/presence']);
+        await s1.cancel();
+        await s2.cancel();
+        await broker.close();
+      },
+    );
 
     test('cancelling a subscription stops further delivery', () async {
       final broker = InMemoryBroker(station: 'a');
       final events = <String>[];
-      final sub = broker.subscribe('grid/presence').listen(
-        (m) => events.add(_text(m.payload)),
-      );
+      final sub = broker
+          .subscribe('grid/presence')
+          .listen((m) => events.add(_text(m.payload)));
       broker.publish('grid/presence', _bytes('1'));
       await Future<void>.delayed(Duration.zero);
       await sub.cancel();
@@ -146,23 +145,20 @@ void main() {
     });
 
     group('presence = broker liveness + LWT (D-B1)', () {
-      test(
-        'a GRACEFUL close publishes the registered will (retained) as an '
-        'explicit goodbye',
-        () async {
-          final broker = InMemoryBroker(
-            station: 'a',
-            will: LastWill(topic: 'grid/presence', payload: _bytes('offline')),
-          );
-          final events = <String>[];
-          final sub = broker.subscribe('grid/presence').listen(
-            (m) => events.add(_text(m.payload)),
-          );
-          await broker.close();
-          expect(events, ['offline']);
-          await sub.cancel();
-        },
-      );
+      test('a GRACEFUL close publishes the registered will (retained) as an '
+          'explicit goodbye', () async {
+        final broker = InMemoryBroker(
+          station: 'a',
+          will: LastWill(topic: 'grid/presence', payload: _bytes('offline')),
+        );
+        final events = <String>[];
+        final sub = broker
+            .subscribe('grid/presence')
+            .listen((m) => events.add(_text(m.payload)));
+        await broker.close();
+        expect(events, ['offline']);
+        await sub.cancel();
+      });
 
       test(
         'a late subscriber sees the will retained AFTER a graceful close',
@@ -179,26 +175,25 @@ void main() {
         },
       );
 
-      test(
-        'simulateCrash does NOT publish the will — only the stream ends '
-        '(the honest disconnect signal, no zombie retained ad)',
-        () async {
-          final broker = InMemoryBroker(
-            station: 'a',
-            will: LastWill(topic: 'grid/presence', payload: _bytes('offline')),
-          );
-          broker.publish('grid/presence', _bytes('online'), retain: true);
-          final events = <String>[];
-          var done = false;
-          broker.subscribe('grid/presence').listen(
-            (m) => events.add(_text(m.payload)),
-            onDone: () => done = true,
-          );
-          await broker.simulateCrash();
-          expect(events, ['online']); // only the retained replay — no will
-          expect(done, isTrue); // the stream itself ended
-        },
-      );
+      test('simulateCrash does NOT publish the will — only the stream ends '
+          '(the honest disconnect signal, no zombie retained ad)', () async {
+        final broker = InMemoryBroker(
+          station: 'a',
+          will: LastWill(topic: 'grid/presence', payload: _bytes('offline')),
+        );
+        broker.publish('grid/presence', _bytes('online'), retain: true);
+        final events = <String>[];
+        var done = false;
+        broker
+            .subscribe('grid/presence')
+            .listen(
+              (m) => events.add(_text(m.payload)),
+              onDone: () => done = true,
+            );
+        await broker.simulateCrash();
+        expect(events, ['online']); // only the retained replay — no will
+        expect(done, isTrue); // the stream itself ended
+      });
     });
 
     test('publish after close is a silent no-op', () async {

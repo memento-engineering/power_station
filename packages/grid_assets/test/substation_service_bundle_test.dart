@@ -23,15 +23,13 @@ import 'package:test/test.dart';
 
 import 'support/asset_fakes.dart';
 
-GraphSnapshot _graph({
-  required List<Bead> beads,
-  required Set<String> ready,
-}) => GraphSnapshot.fromParts(
-  beads: beads,
-  dependencies: const [],
-  readyIds: ready,
-  capturedAt: DateTime(2026),
-);
+GraphSnapshot _graph({required List<Bead> beads, required Set<String> ready}) =>
+    GraphSnapshot.fromParts(
+      beads: beads,
+      dependencies: const [],
+      readyIds: ready,
+      capturedAt: DateTime(2026),
+    );
 
 /// A recording [SourceControl] that captures the bead ids it was asked to
 /// provision. NO delivery is bound on the bundle, so nothing ever leaves the
@@ -45,7 +43,8 @@ GraphSnapshot _graph({
 /// claims to provision, exactly like the recorded bead id, so a live mount
 /// can actually spawn. Call [dispose] to clean up the temp root.
 class _RecordingSourceControl implements SourceControl {
-  _RecordingSourceControl() : _root = Directory.systemTemp.createTempSync('grid-svc-bundle');
+  _RecordingSourceControl()
+    : _root = Directory.systemTemp.createTempSync('grid-svc-bundle');
 
   final Directory _root;
 
@@ -75,94 +74,99 @@ class _RecordingSourceControl implements SourceControl {
 }
 
 void main() {
-  test(
-    'each substation\'s CapabilityHost resolves ITS OWN ServiceBundle — two '
-    'substations get isolated SourceControl (ADR-0008 D5)',
-    () async {
-      final f = buildFakes();
-      final scA = _RecordingSourceControl();
-      final scB = _RecordingSourceControl();
-      addTearDown(scA.dispose);
-      addTearDown(scB.dispose);
+  test('each substation\'s CapabilityHost resolves ITS OWN ServiceBundle — two '
+      'substations get isolated SourceControl (ADR-0008 D5)', () async {
+    final f = buildFakes();
+    final scA = _RecordingSourceControl();
+    final scB = _RecordingSourceControl();
+    addTearDown(scA.dispose);
+    addTearDown(scB.dispose);
 
-      // Adopted sessions (carried on the STATE axis) so each SessionScope
-      // resolves synchronously and the agent spawns under the kernel's flush —
-      // distinct session ids, no mint race. The session's own rig is the_grid's
-      // state partition; the work beads route by id-prefix ownership.
-      //
-      // Each carries the READINESS LADDER complete (bead `pow-q7n`), so the
-      // ladder never mounts and `specify` is again the head that spawns — this
-      // suite's focus (per-substation ServiceBundle isolation) is downstream of
-      // the ladder and unchanged by it.
-      final work = FakeSnapshotSource(_graph(beads: const [], ready: const {}));
-      final state = FakeSnapshotSource(
-        _graph(
-          beads: [
-            ...ladderDoneSession(id: 'tgdog-a', workBeadId: 'sa-1'),
-            ...ladderDoneSession(id: 'tgdog-b', workBeadId: 'sb-1'),
-          ],
-          ready: const {},
-        ),
-      );
-      final bridge = StationJoinBridge(work: work, state: state);
-
-      final kernel = StationKernel(
-        bridge: bridge,
-        stationServices: f.ctx,
-        resolver: kCodeResolver,
-        registry: buildCodeRegistry(),
-        substations: [
-          SubstationScope(
-            configNotifier: SubstationConfigNotifier(
-              const SubstationConfig(substationId: 'sa', ownedSubstations: {'sa'}),
-            ),
-            services: ServiceBundle(sourceControl: scA),
-            key: const ValueKey('scope.sa'),
-          ),
-          SubstationScope(
-            configNotifier: SubstationConfigNotifier(
-              const SubstationConfig(substationId: 'sb', ownedSubstations: {'sb'}),
-            ),
-            services: ServiceBundle(sourceControl: scB),
-            key: const ValueKey('scope.sb'),
-          ),
+    // Adopted sessions (carried on the STATE axis) so each SessionScope
+    // resolves synchronously and the agent spawns under the kernel's flush —
+    // distinct session ids, no mint race. The session's own rig is the_grid's
+    // state partition; the work beads route by id-prefix ownership.
+    //
+    // Each carries the READINESS LADDER complete (bead `pow-q7n`), so the
+    // ladder never mounts and `specify` is again the head that spawns — this
+    // suite's focus (per-substation ServiceBundle isolation) is downstream of
+    // the ladder and unchanged by it.
+    final work = FakeSnapshotSource(_graph(beads: const [], ready: const {}));
+    final state = FakeSnapshotSource(
+      _graph(
+        beads: [
+          ...ladderDoneSession(id: 'tgdog-a', workBeadId: 'sa-1'),
+          ...ladderDoneSession(id: 'tgdog-b', workBeadId: 'sb-1'),
         ],
-      );
-      addTearDown(kernel.dispose);
-      addTearDown(f.provider.close);
-      addTearDown(work.close);
-      addTearDown(state.close);
+        ready: const {},
+      ),
+    );
+    final bridge = StationJoinBridge(work: work, state: state);
 
-      kernel.start();
-      await pumpEventQueue();
-
-      // One ready owned bead per substation (sa-1 → substation sa, sb-1 → sb).
-      work.push(
-        _graph(beads: [bead('sa-1'), bead('sb-1')], ready: {'sa-1', 'sb-1'}),
-      );
-      await pumpEventQueue();
-
-      // Sanity (non-vacuous): both circuit heads (specify, bead `pow-6ao`)
-      // actually mounted + spawned, so both hosts ran their provision step.
-      expect(
-        f.provider.started.map((s) => s.name),
-        unorderedEquals(
-          <String>['tgdog-a/sa-1/spec_review/specify', 'tgdog-b/sb-1/spec_review/specify'],
+    final kernel = StationKernel(
+      bridge: bridge,
+      stationServices: f.ctx,
+      resolver: kCodeResolver,
+      registry: buildCodeRegistry(),
+      substations: [
+        SubstationScope(
+          configNotifier: SubstationConfigNotifier(
+            const SubstationConfig(
+              substationId: 'sa',
+              ownedSubstations: {'sa'},
+            ),
+          ),
+          services: ServiceBundle(sourceControl: scA),
+          key: const ValueKey('scope.sa'),
         ),
-        reason: 'one head step per substation spawned through the real code '
-            'circuit',
-      );
+        SubstationScope(
+          configNotifier: SubstationConfigNotifier(
+            const SubstationConfig(
+              substationId: 'sb',
+              ownedSubstations: {'sb'},
+            ),
+          ),
+          services: ServiceBundle(sourceControl: scB),
+          key: const ValueKey('scope.sb'),
+        ),
+      ],
+    );
+    addTearDown(kernel.dispose);
+    addTearDown(f.provider.close);
+    addTearDown(work.close);
+    addTearDown(state.close);
 
-      // The routing proof: each substation provisioned ONLY its own bead's
-      // workspace, through its OWN SourceControl. A shared station-wide bundle
-      // would have funnelled BOTH beads into one SourceControl.
-      expect(scA.provisioned, equals(<String>['sa-1']));
-      expect(scB.provisioned, equals(<String>['sb-1']));
-      // Explicit isolation: neither substation ever saw the other's bead.
-      expect(scA.provisioned, isNot(contains('sb-1')));
-      expect(scB.provisioned, isNot(contains('sa-1')));
-    },
-  );
+    kernel.start();
+    await pumpEventQueue();
+
+    // One ready owned bead per substation (sa-1 → substation sa, sb-1 → sb).
+    work.push(
+      _graph(beads: [bead('sa-1'), bead('sb-1')], ready: {'sa-1', 'sb-1'}),
+    );
+    await pumpEventQueue();
+
+    // Sanity (non-vacuous): both circuit heads (specify, bead `pow-6ao`)
+    // actually mounted + spawned, so both hosts ran their provision step.
+    expect(
+      f.provider.started.map((s) => s.name),
+      unorderedEquals(<String>[
+        'tgdog-a/sa-1/spec_review/specify',
+        'tgdog-b/sb-1/spec_review/specify',
+      ]),
+      reason:
+          'one head step per substation spawned through the real code '
+          'circuit',
+    );
+
+    // The routing proof: each substation provisioned ONLY its own bead's
+    // workspace, through its OWN SourceControl. A shared station-wide bundle
+    // would have funnelled BOTH beads into one SourceControl.
+    expect(scA.provisioned, equals(<String>['sa-1']));
+    expect(scB.provisioned, equals(<String>['sb-1']));
+    // Explicit isolation: neither substation ever saw the other's bead.
+    expect(scA.provisioned, isNot(contains('sb-1')));
+    expect(scB.provisioned, isNot(contains('sa-1')));
+  });
 
   test(
     'a substation with no ServiceBundle resolves the empty default — provisioning '
@@ -188,7 +192,10 @@ void main() {
         substations: [
           SubstationScope(
             configNotifier: SubstationConfigNotifier(
-              const SubstationConfig(substationId: 'sa', ownedSubstations: {'sa'}),
+              const SubstationConfig(
+                substationId: 'sa',
+                ownedSubstations: {'sa'},
+              ),
             ),
             // No services — the scope provides the empty default (D5: an offline
             // build wires no SourceControl ⇒ provisioning is a no-op).
@@ -208,7 +215,9 @@ void main() {
 
       // The circuit head spawned even with no SourceControl wired (provision
       // no-op).
-      expect(f.provider.started.map((s) => s.name), ['tgdog-a/sa-1/spec_review/specify']);
+      expect(f.provider.started.map((s) => s.name), [
+        'tgdog-a/sa-1/spec_review/specify',
+      ]);
     },
   );
 }

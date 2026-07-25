@@ -93,17 +93,11 @@ void main() {
           err: err,
         ),
       );
-    return (
-      runner: runner,
-      lastDelegate: () => last!,
-      out: out,
-      err: err,
-    );
+    return (runner: runner, lastDelegate: () => last!, out: out, err: err);
   }
 
   test('`search --json <query>` emits ONE JSON object carrying the '
-      'structured report — the surface the discover skill consumes',
-      () async {
+      'structured report — the surface the discover skill consumes', () async {
     final h = harness();
     final code = await h.runner.run(['search', '--json', 'flux']);
 
@@ -131,25 +125,29 @@ void main() {
     expect(h.out.toString(), contains('1 hit(s) across 2 substation(s)'));
   });
 
-  test('the human render names every store outcome and the hit fields',
-      () async {
-    final h = harness(existing: {'/roots/alpha/.beads'});
-    final code = await h.runner.run(['search', 'flux']);
-    expect(code, 0);
-    final text = h.out.toString();
-    expect(text, contains('alpha: 1 hit(s)'));
-    expect(text, contains('close_reason: ratified: soldered flux joints'));
-    expect(text, contains('beta: store absent'));
-  });
+  test(
+    'the human render names every store outcome and the hit fields',
+    () async {
+      final h = harness(existing: {'/roots/alpha/.beads'});
+      final code = await h.runner.run(['search', 'flux']);
+      expect(code, 0);
+      final text = h.out.toString();
+      expect(text, contains('alpha: 1 hit(s)'));
+      expect(text, contains('close_reason: ratified: soldered flux joints'));
+      expect(text, contains('beta: store absent'));
+    },
+  );
 
-  test('no query is a usage refusal: exit 64, loud on stderr, no search run',
-      () async {
-    final h = harness();
-    final code = await h.runner.run(['search']);
-    expect(code, 64);
-    expect(h.err.toString(), contains('a query is required'));
-    expect(h.out.toString(), isEmpty);
-  });
+  test(
+    'no query is a usage refusal: exit 64, loud on stderr, no search run',
+    () async {
+      final h = harness();
+      final code = await h.runner.run(['search']);
+      expect(code, 64);
+      expect(h.err.toString(), contains('a query is required'));
+      expect(h.out.toString(), isEmpty);
+    },
+  );
 
   test('a roster whose every store is absent is a loud non-answer: exit 1, '
       'report still rendered', () async {
@@ -159,10 +157,12 @@ void main() {
     expect(h.out.toString(), contains('store absent'));
   });
 
-  test('the command OWNS the delegate it asked for — disposed after the run',
-      () async {
-    final h = harness();
-    await h.runner.run(['search', 'flux']);
-    expect(h.lastDelegate().disposed, isTrue);
-  });
+  test(
+    'the command OWNS the delegate it asked for — disposed after the run',
+    () async {
+      final h = harness();
+      await h.runner.run(['search', 'flux']);
+      expect(h.lastDelegate().disposed, isTrue);
+    },
+  );
 }

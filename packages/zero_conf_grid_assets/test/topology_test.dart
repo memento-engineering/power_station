@@ -45,10 +45,11 @@ void main() {
         hub,
       ], selfStation: 'self');
 
-      expect(
-        m.peers.map((p) => p.id).toSet(),
-        {'studio', 'the-dashboard', 'hub'},
-      );
+      expect(m.peers.map((p) => p.id).toSet(), {
+        'studio',
+        'the-dashboard',
+        'hub',
+      });
     });
 
     test('a refused (unblessed) peer never reaches membership', () {
@@ -56,10 +57,7 @@ void main() {
         topology: Topology.mesh,
         trust: allowAllBut({'unknown-laptop'}),
       );
-      final m = resolver.resolve([
-        spokeA,
-        stranger,
-      ], selfStation: 'self');
+      final m = resolver.resolve([spokeA, stranger], selfStation: 'self');
 
       expect(m.peers.map((p) => p.id), ['studio']);
     });

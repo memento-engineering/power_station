@@ -22,7 +22,9 @@ File _libFile(String relative) {
     if (parent.path == dir.path) break;
     dir = parent;
   }
-  fail('could not locate grid_assets/lib/$relative from ${Directory.current.path}');
+  fail(
+    'could not locate grid_assets/lib/$relative from ${Directory.current.path}',
+  );
 }
 
 void main() {
@@ -42,14 +44,18 @@ void main() {
 
     test('an unsupported version refuses whole', () {
       expect(
-        () => SiteBinding.parse({'version': 99, 'endpoints': <String, Object?>{}}),
+        () => SiteBinding.parse({
+          'version': 99,
+          'endpoints': <String, Object?>{},
+        }),
         throwsFormatException,
       );
     });
 
     test('a non-object endpoints refuses', () {
       expect(
-        () => SiteBinding.parse({'version': kSiteBindingVersion, 'endpoints': 7}),
+        () =>
+            SiteBinding.parse({'version': kSiteBindingVersion, 'endpoints': 7}),
         throwsFormatException,
       );
     });
@@ -116,25 +122,32 @@ void main() {
       );
     });
 
-    test('an UNBOUND endpoint-needing env refuses, naming env + fact + fix', () {
-      expect(
-        () => binding.endpointFor(name: 'codex-local', environment: openAiEnv),
-        throwsA(
-          isA<SiteBindingError>().having(
-            (e) => e.message,
-            'message',
-            allOf(
-              contains('codex-local'),
-              contains('OpenAI-compatible'),
-              contains(kSiteBindingFile),
+    test(
+      'an UNBOUND endpoint-needing env refuses, naming env + fact + fix',
+      () {
+        expect(
+          () =>
+              binding.endpointFor(name: 'codex-local', environment: openAiEnv),
+          throwsA(
+            isA<SiteBindingError>().having(
+              (e) => e.message,
+              'message',
+              allOf(
+                contains('codex-local'),
+                contains('OpenAI-compatible'),
+                contains(kSiteBindingFile),
+              ),
             ),
           ),
-        ),
-      );
-    });
+        );
+      },
+    );
 
     test('refusalFor returns the same message (boot-eager return form)', () {
-      final msg = binding.refusalFor(name: 'codex-local', environment: openAiEnv);
+      final msg = binding.refusalFor(
+        name: 'codex-local',
+        environment: openAiEnv,
+      );
       expect(msg, isNotNull);
       expect(msg, contains('codex-local'));
     });
@@ -203,12 +216,14 @@ void main() {
 
   group('committed source carries no endpoint url (ADR-0002 D3/D4)', () {
     test('site_binding.dart has no literal endpoint url or localhost', () {
-      final src = _libFile(p.join('src', 'agent', 'site_binding.dart'))
-          .readAsStringSync();
+      final src = _libFile(
+        p.join('src', 'agent', 'site_binding.dart'),
+      ).readAsStringSync();
       expect(
         RegExp(r'https?://|swift://|localhost|127\.0\.0\.1').hasMatch(src),
         isFalse,
-        reason: 'the endpoint url lives ONLY in the machine-local binding, '
+        reason:
+            'the endpoint url lives ONLY in the machine-local binding, '
             'never in committed source (ADR-0002 D3/D4)',
       );
     });

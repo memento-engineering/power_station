@@ -121,26 +121,22 @@ class PackagedAssetLoader {
   /// Renders the `critic` prompt template for [rubricId] + [bead] — substitutes
   /// `{{rubric}}`, `{{rubricText}}` (the loaded rubric bands), and `{{bead}}` (the
   /// full work bead). The format-faithful mirror of `buildCriticPrompt`.
-  String renderCriticPrompt(String rubricId, Bead bead) => _mustache(
-    loadPromptTemplate('critic'),
-    {
-      'rubric': rubricId,
-      'rubricText': loadRubric(rubricId),
-      'bead': beadBlock(bead),
-    },
-  );
+  String renderCriticPrompt(String rubricId, Bead bead) =>
+      _mustache(loadPromptTemplate('critic'), {
+        'rubric': rubricId,
+        'rubricText': loadRubric(rubricId),
+        'bead': beadBlock(bead),
+      });
 
   /// Renders the `spec-critic` prompt template for [rubricId] + [bead] — the
   /// spec-readiness committee's portable mirror (of `buildSpecCriticPrompt`,
   /// bead `pow-6ao`); same three substitutions as [renderCriticPrompt].
-  String renderSpecCriticPrompt(String rubricId, Bead bead) => _mustache(
-    loadPromptTemplate('spec-critic'),
-    {
-      'rubric': rubricId,
-      'rubricText': loadRubric(rubricId),
-      'bead': beadBlock(bead),
-    },
-  );
+  String renderSpecCriticPrompt(String rubricId, Bead bead) =>
+      _mustache(loadPromptTemplate('spec-critic'), {
+        'rubric': rubricId,
+        'rubricText': loadRubric(rubricId),
+        'bead': beadBlock(bead),
+      });
 
   /// Renders the `readiness` prompt template for [rubricId] + [bead] — the
   /// spec-readiness INTAKE lens's portable mirror (of
@@ -148,14 +144,12 @@ class PackagedAssetLoader {
   /// three substitutions as [renderCriticPrompt]. Its own template, not
   /// `spec-critic`'s: the lens grades the BEAD, where the spec critics grade a
   /// SPEC and the code critics a DIFF — three prompt SHAPES, three mirrors.
-  String renderReadinessPrompt(String rubricId, Bead bead) => _mustache(
-    loadPromptTemplate('readiness'),
-    {
-      'rubric': rubricId,
-      'rubricText': loadRubric(rubricId),
-      'bead': beadBlock(bead),
-    },
-  );
+  String renderReadinessPrompt(String rubricId, Bead bead) =>
+      _mustache(loadPromptTemplate('readiness'), {
+        'rubric': rubricId,
+        'rubricText': loadRubric(rubricId),
+        'bead': beadBlock(bead),
+      });
 
   /// Renders the `discovery` prompt template for [lens] + [bead] — the discovery
   /// circuit's portable mirror (of `DiscoveryLensCapability.buildLensPrompt`).
@@ -176,7 +170,14 @@ class PackagedAssetLoader {
   /// is a packaging bug, never a silent empty install).
   String loadSkillTemplate(String skillId) {
     final file = File(
-      p.join(_root, 'station_overlay', '.claude', 'skills', skillId, 'SKILL.md'),
+      p.join(
+        _root,
+        'station_overlay',
+        '.claude',
+        'skills',
+        skillId,
+        'SKILL.md',
+      ),
     );
     if (!file.existsSync()) {
       throw ArgumentError('unknown skill "$skillId" (no ${file.path})');
@@ -274,8 +275,10 @@ class PackagedAssetLoader {
       return null;
     }
     if (libUri == null || !libUri.isScheme('file')) {
-      probes.add('package config: package:grid_assets did not resolve to a '
-          'file URI (no package config?)');
+      probes.add(
+        'package config: package:grid_assets did not resolve to a '
+        'file URI (no package config?)',
+      );
       return null;
     }
     var dir = Directory.fromUri(libUri).parent;
@@ -283,16 +286,20 @@ class PackagedAssetLoader {
       if (_isGridAssetsPackageRoot(dir)) {
         final probe = Directory(p.join(dir.path, 'extension'));
         if (_hasRubrics(probe)) return probe.path;
-        probes.add('package config: ${probe.path} has no rubrics/ '
-            '(package root ${dir.path})');
+        probes.add(
+          'package config: ${probe.path} has no rubrics/ '
+          '(package root ${dir.path})',
+        );
         return null;
       }
       final parent = dir.parent;
       if (parent.path == dir.path) break;
       dir = parent;
     }
-    probes.add('package config: no grid_assets pubspec.yaml above '
-        '${libUri.toFilePath()}');
+    probes.add(
+      'package config: no grid_assets pubspec.yaml above '
+      '${libUri.toFilePath()}',
+    );
     return null;
   }
 
@@ -315,8 +322,10 @@ class PackagedAssetLoader {
       if (parent.path == dir.path) break;
       dir = parent;
     }
-    probes.add('cwd walk-up from ${Directory.current.path} '
-        '(probing extension/, packages/grid_assets/extension/)');
+    probes.add(
+      'cwd walk-up from ${Directory.current.path} '
+      '(probing extension/, packages/grid_assets/extension/)',
+    );
     return null;
   }
 
@@ -326,9 +335,9 @@ class PackagedAssetLoader {
   static bool _isGridAssetsPackageRoot(Directory dir) {
     final pubspec = File(p.join(dir.path, 'pubspec.yaml'));
     if (!pubspec.existsSync()) return false;
-    return pubspec
-        .readAsLinesSync()
-        .any((line) => RegExp(r'^name:\s*grid_assets\s*$').hasMatch(line));
+    return pubspec.readAsLinesSync().any(
+      (line) => RegExp(r'^name:\s*grid_assets\s*$').hasMatch(line),
+    );
   }
 
   /// Whether [extensionDir] is a usable assets root — it exists and holds the

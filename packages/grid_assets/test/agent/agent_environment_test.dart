@@ -94,45 +94,57 @@ void main() {
     });
   });
 
-  group('AgentEnvironment.resolve — the standalone barrier (tri-state honored)', () {
-    const root = AgentEnvironment(command: 'root-cmd', argsAppend: ['a-root']);
-    const leaf = AgentEnvironment(argsAppend: ['a-leaf']);
-
-    test('undeclared mid keeps the root ancestor', () {
-      const mid = AgentEnvironment(
-        base: EnvBaseUndeclared(),
-        argsAppend: ['a-mid'],
+  group(
+    'AgentEnvironment.resolve — the standalone barrier (tri-state honored)',
+    () {
+      const root = AgentEnvironment(
+        command: 'root-cmd',
+        argsAppend: ['a-root'],
       );
-      final r = AgentEnvironment.resolve([root, mid, leaf]);
-      expect(r.command, 'root-cmd'); // root flows through
-      expect(r.argsAppend, ['a-root', 'a-mid', 'a-leaf']);
-    });
+      const leaf = AgentEnvironment(argsAppend: ['a-leaf']);
 
-    test('standalone mid DROPS every more-root ancestor', () {
-      const mid = AgentEnvironment(
-        base: EnvBaseStandalone(),
-        argsAppend: ['a-mid'],
-      );
-      final r = AgentEnvironment.resolve([root, mid, leaf]);
-      expect(r.command, isNull); // root was dropped
-      expect(r.argsAppend, ['a-mid', 'a-leaf']); // root's append dropped too
-    });
+      test('undeclared mid keeps the root ancestor', () {
+        const mid = AgentEnvironment(
+          base: EnvBaseUndeclared(),
+          argsAppend: ['a-mid'],
+        );
+        final r = AgentEnvironment.resolve([root, mid, leaf]);
+        expect(r.command, 'root-cmd'); // root flows through
+        expect(r.argsAppend, ['a-root', 'a-mid', 'a-leaf']);
+      });
 
-    test('absent vs empty base produce different resolved envs', () {
-      const midAbsent =
-          AgentEnvironment(base: EnvBaseUndeclared(), argsAppend: ['a-mid']);
-      const midEmpty =
-          AgentEnvironment(base: EnvBaseStandalone(), argsAppend: ['a-mid']);
-      final a = AgentEnvironment.resolve([root, midAbsent, leaf]);
-      final e = AgentEnvironment.resolve([root, midEmpty, leaf]);
-      expect(a, isNot(e));
-    });
-  });
+      test('standalone mid DROPS every more-root ancestor', () {
+        const mid = AgentEnvironment(
+          base: EnvBaseStandalone(),
+          argsAppend: ['a-mid'],
+        );
+        final r = AgentEnvironment.resolve([root, mid, leaf]);
+        expect(r.command, isNull); // root was dropped
+        expect(r.argsAppend, ['a-mid', 'a-leaf']); // root's append dropped too
+      });
+
+      test('absent vs empty base produce different resolved envs', () {
+        const midAbsent = AgentEnvironment(
+          base: EnvBaseUndeclared(),
+          argsAppend: ['a-mid'],
+        );
+        const midEmpty = AgentEnvironment(
+          base: EnvBaseStandalone(),
+          argsAppend: ['a-mid'],
+        );
+        final a = AgentEnvironment.resolve([root, midAbsent, leaf]);
+        final e = AgentEnvironment.resolve([root, midEmpty, leaf]);
+        expect(a, isNot(e));
+      });
+    },
+  );
 
   group('guards + target', () {
     test('validate refuses flag prompt mode with no prompt flag', () {
-      expect(const AgentEnvironment(promptMode: PromptMode.flag).validate(),
-          isNotNull);
+      expect(
+        const AgentEnvironment(promptMode: PromptMode.flag).validate(),
+        isNotNull,
+      );
       expect(
         const AgentEnvironment(
           promptMode: PromptMode.flag,
@@ -157,26 +169,33 @@ void main() {
     });
 
     test('arg/none prompt modes need no flag', () {
-      expect(const AgentEnvironment(promptMode: PromptMode.arg).validate(),
-          isNull);
-      expect(const AgentEnvironment(promptMode: PromptMode.none).validate(),
-          isNull);
+      expect(
+        const AgentEnvironment(promptMode: PromptMode.arg).validate(),
+        isNull,
+      );
+      expect(
+        const AgentEnvironment(promptMode: PromptMode.none).validate(),
+        isNull,
+      );
     });
 
     test('needsSiteEndpoint tracks the target kind (D3)', () {
       expect(
-        const AgentEnvironment(target: InferenceTarget.providerManaged)
-            .needsSiteEndpoint,
+        const AgentEnvironment(
+          target: InferenceTarget.providerManaged,
+        ).needsSiteEndpoint,
         isFalse,
       );
       expect(
-        const AgentEnvironment(target: InferenceTarget.openAiCompatible)
-            .needsSiteEndpoint,
+        const AgentEnvironment(
+          target: InferenceTarget.openAiCompatible,
+        ).needsSiteEndpoint,
         isTrue,
       );
       expect(
-        const AgentEnvironment(target: InferenceTarget.swiftInfer)
-            .needsSiteEndpoint,
+        const AgentEnvironment(
+          target: InferenceTarget.swiftInfer,
+        ).needsSiteEndpoint,
         isTrue,
       );
       expect(const AgentEnvironment().needsSiteEndpoint, isFalse); // default
@@ -185,12 +204,21 @@ void main() {
 
   group('value equality', () {
     test('== and hashCode are structural', () {
-      const a =
-          AgentEnvironment(command: 'claude', args: ['-p'], env: {'K': 'v'});
-      const b =
-          AgentEnvironment(command: 'claude', args: ['-p'], env: {'K': 'v'});
-      const c =
-          AgentEnvironment(command: 'claude', args: ['-q'], env: {'K': 'v'});
+      const a = AgentEnvironment(
+        command: 'claude',
+        args: ['-p'],
+        env: {'K': 'v'},
+      );
+      const b = AgentEnvironment(
+        command: 'claude',
+        args: ['-p'],
+        env: {'K': 'v'},
+      );
+      const c = AgentEnvironment(
+        command: 'claude',
+        args: ['-q'],
+        env: {'K': 'v'},
+      );
       expect(a, b);
       expect(a.hashCode, b.hashCode);
       expect(a, isNot(c));

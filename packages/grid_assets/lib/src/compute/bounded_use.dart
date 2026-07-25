@@ -120,14 +120,15 @@ class BoundedCommandExecutor {
     CommandExecutor? executor,
     ProcessGroupController? groups,
     void Function(String)? onLog,
-  })  : assert(
-          spawn == null || executor == null,
-          'provide spawn OR executor, not both',
-        ),
-        _spawn = spawn ??
-            (executor != null ? _executorAsSpawn(executor) : realComputeSpawn),
-        _groups = groups ?? const SystemProcessGroupController(),
-        _onLog = onLog ?? _noLog;
+  }) : assert(
+         spawn == null || executor == null,
+         'provide spawn OR executor, not both',
+       ),
+       _spawn =
+           spawn ??
+           (executor != null ? _executorAsSpawn(executor) : realComputeSpawn),
+       _groups = groups ?? const SystemProcessGroupController(),
+       _onLog = onLog ?? _noLog;
 
   /// The declared bounds (allow-list + timeout).
   final ComputeBounds bounds;
@@ -183,7 +184,8 @@ class BoundedCommandExecutor {
       return CommandResult(
         exitCode: 124, // conventional "timed out" exit code
         stdout: '',
-        stderr: 'compute: "${cmd.command}" timed out after '
+        stderr:
+            'compute: "${cmd.command}" timed out after '
             '${bounds.timeout.inSeconds}s (reaped)',
         durationMs: bounds.timeout.inMilliseconds,
       );
@@ -237,8 +239,8 @@ ComputeSpawn _executorAsSpawn(CommandExecutor executor) =>
 
 class _RealComputeProcess implements ComputeProcess {
   _RealComputeProcess(this._p)
-      : _stdout = _p.stdout.transform(utf8.decoder).join().catchError((_) => ''),
-        _stderr = _p.stderr.transform(utf8.decoder).join().catchError((_) => '');
+    : _stdout = _p.stdout.transform(utf8.decoder).join().catchError((_) => ''),
+      _stderr = _p.stderr.transform(utf8.decoder).join().catchError((_) => '');
 
   final Process _p;
   final Future<String> _stdout;

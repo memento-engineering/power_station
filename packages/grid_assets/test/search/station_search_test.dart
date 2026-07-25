@@ -114,10 +114,11 @@ void main() {
         'the authored tree, never a hardcoded list', () {
       final delegate = _StationDelegate(withGamma: true);
       addTearDown(delegate.dispose);
-      expect(
-        mountedRosterOf(delegate).map((s) => s.name),
-        ['alpha', 'beta', 'gamma'],
-      );
+      expect(mountedRosterOf(delegate).map((s) => s.name), [
+        'alpha',
+        'beta',
+        'gamma',
+      ]);
     });
   });
 
@@ -173,10 +174,9 @@ void main() {
         '/roots/alpha': alphaBeads,
         '/roots/beta': betaBeads,
       });
-      final report = await service(source).search(
-        query: 'flux',
-        roster: roster,
-      );
+      final report = await service(
+        source,
+      ).search(query: 'flux', roster: roster);
 
       expect(source.reads, ['/roots/alpha', '/roots/beta']);
       expect(report.stores.map((s) => s.store.name), ['alpha', 'beta']);
@@ -203,18 +203,13 @@ void main() {
         'matching field (title before notes)', () async {
       final source = _FakeBeadSource({
         '/roots/alpha': const [
-          Bead(
-            id: 'al-3',
-            title: 'Flux everywhere',
-            notes: 'flux here too',
-          ),
+          Bead(id: 'al-3', title: 'Flux everywhere', notes: 'flux here too'),
         ],
         '/roots/beta': const [],
       });
-      final report = await service(source).search(
-        query: 'FLUX',
-        roster: roster,
-      );
+      final report = await service(
+        source,
+      ).search(query: 'FLUX', roster: roster);
       final hit = report.hits.single;
       expect(hit.field, 'title');
       expect(hit.snippet, 'Flux everywhere');
@@ -226,10 +221,9 @@ void main() {
         '/roots/alpha': alphaBeads,
         '/roots/beta': const [],
       });
-      final report = await service(source).search(
-        query: 'wiring standard',
-        roster: roster,
-      );
+      final report = await service(
+        source,
+      ).search(query: 'wiring standard', roster: roster);
       expect(report.hits.single.status, 'closed');
     });
 
@@ -246,10 +240,9 @@ void main() {
         ],
         '/roots/beta': const [],
       });
-      final report = await service(source).search(
-        query: 'needle',
-        roster: roster,
-      );
+      final report = await service(
+        source,
+      ).search(query: 'needle', roster: roster);
       final snippet = report.hits.single.snippet;
       expect(snippet, contains('NEEDLE'));
       expect(snippet, startsWith('…'));
@@ -259,8 +252,7 @@ void main() {
     });
 
     test('an absent store is a loud StoreAbsent IN the report — the rest of '
-        'the roster is still searched (skip-loud, mirroring arming)',
-        () async {
+        'the roster is still searched (skip-loud, mirroring arming)', () async {
       final source = _FakeBeadSource({'/roots/beta': betaBeads});
       final report = await service(
         source,
@@ -269,10 +261,7 @@ void main() {
 
       final alpha = report.stores.first;
       expect(alpha, isA<StoreAbsent>());
-      expect(
-        (alpha as StoreAbsent).reason,
-        contains('/roots/alpha/.beads'),
-      );
+      expect((alpha as StoreAbsent).reason, contains('/roots/alpha/.beads'));
       // alpha was never read (no store, no spawn), beta still searched.
       expect(source.reads, ['/roots/beta']);
       expect(report.stores.last, isA<StoreSearched>());
@@ -285,10 +274,9 @@ void main() {
         {'/roots/beta': betaBeads},
         failRoots: {'/roots/alpha'},
       );
-      final report = await service(source).search(
-        query: 'flux',
-        roster: roster,
-      );
+      final report = await service(
+        source,
+      ).search(query: 'flux', roster: roster);
       final alpha = report.stores.first;
       expect(alpha, isA<StoreFailed>());
       expect((alpha as StoreFailed).reason, contains('bd unavailable'));
@@ -310,10 +298,9 @@ void main() {
         {'/roots/beta': betaBeads},
         failRoots: {'/roots/alpha'},
       );
-      final json = (await service(source).search(
-        query: 'flux',
-        roster: roster,
-      )).toJson();
+      final json = (await service(
+        source,
+      ).search(query: 'flux', roster: roster)).toJson();
 
       expect(json['query'], 'flux');
       expect(json['hitCount'], 1);
@@ -352,39 +339,41 @@ void main() {
         dirExists: _probeFor({'/grid/alpha/.beads'}),
       ).search(query: 'roster', roster: roster);
 
-      expect(
-        report.stores.map((s) => s.store.name),
-        ['alpha', 'beta', 'gamma'],
-      );
+      expect(report.stores.map((s) => s.store.name), [
+        'alpha',
+        'beta',
+        'gamma',
+      ]);
       expect(report.hits.single.beadId, 'al-7');
       // The seats without a checkout are absent — reported, not dropped.
       expect(report.stores.whereType<StoreAbsent>(), hasLength(2));
     });
   });
 
-  group('BdExportBeadSource — the A37 read-only fence (at the spawn seam)',
-      () {
+  group('BdExportBeadSource — the A37 read-only fence (at the spawn seam)', () {
     const jsonl =
         '{"_type":"issue","id":"al-1","title":"hello flux","status":"open",'
         '"issue_type":"task"}\n'
         '{"_type":"memory","key":"skipped-config-record"}\n';
 
-    test('the ONLY argv the default source ever issues is `export --all` — '
-        'one spawn per store, a pure read (never show/ready/mutation)',
-        () async {
-      final runners = <String, _RecordingBdRunner>{};
-      final source = BdExportBeadSource(
-        runnerFor: (root) => runners[root] = _RecordingBdRunner(jsonl),
-      );
+    test(
+      'the ONLY argv the default source ever issues is `export --all` — '
+      'one spawn per store, a pure read (never show/ready/mutation)',
+      () async {
+        final runners = <String, _RecordingBdRunner>{};
+        final source = BdExportBeadSource(
+          runnerFor: (root) => runners[root] = _RecordingBdRunner(jsonl),
+        );
 
-      final beads = await source.read(_scope('alpha', '/roots/alpha', 'al'));
+        final beads = await source.read(_scope('alpha', '/roots/alpha', 'al'));
 
-      expect(beads.single.id, 'al-1');
-      final runner = runners['/roots/alpha']!;
-      expect(runner.argvs, [
-        ['export', '--all'],
-      ]);
-    });
+        expect(beads.single.id, 'al-1');
+        final runner = runners['/roots/alpha']!;
+        expect(runner.argvs, [
+          ['export', '--all'],
+        ]);
+      },
+    );
 
     test('each store is read through its OWN root-bound runner (the spawn '
         'runs IN the store root, never a shared cwd)', () async {

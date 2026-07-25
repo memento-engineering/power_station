@@ -49,10 +49,8 @@ const String kAssetManifestTarget = 'mcp';
 String? mountedGridHomeOf(
   sdk.GridDelegate delegate, {
   sdk.GridConfiguration configuration = const sdk.GridConfiguration(),
-}) => mountedValueOf<sdk.GridRoot>(
-  delegate,
-  configuration: configuration,
-)?.path;
+}) =>
+    mountedValueOf<sdk.GridRoot>(delegate, configuration: configuration)?.path;
 
 /// The ORDERED `station_overlay` roots in scope for [gridHome] — every package
 /// in the grid home's package config that ships BOTH the asset manifest
@@ -232,10 +230,12 @@ String renderInstallReport(OverlayInstallReport report, {bool diff = true}) {
     switch (file) {
       case OverlayFileWritten():
         b.writeln(report.dryRun ? 'MISSING $path' : 'installed $path');
-        if (diff) _writeDiff(b, path, report.writtenContents[file.relativePath]);
+        if (diff)
+          _writeDiff(b, path, report.writtenContents[file.relativePath]);
       case OverlayFileUpdated():
         b.writeln(report.dryRun ? 'DRIFTED $path' : 'updated $path');
-        if (diff) _writeDiff(b, path, report.writtenContents[file.relativePath]);
+        if (diff)
+          _writeDiff(b, path, report.writtenContents[file.relativePath]);
       case OverlayFileUnchanged():
         if (diff) b.writeln('current $path');
       case OverlayFileBlocked():

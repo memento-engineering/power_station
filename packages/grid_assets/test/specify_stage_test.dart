@@ -55,7 +55,10 @@ void main() {
       final cfg = const SpecifyCapability().spawn(c.context, c.args);
       expect(cfg.command, 'sh');
       expect(cfg.args[0], '-c');
-      expect(cfg.args[1], contains('.grid/telemetry/tg-1_spec_review_specify.usage.json'));
+      expect(
+        cfg.args[1],
+        contains('.grid/telemetry/tg-1_spec_review_specify.usage.json'),
+      );
       expect(cfg.args, contains('claude'));
       expect(cfg.workDir, '/w/tg-1');
       expect(cfg.lifecycle, Lifecycle.oneTurn);
@@ -69,7 +72,10 @@ void main() {
         values: {Workspace: testWorkspace('tg-1', workspaceDir: '/w/tg-1')},
       );
       expect(
-        () => const SpecifyCapability().spawn(noBead, stepArgs('tg-1/spec_review/specify')),
+        () => const SpecifyCapability().spawn(
+          noBead,
+          stepArgs('tg-1/spec_review/specify'),
+        ),
         throwsStateError,
       );
     });
@@ -108,10 +114,7 @@ void main() {
         '--design, the validation_plan metadata — always --actor specify', () {
       expect(rendered, contains('bd update tg-1 --actor specify --acceptance'));
       expect(rendered, contains('bd update tg-1 --actor specify --design'));
-      expect(
-        rendered,
-        contains('--set-metadata validation_plan='),
-      );
+      expect(rendered, contains('--set-metadata validation_plan='));
       expect(rendered, contains('- [ ]'));
       expect(rendered, contains('## Implementation Plan'));
       expect(rendered, contains('## Touches'));
@@ -220,45 +223,54 @@ void main() {
     });
   });
 
-  group('buildSpecifyBrief — the AUTO-RESPEC correction guidance (`pow-7nm`)', () {
-    const ledger = RespecLedger(
-      round: 2,
-      lanes: [
-        RespecLane(
-          rubric: 'acceptance-testability',
-          grade: 'D',
-          rationale: 'criterion 2 names no command that proves it',
-        ),
-      ],
-    );
-
-    test('with a ledger: the failing lane\'s rationale rides the brief VERBATIM, '
-        'ahead of the job contract', () {
-      final rendered = buildSpecifyBrief(
-        _fullBead(),
-        testWorkspace('tg-1', workspaceDir: '/w/tg-1', branch: 'grid/tg-1'),
-        guidance: ledger,
-      ).render();
-      expect(rendered, contains('RESPEC round 2 of 2'));
-      expect(rendered, contains('`acceptance-testability` — grade D'));
-      expect(rendered, contains('criterion 2 names no command that proves it'));
-      expect(
-        rendered.indexOf('Correction guidance'),
-        lessThan(rendered.indexOf('## Your job')),
-        reason: 'the correction guidance is read BEFORE the job contract',
+  group(
+    'buildSpecifyBrief — the AUTO-RESPEC correction guidance (`pow-7nm`)',
+    () {
+      const ledger = RespecLedger(
+        round: 2,
+        lanes: [
+          RespecLane(
+            rubric: 'acceptance-testability',
+            grade: 'D',
+            rationale: 'criterion 2 names no command that proves it',
+          ),
+        ],
       );
-    });
 
-    test('without a ledger: no correction-guidance section at all (a first '
-        'round is byte-identical to the pre-pow-7nm brief)', () {
-      final rendered = buildSpecifyBrief(
-        _fullBead(),
-        testWorkspace('tg-1', workspaceDir: '/w/tg-1', branch: 'grid/tg-1'),
-      ).render();
-      expect(rendered, isNot(contains('Correction guidance')));
-      expect(rendered, isNot(contains('RESPEC')));
-    });
-  });
+      test(
+        'with a ledger: the failing lane\'s rationale rides the brief VERBATIM, '
+        'ahead of the job contract',
+        () {
+          final rendered = buildSpecifyBrief(
+            _fullBead(),
+            testWorkspace('tg-1', workspaceDir: '/w/tg-1', branch: 'grid/tg-1'),
+            guidance: ledger,
+          ).render();
+          expect(rendered, contains('RESPEC round 2 of 2'));
+          expect(rendered, contains('`acceptance-testability` — grade D'));
+          expect(
+            rendered,
+            contains('criterion 2 names no command that proves it'),
+          );
+          expect(
+            rendered.indexOf('Correction guidance'),
+            lessThan(rendered.indexOf('## Your job')),
+            reason: 'the correction guidance is read BEFORE the job contract',
+          );
+        },
+      );
+
+      test('without a ledger: no correction-guidance section at all (a first '
+          'round is byte-identical to the pre-pow-7nm brief)', () {
+        final rendered = buildSpecifyBrief(
+          _fullBead(),
+          testWorkspace('tg-1', workspaceDir: '/w/tg-1', branch: 'grid/tg-1'),
+        ).render();
+        expect(rendered, isNot(contains('Correction guidance')));
+        expect(rendered, isNot(contains('RESPEC')));
+      });
+    },
+  );
 
   // The SEAM (the bead's load-bearing criterion, proven end-of-wire): the ledger
   // the spec route left in the WORKTREE reaches the re-specify agent's ARGV.

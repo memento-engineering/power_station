@@ -560,7 +560,8 @@ void main() {
         expect(
           _wroteCursor(f, kSpecRouteNode, 'complete'),
           isTrue,
-          reason: 'the route terminalises POSITIVELY — that is exactly what '
+          reason:
+              'the route terminalises POSITIVELY — that is exactly what '
               'makes it a valid `validates` SOURCE for the derivation',
         );
         expect(_resultField(f, kSpecRouteNode, 'grade'), 'F');
@@ -568,7 +569,8 @@ void main() {
         expect(
           _gateMinted(f),
           isFalse,
-          reason: 'a respec mints NO type=gate bead (that is Escalate — a '
+          reason:
+              'a respec mints NO type=gate bead (that is Escalate — a '
               'human park)',
         );
         expect(_wroteCursor(f, kSpecRouteNode, 'gated'), isFalse);
@@ -602,11 +604,13 @@ void main() {
 
         // Same posture for the mint: it is scheduled off `build` as a
         // microtask chain that only becomes observable at the `bd dep` call.
-        bool mintedSuccessor() => f.runner.callsFor('dep').any(
-          (c) =>
-              c.contains('supersedes') &&
-              c.contains('$_sid-${kSpecifyNode.replaceAll('/', '-')}'),
-        );
+        bool mintedSuccessor() => f.runner
+            .callsFor('dep')
+            .any(
+              (c) =>
+                  c.contains('supersedes') &&
+                  c.contains('$_sid-${kSpecifyNode.replaceAll('/', '-')}'),
+            );
         await settle(mintedSuccessor, maxPumps: 1000);
 
         // BACKWARD MOTION IS DERIVED: the engine mints a SUCCESSOR incarnation
@@ -634,7 +638,8 @@ void main() {
         expect(
           f.runner.callsFor('close'),
           isEmpty,
-          reason: 'the session stays LIVE across the derived wave — a respec '
+          reason:
+              'the session stays LIVE across the derived wave — a respec '
               'is not a re-mint',
         );
       },

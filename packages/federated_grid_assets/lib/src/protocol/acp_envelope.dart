@@ -46,7 +46,8 @@ sealed class AcpMessage {
     final method = json['method'];
     if (method is String) {
       final id = json['id'];
-      final params = (json['params'] as Map?)?.cast<String, dynamic>() ??
+      final params =
+          (json['params'] as Map?)?.cast<String, dynamic>() ??
           const <String, dynamic>{};
       if (id != null) {
         return AcpRequest(id: id as String, method: method, params: params);
@@ -96,11 +97,11 @@ class AcpRequest extends AcpMessage {
 
   @override
   Map<String, dynamic> toJson() => {
-        'jsonrpc': kJsonRpcVersion,
-        'id': id,
-        'method': method,
-        'params': params,
-      };
+    'jsonrpc': kJsonRpcVersion,
+    'id': id,
+    'method': method,
+    'params': params,
+  };
 
   @override
   String toString() => 'AcpRequest($method, id: $id, params: $params)';
@@ -120,10 +121,10 @@ class AcpNotification extends AcpMessage {
 
   @override
   Map<String, dynamic> toJson() => {
-        'jsonrpc': kJsonRpcVersion,
-        'method': method,
-        'params': params,
-      };
+    'jsonrpc': kJsonRpcVersion,
+    'method': method,
+    'params': params,
+  };
 
   @override
   String toString() => 'AcpNotification($method, params: $params)';
@@ -142,10 +143,10 @@ class AcpResultResponse extends AcpMessage {
 
   @override
   Map<String, dynamic> toJson() => {
-        'jsonrpc': kJsonRpcVersion,
-        'id': id,
-        'result': result,
-      };
+    'jsonrpc': kJsonRpcVersion,
+    'id': id,
+    'result': result,
+  };
 
   @override
   String toString() => 'AcpResultResponse(id: $id, result: $result)';
@@ -177,14 +178,10 @@ class AcpErrorResponse extends AcpMessage {
 
   @override
   Map<String, dynamic> toJson() => {
-        'jsonrpc': kJsonRpcVersion,
-        'id': id,
-        'error': {
-          'code': code,
-          'message': message,
-          if (data != null) 'data': data,
-        },
-      };
+    'jsonrpc': kJsonRpcVersion,
+    'id': id,
+    'error': {'code': code, 'message': message, if (data != null) 'data': data},
+  };
 
   @override
   String toString() => 'AcpErrorResponse(id: $id, code: $code, $message)';
@@ -198,7 +195,6 @@ Uint8List encodeAcp(AcpMessage message) =>
 /// [FormatException] on invalid JSON (a malformed/foreign message on the
 /// topic) — callers on an untrusted/mixed topic should catch it rather than
 /// let a bad payload crash the listener loop.
-AcpMessage decodeAcp(Uint8List payload) =>
-    AcpMessage.fromJson(
-      (jsonDecode(utf8.decode(payload)) as Map).cast<String, dynamic>(),
-    );
+AcpMessage decodeAcp(Uint8List payload) => AcpMessage.fromJson(
+  (jsonDecode(utf8.decode(payload)) as Map).cast<String, dynamic>(),
+);

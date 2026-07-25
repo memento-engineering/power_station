@@ -21,15 +21,13 @@ import 'package:test/test.dart';
 
 import '../support/asset_fakes.dart';
 
-GraphSnapshot _graph({
-  required List<Bead> beads,
-  required Set<String> ready,
-}) => GraphSnapshot.fromParts(
-  beads: beads,
-  dependencies: const [],
-  readyIds: ready,
-  capturedAt: DateTime(2026),
-);
+GraphSnapshot _graph({required List<Bead> beads, required Set<String> ready}) =>
+    GraphSnapshot.fromParts(
+      beads: beads,
+      dependencies: const [],
+      readyIds: ready,
+      capturedAt: DateTime(2026),
+    );
 
 /// A typed bead carrying a real brief — non-empty on purpose, so the plain task
 /// PASSES the intake contract (bead `pow-q7n`) and this suite's zero-spawn proof
@@ -119,10 +117,16 @@ void main() {
         // the provider YET. Re-project the ladder complete (cursor adoption) and
         // the plain task's AGENT swaps in; every non-core type stays unmounted
         // throughout, which is what this invariant is about.
-        expect(f.provider.started, isEmpty, reason: 'the ladder head is deterministic');
+        expect(
+          f.provider.started,
+          isEmpty,
+          reason: 'the ladder head is deterministic',
+        );
         state.push(
           _graph(
-            beads: [...ladderDoneSession(id: 'tgdog-sess1', workBeadId: 'tg-1')],
+            beads: [
+              ...ladderDoneSession(id: 'tgdog-sess1', workBeadId: 'tg-1'),
+            ],
             ready: const {},
           ),
         );
@@ -204,7 +208,9 @@ void main() {
         await pumpEventQueue();
         state.push(
           _graph(
-            beads: [...ladderDoneSession(id: 'tgdog-sess1', workBeadId: 'tg-1')],
+            beads: [
+              ...ladderDoneSession(id: 'tgdog-sess1', workBeadId: 'tg-1'),
+            ],
             ready: const {},
           ),
         );

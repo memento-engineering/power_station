@@ -16,7 +16,10 @@ import 'package:test/test.dart';
 
 import 'support/asset_fakes.dart';
 
-const _tgConfig = SubstationConfig(substationId: 'tg', ownedSubstations: {'tg'});
+const _tgConfig = SubstationConfig(
+  substationId: 'tg',
+  ownedSubstations: {'tg'},
+);
 
 NodeCursor _done() => const NodeCursor(state: StepState.complete);
 
@@ -74,7 +77,13 @@ class _Committee {
     joined.push(
       JoinedSnapshot(
         graph: GraphSnapshot.fromParts(
-          beads: [Bead(id: beadId, issueType: IssueType.task, status: BeadStatus.open)],
+          beads: [
+            Bead(
+              id: beadId,
+              issueType: IssueType.task,
+              status: BeadStatus.open,
+            ),
+          ],
           dependencies: const [],
           readyIds: {beadId},
           capturedAt: DateTime(2026),

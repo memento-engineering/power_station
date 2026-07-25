@@ -271,8 +271,27 @@ final RegExp _properNounLead = RegExp(
 /// most ordinary shape of the offence. A short, closed, LANGUAGE-level list —
 /// never a vendor list, which is exactly what this lane refuses to maintain.
 const Set<String> _grammaticalCapitals = {
-  'a', 'an', 'the', 'this', 'that', 'these', 'those', 'each', 'every', 'any',
-  'no', 'some', 'one', 'its', 'their', 'our', 'your', 'his', 'her', 'my', 'it',
+  'a',
+  'an',
+  'the',
+  'this',
+  'that',
+  'these',
+  'those',
+  'each',
+  'every',
+  'any',
+  'no',
+  'some',
+  'one',
+  'its',
+  'their',
+  'our',
+  'your',
+  'his',
+  'her',
+  'my',
+  'it',
 };
 
 /// Whether the text [before] the banned term ends in a third-party PROPER NOUN

@@ -92,53 +92,46 @@ void main() {
   });
 
   group('the happy path — inference over the ACTUAL delta', () {
-    test(
-      'reads the branch delta, renders the harness invocation with the CHEAP '
-      'model, and parses the answer',
-      () async {
-        final git = CannedGitRunner(
-          log: 'feat(x): do a thing\n\nRefs: tg-1\x00',
-          diff: '--- a/lib/x.dart\n+++ b/lib/x.dart\n+the change',
-        );
-        final inference = FakeInferenceRunner(output: _answer);
-        final outcome = await _describe(
-          workspaceDir: work.path,
-          git: git,
-          inference: inference,
-        );
+    test('reads the branch delta, renders the harness invocation with the CHEAP '
+        'model, and parses the answer', () async {
+      final git = CannedGitRunner(
+        log: 'feat(x): do a thing\n\nRefs: tg-1\x00',
+        diff: '--- a/lib/x.dart\n+++ b/lib/x.dart\n+the change',
+      );
+      final inference = FakeInferenceRunner(output: _answer);
+      final outcome = await _describe(
+        workspaceDir: work.path,
+        git: git,
+        inference: inference,
+      );
 
-        expect(outcome.source, 'inference');
-        expect(outcome.description!.type, 'feat');
-        expect(outcome.description!.scope, 'landing');
-        expect(outcome.description!.summary, startsWith('The land step reads'));
-        expect(outcome.commits.total, 1);
-        expect(outcome.commits.compliant, 1);
-        expect(outcome.commits.trailered, 1);
+      expect(outcome.source, 'inference');
+      expect(outcome.description!.type, 'feat');
+      expect(outcome.description!.scope, 'landing');
+      expect(outcome.description!.summary, startsWith('The land step reads'));
+      expect(outcome.commits.total, 1);
+      expect(outcome.commits.compliant, 1);
+      expect(outcome.commits.trailered, 1);
 
-        // The branch's OWN delta: the three-dot merge-base range
-        // PinDiffCapability pins the critics to, and the NUL-separated log the
-        // lint reads.
-        expect(git.calls[0], [
-          'log',
-          '--format=%s%n%b%x00',
-          'origin/main..HEAD',
-        ]);
-        expect(git.calls[1], ['diff', '--stat', 'origin/main...HEAD']);
-        expect(git.calls[2], ['diff', 'origin/main...HEAD']);
+      // The branch's OWN delta: the three-dot merge-base range
+      // PinDiffCapability pins the critics to, and the NUL-separated log the
+      // lint reads.
+      expect(git.calls[0], ['log', '--format=%s%n%b%x00', 'origin/main..HEAD']);
+      expect(git.calls[1], ['diff', '--stat', 'origin/main...HEAD']);
+      expect(git.calls[2], ['diff', 'origin/main...HEAD']);
 
-        // The harness (the SAME one the critics ride) rendered a one-shot claude
-        // invocation on the cheap model, carrying the diff in its prompt.
-        final invocation = inference.calls.single;
-        expect(invocation.command, 'claude');
-        expect(invocation.args, containsAllInOrder(<String>['--model', 'haiku']));
-        expect(invocation.workDir, work.path);
-        expect(invocation.args.last, contains('+the change'));
-        expect(
-          invocation.args.last,
-          contains('NEVER write the tracker id `tg-1`'),
-        );
-      },
-    );
+      // The harness (the SAME one the critics ride) rendered a one-shot claude
+      // invocation on the cheap model, carrying the diff in its prompt.
+      final invocation = inference.calls.single;
+      expect(invocation.command, 'claude');
+      expect(invocation.args, containsAllInOrder(<String>['--model', 'haiku']));
+      expect(invocation.workDir, work.path);
+      expect(invocation.args.last, contains('+the change'));
+      expect(
+        invocation.args.last,
+        contains('NEVER write the tracker id `tg-1`'),
+      );
+    });
 
     test("the composition's model is a knob", () async {
       final inference = FakeInferenceRunner(output: _answer);
@@ -178,16 +171,19 @@ void main() {
   });
 
   group('every failure path falls back — a land NEVER fails over PR prose', () {
-    test('a failing `git diff` ⇒ fallback, but the commit lint still lands', () async {
-      final outcome = await _describe(
-        workspaceDir: work.path,
-        git: CannedGitRunner(log: 'wip\x00', diff: 'fatal', diffOk: false),
-        inference: _ExplodingInferenceRunner(),
-      );
-      expect(outcome.source, 'fallback');
-      expect(outcome.commits.total, 1);
-      expect(outcome.commits.compliant, 0);
-    });
+    test(
+      'a failing `git diff` ⇒ fallback, but the commit lint still lands',
+      () async {
+        final outcome = await _describe(
+          workspaceDir: work.path,
+          git: CannedGitRunner(log: 'wip\x00', diff: 'fatal', diffOk: false),
+          inference: _ExplodingInferenceRunner(),
+        );
+        expect(outcome.source, 'fallback');
+        expect(outcome.commits.total, 1);
+        expect(outcome.commits.compliant, 0);
+      },
+    );
 
     test('an EMPTY delta ⇒ fallback, no inference spent', () async {
       final outcome = await _describe(
@@ -198,19 +194,22 @@ void main() {
       expect(outcome.source, 'fallback');
     });
 
-    test('a non-zero inference run, or unparseable output, ⇒ fallback', () async {
-      final failed = await _describe(
-        workspaceDir: work.path,
-        git: CannedGitRunner(diff: 'a diff'),
-        inference: FakeInferenceRunner(output: _answer, ok: false),
-      );
-      expect(failed.source, 'fallback');
-      final garbage = await _describe(
-        workspaceDir: work.path,
-        git: CannedGitRunner(diff: 'a diff'),
-        inference: FakeInferenceRunner(output: 'I refuse.'),
-      );
-      expect(garbage.source, 'fallback');
-    });
+    test(
+      'a non-zero inference run, or unparseable output, ⇒ fallback',
+      () async {
+        final failed = await _describe(
+          workspaceDir: work.path,
+          git: CannedGitRunner(diff: 'a diff'),
+          inference: FakeInferenceRunner(output: _answer, ok: false),
+        );
+        expect(failed.source, 'fallback');
+        final garbage = await _describe(
+          workspaceDir: work.path,
+          git: CannedGitRunner(diff: 'a diff'),
+          inference: FakeInferenceRunner(output: 'I refuse.'),
+        );
+        expect(garbage.source, 'fallback');
+      },
+    );
   });
 }

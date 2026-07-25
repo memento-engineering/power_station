@@ -203,8 +203,16 @@ void main() {
         final grant = await client.requestLease(
           const LeaseRequest(lessee: 'a'),
         );
-        final r1 = await client.dispatch(grant, const {}, idempotencyKey: 'job-1');
-        final r2 = await client.dispatch(grant, const {}, idempotencyKey: 'job-1');
+        final r1 = await client.dispatch(
+          grant,
+          const {},
+          idempotencyKey: 'job-1',
+        );
+        final r2 = await client.dispatch(
+          grant,
+          const {},
+          idempotencyKey: 'job-1',
+        );
         expect(runs, 1); // the owner deduped — a single run
         expect(r2['run'], r1['run']);
         expect(r1['run'], '#1');
@@ -270,34 +278,37 @@ void main() {
   });
 
   group('federation membership/presence/heartbeat (Track B)', () {
-    test('presence carries the capability profile + ephemeral capacity', () async {
-      final server = await StationServer.start(
-        station: 'the-dashboard',
-        offered: 2,
-        host: '127.0.0.1',
-        profile: const {
-          'system-os': 'linux',
-          'flutter-target': ['linux', 'android'],
-        },
-        handler: _echoHandler,
-      );
-      addTearDown(server.close);
-      final client = HttpStationClient(host: '127.0.0.1', port: server.port);
-      addTearDown(client.close);
+    test(
+      'presence carries the capability profile + ephemeral capacity',
+      () async {
+        final server = await StationServer.start(
+          station: 'the-dashboard',
+          offered: 2,
+          host: '127.0.0.1',
+          profile: const {
+            'system-os': 'linux',
+            'flutter-target': ['linux', 'android'],
+          },
+          handler: _echoHandler,
+        );
+        addTearDown(server.close);
+        final client = HttpStationClient(host: '127.0.0.1', port: server.port);
+        addTearDown(client.close);
 
-      final p = await client.presence();
-      expect(p.station, 'the-dashboard');
-      expect(p.offered, 2);
-      expect(p.available, 2); // the EPHEMERAL half
-      expect(p.profile['system-os'], 'linux'); // the DURABLE half
-      expect(p.profile['flutter-target'], ['linux', 'android']);
+        final p = await client.presence();
+        expect(p.station, 'the-dashboard');
+        expect(p.offered, 2);
+        expect(p.available, 2); // the EPHEMERAL half
+        expect(p.profile['system-os'], 'linux'); // the DURABLE half
+        expect(p.profile['flutter-target'], ['linux', 'android']);
 
-      // After a lease only capacity churns; the durable profile is unchanged.
-      await client.requestLease(const LeaseRequest(lessee: 'studio'));
-      final p2 = await client.presence();
-      expect(p2.available, 1);
-      expect(p2.profile['system-os'], 'linux');
-    });
+        // After a lease only capacity churns; the durable profile is unchanged.
+        await client.requestLease(const LeaseRequest(lessee: 'studio'));
+        final p2 = await client.presence();
+        expect(p2.available, 1);
+        expect(p2.profile['system-os'], 'linux');
+      },
+    );
 
     test('heartbeat over the wire keeps a lease alive; loss reaps it', () async {
       final clock = _Clock();
