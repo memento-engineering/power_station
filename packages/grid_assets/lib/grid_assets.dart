@@ -146,6 +146,7 @@ export 'src/code/route_failure.dart';
 export 'src/code/specify.dart';
 export 'src/compute/bounded_use.dart';
 export 'src/compute/compute_command.dart';
+export 'src/compute/compute_commands.dart';
 export 'src/compute/lease_capability.dart';
 export 'src/lease/bus_lease.dart';
 export 'src/search/search_command.dart';
