@@ -1,5 +1,5 @@
 ---
-name: intake-grooming
+name: intake-refinement
 description: >
   Shape work beads so a resident the_grid station can drive them: the required
   validation_plan metadata, driveable issue types, dependency wiring,
@@ -12,9 +12,9 @@ metadata:
   author: memento-engineering
 ---
 
-# Intake grooming
+# Intake refinement
 
-A resident station's drive set IS the ready frontier: **ready = in**. Grooming
+A resident station's drive set IS the ready frontier: **ready = in**. Refinement
 is the only gate between a bead and a live agent, so every rule here exists
 because its violation put a real agent on wrong work.
 

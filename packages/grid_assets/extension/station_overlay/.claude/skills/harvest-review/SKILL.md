@@ -34,7 +34,7 @@ For each work bead with a terminal session:
    **Trust no grade on a zero-commit branch.** Critics have graded
    pre-existing mainline work as the bead's own diff (A/A/A citing a
    weeks-old mainline commit). Zero delta + open bead = stale intake → close
-   the bead with receipts (`intake-grooming`), no landing.
+   the bead with receipts (`intake-refinement`), no landing.
 3. **Committee verdicts** — read the rationales in
    `.grid/critique/<rubric>.json`. A/B with substantive rationales supports
    landing; a C names the follow-up (quote it in the PR or the next round's
