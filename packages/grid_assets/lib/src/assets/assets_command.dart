@@ -34,9 +34,13 @@ import 'overlay_provenance.dart' show resolveOverlaySourceRefSync;
 /// rejected. Installing the operator's own manual is an explicit act.
 class AssetsCommand extends Command<int> {
   /// Creates the umbrella with its subcommands.
+  ///
+  /// When [runnerInvocation] is supplied, the installed assets render it into
+  /// `{{runner}}`. Omission uses the enclosing runner's executable name.
   AssetsCommand({
     required sdk.GridDelegate Function() delegate,
     OverlayInstallService service = const OverlayInstallService(),
+    String? runnerInvocation,
     Future<List<String>> Function(String gridHome)? roots,
     String Function(String overlayRoot)? sourceRef,
     StringSink? out,
@@ -46,6 +50,7 @@ class AssetsCommand extends Command<int> {
       AssetsInstallCommand(
         delegate: delegate,
         service: service,
+        runnerInvocation: runnerInvocation,
         roots: roots,
         sourceRef: sourceRef,
         out: out,
@@ -77,16 +82,21 @@ class AssetsInstallCommand extends Command<int> {
   /// install [service], the overlay-root [roots] resolver and the [sourceRef]
   /// resolver (both injectable; the defaults are the non-prescriptive
   /// `extension_discovery` walk and the overlay checkout's short sha).
+  ///
+  /// When [runnerInvocation] is supplied, the installed assets render it into
+  /// `{{runner}}`. Omission uses the enclosing runner's executable name.
   /// [out]/[err] default to the real stdout/stderr; tests capture them.
   AssetsInstallCommand({
     required sdk.GridDelegate Function() delegate,
     OverlayInstallService service = const OverlayInstallService(),
+    String? runnerInvocation,
     Future<List<String>> Function(String gridHome)? roots,
     String Function(String overlayRoot)? sourceRef,
     StringSink? out,
     StringSink? err,
   }) : _delegate = delegate,
        _service = service,
+       _runnerInvocation = runnerInvocation,
        _roots = roots ?? _discoverRoots,
        _sourceRef = sourceRef ?? resolveOverlaySourceRefSync,
        _out = out ?? stdout,
@@ -133,6 +143,7 @@ class AssetsInstallCommand extends Command<int> {
 
   final sdk.GridDelegate Function() _delegate;
   final OverlayInstallService _service;
+  final String? _runnerInvocation;
   final Future<List<String>> Function(String) _roots;
   final String Function(String) _sourceRef;
   final StringSink _out;
@@ -174,9 +185,12 @@ class AssetsInstallCommand extends Command<int> {
         sourceRef: args.option('source-ref') ?? _sourceRef(overlayRoots.first),
         check: args.flag('check'),
         args: {
-          // The composing station's OWN verb — the vended skills' `{{runner}}`
-          // calls ride it (the ADR-0001 coupling), never a hardcoded name.
-          'runner': runner?.executableName ?? kDefaultOverlayRunner,
+          // A JIT station supplies its launchable invocation; compiled stations
+          // keep the enclosing runner's executable name and unattached fallback.
+          'runner':
+              _runnerInvocation ??
+              runner?.executableName ??
+              kDefaultOverlayRunner,
           'gridHome': gridHome,
         },
       );
