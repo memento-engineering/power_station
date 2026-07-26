@@ -748,7 +748,7 @@ class SpecCriticCapability extends CriticCapability {
           rubric,
           args.nodePath,
           workspace.workspaceDir,
-          round: roundOf(context, args.nodePath),
+          round: verdictRound(args),
         ),
       ),
       workspace: workspace,
@@ -771,9 +771,8 @@ class SpecCriticCapability extends CriticCapability {
   /// Carries the SAME hardening as [CriticCapability.buildCriticPrompt]: the
   /// verdict JSON's `nodePath` FRESHNESS STAMP (gate-integrity #3 — a rework
   /// round reuses the workspace directory), plus the ROUND stamp (A15(5)
-  /// alt-A, re-sourced by A27(7)(a)'s follow-up, bead `pow-96s`) — the respec
-  /// ledger's own `round`, read via [roundOf] off the ambient [Workspace]'s
-  /// worktree, which is what fences a stale verdict across an auto-respec wave
+  /// alt-A), sourced from the engine-injected session circuit round via
+  /// [verdictRound], which fences a stale verdict across an auto-respec wave
   /// (the node path does not move); the workspace-derived ABSOLUTE
   /// canonical write path (gate-integrity #4 — cwd-invariant), and the
   /// file-write instruction as the LAST thing the prompt says (tg-291 —
@@ -909,24 +908,31 @@ class SpecValidationCapability extends ServiceCapability {
 
   @override
   Future<StepOutcome> run(TreeContext context, StepArgs args) async {
+    final round = verdictRound(args);
     // Read the ambient bead at ENTRY (while mounted); the check below is pure
     // over the captured value.
     final bead = context.getInheritedSeedOfExactType<Bead>();
     if (bead == null) {
-      return const Ok({
+      return Ok({
         'grade': 'F',
         'transport': 'structural',
         'rationale': 'no ambient work bead to validate — fail-closed',
+        kVerdictRoundKey: '$round',
       });
     }
     final findings = specStructuralFindings(bead);
     if (findings.isEmpty) {
-      return const Ok({'grade': 'A', 'transport': 'structural'});
+      return Ok({
+        'grade': 'A',
+        'transport': 'structural',
+        kVerdictRoundKey: '$round',
+      });
     }
     return Ok({
       'grade': 'F',
       'transport': 'structural',
       'rationale': findings.join('; '),
+      kVerdictRoundKey: '$round',
     });
   }
 }

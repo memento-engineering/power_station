@@ -53,7 +53,7 @@ void _plantVerdicts(
   Map<String, String> rationales = const {},
   int? round,
 }) {
-  final r = round ?? readRespecLedger(workspaceDir)?.round ?? 0;
+  final r = round ?? 0;
   for (final entry in grades.entries) {
     if (entry.key == _gating) continue;
     File(p.join(workspaceDir, '.grid', 'critique', '${entry.key}.json'))
@@ -85,6 +85,7 @@ Future<RouteVerdict> _route(
   String? workspaceDir,
   Map<String, Map<String, String>> resultExtras = const {},
   SpecRouteCapability capability = const SpecRouteCapability(),
+  int round = 0,
 }) {
   const parent = 'tg-1/spec_review';
   final context = FakeTreeContext(
@@ -99,6 +100,7 @@ Future<RouteVerdict> _route(
           for (final entry in grades.entries)
             '$parent/${entry.key}': {
               'grade': entry.value,
+              'round': '$round',
               if (rationales[entry.key] case final r?) 'rationale': r,
               ...?resultExtras[entry.key],
             },
@@ -116,7 +118,7 @@ Future<RouteVerdict> _route(
     context,
     stepArgs(
       '$parent/route',
-      params: const {'critics': _critics, 'gating': _gating},
+      params: {'critics': _critics, 'gating': _gating, 'grid.round': '$round'},
     ),
   );
 }
@@ -158,7 +160,7 @@ void main() {
       );
       expect(v, isA<SpecRespec>());
       final ledger = (v as SpecRespec).ledger;
-      expect(ledger.round, 1);
+      expect(ledger.round, 0);
       expect(ledger.lanes.single.rubric, 'plan-completeness');
       expect(ledger.lanes.single.grade, 'D');
       expect(ledger.lanes.single.rationale, 'step 3 has no test command');
@@ -272,7 +274,7 @@ void main() {
         priorRound: priorRound,
       );
       expect(at(0), isA<SpecRespec>());
-      expect((at(1) as SpecRespec).ledger.round, 2);
+      expect((at(1) as SpecRespec).ledger.round, 1);
       expect(kMaxRespecRounds, 2);
       final capped = at(kMaxRespecRounds);
       expect(capped, isA<SpecEscalate>());
@@ -319,6 +321,60 @@ void main() {
       expect(respecLedgerPath(ws.path), endsWith('.grid/spec/respec.json'));
     });
 
+    test(
+      'a stale ledger cannot disturb a clean round-2 committee join',
+      () async {
+        writeRespecLedger(
+          ws.path,
+          const RespecLedger(
+            round: 1,
+            lanes: [
+              RespecLane(
+                rubric: 'coherence',
+                grade: 'D',
+                rationale: 'stale guidance',
+              ),
+            ],
+          ),
+        );
+        final grades = _allA();
+        _plantVerdicts(ws.path, grades, round: 2);
+
+        final out = await _route(grades, workspaceDir: ws.path, round: 2);
+
+        expect(out, isA<Advance>());
+        final payload = (out as Advance).payload!;
+        expect(payload['verdict'], 'advance');
+        expect(payload[kVerdictRoundKey], '2');
+        expect(payload['grades'], contains('spec-validation=A'));
+        expect(readRespecLedger(ws.path), isNull);
+      },
+    );
+
+    test('a stale structural payload does not join round 2', () async {
+      final grades = _allA();
+      _plantVerdicts(ws.path, grades, round: 2);
+
+      await expectLater(
+        _route(
+          grades,
+          workspaceDir: ws.path,
+          round: 2,
+          capability: _impatientRoute,
+          resultExtras: const {
+            _gating: {'round': '1'},
+          },
+        ),
+        throwsA(
+          isA<RouteFailure>().having(
+            (error) => error.reason,
+            'reason',
+            allOf(contains(_gating), contains('round 2')),
+          ),
+        ),
+      );
+    });
+
     test('a corrupt / absent ledger degrades to "no prior round" — never a '
         'throw', () {
       expect(readRespecLedger(ws.path), isNull);
@@ -349,8 +405,8 @@ void main() {
         final payload = (out as Advance).payload!;
         expect(payload['grade'], 'F');
         expect(payload['verdict'], 'respec');
-        expect(payload['round'], '1');
-        expect(payload['rationale'], contains('RESPEC round 1/2'));
+        expect(payload['round'], '0');
+        expect(payload['rationale'], contains('RESPEC round 0/2'));
         expect(payload['rationale'], contains('plan-completeness=D'));
         // The edge the derivation walks is DECLARED on the route step, and its
         // target is a real sibling of the SAME circuit — a dangling name mints no
@@ -368,7 +424,7 @@ void main() {
         // The RATIONALES ride the LEDGER (the stamp's prose is telemetry; the
         // ledger is what the next specify brief reads).
         final ledger = readRespecLedger(ws.path)!;
-        expect(ledger.round, 1);
+        expect(ledger.round, 0);
         expect(ledger.lanes.single.rationale, 'step 3 names no test command');
       },
     );
@@ -386,27 +442,29 @@ void main() {
         workspaceDir: ws.path,
       );
       expect((first as Advance).payload!['grade'], 'F');
-      expect(readRespecLedger(ws.path)!.round, 1);
+      expect(readRespecLedger(ws.path)!.round, 0);
 
       // Round 2 reads back the ledger the previous round wrote — no cursor, no
       // engine-side counter (the engine no longer produces one a re-run node
       // can read). The re-planted artifacts stamp the ledger's OWN round (1) —
       // exactly what the re-run critics stamp via `roundOf`.
-      _plantVerdicts(ws.path, grades, rationales: why);
+      _plantVerdicts(ws.path, grades, rationales: why, round: 1);
       final second = await _route(
         grades,
         rationales: why,
         workspaceDir: ws.path,
+        round: 1,
       );
       expect((second as Advance).payload!['grade'], 'F');
-      expect(readRespecLedger(ws.path)!.round, 2);
+      expect(readRespecLedger(ws.path)!.round, 1);
 
       // At the cap: a human rules — an Escalate, never another F stamp.
-      _plantVerdicts(ws.path, grades, rationales: why);
+      _plantVerdicts(ws.path, grades, rationales: why, round: kMaxRespecRounds);
       final capped = await _route(
         grades,
         rationales: why,
         workspaceDir: ws.path,
+        round: kMaxRespecRounds,
       );
       expect(capped, isA<Escalate>());
       expect((capped as Escalate).reason, startsWith('respec-cap'));
@@ -458,11 +516,12 @@ void main() {
       // … while the CURRENT join fails on a DIFFERENT lane.
       final grades = {..._allA(), 'coherence': 'D'};
       const why = {'coherence': 'the plan contradicts the acceptance'};
-      _plantVerdicts(ws.path, grades, rationales: why);
+      _plantVerdicts(ws.path, grades, rationales: why, round: kMaxRespecRounds);
       final capped = await _route(
         grades,
         rationales: why,
         workspaceDir: ws.path,
+        round: kMaxRespecRounds,
       );
       expect(capped, isA<Escalate>());
       final reason = (capped as Escalate).reason;
@@ -482,15 +541,19 @@ void main() {
 
         _plantVerdicts(ws.path, grades, rationales: why);
         await _route(grades, rationales: why, workspaceDir: ws.path);
-        _plantVerdicts(ws.path, grades, rationales: why);
-        await _route(grades, rationales: why, workspaceDir: ws.path);
-        expect(readRespecLedger(ws.path)!.round, kMaxRespecRounds);
-
-        _plantVerdicts(ws.path, grades, rationales: why);
+        _plantVerdicts(ws.path, grades, rationales: why, round: 1);
+        await _route(grades, rationales: why, workspaceDir: ws.path, round: 1);
+        _plantVerdicts(
+          ws.path,
+          grades,
+          rationales: why,
+          round: kMaxRespecRounds,
+        );
         final capped = await _route(
           grades,
           rationales: why,
           workspaceDir: ws.path,
+          round: kMaxRespecRounds,
         );
         expect(capped, isA<Escalate>());
         expect(readRespecLedger(ws.path), isNull);
@@ -593,7 +656,7 @@ void main() {
         workspaceDir: '/grid/worktrees/tg-1',
       );
       expect((out as Advance).payload!['grade'], 'F');
-      expect(out.payload!['round'], '1');
+      expect(out.payload!['round'], '0');
       // No ledger was written anywhere, so the ASSET's counter cannot advance
       // offline. That is not an unbounded loop: the engine's derived generation
       // reaches `kMaxReworkRounds` off the successor chain and gates the node.
@@ -621,6 +684,7 @@ void main() {
         ws.path,
         const {'coherence': 'D', 'adr-alignment': 'A'},
         rationales: const {'coherence': 'the plan contradicts the acceptance'},
+        round: kMaxRespecRounds,
       );
       // …a STALE (round-1) artifact for a third…
       _plantVerdicts(
@@ -649,6 +713,11 @@ void main() {
           },
           workspaceDir: ws.path,
           capability: _impatientRoute,
+          round: kMaxRespecRounds,
+          resultExtras: const {
+            'plan-completeness': {'round': '1'},
+            'acceptance-testability': {'round': '1'},
+          },
         ),
         throwsA(
           isA<RouteFailure>().having(

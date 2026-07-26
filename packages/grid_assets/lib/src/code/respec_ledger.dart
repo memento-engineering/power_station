@@ -2,23 +2,15 @@
 /// guidance file the spec route leaves in the bead's worktree (bead `pow-7nm`;
 /// extracted from `respec.dart` by bead `pow-96s`).
 ///
-/// **Why a separate library.** ADR-0000 A27(7)(a)'s follow-up made the ledger's
-/// `round` field the verdict-round source for EVERY critic family: the round a
-/// critic stamps into its verdict JSON (`committee.dart`'s `roundOf` /
-/// `verdictJsonTemplate`) and the round `_verdictFromFile` verifies are now the
-/// SAME counter the spec route bounds its auto-respec loop with. That makes the
-/// ledger a dependency of BOTH `committee.dart` (the reader side) and
-/// `respec.dart` (the writer side) — and `respec.dart` already imports
-/// `committee.dart`, so homing the ledger here is what lets `committee.dart`
-/// read it without an import cycle and without a second JSON parser.
+/// The ledger remains separate from verdict transport because it is correction
+/// guidance and provenance, not a freshness-round authority.
 ///
 /// The ledger lives at [respecLedgerPath] — a sibling of (never inside)
 /// `.grid/critique/`, which `ClearCritiqueCapability` wipes at the start of
 /// every committee round; the ledger must outlive that wipe. It does NOT
 /// outlive the SESSION: `IntakeCapability` (the spec circuit's once-per-session
 /// head, upstream of the auto-respec closure) clears it, so a fresh session
-/// over a reused worktree starts the round counter at zero — a prior session's
-/// rounds are never counted (bead `pow-96s`).
+/// over a reused worktree never inherits prior correction guidance.
 library;
 
 import 'dart:convert';
@@ -34,7 +26,7 @@ const String kRespecSpecDir = '.grid/spec';
 
 /// The absolute path of the respec guidance ledger under [workspaceDir] —
 /// derived identically by `SpecRouteCapability` (the writer) and its readers
-/// (`SpecifyCapability`'s guidance, `committee.dart`'s `roundOf`).
+/// (`SpecifyCapability`'s guidance).
 String respecLedgerPath(String workspaceDir) =>
     p.join(workspaceDir, kRespecSpecDir, 'respec.json');
 
@@ -77,21 +69,18 @@ class RespecLane {
   }
 }
 
-/// The auto-respec ROUND LEDGER — the round number plus every failing lane,
+/// The auto-respec guidance ledger — the circuit round plus every failing lane,
 /// written into the bead's worktree by `SpecRouteCapability` and read back by
-/// `SpecifyCapability` on the NEXT round. It is BOTH channels: the correction
-/// GUIDANCE the next brief embeds, and the round COUNTER `SpecRouteCapability`
-/// reads back to apply its cap. The `round` it carries is what the next brief
-/// renders ("RESPEC round N of 2") — and, per ADR-0000 A27(7)(a)'s follow-up
-/// (bead `pow-96s`), the round every critic family stamps into its verdict
-/// (`committee.dart`'s `roundOf`), so the writer and the freshness fence can
-/// never drift apart.
+/// `SpecifyCapability` on the next round. The `round` field mirrors the circuit
+/// round for the guidance brief; `grid.round` remains the sole authority.
 class RespecLedger {
   /// Creates a ledger for [round] over the failing [lanes].
   const RespecLedger({required this.round, required this.lanes});
 
-  /// The auto-respec round this ledger opens (1-based; capped at
-  /// `kMaxRespecRounds`).
+  /// The session circuit round mirrored for guidance and provenance.
+  ///
+  /// This field is never a round authority; verdict writers and joins consume
+  /// the engine-injected `grid.round` parameter.
   final int round;
 
   /// Every FIXABLE failing lane, in committee (`critics` param) order.
@@ -109,7 +98,7 @@ class RespecLedger {
   static RespecLedger? fromJson(Object? json) {
     if (json is! Map) return null;
     final round = json['round'];
-    if (round is! int || round < 1) return null;
+    if (round is! int || round < 0) return null;
     final raw = json['lanes'];
     if (raw is! List) return null;
     final lanes = [
@@ -122,9 +111,8 @@ class RespecLedger {
 }
 
 /// The ledger at [workspaceDir], or null when there is none / it is unreadable.
-/// Best-effort by design: a corrupt ledger degrades to "no prior round" (the
-/// next specify ride simply gets no correction guidance and the round counter
-/// restarts) — it can never throw into a spawn or a route.
+/// Best-effort by design: a corrupt ledger degrades to no correction guidance;
+/// it can never throw into a spawn or a route.
 RespecLedger? readRespecLedger(String workspaceDir) {
   final file = File(respecLedgerPath(workspaceDir));
   if (!file.existsSync()) return null;
