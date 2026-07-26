@@ -13,9 +13,11 @@
 /// circuit per coding bead.
 library;
 
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:dart_grid_assets/dart_grid_assets.dart';
+import 'package:meta/meta.dart';
 import 'package:genesis_tree/genesis_tree.dart';
 import 'package:beads_dart/beads_dart.dart';
 import 'package:grid_engine/grid_engine.dart';
@@ -607,8 +609,25 @@ class GitSourceControl implements SourceControl {
     final root = _root;
     // Provisioning not wired (offline) — nothing to do.
     if (provisioner == null || root == null) return;
-    // Idempotent only when the directory is already a git checkout.
-    if (_hasGitEntry(workspaceDir)) return;
+    // Idempotent only when the directory is already a git checkout — but an
+    // ADOPTED worktree's bead store must still be verified (tg-v7qq): a
+    // leftover dir from a prior station arm can carry a SELF-HOSTED dolt
+    // store (its own `dolt/` + `dolt-server-*` sidecar) instead of the
+    // proxied redirect to the substation root's `.beads/proxieddb`. Every
+    // in-worktree `bd update` (the specify stage's spec write-back) then
+    // lands in that isolated clone and NEVER reaches the root store the
+    // station and the critique lanes read — a structurally perfect spec
+    // round hard-blocks at spec-validation ("no ## Implementation Plan
+    // section" on a bead whose worktree copy carries all four). Repair the
+    // stranded store BEFORE reusing the workspace.
+    if (_hasGitEntry(workspaceDir)) {
+      repairStrandedWorktreeStore(
+        workspaceDir: workspaceDir,
+        rootRepoPath: root.path,
+        beadId: beadId,
+      );
+      return;
+    }
 
     final workspace = Directory(workspaceDir);
     if (!workspace.existsSync()) {
@@ -649,6 +668,108 @@ class GitSourceControl implements SourceControl {
     final gitEntry = p.join(workspaceDir, '.git');
     return FileSystemEntity.typeSync(gitEntry, followLinks: false) !=
         FileSystemEntityType.notFound;
+  }
+
+  /// Repairs an adopted worktree whose `.beads` store is STRANDED — a prior
+  /// arm's self-hosted dolt store instead of the proxied redirect to the
+  /// substation root's `.beads/proxieddb` (tg-v7qq).
+  ///
+  /// Stranded signature (any of):
+  /// - an independent `.beads/dolt/` database directory;
+  /// - a `.beads/dolt-server-config.yaml` (the self-hosted sidecar's config);
+  /// - a `.beads/proxied_server_client_info.json` whose `root_path` resolves
+  ///   anywhere but the root repo's `.beads/proxieddb`.
+  ///
+  /// Repair: best-effort SIGTERM of a still-running stranded sidecar (its
+  /// `dolt-server.pid`), then delete the self-hosted artifacts so the next
+  /// in-worktree `bd` invocation re-establishes the proxied redirect exactly
+  /// as it does on a FRESH worktree (the committed `.beads` scaffold —
+  /// `metadata.json`, `config.yaml`, `identity.toml` — is untouched). A
+  /// receipt line is appended to `.beads/store-repair.log` so the repair is
+  /// visible in the worktree the operator inspects.
+  ///
+  /// A healthy proxied worktree (client info pointing at the root proxieddb,
+  /// no self-hosted artifacts) is left byte-untouched.
+  @visibleForTesting
+  static void repairStrandedWorktreeStore({
+    required String workspaceDir,
+    required String rootRepoPath,
+    required String beadId,
+  }) {
+    final beadsDir = p.join(workspaceDir, '.beads');
+    if (!Directory(beadsDir).existsSync()) return;
+
+    final rootProxy = p.canonicalize(
+      p.join(rootRepoPath, '.beads', 'proxieddb'),
+    );
+
+    final doltDir = Directory(p.join(beadsDir, 'dolt'));
+    final serverConfig = File(p.join(beadsDir, 'dolt-server-config.yaml'));
+    var stranded = doltDir.existsSync() || serverConfig.existsSync();
+
+    final clientInfo = File(
+      p.join(beadsDir, 'proxied_server_client_info.json'),
+    );
+    if (!stranded && clientInfo.existsSync()) {
+      var pointsAtRoot = false;
+      try {
+        final decoded = jsonDecode(clientInfo.readAsStringSync());
+        if (decoded is Map<String, Object?>) {
+          final rootPath = decoded['root_path'];
+          if (rootPath is String && rootPath.isNotEmpty) {
+            final resolved = p.isAbsolute(rootPath)
+                ? rootPath
+                : p.join(beadsDir, rootPath);
+            pointsAtRoot = p.canonicalize(resolved) == rootProxy;
+          }
+        }
+      } on Object {
+        // Malformed client info: treat as stranded — repair re-derives it.
+      }
+      stranded = !pointsAtRoot;
+    }
+    if (!stranded) return;
+
+    // Stop a still-running stranded sidecar before deleting its store.
+    final pidFile = File(p.join(beadsDir, 'dolt-server.pid'));
+    if (pidFile.existsSync()) {
+      final pid = int.tryParse(pidFile.readAsStringSync().trim());
+      if (pid != null && pid > 0) {
+        try {
+          Process.killPid(pid);
+        } on Object {
+          // Already gone — the reboot case.
+        }
+      }
+    }
+
+    final removed = <String>[];
+    if (doltDir.existsSync()) {
+      doltDir.deleteSync(recursive: true);
+      removed.add('dolt/');
+    }
+    for (final name in const [
+      'dolt-server-config.yaml',
+      'dolt-server.lock',
+      'dolt-server.pid',
+      'dolt-server.port',
+      'dolt-server.log',
+      'proxied_server_client_info.json',
+      'last-touched',
+    ]) {
+      final f = File(p.join(beadsDir, name));
+      if (f.existsSync()) {
+        f.deleteSync();
+        removed.add(name);
+      }
+    }
+
+    File(p.join(beadsDir, 'store-repair.log')).writeAsStringSync(
+      'repaired stranded self-hosted bead store for $beadId on adopt '
+      '(tg-v7qq): removed ${removed.join(', ')}; next bd invocation '
+      're-establishes the proxied redirect to $rootProxy\n',
+      mode: FileMode.append,
+    );
   }
 
   static void _assertGitCheckout(String workspaceDir, String beadId) {
