@@ -97,16 +97,16 @@ FakeTreeContext _context(String ws, Map<String, Map<String, String>> results) =>
       },
     );
 
-StepArgs _routeArgs() => stepArgs(
+StepArgs _routeArgs({int round = 0}) => stepArgs(
   '$_parent/route',
-  params: const {'critics': _critics, 'gating': _gating},
+  params: {'critics': _critics, 'gating': _gating, 'grid.round': '$round'},
 );
 
 /// The wave-1 lane results as the OLD incarnations recorded them: round 0,
 /// transport file, a fixable D on plan-completeness (what triggered the
 /// respec).
 Map<String, Map<String, String>> _waveOneResults() => {
-  _gating: {'grade': 'A', 'transport': 'structural'},
+  _gating: {'grade': 'A', 'transport': 'structural', 'round': '1'},
   'coherence': {'grade': 'A', 'transport': 'file', 'round': '0'},
   'adr-alignment': {'grade': 'A', 'transport': 'file', 'round': '0'},
   'acceptance-testability': {'grade': 'B', 'transport': 'file', 'round': '0'},
@@ -151,7 +151,7 @@ void main() {
         const SpecRouteCapability(
           lanePoll: Duration(milliseconds: 10),
           laneWaitBudget: Duration(milliseconds: 200),
-        ).route(_context(ws.path, _waveOneResults()), _routeArgs()),
+        ).route(_context(ws.path, _waveOneResults()), _routeArgs(round: 1)),
         throwsA(
           isA<RouteFailure>().having(
             (e) => e.reason,
@@ -198,7 +198,7 @@ void main() {
       final out = await const SpecRouteCapability(
         lanePoll: Duration(milliseconds: 15),
         laneWaitBudget: Duration(seconds: 10),
-      ).route(_context(ws.path, _waveOneResults()), _routeArgs());
+      ).route(_context(ws.path, _waveOneResults()), _routeArgs(round: 1));
       expect(out, isA<Advance>());
       final payload = (out as Advance).payload!;
       expect(payload['verdict'], 'advance');
@@ -221,7 +221,7 @@ void main() {
       _plantVerdict(ws.path, 'acceptance-testability', round: 0, grade: 'B');
       _plantVerdict(ws.path, 'plan-completeness', round: 0, grade: 'C');
       final results = {
-        _gating: {'grade': 'A', 'transport': 'structural'},
+        _gating: {'grade': 'A', 'transport': 'structural', 'round': '0'},
         'coherence': {'grade': 'C', 'transport': 'envelope', 'round': '0'},
         'adr-alignment': {'grade': 'A', 'transport': 'file', 'round': '0'},
         'acceptance-testability': {
@@ -291,7 +291,7 @@ void main() {
             ),
           },
         ),
-        stepArgs('$_parent/clear-critique'),
+        stepArgs('$_parent/clear-critique', params: const {'grid.round': '1'}),
       );
       expect(outcome, isA<Ok>());
       final dir = Directory(p.join(ws.path, '.grid', 'critique'));
@@ -334,13 +334,6 @@ void main() {
       '"finished-this-round" evidence)', () {
     test('an accepted verdict file yields a payload stamped with the ledger '
         'round it was verified against', () async {
-      writeRespecLedger(
-        ws.path,
-        const RespecLedger(
-          round: 2,
-          lanes: [RespecLane(rubric: 'coherence', grade: 'D', rationale: 'x')],
-        ),
-      );
       File(p.join(ws.path, '.grid', 'critique', 'spec-adherence.json'))
         ..createSync(recursive: true)
         ..writeAsStringSync(
@@ -365,7 +358,7 @@ void main() {
         ),
         stepArgs(
           'tg-60t/review/spec-adherence',
-          params: const {'rubric': 'spec-adherence'},
+          params: const {'rubric': 'spec-adherence', 'grid.round': '2'},
         ),
       );
       expect(out!['grade'], 'A');
@@ -389,7 +382,7 @@ void main() {
           ),
           stepArgs(
             'tg-60t/review/spec-adherence',
-            params: const {'rubric': 'spec-adherence'},
+            params: const {'rubric': 'spec-adherence', 'grid.round': '0'},
           ),
         );
         expect(out!['grade'], 'F');

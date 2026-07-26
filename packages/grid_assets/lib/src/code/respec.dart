@@ -173,7 +173,7 @@ typedef SpecLane = ({String id, String? grade, String rationale});
 ///     — there is nothing to feed the re-specify agent, and a respec that re-runs
 ///     `specify` with no guidance would re-write the same spec and re-park. LOUD.
 ///  5. a fixable join UNDER the bound ([priorRound] `<` [maxRounds]) ⇒
-///     [SpecRespec] for round `priorRound + 1`.
+///     [SpecRespec] carrying the current circuit round.
 ///  6. else — a join that is fixable RIGHT NOW, at the bound ⇒ [SpecEscalate]
 ///     (`respec-cap`). This arm is the FALL-THROUGH of arm 5, so the cap is the
 ///     conjunction "the rounds are spent AND the CURRENT join still fails" by
@@ -279,7 +279,7 @@ SpecRouteVerdict decideSpecRoute({
   if (priorRound < maxRounds) {
     return SpecRespec(
       RespecLedger(
-        round: priorRound + 1,
+        round: priorRound,
         lanes: [
           for (final l in fixable)
             RespecLane(
@@ -400,9 +400,8 @@ String renderRespecGuidance(RespecLedger ledger) {
 /// Offline/dry-run posture: an absent [Workspace], or a workspace directory that
 /// does not exist on disk (the synthetic `/grid/worktrees/...` an offline suite
 /// mounts), skips the ledger I/O entirely — the same no-op posture
-/// [ClearCritiqueCapability] takes. The verdict is unchanged; the asset's own
-/// round counter cannot advance there (it IS the ledger), so the bound falls
-/// back to the engine's derived belt, which needs no asset I/O at all.
+/// [ClearCritiqueCapability] takes. The verdict and engine-injected circuit
+/// round are unchanged.
 class SpecRouteCapability extends RouteCapability {
   /// Creates the spec route, optionally over its mid-wave WAIT tuning: the
   /// [lanePoll] interval between join re-reads, and the [laneWaitBudget] after
@@ -435,27 +434,16 @@ class SpecRouteCapability extends RouteCapability {
 
     final dir = workspace?.workspaceDir;
     final live = dir != null && dir.isNotEmpty && Directory(dir).existsSync();
+    final circuitRound = verdictRound(args);
 
     var siblings =
         context.getInheritedSeedOfExactType<SiblingView>() ??
         const SiblingView();
 
-    // The ROUND COUNT is the LEDGER's own `round`. The node's `rewindCount` is
-    // not a candidate: the engine only ever sets it WHILE a node is currently
-    // invalidated, and by the time this route re-runs its successor incarnation
-    // is pending/running with nothing invalidating it — the projection yields 0
-    // forever, so a cap read from there could never fire. The ledger is the
-    // asset's own durable round record, and counting off it also BOUNDS a
-    // spurious re-invalidation. Offline there is no ledger and this reads 0
-    // every round; the bound is then the ENGINE's, derived from the successor
-    // chain depth, which is graph structure and needs no asset I/O. It is the
-    // SAME counter every critic stamped into its verdict this round
-    // (`roundOf`, A27(7)(a) follow-up — bead `pow-96s`): the ledger only moves
-    // when THIS route writes it, downstream of every lane, so the round the
-    // critics stamped and the round verified below are one number.
-    var priorRound = live ? (readRespecLedger(dir)?.round ?? 0) : 0;
-
-    // THE JOIN (bead `pow-96s`, hardened by the 2026-07-24 bridge fix). One
+    // The engine-injected circuit generation is the single round authority for
+    // verdict stamps, freshness joins, the respec cap, and ledger provenance.
+    //
+    // THE JOIN. One
     // fresh vector is all the matrix ever decides on (ADR-0000 A29 — the
     // ledger's recorded lanes are NOT a candidate source). In the LIVE posture
     // each JUDGEMENT lane joins ONLY through its CURRENT-ROUND verdict
@@ -503,24 +491,31 @@ class SpecRouteCapability extends RouteCapability {
     } else {
       final deadline = DateTime.now().add(laneWaitBudget);
       while (true) {
-        priorRound = readRespecLedger(dir)?.round ?? 0;
         lanes.clear();
         final artifactless = <String>[]; // finished THIS round, no artifact.
         final waiting = <String>[]; // no THIS-round trace at all yet.
         for (final id in criticIds) {
           if (id == gating) {
-            lanes.add((
-              id: id,
-              grade: siblings.resultOf('$parent/$id')['grade'],
-              rationale: siblings.resultOf('$parent/$id')['rationale'] ?? '',
-            ));
+            final recorded = siblings.resultOf('$parent/$id');
+            final recordedRound = int.tryParse(
+              (recorded[kVerdictRoundKey] ?? '').trim(),
+            );
+            if (recordedRound == circuitRound) {
+              lanes.add((
+                id: id,
+                grade: recorded['grade'],
+                rationale: recorded['rationale'] ?? '',
+              ));
+            } else {
+              waiting.add(id);
+            }
             continue;
           }
           final verdict = currentVerdictOnDisk(
             workspaceDir: dir,
             rubric: id,
             nodePath: '$parent/$id',
-            round: priorRound,
+            round: circuitRound,
           );
           if (verdict != null) {
             lanes.add((
@@ -534,7 +529,7 @@ class SpecRouteCapability extends RouteCapability {
           final recordedRound = int.tryParse(
             (recorded[kVerdictRoundKey] ?? '').trim(),
           );
-          if (recordedRound == priorRound) {
+          if (recordedRound == circuitRound) {
             artifactless.add(
               '$id (transport ${recorded['transport'] ?? 'unrecorded'})',
             );
@@ -550,7 +545,7 @@ class SpecRouteCapability extends RouteCapability {
           if (artifactless.isNotEmpty) {
             clearRespecLedger(dir);
             return Escalate(
-              'spec-route: no current-round (round $priorRound) verdict '
+              'spec-route: no current-round (round $circuitRound) verdict '
               'artifact on disk for ${artifactless.join(', ')} although the '
               'lane(s) finished this round — the verdict transport left '
               'nothing the join may cite (an envelope/fail-closed grade, or a '
@@ -564,7 +559,7 @@ class SpecRouteCapability extends RouteCapability {
           throw RouteFailure(
             'spec-route: waited ${laneWaitBudget.inSeconds}s but '
             '${waiting.join(', ')} still have no current-round (round '
-            '$priorRound) verdict artifact and no this-round result — a '
+            '$circuitRound) verdict artifact and no this-round result — a '
             'mid-wave join (the derived respec wave has not re-run them yet) '
             'or a stalled lane. Refusing to decide over a partial committee.',
           );
@@ -582,7 +577,7 @@ class SpecRouteCapability extends RouteCapability {
     switch (decideSpecRoute(
       lanes: lanes,
       gating: gating,
-      priorRound: priorRound,
+      priorRound: circuitRound,
     )) {
       case SpecAdvance(:final gradesCsv, :final spread):
         if (live) clearRespecLedger(dir);
@@ -591,6 +586,7 @@ class SpecRouteCapability extends RouteCapability {
           'grades': gradesCsv,
           'spread': '$spread',
           'rule': 'all-approve',
+          kVerdictRoundKey: '$circuitRound',
         });
       case SpecRespec(:final ledger):
         if (live) {
@@ -614,7 +610,7 @@ class SpecRouteCapability extends RouteCapability {
           'verdict': 'respec',
           'grade': 'F',
           'rule': 'respec',
-          'round': '${ledger.round}',
+          kVerdictRoundKey: '$circuitRound',
           'rationale': respecStampReason(ledger),
         });
       case SpecEscalate(:final reason):

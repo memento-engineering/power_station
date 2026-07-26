@@ -35,21 +35,6 @@ import 'support/asset_fakes.dart';
   int round = 0,
 }) {
   final path = nodePath ?? 'tg-1/review/$rubric';
-  if (round > 0) {
-    writeRespecLedger(
-      workspaceDir,
-      RespecLedger(
-        round: round,
-        lanes: const [
-          RespecLane(
-            rubric: 'coherence',
-            grade: 'D',
-            rationale: 'the prior round\'s correction guidance (fixture)',
-          ),
-        ],
-      ),
-    );
-  }
   return (
     context: FakeTreeContext(
       values: {
@@ -61,7 +46,7 @@ import 'support/asset_fakes.dart';
         ),
       },
     ),
-    args: stepArgs(path, params: {'rubric': rubric}),
+    args: stepArgs(path, params: {'rubric': rubric, 'grid.round': '$round'}),
   );
 }
 
@@ -308,9 +293,7 @@ void main() {
       expect(prompt, contains('copy them byte-for-byte'));
     });
 
-    test('spawn reads the round off the respec LEDGER in the worktree '
-        '(A27(7)(a) follow-up, bead pow-96s) — never the cursor\'s dead '
-        'rewindCount, which the engine projects as 0 forever', () {
+    test('spawn reads the session circuit round from step params', () {
       final dir = Directory.systemTemp.createTempSync('critic-spawn-round-');
       addTearDown(() => dir.deleteSync(recursive: true));
       final c = _ctx(
@@ -322,35 +305,25 @@ void main() {
       expect(cfg.args.last, contains('"round":2}'));
     });
 
-    group('roundOf — the LEDGER-derived verdict round (bead pow-96s)', () {
-      test('no ambient Workspace, or a worktree that does not exist ⇒ 0 (the '
-          'offline/dry-run posture)', () {
-        expect(roundOf(FakeTreeContext(values: const {}), 'tg-1/review/x'), 0);
-        final c = _ctx(rubric: 'spec-adherence'); // synthetic '/w/tg-1'.
-        expect(roundOf(c.context, c.args.nodePath), 0);
+    group('verdictRound', () {
+      test('reads the reserved session circuit round', () {
+        final c = _ctx(rubric: 'spec-adherence', round: 2);
+        expect(verdictRound(c.args), 2);
       });
 
-      test('a real worktree with NO ledger ⇒ 0 (a first round, or a fresh '
-          'session whose intake reset the counter)', () {
-        final dir = Directory.systemTemp.createTempSync('roundof-none-');
-        addTearDown(() => dir.deleteSync(recursive: true));
-        final c = _ctx(rubric: 'spec-adherence', workspaceDir: dir.path);
-        expect(roundOf(c.context, c.args.nodePath), 0);
-      });
-
-      test('a ledger on disk ⇒ ITS round — the same counter the spec route '
-          'bounds its auto-respec loop with', () {
-        final dir = Directory.systemTemp.createTempSync('roundof-ledger-');
-        addTearDown(() => dir.deleteSync(recursive: true));
-        final c = _ctx(
-          rubric: 'spec-adherence',
-          workspaceDir: dir.path,
-          round: 2,
+      test('missing input falls back loudly to zero', () {
+        final messages = <String>[];
+        expect(
+          verdictRound(
+            stepArgs(
+              'tg-1/review/coherence',
+              params: const {'rubric': 'coherence'},
+            ),
+            diagnostic: messages.add,
+          ),
+          0,
         );
-        expect(roundOf(c.context, c.args.nodePath), 2);
-        // Re-derives on every read: the ledger moving moves the round.
-        clearRespecLedger(dir.path);
-        expect(roundOf(c.context, c.args.nodePath), 0);
+        expect(messages.single, contains("'grid.round'"));
       });
     });
 

@@ -272,19 +272,8 @@ String renderIntakeHold(Bead bead, List<String> findings) {
 /// two lane-sets, neither weakened. Best-effort, same posture as
 /// [ClearCritiqueCapability]: a wipe that throws never gates the round.
 ///
-/// And it owns the SESSION SCOPE of the auto-respec ROUND COUNTER (bead
-/// `pow-96s`, ADR-0000 A27(7)(a)'s follow-up). The counter IS the worktree's
-/// respec ledger (`respec_ledger.dart`) — the file every critic family now
-/// derives its verdict-round stamp from (`roundOf`) — and the worktree is
-/// REUSED across sessions, so without a reset a fresh session over the same
-/// node path would inherit a PRIOR session's rounds (observed live: a spent
-/// counter re-flaring `respec-cap` with replayed grades). This step is the
-/// spec circuit's once-per-session head, UPSTREAM of `specify` and therefore
-/// OUTSIDE the auto-respec invalidated closure — it runs once when the session
-/// arms and never again during the session's respec waves — so clearing the
-/// ledger HERE is exactly "the counter starts at round zero per session"
-/// while leaving the in-session count untouched. Same best-effort posture as
-/// the critique wipe ([clearRespecLedger] swallows its own IO failures).
+/// It also clears prior-session respec guidance. The session circuit round is
+/// supplied independently by the engine under `grid.round`.
 class IntakeCapability extends RouteCapability {
   /// Creates the intake lens, optionally over an injected [clearer] (tests
   /// inject a no-op so the offline suite never touches a real filesystem at a
@@ -311,11 +300,8 @@ class IntakeCapability extends RouteCapability {
       } catch (_) {
         // Best-effort hygiene (the ClearCritiqueCapability posture).
       }
-      // The SESSION-scoped respec-round reset (bead `pow-96s`): a fresh
-      // session over a reused worktree starts the auto-respec counter — and
-      // therefore every lane's verdict-round stamp (`roundOf`) — at round
-      // zero. Best-effort inside `clearRespecLedger` itself; a no-op when no
-      // ledger (or no real worktree) exists.
+      // Do not carry correction guidance into a fresh session. Best-effort
+      // inside `clearRespecLedger`; a no-op when no ledger exists.
       clearRespecLedger(workspace.workspaceDir);
     }
     final findings = intakeFindings(bead);
@@ -401,7 +387,7 @@ class ReadinessCriticCapability extends CriticCapability {
           rubric,
           args.nodePath,
           workspace.workspaceDir,
-          round: roundOf(context, args.nodePath),
+          round: verdictRound(args),
         ),
       ),
       workspace: workspace,

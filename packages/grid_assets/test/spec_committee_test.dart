@@ -67,25 +67,6 @@ No ADR applies — verified via grep on `heartbeat`, `bus`.
   final path = nodePath ?? 'tg-1/spec_review/$rubric';
   // The ROUND is the respec LEDGER's own `round` (A27(3), re-sourced here by
   // A27(7)(a)'s follow-up, bead `pow-96s`) — the counter the critic stamps and
-  // result() verifies. A non-zero round therefore writes a REAL ledger into
-  // [workspaceDir] (callers pass a real temp dir for that); round 0 is the
-  // no-ledger default, which also holds for the synthetic '/w/tg-1' dir
-  // (`roundOf` reads 0 off a worktree that does not exist).
-  if (round > 0) {
-    writeRespecLedger(
-      workspaceDir,
-      RespecLedger(
-        round: round,
-        lanes: const [
-          RespecLane(
-            rubric: 'coherence',
-            grade: 'D',
-            rationale: 'the prior round\'s correction guidance (fixture)',
-          ),
-        ],
-      ),
-    );
-  }
   return (
     context: FakeTreeContext(
       values: {
@@ -97,7 +78,7 @@ No ADR applies — verified via grep on `heartbeat`, `bus`.
         ),
       },
     ),
-    args: stepArgs(path, params: {'rubric': rubric}),
+    args: stepArgs(path, params: {'rubric': rubric, 'grid.round': '$round'}),
   );
 }
 
@@ -349,11 +330,66 @@ void main() {
   });
 
   group('SpecValidationCapability — the deterministic structural gate', () {
+    test(
+      'one committee stamps every lane with the same circuit round',
+      () async {
+        final dir = Directory.systemTemp.createTempSync('spec-round-stamps-');
+        addTearDown(() => dir.deleteSync(recursive: true));
+
+        final gating = _laneCtx(
+          rubric: kSpecGatingRubric,
+          workspaceDir: dir.path,
+          round: 2,
+        );
+        final structural = await const SpecValidationCapability().run(
+          gating.context,
+          gating.args,
+        );
+        expect((structural as Ok).payload![kVerdictRoundKey], '2');
+
+        for (final rubric in kSpecLlmRubrics) {
+          final lane = _laneCtx(
+            rubric: rubric,
+            workspaceDir: dir.path,
+            round: 2,
+          );
+          File('${dir.path}/.grid/critique/$rubric.json')
+            ..createSync(recursive: true)
+            ..writeAsStringSync(
+              jsonEncode({
+                'rubric': rubric,
+                'version': 1,
+                'grade': 'A',
+                'nodePath': lane.args.nodePath,
+                kVerdictRoundKey: 2,
+              }),
+            );
+          final result = await const SpecCriticCapability().result(
+            lane.context,
+            lane.args,
+          );
+          expect(result![kVerdictRoundKey], '2', reason: rubric);
+          final artifact =
+              jsonDecode(
+                    File(
+                      '${dir.path}/.grid/critique/$rubric.json',
+                    ).readAsStringSync(),
+                  )
+                  as Map<String, dynamic>;
+          expect(artifact[kVerdictRoundKey], 2, reason: rubric);
+        }
+      },
+    );
+
     test('a whole spec grades A', () async {
       final c = _laneCtx(rubric: kSpecGatingRubric);
       final out = await const SpecValidationCapability().run(c.context, c.args);
       expect(out, isA<Ok>());
-      expect((out as Ok).payload, {'grade': 'A', 'transport': 'structural'});
+      expect((out as Ok).payload, {
+        'grade': 'A',
+        'transport': 'structural',
+        'round': '0',
+      });
     });
 
     test('the pre-specify state (no spec at all) grades F with EVERY missing '
@@ -373,9 +409,13 @@ void main() {
     test('a missing ambient bead grades F (fail-closed)', () async {
       final out = await const SpecValidationCapability().run(
         FakeTreeContext(values: const {}),
-        stepArgs('tg-1/spec_review/spec-validation'),
+        stepArgs(
+          'tg-1/spec_review/spec-validation',
+          params: const {'grid.round': '2'},
+        ),
       );
       expect(((out as Ok).payload)!['grade'], 'F');
+      expect(out.payload!['round'], '2');
     });
 
     group('specStructuralFindings — each defect is a named, LOUD finding', () {

@@ -33,7 +33,7 @@
 ///     the envelope/fail-closed transports exactly as if the file were absent:
 ///     `nodePath` (A4) fences a verdict some OTHER node wrote, and `round`
 ///     (A15(5) alt-A as re-sourced by A27(7)(a)'s follow-up, bead `pow-96s` —
-///     the respec ledger's own `round`, read via [roundOf]) fences a verdict
+///     the engine-injected `grid.round`, read via [verdictRound]) fences a verdict
 ///     THIS node wrote in an EARLIER round. The
 ///     round stamp is what makes fix 1 a BELT rather than the guarantee: under
 ///     `RouteVerdict.Rewind` the node path does not move, so `nodePath` alone
@@ -107,7 +107,6 @@ import '../agent/environment_registry.dart';
 import '../agent/path_check.dart';
 import '../agent/site_binding.dart';
 import '../agent/usage_report.dart';
-import 'respec_ledger.dart';
 import 'route_failure.dart';
 
 /// The gating rubric id — its grade `F` is a hard block (a non-zero Validation
@@ -194,34 +193,27 @@ String parentPath(String nodePath) {
 /// so the writer and reader can never drift apart.
 const String kVerdictRoundKey = 'round';
 
-/// THIS node's ROUND — the respec LEDGER's own `round` (ADR-0000 A27(3), and
-/// A27(7)(a)'s named follow-up, bead `pow-96s`), read off the ambient
-/// [Workspace]'s worktree at a capability's spawn/result edge.
+/// Receives one diagnostic emitted while resolving a verdict freshness round.
+typedef RoundDiagnostic = void Function(String message);
+
+void _writeRoundDiagnostic(String message) => stderr.writeln(message);
+
+/// Reads the session circuit round injected under `grid.round`.
 ///
-/// The cursor's `rewindCount` is NOT a candidate: under the `validates`-edge
-/// derivation the engine only sets it WHILE a node is currently invalidated,
-/// and by the time a lane re-runs its successor incarnation is pending/running
-/// with nothing invalidating it — the projection yields 0 forever, so a round
-/// read from there stamped EVERY verdict `round=0` and made the freshness
-/// fence consistent-but-vacuous (stale verdicts from prior rounds replayed as
-/// fresh). The ledger is the asset's own durable round record, moved by
-/// `SpecRouteCapability` exactly once per auto-respec wave — downstream of
-/// every lane, so within a round the counter is stable — and it is the SAME
-/// counter that route bounds its loop with (`respec.dart`), so the round a
-/// critic stamps and the round the route verifies are one number.
-///
-/// Round 0 everywhere the ledger cannot exist: no ambient [Workspace], a
-/// worktree that was never materialized (the offline/dry-run posture — the
-/// synthetic `/grid/worktrees/...` path), or simply no ledger on disk (a first
-/// round, or a fresh session whose `IntakeCapability` reset the counter — the
-/// ledger is SESSION-scoped, never a prior session's count). [nodePath] rides
-/// along for provenance/symmetry with the other per-lane reads; the round is a
-/// per-WORKTREE fact, identical for every lane of the round.
-int roundOf(TreeContext context, String nodePath) {
-  final workspace = context.getInheritedSeedOfExactType<Workspace>();
-  final dir = workspace?.workspaceDir;
-  if (dir == null || dir.isEmpty || !Directory(dir).existsSync()) return 0;
-  return readRespecLedger(dir)?.round ?? 0;
+/// Missing or malformed input fails safe to zero and emits a diagnostic naming
+/// the reserved key; no workspace or respec-ledger state participates.
+int verdictRound(
+  StepArgs args, {
+  RoundDiagnostic diagnostic = _writeRoundDiagnostic,
+}) {
+  final raw = args.params['grid.round'];
+  final parsed = raw == null ? null : int.tryParse(raw.trim());
+  if (parsed != null) return parsed;
+  diagnostic(
+    "missing or invalid reserved StepArgs.params key 'grid.round'; "
+    'verdict round falls back to 0',
+  );
+  return 0;
 }
 
 /// The verdict JSON SHAPE every critic prompt hands its critic — the TWO
@@ -362,7 +354,7 @@ const Circuit kCodeReviewCircuit = Circuit(
 /// bead id to `<bead>#rN` — and neither a `grid rework` round (A14(5)) nor a
 /// `RouteVerdict.Rewind` wave (tg-o90 — only a `rewindCount` bump) does, so the
 /// path is byte-identical round to round. The verdict now STAMPS ITS ROUND
-/// ([verdictJsonTemplate], [roundOf]) and [_verdictFromFile] VERIFIES it, so a
+/// ([verdictJsonTemplate], [verdictRound]) and [_verdictFromFile] VERIFIES it, so a
 /// stale verdict file that SURVIVES a failed wipe is caught positively at the
 /// READ. The wipe stays and still earns its place — it keeps the workspace
 /// honest (a critic that writes nothing this round leaves no shadow at all),
@@ -383,7 +375,7 @@ const Circuit kCodeReviewCircuit = Circuit(
 /// reader ([_verdictFromFile]) would refuse — a PRIOR round's verdicts, a
 /// foreign node's, unstamped/unparseable files, the gating `.rc`, the pinned
 /// diff — and KEEPS a verdict stamped with THIS committee's node paths and
-/// THIS round ([roundOf]'s ledger round). A wipe that lands mid-round is then
+/// THIS round ([verdictRound]'s circuit round). A wipe that lands mid-round is then
 /// harmless by construction ("the wipe only runs at round start" becomes a
 /// property of WHAT it deletes, not of WHEN it runs). Everything a fresh
 /// round must not see still dies here; everything this round already produced
@@ -410,7 +402,7 @@ class ClearCritiqueCapability extends ServiceCapability {
         sweepStaleCritique(
           workspace.workspaceDir,
           committeePath: parentPath(args.nodePath),
-          round: roundOf(context, args.nodePath),
+          round: verdictRound(args),
         );
       }
     } catch (_) {
@@ -799,7 +791,7 @@ class CriticCapability extends ProcessCapability {
           rubric,
           args.nodePath,
           workspace.workspaceDir,
-          round: roundOf(context, args.nodePath),
+          round: verdictRound(args),
         ),
       ),
       workspace: workspace,
@@ -850,10 +842,9 @@ class CriticCapability extends ProcessCapability {
       );
     }
     final workspaceDir = workspace.workspaceDir;
-    // THIS round — the respec LEDGER's own `round` (A27(7)(a) follow-up, bead
-    // `pow-96s`), read at ENTRY with the workspace. The gating lane ignores
-    // it: its `.rc` carries no stamp and the wipe is still ITS freshness fence.
-    final round = roundOf(context, args.nodePath);
+    // Resolve the engine-injected circuit round once at entry so every
+    // transport for this result carries the same freshness stamp.
+    final round = verdictRound(args);
     if (rubric == kGatingRubric) {
       // The plan's exit code, captured by the spawn wrapper. Fail-closed: a
       // missing rc (the plan never ran) grades F — a plan-less bead must NEVER
@@ -961,7 +952,7 @@ class CriticCapability extends ProcessCapability {
   /// The verdict JSON also carries TWO FRESHNESS STAMPS ([verdictJsonTemplate]),
   /// both copied byte-for-byte: [nodePath] (gate-integrity #3 — WHOSE verdict is
   /// this?) and [round] (A15(5) alt-A — WHICH round's?, the respec ledger's own
-  /// `round` via [roundOf]). [_verdictFromFile] rejects a file that fails
+  /// `round` via [verdictRound]). [_verdictFromFile] rejects a file that fails
   /// EITHER, so a verdict left over from an earlier round in the SAME reused
   /// workspace directory — where the node path is byte-identical, and only the
   /// round differs — is never silently read as this round's.
