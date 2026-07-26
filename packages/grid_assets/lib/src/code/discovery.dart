@@ -1118,7 +1118,7 @@ PriorArtSource stationPriorArt(
   sdk.GridDelegate Function() delegate, {
   StationSearchService service = const StationSearchService(),
 }) => (queries) async {
-  final roster = mountedRosterOf(delegate());
+  final roster = codedRosterOf(delegate);
   final hits = <PriorArt>[];
   for (final query in queries) {
     final report = await service.search(query: query, roster: roster);

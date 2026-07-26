@@ -19,6 +19,7 @@ import 'dart:io';
 
 import 'package:args/command_runner.dart';
 import 'package:grid_sdk/grid_sdk.dart' as sdk;
+import 'package:path/path.dart' as p;
 
 import 'overlay_install.dart';
 import 'overlay_materializer.dart' show kDefaultOverlayRunner;
@@ -133,8 +134,8 @@ class AssetsInstallCommand extends Command<int> {
       ..addOption(
         'grid-home',
         help:
-            'The grid home (default: the RawAssetGrid root the '
-            'resident-station context authors).',
+            'An ABSOLUTE grid-home override (default: the RawAssetGrid root '
+            'the resident-station context authors by mounted tree position).',
       );
   }
 
@@ -163,14 +164,30 @@ class AssetsInstallCommand extends Command<int> {
     final args = argResults!;
     final delegate = _delegate();
     try {
-      final gridHome = args.option('grid-home') ?? mountedGridHomeOf(delegate);
-      if (gridHome == null) {
+      final flag = args.option('grid-home')?.trim();
+      String? unresolvedHome;
+      if (flag == null || flag.isEmpty) {
+        try {
+          unresolvedHome = mountedGridHomeOf(delegate);
+        } on ArgumentError catch (error) {
+          final authored = error.invalidValue;
+          if (authored is! String || p.isAbsolute(authored)) rethrow;
+          _refuseRelativeGridHome(authored);
+        }
+      } else {
+        unresolvedHome = flag;
+      }
+      if (unresolvedHome == null) {
         _err.writeln(
           'assets install: the resident-station context authors no grid root — '
           'pass --grid-home <dir> or --root <dir>',
         );
         return 1;
       }
+      if (!p.isAbsolute(unresolvedHome)) {
+        _refuseRelativeGridHome(unresolvedHome);
+      }
+      final gridHome = p.normalize(unresolvedHome);
       final overlayRoots = await _roots(gridHome);
       if (overlayRoots.isEmpty) {
         _err.writeln(
@@ -204,5 +221,14 @@ class AssetsInstallCommand extends Command<int> {
     } finally {
       delegate.dispose();
     }
+  }
+
+  Never _refuseRelativeGridHome(String gridHome) {
+    usageException(
+      'assets install: --grid-home must be an ABSOLUTE path (got '
+      '"$gridHome") — the install RENDERS the grid home into every asset it '
+      'stamps, and the coded roster resolves its relative seats against it; '
+      'a cwd-relative home would be baked into the committed manual.',
+    );
   }
 }

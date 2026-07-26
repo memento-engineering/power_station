@@ -51,6 +51,24 @@ List<sdk.SubstationScope> mountedRosterOf(
   configuration: configuration,
 );
 
+/// Enumerates the coded substation roster authored by a fresh delegate from
+/// [factory], then disposes that owned delegate.
+///
+/// The delegate is disposed in a `finally` block, including when the offline
+/// mount performed by [mountedRosterOf] throws. [configuration] is forwarded
+/// to that mount and defaults to the empty, unarmed configuration.
+List<sdk.SubstationScope> codedRosterOf(
+  sdk.GridDelegate Function() factory, {
+  sdk.GridConfiguration configuration = const sdk.GridConfiguration(),
+}) {
+  final delegate = factory();
+  try {
+    return mountedRosterOf(delegate, configuration: configuration);
+  } finally {
+    delegate.dispose();
+  }
+}
+
 /// The per-store read seam — READ-ONLY by construction (A37): one read
 /// method, no mutation surface. The service is built on this seam so a search
 /// cannot write a foreign store *by type*, and tests exercise the whole

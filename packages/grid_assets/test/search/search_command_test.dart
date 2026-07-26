@@ -15,12 +15,16 @@ import 'package:test/test.dart';
 
 /// The composing station's resident-station context: two literal seats.
 class _StationDelegate extends sdk.GridDelegate {
+  _StationDelegate(this.root);
+
+  @override
+  final String root;
   var disposed = false;
 
   @override
   Seed build(TreeContext context, sdk.GridConfiguration configuration) =>
       sdk.RawAssetGrid(
-        root: '/grid/home',
+        root: root,
         assets: [
           sdk.Station(
             name: 'test-station',
@@ -75,14 +79,15 @@ void main() {
     StringBuffer out,
     StringBuffer err,
   })
-  harness({Set<String>? existing}) {
+  harness({Set<String>? existing, String Function()? gridHomeDefault}) {
     final out = StringBuffer();
     final err = StringBuffer();
     _StationDelegate? last;
     final runner = CommandRunner<int>('space', 'test station')
       ..addCommand(
         SearchCommand(
-          delegate: () => last = _StationDelegate(),
+          delegate: (gridHome) => last = _StationDelegate(gridHome),
+          gridHomeDefault: gridHomeDefault ?? () => '/grid/home',
           service: StationSearchService(
             source: _FakeBeadSource(beads),
             dirExists:
@@ -163,6 +168,47 @@ void main() {
       final h = harness();
       await h.runner.run(['search', 'flux']);
       expect(h.lastDelegate().disposed, isTrue);
+    },
+  );
+
+  test(
+    'grid home defaults, trims, and normalizes before delegate construction',
+    () async {
+      final defaulted = harness(gridHomeDefault: () => '/grid/default/../home');
+      expect(await defaulted.runner.run(['search', 'flux']), 0);
+      expect(defaulted.lastDelegate().root, '/grid/home');
+
+      final overridden = harness(gridHomeDefault: () => '/unused');
+      expect(
+        await overridden.runner.run([
+          'search',
+          '--grid-home',
+          '  /grid/override/../home  ',
+          'flux',
+        ]),
+        0,
+      );
+      expect(overridden.lastDelegate().root, '/grid/home');
+    },
+  );
+
+  test(
+    'a relative grid home is a LOUD usage refusal with the roster reason',
+    () async {
+      final h = harness(gridHomeDefault: () => 'relative/grid');
+
+      await expectLater(
+        h.runner.run(['search', 'flux']),
+        throwsA(
+          isA<UsageException>()
+              .having((error) => error.message, 'message', contains('ABSOLUTE'))
+              .having(
+                (error) => error.message,
+                'reason',
+                contains('re-imports the ambience the v3 model kills'),
+              ),
+        ),
+      );
     },
   );
 }

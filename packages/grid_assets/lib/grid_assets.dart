@@ -42,7 +42,8 @@
 /// also lives here: deterministic, READ-ONLY (A37) cross-store search over the
 /// station's attached substations. [mountedRosterOf] resolves the roster from
 /// the resident-station context (the composing station's `GridDelegate` tree,
-/// mounted offline); [StationSearchService] queries each seat's `.beads/`
+/// mounted offline), while [codedRosterOf] owns and disposes a fresh delegate
+/// around that enumeration; [StationSearchService] queries each seat's `.beads/`
 /// store (backlog + decision beads) through a read-only-by-construction seam;
 /// [SearchCommand] is the THIN exported CLI adapter a station composes
 /// (`space search <query>`) — the substrate agentic skills (`discover`) CALL

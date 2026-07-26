@@ -48,6 +48,20 @@ class _StationDelegate extends sdk.GridDelegate {
   }
 }
 
+class _ThrowingDelegate extends sdk.GridDelegate {
+  var disposed = false;
+
+  @override
+  Seed build(TreeContext context, sdk.GridConfiguration configuration) =>
+      throw StateError('mount failed');
+
+  @override
+  void dispose() {
+    disposed = true;
+    super.dispose();
+  }
+}
+
 /// The programmable per-store read (the read-only seam): beads by store root,
 /// with per-root failure injection and a read log.
 class _FakeBeadSource implements SubstationBeadSource {
@@ -120,6 +134,28 @@ void main() {
         'gamma',
       ]);
     });
+
+    test('codedRosterOf constructs, enumerates, and disposes its delegate', () {
+      late _StationDelegate delegate;
+
+      final roster = codedRosterOf(() => delegate = _StationDelegate());
+
+      expect(roster.map((scope) => scope.name), ['alpha', 'beta']);
+      expect(delegate.disposed, isTrue);
+    });
+
+    test(
+      'codedRosterOf disposes its delegate when the offline mount throws',
+      () {
+        late _ThrowingDelegate delegate;
+
+        expect(
+          () => codedRosterOf(() => delegate = _ThrowingDelegate()),
+          throwsStateError,
+        );
+        expect(delegate.disposed, isTrue);
+      },
+    );
   });
 
   group('StationSearchService.search', () {
