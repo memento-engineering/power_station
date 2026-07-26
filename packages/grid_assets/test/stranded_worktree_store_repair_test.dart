@@ -28,11 +28,13 @@ void main() {
     rootRepoPath = p.join(tmp.path, 'root-repo');
     beadsDir = p.join(workspaceDir, '.beads');
     Directory(beadsDir).createSync(recursive: true);
-    Directory(p.join(rootRepoPath, '.beads', 'proxieddb'))
-        .createSync(recursive: true);
+    Directory(
+      p.join(rootRepoPath, '.beads', 'proxieddb'),
+    ).createSync(recursive: true);
     // The committed scaffold — must survive every repair untouched.
-    File(p.join(beadsDir, 'metadata.json'))
-        .writeAsStringSync('{"dolt_mode":"proxied-server"}');
+    File(
+      p.join(beadsDir, 'metadata.json'),
+    ).writeAsStringSync('{"dolt_mode":"proxied-server"}');
     File(p.join(beadsDir, 'config.yaml')).writeAsStringSync('types: {}\n');
   });
 
@@ -63,8 +65,10 @@ void main() {
     );
 
     expect(Directory(p.join(beadsDir, 'dolt')).existsSync(), isFalse);
-    expect(File(p.join(beadsDir, 'dolt-server-config.yaml')).existsSync(),
-        isFalse);
+    expect(
+      File(p.join(beadsDir, 'dolt-server-config.yaml')).existsSync(),
+      isFalse,
+    );
     expect(File(p.join(beadsDir, 'last-touched')).existsSync(), isFalse);
     // Scaffold untouched.
     expect(File(p.join(beadsDir, 'metadata.json')).existsSync(), isTrue);
@@ -92,20 +96,14 @@ void main() {
       File(p.join(beadsDir, 'proxied_server_client_info.json')).existsSync(),
       isFalse,
     );
-    expect(
-      File(p.join(beadsDir, 'store-repair.log')).existsSync(),
-      isTrue,
-    );
+    expect(File(p.join(beadsDir, 'store-repair.log')).existsSync(), isTrue);
   });
 
   test('a HEALTHY proxied worktree (client info at the root proxieddb, no '
       'self-hosted artifacts) is left byte-untouched', () {
-    final clientInfo = File(
-      p.join(beadsDir, 'proxied_server_client_info.json'),
-    )..writeAsStringSync(
-        jsonEncode({
-          'root_path': p.join(rootRepoPath, '.beads', 'proxieddb'),
-        }),
+    final clientInfo = File(p.join(beadsDir, 'proxied_server_client_info.json'))
+      ..writeAsStringSync(
+        jsonEncode({'root_path': p.join(rootRepoPath, '.beads', 'proxieddb')}),
       );
     final before = clientInfo.readAsStringSync();
 
