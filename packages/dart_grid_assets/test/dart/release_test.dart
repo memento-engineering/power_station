@@ -332,12 +332,12 @@ void main() {
       () async {
         final clean = await Directory.systemTemp.createTemp('release-clean-');
         addTearDown(() => clean.delete(recursive: true));
-        File('${clean.path}/README.md').writeAsStringSync(
-          '# Extensions\nExtensions are registered.\n',
-        );
-        File('${clean.path}/CHANGELOG.md').writeAsStringSync(
-          '## 0.1.0\nRegister VM service support.\n',
-        );
+        File(
+          '${clean.path}/README.md',
+        ).writeAsStringSync('# Extensions\nExtensions are registered.\n');
+        File(
+          '${clean.path}/CHANGELOG.md',
+        ).writeAsStringSync('## 0.1.0\nRegister VM service support.\n');
         Directory('${clean.path}/lib').createSync();
         File('${clean.path}/lib/binding.dart').writeAsStringSync(
           'void _registerExtension() => developer.registerExtension();\n',
@@ -349,9 +349,9 @@ void main() {
 
         final leaking = await Directory.systemTemp.createTemp('release-leak-');
         addTearDown(() => leaking.delete(recursive: true));
-        File('${leaking.path}/README.md').writeAsStringSync(
-          '# Package\nSee the decision register.\n',
-        );
+        File(
+          '${leaking.path}/README.md',
+        ).writeAsStringSync('# Package\nSee the decision register.\n');
         final leakingResult = service.scrubDir(leaking.path);
         expect(leakingResult.clean, isFalse);
         expect(leakingResult.filesScanned, 1);
