@@ -31,6 +31,7 @@ import '../agent/site_binding.dart';
 import '../agent/usage_report.dart';
 import '../assets/asset_loader.dart';
 import '../assets/overlay_materializer.dart';
+import '../assets/overlay_manifest.dart';
 import '../assets/overlay_provenance.dart';
 import 'circuit_migration.dart';
 import 'committee.dart';
@@ -301,11 +302,17 @@ class AgentCapability extends ProcessCapability {
   /// contributes nothing rather than erroring — the empty-overlay case, not a
   /// violated invariant.
   List<String> _materializeStationOverlay(Workspace workspace) {
-    final overlayRoot =
-        _overlayRoot ?? p.join(PackagedAssetLoader().root, 'station_overlay');
+    final loader = PackagedAssetLoader();
+    final overlayRoot = _overlayRoot ?? p.join(loader.root, 'station_overlay');
     if (!Directory(overlayRoot).existsSync()) return const [];
+    final source = _overlayRoot == null
+        ? loader.loadStationOverlaySource()
+        : StationOverlaySource(
+            root: overlayRoot,
+            mappings: kDefaultStationOverlayMappings,
+          );
     final report = _materializer.materializeSync(
-      overlayRoots: [overlayRoot],
+      overlaySources: [source],
       targetRoot: workspace.workspaceDir,
       sourceRef: _overlaySourceRef,
       subtrees: kWorktreeOverlaySubtrees,

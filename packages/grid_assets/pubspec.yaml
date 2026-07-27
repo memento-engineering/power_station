@@ -1,5 +1,5 @@
 name: grid_assets
-version: 0.2.0
+version: 0.2.1
 description: >-
   The_grid's opinion assets: the agent/verify/land Capability impls, the code
   circuit, and the git SourceControl, extracted out of the opinion-free engine.
@@ -21,9 +21,9 @@ dependencies:
   grid_sdk: ^0.1.1
   meta: ^1.16.0
   path: ^1.9.0
+  yaml: ^3.1.2
 
 dev_dependencies:
   lints: ^5.1.0
   state_notifier: ^1.0.0
   test: ^1.25.0
-  yaml: ^3.1.2

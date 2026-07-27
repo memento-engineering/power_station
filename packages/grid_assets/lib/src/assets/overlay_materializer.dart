@@ -7,7 +7,7 @@
 /// directory tree whose internal layout MIRRORS THE TARGET. A file at
 /// `station_overlay/<rel>` lands at `<targetRoot>/<rel>` — so the vended tree
 /// already carries the harness's own layout
-/// (`station_overlay/.claude/skills/discover/SKILL.md`). There is NO kind
+/// (`station_overlay/claude/skills/discover/SKILL.md`). There is NO kind
 /// mapping and no install-target translation in this lib: the overlay AUTHOR
 /// decides where an asset lands by where it sits in the tree.
 ///
@@ -55,6 +55,7 @@ import 'dart:io';
 import 'package:path/path.dart' as p;
 
 import 'asset_loader.dart';
+import 'overlay_manifest.dart';
 import 'overlay_provenance.dart';
 
 /// Where Claude Code discovers a skill inside a repo root
@@ -187,10 +188,17 @@ class OverlayFileRefused extends OverlayFileOutcome {
 class OverlayMaterializeReport {
   /// Creates the report. [dryRun] ⇒ nothing was written; every outcome is what
   /// WOULD happen (the `--check` mode).
-  const OverlayMaterializeReport({required this.files, required this.dryRun});
+  const OverlayMaterializeReport({
+    required this.files,
+    required this.warnings,
+    required this.dryRun,
+  });
 
   /// Every file outcome, in processing order.
   final List<OverlayFileOutcome> files;
+
+  /// Publish-hostile hidden directories encountered in source trees.
+  final List<OverlaySourceWarning> warnings;
 
   /// Whether this was a PLAN (`--check`) rather than a write.
   final bool dryRun;
@@ -279,6 +287,21 @@ class OverlayMaterializeReport {
   }
 }
 
+/// A publish-hostile hidden directory found in an overlay source.
+class OverlaySourceWarning {
+  const OverlaySourceWarning({
+    required this.sourceRoot,
+    required this.relativePath,
+  });
+
+  final String sourceRoot;
+  final String relativePath;
+
+  String get message =>
+      'WARNING: hidden overlay source directory "$relativePath" under '
+      '"$sourceRoot" will be omitted by dart pub publish';
+}
+
 /// Expands `station_overlay`-shaped source roots onto a target ROOT,
 /// PATH-PRESERVING — stateless, and safe to construct anywhere (a CLI Command, a
 /// Flutter interactor, a synchronous engine Capability hook). This class has NO
@@ -307,7 +330,8 @@ class OverlayMaterializer {
   /// THROWS a [StateError] (via [stampProvenance]) on a vended file type that
   /// cannot carry a provenance stamp — a packaging bug, fail-closed.
   OverlayMaterializeReport materializeSync({
-    required List<String> overlayRoots,
+    List<StationOverlaySource>? overlaySources,
+    List<String>? overlayRoots,
     required String targetRoot,
     required String sourceRef,
     List<String> subtrees = const [],
@@ -315,84 +339,112 @@ class OverlayMaterializer {
     bool dryRun = false,
   }) {
     final files = <OverlayFileOutcome>[];
+    final warnings = <OverlaySourceWarning>[];
     final seen = <String>{};
     final runner = args['runner'] ?? kDefaultOverlayRunner;
-    for (final overlayRoot in overlayRoots) {
-      for (final scope in subtrees.isEmpty ? const [''] : subtrees) {
-        final dir = scope.isEmpty
-            ? Directory(overlayRoot)
-            : Directory(p.join(overlayRoot, scope));
-        if (!dir.existsSync()) continue;
-        final sources = dir.listSync(recursive: true).whereType<File>().toList()
-          ..sort((a, b) => a.path.compareTo(b.path));
-        for (final source in sources) {
-          final relativePath = p.relative(source.path, from: overlayRoot);
-          // Union by tree position: an earlier root already decided this path.
-          if (!seen.add(relativePath)) continue;
-          final rendered = _render(source.readAsStringSync(), args);
-          final residue = _templateHole.allMatches(rendered);
-          if (residue.isNotEmpty) {
-            files.add(
-              OverlayFileRefused(
-                relativePath,
-                holes: ({for (final m in residue) m.group(0)!}.toList()
-                  ..sort()),
-                boundArgs: args.keys.toList()..sort(),
-              ),
-            );
-            continue;
-          }
-          final target = File(p.join(targetRoot, relativePath));
-          // A SYMLINK — at the file OR at any ancestor dir — is never something
-          // this tooling generated (it only ever writes regular files), and
-          // writing THROUGH one would mutate a file outside the target root,
-          // breaking this lib's "writes nothing outside targetRoot" promise. It
-          // is also exactly how an operator seat hand-wires its assets today
-          // (`.claude/skills/x -> ../../extension/skills/x` — a symlinked DIR,
-          // so the file under it is not itself a link), and a DANGLING link
-          // would crash the write outright. Blocked, never followed.
-          if (_escapesTargetRoot(targetRoot, relativePath)) {
-            files.add(OverlayFileBlocked(relativePath, symlink: true));
-            continue;
-          }
-          final existing = target.existsSync()
-              ? target.readAsStringSync()
-              : null;
-          if (existing != null && !hasProvenance(existing)) {
-            files.add(OverlayFileBlocked(relativePath));
-            continue;
-          }
-          if (existing != null && stripProvenance(existing) == rendered) {
-            files.add(OverlayFileUnchanged(relativePath));
-            continue;
-          }
-          final stamped = stampProvenance(
-            rendered,
-            relativePath: relativePath,
-            sourceRef: sourceRef,
-            runner: runner,
-          );
-          if (!dryRun) {
-            target.parent.createSync(recursive: true);
-            target.writeAsStringSync(stamped);
-          }
-          files.add(
-            existing == null
-                ? OverlayFileWritten(
-                    relativePath,
-                    sourceRoot: overlayRoot,
-                    contents: stamped,
-                  )
-                : OverlayFileUpdated(
-                    relativePath,
-                    sourceRoot: overlayRoot,
-                    contents: stamped,
-                  ),
-          );
+    final resolvedSources =
+        overlaySources ??
+        [
+          for (final root in overlayRoots ?? const <String>[])
+            StationOverlaySource(
+              root: root,
+              mappings: kDefaultStationOverlayMappings,
+            ),
+        ];
+    for (final overlaySource in resolvedSources) {
+      final root = Directory(overlaySource.root);
+      if (!root.existsSync()) continue;
+      final entities = root.listSync(recursive: true);
+      final hidden = <String>{};
+      for (final directory in entities.whereType<Directory>()) {
+        final relative = p.relative(directory.path, from: overlaySource.root);
+        if (p.split(relative).any((part) => part.startsWith('.'))) {
+          hidden.add(relative);
         }
       }
+      for (final relative in hidden.toList()..sort()) {
+        warnings.add(
+          OverlaySourceWarning(
+            sourceRoot: overlaySource.root,
+            relativePath: relative,
+          ),
+        );
+      }
+      final sources = entities.whereType<File>().toList()
+        ..sort((a, b) => a.path.compareTo(b.path));
+      for (final source in sources) {
+        final sourcePath = p.relative(source.path, from: overlaySource.root);
+        final relativePath = _mappedRelativePath(
+          sourcePath,
+          overlaySource.mappings,
+        );
+        if (!_inMappedScope(relativePath, subtrees)) continue;
+        // Union by tree position: an earlier root already decided this path.
+        if (!seen.add(relativePath)) continue;
+        final rendered = _render(source.readAsStringSync(), args);
+        final residue = _templateHole.allMatches(rendered);
+        if (residue.isNotEmpty) {
+          files.add(
+            OverlayFileRefused(
+              relativePath,
+              holes: ({for (final m in residue) m.group(0)!}.toList()..sort()),
+              boundArgs: args.keys.toList()..sort(),
+            ),
+          );
+          continue;
+        }
+        final target = File(p.join(targetRoot, relativePath));
+        // A SYMLINK — at the file OR at any ancestor dir — is never something
+        // this tooling generated (it only ever writes regular files), and
+        // writing THROUGH one would mutate a file outside the target root,
+        // breaking this lib's "writes nothing outside targetRoot" promise. It
+        // is also exactly how an operator seat hand-wires its assets today
+        // (`.claude/skills/x -> ../../extension/skills/x` — a symlinked DIR,
+        // so the file under it is not itself a link), and a DANGLING link
+        // would crash the write outright. Blocked, never followed.
+        if (_escapesTargetRoot(targetRoot, relativePath)) {
+          files.add(OverlayFileBlocked(relativePath, symlink: true));
+          continue;
+        }
+        final existing = target.existsSync() ? target.readAsStringSync() : null;
+        if (existing != null && !hasProvenance(existing)) {
+          files.add(OverlayFileBlocked(relativePath));
+          continue;
+        }
+        if (existing != null && stripProvenance(existing) == rendered) {
+          files.add(OverlayFileUnchanged(relativePath));
+          continue;
+        }
+        final stamped = stampProvenance(
+          rendered,
+          relativePath: relativePath,
+          sourceRef: sourceRef,
+          runner: runner,
+        );
+        if (!dryRun) {
+          target.parent.createSync(recursive: true);
+          target.writeAsStringSync(stamped);
+        }
+        files.add(
+          existing == null
+              ? OverlayFileWritten(
+                  relativePath,
+                  sourceRoot: overlaySource.root,
+                  contents: stamped,
+                )
+              : OverlayFileUpdated(
+                  relativePath,
+                  sourceRoot: overlaySource.root,
+                  contents: stamped,
+                ),
+        );
+      }
     }
-    return OverlayMaterializeReport(files: files, dryRun: dryRun);
+    return OverlayMaterializeReport(
+      files: files,
+      warnings: warnings,
+      dryRun: dryRun,
+    );
   }
 
   /// The async counterpart of [materializeSync] — for a caller that CAN await (a
@@ -400,13 +452,15 @@ class OverlayMaterializer {
   /// synchronous `dart:io`, so this only shapes the call as a `Future`; see
   /// [materializeSync] for the whole behavior contract.
   Future<OverlayMaterializeReport> materialize({
-    required List<String> overlayRoots,
+    List<StationOverlaySource>? overlaySources,
+    List<String>? overlayRoots,
     required String targetRoot,
     required String sourceRef,
     List<String> subtrees = const [],
     Map<String, String> args = const {},
     bool dryRun = false,
   }) async => materializeSync(
+    overlaySources: overlaySources,
     overlayRoots: overlayRoots,
     targetRoot: targetRoot,
     sourceRef: sourceRef,
@@ -443,3 +497,19 @@ class OverlayMaterializer {
     return out;
   }
 }
+
+String _mappedRelativePath(String sourcePath, Map<String, String> mappings) {
+  final parts = p.split(p.normalize(sourcePath));
+  if (parts.isEmpty) return sourcePath;
+  final targetHead = mappings[parts.first];
+  return targetHead == null
+      ? p.normalize(sourcePath)
+      : p.joinAll([targetHead, ...parts.skip(1)]);
+}
+
+bool _inMappedScope(String path, List<String> subtrees) =>
+    subtrees.isEmpty ||
+    subtrees.any((scope) {
+      final normalized = p.normalize(scope);
+      return path == normalized || path.startsWith('$normalized${p.separator}');
+    });

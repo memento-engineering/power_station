@@ -26,3 +26,10 @@
 ## 0.1.0
 
 - Initial release: the_grid's opinion assets — the agent/verify/land Capability impls, the code circuit, and the git SourceControl.
+# 0.2.1
+
+- Store station overlay assets in publish-visible source directories and map
+  them to harness dot-directories at install time.
+- Allow asset manifests to override the default station overlay mappings.
+- Warn during install and release dry-run when hidden overlay source
+  directories would be omitted by `dart pub publish`.

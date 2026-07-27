@@ -22,6 +22,7 @@ import 'package:grid_sdk/grid_sdk.dart' as sdk;
 import 'package:path/path.dart' as p;
 
 import 'overlay_install.dart';
+import 'overlay_manifest.dart';
 import 'overlay_materializer.dart' show kDefaultOverlayRunner;
 import 'overlay_provenance.dart' show resolveOverlaySourceRefSync;
 
@@ -42,7 +43,7 @@ class AssetsCommand extends Command<int> {
     required sdk.GridDelegate Function() delegate,
     OverlayInstallService service = const OverlayInstallService(),
     String? runnerInvocation,
-    Future<List<String>> Function(String gridHome)? roots,
+    Future<List<StationOverlaySource>> Function(String gridHome)? roots,
     String Function(String overlayRoot)? sourceRef,
     StringSink? out,
     StringSink? err,
@@ -91,7 +92,7 @@ class AssetsInstallCommand extends Command<int> {
     required sdk.GridDelegate Function() delegate,
     OverlayInstallService service = const OverlayInstallService(),
     String? runnerInvocation,
-    Future<List<String>> Function(String gridHome)? roots,
+    Future<List<StationOverlaySource>> Function(String gridHome)? roots,
     String Function(String overlayRoot)? sourceRef,
     StringSink? out,
     StringSink? err,
@@ -139,13 +140,13 @@ class AssetsInstallCommand extends Command<int> {
       );
   }
 
-  static Future<List<String>> _discoverRoots(String gridHome) =>
-      resolveStationOverlayRoots(gridHome: gridHome);
+  static Future<List<StationOverlaySource>> _discoverRoots(String gridHome) =>
+      resolveStationOverlaySources(gridHome: gridHome);
 
   final sdk.GridDelegate Function() _delegate;
   final OverlayInstallService _service;
   final String? _runnerInvocation;
-  final Future<List<String>> Function(String) _roots;
+  final Future<List<StationOverlaySource>> Function(String) _roots;
   final String Function(String) _sourceRef;
   final StringSink _out;
   final StringSink _err;
@@ -188,8 +189,8 @@ class AssetsInstallCommand extends Command<int> {
         _refuseRelativeGridHome(unresolvedHome);
       }
       final gridHome = p.normalize(unresolvedHome);
-      final overlayRoots = await _roots(gridHome);
-      if (overlayRoots.isEmpty) {
+      final overlaySources = await _roots(gridHome);
+      if (overlaySources.isEmpty) {
         _err.writeln(
           'assets install: no package in $gridHome vends an '
           'extension/station_overlay — nothing to install',
@@ -197,9 +198,10 @@ class AssetsInstallCommand extends Command<int> {
         return 1;
       }
       final report = await _service.install(
-        overlayRoots: overlayRoots,
+        overlaySources: overlaySources,
         targetRoot: args.option('root') ?? gridHome,
-        sourceRef: args.option('source-ref') ?? _sourceRef(overlayRoots.first),
+        sourceRef:
+            args.option('source-ref') ?? _sourceRef(overlaySources.first.root),
         check: args.flag('check'),
         args: {
           // A JIT station supplies its launchable invocation; compiled stations

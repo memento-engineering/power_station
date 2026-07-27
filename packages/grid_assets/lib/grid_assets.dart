@@ -59,7 +59,7 @@
 /// The DELIVERY leg is [OverlayMaterializer]: the CLI-free lib that expands a
 /// `station_overlay` tree onto a target ROOT, PATH-PRESERVING. The overlay is
 /// ROOT-RELATIVE — its internal layout MIRRORS the target, so
-/// `station_overlay/.claude/skills/discover/SKILL.md` lands at
+/// `station_overlay/claude/skills/discover/SKILL.md` lands at
 /// `<root>/.claude/skills/discover/SKILL.md` with no kind mapping anywhere: the
 /// overlay AUTHOR decides where an asset lands by where it sits in the tree.
 /// ONE root-parametric materializer, two callers, two roots — this package's OWN
@@ -129,6 +129,7 @@ export 'src/assets/assets_command.dart';
 export 'src/assets/composition_assets.dart';
 export 'src/assets/mounted_tree.dart';
 export 'src/assets/overlay_install.dart';
+export 'src/assets/overlay_manifest.dart';
 export 'src/assets/overlay_materializer.dart';
 export 'src/assets/overlay_provenance.dart';
 export 'src/code/circuit_migration.dart';

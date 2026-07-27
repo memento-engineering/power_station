@@ -434,6 +434,32 @@ void main() {
       expect(result.warningCount, 2);
       expect(result.warnings, ['* Line 3: something', '* Line 9: another']);
     });
+
+    test('a hidden overlay source directory makes the gate unclean', () async {
+      final temp = Directory.systemTemp.createTempSync('release_overlay_');
+      addTearDown(() => temp.deleteSync(recursive: true));
+      Directory(
+        '${temp.path}/extension/station_overlay/.claude/skills',
+      ).createSync(recursive: true);
+      final result = await ReleaseService(
+        runProcess: _FakeProcess(
+          ProcessResult(0, 0, 'Package has 0 warnings.', ''),
+        ).call,
+      ).dryRun(packageDir: temp.path);
+      expect(result.clean, isFalse);
+      expect(result.warningCount, 1);
+      expect(result.warnings.single, contains('.claude'));
+
+      Directory(
+        '${temp.path}/extension/station_overlay/.claude',
+      ).renameSync('${temp.path}/extension/station_overlay/claude');
+      final visible = await ReleaseService(
+        runProcess: _FakeProcess(
+          ProcessResult(0, 0, 'Package has 0 warnings.', ''),
+        ).call,
+      ).dryRun(packageDir: temp.path);
+      expect(visible.clean, isTrue);
+    });
   });
 
   group(

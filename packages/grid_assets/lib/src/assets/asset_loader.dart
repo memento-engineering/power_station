@@ -8,7 +8,7 @@
 /// source; [renderCriticPrompt] is the standalone, format-faithful renderer of
 /// the `prompts/critic.md` template (the portable mirror).
 ///
-/// The vended SKILLS (`extension/station_overlay/.claude/skills/<id>/SKILL.md`,
+/// The vended SKILLS (`extension/station_overlay/claude/skills/<id>/SKILL.md`,
 /// bead `pow-88p`) ride the same loader: the agentic halves of the coupled
 /// skill+command pairs (ADR-0001 — the skill CALLS the vended deterministic
 /// Command, e.g. `discover` calls `search --json`). Each SKILL.md is
@@ -36,6 +36,8 @@ import 'dart:isolate';
 
 import 'package:beads_dart/beads_dart.dart';
 import 'package:path/path.dart' as p;
+
+import 'overlay_manifest.dart';
 
 /// The skill ids this package vends
 /// (`extension/station_overlay/skills/<id>/SKILL.md`) — the agentic halves of
@@ -163,27 +165,27 @@ class PackagedAssetLoader {
       });
 
   /// The mustache-templated SKILL.md body for [skillId]
-  /// (`extension/station_overlay/.claude/skills/<skillId>/SKILL.md` — the
+  /// (`extension/station_overlay/claude/skills/<skillId>/SKILL.md` — the
   /// ROOT-RELATIVE vended-asset overlay format: the tree mirrors the target repo
   /// root, so it already carries the harness's own `.claude/skills/` layout).
   /// Throws an [ArgumentError] for an unknown skill (fail-loud — a missing skill
   /// is a packaging bug, never a silent empty install).
   String loadSkillTemplate(String skillId) {
     final file = File(
-      p.join(
-        _root,
-        'station_overlay',
-        '.claude',
-        'skills',
-        skillId,
-        'SKILL.md',
-      ),
+      p.join(_root, 'station_overlay', 'claude', 'skills', skillId, 'SKILL.md'),
     );
     if (!file.existsSync()) {
       throw ArgumentError('unknown skill "$skillId" (no ${file.path})');
     }
     return file.readAsStringSync();
   }
+
+  /// This package's overlay source plus manifest-declared mappings.
+  StationOverlaySource loadStationOverlaySource() =>
+      loadStationOverlaySourceFromPaths(
+        overlayRoot: p.join(_root, 'station_overlay'),
+        manifestPath: p.join(_root, 'mcp', 'config.yaml'),
+      );
 
   /// Renders the SKILL.md for [skillId], substituting every `{{key}}` from
   /// [args] (the manifest's declared skill args — e.g. `runner`, `gridHome`
