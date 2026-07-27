@@ -4,8 +4,8 @@ description: >
   The grid home's front door — the ONLY human-in-the-loop stage. Dispatches on
   arg shape: a bare invocation or a topic/idea/question researches what the
   grid already knows (the attached substations' backlogs + decision beads +
-  code), then continues an existing bead or — on your yes — files an ephemeral
-  one and starts the design conversation. A bead-id with no prompt is
+  code), then continues an existing bead or — on your yes — files a staged one
+  and starts the design conversation. A bead-id with no prompt is
   advisory: it loads the bead and its graph and recommends the next lifecycle
   step. A bead-id followed by an instruction is directed: same context load,
   but it carries out the instruction (decompose, retype, close, fill in
@@ -102,22 +102,42 @@ research first, file only on confirmation.
 
 - **Target store: the substation whose repo the work would change** (the
   search report's `root` for that seat is your `cd` target). No clear owner →
-  **the grid home's own store** (`.grid/.beads` under it). Cross-store deps do not
-  exist — coupled beads home together in ONE store.
-- **Ephemeral + staged, never ready:** a live station mounts a ready bead
-  within seconds — a half-designed bead must never enter the frontier.
+  **the grid home's own store** (`.grid/.beads` under it).
+- **Cross-store ordering:** cross-store dependencies DO exist, but
+  never author one as a dependency row or with `bd dep add <id>
+  external:<project>:<capability>`: A44 reversed that raw-foreign-id wiring
+  because `bd doctor --fix` can classify it as orphaned and sever it. The
+  current mechanism is A55's OPEN grid-state `type=link` bead carrying
+  `grid.link.from=<blocked bead id>`, `grid.link.to=<blocker bead id>`, and
+  `grid.link.type=blocks` in its own metadata. The station's link-authoring
+  verb mints that bead only after its `crossLinkTypeRefusal` capability check;
+  `StationJoinBridge._applyCrossLinks` projects it and the shared
+  `applyBlockGuard` enforces it. A malformed link fails closed.
+  Default to homing coupled beads together when one repo owns the work,
+  because that gives
+  the station a locally resolvable graph; split them across stores when repo
+  ownership calls for it — including the three-store split directed by
+  Nico on 2026-07-26 — and express their ordering with the link-authoring verb.
+- **Staged, never ready:** a live station mounts a ready bead within seconds —
+  a half-designed bead must never enter the frontier.
 
 ```bash
 cd <owning store root>
 bd create --title "<title>" --type <feature|bug|task|epic|chore|decision> \
-  --ephemeral --defer <date ~1 week out> --actor governor \
+  --defer <date ~1 week out> --actor governor \
   --description "<one paragraph: what problem this solves and why>"
 ```
 
-Promote once the design is approved (`bd update <id> --persistent --actor
-governor`); leave it deferred — blessing into the ready frontier is the
-human's lever, not this skill's. All backlog writes ride the bd CLI with
-`--actor governor`; never SQL, never `.beads/hooks/`.
+Immediately verify that the created bead is discoverable with `{{runner}}
+search --json "<new bead id>"` and require an `id`-field hit. Never use `bd show`
+for this verification: exact-id lookup resolves a stranded wisp and hides that
+it is absent from list/search surfaces.
+
+The bead stays deferred until the human blesses it into the ready frontier.
+Record design approval by filling `--description` and `--design` with `bd update
+<id> --actor governor`; there is no persistence flag to change. All backlog
+writes ride the bd CLI with `--actor governor`; never SQL, never
+`.beads/hooks/`.
 
 ## Design conversation
 
@@ -142,7 +162,6 @@ isolation:
 ```bash
 bd update <id> --description "<what and why, one paragraph>" --actor governor
 bd update <id> --design "<approach chosen, constraints, what was ruled out and why>" --actor governor
-bd update <id> --persistent --actor governor
 ```
 
 ### Hand off to specify

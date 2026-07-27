@@ -625,6 +625,22 @@ void main() {
         );
         expect(installed.existsSync(), isTrue);
         final body = installed.readAsStringSync();
+        expect(body, isNot(contains('--ephemeral')));
+        expect(body, isNot(contains('--persistent')));
+        expect(body, contains('type=link'));
+        expect(body, contains('grid.link.from=<blocked bead id>'));
+        expect(body, contains('grid.link.to=<blocker bead id>'));
+        expect(body, contains('grid.link.type=blocks'));
+        expect(body, contains('StationJoinBridge._applyCrossLinks'));
+        expect(body, contains('applyBlockGuard'));
+        expect(
+          body,
+          isNot(
+            contains('bd dep add <id> external:<project>:<capability> stores'),
+          ),
+        );
+        expect(body, contains('search --json "<new bead id>"'));
+        expect(body, contains('Never use `bd show`'));
         expect(body, startsWith('---\n'));
         expect(body, contains('space search --json'));
         expect(body, isNot(contains('{{')));
