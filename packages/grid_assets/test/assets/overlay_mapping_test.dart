@@ -89,7 +89,7 @@ void main() {
     () {
       File(p.join(source.path, '.claude', 'settings.json'))
         ..createSync(recursive: true)
-      ..writeAsStringSync('{\n  "enabled": true\n}\n');
+        ..writeAsStringSync('{\n  "enabled": true\n}\n');
       final report = const OverlayMaterializer().materializeSync(
         overlayRoots: [source.path],
         targetRoot: target.path,
