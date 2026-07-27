@@ -90,7 +90,7 @@ void main() {
     List<String>? roots,
     String? runnerInvocation,
     String? delegateRoot,
-    Future<List<String>> Function(String gridHome)? resolveRoots,
+    Future<List<StationOverlaySource>> Function(String gridHome)? resolveRoots,
   }) {
     final out = StringBuffer();
     final err = StringBuffer();
@@ -100,7 +100,15 @@ void main() {
         AssetsCommand(
           delegate: () => last = _StationDelegate(delegateRoot ?? temp.path),
           runnerInvocation: runnerInvocation,
-          roots: resolveRoots ?? (gridHome) async => roots ?? [overlay.path],
+          roots:
+              resolveRoots ??
+              (gridHome) async => [
+                for (final root in roots ?? [overlay.path])
+                  StationOverlaySource(
+                    root: root,
+                    mappings: kDefaultStationOverlayMappings,
+                  ),
+              ],
           sourceRef: (_) => 'testref',
           out: out,
           err: err,
@@ -305,7 +313,12 @@ void main() {
     final h = harness(
       resolveRoots: (gridHome) async {
         resolvedHome = gridHome;
-        return [overlay.path];
+        return [
+          StationOverlaySource(
+            root: overlay.path,
+            mappings: kDefaultStationOverlayMappings,
+          ),
+        ];
       },
     );
 
@@ -328,7 +341,12 @@ void main() {
       delegateRoot: authored,
       resolveRoots: (gridHome) async {
         resolvedHome = gridHome;
-        return [overlay.path];
+        return [
+          StationOverlaySource(
+            root: overlay.path,
+            mappings: kDefaultStationOverlayMappings,
+          ),
+        ];
       },
     );
 
@@ -366,7 +384,12 @@ void main() {
         ..addCommand(
           AssetsCommand(
             delegate: () => _RootlessDelegate(temp.path),
-            roots: (gridHome) async => [overlay.path],
+            roots: (gridHome) async => [
+              StationOverlaySource(
+                root: overlay.path,
+                mappings: kDefaultStationOverlayMappings,
+              ),
+            ],
             sourceRef: (_) => 'testref',
             out: out,
             err: err,

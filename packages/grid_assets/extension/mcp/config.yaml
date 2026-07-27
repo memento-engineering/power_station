@@ -137,7 +137,7 @@ prompts:
 # (the same community shape lenny's leonard_cli assets ship). The upstream
 # proposal defines only resources/prompts; this section is this manifest's
 # forward extension of it, reusing the prompts' arg-declaration shape. Each
-# skill dir under extension/station_overlay/.claude/skills/<id>/ holds a
+# skill dir under extension/station_overlay/claude/skills/<id>/ holds a
 # mustache-templated SKILL.md — the overlay is ROOT-RELATIVE (it mirrors the
 # target repo root), so the vended tree already carries the harness's own
 # layout. Two legs install the rendered tree (the OverlayMaterializer — it
@@ -154,7 +154,7 @@ skills:
       (topic research / bead advisory / bead directed), researches via the
       vended `search` Command, and on the human's yes files an ephemeral
       staged bead and starts the design conversation (hand-off: specify).
-    path: station_overlay/.claude/skills/discover/SKILL.md
+    path: station_overlay/claude/skills/discover/SKILL.md
     visibility: public
     audience: agent
     args:
@@ -172,7 +172,7 @@ skills:
       Operate the resident station — boot, bounce, tear down, read status, seed
       a grid home's state store, and diagnose a station that is up but driving
       nothing.
-    path: station_overlay/.claude/skills/station-operations/SKILL.md
+    path: station_overlay/claude/skills/station-operations/SKILL.md
     visibility: public
     audience: operator
     args:
@@ -184,7 +184,7 @@ skills:
       Shape work beads so a resident station can drive them — the required
       validation_plan metadata, driveable issue types, dependency wiring, and
       defer-until-blessed staging.
-    path: station_overlay/.claude/skills/intake-refinement/SKILL.md
+    path: station_overlay/claude/skills/intake-refinement/SKILL.md
     visibility: public
     audience: operator
   - id: harvest-review
@@ -192,7 +192,7 @@ skills:
       Review and land what a station built — verify each terminal session's
       branch delta, committee grades, and validation plan in the real worktree,
       then push and open a PR with receipts.
-    path: station_overlay/.claude/skills/harvest-review/SKILL.md
+    path: station_overlay/claude/skills/harvest-review/SKILL.md
     visibility: public
     audience: operator
     args:
@@ -204,7 +204,7 @@ skills:
       Diagnose and clear gated sessions — read the worktree critique artifacts,
       separate systemic failures from genuinely bad work, and re-arm with a
       rework round.
-    path: station_overlay/.claude/skills/gate-medicine/SKILL.md
+    path: station_overlay/claude/skills/gate-medicine/SKILL.md
     visibility: public
     audience: operator
     args:
@@ -218,10 +218,13 @@ skills:
       breaking, breaking-CHANGELOG framing, tag-drift reconciliation) and CALLS
       the vended `dart release` Command for the deterministic work (version
       math, scrub gate, dry-run, pub.dev poll, dependency order).
-    path: station_overlay/.claude/skills/release/SKILL.md
+    path: station_overlay/claude/skills/release/SKILL.md
     visibility: public
     audience: operator
     args:
       - name: runner
         description: The composing station's executable name — the verb the skill's `dart release` calls ride.
         required: true
+station_overlay:
+  mappings:
+    claude: .claude

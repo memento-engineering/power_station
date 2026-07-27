@@ -792,11 +792,12 @@ class ReleaseService {
       for (final line in const LineSplitter().convert(text))
         if (line.trimLeft().startsWith('* ')) line.trim(),
     ];
+    final overlayWarnings = _hiddenOverlaySourceWarnings(packageDir);
     return DryRunResult(
       package: package,
       exitCode: result.exitCode,
-      warningCount: warningCount,
-      warnings: warnings,
+      warningCount: warningCount + overlayWarnings.length,
+      warnings: [...warnings, ...overlayWarnings],
     );
   }
 
@@ -833,4 +834,19 @@ class ReleaseService {
       isPublished: latest == version,
     );
   }
+}
+
+List<String> _hiddenOverlaySourceWarnings(String packageDir) {
+  final root = Directory(p.join(packageDir, 'extension', 'station_overlay'));
+  if (!root.existsSync()) return const [];
+  final paths = [
+    for (final entity in root.listSync(recursive: true).whereType<Directory>())
+      if (p.basename(entity.path).startsWith('.'))
+        p.relative(entity.path, from: root.path),
+  ]..sort();
+  return [
+    for (final path in paths)
+      '* WARNING: hidden overlay source directory "$path" will be omitted by '
+          'dart pub publish',
+  ];
 }

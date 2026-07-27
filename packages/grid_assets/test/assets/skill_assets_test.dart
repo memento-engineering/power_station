@@ -197,7 +197,7 @@ void main() {
       );
       expect(
         discover['path'],
-        'station_overlay/.claude/skills/discover/SKILL.md',
+        'station_overlay/claude/skills/discover/SKILL.md',
       );
       expect(
         discover['visibility'],
@@ -249,7 +249,7 @@ void main() {
         );
         expect(
           declared['path'],
-          'station_overlay/.claude/skills/${entry.key}/SKILL.md',
+          'station_overlay/claude/skills/${entry.key}/SKILL.md',
         );
         expect(declared['audience'], 'operator');
         final args =
@@ -301,7 +301,7 @@ void main() {
         for (final id in kVendedSkills) {
           expect(
             File(
-              p.join(overlay, '.claude', 'skills', id, 'SKILL.md'),
+              p.join(overlay, 'claude', 'skills', id, 'SKILL.md'),
             ).existsSync(),
             isTrue,
             reason: '$id is vended root-relative',
@@ -313,9 +313,7 @@ void main() {
     test('it carries the COMPLETE operator asset set — the governor agent-def '
         'and the harness settings, not just the skills. These were hand-copied '
         'into the station and drifted; vending them is what ends that', () {
-      final governor = File(
-        p.join(overlay, '.claude', 'agents', 'governor.md'),
-      );
+      final governor = File(p.join(overlay, 'claude', 'agents', 'governor.md'));
       expect(governor.existsSync(), isTrue);
       expect(
         governor.readAsStringSync(),
@@ -324,7 +322,7 @@ void main() {
       );
       expect(governor.readAsStringSync(), contains('name: governor'));
 
-      final settings = File(p.join(overlay, '.claude', 'settings.json'));
+      final settings = File(p.join(overlay, 'claude', 'settings.json'));
       expect(settings.existsSync(), isTrue);
       expect(
         jsonDecode(settings.readAsStringSync()),

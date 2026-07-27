@@ -34,6 +34,7 @@ import 'package:grid_sdk/grid_sdk.dart' as sdk;
 import 'package:path/path.dart' as p;
 
 import 'mounted_tree.dart';
+import 'overlay_manifest.dart';
 import 'overlay_materializer.dart';
 
 /// The Packaged-AI-Asset manifest's target-package name: a package vends assets
@@ -69,7 +70,7 @@ String? mountedGridHomeOf(
 /// THROWS a [StateError] naming the probed path when the grid home has no
 /// package config (LOUD: an operator who has not run `dart pub get` is told,
 /// never handed a silent empty install).
-Future<List<String>> resolveStationOverlayRoots({
+Future<List<StationOverlaySource>> resolveStationOverlaySources({
   required String gridHome,
 }) async {
   final packageConfig = File(
@@ -88,15 +89,36 @@ Future<List<String>> resolveStationOverlayRoots({
   );
   final ordered = [...extensions]
     ..sort((a, b) => a.package.compareTo(b.package));
-  final roots = <String>[];
+  final sources = <StationOverlaySource>[];
   for (final extension in ordered) {
+    final extensionRoot = extension.rootUri.toFilePath();
     final overlay = Directory(
-      p.join(extension.rootUri.toFilePath(), 'extension', 'station_overlay'),
+      p.join(extensionRoot, 'extension', 'station_overlay'),
     );
-    if (overlay.existsSync()) roots.add(overlay.path);
+    if (overlay.existsSync()) {
+      sources.add(
+        loadStationOverlaySourceFromPaths(
+          overlayRoot: overlay.path,
+          manifestPath: p.join(
+            extensionRoot,
+            'extension',
+            'mcp',
+            'config.yaml',
+          ),
+        ),
+      );
+    }
   }
-  return roots;
+  return sources;
 }
+
+/// Legacy root-only view of [resolveStationOverlaySources].
+Future<List<String>> resolveStationOverlayRoots({
+  required String gridHome,
+}) async => [
+  for (final source in await resolveStationOverlaySources(gridHome: gridHome))
+    source.root,
+];
 
 /// One install's outcome — the [OverlayMaterializeReport] (the sealed per-file
 /// outcomes, consumed with an exhaustive `switch` by whoever needs the cases)
@@ -107,7 +129,8 @@ class OverlayInstallReport {
   /// Creates the report.
   const OverlayInstallReport({
     required this.targetRoot,
-    required this.overlayRoots,
+    this.overlaySources = const [],
+    this.overlayRoots = const [],
     required this.materialized,
     required this.writtenContents,
   });
@@ -117,6 +140,9 @@ class OverlayInstallReport {
   final String targetRoot;
 
   /// The overlay roots expanded, in precedence order.
+  final List<StationOverlaySource> overlaySources;
+
+  /// Legacy roots retained for source compatibility.
   final List<String> overlayRoots;
 
   /// What [OverlayMaterializer] did (or, in `--check`, would do), file by file.
@@ -144,6 +170,9 @@ class OverlayInstallReport {
 
   /// The files REFUSED for unbound holes — installed nowhere.
   List<OverlayFileRefused> get refused => materialized.refused;
+
+  /// Publish-hostile hidden source directory warnings.
+  List<OverlaySourceWarning> get warnings => materialized.warnings;
 
   /// The skill ids present under `.claude/skills/` after this run.
   List<String> get installedSkillIds =>
@@ -188,13 +217,15 @@ class OverlayInstallService {
   /// writes nothing outside [targetRoot], and commits NOTHING: the operator
   /// reviews the diff and commits.
   Future<OverlayInstallReport> install({
-    required List<String> overlayRoots,
+    List<StationOverlaySource>? overlaySources,
+    List<String>? overlayRoots,
     required String targetRoot,
     required String sourceRef,
     Map<String, String> args = const {},
     bool check = false,
   }) async {
     final materialized = await _materializer.materialize(
+      overlaySources: overlaySources,
       overlayRoots: overlayRoots,
       targetRoot: targetRoot,
       sourceRef: sourceRef,
@@ -203,7 +234,16 @@ class OverlayInstallService {
     );
     return OverlayInstallReport(
       targetRoot: targetRoot,
-      overlayRoots: overlayRoots,
+      overlaySources:
+          overlaySources ??
+          [
+            for (final root in overlayRoots ?? const <String>[])
+              StationOverlaySource(
+                root: root,
+                mappings: kDefaultStationOverlayMappings,
+              ),
+          ],
+      overlayRoots: overlayRoots ?? const [],
       materialized: materialized,
       writtenContents: {
         for (final file in materialized.written)
@@ -225,6 +265,9 @@ class OverlayInstallService {
 /// way (LOUD).
 String renderInstallReport(OverlayInstallReport report, {bool diff = true}) {
   final b = StringBuffer();
+  for (final warning in report.warnings) {
+    b.writeln(warning.message);
+  }
   for (final file in report.materialized.files) {
     final path = p.join(report.targetRoot, file.relativePath);
     switch (file) {
@@ -253,7 +296,7 @@ String renderInstallReport(OverlayInstallReport report, {bool diff = true}) {
       '${report.updated.length} ${report.dryRun ? 'drifted' : 'updated'}, '
       '${report.unchanged.length} current, ${report.blocked.length} blocked, '
       '${report.refused.length} refused — ${report.targetRoot} '
-      '<- ${report.overlayRoots.length} overlay root(s)',
+      '<- ${report.overlaySources.isNotEmpty ? report.overlaySources.length : report.overlayRoots.length} overlay root(s)',
     )
     ..writeln(
       report.dryRun
