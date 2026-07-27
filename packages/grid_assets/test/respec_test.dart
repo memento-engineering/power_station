@@ -11,6 +11,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:beads_dart/beads_dart.dart' show Bead;
 import 'package:grid_assets/grid_assets.dart';
 import 'package:grid_engine/grid_engine.dart';
 import 'package:path/path.dart' as p;
@@ -86,10 +87,12 @@ Future<RouteVerdict> _route(
   Map<String, Map<String, String>> resultExtras = const {},
   SpecRouteCapability capability = const SpecRouteCapability(),
   int round = 0,
+  Bead? ambientBead,
 }) {
   const parent = 'tg-1/spec_review';
   final context = FakeTreeContext(
     values: {
+      if (ambientBead != null) Bead: ambientBead,
       SiblingView: SiblingView(
         cursor: {
           for (final id in grades.keys)
@@ -351,27 +354,50 @@ void main() {
       },
     );
 
-    test('a stale structural payload does not join round 2', () async {
+    test('a stale structural payload joins round 2 through the INLINE '
+        're-check (tg-q3q0 containment): the deterministic gating lane is '
+        're-run in-process over the ambient bead instead of starving the '
+        'route', () async {
       final grades = _allA();
       _plantVerdicts(ws.path, grades, round: 2);
 
-      await expectLater(
-        _route(
-          grades,
-          workspaceDir: ws.path,
-          round: 2,
-          capability: _impatientRoute,
-          resultExtras: const {
-            _gating: {'round': '1'},
-          },
+      final out = await _route(
+        grades,
+        workspaceDir: ws.path,
+        round: 2,
+        capability: _impatientRoute,
+        resultExtras: const {
+          _gating: {'round': '1'},
+        },
+        ambientBead: bead('tg-1').copyWith(
+          description: 'A whole spec rides the ambient bead.',
+          acceptanceCriteria: kSpecExemplarAcceptance,
+          design: kSpecExemplarDesign,
         ),
-        throwsA(
-          isA<RouteFailure>().having(
-            (error) => error.reason,
-            'reason',
-            allOf(contains(_gating), contains('round 2')),
-          ),
-        ),
+      );
+      expect(out, isA<Advance>());
+      expect((out as Advance).payload!['verdict'], 'advance');
+    });
+
+    test('a stale structural payload with NO ambient bead parks VISIBLY '
+        '(tg-q3q0 containment 2): an Escalate — a type=gate park — replaces '
+        'the gate-less RouteFailure latch', () async {
+      final grades = _allA();
+      _plantVerdicts(ws.path, grades, round: 2);
+
+      final out = await _route(
+        grades,
+        workspaceDir: ws.path,
+        round: 2,
+        capability: _impatientRoute,
+        resultExtras: const {
+          _gating: {'round': '1'},
+        },
+      );
+      expect(out, isA<Escalate>());
+      expect(
+        (out as Escalate).reason,
+        allOf(contains(_gating), contains('round 2'), contains('tg-q3q0')),
       );
     });
 
@@ -667,8 +693,8 @@ void main() {
     test('THE JOIN RULE (bead `pow-96s`, hardened by the 2026-07-24 bridge '
         'fix) — a lane joins the LIVE route only through a CURRENT-ROUND '
         'artifact, and a lane WITHOUT one is never silently dropped: the '
-        'route WAITS for it and then refuses LOUDLY, citing no grade for the '
-        'un-joined lanes and leaving the round counter unspent', () async {
+        'route WAITS for it and then parks VISIBLY (an Escalate gate — '
+        'tg-q3q0), citing no grade for the un-joined lanes', () async {
       // The counter is SPENT: a full fixable join would be the cap flare.
       writeRespecLedger(
         ws.path,
@@ -719,8 +745,8 @@ void main() {
             'acceptance-testability': {'round': '1'},
           },
         ),
-        throwsA(
-          isA<RouteFailure>().having(
+        completion(
+          isA<Escalate>().having(
             (e) => e.reason,
             'reason',
             allOf(
@@ -734,8 +760,10 @@ void main() {
           ),
         ),
       );
-      // The refusal never spends the counter: the round is still open for the
-      // re-keyed lanes to finish (supervision re-runs this route bounded).
+      // The park never spends the counter: the wave may still land while
+      // parked, and a gate-close re-arms this route over the completed join
+      // (tg-q3q0: the Escalate replaces the gate-less RouteFailure latch that
+      // starved sessions silently once the engine's restart budget exhausted).
       expect(readRespecLedger(ws.path)?.round, kMaxRespecRounds);
     });
 

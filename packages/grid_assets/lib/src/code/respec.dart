@@ -61,9 +61,11 @@ import 'dart:io';
 
 import 'package:genesis_tree/genesis_tree.dart';
 import 'package:grid_engine/grid_engine.dart';
+import 'package:beads_dart/beads_dart.dart' show Bead;
 
 import 'committee.dart';
 import 'respec_ledger.dart';
+import 'specify.dart' show specStructuralFindings;
 import 'route_failure.dart';
 
 export 'respec_ledger.dart';
@@ -435,6 +437,10 @@ class SpecRouteCapability extends RouteCapability {
     final dir = workspace?.workspaceDir;
     final live = dir != null && dir.isNotEmpty && Directory(dir).existsSync();
     final circuitRound = verdictRound(args);
+    // tg-q3q0 containment: captured at ENTRY (the same discipline as every
+    // ambient read above) so the deadline fallback below can re-run the
+    // deterministic gating check inline without a post-await context read.
+    final entryBead = context.getInheritedSeedOfExactType<Bead>();
 
     var siblings =
         context.getInheritedSeedOfExactType<SiblingView>() ??
@@ -556,12 +562,42 @@ class SpecRouteCapability extends RouteCapability {
           break;
         }
         if (!DateTime.now().isBefore(deadline)) {
-          throw RouteFailure(
+          // tg-q3q0: the derived respec wave re-runs lanes WITHOUT the
+          // incremented `grid.round` param, so a re-run lane's (real, graded)
+          // result stamps the OLD round and this wait can never be satisfied.
+          // Two containments, in order:
+          //  1. The GATING lane is deterministic (specStructuralFindings over
+          //     the ambient bead — no LLM, no artifact): when it is the stale
+          //     one, re-run the same pure check INLINE and join on that.
+          //  2. Anything still missing parks VISIBLY: an [Escalate] mints a
+          //     type=gate bead. The [RouteFailure] this replaces latched the
+          //     session GATE-LESS once the engine's restart budget exhausted
+          //     — invisible to the operator surface (twelve rounds died that
+          //     way on 2026-07-27 before the pattern was even seen).
+          if (waiting.contains(gating) && entryBead != null) {
+            final findings = specStructuralFindings(entryBead);
+            lanes.add((
+              id: gating,
+              grade: findings.isEmpty ? 'A' : 'F',
+              rationale: findings.isEmpty
+                  ? 'inline structural re-check after a stale-round lane '
+                        'result (tg-q3q0 containment)'
+                  : findings.join('; '),
+            ));
+            waiting.remove(gating);
+          }
+          if (waiting.isEmpty) break;
+          // The ledger SURVIVES this park (unlike the artifactless flare):
+          // the wave may still land its verdicts while parked — a gate-close
+          // re-arms this route over the completed join and the round's
+          // guidance must still be there to spend.
+          return Escalate(
             'spec-route: waited ${laneWaitBudget.inSeconds}s but '
             '${waiting.join(', ')} still have no current-round (round '
             '$circuitRound) verdict artifact and no this-round result — a '
-            'mid-wave join (the derived respec wave has not re-run them yet) '
-            'or a stalled lane. Refusing to decide over a partial committee.',
+            'mid-wave join whose derived wave cannot satisfy the round fence '
+            '(tg-q3q0) or a stalled lane. Parking for a human; deciding over '
+            'a partial committee is withheld.',
           );
         }
         await Future<void>.delayed(lanePoll);

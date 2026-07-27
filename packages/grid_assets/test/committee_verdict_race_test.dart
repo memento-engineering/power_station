@@ -145,15 +145,16 @@ void main() {
 
     test('a PARTIAL current-round join is never decided: the route WAITS for '
         'the re-keyed lanes instead of advancing over the one lane that '
-        'happened to finish first — and the ledger is NOT consumed', () async {
+        'happened to finish first — the park is a VISIBLE Escalate gate '
+        '(tg-q3q0) and the ledger is NOT consumed', () async {
       plantMidWaveDisk();
       await expectLater(
         const SpecRouteCapability(
           lanePoll: Duration(milliseconds: 10),
           laneWaitBudget: Duration(milliseconds: 200),
         ).route(_context(ws.path, _waveOneResults()), _routeArgs(round: 1)),
-        throwsA(
-          isA<RouteFailure>().having(
+        completion(
+          isA<Escalate>().having(
             (e) => e.reason,
             'reason',
             allOf(
