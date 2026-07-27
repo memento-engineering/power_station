@@ -9,7 +9,7 @@
 //   - its research CALLS the vended `search --json` Command — deterministic,
 //     roster-driven — and never re-derives cross-store search by inference
 //     (the ad-hoc `bd` query forms are FENCED out of the skill body);
-//   - on the human's yes it files a bead (ephemeral + staged, `bd create`)
+//   - on the human's yes it files a bead (durable + staged, `bd create`)
 //     and can kick off `specify`.
 //
 // Offline only — reads the bundled `extension/` files; no live anything.
@@ -139,7 +139,6 @@ void main() {
       // The fence: the skill must not instruct (or even name) the ad-hoc
       // sweep forms — coverage rides the deterministic Command exclusively.
       expect(rendered, isNot(contains('bd search')));
-      expect(rendered, isNot(contains('bd list')));
       expect(rendered, isNot(contains('bd export')));
       expect(rendered, isNot(contains('bd ready')));
       // The one sanctioned anchored read is the one-shot, human-present
@@ -148,20 +147,54 @@ void main() {
       expect(rendered.toLowerCase(), contains('never loop'));
     });
 
-    test('on the human\'s yes it files an EPHEMERAL, STAGED bead through the '
-        'bd CLI with the governor actor', () {
-      expect(rendered, contains('bd create'));
-      expect(rendered, contains('--ephemeral'));
-      expect(rendered, contains('--defer'));
-      expect(rendered, contains('--actor governor'));
-      // Filing scope: target substation store first, grid-home fallback.
+    test('on the human\'s yes it files a DURABLE, STAGED bead, verifies it '
+        'through vended search, and documents A55 cross-store links', () {
+      final filingStart = rendered.indexOf('## Filing');
+      final filingEnd = rendered.indexOf('## Design conversation');
+      expect(filingStart, greaterThanOrEqualTo(0));
+      expect(filingEnd, greaterThan(filingStart));
+      final filing = rendered.substring(filingStart, filingEnd);
+
+      expect(filing, contains('bd create'));
+      expect(filing, contains('--defer'));
+      expect(filing, contains('--actor governor'));
+      expect(rendered, isNot(contains('--ephemeral')));
+      expect(rendered, isNot(contains('--persistent')));
+      expect(rendered, contains('files a staged one'));
+      expect(filing, contains('**Staged, never ready:**'));
+      expect(filing, contains('search --json "<new bead id>"'));
+      expect(filing, contains('Never use `bd show`'));
+      expect(filing, contains('stranded wisp'));
+      expect(filing, contains('cross-store dependencies DO exist'));
+      expect(filing, contains('type=link'));
+      expect(filing, contains('grid.link.from=<blocked bead id>'));
+      expect(filing, contains('grid.link.to=<blocker bead id>'));
+      expect(filing, contains('grid.link.type=blocks'));
+      expect(filing, contains('crossLinkTypeRefusal'));
+      expect(filing, contains('StationJoinBridge._applyCrossLinks'));
+      expect(filing, contains('applyBlockGuard'));
+      expect(filing, contains('A44 reversed'));
+      expect(filing, contains('A55'));
+      expect(filing, contains('bd doctor --fix'));
+      expect(filing, contains('never author one as a dependency row'));
       expect(
-        rendered,
+        filing,
+        isNot(
+          contains('bd dep add <id> external:<project>:<capability> stores'),
+        ),
+      );
+      expect(filing, contains('A malformed link fails closed'));
+      expect(filing, contains('Default to homing coupled beads together'));
+      expect(filing, contains('split them across stores'));
+      expect(filing, contains('Nico on 2026-07-26'));
+      expect(filing, contains('--description'));
+      expect(filing, contains('--design'));
+      expect(filing, contains('there is no persistence flag to change'));
+      expect(
+        filing,
         contains('the substation whose repo the work would change'),
       );
-      expect(rendered, contains("the grid home's own store"));
-      // Promote-later: the design conversation ends in the persistent flip.
-      expect(rendered, contains('--persistent'));
+      expect(filing, contains("the grid home's own store"));
     });
 
     test(
