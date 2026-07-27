@@ -499,10 +499,12 @@ class ReleaseService {
   final HttpGetter _http;
 
   /// The scrub pattern (genesis `publishing.md`): internal refs no published
-  /// archive may carry — an ADR/register number, a bare `A<n>` amendment id,
-  /// `register`, or `spike`. Case-insensitive (the `-i` grep flag).
+  /// archive may carry — an ADR number, a bare `A<n>` amendment id,
+  /// decision-register vocabulary, or `spike`. The generic verb `register`
+  /// is deliberately not an offence. Case-insensitive (the `-i` grep flag).
   static final RegExp _internalRef = RegExp(
-    r'ADR-?[0-9]|register|\bA[0-9]{1,2}\b|spike',
+    r'ADR-?[0-9]|\b(?:the\s+register|decision(?:-|\s+)register)\b|'
+    r'\bA[0-9]{1,2}\b|spike',
     caseSensitive: false,
   );
 

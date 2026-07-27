@@ -294,58 +294,71 @@ void main() {
   group('scrub — the internal-ref gate (line-level A2UI exemption)', () {
     const service = ReleaseService();
 
+    test('scrubContent ignores generic register APIs and prose', () {
+      const content =
+          'registerServiceExtension(name, callback);\n'
+          'developer.registerExtension(method, handler);\n'
+          '_registerExtension();\n'
+          'bool _persistentRegistered = true;\n'
+          'extensions are registered through ExtensionContext\n';
+      expect(service.scrubContent(content), isEmpty);
+    });
+
+    test('scrubContent flags decision-register phrases and existing terms', () {
+      const content =
+          'clean line\n'
+          'see ADR-5 for the design\n'
+          'the register says so\n'
+          'Decision Register entry\n'
+          'decision-register reference\n'
+          'this predates A42\n'
+          'a spike we ran\n'
+          'the A2UI wire (A17 here is exempt because the line names A2UI)\n';
+      final hits = service.scrubContent(content);
+      expect(hits.map((hit) => hit.match).toList(), [
+        'ADR-5',
+        'the register',
+        'Decision Register',
+        'decision-register',
+        'A42',
+        'spike',
+      ]);
+      expect(hits.map((hit) => hit.line).toList(), [2, 3, 4, 5, 6, 7]);
+      expect(hits.any((hit) => hit.text.contains('A2UI')), isFalse);
+    });
+
     test(
-      'scrubContent flags ADR/register/bare-A<n>/spike; exempts an A2UI line',
-      () {
-        const content =
-            'clean line\n'
-            'see ADR-5 for the design\n'
-            'the register says so\n'
-            'this predates A42\n'
-            'a spike we ran\n'
-            'the A2UI wire (A17 here is exempt because the line names A2UI)\n';
-        final hits = service.scrubContent(content);
-        expect(hits.map((h) => h.match).toList(), [
-          'ADR-5',
-          'register',
-          'A42',
-          'spike',
-        ]);
-        expect(hits.map((h) => h.line).toList(), [2, 3, 4, 5]);
-        expect(
-          hits.any((h) => h.text.contains('A2UI')),
-          isFalse,
-          reason: 'the A2UI line is exempt WHOLE, even carrying A17',
+      'scrubDir accepts register APIs and rejects a decision-register leak',
+      () async {
+        final clean = await Directory.systemTemp.createTemp('release-clean-');
+        addTearDown(() => clean.delete(recursive: true));
+        File(
+          '${clean.path}/README.md',
+        ).writeAsStringSync('# Extensions\nExtensions are registered.\n');
+        File(
+          '${clean.path}/CHANGELOG.md',
+        ).writeAsStringSync('## 0.1.0\nRegister VM service support.\n');
+        Directory('${clean.path}/lib').createSync();
+        File('${clean.path}/lib/binding.dart').writeAsStringSync(
+          'void _registerExtension() => developer.registerExtension();\n',
         );
+        final cleanResult = service.scrubDir(clean.path);
+        expect(cleanResult.clean, isTrue);
+        expect(cleanResult.filesScanned, 3);
+        expect(cleanResult.hits, isEmpty);
+
+        final leaking = await Directory.systemTemp.createTemp('release-leak-');
+        addTearDown(() => leaking.delete(recursive: true));
+        File(
+          '${leaking.path}/README.md',
+        ).writeAsStringSync('# Package\nSee the decision register.\n');
+        final leakingResult = service.scrubDir(leaking.path);
+        expect(leakingResult.clean, isFalse);
+        expect(leakingResult.filesScanned, 1);
+        expect(leakingResult.hits, hasLength(1));
+        expect(leakingResult.hits.single.match, 'decision register');
       },
     );
-
-    test('scrubDir scans README/CHANGELOG/lib; a clean pkg is clean', () async {
-      final temp = await Directory.systemTemp.createTemp('release-scrub-');
-      addTearDown(() => temp.delete(recursive: true));
-      File('${temp.path}/README.md').writeAsStringSync('# ok\nno refs here\n');
-      File(
-        '${temp.path}/CHANGELOG.md',
-      ).writeAsStringSync('## 0.1.0\nsee ADR-1\n');
-      Directory('${temp.path}/lib').createSync();
-      File(
-        '${temp.path}/lib/a.dart',
-      ).writeAsStringSync('/// a spike note\nclass A {}\n');
-      final result = service.scrubDir(temp.path);
-      expect(result.clean, isFalse);
-      expect(result.filesScanned, 3);
-      expect(result.hits.map((h) => h.file).toSet(), {
-        'CHANGELOG.md',
-        'lib/a.dart',
-      });
-
-      final clean = await Directory.systemTemp.createTemp('release-clean-');
-      addTearDown(() => clean.delete(recursive: true));
-      File(
-        '${clean.path}/README.md',
-      ).writeAsStringSync('# genesis_tree\nA keyed-reconcile engine.\n');
-      expect(service.scrubDir(clean.path).clean, isTrue);
-    });
   });
 
   group('publishOrder — the dependency-first topological sort', () {
