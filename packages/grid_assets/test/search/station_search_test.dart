@@ -251,6 +251,47 @@ void main() {
       expect(hit.snippet, 'Flux everywhere');
     });
 
+    test('multi-word queries OR case-insensitive substring terms across fields '
+        'without requiring the literal phrase', () async {
+      final source = _FakeBeadSource({
+        '/roots/alpha': const [
+          Bead(
+            id: 'al-6',
+            title: 'Telemetry pipeline',
+            description: 'observability is also discussed here',
+          ),
+          Bead(id: 'al-4', title: 'Instrument the service with OTel'),
+          Bead(
+            id: 'al-5',
+            title: 'Exporter work',
+            notes:
+                'telemetry marker padding padding padding padding padding '
+                'padding padding padding padding padding padding padding '
+                'padding padding padding padding padding padding padding '
+                'padding padding padding padding padding observability marker',
+          ),
+          Bead(id: 'al-7', title: 'Unrelated backlog work'),
+          Bead(
+            id: 'al-8',
+            title: 'Observability session',
+            issueType: IssueType.session,
+          ),
+        ],
+        '/roots/beta': const [],
+      });
+
+      final report = await service(
+        source,
+      ).search(query: '  OBSERVABILITY   telemetry otel  ', roster: roster);
+
+      expect(report.hits.map((hit) => hit.beadId), ['al-4', 'al-5', 'al-6']);
+      expect(report.hits.map((hit) => hit.field), ['title', 'notes', 'title']);
+      expect(report.hits[1].snippet, contains('telemetry marker'));
+      expect(report.hits[1].snippet, isNot(contains('observability marker')));
+      expect(report.hits[2].snippet, 'Telemetry pipeline');
+      expect((report.stores.first as StoreSearched).beadsSearched, 4);
+    });
+
     test('closed beads are searchable (decisions live closed) — status rides '
         'the hit so consumers filter', () async {
       final source = _FakeBeadSource({
@@ -259,7 +300,7 @@ void main() {
       });
       final report = await service(
         source,
-      ).search(query: 'wiring standard', roster: roster);
+      ).search(query: 'standard', roster: roster);
       expect(report.hits.single.status, 'closed');
     });
 

@@ -282,8 +282,9 @@ class StationSearchService {
   final SubstationBeadSource _source;
   final sdk.DirectoryProbe _dirExists;
 
-  /// Searches every roster seat's work store for [query] (case-insensitive
-  /// substring), returning one [StoreSearchOutcome] per seat in roster order.
+  /// Searches every roster seat's work store for [query]. The query is split
+  /// on whitespace and each term is matched as a case-insensitive substring;
+  /// a bead matches when ANY term occurs in a searchable field.
   ///
   /// Only CORE-typed beads are matched (task/bug/feature/chore/epic/spike/
   /// story/milestone — the backlog — plus `decision`); the_grid's custom
@@ -332,22 +333,27 @@ class StationSearchService {
     List<Bead> beads,
     String query,
   ) {
-    final needle = query.toLowerCase();
+    final needles = query.trim().toLowerCase().split(RegExp(r'\s+'));
     final searchable = [
       for (final b in beads)
         if (b.issueType.isCore) b,
     ]..sort((a, b) => a.id.compareTo(b.id));
     final hits = <SearchHit>[];
     for (final bead in searchable) {
-      final hit = _matchBead(scope, bead, needle);
+      final hit = _matchBead(scope, bead, needles);
       if (hit != null) hits.add(hit);
     }
     return StoreSearched(scope, hits: hits, beadsSearched: searchable.length);
   }
 
-  /// Matches [needle] against [bead]'s searchable fields in precedence order;
-  /// the FIRST matching field names the hit and yields the snippet.
-  SearchHit? _matchBead(sdk.SubstationScope scope, Bead bead, String needle) {
+  /// Matches any of [needles] against [bead]'s searchable fields in
+  /// precedence order. The FIRST matching field names the hit; within that
+  /// field the earliest matching term yields the snippet.
+  SearchHit? _matchBead(
+    sdk.SubstationScope scope,
+    Bead bead,
+    List<String> needles,
+  ) {
     final fields = <(String, String)>[
       ('id', bead.id),
       ('title', bead.title),
@@ -360,8 +366,17 @@ class StationSearchService {
     ];
     for (final (name, value) in fields) {
       if (value.isEmpty) continue;
-      final at = value.toLowerCase().indexOf(needle);
-      if (at < 0) continue;
+      final lowerValue = value.toLowerCase();
+      var matchAt = -1;
+      var matchLength = 0;
+      for (final needle in needles) {
+        final at = lowerValue.indexOf(needle);
+        if (at >= 0 && (matchAt < 0 || at < matchAt)) {
+          matchAt = at;
+          matchLength = needle.length;
+        }
+      }
+      if (matchAt < 0) continue;
       return SearchHit(
         beadId: bead.id,
         store: scope.name,
@@ -369,7 +384,7 @@ class StationSearchService {
         issueType: bead.issueType.wire,
         title: bead.title,
         field: name,
-        snippet: _snippet(value, at, needle.length),
+        snippet: _snippet(value, matchAt, matchLength),
       );
     }
     return null;
