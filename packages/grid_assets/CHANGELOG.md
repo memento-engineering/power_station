@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.3.0
+
+- **Breaking:** overlay assets now ship from VISIBLE source directories
+  (`extension/station_overlay/claude/`, `agents/`, `github/`, …) mapped to
+  dot-targets (`.claude/`, `.agents/`, `.github/`, …) at install time —
+  `dart pub publish` strips hidden directories, so 0.1.0/0.2.0 tarballs shipped
+  HOLLOW (no operator files at all). Default mappings cover
+  claude/agents/github/copilot/codex; the overlay manifest can declare its own.
+  Migration for `OverlayInstallService.install` overriders: the
+  `overlayRoots: List<String>` required parameter is now optional and superseded
+  by `overlaySources: List<StationOverlaySource>`; root providers return
+  `List<StationOverlaySource>` instead of `List<String>`.
+
 ## 0.2.0
 
 - **Breaking:** `SearchCommand` and `AssetsCommand` now OWN the `--grid-home`
