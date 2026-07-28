@@ -1,3 +1,7 @@
+## 0.3.1
+
+- `CodeCircuitResolver` accepts an optional pre-classification `overrideFor` policy: a non-null override roots that circuit without cursor classification; the null path is byte-for-byte unchanged. Enables subclass stations to route selected beads (e.g. burn orders) to non-code circuits.
+
 # Changelog
 
 ## 0.3.0
