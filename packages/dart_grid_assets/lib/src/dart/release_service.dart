@@ -498,13 +498,18 @@ class ReleaseService {
   final ProcessRunner _run;
   final HttpGetter _http;
 
-  /// The scrub pattern (genesis `publishing.md`): internal refs no published
-  /// archive may carry — an ADR number, a bare `A<n>` amendment id,
-  /// decision-register vocabulary, or `spike`. The generic verb `register`
-  /// is deliberately not an offence. Case-insensitive (the `-i` grep flag).
+  /// Internal vocabulary working documents may not carry: explicit
+  /// decision-register prose or `spike`. Case-insensitive, matching the
+  /// genesis `publishing.md` scrub gate.
   static final RegExp _internalRef = RegExp(
-    r'ADR-?[0-9]|\b(?:the\s+register|decision(?:-|\s+)register)\b|'
-    r'\bA[0-9]{1,2}\b|spike',
+    r'\b(?:the\s+register|decision(?:-|\s+)register)\b|spike',
+    caseSensitive: false,
+  );
+
+  /// Working-document references that are internal outside public Dart
+  /// source and standalone Dartdoc: ADRs and amendment-shaped tokens.
+  static final RegExp _workingDocRef = RegExp(
+    r'ADR-?[0-9]|\bA[0-9]{1,2}\b',
     caseSensitive: false,
   );
 
@@ -676,7 +681,15 @@ class ReleaseService {
     for (var i = 0; i < lines.length; i++) {
       final line = lines[i];
       if (_sanctioned.hasMatch(line)) continue;
-      final match = _internalRef.firstMatch(line);
+      final isPublicDartSource = p.extension(file) == '.dart';
+      final isDartdoc = line.trimLeft().startsWith('///');
+      final internalMatch = isPublicDartSource
+          ? null
+          : _internalRef.firstMatch(line);
+      final workingDocMatch = isPublicDartSource || isDartdoc
+          ? null
+          : _workingDocRef.firstMatch(line);
+      final match = internalMatch ?? workingDocMatch;
       if (match != null) {
         out.add(
           ScrubHit(
