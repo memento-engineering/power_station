@@ -603,10 +603,16 @@ CodeCircuitShape classifyCodeShape({
 /// that first bounces onto the folded circuit. THIS BEAD GATES THAT BOUNCE.
 class CodeCircuitResolver implements SessionResolver {
   /// Creates the migration-aware `code` resolver over the [current] root shape.
-  const CodeCircuitResolver(this.current);
+  const CodeCircuitResolver(this.current, {this.overrideFor});
 
   /// The CURRENT (discovery) root circuit — `kCodeCircuit` in production.
   final Circuit current;
+
+  /// Optional bead-scoped policy consulted before migration classification.
+  ///
+  /// A non-null result is rooted directly through [CircuitResolver]. Returning
+  /// null preserves the cursor-shape migration policy in [circuitFor].
+  final Circuit? Function(Bead bead)? overrideFor;
 
   /// The root circuit for [shape] — [current] for the current shape, else the
   /// frozen shape the session was minted under.
@@ -620,6 +626,13 @@ class CodeCircuitResolver implements SessionResolver {
 
   @override
   Seed sessionFor({required Bead bead, SessionProjection? session}) {
+    final override = overrideFor?.call(bead);
+    if (override != null) {
+      return CircuitResolver(
+        (_) => override,
+      ).sessionFor(bead: bead, session: session);
+    }
+
     final circuit = circuitFor(
       classifyCodeShape(
         beadId: bead.id,
