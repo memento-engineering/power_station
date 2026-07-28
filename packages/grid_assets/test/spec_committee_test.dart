@@ -63,6 +63,7 @@ No ADR applies — verified via grep on `heartbeat`, `bus`.
   String workspaceDir = '/w/tg-1',
   String? nodePath,
   int round = 0,
+  Map<String, String>? specifyResult,
 }) {
   final path = nodePath ?? 'tg-1/spec_review/$rubric';
   // The ROUND is the respec LEDGER's own `round` (A27(3), re-sourced here by
@@ -76,6 +77,10 @@ No ADR applies — verified via grep on `heartbeat`, `bus`.
           workspaceDir: workspaceDir,
           branch: 'grid/tg-1',
         ),
+        if (specifyResult != null)
+          SiblingView: SiblingView(
+            results: {'${parentPath(path)}/$kSpecifyStep': specifyResult},
+          ),
       },
     ),
     args: stepArgs(path, params: {'rubric': rubric, 'grid.round': '$round'}),
@@ -118,6 +123,56 @@ Future<RouteVerdict> _specRoute(
 }
 
 void main() {
+  group('specForStructuralValidation', () {
+    final ambient = bead(
+      'tg-1',
+    ).copyWith(title: 'preserved title', metadata: const {'rig': 'tgdog'});
+    final carried = {
+      kCarriedSpecAcceptanceKey: kSpecExemplarAcceptance,
+      kCarriedSpecDesignKey: kSpecExemplarDesign,
+    };
+
+    test('replaces only the spec fields on the fallback', () {
+      final selected = specForStructuralValidation(
+        fallback: ambient,
+        specifyResult: carried,
+      )!;
+      expect(selected.id, ambient.id);
+      expect(selected.title, ambient.title);
+      expect(selected.metadata, ambient.metadata);
+      expect(selected.acceptanceCriteria, kSpecExemplarAcceptance);
+      expect(selected.design, kSpecExemplarDesign);
+    });
+
+    for (final entry in <String, Map<String, String>>{
+      'absent': const {},
+      'empty': {kCarriedSpecAcceptanceKey: '', kCarriedSpecDesignKey: ''},
+      'blank': {kCarriedSpecAcceptanceKey: ' ', kCarriedSpecDesignKey: '\n'},
+      'acceptance only': {kCarriedSpecAcceptanceKey: kSpecExemplarAcceptance},
+      'design only': {kCarriedSpecDesignKey: kSpecExemplarDesign},
+    }.entries) {
+      test('${entry.key} carried fields return the identical fallback', () {
+        expect(
+          identical(
+            specForStructuralValidation(
+              fallback: ambient,
+              specifyResult: entry.value,
+            ),
+            ambient,
+          ),
+          isTrue,
+        );
+      });
+    }
+
+    test('a complete pair without a fallback returns null', () {
+      expect(
+        specForStructuralValidation(fallback: null, specifyResult: carried),
+        isNull,
+      );
+    });
+  });
+
   group('kSpecReviewCircuit — the shape', () {
     test('readiness ladder → specify → hygiene → gating lane + four isolated '
         'spec critics → route; the route is the terminal', () {
@@ -391,6 +446,67 @@ void main() {
         'round': '0',
       });
     });
+
+    test(
+      'a fresh carried spec grades A over a stale incomplete ambient bead',
+      () async {
+        final ambient = bead('tg-1');
+        final c = _laneCtx(
+          rubric: kSpecGatingRubric,
+          beadOverride: ambient,
+          specifyResult: const {
+            kCarriedSpecAcceptanceKey: kSpecExemplarAcceptance,
+            kCarriedSpecDesignKey: kSpecExemplarDesign,
+          },
+        );
+        final out = await const SpecValidationCapability().run(
+          c.context,
+          c.args,
+        );
+        expect((out as Ok).payload, {
+          'grade': 'A',
+          'transport': 'structural',
+          kVerdictRoundKey: '0',
+        });
+        expect(specStructuralFindings(ambient), isNotEmpty);
+      },
+    );
+
+    for (final specifyResult in <Map<String, String>?>[null, const {}]) {
+      test(
+        'an absent/empty carried result validates the whole ambient bead',
+        () async {
+          final c = _laneCtx(
+            rubric: kSpecGatingRubric,
+            specifyResult: specifyResult,
+          );
+          final out = await const SpecValidationCapability().run(
+            c.context,
+            c.args,
+          );
+          expect((out as Ok).payload!['grade'], 'A');
+        },
+      );
+
+      test(
+        'an absent/empty carried result fails an incomplete ambient bead',
+        () async {
+          final c = _laneCtx(
+            rubric: kSpecGatingRubric,
+            beadOverride: bead('tg-1'),
+            specifyResult: specifyResult,
+          );
+          final out = await const SpecValidationCapability().run(
+            c.context,
+            c.args,
+          );
+          expect((out as Ok).payload!['grade'], 'F');
+          expect(out.payload!['transport'], 'structural');
+          expect(out.payload!['rationale'], isNotEmpty);
+          expect(out.payload![kVerdictRoundKey], '0');
+        },
+      );
+    }
 
     test('the pre-specify state (no spec at all) grades F with EVERY missing '
         'element named — specify can never be silently skipped', () async {

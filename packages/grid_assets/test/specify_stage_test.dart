@@ -11,6 +11,7 @@
 // working agreement is the ARCHITECT's (read-only tree, no commit/push/PR);
 // and the Q3′ fence holds (no bead-stamped path reaches the brief). Zero I/O —
 // no real claude/bd/git.
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:grid_assets/grid_assets.dart';
@@ -48,6 +49,37 @@ Bead _fullBead() => bead('tg-1').copyWith(
 );
 
 void main() {
+  group('CarriedSpec', () {
+    for (final entry in <String, String?>{
+      'null': null,
+      'non-JSON': 'not json',
+      'a JSON list': '[]',
+      'missing fields': '{}',
+      'blank acceptance': '{"acceptance":" ","design":"design"}',
+      'blank design': '{"acceptance":"acceptance","design":" "}',
+      'acceptance only': '{"acceptance":"acceptance"}',
+      'design only': '{"design":"design"}',
+    }.entries) {
+      test('${entry.key} returns null', () {
+        expect(CarriedSpec.tryParse(entry.value), isNull);
+      });
+    }
+
+    test('preserves exact multiline acceptance and design', () {
+      const acceptance = '- [ ] first\n- [ ] second';
+      const design = '## Implementation Plan\n\n### Step 1 — change\n';
+      final carried = CarriedSpec.tryParse(
+        jsonEncode({'acceptance': acceptance, 'design': design}),
+      );
+      expect(carried?.acceptance, acceptance);
+      expect(carried?.design, design);
+      expect(carried?.toResultFields(), {
+        kCarriedSpecAcceptanceKey: acceptance,
+        kCarriedSpecDesignKey: design,
+      });
+    });
+  });
+
   group('SpecifyCapability.spawn — the architect harness ride', () {
     test('spawns claude WRAPPED for usage capture, cwd at the activation '
         '(FT-2, ADR-0008 Decision 10)', () {
@@ -147,6 +179,15 @@ void main() {
       expect(rendered, contains("--include='*.dart'"));
       expect(rendered, contains('bd dep list tg-1'));
       expect(rendered, contains('Re-validated against the live tree'));
+      expect(rendered, contains('exactly one JSON object'));
+      expect(
+        rendered,
+        contains(
+          '{"acceptance":"<the exact value passed to --acceptance>",'
+          '"design":"<the exact value passed to --design>"}',
+        ),
+      );
+      expect(rendered, contains('no Markdown fence and no surrounding prose'));
     });
 
     test('the working agreement is the ARCHITECT\'s: read-only tree, no '
@@ -159,6 +200,8 @@ void main() {
       expect(agreement, contains('Do NOT transition'));
       expect(agreement, contains('/w/tg-1'));
       expect(agreement, contains('grid/tg-1'));
+      expect(agreement, contains('exactly one JSON object'));
+      expect(agreement, contains('no Markdown fence and no surrounding prose'));
     });
 
     test('Q3′ (Track E): a bead-stamped path never reaches the brief — the '
@@ -204,23 +247,41 @@ void main() {
       expect(await const SpecifyCapability().result(c.context, c.args), isNull);
     });
 
-    test('a captured envelope merges the usage fields', () async {
-      final dir = Directory.systemTemp.createTempSync('specify-usage-');
-      addTearDown(() => dir.deleteSync(recursive: true));
-      File('${dir.path}/${usageReportPath('tg-1/spec_review/specify')}')
-        ..createSync(recursive: true)
-        ..writeAsStringSync(
-          '{"type":"result","duration_ms":100,"num_turns":2,'
-          '"total_cost_usd":0.01,'
-          '"usage":{"input_tokens":10,"output_tokens":5}}',
+    test(
+      'a captured envelope merges usage and the exact carried spec',
+      () async {
+        final dir = Directory.systemTemp.createTempSync('specify-usage-');
+        addTearDown(() => dir.deleteSync(recursive: true));
+        const acceptance = '- [ ] exact acceptance\n- [ ] second line';
+        const design = '## Implementation Plan\n\n### Step 1 — exact design\n';
+        File('${dir.path}/${usageReportPath('tg-1/spec_review/specify')}')
+          ..createSync(recursive: true)
+          ..writeAsStringSync(
+            jsonEncode({
+              'type': 'result',
+              'duration_ms': 100,
+              'num_turns': 2,
+              'total_cost_usd': 0.01,
+              'usage': {'input_tokens': 10, 'output_tokens': 5},
+              'result': jsonEncode({
+                'acceptance': acceptance,
+                'design': design,
+              }),
+            }),
+          );
+        final c = _ctx(workspaceDir: dir.path);
+        final fields = await const SpecifyCapability().result(
+          c.context,
+          c.args,
         );
-      final c = _ctx(workspaceDir: dir.path);
-      final fields = await const SpecifyCapability().result(c.context, c.args);
-      expect(fields, isNotNull);
-      expect(fields!['tokensIn'], '10');
-      expect(fields['tokensOut'], '5');
-      expect(fields['numTurns'], '2');
-    });
+        expect(fields, isNotNull);
+        expect(fields!['tokensIn'], '10');
+        expect(fields['tokensOut'], '5');
+        expect(fields['numTurns'], '2');
+        expect(fields[kCarriedSpecAcceptanceKey], acceptance);
+        expect(fields[kCarriedSpecDesignKey], design);
+      },
+    );
   });
 
   group(

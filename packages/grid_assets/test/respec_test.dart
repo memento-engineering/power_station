@@ -88,6 +88,7 @@ Future<RouteVerdict> _route(
   SpecRouteCapability capability = const SpecRouteCapability(),
   int round = 0,
   Bead? ambientBead,
+  Map<String, String> specifyResult = const {},
 }) {
   const parent = 'tg-1/spec_review';
   final context = FakeTreeContext(
@@ -100,6 +101,7 @@ Future<RouteVerdict> _route(
           '$parent/route': const NodeCursor(state: StepState.running),
         },
         results: {
+          '$parent/$kSpecifyStep': specifyResult,
           for (final entry in grades.entries)
             '$parent/${entry.key}': {
               'grade': entry.value,
@@ -377,6 +379,31 @@ void main() {
       );
       expect(out, isA<Advance>());
       expect((out as Advance).payload!['verdict'], 'advance');
+    });
+
+    test('the deadline re-check prefers the carried spec over a stale ambient '
+        'bead', () async {
+      final grades = _allA();
+      _plantVerdicts(ws.path, grades, round: 2);
+      final ambient = bead('tg-1');
+
+      final out = await _route(
+        grades,
+        workspaceDir: ws.path,
+        round: 2,
+        capability: _impatientRoute,
+        resultExtras: const {
+          _gating: {'round': '1'},
+        },
+        ambientBead: ambient,
+        specifyResult: const {
+          kCarriedSpecAcceptanceKey: kSpecExemplarAcceptance,
+          kCarriedSpecDesignKey: kSpecExemplarDesign,
+        },
+      );
+      expect(out, isA<Advance>());
+      expect((out as Advance).payload!['verdict'], 'advance');
+      expect(specStructuralFindings(ambient), isNotEmpty);
     });
 
     test('a stale structural payload with NO ambient bead parks VISIBLY '
@@ -842,5 +869,25 @@ void main() {
       expect(g, contains('`plan-completeness` — grade D'));
       expect(g, contains('step 4 has no commit message'));
     });
+  });
+
+  test('validation paths contain no direct bead reads', () {
+    final specify = File('lib/src/code/specify.dart').readAsStringSync();
+    final validationRegion = specify.substring(
+      specify.indexOf('class SpecValidationCapability'),
+      specify.indexOf(
+        'const List<String> kSpecPlaceholderTokens',
+        specify.indexOf('class SpecValidationCapability'),
+      ),
+    );
+    final respec = File('lib/src/code/respec.dart').readAsStringSync();
+    final deadlineRegion = respec.substring(
+      respec.indexOf('if (!DateTime.now().isBefore(deadline))'),
+      respec.indexOf('await Future<void>.delayed(lanePoll)'),
+    );
+    for (final forbidden in const ['BdCliService', 'bd show', '.show(']) {
+      expect(validationRegion, isNot(contains(forbidden)));
+      expect(deadlineRegion, isNot(contains(forbidden)));
+    }
   });
 }
