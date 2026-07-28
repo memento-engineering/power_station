@@ -65,7 +65,7 @@ import 'package:beads_dart/beads_dart.dart' show Bead;
 
 import 'committee.dart';
 import 'respec_ledger.dart';
-import 'specify.dart' show specStructuralFindings;
+import 'specify.dart' show specForStructuralValidation, specStructuralFindings;
 import 'route_failure.dart';
 
 export 'respec_ledger.dart';
@@ -574,8 +574,12 @@ class SpecRouteCapability extends RouteCapability {
           //     session GATE-LESS once the engine's restart budget exhausted
           //     — invisible to the operator surface (twelve rounds died that
           //     way on 2026-07-27 before the pattern was even seen).
-          if (waiting.contains(gating) && entryBead != null) {
-            final findings = specStructuralFindings(entryBead);
+          final validationBead = specForStructuralValidation(
+            fallback: entryBead,
+            specifyResult: siblings.resultOf('$parent/$kSpecifyStep'),
+          );
+          if (waiting.contains(gating) && validationBead != null) {
+            final findings = specStructuralFindings(validationBead);
             lanes.add((
               id: gating,
               grade: findings.isEmpty ? 'A' : 'F',

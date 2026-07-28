@@ -76,6 +76,7 @@
 /// human unwinds), never a false advance to the build.
 library;
 
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:beads_dart/beads_dart.dart';
@@ -165,6 +166,67 @@ No ADR applies — verified via grep on `heartbeat`, `bus`, `frame`.
 ## Validation Plan
 - [ ] `Heartbeat` parses a well-formed peer frame → `cd packages/grid_assets && dart test test/heartbeat_test.dart` → `All tests passed!`
 - [ ] A malformed peer frame is refused LOUDLY → `cd packages/grid_assets && dart test test/heartbeat_test.dart` → `All tests passed!`''';
+
+/// Result key carrying the acceptance text authored by the specify step.
+const String kCarriedSpecAcceptanceKey = 'specAcceptance';
+
+/// Result key carrying the design text authored by the specify step.
+const String kCarriedSpecDesignKey = 'specDesign';
+
+/// The exact complete specification authored by one specify-step execution.
+class CarriedSpec {
+  /// Creates a carried specification.
+  const CarriedSpec({required this.acceptance, required this.design});
+
+  /// The exact acceptance text written to the work bead.
+  final String acceptance;
+
+  /// The exact design text written to the work bead.
+  final String design;
+
+  /// Parses the final harness result, returning null unless both fields exist.
+  static CarriedSpec? tryParse(String? text) {
+    if (text == null) return null;
+    try {
+      final decoded = jsonDecode(text);
+      if (decoded is! Map) return null;
+      final acceptance = decoded['acceptance'];
+      final design = decoded['design'];
+      if (acceptance is! String ||
+          acceptance.trim().isEmpty ||
+          design is! String ||
+          design.trim().isEmpty) {
+        return null;
+      }
+      return CarriedSpec(acceptance: acceptance, design: design);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Renders the pair into the existing string-valued step result payload.
+  Map<String, String> toResultFields() => {
+    kCarriedSpecAcceptanceKey: acceptance,
+    kCarriedSpecDesignKey: design,
+  };
+}
+
+/// Selects the complete current-wave spec, falling back to the mounted bead.
+Bead? specForStructuralValidation({
+  required Bead? fallback,
+  required Map<String, String> specifyResult,
+}) {
+  final acceptance = specifyResult[kCarriedSpecAcceptanceKey];
+  final design = specifyResult[kCarriedSpecDesignKey];
+  if (acceptance == null ||
+      acceptance.trim().isEmpty ||
+      design == null ||
+      design.trim().isEmpty) {
+    return fallback;
+  }
+  if (fallback == null) return null;
+  return fallback.copyWith(acceptanceCriteria: acceptance, design: design);
+}
 
 /// [kSpecPlaceholderTokens] as one backticked line — the brief names EVERY token
 /// the fence bans.
@@ -479,8 +541,13 @@ class SpecifyCapability extends ProcessCapability {
   ) async {
     final workspace = context.getInheritedSeedOfExactType<Workspace>();
     if (workspace == null) return null;
-    final usage = readUsageFields(workspace.workspaceDir, args.nodePath);
-    return usage.isEmpty ? null : usage;
+    final fields = <String, String>{
+      ...readUsageFields(workspace.workspaceDir, args.nodePath),
+      ...?CarriedSpec.tryParse(
+        readEnvelopeResultText(workspace.workspaceDir, args.nodePath),
+      )?.toResultFields(),
+    };
+    return fields.isEmpty ? null : fields;
   }
 }
 
@@ -659,6 +726,13 @@ AgentBrief buildSpecifyBrief(
       'Then record the outcome as the LAST line of ## Touches: '
       '`Re-validated against the live tree: <one-line summary>` (update the '
       'design field again if re-validation changed the plan).',
+    )
+    ..writeln(
+      'After all three sanctioned `bd update --actor specify` mutations and '
+      'the live-tree re-validation succeed, your final response must be '
+      'exactly one JSON object: {"acceptance":"<the exact value passed to '
+      '--acceptance>","design":"<the exact value passed to --design>"}. Emit '
+      'no Markdown fence and no surrounding prose.',
     );
 
   final agreement = StringBuffer()
@@ -679,6 +753,13 @@ AgentBrief buildSpecifyBrief(
     ..writeln(
       '- Do NOT transition the bead\'s status and do NOT close it — the '
       'circuit advances it.',
+    )
+    ..writeln(
+      '- After all three sanctioned `bd update --actor specify` mutations and '
+      'the live-tree re-validation succeed, your final response must be '
+      'exactly one JSON object: {"acceptance":"<the exact value passed to '
+      '--acceptance>","design":"<the exact value passed to --design>"}. Emit '
+      'no Markdown fence and no surrounding prose.',
     )
     ..write(
       '- When the spec (acceptance + the four-section design + the '
@@ -909,9 +990,16 @@ class SpecValidationCapability extends ServiceCapability {
   @override
   Future<StepOutcome> run(TreeContext context, StepArgs args) async {
     final round = verdictRound(args);
-    // Read the ambient bead at ENTRY (while mounted); the check below is pure
-    // over the captured value.
-    final bead = context.getInheritedSeedOfExactType<Bead>();
+    final entryBead = context.getInheritedSeedOfExactType<Bead>();
+    final siblings =
+        context.getInheritedSeedOfExactType<SiblingView>() ??
+        const SiblingView();
+    final bead = specForStructuralValidation(
+      fallback: entryBead,
+      specifyResult: siblings.resultOf(
+        '${parentPath(args.nodePath)}/$kSpecifyStep',
+      ),
+    );
     if (bead == null) {
       return Ok({
         'grade': 'F',
