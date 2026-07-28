@@ -304,27 +304,54 @@ void main() {
       expect(service.scrubContent(content), isEmpty);
     });
 
-    test('scrubContent flags decision-register phrases and existing terms', () {
+    test('scrubContent permits vocabulary in public Dart source', () {
       const content =
-          'clean line\n'
-          'see ADR-5 for the design\n'
+          '/// The COMPUTE asset domain (ADR-0011 D2/D3, M6 Track D).\n'
+          '  /// PinDiff posture, ADR-0000 A9.\n'
+          '// Implementation rationale: ADR-0002 D3/D4.\n'
+          "throw FormatException('See ADR-0000 A13');\n"
+          "const prompt = 'The register cites inherited amendment A37.';\n"
+          "const beadType = 'spike';\n";
+      expect(
+        service.scrubContent(content, file: 'lib/src/example.dart'),
+        isEmpty,
+      );
+    });
+
+    test('scrubContent rejects planted working-document vocabulary', () {
+      const content =
+          'handoff: revisit ADR-0011 D2/D3 before release\n'
+          'scratch note: reconcile A37 with the implementation\n'
           'the register says so\n'
           'Decision Register entry\n'
           'decision-register reference\n'
-          'this predates A42\n'
-          'a spike we ran\n'
-          'the A2UI wire (A17 here is exempt because the line names A2UI)\n';
-      final hits = service.scrubContent(content);
+          'a spike we ran\n';
+      final hits = service.scrubContent(content, file: 'HANDOFF.md');
       expect(hits.map((hit) => hit.match).toList(), [
-        'ADR-5',
+        'ADR-0',
+        'A37',
         'the register',
         'Decision Register',
         'decision-register',
-        'A42',
         'spike',
       ]);
-      expect(hits.map((hit) => hit.line).toList(), [2, 3, 4, 5, 6, 7]);
-      expect(hits.any((hit) => hit.text.contains('A2UI')), isFalse);
+      expect(hits.map((hit) => hit.line).toList(), [1, 2, 3, 4, 5, 6]);
+      expect(hits.every((hit) => hit.file == 'HANDOFF.md'), isTrue);
+    });
+
+    test('scrubDir reports the current grid_assets package clean', () {
+      final result = service.scrubDir('../grid_assets');
+      expect(result.clean, isTrue, reason: result.hits.join('\n'));
+      expect(result.filesScanned, greaterThan(0));
+      expect(result.hits, isEmpty);
+    });
+
+    test('scrubContent permits standalone Dartdoc and preserves A2UI', () {
+      const content =
+          '/// The COMPUTE asset domain (ADR-0011 D2/D3).\n'
+          '  /// PinDiff posture, ADR-0000 A9 and inherited A37.\n'
+          'the A2UI wire (A17 is exempt because the line names A2UI)\n';
+      expect(service.scrubContent(content), isEmpty);
     });
 
     test(
