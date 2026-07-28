@@ -2,6 +2,8 @@
 // resolver's circuit dispatch, the frozen shapes, and the frozen sub-circuits'
 // registry entries. No kernel, no tree mount, no IO (pure logic tested before IO
 // is wired — the house set).
+import 'dart:collection';
+
 import 'package:genesis_tree/genesis_tree.dart';
 import 'package:grid_assets/grid_assets.dart';
 import 'package:grid_engine/grid_engine.dart';
@@ -15,6 +17,29 @@ const NodeCursor _gated = NodeCursor(state: StepState.gated);
 // D-7's gate re-arm flips a parked node back to an explicit `pending` — the KEY
 // is still present, and presence is the signal.
 const NodeCursor _pending = NodeCursor();
+
+final class _ClassificationTrapCursor extends MapBase<String, NodeCursor> {
+  @override
+  NodeCursor? operator [](Object? key) => null;
+
+  @override
+  void operator []=(String key, NodeCursor value) {}
+
+  @override
+  void clear() {}
+
+  @override
+  Iterable<String> get keys => throw StateError('classification was consulted');
+
+  @override
+  NodeCursor? remove(Object? key) => null;
+}
+
+const _overrideCircuit = Circuit(
+  id: 'override-marker',
+  terminalStepId: 'marker',
+  steps: [CapabilityStep(stepId: 'marker', capabilityId: 'marker')],
+);
 
 SessionProjection _session(CircuitCursor cursor) => SessionProjection(
   workBeadId: 'tg-1',
@@ -236,6 +261,44 @@ void main() {
 
     test('a shape-1 LEGACY session roots kLegacyCodeCircuit', () {
       final scope = scopeFor(_session(const {'tg-1/agent': _complete}));
+      expect(identical(scope.circuit, kLegacyCodeCircuit), isTrue);
+      expect(scope.key, const ValueKey('tg-1:session'));
+    });
+
+    test(
+      'a non-null override roots its marker without classifying the cursor',
+      () {
+        final resolver = CodeCircuitResolver(
+          kCodeCircuit,
+          overrideFor: (bead) {
+            expect(bead.id, 'tg-1');
+            return _overrideCircuit;
+          },
+        );
+        final session = _session(_ClassificationTrapCursor());
+
+        final scope =
+            resolver.sessionFor(bead: bead('tg-1'), session: session)
+                as SessionScope;
+
+        expect(identical(scope.circuit, _overrideCircuit), isTrue);
+        expect(scope.key, const ValueKey('tg-1:session'));
+      },
+    );
+
+    test('a null override preserves migration classification', () {
+      final resolver = CodeCircuitResolver(
+        kCodeCircuit,
+        overrideFor: (_) => null,
+      );
+
+      final scope =
+          resolver.sessionFor(
+                bead: bead('tg-1'),
+                session: _session(const {'tg-1/agent': _complete}),
+              )
+              as SessionScope;
+
       expect(identical(scope.circuit, kLegacyCodeCircuit), isTrue);
       expect(scope.key, const ValueKey('tg-1:session'));
     });
