@@ -1166,10 +1166,37 @@ List<String> specStructuralFindings(Bead bead) {
 ///
 /// PUBLIC because the DOCS committee (`docs_committee.dart`) reads headings
 /// from PROSE by the same rule — one definition, two readers.
-String proseOnly(String spec) => spec
-    .replaceAll(RegExp('```.*?```', dotAll: true), '  ')
-    .replaceAll(RegExp(r'^[ \t]*>.*$', multiLine: true), '  ')
-    .replaceAll(RegExp('`[^`\n]*`'), '  ');
+String proseOnly(String spec) {
+  final prose = StringBuffer();
+  final fenceLines = RegExp(r'^[ \t]*(`{3,})([^`\r\n]*)\r?$', multiLine: true);
+  var copiedThrough = 0;
+  int? openerAt;
+  int? openerLength;
+
+  for (final fence in fenceLines.allMatches(spec)) {
+    final runLength = fence.group(1)!.length;
+    if (openerAt == null) {
+      openerAt = fence.start;
+      openerLength = runLength;
+      continue;
+    }
+    final suffix = fence.group(2)!;
+    if (runLength < openerLength! || suffix.trim().isNotEmpty) continue;
+
+    prose
+      ..write(spec.substring(copiedThrough, openerAt))
+      ..write('  ');
+    copiedThrough = fence.end;
+    openerAt = null;
+    openerLength = null;
+  }
+  prose.write(spec.substring(copiedThrough));
+
+  return prose
+      .toString()
+      .replaceAll(RegExp(r'^[ \t]*>.*$', multiLine: true), '  ')
+      .replaceAll(RegExp(r'`[^`\n]*`'), '  ');
+}
 
 /// The body of the section whose `## ` heading starts at [headingAt] — the
 /// text after the heading line up to the next `## ` heading (or the end).

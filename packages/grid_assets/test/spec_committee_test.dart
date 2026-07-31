@@ -641,6 +641,82 @@ void main() {
           contains('placeholder: "as needed"'),
         );
       });
+
+      test('a longer outer fence ignores shorter fenced blocks', () {
+        const ticks = '\x60\x60\x60';
+        final b = bead('tg-long-fence').copyWith(
+          acceptanceCriteria: '- [ ] Canonical sections remain visible',
+          design:
+              '''
+## Implementation Plan
+### Step 1 — Quote the embedded validator
+${ticks}`markdown
+${ticks}dart
+final pulse = true;
+${ticks}`
+
+## Touches
+- `lib/src/pulse.dart` — unchanged
+
+## ADR Alignment
+No ADR applies — verified via grep on `pulse`, `validator`.
+
+## Validation Plan
+- [ ] Canonical sections remain visible → `dart test` → PASS
+Observe the literal language tag "${ticks}dart".
+''',
+        );
+        expect(specStructuralFindings(b), isEmpty);
+      });
+
+      test('an unterminated line fence leaves the document tail scannable', () {
+        const ticks = '\x60\x60\x60';
+        final b = bead('tg-open-fence').copyWith(
+          acceptanceCriteria: '- [ ] Canonical sections remain visible',
+          design:
+              '''
+## Implementation Plan
+### Step 1 — Preserve the diagnostic transcript
+${ticks}dart
+final pulse = true;
+
+## Touches
+- `lib/src/pulse.dart` — unchanged
+
+## ADR Alignment
+No ADR applies — verified via grep on `pulse`, `diagnostic`.
+
+## Validation Plan
+- [ ] Canonical sections remain visible → `dart test` → PASS
+Observe the literal language tag "${ticks}dart".
+''',
+        );
+        expect(specStructuralFindings(b), isEmpty);
+      });
+
+      test('inline triple backticks are not fence delimiters', () {
+        const ticks = '\x60\x60\x60';
+        final b = bead('tg-inline-fence').copyWith(
+          acceptanceCriteria: '- [ ] Canonical sections remain visible',
+          design:
+              '''
+## Implementation Plan
+### Step 1 — Validate the embedded language tag
+Validate with ruby -e 's.include?("${ticks}dart")'.
+
+## Touches
+- `lib/src/pulse.dart` — unchanged
+
+## ADR Alignment
+No ADR applies — verified via grep on `pulse`, `validator`.
+
+## Validation Plan
+- [ ] Canonical sections remain visible → `dart test` → PASS
+Validate again with ruby -e 's.include?("${ticks}dart")'.
+''',
+        );
+        expect(specStructuralFindings(b), isEmpty);
+      });
     });
 
     group('the brief ↔ gate ROUND TRIP (`pow-77g`)', () {
