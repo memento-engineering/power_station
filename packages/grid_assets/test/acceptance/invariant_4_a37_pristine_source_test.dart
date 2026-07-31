@@ -210,7 +210,7 @@ void main() {
               // The OWNED session for the foreign bead is CLOSED (terminal).
               Bead(
                 id: 'tgdog-sess1',
-                issueType: IssueType.session,
+                issueType: GridIssueTypes.session,
                 status: BeadStatus.closed,
                 metadata: const {
                   'rig': stateSubstation,

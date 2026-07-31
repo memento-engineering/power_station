@@ -7,6 +7,7 @@ import 'package:beads_dart/beads_dart.dart'
     show Bead, BdResult, BdRunner, BeadStatus, IssueType;
 import 'package:genesis_tree/genesis_tree.dart';
 import 'package:grid_assets/grid_assets.dart';
+import 'package:grid_runtime/grid_runtime.dart';
 import 'package:grid_sdk/grid_sdk.dart' as sdk;
 import 'package:test/test.dart';
 
@@ -177,7 +178,7 @@ void main() {
       const Bead(
         id: 'al-9',
         title: 'flux session lifecycle bead',
-        issueType: IssueType.session,
+        issueType: GridIssueTypes.session,
       ),
     ];
     final betaBeads = [
@@ -274,7 +275,7 @@ void main() {
           Bead(
             id: 'al-8',
             title: 'Observability session',
-            issueType: IssueType.session,
+            issueType: GridIssueTypes.session,
           ),
         ],
         '/roots/beta': const [],

@@ -53,7 +53,7 @@ List<Bead> _stampStepResults(
   required Map<String, Map<String, String>> results,
 }) => [
   for (final b in beads)
-    if (b.issueType == IssueType.step &&
+    if (b.issueType == GridIssueTypes.step &&
         (b.metadata[MoleculeStepKeys.path] as String?)?.startsWith(
               '$workBeadId/',
             ) ==

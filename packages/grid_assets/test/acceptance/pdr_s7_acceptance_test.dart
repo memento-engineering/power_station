@@ -676,14 +676,14 @@ void main() {
               // tg-done: terminal owned session ⇒ SKIP.
               Bead(
                 id: 'tgdog-d',
-                issueType: IssueType.session,
+                issueType: GridIssueTypes.session,
                 status: BeadStatus.closed,
                 metadata: const {'rig': 'tgdog', 'work_bead': 'tg-done'},
               ),
               // tg-live: a live MOLECULE session backing a surviving worktree.
               Bead(
                 id: 'tgdog-l',
-                issueType: IssueType.session,
+                issueType: GridIssueTypes.session,
                 status: BeadStatus.open,
                 metadata: const {
                   'rig': 'tgdog',
@@ -697,7 +697,7 @@ void main() {
               // adopts, D5) — a live orphan the sweep kills + clears.
               Bead(
                 id: 'tgdog-l-agent',
-                issueType: IssueType.step,
+                issueType: GridIssueTypes.step,
                 status: BeadStatus.open,
                 metadata: const {
                   'rig': 'tgdog',
