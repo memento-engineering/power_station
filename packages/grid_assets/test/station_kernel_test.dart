@@ -60,7 +60,10 @@ List<Bead> _stampStepGrades(
   if (grades.isEmpty) return beads;
   return [
     for (final b in beads)
-      if (b.issueType == IssueType.step) _graded(b, workBeadId, grades) else b,
+      if (b.issueType == GridIssueTypes.step)
+        _graded(b, workBeadId, grades)
+      else
+        b,
   ];
 }
 

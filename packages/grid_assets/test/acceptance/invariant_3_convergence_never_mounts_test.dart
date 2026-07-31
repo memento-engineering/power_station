@@ -86,19 +86,19 @@ void main() {
         // missed (convoy/event/step/spec/gate/molecule/message/merge-request)
         // and infra (agent/rig/role) ride alongside — plus session.
         final customs = <String, IssueType>{
-          'tg-conv': IssueType.convergence,
-          'tg-cvy': IssueType.convoy,
-          'tg-evt': IssueType.event,
-          'tg-step': IssueType.step,
-          'tg-spec': IssueType.spec,
-          'tg-gate': IssueType.gate,
-          'tg-mol': IssueType.molecule,
-          'tg-msg': IssueType.message,
-          'tg-mr': IssueType.mergeRequest,
-          'tg-agent': IssueType.agent,
-          'tg-rig': IssueType.rig,
-          'tg-role': IssueType.role,
-          'tg-sess': IssueType.session,
+          'tg-conv': GridIssueTypes.convergence,
+          'tg-cvy': GridIssueTypes.convoy,
+          'tg-evt': GridIssueTypes.event,
+          'tg-step': GridIssueTypes.step,
+          'tg-spec': GridIssueTypes.spec,
+          'tg-gate': GridIssueTypes.gate,
+          'tg-mol': GridIssueTypes.molecule,
+          'tg-msg': GridIssueTypes.message,
+          'tg-mr': GridIssueTypes.mergeRequest,
+          'tg-agent': GridIssueTypes.agent,
+          'tg-rig': GridIssueTypes.rig,
+          'tg-role': GridIssueTypes.role,
+          'tg-sess': GridIssueTypes.session,
         };
 
         work.push(
@@ -179,7 +179,7 @@ void main() {
         // passes ownership; only the type gate stops it).
         work.push(
           _graph(
-            beads: [_typed('tg-conv', IssueType.convergence)],
+            beads: [_typed('tg-conv', GridIssueTypes.convergence)],
             ready: {'tg-conv'},
           ),
         );
@@ -199,7 +199,7 @@ void main() {
         work.push(
           _graph(
             beads: [
-              _typed('tg-conv', IssueType.convergence),
+              _typed('tg-conv', GridIssueTypes.convergence),
               _typed('tg-1', IssueType.task),
             ],
             ready: {'tg-conv', 'tg-1'},

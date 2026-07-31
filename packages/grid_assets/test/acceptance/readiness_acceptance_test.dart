@@ -215,7 +215,7 @@ List<Bead> _withResult(
   final path = '$workBeadId/$relativePath';
   return [
     for (final b in beads)
-      if (b.issueType == IssueType.step &&
+      if (b.issueType == GridIssueTypes.step &&
           b.metadata[MoleculeStepKeys.path] == path)
         b.copyWith(
           metadata: {...b.metadata, ...nodeResultMetadata(path, result)},

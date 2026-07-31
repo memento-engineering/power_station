@@ -387,7 +387,7 @@ Bead stepBead(
   String capability = 'agent',
 }) => Bead(
   id: '$sessionId-${relativePath.replaceAll('/', '-')}',
-  issueType: IssueType.step,
+  issueType: GridIssueTypes.step,
   status: BeadStatus.open,
   metadata: {
     'rig': stateSubstation,
