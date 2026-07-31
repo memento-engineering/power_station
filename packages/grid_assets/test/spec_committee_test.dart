@@ -641,6 +641,45 @@ void main() {
           contains('placeholder: "as needed"'),
         );
       });
+
+      test('a longer outer fence ignores shorter fenced blocks', () {
+        const ticks = '\x60\x60\x60';
+        final b = _specced().copyWith(
+          design: _specced().design.replaceFirst(
+            '## Touches\n',
+            '${ticks}`markdown\n'
+                '${ticks}dart\n'
+                'final pulse = true;\n'
+                '$ticks\n'
+                '${ticks}`\n'
+                '## Touches\n',
+          ),
+        );
+        expect(specStructuralFindings(b), isEmpty);
+      });
+
+      test('an unterminated line fence leaves the document tail scannable', () {
+        const ticks = '\x60\x60\x60';
+        final b = _specced().copyWith(
+          design: _specced().design.replaceFirst(
+            '## Touches\n',
+            '${ticks}dart\n## Touches\n',
+          ),
+        );
+        expect(specStructuralFindings(b), isEmpty);
+      });
+
+      test('inline triple backticks are not fence delimiters', () {
+        const ticks = '\x60\x60\x60';
+        final b = _specced().copyWith(
+          design: _specced().design.replaceFirst(
+            '## Touches\n',
+            'Validate with ruby -e \'s.include?("${ticks}dart")\'.\n'
+                '## Touches\n',
+          ),
+        );
+        expect(specStructuralFindings(b), isEmpty);
+      });
     });
 
     group('the brief ↔ gate ROUND TRIP (`pow-77g`)', () {
