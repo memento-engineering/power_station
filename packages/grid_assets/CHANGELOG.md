@@ -1,3 +1,8 @@
+## 0.4.0
+
+- Breaking: rides the 0.2.0 substrate wave — grid_engine/grid_sdk ^0.2.0,
+  genesis_tree ^0.2.0 (foundation diagnostics; ext.leonard.* namespace).
+
 ## 0.3.1
 
 - `CodeCircuitResolver` accepts an optional pre-classification `overrideFor` policy: a non-null override roots that circuit without cursor classification; the null path is byte-for-byte unchanged. Enables subclass stations to route selected beads (e.g. burn orders) to non-code circuits.
