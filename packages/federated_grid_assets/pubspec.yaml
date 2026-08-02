@@ -1,5 +1,5 @@
 name: federated_grid_assets
-version: 0.1.0
+version: 0.2.0
 description: >-
   Cross-station federation impls: the HTTP station bus, the owner-authoritative
   lease manager, static membership, git-over-LAN sync, and the serve/lease CLI
@@ -12,8 +12,8 @@ environment:
 
 dependencies:
   args: ^2.6.0
-  genesis_tree: ^0.1.3
-  grid_engine: ^0.1.0
+  genesis_tree: ^0.2.0
+  grid_engine: ^0.2.0
   meta: ^1.16.0
 
 dev_dependencies:

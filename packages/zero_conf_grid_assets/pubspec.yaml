@@ -1,5 +1,5 @@
 name: zero_conf_grid_assets
-version: 0.1.0
+version: 0.2.0
 description: >-
   Zero-conf discovery and topology opinions for the office grid: mDNS/DNS-SD
   advertise and browse of station brokers, applied over federated_grid_assets.
@@ -10,7 +10,7 @@ environment:
   sdk: ^3.11.0
 
 dependencies:
-  federated_grid_assets: ^0.1.0
+  federated_grid_assets: ^0.2.0
   meta: ^1.16.0
   multicast_dns: ^0.3.3
 
