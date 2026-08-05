@@ -270,6 +270,10 @@ void main() {
         final runner = RecordingBdRunner();
         final writer = StationBeadWriter(
           bd: BdCliService(runner),
+          reader: CliBeadProbeReader(
+            BdCliService(runner),
+            lifecycleTypes: const <IssueType>{},
+          ),
           ownership: BeadOwnershipPredicate(const {stateSubstation}),
         );
 

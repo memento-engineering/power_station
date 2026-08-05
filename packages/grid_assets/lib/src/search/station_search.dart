@@ -18,10 +18,11 @@
 /// **Read-only, by construction (A37 / coexistence).** A substation's work
 /// store is a FOREIGN store to a search — the fence is structural, not a
 /// runtime check: the per-store seam ([SubstationBeadSource]) has no mutation
-/// surface, and the default source ([BdExportBeadSource]) can only issue
-/// `bd export --all` — ONE spawn per store, a pure read. Never `bd show`
+/// surface, and the default source ([BdExportBeadSource]) can only issue one
+/// all-status `bd query` — ONE spawn per store, a pure read. Never `bd show`
 /// (which writes `.beads/last-touched` and self-triggers the store's watcher),
-/// never a bd mutation, never SQL.
+/// never a bd mutation, never SQL. (It shelled `bd export --all` until
+/// tg-w478 retired that read; `export` is refused in proxied-server mode.)
 library;
 
 import 'package:beads_dart/beads_dart.dart'
@@ -81,10 +82,14 @@ abstract interface class SubstationBeadSource {
   Future<List<Bead>> read(sdk.SubstationScope scope);
 }
 
-/// The default [SubstationBeadSource]: `bd export --all` in the store's root —
-/// ONE spawn per store, the same single-spawn snapshot read the status
-/// fallback path uses. A pure read: no `last-touched` write, no watcher
+/// The default [SubstationBeadSource]: ONE `bd query` spawn per store,
+/// covering every status. A pure read: no `last-touched` write, no watcher
 /// self-trigger, no mutation (A37).
+///
+/// This used to shell `bd export --all`, but `export` is REFUSED in
+/// proxied-server mode and `BdCliService.exportAll` was deleted by tg-w478
+/// (the_grid c1a2ff3). The all-status query below is the same read the engine's
+/// own `CliSnapshotReader` now performs, and it stays one spawn.
 class BdExportBeadSource implements SubstationBeadSource {
   /// Creates the source. [runnerFor] is the injectable spawn seam (tests
   /// record argv through it; the default spawns a real `bd` in the store
@@ -98,11 +103,16 @@ class BdExportBeadSource implements SubstationBeadSource {
   static BdRunner _processRunnerFor(String storeRoot) =>
       ProcessBdRunner(workspaceRoot: storeRoot);
 
+  /// Every status, closed included — the doc above is explicit that decision
+  /// beads are usually closed and search needs them.
+  static const String _allStatuses =
+      'status=open OR status=in_progress OR status=blocked OR '
+      'status=deferred OR status=closed';
+
   @override
-  Future<List<Bead>> read(sdk.SubstationScope scope) async {
-    final export = await BdCliService(_runnerFor(scope.root)).exportAll();
-    return export.beads;
-  }
+  Future<List<Bead>> read(sdk.SubstationScope scope) async => BdCliService(
+    _runnerFor(scope.root),
+  ).query(_allStatuses, includeClosed: true);
 }
 
 /// One structured hit: a bead that matched the query, with WHERE it lives
