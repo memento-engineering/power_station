@@ -1,3 +1,14 @@
+## 0.5.0-rc.1
+
+- Breaking: adopts the_grid's 0.2.0-rc.1 prerelease wave — `beads_dart
+  ^0.2.0-rc.1`, `grid_runtime ^0.2.0-rc.1`, `grid_engine ^0.3.0-rc.1`,
+  `grid_sdk ^0.3.0-rc.1`. Published as a prerelease because pub requires a
+  package depending on a prerelease to be one itself.
+- Breaking: `BdExportBeadSource` no longer shells `bd export --all`, which is
+  refused in proxied-server mode and whose API was deleted upstream. It now
+  issues ONE all-status `bd query --all --json` per store. The contract is
+  unchanged — one spawn per store, a pure read (A37), closed beads included.
+
 ## 0.4.0
 
 - Breaking: rides the 0.2.0 substrate wave — grid_engine/grid_sdk ^0.2.0,
