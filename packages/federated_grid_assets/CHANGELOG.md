@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.0-rc.1
+
+- Breaking: adopts `grid_engine ^0.3.0-rc.1` from the_grid's prerelease wave.
+  Published as a prerelease because pub requires a package depending on a
+  prerelease to be one itself. No API change of its own.
+
 ## 0.2.0
 
 - Breaking: rides the 0.2.0 substrate wave — grid_engine ^0.2.0,

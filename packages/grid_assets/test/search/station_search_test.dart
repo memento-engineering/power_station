@@ -429,14 +429,17 @@ void main() {
   });
 
   group('BdExportBeadSource — the A37 read-only fence (at the spawn seam)', () {
+    // tg-w478 retired `bd export` (JSONL) in favour of `bd query --json`,
+    // which returns a schema-versioned envelope rather than a JSONL stream.
     const jsonl =
-        '{"_type":"issue","id":"al-1","title":"hello flux","status":"open",'
-        '"issue_type":"task"}\n'
-        '{"_type":"memory","key":"skipped-config-record"}\n';
+        '{"schema_version":1,"data":['
+        '{"id":"al-1","title":"hello flux","status":"open",'
+        '"issue_type":"task"}'
+        ']}';
 
     test(
-      'the ONLY argv the default source ever issues is `export --all` — '
-      'one spawn per store, a pure read (never show/ready/mutation)',
+      'the ONLY argv the default source ever issues is one all-status '
+      '`query` — one spawn per store, a pure read (never show/ready/mutation)',
       () async {
         final runners = <String, _RecordingBdRunner>{};
         final source = BdExportBeadSource(
@@ -448,7 +451,13 @@ void main() {
         expect(beads.single.id, 'al-1');
         final runner = runners['/roots/alpha']!;
         expect(runner.argvs, [
-          ['export', '--all'],
+          [
+            'query',
+            'status=open OR status=in_progress OR status=blocked OR '
+                'status=deferred OR status=closed',
+            '--all',
+            '--json',
+          ],
         ]);
       },
     );
