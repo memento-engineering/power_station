@@ -7,7 +7,8 @@
 - Breaking: `BdExportBeadSource` no longer shells `bd export --all`, which is
   refused in proxied-server mode and whose API was deleted upstream. It now
   issues ONE all-status `bd query --all --json` per store. The contract is
-  unchanged — one spawn per store, a pure read (A37), closed beads included.
+  unchanged — one spawn per store, a read-only probe that never mutates, and
+  closed beads are still included.
 
 ## 0.4.0
 

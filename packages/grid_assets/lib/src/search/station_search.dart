@@ -21,8 +21,8 @@
 /// surface, and the default source ([BdExportBeadSource]) can only issue one
 /// all-status `bd query` — ONE spawn per store, a pure read. Never `bd show`
 /// (which writes `.beads/last-touched` and self-triggers the store's watcher),
-/// never a bd mutation, never SQL. (It shelled `bd export --all` until
-/// tg-w478 retired that read; `export` is refused in proxied-server mode.)
+/// never a bd mutation, never SQL. (It shelled `bd export --all` until that
+/// read was retired upstream; `export` is refused in proxied-server mode.)
 library;
 
 import 'package:beads_dart/beads_dart.dart'
@@ -87,8 +87,8 @@ abstract interface class SubstationBeadSource {
 /// self-trigger, no mutation (A37).
 ///
 /// This used to shell `bd export --all`, but `export` is REFUSED in
-/// proxied-server mode and `BdCliService.exportAll` was deleted by tg-w478
-/// (the_grid c1a2ff3). The all-status query below is the same read the engine's
+/// proxied-server mode and `BdCliService.exportAll` was removed upstream in
+/// beads_dart 0.2.0. The all-status query below is the same read the engine's
 /// own `CliSnapshotReader` now performs, and it stays one spawn.
 class BdExportBeadSource implements SubstationBeadSource {
   /// Creates the source. [runnerFor] is the injectable spawn seam (tests
