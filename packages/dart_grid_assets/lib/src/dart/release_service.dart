@@ -402,9 +402,7 @@ class DryRunResult {
   };
 }
 
-/// The pub.dev `latest`-version poll's structured verdict (genesis
-/// `publishing.md`: poll until the new version is `latest` before publishing a
-/// dependent).
+/// The pub.dev version poll's structured verdict.
 class PollResult {
   /// Wraps the poll for [package] at the [wanted] version.
   const PollResult({
@@ -424,8 +422,8 @@ class PollResult {
   /// fetch failed (a not-yet-resolvable package is `null`, never an error).
   final String? latest;
 
-  /// True iff [latest] equals [wanted] — the "safe to publish a dependent"
-  /// signal.
+  /// True iff [wanted] occurs in pub.dev's complete `versions` list — the
+  /// "safe to publish a dependent" signal.
   final bool isPublished;
 
   /// JSON form.
@@ -815,10 +813,10 @@ class ReleaseService {
   }
 
   /// Polls `https://pub.dev/api/packages/<package>` ONCE via the [HttpGetter]
-  /// seam and reports whether [version] is now `latest` (genesis
-  /// `publishing.md`: poll before publishing a dependent). ONE probe — the
-  /// skill loops it between dependency-order publishes. Thin: no live network
-  /// in tests.
+  /// seam and reports whether [version] occurs in the complete `versions` list.
+  /// The top-level `latest` stable version remains informational. ONE probe —
+  /// the skill loops it between dependency-order publishes. Thin: no live
+  /// network in tests.
   Future<PollResult> poll({
     required String package,
     required String version,
@@ -827,6 +825,7 @@ class ReleaseService {
       Uri.parse('https://pub.dev/api/packages/$package'),
     );
     String? latest;
+    var isPublished = false;
     if (fetch.statusCode == 200) {
       try {
         final decoded = jsonDecode(fetch.body);
@@ -834,6 +833,12 @@ class ReleaseService {
           final latestField = decoded['latest'];
           if (latestField is Map && latestField['version'] is String) {
             latest = latestField['version'] as String;
+          }
+          final versionsField = decoded['versions'];
+          if (versionsField is List) {
+            isPublished = versionsField.any(
+              (entry) => entry is Map && entry['version'] == version,
+            );
           }
         }
       } on FormatException {
@@ -844,7 +849,7 @@ class ReleaseService {
       package: package,
       wanted: version,
       latest: latest,
-      isPublished: latest == version,
+      isPublished: isPublished,
     );
   }
 }

@@ -489,59 +489,79 @@ void main() {
     });
   });
 
-  group(
-    'poll — the pub.dev latest-version probe over an injected fetch seam',
-    () {
-      test(
-        'wanted == latest reports isPublished; the URL is the pub.dev API',
-        () async {
-          final fake = _FakeHttp(
-            const HttpFetch(
-              statusCode: 200,
-              body: '{"name":"genesis_tree","latest":{"version":"0.1.5"}}',
-            ),
-          );
-          final result = await ReleaseService(
-            httpGet: fake.call,
-          ).poll(package: 'genesis_tree', version: '0.1.5');
-          expect(result.isPublished, isTrue);
-          expect(result.latest, '0.1.5');
-          expect(
-            fake.requested.toString(),
-            'https://pub.dev/api/packages/genesis_tree',
-          );
-        },
-      );
-
-      test('an older latest is not-yet-published', () async {
+  group('poll — the pub.dev versions probe over an injected fetch seam', () {
+    test(
+      'a listed prerelease is published even when latest remains stable',
+      () async {
         final fake = _FakeHttp(
           const HttpFetch(
             statusCode: 200,
-            body: '{"latest":{"version":"0.1.4"}}',
+            body:
+                '{"name":"beads_dart","latest":{"version":"0.1.1"},'
+                '"versions":[{"version":"0.1.0"},{"version":"0.1.1"},'
+                '{"version":"0.2.0-rc.1"}]}',
           ),
         );
         final result = await ReleaseService(
           httpGet: fake.call,
-        ).poll(package: 'genesis_tree', version: '0.1.5');
-        expect(result.isPublished, isFalse);
-        expect(result.latest, '0.1.4');
-      });
+        ).poll(package: 'beads_dart', version: '0.2.0-rc.1');
+        expect(result.isPublished, isTrue);
+        expect(result.latest, '0.1.1');
+        expect(
+          fake.requested.toString(),
+          'https://pub.dev/api/packages/beads_dart',
+        );
+      },
+    );
 
-      test(
-        'a 404 (unpublished package) yields a null latest, never a crash',
-        () async {
-          final fake = _FakeHttp(
-            const HttpFetch(statusCode: 404, body: 'not found'),
-          );
-          final result = await ReleaseService(
-            httpGet: fake.call,
-          ).poll(package: 'nope', version: '0.1.0');
-          expect(result.latest, isNull);
-          expect(result.isPublished, isFalse);
-        },
+    test('a listed stable version is published', () async {
+      final fake = _FakeHttp(
+        const HttpFetch(
+          statusCode: 200,
+          body:
+              '{"latest":{"version":"0.1.5"},'
+              '"versions":[{"version":"0.1.4"},{"version":"0.1.5"}]}',
+        ),
       );
-    },
-  );
+      final result = await ReleaseService(
+        httpGet: fake.call,
+      ).poll(package: 'genesis_tree', version: '0.1.5');
+      expect(result.isPublished, isTrue);
+      expect(result.latest, '0.1.5');
+    });
+
+    test('unlisted stable and prerelease versions are unpublished', () async {
+      for (final wanted in ['0.1.6', '0.2.0-rc.1']) {
+        final result = await ReleaseService(
+          httpGet: _FakeHttp(
+            const HttpFetch(
+              statusCode: 200,
+              body:
+                  '{"latest":{"version":"0.1.5"},'
+                  '"versions":[{"version":"0.1.4"},'
+                  '{"version":"0.1.5"}]}',
+            ),
+          ).call,
+        ).poll(package: 'genesis_tree', version: wanted);
+        expect(result.isPublished, isFalse, reason: wanted);
+        expect(result.latest, '0.1.5', reason: wanted);
+      }
+    });
+
+    test(
+      'a 404 (unpublished package) yields a null latest, never a crash',
+      () async {
+        final fake = _FakeHttp(
+          const HttpFetch(statusCode: 404, body: 'not found'),
+        );
+        final result = await ReleaseService(
+          httpGet: fake.call,
+        ).poll(package: 'nope', version: '0.1.0');
+        expect(result.latest, isNull);
+        expect(result.isPublished, isFalse);
+      },
+    );
+  });
 
   group('DartCommand / dart release — the THIN exported Command', () {
     test(
@@ -791,7 +811,9 @@ void main() {
       final fake = _FakeHttp(
         const HttpFetch(
           statusCode: 200,
-          body: '{"latest":{"version":"0.1.5"}}',
+          body:
+              '{"latest":{"version":"0.1.5"},'
+              '"versions":[{"version":"0.1.5"}]}',
         ),
       );
       final buf = StringBuffer();
@@ -813,7 +835,12 @@ void main() {
       ]);
       expect(code, 0);
       final json = jsonDecode(buf.toString().trim()) as Map<String, dynamic>;
-      expect(json['isPublished'], true);
+      expect(json, {
+        'package': 'genesis_tree',
+        'wanted': '0.1.5',
+        'latest': '0.1.5',
+        'isPublished': true,
+      });
     });
 
     test('scrub --dir on a missing dir exits 64 (usage)', () async {

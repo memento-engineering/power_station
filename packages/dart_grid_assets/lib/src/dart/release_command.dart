@@ -506,7 +506,7 @@ class ReleaseDryRunCommand extends Command<int> {
   }
 }
 
-/// `dart release poll` — poll pub.dev for whether a version is now `latest`.
+/// `dart release poll` — poll pub.dev for whether a version is published.
 class ReleasePollCommand extends Command<int> {
   /// Creates the op over [service], rendering to [out] (poll has no error
   /// path — the mandatory options are enforced by the arg parser).
@@ -530,7 +530,7 @@ class ReleasePollCommand extends Command<int> {
   final String name = 'poll';
   @override
   final String description =
-      'Poll pub.dev once — is <version> the latest for <package> yet?';
+      'Poll pub.dev once — is <version> published for <package> yet?';
 
   @override
   Future<int> run() async {
@@ -545,8 +545,9 @@ class ReleasePollCommand extends Command<int> {
       final latest = result.latest ?? 'unresolved';
       _out.writeln(
         result.isPublished
-            ? '${result.package} ${result.wanted} is latest'
-            : '${result.package}: latest is $latest, not ${result.wanted}',
+            ? '${result.package} ${result.wanted} is published'
+            : '${result.package} ${result.wanted} is not published yet '
+                  '(latest stable: $latest)',
       );
     }
     return 0;
