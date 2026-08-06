@@ -1,7 +1,38 @@
 # ADR-0003 — Private git-tag releases + a pre-release-gated release process
 
-**Status:** **Accepted** — this document records a decision Nico ratified in an interactive
-design session on **2026-07-16**. It is authored under the org's DOC-BEFORE-CODE rule ahead of
+**Status:** **Partially superseded by practice (2026-08-05)** — **D3/D4 stand; D1/D2 do not.**
+Originally Accepted from an interactive design session on **2026-07-16**.
+
+> **CORRECTION, 2026-08-05.** This ADR's first structural premise — *"every `grid_*` package is
+> `publish_to: none`; pub.dev is not the release channel"* — stopped being true **nine days
+> after it was written**. `beads_dart`, `grid_engine`, `grid_sdk` and `grid_cli` first published
+> to pub.dev on **2026-07-25**, `grid_assets` on **2026-07-26**. None of them carries
+> `publish_to: none` today.
+>
+> That was **not a decision overruling D1**. It was the `release` skill doing its ordinary job;
+> the ADR simply went stale and nobody noticed. Recording it here as fact rather than minting a
+> ceremonial amendment (Nico, 2026-08-05: *"this doesn't seem like a decision but just something
+> that is a part of the release skill"*).
+>
+> **What this changes:**
+> - **D1/D2 (git-tag releases, consumers pin `git: {url, ref, path}`) — SUPERSEDED.** The
+>   release channel is pub.dev; a consumer adopts a producer change by bumping a **semver
+>   constraint**. `space_station`'s pubspec already documents this in a comment as a "D1 source
+>   amendment"; that amendment was never recorded anywhere until now.
+> - **D3/D4 (the pre-release gate) — UNCHANGED AND HONOURED.** The property D3 names, *"a
+>   stable release is never born until its rc cleared every consumer"*, is intact. Only the
+>   carrier changed: an rc is a **pub.dev prerelease** (`0.2.0-rc.1`) rather than an rc git tag,
+>   and pub's own solver excludes prereleases from caret ranges, so an rc reaches only consumers
+>   that opt in by pinning `^X.Y.Z-rc.N`.
+> - **First exercise of the gate, 2026-08-05:** the_grid cut six packages at `-rc.1`,
+>   power_station resolved against them from hosted source and ran analyze/test, and that soak
+>   caught two real `grid link` regressions before anything stable shipped. The gate worked as
+>   D3 intended.
+>
+> **Still open:** D5's dev/worktree path-override escape hatch is unaffected. D6's adoption
+> order is moot as written (it sequences tag adoption).
+
+It is authored under the org's DOC-BEFORE-CODE rule ahead of
 the code that implements it, and contains **no new decision of its own** — it TRANSCRIBES a
 human-ratified decision. Because a decision reached collaboratively with Nico is already
 human-ratified, none of it is minted as an ADR-0000 pending amendment (the register rule — do
@@ -29,8 +60,10 @@ the running JIT process had been masking a broken `main`).
 
 Two structural facts constrain the fix:
 
-1. **Every `grid_*` package is `publish_to: none`.** pub.dev is *not* the release channel; a
-   "release" of a private repo is a **git tag**, and a consumer pins `git: {url, ref: <tag>}`.
+1. ~~**Every `grid_*` package is `publish_to: none`.** pub.dev is *not* the release channel; a
+   "release" of a private repo is a **git tag**, and a consumer pins `git: {url, ref: <tag>}`.~~
+   **FALSE SINCE 2026-07-25** — the packages are hosted on pub.dev. See the correction at the
+   top of this document. D1/D2 below rest on this premise and are superseded with it.
 2. **The tooling is half-built.** The linkage domain
    (`dart_grid_assets/lib/src/dart/pub_links.dart`) already models `PubLink.gitUrl`/`gitRef` and
    a `stable` context — but they are **reserved no-ops**: the emitter only ever writes `path:`
