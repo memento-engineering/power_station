@@ -292,6 +292,75 @@ void main() {
       }
     });
 
+    test('release renders the complete rc-first operator flow', () {
+      final rendered = loader.renderSkill('release', args: {'runner': 'space'});
+
+      expect(rendered, isNot(contains('{{')));
+      expect(
+        rendered,
+        contains('--change <docs|additive|fix|breaking|rc> --json'),
+      );
+      expect(rendered, contains('Breaking -> `--change rc`'));
+      expect(rendered, isNot(contains('Breaking -> `--change breaking`')));
+      expect(
+        rendered,
+        contains(
+          'space dart release tag --repo-dir <repo-dir> --tag <tag> --json',
+        ),
+      );
+      expect(
+        rendered,
+        contains(
+          'space dart release validate-consumers --rc-tag <rc-tag> '
+          '--manifest <consumers.json> --json',
+        ),
+      );
+      expect(
+        rendered,
+        contains(
+          'space dart release promote --repo-dir <repo-dir> '
+          '--stable-tag <stable-tag> --validation <validation.json> --json',
+        ),
+      );
+      expect(rendered, contains('Pub excludes prereleases'));
+      expect(rendered, contains('^0.2.0-rc.1'));
+      expect(
+        rendered,
+        contains(
+          'an rc on a package forces an rc on EVERY in-repo\n'
+          '   sibling that depends on it',
+        ),
+      );
+      expect(
+        rendered,
+        contains(
+          '`dart pub publish` REFUSES a stable package that depends on a '
+          'prerelease',
+        ),
+      );
+      expect(
+        rendered,
+        contains(
+          '`release poll` reads pub.dev\'s complete versions list and is the '
+          'authority for\n'
+          '   prereleases',
+        ),
+      );
+      expect(
+        rendered,
+        contains(
+          '`melos publish` still compares against latest stable and is NOT\n'
+          '   a trustworthy “what is left to publish” check during an rc wave',
+        ),
+      );
+      expect(
+        rendered,
+        contains(
+          '“N checked-in files are modified in git” means gate 4 is incomplete',
+        ),
+      );
+    });
+
     test(
       'station-operations renders against the installer binding — the runner '
       'verb and the grid home bound, no residue',

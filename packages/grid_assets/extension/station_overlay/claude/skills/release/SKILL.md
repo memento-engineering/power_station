@@ -29,8 +29,14 @@ internal refs, or read pub.dev's HTML — the Command is the substrate.
 
 Each op emits ONE JSON object under `--json`. Read the fields; never scrape.
 
-- **Version + tag** — `{{runner}} dart release plan --package <name> --current <ver> --change <docs|additive|fix|breaking> --json`
+- **Version + tag** — `{{runner}} dart release plan --package <name> --current <ver> --change <docs|additive|fix|breaking|rc> --json`
   -> `{current, next, change, requiresBreakingChangelog, package, tag}`.
+- **Private release tag** — `{{runner}} dart release tag --repo-dir <repo-dir> --tag <tag> --json`
+  -> `{tag, created, exitCode}`.
+- **Consumer validation** — `{{runner}} dart release validate-consumers --rc-tag <rc-tag> --manifest <consumers.json> --json`
+  -> `{rcTag, allPassed, results:[...]}`.
+- **Stable promotion** — `{{runner}} dart release promote --repo-dir <repo-dir> --stable-tag <stable-tag> --validation <validation.json> --json`
+  -> `{tag, created, exitCode}`.
 - **Scrub gate** — `{{runner}} dart release scrub --dir <package-dir> --json`
   -> `{root, clean, filesScanned, hits:[{file, line, text, match}]}`.
 - **Publish order** — `{{runner}} dart release order --manifest <deps.json> --json`
@@ -58,16 +64,60 @@ Decide the `--change` class, then let `plan` do the math:
 
 - **Additive API, fixes, docs -> `--change` docs/additive/fix** — a PATCH
   (`0.1.x`).
-- **Breaking -> `--change breaking`** — a MINOR pre-1.0 (`0.1.x` -> `0.2.0`),
-  MAJOR from 1.0. `plan` returns `requiresBreakingChangelog: true`: the CHANGELOG
-  MUST lead with `Breaking:` and carry a one-line migration. pub reads `^0.1.0`
-  as `>=0.1.0 <0.2.0`, so a breaking change hidden in a patch silently reaches
-  every resolver — that is why breaking moves the MINOR.
+- **Breaking -> `--change rc`** — plan a MINOR pre-1.0 candidate (`0.1.x`
+  -> `0.2.0-rc.1`), or a MAJOR candidate from 1.0. A BREAKING change MUST go
+  rc-first; do not use `--change breaking` to cut a stable version directly.
+  `plan` returns `requiresBreakingChangelog: true`: the CHANGELOG MUST lead with
+  `Breaking:` and carry a one-line migration. pub reads `^0.1.0` as
+  `>=0.1.0 <0.2.0`, so a breaking change hidden in a patch silently reaches
+  every resolver — that is why breaking moves to the next breaking base as an
+  rc before stable promotion.
 - **Adding a member to an exported abstract interface is breaking** for external
   implementers, even when every in-repo handle just delegates — call it breaking.
 - **Cross-package coherence:** when a sibling consumes API introduced in version
   X, tighten the sibling's constraint to `^X` in the SAME change and release in
   dependency order, so a resolved pair is always coherent.
+
+## Pre-release (rc) publishing
+
+Cut an rc instead of a stable release when a breaking change must be adopted by
+siblings before stable is safe, when the candidate needs consumer validation in
+CI, or whenever “we should not have to do a public stable release to get
+development to work” describes the bind. A BREAKING change MUST go rc-first.
+
+1. Plan the candidate with `{{runner}} dart release plan --package <name>
+   --current <ver> --change rc --json`; use the returned `next` and `tag`.
+2. Apply the planned version and CHANGELOG entry, pass the ordered gates below,
+   commit them, then cut the candidate tag with `{{runner}} dart release tag
+   --repo-dir <repo-dir> --tag <rc-tag> --json`.
+3. In each consumer, opt in by changing its hosted constraint to
+   `^X.Y.Z-rc.N`. Pub excludes prereleases from ordinary stable caret ranges:
+   a consumer on `^0.1.x` does NOT resolve `0.2.0-rc.1`, while a consumer
+   pinned to `^0.2.0-rc.1` accepts later `0.2.0` rcs and stable `0.2.0`.
+   That exclusion is what lets the pub.dev candidate publish without disturbing
+   stable consumers.
+4. **Sibling-coherence rule:** an rc on a package forces an rc on EVERY in-repo
+   sibling that depends on it. Move each dependent's constraint to the rc and
+   version every package in the same release wave, even when a dependent has no
+   API change of its own; otherwise the package set will not resolve. Moreover,
+   `dart pub publish` REFUSES a stable package that depends on a prerelease, so
+   every dependent in that closure must remain rc until the wave is promoted.
+   Compute dependency order with `release order` and process the complete
+   closure.
+5. Publish each candidate in dependency order with `dart pub publish`. After
+   each upload, loop `{{runner}} dart release poll --package <name> --version
+   <rc-version> --json` until `isPublished: true` before publishing a dependent.
+   `release poll` reads pub.dev's complete versions list and is the authority for
+   prereleases. `melos publish` still compares against latest stable and is NOT
+   a trustworthy “what is left to publish” check during an rc wave; it remains
+   usable for upload because pub rejects duplicate versions loudly.
+6. Validate the candidate with `{{runner}} dart release validate-consumers
+   --rc-tag <rc-tag> --manifest <consumers.json> --json`, save that ONE JSON
+   object as `<validation.json>`, and require `allPassed: true`.
+7. Only after every consumer passes, promote with `{{runner}} dart release
+   promote --repo-dir <repo-dir> --stable-tag <stable-tag> --validation
+   <validation.json> --json`. A failed validation report MUST stop promotion;
+   only the promoted wave may remove the prerelease suffix and publish stable.
 
 ## The gates — all mandatory, IN ORDER
 
@@ -85,14 +135,19 @@ Run them in sequence; a failure STOPS the release.
    `plan.next`, write the CHANGELOG entry (the `Breaking:` + migration line when
    `requiresBreakingChangelog`), and commit.
 5. **Dry-run** — `{{runner}} dart release dry-run --dir <package-dir> --package
-   <name> --json`. Read `clean`; treat ANY warning as a stop.
+   <name> --json`. Read `clean`; treat ANY warning as a stop. In particular,
+   “N checked-in files are modified in git” means gate 4 is incomplete: COMMIT
+   the version bump and CHANGELOG first, then rerun dry-run. Staging is not
+   enough; this gate validates checked-in state, so gate order matters.
 
 ## Publishing — in dependency order
 
 - For a MULTI-package release, resolve the order first: build a
   `{package:[deps]}` manifest and call `{{runner}} dart release order --manifest
-  <file> --json`. Publish in the returned `order`. (For the actual upload,
-  `melos publish --no-dry-run --yes` resolves the same order automatically.)
+  <file> --json`. Publish in the returned `order`.
+  (For stable uploads, `melos publish --no-dry-run --yes` resolves the same
+  order automatically. During an rc wave its registry comparison sees only
+  latest stable, so use `release poll` as the publication authority.)
 - `dart pub publish` from the package dir.
 - **After each upload, POLL before publishing a dependent:** loop `{{runner}}
   dart release poll --package <name> --version <ver> --json` until
