@@ -32,6 +32,18 @@ Future<ProcessResult> dolt(String root, List<String> args) =>
     Process.run('dolt', args, workingDirectory: root);
 
 void main() {
+  // The suite exercises a REAL dolt working copy — vector schema, identity
+  // metadata, top-k SQL — so it needs the binary. CI runners don't carry
+  // dolt; skipping there keeps the suite honest where it can run instead of
+  // failing everywhere it can't (measured: PR #98's first CI run).
+  final bool doltAvailable = Process.runSync('which', ['dolt']).exitCode == 0;
+  if (!doltAvailable) {
+    test('dolt binary is unavailable — embedding index suite skipped', () {
+      markTestSkipped('dolt not on PATH; suite requires a real dolt.');
+    });
+    return;
+  }
+
   late Directory home;
 
   setUp(() => home = Directory.systemTemp.createTempSync('embedding-index-'));
