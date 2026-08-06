@@ -48,6 +48,12 @@
 /// [SearchCommand] is the THIN exported CLI adapter a station composes
 /// (`space search <query>`) — the substrate agentic skills (`discover`) CALL
 /// instead of reinventing search by inference.
+/// Semantic vectors live in the grid-home-owned, derived
+/// [DoltEmbeddingIndex] at `.grid/embeddings`; [DoltEmbeddingIndex.open]
+/// provisions its `VECTOR(N)` width from [EmbeddingIndexIdentity], rejects a
+/// provider/model/dimension mismatch before use, and is the sole storage API
+/// shared by the indexing and semantic-read paths. It never writes a
+/// substation work store or the resident tranquility store.
 ///
 /// The VENDED SKILLS (bead `pow-88p`, `extension/station_overlay/skills/`) are
 /// those agentic halves: `discover` is the grid home's HITL front door — it
@@ -151,5 +157,6 @@ export 'src/compute/compute_command.dart';
 export 'src/compute/compute_commands.dart';
 export 'src/compute/lease_capability.dart';
 export 'src/lease/bus_lease.dart';
+export 'src/search/embedding_index.dart';
 export 'src/search/search_command.dart';
 export 'src/search/station_search.dart';
