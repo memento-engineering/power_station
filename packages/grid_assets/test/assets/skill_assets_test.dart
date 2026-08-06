@@ -293,10 +293,7 @@ void main() {
     });
 
     test('release renders the complete rc-first operator flow', () {
-      final rendered = loader.renderSkill(
-        'release',
-        args: {'runner': 'space'},
-      );
+      final rendered = loader.renderSkill('release', args: {'runner': 'space'});
 
       expect(rendered, isNot(contains('{{')));
       expect(
@@ -304,10 +301,7 @@ void main() {
         contains('--change <docs|additive|fix|breaking|rc> --json'),
       );
       expect(rendered, contains('Breaking -> `--change rc`'));
-      expect(
-        rendered,
-        isNot(contains('Breaking -> `--change breaking`')),
-      );
+      expect(rendered, isNot(contains('Breaking -> `--change breaking`')));
       expect(
         rendered,
         contains(
