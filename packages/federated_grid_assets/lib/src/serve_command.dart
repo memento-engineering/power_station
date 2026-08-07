@@ -20,6 +20,9 @@ typedef ServeHandlerFactory =
     })
     Function(ArgResults args, void Function(String) log);
 
+/// Builds the asset domain's opaque advertised profile from serve arguments.
+typedef ServeProfileFactory = Map<String, Object?> Function(ArgResults args);
+
 /// `grid serve` — run as a LESSOR station: offer slots over the federation bus
 /// (ADR-0011). A peer leases a slot and dispatches a use to run HERE. GENERIC:
 /// the dispatched "use" is the asset domain's, injected via [handlerFor] +
@@ -31,7 +34,8 @@ class ServeCommand extends Command<int> {
     required String defaultKind,
     required void Function(ArgParser) configureFlags,
     required this.handlerFor,
-  }) {
+    ServeProfileFactory? profileFor,
+  }) : profileFor = profileFor ?? ((_) => const <String, Object?>{}) {
     argParser
       ..addOption(
         'station',
@@ -40,12 +44,16 @@ class ServeCommand extends Command<int> {
       )
       ..addOption('host', defaultsTo: '0.0.0.0', help: 'Bind address.')
       ..addOption('port', defaultsTo: '8080', help: 'Bind port.')
-      ..addOption(
+      ..addMultiOption(
         'kind',
-        defaultsTo: defaultKind,
+        defaultsTo: [defaultKind],
         help: 'The resource-asset kind offered.',
       )
-      ..addOption('slots', defaultsTo: '1', help: 'How many slots to offer.')
+      ..addMultiOption(
+        'slots',
+        defaultsTo: const ['1'],
+        help: 'How many slots to offer for the corresponding kind.',
+      )
       ..addOption(
         'token',
         help:
@@ -84,6 +92,40 @@ class ServeCommand extends Command<int> {
   /// reference app).
   final ServeHandlerFactory handlerFor;
 
+  /// The asset domain's opaque presence-profile factory.
+  final ServeProfileFactory profileFor;
+
+  /// Parses ordered repeated `--kind`/`--slots` pairs into offered capacities.
+  Map<String, int> serveOfferings(ArgResults args) {
+    final kinds = args.multiOption('kind');
+    final slots = args.multiOption('slots');
+    if (kinds.length != slots.length) {
+      throw UsageException(
+        'each --kind requires one --slots value in the same position',
+        argParser.usage,
+      );
+    }
+    final result = <String, int>{};
+    for (var index = 0; index < kinds.length; index++) {
+      final kind = kinds[index];
+      final capacity = int.tryParse(slots[index]);
+      if (kind.isEmpty || result.containsKey(kind)) {
+        throw UsageException(
+          'served kinds must be non-empty and unique',
+          argParser.usage,
+        );
+      }
+      if (capacity == null || capacity <= 0) {
+        throw UsageException(
+          '--slots values must be positive integers',
+          argParser.usage,
+        );
+      }
+      result[kind] = capacity;
+    }
+    return Map.unmodifiable(result);
+  }
+
   @override
   final String name = 'serve';
 
@@ -97,13 +139,14 @@ class ServeCommand extends Command<int> {
     final a = argResults!;
     final station = a.option('station')!;
     final token = a.option('token');
+    final offerings = serveOfferings(a);
     final asset = handlerFor(a, (m) => stdout.writeln('  $m'));
     final server = await StationServer.start(
       station: station,
       host: a.option('host')!,
       port: int.parse(a.option('port')!),
-      kind: a.option('kind')!,
-      offered: int.parse(a.option('slots')!),
+      offerings: offerings,
+      profile: profileFor(a),
       token: token,
       ttl: Duration(seconds: int.parse(a.option('ttl')!)),
       maxLifetime: Duration(seconds: int.parse(a.option('max-lifetime')!)),
@@ -118,7 +161,7 @@ class ServeCommand extends Command<int> {
       ..writeln('grid serve — LESSOR station "$station"')
       ..writeln(
         'listening on ${a.option('host')}:${server.port}  ·  offering '
-        '${a.option('slots')} ${a.option('kind')} slot(s)'
+        '${offerings.entries.map((e) => '${e.value} ${e.key} slot(s)').join(', ')}'
         '${token != null ? '  ·  token REQUIRED' : ''}',
       );
     if (asset.banner != null) stdout.writeln(asset.banner);

@@ -65,7 +65,7 @@ class _Waiter {
 
 /// Tracks offered vs held slots for a single station and arbitrates leases.
 class LeaseManager {
-  /// Creates a manager offering [offered] slots of [kind] for [station].
+  /// Creates a manager offering the insertion-ordered [offerings] for [station].
   ///
   /// [ttl] is the idle-renewal window (each [touch] extends it). [maxLifetime] is
   /// the immovable cap on a lease's total life (renewal cannot push past it).
@@ -73,10 +73,14 @@ class LeaseManager {
   /// expected liveness cadence; a lease with no [beat] within
   /// [heartbeat] × [missedHeartbeatThreshold] is reaped as disconnected. [clock]
   /// and [idGen] are injectable for deterministic tests.
+  ///
+  /// Fencing deliberately uses one manager-wide counter. A fencing token only
+  /// needs to be an owner-issued monotonic version; sharing the sequence across
+  /// kinds makes every grant from this station manager strictly ordered without
+  /// combining any kind's capacity, queue, idempotency, or lifecycle state.
   LeaseManager({
     required this.station,
-    required this.offered,
-    this.kind = kDefaultKind,
+    required Map<String, int> offerings,
     this.ttl = const Duration(seconds: 300),
     this.maxLifetime = const Duration(seconds: 3600),
     this.maxQueueDepth = 64,
@@ -85,18 +89,23 @@ class LeaseManager {
     this.onLeaseEnded,
     DateTime Function()? clock,
     String Function(int seq)? idGen,
-  }) : assert(missedHeartbeatThreshold > 0, 'threshold must be positive'),
+  }) : offerings = Map.unmodifiable(_validateOfferings(offerings)),
+       _queues = {for (final kind in offerings.keys) kind: <_Waiter>[]},
+       _grantsByKindAndKey = {
+         for (final kind in offerings.keys) kind: <String, LeaseGrant>{},
+       },
+       assert(missedHeartbeatThreshold > 0, 'threshold must be positive'),
        _clock = clock ?? DateTime.now,
        _idGen = idGen ?? ((seq) => '$station-lease-$seq');
 
   /// The station id this manager speaks for.
   final String station;
 
-  /// Total slots offered.
-  final int offered;
+  /// Resource-asset kinds and their capacities, in advertisement order.
+  final Map<String, int> offerings;
 
-  /// The resource-asset kind offered.
-  final String kind;
+  /// Total slots offered across all kinds.
+  int get offered => offerings.values.fold(0, (sum, value) => sum + value);
 
   /// How long a lease lives without activity before it is reaped.
   final Duration ttl;
@@ -124,8 +133,8 @@ class LeaseManager {
   final DateTime Function() _clock;
   final String Function(int seq) _idGen;
   final Map<String, _Held> _held = {};
-  final Map<String, LeaseGrant> _grantsByKey = {};
-  final List<_Waiter> _queue = [];
+  final Map<String, List<_Waiter>> _queues;
+  final Map<String, Map<String, LeaseGrant>> _grantsByKindAndKey;
   int _seq = 0;
   int _fence = 0;
 
@@ -136,19 +145,35 @@ class LeaseManager {
   /// ticker (the spike already reaped on this read; this extends it to pump).
   int get available {
     _pump();
-    return offered - _held.length;
+    return offerings.keys.fold(0, (sum, kind) => sum + _availableFor(kind));
+  }
+
+  /// Free slots for [kind] after driving owner-clock expiry and its FIFO queue.
+  int availableFor(String kind) {
+    _requireKind(kind);
+    _reap();
+    _pumpKind(kind);
+    return _availableFor(kind);
   }
 
   /// The number of requests currently waiting in the FIFO queue.
   int get queued {
     _pump();
-    return _queue.length;
+    return _queues.values.fold(0, (sum, queue) => sum + queue.length);
+  }
+
+  /// The number of requests waiting for [kind].
+  int queuedFor(String kind) {
+    _requireKind(kind);
+    _reap();
+    _pumpKind(kind);
+    return _queues[kind]!.length;
   }
 
   /// A presence snapshot.
   Presence get presence => Presence(
     station: station,
-    kinds: [kind],
+    kinds: offerings.keys.toList(growable: false),
     offered: offered,
     available: available,
   );
@@ -189,17 +214,18 @@ class LeaseManager {
     }
     // Idempotent retry that lands on an already-queued waiter.
     if (req.idempotencyKey.isNotEmpty) {
-      for (final w in _queue) {
+      for (final w in _queues[req.kind]!) {
         if (w.req.idempotencyKey == req.idempotencyKey) {
           return w.completer.future;
         }
       }
     }
-    if (_queue.length >= maxQueueDepth) {
+    final queue = _queues[req.kind]!;
+    if (queue.length >= maxQueueDepth) {
       return Future.error(const LeaseDeniedException('wait-queue full'));
     }
     final w = _Waiter(req, Completer<LeaseGrant>(), _clock().add(maxWait));
-    _queue.add(w);
+    queue.add(w);
     return w.completer.future;
   }
 
@@ -288,19 +314,19 @@ class LeaseManager {
   /// refusal (the kind is not offered).
   LeaseGrant? _tryGrantNow(LeaseRequest req) {
     _pump(); // reap + hand freed slots to the queue FIRST (fairness)
-    if (req.kind != kind) {
+    if (!offerings.containsKey(req.kind)) {
       throw LeaseDeniedException(
-        'kind "${req.kind}" not offered (offers "$kind")',
+        'kind "${req.kind}" not offered (offers ${offerings.keys.join(', ')})',
       );
     }
     if (req.idempotencyKey.isNotEmpty) {
-      final existing = _grantsByKey[req.idempotencyKey];
+      final existing = _grantsByKindAndKey[req.kind]![req.idempotencyKey];
       if (existing != null && _held.containsKey(existing.leaseId)) {
         return existing; // dedup: the live grant, never a second
       }
     }
     // Full — any FIFO waiters are ahead of a fresh direct grant.
-    if (_held.length >= offered) return null;
+    if (_availableFor(req.kind) == 0) return null;
     return _issue(req);
   }
 
@@ -312,7 +338,7 @@ class LeaseManager {
     final hardDeadline = now.add(maxLifetime);
     final timeout = heartbeatTimeout;
     _held[id] = _Held(
-      kind: kind,
+      kind: req.kind,
       // The idle/heartbeat deadlines are NOT clamped to the hard deadline; the
       // hard deadline is enforced independently by [_reap], so it stays the lone,
       // testable max-lifetime bound (no masking by a clamped idle expiry).
@@ -329,9 +355,11 @@ class LeaseManager {
       ttlSeconds: ttl.inSeconds,
       fencingToken: token,
       heartbeatSeconds: heartbeat?.inSeconds ?? 0,
-      kind: kind,
+      kind: req.kind,
     );
-    if (req.idempotencyKey.isNotEmpty) _grantsByKey[req.idempotencyKey] = grant;
+    if (req.idempotencyKey.isNotEmpty) {
+      _grantsByKindAndKey[req.kind]![req.idempotencyKey] = grant;
+    }
     return grant;
   }
 
@@ -345,7 +373,9 @@ class LeaseManager {
 
   void _remove(String leaseId, _Held h) {
     _held.remove(leaseId);
-    if (h.idempotencyKey.isNotEmpty) _grantsByKey.remove(h.idempotencyKey);
+    if (h.idempotencyKey.isNotEmpty) {
+      _grantsByKindAndKey[h.kind]!.remove(h.idempotencyKey);
+    }
     try {
       onLeaseEnded?.call(leaseId);
     } on Object {
@@ -383,17 +413,56 @@ class LeaseManager {
   /// Reap, expire overdue waiters, then grant freed slots to the FIFO head.
   void _pump() {
     _reap();
+    for (final kind in offerings.keys) {
+      _pumpKind(kind);
+    }
+  }
+
+  void _pumpKind(String kind) {
     final now = _clock();
-    _queue.removeWhere((w) {
+    final queue = _queues[kind]!;
+    queue.removeWhere((w) {
       if (w.deadline.isAfter(now)) return false;
       if (!w.completer.isCompleted) {
         w.completer.completeError(const LeaseDeniedException('wait expired'));
       }
       return true;
     });
-    while (_queue.isNotEmpty && _held.length < offered) {
-      final w = _queue.removeAt(0);
+    while (queue.isNotEmpty && _availableFor(kind) > 0) {
+      final w = queue.removeAt(0);
       w.completer.complete(_issue(w.req));
     }
+  }
+
+  int _availableFor(String kind) =>
+      offerings[kind]! - _held.values.where((held) => held.kind == kind).length;
+
+  void _requireKind(String kind) {
+    if (!offerings.containsKey(kind)) {
+      throw ArgumentError.value(kind, 'kind', 'is not offered');
+    }
+  }
+
+  static Map<String, int> _validateOfferings(Map<String, int> offerings) {
+    if (offerings.isEmpty) {
+      throw ArgumentError.value(offerings, 'offerings', 'must not be empty');
+    }
+    for (final entry in offerings.entries) {
+      if (entry.key.isEmpty) {
+        throw ArgumentError.value(
+          entry.key,
+          'offerings',
+          'kind must not be empty',
+        );
+      }
+      if (entry.value <= 0) {
+        throw ArgumentError.value(
+          entry.value,
+          'offerings[${entry.key}]',
+          'capacity must be positive',
+        );
+      }
+    }
+    return Map<String, int>.of(offerings);
   }
 }

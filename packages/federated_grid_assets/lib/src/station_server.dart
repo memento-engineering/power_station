@@ -65,8 +65,9 @@ class StationServer {
   /// The lease manager (exposed for presence/tests).
   LeaseManager get leases => _leases;
 
-  /// Binds an HTTP lessor on [host]:[port] offering [offered] slots of [kind]
-  /// for [station]. [handler] runs a dispatched OPAQUE payload (the asset domain
+  /// Binds an HTTP lessor on [host]:[port], accepting either legacy [offered]
+  /// slots of [kind] or a multi-kind [offerings] map for [station]. Exactly one
+  /// capacity form is required. [handler] runs a dispatched OPAQUE payload (the asset domain
   /// that owns the kind supplies it — the core has no built-in execution). Pass
   /// [token] to require `X-Grid-Token`; [onLog] to observe events. [leaseWait]
   /// (default zero) opts a full-capacity request into the FIFO wait-queue instead
@@ -81,8 +82,9 @@ class StationServer {
   /// it `null` (the default) for tests that drive the injected [clock] manually.
   static Future<StationServer> start({
     required String station,
-    required int offered,
     required DispatchHandler handler,
+    int? offered,
+    Map<String, int>? offerings,
     String host = '0.0.0.0',
     int port = 0,
     String kind = kDefaultKind,
@@ -100,11 +102,14 @@ class StationServer {
     void Function(String)? onLog,
     void Function(String leaseId)? onLeaseEnded,
   }) async {
+    if ((offerings == null) == (offered == null)) {
+      throw ArgumentError('provide exactly one of offerings or offered');
+    }
+    final effectiveOfferings = offerings ?? <String, int>{kind: offered!};
     final server = await HttpServer.bind(host, port);
     final manager = LeaseManager(
       station: station,
-      offered: offered,
-      kind: kind,
+      offerings: effectiveOfferings,
       ttl: ttl,
       maxLifetime: maxLifetime,
       maxQueueDepth: maxQueueDepth,
