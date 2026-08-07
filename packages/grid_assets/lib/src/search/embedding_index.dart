@@ -178,6 +178,39 @@ class DoltEmbeddingIndex {
   final EmbeddingIndexIdentity identity;
   final DoltCommandRunner _runner;
 
+  /// Returns the single persisted freshness key for every bead in [store].
+  Future<Map<String, String>> changeKeys({required String store}) async {
+    final rows = await _query(
+      'SELECT bead_id, change_key FROM bead_vectors WHERE store = '
+      "'${_sql(store)}' GROUP BY bead_id, change_key ORDER BY bead_id;",
+    );
+    final result = <String, String>{};
+    for (final row in rows) {
+      final beadId = '${row['bead_id']}';
+      final key = '${row['change_key']}';
+      final previous = result[beadId];
+      if (previous != null && previous != key) {
+        throw StateError('mixed change keys for $store/$beadId');
+      }
+      result[beadId] = key;
+    }
+    return result;
+  }
+
+  /// Deletes all persisted chunks for [beadIds] in [store].
+  Future<void> deleteBeads({
+    required String store,
+    required List<String> beadIds,
+  }) async {
+    if (beadIds.isEmpty) return;
+    final ids = beadIds.map((id) => "'${_sql(id)}'").join(', ');
+    await _sqlRun(
+      "DELETE FROM bead_vectors WHERE store = '${_sql(store)}' "
+      'AND bead_id IN ($ids);',
+    );
+    await _commit('index remove $store');
+  }
+
   Future<void> _createSchema() async {
     await _sqlRun('''
 CREATE TABLE embedding_index_metadata (

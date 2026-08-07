@@ -54,6 +54,9 @@
 /// provider/model/dimension mismatch before use, and is the sole storage API
 /// shared by the indexing and semantic-read paths. It never writes a
 /// substation work store or the resident tranquility store.
+/// [IndexCommand] is the only embedding writer: it calls [EmbeddingClient]
+/// before writing the grid-home-owned [DoltEmbeddingIndex]. [SearchCommand]
+/// remains inference-free and write-free.
 ///
 /// The VENDED SKILLS (bead `pow-88p`, `extension/station_overlay/skills/`) are
 /// those agentic halves: `discover` is the grid home's HITL front door — it
@@ -160,6 +163,8 @@ export 'src/lease/bus_lease.dart';
 export 'src/search/embedding_index.dart';
 export 'src/search/embedding_change_key.dart';
 export 'src/search/embedding_provider.dart';
-export 'src/search/semantic_search.dart';
+export 'src/search/index_command.dart';
 export 'src/search/search_command.dart';
+export 'src/search/semantic_search.dart';
+export 'src/search/station_index.dart';
 export 'src/search/station_search.dart';
