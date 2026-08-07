@@ -57,6 +57,48 @@ class _FakeBeadSource implements SubstationBeadSource {
       byRoot[scope.root] ?? const [];
 }
 
+class _SemanticBackend implements SemanticSearchBackend {
+  _SemanticBackend(this.beads);
+
+  final Map<String, List<Bead>> beads;
+
+  @override
+  Future<List<double>> embedQuery(String query) async => const [1];
+
+  @override
+  Future<List<EmbeddingIndexedBead>> indexedBeads(String store) async => [
+    for (final bead in beads[store] ?? const <Bead>[])
+      EmbeddingIndexedBead(
+        beadId: bead.id,
+        changeKey: embeddingChangeKey(bead),
+      ),
+  ];
+
+  @override
+  Future<List<EmbeddingIndexHit>> nearest({
+    required String store,
+    required List<double> queryVector,
+    required int limit,
+  }) async {
+    final bead = (beads[store] ?? const <Bead>[]).firstOrNull;
+    if (bead == null) return const [];
+    return [
+      EmbeddingIndexHit(
+        row: EmbeddingIndexRow(
+          store: store,
+          beadId: bead.id,
+          field: 'design',
+          chunkIx: 0,
+          changeKey: embeddingChangeKey(bead),
+          chunkText: 'semantic winning chunk',
+          vector: const [1],
+        ),
+        distance: 0.2,
+      ),
+    ];
+  }
+}
+
 void main() {
   final beads = {
     '/roots/alpha': const [
@@ -79,7 +121,11 @@ void main() {
     StringBuffer out,
     StringBuffer err,
   })
-  harness({Set<String>? existing, String Function()? gridHomeDefault}) {
+  harness({
+    Set<String>? existing,
+    String Function()? gridHomeDefault,
+    SemanticSearchBackendMount? semanticMount,
+  }) {
     final out = StringBuffer();
     final err = StringBuffer();
     _StationDelegate? last;
@@ -93,6 +139,9 @@ void main() {
             dirExists:
                 (existing ?? {'/roots/alpha/.beads', '/roots/beta/.beads'})
                     .contains,
+            semanticBackendMount:
+                semanticMount ??
+                (_) async => throw StateError('provider offline'),
           ),
           out: out,
           err: err,
@@ -110,6 +159,8 @@ void main() {
     final json = jsonDecode(h.out.toString()) as Map<String, dynamic>;
     expect(json['query'], 'flux');
     expect(json['hitCount'], 2);
+    expect(json.keys, ['query', 'stores', 'hitCount', 'semantic']);
+    expect((json['semantic'] as Map)['outcome'], 'unavailable');
     final stores = json['stores'] as List;
     expect(
       stores.map((s) => (s as Map)['substation']),
@@ -121,6 +172,31 @@ void main() {
     expect(hit['status'], 'closed');
     expect(hit['type'], 'decision');
   });
+
+  test(
+    'always-on semantics are additive, marked, scored, and have no flag',
+    () async {
+      final byStore = {
+        'alpha': beads['/roots/alpha']!,
+        'beta': beads['/roots/beta']!,
+      };
+      final h = harness(semanticMount: (_) async => _SemanticBackend(byStore));
+      final command = h.runner.commands['search']!;
+      expect(command.argParser.options, isNot(contains('semantic')));
+      expect(await h.runner.run(['search', '--json', 'flux']), 0);
+      final json = jsonDecode(h.out.toString()) as Map<String, dynamic>;
+      final semantic = json['semantic'] as Map<String, dynamic>;
+      expect(semantic['outcome'], 'searched');
+      expect(semantic['stores'], [
+        {'store': 'alpha', 'indexed': 1, 'stale': 0, 'unindexed': 0},
+        {'store': 'beta', 'indexed': 1, 'stale': 0, 'unindexed': 0},
+      ]);
+      final hit = (semantic['hits'] as List).first as Map;
+      expect(hit['path'], 'semantic');
+      expect(hit['score'], closeTo(0.8, 1e-12));
+      expect(hit['snippet'], 'semantic winning chunk');
+    },
+  );
 
   test('multi-word rest args join into one query', () async {
     final h = harness();
@@ -140,6 +216,10 @@ void main() {
       expect(text, contains('alpha: 1 hit(s)'));
       expect(text, contains('close_reason: ratified: soldered flux joints'));
       expect(text, contains('beta: store absent'));
+      expect(
+        text,
+        contains('semantic: unavailable — Bad state: provider offline'),
+      );
     },
   );
 

@@ -73,6 +73,14 @@ class EmbeddingIndexHit {
   final double distance;
 }
 
+/// One indexed bead and the semantic-input key that produced its chunks.
+class EmbeddingIndexedBead {
+  const EmbeddingIndexedBead({required this.beadId, required this.changeKey});
+
+  final String beadId;
+  final String changeKey;
+}
+
 /// Measured chunk-row cardinality, never a capacity estimate.
 class EmbeddingIndexRowCount {
   const EmbeddingIndexRowCount({required this.total, required this.byStore});
@@ -241,6 +249,30 @@ SELECT store, bead_id, field, chunk_ix, change_key, chunk_text,
           row: _rowFromJson(value, vector: queryVector),
           distance: (value['distance'] as num).toDouble(),
         ),
+    ];
+  }
+
+  /// Returns indexed bead keys for [store], ordered by bead id.
+  Future<List<EmbeddingIndexedBead>> indexedBeads({
+    required String store,
+  }) async {
+    final rows = await _query(
+      'SELECT bead_id, MIN(change_key) AS change_key, '
+      'COUNT(DISTINCT change_key) AS key_count FROM bead_vectors '
+      "WHERE store = '${_sql(store)}' GROUP BY bead_id ORDER BY bead_id;",
+    );
+    return [
+      for (final row in rows)
+        if ((row['key_count'] as num).toInt() != 1)
+          throw StateError(
+            'embedding index has inconsistent change keys for '
+            '$store/${row['bead_id']} — rebuild the derived index',
+          )
+        else
+          EmbeddingIndexedBead(
+            beadId: '${row['bead_id']}',
+            changeKey: '${row['change_key']}',
+          ),
     ];
   }
 

@@ -32,6 +32,40 @@ Future<ProcessResult> dolt(String root, List<String> args) =>
     Process.run('dolt', args, workingDirectory: root);
 
 void main() {
+  test(
+    'indexedBeads returns ordered keys and refuses inconsistent keys',
+    () async {
+      final home = Directory.systemTemp.createTempSync('embedding-index-keys-');
+      addTearDown(() => home.deleteSync(recursive: true));
+      final root = Directory('${home.path}/.grid/embeddings')
+        ..createSync(recursive: true);
+      Directory('${root.path}/.dolt').createSync();
+      final runner = _RecordingRunner();
+      final index = await DoltEmbeddingIndex.open(
+        gridHome: home.path,
+        identity: identity,
+        runner: runner,
+      );
+      expect(
+        (await index.indexedBeads(
+          store: 'alpha',
+        )).map((row) => (row.beadId, row.changeKey)),
+        [('al-1', 'k1'), ('al-2', 'k2')],
+      );
+      runner.inconsistent = true;
+      await expectLater(
+        index.indexedBeads(store: 'alpha'),
+        throwsA(
+          isA<StateError>().having(
+            (error) => '$error',
+            'message',
+            contains('rebuild the derived index'),
+          ),
+        ),
+      );
+    },
+  );
+
   // The suite exercises a REAL dolt working copy — vector schema, identity
   // metadata, top-k SQL — so it needs the binary. CI runners don't carry
   // dolt; skipping there keeps the suite honest where it can run instead of
@@ -207,6 +241,7 @@ void main() {
 
 class _RecordingRunner implements DoltCommandRunner {
   final List<List<String>> arguments = [];
+  bool inconsistent = false;
 
   @override
   Future<DoltCommandResult> run(
@@ -221,6 +256,15 @@ class _RecordingRunner implements DoltCommandRunner {
               'provider_id': 'fixture-provider',
               'model': 'fixture-model',
               'dimensions': 3,
+            },
+          ]
+        : query.contains('COUNT(DISTINCT change_key)')
+        ? [
+            {'bead_id': 'al-1', 'change_key': 'k1', 'key_count': 1},
+            {
+              'bead_id': 'al-2',
+              'change_key': 'k2',
+              'key_count': inconsistent ? 2 : 1,
             },
           ]
         : [

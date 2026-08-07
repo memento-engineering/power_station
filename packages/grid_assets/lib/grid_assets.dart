@@ -158,6 +158,8 @@ export 'src/compute/compute_commands.dart';
 export 'src/compute/lease_capability.dart';
 export 'src/lease/bus_lease.dart';
 export 'src/search/embedding_index.dart';
+export 'src/search/embedding_change_key.dart';
 export 'src/search/embedding_provider.dart';
+export 'src/search/semantic_search.dart';
 export 'src/search/search_command.dart';
 export 'src/search/station_search.dart';

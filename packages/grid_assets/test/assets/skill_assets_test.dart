@@ -132,6 +132,16 @@ void main() {
       // The report contract the skill consumes (A11's documented schema).
       expect(rendered, contains('hitCount'));
       expect(rendered, contains('substation, prefix, root, outcome'));
+      expect(rendered, contains('semantic'));
+      expect(rendered, contains('indexed'));
+      expect(rendered, contains('stale'));
+      expect(rendered, contains('unindexed'));
+      expect(rendered, contains('unavailable'));
+      expect(rendered, contains('path=semantic'));
+      expect(rendered, contains('score'));
+      expect(rendered, contains('lexical stores section'));
+      expect(rendered, contains('field=id'));
+      expect(rendered, contains('semantic hit never confirms'));
     });
 
     test('never re-derives cross-store search by inference — the ad-hoc bd '

@@ -12,6 +12,7 @@ environment:
 dependencies:
   args: ^2.6.0
   beads_dart: ^0.2.0-rc.1
+  crypto: ^3.0.6
   dart_grid_assets: ^0.1.0
   extension_discovery: ^2.1.0
   federated_grid_assets: ^0.3.0-rc.1

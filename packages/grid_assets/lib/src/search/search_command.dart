@@ -22,6 +22,7 @@ import 'package:grid_sdk/grid_sdk.dart' as sdk;
 import 'package:path/path.dart' as p;
 
 import 'station_search.dart';
+import 'semantic_search.dart';
 
 String _currentDirectory() => Directory.current.path;
 
@@ -58,7 +59,7 @@ class SearchCommand extends Command<int> {
         help:
             'Emit the structured report as ONE JSON object '
             '({query, stores: [{substation, prefix, root, outcome, …}], '
-            'hitCount}) — the surface agentic skills consume.',
+            'hitCount, semantic}) — the surface agentic skills consume.',
       )
       ..addOption(
         'grid-home',
@@ -122,7 +123,11 @@ class SearchCommand extends Command<int> {
         );
         return 1;
       }
-      final report = await _service.search(query: query, roster: roster);
+      final report = await _service.search(
+        query: query,
+        roster: roster,
+        gridHome: gridHome,
+      );
       if (args.flag('json')) {
         _out.writeln(jsonEncode(report.toJson()));
       } else {
@@ -162,6 +167,33 @@ class SearchCommand extends Command<int> {
     _out.writeln(
       '${report.hits.length} hit(s) across ${report.stores.length} '
       'substation(s) for "${report.query}"',
+    );
+    switch (report.semantic) {
+      case SemanticSearched(:final stores, :final hits):
+        for (final store in stores) {
+          _renderSemanticCoverage(store);
+        }
+        for (final semantic in hits) {
+          final hit = semantic.hit;
+          _out
+            ..writeln(
+              '  ${hit.beadId}  semantic  score=${semantic.score}  '
+              '${hit.status}  [${hit.issueType}]  ${hit.title}',
+            )
+            ..writeln('      ${hit.field}: ${hit.snippet}');
+        }
+      case SemanticUnavailable(:final stores, :final reason):
+        for (final store in stores) {
+          _renderSemanticCoverage(store);
+        }
+        _out.writeln('semantic: unavailable — $reason');
+    }
+  }
+
+  void _renderSemanticCoverage(SemanticStoreCoverage store) {
+    _out.writeln(
+      '${store.store}: semantic index ${store.indexed} indexed, '
+      '${store.stale} stale, ${store.unindexed} unindexed',
     );
   }
 }

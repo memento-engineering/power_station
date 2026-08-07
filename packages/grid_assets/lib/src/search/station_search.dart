@@ -30,6 +30,7 @@ import 'package:beads_dart/beads_dart.dart'
 import 'package:grid_sdk/grid_sdk.dart' as sdk;
 
 import '../assets/mounted_tree.dart';
+import 'semantic_search.dart';
 
 /// Enumerates the mounted substation roster of [delegate] — the ATTACHED
 /// substations, resolved from the resident-station context at run time.
@@ -244,13 +245,20 @@ class StoreFailed extends StoreSearchOutcome {
 /// seat, in roster (mount) order.
 class StationSearchReport {
   /// Creates the report.
-  const StationSearchReport({required this.query, required this.stores});
+  const StationSearchReport({
+    required this.query,
+    required this.stores,
+    required this.semantic,
+  });
 
   /// The query as searched.
   final String query;
 
   /// One outcome per roster seat, in roster order.
   final List<StoreSearchOutcome> stores;
+
+  /// The independent, additive semantic result.
+  final SemanticSearchOutcome semantic;
 
   /// Every hit across all searched stores, in roster-then-id order.
   List<SearchHit> get hits => [
@@ -269,6 +277,7 @@ class StationSearchReport {
     'query': query,
     'stores': [for (final s in stores) s.toJson()],
     'hitCount': hits.length,
+    'semantic': semantic.toJson(),
   };
 }
 
@@ -286,11 +295,15 @@ class StationSearchService {
   const StationSearchService({
     SubstationBeadSource source = const BdExportBeadSource(),
     sdk.DirectoryProbe dirExists = sdk.defaultDirectoryProbe,
+    SemanticSearchBackendMount semanticBackendMount =
+        mountSemanticSearchBackend,
   }) : _source = source,
-       _dirExists = dirExists;
+       _dirExists = dirExists,
+       _semanticBackendMount = semanticBackendMount;
 
   final SubstationBeadSource _source;
   final sdk.DirectoryProbe _dirExists;
+  final SemanticSearchBackendMount _semanticBackendMount;
 
   /// Searches every roster seat's work store for [query]. The query is split
   /// on whitespace and each term is matched as a case-insensitive substring;
@@ -310,6 +323,7 @@ class StationSearchService {
   Future<StationSearchReport> search({
     required String query,
     required List<sdk.SubstationScope> roster,
+    required String gridHome,
   }) async {
     if (query.trim().isEmpty) {
       throw ArgumentError.value(
@@ -320,6 +334,7 @@ class StationSearchService {
       );
     }
     final outcomes = <StoreSearchOutcome>[];
+    final semanticInputs = <SemanticStoreInput>[];
     for (final scope in roster) {
       final beadsDir = scope.workStore.beadsDir;
       if (!_dirExists(beadsDir)) {
@@ -328,26 +343,37 @@ class StationSearchService {
       }
       try {
         final beads = await _source.read(scope);
-        outcomes.add(_searchStore(scope, beads, query));
+        final searchable = [
+          for (final bead in beads)
+            if (bead.issueType.isCore) bead,
+        ]..sort((left, right) => left.id.compareTo(right.id));
+        semanticInputs.add(SemanticStoreInput(scope: scope, beads: searchable));
+        outcomes.add(_searchStore(scope, searchable, query));
       } on Object catch (e) {
         // Per-store isolation: one failing store never masks the roster's
         // other seats; the failure is IN the report, loud.
         outcomes.add(StoreFailed(scope, reason: '$e'));
       }
     }
-    return StationSearchReport(query: query, stores: outcomes);
+    final semantic = await runSemanticSearch(
+      query: query,
+      gridHome: gridHome,
+      stores: semanticInputs,
+      mount: _semanticBackendMount,
+    );
+    return StationSearchReport(
+      query: query,
+      stores: outcomes,
+      semantic: semantic,
+    );
   }
 
   StoreSearched _searchStore(
     sdk.SubstationScope scope,
-    List<Bead> beads,
+    List<Bead> searchable,
     String query,
   ) {
     final needles = query.trim().toLowerCase().split(RegExp(r'\s+'));
-    final searchable = [
-      for (final b in beads)
-        if (b.issueType.isCore) b,
-    ]..sort((a, b) => a.id.compareTo(b.id));
     final hits = <SearchHit>[];
     for (final bead in searchable) {
       final hit = _matchBead(scope, bead, needles);
