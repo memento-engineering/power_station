@@ -44,7 +44,7 @@ void main() {
   }) async {
     final s = await StationServer.start(
       station: 'peer',
-      offered: offered,
+      offerings: {kDefaultKind: offered},
       host: '127.0.0.1',
       leaseWait: leaseWait,
       ttl: ttl,
@@ -77,7 +77,8 @@ void main() {
   // ===========================================================================
   group('Invariant 1 — owner-authoritative ⇒ NO DOUBLE-GRANT (at depth)', () {
     // MUTATION RESISTED: weakening/removing the capacity guard in
-    // `LeaseManager._tryGrantNow` — `if (_held.length >= offered) return null;`.
+    // `LeaseManager._tryGrantNow` — the per-kind `_availableFor(req.kind)` guard.
+    // Weakening it over-grants only the requested kind; other kinds are isolated.
     // If `>=` were `>` (off-by-one) you would get `offered + 1` grants; if removed
     // entirely, ALL concurrent requests would grant. The exact-count + distinct-
     // slot assertions catch both: a single asset slot is never granted twice.
@@ -267,7 +268,8 @@ void main() {
     );
 
     // MUTATION RESISTED: changing the FIFO dequeue in `LeaseManager._pump`
-    // (`_queue.removeAt(0)` → `removeLast()`, i.e. LIFO). Arrival order is fixed
+    // (`_queues[kDefaultKind]!.removeAt(0)` → `removeLast()`, i.e. LIFO).
+    // Each kind owns an independent arrival-order queue. Arrival order is fixed
     // deterministically over the wire by waiting for each request to ENQUEUE
     // before firing the next; under LIFO the first release would serve the
     // last-arrived waiter, failing `expect(order[0], 'A')`.

@@ -25,7 +25,7 @@ LeaseManager _hbManager(
   Duration maxLifetime = const Duration(seconds: 7200),
 }) => LeaseManager(
   station: 'b',
-  offered: offered,
+  offerings: {'kind-a': offered, 'kind-b': 1},
   ttl: ttl,
   maxLifetime: maxLifetime,
   heartbeat: heartbeat,
@@ -36,19 +36,29 @@ LeaseManager _hbManager(
 void main() {
   group('heartbeat liveness', () {
     test('the grant advertises the heartbeat cadence; off by default', () {
-      final off = LeaseManager(station: 'b', offered: 1);
-      expect(off.grant(const LeaseRequest(lessee: 'x')).heartbeatSeconds, 0);
+      final off = LeaseManager(station: 'b', offerings: const {'kind-a': 1});
+      expect(
+        off
+            .grant(const LeaseRequest(lessee: 'x', kind: 'kind-a'))
+            .heartbeatSeconds,
+        0,
+      );
       expect(off.heartbeatTimeout, isNull);
 
       final on = _hbManager(_Clock());
-      expect(on.grant(const LeaseRequest(lessee: 'x')).heartbeatSeconds, 10);
+      expect(
+        on
+            .grant(const LeaseRequest(lessee: 'x', kind: 'kind-a'))
+            .heartbeatSeconds,
+        10,
+      );
       expect(on.heartbeatTimeout, const Duration(seconds: 30)); // 10 × 3
     });
 
     test('a beat KEEPS the lease alive past the original deadline', () {
       final clock = _Clock();
       final m = _hbManager(clock); // timeout = 30s
-      final g = m.grant(const LeaseRequest(lessee: 'x'));
+      final g = m.grant(const LeaseRequest(lessee: 'x', kind: 'kind-a'));
 
       clock.advance(const Duration(seconds: 25)); // before the 30s deadline
       m.beat(g.leaseId, g.fencingToken); // → deadline now 25+30 = 55s
@@ -61,16 +71,23 @@ void main() {
       () {
         final clock = _Clock();
         final m = _hbManager(clock); // timeout = 30s
-        final g = m.grant(const LeaseRequest(lessee: 'x'));
-        expect(m.available, 0);
+        final g = m.grant(const LeaseRequest(lessee: 'x', kind: 'kind-a'));
+        final bystander = m.grant(
+          const LeaseRequest(lessee: 'bystander', kind: 'kind-b'),
+        );
+        expect(m.availableFor('kind-a'), 0);
+        expect(m.availableFor('kind-b'), 0);
 
         clock.advance(const Duration(seconds: 29));
         expect(m.isValid(g.leaseId), isTrue); // inside the grace window
+        m.beat(bystander.leaseId, bystander.fencingToken);
 
         clock.advance(const Duration(seconds: 2)); // 31s, no beat → past 30s
         m.tick(); // owner-clock reap
         expect(m.isValid(g.leaseId), isFalse);
-        expect(m.available, 1); // the slot returns
+        expect(m.availableFor('kind-a'), 1); // the affected slot returns
+        expect(m.isValid(bystander.leaseId), isTrue);
+        expect(m.availableFor('kind-b'), 0); // the other kind is untouched
       },
     );
 
@@ -79,9 +96,11 @@ void main() {
       () async {
         final clock = _Clock();
         final m = _hbManager(clock); // offered 1, timeout 30s
-        final held = m.grant(const LeaseRequest(lessee: 'first'));
+        final held = m.grant(
+          const LeaseRequest(lessee: 'first', kind: 'kind-a'),
+        );
         final waiterFut = m.acquire(
-          const LeaseRequest(lessee: 'next'),
+          const LeaseRequest(lessee: 'next', kind: 'kind-a'),
           maxWait: const Duration(seconds: 600),
         );
         expect(m.queued, 1);
@@ -98,7 +117,9 @@ void main() {
 
     test('a beat with a STALE fencing token is refused', () {
       final m = _hbManager(_Clock());
-      final g = m.grant(const LeaseRequest(lessee: 'x')); // token 1
+      final g = m.grant(
+        const LeaseRequest(lessee: 'x', kind: 'kind-a'),
+      ); // token 1
       expect(
         () => m.beat(g.leaseId, 999),
         throwsA(isA<LeaseInvalidException>()),
@@ -116,7 +137,7 @@ void main() {
         threshold: 3, // timeout 30s
         maxLifetime: const Duration(seconds: 40),
       );
-      final g = m.grant(const LeaseRequest(lessee: 'greedy'));
+      final g = m.grant(const LeaseRequest(lessee: 'greedy', kind: 'kind-a'));
       clock.advance(const Duration(seconds: 25)); // still inside the 30s window
       m.beat(g.leaseId, g.fencingToken); // pushes the hb deadline to 55s …
       clock.advance(const Duration(seconds: 16)); // 41s > the 40s lifetime

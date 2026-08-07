@@ -26,6 +26,66 @@ class _Clock {
 }
 
 void main() {
+  test(
+    'multi-kind presence carries aggregate capacity and opaque profile',
+    () async {
+      final server = await StationServer.start(
+        station: 'host',
+        offerings: const {'kind-a': 1, 'kind-b': 2},
+        host: '127.0.0.1',
+        profile: const {
+          'targets': [
+            {'platform': 'android'},
+          ],
+        },
+        handler: _echoHandler,
+      );
+      addTearDown(server.close);
+      final client = HttpStationClient(host: '127.0.0.1', port: server.port);
+      addTearDown(client.close);
+      final initial = await client.presence();
+      expect(initial.kinds, ['kind-a', 'kind-b']);
+      expect(initial.offered, 3);
+      expect(initial.available, 3);
+      expect(initial.profile, const {
+        'targets': [
+          {'platform': 'android'},
+        ],
+      });
+      await client.requestLease(
+        const LeaseRequest(lessee: 'a', kind: 'kind-a'),
+      );
+      expect((await client.presence()).available, 2);
+      await client.requestLease(
+        const LeaseRequest(lessee: 'b1', kind: 'kind-b'),
+      );
+      await client.requestLease(
+        const LeaseRequest(lessee: 'b2', kind: 'kind-b'),
+      );
+      expect((await client.presence()).available, 0);
+    },
+  );
+
+  test(
+    'legacy offered and kind start form remains source-compatible',
+    () async {
+      final server = await StationServer.start(
+        station: 'legacy',
+        offered: 1,
+        kind: 'kind-a',
+        host: '127.0.0.1',
+        handler: _echoHandler,
+      );
+      addTearDown(server.close);
+      final client = HttpStationClient(host: '127.0.0.1', port: server.port);
+      addTearDown(client.close);
+      final presence = await client.presence();
+      expect(presence.kinds, ['kind-a']);
+      expect(presence.offered, 1);
+      expect(presence.available, 1);
+    },
+  );
+
   group('federation loopback', () {
     test(
       'presence → lease → dispatch → result → release (the happy path)',
