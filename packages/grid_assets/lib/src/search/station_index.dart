@@ -1,13 +1,12 @@
 /// Provider-sized prose chunking and incremental embedding-index writes.
 library;
 
-import 'dart:convert';
 import 'dart:math';
 
 import 'package:beads_dart/beads_dart.dart';
-import 'package:crypto/crypto.dart';
 import 'package:grid_sdk/grid_sdk.dart';
 
+import 'embedding_change_key.dart';
 import 'embedding_index.dart';
 import 'embedding_provider.dart';
 import 'station_search.dart';
@@ -260,18 +259,7 @@ class StationIndexService {
   String _freshnessKey(Bead bead) {
     final supplied = _changeKeyOf(bead);
     if (supplied != null && supplied.trim().isNotEmpty) return supplied;
-    final fields = <(String, String)>[
-      ('title', bead.title),
-      ('description', bead.description),
-      ('design', bead.design),
-      ('acceptance_criteria', bead.acceptanceCriteria),
-      ('notes', bead.notes),
-      ('close_reason', bead.closeReason),
-    ];
-    final prose = fields
-        .map((field) => '${field.$1}\u0000${field.$2}')
-        .join('\u0001');
-    return sha256.convert(utf8.encode(prose)).toString();
+    return embeddingChangeKey(bead);
   }
 }
 

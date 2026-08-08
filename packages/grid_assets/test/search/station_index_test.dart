@@ -2,7 +2,8 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:beads_dart/beads_dart.dart' show Bead;
-import 'package:grid_assets/grid_assets.dart';
+import 'package:grid_assets/grid_assets.dart' hide embeddingChangeKey;
+import 'package:grid_assets/src/search/embedding_change_key.dart';
 import 'package:grid_sdk/grid_sdk.dart' show SubstationScope;
 import 'package:test/test.dart';
 
@@ -177,6 +178,46 @@ void main() {
         expect((await index.rowCount()).total, 0);
       },
     );
+
+    test('canonical fallback is persisted and supplied keys win', () async {
+      const bead = Bead(
+        id: 'a-1',
+        title: 'title',
+        description: 'description',
+        design: 'design',
+        acceptanceCriteria: 'acceptance',
+        notes: 'notes',
+        closeReason: 'close',
+      );
+      final fallback = StationIndexService(
+        index: index,
+        client: client(),
+        provider: _provider,
+        source: _Source(const {
+          'alpha': [bead],
+        }),
+        dirExists: (_) => true,
+      );
+      await fallback.indexRoster(roster: [scope('alpha')]);
+      expect(await index.changeKeys(store: 'alpha'), {
+        'a-1': embeddingChangeKey(bead),
+      });
+
+      final supplied = StationIndexService(
+        index: index,
+        client: client(),
+        provider: _provider,
+        source: _Source(const {
+          'alpha': [bead],
+        }),
+        changeKeyOf: (_) => 'source-change-key',
+        dirExists: (_) => true,
+      );
+      await supplied.indexRoster(roster: [scope('alpha')], full: true);
+      expect(await index.changeKeys(store: 'alpha'), {
+        'a-1': 'source-change-key',
+      });
+    });
 
     test('provider failure writes nothing and later stores continue', () async {
       final failing = StationIndexService(
