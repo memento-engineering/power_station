@@ -37,8 +37,18 @@ decision beads, all statuses (decisions live closed; "have we already decided
 this" needs them). One JSON object comes back:
 
 ```
-{query, stores: [{substation, prefix, root, outcome, ...}], hitCount}
+{query, stores: [{substation, prefix, root, outcome, hits}], hitCount,
+ semantic: {outcome, stores: [{store, indexed, stale, unindexed}], hits,
+            hitCount}}
 ```
+
+The lexical authority remains in the top-level `stores` section. During topic
+research, also consider hits marked `path=semantic`, including their `score`,
+`field`, and winning-chunk `snippet`. Always report every store's indexed,
+stale, and unindexed counts. If the semantic outcome is `unavailable`, report
+its reason and continue with the lexical answer. For filing verification,
+require `field=id` in a hit inside the lexical stores section; a semantic hit never confirms
+that a bead id exists.
 
 Per-store `outcome` is `searched` (with `beadsSearched` + `hits`), `absent`,
 or `failed` — a roster seat is never silently dropped, and neither do you:

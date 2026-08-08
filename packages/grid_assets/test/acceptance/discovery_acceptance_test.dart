@@ -32,9 +32,87 @@ import 'package:genesis_tree/genesis_tree.dart';
 import 'package:grid_assets/grid_assets.dart';
 import 'package:grid_engine/grid_engine.dart';
 import 'package:grid_runtime/grid_runtime.dart';
+import 'package:grid_sdk/grid_sdk.dart' as sdk;
 import 'package:test/test.dart';
 
 import '../support/asset_fakes.dart';
+
+class _PriorArtDelegate extends sdk.GridDelegate {
+  @override
+  Seed build(TreeContext context, sdk.GridConfiguration configuration) =>
+      sdk.RawAssetGrid(
+        root: '/grid/home',
+        assets: [
+          sdk.Station(
+            name: 'station',
+            assets: [
+              sdk.Substations(
+                substations: [
+                  sdk.Substation('alpha', '/alpha', prefix: 'exact'),
+                ],
+              ),
+            ],
+          ),
+        ],
+      );
+}
+
+class _PriorArtSource implements SubstationBeadSource {
+  static const exact = Bead(id: 'exact-id', title: 'Ratified decision');
+  static const conceptual = Bead(
+    id: 'exact-topic',
+    title: 'conceptual wording precedent',
+  );
+  static const semanticOnly = Bead(
+    id: 'exact-semantic',
+    title: 'unrelated lexical text',
+  );
+
+  @override
+  Future<List<Bead>> read(sdk.SubstationScope scope) async => const [
+    exact,
+    conceptual,
+    semanticOnly,
+  ];
+}
+
+class _PriorArtSemanticBackend implements SemanticSearchBackend {
+  @override
+  Future<List<double>> embedQuery(String query) async => const [1];
+
+  @override
+  Future<List<EmbeddingIndexedBead>> indexedBeads(String store) async => [
+    for (final bead in const [
+      _PriorArtSource.exact,
+      _PriorArtSource.conceptual,
+      _PriorArtSource.semanticOnly,
+    ])
+      EmbeddingIndexedBead(
+        beadId: bead.id,
+        changeKey: embeddingChangeKey(bead),
+      ),
+  ];
+
+  @override
+  Future<List<EmbeddingIndexHit>> nearest({
+    required String store,
+    required List<double> queryVector,
+    required int limit,
+  }) async => [
+    EmbeddingIndexHit(
+      row: EmbeddingIndexRow(
+        store: store,
+        beadId: _PriorArtSource.semanticOnly.id,
+        field: 'description',
+        chunkIx: 0,
+        changeKey: embeddingChangeKey(_PriorArtSource.semanticOnly),
+        chunkText: 'semantic-only conceptual match',
+        vector: const [1],
+      ),
+      distance: 0.1,
+    ),
+  ];
+}
 
 GraphSnapshot _graph({required List<Bead> beads, required Set<String> ready}) =>
     GraphSnapshot.fromParts(
@@ -240,6 +318,33 @@ Future<void> _markStarted(Fakes f, String name) async {
 }
 
 void main() {
+  test(
+    'stationPriorArt preserves query provenance and remains lexical-only',
+    () async {
+      final service = StationSearchService(
+        source: _PriorArtSource(),
+        dirExists: (_) => true,
+        semanticBackendMount: (_) async => _PriorArtSemanticBackend(),
+      );
+      final priorArt = await stationPriorArt(
+        _PriorArtDelegate.new,
+        gridHome: '/grid/home',
+        service: service,
+      )(['conceptual wording', 'exact-id']);
+
+      expect(priorArt.map((hit) => hit.query), [
+        'conceptual wording',
+        'exact-id',
+      ]);
+      expect(priorArt.map((hit) => hit.beadId), ['exact-topic', 'exact-id']);
+      expect(priorArt.last.field, 'id');
+      expect(
+        priorArt.every((hit) => !hit.snippet.contains('semantic-only')),
+        isTrue,
+      );
+    },
+  );
+
   late Directory tmp;
   setUp(() {
     tmp = Directory.systemTemp.createTempSync('discovery-acc');

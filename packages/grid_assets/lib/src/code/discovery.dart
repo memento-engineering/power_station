@@ -1116,12 +1116,17 @@ ResolvedAnchor resolveAnchorOnDisk(String workspaceDir, String anchor) {
 /// `buildCodeRegistry(priorArt: stationPriorArt(() => SpaceDelegate(...)))`.
 PriorArtSource stationPriorArt(
   sdk.GridDelegate Function() delegate, {
+  required String gridHome,
   StationSearchService service = const StationSearchService(),
 }) => (queries) async {
   final roster = codedRosterOf(delegate);
   final hits = <PriorArt>[];
   for (final query in queries) {
-    final report = await service.search(query: query, roster: roster);
+    final report = await service.search(
+      query: query,
+      roster: roster,
+      gridHome: gridHome,
+    );
     for (final hit in report.hits) {
       hits.add(
         PriorArt(

@@ -213,7 +213,7 @@ void main() {
       });
       final report = await service(
         source,
-      ).search(query: 'flux', roster: roster);
+      ).search(query: 'flux', roster: roster, gridHome: '/grid/home');
 
       expect(source.reads, ['/roots/alpha', '/roots/beta']);
       expect(report.stores.map((s) => s.store.name), ['alpha', 'beta']);
@@ -246,7 +246,7 @@ void main() {
       });
       final report = await service(
         source,
-      ).search(query: 'FLUX', roster: roster);
+      ).search(query: 'FLUX', roster: roster, gridHome: '/grid/home');
       final hit = report.hits.single;
       expect(hit.field, 'title');
       expect(hit.snippet, 'Flux everywhere');
@@ -281,9 +281,11 @@ void main() {
         '/roots/beta': const [],
       });
 
-      final report = await service(
-        source,
-      ).search(query: '  OBSERVABILITY   telemetry otel  ', roster: roster);
+      final report = await service(source).search(
+        query: '  OBSERVABILITY   telemetry otel  ',
+        roster: roster,
+        gridHome: '/grid/home',
+      );
 
       expect(report.hits.map((hit) => hit.beadId), ['al-4', 'al-5', 'al-6']);
       expect(report.hits.map((hit) => hit.field), ['title', 'notes', 'title']);
@@ -301,7 +303,7 @@ void main() {
       });
       final report = await service(
         source,
-      ).search(query: 'standard', roster: roster);
+      ).search(query: 'standard', roster: roster, gridHome: '/grid/home');
       expect(report.hits.single.status, 'closed');
     });
 
@@ -320,7 +322,7 @@ void main() {
       });
       final report = await service(
         source,
-      ).search(query: 'needle', roster: roster);
+      ).search(query: 'needle', roster: roster, gridHome: '/grid/home');
       final snippet = report.hits.single.snippet;
       expect(snippet, contains('NEEDLE'));
       expect(snippet, startsWith('…'));
@@ -335,7 +337,7 @@ void main() {
       final report = await service(
         source,
         existing: {'/roots/beta/.beads'}, // alpha's .beads/ missing
-      ).search(query: 'flux', roster: roster);
+      ).search(query: 'flux', roster: roster, gridHome: '/grid/home');
 
       final alpha = report.stores.first;
       expect(alpha, isA<StoreAbsent>());
@@ -354,7 +356,7 @@ void main() {
       );
       final report = await service(
         source,
-      ).search(query: 'flux', roster: roster);
+      ).search(query: 'flux', roster: roster, gridHome: '/grid/home');
       final alpha = report.stores.first;
       expect(alpha, isA<StoreFailed>());
       expect((alpha as StoreFailed).reason, contains('bd unavailable'));
@@ -365,7 +367,9 @@ void main() {
         'never an everything-matches scan)', () {
       final source = _FakeBeadSource(const {});
       expect(
-        () => service(source).search(query: '   ', roster: roster),
+        () => service(
+          source,
+        ).search(query: '   ', roster: roster, gridHome: '/grid/home'),
         throwsArgumentError,
       );
     });
@@ -378,7 +382,7 @@ void main() {
       );
       final json = (await service(
         source,
-      ).search(query: 'flux', roster: roster)).toJson();
+      ).search(query: 'flux', roster: roster, gridHome: '/grid/home')).toJson();
 
       expect(json['query'], 'flux');
       expect(json['hitCount'], 1);
@@ -415,7 +419,7 @@ void main() {
       final report = await StationSearchService(
         source: source,
         dirExists: _probeFor({'/grid/alpha/.beads'}),
-      ).search(query: 'roster', roster: roster);
+      ).search(query: 'roster', roster: roster, gridHome: '/grid/home');
 
       expect(report.stores.map((s) => s.store.name), [
         'alpha',
