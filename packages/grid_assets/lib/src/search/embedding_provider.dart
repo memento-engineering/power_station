@@ -308,20 +308,31 @@ class EmbeddingHttpResponse {
 typedef EmbeddingHttpSend =
     Future<EmbeddingHttpResponse> Function(EmbeddingHttpRequest request);
 
-/// Sends one request through dart:io's HTTP client.
+/// The end-to-end deadline on one embedding HTTP round-trip. A black-holing
+/// endpoint (packets dropped, no fast connection-refused) must degrade to
+/// `SemanticUnavailable` like every other provider failure — never stall the
+/// whole search command behind the lexical half (the review committee's
+/// regression-risk finding on this diff; same bound-the-external-call
+/// convention as `pr_describe.dart`/`bounded_use.dart`).
+const Duration kEmbeddingHttpTimeout = Duration(seconds: 30);
+
+/// Sends one request through dart:io's HTTP client, bounded end to end by
+/// [kEmbeddingHttpTimeout].
 Future<EmbeddingHttpResponse> sendEmbeddingHttpRequest(
   EmbeddingHttpRequest request,
 ) async {
   final client = HttpClient();
   try {
-    final wire = await client.openUrl(request.method, request.uri);
-    request.headers.forEach(wire.headers.set);
-    wire.write(request.body);
-    final response = await wire.close();
-    return EmbeddingHttpResponse(
-      statusCode: response.statusCode,
-      body: await utf8.decoder.bind(response).join(),
-    );
+    return await () async {
+      final wire = await client.openUrl(request.method, request.uri);
+      request.headers.forEach(wire.headers.set);
+      wire.write(request.body);
+      final response = await wire.close();
+      return EmbeddingHttpResponse(
+        statusCode: response.statusCode,
+        body: await utf8.decoder.bind(response).join(),
+      );
+    }().timeout(kEmbeddingHttpTimeout);
   } finally {
     client.close(force: true);
   }
