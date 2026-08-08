@@ -164,6 +164,7 @@ export 'src/search/embedding_index.dart';
 export 'src/search/embedding_change_key.dart';
 export 'src/search/embedding_provider.dart';
 export 'src/search/index_command.dart';
+export 'src/search/search_recall.dart';
 export 'src/search/search_command.dart';
 export 'src/search/semantic_search.dart';
 export 'src/search/station_index.dart';
