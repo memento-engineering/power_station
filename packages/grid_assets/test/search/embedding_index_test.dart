@@ -237,6 +237,52 @@ void main() {
       isTrue,
     );
   });
+
+  test('change keys reconcile scoped deletions and commit them', () async {
+    final index = await DoltEmbeddingIndex.open(
+      gridHome: home.path,
+      identity: identity,
+    );
+    await index.replaceBead(
+      store: 'alpha',
+      beadId: 'al-1',
+      rows: [
+        row('alpha', 'al-1', 'title', 0, 'key', 'one', [1, 0, 0]),
+      ],
+    );
+    await index.replaceBead(
+      store: 'beta',
+      beadId: 'be-1',
+      rows: [
+        row('beta', 'be-1', 'title', 0, 'other', 'two', [1, 0, 0]),
+      ],
+    );
+    expect(await index.changeKeys(store: 'alpha'), {'al-1': 'key'});
+    await index.deleteBeads(store: 'alpha', beadIds: const []);
+    expect((await index.rowCount()).total, 2);
+    await index.deleteBeads(store: 'alpha', beadIds: const ['al-1']);
+    expect((await index.rowCount()).byStore, {'beta': 1});
+    final log = await dolt(index.root, ['log', '--oneline']);
+    expect('${log.stdout}', contains('index remove alpha'));
+  });
+
+  test('change keys refuse mixed rows for one bead', () async {
+    final index = await DoltEmbeddingIndex.open(
+      gridHome: home.path,
+      identity: identity,
+    );
+    await dolt(index.root, [
+      'sql',
+      '-q',
+      '''INSERT INTO bead_vectors VALUES
+('alpha','al-1','title',0,'one','a',VEC_FromText('[1,0,0]')),
+('alpha','al-1','notes',0,'two','b',VEC_FromText('[1,0,0]'));''',
+    ]);
+    await expectLater(
+      index.changeKeys(store: 'alpha'),
+      throwsA(isA<StateError>()),
+    );
+  });
 }
 
 class _RecordingRunner implements DoltCommandRunner {

@@ -650,10 +650,10 @@ void main() {
               '''
 ## Implementation Plan
 ### Step 1 — Quote the embedded validator
-${ticks}`markdown
+$ticks`markdown
 ${ticks}dart
 final pulse = true;
-${ticks}`
+$ticks`
 
 ## Touches
 - `lib/src/pulse.dart` — unchanged
