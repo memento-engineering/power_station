@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "reports": {
+    "refinement-vocabulary":{"lexical":[{"id":"tg-mles","field":"design"}],"semantic":[{"id":"tg-mles","score":0.781}]},
+    "production-observability":{"lexical":[{"id":"tg-dwc","field":"title"}],"semantic":[{"id":"tg-dwc","score":0.836}]},
+    "station-effectiveness":{"lexical":[],"semantic":[{"id":"tg-5drf","score":0.724}]},
+    "single-store-owner":{"lexical":[],"semantic":[{"id":"tg-s6gk","score":0.692},{"id":"tg-0edw","score":0.655}]},
+    "id-hit-still-first":{"lexical":[{"id":"tg-5drf","field":"id"}],"semantic":[{"id":"tg-dwc","score":0.901},{"id":"tg-5drf","score":0.724}]}
+  }
+}
