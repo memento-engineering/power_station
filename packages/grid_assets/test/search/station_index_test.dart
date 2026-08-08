@@ -36,6 +36,18 @@ class _Source implements SubstationBeadSource {
 }
 
 void main() {
+  // The same dolt-absent skip the embedding-index suite carries (PR #98's
+  // first CI run failed exactly here): CI runners ship no dolt; skipping
+  // keeps the suite honest where it can run instead of failing everywhere
+  // it can't.
+  final bool doltAvailable = Process.runSync('which', ['dolt']).exitCode == 0;
+  if (!doltAvailable) {
+    test('dolt binary is unavailable — suite skipped', () {
+      markTestSkipped('dolt not on PATH; suite requires a real dolt.');
+    });
+    return;
+  }
+
   group('ProseChunker', () {
     test('512 tokens derives 1228-rune windows with 245 overlap', () {
       const chunker = ProseChunker(contextWindowTokens: 512);
