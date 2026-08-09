@@ -28,7 +28,7 @@ void main() {
             )
             .toList()
           ..sort();
-    expect(expected, hasLength(8));
+    expect(expected, hasLength(9));
     for (final path in expected) {
       expect(
         output,

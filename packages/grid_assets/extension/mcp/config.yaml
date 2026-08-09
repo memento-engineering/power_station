@@ -165,8 +165,17 @@ skills:
   # hand-committed, installer-less `extension/skills/`. `<cli> install` expands
   # these into the operator's own `.claude/skills/`; the provision wire installs
   # them into a worktree too (one tree, two consumers) but does NOT name them in
-  # a build agent's brief — they drive the station, and one of them pushes (see
-  # `kAgentSkills`).
+  # a build agent's brief — most drive the station (one of them pushes), and
+  # `asset-author` is authoring guidance for the operator's hands, not a build
+  # agent's (see `kAgentSkills`).
+  - id: asset-author
+    description: >
+      Author and install grid assets through B-style in-tree providers:
+      watched nullable dependencies, diagnostic unavailability, explicit
+      create/value ownership, scoped overrides, and assembly-only boot.
+    path: station_overlay/claude/skills/asset-author/SKILL.md
+    visibility: public
+    audience: operator
   - id: station-operations
     description: >
       Operate the resident station — boot, bounce, tear down, read status, seed
@@ -183,7 +192,7 @@ skills:
     description: >
       Shape work beads so a resident station can drive them — the required
       validation_plan metadata, driveable issue types, dependency wiring, and
-      defer-until-blessed staging.
+      defer-until-approved staging.
     path: station_overlay/claude/skills/intake-refinement/SKILL.md
     visibility: public
     audience: operator

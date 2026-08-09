@@ -45,6 +45,7 @@ import 'overlay_manifest.dart';
 /// read this constant (it installs whatever files exist under the overlay); it
 /// is the by-id render surface's own index, and the skill-manifest test's.
 const List<String> kVendedSkills = [
+  'asset-author',
   'discover',
   'gate-medicine',
   'harvest-review',
@@ -60,11 +61,17 @@ const List<String> kVendedSkills = [
 /// (`buildAgentBrief`). The mirror of each skill's `audience:` in
 /// `extension/mcp/config.yaml`, fenced by test.
 ///
-/// The split is load-bearing, not cosmetic. These four drive the STATION (boot
-/// it, land its work, clear its gates) — and `harvest-review` teaches "push and
-/// open a PR with receipts", which the very brief that would offer it FORBIDS
-/// ("Do NOT push and do NOT open a pull request"). Offering a build agent a
-/// skill that contradicts its working agreement is a live hazard.
+/// The split is load-bearing, not cosmetic. Most of these drive the STATION
+/// (boot it, land its work, clear its gates, cut its releases) — and
+/// `harvest-review` teaches "push and open a PR with receipts", which the very
+/// brief that would offer it FORBIDS ("Do NOT push and do NOT open a pull
+/// request"). Offering a build agent a skill that contradicts its working
+/// agreement is a live hazard. `asset-author` drives nothing and is withheld
+/// on its own ground: it is the operator's authoring manual — doctrine for the
+/// human composing and installing the station's asset surface — and a build
+/// agent's composition guidance arrives through its bead's design and
+/// validation plan, never through a station-owner manual its brief did not
+/// ask for.
 ///
 /// A DENY-list, not an allow-list of agent skills: the wire materializes
 /// whatever overlay it is handed, so a skill this package does not vend (a
@@ -73,6 +80,7 @@ const List<String> kVendedSkills = [
 /// silently is the failure this doctrine forbids. Only a DECLARED operator
 /// audience withholds a skill.
 const List<String> kOperatorSkills = [
+  'asset-author',
   'gate-medicine',
   'harvest-review',
   'intake-refinement',

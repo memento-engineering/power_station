@@ -22,8 +22,10 @@ harvest is where a human-adjacent reviewer turns branches into landings.
 
 For each work bead with a terminal session:
 
-1. **Session outcome** — from the state store export: `complete` with no open
-   gate is clean; anything gated/escalated goes back to `gate-medicine`.
+1. **Session outcome** — read from the state store via `bd -C .grid list -t
+   session` / `bd show <session>` (never `bd export` — unsupported on proxied
+   stores): `complete` with no open gate is clean; anything gated/escalated
+   goes back to `gate-medicine`.
 2. **The branch delta** — in the worktree:
 
    ```
@@ -70,6 +72,14 @@ footer.
 
 - **Merges are squash-only** (one commit per bead) and **stay with the human**
   unless explicitly delegated per-PR.
+- **`merge=human` outranks every delegation**: before ANY merge, read the
+  work bead's metadata. A bead carrying `merge=human` is NEVER merged by an
+  agent, standing policy or not — open its PR with receipts, add a
+  `do-not-merge` label, make the body's FIRST line "DO NOT MERGE — flagged
+  for human review", and report it in the awaiting-merge queue.
+- **PR titles are pure conventional commit** — squash inherits the title as
+  the main-branch commit, so no [HOLD]/WIP/decoration ever rides a title;
+  verify the title parses before merging and fix with `gh pr edit --title`.
 - On merge: close the work bead with the PR URL as the receipt, and delete
   the worktree branch if the provisioner hasn't.
 
@@ -77,7 +87,7 @@ footer.
 
 Lead with the verdict: what landed, what needs the human, what was stale.
 Per bead one line — delta, grades, plan result, disposition. Then the queues:
-PRs awaiting merge, beads awaiting bless, findings filed. The reader stepped
+PRs awaiting merge, beads awaiting approval, findings filed. The reader stepped
 away hours ago; write for them.
 
 ## Gotchas
