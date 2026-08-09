@@ -266,6 +266,26 @@ void main() {
       'release': {'runner'},
     };
 
+    test('asset-author teaches the complete B-style provider contract', () {
+      final manual = loader.loadSkillTemplate('asset-author');
+
+      expect(manual, contains('context.watch<T>()'));
+      expect(manual, contains('always returns `T?`'));
+      expect(manual, contains('appearance, replacement, and disappearance'));
+      expect(manual, contains('renders a refusal into diagnostics'));
+      expect(manual, contains('do not search for a throwing `of()` variant'));
+      expect(manual, contains('Provider<T>(create: ...)'));
+      expect(manual, contains('Provider<T>.value'));
+      expect(
+        manual,
+        contains('A pre-built instance never passes through `create:`'),
+      );
+      expect(manual, contains('The nearest provider wins'));
+      expect(manual, contains('per-seat override'));
+      expect(manual, contains('`GridDelegate.boot` is transitional'));
+      expect(manual, contains('never entitled to `GitServices`'));
+    });
+
     test('each is VENDED, declared in the manifest, and carries EXACTLY the '
         'holes it declares', () {
       final manifest =
