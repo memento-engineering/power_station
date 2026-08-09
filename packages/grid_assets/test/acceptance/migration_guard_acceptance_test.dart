@@ -15,7 +15,6 @@
 // ending in `/specify`, so it cannot be fooled by the fold moving the key.
 //
 // Offline — FAKES, no live tg/gc/claude/bd/git/network.
-import 'dart:convert';
 
 import 'package:beads_dart/beads_dart.dart';
 import 'package:genesis_tree/genesis_tree.dart';
@@ -101,10 +100,7 @@ StationKernel _buildKernel(
 bool _wroteCursor(Fakes f, String relPath, String stateName) =>
     f.runner.callsFor('update').any((c) {
       if (c.length < 2 || c[1] != _stepBeadId(relPath)) return false;
-      final i = c.indexOf('--metadata');
-      if (i < 0 || i + 1 >= c.length) return false;
-      final md = jsonDecode(c[i + 1]) as Map<String, dynamic>;
-      return md[MoleculeStepKeys.state] == stateName;
+      return callMetadata(c)[MoleculeStepKeys.state] == stateName;
     });
 
 /// True iff the station SPAWNED a specify architect — at EITHER node path

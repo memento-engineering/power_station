@@ -454,15 +454,25 @@ void main() {
 
         expect(beads.single.id, 'al-1');
         final runner = runners['/roots/alpha']!;
-        expect(runner.argvs, [
-          [
-            'query',
-            'status=open OR status=in_progress OR status=blocked OR '
-                'status=deferred OR status=closed',
-            '--all',
-            '--json',
-          ],
-        ]);
+        // The one all-status query core...
+        const core = [
+          'query',
+          'status=open OR status=in_progress OR status=blocked OR '
+              'status=deferred OR status=closed',
+          '--all',
+          '--json',
+        ];
+        // ...optionally suffixed by the uncapped-read `--limit 0`
+        // (`BdCliService.queryArgs` since tg-vyis / the_grid #166, so the
+        // store's default 50-row cap never truncates a search corpus; the
+        // published beads_dart 0.2.0-rc.2 predates it). EXACTLY one of the
+        // two shapes — any other argv still fails the fence, and either way
+        // it is one spawn, one pure read.
+        expect(runner.argvs, hasLength(1));
+        expect(
+          runner.argvs.single,
+          anyOf(equals(core), equals([...core, '--limit', '0'])),
+        );
       },
     );
 
