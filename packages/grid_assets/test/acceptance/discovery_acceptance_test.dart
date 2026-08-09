@@ -239,20 +239,14 @@ bool _wroteCursor(Fakes f, String relPath, String stateName) {
   final targetId = '$_sid-${relPath.replaceAll('/', '-')}';
   return f.runner.callsFor('update').any((c) {
     if (c.length < 2 || c[1] != targetId) return false;
-    final i = c.indexOf('--metadata');
-    if (i < 0 || i + 1 >= c.length) return false;
-    final md = jsonDecode(c[i + 1]) as Map<String, dynamic>;
-    return md[MoleculeStepKeys.state] == stateName;
+    return callMetadata(c)[MoleculeStepKeys.state] == stateName;
   });
 }
 
 /// The `reason` the chokepoint stamped on the minted gate bead.
 String? _gateReason(Fakes f) {
   for (final c in f.runner.callsFor('update')) {
-    final i = c.indexOf('--metadata');
-    if (i < 0 || i + 1 >= c.length) continue;
-    final md = jsonDecode(c[i + 1]) as Map<String, dynamic>;
-    final reason = md['reason'];
+    final reason = callMetadata(c)['reason'];
     if (reason is String) return reason;
   }
   return null;

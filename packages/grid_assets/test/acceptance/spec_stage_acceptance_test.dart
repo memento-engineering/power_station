@@ -26,7 +26,6 @@
 //    with no gate bead, no human, no session re-mint.
 //
 // Offline — FAKES, no live tg/gc/claude/bd/git/network.
-import 'dart:convert';
 
 import 'package:genesis_tree/genesis_tree.dart';
 import 'package:grid_assets/grid_assets.dart';
@@ -112,10 +111,7 @@ bool _wroteCursor(Fakes f, String relPath, String stateName) {
   final targetId = '$_sid-${relPath.replaceAll('/', '-')}';
   return f.runner.callsFor('update').any((c) {
     if (c.length < 2 || c[1] != targetId) return false;
-    final i = c.indexOf('--metadata');
-    if (i < 0 || i + 1 >= c.length) return false;
-    final md = jsonDecode(c[i + 1]) as Map<String, dynamic>;
-    return md[MoleculeStepKeys.state] == stateName;
+    return callMetadata(c)[MoleculeStepKeys.state] == stateName;
   });
 }
 
@@ -123,10 +119,7 @@ bool _wroteCursor(Fakes f, String relPath, String stateName) {
 /// recorded, or null — the per-lane provenance the host persisted.
 String? _resultField(Fakes f, String relPath, String field) {
   for (final c in f.runner.callsFor('update')) {
-    final i = c.indexOf('--metadata');
-    if (i < 0 || i + 1 >= c.length) continue;
-    final md = jsonDecode(c[i + 1]) as Map<String, dynamic>;
-    final v = md['grid.result.tg-1/$relPath.$field'];
+    final v = callMetadata(c)['grid.result.tg-1/$relPath.$field'];
     if (v is String) return v;
   }
   return null;
@@ -184,10 +177,7 @@ List<Bead> _withGraded(
 /// substation + `blocks`/`node` linkage) in a follow-up `update --metadata`.
 String? _gateReason(Fakes f) {
   for (final c in f.runner.callsFor('update')) {
-    final i = c.indexOf('--metadata');
-    if (i < 0 || i + 1 >= c.length) continue;
-    final md = jsonDecode(c[i + 1]) as Map<String, dynamic>;
-    final reason = md['reason'];
+    final reason = callMetadata(c)['reason'];
     if (reason is String) return reason;
   }
   return null;

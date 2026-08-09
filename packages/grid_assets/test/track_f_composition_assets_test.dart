@@ -25,7 +25,7 @@ import 'support/asset_fakes.dart';
 /// Mounts [root] in a bare tree and flushes one build pass (the Track B
 /// template). The root rides under [sdk.ProviderScope] — the availability
 /// registry every production root (StationKernel.start, runGrid) mounts —
-/// so a watch<T>() miss parks there and surfaces as the designed absence
+/// so a `watch<T>()` miss parks there and surfaces as the designed absence
 /// posture instead of tripping the scope-less debug assert.
 void mount(Seed root) {
   final owner = TreeOwner();

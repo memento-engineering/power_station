@@ -18,6 +18,8 @@
 // mint's pour crosses the filesystem below the fake runner seam.
 export 'package:grid_engine/testing.dart';
 
+import 'dart:convert';
+
 import 'package:beads_dart/beads_dart.dart';
 import 'package:grid_engine/grid_engine.dart';
 // Imported (not just re-exported) so this library can USE the shared fakes
@@ -537,4 +539,29 @@ Future<void> settle(
     await pumpEventQueue();
     await Future<void>.delayed(ioSlice);
   }
+}
+
+/// The metadata map of ONE recorded chokepoint call ([argv]) — decoded from
+/// the legacy single `--metadata '<json>'` flag when present, else assembled
+/// from the repeated op-shaped `--set-metadata key=value` pairs
+/// `BdCliService` emits since the atomic server-side metadata merges
+/// (tg-u7b5, the_grid #174 — shipped in the 0.3.0-rc.3 wave). Empty when the
+/// call carries neither shape. The per-argv sibling of the shared
+/// `RecordingBdRunner.metadataOfUpdate` (same dual-shape parse, same
+/// first-`=` split so embedded equals signs survive), kept separate so the
+/// acceptance probes can filter calls by TARGET id before parsing.
+Map<String, dynamic> callMetadata(List<String> argv) {
+  final i = argv.indexOf('--metadata');
+  if (i != -1 && i + 1 < argv.length) {
+    return jsonDecode(argv[i + 1]) as Map<String, dynamic>;
+  }
+  final merged = <String, dynamic>{};
+  for (var j = 0; j + 1 < argv.length; j++) {
+    if (argv[j] == '--set-metadata') {
+      final pair = argv[j + 1];
+      final eq = pair.indexOf('=');
+      if (eq > 0) merged[pair.substring(0, eq)] = pair.substring(eq + 1);
+    }
+  }
+  return merged;
 }
