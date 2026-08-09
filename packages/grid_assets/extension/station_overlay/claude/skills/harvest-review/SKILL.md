@@ -22,8 +22,10 @@ harvest is where a human-adjacent reviewer turns branches into landings.
 
 For each work bead with a terminal session:
 
-1. **Session outcome** — from the state store export: `complete` with no open
-   gate is clean; anything gated/escalated goes back to `gate-medicine`.
+1. **Session outcome** — read from the state store via `bd -C .grid list -t
+   session` / `bd show <session>` (never `bd export` — unsupported on proxied
+   stores): `complete` with no open gate is clean; anything gated/escalated
+   goes back to `gate-medicine`.
 2. **The branch delta** — in the worktree:
 
    ```
