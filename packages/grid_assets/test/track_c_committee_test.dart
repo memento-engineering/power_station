@@ -12,6 +12,7 @@ import 'package:genesis_tree/genesis_tree.dart';
 import 'package:grid_assets/grid_assets.dart';
 import 'package:beads_dart/beads_dart.dart';
 import 'package:grid_engine/grid_engine.dart';
+import 'package:grid_sdk/grid_sdk.dart' show ProviderScope;
 import 'package:test/test.dart';
 
 import 'support/asset_fakes.dart';
@@ -45,20 +46,24 @@ class _Committee {
   void mount() {
     _push();
     owner.mountRoot(
-      InheritedSeed<JoinedSnapshotNotifier>(
-        value: joined,
-        child: InheritedSeed<StationServices>(
-          value: fakes.ctx,
-          child: InheritedSeed<CapabilityRegistry>(
-            value: reg,
-            child: InheritedSeed<SessionResolver>(
-              value: CircuitResolver((_) => kCodeReviewCircuit),
-              child: Station([
-                SubstationScope(
-                  configNotifier: SubstationConfigNotifier(_tgConfig),
-                  key: const ValueKey('scope.tg'),
-                ),
-              ]),
+      // The availability registry the production root (StationKernel.start)
+      // always mounts — watch<T>() misses park here instead of asserting.
+      ProviderScope(
+        child: InheritedSeed<JoinedSnapshotNotifier>(
+          value: joined,
+          child: InheritedSeed<StationServices>(
+            value: fakes.ctx,
+            child: InheritedSeed<CapabilityRegistry>(
+              value: reg,
+              child: InheritedSeed<SessionResolver>(
+                value: CircuitResolver((_) => kCodeReviewCircuit),
+                child: Station([
+                  SubstationScope(
+                    configNotifier: SubstationConfigNotifier(_tgConfig),
+                    key: const ValueKey('scope.tg'),
+                  ),
+                ]),
+              ),
             ),
           ),
         ),

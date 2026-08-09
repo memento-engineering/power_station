@@ -35,6 +35,7 @@ import 'package:grid_assets/grid_assets.dart';
 import 'package:beads_dart/beads_dart.dart';
 import 'package:grid_engine/grid_engine.dart';
 import 'package:grid_runtime/grid_runtime.dart';
+import 'package:grid_sdk/grid_sdk.dart' show ProviderScope;
 import 'package:test/test.dart';
 
 import '../support/asset_fakes.dart';
@@ -163,23 +164,27 @@ Seed _root({
   required StationServices ctx,
   required CapabilityRegistry registry,
   required ServiceBundle services,
-}) => InheritedSeed<JoinedSnapshotNotifier>(
-  value: joined,
-  child: InheritedSeed<StationServices>(
-    value: ctx,
-    child: InheritedSeed<ProcessLeaseVendor>(
-      value: defaultProcessLeaseVendor(ctx),
-      child: InheritedSeed<CapabilityRegistry>(
-        value: registry,
-        child: InheritedSeed<SessionResolver>(
-          value: kCodeResolver,
-          child: Station([
-            SubstationScope(
-              configNotifier: SubstationConfigNotifier(_tgConfig),
-              services: services,
-              key: const ValueKey('scope.tg'),
-            ),
-          ]),
+}) => ProviderScope(
+  // The availability registry the production root (StationKernel.start)
+  // always mounts — watch<T>() misses park here instead of asserting.
+  child: InheritedSeed<JoinedSnapshotNotifier>(
+    value: joined,
+    child: InheritedSeed<StationServices>(
+      value: ctx,
+      child: InheritedSeed<ProcessLeaseVendor>(
+        value: defaultProcessLeaseVendor(ctx),
+        child: InheritedSeed<CapabilityRegistry>(
+          value: registry,
+          child: InheritedSeed<SessionResolver>(
+            value: kCodeResolver,
+            child: Station([
+              SubstationScope(
+                configNotifier: SubstationConfigNotifier(_tgConfig),
+                services: services,
+                key: const ValueKey('scope.tg'),
+              ),
+            ]),
+          ),
         ),
       ),
     ),
@@ -837,13 +842,16 @@ void main() {
         // non-vacuous.
         final owner = TreeOwner();
         owner.mountRoot(
-          InheritedSeed<StationServices>(
-            value: ctx,
-            child: InheritedSeed<CapabilityRegistry>(
-              value: buildCodeRegistry(),
-              child: InheritedSeed<Bead>(
-                value: bead('tg-1'),
-                child: kCodeResolver.sessionFor(bead: bead('tg-1')),
+          // The availability registry the production root always mounts.
+          ProviderScope(
+            child: InheritedSeed<StationServices>(
+              value: ctx,
+              child: InheritedSeed<CapabilityRegistry>(
+                value: buildCodeRegistry(),
+                child: InheritedSeed<Bead>(
+                  value: bead('tg-1'),
+                  child: kCodeResolver.sessionFor(bead: bead('tg-1')),
+                ),
               ),
             ),
           ),
@@ -893,20 +901,23 @@ void main() {
     ({TreeOwner owner, Branch root}) mountAgent(Fakes f) {
       final owner = TreeOwner();
       final root = owner.mountRoot(
-        InheritedSeed<StationServices>(
-          value: f.ctx,
-          // Mounted automatically by StationKernel; this manual TreeOwner-driven
-          // tree bypasses the kernel entirely, so the molecule process path
-          // needs its own vendor here — the SAME default the kernel installs.
-          child: InheritedSeed<ProcessLeaseVendor>(
-            value: defaultProcessLeaseVendor(f.ctx),
-            child: InheritedSeed<CapabilityRegistry>(
-              value: buildCodeRegistry(),
-              child: InheritedSeed<Bead>(
-                value: bead('tg-1'),
-                child: kCodeResolver.sessionFor(
-                  bead: bead('tg-1'),
-                  session: _session('tg-1', 'tgdog-sess1'),
+        // The availability registry the production root always mounts.
+        ProviderScope(
+          child: InheritedSeed<StationServices>(
+            value: f.ctx,
+            // Mounted automatically by StationKernel; this manual TreeOwner-driven
+            // tree bypasses the kernel entirely, so the molecule process path
+            // needs its own vendor here — the SAME default the kernel installs.
+            child: InheritedSeed<ProcessLeaseVendor>(
+              value: defaultProcessLeaseVendor(f.ctx),
+              child: InheritedSeed<CapabilityRegistry>(
+                value: buildCodeRegistry(),
+                child: InheritedSeed<Bead>(
+                  value: bead('tg-1'),
+                  child: kCodeResolver.sessionFor(
+                    bead: bead('tg-1'),
+                    session: _session('tg-1', 'tgdog-sess1'),
+                  ),
                 ),
               ),
             ),
