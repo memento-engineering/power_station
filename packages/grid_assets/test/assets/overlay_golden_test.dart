@@ -19,10 +19,12 @@ import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 import 'package:yaml/yaml.dart';
 
-/// Every path the wire is allowed to write under a worktree — the 5 vended
+/// Every path the wire is allowed to write under a worktree — the vended
 /// skills' `SKILL.md` plus the self-ignoring `.gitignore` that keeps each out of
 /// the bead's PR. Nothing else: no `settings.json`, no `agents/`.
 const List<String> kWorktreeOverlayGolden = [
+  '.claude/skills/asset-author/.gitignore',
+  '.claude/skills/asset-author/SKILL.md',
   '.claude/skills/discover/.gitignore',
   '.claude/skills/discover/SKILL.md',
   '.claude/skills/gate-medicine/.gitignore',
