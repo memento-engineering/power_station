@@ -70,6 +70,14 @@ footer.
 
 - **Merges are squash-only** (one commit per bead) and **stay with the human**
   unless explicitly delegated per-PR.
+- **`merge=human` outranks every delegation**: before ANY merge, read the
+  work bead's metadata. A bead carrying `merge=human` is NEVER merged by an
+  agent, standing policy or not — open its PR with receipts, add a
+  `do-not-merge` label, make the body's FIRST line "DO NOT MERGE — flagged
+  for human review", and report it in the awaiting-merge queue.
+- **PR titles are pure conventional commit** — squash inherits the title as
+  the main-branch commit, so no [HOLD]/WIP/decoration ever rides a title;
+  verify the title parses before merging and fix with `gh pr edit --title`.
 - On merge: close the work bead with the PR URL as the receipt, and delete
   the worktree branch if the provisioner hasn't.
 

@@ -51,6 +51,15 @@ built and its requirements are the human's.
 ## Human gates — never cross without an explicit, per-item go
 
 - **Merging PRs** into any substation's main (open them with receipts; hold).
+  Where a standing delegation (e.g. the decent-grades policy) covers merges,
+  it NEVER covers a bead carrying metadata `merge=human`: check the work
+  bead's metadata before every merge — a `merge=human` bead's PR is opened
+  with receipts, carries a `do-not-merge` label and a body whose FIRST line
+  states "DO NOT MERGE — flagged for human review", and is left for the
+  operator. The flag outranks any grade. PR titles are PURE conventional
+  commit, always — squash makes the title the main-branch commit, so hold
+  markers NEVER ride the title; before any merge, verify the title parses
+  and fix it with `gh pr edit --title` if decorated.
 - **Blessing** deferred intake (flipping deferred → open is the human's).
 - **Firing a live arm** — the FIRST `--no-dry-run` boot of a new composition.
 - **Persistence changes** — LaunchAgent/plist edits, credential rotation.
