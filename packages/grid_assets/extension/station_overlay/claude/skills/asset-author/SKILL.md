@@ -28,8 +28,10 @@ class ReviewAssets extends SingleChildStatelessSeed {
   @override
   Seed buildWithChild(TreeContext context, Seed child) {
     final services = context.watch<ReviewServices>();
-    return Provider<ReviewCapability>.value(
-      services == null
+    // Derived FRESH on every rebuild — held by no owner — so it rides an
+    // InheritedSeed over a VALUE type, never `Provider<T>.value` (rule 3).
+    return InheritedSeed<ReviewCapability>(
+      value: services == null
           ? ReviewCapability.refused(
               'review unavailable: no ReviewServices at this scope',
             )
@@ -40,6 +42,16 @@ class ReviewAssets extends SingleChildStatelessSeed {
 }
 ```
 
+`ReviewCapability` here is a VALUE: immutable, with `==`/`hashCode` over its
+derivation inputs (identity for the watched services, value equality for the
+refusal message). The seed re-derives it on every rebuild — that re-derivation
+is the point; it is how a later provider mount flips the posture live — and
+value equality is what keeps an input-equal re-description from notifying
+every dependent (`InheritedSeed.updateShouldNotify` compares the old and new
+values). The landed `_DerivedBundleSeed` in space_station_assets exists for
+exactly this: its `ServiceBundle` has no value equality, so the wrapper
+compares the derivation inputs instead.
+
 The rules are load-bearing:
 
 1. Assets are const seeds. In `build`, call `context.watch<T>()` for every
@@ -47,9 +59,15 @@ The rules are load-bearing:
    while it is absent (the enclosing `ProviderScope`'s availability registry
    parks the miss; production roots — `StationKernel.start`, `runGrid` —
    always mount the scope), and notification is bidirectional:
-   appearance, replacement, and disappearance all rebuild the watcher
-   (delivery defers past the announcing flush pass, so the rebuild lands in
-   the owner's next flush). Never snapshot or `??=`-cache reactive state, and
+   appearance, replacement, and disappearance all rebuild the watcher. The
+   timing differs by transition: appearance and disappearance are
+   availability-registry announcements whose delivery is DEFERRED past the
+   announcing flush pass (a microtask marks the watcher, and the rebuild
+   lands in the owner's next flush); a replacement — a changed `.value` or a
+   re-derived
+   inherited value — propagates through the ordinary inherited-update path
+   (`InheritedSeed.updateShouldNotify`) and rebuilds dependents in the SAME
+   flush pass. Never snapshot or `??=`-cache reactive state, and
    never publish a synchronous accessor over `StateNotifier` state. On an
    effect path, use `context.read<T>()` — the non-binding snapshot verb; it
    registers no dependency, live or pending.
@@ -62,8 +80,12 @@ The rules are load-bearing:
    tree-owned value — `create` runs exactly once per mount, in `initState`,
    and the tree disposes the value at unmount, after the subtree is fully
    down. `Provider<T>.value` exposes an owner-held, pre-built value and never
-   takes ownership. A pre-built instance never passes through `create:`. The
-   value is positional (`Provider<T>.value(theValue, child: ...)`), and a
+   takes ownership. A pre-built instance never passes through `create:`. And
+   a value DERIVED in `build` passes through NEITHER — it is held by no
+   owner, so `.value` (which ADOPTS an instance another owner holds) is wrong
+   for it; project it as an `InheritedSeed` over a value-equal type, as the
+   example above does. The value is positional
+   (`Provider<T>.value(theValue, child: ...)`), and a
    provider's kind (create vs `.value`) is fixed for the life of a mounted
    branch — change the type or key to remount.
 4. Placement is scoping. The nearest provider wins. Put station defaults above
@@ -102,7 +124,8 @@ mounts:
 - Compose the new const seed in the station or seat asset list at its intended
   scope.
 - Use `create:` only when the tree constructs and owns the value; use `.value`
-  for injected or otherwise owner-held instances.
+  for injected or otherwise owner-held instances; mount a `build`-derived
+  value as an `InheritedSeed` over a value-equal type.
 - Exercise dependency absent, present, replaced, and removed states.
 - Exercise a seat-local provider shadowing a station default.
 - Keep effects out of `build`; the seed projects values and implementations for
