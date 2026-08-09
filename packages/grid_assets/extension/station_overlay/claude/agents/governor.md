@@ -87,6 +87,7 @@ elsewhere.
 
 ## The skills
 
+- `asset-author` — B-style in-tree provider composition, ownership, availability, and scoping.
 - `station-operations` — boot/bounce/status, silent-death runbook, store seeding.
 - `intake-refinement` — the bead contract, staleness reconciliation, filing discipline.
 - `gate-medicine` — critique forensics, rework-not-gate-close, hygiene sweeps.

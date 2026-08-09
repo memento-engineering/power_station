@@ -454,6 +454,10 @@ void main() {
         reason: 'stampable: the frontmatter must open on line 1',
       );
       expect(governor.readAsStringSync(), contains('name: governor'));
+      expect(
+        governor.readAsStringSync(),
+        contains('`asset-author` — B-style in-tree provider composition'),
+      );
 
       final settings = File(p.join(overlay, 'claude', 'settings.json'));
       expect(settings.existsSync(), isTrue);
