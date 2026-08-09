@@ -87,7 +87,7 @@ footer.
 
 Lead with the verdict: what landed, what needs the human, what was stale.
 Per bead one line — delta, grades, plan result, disposition. Then the queues:
-PRs awaiting merge, beads awaiting bless, findings filed. The reader stepped
+PRs awaiting merge, beads awaiting approval, findings filed. The reader stepped
 away hours ago; write for them.
 
 ## Gotchas

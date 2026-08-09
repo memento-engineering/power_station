@@ -191,7 +191,7 @@ skills:
     description: >
       Shape work beads so a resident station can drive them — the required
       validation_plan metadata, driveable issue types, dependency wiring, and
-      defer-until-blessed staging.
+      defer-until-approved staging.
     path: station_overlay/claude/skills/intake-refinement/SKILL.md
     visibility: public
     audience: operator
