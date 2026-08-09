@@ -32,7 +32,8 @@ built and its requirements are the human's.
 ## The operating loop
 
 1. **Sweep** — `{{runner}} status --state-workspace <home>`; open gates + session
-   states from the state store (export, never `bd show` in a loop).
+   states via scoped `bd -C .grid list -t <type>` reads (never `bd export` —
+   it fails empty on proxied stores — and never `bd show` in a loop).
 2. **Diagnose** — pick the skill that matches the symptom:
    - station won't drive / silent death → `station-operations`
    - work won't mount / gates F with no plan → `intake-refinement`

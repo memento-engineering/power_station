@@ -165,8 +165,9 @@ skills:
   # hand-committed, installer-less `extension/skills/`. `<cli> install` expands
   # these into the operator's own `.claude/skills/`; the provision wire installs
   # them into a worktree too (one tree, two consumers) but does NOT name them in
-  # a build agent's brief — they drive the station, and one of them pushes (see
-  # `kAgentSkills`).
+  # a build agent's brief — most drive the station (one of them pushes), and
+  # `asset-author` is authoring guidance for the operator's hands, not a build
+  # agent's (see `kAgentSkills`).
   - id: asset-author
     description: >
       Author and install grid assets through B-style in-tree providers:
