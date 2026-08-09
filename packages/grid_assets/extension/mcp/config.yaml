@@ -167,6 +167,14 @@ skills:
   # them into a worktree too (one tree, two consumers) but does NOT name them in
   # a build agent's brief — they drive the station, and one of them pushes (see
   # `kAgentSkills`).
+  - id: asset-author
+    description: >
+      Author and install grid assets through B-style in-tree providers:
+      watched nullable dependencies, diagnostic unavailability, explicit
+      create/value ownership, scoped overrides, and assembly-only boot.
+    path: station_overlay/claude/skills/asset-author/SKILL.md
+    visibility: public
+    audience: operator
   - id: station-operations
     description: >
       Operate the resident station — boot, bounce, tear down, read status, seed

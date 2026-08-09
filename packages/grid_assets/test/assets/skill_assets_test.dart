@@ -259,6 +259,7 @@ void main() {
 
   group('the re-homed OPERATOR skills', () {
     const reHomed = <String, Set<String>>{
+      'asset-author': <String>{},
       'station-operations': {'runner'},
       'gate-medicine': {'runner'},
       'harvest-review': {'runner'},

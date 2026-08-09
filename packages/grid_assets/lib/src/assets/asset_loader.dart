@@ -45,6 +45,7 @@ import 'overlay_manifest.dart';
 /// read this constant (it installs whatever files exist under the overlay); it
 /// is the by-id render surface's own index, and the skill-manifest test's.
 const List<String> kVendedSkills = [
+  'asset-author',
   'discover',
   'gate-medicine',
   'harvest-review',
@@ -73,6 +74,7 @@ const List<String> kVendedSkills = [
 /// silently is the failure this doctrine forbids. Only a DECLARED operator
 /// audience withholds a skill.
 const List<String> kOperatorSkills = [
+  'asset-author',
   'gate-medicine',
   'harvest-review',
   'intake-refinement',
