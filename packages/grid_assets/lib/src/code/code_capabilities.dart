@@ -569,7 +569,7 @@ StepSignal _jobSignal(RuntimeEvent event) => switch (event) {
 ///
 /// M5 D-4a stripped commit/push/PR off the [SourceControl] interface: that is
 /// DELIVERY detail, and it lives behind the substation's bound [DeliveryMethod]
-/// (`delivery.dart`'s [GitHubPrDelivery]). What remains here is provisioning —
+/// (`delivery.dart`'s the GitHub PR delivery method). What remains here is provisioning —
 /// [provisioner] ([StationGitService]) + [root] ([RootCheckout]) cut the per-bead
 /// worktree, so the host can materialize the workspace before the agent spawns.
 /// Absent ⇒ [provisionWorkspace] no-ops (the offline/dry-run build), while

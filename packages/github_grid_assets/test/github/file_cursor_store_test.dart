@@ -1,6 +1,6 @@
 import 'dart:io';
 
-import 'package:grid_assets/grid_assets.dart';
+import 'package:github_grid_assets/github_grid_assets.dart';
 import 'package:test/test.dart';
 
 void main() {

@@ -31,7 +31,7 @@
 ///    sides, not merely forbidden by the prompt.
 ///
 /// [PrComposition] is the knob — a config VALUE a station/substation mounts
-/// (`GitHubGridAssets(composition: …)` → `InheritedSeed<PrComposition>`; config
+/// (`the configured GitHub delivery asset` → `InheritedSeed<PrComposition>`; config
 /// = values in the tree, ADR-0008), read by `DeliverRouteCapability` at its route
 /// edge
 /// with the non-binding effect verb (ADR-0008 D3). Everything in this library is
@@ -299,7 +299,7 @@ class PrCompositionContext {
 }
 
 /// The PR title/body composition knob (bead `pow-8dx`) — a config VALUE a
-/// station/substation mounts (`GitHubGridAssets(composition: …)`) to shape the
+/// station/substation mounts (`the configured GitHub delivery asset`) to shape the
 /// landing asset's PRs; `DeliverRouteCapability` reads it at its route edge and
 /// falls back
 /// to `const PrComposition()` when none is mounted. A plain const class (the
