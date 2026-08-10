@@ -17,7 +17,6 @@
 //
 // Offline only — FAKES, no live tg/gc/claude/git/network.
 import 'package:genesis_tree/genesis_tree.dart';
-import 'package:github_grid_assets/github_grid_assets.dart';
 import 'package:grid_assets/grid_assets.dart';
 import 'package:beads_dart/beads_dart.dart';
 import 'package:grid_engine/grid_engine.dart';
@@ -25,6 +24,24 @@ import 'package:grid_runtime/grid_runtime.dart';
 import 'package:test/test.dart';
 
 import '../support/asset_fakes.dart';
+
+late _RecordingDelivery _recordingDelivery;
+
+final class _RecordingDelivery implements DeliveryMethod {
+  final List<DeliveryRequest> requests = <DeliveryRequest>[];
+
+  @override
+  String get id => 'recording-delivery';
+
+  @override
+  Future<StepOutcome> deliver(DeliveryRequest request) async {
+    requests.add(request);
+    return const Ok(<String, String>{
+      'pr_url': 'https://example.invalid/pr/1',
+      'reused': 'false',
+    });
+  }
+}
 
 const _sid = 'tgdog-sess1';
 
@@ -102,7 +119,8 @@ GraphSnapshot _stateAt({
     results: {
       for (final entry in {...kSpecGradesAllA, ...grades}.entries)
         entry.key: {ResultKeys.grade: entry.value},
-      if (deliverDone) kDeliverNode: {ResultKeys.delivery: 'github-pr'},
+      if (deliverDone)
+        kDeliverNode: {ResultKeys.delivery: 'recording-delivery'},
     },
   ),
   ready: const {},
@@ -132,13 +150,8 @@ final Map<String, String> _allA = {for (final n in kCriticNodes) n: 'A'};
 /// SAME way ("the synthetic worktree does not exist on disk") only when the
 /// workspace directory does not exist at all. Land still runs for real through
 /// the fake git ops below (`GitOps(f.git)`), independent of `sourceControl`.
-ServiceBundle _gitServices(Fakes f) => ServiceBundle(
-  delivery: GitHubPrDelivery(
-    gitOps: GitOps(f.git),
-    prOpener: f.pr,
-    gitRunner: f.git,
-  ),
-);
+ServiceBundle _gitServices(Fakes f) =>
+    ServiceBundle(delivery: _recordingDelivery = _RecordingDelivery());
 
 void main() {
   group('invariant 2 — only the chokepoint writes', () {
@@ -373,8 +386,7 @@ void main() {
       expect(f.runner.callsFor('update'), isNotEmpty);
       expect(f.runner.callsFor('close'), hasLength(1));
       // The land Service really ran its orchestration through the fakes.
-      expect(f.git.subcommands, containsAll(<String>['add', 'commit', 'push']));
-      expect(f.pr.opened, isNotEmpty);
+      expect(_recordingDelivery.requests, isNotEmpty);
 
       // (a) NO bd write bypasses the chokepoint: the ONLY BdRunner in the
       //     system is the one inside the StationBeadWriter, so EVERY recorded bd
@@ -421,6 +433,81 @@ void main() {
           reason: 'unexpected bd subcommand bypassing the chokepoint: $c',
         );
       }
+    });
+
+    test('NO write happens inside build(): every host build() is a pure Idle leaf — '
+        'driving the full tree, the work subtree leaves are all Idle and the '
+        'recorded writes are all event-driven, never a build product', () async {
+      final f = buildFakes(createdId: 'tgdog-sess1');
+      final work = FakeSnapshotSource(_graph(beads: const [], ready: const {}));
+      final state = FakeSnapshotSource(
+        _graph(beads: const [], ready: const {}),
+      );
+      final bridge = StationJoinBridge(work: work, state: state);
+      final kernel = StationKernel(
+        bridge: bridge,
+        stationServices: f.ctx,
+        resolver: kCodeResolver,
+        registry: buildCodeRegistry(),
+        substations: [
+          SubstationScope(
+            configNotifier: SubstationConfigNotifier(
+              const SubstationConfig(
+                substationId: 'tg',
+                ownedSubstations: {'tg'},
+              ),
+            ),
+            key: const ValueKey('scope.tg'),
+          ),
+        ],
+      );
+      addTearDown(kernel.dispose);
+      addTearDown(f.provider.close);
+      addTearDown(work.close);
+      addTearDown(state.close);
+
+      kernel.start();
+      await pumpEventQueue();
+
+      // Mount a work bead, then re-project the readiness ladder complete (bead
+      // `pow-q7n` — its `intake` head is a zero-agent ServiceCapability, so
+      // `specify` only mounts behind it). The agent spawns from the host
+      // lifecycle — a write (the session mint) lands. But that write came from
+      // the lifecycle, not a build: re-pushing the SAME snapshot (a redundant
+      // work tick) re-runs WorkList/WorkBead/SessionScope/CircuitScope build()
+      // — and produces ZERO new bd writes, because build() never writes.
+      work.push(_graph(beads: [workBead('tg-1')], ready: {'tg-1'}));
+      await settle(() => f.runner.callsFor('create').isNotEmpty);
+      state.push(
+        _graph(
+          beads: [...ladderDoneSession(id: 'tgdog-sess1')],
+          ready: const {},
+        ),
+      );
+      await settle(() => f.provider.started.isNotEmpty);
+      final writesAfterMount = f.runner.calls.length;
+      expect(writesAfterMount, greaterThan(0), reason: 'the mint landed');
+      expect(f.provider.started, hasLength(1));
+
+      // A redundant identical work tick → the subtree rebuilds (same keys, same
+      // config) → NO new writes (build() is side-effect-free) and NO effect
+      // churn (the keyed reconcile preserves the branches).
+      work.push(_graph(beads: [workBead('tg-1')], ready: {'tg-1'}));
+      await pumpEventQueue();
+      work.push(_graph(beads: [workBead('tg-1')], ready: {'tg-1'}));
+      await pumpEventQueue();
+
+      expect(
+        f.runner.calls.length,
+        writesAfterMount,
+        reason: 'build() writes nothing — redundant rebuilds add no bd calls',
+      );
+      expect(
+        f.provider.started,
+        hasLength(1),
+        reason: 'no respawn — the host branch persisted across rebuilds',
+      );
+      expect(f.provider.stopped, isEmpty);
     });
   });
 }

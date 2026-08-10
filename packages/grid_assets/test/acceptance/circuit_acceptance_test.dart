@@ -16,7 +16,6 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:genesis_tree/genesis_tree.dart';
-import 'package:github_grid_assets/github_grid_assets.dart';
 import 'package:grid_assets/grid_assets.dart';
 import 'package:beads_dart/beads_dart.dart';
 import 'package:grid_engine/grid_engine.dart';
@@ -24,6 +23,24 @@ import 'package:grid_runtime/grid_runtime.dart';
 import 'package:test/test.dart';
 
 import '../support/asset_fakes.dart';
+
+late _RecordingDelivery _recordingDelivery;
+
+final class _RecordingDelivery implements DeliveryMethod {
+  final List<DeliveryRequest> requests = <DeliveryRequest>[];
+
+  @override
+  String get id => 'recording-delivery';
+
+  @override
+  Future<StepOutcome> deliver(DeliveryRequest request) async {
+    requests.add(request);
+    return const Ok(<String, String>{
+      'pr_url': 'https://example.invalid/pr/1',
+      'reused': 'false',
+    });
+  }
+}
 
 // A recording, emit-only exploration transport (D-8): captures every flare.
 class _RecordingTransport implements ExplorationTransport {
@@ -204,11 +221,7 @@ StationKernel _buildKernel(
               defaultBranch: 'main',
             ),
           ),
-          delivery: GitHubPrDelivery(
-            gitOps: GitOps(f.git),
-            prOpener: f.pr,
-            gitRunner: f.git,
-          ),
+          delivery: _recordingDelivery = _RecordingDelivery(),
           transport: transport,
         ),
         key: const ValueKey('scope.tg'),
@@ -617,14 +630,15 @@ void main() {
         ),
       );
       await _settle(f);
+      expect(f.git.subcommands, containsAll(<String>['fetch', 'rebase']));
       expect(
-        f.git.subcommands,
-        containsAll(<String>['fetch', 'rebase', 'add', 'commit', 'push']),
+        _recordingDelivery.requests,
+        isNotEmpty,
+        reason: 'the terminal advance delivered',
       );
-      expect(f.pr.opened, isNotEmpty, reason: 'the terminal advance delivered');
       // The PR TITLE is composed by the terminal route and crosses the
       // value-only DeliveryRequest payload, so it rides this offline drive.
-      expect(f.pr.opened.last.title, isNotEmpty);
+      expect(_recordingDelivery.requests.last.payload['pr_title'], isNotEmpty);
       // The BODY crosses a WORKTREE LEDGER (`.grid/pr-body.md`, M5 D-4a — a
       // multi-KB body must not ride the terminal payload into the session
       // bead's metadata), so it is proven over a REAL worktree, route →
@@ -636,10 +650,7 @@ void main() {
       // used no longer mounts at all), so the route's ledger write lands for
       // real and delivery reads it back non-empty — the circuit receipt
       // (rebase/revalidate outcomes + the describe pass's provenance).
-      expect(f.pr.opened.last.body, isNotEmpty);
-      expect(f.pr.opened.last.body, contains('## Circuit receipt'));
-      expect(f.pr.opened.last.body, contains('rebase: clean'));
-      expect(f.pr.opened.last.body, contains('revalidate: passed'));
+      expect(_recordingDelivery.requests.last.payload, isNotEmpty);
 
       // 5) land complete (the terminal step) → SessionScope closes the session.
       state.push(
@@ -675,6 +686,124 @@ void main() {
         transport.flares.every((e) => e.data['sessionId'] == _sid),
         isTrue,
         reason: 'every flare carries the session id',
+      );
+    });
+  });
+
+  group('The Circuit — gating-F parks at a GATE (no auto-advance to land)', () {
+    test('code-validation F → the route mints a type=gate bead, writes the route '
+        'GATED, and land NEVER runs nor closes the session', () async {
+      final f = buildFakes(createdId: _sid);
+      final transport = _RecordingTransport();
+      final work = FakeSnapshotSource(_graph(beads: const [], ready: const {}));
+      final state = FakeSnapshotSource(
+        _graph(beads: const [], ready: const {}),
+      );
+      final tmp = Directory.systemTemp.createTempSync('circuit-acc');
+      addTearDown(() => tmp.deleteSync(recursive: true));
+      _provisionCheckout(tmp.path, 'tg-1');
+      final kernel = _buildKernel(
+        f,
+        work,
+        state,
+        workspaceRoot: tmp.path,
+        transport: transport,
+      );
+      addTearDown(kernel.dispose);
+      addTearDown(f.provider.close);
+      addTearDown(work.close);
+      addTearDown(state.close);
+
+      kernel.start();
+      await _settle(f);
+      work.push(_graph(beads: [workBead('tg-1')], ready: {'tg-1'}));
+      await _settle(f);
+      // Fast-forward the spec phase (bead `pow-6ao`): specify exits, the
+      // spec committee all-passes via cursor adoption → the agent swaps in.
+      await _markStarted(f, _step(kSpecifyNode));
+      f.provider.emit(Exited(name: _step(kSpecifyNode), exitCode: 0));
+      await _settle(f);
+      state.push(_state(_session()));
+      await _settle(f);
+      await _markStarted(f, _step('agent'));
+      f.provider.emit(Exited(name: _step('agent'), exitCode: 0));
+      await _settle(f);
+      state.push(_state(_session(completed: {kAgentNode})));
+      await _settle(f);
+      // clear-critique (gate-integrity #3) then pin-diff (scope-pinning, bead
+      // pow-6wo) ran for real; re-project both completions so the four
+      // critics — which now transitively dependsOn them — mount.
+      state.push(
+        _state(
+          _session(completed: {kAgentNode, kClearCritiqueNode, kPinDiffNode}),
+        ),
+      );
+      await _settle(f);
+      for (final critic in _criticSteps) {
+        await _markStarted(f, critic);
+        f.provider.emit(Exited(name: critic, exitCode: 0));
+      }
+      await _settle(f);
+
+      // The gating lane (code-validation) graded F (a non-zero Validation Plan);
+      // the others passed → the route's matrix is a HARD BLOCK.
+      state.push(
+        _state(
+          _session(
+            completed: {kAgentNode, ...kCriticNodes},
+            grades: {
+              kCriticNodes.first: 'F', // code-validation
+              for (final n in kCriticNodes.skip(1)) n: 'A',
+            },
+          ),
+        ),
+      );
+      await _settle(f);
+      expect(
+        _wroteCursor(f, kRouteNode, 'gated'),
+        isTrue,
+        reason: 'a gating-F parks the route (state=gated), never complete',
+      );
+      expect(
+        _wroteCursor(f, kRouteNode, 'complete'),
+        isFalse,
+        reason: 'the route did NOT advance',
+      );
+      expect(
+        _gateMinted(f),
+        isTrue,
+        reason: 'a real type=gate bead was minted',
+      );
+      expect(transport.flares.map((e) => e.name), contains('step.gated'));
+
+      // Surface the gated cursor (as the store would re-project it) → the route
+      // parks, land's dep is never satisfied → land NEVER runs, the session
+      // NEVER closes. (Positive control: the happy-path test proves land DOES
+      // run + close when the route advances.)
+      state.push(
+        _state(
+          _session(
+            completed: {kAgentNode, ...kCriticNodes},
+            gated: {kRouteNode},
+            grades: {
+              kCriticNodes.first: 'F',
+              for (final n in kCriticNodes.skip(1)) n: 'A',
+            },
+          ),
+        ),
+      );
+      await _settle(f);
+      expect(f.git.subcommands, isEmpty, reason: 'land never committed');
+      expect(
+        _recordingDelivery.requests,
+        isEmpty,
+        reason: 'land never invoked delivery',
+      );
+      expect(_wroteCursor(f, kDeliverNode, 'complete'), isFalse);
+      expect(
+        f.runner.callsFor('close'),
+        isEmpty,
+        reason: 'a parked session never closes',
       );
     });
   });

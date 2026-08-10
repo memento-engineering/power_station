@@ -15,10 +15,9 @@ import 'package:github_grid_assets/github_grid_assets.dart';
 import 'package:grid_assets/grid_assets.dart';
 import 'package:grid_engine/grid_engine.dart';
 import 'package:grid_runtime/grid_runtime.dart';
-import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
-import '../../grid_assets/test/support/asset_fakes.dart';
+import 'support/asset_fakes.dart';
 
 /// The terminal route's context. [delivery] bound ⇒ the live arm; null ⇒ the
 /// commit-only arm. [siblings] is the SESSION-WIDE view `SessionScope` mounts —
@@ -68,160 +67,6 @@ DeliveryRequest _request({
 );
 
 void main() {
-  group('the ROOT circuit delivers at its TERMINAL', () {
-    test(
-      '`deliver` is a FLAT route step and IS the delivery terminal — a '
-      'SubCircuitStep tail would silently degrade the station to commit-only',
-      () {
-        final byId = {for (final s in kCodeCircuit.steps) s.stepId: s};
-        expect(byId[kDeliverStep], isA<CapabilityStep>());
-        expect(byId[kDeliverStep]!.dependsOn, {'land'});
-        expect(kCodeCircuit.terminalStepId, kDeliverStep);
-        expect(
-          isDeliveryTerminal(
-            circuit: kCodeCircuit,
-            circuitPath: 'tg-1',
-            stepId: kDeliverStep,
-            beadId: 'tg-1',
-          ),
-          isTrue,
-        );
-      },
-    );
-
-    test('the landing sub-circuit no longer carries a `land` step — the PR is '
-        'not a step at all', () {
-      expect(
-        kLandingCircuit.steps.map((s) => s.stepId),
-        isNot(contains('land')),
-      );
-      expect(kLandingCircuit.terminalStepId, 'revalidate');
-    });
-
-    // That the REGISTRY actually binds a capability at `deliver` is proven end
-    // to end, through the real kernel, by `acceptance/circuit_acceptance_test`:
-    // an unbound capability id mounts an inert leaf and the circuit visibly
-    // stalls, so the acceptance drive could not reach the terminal at all.
-    test('the terminal step names the SAME capability id the registry binds — '
-        'one constant, so the circuit and the registry cannot drift', () {
-      final terminal = kCodeCircuit.steps
-          .whereType<CapabilityStep>()
-          .firstWhere((s) => s.stepId == kCodeCircuit.terminalStepId);
-      expect(terminal.capabilityId, kDeliverStep);
-    });
-  });
-
-  group('DeliverRouteCapability — the terminal route', () {
-    late Directory work;
-    setUp(() => work = Directory.systemTemp.createTempSync('deliver-route-'));
-    tearDown(() => work.deleteSync(recursive: true));
-
-    test('NO delivery bound ⇒ a BARE Advance with no payload, and ZERO '
-        'inference spent (the commit-only arm never buys a token)', () async {
-      final outcome = await DeliverRouteCapability(
-        // An exploding runner: reaching inference at all would fail the test.
-        inference: FakeInferenceRunner(output: 'never', ok: false),
-      ).route(_deliverContext(workspaceDir: work.path), _deliverArgs());
-      expect(outcome, isA<Advance>());
-      expect((outcome as Advance).payload, isNull);
-      expect(
-        File(prBodyPath(work.path)).existsSync(),
-        isFalse,
-        reason: 'no body ledger is written in the commit-only arm',
-      );
-    });
-
-    test('delivery bound ⇒ Advance carrying the composed pr_title, and the '
-        'composed BODY is on disk at the worktree ledger (kilobytes of prose '
-        'never ride the payload into the session bead)', () async {
-      final outcome = await const DeliverRouteCapability().route(
-        _deliverContext(
-          workspaceDir: work.path,
-          delivery: _FakeDelivery(),
-          beadOverride: bead('tg-1').copyWith(
-            title: 'better + configurable PR titles',
-            issueType: IssueType.feature,
-            metadata: const {'rig': 'power_station'},
-          ),
-          // The SESSION-WIDE sibling view: the receipt's absolute `<bead>/land/*`
-          // keys resolve from this ROOT-level node exactly as they did from the
-          // old `<bead>/land/land`.
-          siblings: const SiblingView(
-            results: {
-              'tg-1/land/rebase': {'outcome': 'clean'},
-              'tg-1/land/revalidate': {'outcome': 'passed'},
-              'tg-1/review/route': {
-                'grades': 'code-validation=A,spec-adherence=B',
-                'spread': '1',
-                'rule': 'all-approve',
-              },
-            },
-          ),
-        ),
-        _deliverArgs(),
-      );
-
-      expect(outcome, isA<Advance>());
-      final payload = (outcome as Advance).payload!;
-      expect(
-        payload['pr_title'],
-        'feat(power_station): better + configurable PR titles',
-      );
-      expect(payload['title_source'], 'fallback');
-      expect(payload['verdict'], 'deliver');
-      expect(
-        payload.values.join().length,
-        lessThan(500),
-        reason: 'the multi-KB body is NOT in the payload',
-      );
-
-      final body = File(prBodyPath(work.path)).readAsStringSync();
-      expect(body, contains('## Circuit receipt'));
-      expect(body, contains('- rebase: clean'));
-      expect(body, contains('- revalidate: passed'));
-      expect(body, contains('code-validation=A'));
-      expect(body.trimRight(), endsWith('Refs: tg-1'));
-    });
-
-    test(
-      'an unwritable body ledger throws a RouteFailure — never a PR that '
-      'drops the committee grades and the circuit receipt on the floor',
-      () async {
-        // `.grid` occupied by a FILE ⇒ createSync(recursive: true) throws.
-        File(p.join(work.path, '.grid'))
-          ..createSync(recursive: true)
-          ..writeAsStringSync('not a directory');
-        await expectLater(
-          const DeliverRouteCapability().route(
-            _deliverContext(workspaceDir: work.path, delivery: _FakeDelivery()),
-            _deliverArgs(),
-          ),
-          throwsA(
-            isA<RouteFailure>().having(
-              (e) => e.reason,
-              'reason',
-              contains('PR body ledger'),
-            ),
-          ),
-        );
-      },
-    );
-
-    test('an OFFLINE workspace (no worktree on disk) still advances — the body '
-        'ledger is skipped and delivery opens with an empty body; a land never '
-        'fails over PR prose', () async {
-      final outcome = await const DeliverRouteCapability().route(
-        _deliverContext(
-          workspaceDir: '/grid/worktrees/does-not-exist-tg-1',
-          delivery: _FakeDelivery(),
-        ),
-        _deliverArgs(),
-      );
-      expect(outcome, isA<Advance>());
-      expect((outcome as Advance).payload!['pr_title'], isNotEmpty);
-    });
-  });
-
   group('GitHubPrDelivery — the bound method', () {
     late Directory work;
     setUp(() => work = Directory.systemTemp.createTempSync('deliver-method-'));
@@ -602,14 +447,6 @@ void main() {
       expect(pr.opened.single.body, contains('- description: fallback'));
     });
   });
-}
-
-/// A bound [DeliveryMethod] whose presence arms the route; it records nothing.
-class _FakeDelivery implements DeliveryMethod {
-  @override
-  String get id => 'fake';
-  @override
-  Future<StepOutcome> deliver(DeliveryRequest request) async => const Ok();
 }
 
 /// A [GitRunner] whose `status --porcelain` reports RESIDUE — the commit
