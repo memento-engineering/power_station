@@ -1,0 +1,11 @@
+{
+  "runtimeType": "checkConcluded",
+  "nodeId": "CR_3",
+  "actor": "checks-app",
+  "repository": "memento/power",
+  "substation": "power",
+  "observationId": "webhook:delivery-3",
+  "headBranch": "grid/work",
+  "checkName": "test",
+  "conclusion": "success"
+}

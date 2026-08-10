@@ -21,13 +21,15 @@
 /// all now — it is five plain fields: source control, delivery, escalation,
 /// trust, transport.)
 ///
-/// **The assets are `SingleChildStatelessSeed`s** — each wraps the downstream
-/// subtree, so they chain in a `Nest` exactly as the v3 sketch authors them:
+/// **The assets are single-child seeds** — each wraps the downstream subtree,
+/// so they chain in a `Nest` exactly as the v3 sketch authors them:
 /// `assets: Nest(children: [GitGridAssets(...), GitHubGridAssets()])`. The
 /// engine reads the ambient values it always has (`ServiceBundle`,
 /// `AgentHarnessRegistry`, `AgentConfig`); nothing in the opinion-free engine
 /// learns a new type (ADR-0007 §1).
 library;
+
+import 'dart:async';
 
 import 'package:genesis_tree/genesis_tree.dart';
 import 'package:grid_engine/grid_engine.dart';
@@ -43,6 +45,7 @@ import '../agent/environment_registry.dart';
 import '../code/code_capabilities.dart';
 import '../code/delivery.dart';
 import '../code/pr_composition.dart';
+import '../github/github_reconciler_runtime.dart';
 
 /// **GitServices** — the station's git-execution machinery as ONE ambient
 /// value: the shared [StationGitService] provisioner + the [GitOps]
@@ -179,7 +182,7 @@ class GitGridAssets extends SingleChildStatelessSeed {
 /// AND commit/push [GitOps] (its own, or the ambient [GitServices] carrier's).
 /// With either missing it passes the ambient bundle through unchanged: GitHub can
 /// only ADD delivery to a git checkout it can commit from, never conjure one.
-class GitHubGridAssets extends SingleChildStatelessSeed {
+class GitHubGridAssets extends SingleChildStatefulSeed {
   /// Creates the GitHub asset over the optional [prOpener] (the runner injects a
   /// live `GhPrOpener`; null ⇒ NO delivery bound — the commit-only arm), the
   /// optional [gitOps] per-seat override, the optional [gitRunner] the
@@ -190,6 +193,7 @@ class GitHubGridAssets extends SingleChildStatelessSeed {
     this.gitOps,
     this.gitRunner,
     this.composition,
+    this.reconcilerRuntime,
     super.child,
     super.key,
   });
@@ -215,6 +219,31 @@ class GitHubGridAssets extends SingleChildStatelessSeed {
   /// better-by-default shape). Config = VALUES in the tree (ADR-0008).
   final PrComposition? composition;
 
+  /// Optional resident polling lifecycle for this substation's repository.
+  final GitHubReconcilerRuntime? reconcilerRuntime;
+
+  @override
+  SingleChildState<SingleChildStatefulSeed> createState() =>
+      _GitHubGridAssetsState();
+}
+
+class _GitHubGridAssetsState extends SingleChildState<SingleChildStatefulSeed> {
+  GitHubGridAssets get _seed => seed as GitHubGridAssets;
+  late final GitHubReconcilerRuntime? _runtime;
+
+  @override
+  void initState() {
+    super.initState();
+    _runtime = _seed.reconcilerRuntime;
+    _runtime?.start();
+  }
+
+  @override
+  void dispose() {
+    if (_runtime case final runtime?) unawaited(runtime.stop());
+    super.dispose();
+  }
+
   @override
   Seed buildWithChild(TreeContext context, Seed child) {
     // OBSERVE the ambient bundle (D-H: watch deps in `build`, ADR-0008) — a
@@ -229,9 +258,9 @@ class GitHubGridAssets extends SingleChildStatelessSeed {
     // re-provided machinery must RE-DERIVE the binding rather than leave a stale
     // one mounted.
     final services = GitServices.maybeOf(context);
-    final ops = gitOps ?? services?.gitOps;
-    final opener = prOpener;
-    final knob = composition;
+    final ops = _seed.gitOps ?? services?.gitOps;
+    final opener = _seed.prOpener;
+    final knob = _seed.composition;
 
     var wired = child;
     // BOTH halves, or nothing is bound (commit-only).
@@ -244,7 +273,7 @@ class GitHubGridAssets extends SingleChildStatelessSeed {
           delivery: GitHubPrDelivery(
             gitOps: ops,
             prOpener: opener,
-            gitRunner: gitRunner,
+            gitRunner: _seed.gitRunner,
             composition: knob ?? const PrComposition(),
           ),
           escalation: ambient?.escalation,

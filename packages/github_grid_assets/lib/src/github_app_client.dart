@@ -24,6 +24,7 @@ class GitHubAppClient {
     required String method,
     required String path,
     Map<String, String> headers = const <String, String>{},
+    Map<String, String> queryParameters = const <String, String>{},
     Object? jsonBody,
   }) async {
     if (!path.startsWith('/')) {
@@ -33,7 +34,10 @@ class GitHubAppClient {
     return _transport.send(
       GitHubHttpRequest(
         method: method,
-        uri: _config.apiBaseUri.replace(path: path, query: null),
+        uri: _config.apiBaseUri.replace(
+          path: path,
+          queryParameters: queryParameters.isEmpty ? null : queryParameters,
+        ),
         headers: <String, String>{
           'Accept': 'application/vnd.github+json',
           'Authorization': 'Bearer $token',
