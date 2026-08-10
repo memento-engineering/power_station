@@ -27,7 +27,7 @@ NormalizedGitHubEvent _$NormalizedGitHubEventFromJson(
           return CheckConcluded.fromJson(
             json
           );
-
+        
           default:
             throw CheckedFromJsonException(
   json,
@@ -36,7 +36,7 @@ NormalizedGitHubEvent _$NormalizedGitHubEventFromJson(
   'Invalid union type "${json['runtimeType']}"!'
 );
         }
-
+      
 }
 
 /// @nodoc

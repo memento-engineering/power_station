@@ -17,13 +17,14 @@
 //
 // Offline only — FAKES, no live tg/gc/claude/git/network.
 import 'package:genesis_tree/genesis_tree.dart';
+import 'package:github_grid_assets/github_grid_assets.dart';
 import 'package:grid_assets/grid_assets.dart';
 import 'package:beads_dart/beads_dart.dart';
 import 'package:grid_engine/grid_engine.dart';
 import 'package:grid_runtime/grid_runtime.dart';
 import 'package:test/test.dart';
 
-import '../support/asset_fakes.dart';
+import '../../../grid_assets/test/support/asset_fakes.dart';
 
 const _sid = 'tgdog-sess1';
 

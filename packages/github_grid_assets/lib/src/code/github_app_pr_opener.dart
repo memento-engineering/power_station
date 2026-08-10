@@ -1,8 +1,9 @@
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:github_grid_assets/github_grid_assets.dart';
 import 'package:grid_runtime/grid_runtime.dart';
+
+import '../github_app_client.dart';
 
 /// Reads the origin URL for the checkout rooted at [workDir].
 typedef GitRemoteReader = Future<String> Function(String workDir);

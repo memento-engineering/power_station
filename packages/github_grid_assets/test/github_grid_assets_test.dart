@@ -20,7 +20,7 @@ import 'package:grid_sdk/grid_sdk.dart' as sdk;
 import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
-import 'support/asset_fakes.dart';
+import '../../grid_assets/test/support/asset_fakes.dart';
 
 // ── test infra ──────────────────────────────────────────────────────────────
 

@@ -37,7 +37,7 @@
 ///
 /// **The receipt** ([buildCircuitReceipt]): this circuit's rebase/revalidate
 /// outcomes, read off the ambient `SiblingView` at the bead's absolute node
-/// paths. It rides the PR body `GitHubPrDelivery` opens with. The three
+/// paths. It rides the PR body the GitHub PR delivery method opens with. The three
 /// `is`-detected `SourceControl` widenings that used to thread it there — the
 /// receipt-regression, tree-verification and rework-aware stopgaps — are GONE:
 /// each existed only because the ENGINE's `SourceControl` could not carry the
@@ -91,7 +91,7 @@ const Circuit kLandingCircuit = Circuit(
 /// substation bind?", and none is a valid binding — M5 D-4a.)
 class RebaseCapability extends RouteCapability {
   /// Creates the capability, optionally over an injected [runner] (tests
-  /// inject the SAME [RecordingGitRunner] fake `GitHubPrDelivery`'s `GitOps`
+  /// inject the SAME [RecordingGitRunner] fake the GitHub PR delivery method's `GitOps`
   /// already uses — Fakes, not mocks); defaults to the real [SystemGitRunner].
   const RebaseCapability({
     GitRunner? runner,

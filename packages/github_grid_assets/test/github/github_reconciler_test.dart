@@ -2,7 +2,6 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:github_grid_assets/github_grid_assets.dart';
-import 'package:grid_assets/grid_assets.dart';
 import 'package:test/test.dart';
 
 class _Tokens implements GitHubAppTokenProvider {

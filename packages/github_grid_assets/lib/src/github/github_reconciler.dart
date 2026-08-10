@@ -1,6 +1,6 @@
 import 'dart:convert';
 
-import 'package:github_grid_assets/github_grid_assets.dart';
+import '../github_app_client.dart';
 
 import 'reconciler_cursor.dart';
 import 'reconciler_event.dart';

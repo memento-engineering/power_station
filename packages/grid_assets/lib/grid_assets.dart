@@ -10,7 +10,8 @@
 ///
 /// The v3 COMPOSITION ASSETS (Track F, `tg-5r9`, `composition_assets.dart`) are
 /// how those opinions mount into the grid tree at a SCOPE — the replacement for
-/// the runner-built `ServiceBundle` map: [GitGridAssets] / [GitHubGridAssets]
+/// the runner-built `ServiceBundle` map: GitGridAssets plus a domain delivery
+/// asset
 /// (substation-scoped source control, over the ambient [GitServices] machinery
 /// carrier the delegate mounts once), [HarnessProvider] (station-scoped harness
 /// provision), [CircuitProvider] (the Q8 circuit provider/scope), and
@@ -148,7 +149,6 @@ export 'src/code/conventional_commit.dart';
 export 'src/code/delivery.dart';
 export 'src/code/discovery.dart';
 export 'src/code/docs_committee.dart';
-export 'src/code/github_app_pr_opener.dart';
 export 'src/code/landing.dart';
 export 'src/code/pr_composition.dart';
 export 'src/code/pr_describe.dart';
@@ -159,11 +159,6 @@ export 'src/code/specify.dart';
 export 'src/compute/bounded_use.dart';
 export 'src/compute/compute_command.dart';
 export 'src/compute/compute_commands.dart';
-export 'src/github/file_cursor_store.dart';
-export 'src/github/github_reconciler.dart';
-export 'src/github/github_reconciler_runtime.dart';
-export 'src/github/reconciler_cursor.dart';
-export 'src/github/reconciler_event.dart';
 export 'src/compute/lease_capability.dart';
 export 'src/lease/bus_lease.dart';
 export 'src/search/embedding_index.dart';

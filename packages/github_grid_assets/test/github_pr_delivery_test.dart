@@ -11,13 +11,14 @@
 import 'dart:io';
 
 import 'package:beads_dart/beads_dart.dart';
+import 'package:github_grid_assets/github_grid_assets.dart';
 import 'package:grid_assets/grid_assets.dart';
 import 'package:grid_engine/grid_engine.dart';
 import 'package:grid_runtime/grid_runtime.dart';
 import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
-import 'support/asset_fakes.dart';
+import '../../grid_assets/test/support/asset_fakes.dart';
 
 /// The terminal route's context. [delivery] bound ⇒ the live arm; null ⇒ the
 /// commit-only arm. [siblings] is the SESSION-WIDE view `SessionScope` mounts —

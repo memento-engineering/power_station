@@ -2,7 +2,6 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:github_grid_assets/github_grid_assets.dart';
-import 'package:grid_assets/grid_assets.dart';
 import 'package:grid_runtime/grid_runtime.dart';
 import 'package:test/test.dart';
 
@@ -187,7 +186,7 @@ Future<GitHubAppPrOpener> _opener(
 }) async {
   final config = GitHubAppConfig(appId: '123', installationId: 456);
   final pem = await File(
-    '../github_grid_assets/test/fixtures/github_app_test_private.pem',
+    'test/fixtures/github_app_test_private.pem',
   ).readAsString();
   final tokens = GitHubAppTokenProvider(
     config: config,

@@ -9,7 +9,20 @@ environment:
 
 dependencies:
   dart_jsonwebtoken: ^3.4.1
+  freezed_annotation: ^3.0.0
+  genesis_tree: ^0.2.0
+  grid_assets: ^0.5.0-rc.1
+  grid_engine: ^0.3.0-rc.3
+  grid_runtime: ^0.2.0-rc.1
+  json_annotation: ^4.9.0
 
 dev_dependencies:
+  beads_dart: ^0.2.0-rc.1
+  build_runner: ^2.4.15
+  freezed: ^3.0.0
+  grid_sdk: ^0.3.0-rc.3
+  json_serializable: ^6.9.5
   lints: ^5.1.0
+  path: ^1.9.0
+  state_notifier: ^1.0.0
   test: ^1.25.0
