@@ -1,0 +1,25 @@
+[
+  {
+    "runtimeType": "issueOpened",
+    "nodeId": "I_1",
+    "actor": "octocat",
+    "repository": "memento/power",
+    "substation": "power",
+    "observationId": "poll:issue:I_1:2026-08-09T00:00:00Z",
+    "number": 1,
+    "title": "An issue",
+    "body": "Issue body"
+  },
+  {
+    "runtimeType": "pullRequestOpened",
+    "nodeId": "PR_2",
+    "actor": "octocat",
+    "repository": "memento/power",
+    "substation": "power",
+    "observationId": "poll:issue:PR_2:2026-08-09T01:00:00Z",
+    "number": 2,
+    "title": "A pull request",
+    "body": "PR body",
+    "headBranch": "grid/work"
+  }
+]

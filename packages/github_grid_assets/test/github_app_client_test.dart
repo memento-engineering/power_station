@@ -18,7 +18,11 @@ class FakeTransport implements GitHubHttpTransport {
   @override
   Future<GitHubHttpResponse> send(GitHubHttpRequest request) async {
     requests.add(request);
-    return const GitHubHttpResponse(statusCode: 200, body: 'ok');
+    return const GitHubHttpResponse(
+      statusCode: 200,
+      body: 'ok',
+      headers: <String, String>{'etag': '"v1"'},
+    );
   }
 }
 
@@ -48,7 +52,13 @@ void main() {
           'labels': <String>['grid'],
         },
       );
-      await client.send(method: 'GET', path: '/user');
+      final response = await client.send(
+        method: 'GET',
+        path: '/user',
+        queryParameters: const <String, String>{
+          'since': '2026-08-09T12:00:00.000Z',
+        },
+      );
 
       expect(tokens.calls, 2);
       final request = transport.requests.first;
@@ -73,6 +83,11 @@ void main() {
       );
       expect(transport.requests.last.headers['Authorization'], 'Bearer second');
       expect(transport.requests.last.body, isNull);
+      expect(
+        transport.requests.last.uri.queryParameters['since'],
+        '2026-08-09T12:00:00.000Z',
+      );
+      expect(response.header('ETag'), '"v1"');
     },
   );
 

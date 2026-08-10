@@ -7,10 +7,12 @@
 // Pure + offline: the assets are mounted in a bare genesis tree and their
 // PROVIDED ambient values are read back at a leaf — no kernel, no live
 // tg/gc/claude/git (Track F depends only on B, the composition Seeds).
+import 'dart:async';
 import 'dart:io';
 
 import 'package:beads_dart/beads_dart.dart';
 import 'package:genesis_tree/genesis_tree.dart';
+import 'package:github_grid_assets/github_grid_assets.dart';
 import 'package:grid_assets/grid_assets.dart';
 import 'package:grid_engine/grid_engine.dart';
 import 'package:grid_runtime/grid_runtime.dart';
@@ -775,7 +777,87 @@ void main() {
       expect(seen, isNull);
     });
   });
+
+  test(
+    'GitHubGridAssets starts and stops its optional polling runtime once',
+    () async {
+      final transport = _LifecycleTransport();
+      final sleeps = <Completer<void>>[];
+      final runtime = GitHubReconcilerRuntime(
+        installationId: 'installation',
+        reconciler: _lifecycleReconciler(transport),
+        coordinator: GitHubPollCoordinator(minimumSpacing: Duration.zero),
+        delay: (_) {
+          final sleep = Completer<void>();
+          sleeps.add(sleep);
+          return sleep.future;
+        },
+      );
+      final owner = TreeOwner();
+      owner.mountRoot(
+        sdk.ProviderScope(
+          child: _underSubstation(
+            'power_station',
+            '/work/ps',
+            GitHubGridAssets(reconcilerRuntime: runtime, child: const _Leaf()),
+          ),
+        ),
+      );
+      owner.flush();
+      runtime.start();
+      while (sleeps.isEmpty) {
+        await Future<void>.delayed(Duration.zero);
+      }
+      expect(transport.calls, 2);
+      owner.unmountRoot();
+      await Future<void>.delayed(Duration.zero);
+      sleeps.single.complete();
+      await Future<void>.delayed(Duration.zero);
+      expect(transport.calls, 2);
+    },
+  );
 }
+
+class _LifecycleTokens implements GitHubAppTokenProvider {
+  @override
+  Future<String> accessToken() async => 'token';
+}
+
+class _LifecycleTransport implements GitHubHttpTransport {
+  var calls = 0;
+
+  @override
+  Future<GitHubHttpResponse> send(GitHubHttpRequest request) async {
+    calls++;
+    return const GitHubHttpResponse(statusCode: 304, body: '');
+  }
+}
+
+class _LifecycleStore implements GitHubCursorStore {
+  @override
+  Future<GitHubReconcilerCursor> load() async => const GitHubReconcilerCursor();
+
+  @override
+  Future<void> save(GitHubReconcilerCursor cursor) async {}
+}
+
+GitHubReconciler _lifecycleReconciler(_LifecycleTransport transport) =>
+    GitHubReconciler(
+      owner: 'o',
+      repository: 'r',
+      substation: 's',
+      client: GitHubAppClient(
+        config: GitHubAppConfig(
+          appId: 'app',
+          installationId: 1,
+          apiBaseUri: Uri.parse('https://api.github.test'),
+        ),
+        tokens: _LifecycleTokens(),
+        transport: transport,
+      ),
+      cursors: _LifecycleStore(),
+      emit: (_) async {},
+    );
 
 /// A [StatefulSeed] that re-provides an ambient [sdk.SubstationScope] on demand
 /// (via [_ScopeController.retarget]) — lets a test flip the substation name+root

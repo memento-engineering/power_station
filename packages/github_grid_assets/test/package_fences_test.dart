@@ -10,6 +10,9 @@ void main() {
       'PrOpener',
       'Timer.periodic',
       'webhook',
+      'GitHubReconciler',
+      'GitHubCursorStore',
+      'NormalizedGitHubEvent',
     ]) {
       expect(source, isNot(contains(forbidden)));
     }
