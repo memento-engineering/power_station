@@ -17,6 +17,7 @@ dependencies:
   extension_discovery: ^2.1.0
   federated_grid_assets: ^0.3.0-rc.1
   genesis_tree: ^0.2.0
+  github_grid_assets: ^0.1.0
   grid_engine: ^0.3.0-rc.3
   grid_runtime: ^0.2.0-rc.1
   grid_sdk: ^0.3.0-rc.3
