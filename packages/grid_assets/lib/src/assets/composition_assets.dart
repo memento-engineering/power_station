@@ -37,6 +37,7 @@ import 'package:grid_runtime/grid_runtime.dart';
 // StatefulSeed that provided ServiceBundle — the thing this track replaces).
 // Prefix the SDK so the two never ambiguate; we only read the SDK scope values.
 import 'package:grid_sdk/grid_sdk.dart' as sdk;
+import 'package:grid_sdk/grid_sdk.dart' show ProviderTreeContext;
 
 import '../agent/agent_harness.dart';
 import '../agent/environment_registry.dart';
@@ -92,30 +93,22 @@ class GitServices {
 /// `GitGridAssets` commits its work; adding the GitHub delivery asset lets it deliver.
 ///
 /// The git-execution machinery ("the station supplies the machinery the
-/// substation leases" — the shared [StationGitService] provisioner) is sourced
-/// from the ambient [GitServices] carrier the delegate mounts once above the
-/// substation fan-out, so a bare `GitGridAssets()` seat works (bead `pow-72b`).
-/// The [provisioner] ctor param stays a per-seat OVERRIDE (tests inject; a set
-/// ctor field wins over the carrier's). Supplied by neither is the offline/dry-run
-/// build (provisioning no-ops, but `workspaceFor`/`branchFor`/`baseBranch` still
-/// resolve from the root — the layout is deterministic + pure). The carrier's
-/// `gitOps` half is consumed by the GitHub delivery asset, the node that now needs it.
+/// substation leases" — the shared [StationGitService] provisioner) is watched
+/// individually through `context.watch<StationGitService>()`. The observation
+/// is nullable: absence is the offline/dry-run build (provisioning no-ops, but
+/// `workspaceFor`/`branchFor`/`baseBranch` still resolve from the root — the
+/// layout is deterministic + pure). Provider availability drives
+/// re-derivation, so machinery appearing or changing never leaves a stale
+/// source control mounted below.
 class GitGridAssets extends SingleChildStatelessSeed {
-  /// Creates the git asset for the enclosing substation's root. [provisioner] is
-  /// an optional per-seat override of the ambient [GitServices] machinery;
-  /// [child] is supplied by an enclosing [Nest] (or set for standalone use).
+  /// Creates the git asset for the enclosing substation's root; [child] is
+  /// supplied by an enclosing [Nest] (or set for standalone use).
   const GitGridAssets({
-    this.provisioner,
     this.defaultBranch = 'main',
     this.remote = 'origin',
     super.child,
     super.key,
   });
-
-  /// The station's shared worktree-provisioning service (leased per substation);
-  /// null ⇒ the ambient [GitServices]'s (absent there too ⇒ provisioning
-  /// no-ops, offline).
-  final StationGitService? provisioner;
 
   /// The base branch per-bead worktrees rebase/PR against — the substation
   /// root's mainline. A live [StationGitService.registerRootCheckout] PROBES
@@ -131,28 +124,50 @@ class GitGridAssets extends SingleChildStatelessSeed {
     // root. `.of` refuses LOUD when no `Substation` encloses — an asset mounted
     // outside a substation is an authoring error, not a default (v3 §0).
     final scope = sdk.SubstationScope.of(context);
-    // The station machinery: an explicit ctor override wins (tests inject),
-    // else the ambient GitServices carrier. The subscribing read (D-H,
-    // ADR-0008): re-provided machinery re-derives this substation's source
-    // control rather than leaving a stale snapshot mounted below.
-    final services = GitServices.maybeOf(context);
-    final root = RootCheckout(
-      path: scope.root,
-      substation: scope.name,
-      defaultBranch: defaultBranch,
-      remote: remote,
-    );
-    final sourceControl = GitSourceControl(
-      provisioner: provisioner ?? services?.provisioner,
-      root: root,
-    );
-    return InheritedSeed<ServiceBundle>(
+    final provisioner = context.watch<StationGitService>();
+    return DerivedServiceBundleSeed(
       // ONE source control, resolved by TREE POSITION (the v3 "no string-keyed
       // bundle map"): the substation's own root, never a name selected against a
       // map. No delivery bound — the GitHub delivery asset binds it below.
-      value: ServiceBundle(sourceControl: sourceControl),
+      value: ServiceBundle(
+        sourceControl: GitSourceControl(
+          provisioner: provisioner,
+          root: RootCheckout(
+            path: scope.root,
+            substation: scope.name,
+            defaultBranch: defaultBranch,
+            remote: remote,
+          ),
+        ),
+      ),
+      derivedFrom: [provisioner, scope.root, scope.name, defaultBranch, remote],
       child: child,
     );
+  }
+}
+
+/// Provides a derived service bundle and notifies only when a derivation input
+/// changes.
+class DerivedServiceBundleSeed extends InheritedSeed<ServiceBundle> {
+  /// Creates a bundle provider whose notification identity is [derivedFrom].
+  const DerivedServiceBundleSeed({
+    required super.value,
+    required this.derivedFrom,
+    required super.child,
+  });
+
+  /// The exact inputs used to construct [value], in a stable order.
+  final List<Object?> derivedFrom;
+
+  @override
+  bool updateShouldNotify(InheritedSeed<ServiceBundle> oldSeed) {
+    if (oldSeed is! DerivedServiceBundleSeed) return true;
+    final old = oldSeed.derivedFrom;
+    if (old.length != derivedFrom.length) return true;
+    for (var i = 0; i < derivedFrom.length; i++) {
+      if (derivedFrom[i] != old[i]) return true;
+    }
+    return false;
   }
 }
 

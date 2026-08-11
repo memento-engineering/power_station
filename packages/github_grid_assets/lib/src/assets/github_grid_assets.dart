@@ -1,14 +1,12 @@
 library;
 
-import 'dart:async';
-
 import 'package:genesis_tree/genesis_tree.dart';
 import 'package:grid_assets/grid_assets.dart';
 import 'package:grid_engine/grid_engine.dart';
 import 'package:grid_runtime/grid_runtime.dart';
+import 'package:grid_sdk/grid_sdk.dart' show ProviderTreeContext;
 
 import '../code/github_pr_delivery.dart';
-import '../github/github_reconciler_runtime.dart';
 
 /// **GitHubGridAssets** — the substation-scoped asset that BINDS the GitHub
 /// DELIVERY METHOD onto the substation's git asset (v3 §3).
@@ -27,38 +25,14 @@ import '../github/github_reconciler_runtime.dart';
 /// binding must happen at the INNER GitHub node, which reads its ancestor's
 /// bundle and re-provides it downward.
 ///
-/// Fail-safe: delivery is bound only when BOTH halves are present — a [prOpener]
-/// AND commit/push [GitOps] (its own, or the ambient [GitServices] carrier's).
-/// With either missing it passes the ambient bundle through unchanged: GitHub can
-/// only ADD delivery to a git checkout it can commit from, never conjure one.
-class GitHubGridAssets extends SingleChildStatefulSeed {
-  /// Creates the GitHub asset over the optional [prOpener] (the runner injects a
-  /// live `GhPrOpener`; null ⇒ NO delivery bound — the commit-only arm), the
-  /// optional [gitOps] per-seat override, the optional [gitRunner] the
-  /// force-push runs through, and the optional [composition] PR-shaping knob;
-  /// [child] is supplied by an enclosing [Nest].
-  const GitHubGridAssets({
-    this.prOpener,
-    this.gitOps,
-    this.gitRunner,
-    this.composition,
-    this.reconcilerRuntime,
-    super.child,
-    super.key,
-  });
-
-  /// The PR-opening seam (a live `GhPrOpener`); null ⇒ no delivery bound
-  /// (offline / commit-only).
-  final PrOpener? prOpener;
-
-  /// Commit/push ops — a per-seat override of the ambient [GitServices]'s (ctor
-  /// wins when present, else the carrier — merged per FIELD). Absent in both ⇒
-  /// no delivery bound.
-  final GitOps? gitOps;
-
-  /// The raw `git` seam the force-with-lease push runs through; null ⇒ the real
-  /// [SystemGitRunner].
-  final GitRunner? gitRunner;
+/// Fail-safe: delivery is bound only when a checkout, [GitOps], and [PrOpener]
+/// are all observed. With any one missing it passes the ambient bundle through
+/// unchanged: GitHub can only add delivery to a checkout it can commit from,
+/// never conjure one. The collaborators are implementations supplied through
+/// DI; [PrComposition] is a tree value.
+class GitHubGridAssets extends SingleChildStatelessSeed {
+  /// Creates the GitHub asset over the optional [composition] tree value.
+  const GitHubGridAssets({this.composition, super.child, super.key});
 
   /// The substation's PR title/body composition knob (bead `pow-8dx`) — the
   /// trailer token, the body sections, and the describe model — mounted as
@@ -68,31 +42,6 @@ class GitHubGridAssets extends SingleChildStatefulSeed {
   /// better-by-default shape). Config = VALUES in the tree (ADR-0008).
   final PrComposition? composition;
 
-  /// Optional resident polling lifecycle for this substation's repository.
-  final GitHubReconcilerRuntime? reconcilerRuntime;
-
-  @override
-  SingleChildState<SingleChildStatefulSeed> createState() =>
-      _GitHubGridAssetsState();
-}
-
-class _GitHubGridAssetsState extends SingleChildState<SingleChildStatefulSeed> {
-  GitHubGridAssets get _seed => seed as GitHubGridAssets;
-  late final GitHubReconcilerRuntime? _runtime;
-
-  @override
-  void initState() {
-    super.initState();
-    _runtime = _seed.reconcilerRuntime;
-    _runtime?.start();
-  }
-
-  @override
-  void dispose() {
-    if (_runtime case final runtime?) unawaited(runtime.stop());
-    super.dispose();
-  }
-
   @override
   Seed buildWithChild(TreeContext context, Seed child) {
     // OBSERVE the ambient bundle (D-H: watch deps in `build`, ADR-0008) — a
@@ -101,34 +50,40 @@ class _GitHubGridAssetsState extends SingleChildState<SingleChildStatefulSeed> {
     // `SubstationScope`) re-provides a fresh one. The subscribing read rebuilds
     // this node so delivery stays bound alongside the CURRENT source control.
     final ambient = context.dependOnInheritedSeedOfExactType<ServiceBundle>();
-    // The carrier read is the QUIET, SUBSCRIBING `maybeOf` (absence is the
-    // documented offline posture, not an error). It happens HERE — not only in
-    // GitGridAssets — because THIS is the node that consumes the gitOps half, and
-    // re-provided machinery must RE-DERIVE the binding rather than leave a stale
-    // one mounted.
-    final services = GitServices.maybeOf(context);
-    final ops = _seed.gitOps ?? services?.gitOps;
-    final opener = _seed.prOpener;
-    final knob = _seed.composition;
+    final ops = context.watch<GitOps>();
+    final opener = context.watch<PrOpener>();
+    final knob = composition;
 
     var wired = child;
-    // BOTH halves, or nothing is bound (commit-only).
-    if (ops != null && opener != null) {
-      wired = InheritedSeed<ServiceBundle>(
+    final checkout = ambient?.sourceControl;
+    if (checkout != null && ops != null && opener != null) {
+      final resolvedComposition = knob ?? const PrComposition();
+      wired = DerivedServiceBundleSeed(
         // Carry through EVERY field the bundle declares — silently dropping one
         // here would unbind an unrelated service.
         value: ServiceBundle(
-          sourceControl: ambient?.sourceControl,
+          sourceControl: checkout,
           delivery: GitHubPrDelivery(
             gitOps: ops,
             prOpener: opener,
-            gitRunner: _seed.gitRunner,
-            composition: knob ?? const PrComposition(),
+            composition: resolvedComposition,
           ),
           escalation: ambient?.escalation,
           trust: ambient?.trust,
+          trustFloor:
+              ambient?.trustFloor ?? const TrustFloor(TrustLevel.trusted),
           transport: ambient?.transport,
         ),
+        derivedFrom: [
+          checkout,
+          ops,
+          opener,
+          resolvedComposition,
+          ambient?.escalation,
+          ambient?.trust,
+          ambient?.trustFloor,
+          ambient?.transport,
+        ],
         child: child,
       );
     }
