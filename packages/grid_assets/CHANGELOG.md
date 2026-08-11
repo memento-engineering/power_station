@@ -1,3 +1,24 @@
+## 0.6.0-rc.1
+
+- Breaking: the GitHub implementations are REMOVED from this package and now
+  live in `github_grid_assets` (pow-2ua, power_station #109). Six exports are
+  gone: `GitHubAppPrOpener`, `GitHubPrDelivery`, `GitHubGridAssets`,
+  `GitHubReconciler`/`GitHubReconcilerRuntime`, `GitHubReconcilerCursor`/
+  `GitHubCursorStore`/`FileGitHubCursorStore`, and `NormalizedGitHubEvent`.
+  Migration: depend on `github_grid_assets ^0.1.0-rc.2` and import them from
+  `package:github_grid_assets/github_grid_assets.dart`. The abstractions they
+  implement stay here — `DeliveryMethod`, `DeliverRouteCapability`,
+  `SourceControl`, `PrComposition` and every `*Capability` are unchanged.
+- Breaking: this package no longer depends on `github_grid_assets`. The
+  dependency direction is inverted per the org rule: `grid_assets` holds the
+  generic assets and the abstractions other asset packages implement, domain
+  implementations live in their own domain package, and the edge runs
+  implementation -> abstraction. Anything that reached a GitHub symbol
+  transitively through this package must now depend on `github_grid_assets`
+  directly.
+- The MINOR moves rather than the patch specifically so `^0.5.0-rc.1`
+  resolvers do not silently inherit the removals.
+
 ## 0.5.0-rc.1
 
 - Breaking: adopts the_grid's 0.2.0-rc.1 prerelease wave — `beads_dart
