@@ -1,0 +1,6 @@
+# The test fixture below is a real RSA private key generated solely for unit
+# tests (it guards nothing), but `dart pub publish` hard-blocks any archive
+# containing a PEM private key — "Potential leak of RSA Private Key detected".
+# Excluding it from the published archive keeps the key available to the local
+# test suite while letting the package publish.
+test/fixtures/github_app_test_private.pem
