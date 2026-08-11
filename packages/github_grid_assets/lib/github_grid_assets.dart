@@ -14,3 +14,6 @@ export 'src/github/github_reconciler.dart';
 export 'src/github/github_reconciler_runtime.dart';
 export 'src/github/reconciler_cursor.dart';
 export 'src/github/reconciler_event.dart';
+export 'src/intake/github_intake_projection.dart';
+export 'src/intake/github_intake_store.dart';
+export 'src/intake/github_self_trust.dart';
