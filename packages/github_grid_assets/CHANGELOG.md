@@ -1,3 +1,12 @@
+## 0.1.0-rc.2
+
+- Requires `grid_assets ^0.6.0-rc.1`. This is the load-bearing change: 0.1.0-rc.1
+  could resolve alongside `grid_assets 0.5.0-rc.1`, which still exported
+  `GitHubPrDelivery`, so a hosted resolve saw the same symbol from two packages
+  and failed to compile ("'GitHubPrDelivery' is imported from both ..."). Local
+  path overrides masked it; only a no-override resolve hit it. The tightened
+  constraint makes that pairing unrepresentable.
+
 # Changelog
 
 ## 0.1.0-rc.1

@@ -1,5 +1,5 @@
 name: github_grid_assets
-version: 0.1.0-rc.1
+version: 0.1.0-rc.2
 description: GitHub App identity and authenticated REST transport for grid extensions.
 repository: https://github.com/memento-engineering/power_station
 resolution: workspace
@@ -12,7 +12,7 @@ dependencies:
   dart_jsonwebtoken: ^3.4.1
   freezed_annotation: ^3.0.0
   genesis_tree: ^0.2.0
-  grid_assets: ^0.5.0-rc.1
+  grid_assets: ^0.6.0-rc.1
   grid_engine: ^0.3.0-rc.3
   grid_runtime: ^0.2.0-rc.1
   json_annotation: ^4.9.0
