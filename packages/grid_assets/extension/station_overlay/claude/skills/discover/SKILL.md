@@ -143,7 +143,7 @@ search --json "<new bead id>"` and require an `id`-field hit. Never use `bd show
 for this verification: exact-id lookup resolves a stranded wisp and hides that
 it is absent from list/search surfaces.
 
-The bead stays deferred until the human blesses it into the ready frontier.
+The bead stays deferred until the human approves it into the ready frontier.
 Record design approval by filling `--description` and `--design` with `bd update
 <id> --actor governor`; there is no persistence flag to change. All backlog
 writes ride the bd CLI with `--actor governor`; never SQL, never
@@ -179,7 +179,7 @@ bd update <id> --design "<approach chosen, constraints, what was ruled out and w
 When the human signals "continue" / "specify it" / "keep going" → kick off the
 specify stage (the sibling vended asset): invoke `/specify <id>` if this
 station vends it. If it doesn't yet, say so and hand back: "Design recorded on
-<id>, staged. Bless it when it's driveable."
+<id>, staged. Approve it when it's driveable."
 
 ## Advisory
 
@@ -194,7 +194,7 @@ questions inline is not dispatching; the human is right here.
 2. **Read the relevant code and decisions** for that bead.
 3. **Classify the next step:**
    - **Tool-dispatch next steps** — the bead needs a lifecycle action the
-     human must authorize (kick off specify, retype, close, decompose, bless).
+     human must authorize (kick off specify, retype, close, decompose, approve).
      Recommend the command; do not run it.
    - **Conversational next steps** — the bead has open design decisions in its
      body (explicit forks, TBD markers, thin coverage) that can be resolved by
@@ -220,11 +220,11 @@ what we're building in one sentence.
 
 - Write acceptance criteria or implementation plans (the specify stage's job).
 - Write code, or edit engine/product code to "fix" a bead (the station's build
-  agents build; you file, refine, and bless).
+  agents build; you file, refine, and approve).
 - File a bead before the human confirms in topic research.
 - Run lifecycle-mutating commands from *Advisory* without explicit go-ahead —
   only *Directed* carries permission. Asking questions is not dispatching.
-- Bless a bead into the ready frontier — staging is yours, blessing is the
+- Approve a bead into the ready frontier — staging is yours, approval is the
   human's.
 - Re-derive cross-store search by inference — the search command IS the
   research substrate.
