@@ -3,8 +3,8 @@ name: intake-refinement
 description: >
   Shape work beads so a resident the_grid station can drive them: the required
   validation_plan metadata, driveable issue types, dependency wiring,
-  defer-until-blessed staging, and reconciling a backlog against what already
-  shipped in mainline. Use when filing, blessing, re-homing, or auditing beads
+  defer-until-approved staging, and reconciling a backlog against what already
+  shipped in mainline. Use when filing, approving, re-homing, or auditing beads
   in any store the station arms — including "why won't this bead mount" and
   "is this backlog actually current" questions.
 compatibility: Requires bd (beads CLI) and git.
@@ -41,9 +41,9 @@ Every bead intended for the station needs:
 4. **A description an agent can act on alone** — the agent receives the bead
    text and a worktree, nothing else. Name packages and acceptance shape.
 
-## Staging: defer until blessed
+## Staging: defer until approved
 
-Drafts land `deferred`; the human's bless flips them open. Against a LIVE
+Drafts land `deferred`; the human's approval flips them open. Against a LIVE
 station, filing an open ready bead mounts an agent within seconds — so:
 
 - Create with `--defer <date>` (kills the mount race atomically), then wire
