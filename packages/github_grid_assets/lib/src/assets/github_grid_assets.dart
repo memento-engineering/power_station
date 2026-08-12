@@ -73,6 +73,7 @@ class GitHubGridAssets extends SingleChildStatelessSeed {
           trustFloor:
               ambient?.trustFloor ?? const TrustFloor(TrustLevel.trusted),
           transport: ambient?.transport,
+          mountEligibility: ambient?.mountEligibility,
         ),
         derivedFrom: [
           checkout,
@@ -83,6 +84,7 @@ class GitHubGridAssets extends SingleChildStatelessSeed {
           ambient?.trust,
           ambient?.trustFloor,
           ambient?.transport,
+          ambient?.mountEligibility,
         ],
         child: child,
       );

@@ -53,6 +53,45 @@ class _FakePrOpener implements PrOpener {
       PullRequestResult.opened(const PullRequestRef(url: 'https://x/pr/1'));
 }
 
+class _SourceControl implements SourceControl {
+  @override
+  String get baseBranch => 'main';
+  @override
+  String branchFor(String beadId) => 'grid/$beadId';
+  @override
+  String workspaceFor(String beadId) => '/work/$beadId';
+  @override
+  Future<void> provisionWorkspace({
+    required String beadId,
+    required String workspaceDir,
+  }) async {}
+}
+
+class _Delivery implements DeliveryMethod {
+  @override
+  String get id => 'test';
+  @override
+  Future<StepOutcome> deliver(DeliveryRequest request) async => const Ok();
+}
+
+class _Escalation implements EscalationHandler {
+  @override
+  String get id => 'test';
+  @override
+  Future<EscalationDecision> escalate(EscalationRequest request) async =>
+      const ParkAtGate();
+}
+
+class _Trust implements Trust {
+  @override
+  Future<TrustLevel> levelOf(ActorIdentity actor) async => TrustLevel.self;
+}
+
+class _Transport implements ExplorationTransport {
+  @override
+  void flare(String name, Map<String, String> data) {}
+}
+
 class _Host extends StatefulSeed {
   const _Host({required this.onCreate, required this.describe});
   final void Function(_HostState) onCreate;
@@ -81,6 +120,74 @@ Seed _underSubstation(String name, String root, Seed child) =>
     );
 
 void main() {
+  test(
+    'MountEligibilityAssets preserves services, injects, and rebuilds',
+    () async {
+      final sourceControl = _SourceControl();
+      final delivery = _Delivery();
+      final escalation = _Escalation();
+      final trust = _Trust();
+      const floor = TrustFloor(TrustLevel.self);
+      final transport = _Transport();
+      late _HostState host;
+      ServiceBundle? observed;
+      final probe = _Probe(
+        (context) => observed = context
+            .dependOnInheritedSeedOfExactType<ServiceBundle>(),
+      );
+      Seed describe(ServiceBundle bundle) => InheritedSeed<ServiceBundle>(
+        value: bundle,
+        child: MountEligibilityAssets(child: probe),
+      );
+      final first = ServiceBundle(
+        sourceControl: sourceControl,
+        delivery: delivery,
+        escalation: escalation,
+        trust: trust,
+        trustFloor: floor,
+        transport: transport,
+      );
+      final owner = TreeOwner();
+      owner.mountRoot(
+        _Host(
+          onCreate: (state) => host = state,
+          describe: () => describe(first),
+        ),
+      );
+      owner.flush();
+      expect(observed!.sourceControl, same(sourceControl));
+      expect(observed!.delivery, same(delivery));
+      expect(observed!.escalation, same(escalation));
+      expect(observed!.trust, same(trust));
+      expect(observed!.trustFloor, same(floor));
+      expect(observed!.transport, same(transport));
+      expect(observed!.mountEligibility, same(mountEligibilityDecision));
+
+      final replacement = ServiceBundle(sourceControl: _SourceControl());
+      host.swap(() => describe(replacement));
+      owner.flush();
+      await Future<void>.delayed(Duration.zero);
+      owner.flush();
+      expect(observed!.sourceControl, same(replacement.sourceControl));
+    },
+  );
+
+  test('MountEligibilityAssets defaults trusted without ambient bundle', () {
+    ServiceBundle? observed;
+    final owner = TreeOwner();
+    owner.mountRoot(
+      MountEligibilityAssets(
+        child: _Probe(
+          (context) => observed = context
+              .dependOnInheritedSeedOfExactType<ServiceBundle>(),
+        ),
+      ),
+    );
+    owner.flush();
+    expect(observed!.trustFloor, const TrustFloor(TrustLevel.trusted));
+    expect(observed!.mountEligibility, same(mountEligibilityDecision));
+  });
+
   test('GitGridAssets stays deterministic and commit-only while offline', () {
     ServiceBundle? observed;
     final owner = TreeOwner();

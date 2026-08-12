@@ -42,6 +42,40 @@ import 'package:grid_sdk/grid_sdk.dart' show ProviderTreeContext;
 import '../agent/agent_harness.dart';
 import '../agent/environment_registry.dart';
 import '../code/code_capabilities.dart';
+import '../code/mount_eligibility.dart';
+
+/// Injects grid_assets mount eligibility into the ambient service bundle.
+class MountEligibilityAssets extends SingleChildStatelessSeed {
+  /// Creates the mount-boundary assets node.
+  const MountEligibilityAssets({super.child, super.key});
+
+  @override
+  Seed buildWithChild(TreeContext context, Seed child) {
+    final ambient = context.dependOnInheritedSeedOfExactType<ServiceBundle>();
+    final predicate = mountEligibilityDecision;
+    return DerivedServiceBundleSeed(
+      value: ServiceBundle(
+        sourceControl: ambient?.sourceControl,
+        delivery: ambient?.delivery,
+        escalation: ambient?.escalation,
+        trust: ambient?.trust,
+        trustFloor: ambient?.trustFloor ?? const TrustFloor(TrustLevel.trusted),
+        transport: ambient?.transport,
+        mountEligibility: predicate,
+      ),
+      derivedFrom: [
+        ambient?.sourceControl,
+        ambient?.delivery,
+        ambient?.escalation,
+        ambient?.trust,
+        ambient?.trustFloor,
+        ambient?.transport,
+        predicate,
+      ],
+      child: child,
+    );
+  }
+}
 
 /// **GitServices** — the station's git-execution machinery as ONE ambient
 /// value: the shared [StationGitService] provisioner + the [GitOps]

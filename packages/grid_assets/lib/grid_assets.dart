@@ -126,6 +126,8 @@
 /// `DartCommand`) lives in its sibling pack `dart_grid_assets`.
 library;
 
+export 'src/code/mount_eligibility.dart';
+
 export 'src/agent/agent_domain.dart';
 export 'src/agent/agent_environment.dart';
 export 'src/agent/agent_harness.dart';
