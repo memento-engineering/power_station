@@ -115,11 +115,12 @@ bool _wroteCursor(Fakes f, String relPath, String stateName) {
   });
 }
 
-/// The `grid.result.tg-1/<relPath>.<field>` value some chokepoint `update`
-/// recorded, or null — the per-lane provenance the host persisted.
+/// The result [field] some chokepoint `update` recorded for [relPath], or
+/// null when no update carries that engine-owned result key.
 String? _resultField(Fakes f, String relPath, String field) {
+  final key = ResultKeys.keyFor('tg-1/$relPath', field);
   for (final c in f.runner.callsFor('update')) {
-    final v = callMetadata(c)['grid.result.tg-1/$relPath.$field'];
+    final v = callMetadata(c)[key];
     if (v is String) return v;
   }
   return null;
