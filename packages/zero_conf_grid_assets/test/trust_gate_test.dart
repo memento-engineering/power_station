@@ -1,4 +1,4 @@
-// Pure-logic proof of the discovered-is-not-blessed TRUST GATE (D-Z6): an
+// Pure-logic proof of the discovered-is-not-TRUSTED TRUST GATE (D-Z6): an
 // allow-list decision, LOUD both ways, always naming the claimed station id.
 import 'package:test/test.dart';
 import 'package:zero_conf_grid_assets/zero_conf_grid_assets.dart';

@@ -23,7 +23,7 @@ enum Topology {
 }
 
 /// Resolves a discovered peer set into a `federated_grid_assets` [Membership]
-/// — the topology opinion applied AFTER the [trust] gate (D-Z6: an unblessed
+/// — the topology opinion applied AFTER the [trust] gate (D-Z6: an untrusted
 /// peer never reaches the subscribe-to-whom decision at all).
 class TopologyResolver {
   /// Creates a resolver applying [topology] over ads admitted by [trust].
@@ -32,7 +32,7 @@ class TopologyResolver {
   /// The configured topology opinion.
   final Topology topology;
 
-  /// The discovered-is-not-blessed gate (D-Z6) run before [topology] ever
+  /// The discovered-is-not-TRUSTED gate (D-Z6) run before [topology] ever
   /// sees an ad.
   final TrustGate trust;
 

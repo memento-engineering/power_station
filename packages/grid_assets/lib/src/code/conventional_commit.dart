@@ -18,7 +18,7 @@
 library;
 
 /// The Conventional Commits v1.0.0 type set (the `feat`/`fix` pair the spec
-/// itself names, plus the Angular convention's set the spec blesses). An
+/// itself names, plus the Angular convention's set the spec approves). An
 /// out-of-set type is NOT emitted: [sanitizeConventionalSubject] falls it back,
 /// and [lintConventionalSubject] reports it.
 const List<String> kConventionalTypes = [
