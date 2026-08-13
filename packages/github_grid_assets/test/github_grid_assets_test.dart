@@ -1,4 +1,5 @@
 import 'package:genesis_tree/genesis_tree.dart';
+import 'package:beads_dart/beads_dart.dart';
 import 'package:github_grid_assets/github_grid_assets.dart';
 import 'package:grid_assets/grid_assets.dart';
 import 'package:grid_engine/grid_engine.dart';
@@ -6,6 +7,9 @@ import 'package:grid_runtime/grid_runtime.dart';
 import 'package:grid_sdk/grid_sdk.dart' show Provider;
 import 'package:grid_sdk/grid_sdk.dart' as sdk;
 import 'package:test/test.dart';
+
+MountEligibilityDecision _eligible(Bead bead) =>
+    const MountEligibilityDecision.eligible();
 
 class _Leaf extends MultiChildSeed {
   const _Leaf() : super(children: const []);
@@ -134,6 +138,7 @@ void main() {
         trust: trust,
         trustFloor: floor,
         transport: transport,
+        mountEligibility: _eligible,
       );
       ServiceBundle? bound;
       final owner = TreeOwner();
@@ -161,6 +166,12 @@ void main() {
       expect(bound!.trust, same(trust));
       expect(bound!.trustFloor, same(floor));
       expect(bound!.transport, same(transport));
+      expect(bound!.mountEligibility, same(_eligible));
+      final decision = bound!.mountEligibility!(const Bead(id: 'pow-test'));
+      expect(switch (decision) {
+        MountEligible() => true,
+        MountRefused() => false,
+      }, isTrue);
     },
   );
 

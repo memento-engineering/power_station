@@ -5,6 +5,7 @@
 // existed NOWHERE. This test proves they DO live in `grid_assets`: the `code`
 // asset's capabilities spawn `claude` (the coding agent + the LLM committee
 // critics). Pure-Dart, offline (reads files; no live anything).
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:path/path.dart' as p;
@@ -33,15 +34,46 @@ Directory _libDir() {
   );
 }
 
+Directory _packageLib(String packageName) {
+  var current = Directory.current;
+  File? configFile;
+  while (true) {
+    final candidate = File(
+      p.join(current.path, '.dart_tool', 'package_config.json'),
+    );
+    if (candidate.existsSync()) {
+      configFile = candidate;
+      break;
+    }
+    if (current.parent.path == current.path) {
+      fail('package_config.json missing; run dart pub get first');
+    }
+    current = current.parent;
+  }
+  final config =
+      jsonDecode(configFile.readAsStringSync()) as Map<String, Object?>;
+  final packages = config['packages']! as List<Object?>;
+  final entry = packages.cast<Map<String, Object?>>().singleWhere(
+    (candidate) => candidate['name'] == packageName,
+    orElse: () => fail('package $packageName is not resolved'),
+  );
+  final root = configFile.uri.resolve(entry['rootUri']! as String);
+  return Directory.fromUri(
+    Directory.fromUri(root).uri.resolve(entry['packageUri']! as String),
+  );
+}
+
+String _dartSourceUnder(Directory directory) => directory
+    .listSync(recursive: true)
+    .whereType<File>()
+    .where((file) => file.path.endsWith('.dart'))
+    .map((file) => file.readAsStringSync())
+    .join('\n');
+
 void main() {
   group('the opinions DO live in grid_assets (the fence is meaningful)', () {
     final libDir = _libDir();
-    final allSource = libDir
-        .listSync(recursive: true)
-        .whereType<File>()
-        .where((f) => f.path.endsWith('.dart'))
-        .map((f) => f.readAsStringSync())
-        .join('\n');
+    final allSource = _dartSourceUnder(libDir);
 
     test('the `code` asset spawns `claude` (the coding agent + the committee '
         'critics)', () {
@@ -52,6 +84,19 @@ void main() {
       // — `verify` is now the committee whose gating lane runs the bead's own
       // Validation Plan, naming no fixed build tool.)
       expect(allSource, contains('claude'));
+    });
+
+    test('mount clauses remain assets-owned', () {
+      final engineSource = _dartSourceUnder(_packageLib('grid_engine'));
+      for (final clause in const [
+        'validation_plan',
+        'grid.approved',
+        'grid.approval.actor',
+      ]) {
+        expect(engineSource, isNot(contains(clause)));
+      }
+      expect(allSource, contains('validation_plan'));
+      expect(allSource, contains('grid.approved'));
     });
   });
 }

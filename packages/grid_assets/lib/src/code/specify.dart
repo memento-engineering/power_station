@@ -1098,6 +1098,12 @@ List<String> specStructuralFindings(Bead bead) {
   final findings = <String>[];
   final acceptance = bead.acceptanceCriteria;
   final design = bead.design;
+  if (acceptance.trim().isEmpty) {
+    findings.add('acceptance: empty');
+  }
+  if (design.trim().isEmpty) {
+    findings.add('design: empty');
+  }
   // The SHAPE is read from PROSE, the same way the placeholder fence is
   // (A13(10)): a `## ` heading or a step ordinal quoted inside a fenced block —
   // this pack's own specs quote all four headings verbatim — is evidence, not

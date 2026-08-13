@@ -535,6 +535,14 @@ void main() {
     });
 
     group('specStructuralFindings — each defect is a named, LOUD finding', () {
+      test('names blank and whitespace-only authored artifacts', () {
+        final blank = _specced().copyWith(acceptanceCriteria: '', design: ' ');
+        expect(specStructuralFindings(blank).take(2), [
+          'acceptance: empty',
+          'design: empty',
+        ]);
+      });
+
       test('empty on the whole spec', () {
         expect(specStructuralFindings(_specced()), isEmpty);
       });
