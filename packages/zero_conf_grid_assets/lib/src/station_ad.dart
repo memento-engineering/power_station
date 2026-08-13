@@ -2,7 +2,7 @@
 /// "one discovery asset ... service instance carrying station id, control
 /// endpoint, offered substation prefixes, trust hints." [StationAd] is that
 /// shape, transport-free: the mDNS TXT record encodes/decodes it
-/// ([StationAd.toTxt]/[StationAd.fromTxt]), and once a [TrustGate] blesses one
+/// ([StationAd.toTxt]/[StationAd.fromTxt]), and once a [TrustGate] approves one
 /// it converts directly into `federated_grid_assets`' [Peer]
 /// ([StationAd.toPeer]) — the seam D-Z8 promises ("slots behind the
 /// `Membership` seam").
@@ -88,7 +88,7 @@ class StationAd {
 
   /// Converts an ADMITTED ad into a `federated_grid_assets` [Peer] — the D-Z8
   /// seam back into the lease bus's static [Membership] shape. Callers only
-  /// reach this after a [TrustGate] has blessed the ad (discovered ≠ blessed,
+  /// reach this after a [TrustGate] has approved the ad (discovered ≠ trusted,
   /// D-Z6); this method itself performs no trust check.
   Peer toPeer() => Peer(id: station, host: host, port: port, token: trustHint);
 

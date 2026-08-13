@@ -64,7 +64,7 @@ void main() {
       },
     );
 
-    test('an unblessed discovery never reaches the Membership', () async {
+    test('an untrusted discovery never reaches the Membership', () async {
       final log = <String>[];
       final browser = FakeMdnsBrowser([hub, spoke]);
       final loop = ZeroConfMembership(

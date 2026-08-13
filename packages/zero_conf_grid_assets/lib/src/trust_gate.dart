@@ -1,5 +1,5 @@
-/// The discovered-is-not-blessed TRUST GATE (`SCRATCH-multi-root-federation.md`
-/// D-Z6): entry from DISCOVERED (an mDNS/DNS-SD answer) to blessed/admitted
+/// The discovered-is-not-TRUSTED TRUST GATE (`SCRATCH-multi-root-federation.md`
+/// D-Z6): entry from DISCOVERED (an mDNS/DNS-SD answer) to trusted/admitted
 /// membership passes an allow-list decision — the SAME LAN-trust posture as
 /// `federated_grid_assets`' `Peer.token` (a pre-shared secret configured
 /// out-of-band by the operator, never the self-claimed hint a discovered
@@ -11,7 +11,7 @@ library;
 import 'station_ad.dart';
 
 /// Gates discovered [StationAd]s against a configured allow-list — D-Z6's
-/// "discovered ≠ blessed." LOUD both ways per the guard principle: every
+/// "discovered ≠ trusted." LOUD both ways per the guard principle: every
 /// admission and every refusal is logged through [onLog], always naming the
 /// claimed station id, so a gate that quietly drops a peer is never mistaken
 /// for a peer that is simply offline.

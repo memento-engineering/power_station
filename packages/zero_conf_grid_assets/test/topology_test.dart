@@ -1,6 +1,6 @@
 // Pure-logic proof of the TOPOLOGY OPINIONS (D-B1) applied as configuration
 // over `federated_grid_assets`' Membership seam, downstream of the trust gate
-// (D-Z6: an unblessed ad never reaches the topology decision at all).
+// (D-Z6: an untrusted ad never reaches the topology decision at all).
 import 'package:test/test.dart';
 import 'package:zero_conf_grid_assets/zero_conf_grid_assets.dart';
 
@@ -52,7 +52,7 @@ void main() {
       });
     });
 
-    test('a refused (unblessed) peer never reaches membership', () {
+    test('a refused (untrusted) peer never reaches membership', () {
       final resolver = TopologyResolver(
         topology: Topology.mesh,
         trust: allowAllBut({'unknown-laptop'}),

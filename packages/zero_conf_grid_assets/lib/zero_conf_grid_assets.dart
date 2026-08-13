@@ -18,7 +18,7 @@
 ///    [StationAd.isHubCandidate]). The output is a plain
 ///    `federated_grid_assets` [Membership] — nothing downstream needs to know
 ///    discovery produced it.
-/// 3. **The discovered-is-not-blessed TRUST GATE** ([TrustGate], D-Z6):
+/// 3. **The discovered-is-not-TRUSTED TRUST GATE** ([TrustGate], D-Z6):
 ///    allow-list this round, matching [Peer.token]'s LAN-trust posture; LOUD
 ///    both ways, naming the claimed identity.
 ///
