@@ -378,11 +378,28 @@ void main() {
       // --- The chokepoint discipline over the WHOLE recorded log ---
 
       // The cycle actually produced writes (else the assertions are vacuous):
-      // TWO creates (the molecule mint's own two hops, tg-eli phase 2: the
-      // session bead itself, then `create --graph` pouring its `type=step`
-      // beads), updates (birth stamp + identity + cursor advances), and a
-      // close (the positive terminal).
-      expect(f.runner.callsFor('create'), hasLength(2));
+      // THREE creates, updates (birth stamp + identity + cursor advances), and
+      // a close (the positive terminal). The creates, in order:
+      //   1. the session bead itself,
+      //   2. the `mount-attempt` bead — the DURABLE remount budget the engine
+      //      stamps at admission (the_grid tg-zlfu), and
+      //   3. `create --graph`, pouring the session's `type=step` beads (the
+      //      molecule mint's second hop, tg-eli phase 2).
+      // Asserted by SHAPE, not by a bare count. A count alone says nothing
+      // about WHICH write appeared — and it is also resolution-dependent: the
+      // `mount-attempt` hop only exists once grid_engine >= tg-zlfu is
+      // resolved, so a hard total flips between a published-dep CI run and a
+      // path-override dev run. The claims below hold under both.
+      final createdTypes = _createdTypes(f.runner);
+      expect(createdTypes.where((t) => t == 'session'), hasLength(1));
+      expect(createdTypes.where((t) => t == 'graph'), hasLength(1));
+      expect(
+        createdTypes.toSet(),
+        everyElement(isIn(const ['session', 'mount-attempt', 'graph'])),
+        reason:
+            'an unrecognised create means a NEW write reached the '
+            'chokepoint — name it here deliberately, never let it in silently',
+      );
       expect(f.runner.callsFor('update'), isNotEmpty);
       expect(f.runner.callsFor('close'), hasLength(1));
       // The land Service really ran its orchestration through the fakes.
@@ -511,3 +528,16 @@ void main() {
     });
   });
 }
+
+/// The `--type` of every recorded `create`, in order, with `create --graph`
+/// (which carries no `--type`) reported as `graph`. Names WHICH writes reached
+/// the chokepoint instead of merely counting them.
+List<String> _createdTypes(dynamic runner) => [
+  for (final call in runner.callsFor('create') as List<List<String>>)
+    if (call.contains('--type'))
+      call[call.indexOf('--type') + 1]
+    else if (call.contains('--graph'))
+      'graph'
+    else
+      'unknown',
+];
