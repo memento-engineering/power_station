@@ -142,11 +142,23 @@ void main() {
 
         // And exactly ONE session was minted — for the plain task only. (A
         // convergence/orchestration mount would have minted its own session.)
-        // TWO creates: the molecule mint's own two hops (tg-eli phase 2) — the
-        // session bead itself, then `create --graph` pouring its `type=step`
-        // beads — both for the SAME one session.
+        // THREE creates, all for that SAME one session: the session bead, the
+        // `mount-attempt` durable remount budget stamped at admission (the_grid
+        // tg-zlfu), then `create --graph` pouring its `type=step` beads (the
+        // molecule mint's second hop, tg-eli phase 2). Exactly ONE `session`
+        // create is the load-bearing claim here, so assert that directly rather
+        // than leaning on a total count that any new write would falsify.
         final creates = f.runner.callsFor('create');
-        expect(creates, hasLength(2));
+        final sessionCreates = creates.where(
+          (c) =>
+              c.contains('--type') && c[c.indexOf('--type') + 1] == 'session',
+        );
+        expect(sessionCreates, hasLength(1));
+        // No hard TOTAL: the `mount-attempt` hop is present only when
+        // grid_engine >= tg-zlfu is resolved, so a total flips between a
+        // published-dep run and a path-override run. "Exactly one session"
+        // is the claim this invariant actually makes.
+        expect(creates.length, inInclusiveRange(2, 3));
 
         // The birth stamp links the minted session to tg-1, proving the one
         // spawn was the plain task (and not, say, the convergence root).

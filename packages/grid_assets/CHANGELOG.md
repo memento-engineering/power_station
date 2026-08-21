@@ -1,3 +1,25 @@
+## 0.6.0-rc.2
+
+- `MountEligibilityAssets` — the composable mount gate (pow-50l, #114). A
+  station that mounts this seed admits a work bead only when it carries a
+  driveable type, a `validation_plan`, and the `grid.approved` label. Without
+  it the gate is INERT and every ready bead mounts, which is what 0.6.0-rc.1
+  shipped: the class exists on `main` but is absent from the published
+  0.6.0-rc.1 archive, so consumers resolving from pub could not compose the
+  gate at all (pow-w83). This release is that fix — the version moves so the
+  archive and the source stop disagreeing at the same number. It stays an
+  `-rc` because grid_assets still depends on pre-release grid_engine /
+  grid_runtime / grid_sdk / beads_dart / grid_exploration, and pub requires a
+  package depending on a pre-release to publish as one.
+- The git composition collaborators are watched from the tree rather than
+  passed as constructor params (#113), matching the seat-facing const-services
+  direction.
+- Terminology: the human approval gate is "approve/approval" throughout
+  (#118).
+- Tests: the invariant-2/3 acceptance suites assert chokepoint creates by
+  SHAPE rather than by a hard total, so they hold under both published-dep and
+  path-override resolution (the_grid tg-zlfu adds a `mount-attempt` write).
+
 ## 0.6.0-rc.1
 
 - Breaking: the GitHub implementations are REMOVED from this package and now
