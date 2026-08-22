@@ -155,10 +155,14 @@ class DeliverRouteCapability extends RouteCapability {
       }
     }
 
+    final validation = siblings.resultOf('${args.beadId}/land/revalidate');
+    final review = siblings.resultOf('${args.beadId}/review/route');
     return Advance({
       'verdict': 'deliver',
       'pr_title': title,
       'title_source': described.source,
+      'validation_rc': validation['rc'] ?? '0',
+      'committee_grades': review['grades'] ?? '',
     });
   }
 }
