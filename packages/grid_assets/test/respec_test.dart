@@ -64,7 +64,7 @@ void _plantVerdicts(
           'rubric': entry.key,
           'version': 1,
           'grade': entry.value,
-          if (rationales[entry.key] case final why?) 'rationale': why,
+          'rationale': rationales[entry.key] ?? 'fixture verdict',
           'nodePath': 'tg-1/spec_review/${entry.key}',
           'round': r,
         }),

@@ -1,0 +1,1 @@
+{"grade":"C","rationale":"The acceptance probe expects ^packages\/\(grid_assets\)\/test\/(.+)$ and remains reproducible.","round":1,"nodePath":"pow-1rn.5/spec_review/acceptance-testability"}

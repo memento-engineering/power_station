@@ -337,6 +337,7 @@ $kSpecExemplarDesign
 const Circuit kSpecReviewCircuit = Circuit(
   id: 'spec_review',
   terminalStepId: 'route',
+  maxRestarts: 1,
   steps: [
     // The SPEC-READINESS INTAKE LENS (bead `pow-q7n`) — the cheap ladder, ahead
     // of everything expensive. `intake` is deterministic (zero agents) and gates
@@ -824,13 +825,20 @@ class SpecCriticCapability extends CriticCapability {
         environment: environment,
       ),
       brief: AgentBrief(
-        task: buildSpecCriticPrompt(
-          bead,
-          rubric,
-          args.nodePath,
-          workspace.workspaceDir,
-          round: verdictRound(args),
-        ),
+        task:
+            buildSpecCriticPrompt(
+              bead,
+              rubric,
+              args.nodePath,
+              workspace.workspaceDir,
+              round: verdictRound(args),
+            ) +
+            criticRepairInstruction(
+              workspaceDir: workspace.workspaceDir,
+              rubric: rubric,
+              nodePath: args.nodePath,
+              round: verdictRound(args),
+            ),
       ),
       workspace: workspace,
       usageOut: usageReportPath(args.nodePath),

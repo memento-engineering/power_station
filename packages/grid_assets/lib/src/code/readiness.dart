@@ -382,13 +382,20 @@ class ReadinessCriticCapability extends CriticCapability {
         environment: environment,
       ),
       brief: AgentBrief(
-        task: buildReadinessPrompt(
-          bead,
-          rubric,
-          args.nodePath,
-          workspace.workspaceDir,
-          round: verdictRound(args),
-        ),
+        task:
+            buildReadinessPrompt(
+              bead,
+              rubric,
+              args.nodePath,
+              workspace.workspaceDir,
+              round: verdictRound(args),
+            ) +
+            criticRepairInstruction(
+              workspaceDir: workspace.workspaceDir,
+              rubric: rubric,
+              nodePath: args.nodePath,
+              round: verdictRound(args),
+            ),
       ),
       workspace: workspace,
       // CAPTURE-ONLY usage telemetry (FT-2), same as every other lane.
