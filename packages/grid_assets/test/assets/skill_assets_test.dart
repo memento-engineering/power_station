@@ -372,16 +372,17 @@ void main() {
       expect(
         rendered,
         contains(
-          '`release poll` reads pub.dev\'s complete versions list and is the '
-          'authority for\n'
-          '   prereleases',
+          'loop `space dart release poll --package\n'
+          '   <name> --version <rc-version> --json` until `isPublished: true` '
+          'before\n'
+          '   pushing a dependent\'s tag',
         ),
       );
       expect(
         rendered,
         contains(
-          '`melos publish` still compares against latest stable and is NOT\n'
-          '   a trustworthy “what is left to publish” check during an rc wave',
+          '(`melos publish` compares against\n'
+          '   latest stable and is retired for uploads)',
         ),
       );
       expect(
