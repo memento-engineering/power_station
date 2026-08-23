@@ -1,5 +1,7 @@
 library;
 
+import 'dart:async';
+
 import 'package:genesis_tree/genesis_tree.dart';
 import 'package:grid_assets/grid_assets.dart';
 import 'package:grid_engine/grid_engine.dart';
@@ -11,29 +13,16 @@ import '../code/github_delivery_policy.dart';
 import '../code/github_direct_merge_delivery.dart';
 import '../code/github_merge_runner.dart';
 import '../code/github_pr_delivery.dart';
+import '../github/ci_feedback_projection.dart';
+import '../github/github_reconciler.dart';
+import '../github/github_reconciler_runtime.dart';
+import '../github/reconciler_event.dart';
 
-/// **GitHubGridAssets** — the substation-scoped asset that BINDS the GitHub
-/// DELIVERY METHOD onto the substation's git asset (v3 §3).
+/// Binds GitHub delivery and resident CI feedback for a substation.
 ///
-/// Authored BELOW [GitGridAssets] in the substation's `Nest`
-/// (`[GitGridAssets(...), GitHubGridAssets()]` folds outermost-first, so
-/// GitGridAssets is the ancestor and this is its descendant). It OBSERVES the
-/// ambient [ServiceBundle] GitGridAssets provided (`dependOn*`, so a
-/// re-provisioned bundle re-binds — D-H, ADR-0008), binds a [GitHubPrDelivery]
-/// onto [ServiceBundle.delivery], and RE-provides the bundle so the work subtree
-/// below delivers at its terminal advance.
-///
-/// M5 D-4a is what moved the binding: delivery is a bundle FIELD now, not a
-/// `SourceControl` verb, so there is no source control to "enrich" with a PR
-/// opener. The fold-order argument is unchanged and still load-bearing — the
-/// binding must happen at the INNER GitHub node, which reads its ancestor's
-/// bundle and re-provides it downward.
-///
-/// Fail-safe: delivery is bound only when a checkout, [GitOps], and [PrOpener]
-/// are all observed. With any one missing it passes the ambient bundle through
-/// unchanged: GitHub can only add delivery to a checkout it can commit from,
-/// never conjure one. The collaborators are implementations supplied through
-/// DI; [PrComposition] is a tree value.
+/// Delivery is bound only when checkout, [GitOps], and [PrOpener] are all
+/// observed. Implementations are supplied through providers; [PrComposition]
+/// is the sole public configuration value.
 class GitHubGridAssets extends SingleChildStatelessSeed {
   /// Creates the GitHub asset over optional composition values and injected
   /// command seams.
@@ -46,12 +35,7 @@ class GitHubGridAssets extends SingleChildStatelessSeed {
     super.key,
   });
 
-  /// The substation's PR title/body composition knob (bead `pow-8dx`) — the
-  /// trailer token, the body sections, and the describe model — mounted as
-  /// `InheritedSeed<PrComposition>` for the work subtree and read by
-  /// `DeliverRouteCapability`/`AgentCapability` at their route/spawn edges. Null
-  /// ⇒ nothing mounted; both fall back to `const PrComposition()` (the
-  /// better-by-default shape). Config = VALUES in the tree (ADR-0008).
+  /// The substation's PR title/body composition knob.
   final PrComposition? composition;
 
   /// The explicitly selected delivery posture; null preserves PR-without-merge.
@@ -65,14 +49,11 @@ class GitHubGridAssets extends SingleChildStatelessSeed {
 
   @override
   Seed buildWithChild(TreeContext context, Seed child) {
-    // OBSERVE the ambient bundle (D-H: watch deps in `build`, ADR-0008) — a
-    // non-subscribing `get*` here would leave this asset re-providing a bundle
-    // that wraps the STALE source control after GitGridAssets (which watches
-    // `SubstationScope`) re-provides a fresh one. The subscribing read rebuilds
-    // this node so delivery stays bound alongside the CURRENT source control.
     final ambient = context.dependOnInheritedSeedOfExactType<ServiceBundle>();
     final ops = context.watch<GitOps>();
     final opener = context.watch<PrOpener>();
+    final runtime = context.watch<GitHubReconcilerRuntime>();
+    final feedback = context.watch<CiFeedbackProjection>();
     final knob = composition;
 
     var wired = child;
@@ -104,8 +85,6 @@ class GitHubGridAssets extends SingleChildStatelessSeed {
         ),
       };
       wired = DerivedServiceBundleSeed(
-        // Carry through EVERY field the bundle declares — silently dropping one
-        // here would unbind an unrelated service.
         value: ServiceBundle(
           sourceControl: checkout,
           delivery: delivery,
@@ -141,11 +120,94 @@ class GitHubGridAssets extends SingleChildStatelessSeed {
       wired = InheritedSeed<PrComposition>(value: knob, child: wired);
     }
     final selectedPolicy = policy;
-    return selectedPolicy == null
-        ? wired
-        : InheritedSeed<GitHubDeliveryPolicy>(
-            value: selectedPolicy,
-            child: wired,
-          );
+    if (selectedPolicy != null) {
+      wired = InheritedSeed<GitHubDeliveryPolicy>(
+        value: selectedPolicy,
+        child: wired,
+      );
+    }
+    return _FeedbackBinding(
+      runtime: runtime,
+      projection: feedback,
+      child: wired,
+    );
+  }
+}
+
+Future<void> projectCiFeedback(
+  CiFeedbackProjection? projection,
+  NormalizedGitHubEvent event,
+) async {
+  switch (event) {
+    case CheckConcluded() when projection != null:
+      await projection(event);
+    case IssueOpened() || PullRequestOpened() || CheckConcluded():
+      return;
+  }
+}
+
+final class _FeedbackBinding extends SingleChildStatefulSeed {
+  const _FeedbackBinding({
+    required this.runtime,
+    required this.projection,
+    required super.child,
+  });
+
+  final GitHubReconcilerRuntime? runtime;
+  final CiFeedbackProjection? projection;
+
+  @override
+  SingleChildState<SingleChildStatefulSeed> createState() =>
+      _FeedbackBindingState();
+}
+
+final class _FeedbackBindingState
+    extends SingleChildState<SingleChildStatefulSeed> {
+  GitHubReconcilerRuntime? _runtime;
+  late final GitHubEventSink _sink;
+
+  _FeedbackBinding get _binding => seed as _FeedbackBinding;
+
+  @override
+  void initState() {
+    super.initState();
+    _sink = (event) async {
+      await projectCiFeedback(_binding.projection, event);
+    };
+    _runtime = _binding.runtime;
+    _runtime?.reconciler.addObserver(_sink);
+    _runtime?.start();
+  }
+
+  Future<void> _replaceRuntime(
+    GitHubReconcilerRuntime? previous,
+    GitHubReconcilerRuntime? replacement,
+  ) async {
+    previous?.reconciler.removeObserver(_sink);
+    await previous?.stop();
+    if (identical(_runtime, replacement)) {
+      replacement?.reconciler.addObserver(_sink);
+      replacement?.start();
+    }
+  }
+
+  @override
+  Seed buildWithChild(TreeContext context, Seed child) {
+    final replacement = _binding.runtime;
+    if (!identical(_runtime, replacement)) {
+      final previous = _runtime;
+      _runtime = replacement;
+      unawaited(_replaceRuntime(previous, replacement));
+    }
+    return child;
+  }
+
+  @override
+  void dispose() {
+    if (_runtime case final runtime?) {
+      runtime.reconciler.removeObserver(_sink);
+      unawaited(runtime.stop());
+    }
+    super.dispose();
   }
 }
