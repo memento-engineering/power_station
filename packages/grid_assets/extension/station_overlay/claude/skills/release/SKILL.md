@@ -164,8 +164,10 @@ dance disappears with the hand-publish.
      `isPublished: true`. Only then push the DEPENDENT's tag.
 4. **First release of a package:** automated publishing must be enabled ONCE on
    the package's pub.dev admin page (Automated publishing → GitHub Actions →
-   repository `memento-engineering/<repo>`, tag pattern
-   `<package>-v{{version}}`). Only an uploader can click it — a publish run
+   repository `memento-engineering/<repo>`, tag pattern: `<package>-v`
+   immediately followed by pub.dev's version placeholder — the word `version`
+   in double curly braces, as the admin form suggests). Only an uploader can
+   click it — a publish run
    failing with an authorization/OIDC message means exactly this toggle; hand
    the human the admin URL, nothing else.
    (`melos publish` remains retired for uploads; melos still owns the
