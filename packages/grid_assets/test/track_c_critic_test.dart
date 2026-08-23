@@ -536,9 +536,10 @@ void main() {
       );
 
       expect(reports.whereType<AllocationCompleted>(), isEmpty);
-      final failed = reports.whereType<AllocationFailed>().single;
-      expect(failed.reason, 'result threw: $reason');
-      expect(failed.reason, isNot(contains('Bad state:')));
+      expect(reports.whereType<AllocationFailed>(), isEmpty);
+      final terminal = reports.whereType<AllocationEscalated>().single;
+      expect(terminal.reason, 'result threw: $reason');
+      expect(terminal.reason, isNot(contains('Bad state:')));
     });
 
     test('a non-numeric round stamp fails loudly', () async {
@@ -655,10 +656,11 @@ void main() {
         );
 
         expect(reports.whereType<AllocationCompleted>(), isEmpty);
-        final failed = reports.whereType<AllocationFailed>().single;
-        expect(failed.reason, contains(verdict.path));
+        expect(reports.whereType<AllocationFailed>(), isEmpty);
+        final terminal = reports.whereType<AllocationEscalated>().single;
+        expect(terminal.reason, contains(verdict.path));
         expect(
-          failed.reason,
+          terminal.reason,
           contains('unexpected verdict read failure: torn read seam'),
         );
       },
@@ -705,13 +707,13 @@ void main() {
     });
 
     test(
-      'malformed verdict gets one structured re-ask and unrelated failure gets none',
+      'invalid verdict repair is terminal while unrelated failures keep default supervision',
       () async {
         final dir = Directory.systemTemp.createTempSync('critic-reask-');
         addTearDown(() => dir.deleteSync(recursive: true));
         const rubric = 'regression-risk';
         const nodePath = 'tg-1/review/regression-risk';
-        File('${dir.path}/.grid/critique/$rubric.json')
+        final verdict = File('${dir.path}/.grid/critique/$rubric.json')
           ..createSync(recursive: true)
           ..writeAsStringSync('not json');
         final c = _ctx(
@@ -723,7 +725,6 @@ void main() {
             .spawn(c.context, c.args)
             .args
             .join(' ');
-        expect(kCodeReviewCircuit.maxRestarts, 0);
         expect(prompt, contains('## Verdict contract repair'));
         expect(prompt, contains('Unexpected character'));
         expect(prompt.split('## Verdict contract repair').length - 1, 1);
@@ -763,8 +764,14 @@ void main() {
         await Future<void>.delayed(Duration.zero);
         expect(malformedProvider.started, hasLength(2));
         expect(malformedReports.whereType<AllocationCompleted>(), isEmpty);
-        expect(malformedReports.whereType<AllocationFailed>(), hasLength(1));
+        expect(malformedReports.whereType<AllocationFailed>(), isEmpty);
+        final terminal = malformedReports
+            .whereType<AllocationEscalated>()
+            .single;
+        expect(terminal.reason, contains(verdict.path));
+        expect(terminal.reason, contains('Unexpected character'));
 
+        verdict.deleteSync();
         final failedProvider = FakeRuntimeProvider();
         final failedReports = <AllocationReport>[];
         final failed = const CriticCapability().createAllocation(
@@ -788,6 +795,11 @@ void main() {
         await Future<void>.delayed(Duration.zero);
         expect(failedProvider.started, hasLength(1));
         expect(failedReports.whereType<AllocationFailed>(), hasLength(1));
+        expect(failedReports.whereType<AllocationEscalated>(), isEmpty);
+        expect(
+          failedProvider.started.single.config.args.join(' '),
+          isNot(contains('## Verdict contract repair')),
+        );
       },
     );
 

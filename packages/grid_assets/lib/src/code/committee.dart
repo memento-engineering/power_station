@@ -286,7 +286,6 @@ typedef DirectoryClearer = void Function(String dir);
 const Circuit kCodeReviewCircuit = Circuit(
   id: 'code_review',
   terminalStepId: 'route',
-  maxRestarts: 0,
   steps: [
     CapabilityStep(
       stepId: kClearCritiqueStep,
@@ -1129,6 +1128,10 @@ final class _CriticAllocation extends Allocation {
     if (repairsVerdict && !_repairUsed) {
       _repairUsed = true;
       unawaited(_startAttempt());
+      return;
+    }
+    if (repairsVerdict) {
+      context.sink(AllocationEscalated(report.reason));
       return;
     }
     context.sink(report);

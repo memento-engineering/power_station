@@ -337,7 +337,6 @@ $kSpecExemplarDesign
 const Circuit kSpecReviewCircuit = Circuit(
   id: 'spec_review',
   terminalStepId: 'route',
-  maxRestarts: 0,
   steps: [
     // The SPEC-READINESS INTAKE LENS (bead `pow-q7n`) — the cheap ladder, ahead
     // of everything expensive. `intake` is deterministic (zero agents) and gates
