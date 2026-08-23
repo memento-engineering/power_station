@@ -54,24 +54,11 @@ class MountEligibilityAssets extends SingleChildStatelessSeed {
     final ambient = context.dependOnInheritedSeedOfExactType<ServiceBundle>();
     final predicate = mountEligibilityDecision;
     return DerivedServiceBundleSeed(
-      value: ServiceBundle(
-        sourceControl: ambient?.sourceControl,
-        delivery: ambient?.delivery,
-        escalation: ambient?.escalation,
-        trust: ambient?.trust,
-        trustFloor: ambient?.trustFloor ?? const TrustFloor(TrustLevel.trusted),
-        transport: ambient?.transport,
+      value: ServiceBundle.derive(
+        ambient ?? const ServiceBundle(),
         mountEligibility: predicate,
       ),
-      derivedFrom: [
-        ambient?.sourceControl,
-        ambient?.delivery,
-        ambient?.escalation,
-        ambient?.trust,
-        ambient?.trustFloor,
-        ambient?.transport,
-        predicate,
-      ],
+      derivedFrom: [ambient, predicate],
       child: child,
     );
   }

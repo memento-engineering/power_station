@@ -85,17 +85,13 @@ class GitHubGridAssets extends SingleChildStatelessSeed {
         ),
       };
       wired = DerivedServiceBundleSeed(
-        value: ServiceBundle(
+        value: ServiceBundle.derive(
+          ambient!,
           sourceControl: checkout,
           delivery: delivery,
-          escalation: ambient?.escalation,
-          trust: ambient?.trust,
-          trustFloor:
-              ambient?.trustFloor ?? const TrustFloor(TrustLevel.trusted),
-          transport: ambient?.transport,
-          mountEligibility: ambient?.mountEligibility,
         ),
         derivedFrom: [
+          ambient,
           checkout,
           ops,
           opener,
@@ -103,11 +99,6 @@ class GitHubGridAssets extends SingleChildStatelessSeed {
           gitRunner,
           mergeRunner,
           resolvedComposition,
-          ambient?.escalation,
-          ambient?.trust,
-          ambient?.trustFloor,
-          ambient?.transport,
-          ambient?.mountEligibility,
         ],
         child: child,
       );
