@@ -364,12 +364,19 @@ void main() {
 
       // --- The chokepoint discipline over the WHOLE recorded log ---
 
-      // The cycle actually produced writes (else the assertions are vacuous):
-      // TWO creates (the molecule mint's own two hops, tg-eli phase 2: the
-      // session bead itself, then `create --graph` pouring its `type=step`
-      // beads), updates (birth stamp + identity + cursor advances), and a
-      // close (the positive terminal).
-      expect(f.runner.callsFor('create'), hasLength(2));
+      // The cycle actually produced writes (else the assertions are vacuous).
+      // Asserted by SHAPE, not by a bare count (power_station #119's idiom,
+      // ported): a hard total flips between a published-dep run and a
+      // path-override run, because the `mount-attempt` admission write only
+      // exists once grid_engine >= tg-zlfu resolves. The claims below hold
+      // under both, and an unrecognised create still fails — by NAME.
+      final createdTypes = _createdTypes(f.runner);
+      expect(createdTypes.where((t) => t == 'session'), hasLength(1));
+      expect(createdTypes.where((t) => t == 'graph'), hasLength(1));
+      expect(
+        createdTypes.toSet(),
+        everyElement(isIn(const ['session', 'mount-attempt', 'graph'])),
+      );
       expect(f.runner.callsFor('update'), isNotEmpty);
       expect(f.runner.callsFor('close'), hasLength(1));
       // The land Service really ran its orchestration through the fakes.
@@ -424,3 +431,16 @@ void main() {
     });
   });
 }
+
+/// The `--type` of every recorded `create`, in order, with `create --graph`
+/// (which carries no `--type`) reported as `graph` — power_station #119's
+/// shape-based idiom, shared verbatim with grid_assets' copy of this suite.
+List<String> _createdTypes(dynamic runner) => [
+  for (final call in runner.callsFor('create') as List<List<String>>)
+    if (call.contains('--type'))
+      call[call.indexOf('--type') + 1]
+    else if (call.contains('--graph'))
+      'graph'
+    else
+      'unknown',
+];
