@@ -1,3 +1,9 @@
+## 0.1.0-rc.3
+
+- Landing postures as sibling `DeliveryMethod`s: `GitHubDeliveryPolicy` values select `GitHubPrDelivery` (default), `GitHubAutoMergeDelivery` (native auto-merge only when validation rc == 0 and every committee grade is B or better), or `GitHubDirectMergeDelivery` (protected-aware); refused enables fall back loudly with named flares (#121).
+- CI-feedback path: `GitHubGridAssets` observes `GitHubReconcilerRuntime`/`CiFeedbackProjection` from the tree; a failed `CheckConcluded` routes exactly one fenced `grid/rework` through the chokepoint, with the ratified attempt budget and cap gate (#122).
+- `GitHubReconcilerAssets`: the provider that constructs a live `GitHubReconcilerRuntime` from a `GitHubReconcilerConfig` value and mounts it for the seat; config-absent and dry/offline compositions construct nothing (#123).
+
 ## 0.1.0-rc.2
 
 - Requires `grid_assets ^0.6.0-rc.1`. This is the load-bearing change: 0.1.0-rc.1

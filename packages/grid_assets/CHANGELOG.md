@@ -1,3 +1,7 @@
+## 0.6.0-rc.3
+
+- `DeliveryMethod` seam additions backing the grade-gated landing postures (#121).
+
 ## 0.6.0-rc.2
 
 - `MountEligibilityAssets` — the composable mount gate (pow-50l, #114). A
