@@ -128,7 +128,7 @@ void main() {
           siblings: const SiblingView(
             results: {
               'tg-1/land/rebase': {'outcome': 'clean'},
-              'tg-1/land/revalidate': {'outcome': 'passed'},
+              'tg-1/land/revalidate': {'outcome': 'passed', 'rc': '0'},
               'tg-1/review/route': {
                 'grades': 'code-validation=A,spec-adherence=B',
                 'spread': '1',
@@ -148,6 +148,8 @@ void main() {
       );
       expect(payload['title_source'], 'fallback');
       expect(payload['verdict'], 'deliver');
+      expect(payload['validation_rc'], '0');
+      expect(payload['committee_grades'], 'code-validation=A,spec-adherence=B');
       expect(
         payload.values.join().length,
         lessThan(500),
@@ -160,6 +162,27 @@ void main() {
       expect(body, contains('- revalidate: passed'));
       expect(body, contains('code-validation=A'));
       expect(body.trimRight(), endsWith('Refs: tg-1'));
+    });
+
+    test('copies failing landing receipts unchanged into delivery', () async {
+      final outcome = await const DeliverRouteCapability().route(
+        _deliverContext(
+          workspaceDir: work.path,
+          delivery: _FakeDelivery(),
+          siblings: const SiblingView(
+            results: {
+              'tg-1/land/revalidate': {'rc': '7'},
+              'tg-1/review/route': {
+                'grades': 'code-validation=C,spec-adherence=B',
+              },
+            },
+          ),
+        ),
+        _deliverArgs(),
+      );
+      final payload = (outcome as Advance).payload!;
+      expect(payload['validation_rc'], '7');
+      expect(payload['committee_grades'], 'code-validation=C,spec-adherence=B');
     });
 
     test(

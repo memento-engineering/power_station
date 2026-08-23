@@ -58,6 +58,20 @@ class _FakePrOpener implements PrOpener {
       PullRequestResult.opened(const PullRequestRef(url: 'https://x/pr/1'));
 }
 
+class _FakeMergeRunner implements GitHubMergeRunner {
+  @override
+  Future<GitHubMergeResult> enableAutoMerge(
+    String workDir,
+    String prUrl,
+  ) async => const GitHubMergeEnabled();
+
+  @override
+  Future<GitHubProtectionResult> protection(
+    String workDir,
+    String base,
+  ) async => const GitHubUnprotected();
+}
+
 class _SourceControl implements SourceControl {
   const _SourceControl();
   @override
@@ -242,6 +256,61 @@ void main() {
 
     walk(root);
     expect(observed, same(knob));
+  });
+
+  for (final entry in <(GitHubDeliveryPolicy, Type)>[
+    (const PrNoMergePolicy(), GitHubPrDelivery),
+    (const PrAutoMergePolicy(), GitHubAutoMergeDelivery),
+    (const DirectMergePolicy(), GitHubDirectMergeDelivery),
+  ]) {
+    test('explicit ${entry.$1.runtimeType} mounts and binds one sibling', () {
+      ServiceBundle? bundle;
+      GitHubDeliveryPolicy? observedPolicy;
+      final owner = TreeOwner();
+      owner.mountRoot(
+        sdk.ProviderScope(
+          child: _providers(
+            ops: true,
+            opener: true,
+            child: InheritedSeed<ServiceBundle>(
+              value: const ServiceBundle(sourceControl: _SourceControl()),
+              child: GitHubGridAssets(
+                policy: entry.$1,
+                gitRunner: _FakeGitRunner(),
+                mergeRunner: _FakeMergeRunner(),
+                child: _Probe((context) {
+                  bundle = context
+                      .dependOnInheritedSeedOfExactType<ServiceBundle>();
+                  observedPolicy = context
+                      .dependOnInheritedSeedOfExactType<GitHubDeliveryPolicy>();
+                }),
+              ),
+            ),
+          ),
+        ),
+      );
+      owner.flush();
+      expect(bundle!.delivery.runtimeType, entry.$2);
+      expect(observedPolicy, same(entry.$1));
+    });
+  }
+
+  test('omitted policy mounts no policy value', () {
+    GitHubDeliveryPolicy? observed;
+    final owner = TreeOwner();
+    final root = owner.mountRoot(
+      const sdk.ProviderScope(child: GitHubGridAssets(child: _Leaf())),
+    );
+    owner.flush();
+    void walk(Branch branch) {
+      if (branch is InheritedBranch<GitHubDeliveryPolicy>) {
+        observed = branch.value;
+      }
+      branch.visitChildren(walk);
+    }
+
+    walk(root);
+    expect(observed, isNull);
   });
 
   test('provider transitions bind and unbind delivery', () async {

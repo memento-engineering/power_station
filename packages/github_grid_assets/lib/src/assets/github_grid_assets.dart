@@ -6,6 +6,10 @@ import 'package:grid_engine/grid_engine.dart';
 import 'package:grid_runtime/grid_runtime.dart';
 import 'package:grid_sdk/grid_sdk.dart' show ProviderTreeContext;
 
+import '../code/github_auto_merge_delivery.dart';
+import '../code/github_delivery_policy.dart';
+import '../code/github_direct_merge_delivery.dart';
+import '../code/github_merge_runner.dart';
 import '../code/github_pr_delivery.dart';
 
 /// **GitHubGridAssets** — the substation-scoped asset that BINDS the GitHub
@@ -31,8 +35,16 @@ import '../code/github_pr_delivery.dart';
 /// never conjure one. The collaborators are implementations supplied through
 /// DI; [PrComposition] is a tree value.
 class GitHubGridAssets extends SingleChildStatelessSeed {
-  /// Creates the GitHub asset over the optional [composition] tree value.
-  const GitHubGridAssets({this.composition, super.child, super.key});
+  /// Creates the GitHub asset over optional composition values and injected
+  /// command seams.
+  const GitHubGridAssets({
+    this.composition,
+    this.policy,
+    this.gitRunner,
+    this.mergeRunner,
+    super.child,
+    super.key,
+  });
 
   /// The substation's PR title/body composition knob (bead `pow-8dx`) — the
   /// trailer token, the body sections, and the describe model — mounted as
@@ -41,6 +53,15 @@ class GitHubGridAssets extends SingleChildStatelessSeed {
   /// ⇒ nothing mounted; both fall back to `const PrComposition()` (the
   /// better-by-default shape). Config = VALUES in the tree (ADR-0008).
   final PrComposition? composition;
+
+  /// The explicitly selected delivery posture; null preserves PR-without-merge.
+  final GitHubDeliveryPolicy? policy;
+
+  /// Optional git command implementation used by the selected delivery method.
+  final GitRunner? gitRunner;
+
+  /// Optional GitHub merge command implementation.
+  final GitHubMergeRunner? mergeRunner;
 
   @override
   Seed buildWithChild(TreeContext context, Seed child) {
@@ -58,16 +79,36 @@ class GitHubGridAssets extends SingleChildStatelessSeed {
     final checkout = ambient?.sourceControl;
     if (checkout != null && ops != null && opener != null) {
       final resolvedComposition = knob ?? const PrComposition();
+      final selected = policy ?? const PrNoMergePolicy();
+      final pr = GitHubPrDelivery(
+        gitOps: ops,
+        prOpener: opener,
+        gitRunner: gitRunner,
+        composition: resolvedComposition,
+      );
+      final delivery = switch (selected) {
+        PrNoMergePolicy() => pr,
+        PrAutoMergePolicy() => GitHubAutoMergeDelivery(
+          prDelivery: pr,
+          runner: mergeRunner ?? const SystemGitHubMergeRunner(),
+          policy: selected,
+          transport: ambient?.transport,
+        ),
+        DirectMergePolicy() => GitHubDirectMergeDelivery(
+          gitOps: ops,
+          gitRunner: gitRunner ?? SystemGitRunner(),
+          mergeRunner: mergeRunner ?? const SystemGitHubMergeRunner(),
+          policy: selected,
+          transport: ambient?.transport,
+          composition: resolvedComposition,
+        ),
+      };
       wired = DerivedServiceBundleSeed(
         // Carry through EVERY field the bundle declares — silently dropping one
         // here would unbind an unrelated service.
         value: ServiceBundle(
           sourceControl: checkout,
-          delivery: GitHubPrDelivery(
-            gitOps: ops,
-            prOpener: opener,
-            composition: resolvedComposition,
-          ),
+          delivery: delivery,
           escalation: ambient?.escalation,
           trust: ambient?.trust,
           trustFloor:
@@ -79,6 +120,9 @@ class GitHubGridAssets extends SingleChildStatelessSeed {
           checkout,
           ops,
           opener,
+          selected,
+          gitRunner,
+          mergeRunner,
           resolvedComposition,
           ambient?.escalation,
           ambient?.trust,
@@ -93,8 +137,15 @@ class GitHubGridAssets extends SingleChildStatelessSeed {
     // VALUE, not a service): a pass-through build still carries the substation's
     // PR shaping — and the build agent's commit policy — for whatever source
     // control is ambient.
-    return knob == null
+    if (knob != null) {
+      wired = InheritedSeed<PrComposition>(value: knob, child: wired);
+    }
+    final selectedPolicy = policy;
+    return selectedPolicy == null
         ? wired
-        : InheritedSeed<PrComposition>(value: knob, child: wired);
+        : InheritedSeed<GitHubDeliveryPolicy>(
+            value: selectedPolicy,
+            child: wired,
+          );
   }
 }
