@@ -90,6 +90,7 @@
 /// `SCRATCH-orchestration-determinism.md`'s I-catalog in that repo.
 library;
 
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
@@ -285,7 +286,7 @@ typedef DirectoryClearer = void Function(String dir);
 const Circuit kCodeReviewCircuit = Circuit(
   id: 'code_review',
   terminalStepId: 'route',
-  maxRestarts: 1,
+  maxRestarts: 0,
   steps: [
     CapabilityStep(
       stepId: kClearCritiqueStep,
@@ -726,9 +727,18 @@ class CriticCapability extends ProcessCapability {
   /// Creates the critic, optionally over a [rubrics] source (D-9 wires the
   /// Packaged-AI-Asset loader; absent ⇒ an inline placeholder so C is testable
   /// with no real assets).
-  const CriticCapability({RubricSource? rubrics}) : _rubrics = rubrics;
+  const CriticCapability({
+    RubricSource? rubrics,
+    @visibleForTesting String Function(File verdict)? verdictTextReader,
+  }) : _rubrics = rubrics,
+       _verdictTextReader = verdictTextReader ?? _readVerdictText;
 
   final RubricSource? _rubrics;
+  final _VerdictTextReader _verdictTextReader;
+
+  @override
+  Allocation createAllocation(AllocationContext ctx) =>
+      _CriticAllocation(this, ctx);
 
   /// The injected rubric source (D-9) — exposed for subclasses: the
   /// spec-readiness committee's `SpecCriticCapability` (bead `pow-6ao`)
@@ -812,8 +822,8 @@ class CriticCapability extends ProcessCapability {
   }
 
   /// Returns a single corrective instruction when the canonical artifact from
-  /// a failed attempt violated the verdict contract. The circuit restart
-  /// budget bounds this repair to one supervised re-ask.
+  /// a failed attempt violated the verdict contract. [_CriticAllocation]
+  /// bounds this repair to one supervised re-ask.
   @protected
   String criticRepairInstruction({
     required String workspaceDir,
@@ -825,6 +835,7 @@ class CriticCapability extends ProcessCapability {
       File(p.join(workspaceDir, _critiqueDir, '$rubric.json')),
       expectedNodePath: nodePath,
       expectedRound: round,
+      readText: _verdictTextReader,
     );
     final reason = switch (read) {
       _VerdictFileInvalid(:final reason) => reason,
@@ -935,6 +946,7 @@ class CriticCapability extends ProcessCapability {
             verdict,
             expectedNodePath: args.nodePath,
             expectedRound: round,
+            readText: _verdictTextReader,
           ),
         ) ??
         _payloadOrNull(
@@ -1074,6 +1086,61 @@ class CriticCapability extends ProcessCapability {
         'at `$path`.',
       );
     return b.toString();
+  }
+}
+
+final class _CriticAllocation extends Allocation {
+  _CriticAllocation(this.capability, super.context);
+
+  final CriticCapability capability;
+  final List<ProcessAllocation> _attempts = [];
+  bool _repairUsed = false;
+
+  @override
+  Future<void> startOrAdopt() async {
+    await _startAttempt();
+  }
+
+  Future<void> _startAttempt() async {
+    final attempt = ProcessAllocation(
+      capability,
+      AllocationContext(
+        treeContext: context.treeContext,
+        args: context.args,
+        transport: context.transport,
+        address: context.address,
+        env: context.env,
+        sink: _receive,
+        fence: context.fence,
+        kind: context.kind,
+        liveness: context.liveness,
+        workSignal: context.workSignal,
+        workSignalTimeout: context.workSignalTimeout,
+      ),
+    );
+    _attempts.add(attempt);
+    await attempt.startOrAdopt();
+  }
+
+  void _receive(AllocationReport report) {
+    final repairsVerdict =
+        report is AllocationFailed &&
+        report.reason.startsWith('result threw: invalid critic verdict at ');
+    if (repairsVerdict && !_repairUsed) {
+      _repairUsed = true;
+      unawaited(_startAttempt());
+      return;
+    }
+    context.sink(report);
+  }
+
+  @override
+  Future<void> dispose() async {
+    state = AllocationState.dying;
+    for (final attempt in _attempts) {
+      await attempt.dispose();
+    }
+    state = AllocationState.gone;
   }
 }
 
@@ -1303,10 +1370,25 @@ final class _VerdictFileUnstamped extends _VerdictFileRead {
       'verdict present at $path but missing the freshness stamp (nodePath/round)';
 }
 
+/// A synchronous verdict read seam used to exercise boundary failures.
+typedef _VerdictTextReader = String Function(File verdict);
+
+String _readVerdictText(File verdict) => verdict.readAsStringSync();
+
+String _verdictErrorDetail(Object error) => switch (error) {
+  FormatException(:final message) => message,
+  FileSystemException(:final message) => message,
+  _ => error.toString(),
+};
+
+final class _InvalidVerdictFailure extends RouteFailure {
+  const _InvalidVerdictFailure(super.reason);
+}
+
 Map<String, String>? _payloadOrNull(_VerdictFileRead read) => switch (read) {
   _VerdictFileAccepted(:final payload) => payload,
   _VerdictFileMissing() || _VerdictFileRejected() => null,
-  _VerdictFileInvalid(:final reason) ||
+  _VerdictFileInvalid(:final reason) => throw _InvalidVerdictFailure(reason),
   _VerdictFileUnstamped(:final reason) => throw RouteFailure(reason),
 };
 
@@ -1322,17 +1404,19 @@ Map<String, String>? _payloadOrNull(_VerdictFileRead read) => switch (read) {
 /// an EARLIER round (A15(5) alt-A — under `RouteVerdict.Rewind` the node path is
 /// byte-identical round to round, so `nodePath` alone cannot see it). A malformed
 /// or incomplete verdict is surfaced through [_payloadOrNull] as a
-/// [RouteFailure], so the process lane fails and is retried once. Only absent,
-/// stale, or foreign verdicts are misses that can fall through to the stray /
+/// [RouteFailure], so the process lane fails and [_CriticAllocation] re-asks
+/// exactly once. Only absent, stale, or foreign verdicts are misses that can
+/// fall through to the stray /
 /// RESULT TEXT / fail-closed chain.
 _VerdictFileRead _verdictFromFile(
   File verdict, {
   required String expectedNodePath,
   required int expectedRound,
+  _VerdictTextReader readText = _readVerdictText,
 }) {
   if (!verdict.existsSync()) return const _VerdictFileMissing();
   try {
-    final decoded = jsonDecode(verdict.readAsStringSync());
+    final decoded = jsonDecode(readText(verdict));
     if (decoded is! Map<String, dynamic>) {
       return _VerdictFileInvalid(verdict.path, 'root must be a JSON object');
     }
@@ -1382,10 +1466,8 @@ _VerdictFileRead _verdictFromFile(
       'transport': 'file',
       'rationale': rationale,
     });
-  } on FormatException catch (error) {
-    return _VerdictFileInvalid(verdict.path, error.message);
-  } on FileSystemException catch (error) {
-    return _VerdictFileInvalid(verdict.path, error.message);
+  } on Object catch (error) {
+    return _VerdictFileInvalid(verdict.path, _verdictErrorDetail(error));
   }
 }
 

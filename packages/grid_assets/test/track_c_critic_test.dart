@@ -55,6 +55,8 @@ Future<List<AllocationReport>> _runCriticAllocation({
   required String rubric,
   required String nodePath,
   int round = 0,
+  CriticCapability capability = const CriticCapability(),
+  int completions = 2,
 }) async {
   final c = _ctx(
     rubric: rubric,
@@ -64,8 +66,7 @@ Future<List<AllocationReport>> _runCriticAllocation({
   );
   final provider = FakeRuntimeProvider();
   final reports = <AllocationReport>[];
-  final alloc = ProcessAllocation(
-    const CriticCapability(),
+  final alloc = capability.createAllocation(
     AllocationContext(
       treeContext: c.context,
       args: c.args,
@@ -80,10 +81,25 @@ Future<List<AllocationReport>> _runCriticAllocation({
     await provider.close();
   });
   await alloc.startOrAdopt();
-  alloc.deliverEventForTest(Exited(name: 'sess-1/$nodePath', exitCode: 0));
-  await Future<void>.delayed(Duration.zero);
+  for (var attempt = 0; attempt < completions; attempt++) {
+    provider.emit(Exited(name: 'sess-1/$nodePath', exitCode: 0));
+    await Future<void>.delayed(Duration.zero);
+    await Future<void>.delayed(Duration.zero);
+  }
   return reports;
 }
+
+final class _UnexpectedReadFailure implements Exception {
+  const _UnexpectedReadFailure(this.message);
+
+  final String message;
+
+  @override
+  String toString() => 'unexpected verdict read failure: $message';
+}
+
+String _throwUnexpectedRead(File _) =>
+    throw const _UnexpectedReadFailure('torn read seam');
 
 void main() {
   group('Track C2 — code-validation (the GATING lane)', () {
@@ -619,6 +635,35 @@ void main() {
       }
     });
 
+    test(
+      'unknown verdict read exceptions fail the allocation loudly without a grade',
+      () async {
+        final dir = Directory.systemTemp.createTempSync('critic-read-failure-');
+        addTearDown(() => dir.deleteSync(recursive: true));
+        const rubric = 'regression-risk';
+        const nodePath = 'tg-1/review/regression-risk';
+        final verdict = File('${dir.path}/.grid/critique/$rubric.json')
+          ..createSync(recursive: true)
+          ..writeAsStringSync('{}');
+        final reports = await _runCriticAllocation(
+          dir: dir,
+          rubric: rubric,
+          nodePath: nodePath,
+          capability: const CriticCapability(
+            verdictTextReader: _throwUnexpectedRead,
+          ),
+        );
+
+        expect(reports.whereType<AllocationCompleted>(), isEmpty);
+        final failed = reports.whereType<AllocationFailed>().single;
+        expect(failed.reason, contains(verdict.path));
+        expect(
+          failed.reason,
+          contains('unexpected verdict read failure: torn read seam'),
+        );
+      },
+    );
+
     test('incident fixtures are refused loudly', () async {
       for (final incident in [
         (
@@ -659,23 +704,92 @@ void main() {
       }
     });
 
-    test('malformed verdict gets one structured re-ask', () {
-      final dir = Directory.systemTemp.createTempSync('critic-reask-');
-      addTearDown(() => dir.deleteSync(recursive: true));
-      const rubric = 'regression-risk';
-      File('${dir.path}/.grid/critique/$rubric.json')
-        ..createSync(recursive: true)
-        ..writeAsStringSync('not json');
-      final c = _ctx(rubric: rubric, workspaceDir: dir.path);
-      final prompt = const CriticCapability()
-          .spawn(c.context, c.args)
-          .args
-          .join(' ');
-      expect(kCodeReviewCircuit.maxRestarts, 1);
-      expect(prompt, contains('## Verdict contract repair'));
-      expect(prompt, contains('Unexpected character'));
-      expect(prompt.split('## Verdict contract repair').length - 1, 1);
-    });
+    test(
+      'malformed verdict gets one structured re-ask and unrelated failure gets none',
+      () async {
+        final dir = Directory.systemTemp.createTempSync('critic-reask-');
+        addTearDown(() => dir.deleteSync(recursive: true));
+        const rubric = 'regression-risk';
+        const nodePath = 'tg-1/review/regression-risk';
+        File('${dir.path}/.grid/critique/$rubric.json')
+          ..createSync(recursive: true)
+          ..writeAsStringSync('not json');
+        final c = _ctx(
+          rubric: rubric,
+          workspaceDir: dir.path,
+          nodePath: nodePath,
+        );
+        final prompt = const CriticCapability()
+            .spawn(c.context, c.args)
+            .args
+            .join(' ');
+        expect(kCodeReviewCircuit.maxRestarts, 0);
+        expect(prompt, contains('## Verdict contract repair'));
+        expect(prompt, contains('Unexpected character'));
+        expect(prompt.split('## Verdict contract repair').length - 1, 1);
+
+        final malformedProvider = FakeRuntimeProvider();
+        final malformedReports = <AllocationReport>[];
+        final malformed = const CriticCapability().createAllocation(
+          AllocationContext(
+            treeContext: c.context,
+            args: c.args,
+            transport: malformedProvider,
+            address: const AllocationAddress('sess-1', nodePath),
+            env: const {},
+            sink: malformedReports.add,
+          ),
+        );
+        addTearDown(() async {
+          await malformed.dispose();
+          await malformedProvider.close();
+        });
+        await malformed.startOrAdopt();
+        malformedProvider.emit(
+          const Exited(name: 'sess-1/$nodePath', exitCode: 0),
+        );
+        await Future<void>.delayed(Duration.zero);
+        await Future<void>.delayed(Duration.zero);
+        expect(malformedProvider.started, hasLength(2));
+        expect(malformedReports, isEmpty);
+        expect(
+          malformedProvider.started.last.config.args.join(' '),
+          contains('## Verdict contract repair'),
+        );
+        malformedProvider.emit(
+          const Exited(name: 'sess-1/$nodePath', exitCode: 0),
+        );
+        await Future<void>.delayed(Duration.zero);
+        await Future<void>.delayed(Duration.zero);
+        expect(malformedProvider.started, hasLength(2));
+        expect(malformedReports.whereType<AllocationCompleted>(), isEmpty);
+        expect(malformedReports.whereType<AllocationFailed>(), hasLength(1));
+
+        final failedProvider = FakeRuntimeProvider();
+        final failedReports = <AllocationReport>[];
+        final failed = const CriticCapability().createAllocation(
+          AllocationContext(
+            treeContext: c.context,
+            args: c.args,
+            transport: failedProvider,
+            address: const AllocationAddress('sess-2', nodePath),
+            env: const {},
+            sink: failedReports.add,
+          ),
+        );
+        addTearDown(() async {
+          await failed.dispose();
+          await failedProvider.close();
+        });
+        await failed.startOrAdopt();
+        failedProvider.emit(
+          const Exited(name: 'sess-2/$nodePath', exitCode: 1),
+        );
+        await Future<void>.delayed(Duration.zero);
+        expect(failedProvider.started, hasLength(1));
+        expect(failedReports.whereType<AllocationFailed>(), hasLength(1));
+      },
+    );
 
     test('an injected rubric source replaces the inline placeholder', () {
       final cap = CriticCapability(rubrics: (id) => 'CUSTOM BANDS for $id');

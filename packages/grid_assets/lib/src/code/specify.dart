@@ -337,7 +337,7 @@ $kSpecExemplarDesign
 const Circuit kSpecReviewCircuit = Circuit(
   id: 'spec_review',
   terminalStepId: 'route',
-  maxRestarts: 1,
+  maxRestarts: 0,
   steps: [
     // The SPEC-READINESS INTAKE LENS (bead `pow-q7n`) — the cheap ladder, ahead
     // of everything expensive. `intake` is deterministic (zero agents) and gates
@@ -787,7 +787,7 @@ class SpecCriticCapability extends CriticCapability {
   /// Creates the spec critic, optionally over a rubric source (D-9 wires
   /// the Packaged-AI-Asset loader; absent ⇒ an inline placeholder so the
   /// circuit is testable with no real assets).
-  const SpecCriticCapability({super.rubrics});
+  const SpecCriticCapability({super.rubrics, super.verdictTextReader});
 
   @override
   RuntimeConfig spawn(TreeContext context, StepArgs args) {

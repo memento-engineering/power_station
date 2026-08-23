@@ -344,7 +344,7 @@ class ReadinessCriticCapability extends CriticCapability {
   /// Creates the readiness lane, optionally over a rubric source (D-9 wires the
   /// Packaged-AI-Asset loader; absent ⇒ an inline placeholder so the circuit is
   /// testable with no real assets).
-  const ReadinessCriticCapability({super.rubrics});
+  const ReadinessCriticCapability({super.rubrics, super.verdictTextReader});
 
   @override
   RuntimeConfig spawn(TreeContext context, StepArgs args) {

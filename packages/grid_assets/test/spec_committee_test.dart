@@ -178,7 +178,7 @@ void main() {
         'spec critics → route; the route is the terminal', () {
       expect(kSpecReviewCircuit.id, 'spec_review');
       expect(kSpecReviewCircuit.terminalStepId, 'route');
-      expect(kSpecReviewCircuit.maxRestarts, 1);
+      expect(kSpecReviewCircuit.maxRestarts, 0);
       final byId = {for (final s in kSpecReviewCircuit.steps) s.stepId: s};
       expect(byId.keys, {
         kIntakeStep,
