@@ -104,13 +104,13 @@ development to work” describes the bind. A BREAKING change MUST go rc-first.
    every dependent in that closure must remain rc until the wave is promoted.
    Compute dependency order with `release order` and process the complete
    closure.
-5. Publish each candidate in dependency order with `dart pub publish`. After
-   each upload, loop `{{runner}} dart release poll --package <name> --version
-   <rc-version> --json` until `isPublished: true` before publishing a dependent.
-   `release poll` reads pub.dev's complete versions list and is the authority for
-   prereleases. `melos publish` still compares against latest stable and is NOT
-   a trustworthy “what is left to publish” check during an rc wave; it remains
-   usable for upload because pub rejects duplicate versions loudly.
+5. Publish each candidate in dependency order by PUSHING ITS TAG (one tag per
+   push — see Publishing below; the publish workflow uploads via trusted
+   publishing). After each tag, loop `{{runner}} dart release poll --package
+   <name> --version <rc-version> --json` until `isPublished: true` before
+   pushing a dependent's tag. `release poll` reads pub.dev's complete versions
+   list and is the authority for prereleases (`melos publish` compares against
+   latest stable and is retired for uploads).
 6. Validate the candidate with `{{runner}} dart release validate-consumers
    --rc-tag <rc-tag> --manifest <consumers.json> --json`, save that ONE JSON
    object as `<validation.json>`, and require `allPassed: true`.
@@ -140,27 +140,44 @@ Run them in sequence; a failure STOPS the release.
    the version bump and CHANGELOG first, then rerun dry-run. Staging is not
    enough; this gate validates checked-in state, so gate order matters.
 
-## Publishing — in dependency order
+## Publishing — push the tag; CI publishes (trusted publishing)
 
-- For a MULTI-package release, resolve the order first: build a
-  `{package:[deps]}` manifest and call `{{runner}} dart release order --manifest
-  <file> --json`. Publish in the returned `order`.
-  (For stable uploads, `melos publish --no-dry-run --yes` resolves the same
-  order automatically. During an rc wave its registry comparison sees only
-  latest stable, so use `release poll` as the publication authority.)
-- `dart pub publish` from the package dir.
-- **After each upload, POLL before publishing a dependent:** loop `{{runner}}
-  dart release poll --package <name> --version <ver> --json` until
-  `isPublished: true` (the new version lands as `latest` within a minute or two).
-  Only then publish the next package.
+**Local `dart pub publish` is RETIRED.** Each repo's
+`.github/workflows/publish.yml` publishes on a per-package tag push via
+pub.dev's GitHub-Actions trusted publishing (OIDC — no long-lived credential).
+Every historical publish-run failure on the_grid/power_station was `Version X
+already exists`: a hand-publish had beaten the tag. The tag IS the publish.
+CI checkouts also carry no `pubspec_overrides.yaml`, so the move-the-overrides
+dance disappears with the hand-publish.
+
+1. Land the release commit through the repo's normal PR path (queue where one
+   exists). Tags point at the MERGED main commit.
+2. Resolve dependency order (`{{runner}} dart release order --manifest <file>
+   --json` for a multi-package wave).
+3. For each package in that order:
+   - `git tag <plan.tag> <release-commit> && git push origin <plan.tag>` —
+     **ONE TAG PER PUSH.** GitHub fires NO workflows for a push containing more
+     than three tags (observed live 2026-08-23: four tags in one push, zero
+     runs), and per-tag pushes are what give you ordering anyway.
+   - Watch the run (`gh run list --workflow=publish.yml`) and loop `{{runner}}
+     dart release poll --package <name> --version <ver> --json` until
+     `isPublished: true`. Only then push the DEPENDENT's tag.
+4. **First release of a package:** automated publishing must be enabled ONCE on
+   the package's pub.dev admin page (Automated publishing → GitHub Actions →
+   repository `memento-engineering/<repo>`, tag pattern
+   `<package>-v{{version}}`). Only an uploader can click it — a publish run
+   failing with an authorization/OIDC message means exactly this toggle; hand
+   the human the admin URL, nothing else.
+   (`melos publish` remains retired for uploads; melos still owns the
+   workspace-green gates.)
 
 ## Post-publish
 
-1. **Tag the release commit** with `plan.tag` (`<pub-name>-v<version>`, e.g.
-   `genesis_tree-v0.1.5`) and push tags.
-2. Push `main`.
-3. Verify: `{{runner}} dart release poll --package <name> --version <ver> --json`
-   returns `isPublished: true`, and spot-check the rendered README.
+1. Verify: `{{runner}} dart release poll --package <name> --version <ver>
+   --json` returns `isPublished: true` for every wave member, and spot-check
+   the rendered README.
+2. Pull `main` in the primary checkout so the local tree matches the tagged
+   release.
 
 ## Reconciling drift (the lenny case)
 
