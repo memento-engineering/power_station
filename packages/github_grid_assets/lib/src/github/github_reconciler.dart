@@ -54,8 +54,15 @@ class GitHubReconciler {
   final GitHubAppClient _client;
   final GitHubCursorStore _cursors;
   final GitHubEventSink _emit;
+  final List<GitHubEventSink> _observers = <GitHubEventSink>[];
   final DateTime Function() _now;
   Future<void>? _inFlight;
+
+  /// Adds a sibling projection to the normalized event seam.
+  void addObserver(GitHubEventSink observer) => _observers.add(observer);
+
+  /// Removes a previously added sibling projection.
+  void removeObserver(GitHubEventSink observer) => _observers.remove(observer);
 
   /// Runs one coalesced intake-then-feedback reconciliation.
   Future<void> reconcileOnce() =>
@@ -239,6 +246,9 @@ class GitHubReconciler {
       next = next.record(id);
       await _cursors.save(next);
       await _emit(event);
+      for (final observer in List<GitHubEventSink>.of(_observers)) {
+        await observer(event);
+      }
     }
     return next;
   }

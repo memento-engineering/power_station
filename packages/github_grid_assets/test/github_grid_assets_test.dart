@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:genesis_tree/genesis_tree.dart';
 import 'package:beads_dart/beads_dart.dart';
 import 'package:github_grid_assets/github_grid_assets.dart';
@@ -104,6 +106,126 @@ class _Transport implements ExplorationTransport {
   @override
   void flare(String name, Map<String, String> data) {}
 }
+
+final class _FeedbackBdRunner implements BdRunner {
+  @override
+  Future<BdResult> run(
+    List<String> args, {
+    Duration? timeout,
+    String? stdin,
+  }) async => const BdResult(
+    exitCode: 0,
+    stdout:
+        '{"id":"session-1","issue_type":"session",'
+        '"metadata":{"work_bead":"pow-test"}}\n',
+    stderr: '',
+  );
+}
+
+final class _FeedbackSender implements FeedbackCommandSender {
+  final events = <String>[];
+
+  @override
+  Future<FeedbackCommandResult> rework({
+    required String gridRoot,
+    required String beadId,
+    required String note,
+    required String idempotencyKey,
+  }) async {
+    events.add(note);
+    return const FeedbackCommandCompleted(<String, Object?>{});
+  }
+}
+
+final class _Tokens implements GitHubAppTokenProvider {
+  @override
+  Future<String> accessToken() async => 'token';
+}
+
+final class _CheckTransport implements GitHubHttpTransport {
+  final responses = <GitHubHttpResponse>[
+    const GitHubHttpResponse(statusCode: 304, body: ''),
+    GitHubHttpResponse(
+      statusCode: 200,
+      body: jsonEncode([
+        {
+          'node_id': 'PR_1',
+          'head': {'ref': 'grid/pow-test', 'sha': 'abc'},
+        },
+      ]),
+    ),
+    GitHubHttpResponse(
+      statusCode: 200,
+      body: jsonEncode({
+        'check_runs': [
+          {
+            'node_id': 'check',
+            'status': 'completed',
+            'conclusion': 'failure',
+            'completed_at': '2026-08-23T00:00:00Z',
+            'name': 'build',
+            'app': {'slug': 'actions'},
+          },
+        ],
+      }),
+    ),
+  ];
+
+  @override
+  Future<GitHubHttpResponse> send(GitHubHttpRequest request) async =>
+      responses.removeAt(0);
+}
+
+final class _CursorStore implements GitHubCursorStore {
+  GitHubReconcilerCursor cursor = const GitHubReconcilerCursor();
+
+  @override
+  Future<GitHubReconcilerCursor> load() async => cursor;
+
+  @override
+  Future<void> save(GitHubReconcilerCursor value) async => cursor = value;
+}
+
+final class _RecordingRuntime extends GitHubReconcilerRuntime {
+  _RecordingRuntime()
+    : super(
+        installationId: 'installation',
+        reconciler: GitHubReconciler(
+          owner: 'memento',
+          repository: 'power_station',
+          substation: 'power_station',
+          client: GitHubAppClient(
+            config: GitHubAppConfig(
+              appId: 'app',
+              installationId: 1,
+              apiBaseUri: Uri.parse('https://api.github.test'),
+            ),
+            tokens: _Tokens(),
+            transport: _CheckTransport(),
+          ),
+          cursors: _CursorStore(),
+          emit: (_) async {},
+        ),
+        coordinator: GitHubPollCoordinator(minimumSpacing: Duration.zero),
+      );
+
+  var starts = 0;
+  var stops = 0;
+
+  @override
+  void start() => starts++;
+
+  @override
+  Future<void> stop() async => stops++;
+}
+
+CiFeedbackProjection _projection(_FeedbackSender sender) =>
+    CiFeedbackProjection(
+      bd: _FeedbackBdRunner(),
+      commandSender: sender,
+      gridRoot: '/grid',
+      substation: 'power_station',
+    );
 
 class _Host extends StatefulSeed {
   const _Host({required this.onCreate, required this.describe});
@@ -380,5 +502,47 @@ void main() {
     await Future<void>.delayed(Duration.zero);
     owner.flush();
     expect(builds, 1);
+  });
+
+  test('replaces watched feedback runtime and projection', () async {
+    final oldRuntime = _RecordingRuntime();
+    final replacementRuntime = _RecordingRuntime();
+    final oldSender = _FeedbackSender();
+    final replacementSender = _FeedbackSender();
+    final oldProjection = _projection(oldSender);
+    final replacementProjection = _projection(replacementSender);
+    late _HostState host;
+    Seed describe(
+      GitHubReconcilerRuntime runtime,
+      CiFeedbackProjection projection,
+    ) => Provider<GitHubReconcilerRuntime>.value(
+      runtime,
+      child: Provider<CiFeedbackProjection>.value(
+        projection,
+        child: const GitHubGridAssets(child: _Leaf()),
+      ),
+    );
+    final owner = TreeOwner();
+    owner.mountRoot(
+      sdk.ProviderScope(
+        child: _Host(
+          onCreate: (state) => host = state,
+          describe: () => describe(oldRuntime, oldProjection),
+        ),
+      ),
+    );
+    owner.flush();
+    expect(oldRuntime.starts, 1);
+
+    host.swap(() => describe(replacementRuntime, replacementProjection));
+    owner.flush();
+    await Future<void>.delayed(Duration.zero);
+    expect(oldRuntime.stops, 1);
+    expect(replacementRuntime.starts, 1);
+
+    await replacementRuntime.reconciler.reconcileOnce();
+    expect(oldSender.events, isEmpty);
+    expect(replacementSender.events, [contains('build')]);
+    owner.unmountRoot();
   });
 }

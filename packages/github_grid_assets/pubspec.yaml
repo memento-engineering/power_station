@@ -8,14 +8,16 @@ environment:
   sdk: ^3.11.0
 
 dependencies:
-  beads_dart: ^0.2.0-rc.1
+  beads_dart: ^0.2.0-rc.4
   dart_jsonwebtoken: ^3.4.1
   freezed_annotation: ^3.0.0
   genesis_tree: ^0.2.0
-  grid_assets: ^0.6.0-rc.1
-  grid_engine: ^0.3.0-rc.3
-  grid_runtime: ^0.2.0-rc.1
-  grid_sdk: ^0.3.0-rc.3
+  grid_assets: ^0.6.0-rc.2
+  grid_cli: ^0.5.0-rc.6
+  grid_diagnostics_contract: ^0.2.0
+  grid_engine: ^0.3.0-rc.6
+  grid_runtime: ^0.2.0-rc.4
+  grid_sdk: ^0.3.0-rc.5
   json_annotation: ^4.9.0
 
 dev_dependencies:
