@@ -178,6 +178,7 @@ void main() {
         'spec critics → route; the route is the terminal', () {
       expect(kSpecReviewCircuit.id, 'spec_review');
       expect(kSpecReviewCircuit.terminalStepId, 'route');
+      expect(kSpecReviewCircuit.maxRestarts, 3);
       final byId = {for (final s in kSpecReviewCircuit.steps) s.stepId: s};
       expect(byId.keys, {
         kIntakeStep,
@@ -415,6 +416,7 @@ void main() {
                 'rubric': rubric,
                 'version': 1,
                 'grade': 'A',
+                'rationale': 'the specification is complete',
                 'nodePath': lane.args.nodePath,
                 kVerdictRoundKey: 2,
               }),
@@ -818,6 +820,27 @@ Validate again with ruby -e 's.include?("${ticks}dart")'.
   });
 
   group('SpecCriticCapability — one spec rubric, in isolation', () {
+    test('malformed verdict gets one structured re-ask', () {
+      final dir = Directory.systemTemp.createTempSync('spec-critic-reask-');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      const rubric = 'coherence';
+      final c = _laneCtx(rubric: rubric, workspaceDir: dir.path);
+      final firstPrompt = const SpecCriticCapability()
+          .spawn(c.context, c.args)
+          .args
+          .join(' ');
+      expect(firstPrompt, isNot(contains('## Verdict contract repair')));
+      File('${dir.path}/.grid/critique/$rubric.json')
+        ..createSync(recursive: true)
+        ..writeAsStringSync('not json');
+      final prompt = const SpecCriticCapability()
+          .spawn(c.context, c.args)
+          .args
+          .join(' ');
+      expect(prompt, contains('## Verdict contract repair'));
+      expect(prompt.split('## Verdict contract repair').length - 1, 1);
+    });
+
     test('spawns claude WRAPPED for usage capture, carrying only its own '
         'rubric (FT-2)', () {
       final c = _laneCtx(rubric: 'coherence');
@@ -934,6 +957,7 @@ Validate again with ruby -e 's.include?("${ticks}dart")'.
           'rubric': 'coherence',
           'version': 1,
           'grade': 'A',
+          'rationale': 'the prior result is stale',
           'nodePath': 'tg-1#r1/spec_review/coherence',
           'round': 0,
         }),
@@ -970,14 +994,14 @@ Validate again with ruby -e 's.include?("${ticks}dart")'.
               .having(
                 (e) => e.reason,
                 'reason',
-                'verdict present at ${verdict.path} but missing the freshness '
-                    'stamp (nodePath/round)',
+                'invalid critic verdict at ${verdict.path}: nodePath must be '
+                    'a non-empty string',
               )
               .having(
                 (e) => e.toString(),
                 'toString',
-                'verdict present at ${verdict.path} but missing the freshness '
-                    'stamp (nodePath/round)',
+                'invalid critic verdict at ${verdict.path}: nodePath must be '
+                    'a non-empty string',
               ),
         ),
       );

@@ -113,6 +113,7 @@ void main() {
   group('Track C4 — the code_review committee frontier', () {
     test('at mount, clear-critique starts ALONE (gate-integrity #3) — pin-diff '
         'and the four critics `dependsOn` it and wait', () {
+      expect(kCodeReviewCircuit.maxRestarts, 3);
       final c = _Committee('tg-1')..mount();
       addTearDown(c.dispose);
       expect(c.events, ['START clear-critique(tgdog-s/tg-1/clear-critique)']);

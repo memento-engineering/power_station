@@ -786,7 +786,7 @@ class SpecCriticCapability extends CriticCapability {
   /// Creates the spec critic, optionally over a rubric source (D-9 wires
   /// the Packaged-AI-Asset loader; absent ⇒ an inline placeholder so the
   /// circuit is testable with no real assets).
-  const SpecCriticCapability({super.rubrics});
+  const SpecCriticCapability({super.rubrics, super.verdictTextReader});
 
   @override
   RuntimeConfig spawn(TreeContext context, StepArgs args) {
@@ -824,13 +824,20 @@ class SpecCriticCapability extends CriticCapability {
         environment: environment,
       ),
       brief: AgentBrief(
-        task: buildSpecCriticPrompt(
-          bead,
-          rubric,
-          args.nodePath,
-          workspace.workspaceDir,
-          round: verdictRound(args),
-        ),
+        task:
+            buildSpecCriticPrompt(
+              bead,
+              rubric,
+              args.nodePath,
+              workspace.workspaceDir,
+              round: verdictRound(args),
+            ) +
+            criticRepairInstruction(
+              workspaceDir: workspace.workspaceDir,
+              rubric: rubric,
+              nodePath: args.nodePath,
+              round: verdictRound(args),
+            ),
       ),
       workspace: workspace,
       usageOut: usageReportPath(args.nodePath),

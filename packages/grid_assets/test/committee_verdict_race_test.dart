@@ -119,6 +119,30 @@ void main() {
   tearDown(() => ws.deleteSync(recursive: true));
 
   group('the spec route under the mid-wave race (tg-60t 00:04:15)', () {
+    test('a malformed current-round artifact is refused loudly', () {
+      final dir = Directory.systemTemp.createTempSync('route-malformed-');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      const rubric = 'coherence';
+      final verdict =
+          File(p.join(dir.path, '.grid', 'critique', '$rubric.json'))
+            ..createSync(recursive: true)
+            ..writeAsStringSync(r'{"grade":"A","rationale":"bad \q"}');
+      expect(
+        () => currentVerdictFromFile(
+          workspaceDir: dir.path,
+          rubric: rubric,
+          nodePath: '$_parent/$rubric',
+          round: 0,
+        ),
+        throwsA(
+          isA<RouteFailure>().having(
+            (failure) => failure.reason,
+            'reason',
+            allOf(contains(verdict.path), contains('escape')),
+          ),
+        ),
+      );
+    });
     // The disk exactly as route#2 found it: the respec wave is in flight
     // (ledger round=1), ONE lane has re-run and stamped round 1, the other
     // three judgement lanes still hold WAVE-1 round-0 files (clear-critique#2

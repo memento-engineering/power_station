@@ -725,9 +725,14 @@ class CriticCapability extends ProcessCapability {
   /// Creates the critic, optionally over a [rubrics] source (D-9 wires the
   /// Packaged-AI-Asset loader; absent ⇒ an inline placeholder so C is testable
   /// with no real assets).
-  const CriticCapability({RubricSource? rubrics}) : _rubrics = rubrics;
+  const CriticCapability({
+    RubricSource? rubrics,
+    @visibleForTesting String Function(File verdict)? verdictTextReader,
+  }) : _rubrics = rubrics,
+       _verdictTextReader = verdictTextReader ?? _readVerdictText;
 
   final RubricSource? _rubrics;
+  final _VerdictTextReader _verdictTextReader;
 
   /// The injected rubric source (D-9) — exposed for subclasses: the
   /// spec-readiness committee's `SpecCriticCapability` (bead `pow-6ao`)
@@ -786,13 +791,20 @@ class CriticCapability extends ProcessCapability {
         environment: environment,
       ),
       brief: AgentBrief(
-        task: buildCriticPrompt(
-          bead,
-          rubric,
-          args.nodePath,
-          workspace.workspaceDir,
-          round: verdictRound(args),
-        ),
+        task:
+            buildCriticPrompt(
+              bead,
+              rubric,
+              args.nodePath,
+              workspace.workspaceDir,
+              round: verdictRound(args),
+            ) +
+            criticRepairInstruction(
+              workspaceDir: workspace.workspaceDir,
+              rubric: rubric,
+              nodePath: args.nodePath,
+              round: verdictRound(args),
+            ),
       ),
       workspace: workspace,
       // CAPTURE-ONLY usage telemetry (FT-2): the resolved harness (claude)
@@ -801,6 +813,36 @@ class CriticCapability extends ProcessCapability {
       // a separate path, so capture never touches the grade.
       usageOut: usageReportPath(args.nodePath),
     );
+  }
+
+  /// Returns a corrective instruction when the canonical artifact from a prior
+  /// failed attempt violated the verdict contract. Engine supervision restarts
+  /// the failed process lane under its default budget; the restarted [spawn]
+  /// appends this instruction without replacing the lease-vended allocation.
+  @protected
+  String criticRepairInstruction({
+    required String workspaceDir,
+    required String rubric,
+    required String nodePath,
+    required int round,
+  }) {
+    final read = _verdictFromFile(
+      File(p.join(workspaceDir, _critiqueDir, '$rubric.json')),
+      expectedNodePath: nodePath,
+      expectedRound: round,
+      readText: _verdictTextReader,
+    );
+    final reason = switch (read) {
+      _VerdictFileInvalid(:final reason) => reason,
+      _VerdictFileUnstamped(:final reason) => reason,
+      _ => null,
+    };
+    return reason == null
+        ? ''
+        : '\n\n## Verdict contract repair\n'
+              'The previous artifact was refused: $reason\n'
+              'Replace it once with strict JSON carrying grade, rationale, '
+              'nodePath, and round. Do not recover a grade from prose.';
   }
 
   @override
@@ -873,10 +915,11 @@ class CriticCapability extends ProcessCapability {
         if (diagnostic != null) 'rationale': diagnostic,
       };
     }
-    // An LLM critic's verdict JSON. Fail-closed: a missing / malformed / STALE
-    // verdict (no file, unparseable JSON, no readable `grade`, a `nodePath`
-    // stamp naming ANOTHER node — gate-integrity #3 — or a `round` stamp naming
-    // an EARLIER round of THIS node — A15(5) alt-A) falls back, in order, to a
+    // A PRESENT malformed or incomplete artifact fails loudly before any
+    // fallback, withholding the grade from the join. A missing or STALE verdict
+    // (no file, a `nodePath` stamp naming ANOTHER node — gate-integrity #3 — or
+    // a `round` stamp naming an EARLIER round of THIS node — A15(5) alt-A) falls
+    // back, in order, to a
     // round-fresh STRAY verdict (gate-integrity #4 — a critic that cd'd mid-run
     // wrote the file under a subdir instead of the canonical path;
     // [_strayVerdict]) then to the captured harness RESULT TEXT (tg-291 — the
@@ -887,7 +930,7 @@ class CriticCapability extends ProcessCapability {
     // transport freshness envelope is unverifiable, so [_verdictFromFile] throws
     // [RouteFailure] and the process lane fails/retries instead of recording a
     // fake F. The canonical FILE wins whenever it parses AND is fresh; only an
-    // absent/malformed/stale canonical file consults the fallbacks. No parseable
+    // absent/stale canonical file consults the fallbacks. No parseable
     // verdict ANYWHERE still grades F — every path names its own `transport`
     // (`file`/`file-stray`/`envelope`/`fail-closed-default`), so a false-gate
     // post-mortem never has to guess which channel produced the grade.
@@ -898,6 +941,7 @@ class CriticCapability extends ProcessCapability {
             verdict,
             expectedNodePath: args.nodePath,
             expectedRound: round,
+            readText: _verdictTextReader,
           ),
         ) ??
         _payloadOrNull(
@@ -1224,7 +1268,8 @@ String _beadBlock(Bead bead) {
 /// `"round":"2"` made a formatting slip, not a stale verdict); anything else is
 /// a MISS, which fail-closes exactly like a foreign `nodePath` does.
 int? _stampedRound(Object? raw) => switch (raw) {
-  final num round => round.toInt(),
+  final num round when round.isFinite && round == round.truncateToDouble() =>
+    round.toInt(),
   final String round => int.tryParse(round.trim()),
   _ => null,
 };
@@ -1247,6 +1292,15 @@ final class _VerdictFileRejected extends _VerdictFileRead {
   const _VerdictFileRejected();
 }
 
+final class _VerdictFileInvalid extends _VerdictFileRead {
+  const _VerdictFileInvalid(this.path, this.detail);
+
+  final String path;
+  final String detail;
+
+  String get reason => 'invalid critic verdict at $path: $detail';
+}
+
 final class _VerdictFileUnstamped extends _VerdictFileRead {
   const _VerdictFileUnstamped(this.path);
 
@@ -1256,64 +1310,113 @@ final class _VerdictFileUnstamped extends _VerdictFileRead {
       'verdict present at $path but missing the freshness stamp (nodePath/round)';
 }
 
+/// A synchronous verdict read seam used to exercise boundary failures.
+typedef _VerdictTextReader = String Function(File verdict);
+
+String _readVerdictText(File verdict) => verdict.readAsStringSync();
+
+String _verdictErrorDetail(Object error) => switch (error) {
+  FormatException(:final message) => message,
+  FileSystemException(:final message) => message,
+  _ => error.toString(),
+};
+
+final class _InvalidVerdictFailure extends RouteFailure {
+  const _InvalidVerdictFailure(super.reason);
+}
+
 Map<String, String>? _payloadOrNull(_VerdictFileRead read) => switch (read) {
   _VerdictFileAccepted(:final payload) => payload,
   _VerdictFileMissing() || _VerdictFileRejected() => null,
+  _VerdictFileInvalid(:final reason) => throw _InvalidVerdictFailure(reason),
   _VerdictFileUnstamped(:final reason) => throw RouteFailure(reason),
 };
 
 /// The verdict file's grade, when it parses AND is FRESH — `null` for an absent
-/// file, invalid JSON, or a missing/blank `grade`. It rejects a `nodePath` stamp
+/// file or a stale/foreign stamp. Invalid JSON, a non-object root, a missing or
+/// blank required field, an unreadable round, and an off-ladder grade are
+/// [_VerdictFileInvalid]. It rejects a `nodePath` stamp
 /// that doesn't match [expectedNodePath], OR a `round` stamp that doesn't match
 /// [expectedRound], so stale or foreign stamps continue to the fallback chain
 /// per A4/A15. The TWO stamps fence two DIFFERENT staleness modes and both are
 /// load-bearing: `nodePath` rejects a verdict some OTHER node wrote (a stray
 /// write, a mis-keyed lane — A4); `round` rejects a verdict THIS node wrote in
 /// an EARLIER round (A15(5) alt-A — under `RouteVerdict.Rewind` the node path is
-/// byte-identical round to round, so `nodePath` alone cannot see it). A present
-/// parseable verdict with a readable grade but missing either stamp is discarded
-/// and surfaced as [_VerdictFileUnstamped]; [_payloadOrNull] turns that into a
-/// [RouteFailure] so the process lane fails and is retried. Absent, malformed,
-/// stale, or foreign verdicts are treated as misses so [CriticCapability.result]
-/// falls through to the stray / RESULT TEXT / fail-closed chain (tg-291).
+/// byte-identical round to round, so `nodePath` alone cannot see it). A malformed
+/// or incomplete verdict is surfaced through [_payloadOrNull] as a
+/// [RouteFailure], so the lease-vended process allocation reports
+/// [AllocationFailed]. Engine supervision may restart the lane under its
+/// default budget; the next [CriticCapability.spawn] appends
+/// [CriticCapability.criticRepairInstruction]. Only absent, stale, or foreign
+/// verdicts are misses that can fall through to the stray / RESULT TEXT /
+/// fail-closed chain.
 _VerdictFileRead _verdictFromFile(
   File verdict, {
   required String expectedNodePath,
   required int expectedRound,
+  _VerdictTextReader readText = _readVerdictText,
 }) {
   if (!verdict.existsSync()) return const _VerdictFileMissing();
   try {
-    final json = jsonDecode(verdict.readAsStringSync()) as Map<String, dynamic>;
-    final grade = (json['grade'] as String?)?.trim().toUpperCase();
-    if (grade == null || grade.isEmpty) return const _VerdictFileRejected();
-    final stampedNodePath = (json['nodePath'] as String?)?.trim();
-    final hasNodePathStamp =
-        stampedNodePath != null && stampedNodePath.isNotEmpty;
-    final hasRoundStamp =
-        json.containsKey(kVerdictRoundKey) && json[kVerdictRoundKey] != null;
-    if (!hasNodePathStamp || !hasRoundStamp) {
-      return _VerdictFileUnstamped(verdict.path);
+    final decoded = jsonDecode(readText(verdict));
+    if (decoded is! Map<String, dynamic>) {
+      return _VerdictFileInvalid(verdict.path, 'root must be a JSON object');
+    }
+    final json = decoded;
+    final gradeValue = json['grade'];
+    final grade = gradeValue is String ? gradeValue.trim().toUpperCase() : '';
+    if (grade.isEmpty) {
+      return _VerdictFileInvalid(
+        verdict.path,
+        'grade must be a non-empty string',
+      );
+    }
+    if (!const {'A', 'B', 'C', 'D', 'E', 'F'}.contains(grade)) {
+      return _VerdictFileInvalid(verdict.path, 'grade must be one of A–F');
+    }
+    final rationaleValue = json['rationale'];
+    final rationale = rationaleValue is String ? rationaleValue.trim() : '';
+    if (rationale.isEmpty) {
+      return _VerdictFileInvalid(
+        verdict.path,
+        'rationale must be a non-empty string',
+      );
+    }
+    final nodePathValue = json['nodePath'];
+    final stampedNodePath = nodePathValue is String ? nodePathValue.trim() : '';
+    if (stampedNodePath.isEmpty) {
+      return _VerdictFileInvalid(
+        verdict.path,
+        'nodePath must be a non-empty string',
+      );
+    }
+    final stampedRound = _stampedRound(json[kVerdictRoundKey]);
+    if (stampedRound == null) {
+      return _VerdictFileInvalid(
+        verdict.path,
+        'round must be an integer or integer-readable string',
+      );
     }
     if (stampedNodePath != expectedNodePath) {
       return const _VerdictFileRejected(); // a FOREIGN node's.
     }
-    if (_stampedRound(json[kVerdictRoundKey]) != expectedRound) {
+    if (stampedRound != expectedRound) {
       return const _VerdictFileRejected(); // a STALE round's.
     }
-    final rationale = (json['rationale'] as String?)?.trim() ?? '';
     return _VerdictFileAccepted({
       'grade': grade,
       'transport': 'file',
-      if (rationale.isNotEmpty) 'rationale': rationale,
+      'rationale': rationale,
     });
-  } catch (_) {
-    return const _VerdictFileRejected();
+  } on Object catch (error) {
+    return _VerdictFileInvalid(verdict.path, _verdictErrorDetail(error));
   }
 }
 
 /// [rubric]'s CANONICAL verdict payload under [workspaceDir], iff it parses AND
 /// carries THIS [nodePath] + THIS [round]'s freshness stamps — null for an
-/// absent, malformed, foreign, or PRIOR-ROUND file (bead `pow-96s`).
+/// absent, foreign, or PRIOR-ROUND file. A malformed or incomplete present
+/// artifact throws [RouteFailure].
 ///
 /// A thin public wrapper over the ONE parser+fence ([_verdictFromFile] via
 /// [_payloadOrNull]) so a route JOIN can apply the same current-round rule
@@ -1400,6 +1503,7 @@ _VerdictFileRead _strayVerdict(
       case _VerdictFileAccepted(:final payload):
         return _VerdictFileAccepted({...payload, 'transport': 'file-stray'});
       case _VerdictFileUnstamped():
+      case _VerdictFileInvalid():
         return read;
       case _VerdictFileMissing() || _VerdictFileRejected():
         continue;

@@ -344,7 +344,7 @@ class ReadinessCriticCapability extends CriticCapability {
   /// Creates the readiness lane, optionally over a rubric source (D-9 wires the
   /// Packaged-AI-Asset loader; absent ⇒ an inline placeholder so the circuit is
   /// testable with no real assets).
-  const ReadinessCriticCapability({super.rubrics});
+  const ReadinessCriticCapability({super.rubrics, super.verdictTextReader});
 
   @override
   RuntimeConfig spawn(TreeContext context, StepArgs args) {
@@ -382,13 +382,20 @@ class ReadinessCriticCapability extends CriticCapability {
         environment: environment,
       ),
       brief: AgentBrief(
-        task: buildReadinessPrompt(
-          bead,
-          rubric,
-          args.nodePath,
-          workspace.workspaceDir,
-          round: verdictRound(args),
-        ),
+        task:
+            buildReadinessPrompt(
+              bead,
+              rubric,
+              args.nodePath,
+              workspace.workspaceDir,
+              round: verdictRound(args),
+            ) +
+            criticRepairInstruction(
+              workspaceDir: workspace.workspaceDir,
+              rubric: rubric,
+              nodePath: args.nodePath,
+              round: verdictRound(args),
+            ),
       ),
       workspace: workspace,
       // CAPTURE-ONLY usage telemetry (FT-2), same as every other lane.
