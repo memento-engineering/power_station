@@ -1,3 +1,7 @@
+## 0.1.0-rc.4
+
+- The seat's ServiceBundle derivation uses `ServiceBundle.derive` — field drops are now compile errors (#126).
+
 ## 0.1.0-rc.3
 
 - Landing postures as sibling `DeliveryMethod`s: `GitHubDeliveryPolicy` values select `GitHubPrDelivery` (default), `GitHubAutoMergeDelivery` (native auto-merge only when validation rc == 0 and every committee grade is B or better), or `GitHubDirectMergeDelivery` (protected-aware); refused enables fall back loudly with named flares (#121).

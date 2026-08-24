@@ -1,3 +1,8 @@
+## 0.6.0-rc.4
+
+- Critic verdict artifacts are strict-decoded (non-object root, off-ladder/blank grade, blank rationale/nodePath, non-integer round all refuse); a present-but-malformed verdict fails the lane loudly (`AllocationFailed`, reason-prefixed) instead of silently grading F; unknown read exceptions fail the same way. Repair rides `criticRepairInstruction` on engine-supervised restarts (#128).
+- Bundle derivations converted to `ServiceBundle.derive` — new bundle fields compile-error instead of silently dropping (#126).
+
 ## 0.6.0-rc.3
 
 - `DeliveryMethod` seam additions backing the grade-gated landing postures (#121).
