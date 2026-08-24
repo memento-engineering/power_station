@@ -395,6 +395,5 @@ void main() {
       );
     },
     timeout: const Timeout(Duration(minutes: 1)),
-    skip: 'blocked by pow-t3c: resident rework does not mint replacement',
   );
 }
