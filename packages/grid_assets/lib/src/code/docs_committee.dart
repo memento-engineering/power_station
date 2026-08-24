@@ -166,23 +166,6 @@ ChangeShape changeShapeOf(Bead bead) {
   return cited.every(isDocsPath) ? ChangeShape.docs : ChangeShape.code;
 }
 
-/// Every repo-relative path a unified [diff] touches — BOTH sides of each
-/// `diff --git` header, so a rename or a delete is seen too.
-Set<String> changedFilesIn(String diff) {
-  final files = <String>{};
-  for (final match in _diffHeader.allMatches(diff)) {
-    for (final side in [match.group(1)!, match.group(2)!]) {
-      if (side != '/dev/null') files.add(side);
-    }
-  }
-  return files;
-}
-
-final RegExp _diffHeader = RegExp(
-  r'^diff --git a/(\S+) b/(\S+)$',
-  multiLine: true,
-);
-
 /// The ADDED lines of each file in a unified [diff], keyed by repo-relative
 /// path — the ONLY text the mechanical lanes grade. This is the scope-pinning
 /// doctrine one level down (ADR-0000 A9): grade the bead's OWN delta, never the

@@ -943,6 +943,7 @@ DefaultCapabilityRegistry buildCodeRegistry({
         inference: inference ?? const SystemInferenceRunner(),
       ),
       'critic': CriticCapability(rubrics: rubricSource),
+      kDeclaredTestsRubric: const DeclaredTestsCapability(),
       // The DOCS committee's three deterministic lanes — ONE capability, three
       // lanes selected by `params['rubric']`, mirroring `critic`. No rubric
       // source: the checks are mechanical, so the prose in `extension/rubrics/`

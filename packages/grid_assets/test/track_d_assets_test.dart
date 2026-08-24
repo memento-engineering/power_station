@@ -57,7 +57,11 @@ void main() {
     // BOTH committees' packs ride the one loader (bead `pow-6ao`): the code
     // rubrics + the spec-readiness rubrics resolve by id from the same
     // `extension/rubrics/`.
-    for (final rubricId in [...kCommitteeRubrics, ...kSpecCommitteeRubrics]) {
+    for (final rubricId in [
+      kGatingRubric,
+      ...kLlmRubrics,
+      ...kSpecCommitteeRubrics,
+    ]) {
       test(
         'loadRubric("$rubricId") returns non-empty prose that names itself',
         () {
@@ -96,7 +100,7 @@ void main() {
           Directory.current = foreign;
           // No explicit root — resolution runs for real from the foreign cwd.
           final resolved = PackagedAssetLoader();
-          for (final rubricId in kCommitteeRubrics) {
+          for (final rubricId in [kGatingRubric, ...kLlmRubrics]) {
             final text = resolved.loadRubric(rubricId);
             expect(text, isNotEmpty);
             expect(text, contains(rubricId));
@@ -149,7 +153,7 @@ void main() {
       final resourceIds = {for (final r in resources) r['id'] as String};
       expect(
         resourceIds,
-        containsAll([...kCommitteeRubrics, ...kSpecCommitteeRubrics]),
+        containsAll([kGatingRubric, ...kLlmRubrics, ...kSpecCommitteeRubrics]),
         reason:
             'every committee rubric — code AND spec-readiness — is '
             'declared as a resource',

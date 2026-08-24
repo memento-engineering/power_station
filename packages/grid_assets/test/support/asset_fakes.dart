@@ -186,6 +186,13 @@ const String kClearCritiqueNode = 'review/clear-critique';
 const String kPinDiffNode = 'review/pin-diff';
 const List<String> kCriticNodes = [
   'review/code-validation',
+  'review/declared-tests-present',
+  'review/spec-adherence',
+  'review/regression-risk',
+  'review/test-coverage',
+];
+const List<String> kProcessCriticNodes = [
+  'review/code-validation',
   'review/spec-adherence',
   'review/regression-risk',
   'review/test-coverage',
