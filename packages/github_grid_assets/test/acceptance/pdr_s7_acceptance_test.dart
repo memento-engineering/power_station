@@ -270,7 +270,9 @@ void main() {
         _provisionCheckout(tmp.path, 'tg-1');
         _provisionCheckout(tmp.path, 'tg-2');
         // The four tg-1 committee critic step names, in declaration order.
-        final tg1Critics = [for (final n in kCriticNodes) 'tgdog-1/tg-1/$n'];
+        final tg1Critics = [
+          for (final n in kProcessCriticNodes) 'tgdog-1/tg-1/$n',
+        ];
         final allA = {for (final n in kCriticNodes) n: 'A'};
         // ADOPTED sessions so the SessionScope resolves synchronously (the manual
         // owner has no kernel self-flush): the agents spawn under one flush.

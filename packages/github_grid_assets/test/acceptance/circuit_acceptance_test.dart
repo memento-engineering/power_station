@@ -48,7 +48,9 @@ const _sid = 'tgdog-sess1';
 String _step(String relPath) => '$_sid/tg-1/$relPath';
 
 // The committee critic provider names, in committee order.
-final List<String> _criticSteps = [for (final n in kCriticNodes) _step(n)];
+final List<String> _criticSteps = [
+  for (final n in kProcessCriticNodes) _step(n),
+];
 
 /// The committee session with the SPEC phase (bead `pow-6ao`) fast-forwarded
 /// (fully complete + all-A — cursor adoption: already-complete steps never
@@ -378,7 +380,8 @@ void _plantAllPassVerdicts(String workspaceDir, String workBeadId) {
   File(
     '${dir.path}/${kCriticNodes.first.split('/').last}.rc',
   ).writeAsStringSync('0');
-  for (final rubric in kCriticNodes.skip(1).map((n) => n.split('/').last)) {
+  for (final rubric
+      in kProcessCriticNodes.skip(1).map((n) => n.split('/').last)) {
     File('${dir.path}/$rubric.json').writeAsStringSync(
       jsonEncode({
         'grade': 'A',
@@ -520,7 +523,7 @@ void main() {
         contains('.grid/critique/code-validation.rc'),
       );
       final llm = f.provider.started.firstWhere(
-        (s) => s.name == _step(kCriticNodes[1]),
+        (s) => s.name == _step(kProcessCriticNodes[1]),
       );
       expect(llm.config.command, 'sh');
       expect(llm.config.args, contains('claude'));

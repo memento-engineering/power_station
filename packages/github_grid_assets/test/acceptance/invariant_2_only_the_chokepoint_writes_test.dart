@@ -112,7 +112,9 @@ GraphSnapshot _stateAt({
 String _step(String rel) => '$_sid/tg-1/$rel';
 
 /// The four critic provider names, in committee order.
-final List<String> _criticSteps = [for (final n in kCriticNodes) _step(n)];
+final List<String> _criticSteps = [
+  for (final n in kProcessCriticNodes) _step(n),
+];
 
 /// All-pass grades (the happy committee — the route advances, never gates).
 final Map<String, String> _allA = {for (final n in kCriticNodes) n: 'A'};
