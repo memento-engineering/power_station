@@ -109,7 +109,9 @@ GraphSnapshot _stateAt({
 String _step(String rel) => '$_sid/tg-1/$rel';
 
 /// The four critic provider names, in committee order.
-final List<String> _criticSteps = [for (final n in kCriticNodes) _step(n)];
+final List<String> _criticSteps = [
+  for (final n in kProcessCriticNodes) _step(n),
+];
 
 /// All-pass grades (the happy committee).
 final Map<String, String> _allA = {for (final n in kCriticNodes) n: 'A'};
@@ -270,7 +272,7 @@ void main() {
         contains('.grid/critique/code-validation.rc'),
       );
       final llm = f.provider.started.firstWhere(
-        (s) => s.name == _step(kCriticNodes[1]),
+        (s) => s.name == _step(kProcessCriticNodes[1]),
       );
       expect(llm.config.command, 'sh');
       expect(llm.config.args, contains('claude'));

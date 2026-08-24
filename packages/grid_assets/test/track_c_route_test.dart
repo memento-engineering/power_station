@@ -11,7 +11,7 @@ import 'package:test/test.dart';
 
 import 'support/asset_fakes.dart';
 
-const _critics = 'code-validation,spec-adherence,regression-risk,test-coverage';
+final String _critics = kCommitteeRubrics.join(',');
 
 /// A route (ambient tree, per-step args) pair whose ambient [SiblingView]
 /// carries the fabricated [grades] (criticId → letter); an omitted critic has
@@ -23,16 +23,17 @@ const _critics = 'code-validation,spec-adherence,regression-risk,test-coverage';
   Map<String, String> rationales = const {},
 }) {
   const parent = 'tg-1/review';
+  final effectiveGrades = {kDeclaredTestsRubric: 'A', ...grades};
   return (
     context: FakeTreeContext(
       values: {
         SiblingView: SiblingView(
           cursor: {
-            for (final id in grades.keys)
+            for (final id in effectiveGrades.keys)
               '$parent/$id': const NodeCursor(state: StepState.complete),
           },
           results: {
-            for (final entry in grades.entries)
+            for (final entry in effectiveGrades.entries)
               '$parent/${entry.key}': {
                 'grade': entry.value,
                 if (rationales[entry.key] case final rationale?)
@@ -44,7 +45,7 @@ const _critics = 'code-validation,spec-adherence,regression-risk,test-coverage';
     ),
     args: stepArgs(
       '$parent/route',
-      params: const {'critics': _critics, 'gating': 'code-validation'},
+      params: {'critics': _critics, 'gating': kCodeGatingRubrics.join(',')},
     ),
   );
 }
@@ -71,7 +72,8 @@ void main() {
       expect((out as Advance).payload, {
         'verdict': 'advance',
         'grades':
-            'code-validation=A,spec-adherence=B,regression-risk=A,'
+            'code-validation=A,declared-tests-present=A,spec-adherence=B,'
+            'regression-risk=A,'
             'test-coverage=C',
         'spread': '2',
         'rule': 'all-approve',
@@ -87,6 +89,27 @@ void main() {
       });
       expect(out, isA<Escalate>());
       expect((out as Escalate).reason, 'code-validation failed: hard block');
+    });
+
+    test('declared test failures hard-block with every missing path', () async {
+      final c = _routeCtx(
+        const {
+          kDeclaredTestsRubric: 'F',
+          'code-validation': 'A',
+          'spec-adherence': 'A',
+          'regression-risk': 'A',
+          'test-coverage': 'A',
+        },
+        rationales: const {
+          kDeclaredTestsRubric:
+              'missing test/one_test.dart, test/two_test.dart',
+        },
+      );
+      final out = await const CodeRouteCapability().route(c.context, c.args);
+      expect(out, isA<Escalate>());
+      expect((out as Escalate).reason, contains(kDeclaredTestsRubric));
+      expect(out.reason, contains('test/one_test.dart'));
+      expect(out.reason, contains('test/two_test.dart'));
     });
 
     test('the gating critic appends an exit-127 candidate rationale', () async {
@@ -130,6 +153,7 @@ void main() {
       // non-gating F can trip the gate (review finding C-2).
       final out = await _route(const {
         'code-validation': 'D',
+        kDeclaredTestsRubric: 'D',
         'spec-adherence': 'F',
         'regression-risk': 'E',
         'test-coverage': 'D',
@@ -145,6 +169,7 @@ void main() {
         // rework rule does.
         final out = await _route(const {
           'code-validation': 'B',
+          kDeclaredTestsRubric: 'B',
           'spec-adherence': 'C',
           'regression-risk': 'C',
           'test-coverage': 'D',

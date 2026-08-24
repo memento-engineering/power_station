@@ -113,6 +113,12 @@ import 'route_failure.dart';
 /// Plan command), decided by the route's matrix.
 const String kGatingRubric = 'code-validation';
 
+/// The hard gate for test files promised by the Design.
+const String kDeclaredTestsRubric = 'declared-tests-present';
+
+/// Every deterministic hard gate in the code committee.
+const List<String> kCodeGatingRubrics = [kGatingRubric, kDeclaredTestsRubric];
+
 /// The gating lane's absolute-from-spawn deadline (the_grid audit §4,
 /// `tg-uad` follow-through): the deterministic `code-validation` lane runs the
 /// bead's OWN Validation Plan via `sh -c`, which is minutes-scale by
@@ -132,7 +138,7 @@ const List<String> kLlmRubrics = [
 ];
 
 /// Every committee rubric id, in declaration order (the gating lane first).
-const List<String> kCommitteeRubrics = [kGatingRubric, ...kLlmRubrics];
+const List<String> kCommitteeRubrics = [...kCodeGatingRubrics, ...kLlmRubrics];
 
 /// The workspace-relative directory each critic writes its verdict / rc into.
 const String _critiqueDir = '.grid/critique';
@@ -162,6 +168,109 @@ const String _pinnedDiffName = 'pinned.diff';
 /// [CriticCapability.buildCriticPrompt] (which names it to the critic).
 String pinnedDiffPath(String workspaceDir) =>
     p.join(workspaceDir, _critiqueDir, _pinnedDiffName);
+
+final RegExp _diffHeader = RegExp(
+  r'^diff --git a/(\S+) b/(\S+)$',
+  multiLine: true,
+);
+final RegExp _inlineCodeSpan = RegExp(r'`([^`\n]+)`');
+final RegExp _testCommandLine = RegExp(r'^\s*Test:\s*(.+)$');
+final RegExp _testCommandToken = RegExp(
+  r'(?:^|\s)([A-Za-z0-9_.\/-]+_test\.dart)(?=\s|$)',
+);
+
+/// Every repo-relative path a unified [diff] touches.
+Set<String> changedFilesIn(String diff) {
+  final files = <String>{};
+  for (final match in _diffHeader.allMatches(diff)) {
+    for (final side in [match.group(1)!, match.group(2)!]) {
+      if (side != '/dev/null') files.add(side);
+    }
+  }
+  return files;
+}
+
+String? _confidentTestPath(String raw) {
+  final trimmed = raw.trim();
+  final candidate = p.posix.normalize(trimmed);
+  if (candidate.isEmpty ||
+      candidate != trimmed ||
+      p.posix.isAbsolute(candidate) ||
+      candidate == '..' ||
+      candidate.startsWith('../') ||
+      !RegExp(
+        r'^[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)+_test\.dart$',
+      ).hasMatch(candidate)) {
+    return null;
+  }
+  return p.posix.split(candidate).contains('test') ? candidate : null;
+}
+
+/// Confident Design declarations only; ambiguous prose contributes nothing.
+Set<String> declaredTestFiles(String design) {
+  final declared = <String>{};
+  for (final match in _inlineCodeSpan.allMatches(design)) {
+    final path = _confidentTestPath(match.group(1)!);
+    if (path != null) declared.add(path);
+  }
+  for (final line in const LineSplitter().convert(design)) {
+    final command = _testCommandLine.firstMatch(line)?.group(1);
+    if (command == null) continue;
+    for (final match in _testCommandToken.allMatches(
+      command.replaceAll('`', ''),
+    )) {
+      final path = _confidentTestPath(match.group(1)!);
+      if (path != null) declared.add(path);
+    }
+  }
+  return declared;
+}
+
+/// Sorted declarations absent from [changedFiles].
+List<String> missingDeclaredTestFiles({
+  required String design,
+  required Set<String> changedFiles,
+}) => declaredTestFiles(design).difference(changedFiles).toList()..sort();
+
+/// Mechanical, no-agent verification of Design-declared test-file presence.
+class DeclaredTestsCapability extends ServiceCapability {
+  /// Creates the gate.
+  const DeclaredTestsCapability();
+
+  @override
+  Future<StepOutcome> run(TreeContext context, StepArgs args) async {
+    final bead = context.getInheritedSeedOfExactType<Bead>();
+    final workspace = context.getInheritedSeedOfExactType<Workspace>();
+    if (bead == null || workspace == null) {
+      return const Ok({
+        'grade': 'F',
+        'transport': 'structural',
+        'rationale': 'no ambient work Bead / Workspace to check — fail-closed',
+      });
+    }
+    final pinned = File(pinnedDiffPath(workspace.workspaceDir));
+    if (!await pinned.exists()) {
+      return Ok({
+        'grade': 'F',
+        'transport': 'structural',
+        'rationale':
+            'no pinned diff at ${pinned.path} — declared tests cannot be checked; fail-closed',
+      });
+    }
+    final missing = missingDeclaredTestFiles(
+      design: bead.design,
+      changedFiles: changedFilesIn(await pinned.readAsString()),
+    );
+    return missing.isEmpty
+        ? const Ok({'grade': 'A', 'transport': 'structural'})
+        : Ok({
+            'grade': 'F',
+            'transport': 'structural',
+            'rationale':
+                'Design-declared test files missing from pinned diff: ${missing.join(', ')}',
+          });
+  }
+}
 
 /// The absolute path of the round's critique dir under [workspaceDir] — the
 /// canonical home of every lane's verdict file (`<rubric>.json`). Derived
@@ -302,6 +411,11 @@ const Circuit kCodeReviewCircuit = Circuit(
       dependsOn: {kPinDiffStep},
     ),
     CapabilityStep(
+      stepId: kDeclaredTestsRubric,
+      capabilityId: kDeclaredTestsRubric,
+      dependsOn: {kPinDiffStep},
+    ),
+    CapabilityStep(
       stepId: 'spec-adherence',
       capabilityId: 'critic',
       params: {'rubric': 'spec-adherence'},
@@ -323,15 +437,15 @@ const Circuit kCodeReviewCircuit = Circuit(
       stepId: 'route',
       capabilityId: 'route',
       dependsOn: {
-        kGatingRubric,
+        ...kCodeGatingRubrics,
         'spec-adherence',
         'regression-risk',
         'test-coverage',
       },
       params: {
         'critics':
-            'code-validation,spec-adherence,regression-risk,test-coverage',
-        'gating': kGatingRubric,
+            'code-validation,declared-tests-present,spec-adherence,regression-risk,test-coverage',
+        'gating': 'code-validation,declared-tests-present',
       },
     ),
   ],

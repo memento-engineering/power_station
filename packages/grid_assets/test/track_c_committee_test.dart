@@ -108,6 +108,8 @@ class _Committee {
 }
 
 String _c(String stepId) => 'critic(tgdog-s/tg-1/$stepId)';
+const _declared =
+    'START declared-tests-present(tgdog-s/tg-1/declared-tests-present)';
 
 void main() {
   group('Track C4 — the code_review committee frontier', () {
@@ -144,6 +146,7 @@ void main() {
         c.events,
         containsAll([
           'START ${_c('code-validation')}',
+          _declared,
           'START ${_c('spec-adherence')}',
           'START ${_c('regression-risk')}',
           'START ${_c('test-coverage')}',
@@ -163,6 +166,7 @@ void main() {
       // Three of four complete — the barrier stays closed (negative control).
       c.advance({
         'tg-1/code-validation': _done(),
+        'tg-1/declared-tests-present': _done(),
         'tg-1/spec-adherence': _done(),
         'tg-1/regression-risk': _done(),
       });
@@ -176,6 +180,7 @@ void main() {
       // control: the withholding above was the barrier itself).
       c.advance({
         'tg-1/code-validation': _done(),
+        'tg-1/declared-tests-present': _done(),
         'tg-1/spec-adherence': _done(),
         'tg-1/regression-risk': _done(),
         'tg-1/test-coverage': _done(),

@@ -274,12 +274,12 @@ void main() {
         ),
       );
       await settle(
-        () => kCriticNodes.every(
+        () => kProcessCriticNodes.every(
           (n) => f.provider.started.map((s) => s.name).contains(_step(n)),
         ),
       );
       final started = f.provider.started.map((s) => s.name).toSet();
-      for (final n in kCriticNodes) {
+      for (final n in kProcessCriticNodes) {
         expect(
           started,
           contains(_step(n)),
