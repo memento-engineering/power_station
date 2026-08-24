@@ -4,6 +4,7 @@ import 'package:github_grid_assets/github_grid_assets.dart';
 import 'package:test/test.dart';
 
 const _path = '/operator/secrets/github-app.pem';
+const _varName = 'APP_ONE_PRIVATE_KEY';
 
 class FakeEnvironment {
   FakeEnvironment(this.values);
@@ -39,7 +40,7 @@ void main() {
     () async {
       for (final environment in <Map<String, String>>[
         const <String, String>{},
-        const <String, String>{kGitHubAppKeyPathEnvironment: '  '},
+        const <String, String>{_varName: '  '},
       ]) {
         final stat = FakeStat(
           const GitHubKeyFileStat(type: FileSystemEntityType.file, mode: 0x180),
@@ -50,7 +51,7 @@ void main() {
           stat: stat.call,
           read: read.call,
         );
-        expect(await loader.resolve(), isNull);
+        expect(await loader.resolve(_varName), isNull);
         expect(stat.calls, 0);
         expect(read.calls, 0);
       }
@@ -65,9 +66,11 @@ void main() {
       ),
     );
     await expectLater(
-      loader.resolve(),
+      loader.resolve(_varName),
       throwsA(
-        isA<StateError>().having((e) => '$e', 'message', contains(_path)),
+        isA<StateError>()
+            .having((e) => '$e', 'message', contains(_path))
+            .having((e) => '$e', 'variable', contains(_varName)),
       ),
     );
   });
@@ -79,7 +82,7 @@ void main() {
         stat: GitHubKeyFileStat(type: FileSystemEntityType.file, mode: mode),
       );
       await expectLater(
-        loader.resolve(),
+        loader.resolve(_varName),
         throwsA(
           isA<StateError>()
               .having((e) => '$e', 'path', contains(_path))
@@ -100,7 +103,7 @@ void main() {
       read: read,
     );
     await expectLater(
-      loader.resolve(),
+      loader.resolve(_varName),
       throwsA(
         isA<StateError>().having((e) => '$e', 'message', contains(_path)),
       ),
@@ -115,7 +118,7 @@ void main() {
       ),
       read: FakeRead(value: 'secret pem'),
     );
-    final key = await loader.resolve();
+    final key = await loader.resolve(_varName);
     expect(key?.path, _path);
     expect(key?.pem, 'secret pem');
   });
@@ -125,9 +128,7 @@ GitHubAppCredentialLoader _loader({
   required GitHubKeyFileStat stat,
   FakeRead? read,
 }) => GitHubAppCredentialLoader(
-  environment: FakeEnvironment(const <String, String>{
-    kGitHubAppKeyPathEnvironment: _path,
-  }).call,
+  environment: FakeEnvironment(const <String, String>{_varName: _path}).call,
   stat: FakeStat(stat).call,
   read: (read ?? FakeRead()).call,
 );

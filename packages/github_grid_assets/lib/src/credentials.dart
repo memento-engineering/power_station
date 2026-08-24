@@ -1,8 +1,5 @@
 import 'dart:io';
 
-/// Environment variable containing the external GitHub App key file path.
-const kGitHubAppKeyPathEnvironment = 'GC_GITHUB_APP_KEY_PATH';
-
 /// Non-secret identifiers and endpoint configuration for a GitHub App.
 class GitHubAppConfig {
   /// Creates GitHub App configuration.
@@ -58,7 +55,7 @@ typedef KeyFileReader = Future<String> Function(String path);
 /// Resolves a GitHub App private key with inert-or-loud semantics.
 class GitHubAppCredentialLoader {
   /// Creates a loader, optionally replacing platform operations for testing.
-  GitHubAppCredentialLoader({
+  const GitHubAppCredentialLoader({
     EnvironmentReader environment = platformEnvironment,
     KeyFileStatReader stat = platformStat,
     KeyFileReader read = platformRead,
@@ -70,15 +67,13 @@ class GitHubAppCredentialLoader {
   final KeyFileStatReader _stat;
   final KeyFileReader _read;
 
-  /// Returns `null` when unconfigured, otherwise loads a guarded key file.
-  Future<GitHubAppPrivateKey?> resolve() async {
-    final path = _environment()[kGitHubAppKeyPathEnvironment]?.trim() ?? '';
+  /// Returns `null` when [varName] is unconfigured, otherwise loads its key.
+  Future<GitHubAppPrivateKey?> resolve(String varName) async {
+    final path = _environment()[varName]?.trim() ?? '';
     if (path.isEmpty) return null;
     final fileStat = await _stat(path);
     if (fileStat.type != FileSystemEntityType.file) {
-      throw StateError(
-        '$kGitHubAppKeyPathEnvironment points to missing/non-file key: $path',
-      );
+      throw StateError('$varName points to missing/non-file key: $path');
     }
     final permissions = fileStat.mode & 0x1ff;
     if (permissions != 0x180) {
