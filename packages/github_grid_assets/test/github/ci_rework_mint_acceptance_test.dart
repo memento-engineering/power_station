@@ -345,21 +345,12 @@ void main() {
         hasLength(1),
       );
       expect(
-        transport.flares,
-        contains(
-          isA<({String name, Map<String, String> data})>()
-              .having((flare) => flare.name, 'name', 'gate.autoCloseFailed')
-              .having(
-                (flare) => flare.data,
-                'data',
-                containsPair('sessionId', 'grid_state-session-1'),
-              )
-              .having(
-                (flare) => flare.data['reason'],
-                'reason',
-                contains('gate auto-close refused: live session'),
-              ),
+        transport.flares.where(
+          (flare) =>
+              flare.name == 'gate.autoCloseFailed' &&
+              flare.data['sessionId'] == 'grid_state-session-1',
         ),
+        isEmpty,
       );
       final afterFirst = await _waitForMint(stateBd, transport);
       expect(
