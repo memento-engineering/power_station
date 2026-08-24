@@ -209,21 +209,52 @@ void main() {
       );
     });
 
-    test('the wait HEALS: when the re-keyed lanes land their current-round '
-        'artifacts during the poll, the route decides over the FULL fresh '
-        'vector', () async {
-      plantMidWaveDisk();
-      // The wave completes while the route polls: the three lanes re-run and
-      // stamp round 1 (all passing — the respec corrected the spec).
+    test('a terminal cached result stays unresolved until its delayed artifact '
+        'lands', () async {
+      writeRespecLedger(
+        ws.path,
+        const RespecLedger(
+          round: 1,
+          lanes: [
+            RespecLane(
+              rubric: 'plan-completeness',
+              grade: 'D',
+              rationale: 'step 3 names no test command',
+            ),
+          ],
+        ),
+      );
+      _plantVerdict(ws.path, 'adr-alignment', round: 1);
+      _plantVerdict(ws.path, 'acceptance-testability', round: 1, grade: 'B');
+      _plantVerdict(ws.path, 'plan-completeness', round: 1, grade: 'C');
+      final results = {
+        _gating: {'grade': 'A', 'transport': 'structural', 'round': '1'},
+        'coherence': {
+          'grade': 'F',
+          'transport': 'cached-conflict',
+          'round': '1',
+          'rationale': 'cached result must never be cited',
+        },
+        'adr-alignment': {'grade': 'A', 'transport': 'file', 'round': '1'},
+        'acceptance-testability': {
+          'grade': 'B',
+          'transport': 'file',
+          'round': '1',
+        },
+        'plan-completeness': {'grade': 'C', 'transport': 'file', 'round': '1'},
+      };
       Timer(const Duration(milliseconds: 120), () {
-        _plantVerdict(ws.path, 'coherence', round: 1);
-        _plantVerdict(ws.path, 'adr-alignment', round: 1);
-        _plantVerdict(ws.path, 'acceptance-testability', round: 1, grade: 'B');
+        _plantVerdict(
+          ws.path,
+          'coherence',
+          round: 1,
+          rationale: 'durable verdict landed',
+        );
       });
       final out = await const SpecRouteCapability(
         lanePoll: Duration(milliseconds: 15),
         laneWaitBudget: Duration(seconds: 10),
-      ).route(_context(ws.path, _waveOneResults()), _routeArgs(round: 1));
+      ).route(_context(ws.path, results), _routeArgs(round: 1));
       expect(out, isA<Advance>());
       final payload = (out as Advance).payload!;
       expect(payload['verdict'], 'advance');
@@ -233,6 +264,8 @@ void main() {
       expect(payload['grades'], contains('coherence=A'));
       expect(payload['grades'], contains('adr-alignment=A'));
       expect(payload['grades'], contains('acceptance-testability=B'));
+      expect(payload.toString(), isNot(contains('cached result must never')));
+      expect(payload.toString(), isNot(contains('coherence=F')));
       // A REAL advance spends the counter — exactly as before.
       expect(readRespecLedger(ws.path), isNull);
     });
@@ -263,7 +296,7 @@ void main() {
       expect(out, isA<Escalate>());
       final reason = (out as Escalate).reason;
       expect(reason, contains('coherence'));
-      expect(reason, contains('envelope'));
+      expect(reason, contains('waited'));
       // The ratified pow-96s invariant: no grade is ever cited for a lane with
       // no current-round artifact on disk.
       expect(reason, isNot(contains('coherence=C')));
@@ -392,27 +425,32 @@ void main() {
     });
 
     test(
-      'a fail-closed default carries the round too — the route must be '
-      'able to tell a THIS-round transport miss from a not-yet-run lane',
+      'a missing artifact makes direct result fail loudly after the probe',
       () async {
-        final out = await const CriticCapability().result(
-          FakeTreeContext(
-            values: {
-              Workspace: testWorkspace(
-                'tg-60t',
-                workspaceDir: ws.path,
-                branch: 'grid/tg-60t',
-              ),
-            },
+        await expectLater(
+          const CriticCapability().result(
+            FakeTreeContext(
+              values: {
+                Workspace: testWorkspace(
+                  'tg-60t',
+                  workspaceDir: ws.path,
+                  branch: 'grid/tg-60t',
+                ),
+              },
+            ),
+            stepArgs(
+              'tg-60t/review/spec-adherence',
+              params: const {'rubric': 'spec-adherence', 'grid.round': '0'},
+            ),
           ),
-          stepArgs(
-            'tg-60t/review/spec-adherence',
-            params: const {'rubric': 'spec-adherence', 'grid.round': '0'},
+          throwsA(
+            isA<RouteFailure>().having(
+              (failure) => failure.reason,
+              'reason',
+              contains('disappeared after the durability probe'),
+            ),
           ),
         );
-        expect(out!['grade'], 'F');
-        expect(out['transport'], 'fail-closed-default');
-        expect(out['round'], '0');
       },
     );
   });

@@ -123,6 +123,13 @@ Future<RouteVerdict> _specRoute(
 }
 
 void main() {
+  test('SpecCriticCapability inherits artifact durability', () {
+    expect(
+      const SpecCriticCapability().completionContract,
+      CompletionContract.artifactDurability,
+    );
+  });
+
   group('specForStructuralValidation', () {
     final ambient = bead(
       'tg-1',
@@ -962,9 +969,10 @@ Validate again with ruby -e 's.include?("${ticks}dart")'.
           'round': 0,
         }),
       );
-      final graded = await cap.result(c.context, c.args);
-      expect(graded!['grade'], 'F');
-      expect(graded['transport'], 'fail-closed-default');
+      expect(
+        await cap.probeCompletionArtifact(c.context, c.args),
+        GateOutcome.present,
+      );
     });
 
     test('an unstamped parseable spec-critic verdict fails the lane, while a '
@@ -1051,15 +1059,12 @@ Validate again with ruby -e 's.include?("${ticks}dart")'.
         nodePath: nodePath,
         round: 1, // the route moved the LEDGER: this is the RESPEC round.
       );
-      final graded = await const SpecCriticCapability().result(
-        c.context,
-        c.args,
-      );
-      expect(graded!['grade'], 'F');
-      expect(graded['transport'], 'fail-closed-default');
       expect(
-        graded['rationale'],
-        'no parseable verdict via file or envelope — fail-closed default',
+        await const SpecCriticCapability().probeCompletionArtifact(
+          c.context,
+          c.args,
+        ),
+        GateOutcome.present,
       );
     });
 

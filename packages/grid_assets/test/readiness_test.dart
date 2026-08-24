@@ -90,6 +90,13 @@ Future<RouteVerdict> _runRoute({String? grade, String rationale = ''}) {
 }
 
 void main() {
+  test('ReadinessCriticCapability inherits artifact durability', () {
+    expect(
+      const ReadinessCriticCapability().completionContract,
+      CompletionContract.artifactDurability,
+    );
+  });
+
   group('intakeFindings — the deterministic contract (tier 1)', () {
     test('a REFINED bead has NO findings — it reaches the lens', () {
       expect(intakeFindings(_refined()), isEmpty);

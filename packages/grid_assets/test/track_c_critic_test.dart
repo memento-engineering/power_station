@@ -82,7 +82,9 @@ Future<List<AllocationReport>> _runCriticAllocation({
   });
   await allocation.startOrAdopt();
   allocation.deliverEventForTest(Exited(name: 'sess-1/$nodePath', exitCode: 0));
-  await Future<void>.delayed(Duration.zero);
+  for (var attempt = 0; reports.isEmpty && attempt < 100; attempt++) {
+    await Future<void>.delayed(const Duration(milliseconds: 10));
+  }
   return reports;
 }
 
@@ -99,6 +101,100 @@ String _throwUnexpectedRead(File _) =>
     throw const _UnexpectedReadFailure('torn read seam');
 
 void main() {
+  group('critic completion artifact durability', () {
+    test('declares the artifact-durability contract', () {
+      expect(
+        const CriticCapability().completionContract,
+        CompletionContract.artifactDurability,
+      );
+    });
+
+    test(
+      'probes missing, fresh, stale, malformed, and stray verdicts',
+      () async {
+        final dir = Directory.systemTemp.createTempSync('critic-probe-');
+        addTearDown(() => dir.deleteSync(recursive: true));
+        const rubric = 'coherence';
+        const nodePath = 'tg-1/review/coherence';
+        final c = _ctx(
+          rubric: rubric,
+          workspaceDir: dir.path,
+          nodePath: nodePath,
+          round: 1,
+        );
+        const cap = CriticCapability();
+        expect(
+          await cap.probeCompletionArtifact(c.context, c.args),
+          GateOutcome.present,
+        );
+        final verdict = File('${dir.path}/.grid/critique/$rubric.json')
+          ..createSync(recursive: true);
+        verdict.writeAsStringSync(
+          jsonEncode({
+            'grade': 'A',
+            'rationale': 'stale',
+            'nodePath': nodePath,
+            'round': 0,
+          }),
+        );
+        expect(
+          await cap.probeCompletionArtifact(c.context, c.args),
+          GateOutcome.present,
+        );
+        verdict.writeAsStringSync(
+          jsonEncode({
+            'grade': 'A',
+            'rationale': 'fresh canonical',
+            'nodePath': nodePath,
+            'round': 1,
+          }),
+        );
+        expect(
+          await cap.probeCompletionArtifact(c.context, c.args),
+          GateOutcome.clear,
+        );
+        verdict.writeAsStringSync('not json');
+        expect(
+          await cap.probeCompletionArtifact(c.context, c.args),
+          GateOutcome.probeError,
+        );
+        verdict.deleteSync();
+        File('${dir.path}/pkg/.grid/critique/$rubric.json')
+          ..createSync(recursive: true)
+          ..writeAsStringSync(
+            jsonEncode({
+              'grade': 'B',
+              'rationale': 'fresh stray',
+              'nodePath': nodePath,
+              'round': 1,
+            }),
+          );
+        expect(
+          await cap.probeCompletionArtifact(c.context, c.args),
+          GateOutcome.clear,
+        );
+      },
+    );
+
+    test('probes deterministic gating rc absence and presence', () async {
+      final dir = Directory.systemTemp.createTempSync('critic-gate-probe-');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final c = _ctx(rubric: kGatingRubric, workspaceDir: dir.path);
+      const cap = CriticCapability();
+      expect(
+        await cap.probeCompletionArtifact(c.context, c.args),
+        GateOutcome.present,
+      );
+      File('${dir.path}/.grid/critique/$kGatingRubric.rc')
+        ..createSync(recursive: true)
+        ..writeAsStringSync('0');
+      expect(
+        await cap.probeCompletionArtifact(c.context, c.args),
+        GateOutcome.clear,
+      );
+    });
+  });
+
   group('Track C2 — code-validation (the GATING lane)', () {
     test(
       'spawns `sh -c` running the bead\'s Validation Plan, capturing its rc',
@@ -407,20 +503,64 @@ void main() {
     );
 
     test(
+      'stdout-only verdict is persisted before allocation completion',
+      () async {
+        final dir = Directory.systemTemp.createTempSync(
+          'critic-probe-recovery-',
+        );
+        addTearDown(() => dir.deleteSync(recursive: true));
+        const rubric = 'test-coverage';
+        const nodePath = 'tg-1/review/test-coverage';
+        File('${dir.path}/${usageReportPath(nodePath)}')
+          ..createSync(recursive: true)
+          ..writeAsStringSync(
+            jsonEncode({
+              'result': '{"grade":"B","rationale":"real stdout verdict"}',
+            }),
+          );
+
+        final reports = await _runCriticAllocation(
+          dir: dir,
+          rubric: rubric,
+          nodePath: nodePath,
+        );
+
+        expect(reports.whereType<AllocationFailed>(), isEmpty);
+        expect(reports.whereType<AllocationEscalated>(), isEmpty);
+        expect(reports.whereType<AllocationCompleted>().single.payload, {
+          'grade': 'B',
+          'transport': 'file',
+          'round': '0',
+          'rationale': 'real stdout verdict [from result envelope]',
+        });
+        final persisted =
+            jsonDecode(
+                  File(
+                    '${dir.path}/.grid/critique/$rubric.json',
+                  ).readAsStringSync(),
+                )
+                as Map<String, dynamic>;
+        expect(persisted, {
+          'grade': 'B',
+          'rationale': 'real stdout verdict [from result envelope]',
+          'nodePath': nodePath,
+          'round': 0,
+        });
+      },
+    );
+
+    test(
       'invalid critic JSON fails the allocation loudly without a grade',
       () async {
         final dir = Directory.systemTemp.createTempSync('critic-llm-bad-');
         addTearDown(() => dir.deleteSync(recursive: true));
         const cap = CriticCapability();
         final c = _ctx(rubric: 'test-coverage', workspaceDir: dir.path);
-        // Missing verdict ⇒ F.
-        expect(await cap.result(c.context, c.args), {
-          'grade': 'F',
-          'transport': 'fail-closed-default',
-          'round': '0',
-          'rationale':
-              'no parseable verdict via file or envelope — fail-closed default',
-        });
+        // A missing verdict never reaches result after the durability probe.
+        expect(
+          await cap.probeCompletionArtifact(c.context, c.args),
+          GateOutcome.present,
+        );
         // A present malformed artifact is a lane failure, never a fallback.
         final verdict = File('${dir.path}/.grid/critique/test-coverage.json')
           ..createSync(recursive: true)
@@ -462,19 +602,12 @@ void main() {
           workspaceDir: dir.path,
           nodePath: 'tg-1#r2/review/regression-risk',
         );
-        final out = await const CriticCapability().result(c.context, c.args);
         expect(
-          out,
-          {
-            'grade': 'F',
-            'transport': 'fail-closed-default',
-            'round': '0',
-            'rationale':
-                'no parseable verdict via file or envelope — fail-closed default',
-          },
-          reason:
-              'a stale nodePath stamp must be treated as a MISSING file, '
-              'never silently read as this round\'s verdict',
+          await const CriticCapability().probeCompletionArtifact(
+            c.context,
+            c.args,
+          ),
+          GateOutcome.present,
         );
       },
     );
@@ -501,9 +634,13 @@ void main() {
         nodePath: nodePath,
         round: 1,
       );
-      final out = await const CriticCapability().result(c.context, c.args);
-      expect(out!['grade'], 'F');
-      expect(out['transport'], 'fail-closed-default');
+      expect(
+        await const CriticCapability().probeCompletionArtifact(
+          c.context,
+          c.args,
+        ),
+        GateOutcome.present,
+      );
     });
 
     test('a parseable verdict missing a freshness stamp fails the lane with '
@@ -512,7 +649,7 @@ void main() {
       addTearDown(() => dir.deleteSync(recursive: true));
       const rubric = 'test-coverage';
       const nodePath = 'tg-1/review/test-coverage';
-      final verdict = File('${dir.path}/.grid/critique/test-coverage.json')
+      File('${dir.path}/.grid/critique/test-coverage.json')
         ..createSync(recursive: true)
         ..writeAsStringSync(
           jsonEncode({
@@ -522,10 +659,6 @@ void main() {
             'rationale': 'the tests cover the new path',
           }),
         );
-      final reason =
-          'invalid critic verdict at ${verdict.path}: nodePath must be a '
-          'non-empty string';
-
       final reports = await _runCriticAllocation(
         dir: dir,
         rubric: rubric,
@@ -534,7 +667,7 @@ void main() {
 
       expect(reports.whereType<AllocationCompleted>(), isEmpty);
       final failed = reports.whereType<AllocationFailed>().single;
-      expect(failed.reason, 'result threw: $reason');
+      expect(failed.reason, 'unresolved: completion artifact probe failed');
       expect(failed.reason, isNot(contains('Bad state:')));
     });
 
@@ -639,7 +772,7 @@ void main() {
         addTearDown(() => dir.deleteSync(recursive: true));
         const rubric = 'regression-risk';
         const nodePath = 'tg-1/review/regression-risk';
-        final verdict = File('${dir.path}/.grid/critique/$rubric.json')
+        File('${dir.path}/.grid/critique/$rubric.json')
           ..createSync(recursive: true)
           ..writeAsStringSync('{}');
         final reports = await _runCriticAllocation(
@@ -653,15 +786,7 @@ void main() {
 
         expect(reports.whereType<AllocationCompleted>(), isEmpty);
         final failed = reports.whereType<AllocationFailed>().single;
-        expect(
-          failed.reason,
-          startsWith('result threw: invalid critic verdict at '),
-        );
-        expect(failed.reason, contains(verdict.path));
-        expect(
-          failed.reason,
-          contains('unexpected verdict read failure: torn read seam'),
-        );
+        expect(failed.reason, 'unresolved: completion artifact probe failed');
       },
     );
 
@@ -898,8 +1023,18 @@ void main() {
     });
   });
 
-  group('Track C2 — tg-291 verdict-transport fallback to the harness RESULT '
-      'TEXT (the missing-file false-gate fix)', () {
+  group('stdout verdict recovery in the durability probe', () {
+    Future<Map<String, String>?> recover(
+      FakeTreeContext context,
+      StepArgs args,
+    ) async {
+      expect(
+        await const CriticCapability().probeCompletionArtifact(context, args),
+        GateOutcome.clear,
+      );
+      return const CriticCapability().result(context, args);
+    }
+
     void writeVerdict(String workspaceDir, String rubric, String content) {
       File('$workspaceDir/.grid/critique/$rubric.json')
         ..createSync(recursive: true)
@@ -926,7 +1061,7 @@ void main() {
         'Verdict: A',
       );
       final c = _ctx(rubric: rubric, workspaceDir: dir.path);
-      final out = await const CriticCapability().result(c.context, c.args);
+      final out = await recover(c.context, c.args);
       expect(out?['grade'], 'A');
       expect(out?['rationale'], contains('[from result envelope]'));
     });
@@ -944,9 +1079,9 @@ void main() {
         '## Grade: A',
       );
       final c = _ctx(rubric: rubric, workspaceDir: dir.path);
-      final out = await const CriticCapability().result(c.context, c.args);
+      final out = await recover(c.context, c.args);
       expect(out?['grade'], 'A');
-      expect(out?['transport'], 'envelope');
+      expect(out?['transport'], 'file');
       expect(out?['rationale'], contains('[from result envelope]'));
     });
 
@@ -962,7 +1097,7 @@ void main() {
         '"grade":"B","rationale":"missing an edge case"}\n```\n',
       );
       final c = _ctx(rubric: rubric, workspaceDir: dir.path);
-      final out = await const CriticCapability().result(c.context, c.args);
+      final out = await recover(c.context, c.args);
       expect(out?['grade'], 'B');
       expect(out?['rationale'], contains('missing an edge case'));
       expect(out?['rationale'], contains('[from result envelope]'));
@@ -987,7 +1122,7 @@ void main() {
       );
       writeEnvelope(dir.path, rubric, 'Verdict: A');
       final c = _ctx(rubric: rubric, workspaceDir: dir.path);
-      final out = await const CriticCapability().result(c.context, c.args);
+      final out = await recover(c.context, c.args);
       expect(out, {
         'grade': 'C',
         'transport': 'file',
@@ -1016,13 +1151,13 @@ void main() {
       final dir = Directory.systemTemp.createTempSync('critic-fallback-none-');
       addTearDown(() => dir.deleteSync(recursive: true));
       final c = _ctx(rubric: 'regression-risk', workspaceDir: dir.path);
-      expect(await const CriticCapability().result(c.context, c.args), {
-        'grade': 'F',
-        'transport': 'fail-closed-default',
-        'round': '0',
-        'rationale':
-            'no parseable verdict via file or envelope — fail-closed default',
-      });
+      expect(
+        await const CriticCapability().probeCompletionArtifact(
+          c.context,
+          c.args,
+        ),
+        GateOutcome.present,
+      );
     });
 
     test('malformed file + malformed envelope fails loudly', () async {
@@ -1055,13 +1190,13 @@ void main() {
         'I looked at the diff, seems fine, no complaints.',
       );
       final c = _ctx(rubric: rubric, workspaceDir: dir.path);
-      expect(await const CriticCapability().result(c.context, c.args), {
-        'grade': 'F',
-        'transport': 'fail-closed-default',
-        'round': '0',
-        'rationale':
-            'no parseable verdict via file or envelope — fail-closed default',
-      });
+      expect(
+        await const CriticCapability().probeCompletionArtifact(
+          c.context,
+          c.args,
+        ),
+        GateOutcome.present,
+      );
     });
 
     test('(rework 1) a template echo `"grade":"<A-F>"` before a real verdict '
@@ -1083,7 +1218,7 @@ void main() {
         '"rationale":"well covered"}',
       );
       final c = _ctx(rubric: rubric, workspaceDir: dir.path);
-      final out = await const CriticCapability().result(c.context, c.args);
+      final out = await recover(c.context, c.args);
       expect(out?['grade'], 'A');
       expect(out?['rationale'], contains('well covered'));
     });
@@ -1105,7 +1240,7 @@ void main() {
         '"rationale":"no tests for the new path"}',
       );
       final c = _ctx(rubric: rubric, workspaceDir: dir.path);
-      final out = await const CriticCapability().result(c.context, c.args);
+      final out = await recover(c.context, c.args);
       expect(out?['grade'], 'F');
       expect(out?['rationale'], contains('no tests for the new path'));
     });
@@ -1126,13 +1261,13 @@ void main() {
         '"rationale":"<why>"}',
       );
       final c = _ctx(rubric: rubric, workspaceDir: dir.path);
-      expect(await const CriticCapability().result(c.context, c.args), {
-        'grade': 'F',
-        'transport': 'fail-closed-default',
-        'round': '0',
-        'rationale':
-            'no parseable verdict via file or envelope — fail-closed default',
-      });
+      expect(
+        await const CriticCapability().probeCompletionArtifact(
+          c.context,
+          c.args,
+        ),
+        GateOutcome.present,
+      );
     });
 
     test('(rework 2) an early "Verdict: A" heading followed by a later, real '
@@ -1150,7 +1285,7 @@ void main() {
         'Verdict: F',
       );
       final c = _ctx(rubric: rubric, workspaceDir: dir.path);
-      final out = await const CriticCapability().result(c.context, c.args);
+      final out = await recover(c.context, c.args);
       expect(out?['grade'], 'F');
     });
 
@@ -1165,10 +1300,10 @@ void main() {
           jsonEncode({'result': 'Verdict: A', 'num_turns': 36}),
         );
       final c = _ctx(rubric: rubric, workspaceDir: dir.path);
-      final out = await const CriticCapability().result(c.context, c.args);
+      final out = await recover(c.context, c.args);
       expect(out, {
         'grade': 'A',
-        'transport': 'envelope',
+        'transport': 'file',
         'round': '0',
         'rationale': '[from result envelope]',
         'numTurns': '36',
@@ -1241,13 +1376,13 @@ void main() {
           workspaceDir: dir.path,
           nodePath: 'tg-1#r2/review/test-coverage',
         );
-        expect(await const CriticCapability().result(c.context, c.args), {
-          'grade': 'F',
-          'transport': 'fail-closed-default',
-          'round': '0',
-          'rationale':
-              'no parseable verdict via file or envelope — fail-closed default',
-        });
+        expect(
+          await const CriticCapability().probeCompletionArtifact(
+            c.context,
+            c.args,
+          ),
+          GateOutcome.present,
+        );
       },
     );
 
@@ -1304,13 +1439,13 @@ void main() {
         workspaceDir: dir.path,
         nodePath: nodePath,
       );
-      expect(await const CriticCapability().result(c.context, c.args), {
-        'grade': 'F',
-        'transport': 'fail-closed-default',
-        'round': '0',
-        'rationale':
-            'no parseable verdict via file or envelope — fail-closed default',
-      });
+      expect(
+        await const CriticCapability().probeCompletionArtifact(
+          c.context,
+          c.args,
+        ),
+        GateOutcome.present,
+      );
     });
   });
 
