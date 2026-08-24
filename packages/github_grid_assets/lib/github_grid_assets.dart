@@ -7,6 +7,7 @@ export 'src/github_app_client.dart';
 export 'src/http_transport.dart';
 export 'src/token_provider.dart';
 export 'src/assets/github_grid_assets.dart';
+export 'src/assets/github_app_client_assets.dart';
 export 'src/assets/github_reconciler_assets.dart';
 export 'src/code/github_app_pr_opener.dart';
 export 'src/code/github_auto_merge_delivery.dart';
