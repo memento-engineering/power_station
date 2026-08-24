@@ -463,21 +463,9 @@ class SpecRouteCapability extends RouteCapability {
     // check that writes no artifact — its grade rides its own step result,
     // and a missing one still fail-closes to a hard block in the matrix.
     //
-    // What the bridge fix adds is what happens to a lane WITHOUT a
-    // current-round artifact — it no longer silently drops out (the tg-60t
-    // kill: the engine's derived respec wave re-keys the closure node by
-    // node, stale positive terminals of old incarnations let this route run
-    // MID-WAVE, and the one lane that had already re-run then decided the
-    // whole round: a false advance that also consumed the ledger). The lane's
-    // own recorded result carries the round it was recorded against
-    // (`CriticCapability.result`), which splits the miss honestly:
-    //  - result round == this round ⇒ the lane FINISHED this round with no
-    //    artifact on disk (an envelope/fail-closed transport, or a destroyed
-    //    file): waiting cannot help — fail LOUD, ONCE, via an [Escalate] that
-    //    names the lane and cites NO grade for it (the ledger is spent, as on
-    //    every human flare);
-    //  - anything else ⇒ the lane has NOT produced this round's verdict yet
-    //    (a mid-wave join, or a stale replay of a prior round/session): WAIT —
+    // A judgement lane without a current-round artifact remains unresolved;
+    // the engine's durability contract supervises it until the file appears.
+    // The join therefore waits regardless of any cached SiblingView result:
     //    re-read the join every [lanePoll] until the wave catches up, bounded
     //    by [laneWaitBudget], then refuse LOUDLY ([RouteFailure], bounded by
     //    the engine's restart budget — never a silent partial decision). A
@@ -498,8 +486,7 @@ class SpecRouteCapability extends RouteCapability {
       final deadline = DateTime.now().add(laneWaitBudget);
       while (true) {
         lanes.clear();
-        final artifactless = <String>[]; // finished THIS round, no artifact.
-        final waiting = <String>[]; // no THIS-round trace at all yet.
+        final waiting = <String>[];
         for (final id in criticIds) {
           if (id == gating) {
             final recorded = siblings.resultOf('$parent/$id');
@@ -529,38 +516,11 @@ class SpecRouteCapability extends RouteCapability {
               grade: verdict['grade'],
               rationale: verdict['rationale'] ?? '',
             ));
-            continue;
-          }
-          final recorded = siblings.resultOf('$parent/$id');
-          final recordedRound = int.tryParse(
-            (recorded[kVerdictRoundKey] ?? '').trim(),
-          );
-          if (recordedRound == circuitRound) {
-            artifactless.add(
-              '$id (transport ${recorded['transport'] ?? 'unrecorded'})',
-            );
           } else {
             waiting.add(id);
           }
         }
-        if (waiting.isEmpty) {
-          // The join is as complete as it can ever get. A lane that finished
-          // THIS round with no artifact on disk is a verdict-transport defect
-          // no wait can cure — LOUD, ONCE, citing no grade (pow-96s: a flare
-          // may never cite a grade for a lane with no current-round artifact).
-          if (artifactless.isNotEmpty) {
-            clearRespecLedger(dir);
-            return Escalate(
-              'spec-route: no current-round (round $circuitRound) verdict '
-              'artifact on disk for ${artifactless.join(', ')} although the '
-              'lane(s) finished this round — the verdict transport left '
-              'nothing the join may cite (an envelope/fail-closed grade, or a '
-              'destroyed file). A human rules; deciding over a partial '
-              'committee is withheld.',
-            );
-          }
-          break;
-        }
+        if (waiting.isEmpty) break;
         if (!DateTime.now().isBefore(deadline)) {
           // tg-q3q0: the derived respec wave re-runs lanes WITHOUT the
           // incremented `grid.round` param, so a re-run lane's (real, graded)
@@ -591,7 +551,7 @@ class SpecRouteCapability extends RouteCapability {
             waiting.remove(gating);
           }
           if (waiting.isEmpty) break;
-          // The ledger SURVIVES this park (unlike the artifactless flare):
+          // The ledger survives this park:
           // the wave may still land its verdicts while parked — a gate-close
           // re-arms this route over the completed join and the round's
           // guidance must still be there to spend.

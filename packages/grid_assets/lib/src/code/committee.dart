@@ -65,16 +65,12 @@
 /// `packages/grid_assets/.grid/critique/test-coverage.json` — so the canonical
 /// path was empty AND the stdout envelope parse missed the critic's
 /// `## Grade: A` summary shape ⇒ a false fail-closed F ⇒ ps#11's false gate.
-/// Three defense-in-depth fixes: (1) [CriticCapability.buildCriticPrompt] now
+/// Two defense-in-depth fixes remain: (1) [CriticCapability.buildCriticPrompt]
 /// interpolates the workspace-derived ABSOLUTE canonical path, so the write is
 /// cwd-invariant; (2) [_strayVerdict] is a read-side belt that accepts a
 /// round-fresh stray `.grid/critique/<rubric>.json` found anywhere under the
-/// worktree (the `nodePath` freshness stamp keeps it safe); (3) the envelope
-/// fallback ([_verdictFromHeading]) now also recognizes a `Grade: <A-F>`
-/// heading, not just `Verdict:`. A critic that keeps failing to write a
-/// canonical file now reliably grades a LOUD, provenanced fail-closed F every
-/// round (or is recovered from the stray/envelope), never a silently-recycled
-/// stale grade.
+/// worktree (the `nodePath` freshness stamp keeps it safe). The durability
+/// contract leaves a critic that writes neither artifact unresolved.
 ///
 /// **A third, DISTINCT incident class (tg-83y r3, 2026-07-04) is OUT OF SCOPE
 /// here**: the LLM lanes graded against a tree the agent was still editing
@@ -857,6 +853,72 @@ class CriticCapability extends ProcessCapability {
   String _rubricOf(StepArgs args) => args.params['rubric'] ?? '';
 
   @override
+  CompletionContract get completionContract =>
+      CompletionContract.artifactDurability;
+
+  @override
+  Future<GateOutcome> probeCompletionArtifact(
+    TreeContext context,
+    StepArgs args,
+  ) async {
+    final rubric = _rubricOf(args);
+    final workspace = context.getInheritedSeedOfExactType<Workspace>();
+    if (workspace == null) return GateOutcome.probeError;
+    final workspaceDir = workspace.workspaceDir;
+    if (rubric == kGatingRubric) {
+      try {
+        final exists = await File(
+          p.join(workspaceDir, _critiqueDir, '$kGatingRubric.rc'),
+        ).exists();
+        return exists ? GateOutcome.clear : GateOutcome.present;
+      } on Object {
+        return GateOutcome.probeError;
+      }
+    }
+    try {
+      final round = verdictRound(args);
+      final durable = currentVerdictOnDisk(
+        workspaceDir: workspaceDir,
+        rubric: rubric,
+        nodePath: args.nodePath,
+        round: round,
+      );
+      if (durable != null) return GateOutcome.clear;
+
+      final recovered = _verdictFromResultText(
+        readEnvelopeResultText(workspaceDir, args.nodePath),
+      );
+      if (recovered == null) return GateOutcome.present;
+
+      final canonical = File(
+        p.join(workspaceDir, _critiqueDir, '$rubric.json'),
+      );
+      await canonical.create(recursive: true);
+      await canonical.writeAsString(
+        jsonEncode({
+          'grade': recovered['grade'],
+          'rationale': recovered['rationale'],
+          'nodePath': args.nodePath,
+          kVerdictRoundKey: round,
+        }),
+      );
+      return currentVerdictFromFile(
+                workspaceDir: workspaceDir,
+                rubric: rubric,
+                nodePath: args.nodePath,
+                round: round,
+              ) ==
+              null
+          ? GateOutcome.probeError
+          : GateOutcome.clear;
+    } on RouteFailure {
+      return GateOutcome.probeError;
+    } on Object {
+      return GateOutcome.probeError;
+    }
+  }
+
+  @override
   RuntimeConfig spawn(TreeContext context, StepArgs args) {
     // Read the ambient values at ENTRY (synchronously, while mounted).
     final rubric = _rubricOf(args);
@@ -1029,25 +1091,10 @@ class CriticCapability extends ProcessCapability {
         if (diagnostic != null) 'rationale': diagnostic,
       };
     }
-    // A PRESENT malformed or incomplete artifact fails loudly before any
-    // fallback, withholding the grade from the join. A missing or STALE verdict
-    // (no file, a `nodePath` stamp naming ANOTHER node — gate-integrity #3 — or
-    // a `round` stamp naming an EARLIER round of THIS node — A15(5) alt-A) falls
-    // back, in order, to a
-    // round-fresh STRAY verdict (gate-integrity #4 — a critic that cd'd mid-run
-    // wrote the file under a subdir instead of the canonical path;
-    // [_strayVerdict]) then to the captured harness RESULT TEXT (tg-291 — the
-    // verdict-transport brittleness: a critic that graded cleanly but wrote its
-    // verdict into stdout instead of the file must not be scored F on a
-    // transport slip alone). A PRESENT, parseable verdict with a grade but
-    // missing `nodePath` or `round` is different: the critic decided, but the
-    // transport freshness envelope is unverifiable, so [_verdictFromFile] throws
-    // [RouteFailure] and the process lane fails/retries instead of recording a
-    // fake F. The canonical FILE wins whenever it parses AND is fresh; only an
-    // absent/stale canonical file consults the fallbacks. No parseable
-    // verdict ANYWHERE still grades F — every path names its own `transport`
-    // (`file`/`file-stray`/`envelope`/`fail-closed-default`), so a false-gate
-    // post-mortem never has to guess which channel produced the grade.
+    // The engine's artifact-durability contract withholds completion until a
+    // fresh canonical or stray verdict is readable. This second read consumes
+    // that same artifact; disappearance between probe and result is a loud
+    // race, never a synthesized grade.
     final verdict = File(p.join(workspaceDir, _critiqueDir, '$rubric.json'));
     final graded =
         _payloadOrNull(
@@ -1060,21 +1107,13 @@ class CriticCapability extends ProcessCapability {
         ) ??
         _payloadOrNull(
           _strayVerdict(workspaceDir, rubric, args.nodePath, round),
-        ) ??
-        _verdictFromResultText(
-          readEnvelopeResultText(workspaceDir, args.nodePath),
-        ) ??
-        const {
-          'grade': 'F',
-          'transport': 'fail-closed-default',
-          'rationale':
-              'no parseable verdict via file or envelope — fail-closed default',
-        };
-    // Every LLM-lane payload carries the ROUND it was recorded against
-    // (bridge fix, 2026-07-24): the spec route's join needs to tell "this lane
-    // finished THIS round without a canonical artifact" (loud, once) from
-    // "this lane has not re-run for this round yet" (wait) — and the durable
-    // result is the only trace an envelope/fail-closed transport leaves.
+        );
+    if (graded == null) {
+      throw RouteFailure(
+        'critic completion artifact disappeared after the durability probe: '
+        '${verdict.path}',
+      );
+    }
     final stamped = {...graded, kVerdictRoundKey: '$round'};
     // Merge the CAPTURE-ONLY usage telemetry (FT-2) into the payload. FAIL-SAFE:
     // an absent / malformed envelope yields no fields, NEVER a throw — the grade
@@ -1100,12 +1139,10 @@ class CriticCapability extends ProcessCapability {
   ///
   /// The file-write instruction is deliberately the LAST thing the prompt says
   /// (tg-291 — recency: a model observed to state a clean verdict in its
-  /// response prose while skipping the file write, tripping a false gate on the
-  /// fail-closed missing-file rule). It is imperative, names the exact path, and
+  /// response prose while skipping the file write. It is imperative, names the exact path, and
   /// is explicit that stating the verdict in prose does NOT satisfy it — the
-  /// file write is REQUIRED regardless. `result()` still has a stdout-envelope
-  /// fallback for when a critic slips anyway; this hardening is to make the
-  /// slip rarer, not to rely on the fallback.
+  /// file write is REQUIRED regardless. The durability contract keeps a lane
+  /// unresolved until that required artifact exists.
   ///
   /// The verdict JSON also carries TWO FRESHNESS STAMPS ([verdictJsonTemplate]),
   /// both copied byte-for-byte: [nodePath] (gate-integrity #3 — WHOSE verdict is
@@ -1665,24 +1702,8 @@ bool _endsWithPath(String path, String suffix) {
   return boundary == p.separator || boundary == '/';
 }
 
-/// Recovers a verdict from a critic's raw harness RESULT TEXT (tg-291) — the
-/// fallback transport [CriticCapability.result] consults when the verdict file
-/// is absent or unparseable. FT-2 already captures the harness's
-/// `--output-format json` result envelope for telemetry; its `result` field is
-/// the critic's full stdout text, which sometimes carries the verdict the
-/// critic forgot to also write to disk.
-///
-/// Recognizes, in order:
-///  1. an embedded JSON verdict object (fenced or inline — `{"grade":...}`);
-///  2. a `Verdict: <A-F>` OR `Grade: <A-F>` heading (markdown `##` and other
-///     lead-ins allowed), with the prose that follows it as rationale — a
-///     critic that summarizes with `## Grade: A` instead of `Verdict:` was
-///     silently missed before (gate-integrity #4, bead `tg-r66`: the live
-///     false gate whose stray file the belt above now also recovers).
-///
-/// Every recovered rationale is marked `[from result envelope]` so a grade
-/// that rode this fallback is visibly distinguishable downstream. `null` when
-/// neither shape yields a parseable grade (the caller then fail-closes to F).
+/// Recovers a verdict from the critic's captured stdout so the completion
+/// probe can persist it as the canonical durability artifact.
 Map<String, String>? _verdictFromResultText(String? text) {
   if (text == null) return null;
   final trimmed = text.trim();
@@ -1690,21 +1711,9 @@ Map<String, String>? _verdictFromResultText(String? text) {
   return _verdictFromEmbeddedJson(trimmed) ?? _verdictFromHeading(trimmed);
 }
 
-/// A single-letter A-F grade — the same strict shape [_verdictHeading]
-/// enforces via its capture group. [buildCriticPrompt] hands the critic a
-/// LITERAL `"grade":"<A-F>"` template; without this check, an echoed
-/// template/example object in a stdout preamble would parse as a "valid"
-/// verdict (tg-291 rework round 1). `grade` is already upper-cased by the
-/// caller before this check runs.
 final RegExp _validGradeLetter = RegExp(r'^[A-F]$');
 
-/// Scans [text] for EVERY balanced-brace `{...}` substring that decodes as
-/// JSON carrying a `grade` matching [_validGradeLetter] exactly, and returns
-/// the LAST such match. A verdict concludes a critic's output — any earlier
-/// object (an echoed prompt template, a worked example in prose) is a
-/// preamble, not the verdict, so the first match must NOT win (tg-291 rework
-/// round 1: a false ADVANCE was possible when a real F verdict followed an
-/// earlier template/example echo with a matched-looking grade).
+/// Returns the last valid embedded verdict object from captured stdout.
 Map<String, String>? _verdictFromEmbeddedJson(String text) {
   Map<String, String>? last;
   for (var start = 0; start < text.length; start++) {
@@ -1731,35 +1740,21 @@ Map<String, String>? _verdictFromEmbeddedJson(String text) {
             }
           }
         } catch (_) {
-          // not a decodable/relevant object at this start — keep scanning.
+          // Not a decodable verdict at this brace; keep scanning.
         }
-        break; // matched braces exhausted for this start; try the next '{'.
+        break;
       }
     }
   }
   return last;
 }
 
-/// A `Verdict: <A-F>` or `Grade: <A-F>` heading (case-insensitive) — the
-/// prose-heading shapes a critic falls back to when it states its verdict in
-/// plain text (tg-291), including the markdown `## Grade: A` summary a critic
-/// was observed to emit while skipping the file write (gate-integrity #4,
-/// bead `tg-r66`). The keyword is immediately followed by `:` (optional
-/// whitespace only), so the `"grade":"A"` inside an echoed JSON template — where
-/// a `"` sits between the word and the colon — never matches here (that shape is
-/// already handled by [_verdictFromEmbeddedJson]).
 final RegExp _verdictHeading = RegExp(
   r'(?:verdict|grade)\s*:\s*([A-Fa-f])\b',
   caseSensitive: false,
 );
 
-/// The prose that follows the LAST `Verdict:`/`Grade: <A-F>` heading in [text],
-/// as a grade + marked rationale — `null` when no heading is present. A verdict
-/// concludes a critic's output, so an earlier heading (a worked example, a
-/// restated instruction) must not win over a later, real one — mirrors
-/// [_verdictFromEmbeddedJson]'s last-match scan (tg-291 rework round 2: an
-/// early "Verdict: A" followed by a real, later "Verdict: F" must yield F, not
-/// the earlier A).
+/// Returns the last valid verdict heading from captured stdout.
 Map<String, String>? _verdictFromHeading(String text) {
   final matches = _verdictHeading.allMatches(text);
   if (matches.isEmpty) return null;
