@@ -406,6 +406,38 @@ void main() {
   });
 
   group('buildReadinessPrompt — the lens brief', () {
+    test('malformed verdict gets one structured re-ask', () {
+      final dir = Directory.systemTemp.createTempSync('readiness-reask-');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      const nodePath = 'pow-kzx/spec_review/readiness';
+      final context = FakeTreeContext(
+        values: {
+          Bead: _refined(),
+          Workspace: testWorkspace(
+            'pow-kzx',
+            workspaceDir: dir.path,
+            branch: 'grid/pow-kzx',
+          ),
+        },
+      );
+      final args = stepArgs(
+        nodePath,
+        params: {'rubric': kReadinessRubric, 'grid.round': '0'},
+      );
+      final firstPrompt = const ReadinessCriticCapability()
+          .spawn(context, args)
+          .args
+          .join(' ');
+      expect(firstPrompt, isNot(contains('## Verdict contract repair')));
+      File('${dir.path}/.grid/critique/$kReadinessRubric.json')
+        ..createSync(recursive: true)
+        ..writeAsStringSync('not json');
+      final cfg = const ReadinessCriticCapability().spawn(context, args);
+      final prompt = cfg.args.join(' ');
+      expect(prompt, contains('## Verdict contract repair'));
+      expect(prompt.split('## Verdict contract repair').length - 1, 1);
+    });
+
     test('grades the BEAD (no spec, no diff), stamps the nodePath + round, and '
         'names the ABSOLUTE verdict path LAST (tg-291 recency + '
         'gate-integrity #4)', () {
