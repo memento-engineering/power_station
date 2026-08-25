@@ -4,6 +4,12 @@ description: GitHub App identity and authenticated REST transport for grid exten
 repository: https://github.com/memento-engineering/power_station
 resolution: workspace
 
+# Test fixtures, not credentials: throwaway RSA keys minted for the token
+# provider's offline tests. pub's pre-publish secret scan flags any PEM.
+false_secrets:
+  - /test/fixtures/github_app_test_private.pem
+  - /test/fixtures/github_app_test_private_two.pem
+
 environment:
   sdk: ^3.11.0
 
