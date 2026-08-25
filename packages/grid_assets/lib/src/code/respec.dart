@@ -193,6 +193,7 @@ typedef SpecLane = ({String id, String? grade, String rationale});
 SpecRouteVerdict decideSpecRoute({
   required List<SpecLane> lanes,
   required String gating,
+  required String sessionRoot,
   required int priorRound,
   int maxRounds = kMaxRespecRounds,
 }) {
@@ -281,6 +282,7 @@ SpecRouteVerdict decideSpecRoute({
   if (priorRound < maxRounds) {
     return SpecRespec(
       RespecLedger(
+        sessionRoot: sessionRoot,
         round: priorRound,
         lanes: [
           for (final l in fixable)
@@ -577,6 +579,7 @@ class SpecRouteCapability extends RouteCapability {
     switch (decideSpecRoute(
       lanes: lanes,
       gating: gating,
+      sessionRoot: args.beadId,
       priorRound: circuitRound,
     )) {
       case SpecAdvance(:final gradesCsv, :final spread):

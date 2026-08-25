@@ -302,6 +302,7 @@ void main() {
       writeRespecLedger(
         dir.path,
         const RespecLedger(
+          sessionRoot: 'tg-1',
           round: kMaxRespecRounds,
           lanes: [
             RespecLane(
@@ -323,7 +324,7 @@ void main() {
       );
       expect(out, isA<Advance>());
       expect(
-        readRespecLedger(dir.path),
+        readRespecLedger(dir.path, expectedSessionRoot: 'tg-1'),
         isNull,
         reason:
             'every lane\'s verdict-round stamp (`roundOf`) and the spec '
@@ -472,10 +473,10 @@ void main() {
       expect(prompt, contains('Stay cheap'));
       expect(
         prompt.trimRight(),
-        endsWith(
-          'Write the file at `/w/pow-kzx/.grid/critique/$kReadinessRubric.json`.',
-        ),
+        endsWith('never reuse one writer\'s temporary path in another writer.'),
       );
+      expect(prompt, contains('mktemp "/w/pow-kzx/.grid/critique/'));
+      expect(prompt, contains('mv -f -- "\$verdict_tmp"'));
     });
 
     test('anti-anchoring: it names ONLY its own rubric, never a spec-committee '

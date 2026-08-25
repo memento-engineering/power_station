@@ -364,6 +364,20 @@ const String kVerdictStampInstruction =
     'is discarded as an unverifiable transport defect; the lane fails and '
     're-runs, and the unstamped grade is never recorded.';
 
+/// Renders the mandatory same-directory atomic verdict-write contract.
+String verdictWriteInstruction(String path) {
+  final directory = p.dirname(path);
+  final basename = p.basename(path);
+  return 'Do NOT write JSON directly to `$path`. First write the complete '
+      'JSON to a unique temporary file created by '
+      '`mktemp "$directory/.$basename.XXXXXX"`; after that write finishes, '
+      'atomically replace the verdict with '
+      '`mv -f -- "\$verdict_tmp" "$path"`. The temporary file MUST be in '
+      'the same directory as the verdict, so the POSIX rename is atomic. '
+      'Set `verdict_tmp` from the `mktemp` output, and never reuse one '
+      'writer\'s temporary path in another writer.';
+}
+
 /// A pluggable source of a rubric's prose text by id (D-9: the Packaged-AI-Asset
 /// loader replaces the inline placeholder). Returns the rubric body a critic's
 /// prompt embeds.
@@ -1229,15 +1243,7 @@ class CriticCapability extends ProcessCapability {
       ..writeln()
       ..writeln(kVerdictStampInstruction)
       ..writeln()
-      ..writeln(
-        'You MUST write that JSON to the exact ABSOLUTE path `$path` before you '
-        'finish. It is an absolute path on purpose — write it there regardless '
-        'of your current working directory (if you `cd` elsewhere to run a '
-        'command, this path still resolves to the right file). This is REQUIRED '
-        'even if you also state your verdict in your response text — stating the '
-        'grade in prose alone does NOT satisfy this instruction. Write the file '
-        'at `$path`.',
-      );
+      ..writeln(verdictWriteInstruction(path));
     return b.toString();
   }
 }

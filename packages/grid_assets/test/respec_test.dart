@@ -140,6 +140,7 @@ void main() {
   group('decideSpecRoute — the three-way spec matrix', () {
     test('all A–C ⇒ SpecAdvance, with the route provenance (FT-2)', () {
       final v = decideSpecRoute(
+        sessionRoot: 'tg-1',
         lanes: _lanes({..._allA(), 'coherence': 'C'}),
         gating: _gating,
         priorRound: 0,
@@ -156,6 +157,7 @@ void main() {
     test('a FIXABLE fail (a critic D WITH a rationale) ⇒ SpecRespec — never an '
         'escalation — and the ledger carries the rationale VERBATIM', () {
       final v = decideSpecRoute(
+        sessionRoot: 'tg-1',
         lanes: _lanes(
           {..._allA(), 'plan-completeness': 'D'},
           rationales: const {'plan-completeness': 'step 3 has no test command'},
@@ -173,6 +175,7 @@ void main() {
 
     test('a grade E is fixable too (an actionable grade, not a hard F)', () {
       final v = decideSpecRoute(
+        sessionRoot: 'tg-1',
         lanes: _lanes(
           {..._allA(), 'coherence': 'E'},
           rationales: const {
@@ -189,6 +192,7 @@ void main() {
     test('the pow-kzx shape (A/A/B/D, spread 3) auto-respecs — the old "human '
         'ultimatum" spread rule no longer parks it', () {
       final v = decideSpecRoute(
+        sessionRoot: 'tg-1',
         lanes: _lanes(
           {
             _gating: 'A',
@@ -212,6 +216,7 @@ void main() {
       'respec (and NAMES its lane — ADR-0000 A13(5))',
       () {
         final v = decideSpecRoute(
+          sessionRoot: 'tg-1',
           lanes: _lanes({..._allA(), _gating: 'F'}),
           gating: _gating,
           priorRound: 0,
@@ -228,6 +233,7 @@ void main() {
       'respec',
       () {
         final v = decideSpecRoute(
+          sessionRoot: 'tg-1',
           lanes: _lanes(
             {..._allA(), 'coherence': 'F'},
             rationales: const {
@@ -248,6 +254,7 @@ void main() {
       () {
         final grades = _allA()..remove('adr-alignment');
         final v = decideSpecRoute(
+          sessionRoot: 'tg-1',
           lanes: _lanes(grades),
           gating: _gating,
           priorRound: 0,
@@ -260,6 +267,7 @@ void main() {
     test('ESCALATION — a fixable grade with NO rationale has nothing to respec '
         'against', () {
       final v = decideSpecRoute(
+        sessionRoot: 'tg-1',
         lanes: _lanes({..._allA(), 'coherence': 'D'}),
         gating: _gating,
         priorRound: 0,
@@ -271,6 +279,7 @@ void main() {
     test('BOUNDED — a fixable fail at the round cap escalates instead of '
         'looping forever', () {
       SpecRouteVerdict at(int priorRound) => decideSpecRoute(
+        sessionRoot: 'tg-1',
         lanes: _lanes(
           {..._allA(), 'coherence': 'D'},
           rationales: const {'coherence': 'still incoherent'},
@@ -291,6 +300,7 @@ void main() {
       'ADVANCES; the cap bounds the LOOP, never the spec (bead `pow-p8w`)',
       () {
         final v = decideSpecRoute(
+          sessionRoot: 'tg-1',
           lanes: _lanes(_allA()),
           gating: _gating,
           priorRound: kMaxRespecRounds,
@@ -308,6 +318,7 @@ void main() {
 
     test('write → read round-trips the round + every lane verbatim', () {
       const ledger = RespecLedger(
+        sessionRoot: 'tg-1',
         round: 2,
         lanes: [
           RespecLane(
@@ -318,7 +329,7 @@ void main() {
         ],
       );
       writeRespecLedger(ws.path, ledger);
-      final read = readRespecLedger(ws.path)!;
+      final read = readRespecLedger(ws.path, expectedSessionRoot: 'tg-1')!;
       expect(read.round, 2);
       expect(read.lanes.single.rationale, 'plan ≠ acceptance');
       // It is a SIBLING of `.grid/critique/`, which clear-critique wipes each
@@ -332,6 +343,7 @@ void main() {
         writeRespecLedger(
           ws.path,
           const RespecLedger(
+            sessionRoot: 'tg-1',
             round: 1,
             lanes: [
               RespecLane(
@@ -352,7 +364,7 @@ void main() {
         expect(payload['verdict'], 'advance');
         expect(payload[kVerdictRoundKey], '2');
         expect(payload['grades'], contains('spec-validation=A'));
-        expect(readRespecLedger(ws.path), isNull);
+        expect(readRespecLedger(ws.path, expectedSessionRoot: 'tg-1'), isNull);
       },
     );
 
@@ -430,11 +442,11 @@ void main() {
 
     test('a corrupt / absent ledger degrades to "no prior round" — never a '
         'throw', () {
-      expect(readRespecLedger(ws.path), isNull);
+      expect(readRespecLedger(ws.path, expectedSessionRoot: 'tg-1'), isNull);
       File(respecLedgerPath(ws.path))
         ..createSync(recursive: true)
         ..writeAsStringSync('{ not json');
-      expect(readRespecLedger(ws.path), isNull);
+      expect(readRespecLedger(ws.path, expectedSessionRoot: 'tg-1'), isNull);
     });
 
     test(
@@ -476,7 +488,7 @@ void main() {
         );
         // The RATIONALES ride the LEDGER (the stamp's prose is telemetry; the
         // ledger is what the next specify brief reads).
-        final ledger = readRespecLedger(ws.path)!;
+        final ledger = readRespecLedger(ws.path, expectedSessionRoot: 'tg-1')!;
         expect(ledger.round, 0);
         expect(ledger.lanes.single.rationale, 'step 3 names no test command');
       },
@@ -495,7 +507,7 @@ void main() {
         workspaceDir: ws.path,
       );
       expect((first as Advance).payload!['grade'], 'F');
-      expect(readRespecLedger(ws.path)!.round, 0);
+      expect(readRespecLedger(ws.path, expectedSessionRoot: 'tg-1')!.round, 0);
 
       // Round 2 reads back the ledger the previous round wrote — no cursor, no
       // engine-side counter (the engine no longer produces one a re-run node
@@ -509,7 +521,7 @@ void main() {
         round: 1,
       );
       expect((second as Advance).payload!['grade'], 'F');
-      expect(readRespecLedger(ws.path)!.round, 1);
+      expect(readRespecLedger(ws.path, expectedSessionRoot: 'tg-1')!.round, 1);
 
       // At the cap: a human rules — an Escalate, never another F stamp.
       _plantVerdicts(ws.path, grades, rationales: why, round: kMaxRespecRounds);
@@ -530,6 +542,7 @@ void main() {
       writeRespecLedger(
         ws.path,
         const RespecLedger(
+          sessionRoot: 'tg-1',
           round: kMaxRespecRounds,
           lanes: [
             RespecLane(
@@ -547,7 +560,7 @@ void main() {
       expect(payload['verdict'], 'advance');
       // NO `grade` key: a converged round invalidates nothing.
       expect(payload.containsKey('grade'), isFalse);
-      expect(readRespecLedger(ws.path), isNull);
+      expect(readRespecLedger(ws.path, expectedSessionRoot: 'tg-1'), isNull);
     });
 
     test('the CAP flare quotes the FRESH vector it decided on, never the '
@@ -556,6 +569,7 @@ void main() {
       writeRespecLedger(
         ws.path,
         const RespecLedger(
+          sessionRoot: 'tg-1',
           round: kMaxRespecRounds,
           lanes: [
             RespecLane(
@@ -609,7 +623,7 @@ void main() {
           round: kMaxRespecRounds,
         );
         expect(capped, isA<Escalate>());
-        expect(readRespecLedger(ws.path), isNull);
+        expect(readRespecLedger(ws.path, expectedSessionRoot: 'tg-1'), isNull);
 
         // The re-arm after the human ruling: a CONVERGED join advances. The
         // ledger is spent, so the re-run lanes stamp round 0 again.
@@ -627,6 +641,7 @@ void main() {
         writeRespecLedger(
           ws.path,
           const RespecLedger(
+            sessionRoot: 'tg-1',
             round: 1,
             lanes: [
               RespecLane(rubric: 'coherence', grade: 'D', rationale: 'spent'),
@@ -646,7 +661,7 @@ void main() {
           workspaceDir: ws.path,
         );
         expect(out, isA<Escalate>());
-        expect(readRespecLedger(ws.path), isNull);
+        expect(readRespecLedger(ws.path, expectedSessionRoot: 'tg-1'), isNull);
       },
     );
 
@@ -657,6 +672,7 @@ void main() {
         writeRespecLedger(
           ws.path,
           const RespecLedger(
+            sessionRoot: 'tg-1',
             round: 1,
             lanes: [
               RespecLane(rubric: 'coherence', grade: 'D', rationale: 'stale'),
@@ -667,7 +683,7 @@ void main() {
         final out = await _route(_allA(), workspaceDir: ws.path);
         expect(out, isA<Advance>());
         expect((out as Advance).payload!['verdict'], 'advance');
-        expect(readRespecLedger(ws.path), isNull);
+        expect(readRespecLedger(ws.path, expectedSessionRoot: 'tg-1'), isNull);
       },
     );
 
@@ -713,7 +729,10 @@ void main() {
       // No ledger was written anywhere, so the ASSET's counter cannot advance
       // offline. That is not an unbounded loop: the engine's derived generation
       // reaches `kMaxReworkRounds` off the successor chain and gates the node.
-      expect(readRespecLedger('/grid/worktrees/tg-1'), isNull);
+      expect(
+        readRespecLedger('/grid/worktrees/tg-1', expectedSessionRoot: 'tg-1'),
+        isNull,
+      );
       expect(kMaxRespecRounds, lessThan(kMaxReworkRounds));
     });
 
@@ -726,6 +745,7 @@ void main() {
       writeRespecLedger(
         ws.path,
         const RespecLedger(
+          sessionRoot: 'tg-1',
           round: kMaxRespecRounds,
           lanes: [
             RespecLane(rubric: 'coherence', grade: 'D', rationale: 'still off'),
@@ -791,7 +811,10 @@ void main() {
       // parked, and a gate-close re-arms this route over the completed join
       // (tg-q3q0: the Escalate replaces the gate-less RouteFailure latch that
       // starved sessions silently once the engine's restart budget exhausted).
-      expect(readRespecLedger(ws.path)?.round, kMaxRespecRounds);
+      expect(
+        readRespecLedger(ws.path, expectedSessionRoot: 'tg-1')?.round,
+        kMaxRespecRounds,
+      );
     });
 
     test(
@@ -812,7 +835,7 @@ void main() {
           },
           round: kMaxRespecRounds,
         );
-        expect(readRespecLedger(ws.path), isNull);
+        expect(readRespecLedger(ws.path, expectedSessionRoot: 'tg-1'), isNull);
         // THIS round's lanes ran and their `result()` REJECTED the stale files
         // (the ledger-round fence): every judgement lane recorded a fail-closed
         // F stamped round 0 — finished this round, no artifact behind it.
@@ -847,6 +870,7 @@ void main() {
     test('names the round, the bound, every rubric + grade, and the rationale '
         'VERBATIM', () {
       const ledger = RespecLedger(
+        sessionRoot: 'tg-1',
         round: 1,
         lanes: [
           RespecLane(

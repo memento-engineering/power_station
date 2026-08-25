@@ -484,13 +484,7 @@ class ReadinessCriticCapability extends CriticCapability {
       ..writeln()
       ..writeln(kVerdictStampInstruction)
       ..writeln()
-      ..writeln(
-        'You MUST write that JSON to the exact ABSOLUTE path `$path` before you '
-        'finish. It is an absolute path on purpose — write it there regardless '
-        'of your current working directory. This is REQUIRED even if you also '
-        'state your verdict in your response text — stating the grade in prose '
-        'alone does NOT satisfy this instruction. Write the file at `$path`.',
-      );
+      ..writeln(verdictWriteInstruction(path));
     return b.toString();
   }
 }

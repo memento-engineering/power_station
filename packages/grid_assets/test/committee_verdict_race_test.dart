@@ -151,6 +151,7 @@ void main() {
       writeRespecLedger(
         ws.path,
         const RespecLedger(
+          sessionRoot: 'tg-1',
           round: 1,
           lanes: [
             RespecLane(
@@ -196,7 +197,7 @@ void main() {
         ),
       );
       // The counter survives the refusal: the wave's round is still open.
-      expect(readRespecLedger(ws.path)?.round, 1);
+      expect(readRespecLedger(ws.path, expectedSessionRoot: 'tg-1')?.round, 1);
       // The one fresh verdict survives too — refusing never destroys work.
       expect(
         currentVerdictFromFile(
@@ -267,7 +268,7 @@ void main() {
       expect(payload.toString(), isNot(contains('cached result must never')));
       expect(payload.toString(), isNot(contains('coherence=F')));
       // A REAL advance spends the counter — exactly as before.
-      expect(readRespecLedger(ws.path), isNull);
+      expect(readRespecLedger(ws.path, expectedSessionRoot: 'tg-1'), isNull);
     });
 
     test('a lane that FINISHED this round with no canonical artifact '
@@ -311,6 +312,7 @@ void main() {
       writeRespecLedger(
         ws.path,
         const RespecLedger(
+          sessionRoot: 'tg-1',
           round: 1,
           lanes: [
             RespecLane(rubric: 'plan-completeness', grade: 'D', rationale: 'x'),

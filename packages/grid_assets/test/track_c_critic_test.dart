@@ -884,21 +884,14 @@ void main() {
       // (gate-integrity #4 — cwd-invariant), not a workspace-relative one.
       expect(
         prompt.trimRight(),
-        endsWith(
-          'Write the file at `/w/tg-1/.grid/critique/spec-adherence.json`.',
-        ),
+        endsWith('never reuse one writer\'s temporary path in another writer.'),
       );
       expect(
         prompt,
-        contains(
-          'You MUST write that JSON to the exact ABSOLUTE path '
-          '`/w/tg-1/.grid/critique/spec-adherence.json` before you finish.',
-        ),
+        contains('mktemp "/w/tg-1/.grid/critique/.spec-adherence.json.XXXXXX"'),
       );
-      expect(
-        prompt,
-        contains('even if you also state your verdict in your response text'),
-      );
+      expect(prompt, contains('mv -f -- "\$verdict_tmp"'));
+      expect(prompt, contains('Do NOT write JSON directly'));
     });
   });
 
