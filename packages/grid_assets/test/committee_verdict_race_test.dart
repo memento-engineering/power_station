@@ -216,6 +216,7 @@ void main() {
         ws.path,
         const RespecLedger(
           round: 1,
+          sessionRoot: 'tg-1',
           lanes: [
             RespecLane(
               rubric: 'plan-completeness',
