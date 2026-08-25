@@ -226,7 +226,14 @@ Set<String> declaredTestFiles(String design) {
 List<String> missingDeclaredTestFiles({
   required String design,
   required Set<String> changedFiles,
-}) => declaredTestFiles(design).difference(changedFiles).toList()..sort();
+}) =>
+    declaredTestFiles(design)
+        .where(
+          (declared) =>
+              !changedFiles.any((changed) => _endsWithPath(changed, declared)),
+        )
+        .toList()
+      ..sort();
 
 /// Mechanical, no-agent verification of Design-declared test-file presence.
 class DeclaredTestsCapability extends ServiceCapability {

@@ -67,6 +67,68 @@ void main() {
     expect(outcome.payload?['grade'], 'A');
   });
 
+  test(
+    'pow-1gs package-relative declarations match repo-relative diff',
+    () async {
+      const design = '''
+Test: cd packages/grid_assets && dart test test/committee_verdict_race_test.dart
+Test: cd packages/grid_assets && dart test test/readiness_test.dart
+Test: cd packages/grid_assets && dart test test/respec_test.dart
+Modify `packages/grid_assets/test/respec_test.dart`.
+Test: cd packages/grid_assets && dart test test/specify_stage_test.dart
+Test: cd packages/grid_assets && dart test test/verdict_transport_test.dart
+''';
+      final outcome = await _runGate(
+        design: design,
+        diff: _diffFor([
+          'packages/grid_assets/test/committee_verdict_race_test.dart',
+          'packages/grid_assets/test/readiness_test.dart',
+          'packages/grid_assets/test/respec_test.dart',
+          'packages/grid_assets/test/specify_stage_test.dart',
+          'packages/grid_assets/test/verdict_transport_test.dart',
+        ]),
+      );
+      expect(outcome.payload?['grade'], 'A');
+    },
+  );
+
+  test('an absent package-relative declaration still fails', () async {
+    final outcome = await _runGate(
+      design: 'Test: dart test test/absent_test.dart',
+      diff: _diffFor(['packages/grid_assets/test/present_test.dart']),
+    );
+    expect(outcome.payload, {
+      'grade': 'F',
+      'transport': 'structural',
+      'rationale':
+          'Design-declared test files missing from pinned diff: test/absent_test.dart',
+    });
+  });
+
+  test('suffix matching requires a path-component boundary', () async {
+    final outcome = await _runGate(
+      design: 'Test: dart test test/respec_test.dart',
+      diff: _diffFor(['packages/grid_assets/test/prespec_test.dart']),
+    );
+    expect(outcome.payload, {
+      'grade': 'F',
+      'transport': 'structural',
+      'rationale':
+          'Design-declared test files missing from pinned diff: test/respec_test.dart',
+    });
+  });
+
+  test('an ambiguous suffix match counts as present', () async {
+    final outcome = await _runGate(
+      design: 'Test: dart test test/shared_test.dart',
+      diff: _diffFor([
+        'packages/alpha/test/shared_test.dart',
+        'packages/beta/test/shared_test.dart',
+      ]),
+    );
+    expect(outcome.payload?['grade'], 'A');
+  });
+
   test('no declared test files passes', () async {
     final outcome = await _runGate(
       design: 'Change the production implementation.',
