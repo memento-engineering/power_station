@@ -56,21 +56,37 @@ GitHubHttpResponse _response(Object body, {int status = 200, String? etag}) =>
       headers: <String, String>{if (etag != null) 'etag': etag},
     );
 
-Map<String, Object?> _issue({bool pull = false}) => <String, Object?>{
-  'node_id': pull ? 'PR_2' : 'I_1',
-  'updated_at': pull ? '2026-08-09T02:00:00Z' : '2026-08-09T01:00:00Z',
-  'number': pull ? 2 : 1,
-  'title': pull ? 'pull' : 'issue',
-  'body': null,
-  'user': <String, Object?>{'login': 'octocat'},
-  if (pull)
-    'pull_request': <String, Object?>{
-      'url': 'https://api.github.test/repos/memento/power/pulls/2',
-      'html_url': 'https://github.test/memento/power/pull/2',
-      'diff_url': 'https://github.test/memento/power/pull/2.diff',
-      'patch_url': 'https://github.test/memento/power/pull/2.patch',
-    },
-};
+Map<String, Object?> _issue({
+  bool pull = false,
+  String state = 'open',
+  String? nodeId,
+  String? updatedAt,
+  int? number,
+  String? title,
+}) {
+  final resolvedNumber = number ?? (pull ? 2 : 1);
+  return <String, Object?>{
+    'node_id': nodeId ?? (pull ? 'PR_2' : 'I_1'),
+    'updated_at':
+        updatedAt ?? (pull ? '2026-08-09T02:00:00Z' : '2026-08-09T01:00:00Z'),
+    'state': state,
+    'number': resolvedNumber,
+    'title': title ?? (pull ? 'pull' : 'issue'),
+    'body': null,
+    'user': <String, Object?>{'login': 'octocat'},
+    if (pull)
+      'pull_request': <String, Object?>{
+        'url':
+            'https://api.github.test/repos/memento/power/pulls/'
+            '$resolvedNumber',
+        'html_url': 'https://github.test/memento/power/pull/$resolvedNumber',
+        'diff_url':
+            'https://github.test/memento/power/pull/$resolvedNumber.diff',
+        'patch_url':
+            'https://github.test/memento/power/pull/$resolvedNumber.patch',
+      },
+  };
+}
 
 final class FakeBdRunner implements BdRunner {
   final argvs = <List<String>>[];
@@ -95,13 +111,32 @@ final class FakeBdRunner implements BdRunner {
 
 void main() {
   test(
-    'real-shaped /issues pull row completes intake and projects SELF rows',
+    'mixed /issues states project only open rows and claim every observation',
     () async {
+      final rows = <Object?>[
+        _issue(),
+        _issue(pull: true),
+        _issue(
+          state: 'closed',
+          nodeId: 'I_CLOSED',
+          updatedAt: '2026-08-09T02:30:00Z',
+          number: 3,
+          title: 'closed issue',
+        ),
+        _issue(
+          pull: true,
+          state: 'closed',
+          nodeId: 'PR_CLOSED',
+          updatedAt: '2026-08-09T02:45:00Z',
+          number: 4,
+          title: 'closed pull',
+        ),
+      ];
       final transport = FakeGitHubHttpTransport()
         ..responses.addAll(<GitHubHttpResponse>[
-          _response(<Object?>[_issue(), _issue(pull: true)], etag: '"issues"'),
+          _response(rows, etag: '"issues"'),
           _response(const <Object?>[], etag: '"pulls"'),
-          _response(<Object?>[_issue(), _issue(pull: true)], etag: '"issues2"'),
+          _response(rows, etag: '"issues2"'),
           _response(const <Object?>[], etag: '"pulls2"'),
         ]);
       final runner = FakeBdRunner();
@@ -128,6 +163,16 @@ void main() {
       await reconciler.reconcileOnce();
       await reconciler.reconcileOnce();
 
+      expect(
+        rows,
+        everyElement(
+          isA<Map<String, Object?>>().having(
+            (row) => row['state'],
+            'state',
+            anyOf('open', 'closed'),
+          ),
+        ),
+      );
       expect(_issue(pull: true), contains('pull_request'));
       expect(_issue(pull: true), isNot(contains('head')));
       expect(events, <Matcher>[isA<IssueOpened>(), isA<PullRequestOpened>()]);
@@ -142,6 +187,12 @@ void main() {
         creates.map((argv) => argv[argv.indexOf('--external-ref') + 1]).toSet(),
         <String>{'github:I_1', 'github:PR_2'},
       );
+      expect(store.cursor.observationIds.toSet(), <String>{
+        'poll:issue:I_1:2026-08-09T01:00:00Z',
+        'poll:issue:PR_2:2026-08-09T02:00:00Z',
+        'poll:issue:I_CLOSED:2026-08-09T02:30:00Z',
+        'poll:issue:PR_CLOSED:2026-08-09T02:45:00Z',
+      });
       expect(
         calls.indexOf('emit'),
         greaterThan(calls.indexOf('save:poll:issue:I_1:2026-08-09T01:00:00Z')),
@@ -150,7 +201,7 @@ void main() {
       expect(store.cursor.etags, containsPair('intake/issues', '"issues2"'));
       expect(
         transport.requests.first.uri.queryParameters,
-        containsPair('per_page', '100'),
+        allOf(containsPair('state', 'all'), containsPair('per_page', '100')),
       );
       expect(
         transport.requests[2].uri.queryParameters['since'],
@@ -170,13 +221,19 @@ void main() {
     },
   );
 
-  test('malformed intake row reports and does not wedge cursor', () async {
+  test('malformed intake state reports and does not wedge cursor', () async {
+    final malformedState = <String, Object?>{
+      ..._issue(
+        nodeId: 'I_BAD_STATE',
+        updatedAt: '2026-08-09T00:30:00Z',
+        number: 0,
+        title: 'bad state',
+      ),
+      'state': 1,
+    };
     final transport = FakeGitHubHttpTransport()
       ..responses.addAll(<GitHubHttpResponse>[
-        _response(<Object?>[
-          <String, Object?>{'node_id': 1},
-          _issue(),
-        ], etag: '"issues"'),
+        _response(<Object?>[malformedState, _issue()], etag: '"issues"'),
         _response(const <Object?>[], etag: '"pulls"'),
       ]);
     final store = FakeGitHubCursorStore();
@@ -193,7 +250,14 @@ void main() {
       onIntakeRowError: (error, _) => rowErrors.add(error),
     ).reconcileOnce();
 
-    expect(rowErrors.single, isA<FormatException>());
+    expect(
+      rowErrors.single,
+      isA<FormatException>().having(
+        (error) => error.message,
+        'message',
+        contains('state must be a string'),
+      ),
+    );
     expect(events.single, isA<IssueOpened>());
     expect(store.cursor.since, DateTime.parse('2026-08-09T03:00:00Z'));
     expect(store.cursor.etags, containsPair('intake/issues', '"issues"'));
