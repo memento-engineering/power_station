@@ -107,11 +107,17 @@ class GitHubReconciler {
         final nodeId = _string(row, 'node_id');
         final updatedText = _string(row, 'updated_at');
         final updated = _date(updatedText, 'updated_at');
+        final state = _string(row, 'state');
+        final observationId = 'poll:issue:$nodeId:$updatedText';
+        if (latest == null || updated.isAfter(latest)) latest = updated;
+        if (state != 'open') {
+          cursor = cursor.record(observationId);
+          continue;
+        }
         final number = _integer(row, 'number');
         final title = _string(row, 'title');
         final body = _nullableString(row, 'body') ?? '';
         final actor = _string(_nestedMap(row, 'user'), 'login', prefix: 'user');
-        final observationId = 'poll:issue:$nodeId:$updatedText';
         if (row.containsKey('pull_request')) {
           events.add(
             NormalizedGitHubEvent.pullRequestOpened(
@@ -139,7 +145,6 @@ class GitHubReconciler {
             ),
           );
         }
-        if (latest == null || updated.isAfter(latest)) latest = updated;
       } on FormatException catch (error, stackTrace) {
         _reportIntakeRowError(error, stackTrace);
       }
