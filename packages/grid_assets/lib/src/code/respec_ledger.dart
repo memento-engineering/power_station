@@ -75,7 +75,14 @@ class RespecLane {
 /// round for the guidance brief; `grid.round` remains the sole authority.
 class RespecLedger {
   /// Creates a ledger for [round] over the failing [lanes].
-  const RespecLedger({required this.round, required this.lanes});
+  const RespecLedger({
+    required this.sessionRoot,
+    required this.round,
+    required this.lanes,
+  });
+
+  /// The round-zero work-bead root that owns this session ledger.
+  final String sessionRoot;
 
   /// The session circuit round mirrored for guidance and provenance.
   ///
@@ -88,7 +95,8 @@ class RespecLedger {
 
   /// The wire shape.
   Map<String, Object?> toJson() => {
-    'version': 1,
+    'version': 2,
+    'sessionRoot': sessionRoot,
     'round': round,
     'lanes': [for (final lane in lanes) lane.toJson()],
   };
@@ -97,8 +105,9 @@ class RespecLedger {
   /// JSON) — the caller then treats it as "no prior round".
   static RespecLedger? fromJson(Object? json) {
     if (json is! Map) return null;
+    final sessionRoot = (json['sessionRoot'] as String?)?.trim() ?? '';
     final round = json['round'];
-    if (round is! int || round < 0) return null;
+    if (sessionRoot.isEmpty || round is! int || round < 0) return null;
     final raw = json['lanes'];
     if (raw is! List) return null;
     final lanes = [
@@ -106,18 +115,26 @@ class RespecLedger {
         if (RespecLane.fromJson(entry) case final lane?) lane,
     ];
     if (lanes.isEmpty) return null;
-    return RespecLedger(round: round, lanes: lanes);
+    return RespecLedger(sessionRoot: sessionRoot, round: round, lanes: lanes);
   }
 }
 
 /// The ledger at [workspaceDir], or null when there is none / it is unreadable.
 /// Best-effort by design: a corrupt ledger degrades to no correction guidance;
 /// it can never throw into a spawn or a route.
-RespecLedger? readRespecLedger(String workspaceDir) {
+RespecLedger? readRespecLedger(
+  String workspaceDir, {
+  required String expectedSessionRoot,
+}) {
   final file = File(respecLedgerPath(workspaceDir));
   if (!file.existsSync()) return null;
   try {
-    return RespecLedger.fromJson(jsonDecode(file.readAsStringSync()));
+    final ledger = RespecLedger.fromJson(jsonDecode(file.readAsStringSync()));
+    if (ledger == null || ledger.sessionRoot != expectedSessionRoot) {
+      clearRespecLedger(workspaceDir);
+      return null;
+    }
+    return ledger;
   } catch (_) {
     return null;
   }

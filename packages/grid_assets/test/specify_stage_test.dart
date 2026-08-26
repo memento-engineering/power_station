@@ -288,6 +288,7 @@ void main() {
     'buildSpecifyBrief — the AUTO-RESPEC correction guidance (`pow-7nm`)',
     () {
       const ledger = RespecLedger(
+        sessionRoot: 'tg-1',
         round: 2,
         lanes: [
           RespecLane(
@@ -353,6 +354,7 @@ void main() {
       writeRespecLedger(
         ws.path,
         const RespecLedger(
+          sessionRoot: 'tg-1',
           round: 1,
           lanes: [
             RespecLane(

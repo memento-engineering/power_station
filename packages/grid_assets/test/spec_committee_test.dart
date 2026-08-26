@@ -907,8 +907,10 @@ Validate again with ruby -e 's.include?("${ticks}dart")'.
       expect(prompt, contains('/w/tg-1/.grid/critique/plan-completeness.json'));
       expect(
         prompt.trim(),
-        endsWith('.grid/critique/plan-completeness.json`.'),
+        endsWith('never reuse one writer\'s temporary path in another writer.'),
       );
+      expect(prompt, contains('mktemp "/w/tg-1/.grid/critique/'));
+      expect(prompt, contains('mv -f -- "\$verdict_tmp"'));
     });
 
     test('anti-anchoring: the prompt names ONLY its own rubric, never the '
