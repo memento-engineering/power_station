@@ -1,3 +1,7 @@
+## 0.1.0-rc.6
+
+- `GitHubReconcilerBindingAssets`: provides each live seat a durable `GitHubCursorStore` and SELF-only deferred-intake `GitHubEventSink`, completing the ambient seams required by `GitHubReconcilerAssets` to construct its polling runtime (#139).
+
 ## 0.1.0-rc.5
 
 - `GitHubAppClientAssets`: per-seat GitHub App client construction with per-app key resolution — the key path comes from the env var each seat's `privateKeyVar` names (inert when unset, loud on a bad path or mode), replacing the single fixed `GC_GITHUB_APP_KEY_PATH` (#134).
