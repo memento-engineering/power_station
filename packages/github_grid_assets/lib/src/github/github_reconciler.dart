@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:developer' as developer;
 
 import '../github_app_client.dart';
 
@@ -37,10 +38,12 @@ class GitHubReconciler {
     required GitHubAppClient client,
     required GitHubCursorStore cursors,
     required GitHubEventSink emit,
+    void Function(Object error, StackTrace stackTrace)? onIntakeRowError,
     DateTime Function()? now,
   }) : _client = client,
        _cursors = cursors,
        _emit = emit,
+       _onIntakeRowError = onIntakeRowError,
        _now = now ?? DateTime.now;
 
   /// Repository owner.
@@ -54,6 +57,7 @@ class GitHubReconciler {
   final GitHubAppClient _client;
   final GitHubCursorStore _cursors;
   final GitHubEventSink _emit;
+  final void Function(Object error, StackTrace stackTrace)? _onIntakeRowError;
   final List<GitHubEventSink> _observers = <GitHubEventSink>[];
   final DateTime Function() _now;
   Future<void>? _inFlight;
@@ -98,45 +102,47 @@ class GitHubReconciler {
     final events = <NormalizedGitHubEvent>[];
     var latest = cursor.since?.toUtc();
     for (final raw in rows) {
-      final row = _map(raw, 'row');
-      final nodeId = _string(row, 'node_id');
-      final updatedText = _string(row, 'updated_at');
-      final updated = _date(updatedText, 'updated_at');
-      final number = _integer(row, 'number');
-      final title = _string(row, 'title');
-      final body = _nullableString(row, 'body') ?? '';
-      final actor = _string(_nestedMap(row, 'user'), 'login', prefix: 'user');
-      final observationId = 'poll:issue:$nodeId:$updatedText';
-      if (row.containsKey('pull_request')) {
-        final head = _nestedMap(row, 'head');
-        events.add(
-          NormalizedGitHubEvent.pullRequestOpened(
-            nodeId: nodeId,
-            actor: actor,
-            repository: '$owner/$repository',
-            substation: substation,
-            observationId: observationId,
-            number: number,
-            title: title,
-            body: body,
-            headBranch: _string(head, 'ref', prefix: 'head'),
-          ),
-        );
-      } else {
-        events.add(
-          NormalizedGitHubEvent.issueOpened(
-            nodeId: nodeId,
-            actor: actor,
-            repository: '$owner/$repository',
-            substation: substation,
-            observationId: observationId,
-            number: number,
-            title: title,
-            body: body,
-          ),
-        );
+      try {
+        final row = _map(raw, 'row');
+        final nodeId = _string(row, 'node_id');
+        final updatedText = _string(row, 'updated_at');
+        final updated = _date(updatedText, 'updated_at');
+        final number = _integer(row, 'number');
+        final title = _string(row, 'title');
+        final body = _nullableString(row, 'body') ?? '';
+        final actor = _string(_nestedMap(row, 'user'), 'login', prefix: 'user');
+        final observationId = 'poll:issue:$nodeId:$updatedText';
+        if (row.containsKey('pull_request')) {
+          events.add(
+            NormalizedGitHubEvent.pullRequestOpened(
+              nodeId: nodeId,
+              actor: actor,
+              repository: '$owner/$repository',
+              substation: substation,
+              observationId: observationId,
+              number: number,
+              title: title,
+              body: body,
+            ),
+          );
+        } else {
+          events.add(
+            NormalizedGitHubEvent.issueOpened(
+              nodeId: nodeId,
+              actor: actor,
+              repository: '$owner/$repository',
+              substation: substation,
+              observationId: observationId,
+              number: number,
+              title: title,
+              body: body,
+            ),
+          );
+        }
+        if (latest == null || updated.isAfter(latest)) latest = updated;
+      } on FormatException catch (error, stackTrace) {
+        _reportIntakeRowError(error, stackTrace);
       }
-      if (latest == null || updated.isAfter(latest)) latest = updated;
     }
     cursor = await _deliver(cursor, events);
     if (latest == null || pollStartedAt.isAfter(latest)) latest = pollStartedAt;
@@ -251,6 +257,33 @@ class GitHubReconciler {
       }
     }
     return next;
+  }
+
+  void _reportIntakeRowError(Object error, StackTrace stackTrace) {
+    final observer = _onIntakeRowError;
+    if (observer != null) {
+      try {
+        observer(error, stackTrace);
+        return;
+      } on Object catch (observerError, observerStackTrace) {
+        developer.log(
+          'GitHub reconciler intake-row reporter failed for '
+          'seat=$substation repository=$owner/$repository; '
+          'original error: $error',
+          name: 'github_grid_assets.reconciler',
+          error: observerError,
+          stackTrace: observerStackTrace,
+        );
+        return;
+      }
+    }
+    developer.log(
+      'GitHub reconciler skipped malformed intake row for '
+      'seat=$substation repository=$owner/$repository: $error',
+      name: 'github_grid_assets.reconciler',
+      error: error,
+      stackTrace: stackTrace,
+    );
   }
 }
 

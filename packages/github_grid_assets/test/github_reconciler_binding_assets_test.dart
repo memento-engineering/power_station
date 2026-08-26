@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:beads_dart/beads_dart.dart';
 import 'package:genesis_tree/genesis_tree.dart';
 import 'package:github_grid_assets/github_grid_assets.dart';
+import 'package:grid_engine/grid_engine.dart';
 import 'package:grid_sdk/grid_sdk.dart' show Provider;
 import 'package:grid_sdk/grid_sdk.dart' as sdk;
 import 'package:test/test.dart';
@@ -62,6 +63,7 @@ final class _Factory {
   final configs = <GitHubReconcilerConfig>[];
   final cursors = <GitHubCursorStore>[];
   final emits = <GitHubEventSink>[];
+  final transports = <ExplorationTransport?>[];
   final runtimes = <_RecordingRuntime>[];
 
   GitHubReconcilerRuntime create({
@@ -69,10 +71,12 @@ final class _Factory {
     required GitHubAppClient client,
     required GitHubCursorStore cursors,
     required GitHubEventSink emit,
+    required ExplorationTransport? transport,
   }) {
     configs.add(config);
     this.cursors.add(cursors);
     emits.add(emit);
+    transports.add(transport);
     final runtime = _RecordingRuntime(client: client);
     runtimes.add(runtime);
     return runtime;
@@ -192,6 +196,7 @@ void main() {
     expect(factory.configs, hasLength(1));
     expect(factory.cursors.single, same(cursors));
     expect(factory.emits.single, same(sink));
+    expect(factory.transports.single, isNull);
     expect(runtime, same(factory.runtimes.single));
   });
 

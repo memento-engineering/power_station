@@ -1,7 +1,9 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:genesis_tree/genesis_tree.dart';
 import 'package:github_grid_assets/github_grid_assets.dart';
+import 'package:grid_engine/grid_engine.dart';
 import 'package:grid_runtime/grid_runtime.dart';
 import 'package:grid_sdk/grid_sdk.dart' show Provider;
 import 'package:grid_sdk/grid_sdk.dart' as sdk;
@@ -64,6 +66,17 @@ final class _Cursors implements GitHubCursorStore {
   Future<void> save(GitHubReconcilerCursor cursor) async {}
 }
 
+final class _Flares implements ExplorationTransport {
+  final first = Completer<({String name, Map<String, String> data})>();
+
+  @override
+  void flare(String name, Map<String, String> data) {
+    if (!first.isCompleted) {
+      first.complete((name: name, data: Map<String, String>.of(data)));
+    }
+  }
+}
+
 final class _AmbientOpener implements PrOpener {
   @override
   Future<PullRequestResult> open({
@@ -112,6 +125,7 @@ final class _RecordingRuntime extends GitHubReconcilerRuntime {
 
 final class _Factory {
   final configs = <GitHubReconcilerConfig>[];
+  final transports = <ExplorationTransport?>[];
   final runtimes = <_RecordingRuntime>[];
 
   GitHubReconcilerRuntime create({
@@ -119,8 +133,10 @@ final class _Factory {
     required GitHubAppClient client,
     required GitHubCursorStore cursors,
     required GitHubEventSink emit,
+    required ExplorationTransport? transport,
   }) {
     configs.add(config);
+    transports.add(transport);
     final runtime = _RecordingRuntime(client: client);
     runtimes.add(runtime);
     return runtime;
@@ -154,18 +170,22 @@ Seed _runtimeTree({
   required GitHubReconcilerConfig? config,
   required _Factory factory,
   required void Function(GitHubReconcilerRuntime?) observe,
-}) => Provider<GitHubAppClient>.value(
-  _client,
-  child: Provider<GitHubCursorStore>.value(
-    _Cursors(),
-    child: Provider<GitHubEventSink>.value(
-      (_) async {},
-      child: GitHubReconcilerAssets(
-        config: config,
-        runtimeFactory: factory.create,
-        child: GitHubGridAssets(
-          child: _Probe(
-            (context) => observe(context.watch<GitHubReconcilerRuntime>()),
+  ExplorationTransport? transport,
+}) => InheritedSeed<ServiceBundle>(
+  value: ServiceBundle(transport: transport),
+  child: Provider<GitHubAppClient>.value(
+    _client,
+    child: Provider<GitHubCursorStore>.value(
+      _Cursors(),
+      child: Provider<GitHubEventSink>.value(
+        (_) async {},
+        child: GitHubReconcilerAssets(
+          config: config,
+          runtimeFactory: factory.create,
+          child: GitHubGridAssets(
+            child: _Probe(
+              (context) => observe(context.watch<GitHubReconcilerRuntime>()),
+            ),
           ),
         ),
       ),
@@ -176,6 +196,7 @@ Seed _runtimeTree({
 void main() {
   test('live config constructs and starts at consumer', () async {
     final factory = _Factory();
+    final flares = _Flares();
     GitHubReconcilerRuntime? observed;
     final owner = TreeOwner();
     owner.mountRoot(
@@ -184,12 +205,14 @@ void main() {
           config: _config('one'),
           factory: factory,
           observe: (runtime) => observed = runtime,
+          transport: flares,
         ),
       ),
     );
     owner.flush();
 
     expect(factory.configs, hasLength(1));
+    expect(factory.transports.single, same(flares));
     expect(observed, same(factory.runtimes.single));
     expect(factory.runtimes.single.starts, 1);
 
@@ -197,6 +220,34 @@ void main() {
     await Future<void>.delayed(Duration.zero);
     expect(factory.runtimes.single.stops, 1);
   });
+
+  test(
+    'production factory flares throwing cycles with seat and repo',
+    () async {
+      final flares = _Flares();
+      final runtime = createGitHubReconcilerRuntime(
+        config: _config('owner'),
+        client: _client,
+        cursors: _Cursors(),
+        emit: (_) async {},
+        transport: flares,
+      );
+
+      runtime.start();
+      try {
+        final report = await flares.first.future.timeout(
+          const Duration(seconds: 1),
+        );
+        expect(report.name, 'reconciler.cycleFailed');
+        expect(report.data, containsPair('seat', 'power_station'));
+        expect(report.data, containsPair('repository', 'owner/power_station'));
+        expect(report.data['error'], contains('GitHubPollException'));
+        expect(report.data['stack_trace'], isNotEmpty);
+      } finally {
+        await runtime.stop();
+      }
+    },
+  );
 
   test('disposal stops runtime once', () async {
     final factory = _Factory();

@@ -187,11 +187,11 @@ return checkConcluded(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>({TResult Function( String nodeId,  String actor,  String repository,  String substation,  String observationId,  int number,  String title,  String body)?  issueOpened,TResult Function( String nodeId,  String actor,  String repository,  String substation,  String observationId,  int number,  String title,  String body,  String headBranch)?  pullRequestOpened,TResult Function( String nodeId,  String actor,  String repository,  String substation,  String observationId,  String headBranch,  String checkName,  String conclusion)?  checkConcluded,required TResult orElse(),}) {final _that = this;
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>({TResult Function( String nodeId,  String actor,  String repository,  String substation,  String observationId,  int number,  String title,  String body)?  issueOpened,TResult Function( String nodeId,  String actor,  String repository,  String substation,  String observationId,  int number,  String title,  String body)?  pullRequestOpened,TResult Function( String nodeId,  String actor,  String repository,  String substation,  String observationId,  String headBranch,  String checkName,  String conclusion)?  checkConcluded,required TResult orElse(),}) {final _that = this;
 switch (_that) {
 case IssueOpened() when issueOpened != null:
 return issueOpened(_that.nodeId,_that.actor,_that.repository,_that.substation,_that.observationId,_that.number,_that.title,_that.body);case PullRequestOpened() when pullRequestOpened != null:
-return pullRequestOpened(_that.nodeId,_that.actor,_that.repository,_that.substation,_that.observationId,_that.number,_that.title,_that.body,_that.headBranch);case CheckConcluded() when checkConcluded != null:
+return pullRequestOpened(_that.nodeId,_that.actor,_that.repository,_that.substation,_that.observationId,_that.number,_that.title,_that.body);case CheckConcluded() when checkConcluded != null:
 return checkConcluded(_that.nodeId,_that.actor,_that.repository,_that.substation,_that.observationId,_that.headBranch,_that.checkName,_that.conclusion);case _:
   return orElse();
 
@@ -210,11 +210,11 @@ return checkConcluded(_that.nodeId,_that.actor,_that.repository,_that.substation
 /// }
 /// ```
 
-@optionalTypeArgs TResult when<TResult extends Object?>({required TResult Function( String nodeId,  String actor,  String repository,  String substation,  String observationId,  int number,  String title,  String body)  issueOpened,required TResult Function( String nodeId,  String actor,  String repository,  String substation,  String observationId,  int number,  String title,  String body,  String headBranch)  pullRequestOpened,required TResult Function( String nodeId,  String actor,  String repository,  String substation,  String observationId,  String headBranch,  String checkName,  String conclusion)  checkConcluded,}) {final _that = this;
+@optionalTypeArgs TResult when<TResult extends Object?>({required TResult Function( String nodeId,  String actor,  String repository,  String substation,  String observationId,  int number,  String title,  String body)  issueOpened,required TResult Function( String nodeId,  String actor,  String repository,  String substation,  String observationId,  int number,  String title,  String body)  pullRequestOpened,required TResult Function( String nodeId,  String actor,  String repository,  String substation,  String observationId,  String headBranch,  String checkName,  String conclusion)  checkConcluded,}) {final _that = this;
 switch (_that) {
 case IssueOpened():
 return issueOpened(_that.nodeId,_that.actor,_that.repository,_that.substation,_that.observationId,_that.number,_that.title,_that.body);case PullRequestOpened():
-return pullRequestOpened(_that.nodeId,_that.actor,_that.repository,_that.substation,_that.observationId,_that.number,_that.title,_that.body,_that.headBranch);case CheckConcluded():
+return pullRequestOpened(_that.nodeId,_that.actor,_that.repository,_that.substation,_that.observationId,_that.number,_that.title,_that.body);case CheckConcluded():
 return checkConcluded(_that.nodeId,_that.actor,_that.repository,_that.substation,_that.observationId,_that.headBranch,_that.checkName,_that.conclusion);}
 }
 /// A variant of `when` that fallback to returning `null`
@@ -229,11 +229,11 @@ return checkConcluded(_that.nodeId,_that.actor,_that.repository,_that.substation
 /// }
 /// ```
 
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>({TResult? Function( String nodeId,  String actor,  String repository,  String substation,  String observationId,  int number,  String title,  String body)?  issueOpened,TResult? Function( String nodeId,  String actor,  String repository,  String substation,  String observationId,  int number,  String title,  String body,  String headBranch)?  pullRequestOpened,TResult? Function( String nodeId,  String actor,  String repository,  String substation,  String observationId,  String headBranch,  String checkName,  String conclusion)?  checkConcluded,}) {final _that = this;
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>({TResult? Function( String nodeId,  String actor,  String repository,  String substation,  String observationId,  int number,  String title,  String body)?  issueOpened,TResult? Function( String nodeId,  String actor,  String repository,  String substation,  String observationId,  int number,  String title,  String body)?  pullRequestOpened,TResult? Function( String nodeId,  String actor,  String repository,  String substation,  String observationId,  String headBranch,  String checkName,  String conclusion)?  checkConcluded,}) {final _that = this;
 switch (_that) {
 case IssueOpened() when issueOpened != null:
 return issueOpened(_that.nodeId,_that.actor,_that.repository,_that.substation,_that.observationId,_that.number,_that.title,_that.body);case PullRequestOpened() when pullRequestOpened != null:
-return pullRequestOpened(_that.nodeId,_that.actor,_that.repository,_that.substation,_that.observationId,_that.number,_that.title,_that.body,_that.headBranch);case CheckConcluded() when checkConcluded != null:
+return pullRequestOpened(_that.nodeId,_that.actor,_that.repository,_that.substation,_that.observationId,_that.number,_that.title,_that.body);case CheckConcluded() when checkConcluded != null:
 return checkConcluded(_that.nodeId,_that.actor,_that.repository,_that.substation,_that.observationId,_that.headBranch,_that.checkName,_that.conclusion);case _:
   return null;
 
@@ -333,7 +333,7 @@ as String,
 @JsonSerializable()
 
 class PullRequestOpened implements NormalizedGitHubEvent {
-  const PullRequestOpened({required this.nodeId, required this.actor, required this.repository, required this.substation, required this.observationId, required this.number, required this.title, required this.body, required this.headBranch, final  String? $type}): $type = $type ?? 'pullRequestOpened';
+  const PullRequestOpened({required this.nodeId, required this.actor, required this.repository, required this.substation, required this.observationId, required this.number, required this.title, required this.body, final  String? $type}): $type = $type ?? 'pullRequestOpened';
   factory PullRequestOpened.fromJson(Map<String, dynamic> json) => _$PullRequestOpenedFromJson(json);
 
 @override final  String nodeId;
@@ -344,7 +344,6 @@ class PullRequestOpened implements NormalizedGitHubEvent {
  final  int number;
  final  String title;
  final  String body;
- final  String headBranch;
 
 @JsonKey(name: 'runtimeType')
 final String $type;
@@ -363,16 +362,16 @@ Map<String, dynamic> toJson() {
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is PullRequestOpened&&(identical(other.nodeId, nodeId) || other.nodeId == nodeId)&&(identical(other.actor, actor) || other.actor == actor)&&(identical(other.repository, repository) || other.repository == repository)&&(identical(other.substation, substation) || other.substation == substation)&&(identical(other.observationId, observationId) || other.observationId == observationId)&&(identical(other.number, number) || other.number == number)&&(identical(other.title, title) || other.title == title)&&(identical(other.body, body) || other.body == body)&&(identical(other.headBranch, headBranch) || other.headBranch == headBranch));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is PullRequestOpened&&(identical(other.nodeId, nodeId) || other.nodeId == nodeId)&&(identical(other.actor, actor) || other.actor == actor)&&(identical(other.repository, repository) || other.repository == repository)&&(identical(other.substation, substation) || other.substation == substation)&&(identical(other.observationId, observationId) || other.observationId == observationId)&&(identical(other.number, number) || other.number == number)&&(identical(other.title, title) || other.title == title)&&(identical(other.body, body) || other.body == body));
 }
 
 @JsonKey(includeFromJson: false, includeToJson: false)
 @override
-int get hashCode => Object.hash(runtimeType,nodeId,actor,repository,substation,observationId,number,title,body,headBranch);
+int get hashCode => Object.hash(runtimeType,nodeId,actor,repository,substation,observationId,number,title,body);
 
 @override
 String toString() {
-  return 'NormalizedGitHubEvent.pullRequestOpened(nodeId: $nodeId, actor: $actor, repository: $repository, substation: $substation, observationId: $observationId, number: $number, title: $title, body: $body, headBranch: $headBranch)';
+  return 'NormalizedGitHubEvent.pullRequestOpened(nodeId: $nodeId, actor: $actor, repository: $repository, substation: $substation, observationId: $observationId, number: $number, title: $title, body: $body)';
 }
 
 
@@ -383,7 +382,7 @@ abstract mixin class $PullRequestOpenedCopyWith<$Res> implements $NormalizedGitH
   factory $PullRequestOpenedCopyWith(PullRequestOpened value, $Res Function(PullRequestOpened) _then) = _$PullRequestOpenedCopyWithImpl;
 @override @useResult
 $Res call({
- String nodeId, String actor, String repository, String substation, String observationId, int number, String title, String body, String headBranch
+ String nodeId, String actor, String repository, String substation, String observationId, int number, String title, String body
 });
 
 
@@ -400,7 +399,7 @@ class _$PullRequestOpenedCopyWithImpl<$Res>
 
 /// Create a copy of NormalizedGitHubEvent
 /// with the given fields replaced by the non-null parameter values.
-@override @pragma('vm:prefer-inline') $Res call({Object? nodeId = null,Object? actor = null,Object? repository = null,Object? substation = null,Object? observationId = null,Object? number = null,Object? title = null,Object? body = null,Object? headBranch = null,}) {
+@override @pragma('vm:prefer-inline') $Res call({Object? nodeId = null,Object? actor = null,Object? repository = null,Object? substation = null,Object? observationId = null,Object? number = null,Object? title = null,Object? body = null,}) {
   return _then(PullRequestOpened(
 nodeId: null == nodeId ? _self.nodeId : nodeId // ignore: cast_nullable_to_non_nullable
 as String,actor: null == actor ? _self.actor : actor // ignore: cast_nullable_to_non_nullable
@@ -410,7 +409,6 @@ as String,observationId: null == observationId ? _self.observationId : observati
 as String,number: null == number ? _self.number : number // ignore: cast_nullable_to_non_nullable
 as int,title: null == title ? _self.title : title // ignore: cast_nullable_to_non_nullable
 as String,body: null == body ? _self.body : body // ignore: cast_nullable_to_non_nullable
-as String,headBranch: null == headBranch ? _self.headBranch : headBranch // ignore: cast_nullable_to_non_nullable
 as String,
   ));
 }

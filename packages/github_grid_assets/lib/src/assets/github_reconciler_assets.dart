@@ -1,6 +1,8 @@
 import 'dart:async';
+import 'dart:developer' as developer;
 
 import 'package:genesis_tree/genesis_tree.dart';
+import 'package:grid_engine/grid_engine.dart';
 import 'package:grid_runtime/grid_runtime.dart';
 import 'package:grid_sdk/grid_sdk.dart' show ProviderTreeContext;
 
@@ -65,6 +67,7 @@ typedef GitHubReconcilerRuntimeFactory =
       required GitHubAppClient client,
       required GitHubCursorStore cursors,
       required GitHubEventSink emit,
+      required ExplorationTransport? transport,
     });
 
 /// Creates the production polling runtime for [config].
@@ -73,7 +76,44 @@ GitHubReconcilerRuntime createGitHubReconcilerRuntime({
   required GitHubAppClient client,
   required GitHubCursorStore cursors,
   required GitHubEventSink emit,
+  required ExplorationTransport? transport,
 }) {
+  void report(
+    String flareName,
+    String action,
+    Object error,
+    StackTrace stackTrace,
+  ) {
+    final message =
+        'GitHub reconciler $action for seat=${config.substation} '
+        'repository=${config.owner}/${config.repository}: $error';
+    final data = <String, String>{
+      'seat': config.substation,
+      'repository': '${config.owner}/${config.repository}',
+      'error': '$error',
+      'stack_trace': '$stackTrace',
+    };
+    if (transport != null) {
+      try {
+        transport.flare(flareName, data);
+        return;
+      } on Object catch (flareError, flareStackTrace) {
+        developer.log(
+          '$message; flare $flareName failed: $flareError',
+          name: 'github_grid_assets.reconciler',
+          error: flareError,
+          stackTrace: flareStackTrace,
+        );
+      }
+    }
+    developer.log(
+      message,
+      name: 'github_grid_assets.reconciler',
+      error: error,
+      stackTrace: stackTrace,
+    );
+  }
+
   final reconciler = GitHubReconciler(
     owner: config.owner,
     repository: config.repository,
@@ -81,12 +121,20 @@ GitHubReconcilerRuntime createGitHubReconcilerRuntime({
     client: client,
     cursors: cursors,
     emit: emit,
+    onIntakeRowError: (error, stackTrace) => report(
+      'reconciler.intakeRowSkipped',
+      'skipped malformed intake row',
+      error,
+      stackTrace,
+    ),
   );
   return GitHubReconcilerRuntime(
     installationId: config.installationId,
     reconciler: reconciler,
     coordinator: GitHubPollCoordinator(minimumSpacing: config.minimumSpacing),
     interval: config.interval,
+    onError: (error, stackTrace) =>
+        report('reconciler.cycleFailed', 'cycle failed', error, stackTrace),
   );
 }
 
@@ -118,35 +166,40 @@ final class _GitHubReconcilerAssetsState
   GitHubAppClient? _builtClient;
   GitHubCursorStore? _builtCursors;
   GitHubEventSink? _builtEmit;
+  ExplorationTransport? _builtTransport;
 
   GitHubReconcilerAssets get _assets => seed;
 
   @override
   Seed buildWithChild(TreeContext context, Seed child) {
+    final services = context.dependOnInheritedSeedOfExactType<ServiceBundle>();
     final client = context.watch<GitHubAppClient>();
     final cursors = context.watch<GitHubCursorStore>();
     final emit = context.watch<GitHubEventSink>();
     final config = _assets.config;
+    final transport = services?.transport;
     final enabled =
         config?.arm == GitHubReconcilerArm.live &&
         client != null &&
         cursors != null &&
         emit != null;
     if (!enabled) {
-      _replaceRuntime(null, null, null, null, null);
+      _replaceRuntime(null, null, null, null, null, null);
       return child;
     }
     if (config != _builtConfig ||
         !identical(client, _builtClient) ||
         !identical(cursors, _builtCursors) ||
-        !identical(emit, _builtEmit)) {
+        !identical(emit, _builtEmit) ||
+        !identical(transport, _builtTransport)) {
       final replacement = _assets.runtimeFactory(
         config: config!,
         client: client,
         cursors: cursors,
         emit: emit,
+        transport: transport,
       );
-      _replaceRuntime(replacement, config, client, cursors, emit);
+      _replaceRuntime(replacement, config, client, cursors, emit, transport);
     }
     return InheritedSeed<GitHubReconcilerRuntime>(
       value: _runtime!,
@@ -160,6 +213,7 @@ final class _GitHubReconcilerAssetsState
     GitHubAppClient? client,
     GitHubCursorStore? cursors,
     GitHubEventSink? emit,
+    ExplorationTransport? transport,
   ) {
     final previous = _runtime;
     if (identical(previous, replacement)) return;
@@ -168,6 +222,7 @@ final class _GitHubReconcilerAssetsState
     _builtClient = client;
     _builtCursors = cursors;
     _builtEmit = emit;
+    _builtTransport = transport;
     if (previous != null) unawaited(previous.stop());
   }
 

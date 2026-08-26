@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:beads_dart/beads_dart.dart';
 import 'package:github_grid_assets/github_grid_assets.dart';
 import 'package:test/test.dart';
 
@@ -62,13 +63,39 @@ Map<String, Object?> _issue({bool pull = false}) => <String, Object?>{
   'title': pull ? 'pull' : 'issue',
   'body': null,
   'user': <String, Object?>{'login': 'octocat'},
-  if (pull) 'pull_request': <String, Object?>{},
-  if (pull) 'head': <String, Object?>{'ref': 'grid/two'},
+  if (pull)
+    'pull_request': <String, Object?>{
+      'url': 'https://api.github.test/repos/memento/power/pulls/2',
+      'html_url': 'https://github.test/memento/power/pull/2',
+      'diff_url': 'https://github.test/memento/power/pull/2.diff',
+      'patch_url': 'https://github.test/memento/power/pull/2.patch',
+    },
 };
+
+final class FakeBdRunner implements BdRunner {
+  final argvs = <List<String>>[];
+
+  @override
+  Future<BdResult> run(
+    List<String> args, {
+    Duration? timeout,
+    String? stdin,
+  }) async {
+    argvs.add(List<String>.of(args));
+    final data = args.first == 'list'
+        ? <Object?>[]
+        : <String, Object?>{'id': 'pow-intake'};
+    return BdResult(
+      exitCode: 0,
+      stdout: jsonEncode(<String, Object?>{'schema_version': 1, 'data': data}),
+      stderr: '',
+    );
+  }
+}
 
 void main() {
   test(
-    'intake separates issue and PR, claims before emit, and replays once',
+    'real-shaped /issues pull row completes intake and projects SELF rows',
     () async {
       final transport = FakeGitHubHttpTransport()
         ..responses.addAll(<GitHubHttpResponse>[
@@ -77,6 +104,11 @@ void main() {
           _response(<Object?>[_issue(), _issue(pull: true)], etag: '"issues2"'),
           _response(const <Object?>[], etag: '"pulls2"'),
         ]);
+      final runner = FakeBdRunner();
+      final projection = GitHubIntakeProjection(
+        trust: GitHubSelfTrust(githubUser: 'octocat'),
+        store: BdGitHubIntakeStore(runner),
+      );
       final store = FakeGitHubCursorStore();
       final events = <NormalizedGitHubEvent>[];
       final calls = store.calls;
@@ -90,11 +122,26 @@ void main() {
         emit: (event) async {
           calls.add('emit');
           events.add(event);
+          await projection(event);
         },
       );
       await reconciler.reconcileOnce();
       await reconciler.reconcileOnce();
+
+      expect(_issue(pull: true), contains('pull_request'));
+      expect(_issue(pull: true), isNot(contains('head')));
       expect(events, <Matcher>[isA<IssueOpened>(), isA<PullRequestOpened>()]);
+      final creates = runner.argvs
+          .where((argv) => argv.first == 'create')
+          .toList(growable: false);
+      expect(creates, hasLength(2));
+      for (final argv in creates) {
+        expect(argv, containsAllInOrder(<String>['--defer', '9999-12-31']));
+      }
+      expect(
+        creates.map((argv) => argv[argv.indexOf('--external-ref') + 1]).toSet(),
+        <String>{'github:I_1', 'github:PR_2'},
+      );
       expect(
         calls.indexOf('emit'),
         greaterThan(calls.indexOf('save:poll:issue:I_1:2026-08-09T01:00:00Z')),
@@ -122,6 +169,36 @@ void main() {
       );
     },
   );
+
+  test('malformed intake row reports and does not wedge cursor', () async {
+    final transport = FakeGitHubHttpTransport()
+      ..responses.addAll(<GitHubHttpResponse>[
+        _response(<Object?>[
+          <String, Object?>{'node_id': 1},
+          _issue(),
+        ], etag: '"issues"'),
+        _response(const <Object?>[], etag: '"pulls"'),
+      ]);
+    final store = FakeGitHubCursorStore();
+    final events = <NormalizedGitHubEvent>[];
+    final rowErrors = <Object>[];
+    await GitHubReconciler(
+      owner: 'memento',
+      repository: 'power',
+      substation: 'seat',
+      client: _client(transport),
+      cursors: store,
+      now: () => DateTime.parse('2026-08-09T03:00:00Z'),
+      emit: (event) async => events.add(event),
+      onIntakeRowError: (error, _) => rowErrors.add(error),
+    ).reconcileOnce();
+
+    expect(rowErrors.single, isA<FormatException>());
+    expect(events.single, isA<IssueOpened>());
+    expect(store.cursor.since, DateTime.parse('2026-08-09T03:00:00Z'));
+    expect(store.cursor.etags, containsPair('intake/issues', '"issues"'));
+    expect(transport.requests, hasLength(2));
+  });
 
   test('sink failure leaves claimed observation durable', () async {
     final transport = FakeGitHubHttpTransport()
@@ -242,27 +319,27 @@ void main() {
     expect(transport.requests.last.uri.path, contains('a%2Fb/check-runs'));
   });
 
-  test('malformed shapes and non-success statuses fail loudly', () async {
-    for (final response in <GitHubHttpResponse>[
-      _response(const <String, Object?>{}),
-      _response(<Object?>[
-        <String, Object?>{'node_id': 1},
-      ]),
-      _response('', status: 500),
-    ]) {
-      final transport = FakeGitHubHttpTransport()..responses.add(response);
-      final future = GitHubReconciler(
-        owner: 'o',
-        repository: 'r',
-        substation: 's',
-        client: _client(transport),
-        cursors: FakeGitHubCursorStore(),
-        emit: (_) async {},
-      ).reconcileOnce();
-      await expectLater(
-        future,
-        throwsA(anyOf(isA<FormatException>(), isA<GitHubPollException>())),
-      );
-    }
-  });
+  test(
+    'malformed top-level shapes and non-success statuses fail loudly',
+    () async {
+      for (final response in <GitHubHttpResponse>[
+        _response(const <String, Object?>{}),
+        _response('', status: 500),
+      ]) {
+        final transport = FakeGitHubHttpTransport()..responses.add(response);
+        final future = GitHubReconciler(
+          owner: 'o',
+          repository: 'r',
+          substation: 's',
+          client: _client(transport),
+          cursors: FakeGitHubCursorStore(),
+          emit: (_) async {},
+        ).reconcileOnce();
+        await expectLater(
+          future,
+          throwsA(anyOf(isA<FormatException>(), isA<GitHubPollException>())),
+        );
+      }
+    },
+  );
 }
