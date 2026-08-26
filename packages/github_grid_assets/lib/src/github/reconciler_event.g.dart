@@ -41,7 +41,6 @@ PullRequestOpened _$PullRequestOpenedFromJson(Map<String, dynamic> json) =>
       number: (json['number'] as num).toInt(),
       title: json['title'] as String,
       body: json['body'] as String,
-      headBranch: json['headBranch'] as String,
       $type: json['runtimeType'] as String?,
     );
 
@@ -55,7 +54,6 @@ Map<String, dynamic> _$PullRequestOpenedToJson(PullRequestOpened instance) =>
       'number': instance.number,
       'title': instance.title,
       'body': instance.body,
-      'headBranch': instance.headBranch,
       'runtimeType': instance.$type,
     };
 

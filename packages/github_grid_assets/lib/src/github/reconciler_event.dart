@@ -32,7 +32,6 @@ sealed class NormalizedGitHubEvent with _$NormalizedGitHubEvent {
     required int number,
     required String title,
     required String body,
-    required String headBranch,
   }) = PullRequestOpened;
 
   /// A completed check run observed on a station branch.

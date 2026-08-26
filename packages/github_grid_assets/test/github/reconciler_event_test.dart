@@ -29,6 +29,10 @@ void main() {
       isA<CheckConcluded>(),
     ]);
     expect(events.map((event) => event.toJson()).toList(), json);
+    final pull = events.whereType<PullRequestOpened>().single;
+    expect(pull.toJson(), isNot(contains('headBranch')));
+    final check = events.whereType<CheckConcluded>().single;
+    expect(check.headBranch, 'grid/work');
     final encoded = jsonEncode(events.map((event) => event.toJson()).toList());
     for (final rawKey in <String>['pull_request', 'check_runs', 'sender']) {
       expect(encoded, isNot(contains(rawKey)));
