@@ -380,12 +380,11 @@ class AgentCapability extends ProcessCapability {
   StepSignal interpretEvent(RuntimeEvent event) => _jobSignal(event);
 
   /// The CAPTURE-ONLY usage telemetry (FT-2): on a clean completion, read the
-  /// harness's `--output-format json` envelope the resolved harness redirected
-  /// (claude) and contribute tokensIn/tokensOut/costUsd/numTurns/
-  /// harnessDurationMs/model to `grid.result.<nodePath>.*` — `model` being the
-  /// id(s) that ACTUALLY ran (bead `pow-edp`). FAIL-SAFE: an absent /
-  /// malformed / harness-without-usage envelope yields no fields (null), NEVER a
-  /// throw — telemetry can never fail, gate, or delay the agent step.
+  /// resolved harness's declared JSON usage envelope and contribute
+  /// tokensIn/tokensOut/costUsd/premiumRequests/numTurns/harnessDurationMs/model
+  /// to `grid.result.<nodePath>.*`. FAIL-SAFE: an absent, malformed, or
+  /// harness-without-usage envelope yields no fields (null), NEVER a throw —
+  /// telemetry can never fail, gate, or delay the agent step.
   @override
   Future<Map<String, String>?> result(
     TreeContext context,

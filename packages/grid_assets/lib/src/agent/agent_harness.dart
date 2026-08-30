@@ -401,10 +401,13 @@ const Map<String, AgentEnvironment> kBuiltinEnvironments = {
   ),
   'copilot': AgentEnvironment(
     command: 'copilot',
-    argsAppend: ['--allow-all-tools'],
+    argsAppend: ['--allow-all-tools', '-s'],
     promptMode: PromptMode.flag,
     promptFlag: '-p',
     target: InferenceTarget.providerManaged,
+    usageJsonArgs: ['--output-format', 'json'],
+    resumeFlag: '--resume',
+    resumeStyle: ResumeStyle.flag,
   ),
   'pi': AgentEnvironment(
     command: 'pi',
