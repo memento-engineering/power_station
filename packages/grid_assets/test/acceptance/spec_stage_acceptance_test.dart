@@ -265,7 +265,19 @@ void main() {
       expect(brief, contains('bd update tg-1 --actor specify --acceptance'));
       expect(brief, contains('bd update tg-1 --actor specify --design'));
       expect(brief, contains('## ADR Alignment'));
-      expect(brief, contains('docs/adr/*.md'));
+      expect(brief, contains(localDecisionRegisterListCommand()));
+      expect(
+        brief,
+        contains(
+          localDecisionRegisterGrepCommand(
+            r'<keyword1>\|<keyword2>\|<keyword3>',
+          ),
+        ),
+      );
+      for (final directory in kLocalDecisionRegisterDirectories) {
+        expect(brief, contains(directory));
+      }
+      expect(brief, contains('the_grid#admission-authority-boundary'));
       expect(brief, contains('Pre-convene re-validation'));
 
       // 2) specify completes → the spec committee's hygiene step runs for

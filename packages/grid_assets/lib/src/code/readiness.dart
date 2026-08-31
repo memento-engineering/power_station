@@ -79,6 +79,7 @@ import '../agent/environment_registry.dart';
 import '../agent/site_binding.dart';
 import '../agent/usage_report.dart';
 import 'committee.dart';
+import 'decision_register.dart';
 import 'respec_ledger.dart';
 
 /// The deterministic intake-contract step id (the ladder's head — zero agents).
@@ -435,6 +436,7 @@ class ReadinessCriticCapability extends CriticCapability {
     required int round,
   }) {
     final path = p.join(critiqueDirPath(workspaceDir), '$rubric.json');
+    final registerListCommand = localDecisionRegisterListCommand();
     final b = StringBuffer()
       ..writeln('# Spec-readiness intake — rubric: `$rubric`')
       ..writeln()
@@ -456,11 +458,13 @@ class ReadinessCriticCapability extends CriticCapability {
       ..writeln('## Stay cheap — this is a lens, not a committee')
       ..writeln(
         'You are standing in the bead\'s worktree. Spend a BOUNDED look, not an '
-        'exploration: `ls docs/adr/` to see what register exists, and grep ONLY '
-        'the surfaces the bead actually names. Do NOT design the change, do NOT '
-        'write a plan, do NOT read the tree broadly — that is the architect\'s '
-        'job downstream, and duplicating it here defeats this lane\'s purpose. '
-        'Judge the BRIEF, not the codebase.',
+        'exploration: run `$registerListCommand` to see what register exists. '
+        'The command searches `docs/adr/` and `docs/decisions/`; a missing '
+        'directory is absent, not an error. Grep ONLY the surfaces the bead '
+        'actually names. Do NOT design the change, do NOT write a plan, do NOT '
+        'read the tree broadly — that is the architect\'s job downstream, and '
+        'duplicating it here defeats this lane\'s purpose. Judge the BRIEF, not '
+        'the codebase.',
       )
       ..writeln()
       ..writeln('## Your verdict')

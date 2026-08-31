@@ -1,14 +1,22 @@
 # adr-alignment
 
-Does the spec respect the substation's recorded decisions? Every substation
-keeps its register under `docs/adr/` — ratified ADRs plus `ADR-0000`, the
-living AI-decision register whose `A<n>` amendments record autonomous
-decisions (pending until promoted, but binding on new work unless explicitly
-contradicted by a human ruling). A spec that touches a surface those decisions
-govern must cite the relevant decision and either implement it, extend it, or
-explicitly propose overriding it. A spec that silently contradicts a recorded
-decision is the most expensive failure this committee can miss: it undoes
-deliberated work, usually unnoticed until the contradiction ships.
+Does the spec respect the substation's recorded decisions? A substation's local
+decision register may contain `docs/adr/`, `docs/decisions/`, or both. Treat a
+missing directory as absent and continue with the other. The legacy register
+contains ratified ADRs plus `ADR-0000`, the living AI-decision register whose
+`A<n>` amendments record autonomous decisions (pending until promoted, but
+binding on new work unless explicitly contradicted by a human ruling). A spec
+that touches a surface those decisions govern must cite the relevant decision
+and either implement it, extend it, or explicitly propose overriding it. A spec
+that silently contradicts a recorded decision is the most expensive failure
+this committee can miss: it undoes deliberated work, usually unnoticed until
+the contradiction ships.
+
+Legacy ADR citations name the file plus an ADR number or `A<n>` clause, for
+example `docs/adr/ADR-0000-ai-decision-register.md A17(4)`. Entries in
+`docs/decisions/` use `<repo>#<slug>`, for example
+`the_grid#admission-authority-boundary`; migrated entries may also carry
+`register.legacy-id` so their old citations continue to resolve.
 
 You are blind to the other lanes' concerns (fit, testability, plan detail) —
 weigh ONLY decision alignment.
@@ -19,9 +27,9 @@ Enumerate the decisions that COULD apply before judging novelty. Extract 3-6
 keywords from the bead's title + touched surfaces, then run, from the worktree
 root:
 
-```
-ls docs/adr/
-grep -li "<keyword1>\|<keyword2>\|<keyword3>" docs/adr/*.md
+```sh
+for register in docs/adr docs/decisions; do [ ! -d "$register" ] || find "$register" -type f -name '*.md' -print; done
+for register in docs/adr docs/decisions; do [ ! -d "$register" ] || find "$register" -type f -name '*.md' -exec grep -li "<keyword1>\|<keyword2>\|<keyword3>" {} +; done
 ```
 
 Read every hit — including ADR-0000's amendments, which often carry the
@@ -33,11 +41,11 @@ verifiable.
 ## Bands
 
 - **A** — the spec's `## ADR Alignment` section cites every load-bearing
-  decision by file path AND clause (an ADR number or an `A<n>` amendment id)
-  with a one-sentence quote of the constraining clause, and states how the
-  plan aligns (or how it extends the decision, by name). Where no decision
-  applies, the section says so explicitly with the grep keywords that verified
-  it.
+  decision by file path plus clause (an ADR number or an `A<n>` amendment id),
+  or by its `<repo>#<slug>` identity, with a one-sentence quote of the
+  constraining clause, and states how the plan aligns (or how it extends the
+  decision, by name). Where no decision applies, the section says so explicitly
+  with the grep keywords that verified it.
 - **B** — the relevant decision is cited, but without the load-bearing clause:
   a reader can tell WHICH decision is implemented but not which clause
   constrains the work.

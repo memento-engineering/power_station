@@ -611,6 +611,19 @@ void main() {
         expect(prompt, contains('INTENT, NOT PRESENCE'));
         expect(prompt, contains('"ratified":false'));
         expect(prompt, contains('"removesOffence":false'));
+        expect(prompt, contains(localDecisionRegisterListCommand()));
+        expect(
+          prompt,
+          contains(
+            localDecisionRegisterGrepCommand(
+              r'<keyword1>\|<keyword2>\|<keyword3>',
+            ),
+          ),
+        );
+        for (final directory in kLocalDecisionRegisterDirectories) {
+          expect(prompt, contains(directory));
+        }
+        expect(prompt, contains('the_grid#admission-authority-boundary'));
         expect(prompt, isNot(contains('amendments BIND too')));
       },
     );

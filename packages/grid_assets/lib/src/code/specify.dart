@@ -30,8 +30,8 @@
 /// the bd CLI: testable `--acceptance` checkboxes; a `--design` body carrying
 /// `## Implementation Plan` (literal Dart code / exact file paths / exact
 /// `dart test` commands / conventional-commit messages), `## Touches`, a
-/// MANDATORY `## ADR Alignment` (grep the SUBSTATION's `docs/adr/` — the
-/// ADR-0000 register, the org invariant — and cite load-bearing clauses), and
+/// MANDATORY `## ADR Alignment` (grep the SUBSTATION's `docs/adr/` and
+/// `docs/decisions/` registers and cite load-bearing clauses), and
 /// a `## Validation Plan` mapped 1:1 to acceptance; plus the `validation_plan`
 /// metadata command the CODE committee's gating lane later runs. Before it
 /// exits it re-validates the drafted spec against the LIVE worktree (grep
@@ -91,6 +91,7 @@ import '../agent/environment_registry.dart';
 import '../agent/site_binding.dart';
 import '../agent/usage_report.dart';
 import 'committee.dart';
+import 'decision_register.dart';
 import 'discovery.dart';
 import 'readiness.dart';
 import 'respec.dart';
@@ -579,6 +580,10 @@ AgentBrief buildSpecifyBrief(
   final title = bead.title.isNotEmpty ? bead.title : 'work bead ${bead.id}';
   final substation = bead.metadata['rig'];
   final id = bead.id;
+  final registerListCommand = localDecisionRegisterListCommand();
+  final registerGrepCommand = localDecisionRegisterGrepCommand(
+    r'<keyword1>\|<keyword2>\|<keyword3>',
+  );
   final t = StringBuffer()
     ..writeln('# Specify: $title')
     ..writeln()
@@ -676,15 +681,18 @@ AgentBrief buildSpecifyBrief(
     ..writeln()
     ..writeln(
       '**## ADR Alignment** — MANDATORY. Grep the substation\'s ADR register '
-      'FIRST, from the worktree root: `ls docs/adr/` then `grep -li '
-      '"<keyword1>\\|<keyword2>" docs/adr/*.md` with 3-6 keywords from the '
-      'bead\'s title and touched surfaces (the register\'s ADR-0000 is the '
-      'living AI-decision register — its pending `A<n>` amendments bind too). '
-      'Cite each load-bearing ADR/amendment by file path AND clause (e.g. '
-      '`docs/adr/ADR-0000-ai-decision-register.md` A9 — "<one-sentence '
-      'quote>") and say how the plan aligns. If grep returns nothing '
-      'relevant, write exactly: No ADR applies — verified via grep on '
-      '`<keywords>`.',
+      'FIRST, from the worktree root. Run `$registerListCommand`, then '
+      '`$registerGrepCommand` with 3-6 keywords from the bead\'s title and '
+      'touched surfaces. Both commands search `docs/adr/` and '
+      '`docs/decisions/`; a missing directory is absent, not an error. Cite a '
+      'legacy ADR by file path plus ADR or `A<n>` clause. Cite a '
+      '`docs/decisions/` entry as `<repo>#<slug>`, for example '
+      '`the_grid#admission-authority-boundary`; a migrated entry may also '
+      'preserve its old citation in `register.legacy-id`. The legacy '
+      'register\'s ADR-0000 is the living AI-decision register — its pending '
+      '`A<n>` amendments bind too. Quote each load-bearing decision and say '
+      'how the plan aligns. If grep returns nothing relevant, write exactly: '
+      'No ADR applies — verified via grep on `<keywords>`.',
     )
     ..writeln()
     ..writeln(
@@ -881,6 +889,10 @@ class SpecCriticCapability extends CriticCapability {
     required int round,
   }) {
     final path = p.join(workspaceDir, '.grid', 'critique', '$rubric.json');
+    final registerListCommand = localDecisionRegisterListCommand();
+    final registerGrepCommand = localDecisionRegisterGrepCommand(
+      r'<keyword1>\|<keyword2>\|<keyword3>',
+    );
     final b = StringBuffer()
       ..writeln('# Spec review — rubric: `$rubric`')
       ..writeln()
@@ -902,10 +914,15 @@ class SpecCriticCapability extends CriticCapability {
         'You are standing in the bead\'s worktree. Verify the spec\'s claims '
         'against the REAL tree before grading: grep/read the files and '
         'symbols the plan names (a named symbol that neither resolves nor is '
-        'announced as new is a finding, not a style nit), and check the '
-        'substation\'s ADR register under `docs/adr/` for the decisions the '
-        'spec cites — or should have cited. A claim you cannot verify grades '
-        'down; do not take the spec\'s word for the world.',
+        'announced as new is a finding, not a style nit). Run '
+        '`$registerListCommand`, then `$registerGrepCommand`. Both commands '
+        'search `docs/adr/` and `docs/decisions/`; a missing directory is '
+        'absent, not an error. Cite a legacy ADR by file path plus ADR or '
+        '`A<n>` clause. Cite a `docs/decisions/` entry as `<repo>#<slug>`, for '
+        'example `the_grid#admission-authority-boundary`; a migrated entry may '
+        'also preserve its old citation in `register.legacy-id`. Check the '
+        'decisions the spec cites — or should have cited. A claim you cannot '
+        'verify grades down; do not take the spec\'s word for the world.',
       )
       ..writeln()
       ..writeln('## Your verdict')

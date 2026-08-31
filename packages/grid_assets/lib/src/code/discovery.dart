@@ -92,6 +92,7 @@ import '../agent/site_binding.dart';
 import '../agent/usage_report.dart';
 import '../search/station_search.dart';
 import 'committee.dart';
+import 'decision_register.dart';
 import 'readiness.dart';
 import 'respec.dart';
 import 'route_failure.dart';
@@ -213,8 +214,10 @@ class DiscoveryFinding {
   /// What kind of standard is cited.
   final ViolationKind kind;
 
-  /// The CITATION — `docs/adr/ADR-0000-ai-decision-register.md A17(4)`, or the
-  /// skill's path. EMPTY ⇒ a vibe: it can never gate.
+  /// The CITATION — a legacy clause such as
+  /// `docs/adr/ADR-0000-ai-decision-register.md A17(4)`, or a decisions-register
+  /// slug such as `the_grid#admission-authority-boundary`. EMPTY means a vibe
+  /// and can never gate.
   final String standard;
 
   /// The cited clause, quoted.
@@ -1547,6 +1550,10 @@ class DiscoveryLensCapability extends ProcessCapability {
     DiscoveryAnchors? gather,
   }) {
     final path = lensReportPath(workspaceDir, lens);
+    final registerListCommand = localDecisionRegisterListCommand();
+    final registerGrepCommand = localDecisionRegisterGrepCommand(
+      r'<keyword1>\|<keyword2>\|<keyword3>',
+    );
     final b = StringBuffer()
       ..writeln('# Discovery — lens: `$lens`')
       ..writeln()
@@ -1598,10 +1605,14 @@ class DiscoveryLensCapability extends ProcessCapability {
       ..writeln()
       ..writeln('## What counts as an OFFENCE (the gate is CITE-THE-OFFENCE)')
       ..writeln(
-        'The citable standard is: a RATIFIED ADR under `docs/adr/`, or a RATIFIED '
-        'ADR-0000 `A<n>` amendment (its Status line reads Ratified), or an '
-        'applicable SKILL\'s instructions. Skills TEACH how; ADRs RATIFY the '
-        'specific.',
+        'Run `$registerListCommand`, then `$registerGrepCommand`. Both commands '
+        'search `docs/adr/` and `docs/decisions/`; a missing directory is '
+        'absent, not an error. Cite a legacy ADR by file path plus ADR or '
+        '`A<n>` clause. Cite a `docs/decisions/` entry as `<repo>#<slug>`, for '
+        'example `the_grid#admission-authority-boundary`; a migrated entry may '
+        'also preserve its old citation in `register.legacy-id`. The citable '
+        'standard is a RATIFIED local decision, or an applicable SKILL\'s '
+        'instructions. Skills TEACH how; decisions RATIFY the specific.',
       )
       ..writeln(
         '- **RATIFIED-ONLY HOLDS.** A PENDING ADR-0000 amendment (Status: '
@@ -1661,7 +1672,8 @@ class DiscoveryLensCapability extends ProcessCapability {
         '"field":"title|description|design|acceptance_criteria|notes",'
         '"excerpt":"<verbatim field excerpt>"}}],'
         '"violations":[{"kind":"decision|skill|pattern",'
-        '"standard":"<docs/adr/ADR-0000-ai-decision-register.md A17(4)>",'
+        '"standard":"<docs/adr/ADR-0000-ai-decision-register.md A17(4) OR '
+        'the_grid#admission-authority-boundary>",'
         '"quote":"<the clause, verbatim, including its Status line>",'
         '"contradiction":"<what this bead does that contradicts it>",'
         '"acknowledged":false,"ratified":false,"removesOffence":false,'
@@ -1693,31 +1705,37 @@ class DiscoveryLensCapability extends ProcessCapability {
 /// The per-lens angle — the ONE thing that differs between the three lanes.
 /// Public so the Packaged-AI-Asset mirror (`extension/prompts/discovery.md`)
 /// renders the SAME brief the in-pipeline lens reads.
-String lensBrief(String lens) => switch (lens) {
-  kCodeLens =>
-    'CODE CONTEXT. Find the code this bead will touch: the files and symbols it '
-        'names (and the ones it SHOULD have named), the conventions that govern '
-        'them, the tests that fence them. Say what the architect must read before '
-        'it plans. Cite an offence when the bead contradicts a convention with a '
-        'NAMED precedent in the tree.',
-  kDecisionLens =>
-    'DECISION CONTEXT. Read `docs/adr/` (every ADR, and every `A<n>` amendment of '
-        'the ADR-0000 register) and the skills that apply to this work. Report '
-        'the decisions the architect must honour, and CITE any this bead '
-        'contradicts. Only a RATIFIED standard can HOLD the bead: a PENDING '
-        'amendment is ADVISORY (set `"ratified": false` and it rides as a flag). '
-        'This is the lens the violation gate is mostly built on: be precise, and '
-        'be QUOTED — grep the heading AND its Status line before you cite it, '
-        'because an amendment that was removed from the register does not bind '
-        'anything.',
-  kPriorArtLens =>
-    'PRIOR ART. What has already been done, decided, or attempted here? Read the '
-        'prior-art hits above, the git history of the surfaces the bead names, '
-        'and the beads they came from. Report what the architect can REUSE or '
-        'must EXTEND rather than duplicate — and cite an offence when this bead '
-        'redoes something a decision already settled.',
-  _ => 'Explore the bead\'s surfaces and report what the architect needs.',
-};
+String lensBrief(String lens) {
+  final registerListCommand = localDecisionRegisterListCommand();
+  final registerGrepCommand = localDecisionRegisterGrepCommand(
+    r'<keyword1>\|<keyword2>\|<keyword3>',
+  );
+  return switch (lens) {
+    kCodeLens =>
+      'CODE CONTEXT. Find the code this bead will touch: the files and symbols '
+          'it names (and the ones it SHOULD have named), the conventions that '
+          'govern them, the tests that fence them. Say what the architect must '
+          'read before it plans. Cite an offence when the bead contradicts a '
+          'convention with a NAMED precedent in the tree.',
+    kDecisionLens =>
+      'DECISION CONTEXT. Run `$registerListCommand`, then '
+          '`$registerGrepCommand`; read every hit from `docs/adr/` and '
+          '`docs/decisions/`. A missing directory is absent, not an error. '
+          'Report the decisions the architect must honour and CITE any this '
+          'bead contradicts. Legacy citations name the file plus ADR or `A<n>` '
+          'clause; `docs/decisions/` citations use `<repo>#<slug>`. Only a '
+          'RATIFIED standard can HOLD the bead: a PENDING amendment is '
+          'ADVISORY (set `"ratified": false` and it rides as a flag). Be '
+          'QUOTED: read the decision and its status before citing it.',
+    kPriorArtLens =>
+      'PRIOR ART. What has already been done, decided, or attempted here? Read '
+          'the prior-art hits above, the git history of the surfaces the bead '
+          'names, and the beads they came from. Report what the architect can '
+          'REUSE or must EXTEND rather than duplicate — and cite an offence '
+          'when this bead redoes something a decision already settled.',
+    _ => 'Explore the bead\'s surfaces and report what the architect needs.',
+  };
+}
 
 /// Reads ONE lens's report — the A13(3) transport stack, minus the fail-closed
 /// default (a gather lane's silence is MISSING, never a verdict):

@@ -23,12 +23,14 @@ that an architect can turn it into testable `- [ ]` criteria backed by exact
 architect's output — but "make it better" gives them nothing to convert.
 
 **3. Cited constraints.** The bead names the surfaces it touches (packages,
-files, symbols) and the constraints that bind them — the substation's `docs/adr/`
-register (ADR-0000's pending `A<n>` amendments bind too), the memento house set
-(freezed sealed unions consumed with exhaustive `switch`; Fakes, not mocks), and
-any sibling bead it shares state with. A bead that cites nothing forces the
-architect to GUESS which decisions apply — and a guessed ADR alignment is exactly
-what the spec committee rejects.
+files, symbols) and the constraints that bind them — the substation's local
+decision register under `docs/adr/`, `docs/decisions/`, or both.
+Treat a missing directory as absent and continue with the other; ADR-0000's
+pending `A<n>` amendments bind too. The constraints also include the memento
+house set (freezed sealed unions consumed with exhaustive `switch`; Fakes, not
+mocks) and any sibling bead it shares state with. A bead that cites nothing
+forces the architect to GUESS which decisions apply — and a guessed ADR
+alignment is exactly what the spec committee rejects.
 
 **4. Decided approach.** The load-bearing calls are MADE, not deferred. An
 architect can choose a file, a symbol, a test — they cannot choose the bead's

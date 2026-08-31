@@ -471,6 +471,10 @@ void main() {
         contains('"nodePath":"pow-kzx/spec_review/readiness","round":0}'),
       );
       expect(prompt, contains('Stay cheap'));
+      expect(prompt, contains(localDecisionRegisterListCommand()));
+      for (final directory in kLocalDecisionRegisterDirectories) {
+        expect(prompt, contains(directory));
+      }
       expect(
         prompt.trimRight(),
         endsWith('never reuse one writer\'s temporary path in another writer.'),
