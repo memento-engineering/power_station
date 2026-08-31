@@ -16,9 +16,21 @@ is TWO things, and nothing else:
 {{bead}}
 
 ## What counts as an OFFENCE (the gate is CITE-THE-OFFENCE)
-The citable standard is: a RATIFIED ADR under `docs/adr/`, or a RATIFIED ADR-0000
-`A<n>` amendment (its Status line reads Ratified), or an applicable SKILL's
-instructions. Skills TEACH how; ADRs RATIFY the specific.
+A substation's local decision register may contain `docs/adr/`,
+`docs/decisions/`, or both. Treat a missing directory as absent and continue
+with the other.
+
+```sh
+for register in docs/adr docs/decisions; do [ ! -d "$register" ] || find "$register" -type f -name '*.md' -print; done
+for register in docs/adr docs/decisions; do [ ! -d "$register" ] || find "$register" -type f -name '*.md' -exec grep -li "<keyword1>\|<keyword2>\|<keyword3>" {} +; done
+```
+
+Legacy ADR citations name the file plus an ADR number or `A<n>` clause. Entries
+in `docs/decisions/` use `<repo>#<slug>`, for example
+`the_grid#admission-authority-boundary`; migrated entries may also carry
+`register.legacy-id` so their old citations continue to resolve. The citable
+standard is a RATIFIED local decision, or an applicable SKILL's instructions.
+Skills TEACH how; decisions RATIFY the specific.
 
 - **RATIFIED-ONLY HOLDS.** A PENDING ADR-0000 amendment (Status: pending) is
   ADVISORY, NOT binding: cite it if the bead contradicts it, but set
@@ -75,7 +87,7 @@ Write your report as JSON to `.grid/discovery/{{lens}}.json`, resolved from the
 worktree root — write it there regardless of your current working directory:
 
 ```json
-{"lens":"{{lens}}","version":1,"context":[{"note":"<what the architect needs to know>","source":"<non-bead file or ADR source>","beadCitation":{"beadId":"<actual bead id>","field":"title|description|design|acceptance_criteria|notes","excerpt":"<verbatim field excerpt>"}}],"violations":[{"kind":"decision|skill|pattern","standard":"<docs/adr/ADR-0000-ai-decision-register.md A17(4)>","quote":"<the clause, verbatim, including its Status line>","contradiction":"<what this bead does that contradicts it>","contradicts":true,"acknowledged":false,"ratified":false,"removesOffence":false,"precedent":""}]}
+{"lens":"{{lens}}","version":1,"context":[{"note":"<what the architect needs to know>","source":"<non-bead file or decision source>","beadCitation":{"beadId":"<actual bead id>","field":"title|description|design|acceptance_criteria|notes","excerpt":"<verbatim field excerpt>"}}],"violations":[{"kind":"decision|skill|pattern","standard":"<docs/adr/ADR-0000-ai-decision-register.md A17(4) OR the_grid#admission-authority-boundary>","quote":"<the clause, verbatim, including its Status line>","contradiction":"<what this bead does that contradicts it>","contradicts":true,"acknowledged":false,"ratified":false,"removesOffence":false,"precedent":""}]}
 ```
 
 Both arrays may be EMPTY — a clean bead with no findings is a real, expected

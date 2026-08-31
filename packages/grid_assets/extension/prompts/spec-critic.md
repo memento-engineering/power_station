@@ -15,8 +15,20 @@ critics might grade.
 ## Verify against the live tree
 You are standing in the bead's worktree. Verify the spec's claims against the
 REAL tree before grading: grep/read the files and symbols the plan names, and
-check the substation's ADR register under `docs/adr/` for the decisions the
-spec cites — or should have cited. A claim you cannot verify grades down.
+check the substation's local decision register for the decisions the spec cites
+— or should have cited. It may contain `docs/adr/`, `docs/decisions/`, or both;
+treat a missing directory as absent and continue with the other.
+
+```sh
+for register in docs/adr docs/decisions; do [ ! -d "$register" ] || find "$register" -type f -name '*.md' -print; done
+for register in docs/adr docs/decisions; do [ ! -d "$register" ] || find "$register" -type f -name '*.md' -exec grep -li "<keyword1>\|<keyword2>\|<keyword3>" {} +; done
+```
+
+Legacy ADR citations name the file plus an ADR number or `A<n>` clause. Entries
+in `docs/decisions/` use `<repo>#<slug>`, for example
+`the_grid#admission-authority-boundary`; migrated entries may also carry
+`register.legacy-id` so their old citations continue to resolve. A claim you
+cannot verify grades down.
 
 ## Your verdict
 Grade the spec A (best) through F (worst) against `{{rubric}}` ONLY, then write

@@ -8,8 +8,9 @@
 // five spec resources + the spec-critic prompt; and — the acceptance's
 // grep-clean fence — the ported prose carries NO residue of its deprecated
 // source context (no Go tooling, no gas-city/factory vocabulary, no foreign
-// CLI or ADR paths): the rewrite is for Dart tooling, the substation docs/adr
-// register, this committee's own machinery, and the station status model.
+// CLI or ADR paths): the rewrite is for Dart tooling, the substation's local
+// decision registers, this committee's own machinery, and the station status
+// model.
 // Offline only — reads bundled files; no live anything.
 import 'dart:io';
 
@@ -135,10 +136,12 @@ void main() {
       expect(all, contains('Fakes'));
     });
 
-    test('adr-alignment names the SUBSTATION register (docs/adr + the '
-        'ADR-0000 amendment register), never a foreign home', () {
+    test('adr-alignment names both SUBSTATION register directories and the '
+        'ADR-0000 amendment register, never a foreign home', () {
       final text = loader.loadRubric('adr-alignment');
-      expect(text, contains('docs/adr/'));
+      for (final directory in kLocalDecisionRegisterDirectories) {
+        expect(text, contains(directory));
+      }
       expect(text, contains('ADR-0000'));
       expect(text, contains('A<n>'));
     });
@@ -300,6 +303,46 @@ void main() {
       expect(manifest, contains('prompts/discovery.md'));
     });
   });
+
+  test('all local-decision assets name both register directories', () {
+    final assets = <String, String>{
+      'rubrics/adr-alignment.md': loader.loadRubric('adr-alignment'),
+      'rubrics/bead-readiness.md': loader.loadRubric(kReadinessRubric),
+      'prompts/readiness.md': loader.loadPromptTemplate('readiness'),
+      'prompts/spec-critic.md': loader.loadPromptTemplate('spec-critic'),
+      'prompts/discovery.md': loader.loadPromptTemplate('discovery'),
+    };
+
+    for (final entry in assets.entries) {
+      for (final directory in kLocalDecisionRegisterDirectories) {
+        expect(entry.value, contains(directory), reason: entry.key);
+      }
+      expect(entry.value, contains('missing directory'), reason: entry.key);
+    }
+  });
+
+  test(
+    'searching assets guard missing registers and accept both citations',
+    () {
+      final searchingAssets = [
+        loader.loadRubric('adr-alignment'),
+        loader.loadPromptTemplate('readiness'),
+        loader.loadPromptTemplate('spec-critic'),
+        loader.loadPromptTemplate('discovery'),
+      ];
+
+      for (final text in searchingAssets) {
+        expect(text, contains(r'[ ! -d "$register" ]'));
+      }
+      for (final text in [
+        loader.loadRubric('adr-alignment'),
+        loader.loadPromptTemplate('discovery'),
+      ]) {
+        expect(text, contains('ADR-0000-ai-decision-register.md A17(4)'));
+        expect(text, contains('the_grid#admission-authority-boundary'));
+      }
+    },
+  );
 
   test('discovery prompts require structured FOREIGN bead citations', () {
     final runtime = const DiscoveryLensCapability().buildLensPrompt(

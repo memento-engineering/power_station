@@ -14,11 +14,18 @@ specify agent and no 4-critic committee will run.
 {{bead}}
 
 ## Stay cheap — this is a lens, not a committee
-Spend a BOUNDED look, not an exploration: list the substation's `docs/adr/`
-register, and grep ONLY the surfaces the bead actually names. Do not design the
-change and do not write a plan — that is the architect's job downstream, and
-duplicating it here defeats this lane's purpose. Judge the BRIEF, not the
-codebase.
+Spend a BOUNDED look, not an exploration: list the substation's local decision
+register with the command below, and grep ONLY the surfaces the bead actually
+names. It searches `docs/adr/` and `docs/decisions/`; treat a missing directory
+as absent and continue with the other.
+
+```sh
+for register in docs/adr docs/decisions; do [ ! -d "$register" ] || find "$register" -type f -name '*.md' -print; done
+```
+
+Do not design the change and do not write a plan — that is the architect's job
+downstream, and duplicating it here defeats this lane's purpose. Judge the
+BRIEF, not the codebase.
 
 ## Your verdict
 Grade the BEAD A (best) through F (worst) against `{{rubric}}` ONLY. A, B or C ⇒

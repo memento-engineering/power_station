@@ -6,8 +6,8 @@
 // (sh-wrapped claude, FT-2 usage capture, cwd at the activation); the brief
 // carries the full bead + the spec contract (the bd CLI writes — testable
 // `--acceptance` checkboxes, the four-section `--design`, the
-// `validation_plan` metadata — the mandatory ADR-alignment grep of the
-// substation's docs/adr register, and the pre-convene re-validation); the
+// `validation_plan` metadata — the mandatory ADR-alignment grep of both local
+// decision-register directories, and the pre-convene re-validation); the
 // working agreement is the ARCHITECT's (read-only tree, no commit/push/PR);
 // and the Q3′ fence holds (no bead-stamped path reaches the brief). Zero I/O —
 // no real claude/bd/git.
@@ -164,11 +164,23 @@ void main() {
       expect(rendered, contains('D-H doctrine'));
     });
 
-    test('the ADR Alignment section is MANDATORY and greps the SUBSTATION\'s '
-        'docs/adr register (ADR-0000 amendments included)', () {
+    test('the ADR Alignment section is MANDATORY and greps both local decision '
+        'register directories', () {
       expect(rendered, contains('MANDATORY'));
-      expect(rendered, contains('docs/adr/*.md'));
+      expect(rendered, contains(localDecisionRegisterListCommand()));
+      expect(
+        rendered,
+        contains(
+          localDecisionRegisterGrepCommand(
+            r'<keyword1>\|<keyword2>\|<keyword3>',
+          ),
+        ),
+      );
+      for (final directory in kLocalDecisionRegisterDirectories) {
+        expect(rendered, contains(directory));
+      }
       expect(rendered, contains('ADR-0000'));
+      expect(rendered, contains('the_grid#admission-authority-boundary'));
       expect(rendered, contains('No ADR applies — verified via grep on'));
     });
 

@@ -148,6 +148,7 @@ export 'src/code/circuit_migration.dart';
 export 'src/code/code_capabilities.dart';
 export 'src/code/committee.dart';
 export 'src/code/conventional_commit.dart';
+export 'src/code/decision_register.dart';
 export 'src/code/delivery.dart';
 export 'src/code/discovery.dart';
 export 'src/code/docs_committee.dart';

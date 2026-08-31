@@ -875,7 +875,19 @@ Validate again with ruby -e 's.include?("${ticks}dart")'.
       expect(prompt, contains('# Spec review — rubric: `coherence`'));
       expect(prompt, contains('NOT been built'));
       expect(prompt, contains('Verify against the live tree'));
-      expect(prompt, contains('docs/adr/'));
+      expect(prompt, contains(localDecisionRegisterListCommand()));
+      expect(
+        prompt,
+        contains(
+          localDecisionRegisterGrepCommand(
+            r'<keyword1>\|<keyword2>\|<keyword3>',
+          ),
+        ),
+      );
+      for (final directory in kLocalDecisionRegisterDirectories) {
+        expect(prompt, contains(directory));
+      }
+      expect(prompt, contains('the_grid#admission-authority-boundary'));
       // The spec IS the bead's acceptance + design — both render.
       expect(prompt, contains('- [ ] A peer heartbeat surfaces within 1s'));
       expect(prompt, contains('## Implementation Plan'));
