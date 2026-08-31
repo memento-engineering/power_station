@@ -70,20 +70,31 @@ void main() {
         rendered,
       ]);
     });
-    test('copilot places --model first, ignores usageOut (no surface)', () {
-      expect(
-        render(
-          'copilot',
-          model: 'opus',
-          usageOut: '.grid/telemetry/x.usage.json',
-        ),
-        RuntimeConfig(
-          workDir: '/w/tg-1',
-          command: 'copilot',
-          args: ['--model', 'opus', '--allow-all-tools', '-p', rendered],
-          lifecycle: Lifecycle.oneTurn,
-        ),
+    test('copilot usage-wraps silently and declares keyed resume', () {
+      final environment = kBuiltinEnvironments['copilot']!;
+      expect(environment.argsAppend, ['--allow-all-tools', '-s']);
+      expect(environment.usageJsonArgs, ['--output-format', 'json']);
+      expect(environment.resumeFlag, '--resume');
+      expect(environment.resumeStyle, ResumeStyle.flag);
+
+      final cfg = render(
+        'copilot',
+        model: 'opus',
+        usageOut: '.grid/telemetry/x.usage.json',
       );
+      expect(cfg.command, 'sh');
+      expect(cfg.args.sublist(2), [
+        'grid-copilot',
+        'copilot',
+        '--model',
+        'opus',
+        '--allow-all-tools',
+        '-s',
+        '--output-format',
+        'json',
+        '-p',
+        rendered,
+      ]);
     });
     test('pi injects the endpoint env from the site binding', () {
       expect(

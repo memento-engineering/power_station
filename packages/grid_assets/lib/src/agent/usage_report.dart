@@ -1,11 +1,11 @@
-/// Flow telemetry — the CAPTURE-ONLY claude usage codec (FT-2, bead `tg-goh`).
+/// Flow telemetry — the CAPTURE-ONLY harness usage codec (FT-2, bead `tg-goh`).
 ///
 /// The code circuit's keep/kill table needs per-lane tokens/cost, but nothing
 /// captured it: `claude -p` was run in plain print mode and only its exit code
 /// was read. This library adds the capture seam WITHOUT touching agent work,
 /// briefs, grading, or the route matrix:
 ///
-///  - the operative harness ([ClaudeHarness]) runs with `--output-format json`
+///  - the operative harness runs with its declared JSON/JSONL output arguments
 ///    and redirects the result envelope to a per-step telemetry file
 ///    ([usageReportPath]) — the gating lane's rc-file `sh -c` wrapper precedent;
 ///  - a step's `result()` hook reads that file back through [readUsageFields]
@@ -44,15 +44,16 @@ final RegExp _unsafeFilenameChar = RegExp(r'[^A-Za-z0-9._-]');
 String _sanitize(String nodePath) =>
     nodePath.replaceAll(_unsafeFilenameChar, '_');
 
-/// The usage fields a `claude --output-format json` run reports — every field
-/// OPTIONAL (a partial or version-skewed envelope contributes only what it
-/// carries). Pure value; parse with [tryParse], project with [toResultFields].
+/// The usage fields a harness JSON/JSONL run reports — every field OPTIONAL (a
+/// partial or version-skewed envelope contributes only what it carries). Pure
+/// value; parse with [tryParse], project with [toResultFields].
 class UsageReport {
   /// Creates the report over whatever fields were present.
   const UsageReport({
     this.tokensIn,
     this.tokensOut,
     this.costUsd,
+    this.premiumRequests,
     this.numTurns,
     this.harnessDurationMs,
     this.model,
@@ -67,10 +68,15 @@ class UsageReport {
   /// `total_cost_usd` — the run's billed cost in USD.
   final num? costUsd;
 
+  /// `usage.premiumRequests` — premium-request consumption reported for this
+  /// run. A [num] preserves fractional values if a harness emits them.
+  final num? premiumRequests;
+
   /// `num_turns` — assistant turns the run took.
   final int? numTurns;
 
-  /// `duration_ms` — the harness-observed wall-clock duration of the run.
+  /// `duration_ms`, falling back to Copilot's `usage.sessionDurationMs` — the
+  /// harness-observed wall-clock duration of the run.
   final int? harnessDurationMs;
 
   /// The envelope's top-level `modelUsage` map KEYS — the model id(s) that
@@ -91,11 +97,12 @@ class UsageReport {
       tokensIn == null &&
       tokensOut == null &&
       costUsd == null &&
+      premiumRequests == null &&
       numTurns == null &&
       harnessDurationMs == null &&
       model == null;
 
-  /// Parses a `claude --output-format json` result envelope [content],
+  /// Parses a harness JSON result envelope or JSONL event stream [content],
   /// FAIL-SAFE: `null`/blank/malformed content, a non-object shape, or an
   /// envelope with no recoverable usage all yield `null` — NEVER a throw. A
   /// well-formed envelope yields whatever fields it carries (a missing field is
@@ -112,21 +119,24 @@ class UsageReport {
       tokensIn: _asInt(usage['input_tokens']),
       tokensOut: _asInt(usage['output_tokens']),
       costUsd: _asNum(envelope['total_cost_usd']),
+      premiumRequests: _asNum(usage['premiumRequests']),
       numTurns: _asInt(envelope['num_turns']),
-      harnessDurationMs: _asInt(envelope['duration_ms']),
+      harnessDurationMs:
+          _asInt(envelope['duration_ms']) ?? _asInt(usage['sessionDurationMs']),
       model: _modelNames(envelope['modelUsage']),
     );
     return report.isEmpty ? null : report;
   }
 
   /// The string map merged into a step's `result()` payload — collision-safe
-  /// key names (`tokensIn`/`tokensOut`/`costUsd`/`numTurns`/`harnessDurationMs`/
-  /// `model`, distinct from `grade`/`rationale`/`verdict`/`transport`). Only
-  /// present fields appear.
+  /// key names (`tokensIn`/`tokensOut`/`costUsd`/`premiumRequests`/`numTurns`/
+  /// `harnessDurationMs`/`model`, distinct from `grade`/`rationale`/`verdict`/
+  /// `transport`). Only present fields appear.
   Map<String, String> toResultFields() => {
     if (tokensIn != null) 'tokensIn': '$tokensIn',
     if (tokensOut != null) 'tokensOut': '$tokensOut',
     if (costUsd != null) 'costUsd': '$costUsd',
+    if (premiumRequests != null) 'premiumRequests': '$premiumRequests',
     if (numTurns != null) 'numTurns': '$numTurns',
     if (harnessDurationMs != null) 'harnessDurationMs': '$harnessDurationMs',
     if (model != null) 'model': model!,

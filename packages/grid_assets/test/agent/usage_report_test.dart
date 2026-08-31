@@ -88,6 +88,42 @@ void main() {
     });
   });
 
+  group('FT-2 UsageReport.tryParse — copilot JSONL', () {
+    const copilotJsonl =
+        '{"type":"assistant.message","data":{"content":"OK"}}\n'
+        '{"type":"result","timestamp":"2026-08-30T22:46:47.545Z",'
+        '"sessionId":"b20152b1-a421-47ac-b44d-065c87f2271a","exitCode":0,'
+        '"usage":{"premiumRequests":1,"totalApiDurationMs":1024,'
+        '"sessionDurationMs":3735,"codeChanges":{"linesAdded":0,'
+        '"linesRemoved":0,"filesModified":[]}}}\n';
+
+    test(
+      'copilot 1.0.68 JSONL projects per-run usage through the file path',
+      () {
+        final report = UsageReport.tryParse(copilotJsonl);
+        expect(report, isNotNull);
+        expect(report!.premiumRequests, 1);
+        expect(report.harnessDurationMs, 3735);
+        expect(report.costUsd, isNull);
+        expect(report.toResultFields(), {
+          'premiumRequests': '1',
+          'harnessDurationMs': '3735',
+        });
+
+        final dir = Directory.systemTemp.createTempSync('usage-copilot-');
+        addTearDown(() => dir.deleteSync(recursive: true));
+        const nodePath = 'pow-prt/agent';
+        File(p.join(dir.path, usageReportPath(nodePath)))
+          ..createSync(recursive: true)
+          ..writeAsStringSync(copilotJsonl);
+        expect(readUsageFields(dir.path, nodePath), {
+          'premiumRequests': '1',
+          'harnessDurationMs': '3735',
+        });
+      },
+    );
+  });
+
   group('FT-2 UsageReport.tryParse — fail-safe (never throws, omits fields)', () {
     test('null / empty / whitespace content ⇒ null', () {
       expect(UsageReport.tryParse(null), isNull);
