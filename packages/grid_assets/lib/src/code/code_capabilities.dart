@@ -123,6 +123,13 @@ const Circuit kCodeCircuit = Circuit(
   ],
 );
 
+typedef _ResolvedAgentSelection = ({
+  Bead bead,
+  AgentEnvironment environment,
+  String? model,
+  Uri? endpoint,
+});
+
 typedef _ResolvedAgentRun = ({
   AgentEnvironment environment,
   Workspace workspace,
@@ -210,16 +217,17 @@ class AgentCapability extends ProcessCapability {
   /// runner verb or a real grid home wins.
   final Map<String, String> _overlayArgs;
 
-  _ResolvedAgentRun _resolveRun(TreeContext context, StepArgs args) {
+  _ResolvedAgentSelection _resolveAgentSelection(
+    TreeContext context,
+    StepArgs args,
+  ) {
     final bead = context.getInheritedSeedOfExactType<Bead>();
-    final workspace = context.getInheritedSeedOfExactType<Workspace>();
-    if (bead == null || workspace == null) {
+    if (bead == null) {
       throw StateError(
         'AgentCapability requires the ambient Bead + Workspace '
         '(WorkBead/SessionScope mount them)',
       );
     }
-    final skills = _linkWorkspace(bead, workspace);
     final ambient =
         context.getInheritedSeedOfExactType<AgentConfig>() ??
         const AgentConfig();
@@ -228,12 +236,6 @@ class AgentCapability extends ProcessCapability {
         buildBuiltinEnvironmentRegistry();
     final siteBinding =
         context.getInheritedSeedOfExactType<SiteBinding>() ?? SiteBinding.none;
-    // The commit policy the brief teaches rides the station's composition knob
-    // (bead `pow-8dx`) — read with the effect verb at the spawn edge (ADR-0008
-    // D3); absent ⇒ the default `Refs` token.
-    final composition =
-        context.getInheritedSeedOfExactType<PrComposition>() ??
-        const PrComposition();
     final config = resolveAgentConfig(
       role: AgentRole.build,
       ambient: ambient,
@@ -243,19 +245,47 @@ class AgentCapability extends ProcessCapability {
     );
     final environment = registry.resolve(config.harness);
     return (
+      bead: bead,
       environment: environment,
-      workspace: workspace,
-      brief: buildAgentBrief(
-        bead,
-        workspace,
-        trailerToken: composition.trailerToken,
-        skills: skills,
-      ),
       model: config.params['model'],
       endpoint: siteBinding.endpointFor(
         name: config.harness,
         environment: environment,
       ),
+    );
+  }
+
+  _ResolvedAgentRun _resolveRun(
+    TreeContext context,
+    StepArgs args, {
+    _ResolvedAgentSelection? selection,
+  }) {
+    final selected = selection ?? _resolveAgentSelection(context, args);
+    final workspace = context.getInheritedSeedOfExactType<Workspace>();
+    if (workspace == null) {
+      throw StateError(
+        'AgentCapability requires the ambient Bead + Workspace '
+        '(WorkBead/SessionScope mount them)',
+      );
+    }
+    final skills = _linkWorkspace(selected.bead, workspace);
+    // The commit policy the brief teaches rides the station's composition knob
+    // (bead `pow-8dx`) — read with the effect verb at the spawn edge (ADR-0008
+    // D3); absent ⇒ the default `Refs` token.
+    final composition =
+        context.getInheritedSeedOfExactType<PrComposition>() ??
+        const PrComposition();
+    return (
+      environment: selected.environment,
+      workspace: workspace,
+      brief: buildAgentBrief(
+        selected.bead,
+        workspace,
+        trailerToken: composition.trailerToken,
+        skills: skills,
+      ),
+      model: selected.model,
+      endpoint: selected.endpoint,
     );
   }
 
@@ -296,9 +326,10 @@ class AgentCapability extends ProcessCapability {
     required TreeContext context,
     required StepArgs args,
   }) {
-    final run = _resolveRun(context, args);
-    final adapterId = run.environment.sessionAdapter;
+    final selection = _resolveAgentSelection(context, args);
+    final adapterId = selection.environment.sessionAdapter;
     if (adapterId == null) return null;
+    final run = _resolveRun(context, args, selection: selection);
     return AgentSession(
       runtime: runtime,
       name: name,

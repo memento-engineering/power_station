@@ -623,6 +623,46 @@ void main() {
 
     File overridesFile() => File(p.join(worktree.path, kPubspecOverridesFile));
 
+    test(
+      'null-adapter createSession skips pub-link and overlay materialization',
+      () {
+        final c = ctxAt(
+          worktree.path,
+          metadata: envelopeWith(const [
+            PubLink(
+              package: 'genesis_tree',
+              devPath: '../genesis/packages/tree',
+            ),
+          ]),
+        );
+        final runtime = SubprocessProvider(
+          parentEnvironment: const <String, String>{},
+          agentDeadline: null,
+        );
+        addTearDown(runtime.dispose);
+        const cap = AgentCapability(
+          devRoot: '/dev/root',
+          overlaySourceRef: 'testref',
+        );
+
+        final session = cap.createSession(
+          runtime: runtime,
+          name: 'session-1/tg-1/agent',
+          attemptId: 'attempt-1',
+          instanceFence: 'fence-1',
+          context: c.context,
+          args: c.args,
+        );
+
+        expect(session, isNull);
+        expect(overridesFile().existsSync(), isFalse);
+        expect(
+          Directory(p.join(worktree.path, '.claude')).existsSync(),
+          isFalse,
+        );
+      },
+    );
+
     test('(a) envelope + links → pubspec_overrides.yaml at the worktree root '
         'with an absolutized path', () {
       final c = ctxAt(
