@@ -446,6 +446,31 @@ void main() {
       expect(prompt.split('## Verdict contract repair').length - 1, 1);
     });
 
+    test('spawn records THIS incarnation for the readiness lens — one proof, '
+        'three critic families', () {
+      final dir = Directory.systemTemp.createTempSync('readiness-mark-');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final context = FakeTreeContext(
+        values: {
+          Bead: _refined(),
+          Workspace: testWorkspace(
+            'pow-kzx',
+            workspaceDir: dir.path,
+            branch: 'grid/pow-kzx',
+          ),
+        },
+      );
+      final args = stepArgs(
+        'pow-kzx/spec_review/readiness',
+        params: {'rubric': kReadinessRubric, 'grid.round': '0'},
+      );
+      const ReadinessCriticCapability().spawn(context, args);
+      expect(
+        File(criticIncarnationPath(dir.path, kReadinessRubric)).existsSync(),
+        isTrue,
+      );
+    });
+
     test('grades the BEAD (no spec, no diff), stamps the nodePath + round, and '
         'names the ABSOLUTE verdict path LAST (tg-291 recency + '
         'gate-integrity #4)', () {

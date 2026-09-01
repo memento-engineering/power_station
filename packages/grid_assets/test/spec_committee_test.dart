@@ -848,6 +848,19 @@ Validate again with ruby -e 's.include?("${ticks}dart")'.
       expect(prompt.split('## Verdict contract repair').length - 1, 1);
     });
 
+    test('spawn records THIS incarnation for the spec critic too — the '
+        're-stamp proof spans all three critic families', () {
+      final dir = Directory.systemTemp.createTempSync('spec-critic-mark-');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      const rubric = 'coherence';
+      final c = _laneCtx(rubric: rubric, workspaceDir: dir.path);
+      const SpecCriticCapability().spawn(c.context, c.args);
+      expect(
+        File(criticIncarnationPath(dir.path, rubric)).existsSync(),
+        isTrue,
+      );
+    });
+
     test('spawns claude WRAPPED for usage capture, carrying only its own '
         'rubric (FT-2)', () {
       final c = _laneCtx(rubric: 'coherence');

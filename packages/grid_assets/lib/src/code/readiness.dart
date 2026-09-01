@@ -359,6 +359,12 @@ class ReadinessCriticCapability extends CriticCapability {
         '(WorkBead/SessionScope mount them)',
       );
     }
+    // Same incarnation stamp as the code committee: the readiness lens shares
+    // one verdict reader with the lanes whose rounds move.
+    recordCriticIncarnation(
+      workspaceDir: workspace.workspaceDir,
+      rubric: rubric,
+    );
     final ambient =
         context.getInheritedSeedOfExactType<AgentConfig>() ??
         const AgentConfig();

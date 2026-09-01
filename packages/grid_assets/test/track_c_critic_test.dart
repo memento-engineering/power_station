@@ -33,6 +33,7 @@ import 'support/asset_fakes.dart';
   Bead? beadOverride,
   String? nodePath,
   int round = 0,
+  ExplorationTransport? transport,
 }) {
   final path = nodePath ?? 'tg-1/review/$rubric';
   return (
@@ -44,11 +45,48 @@ import 'support/asset_fakes.dart';
           workspaceDir: workspaceDir,
           branch: 'grid/tg-1',
         ),
+        if (transport != null)
+          ServiceBundle: ServiceBundle(transport: transport),
       },
     ),
     args: stepArgs(path, params: {'rubric': rubric, 'grid.round': '$round'}),
   );
 }
+
+/// Plants a critic INCARNATION MARKER whose mtime IS [at] — the spawn instant
+/// [restampVerdictRound] proves freshness against. Pinned explicitly so the
+/// comparison never races the wall clock.
+void _plantIncarnation(String workspaceDir, String rubric, DateTime at) {
+  File(criticIncarnationPath(workspaceDir, rubric))
+    ..createSync(recursive: true)
+    ..writeAsStringSync(at.toIso8601String())
+    ..setLastModifiedSync(at);
+}
+
+/// Plants a verdict at [path] carrying [nodePath] and (when non-null) [round],
+/// with its mtime pinned to [modifiedAt].
+void _plantVerdictAt(
+  String path, {
+  required String nodePath,
+  required DateTime modifiedAt,
+  Object? round,
+  String grade = 'A',
+}) {
+  File(path)
+    ..createSync(recursive: true)
+    ..writeAsStringSync(
+      jsonEncode({
+        'grade': grade,
+        'rationale': 'the lane graded it',
+        'nodePath': nodePath,
+        if (round != null) kVerdictRoundKey: round,
+      }),
+    )
+    ..setLastModifiedSync(modifiedAt);
+}
+
+Map<String, dynamic> _readVerdictJson(String path) =>
+    jsonDecode(File(path).readAsStringSync()) as Map<String, dynamic>;
 
 Future<List<AllocationReport>> _runCriticAllocation({
   required Directory dir,
@@ -1526,6 +1564,259 @@ void main() {
       ).run(c.context, c.args);
       expect(outcome, isA<Ok>());
       expect(cleared, '/w/tg-1/.grid/critique');
+    });
+  });
+
+  group('the CAPABILITY writes the round stamp (Nico 2026-09-01 — keep '
+      'A15(5) alt-A\'s clause, change the WRITER)', () {
+    const rubric = 'adr-alignment';
+    const nodePath = 'tg-j9ac/spec_review/adr-alignment';
+    final spawnAt = DateTime.utc(2026, 9, 1, 19, 6);
+    final afterSpawn = spawnAt.add(const Duration(seconds: 30));
+    final beforeSpawn = spawnAt.subtract(const Duration(seconds: 30));
+
+    late Directory dir;
+    late RecordingExplorationTransport flares;
+    late String canonical;
+
+    setUp(() {
+      dir = Directory.systemTemp.createTempSync('critic-restamp-');
+      canonical = '${dir.path}/.grid/critique/$rubric.json';
+      flares = RecordingExplorationTransport();
+      addTearDown(() => dir.deleteSync(recursive: true));
+    });
+
+    test('a CONTAMINATED fresh stamp (the critic copied a rework ROUND out of '
+        'the bead notes) is re-stamped to grid.round, ACCEPTED, and flared '
+        'with model_round', () async {
+      _plantIncarnation(dir.path, rubric, spawnAt);
+      _plantVerdictAt(
+        canonical,
+        nodePath: nodePath,
+        modifiedAt: afterSpawn,
+        round: 4,
+      );
+      final c = _ctx(
+        rubric: rubric,
+        workspaceDir: dir.path,
+        nodePath: nodePath,
+        round: 1,
+        transport: flares,
+      );
+
+      expect(
+        await const CriticCapability().probeCompletionArtifact(
+          c.context,
+          c.args,
+        ),
+        GateOutcome.clear,
+      );
+      expect(_readVerdictJson(canonical)[kVerdictRoundKey], 1);
+      expect(_readVerdictJson(canonical)[kVerdictModelRoundKey], 4);
+
+      final payload = await const CriticCapability().result(c.context, c.args);
+      expect(payload, containsPair('grade', 'A'));
+      expect(payload, containsPair(kVerdictRoundKey, '1'));
+
+      final flare = flares.named('critic.verdictRoundRestamped').single;
+      expect(flare.data, containsPair('rubric', rubric));
+      expect(flare.data, containsPair('nodePath', nodePath));
+      expect(flare.data, containsPair('round', '1'));
+      expect(flare.data, containsPair(kVerdictModelRoundKey, '4'));
+      expect(flares.named('critic.verdictProbeUnresolved'), isEmpty);
+    });
+
+    test(
+      'a verdict written BEFORE this incarnation is left BYTE-IDENTICAL and '
+      'still REJECTED — the marker is the proof, the wipe is the belt',
+      () async {
+        _plantIncarnation(dir.path, rubric, spawnAt);
+        _plantVerdictAt(
+          canonical,
+          nodePath: nodePath,
+          modifiedAt: beforeSpawn,
+          round: 0,
+        );
+        final before = File(canonical).readAsStringSync();
+        final c = _ctx(
+          rubric: rubric,
+          workspaceDir: dir.path,
+          nodePath: nodePath,
+          round: 1,
+          transport: flares,
+        );
+
+        expect(
+          await const CriticCapability().probeCompletionArtifact(
+            c.context,
+            c.args,
+          ),
+          GateOutcome.present,
+        );
+        expect(File(canonical).readAsStringSync(), before);
+        final flare = flares.named('critic.verdictProbeUnresolved').single;
+        expect(flare.data, containsPair('rubric', rubric));
+        expect(flare.data, containsPair('nodePath', nodePath));
+        expect(flare.data, containsPair('round', '1'));
+        expect(flare.data, containsPair('fileRound', '0'));
+        expect(
+          flare.data,
+          containsPair('restamp', 'skipped: verdict predates this incarnation'),
+        );
+        expect(flare.data, containsPair('strayTried', 'true'));
+        expect(flare.data, containsPair('envelopeTried', 'true'));
+      },
+    );
+
+    test('a FOREIGN nodePath is NEVER re-stamped into validity — A4\'s fence '
+        'holds ahead of the writer', () async {
+      _plantIncarnation(dir.path, rubric, spawnAt);
+      _plantVerdictAt(
+        canonical,
+        nodePath: 'other-bead/spec_review/$rubric',
+        modifiedAt: afterSpawn,
+        round: 4,
+      );
+      final before = File(canonical).readAsStringSync();
+      final c = _ctx(
+        rubric: rubric,
+        workspaceDir: dir.path,
+        nodePath: nodePath,
+        round: 1,
+        transport: flares,
+      );
+
+      expect(
+        await const CriticCapability().probeCompletionArtifact(
+          c.context,
+          c.args,
+        ),
+        GateOutcome.present,
+      );
+      expect(File(canonical).readAsStringSync(), before);
+      expect(
+        flares.named('critic.verdictProbeUnresolved').single.data,
+        containsPair('restamp', 'skipped: foreign nodePath stamp'),
+      );
+    });
+
+    test('a verdict with NO round stamp stays the pow-q5n transport defect — '
+        'the writer never invents one', () async {
+      _plantIncarnation(dir.path, rubric, spawnAt);
+      _plantVerdictAt(canonical, nodePath: nodePath, modifiedAt: afterSpawn);
+      final before = File(canonical).readAsStringSync();
+      final c = _ctx(
+        rubric: rubric,
+        workspaceDir: dir.path,
+        nodePath: nodePath,
+        round: 1,
+        transport: flares,
+      );
+
+      expect(
+        await const CriticCapability().probeCompletionArtifact(
+          c.context,
+          c.args,
+        ),
+        GateOutcome.probeError,
+      );
+      expect(File(canonical).readAsStringSync(), before);
+      expect(
+        File(canonical).readAsStringSync(),
+        isNot(contains(kVerdictModelRoundKey)),
+      );
+    });
+
+    test(
+      'the STRAY belt still rejects a stale round — the writer never reaches '
+      'an off-canonical file',
+      () async {
+        _plantIncarnation(dir.path, rubric, spawnAt);
+        final stray =
+            '${dir.path}/packages/grid_assets/.grid/critique/$rubric.json';
+        _plantVerdictAt(
+          stray,
+          nodePath: nodePath,
+          modifiedAt: afterSpawn,
+          round: 0,
+        );
+        final before = File(stray).readAsStringSync();
+        final c = _ctx(
+          rubric: rubric,
+          workspaceDir: dir.path,
+          nodePath: nodePath,
+          round: 1,
+          transport: flares,
+        );
+
+        expect(
+          await const CriticCapability().probeCompletionArtifact(
+            c.context,
+            c.args,
+          ),
+          GateOutcome.present,
+        );
+        expect(File(stray).readAsStringSync(), before);
+        expect(
+          flares.named('critic.verdictProbeUnresolved').single.data,
+          containsPair('restamp', 'skipped: no canonical verdict file'),
+        );
+      },
+    );
+
+    test('with NO artifact at all the probe flare still names the lane and '
+        'carries an EMPTY fileRound', () async {
+      final c = _ctx(
+        rubric: rubric,
+        workspaceDir: dir.path,
+        nodePath: nodePath,
+        round: 1,
+        transport: flares,
+      );
+
+      expect(
+        await const CriticCapability().probeCompletionArtifact(
+          c.context,
+          c.args,
+        ),
+        GateOutcome.present,
+      );
+      final flare = flares.named('critic.verdictProbeUnresolved').single;
+      expect(flare.data, containsPair('rubric', rubric));
+      expect(flare.data, containsPair('nodePath', nodePath));
+      expect(flare.data, containsPair('round', '1'));
+      expect(flare.data, containsPair('fileRound', ''));
+      expect(
+        flare.data,
+        containsPair('restamp', 'skipped: no canonical verdict file'),
+      );
+    });
+
+    test('spawn records the incarnation for an LLM lane and NOT for the '
+        'deterministic gating runner', () {
+      final llm = _ctx(
+        rubric: rubric,
+        workspaceDir: dir.path,
+        nodePath: nodePath,
+        round: 1,
+      );
+      const CriticCapability().spawn(llm.context, llm.args);
+      expect(
+        File(criticIncarnationPath(dir.path, rubric)).existsSync(),
+        isTrue,
+      );
+
+      final gating = _ctx(
+        rubric: kGatingRubric,
+        workspaceDir: dir.path,
+        nodePath: 'tg-j9ac/review/$kGatingRubric',
+        round: 1,
+      );
+      const CriticCapability().spawn(gating.context, gating.args);
+      expect(
+        File(criticIncarnationPath(dir.path, kGatingRubric)).existsSync(),
+        isFalse,
+      );
     });
   });
 }
