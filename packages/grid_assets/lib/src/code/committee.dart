@@ -104,6 +104,7 @@ import '../agent/path_check.dart';
 import '../agent/site_binding.dart';
 import '../agent/usage_report.dart';
 import 'route_failure.dart';
+import 'specify.dart' show proseOnly, sectionBodyAt;
 
 /// The gating rubric id — its grade `F` is a hard block (a non-zero Validation
 /// Plan command), decided by the route's matrix.
@@ -170,9 +171,43 @@ final RegExp _diffHeader = RegExp(
   multiLine: true,
 );
 final RegExp _inlineCodeSpan = RegExp(r'`([^`\n]+)`');
-final RegExp _testCommandLine = RegExp(r'^\s*Test:\s*(.+)$');
-final RegExp _testCommandToken = RegExp(
+const List<String> _testDeclarationHeadings = [
+  '## Declared Tests',
+  '## Files Touched',
+  '## Touches',
+];
+final RegExp _testCommandLine = RegExp(
+  r'^\s*Test:\s*(.+)$',
+  caseSensitive: false,
+  multiLine: true,
+);
+final RegExp _dartTestCommand = RegExp(
+  r'\bdart\s+test\b',
+  caseSensitive: false,
+);
+final RegExp _testCommandPath = RegExp(
   r'(?:^|\s)([A-Za-z0-9_.\/-]+_test\.dart)(?=\s|$)',
+);
+final RegExp _authoredTestStatement = RegExp(
+  r'\b(?:add(?:ed|ing|s)?|author(?:ed|ing|s)?|create(?:d|s|ing)?|'
+  r'modif(?:ied|ies|y|ying)|update(?:d|s|ing)?|'
+  r'writ(?:e|es|ing|ten)|wrote)\b',
+  caseSensitive: false,
+);
+final RegExp _nonDeclarationTestStatement = RegExp(
+  r'\b(?:unchanged|pre[- ]existing|restore(?:d|s|ing)?|'
+  r'revert(?:ed|s|ing)?|run[- ]only)\b',
+  caseSensitive: false,
+);
+final RegExp _testStatementBoundary = RegExp(
+  r'[.;](?:[ \t]+|\r?\n|$)|'
+  r'\r?\n[ \t]*\r?\n|'
+  r'\r?\n(?=[ \t]*(?:[-*+][ \t]+|\d+[.)][ \t]+|#{1,6}[ \t]+))|'
+  r'\r?\n(?=[ \t]*(?:Test:|'
+  r'(?:add(?:ed|ing|s)?|author(?:ed|ing|s)?|create(?:d|s|ing)?|'
+  r'modif(?:ied|ies|y|ying)|update(?:d|s|ing)?|'
+  r'writ(?:e|es|ing|ten)|wrote)\b))',
+  caseSensitive: false,
 );
 
 /// Every repo-relative path a unified [diff] touches.
@@ -202,22 +237,131 @@ String? _confidentTestPath(String raw) {
   return p.posix.split(candidate).contains('test') ? candidate : null;
 }
 
-/// Confident Design declarations only; ambiguous prose contributes nothing.
-Set<String> declaredTestFiles(String design) {
-  final declared = <String>{};
-  for (final match in _inlineCodeSpan.allMatches(design)) {
-    final path = _confidentTestPath(match.group(1)!);
-    if (path != null) declared.add(path);
-  }
-  for (final line in const LineSplitter().convert(design)) {
-    final command = _testCommandLine.firstMatch(line)?.group(1);
-    if (command == null) continue;
-    for (final match in _testCommandToken.allMatches(
-      command.replaceAll('`', ''),
-    )) {
-      final path = _confidentTestPath(match.group(1)!);
-      if (path != null) declared.add(path);
+String _markerForTestPath(String path, Map<String, String> pathByMarker) {
+  final marker = 'GRID_TEST_PATH_${pathByMarker.length}_';
+  pathByMarker[marker] = path;
+  return marker;
+}
+
+String _markTestCommandPaths(String design, Map<String, String> pathByMarker) =>
+    design.replaceAllMapped(_testCommandLine, (match) {
+      final command = match.group(1)!.replaceAll('`', '');
+      if (!_dartTestCommand.hasMatch(command)) return match.group(0)!;
+      final markers = <String>[];
+      for (final pathMatch in _testCommandPath.allMatches(command)) {
+        final path = _confidentTestPath(pathMatch.group(1)!);
+        if (path != null) {
+          markers.add(_markerForTestPath(path, pathByMarker));
+        }
+      }
+      return markers.isEmpty
+          ? match.group(0)!
+          : 'Test: dart test ${markers.join(' ')}';
+    });
+
+String _markConfidentTestPaths(
+  String design,
+  Map<String, String> pathByMarker,
+) => design.replaceAllMapped(_inlineCodeSpan, (match) {
+  final path = _confidentTestPath(match.group(1)!);
+  return path == null
+      ? match.group(0)!
+      : _markerForTestPath(path, pathByMarker);
+});
+
+String _statementAround(String text, String marker) {
+  final markerAt = text.indexOf(marker);
+  var start = 0;
+  var end = text.length;
+  for (final boundary in _testStatementBoundary.allMatches(text)) {
+    if (boundary.end <= markerAt) {
+      start = boundary.end;
+      continue;
     }
+    if (boundary.start >= markerAt + marker.length) {
+      end = boundary.start;
+      break;
+    }
+  }
+  return text.substring(start, end);
+}
+
+void _collectTestDeclarations({
+  required String text,
+  required Map<String, String> pathByMarker,
+  required Set<String> declared,
+  required bool declarationSection,
+}) {
+  for (final entry in pathByMarker.entries) {
+    if (!text.contains(entry.key)) continue;
+    final statement = _statementAround(text, entry.key);
+    if (_authoredTestStatement.hasMatch(statement)) {
+      declared.add(entry.value);
+      continue;
+    }
+    if (_dartTestCommand.hasMatch(statement) ||
+        _nonDeclarationTestStatement.hasMatch(statement)) {
+      continue;
+    }
+    if (declarationSection) declared.add(entry.value);
+  }
+}
+
+void _collectTestLineFallback({
+  required String prose,
+  required Map<String, String> pathByMarker,
+  required Set<String> declared,
+}) {
+  for (final match in _testCommandLine.allMatches(prose)) {
+    final command = match.group(1)!;
+    if (!_dartTestCommand.hasMatch(command)) continue;
+    for (final entry in pathByMarker.entries) {
+      if (command.contains(entry.key)) declared.add(entry.value);
+    }
+  }
+}
+
+/// Confident test paths named as new or modified authored work in the Design.
+///
+/// A bare `Test:` directive is the fail-closed historical fallback only when
+/// the design carries no declaration section.
+Set<String> declaredTestFiles(String design) {
+  final pathByMarker = <String, String>{};
+  final commandMarkedDesign = _markTestCommandPaths(design, pathByMarker);
+  final markedDesign = _markConfidentTestPaths(
+    commandMarkedDesign,
+    pathByMarker,
+  );
+  final prose = proseOnly(markedDesign);
+  final declared = <String>{};
+  final declarationBodies = <String>[];
+
+  for (final heading in _testDeclarationHeadings) {
+    final headingAt = prose.indexOf(heading);
+    if (headingAt < 0) continue;
+    declarationBodies.add(sectionBodyAt(prose, headingAt));
+  }
+
+  _collectTestDeclarations(
+    text: prose,
+    pathByMarker: pathByMarker,
+    declared: declared,
+    declarationSection: false,
+  );
+  for (final body in declarationBodies) {
+    _collectTestDeclarations(
+      text: body,
+      pathByMarker: pathByMarker,
+      declared: declared,
+      declarationSection: true,
+    );
+  }
+  if (declarationBodies.isEmpty) {
+    _collectTestLineFallback(
+      prose: prose,
+      pathByMarker: pathByMarker,
+      declared: declared,
+    );
   }
   return declared;
 }
