@@ -3,10 +3,10 @@
 ///
 /// Harnesses are DATA. There is no per-tool class and no interface: a tool is a
 /// declared [AgentEnvironment] (`agent_environment.dart`) armed by name in the
-/// [EnvironmentRegistry] (`environment_registry.dart`), and ONE [spawnFor]
-/// renders `(environment, brief, workspace)` into the process invocation —
-/// reading the environment's `command`/`args`/`argsAppend`/`promptMode`/
-/// `promptFlag`/`env`/`target` and its FT-2 `usageJsonArgs` usage surface.
+/// [EnvironmentRegistry] (`environment_registry.dart`). [spawnFor] renders a
+/// one-turn environment into a process invocation; a non-null
+/// [AgentEnvironment.sessionAdapter] selects an injected channel adapter that
+/// owns the long-lived launch and delivers the brief after startup.
 /// [kBuiltinEnvironments] ships the five first-party environments as values
 /// (claude / copilot / pi / opencode / codex); [buildBuiltinEnvironmentRegistry]
 /// is the station default.
@@ -291,11 +291,11 @@ String _usageWrapperScript(String usageOut) =>
 /// its only caller passes a [usageReportPath], which contains no single quote.
 String _sq(String s) => "'$s'";
 
-/// The SINGLE spawn renderer (ADR-0002 D1; the harness collapse, bead
+/// The one-turn spawn renderer (ADR-0002 D1; the harness collapse, bead
 /// `pow-ebf.4`): render one resolved [environment] + [brief] into the process
-/// invocation rooted at [workspace], reading the environment's DATA
-/// (`command`/`args`/`argsAppend`/`promptMode`/`promptFlag`/`env`/`target`). There
-/// is no per-harness class — a new tool is a declared [AgentEnvironment].
+/// invocation rooted at [workspace], reading the environment's DATA. Channel
+/// environments instead select an injected [AgentEnvironment.sessionAdapter];
+/// there is still no per-tool class.
 ///
 /// [model] is the ladder's resolved model; it OVERRIDES [AgentEnvironment.model]
 /// and renders as `--model <model>` in the slot BETWEEN [AgentEnvironment.args]
@@ -334,10 +334,10 @@ RuntimeConfig spawnFor({
     if (wantUsage) ...environment.usageJsonArgs!,
     ...promptSegment,
   ];
-  final processEnv = <String, String>{
-    ...environment.env,
-    ..._targetEnv(environment.target, endpoint),
-  };
+  final processEnv = agentProcessEnvironment(
+    environment: environment,
+    endpoint: endpoint,
+  );
   if (!wantUsage) {
     return RuntimeConfig(
       workDir: workspace.workspaceDir,
@@ -372,23 +372,25 @@ RuntimeConfig spawnFor({
 /// target with a null [endpoint] injects nothing (the LOUD refusal for an unbound
 /// fact is `SiteBinding.endpointFor`'s at the spawn edge, not this pure fold).
 /// Exhaustive switch (house style).
-Map<String, String> _targetEnv(InferenceTarget? target, Uri? endpoint) =>
-    switch (target ?? InferenceTarget.providerManaged) {
-      InferenceTarget.providerManaged => const {},
-      InferenceTarget.openAiCompatible =>
-        endpoint == null ? const {} : {'OPENAI_BASE_URL': '$endpoint'},
-      InferenceTarget.swiftInfer =>
-        endpoint == null ? const {} : {'SWIFT_INFER_BASE_URL': '$endpoint'},
-    };
+Map<String, String> agentProcessEnvironment({
+  required AgentEnvironment environment,
+  Uri? endpoint,
+}) => <String, String>{
+  ...environment.env,
+  ...switch (environment.target ?? InferenceTarget.providerManaged) {
+    InferenceTarget.providerManaged => const {},
+    InferenceTarget.openAiCompatible =>
+      endpoint == null ? const {} : {'OPENAI_BASE_URL': '$endpoint'},
+    InferenceTarget.swiftInfer =>
+      endpoint == null ? const {} : {'SWIFT_INFER_BASE_URL': '$endpoint'},
+  },
+};
 
-/// The first-party inference environments as DATA (ADR-0002 D1; the harness
-/// collapse, bead `pow-ebf.4`). Each is byte-identical in its emitted
-/// [RuntimeConfig] to the class it replaces; `codex` is the fifth, its argv +
-/// usage surface confirmed against `codex-cli 0.144.4`. `model` is `null` on every
-/// builtin EXCEPT codex, which pins its native `gpt-5.6-sol` (bead `pow-a9o`:
-/// claude's tier defaults 400 on codex under ChatGPT auth); the ladder stamps
-/// the rest at spawn. The grid's own harness stays a parked
-/// epic — a sixth entry here, zero code.
+/// The first-party inference environments as DATA (ADR-0002 D1). Claude, Pi,
+/// and OpenCode retain their one-turn argv transports. Copilot and Codex select
+/// the ACP channel adapter while keeping their command, args, and tool posture
+/// as values. Codex alone pins its native `gpt-5.6-sol`; the ACP adapter resolves
+/// that base against the qualified ids offered by the live session.
 const Map<String, AgentEnvironment> kBuiltinEnvironments = {
   'claude': AgentEnvironment(
     command: 'claude',
@@ -401,13 +403,10 @@ const Map<String, AgentEnvironment> kBuiltinEnvironments = {
   ),
   'copilot': AgentEnvironment(
     command: 'copilot',
-    argsAppend: ['--allow-all-tools', '-s'],
-    promptMode: PromptMode.flag,
-    promptFlag: '-p',
+    args: ['--acp', '--allow-all-tools'],
+    promptMode: PromptMode.none,
     target: InferenceTarget.providerManaged,
-    usageJsonArgs: ['--output-format', 'json'],
-    resumeFlag: '--resume',
-    resumeStyle: ResumeStyle.flag,
+    sessionAdapter: 'acp',
   ),
   'pi': AgentEnvironment(
     command: 'pi',
@@ -422,18 +421,13 @@ const Map<String, AgentEnvironment> kBuiltinEnvironments = {
     target: InferenceTarget.providerManaged,
   ),
   'codex': AgentEnvironment(
-    command: 'codex',
-    args: ['exec'],
-    argsAppend: [
-      '--dangerously-bypass-approvals-and-sandbox',
-      '--skip-git-repo-check',
-    ],
-    promptMode: PromptMode.arg,
+    command: 'npx',
+    args: ['-y', '@agentclientprotocol/codex-acp@1.6.2'],
+    env: {'INITIAL_AGENT_MODE': 'agent-full-access'},
+    promptMode: PromptMode.none,
     target: InferenceTarget.providerManaged,
     model: 'gpt-5.6-sol',
-    usageJsonArgs: ['--json'],
-    resumeFlag: 'resume',
-    resumeStyle: ResumeStyle.subcommand,
+    sessionAdapter: 'acp',
   ),
 };
 

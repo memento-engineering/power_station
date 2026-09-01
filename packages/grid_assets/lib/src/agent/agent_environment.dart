@@ -35,18 +35,17 @@
 ///  - `display_name`: a human UI/log label; the_grid names an environment by
 ///    its registry key. Back when: a dashboard lists environments to a human.
 ///  - `ready_delay_ms`, `ready_prompt_prefix`, `process_names`: tmux/
-///    interactive readiness detection (when the TUI prompt is ready). the_grid
-///    runs one-turn headless subprocesses (`Lifecycle.oneTurn`) with no prompt
-///    to await. Back when: an interactive/daemon harness (`GridHarness`, the
-///    parked epic).
+///    interactive readiness detection (when the TUI prompt is ready). ACP
+///    readiness is a protocol handshake, not a guessed delay. Back when: a TUI
+///    harness (`GridHarness`, the parked epic).
 ///  - `accept_startup_dialogs` (tri-state), `emits_permission_warning`
 ///    (tri-state): tmux startup-dialog / permission-warning handling for
 ///    interactive launches. the_grid launches `--dangerously-skip-permissions`
 ///    headless. Back when: an interactive harness that faces startup dialogs.
-///  - `supports_acp`, `acp_command`, `acp_args`: the Agent Client Protocol
-///    (JSON-RPC over stdio) transport plus its command/args overrides. the_grid
-///    spawns one-turn argv processes, not ACP sessions. Back when: an ACP
-///    (persistent-session) transport.
+///  - `supports_acp`, `acp_command`, `acp_args`: [sessionAdapter] is the
+///    implemented transport selector and its adapter owns command rendering.
+///    A separate capability boolean and ACP-only command/args would duplicate
+///    that value path, so these gc fields are intentionally not mirrored.
 ///  - `supports_hooks`: whether the tool has a hook mechanism (settings.json /
 ///    plugins). Unread by the_grid's spawn. Back when: per-environment
 ///    lifecycle-hook orchestration.
@@ -59,8 +58,9 @@
 ///    resume is expressible as flag+style. Back when: a tool whose resume argv
 ///    cannot be expressed as flag+key.
 ///  - `session_id_flag`: the flag to CREATE a session with a chosen id
-///    (generate-and-pass). the_grid does not manage session ids (one-turn, no
-///    resume yet). Back when: durable session management (create/resume by id).
+///    (generate-and-pass). The ACP adapter owns an ephemeral protocol session
+///    id but the_grid does not choose or durably resume it. Back when: durable
+///    session management (create/resume by id).
 ///  - `permission_modes`: a name→flag table for permission-mode dropdowns,
 ///    consumed by external apps (no runtime reader even in gc). the_grid
 ///    hardcodes headless permissions. Back when: a UI exposing permission modes.

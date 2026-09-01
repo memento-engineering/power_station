@@ -25,6 +25,7 @@ import 'package:grid_runtime/grid_runtime.dart';
 import 'package:path/path.dart' as p;
 
 import '../agent/agent_domain.dart';
+import '../agent/acp_session_adapter.dart';
 import '../agent/agent_environment.dart';
 import '../agent/agent_harness.dart';
 import '../agent/agent_session.dart';
@@ -181,8 +182,7 @@ class AgentCapability extends ProcessCapability {
     String? overlayRoot,
     String overlaySourceRef = kUnknownSourceRef,
     Map<String, String> overlayArgs = const {},
-    AgentSessionAdapterRegistry sessionAdapters =
-        const AgentSessionAdapterRegistry(),
+    AgentSessionAdapterRegistry sessionAdapters = kBuiltinAgentSessionAdapters,
     AgentSteerSource steers = const NoAgentSteerSource(),
   }) : _sessionAdapters = sessionAdapters,
        _steers = steers,
@@ -987,8 +987,7 @@ DefaultCapabilityRegistry buildCodeRegistry({
   BdRunner Function(String workspaceRoot)? specifyBdRunnerFor,
   String? overlaySourceRef,
   Map<String, String> overlayArgs = const {},
-  AgentSessionAdapterRegistry sessionAdapters =
-      const AgentSessionAdapterRegistry(),
+  AgentSessionAdapterRegistry sessionAdapters = kBuiltinAgentSessionAdapters,
   AgentSteerSource steers = const NoAgentSteerSource(),
 }) {
   final loader = PackagedAssetLoader();
