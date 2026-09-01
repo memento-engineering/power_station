@@ -262,6 +262,7 @@ class AgentEnvironment {
     this.resumeFlag,
     this.resumeStyle,
     this.usageJsonArgs,
+    this.sessionAdapter,
   });
 
   /// The inheritance pointer (gc `base`) — tri-state, LOAD-BEARING. Default
@@ -319,6 +320,9 @@ class AgentEnvironment {
   /// layers (last non-null wins), like [args].
   final List<String>? usageJsonArgs;
 
+  /// Adapter registry id for channel transport; null keeps one-turn transport.
+  final String? sessionAdapter;
+
   /// A NAMED-invariant guard (guards LOUD or GONE — ADR-0000 A8): a
   /// [PromptMode.flag] transport with no [promptFlag] is unspawnable, and a
   /// [resumeStyle] set with no [resumeFlag] is meaningless. Returns the human
@@ -337,6 +341,13 @@ class AgentEnvironment {
     if (resumeStyle != null && resumeFlag == null) {
       return 'resumeStyle is set but resumeFlag is unset';
     }
+    final adapter = sessionAdapter;
+    if (adapter != null && adapter.isEmpty) {
+      return 'sessionAdapter must be non-empty';
+    }
+    if (adapter != null && (promptMode ?? PromptMode.arg) != PromptMode.none) {
+      return 'sessionAdapter requires promptMode none';
+    }
     return null;
   }
 
@@ -348,7 +359,8 @@ class AgentEnvironment {
   /// Folds an inheritance [chain] — ROOT at index 0, LEAF last — into one
   /// flattened environment:
   ///  - scalars ([command], [promptMode], [promptFlag], [model], [target],
-  ///    [pathCheck], [resumeFlag], [resumeStyle]) — LAST non-null wins;
+  ///    [pathCheck], [resumeFlag], [resumeStyle], [sessionAdapter]) — LAST
+  ///    non-null wins;
   ///  - [args] — REPLACE: the last layer declaring a non-null [args] wins;
   ///  - [argsAppend] — ACCUMULATE: concatenated over every effective layer,
   ///    root->leaf, after the resolved [args];
@@ -388,6 +400,7 @@ class AgentEnvironment {
     String? resumeFlag;
     ResumeStyle? resumeStyle;
     List<String>? usageJsonArgs;
+    String? sessionAdapter;
 
     for (final layer in effective) {
       command = layer.command ?? command;
@@ -402,6 +415,7 @@ class AgentEnvironment {
       resumeFlag = layer.resumeFlag ?? resumeFlag;
       resumeStyle = layer.resumeStyle ?? resumeStyle;
       if (layer.usageJsonArgs != null) usageJsonArgs = layer.usageJsonArgs;
+      sessionAdapter = layer.sessionAdapter ?? sessionAdapter;
     }
 
     return AgentEnvironment(
@@ -418,6 +432,7 @@ class AgentEnvironment {
       resumeFlag: resumeFlag,
       resumeStyle: resumeStyle,
       usageJsonArgs: usageJsonArgs,
+      sessionAdapter: sessionAdapter,
     );
   }
 
@@ -436,7 +451,8 @@ class AgentEnvironment {
       other.pathCheck == pathCheck &&
       other.resumeFlag == resumeFlag &&
       other.resumeStyle == resumeStyle &&
-      _listEq(other.usageJsonArgs, usageJsonArgs);
+      _listEq(other.usageJsonArgs, usageJsonArgs) &&
+      other.sessionAdapter == sessionAdapter;
 
   @override
   int get hashCode {
@@ -457,6 +473,7 @@ class AgentEnvironment {
       resumeFlag,
       resumeStyle,
       usageJsonArgs == null ? null : Object.hashAll(usageJsonArgs!),
+      sessionAdapter,
     );
   }
 
@@ -466,7 +483,8 @@ class AgentEnvironment {
       'argsAppend: $argsAppend, promptMode: $promptMode, '
       'promptFlag: $promptFlag, env: $env, model: $model, target: $target, '
       'pathCheck: $pathCheck, resumeFlag: $resumeFlag, '
-      'resumeStyle: $resumeStyle, usageJsonArgs: $usageJsonArgs)';
+      'resumeStyle: $resumeStyle, usageJsonArgs: $usageJsonArgs, '
+      'sessionAdapter: $sessionAdapter)';
 }
 
 bool _listEq(List<String>? a, List<String>? b) {

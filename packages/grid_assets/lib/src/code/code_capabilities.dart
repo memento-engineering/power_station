@@ -25,7 +25,9 @@ import 'package:grid_runtime/grid_runtime.dart';
 import 'package:path/path.dart' as p;
 
 import '../agent/agent_domain.dart';
+import '../agent/agent_environment.dart';
 import '../agent/agent_harness.dart';
+import '../agent/agent_session.dart';
 import '../agent/environment_registry.dart';
 import '../agent/site_binding.dart';
 import '../agent/usage_report.dart';
@@ -121,6 +123,14 @@ const Circuit kCodeCircuit = Circuit(
   ],
 );
 
+typedef _ResolvedAgentRun = ({
+  AgentEnvironment environment,
+  Workspace workspace,
+  AgentBrief brief,
+  String? model,
+  Uri? endpoint,
+});
+
 /// The IMPLEMENT capability — spawn the coding agent in the bead's workspace,
 /// parameterized over the AMBIENT agent scope (ADR-0008 Decision 10): it reads
 /// the work `Bead`, the `Workspace`, the station's `AgentConfig` default, and
@@ -164,12 +174,20 @@ class AgentCapability extends ProcessCapability {
     String? overlayRoot,
     String overlaySourceRef = kUnknownSourceRef,
     Map<String, String> overlayArgs = const {},
-  }) : _devRoot = devRoot,
+    AgentSessionAdapterRegistry sessionAdapters =
+        const AgentSessionAdapterRegistry(),
+    AgentSteerSource steers = const NoAgentSteerSource(),
+  }) : _sessionAdapters = sessionAdapters,
+       _steers = steers,
+       _devRoot = devRoot,
        _linkService = linkService,
        _materializer = materializer,
        _overlayRoot = overlayRoot,
        _overlaySourceRef = overlaySourceRef,
        _overlayArgs = overlayArgs;
+
+  final AgentSessionAdapterRegistry _sessionAdapters;
+  final AgentSteerSource _steers;
 
   final String? _devRoot;
   final DartLinkService _linkService;
@@ -192,8 +210,7 @@ class AgentCapability extends ProcessCapability {
   /// runner verb or a real grid home wins.
   final Map<String, String> _overlayArgs;
 
-  @override
-  RuntimeConfig spawn(TreeContext context, StepArgs args) {
+  _ResolvedAgentRun _resolveRun(TreeContext context, StepArgs args) {
     final bead = context.getInheritedSeedOfExactType<Bead>();
     final workspace = context.getInheritedSeedOfExactType<Workspace>();
     if (bead == null || workspace == null) {
@@ -225,21 +242,71 @@ class AgentCapability extends ProcessCapability {
       registry: registry,
     );
     final environment = registry.resolve(config.harness);
-    return spawnFor(
+    return (
       environment: environment,
-      model: config.params['model'],
-      endpoint: siteBinding.endpointFor(
-        name: config.harness,
-        environment: environment,
-      ),
+      workspace: workspace,
       brief: buildAgentBrief(
         bead,
         workspace,
         trailerToken: composition.trailerToken,
         skills: skills,
       ),
-      workspace: workspace,
-      usageOut: usageReportPath(args.nodePath),
+      model: config.params['model'],
+      endpoint: siteBinding.endpointFor(
+        name: config.harness,
+        environment: environment,
+      ),
+    );
+  }
+
+  @override
+  RuntimeConfig spawn(TreeContext context, StepArgs args) {
+    final run = _resolveRun(context, args);
+    final adapterId = run.environment.sessionAdapter;
+    if (adapterId == null) {
+      return spawnFor(
+        environment: run.environment,
+        model: run.model,
+        endpoint: run.endpoint,
+        brief: run.brief,
+        workspace: run.workspace,
+        usageOut: usageReportPath(args.nodePath),
+      );
+    }
+    final config = _sessionAdapters
+        .require(adapterId)
+        .launch(
+          environment: run.environment,
+          workspace: run.workspace,
+          model: run.model,
+          endpoint: run.endpoint,
+        );
+    if (config.lifecycle != Lifecycle.longLived) {
+      throw StateError('channel adapter "$adapterId" must launch longLived');
+    }
+    return config;
+  }
+
+  @override
+  ProcessSession? createSession({
+    required RuntimeProvider runtime,
+    required String name,
+    required String attemptId,
+    required String instanceFence,
+    required TreeContext context,
+    required StepArgs args,
+  }) {
+    final run = _resolveRun(context, args);
+    final adapterId = run.environment.sessionAdapter;
+    if (adapterId == null) return null;
+    return AgentSession(
+      runtime: runtime,
+      name: name,
+      adapter: _sessionAdapters.require(adapterId),
+      brief: run.brief,
+      commands: _steers.watch(args.beadId),
+      attemptId: attemptId,
+      instanceFence: instanceFence,
     );
   }
 
@@ -403,9 +470,9 @@ class AgentCapability extends ProcessCapability {
 /// `GridDelegate` D-H fix): watch deps / no sync accessor over `StateNotifier`
 /// state / config = values, impls = DI / guards LOUD or GONE — every coding
 /// agent this station spawns carries it. Model/params are AgentConfig, NOT brief
-/// (OQ-a) — one brief replays across harnesses. Completion is OBSERVED via
-/// process-exit (the host writes the node cursor through the chokepoint when the
-/// agent's process exits clean) — the agent never DECLARES it (tg-p9q).
+/// (OQ-a) — one brief replays across harnesses. One-turn completion is OBSERVED
+/// via process exit; channel completion is OBSERVED in the adapter's structured
+/// protocol event — the agent never DECLARES a grid cursor transition (tg-p9q).
 ///
 /// The agreement also carries the **commit policy** (bead `pow-8dx`): every
 /// commit is Conventional Commits v1.0.0, its subject describes WHAT CHANGED IN
@@ -884,6 +951,9 @@ DefaultCapabilityRegistry buildCodeRegistry({
   PriorArtSource? priorArt,
   String? overlaySourceRef,
   Map<String, String> overlayArgs = const {},
+  AgentSessionAdapterRegistry sessionAdapters =
+      const AgentSessionAdapterRegistry(),
+  AgentSteerSource steers = const NoAgentSteerSource(),
 }) {
   final loader = PackagedAssetLoader();
   final rubricSource = rubrics ?? loader.rubricSource;
@@ -933,6 +1003,8 @@ DefaultCapabilityRegistry buildCodeRegistry({
         devRoot: devRoot,
         overlaySourceRef: resolvedOverlaySourceRef,
         overlayArgs: overlayArgs,
+        sessionAdapters: sessionAdapters,
+        steers: steers,
       ),
       // The old `land` binding is GONE: the PR is no longer a step. The TERMINAL
       // route advances and the engine actuates the substation's bound
