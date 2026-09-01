@@ -310,22 +310,34 @@ void _collectTestDeclarations({
 void _collectTestLineFallback({
   required String prose,
   required Map<String, String> pathByMarker,
-  required Set<String> declared,
+  required Set<String> fallback,
 }) {
   for (final match in _testCommandLine.allMatches(prose)) {
     final command = match.group(1)!;
     if (!_dartTestCommand.hasMatch(command)) continue;
     for (final entry in pathByMarker.entries) {
-      if (command.contains(entry.key)) declared.add(entry.value);
+      if (command.contains(entry.key)) fallback.add(entry.value);
     }
   }
 }
 
-/// Confident test paths named as new or modified authored work in the Design.
+/// A design's confident test paths, split by the EVIDENCE that named them.
 ///
-/// A bare `Test:` directive is the fail-closed historical fallback only when
-/// the design carries no declaration section.
-Set<String> declaredTestFiles(String design) {
+/// [authored] — claimed as new or modified authored work (an authored-test
+/// statement, or a declaration section's own body). [fallback] — named ONLY by
+/// a bare `Test:` run command, the historical fail-closed fallback that applies
+/// when the design carries no declaration section at all (bead `pow-qev` r2).
+///
+/// The buckets answer to different evidence. An authored path is a PROMISE
+/// whatever the base tree holds; a `Test:` line naming a file that already
+/// exists at the pinned base promises nothing — it is a RUN reference (bead
+/// `pow-0jc`). A path in BOTH buckets is authored: precedence never inverts.
+typedef TestDeclarations = ({Set<String> authored, Set<String> fallback});
+
+/// Extracts [TestDeclarations] from [design] — the one extraction pipeline
+/// (`_markTestCommandPaths` → `_markConfidentTestPaths` → `proseOnly` →
+/// `_collectTestDeclarations`), now reporting its two buckets separately.
+TestDeclarations testDeclarations(String design) {
   final pathByMarker = <String, String>{};
   final commandMarkedDesign = _markTestCommandPaths(design, pathByMarker);
   final markedDesign = _markConfidentTestPaths(
@@ -333,7 +345,8 @@ Set<String> declaredTestFiles(String design) {
     pathByMarker,
   );
   final prose = proseOnly(markedDesign);
-  final declared = <String>{};
+  final authored = <String>{};
+  final fallback = <String>{};
   final declarationBodies = <String>[];
 
   for (final heading in _testDeclarationHeadings) {
@@ -345,14 +358,14 @@ Set<String> declaredTestFiles(String design) {
   _collectTestDeclarations(
     text: prose,
     pathByMarker: pathByMarker,
-    declared: declared,
+    declared: authored,
     declarationSection: false,
   );
   for (final body in declarationBodies) {
     _collectTestDeclarations(
       text: body,
       pathByMarker: pathByMarker,
-      declared: declared,
+      declared: authored,
       declarationSection: true,
     );
   }
@@ -360,18 +373,45 @@ Set<String> declaredTestFiles(String design) {
     _collectTestLineFallback(
       prose: prose,
       pathByMarker: pathByMarker,
-      declared: declared,
+      fallback: fallback,
     );
   }
-  return declared;
+  // Authored-marker precedence (bead `pow-qev` r1): a path claimed as authored
+  // work is never demoted to a run reference by also appearing in a `Test:`
+  // line.
+  fallback.removeAll(authored);
+  return (authored: authored, fallback: fallback);
+}
+
+/// Confident test paths the design DECLARES — the gate's obligation set.
+///
+/// [baseFiles] is the pinned base's file list ([baseTreeFiles]). A path the
+/// design names ONLY in a bare `Test:` run command AND that already exists at
+/// the base is a RUN reference, not a declaration (bead `pow-0jc`): the design
+/// promises nothing about it, so requiring it in the pinned diff would block a
+/// change that correctly leaves it alone. An EMPTY [baseFiles] — the default,
+/// and the answer whenever the base could not be read — keeps every fallback
+/// path a declaration, i.e. `pow-qev`'s fail-closed posture unchanged.
+Set<String> declaredTestFiles(
+  String design, {
+  Set<String> baseFiles = const <String>{},
+}) {
+  final declarations = testDeclarations(design);
+  return {
+    ...declarations.authored,
+    ...declarations.fallback.where(
+      (path) => !baseFiles.any((base) => _endsWithPath(base, path)),
+    ),
+  };
 }
 
 /// Sorted declarations absent from [changedFiles].
 List<String> missingDeclaredTestFiles({
   required String design,
   required Set<String> changedFiles,
+  Set<String> baseFiles = const <String>{},
 }) =>
-    declaredTestFiles(design)
+    declaredTestFiles(design, baseFiles: baseFiles)
         .where(
           (declared) =>
               !changedFiles.any((changed) => _endsWithPath(changed, declared)),
@@ -379,10 +419,41 @@ List<String> missingDeclaredTestFiles({
         .toList()
       ..sort();
 
+/// The repo-relative paths tracked at [baseRef] — the pinned base's own file
+/// list, read once with `git ls-tree -r --name-only <baseRef>` in
+/// [workspaceDir].
+///
+/// Answers the EMPTY set when the base cannot be read at all: no worktree on
+/// disk (A9(5)'s offline/dry-run posture) or a git that could not resolve the
+/// ref. Empty means "the base is UNKNOWN", and an unknown base leaves every
+/// `Test:`-line path a declaration — a failed probe can only make the gate
+/// STRICTER, never laxer, so it invents no verdict of its own.
+Future<Set<String>> baseTreeFiles({
+  required GitRunner runner,
+  required String workspaceDir,
+  required String baseRef,
+}) async {
+  if (!Directory(workspaceDir).existsSync()) return const <String>{};
+  final listed = await runner.run(
+    workingDirectory: workspaceDir,
+    args: ['ls-tree', '-r', '--name-only', baseRef],
+  );
+  if (!listed.ok) return const <String>{};
+  return listed.output
+      .split('\n')
+      .map((line) => line.trim())
+      .where((line) => line.isNotEmpty)
+      .toSet();
+}
+
 /// Mechanical, no-agent verification of Design-declared test-file presence.
 class DeclaredTestsCapability extends ServiceCapability {
-  /// Creates the gate.
-  const DeclaredTestsCapability();
+  /// Creates the gate, optionally over an injected [runner] — the `code`
+  /// registry's SHARED git seam (A9(5)); tests inject a canned fake (Fakes,
+  /// not mocks). Absent ⇒ the real [SystemGitRunner].
+  const DeclaredTestsCapability({GitRunner? runner}) : _runner = runner;
+
+  final GitRunner? _runner;
 
   @override
   Future<StepOutcome> run(TreeContext context, StepArgs args) async {
@@ -404,9 +475,23 @@ class DeclaredTestsCapability extends ServiceCapability {
             'no pinned diff at ${pinned.path} — declared tests cannot be checked; fail-closed',
       });
     }
+    // A bare `Test:` run line is a DECLARATION only when the file it names is
+    // ABSENT at the pinned base (bead `pow-0jc`): a file already on the base
+    // that the design merely RUNS is a run reference and the change is right
+    // not to touch it. Authored declarations never consult the base, so a
+    // design carrying a declaration section costs ZERO git.
+    final declarations = testDeclarations(bead.design);
+    final baseFiles = declarations.fallback.isEmpty
+        ? const <String>{}
+        : await baseTreeFiles(
+            runner: _runner ?? SystemGitRunner(),
+            workspaceDir: workspace.workspaceDir,
+            baseRef: 'origin/${workspace.baseBranch}',
+          );
     final missing = missingDeclaredTestFiles(
       design: bead.design,
       changedFiles: changedFilesIn(await pinned.readAsString()),
+      baseFiles: baseFiles,
     );
     return missing.isEmpty
         ? const Ok({'grade': 'A', 'transport': 'structural'})

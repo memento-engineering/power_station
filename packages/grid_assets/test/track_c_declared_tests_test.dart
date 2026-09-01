@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:beads_dart/beads_dart.dart';
 import 'package:grid_assets/grid_assets.dart';
 import 'package:grid_engine/grid_engine.dart';
+import 'package:grid_runtime/grid_runtime.dart';
 import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
@@ -23,10 +24,46 @@ diff --git a/test/commands/bead_command_test.dart b/test/commands/bead_command_t
 +new
 ''';
 
+/// A canned [GitRunner] whose `ls-tree` answers the PINNED BASE's file list —
+/// the declared-tests gate's only git read (Fakes, not mocks). Every other
+/// argv answers empty + ok, and [ok] makes the base probe FAIL so the
+/// fail-closed posture is provable.
+class _BaseTreeGitRunner implements GitRunner {
+  _BaseTreeGitRunner(this.baseFiles, {this.ok = true});
+
+  final List<String> baseFiles;
+  final bool ok;
+
+  /// Every argv, in call order.
+  final List<List<String>> calls = [];
+
+  @override
+  Future<GitRunResult> run({
+    required String workingDirectory,
+    required List<String> args,
+  }) async {
+    calls.add(List.of(args));
+    if (args.isNotEmpty && args.first == 'ls-tree') {
+      return ok
+          ? GitRunResult(exitCode: 0, output: baseFiles.join('\n'))
+          : const GitRunResult(
+              exitCode: 128,
+              output: 'fatal: not a valid object name: origin/main',
+            );
+    }
+    return const GitRunResult(exitCode: 0, output: '');
+  }
+}
+
+/// Drives the gate over a temp workspace. [existingFiles] are the files present
+/// at the PINNED BASE: written to disk (realism) and answered by the fake
+/// `ls-tree`. [runner] overrides that fake outright (argv assertions, probe
+/// failure).
 Future<Ok> _runGate({
   required String design,
   required String diff,
   Iterable<String> existingFiles = const [],
+  _BaseTreeGitRunner? runner,
 }) async {
   final dir = Directory.systemTemp.createTempSync('declared-tests-');
   addTearDown(() => dir.deleteSync(recursive: true));
@@ -38,15 +75,18 @@ Future<Ok> _runGate({
   final pinned = File(pinnedDiffPath(dir.path));
   pinned.parent.createSync(recursive: true);
   pinned.writeAsStringSync(diff);
-  final outcome = await const DeclaredTestsCapability().run(
-    FakeTreeContext(
-      values: {
-        Bead: workBead('tg-1').copyWith(design: design),
-        Workspace: testWorkspace('tg-1', workspaceDir: dir.path),
-      },
-    ),
-    stepArgs('tg-1/review/$kDeclaredTestsRubric'),
-  );
+  final outcome =
+      await DeclaredTestsCapability(
+        runner: runner ?? _BaseTreeGitRunner(existingFiles.toList()),
+      ).run(
+        FakeTreeContext(
+          values: {
+            Bead: workBead('tg-1').copyWith(design: design),
+            Workspace: testWorkspace('tg-1', workspaceDir: dir.path),
+          },
+        ),
+        stepArgs('tg-1/review/$kDeclaredTestsRubric'),
+      );
   expect(outcome, isA<Ok>());
   return outcome as Ok;
 }
@@ -328,5 +368,70 @@ Modify the authored regression test at
     expect(rationale, contains(_fixtureTestPath('commands/link_command')));
     expect(rationale, contains(fallbackPath));
     expect(rationale, isNot(contains('bead_command')));
+  });
+
+  test(
+    'pow-0jc a Test line running a base file is not a declaration',
+    () async {
+      final path = _fixtureTestPath('up_agent_scope');
+      final basePath = 'apps/space/$path';
+      final design = 'Test: cd apps/space && dart test $path';
+      expect(declaredTestFiles(design), {path});
+      expect(declaredTestFiles(design, baseFiles: {basePath}), isEmpty);
+      final outcome = await _runGate(
+        design: design,
+        diff: _diffFor(['apps/space/lib/up_agent_scope.dart']),
+        existingFiles: [basePath, 'apps/space/lib/up_agent_scope.dart'],
+      );
+      expect(outcome.payload?['grade'], 'A');
+    },
+  );
+
+  test('pow-0jc a Test line naming a file absent at the base blocks', () async {
+    final path = _fixtureTestPath('new_scope');
+    final design = 'Test: cd apps/space && dart test $path';
+    expect(
+      declaredTestFiles(design, baseFiles: const {'apps/space/lib/scope.dart'}),
+      {path},
+    );
+    final outcome = await _runGate(
+      design: design,
+      diff: _diffFor(['apps/space/lib/scope.dart']),
+      existingFiles: const ['apps/space/lib/scope.dart'],
+    );
+    expect(outcome.payload, {
+      'grade': 'F',
+      'transport': 'structural',
+      'rationale': 'Design-declared test files missing from pinned diff: $path',
+    });
+  });
+
+  test('pow-0jc an unreadable base stays fail-closed', () async {
+    final path = _fixtureTestPath('unreadable_base');
+    final runner = _BaseTreeGitRunner(const [], ok: false);
+    final outcome = await _runGate(
+      design: 'Test: dart test $path',
+      diff: _diffFor(['lib/gate.dart']),
+      runner: runner,
+    );
+    expect(outcome.payload?['grade'], 'F');
+    expect(runner.calls.single, [
+      'ls-tree',
+      '-r',
+      '--name-only',
+      'origin/main',
+    ]);
+  });
+
+  test('pow-0jc a declaration section never probes the base', () async {
+    final path = _fixtureTestPath('section_authored');
+    final runner = _BaseTreeGitRunner(const []);
+    final outcome = await _runGate(
+      design: '## Touches\n- `$path` — modified\n',
+      diff: _diffFor([path]),
+      runner: runner,
+    );
+    expect(outcome.payload?['grade'], 'A');
+    expect(runner.calls, isEmpty);
   });
 }
