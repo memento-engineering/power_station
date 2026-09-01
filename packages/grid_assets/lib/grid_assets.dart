@@ -132,6 +132,7 @@
 /// `DartCommand`) lives in its sibling pack `dart_grid_assets`.
 library;
 
+export 'src/agent/acp_session_adapter.dart';
 export 'src/agent/agent_session.dart';
 
 export 'src/code/mount_eligibility.dart';

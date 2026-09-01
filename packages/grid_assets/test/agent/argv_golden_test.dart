@@ -70,32 +70,6 @@ void main() {
         rendered,
       ]);
     });
-    test('copilot usage-wraps silently and declares keyed resume', () {
-      final environment = kBuiltinEnvironments['copilot']!;
-      expect(environment.argsAppend, ['--allow-all-tools', '-s']);
-      expect(environment.usageJsonArgs, ['--output-format', 'json']);
-      expect(environment.resumeFlag, '--resume');
-      expect(environment.resumeStyle, ResumeStyle.flag);
-
-      final cfg = render(
-        'copilot',
-        model: 'opus',
-        usageOut: '.grid/telemetry/x.usage.json',
-      );
-      expect(cfg.command, 'sh');
-      expect(cfg.args.sublist(2), [
-        'grid-copilot',
-        'copilot',
-        '--model',
-        'opus',
-        '--allow-all-tools',
-        '-s',
-        '--output-format',
-        'json',
-        '-p',
-        rendered,
-      ]);
-    });
     test('pi injects the endpoint env from the site binding', () {
       expect(
         render(
@@ -123,42 +97,29 @@ void main() {
         ),
       );
     });
-    test('codex — confirmed argv (subcommand exec, positional prompt)', () {
+    test('ACP-backed builtins are channel values', () {
       expect(
-        render('codex', model: 'gpt-5-codex'),
-        RuntimeConfig(
-          workDir: '/w/tg-1',
-          command: 'codex',
-          args: [
-            'exec',
-            '--model',
-            'gpt-5-codex',
-            '--dangerously-bypass-approvals-and-sandbox',
-            '--skip-git-repo-check',
-            rendered,
-          ],
-          lifecycle: Lifecycle.oneTurn,
+        kBuiltinEnvironments['copilot'],
+        const AgentEnvironment(
+          command: 'copilot',
+          args: ['--acp', '--allow-all-tools'],
+          promptMode: PromptMode.none,
+          target: InferenceTarget.providerManaged,
+          sessionAdapter: kAcpSessionAdapterId,
         ),
       );
-    });
-    test('codex usage-wrapped inserts --json before the prompt', () {
-      final cfg = render(
-        'codex',
-        model: 'gpt-5-codex',
-        usageOut: '.grid/telemetry/c.usage.json',
+      expect(
+        kBuiltinEnvironments['codex'],
+        const AgentEnvironment(
+          command: 'npx',
+          args: ['-y', '@agentclientprotocol/codex-acp@1.6.2'],
+          env: {'INITIAL_AGENT_MODE': 'agent-full-access'},
+          promptMode: PromptMode.none,
+          target: InferenceTarget.providerManaged,
+          model: 'gpt-5.6-sol',
+          sessionAdapter: kAcpSessionAdapterId,
+        ),
       );
-      expect(cfg.command, 'sh');
-      expect(cfg.args.sublist(2), [
-        'grid-codex',
-        'codex',
-        'exec',
-        '--model',
-        'gpt-5-codex',
-        '--dangerously-bypass-approvals-and-sandbox',
-        '--skip-git-repo-check',
-        '--json',
-        rendered,
-      ]);
     });
     test('the builtin roster is exactly the five', () {
       expect(buildBuiltinEnvironmentRegistry().names.toSet(), {
@@ -170,9 +131,9 @@ void main() {
       });
     });
 
-    test('every builtin remains on the one-turn argv path', () {
-      for (final environment in kBuiltinEnvironments.values) {
-        expect(environment.sessionAdapter, isNull);
+    test('the other three builtins remain on the one-turn argv path', () {
+      for (final name in <String>['claude', 'pi', 'opencode']) {
+        expect(kBuiltinEnvironments[name]!.sessionAdapter, isNull);
       }
     });
   });

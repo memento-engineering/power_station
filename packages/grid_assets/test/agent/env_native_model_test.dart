@@ -4,6 +4,8 @@
 // and a non-claude, model-less environment armed to a role fails LOUD at boot,
 // not at 400-per-spawn. An operator's explicit bead pin still passes through.
 // Pure-Dart, offline.
+import 'dart:convert';
+
 import 'package:grid_assets/grid_assets.dart';
 import 'package:test/test.dart';
 
@@ -20,7 +22,6 @@ void main() {
     workspaceDir: '/w/tg-1',
     branch: 'grid/tg-1',
   );
-  const brief = AgentBrief(task: 'BODY');
 
   group('pow-a9o — codex carries a native asset default', () {
     test('the codex builtin pins gpt-5.6-sol, not null', () {
@@ -42,19 +43,21 @@ void main() {
       expect(config.params['model'], isNot('opus'));
     });
 
-    test(
-      'the codex spawn argv carries --model gpt-5.6-sol from the default',
-      () {
-        final cfg = spawnFor(
-          environment: kBuiltinEnvironments['codex']!,
-          brief: brief,
-          workspace: ws,
-        );
-        final i = cfg.args.indexOf('--model');
-        expect(i, greaterThanOrEqualTo(0), reason: 'no --model: ${cfg.args}');
-        expect(cfg.args[i + 1], 'gpt-5.6-sol');
-      },
-    );
+    test('the ACP bridge spec retains the bare codex pin', () {
+      final cfg = const AcpSessionAdapter().launch(
+        environment: kBuiltinEnvironments['codex']!,
+        workspace: ws,
+      );
+      final spec = AcpBridgeSpec.fromJson(
+        (jsonDecode(cfg.env[kAcpBridgeSpecEnvironment]!)
+                as Map<String, dynamic>)
+            .cast<String, Object?>(),
+      );
+      expect(spec.command, 'npx');
+      expect(spec.args, ['-y', '@agentclientprotocol/codex-acp@1.6.2']);
+      expect(spec.model, 'gpt-5.6-sol');
+      expect(cfg.args, isNot(contains('--model')));
+    });
 
     test('an operator bead pin passes through into codex verbatim', () {
       final config = resolveAgentConfig(
