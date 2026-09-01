@@ -139,27 +139,40 @@ void main() {
   });
 
   group('the ROLE → TIER policy (the whole per-role surface)', () {
-    test('build ⇒ frontier, grade ⇒ mid, gather ⇒ cheap', () {
+    test('build + architect ⇒ frontier, grade ⇒ mid, gather ⇒ cheap', () {
       expect(AgentRole.values, [
         AgentRole.build,
+        AgentRole.architect,
         AgentRole.grade,
         AgentRole.gather,
       ]);
       expect(tierFor(AgentRole.build), AgentTier.frontier);
+      expect(tierFor(AgentRole.architect), AgentTier.frontier);
       expect(tierFor(AgentRole.grade), AgentTier.mid);
       expect(tierFor(AgentRole.gather), AgentTier.cheap);
     });
 
-    test('role → tier → model: the A20 defaults are PRESERVED, and gather is '
-        'cheap', () {
+    test('role → tier → model preserves every default', () {
       expect(defaultModelFor(AgentRole.build), 'opus');
+      expect(defaultModelFor(AgentRole.architect), 'opus');
       expect(defaultModelFor(AgentRole.grade), 'sonnet');
       expect(defaultModelFor(AgentRole.gather), 'haiku');
       const station = AgentConfig();
       expect(station.modelForRole(AgentRole.build), 'opus');
+      expect(station.modelForRole(AgentRole.architect), 'opus');
       expect(station.modelForRole(AgentRole.grade), 'sonnet');
       expect(station.modelForRole(AgentRole.gather), 'haiku');
     });
+
+    test(
+      'architect resolves through frontier and stamps the frontier default',
+      () {
+        final config = _resolve(AgentRole.architect, const AgentConfig());
+        expect(tierFor(AgentRole.architect), AgentTier.frontier);
+        expect(config.params['model'], kFrontierModelDefault);
+        expect(config.params['model'], 'opus');
+      },
+    );
   });
 
   group(

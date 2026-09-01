@@ -86,6 +86,53 @@ void main() {
     });
   });
 
+  group('pow-t1w — architect environment selection', () {
+    test('an armed architect resolves its own environment', () {
+      final config = resolveAgentConfig(
+        role: AgentRole.architect,
+        ambient: const AgentConfig(
+          harness: 'opencode',
+          roleEnvironments: {
+            AgentRole.architect: 'codex-frontier',
+            AgentRole.build: 'copilot',
+          },
+        ),
+        beadMetadata: const {},
+        stepParams: const {},
+        registry: _registry(),
+      );
+      expect(config.harness, 'codex-frontier');
+      expect(config.params['model'], 'gpt-5-codex');
+    });
+
+    test('an unarmed architect falls back to the build environment', () {
+      final config = resolveAgentConfig(
+        role: AgentRole.architect,
+        ambient: const AgentConfig(
+          harness: 'copilot',
+          roleEnvironments: {AgentRole.build: 'codex-frontier'},
+        ),
+        beadMetadata: const {},
+        stepParams: const {},
+        registry: _registry(),
+      );
+      expect(config.harness, 'codex-frontier');
+      expect(config.params['model'], 'gpt-5-codex');
+    });
+
+    test('an unarmed architect and build fall back to ambient', () {
+      final config = resolveAgentConfig(
+        role: AgentRole.architect,
+        ambient: const AgentConfig(harness: 'copilot'),
+        beadMetadata: const {},
+        stepParams: const {},
+        registry: _registry(),
+      );
+      expect(config.harness, 'copilot');
+      expect(config.params['model'], kFrontierModelDefault);
+    });
+  });
+
   group(
     'pow-k7l — the legacy rungs still function (coexistence, shims UNTOUCHED)',
     () {
