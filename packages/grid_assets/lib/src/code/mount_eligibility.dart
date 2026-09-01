@@ -18,8 +18,22 @@ List<String> mountEligibilityFindings(Bead bead) {
 }
 
 /// The grid_engine predicate supplied by this assets pack.
-MountEligibilityDecision mountEligibilityDecision(Bead bead) {
-  final findings = mountEligibilityFindings(bead);
+///
+/// When [freshBead] is supplied, every clause is recomputed from that bead
+/// before the deliberate first-refusal projection. A mismatched id is an
+/// authoring error: one bead's fresh state may never decide another bead.
+MountEligibilityDecision mountEligibilityDecision(
+  Bead bead, {
+  Bead? freshBead,
+}) {
+  if (freshBead != null && freshBead.id != bead.id) {
+    throw ArgumentError.value(
+      freshBead.id,
+      'freshBead.id',
+      'must match snapshot bead ${bead.id}',
+    );
+  }
+  final findings = mountEligibilityFindings(freshBead ?? bead);
   return findings.isEmpty
       ? const MountEligibilityDecision.eligible()
       : MountEligibilityDecision.refused(clause: findings.first);

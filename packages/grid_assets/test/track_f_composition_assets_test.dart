@@ -1,3 +1,4 @@
+import 'package:beads_dart/beads_dart.dart';
 import 'package:genesis_tree/genesis_tree.dart';
 import 'package:grid_assets/grid_assets.dart';
 import 'package:grid_engine/grid_engine.dart';
@@ -51,6 +52,19 @@ class _FakePrOpener implements PrOpener {
     String body = '',
   }) async =>
       PullRequestResult.opened(const PullRequestRef(url: 'https://x/pr/1'));
+}
+
+class _FakeMountBeadSource implements SubstationBeadSource {
+  _FakeMountBeadSource(this.beads);
+
+  final List<Bead> beads;
+  final List<sdk.SubstationScope> reads = [];
+
+  @override
+  Future<List<Bead>> read(sdk.SubstationScope scope) async {
+    reads.add(scope);
+    return beads;
+  }
 }
 
 class _SourceControl implements SourceControl {
@@ -187,6 +201,50 @@ void main() {
     expect(observed!.trustFloor, const TrustFloor(TrustLevel.trusted));
     expect(observed!.mountEligibility, same(mountEligibilityDecision));
   });
+
+  test(
+    'MountEligibilityAssets loads fresh beads before exposing predicate',
+    () async {
+      ServiceBundle? observed;
+      final source = _FakeMountBeadSource([
+        const Bead(
+          id: 'pow-test',
+          metadata: {'validation_plan': 'dart test'},
+          labels: [],
+        ),
+      ]);
+      final owner = TreeOwner();
+      owner.mountRoot(
+        _underSubstation(
+          'power_station',
+          '/work/ps',
+          MountEligibilityAssets(
+            beadSource: source,
+            child: _Probe(
+              (context) => observed = context
+                  .dependOnInheritedSeedOfExactType<ServiceBundle>(),
+            ),
+          ),
+        ),
+      );
+
+      owner.flush();
+      expect(observed, isNull);
+
+      await pumpEventQueue();
+      owner.flush();
+
+      expect(source.reads.map((scope) => scope.root), ['/work/ps']);
+      final decision = observed!.mountEligibility!(
+        const Bead(id: 'pow-test', metadata: {}, labels: []),
+      );
+      final clause = switch (decision) {
+        MountEligible() => null,
+        MountRefused(:final clause) => clause,
+      };
+      expect(clause, 'approval: missing grid.approved label');
+    },
+  );
 
   test('GitGridAssets stays deterministic and commit-only while offline', () {
     ServiceBundle? observed;

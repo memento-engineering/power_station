@@ -29,6 +29,9 @@
 /// learns a new type (ADR-0007 §1).
 library;
 
+import 'dart:async';
+
+import 'package:beads_dart/beads_dart.dart' show Bead;
 import 'package:genesis_tree/genesis_tree.dart';
 import 'package:grid_engine/grid_engine.dart';
 import 'package:grid_runtime/grid_runtime.dart';
@@ -43,24 +46,135 @@ import '../agent/agent_harness.dart';
 import '../agent/environment_registry.dart';
 import '../code/code_capabilities.dart';
 import '../code/mount_eligibility.dart';
+import '../search/station_search.dart';
 
 /// Injects grid_assets mount eligibility into the ambient service bundle.
-class MountEligibilityAssets extends SingleChildStatelessSeed {
+///
+/// A scoped asset reads the owning store before exposing its synchronous
+/// predicate. The default source is the package's existing read-only bd seam;
+/// tests inject a Fake [SubstationBeadSource].
+class MountEligibilityAssets extends SingleChildStatefulSeed {
   /// Creates the mount-boundary assets node.
-  const MountEligibilityAssets({super.child, super.key});
+  const MountEligibilityAssets({
+    this.beadSource = const BdExportBeadSource(),
+    super.child,
+    super.key,
+  });
+
+  /// The read-only source used to obtain the owning store's fresh beads.
+  final SubstationBeadSource beadSource;
+
+  @override
+  SingleChildState<MountEligibilityAssets> createState() =>
+      _MountEligibilityAssetsState();
+}
+
+class _MountEligibilityPending extends MultiChildSeed {
+  const _MountEligibilityPending() : super(children: const []);
+}
+
+class _MountEligibilityAssetsState
+    extends SingleChildState<MountEligibilityAssets> {
+  ServiceBundle? _ambient;
+  sdk.SubstationScope? _scope;
+  SubstationBeadSource? _source;
+  Map<String, Bead>? _freshBeadsById;
+  Object? _readFailure;
+  var _generation = 0;
+  var _disposed = false;
+
+  @override
+  void didChangeDependencies() {
+    _ambient = context.dependOnInheritedSeedOfExactType<ServiceBundle>();
+    final scope = context
+        .dependOnInheritedSeedOfExactType<sdk.SubstationScope>();
+    final source = seed.beadSource;
+    if (scope == _scope && identical(source, _source)) return;
+
+    _scope = scope;
+    _source = source;
+    _freshBeadsById = null;
+    _readFailure = null;
+    final generation = ++_generation;
+    if (scope != null) {
+      unawaited(_readFresh(source, scope, generation));
+    }
+  }
+
+  Future<void> _readFresh(
+    SubstationBeadSource source,
+    sdk.SubstationScope scope,
+    int generation,
+  ) async {
+    try {
+      final beads = await source.read(scope);
+      final byId = <String, Bead>{};
+      for (final bead in beads) {
+        if (byId.containsKey(bead.id)) {
+          throw StateError(
+            'fresh mount-eligibility query returned duplicate id ${bead.id}',
+          );
+        }
+        byId[bead.id] = bead;
+      }
+      if (_disposed || generation != _generation) return;
+      setState(() {
+        _freshBeadsById = Map<String, Bead>.unmodifiable(byId);
+        _readFailure = null;
+      });
+    } on Object catch (error) {
+      if (_disposed || generation != _generation) return;
+      setState(() {
+        _freshBeadsById = null;
+        _readFailure = error;
+      });
+    }
+  }
 
   @override
   Seed buildWithChild(TreeContext context, Seed child) {
-    final ambient = context.dependOnInheritedSeedOfExactType<ServiceBundle>();
-    final predicate = mountEligibilityDecision;
+    final scope = _scope;
+    final MountEligibilityPredicate predicate;
+    if (scope == null) {
+      predicate = mountEligibilityDecision;
+    } else {
+      final failure = _readFailure;
+      if (failure != null) {
+        throw StateError(
+          'fresh mount-eligibility read for ${scope.root} failed: $failure',
+        );
+      }
+      final freshBeadsById = _freshBeadsById;
+      if (freshBeadsById == null) {
+        return const _MountEligibilityPending();
+      }
+      predicate = (bead) {
+        final freshBead = freshBeadsById[bead.id];
+        if (freshBead == null) {
+          throw StateError(
+            'fresh mount-eligibility query for ${scope.root} '
+            'returned no bead ${bead.id}',
+          );
+        }
+        return mountEligibilityDecision(bead, freshBead: freshBead);
+      };
+    }
+
+    final ambient = _ambient;
     return DerivedServiceBundleSeed(
       value: ServiceBundle.derive(
         ambient ?? const ServiceBundle(),
         mountEligibility: predicate,
       ),
-      derivedFrom: [ambient, predicate],
+      derivedFrom: [ambient, scope, _source, _freshBeadsById, predicate],
       child: child,
     );
+  }
+
+  @override
+  void dispose() {
+    _disposed = true;
+    _generation++;
   }
 }
 

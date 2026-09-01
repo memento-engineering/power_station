@@ -93,6 +93,42 @@ void main() {
     expect(result, 'validation_plan: missing');
   });
 
+  test('fresh state reports approval when stale validation finding clears', () {
+    final decision = mountEligibilityDecision(
+      _bead(plan: null, labels: const []),
+      freshBead: _bead(labels: const []),
+    );
+    final clause = switch (decision) {
+      MountEligible() => null,
+      MountRefused(:final clause) => clause,
+    };
+    expect(clause, 'approval: missing grid.approved label');
+  });
+
+  test('fresh state preserves validation first when both fail', () {
+    final decision = mountEligibilityDecision(
+      _bead(plan: null, labels: const []),
+      freshBead: _bead(plan: null, labels: const []),
+    );
+    final clause = switch (decision) {
+      MountEligible() => null,
+      MountRefused(:final clause) => clause,
+    };
+    expect(clause, 'validation_plan: missing');
+  });
+
+  test('fresh state clears tentative refusal', () {
+    final decision = mountEligibilityDecision(
+      _bead(plan: null, labels: const []),
+      freshBead: _bead(),
+    );
+    final eligible = switch (decision) {
+      MountEligible() => true,
+      MountRefused() => false,
+    };
+    expect(eligible, isTrue);
+  });
+
   test('intake remains its distinct two-clause lifecycle contract', () {
     final bead = _bead(plan: null, labels: const []);
     expect(intakeFindings(bead), isEmpty);
