@@ -1051,7 +1051,11 @@ DefaultCapabilityRegistry buildCodeRegistry({
         inference: inference ?? const SystemInferenceRunner(),
       ),
       'critic': CriticCapability(rubrics: rubricSource),
-      kDeclaredTestsRubric: const DeclaredTestsCapability(),
+      // The declared-tests gate reads the PINNED BASE's file list to tell a
+      // `Test:` run reference from a promise (bead `pow-0jc`), so it shares the
+      // registry's one git seam ([gitRunner]) — the same fake `rebase` and
+      // `pin-diff` ride offline; absent ⇒ the real [SystemGitRunner] (A9(5)).
+      kDeclaredTestsRubric: DeclaredTestsCapability(runner: gitRunner),
       // The DOCS committee's three deterministic lanes — ONE capability, three
       // lanes selected by `params['rubric']`, mirroring `critic`. No rubric
       // source: the checks are mechanical, so the prose in `extension/rubrics/`
