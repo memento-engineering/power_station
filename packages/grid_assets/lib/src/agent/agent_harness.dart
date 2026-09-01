@@ -23,7 +23,7 @@
 /// **The MODEL resolves ROLE → TIER → MODEL (beads `pow-edp`, `pow-2c9`).** A
 /// spawn's model is not one station-wide value and not a per-role field: the
 /// SPAWNING ASSET declares an [AgentRole], the role points at an [AgentTier]
-/// ([tierFor]: build ⇒ frontier, grade ⇒ mid, gather ⇒ cheap), and the STATION
+/// ([tierFor]: build and architect ⇒ frontier, grade ⇒ mid, gather ⇒ cheap), and
 /// arms tier → model ([AgentConfig.tiers], a [ModelTiers] value; unarmed tiers
 /// ride [defaultModelForTier] — opus / sonnet / haiku). The bead's `grid.agent`
 /// `params.model` still outranks both. So the committee grades cheap while the
@@ -53,9 +53,14 @@ import 'model_tier.dart';
 /// so a new role costs ONE `tierFor` case and no config field. Sealed by the
 /// enum — consumers switch exhaustively (house style).
 enum AgentRole {
-  /// The BUILD side — the coding agent (`AgentCapability`) and the architect
-  /// (`SpecifyCapability`). Rides [AgentTier.frontier]: the build IS the work.
+  /// The BUILD side — the coding agent (`AgentCapability`). Rides
+  /// [AgentTier.frontier]: the build IS the work.
   build,
+
+  /// The ARCHITECT side — the spec author (`SpecifyCapability`). Rides
+  /// [AgentTier.frontier] so separating its environment from BUILD does not
+  /// change the model ladder. Re-specification re-enters the same capability.
+  architect,
 
   /// The GRADE side — the committee critics (`CriticCapability`, its spec
   /// subclass `SpecCriticCapability`, and the readiness lane
@@ -80,6 +85,7 @@ enum AgentRole {
 /// exhaustive `switch`, so a role that names no tier does not compile.
 AgentTier tierFor(AgentRole role) => switch (role) {
   AgentRole.build => AgentTier.frontier,
+  AgentRole.architect => AgentTier.frontier,
   AgentRole.grade => AgentTier.mid,
   AgentRole.gather => AgentTier.cheap,
 };
@@ -139,9 +145,11 @@ class AgentConfig {
   /// selection path to role → tier → model (ADR-0002 "the ladder"; ADR-0000 A20
   /// REFINED FORWARD). An entry names an [EnvironmentRegistry] environment;
   /// [resolveAgentConfig] resolves it to the full {harness, target, model} for
-  /// that role. EMPTY ⇒ the role falls through to role → tier → model (the
-  /// [tiers]/[graderModel] shims, still functioning until the shim-deletion bead
-  /// removes them). A station arms this like it arms [tiers].
+  /// that role. An unarmed [AgentRole.architect] first inherits the BUILD
+  /// environment, then falls through to the ambient harness; every other
+  /// unarmed role falls directly to ambient. The model still resolves through
+  /// the named environment and then role → tier → model. A station arms this
+  /// map like it arms [tiers].
   final Map<AgentRole, String> roleEnvironments;
 
   /// The tier map this station ACTUALLY arms: [tiers], with the two PRE-TIER

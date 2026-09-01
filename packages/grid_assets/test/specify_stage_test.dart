@@ -25,6 +25,7 @@ import 'support/asset_fakes.dart';
 ({FakeTreeContext context, StepArgs args}) _ctx({
   Bead? beadOverride,
   String workspaceDir = '/w/tg-1',
+  AgentConfig? agentConfig,
 }) => (
   context: FakeTreeContext(
     values: {
@@ -34,6 +35,7 @@ import 'support/asset_fakes.dart';
         workspaceDir: workspaceDir,
         branch: 'grid/tg-1',
       ),
+      if (agentConfig != null) AgentConfig: agentConfig,
     },
   ),
   args: stepArgs('tg-1/spec_review/specify'),
@@ -81,6 +83,23 @@ void main() {
   });
 
   group('SpecifyCapability.spawn — the architect harness ride', () {
+    test(
+      'declares AgentRole.architect: its own environment outranks build',
+      () {
+        final c = _ctx(
+          agentConfig: const AgentConfig(
+            roleEnvironments: {
+              AgentRole.architect: 'codex',
+              AgentRole.build: 'claude',
+            },
+          ),
+        );
+        final cfg = const SpecifyCapability().spawn(c.context, c.args);
+        expect(cfg.args, contains('codex'));
+        expect(cfg.args, isNot(contains('claude')));
+      },
+    );
+
     test('spawns claude WRAPPED for usage capture, cwd at the activation '
         '(FT-2, ADR-0008 Decision 10)', () {
       final c = _ctx();

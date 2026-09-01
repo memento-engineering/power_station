@@ -449,10 +449,12 @@ const Circuit kSpecReviewCircuit = Circuit(
 /// [AgentHarnessRegistry] with the effect verb, resolves the effective config
 /// through the ladder, and delegates the INVOCATION to the resolved harness.
 ///
-/// The architect is a BUILD-role spawner ([AgentRole.build], bead `pow-edp`) —
-/// it writes the spec two independent builds must converge on, so it rides the
-/// FRONTIER tier ([kFrontierModelDefault], `opus`) by default, not the graders'
-/// cheaper tier.
+/// The architect is an ARCHITECT-role spawner ([AgentRole.architect], bead
+/// `pow-t1w`). It writes the spec two independent builds must converge on, so
+/// it rides the FRONTIER tier ([kFrontierModelDefault], `opus`) by default.
+/// An unarmed architect inherits the BUILD environment in
+/// [resolveAgentConfig], preserving existing station armings. Auto-respec
+/// re-enters this same capability and therefore rides the same role.
 ///
 /// The POLICY stays here: [buildSpecifyBrief] renders the full bead (a
 /// title-only brief starves the agent, A36) + the spec-writing contract — the
@@ -529,7 +531,7 @@ class SpecifyCapability extends ProcessCapability {
     final siteBinding =
         context.getInheritedSeedOfExactType<SiteBinding>() ?? SiteBinding.none;
     final config = resolveAgentConfig(
-      role: AgentRole.build,
+      role: AgentRole.architect,
       ambient: ambient,
       beadMetadata: bead.metadata,
       stepParams: args.params,

@@ -19,10 +19,11 @@
 ///
 /// The AGENT SCOPE's model resolution is ROLE → TIER → MODEL (beads `pow-edp`,
 /// `pow-2c9`): a spawner declares its [AgentRole]; the role points at an
-/// [AgentTier] ([tierFor] — build ⇒ frontier, grade ⇒ mid, gather ⇒ cheap); and
-/// the STATION arms tier → model ([AgentConfig.tiers], a [ModelTiers] value —
-/// an unarmed tier rides [defaultModelForTier]: [kFrontierModelDefault] `opus`,
-/// [kMidModelDefault] `sonnet`, [kCheapModelDefault] `haiku`).
+/// [AgentTier] ([tierFor] — build and architect ⇒ frontier, grade ⇒ mid,
+/// gather ⇒ cheap); and the STATION arms tier → model ([AgentConfig.tiers], a
+/// [ModelTiers] value — an unarmed tier rides [defaultModelForTier]:
+/// [kFrontierModelDefault] `opus`, [kMidModelDefault] `sonnet`,
+/// [kCheapModelDefault] `haiku`).
 /// [resolveAgentConfig] resolves *bead `grid.agent` `params.model` > the
 /// station's arming of the role's tier*, stamping the winner into the harness
 /// transport key. So the committee grades cheap while the build runs strong, a

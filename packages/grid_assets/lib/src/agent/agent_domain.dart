@@ -130,8 +130,9 @@ AgentConfigOverride _parsePayload(Map<String, Object?> payload) {
 ///  - **the NAME ladder** (which environment/harness runs) — a rung names a
 ///    COMPLETE environment via `env`, or diverges the tool only via `harness`;
 ///    *step env/harness > bead env/harness > role → env
-///    ([AgentConfig.roleEnvironments]) > ambient.harness*, the more-specific rung
-///    winning. The winner is resolved through [registry] to the full {harness,
+///    ([AgentConfig.roleEnvironments]; an unarmed architect tries the build
+///    role's environment) > ambient.harness*, the more-specific rung winning.
+///    The winner is resolved through [registry] to the full {harness,
 ///    target, model}. WHERE inference runs is that environment's own `target`
 ///    bound by the site binding (ADR-0002 D3), never a step/bead rung;
 ///  - **the MODEL ladder** (beads `pow-edp` / `pow-2c9`) — *bead `grid.agent`
@@ -190,7 +191,17 @@ AgentConfig resolveAgentConfig({
       _nonEmpty(stepParams['env']) ?? _nonEmpty(stepParams['harness']);
 
   // Rung 5 — role → env (the station's arming; the successor to role → tier).
-  final roleName = ambient.roleEnvironments[role];
+  // ARCHITECT is compatibility-special: an explicit architect arming wins;
+  // otherwise it inherits BUILD's environment before the ambient harness, so
+  // stations that armed only BUILD keep their pre-split behavior.
+  final roleName = switch (role) {
+    AgentRole.build => ambient.roleEnvironments[AgentRole.build],
+    AgentRole.architect =>
+      ambient.roleEnvironments[AgentRole.architect] ??
+          ambient.roleEnvironments[AgentRole.build],
+    AgentRole.grade => ambient.roleEnvironments[AgentRole.grade],
+    AgentRole.gather => ambient.roleEnvironments[AgentRole.gather],
+  };
 
   // The resolved environment NAME → config.harness (the registry key every
   // caller resolves and the site binding keys on). Most-specific rung wins;

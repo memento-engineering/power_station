@@ -123,10 +123,12 @@ void main() {
       'the role resolves its model through its TIER (role → tier → model)',
       () {
         expect(defaultModelFor(AgentRole.build), 'opus');
+        expect(defaultModelFor(AgentRole.architect), 'opus');
         expect(defaultModelFor(AgentRole.grade), 'sonnet');
         expect(defaultModelFor(AgentRole.gather), 'haiku');
         expect(AgentRole.values, [
           AgentRole.build,
+          AgentRole.architect,
           AgentRole.grade,
           AgentRole.gather,
         ]);
