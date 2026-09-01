@@ -496,5 +496,31 @@ void main() {
         );
       },
     );
+
+    test(
+      'assets install materializes grid.approved staging in both skills',
+      () async {
+        final report = await const OverlayInstallService().install(
+          overlayRoots: [p.join(_extensionDir(), 'station_overlay')],
+          targetRoot: temp.path,
+          sourceRef: 'testref',
+          args: {'runner': 'space', 'gridHome': '/grid/home'},
+        );
+
+        expect(report.refused, isEmpty);
+        expect(report.blocked, isEmpty);
+        for (final id in const ['discover', 'intake-refinement']) {
+          final body = File(
+            p.join(temp.path, '.claude', 'skills', id, 'SKILL.md'),
+          ).readAsStringSync();
+          expect(
+            body,
+            contains('grid.approved'),
+            reason: '$id teaches approval',
+          );
+          expect(body, isNot(contains('--defer')), reason: '$id retired defer');
+        }
+      },
+    );
   });
 }

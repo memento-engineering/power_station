@@ -198,29 +198,23 @@ void main() {
       },
     );
 
-    test('filing contract coexists with defer teaching owned by pow-158', () {
+    test('filing and intake stage with grid.approved instead of defer', () {
       final filing = filingSection();
-      expect(filing, contains('**Staged, never ready:**'));
-      expect(filing, contains('--defer <date ~1 week out> --actor governor'));
-      expect(
-        filing,
-        contains(
-          'The bead stays deferred until the human approves it into the ready '
-          'frontier.',
-        ),
-      );
-      expect(
-        filing,
-        contains(
-          'Record design approval by filling `--description` and `--design`',
-        ),
-      );
-      expect(filing, isNot(contains('bd undefer')));
-      expect(filing, isNot(contains('grid.approved')));
+      expect(rendered, isNot(contains('--defer')));
+      expect(filing, contains('**Unapproved, never mounted:**'));
+      expect(filing, contains('`grid.approved` label'));
+      expect(filing, contains('--add-label grid.approved --actor governor'));
+      expect(filing, contains('The approval marker is the staging transition'));
 
       final intake = loader.loadSkillTemplate('intake-refinement');
-      expect(intake, contains('## Staging: defer until approved'));
-      expect(intake, contains('Create with `--defer <date>`'));
+      expect(intake, isNot(contains('--defer')));
+      expect(intake, contains('grid.approved marker staging'));
+      expect(
+        intake,
+        contains('## Staging: mark approved only after refinement'),
+      );
+      expect(intake, contains('--add-label grid.approved --actor operator'));
+      expect(intake, contains('mounted predicate refuses'));
     });
 
     test('cross-store guidance preserves unmigrated binding authority', () {
