@@ -54,100 +54,123 @@ Future<Directory> filingStore() async {
   );
 }
 
+// These tests drive a REAL bd binary end to end; a fake would not prove the
+// filing contract holds against bd's actual argv/exit-code surface.
+final bool _bdAvailable = () {
+  try {
+    return Process.runSync('bd', ['--version']).exitCode == 0;
+  } on ProcessException {
+    return false;
+  }
+}();
+final String? _skipWithoutBd = _bdAvailable
+    ? null
+    : 'requires a real bd binary on PATH (absent in CI)';
+
 void main() {
-  test('real bd filing passes all four requirements', () async {
-    final store = await filingStore();
-    await runBd(store, [
-      'create',
-      '--id',
-      'filing-blocker',
-      '--title',
-      'blocker',
-      '--type',
-      'task',
-      '--actor',
-      'test',
-    ]);
-    await runBd(store, [
-      'create',
-      '--id',
-      'filing-good',
-      '--title',
-      'good filing',
-      '--type',
-      'task',
-      '--defer',
-      '+1h',
-      '--description',
-      'Package: grid_assets\nBlocked by: filing-blocker',
-      '--acceptance',
-      '- [ ] dart test passes',
-      '--metadata',
-      '{"validation_plan":"dart test"}',
-      '--actor',
-      'test',
-    ]);
-    await runBd(store, [
-      'dep',
-      'add',
-      'filing-good',
-      'filing-blocker',
-      '--actor',
-      'test',
-    ]);
+  test(
+    'real bd filing passes all four requirements',
+    skip: _skipWithoutBd,
+    () async {
+      final store = await filingStore();
+      await runBd(store, [
+        'create',
+        '--id',
+        'filing-blocker',
+        '--title',
+        'blocker',
+        '--type',
+        'task',
+        '--actor',
+        'test',
+      ]);
+      await runBd(store, [
+        'create',
+        '--id',
+        'filing-good',
+        '--title',
+        'good filing',
+        '--type',
+        'task',
+        '--defer',
+        '+1h',
+        '--description',
+        'Package: grid_assets\nBlocked by: filing-blocker',
+        '--acceptance',
+        '- [ ] dart test passes',
+        '--metadata',
+        '{"validation_plan":"dart test"}',
+        '--actor',
+        'test',
+      ]);
+      await runBd(store, [
+        'dep',
+        'add',
+        'filing-good',
+        'filing-blocker',
+        '--actor',
+        'test',
+      ]);
 
-    final h = harness(store);
-    expect(
-      await h.runner.run(['filing', '--json', 'filing-good']),
-      0,
-      reason: '${h.out}\n${h.err}',
-    );
-    final report = jsonDecode(h.out.toString()) as Map<String, dynamic>;
-    final rows = (report['requirements'] as List).cast<Map<String, dynamic>>();
-    expect(report['passed'], isTrue);
-    expect(rows, hasLength(4));
-    expect(rows.every((row) => row['passed'] == true), isTrue);
-  });
+      final h = harness(store);
+      expect(
+        await h.runner.run(['filing', '--json', 'filing-good']),
+        0,
+        reason: '${h.out}\n${h.err}',
+      );
+      final report = jsonDecode(h.out.toString()) as Map<String, dynamic>;
+      final rows = (report['requirements'] as List)
+          .cast<Map<String, dynamic>>();
+      expect(report['passed'], isTrue);
+      expect(rows, hasLength(4));
+      expect(rows.every((row) => row['passed'] == true), isTrue);
+    },
+  );
 
-  test('reports every failed requirement and exits non-zero', () async {
-    final store = await filingStore();
-    await runBd(store, [
-      'create',
-      '--id',
-      'filing-blocker',
-      '--title',
-      'unwired blocker',
-      '--type',
-      'task',
-      '--actor',
-      'test',
-    ]);
-    await runBd(store, [
-      'create',
-      '--id',
-      'filing-bad',
-      '--title',
-      'bad filing',
-      '--type',
-      'epic',
-      '--description',
-      'Depends on: filing-blocker',
-      '--metadata',
-      '{"validation_plan":" "}',
-      '--actor',
-      'test',
-    ]);
+  test(
+    'reports every failed requirement and exits non-zero',
+    skip: _skipWithoutBd,
+    () async {
+      final store = await filingStore();
+      await runBd(store, [
+        'create',
+        '--id',
+        'filing-blocker',
+        '--title',
+        'unwired blocker',
+        '--type',
+        'task',
+        '--actor',
+        'test',
+      ]);
+      await runBd(store, [
+        'create',
+        '--id',
+        'filing-bad',
+        '--title',
+        'bad filing',
+        '--type',
+        'epic',
+        '--description',
+        'Depends on: filing-blocker',
+        '--metadata',
+        '{"validation_plan":" "}',
+        '--actor',
+        'test',
+      ]);
 
-    final h = harness(store);
-    expect(await h.runner.run(['filing', '--json', 'filing-bad']), 1);
-    final report = jsonDecode(h.out.toString()) as Map<String, dynamic>;
-    final rows = (report['requirements'] as List).cast<Map<String, dynamic>>();
-    expect(report['passed'], isFalse);
-    expect(rows, hasLength(4));
-    expect(rows.every((row) => row['passed'] == false), isTrue);
-  });
+      final h = harness(store);
+      expect(await h.runner.run(['filing', '--json', 'filing-bad']), 1);
+      final report = jsonDecode(h.out.toString()) as Map<String, dynamic>;
+      final rows = (report['requirements'] as List)
+          .cast<Map<String, dynamic>>();
+      expect(report['passed'], isFalse);
+      expect(rows, hasLength(4));
+      expect(rows.every((row) => row['passed'] == false), isTrue);
+    },
+  );
 
-  test('usage and missing beads fail loudly', () async {
+  test('usage and missing beads fail loudly', skip: _skipWithoutBd, () async {
     final store = await filingStore();
     expect(await harness(store).runner.run(['filing']), 64);
     expect(
