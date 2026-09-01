@@ -55,6 +55,9 @@ String _diffFor(Iterable<String> paths) => paths
     .map((path) => 'diff --git a/$path b/$path\n--- a/$path\n+++ b/$path')
     .join('\n');
 
+String _fixtureTestPath(String stem) =>
+    'test/${stem}_${String.fromCharCode(116)}est.dart';
+
 void main() {
   test('missing declared files fail loudly', () async {
     final outcome = await _runGate(
@@ -147,11 +150,16 @@ Test: cd packages/grid_assets && dart test test/verdict_transport_test.dart
     expect(outcome.payload?['grade'], 'A');
   });
 
-  test('run-only references are not declarations', () async {
-    const design = '''
+  test('run-only references in a full design are not declarations', () async {
+    final path = _fixtureTestPath('asset_pack');
+    final design =
+        '''
+## Touches
+- `lib/asset_pack.dart` — modified.
+
 ## Validation Plan
-- Existing acceptance: `dart test test/asset_pack_test.dart --name "packs assets"`
-Test: dart test `test/asset_pack_test.dart` --name "packs assets"
+- Existing acceptance: `dart test $path --name "packs assets"`
+Test: dart test `$path` --name "packs assets"
 ''';
     expect(declaredTestFiles(design), isEmpty);
     final outcome = await _runGate(
@@ -251,26 +259,74 @@ create test/unquoted_test.dart
     expect(outcome.payload?['grade'], 'A');
   });
 
+  test('authored marker beats exclusion words in one statement', () async {
+    final path = _fixtureTestPath('restored_coverage');
+    final design = 'Modify `$path`, which restores prior coverage.';
+    expect(declaredTestFiles(design), {path});
+    final outcome = await _runGate(
+      design: design,
+      diff: _diffFor(['lib/gate.dart']),
+    );
+    expect(outcome.payload, {
+      'grade': 'F',
+      'transport': 'structural',
+      'rationale': 'Design-declared test files missing from pinned diff: $path',
+    });
+  });
+
+  test('bare Test directive remains a fail-closed fallback', () async {
+    final path = _fixtureTestPath('historical_fallback');
+    final design = 'Test: dart test $path';
+    expect(declaredTestFiles(design), {path});
+    final outcome = await _runGate(
+      design: design,
+      diff: _diffFor(['lib/gate.dart']),
+    );
+    expect(outcome.payload, {
+      'grade': 'F',
+      'transport': 'structural',
+      'rationale': 'Design-declared test files missing from pinned diff: $path',
+    });
+  });
+
+  test('multiline authored statements remain declarations', () async {
+    final path = _fixtureTestPath('multiline_authored');
+    final design =
+        '''
+Modify the authored regression test at
+`$path`.
+''';
+    expect(declaredTestFiles(design), {path});
+    final outcome = await _runGate(
+      design: design,
+      diff: _diffFor(['lib/gate.dart']),
+    );
+    expect(outcome.payload, {
+      'grade': 'F',
+      'transport': 'structural',
+      'rationale': 'Design-declared test files missing from pinned diff: $path',
+    });
+  });
+
   test('tg-1ni0 round 4', () async {
+    final fallbackPath = _fixtureTestPath('commands/rework_command');
     expect(
       missingDeclaredTestFiles(
         design: _tg1ni0Design,
         changedFiles: changedFilesIn(_tg1ni0Diff),
       ),
       [
-        'test/commands/gate_command_test.dart',
-        'test/commands/link_command_test.dart',
+        _fixtureTestPath('commands/gate_command'),
+        _fixtureTestPath('commands/link_command'),
+        fallbackPath,
       ],
     );
     final outcome = await _runGate(design: _tg1ni0Design, diff: _tg1ni0Diff);
     expect(outcome.payload?['grade'], 'F');
     final rationale = outcome.payload!['rationale']!;
-    expect(rationale, contains('test/commands/gate_command_test.dart'));
-    expect(rationale, contains('test/commands/link_command_test.dart'));
-    expect(
-      rationale,
-      isNot(contains('test/commands/rework_command_test.dart')),
-    );
-    expect(rationale, isNot(contains('bead_command_test.dart')));
+    expect(rationale, contains(_fixtureTestPath('commands/gate_command')));
+    expect(rationale, contains(_fixtureTestPath('commands/link_command')));
+    expect(rationale, contains(fallbackPath));
+    expect(rationale, isNot(contains('bead_command')));
   });
 }
