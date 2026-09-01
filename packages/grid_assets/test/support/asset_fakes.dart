@@ -124,6 +124,45 @@ Bead workBead(String id) => bead(id).copyWith(
       'no brief for an architect to plan against.',
 );
 
+/// A fake bd query source for [SpecifyCapability]'s durable spec read-back.
+final class SpecifyReadbackBdRunner implements BdRunner {
+  SpecifyReadbackBdRunner({this.beads = const [], this.error, this.result});
+
+  final List<Bead> beads;
+  final Object? error;
+  final BdResult? result;
+  final List<List<String>> calls = <List<String>>[];
+  final List<String?> stdins = <String?>[];
+
+  @override
+  Future<BdResult> run(
+    List<String> args, {
+    Duration? timeout,
+    String? stdin,
+  }) async {
+    calls.add(List<String>.unmodifiable(args));
+    stdins.add(stdin);
+    final forcedError = error;
+    if (forcedError != null) throw forcedError;
+    final forcedResult = result;
+    if (forcedResult != null) return forcedResult;
+    return BdResult(
+      exitCode: 0,
+      stdout: jsonEncode({
+        'schema_version': 1,
+        'data': [for (final bead in beads) bead.toJson()],
+      }),
+      stderr: '',
+    );
+  }
+}
+
+/// A work bead whose authored spec is durably non-empty.
+Bead durableSpecifiedBead(String id) => workBead(id).copyWith(
+  acceptanceCriteria: kSpecExemplarAcceptance,
+  design: kSpecExemplarDesign,
+);
+
 /// A [SessionProjection] whose whole CHEAP SPEC HEAD is already COMPLETE — the
 /// readiness ladder (grade A) AND the discovery circuit — the cold-start
 /// fast-forward for a suite that projects sessions DIRECTLY onto the joined

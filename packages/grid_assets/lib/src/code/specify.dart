@@ -465,7 +465,49 @@ const Circuit kSpecReviewCircuit = Circuit(
 /// tooling, so `grid.dart` linkage stays the build spawn's job.
 class SpecifyCapability extends ProcessCapability {
   /// Creates the specify capability.
-  const SpecifyCapability();
+  ///
+  /// [runnerFor] is the bd subprocess seam used only for the durable read-back;
+  /// production composes [ProcessBdRunner], while tests inject a fake
+  /// [BdRunner].
+  const SpecifyCapability({
+    BdRunner Function(String workspaceRoot) runnerFor = _processRunnerFor,
+  }) : _runnerFor = runnerFor;
+
+  final BdRunner Function(String workspaceRoot) _runnerFor;
+
+  static BdRunner _processRunnerFor(String workspaceRoot) =>
+      ProcessBdRunner(workspaceRoot: workspaceRoot);
+
+  @override
+  CompletionContract get completionContract =>
+      CompletionContract.artifactDurability;
+
+  @override
+  Future<GateOutcome> probeCompletionArtifact(
+    TreeContext context,
+    StepArgs args,
+  ) async {
+    final workspace = context.getInheritedSeedOfExactType<Workspace>();
+    if (workspace == null) return GateOutcome.probeError;
+    try {
+      final queried = await BdCliService(
+        _runnerFor(workspace.workspaceDir),
+      ).query('id=${args.beadId}');
+      if (args.cancel.isCancelled) return GateOutcome.probeError;
+      final matches = queried
+          .where((candidate) => candidate.id == args.beadId)
+          .toList(growable: false);
+      if (matches.isEmpty) return GateOutcome.present;
+      if (matches.length != 1) return GateOutcome.probeError;
+      final durable = matches.single;
+      return durable.acceptanceCriteria.trim().isNotEmpty &&
+              durable.design.trim().isNotEmpty
+          ? GateOutcome.clear
+          : GateOutcome.present;
+    } on Object {
+      return GateOutcome.probeError;
+    }
+  }
 
   @override
   RuntimeConfig spawn(TreeContext context, StepArgs args) {

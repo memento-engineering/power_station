@@ -184,6 +184,8 @@ void main() {
           // A no-op clearer (gate-integrity #3): offline — never a real
           // filesystem touch.
           critiqueDirClearer: (_) {},
+          specifyBdRunnerFor: (_) =>
+              SpecifyReadbackBdRunner(beads: [durableSpecifiedBead('tg-1')]),
         ),
         substations: [
           SubstationScope(
@@ -236,6 +238,10 @@ void main() {
       await settle(() => f.provider.started.isNotEmpty);
       expect(f.provider.started, hasLength(1));
       expect(f.provider.started.single.name, _step(kSpecifyNode));
+      f.provider.emit(
+        SessionStarted(name: _step(kSpecifyNode), pid: 102, pgid: 101),
+      );
+      await pumpEventQueue();
       f.provider.emit(Exited(name: _step(kSpecifyNode), exitCode: 0));
       await pumpEventQueue();
       state.push(_stateAt());

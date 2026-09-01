@@ -195,6 +195,8 @@ StationKernel _buildKernel(
       // critics ride; an empty/ok response is fine — `describeBranch` falls
       // back to the deterministic id-free subject on unparseable output.
       inference: FakeInferenceRunner(),
+      specifyBdRunnerFor: (_) =>
+          SpecifyReadbackBdRunner(beads: [durableSpecifiedBead('tg-1')]),
     ),
     substations: [
       SubstationScope(
