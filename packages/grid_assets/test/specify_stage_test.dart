@@ -95,8 +95,12 @@ void main() {
           ),
         );
         final cfg = const SpecifyCapability().spawn(c.context, c.args);
-        expect(cfg.args, contains('codex'));
-        expect(cfg.args, isNot(contains('claude')));
+        // codex is an ACP-backed environment since pow-9o6: its launch is the
+        // adapter package, never a bare `codex` argv — assert the ENVIRONMENT
+        // was selected, not one tool's argv shape.
+        final argv = cfg.args.join(' ');
+        expect(argv, contains('codex'));
+        expect(argv, isNot(contains('claude')));
       },
     );
 
