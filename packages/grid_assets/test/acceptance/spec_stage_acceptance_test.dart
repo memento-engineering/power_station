@@ -77,8 +77,10 @@ final List<String> _specCriticSteps = [
 StationKernel _buildKernel(
   Fakes f,
   FakeSnapshotSource work,
-  FakeSnapshotSource state,
-) {
+  FakeSnapshotSource state, {
+  BdRunner Function(String workspaceRoot)? specifyBdRunnerFor,
+  ExplorationTransport? transport,
+}) {
   final bridge = StationJoinBridge(work: work, state: state);
   return StationKernel(
     bridge: bridge,
@@ -89,12 +91,16 @@ StationKernel _buildKernel(
       gitRunner: f.git,
       shellRunner: RecordingShellRunner(),
       critiqueDirClearer: (_) {},
+      specifyBdRunnerFor:
+          specifyBdRunnerFor ??
+          (_) => SpecifyReadbackBdRunner(beads: [durableSpecifiedBead('tg-1')]),
     ),
     substations: [
       SubstationScope(
         configNotifier: SubstationConfigNotifier(
           const SubstationConfig(substationId: 'tg', ownedSubstations: {'tg'}),
         ),
+        services: ServiceBundle(transport: transport),
         key: const ValueKey('scope.tg'),
       ),
     ],
@@ -228,7 +234,15 @@ void main() {
       final state = FakeSnapshotSource(
         _graph(beads: const [], ready: const {}),
       );
-      final kernel = _buildKernel(f, work, state);
+      final specifyReadback = SpecifyReadbackBdRunner(
+        beads: [durableSpecifiedBead('tg-1')],
+      );
+      final kernel = _buildKernel(
+        f,
+        work,
+        state,
+        specifyBdRunnerFor: (_) => specifyReadback,
+      );
       addTearDown(kernel.dispose);
       addTearDown(f.provider.close);
       addTearDown(work.close);
@@ -255,6 +269,10 @@ void main() {
       // the spawn — bounded, so a specify that never mounts still FAILS below.
       await settle(() => f.provider.started.isNotEmpty, maxPumps: 1000);
       expect(f.provider.started.map((s) => s.name), [_step(kSpecifyNode)]);
+      f.provider.emit(
+        SessionStarted(name: _step(kSpecifyNode), pid: 102, pgid: 101),
+      );
+      await _settle(f);
       final specify = f.provider.started.single.config;
       // The architect brief rides the argv: the bd CLI spec writes, the
       // mandatory ADR-alignment grep of the substation register, and the
@@ -283,7 +301,17 @@ void main() {
       // 2) specify completes → the spec committee's hygiene step runs for
       //    real (a ServiceCapability, no spawn); re-project its completion.
       f.provider.emit(Exited(name: _step(kSpecifyNode), exitCode: 0));
-      await _settle(f);
+      await settle(
+        () => _wroteCursor(f, kSpecifyNode, 'complete'),
+        maxPumps: 1000,
+      );
+      expect(_wroteCursor(f, kSpecifyNode, 'complete'), isTrue);
+      expect(specifyReadback.calls.single.first, 'query');
+      expect(
+        specifyReadback.beads.single.acceptanceCriteria.trim(),
+        isNotEmpty,
+      );
+      expect(specifyReadback.beads.single.design.trim(), isNotEmpty);
       state.push(_state(_session(completed: {kSpecifyNode})));
       await _settle(f);
       state.push(
@@ -381,6 +409,70 @@ void main() {
       );
     });
   });
+
+  test(
+    'a clean agent exit with an absent spec write fails and flares',
+    () async {
+      final f = buildFakes(createdId: _sid);
+      final transport = RecordingExplorationTransport();
+      final specifyReadback = SpecifyReadbackBdRunner(
+        beads: [workBead('tg-1')],
+      );
+      final work = FakeSnapshotSource(_graph(beads: const [], ready: const {}));
+      final state = FakeSnapshotSource(
+        _graph(beads: const [], ready: const {}),
+      );
+      final kernel = _buildKernel(
+        f,
+        work,
+        state,
+        specifyBdRunnerFor: (_) => specifyReadback,
+        transport: transport,
+      );
+      addTearDown(kernel.dispose);
+      addTearDown(f.provider.close);
+      addTearDown(work.close);
+      addTearDown(state.close);
+
+      kernel.start();
+      await _settle(f);
+      work.push(_graph(beads: [workBead('tg-1')], ready: {'tg-1'}));
+      await _settle(f);
+      state.push(_state(ladderDoneSession(id: _sid)));
+      await settle(
+        () => f.provider.started.any(
+          (spawn) => spawn.name == _step(kSpecifyNode),
+        ),
+        maxPumps: 1000,
+      );
+      f.provider.emit(
+        SessionStarted(name: _step(kSpecifyNode), pid: 102, pgid: 101),
+      );
+      await _settle(f);
+
+      f.provider.emit(Exited(name: _step(kSpecifyNode), exitCode: 0));
+      await settle(
+        () =>
+            _wroteCursor(f, kSpecifyNode, 'failed') &&
+            transport.named('step.failed').isNotEmpty,
+        maxPumps: 1000,
+      );
+
+      expect(_wroteCursor(f, kSpecifyNode, 'failed'), isTrue);
+      expect(_wroteCursor(f, kSpecifyNode, 'complete'), isFalse);
+      expect(specifyReadback.calls, [
+        ['query', 'id=tg-1', '--json', '--limit', '0'],
+      ]);
+      expect(
+        transport.named('step.failed').single.data['nodePath'],
+        'tg-1/$kSpecifyNode',
+      );
+      final started = f.provider.started.map((spawn) => spawn.name).toSet();
+      for (final critic in _specCriticSteps) {
+        expect(started, isNot(contains(critic)));
+      }
+    },
+  );
 
   group('the spec stage — gating-F parks at a GATE (no build)', () {
     test('spec-validation F → the route mints a type=gate bead, writes the '

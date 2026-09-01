@@ -970,6 +970,10 @@ class GitSourceControl implements SourceControl {
 /// materialized overlay file. Null resolves this package's own station overlay
 /// ref once while the code registry is composed, then threads that stable value
 /// into [AgentCapability], so per-bead agent spawn never shells out for it.
+///
+/// [specifyBdRunnerFor] controls only the specify step's post-exit work-bead
+/// read-back. It defaults to [ProcessBdRunner] and lets offline suites inject
+/// Fakes instead of spawning `bd`.
 DefaultCapabilityRegistry buildCodeRegistry({
   DateTime Function()? clock,
   RubricSource? rubrics,
@@ -980,6 +984,7 @@ DefaultCapabilityRegistry buildCodeRegistry({
   InferenceRunner? inference,
   AnchorResolver? anchorResolver,
   PriorArtSource? priorArt,
+  BdRunner Function(String workspaceRoot)? specifyBdRunnerFor,
   String? overlaySourceRef,
   Map<String, String> overlayArgs = const {},
   AgentSessionAdapterRegistry sessionAdapters =
@@ -1022,7 +1027,9 @@ DefaultCapabilityRegistry buildCodeRegistry({
       kDiscoveryRouteStep: const DiscoveryRouteCapability(),
       // The spec stage + its committee lanes (bead `pow-6ao`; `specify` folded
       // into the spec circuit by `pow-ui8`).
-      kSpecifyStep: const SpecifyCapability(),
+      kSpecifyStep: specifyBdRunnerFor == null
+          ? const SpecifyCapability()
+          : SpecifyCapability(runnerFor: specifyBdRunnerFor),
       'spec-critic': SpecCriticCapability(rubrics: rubricSource),
       kSpecGatingRubric: const SpecValidationCapability(),
       // The SPEC committee's own route (bead `pow-7nm`) — the three-way

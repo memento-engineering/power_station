@@ -127,6 +127,111 @@ void main() {
     });
   });
 
+  group('SpecifyCapability completion artifact durability', () {
+    test(
+      'declares durability and clears only on a fresh non-empty bead',
+      () async {
+        final runner = SpecifyReadbackBdRunner(
+          beads: [durableSpecifiedBead('tg-1')],
+        );
+        final cap = SpecifyCapability(runnerFor: (_) => runner);
+        final c = _ctx();
+        expect(cap.completionContract, CompletionContract.artifactDurability);
+        expect(
+          await cap.probeCompletionArtifact(c.context, c.args),
+          GateOutcome.clear,
+        );
+        expect(runner.calls, [
+          ['query', 'id=tg-1', '--json', '--limit', '0'],
+        ]);
+        expect(runner.stdins, [isNull]);
+      },
+    );
+
+    for (final entry in <String, Bead?>{
+      'absent': null,
+      'non-matching': durableSpecifiedBead('tg-2'),
+      'blank acceptance': durableSpecifiedBead(
+        'tg-1',
+      ).copyWith(acceptanceCriteria: ' '),
+      'blank design': durableSpecifiedBead('tg-1').copyWith(design: '\n'),
+    }.entries) {
+      test('${entry.key} durable state is present/not-durable', () async {
+        final bead = entry.value;
+        final runner = SpecifyReadbackBdRunner(beads: [if (bead != null) bead]);
+        final c = _ctx();
+        expect(
+          await SpecifyCapability(
+            runnerFor: (_) => runner,
+          ).probeCompletionArtifact(c.context, c.args),
+          GateOutcome.present,
+        );
+      });
+    }
+
+    test('duplicate exact-id rows are a probe error', () async {
+      final bead = durableSpecifiedBead('tg-1');
+      final runner = SpecifyReadbackBdRunner(beads: [bead, bead]);
+      final c = _ctx();
+      expect(
+        await SpecifyCapability(
+          runnerFor: (_) => runner,
+        ).probeCompletionArtifact(c.context, c.args),
+        GateOutcome.probeError,
+      );
+    });
+
+    for (final entry in <String, SpecifyReadbackBdRunner>{
+      'bd failure': SpecifyReadbackBdRunner(
+        result: const BdResult(
+          exitCode: 1,
+          stdout: '',
+          stderr: 'forced bd failure',
+        ),
+      ),
+      'malformed envelope': SpecifyReadbackBdRunner(
+        result: const BdResult(
+          exitCode: 0,
+          stdout: 'not an envelope',
+          stderr: '',
+        ),
+      ),
+      'timeout': SpecifyReadbackBdRunner(
+        error: const BdTimeoutException(
+          command: ['bd', 'query', 'id=tg-1'],
+          timeout: Duration(seconds: 15),
+        ),
+      ),
+    }.entries) {
+      test('${entry.key} is a probe error', () async {
+        final c = _ctx();
+        expect(
+          await SpecifyCapability(
+            runnerFor: (_) => entry.value,
+          ).probeCompletionArtifact(c.context, c.args),
+          GateOutcome.probeError,
+        );
+      });
+    }
+
+    test('a missing workspace is a probe error', () async {
+      final runner = SpecifyReadbackBdRunner(
+        beads: [durableSpecifiedBead('tg-1')],
+      );
+      final context = FakeTreeContext(values: {Bead: bead('tg-1')});
+      expect(
+        await SpecifyCapability(
+          runnerFor: (_) => runner,
+        ).probeCompletionArtifact(
+          context,
+          stepArgs('tg-1/spec_review/specify'),
+        ),
+        GateOutcome.probeError,
+      );
+      expect(runner.calls, isEmpty);
+    });
+  });
+
   group('buildSpecifyBrief — the spec contract', () {
     final brief = buildSpecifyBrief(
       _fullBead(),

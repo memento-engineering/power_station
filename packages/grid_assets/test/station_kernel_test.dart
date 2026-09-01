@@ -141,6 +141,8 @@ void main() {
         registry: buildCodeRegistry(
           rubrics: (id) => '($id rubric bands)',
           critiqueDirClearer: (_) {},
+          specifyBdRunnerFor: (_) =>
+              SpecifyReadbackBdRunner(beads: [durableSpecifiedBead('tg-1')]),
         ),
         substations: [
           SubstationScope(
@@ -192,6 +194,10 @@ void main() {
 
       expect(f.provider.started, hasLength(1), reason: 'specify spawned');
       expect(f.provider.started.single.name, _step(kSpecifyNode));
+      f.provider.emit(
+        SessionStarted(name: _step(kSpecifyNode), pid: 102, pgid: 101),
+      );
+      await pumpEventQueue();
 
       // Fast-forward the spec phase (specify complete + an all-pass spec
       // committee — cursor adoption: already-complete steps never mount) →
