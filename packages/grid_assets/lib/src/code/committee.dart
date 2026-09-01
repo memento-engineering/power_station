@@ -449,6 +449,32 @@ String parentPath(String nodePath) {
 /// so the writer and reader can never drift apart.
 const String kVerdictRoundKey = 'round';
 
+/// The verdict JSON's MODEL-AUTHORED round stamp key.
+///
+/// The critic copies the round from its prompt into [kVerdictRoundKey]
+/// ([kVerdictStampInstruction]). When that copy is WRONG, the capability
+/// rewrites [kVerdictRoundKey] to the engine-injected round and PRESERVES what
+/// the model wrote here — so a contaminated stamp stays visible in the artifact
+/// (and in the `critic.verdictRoundRestamped` flare) instead of being erased.
+const String kVerdictModelRoundKey = 'model_round';
+
+/// The directory holding each critic lane's INCARNATION MARKER — deliberately
+/// OUTSIDE `.grid/critique/`, which [sweepStaleCritique] empties at every round
+/// start. A marker that survives an unrelated round is harmless: only a
+/// [CriticCapability.spawn] can precede a probe, and every spawn rewrites it.
+const String kCriticIncarnationDir = '.grid/critique-incarnation';
+
+/// The incarnation marker for [rubric] under [workspaceDir]: the file whose
+/// mtime IS this critic incarnation's spawn instant.
+///
+/// Written by [CriticCapability.recordCriticIncarnation] at the spawn edge and
+/// read by [restampVerdictRound] as the proof that a verdict file on disk was
+/// written by THIS incarnation rather than left behind by an earlier one. Keyed
+/// by RUBRIC, exactly like the canonical verdict it fences (the three critic
+/// families' rubric sets are disjoint, so one key is enough).
+String criticIncarnationPath(String workspaceDir, String rubric) =>
+    p.join(workspaceDir, kCriticIncarnationDir, '$rubric.spawn');
+
 /// Receives one diagnostic emitted while resolving a verdict freshness round.
 typedef RoundDiagnostic = void Function(String message);
 
@@ -1040,8 +1066,32 @@ class CriticCapability extends ProcessCapability {
         return GateOutcome.probeError;
       }
     }
+    // The out-of-band flare sink (D-8, emit-only). This is an EFFECT edge, so
+    // the non-binding verb is correct (ADR-0008 D3); absent ⇒ no flares, never
+    // a failure.
+    final transport = context
+        .getInheritedSeedOfExactType<ServiceBundle>()
+        ?.transport;
     try {
       final round = verdictRound(args);
+      // Nico, 2026-09-01 — keep the clause, change the writer: the round stamp
+      // is MODEL-authored, so correct it to the engine-injected round BEFORE
+      // the ratified A15(5) alt-A fence reads it — but only on a file THIS
+      // incarnation provably wrote.
+      final restamp = restampVerdictRound(
+        workspaceDir: workspaceDir,
+        rubric: rubric,
+        nodePath: args.nodePath,
+        round: round,
+      );
+      if (restamp is RoundRestampApplied) {
+        transport?.flare('critic.verdictRoundRestamped', {
+          'rubric': rubric,
+          'nodePath': args.nodePath,
+          'round': '$round',
+          kVerdictModelRoundKey: restamp.modelRound,
+        });
+      }
       final durable = currentVerdictOnDisk(
         workspaceDir: workspaceDir,
         rubric: rubric,
@@ -1053,7 +1103,26 @@ class CriticCapability extends ProcessCapability {
       final recovered = _verdictFromResultText(
         readEnvelopeResultText(workspaceDir, args.nodePath),
       );
-      if (recovered == null) return GateOutcome.present;
+      if (recovered == null) {
+        // The engine now holds the lane on its completion-artifact contract.
+        // Flare WHY, so an operator reading a held session attributes the hold
+        // to THIS probe instead of misreading the engine's contract message as
+        // a lane verdict.
+        transport?.flare('critic.verdictProbeUnresolved', {
+          'rubric': rubric,
+          'nodePath': args.nodePath,
+          'round': '$round',
+          'fileRound': restamp.fileRound,
+          'restamp': switch (restamp) {
+            RoundRestampSkipped(:final reason) => 'skipped: $reason',
+            RoundRestampUnchanged() => 'unchanged',
+            RoundRestampApplied() => 'applied',
+          },
+          'strayTried': 'true',
+          'envelopeTried': 'true',
+        });
+        return GateOutcome.present;
+      }
 
       final canonical = File(
         p.join(workspaceDir, _critiqueDir, '$rubric.json'),
@@ -1083,6 +1152,36 @@ class CriticCapability extends ProcessCapability {
     }
   }
 
+  /// Stamps THIS incarnation's spawn instant for [rubric] under [workspaceDir]
+  /// — the marker [restampVerdictRound] reads as its freshness proof.
+  ///
+  /// Called at the spawn edge by every critic family (this class and the
+  /// `SpecCriticCapability` / `ReadinessCriticCapability` overrides), BEFORE
+  /// the critic process can write anything, so a verdict file at or after this
+  /// mtime is provably this incarnation's.
+  ///
+  /// BEST-EFFORT, exactly like [ClearCritiqueCapability]'s sweep and for the
+  /// same reason: a marker that cannot be written only costs the re-stamp, and
+  /// the ratified A15(5) alt-A fence then judges the file exactly as it does
+  /// today (fail-closed, never fail-open). It is not silent — the probe's
+  /// `critic.verdictProbeUnresolved` flare reports `no incarnation marker`, so
+  /// the degradation is traceable. The offline suite's synthetic workspace
+  /// dirs take this path.
+  @protected
+  void recordCriticIncarnation({
+    required String workspaceDir,
+    required String rubric,
+  }) {
+    try {
+      File(criticIncarnationPath(workspaceDir, rubric))
+        ..createSync(recursive: true)
+        ..writeAsStringSync(DateTime.now().toUtc().toIso8601String());
+    } on Object {
+      // Best-effort — see the doc comment above: the ratified round fence is
+      // the fail-closed backstop.
+    }
+  }
+
   @override
   RuntimeConfig spawn(TreeContext context, StepArgs args) {
     // Read the ambient values at ENTRY (synchronously, while mounted).
@@ -1105,6 +1204,12 @@ class CriticCapability extends ProcessCapability {
         deadline: kGatingDeadline,
       );
     }
+    // Stamp THIS incarnation before the agent can write its verdict, so the
+    // probe can prove a file on disk is ours.
+    recordCriticIncarnation(
+      workspaceDir: workspace.workspaceDir,
+      rubric: rubric,
+    );
     // The critic lanes are agents (ADR-0008 Decision 10): resolve the
     // effective config through the ladder and delegate the invocation to the
     // resolved harness — exactly like AgentCapability.spawn.
@@ -1581,6 +1686,123 @@ int? _stampedRound(Object? raw) => switch (raw) {
   final String round => int.tryParse(round.trim()),
   _ => null,
 };
+
+/// The outcome of the capability-side round re-stamp ([restampVerdictRound]).
+///
+/// A15(5) alt-A's equality check is UNCHANGED by this union — [_verdictFromFile]
+/// still rejects `stampedRound != expectedRound` as STALE. What this reports is
+/// WHO wrote the stamp that check reads: the model's copy, or the capability's
+/// correction of it.
+sealed class RoundRestamp {
+  const RoundRestamp(this.fileRound);
+
+  /// The round stamp READ off the verdict file — `''` when there was none to
+  /// read (no file, an unparseable file, or no round key).
+  final String fileRound;
+}
+
+/// The verdict file was left EXACTLY as found: it is absent, unparseable, not
+/// provably this incarnation's output, or its round stamp is unusable. The
+/// ratified fence then judges it exactly as it does today.
+final class RoundRestampSkipped extends RoundRestamp {
+  /// Creates a skip carrying its [reason] (flared verbatim) and whatever round
+  /// stamp was legible on disk.
+  const RoundRestampSkipped(this.reason, {String fileRound = ''})
+    : super(fileRound);
+
+  /// Why the file was left untouched.
+  final String reason;
+}
+
+/// The file was proven fresh and the model's copy already MATCHED the
+/// engine-injected round — nothing was rewritten.
+final class RoundRestampUnchanged extends RoundRestamp {
+  /// Creates the no-op outcome over the (correct) [fileRound].
+  const RoundRestampUnchanged(super.fileRound);
+}
+
+/// The file was proven fresh and its CONTAMINATED round stamp was rewritten to
+/// the engine-injected round; [modelRound] is what the model had written, now
+/// preserved in the file under [kVerdictModelRoundKey].
+final class RoundRestampApplied extends RoundRestamp {
+  /// Creates the applied outcome over the model's [modelRound].
+  const RoundRestampApplied(super.modelRound);
+
+  /// The model-authored round, preserved in the file as `model_round`.
+  String get modelRound => fileRound;
+}
+
+/// Rewrites the canonical `<rubric>.json` round stamp to [round] — the
+/// engine-injected `grid.round` read via [verdictRound] — WHEN AND ONLY WHEN
+/// the file is provably THIS critic incarnation's output.
+///
+/// The freshness PROOF is two conjuncts, both required:
+///  1. the file's `nodePath` stamp equals [nodePath] (A4's foreign-node fence —
+///     never re-stamp another node's file into validity);
+///  2. the file's mtime is at or after the incarnation marker's
+///     ([criticIncarnationPath]) — this incarnation's spawn instant, stamped
+///     before the critic process could write anything.
+/// [ClearCritiqueCapability]'s round-start sweep stays the BELT, never the
+/// proof (A15(5) alt-A, as ruled 2026-09-01).
+///
+/// Anything unproven is SKIPPED and the file is left byte-identical, so stale,
+/// foreign, missing-round and stray cases reject exactly as they do today.
+/// NEVER throws: an IO or decode failure is a [RoundRestampSkipped], leaving the
+/// strict-decode contract to [_verdictFromFile], the ONE parser.
+RoundRestamp restampVerdictRound({
+  required String workspaceDir,
+  required String rubric,
+  required String nodePath,
+  required int round,
+}) {
+  final verdict = File(p.join(workspaceDir, _critiqueDir, '$rubric.json'));
+  final marker = File(criticIncarnationPath(workspaceDir, rubric));
+  try {
+    if (!verdict.existsSync()) {
+      return const RoundRestampSkipped('no canonical verdict file');
+    }
+    final decoded = jsonDecode(verdict.readAsStringSync());
+    if (decoded is! Map<String, dynamic>) {
+      return const RoundRestampSkipped('verdict root is not a JSON object');
+    }
+    final modelRound = _stampedRound(decoded[kVerdictRoundKey]);
+    final fileRound = modelRound == null ? '' : '$modelRound';
+    if (!marker.existsSync()) {
+      return RoundRestampSkipped('no incarnation marker', fileRound: fileRound);
+    }
+    if (verdict.statSync().modified.isBefore(marker.statSync().modified)) {
+      return RoundRestampSkipped(
+        'verdict predates this incarnation',
+        fileRound: fileRound,
+      );
+    }
+    final stampedNodePath = decoded['nodePath'];
+    if (stampedNodePath is! String || stampedNodePath.trim() != nodePath) {
+      return RoundRestampSkipped(
+        'foreign nodePath stamp',
+        fileRound: fileRound,
+      );
+    }
+    if (modelRound == null) {
+      return const RoundRestampSkipped('no readable round stamp');
+    }
+    if (modelRound == round) return RoundRestampUnchanged(fileRound);
+    // Same-directory atomic replace, the contract the critic itself is held to
+    // ([verdictWriteInstruction]) — a reader never sees a half-written verdict.
+    final tmp = File('${verdict.path}.restamp')
+      ..writeAsStringSync(
+        jsonEncode({
+          ...decoded,
+          kVerdictRoundKey: round,
+          kVerdictModelRoundKey: modelRound,
+        }),
+      );
+    tmp.renameSync(verdict.path);
+    return RoundRestampApplied(fileRound);
+  } on Object {
+    return const RoundRestampSkipped('verdict re-stamp failed');
+  }
+}
 
 sealed class _VerdictFileRead {
   const _VerdictFileRead();

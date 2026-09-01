@@ -854,6 +854,12 @@ class SpecCriticCapability extends CriticCapability {
         '(WorkBead/SessionScope mount them)',
       );
     }
+    // Same incarnation stamp as the code committee: the spec lanes are where
+    // contaminated rounds have been observed in live review sessions.
+    recordCriticIncarnation(
+      workspaceDir: workspace.workspaceDir,
+      rubric: rubric,
+    );
     final ambient =
         context.getInheritedSeedOfExactType<AgentConfig>() ??
         const AgentConfig();
