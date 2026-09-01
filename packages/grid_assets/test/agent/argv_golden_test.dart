@@ -169,5 +169,11 @@ void main() {
         'codex',
       });
     });
+
+    test('every builtin remains on the one-turn argv path', () {
+      for (final environment in kBuiltinEnvironments.values) {
+        expect(environment.sessionAdapter, isNull);
+      }
+    });
   });
 }

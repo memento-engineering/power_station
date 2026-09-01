@@ -88,6 +88,15 @@ void main() {
       expect(r.usageJsonArgs, ['--json']);
     });
 
+    test('sessionAdapter folds last-non-null-wins', () {
+      final r = AgentEnvironment.resolve(const [
+        AgentEnvironment(sessionAdapter: 'root-channel'),
+        AgentEnvironment(),
+        AgentEnvironment(sessionAdapter: 'leaf-channel'),
+      ]);
+      expect(r.sessionAdapter, 'leaf-channel');
+    });
+
     test('the resolved env is flattened (standalone base)', () {
       final r = AgentEnvironment.resolve([root(), mid(), leaf]);
       expect(r.base, const EnvBaseStandalone());
@@ -179,6 +188,27 @@ void main() {
       );
     });
 
+    test('channel adapters require an explicit none prompt mode', () {
+      expect(
+        const AgentEnvironment(sessionAdapter: '').validate(),
+        'sessionAdapter must be non-empty',
+      );
+      expect(
+        const AgentEnvironment(
+          sessionAdapter: 'probe',
+          promptMode: PromptMode.arg,
+        ).validate(),
+        'sessionAdapter requires promptMode none',
+      );
+      expect(
+        const AgentEnvironment(
+          sessionAdapter: 'probe',
+          promptMode: PromptMode.none,
+        ).validate(),
+        isNull,
+      );
+    });
+
     test('needsSiteEndpoint tracks the target kind (D3)', () {
       expect(
         const AgentEnvironment(
@@ -219,9 +249,16 @@ void main() {
         args: ['-q'],
         env: {'K': 'v'},
       );
+      const channel = AgentEnvironment(
+        command: 'claude',
+        args: ['-p'],
+        env: {'K': 'v'},
+        sessionAdapter: 'channel',
+      );
       expect(a, b);
       expect(a.hashCode, b.hashCode);
       expect(a, isNot(c));
+      expect(a, isNot(channel));
     });
   });
 }
