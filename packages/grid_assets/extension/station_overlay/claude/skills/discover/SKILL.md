@@ -149,13 +149,14 @@ restate that boundary as Filing requirements.
   when repo ownership calls for it — including the three-store split directed
   by Nico on 2026-07-26 — and express their ordering with the link-authoring
   verb.
-- **Staged, never ready:** a live station mounts a ready bead within seconds —
-  a half-designed bead must never enter the frontier.
+- **Unapproved, never mounted:** the mounted predicate refuses a bead without
+  the `grid.approved` label. Create it without the label so dependency wiring
+  and design can finish before the bead enters the mounted frontier.
 
 ```bash
 cd <owning store root>
 bd create --title "<title>" --type <feature|bug|task|chore> \
-  --defer <date ~1 week out> --actor governor \
+  --actor governor \
   --description "<problem, exact package/path, why, and local blocker lines>" \
   --acceptance "- [ ] <initial testable outcome>" \
   --metadata '{"validation_plan":"cd packages/<pkg> && dart pub get && dart analyze && dart test"}'
@@ -177,11 +178,18 @@ search --json "<new bead id>"` and require an `id`-field hit. Never use `bd show
 for this verification: exact-id lookup resolves a stranded wisp and hides that
 it is absent from list/search surfaces.
 
-The bead stays deferred until the human approves it into the ready frontier.
-Record design approval by filling `--description` and `--design` with `bd update
-<id> --actor governor`; there is no persistence flag to change. All backlog
-writes ride the bd CLI with `--actor governor`; never SQL, never
-`.beads/hooks/`.
+The bead stays outside the mounted frontier until the human approves it because
+it has no `grid.approved` label. Record design approval and add the marker in
+one update:
+
+```bash
+bd update <id> --description "<approved description>" \
+  --design "<approved design>" --add-label grid.approved --actor governor
+```
+
+The approval marker is the staging transition; do not add it before the human
+approves. All backlog writes ride the bd CLI with `--actor governor`; never SQL,
+never `.beads/hooks/`.
 
 Filing supplies an executable initial plan. After design, specify
 authoritatively replaces or refines the implementation-aligned plan.

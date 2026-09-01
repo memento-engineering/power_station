@@ -3,7 +3,7 @@ name: intake-refinement
 description: >
   Shape work beads so a resident the_grid station can drive them: the required
   validation_plan metadata, driveable issue types, dependency wiring,
-  defer-until-approved staging, and reconciling a backlog against what already
+  grid.approved marker staging, and reconciling a backlog against what already
   shipped in mainline. Use when filing, approving, re-homing, or auditing beads
   in any store the station arms — including "why won't this bead mount" and
   "is this backlog actually current" questions.
@@ -41,17 +41,23 @@ Every bead intended for the station needs:
 4. **A description an agent can act on alone** — the agent receives the bead
    text and a worktree, nothing else. Name packages and acceptance shape.
 
-## Staging: defer until approved
+## Staging: mark approved only after refinement
 
-Drafts land `deferred`; the human's approval flips them open. Against a LIVE
-station, filing an open ready bead mounts an agent within seconds — so:
+Drafts are created open without `grid.approved`; the human's approval adds the
+label. Against a LIVE station, the mounted predicate refuses any bead missing
+the label, so the mount race is closed without a timer:
 
-- Create with `--defer <date>` (kills the mount race atomically), then wire
-  deps, then let the human undefer. Plain create-then-update-status leaves a
-  seconds-wide window where the station can mount a half-wired bead.
-- Deferring a bead that is ALREADY mounted does not evict it — mounted work is
-  never evicted for budget or readiness reasons; only a positive terminal
-  (bead closed / session terminal) unmounts.
+- Create without `grid.approved`, wire deps, and finish the description and
+  design. Only after human approval run:
+
+  ```
+  bd update <bead> --add-label grid.approved --actor operator
+  ```
+
+  The label is the final transition into the mounted frontier.
+- Removing `grid.approved` from a bead that is ALREADY mounted does not evict it
+  — mounted work is never evicted for budget or readiness reasons; only a
+  positive terminal (bead closed / session terminal) unmounts.
 
 ## Staleness reconciliation — run BEFORE arming any store
 
