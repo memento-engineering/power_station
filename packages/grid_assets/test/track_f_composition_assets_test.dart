@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:beads_dart/beads_dart.dart';
 import 'package:genesis_tree/genesis_tree.dart';
 import 'package:grid_assets/grid_assets.dart';
@@ -54,18 +56,27 @@ class _FakePrOpener implements PrOpener {
       PullRequestResult.opened(const PullRequestRef(url: 'https://x/pr/1'));
 }
 
-class _FakeMountBeadSource implements SubstationBeadSource {
-  _FakeMountBeadSource(this.beads);
+class _RecordingMountBdRunner implements BdRunner {
+  _RecordingMountBdRunner(this._reply);
 
-  final List<Bead> beads;
-  final List<sdk.SubstationScope> reads = [];
+  final Future<BdResult> Function(List<String> args) _reply;
+  final List<List<String>> calls = <List<String>>[];
 
   @override
-  Future<List<Bead>> read(sdk.SubstationScope scope) async {
-    reads.add(scope);
-    return beads;
+  Future<BdResult> run(List<String> args, {Duration? timeout, String? stdin}) {
+    calls.add(List<String>.unmodifiable(args));
+    return _reply(args);
   }
 }
+
+BdResult _queryReply(Bead bead) => BdResult(
+  exitCode: 0,
+  stdout: jsonEncode({
+    'schema_version': 1,
+    'data': [bead.toJson()],
+  }),
+  stderr: '',
+);
 
 class _SourceControl implements SourceControl {
   @override
@@ -132,6 +143,80 @@ Seed _underSubstation(String name, String root, Seed child) =>
       value: sdk.SubstationScope(name: name, root: root, prefix: name),
       child: child,
     );
+
+({TreeOwner owner, ServiceBundle? Function() bundle}) _mountEligibilityAsset(
+  BdRunner Function(String storeRoot) runnerFor,
+) {
+  ServiceBundle? observed;
+  final owner = TreeOwner();
+  owner.mountRoot(
+    _underSubstation(
+      'power_station',
+      '/work/ps',
+      MountEligibilityAssets(
+        runnerFor: runnerFor,
+        child: _Probe(
+          (context) => observed = context
+              .dependOnInheritedSeedOfExactType<ServiceBundle>(),
+        ),
+      ),
+    ),
+  );
+  owner.flush();
+  return (owner: owner, bundle: () => observed);
+}
+
+String? _refusalClause(MountEligibilityDecision decision) => switch (decision) {
+  MountEligible() => null,
+  MountRefused(:final clause) => clause,
+};
+
+Future<({MountEligibilityDecision decision, _RecordingMountBdRunner runner})>
+_runSuccessfulRefusalRecheck(Bead fresh) async {
+  final runner = _RecordingMountBdRunner((_) async => _queryReply(fresh));
+  final mounted = _mountEligibilityAsset((root) {
+    expect(root, '/work/ps');
+    return runner;
+  });
+  expect(mounted.bundle(), isNotNull);
+
+  const snapshot = Bead(id: 'pow-test', metadata: {}, labels: []);
+  final pending = mounted.bundle()!.mountEligibility!(snapshot);
+  expect(
+    _refusalClause(pending),
+    'fresh mount-eligibility read pending: pow-test',
+  );
+
+  await pumpEventQueue();
+  mounted.owner.flush();
+
+  final decision = mounted.bundle()!.mountEligibility!(snapshot);
+  expect(mounted.bundle()!.mountEligibility!(snapshot), decision);
+  expect(runner.calls, [
+    ['query', 'id=pow-test', '--all', '--json', '--limit', '0'],
+  ]);
+  return (decision: decision, runner: runner);
+}
+
+Future<String> _runFailedRefusalRecheck(_RecordingMountBdRunner runner) async {
+  final mounted = _mountEligibilityAsset((_) => runner);
+  const snapshot = Bead(id: 'pow-test', metadata: {}, labels: []);
+
+  expect(
+    _refusalClause(mounted.bundle()!.mountEligibility!(snapshot)),
+    'fresh mount-eligibility read pending: pow-test',
+  );
+  await pumpEventQueue();
+  mounted.owner.flush();
+
+  final clause = _refusalClause(mounted.bundle()!.mountEligibility!(snapshot));
+  expect(clause, isNotNull);
+  expect(mounted.bundle()!.mountEligibility!(snapshot), isA<MountRefused>());
+  expect(runner.calls, [
+    ['query', 'id=pow-test', '--all', '--json', '--limit', '0'],
+  ]);
+  return clause!;
+}
 
 void main() {
   test(
@@ -203,46 +288,99 @@ void main() {
   });
 
   test(
-    'MountEligibilityAssets loads fresh beads before exposing predicate',
+    'MountEligibilityAssets refusal recheck reports approval from fresh state',
     () async {
-      ServiceBundle? observed;
-      final source = _FakeMountBeadSource([
+      final result = await _runSuccessfulRefusalRecheck(
         const Bead(
           id: 'pow-test',
           metadata: {'validation_plan': 'dart test'},
           labels: [],
         ),
-      ]);
-      final owner = TreeOwner();
-      owner.mountRoot(
-        _underSubstation(
-          'power_station',
-          '/work/ps',
-          MountEligibilityAssets(
-            beadSource: source,
-            child: _Probe(
-              (context) => observed = context
-                  .dependOnInheritedSeedOfExactType<ServiceBundle>(),
+      );
+      expect(
+        _refusalClause(result.decision),
+        'approval: missing grid.approved label',
+      );
+    },
+  );
+
+  test(
+    'MountEligibilityAssets refusal recheck preserves validation first',
+    () async {
+      final result = await _runSuccessfulRefusalRecheck(
+        const Bead(id: 'pow-test', metadata: {}, labels: []),
+      );
+      expect(_refusalClause(result.decision), 'validation_plan: missing');
+    },
+  );
+
+  test(
+    'MountEligibilityAssets refusal recheck clears a stale refusal',
+    () async {
+      final result = await _runSuccessfulRefusalRecheck(
+        const Bead(
+          id: 'pow-test',
+          metadata: {'validation_plan': 'dart test'},
+          labels: ['grid.approved'],
+        ),
+      );
+      expect(result.decision, isA<MountEligible>());
+    },
+  );
+
+  test(
+    'MountEligibilityAssets eligible snapshot is synchronous and query-free',
+    () {
+      final runner = _RecordingMountBdRunner(
+        (_) async => throw StateError('eligible snapshot queried bd'),
+      );
+      final mounted = _mountEligibilityAsset((_) => runner);
+
+      expect(mounted.bundle(), isNotNull);
+      final decision = mounted.bundle()!.mountEligibility!(
+        const Bead(
+          id: 'pow-test',
+          metadata: {'validation_plan': 'dart test'},
+          labels: ['grid.approved'],
+        ),
+      );
+      expect(decision, isA<MountEligible>());
+      expect(runner.calls, isEmpty);
+    },
+  );
+
+  test(
+    'MountEligibilityAssets failed refusal recheck is a loud refusal',
+    () async {
+      final clause = await _runFailedRefusalRecheck(
+        _RecordingMountBdRunner(
+          (_) async => const BdResult(
+            exitCode: 1,
+            stdout: '',
+            stderr: 'query failed at store',
+          ),
+        ),
+      );
+      expect(clause, contains('fresh mount-eligibility read failed'));
+      expect(clause, contains('query failed at store'));
+    },
+  );
+
+  test(
+    'MountEligibilityAssets timed-out refusal recheck is a loud refusal',
+    () async {
+      final clause = await _runFailedRefusalRecheck(
+        _RecordingMountBdRunner(
+          (_) => Future<BdResult>.error(
+            const BdTimeoutException(
+              command: ['bd', 'query', 'id=pow-test'],
+              timeout: Duration(seconds: 15),
             ),
           ),
         ),
       );
-
-      owner.flush();
-      expect(observed, isNull);
-
-      await pumpEventQueue();
-      owner.flush();
-
-      expect(source.reads.map((scope) => scope.root), ['/work/ps']);
-      final decision = observed!.mountEligibility!(
-        const Bead(id: 'pow-test', metadata: {}, labels: []),
-      );
-      final clause = switch (decision) {
-        MountEligible() => null,
-        MountRefused(:final clause) => clause,
-      };
-      expect(clause, 'approval: missing grid.approved label');
+      expect(clause, contains('fresh mount-eligibility read failed'));
+      expect(clause, contains('bd timed out after 15000ms'));
     },
   );
 

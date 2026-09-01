@@ -31,7 +31,8 @@ library;
 
 import 'dart:async';
 
-import 'package:beads_dart/beads_dart.dart' show Bead;
+import 'package:beads_dart/beads_dart.dart'
+    show BdCliService, BdRunner, Bead, ProcessBdRunner;
 import 'package:genesis_tree/genesis_tree.dart';
 import 'package:grid_engine/grid_engine.dart';
 import 'package:grid_runtime/grid_runtime.dart';
@@ -46,41 +47,47 @@ import '../agent/agent_harness.dart';
 import '../agent/environment_registry.dart';
 import '../code/code_capabilities.dart';
 import '../code/mount_eligibility.dart';
-import '../search/station_search.dart';
 
 /// Injects grid_assets mount eligibility into the ambient service bundle.
 ///
-/// A scoped asset reads the owning store before exposing its synchronous
-/// predicate. The default source is the package's existing read-only bd seam;
-/// tests inject a Fake [SubstationBeadSource].
+/// Eligible snapshots pass through synchronously. A refused snapshot starts one
+/// scoped fresh-bead query; while it is in flight the refusal stays LOUD, and
+/// completion re-provides the bundle with either the fresh decision or a
+/// refusal that names the read failure.
 class MountEligibilityAssets extends SingleChildStatefulSeed {
   /// Creates the mount-boundary assets node.
+  ///
+  /// [runnerFor] is the injected bd runner factory. The default delegates all
+  /// process policy to [ProcessBdRunner].
   const MountEligibilityAssets({
-    this.beadSource = const BdExportBeadSource(),
+    BdRunner Function(String storeRoot) runnerFor = _processRunnerFor,
     super.child,
     super.key,
-  });
+  }) : _runnerFor = runnerFor;
 
-  /// The read-only source used to obtain the owning store's fresh beads.
-  final SubstationBeadSource beadSource;
+  final BdRunner Function(String storeRoot) _runnerFor;
+
+  static BdRunner _processRunnerFor(String storeRoot) =>
+      ProcessBdRunner(workspaceRoot: storeRoot);
 
   @override
   SingleChildState<MountEligibilityAssets> createState() =>
       _MountEligibilityAssetsState();
 }
 
-class _MountEligibilityPending extends MultiChildSeed {
-  const _MountEligibilityPending() : super(children: const []);
-}
-
 class _MountEligibilityAssetsState
     extends SingleChildState<MountEligibilityAssets> {
   ServiceBundle? _ambient;
   sdk.SubstationScope? _scope;
-  SubstationBeadSource? _source;
-  Map<String, Bead>? _freshBeadsById;
-  Object? _readFailure;
+  BdRunner Function(String storeRoot)? _runnerFor;
+  BdCliService? _bd;
+  final Map<String, Bead> _snapshotsById = <String, Bead>{};
+  final Set<String> _readsInFlight = <String>{};
+  final Map<String, MountEligibilityDecision> _freshDecisionsById =
+      <String, MountEligibilityDecision>{};
+  final Map<String, Object> _readFailuresById = <String, Object>{};
   var _generation = 0;
+  var _revision = 0;
   var _disposed = false;
 
   @override
@@ -88,47 +95,124 @@ class _MountEligibilityAssetsState
     _ambient = context.dependOnInheritedSeedOfExactType<ServiceBundle>();
     final scope = context
         .dependOnInheritedSeedOfExactType<sdk.SubstationScope>();
-    final source = seed.beadSource;
-    if (scope == _scope && identical(source, _source)) return;
+    final runnerFor = seed._runnerFor;
+    if (scope == _scope && identical(runnerFor, _runnerFor)) return;
 
     _scope = scope;
-    _source = source;
-    _freshBeadsById = null;
-    _readFailure = null;
-    final generation = ++_generation;
-    if (scope != null) {
-      unawaited(_readFresh(source, scope, generation));
+    _runnerFor = runnerFor;
+    _bd = scope == null ? null : BdCliService(runnerFor(scope.root));
+    _generation++;
+    _revision++;
+    _resetRechecks();
+  }
+
+  MountEligibilityDecision _decisionFor(Bead bead, sdk.SubstationScope scope) {
+    final snapshotDecision = mountEligibilityDecision(bead);
+    switch (snapshotDecision) {
+      case MountEligible():
+        _forget(bead.id);
+        return snapshotDecision;
+      case MountRefused():
+        if (_snapshotsById[bead.id] != bead) {
+          _forget(bead.id);
+          _snapshotsById[bead.id] = bead;
+        }
+
+        final freshDecision = _freshDecisionsById[bead.id];
+        if (freshDecision != null) return freshDecision;
+
+        final failure = _readFailuresById[bead.id];
+        if (failure != null) {
+          return MountEligibilityDecision.refused(
+            clause:
+                'fresh mount-eligibility read failed for ${bead.id} '
+                'in ${scope.root}: $failure',
+          );
+        }
+
+        if (_readsInFlight.add(bead.id)) {
+          final bd = _bd;
+          if (bd == null) {
+            _readsInFlight.remove(bead.id);
+            return MountEligibilityDecision.refused(
+              clause:
+                  'fresh mount-eligibility read failed for ${bead.id} '
+                  'in ${scope.root}: bd service unavailable',
+            );
+          }
+          unawaited(_readFresh(bead, scope, bd, _generation));
+        }
+        return MountEligibilityDecision.refused(
+          clause: 'fresh mount-eligibility read pending: ${bead.id}',
+        );
     }
   }
 
   Future<void> _readFresh(
-    SubstationBeadSource source,
+    Bead snapshot,
     sdk.SubstationScope scope,
+    BdCliService bd,
     int generation,
   ) async {
+    MountEligibilityDecision decision;
     try {
-      final beads = await source.read(scope);
-      final byId = <String, Bead>{};
-      for (final bead in beads) {
-        if (byId.containsKey(bead.id)) {
-          throw StateError(
-            'fresh mount-eligibility query returned duplicate id ${bead.id}',
-          );
-        }
-        byId[bead.id] = bead;
+      final beads = await bd.query('id=${snapshot.id}', includeClosed: true);
+      if (beads.length != 1 || beads.single.id != snapshot.id) {
+        throw StateError(
+          'fresh mount-eligibility query for ${scope.root} expected '
+          '${snapshot.id}, got [${beads.map((bead) => bead.id).join(', ')}]',
+        );
       }
-      if (_disposed || generation != _generation) return;
-      setState(() {
-        _freshBeadsById = Map<String, Bead>.unmodifiable(byId);
-        _readFailure = null;
-      });
+      decision = mountEligibilityDecision(snapshot, freshBead: beads.single);
     } on Object catch (error) {
-      if (_disposed || generation != _generation) return;
-      setState(() {
-        _freshBeadsById = null;
-        _readFailure = error;
-      });
+      _completeFailure(snapshot, generation, error);
+      return;
     }
+    _completeDecision(snapshot, generation, decision);
+  }
+
+  void _completeDecision(
+    Bead snapshot,
+    int generation,
+    MountEligibilityDecision decision,
+  ) {
+    if (!_isCurrent(snapshot, generation)) return;
+    setState(() {
+      _readsInFlight.remove(snapshot.id);
+      _readFailuresById.remove(snapshot.id);
+      _freshDecisionsById[snapshot.id] = decision;
+      _revision++;
+    });
+  }
+
+  void _completeFailure(Bead snapshot, int generation, Object error) {
+    if (!_isCurrent(snapshot, generation)) return;
+    setState(() {
+      _readsInFlight.remove(snapshot.id);
+      _freshDecisionsById.remove(snapshot.id);
+      _readFailuresById[snapshot.id] = error;
+      _revision++;
+    });
+  }
+
+  bool _isCurrent(Bead snapshot, int generation) =>
+      !_disposed &&
+      generation == _generation &&
+      _snapshotsById[snapshot.id] == snapshot &&
+      _readsInFlight.contains(snapshot.id);
+
+  void _forget(String beadId) {
+    _snapshotsById.remove(beadId);
+    _readsInFlight.remove(beadId);
+    _freshDecisionsById.remove(beadId);
+    _readFailuresById.remove(beadId);
+  }
+
+  void _resetRechecks() {
+    _snapshotsById.clear();
+    _readsInFlight.clear();
+    _freshDecisionsById.clear();
+    _readFailuresById.clear();
   }
 
   @override
@@ -138,26 +222,7 @@ class _MountEligibilityAssetsState
     if (scope == null) {
       predicate = mountEligibilityDecision;
     } else {
-      final failure = _readFailure;
-      if (failure != null) {
-        throw StateError(
-          'fresh mount-eligibility read for ${scope.root} failed: $failure',
-        );
-      }
-      final freshBeadsById = _freshBeadsById;
-      if (freshBeadsById == null) {
-        return const _MountEligibilityPending();
-      }
-      predicate = (bead) {
-        final freshBead = freshBeadsById[bead.id];
-        if (freshBead == null) {
-          throw StateError(
-            'fresh mount-eligibility query for ${scope.root} '
-            'returned no bead ${bead.id}',
-          );
-        }
-        return mountEligibilityDecision(bead, freshBead: freshBead);
-      };
+      predicate = (bead) => _decisionFor(bead, scope);
     }
 
     final ambient = _ambient;
@@ -166,7 +231,7 @@ class _MountEligibilityAssetsState
         ambient ?? const ServiceBundle(),
         mountEligibility: predicate,
       ),
-      derivedFrom: [ambient, scope, _source, _freshBeadsById, predicate],
+      derivedFrom: [ambient, scope, seed._runnerFor, _revision],
       child: child,
     );
   }
