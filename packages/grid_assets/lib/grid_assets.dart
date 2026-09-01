@@ -59,6 +59,12 @@
 /// before writing the grid-home-owned [DoltEmbeddingIndex]. [SearchCommand]
 /// remains inference-free and write-free.
 ///
+/// The FILING pair is the front-door completeness counterpart: [FilingService]
+/// reads one bead through [ExactSubstationBeadSource], [FilingContract]
+/// deterministically evaluates its four mechanical authoring requirements,
+/// and [FilingCommand] is the thin CLI adapter the `discover` skill calls.
+/// Description and acceptance usefulness remain with the agentic half.
+///
 /// The VENDED SKILLS (bead `pow-88p`, `extension/station_overlay/skills/`) are
 /// those agentic halves: `discover` is the grid home's HITL front door — it
 /// dispatches on arg shape (topic research / bead advisory / bead directed),
@@ -163,6 +169,8 @@ export 'src/compute/bounded_use.dart';
 export 'src/compute/compute_command.dart';
 export 'src/compute/compute_commands.dart';
 export 'src/compute/lease_capability.dart';
+export 'src/filing/filing_command.dart';
+export 'src/filing/filing_contract.dart';
 export 'src/lease/bus_lease.dart';
 export 'src/search/embedding_index.dart';
 export 'src/search/embedding_change_key.dart';

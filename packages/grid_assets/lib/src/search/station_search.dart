@@ -25,8 +25,16 @@
 /// read was retired upstream; `export` is refused in proxied-server mode.)
 library;
 
+import 'dart:convert';
+
 import 'package:beads_dart/beads_dart.dart'
-    show Bead, BdCliService, BdRunner, ProcessBdRunner;
+    show
+        Bead,
+        BeadDependency,
+        BdCliService,
+        BdResult,
+        BdRunner,
+        ProcessBdRunner;
 import 'package:grid_sdk/grid_sdk.dart' as sdk;
 
 import '../assets/mounted_tree.dart';
@@ -114,6 +122,106 @@ class BdExportBeadSource implements SubstationBeadSource {
   Future<List<Bead>> read(sdk.SubstationScope scope) async => BdCliService(
     _runnerFor(scope.root),
   ).query(_allStatuses, includeClosed: true);
+}
+
+/// Normalizes the two read-only `bd dep list --json` row shapes supported by
+/// the exact source without adding another process spawn.
+///
+/// Released clients return edge rows (`issue_id`, `depends_on_id`, `type`).
+/// Current bd builds return the dependency bead with `dependency_type`; for
+/// this single-id downward read, that is the same edge expressed from the
+/// requested bead to the returned bead.
+final class _ExactDependencyRowsRunner implements BdRunner {
+  const _ExactDependencyRowsRunner(this._delegate, this._issueId);
+
+  final BdRunner _delegate;
+  final String _issueId;
+
+  @override
+  Future<BdResult> run(
+    List<String> args, {
+    Duration? timeout,
+    String? stdin,
+  }) async {
+    final result = await _delegate.run(args, timeout: timeout, stdin: stdin);
+    if (!result.ok ||
+        args.length < 2 ||
+        args[0] != 'dep' ||
+        args[1] != 'list') {
+      return result;
+    }
+
+    final Object? decoded;
+    try {
+      decoded = jsonDecode(result.stdout);
+    } on FormatException {
+      return result;
+    }
+    if (decoded is! Map<String, dynamic>) return result;
+    final data = decoded['data'];
+    if (data is! List ||
+        data.isEmpty ||
+        data.every(
+          (row) => row is Map<String, dynamic> && row.containsKey('issue_id'),
+        )) {
+      return result;
+    }
+    if (!data.every(
+      (row) =>
+          row is Map<String, dynamic> &&
+          row['id'] is String &&
+          row['dependency_type'] is String,
+    )) {
+      return result;
+    }
+
+    return BdResult(
+      exitCode: result.exitCode,
+      stdout: jsonEncode({
+        ...decoded,
+        'data': [
+          for (final row in data.cast<Map<String, dynamic>>())
+            {
+              'issue_id': _issueId,
+              'depends_on_id': row['id'],
+              'type': row['dependency_type'],
+            },
+        ],
+      }),
+      stderr: result.stderr,
+    );
+  }
+}
+
+/// An exact-id extension of [BdExportBeadSource] for filing checks.
+///
+/// Read-only by construction: a present bead costs one exact-id `bd query`
+/// and one `bd dep list`; an absent bead costs only the query. This type has
+/// no mutation method and never calls `bd show`.
+class ExactSubstationBeadSource extends BdExportBeadSource {
+  /// Creates an exact source over the inherited per-root runner seam.
+  const ExactSubstationBeadSource({super.runnerFor});
+
+  /// Reads [beadId] and its dependency rows from [storeRoot].
+  Future<({Bead? bead, List<BeadDependency> dependencies})> readExact({
+    required String storeRoot,
+    required String beadId,
+  }) async {
+    final cli = BdCliService(
+      _ExactDependencyRowsRunner(_runnerFor(storeRoot), beadId),
+    );
+    final matches = (await cli.query(
+      'id=$beadId',
+      includeClosed: true,
+    )).where((bead) => bead.id == beadId).toList(growable: false);
+    if (matches.length > 1) {
+      throw StateError('duplicate bead id "$beadId" in exact query result');
+    }
+    if (matches.isEmpty) {
+      return (bead: null, dependencies: const <BeadDependency>[]);
+    }
+    return (bead: matches.single, dependencies: await cli.depList([beadId]));
+  }
 }
 
 /// One structured hit: a bead that matched the query, with WHERE it lives
