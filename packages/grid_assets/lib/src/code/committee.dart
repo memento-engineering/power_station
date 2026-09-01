@@ -104,6 +104,7 @@ import '../agent/path_check.dart';
 import '../agent/site_binding.dart';
 import '../agent/usage_report.dart';
 import 'route_failure.dart';
+import 'specify.dart' show proseOnly, sectionBodyAt;
 
 /// The gating rubric id — its grade `F` is a hard block (a non-zero Validation
 /// Plan command), decided by the route's matrix.
@@ -170,9 +171,25 @@ final RegExp _diffHeader = RegExp(
   multiLine: true,
 );
 final RegExp _inlineCodeSpan = RegExp(r'`([^`\n]+)`');
-final RegExp _testCommandLine = RegExp(r'^\s*Test:\s*(.+)$');
-final RegExp _testCommandToken = RegExp(
-  r'(?:^|\s)([A-Za-z0-9_.\/-]+_test\.dart)(?=\s|$)',
+const List<String> _testDeclarationHeadings = [
+  '## Declared Tests',
+  '## Files Touched',
+  '## Touches',
+];
+final RegExp _testCommandLine = RegExp(
+  r'\bdart\s+test\b',
+  caseSensitive: false,
+);
+final RegExp _authoredTestStatement = RegExp(
+  r'\b(?:add(?:ed|ing|s)?|author(?:ed|ing|s)?|create(?:d|s|ing)?|'
+  r'modif(?:ied|ies|y|ying)|update(?:d|s|ing)?|'
+  r'writ(?:e|es|ing|ten)|wrote)\b',
+  caseSensitive: false,
+);
+final RegExp _nonDeclarationTestStatement = RegExp(
+  r'\b(?:unchanged|pre[- ]existing|restore(?:d|s|ing)?|'
+  r'revert(?:ed|s|ing)?|run[- ]only)\b',
+  caseSensitive: false,
 );
 
 /// Every repo-relative path a unified [diff] touches.
@@ -202,22 +219,75 @@ String? _confidentTestPath(String raw) {
   return p.posix.split(candidate).contains('test') ? candidate : null;
 }
 
-/// Confident Design declarations only; ambiguous prose contributes nothing.
-Set<String> declaredTestFiles(String design) {
-  final declared = <String>{};
-  for (final match in _inlineCodeSpan.allMatches(design)) {
-    final path = _confidentTestPath(match.group(1)!);
-    if (path != null) declared.add(path);
+String _markConfidentTestPaths(
+  String design,
+  Map<String, String> pathByMarker,
+) => design.replaceAllMapped(_inlineCodeSpan, (match) {
+  final path = _confidentTestPath(match.group(1)!);
+  if (path == null) return match.group(0)!;
+  final marker = 'GRID_TEST_PATH_${pathByMarker.length}_';
+  pathByMarker[marker] = path;
+  return marker;
+});
+
+String _statementAround(String line, String marker) {
+  final markerAt = line.indexOf(marker);
+  var start = 0;
+  for (final separator in const ['.', ';']) {
+    final separatorAt = line.lastIndexOf(separator, markerAt);
+    if (separatorAt >= start) start = separatorAt + 1;
   }
-  for (final line in const LineSplitter().convert(design)) {
-    final command = _testCommandLine.firstMatch(line)?.group(1);
-    if (command == null) continue;
-    for (final match in _testCommandToken.allMatches(
-      command.replaceAll('`', ''),
-    )) {
-      final path = _confidentTestPath(match.group(1)!);
-      if (path != null) declared.add(path);
+  var end = line.length;
+  for (final separator in const ['.', ';']) {
+    final separatorAt = line.indexOf(separator, markerAt + marker.length);
+    if (separatorAt >= 0 && separatorAt < end) end = separatorAt;
+  }
+  return line.substring(start, end);
+}
+
+void _collectTestDeclarations({
+  required String text,
+  required Map<String, String> pathByMarker,
+  required Set<String> declared,
+  required bool declarationSection,
+}) {
+  for (final line in const LineSplitter().convert(text)) {
+    for (final entry in pathByMarker.entries) {
+      if (!line.contains(entry.key)) continue;
+      final statement = _statementAround(line, entry.key);
+      if (_testCommandLine.hasMatch(statement) ||
+          _nonDeclarationTestStatement.hasMatch(statement)) {
+        continue;
+      }
+      if (declarationSection || _authoredTestStatement.hasMatch(statement)) {
+        declared.add(entry.value);
+      }
     }
+  }
+}
+
+/// Confident test paths named as new or modified authored work in the Design.
+Set<String> declaredTestFiles(String design) {
+  final pathByMarker = <String, String>{};
+  final markedDesign = _markConfidentTestPaths(design, pathByMarker);
+  final prose = proseOnly(markedDesign);
+  final declared = <String>{};
+
+  _collectTestDeclarations(
+    text: prose,
+    pathByMarker: pathByMarker,
+    declared: declared,
+    declarationSection: false,
+  );
+  for (final heading in _testDeclarationHeadings) {
+    final headingAt = prose.indexOf(heading);
+    if (headingAt < 0) continue;
+    _collectTestDeclarations(
+      text: sectionBodyAt(prose, headingAt),
+      pathByMarker: pathByMarker,
+      declared: declared,
+      declarationSection: true,
+    );
   }
   return declared;
 }

@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:beads_dart/beads_dart.dart';
 import 'package:grid_assets/grid_assets.dart';
 import 'package:grid_engine/grid_engine.dart';
+import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
 import 'support/asset_fakes.dart';
@@ -22,9 +23,18 @@ diff --git a/test/commands/bead_command_test.dart b/test/commands/bead_command_t
 +new
 ''';
 
-Future<Ok> _runGate({required String design, required String diff}) async {
+Future<Ok> _runGate({
+  required String design,
+  required String diff,
+  Iterable<String> existingFiles = const [],
+}) async {
   final dir = Directory.systemTemp.createTempSync('declared-tests-');
   addTearDown(() => dir.deleteSync(recursive: true));
+  for (final path in existingFiles) {
+    final file = File(p.join(dir.path, path));
+    file.parent.createSync(recursive: true);
+    file.writeAsStringSync('pre-existing');
+  }
   final pinned = File(pinnedDiffPath(dir.path));
   pinned.parent.createSync(recursive: true);
   pinned.writeAsStringSync(diff);
@@ -94,7 +104,7 @@ Test: cd packages/grid_assets && dart test test/verdict_transport_test.dart
 
   test('an absent package-relative declaration still fails', () async {
     final outcome = await _runGate(
-      design: 'Test: dart test test/absent_test.dart',
+      design: 'Create `test/absent_test.dart`.',
       diff: _diffFor(['packages/grid_assets/test/present_test.dart']),
     );
     expect(outcome.payload, {
@@ -107,7 +117,7 @@ Test: cd packages/grid_assets && dart test test/verdict_transport_test.dart
 
   test('suffix matching requires a path-component boundary', () async {
     final outcome = await _runGate(
-      design: 'Test: dart test test/respec_test.dart',
+      design: 'Modify `test/respec_test.dart`.',
       diff: _diffFor(['packages/grid_assets/test/prespec_test.dart']),
     );
     expect(outcome.payload, {
@@ -120,7 +130,7 @@ Test: cd packages/grid_assets && dart test test/verdict_transport_test.dart
 
   test('an ambiguous suffix match counts as present', () async {
     final outcome = await _runGate(
-      design: 'Test: dart test test/shared_test.dart',
+      design: 'Modify `test/shared_test.dart`.',
       diff: _diffFor([
         'packages/alpha/test/shared_test.dart',
         'packages/beta/test/shared_test.dart',
@@ -137,13 +147,93 @@ Test: cd packages/grid_assets && dart test test/verdict_transport_test.dart
     expect(outcome.payload?['grade'], 'A');
   });
 
-  test('a test command path is extracted', () {
-    expect(
-      declaredTestFiles(
-        'Test: dart test packages/grid_assets/test/track_c_route_test.dart',
-      ),
-      {'packages/grid_assets/test/track_c_route_test.dart'},
+  test('run-only references are not declarations', () async {
+    const design = '''
+## Validation Plan
+- Existing acceptance: `dart test test/asset_pack_test.dart --name "packs assets"`
+Test: dart test `test/asset_pack_test.dart` --name "packs assets"
+''';
+    expect(declaredTestFiles(design), isEmpty);
+    final outcome = await _runGate(
+      design: design,
+      diff: _diffFor(['lib/asset_pack.dart']),
     );
+    expect(outcome.payload?['grade'], 'A');
+  });
+
+  test('pre-existing unchanged prose is not a declaration', () async {
+    const design = '''
+Re-validated against the live tree: `test/track_c_route_test.dart` is a
+pre-existing unchanged main test.
+''';
+    expect(declaredTestFiles(design), isEmpty);
+    final outcome = await _runGate(
+      design: design,
+      diff: _diffFor(['lib/route.dart']),
+    );
+    expect(outcome.payload?['grade'], 'A');
+  });
+
+  test('restore-to-baseline prose is not a declaration', () async {
+    const design = '''
+Restore `test/commands/rework_command_test.dart` to baseline; the file is
+unchanged after the revert.
+''';
+    expect(declaredTestFiles(design), isEmpty);
+    final outcome = await _runGate(
+      design: design,
+      diff: _diffFor(['lib/rework.dart']),
+    );
+    expect(outcome.payload?['grade'], 'A');
+  });
+
+  test('declared new test absent from pinned diff fails', () async {
+    const design = '''
+## Declared Tests
+- `test/new_gate_test.dart` — create as authored coverage.
+''';
+    final outcome = await _runGate(
+      design: design,
+      diff: _diffFor(['lib/gate.dart']),
+    );
+    expect(outcome.payload, {
+      'grade': 'F',
+      'transport': 'structural',
+      'rationale':
+          'Design-declared test files missing from pinned diff: test/new_gate_test.dart',
+    });
+  });
+
+  test('authored pre-existing untouched test fails', () async {
+    const path = 'test/existing_gate_test.dart';
+    final outcome = await _runGate(
+      design: 'Modify `$path` with new regression coverage.',
+      diff: _diffFor(['lib/gate.dart']),
+      existingFiles: const [path],
+    );
+    expect(outcome.payload, {
+      'grade': 'F',
+      'transport': 'structural',
+      'rationale': 'Design-declared test files missing from pinned diff: $path',
+    });
+  });
+
+  test('shared markdown primitives bound declaration sections', () {
+    const design = '''
+```markdown
+## Touches
+- `test/fenced_test.dart` — modified
+```
+> Modify `test/quoted_test.dart`.
+## Files Touched
+- `test/authored_test.dart` — modified
+## Touches
+- `test/second_authored_test.dart` — modified
+''';
+    expect(declaredTestFiles(design), {
+      'test/authored_test.dart',
+      'test/second_authored_test.dart',
+    });
   });
 
   test('ambiguous paths are ignored', () async {
@@ -170,7 +260,6 @@ create test/unquoted_test.dart
       [
         'test/commands/gate_command_test.dart',
         'test/commands/link_command_test.dart',
-        'test/commands/rework_command_test.dart',
       ],
     );
     final outcome = await _runGate(design: _tg1ni0Design, diff: _tg1ni0Diff);
@@ -178,7 +267,10 @@ create test/unquoted_test.dart
     final rationale = outcome.payload!['rationale']!;
     expect(rationale, contains('test/commands/gate_command_test.dart'));
     expect(rationale, contains('test/commands/link_command_test.dart'));
-    expect(rationale, contains('test/commands/rework_command_test.dart'));
+    expect(
+      rationale,
+      isNot(contains('test/commands/rework_command_test.dart')),
+    );
     expect(rationale, isNot(contains('bead_command_test.dart')));
   });
 }
