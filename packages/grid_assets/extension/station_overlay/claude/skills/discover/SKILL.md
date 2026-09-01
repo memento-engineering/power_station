@@ -110,33 +110,67 @@ research first, file only on confirmation.
 
 ## Filing — where a new bead goes
 
+`intake-refinement/SKILL.md` § **The bead contract** is the single canonical
+contract. Apply it at authoring time; do not define a second contract here. A
+driveable filing uses `task`, `bug`, `feature`, or `chore`, carries an
+executable initial `validation_plan`, gives the next agent an actionable
+description with an initial testable acceptance shape, and wires every named
+local blocker. Filing governs author-side completeness only. The mounted
+predicate remains the authority for mount eligibility and approval; do not
+restate that boundary as Filing requirements.
+
 - **Target store: the substation whose repo the work would change** (the
   search report's `root` for that seat is your `cd` target). No clear owner →
   **the grid home's own store** (`.grid/.beads` under it).
-- **Cross-store ordering:** cross-store dependencies DO exist, but
-  never author one as a dependency row or with `bd dep add <id>
-  external:<project>:<capability>`: A44 reversed that raw-foreign-id wiring
-  because `bd doctor --fix` can classify it as orphaned and sever it. The
-  current mechanism is A55's OPEN grid-state `type=link` bead carrying
+- **Local ordering:** put local bead ids on explicit `Blocked by:` or `Depends
+  on:` description lines, then wire every one with `bd dep add <blocked>
+  <blocker> --actor governor`. The filed bead is the first argument.
+- **Cross-store ordering:** `decisions#the-decision-register` is the governing
+  register-format authority ("a decision binds on write"), and
+  `decisions#legacy-register-migration` records that the six legacy registers
+  are not yet migrated. Their entries were already binding, so migration
+  changes their location and not their force; citations are preserved through
+  `register.legacy-id`. Until that mechanical conversion,
+  `the_grid/docs/adr/ADR-0000-ai-decision-register.md A44` remains the
+  binding authority that rejects raw foreign-id dependency rows because
+  `bd doctor --fix` can classify them as orphaned and sever them, and
+  `the_grid/docs/adr/ADR-0000-ai-decision-register.md A55` remains the
+  binding authority for the OPEN grid-state `type=link` mechanism.
+  Cross-store dependencies DO exist, but never author one as a local dependency
+  row or with `bd dep add <id> external:<project>:<capability>`. Use the
+  station's link-authoring verb, after its `crossLinkTypeRefusal` capability
+  check, to mint an OPEN grid-state `type=link` bead carrying
   `grid.link.from=<blocked bead id>`, `grid.link.to=<blocker bead id>`, and
-  `grid.link.type=blocks` in its own metadata. The station's link-authoring
-  verb mints that bead only after its `crossLinkTypeRefusal` capability check;
+  `grid.link.type=blocks` in its own metadata.
   `StationJoinBridge._applyCrossLinks` projects it and the shared
   `applyBlockGuard` enforces it. A malformed link fails closed.
-  Default to homing coupled beads together when one repo owns the work,
-  because that gives
-  the station a locally resolvable graph; split them across stores when repo
-  ownership calls for it — including the three-store split directed by
-  Nico on 2026-07-26 — and express their ordering with the link-authoring verb.
+  Default to homing coupled beads together when one repo owns the work, because
+  that gives the station a locally resolvable graph; split them across stores
+  when repo ownership calls for it — including the three-store split directed
+  by Nico on 2026-07-26 — and express their ordering with the link-authoring
+  verb.
 - **Staged, never ready:** a live station mounts a ready bead within seconds —
   a half-designed bead must never enter the frontier.
 
 ```bash
 cd <owning store root>
-bd create --title "<title>" --type <feature|bug|task|epic|chore|decision> \
+bd create --title "<title>" --type <feature|bug|task|chore> \
   --defer <date ~1 week out> --actor governor \
-  --description "<one paragraph: what problem this solves and why>"
+  --description "<problem, exact package/path, why, and local blocker lines>" \
+  --acceptance "- [ ] <initial testable outcome>" \
+  --metadata '{"validation_plan":"cd packages/<pkg> && dart pub get && dart analyze && dart test"}'
 ```
+
+For every named local blocker, run:
+
+```bash
+bd dep add <new bead id> <local blocker bead id> --actor governor
+```
+
+Then run `{{runner}} filing --json "<new bead id>"`. Do not leave Filing after
+a non-zero result: correct the bead, rerun the command, and continue only after
+it exits 0. The command checks the four mechanical rows; the agentic half still
+judges whether the description and acceptance are useful.
 
 Immediately verify that the created bead is discoverable with `{{runner}}
 search --json "<new bead id>"` and require an `id`-field hit. Never use `bd show`
@@ -148,6 +182,9 @@ Record design approval by filling `--description` and `--design` with `bd update
 <id> --actor governor`; there is no persistence flag to change. All backlog
 writes ride the bd CLI with `--actor governor`; never SQL, never
 `.beads/hooks/`.
+
+Filing supplies an executable initial plan. After design, specify
+authoritatively replaces or refines the implementation-aligned plan.
 
 ## Design conversation
 

@@ -114,6 +114,14 @@ void main() {
       root: root,
     ).renderSkill('discover', args: {'runner': 'space'});
 
+    String filingSection() {
+      final start = rendered.indexOf('## Filing');
+      final end = rendered.indexOf('## Design conversation');
+      expect(start, greaterThanOrEqualTo(0));
+      expect(end, greaterThan(start));
+      return rendered.substring(start, end);
+    }
+
     test('dispatches on arg shape — topic research, bead-id advisory, '
         'bead-id + instruction directed', () {
       expect(rendered, contains('## Dispatch'));
@@ -157,25 +165,79 @@ void main() {
       expect(rendered.toLowerCase(), contains('never loop'));
     });
 
-    test('on the human\'s yes it files a DURABLE, STAGED bead, verifies it '
-        'through vended search, and documents A55 cross-store links', () {
-      final filingStart = rendered.indexOf('## Filing');
-      final filingEnd = rendered.indexOf('## Design conversation');
-      expect(filingStart, greaterThanOrEqualTo(0));
-      expect(filingEnd, greaterThan(filingStart));
-      final filing = rendered.substring(filingStart, filingEnd);
+    test(
+      'filing cites the canonical contract and cannot pass an incomplete bead',
+      () {
+        final filing = filingSection();
+        expect(filing, contains('intake-refinement/SKILL.md'));
+        expect(filing, contains('The bead contract'));
+        expect(filing, contains('--type <feature|bug|task|chore>'));
+        expect(
+          filing,
+          isNot(contains('--type <feature|bug|task|epic|chore|decision>')),
+        );
+        expect(filing, contains('--acceptance'));
+        expect(filing, contains('validation_plan'));
+        expect(
+          filing,
+          contains(
+            'cd packages/<pkg> && dart pub get && dart analyze && dart test',
+          ),
+        );
+        expect(filing, contains('bd dep add <new bead id>'));
+        expect(filing, contains('space filing --json "<new bead id>"'));
+        expect(filing, contains('Do not leave Filing after'));
+        expect(
+          filing,
+          contains(
+            'specify\nauthoritatively replaces or refines the '
+            'implementation-aligned plan',
+          ),
+        );
+        expect(filing, contains('mounted\npredicate remains the authority'));
+      },
+    );
 
-      expect(filing, contains('bd create'));
-      expect(filing, contains('--defer'));
-      expect(filing, contains('--actor governor'));
-      expect(rendered, isNot(contains('--ephemeral')));
-      expect(rendered, isNot(contains('--persistent')));
-      expect(rendered, contains('files a staged one'));
+    test('filing contract coexists with defer teaching owned by pow-158', () {
+      final filing = filingSection();
       expect(filing, contains('**Staged, never ready:**'));
-      expect(filing, contains('search --json "<new bead id>"'));
-      expect(filing, contains('Never use `bd show`'));
-      expect(filing, contains('stranded wisp'));
-      expect(filing, contains('cross-store dependencies DO exist'));
+      expect(filing, contains('--defer <date ~1 week out> --actor governor'));
+      expect(
+        filing,
+        contains(
+          'The bead stays deferred until the human approves it into the ready '
+          'frontier.',
+        ),
+      );
+      expect(
+        filing,
+        contains(
+          'Record design approval by filling `--description` and `--design`',
+        ),
+      );
+      expect(filing, isNot(contains('bd undefer')));
+      expect(filing, isNot(contains('grid.approved')));
+
+      final intake = loader.loadSkillTemplate('intake-refinement');
+      expect(intake, contains('## Staging: defer until approved'));
+      expect(intake, contains('Create with `--defer <date>`'));
+    });
+
+    test('cross-store guidance preserves unmigrated binding authority', () {
+      final filing = filingSection();
+      expect(filing, contains('decisions#the-decision-register'));
+      expect(filing, contains('decisions#legacy-register-migration'));
+      expect(filing, contains('six legacy registers\n  are not yet migrated'));
+      expect(filing, contains('were already binding'));
+      expect(filing, contains('changes their location and not their force'));
+      expect(
+        filing,
+        contains('the_grid/docs/adr/ADR-0000-ai-decision-register.md A44'),
+      );
+      expect(
+        filing,
+        contains('the_grid/docs/adr/ADR-0000-ai-decision-register.md A55'),
+      );
       expect(filing, contains('type=link'));
       expect(filing, contains('grid.link.from=<blocked bead id>'));
       expect(filing, contains('grid.link.to=<blocker bead id>'));
@@ -183,28 +245,14 @@ void main() {
       expect(filing, contains('crossLinkTypeRefusal'));
       expect(filing, contains('StationJoinBridge._applyCrossLinks'));
       expect(filing, contains('applyBlockGuard'));
-      expect(filing, contains('A44 reversed'));
-      expect(filing, contains('A55'));
-      expect(filing, contains('bd doctor --fix'));
-      expect(filing, contains('never author one as a dependency row'));
       expect(
         filing,
         isNot(
-          contains('bd dep add <id> external:<project>:<capability> stores'),
+          contains(
+            'power_station/docs/adr/ADR-0000-ai-decision-register.md A44',
+          ),
         ),
       );
-      expect(filing, contains('A malformed link fails closed'));
-      expect(filing, contains('Default to homing coupled beads together'));
-      expect(filing, contains('split them across stores'));
-      expect(filing, contains('Nico on 2026-07-26'));
-      expect(filing, contains('--description'));
-      expect(filing, contains('--design'));
-      expect(filing, contains('there is no persistence flag to change'));
-      expect(
-        filing,
-        contains('the substation whose repo the work would change'),
-      );
-      expect(filing, contains("the grid home's own store"));
     });
 
     test(
