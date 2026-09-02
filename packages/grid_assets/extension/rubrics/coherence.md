@@ -72,3 +72,21 @@ land coherently.
   file carrying two unrelated concerns is the seam that caps the grade.
 - Out of scope: taste (naming style beyond the house rules, idiom, error
   wording). Grade only graph fit and codebase duplication.
+
+## Ownership — who can fix a D or an E?
+
+Every `D` or `E` you write carries an `owner`, and it decides whether the
+station corrects the spec automatically or asks a human:
+
+- **`architect`** — the fix is derivable from the bead AS WRITTEN plus the
+  tree. Re-running the specify stage with your rationale would produce it.
+  Here: an unacknowledged duplication of an existing symbol, or a sibling the
+  spec never cites but does not actually collide with.
+- **`author`** — the fix needs a decision the bead TEXT does not make. Here:
+  which of two sibling beads owns a shared surface, whose symbol names win,
+  whether the scope should split.
+
+Choose `author` only when no re-run of the architect could converge, however
+good it is: an `author` verdict spends NO auto-correction round and parks the
+bead for a human immediately. When you do, name the CHOICE and its options in
+your rationale — that text IS the gate a governor reads.

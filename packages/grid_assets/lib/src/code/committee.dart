@@ -559,6 +559,28 @@ String parentPath(String nodePath) {
 /// so the writer and reader can never drift apart.
 const String kVerdictRoundKey = 'round';
 
+/// The verdict JSON key naming WHO can fix an actionable (`D`/`E`) grade —
+/// bead `pow-hxme`, ADR-0000 A35. Not a freshness stamp (A4 and A15(5) alt-A
+/// fence the `nodePath` + `round`): a PAYLOAD column the SPEC route's matrix
+/// decides on.
+const String kVerdictOwnerKey = 'owner';
+
+/// The fix is derivable from the bead AS WRITTEN plus the tree — re-running
+/// `specify` with the critic's rationale can produce it. The auto-respec loop
+/// is exactly the right instrument.
+const String kOwnerArchitect = 'architect';
+
+/// The fix needs a decision the bead TEXT does not make (which sibling's
+/// symbol names win, whether the scope splits, which of two designs is
+/// wanted, a policy call). No re-run of the architect can converge, however
+/// good it is — the receipt is `pow-n6n.1`, which drew a coherence `D` twice
+/// asking the architect to choose between its own names and `pow-n6n.2`'s.
+const String kOwnerAuthor = 'author';
+
+/// The closed owner vocabulary. A verdict naming anything else is refused by
+/// the ONE decoder — LOUD, never coerced.
+const List<String> kVerdictOwners = [kOwnerArchitect, kOwnerAuthor];
+
 /// The verdict JSON's MODEL-AUTHORED round stamp key.
 ///
 /// The critic copies the round from its prompt into [kVerdictRoundKey]
@@ -623,9 +645,12 @@ String verdictJsonTemplate({
   required String nodePath,
   required int round,
   String rationaleHint = '<why>',
+  bool owner = false,
 }) =>
     '{"rubric":"$rubric","version":1,"grade":"<A-F>",'
-    '"rationale":"$rationaleHint","nodePath":"$nodePath",'
+    '"rationale":"$rationaleHint",'
+    '${owner ? '"$kVerdictOwnerKey":"<$kOwnerArchitect|$kOwnerAuthor>",' : ''}'
+    '"nodePath":"$nodePath",'
     '"$kVerdictRoundKey":$round}';
 
 /// The stamp instruction that follows [verdictJsonTemplate] in every critic
@@ -643,6 +668,23 @@ const String kVerdictStampInstruction =
     'discarded as stale and the lane grades F. A verdict missing either stamp '
     'is discarded as an unverifiable transport defect; the lane fails and '
     're-runs, and the unstamped grade is never recorded.';
+
+/// The OWNER instruction the SPEC critic prompt writes after
+/// [kVerdictStampInstruction] (bead `pow-hxme`). Only the family that is TAUGHT
+/// ownership is HELD to it ([CriticCapability.requiresVerdictOwner]).
+const String kVerdictOwnerInstruction =
+    'The `$kVerdictOwnerKey` field is REQUIRED whenever your grade is `D` or '
+    '`E` (on any other grade it is ignored — you may drop the key). It answers '
+    'ONE question: WHO can fix this? Write `$kOwnerArchitect` when the fix is '
+    'derivable from the bead AS WRITTEN plus the tree — re-running the specify '
+    'stage with your rationale would produce it. Write `$kOwnerAuthor` when the '
+    'fix needs a decision the bead TEXT does not make: which sibling\'s symbol '
+    'names win, whether the scope splits, which of two designs is wanted, a '
+    'policy call. An `$kOwnerAuthor` verdict SPENDS NO auto-correction round — '
+    'it parks the bead immediately for the human who owns it — so name the '
+    'CHOICE and its options in your rationale, not just the defect. A `D` or '
+    '`E` carrying no owner is discarded as an unverifiable verdict; the lane '
+    'fails and re-runs.';
 
 /// Renders the mandatory same-directory atomic verdict-write contract.
 String verdictWriteInstruction(String path) {
@@ -1238,10 +1280,12 @@ class CriticCapability extends ProcessCapability {
         p.join(workspaceDir, _critiqueDir, '$rubric.json'),
       );
       await canonical.create(recursive: true);
+      final recoveredOwner = recovered[kVerdictOwnerKey];
       await canonical.writeAsString(
         jsonEncode({
           'grade': recovered['grade'],
           'rationale': recovered['rationale'],
+          if (recoveredOwner != null) kVerdictOwnerKey: recoveredOwner,
           'nodePath': args.nodePath,
           kVerdictRoundKey: round,
         }),
@@ -1371,6 +1415,16 @@ class CriticCapability extends ProcessCapability {
     );
   }
 
+  /// Whether THIS critic family's verdicts must NAME an owner
+  /// ([kVerdictOwners]) on an actionable `D`/`E` grade — bead `pow-hxme`
+  /// (ADR-0000 A35). FALSE here and TRUE in `SpecCriticCapability`: only the
+  /// SPEC route ACTS on ownership (an author-owed lane parks instead of
+  /// auto-respec'ing), and only the spec critic is TAUGHT the column
+  /// ([kVerdictOwnerInstruction]) — a family held to a contract its prompt
+  /// never states is the A19 trap.
+  @protected
+  bool get requiresVerdictOwner => false;
+
   /// Returns a corrective instruction when the canonical artifact from a prior
   /// failed attempt violated the verdict contract. Engine supervision restarts
   /// the failed process lane under its default budget; the restarted [spawn]
@@ -1386,6 +1440,7 @@ class CriticCapability extends ProcessCapability {
       File(p.join(workspaceDir, _critiqueDir, '$rubric.json')),
       expectedNodePath: nodePath,
       expectedRound: round,
+      requireOwner: requiresVerdictOwner,
       readText: _verdictTextReader,
     );
     final reason = switch (read) {
@@ -1398,7 +1453,8 @@ class CriticCapability extends ProcessCapability {
         : '\n\n## Verdict contract repair\n'
               'The previous artifact was refused: $reason\n'
               'Replace it once with strict JSON carrying grade, rationale, '
-              'nodePath, and round. Do not recover a grade from prose.';
+              'nodePath, round, and — on a D or E — owner. Do not recover a '
+              'grade from prose.';
   }
 
   @override
@@ -1482,11 +1538,18 @@ class CriticCapability extends ProcessCapability {
             verdict,
             expectedNodePath: args.nodePath,
             expectedRound: round,
+            requireOwner: requiresVerdictOwner,
             readText: _verdictTextReader,
           ),
         ) ??
         _payloadOrNull(
-          _strayVerdict(workspaceDir, rubric, args.nodePath, round),
+          _strayVerdict(
+            workspaceDir,
+            rubric,
+            args.nodePath,
+            round,
+            requireOwner: requiresVerdictOwner,
+          ),
         );
     if (graded == null) {
       throw RouteFailure(
@@ -1994,6 +2057,7 @@ _VerdictFileRead _verdictFromFile(
   File verdict, {
   required String expectedNodePath,
   required int expectedRound,
+  bool requireOwner = false,
   _VerdictTextReader readText = _readVerdictText,
 }) {
   if (!verdict.existsSync()) return const _VerdictFileMissing();
@@ -2022,6 +2086,22 @@ _VerdictFileRead _verdictFromFile(
         'rationale must be a non-empty string',
       );
     }
+    final ownerValue = json[kVerdictOwnerKey];
+    final owner = ownerValue is String ? ownerValue.trim().toLowerCase() : '';
+    if (owner.isNotEmpty && !kVerdictOwners.contains(owner)) {
+      return _VerdictFileInvalid(
+        verdict.path,
+        '$kVerdictOwnerKey must be one of ${kVerdictOwners.join('|')}',
+      );
+    }
+    if (requireOwner && owner.isEmpty && const {'D', 'E'}.contains(grade)) {
+      return _VerdictFileInvalid(
+        verdict.path,
+        'a grade of $grade REQUIRES $kVerdictOwnerKey '
+        '(${kVerdictOwners.join('|')}) — WHO can fix this? An architect-owed '
+        'finding auto-respecs; an author-owed one parks for a human.',
+      );
+    }
     final nodePathValue = json['nodePath'];
     final stampedNodePath = nodePathValue is String ? nodePathValue.trim() : '';
     if (stampedNodePath.isEmpty) {
@@ -2047,6 +2127,7 @@ _VerdictFileRead _verdictFromFile(
       'grade': grade,
       'transport': 'file',
       'rationale': rationale,
+      if (owner.isNotEmpty) kVerdictOwnerKey: owner,
     });
   } on Object catch (error) {
     return _VerdictFileInvalid(verdict.path, _verdictErrorDetail(error));
@@ -2072,11 +2153,13 @@ Map<String, String>? currentVerdictFromFile({
   required String rubric,
   required String nodePath,
   required int round,
+  bool requireOwner = false,
 }) => _payloadOrNull(
   _verdictFromFile(
     File(p.join(workspaceDir, _critiqueDir, '$rubric.json')),
     expectedNodePath: nodePath,
     expectedRound: round,
+    requireOwner: requireOwner,
   ),
 );
 
@@ -2093,14 +2176,24 @@ Map<String, String>? currentVerdictOnDisk({
   required String rubric,
   required String nodePath,
   required int round,
+  bool requireOwner = false,
 }) =>
     currentVerdictFromFile(
       workspaceDir: workspaceDir,
       rubric: rubric,
       nodePath: nodePath,
       round: round,
+      requireOwner: requireOwner,
     ) ??
-    _payloadOrNull(_strayVerdict(workspaceDir, rubric, nodePath, round));
+    _payloadOrNull(
+      _strayVerdict(
+        workspaceDir,
+        rubric,
+        nodePath,
+        round,
+        requireOwner: requireOwner,
+      ),
+    );
 
 /// A round-fresh verdict a critic wrote to a STRAY
 /// `.../.grid/critique/<rubric>.json` somewhere OTHER than the canonical
@@ -2127,8 +2220,9 @@ _VerdictFileRead _strayVerdict(
   String workspaceDir,
   String rubric,
   String expectedNodePath,
-  int expectedRound,
-) {
+  int expectedRound, {
+  bool requireOwner = false,
+}) {
   final canonical = p.canonicalize(
     p.join(workspaceDir, _critiqueDir, '$rubric.json'),
   );
@@ -2138,6 +2232,7 @@ _VerdictFileRead _strayVerdict(
       file,
       expectedNodePath: expectedNodePath,
       expectedRound: expectedRound,
+      requireOwner: requireOwner,
     );
     switch (read) {
       case _VerdictFileAccepted(:final payload):
@@ -2219,12 +2314,17 @@ Map<String, String>? _verdictFromEmbeddedJson(String text) {
             final grade = (json['grade'] as String?)?.trim().toUpperCase();
             if (grade != null && _validGradeLetter.hasMatch(grade)) {
               final rationale = (json['rationale'] as String?)?.trim() ?? '';
+              final envelopeOwner =
+                  (json[kVerdictOwnerKey] as String?)?.trim().toLowerCase() ??
+                  '';
               last = {
                 'grade': grade,
                 'transport': 'envelope',
                 'rationale': rationale.isEmpty
                     ? '[from result envelope]'
                     : '$rationale [from result envelope]',
+                if (kVerdictOwners.contains(envelopeOwner))
+                  kVerdictOwnerKey: envelopeOwner,
               };
             }
           }

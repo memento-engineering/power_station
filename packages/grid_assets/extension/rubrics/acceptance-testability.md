@@ -49,3 +49,22 @@ criterion that will never be checked.
   package) does not validate its criterion — treat the criterion as unmapped.
 - Count the mapping BOTH ways: an unmapped criterion caps at C; a validation
   item mapped to no criterion suggests the criteria are incomplete — name it.
+
+## Ownership — who can fix a D or an E?
+
+Every `D` or `E` you write carries an `owner`, and it decides whether the
+station corrects the spec automatically or asks a human:
+
+- **`architect`** — the fix is derivable from the bead AS WRITTEN plus the
+  tree. Re-running the specify stage with your rationale would produce it.
+  Here: a criterion with no command, a validation item naming a path that does
+  not exist, an unmapped criterion.
+- **`author`** — the fix needs a decision the bead TEXT does not make. Here:
+  "done" itself is undecided in the bead (which behaviour is the deliverable,
+  which of two acceptance shapes is wanted), so no command can be named until
+  a human says what passing means.
+
+Choose `author` only when no re-run of the architect could converge, however
+good it is: an `author` verdict spends NO auto-correction round and parks the
+bead for a human immediately. When you do, name the CHOICE and its options in
+your rationale — that text IS the gate a governor reads.

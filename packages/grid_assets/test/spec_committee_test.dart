@@ -848,6 +848,88 @@ Validate again with ruby -e 's.include?("${ticks}dart")'.
       expect(prompt.split('## Verdict contract repair').length - 1, 1);
     });
 
+    test('a D verdict naming NO owner is REFUSED (LOUD) — the spec family is '
+        'held to the owner column (bead `pow-hxme`)', () async {
+      final dir = Directory.systemTemp.createTempSync('spec-owner-');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      const cap = SpecCriticCapability();
+      final c = _laneCtx(rubric: 'coherence', workspaceDir: dir.path);
+      final verdict = File('${dir.path}/.grid/critique/coherence.json')
+        ..createSync(recursive: true)
+        ..writeAsStringSync(
+          jsonEncode({
+            'rubric': 'coherence',
+            'version': 1,
+            'grade': 'D',
+            'rationale': 'the names collide with a sibling',
+            'nodePath': 'tg-1/spec_review/coherence',
+            'round': 0,
+          }),
+        );
+      await expectLater(
+        cap.result(c.context, c.args),
+        throwsA(
+          isA<RouteFailure>().having(
+            (e) => e.reason,
+            'reason',
+            allOf(contains(kVerdictOwnerKey), contains('WHO can fix this')),
+          ),
+        ),
+      );
+
+      verdict.writeAsStringSync(
+        jsonEncode({
+          'rubric': 'coherence',
+          'version': 1,
+          'grade': 'B',
+          'rationale': 'fine',
+          kVerdictOwnerKey: 'nobody',
+          'nodePath': 'tg-1/spec_review/coherence',
+          'round': 0,
+        }),
+      );
+      await expectLater(
+        cap.result(c.context, c.args),
+        throwsA(isA<RouteFailure>()),
+      );
+
+      verdict.writeAsStringSync(
+        jsonEncode({
+          'rubric': 'coherence',
+          'version': 1,
+          'grade': 'D',
+          'rationale': 'whose names win?',
+          kVerdictOwnerKey: kOwnerAuthor,
+          'nodePath': 'tg-1/spec_review/coherence',
+          'round': 0,
+        }),
+      );
+      expect(
+        (await cap.result(c.context, c.args))![kVerdictOwnerKey],
+        kOwnerAuthor,
+      );
+
+      verdict.writeAsStringSync(
+        jsonEncode({
+          'rubric': 'coherence',
+          'version': 1,
+          'grade': 'D',
+          'rationale': 'the names collide with a sibling',
+          'nodePath': 'tg-1/spec_review/coherence',
+          'round': 0,
+        }),
+      );
+      expect(
+        currentVerdictFromFile(
+          workspaceDir: dir.path,
+          rubric: 'coherence',
+          nodePath: 'tg-1/spec_review/coherence',
+          round: 0,
+        ),
+        isNotNull,
+      );
+    });
+
     test('spawn records THIS incarnation for the spec critic too — the '
         're-stamp proof spans all three critic families', () {
       final dir = Directory.systemTemp.createTempSync('spec-critic-mark-');

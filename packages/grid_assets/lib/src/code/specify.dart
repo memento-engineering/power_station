@@ -842,6 +842,12 @@ class SpecCriticCapability extends CriticCapability {
   /// circuit is testable with no real assets).
   const SpecCriticCapability({super.rubrics, super.verdictTextReader});
 
+  /// The SPEC family IS held to the owner column (bead `pow-hxme`, ADR-0000
+  /// A35): its route decides on ownership, and [buildSpecCriticPrompt] teaches
+  /// it below.
+  @override
+  bool get requiresVerdictOwner => true;
+
   @override
   RuntimeConfig spawn(TreeContext context, StepArgs args) {
     // Read the ambient values at ENTRY (synchronously, while mounted).
@@ -981,10 +987,17 @@ class SpecCriticCapability extends CriticCapability {
         'Your verdict is JSON of this exact shape:',
       )
       ..writeln(
-        verdictJsonTemplate(rubric: rubric, nodePath: nodePath, round: round),
+        verdictJsonTemplate(
+          rubric: rubric,
+          nodePath: nodePath,
+          round: round,
+          owner: true,
+        ),
       )
       ..writeln()
       ..writeln(kVerdictStampInstruction)
+      ..writeln()
+      ..writeln(kVerdictOwnerInstruction)
       ..writeln()
       ..writeln(verdictWriteInstruction(path));
     return b.toString();

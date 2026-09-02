@@ -46,6 +46,15 @@ void main() {
         expect(prompt, isNot(contains('You MUST write that JSON to')));
       }
     });
+
+    test('ONLY the spec critic is taught the owner column', () {
+      expect(prompts[1], contains('"$kVerdictOwnerKey":"<architect|author>"'));
+      expect(prompts[1], contains(kVerdictOwnerInstruction));
+      for (final other in [prompts[0], prompts[2]]) {
+        expect(other, isNot(contains('"$kVerdictOwnerKey":')));
+        expect(other, isNot(contains(kVerdictOwnerInstruction)));
+      }
+    });
   });
 
   test('concurrent atomic verdict replacement stays parseable', () async {

@@ -37,6 +37,13 @@ worktree root — write it there regardless of your current working directory (i
 you `cd` elsewhere to run a command, resolve the path back to the worktree root,
 not your new cwd):
 
+On a `D` or `E`, `owner` is REQUIRED: `architect` when re-running the specify
+stage with your rationale would fix it, `author` when the fix needs a decision
+the bead text does not make (which names win, whether the scope splits, which
+of two designs). An `author` verdict parks the bead for a human instead of
+spending a correction round, so name the CHOICE and its options in your
+rationale.
+
 ```json
-{"rubric":"{{rubric}}","version":1,"grade":"<A-F>","rationale":"<why>"}
+{"rubric":"{{rubric}}","version":1,"grade":"<A-F>","rationale":"<why>","owner":"<architect|author>"}
 ```

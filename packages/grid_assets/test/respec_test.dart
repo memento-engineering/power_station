@@ -29,9 +29,15 @@ const _critics =
 List<SpecLane> _lanes(
   Map<String, String> grades, {
   Map<String, String> rationales = const {},
+  Map<String, String> owners = const {},
 }) => [
   for (final id in kSpecCommitteeRubrics)
-    (id: id, grade: grades[id], rationale: rationales[id] ?? ''),
+    (
+      id: id,
+      grade: grades[id],
+      rationale: rationales[id] ?? '',
+      owner: owners[id] ?? '',
+    ),
 ];
 
 Map<String, String> _allA() => {
@@ -52,6 +58,7 @@ void _plantVerdicts(
   String workspaceDir,
   Map<String, String> grades, {
   Map<String, String> rationales = const {},
+  Map<String, String> owners = const {},
   int? round,
 }) {
   final r = round ?? 0;
@@ -65,6 +72,7 @@ void _plantVerdicts(
           'version': 1,
           'grade': entry.value,
           'rationale': rationales[entry.key] ?? 'fixture verdict',
+          kVerdictOwnerKey: owners[entry.key] ?? kOwnerArchitect,
           'nodePath': 'tg-1/spec_review/${entry.key}',
           'round': r,
         }),
@@ -309,6 +317,98 @@ void main() {
         expect((v as SpecAdvance).spread, 0);
       },
     );
+
+    group('OWNERSHIP — an author-owed finding never burns a round', () {
+      test('an author-owed D at round 0 ⇒ SpecEscalate(author-owed) with the '
+          'bound UNSPENT, and the reason carries the lane + its rationale', () {
+        final v = decideSpecRoute(
+          sessionRoot: 'tg-1',
+          lanes: _lanes(
+            {..._allA(), 'coherence': 'D'},
+            rationales: const {
+              'coherence': 'choose: this bead\'s names or pow-n6n.2\'s',
+            },
+            owners: const {'coherence': kOwnerAuthor},
+          ),
+          gating: _gating,
+          priorRound: 0,
+        );
+        expect(v, isA<SpecEscalate>());
+        expect((v as SpecEscalate).rule, 'author-owed');
+        expect(v.reason, contains('coherence=D'));
+        expect(v.reason, contains('pow-n6n.2'));
+        expect(v.reason, contains('0 of 2 round(s) used'));
+      });
+
+      test('a MIXED join (author-owed + architect-owed) escalates author-owed '
+          '— any author-owed lane decides it', () {
+        final v = decideSpecRoute(
+          sessionRoot: 'tg-1',
+          lanes: _lanes(
+            {..._allA(), 'coherence': 'D', 'plan-completeness': 'E'},
+            rationales: const {
+              'coherence': 'whose names win?',
+              'plan-completeness': 'step 3 names no test command',
+            },
+            owners: const {
+              'coherence': kOwnerAuthor,
+              'plan-completeness': kOwnerArchitect,
+            },
+          ),
+          gating: _gating,
+          priorRound: 0,
+        );
+        expect(v, isA<SpecEscalate>());
+        expect((v as SpecEscalate).rule, 'author-owed');
+        expect(v.reason, contains('coherence=D'));
+        expect(v.reason, isNot(contains('step 3 names no test command')));
+      });
+
+      test('an ARCHITECT-owed join is UNCHANGED: respec under the bound, '
+          'respec-cap at it', () {
+        SpecRouteVerdict at(int priorRound) => decideSpecRoute(
+          sessionRoot: 'tg-1',
+          lanes: _lanes(
+            {..._allA(), 'coherence': 'D'},
+            rationales: const {'coherence': 'cite the clause'},
+            owners: const {'coherence': kOwnerArchitect},
+          ),
+          gating: _gating,
+          priorRound: priorRound,
+        );
+        expect(at(0), isA<SpecRespec>());
+        expect(at(1), isA<SpecRespec>());
+        expect((at(kMaxRespecRounds) as SpecEscalate).rule, 'respec-cap');
+      });
+
+      test('a BLANK owner reads as architect-owed (today\'s route) — the LOUD '
+          'guard against a missing owner is the decoder, not the matrix', () {
+        final v = decideSpecRoute(
+          sessionRoot: 'tg-1',
+          lanes: _lanes(
+            {..._allA(), 'coherence': 'D'},
+            rationales: const {'coherence': 'cite the clause'},
+          ),
+          gating: _gating,
+          priorRound: 0,
+        );
+        expect(v, isA<SpecRespec>());
+      });
+
+      test('an author-owed lane with NO rationale still escalates as '
+          'no-rationale (A14(6) is untouched)', () {
+        final v = decideSpecRoute(
+          sessionRoot: 'tg-1',
+          lanes: _lanes(
+            {..._allA(), 'coherence': 'D'},
+            owners: const {'coherence': kOwnerAuthor},
+          ),
+          gating: _gating,
+          priorRound: 0,
+        );
+        expect((v as SpecEscalate).rule, 'no-rationale');
+      });
+    });
   });
 
   group('the guidance ledger — the channel that survives the critique wipe', () {
@@ -864,6 +964,46 @@ void main() {
         expect(reason, isNot(contains('plan-completeness=')));
       },
     );
+
+    test('LIVE: a planted author-owed D parks as an Escalate — never a respec '
+        'stamp — and the guidance ledger is SPENT (A29)', () async {
+      const grades = {
+        _gating: 'A',
+        'coherence': 'D',
+        'adr-alignment': 'A',
+        'acceptance-testability': 'A',
+        'plan-completeness': 'A',
+      };
+      writeRespecLedger(
+        ws.path,
+        const RespecLedger(
+          sessionRoot: 'tg-1',
+          round: 0,
+          lanes: [
+            RespecLane(
+              rubric: 'coherence',
+              grade: 'D',
+              rationale: 'a prior round\'s guidance',
+            ),
+          ],
+        ),
+      );
+      _plantVerdicts(
+        ws.path,
+        grades,
+        rationales: const {'coherence': 'whose names win?'},
+        owners: const {'coherence': kOwnerAuthor},
+      );
+      final out = await _route(
+        grades,
+        rationales: const {'coherence': 'whose names win?'},
+        workspaceDir: ws.path,
+      );
+      expect(out, isA<Escalate>());
+      expect((out as Escalate).reason, contains('author-owed'));
+      expect(out.reason, contains('whose names win?'));
+      expect(readRespecLedger(ws.path, expectedSessionRoot: 'tg-1'), isNull);
+    });
   });
 
   group('renderRespecGuidance — the recommendations reach the agent', () {

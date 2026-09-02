@@ -136,6 +136,21 @@ void main() {
       expect(all, contains('Fakes'));
     });
 
+    test('every judgement rubric DEFINES D/E ownership — the column the '
+        'decoder enforces is stated to the critic it judges (A19)', () {
+      for (final rubricId in kSpecLlmRubrics) {
+        final text = loader.loadRubric(rubricId);
+        expect(text, contains('## Ownership'), reason: rubricId);
+        expect(text, contains('`$kOwnerArchitect`'), reason: rubricId);
+        expect(text, contains('`$kOwnerAuthor`'), reason: rubricId);
+      }
+      expect(
+        loader.loadRubric(kSpecGatingRubric),
+        isNot(contains('## Ownership')),
+        reason: 'the deterministic gate grades A or F and owns no fixable D',
+      );
+    });
+
     test('adr-alignment names both SUBSTATION register directories and the '
         'ADR-0000 amendment register, never a foreign home', () {
       final text = loader.loadRubric('adr-alignment');
