@@ -129,7 +129,10 @@ AgentConfigOverride _parsePayload(Map<String, Object?> payload) {
 ///
 ///  - **the NAME ladder** (which environment/harness runs) — a rung names a
 ///    COMPLETE environment via `env`, or diverges the tool only via `harness`;
-///    *step env/harness > bead env/harness > role → env
+///    *step env/harness > bead env/harness > the TYPED rung ([typedEnvironment]
+///    - a complete environment VALUE the caller resolved from the tree via
+///    `resolveEnvironment`, converted back to its registry NAME once by
+///    [EnvironmentRegistry.nameOf]; ADR-0006 D2) > role → env
 ///    ([AgentConfig.roleEnvironments]; an unarmed architect tries the build
 ///    role's environment) > ambient.harness*, the more-specific rung winning.
 ///    The winner is resolved through [registry] to the full {harness,
@@ -160,6 +163,7 @@ AgentConfig resolveAgentConfig({
   required Map<String, dynamic> beadMetadata,
   required Map<String, String> stepParams,
   required EnvironmentRegistry registry,
+  AgentEnvironment? typedEnvironment,
 }) {
   var config = ambient;
   String? beadModel;
@@ -206,7 +210,23 @@ AgentConfig resolveAgentConfig({
   // The resolved environment NAME → config.harness (the registry key every
   // caller resolves and the site binding keys on). Most-specific rung wins;
   // TOTAL because ambient.harness is a non-null default.
-  final name = stepName ?? beadName ?? roleName ?? ambient.harness;
+  // Rung 4.5 - the TYPED rung (epic `pow-n6n`; ADR-0006 D2; mechanism ADR-0000
+  // A35): the caller resolved a complete environment VALUE out of the tree
+  // (`resolveEnvironment`) and passes it in. It OUTRANKS role -> env and LOSES
+  // to the step/bead NAME rungs. Selection was by value, so legality is already
+  // settled where the value entered the tree (an AvailableEnvironments set
+  // holds only boot-validated registry members); this converts the winner back
+  // to its registry NAME exactly once, so the transport key, the site-binding
+  // lookup and the model ladder below keep reading a valid name and nothing
+  // re-resolves it. A value no armed name resolves to is a programming error
+  // and throws (nameOf, LOUD).
+  String? typedName() {
+    final typed = typedEnvironment;
+    return typed == null ? null : registry.nameOf(typed);
+  }
+
+  final name =
+      stepName ?? beadName ?? typedName() ?? roleName ?? ambient.harness;
   config = config.merge(harness: name);
 
   // Legality (OQ-c moment 2, fail-closed): the resolved name must be an armed,

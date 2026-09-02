@@ -356,6 +356,17 @@ class AgentEnvironment {
   bool get needsSiteEndpoint =>
       inferenceTargetNeedsEndpoint(target ?? InferenceTarget.providerManaged);
 
+  /// This layer folded ALONE - its NORMAL FORM: [resolve] over a one-layer
+  /// chain, so every field is kept and [base] collapses to [EnvBaseStandalone].
+  ///
+  /// The form in which two environment VALUES are COMPARED (bead `pow-n6n.1`;
+  /// ADR-0006 D2). A canned layer authored beside a station's arming carries
+  /// the default [EnvBaseUndeclared]; [EnvironmentRegistry.resolve] hands back
+  /// a flattened value. Raw equality would call those two DIFFERENT
+  /// environments on [base] alone. Idempotent:
+  /// `x.flattened.flattened == x.flattened`.
+  AgentEnvironment get flattened => AgentEnvironment.resolve([this]);
+
   /// Folds an inheritance [chain] — ROOT at index 0, LEAF last — into one
   /// flattened environment:
   ///  - scalars ([command], [promptMode], [promptFlag], [model], [target],

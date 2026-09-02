@@ -75,6 +75,63 @@ class EnvironmentRegistry {
   AgentEnvironment resolve(String name) =>
       AgentEnvironment.resolve(_chain(name));
 
+  /// The REVERSE map: the armed NAME whose resolved environment equals
+  /// [environment], compared in the [AgentEnvironment.flattened] normal form.
+  ///
+  /// The bridge the TYPED rung crosses (bead `pow-n6n.1`; ADR-0006 D2):
+  /// selection is by VALUE, but `AgentConfig.harness`, the [SiteBinding] lookup
+  /// and the model ladder downstream all read a NAME, so a typed win is
+  /// converted back exactly once — here — and no rung below re-resolves it.
+  ///
+  /// TOTAL for any value that came from [validatedEnvironments] (hence from an
+  /// `AvailableEnvironments` set): every mounted value is a registry member. A
+  /// value no armed name resolves to is a PROGRAMMING error and fails closed
+  /// with a [StateError] naming the value and the armed set (guards LOUD or
+  /// GONE - ADR-0000 A8), never a silent fall-through to a lower rung.
+  ///
+  /// Two names resolving to EQUAL environments tie-break on [names] order,
+  /// which is sorted — deterministic.
+  String nameOf(AgentEnvironment environment) {
+    final wanted = environment.flattened;
+    for (final name in names) {
+      final AgentEnvironment candidate;
+      try {
+        candidate = resolve(name);
+      } on EnvironmentRegistryError {
+        continue; // Unresolvable: boot refuses it; it is not a candidate.
+      }
+      if (candidate == wanted) return name;
+    }
+    throw StateError(
+      'no armed environment equals $environment (armed: ${_armedList()}) - a '
+      'typed environment value must be a registry member; arm it in the '
+      'environment registry, or build the preference from registry values',
+    );
+  }
+
+  /// Every armed environment that passes the boot LEGALITY check (MOMENT 1),
+  /// flattened: each armed name that RESOLVES and is a legal, spawnable combo
+  /// ([_legalityRefusal] - the same rule [validate] applies).
+  ///
+  /// The DEFAULT presence set (bead `pow-n6n.1`): until the availability seed
+  /// (bead `pow-n6n.3`) publishes live probes, "available" means exactly "the
+  /// registry validated it at boot", so nothing regresses. A name [validate]
+  /// would refuse is SKIPPED, not thrown on - a boot-refused registry never
+  /// reaches work in the first place. [SiteBinding] binding is deliberately
+  /// NOT re-checked per member: it is a whole-registry boot refusal, so a
+  /// per-member filter here would be unreachable.
+  Iterable<AgentEnvironment> get validatedEnvironments sync* {
+    for (final name in names) {
+      final AgentEnvironment env;
+      try {
+        env = resolve(name);
+      } on EnvironmentRegistryError {
+        continue;
+      }
+      if (_legalityRefusal(name, env) == null) yield env;
+    }
+  }
+
   /// MOMENT 1 (boot-eager): the FIRST refusal message across the whole armed set,
   /// or null when the box is legally configured. Checks, in order:
   ///  1. every armed name RESOLVES (no cycle, no dangling `base`);
