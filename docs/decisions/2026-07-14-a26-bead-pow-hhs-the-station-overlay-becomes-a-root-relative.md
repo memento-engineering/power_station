@@ -46,24 +46,3 @@ register:
 
 ---
 
-## RATIFIED CROSS-AMENDMENT RULE — SKILLS-HOME (2026-07-14, Nico)
-
-Nico's ratification. Promotes **A12, A23, A24, A26** to **Ratified**. A vended skill's on-disk home follows its declared `audience` (`extension/mcp/config.yaml`):
-
-- **agent** (invoked by a build agent; named in its brief) → `packages/grid_assets/extension/skills/<name>/SKILL.md` (A12).
-- **operator** (for the human/governor operating a station; NEVER named in a build agent's brief) → `packages/grid_assets/extension/station_overlay/.claude/skills/<name>/SKILL.md` (A23 established the overlay tree → A24 the audience split → A26 the root-relative `.claude/` form).
-
-Audience is declared in the manifest and enforced as a deny-list so a build agent's brief never offers an operator skill (A24(3)). Consequence: the `release` skill (pow-vvr) and the four station-operator skills are OPERATOR-audience; `discover` is AGENT-audience.
-
----
-
-## RATIFIED — DISCOVERY GATE: pending amendments are ADVISORY, not binding (2026-07-14, Nico)
-
-Nico's ratification, resolving the A21-vs-CLAUDE.md conflict that thrashed the pow-vvr / vendor-content work. At the discovery/violation gate (A21 / pow-96y), a **PENDING** ADR-0000 amendment is **ADVISORY ONLY** — surfaced as context for the spec committee's `adr-alignment` lane, NEVER grounds for a discovery HOLD. Only a **RATIFIED** standard (a ratified ADR, or an amendment whose Status is Ratified) can trigger a hold.
-
-This **supersedes A21(2)'s** clause "the citable standard is a ratified ADR (its pending `A<n>` amendments included — they bind)", and aligns the gate with the org CLAUDE.md (amendments are candidates for ratification, not binding until ratified).
-
-The gate additionally grades a bead's **INTENT** — a bead whose plan/acceptance REMOVES a cited offence PASSES (it is the fix), rather than holding on mere text-presence — per A21's own principle that "only an unwitting contradiction gates."
-
-Implemented by **pow-d7i**.
-
