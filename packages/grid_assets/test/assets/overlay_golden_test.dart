@@ -5,7 +5,8 @@
 // gate on the LIVE path — the running station provisions every bead's worktree
 // through `AgentCapability.spawn`, so a change here breaks live agent setup.
 //
-// The worktree leg is SCOPED to `.claude/skills`: a loose `.claude/settings.json`
+// The worktree leg is SCOPED to the per-harness SKILL trees (`.claude/skills` +
+// `.agents/skills`): a loose `.claude/settings.json`
 // is repo-owned territory a per-asset-dir `.gitignore` cannot fence (A23(6) —
 // power_station and lenny TRACK `.claude/settings.json`), so the operator-seat
 // assets are the operator's seat's, never a bead's worktree's.
@@ -19,10 +20,25 @@ import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 import 'package:yaml/yaml.dart';
 
-/// Every path the wire is allowed to write under a worktree — the vended
-/// skills' `SKILL.md` plus the self-ignoring `.gitignore` that keeps each out of
-/// the bead's PR. Nothing else: no `settings.json`, no `agents/`.
+/// Every path the wire is allowed to write under a worktree — each vended
+/// skill's `SKILL.md`, in EVERY harness skill tree the station arms, plus the
+/// self-ignoring `.gitignore` that keeps each out of the bead's PR. Nothing
+/// else: no `settings.json`, no `agents/` agent-defs, no loose root file.
 const List<String> kWorktreeOverlayGolden = [
+  '.agents/skills/asset-author/.gitignore',
+  '.agents/skills/asset-author/SKILL.md',
+  '.agents/skills/discover/.gitignore',
+  '.agents/skills/discover/SKILL.md',
+  '.agents/skills/gate-medicine/.gitignore',
+  '.agents/skills/gate-medicine/SKILL.md',
+  '.agents/skills/harvest-review/.gitignore',
+  '.agents/skills/harvest-review/SKILL.md',
+  '.agents/skills/intake-refinement/.gitignore',
+  '.agents/skills/intake-refinement/SKILL.md',
+  '.agents/skills/release/.gitignore',
+  '.agents/skills/release/SKILL.md',
+  '.agents/skills/station-operations/.gitignore',
+  '.agents/skills/station-operations/SKILL.md',
   '.claude/skills/asset-author/.gitignore',
   '.claude/skills/asset-author/SKILL.md',
   '.claude/skills/discover/.gitignore',
@@ -64,16 +80,20 @@ void main() {
   );
 
   /// Every file the spawn left under the worktree, worktree-relative + sorted.
+  /// The walk starts at the ROOT, not at one subtree: a loose file at the root
+  /// (an `AGENTS.md`, a `settings.json`) is exactly the shape the per-asset-dir
+  /// fence cannot cover, so the equality below is what refuses one.
   List<String> materializedPaths() =>
-      Directory(p.join(worktree.path, '.claude'))
-          .listSync(recursive: true)
+      worktree
+          .listSync(recursive: true, followLinks: false)
           .whereType<File>()
           .map((f) => p.relative(f.path, from: worktree.path))
           .toList()
         ..sort();
 
-  test('the provision wire emits EXACTLY the golden set — no settings.json, no '
-      'agents/, nothing outside .claude/skills/', () {
+  test('the provision wire emits EXACTLY the golden set into a BUILD WORKTREE '
+      '— both harness skill trees, no settings.json, no agent-defs, and no '
+      'loose file anywhere at the root', () {
     const cap = AgentCapability(devRoot: '/dev/root');
     final c = ctx();
 
@@ -145,4 +165,77 @@ void main() {
       }
     },
   );
+
+  ProcessResult git(List<String> args) =>
+      Process.runSync('git', args, workingDirectory: worktree.path);
+
+  test('in a REAL git repo the provision leaves NOTHING for `git add -A` to '
+      'stage: every written path is check-ignore clean and the tracked tree is '
+      'untouched (A23(6), now across BOTH skill trees)', () {
+    expect(git(const ['init', '--initial-branch=main']).exitCode, 0);
+    File(p.join(worktree.path, 'README.md')).writeAsStringSync('# seed\n');
+    expect(git(const ['add', 'README.md']).exitCode, 0);
+    expect(
+      git(const [
+        '-c',
+        'user.email=gate@example.com',
+        '-c',
+        'user.name=gate',
+        'commit',
+        '-m',
+        'seed',
+      ]).exitCode,
+      0,
+    );
+
+    const cap = AgentCapability(devRoot: '/dev/root');
+    final c = ctx();
+
+    cap.spawn(c.context, c.args);
+
+    for (final rel in kWorktreeOverlayGolden) {
+      expect(
+        git(['check-ignore', '-q', rel]).exitCode,
+        0,
+        reason: '$rel must be git-excluded',
+      );
+    }
+    expect(
+      (git(const ['status', '--porcelain']).stdout as String).trim(),
+      isEmpty,
+      reason: "the bead's PR carries none of the vended overlay",
+    );
+  });
+
+  test('a HAND-AUTHORED file at a vended path under .agents/skills is BLOCKED, '
+      'never clobbered, and its dir gets no fence — `.agents/` is repo-owned '
+      'territory (`bd init` tracks `.agents/skills/beads/`), and never '
+      'clobbering it is what makes the widened scope safe', () {
+    const handAuthored = '---\nname: discover\n---\nthe repo own copy\n';
+    final target =
+        File(p.join(worktree.path, '.agents', 'skills', 'discover', 'SKILL.md'))
+          ..createSync(recursive: true)
+          ..writeAsStringSync(handAuthored);
+
+    const cap = AgentCapability(devRoot: '/dev/root');
+    final c = ctx();
+
+    cap.spawn(c.context, c.args);
+
+    expect(target.readAsStringSync(), handAuthored);
+    expect(
+      File(
+        p.join(worktree.path, '.agents', 'skills', 'discover', '.gitignore'),
+      ).existsSync(),
+      isFalse,
+      reason: 'the fence covers only asset dirs this call actually wrote into',
+    );
+    expect(
+      File(
+        p.join(worktree.path, '.claude', 'skills', 'discover', 'SKILL.md'),
+      ).existsSync(),
+      isTrue,
+      reason: 'the claude leg still installs — one blocked path fails nothing',
+    );
+  });
 }

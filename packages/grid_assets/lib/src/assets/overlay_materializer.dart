@@ -16,9 +16,11 @@
 /// `AgentCapability`, `code_capabilities.dart`) and an operator STATION repo
 /// root (the `assets install` Command). One root-parametric materializer, two
 /// callers. They differ only in root and in [OverlayMaterializer.materializeSync]'s
-/// `subtrees` SCOPE: the worktree leg takes [kClaudeSkillsSubtree] alone, because
-/// a loose `.claude/settings.json` is repo-owned territory a per-asset-dir
-/// `.gitignore` cannot fence (ADR-0000 A23(6)).
+/// `subtrees` SCOPE: the worktree leg takes [kWorktreeOverlaySubtrees] — the
+/// per-harness SKILL trees, `.claude/skills` and `.agents/skills` — because a
+/// loose `.claude/settings.json` is repo-owned territory a per-asset-dir
+/// `.gitignore` cannot fence (A23(6), `docs/decisions/`). Every path in scope
+/// sits inside an `<id>/` asset dir, so the fence still covers all of it.
 ///
 /// **The lib.** [OverlayMaterializer] is the CLI-FREE, git-free, UI-drivable
 /// substrate both legs ride. It takes the ALREADY-RESOLVED, ORDERED overlay
@@ -65,11 +67,22 @@ import 'overlay_provenance.dart';
 /// read skill ids back out of it.
 const String kClaudeSkillsSubtree = '.claude/skills';
 
-/// Subtrees materialized into an agent worktree.
+/// Where Codex discovers a skill inside a repo root
+/// (`<root>/.agents/skills/<id>/SKILL.md`, scanned from cwd up to the repo
+/// root). Copilot CLI reads this tree AND `.claude/skills`, so the two legs
+/// below already serve it — there is no third rendering.
+const String kAgentsSkillsSubtree = '.agents/skills';
+
+/// Subtrees materialized into an agent worktree — one per harness SKILL tree,
+/// and nothing else: each is a set of `<id>/` asset dirs, which is what keeps
+/// the per-asset-dir git fence able to cover every path the leg writes.
 ///
 /// Landing consumes this same list, so a new worktree subtree is rendered and
 /// restored by changing this manifest once.
-const List<String> kWorktreeOverlaySubtrees = [kClaudeSkillsSubtree];
+const List<String> kWorktreeOverlaySubtrees = [
+  kClaudeSkillsSubtree,
+  kAgentsSkillsSubtree,
+];
 
 /// The executable name the vended overlay's skills render `{{runner}}` against
 /// (the skill's own `<runner> search --json` call — the coupled skill+command
