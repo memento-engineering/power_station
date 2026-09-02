@@ -146,6 +146,7 @@ export 'src/agent/environment_probe.dart';
 export 'src/agent/environment_registry.dart';
 export 'src/agent/model_tier.dart';
 export 'src/agent/path_check.dart';
+export 'src/agent/seat_environments.dart';
 export 'src/agent/site_binding.dart';
 export 'src/agent/typed_environment.dart';
 export 'src/agent/usage_report.dart';

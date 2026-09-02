@@ -88,7 +88,9 @@ import 'package:path/path.dart' as p;
 import '../agent/agent_domain.dart';
 import '../agent/agent_harness.dart';
 import '../agent/environment_registry.dart';
+import '../agent/seat_environments.dart';
 import '../agent/site_binding.dart';
+import '../agent/typed_environment.dart';
 import '../agent/usage_report.dart';
 import '../search/station_search.dart';
 import 'committee.dart';
@@ -1473,6 +1475,7 @@ class DiscoveryLensCapability extends ProcessCapability {
       beadMetadata: bead.metadata,
       stepParams: args.params,
       registry: registry,
+      typedEnvironment: resolveEnvironment<GatherAgentEnvironment>(context),
     );
     final environment = registry.resolve(config.harness);
     final workspaceDir = workspace.workspaceDir;

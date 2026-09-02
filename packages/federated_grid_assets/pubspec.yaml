@@ -12,8 +12,8 @@ environment:
 
 dependencies:
   args: ^2.6.0
-  genesis_tree: ^0.2.0
-  grid_engine: ^0.3.0-rc.1
+  genesis_tree: ^0.3.0
+  grid_engine: ^0.3.0-rc.10
   meta: ^1.16.0
 
 dev_dependencies:
