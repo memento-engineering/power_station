@@ -1,3 +1,23 @@
+## Unreleased
+
+- Breaking: approval IS the `grid.approved_*` stamp. `mountEligibilityFindings`
+  no longer reads the `grid.approved` LABEL — its clause is now
+  `if (!isApprovalStamped(bead))`, refusing with
+  `approval: not approved - run the approve verb` — the `kApprovedLabel`
+  constant is deleted, and the `approve` verb writes only the three stamp keys
+  (`grid.approved_by`, `grid.approved_at`, `grid.approved_rev`) in its one
+  `bd update`, with no `--add-label`. A bead carried four encodings of "not
+  yet" and the label and the stamp were the same act written twice; a label any
+  writer could add mounted work ahead of its blockers, while a hand-added one
+  silently never mounted at all.
+  Migration: every open bead holding ONLY the `grid.approved` label stops
+  mounting — re-approve it with `<runner> approve --actor <name> <bead-id>`,
+  which stamps it. Beads already stamped by the verb keep mounting untouched;
+  the now-inert label needs no removal. `ApprovalStamp`, the three key
+  constants and `isApprovalStamped` are unchanged and still exported, and the
+  filing preflight is untouched. The vended station overlay teaches the stamp
+  rule.
+
 ## 0.6.0-rc.7
 
 - Breaking: the role map is retired — `AgentRole`, `roleEnvironments`,
