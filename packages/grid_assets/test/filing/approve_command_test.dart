@@ -180,7 +180,7 @@ void main() {
     final argv = h.bd.updates.single;
     expect(argv.take(2), ['update', 'pow-child']);
     expect(argv, containsAllInOrder(['--actor', 'nico']));
-    expect(argv, containsAllInOrder(['--add-label', 'grid.approved']));
+    expect(argv, isNot(contains('--add-label')));
     expect(argv.where((arg) => arg == '--set-metadata'), hasLength(3));
     expect(callMetadata(argv), {
       'grid.approved_by': 'nico',

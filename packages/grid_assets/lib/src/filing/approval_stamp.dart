@@ -1,13 +1,5 @@
 import 'package:beads_dart/beads_dart.dart';
 
-/// The label a bead carries once it has been approved for mounting.
-///
-/// The label alone is NOT approval: any writer can add it at any time, which is
-/// how four `pow-n6n` children mounted ahead of their blockers on 2026-09-02.
-/// Approval is the label PLUS the [ApprovalStamp] the approve verb writes in the
-/// same `bd update` — see [isApprovalStamped].
-const String kApprovedLabel = 'grid.approved';
-
 /// Metadata key: the `--actor` that ran the approve verb.
 const String kApprovedByKey = 'grid.approved_by';
 
@@ -17,8 +9,10 @@ const String kApprovedAtKey = 'grid.approved_at';
 /// Metadata key: the store root's git HEAD sha at approval time.
 const String kApprovedRevKey = 'grid.approved_rev';
 
-/// The RECEIPT the approve verb writes beside [kApprovedLabel]: WHO approved,
-/// WHEN, and against WHICH revision of the bead's store root.
+/// The RECEIPT the approve verb writes — and the ONLY approval marker the
+/// mount gate reads: WHO approved, WHEN, and against WHICH revision of the
+/// bead's store root. The `grid.approved` label it used to sit beside is
+/// retired; a label any writer can add was the same act written twice.
 final class ApprovalStamp {
   /// Creates a stamp.
   const ApprovalStamp({required this.by, required this.at, required this.rev});
@@ -48,6 +42,9 @@ final class ApprovalStamp {
 /// [kApprovedAtKey] is the witness: the verb writes all three keys in one
 /// update, so the instant cannot exist without the actor and the revision, and
 /// a hand-added label has none of them.
+///
+/// This is the mount gate's approval clause — see `mountEligibilityFindings`
+/// in `lib/src/code/mount_eligibility.dart`.
 bool isApprovalStamped(Bead bead) {
   final at = bead.metadata[kApprovedAtKey];
   return at is String && at.trim().isNotEmpty;

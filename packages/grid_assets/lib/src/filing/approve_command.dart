@@ -33,7 +33,7 @@ sealed class ApprovalOutcome {
   Map<String, Object?> toJson();
 }
 
-/// The verb WROTE the label and the stamp in one `bd update`.
+/// The verb WROTE the `grid.approved_*` stamp in one `bd update`.
 final class ApprovalStamped extends ApprovalOutcome {
   /// Creates the stamped outcome.
   const ApprovalStamped({
@@ -151,8 +151,6 @@ final class ApproveService {
       '--json',
       '--actor',
       actor,
-      '--add-label',
-      kApprovedLabel,
       for (final entry in stamp.metadata.entries) ...[
         '--set-metadata',
         '${entry.key}=${entry.value}',
@@ -173,7 +171,7 @@ final class ApproveService {
 }
 
 /// `approve --actor <name> [--json] [--state-root <path>] <bead-id>` — the
-/// approval VERB: the filing preflight, then the label plus its receipt.
+/// approval VERB: the filing preflight, then the `grid.approved_*` stamp.
 class ApproveCommand extends Command<int> {
   /// Creates the thin adapter over [service].
   ApproveCommand({
