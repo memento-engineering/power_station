@@ -1,3 +1,59 @@
+## 0.6.0-rc.6
+
+- Breaking: a `grid.approved` label without a `grid.approved_at` stamp no
+  longer mounts. The new `approve` verb (`ApproveCommand`) gates its atomic
+  receipt write on filing completeness — sentence-scoped blockers and
+  state-store links included — and records the approver, the UTC instant and
+  the repository revision, so mount eligibility can tell a verb-issued receipt
+  from a bare label (pow-kps, #159). Migration: re-stamp every open
+  `grid.approved` bead with the `approve` verb; a bare label is refused at the
+  gate. The governor already ran this org-wide on 2026-09-02.
+- The bead filing contract is enforced by a read-only filing service and
+  `FilingCommand`, which reject mechanically incomplete author-side filings;
+  `discover` calls the command, and the defer and mount-eligibility boundaries
+  are unchanged (#148).
+- ACP-backed agent sessions: Copilot and Codex drive through one long-lived ACP
+  adapter carrying structured progress, completion, usage, steering,
+  permissions and model selection, with hermetic protocol-conformance coverage
+  and an opt-in live worktree proof (#153).
+- Channel-backed agent sessions: harness-specific session adapters, bead-routed
+  fenced steering and environment opt-in wiring; agent briefs, structured
+  results and usage travel the long-lived channel while every builtin stays on
+  the one-turn path (#147).
+- The `architect` agent role gives specification agents an independent
+  environment role, with a build fallback so existing build-environment
+  armings keep working (#154).
+- Copilot one-shot telemetry: the Copilot environment declares silent JSON
+  output and keyed resume, and projects premium-request consumption plus
+  session duration through the generic usage report path (#145).
+- Critic verdict rounds are authored at the capability boundary: a canonical
+  verdict must be proven to belong to the current critic incarnation before it
+  replaces a model-authored round, the model value is preserved for
+  diagnostics, and an unresolved durability probe flares (pow-uok, #157).
+- Critic verdict artifacts are written through same-directory atomic
+  replacement, and respec ledgers are fenced by their owning session root, so a
+  concurrent or stale artifact cannot poison a live join (#140).
+- `specify` completion is gated on a fresh exact-id readback through the owned
+  bd client, failing closed when authored acceptance or design is absent or
+  unreadable (#149).
+- Mount eligibility preloads the owning store's bead snapshot and rechecks a
+  tentative refusal against the fresh bead, so first-refusal clauses derive
+  from current fields; eligible snapshots stay synchronous (#152).
+- Declared tests: extraction is narrowed to authored declarations and ignores
+  run commands, quotation contexts and unchanged/restore statements (#150);
+  bare `Test:` run references are split from authored declarations and consult
+  the pinned base only as the fallback set (#155); package-relative
+  declarations resolve against repo-relative pinned-diff paths by path suffix
+  (#138).
+- Readiness, specify, spec review and discovery prompts search both local
+  decision homes (`docs/adr` and `docs/decisions`) through one missing-safe
+  command set, and packaged assets accept legacy clauses as well as decision
+  slugs in a citation (#146).
+- The vended skills teach the enforced approval-label transition in place of
+  defer staging, with pinned source rendering and operator installation (#151).
+- Tests: the specify environment assertion names the `architect` environment
+  rather than a bare codex argv (#156).
+
 ## 0.6.0-rc.5
 
 - New `declared-tests-present` code-review lane: confidently-declared test paths in the design are compared against the pinned diff; omitted files hard-block the round (#131).
