@@ -82,31 +82,78 @@ final class FilingReport {
   };
 }
 
-final RegExp _blockerLine = RegExp(
-  r'^\s*(?:Blocked by|Depends on)\s*:?\s*(.*)$',
+/// The blocker phrases, scanned at sentence scope.
+///
+/// Matches `Blocked by` / `Blocked on` / `Depends on` anywhere in the text and
+/// captures up to the end of the sentence. A sentence-ending period is followed
+/// by whitespace or end-of-input, so dotted child ids remain intact.
+final RegExp _blockerPhrase = RegExp(
+  r'(?:blocked\s+(?:by|on)|depends\s+on)\b(.*?)(?=\.(?:\s|$)|$)',
+  caseSensitive: false,
   multiLine: true,
 );
 final RegExp _beadId = RegExp(r'\b[a-z][a-z0-9_]*(?:-[a-z0-9_.]+)+\b');
 
 Set<String> _namedBlockers(String description) => {
-  for (final line in _blockerLine.allMatches(description))
-    for (final id in _beadId.allMatches(line.group(1)!).map((m) => m.group(0)!))
+  for (final phrase in _blockerPhrase.allMatches(description))
+    for (final id
+        in _beadId.allMatches(phrase.group(1)!).map((match) => match.group(0)!))
       id,
 };
+
+BdRunner _processRunnerFor(String stateRoot) =>
+    ProcessBdRunner(workspaceRoot: stateRoot);
+
+/// Reads the station's own state store for open link beads that wire a named
+/// cross-store blocker.
+final class CrossLinkBlockerSource {
+  /// Creates the source over an injectable spawn seam.
+  const CrossLinkBlockerSource({
+    BdRunner Function(String stateRoot) runnerFor = _processRunnerFor,
+  }) : _runnerFor = runnerFor;
+
+  final BdRunner Function(String stateRoot) _runnerFor;
+
+  /// The blocker ids wired for [beadId] by an open link bead in [stateRoot].
+  Future<Set<String>> wiredFor({
+    required String stateRoot,
+    required String beadId,
+  }) async {
+    final scope = await BdCliService(
+      _runnerFor(stateRoot),
+    ).listScope(type: GridIssueTypes.link, status: BeadStatus.open);
+    final snapshot = GraphSnapshot.fromParts(
+      beads: scope.beads,
+      dependencies: const <BeadDependency>[],
+      readyIds: const <String>[],
+      capturedAt: DateTime.fromMillisecondsSinceEpoch(0, isUtc: true),
+    );
+    return {
+      for (final link in projectCrossLinks(snapshot))
+        if (link.from == beadId && link.to.isNotEmpty) link.to,
+    };
+  }
+}
 
 /// Pure evaluator for the four-row filing report.
 final class FilingContract {
   /// Creates the stateless evaluator.
   const FilingContract();
 
-  /// Evaluates [bead] against its [dependencies].
-  FilingReport evaluate(Bead bead, Iterable<BeadDependency> dependencies) {
+  /// Evaluates [bead] against its [dependencies] and blockers wired by open
+  /// cross-store link beads ([linkedBlockers]).
+  FilingReport evaluate(
+    Bead bead,
+    Iterable<BeadDependency> dependencies, {
+    Set<String> linkedBlockers = const {},
+  }) {
     final validationPlan = bead.metadata['validation_plan'];
     final named = _namedBlockers(bead.description);
     final wired = {
       for (final edge in dependencies)
         if (edge.issueId == bead.id && edge.type == DependencyType.blocks)
           edge.dependsOnId,
+      ...linkedBlockers,
     };
     final missing = named.difference(wired).toList()..sort();
     final dependencyPass = missing.isEmpty;
@@ -154,6 +201,7 @@ final class FilingService {
   const FilingService({
     this.source = const ExactSubstationBeadSource(),
     this.contract = const FilingContract(),
+    this.links = const CrossLinkBlockerSource(),
   });
 
   /// Exact read source.
@@ -162,15 +210,21 @@ final class FilingService {
   /// Pure contract evaluator.
   final FilingContract contract;
 
+  /// The station state store's cross-link reader.
+  final CrossLinkBlockerSource links;
+
   /// Checks [beadId] in the store rooted at [storeRoot].
   Future<FilingReport> check({
     required String storeRoot,
     required String beadId,
+    String? stateRoot,
   }) async {
     final read = await source.readExact(storeRoot: storeRoot, beadId: beadId);
     final bead = read.bead;
-    return bead == null
-        ? FilingReport.missing(beadId)
-        : contract.evaluate(bead, read.dependencies);
+    if (bead == null) return FilingReport.missing(beadId);
+    final linked = stateRoot == null
+        ? const <String>{}
+        : await links.wiredFor(stateRoot: stateRoot, beadId: beadId);
+    return contract.evaluate(bead, read.dependencies, linkedBlockers: linked);
   }
 }
