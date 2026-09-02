@@ -286,24 +286,33 @@ String _statementAround(String text, String marker) {
   return text.substring(start, end);
 }
 
+/// Sorts every marked path in [text] into the bucket its EVIDENCE earns.
+///
+/// [authored] — the statement around the marker carries an explicit edit verb
+/// ([_authoredTestStatement]): a PROMISE about the file whatever the base tree
+/// holds. [mentioned] — the marker sits inside a declaration section's body with
+/// NO edit verb (bead `pow-aoa`): the design NAMES the file without claiming an
+/// edit, which is evidence only when the file does not exist yet. A marker in
+/// neither position is not collected at all.
 void _collectTestDeclarations({
   required String text,
   required Map<String, String> pathByMarker,
-  required Set<String> declared,
+  required Set<String> authored,
+  required Set<String> mentioned,
   required bool declarationSection,
 }) {
   for (final entry in pathByMarker.entries) {
     if (!text.contains(entry.key)) continue;
     final statement = _statementAround(text, entry.key);
     if (_authoredTestStatement.hasMatch(statement)) {
-      declared.add(entry.value);
+      authored.add(entry.value);
       continue;
     }
     if (_dartTestCommand.hasMatch(statement) ||
         _nonDeclarationTestStatement.hasMatch(statement)) {
       continue;
     }
-    if (declarationSection) declared.add(entry.value);
+    if (declarationSection) mentioned.add(entry.value);
   }
 }
 
@@ -323,20 +332,26 @@ void _collectTestLineFallback({
 
 /// A design's confident test paths, split by the EVIDENCE that named them.
 ///
-/// [authored] — claimed as new or modified authored work (an authored-test
-/// statement, or a declaration section's own body). [fallback] — named ONLY by
+/// [authored] — claimed as new or modified authored work by an explicit edit
+/// verb ([_authoredTestStatement]). [mentioned] — named inside a declaration
+/// section's body with no edit verb (bead `pow-aoa`). [fallback] — named ONLY by
 /// a bare `Test:` run command, the historical fail-closed fallback that applies
 /// when the design carries no declaration section at all (bead `pow-qev` r2).
 ///
 /// The buckets answer to different evidence. An authored path is a PROMISE
-/// whatever the base tree holds; a `Test:` line naming a file that already
-/// exists at the pinned base promises nothing — it is a RUN reference (bead
-/// `pow-0jc`). A path in BOTH buckets is authored: precedence never inverts.
-typedef TestDeclarations = ({Set<String> authored, Set<String> fallback});
+/// whatever the base tree holds; a bare mention or a `Test:` line naming a file
+/// that already exists at the pinned base promises nothing — it is a RUN or a
+/// REFERENCE (beads `pow-0jc`, `pow-aoa`). A path with authored evidence is
+/// authored: precedence never inverts.
+typedef TestDeclarations = ({
+  Set<String> authored,
+  Set<String> mentioned,
+  Set<String> fallback,
+});
 
 /// Extracts [TestDeclarations] from [design] — the one extraction pipeline
 /// (`_markTestCommandPaths` → `_markConfidentTestPaths` → `proseOnly` →
-/// `_collectTestDeclarations`), now reporting its two buckets separately.
+/// `_collectTestDeclarations`), reporting its three evidence buckets separately.
 TestDeclarations testDeclarations(String design) {
   final pathByMarker = <String, String>{};
   final commandMarkedDesign = _markTestCommandPaths(design, pathByMarker);
@@ -346,6 +361,7 @@ TestDeclarations testDeclarations(String design) {
   );
   final prose = proseOnly(markedDesign);
   final authored = <String>{};
+  final mentioned = <String>{};
   final fallback = <String>{};
   final declarationBodies = <String>[];
 
@@ -358,14 +374,16 @@ TestDeclarations testDeclarations(String design) {
   _collectTestDeclarations(
     text: prose,
     pathByMarker: pathByMarker,
-    declared: authored,
+    authored: authored,
+    mentioned: mentioned,
     declarationSection: false,
   );
   for (final body in declarationBodies) {
     _collectTestDeclarations(
       text: body,
       pathByMarker: pathByMarker,
-      declared: authored,
+      authored: authored,
+      mentioned: mentioned,
       declarationSection: true,
     );
   }
@@ -377,31 +395,36 @@ TestDeclarations testDeclarations(String design) {
     );
   }
   // Authored-marker precedence (bead `pow-qev` r1): a path claimed as authored
-  // work is never demoted to a run reference by also appearing in a `Test:`
-  // line.
+  // work is never demoted to a bare mention or a run reference by ALSO appearing
+  // in a declaration section's prose or in a `Test:` line.
+  mentioned.removeAll(authored);
   fallback.removeAll(authored);
-  return (authored: authored, fallback: fallback);
+  fallback.removeAll(mentioned);
+  return (authored: authored, mentioned: mentioned, fallback: fallback);
 }
 
 /// Confident test paths the design DECLARES — the gate's obligation set.
 ///
 /// [baseFiles] is the pinned base's file list ([baseTreeFiles]). A path the
-/// design names ONLY in a bare `Test:` run command AND that already exists at
-/// the base is a RUN reference, not a declaration (bead `pow-0jc`): the design
-/// promises nothing about it, so requiring it in the pinned diff would block a
-/// change that correctly leaves it alone. An EMPTY [baseFiles] — the default,
-/// and the answer whenever the base could not be read — keeps every fallback
-/// path a declaration, i.e. `pow-qev`'s fail-closed posture unchanged.
+/// design names ONLY in a bare `Test:` run command (bead `pow-0jc`) or ONLY as a
+/// bare prose mention inside a declaration section (bead `pow-aoa`) AND that
+/// already exists at the base is a RUN or a REFERENCE, not a declaration: the
+/// design promises nothing about it, so requiring it in the pinned diff would
+/// block a change that correctly leaves it alone. An authored edit verb still
+/// declares whatever the base holds. An EMPTY [baseFiles] — the default, and the
+/// answer whenever the base could not be read — keeps every base-gated path a
+/// declaration, i.e. `pow-qev`'s fail-closed posture unchanged.
 Set<String> declaredTestFiles(
   String design, {
   Set<String> baseFiles = const <String>{},
 }) {
   final declarations = testDeclarations(design);
+  bool absentAtBase(String path) =>
+      !baseFiles.any((base) => _endsWithPath(base, path));
   return {
     ...declarations.authored,
-    ...declarations.fallback.where(
-      (path) => !baseFiles.any((base) => _endsWithPath(base, path)),
-    ),
+    ...declarations.mentioned.where(absentAtBase),
+    ...declarations.fallback.where(absentAtBase),
   };
 }
 
@@ -426,7 +449,7 @@ List<String> missingDeclaredTestFiles({
 /// Answers the EMPTY set when the base cannot be read at all: no worktree on
 /// disk (A9(5)'s offline/dry-run posture) or a git that could not resolve the
 /// ref. Empty means "the base is UNKNOWN", and an unknown base leaves every
-/// `Test:`-line path a declaration — a failed probe can only make the gate
+/// base-gated path a declaration — a failed probe can only make the gate
 /// STRICTER, never laxer, so it invents no verdict of its own.
 Future<Set<String>> baseTreeFiles({
   required GitRunner runner,
@@ -475,13 +498,15 @@ class DeclaredTestsCapability extends ServiceCapability {
             'no pinned diff at ${pinned.path} — declared tests cannot be checked; fail-closed',
       });
     }
-    // A bare `Test:` run line is a DECLARATION only when the file it names is
-    // ABSENT at the pinned base (bead `pow-0jc`): a file already on the base
-    // that the design merely RUNS is a run reference and the change is right
-    // not to touch it. Authored declarations never consult the base, so a
-    // design carrying a declaration section costs ZERO git.
+    // A bare `Test:` run line (bead `pow-0jc`) and a bare prose mention inside a
+    // declaration section (bead `pow-aoa`) are DECLARATIONS only when the file
+    // they name is ABSENT at the pinned base: a file already on the base that
+    // the design merely RUNS or REFERS TO is not a promise, and the change is
+    // right not to touch it. An authored edit verb never consults the base, so a
+    // design whose declarations are all authored costs ZERO git.
     final declarations = testDeclarations(bead.design);
-    final baseFiles = declarations.fallback.isEmpty
+    final baseGated = {...declarations.mentioned, ...declarations.fallback};
+    final baseFiles = baseGated.isEmpty
         ? const <String>{}
         : await baseTreeFiles(
             runner: _runner ?? SystemGitRunner(),
