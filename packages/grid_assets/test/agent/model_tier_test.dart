@@ -213,29 +213,26 @@ void main() {
       expect(_modelOf(cfg), 'haiku');
     });
 
-    test(
-      'a bead-pinned model still outranks the cheap tier',
-      () {
-        final pinned = bead('tg-1').copyWith(
-          metadata: {
-            'grid.agent': {
-              'assets_version': kAgentAssetsVersion,
-              'payload': {
-                'params': {'model': 'Z'},
-              },
+    test('a bead-pinned model still outranks the cheap tier', () {
+      final pinned = bead('tg-1').copyWith(
+        metadata: {
+          'grid.agent': {
+            'assets_version': kAgentAssetsVersion,
+            'payload': {
+              'params': {'model': 'Z'},
             },
           },
-        );
-        final config = resolveAgentConfig(
-          tier: AgentTier.cheap,
-          ambient: const AgentConfig(),
-          beadMetadata: pinned.metadata,
-          stepParams: const {},
-          registry: buildBuiltinEnvironmentRegistry(),
-        );
-        expect(config.params['model'], 'Z');
-      },
-    );
+        },
+      );
+      final config = resolveAgentConfig(
+        tier: AgentTier.cheap,
+        ambient: const AgentConfig(),
+        beadMetadata: pinned.metadata,
+        stepParams: const {},
+        registry: buildBuiltinEnvironmentRegistry(),
+      );
+      expect(config.params['model'], 'Z');
+    });
 
     test('EVERY tier resolves a non-empty model (no unpinned spawn)', () {
       for (final tier in AgentTier.values) {
@@ -315,11 +312,7 @@ void main() {
       'the ENGINE stays DOMAIN-FREE — it names no role, tier, or tier map',
       () {
         final engine = _sourceUnder(_engineLibDir());
-        for (final domain in [
-          'AgentTier',
-          'ModelTiers',
-          'ModelPreference',
-        ]) {
+        for (final domain in ['AgentTier', 'ModelTiers', 'ModelPreference']) {
           expect(
             engine,
             isNot(contains(domain)),

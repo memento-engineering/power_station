@@ -109,10 +109,7 @@ void main() {
       final registry = EnvironmentRegistry(
         custom: {'opencode': kBuiltinEnvironments['opencode']!},
       );
-      expect(
-        registry.validate(armedNames: {'build': 'opencode'}),
-        isNull,
-      );
+      expect(registry.validate(armedNames: {'build': 'opencode'}), isNull);
     });
 
     test('a model-less pi builtin (endpoint bound) armed by name PASSES', () {
@@ -124,10 +121,7 @@ void main() {
       );
       final binding = SiteBinding({'pi': Uri.parse('http://localhost:8080')});
       expect(
-        registry.validate(
-          armedNames: {'build': 'pi'},
-          siteBinding: binding,
-        ),
+        registry.validate(armedNames: {'build': 'pi'}, siteBinding: binding),
         isNull,
       );
     });
@@ -148,10 +142,7 @@ void main() {
         const registry = EnvironmentRegistry(
           custom: {'frontier': AgentEnvironment(command: 'claude')},
         );
-        expect(
-          registry.validate(armedNames: {'build': 'frontier'}),
-          isNull,
-        );
+        expect(registry.validate(armedNames: {'build': 'frontier'}), isNull);
       },
     );
   });

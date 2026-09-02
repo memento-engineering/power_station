@@ -86,58 +86,55 @@ void main() {
   });
 
   group('pow-n6n.4 — nothing armed falls through to the ambient harness', () {
-    test('no typed seat, no bead/step rung ⇒ ambient.harness + the tier floor', () {
-      final config = resolveAgentConfig(
-        tier: AgentTier.frontier,
-        ambient: const AgentConfig(harness: 'copilot'),
-        beadMetadata: const {},
-        stepParams: const {},
-        registry: _registry(),
-      );
-      expect(config.harness, 'copilot');
-      expect(config.params['model'], kFrontierModelDefault);
-    });
-  });
-
-  group(
-    'pow-k7l — the bead and station rungs still function',
-    () {
-      test(
-        'a bead harness names only the tool; the model rides the declared tier',
-        () {
-          final config = resolveAgentConfig(
-            tier: AgentTier.mid,
-            ambient: const AgentConfig(graderModel: 'sonnet-legacy'),
-            beadMetadata: _envelope({'harness': 'copilot'}),
-            stepParams: const {},
-            registry: _registry(),
-          );
-          expect(config.harness, 'copilot');
-          // graderModel projects onto the MID tier — the pre-env path is intact.
-          expect(config.params['model'], 'sonnet-legacy');
-        },
-      );
-
-      test('a bead-pinned params.model still tops every rung', () {
+    test(
+      'no typed seat, no bead/step rung ⇒ ambient.harness + the tier floor',
+      () {
         final config = resolveAgentConfig(
           tier: AgentTier.frontier,
-          ambient: const AgentConfig(),
-          beadMetadata: _envelope({
-            'params': {'model': 'Z'},
-          }),
+          ambient: const AgentConfig(harness: 'copilot'),
+          beadMetadata: const {},
           stepParams: const {},
           registry: _registry(),
-          typedEnvironment: _registry().resolve('codex-frontier'),
         );
-        expect(
-          config.harness,
-          'codex-frontier',
-        ); // the typed rung still picks the env
-        expect(
-          config.params['model'],
-          'Z',
-        ); // ...but the bead pin wins the model
-      });
-    },
-  );
+        expect(config.harness, 'copilot');
+        expect(config.params['model'], kFrontierModelDefault);
+      },
+    );
+  });
+
+  group('pow-k7l — the bead and station rungs still function', () {
+    test(
+      'a bead harness names only the tool; the model rides the declared tier',
+      () {
+        final config = resolveAgentConfig(
+          tier: AgentTier.mid,
+          ambient: const AgentConfig(graderModel: 'sonnet-legacy'),
+          beadMetadata: _envelope({'harness': 'copilot'}),
+          stepParams: const {},
+          registry: _registry(),
+        );
+        expect(config.harness, 'copilot');
+        // graderModel projects onto the MID tier — the pre-env path is intact.
+        expect(config.params['model'], 'sonnet-legacy');
+      },
+    );
+
+    test('a bead-pinned params.model still tops every rung', () {
+      final config = resolveAgentConfig(
+        tier: AgentTier.frontier,
+        ambient: const AgentConfig(),
+        beadMetadata: _envelope({
+          'params': {'model': 'Z'},
+        }),
+        stepParams: const {},
+        registry: _registry(),
+        typedEnvironment: _registry().resolve('codex-frontier'),
+      );
+      expect(
+        config.harness,
+        'codex-frontier',
+      ); // the typed rung still picks the env
+      expect(config.params['model'], 'Z'); // ...but the bead pin wins the model
+    });
+  });
 }

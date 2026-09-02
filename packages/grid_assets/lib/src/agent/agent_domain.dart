@@ -242,7 +242,9 @@ AgentConfig resolveAgentConfig({
   // TOTAL: ModelTiers.modelFor never returns null, so A20(3) holds by
   // construction and no spawn is ever unpinned.
   config = config.merge(
-    params: {'model': beadModel ?? env.model ?? ambient.armedTiers.modelFor(tier)},
+    params: {
+      'model': beadModel ?? env.model ?? ambient.armedTiers.modelFor(tier),
+    },
   );
   return config;
 }

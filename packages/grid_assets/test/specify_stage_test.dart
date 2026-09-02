@@ -85,22 +85,25 @@ void main() {
   });
 
   group('SpecifyCapability.spawn — the spec seat\'s harness ride', () {
-    test('rides its SpecAgentEnvironment seat: codex, not the ambient claude', () {
-      final c = _ctx(
-        seat: {
-          SpecAgentEnvironment: SpecAgentEnvironment([
-            kBuiltinEnvironments['codex']!,
-          ]),
-        },
-      );
-      final cfg = const SpecifyCapability().spawn(c.context, c.args);
-      // codex is an ACP-backed environment since pow-9o6: its launch is the
-      // adapter package, never a bare `codex` argv — assert the ENVIRONMENT
-      // was selected, not one tool's argv shape.
-      final argv = cfg.args.join(' ');
-      expect(argv, contains('codex'));
-      expect(argv, isNot(contains('claude')));
-    });
+    test(
+      'rides its SpecAgentEnvironment seat: codex, not the ambient claude',
+      () {
+        final c = _ctx(
+          seat: {
+            SpecAgentEnvironment: SpecAgentEnvironment([
+              kBuiltinEnvironments['codex']!,
+            ]),
+          },
+        );
+        final cfg = const SpecifyCapability().spawn(c.context, c.args);
+        // codex is an ACP-backed environment since pow-9o6: its launch is the
+        // adapter package, never a bare `codex` argv — assert the ENVIRONMENT
+        // was selected, not one tool's argv shape.
+        final argv = cfg.args.join(' ');
+        expect(argv, contains('codex'));
+        expect(argv, isNot(contains('claude')));
+      },
+    );
 
     test('spawns claude WRAPPED for usage capture, cwd at the activation '
         '(FT-2, ADR-0008 Decision 10)', () {
