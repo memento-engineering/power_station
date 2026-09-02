@@ -738,9 +738,9 @@ AgentBrief buildSpecifyBrief(
       'legacy ADR by file path plus ADR or `A<n>` clause. Cite a '
       '`docs/decisions/` entry as `<repo>#<slug>`, for example '
       '`the_grid#admission-authority-boundary`; a migrated entry may also '
-      'preserve its old citation in `register.legacy-id`. The legacy '
-      'register\'s ADR-0000 is the living AI-decision register — its pending '
-      '`A<n>` amendments bind too. Quote each load-bearing decision and say '
+      'preserve its old citation in `register.legacy-id`. '
+      '$kDecisionWriteRule '
+      'Quote each load-bearing decision and say '
       'how the plan aligns. If grep returns nothing relevant, write exactly: '
       'No ADR applies — verified via grep on `<keywords>`.',
     )
@@ -986,7 +986,10 @@ class SpecCriticCapability extends CriticCapability {
         'absent, not an error. Cite a legacy ADR by file path plus ADR or '
         '`A<n>` clause. Cite a `docs/decisions/` entry as `<repo>#<slug>`, for '
         'example `the_grid#admission-authority-boundary`; a migrated entry may '
-        'also preserve its old citation in `register.legacy-id`. Check the '
+        'also preserve its old citation in `register.legacy-id`. '
+        '$kDecisionWriteRule '
+        'A spec that appends an `A<n>` amendment to ADR-0000 has DEPARTED '
+        'from that rule — say so under `adr-alignment`. Check the '
         'decisions the spec cites — or should have cited. A claim you cannot '
         'verify grades down; do not take the spec\'s word for the world.',
       )

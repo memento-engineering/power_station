@@ -2,10 +2,11 @@
 
 Does the spec respect the substation's recorded decisions? A substation's local
 decision register may contain `docs/adr/`, `docs/decisions/`, or both. Treat a
-missing directory as absent and continue with the other. The legacy register
-contains ratified ADRs plus `ADR-0000`, the living AI-decision register whose
-`A<n>` amendments record autonomous decisions (pending until promoted, but
-binding on new work unless explicitly contradicted by a human ruling). A spec
+missing directory as absent and continue with the other. `docs/adr/` is
+READ-ONLY LEGACY: it holds the ratified ADRs plus `ADR-0000`, whose `A<n>`
+amendments were converted with `status: accepted` and bind as accepted.
+`docs/decisions/` is where decisions are RECORDED now, and an entry BINDS ON
+WRITE. A spec
 that touches a surface those decisions govern must cite the relevant decision
 and either implement it, extend it, or explicitly propose overriding it. A spec
 that silently contradicts a recorded decision is the most expensive failure
@@ -28,8 +29,8 @@ keywords from the bead's title + touched surfaces, then run, from the worktree
 root:
 
 ```sh
-for register in docs/adr docs/decisions; do [ ! -d "$register" ] || find "$register" -type f -name '*.md' -print; done
-for register in docs/adr docs/decisions; do [ ! -d "$register" ] || find "$register" -type f -name '*.md' -exec grep -li "<keyword1>\|<keyword2>\|<keyword3>" {} +; done
+for register in docs/adr docs/decisions; do [ ! -d "$register" ] || find "$register" -type f -not -path '*/views/*' -name '*.md' -print; done
+for register in docs/adr docs/decisions; do [ ! -d "$register" ] || find "$register" -type f -not -path '*/views/*' -name '*.md' -exec grep -li "<keyword1>\|<keyword2>\|<keyword3>" {} +; done
 ```
 
 Read every hit — including ADR-0000's amendments, which often carry the
@@ -65,11 +66,15 @@ verifiable.
 
 ## Calibration
 
-- ADR-0000's PENDING amendments bind for grading purposes: they are the
-  register's whole point (an autonomous decision awaiting promotion is still
-  the recorded state of the world). A spec free to contradict one must SAY it
-  proposes overriding a pending amendment — that names the conflict for the
+- Legacy `A<n>` amendments bind for grading purposes exactly as
+  `docs/decisions/` entries do: both are the recorded state of the world, and a
+  recorded entry binds on write. A spec free to contradict one must SAY it
+  proposes overriding a recorded decision — that names the conflict for the
   human instead of hiding it.
+- Decisions are RECORDED at `docs/decisions/`, never appended to
+  `docs/adr/ADR-0000-ai-decision-register.md` — that file is READ-ONLY legacy.
+  A spec whose plan appends an `A<n>` amendment is writing to the wrong home:
+  grade it and name `docs/decisions/` plus the vended `decide` skill.
 - Do not demand citations for decisions that genuinely do not touch the spec's
   surfaces — a padded ADR section citing everything is noise, not alignment.
   The A-grade signal is the LOAD-BEARING citation, quoted.

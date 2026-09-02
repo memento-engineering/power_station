@@ -308,6 +308,8 @@ void main() {
         expect(rendered, contains(directory));
       }
       expect(rendered, contains('ADR-0000'));
+      expect(rendered, contains(kDecisionWriteRule));
+      expect(rendered, isNot(contains('living AI-decision register')));
       expect(rendered, contains('the_grid#admission-authority-boundary'));
       expect(rendered, contains('No ADR applies — verified via grep on'));
     });

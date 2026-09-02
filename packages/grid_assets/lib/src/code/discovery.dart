@@ -46,9 +46,9 @@
 ///  - **intent, not presence.** A finding the bead's own plan/acceptance REMOVES
 ///    (the bead IS the fix) passes — discovery runs pre-specify, so the offending
 ///    text is necessarily still present.
-///  - **ratified-only holds.** A [ViolationKind.decision] gates only on a RATIFIED
-///    standard; a PENDING ADR-0000 amendment is ADVISORY and rides as a FLAG,
-///    never a hold (the 2026-07-14 register foot).
+///  - **a recorded entry holds.** A [ViolationKind.decision] gates only on a
+///    RECORDED decision entry (it binds on write); anything that is not one
+///    rides as a FLAG, never a hold (the 2026-07-14 register foot).
 ///  - **a pattern needs a precedent.** A [ViolationKind.pattern] deviation gates
 ///    only when the lens NAMES the precedent it deviates from; otherwise it is a
 ///    FLAG in the ask, never a hold.
@@ -173,9 +173,10 @@ String discoveryRegatherLedgerPath(String workspaceDir) =>
 /// What KIND of standard a violation cites. Sealed by the enum — consumed with an
 /// exhaustive `switch` (house style), so a new kind cannot skip the gate matrix.
 enum ViolationKind {
-  /// A ratified ADR, or an ADR-0000 `A<n>` amendment whose Status is Ratified. A
-  /// PENDING amendment is ADVISORY — it can never HOLD (2026-07-14 register foot);
-  /// it rides as a flag for `adr-alignment`.
+  /// A RECORDED decision entry — a `docs/decisions/` slug entry, or a legacy
+  /// ADR-0000 `A<n>` amendment (converted with `status: accepted`). It binds on
+  /// write. Anything that is not a recorded entry is ADVISORY: it can never
+  /// HOLD (2026-07-14 register foot); it rides as a flag for `adr-alignment`.
   decision,
 
   /// An applicable SKILL's instructions (skills TEACH how; ADRs RATIFY the
@@ -243,11 +244,13 @@ class DiscoveryFinding {
   /// Y"). A declared departure PASSES.
   final bool acknowledged;
 
-  /// Whether the cited standard is RATIFIED — a ratified ADR, or an ADR-0000
-  /// amendment whose Status is Ratified. For [ViolationKind.decision] ONLY: a
-  /// PENDING amendment (`false`) is ADVISORY and can never HOLD (the 2026-07-14
-  /// register-foot ratification). Default `false` — fail-open on holds (A17(3): a
-  /// false HOLD is strictly worse than a wasted round).
+  /// Whether the cited standard is a RECORDED decision entry — a
+  /// `docs/decisions/` slug entry, or a legacy ADR-0000 `A<n>` amendment
+  /// (converted with `status: accepted`). For [ViolationKind.decision] ONLY:
+  /// anything that is not a recorded entry (`false`) is ADVISORY and can never
+  /// HOLD (the 2026-07-14 register-foot ratification). Default `false` —
+  /// fail-open on holds (A17(3): a false HOLD is strictly worse than a wasted
+  /// round).
   final bool ratified;
 
   /// Whether the bead's OWN plan/acceptance REMOVES this cited offence — the bead
@@ -734,16 +737,22 @@ class DiscoveryDossier {
 ///     offence IS the fix — it passes. (The CLASS-1 false-positive: a
 ///     fix-the-violation bead necessarily HAS the offending text present at
 ///     discovery time, since discovery runs pre-specify.)
-///  4. RATIFIED-ONLY HOLDS. A `decision` gates only when the cited standard is
-///     RATIFIED (a ratified ADR, or an ADR-0000 amendment whose Status is
-///     Ratified). A PENDING amendment is ADVISORY — it rides as a FLAG, never a
-///     hold (the CLASS-2 false-positive). A `skill` always gates when cited; a
-///     `pattern` needs a named precedent.
+///  4. A RECORDED ENTRY HOLDS. A `decision` gates only when the cited standard
+///     is a RECORDED decision entry — a `docs/decisions/` slug entry, or a
+///     legacy ADR-0000 `A<n>` amendment (converted with `status: accepted`) —
+///     which binds on write. Anything that is not a recorded entry is ADVISORY:
+///     it rides as a FLAG, never a hold (the CLASS-2 false-positive). A `skill`
+///     always gates when cited; a `pattern` needs a named precedent.
 ///
 /// Ratified basis: the 2026-07-14 register-foot ratification ("DISCOVERY GATE:
 /// pending amendments are ADVISORY, not binding") supersedes A21(2)'s "pending
 /// `A<n>` amendments … they bind" clause, and adds the intent grade per A21's own
-/// principle "only an unwitting contradiction gates".
+/// principle "only an unwitting contradiction gates". Bead `pow-712z` NARROWS
+/// what that ruling can discriminate rather than reversing it: after the
+/// option-C legacy migration (`decisions#legacy-register-migration`) every
+/// converted amendment carries `status: accepted`, so the ADVISORY tier holds no
+/// decision entries at all. The predicate below is UNCHANGED — only its
+/// population is.
 bool gatesTheBead(DiscoveryFinding finding) {
   if (finding.standard.trim().isEmpty) return false;
   if (!finding.contradicts) return false;
@@ -1618,17 +1627,21 @@ class DiscoveryLensCapability extends ProcessCapability {
         'instructions. Skills TEACH how; decisions RATIFY the specific.',
       )
       ..writeln(
-        '- **RATIFIED-ONLY HOLDS.** A PENDING ADR-0000 amendment (Status: '
-        'pending) is ADVISORY, NOT binding: cite it if the bead contradicts it, '
-        'but set `"ratified": false` — it rides to the architect as a flag for '
-        'the `adr-alignment` lane and NEVER holds the bead. Set `"ratified": '
-        'true` ONLY for a ratified ADR or an amendment whose Status is Ratified. '
-        '(A `skill` or `pattern` citation ignores this field.)',
+        '- **A DECISION ENTRY BINDS.** A recorded entry is in force the moment '
+        'it is written — a `docs/decisions/` slug entry, or a legacy `A<n>` '
+        'amendment (converted with `status: accepted`). There is no advisory '
+        'tier and no serial to wait on: cite one and set `"ratified": true`. '
+        '**A BEAD IS NOT A DECISION** — a plan, a proposal, another bead\'s '
+        'design field, or your own reading of the tree is not a recorded '
+        'entry: set `"ratified": false` and it rides to the architect as a '
+        'flag for the `adr-alignment` lane, NEVER as a hold. (A `skill` or '
+        '`pattern` citation ignores this field.)',
       )
       ..writeln(
         '- You MUST cite the STANDARD and the CLAUSE, and the clause MUST EXIST: '
-        'quote it VERBATIM from the file you actually read, INCLUDING its Status '
-        'line so ratified-vs-pending is grounded, not guessed. A citation you '
+        'quote it VERBATIM from the file you actually read, INCLUDING its '
+        '`status` line so the entry\'s force is grounded, not guessed. A '
+        'citation you '
         'cannot quote is not a citation — the register is edited and amendments '
         'are REMOVED, so an `A<n>` you remember is not an `A<n>` that exists. A '
         'concern you cannot cite is NOT an offence: report it as a violation with '
@@ -1726,10 +1739,11 @@ String lensBrief(String lens) {
           '`docs/decisions/`. A missing directory is absent, not an error. '
           'Report the decisions the architect must honour and CITE any this '
           'bead contradicts. Legacy citations name the file plus ADR or `A<n>` '
-          'clause; `docs/decisions/` citations use `<repo>#<slug>`. Only a '
-          'RATIFIED standard can HOLD the bead: a PENDING amendment is '
-          'ADVISORY (set `"ratified": false` and it rides as a flag). Be '
-          'QUOTED: read the decision and its status before citing it.',
+          'clause; `docs/decisions/` citations use `<repo>#<slug>`. A RECORDED '
+          'decision entry can HOLD the bead — it binds on write, so set '
+          '`"ratified": true`; anything that is NOT a recorded entry (a bead, '
+          'a plan, your own reading) sets `"ratified": false` and rides as a '
+          'flag. Be QUOTED: read the entry and its `status` before citing it.',
     kPriorArtLens =>
       'PRIOR ART. What has already been done, decided, or attempted here? Read '
           'the prior-art hits above, the git history of the surfaces the bead '

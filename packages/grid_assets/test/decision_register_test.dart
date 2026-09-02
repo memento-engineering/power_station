@@ -92,6 +92,40 @@ void main() {
     expect(_run(root, localDecisionRegisterGrepCommand('authority')), isEmpty);
   });
 
+  test('the lens EXCLUDES the rendered views subtree', () {
+    final entry = _writeDecision(
+      root,
+      'docs/decisions/2026-08-30-entry-identity.md',
+      '# Entry identity\n\nviews-fixture-token\n',
+    );
+    _writeDecision(
+      root,
+      'docs/decisions/views/0001-x.md',
+      '# Rendered view\n\nviews-fixture-token\n',
+    );
+
+    expect(_run(root, localDecisionRegisterListCommand()), [entry]);
+    expect(
+      _run(root, localDecisionRegisterGrepCommand('views-fixture-token')),
+      [entry],
+    );
+  });
+
+  test('a CATEGORY subdirectory still surfaces — the predicate is a path '
+      'exclusion, never a depth cap', () {
+    final nested = _writeDecision(
+      root,
+      'docs/decisions/naming/2026-08-30-package-prefixes.md',
+      '# Package prefixes\n\nnested-fixture-token\n',
+    );
+
+    expect(_run(root, localDecisionRegisterListCommand()), [nested]);
+    expect(
+      _run(root, localDecisionRegisterGrepCommand('nested-fixture-token')),
+      [nested],
+    );
+  });
+
   test('slug-form citation round-trips as a gateable decision', () {
     final finding = DiscoveryFinding.fromJson({
       'kind': 'decision',

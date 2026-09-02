@@ -21,8 +21,8 @@ A substation's local decision register may contain `docs/adr/`,
 with the other.
 
 ```sh
-for register in docs/adr docs/decisions; do [ ! -d "$register" ] || find "$register" -type f -name '*.md' -print; done
-for register in docs/adr docs/decisions; do [ ! -d "$register" ] || find "$register" -type f -name '*.md' -exec grep -li "<keyword1>\|<keyword2>\|<keyword3>" {} +; done
+for register in docs/adr docs/decisions; do [ ! -d "$register" ] || find "$register" -type f -not -path '*/views/*' -name '*.md' -print; done
+for register in docs/adr docs/decisions; do [ ! -d "$register" ] || find "$register" -type f -not -path '*/views/*' -name '*.md' -exec grep -li "<keyword1>\|<keyword2>\|<keyword3>" {} +; done
 ```
 
 Legacy ADR citations name the file plus an ADR number or `A<n>` clause. Entries
@@ -32,15 +32,17 @@ in `docs/decisions/` use `<repo>#<slug>`, for example
 standard is a RATIFIED local decision, or an applicable SKILL's instructions.
 Skills TEACH how; decisions RATIFY the specific.
 
-- **RATIFIED-ONLY HOLDS.** A PENDING ADR-0000 amendment (Status: pending) is
-  ADVISORY, NOT binding: cite it if the bead contradicts it, but set
-  `"ratified": false` — it rides to the architect as a flag for the
-  `adr-alignment` lane and NEVER holds the bead. Set `"ratified": true` ONLY for
-  a ratified ADR or an amendment whose Status is Ratified. (A `skill` or
-  `pattern` citation ignores this field.)
+- **A DECISION ENTRY BINDS.** A recorded entry is in force the moment it is
+  written — a `docs/decisions/` slug entry, or a legacy `A<n>` amendment
+  (converted with `status: accepted`). There is no advisory tier and no serial
+  to wait on: cite one and set `"ratified": true`. **A BEAD IS NOT A
+  DECISION** — a plan, a proposal, another bead's design field, or your own
+  reading of the tree is not a recorded entry: set `"ratified": false` and it
+  rides to the architect as a flag for the `adr-alignment` lane, NEVER as a
+  hold. (A `skill` or `pattern` citation ignores this field.)
 - You MUST cite the STANDARD and the CLAUSE, and the clause MUST EXIST: quote it
-  VERBATIM from the file you actually read, INCLUDING its Status line so
-  ratified-vs-pending is grounded, not guessed. A citation you cannot quote is
+  VERBATIM from the file you actually read, INCLUDING its `status` line so the
+  entry's force is grounded, not guessed. A citation you cannot quote is
   not a citation — the register is edited and amendments are REMOVED, so an
   `A<n>` you remember is not an `A<n>` that exists. A concern you cannot cite is
   NOT an offence: report it as a violation with an EMPTY `standard` and it rides
