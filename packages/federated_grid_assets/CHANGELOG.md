@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.0-rc.2
+
+- Breaking: none new in this candidate — it continues the 0.3.0 line so that
+  main and pub.dev agree.
+- The federation bus serves multiple lease kinds (#100); model environments
+  route through typed seats (pow-n6n.2, #168).
 ## 0.3.0-rc.1
 
 - Breaking: adopts `grid_engine ^0.3.0-rc.1` from the_grid's prerelease wave.

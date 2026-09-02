@@ -1,3 +1,12 @@
+## 0.1.0-rc.7
+
+- Breaking: the reconciler tolerates pull rows and flare polling failures
+  (pow-2s1, #143) — the polling loop no longer throws on a failed poll.
+- Closed intake rows are filtered from reconciliation (#144).
+- Model environments route through typed seats (pow-n6n.2, #168).
+- Requires `grid_cli ^0.5.0-rc.10` (the rc.8/rc.9 cap is lifted now that the
+  hosted chain resolves) and `grid_assets ^0.6.0-rc.7`.
+
 ## 0.1.0-rc.6
 
 - `GitHubReconcilerBindingAssets`: provides each live seat a durable `GitHubCursorStore` and SELF-only deferred-intake `GitHubEventSink`, completing the ambient seams required by `GitHubReconcilerAssets` to construct its polling runtime (#139).
