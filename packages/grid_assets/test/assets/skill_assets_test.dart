@@ -487,6 +487,103 @@ void main() {
     });
   });
 
+  group('the intake-refinement refiner corpus (bead `pow-glza`)', () {
+    final template = loader.loadSkillTemplate('intake-refinement');
+    final rendered = loader.renderSkill(
+      'intake-refinement',
+      args: {'runner': 'space'},
+    );
+
+    test('the exit oracle is the filing verb — the skill CALLS the command '
+        'and owns no completeness predicate of its own', () {
+      expect(template, contains('{{runner}} filing --json "<bead>"'));
+      expect(rendered, contains('space filing --json "<bead>"'));
+      expect(
+        template,
+        contains(
+          '## The exit check — `filing` is the oracle, and it is a COMMAND',
+        ),
+      );
+      // The report contract the skill consumes, row for row.
+      expect(template, contains('{id, passed, requirements, error?}'));
+      for (final row in const [
+        'driveable_type',
+        'validation_plan',
+        'acceptance_criteria',
+        'dependencies',
+      ]) {
+        expect(template, contains(row), reason: 'the corpus names $row');
+      }
+      expect(template, contains('"passed": false'));
+      expect(template, contains('"passed": true'));
+      expect(template, contains('missing outgoing blocks edges'));
+      expect(template, contains('is a REFUSAL, not a pass'));
+      // The reinvention this bead was CURED of (governor, 2026-09-02): the
+      // engine-side mount gate and a refiner-local predicate are BOTH absent.
+      expect(template, isNot(contains('mountEligibilityFindings')));
+      expect(template, isNot(contains('refinerExitFindings')));
+    });
+
+    test('the corpus carries every refiner rule, each with the round it '
+        'burned', () {
+      const sections = <String>[
+        '## Search prior art BEFORE accepting a filing',
+        '## Scope the validation_plan to every consumer',
+        '## Wire every dependency at intake',
+        '## FLAG an EITHER/OR fork — never decide it',
+        '## Stamp architecture constraints into the CHILD bead',
+        '## Repo-relative paths in every declared test list',
+        '## Point at the primitive that already exists',
+        '## Staleness reconciliation — run BEFORE arming any store',
+      ];
+      for (final section in sections) {
+        expect(template, contains(section), reason: '$section is authored');
+      }
+      expect(
+        RegExp(r'\*\*Why:\*\*').allMatches(template).length,
+        greaterThanOrEqualTo(7),
+        reason: 'every new rule states the round it burned',
+      );
+      // The load-bearing mechanics of each rule.
+      expect(rendered, contains('space search --json "<token>"'));
+      expect(template, contains('single tokens'));
+      expect(template, contains('bd -C <store root> dep add <blocked bead>'));
+      expect(rendered, contains('space link <blocked bead> --blocked-by'));
+      expect(template, contains('grid.link.type=blocks'));
+      expect(template, contains('FORK (author decides)'));
+      expect(template, contains('An agent reads ONE bead: its own.'));
+      expect(
+        template,
+        contains('packages/grid_assets/test/assets/skill_assets_test.dart'),
+      );
+      expect(template, contains('CLOSE IT AS STALE WITH RECEIPTS'));
+      expect(template, contains('<receipts: file paths, commit ids>'));
+    });
+
+    test('the compose-do-not-reinvent pointer RESOLVES in the live tree — a '
+        'stale file:line teaches the duplication it exists to prevent', () {
+      final match = RegExp(
+        r'COMPOSE: (packages/\S+\.dart):(\d+)',
+      ).firstMatch(template);
+      expect(match, isNotNull, reason: 'the corpus carries the pointer');
+      final repoRoot = p.normalize(p.join(_extensionDir(), '..', '..', '..'));
+      final target = File(p.join(repoRoot, match!.group(1)!));
+      expect(
+        target.existsSync(),
+        isTrue,
+        reason: '${match.group(1)} exists at the repo root',
+      );
+      final lines = target.readAsLinesSync();
+      final at = int.parse(match.group(2)!);
+      expect(lines.length, greaterThanOrEqualTo(at));
+      expect(
+        lines[at - 1],
+        contains('class FilingContract'),
+        reason: 'the cited line declares the primitive the corpus names',
+      );
+    });
+  });
+
   group('the vended overlay is ROOT-RELATIVE and COMPLETE', () {
     final overlay = p.join(root, 'station_overlay');
 

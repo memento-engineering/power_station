@@ -533,5 +533,42 @@ void main() {
         }
       },
     );
+
+    test(
+      'assets install materializes the intake-refinement refiner corpus onto '
+      'a target root — the filing exit check renders with the station verb',
+      () async {
+        final report = await const OverlayInstallService().install(
+          overlayRoots: [p.join(_extensionDir(), 'station_overlay')],
+          targetRoot: temp.path,
+          sourceRef: 'testref',
+          args: {'runner': 'space', 'gridHome': '/grid/home'},
+        );
+
+        expect(report.refused, isEmpty);
+        expect(report.blocked, isEmpty);
+        final installed = File(
+          p.join(
+            temp.path,
+            '.claude',
+            'skills',
+            'intake-refinement',
+            'SKILL.md',
+          ),
+        );
+        expect(
+          installed.existsSync(),
+          isTrue,
+          reason: 'the refiner corpus lands on the operator root',
+        );
+        final body = installed.readAsStringSync();
+        expect(hasProvenance(body), isTrue);
+        expect(body, isNot(contains('{{')));
+        expect(body, contains('space filing --json "<bead>"'));
+        expect(body, contains('space search --json "<token>"'));
+        expect(body, contains('space link <blocked bead> --blocked-by'));
+        expect(body, isNot(contains('mountEligibilityFindings')));
+      },
+    );
   });
 }
