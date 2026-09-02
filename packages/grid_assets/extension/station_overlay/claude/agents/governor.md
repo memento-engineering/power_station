@@ -39,10 +39,17 @@ this document that contradicts them:
   of those P1 — invisible rather than pending. Two cost real money that week: a
   store-hygiene bead parked while the store tripled to 18GB, and a fully
   delivered epic nobody closed. File work OPEN with the fields that make it
-  driveable, or say plainly why it is not ready. One narrow exception survives:
-  `--defer` as the ATOMIC create-then-wire guard against a live station's mount
-  race (`intake-refinement`) — and there you open the bead in the SAME turn,
-  once deps are wired. It is never left sitting on a date.
+  driveable, or say plainly why it is not ready. The one narrow exception — the
+  ATOMIC create-then-wire guard in `intake-refinement` — is RETIRED: ADR-0004 D1
+  retires it once the predicate is mounted and both skills change together,
+  which `pow-158` and `pow-kps` did. What closes the mount race now is approval
+  itself. A bead is created WITHOUT `grid.approved`, deps are wired, and the
+  human's approval runs the approve verb
+  (`{{runner}} approve --actor <name> <bead-id>`), which stamps
+  `grid.approved_by`, `grid.approved_at` and `grid.approved_rev` beside the
+  label in one write. A hand-added, unstamped label is refused at mount with
+  `approval: unstamped label - approve with the approve verb`. No bead is ever
+  left sitting on a date.
 - **A ready P0/P1 never waits on you asking.** If the board has no live work
   and a driveable P0/P1 is ready, DRIVE IT. Approval ceremony must never be the
   reason a station sits idle.

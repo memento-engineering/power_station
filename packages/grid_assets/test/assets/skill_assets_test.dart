@@ -198,23 +198,50 @@ void main() {
       },
     );
 
-    test('filing and intake stage with grid.approved instead of defer', () {
+    test('filing and intake approve with the approve verb, never a '
+        'hand-added label', () {
+      const stampKeys = <String>[
+        'grid.approved_by',
+        'grid.approved_at',
+        'grid.approved_rev',
+      ];
+      const refusal =
+          'approval: unstamped label - approve with the approve verb';
+
       final filing = filingSection();
       expect(rendered, isNot(contains('--defer')));
       expect(filing, contains('**Unapproved, never mounted:**'));
       expect(filing, contains('`grid.approved` label'));
-      expect(filing, contains('--add-label grid.approved --actor governor'));
-      expect(filing, contains('The approval marker is the staging transition'));
+      expect(filing, contains('space approve --actor governor --json "<id>"'));
+      for (final key in stampKeys) {
+        expect(filing, contains(key), reason: 'discover names $key');
+      }
+      expect(filing, contains(refusal));
+      expect(
+        filing,
+        contains('staging transition; do not run it before the human approves'),
+      );
+      expect(filing, isNot(contains('--add-label')));
 
       final intake = loader.loadSkillTemplate('intake-refinement');
       expect(intake, isNot(contains('--defer')));
-      expect(intake, contains('grid.approved marker staging'));
+      expect(intake, contains('grid.approved approval via the approve verb'));
       expect(
         intake,
-        contains('## Staging: mark approved only after refinement'),
+        contains(
+          '## Staging: approve with the approve verb, only after refinement',
+        ),
       );
-      expect(intake, contains('--add-label grid.approved --actor operator'));
+      expect(
+        intake,
+        contains('{{runner}} approve --actor operator --json "<bead>"'),
+      );
+      for (final key in stampKeys) {
+        expect(intake, contains(key), reason: 'intake names $key');
+      }
+      expect(intake, contains(refusal));
       expect(intake, contains('mounted predicate refuses'));
+      expect(intake, isNot(contains('--add-label')));
     });
 
     test('cross-store guidance preserves unmigrated binding authority', () {
@@ -305,7 +332,7 @@ void main() {
       'station-operations': {'runner'},
       'gate-medicine': {'runner'},
       'harvest-review': {'runner'},
-      'intake-refinement': <String>{},
+      'intake-refinement': {'runner'},
       'release': {'runner'},
     };
 
@@ -510,6 +537,37 @@ void main() {
         reason: 'stampable: a JSON object',
       );
       expect(settings.readAsStringSync(), contains('bd prime --hook-json'));
+    });
+
+    test('no station_overlay file — skill OR governor agent-def — still '
+        'teaches the hand-added label or the retired defer guard', () {
+      final offenders = <String>[];
+      for (final entity in Directory(overlay).listSync(recursive: true)) {
+        if (entity is! File) continue;
+        final body = entity.readAsStringSync();
+        if (body.contains('--add-label ${'grid'}.approved') ||
+            body.contains('--defer')) {
+          offenders.add(p.relative(entity.path, from: overlay));
+        }
+      }
+      expect(
+        offenders,
+        isEmpty,
+        reason: 'approval is the approve verb; the label alone never mounts',
+      );
+
+      final governor = File(
+        p.join(overlay, 'claude', 'agents', 'governor.md'),
+      ).readAsStringSync();
+      expect(
+        governor,
+        contains('{{runner}} approve --actor <name> <bead-id>'),
+        reason: 'the governor names the verb that replaced the guard',
+      );
+      expect(
+        governor,
+        contains('approval: unstamped label - approve with the approve verb'),
+      );
     });
 
     test('EVERY vended file can carry a provenance stamp — an unstampable one '

@@ -2,11 +2,11 @@
 name: intake-refinement
 description: >
   Shape work beads so a resident the_grid station can drive them: the required
-  validation_plan metadata, driveable issue types, dependency wiring,
-  grid.approved marker staging, and reconciling a backlog against what already
-  shipped in mainline. Use when filing, approving, re-homing, or auditing beads
-  in any store the station arms — including "why won't this bead mount" and
-  "is this backlog actually current" questions.
+  validation_plan metadata, driveable issue types, dependency wiring, stamped
+  grid.approved approval via the approve verb, and reconciling a backlog
+  against what already shipped in mainline. Use when filing, approving,
+  re-homing, or auditing beads in any store the station arms — including "why
+  won't this bead mount" and "is this backlog actually current" questions.
 compatibility: Requires bd (beads CLI) and git.
 metadata:
   author: memento-engineering
@@ -41,20 +41,27 @@ Every bead intended for the station needs:
 4. **A description an agent can act on alone** — the agent receives the bead
    text and a worktree, nothing else. Name packages and acceptance shape.
 
-## Staging: mark approved only after refinement
+## Staging: approve with the approve verb, only after refinement
 
-Drafts are created open without `grid.approved`; the human's approval adds the
-label. Against a LIVE station, the mounted predicate refuses any bead missing
-the label, so the mount race is closed without a timer:
+Drafts are created open without `grid.approved`; the human's approval is the
+approve verb, which runs the filing preflight and then writes the label AND its
+stamp in one `bd update`. Against a LIVE station, the mounted predicate refuses
+any bead missing the label, and refuses a hand-added, unstamped one with
+`approval: unstamped label - approve with the approve verb`, so the mount race
+is closed without a timer:
 
 - Create without `grid.approved`, wire deps, and finish the description and
-  design. Only after human approval run:
+  design. Only after human approval, from the owning store root, run:
 
   ```
-  bd update <bead> --add-label grid.approved --actor operator
+  {{runner}} approve --actor operator --json "<bead>"
   ```
 
-  The label is the final transition into the mounted frontier.
+  The verb stamps `grid.approved_by` (the `--actor`), `grid.approved_at` (the
+  UTC ISO-8601 instant) and `grid.approved_rev` (the store root's git HEAD sha)
+  beside the label; that one stamped write is the final transition into the
+  mounted frontier. A refusal writes nothing — fix the reported `reason` and
+  rerun the verb.
 - Removing `grid.approved` from a bead that is ALREADY mounted does not evict it
   — mounted work is never evicted for budget or readiness reasons; only a
   positive terminal (bead closed / session terminal) unmounts.

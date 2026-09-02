@@ -192,10 +192,14 @@ skills:
     description: >
       Shape work beads so a resident station can drive them — the required
       validation_plan metadata, driveable issue types, dependency wiring, and
-      defer-until-approved staging.
+      stamped grid.approved approval via the approve verb.
     path: station_overlay/claude/skills/intake-refinement/SKILL.md
     visibility: public
     audience: operator
+    args:
+      - name: runner
+        description: The composing station's executable name (e.g. `space`) — the verb its boot/status/down calls ride.
+        required: true
   - id: harvest-review
     description: >
       Review and land what a station built — verify each terminal session's
