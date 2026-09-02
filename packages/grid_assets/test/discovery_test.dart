@@ -202,8 +202,9 @@ void main() {
     );
 
     test(
-      'RATIFIED-ONLY: a cited contradiction of a PENDING amendment does NOT hold '
-      '— it rides as a FLAG (the CLASS-2 false-positive fix)',
+      'A RECORDED ENTRY HOLDS: a cited contradiction of something that is NOT a '
+      'recorded decision entry does NOT hold — it rides as a FLAG (the CLASS-2 '
+      'false-positive fix)',
       () {
         final verdict = _decide({
           kDecisionLens: _report(violations: [_cited(ratified: false)]),
@@ -598,8 +599,8 @@ void main() {
     });
 
     test(
-      'the lens prompt teaches RATIFIED-ONLY and INTENT-NOT-PRESENCE, and its '
-      'JSON shape carries the two new fields',
+      'the lens prompt teaches that a decision entry binds and a bead is not a '
+      'decision, plus INTENT-NOT-PRESENCE and both JSON fields',
       () {
         final prompt = const DiscoveryLensCapability().buildLensPrompt(
           bead: workBead('tg-1'),
@@ -607,7 +608,8 @@ void main() {
           nodePath: 'tg-1/spec_review/discovery/$kDecisionLens',
           workspaceDir: '/w/tg-1',
         );
-        expect(prompt, contains('RATIFIED-ONLY HOLDS'));
+        expect(prompt, contains('A DECISION ENTRY BINDS'));
+        expect(prompt, contains('A BEAD IS NOT A DECISION'));
         expect(prompt, contains('INTENT, NOT PRESENCE'));
         expect(prompt, contains('"ratified":false'));
         expect(prompt, contains('"removesOffence":false'));

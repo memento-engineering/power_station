@@ -983,6 +983,11 @@ Validate again with ruby -e 's.include?("${ticks}dart")'.
         expect(prompt, contains(directory));
       }
       expect(prompt, contains('the_grid#admission-authority-boundary'));
+      expect(prompt, contains(kDecisionWriteRule));
+      expect(
+        prompt,
+        contains('appends an `A<n>` amendment to ADR-0000 has DEPARTED'),
+      );
       // The spec IS the bead's acceptance + design — both render.
       expect(prompt, contains('- [ ] A peer heartbeat surfaces within 1s'));
       expect(prompt, contains('## Implementation Plan'));

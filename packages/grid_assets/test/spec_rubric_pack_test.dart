@@ -46,6 +46,12 @@ String _extensionDir() {
   );
 }
 
+/// This package's `lib/` — the sibling of [_extensionDir]'s result. The
+/// positive-control fence greps BOTH source trees: the brief that teaches the
+/// write rule is Dart, its portable mirrors are Markdown.
+Directory _libDir() =>
+    Directory(p.join(Directory(_extensionDir()).parent.path, 'lib'));
+
 /// The residue fence: tokens from the pack's DEPRECATED source context that
 /// must NOT survive the content rewrite. Each pattern names its concern.
 final Map<String, RegExp> _forbiddenResidue = {
@@ -379,5 +385,102 @@ void main() {
         expect(prompt, contains(token));
       }
     }
+  });
+
+  group('the register WRITE rule replaced the legacy-register vocabulary', () {
+    /// Every Markdown asset under `extension/` plus every Dart source under
+    /// `lib/` — the two trees the positive control covers.
+    List<File> sourceFiles() => [
+      ...Directory(_extensionDir())
+          .listSync(recursive: true)
+          .whereType<File>()
+          .where((file) => file.path.endsWith('.md')),
+      ..._libDir()
+          .listSync(recursive: true)
+          .whereType<File>()
+          .where((file) => file.path.endsWith('.dart')),
+    ];
+
+    test('POSITIVE CONTROL: the legacy-register strings are GONE from lib/ '
+        'and extension/', () {
+      final dead = <String, RegExp>{
+        'the living-register framing': RegExp(
+          'living AI-decision register',
+          caseSensitive: false,
+        ),
+        'the pending amendment status': RegExp(
+          r'status:\s*pending',
+          caseSensitive: false,
+        ),
+      };
+      final files = sourceFiles();
+      expect(files, isNotEmpty, reason: 'the fence must scan something');
+      for (final file in files) {
+        final text = file.readAsStringSync();
+        for (final entry in dead.entries) {
+          expect(
+            entry.value.hasMatch(text),
+            isFalse,
+            reason: '${file.path} still carries ${entry.key}',
+          );
+        }
+      }
+    });
+
+    test('no RENDERED register instruction carries the `pending` tier', () {
+      final rendered = <String, String>{
+        'rubrics/adr-alignment.md': loader.loadRubric('adr-alignment'),
+        'rubrics/bead-readiness.md': loader.loadRubric(kReadinessRubric),
+        'prompts/spec-critic.md': loader.loadPromptTemplate('spec-critic'),
+        'prompts/readiness.md': loader.loadPromptTemplate('readiness'),
+        'prompts/discovery.md': loader.loadPromptTemplate('discovery'),
+        'discovery.dart:buildLensPrompt': const DiscoveryLensCapability()
+            .buildLensPrompt(
+              bead: bead('tg-1'),
+              lens: kDecisionLens,
+              nodePath: 'tg-1/spec_review/discovery/$kDecisionLens',
+              workspaceDir: '/w/tg-1',
+            ),
+        'discovery.dart:lensBrief': lensBrief(kDecisionLens),
+      };
+      final tier = RegExp(r'\bpending\b', caseSensitive: false);
+      for (final entry in rendered.entries) {
+        expect(
+          tier.hasMatch(entry.value),
+          isFalse,
+          reason: '${entry.key} still teaches the `pending` tier',
+        );
+      }
+    });
+
+    test('the write rule NAMES its four load-bearing tokens', () {
+      for (final token in [
+        'docs/decisions/',
+        '.claude/skills/decide/SKILL.md',
+        'BINDS ON WRITE',
+        'READ-ONLY LEGACY',
+      ]) {
+        expect(kDecisionWriteRule, contains(token));
+      }
+    });
+
+    test('every searching asset mirrors the lens command VERBATIM', () {
+      const grepPattern = r'<keyword1>\|<keyword2>\|<keyword3>';
+      final listing = localDecisionRegisterListCommand();
+      final grepping = localDecisionRegisterGrepCommand(grepPattern);
+
+      expect(listing, contains("-not -path '*/views/*'"));
+      expect(grepping, contains("-not -path '*/views/*'"));
+
+      for (final text in [
+        loader.loadRubric('adr-alignment'),
+        loader.loadPromptTemplate('spec-critic'),
+        loader.loadPromptTemplate('discovery'),
+      ]) {
+        expect(text, contains(listing));
+        expect(text, contains(grepping));
+      }
+      expect(loader.loadPromptTemplate('readiness'), contains(listing));
+    });
   });
 }

@@ -20,7 +20,7 @@ names. It searches `docs/adr/` and `docs/decisions/`; treat a missing directory
 as absent and continue with the other.
 
 ```sh
-for register in docs/adr docs/decisions; do [ ! -d "$register" ] || find "$register" -type f -name '*.md' -print; done
+for register in docs/adr docs/decisions; do [ ! -d "$register" ] || find "$register" -type f -not -path '*/views/*' -name '*.md' -print; done
 ```
 
 Do not design the change and do not write a plan — that is the architect's job
