@@ -43,13 +43,14 @@ this document that contradicts them:
   ATOMIC create-then-wire guard in `intake-refinement` — is RETIRED: ADR-0004 D1
   retires it once the predicate is mounted and both skills change together,
   which `pow-158` and `pow-kps` did. What closes the mount race now is approval
-  itself. A bead is created WITHOUT `grid.approved`, deps are wired, and the
-  human's approval runs the approve verb
-  (`{{runner}} approve --actor <name> <bead-id>`), which stamps
-  `grid.approved_by`, `grid.approved_at` and `grid.approved_rev` beside the
-  label in one write. A hand-added, unstamped label is refused at mount with
-  `approval: unstamped label - approve with the approve verb`. No bead is ever
-  left sitting on a date.
+  itself. A bead is created UNSTAMPED, deps are wired, and the human's approval
+  runs the approve verb (`{{runner}} approve --actor <name> <bead-id>`), which
+  writes `grid.approved_by`, `grid.approved_at` and `grid.approved_rev` in one
+  update. THE STAMP IS THE APPROVAL: the `grid.approved` label is retired and
+  the mount gate never reads it, so adding it by hand does nothing — an
+  unstamped bead is refused with
+  `approval: not approved - run the approve verb`. No bead is ever left sitting
+  on a date.
 - **A ready P0/P1 never waits on you asking.** If the board has no live work
   and a driveable P0/P1 is ready, DRIVE IT. Approval ceremony must never be the
   reason a station sits idle.
