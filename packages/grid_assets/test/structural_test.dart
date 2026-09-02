@@ -99,4 +99,54 @@ void main() {
       expect(allSource, contains('grid.approved'));
     });
   });
+
+  group(
+    'bead `pow-hxme` cites its OWN amendment (A37), never the stale A35',
+    () {
+      final libDir = _libDir();
+
+      /// The three `lib` files carrying the verdict-owner mechanism.
+      const ownerSources = <String>[
+        'src/code/committee.dart',
+        'src/code/respec.dart',
+        'src/code/specify.dart',
+      ];
+
+      test('every owner-mechanism file names the bead and cites A37', () {
+        for (final relative in ownerSources) {
+          final text = File(p.join(libDir.path, relative)).readAsStringSync();
+          expect(text, contains('pow-hxme'), reason: relative);
+          expect(
+            text,
+            contains('A37'),
+            reason: '$relative must cite pow-hxme\'s amendment by number',
+          );
+          expect(
+            text,
+            isNot(contains('A35')),
+            reason:
+                '$relative miscites A35 — that number is pow-n6n.1\'s '
+                'typed-environment amendment, not pow-hxme\'s',
+          );
+        }
+      });
+
+      test('A37 is exactly one register entry, and it names pow-hxme', () {
+        final register = File(
+          p.join(
+            libDir.parent.parent.parent.path,
+            'docs',
+            'adr',
+            'ADR-0000-ai-decision-register.md',
+          ),
+        ).readAsStringSync();
+        final headings = RegExp(
+          r'^## A37 .*$',
+          multiLine: true,
+        ).allMatches(register).map((match) => match.group(0)!).toList();
+        expect(headings, hasLength(1));
+        expect(headings.single, contains('pow-hxme'));
+      });
+    },
+  );
 }
