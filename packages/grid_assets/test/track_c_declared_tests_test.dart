@@ -434,4 +434,74 @@ Modify the authored regression test at
     expect(outcome.payload?['grade'], 'A');
     expect(runner.calls, isEmpty);
   });
+
+  test('pow-aoa a prose mention of a base file is not a declaration', () async {
+    final path = _fixtureTestPath('widget/transcript_wiring');
+    final basePath = 'packages/panel/$path';
+    final design =
+        '''
+## Touches
+- `lib/prompt_panel.dart` — modified.
+
+Re-validated against the live tree: the two other tests that tap `prompt.start`
+(`$path`) both have a non-null `_modelId`, so step 2 does not break them.
+''';
+    expect(declaredTestFiles(design), {path});
+    expect(declaredTestFiles(design, baseFiles: {basePath}), isEmpty);
+    final runner = _BaseTreeGitRunner([basePath]);
+    final outcome = await _runGate(
+      design: design,
+      diff: _diffFor(['packages/panel/lib/prompt_panel.dart']),
+      runner: runner,
+    );
+    expect(outcome.payload?['grade'], 'A');
+    expect(runner.calls.single, [
+      'ls-tree',
+      '-r',
+      '--name-only',
+      'origin/main',
+    ]);
+  });
+
+  test('pow-aoa a prose mention absent at the base still blocks', () async {
+    final path = _fixtureTestPath('widget/new_transcript_wiring');
+    const baseLib = 'packages/panel/lib/prompt_panel.dart';
+    final design =
+        '''
+## Touches
+- `lib/prompt_panel.dart` — modified.
+
+Re-validated against the live tree: the fallback-link coverage lives in
+(`$path`), which step 2 keeps green.
+''';
+    expect(declaredTestFiles(design, baseFiles: const {baseLib}), {path});
+    final outcome = await _runGate(
+      design: design,
+      diff: _diffFor([baseLib]),
+      existingFiles: const [baseLib],
+    );
+    expect(outcome.payload, {
+      'grade': 'F',
+      'transport': 'structural',
+      'rationale': 'Design-declared test files missing from pinned diff: $path',
+    });
+  });
+
+  test('pow-aoa an authored marker on a base file still declares', () async {
+    final path = _fixtureTestPath('authored_over_base');
+    final basePath = 'packages/panel/$path';
+    final design = 'Modify `$path` with the regression case.';
+    expect(testDeclarations(design).authored, {path});
+    expect(declaredTestFiles(design, baseFiles: {basePath}), {path});
+    final outcome = await _runGate(
+      design: design,
+      diff: _diffFor(['packages/panel/lib/prompt_panel.dart']),
+      existingFiles: [basePath, 'packages/panel/lib/prompt_panel.dart'],
+    );
+    expect(outcome.payload, {
+      'grade': 'F',
+      'transport': 'structural',
+      'rationale': 'Design-declared test files missing from pinned diff: $path',
+    });
+  });
 }
