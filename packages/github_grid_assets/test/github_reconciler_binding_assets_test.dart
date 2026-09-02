@@ -304,9 +304,9 @@ void main() {
         body: 'Issue body',
       ),
     );
-    expect(runner.argvs, hasLength(2));
+    expect(runner.argvs, hasLength(3));
     expect(
-      runner.argvs.last,
+      runner.argvs[1],
       containsAllInOrder([
         'create',
         '--type',
@@ -316,6 +316,10 @@ void main() {
         '--external-ref',
         'github:I_1',
       ]),
+    );
+    expect(
+      runner.argvs[2],
+      containsAllInOrder(['update', '--set-metadata', 'github.node_id=I_1']),
     );
 
     runner.argvs.clear();
