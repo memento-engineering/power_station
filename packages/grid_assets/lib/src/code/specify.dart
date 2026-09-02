@@ -88,7 +88,9 @@ import 'package:path/path.dart' as p;
 import '../agent/agent_domain.dart';
 import '../agent/agent_harness.dart';
 import '../agent/environment_registry.dart';
+import '../agent/seat_environments.dart';
 import '../agent/site_binding.dart';
+import '../agent/typed_environment.dart';
 import '../agent/usage_report.dart';
 import 'committee.dart';
 import 'decision_register.dart';
@@ -536,6 +538,10 @@ class SpecifyCapability extends ProcessCapability {
       beadMetadata: bead.metadata,
       stepParams: args.params,
       registry: registry,
+      // Rung 4.5 - the SPEC seat (ADR-0006 D2). Read with the effect verb at the
+      // spawn edge; null (nothing mounted, or nothing preferred present) simply
+      // falls to the role rung below, which bead `pow-n6n.4` then deletes.
+      typedEnvironment: resolveEnvironment<SpecAgentEnvironment>(context),
     );
     final environment = registry.resolve(config.harness);
     // The AUTO-RESPEC guidance (bead `pow-7nm`): on a rework round the spec
@@ -880,6 +886,10 @@ class SpecCriticCapability extends CriticCapability {
       beadMetadata: bead.metadata,
       stepParams: args.params,
       registry: registry,
+      typedEnvironment: CriticAgentEnvironment.of(
+        context,
+        lane: CriticLane(rubric),
+      ),
     );
     final environment = registry.resolve(config.harness);
     return spawnFor(

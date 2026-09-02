@@ -17,7 +17,7 @@ dependencies:
   beads_dart: ^0.2.0-rc.4
   dart_jsonwebtoken: ^3.4.1
   freezed_annotation: ^3.0.0
-  genesis_tree: ^0.2.0
+  genesis_tree: ^0.3.0
   grid_assets: ^0.6.0-rc.5
   grid_cli: ^0.5.0-rc.8
   grid_diagnostics_contract: ^0.2.0

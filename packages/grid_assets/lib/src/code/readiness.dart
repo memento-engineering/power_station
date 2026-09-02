@@ -76,6 +76,7 @@ import 'package:path/path.dart' as p;
 import '../agent/agent_domain.dart';
 import '../agent/agent_harness.dart';
 import '../agent/environment_registry.dart';
+import '../agent/seat_environments.dart';
 import '../agent/site_binding.dart';
 import '../agent/usage_report.dart';
 import 'committee.dart';
@@ -379,6 +380,10 @@ class ReadinessCriticCapability extends CriticCapability {
       beadMetadata: bead.metadata,
       stepParams: args.params,
       registry: registry,
+      typedEnvironment: CriticAgentEnvironment.of(
+        context,
+        lane: CriticLane(rubric),
+      ),
     );
     final environment = registry.resolve(config.harness);
     return spawnFor(

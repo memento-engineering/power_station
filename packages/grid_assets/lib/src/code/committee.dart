@@ -101,6 +101,7 @@ import '../agent/agent_domain.dart';
 import '../agent/agent_harness.dart';
 import '../agent/environment_registry.dart';
 import '../agent/path_check.dart';
+import '../agent/seat_environments.dart';
 import '../agent/site_binding.dart';
 import '../agent/usage_report.dart';
 import 'route_failure.dart';
@@ -1381,6 +1382,13 @@ class CriticCapability extends ProcessCapability {
       beadMetadata: bead.metadata,
       stepParams: args.params,
       registry: registry,
+      // Rung 4.5 - the CRITIC seat, routed by this lane (ADR-0006 D4). One
+      // mounted value sends `adr-alignment` and `coherence` to different
+      // environments; an unrouted lane rides the seat's shared entries.
+      typedEnvironment: CriticAgentEnvironment.of(
+        context,
+        lane: CriticLane(rubric),
+      ),
     );
     final environment = registry.resolve(config.harness);
     return spawnFor(

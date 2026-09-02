@@ -30,7 +30,9 @@ import '../agent/agent_environment.dart';
 import '../agent/agent_harness.dart';
 import '../agent/agent_session.dart';
 import '../agent/environment_registry.dart';
+import '../agent/seat_environments.dart';
 import '../agent/site_binding.dart';
+import '../agent/typed_environment.dart';
 import '../agent/usage_report.dart';
 import '../assets/asset_loader.dart';
 import '../assets/overlay_materializer.dart';
@@ -242,6 +244,7 @@ class AgentCapability extends ProcessCapability {
       beadMetadata: bead.metadata,
       stepParams: args.params,
       registry: registry,
+      typedEnvironment: resolveEnvironment<BuildAgentEnvironment>(context),
     );
     final environment = registry.resolve(config.harness);
     return (
