@@ -76,3 +76,22 @@ verifiable.
 - The org invariants (the seam word is **extension**, never "plugin"; package
   names are human faculties, never agent-nouns; bd CLI only, never SQL) count
   as recorded decisions even when a local ADR does not restate them.
+
+## Ownership — who can fix a D or an E?
+
+Every `D` or `E` you write carries an `owner`, and it decides whether the
+station corrects the spec automatically or asks a human:
+
+- **`architect`** — the fix is derivable from the bead AS WRITTEN plus the
+  tree. Re-running the specify stage with your rationale would produce it.
+  Here: a governing decision the spec failed to cite, where the fix is adding
+  the citation with its quoted clause.
+- **`author`** — the fix needs a decision the bead TEXT does not make. Here:
+  the spec would OVERRIDE or supersede a ratified decision, or two recorded
+  decisions conflict on the surface it touches — revisiting a precedent is a
+  human call.
+
+Choose `author` only when no re-run of the architect could converge, however
+good it is: an `author` verdict spends NO auto-correction round and parks the
+bead for a human immediately. When you do, name the CHOICE and its options in
+your rationale — that text IS the gate a governor reads.

@@ -135,8 +135,8 @@ final class SpecRespec extends SpecRouteVerdict {
 }
 
 /// The spec needs a HUMAN — the escalation arm. [rule] names the matrix arm that
-/// fired (`gating-hard-block` / `critic-F` / `no-rationale` / `respec-cap`);
-/// [reason] is the parked gate's human-readable body.
+/// fired (`gating-hard-block` / `critic-F` / `no-rationale` / `author-owed` /
+/// `respec-cap`); [reason] is the parked gate's human-readable body.
 final class SpecEscalate extends SpecRouteVerdict {
   /// Creates an escalation.
   const SpecEscalate({required this.rule, required this.reason});
@@ -148,10 +148,11 @@ final class SpecEscalate extends SpecRouteVerdict {
   final String reason;
 }
 
-/// One committee lane's raw result, as the route reads it off the [SiblingView]:
-/// its rubric id, its grade (null/blank ⇒ MISSING ⇒ fail-closed to `F`), and its
-/// rationale (blank when the critic returned none).
-typedef SpecLane = ({String id, String? grade, String rationale});
+/// One committee lane's raw result, as the route reads it off its verdict
+/// source: its rubric id, its grade (null/blank ⇒ MISSING ⇒ fail-closed to
+/// `F`), its rationale (blank when the critic returned none), and its OWNER
+/// (blank when the lane names none — see [decideSpecRoute] arm 5).
+typedef SpecLane = ({String id, String? grade, String rationale, String owner});
 
 /// The SPEC-route matrix (pure — zero I/O; the whole decision, unit-testable).
 ///
@@ -174,10 +175,16 @@ typedef SpecLane = ({String id, String? grade, String rationale});
 ///  4. a fixable lane with an EMPTY rationale ⇒ [SpecEscalate] (`no-rationale`)
 ///     — there is nothing to feed the re-specify agent, and a respec that re-runs
 ///     `specify` with no guidance would re-write the same spec and re-park. LOUD.
-///  5. a fixable join UNDER the bound ([priorRound] `<` [maxRounds]) ⇒
+///  5. a fixable join containing ANY author-owed lane ⇒ [SpecEscalate]
+///     (`author-owed`) IMMEDIATELY, with the correction bound unspent and every
+///     author-owed rationale quoted verbatim for the governor. A blank or
+///     unrecognised owner reads as architect-owed — today's behaviour; the
+///     LOUD guard against a missing owner is the DECODER (`requireOwner`), which
+///     refuses a live D/E naming no owner at all.
+///  6. a fixable join UNDER the bound ([priorRound] `<` [maxRounds]) ⇒
 ///     [SpecRespec] carrying the current circuit round.
-///  6. else — a join that is fixable RIGHT NOW, at the bound ⇒ [SpecEscalate]
-///     (`respec-cap`). This arm is the FALL-THROUGH of arm 5, so the cap is the
+///  7. else — a join that is fixable RIGHT NOW, at the bound ⇒ [SpecEscalate]
+///     (`respec-cap`). This arm is the FALL-THROUGH of arm 6, so the cap is the
 ///     conjunction "the rounds are spent AND the CURRENT join still fails" by
 ///     STRUCTURE rather than by a second read, and its reason quotes the same
 ///     fresh vector the matrix just decided on — never a ledger-recorded last
@@ -201,6 +208,8 @@ SpecRouteVerdict decideSpecRoute({
       (lane.grade == null || lane.grade!.trim().isEmpty)
       ? 'F'
       : lane.grade!.trim().toUpperCase();
+
+  String ownerOf(SpecLane lane) => lane.owner.trim().toLowerCase();
 
   // The FRESH grade vector — the ONE verdict source this matrix decides on, in
   // `critics` order. Every arm that REPORTS a grade quotes this binding, so a
@@ -277,7 +286,40 @@ SpecRouteVerdict decideSpecRoute({
     );
   }
 
-  // 5. RESPEC — a fixable join UNDER the bound auto-loops with the failing
+  // 5. AUTHOR-OWED — the fix is a decision only the bead's AUTHOR can make, so
+  //    an auto-respec round is UNWINNABLE by construction: `specify` re-runs
+  //    with the same bead text and re-draws the same grade (the receipt:
+  //    pow-n6n.1 burned both rounds on a coherence D that asked the architect
+  //    to choose between its own names and pow-n6n.2's). Park IMMEDIATELY,
+  //    spending NO round of the bound, and hand the governor the fork verbatim
+  //    so the bead BODY is cured once. ANY author-owed lane decides the join:
+  //    the human is already in the loop, and the architect-owed lanes ride the
+  //    same rework wave for free. Bead `pow-hxme`'s ADR-0000 A37 records
+  //    this refinement of ratified A14(3).
+  final authorOwed = [
+    for (final l in fixable)
+      if (ownerOf(l) == kOwnerAuthor) l,
+  ];
+  if (authorOwed.isNotEmpty) {
+    final b = StringBuffer()
+      ..write(
+        'author-owed: '
+        '${authorOwed.map((l) => '${l.id}=${gradeOf(l)}').join(', ')} — the '
+        'critic marked the fix AUTHOR-owed: it needs a decision the BEAD TEXT '
+        'does not make (which names win, whether the scope splits, which of '
+        'two designs), not a spec correction the architect can derive from the '
+        'tree. Auto-respec is WITHHELD with the bound UNSPENT ($priorRound of '
+        '$maxRounds round(s) used): re-running `specify` cannot decide it. '
+        'Cure the bead BODY once, then resolve this gate. The current join is '
+        '$gradesCsv.',
+      );
+    for (final l in authorOwed) {
+      b.write('\n\n### ${l.id} — grade ${gradeOf(l)}\n${l.rationale.trim()}');
+    }
+    return SpecEscalate(rule: 'author-owed', reason: b.toString());
+  }
+
+  // 6. RESPEC — a fixable join UNDER the bound auto-loops with the failing
   //    lanes' rationales as the correction guidance.
   if (priorRound < maxRounds) {
     return SpecRespec(
@@ -296,7 +338,7 @@ SpecRouteVerdict decideSpecRoute({
     );
   }
 
-  // 6. the BOUND — reachable ONLY as arm 5's fall-through, i.e. over a join that
+  // 7. the BOUND — reachable ONLY as arm 6's fall-through, i.e. over a join that
   //    is fixable RIGHT NOW (arm 3 already advanced a converged one). So the cap
   //    IS "rounds spent AND the current join still fails", and the reason quotes
   //    `fixable` plus the whole fresh `gradesCsv` the matrix decided on — a human
@@ -478,10 +520,12 @@ class SpecRouteCapability extends RouteCapability {
     final lanes = <SpecLane>[];
     if (!live) {
       for (final id in criticIds) {
+        final recorded = siblings.resultOf('$parent/$id');
         lanes.add((
           id: id,
-          grade: siblings.resultOf('$parent/$id')['grade'],
-          rationale: siblings.resultOf('$parent/$id')['rationale'] ?? '',
+          grade: recorded['grade'],
+          rationale: recorded['rationale'] ?? '',
+          owner: recorded[kVerdictOwnerKey] ?? '',
         ));
       }
     } else {
@@ -500,6 +544,7 @@ class SpecRouteCapability extends RouteCapability {
                 id: id,
                 grade: recorded['grade'],
                 rationale: recorded['rationale'] ?? '',
+                owner: '',
               ));
             } else {
               waiting.add(id);
@@ -511,12 +556,14 @@ class SpecRouteCapability extends RouteCapability {
             rubric: id,
             nodePath: '$parent/$id',
             round: circuitRound,
+            requireOwner: true,
           );
           if (verdict != null) {
             lanes.add((
               id: id,
               grade: verdict['grade'],
               rationale: verdict['rationale'] ?? '',
+              owner: verdict[kVerdictOwnerKey] ?? '',
             ));
           } else {
             waiting.add(id);
@@ -549,6 +596,7 @@ class SpecRouteCapability extends RouteCapability {
                   ? 'inline structural re-check after a stale-round lane '
                         'result (tg-q3q0 containment)'
                   : findings.join('; '),
+              owner: '',
             ));
             waiting.remove(gating);
           }

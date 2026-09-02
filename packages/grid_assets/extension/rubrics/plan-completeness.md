@@ -64,3 +64,22 @@ complete; a two-hundred-line plan paraphrasing goals is not.
   that two independent builds of it converge on the same change. If you can
   name a step where two builders would plausibly diverge, name it in your
   rationale and grade accordingly.
+
+## Ownership — who can fix a D or an E?
+
+Every `D` or `E` you write carries an `owner`, and it decides whether the
+station corrects the spec automatically or asks a human:
+
+- **`architect`** — the fix is derivable from the bead AS WRITTEN plus the
+  tree. Re-running the specify stage with your rationale would produce it.
+  Here: a step missing its file path, code block, test command, or commit
+  message; a named symbol that does not resolve.
+- **`author`** — the fix needs a decision the bead TEXT does not make. Here:
+  the unresolved judgment call is one the bead deliberately left open (which
+  seam to extend, which of two designs ships), so the architect would be
+  inventing policy rather than finishing the plan.
+
+Choose `author` only when no re-run of the architect could converge, however
+good it is: an `author` verdict spends NO auto-correction round and parks the
+bead for a human immediately. When you do, name the CHOICE and its options in
+your rationale — that text IS the gate a governor reads.
