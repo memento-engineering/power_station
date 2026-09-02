@@ -843,7 +843,7 @@ class SpecCriticCapability extends CriticCapability {
   const SpecCriticCapability({super.rubrics, super.verdictTextReader});
 
   /// The SPEC family IS held to the owner column (bead `pow-hxme`, ADR-0000
-  /// A35): its route decides on ownership, and [buildSpecCriticPrompt] teaches
+  /// A37): its route decides on ownership, and [buildSpecCriticPrompt] teaches
   /// it below.
   @override
   bool get requiresVerdictOwner => true;

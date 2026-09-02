@@ -560,7 +560,7 @@ String parentPath(String nodePath) {
 const String kVerdictRoundKey = 'round';
 
 /// The verdict JSON key naming WHO can fix an actionable (`D`/`E`) grade —
-/// bead `pow-hxme`, ADR-0000 A35. Not a freshness stamp (A4 and A15(5) alt-A
+/// bead `pow-hxme`, ADR-0000 A37. Not a freshness stamp (A4 and A15(5) alt-A
 /// fence the `nodePath` + `round`): a PAYLOAD column the SPEC route's matrix
 /// decides on.
 const String kVerdictOwnerKey = 'owner';
@@ -1417,7 +1417,7 @@ class CriticCapability extends ProcessCapability {
 
   /// Whether THIS critic family's verdicts must NAME an owner
   /// ([kVerdictOwners]) on an actionable `D`/`E` grade — bead `pow-hxme`
-  /// (ADR-0000 A35). FALSE here and TRUE in `SpecCriticCapability`: only the
+  /// (ADR-0000 A37). FALSE here and TRUE in `SpecCriticCapability`: only the
   /// SPEC route ACTS on ownership (an author-owed lane parks instead of
   /// auto-respec'ing), and only the spec critic is TAUGHT the column
   /// ([kVerdictOwnerInstruction]) — a family held to a contract its prompt

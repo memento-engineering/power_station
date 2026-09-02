@@ -294,8 +294,8 @@ SpecRouteVerdict decideSpecRoute({
   //    spending NO round of the bound, and hand the governor the fork verbatim
   //    so the bead BODY is cured once. ANY author-owed lane decides the join:
   //    the human is already in the loop, and the architect-owed lanes ride the
-  //    same rework wave for free. ADR-0000 A35 records this refinement of
-  //    ratified A14(3).
+  //    same rework wave for free. Bead `pow-hxme`'s ADR-0000 A37 records
+  //    this refinement of ratified A14(3).
   final authorOwed = [
     for (final l in fixable)
       if (ownerOf(l) == kOwnerAuthor) l,
