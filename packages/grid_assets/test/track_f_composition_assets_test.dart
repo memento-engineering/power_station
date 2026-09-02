@@ -320,7 +320,10 @@ void main() {
       final result = await _runSuccessfulRefusalRecheck(
         const Bead(
           id: 'pow-test',
-          metadata: {'validation_plan': 'dart test'},
+          metadata: {
+            'validation_plan': 'dart test',
+            'grid.approved_at': '2026-09-02T14:30:00.000Z',
+          },
           labels: ['grid.approved'],
         ),
       );
@@ -340,7 +343,10 @@ void main() {
       final decision = mounted.bundle()!.mountEligibility!(
         const Bead(
           id: 'pow-test',
-          metadata: {'validation_plan': 'dart test'},
+          metadata: {
+            'validation_plan': 'dart test',
+            'grid.approved_at': '2026-09-02T14:30:00.000Z',
+          },
           labels: ['grid.approved'],
         ),
       );

@@ -173,6 +173,8 @@ export 'src/compute/bounded_use.dart';
 export 'src/compute/compute_command.dart';
 export 'src/compute/compute_commands.dart';
 export 'src/compute/lease_capability.dart';
+export 'src/filing/approval_stamp.dart';
+export 'src/filing/approve_command.dart';
 export 'src/filing/filing_command.dart';
 export 'src/filing/filing_contract.dart';
 export 'src/lease/bus_lease.dart';

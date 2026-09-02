@@ -66,6 +66,90 @@ void main() {
     );
   });
 
+  test('blockers are named at sentence scope, dotted ids intact', () {
+    const bead = Bead(
+      id: 'pow-n6n.2',
+      issueType: IssueType.task,
+      description:
+          'Child 2 of epic pow-n6n. Depends on child pow-n6n.1 (local). '
+          'BLOCKED on tg-89y8 across stores.',
+      acceptanceCriteria: '- [ ] checked',
+      metadata: {'validation_plan': 'dart test'},
+    );
+    const local = BeadDependency(
+      issueId: 'pow-n6n.2',
+      dependsOnId: 'pow-n6n.1',
+    );
+
+    FilingRequirementRow dependency(
+      List<BeadDependency> edges,
+      Set<String> linked,
+    ) => const FilingContract()
+        .evaluate(bead, edges, linkedBlockers: linked)
+        .requirements
+        .singleWhere(
+          (row) => row.requirement == FilingRequirement.dependencies,
+        );
+
+    expect(dependency(const [], const {}).passed, isFalse);
+    expect(
+      dependency(const [], const {}).detail,
+      allOf(contains('pow-n6n.1'), contains('tg-89y8')),
+    );
+    expect(
+      dependency(const [local], const {}).detail,
+      allOf(isNot(contains('pow-n6n.1')), contains('tg-89y8')),
+    );
+    expect(dependency(const [local], const {'tg-89y8'}).passed, isTrue);
+    expect(
+      const FilingContract()
+          .evaluate(
+            bead.copyWith(
+              description: 'The design depends on whether we ship.',
+            ),
+            const [],
+          )
+          .requirements
+          .last
+          .passed,
+      isTrue,
+    );
+  });
+
+  test(
+    'an open link bead wires a foreign blocker, a malformed one does not',
+    () async {
+      final runner = _RecordingBdRunner([
+        '{"schema_version":1,"data":['
+            '{"id":"tgdog-l1","issue_type":"link","status":"open",'
+            '"metadata":{"grid.link.from":"pow-n6n.2",'
+            '"grid.link.to":"tg-89y8","grid.link.type":"blocks"}},'
+            '{"id":"tgdog-l2","issue_type":"link","status":"open",'
+            '"metadata":{"grid.link.from":"pow-n6n.2",'
+            '"grid.link.type":"blocks"}},'
+            '{"id":"tgdog-l3","issue_type":"link","status":"open",'
+            '"metadata":{"grid.link.from":"pow-other",'
+            '"grid.link.to":"tg-zzz","grid.link.type":"blocks"}}]}',
+      ]);
+
+      final wired = await CrossLinkBlockerSource(
+        runnerFor: (_) => runner,
+      ).wiredFor(stateRoot: '/work/home/.grid', beadId: 'pow-n6n.2');
+
+      expect(wired, {'tg-89y8'});
+      expect(runner.argvs.single, [
+        'list',
+        '-t',
+        'link',
+        '--status',
+        'open',
+        '--json',
+        '--limit',
+        '0',
+      ]);
+    },
+  );
+
   test('source is read-only by construction', () async {
     final runner = _RecordingBdRunner([
       '{"schema_version":1,"data":['

@@ -11,6 +11,11 @@ Bead _bead({
   String design = '',
   String acceptance = '',
   DateTime? deferUntil,
+  Map<String, dynamic> stamp = const {
+    'grid.approved_by': 'nico',
+    'grid.approved_at': '2026-09-02T14:30:00.000Z',
+    'grid.approved_rev': '9f1c2d3e4b5a69788899aabbccddeeff00112233',
+  },
 }) => Bead(
   id: 'pow-test',
   issueType: type,
@@ -18,7 +23,7 @@ Bead _bead({
   design: design,
   acceptanceCriteria: acceptance,
   deferUntil: deferUntil,
-  metadata: plan == null ? const {} : {'validation_plan': plan},
+  metadata: {if (plan != null) 'validation_plan': plan, ...stamp},
   labels: labels,
 );
 
@@ -62,6 +67,22 @@ void main() {
     expect(mountEligibilityFindings(_bead(plan: null)), [
       'validation_plan: missing',
     ]);
+  });
+
+  test('a hand-added label without the stamp never mounts', () {
+    expect(mountEligibilityFindings(_bead(stamp: const {})), [
+      'approval: unstamped label - approve with the approve verb',
+    ]);
+    final decision = mountEligibilityDecision(_bead(stamp: const {}));
+    final clause = switch (decision) {
+      MountEligible() => null,
+      MountRefused(:final clause) => clause,
+    };
+    expect(clause, 'approval: unstamped label - approve with the approve verb');
+  });
+
+  test('the stamped label mounts', () {
+    expect(mountEligibilityFindings(_bead()), isEmpty);
   });
 
   test('every non-driveable issue type is refused', () {
