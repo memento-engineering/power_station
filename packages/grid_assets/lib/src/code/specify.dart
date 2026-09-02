@@ -88,6 +88,7 @@ import 'package:path/path.dart' as p;
 import '../agent/agent_domain.dart';
 import '../agent/agent_harness.dart';
 import '../agent/environment_registry.dart';
+import '../agent/model_tier.dart';
 import '../agent/seat_environments.dart';
 import '../agent/site_binding.dart';
 import '../agent/typed_environment.dart';
@@ -451,12 +452,12 @@ const Circuit kSpecReviewCircuit = Circuit(
 /// [AgentHarnessRegistry] with the effect verb, resolves the effective config
 /// through the ladder, and delegates the INVOCATION to the resolved harness.
 ///
-/// The architect is an ARCHITECT-role spawner ([AgentRole.architect], bead
-/// `pow-t1w`). It writes the spec two independent builds must converge on, so
-/// it rides the FRONTIER tier ([kFrontierModelDefault], `opus`) by default.
-/// An unarmed architect inherits the BUILD environment in
-/// [resolveAgentConfig], preserving existing station armings. Auto-respec
-/// re-enters this same capability and therefore rides the same role.
+/// The spec author declares the **FRONTIER tier** ([AgentTier.frontier]): it
+/// writes the spec two independent builds must converge on, so it rides
+/// [kFrontierModelDefault] (`opus`) by default. Its ENVIRONMENT comes from the
+/// [SpecAgentEnvironment] seat (ADR-0006 D2/D5, bead `pow-n6n.4`), which folded
+/// `pow-t1w`'s architect role. Auto-respec re-enters this same capability and
+/// therefore rides the same seat.
 ///
 /// The POLICY stays here: [buildSpecifyBrief] renders the full bead (a
 /// title-only brief starves the agent, A36) + the spec-writing contract — the
@@ -533,14 +534,14 @@ class SpecifyCapability extends ProcessCapability {
     final siteBinding =
         context.getInheritedSeedOfExactType<SiteBinding>() ?? SiteBinding.none;
     final config = resolveAgentConfig(
-      role: AgentRole.architect,
+      tier: AgentTier.frontier,
       ambient: ambient,
       beadMetadata: bead.metadata,
       stepParams: args.params,
       registry: registry,
       // Rung 4.5 - the SPEC seat (ADR-0006 D2). Read with the effect verb at the
       // spawn edge; null (nothing mounted, or nothing preferred present) simply
-      // falls to the role rung below, which bead `pow-n6n.4` then deletes.
+      // falls to the ambient harness below.
       typedEnvironment: resolveEnvironment<SpecAgentEnvironment>(context),
     );
     final environment = registry.resolve(config.harness);
@@ -835,9 +836,9 @@ AgentBrief buildSpecifyBrief(
 /// each with the `nodePath` + `round` freshness stamps and a named `transport`;
 /// plus the FT-2 usage merge): one transport stack serves both committees, so a
 /// hardening landed for the code critics (gate-integrity #3/#4, tg-291)
-/// automatically holds here. Only the SPAWN differs — it is a GRADE-role spawner
-/// ([AgentRole.grade], bead `pow-edp`), like its superclass, so absent an
-/// override it grades on the MID tier ([kMidModelDefault], `sonnet`); and a spec
+/// automatically holds here. Only the SPAWN differs — it declares the MID tier
+/// ([AgentTier.mid]), like its superclass, so absent an override it grades on
+/// [kMidModelDefault] (`sonnet`); and a spec
 /// critic is always an agent (there is no `sh -c` validation-runner flavor; the
 /// spec gate is [SpecValidationCapability]) and its prompt is
 /// [buildSpecCriticPrompt]: the review subject is the bead's SPEC, never a
@@ -881,7 +882,7 @@ class SpecCriticCapability extends CriticCapability {
     final siteBinding =
         context.getInheritedSeedOfExactType<SiteBinding>() ?? SiteBinding.none;
     final config = resolveAgentConfig(
-      role: AgentRole.grade,
+      tier: AgentTier.mid,
       ambient: ambient,
       beadMetadata: bead.metadata,
       stepParams: args.params,

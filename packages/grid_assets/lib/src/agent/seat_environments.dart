@@ -21,8 +21,8 @@ import 'agent_environment.dart';
 import 'typed_environment.dart';
 
 /// The SPEC seat - `SpecifyCapability` (its first-round and its respec spawn are
-/// the same site). Folds `AgentRole.architect` (bead `pow-t1w`), which bead
-/// `pow-n6n.4` then deletes.
+/// the same site). Folded `pow-t1w`'s architect role, which bead `pow-n6n.4`
+/// deleted (ADR-0006 D5).
 class SpecAgentEnvironment extends ModelPreference {
   /// Creates the spec seat's preference, most-preferred first.
   const SpecAgentEnvironment(super.entries);

@@ -26,6 +26,7 @@ import 'support/asset_fakes.dart';
   Bead? beadOverride,
   String workspaceDir = '/w/tg-1',
   AgentConfig? agentConfig,
+  Map<Type, Object> seat = const {},
 }) => (
   context: FakeTreeContext(
     values: {
@@ -36,6 +37,7 @@ import 'support/asset_fakes.dart';
         branch: 'grid/tg-1',
       ),
       if (agentConfig != null) AgentConfig: agentConfig,
+      ...seat,
     },
   ),
   args: stepArgs('tg-1/spec_review/specify'),
@@ -82,17 +84,16 @@ void main() {
     });
   });
 
-  group('SpecifyCapability.spawn — the architect harness ride', () {
+  group('SpecifyCapability.spawn — the spec seat\'s harness ride', () {
     test(
-      'declares AgentRole.architect: its own environment outranks build',
+      'rides its SpecAgentEnvironment seat: codex, not the ambient claude',
       () {
         final c = _ctx(
-          agentConfig: const AgentConfig(
-            roleEnvironments: {
-              AgentRole.architect: 'codex',
-              AgentRole.build: 'claude',
-            },
-          ),
+          seat: {
+            SpecAgentEnvironment: SpecAgentEnvironment([
+              kBuiltinEnvironments['codex']!,
+            ]),
+          },
         );
         final cfg = const SpecifyCapability().spawn(c.context, c.args);
         // codex is an ACP-backed environment since pow-9o6: its launch is the

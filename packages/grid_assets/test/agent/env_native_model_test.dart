@@ -1,7 +1,7 @@
 // Bead `pow-a9o` — the model ladder is environment-aware: codex carries an
 // EXPLICIT codex-native pin (gpt-5.6-sol) so its asset-default rung never
 // borrows claude's names (opus/sonnet/haiku), which 400 on a ChatGPT account;
-// and a non-claude, model-less environment armed to a role fails LOUD at boot,
+// and a non-claude, model-less environment armed by name fails LOUD at boot,
 // not at 400-per-spawn. An operator's explicit bead pin still passes through.
 // Pure-Dart, offline.
 import 'dart:convert';
@@ -30,13 +30,12 @@ void main() {
 
     test('the asset-default rung resolves codex-native, never opus', () {
       final config = resolveAgentConfig(
-        role: AgentRole.build,
-        ambient: const AgentConfig(
-          roleEnvironments: {AgentRole.build: 'codex'},
-        ),
+        tier: AgentTier.frontier,
+        ambient: const AgentConfig(),
         beadMetadata: const {},
         stepParams: const {},
         registry: buildBuiltinEnvironmentRegistry(),
+        typedEnvironment: kBuiltinEnvironments['codex'],
       );
       expect(config.harness, 'codex');
       expect(config.params['model'], 'gpt-5.6-sol');
@@ -61,15 +60,14 @@ void main() {
 
     test('an operator bead pin passes through into codex verbatim', () {
       final config = resolveAgentConfig(
-        role: AgentRole.build,
-        ambient: const AgentConfig(
-          roleEnvironments: {AgentRole.build: 'codex'},
-        ),
+        tier: AgentTier.frontier,
+        ambient: const AgentConfig(),
         beadMetadata: _envelope({
           'params': {'model': 'opus'},
         }),
         stepParams: const {},
         registry: buildBuiltinEnvironmentRegistry(),
+        typedEnvironment: kBuiltinEnvironments['codex'],
       );
       expect(config.harness, 'codex');
       expect(config.params['model'], 'opus'); // operator owns the risk
@@ -87,11 +85,11 @@ void main() {
           ),
         },
       );
-      final refusal = registry.validate(roleEnvironments: {'build': 'rogue'});
+      final refusal = registry.validate(armedNames: {'build': 'rogue'});
       expect(
         refusal,
         allOf(
-          contains('role "build"'),
+          contains('arming "build"'),
           contains('"rogue"'),
           contains('codex'),
           contains('opus'),
@@ -100,24 +98,21 @@ void main() {
       );
     });
 
-    test('a model-less copilot builtin armed to a role PASSES', () {
+    test('a model-less copilot builtin armed by name PASSES', () {
       final registry = EnvironmentRegistry(
         custom: {'copilot': kBuiltinEnvironments['copilot']!},
       );
-      expect(registry.validate(roleEnvironments: {'build': 'copilot'}), isNull);
+      expect(registry.validate(armedNames: {'build': 'copilot'}), isNull);
     });
 
-    test('a model-less opencode builtin armed to a role PASSES', () {
+    test('a model-less opencode builtin armed by name PASSES', () {
       final registry = EnvironmentRegistry(
         custom: {'opencode': kBuiltinEnvironments['opencode']!},
       );
-      expect(
-        registry.validate(roleEnvironments: {'build': 'opencode'}),
-        isNull,
-      );
+      expect(registry.validate(armedNames: {'build': 'opencode'}), isNull);
     });
 
-    test('a model-less pi builtin (endpoint bound) armed to a role PASSES', () {
+    test('a model-less pi builtin (endpoint bound) armed by name PASSES', () {
       // pi is openAiCompatible, so it needs a bound endpoint; the MODEL guard
       // never fires on it (model-less non-claude is grandfathered). Bind the
       // endpoint so the whole boot validates clean.
@@ -126,34 +121,28 @@ void main() {
       );
       final binding = SiteBinding({'pi': Uri.parse('http://localhost:8080')});
       expect(
-        registry.validate(
-          roleEnvironments: {'build': 'pi'},
-          siteBinding: binding,
-        ),
+        registry.validate(armedNames: {'build': 'pi'}, siteBinding: binding),
         isNull,
       );
     });
 
-    test('the pinned codex builtin armed to a role PASSES', () {
+    test('the pinned codex builtin armed by name PASSES', () {
       // Isolated so only the guard is exercised (the full builtin registry
       // drags in `pi`, whose unbound endpoint trips a separate site-binding
       // check unrelated to this guard).
       final registry = EnvironmentRegistry(
         custom: {'codex': kBuiltinEnvironments['codex']!},
       );
-      expect(registry.validate(roleEnvironments: {'build': 'codex'}), isNull);
+      expect(registry.validate(armedNames: {'build': 'codex'}), isNull);
     });
 
     test(
-      'claude (the tier-defaults owner, model-less) armed to a role PASSES',
+      'claude (the tier-defaults owner, model-less) armed by name PASSES',
       () {
         const registry = EnvironmentRegistry(
           custom: {'frontier': AgentEnvironment(command: 'claude')},
         );
-        expect(
-          registry.validate(roleEnvironments: {'build': 'frontier'}),
-          isNull,
-        );
+        expect(registry.validate(armedNames: {'build': 'frontier'}), isNull);
       },
     );
   });

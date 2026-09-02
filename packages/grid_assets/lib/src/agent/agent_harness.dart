@@ -20,15 +20,17 @@
 /// [EnvironmentRegistry] mounted at `main()`; behavior is never derived from a
 /// service looked up in the tree.
 ///
-/// **The MODEL resolves ROLE → TIER → MODEL (beads `pow-edp`, `pow-2c9`).** A
-/// spawn's model is not one station-wide value and not a per-role field: the
-/// SPAWNING ASSET declares an [AgentRole], the role points at an [AgentTier]
-/// ([tierFor]: build and architect ⇒ frontier, grade ⇒ mid, gather ⇒ cheap), and
-/// arms tier → model ([AgentConfig.tiers], a [ModelTiers] value; unarmed tiers
-/// ride [defaultModelForTier] — opus / sonnet / haiku). The bead's `grid.agent`
-/// `params.model` still outranks both. So the committee grades cheap while the
-/// build runs strong, a new role costs one `tierFor` case, and a retune is one
-/// arming change.
+/// **The MODEL resolves TIER → MODEL (beads `pow-2c9`, `pow-n6n.4`).** A spawn's
+/// model is not one station-wide value: the SPAWNING ASSET declares the
+/// [AgentTier] it rides (frontier for the build and the spec author, mid for the
+/// committee's critics, cheap for the read-only lenses), and the station arms
+/// tier → model ([AgentConfig.tiers], a [ModelTiers] value; unarmed tiers ride
+/// [defaultModelForTier] — opus / sonnet / haiku). The bead's `grid.agent`
+/// `params.model` and the selected environment's own model both outrank it. So
+/// the committee grades cheap while the build runs strong, and a retune is one
+/// arming change. WHICH environment a seat rides is the TYPED lookup
+/// (`typed_environment.dart`, ADR-0006 D2) — ADR-0006 D5 retired the role
+/// indirection that used to answer both questions at once.
 ///
 /// **Two-moment validation (OQ-c, ratified)** now lives on the registry: the
 /// composition root validates its station default eagerly
@@ -47,56 +49,6 @@ import 'agent_environment.dart';
 import 'environment_registry.dart';
 import 'model_tier.dart';
 
-/// The ROLE an agent spawn plays — the DOMAIN semantic, declared by the
-/// SPAWNING ASSET (bead `pow-edp`). It is NOT the model axis: a role points at
-/// an [AgentTier] ([tierFor]) and the station arms the tier (bead `pow-2c9`),
-/// so a new role costs ONE `tierFor` case and no config field. Sealed by the
-/// enum — consumers switch exhaustively (house style).
-enum AgentRole {
-  /// The BUILD side — the coding agent (`AgentCapability`). Rides
-  /// [AgentTier.frontier]: the build IS the work.
-  build,
-
-  /// The ARCHITECT side — the spec author (`SpecifyCapability`). Rides
-  /// [AgentTier.frontier] so separating its environment from BUILD does not
-  /// change the model ladder. Re-specification re-enters the same capability.
-  architect,
-
-  /// The GRADE side — the committee critics (`CriticCapability`, its spec
-  /// subclass `SpecCriticCapability`, and the readiness lane
-  /// `ReadinessCriticCapability`). Rides [AgentTier.mid]: a critic reads a
-  /// pinned diff against ONE rubric and writes a letter.
-  grade,
-
-  /// The GATHER side — read-only discovery: it reads the tree, cites what it
-  /// finds, and DECIDES NOTHING. Rides [AgentTier.cheap]. The discovery circuit
-  /// (bead `pow-96y`, which this bead unblocks) is its first spawner. It is NOT
-  /// the home for a cheap JUDGEMENT lane (a lane that emits a verdict letter is
-  /// grading, not gathering — see `readiness.dart`).
-  gather,
-}
-
-/// The ROLE → TIER policy (bead `pow-2c9`) — the ENTIRE per-role surface of
-/// model selection.
-///
-/// This is the map that scales: a new role points at an EXISTING tier (one case
-/// here), and a retune ("grading is cheap now") is one arming change on the
-/// station ([ModelTiers]) that touches no role at all. Consumed with an
-/// exhaustive `switch`, so a role that names no tier does not compile.
-AgentTier tierFor(AgentRole role) => switch (role) {
-  AgentRole.build => AgentTier.frontier,
-  AgentRole.architect => AgentTier.frontier,
-  AgentRole.grade => AgentTier.mid,
-  AgentRole.gather => AgentTier.cheap,
-};
-
-/// The model [role] rides when nothing more explicit names one — role → tier →
-/// model ([tierFor], then [defaultModelForTier]): the ASSET rung, the bottom of
-/// the ladder. A20's per-role defaults (build ⇒ opus, grade ⇒ sonnet) are
-/// preserved exactly, now DERIVED through the tier rather than hardcoded per
-/// role.
-String defaultModelFor(AgentRole role) => defaultModelForTier(tierFor(role));
-
 /// The agent configuration — a pure VALUE the tree carries (never behavior).
 /// Watched by branches (`dependOn*`), snapshot-read by effects (`get*`).
 class AgentConfig {
@@ -109,7 +61,6 @@ class AgentConfig {
     this.params = const {},
     this.tiers = const ModelTiers(),
     this.graderModel,
-    this.roleEnvironments = const {},
   });
 
   /// The registry id of the harness: `claude` | `copilot` | `pi` | `opencode`.
@@ -123,15 +74,14 @@ class AgentConfig {
   ///    knob — what `space up --model` sets. It arms the FRONTIER tier
   ///    ([armedTiers]); absent, that tier rides [kFrontierModelDefault];
   ///  - on a config RETURNED by [resolveAgentConfig], it is the fully-resolved
-  ///    model of the role that asked — the ladder's winner, stamped into the
-  ///    key the harness reads.
+  ///    model of the TIER that asked — the ladder's winner, stamped into the key
+  ///    the harness reads.
   final Map<String, String> params;
 
   /// The station's TIER ARMING (bead `pow-2c9`) — the model-selection surface:
   /// tier → model, sparse (an unarmed tier rides its asset default). Selection
-  /// reads it through the SPAWNER's role ([tierFor]), so a new role costs a
-  /// `tierFor` case and NOTHING here — the field count follows the TIERS, never
-  /// the roles.
+  /// reads it through the tier the SPAWNER declares, so the field count follows
+  /// the TIERS and nothing else.
   final ModelTiers tiers;
 
   /// The PRE-TIER grade knob (`space up --grader-model` — ADR-0000 A20's GRADE
@@ -140,17 +90,6 @@ class AgentConfig {
   /// INPUT. A station migrates by arming [tiers] directly, and it retires here
   /// at that point.
   final String? graderModel;
-
-  /// The station's ROLE → ENVIRONMENT arming — role → env NAME, the successor
-  /// selection path to role → tier → model (ADR-0002 "the ladder"; ADR-0000 A20
-  /// REFINED FORWARD). An entry names an [EnvironmentRegistry] environment;
-  /// [resolveAgentConfig] resolves it to the full {harness, target, model} for
-  /// that role. An unarmed [AgentRole.architect] first inherits the BUILD
-  /// environment, then falls through to the ambient harness; every other
-  /// unarmed role falls directly to ambient. The model still resolves through
-  /// the named environment and then role → tier → model. A station arms this
-  /// map like it arms [tiers].
-  final Map<AgentRole, String> roleEnvironments;
 
   /// The tier map this station ACTUALLY arms: [tiers], with the two PRE-TIER
   /// knobs projected onto the tiers they arm — `params['model']` (`space up
@@ -164,18 +103,6 @@ class AgentConfig {
   ModelTiers get armedTiers =>
       tiers.merge(frontier: params['model'], mid: graderModel);
 
-  /// The model [role] rides on THIS station — role → tier → model, resolved
-  /// through [armedTiers]. NEVER null (every tier names a real model), which is
-  /// why [resolveAgentConfig] can stamp an explicit `--model` on every spawn
-  /// with no fallback and no guard.
-  String modelForRole(AgentRole role) => armedTiers.modelFor(tierFor(role));
-
-  /// The station's EXPLICIT rung for [role] — the arming of [role]'s tier, or
-  /// null when the station armed neither that tier nor its pre-tier knob (⇒ the
-  /// role falls through to [defaultModelFor]). Consumed by a station's `up`
-  /// banner; [modelForRole] is the total form this pack resolves with.
-  String? stationModelFor(AgentRole role) => armedTiers.armed(tierFor(role));
-
   /// A copy with the non-null overrides applied (the D-C ladder's merge — both
   /// [params] and [tiers] merge key-wise, they don't replace whole).
   AgentConfig merge({
@@ -183,7 +110,6 @@ class AgentConfig {
     Map<String, String>? params,
     ModelTiers? tiers,
     String? graderModel,
-    Map<AgentRole, String>? roleEnvironments,
   }) => AgentConfig(
     harness: harness ?? this.harness,
     params: params == null ? this.params : {...this.params, ...params},
@@ -195,9 +121,6 @@ class AgentConfig {
             frontier: tiers.frontier,
           ),
     graderModel: graderModel ?? this.graderModel,
-    roleEnvironments: roleEnvironments == null
-        ? this.roleEnvironments
-        : {...this.roleEnvironments, ...roleEnvironments},
   );
 
   @override
@@ -206,8 +129,7 @@ class AgentConfig {
       other.harness == harness &&
       other.tiers == tiers &&
       other.graderModel == graderModel &&
-      _mapEquals(other.params, params) &&
-      _mapEquals(other.roleEnvironments, roleEnvironments);
+      _mapEquals(other.params, params);
 
   @override
   int get hashCode => Object.hash(
@@ -216,9 +138,6 @@ class AgentConfig {
     graderModel,
     Object.hashAllUnordered(
       params.entries.map((e) => Object.hash(e.key, e.value)),
-    ),
-    Object.hashAllUnordered(
-      roleEnvironments.entries.map((e) => Object.hash(e.key, e.value)),
     ),
   );
 
@@ -233,8 +152,7 @@ class AgentConfig {
   @override
   String toString() =>
       'AgentConfig($harness, params: $params, tiers: $tiers'
-      '${graderModel == null ? '' : ', graderModel: $graderModel'}'
-      '${roleEnvironments.isEmpty ? '' : ', roleEnvironments: $roleEnvironments'})';
+      '${graderModel == null ? '' : ', graderModel: $graderModel'})';
 }
 
 /// The harness-agnostic WORK CONTENT handed to an agent (OQ-a, ratified):

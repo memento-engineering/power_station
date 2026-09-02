@@ -3,9 +3,9 @@
 //
 // Pure-Dart, offline: the synthetic workspace dir never exists on disk, so the
 // spawners' filesystem probes no-op (the documented offline posture of
-// `role_model_ladder_test.dart`). The models below are deliberately NOT the
+// `model_ladder_test.dart`). The models below are deliberately NOT the
 // tier defaults (opus/sonnet/haiku), so a typed win is distinguishable from the
-// role rung by the `--model` argv alone.
+// tier floor by the `--model` argv alone.
 import 'package:beads_dart/beads_dart.dart';
 import 'package:genesis_tree/genesis_tree.dart';
 import 'package:grid_assets/grid_assets.dart';
@@ -32,7 +32,7 @@ const AgentEnvironment _shared = AgentEnvironment(
 );
 
 /// Custom arming PLUS the builtins, so an UNMOUNTED preference still resolves
-/// `AgentConfig().harness` ('claude') through the role rung.
+/// `AgentConfig().harness` ('claude') through the ambient rung.
 const EnvironmentRegistry _registry = EnvironmentRegistry(
   custom: {'fast': _fast, 'strong': _strong, 'shared': _shared},
   builtins: kBuiltinEnvironments,
@@ -193,7 +193,7 @@ void main() {
       );
     });
 
-    test('nothing mounted keeps the role rung', () {
+    test('nothing mounted keeps the TIER floor', () {
       expect(_specify(const {}), kFrontierModelDefault);
     });
   });
@@ -217,7 +217,7 @@ void main() {
       );
     });
 
-    test('nothing mounted keeps the role rung', () {
+    test('nothing mounted keeps the TIER floor', () {
       expect(_build(const {}), kFrontierModelDefault);
     });
   });
@@ -241,7 +241,7 @@ void main() {
       );
     });
 
-    test('nothing mounted keeps the role rung', () {
+    test('nothing mounted keeps the TIER floor', () {
       expect(_gather(const {}), kCheapModelDefault);
     });
   });
@@ -282,7 +282,7 @@ void main() {
       expect(_readiness(generic, 'coherence'), 'fast-model');
     });
 
-    test('nothing mounted keeps the role rung', () {
+    test('nothing mounted keeps the TIER floor', () {
       expect(_critic(const {}, 'coherence'), kMidModelDefault);
       expect(_specCritic(const {}, 'coherence'), kMidModelDefault);
       expect(_readiness(const {}, 'coherence'), kMidModelDefault);

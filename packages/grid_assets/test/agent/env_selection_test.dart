@@ -1,6 +1,6 @@
-// Bead `pow-k7l` — env at the bead + step rungs; role → env (the codex-first-class
-// selection mechanism). A NAMED environment resolves through the registry to the
-// full {harness, target, model}; the legacy harness/model rungs still function.
+// Bead `pow-k7l` — env at the bead + step rungs. A NAMED environment resolves
+// through the registry to the full {harness, target, model}; the ambient
+// harness/model rungs still function.
 import 'package:grid_assets/grid_assets.dart';
 import 'package:test/test.dart';
 
@@ -27,7 +27,7 @@ void main() {
   group('pow-k7l — a NAMED env at the rungs resolves the full config', () {
     test('a bead env resolves the environment: harness + its own model', () {
       final config = resolveAgentConfig(
-        role: AgentRole.build,
+        tier: AgentTier.frontier,
         ambient: const AgentConfig(),
         beadMetadata: _envelope({'env': 'codex-frontier'}),
         stepParams: const {},
@@ -42,7 +42,7 @@ void main() {
 
     test('a step env resolves the environment and OUTRANKS a bead harness', () {
       final config = resolveAgentConfig(
-        role: AgentRole.build,
+        tier: AgentTier.frontier,
         ambient: const AgentConfig(),
         beadMetadata: _envelope({'harness': 'claude'}),
         stepParams: const {'env': 'codex-frontier'},
@@ -52,15 +52,14 @@ void main() {
       expect(config.params['model'], 'gpt-5-codex');
     });
 
-    test('role → env resolves the role to an environment → full config', () {
+    test('the typed rung resolves a VALUE to an environment → full config', () {
       final config = resolveAgentConfig(
-        role: AgentRole.build,
-        ambient: const AgentConfig(
-          roleEnvironments: {AgentRole.build: 'codex-frontier'},
-        ),
+        tier: AgentTier.frontier,
+        ambient: const AgentConfig(),
         beadMetadata: const {},
         stepParams: const {},
         registry: _registry(),
+        typedEnvironment: _registry().resolve('codex-frontier'),
       );
       expect(config.harness, 'codex-frontier');
       expect(config.params['model'], 'gpt-5-codex');
@@ -69,7 +68,7 @@ void main() {
     test('an unknown env NAME fails closed at per-work resolution', () {
       expect(
         () => resolveAgentConfig(
-          role: AgentRole.build,
+          tier: AgentTier.frontier,
           ambient: const AgentConfig(),
           beadMetadata: _envelope({'env': 'no-such-env'}),
           stepParams: const {},
@@ -86,93 +85,56 @@ void main() {
     });
   });
 
-  group('pow-t1w — architect environment selection', () {
-    test('an armed architect resolves its own environment', () {
-      final config = resolveAgentConfig(
-        role: AgentRole.architect,
-        ambient: const AgentConfig(
-          harness: 'opencode',
-          roleEnvironments: {
-            AgentRole.architect: 'codex-frontier',
-            AgentRole.build: 'copilot',
-          },
-        ),
-        beadMetadata: const {},
-        stepParams: const {},
-        registry: _registry(),
-      );
-      expect(config.harness, 'codex-frontier');
-      expect(config.params['model'], 'gpt-5-codex');
-    });
-
-    test('an unarmed architect falls back to the build environment', () {
-      final config = resolveAgentConfig(
-        role: AgentRole.architect,
-        ambient: const AgentConfig(
-          harness: 'copilot',
-          roleEnvironments: {AgentRole.build: 'codex-frontier'},
-        ),
-        beadMetadata: const {},
-        stepParams: const {},
-        registry: _registry(),
-      );
-      expect(config.harness, 'codex-frontier');
-      expect(config.params['model'], 'gpt-5-codex');
-    });
-
-    test('an unarmed architect and build fall back to ambient', () {
-      final config = resolveAgentConfig(
-        role: AgentRole.architect,
-        ambient: const AgentConfig(harness: 'copilot'),
-        beadMetadata: const {},
-        stepParams: const {},
-        registry: _registry(),
-      );
-      expect(config.harness, 'copilot');
-      expect(config.params['model'], kFrontierModelDefault);
-    });
-  });
-
-  group(
-    'pow-k7l — the legacy rungs still function (coexistence, shims UNTOUCHED)',
-    () {
-      test(
-        'a bead harness names only the tool; the model rides role → tier',
-        () {
-          final config = resolveAgentConfig(
-            role: AgentRole.grade,
-            ambient: const AgentConfig(graderModel: 'sonnet-legacy'),
-            beadMetadata: _envelope({'harness': 'copilot'}),
-            stepParams: const {},
-            registry: _registry(),
-          );
-          expect(config.harness, 'copilot');
-          // graderModel projects onto the MID tier — the pre-env path is intact.
-          expect(config.params['model'], 'sonnet-legacy');
-        },
-      );
-
-      test('a bead-pinned params.model still tops every rung', () {
+  group('pow-n6n.4 — nothing armed falls through to the ambient harness', () {
+    test(
+      'no typed seat, no bead/step rung ⇒ ambient.harness + the tier floor',
+      () {
         final config = resolveAgentConfig(
-          role: AgentRole.build,
-          ambient: const AgentConfig(
-            roleEnvironments: {AgentRole.build: 'codex-frontier'},
-          ),
-          beadMetadata: _envelope({
-            'params': {'model': 'Z'},
-          }),
+          tier: AgentTier.frontier,
+          ambient: const AgentConfig(harness: 'copilot'),
+          beadMetadata: const {},
           stepParams: const {},
           registry: _registry(),
         );
-        expect(
-          config.harness,
-          'codex-frontier',
-        ); // role → env still picks the env
-        expect(
-          config.params['model'],
-          'Z',
-        ); // ...but the bead pin wins the model
-      });
-    },
-  );
+        expect(config.harness, 'copilot');
+        expect(config.params['model'], kFrontierModelDefault);
+      },
+    );
+  });
+
+  group('pow-k7l — the bead and station rungs still function', () {
+    test(
+      'a bead harness names only the tool; the model rides the declared tier',
+      () {
+        final config = resolveAgentConfig(
+          tier: AgentTier.mid,
+          ambient: const AgentConfig(graderModel: 'sonnet-legacy'),
+          beadMetadata: _envelope({'harness': 'copilot'}),
+          stepParams: const {},
+          registry: _registry(),
+        );
+        expect(config.harness, 'copilot');
+        // graderModel projects onto the MID tier — the pre-env path is intact.
+        expect(config.params['model'], 'sonnet-legacy');
+      },
+    );
+
+    test('a bead-pinned params.model still tops every rung', () {
+      final config = resolveAgentConfig(
+        tier: AgentTier.frontier,
+        ambient: const AgentConfig(),
+        beadMetadata: _envelope({
+          'params': {'model': 'Z'},
+        }),
+        stepParams: const {},
+        registry: _registry(),
+        typedEnvironment: _registry().resolve('codex-frontier'),
+      );
+      expect(
+        config.harness,
+        'codex-frontier',
+      ); // the typed rung still picks the env
+      expect(config.params['model'], 'Z'); // ...but the bead pin wins the model
+    });
+  });
 }
