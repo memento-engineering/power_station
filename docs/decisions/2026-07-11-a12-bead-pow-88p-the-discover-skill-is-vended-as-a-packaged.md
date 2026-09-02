@@ -1,0 +1,32 @@
+---
+status: accepted
+date: 2026-07-11
+decision-makers: ["agent"]
+consulted: []
+informed: []
+register:
+  spec: 1
+  slug: a12-bead-pow-88p-the-discover-skill-is-vended-as-a-packaged
+  surfaces:
+    - "packages/**"
+  obsoletes: []
+  updates: []
+  obsoleted-by: null
+  updated-by: []
+  bead: null
+  legacy-id: "A12"
+---
+## A12 (2026-07-11) — bead `pow-88p`: the `discover` skill is VENDED as a Packaged-AI-Asset under a new `extension/skills/` home — one mustache-templated SKILL.md (`{{runner}}`/`{{gridHome}}`), a `skills:` manifest section extending the proposal, a LOUD unbound-hole render guard, and the grid-flavored adaptation of the deprecated factoryskills flow
+
+**Decision:** the coupled skill+command pattern's first SKILL (ADR-0001 draft's `pow-88p` half) ships as `packages/grid_assets/extension/skills/discover/SKILL.md`, loaded/rendered by `PackagedAssetLoader` (`loadSkillTemplate` / `renderSkill`) and enumerated by a new `kVendedSkills` const (the delivery leg's roster). Autonomous calls inside the bead's prescribed shape:
+(1) **The `skills/` home + format.** ADR-0001 already names the missing `extension/skills/` home; the skill file follows the agentskills SKILL.md shape (frontmatter `name:`/`description:` + markdown body — the community format lenny's `leonard_cli` assets ship, and what the harness's skill discovery reads once `pow-kzx` materializes it into a seat's skills dir). The manifest (`extension/mcp/config.yaml`) gains a top-level `skills:` section — the upstream "Packaged AI Assets" proposal defines only `resources`/`prompts`, so this is a documented FORWARD EXTENSION of the manifest's own dialect, reusing the prompts' arg-declaration shape (lenny's alternative — pointing a `resources` entry at the skill file — was rejected as under-typed: a skill has render args and an install destination a doc resource doesn't).
+(2) **One file, references folded in.** The ADAPT-FROM factoryskills skill carried `references/` (brainstorming + 4 type files); those collapsed into a compact in-skill *Design conversation* section (one-question-at-a-time, 2–3 approaches, section-by-section presentation, per-type notes). One file keeps the first instance tight while the delivery leg (`pow-kzx`) is still being built — a multi-file skill dir install can come with a skill that earns it.
+(3) **The template args are `{{runner}}` + `{{gridHome}}`, bound at materialization.** The skill is station-agnostic; the composing station's executable name (the verb its `search` calls ride — `space` for space_station) and grid-home root (the filing fallback) are the two facts only the installer knows. `renderSkill` throws a `StateError` on ANY surviving `{{…}}` hole — a named invariant (an installed skill has no template residue; a literal `{{runner}}` in a seat's skill would be a silent packaging bug), so the guard is LOUD, per doctrine.
+(4) **The research redline is enforced in-content and fenced by test.** The skill's cross-STORE coverage rides the vended `search --json` Command EXCLUSIVELY (2–4 keyword angles — "vary the terms, never the mechanism"); reading CODE rides normal tools (A11(5): code-grep is not the Command's job). The skill body deliberately never even NAMES the ad-hoc bd query forms, so the content fence (`test/assets/skill_assets_test.dart`) can assert their absence outright; the one sanctioned anchored read is a one-shot, human-present `bd show <id>` in the owning store's root (the governor's own documented affordance — a HITL turn is not a re-query/controller path), with an explicit never-loop caution in the skill.
+(5) **Bead-id confirmation is the search command itself,** replacing factoryskills' `bd show <token>` probe: `search --json "<token>"` — an `id`-field hit (first in A11's match precedence) both confirms existence and names the owning store + root. Deterministic, and one mechanism instead of two.
+(6) **Filing (the bead's open SCOPE question, answered):** the new bead files into **the substation whose repo the work would change** — the search report's per-store `root` is the `cd` target (relative roots resolve against `{{gridHome}}`); no clear owner ⇒ the **grid home's own store**. Coupled beads home together in ONE store (cross-store deps do not exist). The create shape is `bd create --ephemeral --defer <~1 week> --actor governor`: ephemeral for the factoryskills promote-later pattern (`--persistent` flips on design approval), **deferred because a live `--land` station mounts a ready bead within seconds** (the mount race the governor's manual documents) — a half-designed bead must never enter the frontier, and UNDEFERRING (blessing) stays the human's lever, never the skill's.
+(7) **The specify handoff is conditional:** on the human's continue-signal the skill invokes `/specify <id>` where the station vends it (pow-6ao is independent and not yet built), else it reports the design as recorded + staged and hands back. The acceptance's "can kick off specify" is thus content-true today and mechanically true the day pow-6ao lands, with no dependency edge.
+**Why:** ADR-0001 (draft) prescribes the pattern and resolves delivery to skill-file install but leaves the skills' on-disk home, manifest shape, render seam, and the discover adaptation itself to this bead; each call above reuses the nearest established idiom (the D-9 loader + mustache for rendering, lenny's shipped agentskills precedent for format, A11's report contract for the research surface, the governor manual's `--defer` staging for filing) rather than inventing new machinery. The skill+manifest+loader trio keeps grid_assets the single source of truth: `pow-kzx`'s installer only enumerates `kVendedSkills`, renders, and writes.
+**Affects (if promoted):** power_station code (built this bead): `packages/grid_assets/extension/skills/discover/SKILL.md`, `packages/grid_assets/extension/mcp/config.yaml` (the `skills:` section), `packages/grid_assets/lib/src/assets/asset_loader.dart` (`kVendedSkills`, `loadSkillTemplate`, `renderSkill` + guard), `packages/grid_assets/lib/grid_assets.dart` (library doc), `packages/grid_assets/test/assets/skill_assets_test.dart`. Downstream: `pow-kzx` (delivery) consumes `kVendedSkills` + `renderSkill(runner:, gridHome:)`; `pow-6ao` (specify) is the named hand-off and should vend under the same `skills/` home; ADR-0001's "extension/ still needs a skills/ home added" note is now satisfied and its ratification can fold this shape in.
+**Status:** Ratified (2026-07-14, Nico) — part of the SKILLS-HOME RULE (register foot).
+
