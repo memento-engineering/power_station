@@ -14,20 +14,19 @@ void main() {
     ], workingDirectory: packageRoot.path);
     expect(result.exitCode, 0, reason: '${result.stdout}\n${result.stderr}');
     final output = '${result.stdout}\n${result.stderr}'.replaceAll('\\', '/');
-    final expected =
-        [
-          for (final leg in const ['agents', 'claude'])
-            ...Directory(
-                  p.join(packageRoot.path, 'extension', 'station_overlay', leg),
-                )
-                .listSync(recursive: true)
-                .whereType<File>()
-                .map(
-                  (file) => p
-                      .relative(file.path, from: packageRoot.path)
-                      .replaceAll('\\', '/'),
-                ),
-        ]..sort();
+    final expected = [
+      for (final leg in const ['agents', 'claude'])
+        ...Directory(
+              p.join(packageRoot.path, 'extension', 'station_overlay', leg),
+            )
+            .listSync(recursive: true)
+            .whereType<File>()
+            .map(
+              (file) => p
+                  .relative(file.path, from: packageRoot.path)
+                  .replaceAll('\\', '/'),
+            ),
+    ]..sort();
     expect(expected, hasLength(16));
     for (final path in expected) {
       expect(

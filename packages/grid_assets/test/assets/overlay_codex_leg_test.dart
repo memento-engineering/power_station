@@ -85,7 +85,8 @@ void main() {
             .toList()
           ..sort();
     expect(files, [
-      for (final id in kVendedSkills) p.join('agents', 'skills', id, 'SKILL.md'),
+      for (final id in kVendedSkills)
+        p.join('agents', 'skills', id, 'SKILL.md'),
     ]);
   });
 

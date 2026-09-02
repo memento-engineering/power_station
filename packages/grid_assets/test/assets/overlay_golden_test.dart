@@ -83,12 +83,13 @@ void main() {
   /// The walk starts at the ROOT, not at one subtree: a loose file at the root
   /// (an `AGENTS.md`, a `settings.json`) is exactly the shape the per-asset-dir
   /// fence cannot cover, so the equality below is what refuses one.
-  List<String> materializedPaths() => worktree
-      .listSync(recursive: true, followLinks: false)
-      .whereType<File>()
-      .map((f) => p.relative(f.path, from: worktree.path))
-      .toList()
-    ..sort();
+  List<String> materializedPaths() =>
+      worktree
+          .listSync(recursive: true, followLinks: false)
+          .whereType<File>()
+          .map((f) => p.relative(f.path, from: worktree.path))
+          .toList()
+        ..sort();
 
   test('the provision wire emits EXACTLY the golden set into a BUILD WORKTREE '
       '— both harness skill trees, no settings.json, no agent-defs, and no '
