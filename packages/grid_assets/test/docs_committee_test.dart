@@ -20,6 +20,22 @@ Bead _docsBead({String? sections}) => bead('pow-1').copyWith(
   metadata: sections == null ? const {} : {'docs_sections': sections},
 );
 
+/// The pow-x6k receipt (power_station #160) — a release bump.
+Bead _releaseBumpBead() => bead('pow-x6k').copyWith(
+  design:
+      '## Touches\n'
+      '- `packages/grid_assets/CHANGELOG.md` — the 0.6.0-rc.6 entry\n'
+      '- `packages/grid_assets/pubspec.yaml` — the version bump\n',
+);
+
+/// The swift-infer-ecny receipt — a README beside a JSON config example.
+Bead _configEditBead() => bead('pow-ecny').copyWith(
+  design:
+      '## Touches\n'
+      '- `swift_infer/README.md` — the usage section\n'
+      '- `swift_infer/example-config.json` — the sample config\n',
+);
+
 /// A unified diff adding [lines] to [path].
 String _diff(String path, List<String> lines) =>
     'diff --git a/$path b/$path\n'
@@ -163,6 +179,118 @@ void main() {
     });
   });
 
+  group('the metadata shape meets the docs committee', () {
+    test('the pow-x6k receipt (CHANGELOG + pubspec) is metadata', () {
+      expect(changeShapeOf(_releaseBumpBead()), ChangeShape.metadata);
+    });
+
+    test('the swift-infer-ecny receipt (README + JSON) is metadata', () {
+      expect(changeShapeOf(_configEditBead()), ChangeShape.metadata);
+    });
+
+    test(
+      'a metadata bead roots docs_review, which mounts no test-coverage',
+      () {
+        const resolver = ChangeShapeCircuitResolver(kCodeCircuit);
+        final review =
+            resolver.circuitFor(ChangeShape.metadata).stepById(kReviewStepId)!
+                as SubCircuitStep;
+        expect(review.circuitId, kDocsReviewCircuitId);
+        expect(
+          kDocsReviewCircuit.steps.map((s) => s.stepId),
+          isNot(contains('test-coverage')),
+        );
+      },
+    );
+
+    test('one source path among metadata keeps the CODE shape', () {
+      final mixed = bead('pow-4').copyWith(
+        design:
+            '## Touches\n'
+            '- `packages/grid_assets/CHANGELOG.md`\n'
+            '- `packages/grid_assets/lib/src/code/docs_committee.dart`\n',
+      );
+      expect(changeShapeOf(mixed), ChangeShape.code);
+    });
+
+    test('isMetadataPath admits non-code surfaces and refuses source', () {
+      for (final path in const [
+        'CHANGELOG.md',
+        'packages/grid_assets/pubspec.yaml',
+        '.github/workflows/ci.yml',
+        'swift_infer/example-config.json',
+        'rust/Cargo.toml',
+        'LICENSE',
+        'docs/adr/ADR-0000-ai-decision-register.md',
+      ]) {
+        expect(isMetadataPath(path), isTrue, reason: path);
+      }
+      for (final path in const [
+        'lib/src/code/docs_committee.dart',
+        'Sources/App/Main.swift',
+        'app/src/Main.kt',
+        'cmd/main.go',
+        'tools/gen.py',
+        'web/app.js',
+        'web/app.ts',
+        'tool/release.sh',
+      ]) {
+        expect(isMetadataPath(path), isFalse, reason: path);
+      }
+    });
+  });
+
+  group('the docs lanes admit a metadata diff and still refuse source', () {
+    test(
+      'every mechanical lane grades A on a CHANGELOG + pubspec diff',
+      () async {
+        final dir = _worktree(
+          _diff('packages/grid_assets/CHANGELOG.md', [
+                '## 0.6.0-rc.6',
+                '',
+                '- the docs committee ships',
+              ]) +
+              _diff('packages/grid_assets/pubspec.yaml', [
+                'version: 0.6.0-rc.6',
+              ]),
+          files: const {
+            'packages/grid_assets/CHANGELOG.md': '# Changelog\n',
+            'packages/grid_assets/pubspec.yaml': 'version: 0.6.0-rc.6\n',
+          },
+        );
+        for (final rubric in kDocsGatingRubrics) {
+          final payload = await _lane(
+            rubric,
+            dir,
+            beadOverride: _releaseBumpBead(),
+          );
+          expect(payload['grade'], 'A', reason: rubric);
+        }
+      },
+    );
+
+    test('a .dart file in the diff is refused, and NAMED', () async {
+      final dir = _worktree(
+        _diff('packages/grid_assets/CHANGELOG.md', ['## 0.6.0-rc.6']) +
+            _diff('packages/grid_assets/lib/src/code/docs_committee.dart', [
+              '// changed',
+            ]),
+      );
+      final payload = await _lane(
+        kTerminologyBanRubric,
+        dir,
+        beadOverride: _releaseBumpBead(),
+      );
+      expect(payload['grade'], 'F');
+      expect(payload['rationale'], contains('source file'));
+      expect(
+        payload['rationale'],
+        contains('packages/grid_assets/lib/src/code/docs_committee.dart'),
+      );
+      expect(payload['rationale'], isNot(contains('CHANGELOG.md')));
+    });
+  });
+
   group('citation-paths-resolve', () {
     test('F names a cited path that does not exist', () async {
       final dir = _worktree(
@@ -286,7 +414,7 @@ void main() {
         );
         final payload = await _lane(kTerminologyBanRubric, dir);
         expect(payload['grade'], 'F');
-        expect(payload['rationale'], contains('non-docs file'));
+        expect(payload['rationale'], contains('source file'));
         expect(payload['rationale'], contains('lib/src/code/committee.dart'));
       },
     );

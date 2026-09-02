@@ -26,9 +26,10 @@
 /// diff, and it cannot read a prior step's result. Selection therefore reads the
 /// bead's DECLARED change surface — the paths its spec cites in `## Touches`
 /// ([changeShapeOf]) — and the docs committee VERIFIES the real diff itself:
-/// every docs lane refuses LOUDLY (grade F, non-docs files named) when the
-/// pinned diff touches a path outside `docs/**` / `*.md`. A mis-declared bead
-/// hard-blocks at a human gate; it never sneaks code past a prose committee.
+/// every docs lane refuses LOUDLY (grade F, source files named) when the
+/// pinned diff touches a path [isMetadataPath] does not admit (`docs/**` and
+/// `*.md`, plus the non-code configuration surfaces — `CHANGELOG.md`,
+/// `pubspec.yaml`, `*.json`, `*.toml`, `LICENSE`).
 library;
 
 import 'dart:convert';
@@ -90,6 +91,12 @@ enum ChangeShape {
   /// Prose only — `docs/**` and `*.md`.
   docs,
 
+  /// Non-code, but not prose either — a `CHANGELOG.md` beside a
+  /// `pubspec.yaml`, a `*.yaml` / `*.json` / `*.toml` config, a `LICENSE`
+  /// ([isMetadataPath]). It meets the SAME committee as [docs]: a release
+  /// bump has no test to cover either, so `test-coverage` must never grade it.
+  metadata,
+
   /// Anything else (the DEFAULT: an undeclared bead gets the code committee).
   code,
 }
@@ -101,6 +108,42 @@ bool isDocsPath(String path) {
   if (normalized.isEmpty || normalized == '.') return false;
   if (normalized.toLowerCase().endsWith('.md')) return true;
   return p.posix.split(normalized).contains('docs');
+}
+
+/// The file extensions a METADATA path may carry — prose and configuration,
+/// never source.
+const Set<String> kMetadataPathExtensions = {
+  '.md',
+  '.yaml',
+  '.yml',
+  '.json',
+  '.toml',
+};
+
+/// The extension-less file NAMES a metadata path may carry.
+const Set<String> kMetadataPathFilenames = {'LICENSE'};
+
+/// Whether [path] is a METADATA path — prose or configuration, never source.
+///
+/// A strict SUPERSET of [isDocsPath]: every docs path is metadata, plus any
+/// file whose extension is in [kMetadataPathExtensions] (`CHANGELOG.md`,
+/// `pubspec.yaml`, `example-config.json`, `Cargo.toml`) and any file whose
+/// name is in [kMetadataPathFilenames] (`LICENSE`).
+///
+/// An ALLOW-list, never a deny-list of source extensions: a `.dart` / `.swift`
+/// / `.kt` / `.go` / `.py` / `.js` / `.ts` file is not metadata because it is
+/// not LISTED — and neither is an unlisted surface nobody thought of (a
+/// `tool/release.sh`, a template, an extension-less script). That keeps
+/// [changeShapeOf]'s fail-to-code posture: an unknown surface meets the CODE
+/// committee rather than sneaking past a prose one.
+bool isMetadataPath(String path) {
+  if (isDocsPath(path)) return true;
+  final normalized = p.posix.normalize(path.trim());
+  if (normalized.isEmpty || normalized == '.') return false;
+  final name = p.posix.basename(normalized);
+  if (kMetadataPathFilenames.contains(name)) return true;
+  final extension = p.posix.extension(name).toLowerCase();
+  return extension.isNotEmpty && kMetadataPathExtensions.contains(extension);
 }
 
 /// [raw] as a citable repo-relative path, or null when it is not one.
@@ -153,17 +196,23 @@ List<String> citedPaths(String markdown) {
 }
 
 /// The bead's DECLARED change shape — [ChangeShape.docs] iff its `## Touches`
-/// section cites at least one path and EVERY cited path is a docs path.
+/// section cites at least one path and EVERY cited path is a docs path;
+/// [ChangeShape.metadata] iff every cited path is a METADATA path
+/// ([isMetadataPath]) but not every one is prose (a `CHANGELOG.md` beside a
+/// `pubspec.yaml` — the pow-x6k receipt).
 ///
-/// Fail-to-code by construction: a bead with no `## Touches` section, or one
-/// that cites nothing, gets the CODE committee. The docs committee is the
-/// narrow, opt-in lane; the code committee stays the default.
+/// Fail-to-code by construction: a bead with no `## Touches` section, one that
+/// cites nothing, or one citing a single unlisted surface gets the CODE
+/// committee. The docs committee is the narrow, opt-in lane; the code
+/// committee stays the default.
 ChangeShape changeShapeOf(Bead bead) {
   final touchesAt = bead.design.indexOf('## Touches');
   if (touchesAt < 0) return ChangeShape.code;
   final cited = citedPaths(sectionBodyAt(bead.design, touchesAt));
   if (cited.isEmpty) return ChangeShape.code;
-  return cited.every(isDocsPath) ? ChangeShape.docs : ChangeShape.code;
+  if (cited.every(isDocsPath)) return ChangeShape.docs;
+  if (cited.every(isMetadataPath)) return ChangeShape.metadata;
+  return ChangeShape.code;
 }
 
 /// The ADDED lines of each file in a unified [diff], keyed by repo-relative
@@ -364,10 +413,11 @@ List<String> sectionFindings({
 /// Three fail-closed refusals, each LOUD and each naming what it refused:
 ///  - no ambient [Bead]/[Workspace] ⇒ F;
 ///  - no pinned diff on disk ⇒ F (the lane cannot see what it must grade);
-///  - a pinned diff touching a NON-docs path ⇒ F, naming the files — the docs
-///    committee was selected from the bead's DECLARED surface, and this is the
-///    verification of the REAL one. A mis-declared bead hard-blocks; it never
-///    gets code reviewed by a prose committee.
+///  - a pinned diff touching a SOURCE path (anything [isMetadataPath] does
+///    not admit) ⇒ F, naming the files — the docs committee was selected from
+///    the bead's DECLARED surface, and this is the verification of the REAL
+///    one. A mis-declared bead hard-blocks; it never gets code reviewed by a
+///    prose committee.
 class DocsCheckCapability extends ServiceCapability {
   /// Creates the lane.
   const DocsCheckCapability();
@@ -399,14 +449,15 @@ class DocsCheckCapability extends ServiceCapability {
     }
     final diff = pinned.readAsStringSync();
     final changed = changedFilesIn(diff);
-    final nonDocs = changed.where((path) => !isDocsPath(path)).toList()..sort();
-    if (nonDocs.isNotEmpty) {
+    final source = changed.where((path) => !isMetadataPath(path)).toList()
+      ..sort();
+    if (source.isNotEmpty) {
       return Ok({
         'grade': 'F',
         'transport': 'structural',
         'rationale':
             'the docs committee was selected but the pinned diff touches '
-            '${nonDocs.length} non-docs file(s): ${nonDocs.join(', ')} — a code '
+            '${source.length} source file(s): ${source.join(', ')} — a code '
             'change belongs to the code committee',
       });
     }
@@ -579,9 +630,12 @@ class ChangeShapeCircuitResolver implements SessionResolver {
   /// The CURRENT code root circuit — `kCodeCircuit` in production.
   final Circuit code;
 
-  /// The root circuit for [shape].
+  /// The root circuit for [shape] — [ChangeShape.docs] and
+  /// [ChangeShape.metadata] share the docs committee (neither carries a test
+  /// to cover), and [ChangeShape.code] keeps the default.
   Circuit circuitFor(ChangeShape shape) => switch (shape) {
-    ChangeShape.docs => withReviewCircuitId(code, kDocsReviewCircuitId),
+    ChangeShape.docs ||
+    ChangeShape.metadata => withReviewCircuitId(code, kDocsReviewCircuitId),
     ChangeShape.code => code,
   };
 
