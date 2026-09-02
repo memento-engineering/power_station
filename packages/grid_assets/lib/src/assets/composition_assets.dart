@@ -44,6 +44,8 @@ import 'package:grid_sdk/grid_sdk.dart' as sdk;
 import 'package:grid_sdk/grid_sdk.dart' show ProviderTreeContext;
 
 import '../agent/agent_harness.dart';
+import '../agent/availability_assets.dart';
+import '../agent/environment_probe.dart';
 import '../agent/environment_registry.dart';
 import '../code/code_capabilities.dart';
 import '../code/mount_eligibility.dart';
@@ -386,12 +388,31 @@ class DerivedServiceBundleSeed extends InheritedSeed<ServiceBundle> {
 /// claude/copilot/pi/opencode/codex set as data) — a `const` value, so the
 /// default is canonical (repeated resolution is the SAME instance, no dependent
 /// churn).
+///
+/// **Availability (ADR-0006 D3, bead `pow-n6n.3`).** Passing [probe] mounts an
+/// [AvailabilityAssets] BELOW the registry seed, which probes every
+/// boot-validated environment and publishes the survivors as
+/// `InheritedSeed<AvailableEnvironments>`; a dead local server disappears from
+/// the set and the next `resolveEnvironment` walk skips it. Unarmed AND with no
+/// ambient [EnvironmentProbeArming], the set stays the boot-validated registry
+/// members (ADR-0000 A35(5)).
+///
+/// **Per-substation arming composes (ADR-0002 D5).** D5 makes a nested
+/// `HarnessProvider` the seat's own arming rung, and a nested one re-provides
+/// its registry unconditionally — so arming is published as an ambient
+/// [EnvironmentProbeArming] and a nested provider WITHOUT its own [probe]
+/// INHERITS it, re-mounting an [AvailabilityAssets] over the registry actually
+/// in effect for that subtree. Without that, a seat overriding only its
+/// registry would keep reading an ancestor's presence set, computed over a
+/// different registry.
 class HarnessProvider extends SingleChildStatelessSeed {
   /// Creates the harness asset over the station-default [registry] and ambient
   /// [config]; [child] is supplied by an enclosing [Nest].
   const HarnessProvider({
     this.registry,
     this.config = const AgentConfig(),
+    this.probe,
+    this.probeInterval = kEnvironmentProbeInterval,
     super.child,
     super.key,
   });
@@ -402,12 +423,48 @@ class HarnessProvider extends SingleChildStatelessSeed {
   /// The station-default agent config (the ladder's ambient rung).
   final AgentConfig config;
 
+  /// The station's LIVE availability probe (ADR-0006 D3), injected — impls are
+  /// DI. A station arms it as `probe: const ProcessEnvironmentProbe().call`.
+  ///
+  /// NULL (the default) ⇒ this provider mounts no probe of its own; it falls
+  /// back to the ambient [EnvironmentProbeArming] (D5 inheritance) and, absent
+  /// that too, to the pre-`pow-n6n.3` behaviour: every boot-validated registry
+  /// member is present (ADR-0000 A35(5)). Arming is a station's call because
+  /// probing touches the machine.
+  final EnvironmentProbe? probe;
+
+  /// The bounded re-probe interval used when [probe] is armed (a VALUE).
+  final Duration probeInterval;
+
   @override
-  Seed buildWithChild(TreeContext context, Seed child) =>
-      InheritedSeed<EnvironmentRegistry>(
-        value: registry ?? buildBuiltinEnvironmentRegistry(),
-        child: InheritedSeed<AgentConfig>(value: config, child: child),
-      );
+  Seed buildWithChild(TreeContext context, Seed child) {
+    final own = probe;
+    // WATCH the ambient arming (the D-H build verb): a station that re-arms
+    // above this seat re-mounts this seat's probe pass too.
+    final inherited = context
+        .dependOnInheritedSeedOfExactType<EnvironmentProbeArming>();
+    final arming = own == null
+        ? inherited
+        : EnvironmentProbeArming(probe: own, interval: probeInterval);
+    // The availability seed sits BELOW the registry seed: it READS the registry
+    // it probes, and its `AvailableEnvironments` must shadow nothing above it.
+    // Bead `pow-2eg` mounts `InheritedSeed<SiteBinding>` in this same nest — it
+    // belongs ABOVE this seed, which watches the site binding.
+    final below = arming == null
+        ? child
+        : InheritedSeed<EnvironmentProbeArming>(
+            value: arming,
+            child: AvailabilityAssets(
+              probe: arming.probe,
+              interval: arming.interval,
+              child: child,
+            ),
+          );
+    return InheritedSeed<EnvironmentRegistry>(
+      value: registry ?? buildBuiltinEnvironmentRegistry(),
+      child: InheritedSeed<AgentConfig>(value: config, child: below),
+    );
+  }
 }
 
 /// **CircuitProvider** — the circuit provider / circuit scope shape (Q8, v3 §3):
