@@ -117,11 +117,8 @@ class CriticAgentEnvironment extends ModelPreference {
       _sameLanes(other.lanes, lanes);
 
   @override
-  int get hashCode => Object.hash(
-    runtimeType,
-    Object.hashAll(entries),
-    _lanesHash(lanes),
-  );
+  int get hashCode =>
+      Object.hash(runtimeType, Object.hashAll(entries), _lanesHash(lanes));
 }
 
 /// Provides a [CriticAgentEnvironment] whose BUILD-time dependents may scope

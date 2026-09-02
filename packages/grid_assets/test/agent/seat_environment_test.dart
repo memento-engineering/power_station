@@ -176,7 +176,9 @@ void main() {
 
     test('an absent specific falls back to the generic', () {
       expect(
-        _specify({ModelPreference: const ModelPreference([_fast])}),
+        _specify({
+          ModelPreference: const ModelPreference([_fast]),
+        }),
         'fast-model',
       );
     });
@@ -208,7 +210,9 @@ void main() {
 
     test('an absent specific falls back to the generic', () {
       expect(
-        _build({ModelPreference: const ModelPreference([_strong])}),
+        _build({
+          ModelPreference: const ModelPreference([_strong]),
+        }),
         'strong-model',
       );
     });
@@ -230,7 +234,9 @@ void main() {
 
     test('an absent specific falls back to the generic', () {
       expect(
-        _gather({ModelPreference: const ModelPreference([_fast])}),
+        _gather({
+          ModelPreference: const ModelPreference([_fast]),
+        }),
         'fast-model',
       );
     });
@@ -271,18 +277,9 @@ void main() {
       final generic = <Type, Object>{
         ModelPreference: const ModelPreference([_fast]),
       };
-      expect(
-        _critic(generic, 'coherence'),
-        'fast-model',
-      );
-      expect(
-        _specCritic(generic, 'coherence'),
-        'fast-model',
-      );
-      expect(
-        _readiness(generic, 'coherence'),
-        'fast-model',
-      );
+      expect(_critic(generic, 'coherence'), 'fast-model');
+      expect(_specCritic(generic, 'coherence'), 'fast-model');
+      expect(_readiness(generic, 'coherence'), 'fast-model');
     });
 
     test('nothing mounted keeps the role rung', () {
@@ -295,9 +292,9 @@ void main() {
       final gating = const CriticCapability().spawn(
         FakeTreeContext(
           values: {
-            Bead: bead('tg-1').copyWith(
-              metadata: const {'validation_plan': 'dart analyze'},
-            ),
+            Bead: bead(
+              'tg-1',
+            ).copyWith(metadata: const {'validation_plan': 'dart analyze'}),
             Workspace: testWorkspace(
               'tg-1',
               workspaceDir: '/w/tg-1',
