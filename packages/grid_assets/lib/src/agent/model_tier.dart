@@ -4,11 +4,11 @@
 /// A20 mapped the spawn's role to a model DIRECTLY, so every new role had to
 /// grow its own model field on the station config, and retuning a class of work
 /// ("grading is cheap now") had to touch the roles that ride it. Selection is
-/// really TWO maps: a DOMAIN policy (role → tier — `tierFor`, in
-/// `agent_harness.dart`, where the role lives) and a STATION arming (tier →
-/// model — this library). This half is deliberately dependency-free, so a tier
-/// can be retuned without a role, a capability, or the engine ever hearing
-/// about it.
+/// really TWO halves: the SPAWN SITE declares the tier it rides (ADR-0006 D5
+/// retired the role indirection that used to derive it) and the STATION arms
+/// TIER → MODEL (this library). This half is deliberately dependency-free, so
+/// a tier can be retuned without a role, a capability, or the engine ever
+/// hearing about it.
 library;
 
 /// The model CLASS a spawn rides — the selection axis. Sealed by the enum:

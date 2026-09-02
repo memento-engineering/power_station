@@ -221,7 +221,7 @@ void main() {
       Map<String, String> stepParams = const {},
       AgentEnvironment? typedEnvironment,
     }) => resolveAgentConfig(
-      role: AgentRole.build,
+      tier: AgentTier.frontier,
       ambient: ambient,
       beadMetadata: beadMetadata,
       stepParams: stepParams,
@@ -235,9 +235,9 @@ void main() {
       expect(config.params['model'], 'opus');
     });
 
-    test('the typed rung OUTRANKS role to env', () {
+    test('the typed rung OUTRANKS the ambient harness', () {
       final config = resolve(
-        ambient: const AgentConfig(roleEnvironments: {AgentRole.build: 'fast'}),
+        ambient: const AgentConfig(harness: 'fast'),
         typedEnvironment: _strong,
       );
       expect(config.harness, 'strong');
@@ -288,10 +288,8 @@ void main() {
       );
     });
 
-    test('omitting the typed rung leaves role to env winning', () {
-      final config = resolve(
-        ambient: const AgentConfig(roleEnvironments: {AgentRole.build: 'fast'}),
-      );
+    test('omitting the typed rung falls through to the ambient harness', () {
+      final config = resolve(ambient: const AgentConfig(harness: 'fast'));
       expect(config.harness, 'fast');
       expect(config.params['model'], 'haiku');
     });

@@ -21,9 +21,9 @@
 ///     the read-only [StationSearchService] seam (ADR-0001: the asset CALLS the
 ///     deterministic Command's service — it never re-derives search by
 ///     inference).
-///  2. [DiscoveryLensCapability] ×3 — parallel READ-ONLY explorers on the CHEAP
-///     tier ([AgentRole.gather] ⇒ [tierFor] ⇒ [AgentTier.cheap]). The role's own
-///     doctrine, at its declaration in `agent_harness.dart`, is the contract this
+///  2. [DiscoveryLensCapability] ×3 — parallel READ-ONLY explorers that declare
+///     [AgentTier.cheap]. The GATHER doctrine ADR-0000 A20's REFINED FORWARD
+///     footer ratified in outline is the contract this
 ///     circuit honors: "read-only discovery: it reads the tree, cites what it
 ///     finds, and DECIDES NOTHING… It is NOT the home for a cheap JUDGEMENT lane
 ///     (a lane that emits a verdict letter is grading, not gathering)." So a lens
@@ -88,6 +88,7 @@ import 'package:path/path.dart' as p;
 import '../agent/agent_domain.dart';
 import '../agent/agent_harness.dart';
 import '../agent/environment_registry.dart';
+import '../agent/model_tier.dart';
 import '../agent/seat_environments.dart';
 import '../agent/site_binding.dart';
 import '../agent/typed_environment.dart';
@@ -1412,8 +1413,8 @@ class AnchorsCapability extends ServiceCapability {
   }
 }
 
-/// The READ-ONLY working agreement every lens rides (A37, and the `gather` role's
-/// own doctrine in `agent_harness.dart`: it reads, it CITES, it decides NOTHING).
+/// The READ-ONLY working agreement every lens rides (A37, and the gather lane's
+/// own doctrine: it reads, it CITES, it decides NOTHING).
 /// Rendered into the brief, and asserted VERBATIM in test: the one artifact a
 /// lens may write is its own report file.
 const String kLensWorkingAgreement = '''
@@ -1429,12 +1430,11 @@ const String kLensWorkingAgreement = '''
   do not read the tree end to end.''';
 
 /// ONE read-only explorer — the discovery circuit's agent lane, on the CHEAP tier
-/// ([AgentRole.gather] ⇒ [tierFor] ⇒ [AgentTier.cheap] ⇒ haiku).
+/// ([AgentTier.cheap] ⇒ [kCheapModelDefault], `haiku`).
 ///
 /// It is NOT a critic and NOT a subclass of [CriticCapability]. That is the
-/// `gather` role's own doctrine, stated at its declaration in
-/// `lib/src/agent/agent_harness.dart` and ratified in outline by ADR-0000 A20's
-/// REFINED FORWARD footer: the role "reads the tree, cites what it finds, and
+/// GATHER doctrine, ratified in outline by ADR-0000 A20's REFINED FORWARD
+/// footer: the lane "reads the tree, cites what it finds, and
 /// DECIDES NOTHING… It is NOT the home for a cheap JUDGEMENT lane (a lane that
 /// emits a verdict letter is grading, not gathering)". A critic emits a LETTER,
 /// and a letter is a judgement. A lens emits a [LensReport]: notes with SOURCES,
@@ -1475,11 +1475,11 @@ class DiscoveryLensCapability extends ProcessCapability {
         buildBuiltinEnvironmentRegistry();
     final siteBinding =
         context.getInheritedSeedOfExactType<SiteBinding>() ?? SiteBinding.none;
-    // The GATHER role — the ONLY read-only role. It rides the CHEAP tier by
-    // policy ([tierFor]), so this lane carries no model opinion of its own and a
+    // The GATHER lane — the ONLY read-only one. It declares the CHEAP tier, so
+    // this lane carries no model opinion of its own and a
     // station that retunes `cheap` moves all three lenses with it.
     final config = resolveAgentConfig(
-      role: AgentRole.gather,
+      tier: AgentTier.cheap,
       ambient: ambient,
       beadMetadata: bead.metadata,
       stepParams: args.params,

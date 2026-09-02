@@ -17,21 +17,22 @@
 /// provision), [CircuitProvider] (the Q8 circuit provider/scope), and
 /// [sourceControlOf] (bead → substation → root resolution, no string-keyed map).
 ///
-/// The AGENT SCOPE's model resolution is ROLE → TIER → MODEL (beads `pow-edp`,
-/// `pow-2c9`): a spawner declares its [AgentRole]; the role points at an
-/// [AgentTier] ([tierFor] — build and architect ⇒ frontier, grade ⇒ mid,
-/// gather ⇒ cheap); and the STATION arms tier → model ([AgentConfig.tiers], a
+/// The AGENT SCOPE's model resolution is TIER → MODEL (beads `pow-2c9`,
+/// `pow-n6n.4`): a spawner declares the [AgentTier] it rides (frontier for the
+/// build and the spec author, mid for the critics, cheap for the read-only
+/// lenses) and the STATION arms tier → model ([AgentConfig.tiers], a
 /// [ModelTiers] value — an unarmed tier rides [defaultModelForTier]:
 /// [kFrontierModelDefault] `opus`, [kMidModelDefault] `sonnet`,
 /// [kCheapModelDefault] `haiku`).
 /// [resolveAgentConfig] resolves *bead `grid.agent` `params.model` > the
-/// station's arming of the role's tier*, stamping the winner into the harness
-/// transport key. So the committee grades cheap while the build runs strong, a
-/// NEW role costs one `tierFor` case (never a new config field), and a retune is
-/// one arming change. The resolved model is ALWAYS explicit — never the harness
-/// CLI's own default (which silently fell back to fable when a weekly limit
-/// blew) — and [UsageReport.model] captures the id(s) that ACTUALLY ran, so
-/// `grid.result.<node>.model` proves it from the ledger (subsuming bead
+/// selected environment's own model > the station's arming of the declared
+/// tier*, stamping the winner into the harness transport key. So the committee
+/// grades cheap while the build runs strong, and a retune is one arming change.
+/// WHICH environment a seat rides is the TYPED lookup (ADR-0006 D2) — D5
+/// retired the role indirection. The resolved model is ALWAYS explicit — never
+/// the harness CLI's own default (which silently fell back to fable when a
+/// weekly limit blew) — and [UsageReport.model] captures the id(s) that ACTUALLY
+/// ran, so `grid.result.<node>.model` proves it from the ledger (subsuming bead
 /// `pow-efv`).
 ///
 /// The COMPUTE asset domain (ADR-0011 D2/D3, M6 Track D) also lives here: the
@@ -117,9 +118,9 @@
 /// grading rubrics, the bead's code anchors resolved against the worktree, and
 /// prior art through the read-only [StationSearchService] the `search` Command
 /// already vends. Three READ-ONLY explorers ([DiscoveryLensCapability]) then run
-/// in parallel on the CHEAP tier — the [AgentRole.gather] role's first spawner —
-/// and, because that role DECIDES NOTHING, a lens emits no letter: it emits a
-/// [LensReport] of context notes and CITED violations. [DiscoveryRouteCapability]
+/// in parallel on the CHEAP tier and, because a lens DECIDES NOTHING, a lens
+/// emits no letter: it emits a [LensReport] of context notes and CITED
+/// violations. [DiscoveryRouteCapability]
 /// makes the call, deterministically ([decideDiscovery]): a bead that contradicts
 /// a ratified ADR or an applicable skill WITHOUT acknowledging the departure is
 /// HELD with the offence CITED, so no architect and no committee ever runs on it;

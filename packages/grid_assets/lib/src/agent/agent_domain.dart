@@ -19,9 +19,9 @@
 ///
 /// The envelope's `params.model` is the TOP rung of the model ladder (bead
 /// `pow-edp`): it overrides the station's `--model`/`--grader-model` and the
-/// asset role defaults alike, for every agent that bead spawns — build and
+/// tier defaults alike, for every agent that bead spawns — build and
 /// grader both. A blank model is a MALFORMATION, refused whole (never a silent
-/// fall-through to the role default).
+/// fall-through to the tier default).
 ///
 /// Every payload field is optional (an override, not a full config). Decode is
 /// FAIL-CLOSED (the envelope precedent: refuse whole, never a partial parse of
@@ -35,6 +35,7 @@ import 'package:dart_grid_assets/dart_grid_assets.dart';
 import 'agent_environment.dart';
 import 'agent_harness.dart';
 import 'environment_registry.dart';
+import 'model_tier.dart';
 
 /// The `grid.agent` metadata key (one slot per domain — the top-level-key
 /// merge granularity).
@@ -113,7 +114,7 @@ AgentConfigOverride _parsePayload(Map<String, Object?> payload) {
   if (beadModel != null && beadModel.trim().isEmpty) {
     throw const FormatException(
       '"params.model" must be a non-empty model name (a blank model would '
-      'silently fall through to the role default — refused whole)',
+      'silently fall through to the tier default — refused whole)',
     );
   }
   return AgentConfigOverride(
@@ -125,31 +126,33 @@ AgentConfigOverride _parsePayload(Map<String, Object?> payload) {
 
 /// The effect-boundary resolution (the D-C ladder as a pure value merge).
 ///
-/// TWO ladders, resolved together for the [role] the SPAWNING ASSET declares:
+/// TWO ladders, resolved together for the [tier] the SPAWNING ASSET declares:
 ///
 ///  - **the NAME ladder** (which environment/harness runs) — a rung names a
 ///    COMPLETE environment via `env`, or diverges the tool only via `harness`;
 ///    *step env/harness > bead env/harness > the TYPED rung ([typedEnvironment]
-///    - a complete environment VALUE the caller resolved from the tree via
+///    — a complete environment VALUE the caller resolved from the tree via
 ///    `resolveEnvironment`, converted back to its registry NAME once by
-///    [EnvironmentRegistry.nameOf]; ADR-0006 D2) > role → env
-///    ([AgentConfig.roleEnvironments]; an unarmed architect tries the build
-///    role's environment) > ambient.harness*, the more-specific rung winning.
-///    The winner is resolved through [registry] to the full {harness,
-///    target, model}. WHERE inference runs is that environment's own `target`
-///    bound by the site binding (ADR-0002 D3), never a step/bead rung;
+///    [EnvironmentRegistry.nameOf]; ADR-0006 D2) > ambient.harness*, the
+///    more-specific rung winning. ADR-0006 D5 DELETED the role → env rung that
+///    used to sit under the typed one (bead `pow-n6n.4`): a seat now says which
+///    environment it wants by mounting a typed VALUE, never by arming a name.
+///    The winner is resolved through [registry] to the full {harness, target,
+///    model}. WHERE inference runs is that environment's own `target` bound by
+///    the site binding (ADR-0002 D3), never a step/bead rung;
 ///  - **the MODEL ladder** (beads `pow-edp` / `pow-2c9`) — *bead `grid.agent`
-///    `params.model` > the NAMED environment's own model (role → env's model;
-///    null on every builtin) > the STATION's arming of the role's TIER
-///    ([AgentConfig.modelForRole]: [tierFor] the role, then [ModelTiers] —
-///    which falls through to that tier's asset default)*. The winner is STAMPED
-///    into the returned config's `params['model']` — the transport key every
-///    harness reads — so a grader rides the mid tier while a builder rides the
-///    frontier off the same ambient config, a gatherer rides cheap, and no
-///    harness needs to know a role or a tier exists.
+///    `params.model` > the SELECTED environment's own model (null on every
+///    claude builtin) > the STATION's arming of the declared [tier]
+///    ([AgentConfig.armedTiers], which falls through to that tier's asset
+///    default)*. The winner is STAMPED into the returned config's
+///    `params['model']` — the transport key every harness reads — so a grader
+///    rides the mid tier while a builder rides the frontier off the same ambient
+///    config, a gatherer rides cheap, and no harness needs to know a tier exists.
 ///
-/// The returned config ALWAYS names an explicit model (no silent fallback to the
-/// harness CLI's own default — the fable/opus incident).
+/// The returned config ALWAYS names an explicit model (ADR-0000 A20(3): no
+/// `fallbackModel`, no unpinned spawn — the fable/opus incident). That is TRUE BY
+/// CONSTRUCTION, because [ModelTiers.modelFor] is total; there is no guard,
+/// because there is nothing for one to check (guards LOUD or GONE).
 ///
 /// Validates the resolved config against [registry] and FAILS CLOSED (throws
 /// [StateError]) on: an incompatible/malformed envelope (including a blank
@@ -158,7 +161,7 @@ AgentConfigOverride _parsePayload(Map<String, Object?> payload) {
 /// supervision as a per-work `Failed` (OQ-c moment 2: one bad bead parks loudly;
 /// the station never crashes).
 AgentConfig resolveAgentConfig({
-  required AgentRole role,
+  required AgentTier tier,
   required AgentConfig ambient,
   required Map<String, dynamic> beadMetadata,
   required Map<String, String> stepParams,
@@ -194,39 +197,26 @@ AgentConfig resolveAgentConfig({
   final stepName =
       _nonEmpty(stepParams['env']) ?? _nonEmpty(stepParams['harness']);
 
-  // Rung 5 — role → env (the station's arming; the successor to role → tier).
-  // ARCHITECT is compatibility-special: an explicit architect arming wins;
-  // otherwise it inherits BUILD's environment before the ambient harness, so
-  // stations that armed only BUILD keep their pre-split behavior.
-  final roleName = switch (role) {
-    AgentRole.build => ambient.roleEnvironments[AgentRole.build],
-    AgentRole.architect =>
-      ambient.roleEnvironments[AgentRole.architect] ??
-          ambient.roleEnvironments[AgentRole.build],
-    AgentRole.grade => ambient.roleEnvironments[AgentRole.grade],
-    AgentRole.gather => ambient.roleEnvironments[AgentRole.gather],
-  };
-
   // The resolved environment NAME → config.harness (the registry key every
   // caller resolves and the site binding keys on). Most-specific rung wins;
   // TOTAL because ambient.harness is a non-null default.
-  // Rung 4.5 - the TYPED rung (epic `pow-n6n`; ADR-0006 D2; mechanism ADR-0000
+  // Rung 5 - the TYPED rung (epic `pow-n6n`; ADR-0006 D2; mechanism ADR-0000
   // A35): the caller resolved a complete environment VALUE out of the tree
-  // (`resolveEnvironment`) and passes it in. It OUTRANKS role -> env and LOSES
-  // to the step/bead NAME rungs. Selection was by value, so legality is already
-  // settled where the value entered the tree (an AvailableEnvironments set
-  // holds only boot-validated registry members); this converts the winner back
-  // to its registry NAME exactly once, so the transport key, the site-binding
-  // lookup and the model ladder below keep reading a valid name and nothing
-  // re-resolves it. A value no armed name resolves to is a programming error
-  // and throws (nameOf, LOUD).
+  // (`resolveEnvironment`) and passes it in. It is the LAST name-producing rung
+  // (bead `pow-n6n.4` deleted role -> env below it) and LOSES to the step/bead
+  // NAME rungs. Selection was by value, so legality is already settled where
+  // the value entered the tree (an AvailableEnvironments set holds only
+  // boot-validated registry members); this converts the winner back to its
+  // registry NAME exactly once, so the transport key, the site-binding lookup
+  // and the model ladder below keep reading a valid name and nothing re-resolves
+  // it. A value no armed name resolves to is a programming error and throws
+  // (nameOf, LOUD).
   String? typedName() {
     final typed = typedEnvironment;
     return typed == null ? null : registry.nameOf(typed);
   }
 
-  final name =
-      stepName ?? beadName ?? typedName() ?? roleName ?? ambient.harness;
+  final name = stepName ?? beadName ?? typedName() ?? ambient.harness;
   config = config.merge(harness: name);
 
   // Legality (OQ-c moment 2, fail-closed): the resolved name must be an armed,
@@ -247,12 +237,12 @@ AgentConfig resolveAgentConfig({
   }
 
   // The MODEL ladder, stamped into the harness transport key: the bead's pinned
-  // model (TOP, every role of that bead) > the NAMED environment's own model
-  // (role → env's model; null on every builtin) > role → tier → model
-  // (ambient.modelForRole — the pre-env ladder, STILL FUNCTIONING until the
-  // shim-deletion bead removes it). TOTAL: modelForRole never returns null.
+  // model (TOP, every spawn of that bead) > the SELECTED environment's own model
+  // (null on every claude builtin) > the station's arming of the DECLARED tier.
+  // TOTAL: ModelTiers.modelFor never returns null, so A20(3) holds by
+  // construction and no spawn is ever unpinned.
   config = config.merge(
-    params: {'model': beadModel ?? env.model ?? ambient.modelForRole(role)},
+    params: {'model': beadModel ?? env.model ?? ambient.armedTiers.modelFor(tier)},
   );
   return config;
 }

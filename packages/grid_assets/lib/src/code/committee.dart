@@ -100,6 +100,7 @@ import 'package:path/path.dart' as p;
 import '../agent/agent_domain.dart';
 import '../agent/agent_harness.dart';
 import '../agent/environment_registry.dart';
+import '../agent/model_tier.dart';
 import '../agent/path_check.dart';
 import '../agent/seat_environments.dart';
 import '../agent/site_binding.dart';
@@ -1160,7 +1161,7 @@ String _reasonTail(String output, [int max = 300]) {
 ///    decision point: no retry storm on a deterministic command failure). It is
 ///    a VALIDATION RUNNER, not an agent — it keeps its direct `sh -c` config;
 ///  - the three LLM lanes RIDE THE HARNESS (ADR-0008 Decision 10 — critics are
-///    agents), in the **GRADE role** ([AgentRole.grade], bead `pow-edp`): the
+///    agents), on the **MID tier** ([AgentTier.mid], bead `pow-2c9`): the
 ///    effective [AgentConfig] resolves through the same ladder as the coding
 ///    agent but off the GRADER rung — a critic reads a pinned diff against ONE
 ///    rubric and writes a letter, so absent a bead or `--grader-model` override
@@ -1377,7 +1378,7 @@ class CriticCapability extends ProcessCapability {
     final siteBinding =
         context.getInheritedSeedOfExactType<SiteBinding>() ?? SiteBinding.none;
     final config = resolveAgentConfig(
-      role: AgentRole.grade,
+      tier: AgentTier.mid,
       ambient: ambient,
       beadMetadata: bead.metadata,
       stepParams: args.params,

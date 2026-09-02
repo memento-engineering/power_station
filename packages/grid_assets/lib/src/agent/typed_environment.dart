@@ -151,8 +151,8 @@ AgentEnvironment? firstAvailable(
 ///  3. then [firstAvailable] over that preference.
 ///
 /// Null when no preference is mounted at all, or when no entry is present: the
-/// caller simply falls to the next rung (`resolveAgentConfig`'s role -> env,
-/// until bead `pow-n6n.4` deletes it).
+/// caller simply falls to the next rung (`resolveAgentConfig`'s `ambient.harness`
+/// — bead `pow-n6n.4` deleted the role -> env rung that used to sit between).
 ///
 /// THE EFFECT VERB, deliberately: `getInheritedSeedOfExactType`, not the
 /// subscribing `dependOn*`. Per the D-H doctrine (ADR-0008 D3; ADR-0000 A8(3))

@@ -30,6 +30,7 @@ import '../agent/agent_environment.dart';
 import '../agent/agent_harness.dart';
 import '../agent/agent_session.dart';
 import '../agent/environment_registry.dart';
+import '../agent/model_tier.dart';
 import '../agent/seat_environments.dart';
 import '../agent/site_binding.dart';
 import '../agent/typed_environment.dart';
@@ -149,10 +150,11 @@ typedef _ResolvedAgentRun = ({
 /// `grid.agent` envelope > ambient; fail-closed → a per-work `Failed`), and
 /// delegates the INVOCATION to the resolved harness.
 ///
-/// It spawns in the **BUILD role** ([AgentRole.build], bead `pow-edp`): absent a
-/// bead or station override, the coding agent rides the FRONTIER tier ([tierFor]
-/// — [kFrontierModelDefault], `opus`) — the committee's critics resolve their
-/// own, cheaper tier off the same ambient config.
+/// It declares the **FRONTIER tier** ([AgentTier.frontier], beads `pow-2c9` /
+/// `pow-n6n.4`): absent a bead or station override, the coding agent rides
+/// [kFrontierModelDefault] (`opus`) — the committee's critics declare the
+/// cheaper MID tier off the same ambient config. WHICH environment it rides is
+/// its typed [BuildAgentEnvironment] seat (ADR-0006 D2), never a name.
 ///
 /// The POLICY stays here:
 /// [buildAgentBrief] renders the full bead (a title-only brief starves the
@@ -239,7 +241,7 @@ class AgentCapability extends ProcessCapability {
     final siteBinding =
         context.getInheritedSeedOfExactType<SiteBinding>() ?? SiteBinding.none;
     final config = resolveAgentConfig(
-      role: AgentRole.build,
+      tier: AgentTier.frontier,
       ambient: ambient,
       beadMetadata: bead.metadata,
       stepParams: args.params,

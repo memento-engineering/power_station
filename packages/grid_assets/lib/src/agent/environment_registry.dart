@@ -139,13 +139,13 @@ class EnvironmentRegistry {
   ///     harness now DATA there is no `supports(target)` table, so legality is the
   ///     environment's own self-consistency ([AgentEnvironment.validate], the
   ///     direct successor to `AgentHarness.supports`) plus a `command` to spawn;
-  ///  3. every name a ROLE maps to is ARMED ([roleEnvironments] — the role→name
-  ///     values the ladder `pow-ebf.5` supplies; role-agnostic here);
+  ///  3. every name an ARMING maps to is ARMED ([armedNames] — the label→name
+  ///     pairs a composition root arms; label-agnostic here);
   ///  4. every machine fact an armed environment needs is BOUND
   ///     ([SiteBinding.validate], bead `pow-ebf.6`).
   /// The composition root throws on a non-null return.
   String? validate({
-    Map<String, String> roleEnvironments = const {},
+    Map<String, String> armedNames = const {},
     SiteBinding siteBinding = SiteBinding.none,
   }) {
     final resolved = <String, AgentEnvironment>{};
@@ -160,12 +160,12 @@ class EnvironmentRegistry {
       if (illegal != null) return illegal;
       resolved[name] = env;
     }
-    for (final entry in roleEnvironments.entries) {
+    for (final entry in armedNames.entries) {
       final env = resolved[entry.value];
       if (env == null) {
-        return 'role "${entry.key}" names environment "${entry.value}" but it '
+        return 'arming "${entry.key}" names environment "${entry.value}" but it '
             'is not armed (armed: ${_armedList()}) — arm "${entry.value}" in '
-            'the environment registry, or point the role at an armed environment';
+            'the environment registry, or point the arming at an armed environment';
       }
       // A claude-native tier default (opus/sonnet/haiku) is CLAUDE's model
       // name; it 400s in any other tool's argv (`codex --model opus` is
@@ -180,7 +180,7 @@ class EnvironmentRegistry {
       if (crossing != null &&
           kClaudeNativeDefaults.contains(crossing) &&
           env.command != kTierDefaultCommand) {
-        return 'role "${entry.key}" names environment "${entry.value}" '
+        return 'arming "${entry.key}" names environment "${entry.value}" '
             '(command "${env.command}") but pins the claude-native model '
             '"$crossing" — a claude tier default '
             '(${kClaudeNativeDefaults.join('/')}) 400s in a non-claude argv '

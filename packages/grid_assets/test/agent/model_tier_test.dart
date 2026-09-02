@@ -1,10 +1,11 @@
-// Bead `pow-2c9` — model selection is ROLE → TIER → MODEL.
+// Bead `pow-2c9` — model selection is TIER → MODEL (bead `pow-n6n.4` retired
+// the role half).
 //
 // A20 mapped role → model directly (build ⇒ `params['model']`, grade ⇒
 // `graderModel`), so a new role meant a new station field and a retune meant
-// touching roles. The tier is the axis selection actually varies on: the domain
-// declares a ROLE, the role points at a TIER (`tierFor` — a tiny policy), and
-// the STATION arms TIER → MODEL (`ModelTiers`). This suite pins the axis, the
+// touching roles. The tier is the axis selection actually varies on: the SPAWN
+// SITE declares a TIER and the STATION arms TIER → MODEL (`ModelTiers`). This
+// suite pins the axis, the
 // arming, `gather` = cheap = haiku end to end, the readiness lane's CURRENT rung
 // (ADR-0000 A17(6) — see the group below), and the two fences that keep the
 // layering honest (the tier axis knows no engine and no role; the engine knows
@@ -33,9 +34,9 @@ String _modelOf(RuntimeConfig cfg) {
   return cfg.args[i + 1];
 }
 
-/// Resolves a config for [role] off the station [ambient] (no bead override).
-AgentConfig _resolve(AgentRole role, AgentConfig ambient) => resolveAgentConfig(
-  role: role,
+/// Resolves a config for [tier] off the station [ambient] (no bead override).
+AgentConfig _resolve(AgentTier tier, AgentConfig ambient) => resolveAgentConfig(
+  tier: tier,
   ambient: ambient,
   beadMetadata: const {},
   stepParams: const {},
@@ -138,61 +139,24 @@ void main() {
     );
   });
 
-  group('the ROLE → TIER policy (the whole per-role surface)', () {
-    test('build + architect ⇒ frontier, grade ⇒ mid, gather ⇒ cheap', () {
-      expect(AgentRole.values, [
-        AgentRole.build,
-        AgentRole.architect,
-        AgentRole.grade,
-        AgentRole.gather,
-      ]);
-      expect(tierFor(AgentRole.build), AgentTier.frontier);
-      expect(tierFor(AgentRole.architect), AgentTier.frontier);
-      expect(tierFor(AgentRole.grade), AgentTier.mid);
-      expect(tierFor(AgentRole.gather), AgentTier.cheap);
-    });
-
-    test('role → tier → model preserves every default', () {
-      expect(defaultModelFor(AgentRole.build), 'opus');
-      expect(defaultModelFor(AgentRole.architect), 'opus');
-      expect(defaultModelFor(AgentRole.grade), 'sonnet');
-      expect(defaultModelFor(AgentRole.gather), 'haiku');
-      const station = AgentConfig();
-      expect(station.modelForRole(AgentRole.build), 'opus');
-      expect(station.modelForRole(AgentRole.architect), 'opus');
-      expect(station.modelForRole(AgentRole.grade), 'sonnet');
-      expect(station.modelForRole(AgentRole.gather), 'haiku');
-    });
-
-    test(
-      'architect resolves through frontier and stamps the frontier default',
-      () {
-        final config = _resolve(AgentRole.architect, const AgentConfig());
-        expect(tierFor(AgentRole.architect), AgentTier.frontier);
-        expect(config.params['model'], kFrontierModelDefault);
-        expect(config.params['model'], 'opus');
-      },
-    );
-  });
-
   group(
     'the STATION arms TIER → MODEL (one change retunes a class of work)',
     () {
-      test('arming the tiers moves every role that rides them', () {
+      test('arming the tiers moves every spawn that rides them', () {
         const station = AgentConfig(
           tiers: ModelTiers(cheap: 'c', mid: 'm', frontier: 'f'),
         );
-        expect(station.modelForRole(AgentRole.build), 'f');
-        expect(station.modelForRole(AgentRole.grade), 'm');
-        expect(station.modelForRole(AgentRole.gather), 'c');
+        expect(station.armedTiers.modelFor(AgentTier.frontier), 'f');
+        expect(station.armedTiers.modelFor(AgentTier.mid), 'm');
+        expect(station.armedTiers.modelFor(AgentTier.cheap), 'c');
       });
 
-      test('"grading is cheap now" is ONE arming change — no role churn', () {
+      test('"grading is cheap now" is ONE arming change — no spawn churn', () {
         const station = AgentConfig(tiers: ModelTiers(mid: 'haiku'));
-        expect(_resolve(AgentRole.grade, station).params['model'], 'haiku');
+        expect(_resolve(AgentTier.mid, station).params['model'], 'haiku');
         // …and the other tiers are untouched.
-        expect(_resolve(AgentRole.build, station).params['model'], 'opus');
-        expect(_resolve(AgentRole.gather, station).params['model'], 'haiku');
+        expect(_resolve(AgentTier.frontier, station).params['model'], 'opus');
+        expect(_resolve(AgentTier.cheap, station).params['model'], 'haiku');
       });
     },
   );
@@ -200,13 +164,13 @@ void main() {
   group('the PRE-TIER station knobs project onto tiers (A20, no wedge)', () {
     test('--model X arms FRONTIER only; --grader-model Y arms MID only', () {
       const build = AgentConfig(params: {'model': 'X'});
-      expect(build.modelForRole(AgentRole.build), 'X');
-      expect(build.modelForRole(AgentRole.grade), 'sonnet');
-      expect(build.modelForRole(AgentRole.gather), 'haiku');
+      expect(build.armedTiers.modelFor(AgentTier.frontier), 'X');
+      expect(build.armedTiers.modelFor(AgentTier.mid), 'sonnet');
+      expect(build.armedTiers.modelFor(AgentTier.cheap), 'haiku');
       const grade = AgentConfig(graderModel: 'Y');
-      expect(grade.modelForRole(AgentRole.build), 'opus');
-      expect(grade.modelForRole(AgentRole.grade), 'Y');
-      expect(grade.modelForRole(AgentRole.gather), 'haiku');
+      expect(grade.armedTiers.modelFor(AgentTier.frontier), 'opus');
+      expect(grade.armedTiers.modelFor(AgentTier.mid), 'Y');
+      expect(grade.armedTiers.modelFor(AgentTier.cheap), 'haiku');
     });
 
     test('a PRE-TIER knob OUT-RANKS an armed tier — an operator flag is never '
@@ -216,41 +180,25 @@ void main() {
         graderModel: 'Y',
         tiers: ModelTiers(mid: 'm', frontier: 'f'),
       );
-      expect(station.modelForRole(AgentRole.build), 'X');
-      expect(station.modelForRole(AgentRole.grade), 'Y');
+      expect(station.armedTiers.modelFor(AgentTier.frontier), 'X');
+      expect(station.armedTiers.modelFor(AgentTier.mid), 'Y');
     });
 
     test('the UNMIGRATED station surface still compiles and resolves '
         '(`space up --model` / `--grader-model`)', () {
       const armed = AgentConfig(params: {'model': 'X'}, graderModel: 'Y');
-      expect(
-        armed.stationModelFor(AgentRole.build) ??
-            defaultModelFor(AgentRole.build),
-        'X',
-      );
-      expect(
-        armed.stationModelFor(AgentRole.grade) ??
-            defaultModelFor(AgentRole.grade),
-        'Y',
-      );
+      expect(armed.armedTiers.armed(AgentTier.frontier), 'X');
+      expect(armed.armedTiers.armed(AgentTier.mid), 'Y');
       const bare = AgentConfig();
-      expect(bare.stationModelFor(AgentRole.build), isNull);
-      expect(
-        bare.stationModelFor(AgentRole.build) ??
-            defaultModelFor(AgentRole.build),
-        'opus',
-      );
-      expect(
-        bare.stationModelFor(AgentRole.grade) ??
-            defaultModelFor(AgentRole.grade),
-        'sonnet',
-      );
+      expect(bare.armedTiers.armed(AgentTier.frontier), isNull);
+      expect(bare.armedTiers.modelFor(AgentTier.frontier), 'opus');
+      expect(bare.armedTiers.modelFor(AgentTier.mid), 'sonnet');
     });
   });
 
-  group('gather = cheap = haiku, end to end at the argv', () {
+  group('cheap = haiku, end to end at the argv', () {
     test('a gather spawn stamps --model haiku into the claude invocation', () {
-      final config = _resolve(AgentRole.gather, const AgentConfig());
+      final config = _resolve(AgentTier.cheap, const AgentConfig());
       expect(config.params['model'], 'haiku');
       final cfg = spawnFor(
         environment: kBuiltinEnvironments['claude']!,
@@ -266,7 +214,7 @@ void main() {
     });
 
     test(
-      'a bead-pinned model still outranks the tier, for the gather role too',
+      'a bead-pinned model still outranks the cheap tier',
       () {
         final pinned = bead('tg-1').copyWith(
           metadata: {
@@ -279,7 +227,7 @@ void main() {
           },
         );
         final config = resolveAgentConfig(
-          role: AgentRole.gather,
+          tier: AgentTier.cheap,
           ambient: const AgentConfig(),
           beadMetadata: pinned.metadata,
           stepParams: const {},
@@ -289,9 +237,9 @@ void main() {
       },
     );
 
-    test('EVERY role resolves a non-empty model (no unpinned spawn)', () {
-      for (final role in AgentRole.values) {
-        expect(_resolve(role, const AgentConfig()).params['model'], isNotEmpty);
+    test('EVERY tier resolves a non-empty model (no unpinned spawn)', () {
+      for (final tier in AgentTier.values) {
+        expect(_resolve(tier, const AgentConfig()).params['model'], isNotEmpty);
       }
     });
   });
@@ -305,8 +253,8 @@ void main() {
   // rungs (sonnet, not the build's opus) — so A17(6) is KEPT. Pointing it at
   // the CHEAP tier now that one exists is a BEHAVIOR change on a live
   // governance lane, with its own bead. This test pins TODAY's rung at the
-  // argv, so that flip is a deliberate two-line diff (the role in
-  // `readiness.dart`, this expectation) — never silent drift.
+  // argv, so that flip is a deliberate two-line diff (a cheap-tier declaration
+  // at the spawn, this expectation) — never silent drift.
   group('the READINESS lane rides the MID tier today (A17(6), pinned)', () {
     test('ReadinessCriticCapability spawns --model sonnet', () {
       final cfg = const ReadinessCriticCapability().spawn(
@@ -334,9 +282,8 @@ void main() {
   });
 
   group('the fences — the layering is real', () {
-    test('a NEW role added NO station model field: the arming surface is one '
-        'knob per TIER', () {
-      // Three tiers, three armings — and the role count moved without it.
+    test('the station model surface stays one knob per TIER', () {
+      // Three tiers, three armings.
       const armed = ModelTiers(cheap: 'c', mid: 'm', frontier: 'f');
       expect(
         {for (final t in AgentTier.values) t: armed.armed(t)},
@@ -345,7 +292,7 @@ void main() {
       expect(
         _sourceUnder(_libDir()),
         isNot(contains('gatherModel')),
-        reason: 'a role points at a TIER — it never grows its own model field',
+        reason: 'a lane declares a TIER — it never grows its own model field',
       );
     });
 
@@ -369,10 +316,9 @@ void main() {
       () {
         final engine = _sourceUnder(_engineLibDir());
         for (final domain in [
-          'AgentRole',
           'AgentTier',
           'ModelTiers',
-          'tierFor',
+          'ModelPreference',
         ]) {
           expect(
             engine,

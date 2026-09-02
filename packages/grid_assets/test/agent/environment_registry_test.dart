@@ -158,17 +158,15 @@ void main() {
       );
     });
 
-    test('an unarmed role environment is refused, naming role and name', () {
+    test('an unarmed name is refused, naming the arming and the name', () {
       const registry = EnvironmentRegistry(
         custom: {'frontier': AgentEnvironment(command: 'claude')},
       );
-      final refusal = registry.validate(
-        roleEnvironments: {'build': 'missing-env'},
-      );
+      final refusal = registry.validate(armedNames: {'build': 'missing-env'});
       expect(
         refusal,
         allOf(
-          contains('role "build"'),
+          contains('arming "build"'),
           contains('"missing-env"'),
           contains('not armed'),
         ),

@@ -531,7 +531,7 @@ void main() {
     );
   });
 
-  group('the lenses are READ-ONLY (A37) and CHEAP (the `gather` role)', () {
+  group('the lenses are READ-ONLY (A37) and CHEAP (the gather lane)', () {
     RuntimeConfig spawnLens(String lens) =>
         const DiscoveryLensCapability().spawn(
           FakeTreeContext(
@@ -551,7 +551,6 @@ void main() {
         final i = cfg.args.indexOf('--model');
         expect(i, greaterThanOrEqualTo(0), reason: 'the lens named NO --model');
         expect(cfg.args[i + 1], kCheapModelDefault);
-        expect(tierFor(AgentRole.gather), AgentTier.cheap);
       },
     );
 
