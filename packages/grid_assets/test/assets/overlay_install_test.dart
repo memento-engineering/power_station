@@ -498,7 +498,7 @@ void main() {
     );
 
     test(
-      'assets install materializes grid.approved staging in both skills',
+      'assets install materializes the stamped approve verb in both skills',
       () async {
         final report = await const OverlayInstallService().install(
           overlayRoots: [p.join(_extensionDir(), 'station_overlay')],
@@ -519,6 +519,17 @@ void main() {
             reason: '$id teaches approval',
           );
           expect(body, isNot(contains('--defer')), reason: '$id retired defer');
+          expect(
+            body,
+            contains('space approve --actor'),
+            reason: '$id installs the approve verb, not a hand-added label',
+          );
+          expect(
+            body,
+            contains('grid.approved_at'),
+            reason: '$id installs the stamp keys',
+          );
+          expect(body, isNot(contains('--add-label ${'grid'}.approved')));
         }
       },
     );

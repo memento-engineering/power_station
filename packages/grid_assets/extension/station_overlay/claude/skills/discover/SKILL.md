@@ -149,9 +149,12 @@ restate that boundary as Filing requirements.
   when repo ownership calls for it — including the three-store split directed
   by Nico on 2026-07-26 — and express their ordering with the link-authoring
   verb.
-- **Unapproved, never mounted:** the mounted predicate refuses a bead without
-  the `grid.approved` label. Create it without the label so dependency wiring
-  and design can finish before the bead enters the mounted frontier.
+- **Unapproved, never mounted:** approval is the approve verb, never a
+  hand-added label. The mounted predicate refuses a bead without the
+  `grid.approved` label, and refuses a bare, unstamped one with
+  `approval: unstamped label - approve with the approve verb`. Create it
+  without the label so dependency wiring and design can finish before the bead
+  enters the mounted frontier.
 
 ```bash
 cd <owning store root>
@@ -178,18 +181,26 @@ search --json "<new bead id>"` and require an `id`-field hit. Never use `bd show
 for this verification: exact-id lookup resolves a stranded wisp and hides that
 it is absent from list/search surfaces.
 
-The bead stays outside the mounted frontier until the human approves it because
-it has no `grid.approved` label. Record design approval and add the marker in
-one update:
+The bead stays outside the mounted frontier until the human approves it: it has
+no `grid.approved` label, and a hand-added label would not mount it either.
+Record the approved design first, then run the approve verb from the owning
+store root. The verb re-runs the four-row filing preflight and, only if every
+row passes, writes the label AND its receipt in ONE `bd update`:
+`grid.approved_by` (the `--actor`), `grid.approved_at` (the UTC ISO-8601
+instant) and `grid.approved_rev` (the store root's git HEAD sha).
 
 ```bash
 bd update <id> --description "<approved description>" \
-  --design "<approved design>" --add-label grid.approved --actor governor
+  --design "<approved design>" --actor governor
+{{runner}} approve --actor governor --json "<id>"
 ```
 
-The approval marker is the staging transition; do not add it before the human
-approves. All backlog writes ride the bd CLI with `--actor governor`; never SQL,
-never `.beads/hooks/`.
+A refusal prints `"approved": false` with a `reason` and writes NOTHING:
+correct the bead and rerun the verb. Never stamp by hand — a label added with
+`bd update` alone is refused at mount with
+`approval: unstamped label - approve with the approve verb`. The verb is the
+staging transition; do not run it before the human approves. All backlog writes
+ride the bd CLI with `--actor governor`; never SQL, never `.beads/hooks/`.
 
 Filing supplies an executable initial plan. After design, specify
 authoritatively replaces or refines the implementation-aligned plan.
