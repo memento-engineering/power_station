@@ -1,6 +1,6 @@
 ---
 status: accepted
-date: 2026-09-01
+date: 2026-09-02
 decision-makers: ["nico"]
 consulted: []
 informed: []
