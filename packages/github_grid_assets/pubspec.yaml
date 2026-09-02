@@ -14,7 +14,7 @@ environment:
   sdk: ^3.11.0
 
 dependencies:
-  beads_dart: ^0.2.0-rc.4
+  beads_dart: ^0.2.0-rc.6
   dart_jsonwebtoken: ^3.4.1
   freezed_annotation: ^3.0.0
   genesis_tree: ^0.3.0

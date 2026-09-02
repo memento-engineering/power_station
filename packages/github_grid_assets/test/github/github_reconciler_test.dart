@@ -110,6 +110,8 @@ final class FakeBdRunner implements BdRunner {
 }
 
 void main() {
+  setUp(BdCliService.resetCreateMetadataCapabilityForTesting);
+
   test(
     'mixed /issues states project only open rows and claim every observation',
     () async {
@@ -177,7 +179,7 @@ void main() {
       expect(_issue(pull: true), isNot(contains('head')));
       expect(events, <Matcher>[isA<IssueOpened>(), isA<PullRequestOpened>()]);
       final creates = runner.argvs
-          .where((argv) => argv.first == 'create')
+          .where((argv) => argv.first == 'create' && argv[1] != '--help')
           .toList(growable: false);
       expect(creates, hasLength(2));
       for (final argv in creates) {

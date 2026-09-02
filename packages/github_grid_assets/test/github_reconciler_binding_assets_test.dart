@@ -165,6 +165,8 @@ Seed _boundTree({
 );
 
 void main() {
+  setUp(BdCliService.resetCreateMetadataCapabilityForTesting);
+
   test('live binding provides both seams and constructs the runtime', () {
     final factory = _Factory();
     GitHubCursorStore? cursors;
@@ -304,7 +306,7 @@ void main() {
         body: 'Issue body',
       ),
     );
-    expect(runner.argvs, hasLength(2));
+    expect(runner.argvs, hasLength(3));
     expect(
       runner.argvs.last,
       containsAllInOrder([

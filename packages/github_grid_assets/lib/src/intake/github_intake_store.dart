@@ -1,5 +1,3 @@
-import 'dart:convert';
-
 import 'package:beads_dart/beads_dart.dart';
 
 /// Thin GitHub entity content projected into a bead.
@@ -39,86 +37,64 @@ abstract interface class GitHubIntakeStore {
   Future<void> upsertDeferred(GitHubIntakeRecord record);
 }
 
+/// The far-future date every GitHub intake bead is parked behind until a human
+/// triages it.
+///
+/// This is the existing pending-state contract, moved verbatim onto the shared
+/// builder. Bead `pow-5wo` owns replacing it with the eventual lifecycle.
+const String kGitHubIntakeDeferUntil = '9999-12-31';
+
 /// bd-CLI implementation of [GitHubIntakeStore].
+///
+/// Every call goes through [BdCliService] so the shared compatibility rails
+/// cover this surface. Metadata is merged per key to preserve values owned by
+/// other writers on the same bead.
 final class BdGitHubIntakeStore implements GitHubIntakeStore {
   /// Creates a store over the shared bounded runner.
-  const BdGitHubIntakeStore(this._runner);
+  BdGitHubIntakeStore(BdRunner runner) : _bd = BdCliService(runner);
 
-  final BdRunner _runner;
+  final BdCliService _bd;
 
   @override
   Future<void> upsertDeferred(GitHubIntakeRecord record) async {
-    final rows = (await _run(<String>[
-      'list',
-      '--all',
-      '--external-ref',
-      record.externalRef,
-      '--limit',
-      '0',
-      '--json',
-    ])).dataList;
-    if (rows.length > 1) {
+    // Type-agnostic and closed-inclusive: a correlated bead may have been
+    // re-typed or closed since intake, and both still count as correlated.
+    final beads = (await _bd.listScope(
+      externalRef: record.externalRef,
+      includeClosed: true,
+    )).beads;
+    if (beads.length > 1) {
       throw StateError('multiple beads correlate to ${record.externalRef}');
     }
-    if (rows case [final row]) {
-      final id = row['id'];
-      if (id is! String || id.isEmpty) {
+    if (beads case [final bead]) {
+      if (bead.id.isEmpty) {
         throw const BdParseException('correlated bead has no string id');
       }
-      await _run(<String>[
-        'update',
-        id,
-        '--title',
-        record.beadTitle,
-        '--description',
-        record.description,
-        '--metadata',
-        _metadata(record),
-        '--actor',
-        'grid-controller',
-        '--json',
-      ]);
+      await _bd.update(
+        bead.id,
+        title: record.beadTitle,
+        description: record.description,
+        mergeMetadata: _metadata(record),
+      );
       return;
     }
-    await _run(<String>[
-      'create',
-      '--title',
-      record.beadTitle,
-      '--description',
-      record.description,
-      '--type',
-      'chore',
-      '--priority',
-      '2',
-      '--defer',
-      '9999-12-31',
-      '--external-ref',
-      record.externalRef,
-      '--metadata',
-      _metadata(record),
-      '--actor',
-      'grid-controller',
-      '--json',
-    ]);
+    await _bd.create(
+      title: record.beadTitle,
+      type: IssueType.chore,
+      priority: 2,
+      description: record.description,
+      defer: kGitHubIntakeDeferUntil,
+      externalRef: record.externalRef,
+      setMetadata: _metadata(record),
+    );
   }
 
-  String _metadata(GitHubIntakeRecord record) => jsonEncode(<String, String>{
+  /// The four always-present correlation keys. Flat, string-valued, and never
+  /// removed, so per-key writes express the complete intake-owned map.
+  Map<String, String> _metadata(GitHubIntakeRecord record) => <String, String>{
     'github.node_id': record.nodeId,
     'github.kind': record.kind,
     'github.repository': record.repository,
     'github.actor': record.actor,
-  });
-
-  Future<BdEnvelope> _run(List<String> args) async {
-    final result = await _runner.run(args);
-    if (!result.ok) {
-      throw BdCommandFailed.fromOutput(
-        command: <String>['bd', ...args],
-        exitCode: result.exitCode,
-        stdout: result.stdout,
-        stderr: result.stderr,
-      );
-    }
-    return BdEnvelope.parse(result.stdout);
-  }
+  };
 }
