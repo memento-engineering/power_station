@@ -18,21 +18,10 @@ workspace:
 # See the_grid docs/SCRATCH-pub-capability-and-repo-split.md.
 
 # VERSION overrides (never path overrides — ADR-0003 D5 keeps those machine-local
-# in the gitignored pubspec_overrides.yaml). These are checked in because they are
-# machine-independent and CI resolves with no overrides file at all. Each one works
-# around a producer that is broken on pub.dev, and each retires when that producer
-# republishes:
-#   genesis_perception — leonard_contract 0.2.1 pins ^0.2.0, but genesis_perception
-#     0.2.0 does not compile against genesis_tree 0.3.0 (its _PerceptionHandle
-#     "has fewer named arguments than" TreeContext.dependOnInheritedSeedOfExactType,
-#     which 0.3.0 widened with {Object? aspect}). Retires when lenny republishes
-#     leonard_contract against genesis_perception ^0.3.0.
-#   genesis_tree — grid_cli 0.5.0-rc.8 (the newest hosted release that compiles,
-#     see github_grid_assets' cap) still pins ^0.2.0. Retires when the_grid
-#     republishes grid_exploration + grid_cli against genesis_tree ^0.3.0.
-dependency_overrides:
-  genesis_perception: ^0.3.0
-  genesis_tree: ^0.3.0
+# in the gitignored pubspec_overrides.yaml) are checked in only while a producer is
+# broken on pub.dev. None are needed today: leonard_contract 0.2.2 and the wave-2
+# the_grid train (grid_exploration 0.3.0-rc.4 / grid_cli 0.5.0-rc.10) resolve
+# against genesis 0.3.0.
 
 dev_dependencies:
   melos: ^7.7.0

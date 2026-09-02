@@ -1,3 +1,22 @@
+## 0.6.0-rc.7
+
+- Breaking: the role map is retired — `AgentRole`, `roleEnvironments`,
+  `modelForRole`, `stationModelFor`, `tierFor` and `defaultModelFor` are gone;
+  `resolveAgentConfig` maps role to tier and model environments are selected by
+  value through typed seats (`seat_environments.dart`) (#161, #168, #170).
+  Migration: author the agent posture as typed seat environments instead of a
+  role map; see `lib/src/agent/seat_environments.dart`.
+- Breaking: author-owned spec-review verdicts route to the human gate
+  (pow-hxme, #164), and committee metadata changes route through docs review (#162).
+- Live environment availability is published to the arming surface (pow-n6n.3, #165).
+- The decisions register: design decisions are recorded as slug entries under
+  `docs/decisions/` and the lens excludes `views/` (#169).
+- The approve verb stamps `grid.approved_by/at/rev` beside the label, and the
+  overlay skills teach approval through the verb (pow-5ch, #163).
+- Declared-tests base-gates bare prose test mentions (#158).
+- Requires `grid_runtime ^0.2.0-rc.8` and `beads_dart ^0.2.0-rc.5`
+  (the wave-2 the_grid train).
+
 ## 0.6.0-rc.6
 
 - Breaking: a `grid.approved` label without a `grid.approved_at` stamp no
