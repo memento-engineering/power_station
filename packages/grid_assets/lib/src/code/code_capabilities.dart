@@ -388,15 +388,18 @@ class AgentCapability extends ProcessCapability {
   /// `.claude/skills/`, and print mode invokes a skill only when the brief names
   /// it explicitly — hence the returned ids ride [buildAgentBrief]).
   ///
-  /// SCOPED to [kClaudeSkillsSubtree]: the overlay is ONE tree with two
-  /// consumers, but a per-bead worktree gets the SKILL tree only. The
-  /// operator-seat assets (`.claude/agents/governor.md`, `.claude/settings.json`)
-  /// belong to the human's seat, and a LOOSE file under `.claude/` cannot be
-  /// git-fenced per-asset-dir — A23(6) rejected a shared `.claude/.gitignore`
-  /// precisely because `.claude/` is repo-owned territory in the repos the grid
-  /// cuts worktrees from (power_station and lenny TRACK `.claude/settings.json`).
-  /// Installing one there would either leak into the bead's PR or overwrite a
-  /// tracked repo file from a provision hook.
+  /// SCOPED to [kWorktreeOverlaySubtrees]: the overlay is ONE tree with two
+  /// consumers, but a per-bead worktree gets the per-harness SKILL trees only
+  /// (`.claude/skills` for Claude Code, `.agents/skills` for Codex — which
+  /// Copilot CLI reads as well, so both legs together reach every harness the
+  /// station arms). The operator-seat assets (`.claude/agents/governor.md`,
+  /// `.claude/settings.json`) belong to the human's seat, and a LOOSE file
+  /// under a repo-owned dir cannot be git-fenced per-asset-dir — A23(6)
+  /// rejected a shared `.claude/.gitignore` precisely because `.claude/` is
+  /// repo-owned territory in the repos the grid cuts worktrees from
+  /// (power_station and lenny TRACK `.claude/settings.json`; `bd init` tracks
+  /// `.agents/skills/beads/`). Installing one there would either leak into the
+  /// bead's PR or overwrite a tracked repo file from a provision hook.
   ///
   /// Same synchronous constraint as the pub-link write above, and the same
   /// never-clobber posture ([OverlayMaterializer] refuses to overwrite a file it
@@ -429,15 +432,21 @@ class AgentCapability extends ProcessCapability {
         ..._overlayArgs,
       },
     );
-    _excludeOverlayFromGit(
-      workspace.workspaceDir,
-      report.writtenAssetDirsUnder(kClaudeSkillsSubtree),
-    );
+    for (final subtree in kWorktreeOverlaySubtrees) {
+      _excludeOverlayFromGit(
+        workspace.workspaceDir,
+        report.writtenAssetDirsUnder(subtree),
+      );
+    }
     // AUDIENCE: the overlay is ONE tree with two consumers, so a worktree gets
     // the operator skills too — but the brief must not OFFER them.
     // `harvest-review` pushes and opens PRs; this brief forbids both. A skill
     // the brief never names cannot be invoked (print mode selects none on its
     // own — ADR-0001), so withholding the name is the whole guard.
+    //
+    // ONE leg answers for both: the agents leg is pinned byte-identical to the
+    // claude leg (`overlay_codex_leg_test.dart`), so its id set is the same
+    // set. Reading both would just deduplicate what one read already gives.
     return [
       for (final id in report.installedSkillIdsUnder(kClaudeSkillsSubtree))
         if (!kOperatorSkills.contains(id)) id,
@@ -447,7 +456,8 @@ class AgentCapability extends ProcessCapability {
   /// Keeps what we just materialized OUT of the bead's commit: the bound
   /// `DeliveryMethod` commits residue with `git add -A` (`GitOps.commitAll`), so
   /// an untracked
-  /// `.claude/skills/**` would ride every bead's PR into whatever repo the bead
+  /// `.claude/skills/**` or `.agents/skills/**` would ride every bead's PR into
+  /// whatever repo the bead
   /// belongs to. Writes a SELF-IGNORING `.gitignore` — a single `*` — INSIDE
   /// each asset dir this call wrote into: `*` matches every file in that dir
   /// INCLUDING the `.gitignore` itself, so the whole vended asset is invisible

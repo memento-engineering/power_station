@@ -82,8 +82,9 @@
 /// overlay AUTHOR decides where an asset lands by where it sits in the tree.
 /// ONE root-parametric materializer, two callers, two roots — this package's OWN
 /// provision-time wire ([AgentCapability], onto a per-bead WORKTREE root, so a
-/// station-spawned `claude -p` can `/invoke` a vended skill; SCOPED to
-/// [kClaudeSkillsSubtree], because a loose `.claude/settings.json` is repo-owned
+/// station-spawned agent can `/invoke` a vended skill; SCOPED to
+/// [kWorktreeOverlaySubtrees] — the per-harness SKILL trees `.claude/skills`
+/// and `.agents/skills` — because a loose `.claude/settings.json` is repo-owned
 /// territory) and the operator install Command (onto a STATION repo root, whole
 /// tree). It renders each file, REFUSES to install one whose holes are unbound,
 /// and NEVER clobbers a file it did not generate.
