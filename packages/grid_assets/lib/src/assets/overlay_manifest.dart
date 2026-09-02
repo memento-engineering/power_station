@@ -6,11 +6,18 @@ import 'package:path/path.dart' as p;
 import 'package:yaml/yaml.dart';
 
 /// Default publish-safe source directory to harness target directory mappings.
+///
+/// A head exists only where some harness READS the mapped target inside a repo:
+/// `.claude` (Claude Code), `.agents` (Codex skills, also read by Copilot CLI),
+/// `.github` (Copilot's repo-level instructions), `.codex` (Codex config).
+/// A repo-level `.copilot/` is read by nothing — Copilot CLI reads `.github/`,
+/// `.claude/` and `.agents/` in the repo and `$HOME/.copilot/` outside it — so
+/// no `copilot` head is vended. A pack that wants one declares it in its own
+/// `station_overlay.mappings`.
 const Map<String, String> kDefaultStationOverlayMappings = {
   'claude': '.claude',
   'agents': '.agents',
   'github': '.github',
-  'copilot': '.copilot',
   'codex': '.codex',
 };
 
