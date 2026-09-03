@@ -1,12 +1,13 @@
 // The DISCOVERY circuit, offline end-to-end.
 //
 // Drives the nested gather + CITE-THE-OFFENCE gate — the spec circuit's second
-// head, between the readiness ladder and `specify` — through the REAL
-// StationKernel + CodeCircuitResolver + buildCodeRegistry, advancing the per-node
-// cursor via the fake STATE source (the bridge re-projecting each chokepoint
-// write). The worktree is a REAL temp dir, so the gather's `anchors.json`, the
-// lenses' reports and the route's `dossier.json` are real files on disk; the lens
-// PROCESSES are the fake runtime provider's recorded spawns.
+// head, between the readiness ladder and `specify` — through the REAL `runGrid`
+// station root + CodeCircuitResolver + buildCodeRegistry, advancing the
+// per-node cursor via the fake STATE source (the bridge re-projecting each
+// chokepoint write). The worktree is a REAL temp dir, so the gather's
+// `anchors.json`, the lenses' reports and the route's `dossier.json` are real
+// files on disk; the lens PROCESSES are the fake runtime provider's recorded
+// spawns.
 //
 // Four proofs — the bead's acceptance criteria:
 //  - THE GATHER SPAWNS NOTHING: `anchors` is deterministic (ZERO agents) and its

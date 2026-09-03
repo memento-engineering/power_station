@@ -1,11 +1,11 @@
-// The acceptance harnesses' station root, after the_grid #284 deleted
-// `StationKernel` (`the_grid#run-grid-is-the-single-flush-coordinator`,
-// accepted 2026-09-02): `runGrid` is the ONE flush coordinator and
-// `StationDriver` is the off-tree work-axis half (the bridge lifecycle, the
-// D-5/F1 cooldown Timer, the unclaimed-frontier scan). This composes the two
-// over the SAME ambient stack the retired kernel mounted — same providers,
-// same order, same `Station(substations)` child — so a migrated suite drives
-// an identical tree and no assertion has to move.
+// The acceptance harnesses' station root, after the engine retired its kernel
+// (`the_grid#run-grid-is-the-single-flush-coordinator`, accepted 2026-09-02):
+// `runGrid` is the ONE flush coordinator and `StationDriver` is the off-tree
+// work-axis half (the bridge lifecycle, the D-5/F1 cooldown Timer, the
+// unclaimed-frontier scan). This composes the two over the SAME ambient stack
+// the retired kernel mounted — same providers, same order, same
+// `Station(substations)` child — so a migrated suite drives an identical tree
+// and no assertion has to move.
 import 'package:genesis_tree/genesis_tree.dart';
 import 'package:grid_engine/grid_engine.dart';
 import 'package:grid_sdk/grid_sdk.dart'

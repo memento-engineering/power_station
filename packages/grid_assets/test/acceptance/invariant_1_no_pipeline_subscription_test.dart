@@ -7,13 +7,14 @@
 // snapshot pipelines). A single over-broad observation would re-create the
 // "config built 100×" bug the invariant exists to prevent.
 //
-// This drives the FULL StationKernel over fake SnapshotSources and asserts the
-// invariant three ways: (a) exactly one persistent notifier listener after
-// mount; (b) the bridge is the only subscriber to the SnapshotSources (no tree
-// node subscribes to a GraphSnapshot stream); (c) a work tick reconciles
-// WITHOUT re-running a config ancestor's build — proven through the integrated
-// kernel via the effect lifecycle (a work tick spawns/swaps an effect but does
-// not re-build the config-observing SubstationScope).
+// This drives the FULL `runGrid` station root over fake SnapshotSources and
+// asserts the invariant three ways: (a) exactly one persistent notifier
+// listener after mount; (b) the bridge is the only subscriber to the
+// SnapshotSources (no tree node subscribes to a GraphSnapshot stream); (c) a
+// work tick reconciles WITHOUT re-running a config ancestor's build — proven
+// through the integrated station root via the effect lifecycle (a work tick
+// spawns/swaps an effect but does not re-build the config-observing
+// SubstationScope).
 //
 // Offline only — FAKES, no live tg/gc/claude/git/network.
 import 'package:genesis_tree/genesis_tree.dart';
@@ -213,10 +214,10 @@ void main() {
           value: joined,
           child: InheritedSeed<StationServices>(
             value: f.ctx,
-            // Mounted automatically by StationKernel (tg-h4u); this manual
-            // TreeOwner-driven tree bypasses the kernel entirely, so the
+            // Mounted automatically by the runGrid station root (tg-h4u); this
+            // manual TreeOwner-driven tree bypasses that root entirely, so the
             // molecule process path needs its own vendor here — the SAME
-            // default the kernel installs at its root.
+            // default that root installs.
             child: InheritedSeed<ProcessLeaseVendor>(
               value: defaultProcessLeaseVendor(f.ctx),
               child: InheritedSeed<CapabilityRegistry>(

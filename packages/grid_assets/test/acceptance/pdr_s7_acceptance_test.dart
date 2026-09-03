@@ -174,16 +174,16 @@ Bead _gradedStep(
 /// `code` registry + the CircuitResolver above the Station; one rig owning `tg`.
 /// The git ServiceBundle is provided AT THE SubstationScope (ADR-0008 D5: source
 /// control is a per-substation responsibility). `ProcessLeaseVendor` is
-/// mounted automatically by `StationKernel`; this manual TreeOwner-driven
-/// tree bypasses the kernel entirely, so the molecule process path needs its
-/// own vendor here — the SAME default the kernel installs at its root.
+/// mounted automatically by the `runGrid` station root; this manual
+/// TreeOwner-driven tree bypasses that root entirely, so the molecule process
+/// path needs its own vendor here — the SAME default that root installs.
 Seed _root({
   required JoinedSnapshotNotifier joined,
   required StationServices ctx,
   required CapabilityRegistry registry,
   required ServiceBundle services,
 }) => ProviderScope(
-  // The availability registry the production root (StationKernel.start)
+  // The availability registry the production root (runGrid)
   // always mounts — watch<T>() misses park here instead of asserting.
   child: InheritedSeed<JoinedSnapshotNotifier>(
     value: joined,
@@ -917,9 +917,10 @@ void main() {
         ProviderScope(
           child: InheritedSeed<StationServices>(
             value: f.ctx,
-            // Mounted automatically by StationKernel; this manual TreeOwner-driven
-            // tree bypasses the kernel entirely, so the molecule process path
-            // needs its own vendor here — the SAME default the kernel installs.
+            // Mounted automatically by the runGrid station root; this manual
+            // TreeOwner-driven tree bypasses that root entirely, so the
+            // molecule process path needs its own vendor here — the SAME
+            // default that root installs.
             child: InheritedSeed<ProcessLeaseVendor>(
               value: defaultProcessLeaseVendor(f.ctx),
               child: InheritedSeed<CapabilityRegistry>(

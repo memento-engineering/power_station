@@ -1,10 +1,11 @@
 // The SPEC-READINESS INTAKE LENS, offline end-to-end (bead `pow-q7n`).
 //
 // Drives the readiness LADDER — the cheap head of the spec circuit
-// (`intake` → `readiness` → `readiness-route`) — through the REAL StationKernel
-// + CodeCircuitResolver + buildCodeRegistry, advancing the per-node cursor via
-// the fake STATE source (the bridge re-projecting each chokepoint write) and
-// feeding the lens's grade through the same source's `grid.result.*` keys.
+// (`intake` → `readiness` → `readiness-route`) — through the REAL `runGrid`
+// station root + CodeCircuitResolver + buildCodeRegistry, advancing the
+// per-node cursor via the fake STATE source (the bridge re-projecting each
+// chokepoint write) and feeding the lens's grade through the same source's
+// `grid.result.*` keys.
 //
 // Four proofs — the bead's acceptance criteria:
 //  - NEVER SPAWNS: a NON-DRIVEABLE bead (type `decision` — which a NON-resident

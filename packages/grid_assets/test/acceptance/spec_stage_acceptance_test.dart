@@ -1,8 +1,8 @@
 // The SPEC stage, offline end-to-end (bead `pow-6ao`).
 //
 // Drives the specify → spec-committee head of the `code` circuit through the
-// REAL StationKernel + CircuitResolver + buildCodeRegistry, advancing the
-// per-node cursor via the fake STATE source (the bridge re-projecting each
+// REAL `runGrid` station root + CircuitResolver + buildCodeRegistry, advancing
+// the per-node cursor via the fake STATE source (the bridge re-projecting each
 // chokepoint write) and feeding the spec grades through the same STATE
 // source's `grid.result.*` keys.
 //

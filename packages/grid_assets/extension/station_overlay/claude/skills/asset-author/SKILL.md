@@ -57,8 +57,8 @@ The rules are load-bearing:
 1. Assets are const seeds. In `build`, call `context.watch<T>()` for every
    dependency. `watch<T>()` always returns `T?`, registers the dependency even
    while it is absent (the enclosing `ProviderScope`'s availability registry
-   parks the miss; production roots — `StationKernel.start`, `runGrid` —
-   always mount the scope), and notification is bidirectional:
+   parks the miss; the production root — `runGrid` — always mounts the
+   scope), and notification is bidirectional:
    appearance, replacement, and disappearance all rebuild the watcher. The
    timing differs by transition: appearance and disappearance are
    availability-registry announcements whose delivery is DEFERRED past the

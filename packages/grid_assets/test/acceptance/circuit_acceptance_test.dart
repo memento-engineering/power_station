@@ -1,11 +1,12 @@
 // M5 "The Circuit" — Track E2: the verify-first committee, offline end-to-end.
 //
-// Drives the FULL committee-wired `code` path through the REAL StationKernel +
-// CircuitResolver + buildCodeRegistry (agent → review[4 critics ∥ → route] →
-// land), advancing the per-node cursor via the fake STATE source (the bridge
-// re-projecting each chokepoint write) and feeding the critics' grades through
-// the same STATE source's `grid.result.*` keys (what the host's result() would
-// have persisted; the route reads them via the threaded SiblingView, D-5).
+// Drives the FULL committee-wired `code` path through the REAL `runGrid`
+// station root + CircuitResolver + buildCodeRegistry (agent → review[4 critics
+// ∥ → route] → land), advancing the per-node cursor via the fake STATE source
+// (the bridge re-projecting each chokepoint write) and feeding the critics'
+// grades through the same STATE source's `grid.result.*` keys (what the host's
+// result() would have persisted; the route reads them via the threaded
+// SiblingView, D-5).
 //
 // Three proofs: the happy path (agent → 4 critics IN PARALLEL → route advances →
 // land → session close); the gating-F path (code-validation F → route parks at a

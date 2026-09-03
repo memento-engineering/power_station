@@ -46,7 +46,7 @@ class _Committee {
   void mount() {
     _push();
     owner.mountRoot(
-      // The availability registry the production root (StationKernel.start)
+      // The availability registry the production root (runGrid)
       // always mounts — watch<T>() misses park here instead of asserting.
       ProviderScope(
         child: InheritedSeed<JoinedSnapshotNotifier>(

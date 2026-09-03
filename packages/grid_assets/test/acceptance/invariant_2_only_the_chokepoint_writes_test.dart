@@ -7,13 +7,13 @@
 // hosts act in initState / on a runtime event / dispose; `build()` is a pure
 // Idle leaf.
 //
-// This drives a FULL agent→committee→land cycle through the REAL StationKernel +
-// the REAL `code` circuit (CircuitResolver + buildCodeRegistry — agent → the four
-// adversarial critics → route → land) with a RecordingBdRunner-backed
-// StationBeadWriter (the chokepoint) + the fake provider/git/PR, emitting
-// SessionStarted + a clean completion per step and advancing the per-node cursor
-// (+ all-pass grades) via the fake STATE source. It then asserts the chokepoint
-// discipline over the WHOLE recorded call log.
+// This drives a FULL agent→committee→land cycle through the REAL `runGrid`
+// station root + the REAL `code` circuit (CircuitResolver + buildCodeRegistry —
+// agent → the four adversarial critics → route → land) with a
+// RecordingBdRunner-backed StationBeadWriter (the chokepoint) + the fake
+// provider/git/PR, emitting SessionStarted + a clean completion per step and
+// advancing the per-node cursor (+ all-pass grades) via the fake STATE source.
+// It then asserts the chokepoint discipline over the WHOLE recorded call log.
 //
 // Offline only — FAKES, no live tg/gc/claude/git/network.
 import 'package:genesis_tree/genesis_tree.dart';
