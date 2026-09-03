@@ -1,6 +1,6 @@
-import 'dart:io';
-
 import 'package:grid_engine/grid_engine.dart';
+
+import '../credentials.dart';
 
 /// SELF-only GitHub actor trust for v1 intake.
 final class GitHubSelfTrust implements Trust {
@@ -15,8 +15,15 @@ final class GitHubSelfTrust implements Trust {
           : githubUser;
 
   /// Creates trust from `GITHUB_USER`; absence is refused loudly.
-  factory GitHubSelfTrust.fromEnvironment({Map<String, String>? environment}) {
-    final value = (environment ?? Platform.environment)['GITHUB_USER'];
+  ///
+  /// [environment] is the injectable [EnvironmentReader] seam — it defaults to
+  /// [platformEnvironment] so production reads the process environment, and a
+  /// test injects its own map instead of depending on what the operator
+  /// exported.
+  factory GitHubSelfTrust.fromEnvironment({
+    EnvironmentReader environment = platformEnvironment,
+  }) {
+    final value = environment()['GITHUB_USER'];
     if (value == null) {
       throw StateError('GITHUB_USER is required for GitHub intake');
     }
