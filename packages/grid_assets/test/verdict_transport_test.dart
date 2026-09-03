@@ -53,11 +53,7 @@ Map<String, Object?> _canonical(String workspaceDir, String rubric) =>
 /// shape a critic emits when it fences its verdict in a markdown block.
 String _envelopeText(Map<String, String> columns) =>
     'Here is my verdict:\n```json\n'
-    '${jsonEncode({
-      'grade': 'B',
-      'rationale': 'covered, with a tracker note',
-      ...columns,
-    })}\n```\n';
+    '${jsonEncode({'grade': 'B', 'rationale': 'covered, with a tracker note', ...columns})}\n```\n';
 
 void main() {
   group('atomic verdict prompt contract', () {
@@ -264,15 +260,20 @@ void main() {
       expect(written[kVerdictRoundKey], 0);
     });
 
-    test('a MISSPELLED column key recovers NO refinement — and still grades the '
-        'lane (the strict decode stays the ONE place a verdict fails)', () async {
-      final out = await recover(_envelopeText(const {'refinment': refinement}));
-      expect(out?['grade'], 'B');
-      expect(out!.containsKey(kVerdictRefinementKey), isFalse);
-      expect(
-        _canonical(dir.path, rubric).containsKey(kVerdictRefinementKey),
-        isFalse,
-      );
-    });
+    test(
+      'a MISSPELLED column key recovers NO refinement — and still grades the '
+      'lane (the strict decode stays the ONE place a verdict fails)',
+      () async {
+        final out = await recover(
+          _envelopeText(const {'refinment': refinement}),
+        );
+        expect(out?['grade'], 'B');
+        expect(out!.containsKey(kVerdictRefinementKey), isFalse);
+        expect(
+          _canonical(dir.path, rubric).containsKey(kVerdictRefinementKey),
+          isFalse,
+        );
+      },
+    );
   });
 }
