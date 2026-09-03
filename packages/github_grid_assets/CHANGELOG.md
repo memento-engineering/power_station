@@ -1,3 +1,7 @@
+## 0.1.0-rc.10
+
+- Adopts the the_grid wave 2 and grid_assets 0.6.0-rc.10: floors `grid_assets ^0.6.0-rc.10`, `grid_cli ^0.5.0-rc.12`, `grid_engine ^0.3.0-rc.12`, `grid_runtime ^0.2.0-rc.10`, `grid_sdk ^0.3.0-rc.10` (power_station#195). No API change.
+
 ## 0.1.0-rc.9
 
 - Added: `SubstationSeed`, the COMPOSED per-seat stack, plus its

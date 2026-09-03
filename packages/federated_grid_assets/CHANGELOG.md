@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.0-rc.3
+
+- Adopts grid_engine 0.3.0-rc.12 (floor); doc comments name `StationDriver` instead of the deleted `StationKernel` (#193, #195). No API change.
+
 ## 0.3.0-rc.2
 
 - Breaking: none new in this candidate — it continues the 0.3.0 line so that
