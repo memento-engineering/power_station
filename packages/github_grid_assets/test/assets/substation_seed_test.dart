@@ -149,19 +149,14 @@ void main() {
   test('the seat arming rung SHADOWS the station on the type it arms and '
       'leaves every other type resolving through the station', () {
     final mounted = _mount(
-      _station(
-        [
-          SubstationSeed(name: 'plain', root: '../plain'),
-          SubstationSeed(
-            name: 'armed',
-            root: '../armed',
-            arming: const AgentArming(
-              build: BuildAgentEnvironment([_seatBuild]),
-            ),
-          ),
-        ],
-        arming: _stationArming,
-      ),
+      _station([
+        SubstationSeed(name: 'plain', root: '../plain'),
+        SubstationSeed(
+          name: 'armed',
+          root: '../armed',
+          arming: const AgentArming(build: BuildAgentEnvironment([_seatBuild])),
+        ),
+      ], arming: _stationArming),
     );
     addTearDown(mounted.owner.dispose);
 
@@ -246,7 +241,8 @@ void main() {
     expect(
       mounted.walk.seeds<GitHubAppClientAssets>(),
       hasLength(1),
-      reason: 'the paired positive: the previous test\'s isEmpty is falsifiable',
+      reason:
+          'the paired positive: the previous test\'s isEmpty is falsifiable',
     );
   });
 
