@@ -163,7 +163,10 @@ void main() {
     expect(spec.command, 'npx');
     expect(spec.args, contains('@agentclientprotocol/codex-acp@1.6.2'));
     expect(spec.cwd, '/w/tg-1');
-    expect(spec.usageOut, '.grid/telemetry/tg-1_spec_review_specify.usage.json');
+    expect(
+      spec.usageOut,
+      '.grid/telemetry/tg-1_spec_review_specify.usage.json',
+    );
   });
 
   test('a recorded codex session receives the BRIEF and its written spec '

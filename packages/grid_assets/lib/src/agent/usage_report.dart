@@ -270,7 +270,8 @@ String usageEnvelopeJson({
     if (tokensOut != null) 'output_tokens': tokensOut,
   },
   if (numTurns != null) 'num_turns': numTurns,
-  if (model != null) 'modelUsage': <String, Object?>{model: <String, Object?>{}},
+  if (model != null)
+    'modelUsage': <String, Object?>{model: <String, Object?>{}},
 });
 
 /// Writes [content] to the workspace-relative [usageOut] under [workspaceDir],

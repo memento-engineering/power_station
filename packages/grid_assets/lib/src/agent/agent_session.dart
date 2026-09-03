@@ -370,13 +370,15 @@ RuntimeConfig spawnThroughSessionAdapter({
       endpoint: endpoint,
     );
   }
-  final config = adapters.require(adapterId).launch(
-    environment: environment,
-    workspace: workspace,
-    model: model,
-    endpoint: endpoint,
-    usageOut: usageOut,
-  );
+  final config = adapters
+      .require(adapterId)
+      .launch(
+        environment: environment,
+        workspace: workspace,
+        model: model,
+        endpoint: endpoint,
+        usageOut: usageOut,
+      );
   if (config.lifecycle != Lifecycle.longLived) {
     throw StateError('channel adapter "$adapterId" must launch longLived');
   }

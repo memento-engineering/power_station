@@ -456,46 +456,48 @@ void main() {
   // returns the session's terminal verbatim. So the capability re-applies its
   // own declared contract here (bead `pow-39tl`).
   group('ArtifactFencedSession', () {
-    test('a clean protocol completion with NO artifact fails tail-first',
-        () async {
-      final runtime = _Runtime();
-      await runtime.start(
-        'session',
-        const RuntimeConfig(workDir: '/tmp', command: 'probe'),
-      );
-      final transcript =
-          'HEAD-OF-TRANSCRIPT\n${'y' * 4000}\n'
-          'I could not run bd: command not found';
-      final done = driveProcessSession(
-        session: ArtifactFencedSession(
-          inner: _session(runtime: runtime, adapter: _JsonAdapter()),
-          probe: () async => GateOutcome.present,
-          resultFields: () async => const <String, String>{},
-          verb: 'specify',
-          adapter: 'acp',
-        ),
-        runtimeEvents: runtime.events,
-      );
-      await _pump();
-      runtime.emitOutput(
-        jsonEncode(<String, Object?>{
-          'type': 'completed',
-          'result': <String, String>{'text': transcript},
-        }),
-      );
-      final update = await done;
-      expect(update, isA<ProcessSessionFailed>());
-      final reason = (update as ProcessSessionFailed).reason;
-      expect(reason, startsWith('specify failed (exit 0) [acp]: '));
-      expect(
-        reason,
-        contains('declared completion artifact is not durable — …'),
-      );
-      // The harness's own last words are the diagnosis; its opening is not.
-      expect(reason, contains('I could not run bd: command not found'));
-      expect(reason, isNot(contains('HEAD-OF-TRANSCRIPT')));
-      await runtime.close();
-    });
+    test(
+      'a clean protocol completion with NO artifact fails tail-first',
+      () async {
+        final runtime = _Runtime();
+        await runtime.start(
+          'session',
+          const RuntimeConfig(workDir: '/tmp', command: 'probe'),
+        );
+        final transcript =
+            'HEAD-OF-TRANSCRIPT\n${'y' * 4000}\n'
+            'I could not run bd: command not found';
+        final done = driveProcessSession(
+          session: ArtifactFencedSession(
+            inner: _session(runtime: runtime, adapter: _JsonAdapter()),
+            probe: () async => GateOutcome.present,
+            resultFields: () async => const <String, String>{},
+            verb: 'specify',
+            adapter: 'acp',
+          ),
+          runtimeEvents: runtime.events,
+        );
+        await _pump();
+        runtime.emitOutput(
+          jsonEncode(<String, Object?>{
+            'type': 'completed',
+            'result': <String, String>{'text': transcript},
+          }),
+        );
+        final update = await done;
+        expect(update, isA<ProcessSessionFailed>());
+        final reason = (update as ProcessSessionFailed).reason;
+        expect(reason, startsWith('specify failed (exit 0) [acp]: '));
+        expect(
+          reason,
+          contains('declared completion artifact is not durable — …'),
+        );
+        // The harness's own last words are the diagnosis; its opening is not.
+        expect(reason, contains('I could not run bd: command not found'));
+        expect(reason, isNot(contains('HEAD-OF-TRANSCRIPT')));
+        await runtime.close();
+      },
+    );
 
     test('a failed probe is refused too, never a silent pass', () async {
       final runtime = _Runtime();
@@ -530,84 +532,88 @@ void main() {
       await runtime.close();
     });
 
-    test('a proven artifact completes and merges the capability result fields',
-        () async {
-      final runtime = _Runtime();
-      await runtime.start(
-        'session',
-        const RuntimeConfig(workDir: '/tmp', command: 'probe'),
-      );
-      final done = driveProcessSession(
-        session: ArtifactFencedSession(
-          inner: _session(runtime: runtime, adapter: _JsonAdapter()),
-          probe: () async => GateOutcome.clear,
-          resultFields: () async => const <String, String>{
-            'specAcceptance': '- [ ] a',
-          },
-          verb: 'specify',
-          adapter: 'acp',
-        ),
-        runtimeEvents: runtime.events,
-      );
-      await _pump();
-      runtime.emitOutput(
-        jsonEncode(<String, Object?>{
-          'type': 'completed',
-          'result': <String, String>{'text': 'wrote it'},
-        }),
-      );
-      final update = await done;
-      expect(update, isA<ProcessSessionCompleted>());
-      // The protocol result, the inner session's usage merge, AND the
-      // capability's own `result()` contribution — which the engine's session
-      // dispatch never calls.
-      expect((update as ProcessSessionCompleted).result, {
-        'text': 'wrote it',
-        'tokensIn': '21',
-        'tokensOut': '8',
-        'numTurns': '2',
-        'model': 'probe-model',
-        'specAcceptance': '- [ ] a',
-      });
-      await runtime.close();
-    });
+    test(
+      'a proven artifact completes and merges the capability result fields',
+      () async {
+        final runtime = _Runtime();
+        await runtime.start(
+          'session',
+          const RuntimeConfig(workDir: '/tmp', command: 'probe'),
+        );
+        final done = driveProcessSession(
+          session: ArtifactFencedSession(
+            inner: _session(runtime: runtime, adapter: _JsonAdapter()),
+            probe: () async => GateOutcome.clear,
+            resultFields: () async => const <String, String>{
+              'specAcceptance': '- [ ] a',
+            },
+            verb: 'specify',
+            adapter: 'acp',
+          ),
+          runtimeEvents: runtime.events,
+        );
+        await _pump();
+        runtime.emitOutput(
+          jsonEncode(<String, Object?>{
+            'type': 'completed',
+            'result': <String, String>{'text': 'wrote it'},
+          }),
+        );
+        final update = await done;
+        expect(update, isA<ProcessSessionCompleted>());
+        // The protocol result, the inner session's usage merge, AND the
+        // capability's own `result()` contribution — which the engine's session
+        // dispatch never calls.
+        expect((update as ProcessSessionCompleted).result, {
+          'text': 'wrote it',
+          'tokensIn': '21',
+          'tokensOut': '8',
+          'numTurns': '2',
+          'model': 'probe-model',
+          'specAcceptance': '- [ ] a',
+        });
+        await runtime.close();
+      },
+    );
 
-    test('a harness FAILURE is forwarded verbatim — the probe never runs',
-        () async {
-      final runtime = _Runtime();
-      await runtime.start(
-        'session',
-        const RuntimeConfig(workDir: '/tmp', command: 'probe'),
-      );
-      var probed = false;
-      final done = driveProcessSession(
-        session: ArtifactFencedSession(
-          inner: _session(runtime: runtime, adapter: _JsonAdapter()),
-          probe: () async {
-            probed = true;
-            return GateOutcome.clear;
-          },
-          resultFields: () async => const <String, String>{},
-          verb: 'specify',
-          adapter: 'acp',
-        ),
-        runtimeEvents: runtime.events,
-      );
-      await _pump();
-      runtime.emitOutput(
-        jsonEncode(<String, Object?>{
-          'type': 'failed',
-          'reason': 'acp agent failed (exit 3) [acp]: boom',
-        }),
-      );
-      final update = await done;
-      expect(
-        (update as ProcessSessionFailed).reason,
-        'acp agent failed (exit 3) [acp]: boom',
-      );
-      expect(probed, isFalse);
-      await runtime.close();
-    });
+    test(
+      'a harness FAILURE is forwarded verbatim — the probe never runs',
+      () async {
+        final runtime = _Runtime();
+        await runtime.start(
+          'session',
+          const RuntimeConfig(workDir: '/tmp', command: 'probe'),
+        );
+        var probed = false;
+        final done = driveProcessSession(
+          session: ArtifactFencedSession(
+            inner: _session(runtime: runtime, adapter: _JsonAdapter()),
+            probe: () async {
+              probed = true;
+              return GateOutcome.clear;
+            },
+            resultFields: () async => const <String, String>{},
+            verb: 'specify',
+            adapter: 'acp',
+          ),
+          runtimeEvents: runtime.events,
+        );
+        await _pump();
+        runtime.emitOutput(
+          jsonEncode(<String, Object?>{
+            'type': 'failed',
+            'reason': 'acp agent failed (exit 3) [acp]: boom',
+          }),
+        );
+        final update = await done;
+        expect(
+          (update as ProcessSessionFailed).reason,
+          'acp agent failed (exit 3) [acp]: boom',
+        );
+        expect(probed, isFalse);
+        await runtime.close();
+      },
+    );
   });
 
   test('malformed protocol frame fails and cancels decoder', () async {

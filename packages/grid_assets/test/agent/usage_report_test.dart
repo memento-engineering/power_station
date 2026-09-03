@@ -405,7 +405,8 @@ void main() {
           workspaceDir: dir.path,
           usageOut: out,
           content: usageEnvelopeJson(
-            result: '{"acceptance":"- [ ] a","design":"## Implementation Plan"}',
+            result:
+                '{"acceptance":"- [ ] a","design":"## Implementation Plan"}',
             tokensIn: 11,
             tokensOut: 22,
             numTurns: 3,
@@ -428,22 +429,24 @@ void main() {
       );
     });
 
-    test('an EMPTY-usage envelope still lands and parses to no fields',
-        () async {
-      final dir = await Directory.systemTemp.createTemp('grid_usage_');
-      addTearDown(() async => dir.delete(recursive: true));
-      final out = usageReportPath('tg-1/spec_review/specify');
-      expect(
-        writeUsageEnvelope(
-          workspaceDir: dir.path,
-          usageOut: out,
-          content: usageEnvelopeJson(),
-        ),
-        isTrue,
-      );
-      expect(File(p.join(dir.path, out)).existsSync(), isTrue);
-      expect(readUsageFields(dir.path, 'tg-1/spec_review/specify'), isEmpty);
-    });
+    test(
+      'an EMPTY-usage envelope still lands and parses to no fields',
+      () async {
+        final dir = await Directory.systemTemp.createTemp('grid_usage_');
+        addTearDown(() async => dir.delete(recursive: true));
+        final out = usageReportPath('tg-1/spec_review/specify');
+        expect(
+          writeUsageEnvelope(
+            workspaceDir: dir.path,
+            usageOut: out,
+            content: usageEnvelopeJson(),
+          ),
+          isTrue,
+        );
+        expect(File(p.join(dir.path, out)).existsSync(), isTrue);
+        expect(readUsageFields(dir.path, 'tg-1/spec_review/specify'), isEmpty);
+      },
+    );
 
     test('an unwritable telemetry path is FAIL-SAFE, never a throw', () {
       expect(
