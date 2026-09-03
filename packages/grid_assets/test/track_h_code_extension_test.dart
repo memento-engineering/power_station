@@ -561,7 +561,9 @@ void main() {
 
         // The retry MINTS FRESH instead of adopting a registered-but-missing
         // worktree — the wedge that held every fresh provision.
-        runner.checkoutEntries = {'.grid/seats/README.md': 'tracked seat state'};
+        runner.checkoutEntries = {
+          '.grid/seats/README.md': 'tracked seat state',
+        };
         await sc.provisionWorkspace(
           beadId: 'pow-1',
           workspaceDir: workspaceDir,
@@ -645,65 +647,62 @@ void main() {
       },
     );
 
-    test(
-      'GitSourceControl.provisionWorkspace refuses LOUDLY when the unwind '
-      'cannot clear the registration',
-      () async {
-        final rootDir = Directory.systemTemp.createTempSync('powgnrm-root-');
-        addTearDown(() => rootDir.deleteSync(recursive: true));
-        final workspaceDir = WorktreeLayout.worktreePath(
-          rootDir.path,
-          'ps',
-          'pow-1',
-        );
-        File(p.join(workspaceDir, '.grid', 'critique', 'pinned.diff'))
-          ..createSync(recursive: true)
-          ..writeAsStringSync('scaffold');
+    test('GitSourceControl.provisionWorkspace refuses LOUDLY when the unwind '
+        'cannot clear the registration', () async {
+      final rootDir = Directory.systemTemp.createTempSync('powgnrm-root-');
+      addTearDown(() => rootDir.deleteSync(recursive: true));
+      final workspaceDir = WorktreeLayout.worktreePath(
+        rootDir.path,
+        'ps',
+        'pow-1',
+      );
+      File(p.join(workspaceDir, '.grid', 'critique', 'pinned.diff'))
+        ..createSync(recursive: true)
+        ..writeAsStringSync('scaffold');
 
-        final runner = _MaterializingWorktreeRunner(
-          checkoutEntries: {'.grid/critique/pinned.diff': 'checkout'},
-          refuseWorktreeRemove: true,
-        );
-        final sc = GitSourceControl(
-          provisioner: StationGitService(
-            runner: runner,
-            prOpener: _NoopPrOpener(),
-          ),
-          root: RootCheckout(
-            path: rootDir.path,
-            defaultBranch: 'main',
-            substation: 'ps',
-          ),
-          gitRunner: runner,
-        );
+      final runner = _MaterializingWorktreeRunner(
+        checkoutEntries: {'.grid/critique/pinned.diff': 'checkout'},
+        refuseWorktreeRemove: true,
+      );
+      final sc = GitSourceControl(
+        provisioner: StationGitService(
+          runner: runner,
+          prOpener: _NoopPrOpener(),
+        ),
+        root: RootCheckout(
+          path: rootDir.path,
+          defaultBranch: 'main',
+          substation: 'ps',
+        ),
+        gitRunner: runner,
+      );
 
-        await expectLater(
-          sc.provisionWorkspace(beadId: 'pow-1', workspaceDir: workspaceDir),
-          throwsA(
-            isA<StateError>()
-                .having(
-                  (error) => error.message,
-                  'message',
-                  contains('failed to unwind the discarded provision'),
-                )
-                .having(
-                  (error) => error.message,
-                  'message',
-                  contains('scaffold path collision'),
-                ),
-          ),
-        );
+      await expectLater(
+        sc.provisionWorkspace(beadId: 'pow-1', workspaceDir: workspaceDir),
+        throwsA(
+          isA<StateError>()
+              .having(
+                (error) => error.message,
+                'message',
+                contains('failed to unwind the discarded provision'),
+              )
+              .having(
+                (error) => error.message,
+                'message',
+                contains('scaffold path collision'),
+              ),
+        ),
+      );
 
-        // The scaffold still came back even though the unwind could not be
-        // verified — the restore is never skipped.
-        expect(
-          File(
-            p.join(workspaceDir, '.grid', 'critique', 'pinned.diff'),
-          ).readAsStringSync(),
-          'scaffold',
-        );
-      },
-    );
+      // The scaffold still came back even though the unwind could not be
+      // verified — the restore is never skipped.
+      expect(
+        File(
+          p.join(workspaceDir, '.grid', 'critique', 'pinned.diff'),
+        ).readAsStringSync(),
+        'scaffold',
+      );
+    });
 
     test(
       'GitSourceControl.provisionWorkspace refuses a provisioner that leaves '
