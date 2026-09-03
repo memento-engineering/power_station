@@ -240,7 +240,7 @@ void main() {
           ),
         );
         owner.flush();
-        await _settle(owner);
+        await _settle(owner, () => observed != null);
         await _send(observed!);
         _verify(transport, _onePublicKey);
         expect((stat.calls, read.calls), (1, 1));
@@ -324,7 +324,7 @@ void main() {
           ),
         );
         owner.flush();
-        await _settle(owner);
+        await _settle(owner, () => observations.last != null);
         final first = observations.last;
         host.swap(() => describe('one', _oneVar));
         owner.flush();
@@ -333,13 +333,13 @@ void main() {
         expect(factories, 1);
         host.swap(() => describe('one', _twoVar));
         owner.flush();
-        await _settle(owner);
+        await _settle(owner, () => factories == 2);
         expect(observations.last, isNot(same(first)));
         expect(factories, 2);
         final second = observations.last;
         host.swap(() => describe('two', _twoVar));
         owner.flush();
-        await _settle(owner);
+        await _settle(owner, () => factories == 3);
         expect(observations.last, isNot(same(second)));
         expect(factories, 3);
       },
@@ -390,7 +390,7 @@ void main() {
           ),
         );
         owner.flush();
-        await _settle(owner);
+        await _settle(owner, () => one != null && two != null);
         expect(two, isNot(same(one)));
         await _send(one!);
         await _send(two!);
