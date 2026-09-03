@@ -124,7 +124,7 @@ List<Bead> _withDeliveryResult(List<Bead> beads) {
   ];
 }
 
-StationKernel _buildKernel(
+MountedStation _buildStation(
   Fakes f,
   FakeSnapshotSource work,
   FakeSnapshotSource state, {
@@ -133,7 +133,7 @@ StationKernel _buildKernel(
   ShellRunner? shellRunner,
 }) {
   final bridge = StationJoinBridge(work: work, state: state);
-  return StationKernel(
+  return MountedStation(
     bridge: bridge,
     stationServices: f.ctx,
     resolver: kCodeResolver,
@@ -440,19 +440,19 @@ void main() {
       final tmp = Directory.systemTemp.createTempSync('circuit-acc');
       addTearDown(() => tmp.deleteSync(recursive: true));
       _provisionCheckout(tmp.path, 'tg-1');
-      final kernel = _buildKernel(
+      final station = _buildStation(
         f,
         work,
         state,
         workspaceRoot: tmp.path,
         transport: transport,
       );
-      addTearDown(kernel.dispose);
+      addTearDown(station.dispose);
       addTearDown(f.provider.close);
       addTearDown(work.close);
       addTearDown(state.close);
 
-      kernel.start();
+      await station.start();
       await _settle(f);
 
       // 1) a ready owned task → the READINESS LADDER's `intake` head mounts

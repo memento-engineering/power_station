@@ -155,7 +155,7 @@ void main() {
         _graph(beads: const [], ready: const {}),
       );
       final bridge = StationJoinBridge(work: work, state: state);
-      final kernel = StationKernel(
+      final station = MountedStation(
         bridge: bridge,
         stationServices: f.ctx,
         resolver: kCodeResolver,
@@ -187,12 +187,12 @@ void main() {
           ),
         ],
       );
-      addTearDown(kernel.dispose);
+      addTearDown(station.dispose);
       addTearDown(f.provider.close);
       addTearDown(work.close);
       addTearDown(state.close);
 
-      kernel.start();
+      await station.start();
       await pumpEventQueue();
 
       // 1) LADDER → SPECIFY → AGENT — a ready owned task mounts the readiness

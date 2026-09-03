@@ -130,7 +130,7 @@ void main() {
       );
       final bridge = StationJoinBridge(work: work, state: state);
 
-      final kernel = StationKernel(
+      final station = MountedStation(
         bridge: bridge,
         stationServices: f.ctx,
         resolver: kCodeResolver,
@@ -156,12 +156,12 @@ void main() {
           ),
         ],
       );
-      addTearDown(kernel.dispose);
+      addTearDown(station.dispose);
       addTearDown(f.provider.close);
       addTearDown(work.close);
       addTearDown(state.close);
 
-      kernel.start();
+      await station.start();
       await pumpEventQueue();
       // No work yet — nothing mounted.
       expect(f.provider.started, isEmpty);

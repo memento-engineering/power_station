@@ -103,7 +103,7 @@ void main() {
     );
     final bridge = StationJoinBridge(work: work, state: state);
 
-    final kernel = StationKernel(
+    final station = MountedStation(
       bridge: bridge,
       stationServices: f.ctx,
       resolver: kCodeResolver,
@@ -131,12 +131,12 @@ void main() {
         ),
       ],
     );
-    addTearDown(kernel.dispose);
+    addTearDown(station.dispose);
     addTearDown(f.provider.close);
     addTearDown(work.close);
     addTearDown(state.close);
 
-    kernel.start();
+    await station.start();
     await pumpEventQueue();
 
     // One ready owned bead per substation (sa-1 → substation sa, sb-1 → sb).
@@ -184,7 +184,7 @@ void main() {
       );
       final bridge = StationJoinBridge(work: work, state: state);
 
-      final kernel = StationKernel(
+      final station = MountedStation(
         bridge: bridge,
         stationServices: f.ctx,
         resolver: kCodeResolver,
@@ -203,12 +203,12 @@ void main() {
           ),
         ],
       );
-      addTearDown(kernel.dispose);
+      addTearDown(station.dispose);
       addTearDown(f.provider.close);
       addTearDown(work.close);
       addTearDown(state.close);
 
-      kernel.start();
+      await station.start();
       await pumpEventQueue();
       work.push(_graph(beads: [bead('sa-1')], ready: {'sa-1'}));
       await pumpEventQueue();

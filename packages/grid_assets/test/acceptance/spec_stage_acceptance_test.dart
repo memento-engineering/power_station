@@ -74,7 +74,7 @@ final List<String> _specCriticSteps = [
   for (final n in kSpecCriticNodes) _step(n),
 ];
 
-StationKernel _buildKernel(
+MountedStation _buildStation(
   Fakes f,
   FakeSnapshotSource work,
   FakeSnapshotSource state, {
@@ -82,7 +82,7 @@ StationKernel _buildKernel(
   ExplorationTransport? transport,
 }) {
   final bridge = StationJoinBridge(work: work, state: state);
-  return StationKernel(
+  return MountedStation(
     bridge: bridge,
     stationServices: f.ctx,
     resolver: kCodeResolver,
@@ -237,18 +237,18 @@ void main() {
       final specifyReadback = SpecifyReadbackBdRunner(
         beads: [durableSpecifiedBead('tg-1')],
       );
-      final kernel = _buildKernel(
+      final station = _buildStation(
         f,
         work,
         state,
         specifyBdRunnerFor: (_) => specifyReadback,
       );
-      addTearDown(kernel.dispose);
+      addTearDown(station.dispose);
       addTearDown(f.provider.close);
       addTearDown(work.close);
       addTearDown(state.close);
 
-      kernel.start();
+      await station.start();
       await _settle(f);
 
       // 1) a ready owned task → the READINESS LADDER's `intake` head mounts
@@ -414,19 +414,19 @@ void main() {
       final state = FakeSnapshotSource(
         _graph(beads: const [], ready: const {}),
       );
-      final kernel = _buildKernel(
+      final station = _buildStation(
         f,
         work,
         state,
         specifyBdRunnerFor: (_) => specifyReadback,
         transport: transport,
       );
-      addTearDown(kernel.dispose);
+      addTearDown(station.dispose);
       addTearDown(f.provider.close);
       addTearDown(work.close);
       addTearDown(state.close);
 
-      kernel.start();
+      await station.start();
       await _settle(f);
       work.push(_graph(beads: [workBead('tg-1')], ready: {'tg-1'}));
       await _settle(f);
@@ -475,13 +475,13 @@ void main() {
       final state = FakeSnapshotSource(
         _graph(beads: const [], ready: const {}),
       );
-      final kernel = _buildKernel(f, work, state);
-      addTearDown(kernel.dispose);
+      final station = _buildStation(f, work, state);
+      addTearDown(station.dispose);
       addTearDown(f.provider.close);
       addTearDown(work.close);
       addTearDown(state.close);
 
-      kernel.start();
+      await station.start();
       await _settle(f);
       work.push(_graph(beads: [workBead('tg-1')], ready: {'tg-1'}));
       await _settle(f);
@@ -585,13 +585,13 @@ void main() {
         final state = FakeSnapshotSource(
           _graph(beads: const [], ready: const {}),
         );
-        final kernel = _buildKernel(f, work, state);
-        addTearDown(kernel.dispose);
+        final station = _buildStation(f, work, state);
+        addTearDown(station.dispose);
         addTearDown(f.provider.close);
         addTearDown(work.close);
         addTearDown(state.close);
 
-        kernel.start();
+        await station.start();
         await _settle(f);
         work.push(_graph(beads: [workBead('tg-1')], ready: {'tg-1'}));
         await _settle(f);
@@ -746,13 +746,13 @@ void main() {
         final state = FakeSnapshotSource(
           _graph(beads: const [], ready: const {}),
         );
-        final kernel = _buildKernel(f, work, state);
-        addTearDown(kernel.dispose);
+        final station = _buildStation(f, work, state);
+        addTearDown(station.dispose);
         addTearDown(f.provider.close);
         addTearDown(work.close);
         addTearDown(state.close);
 
-        kernel.start();
+        await station.start();
         await _settle(f);
         work.push(_graph(beads: [workBead('tg-1')], ready: {'tg-1'}));
         await _settle(f);

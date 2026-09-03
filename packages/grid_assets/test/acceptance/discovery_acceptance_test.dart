@@ -195,7 +195,7 @@ class _TempWorkspace implements SourceControl {
   }) async {}
 }
 
-StationKernel _buildKernel(
+MountedStation _buildStation(
   Fakes f,
   FakeSnapshotSource work,
   FakeSnapshotSource state,
@@ -203,7 +203,7 @@ StationKernel _buildKernel(
   PriorArtSource? priorArt,
 }) {
   final bridge = StationJoinBridge(work: work, state: state);
-  return StationKernel(
+  return MountedStation(
     bridge: bridge,
     stationServices: f.ctx,
     resolver: kCodeResolver,
@@ -363,13 +363,13 @@ void main() {
     final f = buildFakes(createdId: _sid);
     final work = FakeSnapshotSource(_graph(beads: const [], ready: const {}));
     final state = FakeSnapshotSource(_graph(beads: const [], ready: const {}));
-    final kernel = _buildKernel(f, work, state, tmp.path, priorArt: priorArt);
-    addTearDown(kernel.dispose);
+    final station = _buildStation(f, work, state, tmp.path, priorArt: priorArt);
+    addTearDown(station.dispose);
     addTearDown(f.provider.close);
     addTearDown(work.close);
     addTearDown(state.close);
 
-    kernel.start();
+    await station.start();
     await _settle(f);
 
     // The ladder is fast-forwarded (its own choreography is
@@ -599,13 +599,13 @@ void main() {
       final state = FakeSnapshotSource(
         _graph(beads: const [], ready: const {}),
       );
-      final kernel = _buildKernel(f, work, state, tmp.path);
-      addTearDown(kernel.dispose);
+      final station = _buildStation(f, work, state, tmp.path);
+      addTearDown(station.dispose);
       addTearDown(f.provider.close);
       addTearDown(work.close);
       addTearDown(state.close);
 
-      kernel.start();
+      await station.start();
       await _settle(f);
       work.push(_graph(beads: [workBead('tg-1')], ready: {'tg-1'}));
       await _settle(f);
@@ -633,13 +633,13 @@ void main() {
         // The BOUNCE: the station restarts and ADOPTS an in-flight session whose
         // cursor was minted under the pre-discovery shape (no `anchors` key).
         final state = FakeSnapshotSource(_state(_preDiscoverySession()));
-        final kernel = _buildKernel(f, work, state, tmp.path);
-        addTearDown(kernel.dispose);
+        final station = _buildStation(f, work, state, tmp.path);
+        addTearDown(station.dispose);
         addTearDown(f.provider.close);
         addTearDown(work.close);
         addTearDown(state.close);
 
-        kernel.start();
+        await station.start();
         await _settle(f);
         work.push(_graph(beads: [workBead('tg-1')], ready: {'tg-1'}));
         await _settle(f);

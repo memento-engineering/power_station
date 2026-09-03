@@ -39,7 +39,7 @@ Bead _typed(String id, IssueType type) => Bead(
   description: 'A real brief, so intake holds only on the type.',
 );
 
-StationKernel _kernel(StationJoinBridge bridge, Fakes f) => StationKernel(
+MountedStation _station(StationJoinBridge bridge, Fakes f) => MountedStation(
   bridge: bridge,
   stationServices: f.ctx,
   resolver: kCodeResolver,
@@ -72,13 +72,13 @@ void main() {
           _graph(beads: const [], ready: const {}),
         );
         final bridge = StationJoinBridge(work: work, state: state);
-        final kernel = _kernel(bridge, f);
-        addTearDown(kernel.dispose);
+        final station = _station(bridge, f);
+        addTearDown(station.dispose);
         addTearDown(f.provider.close);
         addTearDown(work.close);
         addTearDown(state.close);
 
-        kernel.start();
+        await station.start();
         await pumpEventQueue();
 
         // Every the_grid non-core type, ALL owned (`tg-*`) + ALL ready. The
@@ -178,13 +178,13 @@ void main() {
           _graph(beads: const [], ready: const {}),
         );
         final bridge = StationJoinBridge(work: work, state: state);
-        final kernel = _kernel(bridge, f);
-        addTearDown(kernel.dispose);
+        final station = _station(bridge, f);
+        addTearDown(station.dispose);
         addTearDown(f.provider.close);
         addTearDown(work.close);
         addTearDown(state.close);
 
-        kernel.start();
+        await station.start();
         await pumpEventQueue();
 
         // A lone OWNED, READY convergence bead — the most adversarial case (it

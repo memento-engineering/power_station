@@ -62,7 +62,7 @@ void main() {
         state: state,
         notifier: notifier,
       );
-      final kernel = StationKernel(
+      final station = MountedStation(
         bridge: bridge,
         stationServices: f.ctx,
         resolver: kCodeResolver,
@@ -79,7 +79,7 @@ void main() {
           ),
         ],
       );
-      addTearDown(kernel.dispose);
+      addTearDown(station.dispose);
       addTearDown(notifier.dispose);
       addTearDown(f.provider.close);
       addTearDown(work.close);
@@ -88,7 +88,7 @@ void main() {
       // Before mount: no tree listener at all.
       expect(notifier.liveListenerCount, 0);
 
-      kernel.start();
+      await station.start();
       await pumpEventQueue();
 
       // After mounting the WHOLE tree: exactly ONE persistent listener — the
@@ -144,7 +144,7 @@ void main() {
           ),
         );
         final bridge = StationJoinBridge(work: work, state: state);
-        final kernel = StationKernel(
+        final station = MountedStation(
           bridge: bridge,
           stationServices: f.ctx,
           resolver: kCodeResolver,
@@ -161,12 +161,12 @@ void main() {
             ),
           ],
         );
-        addTearDown(kernel.dispose);
+        addTearDown(station.dispose);
         addTearDown(f.provider.close);
         addTearDown(work.close);
         addTearDown(state.close);
 
-        kernel.start();
+        await station.start();
         await pumpEventQueue();
 
         // Drive several real ticks through the kernel — mounting work beads,

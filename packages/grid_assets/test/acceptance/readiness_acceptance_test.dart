@@ -96,13 +96,13 @@ List<Bead> _preLadderSession() => committeeSession(
   grades: {kSpecGateNode: 'A', for (final n in kSpecCriticNodes) n: 'A'},
 );
 
-StationKernel _buildKernel(
+MountedStation _buildStation(
   Fakes f,
   FakeSnapshotSource work,
   FakeSnapshotSource state,
 ) {
   final bridge = StationJoinBridge(work: work, state: state);
-  return StationKernel(
+  return MountedStation(
     bridge: bridge,
     stationServices: f.ctx,
     resolver: kCodeResolver,
@@ -244,13 +244,13 @@ void main() {
         final state = FakeSnapshotSource(
           _graph(beads: const [], ready: const {}),
         );
-        final kernel = _buildKernel(f, work, state);
-        addTearDown(kernel.dispose);
+        final station = _buildStation(f, work, state);
+        addTearDown(station.dispose);
         addTearDown(f.provider.close);
         addTearDown(work.close);
         addTearDown(state.close);
 
-        kernel.start();
+        await station.start();
         await pumpEventQueue();
 
         work.push(_graph(beads: [_decisionBead()], ready: {'tg-1'}));
@@ -295,13 +295,13 @@ void main() {
       final state = FakeSnapshotSource(
         _graph(beads: const [], ready: const {}),
       );
-      final kernel = _buildKernel(f, work, state);
-      addTearDown(kernel.dispose);
+      final station = _buildStation(f, work, state);
+      addTearDown(station.dispose);
       addTearDown(f.provider.close);
       addTearDown(work.close);
       addTearDown(state.close);
 
-      kernel.start();
+      await station.start();
       await pumpEventQueue();
 
       // 1) A driveable bead with a real brief PASSES the deterministic intake
@@ -375,13 +375,13 @@ void main() {
       final state = FakeSnapshotSource(
         _graph(beads: const [], ready: const {}),
       );
-      final kernel = _buildKernel(f, work, state);
-      addTearDown(kernel.dispose);
+      final station = _buildStation(f, work, state);
+      addTearDown(station.dispose);
       addTearDown(f.provider.close);
       addTearDown(work.close);
       addTearDown(state.close);
 
-      kernel.start();
+      await station.start();
       await pumpEventQueue();
 
       work.push(_graph(beads: [workBead('tg-1')], ready: {'tg-1'}));
@@ -492,13 +492,13 @@ void main() {
       // The BOUNCE: the station restarts and ADOPTS an in-flight session whose
       // cursor was minted under the pre-ladder shape (no `intake` key).
       final state = FakeSnapshotSource(_state(_preLadderSession()));
-      final kernel = _buildKernel(f, work, state);
-      addTearDown(kernel.dispose);
+      final station = _buildStation(f, work, state);
+      addTearDown(station.dispose);
       addTearDown(f.provider.close);
       addTearDown(work.close);
       addTearDown(state.close);
 
-      kernel.start();
+      await station.start();
       await pumpEventQueue();
 
       work.push(_graph(beads: [workBead('tg-1')], ready: {'tg-1'}));
