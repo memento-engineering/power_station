@@ -509,6 +509,80 @@ void main() {
       expect(planOutputWithoutPubAdvice(''), '');
     });
   });
+
+  // The ONE assembler every captured-output failure reason rides (bead
+  // `pow-39tl`). The bracket holds the ADAPTER and nothing else — the optional
+  // diagnostic opens the message, ahead of the log it explains — so the
+  // rendered prefix is the same string whether or not a call site names a
+  // cause.
+  group('capturedOutputReason (bead `pow-39tl`)', () {
+    test('is exit-code-led, adapter-named, and keeps the TAIL', () {
+      final long = 'FIRST-LINE\n${'x' * 4000}\nFATAL: bd is not on PATH';
+      final reason = capturedOutputReason(
+        verb: 'specify',
+        adapter: 'acp',
+        output: long,
+        exitCode: 3,
+      );
+      expect(reason, startsWith('specify failed (exit 3) [acp]: …'));
+      expect(reason, contains('FATAL: bd is not on PATH'));
+      expect(reason, isNot(contains('FIRST-LINE')));
+      expect(
+        reason,
+        'specify failed (exit 3) [acp]: '
+        '${landReasonTail(long, kRevalidateReasonTailChars)}',
+      );
+    });
+
+    test('a diagnostic opens the message and does NOT move the prefix', () {
+      final long = 'HEAD-OF-LOG\n${'y' * 4000}\nbd: command not found';
+      final reason = capturedOutputReason(
+        verb: 'specify',
+        adapter: 'acp',
+        output: long,
+        exitCode: 0,
+        diagnostic: 'declared completion artifact is not durable',
+      );
+      // The SAME prefix as the no-diagnostic rendering above: the adapter is
+      // the bracket's only tenant, so an operator greps one shape.
+      expect(reason, startsWith('specify failed (exit 0) [acp]: '));
+      expect(
+        reason,
+        'specify failed (exit 0) [acp]: '
+        'declared completion artifact is not durable — '
+        '${landReasonTail(long, kRevalidateReasonTailChars)}',
+      );
+      expect(reason, contains('bd: command not found'));
+      expect(reason, isNot(contains('HEAD-OF-LOG')));
+    });
+
+    test('a null exit code and empty output stay honest', () {
+      expect(
+        capturedOutputReason(
+          verb: 'specify',
+          adapter: 'acp',
+          output: '   ',
+          diagnostic: 'artifact probe failed',
+        ),
+        'specify failed (exit unknown) [acp]: '
+        'artifact probe failed — <no output captured>',
+      );
+    });
+
+    test('output inside the budget rides whole, with no cut marker', () {
+      expect(
+        capturedOutputReason(
+          verb: 'acp agent',
+          adapter: 'acp',
+          output: '  FATAL: could not authenticate\n',
+          exitCode: 3,
+          diagnostic: 'exited before protocol completion',
+        ),
+        'acp agent failed (exit 3) [acp]: '
+        'exited before protocol completion — FATAL: could not authenticate',
+      );
+    });
+  });
 }
 
 class _MaterializerAwareRebaseRunner implements GitRunner {
