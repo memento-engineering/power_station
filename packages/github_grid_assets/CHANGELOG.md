@@ -1,5 +1,27 @@
 ## 0.1.0-rc.8
 
+- Breaking: `GitHubSelfTrust.fromEnvironment` takes an injected
+  `EnvironmentReader`; nothing under `lib/` reads `Platform.environment`
+  ambiently any more, and the App-key asset tests are hermetic against an
+  operator's exported `GRID_GITHUB_APP_KEY_*` variables (pow-vw38, #184).
+- Breaking: the reconciler poll reads every `Link` page before advancing, and
+  `since` moves only to the last examined update. Issue-shaped pull rows fetch
+  the full pull resource; `GitHubReconcilerCursor` caches `pullHeads` beside
+  their conditional tags (`intake/pull/<nodeId>`) and evicts the two together.
+  `nextGitHubPageUri` is the one home for the `Link` parse (pow-40a4, #182).
+- Added: a durable pending/delivered outbox on the cursor document. An
+  observation is persisted pending before its sink runs, acknowledged per
+  delivery leg (`addObserver`/`removeObserver`, `kSinkDeliveryLeg`), and
+  replayed as a step of the next poll after a restart, so an event between a
+  fetch and a crash is delivered exactly once. The document stays version 1
+  (pow-oe97, #183).
+- Changed: GitHub intake bead writes (correlate, create, update) ride
+  `BdCliService`, inheriting the shared compatibility and runner behaviour;
+  requires `dart_grid_assets` at the rc that ships `create(defer:, externalRef:,
+  setMetadata:)` and `listScope` (pow-0nvg, #174).
+- Changed: the decision lane's lookup rides the composing station's roster-mode
+  `decisions index --surface`, so a decision in a sibling register is reachable
+  (#178).
 - Breaking: `GitHubIntakeStore.upsertDeferred` is renamed `upsert`, and admitted
   GitHub intake beads are filed OPEN — the `9999-12-31` parking date is dropped
   (pow-5wo). The store writes no approval marker of any kind; absence of the
