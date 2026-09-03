@@ -274,7 +274,7 @@ void main() {
         runner: runner,
       ).route(c.context, c.args);
       expect(outcome, isA<Escalate>());
-      expect((outcome as Escalate).reason, 'revalidate failed: ');
+      expect((outcome as Escalate).reason, 'revalidate failed (exit 1): ');
       expect((outcome).reason, isNot(contains('candidate missing commands')));
     });
 
@@ -292,8 +292,9 @@ void main() {
       expect(outcome, isA<Escalate>());
       expect(
         (outcome as Escalate).reason,
-        'revalidate failed: sh: rg: not found; '
-        'exit 127 — candidate missing commands: rg',
+        'revalidate failed (exit 127); '
+        'exit 127 — candidate missing commands: rg: '
+        'sh: rg: not found',
       );
       expect(runner.calls.single.command, 'rg needle');
     });
