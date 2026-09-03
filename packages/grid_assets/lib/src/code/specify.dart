@@ -86,8 +86,11 @@ import 'package:grid_engine/grid_engine.dart';
 import 'package:grid_runtime/grid_runtime.dart';
 import 'package:path/path.dart' as p;
 
+import '../agent/acp_session_adapter.dart';
 import '../agent/agent_domain.dart';
+import '../agent/agent_environment.dart';
 import '../agent/agent_harness.dart';
+import '../agent/agent_session.dart';
 import '../agent/environment_registry.dart';
 import '../agent/model_tier.dart';
 import '../agent/seat_environments.dart';
@@ -485,17 +488,37 @@ const Circuit kSpecReviewCircuit = Circuit(
 /// the build stage owns the tree). No pub linkage is materialized here
 /// (unlike [AgentCapability]): the stage greps and reads; it runs no Dart
 /// tooling, so `grid.dart` linkage stays the build spawn's job.
+/// One resolved specify spawn — the ambient values read with the effect verb at
+/// the spawn edge (ADR-0008 D3), shared by `spawn` and `createSession`.
+typedef _ResolvedSpecifyRun = ({
+  AgentEnvironment environment,
+  Workspace workspace,
+  AgentBrief brief,
+  String? model,
+  Uri? endpoint,
+});
+
 class SpecifyCapability extends ProcessCapability {
   /// Creates the specify capability.
   ///
   /// [runnerFor] is the bd subprocess seam used only for the durable read-back;
   /// production composes [ProcessBdRunner], while tests inject a fake
   /// [BdRunner].
+  ///
+  /// [sessionAdapters] and [steers] are the CHANNEL seams — this seat is armed
+  /// on a channel harness as readily as the build seat is (bead `pow-39tl`), so
+  /// it carries the same two injected collaborators.
   const SpecifyCapability({
     BdRunner Function(String workspaceRoot) runnerFor = _processRunnerFor,
-  }) : _runnerFor = runnerFor;
+    AgentSessionAdapterRegistry sessionAdapters = kBuiltinAgentSessionAdapters,
+    AgentSteerSource steers = const NoAgentSteerSource(),
+  }) : _runnerFor = runnerFor,
+       _sessionAdapters = sessionAdapters,
+       _steers = steers;
 
   final BdRunner Function(String workspaceRoot) _runnerFor;
+  final AgentSessionAdapterRegistry _sessionAdapters;
+  final AgentSteerSource _steers;
 
   static BdRunner _processRunnerFor(String workspaceRoot) =>
       ProcessBdRunner(workspaceRoot: workspaceRoot);
@@ -531,9 +554,14 @@ class SpecifyCapability extends ProcessCapability {
     }
   }
 
-  @override
-  RuntimeConfig spawn(TreeContext context, StepArgs args) {
-    // Read the ambient values at ENTRY (synchronously, while mounted).
+  /// Reads the ambient values at ENTRY (synchronously, while mounted) and
+  /// renders this incarnation's environment, brief, model and endpoint — shared
+  /// by [spawn] and [createSession], so the argv leg and the channel leg can
+  /// never disagree about what this seat resolved.
+  ///
+  /// GUARD, LOUD: a missing ambient [Bead]/[Workspace] throws, which
+  /// `ProcessAllocation` routes to supervision as a per-work `Failed`.
+  _ResolvedSpecifyRun _resolveRun(TreeContext context, StepArgs args) {
     final bead = context.getInheritedSeedOfExactType<Bead>();
     final workspace = context.getInheritedSeedOfExactType<Workspace>();
     if (bead == null || workspace == null) {
@@ -576,22 +604,78 @@ class SpecifyCapability extends ProcessCapability {
     // circuit left in the worktree. Absent (offline, or a session on a frozen
     // pre-discovery shape) ⇒ a brief byte-identical to the pre-discovery one.
     final dossier = live ? readDiscoveryDossier(workspaceDir) : null;
-    return spawnFor(
+    return (
       environment: environment,
-      model: config.params['model'],
-      endpoint: siteBinding.endpointFor(
-        name: config.harness,
-        environment: environment,
-      ),
+      workspace: workspace,
       brief: buildSpecifyBrief(
         bead,
         workspace,
         guidance: guidance,
         dossier: dossier,
       ),
-      workspace: workspace,
+      model: config.params['model'],
+      endpoint: siteBinding.endpointFor(
+        name: config.harness,
+        environment: environment,
+      ),
+    );
+  }
+
+  @override
+  RuntimeConfig spawn(TreeContext context, StepArgs args) {
+    final run = _resolveRun(context, args);
+    // HARNESS-NEUTRAL (bead `pow-39tl`): a channel environment launches through
+    // its session adapter and receives the brief over the protocol; an argv
+    // environment renders it into argv. Calling `spawnFor` directly is what
+    // spawned an ACP server as a one-turn process with an EMPTY prompt segment
+    // (`PromptMode.none`), so the brief was never delivered and the seat made
+    // no forward progress past discovery.
+    return spawnThroughSessionAdapter(
+      adapters: _sessionAdapters,
+      environment: run.environment,
+      brief: run.brief,
+      workspace: run.workspace,
+      model: run.model,
+      endpoint: run.endpoint,
       // CAPTURE-ONLY usage telemetry (FT-2), same as the build agent.
       usageOut: usageReportPath(args.nodePath),
+    );
+  }
+
+  /// The CHANNEL leg of the same seat. Null for an argv environment (the
+  /// engine's one-turn dispatch owns it, including the artifact fence).
+  ///
+  /// The completion contract this capability DECLARES is re-applied here,
+  /// because the engine's dispatcher fence is unreachable on the session path —
+  /// see [ArtifactFencedSession]. This stage also stays READ-ONLY on the tree
+  /// (A13(6)): unlike [AgentCapability.createSession] it materializes no pub
+  /// linkage and no station overlay — the architect greps and writes the bead.
+  @override
+  ProcessSession? createSession({
+    required RuntimeProvider runtime,
+    required String name,
+    required String attemptId,
+    required String instanceFence,
+    required TreeContext context,
+    required StepArgs args,
+  }) {
+    final run = _resolveRun(context, args);
+    final adapterId = run.environment.sessionAdapter;
+    if (adapterId == null) return null;
+    return ArtifactFencedSession(
+      inner: AgentSession(
+        runtime: runtime,
+        name: name,
+        adapter: _sessionAdapters.require(adapterId),
+        brief: run.brief,
+        commands: _steers.watch(args.beadId),
+        attemptId: attemptId,
+        instanceFence: instanceFence,
+      ),
+      probe: () => probeCompletionArtifact(context, args),
+      resultFields: () => result(context, args),
+      verb: kSpecifyStep,
+      adapter: adapterId,
     );
   }
 

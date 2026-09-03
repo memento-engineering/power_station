@@ -86,7 +86,7 @@ void main() {
 
   group('SpecifyCapability.spawn — the spec seat\'s harness ride', () {
     test(
-      'rides its SpecAgentEnvironment seat: codex, not the ambient claude',
+      'rides its SpecAgentEnvironment seat through the ACP CHANNEL, not argv',
       () {
         final c = _ctx(
           seat: {
@@ -96,12 +96,28 @@ void main() {
           },
         );
         final cfg = const SpecifyCapability().spawn(c.context, c.args);
-        // codex is an ACP-backed environment since pow-9o6: its launch is the
-        // adapter package, never a bare `codex` argv — assert the ENVIRONMENT
-        // was selected, not one tool's argv shape.
-        final argv = cfg.args.join(' ');
-        expect(argv, contains('codex'));
-        expect(argv, isNot(contains('claude')));
+        // codex declares `sessionAdapter: 'acp'`, so the launch is the BRIDGE
+        // and the codex identity rides the bridge spec — never argv. This test
+        // used to pass on `argv contains 'codex'`, which was true only because
+        // the string sits inside the npx PACKAGE NAME: the very argv that
+        // proved the bug. Before this the seat rendered
+        // `npx … codex-acp --model …` as a ONE-TURN process with no brief.
+        expect(cfg.lifecycle, Lifecycle.longLived);
+        expect(cfg.command, Platform.resolvedExecutable);
+        expect(cfg.args.join(' '), isNot(contains('codex')));
+        expect(cfg.args.join(' '), isNot(contains('claude')));
+        final spec = AcpBridgeSpec.fromJson(
+          (jsonDecode(cfg.env[kAcpBridgeSpecEnvironment]!)
+                  as Map<String, dynamic>)
+              .cast<String, Object?>(),
+        );
+        expect(spec.command, 'npx');
+        expect(spec.args, contains('@agentclientprotocol/codex-acp@1.6.2'));
+        expect(spec.model, 'gpt-5.6-sol');
+        expect(
+          spec.usageOut,
+          '.grid/telemetry/tg-1_spec_review_specify.usage.json',
+        );
       },
     );
 

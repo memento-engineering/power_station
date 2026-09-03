@@ -1050,8 +1050,12 @@ DefaultCapabilityRegistry buildCodeRegistry({
       // The spec stage + its committee lanes (bead `pow-6ao`; `specify` folded
       // into the spec circuit by `pow-ui8`).
       kSpecifyStep: specifyBdRunnerFor == null
-          ? const SpecifyCapability()
-          : SpecifyCapability(runnerFor: specifyBdRunnerFor),
+          ? SpecifyCapability(sessionAdapters: sessionAdapters, steers: steers)
+          : SpecifyCapability(
+              runnerFor: specifyBdRunnerFor,
+              sessionAdapters: sessionAdapters,
+              steers: steers,
+            ),
       'spec-critic': SpecCriticCapability(rubrics: rubricSource),
       kSpecGatingRubric: const SpecValidationCapability(),
       // The SPEC committee's own route (bead `pow-7nm`) — the three-way
