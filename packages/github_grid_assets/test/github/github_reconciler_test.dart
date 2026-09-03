@@ -35,6 +35,9 @@ class FakeGitHubCursorStore implements GitHubCursorStore {
 
   @override
   Future<void> save(GitHubReconcilerCursor value) async {
+    for (final entry in value.pending) {
+      calls.add('pending:${entry.observationId}');
+    }
     calls.add('save:${value.observationIds.firstOrNull ?? '-'}');
     cursor = value;
   }
@@ -229,10 +232,12 @@ void main() {
         'poll:issue:I_CLOSED:2026-08-09T02:30:00Z',
         'poll:issue:PR_CLOSED:2026-08-09T02:45:00Z',
       });
+      const issueId = 'poll:issue:I_1:2026-08-09T01:00:00Z';
       expect(
-        calls.indexOf('emit'),
-        greaterThan(calls.indexOf('save:poll:issue:I_1:2026-08-09T01:00:00Z')),
+        calls.indexOf('pending:$issueId'),
+        lessThan(calls.indexOf('emit')),
       );
+      expect(calls.indexOf('emit'), lessThan(calls.indexOf('save:$issueId')));
       expect(store.cursor.since, DateTime.parse('2026-08-09T02:45:00Z'));
       expect(store.cursor.etags, containsPair('intake/issues', '"issues2"'));
       expect(store.cursor.pullHeads['PR_2'], 'grid/pow-40a4');
@@ -433,7 +438,7 @@ void main() {
     },
   );
 
-  test('sink failure leaves claimed observation durable', () async {
+  test('sink failure leaves the observation pending, never observed', () async {
     final transport = FakeGitHubHttpTransport()
       ..responses.add(_response(<Object?>[_issue()]));
     final store = FakeGitHubCursorStore();
@@ -446,10 +451,10 @@ void main() {
       emit: (_) async => throw StateError('sink failed'),
     );
     await expectLater(reconciler.reconcileOnce(), throwsStateError);
-    expect(
-      store.cursor.observationIds,
-      contains('poll:issue:I_1:2026-08-09T01:00:00Z'),
-    );
+    const id = 'poll:issue:I_1:2026-08-09T01:00:00Z';
+    expect(store.cursor.isPending(id), isTrue);
+    expect(store.cursor.pendingFor(id)!.acked, isEmpty);
+    expect(store.cursor.hasObserved(id), isFalse);
   });
 
   test('overlapping calls share one in-flight poll', () async {

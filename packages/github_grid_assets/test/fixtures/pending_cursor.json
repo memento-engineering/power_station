@@ -1,0 +1,38 @@
+{
+  "version": 1,
+  "since": "2026-08-09T03:00:00.000Z",
+  "etags": {"intake/issues": "\"issues\""},
+  "observation_ids": ["poll:issue:I_1:2026-08-09T00:00:00Z"],
+  "pull_heads": {"PR_2": "grid/pow-40a4"},
+  "pending": [
+    {
+      "event": {
+        "nodeId": "I_1",
+        "actor": "octocat",
+        "repository": "memento/power",
+        "substation": "power",
+        "observationId": "poll:issue:I_1:2026-08-09T00:00:00Z",
+        "number": 1,
+        "title": "An issue",
+        "body": "Issue body",
+        "runtimeType": "issueOpened"
+      },
+      "acked": ["sink"]
+    },
+    {
+      "event": {
+        "nodeId": "PR_2",
+        "actor": "octocat",
+        "repository": "memento/power",
+        "substation": "power",
+        "observationId": "poll:issue:PR_2:2026-08-09T01:00:00Z",
+        "number": 2,
+        "title": "A pull request",
+        "body": "PR body",
+        "headRef": "grid/pow-40a4",
+        "runtimeType": "pullRequestOpened"
+      },
+      "acked": []
+    }
+  ]
+}
