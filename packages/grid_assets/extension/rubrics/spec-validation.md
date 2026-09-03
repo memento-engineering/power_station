@@ -13,7 +13,9 @@ and this lane verifies the structure landed whole.
   the bead's acceptance field.
 - **The design carries all four sections** — `## Implementation Plan`,
   `## Touches`, `## ADR Alignment`, and `## Validation Plan` (with at least one
-  `- ` item).
+  `- ` item). Each heading is read at a LINE START: a heading named inside a
+  sentence ("see `## Validation Plan`") is a mention, not a section, and the
+  real section further down is the one the check reads.
 - **`## Implementation Plan` carries ORDINAL-LED steps.** Every step opens with
   an ordinal: an ordered-list item (`1. …` / `1) …`) or an ordinal heading
   (`### Step 1 — …` / `### 1. …` / `**Step 1:** …`). Both are ordered and

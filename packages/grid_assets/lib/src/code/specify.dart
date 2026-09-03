@@ -261,7 +261,10 @@ else:
 1. **Acceptance** carries at least one `- [ ]` checkbox line.
 2. **The design carries all four `## ` headings**, spelled exactly:
    `## Implementation Plan`, `## Touches`, `## ADR Alignment`,
-   `## Validation Plan`.
+   `## Validation Plan` — each OPENING ITS OWN LINE. A heading NAMED inside a
+   sentence ("the machine gate is the fast subset — see `## Validation Plan`")
+   is a MENTION: it neither satisfies this rule nor displaces the real section
+   further down. Backtick any heading you name in running prose.
 3. **`## Implementation Plan` carries NUMBERED steps.** Every step opens with an
    ordinal — an ordered-list item (`1. …` / `1) …`) or an ordinal heading
    (`### Step 1 — …` / `### 1. …`). A bulleted or prose-only plan has no ordinal
