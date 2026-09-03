@@ -157,14 +157,12 @@ void main() {
       );
     });
 
-    test('adr-alignment names both SUBSTATION register directories and the '
-        'ADR-0000 amendment register, never a foreign home', () {
-      final text = loader.loadRubric('adr-alignment');
-      for (final directory in kLocalDecisionRegisterDirectories) {
-        expect(text, contains(directory));
-      }
-      expect(text, contains('ADR-0000'));
-      expect(text, contains('A<n>'));
+    test('decision-alignment names the ROSTER union, not a local register', () {
+      final text = loader.loadRubric('decision-alignment');
+      expect(text, contains('decisions index'));
+      expect(text, contains('originRegister'));
+      expect(text, contains('<repo>#<slug>'));
+      expect(text, isNot(contains('docs/adr')));
     });
 
     test('coherence speaks memento terminology (the seam word is extension) '
@@ -325,45 +323,45 @@ void main() {
     });
   });
 
-  test('all local-decision assets name both register directories', () {
+  test('all decision assets name the roster-mode lookup', () {
     final assets = <String, String>{
-      'rubrics/adr-alignment.md': loader.loadRubric('adr-alignment'),
-      'rubrics/bead-readiness.md': loader.loadRubric(kReadinessRubric),
+      'rubrics/decision-alignment.md': loader.loadRubric('decision-alignment'),
       'prompts/readiness.md': loader.loadPromptTemplate('readiness'),
       'prompts/spec-critic.md': loader.loadPromptTemplate('spec-critic'),
       'prompts/discovery.md': loader.loadPromptTemplate('discovery'),
     };
 
     for (final entry in assets.entries) {
-      for (final directory in kLocalDecisionRegisterDirectories) {
-        expect(entry.value, contains(directory), reason: entry.key);
+      expect(entry.value, contains('space decisions index'), reason: entry.key);
+      expect(
+        entry.value,
+        contains('mounted-substation roster'),
+        reason: entry.key,
+      );
+      for (final token in kLocalOnlyTokens) {
+        expect(entry.value, isNot(contains(token)), reason: entry.key);
       }
-      expect(entry.value, contains('missing directory'), reason: entry.key);
     }
   });
 
-  test(
-    'searching assets guard missing registers and accept both citations',
-    () {
-      final searchingAssets = [
-        loader.loadRubric('adr-alignment'),
-        loader.loadPromptTemplate('readiness'),
-        loader.loadPromptTemplate('spec-critic'),
-        loader.loadPromptTemplate('discovery'),
-      ];
+  test('searching assets pass NO register-directory argument', () {
+    final searchingAssets = [
+      loader.loadRubric('decision-alignment'),
+      loader.loadPromptTemplate('readiness'),
+      loader.loadPromptTemplate('spec-critic'),
+      loader.loadPromptTemplate('discovery'),
+    ];
 
-      for (final text in searchingAssets) {
-        expect(text, contains(r'[ ! -d "$register" ]'));
-      }
-      for (final text in [
-        loader.loadRubric('adr-alignment'),
-        loader.loadPromptTemplate('discovery'),
-      ]) {
-        expect(text, contains('ADR-0000-ai-decision-register.md A17(4)'));
-        expect(text, contains('the_grid#admission-authority-boundary'));
-      }
-    },
-  );
+    for (final text in searchingAssets) {
+      expect(text, isNot(contains(r'[ ! -d "$register" ]')));
+    }
+    for (final text in [
+      loader.loadRubric('decision-alignment'),
+      loader.loadPromptTemplate('discovery'),
+    ]) {
+      expect(text, contains('the_grid#admission-authority-boundary'));
+    }
+  });
 
   test('discovery prompts require structured FOREIGN bead citations', () {
     final runtime = const DiscoveryLensCapability().buildLensPrompt(
@@ -429,7 +427,9 @@ void main() {
 
     test('no RENDERED register instruction carries the `pending` tier', () {
       final rendered = <String, String>{
-        'rubrics/adr-alignment.md': loader.loadRubric('adr-alignment'),
+        'rubrics/decision-alignment.md': loader.loadRubric(
+          'decision-alignment',
+        ),
         'rubrics/bead-readiness.md': loader.loadRubric(kReadinessRubric),
         'prompts/spec-critic.md': loader.loadPromptTemplate('spec-critic'),
         'prompts/readiness.md': loader.loadPromptTemplate('readiness'),
@@ -465,22 +465,21 @@ void main() {
     });
 
     test('every searching asset mirrors the lens command VERBATIM', () {
-      const grepPattern = r'<keyword1>\|<keyword2>\|<keyword3>';
-      final listing = localDecisionRegisterListCommand();
-      final grepping = localDecisionRegisterGrepCommand(grepPattern);
-
-      expect(listing, contains("-not -path '*/views/*'"));
-      expect(grepping, contains("-not -path '*/views/*'"));
+      final surfaceLookup = rosterDecisionIndexCommand(
+        surface: '$kUnknownSubstationPrefix/$kRosterSurfacePlaceholder',
+      );
 
       for (final text in [
-        loader.loadRubric('adr-alignment'),
+        loader.loadRubric('decision-alignment'),
         loader.loadPromptTemplate('spec-critic'),
         loader.loadPromptTemplate('discovery'),
       ]) {
-        expect(text, contains(listing));
-        expect(text, contains(grepping));
+        expect(text, contains(surfaceLookup));
       }
-      expect(loader.loadPromptTemplate('readiness'), contains(listing));
+      expect(
+        loader.loadPromptTemplate('readiness'),
+        contains(rosterDecisionIndexCommand()),
+      );
     });
   });
 }

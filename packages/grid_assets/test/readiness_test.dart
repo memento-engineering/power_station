@@ -496,9 +496,9 @@ void main() {
         contains('"nodePath":"pow-kzx/spec_review/readiness","round":0}'),
       );
       expect(prompt, contains('Stay cheap'));
-      expect(prompt, contains(localDecisionRegisterListCommand()));
-      for (final directory in kLocalDecisionRegisterDirectories) {
-        expect(prompt, contains(directory));
+      expect(prompt, contains('space decisions index'));
+      for (final token in kLocalOnlyTokens) {
+        expect(prompt, isNot(contains(token)));
       }
       expect(
         prompt.trimRight(),

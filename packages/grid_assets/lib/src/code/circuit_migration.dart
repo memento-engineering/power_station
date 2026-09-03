@@ -50,7 +50,10 @@
 /// shape-1, shape-2, shape-3 **or shape-4** cursor (every survivor landed,
 /// closed, or was reworked into a fresh round), DELETE this file, drop
 /// `...kMigrationCircuits` from `buildCodeRegistry`, and put the production
-/// composition back to `CircuitResolver((_) => kCodeCircuit)`.
+/// composition back to `CircuitResolver((_) => kCodeCircuit)`. These frozen
+/// shapes are also the LAST consumer of the local-only
+/// `extension/rubrics/adr-alignment.md` (the live lane moved to the
+/// roster-mode `decision-alignment`): delete that rubric with this file.
 ///
 /// **Layering note (do not "fix" into a cycle).** This library imports NOTHING
 /// from `code_capabilities.dart`: the CURRENT circuit arrives as a constructor

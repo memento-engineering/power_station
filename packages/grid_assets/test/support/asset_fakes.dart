@@ -211,11 +211,22 @@ List<Bead> ladderDoneSession({
   completed: kSpecHeadNodes,
   grades: kReadinessGradeA,
 );
+/// The LOCAL-ONLY register tokens the spec path no longer renders — the shell
+/// shape a `for register in docs/adr docs/decisions` grep is built from.
+///
+/// Shared by every suite that fences the roster-mode lookup: a revert to a
+/// local register read reintroduces at least one of them.
+const List<String> kLocalOnlyTokens = [
+  'for register in docs/adr docs/decisions',
+  r'[ ! -d "$register" ]',
+  '-exec grep -li',
+];
+
 const String kSpecClearCritiqueNode = 'spec_review/clear-critique';
 const String kSpecGateNode = 'spec_review/spec-validation';
 const List<String> kSpecCriticNodes = [
   'spec_review/coherence',
-  'spec_review/adr-alignment',
+  'spec_review/decision-alignment',
   'spec_review/acceptance-testability',
   'spec_review/plan-completeness',
 ];
@@ -255,7 +266,7 @@ const Set<String> kSpecPhaseNodes = {
   kSpecClearCritiqueNode,
   kSpecGateNode,
   'spec_review/coherence',
-  'spec_review/adr-alignment',
+  'spec_review/decision-alignment',
   'spec_review/acceptance-testability',
   'spec_review/plan-completeness',
   kSpecRouteNode,

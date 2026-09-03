@@ -16,21 +16,26 @@ is TWO things, and nothing else:
 {{bead}}
 
 ## What counts as an OFFENCE (the gate is CITE-THE-OFFENCE)
-A substation's local decision register may contain `docs/adr/`,
-`docs/decisions/`, or both. Treat a missing directory as absent and continue
-with the other.
+Lookup is ROSTER-MODE. Run the roster union once, then one lookup per surface
+this bead names — roster-qualify every repository-relative path with its
+substation repository name.
 
 ```sh
-for register in docs/adr docs/decisions; do [ ! -d "$register" ] || find "$register" -type f -not -path '*/views/*' -name '*.md' -print; done
-for register in docs/adr docs/decisions; do [ ! -d "$register" ] || find "$register" -type f -not -path '*/views/*' -name '*.md' -exec grep -li "<keyword1>\|<keyword2>\|<keyword3>" {} +; done
+space decisions index
+space decisions index --surface <repo>/<path>
 ```
 
-Legacy ADR citations name the file plus an ADR number or `A<n>` clause. Entries
-in `docs/decisions/` use `<repo>#<slug>`, for example
+Pass NO register-directory argument: that omission is load-bearing — the grid
+adapter resolves the live mounted-substation roster and the command returns the
+UNION of every mounted register rather than only this repo's. A SIBLING
+substation's entry binds exactly as a local one does. A lookup that FAILS is not
+an empty union — report the failure.
+
+Cite each decision by its canonical `<repo>#<slug>` identity, for example
 `the_grid#admission-authority-boundary`; migrated entries may also carry
 `register.legacy-id` so their old citations continue to resolve. The citable
-standard is a RATIFIED local decision, or an applicable SKILL's instructions.
-Skills TEACH how; decisions RATIFY the specific.
+standard is a RECORDED decision from ANY mounted register, or an applicable
+SKILL's instructions. Skills TEACH how; decisions RATIFY the specific.
 
 - **A DECISION ENTRY BINDS.** A recorded entry is in force the moment it is
   written — a `docs/decisions/` slug entry, or a legacy `A<n>` amendment
@@ -38,7 +43,7 @@ Skills TEACH how; decisions RATIFY the specific.
   to wait on: cite one and set `"ratified": true`. **A BEAD IS NOT A
   DECISION** — a plan, a proposal, another bead's design field, or your own
   reading of the tree is not a recorded entry: set `"ratified": false` and it
-  rides to the architect as a flag for the `adr-alignment` lane, NEVER as a
+  rides to the architect as a flag for the `decision-alignment` lane, NEVER as a
   hold. (A `skill` or `pattern` citation ignores this field.)
 - You MUST cite the STANDARD and the CLAUSE, and the clause MUST EXIST: quote it
   VERBATIM from the file you actually read, INCLUDING its `status` line so the

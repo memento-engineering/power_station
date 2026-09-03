@@ -14,13 +14,14 @@ specify agent and no 4-critic committee will run.
 {{bead}}
 
 ## Stay cheap — this is a lens, not a committee
-Spend a BOUNDED look, not an exploration: list the substation's local decision
-register with the command below, and grep ONLY the surfaces the bead actually
-names. It searches `docs/adr/` and `docs/decisions/`; treat a missing directory
-as absent and continue with the other.
+Spend a BOUNDED look, not an exploration: list the roster union of recorded
+decisions ONCE with the command below, and grep ONLY the surfaces the bead
+actually names. It takes no register-directory argument on purpose — the grid
+adapter resolves the live mounted-substation roster, so a SIBLING substation's
+decisions are in the answer too.
 
 ```sh
-for register in docs/adr docs/decisions; do [ ! -d "$register" ] || find "$register" -type f -not -path '*/views/*' -name '*.md' -print; done
+space decisions index
 ```
 
 Do not design the change and do not write a plan — that is the architect's job

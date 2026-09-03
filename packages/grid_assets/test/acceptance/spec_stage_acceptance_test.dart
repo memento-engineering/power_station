@@ -275,7 +275,7 @@ void main() {
       await _settle(f);
       final specify = f.provider.started.single.config;
       // The architect brief rides the argv: the bd CLI spec writes, the
-      // mandatory ADR-alignment grep of the substation register, and the
+      // mandatory roster-union decision lookup, and the
       // pre-convene re-validation.
       expect(specify.command, 'sh');
       expect(specify.args, contains('claude'));
@@ -283,17 +283,9 @@ void main() {
       expect(brief, contains('bd update tg-1 --actor specify --acceptance'));
       expect(brief, contains('bd update tg-1 --actor specify --design'));
       expect(brief, contains('## ADR Alignment'));
-      expect(brief, contains(localDecisionRegisterListCommand()));
-      expect(
-        brief,
-        contains(
-          localDecisionRegisterGrepCommand(
-            r'<keyword1>\|<keyword2>\|<keyword3>',
-          ),
-        ),
-      );
-      for (final directory in kLocalDecisionRegisterDirectories) {
-        expect(brief, contains(directory));
+      expect(brief, contains('space decisions index --surface'));
+      for (final token in kLocalOnlyTokens) {
+        expect(brief, isNot(contains(token)));
       }
       expect(brief, contains('the_grid#admission-authority-boundary'));
       expect(brief, contains('Pre-convene re-validation'));

@@ -293,26 +293,25 @@ void main() {
       expect(rendered, contains('D-H doctrine'));
     });
 
-    test('the ADR Alignment section is MANDATORY and greps both local decision '
-        'register directories', () {
+    test('the ADR Alignment section is MANDATORY and queries the ROSTER union, '
+        'never a local register', () {
       expect(rendered, contains('MANDATORY'));
-      expect(rendered, contains(localDecisionRegisterListCommand()));
+      expect(rendered, contains(kDecisionLookupRule));
       expect(
         rendered,
-        contains(
-          localDecisionRegisterGrepCommand(
-            r'<keyword1>\|<keyword2>\|<keyword3>',
-          ),
-        ),
+        contains('space decisions index --surface <repo>/<path>'),
       );
-      for (final directory in kLocalDecisionRegisterDirectories) {
-        expect(rendered, contains(directory));
+      for (final token in kLocalOnlyTokens) {
+        expect(rendered, isNot(contains(token)));
       }
       expect(rendered, contains('ADR-0000'));
       expect(rendered, contains(kDecisionWriteRule));
       expect(rendered, isNot(contains('living AI-decision register')));
       expect(rendered, contains('the_grid#admission-authority-boundary'));
-      expect(rendered, contains('No ADR applies — verified via grep on'));
+      expect(
+        rendered,
+        contains('No recorded decision governs these surfaces'),
+      );
     });
 
     test('carries the pre-convene re-validation: grep callers/tests of every '

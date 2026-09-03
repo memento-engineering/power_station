@@ -38,7 +38,7 @@ const EnvironmentRegistry _registry = EnvironmentRegistry(
   builtins: kBuiltinEnvironments,
 );
 
-const CriticLane _adr = CriticLane('adr-alignment');
+const CriticLane _adr = CriticLane('decision-alignment');
 const CriticLane _coherence = CriticLane('coherence');
 
 /// The ambient tree a spawner reads at entry, plus whatever seat preference
@@ -256,15 +256,15 @@ void main() {
     );
     final seat = <Type, Object>{CriticAgentEnvironment: routed};
 
-    test('ONE provider routes adr-alignment and coherence apart', () {
-      expect(_critic(seat, 'adr-alignment'), 'strong-model');
+    test('ONE provider routes decision-alignment and coherence apart', () {
+      expect(_critic(seat, 'decision-alignment'), 'strong-model');
       expect(_critic(seat, 'coherence'), 'fast-model');
     });
 
     test('the spec critic and the readiness lens read the SAME seat', () {
       expect(_specCritic(seat, 'coherence'), 'fast-model');
-      expect(_specCritic(seat, 'adr-alignment'), 'strong-model');
-      expect(_readiness(seat, 'adr-alignment'), 'strong-model');
+      expect(_specCritic(seat, 'decision-alignment'), 'strong-model');
+      expect(_readiness(seat, 'decision-alignment'), 'strong-model');
       expect(_readiness(seat, 'coherence'), 'fast-model');
     });
 
@@ -365,7 +365,7 @@ void main() {
   });
 
   group('pow-n6n.2 - the lane ASPECT narrows invalidation', () {
-    test('a coherence dependent ignores an adr-alignment-only change', () {
+    test('a coherence dependent ignores an decision-alignment-only change', () {
       var builds = 0;
       late void Function(CriticAgentEnvironment) publish;
       final owner = TreeOwner();
@@ -385,7 +385,7 @@ void main() {
       owner.flush();
       expect(builds, 1);
 
-      // Only the adr-alignment lane moves.
+      // Only the decision-alignment lane moves.
       publish(
         CriticAgentEnvironment(
           const [_shared],
