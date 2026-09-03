@@ -72,19 +72,35 @@ class _HostState extends State<_Host> {
 class _FakeStat {
   _FakeStat(this.values);
   final Map<String, GitHubKeyFileStat> values;
-  var calls = 0;
+
+  /// Every path this fake was asked to stat, in order.
+  final paths = <String>[];
+  int get calls => paths.length;
   Future<GitHubKeyFileStat> call(String path) async {
-    calls++;
+    paths.add(path);
     return values[path] ??
         const GitHubKeyFileStat(type: FileSystemEntityType.notFound, mode: 0);
   }
 }
 
+/// The fixture PEMs, read ONCE at library load — never inside a settle window.
+///
+/// [_FakeRead] used to `await File(path).readAsString()`, putting a REAL
+/// asynchronous filesystem hop BELOW the fake seam. A pump-only wait advances
+/// event-loop turns and cannot wait out an OS completion, so the asset's key
+/// load had frequently not landed when the assertions ran.
+final _pems = <String, String>{
+  _onePath: File(_onePath).readAsStringSync(),
+  _twoPath: File(_twoPath).readAsStringSync(),
+};
+
 class _FakeRead {
-  var calls = 0;
+  /// Every path this fake was asked to read, in order.
+  final paths = <String>[];
+  int get calls => paths.length;
   Future<String> call(String path) async {
-    calls++;
-    return File(path).readAsString();
+    paths.add(path);
+    return _pems[path] ?? (throw StateError('no fixture PEM for $path'));
   }
 }
 
