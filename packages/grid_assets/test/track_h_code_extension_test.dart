@@ -297,6 +297,7 @@ void main() {
             defaultBranch: 'main',
             substation: 'ps',
           ),
+          gitRunner: runner,
         );
 
         await sc.provisionWorkspace(
@@ -370,9 +371,10 @@ void main() {
       );
       residue.createSync(recursive: true);
       residue.writeAsStringSync('{"ok":true}');
+      final runner = _MaterializingWorktreeRunner(failWorktreeAdd: true);
       final sc = GitSourceControl(
         provisioner: StationGitService(
-          runner: _MaterializingWorktreeRunner(failWorktreeAdd: true),
+          runner: runner,
           prOpener: _NoopPrOpener(),
         ),
         root: RootCheckout(
@@ -380,6 +382,7 @@ void main() {
           defaultBranch: 'main',
           substation: 'ps',
         ),
+        gitRunner: runner,
       );
 
       await expectLater(
@@ -411,11 +414,12 @@ void main() {
       );
       residue.createSync(recursive: true);
       residue.writeAsStringSync('scaffold');
+      final runner = _MaterializingWorktreeRunner(
+        checkoutEntries: {'.grid/critique/pinned.diff': 'checkout'},
+      );
       final sc = GitSourceControl(
         provisioner: StationGitService(
-          runner: _MaterializingWorktreeRunner(
-            checkoutEntries: {'.grid/critique/pinned.diff': 'checkout'},
-          ),
+          runner: runner,
           prOpener: _NoopPrOpener(),
         ),
         root: RootCheckout(
@@ -423,6 +427,7 @@ void main() {
           defaultBranch: 'main',
           substation: 'ps',
         ),
+        gitRunner: runner,
       );
 
       await expectLater(
@@ -436,6 +441,269 @@ void main() {
         ),
       );
     });
+    test(
+      'GitSourceControl.provisionWorkspace MERGES the scaffold into a checkout '
+      'that already tracks a path under .grid',
+      () async {
+        final rootDir = Directory.systemTemp.createTempSync('powgnrm-root-');
+        addTearDown(() => rootDir.deleteSync(recursive: true));
+        final workspaceDir = WorktreeLayout.worktreePath(
+          rootDir.path,
+          'ps',
+          'pow-1',
+        );
+        // The engine's pre-acquire scaffold, two levels deep so the merge has
+        // to recurse INTO a tracked dir, not just land beside it.
+        for (final entry in {
+          p.join('.grid', 'critique', 'pinned.diff'): 'pinned',
+          p.join('.grid', 'seats', 'scratch', 'note.md'): 'scratch',
+        }.entries) {
+          File(p.join(workspaceDir, entry.key))
+            ..createSync(recursive: true)
+            ..writeAsStringSync(entry.value);
+        }
+
+        final runner = _MaterializingWorktreeRunner(
+          checkoutEntries: {
+            '.grid/seats/README.md': 'tracked seat state',
+            'lib/source.dart': 'void source() {}',
+          },
+        );
+        final sc = GitSourceControl(
+          provisioner: StationGitService(
+            runner: runner,
+            prOpener: _NoopPrOpener(),
+          ),
+          root: RootCheckout(
+            path: rootDir.path,
+            defaultBranch: 'main',
+            substation: 'ps',
+          ),
+          gitRunner: runner,
+        );
+
+        await sc.provisionWorkspace(
+          beadId: 'pow-1',
+          workspaceDir: workspaceDir,
+        );
+
+        expect(File(p.join(workspaceDir, '.git')).existsSync(), isTrue);
+        expect(
+          File(
+            p.join(workspaceDir, '.grid', 'seats', 'README.md'),
+          ).readAsStringSync(),
+          'tracked seat state',
+        );
+        expect(
+          File(
+            p.join(workspaceDir, '.grid', 'critique', 'pinned.diff'),
+          ).readAsStringSync(),
+          'pinned',
+        );
+        expect(
+          File(
+            p.join(workspaceDir, '.grid', 'seats', 'scratch', 'note.md'),
+          ).readAsStringSync(),
+          'scratch',
+        );
+        expect(Directory('$workspaceDir.scaffold-stash').existsSync(), isFalse);
+      },
+    );
+
+    test(
+      'GitSourceControl.provisionWorkspace unwinds the discarded provision on a '
+      'restore failure, so the retry mints fresh',
+      () async {
+        final rootDir = Directory.systemTemp.createTempSync('powgnrm-root-');
+        addTearDown(() => rootDir.deleteSync(recursive: true));
+        final workspaceDir = WorktreeLayout.worktreePath(
+          rootDir.path,
+          'ps',
+          'pow-1',
+        );
+        final residue = File(
+          p.join(workspaceDir, '.grid', 'critique', 'pinned.diff'),
+        )..createSync(recursive: true);
+        residue.writeAsStringSync('scaffold');
+
+        final runner = _MaterializingWorktreeRunner(
+          checkoutEntries: {'.grid/critique/pinned.diff': 'checkout'},
+        );
+        final sc = GitSourceControl(
+          provisioner: StationGitService(
+            runner: runner,
+            prOpener: _NoopPrOpener(),
+          ),
+          root: RootCheckout(
+            path: rootDir.path,
+            defaultBranch: 'main',
+            substation: 'ps',
+          ),
+          gitRunner: runner,
+        );
+
+        await expectLater(
+          sc.provisionWorkspace(beadId: 'pow-1', workspaceDir: workspaceDir),
+          throwsA(
+            isA<StateError>().having(
+              (error) => error.message,
+              'message',
+              contains('scaffold path collision'),
+            ),
+          ),
+        );
+
+        // Nothing prunable, no minted branch — the retry can mint fresh.
+        expect(runner.registered, isEmpty);
+        expect(runner.branches, isEmpty);
+        expect(residue.readAsStringSync(), 'scaffold');
+        expect(Directory('$workspaceDir.scaffold-stash').existsSync(), isFalse);
+
+        // The retry MINTS FRESH instead of adopting a registered-but-missing
+        // worktree — the wedge that held every fresh provision.
+        runner.checkoutEntries = {'.grid/seats/README.md': 'tracked seat state'};
+        await sc.provisionWorkspace(
+          beadId: 'pow-1',
+          workspaceDir: workspaceDir,
+        );
+
+        expect(File(p.join(workspaceDir, '.git')).existsSync(), isTrue);
+        expect(residue.readAsStringSync(), 'scaffold');
+        expect(
+          File(
+            p.join(workspaceDir, '.grid', 'seats', 'README.md'),
+          ).readAsStringSync(),
+          'tracked seat state',
+        );
+        expect(
+          runner.calls
+              .where(
+                (args) =>
+                    args.length > 2 &&
+                    args[0] == 'worktree' &&
+                    args[1] == 'add' &&
+                    args[2] == '-b',
+              )
+              .length,
+          2,
+        );
+      },
+    );
+
+    test(
+      'GitSourceControl.provisionWorkspace never deletes an adopted branch when '
+      'it unwinds',
+      () async {
+        final rootDir = Directory.systemTemp.createTempSync('powgnrm-root-');
+        addTearDown(() => rootDir.deleteSync(recursive: true));
+        final workspaceDir = WorktreeLayout.worktreePath(
+          rootDir.path,
+          'ps',
+          'pow-1',
+        );
+        File(p.join(workspaceDir, '.grid', 'critique', 'pinned.diff'))
+          ..createSync(recursive: true)
+          ..writeAsStringSync('scaffold');
+
+        final runner = _MaterializingWorktreeRunner(
+          checkoutEntries: {'.grid/critique/pinned.diff': 'checkout'},
+        );
+        // The branch outlived a prior arm: `provisionWorktree` ADOPTS it, so
+        // the unwind must leave it alone (it can carry that arm's commits).
+        runner.branches.add('grid/pow-1');
+
+        final sc = GitSourceControl(
+          provisioner: StationGitService(
+            runner: runner,
+            prOpener: _NoopPrOpener(),
+          ),
+          root: RootCheckout(
+            path: rootDir.path,
+            defaultBranch: 'main',
+            substation: 'ps',
+          ),
+          gitRunner: runner,
+        );
+
+        await expectLater(
+          sc.provisionWorkspace(beadId: 'pow-1', workspaceDir: workspaceDir),
+          throwsA(
+            isA<StateError>().having(
+              (error) => error.message,
+              'message',
+              contains('scaffold path collision'),
+            ),
+          ),
+        );
+
+        expect(runner.registered, isEmpty);
+        expect(runner.branches, contains('grid/pow-1'));
+        expect(
+          runner.calls.any((args) => args[0] == 'branch' && args[1] == '-D'),
+          isFalse,
+        );
+      },
+    );
+
+    test(
+      'GitSourceControl.provisionWorkspace refuses LOUDLY when the unwind '
+      'cannot clear the registration',
+      () async {
+        final rootDir = Directory.systemTemp.createTempSync('powgnrm-root-');
+        addTearDown(() => rootDir.deleteSync(recursive: true));
+        final workspaceDir = WorktreeLayout.worktreePath(
+          rootDir.path,
+          'ps',
+          'pow-1',
+        );
+        File(p.join(workspaceDir, '.grid', 'critique', 'pinned.diff'))
+          ..createSync(recursive: true)
+          ..writeAsStringSync('scaffold');
+
+        final runner = _MaterializingWorktreeRunner(
+          checkoutEntries: {'.grid/critique/pinned.diff': 'checkout'},
+          refuseWorktreeRemove: true,
+        );
+        final sc = GitSourceControl(
+          provisioner: StationGitService(
+            runner: runner,
+            prOpener: _NoopPrOpener(),
+          ),
+          root: RootCheckout(
+            path: rootDir.path,
+            defaultBranch: 'main',
+            substation: 'ps',
+          ),
+          gitRunner: runner,
+        );
+
+        await expectLater(
+          sc.provisionWorkspace(beadId: 'pow-1', workspaceDir: workspaceDir),
+          throwsA(
+            isA<StateError>()
+                .having(
+                  (error) => error.message,
+                  'message',
+                  contains('failed to unwind the discarded provision'),
+                )
+                .having(
+                  (error) => error.message,
+                  'message',
+                  contains('scaffold path collision'),
+                ),
+          ),
+        );
+
+        // The scaffold still came back even though the unwind could not be
+        // verified — the restore is never skipped.
+        expect(
+          File(
+            p.join(workspaceDir, '.grid', 'critique', 'pinned.diff'),
+          ).readAsStringSync(),
+          'scaffold',
+        );
+      },
+    );
 
     test(
       'GitSourceControl.provisionWorkspace refuses a provisioner that leaves '
@@ -1163,36 +1431,149 @@ void main() {
   });
 }
 
+/// A [CannedGitRunner] that MODELS git's worktree registry and local branches,
+/// so the provision → discard → retry round-trip runs entirely offline:
+///
+/// - `worktree add [-b <branch>] <path> [<base>]` registers [path] and
+///   materializes the checkout ([checkoutEntries] plus a `.git` marker); a MINT
+///   (`-b`) refuses when the branch already exists, and ANY add refuses onto a
+///   path that is STILL REGISTERED — git's "missing but already registered
+///   worktree", the wedge a discarded provision used to leave behind;
+/// - `worktree list --porcelain` renders the registry (the root repo first);
+/// - `worktree remove <path> --force` unregisters and deletes the directory;
+/// - `worktree prune` drops registrations whose directory is gone;
+/// - `show-ref --verify --quiet refs/heads/<b>` and `branch -D <b>` answer and
+///   mutate [branches].
 class _MaterializingWorktreeRunner extends CannedGitRunner {
   _MaterializingWorktreeRunner({
     this.checkoutEntries = const {},
     this.failWorktreeAdd = false,
+    this.refuseWorktreeRemove = false,
   });
 
-  final Map<String, String> checkoutEntries;
+  /// The tracked files a fresh checkout materializes (relative path → body).
+  /// Mutable so ONE runner can serve a second, different provision.
+  Map<String, String> checkoutEntries;
+
+  /// Whether `worktree add` reports a non-zero git.
   final bool failWorktreeAdd;
+
+  /// Whether `worktree remove` refuses — the unverifiable-unwind case.
+  final bool refuseWorktreeRemove;
+
+  /// git's `.git/worktrees` registry: path → branch.
+  final Map<String, String> registered = {};
+
+  /// The local branches (`refs/heads/*`) the root repo carries.
+  final Set<String> branches = {};
 
   @override
   Future<GitRunResult> run({
     required String workingDirectory,
     required List<String> args,
   }) async {
-    if (args.length >= 2 && args[0] == 'worktree' && args[1] == 'add') {
+    if (args.length >= 2 && args[0] == 'worktree') {
+      switch (args[1]) {
+        case 'add':
+          return _add(args);
+        case 'list':
+          calls.add(List.unmodifiable(args));
+          return GitRunResult(
+            exitCode: 0,
+            output: _porcelain(workingDirectory),
+          );
+        case 'remove':
+          return _remove(args);
+        case 'prune':
+          calls.add(List.unmodifiable(args));
+          registered.removeWhere((path, _) => !Directory(path).existsSync());
+          return const GitRunResult(exitCode: 0, output: '');
+      }
+    }
+    if (args.length >= 4 && args[0] == 'show-ref') {
       calls.add(List.unmodifiable(args));
-      if (failWorktreeAdd) {
-        return const GitRunResult(exitCode: 128, output: 'worktree add failed');
-      }
-      final target = args.contains('-b') ? args[4] : args[2];
-      Directory(target).createSync(recursive: true);
-      File(p.join(target, '.git')).writeAsStringSync('gitdir: fake');
-      for (final entry in checkoutEntries.entries) {
-        final file = File(p.join(target, entry.key));
-        file.createSync(recursive: true);
-        file.writeAsStringSync(entry.value);
-      }
-      return const GitRunResult(exitCode: 0, output: '');
+      final branch = args.last.replaceFirst('refs/heads/', '');
+      return GitRunResult(
+        exitCode: branches.contains(branch) ? 0 : 1,
+        output: '',
+      );
+    }
+    if (args.length >= 3 && args[0] == 'branch' && args[1] == '-D') {
+      calls.add(List.unmodifiable(args));
+      return GitRunResult(
+        exitCode: branches.remove(args[2]) ? 0 : 1,
+        output: '',
+      );
     }
     return super.run(workingDirectory: workingDirectory, args: args);
+  }
+
+  GitRunResult _add(List<String> args) {
+    calls.add(List.unmodifiable(args));
+    if (failWorktreeAdd) {
+      return const GitRunResult(exitCode: 128, output: 'worktree add failed');
+    }
+    // mint: [worktree, add, -b, branch, path, base]
+    // adopt: [worktree, add, path, branch]
+    final mint = args.contains('-b');
+    final path = mint ? args[4] : args[2];
+    final branch = args[3];
+    if (registered.containsKey(path)) {
+      return GitRunResult(
+        exitCode: 128,
+        output: 'fatal: $path is a missing but already registered worktree',
+      );
+    }
+    if (mint && branches.contains(branch)) {
+      return GitRunResult(
+        exitCode: 128,
+        output: "fatal: a branch named '$branch' already exists",
+      );
+    }
+    Directory(path).createSync(recursive: true);
+    File(p.join(path, '.git')).writeAsStringSync('gitdir: fake');
+    for (final entry in checkoutEntries.entries) {
+      File(p.join(path, entry.key))
+        ..createSync(recursive: true)
+        ..writeAsStringSync(entry.value);
+    }
+    registered[path] = branch;
+    branches.add(branch);
+    return const GitRunResult(exitCode: 0, output: '');
+  }
+
+  GitRunResult _remove(List<String> args) {
+    calls.add(List.unmodifiable(args));
+    final path = args[2];
+    if (refuseWorktreeRemove) {
+      return GitRunResult(exitCode: 128, output: 'fatal: refused: $path');
+    }
+    if (!registered.containsKey(path)) {
+      return GitRunResult(
+        exitCode: 128,
+        output: 'fatal: $path is not a working tree',
+      );
+    }
+    registered.remove(path);
+    final dir = Directory(path);
+    if (dir.existsSync()) dir.deleteSync(recursive: true);
+    return const GitRunResult(exitCode: 0, output: '');
+  }
+
+  String _porcelain(String rootRepo) {
+    final buffer = StringBuffer()
+      ..writeln('worktree $rootRepo')
+      ..writeln('HEAD ${'0' * 40}')
+      ..writeln('branch refs/heads/main')
+      ..writeln();
+    for (final entry in registered.entries) {
+      buffer
+        ..writeln('worktree ${entry.key}')
+        ..writeln('HEAD ${'0' * 40}')
+        ..writeln('branch refs/heads/${entry.value}')
+        ..writeln();
+    }
+    return buffer.toString();
   }
 }
 
