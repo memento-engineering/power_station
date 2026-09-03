@@ -678,7 +678,8 @@ The fake mirrors the shape already used in `test/roster_test.dart`.
   });
 
   test('pow-26dd r2 one verb authors an and-joined pair', () async {
-    const design = 'Create `test/pair_x_test.dart` and `test/pair_y_test.dart`.';
+    const design =
+        'Create `test/pair_x_test.dart` and `test/pair_y_test.dart`.';
     const paths = {'test/pair_x_test.dart', 'test/pair_y_test.dart'};
     expect(testDeclarations(design).authored, paths);
     expect(
