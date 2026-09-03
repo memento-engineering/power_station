@@ -82,23 +82,55 @@ final class FilingReport {
   };
 }
 
-/// The blocker phrases, scanned at sentence scope.
-///
-/// Matches `Blocked by` / `Blocked on` / `Depends on` anywhere in the text and
-/// captures up to the end of the sentence. A sentence-ending period is followed
-/// by whitespace or end-of-input, so dotted child ids remain intact.
-final RegExp _blockerPhrase = RegExp(
-  r'(?:blocked\s+(?:by|on)|depends\s+on)\b(.*?)(?=\.(?:\s|$)|$)',
-  caseSensitive: false,
-  multiLine: true,
-);
-final RegExp _beadId = RegExp(r'\b[a-z][a-z0-9_]*(?:-[a-z0-9_.]+)+\b');
+/// Splits a description where a blocker DECLARATION can end: a sentence
+/// terminator followed by whitespace or end-of-input, or a line break. A `.`
+/// followed by a word character stays inside its segment, so dotted child ids
+/// (`pow-n6n.1`) survive the split.
+final RegExp _segmentBreak = RegExp(r'(?:[.!?;](?=\s|$)|\n)+');
 
-Set<String> _namedBlockers(String description) => {
-  for (final phrase in _blockerPhrase.allMatches(description))
-    for (final id
-        in _beadId.allMatches(phrase.group(1)!).map((match) => match.group(0)!))
-      id,
+/// A segment DECLARES blockers only when it OPENS with the phrase, after any
+/// list or quote marker: `Blocked by: pow-one` on its own line declares, and
+/// `pow-pry0 carries a 'DEPENDS ON: tg-1n4y' receipt` only MENTIONS one.
+final RegExp _leadingBlockerPhrase = RegExp(
+  r'^[\s>*#-]*(?:\d+[.)]\s*)?(?:blocked\s+(?:by|on)|depends\s+on)\b',
+  caseSensitive: false,
+);
+
+/// A `<prefix>-<tail>` token — the SHAPE of a bead id. Shape alone does not
+/// make one: [_isBeadId] decides.
+final RegExp _candidateId = RegExp(r'\b[a-z][a-z0-9_]*(?:-[a-z0-9_.]+)+\b');
+
+final RegExp _digit = RegExp(r'[0-9]');
+
+/// The store prefix of [id] — `pow` for `pow-n6n.1`; empty when [id] carries
+/// no prefix at all.
+String _prefixOf(String id) {
+  final hyphen = id.indexOf('-');
+  return hyphen <= 0 ? '' : id.substring(0, hyphen);
+}
+
+/// True when [candidate] reads as a bead id rather than a hyphenated English
+/// compound (`cross-store`, `read-only`): its prefix is one this check already
+/// knows ([knownPrefixes] — the checked bead's own store, plus the store of
+/// every blocker already wired), or its tail carries a digit.
+///
+/// The prefix arm is what keeps digitless ids (`pow-one`, `filing-blocker`)
+/// readable; requiring a digit alone would silently stop naming them.
+bool _isBeadId(String candidate, Set<String> knownPrefixes) {
+  final hyphen = candidate.indexOf('-');
+  return knownPrefixes.contains(candidate.substring(0, hyphen)) ||
+      _digit.hasMatch(candidate.substring(hyphen + 1));
+}
+
+/// The blocker ids DECLARED by [description] — read ONLY from segments that
+/// open with a blocker phrase, and only from tokens [_isBeadId] accepts.
+Set<String> _namedBlockers(String description, Set<String> knownPrefixes) => {
+  for (final segment in description.split(_segmentBreak))
+    if (_leadingBlockerPhrase.matchAsPrefix(segment) case final phrase?)
+      for (final match in _candidateId.allMatches(
+        segment.substring(phrase.end),
+      ))
+        if (_isBeadId(match.group(0)!, knownPrefixes)) match.group(0)!,
 };
 
 BdRunner _processRunnerFor(String stateRoot) =>
@@ -142,19 +174,29 @@ final class FilingContract {
 
   /// Evaluates [bead] against its [dependencies] and blockers wired by open
   /// cross-store link beads ([linkedBlockers]).
+  ///
+  /// A blocker is DECLARED by a description segment that OPENS with
+  /// `Blocked by` / `Blocked on` / `Depends on`; a mid-sentence mention of the
+  /// phrase declares nothing. Within such a segment a `<prefix>-<tail>` token
+  /// is a bead id when its prefix is the bead's own store or that of an
+  /// already-wired blocker, or when its tail carries a digit.
   FilingReport evaluate(
     Bead bead,
     Iterable<BeadDependency> dependencies, {
     Set<String> linkedBlockers = const {},
   }) {
     final validationPlan = bead.metadata['validation_plan'];
-    final named = _namedBlockers(bead.description);
     final wired = {
       for (final edge in dependencies)
         if (edge.issueId == bead.id && edge.type == DependencyType.blocks)
           edge.dependsOnId,
       ...linkedBlockers,
     };
+    final knownPrefixes = <String>{
+      _prefixOf(bead.id),
+      for (final id in wired) _prefixOf(id),
+    }..remove('');
+    final named = _namedBlockers(bead.description, knownPrefixes);
     final missing = named.difference(wired).toList()..sort();
     final dependencyPass = missing.isEmpty;
     return FilingReport(
