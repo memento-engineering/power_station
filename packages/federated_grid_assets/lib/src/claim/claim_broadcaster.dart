@@ -3,7 +3,7 @@
 /// the honesty pass, 2026-07-03).
 ///
 /// A [ClaimBroadcaster] wraps ONE station's own [Broker]. Give
-/// [onUnclaimedFrontier] directly to `StationKernel`'s constructor param of
+/// [onUnclaimedFrontier] directly to `StationDriver`'s constructor param of
 /// the same name (`grid_engine`'s D-B5 hook #1) — it is called once per
 /// reconciliation phase with the CURRENT station-wide unclaimed set:
 ///
@@ -104,7 +104,7 @@ class ClaimBroadcaster {
 
   final Map<String, StreamSubscription<BrokerMessage>> _peerSubs = {};
 
-  /// `StationKernel`'s `onUnclaimedFrontier` hook (D-B5 hook #1) — call this
+  /// `StationDriver`'s `onUnclaimedFrontier` hook (D-B5 hook #1) — call this
   /// directly as that constructor param. Advertises every NEWLY unclaimed
   /// requirement (retained) and retracts any no-longer-unclaimed one that
   /// isn't already confirmed (see the library doc, points 1-2).

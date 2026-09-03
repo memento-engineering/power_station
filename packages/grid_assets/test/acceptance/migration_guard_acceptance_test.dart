@@ -65,13 +65,13 @@ Future<void> _pumpUntilReal(
   }
 }
 
-StationKernel _buildKernel(
+MountedStation _buildStation(
   Fakes f,
   FakeSnapshotSource work,
   FakeSnapshotSource state,
 ) {
   final bridge = StationJoinBridge(work: work, state: state);
-  return StationKernel(
+  return MountedStation(
     bridge: bridge,
     stationServices: f.ctx,
     resolver: kCodeResolver,
@@ -216,13 +216,13 @@ void main() {
       final state = FakeSnapshotSource(
         _graph(beads: const [], ready: const {}),
       );
-      final kernel = _buildKernel(f, work, state);
-      addTearDown(kernel.dispose);
+      final station = _buildStation(f, work, state);
+      addTearDown(station.dispose);
       addTearDown(f.provider.close);
       addTearDown(work.close);
       addTearDown(state.close);
 
-      kernel.start();
+      await station.start();
       await pumpEventQueue();
 
       // The persisted survivor lands BEFORE the work bead — the restoration
@@ -315,13 +315,13 @@ void main() {
         final state = FakeSnapshotSource(
           _graph(beads: const [], ready: const {}),
         );
-        final kernel = _buildKernel(f, work, state);
-        addTearDown(kernel.dispose);
+        final station = _buildStation(f, work, state);
+        addTearDown(station.dispose);
         addTearDown(f.provider.close);
         addTearDown(work.close);
         addTearDown(state.close);
 
-        kernel.start();
+        await station.start();
         await pumpEventQueue();
 
         state.push(
@@ -410,13 +410,13 @@ void main() {
         final state = FakeSnapshotSource(
           _graph(beads: const [], ready: const {}),
         );
-        final kernel = _buildKernel(f, work, state);
-        addTearDown(kernel.dispose);
+        final station = _buildStation(f, work, state);
+        addTearDown(station.dispose);
         addTearDown(f.provider.close);
         addTearDown(work.close);
         addTearDown(state.close);
 
-        kernel.start();
+        await station.start();
         await pumpEventQueue();
 
         work.push(_graph(beads: [bead('tg-1')], ready: {'tg-1'}));
@@ -449,13 +449,13 @@ void main() {
         final state = FakeSnapshotSource(
           _graph(beads: const [], ready: const {}),
         );
-        final kernel = _buildKernel(f, work, state);
-        addTearDown(kernel.dispose);
+        final station = _buildStation(f, work, state);
+        addTearDown(station.dispose);
         addTearDown(f.provider.close);
         addTearDown(work.close);
         addTearDown(state.close);
 
-        kernel.start();
+        await station.start();
         await pumpEventQueue();
 
         // A CURRENT-shape survivor: the whole cheap head's keys ARE present — the

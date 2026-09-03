@@ -8,9 +8,9 @@
 // (the upstream core types) does.
 //
 // Track A's track_a_reconcile_test asserts the predicate at the WorkBead
-// child-set level; THIS formalizes it at the kernel/effect-SPAWN level — driven
-// through the real StationKernel + the real `code` circuit, the allow-list is
-// proven by what does (and does not) reach the provider.
+// child-set level; THIS formalizes it at the station/effect-SPAWN level —
+// driven through the real `runGrid` station root + the real `code` circuit, the
+// allow-list is proven by what does (and does not) reach the provider.
 //
 // Offline only — FAKES, no live tg/gc/claude/git/network.
 import 'package:genesis_tree/genesis_tree.dart';
@@ -39,7 +39,7 @@ Bead _typed(String id, IssueType type) => Bead(
   description: 'A real brief, so intake holds only on the type.',
 );
 
-StationKernel _kernel(StationJoinBridge bridge, Fakes f) => StationKernel(
+MountedStation _station(StationJoinBridge bridge, Fakes f) => MountedStation(
   bridge: bridge,
   stationServices: f.ctx,
   resolver: kCodeResolver,
@@ -72,13 +72,13 @@ void main() {
           _graph(beads: const [], ready: const {}),
         );
         final bridge = StationJoinBridge(work: work, state: state);
-        final kernel = _kernel(bridge, f);
-        addTearDown(kernel.dispose);
+        final station = _station(bridge, f);
+        addTearDown(station.dispose);
         addTearDown(f.provider.close);
         addTearDown(work.close);
         addTearDown(state.close);
 
-        kernel.start();
+        await station.start();
         await pumpEventQueue();
 
         // Every the_grid non-core type, ALL owned (`tg-*`) + ALL ready. The
@@ -178,13 +178,13 @@ void main() {
           _graph(beads: const [], ready: const {}),
         );
         final bridge = StationJoinBridge(work: work, state: state);
-        final kernel = _kernel(bridge, f);
-        addTearDown(kernel.dispose);
+        final station = _station(bridge, f);
+        addTearDown(station.dispose);
         addTearDown(f.provider.close);
         addTearDown(work.close);
         addTearDown(state.close);
 
-        kernel.start();
+        await station.start();
         await pumpEventQueue();
 
         // A lone OWNED, READY convergence bead — the most adversarial case (it
@@ -205,7 +205,7 @@ void main() {
         );
 
         // Sanity (non-vacuous): the SAME kernel DOES spawn for a plain task, so
-        // the zero-spawn above is the type gate, not a dead kernel. The task
+        // the zero-spawn above is the type gate, not a dead station. The task
         // mints its session and mounts the ladder's zero-agent head first (bead
         // `pow-q7n`); re-project it complete and the agent swaps in.
         work.push(

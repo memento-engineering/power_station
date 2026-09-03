@@ -1,8 +1,9 @@
-// Track E/F — the REACTIVE LOOP through the ALREADY-AUTHORED StationKernel.
+// Track E/F — the REACTIVE LOOP through the ALREADY-AUTHORED `runGrid` +
+// `StationDriver` station root.
 //
 // This is the integration proof that the M4 tree engine drives agent → committee
 // → land as RECONCILE TRANSITIONS: a bridge push marks the sole observer
-// (WorkList) dirty, the kernel's microtask flush reconciles the work set, mount =
+// (WorkList) dirty, `runGrid`'s microtask flush reconciles the work set, mount =
 // spawn (the agent), and a per-node cursor advance swaps the running frontier
 // (stop old + start new) — the agent retiring fans the four critics out IN
 // PARALLEL, then route + land swap through. The live `code` circuit
@@ -10,7 +11,7 @@
 // StationServices is over the offline fakes (no live tg/gc/claude/git).
 //
 // Unlike Track A's reconcile test (which calls owner.flush() directly), THIS test
-// goes through the kernel's real `scheduleMicrotask` flush loop, so every step
+// goes through `runGrid`'s real coalesced-microtask flush loop, so every step
 // settles the event queue to let the scheduled flush run.
 //
 // **The molecule model (tg-eli phase 2).** `committeeSession` returns the
@@ -117,7 +118,7 @@ final List<String> _criticSteps = [
 final Map<String, String> _allA = {for (final n in kCriticNodes) n: 'A'};
 
 void main() {
-  group('StationKernel — the reactive loop drives agent→committee→land', () {
+  group('runGrid — the reactive loop drives agent→committee→land', () {
     test('a ready owned task spawns the agent; advancing the per-node cursor fans '
         'the four critics out IN PARALLEL, then routes through to land — each a '
         'reconcile transition (stop old + start new), reusing the one session', () async {
@@ -130,7 +131,7 @@ void main() {
       );
       final bridge = StationJoinBridge(work: work, state: state);
 
-      final kernel = StationKernel(
+      final station = MountedStation(
         bridge: bridge,
         stationServices: f.ctx,
         resolver: kCodeResolver,
@@ -156,12 +157,12 @@ void main() {
           ),
         ],
       );
-      addTearDown(kernel.dispose);
+      addTearDown(station.dispose);
       addTearDown(f.provider.close);
       addTearDown(work.close);
       addTearDown(state.close);
 
-      kernel.start();
+      await station.start();
       await pumpEventQueue();
       // No work yet — nothing mounted.
       expect(f.provider.started, isEmpty);

@@ -1,11 +1,12 @@
 // M5 "The Circuit" — Track E2: the verify-first committee, offline end-to-end.
 //
-// Drives the FULL committee-wired `code` path through the REAL StationKernel +
-// CircuitResolver + buildCodeRegistry (agent → review[4 critics ∥ → route] →
-// land), advancing the per-node cursor via the fake STATE source (the bridge
-// re-projecting each chokepoint write) and feeding the critics' grades through
-// the same STATE source's `grid.result.*` keys (what the host's result() would
-// have persisted; the route reads them via the threaded SiblingView, D-5).
+// Drives the FULL committee-wired `code` path through the REAL `runGrid`
+// station root + CircuitResolver + buildCodeRegistry (agent → review[4 critics
+// ∥ → route] → land), advancing the per-node cursor via the fake STATE source
+// (the bridge re-projecting each chokepoint write) and feeding the critics'
+// grades through the same STATE source's `grid.result.*` keys (what the host's
+// result() would have persisted; the route reads them via the threaded
+// SiblingView, D-5).
 //
 // Three proofs: the happy path (agent → 4 critics IN PARALLEL → route advances →
 // land → session close); the gating-F path (code-validation F → route parks at a
@@ -141,7 +142,7 @@ List<Bead> _withDeliveryResult(List<Bead> beads) {
   ];
 }
 
-StationKernel _buildKernel(
+MountedStation _buildStation(
   Fakes f,
   FakeSnapshotSource work,
   FakeSnapshotSource state, {
@@ -150,7 +151,7 @@ StationKernel _buildKernel(
   ShellRunner? shellRunner,
 }) {
   final bridge = StationJoinBridge(work: work, state: state);
-  return StationKernel(
+  return MountedStation(
     bridge: bridge,
     stationServices: f.ctx,
     resolver: kCodeResolver,
@@ -455,19 +456,19 @@ void main() {
       final tmp = Directory.systemTemp.createTempSync('circuit-acc');
       addTearDown(() => tmp.deleteSync(recursive: true));
       _provisionCheckout(tmp.path, 'tg-1');
-      final kernel = _buildKernel(
+      final station = _buildStation(
         f,
         work,
         state,
         workspaceRoot: tmp.path,
         transport: transport,
       );
-      addTearDown(kernel.dispose);
+      addTearDown(station.dispose);
       addTearDown(f.provider.close);
       addTearDown(work.close);
       addTearDown(state.close);
 
-      kernel.start();
+      await station.start();
       await _settle(f);
 
       // 1) a ready owned task → the READINESS LADDER's `intake` head mounts
@@ -707,19 +708,19 @@ void main() {
       final tmp = Directory.systemTemp.createTempSync('circuit-acc');
       addTearDown(() => tmp.deleteSync(recursive: true));
       _provisionCheckout(tmp.path, 'tg-1');
-      final kernel = _buildKernel(
+      final station = _buildStation(
         f,
         work,
         state,
         workspaceRoot: tmp.path,
         transport: transport,
       );
-      addTearDown(kernel.dispose);
+      addTearDown(station.dispose);
       addTearDown(f.provider.close);
       addTearDown(work.close);
       addTearDown(state.close);
 
-      kernel.start();
+      await station.start();
       await _settle(f);
       work.push(_graph(beads: [workBead('tg-1')], ready: {'tg-1'}));
       await _settle(f);

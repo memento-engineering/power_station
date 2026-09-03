@@ -1,12 +1,13 @@
 // The DISCOVERY circuit, offline end-to-end.
 //
 // Drives the nested gather + CITE-THE-OFFENCE gate — the spec circuit's second
-// head, between the readiness ladder and `specify` — through the REAL
-// StationKernel + CodeCircuitResolver + buildCodeRegistry, advancing the per-node
-// cursor via the fake STATE source (the bridge re-projecting each chokepoint
-// write). The worktree is a REAL temp dir, so the gather's `anchors.json`, the
-// lenses' reports and the route's `dossier.json` are real files on disk; the lens
-// PROCESSES are the fake runtime provider's recorded spawns.
+// head, between the readiness ladder and `specify` — through the REAL `runGrid`
+// station root + CodeCircuitResolver + buildCodeRegistry, advancing the
+// per-node cursor via the fake STATE source (the bridge re-projecting each
+// chokepoint write). The worktree is a REAL temp dir, so the gather's
+// `anchors.json`, the lenses' reports and the route's `dossier.json` are real
+// files on disk; the lens PROCESSES are the fake runtime provider's recorded
+// spawns.
 //
 // Four proofs — the bead's acceptance criteria:
 //  - THE GATHER SPAWNS NOTHING: `anchors` is deterministic (ZERO agents) and its
@@ -195,7 +196,7 @@ class _TempWorkspace implements SourceControl {
   }) async {}
 }
 
-StationKernel _buildKernel(
+MountedStation _buildStation(
   Fakes f,
   FakeSnapshotSource work,
   FakeSnapshotSource state,
@@ -203,7 +204,7 @@ StationKernel _buildKernel(
   PriorArtSource? priorArt,
 }) {
   final bridge = StationJoinBridge(work: work, state: state);
-  return StationKernel(
+  return MountedStation(
     bridge: bridge,
     stationServices: f.ctx,
     resolver: kCodeResolver,
@@ -363,13 +364,13 @@ void main() {
     final f = buildFakes(createdId: _sid);
     final work = FakeSnapshotSource(_graph(beads: const [], ready: const {}));
     final state = FakeSnapshotSource(_graph(beads: const [], ready: const {}));
-    final kernel = _buildKernel(f, work, state, tmp.path, priorArt: priorArt);
-    addTearDown(kernel.dispose);
+    final station = _buildStation(f, work, state, tmp.path, priorArt: priorArt);
+    addTearDown(station.dispose);
     addTearDown(f.provider.close);
     addTearDown(work.close);
     addTearDown(state.close);
 
-    kernel.start();
+    await station.start();
     await _settle(f);
 
     // The ladder is fast-forwarded (its own choreography is
@@ -599,13 +600,13 @@ void main() {
       final state = FakeSnapshotSource(
         _graph(beads: const [], ready: const {}),
       );
-      final kernel = _buildKernel(f, work, state, tmp.path);
-      addTearDown(kernel.dispose);
+      final station = _buildStation(f, work, state, tmp.path);
+      addTearDown(station.dispose);
       addTearDown(f.provider.close);
       addTearDown(work.close);
       addTearDown(state.close);
 
-      kernel.start();
+      await station.start();
       await _settle(f);
       work.push(_graph(beads: [workBead('tg-1')], ready: {'tg-1'}));
       await _settle(f);
@@ -633,13 +634,13 @@ void main() {
         // The BOUNCE: the station restarts and ADOPTS an in-flight session whose
         // cursor was minted under the pre-discovery shape (no `anchors` key).
         final state = FakeSnapshotSource(_state(_preDiscoverySession()));
-        final kernel = _buildKernel(f, work, state, tmp.path);
-        addTearDown(kernel.dispose);
+        final station = _buildStation(f, work, state, tmp.path);
+        addTearDown(station.dispose);
         addTearDown(f.provider.close);
         addTearDown(work.close);
         addTearDown(state.close);
 
-        kernel.start();
+        await station.start();
         await _settle(f);
         work.push(_graph(beads: [workBead('tg-1')], ready: {'tg-1'}));
         await _settle(f);

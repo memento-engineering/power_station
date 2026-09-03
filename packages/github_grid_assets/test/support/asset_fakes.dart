@@ -17,6 +17,7 @@
 // wait helper; it grants REAL wall clock per round because the molecule
 // mint's pour crosses the filesystem below the fake runner seam.
 export 'package:grid_engine/testing.dart';
+export 'mounted_station.dart';
 
 import 'dart:convert';
 
