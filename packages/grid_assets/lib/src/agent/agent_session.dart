@@ -8,6 +8,7 @@ import 'package:grid_runtime/grid_runtime.dart';
 
 import 'agent_environment.dart';
 import 'agent_harness.dart';
+import 'captured_output.dart';
 import 'usage_report.dart';
 
 part 'agent_session.freezed.dart';
@@ -38,11 +39,18 @@ abstract interface class AgentSessionAdapter {
   String get id;
 
   /// Describes a long-lived launch without access to the brief.
+  ///
+  /// [usageOut] is the workspace-relative FT-2 telemetry path
+  /// ([usageReportPath]) this incarnation's usage envelope must land at. The
+  /// argv transport gets this through its `sh -c` wrapper; a channel harness
+  /// has no wrapper, so the adapter carries it to whatever writes the
+  /// envelope. An adapter with no telemetry surface IGNORES it.
   RuntimeConfig launch({
     required AgentEnvironment environment,
     required Workspace workspace,
     String? model,
     Uri? endpoint,
+    String? usageOut,
   });
 
   /// Encodes the initial brief for delivery over the channel.
@@ -324,6 +332,200 @@ class AgentSession implements ProcessSession {
     _terminal = true;
     await _commandSub?.cancel();
     await _decoderSub?.cancel();
+    if (!_updates.isClosed) await _updates.close();
+  }
+}
+
+/// The HARNESS-NEUTRAL spawn (bead `pow-39tl`): one resolved [environment]
+/// rendered into a process invocation, whichever transport it declares.
+///
+/// An environment naming an [AgentEnvironment.sessionAdapter] launches
+/// LONG-LIVED through that adapter and receives its [brief] over the channel
+/// once the protocol is up ([AgentSession.start]); one that does not renders
+/// the brief into argv through [spawnFor]. Before this seam existed the branch
+/// lived in ONE caller, and the spec seat — which called [spawnFor] directly —
+/// spawned a channel harness as a one-turn process with an EMPTY prompt
+/// segment (`PromptMode.none`), so the brief was never delivered at all.
+///
+/// GUARD, LOUD: a channel adapter that does not launch [Lifecycle.longLived]
+/// throws — the brief arrives AFTER startup, so a one-turn channel launch can
+/// only ever produce a briefless run.
+RuntimeConfig spawnThroughSessionAdapter({
+  required AgentSessionAdapterRegistry adapters,
+  required AgentEnvironment environment,
+  required AgentBrief brief,
+  required Workspace workspace,
+  String? model,
+  String? usageOut,
+  Uri? endpoint,
+}) {
+  final adapterId = environment.sessionAdapter;
+  if (adapterId == null) {
+    return spawnFor(
+      environment: environment,
+      brief: brief,
+      workspace: workspace,
+      model: model,
+      usageOut: usageOut,
+      endpoint: endpoint,
+    );
+  }
+  final config = adapters
+      .require(adapterId)
+      .launch(
+        environment: environment,
+        workspace: workspace,
+        model: model,
+        endpoint: endpoint,
+        usageOut: usageOut,
+      );
+  if (config.lifecycle != Lifecycle.longLived) {
+    throw StateError('channel adapter "$adapterId" must launch longLived');
+  }
+  return config;
+}
+
+/// Re-applies a capability's DECLARED [CompletionContract.artifactDurability]
+/// on the CHANNEL path, and contributes that capability's `result()` fields
+/// (bead `pow-39tl`).
+///
+/// The engine fences an artifact-durability completion in its process
+/// dispatcher, which a session-driven step never reaches — the vendor returns
+/// the session's terminal verbatim. A channel harness that ends its turn
+/// without writing the artifact therefore completed SILENTLY, and its step
+/// result carried neither the FT-2 usage fields nor any transport-carried
+/// payload. This decorator restores both, so ONE brief behaves identically on
+/// either transport.
+///
+/// [probe] and [resultFields] are the composing capability's own — read at the
+/// decorator's construction site, where the branch is mounted.
+class ArtifactFencedSession implements ProcessSession {
+  /// Wraps [inner], fencing its completion on [probe] and merging
+  /// [resultFields] into the forwarded result. [verb] and [adapter] name the
+  /// step and its transport in the failure reason.
+  ///
+  /// Subscribes to [inner] EAGERLY, in the constructor: the engine's
+  /// retained-terminal path calls `onRuntimeEvent` WITHOUT ever calling
+  /// `start()`, so a decorator that attached in `start()` would forward
+  /// nothing and hang the dispatch.
+  ArtifactFencedSession({
+    required this.inner,
+    required this.probe,
+    required this.resultFields,
+    required this.verb,
+    required this.adapter,
+  }) {
+    _sub = inner.updates.listen(
+      _onUpdate,
+      onError: _updates.addError,
+      onDone: () {
+        if (!_terminal && !_updates.isClosed) _updates.close();
+      },
+    );
+  }
+
+  /// The protocol session being fenced.
+  final ProcessSession inner;
+
+  /// The composing capability's artifact probe.
+  final Future<GateOutcome> Function() probe;
+
+  /// The composing capability's result contribution.
+  final Future<Map<String, String>?> Function() resultFields;
+
+  /// The step id named in a failure reason (e.g. `specify`).
+  final String verb;
+
+  /// The session-adapter id named in a failure reason (e.g. `acp`).
+  final String adapter;
+
+  final StreamController<ProcessSessionUpdate> _updates =
+      StreamController<ProcessSessionUpdate>();
+  StreamSubscription<ProcessSessionUpdate>? _sub;
+  bool _terminal = false;
+
+  @override
+  Stream<ProcessSessionUpdate> get updates => _updates.stream;
+
+  @override
+  Future<void> start() => inner.start();
+
+  @override
+  Future<ProcessCommandDisposition> send(ProcessSessionCommand command) =>
+      inner.send(command);
+
+  @override
+  void onRuntimeEvent(RuntimeEvent event) => inner.onRuntimeEvent(event);
+
+  void _onUpdate(ProcessSessionUpdate update) {
+    if (_terminal) return;
+    switch (update) {
+      case ProcessSessionProgress():
+        _updates.add(update);
+      case ProcessSessionFailed():
+        // The harness already said why — and on the ACP path that reason
+        // already carries the child's exit code and stderr tail.
+        _terminal = true;
+        _updates.add(update);
+      case ProcessSessionCompleted(:final result):
+        _terminal = true;
+        unawaited(_fence(result));
+    }
+  }
+
+  /// Proves the artifact before letting a completion through. The captured
+  /// output is the harness's OWN final text (`result['text']`), which is where
+  /// a channel harness says why it could not write — and which the argv path
+  /// gets from its stdout envelope.
+  Future<void> _fence(Map<String, String> result) async {
+    GateOutcome outcome;
+    try {
+      outcome = await probe();
+    } on Object {
+      outcome = GateOutcome.probeError;
+    }
+    if (_updates.isClosed) return;
+    switch (outcome) {
+      case GateOutcome.clear:
+        Map<String, String>? extra;
+        try {
+          extra = await resultFields();
+        } on Object {
+          extra = null; // a result contribution never gates a proven artifact.
+        }
+        if (_updates.isClosed) return;
+        _updates.add(
+          ProcessSessionUpdate.completed(
+            result: <String, String>{...result, ...?extra},
+          ),
+        );
+      case GateOutcome.present:
+        _updates.add(
+          _refuse(result, 'declared completion artifact is not durable'),
+        );
+      case GateOutcome.probeError:
+        _updates.add(_refuse(result, 'completion artifact probe failed'));
+    }
+  }
+
+  ProcessSessionUpdate _refuse(Map<String, String> result, String diagnostic) =>
+      ProcessSessionUpdate.failed(
+        reason: capturedOutputReason(
+          verb: verb,
+          adapter: adapter,
+          output: result['text'] ?? '',
+          // A protocol turn that ENDED cleanly: the child said it was done, so
+          // the exit code is the honest 0 and the diagnostic carries the lie.
+          exitCode: 0,
+          diagnostic: diagnostic,
+        ),
+      );
+
+  @override
+  Future<void> close() async {
+    _terminal = true;
+    await _sub?.cancel();
+    await inner.close();
     if (!_updates.isClosed) await _updates.close();
   }
 }

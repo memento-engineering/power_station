@@ -247,3 +247,48 @@ num? _asNum(Object? value) => switch (value) {
   final String v => num.tryParse(v),
   _ => null,
 };
+
+/// Renders a harness-neutral FT-2 usage envelope — the SAME JSON shape
+/// [UsageReport.tryParse] and [readEnvelopeResultText] read out of claude's
+/// `--output-format json` result, so a CHANNEL harness's telemetry and its
+/// final text land in the step's durable result through the identical path
+/// (bead `pow-39tl`).
+///
+/// Every field is optional: a run that reported no usage at all still renders a
+/// well-formed envelope, because the ABSENCE of a telemetry file and the
+/// presence of an empty-usage one are different diagnoses.
+String usageEnvelopeJson({
+  String? result,
+  int? tokensIn,
+  int? tokensOut,
+  int? numTurns,
+  String? model,
+}) => jsonEncode(<String, Object?>{
+  if (result != null) 'result': result,
+  'usage': <String, Object?>{
+    if (tokensIn != null) 'input_tokens': tokensIn,
+    if (tokensOut != null) 'output_tokens': tokensOut,
+  },
+  if (numTurns != null) 'num_turns': numTurns,
+  if (model != null)
+    'modelUsage': <String, Object?>{model: <String, Object?>{}},
+});
+
+/// Writes [content] to the workspace-relative [usageOut] under [workspaceDir],
+/// creating the telemetry directory. FAIL-SAFE (the FT-2 property): any I/O
+/// surprise is swallowed, so writing telemetry can never fail, gate, or delay
+/// a run. Returns whether the file landed.
+bool writeUsageEnvelope({
+  required String workspaceDir,
+  required String usageOut,
+  required String content,
+}) {
+  try {
+    final file = File(p.join(workspaceDir, usageOut));
+    file.parent.createSync(recursive: true);
+    file.writeAsStringSync(content);
+    return true;
+  } catch (_) {
+    return false; // telemetry never gates.
+  }
+}

@@ -43,9 +43,11 @@
 /// each existed only because the ENGINE's `SourceControl` could not carry the
 /// verb, and M5 D-4a stripped those verbs off the interface entirely. A delivery
 /// method owns git DIRECTLY now, so the outcome shapes below ([LandPushOutcome],
-/// [LandPrOutcome], [isPrAlreadyOpen], [extractPrUrl], [landReasonTail]) survive
-/// as ITS vocabulary — force-with-lease push, reuse-an-open-PR, and the stderr
-/// tail an operator reads as the FT-1 `failureReason`.
+/// [LandPrOutcome], [isPrAlreadyOpen], [extractPrUrl]) survive as ITS
+/// vocabulary — force-with-lease push and reuse-an-open-PR. The stderr tail an
+/// operator reads as the FT-1 `failureReason` is assembled by
+/// [capturedOutputReason]'s mechanism, which moved to `captured_output.dart` so
+/// the standalone ACP bridge could share it.
 library;
 
 import 'dart:io';
@@ -55,6 +57,7 @@ import 'package:genesis_tree/genesis_tree.dart';
 import 'package:grid_engine/grid_engine.dart';
 import 'package:grid_runtime/grid_runtime.dart';
 
+import '../agent/captured_output.dart';
 import '../agent/path_check.dart';
 import '../assets/overlay_materializer.dart';
 import 'route_failure.dart';
@@ -381,60 +384,6 @@ bool isPrAlreadyOpen(String ghOutput) => ghOutput.contains('already exists');
 /// Returns null when none is present.
 String? extractPrUrl(String output) =>
     RegExp(r'https?://\S+/pull/\d+').firstMatch(output)?.group(0);
-
-/// The TAIL of git/gh combined output — what delivery stamps as its FT-1
-/// `failureReason` so an operator sees WHY without forensics. The useful line
-/// is at the END (git/gh print progress first, the fatal message last) and the
-/// engine truncates a `failureReason` to its FIRST `kMaxReasonChars`; taking
-/// the tail keeps the diagnosis, not the noise. A leading `…` marks a cut.
-String landReasonTail(String output, [int max = 400]) {
-  final trimmed = output.trim();
-  return trimmed.length <= max
-      ? trimmed
-      : '…${trimmed.substring(trimmed.length - max)}';
-}
-
-/// The tail budget for the captured Validation-Plan log a revalidate
-/// [Escalate] carries (bead `pow-gy41`). Wide enough to hold a whole
-/// `dart test` failure block — the failing test's name, its expected/actual,
-/// and the `Some tests failed.` trailer — and well inside the gate bead's
-/// metadata budget.
-const int kRevalidateReasonTailChars = 1500;
-
-/// One `dart pub get` line of pure UPGRADE ADVICE — `analyzer 10.2.0 (14.3.0
-/// available)`. Anchored at both ends: a line that merely MENTIONS an
-/// available version mid-sentence is not advice and survives.
-final RegExp _pubVersionAdvice = RegExp(
-  r'^\s*[a-z_][a-z0-9_]*\s+\S+\s+\(\S+\s+available\)\s*$',
-);
-
-/// The two trailers pub prints after that block — the `N packages have newer
-/// versions incompatible with dependency constraints.` count and the
-/// ``Try `dart pub outdated` for more information.`` nudge.
-final RegExp _pubOutdatedSummary = RegExp(
-  r'^\s*(\d+\s+packages?\s+(have|has)\s+newer\s+versions\s+incompatible\s+'
-  r'with\s+dependency\s+constraints\.'
-  r'|Try\s+`(dart|flutter)\s+pub\s+outdated`.*)\s*$',
-);
-
-/// [output] with pub's upgrade-ADVICE lines dropped (bead `pow-gy41`).
-///
-/// A Dart Validation Plan opens with `dart pub get`, and on a seat with an
-/// outdated lockfile its advisory block runs past 2000 characters on its own —
-/// burying the fatal line, which comes LAST. This is never the failure, so it
-/// is never the diagnosis.
-///
-/// Pure and line-wise: every line that is not advice is returned
-/// BYTE-IDENTICAL, in order; advice-free input is returned unchanged. Applied
-/// BEFORE [landReasonTail] so the tail budget is spent on signal.
-String planOutputWithoutPubAdvice(String output) => output
-    .split('\n')
-    .where(
-      (line) =>
-          !_pubVersionAdvice.hasMatch(line) &&
-          !_pubOutdatedSummary.hasMatch(line),
-    )
-    .join('\n');
 
 /// The bead's OWN Validation Plan command — mirrors `committee.dart`'s
 /// identical private helper (duplicated rather than shared, so this file

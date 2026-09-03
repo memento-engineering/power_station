@@ -18,6 +18,9 @@ class _ProbeAdapter implements AgentSessionAdapter {
   final String fixture;
   final List<String> args;
 
+  /// The last `usageOut` the capability handed this adapter.
+  String? usageOut;
+
   @override
   String get id => 'probe';
 
@@ -27,12 +30,16 @@ class _ProbeAdapter implements AgentSessionAdapter {
     required Workspace workspace,
     String? model,
     Uri? endpoint,
-  }) => RuntimeConfig(
-    workDir: workspace.workspaceDir,
-    command: Platform.resolvedExecutable,
-    args: <String>[fixture, ...args],
-    lifecycle: Lifecycle.longLived,
-  );
+    String? usageOut,
+  }) {
+    this.usageOut = usageOut;
+    return RuntimeConfig(
+      workDir: workspace.workspaceDir,
+      command: Platform.resolvedExecutable,
+      args: <String>[fixture, ...args],
+      lifecycle: Lifecycle.longLived,
+    );
+  }
 
   @override
   List<int> encodeBrief(AgentBrief brief) => utf8.encode(

@@ -63,6 +63,7 @@ class AcpBridgeSpec {
     required this.env,
     required this.cwd,
     this.model,
+    this.usageOut,
   });
 
   /// Agent executable.
@@ -80,6 +81,10 @@ class AcpBridgeSpec {
   /// Optional environment-owned model pin.
   final String? model;
 
+  /// Workspace-relative FT-2 telemetry path the bridge writes its usage
+  /// envelope to ([usageReportPath]); null ⇒ this launch captures no usage.
+  final String? usageOut;
+
   /// Encodes the bridge handoff.
   Map<String, Object?> toJson() => <String, Object?>{
     'command': command,
@@ -87,6 +92,7 @@ class AcpBridgeSpec {
     'env': env,
     'cwd': cwd,
     if (model case final model?) 'model': model,
+    if (usageOut case final usageOut?) 'usageOut': usageOut,
   };
 
   /// Decodes the bridge handoff.
@@ -98,6 +104,7 @@ class AcpBridgeSpec {
     ),
     cwd: json['cwd']! as String,
     model: json['model'] as String?,
+    usageOut: json['usageOut'] as String?,
   );
 }
 
@@ -200,6 +207,7 @@ class AcpSessionAdapter implements AgentSessionAdapter {
     required Workspace workspace,
     String? model,
     Uri? endpoint,
+    String? usageOut,
   }) {
     final command = environment.command;
     if (command == null || command.isEmpty) {
@@ -221,6 +229,7 @@ class AcpSessionAdapter implements AgentSessionAdapter {
       ),
       cwd: workspace.workspaceDir,
       model: environment.model == null ? null : model ?? environment.model,
+      usageOut: usageOut,
     );
     return RuntimeConfig(
       workDir: workspace.workspaceDir,

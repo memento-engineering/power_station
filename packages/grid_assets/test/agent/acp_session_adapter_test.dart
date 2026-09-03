@@ -56,12 +56,17 @@ class _BridgeResult {
     required this.config,
     required this.stderr,
     required this.trace,
+    required this.usageEnvelope,
   });
 
   final Map<String, dynamic> frame;
   final RuntimeConfig config;
   final String stderr;
   final List<Map<String, dynamic>> trace;
+
+  /// The FT-2 envelope the bridge wrote, read before the temp workspace is
+  /// deleted; null when this run asked for no `usageOut` or none landed.
+  final String? usageEnvelope;
 }
 
 Future<_Run> _buildAcpRun({
@@ -186,6 +191,7 @@ Future<_BridgeResult> _runBridge({
   required List<String> probeArgs,
   String? model = 'gpt-5.6-sol',
   bool cancelOnProgress = false,
+  String? usageOut,
 }) async {
   final workspace = await Directory.systemTemp.createTemp(
     'grid_assets_acp_bridge_',
@@ -206,6 +212,7 @@ Future<_BridgeResult> _runBridge({
       branch: 'grid/probe',
       baseBranch: 'main',
     ),
+    usageOut: usageOut,
   );
   final process = await Process.start(
     config.command,
@@ -257,12 +264,21 @@ Future<_BridgeResult> _runBridge({
             .map((line) => jsonDecode(line) as Map<String, dynamic>)
             .toList(growable: false)
       : const <Map<String, dynamic>>[];
+  // The workspace is deleted below, so the bridge's telemetry must be read
+  // HERE — its whole point is that it survives the run (bead `pow-39tl`).
+  final envelopeFile = usageOut == null
+      ? null
+      : File(p.join(workspace.path, usageOut));
+  final envelope = envelopeFile != null && envelopeFile.existsSync()
+      ? envelopeFile.readAsStringSync()
+      : null;
   await workspace.delete(recursive: true);
   return _BridgeResult(
     frame: frame,
     config: config,
     stderr: error.toString(),
     trace: traceEntries,
+    usageEnvelope: envelope,
   );
 }
 
@@ -538,6 +554,43 @@ void main() {
     timeout: const Timeout(Duration(seconds: 30)),
   );
 
+  // The DIAGNOSIS four live codex specify runs never left behind (bead
+  // `pow-39tl`): a child that dies before speaking the protocol now reports its
+  // exit code, its transport and the last thing it said — and still writes its
+  // telemetry, because an absent envelope and an empty one mean different
+  // things.
+  test('a child that dies before the protocol reports exit code, adapter and '
+      'tail — and still writes its usage envelope', () async {
+    final result = await _runBridge(
+      probePath: probePath,
+      probeArgs: const <String>[
+        '--die-with=3',
+        '--stderr=FATAL: codex-acp could not authenticate',
+      ],
+      usageOut: 'probe.usage.json',
+    );
+    expect(result.frame['kind'], 'failed', reason: '${result.frame}');
+    final reason = result.frame['reason']! as String;
+    // Exit-code-led and adapter-named: an operator reads the CLASS of
+    // failure and WHICH transport produced it before the log.
+    expect(reason, startsWith('acp agent failed (exit 3) [acp]: '));
+    // TAIL-first: the fatal line is the LAST thing the child wrote, and the
+    // 2000-odd characters of noise ahead of it are cut, not the diagnosis.
+    expect(reason, contains('FATAL: codex-acp could not authenticate'));
+    expect(reason, isNot(contains('HEAD-OF-CHILD-STDERR')));
+    expect(reason.length, lessThan(kRevalidateReasonTailChars + 200));
+    // The envelope lands on a FAILED terminal too, and reads back through
+    // the production parser: an absent telemetry file and an empty-usage one
+    // are different diagnoses, and only the second one says "it ran".
+    expect(result.usageEnvelope, isNotNull);
+    expect(() => UsageReport.tryParse(result.usageEnvelope), returnsNormally);
+    expect(UsageReport.tryParse(result.usageEnvelope)?.toResultFields(), {
+      'tokensIn': '0',
+      'tokensOut': '0',
+      'numTurns': '0',
+    });
+  }, timeout: const Timeout(Duration(seconds: 30)));
+
   test('adapter launch is package resolved and brief free', () {
     const brief = AgentBrief(task: 'SECRET BRIEF');
     final config = const AcpSessionAdapter().launch(
@@ -558,6 +611,7 @@ void main() {
       ),
       model: 'resolved-model',
       endpoint: Uri.parse('http://127.0.0.1:8080'),
+      usageOut: usageReportPath('tg-1/spec_review/specify'),
     );
     expect(config.command, Platform.resolvedExecutable);
     expect(config.lifecycle, Lifecycle.longLived);
@@ -578,6 +632,12 @@ void main() {
     });
     expect(spec.cwd, '/worktree');
     expect(spec.model, 'resolved-model');
+    // The FT-2 telemetry path rides the bridge spec: a channel harness has no
+    // `sh -c` wrapper, so the adapter must carry it (bead `pow-39tl`).
+    expect(
+      spec.usageOut,
+      '.grid/telemetry/tg-1_spec_review_specify.usage.json',
+    );
     expect(const AcpSessionAdapter().encodeBrief(brief), isNotEmpty);
   });
 

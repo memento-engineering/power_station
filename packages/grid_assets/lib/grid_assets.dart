@@ -147,6 +147,7 @@ export 'src/agent/agent_domain.dart';
 export 'src/agent/agent_environment.dart';
 export 'src/agent/agent_harness.dart';
 export 'src/agent/availability_assets.dart';
+export 'src/agent/captured_output.dart';
 export 'src/agent/environment_probe.dart';
 export 'src/agent/environment_registry.dart';
 export 'src/agent/model_tier.dart';
