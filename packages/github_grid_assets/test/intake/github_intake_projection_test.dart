@@ -60,6 +60,7 @@ void main() {
         number: 43,
         title: 'PR title',
         body: 'PR body',
+        headRef: 'grid/pow-1',
       ),
     );
 

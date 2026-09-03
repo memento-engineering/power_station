@@ -3,6 +3,7 @@ import 'dart:developer' as developer;
 
 import '../github_app_client.dart';
 
+import 'link_header.dart';
 import 'reconciler_cursor.dart';
 import 'reconciler_event.dart';
 
@@ -39,12 +40,10 @@ class GitHubReconciler {
     required GitHubCursorStore cursors,
     required GitHubEventSink emit,
     void Function(Object error, StackTrace stackTrace)? onIntakeRowError,
-    DateTime Function()? now,
   }) : _client = client,
        _cursors = cursors,
        _emit = emit,
-       _onIntakeRowError = onIntakeRowError,
-       _now = now ?? DateTime.now;
+       _onIntakeRowError = onIntakeRowError;
 
   /// Repository owner.
   final String owner;
@@ -59,7 +58,6 @@ class GitHubReconciler {
   final GitHubEventSink _emit;
   final void Function(Object error, StackTrace stackTrace)? _onIntakeRowError;
   final List<GitHubEventSink> _observers = <GitHubEventSink>[];
-  final DateTime Function() _now;
   Future<void>? _inFlight;
 
   /// Adds a sibling projection to the normalized event seam.
@@ -80,8 +78,7 @@ class GitHubReconciler {
 
   Future<GitHubReconcilerCursor> _intake(GitHubReconcilerCursor cursor) async {
     const key = 'intake/issues';
-    final pollStartedAt = _now().toUtc();
-    final response = await _client.send(
+    var response = await _client.send(
       method: 'GET',
       path: '/repos/$owner/$repository/issues',
       queryParameters: <String, String>{
@@ -98,20 +95,49 @@ class GitHubReconciler {
     );
     if (response.statusCode == 304) return cursor;
     _requireSuccess(key, response.statusCode);
-    final rows = _list(response.body, key);
-    final events = <NormalizedGitHubEvent>[];
+    final firstPageEtag = response.header('etag');
     var latest = cursor.since?.toUtc();
+    while (true) {
+      final page = await _intakePage(cursor, _list(response.body, key), latest);
+      cursor = page.cursor;
+      latest = page.latest;
+      final nextPage = nextGitHubPageUri(response.header('link'));
+      if (nextPage == null) break;
+      response = await _client.send(
+        method: 'GET',
+        path: nextPage.path,
+        queryParameters: nextPage.queryParameters,
+      );
+      _requireSuccess(key, response.statusCode);
+    }
+    final etags = <String, String>{...cursor.etags};
+    if (firstPageEtag != null) etags[key] = firstPageEtag;
+    final next = cursor.copyWith(since: latest, etags: etags);
+    await _cursors.save(next);
+    return next;
+  }
+
+  /// Examines one page of issues rows, delivering its events and returning the
+  /// cursor plus the newest `updated_at` seen so far.
+  Future<({GitHubReconcilerCursor cursor, DateTime? latest})> _intakePage(
+    GitHubReconcilerCursor cursor,
+    List<Object?> rows,
+    DateTime? latest,
+  ) async {
+    var next = cursor;
+    var mark = latest;
+    final events = <NormalizedGitHubEvent>[];
     for (final raw in rows) {
       try {
         final row = _map(raw, 'row');
         final nodeId = _string(row, 'node_id');
         final updatedText = _string(row, 'updated_at');
         final updated = _date(updatedText, 'updated_at');
-        final state = _string(row, 'state');
+        if (mark == null || updated.isAfter(mark)) mark = updated;
         final observationId = 'poll:issue:$nodeId:$updatedText';
-        if (latest == null || updated.isAfter(latest)) latest = updated;
+        final state = _string(row, 'state');
         if (state != 'open') {
-          cursor = cursor.record(observationId);
+          next = next.record(observationId);
           continue;
         }
         final number = _integer(row, 'number');
@@ -119,6 +145,8 @@ class GitHubReconciler {
         final body = _nullableString(row, 'body') ?? '';
         final actor = _string(_nestedMap(row, 'user'), 'login', prefix: 'user');
         if (row.containsKey('pull_request')) {
+          final head = await _pullHead(next, nodeId, number);
+          next = head.cursor;
           events.add(
             NormalizedGitHubEvent.pullRequestOpened(
               nodeId: nodeId,
@@ -129,6 +157,7 @@ class GitHubReconciler {
               number: number,
               title: title,
               body: body,
+              headRef: head.headRef,
             ),
           );
         } else {
@@ -149,14 +178,45 @@ class GitHubReconciler {
         _reportIntakeRowError(error, stackTrace);
       }
     }
-    cursor = await _deliver(cursor, events);
-    if (latest == null || pollStartedAt.isAfter(latest)) latest = pollStartedAt;
-    final etag = response.header('etag');
-    final etags = <String, String>{...cursor.etags};
-    if (etag != null) etags[key] = etag;
-    final next = cursor.copyWith(since: latest, etags: etags);
-    await _cursors.save(next);
-    return next;
+    return (cursor: await _deliver(next, events), latest: mark);
+  }
+
+  /// Resolves pull [number]'s head ref from its full resource.
+  ///
+  /// The issues row for a pull request carries no `head`, so the feedback path
+  /// cannot get the branch from it. The request is conditional only when a ref
+  /// is already cached, so an unchanged pull costs one `304` and reuses the
+  /// cache; a `304` with no cache is therefore unreachable, and if the server
+  /// produced one anyway it fails LOUDLY as a [GitHubPollException].
+  Future<({GitHubReconcilerCursor cursor, String headRef})> _pullHead(
+    GitHubReconcilerCursor cursor,
+    String nodeId,
+    int number,
+  ) async {
+    final key = GitHubReconcilerCursor.pullEtagKey(nodeId);
+    final cached = cursor.pullHeads[nodeId];
+    final conditional = cached == null ? null : cursor.etags[key];
+    final response = await _client.send(
+      method: 'GET',
+      path: '/repos/$owner/$repository/pulls/$number',
+      headers: <String, String>{
+        if (conditional case final etag?) 'If-None-Match': etag,
+      },
+    );
+    if (response.statusCode == 304 && cached != null) {
+      return (cursor: cursor, headRef: cached);
+    }
+    _requireSuccess(key, response.statusCode);
+    final pull = _map(_decoded(response.body, key), key);
+    final headRef = _string(_nestedMap(pull, 'head'), 'ref', prefix: 'head');
+    return (
+      cursor: cursor.recordPullHead(
+        nodeId,
+        headRef,
+        etag: response.header('etag'),
+      ),
+      headRef: headRef,
+    );
   }
 
   Future<GitHubReconcilerCursor> _feedback(

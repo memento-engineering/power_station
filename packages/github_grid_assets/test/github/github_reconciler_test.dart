@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:beads_dart/beads_dart.dart';
 import 'package:github_grid_assets/github_grid_assets.dart';
@@ -49,12 +50,23 @@ GitHubAppClient _client(FakeGitHubHttpTransport transport) => GitHubAppClient(
   transport: transport,
 );
 
-GitHubHttpResponse _response(Object body, {int status = 200, String? etag}) =>
-    GitHubHttpResponse(
-      statusCode: status,
-      body: body is String ? body : jsonEncode(body),
-      headers: <String, String>{if (etag != null) 'etag': etag},
-    );
+GitHubHttpResponse _response(
+  Object body, {
+  int status = 200,
+  String? etag,
+  String? link,
+}) => GitHubHttpResponse(
+  statusCode: status,
+  body: body is String ? body : jsonEncode(body),
+  headers: <String, String>{
+    if (etag != null) 'etag': etag,
+    if (link != null) 'link': link,
+  },
+);
+
+Future<Map<String, Object?>> _pullResource() async =>
+    jsonDecode(await File('test/fixtures/pull_resource.json').readAsString())
+        as Map<String, Object?>;
 
 Map<String, Object?> _issue({
   bool pull = false,
@@ -87,6 +99,22 @@ Map<String, Object?> _issue({
       },
   };
 }
+
+/// One recorded issues page of [count] rows starting at [first], one minute
+/// apart, ascending by `updated_at` exactly as the poll requests them.
+List<Object?> _page(int count, {required int first}) => <Object?>[
+  for (var index = first; index < first + count; index++)
+    _issue(
+      nodeId: 'I_$index',
+      number: index,
+      title: 'issue $index',
+      updatedAt: DateTime.utc(
+        2026,
+        8,
+        9,
+      ).add(Duration(minutes: index)).toIso8601String(),
+    ),
+];
 
 final class FakeBdRunner implements BdRunner {
   final argvs = <List<String>>[];
@@ -135,8 +163,10 @@ void main() {
       final transport = FakeGitHubHttpTransport()
         ..responses.addAll(<GitHubHttpResponse>[
           _response(rows, etag: '"issues"'),
+          _response(await _pullResource(), etag: '"pull2"'),
           _response(const <Object?>[], etag: '"pulls"'),
           _response(rows, etag: '"issues2"'),
+          _response('', status: 304),
           _response(const <Object?>[], etag: '"pulls2"'),
         ]);
       final runner = FakeBdRunner();
@@ -153,7 +183,6 @@ void main() {
         substation: 'seat',
         client: _client(transport),
         cursors: store,
-        now: () => DateTime.parse('2026-08-09T03:00:00Z'),
         emit: (event) async {
           calls.add('emit');
           events.add(event);
@@ -175,7 +204,14 @@ void main() {
       );
       expect(_issue(pull: true), contains('pull_request'));
       expect(_issue(pull: true), isNot(contains('head')));
-      expect(events, <Matcher>[isA<IssueOpened>(), isA<PullRequestOpened>()]);
+      expect(events, <Matcher>[
+        isA<IssueOpened>(),
+        isA<PullRequestOpened>().having(
+          (event) => event.headRef,
+          'headRef',
+          'grid/pow-40a4',
+        ),
+      ]);
       final creates = runner.argvs
           .where((argv) => argv.first == 'create')
           .toList(growable: false);
@@ -197,17 +233,20 @@ void main() {
         calls.indexOf('emit'),
         greaterThan(calls.indexOf('save:poll:issue:I_1:2026-08-09T01:00:00Z')),
       );
-      expect(store.cursor.since, DateTime.parse('2026-08-09T03:00:00Z'));
+      expect(store.cursor.since, DateTime.parse('2026-08-09T02:45:00Z'));
       expect(store.cursor.etags, containsPair('intake/issues', '"issues2"'));
+      expect(store.cursor.pullHeads['PR_2'], 'grid/pow-40a4');
       expect(
         transport.requests.first.uri.queryParameters,
         allOf(containsPair('state', 'all'), containsPair('per_page', '100')),
       );
+      expect(transport.requests[1].uri.path, '/repos/memento/power/pulls/2');
       expect(
-        transport.requests[2].uri.queryParameters['since'],
-        '2026-08-09T03:00:00.000Z',
+        transport.requests[3].uri.queryParameters['since'],
+        '2026-08-09T02:45:00.000Z',
       );
-      expect(transport.requests[2].headers['If-None-Match'], '"issues"');
+      expect(transport.requests[3].headers['If-None-Match'], '"issues"');
+      expect(transport.requests[4].headers['If-None-Match'], '"pull2"');
       expect(
         transport.requests,
         everyElement(
@@ -245,7 +284,6 @@ void main() {
       substation: 'seat',
       client: _client(transport),
       cursors: store,
-      now: () => DateTime.parse('2026-08-09T03:00:00Z'),
       emit: (event) async => events.add(event),
       onIntakeRowError: (error, _) => rowErrors.add(error),
     ).reconcileOnce();
@@ -259,10 +297,141 @@ void main() {
       ),
     );
     expect(events.single, isA<IssueOpened>());
-    expect(store.cursor.since, DateTime.parse('2026-08-09T03:00:00Z'));
+    expect(store.cursor.since, DateTime.parse('2026-08-09T01:00:00Z'));
     expect(store.cursor.etags, containsPair('intake/issues', '"issues"'));
     expect(transport.requests, hasLength(2));
   });
+
+  test('a poll reads every Link page before it returns', () async {
+    final transport = FakeGitHubHttpTransport()
+      ..responses.addAll(<GitHubHttpResponse>[
+        _response(
+          _page(100, first: 0),
+          etag: '"page1"',
+          link:
+              '<https://api.github.test/repos/o/r/issues?per_page=100&page=2>; '
+              'rel="next", '
+              '<https://api.github.test/repos/o/r/issues?per_page=100&page=2>; '
+              'rel="last"',
+        ),
+        _response(_page(20, first: 100)),
+        _response(const <Object?>[], etag: '"pulls"'),
+      ]);
+    final store = FakeGitHubCursorStore();
+    final events = <NormalizedGitHubEvent>[];
+    await GitHubReconciler(
+      owner: 'o',
+      repository: 'r',
+      substation: 's',
+      client: _client(transport),
+      cursors: store,
+      emit: (event) async => events.add(event),
+    ).reconcileOnce();
+
+    expect(events, hasLength(120));
+    expect(events.whereType<IssueOpened>().last.nodeId, 'I_119');
+    final issueRequests = transport.requests
+        .where((request) => request.uri.path.endsWith('/issues'))
+        .toList(growable: false);
+    expect(issueRequests, hasLength(2));
+    expect(issueRequests.last.uri.queryParameters['page'], '2');
+    expect(issueRequests.last.headers.containsKey('If-None-Match'), isFalse);
+    expect(store.cursor.since, DateTime.parse('2026-08-09T01:59:00Z'));
+  });
+
+  test('since marks the last examined row, never the poll start', () async {
+    final transport = FakeGitHubHttpTransport()
+      ..responses.addAll(<GitHubHttpResponse>[
+        _response(<Object?>[
+          _issue(nodeId: 'I_1', number: 1, updatedAt: '2026-08-09T01:00:00Z'),
+          _issue(nodeId: 'I_2', number: 2, updatedAt: '2026-08-09T02:00:00Z'),
+        ], etag: '"first"'),
+        _response(const <Object?>[], etag: '"pulls"'),
+        _response(<Object?>[
+          _issue(nodeId: 'I_2', number: 2, updatedAt: '2026-08-09T02:00:00Z'),
+          _issue(nodeId: 'I_3', number: 3, updatedAt: '2026-08-09T02:30:00Z'),
+        ], etag: '"second"'),
+        _response(const <Object?>[], etag: '"pulls2"'),
+      ]);
+    final store = FakeGitHubCursorStore();
+    final events = <NormalizedGitHubEvent>[];
+    final reconciler = GitHubReconciler(
+      owner: 'o',
+      repository: 'r',
+      substation: 's',
+      client: _client(transport),
+      cursors: store,
+      emit: (event) async => events.add(event),
+    );
+    await reconciler.reconcileOnce();
+
+    expect(store.cursor.since, DateTime.parse('2026-08-09T02:00:00Z'));
+    expect(events.map((event) => event.toJson()['nodeId']), <String>[
+      'I_1',
+      'I_2',
+    ]);
+
+    await reconciler.reconcileOnce();
+
+    final issueRequests = transport.requests
+        .where((request) => request.uri.path.endsWith('/issues'))
+        .toList(growable: false);
+    expect(
+      issueRequests.last.uri.queryParameters['since'],
+      '2026-08-09T02:00:00.000Z',
+    );
+    expect(events.map((event) => event.toJson()['nodeId']), <String>[
+      'I_1',
+      'I_2',
+      'I_3',
+    ]);
+    expect(store.cursor.since, DateTime.parse('2026-08-09T02:30:00Z'));
+  });
+
+  test(
+    'a PR row fetches the full pull and a 304 reuses the cached head',
+    () async {
+      final transport = FakeGitHubHttpTransport()
+        ..responses.addAll(<GitHubHttpResponse>[
+          _response(<Object?>[
+            _issue(pull: true, updatedAt: '2026-08-09T02:00:00Z'),
+          ], etag: '"issues"'),
+          _response(await _pullResource(), etag: '"pull2"'),
+          _response(const <Object?>[], etag: '"pulls"'),
+          _response(<Object?>[
+            _issue(pull: true, updatedAt: '2026-08-09T03:00:00Z'),
+          ], etag: '"issues2"'),
+          _response('', status: 304),
+          _response(const <Object?>[], etag: '"pulls2"'),
+        ]);
+      final store = FakeGitHubCursorStore();
+      final events = <NormalizedGitHubEvent>[];
+      final reconciler = GitHubReconciler(
+        owner: 'o',
+        repository: 'r',
+        substation: 's',
+        client: _client(transport),
+        cursors: store,
+        emit: (event) async => events.add(event),
+      );
+      await reconciler.reconcileOnce();
+      await reconciler.reconcileOnce();
+
+      expect(events, hasLength(2));
+      expect(
+        events.whereType<PullRequestOpened>().map((event) => event.headRef),
+        <String>['grid/pow-40a4', 'grid/pow-40a4'],
+      );
+      final pullRequests = transport.requests
+          .where((request) => request.uri.path.endsWith('/pulls/2'))
+          .toList(growable: false);
+      expect(pullRequests, hasLength(2));
+      expect(pullRequests.first.headers.containsKey('If-None-Match'), isFalse);
+      expect(pullRequests.last.headers['If-None-Match'], '"pull2"');
+      expect(store.cursor.etags['intake/pull/PR_2'], '"pull2"');
+      expect(store.cursor.since, DateTime.parse('2026-08-09T03:00:00Z'));
+    },
+  );
 
   test('sink failure leaves claimed observation durable', () async {
     final transport = FakeGitHubHttpTransport()

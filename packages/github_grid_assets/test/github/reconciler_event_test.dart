@@ -30,6 +30,7 @@ void main() {
     ]);
     expect(events.map((event) => event.toJson()).toList(), json);
     final pull = events.whereType<PullRequestOpened>().single;
+    expect(pull.headRef, 'grid/pow-40a4');
     expect(pull.toJson(), isNot(contains('headBranch')));
     final check = events.whereType<CheckConcluded>().single;
     expect(check.headBranch, 'grid/work');

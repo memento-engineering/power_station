@@ -19,6 +19,7 @@
     "observationId": "poll:issue:PR_2:2026-08-09T01:00:00Z",
     "number": 2,
     "title": "A pull request",
-    "body": "PR body"
+    "body": "PR body",
+    "headRef": "grid/pow-40a4"
   }
 ]
