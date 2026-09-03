@@ -1241,8 +1241,11 @@ List<String> specStructuralFindings(Bead bead) {
     findings.add('acceptance: no testable `- [ ]` checkbox criteria');
   }
 
-  // The four design sections.
-  final planAt = structure.indexOf('## Implementation Plan');
+  // The four design sections. Each heading is resolved at a LINE START
+  // ([headingOffset]): a sentence that NAMES `## Validation Plan` is a MENTION,
+  // and a mention neither satisfies the gate nor displaces the real section
+  // further down (bead `pow-o3ti`).
+  final planAt = headingOffset(structure, '## Implementation Plan');
   if (planAt < 0) {
     findings.add('design: no `## Implementation Plan` section');
   } else if (!_numberedStep.hasMatch(sectionBodyAt(structure, planAt))) {
@@ -1252,13 +1255,13 @@ List<String> specStructuralFindings(Bead bead) {
       'headings)',
     );
   }
-  if (!structure.contains('## Touches')) {
+  if (headingOffset(structure, '## Touches') < 0) {
     findings.add('design: no `## Touches` section');
   }
-  if (!structure.contains('## ADR Alignment')) {
+  if (headingOffset(structure, '## ADR Alignment') < 0) {
     findings.add('design: no `## ADR Alignment` section');
   }
-  final validationAt = structure.indexOf('## Validation Plan');
+  final validationAt = headingOffset(structure, '## Validation Plan');
   if (validationAt < 0) {
     findings.add('design: no `## Validation Plan` section');
   } else {
