@@ -7,6 +7,8 @@ import 'package:github_grid_assets/github_grid_assets.dart';
 import 'package:grid_sdk/grid_sdk.dart' as sdk;
 import 'package:test/test.dart';
 
+import 'support/asset_fakes.dart';
+
 const _oneVar = 'APP_ONE_PRIVATE_KEY';
 const _twoVar = 'APP_TWO_PRIVATE_KEY';
 const _onePath = 'test/fixtures/github_app_test_private.pem';
@@ -152,12 +154,16 @@ Seed _assets({
   child: _Probe(observe),
 );
 
-Future<void> _settle(TreeOwner owner) async {
-  for (var i = 0; i < 3; i++) {
-    await pumpEventQueue();
-    owner.flush();
-  }
-}
+/// Drives [owner] until [reached] holds, or the shared bounded budget is spent.
+///
+/// Delegates to `settle` (`test/support/asset_fakes.dart`) so every round both
+/// drains the event queue AND yields a real wall-clock slice. Omit [reached]
+/// for the RETENTION cases, which have no arrival to target and want the full
+/// quiet window instead.
+Future<void> _settle(TreeOwner owner, [bool Function()? reached]) => settle(() {
+  owner.flush();
+  return reached?.call() ?? false;
+});
 
 Future<void> _send(GitHubAppClient client) async {
   await client.send(method: 'GET', path: '/repos/o/r');
