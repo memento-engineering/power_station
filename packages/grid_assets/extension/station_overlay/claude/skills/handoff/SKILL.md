@@ -118,8 +118,8 @@ after it:
 - **(b) Fresh start** — `Handoff written: <path>. Run /clear, or exit and let the seat launcher relaunch this seat.`
 - **(c) Headless / launcher-driven** — `Handoff written: <path>. Turn ended for relaunch.`
   The launcher brings the seat back primed with it
-  (`claude --append-system-prompt-file <path>`, documented for interactive and
-  headless runs alike).
+  (`claude --append-system-prompt-file <path>`). WHICH run mode it relaunches
+  into is the launcher's business, not this skill's.
 
 The launcher itself, and the `SessionStart` compact-matcher hook that
 references the newest handoff after an in-place compaction, are the
