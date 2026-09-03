@@ -390,4 +390,70 @@ void main() {
       expect(report!.model, 'claude-opus-4-8');
     });
   });
+
+  // The harness-neutral ENVELOPE (bead `pow-39tl`) — a channel harness has no
+  // `sh -c` wrapper to redirect claude's `--output-format json`, so the bridge
+  // renders the same shape itself. Proven by reading it back through the
+  // production readers, unchanged.
+  group('usageEnvelopeJson + writeUsageEnvelope (bead `pow-39tl`)', () {
+    test('round-trips through the claude-shaped readers', () async {
+      final dir = await Directory.systemTemp.createTemp('grid_usage_');
+      addTearDown(() async => dir.delete(recursive: true));
+      final out = usageReportPath('tg-1/spec_review/specify');
+      expect(
+        writeUsageEnvelope(
+          workspaceDir: dir.path,
+          usageOut: out,
+          content: usageEnvelopeJson(
+            result: '{"acceptance":"- [ ] a","design":"## Implementation Plan"}',
+            tokensIn: 11,
+            tokensOut: 22,
+            numTurns: 3,
+            model: 'gpt-5.6-sol',
+          ),
+        ),
+        isTrue,
+      );
+      expect(readUsageFields(dir.path, 'tg-1/spec_review/specify'), {
+        'tokensIn': '11',
+        'tokensOut': '22',
+        'numTurns': '3',
+        'model': 'gpt-5.6-sol',
+      });
+      expect(
+        CarriedSpec.tryParse(
+          readEnvelopeResultText(dir.path, 'tg-1/spec_review/specify'),
+        )?.acceptance,
+        '- [ ] a',
+      );
+    });
+
+    test('an EMPTY-usage envelope still lands and parses to no fields',
+        () async {
+      final dir = await Directory.systemTemp.createTemp('grid_usage_');
+      addTearDown(() async => dir.delete(recursive: true));
+      final out = usageReportPath('tg-1/spec_review/specify');
+      expect(
+        writeUsageEnvelope(
+          workspaceDir: dir.path,
+          usageOut: out,
+          content: usageEnvelopeJson(),
+        ),
+        isTrue,
+      );
+      expect(File(p.join(dir.path, out)).existsSync(), isTrue);
+      expect(readUsageFields(dir.path, 'tg-1/spec_review/specify'), isEmpty);
+    });
+
+    test('an unwritable telemetry path is FAIL-SAFE, never a throw', () {
+      expect(
+        writeUsageEnvelope(
+          workspaceDir: '/dev/null',
+          usageOut: usageReportPath('tg-1/spec_review/specify'),
+          content: usageEnvelopeJson(tokensIn: 1),
+        ),
+        isFalse,
+      );
+    });
+  });
 }
