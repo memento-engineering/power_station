@@ -42,7 +42,7 @@ class BuildAgentEnvironment extends ModelPreference {
 }
 
 /// One critic LANE: the rubric id a critic already carries
-/// (`args.params['rubric']` - `coherence`, `adr-alignment`, `bead-readiness`),
+/// (`args.params['rubric']` - `coherence`, `decision-alignment`, `bead-readiness`),
 /// as a VALUE so it can serve as an `InheritedModelSeed` aspect.
 ///
 /// A TYPE rather than a bare `String` on purpose: `InheritedModelBranch`
@@ -54,7 +54,7 @@ class CriticLane {
   /// Creates the lane over the critic's [rubric] id.
   const CriticLane(this.rubric);
 
-  /// The rubric id (`coherence`, `adr-alignment`, `spec-adherence`, ...).
+  /// The rubric id (`coherence`, `decision-alignment`, `spec-adherence`, ...).
   final String rubric;
 
   @override
@@ -71,7 +71,7 @@ class CriticLane {
 /// The CRITIC seat - `CriticCapability`, `SpecCriticCapability` and
 /// `ReadinessCriticCapability`. ONE class over many rubrics, so ONE mounted
 /// value routes them: [entries] is the shared preference and [lanes] overrides
-/// it per rubric (ADR-0006 D4), so a station can send `adr-alignment` somewhere
+/// it per rubric (ADR-0006 D4), so a station can send `decision-alignment` somewhere
 /// else without a second provider.
 class CriticAgentEnvironment extends ModelPreference {
   /// Creates the critic seat's shared preference over [entries], with optional

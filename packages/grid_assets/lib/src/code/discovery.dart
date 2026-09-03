@@ -41,7 +41,7 @@
 ///    can never gate; it rides the dossier as a FLAG.
 ///  - **the departure clause.** A finding the bead ACKNOWLEDGES ("this departs
 ///    from X because Y") passes — a considered departure is not an offender, and
-///    it is judged downstream by `adr-alignment`. Only an UNWITTING contradiction
+///    it is judged downstream by `decision-alignment`. Only an UNWITTING contradiction
 ///    gates.
 ///  - **intent, not presence.** A finding the bead's own plan/acceptance REMOVES
 ///    (the bead IS the fix) passes — discovery runs pre-specify, so the offending
@@ -177,7 +177,7 @@ enum ViolationKind {
   /// A RECORDED decision entry — a `docs/decisions/` slug entry, or a legacy
   /// ADR-0000 `A<n>` amendment (converted with `status: accepted`). It binds on
   /// write. Anything that is not a recorded entry is ADVISORY: it can never
-  /// HOLD (2026-07-14 register foot); it rides as a flag for `adr-alignment`.
+  /// HOLD (2026-07-14 register foot); it rides as a flag for `decision-alignment`.
   decision,
 
   /// An applicable SKILL's instructions (skills TEACH how; ADRs RATIFY the
@@ -237,7 +237,7 @@ class DiscoveryFinding {
   /// a bead (pow-hf2: the flaky false-hold that taxed pow-ebf.3 / pow-8b3 /
   /// pow-hf2 itself). [gatesTheBead] therefore REQUIRES this to be `true`;
   /// absent/`false` fails OPEN (ADR-0000 A17(3): a false HOLD is strictly worse
-  /// than a wasted round, and the spec committee's `adr-alignment` lane
+  /// than a wasted round, and the spec committee's `decision-alignment` lane
   /// backstops a genuine contradiction downstream).
   final bool contradicts;
 
@@ -949,7 +949,7 @@ String renderDiscoveryHold({
     ..writeln(
       '2. DECLARE the departure IN the bead — "this departs from <the standard> '
       'because <why>". A considered departure is NOT an offence: it passes this '
-      'gate and is judged downstream by the spec committee\'s `adr-alignment` '
+      'gate and is judged downstream by the spec committee\'s `decision-alignment` '
       'lane. What this gate refuses is an UNWITTING contradiction.',
     );
   if (flags.isNotEmpty) {
@@ -1562,9 +1562,12 @@ class DiscoveryLensCapability extends ProcessCapability {
     DiscoveryAnchors? gather,
   }) {
     final path = lensReportPath(workspaceDir, lens);
-    final registerListCommand = localDecisionRegisterListCommand();
-    final registerGrepCommand = localDecisionRegisterGrepCommand(
-      r'<keyword1>\|<keyword2>\|<keyword3>',
+    final rig = bead.metadata['rig'];
+    final lookupBlock = rosterDecisionLookupBlock(
+      rosterQualifiedSurfaces(
+        design: bead.design,
+        substation: rig is String ? rig : '',
+      ),
     );
     final b = StringBuffer()
       ..writeln('# Discovery — lens: `$lens`')
@@ -1616,15 +1619,17 @@ class DiscoveryLensCapability extends ProcessCapability {
     b
       ..writeln()
       ..writeln('## What counts as an OFFENCE (the gate is CITE-THE-OFFENCE)')
+      ..writeln(kDecisionLookupRule)
+      ..writeln()
+      ..writeln('```sh')
+      ..writeln(lookupBlock)
+      ..writeln('```')
+      ..writeln()
       ..writeln(
-        'Run `$registerListCommand`, then `$registerGrepCommand`. Both commands '
-        'search `docs/adr/` and `docs/decisions/`; a missing directory is '
-        'absent, not an error. Cite a legacy ADR by file path plus ADR or '
-        '`A<n>` clause. Cite a `docs/decisions/` entry as `<repo>#<slug>`, for '
-        'example `the_grid#admission-authority-boundary`; a migrated entry may '
-        'also preserve its old citation in `register.legacy-id`. The citable '
-        'standard is a RATIFIED local decision, or an applicable SKILL\'s '
-        'instructions. Skills TEACH how; decisions RATIFY the specific.',
+        'The citable standard is a RECORDED decision from ANY mounted '
+        'register — a sibling substation\'s entry binds exactly as a local one '
+        'does — or an applicable SKILL\'s instructions. Skills TEACH how; '
+        'decisions RATIFY the specific.',
       )
       ..writeln(
         '- **A DECISION ENTRY BINDS.** A recorded entry is in force the moment '
@@ -1634,7 +1639,7 @@ class DiscoveryLensCapability extends ProcessCapability {
         '**A BEAD IS NOT A DECISION** — a plan, a proposal, another bead\'s '
         'design field, or your own reading of the tree is not a recorded '
         'entry: set `"ratified": false` and it rides to the architect as a '
-        'flag for the `adr-alignment` lane, NEVER as a hold. (A `skill` or '
+        'flag for the `decision-alignment` lane, NEVER as a hold. (A `skill` or '
         '`pattern` citation ignores this field.)',
       )
       ..writeln(
@@ -1722,9 +1727,9 @@ class DiscoveryLensCapability extends ProcessCapability {
 /// Public so the Packaged-AI-Asset mirror (`extension/prompts/discovery.md`)
 /// renders the SAME brief the in-pipeline lens reads.
 String lensBrief(String lens) {
-  final registerListCommand = localDecisionRegisterListCommand();
-  final registerGrepCommand = localDecisionRegisterGrepCommand(
-    r'<keyword1>\|<keyword2>\|<keyword3>',
+  final rosterIndex = rosterDecisionIndexCommand();
+  final surfaceIndex = rosterDecisionIndexCommand(
+    surface: '$kUnknownSubstationPrefix/$kRosterSurfacePlaceholder',
   );
   return switch (lens) {
     kCodeLens =>
@@ -1734,16 +1739,21 @@ String lensBrief(String lens) {
           'read before it plans. Cite an offence when the bead contradicts a '
           'convention with a NAMED precedent in the tree.',
     kDecisionLens =>
-      'DECISION CONTEXT. Run `$registerListCommand`, then '
-          '`$registerGrepCommand`; read every hit from `docs/adr/` and '
-          '`docs/decisions/`. A missing directory is absent, not an error. '
-          'Report the decisions the architect must honour and CITE any this '
-          'bead contradicts. Legacy citations name the file plus ADR or `A<n>` '
-          'clause; `docs/decisions/` citations use `<repo>#<slug>`. A RECORDED '
+      'DECISION CONTEXT. Run `$rosterIndex` for the whole roster union, then '
+          '`$surfaceIndex` for each surface this bead names — roster-qualify '
+          'every repository-relative path with its substation repository name. '
+          'Pass NO register-directory argument: the omission is what makes the '
+          'grid adapter resolve the live mounted-substation roster and return '
+          'the UNION rather than only this repo\'s register. Read every '
+          'returned record from EVERY `originRegister`: a SIBLING '
+          'substation\'s entry binds exactly as a local one does. Report the '
+          'decisions the architect must honour and CITE any this bead '
+          'contradicts, by canonical `<repo>#<slug>` identity. A RECORDED '
           'decision entry can HOLD the bead — it binds on write, so set '
           '`"ratified": true`; anything that is NOT a recorded entry (a bead, '
           'a plan, your own reading) sets `"ratified": false` and rides as a '
-          'flag. Be QUOTED: read the entry and its `status` before citing it.',
+          'flag. Be QUOTED: read the entry and its `status` before citing it. '
+          'A lookup that FAILS is not an empty union — report the failure.',
     kPriorArtLens =>
       'PRIOR ART. What has already been done, decided, or attempted here? Read '
           'the prior-art hits above, the git history of the surfaces the bead '

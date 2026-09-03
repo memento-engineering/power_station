@@ -42,6 +42,10 @@ resources:
     description: Does the spec cite and align with the substation's docs/adr register (ADR-0000 amendments included)?
     path: rubrics/adr-alignment.md
     visibility: public
+  - id: decision-alignment
+    description: Does the spec cite and align with every recorded decision the station's ROSTER union governs its touched surfaces with?
+    path: rubrics/decision-alignment.md
+    visibility: public
   - id: acceptance-testability
     description: Are the acceptance criteria testable by exact commands, with a 1:1 validation-plan mapping?
     path: rubrics/acceptance-testability.md

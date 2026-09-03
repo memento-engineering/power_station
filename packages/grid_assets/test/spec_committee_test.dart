@@ -23,7 +23,7 @@ import 'package:test/test.dart';
 import 'support/asset_fakes.dart';
 
 const _specCritics =
-    'spec-validation,coherence,adr-alignment,acceptance-testability,'
+    'spec-validation,coherence,decision-alignment,acceptance-testability,'
     'plan-completeness';
 
 /// A bead carrying a structurally WHOLE spec (every section, no placeholders).
@@ -970,23 +970,18 @@ Validate again with ruby -e 's.include?("${ticks}dart")'.
       expect(prompt, contains('# Spec review — rubric: `coherence`'));
       expect(prompt, contains('NOT been built'));
       expect(prompt, contains('Verify against the live tree'));
-      expect(prompt, contains(localDecisionRegisterListCommand()));
-      expect(
-        prompt,
-        contains(
-          localDecisionRegisterGrepCommand(
-            r'<keyword1>\|<keyword2>\|<keyword3>',
-          ),
-        ),
-      );
-      for (final directory in kLocalDecisionRegisterDirectories) {
-        expect(prompt, contains(directory));
+      expect(prompt, contains(kDecisionLookupRule));
+      for (final token in kLocalOnlyTokens) {
+        expect(prompt, isNot(contains(token)));
       }
       expect(prompt, contains('the_grid#admission-authority-boundary'));
       expect(prompt, contains(kDecisionWriteRule));
       expect(
         prompt,
-        contains('appends an `A<n>` amendment to ADR-0000 has DEPARTED'),
+        contains(
+          'appends an `A<n>` amendment to ADR-0000 has DEPARTED from that '
+          'rule — say so under `decision-alignment`',
+        ),
       );
       // The spec IS the bead's acceptance + design — both render.
       expect(prompt, contains('- [ ] A peer heartbeat surfaces within 1s'));
@@ -1029,13 +1024,13 @@ Validate again with ruby -e 's.include?("${ticks}dart")'.
         'other lanes\'', () {
       final prompt = const SpecCriticCapability().buildSpecCriticPrompt(
         _specced(),
-        'adr-alignment',
-        'tg-1/spec_review/adr-alignment',
+        'decision-alignment',
+        'tg-1/spec_review/decision-alignment',
         '/w/tg-1',
         round: 0,
       );
       for (final other in kSpecCommitteeRubrics) {
-        if (other == 'adr-alignment') continue;
+        if (other == 'decision-alignment') continue;
         expect(
           prompt,
           isNot(contains('`$other`')),
@@ -1223,7 +1218,7 @@ Validate again with ruby -e 's.include?("${ticks}dart")'.
       expect((out as Advance).payload!['verdict'], 'advance');
       expect(
         out.payload!['grades'],
-        'spec-validation=A,coherence=A,adr-alignment=A,'
+        'spec-validation=A,coherence=A,decision-alignment=A,'
         'acceptance-testability=A,plan-completeness=A',
       );
     });
@@ -1258,7 +1253,7 @@ Validate again with ruby -e 's.include?("${ticks}dart")'.
     });
 
     test('a missing spec grade fail-closes (never advances)', () async {
-      final grades = allA()..remove('adr-alignment');
+      final grades = allA()..remove('decision-alignment');
       final out = await _specRoute(grades);
       expect(out, isA<Escalate>());
     });

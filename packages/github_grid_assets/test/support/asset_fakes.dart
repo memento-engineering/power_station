@@ -176,7 +176,7 @@ const String kSpecClearCritiqueNode = 'spec_review/clear-critique';
 const String kSpecGateNode = 'spec_review/spec-validation';
 const List<String> kSpecCriticNodes = [
   'spec_review/coherence',
-  'spec_review/adr-alignment',
+  'spec_review/decision-alignment',
   'spec_review/acceptance-testability',
   'spec_review/plan-completeness',
 ];
@@ -216,7 +216,7 @@ const Set<String> kSpecPhaseNodes = {
   kSpecClearCritiqueNode,
   kSpecGateNode,
   'spec_review/coherence',
-  'spec_review/adr-alignment',
+  'spec_review/decision-alignment',
   'spec_review/acceptance-testability',
   'spec_review/plan-completeness',
   kSpecRouteNode,

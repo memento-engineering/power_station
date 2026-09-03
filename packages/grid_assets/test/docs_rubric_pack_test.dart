@@ -109,7 +109,7 @@ void main() {
       final addedLines = <String, List<String>>{
         for (final rubricId in [
           ...kDocsGatingRubrics,
-          'adr-alignment',
+          'decision-alignment',
           'coherence',
         ])
           'rubrics/$rubricId.md': loader.loadRubric(rubricId).split('\n'),

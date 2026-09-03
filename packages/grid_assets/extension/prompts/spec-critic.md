@@ -15,17 +15,23 @@ critics might grade.
 ## Verify against the live tree
 You are standing in the bead's worktree. Verify the spec's claims against the
 REAL tree before grading: grep/read the files and symbols the plan names, and
-check the substation's local decision register for the decisions the spec cites
-— or should have cited. It may contain `docs/adr/`, `docs/decisions/`, or both;
-treat a missing directory as absent and continue with the other.
+check every recorded decision that governs its touched surfaces. Lookup is
+ROSTER-MODE: read every literal path in the spec's `## Touches` section, prefix
+each repository-relative path with its substation repository name, and run one
+lookup per unique roster-qualified path.
 
 ```sh
-for register in docs/adr docs/decisions; do [ ! -d "$register" ] || find "$register" -type f -not -path '*/views/*' -name '*.md' -print; done
-for register in docs/adr docs/decisions; do [ ! -d "$register" ] || find "$register" -type f -not -path '*/views/*' -name '*.md' -exec grep -li "<keyword1>\|<keyword2>\|<keyword3>" {} +; done
+space decisions index --surface <repo>/<path>
 ```
 
-Legacy ADR citations name the file plus an ADR number or `A<n>` clause. Entries
-in `docs/decisions/` use `<repo>#<slug>`, for example
+Pass NO register-directory argument: that omission is load-bearing — the grid
+adapter resolves the live mounted-substation roster and the command returns the
+UNION of every mounted register rather than only this repo's. Retain results
+from every `originRegister`; a sibling register has exactly the same force as
+the local one. A lookup that FAILS or exits non-zero is NOT an empty union —
+report the failure verbatim and never grade a crashed index clean.
+
+Cite each decision by its canonical `<repo>#<slug>` identity, for example
 `the_grid#admission-authority-boundary`; migrated entries may also carry
 `register.legacy-id` so their old citations continue to resolve. A claim you
 cannot verify grades down.
@@ -40,7 +46,7 @@ serial to collide on. `docs/adr/ADR-0000-ai-decision-register.md` is READ-ONLY
 LEGACY — cite it, NEVER append to it. When `docs/decisions/` does not exist in
 the substation, CREATE it with the entry; a missing directory is not a reason to
 fall back to ADR-0000. A spec that appends an `A<n>` amendment to ADR-0000 has
-DEPARTED from that rule — say so under `adr-alignment`.
+DEPARTED from that rule — say so under `decision-alignment`.
 
 ## Your verdict
 Grade the spec A (best) through F (worst) against `{{rubric}}` ONLY, then write

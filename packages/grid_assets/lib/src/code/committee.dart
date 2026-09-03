@@ -1384,7 +1384,7 @@ class CriticCapability extends ProcessCapability {
       stepParams: args.params,
       registry: registry,
       // Rung 4.5 - the CRITIC seat, routed by this lane (ADR-0006 D4). One
-      // mounted value sends `adr-alignment` and `coherence` to different
+      // mounted value sends `decision-alignment` and `coherence` to different
       // environments; an unrouted lane rides the seat's shared entries.
       typedEnvironment: CriticAgentEnvironment.of(
         context,

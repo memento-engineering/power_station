@@ -23,10 +23,10 @@ that an architect can turn it into testable `- [ ]` criteria backed by exact
 architect's output — but "make it better" gives them nothing to convert.
 
 **3. Cited constraints.** The bead names the surfaces it touches (packages,
-files, symbols) and the constraints that bind them — the substation's local
-decision register under `docs/adr/`, `docs/decisions/`, or both.
-Treat a missing directory as absent and continue with the other; legacy `A<n>`
-amendments bind as accepted, and a `docs/decisions/` entry binds on write. The
+files, symbols) and the constraints that bind them — every recorded decision in
+the station's ROSTER union, each mounted substation's `docs/decisions/`
+register included, since a SIBLING substation's entry binds exactly as a local
+one does. An entry binds on write. The
 constraints also include the memento
 house set (freezed sealed unions consumed with exhaustive `switch`; Fakes, not
 mocks) and any sibling bead it shares state with. A bead that cites nothing
@@ -37,7 +37,7 @@ alignment is exactly what the spec committee rejects.
 architect can choose a file, a symbol, a test — they cannot choose the bead's
 architecture on the author's behalf. An unresolved fork ("either X or Y"), an
 undecided layering, or an open question left in the brief will surface downstream
-as a coherence or adr-alignment failure — precisely the round this lens exists to
+as a coherence or decision-alignment failure — precisely the round this lens exists to
 withhold.
 
 ## Bands

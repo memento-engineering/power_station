@@ -2,7 +2,7 @@
 /// ladder at the head of [kSpecReviewCircuit].
 ///
 /// **The gap.** The 2026-07-11 opus wide run proved the coarse backlog is not
-/// spec-ready: 4 of 7 beads gated at `spec_review` on real adr-alignment /
+/// spec-ready: 4 of 7 beads gated at `spec_review` on real decision-alignment /
 /// coherence findings, because their COARSE descriptions produced weak specs.
 /// ~42 opus agents discovered that AT the spec committee — downstream of the
 /// most expensive fan-out in the circuit. The bar this lens applies is NOT "is
@@ -447,7 +447,7 @@ class ReadinessCriticCapability extends CriticCapability {
     required int round,
   }) {
     final path = p.join(critiqueDirPath(workspaceDir), '$rubric.json');
-    final registerListCommand = localDecisionRegisterListCommand();
+    final rosterIndex = rosterDecisionIndexCommand();
     final b = StringBuffer()
       ..writeln('# Spec-readiness intake — rubric: `$rubric`')
       ..writeln()
@@ -468,14 +468,15 @@ class ReadinessCriticCapability extends CriticCapability {
       ..writeln()
       ..writeln('## Stay cheap — this is a lens, not a committee')
       ..writeln(
-        'You are standing in the bead\'s worktree. Spend a BOUNDED look, not an '
-        'exploration: run `$registerListCommand` to see what register exists. '
-        'The command searches `docs/adr/` and `docs/decisions/`; a missing '
-        'directory is absent, not an error. Grep ONLY the surfaces the bead '
-        'actually names. Do NOT design the change, do NOT write a plan, do NOT '
-        'read the tree broadly — that is the architect\'s job downstream, and '
-        'duplicating it here defeats this lane\'s purpose. Judge the BRIEF, not '
-        'the codebase.',
+        'You are standing in the bead\'s worktree. Spend a BOUNDED look, not '
+        'an exploration: run `$rosterIndex` ONCE to see what the roster union '
+        'already decides. It takes NO register-directory argument on purpose — '
+        'the grid adapter resolves the live mounted-substation roster, so a '
+        'SIBLING substation\'s decisions are in the answer too. Grep ONLY the '
+        'surfaces the bead actually names. Do NOT design the change, do NOT '
+        'write a plan, do NOT read the tree broadly — that is the architect\'s '
+        'job downstream, and duplicating it here defeats this lane\'s purpose. '
+        'Judge the BRIEF, not the codebase.',
       )
       ..writeln()
       ..writeln('## Your verdict')

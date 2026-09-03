@@ -21,7 +21,7 @@ import 'support/asset_fakes.dart';
 
 const _gating = kSpecGatingRubric;
 const _critics =
-    'spec-validation,coherence,adr-alignment,acceptance-testability,'
+    'spec-validation,coherence,decision-alignment,acceptance-testability,'
     'plan-completeness';
 
 /// The five spec lanes at [grades], with [rationales] where a critic gave one;
@@ -156,7 +156,7 @@ void main() {
       expect(v, isA<SpecAdvance>());
       expect(
         (v as SpecAdvance).gradesCsv,
-        'spec-validation=A,coherence=C,adr-alignment=A,'
+        'spec-validation=A,coherence=C,decision-alignment=A,'
         'acceptance-testability=A,plan-completeness=A',
       );
       expect(v.spread, 2);
@@ -205,7 +205,7 @@ void main() {
           {
             _gating: 'A',
             'coherence': 'A',
-            'adr-alignment': 'A',
+            'decision-alignment': 'A',
             'acceptance-testability': 'B',
             'plan-completeness': 'D',
           },
@@ -260,7 +260,7 @@ void main() {
       'ESCALATION — a MISSING critic grade fail-closes to F (never advances, '
       'never respecs)',
       () {
-        final grades = _allA()..remove('adr-alignment');
+        final grades = _allA()..remove('decision-alignment');
         final v = decideSpecRoute(
           sessionRoot: 'tg-1',
           lanes: _lanes(grades),
@@ -646,7 +646,7 @@ void main() {
           round: kMaxRespecRounds,
           lanes: [
             RespecLane(
-              rubric: 'adr-alignment',
+              rubric: 'decision-alignment',
               grade: 'D',
               rationale: 'the ADR citation is not real',
             ),
@@ -665,7 +665,7 @@ void main() {
 
     test('the CAP flare quotes the FRESH vector it decided on, never the '
         'ledger\'s recorded last failure (bead `pow-p8w`)', () async {
-      // A SPENT ledger whose recorded last failure names `adr-alignment` …
+      // A SPENT ledger whose recorded last failure names `decision-alignment` …
       writeRespecLedger(
         ws.path,
         const RespecLedger(
@@ -673,7 +673,7 @@ void main() {
           round: kMaxRespecRounds,
           lanes: [
             RespecLane(
-              rubric: 'adr-alignment',
+              rubric: 'decision-alignment',
               grade: 'D',
               rationale: 'the ADR citation is not real',
             ),
@@ -694,8 +694,8 @@ void main() {
       final reason = (capped as Escalate).reason;
       expect(reason, startsWith('respec-cap'));
       expect(reason, contains('coherence=D'));
-      expect(reason, contains('adr-alignment=A'));
-      expect(reason, isNot(contains('adr-alignment=D')));
+      expect(reason, contains('decision-alignment=A'));
+      expect(reason, isNot(contains('decision-alignment=D')));
     });
 
     test(
@@ -855,7 +855,7 @@ void main() {
       // CURRENT-round (2) artifacts for TWO judgement lanes only…
       _plantVerdicts(
         ws.path,
-        const {'coherence': 'D', 'adr-alignment': 'A'},
+        const {'coherence': 'D', 'decision-alignment': 'A'},
         rationales: const {'coherence': 'the plan contradicts the acceptance'},
         round: kMaxRespecRounds,
       );
@@ -970,7 +970,7 @@ void main() {
       const grades = {
         _gating: 'A',
         'coherence': 'D',
-        'adr-alignment': 'A',
+        'decision-alignment': 'A',
         'acceptance-testability': 'A',
         'plan-completeness': 'A',
       };
@@ -1014,7 +1014,7 @@ void main() {
         round: 1,
         lanes: [
           RespecLane(
-            rubric: 'adr-alignment',
+            rubric: 'decision-alignment',
             grade: 'D',
             rationale: 'ADR-0008 D3 is cited but says the opposite',
           ),
@@ -1028,7 +1028,7 @@ void main() {
       final g = renderRespecGuidance(ledger);
       expect(g, contains('RESPEC round 1 of 2'));
       expect(g, contains('READ THIS FIRST'));
-      expect(g, contains('`adr-alignment` — grade D'));
+      expect(g, contains('`decision-alignment` — grade D'));
       expect(g, contains('ADR-0008 D3 is cited but says the opposite'));
       expect(g, contains('`plan-completeness` — grade D'));
       expect(g, contains('step 4 has no commit message'));

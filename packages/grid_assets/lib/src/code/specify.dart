@@ -30,8 +30,9 @@
 /// the bd CLI: testable `--acceptance` checkboxes; a `--design` body carrying
 /// `## Implementation Plan` (literal Dart code / exact file paths / exact
 /// `dart test` commands / conventional-commit messages), `## Touches`, a
-/// MANDATORY `## ADR Alignment` (grep the SUBSTATION's `docs/adr/` and
-/// `docs/decisions/` registers and cite load-bearing clauses), and
+/// MANDATORY `## ADR Alignment` (query the ROSTER UNION of every mounted
+/// substation's register via `decisions index` and cite load-bearing
+/// clauses), and
 /// a `## Validation Plan` mapped 1:1 to acceptance; plus the `validation_plan`
 /// metadata command the CODE committee's gating lane later runs. Before it
 /// exits it re-validates the drafted spec against the LIVE worktree (grep
@@ -51,7 +52,7 @@
 ///    spec-side mirror of `code-validation`'s runner-not-agent posture). A
 ///    placeholder or section-less spec grades F — a hard block via the route —
 ///    so a spec-less bead can never silently reach the build.
-///  - `coherence` / `adr-alignment` / `acceptance-testability` /
+///  - `coherence` / `decision-alignment` / `acceptance-testability` /
 ///    `plan-completeness` — four LLM critics ([SpecCriticCapability]), each
 ///    riding the resolved harness with ONLY its own rubric (anti-anchoring),
 ///    grading the bead's SPEC (never a diff — there is no code yet) and
@@ -93,6 +94,7 @@ import '../agent/seat_environments.dart';
 import '../agent/site_binding.dart';
 import '../agent/typed_environment.dart';
 import '../agent/usage_report.dart';
+import '../assets/overlay_materializer.dart' show kDefaultOverlayRunner;
 import 'committee.dart';
 import 'decision_register.dart';
 import 'discovery.dart';
@@ -108,7 +110,7 @@ const String kSpecGatingRubric = 'spec-validation';
 /// critic; anti-anchoring) — the spec-readiness pack's judgement lanes.
 const List<String> kSpecLlmRubrics = [
   'coherence',
-  'adr-alignment',
+  'decision-alignment',
   'acceptance-testability',
   'plan-completeness',
 ];
@@ -395,10 +397,22 @@ const Circuit kSpecReviewCircuit = Circuit(
       params: {'rubric': 'coherence'},
       dependsOn: {kClearCritiqueStep},
     ),
+    // The DECISION lane
+    // (`power_station#the-spec-decision-lane-queries-the-roster-union`): it
+    // queries the composing station's ROSTER-MODE `decisions index` — the
+    // UNION of every mounted substation's register — not this repo's
+    // `docs/adr/`. Step id and rubric id MUST stay equal: the route joins a
+    // lane by reading `.grid/critique/<id>.json` at `<parent>/<id>`. A
+    // survivor mid-`spec_review` finds no cursor key here, which the frontier
+    // reads as `pending`: the lane simply re-runs, and a read-only critic
+    // re-grading is harmless (A16 guards spec-phase RE-ENTRY for a bead
+    // already mid-BUILD, which this cannot cause). The FROZEN shapes in
+    // `circuit_migration.dart` keep the superseded lane's literal ids and its
+    // local-only rubric, and retire with that file.
     CapabilityStep(
-      stepId: 'adr-alignment',
+      stepId: 'decision-alignment',
       capabilityId: 'spec-critic',
-      params: {'rubric': 'adr-alignment'},
+      params: {'rubric': 'decision-alignment'},
       dependsOn: {kClearCritiqueStep},
     ),
     CapabilityStep(
@@ -422,13 +436,13 @@ const Circuit kSpecReviewCircuit = Circuit(
       dependsOn: {
         kSpecGatingRubric,
         'coherence',
-        'adr-alignment',
+        'decision-alignment',
         'acceptance-testability',
         'plan-completeness',
       },
       params: {
         'critics':
-            'spec-validation,coherence,adr-alignment,'
+            'spec-validation,coherence,decision-alignment,'
             'acceptance-testability,plan-completeness',
         'gating': kSpecGatingRubric,
         // The DECLARATIVE backward-motion edge. The route does not REPORT a
@@ -631,9 +645,11 @@ AgentBrief buildSpecifyBrief(
   final title = bead.title.isNotEmpty ? bead.title : 'work bead ${bead.id}';
   final substation = bead.metadata['rig'];
   final id = bead.id;
-  final registerListCommand = localDecisionRegisterListCommand();
-  final registerGrepCommand = localDecisionRegisterGrepCommand(
-    r'<keyword1>\|<keyword2>\|<keyword3>',
+  final lookupBlock = rosterDecisionLookupBlock(
+    rosterQualifiedSurfaces(
+      design: bead.design,
+      substation: substation is String ? substation : '',
+    ),
   );
   final t = StringBuffer()
     ..writeln('# Specify: $title')
@@ -731,19 +747,22 @@ AgentBrief buildSpecifyBrief(
     )
     ..writeln()
     ..writeln(
-      '**## ADR Alignment** — MANDATORY. Grep the substation\'s ADR register '
-      'FIRST, from the worktree root. Run `$registerListCommand`, then '
-      '`$registerGrepCommand` with 3-6 keywords from the bead\'s title and '
-      'touched surfaces. Both commands search `docs/adr/` and '
-      '`docs/decisions/`; a missing directory is absent, not an error. Cite a '
-      'legacy ADR by file path plus ADR or `A<n>` clause. Cite a '
-      '`docs/decisions/` entry as `<repo>#<slug>`, for example '
-      '`the_grid#admission-authority-boundary`; a migrated entry may also '
-      'preserve its old citation in `register.legacy-id`. '
+      '**## ADR Alignment** — MANDATORY. $kDecisionLookupRule '
+      'For the surfaces this bead already names that is:',
+    )
+    ..writeln()
+    ..writeln('```sh')
+    ..writeln(lookupBlock)
+    ..writeln('```')
+    ..writeln()
+    ..writeln(
+      'Re-run the block over the FINAL `## Touches` you write. '
       '$kDecisionWriteRule '
-      'Quote each load-bearing decision and say '
-      'how the plan aligns. If grep returns nothing relevant, write exactly: '
-      'No ADR applies — verified via grep on `<keywords>`.',
+      'Quote each load-bearing decision and say how the plan aligns. If the '
+      'union is empty for every queried surface, write exactly: No recorded '
+      'decision governs these surfaces — verified via '
+      '`$kDefaultOverlayRunner decisions index --surface` over '
+      '`<the roster-qualified paths>`.',
     )
     ..writeln()
     ..writeln(
@@ -956,9 +975,12 @@ class SpecCriticCapability extends CriticCapability {
     required int round,
   }) {
     final path = p.join(workspaceDir, '.grid', 'critique', '$rubric.json');
-    final registerListCommand = localDecisionRegisterListCommand();
-    final registerGrepCommand = localDecisionRegisterGrepCommand(
-      r'<keyword1>\|<keyword2>\|<keyword3>',
+    final rig = bead.metadata['rig'];
+    final lookupBlock = rosterDecisionLookupBlock(
+      rosterQualifiedSurfaces(
+        design: bead.design,
+        substation: rig is String ? rig : '',
+      ),
     );
     final b = StringBuffer()
       ..writeln('# Spec review — rubric: `$rubric`')
@@ -981,16 +1003,18 @@ class SpecCriticCapability extends CriticCapability {
         'You are standing in the bead\'s worktree. Verify the spec\'s claims '
         'against the REAL tree before grading: grep/read the files and '
         'symbols the plan names (a named symbol that neither resolves nor is '
-        'announced as new is a finding, not a style nit). Run '
-        '`$registerListCommand`, then `$registerGrepCommand`. Both commands '
-        'search `docs/adr/` and `docs/decisions/`; a missing directory is '
-        'absent, not an error. Cite a legacy ADR by file path plus ADR or '
-        '`A<n>` clause. Cite a `docs/decisions/` entry as `<repo>#<slug>`, for '
-        'example `the_grid#admission-authority-boundary`; a migrated entry may '
-        'also preserve its old citation in `register.legacy-id`. '
+        'announced as new is a finding, not a style nit). '
+        '$kDecisionLookupRule',
+      )
+      ..writeln()
+      ..writeln('```sh')
+      ..writeln(lookupBlock)
+      ..writeln('```')
+      ..writeln()
+      ..writeln(
         '$kDecisionWriteRule '
         'A spec that appends an `A<n>` amendment to ADR-0000 has DEPARTED '
-        'from that rule — say so under `adr-alignment`. Check the '
+        'from that rule — say so under `decision-alignment`. Check the '
         'decisions the spec cites — or should have cited. A claim you cannot '
         'verify grades down; do not take the spec\'s word for the world.',
       )

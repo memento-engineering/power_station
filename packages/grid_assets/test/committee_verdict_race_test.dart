@@ -46,7 +46,7 @@ import 'support/asset_fakes.dart';
 const _parent = 'tg-60t/spec_review';
 const _gating = kSpecGatingRubric;
 const _critics =
-    'spec-validation,coherence,adr-alignment,acceptance-testability,'
+    'spec-validation,coherence,decision-alignment,acceptance-testability,'
     'plan-completeness';
 
 /// Plants one canonical verdict artifact stamped for THIS node path + [round].
@@ -108,7 +108,7 @@ StepArgs _routeArgs({int round = 0}) => stepArgs(
 Map<String, Map<String, String>> _waveOneResults() => {
   _gating: {'grade': 'A', 'transport': 'structural', 'round': '1'},
   'coherence': {'grade': 'A', 'transport': 'file', 'round': '0'},
-  'adr-alignment': {'grade': 'A', 'transport': 'file', 'round': '0'},
+  'decision-alignment': {'grade': 'A', 'transport': 'file', 'round': '0'},
   'acceptance-testability': {'grade': 'B', 'transport': 'file', 'round': '0'},
   'plan-completeness': {'grade': 'D', 'transport': 'file', 'round': '0'},
 };
@@ -164,7 +164,7 @@ void main() {
       );
       _plantVerdict(ws.path, 'plan-completeness', round: 1, grade: 'C');
       _plantVerdict(ws.path, 'coherence', round: 0);
-      _plantVerdict(ws.path, 'adr-alignment', round: 0);
+      _plantVerdict(ws.path, 'decision-alignment', round: 0);
       _plantVerdict(ws.path, 'acceptance-testability', round: 0, grade: 'B');
     }
 
@@ -184,7 +184,7 @@ void main() {
             'reason',
             allOf(
               contains('coherence'),
-              contains('adr-alignment'),
+              contains('decision-alignment'),
               contains('acceptance-testability'),
               contains('round 1'),
               // The refusal cites NO grade for the un-joined lanes (the
@@ -226,7 +226,7 @@ void main() {
           ],
         ),
       );
-      _plantVerdict(ws.path, 'adr-alignment', round: 1);
+      _plantVerdict(ws.path, 'decision-alignment', round: 1);
       _plantVerdict(ws.path, 'acceptance-testability', round: 1, grade: 'B');
       _plantVerdict(ws.path, 'plan-completeness', round: 1, grade: 'C');
       final results = {
@@ -237,7 +237,7 @@ void main() {
           'round': '1',
           'rationale': 'cached result must never be cited',
         },
-        'adr-alignment': {'grade': 'A', 'transport': 'file', 'round': '1'},
+        'decision-alignment': {'grade': 'A', 'transport': 'file', 'round': '1'},
         'acceptance-testability': {
           'grade': 'B',
           'transport': 'file',
@@ -264,7 +264,7 @@ void main() {
       // The full five-lane vector — including the mid-wave early finisher.
       expect(payload['grades'], contains('plan-completeness=C'));
       expect(payload['grades'], contains('coherence=A'));
-      expect(payload['grades'], contains('adr-alignment=A'));
+      expect(payload['grades'], contains('decision-alignment=A'));
       expect(payload['grades'], contains('acceptance-testability=B'));
       expect(payload.toString(), isNot(contains('cached result must never')));
       expect(payload.toString(), isNot(contains('coherence=F')));
@@ -277,13 +277,13 @@ void main() {
         'names the lane and cites no grade for it', () async {
       // Round 0, no ledger. Three lanes wrote artifacts; `coherence` graded
       // through the stdout-envelope fallback (tg-291) — no file exists.
-      _plantVerdict(ws.path, 'adr-alignment', round: 0);
+      _plantVerdict(ws.path, 'decision-alignment', round: 0);
       _plantVerdict(ws.path, 'acceptance-testability', round: 0, grade: 'B');
       _plantVerdict(ws.path, 'plan-completeness', round: 0, grade: 'C');
       final results = {
         _gating: {'grade': 'A', 'transport': 'structural', 'round': '0'},
         'coherence': {'grade': 'C', 'transport': 'envelope', 'round': '0'},
-        'adr-alignment': {'grade': 'A', 'transport': 'file', 'round': '0'},
+        'decision-alignment': {'grade': 'A', 'transport': 'file', 'round': '0'},
         'acceptance-testability': {
           'grade': 'B',
           'transport': 'file',
@@ -326,12 +326,12 @@ void main() {
       // and the gating rc (never stamped — the wipe stays ITS fence).
       _plantVerdict(ws.path, 'coherence', round: 0);
       File(
-        p.join(ws.path, '.grid', 'critique', 'adr-alignment.json'),
+        p.join(ws.path, '.grid', 'critique', 'decision-alignment.json'),
       ).writeAsStringSync(
         jsonEncode({
-          'rubric': 'adr-alignment',
+          'rubric': 'decision-alignment',
           'grade': 'A',
-          'nodePath': 'OTHER-bead/spec_review/adr-alignment',
+          'nodePath': 'OTHER-bead/spec_review/decision-alignment',
           'round': 1,
         }),
       );
