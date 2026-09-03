@@ -652,4 +652,100 @@ The fake mirrors the shape already used in `test/roster_test.dart`.
       {'test/pause_lane_test.dart'},
     );
   });
+
+  test('pow-26dd r2 one verb authors a comma-and list', () {
+    const design =
+        'Modify `test/lane_a_test.dart`, `test/lane_b_test.dart`, and '
+        '`test/lane_c_test.dart`.';
+    const paths = {
+      'test/lane_a_test.dart',
+      'test/lane_b_test.dart',
+      'test/lane_c_test.dart',
+    };
+    expect(testDeclarations(design).authored, paths);
+    expect(testDeclarations(design).mentioned, isEmpty);
+    expect(
+      declaredTestFiles(
+        design,
+        baseFiles: const {
+          'packages/p/test/lane_a_test.dart',
+          'packages/p/test/lane_b_test.dart',
+          'packages/p/test/lane_c_test.dart',
+        },
+      ),
+      paths,
+    );
+  });
+
+  test('pow-26dd r2 one verb authors an and-joined pair', () async {
+    const design = 'Create `test/pair_x_test.dart` and `test/pair_y_test.dart`.';
+    const paths = {'test/pair_x_test.dart', 'test/pair_y_test.dart'};
+    expect(testDeclarations(design).authored, paths);
+    expect(
+      declaredTestFiles(
+        design,
+        baseFiles: const {
+          'packages/p/test/pair_x_test.dart',
+          'packages/p/test/pair_y_test.dart',
+        },
+      ),
+      paths,
+    );
+    final outcome = await _runGate(
+      design: design,
+      diff: _diffFor(['test/pair_x_test.dart']),
+    );
+    expect(outcome.payload, {
+      'grade': 'F',
+      'transport': 'structural',
+      'rationale':
+          'Design-declared test files missing from pinned diff: '
+          'test/pair_y_test.dart',
+    });
+  });
+
+  test('pow-26dd r2 a trailing verb authors the whole list', () {
+    const design =
+        '`test/tail_a_test.dart` and `test/tail_b_test.dart` — both modified.';
+    expect(testDeclarations(design).authored, {
+      'test/tail_a_test.dart',
+      'test/tail_b_test.dart',
+    });
+  });
+
+  test('pow-26dd r2 a worded gap keeps the runs separate', () {
+    const design =
+        'Create `test/run_u_test.dart`, `test/run_v_test.dart` and '
+        '`test/run_w_test.dart`, built on the harness '
+        '`test/run_h_test.dart` already uses.';
+    expect(testDeclarations(design).authored, {
+      'test/run_u_test.dart',
+      'test/run_v_test.dart',
+      'test/run_w_test.dart',
+    });
+    expect(declaredTestFiles(design), {
+      'test/run_u_test.dart',
+      'test/run_v_test.dart',
+      'test/run_w_test.dart',
+    });
+  });
+
+  test('pow-26dd r2 a two-path run line is still not a declaration', () {
+    const design = 'Test: dart test test/run_r_test.dart test/run_s_test.dart';
+    const paths = {'test/run_r_test.dart', 'test/run_s_test.dart'};
+    final declarations = testDeclarations(design);
+    expect(declarations.authored, isEmpty);
+    expect(declarations.fallback, paths);
+    expect(declaredTestFiles(design), paths);
+    expect(
+      declaredTestFiles(
+        design,
+        baseFiles: const {
+          'packages/p/test/run_r_test.dart',
+          'packages/p/test/run_s_test.dart',
+        },
+      ),
+      isEmpty,
+    );
+  });
 }
