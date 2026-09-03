@@ -14,10 +14,11 @@ void main() {
     () {
       final offenders = <String>[];
       var sanctionedHits = 0;
-      for (final file in Directory('lib')
-          .listSync(recursive: true)
-          .whereType<File>()
-          .where((f) => f.path.endsWith('.dart'))) {
+      for (final file
+          in Directory('lib')
+              .listSync(recursive: true)
+              .whereType<File>()
+              .where((f) => f.path.endsWith('.dart'))) {
         final hits = 'Platform.environment'
             .allMatches(file.readAsStringSync())
             .length;
