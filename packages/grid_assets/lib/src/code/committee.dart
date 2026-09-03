@@ -202,6 +202,27 @@ final RegExp _nonDeclarationTestStatement = RegExp(
   r'revert(?:ed|s|ing)?|run[- ]only)\b',
   caseSensitive: false,
 );
+
+/// The vocabulary a design uses when it CITES an existing test as the pattern
+/// it follows, rather than promising an edit to it — "built on", "the shape
+/// already used in", "mirrors", "reuses", "as in".
+///
+/// Read ONLY inside a per-path window ([_authoredEvidence]), never
+/// statement-wide: a cue demotes an edit verb for the path it GOVERNS, so the
+/// base-presence exemption reaches the cited file, and never for a sibling path
+/// in the same sentence. [_nonDeclarationTestStatement] stays the statement-wide
+/// exclusion list and is NOT extended — folding these words into it would widen
+/// the exclusion to every path in a sentence, the same over-claim mirrored.
+final RegExp _referenceTestStatement = RegExp(
+  r'\balready\s+(?:use[sd]|do(?:es)?|ha[sd])\b|'
+  r'\b(?:built|based|modell?ed)\s+on\b|'
+  r'\bmirror(?:s|ed|ing)?\b|'
+  r'\breus(?:e|es|ed|ing)\b|'
+  r'\b(?:the\s+)?same\s+shape\s+as\b|'
+  r'\bthe\s+shape\s+used\s+in\b|'
+  r'\b(?:like|as\s+in|see)\b',
+  caseSensitive: false,
+);
 final RegExp _testStatementBoundary = RegExp(
   r'[.;](?:[ \t]+|\r?\n|$)|'
   r'\r?\n[ \t]*\r?\n|'
@@ -289,14 +310,123 @@ String _statementAround(String text, String marker) {
   return text.substring(start, end);
 }
 
+/// The gap between two sibling test paths that carries NO evidence of its own —
+/// whitespace, commas, semicolons, backticks and the conjunctions `and`/`or`.
+///
+/// A run of paths joined only by these separators is ONE list governed by one
+/// verb ("Modify `a`, `b`, and `c`"), so [_evidenceWindow] keeps the run whole
+/// instead of cutting each path off from the verb that promises it.
+final RegExp _testPathListGap = RegExp(
+  r'^(?:[\s,;&`]|\band\b|\bor\b)*$',
+  caseSensitive: false,
+);
+
+/// The slice of [statement] whose words govern the path at [marker]: the
+/// maximal RUN of sibling paths containing it, widened to the END of the path
+/// before the run and the START of the path after it.
+///
+/// Evidence for one path never leaks onto another. In `Create A, built on the
+/// harness B already uses`, the A-B gap carries words, so the two are separate
+/// runs: A's window holds "Create" and B's holds only the reference clause.
+/// In `Modify A, B, and C` every gap is a bare list separator
+/// ([_testPathListGap]), so all three share one window and one verb promises
+/// them all. [markers] is every marker in play (`pathByMarker.keys`); each
+/// occurrence carries its OWN marker, so a marker absent from [statement] cuts
+/// nothing.
+String _evidenceWindow(
+  String statement,
+  String marker,
+  Iterable<String> markers,
+) {
+  final markerAt = statement.indexOf(marker);
+  if (markerAt < 0) return statement;
+  final spans = <({int start, int end})>[
+    (start: markerAt, end: markerAt + marker.length),
+  ];
+  for (final other in markers) {
+    if (other == marker) continue;
+    var at = statement.indexOf(other);
+    while (at >= 0) {
+      spans.add((start: at, end: at + other.length));
+      at = statement.indexOf(other, at + 1);
+    }
+  }
+  spans.sort((a, b) => a.start.compareTo(b.start));
+  final self = spans.indexWhere((span) => span.start == markerAt);
+  bool listGap(int left) => _testPathListGap.hasMatch(
+    statement.substring(spans[left].end, spans[left + 1].start),
+  );
+  var first = self;
+  while (first > 0 && listGap(first - 1)) {
+    first--;
+  }
+  var last = self;
+  while (last < spans.length - 1 && listGap(last)) {
+    last++;
+  }
+  return statement.substring(
+    first == 0 ? 0 : spans[first - 1].end,
+    last == spans.length - 1 ? statement.length : spans[last + 1].start,
+  );
+}
+
+/// Whether [window]'s edit-verb evidence PROMISES the path at [marker].
+///
+/// An edit verb ([_authoredTestStatement]) must appear in the window at all —
+/// no verb, no promise. Which of the two vocabularies GOVERNS the path is then
+/// decided by position: the LAST evidence token that ends before the path wins;
+/// when nothing precedes the path, the FIRST token that starts after it wins
+/// ("`<A>` — modified" is authored; "the harness `<A>` already uses" is a
+/// citation); when neither exists, an edit verb elsewhere in the window still
+/// claims it. A reference cue ([_referenceTestStatement]) governing the path
+/// demotes it to the base-gated `mentioned` bucket — it never exempts it
+/// outright.
+bool _authoredEvidence(String window, String marker) {
+  if (!_authoredTestStatement.hasMatch(window)) return false;
+  final markerAt = window.indexOf(marker);
+  if (markerAt < 0) return true;
+  final markerEnd = markerAt + marker.length;
+  bool? governing;
+  var lastAt = -1;
+  for (final match in _authoredTestStatement.allMatches(window)) {
+    if (match.end <= markerAt && match.start > lastAt) {
+      lastAt = match.start;
+      governing = true;
+    }
+  }
+  for (final match in _referenceTestStatement.allMatches(window)) {
+    if (match.end <= markerAt && match.start > lastAt) {
+      lastAt = match.start;
+      governing = false;
+    }
+  }
+  if (governing != null) return governing;
+  var firstAt = window.length;
+  for (final match in _authoredTestStatement.allMatches(window)) {
+    if (match.start >= markerEnd && match.start < firstAt) {
+      firstAt = match.start;
+      governing = true;
+    }
+  }
+  for (final match in _referenceTestStatement.allMatches(window)) {
+    if (match.start >= markerEnd && match.start < firstAt) {
+      firstAt = match.start;
+      governing = false;
+    }
+  }
+  return governing ?? true;
+}
+
 /// Sorts every marked path in [text] into the bucket its EVIDENCE earns.
 ///
-/// [authored] — the statement around the marker carries an explicit edit verb
-/// ([_authoredTestStatement]): a PROMISE about the file whatever the base tree
-/// holds. [mentioned] — the marker sits inside a declaration section's body with
-/// NO edit verb (bead `pow-aoa`): the design NAMES the file without claiming an
-/// edit, which is evidence only when the file does not exist yet. A marker in
-/// neither position is not collected at all.
+/// [authored] — the path's own per-path WINDOW carries an explicit edit verb
+/// ([_evidenceWindow] + [_authoredEvidence]): a PROMISE about the file whatever
+/// the base tree holds. Evidence is scoped to the path it governs, so a sentence
+/// that creates one file and CITES another as its pattern promises only the
+/// created one. [mentioned] — the marker sits inside a declaration section's
+/// body with NO authored evidence (bead `pow-aoa`): the design NAMES the file
+/// without claiming an edit, which is evidence only when the file does not exist
+/// yet. A marker in neither position is not collected at all.
 void _collectTestDeclarations({
   required String text,
   required Map<String, String> pathByMarker,
@@ -307,10 +437,14 @@ void _collectTestDeclarations({
   for (final entry in pathByMarker.entries) {
     if (!text.contains(entry.key)) continue;
     final statement = _statementAround(text, entry.key);
-    if (_authoredTestStatement.hasMatch(statement)) {
+    final window = _evidenceWindow(statement, entry.key, pathByMarker.keys);
+    if (_authoredEvidence(window, entry.key)) {
       authored.add(entry.value);
       continue;
     }
+    // The run-line and non-declaration arms stay STATEMENT-wide: a rewritten
+    // `Test: dart test <M1> <M2>` line puts `dart test` outside `<M2>`'s window,
+    // so narrowing them would turn a run reference into a declaration.
     if (_dartTestCommand.hasMatch(statement) ||
         _nonDeclarationTestStatement.hasMatch(statement)) {
       continue;
@@ -414,16 +548,28 @@ TestDeclarations testDeclarations(String design) {
 /// already exists at the base is a RUN or a REFERENCE, not a declaration: the
 /// design promises nothing about it, so requiring it in the pinned diff would
 /// block a change that correctly leaves it alone. An authored edit verb still
-/// declares whatever the base holds. An EMPTY [baseFiles] — the default, and the
-/// answer whenever the base could not be read — keeps every base-gated path a
-/// declaration, i.e. `pow-qev`'s fail-closed posture unchanged.
+/// declares whatever the base holds.
+///
+/// A citation is matched against [baseFiles] verbatim, or by a UNIQUE
+/// path-boundary suffix (a cited `test/x_test.dart` resolves to a base
+/// `packages/p/test/x_test.dart`); an AMBIGUOUS suffix — the same basename under
+/// two packages — identifies no file and stays a declaration. An EMPTY
+/// [baseFiles] — the default, and the answer whenever the base could not be
+/// read — keeps every base-gated path a declaration, i.e. `pow-qev`'s
+/// fail-closed posture unchanged.
 Set<String> declaredTestFiles(
   String design, {
   Set<String> baseFiles = const <String>{},
 }) {
   final declarations = testDeclarations(design);
-  bool absentAtBase(String path) =>
-      !baseFiles.any((base) => _endsWithPath(base, path));
+  // A package-relative citation resolves against the repo-root base list by
+  // path-boundary suffix — but only when the answer is UNIQUE. Two packages
+  // carrying the same test basename identify nothing, so the path stays a
+  // declaration (fail-closed, like `pow-qev`'s empty base).
+  bool presentAtBase(String path) =>
+      baseFiles.contains(path) ||
+      baseFiles.where((base) => _endsWithPath(base, path)).length == 1;
+  bool absentAtBase(String path) => !presentAtBase(path);
   return {
     ...declarations.authored,
     ...declarations.mentioned.where(absentAtBase),
