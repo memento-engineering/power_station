@@ -586,6 +586,79 @@ void main() {
         );
       });
 
+      test('a prose MENTION is not a section — the REAL section further down '
+          'is the one the gate reads (bead `pow-o3ti`)', () {
+        final mentioning = _specced().copyWith(
+          design:
+              'The machine gate for this bead is the fast subset rather than '
+              'the full house gate (see ## Validation Plan), and every step is '
+              'ordinal-led (see ## Implementation Plan).\n'
+              '\n'
+              '${_specced().design}',
+        );
+        expect(specStructuralFindings(mentioning), isEmpty);
+      });
+
+      test('a MENTION with no real `## Validation Plan` section blocks — the '
+          'finding is unchanged, and today the mention SATISFIES the check', () {
+        final mentionOnly = _specced().copyWith(
+          design: _specced().design.replaceFirst(
+            '\n## Validation Plan\n',
+            '\nEvery criterion is mapped (see ## Validation Plan).\n',
+          ),
+        );
+        expect(
+          specStructuralFindings(mentionOnly).single,
+          contains('no `## Validation Plan` section'),
+        );
+      });
+
+      test('a MENTION with no real `## Implementation Plan` section blocks — '
+          'the finding is unchanged', () {
+        final mentionOnly = _specced().copyWith(
+          design: _specced().design.replaceFirst(
+            '## Implementation Plan\n',
+            'Every step is ordinal-led (see ## Implementation Plan).\n',
+          ),
+        );
+        expect(
+          specStructuralFindings(mentionOnly).single,
+          contains('no `## Implementation Plan` section'),
+        );
+      });
+
+      test('a MENTION of `## Touches` no longer satisfies the PRESENCE check '
+          '— the two `contains` lookups move to the same resolver', () {
+        final mentionOnly = _specced().copyWith(
+          design: _specced().design.replaceFirst(
+            '\n## Touches\n',
+            '\nThe surfaces are enumerated under ## Touches in the epic.\n',
+          ),
+        );
+        expect(
+          specStructuralFindings(mentionOnly).single,
+          contains('no `## Touches` section'),
+        );
+      });
+
+      test('an UNTERMINATED fence quoting a heading ABOVE the real section '
+          'does not displace it — the LAST line-anchored match wins', () {
+        const ticks = '\x60\x60\x60';
+        final quoting = _specced().copyWith(
+          design: _specced().design.replaceFirst(
+            'Commit: `feat(bus): add the peer heartbeat`\n',
+            'Commit: `feat(bus): add the peer heartbeat`\n'
+                '\n'
+                'The exemplar this brief ships, quoted:\n'
+                '${ticks}markdown\n'
+                '## Validation Plan\n'
+                'carrying no items\n'
+                '\n',
+          ),
+        );
+        expect(specStructuralFindings(quoting), isEmpty);
+      });
+
       test('placeholder tokens anchor F — on word boundaries, so an '
           'identifier merely containing the letters never trips', () {
         final withTodo = _specced().copyWith(
@@ -822,6 +895,45 @@ Validate again with ruby -e 's.include?("${ticks}dart")'.
                 'the brief omits is a silent F',
           );
         }
+      });
+    });
+
+    group('headingOffset — a heading is STRUCTURE, read at a line start', () {
+      test('a mid-sentence mention is not a heading', () {
+        expect(
+          headingOffset(
+            'see ## Validation Plan for the map\n',
+            '## Validation Plan',
+          ),
+          -1,
+        );
+      });
+
+      test('the LAST line-anchored heading wins', () {
+        const doc = '## Touches\nfirst\n\n## Touches\nsecond\n';
+        expect(headingOffset(doc, '## Touches'), doc.lastIndexOf('## Touches'));
+      });
+
+      test('a deeper level and trailing text still read as the heading — no '
+          'stricter than the substring search it replaces', () {
+        expect(
+          headingOffset(
+            '### Validation Plan (1:1)\n- [ ] x\n',
+            '## Validation Plan',
+          ),
+          0,
+        );
+      });
+
+      test('an absent heading answers -1 — the `indexOf` contract every call '
+          'site keeps', () {
+        expect(headingOffset('## Touches\nx\n', '## Validation Plan'), -1);
+      });
+
+      test('0-3 spaces still indent a heading; 4+ is an indented code block, '
+          'i.e. quotation', () {
+        expect(headingOffset('   ## Touches\n- x\n', '## Touches'), 0);
+        expect(headingOffset('    ## Touches\n- x\n', '## Touches'), -1);
       });
     });
   });

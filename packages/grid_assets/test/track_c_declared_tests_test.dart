@@ -749,4 +749,26 @@ The fake mirrors the shape already used in `test/roster_test.dart`.
       isEmpty,
     );
   });
+
+  test('a mid-sentence `## Declared Tests` mention does not anchor the '
+      'declaration body — the REAL section does (bead `pow-o3ti`)', () async {
+    final path = _fixtureTestPath('line_anchored_declaration');
+    final design =
+        '''
+The regression coverage is listed under ## Declared Tests below.
+
+## Declared Tests
+- (`$path`) carries the regression case.
+''';
+    expect(testDeclarations(design).mentioned, {path});
+    final outcome = await _runGate(
+      design: design,
+      diff: _diffFor(['lib/src/code/specify.dart']),
+    );
+    expect(outcome.payload, {
+      'grade': 'F',
+      'transport': 'structural',
+      'rationale': 'Design-declared test files missing from pinned diff: $path',
+    });
+  });
 }
