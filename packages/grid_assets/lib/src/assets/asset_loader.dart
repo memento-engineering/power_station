@@ -48,6 +48,7 @@ const List<String> kVendedSkills = [
   'asset-author',
   'discover',
   'gate-medicine',
+  'handoff',
   'harvest-review',
   'intake-refinement',
   'release',
@@ -71,7 +72,11 @@ const List<String> kVendedSkills = [
 /// human composing and installing the station's asset surface — and a build
 /// agent's composition guidance arrives through its bead's design and
 /// validation plan, never through a station-owner manual its brief did not
-/// ask for.
+/// ask for. `handoff` is withheld on the same ground: it ENDS a turn by asking
+/// the OUTER harness to compact, clear, or relaunch the seat, and it writes to
+/// an Agent Disc that exists at a grid home and not in a bead's worktree —
+/// both contradict a build agent's working agreement, which is to finish the
+/// bead and commit.
 ///
 /// A DENY-list, not an allow-list of agent skills: the wire materializes
 /// whatever overlay it is handed, so a skill this package does not vend (a
@@ -82,6 +87,7 @@ const List<String> kVendedSkills = [
 const List<String> kOperatorSkills = [
   'asset-author',
   'gate-medicine',
+  'handoff',
   'harvest-review',
   'intake-refinement',
   'release',
