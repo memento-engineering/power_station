@@ -355,30 +355,32 @@ void main() {
       expect(reason.length, lessThanOrEqualTo(1600));
     });
 
-    test('output still over the tail budget after stripping is cut at the '
-        'START — landReasonTail\'s leading …, never the head (pow-gy41)',
-        () async {
-      final long = '${'noise line\n' * 400}FATAL: the real error';
-      final runner = _FixedShellRunner(
-        ShellRunResult(exitCode: 2, output: long),
-      );
-      final richBead = bead(
-        'tg-1',
-      ).copyWith(metadata: const {'validation_plan': 'dart test'});
-      final c = _capCtx(delivery: _FakeDelivery(), beadOverride: richBead);
-      final outcome = await RevalidateCapability(
-        runner: runner,
-      ).route(c.context, c.args);
-      expect(outcome, isA<Escalate>());
-      final reason = (outcome as Escalate).reason;
-      expect(reason, startsWith('revalidate failed (exit 2): …'));
-      expect(reason, endsWith('FATAL: the real error'));
-      expect(
-        reason.length,
-        kRevalidateReasonTailChars + 29,
-        reason: 'the 28-char prefix + the … cut marker + the last 1500 chars',
-      );
-    });
+    test(
+      'output still over the tail budget after stripping is cut at the '
+      'START — landReasonTail\'s leading …, never the head (pow-gy41)',
+      () async {
+        final long = '${'noise line\n' * 400}FATAL: the real error';
+        final runner = _FixedShellRunner(
+          ShellRunResult(exitCode: 2, output: long),
+        );
+        final richBead = bead(
+          'tg-1',
+        ).copyWith(metadata: const {'validation_plan': 'dart test'});
+        final c = _capCtx(delivery: _FakeDelivery(), beadOverride: richBead);
+        final outcome = await RevalidateCapability(
+          runner: runner,
+        ).route(c.context, c.args);
+        expect(outcome, isA<Escalate>());
+        final reason = (outcome as Escalate).reason;
+        expect(reason, startsWith('revalidate failed (exit 2): …'));
+        expect(reason, endsWith('FATAL: the real error'));
+        expect(
+          reason.length,
+          kRevalidateReasonTailChars + 29,
+          reason: 'the 28-char prefix + the … cut marker + the last 1500 chars',
+        );
+      },
+    );
   });
 
   group('buildCircuitReceipt', () {

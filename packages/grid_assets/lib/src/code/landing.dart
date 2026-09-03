@@ -436,7 +436,6 @@ String planOutputWithoutPubAdvice(String output) => output
     )
     .join('\n');
 
-
 /// The bead's OWN Validation Plan command — mirrors `committee.dart`'s
 /// identical private helper (duplicated rather than shared, so this file
 /// doesn't couple to the review committee's file layout for one four-line
