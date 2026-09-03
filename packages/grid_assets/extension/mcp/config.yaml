@@ -242,6 +242,23 @@ skills:
       - name: runner
         description: The composing station's executable name — the verb the skill's `dart release` calls ride.
         required: true
+  # The seat's own session-end ritual. Not a re-homed operator skill, but
+  # operator-audience for the same reason the others are: the Agent Disc it
+  # writes lives at a grid home, and it ends a turn by asking the outer harness
+  # to relaunch the seat — neither belongs in a build agent's brief.
+  - id: handoff
+    description: >
+      Write the seat's own handoff onto its Agent Disc, bank the durable
+      learnings as separate disc notes, index it, and end the turn with the one
+      line that tells the OUTER harness to compact, clear, or relaunch. Also
+      the successor's read: consume the newest handoff and delete it.
+    path: station_overlay/claude/skills/handoff/SKILL.md
+    visibility: public
+    audience: operator
+    args:
+      - name: runner
+        description: The composing station's executable name — the verb the skill's `status` read rides.
+        required: true
 station_overlay:
   mappings:
     claude: .claude

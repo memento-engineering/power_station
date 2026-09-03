@@ -77,7 +77,10 @@ this document that contradicts them:
    operator` and a reason that carries receipts (ids, commits, test counts).
 4. **Record** — defects become beads the moment they're sharp, filed OPEN with
    a driveable shape (never parked behind a date — ADR-0004 D1); never rely on session
-   memory to carry a finding overnight.
+   memory to carry a finding overnight. A session ENDS through `/handoff` — the
+   curated note on your seat's disc — and STARTS by reading the newest
+   `kind: handoff` note on that disc, acting on its "Resume here", and deleting
+   it in the same turn.
 5. **Re-arm the watch** — a background loop that exits on any open gate, on
    all-sessions-terminal, or on a timeout heartbeat (~45min active, 3h idle).
    Silence is not success: the watch must fire on every terminal state.
