@@ -3,11 +3,17 @@
 // `.agents/skills/<id>/SKILL.md` at install by the `agents -> .agents` head
 // already in `kDefaultStationOverlayMappings`.
 //
-// The SKILL.md + frontmatter format is shared by every harness the station
-// arms — only the root dir differs — so the codex leg is a COPY of the claude
-// leg, never a translation. Nothing enforces that at runtime: this file is the
-// enforcement. A drifted copy is the one failure mode the copy-based design
-// admits, so it is pinned byte-for-byte here.
+// The agents leg is an INDEPENDENT instruction source for the codex-style
+// harnesses the station arms. It started life as a copy of the claude leg and
+// MAY diverge from it: a harness may carry its own instructions (Nico,
+// 2026-09-03), so a difference between the two legs is a harness-specific
+// instruction, not drift. Identical content is permitted, never required —
+// nothing here reads a SKILL.md's bytes.
+//
+// What this file DOES pin is STRUCTURE, which is harness-independent: both
+// legs vend the same skill IDS (a skill present for one harness and absent
+// for the other is a vending gap, not an instruction difference), the leg
+// carries SKILL.md files and nothing else, and no copilot leg exists.
 //
 // Offline only — reads the bundled `extension/` files.
 import 'dart:io';
@@ -58,21 +64,6 @@ void main() {
   test('the agents leg vends EXACTLY the claude leg skill ids', () {
     expect(skillIdsIn(agentsSkills), kVendedSkills);
     expect(skillIdsIn(agentsSkills), skillIdsIn(claudeSkills));
-  });
-
-  test('every agents-leg SKILL.md is BYTE-IDENTICAL to its claude twin — the '
-      'format is shared across harnesses, so a divergent copy is drift, never '
-      'a translation', () {
-    for (final id in kVendedSkills) {
-      final claude = File(p.join(claudeSkills, id, 'SKILL.md'));
-      final agents = File(p.join(agentsSkills, id, 'SKILL.md'));
-      expect(agents.existsSync(), isTrue, reason: '$id is vended for codex');
-      expect(
-        agents.readAsBytesSync(),
-        claude.readAsBytesSync(),
-        reason: '$id drifted from the claude leg',
-      );
-    }
   });
 
   test('the agents leg carries SKILL.md files and nothing else — no operator '
