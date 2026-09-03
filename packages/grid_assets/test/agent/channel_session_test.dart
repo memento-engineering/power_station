@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:beads_dart/beads_dart.dart';
 import 'package:grid_assets/grid_assets.dart';
 import 'package:grid_engine/grid_engine.dart';
+import 'package:grid_engine/testing.dart';
 import 'package:grid_runtime/grid_runtime.dart';
 import 'package:test/test.dart';
 
@@ -186,6 +187,7 @@ AgentSession _session({
   required _JsonAdapter adapter,
   Stream<ProcessSessionCommand> commands =
       const Stream<ProcessSessionCommand>.empty(),
+  ExplorationTransport? transport,
 }) => AgentSession(
   runtime: runtime,
   name: 'session',
@@ -194,6 +196,7 @@ AgentSession _session({
   commands: commands,
   attemptId: 'attempt-live',
   instanceFence: 'fence-live',
+  transport: transport,
 );
 
 Future<void> _pump() async {
@@ -203,6 +206,69 @@ Future<void> _pump() async {
 }
 
 void main() {
+  test('an orphaned session is OBSERVED, stays live, and still dies on the '
+      'terminal that follows', () async {
+    final runtime = _Runtime();
+    final transport = RecordingExplorationTransport();
+    await runtime.start(
+      'session',
+      const RuntimeConfig(workDir: '/tmp', command: 'probe'),
+    );
+    final session = _session(
+      runtime: runtime,
+      adapter: _JsonAdapter(),
+      transport: transport,
+    );
+    final updates = <ProcessSessionUpdate>[];
+    final updateSub = session.updates.listen(updates.add);
+    await session.start();
+    await _pump();
+
+    session.onRuntimeEvent(
+      const RuntimeEvent.sessionOrphaned(
+        name: 'session',
+        pgid: 4242,
+        memberCount: 3,
+        pid: 99,
+      ),
+    );
+    await _pump();
+
+    // OBSERVED, never a state change: one flare, and NO protocol update (so
+    // `driveProcessSession` cannot settle and no respawn is scheduled).
+    final flare = transport.named('agent.sessionOrphaned').single;
+    expect(flare.data, containsPair('sessionId', 'session'));
+    expect(flare.data, containsPair('pgid', '4242'));
+    expect(flare.data, containsPair('memberCount', '3'));
+    expect(updates, isEmpty);
+
+    // Still LIVE and supervised: a correctly fenced steer is still delivered,
+    // so the session was not latched terminal by the observation.
+    expect(
+      await session.send(
+        const ProcessSessionCommand(
+          commandId: 'steer-after-orphan',
+          attemptId: 'attempt-live',
+          instanceFence: 'fence-live',
+          body: 'keep going',
+        ),
+      ),
+      ProcessCommandDisposition.delivered,
+    );
+
+    // The TERMINAL after the provider's bounded grace still ends the session.
+    session.onRuntimeEvent(
+      const RuntimeEvent.died(name: 'session', reason: 'group reaped'),
+    );
+    await _pump();
+    expect(updates.single, isA<ProcessSessionFailed>());
+    expect(transport.named('agent.sessionOrphaned'), hasLength(1));
+
+    await updateSub.cancel();
+    await session.close();
+    await runtime.close();
+  });
+
   test('clean exit and exit zero before protocol completion fail', () async {
     final exitRuntime = _Runtime();
     await exitRuntime.start(
