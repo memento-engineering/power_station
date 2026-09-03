@@ -231,7 +231,14 @@ class RevalidateCapability extends RouteCapability {
     if (result.ok) return const Advance({'outcome': 'passed'});
     final diagnostic = pathCheckDiagnostic(plan, result.exitCode);
     final suffix = diagnostic == null ? '' : '; $diagnostic';
-    return Escalate('revalidate failed: ${_truncate(result.output)}$suffix');
+    // The exit code LEADS (the class of failure), then the PATH diagnostic,
+    // then the log — advice-stripped and TAIL-cut, because the fatal line is
+    // LAST and the old head truncation cut exactly it (bead `pow-gy41`).
+    final log = landReasonTail(
+      planOutputWithoutPubAdvice(result.output),
+      kRevalidateReasonTailChars,
+    );
+    return Escalate('revalidate failed (exit ${result.exitCode})$suffix: $log');
   }
 }
 
@@ -439,13 +446,4 @@ String _validationPlan(Bead bead) {
   final plan = bead.metadata['validation_plan'];
   if (plan is String && plan.trim().isNotEmpty) return plan.trim();
   return 'false';
-}
-
-/// Caps captured process output embedded in an [Escalate] reason — a runaway
-/// Validation Plan log must not blow up a gate bead's metadata.
-String _truncate(String s, [int max = 2000]) {
-  final trimmed = s.trim();
-  return trimmed.length <= max
-      ? trimmed
-      : '${trimmed.substring(0, max)}\n… (truncated)';
 }
