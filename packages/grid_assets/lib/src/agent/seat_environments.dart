@@ -13,11 +13,20 @@
 /// entries, [CriticAgentEnvironment.of] picks the lane's preference at the spawn
 /// edge, and [CriticEnvironmentSeed] scopes a BUILD-time dependent's
 /// invalidation to its own lane over `genesis_tree`'s `InheritedModelSeed`.
+///
+/// The MECHANISM that mounts and resolves those seats lives here too:
+/// [AgentArming] is the pure VALUE naming one environment per seat,
+/// [TypedEnvironmentProvider] is the ONE seed both the station rung and the
+/// per-substation rung mount (ADR-0002 D5), and [SeatEnvironments] is the
+/// offline projection of all four resolutions at a point in the tree. A
+/// station's own NAMED environments and ladders stay in that station's package
+/// - mechanism is vended, posture is not.
 library;
 
 import 'package:genesis_tree/genesis_tree.dart';
 
 import 'agent_environment.dart';
+import 'environment_registry.dart';
 import 'typed_environment.dart';
 
 /// The SPEC seat - `SpecifyCapability` (its first-round and its respec spawn are
@@ -147,6 +156,172 @@ class CriticEnvironmentSeed
   ) => dependencies.any(
     (lane) => value.preferenceFor(lane) != oldSeed.value.preferenceFor(lane),
   );
+}
+
+/// One ARMING of the TYPED environment seats - a station's or a seat's say in
+/// which environment each capability runs on. A pure VALUE; it carries no
+/// behavior and reaches no service. A null field leaves that seat to the
+/// nearest ancestor's arming (ADR-0006 D2: the TYPE is the scope).
+///
+/// The MECHANISM only. A station's own named environments and the ladders built
+/// over them are that station's posture and live in the station's own package.
+///
+/// FOUR TYPED SEATS AND NOTHING ELSE - the POST-role-retirement shape. There is
+/// no role map and no role rung: ADR-0006 D5 retired them and bead `pow-n6n.4`
+/// carried it out, leaving the typed lookup as the whole environment axis.
+class AgentArming {
+  /// Creates an arming over the seats it names; every field is optional.
+  const AgentArming({this.build, this.spec, this.critic, this.gather});
+
+  /// The BUILD seat (the coding agent).
+  final BuildAgentEnvironment? build;
+
+  /// The SPEC seat (the architect / specify stage).
+  final SpecAgentEnvironment? spec;
+
+  /// The CRITIC seat (every committee lane), with optional per-lane overrides.
+  final CriticAgentEnvironment? critic;
+
+  /// The GATHER seat (the read-only discovery explorers).
+  final GatherAgentEnvironment? gather;
+
+  /// Whether this arming says nothing at all.
+  bool get isEmpty =>
+      build == null && spec == null && critic == null && gather == null;
+
+  /// The armed seats, BUILD first - the stable order a station's boot-eager
+  /// arming guard walks.
+  Iterable<ModelPreference> get seats => [
+    if (build != null) build!,
+    if (spec != null) spec!,
+    if (critic != null) critic!,
+    if (gather != null) gather!,
+  ];
+
+  @override
+  bool operator ==(Object other) =>
+      other is AgentArming &&
+      other.build == build &&
+      other.spec == spec &&
+      other.critic == critic &&
+      other.gather == gather;
+
+  @override
+  int get hashCode => Object.hash(build, spec, critic, gather);
+
+  @override
+  String toString() =>
+      'AgentArming(build: $build, spec: $spec, critic: $critic, '
+      'gather: $gather)';
+}
+
+/// Provides an [arming]'s TYPED seats over its subtree - the ONE seed both the
+/// station rung and the per-substation rung mount (ADR-0002 D5, ADR-0006 D2).
+///
+/// A NESTED instance shadows only the types it arms: an unarmed seat keeps
+/// resolving through the enclosing provider, because [resolveEnvironment] reads
+/// by EXACT type and finds the nearest ancestor of that type.
+///
+/// THE MOUNTING SEED, so this is where the SUBSCRIBING build verb would belong
+/// if a value here were derived (ADR-0000 A35(6)). Nothing here is derived -
+/// [arming] is an authored VALUE - so this build reads no ambient state at all.
+final class TypedEnvironmentProvider extends SingleChildStatelessSeed {
+  /// Provides [arming]'s seats over [child].
+  const TypedEnvironmentProvider({
+    required this.arming,
+    super.child,
+    super.key,
+  });
+
+  /// The seats this provider mounts.
+  final AgentArming arming;
+
+  @override
+  Seed buildWithChild(TreeContext context, Seed child) {
+    var below = child;
+    final gather = arming.gather;
+    if (gather != null) {
+      below = InheritedSeed<GatherAgentEnvironment>(
+        value: gather,
+        child: below,
+      );
+    }
+    final critic = arming.critic;
+    if (critic != null) {
+      // CriticEnvironmentSeed, not a plain InheritedSeed: a BUILD-time
+      // dependent may scope its invalidation to ONE CriticLane (ADR-0006 D4).
+      // Spawn edges read the same value with the effect verb and pay nothing.
+      below = CriticEnvironmentSeed(value: critic, child: below);
+    }
+    final spec = arming.spec;
+    if (spec != null) {
+      below = InheritedSeed<SpecAgentEnvironment>(value: spec, child: below);
+    }
+    final build = arming.build;
+    if (build != null) {
+      below = InheritedSeed<BuildAgentEnvironment>(value: build, child: below);
+    }
+    return below;
+  }
+}
+
+/// The four typed lookups RESOLVED at one point in the tree - the offline
+/// projection a station's banner prints and the suites assert. A pure VALUE.
+final class SeatEnvironments {
+  /// Creates the projection over its four resolved environments.
+  const SeatEnvironments({this.build, this.spec, this.critic, this.gather});
+
+  /// Resolves all four seats at [context] through the vended resolvers (one
+  /// availability walk each). These are EFFECT-boundary reads -
+  /// [resolveEnvironment] and [CriticAgentEnvironment.of] use the non-binding
+  /// `getInheritedSeedOfExactType` (ADR-0000 A35(6)) - so a caller that runs
+  /// this inside a `build` subscribes to the same values FIRST with
+  /// `dependOn*` (the D-H doctrine, ADR-0008 D3; ADR-0000 A8(3)).
+  factory SeatEnvironments.of(TreeContext context) => SeatEnvironments(
+    build: resolveEnvironment<BuildAgentEnvironment>(context),
+    spec: resolveEnvironment<SpecAgentEnvironment>(context),
+    critic: CriticAgentEnvironment.of(context),
+    gather: resolveEnvironment<GatherAgentEnvironment>(context),
+  );
+
+  /// The BUILD seat's resolved environment; null when nothing is armed or
+  /// nothing preferred is present (the caller falls to the ambient rung).
+  final AgentEnvironment? build;
+
+  /// The SPEC seat's resolved environment.
+  final AgentEnvironment? spec;
+
+  /// The CRITIC seat's resolved environment (the shared, laneless preference).
+  final AgentEnvironment? critic;
+
+  /// The GATHER seat's resolved environment.
+  final AgentEnvironment? gather;
+
+  /// This projection rendered with [registry]'s NAMES - the banner line. The
+  /// name is restored at the boundary exactly as `resolveAgentConfig` does it
+  /// ([EnvironmentRegistry.nameOf]).
+  String describe(EnvironmentRegistry registry) {
+    String named(AgentEnvironment? environment) =>
+        environment == null ? '<ambient>' : registry.nameOf(environment);
+    return 'build ${named(build)}  ·  spec ${named(spec)}  ·  '
+        'critic ${named(critic)}  ·  gather ${named(gather)}';
+  }
+
+  @override
+  bool operator ==(Object other) =>
+      other is SeatEnvironments &&
+      other.build == build &&
+      other.spec == spec &&
+      other.critic == critic &&
+      other.gather == gather;
+
+  @override
+  int get hashCode => Object.hash(build, spec, critic, gather);
+
+  @override
+  String toString() =>
+      'SeatEnvironments(build: $build, spec: $spec, critic: $critic, '
+      'gather: $gather)';
 }
 
 bool _sameEntries(List<AgentEnvironment> a, List<AgentEnvironment> b) {
