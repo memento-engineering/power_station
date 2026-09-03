@@ -81,6 +81,37 @@ class _FixedShellRunner implements ShellRunner {
   }
 }
 
+/// A `dart pub get` preamble on a seat with an outdated lockfile — the block
+/// that buried the real failure in bead `pow-gy41`'s live receipt.
+/// Deliberately longer than 3000 characters on its own.
+String _pubAdviceBlock({int packages = 70}) {
+  final buffer = StringBuffer()
+    ..writeln('Resolving dependencies in `/w/tg-1`...')
+    ..writeln('Downloading packages...');
+  for (var i = 0; i < packages; i++) {
+    buffer.writeln('  outdated_package_number_$i 1.0.$i (2.0.$i available)');
+  }
+  buffer
+    ..writeln('Got 120 dependencies!')
+    ..writeln(
+      '$packages packages have newer versions incompatible with dependency '
+      'constraints.',
+    )
+    ..writeln('Try `dart pub outdated` for more information.');
+  return buffer.toString();
+}
+
+/// What `dart test` prints when it fails — the part an operator actually needs,
+/// and the part the old HEAD truncation threw away.
+const _dartTestFailure = '''
+00:02 +512 -1: test/foo_test.dart: renders the widget [E]
+  Expected: <42>
+    Actual: <41>
+  package:test_api                     expect
+  test/foo_test.dart 88:7              main.<fn>
+
+00:02 +512 -1: Some tests failed.''';
+
 void main() {
   group('RebaseCapability', () {
     test(
@@ -298,6 +329,56 @@ void main() {
       );
       expect(runner.calls.single.command, 'rg needle');
     });
+
+    test('the pub advisory block is stripped and the TAIL kept — the fatal '
+        'line survives exactly where the old HEAD truncation cut it '
+        '(pow-gy41)', () async {
+      final noise = _pubAdviceBlock();
+      expect(noise.length, greaterThan(3000), reason: 'the receipt shape');
+      final runner = _FixedShellRunner(
+        ShellRunResult(exitCode: 1, output: '$noise$_dartTestFailure'),
+      );
+      final richBead = bead('tg-1').copyWith(
+        metadata: const {'validation_plan': 'dart pub get && dart test'},
+      );
+      final c = _capCtx(delivery: _FakeDelivery(), beadOverride: richBead);
+      final outcome = await RevalidateCapability(
+        runner: runner,
+      ).route(c.context, c.args);
+      expect(outcome, isA<Escalate>());
+      final reason = (outcome as Escalate).reason;
+      expect(reason, startsWith('revalidate failed (exit 1): '));
+      expect(reason, contains('test/foo_test.dart: renders the widget [E]'));
+      expect(reason, contains('Some tests failed.'));
+      expect(reason, isNot(contains(' available)')));
+      expect(reason, isNot(contains('… (truncated)')));
+      expect(reason.length, lessThanOrEqualTo(1600));
+    });
+
+    test('output still over the tail budget after stripping is cut at the '
+        'START — landReasonTail\'s leading …, never the head (pow-gy41)',
+        () async {
+      final long = '${'noise line\n' * 400}FATAL: the real error';
+      final runner = _FixedShellRunner(
+        ShellRunResult(exitCode: 2, output: long),
+      );
+      final richBead = bead(
+        'tg-1',
+      ).copyWith(metadata: const {'validation_plan': 'dart test'});
+      final c = _capCtx(delivery: _FakeDelivery(), beadOverride: richBead);
+      final outcome = await RevalidateCapability(
+        runner: runner,
+      ).route(c.context, c.args);
+      expect(outcome, isA<Escalate>());
+      final reason = (outcome as Escalate).reason;
+      expect(reason, startsWith('revalidate failed (exit 2): …'));
+      expect(reason, endsWith('FATAL: the real error'));
+      expect(
+        reason.length,
+        kRevalidateReasonTailChars + 29,
+        reason: 'the 28-char prefix + the … cut marker + the last 1500 chars',
+      );
+    });
   });
 
   group('buildCircuitReceipt', () {
@@ -387,6 +468,43 @@ void main() {
       expect(tail, startsWith('…'));
       expect(tail, endsWith('FATAL: the real error'));
       expect(tail.length, 41, reason: '… + the last 40 chars');
+    });
+  });
+
+  group('planOutputWithoutPubAdvice (pow-gy41)', () {
+    test('drops pub\'s version-advice lines and both of its trailers', () {
+      const input =
+          'Resolving dependencies in `/w/tg-1`...\n'
+          'Downloading packages...\n'
+          '  _fe_analyzer_shared 96.0.0 (107.0.0 available)\n'
+          '  analyzer 10.2.0 (14.3.0 available)\n'
+          'Got 120 dependencies!\n'
+          '44 packages have newer versions incompatible with dependency '
+          'constraints.\n'
+          'Try `dart pub outdated` for more information.\n'
+          'Some tests failed.';
+      expect(
+        planOutputWithoutPubAdvice(input),
+        'Resolving dependencies in `/w/tg-1`...\n'
+        'Downloading packages...\n'
+        'Got 120 dependencies!\n'
+        'Some tests failed.',
+      );
+    });
+
+    test('leaves every non-advisory line BYTE-IDENTICAL — a lookalike that '
+        'merely CONTAINS " available)" mid-line survives whole', () {
+      const input =
+          'Expected: <42>\n'
+          '  analyzer 10.2.0 (14.3.0 available) — cited inside a failure\n'
+          '\n'
+          '  test/foo_test.dart 88:7  main.<fn>\n'
+          'Some tests failed.';
+      expect(planOutputWithoutPubAdvice(input), input);
+    });
+
+    test('empty output stays empty', () {
+      expect(planOutputWithoutPubAdvice(''), '');
     });
   });
 }
