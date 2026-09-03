@@ -310,15 +310,29 @@ String _statementAround(String text, String marker) {
   return text.substring(start, end);
 }
 
-/// The slice of [statement] whose words govern the path at [marker]: from the
-/// END of the previous marker (or the statement's start) up to the START of the
-/// next one (or the statement's end).
+/// The gap between two sibling test paths that carries NO evidence of its own —
+/// whitespace, commas, semicolons, backticks and the conjunctions `and`/`or`.
 ///
-/// Evidence for one path never leaks onto another. In "Create <A>, built on the
-/// harness <B> already uses", A's window holds "Create" and B's holds only the
-/// reference clause, so the sentence promises A and merely cites B. [markers] is
-/// every marker in play (`pathByMarker.keys`); each occurrence carries its OWN
-/// marker, so a marker absent from [statement] cuts nothing.
+/// A run of paths joined only by these separators is ONE list governed by one
+/// verb ("Modify `a`, `b`, and `c`"), so [_evidenceWindow] keeps the run whole
+/// instead of cutting each path off from the verb that promises it.
+final RegExp _testPathListGap = RegExp(
+  r'^(?:[\s,;&`]|\band\b|\bor\b)*$',
+  caseSensitive: false,
+);
+
+/// The slice of [statement] whose words govern the path at [marker]: the
+/// maximal RUN of sibling paths containing it, widened to the END of the path
+/// before the run and the START of the path after it.
+///
+/// Evidence for one path never leaks onto another. In `Create A, built on the
+/// harness B already uses`, the A-B gap carries words, so the two are separate
+/// runs: A's window holds "Create" and B's holds only the reference clause.
+/// In `Modify A, B, and C` every gap is a bare list separator
+/// ([_testPathListGap]), so all three share one window and one verb promises
+/// them all. [markers] is every marker in play (`pathByMarker.keys`); each
+/// occurrence carries its OWN marker, so a marker absent from [statement] cuts
+/// nothing.
 String _evidenceWindow(
   String statement,
   String marker,
@@ -326,19 +340,34 @@ String _evidenceWindow(
 ) {
   final markerAt = statement.indexOf(marker);
   if (markerAt < 0) return statement;
-  final markerEnd = markerAt + marker.length;
-  var start = 0;
-  var end = statement.length;
+  final spans = <({int start, int end})>[
+    (start: markerAt, end: markerAt + marker.length),
+  ];
   for (final other in markers) {
+    if (other == marker) continue;
     var at = statement.indexOf(other);
     while (at >= 0) {
-      final otherEnd = at + other.length;
-      if (otherEnd <= markerAt && otherEnd > start) start = otherEnd;
-      if (at >= markerEnd && at < end) end = at;
+      spans.add((start: at, end: at + other.length));
       at = statement.indexOf(other, at + 1);
     }
   }
-  return statement.substring(start, end);
+  spans.sort((a, b) => a.start.compareTo(b.start));
+  final self = spans.indexWhere((span) => span.start == markerAt);
+  bool listGap(int left) => _testPathListGap.hasMatch(
+    statement.substring(spans[left].end, spans[left + 1].start),
+  );
+  var first = self;
+  while (first > 0 && listGap(first - 1)) {
+    first--;
+  }
+  var last = self;
+  while (last < spans.length - 1 && listGap(last)) {
+    last++;
+  }
+  return statement.substring(
+    first == 0 ? 0 : spans[first - 1].end,
+    last == spans.length - 1 ? statement.length : spans[last + 1].start,
+  );
 }
 
 /// Whether [window]'s edit-verb evidence PROMISES the path at [marker].
