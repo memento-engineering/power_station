@@ -519,16 +519,28 @@ TestDeclarations testDeclarations(String design) {
 /// already exists at the base is a RUN or a REFERENCE, not a declaration: the
 /// design promises nothing about it, so requiring it in the pinned diff would
 /// block a change that correctly leaves it alone. An authored edit verb still
-/// declares whatever the base holds. An EMPTY [baseFiles] — the default, and the
-/// answer whenever the base could not be read — keeps every base-gated path a
-/// declaration, i.e. `pow-qev`'s fail-closed posture unchanged.
+/// declares whatever the base holds.
+///
+/// A citation is matched against [baseFiles] verbatim, or by a UNIQUE
+/// path-boundary suffix (a cited `test/x_test.dart` resolves to a base
+/// `packages/p/test/x_test.dart`); an AMBIGUOUS suffix — the same basename under
+/// two packages — identifies no file and stays a declaration. An EMPTY
+/// [baseFiles] — the default, and the answer whenever the base could not be
+/// read — keeps every base-gated path a declaration, i.e. `pow-qev`'s
+/// fail-closed posture unchanged.
 Set<String> declaredTestFiles(
   String design, {
   Set<String> baseFiles = const <String>{},
 }) {
   final declarations = testDeclarations(design);
-  bool absentAtBase(String path) =>
-      !baseFiles.any((base) => _endsWithPath(base, path));
+  // A package-relative citation resolves against the repo-root base list by
+  // path-boundary suffix — but only when the answer is UNIQUE. Two packages
+  // carrying the same test basename identify nothing, so the path stays a
+  // declaration (fail-closed, like `pow-qev`'s empty base).
+  bool presentAtBase(String path) =>
+      baseFiles.contains(path) ||
+      baseFiles.where((base) => _endsWithPath(base, path)).length == 1;
+  bool absentAtBase(String path) => !presentAtBase(path);
   return {
     ...declarations.authored,
     ...declarations.mentioned.where(absentAtBase),
