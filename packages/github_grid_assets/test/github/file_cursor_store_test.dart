@@ -55,6 +55,34 @@ void main() {
     }
   });
 
+  test(
+    'a version-one document without pull_heads loads an empty cache',
+    () async {
+      final file = File(store.cursorPath);
+      await file.parent.create(recursive: true);
+      await file.writeAsString(
+        '{"version":1,"since":null,"etags":{},"observation_ids":[]}',
+      );
+      expect((await store.load()).pullHeads, isEmpty);
+    },
+  );
+
+  test('a cached pull head and its tag are retained and evicted together', () {
+    var cursor = const GitHubReconcilerCursor();
+    for (var index = 0; index < 513; index++) {
+      cursor = cursor.recordPullHead(
+        'PR_$index',
+        'grid/$index',
+        etag: '"$index"',
+      );
+    }
+    expect(cursor.pullHeads, hasLength(512));
+    expect(cursor.pullHeads.containsKey('PR_0'), isFalse);
+    expect(cursor.etags.containsKey('intake/pull/PR_0'), isFalse);
+    expect(cursor.etags['intake/pull/PR_512'], '"512"');
+    expect(cursor.pullHeads['PR_512'], 'grid/512');
+  });
+
   test('relative cursor paths are refused', () {
     expect(
       () => FileGitHubCursorStore(cursorPath: 'cursor.json'),
