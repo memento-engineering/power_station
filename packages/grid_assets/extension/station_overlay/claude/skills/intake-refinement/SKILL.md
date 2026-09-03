@@ -169,7 +169,7 @@ checker of its own.
 
 ## The exit check — `filing` is the oracle, and it is a COMMAND
 
-Refinement EXITS on the verb, never on a reading. From the owning store root:
+Refinement EXITS on the verb, never on a reading. From the grid home (the verb resolves the owning store by the id's prefix):
 
 ```bash
 {{runner}} filing --json "<bead>"
@@ -213,7 +213,7 @@ label is not read — so the mount race is closed without a timer:
 
 - Create UNSTAMPED, wire deps, finish the description and design,
   and drive `{{runner}} filing --json "<bead>"` to `"passed": true`. Only after
-  human approval, from the owning store root, run:
+  human approval, from the grid home, run:
 
   ```
   {{runner}} approve --actor operator --json "<bead>"
