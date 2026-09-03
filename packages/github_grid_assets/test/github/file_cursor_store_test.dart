@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:github_grid_assets/github_grid_assets.dart';
@@ -48,6 +49,8 @@ void main() {
     for (final document in <String>[
       '{"version":2,"since":null,"etags":{},"observation_ids":[]}',
       '{"version":1,"since":null,"etags":[],"observation_ids":{}}',
+      '{"version":1,"since":null,"etags":{},"observation_ids":[],'
+          '"pending":{}}',
       '{"version":1,"since":null}',
     ]) {
       await file.writeAsString(document);
@@ -81,6 +84,40 @@ void main() {
     expect(cursor.etags.containsKey('intake/pull/PR_0'), isFalse);
     expect(cursor.etags['intake/pull/PR_512'], '"512"');
     expect(cursor.pullHeads['PR_512'], 'grid/512');
+  });
+
+  test('a version-one document without pending loads an empty queue', () async {
+    final file = File(store.cursorPath);
+    await file.parent.create(recursive: true);
+    await file.writeAsString(
+      '{"version":1,"since":"2026-08-09T08:00:00.000Z","etags":{},'
+      '"observation_ids":["one"]}',
+    );
+    final loaded = await store.load();
+    expect(loaded.pending, isEmpty);
+    expect(loaded.observationIds, <String>['one']);
+    expect(loaded.since, DateTime.parse('2026-08-09T08:00:00Z'));
+  });
+
+  test('the recorded pending document round-trips through the store', () async {
+    final recorded =
+        jsonDecode(
+              await File('test/fixtures/pending_cursor.json').readAsString(),
+            )
+            as Map<String, Object?>;
+    final cursor = GitHubReconcilerCursor.fromJson(recorded);
+    const issueId = 'poll:issue:I_1:2026-08-09T00:00:00Z';
+    const pullId = 'poll:issue:PR_2:2026-08-09T01:00:00Z';
+    expect(cursor.pending, hasLength(2));
+    expect(cursor.pendingFor(issueId)!.acked, <String>['sink']);
+    expect(cursor.hasObserved(issueId), isTrue);
+    expect(cursor.pendingFor(pullId)!.acked, isEmpty);
+    expect(cursor.isPending(pullId), isTrue);
+    await store.save(cursor);
+    expect((await store.load()).toJson(), recorded);
+    final drained = cursor.deliver(pullId);
+    expect(drained.pending, hasLength(1));
+    expect(drained.hasObserved(pullId), isTrue);
   });
 
   test('relative cursor paths are refused', () {
