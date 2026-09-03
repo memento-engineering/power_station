@@ -6,6 +6,16 @@ import 'ci_feedback.dart';
 import 'reconciler_event.dart';
 import 'resident_feedback_command.dart';
 
+/// The delivery-leg name under which [CiFeedbackProjection] is registered.
+///
+/// The outbox records this leg against a pending observation once the
+/// projection returns, so a replay after a crash does NOT re-drive it. That
+/// matters because [CiFeedbackProjection]'s own `_handled` guard is in-memory
+/// and a restart empties it, while its rework request is idempotent only within
+/// one rework round: a successful rework increments the round `decideCiFeedback`
+/// reads back, so a re-drive would mint a SECOND round for one CI failure.
+const String kCiFeedbackDeliveryLeg = 'ci-feedback';
+
 /// Projects normalized check results into the durable bead/control rails.
 final class CiFeedbackProjection {
   CiFeedbackProjection({

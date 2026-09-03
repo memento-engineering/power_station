@@ -166,7 +166,7 @@ final class _FeedbackBindingState
       await projectCiFeedback(_binding.projection, event);
     };
     _runtime = _binding.runtime;
-    _runtime?.reconciler.addObserver(_sink);
+    _runtime?.reconciler.addObserver(kCiFeedbackDeliveryLeg, _sink);
     _runtime?.start();
   }
 
@@ -174,10 +174,10 @@ final class _FeedbackBindingState
     GitHubReconcilerRuntime? previous,
     GitHubReconcilerRuntime? replacement,
   ) async {
-    previous?.reconciler.removeObserver(_sink);
+    previous?.reconciler.removeObserver(kCiFeedbackDeliveryLeg);
     await previous?.stop();
     if (identical(_runtime, replacement)) {
-      replacement?.reconciler.addObserver(_sink);
+      replacement?.reconciler.addObserver(kCiFeedbackDeliveryLeg, _sink);
       replacement?.start();
     }
   }
@@ -196,7 +196,7 @@ final class _FeedbackBindingState
   @override
   void dispose() {
     if (_runtime case final runtime?) {
-      runtime.reconciler.removeObserver(_sink);
+      runtime.reconciler.removeObserver(kCiFeedbackDeliveryLeg);
       unawaited(runtime.stop());
     }
     super.dispose();

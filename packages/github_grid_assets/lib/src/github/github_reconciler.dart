@@ -10,6 +10,17 @@ import 'reconciler_event.dart';
 /// Receives one normalized observation.
 typedef GitHubEventSink = Future<void> Function(NormalizedGitHubEvent event);
 
+/// The reserved delivery-leg name for the reconciler's own [GitHubEventSink].
+const String kSinkDeliveryLeg = 'sink';
+
+/// One named delivery leg: an observer plus its durable acknowledgement key.
+class _DeliveryLeg {
+  const _DeliveryLeg(this.leg, this.sink);
+
+  final String leg;
+  final GitHubEventSink sink;
+}
+
 /// A failed conditional GitHub polling request.
 class GitHubPollException implements Exception {
   /// Creates a polling failure.
@@ -57,14 +68,30 @@ class GitHubReconciler {
   final GitHubCursorStore _cursors;
   final GitHubEventSink _emit;
   final void Function(Object error, StackTrace stackTrace)? _onIntakeRowError;
-  final List<GitHubEventSink> _observers = <GitHubEventSink>[];
+  final List<_DeliveryLeg> _observers = <_DeliveryLeg>[];
   Future<void>? _inFlight;
 
-  /// Adds a sibling projection to the normalized event seam.
-  void addObserver(GitHubEventSink observer) => _observers.add(observer);
+  /// Adds a sibling projection to the normalized event seam under [leg].
+  ///
+  /// [leg] is the DURABLE acknowledgement key for this observer: the outbox
+  /// records it against the pending entry once the observer returns, so a replay
+  /// never re-drives a leg that already succeeded. A duplicate name, or the
+  /// reserved [kSinkDeliveryLeg], is refused LOUDLY — either would silently make
+  /// two legs share one acknowledgement, which is exactly the lost effect this
+  /// outbox exists to prevent.
+  void addObserver(String leg, GitHubEventSink observer) {
+    if (leg == kSinkDeliveryLeg) {
+      throw ArgumentError.value(leg, 'leg', 'reserved for the reconciler sink');
+    }
+    if (_observers.any((entry) => entry.leg == leg)) {
+      throw ArgumentError.value(leg, 'leg', 'delivery leg already registered');
+    }
+    _observers.add(_DeliveryLeg(leg, observer));
+  }
 
-  /// Removes a previously added sibling projection.
-  void removeObserver(GitHubEventSink observer) => _observers.remove(observer);
+  /// Removes the observer registered under [leg].
+  void removeObserver(String leg) =>
+      _observers.removeWhere((entry) => entry.leg == leg);
 
   /// Runs one coalesced intake-then-feedback reconciliation.
   Future<void> reconcileOnce() =>
@@ -72,8 +99,28 @@ class GitHubReconciler {
 
   Future<void> _reconcile() async {
     var cursor = await _cursors.load();
+    cursor = await _replayPending(cursor);
     cursor = await _intake(cursor);
     await _feedback(cursor);
+  }
+
+  /// Re-delivers every PENDING observation, oldest first, before new polling.
+  ///
+  /// This runs INSIDE [reconcileOnce], so it shares the poll's coordinator
+  /// installation quota slot instead of queueing a second one, and the first
+  /// cycle after a process restart IS the startup replay. A throw propagates:
+  /// the cycle fails loudly, the runtime's failure observer flares it, the poll
+  /// does not advance, and the observation stays PENDING for the next cycle.
+  /// That head-of-line block is deliberate — skipping a stuck leg would restore
+  /// the silent loss this queue removes.
+  Future<GitHubReconcilerCursor> _replayPending(
+    GitHubReconcilerCursor cursor,
+  ) async {
+    var next = cursor;
+    for (final entry in List<PendingObservation>.of(cursor.pending)) {
+      next = await _dispatch(next, entry.event);
+    }
+    return next;
   }
 
   Future<GitHubReconcilerCursor> _intake(GitHubReconcilerCursor cursor) async {
@@ -308,20 +355,46 @@ class GitHubReconciler {
   ) async {
     var next = cursor;
     for (final event in events) {
-      final id = switch (event) {
-        IssueOpened(:final observationId) => observationId,
-        PullRequestOpened(:final observationId) => observationId,
-        CheckConcluded(:final observationId) => observationId,
-      };
+      final id = GitHubReconcilerCursor.observationIdOf(event);
       if (next.hasObserved(id)) continue;
-      next = next.record(id);
-      await _cursors.save(next);
-      await _emit(event);
-      for (final observer in List<GitHubEventSink>.of(_observers)) {
-        await observer(event);
+      if (!next.isPending(id)) {
+        next = next.enqueue(event);
+        await _cursors.save(next);
       }
+      next = await _dispatch(next, event);
     }
     return next;
+  }
+
+  /// Drives every UNACKED delivery leg for one PENDING observation, then records
+  /// it DELIVERED.
+  ///
+  /// Each leg's acknowledgement is persisted the moment that leg returns, so a
+  /// throw from a LATER leg replays only the legs that have not acked. An id
+  /// that is already DELIVERED is drained from the queue WITHOUT touching any
+  /// leg; that is the idempotency of replay.
+  Future<GitHubReconcilerCursor> _dispatch(
+    GitHubReconcilerCursor cursor,
+    NormalizedGitHubEvent event,
+  ) async {
+    final id = GitHubReconcilerCursor.observationIdOf(event);
+    var next = cursor;
+    if (!next.hasObserved(id)) {
+      if (next.pendingFor(id)?.hasAcked(kSinkDeliveryLeg) != true) {
+        await _emit(event);
+        next = next.ack(id, kSinkDeliveryLeg);
+        await _cursors.save(next);
+      }
+      for (final observer in List<_DeliveryLeg>.of(_observers)) {
+        if (next.pendingFor(id)?.hasAcked(observer.leg) ?? false) continue;
+        await observer.sink(event);
+        next = next.ack(id, observer.leg);
+        await _cursors.save(next);
+      }
+    }
+    final delivered = next.deliver(id);
+    await _cursors.save(delivered);
+    return delivered;
   }
 
   void _reportIntakeRowError(Object error, StackTrace stackTrace) {
