@@ -504,4 +504,152 @@ Re-validated against the live tree: the fallback-link coverage lives in
       'rationale': 'Design-declared test files missing from pinned diff: $path',
     });
   });
+
+  test('pow-26dd tg-5kb a pattern file cited beside a created test', () async {
+    const created = 'packages/grid_engine/test/work_list_pause_test.dart';
+    const pattern =
+        'packages/grid_engine/test/track_a_concurrency_governor_test.dart';
+    const design = '''
+Create `packages/grid_engine/test/work_list_pause_test.dart`, built on the
+harness `packages/grid_engine/test/track_a_concurrency_governor_test.dart`
+already uses (its _FakeSessionResolver and _FakeClock are file-private there,
+so they are reproduced below).
+''';
+    final declarations = testDeclarations(design);
+    expect(declarations.authored, {created});
+    expect(declarations.mentioned, isEmpty);
+    expect(declaredTestFiles(design, baseFiles: const {pattern}), {created});
+    final outcome = await _runGate(
+      design: design,
+      diff: _diffFor([created]),
+      existingFiles: const [pattern],
+    );
+    expect(outcome.payload?['grade'], 'A');
+  });
+
+  test('pow-26dd space-fvg a package-relative pattern citation', () async {
+    const cited = 'test/link_composition_test.dart';
+    const second = 'test/memento_roster_test.dart';
+    const baseCited = 'packages/spec_committee/test/link_composition_test.dart';
+    const baseSecond = 'packages/spec_committee/test/memento_roster_test.dart';
+    const design = '''
+## Touches
+- `lib/link.dart` — modified.
+
+Add the downstream fake as the `_DownstreamDelegate` shape already used in
+`test/link_composition_test.dart` and `test/memento_roster_test.dart`.
+''';
+    final declarations = testDeclarations(design);
+    expect(declarations.authored, isEmpty);
+    expect(declarations.mentioned, {cited, second});
+    // pow-qev's fail-closed posture: an unknown base declares both.
+    expect(declaredTestFiles(design), {cited, second});
+    expect(
+      declaredTestFiles(design, baseFiles: const {baseCited, baseSecond}),
+      isEmpty,
+    );
+    final outcome = await _runGate(
+      design: design,
+      diff: _diffFor(['packages/spec_committee/lib/link.dart']),
+      existingFiles: const [baseCited, baseSecond],
+    );
+    expect(outcome.payload?['grade'], 'A');
+  });
+
+  test('pow-26dd tg-czsf a must-stay-green file cited in prose', () async {
+    const created = 'test/overlay_scope_test.dart';
+    const design = '''
+Create `test/overlay_scope_test.dart`, mirroring
+`test/overlay_delivery_test.dart`, which must stay green.
+''';
+    final declarations = testDeclarations(design);
+    expect(declarations.authored, {created});
+    expect(declarations.mentioned, isEmpty);
+    final outcome = await _runGate(
+      design: design,
+      diff: _diffFor([created]),
+      existingFiles: const [
+        'packages/grid_assets/test/overlay_delivery_test.dart',
+      ],
+    );
+    expect(outcome.payload?['grade'], 'A');
+  });
+
+  test('pow-26dd a reference cue that follows the path demotes it', () async {
+    const cited = 'test/lane_pattern_test.dart';
+    const authored = 'test/lane_probe_test.dart';
+    const design = '''
+## Touches
+- `lib/lane.dart` — modified.
+
+The downstream fake the harness `test/lane_pattern_test.dart` already uses is
+copied inline, and add `test/lane_probe_test.dart`.
+''';
+    final declarations = testDeclarations(design);
+    expect(declarations.authored, {authored});
+    expect(declarations.mentioned, {cited});
+    expect(
+      declaredTestFiles(
+        design,
+        baseFiles: const {'packages/lane/test/lane_pattern_test.dart'},
+      ),
+      {authored},
+    );
+  });
+
+  test('pow-26dd an ambiguous base suffix stays declared', () {
+    const cited = 'test/roster_test.dart';
+    const design = '''
+## Touches
+- `lib/roster.dart` — modified.
+
+The fake mirrors the shape already used in `test/roster_test.dart`.
+''';
+    expect(testDeclarations(design).mentioned, {cited});
+    expect(
+      declaredTestFiles(
+        design,
+        baseFiles: const {
+          'packages/alpha/test/roster_test.dart',
+          'packages/beta/test/roster_test.dart',
+        },
+      ),
+      {cited},
+    );
+    expect(
+      declaredTestFiles(
+        design,
+        baseFiles: const {'packages/alpha/test/roster_test.dart'},
+      ),
+      isEmpty,
+    );
+  });
+
+  test('pow-26dd two authored paths in one sentence both declare', () {
+    const design =
+        'Modify `test/gate_shape_test.dart` and add `test/gate_route_test.dart`.';
+    expect(declaredTestFiles(design), {
+      'test/gate_shape_test.dart',
+      'test/gate_route_test.dart',
+    });
+  });
+
+  test('pow-26dd an unchanged sibling is not declared', () {
+    const design =
+        'Create `test/new_lane_test.dart`. `test/old_lane_test.dart` is unchanged.';
+    expect(declaredTestFiles(design), {'test/new_lane_test.dart'});
+  });
+
+  test('pow-26dd a cue after the path leaves the path authored', () {
+    const design =
+        'Create `test/pause_lane_test.dart`, built on the existing harness.';
+    expect(testDeclarations(design).authored, {'test/pause_lane_test.dart'});
+    expect(
+      declaredTestFiles(
+        design,
+        baseFiles: const {'packages/p/test/pause_lane_test.dart'},
+      ),
+      {'test/pause_lane_test.dart'},
+    );
+  });
 }
