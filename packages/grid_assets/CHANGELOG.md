@@ -1,4 +1,4 @@
-## Unreleased
+## 0.6.0-rc.8
 
 - Breaking: approval IS the `grid.approved_*` stamp. `mountEligibilityFindings`
   no longer reads the `grid.approved` LABEL — its clause is now
