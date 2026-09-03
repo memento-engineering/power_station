@@ -699,13 +699,21 @@ StepSignal _jobSignal(RuntimeEvent event) => switch (event) {
 /// The layout ("one git worktree per bead, cut from the substation's root") is
 /// THIS impl's opinion, not the engine's — the engine's concept is "a workspace".
 class GitSourceControl implements SourceControl {
-  /// Wraps the optional provisioning seam ([provisioner]/[root]).
-  const GitSourceControl({StationGitService? provisioner, RootCheckout? root})
-    : _provisioner = provisioner,
-      _root = root;
+  /// Wraps the optional provisioning seam ([provisioner]/[root]) plus the git
+  /// seam the failed-provision unwind runs on ([gitRunner]; absent ⇒ the real
+  /// [SystemGitRunner], the posture every other git consumer in this pack
+  /// takes — the offline suite injects a fake, Fakes not mocks).
+  const GitSourceControl({
+    StationGitService? provisioner,
+    RootCheckout? root,
+    GitRunner? gitRunner,
+  }) : _provisioner = provisioner,
+       _root = root,
+       _gitRunner = gitRunner;
 
   final StationGitService? _provisioner;
   final RootCheckout? _root;
+  final GitRunner? _gitRunner;
 
   @override
   String workspaceFor(String beadId) {
@@ -771,6 +779,15 @@ class GitSourceControl implements SourceControl {
       );
     }
 
+    // The unwind seam. `branchExists` is probed BEFORE the provision because
+    // only a branch THIS call mints may be deleted on rollback — an adopted
+    // `grid/<beadId>` can carry a prior arm's commits.
+    final gitRunner = _gitRunner ?? SystemGitRunner();
+    final branch = WorktreeLayout.branchFor(beadId);
+    final branchPreexisted = await GitOps(
+      gitRunner,
+    ).branchExists(root.path, branch);
+
     workspace.renameSync(stash.path);
     try {
       await provisioner.provisionWorktree(root: root, beadId: beadId);
@@ -781,12 +798,28 @@ class GitSourceControl implements SourceControl {
         beadId: beadId,
       );
     } catch (error, stackTrace) {
+      // Unwind BEFORE the filesystem restore (git needs the worktree it
+      // registered), but let the restore run either way: the scaffold must
+      // come back even when the unwind itself could not be verified.
+      final leftover = await _unwindProvisionedWorktree(
+        runner: gitRunner,
+        root: root,
+        beadId: beadId,
+        branch: branch,
+        deleteBranch: !branchPreexisted,
+      );
       _restoreWorkspaceAfterProvisionFailure(
         workspace: workspace,
         stash: stash,
         beadId: beadId,
         error: error,
       );
+      if (leftover != null) {
+        throw StateError(
+          'provisionWorkspace: failed to unwind the discarded provision for '
+          '$beadId after provisioning failed with $error: $leftover',
+        );
+      }
       Error.throwWithStackTrace(error, stackTrace);
     }
   }
@@ -905,6 +938,71 @@ class GitSourceControl implements SourceControl {
       'provisionWorkspace: provisioner completed for $beadId but '
       '"$workspaceDir" is not a git checkout (missing .git entry)',
     );
+  }
+
+  /// Unwinds the provision the caller is DISCARDING.
+  ///
+  /// [_restoreWorkspaceAfterProvisionFailure] deletes the freshly added
+  /// worktree DIRECTORY, which leaves git's registration under
+  /// `.git/worktrees/<beadId>` and the just-minted `grid/<beadId>` branch
+  /// behind. The next mount then finds the branch, takes
+  /// [StationGitService.provisionWorktree]'s adopt path, and git refuses with
+  /// "is a missing but already registered worktree" — a wedge no retry can
+  /// clear. So the discard is COMPLETED: `git worktree remove --force`, run
+  /// from the ROOT repo and never from inside the worktree (ADR-0006
+  /// Decision 3), then `git worktree prune` in case the registration outlived
+  /// its directory, then `git branch -D` only when [deleteBranch] — an ADOPTED
+  /// branch is never deleted.
+  ///
+  /// The target path is derived with the SAME [WorktreeLayout] the provisioner
+  /// used, not the caller's `workspaceDir`: git registered that path.
+  ///
+  /// Returns null when the unwind VERIFIES clean, or a one-line description of
+  /// what survived (an unverifiable probe included) so the caller refuses
+  /// LOUDLY. Never throws — [GitRunner] reports failure as a result.
+  static Future<String?> _unwindProvisionedWorktree({
+    required GitRunner runner,
+    required RootCheckout root,
+    required String beadId,
+    required String branch,
+    required bool deleteBranch,
+  }) async {
+    final ops = GitOps(runner);
+    final provisioned = WorktreeLayout.worktreePath(
+      root.path,
+      root.substation,
+      beadId,
+    );
+    await ops.worktreeRemove(
+      rootRepo: root.path,
+      path: provisioned,
+      force: true,
+    );
+    // `remove` refuses once the directory is gone; prune drops exactly that
+    // stale registration. Both are best-effort — the verify below is the guard.
+    await runner.run(
+      workingDirectory: root.path,
+      args: const <String>['worktree', 'prune'],
+    );
+    if (deleteBranch) {
+      await ops.branchDelete(rootRepo: root.path, branch: branch);
+    }
+    final listed = await ops.worktreeList(root.path);
+    if (listed == null) {
+      return 'could not verify the unwind — `git worktree list --porcelain` '
+          'failed in "${root.path}"';
+    }
+    // Compared by DIR NAME, not by path: git reports symlink-RESOLVED paths
+    // (macOS `/private/var` for a `/var` root), so a raw path compare would
+    // read clean on a surviving registration. The per-bead worktree dir name
+    // IS the bead id ([WorktreeLayout]).
+    if (listed.any((wt) => p.basename(wt.path) == beadId)) {
+      return 'a worktree registration for "$provisioned" survived';
+    }
+    if (deleteBranch && await ops.branchExists(root.path, branch)) {
+      return 'the minted branch "$branch" survived';
+    }
+    return null;
   }
 
   static void _restoreStashedEntries({
