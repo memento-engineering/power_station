@@ -554,6 +554,47 @@ void main() {
     timeout: const Timeout(Duration(seconds: 30)),
   );
 
+  // The DIAGNOSIS four live codex specify runs never left behind (bead
+  // `pow-39tl`): a child that dies before speaking the protocol now reports its
+  // exit code, its transport and the last thing it said — and still writes its
+  // telemetry, because an absent envelope and an empty one mean different
+  // things.
+  test(
+    'a child that dies before the protocol reports exit code, adapter and '
+    'tail — and still writes its usage envelope',
+    () async {
+      final result = await _runBridge(
+        probePath: probePath,
+        probeArgs: const <String>[
+          '--die-with=3',
+          '--stderr=FATAL: codex-acp could not authenticate',
+        ],
+        usageOut: 'probe.usage.json',
+      );
+      expect(result.frame['kind'], 'failed', reason: '${result.frame}');
+      final reason = result.frame['reason']! as String;
+      // Exit-code-led and adapter-named: an operator reads the CLASS of
+      // failure and WHICH transport produced it before the log.
+      expect(reason, startsWith('acp agent failed (exit 3) [acp]: '));
+      // TAIL-first: the fatal line is the LAST thing the child wrote, and the
+      // 2000-odd characters of noise ahead of it are cut, not the diagnosis.
+      expect(reason, contains('FATAL: codex-acp could not authenticate'));
+      expect(reason, isNot(contains('HEAD-OF-CHILD-STDERR')));
+      expect(reason.length, lessThan(kRevalidateReasonTailChars + 200));
+      // The envelope lands on a FAILED terminal too, and reads back through
+      // the production parser: an absent telemetry file and an empty-usage one
+      // are different diagnoses, and only the second one says "it ran".
+      expect(result.usageEnvelope, isNotNull);
+      expect(() => UsageReport.tryParse(result.usageEnvelope), returnsNormally);
+      expect(UsageReport.tryParse(result.usageEnvelope)?.toResultFields(), {
+        'tokensIn': '0',
+        'tokensOut': '0',
+        'numTurns': '0',
+      });
+    },
+    timeout: const Timeout(Duration(seconds: 30)),
+  );
+
   test('adapter launch is package resolved and brief free', () {
     const brief = AgentBrief(task: 'SECRET BRIEF');
     final config = const AcpSessionAdapter().launch(

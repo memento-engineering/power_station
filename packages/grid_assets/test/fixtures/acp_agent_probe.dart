@@ -22,6 +22,16 @@ Future<void> main(List<String> args) async {
       .toList(growable: false);
   _current = _arg(args, '--current=') ?? 'gpt-5.6-sol[xhigh]';
   _stopReason = _arg(args, '--stop-reason=') ?? 'end_turn';
+  // The DYING-CHILD arm (bead `pow-39tl`): write noise then one fatal line to
+  // stderr and exit non-zero WITHOUT ever speaking the protocol — the live
+  // codex shape the bridge previously reported with no exit code and no log.
+  final dieWith = _arg(args, '--die-with=');
+  if (dieWith != null) {
+    final fatal = _arg(args, '--stderr=') ?? 'FATAL: probe refused to start';
+    stderr.writeln('HEAD-OF-CHILD-STDERR\n${'noise line\n' * 200}$fatal');
+    await stderr.flush();
+    exit(int.parse(dieWith));
+  }
   _flags = args
       .where((arg) => arg.startsWith('--') && !arg.contains('='))
       .toSet();
