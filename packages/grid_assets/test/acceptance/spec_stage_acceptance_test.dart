@@ -573,7 +573,7 @@ void main() {
   group('the spec stage — a FIXABLE spec INVALIDATES the specify sub-DAG '
       '(beads `pow-7nm` + `pow-ui8`)', () {
     test(
-      'a critic D WITH a rationale stamps an invalidating F on the route, and '
+      'a critic E WITH a rationale stamps an invalidating F on the route, and '
       'the engine DERIVES a successor incarnation for `specify` + everything '
       'downstream IN-SESSION — no type=gate bead, no human, no session '
       're-mint; the build agent never spawns and the session never closes',
@@ -606,8 +606,10 @@ void main() {
         }
         await _settle(f);
 
-        // The gating lane is clean; ONE judgement lane graded D and said WHY —
-        // an actionable critic grade carrying a rationale: the FIXABLE arm.
+        // The gating lane is clean; ONE judgement lane graded E and said WHY —
+        // an actionable critic grade carrying a rationale: the FIXABLE arm. A
+        // single `D` would ADVANCE carrying the finding (bead `pow-bhm`); the
+        // respec arm is `E`-only now.
         state.push(
           _state(
             _withGraded(
@@ -622,7 +624,7 @@ void main() {
               grades: kSpecGradesAllA,
               results: const {
                 'spec_review/plan-completeness': {
-                  'grade': 'D',
+                  'grade': 'E',
                   'rationale': 'step 3 names no test command',
                 },
               },
@@ -680,7 +682,7 @@ void main() {
               grades: {...kSpecGradesAllA, kSpecRouteNode: 'F'},
               results: const {
                 'spec_review/plan-completeness': {
-                  'grade': 'D',
+                  'grade': 'E',
                   'rationale': 'step 3 names no test command',
                 },
               },
@@ -729,6 +731,95 @@ void main() {
               'the session stays LIVE across the derived wave — a respec '
               'is not a re-mint',
         );
+      },
+    );
+
+    test(
+      'a SINGLE critic D WITH a rationale ADVANCES instead — the route carries '
+      'the finding to the build (rule=single-finding-advance), stamps NO '
+      'grade, and parks nothing (bead `pow-bhm`)',
+      () async {
+        final f = buildFakes(createdId: _sid);
+        final work = FakeSnapshotSource(
+          _graph(beads: const [], ready: const {}),
+        );
+        final state = FakeSnapshotSource(
+          _graph(beads: const [], ready: const {}),
+        );
+        final kernel = _buildKernel(f, work, state);
+        addTearDown(kernel.dispose);
+        addTearDown(f.provider.close);
+        addTearDown(work.close);
+        addTearDown(state.close);
+
+        kernel.start();
+        await _settle(f);
+        work.push(_graph(beads: [workBead('tg-1')], ready: {'tg-1'}));
+        await _settle(f);
+        f.provider.emit(Exited(name: _step(kSpecifyNode), exitCode: 0));
+        await _settle(f);
+        state.push(
+          _state(_session(completed: {kSpecifyNode, kSpecClearCritiqueNode})),
+        );
+        await _settle(f);
+        for (final critic in _specCriticSteps) {
+          f.provider.emit(Exited(name: critic, exitCode: 0));
+        }
+        await _settle(f);
+
+        // The SAME shape as the respec fixture above, one band lower: a single
+        // architect-owed `D` with a rationale. It ADVANCES carrying the
+        // finding rather than spending a respec round.
+        state.push(
+          _state(
+            _withGraded(
+              _session(
+                completed: {
+                  kSpecifyNode,
+                  kSpecClearCritiqueNode,
+                  kSpecGateNode,
+                  ...kSpecCriticNodes,
+                },
+              ),
+              grades: kSpecGradesAllA,
+              results: const {
+                'spec_review/plan-completeness': {
+                  'grade': 'D',
+                  'rationale': 'step 3 names no test command',
+                },
+              },
+            ),
+          ),
+        );
+        await _settle(f);
+        await settle(
+          () => _wroteCursor(f, kSpecRouteNode, 'complete'),
+          maxPumps: 1000,
+        );
+
+        expect(_wroteCursor(f, kSpecRouteNode, 'complete'), isTrue);
+        expect(_resultField(f, kSpecRouteNode, 'verdict'), 'advance');
+        expect(
+          _resultField(f, kSpecRouteNode, 'rule'),
+          'single-finding-advance',
+        );
+        expect(
+          _resultField(f, kSpecRouteNode, 'fix_in_flight'),
+          'plan-completeness=D',
+        );
+        // A27(2): an ADVANCING round carries NO grade key, so it invalidates
+        // no spec closure — the single-finding arm included.
+        expect(
+          _resultField(f, kSpecRouteNode, 'grade'),
+          isNull,
+          reason: 'an advance invalidates nothing (A27(2))',
+        );
+        expect(
+          _gateMinted(f),
+          isFalse,
+          reason: 'a carried finding parks nothing',
+        );
+        expect(_wroteCursor(f, kSpecRouteNode, 'gated'), isFalse);
       },
     );
   });

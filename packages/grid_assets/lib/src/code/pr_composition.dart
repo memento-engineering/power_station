@@ -614,6 +614,11 @@ String _committeeGrades(PrCompositionContext context) {
       '- review: grades=${review['grades'] ?? ''} '
       'spread=${review['spread'] ?? ''} rule=${review['rule'] ?? ''}',
     );
+  // The code route's single-finding advance (bead `pow-bhm`) — the ONE open
+  // finding this PR was built carrying, so a reviewer reads it in the digest.
+  if (review['fix_in_flight'] case final carried? when carried.isNotEmpty) {
+    b.writeln('- fix in flight: $carried');
+  }
   return b.toString();
 }
 

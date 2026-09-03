@@ -105,6 +105,7 @@ import '../agent/path_check.dart';
 import '../agent/seat_environments.dart';
 import '../agent/site_binding.dart';
 import '../agent/usage_report.dart';
+import 'fix_in_flight.dart';
 import 'route_failure.dart';
 import 'specify.dart' show proseOnly, sectionBodyAt;
 
@@ -583,6 +584,28 @@ const String kOwnerAuthor = 'author';
 /// the ONE decoder — LOUD, never coerced.
 const List<String> kVerdictOwners = [kOwnerArchitect, kOwnerAuthor];
 
+/// The verdict JSON key carrying a lane's NON-GRADING observations about the
+/// BEAD GRAPH — bead `pow-bhm`'s COHERENCE SCOPE dial (policy Nico-ratified
+/// 2026-07-18, interactive session: "Tracker state is never the spec author's
+/// defect").
+///
+/// A PAYLOAD column exactly like [kVerdictOwnerKey] (A37(6)): validated after
+/// the grade, never a freshness stamp, never read by a decision matrix. It is
+/// OPTIONAL for every family — nothing is ever refused for omitting it — and
+/// only the lane whose rubric TEACHES it (`coherence`) is expected to fill it.
+const String kVerdictRefinementKey = 'refinement';
+
+/// The REFINEMENT instruction the SPEC critic prompt writes after
+/// [kVerdictOwnerInstruction] (bead `pow-bhm`).
+const String kVerdictRefinementInstruction =
+    'The `$kVerdictRefinementKey` field is OPTIONAL and NEVER grades. Put every '
+    'BEAD-GRAPH observation there — a duplicate bead, a dep edge pointing at the '
+    'wrong id, tracker hygiene — and nowhere else. Those are TRACKER STATE: they '
+    'are real, they are worth filing, and they are not the spec author\'s '
+    'defect, so they must not move your letter by one band. The station routes '
+    'this field to REFINEMENT (an operator flag), never to a round failure. '
+    'Omit the key when you have no such observation.';
+
 /// The verdict JSON's MODEL-AUTHORED round stamp key.
 ///
 /// The critic copies the round from its prompt into [kVerdictRoundKey]
@@ -648,10 +671,12 @@ String verdictJsonTemplate({
   required int round,
   String rationaleHint = '<why>',
   bool owner = false,
+  bool refinement = false,
 }) =>
     '{"rubric":"$rubric","version":1,"grade":"<A-F>",'
     '"rationale":"$rationaleHint",'
     '${owner ? '"$kVerdictOwnerKey":"<$kOwnerArchitect|$kOwnerAuthor>",' : ''}'
+    '${refinement ? '"$kVerdictRefinementKey":"<bead-graph findings; omit when none>",' : ''}'
     '"nodePath":"$nodePath",'
     '"$kVerdictRoundKey":$round}';
 
@@ -1283,11 +1308,14 @@ class CriticCapability extends ProcessCapability {
       );
       await canonical.create(recursive: true);
       final recoveredOwner = recovered[kVerdictOwnerKey];
+      final recoveredRefinement = recovered[kVerdictRefinementKey];
       await canonical.writeAsString(
         jsonEncode({
           'grade': recovered['grade'],
           'rationale': recovered['rationale'],
           if (recoveredOwner != null) kVerdictOwnerKey: recoveredOwner,
+          if (recoveredRefinement != null)
+            kVerdictRefinementKey: recoveredRefinement,
           'nodePath': args.nodePath,
           kVerdictRoundKey: round,
         }),
@@ -1661,7 +1689,19 @@ class CriticCapability extends ProcessCapability {
         'OF SCOPE — do NOT grade pre-existing code, and do NOT credit (or blame) '
         'work that is already in mainline outside this diff. If you cannot point '
         'a claim to a hunk of the pinned diff, it does not belong in your grade.',
-      )
+      );
+    // The spec committee may have ADVANCED this bead's spec carrying ONE open
+    // finding (bead `pow-bhm`, ratified 2026-07-18) — BINDING on the build under
+    // review, so the code committee is the lane that re-checks it. Absent (the
+    // ordinary case, an offline/dry-run worktree, or an unreadable carry) the
+    // prompt is byte-identical to the pre-`pow-bhm` one.
+    final carried = readFixInFlight(workspaceDir);
+    if (carried != null) {
+      b
+        ..writeln()
+        ..writeln(renderFixInFlightRecheck(carried));
+    }
+    b
       ..writeln()
       ..writeln('## Your verdict')
       ..writeln(
@@ -1688,17 +1728,34 @@ class CriticCapability extends ProcessCapability {
 ///    (hard block). `gating` is a lane SET read as a CSV, so a committee whose
 ///    gate is several deterministic checks (the docs committee's three) needs
 ///    no second matrix — a single-id value is just a one-element set;
-///  - a grade SPREAD ≥ 3 letters across the lanes → [Escalate] (human ultimatum);
-///  - any NON-gating critic at `D`/`F` → [Escalate] (rework — the `restForOne`
-///    transitive re-key is deferred, so a D/F parks at the bound handler for now);
-///  - else (all A–C, gating not F, spread < 3) → [Advance] (on to delivery).
+///  - any NON-gating critic at `F` → [Escalate] (rework);
+///  - TWO or more non-gating critics at an ACTION grade (`D`/`E`) → [Escalate]
+///    (rework — the round did not converge on a single carriable finding);
+///  - a single `E` → [Escalate] (rework: this committee has no auto-correction
+///    arm downstream of the build, so an `E` parks);
+///  - a single `D` with NO rationale → [Escalate] (there is nothing to carry);
+///  - a single `D` WITH a rationale → [Advance] carrying `fix_in_flight` +
+///    `fix_in_flight_finding` (`rule` = `single-finding-advance`);
+///  - else (all A–C, gating not F) → [Advance] `all-approve` (on to delivery).
+///
+/// **The re-tuned matrix** (policy Nico-ratified 2026-07-18, interactive
+/// session; recorded as the `docs/decisions/` entry
+/// `committee-gate-single-finding-advance-and-the-refinement-flag`): hard-gate
+/// ONLY on `F` or on two-plus action lanes. A single finding rides the build
+/// instead of burning a full rework cycle, and the committee re-checks it at
+/// review — every catch keeps its value. This DEPARTS from ratified A14(2),
+/// which left this route byte-unchanged for the code committee; the ratified
+/// policy names both routes explicitly, and the departure is recorded in that
+/// entry. The `spread ≥ 3` "human ultimatum" rule is GONE for A14(4)'s own
+/// reason — a spread of 3+ necessarily puts some lane at `D` or worse, so the
+/// arms above already cover every case it caught.
 ///
 /// The [Advance] payload carries ROUTE PROVENANCE (FT-2, CAPTURE-ONLY): the
 /// grade vector consumed (`grades` — `lane=grade` CSV in [kCommitteeRubrics]
-/// order), the computed `spread`, and the matrix arm that fired (`rule` =
-/// `all-approve`) — making the keep/kill export self-contained without changing
-/// the matrix. Escalations are UNCHANGED (their reason string already names the
-/// rule).
+/// order), the computed `spread`, the matrix arm that fired (`rule`), and — on
+/// the single-finding arm — the carried lane and its rationale verbatim — making
+/// the keep/kill export self-contained without changing the matrix. Escalations
+/// are UNCHANGED (their reason string already names the rule).
 ///
 /// Fail-closed: an unread / missing sibling grade is treated as `F`, so a forged
 /// or absent grade can NEVER advance (the mutation-tested property).
@@ -1766,10 +1823,9 @@ class CodeRouteCapability extends RouteCapability {
       return Escalate('${failedGates.join(', ')} failed: hard block$suffix');
     }
 
-    // 2. a grade spread ≥ 3 letters across the PRESENT lanes — a human
-    // ultimatum. Missing grades are IGNORED here (they are already caught by
-    // the fail-closed gating/D-F block rules), so the spread reflects only the
-    // grades the critics actually returned.
+    // The grade SPREAD across the PRESENT lanes. Missing grades are IGNORED
+    // here (they are already caught by the fail-closed gating/F block rules).
+    // PROVENANCE ONLY (FT-2) — no arm decides on it any more.
     final indices = [
       for (final entry in rawGrades.entries)
         if (entry.value != null && entry.value!.trim().isNotEmpty)
@@ -1778,30 +1834,74 @@ class CodeRouteCapability extends RouteCapability {
     final spread = indices.isEmpty
         ? 0
         : indices.reduce(math.max) - indices.reduce(math.min);
-    if (spread >= 3) {
-      return const Escalate('grade spread ≥ 3 — human ultimatum');
+
+    // 2. any NON-gating lane at F — the hard, unfixable ruling (bead `pow-bhm`,
+    // policy Nico-ratified 2026-07-18: "hard-gate ONLY on F or on two-plus D
+    // lanes"). F is the scope/decompose-class judgement or a fail-closed
+    // transport miss; neither advances. A MISSING grade normalises to F here,
+    // so the fail-closed property is unchanged.
+    final failed = [
+      for (final entry in grades.entries)
+        if (!gating.contains(entry.key) && entry.value == 'F') entry.key,
+    ];
+    if (failed.isNotEmpty) {
+      return Escalate('a critic returned F (${failed.join(', ')}) — rework');
     }
 
-    // 3. any non-gating critic at D/F — rework → restForOne re-key is deferred
-    // (build-order); a D/F parks at the bound handler for now.
-    for (final entry in grades.entries) {
-      if (gating.contains(entry.key)) continue;
-      if (entry.value == 'D' || entry.value == 'F') {
-        return const Escalate('a critic returned D/F — rework');
-      }
+    // 3. the ACTION set — every non-gating lane at D or E. TWO or more gate;
+    // a single E gates (the code committee has no auto-correction arm
+    // downstream of the build, so an E parks); a single D ADVANCES below,
+    // carrying its finding. The `spread >= 3` "human ultimatum" rule is GONE
+    // from this route: a spread of 3+ across A..F necessarily puts some lane at
+    // D or worse, so these arms already cover every case it caught — and A14(4)
+    // already removed it from the spec route for exactly that reason. The
+    // spread rides the advance payload as FT-2 provenance, unchanged. NOTE this
+    // arm also CLOSES a pre-existing hole: the deleted loop matched `D`/`F`
+    // only, so a lone `E` inside a narrow spread advanced silently.
+    final action = [
+      for (final entry in grades.entries)
+        if (!gating.contains(entry.key) &&
+            (entry.value == 'D' || entry.value == 'E'))
+          entry.key,
+    ];
+    if (action.length >= 2) {
+      return Escalate(
+        'two or more critics returned an action grade '
+        '(${action.map((id) => '$id=${grades[id]}').join(', ')}) — rework',
+      );
+    }
+    final single = action.isEmpty ? null : action.single;
+    if (single != null && grades[single] == 'E') {
+      return Escalate('$single returned E — rework');
+    }
+    // A carried finding is the RATIONALE, verbatim. A single D that says NOTHING
+    // carries nothing, so it cannot advance: LOUD, the same posture the spec
+    // route's `no-rationale` arm takes (A14(6)).
+    final carried = single == null
+        ? ''
+        : (siblings.resultOf('$parent/$single')['rationale'] ?? '').trim();
+    if (single != null && carried.isEmpty) {
+      return Escalate(
+        '$single returned D but NO rationale — there is nothing to carry into '
+        'the build as a fix-in-flight item, so the finding would be lost. '
+        'Rework.',
+      );
     }
 
-    // 4. all A–C, gating clean, spread < 3 — advance. The advance payload
-    // carries the ROUTE PROVENANCE (FT-2): the per-lane grade vector it consumed
-    // (CSV `lane=grade` in kCommitteeRubrics order), the computed spread, and the
-    // matrix arm that fired (`all-approve`) — so the keep/kill export is
-    // self-contained. Escalations keep their reason string (it names the rule).
+    // 4. ADVANCE — a converged join, or a single D whose finding rides along.
+    // The payload carries the ROUTE PROVENANCE (FT-2): the per-lane grade vector
+    // it consumed (CSV `lane=grade` in kCommitteeRubrics order), the computed
+    // spread, the matrix arm that fired, and the carried finding when there is
+    // one — so the keep/kill export and the PR digest are self-contained.
+    // Escalations keep their reason string (it names the rule).
     final gradesCsv = criticIds.map((id) => '$id=${grades[id]}').join(',');
     return Advance({
       'verdict': 'advance',
       'grades': gradesCsv,
       'spread': '$spread',
-      'rule': 'all-approve',
+      'rule': single == null ? 'all-approve' : 'single-finding-advance',
+      if (single != null) 'fix_in_flight': '$single=${grades[single]}',
+      if (single != null) 'fix_in_flight_finding': carried,
     });
   }
 }
@@ -2111,6 +2211,13 @@ _VerdictFileRead _verdictFromFile(
         'finding auto-respecs; an author-owed one parks for a human.',
       );
     }
+    // The NON-GRADING bead-graph column (bead `pow-bhm`) — read AFTER the grade
+    // and BEFORE A4's nodePath fence, exactly like `owner` (A37(6)). The read is
+    // TOLERANT: a non-String value degrades to '', so this column adds NO second
+    // place a verdict can fail its lane (A34(6) — the strict decode above stays
+    // the ONE).
+    final refinementValue = json[kVerdictRefinementKey];
+    final refinement = refinementValue is String ? refinementValue.trim() : '';
     final nodePathValue = json['nodePath'];
     final stampedNodePath = nodePathValue is String ? nodePathValue.trim() : '';
     if (stampedNodePath.isEmpty) {
@@ -2137,6 +2244,7 @@ _VerdictFileRead _verdictFromFile(
       'transport': 'file',
       'rationale': rationale,
       if (owner.isNotEmpty) kVerdictOwnerKey: owner,
+      if (refinement.isNotEmpty) kVerdictRefinementKey: refinement,
     });
   } on Object catch (error) {
     return _VerdictFileInvalid(verdict.path, _verdictErrorDetail(error));
@@ -2326,6 +2434,11 @@ Map<String, String>? _verdictFromEmbeddedJson(String text) {
               final envelopeOwner =
                   (json[kVerdictOwnerKey] as String?)?.trim().toLowerCase() ??
                   '';
+              // The bead-graph column survives a transport REPAIR too (bead
+              // `pow-bhm`) — A4 fenced three paths and the column rides all of
+              // them.
+              final envelopeRefinement =
+                  (json[kVerdictRefinementKey] as String?)?.trim() ?? '';
               last = {
                 'grade': grade,
                 'transport': 'envelope',
@@ -2334,6 +2447,8 @@ Map<String, String>? _verdictFromEmbeddedJson(String text) {
                     : '$rationale [from result envelope]',
                 if (kVerdictOwners.contains(envelopeOwner))
                   kVerdictOwnerKey: envelopeOwner,
+                if (envelopeRefinement.isNotEmpty)
+                  kVerdictRefinementKey: envelopeRefinement,
               };
             }
           }

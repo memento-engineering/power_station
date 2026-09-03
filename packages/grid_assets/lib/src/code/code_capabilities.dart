@@ -45,6 +45,7 @@ import 'conventional_commit.dart';
 import 'delivery.dart';
 import 'discovery.dart';
 import 'docs_committee.dart';
+import 'fix_in_flight.dart';
 import 'landing.dart';
 import 'pr_composition.dart';
 import 'pr_describe.dart';
@@ -280,6 +281,12 @@ class AgentCapability extends ProcessCapability {
     final composition =
         context.getInheritedSeedOfExactType<PrComposition>() ??
         const PrComposition();
+    // The spec route may have advanced this bead carrying ONE open finding
+    // (bead `pow-bhm`). Read it at the SPAWN edge, best-effort: a missing or
+    // corrupt carry degrades to no block, never a throw into a spawn.
+    final carried = Directory(workspace.workspaceDir).existsSync()
+        ? readFixInFlight(workspace.workspaceDir)
+        : null;
     return (
       environment: selected.environment,
       workspace: workspace,
@@ -288,6 +295,7 @@ class AgentCapability extends ProcessCapability {
         workspace,
         trailerToken: composition.trailerToken,
         skills: skills,
+        fixInFlight: carried,
       ),
       model: selected.model,
       endpoint: selected.endpoint,
@@ -538,6 +546,7 @@ AgentBrief buildAgentBrief(
   Workspace workspace, {
   String trailerToken = kDefaultTrailerToken,
   List<String> skills = const [],
+  FixInFlight? fixInFlight,
 }) {
   final title = bead.title.isNotEmpty ? bead.title : 'work bead ${bead.id}';
   final substation = bead.metadata['rig'];
@@ -561,6 +570,14 @@ AgentBrief buildAgentBrief(
   section('Design', bead.design);
   section('Acceptance criteria', bead.acceptanceCriteria);
   section('Notes', bead.notes);
+  // The BINDING carry (bead `pow-bhm`, ratified 2026-07-18): the spec committee
+  // advanced this spec with ONE open finding, so the builder closes it in
+  // flight. Absent ⇒ a brief byte-identical to the pre-`pow-bhm` one.
+  if (fixInFlight != null) {
+    task
+      ..writeln()
+      ..writeln(renderFixInFlightGuidance(fixInFlight).trim());
+  }
   final agreement = StringBuffer()
     ..writeln(
       '- Work ONLY inside this worktree (${workspace.workspaceDir}); it is on '

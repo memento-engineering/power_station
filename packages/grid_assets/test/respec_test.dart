@@ -24,12 +24,16 @@ const _critics =
     'spec-validation,coherence,decision-alignment,acceptance-testability,'
     'plan-completeness';
 
+/// The finding a single-`D` round CARRIES into the build (bead `pow-bhm`).
+const _carriedFinding = 'step 3 cites the wrong decision slug';
+
 /// The five spec lanes at [grades], with [rationales] where a critic gave one;
 /// an omitted lane has NO grade (the fail-closed-missing case).
 List<SpecLane> _lanes(
   Map<String, String> grades, {
   Map<String, String> rationales = const {},
   Map<String, String> owners = const {},
+  Map<String, String> refinements = const {},
 }) => [
   for (final id in kSpecCommitteeRubrics)
     (
@@ -37,6 +41,7 @@ List<SpecLane> _lanes(
       grade: grades[id],
       rationale: rationales[id] ?? '',
       owner: owners[id] ?? '',
+      refinement: refinements[id] ?? '',
     ),
 ];
 
@@ -59,6 +64,7 @@ void _plantVerdicts(
   Map<String, String> grades, {
   Map<String, String> rationales = const {},
   Map<String, String> owners = const {},
+  Map<String, String> refinements = const {},
   int? round,
 }) {
   final r = round ?? 0;
@@ -73,6 +79,8 @@ void _plantVerdicts(
           'grade': entry.value,
           'rationale': rationales[entry.key] ?? 'fixture verdict',
           kVerdictOwnerKey: owners[entry.key] ?? kOwnerArchitect,
+          if ((refinements[entry.key] ?? '').isNotEmpty)
+            kVerdictRefinementKey: refinements[entry.key],
           'nodePath': 'tg-1/spec_review/${entry.key}',
           'round': r,
         }),
@@ -162,12 +170,12 @@ void main() {
       expect(v.spread, 2);
     });
 
-    test('a FIXABLE fail (a critic D WITH a rationale) ⇒ SpecRespec — never an '
+    test('a FIXABLE fail (a critic E WITH a rationale) ⇒ SpecRespec — never an '
         'escalation — and the ledger carries the rationale VERBATIM', () {
       final v = decideSpecRoute(
         sessionRoot: 'tg-1',
         lanes: _lanes(
-          {..._allA(), 'plan-completeness': 'D'},
+          {..._allA(), 'plan-completeness': 'E'},
           rationales: const {'plan-completeness': 'step 3 has no test command'},
         ),
         gating: _gating,
@@ -177,7 +185,7 @@ void main() {
       final ledger = (v as SpecRespec).ledger;
       expect(ledger.round, 0);
       expect(ledger.lanes.single.rubric, 'plan-completeness');
-      expect(ledger.lanes.single.grade, 'D');
+      expect(ledger.lanes.single.grade, 'E');
       expect(ledger.lanes.single.rationale, 'step 3 has no test command');
     });
 
@@ -197,8 +205,9 @@ void main() {
       expect((v as SpecRespec).ledger.lanes.single.grade, 'E');
     });
 
-    test('the pow-kzx shape (A/A/B/D, spread 3) auto-respecs — the old "human '
-        'ultimatum" spread rule no longer parks it', () {
+    test('the pow-kzx shape (A/A/B/D, spread 3) now ADVANCES carrying the '
+        'finding — the spread rule parked it, and even a respec round no '
+        'longer has to be spent on it', () {
       final v = decideSpecRoute(
         sessionRoot: 'tg-1',
         lanes: _lanes(
@@ -216,7 +225,9 @@ void main() {
         gating: _gating,
         priorRound: 0,
       );
-      expect(v, isA<SpecRespec>());
+      expect(v, isA<SpecAdvance>());
+      expect((v as SpecAdvance).spread, 3);
+      expect(v.fixInFlight!.rationale, 'the ADR citation is not real');
     });
 
     test(
@@ -289,7 +300,7 @@ void main() {
       SpecRouteVerdict at(int priorRound) => decideSpecRoute(
         sessionRoot: 'tg-1',
         lanes: _lanes(
-          {..._allA(), 'coherence': 'D'},
+          {..._allA(), 'coherence': 'E'},
           rationales: const {'coherence': 'still incoherent'},
         ),
         gating: _gating,
@@ -317,6 +328,96 @@ void main() {
         expect((v as SpecAdvance).spread, 0);
       },
     );
+
+    test('a SINGLE architect-owed D WITH a rationale ⇒ SpecAdvance carrying '
+        'the finding (bead pow-bhm — never a respec round)', () {
+      final v = decideSpecRoute(
+        sessionRoot: 'tg-1',
+        lanes: _lanes(
+          {..._allA(), 'decision-alignment': 'D'},
+          rationales: const {'decision-alignment': _carriedFinding},
+          owners: const {'decision-alignment': kOwnerArchitect},
+        ),
+        gating: _gating,
+        priorRound: 0,
+      );
+      expect(v, isA<SpecAdvance>());
+      final carried = (v as SpecAdvance).fixInFlight;
+      expect(carried, isNotNull);
+      expect(carried!.rubric, 'decision-alignment');
+      expect(carried.grade, 'D');
+      expect(carried.rationale, _carriedFinding);
+    });
+
+    test('TWO action grades ⇒ SpecEscalate(multi-action-grade)', () {
+      final v = decideSpecRoute(
+        sessionRoot: 'tg-1',
+        lanes: _lanes(
+          {..._allA(), 'decision-alignment': 'D', 'plan-completeness': 'D'},
+          rationales: const {
+            'decision-alignment': 'the A14 clause is uncited',
+            'plan-completeness': 'step 3 names no test command',
+          },
+          owners: const {
+            'decision-alignment': kOwnerArchitect,
+            'plan-completeness': kOwnerArchitect,
+          },
+        ),
+        gating: _gating,
+        priorRound: 0,
+      );
+      expect(v, isA<SpecEscalate>());
+      expect((v as SpecEscalate).rule, 'multi-action-grade');
+      expect(v.reason, contains('step 3 names no test command'));
+    });
+
+    test('a BEAD-GRAPH finding does NOT grade — the verdict is identical with '
+        'and without it, and the note surfaces', () {
+      SpecRouteVerdict decide({required String refinement}) => decideSpecRoute(
+        sessionRoot: 'tg-1',
+        lanes: _lanes(_allA(), refinements: {'coherence': refinement}),
+        gating: _gating,
+        priorRound: 0,
+      );
+      final without = decide(refinement: '');
+      final withNote = decide(refinement: 'tg-yau duplicates this bead');
+      expect(without, isA<SpecAdvance>());
+      expect(withNote, isA<SpecAdvance>());
+      expect(
+        (withNote as SpecAdvance).gradesCsv,
+        (without as SpecAdvance).gradesCsv,
+      );
+      expect(withNote.fixInFlight, isNull);
+      expect(
+        refinementNotes(
+          _lanes(_allA(), refinements: {'coherence': 'tg-yau duplicates this'}),
+        ).single.finding,
+        'tg-yau duplicates this',
+      );
+      expect(refinementNotes(_lanes(_allA())), isEmpty);
+    });
+
+    test('an F still HARD-GATES — the single-finding arm weakened neither F '
+        'rule', () {
+      final gatingF = decideSpecRoute(
+        sessionRoot: 'tg-1',
+        lanes: _lanes({..._allA(), _gating: 'F'}),
+        gating: _gating,
+        priorRound: 0,
+      );
+      expect((gatingF as SpecEscalate).rule, 'gating-hard-block');
+      expect(gatingF.reason, contains(_gating));
+      final criticF = decideSpecRoute(
+        sessionRoot: 'tg-1',
+        lanes: _lanes(
+          {..._allA(), 'coherence': 'F'},
+          rationales: const {'coherence': 'reinvents the route matrix'},
+        ),
+        gating: _gating,
+        priorRound: 0,
+      );
+      expect((criticF as SpecEscalate).rule, 'critic-F');
+    });
 
     group('OWNERSHIP — an author-owed finding never burns a round', () {
       test('an author-owed D at round 0 ⇒ SpecEscalate(author-owed) with the '
@@ -369,7 +470,7 @@ void main() {
         SpecRouteVerdict at(int priorRound) => decideSpecRoute(
           sessionRoot: 'tg-1',
           lanes: _lanes(
-            {..._allA(), 'coherence': 'D'},
+            {..._allA(), 'coherence': 'E'},
             rationales: const {'coherence': 'cite the clause'},
             owners: const {'coherence': kOwnerArchitect},
           ),
@@ -386,7 +487,7 @@ void main() {
         final v = decideSpecRoute(
           sessionRoot: 'tg-1',
           lanes: _lanes(
-            {..._allA(), 'coherence': 'D'},
+            {..._allA(), 'coherence': 'E'},
             rationales: const {'coherence': 'cite the clause'},
           ),
           gating: _gating,
@@ -554,7 +655,7 @@ void main() {
       'route\'s OWN result — the engine derives the wave off the declared '
       '`validates` edge, with no gate, no human, no session re-mint',
       () async {
-        final grades = {..._allA(), 'plan-completeness': 'D'};
+        final grades = {..._allA(), 'plan-completeness': 'E'};
         const why = {'plan-completeness': 'step 3 names no test command'};
         _plantVerdicts(ws.path, grades, rationales: why);
         final out = await _route(
@@ -572,7 +673,7 @@ void main() {
         expect(payload['verdict'], 'respec');
         expect(payload['round'], '0');
         expect(payload['rationale'], contains('RESPEC round 0/2'));
-        expect(payload['rationale'], contains('plan-completeness=D'));
+        expect(payload['rationale'], contains('plan-completeness=E'));
         // The edge the derivation walks is DECLARED on the route step, and its
         // target is a real sibling of the SAME circuit — a dangling name mints no
         // edge at all, so a drift here would silently disarm the loop.
@@ -597,7 +698,7 @@ void main() {
     test('the round counter is the LEDGER\'s own `round`, and at the cap the '
         'route flares to a HUMAN gate — the asset escalates on its OWN policy '
         'before the engine\'s derived belt', () async {
-      final grades = {..._allA(), 'coherence': 'D'};
+      final grades = {..._allA(), 'coherence': 'E'};
       const why = {'coherence': 'the plan still contradicts the acceptance'};
 
       _plantVerdicts(ws.path, grades, rationales: why); // round 0's artifacts.
@@ -681,7 +782,7 @@ void main() {
         ),
       );
       // … while the CURRENT join fails on a DIFFERENT lane.
-      final grades = {..._allA(), 'coherence': 'D'};
+      final grades = {..._allA(), 'coherence': 'E'};
       const why = {'coherence': 'the plan contradicts the acceptance'};
       _plantVerdicts(ws.path, grades, rationales: why, round: kMaxRespecRounds);
       final capped = await _route(
@@ -693,9 +794,9 @@ void main() {
       expect(capped, isA<Escalate>());
       final reason = (capped as Escalate).reason;
       expect(reason, startsWith('respec-cap'));
-      expect(reason, contains('coherence=D'));
+      expect(reason, contains('coherence=E'));
       expect(reason, contains('decision-alignment=A'));
-      expect(reason, isNot(contains('decision-alignment=D')));
+      expect(reason, isNot(contains('decision-alignment=E')));
     });
 
     test(
@@ -703,7 +804,7 @@ void main() {
       'route and it decides on the CURRENT join instead of re-flaring off the '
       'consumed round forever (bead `pow-p8w`)',
       () async {
-        final grades = {..._allA(), 'coherence': 'D'};
+        final grades = {..._allA(), 'coherence': 'E'};
         const why = {'coherence': 'the plan still contradicts the acceptance'};
 
         _plantVerdicts(ws.path, grades, rationales: why);
@@ -795,14 +896,14 @@ void main() {
         ..writeAsStringSync('not a directory');
       _plantVerdicts(
         ws.path,
-        {..._allA(), 'coherence': 'D'},
+        {..._allA(), 'coherence': 'E'},
         rationales: const {'coherence': 'incoherent'},
       );
       // A route has NO failure arm: a throwing body is what RouteAllocation
       // sinks to supervision.
       await expectLater(
         _route(
-          {..._allA(), 'coherence': 'D'},
+          {..._allA(), 'coherence': 'E'},
           rationales: const {'coherence': 'incoherent'},
           workspaceDir: ws.path,
         ),
@@ -816,11 +917,45 @@ void main() {
       );
     });
 
+    test('LIVE: a single-D advance WRITES the fix-in-flight carry, names it on '
+        'the payload, and carries NO grade key (A27(2) — an advancing round '
+        'invalidates nothing)', () async {
+      final grades = {..._allA(), 'decision-alignment': 'D'};
+      const why = {'decision-alignment': _carriedFinding};
+      _plantVerdicts(ws.path, grades, rationales: why);
+      final out = await _route(grades, rationales: why, workspaceDir: ws.path);
+      expect(out, isA<Advance>());
+      final payload = (out as Advance).payload!;
+      expect(payload['verdict'], 'advance');
+      expect(payload['rule'], 'single-finding-advance');
+      expect(payload['fix_in_flight'], 'decision-alignment=D');
+      expect(payload['fix_in_flight_finding'], _carriedFinding);
+      expect(payload.containsKey('grade'), isFalse);
+      // The BUILD brief reads the FILE, so the carry must be on disk.
+      expect(readFixInFlight(ws.path)!.lane.rationale, _carriedFinding);
+      expect(readFixInFlight(ws.path)!.lane.rubric, 'decision-alignment');
+    });
+
+    test('LIVE: a planted `refinement` column WRITES the refinement flag and '
+        'rides the payload — while the round still ADVANCES clean', () async {
+      const note = 'tg-yau duplicates this bead; tg-9kk deps on the duplicate';
+      _plantVerdicts(ws.path, _allA(), refinements: const {'coherence': note});
+      final out = await _route(_allA(), workspaceDir: ws.path);
+      expect(out, isA<Advance>());
+      final payload = (out as Advance).payload!;
+      expect(payload['verdict'], 'advance');
+      expect(payload['rule'], 'all-approve');
+      expect(payload[kVerdictRefinementKey], 'coherence');
+      expect(readRefinementFlag(ws.path)!.notes.single.finding, note);
+      // No carry: the bead-graph note never made a finding to carry.
+      expect(readFixInFlight(ws.path), isNull);
+    });
+
     test('offline/dry-run (a workspace dir that does not exist) skips the ledger '
         'I/O but still stamps the invalidating F — the BOUND is then the '
         'ENGINE\'s, derived from the successor-chain depth', () async {
       final out = await _route(
-        {..._allA(), 'coherence': 'D'},
+        {..._allA(), 'coherence': 'E'},
         rationales: const {'coherence': 'the plan contradicts the acceptance'},
         workspaceDir: '/grid/worktrees/tg-1',
       );

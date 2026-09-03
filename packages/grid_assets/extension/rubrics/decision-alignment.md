@@ -68,10 +68,19 @@ in your rationale and never grade the lane clean on a crashed lookup.
   surface the decision established) but never cites it; the alignment is
   accidental rather than acknowledged. Or: the section claims "no decision
   applies" without naming the roster-qualified surface paths that verified it.
-- **D** — `decisions index` returns a decision that plainly governs a surface
-  this spec touches, and the spec does not cite it. The fix is mechanical —
-  add the citation with the quoted clause and apply (or explicitly
-  distinguish) the precedent — so this routes to spec rework, not a human.
+  Or: a MISATTRIBUTED citation — the quoted clause is verbatim-correct and
+  load-bearing but sits under the wrong decision number or slug. The decision
+  was read and applied; the label slipped, and the fix is one edited
+  identifier.
+- **D** — a governing decision is MISSING or MISAPPLIED: `decisions index`
+  returns a decision that plainly governs a surface this spec touches and the
+  spec cites nothing for it, or the spec cites a constraint it then applies
+  backwards, so the DESIGN changes once the decision is honoured. The fix is
+  mechanical — add the citation with the quoted clause and apply (or
+  explicitly distinguish) the precedent — so this routes to spec rework, not a
+  human. Reserve `D` for those two — a citation whose clause is right and whose
+  number is wrong is a `C` correction, not a round failure (station policy,
+  ratified 2026-07-18).
 - **F** — a structural contradiction: the spec, AS WRITTEN, would invert or
   undo a load-bearing clause of a recorded decision, and no citation paragraph
   can fix it — implementing the spec means the precedent no longer holds. The
@@ -80,6 +89,9 @@ in your rationale and never grade the lane clean on a crashed lookup.
 
 ## Calibration
 
+- Check the CLAUSE before the number: quote what the spec quoted against the
+  file you read. If the clause is verbatim-correct and governs, the citation
+  did its job — grade the mislabel `C`.
 - Every recorded decision binds for grading the moment it is written. There
   is no advisory class to promote or discount.
 - Do not demand citations for decisions that genuinely do not touch the spec's

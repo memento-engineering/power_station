@@ -1231,18 +1231,18 @@ Validate again with ruby -e 's.include?("${ticks}dart")'.
       expect(out.reason, contains('hard block'));
     });
 
-    test('an LLM spec lane at D WITH a rationale ⇒ an ADVANCE carrying the '
+    test('an LLM spec lane at E WITH a rationale ⇒ an ADVANCE carrying the '
         'invalidating `grade: F` stamp — the loop actuates through the declared '
         '`validates` edge, with no human and no reported rewind', () async {
       final out = await _specRoute(
-        {...allA(), 'plan-completeness': 'D'},
+        {...allA(), 'plan-completeness': 'E'},
         rationales: const {'plan-completeness': 'step 3 names no test command'},
       );
       expect(out, isA<Advance>());
       final payload = (out as Advance).payload!;
       expect(payload['grade'], 'F');
       expect(payload['verdict'], 'respec');
-      expect(payload['rationale'], contains('plan-completeness=D'));
+      expect(payload['rationale'], contains('plan-completeness=E'));
     });
 
     test('an LLM spec lane at D with NO rationale ⇒ a HUMAN gate — nothing to '

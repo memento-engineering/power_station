@@ -1030,12 +1030,15 @@ class SpecCriticCapability extends CriticCapability {
           nodePath: nodePath,
           round: round,
           owner: true,
+          refinement: true,
         ),
       )
       ..writeln()
       ..writeln(kVerdictStampInstruction)
       ..writeln()
       ..writeln(kVerdictOwnerInstruction)
+      ..writeln()
+      ..writeln(kVerdictRefinementInstruction)
       ..writeln()
       ..writeln(verdictWriteInstruction(path));
     return b.toString();
