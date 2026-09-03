@@ -264,6 +264,10 @@ class _FakeGroups implements ProcessGroupController {
   bool processAlive(int pid) => !_killed && _termCount == 0;
 
   @override
+  Future<List<int>> groupMembers(int pgid) async =>
+      processAlive(pgid) ? <int>[pgid] : const <int>[];
+
+  @override
   bool signalGroup(int pgid, ProcessSignal signal) {
     signals.add((pgid, signal));
     if (signal == ProcessSignal.sigterm) _termCount++;

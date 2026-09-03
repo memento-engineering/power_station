@@ -1060,6 +1060,9 @@ class _RecordingGroups implements ProcessGroupController {
   bool processAlive(int pid) => _alive.contains(pid);
 
   @override
+  Future<List<int>> groupMembers(int pgid) async => _alive.toList();
+
+  @override
   Future<int?> resolvePgid(int pid) async => null;
 
   @override

@@ -1,3 +1,22 @@
+## 0.6.0-rc.10
+
+- Fixed: `AgentSession.onRuntimeEvent` handles `RuntimeEvent.sessionOrphaned`.
+  The arm is an OBSERVATION, not a state change: it flares
+  `agent.sessionOrphaned` (`sessionId`, `pgid`, `memberCount`) on the injected
+  `ExplorationTransport` and returns, so the session stays live and supervised
+  and the `Exited`/`Died` after the provider's bounded grace is still the
+  terminal. `AgentSession` gains an optional `transport` parameter, wired in
+  `AgentCapability.createSession` from the ambient `ServiceBundle.transport`;
+  absent means no flares, never a failure. The switch stays exhaustive with no
+  default arm, so the next lifecycle variant is caught the same way.
+- Fixed: this pack's three `ProcessGroupController` fakes implement the
+  `groupMembers(pgid)` member the same upstream change added, so the package
+  analyzes and tests clean again.
+- Breaking (floor): `grid_runtime` is floored at `^0.2.0-rc.10`. A single source
+  cannot be exhaustive over `RuntimeEvent` under both rc.9 (no `SessionOrphaned`)
+  and rc.10 (with it), so this pack now requires the candidate that carries the
+  variant and ships with that wave.
+
 ## 0.6.0-rc.9
 
 - Added: the typed-seat arming MECHANISM is vended — `AgentArming` (the pure
