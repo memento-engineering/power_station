@@ -205,8 +205,7 @@ void main() {
         'grid.approved_at',
         'grid.approved_rev',
       ];
-      const refusal =
-          'approval: unstamped label - approve with the approve verb';
+      const refusal = 'approval: not approved - run the approve verb';
 
       final filing = filingSection();
       expect(rendered, isNot(contains('--defer')));
@@ -225,7 +224,10 @@ void main() {
 
       final intake = loader.loadSkillTemplate('intake-refinement');
       expect(intake, isNot(contains('--defer')));
-      expect(intake, contains('grid.approved approval via the approve verb'));
+      expect(
+        intake,
+        contains('grid.approved_* stamp approval via the approve verb'),
+      );
       expect(
         intake,
         contains(
@@ -663,7 +665,7 @@ void main() {
       );
       expect(
         governor,
-        contains('approval: unstamped label - approve with the approve verb'),
+        contains('approval: not approved - run the approve verb'),
       );
     });
 

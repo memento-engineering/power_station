@@ -299,7 +299,7 @@ void main() {
       );
       expect(
         _refusalClause(result.decision),
-        'approval: missing grid.approved label',
+        'approval: not approved - run the approve verb',
       );
     },
   );

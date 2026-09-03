@@ -3,10 +3,12 @@ import 'package:grid_assets/grid_assets.dart';
 import 'package:grid_engine/grid_engine.dart';
 import 'package:test/test.dart';
 
+const String _notApproved = 'approval: not approved - run the approve verb';
+
 Bead _bead({
   IssueType type = IssueType.task,
   Object? plan = 'dart test',
-  List<String> labels = const ['grid.approved'],
+  List<String> labels = const [],
   String description = 'A concrete brief',
   String design = '',
   String acceptance = '',
@@ -27,17 +29,18 @@ Bead _bead({
   labels: labels,
 );
 
+String? _clause(MountEligibilityDecision decision) => switch (decision) {
+  MountEligible() => null,
+  MountRefused(:final clause) => clause,
+};
+
 void main() {
   test('findings are exact and ordered', () {
     expect(
       mountEligibilityFindings(
-        _bead(type: IssueType.epic, plan: null, labels: const []),
+        _bead(type: IssueType.epic, plan: null, stamp: const {}),
       ),
-      [
-        'type: not driveable',
-        'validation_plan: missing',
-        'approval: missing grid.approved label',
-      ],
+      ['type: not driveable', 'validation_plan: missing', _notApproved],
     );
   });
 
@@ -49,8 +52,26 @@ void main() {
     });
   }
 
-  test('audit metadata never substitutes for approval label', () {
-    final bead = _bead(labels: const []).copyWith(
+  test('the grid.approved label is never consulted', () {
+    expect(
+      mountEligibilityFindings(
+        _bead(labels: const ['grid.approved'], stamp: const {}),
+      ),
+      [_notApproved],
+    );
+    expect(
+      _clause(
+        mountEligibilityDecision(
+          _bead(labels: const ['grid.approved'], stamp: const {}),
+        ),
+      ),
+      _notApproved,
+    );
+    expect(mountEligibilityFindings(_bead()), isEmpty);
+  });
+
+  test('legacy audit metadata never substitutes for the stamp', () {
+    final bead = _bead(stamp: const {}).copyWith(
       metadata: const {
         'validation_plan': 'dart test',
         'grid.approval.actor': 'nico',
@@ -58,31 +79,26 @@ void main() {
         'grid.approval.reason': 'reviewed',
       },
     );
-    expect(mountEligibilityFindings(bead), [
-      'approval: missing grid.approved label',
-    ]);
+    expect(mountEligibilityFindings(bead), [_notApproved]);
   });
 
-  test('approval label does not substitute for audit-independent plan', () {
+  test('the stamp does not substitute for a validation plan', () {
     expect(mountEligibilityFindings(_bead(plan: null)), [
       'validation_plan: missing',
     ]);
   });
 
-  test('a hand-added label without the stamp never mounts', () {
-    expect(mountEligibilityFindings(_bead(stamp: const {})), [
-      'approval: unstamped label - approve with the approve verb',
-    ]);
-    final decision = mountEligibilityDecision(_bead(stamp: const {}));
-    final clause = switch (decision) {
-      MountEligible() => null,
-      MountRefused(:final clause) => clause,
-    };
-    expect(clause, 'approval: unstamped label - approve with the approve verb');
+  test('a blank grid.approved_at is not a stamp', () {
+    final blank = _bead(stamp: const {'grid.approved_at': '   '});
+    expect(mountEligibilityFindings(blank), [_notApproved]);
+    expect(isApprovalStamped(blank), isFalse);
   });
 
-  test('the stamped label mounts', () {
+  test('a stamped bead with NO label mounts', () {
+    expect(_bead().labels, isEmpty);
     expect(mountEligibilityFindings(_bead()), isEmpty);
+    expect(isApprovalStamped(_bead()), isTrue);
+    expect(_clause(mountEligibilityDecision(_bead())), isNull);
   });
 
   test('every non-driveable issue type is refused', () {
@@ -95,63 +111,56 @@ void main() {
 
   test('future defer and blank session outputs do not affect eligibility', () {
     final bead = _bead(deferUntil: DateTime.utc(2099));
-    final decision = mountEligibilityDecision(bead);
-    final result = switch (decision) {
-      MountEligible() => 'eligible',
-      MountRefused(:final clause) => clause,
-    };
-    expect(result, 'eligible');
+    expect(_clause(mountEligibilityDecision(bead)), isNull);
     expect(bead.design, isEmpty);
     expect(bead.acceptanceCriteria, isEmpty);
   });
 
   test('refusal carries the first failed clause', () {
-    final decision = mountEligibilityDecision(_bead(plan: null));
-    final result = switch (decision) {
-      MountEligible() => null,
-      MountRefused(:final clause) => clause,
-    };
-    expect(result, 'validation_plan: missing');
+    expect(
+      _clause(mountEligibilityDecision(_bead(plan: null, stamp: const {}))),
+      'validation_plan: missing',
+    );
   });
 
   test('fresh state reports approval when stale validation finding clears', () {
-    final decision = mountEligibilityDecision(
-      _bead(plan: null, labels: const []),
-      freshBead: _bead(labels: const []),
+    expect(
+      _clause(
+        mountEligibilityDecision(
+          _bead(plan: null, stamp: const {}),
+          freshBead: _bead(stamp: const {}),
+        ),
+      ),
+      _notApproved,
     );
-    final clause = switch (decision) {
-      MountEligible() => null,
-      MountRefused(:final clause) => clause,
-    };
-    expect(clause, 'approval: missing grid.approved label');
   });
 
   test('fresh state preserves validation first when both fail', () {
-    final decision = mountEligibilityDecision(
-      _bead(plan: null, labels: const []),
-      freshBead: _bead(plan: null, labels: const []),
+    expect(
+      _clause(
+        mountEligibilityDecision(
+          _bead(plan: null, stamp: const {}),
+          freshBead: _bead(plan: null, stamp: const {}),
+        ),
+      ),
+      'validation_plan: missing',
     );
-    final clause = switch (decision) {
-      MountEligible() => null,
-      MountRefused(:final clause) => clause,
-    };
-    expect(clause, 'validation_plan: missing');
   });
 
   test('fresh state clears tentative refusal', () {
-    final decision = mountEligibilityDecision(
-      _bead(plan: null, labels: const []),
-      freshBead: _bead(),
+    expect(
+      _clause(
+        mountEligibilityDecision(
+          _bead(plan: null, stamp: const {}),
+          freshBead: _bead(),
+        ),
+      ),
+      isNull,
     );
-    final eligible = switch (decision) {
-      MountEligible() => true,
-      MountRefused() => false,
-    };
-    expect(eligible, isTrue);
   });
 
   test('intake remains its distinct two-clause lifecycle contract', () {
-    final bead = _bead(plan: null, labels: const []);
+    final bead = _bead(plan: null, stamp: const {});
     expect(intakeFindings(bead), isEmpty);
     expect(mountEligibilityFindings(bead), isNotEmpty);
   });

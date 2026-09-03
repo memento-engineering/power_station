@@ -4,9 +4,9 @@ description: >
   Shape work beads so a resident the_grid station can drive them: prior-art
   search before a filing is accepted, the required validation_plan metadata,
   driveable issue types, dependency wiring, flagged EITHER/OR forks, the
-  deterministic filing exit check, stamped
-  grid.approved approval via the approve verb, and reconciling a backlog
-  against what already shipped in mainline. Use when filing, approving,
+  deterministic filing exit check,
+  grid.approved_* stamp approval via the approve verb, and reconciling a
+  backlog against what already shipped in mainline. Use when filing, approving,
   re-homing, or auditing beads in any store the station arms — including "why
   won't this bead mount" and "is this backlog actually current" questions.
 compatibility: Requires bd (beads CLI) and git.
@@ -169,7 +169,7 @@ checker of its own.
 
 ## The exit check — `filing` is the oracle, and it is a COMMAND
 
-Refinement EXITS on the verb, never on a reading. From the owning store root:
+Refinement EXITS on the verb, never on a reading. From the grid home (the verb resolves the owning store by the id's prefix):
 
 ```bash
 {{runner}} filing --json "<bead>"
@@ -204,28 +204,28 @@ rerun. Never approve past an `error`.
 
 ## Staging: approve with the approve verb, only after refinement
 
-Drafts are created open without `grid.approved`; the human's approval is the
-approve verb, which re-runs the same four-row filing preflight and then writes
-the label AND its stamp in one `bd update`. Against a LIVE station, the
-mounted predicate refuses any bead missing the label, and refuses a
-hand-added, unstamped one with
-`approval: unstamped label - approve with the approve verb`, so the mount race
-is closed without a timer:
+Drafts are created open and UNSTAMPED; the human's approval is the approve
+verb, which re-runs the same four-row filing preflight and then writes the
+`grid.approved_*` stamp in one `bd update`. Against a LIVE station, the
+mounted predicate refuses any unstamped bead with
+`approval: not approved - run the approve verb` — the retired `grid.approved`
+label is not read — so the mount race is closed without a timer:
 
-- Create without `grid.approved`, wire deps, finish the description and design,
+- Create UNSTAMPED, wire deps, finish the description and design,
   and drive `{{runner}} filing --json "<bead>"` to `"passed": true`. Only after
-  human approval, from the owning store root, run:
+  human approval, from the grid home, run:
 
   ```
   {{runner}} approve --actor operator --json "<bead>"
   ```
 
   The verb stamps `grid.approved_by` (the `--actor`), `grid.approved_at` (the
-  UTC ISO-8601 instant) and `grid.approved_rev` (the store root's git HEAD sha)
-  beside the label; that one stamped write is the final transition into the
-  mounted frontier. A refusal writes nothing — it reports `"approved": false`
+  UTC ISO-8601 instant) and `grid.approved_rev` (the store root's git HEAD
+  sha); that one stamped write is the final transition into the mounted
+  frontier. A refusal writes nothing — it reports `"approved": false`
   with a `reason` plus the failing filing rows; fix them and rerun the verb.
-- Removing `grid.approved` from a bead that is ALREADY mounted does not evict it
+- Removing the `grid.approved_*` stamp from a bead that is ALREADY mounted does
+  not evict it
   — mounted work is never evicted for budget or readiness reasons; only a
   positive terminal (bead closed / session terminal) unmounts.
 
