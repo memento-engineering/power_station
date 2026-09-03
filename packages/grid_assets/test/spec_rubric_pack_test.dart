@@ -482,4 +482,37 @@ void main() {
       );
     });
   });
+
+  group('the pow-bhm re-tune — the vended docs (ratified 2026-07-18)', () {
+    test('coherence grades the CODEBASE axis only — the bead graph is '
+        'reported, never graded', () {
+      final text = File(
+        p.join(_extensionDir(), 'rubrics', 'coherence.md'),
+      ).readAsStringSync();
+      expect(text, contains(kVerdictRefinementKey));
+      expect(text, contains('never graded'));
+      expect(
+        text,
+        isNot(contains('the WORSE axis sets the floor')),
+        reason: 'the two-axis floor rule is what pow-bhm retired',
+      );
+    });
+
+    test('adr-alignment bands a MISATTRIBUTED citation as C', () {
+      final text = File(
+        p.join(_extensionDir(), 'rubrics', 'adr-alignment.md'),
+      ).readAsStringSync();
+      final cBand = text.split('- **D**').first;
+      expect(cBand, contains('MISATTRIBUTED'));
+      expect(text, contains('MISSING or MISAPPLIED'));
+    });
+
+    test('the vended spec-critic prompt teaches the refinement column', () {
+      final text = File(
+        p.join(_extensionDir(), 'prompts', 'spec-critic.md'),
+      ).readAsStringSync();
+      expect(text, contains(kVerdictRefinementKey));
+      expect(text, contains('NEVER grades'));
+    });
+  });
 }

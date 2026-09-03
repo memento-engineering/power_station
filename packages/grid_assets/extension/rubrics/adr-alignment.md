@@ -53,11 +53,16 @@ verifiable.
 - **C** — the spec is clearly downstream of a recorded decision (it extends a
   surface the decision established) but never cites it; the alignment is
   accidental rather than acknowledged. Or: the section claims "no ADR applies"
-  without naming the keywords that verified it.
-- **D** — your grep returns a decision that plainly governs a surface this
-  spec touches, and the spec does not cite it. The fix is mechanical — add the
-  citation with the quoted clause and apply (or explicitly distinguish) the
-  precedent — so this routes to spec rework, not a human.
+  without naming the keywords that verified it. Or: a MISATTRIBUTED citation —
+  the quoted clause is verbatim-correct and load-bearing but sits under the
+  wrong decision number or slug. The decision was read and applied; the label
+  slipped, and the fix is one edited identifier.
+- **D** — a governing decision is MISSING or MISAPPLIED: your grep returns a
+  decision that plainly governs a surface this spec touches and the spec cites
+  nothing for it, or the spec cites a constraint it then applies backwards, so
+  the DESIGN changes once the decision is honoured. Reserve `D` for those two —
+  a citation whose clause is right and whose number is wrong is a `C`
+  correction, not a round failure (station policy, ratified 2026-07-18).
 - **F** — a structural contradiction: the spec, AS WRITTEN, would invert or
   undo a load-bearing clause of a recorded decision, and no citation paragraph
   can fix it — implementing the spec means the precedent no longer holds. The
@@ -81,6 +86,9 @@ verifiable.
 - The org invariants (the seam word is **extension**, never "plugin"; package
   names are human faculties, never agent-nouns; bd CLI only, never SQL) count
   as recorded decisions even when a local ADR does not restate them.
+- Check the CLAUSE before the number: quote what the spec quoted against the
+  file you read. If the clause is verbatim-correct and governs, the citation
+  did its job — grade the mislabel `C`.
 
 ## Ownership — who can fix a D or an E?
 

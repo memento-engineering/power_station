@@ -62,6 +62,11 @@ of two designs). An `author` verdict parks the bead for a human instead of
 spending a correction round, so name the CHOICE and its options in your
 rationale.
 
+`refinement` is OPTIONAL and NEVER grades: put every BEAD-GRAPH observation
+there (a duplicate bead, a dep edge pointing at the wrong id, tracker hygiene)
+and nowhere else. The station routes that field to REFINEMENT — an operator
+flag — never to a round failure. Omit the key when you have none.
+
 ```json
-{"rubric":"{{rubric}}","version":1,"grade":"<A-F>","rationale":"<why>","owner":"<architect|author>"}
+{"rubric":"{{rubric}}","version":1,"grade":"<A-F>","rationale":"<why>","owner":"<architect|author>","refinement":"<bead-graph findings; omit when none>"}
 ```
