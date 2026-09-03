@@ -939,11 +939,7 @@ void main() {
     test('LIVE: a planted `refinement` column WRITES the refinement flag and '
         'rides the payload — while the round still ADVANCES clean', () async {
       const note = 'tg-yau duplicates this bead; tg-9kk deps on the duplicate';
-      _plantVerdicts(
-        ws.path,
-        _allA(),
-        refinements: const {'coherence': note},
-      );
+      _plantVerdicts(ws.path, _allA(), refinements: const {'coherence': note});
       final out = await _route(_allA(), workspaceDir: ws.path);
       expect(out, isA<Advance>());
       final payload = (out as Advance).payload!;

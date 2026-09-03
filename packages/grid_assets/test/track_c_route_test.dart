@@ -200,29 +200,26 @@ void main() {
       expect((out as Escalate).reason, contains('rework'));
     });
 
-    test(
-      'TWO non-gating critics at an action grade ⇒ Gate (rework)',
-      () async {
-        // The round did not converge on a SINGLE carriable finding, so it
-        // gates — even though each lane says WHY (bead `pow-bhm`).
-        final out = await _route(
-          const {
-            'code-validation': 'B',
-            kDeclaredTestsRubric: 'B',
-            'spec-adherence': 'C',
-            'regression-risk': 'D',
-            'test-coverage': 'D',
-          },
-          rationales: const {
-            'regression-risk': 'the retry loop is unbounded',
-            'test-coverage': 'the new arm has no test',
-          },
-        );
-        expect(out, isA<Escalate>());
-        expect((out as Escalate).reason, contains('two or more critics'));
-        expect(out.reason, contains('rework'));
-      },
-    );
+    test('TWO non-gating critics at an action grade ⇒ Gate (rework)', () async {
+      // The round did not converge on a SINGLE carriable finding, so it
+      // gates — even though each lane says WHY (bead `pow-bhm`).
+      final out = await _route(
+        const {
+          'code-validation': 'B',
+          kDeclaredTestsRubric: 'B',
+          'spec-adherence': 'C',
+          'regression-risk': 'D',
+          'test-coverage': 'D',
+        },
+        rationales: const {
+          'regression-risk': 'the retry loop is unbounded',
+          'test-coverage': 'the new arm has no test',
+        },
+      );
+      expect(out, isA<Escalate>());
+      expect((out as Escalate).reason, contains('two or more critics'));
+      expect(out.reason, contains('rework'));
+    });
 
     test(
       'a MISSING sibling grade ⇒ Gate (fail-closed — can never advance)',

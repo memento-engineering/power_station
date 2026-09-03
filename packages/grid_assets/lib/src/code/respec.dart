@@ -303,7 +303,8 @@ SpecRouteVerdict decideSpecRoute({
   // of the converged arm so the single-finding advance (arm 7) reports it too.
   final indices = [
     for (final l in lanes)
-      if (l.grade != null && l.grade!.trim().isNotEmpty) _gradeIndex(gradeOf(l)),
+      if (l.grade != null && l.grade!.trim().isNotEmpty)
+        _gradeIndex(gradeOf(l)),
   ];
   final spread = indices.isEmpty
       ? 0
