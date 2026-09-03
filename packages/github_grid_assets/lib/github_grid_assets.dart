@@ -21,6 +21,7 @@ export 'src/github/ci_feedback.dart';
 export 'src/github/ci_feedback_projection.dart';
 export 'src/github/github_reconciler.dart';
 export 'src/github/github_reconciler_runtime.dart';
+export 'src/github/link_header.dart';
 export 'src/github/reconciler_cursor.dart';
 export 'src/github/reconciler_event.dart';
 export 'src/github/resident_feedback_command.dart';

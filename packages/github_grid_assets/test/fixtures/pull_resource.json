@@ -1,0 +1,18 @@
+{
+  "node_id": "PR_2",
+  "number": 2,
+  "state": "open",
+  "title": "A pull request",
+  "updated_at": "2026-08-09T02:00:00Z",
+  "user": { "login": "octocat" },
+  "head": {
+    "label": "memento:grid/pow-40a4",
+    "ref": "grid/pow-40a4",
+    "sha": "0f1e2d3c4b5a69788796a5b4c3d2e1f009182736"
+  },
+  "base": {
+    "label": "memento:main",
+    "ref": "main",
+    "sha": "1122334455667788990011223344556677889900"
+  }
+}

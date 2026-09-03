@@ -22,7 +22,8 @@ sealed class NormalizedGitHubEvent with _$NormalizedGitHubEvent {
     required String body,
   }) = IssueOpened;
 
-  /// A newly observed pull request.
+  /// A newly observed pull request, carrying the head ref of its full
+  /// `/pulls/{number}` resource (the issues row alone has no `head`).
   const factory NormalizedGitHubEvent.pullRequestOpened({
     required String nodeId,
     required String actor,
@@ -32,6 +33,7 @@ sealed class NormalizedGitHubEvent with _$NormalizedGitHubEvent {
     required int number,
     required String title,
     required String body,
+    required String headRef,
   }) = PullRequestOpened;
 
   /// A completed check run observed on a station branch.
