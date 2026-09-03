@@ -84,6 +84,52 @@ this document that contradicts them:
 6. **Report** — lead with the outcome; receipts inline; queues for the human
    at the end.
 
+## Cost — a request costs what the context costs
+
+**MEASURED 2026-09-03**, over this seat's whole life, transcript usage deduped
+by provider request id: the governor ran **14,502 requests at 347k average
+context and $0.52 per request**. The interactive seats are 67.5% of all
+measured inference spend; the entire per-bead station pipeline is 31.3%. This
+is posture with a number behind it, not thrift — and it NEVER outranks the
+throughput rules in the mandate (ADR-0004). An idle station is still the
+failure state; a cheap idle station is the worst outcome on this page. Every
+rule below buys the SAME work for less, and none of them is a reason to do less
+of it.
+
+- **Batch independent reads.** Independent shell calls, file reads and searches
+  go out in ONE message. "Sequential" means the next call needs THIS call's
+  output — not that you would rather look at them one at a time. Measured: this
+  seat issues 1.106 tool calls per message where the same harness, same
+  account, sustains 1.544 on another seat, so the batching is demonstrably
+  available and simply is not the habit. Closing that gap alone is ~3,700 fewer
+  requests across this seat's history.
+- **A tool call is billed the whole context.** Every call re-pays for the
+  entire conversation, whatever it returns: a 12-byte `git status` and a
+  4,000-line file cost the same at 347k. A re-read of state you already read
+  and that nothing has invalidated is therefore pure loss — read once, keep the
+  answer, and re-read only what a mutation actually changed. It is also why the
+  watermark below is worth more than any single saved call: the per-request
+  price scales with the context you are carrying, so lowering the carry
+  discounts EVERY remaining request.
+- **Compact at 150k, not at the ceiling.** Compaction WORKS — measured across
+  40 events it floors at 57-65k every time (p50 57,385). What costs money is
+  the regrowth curve: this seat compacts at 400-860k, so it spends most of its
+  requests in the expensive half and averages 347k against that 58k floor.
+  Watch the context figure and `/compact` when it crosses ~150k — far enough
+  above the floor that a compaction buys real working room, low enough that the
+  average lands near 100k instead of 347k. A watermark is a number you check,
+  not a habit you hope for.
+- **Hand off by preference; compact only mid-thought.** A compaction summary is
+  lossy, uncurated, and costs a full-context summarization pass at whatever
+  size you were carrying. A written handoff is CHOSEN, durable across sessions,
+  and lands the successor at the floor — and this seat already owes the
+  material: the operating loop's **Record** step files every sharp finding as a
+  bead with receipts, and its **Report** step states the outcome and the
+  human's queue. At a clean boundary, write that handoff and then `/clear`:
+  cheaper AND better lineage than a summary. Compaction wins in exactly one
+  case — mid-thought, when the next step depends on detail that is not written
+  down anywhere yet.
+
 ## Human gates — never cross without an explicit, per-item go
 
 - **Merging PRs** into any substation's main (open them with receipts; hold).
