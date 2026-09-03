@@ -263,6 +263,48 @@ void main() {
     });
   });
 
+  // The code route's single-finding advance (bead `pow-bhm`) writes
+  // `fix_in_flight` onto its route result as `<lane>=<grade>`; the PR body
+  // surfaces it as ONE digest line, so a reviewer reads the open finding this
+  // PR was built carrying without opening the circuit.
+  group('the committee digest names the carried finding', () {
+    SiblingView siblingsWith({String? carried}) => SiblingView(
+      results: {
+        'tg-1/review/route': {
+          'grades': 'code-validation=A regression-risk=D',
+          'spread': '1',
+          'rule': carried == null ? 'all-approve' : 'single-finding-advance',
+          if (carried != null) 'fix_in_flight': carried,
+        },
+      },
+    );
+
+    test('a carried finding renders `- fix in flight: <lane>=<grade>`', () {
+      final body = const PrComposition().bodyOf(
+        _context(siblings: siblingsWith(carried: 'regression-risk=D')),
+      );
+      expect(body, contains('## Committee'));
+      expect(body, contains('- fix in flight: regression-risk=D'));
+    });
+
+    test('no carried finding ⇒ the committee section omits the line', () {
+      final body = const PrComposition().bodyOf(
+        _context(siblings: siblingsWith()),
+      );
+      expect(body, contains('## Committee'));
+      expect(body, isNot(contains('fix in flight')));
+    });
+
+    test('an EMPTY carry value omits the line — the guard is the emptiness '
+        'check, not mere presence of the key', () {
+      final body = const PrComposition().bodyOf(
+        _context(siblings: siblingsWith(carried: '')),
+      );
+      expect(body, contains('## Committee'));
+      expect(body, isNot(contains('fix in flight')));
+    });
+  });
+
   group('the human DIGEST leads the body', () {
     test(
       'an inferred digest renders under `## Summary`, ABOVE the receipt — the '
