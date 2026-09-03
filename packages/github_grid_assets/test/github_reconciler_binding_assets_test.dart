@@ -272,7 +272,7 @@ void main() {
     expect(paths.toSet(), hasLength(2));
   });
 
-  test('sink admits only self actors as deferred intake', () async {
+  test('sink admits only self actors as OPEN intake', () async {
     final runner = _BdRunner();
     GitHubEventSink? sink;
     final owner = TreeOwner();
@@ -311,12 +311,13 @@ void main() {
         'create',
         '--type',
         'chore',
-        '--defer',
-        '9999-12-31',
+        '--priority',
+        '2',
         '--external-ref',
         'github:I_1',
       ]),
     );
+    expect(runner.argvs[1], isNot(contains('--defer')));
     expect(
       runner.argvs[2],
       containsAllInOrder(['update', '--set-metadata', 'github.node_id=I_1']),

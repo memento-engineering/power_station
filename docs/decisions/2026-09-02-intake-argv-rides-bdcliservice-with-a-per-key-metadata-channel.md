@@ -12,7 +12,7 @@ register:
   obsoletes: []
   updates: []
   obsoleted-by: null
-  updated-by: []
+  updated-by: ["github-intake-files-open-and-unstamped"]
   bead: pow-0nvg
   legacy-id: null
 ---
@@ -76,3 +76,11 @@ and the spawn-count assertion in
 `packages/github_grid_assets/test/github_reconciler_binding_assets_test.dart`.
 DEPARTS from ADR-0004 D1; PRESERVES A30's durable-not-ephemeral filing shape
 (no ephemeral flag is introduced). No change under `the_grid`.
+
+**AMENDED 2026-09-03 by `power_station#github-intake-files-open-and-unstamped`
+(bead `pow-5wo`).** The ADR-0004 D1 DEPARTURE declared above is RETIRED.
+`BdGitHubIntakeStore` no longer parks intake beads on `9999-12-31`: it files
+them OPEN and unstamped, and the pending state is the absence of the approve
+verb's `grid.approved_*` stamp. The MECHANISM half of this entry — all three
+surfaces ride `BdCliService`, metadata per key on the follow-up `update` — is
+unchanged and still binds.

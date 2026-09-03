@@ -220,7 +220,17 @@ void main() {
           .toList(growable: false);
       expect(creates, hasLength(2));
       for (final argv in creates) {
-        expect(argv, containsAllInOrder(<String>['--defer', '9999-12-31']));
+        expect(
+          argv,
+          containsAllInOrder(<String>[
+            'create',
+            '--type',
+            'chore',
+            '--priority',
+            '2',
+          ]),
+        );
+        expect(argv, isNot(contains('--defer')));
       }
       expect(
         creates.map((argv) => argv[argv.indexOf('--external-ref') + 1]).toSet(),

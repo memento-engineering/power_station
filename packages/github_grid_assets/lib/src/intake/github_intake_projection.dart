@@ -3,7 +3,7 @@ import 'package:grid_engine/grid_engine.dart';
 import '../github/reconciler_event.dart';
 import 'github_intake_store.dart';
 
-/// Projects admitted GitHub-open events into deferred beads.
+/// Projects admitted GitHub-open events into OPEN, unstamped intake beads.
 final class GitHubIntakeProjection {
   /// Creates the projection from engine trust and a bead store.
   const GitHubIntakeProjection({
@@ -67,6 +67,6 @@ final class GitHubIntakeProjection {
         ),
       CheckConcluded() => throw StateError('unreachable feedback event'),
     };
-    await _store.upsertDeferred(record);
+    await _store.upsert(record);
   }
 }

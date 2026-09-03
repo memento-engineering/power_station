@@ -1,3 +1,11 @@
+## 0.1.0-rc.8
+
+- Breaking: `GitHubIntakeStore.upsertDeferred` is renamed `upsert`, and admitted
+  GitHub intake beads are filed OPEN — the `9999-12-31` parking date is dropped
+  (pow-5wo). The store writes no approval marker of any kind; absence of the
+  approve verb's `grid.approved_*` stamp is the pending state
+  (`power_station#github-intake-files-open-and-unstamped`).
+
 ## 0.1.0-rc.7
 
 - Breaking: the reconciler tolerates pull rows and flare polling failures

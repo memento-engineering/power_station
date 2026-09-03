@@ -62,14 +62,14 @@ BdResult ok(Object? data, {int schemaVersion = 1}) => BdResult(
 
 void main() {
   group('BdGitHubIntakeStore', () {
-    test('creates a durable deferred core bead for a new node id', () async {
+    test('creates a durable OPEN core bead for a new node id', () async {
       final runner = FakeBdRunner([
         ok([]),
         ok({'id': 'pow-new'}),
         ok({'id': 'pow-new'}),
       ]);
 
-      await BdGitHubIntakeStore(runner).upsertDeferred(record);
+      await BdGitHubIntakeStore(runner).upsert(record);
 
       expect(runner.argvs, hasLength(3));
       expect(runner.argvs[0], [
@@ -94,8 +94,6 @@ void main() {
         '2',
         '--description',
         expectedBody,
-        '--defer',
-        '9999-12-31',
         '--external-ref',
         'github:I_1',
       ]);
@@ -114,6 +112,30 @@ void main() {
     });
 
     test(
+      'the create argv carries no parking date and no approval marker',
+      () async {
+        final runner = FakeBdRunner([
+          ok([]),
+          ok({'id': 'pow-new'}),
+          ok({'id': 'pow-new'}),
+        ]);
+
+        await BdGitHubIntakeStore(runner).upsert(record);
+
+        final flattened = runner.argvs.expand((argv) => argv).toList();
+        expect(flattened, isNot(contains('--defer')));
+        expect(flattened.where((arg) => arg.contains('9999')), isEmpty);
+        expect(
+          flattened.where((arg) => arg.contains('grid.approved')),
+          isEmpty,
+          reason: 'the approve verb is the only writer of the approval stamp',
+        );
+        expect(flattened, isNot(contains('--label')));
+        expect(flattened, isNot(contains('--add-label')));
+      },
+    );
+
+    test(
       'updates the sole correlated bead without readiness mutation',
       () async {
         final runner = FakeBdRunner([
@@ -123,7 +145,7 @@ void main() {
           ok({'id': 'pow-existing'}),
         ]);
 
-        await BdGitHubIntakeStore(runner).upsertDeferred(record);
+        await BdGitHubIntakeStore(runner).upsert(record);
 
         expect(runner.argvs, hasLength(2));
         expect(runner.argvs[1], [
@@ -154,7 +176,7 @@ void main() {
         ]),
       ]);
       await expectLater(
-        BdGitHubIntakeStore(multiple).upsertDeferred(record),
+        BdGitHubIntakeStore(multiple).upsert(record),
         throwsStateError,
       );
 
@@ -164,7 +186,7 @@ void main() {
         ]),
       ]);
       await expectLater(
-        BdGitHubIntakeStore(empty).upsertDeferred(record),
+        BdGitHubIntakeStore(empty).upsert(record),
         throwsA(isA<BdParseException>()),
       );
 
@@ -175,7 +197,7 @@ void main() {
           ]),
         ]);
         await expectLater(
-          BdGitHubIntakeStore(malformed).upsertDeferred(record),
+          BdGitHubIntakeStore(malformed).upsert(record),
           throwsA(isA<TypeError>()),
         );
       }
@@ -186,19 +208,19 @@ void main() {
         const BdResult(exitCode: 1, stdout: '', stderr: 'nope'),
       ]);
       await expectLater(
-        BdGitHubIntakeStore(failed).upsertDeferred(record),
+        BdGitHubIntakeStore(failed).upsert(record),
         throwsA(isA<BdCommandFailed>()),
       );
       final drifted = FakeBdRunner([ok([], schemaVersion: 2)]);
       await expectLater(
-        BdGitHubIntakeStore(drifted).upsertDeferred(record),
+        BdGitHubIntakeStore(drifted).upsert(record),
         throwsA(isA<BdSchemaDriftException>()),
       );
       final malformed = FakeBdRunner([
         ok({'id': 'not-a-list'}),
       ]);
       await expectLater(
-        BdGitHubIntakeStore(malformed).upsertDeferred(record),
+        BdGitHubIntakeStore(malformed).upsert(record),
         throwsA(isA<BdParseException>()),
       );
     });
