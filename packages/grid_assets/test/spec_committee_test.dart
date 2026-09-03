@@ -599,19 +599,22 @@ void main() {
         expect(specStructuralFindings(mentioning), isEmpty);
       });
 
-      test('a MENTION with no real `## Validation Plan` section blocks — the '
-          'finding is unchanged, and today the mention SATISFIES the check', () {
-        final mentionOnly = _specced().copyWith(
-          design: _specced().design.replaceFirst(
-            '\n## Validation Plan\n',
-            '\nEvery criterion is mapped (see ## Validation Plan).\n',
-          ),
-        );
-        expect(
-          specStructuralFindings(mentionOnly).single,
-          contains('no `## Validation Plan` section'),
-        );
-      });
+      test(
+        'a MENTION with no real `## Validation Plan` section blocks — the '
+        'finding is unchanged, and today the mention SATISFIES the check',
+        () {
+          final mentionOnly = _specced().copyWith(
+            design: _specced().design.replaceFirst(
+              '\n## Validation Plan\n',
+              '\nEvery criterion is mapped (see ## Validation Plan).\n',
+            ),
+          );
+          expect(
+            specStructuralFindings(mentionOnly).single,
+            contains('no `## Validation Plan` section'),
+          );
+        },
+      );
 
       test('a MENTION with no real `## Implementation Plan` section blocks — '
           'the finding is unchanged', () {
