@@ -1005,26 +1005,78 @@ class GitSourceControl implements SourceControl {
     return null;
   }
 
+  /// Moves the stashed scaffold back into the freshly provisioned checkout,
+  /// MERGING directories.
+  ///
+  /// A fresh checkout can legitimately TRACK a path the scaffold also occupies:
+  /// the_grid tracks `.grid/seats/` while the engine scaffolds `.grid/critique/`
+  /// into the same dir. Refusing on the shared DIRECTORY name discarded every
+  /// fresh the_grid provision, so a directory meeting a directory RECURSES, and
+  /// only a FILE meeting an existing path is a collision.
+  ///
+  /// Collisions are detected over the WHOLE tree before ANY entry moves: a
+  /// half-moved scaffold is lost by [_restoreWorkspaceAfterProvisionFailure]
+  /// (which deletes the workspace and renames the stash back), so the
+  /// refuse-before-moving guarantee holds at every depth.
   static void _restoreStashedEntries({
     required Directory stash,
     required Directory workspace,
     required String beadId,
   }) {
-    final entries = stash.listSync(followLinks: false);
-    for (final entry in entries) {
-      final target = p.join(workspace.path, p.basename(entry.path));
-      if (FileSystemEntity.typeSync(target, followLinks: false) !=
-          FileSystemEntityType.notFound) {
-        throw StateError(
-          'provisionWorkspace: scaffold path collision for $beadId at '
-          '"$target"',
-        );
-      }
-    }
-    for (final entry in entries) {
-      entry.renameSync(p.join(workspace.path, p.basename(entry.path)));
-    }
+    _assertNoFileCollisions(source: stash, target: workspace, beadId: beadId);
+    _moveChildren(source: stash, target: workspace);
     stash.deleteSync();
+  }
+
+  /// Throws [StateError] when any entry under [source] would land on an
+  /// EXISTING path in [target] that is not a directory-onto-directory merge.
+  /// Reads only; moves nothing.
+  static void _assertNoFileCollisions({
+    required Directory source,
+    required Directory target,
+    required String beadId,
+  }) {
+    for (final entry in source.listSync(followLinks: false)) {
+      final targetPath = p.join(target.path, p.basename(entry.path));
+      final targetType = FileSystemEntity.typeSync(
+        targetPath,
+        followLinks: false,
+      );
+      if (targetType == FileSystemEntityType.notFound) continue;
+      if (entry is Directory && targetType == FileSystemEntityType.directory) {
+        _assertNoFileCollisions(
+          source: entry,
+          target: Directory(targetPath),
+          beadId: beadId,
+        );
+        continue;
+      }
+      throw StateError(
+        'provisionWorkspace: scaffold path collision for $beadId at '
+        '"$targetPath"',
+      );
+    }
+  }
+
+  /// Moves every child of [source] into [target], recursing where BOTH sides
+  /// are directories and deleting each emptied source dir behind it. A symlink
+  /// is moved whole (`listSync(followLinks: false)` yields a [Link], never a
+  /// [Directory]). Callers run [_assertNoFileCollisions] first.
+  static void _moveChildren({
+    required Directory source,
+    required Directory target,
+  }) {
+    for (final entry in source.listSync(followLinks: false)) {
+      final targetPath = p.join(target.path, p.basename(entry.path));
+      if (entry is Directory &&
+          FileSystemEntity.typeSync(targetPath, followLinks: false) ==
+              FileSystemEntityType.directory) {
+        _moveChildren(source: entry, target: Directory(targetPath));
+        entry.deleteSync();
+        continue;
+      }
+      entry.renameSync(targetPath);
+    }
   }
 
   static void _restoreWorkspaceAfterProvisionFailure({
