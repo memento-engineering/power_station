@@ -87,7 +87,7 @@ class _FakeStat {
 
 /// The fixture PEMs, read ONCE at library load — never inside a settle window.
 ///
-/// [_FakeRead] used to `await File(path).readAsString()`, putting a REAL
+/// [_FakeRead] used to await `File.readAsString` on the path, putting a REAL
 /// asynchronous filesystem hop BELOW the fake seam. A pump-only wait advances
 /// event-loop turns and cannot wait out an OS completion, so the asset's key
 /// load had frequently not landed when the assertions ran.
