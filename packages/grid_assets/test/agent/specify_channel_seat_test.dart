@@ -71,6 +71,9 @@ class _Runtime implements RuntimeProvider {
       _output.add(utf8.encode('${jsonEncode(frame)}\n'));
 
   @override
+  String exitOutputOf(String name) => '';
+
+  @override
   Future<void> start(String name, RuntimeConfig config) async => running = true;
 
   @override
