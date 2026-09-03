@@ -480,7 +480,11 @@ void main() {
 
     test('the AUDIENCE split: an operator skill is never named in a build '
         "agent's brief — one of them PUSHES, which the brief forbids", () {
-      expect(kOperatorSkills, reHomed.keys.toSet());
+      expect(
+        kOperatorSkills,
+        {...reHomed.keys, 'handoff'},
+        reason: 'handoff is operator-audience without being a re-homed skill',
+      );
       expect(
         kOperatorSkills,
         isNot(contains('discover')),

@@ -27,7 +27,7 @@ void main() {
                   .replaceAll('\\', '/'),
             ),
     ]..sort();
-    expect(expected, hasLength(16));
+    expect(expected, hasLength(18));
     for (final path in expected) {
       expect(
         output,
