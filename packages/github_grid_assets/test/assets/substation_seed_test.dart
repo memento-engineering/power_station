@@ -1,7 +1,7 @@
 // The composed seat, mounted from a DOWNSTREAM consumer's import set:
 // `the_grid` (grid_sdk / grid_engine / grid_runtime / genesis_tree) plus
-// `power_station` (github_grid_assets / grid_assets). NO space_station import
-// appears here, and that absence is the whole claim this file makes.
+// `power_station` (github_grid_assets / grid_assets). NO composing-station
+// import appears here, and that absence is the whole claim this file makes.
 //
 // Pure + offline: every tree mounts in a bare `TreeOwner` under a
 // `ProviderScope` (the availability registry `runGrid` mounts at the production
