@@ -398,5 +398,44 @@ void main() {
         _verify(twoTransport, _twoPublicKey);
       },
     );
+
+    test(
+      'a hostile ambient GRID_GITHUB_APP_KEY_* entry never reaches the '
+      'resolved identity — only the injected fixture variables do',
+      () async {
+        final stat = _FakeStat(const {
+          _onePath: GitHubKeyFileStat(
+            type: FileSystemEntityType.file,
+            mode: 0x180,
+          ),
+        });
+        final read = _FakeRead();
+        final transport = _FakeTransport();
+        GitHubAppClient? observed;
+        final owner = TreeOwner();
+        addTearDown(owner.dispose);
+        owner.mountRoot(
+          sdk.ProviderScope(
+            child: _assets(
+              config: _config('one'),
+              privateKeyVar: _oneVar,
+              loader: _loader(const {
+                _oneVar: _onePath,
+                'GRID_GITHUB_APP_KEY_MEMENTO': '/hostile/memento.pem',
+                'GRID_GITHUB_APP_KEY_NICHOLAS': '/hostile/nicholas.pem',
+              }, stat, read),
+              transportFactory: () => transport,
+              observe: (value) => observed = value,
+            ),
+          ),
+        );
+        owner.flush();
+        await _settle(owner, () => observed != null);
+        expect(stat.paths, [_onePath]);
+        expect(read.paths, [_onePath]);
+        await _send(observed!);
+        _verify(transport, _onePublicKey);
+      },
+    );
   });
 }
