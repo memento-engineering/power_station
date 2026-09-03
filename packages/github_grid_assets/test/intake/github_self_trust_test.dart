@@ -29,20 +29,20 @@ void main() {
 
     test('reads GITHUB_USER from a supplied environment', () async {
       final fromEnvironment = GitHubSelfTrust.fromEnvironment(
-        environment: const {'GITHUB_USER': 'nico'},
+        environment: () => const {'GITHUB_USER': 'nico'},
       );
       expect(fromEnvironment.githubUser, 'nico');
     });
 
     test('refuses absent or blank GITHUB_USER', () {
       expect(
-        () => GitHubSelfTrust.fromEnvironment(environment: const {}),
+        () => GitHubSelfTrust.fromEnvironment(environment: () => const {}),
         throwsStateError,
       );
       for (final value in ['', '  ']) {
         expect(
           () => GitHubSelfTrust.fromEnvironment(
-            environment: {'GITHUB_USER': value},
+            environment: () => {'GITHUB_USER': value},
           ),
           throwsArgumentError,
         );

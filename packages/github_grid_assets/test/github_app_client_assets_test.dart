@@ -7,6 +7,8 @@ import 'package:github_grid_assets/github_grid_assets.dart';
 import 'package:grid_sdk/grid_sdk.dart' as sdk;
 import 'package:test/test.dart';
 
+import 'support/asset_fakes.dart';
+
 const _oneVar = 'APP_ONE_PRIVATE_KEY';
 const _twoVar = 'APP_TWO_PRIVATE_KEY';
 const _onePath = 'test/fixtures/github_app_test_private.pem';
@@ -72,19 +74,35 @@ class _HostState extends State<_Host> {
 class _FakeStat {
   _FakeStat(this.values);
   final Map<String, GitHubKeyFileStat> values;
-  var calls = 0;
+
+  /// Every path this fake was asked to stat, in order.
+  final paths = <String>[];
+  int get calls => paths.length;
   Future<GitHubKeyFileStat> call(String path) async {
-    calls++;
+    paths.add(path);
     return values[path] ??
         const GitHubKeyFileStat(type: FileSystemEntityType.notFound, mode: 0);
   }
 }
 
+/// The fixture PEMs, read ONCE at library load — never inside a settle window.
+///
+/// [_FakeRead] used to await `File.readAsString` on the path, putting a REAL
+/// asynchronous filesystem hop BELOW the fake seam. A pump-only wait advances
+/// event-loop turns and cannot wait out an OS completion, so the asset's key
+/// load had frequently not landed when the assertions ran.
+final _pems = <String, String>{
+  _onePath: File(_onePath).readAsStringSync(),
+  _twoPath: File(_twoPath).readAsStringSync(),
+};
+
 class _FakeRead {
-  var calls = 0;
+  /// Every path this fake was asked to read, in order.
+  final paths = <String>[];
+  int get calls => paths.length;
   Future<String> call(String path) async {
-    calls++;
-    return File(path).readAsString();
+    paths.add(path);
+    return _pems[path] ?? (throw StateError('no fixture PEM for $path'));
   }
 }
 
@@ -136,12 +154,16 @@ Seed _assets({
   child: _Probe(observe),
 );
 
-Future<void> _settle(TreeOwner owner) async {
-  for (var i = 0; i < 3; i++) {
-    await pumpEventQueue();
-    owner.flush();
-  }
-}
+/// Drives [owner] until [reached] holds, or the shared bounded budget is spent.
+///
+/// Delegates to `settle` (`test/support/asset_fakes.dart`) so every round both
+/// drains the event queue AND yields a real wall-clock slice. Omit [reached]
+/// for the RETENTION cases, which have no arrival to target and want the full
+/// quiet window instead.
+Future<void> _settle(TreeOwner owner, [bool Function()? reached]) => settle(() {
+  owner.flush();
+  return reached?.call() ?? false;
+});
 
 Future<void> _send(GitHubAppClient client) async {
   await client.send(method: 'GET', path: '/repos/o/r');
@@ -218,7 +240,7 @@ void main() {
           ),
         );
         owner.flush();
-        await _settle(owner);
+        await _settle(owner, () => observed != null);
         await _send(observed!);
         _verify(transport, _onePublicKey);
         expect((stat.calls, read.calls), (1, 1));
@@ -302,7 +324,7 @@ void main() {
           ),
         );
         owner.flush();
-        await _settle(owner);
+        await _settle(owner, () => observations.last != null);
         final first = observations.last;
         host.swap(() => describe('one', _oneVar));
         owner.flush();
@@ -311,13 +333,13 @@ void main() {
         expect(factories, 1);
         host.swap(() => describe('one', _twoVar));
         owner.flush();
-        await _settle(owner);
+        await _settle(owner, () => factories == 2);
         expect(observations.last, isNot(same(first)));
         expect(factories, 2);
         final second = observations.last;
         host.swap(() => describe('two', _twoVar));
         owner.flush();
-        await _settle(owner);
+        await _settle(owner, () => factories == 3);
         expect(observations.last, isNot(same(second)));
         expect(factories, 3);
       },
@@ -368,7 +390,7 @@ void main() {
           ),
         );
         owner.flush();
-        await _settle(owner);
+        await _settle(owner, () => one != null && two != null);
         expect(two, isNot(same(one)));
         await _send(one!);
         await _send(two!);
@@ -376,5 +398,45 @@ void main() {
         _verify(twoTransport, _twoPublicKey);
       },
     );
+
+    test('a hostile ambient GRID_GITHUB_APP_KEY_* entry never reaches the '
+        'resolved identity — only the injected fixture variables do', () async {
+      final stat = _FakeStat(const {
+        _onePath: GitHubKeyFileStat(
+          type: FileSystemEntityType.file,
+          mode: 0x180,
+        ),
+      });
+      final read = _FakeRead();
+      final transport = _FakeTransport();
+      GitHubAppClient? observed;
+      final owner = TreeOwner();
+      addTearDown(owner.dispose);
+      owner.mountRoot(
+        sdk.ProviderScope(
+          child: _assets(
+            config: _config('one'),
+            privateKeyVar: _oneVar,
+            loader: _loader(
+              const {
+                _oneVar: _onePath,
+                'GRID_GITHUB_APP_KEY_MEMENTO': '/hostile/memento.pem',
+                'GRID_GITHUB_APP_KEY_NICHOLAS': '/hostile/nicholas.pem',
+              },
+              stat,
+              read,
+            ),
+            transportFactory: () => transport,
+            observe: (value) => observed = value,
+          ),
+        ),
+      );
+      owner.flush();
+      await _settle(owner, () => observed != null);
+      expect(stat.paths, [_onePath]);
+      expect(read.paths, [_onePath]);
+      await _send(observed!);
+      _verify(transport, _onePublicKey);
+    });
   });
 }
