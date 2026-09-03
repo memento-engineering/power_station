@@ -64,10 +64,13 @@ import 'package:grid_engine/grid_engine.dart';
 import 'package:beads_dart/beads_dart.dart' show Bead;
 
 import 'committee.dart';
+import 'fix_in_flight.dart';
+import 'refinement_flag.dart';
 import 'respec_ledger.dart';
 import 'specify.dart' show specForStructuralValidation, specStructuralFindings;
 import 'route_failure.dart';
 
+export 'refinement_flag.dart';
 export 'respec_ledger.dart';
 
 /// The max AUTO-respec rounds a spec may take before the route flares to a human
@@ -111,10 +114,17 @@ sealed class SpecRouteVerdict {
   const SpecRouteVerdict();
 }
 
-/// The spec is READY — advance to the build (all lanes A–C, gating lane clean).
+/// The spec is READY — advance to the build. Either every lane converged
+/// ([fixInFlight] null), or exactly ONE architect-owed `D` remains and rides
+/// along as a BINDING fix-in-flight item (bead `pow-bhm`, ratified 2026-07-18).
 final class SpecAdvance extends SpecRouteVerdict {
-  /// Creates an advance carrying the route provenance (FT-2).
-  const SpecAdvance({required this.gradesCsv, required this.spread});
+  /// Creates an advance carrying the route provenance (FT-2) and, when the
+  /// single-finding arm fired, the [fixInFlight] lane.
+  const SpecAdvance({
+    required this.gradesCsv,
+    required this.spread,
+    this.fixInFlight,
+  });
 
   /// The per-lane grade vector consumed, `lane=grade` CSV in `critics` order.
   final String gradesCsv;
@@ -122,6 +132,9 @@ final class SpecAdvance extends SpecRouteVerdict {
   /// The computed grade spread across the PRESENT lanes (provenance only — the
   /// spec route no longer BLOCKS on it; see [decideSpecRoute]).
   final int spread;
+
+  /// The ONE open finding this advance carries, or null for a clean converge.
+  final RespecLane? fixInFlight;
 }
 
 /// The spec is FIXABLE — auto-loop back to `specify` with [ledger]'s rationales
@@ -136,7 +149,8 @@ final class SpecRespec extends SpecRouteVerdict {
 
 /// The spec needs a HUMAN — the escalation arm. [rule] names the matrix arm that
 /// fired (`gating-hard-block` / `critic-F` / `no-rationale` / `author-owed` /
-/// `respec-cap`); [reason] is the parked gate's human-readable body.
+/// `multi-action-grade` / `respec-cap`); [reason] is the parked gate's
+/// human-readable body.
 final class SpecEscalate extends SpecRouteVerdict {
   /// Creates an escalation.
   const SpecEscalate({required this.rule, required this.reason});
@@ -150,9 +164,17 @@ final class SpecEscalate extends SpecRouteVerdict {
 
 /// One committee lane's raw result, as the route reads it off its verdict
 /// source: its rubric id, its grade (null/blank ⇒ MISSING ⇒ fail-closed to
-/// `F`), its rationale (blank when the critic returned none), and its OWNER
-/// (blank when the lane names none — see [decideSpecRoute] arm 5).
-typedef SpecLane = ({String id, String? grade, String rationale, String owner});
+/// `F`), its rationale (blank when the critic returned none), its OWNER (blank
+/// when the lane names none — see [decideSpecRoute] arm 5), and its REFINEMENT
+/// — the lane's BEAD-GRAPH observations, which [decideSpecRoute] never reads
+/// (bead `pow-bhm`).
+typedef SpecLane = ({
+  String id,
+  String? grade,
+  String rationale,
+  String owner,
+  String refinement,
+});
 
 /// The SPEC-route matrix (pure — zero I/O; the whole decision, unit-testable).
 ///
@@ -181,22 +203,42 @@ typedef SpecLane = ({String id, String? grade, String rationale, String owner});
 ///     unrecognised owner reads as architect-owed — today's behaviour; the
 ///     LOUD guard against a missing owner is the DECODER (`requireOwner`), which
 ///     refuses a live D/E naming no owner at all.
-///  6. a fixable join UNDER the bound ([priorRound] `<` [maxRounds]) ⇒
+///  6. TWO OR MORE fixable lanes ⇒ [SpecEscalate] (`multi-action-grade`) — the
+///     round did not converge on a single carriable finding, so a human rules
+///     (bead `pow-bhm`, policy Nico-ratified 2026-07-18: "hard-gate ONLY on F or
+///     on two-plus D lanes"). The auto-respec bound is NOT spent here.
+///  7. a SINGLE architect-owed `D` WITH a rationale ⇒ [SpecAdvance] carrying it
+///     as [SpecAdvance.fixInFlight] — the finding rides the build brief VERBATIM
+///     as a BINDING fix-in-flight item and the code committee re-checks it at
+///     review, so the catch keeps its value without spending a respec cycle
+///     (bead `pow-bhm`). A single `E` falls through to arm 8: `E` is the band
+///     above `D`, and the ratified rule names `D` alone.
+///  8. a fixable join UNDER the bound ([priorRound] `<` [maxRounds]) ⇒
 ///     [SpecRespec] carrying the current circuit round.
-///  7. else — a join that is fixable RIGHT NOW, at the bound ⇒ [SpecEscalate]
-///     (`respec-cap`). This arm is the FALL-THROUGH of arm 6, so the cap is the
+///  9. else — a join that is fixable RIGHT NOW, at the bound ⇒ [SpecEscalate]
+///     (`respec-cap`). This arm is the FALL-THROUGH of arm 8, so the cap is the
 ///     conjunction "the rounds are spent AND the CURRENT join still fails" by
 ///     STRUCTURE rather than by a second read, and its reason quotes the same
 ///     fresh vector the matrix just decided on — never a ledger-recorded last
 ///     failure. (`decideDiscovery`'s regather arm carries the identical shape.)
 ///
-/// **The spread rule is GONE from the spec route** (it survives untouched in the
-/// code committee's [CodeRouteCapability]). A spread ≥ 3 across A..F necessarily
+/// **The spread rule is GONE from the spec route** (and Step 4's `pow-bhm` cut
+/// removed it from [CodeRouteCapability] as well, for the identical reason). A
+/// spread ≥ 3 across A..F necessarily
 /// puts
 /// some lane at `D` or worse, so arms 2/3 already cover every case it caught —
 /// and what it did with them ("human ultimatum") is exactly what this bead exists
 /// to stop doing by default. The spread still rides [SpecAdvance] as provenance.
-/// This removal is registered as pending ADR-0000 amendment A14.
+/// Recorded as
+/// `power_station#a14-bead-pow-7nm-the-spec-route-auto-respecs-a-fixable-spec`
+/// clause (4), extended to the code route by the `pow-bhm` decision entry
+/// `committee-gate-single-finding-advance-and-the-refinement-flag`.
+///
+/// **Arm numbering is a CITED contract.** Bead `pow-s2t` (rework can DECOMPOSE)
+/// will hang its breakdown disposition off the BOUND arms — today arms 8
+/// ([SpecRespec]) and 9 (`respec-cap`), renumbered from 6 and 7 by bead
+/// `pow-bhm`. The threshold itself ([kMaxRespecRounds]) is unmoved and the cap
+/// arm's `rule` string is still `respec-cap`; only the ordinals shifted.
 SpecRouteVerdict decideSpecRoute({
   required List<SpecLane> lanes,
   required String gating,
@@ -257,16 +299,17 @@ SpecRouteVerdict decideSpecRoute({
     for (final l in judged)
       if (gradeOf(l) == 'D' || gradeOf(l) == 'E') l,
   ];
+  // The spread is PROVENANCE only (A14(4)) — no arm decides on it. Hoisted out
+  // of the converged arm so the single-finding advance (arm 7) reports it too.
+  final indices = [
+    for (final l in lanes)
+      if (l.grade != null && l.grade!.trim().isNotEmpty) _gradeIndex(gradeOf(l)),
+  ];
+  final spread = indices.isEmpty
+      ? 0
+      : indices.reduce((a, b) => a > b ? a : b) -
+            indices.reduce((a, b) => a < b ? a : b);
   if (fixable.isEmpty) {
-    final indices = [
-      for (final l in lanes)
-        if (l.grade != null && l.grade!.trim().isNotEmpty)
-          _gradeIndex(gradeOf(l)),
-    ];
-    final spread = indices.isEmpty
-        ? 0
-        : indices.reduce((a, b) => a > b ? a : b) -
-              indices.reduce((a, b) => a < b ? a : b);
     return SpecAdvance(gradesCsv: gradesCsv, spread: spread);
   }
 
@@ -319,7 +362,48 @@ SpecRouteVerdict decideSpecRoute({
     return SpecEscalate(rule: 'author-owed', reason: b.toString());
   }
 
-  // 6. RESPEC — a fixable join UNDER the bound auto-loops with the failing
+  // 6. TWO OR MORE action grades — the round did not converge on a single
+  //    finding, so it GATES (bead `pow-bhm`, policy Nico-ratified 2026-07-18:
+  //    "hard-gate ONLY on F or on two-plus D lanes"). The auto-respec loop is
+  //    NOT spent here: a multi-lane join is the shape a human reads once, and
+  //    the governor's rework is one command. A29(2): the flare quotes the FRESH
+  //    vector this matrix decided on.
+  if (fixable.length >= 2) {
+    final b = StringBuffer()
+      ..write(
+        'multi-action-grade: '
+        '${fixable.map((l) => '${l.id}=${gradeOf(l)}').join(', ')} — two or '
+        'more lanes returned an action grade, so the round did not converge on '
+        'a single carriable finding. The current join is $gradesCsv.',
+      );
+    for (final l in fixable) {
+      b.write('\n\n### ${l.id} — grade ${gradeOf(l)}\n${l.rationale.trim()}');
+    }
+    return SpecEscalate(rule: 'multi-action-grade', reason: b.toString());
+  }
+
+  // 7. a SINGLE architect-owed D WITH a rationale — ADVANCE, carrying the
+  //    finding VERBATIM to the build brief as a BINDING fix-in-flight item.
+  //    The receipt (bead `pow-bhm`): `tg-h4u` burned two substantive spec
+  //    rounds on a single sub-C lane, one of them an adr-alignment D whose
+  //    load-bearing defect was a citation misattribution. Every catch keeps its
+  //    value — the finding rides the build and the code committee re-checks it
+  //    — and the respec cycle is not spent. A single E still respecs: E is the
+  //    band above D, and the ratified rule names D alone.
+  final only = fixable.single;
+  if (gradeOf(only) == 'D') {
+    return SpecAdvance(
+      gradesCsv: gradesCsv,
+      spread: spread,
+      fixInFlight: RespecLane(
+        rubric: only.id,
+        grade: gradeOf(only),
+        rationale: only.rationale.trim(),
+      ),
+    );
+  }
+
+  // 8. RESPEC — a fixable join UNDER the bound auto-loops with the failing
   //    lanes' rationales as the correction guidance.
   if (priorRound < maxRounds) {
     return SpecRespec(
@@ -338,7 +422,7 @@ SpecRouteVerdict decideSpecRoute({
     );
   }
 
-  // 7. the BOUND — reachable ONLY as arm 6's fall-through, i.e. over a join that
+  // 9. the BOUND — reachable ONLY as arm 8's fall-through, i.e. over a join that
   //    is fixable RIGHT NOW (arm 3 already advanced a converged one). So the cap
   //    IS "rounds spent AND the current join still fails", and the reason quotes
   //    `fixable` plus the whole fresh `gradesCsv` the matrix decided on — a human
@@ -354,6 +438,20 @@ SpecRouteVerdict decideSpecRoute({
         'specify agent are not converging.',
   );
 }
+
+/// Every lane's BEAD-GRAPH observations, in `critics` order (bead `pow-bhm`'s
+/// COHERENCE SCOPE dial, ratified 2026-07-18).
+///
+/// Deliberately OUTSIDE [decideSpecRoute]: the matrix never reads
+/// [kVerdictRefinementKey], so tracker state cannot move a letter by
+/// construction — not by convention. The route surfaces these to the OPERATOR
+/// (the refinement flag file, the `refinement` result key, and the gate reason
+/// on an escalate) and never to the grade.
+List<RefinementNote> refinementNotes(List<SpecLane> lanes) => [
+  for (final lane in lanes)
+    if (lane.refinement.trim().isNotEmpty)
+      RefinementNote(rubric: lane.id, finding: lane.refinement.trim()),
+];
 
 /// A grade's ladder index (A=0 … F=5); anything outside `A..F` clamps to F (the
 /// fail-closed worst) — the same ladder the code route uses, kept local so the
@@ -426,7 +524,20 @@ String renderRespecGuidance(RespecLedger ledger) {
 ///  - [SpecAdvance] ⇒ [Advance] with the SAME provenance payload the code route
 ///    emits
 ///    (`verdict`/`grades`/`spread`/`rule`), and the guidance ledger is DELETED (a
-///    later rework round must never re-inject a stale spec correction).
+///    later rework round must never re-inject a stale spec correction). When the
+///    advance CARRIES a single finding (bead `pow-bhm`, ratified 2026-07-18) the
+///    payload also names it (`fix_in_flight` + `fix_in_flight_finding`) and the
+///    carry is WRITTEN into the worktree at [fixInFlightPath] for the build
+///    brief to embed — a write that cannot land throws a [RouteFailure], LOUD,
+///    because an advance whose one known defect silently evaporated is exactly
+///    what "every catch keeps its value" forbids. The arm still carries NO
+///    `grade` key, so an advancing round invalidates nothing.
+///
+/// On EVERY arm the route also surfaces the REFINEMENT FLAG (bead `pow-bhm`):
+/// each lane's non-grading BEAD-GRAPH observations, read off the
+/// [kVerdictRefinementKey] verdict column, written to [refinementFlagPath],
+/// named on the result payload, and appended to an escalate's gate reason. NO
+/// arm reads them — tracker state is never the spec author's defect.
 ///  - [SpecRespec] ⇒ the ledger is WRITTEN into the worktree, then an [Advance]
 ///    carrying the INVALIDATING stamp `grade: 'F'` on this route's OWN result.
 ///    This step declares `validates: `[kSpecifyStep], so the engine DERIVES the
@@ -526,6 +637,7 @@ class SpecRouteCapability extends RouteCapability {
           grade: recorded['grade'],
           rationale: recorded['rationale'] ?? '',
           owner: recorded[kVerdictOwnerKey] ?? '',
+          refinement: recorded[kVerdictRefinementKey] ?? '',
         ));
       }
     } else {
@@ -545,6 +657,8 @@ class SpecRouteCapability extends RouteCapability {
                 grade: recorded['grade'],
                 rationale: recorded['rationale'] ?? '',
                 owner: '',
+                // A deterministic structural check observes no bead graph.
+                refinement: '',
               ));
             } else {
               waiting.add(id);
@@ -564,6 +678,7 @@ class SpecRouteCapability extends RouteCapability {
               grade: verdict['grade'],
               rationale: verdict['rationale'] ?? '',
               owner: verdict[kVerdictOwnerKey] ?? '',
+              refinement: verdict[kVerdictRefinementKey] ?? '',
             ));
           } else {
             waiting.add(id);
@@ -597,6 +712,7 @@ class SpecRouteCapability extends RouteCapability {
                         'result (tg-q3q0 containment)'
                   : findings.join('; '),
               owner: '',
+              refinement: '',
             ));
             waiting.remove(gating);
           }
@@ -624,19 +740,74 @@ class SpecRouteCapability extends RouteCapability {
       }
     }
 
+    // The REFINEMENT flag (bead `pow-bhm`) — surfaced on every arm, and read by
+    // NO arm. An empty set CLEARS the file so a later round never re-surfaces a
+    // note the tracker already absorbed.
+    final notes = refinementNotes(lanes);
+    final flag = RefinementFlag(
+      sessionRoot: args.beadId,
+      round: circuitRound,
+      notes: notes,
+    );
+    if (live) {
+      if (notes.isEmpty) {
+        clearRefinementFlag(dir);
+      } else {
+        writeRefinementFlag(dir, flag);
+      }
+    }
+    final refinementCsv = notes.map((n) => n.rubric).join(',');
+    final refinementBlock = notes.isEmpty
+        ? ''
+        : '\n\n${renderRefinementFlag(flag)}';
+
     switch (decideSpecRoute(
       lanes: lanes,
       gating: gating,
       sessionRoot: args.beadId,
       priorRound: circuitRound,
     )) {
-      case SpecAdvance(:final gradesCsv, :final spread):
+      case SpecAdvance(:final gradesCsv, :final spread, :final fixInFlight):
         if (live) clearRespecLedger(dir);
+        // The CARRY is BINDING on the build, and the build brief reads the
+        // FILE — a write that cannot land is LOUD, never an advance whose
+        // finding silently evaporates (the `writeRespecLedger` posture, A14(6)).
+        if (live) {
+          if (fixInFlight == null) {
+            clearFixInFlight(dir);
+          } else {
+            try {
+              writeFixInFlight(
+                dir,
+                FixInFlight(
+                  sessionRoot: args.beadId,
+                  round: circuitRound,
+                  lane: fixInFlight,
+                ),
+              );
+            } catch (e) {
+              throw RouteFailure(
+                'spec-route: could not write the fix-in-flight carry at '
+                '${fixInFlightPath(dir)} — $e. Refusing to advance a spec whose '
+                'ONE open finding would never reach the build brief.',
+              );
+            }
+          }
+        }
+        // A27(2): this arm carries NO `grade` key, so an ADVANCING round — the
+        // single-finding one included — invalidates no spec closure.
         return Advance({
           'verdict': 'advance',
           'grades': gradesCsv,
           'spread': '$spread',
-          'rule': 'all-approve',
+          'rule': fixInFlight == null
+              ? 'all-approve'
+              : 'single-finding-advance',
+          if (fixInFlight != null)
+            'fix_in_flight': '${fixInFlight.rubric}=${fixInFlight.grade}',
+          if (fixInFlight != null)
+            'fix_in_flight_finding': fixInFlight.rationale,
+          if (refinementCsv.isNotEmpty) kVerdictRefinementKey: refinementCsv,
           kVerdictRoundKey: '$circuitRound',
         });
       case SpecRespec(:final ledger):
@@ -657,11 +828,15 @@ class SpecRouteCapability extends RouteCapability {
         // `grade: 'F'` lands on a positively-terminal source. The ADVANCE arm
         // above deliberately carries NO `grade` key, so a passing round never
         // invalidates anything.
+        // A respec is not an advance-with-a-finding: the carry is cleared so a
+        // corrected spec never inherits a stale one (bead `pow-bhm`).
+        if (live) clearFixInFlight(dir);
         return Advance({
           'verdict': 'respec',
           'grade': 'F',
           'rule': 'respec',
           kVerdictRoundKey: '$circuitRound',
+          if (refinementCsv.isNotEmpty) kVerdictRefinementKey: refinementCsv,
           'rationale': respecStampReason(ledger),
         });
       case SpecEscalate(:final reason):
@@ -676,8 +851,14 @@ class SpecRouteCapability extends RouteCapability {
         // closes the hole [clearRespecLedger] already names: an escalate PARKS a
         // gate, and a governor's `grid rework` off that gate IS a "LATER rework
         // round" that must not re-inject a spent correction into a fresh brief.
-        if (live) clearRespecLedger(dir);
-        return Escalate(reason);
+        if (live) {
+          clearRespecLedger(dir);
+          clearFixInFlight(dir);
+        }
+        // The gate reason IS the governor's surface (A14(7)'s posture): the
+        // refinement notes ride it so tracker findings reach a human on the
+        // same read as the ruling.
+        return Escalate('$reason$refinementBlock');
     }
   }
 }
