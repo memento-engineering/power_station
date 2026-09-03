@@ -349,6 +349,9 @@ class _NoopGroups implements ProcessGroupController {
   bool processAlive(int pid) => false;
 
   @override
+  Future<List<int>> groupMembers(int pgid) async => const <int>[];
+
+  @override
   Future<int?> resolvePgid(int pid) async => null;
 
   @override
