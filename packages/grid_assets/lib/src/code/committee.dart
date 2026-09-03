@@ -107,7 +107,7 @@ import '../agent/site_binding.dart';
 import '../agent/usage_report.dart';
 import 'fix_in_flight.dart';
 import 'route_failure.dart';
-import 'specify.dart' show proseOnly, sectionBodyAt;
+import 'specify.dart' show headingOffset, proseOnly, sectionBodyAt;
 
 /// The gating rubric id — its grade `F` is a hard block (a non-zero Validation
 /// Plan command), decided by the route's matrix.
@@ -503,7 +503,7 @@ TestDeclarations testDeclarations(String design) {
   final declarationBodies = <String>[];
 
   for (final heading in _testDeclarationHeadings) {
-    final headingAt = prose.indexOf(heading);
+    final headingAt = headingOffset(prose, heading);
     if (headingAt < 0) continue;
     declarationBodies.add(sectionBodyAt(prose, headingAt));
   }
