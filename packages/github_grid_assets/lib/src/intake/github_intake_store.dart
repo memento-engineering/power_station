@@ -33,8 +33,8 @@ class GitHubIntakeRecord {
 
 /// Upserts GitHub intake records by stable node id.
 abstract interface class GitHubIntakeStore {
-  /// Creates a deferred bead or updates its existing correlated bead.
-  Future<void> upsertDeferred(GitHubIntakeRecord record);
+  /// Creates an OPEN, unstamped bead or updates its existing correlated bead.
+  Future<void> upsert(GitHubIntakeRecord record);
 }
 
 /// bd-CLI implementation of [GitHubIntakeStore].
@@ -51,21 +51,24 @@ abstract interface class GitHubIntakeStore {
 /// ones. bd's whole-object create-time metadata form REPLACES the map, which
 /// would clobber the `validation_plan` and approval-stamp keys other writers
 /// own on the same bead (`the_grid#bd-create-metadata-rides-a-follow-up-update`).
+///
+/// **Intake beads are filed OPEN, with no parking date and no approval
+/// marker.** Absence of the approve verb's `grid.approved_*` stamp IS the
+/// pending state: it is readiness-based rather than time-based, and it never
+/// fires on its own
+/// (`power_station#github-intake-files-open-and-unstamped`). This store passes
+/// no date argument and writes no approval key and no label; `grid_assets`'s
+/// `lib/src/filing/approve_command.dart` remains the only writer of the stamp
+/// that `mountEligibilityFindings` reads, so an intake bead is VISIBLE to
+/// `bd ready` and still unmountable until a human runs the approve verb.
 final class BdGitHubIntakeStore implements GitHubIntakeStore {
   /// Creates a store over the shared bounded runner.
   BdGitHubIntakeStore(BdRunner runner) : _bd = BdCliService(runner);
 
   final BdCliService _bd;
 
-  /// The far-future deferral date every intake bead is parked on until a human
-  /// triages it. An explicit ADR-0004 D1 DEPARTURE, recorded in
-  /// `docs/decisions/2026-09-02-intake-argv-rides-bdcliservice-with-a-per-key-metadata-channel.md`;
-  /// bead `pow-5wo` owns the replacement lifecycle. This bead moves the argv
-  /// only — it does not change the pending-state contract.
-  static final DateTime _intakeDeferral = DateTime(9999, 12, 31);
-
   @override
-  Future<void> upsertDeferred(GitHubIntakeRecord record) async {
+  Future<void> upsert(GitHubIntakeRecord record) async {
     final correlated = (await _bd.listScope(
       externalRef: record.externalRef,
       includeClosed: true,
@@ -90,7 +93,6 @@ final class BdGitHubIntakeStore implements GitHubIntakeStore {
       type: IssueType.chore,
       priority: 2,
       description: record.description,
-      defer: _intakeDeferral,
       externalRef: record.externalRef,
       setMetadata: _metadata(record),
     );

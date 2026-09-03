@@ -12,7 +12,7 @@ import '../intake/github_self_trust.dart';
 import 'github_app_client_assets.dart';
 import 'github_reconciler_assets.dart';
 
-/// Provides the durable cursor and SELF-only deferred-intake sink for one seat.
+/// Provides the durable cursor and SELF-only intake sink for one seat.
 ///
 /// Mount this below [GitHubAppClientAssets] and above
 /// [GitHubReconcilerAssets]. The reconciler below observes the App client,
