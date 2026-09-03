@@ -1338,3 +1338,40 @@ String sectionBodyAt(String design, int headingAt) {
   final next = design.indexOf('\n## ', afterHeading);
   return design.substring(afterHeading, next < 0 ? design.length : next);
 }
+
+/// The offset of the heading LINE that opens [heading]'s section in [design],
+/// or `-1` when there is none — the LAST match when several exist.
+///
+/// A heading is markdown STRUCTURE, so it is resolved at a LINE START. A
+/// substring search is not, and that is the defect this replaces: it takes a
+/// prose SENTENCE that NAMES the heading (`... the full house gate (see ##
+/// Validation Plan).`) for the section itself, anchors [sectionBodyAt] at that
+/// sentence, reads the following paragraph as the body, and hard-blocks a whole
+/// spec on `has no items` while the real section, further down, carries ten
+/// (bead `pow-o3ti`, receipt space-3ds 2026-09-03).
+///
+/// LAST, not first. Callers pass [proseOnly] output, so a heading quoted in a
+/// TERMINATED fence, a `>` blockquote or an inline span is already blanked; what
+/// survives is an UNTERMINATED fence, whose tail [proseOnly] leaves scannable by
+/// design. This pack's own specs quote the four canonical headings inside their
+/// `## Implementation Plan`, ABOVE the sections they name, so taking the LAST
+/// line-anchored match is what keeps a quotation from displacing the authored
+/// section in exactly the case that survives the strip.
+///
+/// As permissive as the `indexOf` it replaces on every axis but two: the line
+/// start, and 0-3 spaces of indentation (4+ is an indented code block, i.e.
+/// quotation). Any level `##`…`######` still resolves (`indexOf('## X')` matches
+/// inside `### X` today, and a spec that writes `### Touches` must not newly
+/// park), as does any trailing text on the heading line
+/// (`## Validation Plan (1:1)`) and any spacing after the hashes.
+///
+/// PUBLIC for the same reason as [proseOnly] and [sectionBodyAt]: the code
+/// committee's declaration headings resolve through this one definition too.
+int headingOffset(String design, String heading) {
+  final title = heading.replaceFirst(RegExp(r'^#+[ \t]*'), '');
+  final matches = RegExp(
+    r'^[ \t]{0,3}#{2,6}[ \t]*' + RegExp.escape(title),
+    multiLine: true,
+  ).allMatches(design).toList();
+  return matches.isEmpty ? -1 : matches.last.start;
+}
