@@ -95,6 +95,7 @@ class _JsonAdapter implements AgentSessionAdapter {
     required Workspace workspace,
     String? model,
     Uri? endpoint,
+    String? usageOut,
   }) => RuntimeConfig(
     workDir: workspace.workspaceDir,
     command: 'probe',

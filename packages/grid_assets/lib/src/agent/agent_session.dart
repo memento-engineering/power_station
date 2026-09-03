@@ -38,11 +38,18 @@ abstract interface class AgentSessionAdapter {
   String get id;
 
   /// Describes a long-lived launch without access to the brief.
+  ///
+  /// [usageOut] is the workspace-relative FT-2 telemetry path
+  /// ([usageReportPath]) this incarnation's usage envelope must land at. The
+  /// argv transport gets this through its `sh -c` wrapper; a channel harness
+  /// has no wrapper, so the adapter carries it to whatever writes the
+  /// envelope. An adapter with no telemetry surface IGNORES it.
   RuntimeConfig launch({
     required AgentEnvironment environment,
     required Workspace workspace,
     String? model,
     Uri? endpoint,
+    String? usageOut,
   });
 
   /// Encodes the initial brief for delivery over the channel.

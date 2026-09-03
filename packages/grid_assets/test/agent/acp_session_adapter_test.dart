@@ -56,12 +56,17 @@ class _BridgeResult {
     required this.config,
     required this.stderr,
     required this.trace,
+    required this.usageEnvelope,
   });
 
   final Map<String, dynamic> frame;
   final RuntimeConfig config;
   final String stderr;
   final List<Map<String, dynamic>> trace;
+
+  /// The FT-2 envelope the bridge wrote, read before the temp workspace is
+  /// deleted; null when this run asked for no `usageOut` or none landed.
+  final String? usageEnvelope;
 }
 
 Future<_Run> _buildAcpRun({
@@ -186,6 +191,7 @@ Future<_BridgeResult> _runBridge({
   required List<String> probeArgs,
   String? model = 'gpt-5.6-sol',
   bool cancelOnProgress = false,
+  String? usageOut,
 }) async {
   final workspace = await Directory.systemTemp.createTemp(
     'grid_assets_acp_bridge_',
@@ -206,6 +212,7 @@ Future<_BridgeResult> _runBridge({
       branch: 'grid/probe',
       baseBranch: 'main',
     ),
+    usageOut: usageOut,
   );
   final process = await Process.start(
     config.command,
@@ -257,12 +264,21 @@ Future<_BridgeResult> _runBridge({
             .map((line) => jsonDecode(line) as Map<String, dynamic>)
             .toList(growable: false)
       : const <Map<String, dynamic>>[];
+  // The workspace is deleted below, so the bridge's telemetry must be read
+  // HERE — its whole point is that it survives the run (bead `pow-39tl`).
+  final envelopeFile = usageOut == null
+      ? null
+      : File(p.join(workspace.path, usageOut));
+  final envelope = envelopeFile != null && envelopeFile.existsSync()
+      ? envelopeFile.readAsStringSync()
+      : null;
   await workspace.delete(recursive: true);
   return _BridgeResult(
     frame: frame,
     config: config,
     stderr: error.toString(),
     trace: traceEntries,
+    usageEnvelope: envelope,
   );
 }
 
@@ -558,6 +574,7 @@ void main() {
       ),
       model: 'resolved-model',
       endpoint: Uri.parse('http://127.0.0.1:8080'),
+      usageOut: usageReportPath('tg-1/spec_review/specify'),
     );
     expect(config.command, Platform.resolvedExecutable);
     expect(config.lifecycle, Lifecycle.longLived);
@@ -578,6 +595,12 @@ void main() {
     });
     expect(spec.cwd, '/worktree');
     expect(spec.model, 'resolved-model');
+    // The FT-2 telemetry path rides the bridge spec: a channel harness has no
+    // `sh -c` wrapper, so the adapter must carry it (bead `pow-39tl`).
+    expect(
+      spec.usageOut,
+      '.grid/telemetry/tg-1_spec_review_specify.usage.json',
+    );
     expect(const AcpSessionAdapter().encodeBrief(brief), isNotEmpty);
   });
 
