@@ -353,7 +353,9 @@ class AgentCapability extends ProcessCapability {
       instanceFence: instanceFence,
       // The out-of-band flare sink, read at this EFFECT edge with the
       // non-binding verb (ADR-0008 D3); absent => no flares, never a failure.
-      transport: context.getInheritedSeedOfExactType<ServiceBundle>()?.transport,
+      transport: context
+          .getInheritedSeedOfExactType<ServiceBundle>()
+          ?.transport,
     );
   }
 
