@@ -241,13 +241,14 @@ class GitHubReconcilerCursor {
         }),
         pending: List.unmodifiable(switch (json['pending']) {
           null => const <PendingObservation>[],
-          final List<Object?> value => value
-              .map(
-                (entry) => PendingObservation.fromJson(
-                  Map<String, Object?>.from(entry! as Map),
-                ),
-              )
-              .toList(growable: false),
+          final List<Object?> value =>
+            value
+                .map(
+                  (entry) => PendingObservation.fromJson(
+                    Map<String, Object?>.from(entry! as Map),
+                  ),
+                )
+                .toList(growable: false),
           _ => throw const FormatException('cursor pending must be a list'),
         }),
       );

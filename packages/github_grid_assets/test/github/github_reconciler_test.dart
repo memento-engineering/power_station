@@ -233,7 +233,10 @@ void main() {
         'poll:issue:PR_CLOSED:2026-08-09T02:45:00Z',
       });
       const issueId = 'poll:issue:I_1:2026-08-09T01:00:00Z';
-      expect(calls.indexOf('pending:$issueId'), lessThan(calls.indexOf('emit')));
+      expect(
+        calls.indexOf('pending:$issueId'),
+        lessThan(calls.indexOf('emit')),
+      );
       expect(calls.indexOf('emit'), lessThan(calls.indexOf('save:$issueId')));
       expect(store.cursor.since, DateTime.parse('2026-08-09T02:45:00Z'));
       expect(store.cursor.etags, containsPair('intake/issues', '"issues2"'));

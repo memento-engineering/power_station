@@ -137,56 +137,52 @@ GitHubReconciler _reconciler({
 );
 
 void main() {
-  test('pending is persisted before the sink and claimed after observers', () async {
-    final calls = <String>[];
-    final saves = <_Snapshot>[];
-    final cursors = _Cursors();
-    final reconciler =
-        _reconciler(
-            transport: _Transport(<GitHubHttpResponse>[
-              _response(<Object?>[_issueRow()]),
-              _response(const <Object?>[]),
-            ]),
-            cursors: _RecordingCursors(cursors, calls, saves),
-            emit: (_) async => calls.add('emit'),
-          )
-          ..addObserver('audit', (_) async => calls.add('observer'));
+  test(
+    'pending is persisted before the sink and claimed after observers',
+    () async {
+      final calls = <String>[];
+      final saves = <_Snapshot>[];
+      final cursors = _Cursors();
+      final reconciler = _reconciler(
+        transport: _Transport(<GitHubHttpResponse>[
+          _response(<Object?>[_issueRow()]),
+          _response(const <Object?>[]),
+        ]),
+        cursors: _RecordingCursors(cursors, calls, saves),
+        emit: (_) async => calls.add('emit'),
+      )..addObserver('audit', (_) async => calls.add('observer'));
 
-    await reconciler.reconcileOnce();
+      await reconciler.reconcileOnce();
 
-    expect(saves[0].pending, <String>[_issueId]);
-    expect(saves[0].observed, isEmpty);
-    expect(saves[1].observed, isEmpty);
-    expect(saves[2].observed, isEmpty);
-    expect(saves[3].pending, isEmpty);
-    expect(saves[3].observed, <String>[_issueId]);
-    expect(calls.take(6), <String>[
-      'save',
-      'emit',
-      'save',
-      'observer',
-      'save',
-      'save',
-    ]);
-    expect(cursors.cursor.pending, isEmpty);
-    expect(cursors.cursor.hasObserved(_issueId), isTrue);
-  });
+      expect(saves[0].pending, <String>[_issueId]);
+      expect(saves[0].observed, isEmpty);
+      expect(saves[1].observed, isEmpty);
+      expect(saves[2].observed, isEmpty);
+      expect(saves[3].pending, isEmpty);
+      expect(saves[3].observed, <String>[_issueId]);
+      expect(calls.take(6), <String>[
+        'save',
+        'emit',
+        'save',
+        'observer',
+        'save',
+        'save',
+      ]);
+      expect(cursors.cursor.pending, isEmpty);
+      expect(cursors.cursor.hasObserved(_issueId), isTrue);
+    },
+  );
 
   test('a failing observer leaves the observation pending', () async {
     final cursors = _Cursors();
     final emitted = <NormalizedGitHubEvent>[];
-    final reconciler =
-        _reconciler(
-            transport: _Transport(<GitHubHttpResponse>[
-              _response(<Object?>[_issueRow()]),
-            ]),
-            cursors: cursors,
-            emit: (event) async => emitted.add(event),
-          )
-          ..addObserver(
-            'audit',
-            (_) async => throw StateError('observer failed'),
-          );
+    final reconciler = _reconciler(
+      transport: _Transport(<GitHubHttpResponse>[
+        _response(<Object?>[_issueRow()]),
+      ]),
+      cursors: cursors,
+      emit: (event) async => emitted.add(event),
+    )..addObserver('audit', (_) async => throw StateError('observer failed'));
 
     await expectLater(reconciler.reconcileOnce(), throwsStateError);
 
@@ -198,52 +194,53 @@ void main() {
     expect(cursors.cursor.hasObserved(_issueId), isFalse);
   });
 
-  test('replay re-drives only the failed leg, never ci-feedback twice', () async {
-    final feedback = <NormalizedGitHubEvent>[];
-    var landingFails = true;
-    final cursors = _Cursors();
-    final reconciler =
-        _reconciler(
-            transport: _Transport(<GitHubHttpResponse>[
-              _response(<Object?>[_issueRow()]),
-              _response('', status: 304),
-              _response('', status: 304),
-            ]),
-            cursors: cursors,
-            emit: (_) async {},
-          )
-          ..addObserver(
-            kCiFeedbackDeliveryLeg,
-            (event) async => feedback.add(event),
-          )
-          ..addObserver('landing', (_) async {
-            if (landingFails) {
-              landingFails = false;
-              throw StateError('landing store timed out');
-            }
-          });
+  test(
+    'replay re-drives only the failed leg, never ci-feedback twice',
+    () async {
+      final feedback = <NormalizedGitHubEvent>[];
+      var landingFails = true;
+      final cursors = _Cursors();
+      final reconciler =
+          _reconciler(
+              transport: _Transport(<GitHubHttpResponse>[
+                _response(<Object?>[_issueRow()]),
+                _response('', status: 304),
+                _response('', status: 304),
+              ]),
+              cursors: cursors,
+              emit: (_) async {},
+            )
+            ..addObserver(
+              kCiFeedbackDeliveryLeg,
+              (event) async => feedback.add(event),
+            )
+            ..addObserver('landing', (_) async {
+              if (landingFails) {
+                landingFails = false;
+                throw StateError('landing store timed out');
+              }
+            });
 
-    await expectLater(reconciler.reconcileOnce(), throwsStateError);
-    expect(cursors.cursor.pendingFor(_issueId)!.acked, <String>[
-      kSinkDeliveryLeg,
-      kCiFeedbackDeliveryLeg,
-    ]);
+      await expectLater(reconciler.reconcileOnce(), throwsStateError);
+      expect(cursors.cursor.pendingFor(_issueId)!.acked, <String>[
+        kSinkDeliveryLeg,
+        kCiFeedbackDeliveryLeg,
+      ]);
 
-    await reconciler.reconcileOnce();
+      await reconciler.reconcileOnce();
 
-    expect(feedback, hasLength(1));
-    expect(cursors.cursor.pending, isEmpty);
-    expect(cursors.cursor.hasObserved(_issueId), isTrue);
-  });
+      expect(feedback, hasLength(1));
+      expect(cursors.cursor.pending, isEmpty);
+      expect(cursors.cursor.hasObserved(_issueId), isTrue);
+    },
+  );
 
   test('a duplicate or reserved delivery leg is refused loudly', () {
-    final reconciler =
-        _reconciler(
-            transport: _Transport(<GitHubHttpResponse>[]),
-            cursors: _Cursors(),
-            emit: (_) async {},
-          )
-          ..addObserver(kCiFeedbackDeliveryLeg, (_) async {});
+    final reconciler = _reconciler(
+      transport: _Transport(<GitHubHttpResponse>[]),
+      cursors: _Cursors(),
+      emit: (_) async {},
+    )..addObserver(kCiFeedbackDeliveryLeg, (_) async {});
     expect(
       () => reconciler.addObserver(kCiFeedbackDeliveryLeg, (_) async {}),
       throwsArgumentError,
@@ -256,51 +253,59 @@ void main() {
     reconciler.addObserver(kCiFeedbackDeliveryLeg, (_) async {});
   });
 
-  test('a restart between persistence and delivery delivers exactly once', () async {
-    final directory = await Directory.systemTemp.createTemp('github-outbox-');
-    addTearDown(() => directory.delete(recursive: true));
-    final path = '${directory.path}/cursor.json';
+  test(
+    'a restart between persistence and delivery delivers exactly once',
+    () async {
+      final directory = await Directory.systemTemp.createTemp('github-outbox-');
+      addTearDown(() => directory.delete(recursive: true));
+      final path = '${directory.path}/cursor.json';
 
-    await expectLater(
-      _reconciler(
+      await expectLater(
+        _reconciler(
+          transport: _Transport(<GitHubHttpResponse>[
+            _response(<Object?>[_issueRow()]),
+          ]),
+          cursors: FileGitHubCursorStore(cursorPath: path),
+          emit: (_) async => throw StateError('sink failed'),
+        ).reconcileOnce(),
+        throwsStateError,
+      );
+      expect(
+        (await FileGitHubCursorStore(
+          cursorPath: path,
+        ).load()).isPending(_issueId),
+        isTrue,
+      );
+
+      final calls = <String>[];
+      final delivered = <NormalizedGitHubEvent>[];
+      final restarted = _reconciler(
         transport: _Transport(<GitHubHttpResponse>[
-          _response(<Object?>[_issueRow()]),
-        ]),
+          _response('', status: 304),
+          _response('', status: 304),
+          _response('', status: 304),
+          _response('', status: 304),
+        ], calls),
         cursors: FileGitHubCursorStore(cursorPath: path),
-        emit: (_) async => throw StateError('sink failed'),
-      ).reconcileOnce(),
-      throwsStateError,
-    );
-    expect(
-      (await FileGitHubCursorStore(cursorPath: path).load()).isPending(_issueId),
-      isTrue,
-    );
+        emit: (event) async {
+          calls.add('emit');
+          delivered.add(event);
+        },
+      );
+      await restarted.reconcileOnce();
+      await restarted.reconcileOnce();
 
-    final calls = <String>[];
-    final delivered = <NormalizedGitHubEvent>[];
-    final restarted = _reconciler(
-      transport: _Transport(<GitHubHttpResponse>[
-        _response('', status: 304),
-        _response('', status: 304),
-        _response('', status: 304),
-        _response('', status: 304),
-      ], calls),
-      cursors: FileGitHubCursorStore(cursorPath: path),
-      emit: (event) async {
-        calls.add('emit');
-        delivered.add(event);
-      },
-    );
-    await restarted.reconcileOnce();
-    await restarted.reconcileOnce();
-
-    expect(delivered, hasLength(1));
-    expect(GitHubReconcilerCursor.observationIdOf(delivered.single), _issueId);
-    expect(calls.first, 'emit');
-    final reloaded = await FileGitHubCursorStore(cursorPath: path).load();
-    expect(reloaded.pending, isEmpty);
-    expect(reloaded.hasObserved(_issueId), isTrue);
-  });
+      expect(delivered, hasLength(1));
+      expect(
+        GitHubReconcilerCursor.observationIdOf(delivered.single),
+        _issueId,
+      );
+      expect(calls.first, 'emit');
+      final reloaded = await FileGitHubCursorStore(cursorPath: path).load();
+      expect(reloaded.pending, isEmpty);
+      expect(reloaded.hasObserved(_issueId), isTrue);
+    },
+  );
 
   test('a claimed id in the recorded queue replays as a sink no-op', () async {
     final recorded =
@@ -313,17 +318,16 @@ void main() {
     final observed = <NormalizedGitHubEvent>[];
     final reconciler =
         _reconciler(
-            transport: _Transport(<GitHubHttpResponse>[
-              _response('', status: 304),
-              _response('', status: 304),
-            ]),
-            cursors: cursors,
-            emit: (event) async => delivered.add(event),
-          )
-          ..addObserver(
-            kCiFeedbackDeliveryLeg,
-            (event) async => observed.add(event),
-          );
+          transport: _Transport(<GitHubHttpResponse>[
+            _response('', status: 304),
+            _response('', status: 304),
+          ]),
+          cursors: cursors,
+          emit: (event) async => delivered.add(event),
+        )..addObserver(
+          kCiFeedbackDeliveryLeg,
+          (event) async => observed.add(event),
+        );
 
     await reconciler.reconcileOnce();
 
