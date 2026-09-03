@@ -6,7 +6,7 @@ final class FakeGitHubIntakeStore implements GitHubIntakeStore {
   final List<GitHubIntakeRecord> records = [];
 
   @override
-  Future<void> upsertDeferred(GitHubIntakeRecord record) async {
+  Future<void> upsert(GitHubIntakeRecord record) async {
     records.add(record);
   }
 }
