@@ -334,3 +334,50 @@ class AgentSession implements ProcessSession {
     if (!_updates.isClosed) await _updates.close();
   }
 }
+
+/// The HARNESS-NEUTRAL spawn (bead `pow-39tl`): one resolved [environment]
+/// rendered into a process invocation, whichever transport it declares.
+///
+/// An environment naming an [AgentEnvironment.sessionAdapter] launches
+/// LONG-LIVED through that adapter and receives its [brief] over the channel
+/// once the protocol is up ([AgentSession.start]); one that does not renders
+/// the brief into argv through [spawnFor]. Before this seam existed the branch
+/// lived in ONE caller, and the spec seat — which called [spawnFor] directly —
+/// spawned a channel harness as a one-turn process with an EMPTY prompt
+/// segment (`PromptMode.none`), so the brief was never delivered at all.
+///
+/// GUARD, LOUD: a channel adapter that does not launch [Lifecycle.longLived]
+/// throws — the brief arrives AFTER startup, so a one-turn channel launch can
+/// only ever produce a briefless run.
+RuntimeConfig spawnThroughSessionAdapter({
+  required AgentSessionAdapterRegistry adapters,
+  required AgentEnvironment environment,
+  required AgentBrief brief,
+  required Workspace workspace,
+  String? model,
+  String? usageOut,
+  Uri? endpoint,
+}) {
+  final adapterId = environment.sessionAdapter;
+  if (adapterId == null) {
+    return spawnFor(
+      environment: environment,
+      brief: brief,
+      workspace: workspace,
+      model: model,
+      usageOut: usageOut,
+      endpoint: endpoint,
+    );
+  }
+  final config = adapters.require(adapterId).launch(
+    environment: environment,
+    workspace: workspace,
+    model: model,
+    endpoint: endpoint,
+    usageOut: usageOut,
+  );
+  if (config.lifecycle != Lifecycle.longLived) {
+    throw StateError('channel adapter "$adapterId" must launch longLived');
+  }
+  return config;
+}

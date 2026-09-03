@@ -305,29 +305,15 @@ class AgentCapability extends ProcessCapability {
   @override
   RuntimeConfig spawn(TreeContext context, StepArgs args) {
     final run = _resolveRun(context, args);
-    final adapterId = run.environment.sessionAdapter;
-    if (adapterId == null) {
-      return spawnFor(
-        environment: run.environment,
-        model: run.model,
-        endpoint: run.endpoint,
-        brief: run.brief,
-        workspace: run.workspace,
-        usageOut: usageReportPath(args.nodePath),
-      );
-    }
-    final config = _sessionAdapters
-        .require(adapterId)
-        .launch(
-          environment: run.environment,
-          workspace: run.workspace,
-          model: run.model,
-          endpoint: run.endpoint,
-        );
-    if (config.lifecycle != Lifecycle.longLived) {
-      throw StateError('channel adapter "$adapterId" must launch longLived');
-    }
-    return config;
+    return spawnThroughSessionAdapter(
+      adapters: _sessionAdapters,
+      environment: run.environment,
+      brief: run.brief,
+      workspace: run.workspace,
+      model: run.model,
+      endpoint: run.endpoint,
+      usageOut: usageReportPath(args.nodePath),
+    );
   }
 
   @override
