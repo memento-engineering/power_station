@@ -111,26 +111,29 @@ void main() {
       expect(flattened, isNot(contains('--status')));
     });
 
-    test('the create argv carries no parking date and no approval marker', () async {
-      final runner = FakeBdRunner([
-        ok([]),
-        ok({'id': 'pow-new'}),
-        ok({'id': 'pow-new'}),
-      ]);
+    test(
+      'the create argv carries no parking date and no approval marker',
+      () async {
+        final runner = FakeBdRunner([
+          ok([]),
+          ok({'id': 'pow-new'}),
+          ok({'id': 'pow-new'}),
+        ]);
 
-      await BdGitHubIntakeStore(runner).upsert(record);
+        await BdGitHubIntakeStore(runner).upsert(record);
 
-      final flattened = runner.argvs.expand((argv) => argv).toList();
-      expect(flattened, isNot(contains('--defer')));
-      expect(flattened.where((arg) => arg.contains('9999')), isEmpty);
-      expect(
-        flattened.where((arg) => arg.contains('grid.approved')),
-        isEmpty,
-        reason: 'the approve verb is the only writer of the approval stamp',
-      );
-      expect(flattened, isNot(contains('--label')));
-      expect(flattened, isNot(contains('--add-label')));
-    });
+        final flattened = runner.argvs.expand((argv) => argv).toList();
+        expect(flattened, isNot(contains('--defer')));
+        expect(flattened.where((arg) => arg.contains('9999')), isEmpty);
+        expect(
+          flattened.where((arg) => arg.contains('grid.approved')),
+          isEmpty,
+          reason: 'the approve verb is the only writer of the approval stamp',
+        );
+        expect(flattened, isNot(contains('--label')));
+        expect(flattened, isNot(contains('--add-label')));
+      },
+    );
 
     test(
       'updates the sole correlated bead without readiness mutation',
