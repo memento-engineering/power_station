@@ -65,14 +65,15 @@ Bead _fixture(String design) => bead('pow-fixture').copyWith(
 /// injected [RubricSource] (D-9), so the prompt carries the vendored rubric's
 /// own prose, not the no-assets placeholder.
 String _lanePrompt(Bead bead) =>
-    SpecCriticCapability(rubrics: PackagedAssetLoader().rubricSource)
-        .buildSpecCriticPrompt(
-          bead,
-          'decision-alignment',
-          'pow-fixture/spec_review/decision-alignment',
-          '/w/pow-fixture',
-          round: 0,
-        );
+    SpecCriticCapability(
+      rubrics: PackagedAssetLoader().rubricSource,
+    ).buildSpecCriticPrompt(
+      bead,
+      'decision-alignment',
+      'pow-fixture/spec_review/decision-alignment',
+      '/w/pow-fixture',
+      round: 0,
+    );
 
 void main() {
   group('rosterQualifiedSurfaces reads the spec\'s OWN Touches section', () {

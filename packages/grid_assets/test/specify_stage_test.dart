@@ -308,10 +308,7 @@ void main() {
       expect(rendered, contains(kDecisionWriteRule));
       expect(rendered, isNot(contains('living AI-decision register')));
       expect(rendered, contains('the_grid#admission-authority-boundary'));
-      expect(
-        rendered,
-        contains('No recorded decision governs these surfaces'),
-      );
+      expect(rendered, contains('No recorded decision governs these surfaces'));
     });
 
     test('carries the pre-convene re-validation: grep callers/tests of every '

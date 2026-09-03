@@ -211,6 +211,7 @@ List<Bead> ladderDoneSession({
   completed: kSpecHeadNodes,
   grades: kReadinessGradeA,
 );
+
 /// The LOCAL-ONLY register tokens the spec path no longer renders — the shell
 /// shape a `for register in docs/adr docs/decisions` grep is built from.
 ///

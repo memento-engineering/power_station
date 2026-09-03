@@ -96,18 +96,20 @@ List<String> rosterQualifiedSurfaces({
 String rosterDecisionLookupBlock(
   List<String> surfaces, {
   String runner = kDefaultOverlayRunner,
-}) => (surfaces.isEmpty
-          ? [
-              rosterDecisionIndexCommand(
-                surface: '$kUnknownSubstationPrefix/$kRosterSurfacePlaceholder',
-                runner: runner,
-              ),
-            ]
-          : [
-              for (final surface in surfaces)
-                rosterDecisionIndexCommand(surface: surface, runner: runner),
-            ])
-      .join('\n');
+}) =>
+    (surfaces.isEmpty
+            ? [
+                rosterDecisionIndexCommand(
+                  surface:
+                      '$kUnknownSubstationPrefix/$kRosterSurfacePlaceholder',
+                  runner: runner,
+                ),
+              ]
+            : [
+                for (final surface in surfaces)
+                  rosterDecisionIndexCommand(surface: surface, runner: runner),
+              ])
+        .join('\n');
 
 /// The register's READ rule — stated to every agent on the spec path.
 ///
