@@ -387,6 +387,49 @@ String landReasonTail(String output, [int max = 400]) {
       : '…${trimmed.substring(trimmed.length - max)}';
 }
 
+/// The tail budget for the captured Validation-Plan log a revalidate
+/// [Escalate] carries (bead `pow-gy41`). Wide enough to hold a whole
+/// `dart test` failure block — the failing test's name, its expected/actual,
+/// and the `Some tests failed.` trailer — and well inside the gate bead's
+/// metadata budget.
+const int kRevalidateReasonTailChars = 1500;
+
+/// One `dart pub get` line of pure UPGRADE ADVICE — `analyzer 10.2.0 (14.3.0
+/// available)`. Anchored at both ends: a line that merely MENTIONS an
+/// available version mid-sentence is not advice and survives.
+final RegExp _pubVersionAdvice = RegExp(
+  r'^\s*[a-z_][a-z0-9_]*\s+\S+\s+\(\S+\s+available\)\s*$',
+);
+
+/// The two trailers pub prints after that block — the `N packages have newer
+/// versions incompatible with dependency constraints.` count and the
+/// ``Try `dart pub outdated` for more information.`` nudge.
+final RegExp _pubOutdatedSummary = RegExp(
+  r'^\s*(\d+\s+packages?\s+(have|has)\s+newer\s+versions\s+incompatible\s+'
+  r'with\s+dependency\s+constraints\.'
+  r'|Try\s+`(dart|flutter)\s+pub\s+outdated`.*)\s*$',
+);
+
+/// [output] with pub's upgrade-ADVICE lines dropped (bead `pow-gy41`).
+///
+/// A Dart Validation Plan opens with `dart pub get`, and on a seat with an
+/// outdated lockfile its advisory block runs past 2000 characters on its own —
+/// burying the fatal line, which comes LAST. This is never the failure, so it
+/// is never the diagnosis.
+///
+/// Pure and line-wise: every line that is not advice is returned
+/// BYTE-IDENTICAL, in order; advice-free input is returned unchanged. Applied
+/// BEFORE [landReasonTail] so the tail budget is spent on signal.
+String planOutputWithoutPubAdvice(String output) => output
+    .split('\n')
+    .where(
+      (line) =>
+          !_pubVersionAdvice.hasMatch(line) &&
+          !_pubOutdatedSummary.hasMatch(line),
+    )
+    .join('\n');
+
+
 /// The bead's OWN Validation Plan command — mirrors `committee.dart`'s
 /// identical private helper (duplicated rather than shared, so this file
 /// doesn't couple to the review committee's file layout for one four-line
