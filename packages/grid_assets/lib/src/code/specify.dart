@@ -1366,9 +1366,9 @@ String sectionBodyAt(String design, int headingAt) {
 ///
 /// As permissive as the `indexOf` it replaces on every axis but two: the line
 /// start, and 0-3 spaces of indentation (4+ is an indented code block, i.e.
-/// quotation). Any level `##`…`######` still resolves (`indexOf('## X')` matches
-/// inside `### X` today, and a spec that writes `### Touches` must not newly
-/// park), as does any trailing text on the heading line
+/// quotation). Any level `##`…`######` still resolves (a substring search for
+/// `## X` matches inside `### X` today, and a spec that writes `### Touches`
+/// must not newly park), as does any trailing text on the heading line
 /// (`## Validation Plan (1:1)`) and any spacing after the hashes.
 ///
 /// PUBLIC for the same reason as [proseOnly] and [sectionBodyAt]: the code
