@@ -334,9 +334,9 @@ void main() {
       final v = decideSpecRoute(
         sessionRoot: 'tg-1',
         lanes: _lanes(
-          {..._allA(), 'adr-alignment': 'D'},
-          rationales: const {'adr-alignment': _carriedFinding},
-          owners: const {'adr-alignment': kOwnerArchitect},
+          {..._allA(), 'decision-alignment': 'D'},
+          rationales: const {'decision-alignment': _carriedFinding},
+          owners: const {'decision-alignment': kOwnerArchitect},
         ),
         gating: _gating,
         priorRound: 0,
@@ -344,7 +344,7 @@ void main() {
       expect(v, isA<SpecAdvance>());
       final carried = (v as SpecAdvance).fixInFlight;
       expect(carried, isNotNull);
-      expect(carried!.rubric, 'adr-alignment');
+      expect(carried!.rubric, 'decision-alignment');
       expect(carried.grade, 'D');
       expect(carried.rationale, _carriedFinding);
     });
@@ -353,13 +353,13 @@ void main() {
       final v = decideSpecRoute(
         sessionRoot: 'tg-1',
         lanes: _lanes(
-          {..._allA(), 'adr-alignment': 'D', 'plan-completeness': 'D'},
+          {..._allA(), 'decision-alignment': 'D', 'plan-completeness': 'D'},
           rationales: const {
-            'adr-alignment': 'the A14 clause is uncited',
+            'decision-alignment': 'the A14 clause is uncited',
             'plan-completeness': 'step 3 names no test command',
           },
           owners: const {
-            'adr-alignment': kOwnerArchitect,
+            'decision-alignment': kOwnerArchitect,
             'plan-completeness': kOwnerArchitect,
           },
         ),
@@ -920,20 +920,20 @@ void main() {
     test('LIVE: a single-D advance WRITES the fix-in-flight carry, names it on '
         'the payload, and carries NO grade key (A27(2) — an advancing round '
         'invalidates nothing)', () async {
-      final grades = {..._allA(), 'adr-alignment': 'D'};
-      const why = {'adr-alignment': _carriedFinding};
+      final grades = {..._allA(), 'decision-alignment': 'D'};
+      const why = {'decision-alignment': _carriedFinding};
       _plantVerdicts(ws.path, grades, rationales: why);
       final out = await _route(grades, rationales: why, workspaceDir: ws.path);
       expect(out, isA<Advance>());
       final payload = (out as Advance).payload!;
       expect(payload['verdict'], 'advance');
       expect(payload['rule'], 'single-finding-advance');
-      expect(payload['fix_in_flight'], 'adr-alignment=D');
+      expect(payload['fix_in_flight'], 'decision-alignment=D');
       expect(payload['fix_in_flight_finding'], _carriedFinding);
       expect(payload.containsKey('grade'), isFalse);
       // The BUILD brief reads the FILE, so the carry must be on disk.
       expect(readFixInFlight(ws.path)!.lane.rationale, _carriedFinding);
-      expect(readFixInFlight(ws.path)!.lane.rubric, 'adr-alignment');
+      expect(readFixInFlight(ws.path)!.lane.rubric, 'decision-alignment');
     });
 
     test('LIVE: a planted `refinement` column WRITES the refinement flag and '

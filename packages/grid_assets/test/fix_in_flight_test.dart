@@ -15,7 +15,7 @@ const _finding =
 FixInFlight _carry() => const FixInFlight(
   sessionRoot: 'tg-1',
   round: 0,
-  lane: RespecLane(rubric: 'adr-alignment', grade: 'D', rationale: _finding),
+  lane: RespecLane(rubric: 'decision-alignment', grade: 'D', rationale: _finding),
 );
 
 void main() {
@@ -28,7 +28,7 @@ void main() {
     final read = readFixInFlight(dir.path);
     expect(read, isNotNull);
     expect(read!.lane.rationale, _finding);
-    expect(read.lane.rubric, 'adr-alignment');
+    expect(read.lane.rubric, 'decision-alignment');
     // A SIBLING of `.grid/critique/`, which clear-critique wipes each round.
     expect(fixInFlightPath(dir.path), endsWith('.grid/spec/fix-in-flight.json'));
     clearFixInFlight(dir.path);

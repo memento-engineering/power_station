@@ -385,7 +385,7 @@ SpecRouteVerdict decideSpecRoute({
   // 7. a SINGLE architect-owed D WITH a rationale — ADVANCE, carrying the
   //    finding VERBATIM to the build brief as a BINDING fix-in-flight item.
   //    The receipt (bead `pow-bhm`): `tg-h4u` burned two substantive spec
-  //    rounds on a single sub-C lane, one of them an adr-alignment D whose
+  //    rounds on a single sub-C lane, one of them a decision-alignment D whose
   //    load-bearing defect was a citation misattribution. Every catch keeps its
   //    value — the finding rides the build and the code committee re-checks it
   //    — and the respec cycle is not spent. A single E still respecs: E is the

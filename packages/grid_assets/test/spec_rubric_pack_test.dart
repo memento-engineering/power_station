@@ -498,9 +498,9 @@ void main() {
       );
     });
 
-    test('adr-alignment bands a MISATTRIBUTED citation as C', () {
+    test('decision-alignment bands a MISATTRIBUTED citation as C', () {
       final text = File(
-        p.join(_extensionDir(), 'rubrics', 'adr-alignment.md'),
+        p.join(_extensionDir(), 'rubrics', 'decision-alignment.md'),
       ).readAsStringSync();
       final cBand = text.split('- **D**').first;
       expect(cBand, contains('MISATTRIBUTED'));
