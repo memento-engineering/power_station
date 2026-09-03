@@ -1,3 +1,18 @@
+## 0.1.0-rc.9
+
+- Added: `SubstationSeed`, the COMPOSED per-seat stack, plus its
+  `SubstationAppIdentity` delivery identity and the `MountedSubstationSeed`
+  offline projection. A downstream station now composes a full GitHub-delivering
+  seat from `the_grid` + `power_station` alone: the seed mounts the seat's
+  `TypedEnvironmentProvider` rung, the mounted projection, `grid_assets`'
+  `GitGridAssets`, the live-arm reconciler binding, `GitHubReconcilerAssets`,
+  `GitHubGridAssets` and `MountEligibilityAssets`, and wraps the App client and
+  PR opener on a live poll arm. `SubstationAppIdentity.installationId` is an
+  `int`, so a malformed installation id fails where the seat is authored rather
+  than during mount; the pre-existing `GitHubAppConfig` is untouched.
+- Changed: the `grid_assets` floor is `^0.6.0-rc.9` — the seed consumes the
+  arming mechanism vended there.
+
 ## 0.1.0-rc.8
 
 - Breaking: `GitHubSelfTrust.fromEnvironment` takes an injected

@@ -1,3 +1,14 @@
+## 0.6.0-rc.9
+
+- Added: the typed-seat arming MECHANISM is vended — `AgentArming` (the pure
+  per-seat VALUE), `TypedEnvironmentProvider` (the ONE seed both the station rung
+  and the per-substation rung mount) and `SeatEnvironments` (the
+  offline projection of all four resolutions at a point in the tree) now ship
+  from `lib/src/agent/seat_environments.dart`, beside the seat vocabulary they
+  wrap. `AgentArming` is the typed-seat shape: four typed seats and no
+  role rung. A composing station keeps its own named environments and ladders:
+  mechanism is vended, posture is not.
+
 ## 0.6.0-rc.8
 
 - Fixed: the `filing` verb reads the grid home's cross-store link beads. It
