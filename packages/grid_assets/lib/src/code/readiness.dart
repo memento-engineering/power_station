@@ -82,6 +82,8 @@ import '../agent/site_binding.dart';
 import '../agent/usage_report.dart';
 import 'committee.dart';
 import 'decision_register.dart';
+import 'fix_in_flight.dart';
+import 'refinement_flag.dart';
 import 'respec_ledger.dart';
 
 /// The deterministic intake-contract step id (the ladder's head — zero agents).
@@ -306,6 +308,10 @@ class IntakeCapability extends RouteCapability {
       // Do not carry correction guidance into a fresh session. Best-effort
       // inside `clearRespecLedger`; a no-op when no ledger exists.
       clearRespecLedger(workspace.workspaceDir);
+      // Session-scoped exactly like the ledger (bead `pow-bhm`): a reused
+      // worktree never inherits a prior session's carry or flag.
+      clearFixInFlight(workspace.workspaceDir);
+      clearRefinementFlag(workspace.workspaceDir);
     }
     final findings = intakeFindings(bead);
     if (findings.isEmpty) {
