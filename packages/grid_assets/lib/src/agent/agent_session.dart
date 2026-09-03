@@ -186,6 +186,7 @@ class AgentSession implements ProcessSession {
     required this.commands,
     required this.attemptId,
     required this.instanceFence,
+    this.transport,
   });
 
   /// The sole owner of the supervised child and its byte interaction surface.
@@ -208,6 +209,11 @@ class AgentSession implements ProcessSession {
 
   /// Live process-incarnation fence accepted by [send].
   final String instanceFence;
+
+  /// The out-of-band flare sink for observations that are NOT protocol updates
+  /// (emit-only, D-8). Null — the composition mounted no transport — drops the
+  /// observation; it is never a session failure.
+  final ExplorationTransport? transport;
 
   final StreamController<ProcessSessionUpdate> _updates =
       StreamController<ProcessSessionUpdate>();
@@ -272,6 +278,19 @@ class AgentSession implements ProcessSession {
     switch (event) {
       case Exited() || Died():
         _fail('process ended before protocol completion');
+      case SessionOrphaned(:final pgid, :final memberCount):
+        // NOT a terminal and NOT a state change (grid_runtime
+        // `RuntimeEvent.sessionOrphaned`): the leader is gone but the OWNED
+        // group still has live members, so the session stays supervised until
+        // the group empties or the provider's bounded grace elapses. Record the
+        // observation and leave the session exactly where it is; the
+        // `Exited`/`Died` that follows IS the terminal and has its own arm.
+        transport?.flare('agent.sessionOrphaned', <String, String>{
+          'sessionId': event.name,
+          'pgid': '$pgid',
+          'memberCount': '$memberCount',
+        });
+        return;
       case SessionStarted() || Respawned() || ActivityChanged():
         return;
     }
