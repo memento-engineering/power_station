@@ -26,6 +26,9 @@ class _Runtime implements RuntimeProvider {
   Future<void> closeOutput() => _output.close();
 
   @override
+  String exitOutputOf(String name) => '';
+
+  @override
   Future<void> start(String name, RuntimeConfig config) async => running = true;
 
   @override
