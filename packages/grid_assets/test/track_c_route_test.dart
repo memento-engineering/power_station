@@ -2,8 +2,10 @@
 //
 // `route` reads its sibling critics' grades through the AMBIENT SiblingView
 // (D-5; read with the effect verb — never a subscription/re-query) and decides:
-//   gating-F → Escalate · spread ≥ 3 → Escalate · any non-gating D/F →
-//   Escalate · all A–C → Advance.
+//   gating-F → Escalate · any non-gating F → Escalate · two-plus action grades
+//   (D/E) → Escalate · a single E → Escalate · a single rationale-less D →
+//   Escalate · a single D WITH a rationale → Advance carrying the finding ·
+//   else → Advance (bead `pow-bhm`; policy Nico-ratified 2026-07-18).
 // Fail-closed: a missing/forged grade is F, so it can NEVER advance. Zero I/O.
 import 'package:grid_assets/grid_assets.dart';
 import 'package:grid_engine/grid_engine.dart';
@@ -51,8 +53,11 @@ final String _critics = kCommitteeRubrics.join(',');
 }
 
 /// Runs the route over the fabricated [grades].
-Future<RouteVerdict> _route(Map<String, String> grades) {
-  final c = _routeCtx(grades);
+Future<RouteVerdict> _route(
+  Map<String, String> grades, {
+  Map<String, String> rationales = const {},
+}) {
+  final c = _routeCtx(grades, rationales: rationales);
   return const CodeRouteCapability().route(c.context, c.args);
 }
 
@@ -133,7 +138,42 @@ void main() {
       );
     });
 
-    test('a grade spread ≥ 3 (A + D) ⇒ Gate', () async {
+    test('a single D (A + D, spread 3) ⇒ Advance carrying the finding — the '
+        'spread rule is GONE', () async {
+      final out = await _route(
+        const {
+          'code-validation': 'A',
+          'spec-adherence': 'A',
+          'regression-risk': 'A',
+          'test-coverage': 'D',
+        },
+        rationales: const {'test-coverage': 'the new arm has no test'},
+      );
+      expect(out, isA<Advance>());
+      final payload = (out as Advance).payload!;
+      expect(payload['rule'], 'single-finding-advance');
+      expect(payload['fix_in_flight'], 'test-coverage=D');
+      expect(payload['fix_in_flight_finding'], 'the new arm has no test');
+      // The spread still rides the payload as FT-2 provenance — it just no
+      // longer DECIDES anything.
+      expect(payload['spread'], '3');
+    });
+
+    test('a single E ⇒ Gate — the code committee has no respec arm', () async {
+      final out = await _route(
+        const {
+          'code-validation': 'A',
+          'spec-adherence': 'A',
+          'regression-risk': 'E',
+          'test-coverage': 'A',
+        },
+        rationales: const {'regression-risk': 'the retry loop is unbounded'},
+      );
+      expect(out, isA<Escalate>());
+      expect((out as Escalate).reason, contains('returned E'));
+    });
+
+    test('a single D with NO rationale ⇒ Gate — nothing to carry', () async {
       final out = await _route(const {
         'code-validation': 'A',
         'spec-adherence': 'A',
@@ -141,9 +181,7 @@ void main() {
         'test-coverage': 'D',
       });
       expect(out, isA<Escalate>());
-      // The spread rule (rule 2) fires before the D/F rule — assert the REASON
-      // so a gate firing for the WRONG rule is caught (review finding C-1).
-      expect((out as Escalate).reason, contains('spread'));
+      expect((out as Escalate).reason, contains('NO rationale'));
     });
 
     test('a non-gating critic at F (spread < 3) ⇒ Gate (rework rule, the F '
@@ -163,19 +201,26 @@ void main() {
     });
 
     test(
-      'a non-gating critic at D (spread < 3) ⇒ Gate (rework, deferred)',
+      'TWO non-gating critics at an action grade ⇒ Gate (rework)',
       () async {
-        // B..D is a spread of 2 (< 3) so the spread rule does NOT fire — the D/F
-        // rework rule does.
-        final out = await _route(const {
-          'code-validation': 'B',
-          kDeclaredTestsRubric: 'B',
-          'spec-adherence': 'C',
-          'regression-risk': 'C',
-          'test-coverage': 'D',
-        });
+        // The round did not converge on a SINGLE carriable finding, so it
+        // gates — even though each lane says WHY (bead `pow-bhm`).
+        final out = await _route(
+          const {
+            'code-validation': 'B',
+            kDeclaredTestsRubric: 'B',
+            'spec-adherence': 'C',
+            'regression-risk': 'D',
+            'test-coverage': 'D',
+          },
+          rationales: const {
+            'regression-risk': 'the retry loop is unbounded',
+            'test-coverage': 'the new arm has no test',
+          },
+        );
         expect(out, isA<Escalate>());
-        expect((out as Escalate).reason, contains('rework'));
+        expect((out as Escalate).reason, contains('two or more critics'));
+        expect(out.reason, contains('rework'));
       },
     );
 
