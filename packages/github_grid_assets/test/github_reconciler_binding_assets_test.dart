@@ -298,10 +298,7 @@ Seed _seatTree({
         );
   final Seed seat = Provider<sdk.SubstationScope>.value(
     scope,
-    child: Provider<GitHubAppClient>.value(
-      client ?? _client,
-      child: binding,
-    ),
+    child: Provider<GitHubAppClient>.value(client ?? _client, child: binding),
   );
   return sdk.ProviderScope(
     child: gridRoot == null
@@ -581,49 +578,52 @@ void main() {
     expect(value.commandSender, isA<ResidentFeedbackCommandSender>());
   });
 
-  test('no grid root provides no projection and leaves intake working', () async {
-    CiFeedbackProjection? projection;
-    GitHubEventSink? sink;
-    final runner = _BdRunner();
-    final owner = TreeOwner();
-    addTearDown(owner.dispose);
-    owner.mountRoot(
-      _seatTree(
-        scope: const sdk.SubstationScope(
-          name: 'seat',
-          root: '/work/seat',
-          prefix: 'pow',
+  test(
+    'no grid root provides no projection and leaves intake working',
+    () async {
+      CiFeedbackProjection? projection;
+      GitHubEventSink? sink;
+      final runner = _BdRunner();
+      final owner = TreeOwner();
+      addTearDown(owner.dispose);
+      owner.mountRoot(
+        _seatTree(
+          scope: const sdk.SubstationScope(
+            name: 'seat',
+            root: '/work/seat',
+            prefix: 'pow',
+          ),
+          config: _config(owner: 'memento', repository: 'power_station'),
+          runner: runner,
+          runtimeFactory: _Factory().create,
+          observe: (value, seam) {
+            projection = value;
+            sink = seam;
+          },
         ),
-        config: _config(owner: 'memento', repository: 'power_station'),
-        runner: runner,
-        runtimeFactory: _Factory().create,
-        observe: (value, seam) {
-          projection = value;
-          sink = seam;
-        },
-      ),
-    );
-    owner.flush();
+      );
+      owner.flush();
 
-    expect(projection, isNull);
-    expect(sink, isNotNull);
-    await sink!(
-      const NormalizedGitHubEvent.issueOpened(
-        nodeId: 'I_1',
-        actor: 'nico',
-        repository: 'memento/power_station',
-        substation: 'seat',
-        observationId: 'obs-1',
-        number: 42,
-        title: 'Issue title',
-        body: 'Issue body',
-      ),
-    );
-    expect(
-      runner.argvs.firstWhere((argv) => argv.first == 'create'),
-      containsAllInOrder(['--external-ref', 'github:I_1']),
-    );
-  });
+      expect(projection, isNull);
+      expect(sink, isNotNull);
+      await sink!(
+        const NormalizedGitHubEvent.issueOpened(
+          nodeId: 'I_1',
+          actor: 'nico',
+          repository: 'memento/power_station',
+          substation: 'seat',
+          observationId: 'obs-1',
+          number: 42,
+          title: 'Issue title',
+          body: 'Issue body',
+        ),
+      );
+      expect(
+        runner.argvs.firstWhere((argv) => argv.first == 'create'),
+        containsAllInOrder(['--external-ref', 'github:I_1']),
+      );
+    },
+  );
 
   test('an inert arm provides no projection even under a grid root', () {
     for (final arm in [GitHubReconcilerArm.dry, GitHubReconcilerArm.offline]) {
