@@ -23,13 +23,18 @@ policy verbatim — an authored path is a promise whatever the base holds; a run
 or a citation of a file already on the base is not (beads `pow-0jc`, `pow-aoa`,
 `pow-qev`). What changes is the SCOPE at which edit-verb evidence is read.
 (1) An edit verb claims a path only when it falls inside that path's own WINDOW
-— the statement cut at the neighbouring test-path markers (`_evidenceWindow`) —
-never the whole statement. (2) Inside that window, position decides which
-vocabulary governs: the LAST evidence token ending before the path wins, else
-the FIRST token starting after it, else an edit verb anywhere in the window
-claims it. A reference cue (`_referenceTestStatement`: "built on", "already
-used in", "mirrors", "reuses", "as in") that governs the path demotes it to the
-base-gated `mentioned` bucket — never to an unconditional exemption. (3) The
+(`_evidenceWindow`), never the whole statement. The window is cut around the
+RUN, not the single path: consecutive paths joined by NOTHING but list
+separators — whitespace, commas, semicolons, backticks, `and`, `or`
+(`_testPathListGap`) — are one list governed by one verb, so "Modify `a`, `b`,
+and `c`" promises all three, while a gap that carries any other word ("Create
+`a`, built on the harness `b` already uses") splits the two into separate runs.
+(2) Inside that window, position decides which vocabulary governs: the LAST
+evidence token ending before the path wins, else the FIRST token starting after
+it, else an edit verb anywhere in the window claims it. A reference cue
+(`_referenceTestStatement`: "built on", "already used in", "mirrors", "reuses",
+"as in") that governs the path demotes it to the base-gated `mentioned` bucket
+— never to an unconditional exemption. (3) The
 statement-wide arm — `_dartTestCommand` and `_nonDeclarationTestStatement` — is
 UNCHANGED, because a rewritten `Test: dart test <M1> <M2>` line puts `dart test`
 outside `<M2>`'s window and narrowing it would invert `pow-0jc`. (4) A
@@ -55,7 +60,23 @@ stays GATING (`kCodeGatingRubrics` still lists it) and every narrowing is pinned
 by a receipt-shaped test.
 
 **Affects (if promoted):** `packages/grid_assets/lib/src/code/committee.dart`
-(`_referenceTestStatement`, `_evidenceWindow`, `_authoredEvidence`,
-`_collectTestDeclarations`'s authored arm, `declaredTestFiles`'s base match) and
-`packages/grid_assets/test/track_c_declared_tests_test.dart` (eight cases). No
-public API changes. the_grid: none.
+(`_referenceTestStatement`, `_testPathListGap`, `_evidenceWindow`,
+`_authoredEvidence`, `_collectTestDeclarations`'s authored arm,
+`declaredTestFiles`'s base match) and
+`packages/grid_assets/test/track_c_declared_tests_test.dart` (thirteen cases).
+No public API changes. the_grid: none.
+
+**Round 2 (governor-upheld regression, 2026-09-03).** The first pass cut the
+window at the neighbouring marker unconditionally, which lost a shared verb:
+for `Modify `a`, `b`, and `c`` only `a` stayed authored, `b` and `c` fell to the
+base-gated `mentioned` bucket, and a design promising three files gated on one —
+a false NEGATIVE on a gating rubric, the inverse of the defect this entry fixes.
+The RUN rule in clause (1) is the correction: a path's window spans the maximal
+run of siblings joined only by list separators, so one verb governs the whole
+list whether it LEADS it ("Modify `a`, `b`, and `c`") or TRAILS it ("`a` and `b`
+— both modified"), while any other word in a gap still separates the runs and
+preserves the `tg-5kb` / `space-fvg` / `tg-czsf` receipts. The widening is
+evidence-symmetric, not policy: a reference cue governing a run demotes the
+whole run to the same base-gated bucket, so `pow-qev`'s fail-closed posture and
+`pow-0jc`'s run-line arm are unchanged, each pinned by a case in
+`track_c_declared_tests_test.dart`.
