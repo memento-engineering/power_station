@@ -66,6 +66,9 @@
 /// deterministically evaluates its four mechanical authoring requirements,
 /// and [FilingCommand] is the thin CLI adapter the `discover` skill calls.
 /// Description and acceptance usefulness remain with the agentic half.
+/// Both filing verbs read the grid home's cross-store link beads through ONE
+/// `--state-root` seam ([addStateRootOption] / [resolveStateRoot]), so
+/// `filing` and `approve` cannot answer the same contract two ways.
 ///
 /// The VENDED SKILLS (bead `pow-88p`, `extension/station_overlay/skills/`) are
 /// those agentic halves: `discover` is the grid home's HITL front door — it
@@ -184,6 +187,7 @@ export 'src/filing/approval_stamp.dart';
 export 'src/filing/approve_command.dart';
 export 'src/filing/filing_command.dart';
 export 'src/filing/filing_contract.dart';
+export 'src/filing/state_root_option.dart';
 export 'src/lease/bus_lease.dart';
 export 'src/search/embedding_index.dart';
 export 'src/search/embedding_change_key.dart';

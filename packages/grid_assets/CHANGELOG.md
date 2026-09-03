@@ -1,5 +1,16 @@
 ## 0.6.0-rc.8
 
+- Fixed: the `filing` verb reads the grid home's cross-store link beads. It
+  gains `--state-root <path>` with the same injected default `approve` carries,
+  and both verbs now register and resolve it through one seam
+  (`lib/src/filing/state_root_option.dart`: `kStateRootOption`,
+  `kStateRootHelp`, `noStateRoot`, `addStateRootOption`, `resolveStateRoot`) —
+  a blocker wired by an open link bead used to pass `approve` and fail
+  `filing`. The named-blocker parser also tightened: a blocker is DECLARED by a
+  segment that OPENS with `Blocked by` / `Blocked on` / `Depends on` (a
+  mid-sentence mention declares nothing), and a `<prefix>-<tail>` token is a
+  bead id only when its prefix is known or its tail carries a digit, so
+  `cross-store` is no longer reported as a missing blocker.
 - Breaking: approval IS the `grid.approved_*` stamp. `mountEligibilityFindings`
   no longer reads the `grid.approved` LABEL — its clause is now
   `if (!isApprovalStamped(bead))`, refusing with

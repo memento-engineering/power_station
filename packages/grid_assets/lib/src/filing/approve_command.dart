@@ -9,9 +9,9 @@ import 'package:path/path.dart' as p;
 import '../search/station_search.dart';
 import 'approval_stamp.dart';
 import 'filing_contract.dart';
+import 'state_root_option.dart';
 
 String _currentDirectory() => Directory.current.path;
-String? _noStateRoot() => null;
 BdRunner _processRunnerFor(String storeRoot) =>
     ProcessBdRunner(workspaceRoot: storeRoot);
 final RegExp _sha = RegExp(r'^[0-9a-f]{7,40}$');
@@ -177,7 +177,7 @@ class ApproveCommand extends Command<int> {
   ApproveCommand({
     ApproveService? service,
     String Function() storeRoot = _currentDirectory,
-    String? Function() stateRoot = _noStateRoot,
+    String? Function() stateRoot = noStateRoot,
     StringSink? out,
     StringSink? err,
   }) : _service = service ?? ApproveService(),
@@ -196,13 +196,8 @@ class ApproveCommand extends Command<int> {
       ..addOption(
         'actor',
         help: 'The approver, recorded as grid.approved_by. Required.',
-      )
-      ..addOption(
-        'state-root',
-        help:
-            'The grid home whose .grid/.beads holds the cross-store link '
-            'beads.',
       );
+    addStateRootOption(argParser);
   }
 
   final ApproveService _service;
@@ -241,10 +236,7 @@ class ApproveCommand extends Command<int> {
       );
       return 64;
     }
-    final option = argResults!.option('state-root')?.trim();
-    final stateRoot = option == null || option.isEmpty
-        ? _stateRoot()
-        : p.normalize(option);
+    final stateRoot = resolveStateRoot(argResults!, _stateRoot);
     final ApprovalOutcome outcome;
     try {
       outcome = await _service.approve(
