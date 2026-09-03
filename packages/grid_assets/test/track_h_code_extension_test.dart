@@ -1085,6 +1085,82 @@ void main() {
       },
     );
   });
+  // The spec route may ADVANCE carrying ONE open finding (bead `pow-bhm`).
+  // `AgentCapability._resolveRun` reads that carry off disk at the SPAWN edge
+  // and threads it into `buildAgentBrief`, so the finding reaches the builder
+  // through the REAL spawn wire — `fix_in_flight_test.dart` already covers
+  // `buildAgentBrief`'s rendering; this covers the READ that feeds it.
+  group('the fix-in-flight carry reaches the SPAWNED brief', () {
+    const finding =
+        'step 3 cites `the_grid#admission-authority-boundary` for a clause '
+        'that lives in `power_station#landing-policy`';
+
+    late Directory worktree;
+
+    setUp(() {
+      worktree = Directory.systemTemp.createTempSync('agent-carry-worktree-');
+    });
+
+    tearDown(() {
+      if (worktree.existsSync()) worktree.deleteSync(recursive: true);
+    });
+
+    /// The capability with BOTH provision legs inert: the bead carries no
+    /// `grid.dart` envelope (so the pub-link write is a no-op) and the overlay
+    /// root does not exist (so no skill materialization), leaving the carry read
+    /// under test as the only thing this spawn touches the real filesystem for.
+    AgentCapability capability() => AgentCapability(
+      devRoot: '/dev/root',
+      overlayRoot: p.join(worktree.path, 'no-overlay'),
+    );
+
+    ({FakeTreeContext context, StepArgs args}) ctxAt(String workspaceDir) => (
+      context: FakeTreeContext(
+        values: {
+          Bead: bead('tg-1'),
+          Workspace: testWorkspace(
+            'tg-1',
+            workspaceDir: workspaceDir,
+            branch: 'grid/tg-1',
+          ),
+        },
+      ),
+      args: stepArgs('tg-1/agent'),
+    );
+
+    /// The rendered brief as the spawned process actually receives it: the FINAL
+    /// sh positional, which `"$@"` execs verbatim.
+    String spawnedBrief() {
+      final c = ctxAt(worktree.path);
+      return capability().spawn(c.context, c.args).args.last;
+    }
+
+    test('a carry on disk lands in the spawned argv brief, BINDING', () {
+      writeFixInFlight(
+        worktree.path,
+        const FixInFlight(
+          sessionRoot: 'tg-1',
+          round: 0,
+          lane: RespecLane(
+            rubric: 'decision-alignment',
+            grade: 'D',
+            rationale: finding,
+          ),
+        ),
+      );
+      final brief = spawnedBrief();
+      expect(brief, contains('Fix in flight'));
+      expect(brief, contains('BINDING'));
+      expect(brief, contains(finding));
+      expect(brief, contains('`decision-alignment` — grade D'));
+    });
+
+    test('no carry file ⇒ a brief with no fix-in-flight block', () {
+      final brief = spawnedBrief();
+      expect(brief, contains('Bead `tg-1`'));
+      expect(brief, isNot(contains('Fix in flight')));
+    });
+  });
 }
 
 class _MaterializingWorktreeRunner extends CannedGitRunner {

@@ -331,6 +331,61 @@ void main() {
             'route\'s cap now start this session at round 0',
       );
     });
+
+    test('the session head also clears the prior session\'s FIX-IN-FLIGHT '
+        'carry and REFINEMENT flag (bead pow-bhm)', () async {
+      final dir = Directory.systemTemp.createTempSync('intake-carry-');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      // The prior session's two worktree channels. Both are SIBLINGS of
+      // `.grid/critique/` (they live under `.grid/spec/`), so the per-round
+      // critique sweep never touches them — only this session-head clear does.
+      writeFixInFlight(
+        dir.path,
+        const FixInFlight(
+          sessionRoot: 'tg-1',
+          round: 2,
+          lane: RespecLane(
+            rubric: 'coherence',
+            grade: 'D',
+            rationale: 'a prior session\'s carried finding',
+          ),
+        ),
+      );
+      writeRefinementFlag(
+        dir.path,
+        const RefinementFlag(
+          sessionRoot: 'tg-1',
+          round: 2,
+          notes: [
+            RefinementNote(
+              rubric: 'coherence',
+              finding: 'a prior session\'s tracker note',
+            ),
+          ],
+        ),
+      );
+      expect(File(fixInFlightPath(dir.path)).existsSync(), isTrue);
+      expect(File(refinementFlagPath(dir.path)).existsSync(), isTrue);
+
+      final out = await const IntakeCapability(clearer: _noop).route(
+        FakeTreeContext(
+          values: {
+            Bead: _refined(),
+            Workspace: testWorkspace('tg-1', workspaceDir: dir.path),
+          },
+        ),
+        stepArgs('tg-1/$kIntakeNode'),
+      );
+
+      expect(out, isA<Advance>());
+      expect(readFixInFlight(dir.path), isNull);
+      expect(readRefinementFlag(dir.path), isNull);
+      // DELETED, not merely unreadable: both decoders degrade a corrupt
+      // document to null, so only the file-level check pins the clear — a
+      // reused worktree inherits nothing.
+      expect(File(fixInFlightPath(dir.path)).existsSync(), isFalse);
+      expect(File(refinementFlagPath(dir.path)).existsSync(), isFalse);
+    });
   });
 
   group('ReadinessRouteCapability — the decision point (tier 3)', () {

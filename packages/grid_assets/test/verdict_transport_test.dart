@@ -3,7 +3,57 @@ import 'dart:io';
 
 import 'package:beads_dart/beads_dart.dart' show Bead;
 import 'package:grid_assets/grid_assets.dart';
+import 'package:grid_engine/grid_engine.dart';
+import 'package:grid_runtime/grid_runtime.dart';
 import 'package:test/test.dart';
+
+import 'support/asset_fakes.dart';
+
+/// The critic's (ambient tree, per-step args) pair — the same context rip-out
+/// shape the critic unit file uses: the work Bead + Workspace ride the tree, the
+/// rubric rides the step params, and `grid.round` is the engine's injected round
+/// the verdict stamp is fenced against.
+({FakeTreeContext context, StepArgs args}) _criticCtx({
+  required String rubric,
+  required String workspaceDir,
+}) => (
+  context: FakeTreeContext(
+    values: {
+      Bead: bead('tg-1'),
+      Workspace: testWorkspace(
+        'tg-1',
+        workspaceDir: workspaceDir,
+        branch: 'grid/tg-1',
+      ),
+    },
+  ),
+  args: stepArgs(
+    'tg-1/review/$rubric',
+    params: {'rubric': rubric, 'grid.round': '0'},
+  ),
+);
+
+/// Writes the captured-stdout RESULT ENVELOPE the durability probe recovers
+/// from — the embedded-JSON transport, with no canonical file on disk so the
+/// probe must repair.
+void _writeEnvelope(String workspaceDir, String rubric, String resultText) {
+  File('$workspaceDir/${usageReportPath('tg-1/review/$rubric')}')
+    ..createSync(recursive: true)
+    ..writeAsStringSync(jsonEncode({'result': resultText}));
+}
+
+/// The canonical verdict document the probe's rewrite left on disk.
+Map<String, Object?> _canonical(String workspaceDir, String rubric) =>
+    jsonDecode(
+          File('$workspaceDir/.grid/critique/$rubric.json').readAsStringSync(),
+        )
+        as Map<String, Object?>;
+
+/// An embedded-JSON result envelope carrying [columns] beside a `B` grade — the
+/// shape a critic emits when it fences its verdict in a markdown block.
+String _envelopeText(Map<String, String> columns) =>
+    'Here is my verdict:\n```json\n'
+    '${jsonEncode({'grade': 'B', 'rationale': 'covered, with a tracker note', ...columns})}\n```\n';
 
 void main() {
   group('atomic verdict prompt contract', () {
@@ -160,5 +210,70 @@ void main() {
       expect(ledger?.round, 2);
       expect(ledger?.lanes.single.rationale, 'verbatim rationale');
     });
+  });
+
+  // The NON-GRADING bead-graph column (bead `pow-bhm`) survives a verdict
+  // TRANSPORT REPAIR: the embedded-JSON reader picks it off the envelope and
+  // the probe's canonical rewrite persists it, so a repair never silently drops
+  // the finding the operator flag is built from. Driven through the BASE
+  // `CriticCapability` deliberately — the transport stack is shared by every
+  // critic family, so a column proven here rides all of them.
+  group('the `refinement` column survives verdict-transport recovery', () {
+    const rubric = 'test-coverage';
+    const refinement =
+        'tg-yau duplicates this bead; tg-9kk deps on the duplicate';
+
+    late Directory dir;
+    setUp(() => dir = Directory.systemTemp.createTempSync('verdict-refine-'));
+    tearDown(() => dir.deleteSync(recursive: true));
+
+    Future<Map<String, String>?> recover(String envelope) async {
+      _writeEnvelope(dir.path, rubric, envelope);
+      final c = _criticCtx(rubric: rubric, workspaceDir: dir.path);
+      expect(
+        await const CriticCapability().probeCompletionArtifact(
+          c.context,
+          c.args,
+        ),
+        GateOutcome.clear,
+      );
+      return const CriticCapability().result(c.context, c.args);
+    }
+
+    test('an embedded-JSON envelope carries `refinement` through recovery into '
+        'result()', () async {
+      final out = await recover(
+        _envelopeText(const {kVerdictRefinementKey: refinement}),
+      );
+      expect(out?['grade'], 'B');
+      expect(out?['transport'], 'file'); // repaired INTO the canonical file
+      expect(out?[kVerdictRefinementKey], refinement);
+    });
+
+    test('the canonical REWRITE persists the recovered `refinement` on disk, '
+        'beside grade / rationale / nodePath / round', () async {
+      await recover(_envelopeText(const {kVerdictRefinementKey: refinement}));
+      final written = _canonical(dir.path, rubric);
+      expect(written[kVerdictRefinementKey], refinement);
+      expect(written['grade'], 'B');
+      expect(written['nodePath'], 'tg-1/review/$rubric');
+      expect(written[kVerdictRoundKey], 0);
+    });
+
+    test(
+      'a MISSPELLED column key recovers NO refinement — and still grades the '
+      'lane (the strict decode stays the ONE place a verdict fails)',
+      () async {
+        final out = await recover(
+          _envelopeText(const {'refinment': refinement}),
+        );
+        expect(out?['grade'], 'B');
+        expect(out!.containsKey(kVerdictRefinementKey), isFalse);
+        expect(
+          _canonical(dir.path, rubric).containsKey(kVerdictRefinementKey),
+          isFalse,
+        );
+      },
+    );
   });
 }
