@@ -150,7 +150,11 @@ class DescribeOutcome {
 ///
 /// [nodePath] is the delivering node's path: it names the FT-2 telemetry file
 /// this call's usage envelope lands at ([usageReportPath]), so the otherwise
-/// unmetered describe call is projected exactly like every spawned seat's.
+/// unmetered describe call is projected exactly like every spawned seat's. Its
+/// cost is priced off [ambient]'s declared `modelPrices` when the harness
+/// reports none, and [flare] — the route's own `ExplorationTransport.flare`,
+/// injected because this is a pure function over its inputs — names a model
+/// that has no declared price (bead `pow-zetn`).
 ///
 /// The two guards that keep the WHOLE offline suite free of real git and real
 /// claude are the first two lines: an unwired [inference] (a bare
@@ -171,6 +175,7 @@ Future<DescribeOutcome> describeBranch({
   List<DescribeReceipt> receipts = const [],
   GitRunner? git,
   InferenceRunner? inference,
+  UsageFlare? flare,
 }) async {
   if (inference == null) return const DescribeOutcome();
   if (!Directory(workspace.workspaceDir).existsSync()) {
@@ -278,7 +283,14 @@ Future<DescribeOutcome> describeBranch({
     commits: commits,
     source: described == null ? 'fallback' : 'inference',
     usage: {
-      ...readUsageFields(workDir, nodePath),
+      // The describe pass prices off the AMBIENT config's declared table — the
+      // same value every other lane's usage merge reads (bead `pow-zetn`).
+      ...readUsageFields(
+        workDir,
+        nodePath,
+        modelPrices: ambient.modelPrices,
+        flare: flare,
+      ),
       'describe_harness': config.harness,
       if (model != null && model.isNotEmpty) 'describe_model': model,
       'describe_stop': run.ok ? 'ok' : 'failed',

@@ -53,13 +53,14 @@ import 'model_tier.dart';
 /// Watched by branches (`dependOn*`), snapshot-read by effects (`get*`).
 class AgentConfig {
   /// Creates the config: which [harness] runs the work, with harness-opaque
-  /// [params] tuning, the station's [tiers] arming, and the PRE-TIER
-  /// [graderModel] knob. WHERE inference runs is the named environment's own
-  /// `target` (ADR-0002 D3), not a config axis.
+  /// [params] tuning, the station's [tiers] arming, the declared [modelPrices],
+  /// and the PRE-TIER [graderModel] knob. WHERE inference runs is the named
+  /// environment's own `target` (ADR-0002 D3), not a config axis.
   const AgentConfig({
     this.harness = 'claude',
     this.params = const {},
     this.tiers = const ModelTiers(),
+    this.modelPrices = kUsageModelPrices,
     this.graderModel,
   });
 
@@ -83,6 +84,15 @@ class AgentConfig {
   /// reads it through the tier the SPAWNER declares, so the field count follows
   /// the TIERS and nothing else.
   final ModelTiers tiers;
+
+  /// The station's declared per-model TOKEN PRICES (bead `pow-zetn`) — read
+  /// ONLY where a harness reports tokens but no billed cost, so a
+  /// subscription-billed lane still has a cost in the ledger. Config = VALUES
+  /// in the tree: this rides the ambient [AgentConfig] the tree already mounts,
+  /// so a station retunes prices by arming a value, never by injecting a
+  /// pricing service. An unpriced model FLARES and stays cost-null — never a
+  /// silent zero.
+  final ModelPriceTable modelPrices;
 
   /// The PRE-TIER grade knob (`space up --grader-model` — ADR-0000 A20's GRADE
   /// rung). Kept so an UNMIGRATED station keeps arming its critics: it projects
@@ -109,6 +119,7 @@ class AgentConfig {
     String? harness,
     Map<String, String>? params,
     ModelTiers? tiers,
+    ModelPriceTable? modelPrices,
     String? graderModel,
   }) => AgentConfig(
     harness: harness ?? this.harness,
@@ -120,6 +131,7 @@ class AgentConfig {
             mid: tiers.mid,
             frontier: tiers.frontier,
           ),
+    modelPrices: modelPrices ?? this.modelPrices,
     graderModel: graderModel ?? this.graderModel,
   );
 
@@ -129,6 +141,7 @@ class AgentConfig {
       other.harness == harness &&
       other.tiers == tiers &&
       other.graderModel == graderModel &&
+      _mapEquals(other.modelPrices, modelPrices) &&
       _mapEquals(other.params, params);
 
   @override
@@ -137,11 +150,14 @@ class AgentConfig {
     tiers,
     graderModel,
     Object.hashAllUnordered(
+      modelPrices.entries.map((e) => Object.hash(e.key, e.value)),
+    ),
+    Object.hashAllUnordered(
       params.entries.map((e) => Object.hash(e.key, e.value)),
     ),
   );
 
-  static bool _mapEquals<K>(Map<K, String> a, Map<K, String> b) {
+  static bool _mapEquals<K, V>(Map<K, V> a, Map<K, V> b) {
     if (a.length != b.length) return false;
     for (final e in a.entries) {
       if (b[e.key] != e.value) return false;
@@ -151,7 +167,8 @@ class AgentConfig {
 
   @override
   String toString() =>
-      'AgentConfig($harness, params: $params, tiers: $tiers'
+      'AgentConfig($harness, params: $params, tiers: $tiers, '
+      'modelPrices: ${modelPrices.keys}'
       '${graderModel == null ? '' : ', graderModel: $graderModel'})';
 }
 

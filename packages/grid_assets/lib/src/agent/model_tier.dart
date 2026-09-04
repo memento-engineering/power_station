@@ -118,3 +118,102 @@ class ModelTiers {
   String toString() =>
       'ModelTiers(cheap: $cheap, mid: $mid, frontier: $frontier)';
 }
+
+/// The per-million-token LIST PRICE of one explicitly selected model — the
+/// declared half of a DERIVED cost (bead `pow-zetn`).
+///
+/// A harness that bills through a subscription reports tokens but no money:
+/// codex's envelope carries `usage.input_tokens`/`output_tokens` and NO
+/// `total_cost_usd`, so every codex lane folded to a null cost and vanished
+/// from the station's spend report exactly when the cost posture moved the
+/// build and spec seats onto it. Cost is therefore DERIVED from prices declared
+/// HERE — typed Dart beside the ladder that picks the model, never inferred in
+/// the fold and never a YAML the parse has to trust (ADR-0002 D2: the Dart type
+/// is the source of truth).
+///
+/// Rates are USD per one MILLION text tokens.
+class ModelTokenPrice {
+  /// Declares one model's four token-class rates, USD per million tokens.
+  const ModelTokenPrice({
+    required this.inputUsdPerMillion,
+    required this.cacheReadUsdPerMillion,
+    required this.cacheCreationUsdPerMillion,
+    required this.outputUsdPerMillion,
+  });
+
+  /// Uncached input (prompt) tokens, USD per million.
+  final double inputUsdPerMillion;
+
+  /// Cache-READ input tokens, USD per million.
+  final double cacheReadUsdPerMillion;
+
+  /// Cache-CREATION (write) input tokens, USD per million.
+  final double cacheCreationUsdPerMillion;
+
+  /// Output (completion) tokens, USD per million.
+  final double outputUsdPerMillion;
+
+  /// Estimates one run's cost from the token classes the envelope ACTUALLY
+  /// reported — a class the harness never split off contributes 0, so a
+  /// cache-blind harness is priced as if it never cached: an OVER-estimate,
+  /// deliberately, because the alternative is inventing a cheaper split the
+  /// envelope never claimed.
+  double costUsd({
+    required int inputTokens,
+    required int cacheReadInputTokens,
+    required int cacheCreationInputTokens,
+    required int outputTokens,
+  }) =>
+      (inputTokens * inputUsdPerMillion +
+          cacheReadInputTokens * cacheReadUsdPerMillion +
+          cacheCreationInputTokens * cacheCreationUsdPerMillion +
+          outputTokens * outputUsdPerMillion) /
+      1000000;
+
+  @override
+  bool operator ==(Object other) =>
+      other is ModelTokenPrice &&
+      other.inputUsdPerMillion == inputUsdPerMillion &&
+      other.cacheReadUsdPerMillion == cacheReadUsdPerMillion &&
+      other.cacheCreationUsdPerMillion == cacheCreationUsdPerMillion &&
+      other.outputUsdPerMillion == outputUsdPerMillion;
+
+  @override
+  int get hashCode => Object.hash(
+    inputUsdPerMillion,
+    cacheReadUsdPerMillion,
+    cacheCreationUsdPerMillion,
+    outputUsdPerMillion,
+  );
+
+  @override
+  String toString() =>
+      'ModelTokenPrice(in: $inputUsdPerMillion, cacheRead: '
+      '$cacheReadUsdPerMillion, cacheWrite: $cacheCreationUsdPerMillion, '
+      'out: $outputUsdPerMillion)';
+}
+
+/// Model id → its declared token prices, keyed by the id `resolveAgentConfig`
+/// stamps into `params['model']` (A20(3): every spawn is explicitly pinned, so
+/// the key is always known).
+typedef ModelPriceTable = Map<String, ModelTokenPrice>;
+
+/// The station's declared prices — read ONLY when a harness reports tokens but
+/// no billed cost.
+///
+/// `gpt-5.6-sol` carries the OpenAI list rates verified 2026-09-04
+/// (<https://developers.openai.com/api/docs/models/gpt-5.6-sol>): input $4.00,
+/// cached input $0.40, output $20.00 per million; cache CREATION is $5.00
+/// because that page bills a cache write at 1.25× input.
+///
+/// The claude models are deliberately ABSENT: their envelope reports
+/// `total_cost_usd`, which stays authoritative — a reported price is never
+/// second-guessed by a table that can drift.
+const ModelPriceTable kUsageModelPrices = <String, ModelTokenPrice>{
+  'gpt-5.6-sol': ModelTokenPrice(
+    inputUsdPerMillion: 4,
+    cacheReadUsdPerMillion: 0.4,
+    cacheCreationUsdPerMillion: 5,
+    outputUsdPerMillion: 20,
+  ),
+};

@@ -1827,6 +1827,17 @@ class CriticCapability extends ProcessCapability {
       );
     }
     final workspaceDir = workspace.workspaceDir;
+    // The FT-2 usage merge's two ambient reads, taken HERE with the rest — the
+    // declared prices (a config VALUE) and the emit-only flare sink (an
+    // injected IMPL). Non-binding verb: `result()` is an effect, not a build
+    // (ADR-0008 D3).
+    final prices =
+        (context.getInheritedSeedOfExactType<AgentConfig>() ??
+                const AgentConfig())
+            .modelPrices;
+    final transport = context
+        .getInheritedSeedOfExactType<ServiceBundle>()
+        ?.transport;
     // Resolve the engine-injected circuit round once at entry so every
     // transport for this result carries the same freshness stamp.
     final round = verdictRound(args);
@@ -1895,7 +1906,12 @@ class CriticCapability extends ProcessCapability {
     // an absent / malformed envelope yields no fields, NEVER a throw — the grade
     // (fail-closed above) is unaffected. Collision-safe keys (grade/rationale vs
     // tokensIn/…), so the merge never shadows the verdict.
-    final usage = readUsageFields(workspaceDir, args.nodePath);
+    final usage = readUsageFields(
+      workspaceDir,
+      args.nodePath,
+      modelPrices: prices,
+      flare: transport?.flare,
+    );
     return usage.isEmpty ? stamped : {...stamped, ...usage};
   }
 

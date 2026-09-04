@@ -562,7 +562,22 @@ class AgentCapability extends ProcessCapability {
   ) async {
     final workspace = context.getInheritedSeedOfExactType<Workspace>();
     if (workspace == null) return null;
-    final usage = readUsageFields(workspace.workspaceDir, args.nodePath);
+    // The declared prices ride the ambient config VALUE, the flare sink is the
+    // injected transport IMPL — both read with the NON-BINDING verb, because
+    // `result()` is an effect edge, not a build (ADR-0008 D3).
+    final prices =
+        (context.getInheritedSeedOfExactType<AgentConfig>() ??
+                const AgentConfig())
+            .modelPrices;
+    final usage = readUsageFields(
+      workspace.workspaceDir,
+      args.nodePath,
+      modelPrices: prices,
+      flare: context
+          .getInheritedSeedOfExactType<ServiceBundle>()
+          ?.transport
+          ?.flare,
+    );
     return usage.isEmpty ? null : usage;
   }
 }
