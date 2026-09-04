@@ -100,6 +100,7 @@ import 'package:path/path.dart' as p;
 
 import '../agent/agent_domain.dart';
 import '../agent/agent_harness.dart';
+import '../agent/captured_output.dart';
 import '../agent/environment_registry.dart';
 import '../agent/model_tier.dart';
 import '../agent/path_check.dart';
@@ -144,6 +145,40 @@ const List<String> kCommitteeRubrics = [...kCodeGatingRubrics, ...kLlmRubrics];
 
 /// The workspace-relative directory each critic writes its verdict / rc into.
 const String _critiqueDir = '.grid/critique';
+
+/// The workspace-relative path the gating lane tees the Validation Plan's FULL
+/// combined stdout+stderr to — named in the failed gate's reason so the
+/// engine's head-first `failureReason` cap can never be the only copy of the
+/// cause (the live finding: a lane that discarded the plan's output gated a
+/// bead with `code-validation failed: hard block` and nothing else, and the
+/// operator then had to re-derive by hand what one read would have answered).
+///
+/// Beside the `.rc` on purpose: they are the ONE run's two artifacts, written
+/// by the same script, and [sweepStaleCritique] retires them together.
+const String _gatingLogRelativePath = '$_critiqueDir/$kGatingRubric.log';
+
+/// The workspace-relative ARMED-DEADLINE stamp — written before the Validation
+/// Plan starts and removed only after its rc lands, so a stamp that OUTLIVES
+/// the run is proof the lane was killed rather than finished.
+///
+/// Deliberately OUTSIDE [_critiqueDir], for exactly the reason
+/// [kCriticIncarnationDir] is: [sweepStaleCritique] empties the critique dir of
+/// everything except this round's `<rubric>.json`, and the derived auto-respec
+/// wave can land that sweep MID-ROUND (the tg-60t race). A stamp armed for the
+/// whole [kGatingDeadline] window inside the swept dir would be deleted under a
+/// still-running plan, and the timeout would then silently degrade into the
+/// unattributable hold this stamp exists to name. A stamp that survives an
+/// unrelated round is harmless by the same argument that makes the incarnation
+/// marker safe: only a [CriticCapability.spawn] can precede a probe, and every
+/// spawn rewrites it.
+const String _gatingDeadlineStampRelativePath =
+    '$kCriticIncarnationDir/$kGatingRubric.deadline';
+
+/// The gating lane's private result key carrying the BOUNDED diagnostic head
+/// ([validationDiagnosticLines]) the route puts AHEAD of its hard-block line.
+/// Private because it is a lane→route detail, and because no other gating lane
+/// emits it: their reasons stay byte-identical.
+const String _gatingDiagnosticHeadKey = 'diagnostic_head';
 
 /// The hygiene step id every critic lane transitively `dependsOn`
 /// (gate-integrity #3) — wipes [_critiqueDir] before any lane can read or
@@ -1518,10 +1553,18 @@ class CriticCapability extends ProcessCapability {
     final workspaceDir = workspace.workspaceDir;
     if (rubric == kGatingRubric) {
       try {
-        final exists = await File(
+        // Both of the lane's DURABLE terminals: a plan that ran to completion
+        // left its rc; a plan the watchdog killed left its armed deadline
+        // stamp. Either one is enough evidence for `result()` to grade on.
+        final rcExists = await File(
           p.join(workspaceDir, _critiqueDir, '$kGatingRubric.rc'),
         ).exists();
-        return exists ? GateOutcome.clear : GateOutcome.present;
+        final deadlineStampExists = await File(
+          p.join(workspaceDir, _gatingDeadlineStampRelativePath),
+        ).exists();
+        return rcExists || deadlineStampExists
+            ? GateOutcome.clear
+            : GateOutcome.present;
       } on Object {
         return GateOutcome.probeError;
       }
@@ -1820,6 +1863,16 @@ class CriticCapability extends ProcessCapability {
     if (isGating) {
       return switch (event) {
         Exited() => StepSignal.complete,
+        // The WATCHDOG kill is the lane's other legitimate terminal: the
+        // provider shoots a plan that outran [kGatingDeadline] and reports a
+        // death carrying that exact reason. Completing it lets `result()` grade
+        // the timeout AS a timeout off the armed stamp, instead of failing the
+        // step with the deadline invisible. Matched on the provider's own
+        // wording, so no OTHER death can borrow this arm.
+        Died(:final reason)
+            when reason.startsWith('watchdog: session exceeded its ') &&
+                reason.contains(' deadline and was killed') =>
+          StepSignal.complete,
         Died() => StepSignal.failed,
         _ => StepSignal.none,
       };
@@ -1868,7 +1921,27 @@ class CriticCapability extends ProcessCapability {
       // silently pass. [ClearCritiqueCapability] wipes this file every round,
       // so an rc found here is guaranteed fresh — no separate stamp needed.
       final rc = File(p.join(workspaceDir, _critiqueDir, '$kGatingRubric.rc'));
+      final logPath = p.join(workspaceDir, _gatingLogRelativePath);
       if (!rc.existsSync()) {
+        // A still-armed stamp with no rc is the watchdog terminal
+        // `interpretEvent` admitted: the plan never got to write its rc
+        // because it was killed. Say SO — a timeout must read as a timeout,
+        // not as a plan that mysteriously produced nothing.
+        if (File(
+          p.join(workspaceDir, _gatingDeadlineStampRelativePath),
+        ).existsSync()) {
+          return {
+            'grade': 'F',
+            'transport': 'file',
+            ..._gatingFailureDetails(
+              failure:
+                  'validation plan exceeded the '
+                  '${kGatingDeadline.inMinutes}-minute kGatingDeadline',
+              output: readCapturedOutputLogOrEmpty(logPath),
+            ),
+            kVerdictRoundKey: '$round',
+          };
+        }
         return {
           'grade': 'F',
           'transport': 'fail-closed-default',
@@ -1877,17 +1950,22 @@ class CriticCapability extends ProcessCapability {
         };
       }
       final code = rc.readAsStringSync().trim();
+      if (code == '0') {
+        return {'grade': 'A', 'transport': 'file', kVerdictRoundKey: '$round'};
+      }
+      final exitCode = int.tryParse(code) ?? -1;
       final diagnostic = bead == null
           ? null
-          : pathCheckDiagnostic(
-              _validationPlan(bead),
-              int.tryParse(code) ?? -1,
-            );
+          : pathCheckDiagnostic(_validationPlan(bead), exitCode);
+      final suffix = diagnostic == null ? '' : '; $diagnostic';
       return {
-        'grade': code == '0' ? 'A' : 'F',
+        'grade': 'F',
         'transport': 'file',
+        ..._gatingFailureDetails(
+          failure: 'validation plan failed (exit $code)$suffix',
+          output: readCapturedOutputLogOrEmpty(logPath),
+        ),
         kVerdictRoundKey: '$round',
-        if (diagnostic != null) 'rationale': diagnostic,
       };
     }
     // The engine's artifact-durability contract withholds completion until a
@@ -2261,12 +2339,51 @@ String _validationPlan(Bead bead) {
   return 'false';
 }
 
-/// The `sh -c` script the gating lane runs: ensure the critique dir, run the
-/// plan in a subshell, and capture ITS exit code to the rc file `result()`
-/// reads. The outer `sh` exits clean regardless, so the step always `complete`s
-/// and the route is the single decision point.
+/// The FAILED-GATING payload: the diagnostic head the route leads with (when
+/// the plan emitted a recognized line) plus the rationale it appends.
+///
+/// [failure] is the exit CLASS and LEADS the rationale (the ratified
+/// captured-output shape); the log path follows, then the advice-stripped TAIL
+/// — because the fatal line of an ordinary tool is LAST. The head and tail
+/// share the ONE [kRevalidateReasonTailChars] budget, exactly as the revalidate
+/// step spends it. Empty captured output renders `<no output captured>`, which
+/// is itself the diagnosis.
+Map<String, String> _gatingFailureDetails({
+  required String failure,
+  required String output,
+}) {
+  final cleanedOutput = planOutputWithoutPubAdvice(output);
+  final diagnostics = validationDiagnosticLines(cleanedOutput);
+  final head = boundedValidationDiagnosticHead(diagnostics);
+  final tailBudget =
+      kRevalidateReasonTailChars - (head.isEmpty ? 0 : head.length + 2);
+  final tail = landReasonTail(cleanedOutput, tailBudget);
+  return {
+    if (head.isNotEmpty) _gatingDiagnosticHeadKey: head,
+    'rationale':
+        '$failure; full log: $_gatingLogRelativePath: '
+        '${tail.isEmpty ? '<no output captured>' : tail}',
+  };
+}
+
+/// The `sh -c` script the gating lane runs: ensure the artifact dirs, ARM the
+/// deadline stamp, run the plan in a subshell with its combined output TEED to
+/// the log, capture ITS exit code to the rc file `result()` reads, then disarm
+/// the stamp. The outer `sh` exits clean regardless, so the step always
+/// `complete`s and the route is the single decision point.
+///
+/// The empty log is created BEFORE the stamp is armed, so a stamp always
+/// implies a readable log; the stamp is removed only AFTER the rc lands, so a
+/// surviving stamp always means the plan never finished. The rc line is
+/// unchanged, byte for byte — it is read by more than this lane.
 String _gatingScript(String plan) =>
-    'mkdir -p $_critiqueDir; ( $plan ) ; echo \$? > $_critiqueDir/$kGatingRubric.rc';
+    'mkdir -p $_critiqueDir $kCriticIncarnationDir; '
+    ': > $_gatingLogRelativePath; '
+    'printf "${kGatingDeadline.inMinutes}m\\n" > '
+    '$_gatingDeadlineStampRelativePath; '
+    '( $plan ) > $_gatingLogRelativePath 2>&1; '
+    'echo \$? > $_critiqueDir/$kGatingRubric.rc; '
+    'rm -f $_gatingDeadlineStampRelativePath';
 
 /// Renders the full work bead into a prompt block (title/description/design/
 /// acceptance/notes) — the load-bearing review input.
