@@ -1,3 +1,22 @@
+## 0.1.0-rc.11
+
+- Fixed: the App transport encodes its body as UTF-8 at the SINK
+  (`ioRequest.add(utf8.encode(body))`) and sends
+  `Content-Type: application/json; charset=utf-8`. An `IOSink` falls back to
+  iso-8859-1 when the content type carries no charset, and latin1 THROWS on the
+  first code unit above U+00FF — so a single em dash in a PR body killed
+  delivery before the request was ever sent. Encoding at the sink covers every
+  caller, the `/pulls` POST and the installation-token exchange alike.
+- Fixed: a THROWN PR-open error escalates type-first — generic advice leads and
+  the cause trails as `Cause (<runtimeType>): …`, capped at 300 CHARACTERS
+  (never a first-line cap: `safeToString` escapes newlines, so a serialized
+  request renders as one multi-kilobyte line). Delivery passes the reason
+  through `landReasonTail`, which keeps the TAIL, so the type and message now
+  survive the cut instead of whatever an SDK error had embedded (pow-b14a,
+  #201).
+- Changed: the `grid_assets` floor is `^0.6.0-rc.11` — the in-set coherence
+  floor for this wave.
+
 ## 0.1.0-rc.10
 
 - Adopts the the_grid wave 2 and grid_assets 0.6.0-rc.10: floors `grid_assets ^0.6.0-rc.10`, `grid_cli ^0.5.0-rc.12`, `grid_engine ^0.3.0-rc.12`, `grid_runtime ^0.2.0-rc.10`, `grid_sdk ^0.3.0-rc.10` (power_station#195). No API change.

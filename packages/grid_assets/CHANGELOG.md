@@ -1,3 +1,35 @@
+## 0.6.0-rc.11
+
+- Fixed: `SpecifyCapability` is harness-neutral — it routes the spec seat
+  through its `AgentSessionAdapter` (a shared `_resolveRun` feeds both `spawn`
+  and a new `createSession`), and the ACP bridge now reports its child's real
+  exit status and a bounded stderr tail instead of a bare "output closed".
+  `landReasonTail`, `kRevalidateReasonTailChars` and `planOutputWithoutPubAdvice`
+  move verbatim from the landing circuit to a zero-import
+  `src/agent/captured_output.dart` leaf (same names, same behaviour, newly
+  exported from the barrel) beside the new `capturedOutputReason` assembler;
+  `usageEnvelopeJson`/`writeUsageEnvelope` render FT-2 telemetry a channel
+  harness has no wrapper to produce, and `AgentSessionAdapter.launch` gains an
+  optional `usageOut` to carry the path across the seam (pow-39tl, #197).
+- Changed: the vended `governor` agent overlay states the seat's COST posture —
+  ranked under throughput, with the model/effort calls it implies — pinned by
+  `governor_posture_test.dart` (pow-8dwh, #198).
+- Added: the `/handoff` ritual vends as an operator-audience skill on BOTH
+  overlay legs (`station_overlay/claude/skills/handoff/` and
+  `station_overlay/agents/skills/handoff/`), with the MCP `config.yaml` entry
+  and the `asset_loader` wiring that carries it (pow-pry0, #199).
+- Fixed: scaffold restore MERGES directories instead of clobbering them, and a
+  failed provision UNWINDS what it created rather than leaving a half-cut
+  worktree behind — the shape that wedged fresh worktrees on a scaffold
+  collision (pow-gnrm, #200).
+- Fixed: the discovery circuit fences lens reports on ROUND. Every lens prompt
+  stamps `round` beside `nodePath` and one shared fence reads both on every read
+  path, the round-stamp parser is promoted out of `committee.dart` as the shared
+  `stampedRound`, `AnchorsCapability`'s blanket `.grid/discovery` wipe becomes a
+  round-aware `sweepStaleDiscovery`, and the route join classifies an
+  artifact-less lane (decided-with-no-artifact vs. merely LATE) instead of
+  dropping it (pow-3yo, #202).
+
 ## 0.6.0-rc.10
 
 - Fixed: `AgentSession.onRuntimeEvent` handles `RuntimeEvent.sessionOrphaned`.
