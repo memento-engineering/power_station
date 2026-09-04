@@ -282,6 +282,19 @@ ServiceBundle _gitServices(Fakes f, String workspaceRoot) => ServiceBundle(
 void _provisionCheckout(String root, String beadId) {
   final path = WorktreeLayout.worktreePath(root, 'tg', beadId);
   Directory('$path/.git').createSync(recursive: true);
+  // The round's pinned review scope (bead `pow-jicn`): `format-clean` reads it
+  // to learn which files it must check, and a MISSING scope in a worktree that
+  // exists is a LOUD non-result. A NON-Dart touched path keeps this offline
+  // fixture honest AND cheap — the step takes its no-Dart clean path and never
+  // spawns a formatter. (The suite injects a no-op critique clearer, so the
+  // planted scope survives `clear-critique`.)
+  File(pinnedDiffPath(path))
+    ..createSync(recursive: true)
+    ..writeAsStringSync(
+      'diff --git a/CHANGE.md b/CHANGE.md\n'
+      '--- a/CHANGE.md\n'
+      '+++ b/CHANGE.md\n',
+    );
 }
 
 const _tgConfig = SubstationConfig(
@@ -427,7 +440,13 @@ void main() {
               'tg-1': _session(
                 'tg-1',
                 'tgdog-1',
-                completed: {kAgentNode, kClearCritiqueNode, kPinDiffNode},
+                completed: {
+                  kAgentNode,
+                  kClearCritiqueNode,
+                  kPinDiffNode,
+                  kFormatCleanNode,
+                  'review/declared-tests-present',
+                },
               ),
               'tg-2': _session('tg-2', 'tgdog-2'),
             },

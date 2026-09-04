@@ -582,6 +582,10 @@ AgentBrief buildAgentBrief(
     )
     ..writeln('- Implement the task and COMMIT your work on that branch.')
     ..writeln(
+      '- Before you commit, run `dart format` on every changed Dart file; the '
+      'review circuit refuses an unformatted diff.',
+    )
+    ..writeln(
       '- Every commit message is CONVENTIONAL COMMITS v1.0.0: '
       '`<type>[(scope)][!]: <description>`, type one of '
       '${kConventionalTypes.join(' | ')}. The description is IMPERATIVE, '
@@ -1128,6 +1132,9 @@ class GitSourceControl implements SourceControl {
 /// ⇒ offline/dry-run, no root registered). [gitRunner]/[shellRunner] override
 /// `rebase`/`revalidate`'s real git/shell seams (tests inject recording fakes —
 /// Fakes, not mocks; absent ⇒ the real [SystemGitRunner]/[SystemShellRunner]).
+/// [dartFormatService] overrides [FormatCleanCapability]'s real Dart formatter
+/// probe (bead `pow-jicn`); absent ⇒ the real [DartFormatService], which the
+/// offline suite never reaches (no worktree on disk ⇒ no process at all).
 /// [critiqueDirClearer] overrides [ClearCritiqueCapability]'s real
 /// delete+recreate (gate-integrity #3, bead `tg-bns`) — tests inject a no-op
 /// so the offline suite never touches a real filesystem at a synthetic
@@ -1158,6 +1165,7 @@ DefaultCapabilityRegistry buildCodeRegistry({
   String? devRoot,
   GitRunner? gitRunner,
   ShellRunner? shellRunner,
+  DartFormatService? dartFormatService,
   DirectoryClearer? critiqueDirClearer,
   InferenceRunner? inference,
   AnchorResolver? anchorResolver,
@@ -1251,6 +1259,13 @@ DefaultCapabilityRegistry buildCodeRegistry({
       // registry's git seam ([gitRunner]) — the SAME recording fake `rebase`
       // rides offline; absent ⇒ the real [SystemGitRunner].
       kPinDiffStep: PinDiffCapability(runner: gitRunner),
+      // The formatting gate (bead `pow-jicn`) reads the SAME pinned scope and
+      // composes the DART domain's own formatter probe by id, so a substation
+      // whose domain is not Dart composes nothing. [dartFormatService] injects
+      // a canned Fake offline; absent ⇒ the real [DartFormatService].
+      kFormatCleanStep: FormatCleanCapability(
+        formatter: dartFormatService ?? const DartFormatService(),
+      ),
     },
     circuits: const {
       'code': kCodeCircuit,

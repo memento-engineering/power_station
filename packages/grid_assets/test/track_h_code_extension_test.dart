@@ -231,6 +231,25 @@ void main() {
       );
     });
 
+    test('the working agreement tells the builder to format before committing', () {
+      // Bead pow-jicn: three codex-built branches in one epoch passed the full
+      // committee, then failed CI at its FIRST step — the workspace format gate.
+      // `format-clean` REFUSES that diff, and this line is how the builder
+      // learns the rule before it spends a round on it. Static text — no bead/
+      // path interpolation, so the Q3′ reference-inflation fence is untouched.
+      final agreement = buildAgentBrief(
+        bead('tg-1'),
+        _workspace(),
+      ).workingAgreement;
+      expect(
+        agreement,
+        contains(
+          'Before you commit, run `dart format` on every changed Dart file; '
+          'the review circuit refuses an unformatted diff.',
+        ),
+      );
+    });
+
     test('a station\'s trailer token flows into the brief', () {
       final brief = buildAgentBrief(
         bead('tg-1'),
