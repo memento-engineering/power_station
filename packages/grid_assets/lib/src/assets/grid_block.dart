@@ -9,7 +9,10 @@
 /// resolved above, by a later resolver holding substation facts.
 library;
 
+import 'dart:io';
+
 import 'package:grid_sdk/grid_sdk.dart';
+import 'package:path/path.dart' as p;
 import 'package:yaml/yaml.dart';
 
 /// The marker BOTH generated outputs carry, so a reader tells a generated file
@@ -608,3 +611,60 @@ String _mcpAudience(AssetAudience audience) => switch (audience) {
   AssetAudience.agent => 'agent',
   AssetAudience.both => 'agent',
 };
+
+/// The generated Dart declaration, relative to the package root.
+const String kGeneratedPackPath = 'lib/src/assets/grid_asset_pack.dart';
+
+/// The generated MCP mirror, relative to the package root.
+const String kGeneratedMcpPath = 'extension/mcp/config.yaml';
+
+/// Regenerates — or, with [check], VERIFIES — both generated outputs from the
+/// `grid:` block at `<packageRoot>/pubspec.yaml`.
+///
+/// ATOMIC: both outputs are rendered from ONE parse before either is written,
+/// so a malformed block ([GridBlockException]) leaves both files untouched.
+/// Returns a process exit code — `0` current, `1` stale under [check].
+/// [out] defaults to `stdout`.
+int runGridAssetsGenerator({
+  required String packageRoot,
+  bool check = false,
+  StringSink? out,
+}) {
+  final sink = out ?? stdout;
+  final block = parseGridBlock(
+    pubspecYaml: File(p.join(packageRoot, 'pubspec.yaml')).readAsStringSync(),
+    pathExists: (relative) =>
+        File(p.join(packageRoot, relative)).existsSync() ||
+        Directory(p.join(packageRoot, relative)).existsSync(),
+  );
+  final outputs = <String, String>{
+    kGeneratedPackPath: renderGridAssetPackLibrary(block),
+    kGeneratedMcpPath: renderMcpConfig(block),
+  };
+  final report =
+      '${block.assets.length} assets, '
+      '${block.undeclaredSelectorAssetIds.length} with an UNDECLARED selector';
+  if (check) {
+    final stale = <String>[
+      for (final entry in outputs.entries)
+        if (_currentText(packageRoot, entry.key) != entry.value) entry.key,
+    ];
+    for (final path in stale) {
+      sink.writeln(
+        'STALE $path — run `dart run tool/generate_grid_assets.dart`',
+      );
+    }
+    sink.writeln('grid: $report');
+    return stale.isEmpty ? 0 : 1;
+  }
+  for (final entry in outputs.entries) {
+    File(p.join(packageRoot, entry.key)).writeAsStringSync(entry.value);
+  }
+  sink.writeln('grid: wrote ${outputs.length} outputs — $report');
+  return 0;
+}
+
+String? _currentText(String packageRoot, String relative) {
+  final file = File(p.join(packageRoot, relative));
+  return file.existsSync() ? file.readAsStringSync() : null;
+}
