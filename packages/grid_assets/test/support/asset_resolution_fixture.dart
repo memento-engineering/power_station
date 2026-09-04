@@ -1,6 +1,6 @@
-// The shared ASSET RESOLUTION fixture — one declared registry, one temp package
-// root holding its exact declared artifacts, and the Fake repository that
-// publishes facts for it (Fakes, not mocks).
+// The shared ASSET RESOLUTION fixture — one declared registry over one or more
+// packs, a temp root per pack holding its exact declared artifacts, and the
+// Fake repository that publishes facts for it (Fakes, not mocks).
 //
 // Every writer suite rides this instead of hand-building an overlay tree: the
 // resolution is what both writers consume, so a fixture that produced files any
@@ -19,12 +19,16 @@ const String kFixturePackage = 'fixture_assets';
 const SubstationKey kFixtureSubstation = SubstationKey('fixture');
 
 /// A skill declared on BOTH harness legs at the vended paths the real pack uses.
+///
+/// [package] names the vending pack — [kFixturePackage] unless the fixture is
+/// composing a SECOND pack, the way a real station composes a downstream one.
 GridAssetDefinition fixtureSkill(
   String id, {
   AssetSelector selector = const AlwaysApplies(),
   AssetAudience audience = AssetAudience.agent,
+  String package = kFixturePackage,
 }) => GridAssetDefinition(
-  assetKey: AssetKey(package: kFixturePackage, kind: AssetKind.skill, id: id),
+  assetKey: AssetKey(package: package, kind: AssetKind.skill, id: id),
   description: 'the $id fixture skill',
   audience: audience,
   selector: selector,
@@ -112,28 +116,43 @@ class FakeSubstationFactsRepository implements SubstationFactsRepository {
   }
 }
 
-/// One declared fixture pack on disk: the registry, a package root holding
-/// exactly its declared artifact files, and the facts that select them.
+/// One or more declared fixture packs on disk: the registry, a package root per
+/// pack holding exactly its declared artifact files, and the facts that select
+/// them.
 class TestAssetResolutionFixture {
   /// Creates the fixture under [root], writing each declared artifact's source
   /// file. [extraPackages] widen the observed package graph so a
   /// `RequiresPackage` selector can hold.
+  ///
+  /// [extraPacks] (vending package name → its assets) compose FURTHER packs
+  /// into the one registry, each under its own root — a station's registry is
+  /// a resolved package CLOSURE, so a fixture that could only ever hold one
+  /// pack could not tell a package-local answer from a station-wide one.
   TestAssetResolutionFixture({
     required Directory root,
     required List<GridAssetDefinition> assets,
+    Map<String, List<GridAssetDefinition>> extraPacks =
+        const <String, List<GridAssetDefinition>>{},
     Map<String, String> bodies = const <String, String>{},
     Iterable<String> extraPackages = const <String>[],
     Iterable<String> existingPaths = const <String>[],
   }) : packageRoot = p.join(root.path, kFixturePackage),
        substationRoot = p.join(root.path, 'substation'),
+       packageRoots = Map<String, String>.unmodifiable(<String, String>{
+         kFixturePackage: p.join(root.path, kFixturePackage),
+         for (final package in extraPacks.keys)
+           package: p.join(root.path, package),
+       }),
        registry = GridAssetRegistry(<GridAssetPackDefinition>[
          GridAssetPackDefinition(package: kFixturePackage, assets: assets),
+         for (final entry in extraPacks.entries)
+           GridAssetPackDefinition(package: entry.key, assets: entry.value),
        ]) {
-    for (final asset in assets) {
+    for (final asset in registry.assets) {
       for (final artifact in asset.artifacts) {
         final body =
             bodies[artifact.path] ?? fixtureSkillBody(asset.assetKey.id);
-        File(p.join(packageRoot, artifact.path))
+        File(p.join(packageRoots[asset.assetKey.package]!, artifact.path))
           ..createSync(recursive: true)
           ..writeAsStringSync(body);
       }
@@ -141,14 +160,18 @@ class TestAssetResolutionFixture {
     Directory(substationRoot).createSync(recursive: true);
     _facts = SubstationFacts(
       root: substationRoot,
-      dartPackages: <String>{kFixturePackage, ...extraPackages},
-      packageRoots: <String, String>{kFixturePackage: packageRoot},
+      dartPackages: <String>{...packageRoots.keys, ...extraPackages},
+      packageRoots: packageRoots,
       existingPaths: existingPaths,
     );
   }
 
-  /// The vending package root the declared artifact paths resolve against.
+  /// The PRIMARY ([kFixturePackage]) pack's root the declared artifact paths
+  /// resolve against.
   final String packageRoot;
+
+  /// Every composed pack's vending root, keyed by package name.
+  final Map<String, String> packageRoots;
 
   /// The substation root the facts were observed at.
   final String substationRoot;

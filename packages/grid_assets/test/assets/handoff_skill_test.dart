@@ -67,7 +67,7 @@ void main() {
         'claude/skills and agents/skills', () {
       expect(vendedSkillIds, contains('handoff'));
       expect(
-        operatorSkillIds,
+        operatorSkillIds(GeneratedGridAssetRegistrant.registry),
         contains('handoff'),
         reason:
             "a build agent's brief never names it: the disc it writes lives "

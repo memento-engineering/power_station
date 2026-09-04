@@ -17,6 +17,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:grid_assets/grid_assets.dart';
+import 'package:grid_assets/station_asset_registry.dart';
 import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 import 'package:yaml/yaml.dart';
@@ -480,13 +481,16 @@ void main() {
 
     test('the AUDIENCE split: an operator skill is never named in a build '
         "agent's brief — one of them PUSHES, which the brief forbids", () {
+      final operatorIds = operatorSkillIds(
+        GeneratedGridAssetRegistrant.registry,
+      );
       expect(
-        operatorSkillIds,
+        operatorIds,
         {...reHomed.keys, 'handoff'},
         reason: 'handoff is operator-audience without being a re-homed skill',
       );
       expect(
-        operatorSkillIds,
+        operatorIds,
         isNot(contains('discover')),
         reason: 'discover is the agent-audience skill the brief DOES name',
       );
