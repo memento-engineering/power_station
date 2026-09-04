@@ -1,12 +1,23 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:args/command_runner.dart';
 import 'package:beads_dart/beads_dart.dart';
 import 'package:grid_assets/grid_assets.dart';
 import 'package:grid_runtime/grid_runtime.dart';
+import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
 import '../support/asset_fakes.dart' show callMetadata;
+
+/// Creates a REAL grid home — `<home>/.grid/.beads` — because the resolver
+/// probes the filesystem to tell a grid home from its own state store.
+String _gridHome() {
+  final home = Directory.systemTemp.createTempSync('grid-home-');
+  Directory(p.join(home.path, '.grid', '.beads')).createSync(recursive: true);
+  addTearDown(() => home.deleteSync(recursive: true));
+  return home.path;
+}
 
 /// Replies by bd subcommand, recording every argv so a refusal can prove it
 /// wrote nothing.
@@ -96,6 +107,7 @@ String _linkReply(List<Map<String, String>> links) => jsonEncode({
   StringBuffer err,
   _ScriptedBdRunner bd,
   _FakeGitRunner git,
+  List<String> roots,
 })
 _harness(
   _ScriptedBdRunner bd, {
@@ -105,12 +117,16 @@ _harness(
   final out = StringBuffer();
   final err = StringBuffer();
   final git = _FakeGitRunner(gitResult);
+  final roots = <String>[];
   return (
     runner: CommandRunner<int>('space', 'test station')
       ..addCommand(
         ApproveCommand(
           service: ApproveService(
-            runnerFor: (_) => bd,
+            runnerFor: (root) {
+              roots.add(root);
+              return bd;
+            },
             git: git,
             now: () => DateTime.utc(2026, 9, 2, 14, 30),
           ),
@@ -124,10 +140,17 @@ _harness(
     err: err,
     bd: bd,
     git: git,
+    roots: roots,
   );
 }
 
 void main() {
+  const linked = {
+    'grid.link.from': 'pow-child',
+    'grid.link.to': 'tg-89y8',
+    'grid.link.type': 'blocks',
+  };
+
   test('refuses an unwired mid-sentence blocker and writes nothing', () async {
     final h = _harness(
       _ScriptedBdRunner({
@@ -200,25 +223,20 @@ void main() {
       'dep': _depReply(const []),
       'list': _linkReply(links),
     });
+    final home = _gridHome();
 
-    final without = _harness(bd(const []), stateRoot: '/work/home/.grid');
+    final without = _harness(bd(const []), stateRoot: home);
     expect(
       await without.runner.run(['approve', '--actor', 'nico', 'pow-child']),
       1,
     );
-    expect(without.out.toString(), contains('tg-89y8'));
+    expect(
+      without.out.toString(),
+      contains('missing outgoing blocks edges: tg-89y8'),
+    );
     expect(without.bd.updates, isEmpty);
 
-    final withLink = _harness(
-      bd(const [
-        {
-          'grid.link.from': 'pow-child',
-          'grid.link.to': 'tg-89y8',
-          'grid.link.type': 'blocks',
-        },
-      ]),
-      stateRoot: '/work/home/.grid',
-    );
+    final withLink = _harness(bd(const [linked]), stateRoot: home);
     expect(
       await withLink.runner.run(['approve', '--actor', 'nico', 'pow-child']),
       0,
@@ -226,6 +244,87 @@ void main() {
     );
     expect(withLink.bd.updates, hasLength(1));
   });
+
+  test('documented grid home reaches the state store', () async {
+    final home = _gridHome();
+    final h = _harness(
+      _ScriptedBdRunner({
+        'query': _beadReply(description: 'BLOCKED on tg-89y8 across stores.'),
+        'dep': _depReply(const []),
+        'list': _linkReply(const [linked]),
+      }),
+    );
+
+    expect(
+      await h.runner.run([
+        'approve',
+        '--actor',
+        'nico',
+        '--json',
+        '--state-root',
+        home,
+        'pow-child',
+      ]),
+      0,
+      reason: '${h.out}${h.err}',
+    );
+    expect(h.roots, contains(p.join(home, '.grid')));
+    expect(h.err.toString(), isEmpty);
+    expect(h.out.toString(), isNot(contains('invalid issue type')));
+  });
+
+  test('an unrelated state root refuses before any read or write', () async {
+    final unrelated = Directory.systemTemp.createTempSync('not-a-grid-home-');
+    addTearDown(() => unrelated.deleteSync(recursive: true));
+    final h = _harness(
+      _ScriptedBdRunner({
+        'query': _beadReply(description: 'No local ordering.'),
+        'dep': _depReply(const []),
+      }),
+    );
+
+    expect(
+      await h.runner.run([
+        'approve',
+        '--actor',
+        'nico',
+        '--state-root',
+        unrelated.path,
+        'pow-child',
+      ]),
+      1,
+    );
+    expect(h.err.toString(), allOf(contains('.grid'), contains('.beads')));
+    expect(h.bd.argvs, isEmpty);
+    expect(h.git.calls, isEmpty);
+  });
+
+  test(
+    'an unconsulted cross-store blocker is unchecked, never missing',
+    () async {
+      final h = _harness(
+        _ScriptedBdRunner({
+          'query': _beadReply(description: 'BLOCKED on tg-89y8 across stores.'),
+          'dep': _depReply(const []),
+          'list': _linkReply(const [linked]),
+        }),
+      );
+
+      expect(
+        await h.runner.run(['approve', '--actor', 'nico', 'pow-child']),
+        1,
+      );
+      expect(
+        h.out.toString(),
+        contains(
+          'FAIL dependencies: cross-store edges not consulted — '
+          'pass --state-root',
+        ),
+      );
+      expect(h.out.toString(), isNot(contains('tg-89y8')));
+      expect(h.bd.updates, isEmpty);
+    },
+  );
 
   test('a missing actor is a usage refusal that spawns nothing', () async {
     final h = _harness(_ScriptedBdRunner(const {}));

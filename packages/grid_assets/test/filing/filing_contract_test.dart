@@ -116,6 +116,57 @@ void main() {
     );
   });
 
+  test('an unconsulted state store yields UNCHECKED, never missing', () {
+    const bead = Bead(
+      id: 'pow-n6n.2',
+      issueType: IssueType.task,
+      description:
+          'Depends on child pow-n6n.1 (local). '
+          'BLOCKED on tg-89y8 across stores.',
+      acceptanceCriteria: '- [ ] checked',
+      metadata: {'validation_plan': 'dart test'},
+    );
+    const local = BeadDependency(
+      issueId: 'pow-n6n.2',
+      dependsOnId: 'pow-n6n.1',
+    );
+
+    FilingRequirementRow dependency(
+      List<BeadDependency> edges, {
+      Set<String>? linked,
+    }) => const FilingContract()
+        .evaluate(bead, edges, linkedBlockers: linked)
+        .requirements
+        .singleWhere(
+          (row) => row.requirement == FilingRequirement.dependencies,
+        );
+
+    // UNCONSULTED (null): only the bead's own store can be called missing.
+    expect(
+      dependency(const []).detail,
+      'missing outgoing blocks edges: pow-n6n.1; '
+      '$kUnconsultedCrossStoreDetail',
+    );
+    expect(dependency(const []).passed, isFalse);
+    expect(dependency(const [local]).detail, kUnconsultedCrossStoreDetail);
+    expect(dependency(const [local]).detail, isNot(contains('tg-89y8')));
+
+    // CONSULTED and empty: the same foreign id IS genuinely missing.
+    expect(
+      dependency(const [local], linked: const {}).detail,
+      'missing outgoing blocks edges: tg-89y8',
+    );
+
+    // A local `blocks` edge to the foreign id needs no lookup at all.
+    expect(
+      dependency(const [
+        local,
+        BeadDependency(issueId: 'pow-n6n.2', dependsOnId: 'tg-89y8'),
+      ]).detail,
+      'all named local blockers are wired',
+    );
+  });
+
   test(
     'an open link bead wires a foreign blocker, a malformed one does not',
     () async {
