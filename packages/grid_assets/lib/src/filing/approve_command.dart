@@ -103,8 +103,9 @@ final class ApproveService {
 
   /// Approves [beadId] in [storeRoot] on behalf of [actor].
   ///
-  /// [stateRoot] is the grid home whose state store holds the cross-store link
-  /// beads; null means only local `blocks` edges count as wiring.
+  /// [stateRoot] is the resolved state store holding the cross-store link
+  /// beads; null means the store is NOT consulted, so a named cross-store
+  /// blocker is reported unchecked rather than unwired.
   Future<ApprovalOutcome> approve({
     required String storeRoot,
     required String beadId,
@@ -236,14 +237,13 @@ class ApproveCommand extends Command<int> {
       );
       return 64;
     }
-    final stateRoot = resolveStateRoot(argResults!, _stateRoot);
     final ApprovalOutcome outcome;
     try {
       outcome = await _service.approve(
         storeRoot: p.normalize(_storeRoot()),
         beadId: beadId,
         actor: actor,
-        stateRoot: stateRoot,
+        stateRoot: resolveStateRoot(argResults!, _stateRoot),
       );
     } on Object catch (error) {
       _err.writeln('approve: failed to approve $beadId: $error');

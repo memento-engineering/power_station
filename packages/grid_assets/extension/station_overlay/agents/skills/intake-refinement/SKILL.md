@@ -158,7 +158,7 @@ When the work extends something the tree already owns, write the pointer into
 the bead body as `path:line` plus the relationship:
 
 ```
-COMPOSE: packages/grid_assets/lib/src/filing/filing_contract.dart:171 owns the
+COMPOSE: packages/grid_assets/lib/src/filing/filing_contract.dart:188 owns the
 four-row completeness contract — CALL it; do not add a second predicate.
 ```
 
@@ -169,11 +169,18 @@ checker of its own.
 
 ## The exit check — `filing` is the oracle, and it is a COMMAND
 
-Refinement EXITS on the verb, never on a reading. From the grid home (the verb resolves the owning store by the id's prefix):
+Refinement EXITS on the verb, never on a reading. From the grid home (the verb
+resolves the owning store by the id's prefix), and ALWAYS with `--state-root`
+pointed at that grid home, so the cross-store link beads are actually read:
 
 ```bash
-{{runner}} filing --json "<bead>"
+{{runner}} filing --json --state-root "<grid home>" "<bead>"
 ```
+
+`--state-root` takes the GRID HOME, the same value `--grid-home` takes; the
+verb appends its `.grid` state store itself. Omitting it does not make the
+check stricter — it makes the check BLIND to every blocker wired by a link
+bead.
 
 The report is one JSON object: `{id, passed, requirements, error?}`.
 `requirements` carries exactly four rows, in order — `driveable_type`,
@@ -190,8 +197,14 @@ correction:
   validation_plan to every consumer**.
 - `acceptance_criteria is blank` — author `- [ ]` checkboxes a named command
   can falsify.
-- `missing outgoing blocks edges: <ids>` — wire each named id per **Wire every
-  dependency at intake**.
+- `missing outgoing blocks edges: <ids>` — the store WAS consulted and each
+  named id is genuinely unwired: wire it per **Wire every dependency at
+  intake**.
+- `cross-store edges not consulted — pass --state-root` — the store was NOT
+  consulted, so nothing is known about the foreign blockers this bead names.
+  RERUN with `--state-root "<grid home>"`. Never wire an edge off this
+  detail: the blocker it would name may already be wired by an open link bead,
+  and the duplicate is a WRITE driven by a read that never happened.
 
 Then RERUN the verb. Repeat until the report reads `"passed": true`; only then
 stage the bead for approval. Nothing else stages a bead — a reading of the
@@ -212,11 +225,11 @@ mounted predicate refuses any unstamped bead with
 label is not read — so the mount race is closed without a timer:
 
 - Create UNSTAMPED, wire deps, finish the description and design,
-  and drive `{{runner}} filing --json "<bead>"` to `"passed": true`. Only after
-  human approval, from the grid home, run:
+  and drive `{{runner}} filing --json --state-root "<grid home>" "<bead>"` to
+  `"passed": true`. Only after human approval, from the grid home, run:
 
   ```
-  {{runner}} approve --actor operator --json "<bead>"
+  {{runner}} approve --actor operator --json --state-root "<grid home>" "<bead>"
   ```
 
   The verb stamps `grid.approved_by` (the `--actor`), `grid.approved_at` (the

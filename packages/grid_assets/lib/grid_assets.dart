@@ -68,7 +68,11 @@
 /// Description and acceptance usefulness remain with the agentic half.
 /// Both filing verbs read the grid home's cross-store link beads through ONE
 /// `--state-root` seam ([addStateRootOption] / [resolveStateRoot]), so
-/// `filing` and `approve` cannot answer the same contract two ways.
+/// `filing` and `approve` cannot answer the same contract two ways. That seam
+/// takes the GRID HOME and appends its `.grid` state store; with no root at
+/// all the store is UNCONSULTED, which the report says
+/// ([kUnconsultedCrossStoreDetail]) rather than calling the unread edge
+/// missing.
 ///
 /// The SEAT pair makes an operator seat OCCUPIABLE with its own disc (bead
 /// `pow-lv6t`): [PrimeCommand] is the grid's own SessionStart hook target — it

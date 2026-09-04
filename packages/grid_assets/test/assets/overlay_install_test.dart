@@ -692,7 +692,10 @@ void main() {
         final body = installed.readAsStringSync();
         expect(hasProvenance(body), isTrue);
         expect(body, isNot(contains('{{')));
-        expect(body, contains('space filing --json "<bead>"'));
+        expect(
+          body,
+          contains('space filing --json --state-root "<grid home>" "<bead>"'),
+        );
         expect(body, contains('space search --json "<token>"'));
         expect(body, contains('space link <blocked bead> --blocked-by'));
         expect(body, isNot(contains('mountEligibilityFindings')));

@@ -237,7 +237,10 @@ void main() {
       );
       expect(
         intake,
-        contains('{{runner}} approve --actor operator --json "<bead>"'),
+        contains(
+          '{{runner}} approve --actor operator --json '
+          '--state-root "<grid home>" "<bead>"',
+        ),
       );
       for (final key in stampKeys) {
         expect(intake, contains(key), reason: 'intake names $key');
@@ -532,8 +535,16 @@ void main() {
 
     test('the exit oracle is the filing verb — the skill CALLS the command '
         'and owns no completeness predicate of its own', () {
-      expect(template, contains('{{runner}} filing --json "<bead>"'));
-      expect(rendered, contains('space filing --json "<bead>"'));
+      expect(
+        template,
+        contains(
+          '{{runner}} filing --json --state-root "<grid home>" "<bead>"',
+        ),
+      );
+      expect(
+        rendered,
+        contains('space filing --json --state-root "<grid home>" "<bead>"'),
+      );
       expect(
         template,
         contains(
@@ -617,6 +628,50 @@ void main() {
         contains('class FilingContract'),
         reason: 'the cited line declares the primitive the corpus names',
       );
+    });
+
+    test('intake-refinement distinguishes unchecked cross-store edges from '
+        'missing wiring in both overlay legs', () {
+      // The refiner acts on the verb's `detail` verbatim, so the corpus is
+      // pinned to the strings the verb EMITS — not to a paraphrase of them.
+      const missing = 'missing outgoing blocks edges: <ids>';
+      const form = '--state-root "<grid home>"';
+      for (final leg in const ['claude', 'agents']) {
+        final body = File(
+          p.join(
+            root,
+            'station_overlay',
+            leg,
+            'skills',
+            'intake-refinement',
+            'SKILL.md',
+          ),
+        ).readAsStringSync();
+
+        expect(
+          body,
+          contains(kUnconsultedCrossStoreDetail),
+          reason: '$leg teaches the UNCHECKED detail verbatim',
+        );
+        expect(
+          body,
+          contains(missing),
+          reason: '$leg still teaches the genuinely-missing detail',
+        );
+        // Unchecked never becomes a reason to WRITE an edge.
+        expect(body, contains('Never wire an edge off this'));
+        // Both command examples pass the documented GRID HOME.
+        expect(
+          body,
+          contains('{{runner}} filing --json $form "<bead>"'),
+          reason: '$leg documents the filing form that reads link beads',
+        );
+        expect(
+          body,
+          contains('{{runner}} approve --actor operator --json $form "<bead>"'),
+          reason: '$leg documents the approve form that reads link beads',
+        );
+      }
     });
   });
 

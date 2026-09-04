@@ -167,13 +167,36 @@ final class CrossLinkBlockerSource {
   }
 }
 
+/// The dependency detail for unwired blockers the state store was never asked
+/// about — an UNCHECKED condition, never the fact that the edge is missing.
+///
+/// A refiner instructed by `missing outgoing blocks edges` wires each named id;
+/// told that about an edge an open link bead already carries, it writes a
+/// duplicate. So the two conditions get two strings.
+const String kUnconsultedCrossStoreDetail =
+    'cross-store edges not consulted — pass --state-root';
+
 /// Pure evaluator for the four-row filing report.
+///
+/// This is the FILING COMPLETENESS contract of
+/// `power_station#approval-is-the-stamp-the-grid-approved-label-retires` —
+/// *"FILING COMPLETENESS in `lib/src/filing/`, MOUNT ELIGIBILITY in
+/// `lib/src/code/`, neither subsuming the other, no third completeness
+/// predicate minted"*. The unchecked cross-store arm is a refinement of this
+/// contract's own dependency row, not a fifth requirement and not a second
+/// predicate.
 final class FilingContract {
   /// Creates the stateless evaluator.
   const FilingContract();
 
-  /// Evaluates [bead] against its [dependencies] and blockers wired by open
-  /// cross-store link beads ([linkedBlockers]).
+  /// Evaluates [bead] against its [dependencies] and the blockers wired by
+  /// open cross-store link beads ([linkedBlockers]).
+  ///
+  /// [linkedBlockers] is NULL when the state store was not consulted, and an
+  /// empty set when it was consulted and no link matched. The two differ: an
+  /// unconsulted store cannot say a cross-store blocker is unwired, so its
+  /// unwired foreign ids are reported through [kUnconsultedCrossStoreDetail]
+  /// and never as missing outgoing edges.
   ///
   /// A blocker is DECLARED by a description segment that OPENS with
   /// `Blocked by` / `Blocked on` / `Depends on`; a mid-sentence mention of the
@@ -183,22 +206,41 @@ final class FilingContract {
   FilingReport evaluate(
     Bead bead,
     Iterable<BeadDependency> dependencies, {
-    Set<String> linkedBlockers = const {},
+    Set<String>? linkedBlockers,
   }) {
     final validationPlan = bead.metadata['validation_plan'];
     final wired = {
       for (final edge in dependencies)
         if (edge.issueId == bead.id && edge.type == DependencyType.blocks)
           edge.dependsOnId,
-      ...linkedBlockers,
+      ...?linkedBlockers,
     };
+    final ownPrefix = _prefixOf(bead.id);
     final knownPrefixes = <String>{
-      _prefixOf(bead.id),
+      ownPrefix,
       for (final id in wired) _prefixOf(id),
     }..remove('');
     final named = _namedBlockers(bead.description, knownPrefixes);
     final missing = named.difference(wired).toList()..sort();
     final dependencyPass = missing.isEmpty;
+    // With the store unconsulted only the checked bead's OWN store can be
+    // called missing; every foreign id is merely unchecked.
+    final local = linkedBlockers != null
+        ? missing
+        : [
+            for (final id in missing)
+              if (_prefixOf(id) == ownPrefix) id,
+          ];
+    final hasUnconsulted = local.length != missing.length;
+    final dependencyDetail = dependencyPass
+        ? (named.isEmpty
+              ? 'no local blockers named'
+              : 'all named local blockers are wired')
+        : [
+            if (local.isNotEmpty)
+              'missing outgoing blocks edges: ${local.join(', ')}',
+            if (hasUnconsulted) kUnconsultedCrossStoreDetail,
+          ].join('; ');
     return FilingReport(
       beadId: bead.id,
       requirements: [
@@ -226,11 +268,7 @@ final class FilingContract {
         FilingRequirementRow(
           requirement: FilingRequirement.dependencies,
           passed: dependencyPass,
-          detail: dependencyPass
-              ? (named.isEmpty
-                    ? 'no local blockers named'
-                    : 'all named local blockers are wired')
-              : 'missing outgoing blocks edges: ${missing.join(', ')}',
+          detail: dependencyDetail,
         ),
       ],
     );
@@ -256,6 +294,10 @@ final class FilingService {
   final CrossLinkBlockerSource links;
 
   /// Checks [beadId] in the store rooted at [storeRoot].
+  ///
+  /// A null [stateRoot] leaves the cross-store link beads UNREAD, and that is
+  /// what the contract is told: it receives null rather than an empty set, so
+  /// an unconsulted lookup is never reported as an absent edge.
   Future<FilingReport> check({
     required String storeRoot,
     required String beadId,
@@ -264,9 +306,12 @@ final class FilingService {
     final read = await source.readExact(storeRoot: storeRoot, beadId: beadId);
     final bead = read.bead;
     if (bead == null) return FilingReport.missing(beadId);
-    final linked = stateRoot == null
-        ? const <String>{}
-        : await links.wiredFor(stateRoot: stateRoot, beadId: beadId);
-    return contract.evaluate(bead, read.dependencies, linkedBlockers: linked);
+    return contract.evaluate(
+      bead,
+      read.dependencies,
+      linkedBlockers: stateRoot == null
+          ? null
+          : await links.wiredFor(stateRoot: stateRoot, beadId: beadId),
+    );
   }
 }
