@@ -22,6 +22,22 @@ and this lane verifies the structure landed whole.
   addressable; a bulleted or prose-only plan is neither and fails, however
   complete it is. The check reads the `## Implementation Plan` section's own
   body — an ordinal in another section does not stand in for a step.
+- **Every record is ADDRESSABLE.** Inside those sections the spec is a
+  line-oriented grammar, parsed into one typed contract: acceptance criteria
+  are `- [ ] AC-<n> — <criterion>` with unique, contiguous ids; each
+  implementation step carries `Paths:`, `Change:`, `Test:`, `Expect:` and
+  `Commit:` lines (a fenced code block beside `Change:` is optional evidence,
+  never a required field); each `## Touches` item carries one repo-relative
+  backticked path and a disposition; each `## ADR Alignment` item carries a
+  resolvable decision identity and a disposition, and the section is never
+  silent about the lookup itself — it states either that no recorded decision
+  governs the queried surfaces, or that the lookup FAILED and what it printed
+  (an unknown union is not an empty one); each `## Validation Plan` item is
+  ``- [ ] AC-<n> → `<command>` → <expected>``, exactly once for every
+  acceptance id and never for an unknown one. Every deviation is reported with
+  the line it is on. Structure and referential integrity are decided here;
+  whether a test PROVES the behaviour, whether the plan is COHERENT, and
+  whether a decision is INTERPRETED correctly stay the judgement lanes'.
 - **No placeholder token in PROSE** — `TBD`, `TODO`, `implement later`,
   `fill in later`, `as needed`, `appropriate error handling`,
   `similar to step`. A spec that defers its own content is not
@@ -40,10 +56,12 @@ told.
 
 ## Bands
 
-- **A** — every structural element is present and placeholder-free. The spec is
-  structurally whole; whether it is also COHERENT, ALIGNED, TESTABLE, and
-  COMPLETE is the four judgement lanes' call, not this one's.
-- **F** — any element missing, any placeholder present, or no spec at all (the
+- **A** — every structural element is present, every record matches its
+  documented form, and no placeholder appears. The spec is structurally whole;
+  whether it is also COHERENT, ALIGNED, TESTABLE, and COMPLETE is the four
+  judgement lanes' call, not this one's.
+- **F** — any element missing, any record malformed, any acceptance id
+  unmapped or double-mapped, any placeholder present, or no spec at all (the
   pre-specify state — a bead whose specify stage never wrote, or was skipped,
   never silently passes).
 
