@@ -1271,6 +1271,12 @@ DefaultCapabilityRegistry buildCodeRegistry({
   // hole the packaged `decision-alignment` bands carry. A downstream station
   // whose verb is not `space` was otherwise handed a command that exits 127.
   final decisionRunner = overlayArgs['runner'] ?? kDefaultOverlayRunner;
+  // The COMPOSING STATION's grid home, from the SAME in-store binding A23(4)
+  // gives `runner` — the cwd the station's JIT verb actually resolves from.
+  // Unlike `decisionRunner` this takes no `kDefaultOverlayRunner`-style
+  // fallback beyond the registered root checkout: an unbound grid home records
+  // honest absence rather than running the verb somewhere it cannot resolve.
+  final decisionGridHome = overlayArgs['gridHome'] ?? devRoot;
   final rubricSource =
       rubrics ?? loader.boundRubricSource(args: {'runner': decisionRunner});
   final stationOverlayRoot = p.join(loader.root, 'station_overlay');
@@ -1330,11 +1336,16 @@ DefaultCapabilityRegistry buildCodeRegistry({
         // in-store `kDefaultOverlayRunner` still binds the RENDERED skill arg
         // above; it deliberately does not bind this EXECUTING path, where a
         // guessed verb is exit 127 rather than legible prose.
+        //
+        // The verb runs at the station's GRID HOME (`overlayArgs['gridHome']`,
+        // else the registered root checkout), never at the per-bead worktree:
+        // a JIT runner resolves only where its package is.
         decisions:
             discoveryDecisions ??
             commandDecisionIndexSource(
               shellRunner ?? const SystemShellRunner(),
               runnerInvocation: overlayArgs['runner'],
+              gridHome: decisionGridHome,
             ),
         history:
             discoveryHistory ??

@@ -647,47 +647,82 @@ void main() {
       }
     });
 
-    test('decision-index composition uses only the station runner', () async {
-      final work = workBead('tg-1').copyWith(
-        description: 'Inspect `lib/src/code/discovery.dart`.',
-        metadata: const {'rig': 'power_station'},
-      );
+    test(
+      'decision-index composition requires station runner and grid home',
+      () async {
+        final work = workBead('tg-1').copyWith(
+          description: 'Inspect `lib/src/code/discovery.dart`.',
+          metadata: const {'rig': 'power_station'},
+        );
 
-      // An UNCONFIGURED station: no `overlayArgs['runner']`. The gather makes
-      // NO shell call at all — this pack never guesses a decisions binary —
-      // and records honest absence. A23(4)'s in-store `kDefaultOverlayRunner`
-      // binds the RENDERED skill arg, deliberately not this executing path.
-      final absent = RecordingShellRunner();
-      await driveToRoute(
-        {for (final lens in kDiscoveryLenses) lens: LensReport(lens: lens)},
-        workBeadOverride: work,
-        shellRunner: absent,
-      );
-      expect(absent.calls, isEmpty);
-      expect(
-        readDiscoveryAnchors(tmp.path)!.decisionLookups.single.state,
-        EvidenceState.unavailable,
-      );
+        // An UNCONFIGURED station: no `overlayArgs['runner']`. The gather makes
+        // NO shell call at all — this pack never guesses a decisions binary —
+        // and records honest absence. A23(4)'s in-store `kDefaultOverlayRunner`
+        // binds the RENDERED skill arg, deliberately not this executing path.
+        final absent = RecordingShellRunner();
+        await driveToRoute(
+          {for (final lens in kDiscoveryLenses) lens: LensReport(lens: lens)},
+          workBeadOverride: work,
+          shellRunner: absent,
+        );
+        expect(absent.calls, isEmpty);
+        expect(
+          readDiscoveryAnchors(tmp.path)!.decisionLookups.single.state,
+          EvidenceState.unavailable,
+        );
 
-      // A station that DID compose one: its own invocation is what runs,
-      // verbatim, and a non-zero exit is a loud FAILED — never an empty union.
-      final failing = RecordingShellRunner()..exitCode = 17;
-      await driveToRoute(
-        {for (final lens in kDiscoveryLenses) lens: LensReport(lens: lens)},
-        workBeadOverride: work,
-        shellRunner: failing,
-        overlayArgs: const {'runner': 'dart run lunar:lunar'},
-      );
-      expect(
-        failing.calls.single.command,
-        'dart run lunar:lunar decisions index --surface '
-        'power_station/lib/src/code/discovery.dart',
-      );
-      expect(
-        readDiscoveryAnchors(tmp.path)!.decisionLookups.single.state,
-        EvidenceState.failed,
-      );
-    });
+        // A runner with NO grid home bound (no `overlayArgs['gridHome']`, no
+        // `devRoot`): still no shell call. The station's verb is a JIT
+        // invocation that resolves only at ITS grid home, so running it from the
+        // per-bead worktree is `Could not find package` — the worktree is never
+        // the fallback, and nobody looking is recorded as such.
+        final unbound = RecordingShellRunner();
+        await driveToRoute(
+          {for (final lens in kDiscoveryLenses) lens: LensReport(lens: lens)},
+          workBeadOverride: work,
+          shellRunner: unbound,
+          overlayArgs: const {'runner': 'dart run lunar:lunar'},
+        );
+        expect(unbound.calls, isEmpty);
+        final unboundLookup = readDiscoveryAnchors(
+          tmp.path,
+        )!.decisionLookups.single;
+        expect(unboundLookup.state, EvidenceState.unavailable);
+        expect(unboundLookup.command, isEmpty);
+        expect(unboundLookup.error, 'no composing grid home is bound');
+
+        // A station that composed BOTH: its own invocation is what runs,
+        // verbatim, at its own grid home — and a non-zero exit is a loud FAILED,
+        // never an empty union.
+        final failing = RecordingShellRunner()..exitCode = 17;
+        await driveToRoute(
+          {for (final lens in kDiscoveryLenses) lens: LensReport(lens: lens)},
+          workBeadOverride: work,
+          shellRunner: failing,
+          overlayArgs: const {
+            'runner': 'dart run lunar:lunar',
+            'gridHome': '/grid/lunar',
+          },
+        );
+        expect(
+          failing.calls.single.command,
+          'dart run lunar:lunar decisions index --surface '
+          'power_station/lib/src/code/discovery.dart',
+        );
+        expect(
+          failing.calls.single.workingDirectory,
+          '/grid/lunar',
+          reason:
+              'the COMPOSING station\'s grid home is the cwd, never the work '
+              'worktree (${tmp.path})',
+        );
+        expect(failing.calls.single.workingDirectory, isNot(tmp.path));
+        expect(
+          readDiscoveryAnchors(tmp.path)!.decisionLookups.single.state,
+          EvidenceState.failed,
+        );
+      },
+    );
   });
 
   group('the discovery circuit — an OFFENDER spawns NO architect', () {

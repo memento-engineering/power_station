@@ -210,14 +210,17 @@ class _CannedShellRunner implements ShellRunner {
 
   final int exitCode;
   final String output;
-  final List<String> commands = [];
+  final List<({String workingDirectory, String command})> calls = [];
+
+  /// The command text of every recorded call, in order.
+  List<String> get commands => [for (final call in calls) call.command];
 
   @override
   Future<ShellRunResult> run({
     required String workingDirectory,
     required String command,
   }) async {
-    commands.add(command);
+    calls.add((workingDirectory: workingDirectory, command: command));
     return ShellRunResult(exitCode: exitCode, output: output);
   }
 }
@@ -698,6 +701,134 @@ void main() {
       );
     });
 
+    test('ambient SubstationConfig qualifies decision surfaces without bead '
+        'rig', () async {
+      final shell = _CannedShellRunner(
+        output: jsonEncode({'spec': 1, 'decisions': <Object?>[]}),
+      );
+      final gathered = <DecisionSurfaceEvidence>[];
+      final source = commandDecisionIndexSource(
+        shell,
+        runnerInvocation: 'dart run lunar:lunar',
+        gridHome: '/grid/lunar',
+      );
+      final outcome =
+          await AnchorsCapability(
+            decisions: (workspaceDir, surfaces) async {
+              final records = await source(workspaceDir, surfaces);
+              gathered.addAll(records);
+              return records;
+            },
+            clearer: (_) {},
+          ).run(
+            FakeTreeContext(
+              values: {
+                // A WORK bead — `rig` is a SESSION-bead field, so it has none.
+                Bead: bead('space-31x').copyWith(
+                  description:
+                      'Touch `apps/space/lib/prime_seat.dart` and '
+                      '`apps/space/test/prime_seat_cli_smoke_test.dart`.',
+                ),
+                Workspace: testWorkspace(
+                  'space-31x',
+                  workspaceDir: '/w/space-31x',
+                ),
+                SubstationConfig: const SubstationConfig(
+                  substationId: 'space_station',
+                ),
+              },
+            ),
+            stepArgs('space-31x/spec_review/discovery/$kAnchorsStep'),
+          );
+      expect(outcome, isA<Ok>());
+      expect(
+        shell.commands,
+        [
+          'dart run lunar:lunar decisions index --surface '
+              'space_station/apps/space/lib/prime_seat.dart',
+          'dart run lunar:lunar decisions index --surface '
+              'space_station/apps/space/test/prime_seat_cli_smoke_test.dart',
+        ],
+        reason:
+            'the SESSION\'s substation qualifies every surface, so the shell '
+            'never parses `<repo>` as an input redirect',
+      );
+      expect(
+        shell.commands.every((command) => !command.contains('<repo>')),
+        isTrue,
+      );
+      expect(
+        shell.calls.map((call) => call.workingDirectory).toSet(),
+        {'/grid/lunar'},
+        reason: 'the composing station\'s grid home is the ONLY cwd',
+      );
+      expect(gathered, hasLength(2));
+      expect(
+        gathered.every((record) => record.state == EvidenceState.complete),
+        isTrue,
+      );
+    });
+
+    test('unknown substation records decision surfaces unavailable without '
+        'shell', () async {
+      final never = _CannedShellRunner(
+        output: jsonEncode({'spec': 1, 'decisions': <Object?>[]}),
+      );
+      final gathered = <DecisionSurfaceEvidence>[];
+      final source = commandDecisionIndexSource(
+        never,
+        runnerInvocation: 'dart run lunar:lunar',
+        gridHome: '/grid/lunar',
+      );
+      final outcome =
+          await AnchorsCapability(
+            decisions: (workspaceDir, surfaces) async {
+              final records = await source(workspaceDir, surfaces);
+              gathered.addAll(records);
+              return records;
+            },
+            clearer: (_) {},
+          ).run(
+            FakeTreeContext(
+              values: {
+                // No bead `rig` AND no ambient session config: nobody can name
+                // the substation, so nobody looks.
+                Bead: bead('space-31x').copyWith(
+                  description:
+                      'Touch `apps/space/lib/prime_seat.dart` and '
+                      '`apps/space/lib/prime_seat.dart` again.',
+                ),
+                Workspace: testWorkspace(
+                  'space-31x',
+                  workspaceDir: '/w/space-31x',
+                ),
+              },
+            ),
+            stepArgs('space-31x/spec_review/discovery/$kAnchorsStep'),
+          );
+      expect(outcome, isA<Ok>());
+      expect(
+        never.calls,
+        isEmpty,
+        reason: 'a `<repo>`-prefixed surface is NEVER handed to a shell',
+      );
+      expect(gathered, hasLength(1), reason: 'one record per DEDUP surface');
+      expect(
+        gathered.single.surface,
+        '$kUnknownSubstationPrefix/apps/space/lib/prime_seat.dart',
+      );
+      expect(gathered.single.state, EvidenceState.unavailable);
+      expect(
+        gathered.single.command,
+        isEmpty,
+        reason: 'a command this pack never ran is never stamped as provenance',
+      );
+      expect(
+        gathered.single.error,
+        'substation unknown — no roster-qualified surface',
+      );
+    });
+
     test(
       'an UNWIRED prior-art source is reported LOUDLY, never as "no hits"',
       () {
@@ -1093,6 +1224,7 @@ void main() {
       final surfaced = await commandDecisionIndexSource(
         ok,
         runnerInvocation: 'dart run lunar:lunar',
+        gridHome: '/grid/lunar',
       )(dir.path, ['power_station/lib/a.dart', 'power_station/lib/a.dart']);
       expect(
         ok.commands,
@@ -1105,6 +1237,13 @@ void main() {
             'station\'s invocation and never a literal binary name, with no '
             'register-dir argument',
       );
+      expect(
+        ok.calls.single.workingDirectory,
+        '/grid/lunar',
+        reason:
+            'the station\'s JIT verb runs at ITS grid home, never at the '
+            'work worktree (${dir.path}) where the package does not resolve',
+      );
       expect(surfaced.single.state, EvidenceState.complete);
       final entry = surfaced.single.decisions.single;
       expect(entry.identity, 'sibling_station#the-entry');
@@ -1116,6 +1255,7 @@ void main() {
           output: jsonEncode({'spec': 1, 'decisions': <Object?>[]}),
         ),
         runnerInvocation: 'dart run lunar:lunar',
+        gridHome: '/grid/lunar',
       )(dir.path, ['power_station/lib/a.dart']);
       expect(empty.single.state, EvidenceState.complete);
       expect(empty.single.decisions, isEmpty);
@@ -1124,6 +1264,7 @@ void main() {
       final malformed = await commandDecisionIndexSource(
         _CannedShellRunner(output: 'not json'),
         runnerInvocation: 'dart run lunar:lunar',
+        gridHome: '/grid/lunar',
       )(dir.path, ['power_station/lib/a.dart']);
       expect(malformed.single.state, EvidenceState.failed);
       expect(malformed.single.error, contains('malformed index JSON'));
@@ -1131,6 +1272,7 @@ void main() {
       final crashed = await commandDecisionIndexSource(
         _CannedShellRunner(exitCode: 127, output: 'command not found: lunar'),
         runnerInvocation: 'dart run lunar:lunar',
+        gridHome: '/grid/lunar',
       )(dir.path, ['power_station/lib/a.dart']);
       expect(crashed.single.state, EvidenceState.failed);
       expect(crashed.single.error, contains('command not found'));
@@ -1150,6 +1292,7 @@ void main() {
           }),
         ),
         runnerInvocation: 'dart run lunar:lunar',
+        gridHome: '/grid/lunar',
       )(dir.path, ['power_station/lib/a.dart']);
       expect(unresolvable.single.state, EvidenceState.failed);
       expect(unresolvable.single.error, contains('no-such-entry'));
@@ -1175,6 +1318,22 @@ void main() {
         );
         expect(records.single.error, contains('no composing station runner'));
       }
+      // A composed runner with NO grid home is the same honest absence: the
+      // work worktree is never substituted as a place to run the verb.
+      final unbound = _CannedShellRunner(output: '{}');
+      for (final home in [null, '', '   ']) {
+        final records = await commandDecisionIndexSource(
+          unbound,
+          runnerInvocation: 'dart run lunar:lunar',
+          gridHome: home,
+        )('/w', ['power_station/lib/a.dart', 'power_station/lib/a.dart']);
+        expect(unbound.calls, isEmpty, reason: 'no shell call is made at all');
+        expect(records, hasLength(1), reason: 'one record per DEDUP surface');
+        expect(records.single.state, EvidenceState.unavailable);
+        expect(records.single.command, isEmpty);
+        expect(records.single.error, 'no composing grid home is bound');
+      }
+
       // The unwired-SOURCE arm records the same shape, with its own reason —
       // and likewise invents no command.
       final unwired = await gatherDecisions(null, '/w', [
