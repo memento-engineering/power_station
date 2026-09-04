@@ -7,6 +7,8 @@
 // became "which delivery method did this substation bind?", and none is a valid
 // binding (M5 D-4a). So a bound `ServiceBundle.delivery` is what makes these two
 // steps do real git; unbound, both no-op with ZERO calls.
+import 'dart:io';
+
 import 'package:grid_assets/grid_assets.dart';
 import 'package:beads_dart/beads_dart.dart';
 import 'package:grid_engine/grid_engine.dart';
@@ -64,13 +66,14 @@ List<String> _ownedPaths(SubstationFactsSnapshot snapshot) => resolveGridAssets(
   ExplorationTransport? transport,
   bool mountFacts = true,
   bool mountScope = true,
+  String workspaceDir = '/w/tg-1',
 }) => (
   context: FakeTreeContext(
     values: {
       Bead: beadOverride ?? bead('tg-1'),
       Workspace: testWorkspace(
         'tg-1',
-        workspaceDir: '/w/tg-1',
+        workspaceDir: workspaceDir,
         branch: 'grid/tg-1',
         baseBranch: 'main',
       ),
@@ -619,6 +622,16 @@ void main() {
   });
 
   group('RevalidateCapability', () {
+    late Directory workspace;
+
+    setUp(() {
+      workspace = Directory.systemTemp.createTempSync('revalidate-');
+    });
+
+    tearDown(() {
+      if (workspace.existsSync()) workspace.deleteSync(recursive: true);
+    });
+
     test('NO delivery bound → Advance, no shell exec at all (the commit-only '
         'arm)', () async {
       final runner = RecordingShellRunner();
@@ -652,7 +665,10 @@ void main() {
       // returns a canned result — so exitCode is set explicitly to model
       // what a real `false` would do (never silently pass).
       final runner = RecordingShellRunner()..exitCode = 1;
-      final c = _capCtx(delivery: _FakeDelivery());
+      final c = _capCtx(
+        delivery: _FakeDelivery(),
+        workspaceDir: workspace.path,
+      );
       final outcome = await RevalidateCapability(
         runner: runner,
       ).route(c.context, c.args);
@@ -666,7 +682,11 @@ void main() {
       final richBead = bead(
         'tg-1',
       ).copyWith(metadata: const {'validation_plan': 'melos test'});
-      final c = _capCtx(delivery: _FakeDelivery(), beadOverride: richBead);
+      final c = _capCtx(
+        delivery: _FakeDelivery(),
+        beadOverride: richBead,
+        workspaceDir: workspace.path,
+      );
       final outcome = await RevalidateCapability(
         runner: runner,
       ).route(c.context, c.args);
@@ -682,7 +702,11 @@ void main() {
       final richBead = bead(
         'tg-1',
       ).copyWith(metadata: const {'validation_plan': 'rg needle'});
-      final c = _capCtx(delivery: _FakeDelivery(), beadOverride: richBead);
+      final c = _capCtx(
+        delivery: _FakeDelivery(),
+        beadOverride: richBead,
+        workspaceDir: workspace.path,
+      );
       final outcome = await RevalidateCapability(
         runner: runner,
       ).route(c.context, c.args);
@@ -696,6 +720,64 @@ void main() {
       expect(runner.calls.single.command, 'rg needle');
     });
 
+    test('CFE diagnostics lead once and persist the full combined log', () async {
+      const failedToLoad = 'Failed to load "test/a_test.dart":';
+      const error =
+          "lib/src/failure_policy.dart:30:28: Error: Member not found: 'noResult'.";
+      final output = [
+        failedToLoad,
+        error,
+        failedToLoad,
+        error,
+        for (var i = 0; i < 120; i++) '00:01 +0 -1: loading test/case_$i.dart',
+        'Some tests failed.',
+        'Failing tests:',
+        'test/a_test.dart: loading',
+      ].join('\n');
+      final runner = _FixedShellRunner(
+        ShellRunResult(exitCode: 1, output: output),
+      );
+      final richBead = bead(
+        'tg-1',
+      ).copyWith(metadata: const {'validation_plan': 'dart test'});
+      final c = _capCtx(
+        delivery: _FakeDelivery(),
+        beadOverride: richBead,
+        workspaceDir: workspace.path,
+      );
+
+      final outcome = await RevalidateCapability(
+        runner: runner,
+      ).route(c.context, c.args);
+
+      expect(outcome, isA<Escalate>());
+      final reason = (outcome as Escalate).reason;
+      const marker =
+          'revalidate failed (exit 1); full log: '
+          '.grid/critique/revalidate.log: ';
+      expect(reason, startsWith('$failedToLoad\n$error\n$marker'));
+      expect(reason.split(failedToLoad), hasLength(2));
+      expect(reason.split(error), hasLength(2));
+      expect(
+        reason.length - marker.length,
+        lessThanOrEqualTo(kRevalidateReasonTailChars),
+      );
+      expect(
+        reason,
+        endsWith(
+          'Some tests failed.\n'
+          'Failing tests:\n'
+          'test/a_test.dart: loading',
+        ),
+      );
+      expect(
+        File(
+          p.join(workspace.path, '.grid', 'critique', 'revalidate.log'),
+        ).readAsStringSync(),
+        output,
+      );
+    });
+
     test('the pub advisory block is stripped and the TAIL kept — the fatal '
         'line survives exactly where the old HEAD truncation cut it '
         '(pow-gy41)', () async {
@@ -707,7 +789,11 @@ void main() {
       final richBead = bead('tg-1').copyWith(
         metadata: const {'validation_plan': 'dart pub get && dart test'},
       );
-      final c = _capCtx(delivery: _FakeDelivery(), beadOverride: richBead);
+      final c = _capCtx(
+        delivery: _FakeDelivery(),
+        beadOverride: richBead,
+        workspaceDir: workspace.path,
+      );
       final outcome = await RevalidateCapability(
         runner: runner,
       ).route(c.context, c.args);
@@ -732,7 +818,11 @@ void main() {
         final richBead = bead(
           'tg-1',
         ).copyWith(metadata: const {'validation_plan': 'dart test'});
-        final c = _capCtx(delivery: _FakeDelivery(), beadOverride: richBead);
+        final c = _capCtx(
+          delivery: _FakeDelivery(),
+          beadOverride: richBead,
+          workspaceDir: workspace.path,
+        );
         final outcome = await RevalidateCapability(
           runner: runner,
         ).route(c.context, c.args);

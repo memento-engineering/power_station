@@ -12,7 +12,7 @@ register:
   obsoletes: []
   updates: []
   obsoleted-by: null
-  updated-by: []
+  updated-by: ["revalidate-cfe-diagnostics-lead-before-tail"]
   bead: pow-gy41
   legacy-id: null
 ---
