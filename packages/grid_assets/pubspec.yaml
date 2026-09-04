@@ -29,7 +29,7 @@ dependencies:
   # compiles against.
   grid_engine: ^0.3.0-rc.15
   grid_runtime: ^0.2.0-rc.11
-  grid_sdk: ^0.3.0-rc.11
+  grid_sdk: ^0.3.0-rc.15
   grid_trajectory: ^0.2.0-rc.4
   json_annotation: ^4.9.0
   meta: ^1.16.0
@@ -59,6 +59,13 @@ dev_dependencies:
 # `audience` — who may INVOKE an asset. `selector` — WHERE it mounts. They are
 # ORTHOGONAL: an operator-audience asset may carry any selector, and vice
 # versa.
+#
+# `teaches` — WHICH deterministic top-level commands a skill's prose teaches,
+# the machine-readable half of the coupled pair
+# (`power_station#adr-0001-packaged-ai-asset-skill-command-coupling`). Legal
+# non-empty only on `kind: skill`; every entry is one distinct lowercase
+# command name. It reaches the generated Dart pack ONLY — the MCP mirror is
+# compatibility output and gains no competing authority.
 #
 # The audience doctrine, preserved verbatim from the retired `kOperatorSkills`
 # docstring:
@@ -313,6 +320,7 @@ grid:
       audience: human
       visibility: public
       selector: dart-package:grid_sdk
+      teaches: [assets]
       artifacts:
         - target: claude
           path: extension/station_overlay/claude/skills/asset-author/SKILL.md
@@ -324,6 +332,7 @@ grid:
       description: "The grid home's HITL front door — dispatches on arg shape (topic research / bead advisory / bead directed), researches via the vended `search` Command, and on the human's yes files an ephemeral staged bead and starts the design conversation (hand-off: specify)."
       audience: agent
       visibility: public
+      teaches: [search]
       artifacts:
         - target: claude
           path: extension/station_overlay/claude/skills/discover/SKILL.md
@@ -400,6 +409,7 @@ grid:
       description: "Shape work beads so a resident station can drive them — the required validation_plan metadata, driveable issue types, dependency wiring, and stamped grid.approved approval via the approve verb."
       audience: human
       visibility: public
+      teaches: [filing, approve, link]
       artifacts:
         - target: claude
           path: extension/station_overlay/claude/skills/intake-refinement/SKILL.md
@@ -438,6 +448,7 @@ grid:
       description: "Operate the resident station — boot, bounce, tear down, read status, seed a grid home's state store, and diagnose a station that is up but driving nothing."
       audience: human
       visibility: public
+      teaches: [up, down, status]
       artifacts:
         - target: claude
           path: extension/station_overlay/claude/skills/station-operations/SKILL.md

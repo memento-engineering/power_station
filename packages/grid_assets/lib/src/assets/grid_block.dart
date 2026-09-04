@@ -141,6 +141,7 @@ GridBlock parseGridBlock({
         audience: _audience(raw['audience'], label),
         visibility: _visibility(raw['visibility'], label),
         selector: parseAssetSelector(raw['selector'], label),
+        teaches: _teaches(raw['teaches'], kind, label),
         artifacts: _artifacts(raw['artifacts'], label, pathExists),
       ),
     );
@@ -197,6 +198,43 @@ AssetVisibility _visibility(Object? raw, String label) {
     'unrecognised visibility "$raw" (expected one of '
         '${AssetVisibility.values.map((v) => v.name).join(', ')})',
   );
+}
+
+/// One lowercase top-level command name — the shape `grid_sdk`'s pack
+/// validation enforces, mirrored here so the YAML boundary refuses FIRST.
+final RegExp _taughtCommandPattern = RegExp(r'^[a-z][a-z0-9-]*$');
+
+/// Reads the `teaches:` claim — the top-level commands this asset teaches.
+///
+/// The COUPLING half of a Packaged AI Asset (`power_station#adr-0001-packaged-
+/// ai-asset-skill-command-coupling`): a skill vends prose AND names the
+/// deterministic command that prose teaches, so a composing station can fence
+/// the pair instead of inferring it. Only a skill teaches; a claim is a list of
+/// distinct lowercase command names, in declaration order.
+List<String> _teaches(Object? raw, AssetKind kind, String label) {
+  if (raw == null) return const <String>[];
+  if (raw is! YamlList) _refuse(label, 'teaches', 'must be a list');
+  if (raw.isNotEmpty && kind != AssetKind.skill) {
+    _refuse(label, 'teaches', 'may be non-empty only for kind "skill"');
+  }
+  final commands = <String>[];
+  final seen = <String>{};
+  for (var index = 0; index < raw.length; index++) {
+    final entry = raw[index];
+    if (entry is! String || !_taughtCommandPattern.hasMatch(entry)) {
+      _refuse(
+        label,
+        'teaches[$index]',
+        'must be one lowercase top-level command name matching '
+            '${_taughtCommandPattern.pattern}',
+      );
+    }
+    if (!seen.add(entry)) {
+      _refuse(label, 'teaches[$index]', 'duplicate command "$entry"');
+    }
+    commands.add(entry);
+  }
+  return List<String>.unmodifiable(commands);
 }
 
 /// Maps one CLOSED selector token onto the `grid_sdk` [AssetSelector] union.
@@ -380,8 +418,14 @@ String renderGridAssetPackLibrary(GridBlock block) {
       ..writeln('    description: ${_dartString(asset.description)},')
       ..writeln('    audience: AssetAudience.${asset.audience.name},')
       ..writeln('    visibility: AssetVisibility.${asset.visibility.name},')
-      ..writeln('    selector: ${selectorExpression(asset.selector)},')
-      ..writeln('    artifacts: <AssetArtifact>[');
+      ..writeln('    selector: ${selectorExpression(asset.selector)},');
+    if (asset.teaches.isNotEmpty) {
+      buffer.writeln(
+        '    teaches: <String>['
+        '${asset.teaches.map(_dartString).join(', ')}],',
+      );
+    }
+    buffer.writeln('    artifacts: <AssetArtifact>[');
     for (final artifact in asset.artifacts) {
       buffer
         ..writeln('      AssetArtifact(')
@@ -481,8 +525,9 @@ String _yamlString(String value) {
 /// Renders [block] as the MCP-shaped compatibility mirror
 /// (`extension/mcp/config.yaml`, the `package:extension_discovery` shape).
 ///
-/// Carries ONLY MCP concepts. The grid-only `kind`, `selector`, and the
-/// non-MCP delivery legs stay in the block and in the generated Dart. `agent`,
+/// Carries ONLY MCP concepts. The grid-only `kind`, `selector`, `teaches`, and
+/// the non-MCP delivery legs stay in the block and in the generated Dart. This
+/// mirror is compatibility output, never a second claim authority. `agent`,
 /// `hook`, and `settings` assets are not mirrored — MCP has no section for
 /// them.
 String renderMcpConfig(GridBlock block) {
