@@ -1,0 +1,8 @@
+- [ ] The inferred digest renders under a `## Summary` heading as the FIRST section of the PR body, above `## Circuit receipt` — a reader meets the change before its provenance.
+- [ ] A digest that smuggles the bead id (bare, parenthesized, or the `#rN` rework form) is STRIPPED at render: the id appears EXACTLY once in the composed body, on the trailer line (A18(4)).
+- [ ] A blank or absent digest drops the `## Summary` heading with its section (never a bare heading) and the PR still lands — the digest is decoration, never a gate (A18(6)).
+- [ ] `PrDescription.parse` reads the `summary` key, and still recovers a digest from A18's legacy `body` key.
+- [ ] A runaway digest is capped at `kMaxSummaryChars`; `sanitizeDigest` preserves paragraph breaks and returns '' for ''.
+- [ ] `buildDescribePrompt` states the digest contract — 2 to 5 complete sentences, written for a reviewer who never opens the diff, prose only (no heading, no bullets, no fence) — and its exemplar answer object carries a real `summary` value.
+- [ ] The pack is green end to end: `dart analyze` clean and the full `grid_assets` suite passes (landing, describe, composition, reference-inflation).
+- [ ] The autonomous calls are logged as ONE new pending amendment in `docs/adr/ADR-0000-ai-decision-register.md`.

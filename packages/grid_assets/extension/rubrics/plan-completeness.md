@@ -9,13 +9,16 @@ whether the plan is complete.
 Completeness has two faces, graded together:
 
 1. **Literalness.** Every step names an exact file path from the repo root, a
-   real Dart code block (the code to write, not a description of it — honoring
-   the memento house set: freezed sealed unions consumed with exhaustive
-   `switch`, Fakes not mocks, doc comments on public API, no `print` in lib
-   code), the exact test command with expected output (`dart test
-   test/<file>_test.dart` → expect PASS), and a conventional-commit message.
-   Shorthand that is unambiguous in context ("and the symmetric case for X")
-   is economy; "wire it up appropriately" is vagueness.
+   `Change:` that states the behaviour and invariant to produce (not a goal to
+   pursue — honoring the memento house set: freezed sealed unions consumed with
+   exhaustive `switch`, Fakes not mocks, doc comments on public API, no `print`
+   in lib code), the exact test command with expected output (`dart test
+   test/<file>_test.dart` → expect PASS), and a conventional-commit message. A
+   fenced Dart block is optional EVIDENCE where the exact text matters, and its
+   absence is NOT a finding: the structural gate does not require one, the
+   brief tells the architect it is optional, and this lane must not grade a
+   rule the brief denies. Shorthand that is unambiguous in context ("and the
+   symmetric case for X") is economy; "wire it up appropriately" is vagueness.
 
 2. **Decisions made.** A judgment call is any step where the builder must
    compare alternatives and pick one — which seam to extend, which error
@@ -29,8 +32,8 @@ complete; a two-hundred-line plan paraphrasing goals is not.
 
 ## Bands
 
-- **A** — every step carries all four elements and zero judgment calls; a
-  reader can predict the diff before opening an editor. Named symbols resolve
+- **A** — every step carries all five labeled fields and zero judgment calls;
+  a reader can predict the diff before opening an editor. Named symbols resolve
   in the current tree (verify with `grep -rn "<symbol>" . --include='*.dart'`)
   or are explicitly announced as new — literal-SOUNDING is not
   literally-correct.
@@ -46,14 +49,18 @@ complete; a two-hundred-line plan paraphrasing goals is not.
   noticeably different diffs.
 - **F** — the plan describes the goal, not the work ("make the gate
   stricter", "improve the committee's prompts", "add tests for this area");
-  or steps carry no code blocks at all. The builder would have to produce the
-  plan the spec was supposed to provide.
+  or its `Change:` fields name outcomes to reach rather than behaviour to
+  produce. The builder would have to produce the plan the spec was supposed to
+  provide. A plan is never F for carrying no code blocks.
 
 ## Calibration
 
-- Before grading A or B, run grep for at least one named symbol per step
-  block; awarding A on faith is the leniency failure this rubric exists to
-  prevent.
+- Before grading A or B, run grep for at least one named symbol per step;
+  awarding A on faith is the leniency failure this rubric exists to prevent.
+- Do not ask for a code block. The structural gate parses `Change:` as prose
+  and the brief states that a fenced block is optional evidence; penalising its
+  absence would re-arm the exact trap this committee closed once already — a
+  lane grading a rule the architect was told did not exist.
 - Naming a test command without its expected output means the builder still
   decides what passing looks like — more than half the steps like that caps
   at C.
@@ -72,8 +79,9 @@ station corrects the spec automatically or asks a human:
 
 - **`architect`** — the fix is derivable from the bead AS WRITTEN plus the
   tree. Re-running the specify stage with your rationale would produce it.
-  Here: a step missing its file path, code block, test command, or commit
-  message; a named symbol that does not resolve.
+  Here: a step missing its `Paths:`, `Change:`, `Test:`, `Expect:` or
+  `Commit:` line; a `Change:` that states a goal rather than behaviour; a named
+  symbol that does not resolve.
 - **`author`** — the fix needs a decision the bead TEXT does not make. Here:
   the unresolved judgment call is one the bead deliberately left open (which
   seam to extend, which of two designs ships), so the architect would be

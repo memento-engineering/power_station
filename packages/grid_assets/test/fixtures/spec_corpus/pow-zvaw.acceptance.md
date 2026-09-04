@@ -1,0 +1,9 @@
+- [ ] No `StationKernel` reference survives under `packages/`: `grep -rn StationKernel packages` prints nothing, and the two doc comments in `packages/federated_grid_assets/lib/src/claim/claim_broadcaster.dart` (lines 6 and 107) name `StationDriver` instead.
+- [ ] Workspace-wide `dart analyze` exits 0 after a FRESH resolve (`dart pub upgrade` at the workspace root first) — the exact step CI's "Analyze (workspace-wide)" job runs.
+- [ ] Every acceptance suite under `packages/grid_assets/test/acceptance` passes against grid_engine 0.3.0-rc.11 / grid_sdk 0.3.0-rc.9.
+- [ ] Every acceptance suite under `packages/github_grid_assets/test/acceptance` passes against the same wave.
+- [ ] No invariant assertion and no settle/pump is lost in the port: for every migrated test file, the combined count of `expect(`, `await _settle(` and `await pumpEventQueue()` lines equals the count the same file carries on `main`.
+- [ ] `packages/grid_assets/test/station_kernel_test.dart` is RE-HOMED BY NAME (never deleted) to `packages/grid_assets/test/run_grid_reactive_loop_test.dart`: the renamed file exists, still carries exactly one `test(` case, and passes.
+- [ ] `packages/grid_assets/test/substation_service_bundle_test.dart` passes on the migrated harness.
+- [ ] The wave floors read `beads_dart: ^0.2.0-rc.7`, `grid_runtime: ^0.2.0-rc.9`, `grid_engine: ^0.3.0-rc.11`, `grid_sdk: ^0.3.0-rc.9` and `grid_cli: ^0.5.0-rc.11` in every package pubspec that names them, and the workspace resolves exactly those versions.
+- [ ] The migration's design call is recorded as a `docs/decisions/` entry with `status: accepted` and slug `acceptance-harnesses-mount-through-run-grid`.

@@ -1,0 +1,10 @@
+- [ ] A spec whose PROSE mentions `## Validation Plan` and `## Implementation Plan` before the real sections passes `spec-validation` when the real sections carry `- ` items and ordinal steps (the space-3ds receipt shape)
+- [ ] A spec carrying ONLY the prose mention, with no real section, hard-blocks with the UNCHANGED findings ``design: no `## Validation Plan` section`` / ``design: no `## Implementation Plan` section`` — today a mention makes those two checks pass silently
+- [ ] A MENTION of `## Touches` no longer satisfies the presence check: the two `String.contains` lookups move to the same resolver and a mention-only design grades F
+- [ ] `headingOffset(design, heading)` resolves a heading at a LINE START, answers the LAST match when several exist, `-1` for a mid-sentence mention or an absent heading; a deeper level (`### `), trailing text on the heading line, and 0-3 spaces of indentation still resolve, 4+ spaces does not
+- [ ] An UNTERMINATED fence quoting `## Validation Plan` ABOVE the real section does not displace it — the LAST-match rule is what makes this pack's own quote-the-exemplar specs safe
+- [ ] No section heading in the structural validator or in the code committee's declaration loop is resolved by substring search: `grep -rn "indexOf('## \|contains('## " packages/grid_assets/lib/src/code/specify.dart packages/grid_assets/lib/src/code/committee.dart` returns no match
+- [ ] `testDeclarations` reads its declaration bodies line-anchored: a bare test path under a real `## Declared Tests` section is still declared when an earlier sentence names that heading mid-line (today the declaration is silently LOST)
+- [ ] The contract the specify brief renders (`kSpecStructuralContract`) and the shipped `spec-validation` rubric both STATE the line-start rule — the gate never enforces a rule its brief withholds
+- [ ] The decision is RECORDED as a new entry under `docs/decisions/` (slug `spec-section-headings-resolve-at-a-line-start`) citing A19(3) and the A17(4) narrowing amendment
+- [ ] House gate green: `cd packages/grid_assets && dart analyze && dart test`

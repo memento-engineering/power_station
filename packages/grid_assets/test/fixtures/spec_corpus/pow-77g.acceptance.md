@@ -1,0 +1,8 @@
+- [ ] A plan whose steps are ordinal HEADINGS (`### Step 1 — …` — the `pow-kzx` shape the plan-completeness critic graded A) grades A at spec-validation: `specStructuralFindings` returns empty.
+- [ ] Round-trip: the exemplar the specify brief SHIPS passes the gate that grades it — a Bead carrying `kSpecExemplarAcceptance` + `kSpecExemplarDesign` returns EMPTY findings.
+- [ ] `buildSpecifyBrief` renders `kSpecStructuralContract` VERBATIM — naming both accepted ordinal shapes and every one of the seven banned placeholder tokens (the brief named three of seven before this bead).
+- [ ] The gate still bites real gaps: a bulleted (ordinal-free) plan, a step-less plan, and a plan whose only ordinal sits OUTSIDE `## Implementation Plan` each still grade F with `has no numbered steps`.
+- [ ] Structure is read from PROSE: a design whose only `## Touches` heading is quoted inside a fenced code block grades F (a quoted heading is evidence, not a section).
+- [ ] `_placeholderPatterns` is DERIVED from `kSpecPlaceholderTokens` — each of the seven trips the fence in prose, and none trips inside a quotation context (the existing negative controls stay green).
+- [ ] The `spec-validation` rubric doc states the contract the code actually enforces (both ordinal shapes, all seven tokens) and stays source-residue-clean.
+- [ ] The pack stays green end to end: analyze clean, every test passes.
