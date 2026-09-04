@@ -1,0 +1,9 @@
+- [ ] A revalidate failure whose plan output is a 3000+ char `dart pub get` advisory block followed by a `dart test` failure produces an `Escalate` reason that contains BOTH the failing test line (`test/foo_test.dart: renders the widget [E]`) and `Some tests failed.`
+- [ ] That same reason contains no pub upgrade-advice line (no occurrence of the substring ` available)`), no `… (truncated)` head marker, and is at most 1600 characters
+- [ ] The reason begins `revalidate failed (exit 1): ` — the real process exit code — and `pathCheckDiagnostic`'s suffix still appears for the exit-127 PATH-shaped failure, as `revalidate failed (exit 127); exit 127 — candidate missing commands: rg: sh: rg: not found`
+- [ ] When the advice-stripped output still exceeds the 1500-char tail budget, the reason is cut at the START: it starts with `revalidate failed (exit 2): …` and ends with the output's last line, at exactly `kRevalidateReasonTailChars + 29` characters
+- [ ] `planOutputWithoutPubAdvice` is unit-tested alone: it drops the version-advice lines and both pub trailers, and returns advice-free input BYTE-IDENTICAL (including a lookalike line that merely contains ` available)` mid-line)
+- [ ] `_truncate` is deleted from `packages/grid_assets/lib/src/code/landing.dart` (its only caller is gone, so `dart analyze` would flag it dead)
+- [ ] The five existing landing-circuit revalidate/helper tests stay green (no-delivery advance, clean-exit advance, plan-less escalate, exit-127 diagnostic, `landReasonTail`)
+- [ ] The decision entry `docs/decisions/2026-09-02-captured-process-output-escalates-tail-first.md` exists and carries the `register` front-matter block
+- [ ] House gate green: `cd packages/grid_assets && dart analyze && dart test`

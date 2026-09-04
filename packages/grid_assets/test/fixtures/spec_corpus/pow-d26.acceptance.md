@@ -1,0 +1,7 @@
+- [ ] `station_kernel_test.dart` + `acceptance/circuit_acceptance_test.dart` are green across 10 consecutive `-j1` runs (the flake this bead exists to retire; measured 5-8/40 failing before the fix)
+- [ ] `settle` sleeps REAL wall clock per unsatisfied round: 5 rounds at a 4ms slice elapse >= 20ms (a pump-only wait returns in microseconds and fails this)
+- [ ] `settle` evaluates its condition EXACTLY ONCE per round: an already-satisfied condition costs 1 check; a never-satisfied one at `maxPumps: 3` costs exactly 3 (the plateau the acceptance suites count `stableRounds` in)
+- [ ] a pending REAL filesystem round trip (temp dir -> plan write -> recursive delete, the shape `BdCliService.applyGraph` performs) lands inside `settle`'s budget
+- [ ] the full offline `grid_assets` suite passes and `dart analyze` reports no issues
+- [ ] `docs/adr/ADR-0000-ai-decision-register.md` carries amendment A28 with `**Status:** pending` (never Accepted, per the org register rule)
+- [ ] the bead's notes carry the 40-run receipt (the `0/40 after` diagnosis-of-record), so the diagnosis survives the worktree

@@ -1,4 +1,10 @@
 /// Durable semantic-search recall evaluation and its explicit live runner.
+///
+/// This is one of the pack's two retained-corpus measurements; the other is
+/// `code/spec_contract_shadow.dart`, which measures the spec record grammar
+/// and states there exactly what the two share and what they deliberately do
+/// not. The shared piece is [recordArtifact], the one writer of a recorded
+/// artifact.
 library;
 
 import 'dart:convert';
@@ -6,6 +12,7 @@ import 'dart:io';
 
 import 'package:grid_sdk/grid_sdk.dart' as sdk;
 
+import '../io/recorded_artifact.dart';
 import 'semantic_search.dart';
 import 'station_search.dart';
 
@@ -423,9 +430,8 @@ Future<void> _writeBaselineAtomically(
     'exactIdGuard': set.exactIdGuard,
     'baseline': baseline,
   };
-  final temporary = File('${file.path}.tmp');
-  await temporary.writeAsString(
+  await recordArtifact(
+    file,
     '${const JsonEncoder.withIndent('  ').convert(json)}\n',
   );
-  await temporary.rename(file.path);
 }

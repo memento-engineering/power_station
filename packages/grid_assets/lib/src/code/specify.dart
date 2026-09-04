@@ -857,8 +857,11 @@ AgentBrief buildSpecifyBrief(
     )
     ..writeln()
     ..writeln(
-      '**## Touches** — every file the plan creates or modifies, and every '
-      'public symbol it adds or exposes (`lib/src/<file>.dart:SymbolName`). '
+      '**## Touches** — one item per file the plan creates or modifies, in '
+      'the record form: `$kTouchRecordForm`. EXACTLY one repo-relative '
+      'backticked path per item, then what happens to it, then the public '
+      'symbols it adds or exposes as bare backticked names (`Heartbeat`, '
+      '`Heartbeat.parse`) — a second path in the same item is a second item. '
       'Sibling beads cross-check shared state against this section.',
     )
     ..writeln()
@@ -2041,6 +2044,32 @@ List<_AuthoredLine> _authoredLines(
     if (prose[i - 1].trim().isNotEmpty) (line: i, text: raw[i - 1]),
 ];
 
+/// The `- ` list ITEMS of [lines].
+///
+/// Each item is its opening line joined with every CONTIGUOUS following line
+/// that is not itself a list item or a heading, because a markdown list item
+/// INCLUDES its continuation: a record wrapped over two lines is one record,
+/// and reading only its first line would report a disposition the author did
+/// write. The item keeps its OPENING line number, which is where a reader
+/// looks for it.
+List<_AuthoredLine> _listItems(List<_AuthoredLine> lines) {
+  final items = <_AuthoredLine>[];
+  for (var i = 0; i < lines.length; i++) {
+    if (!_listItem.hasMatch(lines[i].text)) continue;
+    final text = StringBuffer(lines[i].text);
+    var previous = lines[i].line;
+    for (var j = i + 1; j < lines.length; j++) {
+      if (lines[j].line != previous + 1) break;
+      if (_listItem.hasMatch(lines[j].text)) break;
+      if (_headingLine.hasMatch(lines[j].text)) break;
+      text.write(' ${lines[j].text.trim()}');
+      previous = lines[j].line;
+    }
+    items.add((line: lines[i].line, text: text.toString()));
+  }
+  return items;
+}
+
 /// The 1-based, inclusive line range of [heading]'s section BODY in [prose],
 /// or null when the section is absent.
 ({int from, int to})? _sectionLineRange(String prose, String heading) {
@@ -2288,13 +2317,14 @@ String? _stepFieldValue(List<_AuthoredLine> slice, String label) {
       ? _sectionLineRange(designProse, '## Touches')
       : null;
   if (touchRange != null) {
-    for (final entry in _authoredLines(
-      designRaw,
-      designProseLines,
-      touchRange.from,
-      touchRange.to,
+    for (final entry in _listItems(
+      _authoredLines(
+        designRaw,
+        designProseLines,
+        touchRange.from,
+        touchRange.to,
+      ),
     )) {
-      if (!_listItem.hasMatch(entry.text)) continue;
       final paths = [
         for (final span in _backtickedSpan.allMatches(entry.text))
           if (repoRelativePathOf(span.group(1)!) case final path?) path,
@@ -2343,9 +2373,7 @@ String? _stepFieldValue(List<_AuthoredLine> slice, String label) {
     } else if (prose.contains(kNoGoverningDecisionPrefix)) {
       narrative = DecisionLookupNarrative.emptyUnion;
     }
-    final items = body
-        .where((entry) => _listItem.hasMatch(entry.text))
-        .toList();
+    final items = _listItems(body);
     if (narrative != DecisionLookupNarrative.emptyUnion) {
       for (final entry in items) {
         final tokens = [
@@ -2378,7 +2406,17 @@ String? _stepFieldValue(List<_AuthoredLine> slice, String label) {
         );
       }
     }
-    if (narrative == DecisionLookupNarrative.cited && items.isEmpty) {
+    // SILENT means the section says nothing about the lookup AT ALL. A
+    // resolvable identity anywhere in its prose is a statement — it may be
+    // outside the record form (and rule 9 is what says so), but calling such
+    // a section "cites nothing" would be a finding whose own message is false.
+    final citesSomething = [
+      for (final span in _backtickedSpan.allMatches(prose)) span.group(1)!,
+      ...prose.split(RegExp(r'[\s,;`]+')),
+    ].any(isResolvableDecisionReference);
+    if (narrative == DecisionLookupNarrative.cited &&
+        items.isEmpty &&
+        !citesSomething) {
       report(
         SpecContractRule.decisionSectionSilent,
         'design',

@@ -1,0 +1,65 @@
+{
+  "version": 1,
+  "entries": [
+    {
+      "bead": "pow-26dd",
+      "title": "declared-tests-present claims every test path in a sentence once ANY edit verb appears in it: 'Create X, built on the harness Y already uses' declares Y, and a pre-existing reference file becomes a hard block (3 false positives on 2026-09-02/03)",
+      "closedAt": "2026-09-03T06:31:44Z",
+      "outcome": "shipped"
+    },
+    {
+      "bead": "pow-77g",
+      "title": "spec-validation F's COMPLETE plans on format ('Implementation Plan has no numbered steps' vs plan-completeness=A) \u2014 align the specify brief to the deterministic contract",
+      "closedAt": "2026-07-12T13:23:49Z",
+      "outcome": "shipped"
+    },
+    {
+      "bead": "pow-8qb",
+      "title": "landing PR body: add a human-readable change DIGEST (prose summary) above the receipt \u2014 A18 infers a compliant title but no digest",
+      "closedAt": "2026-07-13T05:24:56Z",
+      "outcome": "shipped"
+    },
+    {
+      "bead": "pow-d26",
+      "title": "spec_stage_acceptance gating-F path wedges ~5% of runs even with an observable-targeted wait",
+      "closedAt": "2026-07-22T03:37:57Z",
+      "outcome": "shipped"
+    },
+    {
+      "bead": "pow-emxf",
+      "title": "retire the byte-identical twin rule on the codex agents leg: a harness may carry its own instructions (Nico, 2026-09-03), so overlay_codex_leg_test must stop pinning agents/skills to the claude leg byte-for-byte",
+      "closedAt": "2026-09-03T01:58:36Z",
+      "outcome": "shipped"
+    },
+    {
+      "bead": "pow-gy41",
+      "title": "RevalidateCapability escalates with the HEAD of the plan output, so pub's upgrade-advice noise fills the 2000-char cap and the actual failure line is cut off; the gate reads '\u2026 (truncated)' and the governor must re-run the plan blind",
+      "closedAt": "2026-09-03T02:25:57Z",
+      "outcome": "shipped"
+    },
+    {
+      "bead": "pow-kzx",
+      "title": "grid_assets: station_overlay skill-file delivery \u2014 the format + non-destructive materialization lib (skill-file install; pow-a74 is the CLI over it)",
+      "closedAt": "2026-07-13T05:29:58Z",
+      "outcome": "shipped"
+    },
+    {
+      "bead": "pow-o3ti",
+      "title": "spec-validation locates '## Validation Plan' and '## Implementation Plan' by substring, so a prose mention of the heading text (e.g. '(see ## Validation Plan)') is taken as the section and hard-blocks with 'has no items'",
+      "closedAt": "2026-09-03T13:34:58Z",
+      "outcome": "shipped"
+    },
+    {
+      "bead": "pow-vw38",
+      "title": "github_grid_assets tests fail whenever the operator's GRID_GITHUB_APP_KEY_* variables are exported: github_app_client_assets_test (2 cases) is coupled to the ambient process environment, so every land/revalidate for a github_grid_assets bead fails on an armed machine",
+      "closedAt": "2026-09-03T04:37:58Z",
+      "outcome": "shipped"
+    },
+    {
+      "bead": "pow-zvaw",
+      "title": "CI red on every PR: acceptance harnesses construct StationKernel, deleted by the_grid #284 (grid_engine rc.11 / grid_sdk rc.9) \u2014 migrate to StationDriver + runGrid and adopt the wave",
+      "closedAt": "2026-09-03T13:27:23Z",
+      "outcome": "shipped"
+    }
+  ]
+}
