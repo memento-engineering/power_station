@@ -79,6 +79,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:beads_dart/beads_dart.dart';
+import 'package:crypto/crypto.dart';
 import 'package:genesis_tree/genesis_tree.dart';
 import 'package:grid_engine/grid_engine.dart';
 import 'package:grid_runtime/grid_runtime.dart';
@@ -96,7 +97,7 @@ import '../agent/usage_report.dart';
 import '../search/station_search.dart';
 import 'committee.dart';
 import 'decision_register.dart';
-import 'readiness.dart';
+import 'landing.dart' show ShellRunner;
 import 'respec.dart';
 import 'route_failure.dart';
 
@@ -138,6 +139,571 @@ const int kMaxAnchors = 12;
 /// The bound on a resolved anchor's SURROUNDING PATTERN (its directory's other
 /// files) — enough to show the architect what the neighborhood looks like.
 const int kMaxNeighbors = 8;
+
+/// The bound on ONE piece of bounded evidence's rendered SNIPPET. The full text
+/// is always hashed; only the snippet is clipped, and a clip is RECORDED
+/// ([EvidenceState.truncated]) so bounded evidence can never masquerade as
+/// complete evidence.
+const int kMaxDiscoverySnippetChars = 4096;
+
+/// The bound on the decision entries kept for ONE roster-qualified surface.
+const int kMaxDecisionEntriesPerSurface = 12;
+
+/// The bound on the prior-art hits kept for ONE query.
+const int kMaxPriorArtHitsPerQuery = 12;
+
+/// The bound on the git-history commits kept for one round.
+const int kMaxHistoryCommits = 12;
+
+/// How COMPLETE one piece of gathered evidence is. Sealed by the enum and
+/// consumed with an exhaustive `switch` (house style), so a new state cannot
+/// skip a projection's sufficiency check.
+///
+/// The distinction is the whole point of the canonical profile: an empty
+/// successful lookup ([complete]) is a REAL result, where a clipped one
+/// ([truncated]), an unwired source ([unavailable]) and a crashed one
+/// ([failed]) are known NON-answers. A lens is handed the state, never a bare
+/// snippet, so it can never read "nobody looked" as "nothing is there".
+enum EvidenceState {
+  /// The lookup ran and its whole result is carried (an empty result included).
+  complete,
+
+  /// The lookup ran but its result was CLIPPED by one of this library's bounds.
+  truncated,
+
+  /// No source was wired, so the lookup never ran at all.
+  unavailable,
+
+  /// The lookup ran and CRASHED — the detail rides the record's `error`.
+  failed;
+
+  /// The state [raw] names — null when it names none (fail-closed: an unknown
+  /// state is refused by the decoder rather than silently downgraded).
+  static EvidenceState? fromWire(Object? raw) => switch (raw) {
+    'complete' => EvidenceState.complete,
+    'truncated' => EvidenceState.truncated,
+    'unavailable' => EvidenceState.unavailable,
+    'failed' => EvidenceState.failed,
+    _ => null,
+  };
+}
+
+/// ONE piece of gathered evidence, BOUNDED: a stable identity, where it came
+/// from, the clipped snippet, the digest of the COMPLETE text, and how complete
+/// the record is.
+///
+/// The digest is over the whole text, so a truncated snippet still identifies
+/// the artifact it was cut from; [id] carries that digest, which is what makes
+/// an evidence id stable across rounds for unchanged evidence and different the
+/// moment the underlying text moves.
+class BoundedEvidence {
+  /// Creates a record. Prefer [boundDiscoveryEvidence], which derives the
+  /// digest, the id and the truncation state from the complete text.
+  const BoundedEvidence({
+    required this.id,
+    required this.source,
+    required this.snippet,
+    required this.digest,
+    required this.state,
+    this.error = '',
+  });
+
+  /// The canonical identity — `<kind>:<subject>@sha256:<digest>`.
+  final String id;
+
+  /// WHERE the evidence came from (a file path, a bead field, a command).
+  final String source;
+
+  /// The evidence text, clipped to [kMaxDiscoverySnippetChars].
+  final String snippet;
+
+  /// The SHA-256 of the COMPLETE text (never of the clipped snippet).
+  final String digest;
+
+  /// How complete this record is.
+  final EvidenceState state;
+
+  /// The failure detail — REQUIRED (non-empty) for [EvidenceState.failed].
+  final String error;
+
+  /// The wire shape (hand-rolled — this pack carries no `json_serializable`).
+  Map<String, Object?> toJson() => {
+    'id': id,
+    'source': source,
+    'snippet': snippet,
+    'digest': digest,
+    'state': state.name,
+    'error': error,
+  };
+
+  /// Decodes one record STRICTLY: a non-map, an empty id/digest, an unknown
+  /// state, or a [EvidenceState.failed] record with no error yields null. The
+  /// caller turns that into a refused artifact, never a silently emptied one.
+  static BoundedEvidence? fromJson(Object? json) {
+    if (json is! Map) return null;
+    final id = (json['id'] as String?)?.trim() ?? '';
+    final digest = (json['digest'] as String?)?.trim() ?? '';
+    final state = EvidenceState.fromWire(json['state']);
+    if (id.isEmpty || digest.isEmpty || state == null) return null;
+    final error = (json['error'] as String?) ?? '';
+    if (state == EvidenceState.failed && error.trim().isEmpty) return null;
+    return BoundedEvidence(
+      id: id,
+      source: (json['source'] as String?) ?? '',
+      snippet: (json['snippet'] as String?) ?? '',
+      digest: digest,
+      state: state,
+      error: error,
+    );
+  }
+}
+
+/// Bounds [fullText] into one [BoundedEvidence] record: hashes the COMPLETE
+/// text, clips the snippet at [kMaxDiscoverySnippetChars], and derives the
+/// state ([EvidenceState.truncated] on a clip) unless [state] forces one.
+BoundedEvidence boundDiscoveryEvidence({
+  required String kind,
+  required String subject,
+  required String source,
+  required String fullText,
+  EvidenceState? state,
+  String error = '',
+}) {
+  final digest = sha256.convert(utf8.encode(fullText)).toString();
+  final wasTruncated = fullText.length > kMaxDiscoverySnippetChars;
+  final resolvedState =
+      state ?? (wasTruncated ? EvidenceState.truncated : EvidenceState.complete);
+  return BoundedEvidence(
+    id: '$kind:${Uri.encodeComponent(subject)}@sha256:$digest',
+    source: source,
+    snippet: wasTruncated
+        ? fullText.substring(0, kMaxDiscoverySnippetChars)
+        : fullText,
+    digest: digest,
+    state: resolvedState,
+    error: error.length > kMaxDiscoverySnippetChars
+        ? error.substring(0, kMaxDiscoverySnippetChars)
+        : error,
+  );
+}
+
+/// ONE bead field, bounded — the work bead's own prose, resolved ONCE by the
+/// deterministic gather so no lens re-reads the bead through a tool.
+class BeadFieldEvidence {
+  /// Creates the record.
+  const BeadFieldEvidence({
+    required this.beadId,
+    required this.field,
+    required this.evidence,
+  });
+
+  /// The bead the field belongs to.
+  final String beadId;
+
+  /// Which field.
+  final BeadCitationField field;
+
+  /// The bounded field text.
+  final BoundedEvidence evidence;
+
+  /// The wire shape.
+  Map<String, Object?> toJson() => {
+    'beadId': beadId,
+    'field': field.wire,
+    'evidence': evidence.toJson(),
+  };
+
+  /// Decodes one record STRICTLY; anything incomplete yields null.
+  static BeadFieldEvidence? fromJson(Object? json) {
+    if (json is! Map) return null;
+    final beadId = (json['beadId'] as String?)?.trim() ?? '';
+    final field = BeadCitationField.fromWire(json['field']);
+    final evidence = BoundedEvidence.fromJson(json['evidence']);
+    if (beadId.isEmpty || field == null || evidence == null) return null;
+    return BeadFieldEvidence(beadId: beadId, field: field, evidence: evidence);
+  }
+}
+
+/// ONE grading rubric, bounded — its identity plus the digest of its COMPLETE
+/// prose. The prose itself still rides `DiscoveryAnchors.rubrics` verbatim (the
+/// architect is graded by it), so this record is the IDENTITY, not a second copy.
+class RubricEvidence {
+  /// Creates the record.
+  const RubricEvidence({required this.rubricId, required this.evidence});
+
+  /// The rubric id.
+  final String rubricId;
+
+  /// The bounded rubric prose.
+  final BoundedEvidence evidence;
+
+  /// The wire shape.
+  Map<String, Object?> toJson() => {
+    'rubricId': rubricId,
+    'evidence': evidence.toJson(),
+  };
+
+  /// Decodes one record STRICTLY; anything incomplete yields null.
+  static RubricEvidence? fromJson(Object? json) {
+    if (json is! Map) return null;
+    final rubricId = (json['rubricId'] as String?)?.trim() ?? '';
+    final evidence = BoundedEvidence.fromJson(json['evidence']);
+    if (rubricId.isEmpty || evidence == null) return null;
+    return RubricEvidence(rubricId: rubricId, evidence: evidence);
+  }
+}
+
+/// ONE prior-art QUERY's coverage — the query, how the search went, and its
+/// bounded hits.
+///
+/// Query-level, not hit-level, on purpose: flattening hits loses the difference
+/// between "searched, no hits" and "a roster seat was absent or the read
+/// crashed", which is exactly the blindness the prior-art seam exists to remove.
+class PriorArtQueryEvidence {
+  /// Creates the record.
+  const PriorArtQueryEvidence({
+    required this.id,
+    required this.query,
+    required this.state,
+    this.truncated = false,
+    this.error = '',
+    this.hits = const [],
+  });
+
+  /// The canonical identity of this query's coverage.
+  final String id;
+
+  /// The query as searched.
+  final String query;
+
+  /// How the search went.
+  final EvidenceState state;
+
+  /// Whether the hit list was clipped at [kMaxPriorArtHitsPerQuery].
+  final bool truncated;
+
+  /// The failure detail — REQUIRED (non-empty) for [EvidenceState.failed].
+  final String error;
+
+  /// The bounded hits, in search order.
+  final List<PriorArt> hits;
+
+  /// The wire shape.
+  Map<String, Object?> toJson() => {
+    'id': id,
+    'query': query,
+    'state': state.name,
+    'truncated': truncated,
+    'error': error,
+    'hits': [for (final hit in hits) hit.toJson()],
+  };
+
+  /// Decodes one record STRICTLY: an unknown state, an empty id, a failed
+  /// record with no error, or ANY malformed hit yields null (a malformed entry
+  /// is never dropped — the whole artifact is refused).
+  static PriorArtQueryEvidence? fromJson(Object? json) {
+    if (json is! Map) return null;
+    final id = (json['id'] as String?)?.trim() ?? '';
+    final state = EvidenceState.fromWire(json['state']);
+    if (id.isEmpty || state == null) return null;
+    final error = (json['error'] as String?) ?? '';
+    if (state == EvidenceState.failed && error.trim().isEmpty) return null;
+    final rawHits = json['hits'];
+    if (rawHits is! List) return null;
+    final hits = <PriorArt>[];
+    for (final entry in rawHits) {
+      final hit = PriorArt.fromJson(entry);
+      if (hit == null) return null;
+      hits.add(hit);
+    }
+    return PriorArtQueryEvidence(
+      id: id,
+      query: (json['query'] as String?) ?? '',
+      state: state,
+      truncated: json['truncated'] == true,
+      error: error,
+      hits: hits,
+    );
+  }
+}
+
+/// ONE recorded decision entry, resolved from the roster-mode index and read
+/// off disk — the canonical `<repo>#<slug>` identity plus its bounded body.
+class DecisionEntryEvidence {
+  /// Creates the record.
+  const DecisionEntryEvidence({
+    required this.identity,
+    required this.originRegister,
+    required this.originPath,
+    required this.slug,
+    required this.status,
+    required this.surfaces,
+    required this.entryPath,
+    required this.body,
+  });
+
+  /// The canonical citation identity — `<originRegister>#<slug>`.
+  final String identity;
+
+  /// The register the entry came from (a SIBLING substation binds as a local
+  /// one does).
+  final String originRegister;
+
+  /// The register directory the index reported.
+  final String originPath;
+
+  /// The entry's slug.
+  final String slug;
+
+  /// The entry's `status` front-matter value.
+  final String status;
+
+  /// The surfaces the entry declares.
+  final List<String> surfaces;
+
+  /// The resolved entry file.
+  final String entryPath;
+
+  /// The bounded entry body.
+  final BoundedEvidence body;
+
+  /// The wire shape.
+  Map<String, Object?> toJson() => {
+    'identity': identity,
+    'originRegister': originRegister,
+    'originPath': originPath,
+    'slug': slug,
+    'status': status,
+    'surfaces': surfaces,
+    'entryPath': entryPath,
+    'body': body.toJson(),
+  };
+
+  /// Decodes one record STRICTLY; anything incomplete yields null.
+  static DecisionEntryEvidence? fromJson(Object? json) {
+    if (json is! Map) return null;
+    final identity = (json['identity'] as String?)?.trim() ?? '';
+    final slug = (json['slug'] as String?)?.trim() ?? '';
+    final body = BoundedEvidence.fromJson(json['body']);
+    final rawSurfaces = json['surfaces'];
+    if (identity.isEmpty || slug.isEmpty || body == null) return null;
+    if (rawSurfaces is! List) return null;
+    return DecisionEntryEvidence(
+      identity: identity,
+      originRegister: (json['originRegister'] as String?) ?? '',
+      originPath: (json['originPath'] as String?) ?? '',
+      slug: slug,
+      status: (json['status'] as String?) ?? '',
+      surfaces: [
+        for (final surface in rawSurfaces)
+          if (surface is String) surface,
+      ],
+      entryPath: (json['entryPath'] as String?) ?? '',
+      body: body,
+    );
+  }
+}
+
+/// ONE roster-qualified surface's decision lookup — the exact command that ran,
+/// how it went, and the entries it returned.
+class DecisionSurfaceEvidence {
+  /// Creates the record.
+  const DecisionSurfaceEvidence({
+    required this.id,
+    required this.surface,
+    required this.command,
+    required this.state,
+    this.truncated = false,
+    this.error = '',
+    this.decisions = const [],
+  });
+
+  /// The canonical identity of this surface's lookup.
+  final String id;
+
+  /// The roster-qualified surface queried (`<repo>/<path>`).
+  final String surface;
+
+  /// The exact command that ran (provenance — the lens never re-runs it).
+  final String command;
+
+  /// How the lookup went. An empty `decisions` list with
+  /// [EvidenceState.complete] is a REAL empty union.
+  final EvidenceState state;
+
+  /// Whether the entry list was clipped at [kMaxDecisionEntriesPerSurface].
+  final bool truncated;
+
+  /// The failure detail — REQUIRED (non-empty) for [EvidenceState.failed].
+  final String error;
+
+  /// The entries, in index order.
+  final List<DecisionEntryEvidence> decisions;
+
+  /// The wire shape.
+  Map<String, Object?> toJson() => {
+    'id': id,
+    'surface': surface,
+    'command': command,
+    'state': state.name,
+    'truncated': truncated,
+    'error': error,
+    'decisions': [for (final entry in decisions) entry.toJson()],
+  };
+
+  /// Decodes one record STRICTLY; an unknown state, an empty id, a failed
+  /// record with no error, or ANY malformed entry yields null.
+  static DecisionSurfaceEvidence? fromJson(Object? json) {
+    if (json is! Map) return null;
+    final id = (json['id'] as String?)?.trim() ?? '';
+    final state = EvidenceState.fromWire(json['state']);
+    if (id.isEmpty || state == null) return null;
+    final error = (json['error'] as String?) ?? '';
+    if (state == EvidenceState.failed && error.trim().isEmpty) return null;
+    final rawEntries = json['decisions'];
+    if (rawEntries is! List) return null;
+    final decisions = <DecisionEntryEvidence>[];
+    for (final raw in rawEntries) {
+      final entry = DecisionEntryEvidence.fromJson(raw);
+      if (entry == null) return null;
+      decisions.add(entry);
+    }
+    return DecisionSurfaceEvidence(
+      id: id,
+      surface: (json['surface'] as String?) ?? '',
+      command: (json['command'] as String?) ?? '',
+      state: state,
+      truncated: json['truncated'] == true,
+      error: error,
+      decisions: decisions,
+    );
+  }
+}
+
+/// ONE commit touching the bead's resolved surfaces.
+class HistoryCommitEvidence {
+  /// Creates the record.
+  const HistoryCommitEvidence({
+    required this.id,
+    required this.sha,
+    required this.authoredAt,
+    required this.subject,
+  });
+
+  /// The canonical identity of this commit record.
+  final String id;
+
+  /// The full commit SHA.
+  final String sha;
+
+  /// The author date, ISO-8601.
+  final String authoredAt;
+
+  /// The commit subject line.
+  final String subject;
+
+  /// The wire shape.
+  Map<String, Object?> toJson() => {
+    'id': id,
+    'sha': sha,
+    'authoredAt': authoredAt,
+    'subject': subject,
+  };
+
+  /// Decodes one record STRICTLY; anything incomplete yields null.
+  static HistoryCommitEvidence? fromJson(Object? json) {
+    if (json is! Map) return null;
+    final id = (json['id'] as String?)?.trim() ?? '';
+    final sha = (json['sha'] as String?)?.trim() ?? '';
+    if (id.isEmpty || sha.isEmpty) return null;
+    return HistoryCommitEvidence(
+      id: id,
+      sha: sha,
+      authoredAt: (json['authoredAt'] as String?) ?? '',
+      subject: (json['subject'] as String?) ?? '',
+    );
+  }
+}
+
+/// The round's git-history evidence over the bead's RESOLVED surfaces — ONE
+/// batched read, recorded with its exact command.
+class HistoryEvidence {
+  /// Creates the record.
+  const HistoryEvidence({
+    required this.id,
+    required this.paths,
+    required this.command,
+    required this.state,
+    this.truncated = false,
+    this.error = '',
+    this.commits = const [],
+  });
+
+  /// The canonical identity of this history read.
+  final String id;
+
+  /// The paths the read covered.
+  final List<String> paths;
+
+  /// The exact argv that ran (provenance — the lens never re-runs it).
+  final String command;
+
+  /// How the read went. An empty `commits` list with [EvidenceState.complete]
+  /// is a REAL empty history.
+  final EvidenceState state;
+
+  /// Whether the commit list was clipped at [kMaxHistoryCommits].
+  final bool truncated;
+
+  /// The failure detail — REQUIRED (non-empty) for [EvidenceState.failed].
+  final String error;
+
+  /// The commits, newest first.
+  final List<HistoryCommitEvidence> commits;
+
+  /// The wire shape.
+  Map<String, Object?> toJson() => {
+    'id': id,
+    'paths': paths,
+    'command': command,
+    'state': state.name,
+    'truncated': truncated,
+    'error': error,
+    'commits': [for (final commit in commits) commit.toJson()],
+  };
+
+  /// Decodes the record STRICTLY; an unknown state, an empty id, a failed
+  /// record with no error, or ANY malformed commit yields null.
+  static HistoryEvidence? fromJson(Object? json) {
+    if (json is! Map) return null;
+    final id = (json['id'] as String?)?.trim() ?? '';
+    final state = EvidenceState.fromWire(json['state']);
+    if (id.isEmpty || state == null) return null;
+    final error = (json['error'] as String?) ?? '';
+    if (state == EvidenceState.failed && error.trim().isEmpty) return null;
+    final rawPaths = json['paths'];
+    final rawCommits = json['commits'];
+    if (rawPaths is! List || rawCommits is! List) return null;
+    final commits = <HistoryCommitEvidence>[];
+    for (final raw in rawCommits) {
+      final commit = HistoryCommitEvidence.fromJson(raw);
+      if (commit == null) return null;
+      commits.add(commit);
+    }
+    return HistoryEvidence(
+      id: id,
+      paths: [
+        for (final path in rawPaths)
+          if (path is String) path,
+      ],
+      command: (json['command'] as String?) ?? '',
+      state: state,
+      truncated: json['truncated'] == true,
+      error: error,
+      commits: commits,
+    );
+  }
+}
 
 /// The discovery round's artifact dir under [workspaceDir]. A SIBLING of
 /// `.grid/critique/` (which `ClearCritiqueCapability` wipes every committee
@@ -409,18 +975,43 @@ class ContextNote {
   String get line => source.isEmpty ? note : '$note (`$source`)';
 }
 
-/// ONE lens's report — the artifact a read-only explorer writes, and the ONLY
-/// thing it writes.
-class LensReport {
-  /// Creates a report.
-  const LensReport({
-    required this.lens,
-    this.context = const [],
-    this.violations = const [],
-  });
+/// ONE lens's OUTCOME — the artifact a read-only explorer writes, and the ONLY
+/// thing it writes. Sealed: consumed with an exhaustive `switch`, so a lane
+/// that states its evidence was incomplete can never be read as a clean report.
+sealed class DiscoveryLensOutcome {
+  /// Creates an outcome for [lens].
+  const DiscoveryLensOutcome({required this.lens});
 
   /// The lens that produced it.
   final String lens;
+
+  /// The wire shape.
+  Map<String, Object?> toJson();
+
+  /// Decodes either outcome. A `report` outcome — and, for backward
+  /// compatibility with an already-stamped same-round v1 file, one carrying NO
+  /// `outcome` key at all — decodes as a [LensReport]; an
+  /// `insufficient-evidence` outcome as an [InsufficientEvidenceReport].
+  static DiscoveryLensOutcome? fromJson(Object? json) => switch (json) {
+    final Map<Object?, Object?> value
+        when value['outcome'] == 'insufficient-evidence' =>
+      InsufficientEvidenceReport.fromJson(value),
+    final Map<Object?, Object?> value
+        when value['outcome'] == 'report' || !value.containsKey('outcome') =>
+      LensReport.fromJson(value),
+    _ => null,
+  };
+}
+
+/// The NORMAL report — what the lens found, and what it found that CONTRADICTS
+/// a standard.
+final class LensReport extends DiscoveryLensOutcome {
+  /// Creates a report.
+  const LensReport({
+    required super.lens,
+    this.context = const [],
+    this.violations = const [],
+  });
 
   /// What it found (context for the architect).
   final List<ContextNote> context;
@@ -429,9 +1020,11 @@ class LensReport {
   final List<DiscoveryFinding> violations;
 
   /// The wire shape.
+  @override
   Map<String, Object?> toJson() => {
+    'outcome': 'report',
     'lens': lens,
-    'version': 1,
+    'version': 2,
     'context': [for (final c in context) c.toJson()],
     'violations': [for (final v in violations) v.toJson()],
   };
@@ -460,6 +1053,48 @@ class LensReport {
   }
 }
 
+/// The lens STATES that the canonical evidence it was handed is incomplete —
+/// a KNOWN NON-ANSWER, which is neither a clean report nor a missing lane.
+///
+/// This is the typed exit the projection contract promises: rather than
+/// wandering through unbounded tools to fill a hole the deterministic gather
+/// already recorded, the lane names the exact evidence ids and their recorded
+/// reasons. The route regathers the lane once and then HOLDS on it.
+final class InsufficientEvidenceReport extends DiscoveryLensOutcome {
+  /// Creates the outcome over its [gaps] (never empty).
+  const InsufficientEvidenceReport({required super.lens, required this.gaps});
+
+  /// The named holes, each carrying a canonical evidence id and the recorded
+  /// reason it is not complete.
+  final List<EvidenceGap> gaps;
+
+  /// The wire shape.
+  @override
+  Map<String, Object?> toJson() => {
+    'outcome': 'insufficient-evidence',
+    'lens': lens,
+    'version': 2,
+    'gaps': [for (final gap in gaps) gap.toJson()],
+  };
+
+  /// Decodes the outcome; a lens-less report, a non-list `gaps`, an EMPTY
+  /// `gaps`, or ANY malformed gap yields null (an unnamed hole is not a
+  /// statement — the lane is then simply MISSING).
+  static InsufficientEvidenceReport? fromJson(Object? json) {
+    if (json is! Map) return null;
+    final lens = (json['lens'] as String?)?.trim() ?? '';
+    final raw = json['gaps'];
+    if (lens.isEmpty || raw is! List || raw.isEmpty) return null;
+    final gaps = <EvidenceGap>[];
+    for (final entry in raw) {
+      final gap = EvidenceGap.fromJson(entry);
+      if (gap == null) return null;
+      gaps.add(gap);
+    }
+    return InsufficientEvidenceReport(lens: lens, gaps: gaps);
+  }
+}
+
 /// One resolved code ANCHOR — a path the bead NAMES, resolved against the live
 /// worktree, with the PATTERN that surrounds it (its directory's other files).
 class ResolvedAnchor {
@@ -467,7 +1102,9 @@ class ResolvedAnchor {
   const ResolvedAnchor({
     required this.anchor,
     required this.resolved,
+    required this.contents,
     this.neighbors = const [],
+    this.neighborsTruncated = false,
   });
 
   /// The path the bead named.
@@ -477,33 +1114,63 @@ class ResolvedAnchor {
   /// exist is stating NEW work — the architect must know which.
   final bool resolved;
 
+  /// The file's BOUNDED contents — the snippet the code lens reads instead of
+  /// opening the file itself. A path that does not exist is a COMPLETE negative
+  /// lookup (empty snippet, [EvidenceState.complete]); a read that threw is
+  /// [EvidenceState.failed] with the exception in its `error`.
+  final BoundedEvidence contents;
+
   /// The other files in its directory (the surrounding pattern), sorted, bounded
   /// by [kMaxNeighbors].
   final List<String> neighbors;
+
+  /// Whether the neighbor list was clipped at [kMaxNeighbors].
+  final bool neighborsTruncated;
 
   /// The wire shape.
   Map<String, Object?> toJson() => {
     'anchor': anchor,
     'resolved': resolved,
+    'contents': contents.toJson(),
     'neighbors': neighbors,
+    'neighborsTruncated': neighborsTruncated,
   };
 
-  /// Decodes one anchor; an anchor-less entry yields null.
+  /// Decodes one anchor STRICTLY; an anchor-less or contents-less entry yields
+  /// null.
   static ResolvedAnchor? fromJson(Object? json) {
     if (json is! Map) return null;
     final anchor = (json['anchor'] as String?)?.trim() ?? '';
-    if (anchor.isEmpty) return null;
+    final contents = BoundedEvidence.fromJson(json['contents']);
+    if (anchor.isEmpty || contents == null) return null;
     return ResolvedAnchor(
       anchor: anchor,
       resolved: json['resolved'] == true,
+      contents: contents,
       neighbors: [
         if (json['neighbors'] case final List<Object?> raw)
           for (final n in raw)
             if (n is String) n,
       ],
+      neighborsTruncated: json['neighborsTruncated'] == true,
     );
   }
 }
+
+/// The ANCHOR that does not exist in the worktree — a COMPLETE negative lookup
+/// (the bead is naming NEW work, or a stale path). Shared by the offline gather
+/// and [resolveAnchorOnDisk] so both spell the same record.
+ResolvedAnchor unresolvedAnchor(String anchor, {required String source}) =>
+    ResolvedAnchor(
+      anchor: anchor,
+      resolved: false,
+      contents: boundDiscoveryEvidence(
+        kind: 'code-anchor',
+        subject: anchor,
+        source: source,
+        fullText: '',
+      ),
+    );
 
 /// One PRIOR-ART hit — a bead or decision that already covered this ground.
 class PriorArt {
@@ -516,7 +1183,22 @@ class PriorArt {
     required this.field,
     required this.snippet,
     required this.query,
+    required this.evidenceId,
   });
+
+  /// A hit's canonical evidence identity — derived from its query, bead, field
+  /// and snippet, so the id is stable across rounds while the hit is.
+  static String identityFor({
+    required String query,
+    required String beadId,
+    required String field,
+    required String snippet,
+  }) => boundDiscoveryEvidence(
+    kind: 'prior-art-hit',
+    subject: '$query|$beadId|$field',
+    source: 'search:$query',
+    fullText: snippet,
+  ).id;
 
   /// The bead that matched.
   final String beadId;
@@ -539,6 +1221,10 @@ class PriorArt {
   /// The query that surfaced it (provenance).
   final String query;
 
+  /// This hit's canonical evidence identity ([identityFor]) — PERSISTED, so the
+  /// dossier can cite the exact evidence profile without re-deriving it.
+  final String evidenceId;
+
   /// The wire shape.
   Map<String, Object?> toJson() => {
     'id': beadId,
@@ -548,6 +1234,7 @@ class PriorArt {
     'field': field,
     'snippet': snippet,
     'query': query,
+    'evidenceId': evidenceId,
   };
 
   /// Decodes one hit; incomplete provenance yields null.
@@ -556,7 +1243,9 @@ class PriorArt {
     final beadId = (json['id'] as String?)?.trim() ?? '';
     final field = BeadCitationField.fromWire(json['field']);
     final snippet = (json['snippet'] as String?)?.trim() ?? '';
+    final evidenceId = (json['evidenceId'] as String?)?.trim() ?? '';
     if (beadId.isEmpty || field == null || snippet.isEmpty) return null;
+    if (evidenceId.isEmpty) return null;
     return PriorArt(
       beadId: beadId,
       store: (json['store'] as String?)?.trim() ?? '',
@@ -565,6 +1254,7 @@ class PriorArt {
       field: field.wire,
       snippet: snippet,
       query: (json['query'] as String?)?.trim() ?? '',
+      evidenceId: evidenceId,
     );
   }
 
@@ -572,16 +1262,43 @@ class PriorArt {
   String get line => '`$beadId` ($store, $status) — $title';
 }
 
-/// The DETERMINISTIC gather's whole output (zero agents, zero judgement).
+/// The DETERMINISTIC gather's whole output (zero agents, zero judgement) — the
+/// round's CANONICAL EVIDENCE PROFILE.
+///
+/// Everything the three lenses need is resolved ONCE here and persisted with
+/// its provenance, its digest and its [EvidenceState]: the bead's own fields,
+/// the code anchors with bounded snippets, the prior-art queries with per-query
+/// coverage, the roster-qualified decision lookups, the surfaces' git history,
+/// and the grading rubrics. A lens SYNTHESIZES a bounded projection of this
+/// artifact ([projectDiscoveryEvidence]); it never re-runs a deterministic
+/// lookup of its own.
 class DiscoveryAnchors {
   /// Creates the gather.
   const DiscoveryAnchors({
+    this.round = -1,
+    this.workBeadId = '',
+    this.beadFields = const [],
     this.rubrics = const {},
+    this.rubricEvidence = const [],
     this.anchors = const [],
     this.symbols = const [],
-    this.priorArt = const [],
-    this.priorArtWired = false,
+    this.anchorsTruncated = false,
+    this.symbolsTruncated = false,
+    this.priorArtQueries = const [],
+    this.decisionLookups = const [],
+    this.history,
   });
+
+  /// The discovery ROUND this gather was taken in — the freshness stamp a
+  /// projection checks before it hands a lens anything. `-1` is the in-memory
+  /// "no gather" default; it is never a decoded value.
+  final int round;
+
+  /// The work bead this gather was taken for.
+  final String workBeadId;
+
+  /// The bead's own fields, bounded — so no lens re-reads the bead.
+  final List<BeadFieldEvidence> beadFields;
 
   /// The spec committee's own grading rubrics, id → prose. ADR-0000 A19's
   /// ratified Status footer names this pull: "A19 is the PRECEDENT for the
@@ -591,6 +1308,9 @@ class DiscoveryAnchors {
   /// grade by.
   final Map<String, String> rubrics;
 
+  /// The rubric IDENTITIES + digests (the prose itself rides [rubrics]).
+  final List<RubricEvidence> rubricEvidence;
+
   /// The bead's PATH anchors, resolved against the live worktree.
   final List<ResolvedAnchor> anchors;
 
@@ -598,52 +1318,537 @@ class DiscoveryAnchors {
   /// does, and they are the prior-art queries).
   final List<String> symbols;
 
-  /// The prior art the `space search` service found.
-  final List<PriorArt> priorArt;
+  /// Whether the PATH-anchor extraction hit [kMaxAnchors] — the bead names more
+  /// surfaces than this profile carries.
+  final bool anchorsTruncated;
 
-  /// Whether a [PriorArtSource] was wired at all — an unwired pull is reported
-  /// LOUDLY in the dossier, never mistaken for "no prior art exists".
-  final bool priorArtWired;
+  /// Whether the SYMBOL extraction hit [kMaxAnchors].
+  final bool symbolsTruncated;
+
+  /// One coverage record per prior-art QUERY, in query order.
+  final List<PriorArtQueryEvidence> priorArtQueries;
+
+  /// One lookup record per roster-qualified SURFACE, in surface order.
+  final List<DecisionSurfaceEvidence> decisionLookups;
+
+  /// The round's batched git history over the resolved surfaces.
+  final HistoryEvidence? history;
+
+  /// Every prior-art hit, flattened — the shape the dossier's citation
+  /// verification consumes. The per-query COVERAGE (which is what tells
+  /// "no hits" from "nobody looked") stays on [priorArtQueries].
+  List<PriorArt> get priorArt => [
+    for (final query in priorArtQueries) ...query.hits,
+  ];
+
+  /// Whether every prior-art query actually reached a source — an unwired pull
+  /// is reported LOUDLY in the dossier, never mistaken for "no prior art
+  /// exists".
+  bool get priorArtWired =>
+      priorArtQueries.every((query) => query.state != EvidenceState.unavailable);
+
+  /// Every canonical evidence identity this gather carries — the profile the
+  /// dossier cites and a downstream consumer verifies against.
+  Set<String> get evidenceIds => {
+    for (final field in beadFields) field.evidence.id,
+    for (final rubric in rubricEvidence) rubric.evidence.id,
+    for (final anchor in anchors) anchor.contents.id,
+    for (final query in priorArtQueries) query.id,
+    for (final query in priorArtQueries)
+      for (final hit in query.hits) hit.evidenceId,
+    for (final lookup in decisionLookups) lookup.id,
+    for (final lookup in decisionLookups)
+      for (final decision in lookup.decisions) decision.body.id,
+    if (history case final value?) value.id,
+    if (history case final value?)
+      for (final commit in value.commits) commit.id,
+  };
 
   /// The wire shape.
   Map<String, Object?> toJson() => {
-    'version': 1,
+    'version': 2,
+    'round': round,
+    'workBeadId': workBeadId,
+    'beadFields': [for (final f in beadFields) f.toJson()],
     'rubrics': rubrics,
+    'rubricEvidence': [for (final r in rubricEvidence) r.toJson()],
     'anchors': [for (final a in anchors) a.toJson()],
     'symbols': symbols,
-    'priorArt': [for (final h in priorArt) h.toJson()],
-    'priorArtWired': priorArtWired,
+    'anchorsTruncated': anchorsTruncated,
+    'symbolsTruncated': symbolsTruncated,
+    'priorArtQueries': [for (final q in priorArtQueries) q.toJson()],
+    'decisionLookups': [for (final d in decisionLookups) d.toJson()],
+    'history': history?.toJson(),
   };
 
-  /// Decodes the gather; null for anything unreadable.
+  /// Decodes the gather STRICTLY — this artifact is the ONLY evidence three
+  /// lenses get, so a partial decode is refused rather than silently emptied.
+  /// Null for a non-map, any `version` but 2, a negative/non-integer round, an
+  /// empty work bead id, ANY malformed nested record (never dropped), an
+  /// unknown evidence state, a duplicate evidence id, or a failed record with
+  /// no error. The route reads that null as EXPLICIT insufficient evidence.
   static DiscoveryAnchors? fromJson(Object? json) {
     if (json is! Map) return null;
-    return DiscoveryAnchors(
+    if (json['version'] != 2) return null;
+    final round = json['round'];
+    final workBeadId = (json['workBeadId'] as String?)?.trim() ?? '';
+    if (round is! int || round < 0 || workBeadId.isEmpty) return null;
+
+    final beadFields = _decodeAll(json['beadFields'], BeadFieldEvidence.fromJson);
+    final rubricEvidence = _decodeAll(
+      json['rubricEvidence'],
+      RubricEvidence.fromJson,
+    );
+    final anchors = _decodeAll(json['anchors'], ResolvedAnchor.fromJson);
+    final priorArtQueries = _decodeAll(
+      json['priorArtQueries'],
+      PriorArtQueryEvidence.fromJson,
+    );
+    final decisionLookups = _decodeAll(
+      json['decisionLookups'],
+      DecisionSurfaceEvidence.fromJson,
+    );
+    if (beadFields == null ||
+        rubricEvidence == null ||
+        anchors == null ||
+        priorArtQueries == null ||
+        decisionLookups == null) {
+      return null;
+    }
+    final rawSymbols = json['symbols'];
+    if (rawSymbols is! List) return null;
+    final rawHistory = json['history'];
+    final history = rawHistory == null
+        ? null
+        : HistoryEvidence.fromJson(rawHistory);
+    if (rawHistory != null && history == null) return null;
+
+    final decoded = DiscoveryAnchors(
+      round: round,
+      workBeadId: workBeadId,
+      beadFields: beadFields,
       rubrics: {
         if (json['rubrics'] case final Map<Object?, Object?> raw)
           for (final entry in raw.entries)
             if (entry.key is String && entry.value is String)
               entry.key as String: entry.value as String,
       },
-      anchors: [
-        if (json['anchors'] case final List<Object?> raw)
-          for (final entry in raw)
-            if (ResolvedAnchor.fromJson(entry) case final a?) a,
-      ],
+      rubricEvidence: rubricEvidence,
+      anchors: anchors,
       symbols: [
-        if (json['symbols'] case final List<Object?> raw)
-          for (final s in raw)
-            if (s is String) s,
+        for (final s in rawSymbols)
+          if (s is String) s,
       ],
-      priorArt: [
-        if (json['priorArt'] case final List<Object?> raw)
-          for (final entry in raw)
-            if (PriorArt.fromJson(entry) case final h?) h,
-      ],
-      priorArtWired: json['priorArtWired'] == true,
+      anchorsTruncated: json['anchorsTruncated'] == true,
+      symbolsTruncated: json['symbolsTruncated'] == true,
+      priorArtQueries: priorArtQueries,
+      decisionLookups: decisionLookups,
+      history: history,
+    );
+    if (decoded.evidenceIds.length != _evidenceIdCount(decoded)) return null;
+    return decoded;
+  }
+
+  /// How many evidence ids the record CARRIES (duplicates included) — compared
+  /// against the deduplicated [evidenceIds] to refuse a colliding profile.
+  static int _evidenceIdCount(DiscoveryAnchors a) =>
+      a.beadFields.length +
+      a.rubricEvidence.length +
+      a.anchors.length +
+      a.priorArtQueries.length +
+      a.priorArtQueries.fold<int>(0, (n, q) => n + q.hits.length) +
+      a.decisionLookups.length +
+      a.decisionLookups.fold<int>(0, (n, d) => n + d.decisions.length) +
+      (a.history == null ? 0 : 1 + a.history!.commits.length);
+}
+
+/// Decodes every entry of [raw] through [decode], REFUSING the whole list when
+/// any entry is malformed (a garbled evidence record is never silently dropped
+/// out of a canonical artifact). Null ⇒ refuse.
+List<T>? _decodeAll<T>(Object? raw, T? Function(Object?) decode) {
+  if (raw is! List) return null;
+  final out = <T>[];
+  for (final entry in raw) {
+    final value = decode(entry);
+    if (value == null) return null;
+    out.add(value);
+  }
+  return out;
+}
+
+/// ONE named hole in a lens's evidence bundle — the canonical id of the record
+/// that is not complete, and the RECORDED reason it is not.
+class EvidenceGap {
+  /// Creates a gap.
+  const EvidenceGap({required this.evidenceId, required this.reason});
+
+  /// The canonical evidence id (or the artifact-level key) the gap is about.
+  final String evidenceId;
+
+  /// The recorded reason — a source's own error text where there is one.
+  final String reason;
+
+  /// The wire shape.
+  Map<String, Object?> toJson() => {
+    'evidenceId': evidenceId,
+    'reason': reason,
+  };
+
+  /// Decodes one gap; an id-less or reason-less entry yields null.
+  static EvidenceGap? fromJson(Object? json) {
+    if (json is! Map) return null;
+    final evidenceId = (json['evidenceId'] as String?)?.trim() ?? '';
+    final reason = (json['reason'] as String?)?.trim() ?? '';
+    if (evidenceId.isEmpty || reason.isEmpty) return null;
+    return EvidenceGap(evidenceId: evidenceId, reason: reason);
+  }
+
+  /// The one-line rendering a hold or a report prints.
+  String get line => '`$evidenceId` — $reason';
+}
+
+/// ONE lens's bounded slice of the canonical evidence profile — everything that
+/// lens is allowed to see, and NOTHING else.
+class DiscoveryEvidenceProjection {
+  /// Creates a projection.
+  const DiscoveryEvidenceProjection({
+    required this.lens,
+    required this.round,
+    required this.workBeadId,
+    required this.evidenceIds,
+    required this.renderedEvidence,
+    required this.gaps,
+  });
+
+  /// The lens this projection is for.
+  final String lens;
+
+  /// The round it was projected at.
+  final int round;
+
+  /// The work bead it was projected for.
+  final String workBeadId;
+
+  /// The canonical ids in this bundle, SORTED.
+  final List<String> evidenceIds;
+
+  /// The bundle, rendered for the lens's prompt — state, provenance, digest,
+  /// id, snippet and error for every selected record.
+  final String renderedEvidence;
+
+  /// Every hole in the bundle. Empty ⇒ the lens may judge.
+  final List<EvidenceGap> gaps;
+
+  /// Whether the lens has everything it was promised.
+  bool get isSufficient => gaps.isEmpty;
+}
+
+/// Projects [anchors] into [lens]'s OWN bundle — the whole reason the gather is
+/// deterministic.
+///
+/// The artifact's [DiscoveryAnchors.round] and [DiscoveryAnchors.workBeadId] are
+/// checked FIRST: a bundle from another round or another bead is not this lens's
+/// evidence at all. Then the lens's slice is selected and rendered, and any
+/// record that is not [EvidenceState.complete] — plus an extraction truncation
+/// marker or an absent history — becomes an [EvidenceGap] carrying the
+/// canonical id and the RECORDED reason.
+///
+/// The slices are ISOLATED by construction: no rubric prose enters a lens; no
+/// decision/history/prior-art record enters the code lane; no code snippet,
+/// history or prior-art record enters the decision lane; no code snippet or
+/// decision record enters the prior-art lane.
+DiscoveryEvidenceProjection projectDiscoveryEvidence(
+  DiscoveryAnchors anchors, {
+  required String lens,
+  required int round,
+  required String workBeadId,
+}) {
+  final gaps = <EvidenceGap>[];
+  final ids = <String>[];
+  final b = StringBuffer();
+
+  if (anchors.round != round) {
+    gaps.add(
+      EvidenceGap(
+        evidenceId: 'gather:round',
+        reason:
+            'the canonical gather is stamped round ${anchors.round}, not this '
+            'round ($round)',
+      ),
     );
   }
+  if (anchors.workBeadId != workBeadId) {
+    gaps.add(
+      EvidenceGap(
+        evidenceId: 'gather:workBeadId',
+        reason:
+            'the canonical gather is for `${anchors.workBeadId}`, not this work '
+            'bead (`$workBeadId`)',
+      ),
+    );
+  }
+
+  void take(String label, BoundedEvidence evidence) {
+    ids.add(evidence.id);
+    _renderEvidence(b, label, evidence);
+    if (evidence.state != EvidenceState.complete) {
+      gaps.add(
+        EvidenceGap(
+          evidenceId: evidence.id,
+          reason: _stateReason(evidence.state, evidence.error),
+        ),
+      );
+    }
+  }
+
+  void beadFields() {
+    b
+      ..writeln('### The work bead, as the gather resolved it')
+      ..writeln();
+    for (final field in anchors.beadFields) {
+      take('${field.beadId}.${field.field.wire}', field.evidence);
+    }
+  }
+
+  switch (lens) {
+    case kCodeLens:
+      beadFields();
+      b
+        ..writeln('### The code this bead names, resolved')
+        ..writeln();
+      for (final anchor in anchors.anchors) {
+        b.writeln(
+          anchor.resolved
+              ? '#### `${anchor.anchor}` — EXISTS'
+              : '#### `${anchor.anchor}` — does NOT exist in this worktree '
+                    '(NEW work, or a stale path)',
+        );
+        take(anchor.anchor, anchor.contents);
+        if (anchor.neighbors.isNotEmpty) {
+          b.writeln(
+            'Its directory also holds: '
+            '${anchor.neighbors.map((n) => '`$n`').join(', ')}'
+            '${anchor.neighborsTruncated ? ' (CLIPPED)' : ''}',
+          );
+        }
+        b.writeln();
+      }
+      if (anchors.symbols.isNotEmpty) {
+        b
+          ..writeln(
+            'Symbols the bead names: '
+            '${anchors.symbols.map((s) => '`$s`').join(', ')}',
+          )
+          ..writeln();
+      }
+      if (anchors.anchorsTruncated) {
+        gaps.add(
+          const EvidenceGap(
+            evidenceId: 'gather:anchors',
+            reason:
+                'the bead names MORE code surfaces than the gather carries — '
+                'the anchor extraction was clipped at its bound',
+          ),
+        );
+      }
+      if (anchors.symbolsTruncated) {
+        gaps.add(
+          const EvidenceGap(
+            evidenceId: 'gather:symbols',
+            reason:
+                'the bead names MORE symbols than the gather carries — the '
+                'symbol extraction was clipped at its bound',
+          ),
+        );
+      }
+    case kDecisionLens:
+      beadFields();
+      b
+        ..writeln('### The recorded decisions governing this bead\'s surfaces')
+        ..writeln();
+      if (anchors.decisionLookups.isEmpty) {
+        b
+          ..writeln(
+            'The bead names NO roster-qualified surface, so NO decision lookup '
+            'was owed. That is a real empty, not a gap.',
+          )
+          ..writeln();
+      }
+      for (final lookup in anchors.decisionLookups) {
+        b
+          ..writeln('#### Surface `${lookup.surface}`')
+          ..writeln(
+            '- looked up ALREADY, by the deterministic roster-mode index over '
+            'the live mounted-substation roster',
+          )
+          ..writeln('- state: ${lookup.state.name.toUpperCase()}')
+          ..writeln('- id: `${lookup.id}`');
+        if (lookup.error.isNotEmpty) b.writeln('- error: ${lookup.error}');
+        if (lookup.decisions.isEmpty &&
+            lookup.state == EvidenceState.complete) {
+          b.writeln(
+            '- the union is EMPTY for this surface — a real result, verified.',
+          );
+        }
+        b.writeln();
+        ids.add(lookup.id);
+        if (lookup.state != EvidenceState.complete) {
+          gaps.add(
+            EvidenceGap(
+              evidenceId: lookup.id,
+              reason: _stateReason(lookup.state, lookup.error),
+            ),
+          );
+        }
+        for (final decision in lookup.decisions) {
+          b.writeln(
+            '##### `${decision.identity}` (status: ${decision.status}, '
+            'entry: `${decision.entryPath}`)',
+          );
+          take(decision.identity, decision.body);
+        }
+      }
+    case kPriorArtLens:
+      beadFields();
+      b
+        ..writeln('### Prior art, by query')
+        ..writeln();
+      if (anchors.priorArtQueries.isEmpty) {
+        b
+          ..writeln('NO prior-art query was formed for this bead.')
+          ..writeln();
+      }
+      for (final query in anchors.priorArtQueries) {
+        b
+          ..writeln('#### Query `${query.query}`')
+          ..writeln('- state: ${query.state.name.toUpperCase()}')
+          ..writeln('- id: `${query.id}`');
+        if (query.error.isNotEmpty) b.writeln('- error: ${query.error}');
+        if (query.hits.isEmpty && query.state == EvidenceState.complete) {
+          b.writeln('- searched, NO hits — a real result, verified.');
+        }
+        for (final hit in query.hits) {
+          b
+            ..writeln('- ${hit.line}')
+            ..writeln('  - id: `${hit.evidenceId}`')
+            ..writeln('  - ${hit.field}: “${hit.snippet}”');
+          ids.add(hit.evidenceId);
+        }
+        b.writeln();
+        ids.add(query.id);
+        if (query.state != EvidenceState.complete) {
+          gaps.add(
+            EvidenceGap(
+              evidenceId: query.id,
+              reason: _stateReason(query.state, query.error),
+            ),
+          );
+        }
+      }
+      b
+        ..writeln('### The history of the surfaces this bead names')
+        ..writeln();
+      final history = anchors.history;
+      if (history == null) {
+        gaps.add(
+          const EvidenceGap(
+            evidenceId: 'gather:history',
+            reason: 'the canonical gather carries NO history record at all',
+          ),
+        );
+        b
+          ..writeln('NO history record was gathered.')
+          ..writeln();
+      } else {
+        b
+          ..writeln(
+            '- read ALREADY, by the deterministic gather, over: '
+            '${history.paths.map((path) => '`$path`').join(', ')}',
+          )
+          ..writeln('- state: ${history.state.name.toUpperCase()}')
+          ..writeln('- id: `${history.id}`');
+        if (history.error.isNotEmpty) b.writeln('- error: ${history.error}');
+        if (history.commits.isEmpty && history.state == EvidenceState.complete) {
+          b.writeln('- these surfaces have NO history — a real result.');
+        }
+        for (final commit in history.commits) {
+          b.writeln('- ${commit.sha} ${commit.authoredAt} ${commit.subject}');
+          ids.add(commit.id);
+        }
+        b.writeln();
+        ids.add(history.id);
+        if (history.state != EvidenceState.complete) {
+          gaps.add(
+            EvidenceGap(
+              evidenceId: history.id,
+              reason: _stateReason(history.state, history.error),
+            ),
+          );
+        }
+      }
+    default:
+      gaps.add(
+        EvidenceGap(
+          evidenceId: 'gather:lens',
+          reason:
+              '`$lens` is not a lens this circuit projects evidence for — no '
+              'bundle exists',
+        ),
+      );
+  }
+
+  final sorted = ids.toSet().toList()..sort();
+  final manifest = StringBuffer()
+    ..writeln('### Canonical evidence identities in THIS bundle')
+    ..writeln();
+  for (final id in sorted) {
+    manifest.writeln('- `$id`');
+  }
+  manifest.writeln();
+  return DiscoveryEvidenceProjection(
+    lens: lens,
+    round: round,
+    workBeadId: workBeadId,
+    evidenceIds: sorted,
+    renderedEvidence: '$manifest$b',
+    gaps: gaps,
+  );
 }
+
+/// Renders ONE bounded record with everything a lens needs to tell an empty
+/// successful lookup from a clipped, unwired or crashed one.
+void _renderEvidence(StringBuffer b, String label, BoundedEvidence evidence) {
+  b
+    ..writeln('- **$label** — ${evidence.state.name.toUpperCase()}')
+    ..writeln('  - id: `${evidence.id}`')
+    ..writeln('  - source: `${evidence.source}`')
+    ..writeln('  - digest: `sha256:${evidence.digest}`');
+  if (evidence.error.isNotEmpty) {
+    b.writeln('  - error: ${evidence.error}');
+  }
+  if (evidence.snippet.isEmpty) {
+    b.writeln('  - (empty)');
+  } else {
+    b
+      ..writeln('  - text:')
+      ..writeln('```')
+      ..writeln(evidence.snippet)
+      ..writeln('```');
+  }
+  b.writeln();
+}
+
+/// The RECORDED reason a non-complete record is a gap — the source's own error
+/// where it has one, else the state's own meaning.
+String _stateReason(EvidenceState state, String error) => switch (state) {
+  EvidenceState.complete => 'complete',
+  EvidenceState.truncated =>
+    error.isEmpty ? 'TRUNCATED — the record was clipped at its bound' : error,
+  EvidenceState.unavailable =>
+    error.isEmpty ? 'UNAVAILABLE — no source was wired, so nobody looked' : error,
+  EvidenceState.failed =>
+    error.isEmpty ? 'FAILED — the lookup crashed' : 'FAILED — $error',
+};
 
 /// The CURATED context the route hands to the architect — the deterministic
 /// gather PLUS what the explorers found, minus what gated.
@@ -656,10 +1861,16 @@ class DiscoveryDossier {
     this.flags = const [],
     this.departures = const [],
     this.missingLenses = const [],
+    this.evidenceIds = const [],
   });
 
   /// The deterministic half.
   final DiscoveryAnchors anchors;
+
+  /// The SORTED canonical evidence identities the gather resolved — the public
+  /// evidence PROFILE a downstream consumer (the architect's brief, and a later
+  /// committee-selection pass) verifies against without a lookup of its own.
+  final List<String> evidenceIds;
 
   /// The bead this dossier was assembled for.
   final String workBeadId;
@@ -682,13 +1893,14 @@ class DiscoveryDossier {
 
   /// The wire shape.
   Map<String, Object?> toJson() => {
-    'version': 1,
+    'version': 2,
     'workBeadId': workBeadId,
     'anchors': anchors.toJson(),
     'context': [for (final c in context) c.toJson()],
     'flags': [for (final f in flags) f.toJson()],
     'departures': [for (final d in departures) d.toJson()],
     'missingLenses': missingLenses,
+    'evidenceIds': evidenceIds,
   };
 
   /// Decodes a dossier; null for anything unreadable (the next specify ride then
@@ -720,6 +1932,11 @@ class DiscoveryDossier {
         if (json['missingLenses'] case final List<Object?> raw)
           for (final l in raw)
             if (l is String) l,
+      ],
+      evidenceIds: [
+        if (json['evidenceIds'] case final List<Object?> raw)
+          for (final id in raw)
+            if (id is String) id,
       ],
     );
   }
@@ -792,6 +2009,26 @@ final class DiscoveryHold extends DiscoveryVerdict {
   final String reason;
 }
 
+/// A lens STATED that its canonical evidence is incomplete, and the re-gather
+/// bound is spent — a KNOWN NON-ANSWER, held for a human.
+///
+/// This is the one distinction A21(3) does NOT already cover. An ABSENT lens
+/// remains MISSING and eventually ADVANCES (the gate never fires on absence,
+/// and a false HOLD is strictly worse than a wasted round). But a lane that
+/// says, in a typed report, that required evidence was TRUNCATED, UNAVAILABLE
+/// or FAILED has answered — with a non-answer. Advancing on that would hand the
+/// architect a dossier whose incompleteness nobody ever saw.
+final class DiscoveryEvidenceHold extends DiscoveryVerdict {
+  /// Creates the hold over each lens's named [gaps].
+  const DiscoveryEvidenceHold({required this.gaps, required this.reason});
+
+  /// The named holes, per lens.
+  final Map<String, List<EvidenceGap>> gaps;
+
+  /// The refinement ask the parked gate carries.
+  final String reason;
+}
+
 /// A lens produced NO parseable report — re-run it VIRGIN (once).
 final class DiscoveryRegather extends DiscoveryVerdict {
   /// Creates a re-gather of [lenses].
@@ -816,23 +2053,30 @@ final class DiscoveryRegather extends DiscoveryVerdict {
 ///     note, every FLAG (uncited concerns + precedent-less pattern deviations),
 ///     every DECLARED departure, and any lens that stayed silent through the cap.
 DiscoveryVerdict decideDiscovery({
-  required Map<String, LensReport?> lanes,
+  required Map<String, DiscoveryLensOutcome?> lanes,
   required DiscoveryAnchors anchors,
   required Bead workBead,
   required int priorRound,
   int maxRounds = kMaxRegatherRounds,
 }) {
   final reports = [
-    for (final report in lanes.values)
-      if (report != null) report,
+    for (final outcome in lanes.values)
+      if (outcome case final LensReport report) report,
   ];
+  final insufficient = {
+    for (final entry in lanes.entries)
+      if (entry.value case final InsufficientEvidenceReport stated)
+        entry.key: stated.gaps,
+  };
   final violations = [for (final r in reports) ...r.violations];
   final flags = [
     for (final v in violations)
       if (!gatesTheBead(v) && !v.acknowledged) v,
   ];
 
-  // 1. the CITED offences — the only thing that holds a bead.
+  // 1. the CITED offences — the only thing that holds a bead. A PROVEN offence
+  //    is not unproven by a sibling lane's silence or its evidence hole, so the
+  //    cheapest exit is still taken first.
   final offenses = violations.where(gatesTheBead).toList();
   if (offenses.isNotEmpty) {
     return DiscoveryHold(
@@ -841,26 +2085,41 @@ DiscoveryVerdict decideDiscovery({
     );
   }
 
-  // 2. a lens that never reported — re-gather it ONCE, LOUDLY.
+  // 2. a lens that never reported, or one that STATED its evidence was
+  //    incomplete — re-gather it ONCE, LOUDLY. Both are broken lanes at this
+  //    point; what differs is what happens AT the cap (3 below).
   final missing = {
     for (final entry in lanes.entries)
       if (entry.value == null) entry.key,
   };
-  if (missing.isNotEmpty && priorRound < maxRounds) {
+  final affected = {...missing, ...insufficient.keys};
+  if (affected.isNotEmpty && priorRound < maxRounds) {
     return DiscoveryRegather(
-      lenses: missing,
+      lenses: affected,
       reason:
-          'RE-GATHER round ${priorRound + 1}/$maxRounds — ${missing.join(', ')} '
-          'produced no parseable report (a broken LANE, not a verdict). '
-          'Re-running the lens VIRGIN; the gate never fires on absence.',
+          'RE-GATHER round ${priorRound + 1}/$maxRounds — '
+          '${affected.join(', ')} produced no usable report (a broken LANE, '
+          'not a verdict). Re-running the gather VIRGIN; the gate never fires '
+          'on absence.',
     );
   }
 
-  // 3. CLEAN — advance with the curated context.
+  // 3. at the cap, the two lanes PART. A lane that STATED incomplete evidence
+  //    has answered with a known non-answer: HOLD it for a human. A merely
+  //    ABSENT lane still advances with the miss recorded LOUDLY (A21(3)).
+  if (insufficient.isNotEmpty) {
+    return DiscoveryEvidenceHold(
+      gaps: insufficient,
+      reason: renderDiscoveryEvidenceHold(insufficient),
+    );
+  }
+
+  // 4. CLEAN — advance with the curated context.
   return DiscoveryAdvance(
     DiscoveryDossier(
       anchors: anchors,
       workBeadId: workBead.id,
+      evidenceIds: anchors.evidenceIds.toList()..sort(),
       context: verifiedContextNotes(
         notes: [for (final r in reports) ...r.context],
         workBead: workBead,
@@ -963,6 +2222,42 @@ String renderDiscoveryHold({
   return b.toString();
 }
 
+/// The REFINEMENT ASK a bead parks with when a lens STATED that the canonical
+/// evidence it was handed is incomplete — it NAMES each hole by its canonical
+/// evidence id and repeats the reason the gather itself recorded, so a
+/// governor's next move is unambiguous.
+String renderDiscoveryEvidenceHold(Map<String, List<EvidenceGap>> gaps) {
+  final b = StringBuffer()
+    ..writeln(
+      'DISCOVERY EVIDENCE HOLD — the deterministic gather could not resolve '
+      'evidence a lens NEEDED, and the re-gather round did not fix it. This is '
+      'a KNOWN NON-ANSWER, not a verdict about the bead and not a missing '
+      'lane: nothing about this bead was judged. It is HELD, not rejected.',
+    )
+    ..writeln()
+    ..writeln('## The evidence that never landed');
+  for (final entry in gaps.entries) {
+    b.writeln('- **${entry.key}**');
+    for (final gap in entry.value) {
+      b.writeln('  - ${gap.line}');
+    }
+  }
+  b
+    ..writeln()
+    ..writeln('## Your exits (either one clears this hold)')
+    ..writeln(
+      '1. FIX THE SOURCE the gather could not reach — compose the missing '
+      'prior-art/decision/history seam, or repair the surface it crashed on; '
+      'or',
+    )
+    ..writeln(
+      '2. NARROW the bead so the evidence it needs fits inside the gather\'s '
+      'bounds. Evidence that is clipped, unwired or crashed is not evidence '
+      'that is absent — it is evidence nobody has yet.',
+    );
+  return b.toString();
+}
+
 /// The DOSSIER block `buildSpecifyBrief` renders — the architect's curated
 /// context. Rubrics FIRST (ADR-0000 A19's Status footer: spec to the definition
 /// you are graded by), then the resolved anchors, the prior art, what the
@@ -1018,16 +2313,38 @@ String renderDiscoveryDossier(DiscoveryDossier dossier) {
   b
     ..writeln()
     ..writeln('### Prior art (`space search` over the attached stores)');
-  if (!a.priorArtWired) {
+  if (a.priorArtQueries.isEmpty || !a.priorArtWired) {
     b.writeln(
       '- NOT WIRED — this station composed no prior-art source, so NO search '
       'ran. This is not "no prior art exists": it is "nobody looked".',
     );
-  } else if (a.priorArt.isEmpty) {
-    b.writeln('- searched, no hits.');
-  } else {
-    for (final hit in a.priorArt) {
-      b.writeln('- ${hit.line}');
+  }
+  // Per QUERY, never flattened: a failed or clipped sweep can never print as
+  // "searched, no hits".
+  for (final query in a.priorArtQueries) {
+    switch (query.state) {
+      case EvidenceState.unavailable:
+        continue;
+      case EvidenceState.failed:
+        b.writeln(
+          '- `${query.query}` — the search FAILED (${query.error}). This is '
+          'NOT an empty result.',
+        );
+      case EvidenceState.truncated:
+      case EvidenceState.complete:
+        if (query.hits.isEmpty) {
+          b.writeln('- `${query.query}` — searched, no hits.');
+        } else {
+          for (final hit in query.hits) {
+            b.writeln('- ${hit.line}');
+          }
+          if (query.truncated) {
+            b.writeln(
+              '- `${query.query}` — MORE hits exist than the '
+              '$kMaxPriorArtHitsPerQuery carried here.',
+            );
+          }
+        }
     }
   }
 
@@ -1062,6 +2379,21 @@ String renderDiscoveryDossier(DiscoveryDossier dossier) {
     }
   }
 
+  if (dossier.evidenceIds.isNotEmpty) {
+    b
+      ..writeln()
+      ..writeln('### Canonical evidence identities')
+      ..writeln(
+        'The exact profile the deterministic gather resolved for this round. '
+        'Every note above was synthesized from one of these records — you can '
+        'verify what was looked at without looking again.',
+      )
+      ..writeln();
+    for (final id in dossier.evidenceIds) {
+      b.writeln('- `$id`');
+    }
+  }
+
   if (dossier.missingLenses.isNotEmpty) {
     b
       ..writeln()
@@ -1085,40 +2417,120 @@ String renderContextNote(ContextNote note, String workBeadId) {
       '“${citation.excerpt}”)';
 }
 
-/// The pluggable ANCHOR resolution seam (mirrors [RubricSource]) — defaults to
-/// the real filesystem probe; tests inject a Fake so the offline suite never
+/// The pluggable ANCHOR resolution seam (mirrors [RubricSource]) — ONE call per
+/// round over EVERY anchor, so the tree is intaken exactly once. Defaults to
+/// [resolveAnchorsOnDisk]; tests inject a Fake so the offline suite never
 /// touches a real path.
 typedef AnchorResolver =
-    ResolvedAnchor Function(String workspaceDir, String anchor);
+    List<ResolvedAnchor> Function(String workspaceDir, List<String> anchors);
 
 /// The pluggable PRIOR-ART seam — the deterministic `space search` pull, as one
-/// call over every query. The composing station wires [stationPriorArt] (which
-/// resolves the roster from ITS resident-station context); absent ⇒ NO search
-/// runs and the dossier says so LOUDLY (never a silent "no hits").
-typedef PriorArtSource = Future<List<PriorArt>> Function(List<String> queries);
+/// call over every query, answering with per-QUERY coverage. The composing
+/// station wires [stationPriorArt] (which resolves the roster from ITS
+/// resident-station context); absent ⇒ NO search runs and every query is
+/// recorded [EvidenceState.unavailable] (never a silent "no hits").
+typedef PriorArtSource =
+    Future<List<PriorArtQueryEvidence>> Function(List<String> queries);
+
+/// The pluggable DECISION-INDEX seam — the composing station's roster-mode
+/// `decisions index --surface <repo>/<path>` verb, run ONCE per round over
+/// every roster-qualified surface. Absent ⇒ every surface is recorded
+/// [EvidenceState.unavailable].
+typedef DecisionIndexSource =
+    Future<List<DecisionSurfaceEvidence>> Function(
+      String workspaceDir,
+      List<String> rosterQualifiedSurfaces,
+    );
+
+/// The pluggable HISTORY seam — one batched `git log` over the round's RESOLVED
+/// surfaces. Absent ⇒ the history record is [EvidenceState.unavailable].
+typedef HistorySource =
+    Future<HistoryEvidence> Function(
+      String workspaceDir,
+      List<String> resolvedPaths,
+    );
 
 /// The real [AnchorResolver]: does the path exist in the worktree, and what else
 /// lives in its directory (the SURROUNDING PATTERN the architect must match).
 /// Deterministic (sorted) and bounded ([kMaxNeighbors]).
 ResolvedAnchor resolveAnchorOnDisk(String workspaceDir, String anchor) {
-  final file = File(p.join(workspaceDir, anchor));
+  final path = p.join(workspaceDir, anchor);
+  final file = File(path);
   if (!file.existsSync()) {
-    return ResolvedAnchor(anchor: anchor, resolved: false);
+    return unresolvedAnchor(anchor, source: workspaceDir);
   }
-  final neighbors =
-      file.parent
-          .listSync()
-          .whereType<File>()
-          .map((f) => p.relative(f.path, from: workspaceDir))
-          .where((path) => path != anchor)
-          .toList()
-        ..sort();
-  return ResolvedAnchor(
-    anchor: anchor,
-    resolved: true,
-    neighbors: neighbors.take(kMaxNeighbors).toList(),
-  );
+  try {
+    final text = file.readAsStringSync();
+    final neighbors =
+        file.parent
+            .listSync()
+            .whereType<File>()
+            .map((f) => p.relative(f.path, from: workspaceDir))
+            .where((n) => n != anchor)
+            .toList()
+          ..sort();
+    final neighborsTruncated = neighbors.length > kMaxNeighbors;
+    return ResolvedAnchor(
+      anchor: anchor,
+      resolved: true,
+      contents: boundDiscoveryEvidence(
+        kind: 'code-anchor',
+        subject: anchor,
+        source: path,
+        fullText: text,
+        state: neighborsTruncated ? EvidenceState.truncated : null,
+      ),
+      neighbors: neighbors.take(kMaxNeighbors).toList(),
+      neighborsTruncated: neighborsTruncated,
+    );
+  } catch (e) {
+    return ResolvedAnchor(
+      anchor: anchor,
+      resolved: true,
+      contents: boundDiscoveryEvidence(
+        kind: 'code-anchor',
+        subject: anchor,
+        source: path,
+        fullText: '',
+        state: EvidenceState.failed,
+        error: '$e',
+      ),
+    );
+  }
 }
+
+/// The bead's own fields, bounded ONCE — the intake block every lens used to
+/// re-render from the live bead.
+List<BeadFieldEvidence> boundedBeadFields(Bead bead) => [
+  for (final field in BeadCitationField.values)
+    BeadFieldEvidence(
+      beadId: bead.id,
+      field: field,
+      evidence: boundDiscoveryEvidence(
+        kind: 'bead-field',
+        subject: '${bead.id}.${field.wire}',
+        source: 'bead:${bead.id}#${field.wire}',
+        fullText: beadFieldValue(bead, field),
+      ),
+    ),
+];
+
+/// The rubric IDENTITIES for [rubrics] — the digest of each rubric's complete
+/// prose, in map order. The prose itself is NOT re-copied: it rides
+/// `DiscoveryAnchors.rubrics` verbatim, which is what A19's rubrics-in-brief
+/// principle requires.
+List<RubricEvidence> rubricEvidenceOf(Map<String, String> rubrics) => [
+  for (final entry in rubrics.entries)
+    RubricEvidence(
+      rubricId: entry.key,
+      evidence: boundDiscoveryEvidence(
+        kind: 'rubric',
+        subject: entry.key,
+        source: 'rubric:${entry.key}',
+        fullText: entry.value,
+      ),
+    ),
+];
 
 /// The station's real prior-art source (ADR-0001, the coupled skill+command
 /// pattern applied one layer in): the asset CALLS the deterministic
@@ -1129,45 +2541,535 @@ ResolvedAnchor resolveAnchorOnDisk(String workspaceDir, String anchor) {
 ///
 /// A station composes it as
 /// `buildCodeRegistry(priorArt: stationPriorArt(() => SpaceDelegate(...)))`.
+/// It answers with one [PriorArtQueryEvidence] per requested query, in input
+/// order: a seat the service reported [StoreAbsent] or [StoreFailed] makes the
+/// query [EvidenceState.failed] with those reasons in its error, because a
+/// PARTIAL sweep presented as a clean empty is exactly the blindness the search
+/// service's sealed outcomes exist to prevent.
 PriorArtSource stationPriorArt(
   sdk.GridDelegate Function() delegate, {
   required String gridHome,
   StationSearchService service = const StationSearchService(),
 }) => (queries) async {
   final roster = codedRosterOf(delegate);
-  final hits = <PriorArt>[];
+  final coverage = <PriorArtQueryEvidence>[];
   for (final query in queries) {
-    final report = await service.search(
-      query: query,
-      roster: roster,
-      gridHome: gridHome,
-    );
-    for (final hit in report.hits) {
-      hits.add(
-        PriorArt(
-          beadId: hit.beadId,
-          store: hit.store,
-          status: hit.status,
-          title: hit.title,
-          field: hit.field,
-          snippet: hit.snippet,
+    try {
+      final report = await service.search(
+        query: query,
+        roster: roster,
+        gridHome: gridHome,
+      );
+      final gaps = [
+        for (final store in report.stores)
+          switch (store) {
+            StoreSearched() => null,
+            StoreAbsent(:final reason) => 'absent ${store.store.name}: $reason',
+            StoreFailed(:final reason) => 'failed ${store.store.name}: $reason',
+          },
+      ].whereType<String>().toList();
+      final all = [
+        for (final hit in report.hits)
+          PriorArt(
+            beadId: hit.beadId,
+            store: hit.store,
+            status: hit.status,
+            title: hit.title,
+            field: hit.field,
+            snippet: hit.snippet,
+            query: query,
+            evidenceId: PriorArt.identityFor(
+              query: query,
+              beadId: hit.beadId,
+              field: hit.field,
+              snippet: hit.snippet,
+            ),
+          ),
+      ];
+      coverage.add(
+        _priorArtCoverage(
           query: query,
+          hits: all,
+          gaps: gaps,
+          command: 'search $query',
+        ),
+      );
+    } catch (e) {
+      coverage.add(
+        _priorArtCoverage(
+          query: query,
+          hits: const [],
+          gaps: ['$e'],
+          command: 'search $query',
         ),
       );
     }
   }
-  return hits;
+  return coverage;
 };
 
-/// The PATH + SYMBOL anchors [bead] names — every backticked span, classified.
+/// Assembles ONE query's coverage: caps the hits, records the cap as
+/// [EvidenceState.truncated], and turns any roster [gaps] into an explicit
+/// [EvidenceState.failed] rather than a clean-looking partial result.
+PriorArtQueryEvidence _priorArtCoverage({
+  required String query,
+  required List<PriorArt> hits,
+  required List<String> gaps,
+  required String command,
+}) {
+  final truncated = hits.length > kMaxPriorArtHitsPerQuery;
+  final error = gaps.join('; ');
+  return PriorArtQueryEvidence(
+    id: boundDiscoveryEvidence(
+      kind: 'prior-art-query',
+      subject: query,
+      source: command,
+      fullText: hits.map((h) => h.evidenceId).join('\n'),
+    ).id,
+    query: query,
+    state: error.isNotEmpty
+        ? EvidenceState.failed
+        : (truncated ? EvidenceState.truncated : EvidenceState.complete),
+    truncated: truncated,
+    error: error,
+    hits: hits.take(kMaxPriorArtHitsPerQuery).toList(),
+  );
+}
+
+/// The real [AnchorResolver]: [resolveAnchorOnDisk] over the whole batch, in
+/// input order. ONE tree-intake pass per round.
+List<ResolvedAnchor> resolveAnchorsOnDisk(
+  String workspaceDir,
+  List<String> anchors,
+) => [for (final anchor in anchors) resolveAnchorOnDisk(workspaceDir, anchor)];
+
+/// The real [DecisionIndexSource]: the composing station's ROSTER-MODE
+/// `decisions index --surface <repo>/<path>` verb, run through the pack's
+/// existing [ShellRunner] seam once per deduplicated surface inside ONE batch
+/// call.
+///
+/// It preserves the roster-union contract exactly and only MOVES it: no
+/// register-directory argument is ever passed (the omission is what resolves
+/// the live roster), every `originRegister` is kept, and each returned `slug`
+/// is resolved to its entry file by an exact multiline `slug:` match under its
+/// own `originPath`. Zero results at exit 0 is a REAL empty union
+/// ([EvidenceState.complete]); a non-zero exit, malformed JSON, a missing or
+/// duplicate slug file, or an unreadable entry is [EvidenceState.failed] with
+/// the output/exception preserved — a crashed lookup is never graded clean.
+DecisionIndexSource commandDecisionIndexSource(ShellRunner runner) =>
+    (workspaceDir, surfaces) async {
+      final out = <DecisionSurfaceEvidence>[];
+      final seen = <String>{};
+      for (final surface in surfaces) {
+        if (!seen.add(surface)) continue;
+        final command = rosterDecisionIndexCommand(surface: surface);
+        try {
+          final result = await runner.run(
+            workingDirectory: workspaceDir,
+            command: command,
+          );
+          if (!result.ok) {
+            out.add(
+              _decisionSurface(
+                surface: surface,
+                command: command,
+                entries: const [],
+                error:
+                    'exit ${result.exitCode}: '
+                    '${result.output.trim()}',
+              ),
+            );
+            continue;
+          }
+          out.add(
+            _decisionLookup(
+              workspaceDir: workspaceDir,
+              surface: surface,
+              command: command,
+              output: result.output,
+            ),
+          );
+        } catch (e) {
+          out.add(
+            _decisionSurface(
+              surface: surface,
+              command: command,
+              entries: const [],
+              error: '$e',
+            ),
+          );
+        }
+      }
+      return out;
+    };
+
+/// Parses ONE `decisions index` run and resolves every returned slug on disk.
+DecisionSurfaceEvidence _decisionLookup({
+  required String workspaceDir,
+  required String surface,
+  required String command,
+  required String output,
+}) {
+  final Object? decoded;
+  try {
+    decoded = jsonDecode(output);
+  } catch (e) {
+    return _decisionSurface(
+      surface: surface,
+      command: command,
+      entries: const [],
+      error: 'malformed index JSON: $e',
+    );
+  }
+  if (decoded is! Map || decoded['spec'] != 1) {
+    return _decisionSurface(
+      surface: surface,
+      command: command,
+      entries: const [],
+      error: 'index answered no `spec: 1` envelope',
+    );
+  }
+  final raw = decoded['decisions'];
+  if (raw is! List) {
+    return _decisionSurface(
+      surface: surface,
+      command: command,
+      entries: const [],
+      error: 'index answered no `decisions` array',
+    );
+  }
+  final entries = <DecisionEntryEvidence>[];
+  for (final record in raw.take(kMaxDecisionEntriesPerSurface)) {
+    if (record is! Map) {
+      return _decisionSurface(
+        surface: surface,
+        command: command,
+        entries: const [],
+        error: 'index answered a non-map decision record',
+      );
+    }
+    final slug = (record['slug'] as String?)?.trim() ?? '';
+    final originRegister = (record['originRegister'] as String?)?.trim() ?? '';
+    final originPath = (record['originPath'] as String?)?.trim() ?? '';
+    if (slug.isEmpty || originRegister.isEmpty || originPath.isEmpty) {
+      return _decisionSurface(
+        surface: surface,
+        command: command,
+        entries: const [],
+        error: 'index answered a record with no slug/originRegister/originPath',
+      );
+    }
+    final String entryPath;
+    final String body;
+    try {
+      final dir = Directory(
+        p.isAbsolute(originPath) ? originPath : p.join(workspaceDir, originPath),
+      );
+      final slugLine = RegExp(
+        '^\\s*slug:\\s*${RegExp.escape(slug)}\\s*\$',
+        multiLine: true,
+      );
+      final matches = [
+        for (final file in dir.listSync().whereType<File>())
+          if (file.path.endsWith('.md') &&
+              slugLine.hasMatch(file.readAsStringSync()))
+            file,
+      ];
+      if (matches.length != 1) {
+        return _decisionSurface(
+          surface: surface,
+          command: command,
+          entries: const [],
+          error:
+              '${matches.length} entry files match `slug: $slug` under '
+              '$originPath (exactly one must)',
+        );
+      }
+      entryPath = matches.single.path;
+      body = matches.single.readAsStringSync();
+    } catch (e) {
+      return _decisionSurface(
+        surface: surface,
+        command: command,
+        entries: const [],
+        error: 'could not resolve `slug: $slug` under $originPath — $e',
+      );
+    }
+    entries.add(
+      DecisionEntryEvidence(
+        identity: '$originRegister#$slug',
+        originRegister: originRegister,
+        originPath: originPath,
+        slug: slug,
+        status: (record['status'] as String?)?.trim() ?? '',
+        surfaces: [
+          if (record['surfaces'] case final List<Object?> declared)
+            for (final declaredSurface in declared)
+              if (declaredSurface is String) declaredSurface,
+        ],
+        entryPath: entryPath,
+        body: boundDiscoveryEvidence(
+          kind: 'decision-entry',
+          subject: '$originRegister#$slug',
+          source: entryPath,
+          fullText: body,
+        ),
+      ),
+    );
+  }
+  return _decisionSurface(
+    surface: surface,
+    command: command,
+    entries: entries,
+    truncated: raw.length > kMaxDecisionEntriesPerSurface,
+  );
+}
+
+/// Assembles ONE surface's lookup record — the shared shape every arm of
+/// [commandDecisionIndexSource] lands on.
+DecisionSurfaceEvidence _decisionSurface({
+  required String surface,
+  required String command,
+  required List<DecisionEntryEvidence> entries,
+  bool truncated = false,
+  String error = '',
+}) => DecisionSurfaceEvidence(
+  id: boundDiscoveryEvidence(
+    kind: 'decision-surface',
+    subject: surface,
+    source: command,
+    fullText: entries.map((e) => e.identity).join('\n'),
+  ).id,
+  surface: surface,
+  command: command,
+  state: error.isNotEmpty
+      ? EvidenceState.failed
+      : (truncated || entries.any((e) => e.body.state != EvidenceState.complete)
+            ? EvidenceState.truncated
+            : EvidenceState.complete),
+  truncated: truncated,
+  error: error,
+  decisions: entries,
+);
+
+/// The real [HistorySource]: ONE `git log` over every resolved surface, through
+/// the pack's existing [GitRunner] seam.
+///
+/// A non-zero git, or a record that does not split into SHA / ISO timestamp /
+/// subject, is [EvidenceState.failed]; an EMPTY successful log is
+/// [EvidenceState.complete] (a surface with no history is a real answer).
+HistorySource gitHistorySource(GitRunner runner) => (workspaceDir, paths) async {
+  final args = [
+    'log',
+    '--max-count=${kMaxHistoryCommits + 1}',
+    '--format=%H%x09%aI%x09%s',
+    '--',
+    ...paths,
+  ];
+  final command = 'git ${args.join(' ')}';
+  try {
+    final result = await runner.run(
+      workingDirectory: workspaceDir,
+      args: args,
+    );
+    if (!result.ok) {
+      return _history(
+        paths: paths,
+        command: command,
+        commits: const [],
+        error: 'exit ${result.exitCode}: ${result.output.trim()}',
+      );
+    }
+    final records = result.output
+        .split('\n')
+        .map((line) => line.trim())
+        .where((line) => line.isNotEmpty)
+        .toList();
+    final commits = <HistoryCommitEvidence>[];
+    for (final record in records.take(kMaxHistoryCommits)) {
+      final parts = record.split('\t');
+      if (parts.length != 3) {
+        return _history(
+          paths: paths,
+          command: command,
+          commits: const [],
+          error: 'unparseable log record: $record',
+        );
+      }
+      commits.add(
+        HistoryCommitEvidence(
+          id: boundDiscoveryEvidence(
+            kind: 'history-commit',
+            subject: parts[0],
+            source: command,
+            fullText: record,
+          ).id,
+          sha: parts[0],
+          authoredAt: parts[1],
+          subject: parts[2],
+        ),
+      );
+    }
+    return _history(
+      paths: paths,
+      command: command,
+      commits: commits,
+      truncated: records.length > kMaxHistoryCommits,
+    );
+  } catch (e) {
+    return _history(
+      paths: paths,
+      command: command,
+      commits: const [],
+      error: '$e',
+    );
+  }
+};
+
+/// Assembles the round's history record — the shared shape every arm of
+/// [gitHistorySource] lands on.
+HistoryEvidence _history({
+  required List<String> paths,
+  required String command,
+  required List<HistoryCommitEvidence> commits,
+  bool truncated = false,
+  String error = '',
+}) => HistoryEvidence(
+  id: boundDiscoveryEvidence(
+    kind: 'history',
+    subject: paths.join('|'),
+    source: command,
+    fullText: commits.map((c) => c.sha).join('\n'),
+  ).id,
+  paths: paths,
+  command: command,
+  state: error.isNotEmpty
+      ? EvidenceState.failed
+      : (truncated ? EvidenceState.truncated : EvidenceState.complete),
+  truncated: truncated,
+  error: error,
+  commits: commits,
+);
+
+/// Every prior-art query's coverage, gathered through [source] — or an explicit
+/// [EvidenceState.unavailable] record per query when NO source is wired, and a
+/// [EvidenceState.failed] record per query when the batch itself threw.
+Future<List<PriorArtQueryEvidence>> gatherPriorArt(
+  PriorArtSource? source,
+  List<String> queries,
+) async {
+  List<PriorArtQueryEvidence> flat(EvidenceState state, String error) => [
+    for (final query in queries)
+      PriorArtQueryEvidence(
+        id: boundDiscoveryEvidence(
+          kind: 'prior-art-query',
+          subject: query,
+          source: 'search $query',
+          fullText: '',
+        ).id,
+        query: query,
+        state: state,
+        error: error,
+      ),
+  ];
+  if (source == null) {
+    return flat(EvidenceState.unavailable, 'no prior-art source is composed');
+  }
+  try {
+    return await source(queries);
+  } catch (e) {
+    return flat(EvidenceState.failed, '$e');
+  }
+}
+
+/// Every roster-qualified surface's decision lookup, gathered through [source]
+/// — or an explicit [EvidenceState.unavailable]/[EvidenceState.failed] record
+/// per surface when no source is wired / the batch threw.
+Future<List<DecisionSurfaceEvidence>> gatherDecisions(
+  DecisionIndexSource? source,
+  String workspaceDir,
+  List<String> surfaces,
+) async {
+  List<DecisionSurfaceEvidence> flat(EvidenceState state, String error) => [
+    for (final surface in surfaces)
+      DecisionSurfaceEvidence(
+        id: boundDiscoveryEvidence(
+          kind: 'decision-surface',
+          subject: surface,
+          source: rosterDecisionIndexCommand(surface: surface),
+          fullText: '',
+        ).id,
+        surface: surface,
+        command: rosterDecisionIndexCommand(surface: surface),
+        state: state,
+        error: error,
+      ),
+  ];
+  if (source == null) {
+    return flat(EvidenceState.unavailable, 'no decision-index source is composed');
+  }
+  try {
+    return await source(workspaceDir, surfaces);
+  } catch (e) {
+    return flat(EvidenceState.failed, '$e');
+  }
+}
+
+/// The round's git history, gathered through [source] — or an explicit
+/// [EvidenceState.unavailable]/[EvidenceState.failed] record when no source is
+/// wired / the batch threw.
+Future<HistoryEvidence> gatherHistory(
+  HistorySource? source,
+  String workspaceDir,
+  List<String> paths,
+) async {
+  if (source == null) {
+    return HistoryEvidence(
+      id: boundDiscoveryEvidence(
+        kind: 'history',
+        subject: paths.join('|'),
+        source: '',
+        fullText: '',
+      ).id,
+      paths: paths,
+      command: '',
+      state: EvidenceState.unavailable,
+      error: 'no history source is composed',
+    );
+  }
+  try {
+    return await source(workspaceDir, paths);
+  } catch (e) {
+    return _history(
+      paths: paths,
+      command: '',
+      commits: const [],
+      error: '$e',
+    );
+  }
+}
+
+/// The PATH + SYMBOL anchors [bead] names — the round's ONLY tree-intake pass.
 /// Pure, deterministic (first-appearance order), bounded ([kMaxAnchors]), and
 /// exposed for unit tests.
 ///
-/// A PATH is a backticked span with a `/` and a known extension; a SYMBOL is a
-/// backticked identifier carrying an inner capital (`buildSpecifyBrief`,
+/// A PATH is a known-extension repository-relative token, found either inside
+/// backticks OR as a plain path token in the prose (a bead that writes
+/// lib/src/x.dart without backticks names the same surface). A SYMBOL is a
+/// BACKTICKED identifier carrying an inner capital (`buildSpecifyBrief`,
 /// `kSpecReviewCircuit`) or an initial one (`Heartbeat`) — which is what keeps
 /// ordinary backticked prose (`bd`, `main`, `haiku`) out of the set.
-({List<String> paths, List<String> symbols}) beadAnchors(Bead bead) {
+///
+/// [pathsTruncated]/[symbolsTruncated] record a hit on [kMaxAnchors]: the bead
+/// names MORE surfaces than this profile carries, and a lens must be told that
+/// rather than shown a silently short list.
+({
+  List<String> paths,
+  List<String> symbols,
+  bool pathsTruncated,
+  bool symbolsTruncated,
+})
+beadAnchors(Bead bead) {
   final text = [
     bead.title,
     bead.description,
@@ -1175,20 +3077,31 @@ PriorArtSource stationPriorArt(
     bead.acceptanceCriteria,
     bead.notes,
   ].join('\n');
-  final paths = <String>[];
-  final symbols = <String>[];
-  for (final match in RegExp(r'`([^`\n]+)`').allMatches(text)) {
-    final span = match.group(1)!.trim();
+  final paths = <String>{};
+  final symbols = <String>{};
+  for (final match in _anchorSpan.allMatches(text)) {
+    final backticked = match.group(1);
+    final span = (backticked ?? match.group(2)!).trim();
     if (_isPathAnchor(span)) {
-      if (!paths.contains(span) && paths.length < kMaxAnchors) paths.add(span);
-    } else if (_isSymbolAnchor(span)) {
-      if (!symbols.contains(span) && symbols.length < kMaxAnchors) {
-        symbols.add(span);
-      }
+      paths.add(span);
+    } else if (backticked != null && _isSymbolAnchor(span)) {
+      symbols.add(span);
     }
   }
-  return (paths: paths, symbols: symbols);
+  return (
+    paths: paths.take(kMaxAnchors).toList(),
+    symbols: symbols.take(kMaxAnchors).toList(),
+    pathsTruncated: paths.length > kMaxAnchors,
+    symbolsTruncated: symbols.length > kMaxAnchors,
+  );
 }
+
+/// A backticked span (group 1) OR a bare repository-relative path token
+/// (group 2) — alternated in ONE scan so both sources keep first-appearance
+/// order and a backticked path is never re-matched as a bare one.
+final RegExp _anchorSpan = RegExp(
+  r'`([^`\n]+)`|([\w./-]+\.(?:dart|md|yaml|yml|json))',
+);
 
 final RegExp _pathAnchor = RegExp(r'^[\w./-]+\.(dart|md|yaml|yml|json)$');
 final RegExp _symbolChars = RegExp(r'^[A-Za-z][A-Za-z0-9_]*$');
@@ -1384,17 +3297,23 @@ class AnchorsCapability extends ServiceCapability {
     RubricSource? rubrics,
     AnchorResolver? resolver,
     PriorArtSource? priorArt,
+    DecisionIndexSource? decisions,
+    HistorySource? history,
     DirectoryClearer? clearer,
   }) : _rubricIds = rubricIds,
        _rubrics = rubrics,
        _resolver = resolver,
        _priorArt = priorArt,
+       _decisions = decisions,
+       _history = history,
        _clearer = clearer;
 
   final List<String> _rubricIds;
   final RubricSource? _rubrics;
   final AnchorResolver? _resolver;
   final PriorArtSource? _priorArt;
+  final DecisionIndexSource? _decisions;
+  final HistorySource? _history;
   final DirectoryClearer? _clearer;
 
   @override
@@ -1435,29 +3354,51 @@ class AnchorsCapability extends ServiceCapability {
       }
     }
 
-    final (:paths, :symbols) = beadAnchors(bead);
-    final resolve = _resolver ?? resolveAnchorOnDisk;
-    final queries = priorArtQueries(bead, symbols);
-    final source = _priorArt;
-    final hits = source == null ? <PriorArt>[] : await source(queries);
+    // ONE deterministic pass per seam, per round — the whole point of this
+    // step. Every source is invoked EXACTLY once, in a fixed order, and the
+    // cancel token is checked between them.
+    final round = verdictRound(args);
+    final extracted = beadAnchors(bead);
+    final rig = bead.metadata['rig'];
+    final surfaces = rosterQualifiedPaths(
+      paths: extracted.paths,
+      substation: rig is String ? rig : '',
+    );
+    final resolved = live
+        ? (_resolver ?? resolveAnchorsOnDisk)(workspaceDir, extracted.paths)
+        : [
+            for (final path in extracted.paths)
+              unresolvedAnchor(path, source: workspaceDir),
+          ];
+    final queries = priorArtQueries(bead, extracted.symbols);
+    final priorArt = await gatherPriorArt(_priorArt, queries);
+    if (args.cancel.isCancelled) return const Failed('cancelled');
+    final decisions = await gatherDecisions(_decisions, workspaceDir, surfaces);
+    if (args.cancel.isCancelled) return const Failed('cancelled');
+    final history = await gatherHistory(_history, workspaceDir, [
+      for (final anchor in resolved)
+        if (anchor.resolved) anchor.anchor,
+    ]);
     if (args.cancel.isCancelled) return const Failed('cancelled');
 
     final rubricSource = _rubrics;
+    final rubricBodies = {
+      if (rubricSource != null)
+        for (final rubric in _rubricIds) rubric: rubricSource(rubric),
+    };
     final anchors = DiscoveryAnchors(
-      rubrics: {
-        if (rubricSource != null)
-          for (final rubric in _rubricIds) rubric: rubricSource(rubric),
-      },
-      anchors: [
-        for (final path in paths)
-          if (live)
-            resolve(workspaceDir, path)
-          else
-            ResolvedAnchor(anchor: path, resolved: false),
-      ],
-      symbols: symbols,
-      priorArt: hits,
-      priorArtWired: source != null,
+      round: round,
+      workBeadId: bead.id,
+      beadFields: boundedBeadFields(bead),
+      rubrics: rubricBodies,
+      rubricEvidence: rubricEvidenceOf(rubricBodies),
+      anchors: resolved,
+      symbols: extracted.symbols,
+      anchorsTruncated: extracted.pathsTruncated,
+      symbolsTruncated: extracted.symbolsTruncated,
+      priorArtQueries: priorArt,
+      decisionLookups: decisions,
+      history: history,
     );
 
     if (live) {
@@ -1473,11 +3414,15 @@ class AnchorsCapability extends ServiceCapability {
     }
 
     return Ok({
+      kVerdictRoundKey: '$round',
       'anchors': '${anchors.anchors.length}',
       'resolved': '${anchors.anchors.where((a) => a.resolved).length}',
-      'symbols': '${symbols.length}',
+      'symbols': '${extracted.symbols.length}',
       'rubrics': '${anchors.rubrics.length}',
-      'priorArt': source == null ? 'not-wired' : '${hits.length}',
+      'decisions': '${decisions.length}',
+      'history': '${history.commits.length}',
+      'evidence': '${anchors.evidenceIds.length}',
+      'priorArt': _priorArt == null ? 'not-wired' : '${anchors.priorArt.length}',
     });
   }
 }
@@ -1495,8 +3440,14 @@ const String kLensWorkingAgreement = '''
 - You DECIDE nothing. You do not grade, you do not rule, and you do not spec.
   You REPORT what you found and you CITE where you found it. A deterministic
   route reads your report and makes the call.
-- Stay CHEAP: a bounded look, not an exhaustive audit. Grep what the bead names;
-  do not read the tree end to end.''';
+- Stay CHEAP: you were handed a BOUNDED evidence bundle; synthesize it. Do NOT
+  read the tree, do NOT run a decision-index lookup, do NOT run a prior-art
+  search, and do NOT read git history — every one of those already ran
+  deterministically, and the result is in your prompt.
+- Use ONLY the supplied projection. If a record you needed is marked TRUNCATED,
+  UNAVAILABLE or FAILED, say so in the typed insufficient-evidence report and
+  stop. Reaching for a tool to fill that hole is the exact waste this circuit
+  removes.''';
 
 /// The stamp instruction every lens prompt writes after its report template —
 /// the discovery twin of [kVerdictStampInstruction]. BOTH stamps are required
@@ -1576,6 +3527,7 @@ class DiscoveryLensCapability extends ProcessCapability {
     );
     final environment = registry.resolve(config.harness);
     final workspaceDir = workspace.workspaceDir;
+    final round = verdictRound(args);
     final gather = Directory(workspaceDir).existsSync()
         ? readDiscoveryAnchors(workspaceDir)
         : null;
@@ -1588,12 +3540,16 @@ class DiscoveryLensCapability extends ProcessCapability {
       ),
       brief: AgentBrief(
         task: buildLensPrompt(
-          bead: bead,
           lens: lens,
           nodePath: args.nodePath,
-          round: verdictRound(args),
+          round: round,
           workspaceDir: workspaceDir,
-          gather: gather,
+          projection: projectDiscoveryEvidence(
+            gather ?? const DiscoveryAnchors(),
+            lens: lens,
+            round: round,
+            workBeadId: bead.id,
+          ),
         ),
         workingAgreement: kLensWorkingAgreement,
       ),
@@ -1635,12 +3591,22 @@ class DiscoveryLensCapability extends ProcessCapability {
       // lane FINISHED this round (classify LOUD) rather than has not been
       // re-run yet (classify WAIT).
       kVerdictRoundKey: '$round',
-      if (report != null) ...{
-        'lens': report.lens,
-        'context': '${report.context.length}',
-        'violations': '${report.violations.length}',
-        'cited': '${report.violations.where(gatesTheBead).length}',
-        'transport': 'file',
+      ...switch (report) {
+        null => const <String, String>{},
+        LensReport(:final lens, :final context, :final violations) => {
+          'lens': lens,
+          'outcome': 'report',
+          'context': '${context.length}',
+          'violations': '${violations.length}',
+          'cited': '${violations.where(gatesTheBead).length}',
+          'transport': 'file',
+        },
+        InsufficientEvidenceReport(:final lens, :final gaps) => {
+          'lens': lens,
+          'outcome': 'insufficient-evidence',
+          'gaps': '${gaps.length}',
+          'transport': 'file',
+        },
       },
       ...usage,
     };
@@ -1653,21 +3619,13 @@ class DiscoveryLensCapability extends ProcessCapability {
   /// instruction LAST (recency). What differs is the JOB: it gathers, it cites,
   /// and it decides nothing.
   String buildLensPrompt({
-    required Bead bead,
     required String lens,
     required String nodePath,
     required int round,
     required String workspaceDir,
-    DiscoveryAnchors? gather,
+    required DiscoveryEvidenceProjection projection,
   }) {
     final path = lensReportPath(workspaceDir, lens);
-    final rig = bead.metadata['rig'];
-    final lookupBlock = rosterDecisionLookupBlock(
-      rosterQualifiedSurfaces(
-        design: bead.design,
-        substation: rig is String ? rig : '',
-      ),
-    );
     final b = StringBuffer()
       ..writeln('# Discovery — lens: `$lens`')
       ..writeln()
@@ -1678,57 +3636,42 @@ class DiscoveryLensCapability extends ProcessCapability {
       )
       ..writeln()
       ..writeln(
-        '1. **GATHER** the context the architect will need through your lens, so '
-        'it does not have to re-derive it.',
+        '1. **SYNTHESIZE** the evidence below into the context the architect '
+        'will need through your lens.',
       )
       ..writeln(
         '2. **CITE any OFFENCE** — anything in this bead that CONTRADICTS a '
-        'standard we have already ratified.',
+        'standard we have already ratified, using ONLY that evidence.',
       )
       ..writeln()
       ..writeln('## Your lens')
       ..writeln(lensBrief(lens))
-      ..write(beadUnderIntake(bead));
-
-    if (gather != null) {
-      b
-        ..writeln()
-        ..writeln('## What the deterministic gather already resolved')
-        ..writeln(
-          'Do NOT re-derive these. Build on them, or correct them if they are '
-          'wrong.',
-        );
-      for (final anchor in gather.anchors) {
-        b.writeln(
-          '- `${anchor.anchor}` — '
-          '${anchor.resolved ? 'exists' : 'does NOT exist'}',
-        );
-      }
-      if (gather.symbols.isNotEmpty) {
-        b.writeln(
-          '- symbols the bead names: '
-          '${gather.symbols.map((s) => '`$s`').join(', ')}',
-        );
-      }
-      for (final hit in gather.priorArt) {
-        b.writeln('- prior art: ${hit.line}');
-      }
-    }
-
-    b
+      ..writeln()
+      ..writeln('## Canonical evidence projection')
+      ..writeln(
+        'A DETERMINISTIC gather resolved all of this ONCE, for round $round, '
+        'and recorded how complete each record is. It is the whole of your '
+        'evidence. Do NOT inspect the tree, do NOT run a decision-index or '
+        'prior-art search, and do NOT read git history — those lookups already '
+        'ran, and re-running them is the waste this circuit exists to remove.',
+      )
+      ..writeln()
+      ..write(projection.renderedEvidence)
+      ..writeln(
+        'Every record above carries its STATE. `COMPLETE` is a real answer, an '
+        'empty one included. `TRUNCATED`, `UNAVAILABLE` and `FAILED` are known '
+        'NON-answers: do NOT compensate for one with a tool, and do NOT treat '
+        'it as "nothing is there".',
+      )
       ..writeln()
       ..writeln('## What counts as an OFFENCE (the gate is CITE-THE-OFFENCE)')
-      ..writeln(kDecisionLookupRule)
-      ..writeln()
-      ..writeln('```sh')
-      ..writeln(lookupBlock)
-      ..writeln('```')
-      ..writeln()
       ..writeln(
-        'The citable standard is a RECORDED decision from ANY mounted '
-        'register — a sibling substation\'s entry binds exactly as a local one '
+        'The citable standard is a RECORDED decision entry from the evidence '
+        'above — a sibling substation\'s entry binds exactly as a local one '
         'does — or an applicable SKILL\'s instructions. Skills TEACH how; '
-        'decisions RATIFY the specific.',
+        'decisions RATIFY the specific. Cite each decision by its canonical '
+        '`<repo>#<slug>` identity, for example '
+        '`the_grid#admission-authority-boundary`.',
       )
       ..writeln(
         '- **A DECISION ENTRY BINDS.** A recorded entry is in force the moment '
@@ -1742,15 +3685,15 @@ class DiscoveryLensCapability extends ProcessCapability {
         '`pattern` citation ignores this field.)',
       )
       ..writeln(
-        '- You MUST cite the STANDARD and the CLAUSE, and the clause MUST EXIST: '
-        'quote it VERBATIM from the file you actually read, INCLUDING its '
-        '`status` line so the entry\'s force is grounded, not guessed. A '
-        'citation you '
-        'cannot quote is not a citation — the register is edited and amendments '
-        'are REMOVED, so an `A<n>` you remember is not an `A<n>` that exists. A '
-        'concern you cannot cite is NOT an offence: report it as a violation with '
-        'an EMPTY `standard` and it rides to the architect as a flag, never held '
-        'against the bead. Do not inflate a preference into a citation.',
+        '- You MUST cite the STANDARD and the CLAUSE, and the clause MUST be in '
+        'the evidence above: quote it VERBATIM from the entry body you were '
+        'handed, INCLUDING its `status` line so the entry\'s force is grounded, '
+        'not guessed. A citation you cannot quote from that evidence is not a '
+        'citation — do not cite an `A<n>` you remember, and do not go looking '
+        'for one. A concern you cannot cite is NOT an offence: report it as a '
+        'violation with an EMPTY `standard` and it rides to the architect as a '
+        'flag, never held against the bead. Do not inflate a preference into a '
+        'citation.',
       )
       ..writeln(
         '- **The departure clause**: if the bead ITSELF acknowledges the '
@@ -1783,20 +3726,23 @@ class DiscoveryLensCapability extends ProcessCapability {
       )
       ..writeln()
       ..writeln('## Your report')
-      ..writeln('Your report is JSON of this exact shape:')
       ..writeln(
-        '{"lens":"$lens","version":1,"nodePath":"$nodePath",'
+        'Your report is ONE of exactly two JSON shapes. The NORMAL report, when '
+        'the evidence above let you do your job:',
+      )
+      ..writeln(
+        '{"outcome":"report","lens":"$lens","version":2,"nodePath":"$nodePath",'
         '"$kVerdictRoundKey":$round,'
         '"context":[{"note":"<what the architect needs to know>",'
-        '"source":"<non-bead file or ADR source>",'
+        '"source":"<the evidence id or source you read it from>",'
         '"beadCitation":{"beadId":"<actual bead id>",'
         '"field":"title|description|design|acceptance_criteria|notes",'
         '"excerpt":"<verbatim field excerpt>"}}],'
         '"violations":[{"kind":"decision|skill|pattern",'
-        '"standard":"<docs/adr/ADR-0000-ai-decision-register.md A17(4) OR '
-        'the_grid#admission-authority-boundary>",'
+        '"standard":"<the_grid#admission-authority-boundary>",'
         '"quote":"<the clause, verbatim, including its Status line>",'
         '"contradiction":"<what this bead does that contradicts it>",'
+        '"contradicts":true,'
         '"acknowledged":false,"ratified":false,"removesOffence":false,'
         '"precedent":""}]}',
       )
@@ -1805,6 +3751,19 @@ class DiscoveryLensCapability extends ProcessCapability {
         'Both arrays may be EMPTY — a clean bead with no findings is a real, '
         'expected result. NEVER invent a violation to look useful: a false hold '
         'stalls the work, and this gate exists to be trusted.',
+      )
+      ..writeln()
+      ..writeln(
+        'The INSUFFICIENT-EVIDENCE report, when a record you NEEDED is marked '
+        'TRUNCATED, UNAVAILABLE or FAILED. Name the record by its canonical id '
+        'and repeat its recorded reason — do NOT reach for a tool to fill the '
+        'hole, and do NOT report clean over it:',
+      )
+      ..writeln(
+        '{"outcome":"insufficient-evidence","lens":"$lens","version":2,'
+        '"nodePath":"$nodePath","$kVerdictRoundKey":$round,'
+        '"gaps":[{"evidenceId":"<the canonical id above>",'
+        '"reason":"<the recorded reason above>"}]}',
       )
       ..writeln()
       ..writeln(kLensStampInstruction)
@@ -1823,43 +3782,43 @@ class DiscoveryLensCapability extends ProcessCapability {
 /// The per-lens angle — the ONE thing that differs between the three lanes.
 /// Public so the Packaged-AI-Asset mirror (`extension/prompts/discovery.md`)
 /// renders the SAME brief the in-pipeline lens reads.
-String lensBrief(String lens) {
-  final rosterIndex = rosterDecisionIndexCommand();
-  final surfaceIndex = rosterDecisionIndexCommand(
-    surface: '$kUnknownSubstationPrefix/$kRosterSurfacePlaceholder',
-  );
-  return switch (lens) {
-    kCodeLens =>
-      'CODE CONTEXT. Find the code this bead will touch: the files and symbols '
-          'it names (and the ones it SHOULD have named), the conventions that '
-          'govern them, the tests that fence them. Say what the architect must '
-          'read before it plans. Cite an offence when the bead contradicts a '
-          'convention with a NAMED precedent in the tree.',
-    kDecisionLens =>
-      'DECISION CONTEXT. Run `$rosterIndex` for the whole roster union, then '
-          '`$surfaceIndex` for each surface this bead names — roster-qualify '
-          'every repository-relative path with its substation repository name. '
-          'Pass NO register-directory argument: the omission is what makes the '
-          'grid adapter resolve the live mounted-substation roster and return '
-          'the UNION rather than only this repo\'s register. Read every '
-          'returned record from EVERY `originRegister`: a SIBLING '
-          'substation\'s entry binds exactly as a local one does. Report the '
-          'decisions the architect must honour and CITE any this bead '
-          'contradicts, by canonical `<repo>#<slug>` identity. A RECORDED '
-          'decision entry can HOLD the bead — it binds on write, so set '
-          '`"ratified": true`; anything that is NOT a recorded entry (a bead, '
-          'a plan, your own reading) sets `"ratified": false` and rides as a '
-          'flag. Be QUOTED: read the entry and its `status` before citing it. '
-          'A lookup that FAILS is not an empty union — report the failure.',
-    kPriorArtLens =>
-      'PRIOR ART. What has already been done, decided, or attempted here? Read '
-          'the prior-art hits above, the git history of the surfaces the bead '
-          'names, and the beads they came from. Report what the architect can '
-          'REUSE or must EXTEND rather than duplicate — and cite an offence '
-          'when this bead redoes something a decision already settled.',
-    _ => 'Explore the bead\'s surfaces and report what the architect needs.',
-  };
-}
+String lensBrief(String lens) => switch (lens) {
+  kCodeLens =>
+    'CODE CONTEXT. SYNTHESIZE the code-pattern evidence you were handed: the '
+        'files this bead names, resolved, with their bounded contents and the '
+        'pattern that surrounds them, plus the symbols it names. Say what the '
+        'architect must know before it plans — the conventions those files '
+        'hold, the tests that fence them, what the bead SHOULD have named. Cite '
+        'an offence when the bead contradicts a convention whose precedent is '
+        'IN that evidence. You were handed no decision, prior-art or history '
+        'evidence, and you must not go get any.',
+  kDecisionLens =>
+    'DECISION CONTEXT. COMPARE the bead fields you were handed with the '
+        'recorded decision entries you were handed — one lookup per '
+        'roster-qualified surface, already run, with every `originRegister` '
+        'kept: a SIBLING substation\'s entry binds exactly as a local one '
+        'does. Report the decisions the architect must honour and CITE any this '
+        'bead contradicts, by canonical `<repo>#<slug>` identity. A RECORDED '
+        'decision entry can HOLD the bead — it binds on write, so set '
+        '`"ratified": true`; anything that is NOT a recorded entry (a bead, a '
+        'plan, your own reading) sets `"ratified": false` and rides as a flag. '
+        'Be QUOTED: the entry body and its `status` are in your evidence — '
+        'quote them from there. A lookup marked FAILED is NOT an empty union: '
+        'report insufficient evidence rather than grading a crashed index '
+        'clean. You were handed no code snippet, prior-art or history '
+        'evidence, and you must not go get any.',
+  kPriorArtLens =>
+    'PRIOR ART. SYNTHESIZE the query hits and the surface history you were '
+        'handed: what has already been done, decided, or attempted here? Each '
+        'query carries its own coverage, so "searched, no hits" and "nobody '
+        'looked" are different answers — treat them differently. Report what '
+        'the architect can REUSE or must EXTEND rather than duplicate, and cite '
+        'an offence when this bead redoes something a decision already settled. '
+        'You were handed no code snippet and no decision entry, and you must '
+        'not go get any.',
+  _ => 'Synthesize the evidence you were handed and report what the architect '
+      'needs.',
+};
 
 /// The ONE freshness fence + decode every lens-report read path runs through —
 /// [readLensReport]'s canonical file, its envelope fallback, and
@@ -1869,7 +3828,7 @@ String lensBrief(String lens) {
 /// [stampedRound] — equals [round]. An ABSENT or unreadable stamp is a MISS
 /// exactly as a foreign one is (A4: a mismatch, an absent stamp included, is
 /// treated as missing).
-LensReport? _freshLensReport(
+DiscoveryLensOutcome? _freshLensReport(
   Object? json, {
   required String nodePath,
   required int round,
@@ -1877,7 +3836,7 @@ LensReport? _freshLensReport(
   if (json is! Map) return null;
   if (json['nodePath'] != nodePath) return null;
   if (stampedRound(json[kVerdictRoundKey]) != round) return null;
-  return LensReport.fromJson(json);
+  return DiscoveryLensOutcome.fromJson(json);
 }
 
 /// Reads ONE lens's report — the A13(3) transport stack, minus the fail-closed
@@ -1889,7 +3848,7 @@ LensReport? _freshLensReport(
 ///     by node path alone, so a not-yet-re-run lane's envelope is last
 ///     generation's — it must clear the round stamp to join);
 ///  3. else null ⇒ MISSING ⇒ the route re-gathers it once.
-LensReport? readLensReport(
+DiscoveryLensOutcome? readLensReport(
   String workspaceDir,
   String lens,
   String nodePath, {
@@ -1928,7 +3887,7 @@ LensReport? readLensReport(
 /// returning canned reports, so the whole matrix drives offline; absent ⇒ the
 /// real [readLensReport]).
 typedef LensReportReader =
-    LensReport? Function(
+    DiscoveryLensOutcome? Function(
       String workspaceDir,
       String lens,
       String lensNodePath, {
@@ -2035,14 +3994,45 @@ class DiscoveryRouteCapability extends RouteCapability {
     //    killed the committee round.
     // Offline (no real worktree) there is no wave and no artifact to wait for:
     // the injected reader answers once — the ledger's no-op posture.
-    final lanes = <String, LensReport?>{};
+    //
+    // THE CANONICAL EVIDENCE, read ONCE: the same artifact every lens was
+    // projected from. A live worktree whose gather is absent or STRICTLY
+    // refused is not "no gather" — it is EXPLICIT insufficiency, and every
+    // lane inherits it. Offline (no real worktree) there is no artifact to
+    // read and no projection to check — the ledger's no-op posture.
+    final anchors = live ? readDiscoveryAnchors(dir) : null;
+    final projections = <String, DiscoveryEvidenceProjection>{
+      if (live)
+        for (final lens in lenses)
+          lens: projectDiscoveryEvidence(
+            anchors ?? const DiscoveryAnchors(),
+            lens: lens,
+            round: round,
+            workBeadId: workBead.id,
+          ),
+    };
+
+    final lanes = <String, DiscoveryLensOutcome?>{};
     final deadline = DateTime.now().add(laneWaitBudget);
     while (true) {
       lanes
         ..clear()
         ..addEntries([
           for (final lens in lenses)
-            MapEntry(lens, read(dir, lens, '$parent/$lens', round: round)),
+            MapEntry(
+              lens,
+              // A deterministic gap OVERRIDES whatever the model wrote: a lane
+              // cannot hide a truncation, an unwired source or a crashed
+              // lookup behind a clean-looking report.
+              switch (projections[lens]) {
+                final projection? when !projection.isSufficient =>
+                  InsufficientEvidenceReport(
+                    lens: lens,
+                    gaps: projection.gaps,
+                  ),
+                _ => read(dir, lens, '$parent/$lens', round: round),
+              },
+            ),
         ]);
       if (!live) break;
       final waiting = [
@@ -2079,12 +4069,16 @@ class DiscoveryRouteCapability extends RouteCapability {
 
     switch (decideDiscovery(
       lanes: lanes,
-      anchors:
-          (live ? readDiscoveryAnchors(dir) : null) ?? const DiscoveryAnchors(),
+      anchors: anchors ?? const DiscoveryAnchors(),
       workBead: workBead,
       priorRound: priorRound,
     )) {
       case DiscoveryHold(:final reason):
+        return Escalate(reason);
+      case DiscoveryEvidenceHold(:final reason):
+        // A KNOWN NON-ANSWER, at the cap. Distinct from a merely ABSENT lane
+        // (which still ADVANCES below, named in `missingLenses`): here the
+        // gather itself RECORDED that required evidence never landed.
         return Escalate(reason);
       case DiscoveryRegather(lenses: final silent, :final reason):
         // The LEDGER's next round — distinct from the circuit [round] above,

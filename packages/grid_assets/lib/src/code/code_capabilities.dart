@@ -1156,6 +1156,11 @@ class GitSourceControl implements SourceControl {
 /// ref once while the code registry is composed, then threads that stable value
 /// into [AgentCapability], so per-bead agent spawn never shells out for it.
 ///
+/// [discoveryDecisions]/[discoveryHistory] override the deterministic gather's
+/// roster-mode decision-index and git-history seams (bead-level Fakes; absent ⇒
+/// [commandDecisionIndexSource]/[gitHistorySource] over this registry's own
+/// [shellRunner]/[gitRunner]).
+///
 /// [specifyBdRunnerFor] controls only the specify step's post-exit work-bead
 /// read-back. It defaults to [ProcessBdRunner] and lets offline suites inject
 /// Fakes instead of spawning `bd`.
@@ -1170,6 +1175,8 @@ DefaultCapabilityRegistry buildCodeRegistry({
   InferenceRunner? inference,
   AnchorResolver? anchorResolver,
   PriorArtSource? priorArt,
+  DecisionIndexSource? discoveryDecisions,
+  HistorySource? discoveryHistory,
   BdRunner Function(String workspaceRoot)? specifyBdRunnerFor,
   String? overlaySourceRef,
   Map<String, String> overlayArgs = const {},
@@ -1204,6 +1211,17 @@ DefaultCapabilityRegistry buildCodeRegistry({
         rubrics: rubricSource,
         resolver: anchorResolver,
         priorArt: priorArt,
+        // The gather runs the roster-mode decision index and the surfaces' git
+        // history ONCE per round, through the registry's OWN shell/git seams —
+        // no second runner abstraction, and the same recording fakes ride
+        // offline.
+        decisions:
+            discoveryDecisions ??
+            commandDecisionIndexSource(
+              shellRunner ?? const SystemShellRunner(),
+            ),
+        history:
+            discoveryHistory ?? gitHistorySource(gitRunner ?? SystemGitRunner()),
         clearer: critiqueDirClearer,
       ),
       // ONE capability, three lens lanes (`params['lens']`) — the id is the
