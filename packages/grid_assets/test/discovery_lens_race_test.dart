@@ -63,27 +63,28 @@ Future<RouteVerdict> _route(
   Duration lanePoll = const Duration(milliseconds: 10),
   Duration laneWaitBudget = const Duration(seconds: 10),
   int round = 1,
-}) => DiscoveryRouteCapability(
-  lanePoll: lanePoll,
-  laneWaitBudget: laneWaitBudget,
-).route(
-  FakeTreeContext(
-    values: {
-      Bead: workBead('tg-1'),
-      Workspace: testWorkspace('tg-1', workspaceDir: ws),
-      SiblingView: SiblingView(
-        results: {
-          for (final entry in recorded.entries)
-            '$_parent/${entry.key}': {kVerdictRoundKey: '${entry.value}'},
+}) =>
+    DiscoveryRouteCapability(
+      lanePoll: lanePoll,
+      laneWaitBudget: laneWaitBudget,
+    ).route(
+      FakeTreeContext(
+        values: {
+          Bead: workBead('tg-1'),
+          Workspace: testWorkspace('tg-1', workspaceDir: ws),
+          SiblingView: SiblingView(
+            results: {
+              for (final entry in recorded.entries)
+                '$_parent/${entry.key}': {kVerdictRoundKey: '${entry.value}'},
+            },
+          ),
         },
       ),
-    },
-  ),
-  stepArgs(
-    '$_parent/$kDiscoveryRouteStep',
-    params: {'lenses': kDiscoveryLenses.join(','), 'grid.round': '$round'},
-  ),
-);
+      stepArgs(
+        '$_parent/$kDiscoveryRouteStep',
+        params: {'lenses': kDiscoveryLenses.join(','), 'grid.round': '$round'},
+      ),
+    );
 
 void main() {
   late Directory ws;
@@ -222,60 +223,68 @@ void main() {
   });
 
   group('the round-aware anchors sweep (the wipe between lanes)', () {
-    test('a sweep landing AFTER a same-round lens already wrote KEEPS that '
-        'report and deletes only stale/foreign/unstamped/non-report files',
-        () async {
-      _plantReport(ws.path, kCodeLens, round: 1); // this round's, already in.
-      _plantReport(ws.path, kPriorArtLens, round: 0); // a prior generation's.
-      _plantReport(
-        ws.path,
-        kDecisionLens,
-        round: 1,
-        nodePath: 'OTHER-bead/spec_review/discovery/$kDecisionLens',
-      );
-      File(
-        p.join(discoveryDirPath(ws.path), 'dossier.json'),
-      ).writeAsStringSync('{ not json');
-      final outcome = await const AnchorsCapability().run(
-        FakeTreeContext(
-          values: {
-            Bead: workBead('tg-1'),
-            Workspace: testWorkspace('tg-1', workspaceDir: ws.path),
-          },
-        ),
-        stepArgs('$_parent/$kAnchorsStep', params: const {'grid.round': '1'}),
-      );
-      expect(outcome, isA<Ok>());
-      expect(
-        Directory(discoveryDirPath(ws.path))
-            .listSync()
-            .map((e) => p.basename(e.path))
-            .toList()
-          ..sort(),
-        ['anchors.json', '$kCodeLens.json'],
-        reason: 'this round\'s report survives; everything else is swept',
-      );
-    });
+    test(
+      'a sweep landing AFTER a same-round lens already wrote KEEPS that '
+      'report and deletes only stale/foreign/unstamped/non-report files',
+      () async {
+        _plantReport(ws.path, kCodeLens, round: 1); // this round's, already in.
+        _plantReport(ws.path, kPriorArtLens, round: 0); // a prior generation's.
+        _plantReport(
+          ws.path,
+          kDecisionLens,
+          round: 1,
+          nodePath: 'OTHER-bead/spec_review/discovery/$kDecisionLens',
+        );
+        File(
+          p.join(discoveryDirPath(ws.path), 'dossier.json'),
+        ).writeAsStringSync('{ not json');
+        final outcome = await const AnchorsCapability().run(
+          FakeTreeContext(
+            values: {
+              Bead: workBead('tg-1'),
+              Workspace: testWorkspace('tg-1', workspaceDir: ws.path),
+            },
+          ),
+          stepArgs('$_parent/$kAnchorsStep', params: const {'grid.round': '1'}),
+        );
+        expect(outcome, isA<Ok>());
+        expect(
+          Directory(
+            discoveryDirPath(ws.path),
+          ).listSync().map((e) => p.basename(e.path)).toList()..sort(),
+          ['anchors.json', '$kCodeLens.json'],
+          reason: 'this round\'s report survives; everything else is swept',
+        );
+      },
+    );
   });
 
   group('the lens result payload carries its round', () {
-    test('a lens stamps the round it was recorded against, report or not',
-        () async {
-      final args = stepArgs(
-        '$_parent/$kCodeLens',
-        params: const {'lens': kCodeLens, 'grid.round': '2'},
-      );
-      final context = FakeTreeContext(
-        values: {Workspace: testWorkspace('tg-1', workspaceDir: ws.path)},
-      );
-      final empty = await const DiscoveryLensCapability().result(context, args);
-      expect(empty![kVerdictRoundKey], '2');
-      expect(empty.containsKey('lens'), isFalse);
-      _plantReport(ws.path, kCodeLens, round: 2);
-      final full = await const DiscoveryLensCapability().result(context, args);
-      expect(full![kVerdictRoundKey], '2');
-      expect(full['lens'], kCodeLens);
-      expect(full['transport'], 'file');
-    });
+    test(
+      'a lens stamps the round it was recorded against, report or not',
+      () async {
+        final args = stepArgs(
+          '$_parent/$kCodeLens',
+          params: const {'lens': kCodeLens, 'grid.round': '2'},
+        );
+        final context = FakeTreeContext(
+          values: {Workspace: testWorkspace('tg-1', workspaceDir: ws.path)},
+        );
+        final empty = await const DiscoveryLensCapability().result(
+          context,
+          args,
+        );
+        expect(empty![kVerdictRoundKey], '2');
+        expect(empty.containsKey('lens'), isFalse);
+        _plantReport(ws.path, kCodeLens, round: 2);
+        final full = await const DiscoveryLensCapability().result(
+          context,
+          args,
+        );
+        expect(full![kVerdictRoundKey], '2');
+        expect(full['lens'], kCodeLens);
+        expect(full['transport'], 'file');
+      },
+    );
   });
 }

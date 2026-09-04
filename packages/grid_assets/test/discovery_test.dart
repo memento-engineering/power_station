@@ -78,25 +78,26 @@ Future<RouteVerdict> _runRoute(Map<String, LensReport?> canned) =>
 Future<RouteVerdict> _runRouteAt(
   Map<String, LensReport?> canned, {
   required String workspaceDir,
-}) => DiscoveryRouteCapability(
-  reader: _reader(canned),
-  // A canned-null lane has recorded no result either, so the live route
-  // classifies it LATE and waits: millisecond tuning keeps the suite offline-fast.
-  lanePoll: const Duration(milliseconds: 5),
-  laneWaitBudget: const Duration(milliseconds: 50),
-).route(
-  FakeTreeContext(
-    values: {
-      Bead: workBead('tg-1'),
-      Workspace: testWorkspace('tg-1', workspaceDir: workspaceDir),
-      SiblingView: const SiblingView(),
-    },
-  ),
-  stepArgs(
-    'tg-1/spec_review/discovery/$kDiscoveryRouteStep',
-    params: {'lenses': kDiscoveryLenses.join(','), 'grid.round': '0'},
-  ),
-);
+}) =>
+    DiscoveryRouteCapability(
+      reader: _reader(canned),
+      // A canned-null lane has recorded no result either, so the live route
+      // classifies it LATE and waits: millisecond tuning keeps the suite offline-fast.
+      lanePoll: const Duration(milliseconds: 5),
+      laneWaitBudget: const Duration(milliseconds: 50),
+    ).route(
+      FakeTreeContext(
+        values: {
+          Bead: workBead('tg-1'),
+          Workspace: testWorkspace('tg-1', workspaceDir: workspaceDir),
+          SiblingView: const SiblingView(),
+        },
+      ),
+      stepArgs(
+        'tg-1/spec_review/discovery/$kDiscoveryRouteStep',
+        params: {'lenses': kDiscoveryLenses.join(','), 'grid.round': '0'},
+      ),
+    );
 
 void main() {
   group('the CITE-THE-OFFENCE gate (a vibe can never hold a bead)', () {
