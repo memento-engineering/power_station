@@ -994,6 +994,80 @@ void main() {
       });
     });
 
+    test(
+      'release scrub JSON includes declared floors and exits on failure',
+      () async {
+        final fixture = _writeUnitFloorWorkspace('^0.2.0-rc.3');
+        addTearDown(() => fixture.root.delete(recursive: true));
+        final fake = _FakeProcess.queue([
+          ProcessResult(1, 0, 'pub get ok', ''),
+          ProcessResult(2, 1, '', "There's no constant named 'noResult'."),
+        ]);
+        final out = StringBuffer();
+        final runner = CommandRunner<int>('t', 'test')
+          ..addCommand(
+            ReleaseCommand(
+              service: ReleaseService(runProcess: fake.call),
+              out: out,
+            ),
+          );
+        final code = await runner.run([
+          'release',
+          'scrub',
+          '--dir',
+          fixture.candidate.path,
+          '--json',
+        ]);
+        final json = jsonDecode(out.toString()) as Map<String, dynamic>;
+        final floors = json['declaredFloors'] as Map<String, dynamic>;
+
+        expect(code, 1);
+        expect(json['clean'], isFalse);
+        expect(json['hits'], isEmpty);
+        expect(floors['passed'], isFalse);
+        expect(floors['message'], contains('grid_trajectory@0.2.0-rc.3'));
+        expect(floors['pins'], [
+          {
+            'package': 'grid_trajectory',
+            'declaredConstraint': '^0.2.0-rc.3',
+            'floor': '0.2.0-rc.3',
+          },
+        ]);
+      },
+    );
+
+    test('release scrub exits 0 when both legs pass', () async {
+      final fixture = _writeUnitFloorWorkspace('^0.2.0-rc.4');
+      addTearDown(() => fixture.root.delete(recursive: true));
+      final fake = _FakeProcess.queue([
+        ProcessResult(1, 0, 'pub get ok', ''),
+        ProcessResult(2, 0, 'No issues found!', ''),
+      ]);
+      final out = StringBuffer();
+      final runner = CommandRunner<int>('t', 'test')
+        ..addCommand(
+          ReleaseCommand(
+            service: ReleaseService(runProcess: fake.call),
+            out: out,
+          ),
+        );
+      final code = await runner.run([
+        'release',
+        'scrub',
+        '--dir',
+        fixture.candidate.path,
+        '--json',
+      ]);
+      final json = jsonDecode(out.toString()) as Map<String, dynamic>;
+
+      expect(code, 0);
+      expect(json['clean'], isTrue);
+      expect(
+        (json['declaredFloors'] as Map<String, dynamic>)['passed'],
+        isTrue,
+      );
+    });
+
     test('scrub --dir on a missing dir exits 64 (usage)', () async {
       final runner = CommandRunner<int>('t', 'test')
         ..addCommand(ReleaseCommand(out: StringBuffer(), err: StringBuffer()));

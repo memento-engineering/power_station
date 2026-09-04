@@ -353,7 +353,8 @@ class ReleaseScrubCommand extends Command<int> {
   final String name = 'scrub';
   @override
   final String description =
-      'Scan README/CHANGELOG/lib/example for internal refs (the scrub gate).';
+      'Scan README/CHANGELOG/lib/example for internal refs and analyze the '
+      'candidate at its declared sibling floors (the scrub gate).';
 
   @override
   Future<int> run() async {
@@ -363,17 +364,35 @@ class ReleaseScrubCommand extends Command<int> {
       _err.writeln('release scrub: no such dir: $dir');
       return 64;
     }
-    final result = _service.scrubDir(dir);
+    final ScrubResult result;
+    try {
+      result = await _service.scrubPackage(dir);
+    } on FileSystemException catch (error) {
+      _err.writeln('release scrub: ${error.message}: ${error.path}');
+      return 64;
+    } on FormatException catch (error) {
+      _err.writeln('release scrub: ${error.message}');
+      return 64;
+    } on StateError catch (error) {
+      _err.writeln('release scrub: ${error.message}');
+      return 1;
+    }
     if (args.flag('json')) {
       _out.writeln(jsonEncode(result.toJson()));
-    } else {
+    } else if (result.clean) {
       _out.writeln(
-        result.clean
-            ? 'scrub clean (${result.filesScanned} files)'
-            : 'scrub found ${result.hits.length} internal ref(s)',
+        'scrub clean (${result.filesScanned} files; declared floors pass)',
       );
+    } else {
+      if (result.hits.isNotEmpty) {
+        _out.writeln('scrub found ${result.hits.length} internal ref(s)');
+      }
+      final floors = result.declaredFloors;
+      if (floors != null && !floors.passed) {
+        _out.writeln(floors.message);
+      }
     }
-    return 0;
+    return result.clean ? 0 : 1;
   }
 }
 

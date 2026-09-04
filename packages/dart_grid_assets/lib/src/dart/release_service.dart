@@ -425,11 +425,13 @@ class ScrubHit {
 
 /// The scrub gate's structured verdict over a package dir.
 class ScrubResult {
-  /// Wraps the [hits] found scanning [root]'s [filesScanned] files.
+  /// Wraps the [hits] found scanning [root]'s [filesScanned] files, plus the
+  /// [declaredFloors] verdict when the complete gate ran.
   const ScrubResult({
     required this.root,
     required this.hits,
     required this.filesScanned,
+    this.declaredFloors,
   });
 
   /// The scanned package dir.
@@ -441,8 +443,15 @@ class ScrubResult {
   /// How many files were actually read (the coverage denominator).
   final int filesScanned;
 
-  /// The gate passes iff nothing leaked (genesis `publishing.md`: expect empty).
-  bool get clean => hits.isEmpty;
+  /// Present when the complete release scrub gate ran (i.e. through
+  /// [ReleaseService.scrubPackage]); null for a content-only [
+  /// ReleaseService.scrubDir] scan.
+  final DeclaredFloorsValidationResult? declaredFloors;
+
+  /// The gate passes iff nothing leaked (genesis `publishing.md`: expect empty)
+  /// AND — when it ran — the candidate compiled at its declared floors.
+  bool get clean =>
+      hits.isEmpty && (declaredFloors == null || declaredFloors!.passed);
 
   /// JSON form.
   Map<String, dynamic> toJson() => {
@@ -450,6 +459,7 @@ class ScrubResult {
     'clean': clean,
     'filesScanned': filesScanned,
     'hits': [for (final h in hits) h.toJson()],
+    if (declaredFloors != null) 'declaredFloors': declaredFloors!.toJson(),
   };
 }
 
@@ -908,6 +918,20 @@ class ReleaseService {
       (a, b) => a.file != b.file ? a.file.compareTo(b.file) : a.line - b.line,
     );
     return ScrubResult(root: packageDir, hits: hits, filesScanned: scanned);
+  }
+
+  /// Runs the COMPLETE online release scrub gate for [packageDir]: the
+  /// content scan of [scrubDir] plus the [validateDeclaredFloors] leg. Both
+  /// verdicts ride ONE [ScrubResult] — the release skill parses one object.
+  Future<ScrubResult> scrubPackage(String packageDir) async {
+    final content = scrubDir(packageDir);
+    final floors = await validateDeclaredFloors(packageDir: packageDir);
+    return ScrubResult(
+      root: content.root,
+      hits: content.hits,
+      filesScanned: content.filesScanned,
+      declaredFloors: floors,
+    );
   }
 
   /// Resolves the dependency-order publish sequence for [deps] — a map of
