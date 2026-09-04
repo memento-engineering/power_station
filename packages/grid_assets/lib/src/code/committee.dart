@@ -2108,7 +2108,13 @@ String _beadBlock(Bead bead) {
 /// unreadable. A JSON number and its string form both read (a critic that wrote
 /// `"round":"2"` made a formatting slip, not a stale verdict); anything else is
 /// a MISS, which fail-closes exactly like a foreign `nodePath` does.
-int? _stampedRound(Object? raw) => switch (raw) {
+///
+/// PUBLIC because it is the ONE round-stamp parser this pack owns: the
+/// committee's verdict fence ([restampVerdictRound] and the `_verdictFromFile`
+/// reader) and the discovery circuit's lens-report fence (`discovery.dart`'s
+/// `_freshLensReport`) both read a stamp through it, so the two circuits can
+/// never drift on what a round stamp means on the wire.
+int? stampedRound(Object? raw) => switch (raw) {
   final num round when round.isFinite && round == round.truncateToDouble() =>
     round.toInt(),
   final String round => int.tryParse(round.trim()),
@@ -2193,7 +2199,7 @@ RoundRestamp restampVerdictRound({
     if (decoded is! Map<String, dynamic>) {
       return const RoundRestampSkipped('verdict root is not a JSON object');
     }
-    final modelRound = _stampedRound(decoded[kVerdictRoundKey]);
+    final modelRound = stampedRound(decoded[kVerdictRoundKey]);
     final fileRound = modelRound == null ? '' : '$modelRound';
     if (!marker.existsSync()) {
       return RoundRestampSkipped('no incarnation marker', fileRound: fileRound);
@@ -2372,8 +2378,8 @@ _VerdictFileRead _verdictFromFile(
         'nodePath must be a non-empty string',
       );
     }
-    final stampedRound = _stampedRound(json[kVerdictRoundKey]);
-    if (stampedRound == null) {
+    final fileRound = stampedRound(json[kVerdictRoundKey]);
+    if (fileRound == null) {
       return _VerdictFileInvalid(
         verdict.path,
         'round must be an integer or integer-readable string',
@@ -2382,7 +2388,7 @@ _VerdictFileRead _verdictFromFile(
     if (stampedNodePath != expectedNodePath) {
       return const _VerdictFileRejected(); // a FOREIGN node's.
     }
-    if (stampedRound != expectedRound) {
+    if (fileRound != expectedRound) {
       return const _VerdictFileRejected(); // a STALE round's.
     }
     return _VerdictFileAccepted({

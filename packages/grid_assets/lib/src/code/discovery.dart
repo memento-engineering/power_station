@@ -1295,6 +1295,60 @@ void clearDiscoveryRegatherLedger(String workspaceDir) {
   }
 }
 
+/// The round-aware discovery sweep [AnchorsCapability] runs at the head of
+/// every round — the twin of [sweepStaleCritique]. It ensures
+/// [discoveryDirPath] exists and deletes every entry in it EXCEPT a lens report
+/// of THIS round: a `<lens>.json` whose stamps pass the one shared fence
+/// ([_freshLensReport]) for the sibling node path `<circuitPath>/<lens>` at
+/// [round]. Everything else — a PRIOR round's report, a FOREIGN node's, an
+/// unstamped or unparseable file, and the previous round's `anchors.json` /
+/// `dossier.json` (neither carries a lens stamp, and the gather rewrites the
+/// first immediately) — is deleted, exactly what the blanket wipe deleted.
+///
+/// KEEPING this round's reports is the whole point. Under the
+/// `validates: `[kAnchorsStep] derived wave the engine re-keys the gather
+/// closure NODE BY NODE, so a re-keyed LENS can legitimately write THIS
+/// round's report BEFORE this step's own successor runs; a blanket wipe then
+/// destroys finished work the route's join can only wait for forever (the lane
+/// is terminal — nothing will re-write it). "The wipe only runs at round start"
+/// becomes a property of WHAT it deletes, not of WHEN it runs. Best-effort per
+/// entry: a survivor is caught by the read fence.
+void sweepStaleDiscovery(
+  String workspaceDir, {
+  required String circuitPath,
+  required int round,
+}) {
+  final dir = Directory(discoveryDirPath(workspaceDir));
+  if (!dir.existsSync()) {
+    dir.createSync(recursive: true);
+    return;
+  }
+  for (final entry in dir.listSync(followLinks: false)) {
+    var keep = false;
+    if (entry is File && entry.path.endsWith('.json')) {
+      final lens = p.basenameWithoutExtension(entry.path);
+      try {
+        keep =
+            _freshLensReport(
+              jsonDecode(entry.readAsStringSync()),
+              nodePath: '$circuitPath/$lens',
+              round: round,
+            ) !=
+            null;
+      } catch (_) {
+        keep = false; // unparseable is stale by construction.
+      }
+    }
+    if (!keep) {
+      try {
+        entry.deleteSync(recursive: true);
+      } catch (_) {
+        // Best-effort per entry — a survivor is caught by the read fence.
+      }
+    }
+  }
+}
+
 /// TIER 1 of the discovery circuit — the DETERMINISTIC gather (ZERO agents).
 ///
 /// It pulls what a machine can be RIGHT about, so no agent spends a token
@@ -1304,12 +1358,14 @@ void clearDiscoveryRegatherLedger(String workspaceDir) {
 /// them, and prior art through the read-only [PriorArtSource].
 ///
 /// It ALSO owns the discovery round's FRESHNESS (the A17(8) posture, one level
-/// down): `ClearCritiqueCapability` wipes `.grid/critique/` only DOWNSTREAM of
+/// down): `ClearCritiqueCapability` sweeps `.grid/critique/` only DOWNSTREAM of
 /// `specify`, so on a `grid rework` round — same worktree, no re-key, so every
 /// node path is byte-identical — the lenses would otherwise read the PREVIOUS
-/// round's reports. This step runs exactly once per round, immediately before the
-/// lenses, so its wipe IS their guarantee. Best-effort: a wipe that throws never
-/// gates the round.
+/// round's reports. This step runs at the head of every round, immediately
+/// before the lenses, and its ROUND-AWARE SWEEP ([sweepStaleDiscovery]) is
+/// their guarantee: it deletes what the read fence would refuse and keeps what
+/// THIS round already wrote, so a sweep that lands between lanes is harmless by
+/// construction. Best-effort: a sweep that throws never gates the round.
 ///
 /// Offline/dry-run posture: a workspace directory that does not exist on disk
 /// (the synthetic path an offline suite mounts) computes the gather and skips the
@@ -1321,7 +1377,8 @@ class AnchorsCapability extends ServiceCapability {
   /// [rubricIds] (WHICH rubrics to pull — `buildCodeRegistry` wires the spec
   /// committee's own), [rubrics] (the Packaged-AI-Asset loader), [resolver] (the
   /// anchor probe; null ⇒ [resolveAnchorOnDisk]), [priorArt] (null ⇒ no search
-  /// runs, reported LOUDLY) and [clearer] (null ⇒ the real [clearDirectory]).
+  /// runs, reported LOUDLY) and [clearer] (the offline no-op seam; null ⇒ the
+  /// real round-aware [sweepStaleDiscovery]).
   const AnchorsCapability({
     List<String> rubricIds = const [],
     RubricSource? rubrics,
@@ -1356,11 +1413,23 @@ class AnchorsCapability extends ServiceCapability {
     final live =
         workspaceDir.isNotEmpty && Directory(workspaceDir).existsSync();
 
-    // Round-freshness: wipe the PREVIOUS round's reports before any lens can read
-    // one (best-effort — the A17(8) posture).
+    // Round-freshness: a ROUND-AWARE SWEEP, never a blanket wipe. It deletes
+    // exactly what the read fence would refuse and KEEPS a report stamped for
+    // this circuit's lens node paths at THIS round, so a sweep landing mid-wave
+    // cannot destroy a re-keyed lens's finished work. Best-effort — the A17(8)
+    // posture; an injected clearer stays the offline no-op seam.
     if (live) {
       try {
-        (_clearer ?? clearDirectory)(discoveryDirPath(workspaceDir));
+        final clearer = _clearer;
+        if (clearer != null) {
+          clearer(discoveryDirPath(workspaceDir));
+        } else {
+          sweepStaleDiscovery(
+            workspaceDir,
+            circuitPath: parentPath(args.nodePath),
+            round: verdictRound(args),
+          );
+        }
       } catch (_) {
         // Best-effort hygiene (the ClearCritiqueCapability posture).
       }
@@ -1428,6 +1497,25 @@ const String kLensWorkingAgreement = '''
   route reads your report and makes the call.
 - Stay CHEAP: a bounded look, not an exhaustive audit. Grep what the bead names;
   do not read the tree end to end.''';
+
+/// The stamp instruction every lens prompt writes after its report template —
+/// the discovery twin of [kVerdictStampInstruction]. BOTH stamps are required
+/// and copied verbatim: `nodePath` proves the report is THIS node's (A4's
+/// foreign-node fence), `round` proves it is THIS round's (A15(5) alt-A's
+/// round fence — a re-gather wave re-runs the lens in the SAME worktree under
+/// the SAME node path, so an earlier generation's report file is otherwise
+/// indistinguishable from this one's). A report carrying the wrong stamps, or
+/// missing either, is read as MISSING — never as a verdict: the route
+/// re-gathers the lane once and, at the cap, ADVANCES with the miss recorded
+/// LOUDLY (A21(3)).
+const String kLensStampInstruction =
+    'The `nodePath` and `round` values above are REQUIRED freshness stamps — '
+    'copy them byte-for-byte into your report. `nodePath` proves the report is '
+    'YOURS and not another node\'s stray file; `round` proves it is THIS '
+    'round\'s — a re-gather wave re-runs you in the SAME worktree under the '
+    'SAME node path, so an earlier round\'s report file is otherwise '
+    'indistinguishable from yours. A report carrying the wrong stamps, or '
+    'missing either, is read as MISSING and your lane is re-gathered.';
 
 /// ONE read-only explorer — the discovery circuit's agent lane, on the CHEAP tier
 /// ([AgentTier.cheap] ⇒ [kCheapModelDefault], `haiku`).
@@ -1503,6 +1591,7 @@ class DiscoveryLensCapability extends ProcessCapability {
           bead: bead,
           lens: lens,
           nodePath: args.nodePath,
+          round: verdictRound(args),
           workspaceDir: workspaceDir,
           gather: gather,
         ),
@@ -1523,8 +1612,8 @@ class DiscoveryLensCapability extends ProcessCapability {
 
   /// PROVENANCE ONLY (the route reads the REPORT itself, through its injected
   /// reader): how many notes and violations this lens produced, plus the FT-2
-  /// usage merge. Fail-safe — an absent/malformed report yields no fields, NEVER
-  /// a throw, and never a grade.
+  /// usage merge. Fail-safe — an absent/malformed report yields only the round
+  /// stamp, NEVER a throw, and never a grade.
   @override
   Future<Map<String, String>?> result(
     TreeContext context,
@@ -1533,9 +1622,19 @@ class DiscoveryLensCapability extends ProcessCapability {
     final workspace = context.getInheritedSeedOfExactType<Workspace>();
     if (workspace == null) return null;
     final workspaceDir = workspace.workspaceDir;
-    final report = readLensReport(workspaceDir, _lensOf(args), args.nodePath);
+    final round = verdictRound(args);
+    final report = readLensReport(
+      workspaceDir,
+      _lensOf(args),
+      args.nodePath,
+      round: round,
+    );
     final usage = readUsageFields(workspaceDir, args.nodePath);
-    final fields = {
+    return {
+      // ALWAYS stamped, report or not: this is the route's evidence that the
+      // lane FINISHED this round (classify LOUD) rather than has not been
+      // re-run yet (classify WAIT).
+      kVerdictRoundKey: '$round',
       if (report != null) ...{
         'lens': report.lens,
         'context': '${report.context.length}',
@@ -1545,7 +1644,6 @@ class DiscoveryLensCapability extends ProcessCapability {
       },
       ...usage,
     };
-    return fields.isEmpty ? null : fields;
   }
 
   /// The lens's prompt (exposed for unit tests). It carries the SAME hardening as
@@ -1558,6 +1656,7 @@ class DiscoveryLensCapability extends ProcessCapability {
     required Bead bead,
     required String lens,
     required String nodePath,
+    required int round,
     required String workspaceDir,
     DiscoveryAnchors? gather,
   }) {
@@ -1687,6 +1786,7 @@ class DiscoveryLensCapability extends ProcessCapability {
       ..writeln('Your report is JSON of this exact shape:')
       ..writeln(
         '{"lens":"$lens","version":1,"nodePath":"$nodePath",'
+        '"$kVerdictRoundKey":$round,'
         '"context":[{"note":"<what the architect needs to know>",'
         '"source":"<non-bead file or ADR source>",'
         '"beadCitation":{"beadId":"<actual bead id>",'
@@ -1707,10 +1807,7 @@ class DiscoveryLensCapability extends ProcessCapability {
         'stalls the work, and this gate exists to be trusted.',
       )
       ..writeln()
-      ..writeln(
-        'The `nodePath` value above is FIXED — copy it byte-for-byte into your '
-        'report; it is how the route confirms the report belongs to THIS node.',
-      )
+      ..writeln(kLensStampInstruction)
       ..writeln()
       ..writeln(
         'You MUST write that JSON to the exact ABSOLUTE path `$path` before you '
@@ -1764,22 +1861,49 @@ String lensBrief(String lens) {
   };
 }
 
+/// The ONE freshness fence + decode every lens-report read path runs through —
+/// [readLensReport]'s canonical file, its envelope fallback, and
+/// [sweepStaleDiscovery]'s keep test (gate-integrity #3: one canonical logic
+/// rules all read paths). Returns null unless [json] is a map whose `nodePath`
+/// stamp equals [nodePath] AND whose `round` stamp — parsed by the shared
+/// [stampedRound] — equals [round]. An ABSENT or unreadable stamp is a MISS
+/// exactly as a foreign one is (A4: a mismatch, an absent stamp included, is
+/// treated as missing).
+LensReport? _freshLensReport(
+  Object? json, {
+  required String nodePath,
+  required int round,
+}) {
+  if (json is! Map) return null;
+  if (json['nodePath'] != nodePath) return null;
+  if (stampedRound(json[kVerdictRoundKey]) != round) return null;
+  return LensReport.fromJson(json);
+}
+
 /// Reads ONE lens's report — the A13(3) transport stack, minus the fail-closed
 /// default (a gather lane's silence is MISSING, never a verdict):
-///  1. the canonical stamped FILE (a report whose `nodePath` is not ours is a
-///     foreign/stale artifact and is refused);
-///  2. the harness RESULT ENVELOPE (a lens that reported cleanly but wrote its
-///     JSON to stdout must not be scored as a broken lane);
+///  1. the canonical DUAL-STAMPED file (a report whose `nodePath` is not ours
+///     is foreign; whose `round` is not [round] is a PRIOR generation's — both
+///     refused, through the one [_freshLensReport] fence);
+///  2. the harness RESULT ENVELOPE, under the SAME fence (the envelope is keyed
+///     by node path alone, so a not-yet-re-run lane's envelope is last
+///     generation's — it must clear the round stamp to join);
 ///  3. else null ⇒ MISSING ⇒ the route re-gathers it once.
-LensReport? readLensReport(String workspaceDir, String lens, String nodePath) {
+LensReport? readLensReport(
+  String workspaceDir,
+  String lens,
+  String nodePath, {
+  required int round,
+}) {
   final file = File(lensReportPath(workspaceDir, lens));
   if (file.existsSync()) {
     try {
-      final json = jsonDecode(file.readAsStringSync());
-      if (json is Map && json['nodePath'] == nodePath) {
-        final report = LensReport.fromJson(json);
-        if (report != null) return report;
-      }
+      final report = _freshLensReport(
+        jsonDecode(file.readAsStringSync()),
+        nodePath: nodePath,
+        round: round,
+      );
+      if (report != null) return report;
     } catch (_) {
       // Fall through to the envelope — an unparseable file is a transport slip.
     }
@@ -1790,7 +1914,11 @@ LensReport? readLensReport(String workspaceDir, String lens, String nodePath) {
   final end = text.lastIndexOf('}');
   if (start < 0 || end <= start) return null;
   try {
-    return LensReport.fromJson(jsonDecode(text.substring(start, end + 1)));
+    return _freshLensReport(
+      jsonDecode(text.substring(start, end + 1)),
+      nodePath: nodePath,
+      round: round,
+    );
   } catch (_) {
     return null;
   }
@@ -1800,7 +1928,12 @@ LensReport? readLensReport(String workspaceDir, String lens, String nodePath) {
 /// returning canned reports, so the whole matrix drives offline; absent ⇒ the
 /// real [readLensReport]).
 typedef LensReportReader =
-    LensReport? Function(String workspaceDir, String lens, String lensNodePath);
+    LensReport? Function(
+      String workspaceDir,
+      String lens,
+      String lensNodePath, {
+      required int round,
+    });
 
 /// The DISCOVERY decision point (ZERO agents) — the circuit's terminal.
 ///
@@ -1834,11 +1967,31 @@ typedef LensReportReader =
 /// ledger and dossier WRITES (the `SpecRouteCapability` posture). The verdict is
 /// unchanged; the asset's own round counter cannot advance there (it IS the
 /// ledger), so the bound falls back to the engine's derived belt.
+///
+/// The JOIN itself waits: a lens that has not recorded a result for THIS round
+/// is LATE, not missing, and the matrix is never run over it. Only a lane that
+/// finished this round artifact-less, or one still silent at [laneWaitBudget],
+/// reaches the matrix — where it is re-gathered once and then named LOUDLY in
+/// the dossier. Absence still never HOLDS the bead (A21(3)).
 class DiscoveryRouteCapability extends RouteCapability {
-  /// Creates the route over its report reader (null ⇒ the real [readLensReport]).
-  const DiscoveryRouteCapability({LensReportReader? reader}) : _reader = reader;
+  /// Creates the route over its report reader (null ⇒ the real
+  /// [readLensReport]) and its mid-wave WAIT tuning: the [lanePoll] interval
+  /// between join re-reads, and the [laneWaitBudget] after which a still
+  /// artifact-less lane is treated as MISSING. The defaults cover one
+  /// cheap-tier lens re-ride with margin; tests inject millisecond values.
+  const DiscoveryRouteCapability({
+    LensReportReader? reader,
+    this.lanePoll = const Duration(seconds: 15),
+    this.laneWaitBudget = const Duration(minutes: 20),
+  }) : _reader = reader;
 
   final LensReportReader? _reader;
+
+  /// How often the WAIT re-reads the join (see [route]).
+  final Duration lanePoll;
+
+  /// How long the WAIT may last before an artifact-less lane is MISSING.
+  final Duration laneWaitBudget;
 
   @override
   Future<RouteVerdict> route(TreeContext context, StepArgs args) async {
@@ -1862,9 +2015,55 @@ class DiscoveryRouteCapability extends RouteCapability {
     final live = dir.isNotEmpty && Directory(dir).existsSync();
     final read = _reader ?? readLensReport;
 
-    final lanes = <String, LensReport?>{
-      for (final lens in lenses) lens: read(dir, lens, '$parent/$lens'),
-    };
+    final round = verdictRound(args);
+    var siblings =
+        context.getInheritedSeedOfExactType<SiblingView>() ??
+        const SiblingView();
+
+    // THE JOIN — WAIT or LOUD, never a silent drop and never a partial
+    // decision. A lane joins ONLY through a report carrying THIS node path and
+    // THIS round. A lane without one is CLASSIFIED:
+    //  - it RECORDED a result for this round ⇒ it finished artifact-less: a
+    //    broken LANE. Decide now — the matrix re-gathers it once and, at the
+    //    cap, ADVANCES with the miss recorded LOUDLY (A21(3): the gate never
+    //    fires on absence, and a false HOLD is strictly worse than a wasted
+    //    round);
+    //  - it recorded NOTHING for this round ⇒ the derived wave has not re-run
+    //    it yet. WAIT: re-read every [lanePoll] until it lands, bounded by
+    //    [laneWaitBudget], then fall through to the same LOUD arm. Deciding
+    //    over a lane that is merely LATE is exactly the partial join that
+    //    killed the committee round.
+    // Offline (no real worktree) there is no wave and no artifact to wait for:
+    // the injected reader answers once — the ledger's no-op posture.
+    final lanes = <String, LensReport?>{};
+    final deadline = DateTime.now().add(laneWaitBudget);
+    while (true) {
+      lanes
+        ..clear()
+        ..addEntries([
+          for (final lens in lenses)
+            MapEntry(lens, read(dir, lens, '$parent/$lens', round: round)),
+        ]);
+      if (!live) break;
+      final waiting = [
+        for (final entry in lanes.entries)
+          if (entry.value == null &&
+              stampedRound(
+                    siblings.resultOf('$parent/${entry.key}')[kVerdictRoundKey],
+                  ) !=
+                  round)
+            entry.key,
+      ];
+      if (waiting.isEmpty || !DateTime.now().isBefore(deadline)) break;
+      await Future<void>.delayed(lanePoll);
+      if (args.cancel.isCancelled) throw kRouteCancelled;
+      // Re-read the ambient view for the next attempt (post-cancel-check — the
+      // effect verb is snapshot-at-read and safe across the wait, the
+      // `SpecRouteCapability` precedent).
+      siblings =
+          context.getInheritedSeedOfExactType<SiblingView>() ??
+          const SiblingView();
+    }
 
     // The ROUND COUNT is the durable REGATHER LEDGER's own `round` — NOT this
     // node's `rewindCount`. Under the validates-edge derivation the engine
@@ -1888,12 +2087,14 @@ class DiscoveryRouteCapability extends RouteCapability {
       case DiscoveryHold(:final reason):
         return Escalate(reason);
       case DiscoveryRegather(lenses: final silent, :final reason):
-        final round = priorRound + 1;
+        // The LEDGER's next round — distinct from the circuit [round] above,
+        // which is the freshness stamp every lane is fenced on.
+        final regatherRound = priorRound + 1;
         if (live) {
           try {
             writeDiscoveryRegatherLedger(
               dir,
-              DiscoveryRegatherLedger(round: round),
+              DiscoveryRegatherLedger(round: regatherRound),
             );
           } catch (e) {
             throw RouteFailure(
@@ -1916,7 +2117,7 @@ class DiscoveryRouteCapability extends RouteCapability {
           'verdict': 'regather',
           'grade': 'F',
           'rule': 'regather',
-          'round': '$round',
+          'round': '$regatherRound',
           'lenses': silent.join(','),
           'rationale': reason,
         });

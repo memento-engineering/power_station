@@ -256,11 +256,13 @@ String? _gateReason(Fakes f) {
 Iterable<String> _spawned(Fakes f) => f.provider.started.map((s) => s.name);
 
 /// Writes the report a lens process would have written — at the canonical
-/// absolute path its own prompt names, stamped with its own `nodePath`.
+/// absolute path its own prompt names, stamped with its own `nodePath` and the
+/// session's circuit round.
 void _plantReport(String dir, String lens, LensReport report) {
   final json = {
     ...report.toJson(),
     'nodePath': 'tg-1/spec_review/discovery/$lens',
+    kVerdictRoundKey: 0,
   };
   File(lensReportPath(dir, lens))
     ..createSync(recursive: true)
