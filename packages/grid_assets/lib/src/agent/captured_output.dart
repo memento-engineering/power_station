@@ -1,11 +1,14 @@
 /// The CAPTURED-PROCESS-OUTPUT mechanism — tail-first, advice-stripped,
 /// exit-code-led (`power_station#captured-process-output-escalates-tail-first`).
 ///
-/// A zero-import leaf on purpose: both the landing circuit (in the grid
-/// process) and the ACP bridge (a standalone child script) assemble failure
-/// reasons this way, and the bridge must not pay for `landing.dart`'s
-/// dependency graph to do it.
+/// A small shared leaf on purpose: the landing circuit (in the grid process),
+/// the code committee's gating lane, and the ACP bridge (a standalone child
+/// script) all assemble failure reasons this way, and none of them may pay for
+/// another's dependency graph to do it. Its sole import is `dart:io`, for the
+/// shared full-log writer/reader the two validation lanes share.
 library;
+
+import 'dart:io';
 
 /// The TAIL of captured process output — what a failure reason stamps so an
 /// operator sees WHY without forensics. The useful line is at the END (a tool
@@ -24,6 +27,73 @@ String landReasonTail(String output, [int max = 400]) {
 /// the failing test's name, its expected/actual, and the `Some tests failed.`
 /// trailer — and well inside the gate bead's metadata budget.
 const int kRevalidateReasonTailChars = 1500;
+
+/// The character budget the leading VALIDATION DIAGNOSTICS may take out of
+/// [kRevalidateReasonTailChars]. Wide enough for the two-line
+/// `Failed to load` + `file:line:col: Error: <symbol>` pair the Dart front end
+/// prints, narrow enough that the exit-class and log-path line still lands
+/// inside the engine's 500-char persisted prefix.
+const int kValidationDiagnosticHeadChars = 320;
+
+/// Every recognized validation diagnostic line in [output], deduplicated in
+/// encounter order — the Dart front end repeats the SAME `Error:` once per test
+/// file it failed to load, so an undeduplicated lead would spend the whole
+/// budget on one cause.
+///
+/// The front end carries `Error:` or `Failed to load`; the analyzer and the
+/// other line-oriented validation tools carry `[E]`. Every other output shape
+/// is served by the retained tail, which is where its fatal line lives.
+List<String> validationDiagnosticLines(String output) {
+  final diagnostics = <String>{};
+  for (final line in output.split('\n')) {
+    final diagnostic = line.trim();
+    if (diagnostic.contains('Error:') ||
+        diagnostic.contains('Failed to load') ||
+        diagnostic.contains('[E]')) {
+      diagnostics.add(diagnostic);
+    }
+  }
+  return diagnostics.toList(growable: false);
+}
+
+/// [diagnostics] joined and cut to [max], marked with a trailing … when cut —
+/// the unabridged lines stay in the log on disk.
+String boundedValidationDiagnosticHead(
+  List<String> diagnostics, [
+  int max = kValidationDiagnosticHeadChars,
+]) {
+  final joined = diagnostics.join('\n');
+  if (joined.length <= max) return joined;
+  return '${joined.substring(0, max - 1)}…';
+}
+
+/// Writes [output] unchanged to [path], creating its parent directories.
+///
+/// LOUD by design: a failure to persist throws rather than letting a caller
+/// hand an operator a reason that names a full log which does not exist.
+void writeCapturedOutputLog({required String path, required String output}) {
+  File(path)
+    ..createSync(recursive: true)
+    ..writeAsStringSync(output);
+}
+
+/// The full captured-output log at [path], or `''` when it is not readable.
+///
+/// Tolerant on purpose, and it is the READER that is tolerant rather than the
+/// writer: these logs live in the round-swept `.grid/critique/`, which the
+/// committee's round-start sweep can empty while a lane is still in flight (the
+/// tg-60t derived-wave race). A missing log must therefore degrade to
+/// `<no output captured>` inside the failure reason — which still names the
+/// exit class and the log path — and must NEVER throw out of a result hook,
+/// because that would turn a diagnosable gate failure back into the opaque
+/// hold this whole mechanism exists to prevent.
+String readCapturedOutputLogOrEmpty(String path) {
+  try {
+    return File(path).readAsStringSync();
+  } on Object {
+    return '';
+  }
+}
 
 /// One `dart pub get` line of pure UPGRADE ADVICE — `analyzer 10.2.0 (14.3.0
 /// available)`. Anchored at both ends: a line that merely MENTIONS an
