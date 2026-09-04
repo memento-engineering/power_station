@@ -34,3 +34,434 @@ dev_dependencies:
   lints: ^5.1.0
   state_notifier: ^1.0.0
   test: ^1.25.0
+
+# ── The grid asset surface ───────────────────────────────────────────────────
+# The SINGLE authored declaration of what this pack vends. A package
+# participates in the station's compiled asset registry exactly when its
+# pubspec carries this block
+# (`the_grid#grid-block-packages-publish-dart-asset-definitions`).
+#
+# `dart run tool/generate_grid_assets.dart` reads it and emits BOTH
+# `lib/src/assets/grid_asset_pack.dart` (the composition surface: `grid_sdk`
+# values) and `extension/mcp/config.yaml` (the MCP-shaped compatibility
+# mirror), atomically. Edit HERE and regenerate; never edit either output.
+#
+# `audience` — who may INVOKE an asset. `selector` — WHERE it mounts. They are
+# ORTHOGONAL: an operator-audience asset may carry any selector, and vice
+# versa.
+#
+# The audience doctrine, preserved verbatim from the retired `kOperatorSkills`
+# docstring:
+#
+#   The split is load-bearing, not cosmetic. Most of these drive the STATION
+#   (boot it, land its work, clear its gates, cut its releases) — and
+#   `harvest-review` teaches "push and open a PR with receipts", which the very
+#   brief that would offer it FORBIDS ("Do NOT push and do NOT open a pull
+#   request"). Offering a build agent a skill that contradicts its working
+#   agreement is a live hazard. `asset-author` drives nothing and is withheld
+#   on its own ground: it is the operator's authoring manual — doctrine for the
+#   human composing and installing the station's asset surface — and a build
+#   agent's composition guidance arrives through its bead's design and
+#   validation plan, never through a station-owner manual its brief did not
+#   ask for. `handoff` is withheld on the same ground: it ENDS a turn by asking
+#   the OUTER harness to compact, clear, or relaunch the seat, and it writes to
+#   an Agent Disc that exists at a grid home and not in a bead's worktree —
+#   both contradict a build agent's working agreement, which is to finish the
+#   bead and commit.
+#
+#   A DENY-list, not an allow-list of agent skills: the wire materializes
+#   whatever overlay it is handed, so a skill this package does not vend (a
+#   third-party asset pack's, an injected fixture's) is a skill whose pack meant
+#   it for its agents. Naming it is what makes it invocable — dropping it
+#   silently is the failure this doctrine forbids. Only a DECLARED operator
+#   audience withholds a skill.
+#
+# `audience: human` IS that declared operator audience; `operatorSkillIds`
+# derives the deny-list from it.
+#
+# The selector vocabulary is CLOSED: `any`, `dart-package:<name>`,
+# `decision-register`, `station`, `never`, and `unknown` (the meaning of an
+# omitted `selector`). `unknown` and `any` are emitted identically today;
+# `unknown` stays reportable as undeclared. Nothing EVALUATES a selector yet —
+# the resolver bead owns that; this block declares syntax only.
+grid:
+  assets:
+    # ── rubrics (mirrored into the manifest's `resources:` section) ──────────
+    - id: code-validation
+      kind: rubric
+      description: "The GATING lane — runs the bead's own Validation Plan; F on any non-zero command."
+      audience: agent
+      visibility: public
+      artifacts:
+        - target: mcp
+          path: extension/rubrics/code-validation.md
+
+    - id: spec-adherence
+      kind: rubric
+      description: "Does the diff implement the bead's Implementation Plan + acceptance criteria?"
+      audience: agent
+      visibility: public
+      artifacts:
+        - target: mcp
+          path: extension/rubrics/spec-adherence.md
+
+    - id: regression-risk
+      kind: rubric
+      description: "The blast radius — how likely is the change to break existing behavior?"
+      audience: agent
+      visibility: public
+      artifacts:
+        - target: mcp
+          path: extension/rubrics/regression-risk.md
+
+    - id: test-coverage
+      kind: rubric
+      description: "Are the changes covered by MEANINGFUL (non-vacuous) tests?"
+      audience: agent
+      visibility: public
+      artifacts:
+        - target: mcp
+          path: extension/rubrics/test-coverage.md
+
+    - id: spec-validation
+      kind: rubric
+      description: "The GATING spec lane — a deterministic structural check over the bead's spec; F on any missing section or placeholder."
+      audience: agent
+      visibility: public
+      artifacts:
+        - target: mcp
+          path: extension/rubrics/spec-validation.md
+
+    - id: coherence
+      kind: rubric
+      description: "Does the spec carve scope cleanly from sibling beads AND extend existing code rather than duplicate it?"
+      audience: agent
+      visibility: public
+      artifacts:
+        - target: mcp
+          path: extension/rubrics/coherence.md
+
+    - id: adr-alignment
+      kind: rubric
+      description: "Does the spec cite and align with the substation's docs/adr register (ADR-0000 amendments included)?"
+      audience: agent
+      visibility: public
+      artifacts:
+        - target: mcp
+          path: extension/rubrics/adr-alignment.md
+
+    - id: decision-alignment
+      kind: rubric
+      description: "Does the spec cite and align with every recorded decision the station's ROSTER union governs its touched surfaces with?"
+      audience: agent
+      visibility: public
+      # It grades against a substation's `docs/decisions/` register; where there
+      # is none, the lane has nothing to read. DECLARED, not yet evaluated.
+      selector: decision-register
+      artifacts:
+        - target: mcp
+          path: extension/rubrics/decision-alignment.md
+
+    - id: acceptance-testability
+      kind: rubric
+      description: "Are the acceptance criteria testable by exact commands, with a 1:1 validation-plan mapping?"
+      audience: agent
+      visibility: public
+      artifacts:
+        - target: mcp
+          path: extension/rubrics/acceptance-testability.md
+
+    - id: plan-completeness
+      kind: rubric
+      description: "Is the implementation plan literal and decision-free — exact Dart code, file paths, test commands, commits?"
+      audience: agent
+      visibility: public
+      artifacts:
+        - target: mcp
+          path: extension/rubrics/plan-completeness.md
+
+    - id: bead-readiness
+      kind: rubric
+      description: "The INTAKE lens — is the BEAD ready to specify (scope, acceptance shape, cited constraints, a decided approach)? D or worse HOLDS it for refinement."
+      audience: agent
+      visibility: public
+      artifacts:
+        - target: mcp
+          path: extension/rubrics/bead-readiness.md
+
+    - id: citation-paths-resolve
+      kind: rubric
+      description: "The DOCS gating lane — every file path a changed doc cites must resolve in the tree."
+      audience: agent
+      visibility: public
+      artifacts:
+        - target: mcp
+          path: extension/rubrics/citation-paths-resolve.md
+
+    - id: terminology-ban
+      kind: rubric
+      description: "The DOCS gating lane — the org seam word is `extension`; the banned word is reserved for third-party proper nouns."
+      audience: agent
+      visibility: public
+      artifacts:
+        - target: mcp
+          path: extension/rubrics/terminology-ban.md
+
+    - id: section-structure
+      kind: rubric
+      description: "The DOCS gating lane — the sections a bead names (metadata.docs_sections) must be present in every changed doc."
+      audience: agent
+      visibility: public
+      artifacts:
+        - target: mcp
+          path: extension/rubrics/section-structure.md
+
+    # ── prompts (mirrored into the manifest's `prompts:` section) ────────────
+    - id: critic
+      kind: prompt
+      description: "One adversarial critic, grading the work against a single rubric in isolation."
+      audience: agent
+      visibility: public
+      artifacts:
+        - target: mcp
+          path: extension/prompts/critic.md
+          args:
+            - name: rubric
+              description: "The rubric id this critic grades against (the lane)."
+              required: true
+            - name: rubricText
+              description: "The rubric's prose bands, loaded from resources/<rubric>."
+              required: true
+            - name: bead
+              description: "The full work bead under review (title/task/design/acceptance/notes)."
+              required: true
+
+    - id: spec-critic
+      kind: prompt
+      description: "One adversarial spec-readiness critic, grading the bead's SPEC (not a diff) against a single rubric in isolation."
+      audience: agent
+      visibility: public
+      artifacts:
+        - target: mcp
+          path: extension/prompts/spec-critic.md
+          args:
+            - name: rubric
+              description: "The rubric id this critic grades against (the lane)."
+              required: true
+            - name: rubricText
+              description: "The rubric's prose bands, loaded from resources/<rubric>."
+              required: true
+            - name: bead
+              description: "The full work bead whose acceptance + design fields are the spec under review."
+              required: true
+
+    - id: readiness
+      kind: prompt
+      description: "The cheap pre-specify intake lens, grading the work BEAD itself (no spec and no diff exists yet)."
+      audience: agent
+      visibility: public
+      artifacts:
+        - target: mcp
+          path: extension/prompts/readiness.md
+          args:
+            - name: rubric
+              description: "The rubric id this lens grades against."
+              required: true
+            - name: rubricText
+              description: "The rubric's prose bands, loaded from resources/<rubric>."
+              required: true
+            - name: bead
+              description: "The full work bead under intake (title/task/design/acceptance/notes)."
+              required: true
+
+    - id: discovery
+      kind: prompt
+      description: "One read-only explorer in the discovery circuit — gathers context and CITES any offence; it grades nothing."
+      audience: agent
+      visibility: public
+      artifacts:
+        - target: mcp
+          path: extension/prompts/discovery.md
+          args:
+            - name: lens
+              description: "The lens this explorer runs (explore-code | explore-decision | explore-prior-art)."
+              required: true
+            - name: lensBrief
+              description: "The lens's angle — what this explorer looks for."
+              required: true
+            - name: bead
+              description: "The full work bead being explored (title/task/design/acceptance/notes)."
+              required: true
+
+    # ── skills (two INDEPENDENTLY authored legs per logical skill) ───────────
+    - id: asset-author
+      kind: skill
+      description: "Author and install grid assets through B-style in-tree providers: watched nullable dependencies, diagnostic unavailability, explicit create/value ownership, scoped overrides, and assembly-only boot."
+      # OPERATOR audience AND a non-`any` selector — the two axes are
+      # independent. It is the operator's authoring manual for GRID assets, so
+      # it applies where the substation's package graph carries grid_sdk.
+      audience: human
+      visibility: public
+      selector: dart-package:grid_sdk
+      artifacts:
+        - target: claude
+          path: extension/station_overlay/claude/skills/asset-author/SKILL.md
+        - target: agents
+          path: extension/station_overlay/agents/skills/asset-author/SKILL.md
+
+    - id: discover
+      kind: skill
+      description: "The grid home's HITL front door — dispatches on arg shape (topic research / bead advisory / bead directed), researches via the vended `search` Command, and on the human's yes files an ephemeral staged bead and starts the design conversation (hand-off: specify)."
+      audience: agent
+      visibility: public
+      artifacts:
+        - target: claude
+          path: extension/station_overlay/claude/skills/discover/SKILL.md
+          args:
+            - name: runner
+              description: "The composing station's executable name (e.g. `space`) — the verb the skill's search calls ride."
+              required: true
+        - target: agents
+          path: extension/station_overlay/agents/skills/discover/SKILL.md
+          args:
+            - name: runner
+              description: "The composing station's executable name (e.g. `space`) — the verb the skill's search calls ride."
+              required: true
+
+    - id: gate-medicine
+      kind: skill
+      description: "Diagnose and clear gated sessions — read the worktree critique artifacts, separate systemic failures from genuinely bad work, and re-arm with a rework round."
+      audience: human
+      visibility: public
+      artifacts:
+        - target: claude
+          path: extension/station_overlay/claude/skills/gate-medicine/SKILL.md
+          args:
+            - name: runner
+              description: "The composing station's executable name — the verb its rework calls ride."
+              required: true
+        - target: agents
+          path: extension/station_overlay/agents/skills/gate-medicine/SKILL.md
+          args:
+            - name: runner
+              description: "The composing station's executable name — the verb its rework calls ride."
+              required: true
+
+    - id: handoff
+      kind: skill
+      description: "Write the seat's own handoff onto its Agent Disc, bank the durable learnings as separate disc notes, index it, and end the turn with the one line that tells the OUTER harness to compact, clear, or relaunch. Also the successor's read: consume the newest handoff and delete it."
+      audience: human
+      visibility: public
+      artifacts:
+        - target: claude
+          path: extension/station_overlay/claude/skills/handoff/SKILL.md
+          args:
+            - name: runner
+              description: "The composing station's executable name — the verb the skill's `status` read rides."
+              required: true
+        - target: agents
+          path: extension/station_overlay/agents/skills/handoff/SKILL.md
+          args:
+            - name: runner
+              description: "The composing station's executable name — the verb the skill's `status` read rides."
+              required: true
+
+    - id: harvest-review
+      kind: skill
+      description: "Review and land what a station built — verify each terminal session's branch delta, committee grades, and validation plan in the real worktree, then push and open a PR with receipts."
+      audience: human
+      visibility: public
+      artifacts:
+        - target: claude
+          path: extension/station_overlay/claude/skills/harvest-review/SKILL.md
+          args:
+            - name: runner
+              description: "The composing station's executable name — the verb its rework calls ride."
+              required: true
+        - target: agents
+          path: extension/station_overlay/agents/skills/harvest-review/SKILL.md
+          args:
+            - name: runner
+              description: "The composing station's executable name — the verb its rework calls ride."
+              required: true
+
+    - id: intake-refinement
+      kind: skill
+      description: "Shape work beads so a resident station can drive them — the required validation_plan metadata, driveable issue types, dependency wiring, and stamped grid.approved approval via the approve verb."
+      audience: human
+      visibility: public
+      artifacts:
+        - target: claude
+          path: extension/station_overlay/claude/skills/intake-refinement/SKILL.md
+          args:
+            - name: runner
+              description: "The composing station's executable name (e.g. `space`) — the verb its boot/status/down calls ride."
+              required: true
+        - target: agents
+          path: extension/station_overlay/agents/skills/intake-refinement/SKILL.md
+          args:
+            - name: runner
+              description: "The composing station's executable name (e.g. `space`) — the verb its boot/status/down calls ride."
+              required: true
+
+    - id: release
+      kind: skill
+      description: "Cut a disciplined pub.dev release — the consolidated genesis+lenny publishing playbook. Owns the judgement (when to publish, patch vs. breaking, breaking-CHANGELOG framing, tag-drift reconciliation) and CALLS the vended `dart release` Command for the deterministic work (version math, scrub gate, dry-run, pub.dev poll, dependency order)."
+      audience: human
+      visibility: public
+      artifacts:
+        - target: claude
+          path: extension/station_overlay/claude/skills/release/SKILL.md
+          args:
+            - name: runner
+              description: "The composing station's executable name — the verb the skill's `dart release` calls ride."
+              required: true
+        - target: agents
+          path: extension/station_overlay/agents/skills/release/SKILL.md
+          args:
+            - name: runner
+              description: "The composing station's executable name — the verb the skill's `dart release` calls ride."
+              required: true
+
+    - id: station-operations
+      kind: skill
+      description: "Operate the resident station — boot, bounce, tear down, read status, seed a grid home's state store, and diagnose a station that is up but driving nothing."
+      audience: human
+      visibility: public
+      artifacts:
+        - target: claude
+          path: extension/station_overlay/claude/skills/station-operations/SKILL.md
+          args:
+            - name: runner
+              description: "The composing station's executable name (e.g. `space`) — the verb its boot/status/down calls ride."
+              required: true
+        - target: agents
+          path: extension/station_overlay/agents/skills/station-operations/SKILL.md
+          args:
+            - name: runner
+              description: "The composing station's executable name (e.g. `space`) — the verb its boot/status/down calls ride."
+              required: true
+
+    # ── the operator seat assets (grid-only; NOT mirrored into MCP) ──────────
+    - id: governor
+      kind: agent
+      description: "The governor seat's persona, tool surface, and cost posture."
+      audience: human
+      visibility: public
+      artifacts:
+        - target: claude
+          path: extension/station_overlay/claude/agents/governor.md
+
+    - id: harness
+      kind: settings
+      description: "The harness settings this pack contributes to an operator seat."
+      audience: human
+      visibility: public
+      artifacts:
+        - target: claude
+          path: extension/station_overlay/claude/settings.json
+
+  # Overlay head → target mappings stay package configuration in this block.
+  station_overlay:
+    mappings:
+      claude: .claude
