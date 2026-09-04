@@ -239,12 +239,22 @@ void main() {
       state.push(_stateAt(completed: {kAgentNode}));
       await pumpEventQueue();
       // clear-critique (gate-integrity #3, dep-free) then pin-diff
-      // (scope-pinning, bead pow-6wo) each ran for real — no provider spawn
-      // (both ServiceCapabilities; pin-diff no-ops to Ok since the synthetic
-      // worktree does not exist on disk). Re-project their completions so the
-      // four critics, which now transitively `dependsOn` them, become ready.
+      // (scope-pinning, bead pow-6wo) then the DETERMINISTIC FRONTIER
+      // (format-clean + declared-tests-present, bead pow-jicn) each ran for
+      // real — no provider spawn (all four are ServiceCapabilities; pin-diff
+      // and format-clean no-op to Ok since the synthetic worktree does not
+      // exist on disk). Re-project their completions so the four critics,
+      // which now transitively `dependsOn` them, become ready.
       state.push(
-        _stateAt(completed: {kAgentNode, kClearCritiqueNode, kPinDiffNode}),
+        _stateAt(
+          completed: {
+            kAgentNode,
+            kClearCritiqueNode,
+            kPinDiffNode,
+            kFormatCleanNode,
+            'review/declared-tests-present',
+          },
+        ),
       );
       await settle(() => f.provider.started.length >= 6);
 

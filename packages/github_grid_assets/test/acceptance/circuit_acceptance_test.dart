@@ -494,13 +494,23 @@ void main() {
       state.push(_state(_session(completed: {kAgentNode, kClearCritiqueNode})));
       await _settle(f);
 
-      // pin-diff (scope-pinning, bead pow-6wo) then ran for real — another
-      // ServiceCapability, no provider spawn, against the REAL git checkout
-      // [_provisionCheckout] planted. Re-project its completion before the
-      // four critics (which now `dependsOn` it) become ready.
+      // pin-diff (scope-pinning, bead pow-6wo) then the DETERMINISTIC
+      // FRONTIER (format-clean + declared-tests-present, bead pow-jicn) then
+      // ran for real — all ServiceCapabilities, no provider spawn, against the
+      // REAL git checkout [_provisionCheckout] planted. Re-project every
+      // completion before the four critics (which now `dependsOn` the
+      // frontier) become ready.
       state.push(
         _state(
-          _session(completed: {kAgentNode, kClearCritiqueNode, kPinDiffNode}),
+          _session(
+            completed: {
+              kAgentNode,
+              kClearCritiqueNode,
+              kPinDiffNode,
+              kFormatCleanNode,
+              'review/declared-tests-present',
+            },
+          ),
         ),
       );
       await _settle(f);

@@ -149,6 +149,19 @@ Set<String> _specHeadMidReview() => {
 /// adopted survivor continues exactly as it would have). [kAgentNode] is
 /// deliberately NOT included — every survivor's OWN node set below names it
 /// explicitly (it sits BEFORE this tail, not after).
+///
+/// This tail tracks the CURRENT review shape ON PURPOSE, and ratified A16
+/// (`a16-bead-pow-3p4-the-kcodecircuit-migration-guard-is-pure-be`, surface
+/// `packages/**`, which names this file in its own Affects list) is what says
+/// so: what A16 freezes is the SPEC HEAD — "the frozen spec-head shape gets its
+/// OWN registered sub-circuit (`spec_review_v1`)" — while "the legacy shape
+/// needs no such entry: its `code_review`/`landing` sub-circuits are the
+/// CURRENT ones (neither reshape touched them)". So a new deterministic review
+/// step ([kFormatCleanNode], bead `pow-jicn`) belongs in this set: every frozen
+/// shape's `review` inflates the live `code_review` body, and
+/// `CapabilityHost._stepBeadId` refuses LOUD if a node it MOUNTS has no staged
+/// step bead. Carving the step out of the frozen universe would not pin the
+/// frozen shape — it would break it.
 const Set<String> _kSharedTailNodes = {
   ...kCodeReviewNodes,
   ...kLandingNodes,
@@ -265,11 +278,22 @@ void main() {
       );
 
       // One more SAME-SHAPE cursor tick: the code committee fans out for real.
+      // The DETERMINISTIC FRONTIER (format-clean + declared-tests-present, bead
+      // `pow-jicn`) is projected complete alongside the hygiene + scope-pinning
+      // steps — every frozen shape's `review` is the CURRENT `code_review`
+      // registry entry (`circuit_migration.dart`), so the frontier the live
+      // critics `dependsOn` gates a survivor exactly as it gates a fresh round.
       state.push(
         _state(
           _survivorSession(
             ownNodes: survivor,
-            completed: {...survivor, kClearCritiqueNode, kPinDiffNode},
+            completed: {
+              ...survivor,
+              kClearCritiqueNode,
+              kPinDiffNode,
+              kFormatCleanNode,
+              'review/declared-tests-present',
+            },
           ),
         ),
       );

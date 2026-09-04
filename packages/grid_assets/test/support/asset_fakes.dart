@@ -42,8 +42,10 @@ const SessionResolver kCodeResolver = CodeCircuitResolver(kCodeCircuit);
 /// The committee-wired `code` circuit's node paths (relative to the work bead),
 /// in declaration order — the `spec_review/<lane>` spec committee, `specify`
 /// INCLUDED (beads `pow-6ao` + `pow-ui8`) → `agent` → `review/clear-critique`
-/// (gate-integrity #3) → `review/pin-diff` (scope-pinning, bead `pow-6wo`) → the
-/// four `review/<critic>` lanes → `review/route` → `land`. The drive helpers +
+/// (gate-integrity #3) → `review/pin-diff` (scope-pinning, bead `pow-6wo`) →
+/// the deterministic frontier (`review/format-clean` +
+/// `review/declared-tests-present`, bead `pow-jicn`) → the remaining
+/// `review/<critic>` lanes → `review/route` → `land`. The drive helpers +
 /// acceptance tests key the cursor off these.
 ///
 /// The specify stage's node path is INSIDE the spec circuit as of bead `pow-ui8`
@@ -236,6 +238,12 @@ const String kSpecRouteNode = 'spec_review/route';
 const String kAgentNode = 'agent';
 const String kClearCritiqueNode = 'review/clear-critique';
 const String kPinDiffNode = 'review/pin-diff';
+
+/// The DETERMINISTIC FRONTIER's formatting node (bead `pow-jicn`) — sibling of
+/// `review/declared-tests-present` after [kPinDiffNode], and a member of
+/// [kCodeReviewNodes] but NOT of [kCriticNodes]: it produces no letter grade,
+/// only a typed non-result, so no grade map ever carries it.
+const String kFormatCleanNode = 'review/format-clean';
 const List<String> kCriticNodes = [
   'review/code-validation',
   'review/declared-tests-present',
@@ -297,12 +305,14 @@ const String kRevalidateNode = 'land/revalidate';
 const String kDeliverNode = kDeliverStep;
 
 /// The `code_review` sub-circuit's whole node set (`committee.dart`):
-/// `clear-critique` (gate-integrity #3) → `pin-diff` → the four critics (in
-/// parallel) → `route`. Pair with [kLandingNodes] + [kSpecPhaseNodes] to build
-/// [kAllCodeCircuitNodes].
+/// `clear-critique` (gate-integrity #3) → `pin-diff` → the DETERMINISTIC
+/// FRONTIER (`format-clean` + `declared-tests-present`, bead `pow-jicn`) → the
+/// four critics (in parallel) → `route`. Pair with [kLandingNodes] +
+/// [kSpecPhaseNodes] to build [kAllCodeCircuitNodes].
 const Set<String> kCodeReviewNodes = {
   kClearCritiqueNode,
   kPinDiffNode,
+  kFormatCleanNode,
   ...kCriticNodes,
   kRouteNode,
 };
