@@ -30,13 +30,18 @@ String _pubspec(String assets) =>
     '    mappings:\n'
     '      claude: .claude\n';
 
-String _skill({String? selector, String audience = 'agent'}) =>
+String _skill({
+  String? selector,
+  String audience = 'agent',
+  List<String>? teaches,
+}) =>
     '    - id: probe\n'
     '      kind: skill\n'
     '      description: "A probe."\n'
     '      audience: $audience\n'
     '      visibility: public\n'
     '${selector == null ? '' : '      selector: "$selector"\n'}'
+    '${teaches == null ? '' : '      teaches: [${teaches.join(', ')}]\n'}'
     '      artifacts:\n'
     '        - target: claude\n'
     '          path: $_skillPath\n';
@@ -165,6 +170,100 @@ void main() {
           ),
         ),
       );
+    });
+  });
+
+  group('the teaches claim couples a skill to the commands it teaches', () {
+    test('a skill teaches commands in declaration order', () {
+      expect(
+        _parse(
+          _skill(teaches: ['filing', 'approve', 'link']),
+        ).assets.single.teaches,
+        ['filing', 'approve', 'link'],
+      );
+      expect(_parse(_skill()).assets.single.teaches, isEmpty);
+      expect(_parse(_skill(teaches: [])).assets.single.teaches, isEmpty);
+    });
+
+    test('malformed teaches declarations are refused with exact fields', () {
+      void refuses(String assets, String field) => expect(
+        () => _parse(assets),
+        throwsA(
+          isA<GridBlockException>().having(
+            (e) => e.message,
+            'message',
+            startsWith(field),
+          ),
+        ),
+      );
+
+      // A bare scalar is not a claim — the value must be a list.
+      refuses(
+        '    - id: probe\n'
+            '      kind: skill\n'
+            '      description: "A probe."\n'
+            '      teaches: filing\n'
+            '      artifacts:\n'
+            '        - target: claude\n'
+            '          path: $_skillPath\n',
+        'grid: asset "skill/probe": teaches: must be a list',
+      );
+      // Only a skill teaches; every other kind may claim nothing.
+      refuses(
+        '    - id: probe\n'
+            '      kind: prompt\n'
+            '      description: "A probe."\n'
+            '      teaches: [filing]\n'
+            '      artifacts:\n'
+            '        - target: claude\n'
+            '          path: $_skillPath\n',
+        'grid: asset "prompt/probe": teaches: may be non-empty only for '
+            'kind "skill"',
+      );
+      const String entryReason =
+          'must be one lowercase top-level command name matching '
+          r'^[a-z][a-z0-9-]*$';
+      refuses(
+        '    - id: probe\n'
+            '      kind: skill\n'
+            '      description: "A probe."\n'
+            '      teaches: ["", filing]\n'
+            '      artifacts:\n'
+            '        - target: claude\n'
+            '          path: $_skillPath\n',
+        'grid: asset "skill/probe": teaches[0]: $entryReason',
+      );
+      refuses(
+        _skill(teaches: ['Filing']),
+        'grid: asset "skill/probe": teaches[0]: $entryReason',
+      );
+      refuses(
+        _skill(teaches: ['filing', 'filing']),
+        'grid: asset "skill/probe": teaches[1]: duplicate command "filing"',
+      );
+    });
+
+    test('Dart emission carries teaches and MCP emission omits it', () {
+      final claimed = _parse(_skill(teaches: ['filing', 'approve']));
+      final source = renderGridAssetPackLibrary(claimed);
+      expect(source, contains("teaches: <String>['filing', 'approve'],"));
+      expect(
+        source.indexOf('teaches:'),
+        allOf(
+          greaterThan(source.indexOf('selector:')),
+          lessThan(source.indexOf('artifacts:')),
+        ),
+      );
+      expect(
+        renderGridAssetPackLibrary(_parse(_skill())),
+        isNot(contains('teaches')),
+      );
+      expect(
+        renderGridAssetPackLibrary(_parse(_skill(teaches: []))),
+        isNot(contains('teaches')),
+      );
+      // The MCP mirror is compatibility output, never a second authority.
+      expect(renderMcpConfig(claimed), isNot(contains('teaches')));
     });
   });
 
@@ -350,6 +449,21 @@ void main() {
           'relativePath',
           'docs/decisions',
         ),
+      );
+    });
+
+    test('the real pack carries exactly the four baseline teaches claims', () {
+      expect(
+        <String, List<String>>{
+          for (final asset in GridAssetsPack.assets)
+            if (asset.teaches.isNotEmpty) asset.assetKey.id: asset.teaches,
+        },
+        {
+          'asset-author': ['assets'],
+          'discover': ['search'],
+          'intake-refinement': ['filing', 'approve', 'link'],
+          'station-operations': ['up', 'down', 'status'],
+        },
       );
     });
 

@@ -459,6 +459,7 @@ abstract final class GridAssetsPack {
     audience: AssetAudience.human,
     visibility: AssetVisibility.public,
     selector: RequiresPackage('grid_sdk'),
+    teaches: <String>['assets'],
     artifacts: <AssetArtifact>[
       AssetArtifact(
         target: AssetDeliveryTarget.claude,
@@ -479,6 +480,7 @@ abstract final class GridAssetsPack {
     audience: AssetAudience.agent,
     visibility: AssetVisibility.public,
     selector: AlwaysApplies(),
+    teaches: <String>['search'],
     artifacts: <AssetArtifact>[
       AssetArtifact(
         target: AssetDeliveryTarget.claude,
@@ -635,6 +637,7 @@ abstract final class GridAssetsPack {
     audience: AssetAudience.human,
     visibility: AssetVisibility.public,
     selector: AlwaysApplies(),
+    teaches: <String>['filing', 'approve', 'link'],
     artifacts: <AssetArtifact>[
       AssetArtifact(
         target: AssetDeliveryTarget.claude,
@@ -713,6 +716,7 @@ abstract final class GridAssetsPack {
     audience: AssetAudience.human,
     visibility: AssetVisibility.public,
     selector: AlwaysApplies(),
+    teaches: <String>['up', 'down', 'status'],
     artifacts: <AssetArtifact>[
       AssetArtifact(
         target: AssetDeliveryTarget.claude,
