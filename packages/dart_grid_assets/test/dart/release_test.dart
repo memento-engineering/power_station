@@ -8,6 +8,7 @@ import 'dart:io';
 
 import 'package:args/command_runner.dart';
 import 'package:dart_grid_assets/dart_grid_assets.dart';
+import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
 /// A Fake [ProcessRunner]: records the last argv and returns canned output.
@@ -20,6 +21,10 @@ class _FakeProcess {
       <
         ({String executable, List<String> arguments, String? workingDirectory})
       >[];
+
+  /// The generated `pubspec_overrides.yaml` as it stood at each call — the
+  /// throwaway dir is deleted before the test can read it back.
+  final overrideSnapshots = <String?>[];
 
   String? get executable => calls.isEmpty ? null : calls.last.executable;
   List<String>? get arguments => calls.isEmpty ? null : calls.last.arguments;
@@ -36,6 +41,14 @@ class _FakeProcess {
       arguments: arguments,
       workingDirectory: workingDirectory,
     ));
+    final override = workingDirectory == null
+        ? null
+        : File(p.join(workingDirectory, 'pubspec_overrides.yaml'));
+    overrideSnapshots.add(
+      override != null && override.existsSync()
+          ? override.readAsStringSync()
+          : null,
+    );
     if (_results.isEmpty) {
       throw StateError(
         'unexpected process call: $executable ${arguments.join(' ')}',
@@ -54,6 +67,49 @@ class _FakeHttp {
     requested = url;
     return fetch;
   }
+}
+
+/// Writes a two-member pub workspace: a candidate that uses a symbol from its
+/// sibling, declaring [floor] as the sibling's constraint. File setup only —
+/// it never runs dart and never touches the network.
+({Directory root, Directory candidate}) _writeUnitFloorWorkspace(String floor) {
+  final root = Directory.systemTemp.createTempSync('declared-floor-unit-');
+  File(p.join(root.path, 'pubspec.yaml')).writeAsStringSync(
+    'name: declared_floor_unit_workspace\n'
+    'publish_to: none\n'
+    'environment:\n'
+    '  sdk: ^3.11.0\n'
+    'workspace:\n'
+    '  - packages/candidate\n'
+    '  - packages/grid_trajectory\n',
+  );
+  final sibling = Directory(p.join(root.path, 'packages', 'grid_trajectory'))
+    ..createSync(recursive: true);
+  File(p.join(sibling.path, 'pubspec.yaml')).writeAsStringSync(
+    'name: grid_trajectory\n'
+    'version: 0.2.0-rc.4\n'
+    'resolution: workspace\n'
+    'environment:\n'
+    '  sdk: ^3.11.0\n',
+  );
+  final candidate = Directory(p.join(root.path, 'packages', 'candidate'))
+    ..createSync(recursive: true);
+  File(p.join(candidate.path, 'pubspec.yaml')).writeAsStringSync(
+    'name: declared_floor_unit_candidate\n'
+    'version: 0.1.0\n'
+    'publish_to: none\n'
+    'resolution: workspace\n'
+    'environment:\n'
+    '  sdk: ^3.11.0\n'
+    'dependencies:\n'
+    '  grid_trajectory: $floor\n',
+  );
+  final lib = Directory(p.join(candidate.path, 'lib'))
+    ..createSync(recursive: true);
+  File(
+    p.join(lib.path, 'candidate.dart'),
+  ).writeAsStringSync('Object? classify() => StepFailureClass.noResult;\n');
+  return (root: root, candidate: candidate);
 }
 
 void main() {
@@ -288,6 +344,148 @@ void main() {
       expect(fake.executable, 'git');
       expect(fake.arguments, ['tag', 'grid_engine-v0.3.0']);
       expect(fake.workingDirectory, '/repo');
+    });
+  });
+
+  group('validateDeclaredFloors — the producer-side floors leg', () {
+    test(
+      'exact-pins siblings, analyzes a copy, reports, and cleans up',
+      () async {
+        final fixture = _writeUnitFloorWorkspace('^0.2.0-rc.3');
+        addTearDown(() => fixture.root.delete(recursive: true));
+        final fake = _FakeProcess.queue([
+          ProcessResult(1, 0, 'pub get ok', ''),
+          ProcessResult(2, 1, '', "There's no constant named 'noResult'."),
+        ]);
+        final result = await ReleaseService(
+          runProcess: fake.call,
+        ).validateDeclaredFloors(packageDir: fixture.candidate.path);
+
+        expect(fake.calls.map((call) => call.arguments), [
+          ['pub', 'get'],
+          ['analyze'],
+        ]);
+        expect(
+          fake.calls.first.workingDirectory,
+          isNot(fixture.candidate.path),
+        );
+        expect(
+          fake.overrideSnapshots.first,
+          contains("grid_trajectory: '0.2.0-rc.3'"),
+        );
+        expect(result.passed, isFalse);
+        expect(result.pins.single.toJson(), {
+          'package': 'grid_trajectory',
+          'declaredConstraint': '^0.2.0-rc.3',
+          'floor': '0.2.0-rc.3',
+        });
+        expect(result.message, contains('noResult'));
+        expect(result.message, contains('grid_trajectory@0.2.0-rc.3'));
+        expect(
+          Directory(fake.calls.first.workingDirectory!).existsSync(),
+          isFalse,
+        );
+      },
+    );
+
+    test('the copy resolves STANDALONE and drops repo-local residue', () async {
+      final fixture = _writeUnitFloorWorkspace('^0.2.0-rc.3');
+      addTearDown(() => fixture.root.delete(recursive: true));
+      // Residue the copy must drop: the repo's lock, the machine-local dev
+      // overrides, the workspace-resolved cache, and — critically — an
+      // analysis_options.yaml whose `include:` points OUTSIDE the package and
+      // so resolves to nothing once the copy leaves the checkout.
+      File(
+        p.join(fixture.candidate.path, 'analysis_options.yaml'),
+      ).writeAsStringSync('include: ../../analysis_options.yaml\n');
+      File(
+        p.join(fixture.candidate.path, 'pubspec.lock'),
+      ).writeAsStringSync('# stale\n');
+      File(
+        p.join(fixture.candidate.path, 'pubspec_overrides.yaml'),
+      ).writeAsStringSync('# stale machine-local dev override\n');
+      Directory(
+        p.join(fixture.candidate.path, '.dart_tool'),
+      ).createSync(recursive: true);
+
+      String? copiedPubspec;
+      final entries = <String>{};
+      final fake = _FakeProcess.queue([
+        ProcessResult(1, 0, '', ''),
+        ProcessResult(2, 0, 'No issues found!', ''),
+      ]);
+      final result = await ReleaseService(
+        runProcess: (executable, arguments, {workingDirectory}) async {
+          final copy = workingDirectory!;
+          copiedPubspec ??= File(
+            p.join(copy, 'pubspec.yaml'),
+          ).readAsStringSync();
+          entries.addAll(
+            Directory(copy).listSync().map((e) => p.basename(e.path)),
+          );
+          return fake.call(
+            executable,
+            arguments,
+            workingDirectory: workingDirectory,
+          );
+        },
+      ).validateDeclaredFloors(packageDir: fixture.candidate.path);
+
+      expect(copiedPubspec, isNot(contains('resolution: workspace')));
+      expect(copiedPubspec, contains('grid_trajectory: ^0.2.0-rc.3'));
+      expect(entries, containsAll(<String>['lib', 'pubspec.yaml']));
+      expect(
+        entries.intersection(<String>{
+          '.dart_tool',
+          'analysis_options.yaml',
+          'pubspec.lock',
+        }),
+        isEmpty,
+        reason: 'a repo-root `include:` cannot resolve in the throwaway copy',
+      );
+      // The one pubspec_overrides.yaml present is the GENERATED floor pin —
+      // never the machine-local dev override that sat beside the source.
+      expect(entries, contains('pubspec_overrides.yaml'));
+      expect(
+        fake.overrideSnapshots.first,
+        contains("grid_trajectory: '0.2.0-rc.3'"),
+      );
+      expect(result.passed, isTrue);
+      expect(result.message, contains('declared-floor validation passed'));
+    });
+
+    test('skips analyze when pub get fails', () async {
+      final fixture = _writeUnitFloorWorkspace('^0.2.0-rc.3');
+      addTearDown(() => fixture.root.delete(recursive: true));
+      final fake = _FakeProcess(ProcessResult(1, 1, '', 'resolution failed'));
+      final result = await ReleaseService(
+        runProcess: fake.call,
+      ).validateDeclaredFloors(packageDir: fixture.candidate.path);
+
+      expect(fake.calls, hasLength(1));
+      expect(fake.calls.single.arguments, ['pub', 'get']);
+      expect(result.analyzeExitCode, isNull);
+      expect(result.passed, isFalse);
+      expect(result.message, contains('resolution failed'));
+    });
+
+    test('a sibling with no inclusive floor is a LOUD refusal', () async {
+      final fixture = _writeUnitFloorWorkspace('any');
+      addTearDown(() => fixture.root.delete(recursive: true));
+      final fake = _FakeProcess.queue(const []);
+      await expectLater(
+        ReleaseService(
+          runProcess: fake.call,
+        ).validateDeclaredFloors(packageDir: fixture.candidate.path),
+        throwsA(
+          isA<StateError>().having(
+            (error) => error.message,
+            'message',
+            allOf(contains('grid_trajectory'), contains('inclusive')),
+          ),
+        ),
+      );
+      expect(fake.calls, isEmpty);
     });
   });
 
@@ -841,6 +1039,80 @@ void main() {
         'latest': '0.1.5',
         'isPublished': true,
       });
+    });
+
+    test(
+      'release scrub JSON includes declared floors and exits on failure',
+      () async {
+        final fixture = _writeUnitFloorWorkspace('^0.2.0-rc.3');
+        addTearDown(() => fixture.root.delete(recursive: true));
+        final fake = _FakeProcess.queue([
+          ProcessResult(1, 0, 'pub get ok', ''),
+          ProcessResult(2, 1, '', "There's no constant named 'noResult'."),
+        ]);
+        final out = StringBuffer();
+        final runner = CommandRunner<int>('t', 'test')
+          ..addCommand(
+            ReleaseCommand(
+              service: ReleaseService(runProcess: fake.call),
+              out: out,
+            ),
+          );
+        final code = await runner.run([
+          'release',
+          'scrub',
+          '--dir',
+          fixture.candidate.path,
+          '--json',
+        ]);
+        final json = jsonDecode(out.toString()) as Map<String, dynamic>;
+        final floors = json['declaredFloors'] as Map<String, dynamic>;
+
+        expect(code, 1);
+        expect(json['clean'], isFalse);
+        expect(json['hits'], isEmpty);
+        expect(floors['passed'], isFalse);
+        expect(floors['message'], contains('grid_trajectory@0.2.0-rc.3'));
+        expect(floors['pins'], [
+          {
+            'package': 'grid_trajectory',
+            'declaredConstraint': '^0.2.0-rc.3',
+            'floor': '0.2.0-rc.3',
+          },
+        ]);
+      },
+    );
+
+    test('release scrub exits 0 when both legs pass', () async {
+      final fixture = _writeUnitFloorWorkspace('^0.2.0-rc.4');
+      addTearDown(() => fixture.root.delete(recursive: true));
+      final fake = _FakeProcess.queue([
+        ProcessResult(1, 0, 'pub get ok', ''),
+        ProcessResult(2, 0, 'No issues found!', ''),
+      ]);
+      final out = StringBuffer();
+      final runner = CommandRunner<int>('t', 'test')
+        ..addCommand(
+          ReleaseCommand(
+            service: ReleaseService(runProcess: fake.call),
+            out: out,
+          ),
+        );
+      final code = await runner.run([
+        'release',
+        'scrub',
+        '--dir',
+        fixture.candidate.path,
+        '--json',
+      ]);
+      final json = jsonDecode(out.toString()) as Map<String, dynamic>;
+
+      expect(code, 0);
+      expect(json['clean'], isTrue);
+      expect(
+        (json['declaredFloors'] as Map<String, dynamic>)['passed'],
+        isTrue,
+      );
     });
 
     test('scrub --dir on a missing dir exits 64 (usage)', () async {

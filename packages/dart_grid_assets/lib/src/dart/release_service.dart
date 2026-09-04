@@ -21,6 +21,7 @@ import 'dart:io';
 
 import 'package:path/path.dart' as p;
 import 'package:pub_semver/pub_semver.dart';
+import 'package:yaml/yaml.dart';
 
 import 'pub_links.dart';
 
@@ -290,6 +291,106 @@ class ConsumerValidationReport {
       );
 }
 
+/// One direct workspace-sibling dependency and the exact floor under test.
+class DeclaredFloorPin {
+  /// Creates a pin derived from [declaredConstraint].
+  const DeclaredFloorPin({
+    required this.package,
+    required this.declaredConstraint,
+    required this.floor,
+  });
+
+  /// The workspace sibling's pub package name.
+  final String package;
+
+  /// The constraint authored in the candidate's `dependencies` map.
+  final String declaredConstraint;
+
+  /// The inclusive minimum extracted from [declaredConstraint].
+  final String floor;
+
+  /// JSON form.
+  Map<String, dynamic> toJson() => {
+    'package': package,
+    'declaredConstraint': declaredConstraint,
+    'floor': floor,
+  };
+}
+
+/// The candidate's analyze verdict when every direct workspace sibling is
+/// exact-pinned at its DECLARED floor.
+///
+/// [ConsumerValidationResult] proves a consumer accepts the new version;
+/// this proves the candidate itself compiles against the minimums it
+/// PROMISES — the leg a pub workspace hides, because siblings resolve by path
+/// and a member added in one package is instantly visible in another.
+class DeclaredFloorsValidationResult {
+  /// Creates the structured declared-floors verdict.
+  const DeclaredFloorsValidationResult({
+    required this.candidate,
+    required this.pins,
+    required this.pubGetExitCode,
+    required this.analyzeExitCode,
+    required this.stdout,
+    required this.stderr,
+  });
+
+  /// The candidate pub package name.
+  final String candidate;
+
+  /// The exact sibling floors installed in `pubspec_overrides.yaml`.
+  final List<DeclaredFloorPin> pins;
+
+  /// The `dart pub get` exit code.
+  final int pubGetExitCode;
+
+  /// The `dart analyze` exit code, or null when pub get failed.
+  final int? analyzeExitCode;
+
+  /// Combined process stdout.
+  final String stdout;
+
+  /// Combined process stderr.
+  final String stderr;
+
+  /// Whether resolution and analysis both passed.
+  bool get passed => pubGetExitCode == 0 && analyzeExitCode == 0;
+
+  /// A self-contained diagnostic naming every sibling floor and raw tool
+  /// output — so a failure reads as "symbol X, sibling Y, floor Z".
+  String get message {
+    final floors = pins.isEmpty
+        ? 'no direct workspace-sibling dependencies'
+        : pins
+              .map(
+                (pin) =>
+                    '${pin.package}@${pin.floor} '
+                    '(declared ${pin.declaredConstraint})',
+              )
+              .join(', ');
+    final summary = passed
+        ? 'declared-floor validation passed for $candidate at $floors'
+        : 'declared-floor validation failed for $candidate at $floors';
+    final diagnostics = [
+      stderr.trim(),
+      stdout.trim(),
+    ].where((value) => value.isNotEmpty).join('\n');
+    return diagnostics.isEmpty ? summary : '$summary\n$diagnostics';
+  }
+
+  /// JSON form consumed inside the release scrub result.
+  Map<String, dynamic> toJson() => {
+    'candidate': candidate,
+    'pins': [for (final pin in pins) pin.toJson()],
+    'pubGetExitCode': pubGetExitCode,
+    'analyzeExitCode': analyzeExitCode,
+    'passed': passed,
+    'message': message,
+    'stdout': stdout,
+    'stderr': stderr,
+  };
+}
+
 /// One scrub-gate offence: a [file] + 1-based [line] where an internal
 /// reference leaked into text the published archive ships or pub.dev renders.
 class ScrubHit {
@@ -324,11 +425,13 @@ class ScrubHit {
 
 /// The scrub gate's structured verdict over a package dir.
 class ScrubResult {
-  /// Wraps the [hits] found scanning [root]'s [filesScanned] files.
+  /// Wraps the [hits] found scanning [root]'s [filesScanned] files, plus the
+  /// [declaredFloors] verdict when the complete gate ran.
   const ScrubResult({
     required this.root,
     required this.hits,
     required this.filesScanned,
+    this.declaredFloors,
   });
 
   /// The scanned package dir.
@@ -340,8 +443,15 @@ class ScrubResult {
   /// How many files were actually read (the coverage denominator).
   final int filesScanned;
 
-  /// The gate passes iff nothing leaked (genesis `publishing.md`: expect empty).
-  bool get clean => hits.isEmpty;
+  /// Present when the complete release scrub gate ran (i.e. through
+  /// [ReleaseService.scrubPackage]); null for a content-only
+  /// [ReleaseService.scrubDir] scan.
+  final DeclaredFloorsValidationResult? declaredFloors;
+
+  /// The gate passes iff nothing leaked (genesis `publishing.md`: expect empty)
+  /// AND — when it ran — the candidate compiled at its declared floors.
+  bool get clean =>
+      hits.isEmpty && (declaredFloors == null || declaredFloors!.passed);
 
   /// JSON form.
   Map<String, dynamic> toJson() => {
@@ -349,6 +459,7 @@ class ScrubResult {
     'clean': clean,
     'filesScanned': filesScanned,
     'hits': [for (final h in hits) h.toJson()],
+    if (declaredFloors != null) 'declaredFloors': declaredFloors!.toJson(),
   };
 }
 
@@ -649,6 +760,78 @@ class ReleaseService {
     return ConsumerValidationReport(rcTag: rcTag, results: results);
   }
 
+  /// Copies [packageDir], exact-pins its direct workspace siblings at their
+  /// DECLARED inclusive minimums, then runs `dart pub get` and `dart analyze`
+  /// in that throwaway copy.
+  ///
+  /// The inverse of [validateConsumers]: same `pubspec_overrides.yaml`
+  /// mechanism, but it pins the DEPENDENCIES' floors instead of the candidate.
+  /// A pub workspace resolves siblings by path, so a member added in one
+  /// package and used in another compiles green even when every published
+  /// floor in the chain predates it; this leg is what catches that before the
+  /// tag is cut. It resolves against pub.dev, so it belongs to the release
+  /// verb, never an offline unit suite.
+  ///
+  /// A structured/path sibling dependency, an `any`, or an exclusive lower
+  /// bound has no exact floor to pin and is a LOUD [StateError] naming that
+  /// sibling and its authored constraint (guards LOUD or GONE). Only the
+  /// top-level `dependencies` map is read — `dev_dependencies` are not part of
+  /// the published runtime contract.
+  Future<DeclaredFloorsValidationResult> validateDeclaredFloors({
+    required String packageDir,
+  }) async {
+    final candidateDir = Directory(p.normalize(p.absolute(packageDir)));
+    final candidatePubspecFile = File(
+      p.join(candidateDir.path, 'pubspec.yaml'),
+    );
+    final candidatePubspec = _readPubspec(candidatePubspecFile);
+    final candidate = _pubspecName(candidatePubspec, candidatePubspecFile.path);
+    final pins = _declaredFloorPins(
+      candidatePubspec,
+      workspacePackageNames: _workspacePackageNames(candidateDir),
+      pubspecPath: candidatePubspecFile.path,
+    );
+    final temp = await Directory.systemTemp.createTemp(
+      'release-declared-floors-',
+    );
+    try {
+      final copy = Directory(p.join(temp.path, candidate));
+      _copyPackage(candidateDir, copy);
+      _removeWorkspaceResolution(File(p.join(copy.path, 'pubspec.yaml')));
+      final overrides = pubspecOverridesForExactVersions({
+        for (final pin in pins) pin.package: pin.floor,
+      });
+      if (overrides != null) {
+        File(
+          p.join(copy.path, 'pubspec_overrides.yaml'),
+        ).writeAsStringSync(overrides);
+      }
+
+      final pubGet = await _run('dart', const [
+        'pub',
+        'get',
+      ], workingDirectory: copy.path);
+      ProcessResult? analyze;
+      if (pubGet.exitCode == 0) {
+        analyze = await _run('dart', const [
+          'analyze',
+        ], workingDirectory: copy.path);
+      }
+      return DeclaredFloorsValidationResult(
+        candidate: candidate,
+        pins: List<DeclaredFloorPin>.unmodifiable(pins),
+        pubGetExitCode: pubGet.exitCode,
+        analyzeExitCode: analyze?.exitCode,
+        stdout: '${pubGet.stdout}\n${analyze?.stdout ?? ''}',
+        stderr: '${pubGet.stderr}\n${analyze?.stderr ?? ''}',
+      );
+    } finally {
+      if (temp.existsSync()) {
+        await temp.delete(recursive: true);
+      }
+    }
+  }
+
   /// Cuts [stableTag] only after [validation] reports every consumer passed.
   Future<ReleaseTagResult> promoteTag({
     required String repoDir,
@@ -735,6 +918,20 @@ class ReleaseService {
       (a, b) => a.file != b.file ? a.file.compareTo(b.file) : a.line - b.line,
     );
     return ScrubResult(root: packageDir, hits: hits, filesScanned: scanned);
+  }
+
+  /// Runs the COMPLETE online release scrub gate for [packageDir]: the
+  /// content scan of [scrubDir] plus the [validateDeclaredFloors] leg. Both
+  /// verdicts ride ONE [ScrubResult] — the release skill parses one object.
+  Future<ScrubResult> scrubPackage(String packageDir) async {
+    final content = scrubDir(packageDir);
+    final floors = await validateDeclaredFloors(packageDir: packageDir);
+    return ScrubResult(
+      root: content.root,
+      hits: content.hits,
+      filesScanned: content.filesScanned,
+      declaredFloors: floors,
+    );
   }
 
   /// Resolves the dependency-order publish sequence for [deps] — a map of
@@ -852,6 +1049,172 @@ class ReleaseService {
       isPublished: isPublished,
     );
   }
+}
+
+/// Entries a throwaway candidate copy must NOT carry: workspace-resolved
+/// caches, the repo's own lock, the machine-local generated overrides, and
+/// build output. Everything else is copied so analysis sees the real sources.
+///
+/// `analysis_options.yaml` is excluded too, because the house one `include:`s a
+/// repo-root file by relative path — outside the checkout that resolves to
+/// nothing and analysis reports `include_file_not_found`, failing every
+/// candidate for a reason that has nothing to do with its floors. The leg's
+/// invariant is narrow on purpose: does the candidate COMPILE against the
+/// minimums it declares. Repo lint conformance is the workspace-green gate's
+/// job, and it runs against the real tree where the include resolves.
+const Set<String> _throwawayExclusions = {
+  '.dart_tool',
+  '.git',
+  'analysis_options.yaml',
+  'build',
+  'pubspec.lock',
+  'pubspec_overrides.yaml',
+};
+
+Map<Object?, Object?> _readPubspec(File file) {
+  if (!file.existsSync()) {
+    throw FileSystemException('Missing pubspec.yaml', file.path);
+  }
+  final Object? decoded = loadYaml(file.readAsStringSync());
+  if (decoded is! Map) {
+    throw FormatException('${file.path} must contain a YAML map');
+  }
+  return decoded.cast<Object?, Object?>();
+}
+
+String _pubspecName(Map<Object?, Object?> pubspec, String path) {
+  final name = pubspec['name'];
+  if (name is! String || name.isEmpty) {
+    throw FormatException('$path requires a non-empty package name');
+  }
+  PubLink.fromJson(<String, Object?>{'package': name});
+  return name;
+}
+
+/// Walks up from [candidateDir] for the pub workspace root that LISTS it, and
+/// yields every member's package name. No workspace -> an empty set (a
+/// standalone package has no siblings to pin).
+Set<String> _workspacePackageNames(Directory candidateDir) {
+  var cursor = candidateDir;
+  final candidatePath = p.normalize(candidateDir.absolute.path);
+  while (true) {
+    final rootPubspecFile = File(p.join(cursor.path, 'pubspec.yaml'));
+    if (rootPubspecFile.existsSync()) {
+      final rootPubspec = _readPubspec(rootPubspecFile);
+      final workspace = rootPubspec['workspace'];
+      if (workspace is List) {
+        final members = <Directory>[];
+        for (final value in workspace) {
+          if (value is! String) {
+            throw FormatException(
+              '${rootPubspecFile.path} workspace entries must be strings',
+            );
+          }
+          members.add(Directory(p.normalize(p.join(cursor.path, value))));
+        }
+        if (members.any(
+          (member) => p.normalize(member.absolute.path) == candidatePath,
+        )) {
+          return {
+            for (final member in members)
+              _pubspecName(
+                _readPubspec(File(p.join(member.path, 'pubspec.yaml'))),
+                p.join(member.path, 'pubspec.yaml'),
+              ),
+          };
+        }
+      }
+    }
+    final parent = cursor.parent;
+    if (parent.path == cursor.path) return const <String>{};
+    cursor = parent;
+  }
+}
+
+List<DeclaredFloorPin> _declaredFloorPins(
+  Map<Object?, Object?> pubspec, {
+  required Set<String> workspacePackageNames,
+  required String pubspecPath,
+}) {
+  final rawDependencies = pubspec['dependencies'];
+  if (rawDependencies == null) return const <DeclaredFloorPin>[];
+  if (rawDependencies is! Map) {
+    throw FormatException('$pubspecPath dependencies must be a map');
+  }
+  final pins = <DeclaredFloorPin>[];
+  for (final entry in rawDependencies.entries) {
+    final key = entry.key;
+    if (key is! String) {
+      throw FormatException('$pubspecPath dependency names must be strings');
+    }
+    if (!workspacePackageNames.contains(key)) continue;
+    final rawConstraint = entry.value;
+    if (rawConstraint is! String) {
+      throw StateError(
+        'workspace sibling "$key" declares a non-hosted dependency in '
+        '$pubspecPath; an exact declared floor cannot be derived',
+      );
+    }
+    final VersionConstraint constraint;
+    try {
+      constraint = VersionConstraint.parse(rawConstraint);
+    } on FormatException catch (error) {
+      throw StateError(
+        'workspace sibling "$key" has malformed declared constraint '
+        '"$rawConstraint": $error',
+      );
+    }
+    final floor = switch (constraint) {
+      VersionRange(min: final min, includeMin: true) => min,
+      _ => null,
+    };
+    if (floor == null) {
+      throw StateError(
+        'workspace sibling "$key" constraint "$rawConstraint" has no '
+        'inclusive declared floor to exact-pin',
+      );
+    }
+    pins.add(
+      DeclaredFloorPin(
+        package: key,
+        declaredConstraint: rawConstraint,
+        floor: floor.toString(),
+      ),
+    );
+  }
+  pins.sort((a, b) => a.package.compareTo(b.package));
+  return pins;
+}
+
+void _copyPackage(Directory source, Directory target) {
+  target.createSync(recursive: true);
+  for (final entity in source.listSync(followLinks: false)) {
+    final name = p.basename(entity.path);
+    if (_throwawayExclusions.contains(name)) continue;
+    final destination = p.join(target.path, name);
+    if (entity is File) {
+      entity.copySync(destination);
+    } else if (entity is Directory) {
+      _copyPackage(entity, Directory(destination));
+    } else if (entity is Link) {
+      Link(destination).createSync(entity.targetSync());
+    } else {
+      throw StateError('unsupported package entry: ${entity.path}');
+    }
+  }
+}
+
+/// Strips `resolution: workspace` so the copy resolves STANDALONE — the whole
+/// point of the leg is to stop siblings resolving by path.
+void _removeWorkspaceResolution(File pubspec) {
+  final standalone = const LineSplitter()
+      .convert(pubspec.readAsStringSync())
+      .where(
+        (line) =>
+            !RegExp(r'^resolution:\s*workspace\s*(?:#.*)?$').hasMatch(line),
+      )
+      .join('\n');
+  pubspec.writeAsStringSync('$standalone\n');
 }
 
 List<String> _hiddenOverlaySourceWarnings(String packageDir) {
