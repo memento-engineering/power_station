@@ -1589,12 +1589,39 @@ class CriticCapability extends ProcessCapability {
               null
           ? GateOutcome.probeError
           : GateOutcome.clear;
+    } on CapabilityFailure {
+      // The strict decoder already NAMED this failure's kind and bounded its
+      // receipt: a malformed completion contract is an `invalidResult`, and
+      // flattening it into the fail-closed `probeError` would spend the whole
+      // circuit's restart budget on it and read to an operator like an F.
+      rethrow;
     } on RouteFailure {
       return GateOutcome.probeError;
     } on Object {
       return GateOutcome.probeError;
     }
   }
+
+  /// Gives an invalid critic artifact one repair restart before a visible gate.
+  ///
+  /// The engine tests exhaustion after incrementing the restart cursor, so
+  /// [RetryPolicy.maxRestarts] of two means one initial attempt plus one
+  /// repair. This conservative bound and [Backoff.standard] remain in force
+  /// until tg-5drf supplies retained invalid-output and retry distributions.
+  ///
+  /// Only `invalidResult` is declared: `work` (a real F) and `noResult` (no
+  /// artifact at all) keep the circuit's own budget, so a broken completion
+  /// CONTRACT is the only thing this narrows.
+  @override
+  SupervisionPolicy supervisionPolicy(StepArgs args) => const SupervisionPolicy(
+    byKind: {
+      CapabilityFailureKind.invalidResult: RetryPolicy(
+        maxRestarts: 2,
+        backoff: Backoff.standard,
+        onExhaustion: ExhaustionBehavior.parkAtGate,
+      ),
+    },
+  );
 
   /// Stamps THIS incarnation's spawn instant for [rubric] under [workspaceDir]
   /// — the marker [restampVerdictRound] reads as its freshness proof.
@@ -1724,8 +1751,11 @@ class CriticCapability extends ProcessCapability {
 
   /// Returns a corrective instruction when the canonical artifact from a prior
   /// failed attempt violated the verdict contract. Engine supervision restarts
-  /// the failed process lane under its default budget; the restarted [spawn]
-  /// appends this instruction without replacing the lease-vended allocation.
+  /// the failed process lane under [supervisionPolicy]'s invalid-result budget;
+  /// the restarted [spawn] appends this instruction without replacing the
+  /// lease-vended allocation. The instruction carries the SAME bounded receipt
+  /// the engine was handed ([_InvalidVerdictFailure]), so the repairing critic
+  /// reads exactly what the operator does.
   @protected
   String criticRepairInstruction({
     required String workspaceDir,
@@ -1741,7 +1771,11 @@ class CriticCapability extends ProcessCapability {
       readText: _verdictTextReader,
     );
     final reason = switch (read) {
-      _VerdictFileInvalid(:final reason) => reason,
+      _VerdictFileInvalid(:final path, :final detail) => _InvalidVerdictFailure(
+        rubric: rubric,
+        artifactPath: path,
+        detail: detail,
+      ).reason,
       _VerdictFileUnstamped(:final reason) => reason,
       _ => null,
     };
@@ -1838,6 +1872,7 @@ class CriticCapability extends ProcessCapability {
             requireOwner: requiresVerdictOwner,
             readText: _verdictTextReader,
           ),
+          rubric: rubric,
         ) ??
         _payloadOrNull(
           _strayVerdict(
@@ -1847,6 +1882,7 @@ class CriticCapability extends ProcessCapability {
             round,
             requireOwner: requiresVerdictOwner,
           ),
+          rubric: rubric,
         );
     if (graded == null) {
       throw RouteFailure(
@@ -2375,8 +2411,6 @@ final class _VerdictFileInvalid extends _VerdictFileRead {
 
   final String path;
   final String detail;
-
-  String get reason => 'invalid critic verdict at $path: $detail';
 }
 
 final class _VerdictFileUnstamped extends _VerdictFileRead {
@@ -2399,14 +2433,38 @@ String _verdictErrorDetail(Object error) => switch (error) {
   _ => error.toString(),
 };
 
-final class _InvalidVerdictFailure extends RouteFailure {
-  const _InvalidVerdictFailure(super.reason);
+/// A malformed or incomplete verdict artifact, reported through the engine's
+/// TYPED non-result seam as [CapabilityFailureKind.invalidResult] — a broken
+/// completion CONTRACT, never a substantive `F`.
+///
+/// The receipt leads with the rubric and the artifact path and only then the
+/// parser's own detail, because the engine bounds a reason AT CONSTRUCTION
+/// ([kMaxReasonChars]): putting the identity fields first means a long parser
+/// detail can be truncated without ever costing an operator the two facts that
+/// say WHICH lane and WHICH file to look at.
+final class _InvalidVerdictFailure extends CapabilityFailure {
+  _InvalidVerdictFailure({
+    required String rubric,
+    required String artifactPath,
+    required String detail,
+  }) : super.invalidResult(
+         'invalid critic verdict for rubric "$rubric" at $artifactPath: '
+         '$detail',
+       );
 }
 
-Map<String, String>? _payloadOrNull(_VerdictFileRead read) => switch (read) {
+Map<String, String>? _payloadOrNull(
+  _VerdictFileRead read, {
+  required String rubric,
+}) => switch (read) {
   _VerdictFileAccepted(:final payload) => payload,
   _VerdictFileMissing() || _VerdictFileRejected() => null,
-  _VerdictFileInvalid(:final reason) => throw _InvalidVerdictFailure(reason),
+  _VerdictFileInvalid(:final path, :final detail) =>
+    throw _InvalidVerdictFailure(
+      rubric: rubric,
+      artifactPath: path,
+      detail: detail,
+    ),
   _VerdictFileUnstamped(:final reason) => throw RouteFailure(reason),
 };
 
@@ -2421,10 +2479,12 @@ Map<String, String>? _payloadOrNull(_VerdictFileRead read) => switch (read) {
 /// write, a mis-keyed lane — A4); `round` rejects a verdict THIS node wrote in
 /// an EARLIER round (A15(5) alt-A — under `RouteVerdict.Rewind` the node path is
 /// byte-identical round to round, so `nodePath` alone cannot see it). A malformed
-/// or incomplete verdict is surfaced through [_payloadOrNull] as a
-/// [RouteFailure], so the lease-vended process allocation reports
-/// [AllocationFailed]. Engine supervision may restart the lane under its
-/// default budget; the next [CriticCapability.spawn] appends
+/// or incomplete verdict is surfaced through [_payloadOrNull] as an
+/// [_InvalidVerdictFailure], so the lease-vended process allocation reports
+/// [AllocationFailed] of kind [CapabilityFailureKind.invalidResult] — a broken
+/// completion CONTRACT, never a substantive F. Engine supervision restarts the
+/// lane under [CriticCapability.supervisionPolicy]'s critic-lane budget, and
+/// the next [CriticCapability.spawn] appends
 /// [CriticCapability.criticRepairInstruction]. Only absent, stale, or foreign
 /// verdicts are misses that can fall through to the stray / RESULT TEXT /
 /// fail-closed chain.
@@ -2520,7 +2580,8 @@ _VerdictFileRead _verdictFromFile(
 /// [rubric]'s CANONICAL verdict payload under [workspaceDir], iff it parses AND
 /// carries THIS [nodePath] + THIS [round]'s freshness stamps — null for an
 /// absent, foreign, or PRIOR-ROUND file. A malformed or incomplete present
-/// artifact throws [RouteFailure].
+/// artifact throws `CapabilityFailure.invalidResult`, naming the rubric, the
+/// artifact path, and the parser's own detail.
 ///
 /// A thin public wrapper over the ONE parser+fence ([_verdictFromFile] via
 /// [_payloadOrNull]) so a route JOIN can apply the same current-round rule
@@ -2544,6 +2605,7 @@ Map<String, String>? currentVerdictFromFile({
     expectedRound: round,
     requireOwner: requireOwner,
   ),
+  rubric: rubric,
 );
 
 /// [currentVerdictFromFile] widened to the SAME transport reach `result()` has
@@ -2576,6 +2638,7 @@ Map<String, String>? currentVerdictOnDisk({
         round,
         requireOwner: requireOwner,
       ),
+      rubric: rubric,
     );
 
 /// A round-fresh verdict a critic wrote to a STRAY
@@ -2597,7 +2660,8 @@ Map<String, String>? currentVerdictOnDisk({
 /// verdicts continue the fallback chain; stale or foreign stamps continue the
 /// fallback chain per A4/A15; a present parseable stray verdict missing the
 /// freshness stamp is discarded as [_VerdictFileUnstamped], which fails the lane
-/// through [RouteFailure] so the process lane retries. Best-effort for directory
+/// through [RouteFailure] so the process lane retries; a malformed stray fails it
+/// through the typed [_InvalidVerdictFailure] instead. Best-effort for directory
 /// traversal; parse outcomes remain explicit.
 _VerdictFileRead _strayVerdict(
   String workspaceDir,

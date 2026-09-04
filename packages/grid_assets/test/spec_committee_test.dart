@@ -994,11 +994,22 @@ void main() {
       await expectLater(
         cap.result(c.context, c.args),
         throwsA(
-          isA<RouteFailure>().having(
-            (e) => e.reason,
-            'reason',
-            allOf(contains(kVerdictOwnerKey), contains('WHO can fix this')),
-          ),
+          isA<CapabilityFailure>()
+              .having(
+                (e) => e.kind,
+                'kind',
+                CapabilityFailureKind.invalidResult,
+              )
+              .having(
+                (e) => e.reason,
+                'reason',
+                allOf(
+                  contains('rubric "coherence"'),
+                  contains(verdict.path),
+                  contains(kVerdictOwnerKey),
+                  contains('WHO can fix this'),
+                ),
+              ),
         ),
       );
 
@@ -1015,7 +1026,13 @@ void main() {
       );
       await expectLater(
         cap.result(c.context, c.args),
-        throwsA(isA<RouteFailure>()),
+        throwsA(
+          isA<CapabilityFailure>().having(
+            (e) => e.kind,
+            'kind',
+            CapabilityFailureKind.invalidResult,
+          ),
+        ),
       );
 
       verdict.writeAsStringSync(
@@ -1232,17 +1249,23 @@ void main() {
       await expectLater(
         const SpecCriticCapability().result(c.context, c.args),
         throwsA(
-          isA<RouteFailure>()
+          isA<CapabilityFailure>()
+              .having(
+                (e) => e.kind,
+                'kind',
+                CapabilityFailureKind.invalidResult,
+              )
               .having(
                 (e) => e.reason,
                 'reason',
-                'invalid critic verdict at ${verdict.path}: nodePath must be '
-                    'a non-empty string',
+                'invalid critic verdict for rubric "coherence" at '
+                    '${verdict.path}: nodePath must be a non-empty string',
               )
               .having(
                 (e) => e.toString(),
                 'toString',
-                'invalid critic verdict at ${verdict.path}: nodePath must be '
+                'CapabilityFailure(invalidResult): invalid critic verdict for '
+                    'rubric "coherence" at ${verdict.path}: nodePath must be '
                     'a non-empty string',
               ),
         ),

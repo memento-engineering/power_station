@@ -135,11 +135,21 @@ void main() {
           round: 0,
         ),
         throwsA(
-          isA<RouteFailure>().having(
-            (failure) => failure.reason,
-            'reason',
-            allOf(contains(verdict.path), contains('escape')),
-          ),
+          isA<CapabilityFailure>()
+              .having(
+                (failure) => failure.kind,
+                'kind',
+                CapabilityFailureKind.invalidResult,
+              )
+              .having(
+                (failure) => failure.reason,
+                'reason',
+                allOf(
+                  contains('rubric "$rubric"'),
+                  contains(verdict.path),
+                  contains('escape'),
+                ),
+              ),
         ),
       );
     });
