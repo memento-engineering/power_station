@@ -7,14 +7,18 @@
 // own rubric (anti-anchoring) and write a verdict JSON `result()` parses. Zero
 // I/O — no real `claude`/`sh`: the spawn config is inspected directly and
 // `result()` reads files a test writes into a temp dir.
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:genesis_tree/genesis_tree.dart';
 import 'package:grid_assets/grid_assets.dart';
 import 'package:beads_dart/beads_dart.dart';
 import 'package:grid_engine/grid_engine.dart';
-import 'package:grid_engine/testing.dart';
+import 'package:grid_engine/src/molecule/bead_path_key.dart';
+import 'package:grid_engine/src/molecule/inherited_circuit.dart';
 import 'package:grid_runtime/grid_runtime.dart';
+import 'package:grid_sdk/grid_sdk.dart' show ProviderScope;
 import 'package:test/test.dart';
 
 import 'support/asset_fakes.dart';
@@ -135,8 +139,62 @@ final class _UnexpectedReadFailure implements Exception {
   String toString() => 'unexpected verdict read failure: $message';
 }
 
-String _throwUnexpectedRead(File _) =>
-    throw const _UnexpectedReadFailure('torn read seam');
+/// The detail prefix every [_UnexpectedReadFailure] receipt leads with.
+const _readFailureDetail = 'unexpected verdict read failure: ';
+
+/// A reader whose failure detail ALONE overruns the engine's reason bound, so
+/// the receipt can only stay inside [kMaxReasonChars] by truncating the detail
+/// — which is exactly what proves the rubric and path are written FIRST.
+String _throwLongUnexpectedRead(File _) =>
+    throw _UnexpectedReadFailure('torn read seam ${'x' * kMaxReasonChars}');
+
+/// The typed non-result the strict decoder REPORTS for a malformed or
+/// incomplete artifact: kind `invalidResult` (a broken completion contract,
+/// never a substantive F), and a bounded receipt naming the lane and the file
+/// before the parser's own detail.
+Matcher _invalidVerdictReport({
+  required String rubric,
+  required String path,
+  required String detail,
+}) => isA<AllocationFailed>()
+    .having(
+      (failure) => failure.kind,
+      'kind',
+      CapabilityFailureKind.invalidResult,
+    )
+    .having(
+      (failure) => failure.reason,
+      'receipt',
+      allOf(contains('rubric "$rubric"'), contains(path), contains(detail)),
+    )
+    .having(
+      (failure) => failure.reason.length,
+      'bounded receipt length',
+      lessThanOrEqualTo(kMaxReasonChars),
+    );
+
+/// [_invalidVerdictReport]'s THROWN twin, for the hooks a test drives directly
+/// instead of through an allocation.
+Matcher _invalidVerdictThrow({
+  required String rubric,
+  required String path,
+  required String detail,
+}) => isA<CapabilityFailure>()
+    .having(
+      (failure) => failure.kind,
+      'kind',
+      CapabilityFailureKind.invalidResult,
+    )
+    .having(
+      (failure) => failure.reason,
+      'receipt',
+      allOf(contains('rubric "$rubric"'), contains(path), contains(detail)),
+    )
+    .having(
+      (failure) => failure.reason.length,
+      'bounded receipt length',
+      lessThanOrEqualTo(kMaxReasonChars),
+    );
 
 void main() {
   group('critic completion artifact durability', () {
@@ -192,9 +250,17 @@ void main() {
           GateOutcome.clear,
         );
         verdict.writeAsStringSync('not json');
-        expect(
-          await cap.probeCompletionArtifact(c.context, c.args),
-          GateOutcome.probeError,
+        // The probe no longer FLATTENS a broken completion contract into the
+        // fail-closed `probeError`: it reports the kind the decoder named.
+        await expectLater(
+          cap.probeCompletionArtifact(c.context, c.args),
+          throwsA(
+            _invalidVerdictThrow(
+              rubric: rubric,
+              path: verdict.path,
+              detail: 'Unexpected character',
+            ),
+          ),
         );
         verdict.deleteSync();
         File('${dir.path}/pkg/.grid/critique/$rubric.json')
@@ -606,10 +672,10 @@ void main() {
         await expectLater(
           cap.result(c.context, c.args),
           throwsA(
-            isA<RouteFailure>().having(
-              (failure) => failure.reason,
-              'reason',
-              allOf(contains(verdict.path), contains('Unexpected character')),
+            _invalidVerdictThrow(
+              rubric: 'test-coverage',
+              path: verdict.path,
+              detail: 'Unexpected character',
             ),
           ),
         );
@@ -705,7 +771,14 @@ void main() {
 
       expect(reports.whereType<AllocationCompleted>(), isEmpty);
       final failed = reports.whereType<AllocationFailed>().single;
-      expect(failed.reason, 'unresolved: completion artifact probe failed');
+      expect(
+        failed,
+        _invalidVerdictReport(
+          rubric: rubric,
+          path: '${dir.path}/.grid/critique/$rubric.json',
+          detail: 'nodePath must be a non-empty string',
+        ),
+      );
       expect(failed.reason, isNot(contains('Bad state:')));
     });
 
@@ -731,10 +804,10 @@ void main() {
       await expectLater(
         const CriticCapability().result(c.context, c.args),
         throwsA(
-          isA<RouteFailure>().having(
-            (failure) => failure.reason,
-            'reason',
-            contains('round must be an integer'),
+          _invalidVerdictThrow(
+            rubric: 'test-coverage',
+            path: '${dir.path}/.grid/critique/test-coverage.json',
+            detail: 'round must be an integer',
           ),
         ),
       );
@@ -793,10 +866,10 @@ void main() {
         await expectLater(
           const CriticCapability().result(c.context, c.args),
           throwsA(
-            isA<RouteFailure>().having(
-              (failure) => failure.reason,
-              'reason',
-              allOf(contains(verdict.path), contains(field)),
+            _invalidVerdictThrow(
+              rubric: 'test-coverage',
+              path: verdict.path,
+              detail: field,
             ),
           ),
         );
@@ -804,27 +877,50 @@ void main() {
     });
 
     test(
-      'unknown verdict read exceptions fail the allocation loudly without a grade',
+      'an UNREADABLE fresh artifact is a typed bounded non-result, not a grade',
       () async {
         final dir = Directory.systemTemp.createTempSync('critic-read-failure-');
         addTearDown(() => dir.deleteSync(recursive: true));
         const rubric = 'regression-risk';
         const nodePath = 'tg-1/review/regression-risk';
-        File('${dir.path}/.grid/critique/$rubric.json')
+        // A verdict the NORMAL probe clears (it reads with the real reader), so
+        // the injected torn read is what the result hook — and only the result
+        // hook — trips over.
+        final verdict = File('${dir.path}/.grid/critique/$rubric.json')
           ..createSync(recursive: true)
-          ..writeAsStringSync('{}');
+          ..writeAsStringSync(
+            jsonEncode({
+              'grade': 'B',
+              'rationale': 'a narrow blast radius',
+              'nodePath': nodePath,
+              'round': 0,
+            }),
+          );
         final reports = await _runCriticAllocation(
           dir: dir,
           rubric: rubric,
           nodePath: nodePath,
           capability: const CriticCapability(
-            verdictTextReader: _throwUnexpectedRead,
+            verdictTextReader: _throwLongUnexpectedRead,
           ),
         );
 
         expect(reports.whereType<AllocationCompleted>(), isEmpty);
-        final failed = reports.whereType<AllocationFailed>().single;
-        expect(failed.reason, 'unresolved: completion artifact probe failed');
+        expect(
+          reports.whereType<AllocationFailed>().single,
+          _invalidVerdictReport(
+            rubric: rubric,
+            path: verdict.path,
+            detail: _readFailureDetail,
+          ),
+        );
+        expect(
+          reports.whereType<AllocationFailed>().single.reason.length,
+          kMaxReasonChars,
+          reason:
+              'the detail alone overruns the bound, so the receipt is cut — '
+              'and the rubric/path it leads with survive the cut',
+        );
       },
     );
 
@@ -858,17 +954,17 @@ void main() {
         await expectLater(
           const CriticCapability().result(c.context, c.args),
           throwsA(
-            isA<RouteFailure>().having(
-              (failure) => failure.reason,
-              'reason',
-              allOf(contains(verdict.path), contains('escape')),
+            _invalidVerdictThrow(
+              rubric: incident.rubric,
+              path: verdict.path,
+              detail: 'escape',
             ),
           ),
         );
       }
     });
 
-    test('a restarted lane appends one verdict repair instruction', () async {
+    test('repair prompt carries the bounded invalid-result receipt once', () {
       final dir = Directory.systemTemp.createTempSync('critic-reask-');
       addTearDown(() => dir.deleteSync(recursive: true));
       const rubric = 'regression-risk';
@@ -879,20 +975,224 @@ void main() {
         workspaceDir: dir.path,
         nodePath: nodePath,
       );
-      final firstPrompt = const CriticCapability()
-          .spawn(c.context, c.args)
-          .args
-          .join(' ');
+      const capability = CriticCapability(
+        verdictTextReader: _throwLongUnexpectedRead,
+      );
+      final firstPrompt = capability.spawn(c.context, c.args).args.join(' ');
       expect(firstPrompt, isNot(contains('## Verdict contract repair')));
+
       verdict
         ..createSync(recursive: true)
-        ..writeAsStringSync('not json');
-      final restartedPrompt = const CriticCapability()
+        ..writeAsStringSync('{}');
+      final restartedPrompt = capability
           .spawn(c.context, c.args)
           .args
           .join(' ');
-      expect(restartedPrompt, contains('Unexpected character'));
       expect(restartedPrompt.split('## Verdict contract repair').length - 1, 1);
+
+      // The prompt carries the SAME receipt the engine was handed — one
+      // section, the rubric, the canonical path, the parser detail, bounded.
+      final receipt = restartedPrompt
+          .split('The previous artifact was refused: ')
+          .last
+          .split('\n')
+          .first;
+      expect(receipt, contains('rubric "$rubric"'));
+      expect(receipt, contains(verdict.path));
+      expect(receipt, contains(_readFailureDetail));
+      expect(receipt.length, lessThanOrEqualTo(kMaxReasonChars));
+      expect(
+        receipt,
+        isNot(matches(RegExp(r'\bgrade of [A-F]\b'))),
+        reason: 'the repair receipt reports the CONTRACT breach, never a grade',
+      );
+    });
+
+    test('invalid verdict shapes are typed bounded non-results', () async {
+      const rubric = 'regression-risk';
+      const nodePath = 'tg-1/review/regression-risk';
+      const valid = {
+        'grade': 'B',
+        'rationale': 'a narrow blast radius',
+        'nodePath': nodePath,
+        'round': 0,
+      };
+      Map<String, Object> without(String field) =>
+          Map<String, Object>.of(valid)..remove(field);
+      Map<String, Object> with_(String field, Object value) =>
+          Map<String, Object>.of(valid)..[field] = value;
+
+      final rows =
+          <({String shape, String body, String detail, CriticCapability cap})>[
+            (
+              shape: 'malformed JSON',
+              body: 'not json',
+              detail: 'Unexpected character',
+              cap: const CriticCapability(),
+            ),
+            (
+              shape: 'a non-object (list) root',
+              body: '[]',
+              detail: 'root must be a JSON object',
+              cap: const CriticCapability(),
+            ),
+            (
+              shape: 'a missing grade',
+              body: jsonEncode(without('grade')),
+              detail: 'grade must be a non-empty string',
+              cap: const CriticCapability(),
+            ),
+            (
+              shape: 'a blank grade',
+              body: jsonEncode(with_('grade', '   ')),
+              detail: 'grade must be a non-empty string',
+              cap: const CriticCapability(),
+            ),
+            (
+              shape: 'an off-ladder grade',
+              body: jsonEncode(with_('grade', 'G')),
+              detail: 'grade must be one of A–F',
+              cap: const CriticCapability(),
+            ),
+            (
+              shape: 'a missing rationale',
+              body: jsonEncode(without('rationale')),
+              detail: 'rationale must be a non-empty string',
+              cap: const CriticCapability(),
+            ),
+            (
+              shape: 'a blank rationale',
+              body: jsonEncode(with_('rationale', '  ')),
+              detail: 'rationale must be a non-empty string',
+              cap: const CriticCapability(),
+            ),
+            (
+              shape: 'an owner off the closed vocabulary',
+              body: jsonEncode(with_(kVerdictOwnerKey, 'nobody')),
+              detail:
+                  '$kVerdictOwnerKey must be one of ${kVerdictOwners.join('|')}',
+              cap: const CriticCapability(),
+            ),
+            (
+              // The owner column is a per-FAMILY switch (A37): only the spec
+              // critic is held to it, and only on an actionable D/E.
+              shape: 'a D naming no owner, under the spec family',
+              body: jsonEncode(with_('grade', 'D')),
+              detail: 'a grade of D REQUIRES',
+              cap: const SpecCriticCapability(),
+            ),
+            (
+              shape: 'a missing nodePath',
+              body: jsonEncode(without('nodePath')),
+              detail: 'nodePath must be a non-empty string',
+              cap: const CriticCapability(),
+            ),
+            (
+              shape: 'a blank nodePath',
+              body: jsonEncode(with_('nodePath', '   ')),
+              detail: 'nodePath must be a non-empty string',
+              cap: const CriticCapability(),
+            ),
+            (
+              shape: 'a missing round',
+              body: jsonEncode(without('round')),
+              detail: 'round must be an integer or integer-readable string',
+              cap: const CriticCapability(),
+            ),
+            (
+              shape: 'a non-integer round',
+              body: jsonEncode(with_('round', 'not-a-number')),
+              detail: 'round must be an integer or integer-readable string',
+              cap: const CriticCapability(),
+            ),
+          ];
+
+      for (final row in rows) {
+        final dir = Directory.systemTemp.createTempSync('critic-invalid-');
+        addTearDown(() => dir.deleteSync(recursive: true));
+        final verdict = File('${dir.path}/.grid/critique/$rubric.json')
+          ..createSync(recursive: true)
+          ..writeAsStringSync(row.body);
+
+        final reports = await _runCriticAllocation(
+          dir: dir,
+          rubric: rubric,
+          nodePath: nodePath,
+          capability: row.cap,
+        );
+
+        expect(
+          reports.whereType<AllocationCompleted>(),
+          isEmpty,
+          reason: '${row.shape} must never contribute a grade',
+        );
+        expect(
+          reports.whereType<AllocationFailed>().single,
+          _invalidVerdictReport(
+            rubric: rubric,
+            path: verdict.path,
+            detail: row.detail,
+          ),
+          reason: row.shape,
+        );
+      }
+    });
+
+    test('valid A through F verdicts complete unchanged', () async {
+      const rubric = 'regression-risk';
+      const nodePath = 'tg-1/review/regression-risk';
+      for (final grade in ['A', 'B', 'C', 'D', 'E', 'F']) {
+        final dir = Directory.systemTemp.createTempSync('critic-grade-');
+        addTearDown(() => dir.deleteSync(recursive: true));
+        File('${dir.path}/.grid/critique/$rubric.json')
+          ..createSync(recursive: true)
+          ..writeAsStringSync(
+            jsonEncode({
+              'grade': grade,
+              'rationale': 'the lane graded it $grade',
+              'nodePath': nodePath,
+              'round': 0,
+            }),
+          );
+
+        final reports = await _runCriticAllocation(
+          dir: dir,
+          rubric: rubric,
+          nodePath: nodePath,
+        );
+
+        // F is a REAL verdict — the substantive negative result the whole
+        // typed-non-result seam exists NOT to swallow.
+        final completed = reports.whereType<AllocationCompleted>().single;
+        expect(reports.whereType<AllocationFailed>(), isEmpty);
+        expect(completed.payload!['grade'], grade);
+        expect(completed.payload!['transport'], 'file');
+      }
+    });
+
+    test('critic invalid-result policy permits one repair retry', () {
+      final policy = const CriticCapability().supervisionPolicy(
+        stepArgs(
+          'tg-1/review/regression-risk',
+          params: const {'rubric': 'regression-risk'},
+        ),
+      );
+      expect(
+        policy.policyFor(CapabilityFailureKind.invalidResult),
+        const RetryPolicy(
+          maxRestarts: 2,
+          backoff: Backoff.standard,
+          onExhaustion: ExhaustionBehavior.parkAtGate,
+        ),
+      );
+      // Only the broken CONTRACT is narrowed: a real F and a missing artifact
+      // keep the circuit's own budget.
+      expect(policy.policyFor(CapabilityFailureKind.work), const RetryPolicy());
+      expect(
+        policy.policyFor(CapabilityFailureKind.noResult),
+        const RetryPolicy(),
+      );
+      expect(Backoff.standard.delayFor(1), const Duration(seconds: 1));
     });
 
     test('an injected rubric source replaces the inline placeholder', () {
@@ -1000,7 +1300,13 @@ void main() {
         final c = _ctx(rubric: rubric, workspaceDir: dir.path);
         await expectLater(
           const CriticCapability().result(c.context, c.args),
-          throwsA(isA<RouteFailure>()),
+          throwsA(
+            _invalidVerdictThrow(
+              rubric: rubric,
+              path: '${dir.path}/.grid/critique/$rubric.json',
+              detail: 'Unexpected character',
+            ),
+          ),
         );
       },
     );
@@ -1173,7 +1479,13 @@ void main() {
       final c = _ctx(rubric: rubric, workspaceDir: dir.path);
       await expectLater(
         const CriticCapability().result(c.context, c.args),
-        throwsA(isA<RouteFailure>()),
+        throwsA(
+          _invalidVerdictThrow(
+            rubric: rubric,
+            path: '${dir.path}/.grid/critique/$rubric.json',
+            detail: 'Unexpected character',
+          ),
+        ),
       );
     });
 
@@ -1204,7 +1516,13 @@ void main() {
       final c = _ctx(rubric: rubric, workspaceDir: dir.path);
       await expectLater(
         const CriticCapability().result(c.context, c.args),
-        throwsA(isA<RouteFailure>()),
+        throwsA(
+          _invalidVerdictThrow(
+            rubric: rubric,
+            path: '${dir.path}/.grid/critique/$rubric.json',
+            detail: 'Unexpected character',
+          ),
+        ),
       );
     });
 
@@ -1713,12 +2031,15 @@ void main() {
         transport: flares,
       );
 
-      expect(
-        await const CriticCapability().probeCompletionArtifact(
-          c.context,
-          c.args,
+      await expectLater(
+        const CriticCapability().probeCompletionArtifact(c.context, c.args),
+        throwsA(
+          _invalidVerdictThrow(
+            rubric: rubric,
+            path: canonical,
+            detail: 'round must be an integer or integer-readable string',
+          ),
         ),
-        GateOutcome.probeError,
       );
       expect(File(canonical).readAsStringSync(), before);
       expect(
@@ -1819,6 +2140,164 @@ void main() {
       );
     });
   });
+
+  group('critic invalid-result EXHAUSTION (the visible gate)', () {
+    test(
+      'parks one actionable gate, with no failed cursor and no grade',
+      () async {
+        final fakes = buildFakes();
+        final owner = TreeOwner();
+        addTearDown(() {
+          owner.dispose();
+          unawaited(fakes.provider.close());
+        });
+        const receipt =
+            'invalid critic verdict for rubric "regression-risk" at '
+            '/w/tg-1/.grid/critique/regression-risk.json: '
+            'grade must be one of A–F';
+
+        final root = owner.mountRoot(
+          ProviderScope(
+            child: InheritedSeed<StationServices>(
+              value: fakes.ctx,
+              child: InheritedSeed<CapabilityRegistry>(
+                value: RecordingCapabilityRegistry(clock: DateTime(2026)),
+                child: InheritedSeed<InheritedCircuit>(
+                  value: _criticCircuit,
+                  child: const CapabilityHost(
+                    capability: _CriticPolicyProbeCapability(),
+                    mount: _criticMount,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+        await pumpEventQueue();
+        fakes.runner.calls.clear();
+
+        final hostBranch =
+            _branchWithSeed<CapabilityHost>(root) as StatefulBranch;
+        // ignore: invalid_use_of_protected_member
+        final host = hostBranch.state as CapabilityHostState;
+        // The SECOND invalid attempt: the mount's cursor already carries one
+        // restart, so the declared budget of two is spent by this report.
+        host.deliverReportForTest(
+          const AllocationFailed.invalidResult(receipt),
+        );
+        await pumpEventQueue();
+
+        final stepMetadata = callMetadata(
+          fakes.runner
+              .callsFor('update')
+              .firstWhere((call) => call.contains(_criticStepBeadId)),
+        );
+        expect(stepMetadata[MoleculeStepKeys.state], 'gated');
+        expect(
+          stepMetadata.containsKey(
+            ResultKeys.keyFor(_criticNodePath, ResultKeys.grade),
+          ),
+          isFalse,
+          reason: 'an unusable artifact contributes NO grade to the committee',
+        );
+
+        // Exactly ONE actionable gate — not a whole-round replay.
+        expect(fakes.runner.callsFor('create'), hasLength(1));
+        expect(
+          fakes.runner.callsFor('create').single,
+          containsAllInOrder(['--type', 'gate']),
+        );
+        final gateMetadata = fakes.runner
+            .callsFor('update')
+            .map(callMetadata)
+            .firstWhere((metadata) => metadata.containsKey('reason'));
+        expect(gateMetadata['reason'], contains('invalid_result'));
+        expect(gateMetadata['reason'], contains(receipt));
+
+        for (final call in fakes.runner.calls) {
+          expect(call.join(' '), isNot(contains('grid.step.state=failed')));
+        }
+      },
+    );
+  });
 }
 
 void _throwingClearer(String dir) => throw StateError('disk is full');
+
+// ── the invalid-result exhaustion harness ────────────────────────────────────
+//
+// PRODUCTION critics keep riding the lease-vended `ProcessAllocation`; this
+// passive allocation exists only so the host has an effect to drive while the
+// REAL `CriticCapability.supervisionPolicy` decides what its failure costs.
+
+const _criticNodePath = 'tg-1/regression-risk';
+const _criticStepBeadId = 'tgdog-step-regression-risk';
+
+const _criticCircuitValue = Circuit(
+  id: 'code_review',
+  terminalStepId: 'regression-risk',
+  maxRestarts: 3,
+  steps: [CapabilityStep(stepId: 'regression-risk', capabilityId: 'critic')],
+);
+
+const _criticMount = StepMount(
+  step: CapabilityStep(stepId: 'regression-risk', capabilityId: 'critic'),
+  nodePath: _criticNodePath,
+  circuit: _criticCircuitValue,
+  circuitPath: 'tg-1',
+  session: SessionHandle('tgdog-s'),
+  // The FIRST supervised restart is already spent, so the next invalid report
+  // exhausts the critic's declared budget of two.
+  node: NodeCursor(state: StepState.running, restartCount: 1),
+  key: ValueKey('$_criticStepBeadId#1'),
+  maxRestarts: 3,
+);
+
+final _criticCircuit = InheritedCircuit(
+  root: BeadPathKey(const ['tg-1', 'tgdog-s', _criticStepBeadId]),
+  beadIdByNodePath: const {_criticNodePath: _criticStepBeadId},
+  cursor: const {},
+);
+
+/// An effect that starts and stops and does nothing else — the host stimulus
+/// for a policy test (never a production allocation shape).
+final class _PassiveAllocation extends Allocation {
+  _PassiveAllocation(super.context);
+
+  @override
+  Future<void> startOrAdopt() {
+    state = AllocationState.live;
+    return Future<void>.value();
+  }
+
+  @override
+  Future<void> dispose() {
+    state = AllocationState.gone;
+    return Future<void>.value();
+  }
+}
+
+/// Carries the REAL [CriticCapability.supervisionPolicy] over a passive
+/// effect, so the host resolves the critic's own declaration with no process,
+/// no lease vendor, and no verdict file in play.
+final class _CriticPolicyProbeCapability extends Capability {
+  const _CriticPolicyProbeCapability();
+
+  @override
+  Allocation createAllocation(AllocationContext ctx) => _PassiveAllocation(ctx);
+
+  @override
+  SupervisionPolicy supervisionPolicy(StepArgs args) =>
+      const CriticCapability().supervisionPolicy(args);
+}
+
+Branch _branchWithSeed<T extends Seed>(Branch root) {
+  Branch? found;
+  void walk(Branch branch) {
+    if (branch.seed is T) found = branch;
+    branch.visitChildren(walk);
+  }
+
+  walk(root);
+  return found!;
+}

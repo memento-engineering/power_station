@@ -12,6 +12,9 @@
 // until every critic reaches a positive terminal (the await-all barrier,
 // already proven by the Burn). A recording registry's fake leaf records
 // START/STOP so the frontier is observable. Zero I/O.
+import 'dart:convert';
+import 'dart:io';
+
 import 'package:genesis_tree/genesis_tree.dart';
 import 'package:grid_assets/grid_assets.dart';
 import 'package:beads_dart/beads_dart.dart';
@@ -47,9 +50,14 @@ class _Committee {
 
   List<String> get events => reg.events;
 
+  /// The mounted root, retained so a test can read a step node's BRANCH
+  /// IDENTITY — the proof that a supervised restart re-keyed one lane and left
+  /// its siblings' branches untouched (never disposed and re-created).
+  late final Branch root;
+
   void mount() {
     _push();
-    owner.mountRoot(
+    root = owner.mountRoot(
       // The availability registry the production root (runGrid)
       // always mounts — watch<T>() misses park here instead of asserting.
       ProviderScope(
@@ -108,8 +116,31 @@ class _Committee {
     );
   }
 
+  /// The stable per-step node's branch id at [nodePath] — identity, not state.
+  Object branchIdentity(String nodePath) =>
+      _stepBranch(root, nodePath).branchId;
+
   void dispose() => owner.dispose();
 }
+
+List<Branch> _allBranches(Branch root) {
+  final branches = <Branch>[];
+
+  void visit(Branch branch) {
+    branches.add(branch);
+    branch.visitChildren(visit);
+  }
+
+  visit(root);
+  return branches;
+}
+
+/// The ONE stable node the CircuitScope keeps per declared step (keyed by its
+/// node path, persisting across frontier changes) — distinct from the
+/// incarnation-keyed effect beneath it.
+Branch _stepBranch(Branch root, String nodePath) => _allBranches(
+  root,
+).singleWhere((branch) => branch.seed.key == ValueKey(nodePath));
 
 String _c(String stepId) => 'critic(tgdog-s/tg-1/$stepId)';
 const _declared =
@@ -229,6 +260,91 @@ void main() {
         isTrue,
         reason: 'all four critics terminal → the await-all barrier opens',
       );
+    });
+
+    test('malformed retry rekeys only its critic lane', () {
+      const failedLane = 'tg-1/test-coverage';
+      const completedRubrics = [
+        'code-validation',
+        'spec-adherence',
+        'regression-risk',
+      ];
+      final dir = Directory.systemTemp.createTempSync('committee-one-for-one-');
+      addTearDown(() => dir.deleteSync(recursive: true));
+
+      final c = _Committee('tg-1')..mount();
+      addTearDown(c.dispose);
+      c.advance({'tg-1/clear-critique': _done()});
+      c.advance({'tg-1/pin-diff': _done()});
+      c.advance({
+        'tg-1/format-clean': _done(),
+        'tg-1/declared-tests-present': _done(),
+      });
+      // Three critics land; `test-coverage` is still running its turn.
+      c.advance({
+        for (final rubric in completedRubrics) 'tg-1/$rubric': _done(),
+      });
+
+      // The artifacts a completed lane already wrote this round. A retry that
+      // re-ran `clear-critique` — or replayed the round — would destroy them.
+      const stamp = 'lastModifiedSync';
+      final bytes = <String, List<int>>{};
+      final modified = <String, DateTime>{};
+      for (final rubric in completedRubrics) {
+        final verdict = File('${dir.path}/.grid/critique/$rubric.json')
+          ..createSync(recursive: true)
+          ..writeAsStringSync(
+            jsonEncode({
+              'grade': 'A',
+              'rationale': '$rubric graded it',
+              'nodePath': 'tg-1/$rubric',
+              'round': 0,
+            }),
+          )
+          ..setLastModifiedSync(DateTime.utc(2026));
+        bytes[rubric] = verdict.readAsBytesSync();
+        modified[rubric] = verdict.lastModifiedSync();
+      }
+      final identities = {
+        for (final path in const [
+          'tg-1/clear-critique',
+          'tg-1/pin-diff',
+          'tg-1/format-clean',
+          'tg-1/declared-tests-present',
+          'tg-1/code-validation',
+          'tg-1/spec-adherence',
+          'tg-1/regression-risk',
+        ])
+          path: c.branchIdentity(path),
+      };
+
+      // ONE lane reaches its first supervised failure (a malformed verdict).
+      c.advance({
+        failedLane: const NodeCursor(state: StepState.failed, restartCount: 1),
+      });
+
+      // The whole claim, exactly: the failed lane re-keys (STOP + START) and
+      // NOTHING else moves — no sibling remount, no `clear-critique`, no route.
+      expect(
+        c.events,
+        unorderedEquals([
+          'STOP ${_c('test-coverage')}',
+          'START ${_c('test-coverage')}',
+        ]),
+      );
+
+      for (final entry in identities.entries) {
+        expect(
+          c.branchIdentity(entry.key),
+          entry.value,
+          reason: '${entry.key} must not be disposed and re-created',
+        );
+      }
+      for (final rubric in completedRubrics) {
+        final verdict = File('${dir.path}/.grid/critique/$rubric.json');
+        expect(verdict.readAsBytesSync(), bytes[rubric]);
+        expect(verdict.lastModifiedSync(), modified[rubric], reason: stamp);
+      }
     });
   });
 }
