@@ -1407,6 +1407,137 @@ void main() {
       },
     );
 
+    test('AgentCapability without asset facts still spawns and flares once', () {
+      // The MIGRATION posture (the governor's compatibility ruling): a station
+      // that has NOT mounted the facts projection yet must keep spawning. It
+      // writes nothing, leaves whatever the REPOSITORY put in the worktree
+      // alone, and says once — on the transport — that it ran the
+      // pre-projection path.
+      final fixtureRoot = Directory.systemTemp.createTempSync('overlay-nofx-');
+      addTearDown(() {
+        if (fixtureRoot.existsSync()) fixtureRoot.deleteSync(recursive: true);
+      });
+      final fixture = TestAssetResolutionFixture(
+        root: fixtureRoot,
+        assets: <GridAssetDefinition>[fixtureSkill('fixture-skill')],
+      );
+      final scope = sdk.SubstationScope(
+        name: kFixtureSubstation.name,
+        root: fixture.substationRoot,
+        prefix: 'fx',
+      );
+
+      for (final missing in const <({bool facts, bool scope, String data})>[
+        (facts: false, scope: true, data: 'snapshot'),
+        (facts: true, scope: false, data: 'scope'),
+        (facts: false, scope: false, data: 'snapshot,scope'),
+      ]) {
+        final workspaceDir = Directory(
+          p.join(worktree.path, missing.data.replaceAll(',', '-')),
+        )..createSync(recursive: true);
+        // What the REPOSITORY itself checked in: it must survive byte-for-byte.
+        final repoOwned =
+            File(
+                p.join(
+                  workspaceDir.path,
+                  '.claude',
+                  'skills',
+                  'repo-owned',
+                  'SKILL.md',
+                ),
+              )
+              ..createSync(recursive: true)
+              ..writeAsStringSync('repo-owned, never the writer\'s');
+        final flares = RecordingExplorationTransport();
+        final context = FakeTreeContext(
+          values: {
+            Bead: bead('tg-1'),
+            Workspace: testWorkspace(
+              'tg-1',
+              workspaceDir: workspaceDir.path,
+              branch: 'grid/tg-1',
+            ),
+            ServiceBundle: ServiceBundle(transport: flares),
+            if (missing.facts) SubstationFactsSnapshot: fixture.snapshot,
+            if (missing.scope) sdk.SubstationScope: scope,
+          },
+        );
+        final cap = AgentCapability(
+          devRoot: '/dev/root',
+          assetRegistry: fixture.registry,
+          overlaySourceRef: 'testref',
+        );
+
+        late final RuntimeConfig cfg;
+        expect(
+          () => cfg = cap.spawn(context, stepArgs('tg-1/agent')),
+          returnsNormally,
+          reason: missing.data,
+        );
+        expect(cfg.args.last, isNot(contains('VENDED skills')));
+        expect(
+          repoOwned.readAsStringSync(),
+          'repo-owned, never the writer\'s',
+          reason: 'the repository\'s own asset is untouched: ${missing.data}',
+        );
+        expect(
+          File(
+            p.join(
+              workspaceDir.path,
+              '.claude',
+              'skills',
+              'fixture-skill',
+              'SKILL.md',
+            ),
+          ).existsSync(),
+          isFalse,
+          reason: 'no resolved artifact is written: ${missing.data}',
+        );
+        expect(
+          flares.flares.map((flare) => flare.name),
+          [kAssetFactsUnavailableFlare],
+          reason: 'exactly ONE flare per attempted effect: ${missing.data}',
+        );
+        expect(flares.flares.single.data, {
+          'consumer': 'agent',
+          'missing': missing.data,
+        });
+      }
+
+      // Once BOTH are mounted the resolution is strict again: a snapshot that
+      // does not carry this substation's key is a composition error, never a
+      // reason to degrade.
+      final strictDir = Directory(p.join(worktree.path, 'strict'))
+        ..createSync(recursive: true);
+      final strictFlares = RecordingExplorationTransport();
+      final strict = FakeTreeContext(
+        values: {
+          Bead: bead('tg-1'),
+          Workspace: testWorkspace(
+            'tg-1',
+            workspaceDir: strictDir.path,
+            branch: 'grid/tg-1',
+          ),
+          ServiceBundle: ServiceBundle(transport: strictFlares),
+          SubstationFactsSnapshot: fixture.snapshot,
+          sdk.SubstationScope: const sdk.SubstationScope(
+            name: 'another-seat',
+            root: '/w/another-seat',
+            prefix: 'another',
+          ),
+        },
+      );
+      expect(
+        () => AgentCapability(
+          devRoot: '/dev/root',
+          assetRegistry: fixture.registry,
+          overlaySourceRef: 'testref',
+        ).spawn(strict, stepArgs('tg-1/agent')),
+        throwsA(isA<StateError>()),
+      );
+      expect(strictFlares.flares, isEmpty);
+    });
+
     test(
       'a spawn that installs NO skills carries no skills paragraph — the brief '
       'only names what is actually there',

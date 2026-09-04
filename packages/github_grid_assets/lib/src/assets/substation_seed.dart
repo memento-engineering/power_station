@@ -40,6 +40,8 @@ import 'package:grid_assets/grid_assets.dart'
         SubstationKey,
         TypedEnvironmentProvider,
         resolveGridAssets;
+import 'package:grid_assets/station_asset_registry.dart'
+    show GeneratedGridAssetRegistrant;
 import 'package:grid_runtime/grid_runtime.dart' show GitOps;
 import 'package:grid_sdk/grid_sdk.dart' as sdk;
 import 'package:grid_sdk/grid_sdk.dart' show Provider, ProviderTreeContext;
@@ -136,7 +138,7 @@ class SubstationSeed extends StatelessSeed {
   SubstationSeed({
     required this.name,
     required this.root,
-    required this.assetRegistry,
+    sdk.GridAssetRegistry? assetRegistry,
     this.assetRenderArguments = const <String, String>{},
     this.assetRosterOverride,
     this.prefix,
@@ -148,7 +150,8 @@ class SubstationSeed extends StatelessSeed {
     this.githubTransportFactory = createGitHubHttpTransport,
     this.mountEligibilityRunnerFor,
     Key? key,
-  }) : _assetFactsKey = SubstationKey(name),
+  }) : assetRegistry = assetRegistry ?? GeneratedGridAssetRegistrant.registry,
+       _assetFactsKey = SubstationKey(name),
        super(key: key ?? ValueKey<String>('seat:$name'));
 
   /// The substation's name (its tree identity).
@@ -158,10 +161,18 @@ class SubstationSeed extends StatelessSeed {
   /// `GridRoot` (resolved by the SDK's own `Substation` build).
   final String root;
 
-  /// The STATION-GENERATED asset registry (`GeneratedGridAssetRegistrant`) this
-  /// seat resolves its own availability from — POTENTIAL availability, which
-  /// [resolveGridAssets] narrows to the ACTUAL set this seat mounts
+  /// The STATION-GENERATED asset registry this seat resolves its own
+  /// availability from — POTENTIAL availability, which [resolveGridAssets]
+  /// narrows to the ACTUAL set this seat mounts
   /// (`power_station#one-asset-resolution-defines-tree-and-writers`).
+  ///
+  /// OMITTING it takes [GeneratedGridAssetRegistrant.registry], the registry
+  /// generated for the station composing THIS package's closure
+  /// (`power_station#station-registries-use-resolved-package-closures`) — which
+  /// is what a downstream station composing the vended stack wants, and what a
+  /// seat authored before the resolution existed keeps getting. Pass one
+  /// explicitly to resolve against a different closure (a test fixture, or a
+  /// station that generates its own registrant).
   final sdk.GridAssetRegistry assetRegistry;
 
   /// The `{{hole}}` bindings a materializing consumer renders this seat's

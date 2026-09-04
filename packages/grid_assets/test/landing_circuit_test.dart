@@ -61,6 +61,9 @@ List<String> _ownedPaths(SubstationFactsSnapshot snapshot) => resolveGridAssets(
   DeliveryMethod? delivery,
   Bead? beadOverride,
   SubstationFactsSnapshot? facts,
+  ExplorationTransport? transport,
+  bool mountFacts = true,
+  bool mountScope = true,
 }) => (
   context: FakeTreeContext(
     values: {
@@ -74,14 +77,17 @@ List<String> _ownedPaths(SubstationFactsSnapshot snapshot) => resolveGridAssets(
       ServiceBundle: ServiceBundle(
         sourceControl: _FakeSourceControl(),
         delivery: delivery,
+        transport: transport,
       ),
-      // The ONE resolution's inputs, ambient exactly as the station mounts them.
-      SubstationFactsSnapshot: facts ?? _assetFacts(),
-      sdk.SubstationScope: const sdk.SubstationScope(
-        name: 'seat',
-        root: '/w/seat',
-        prefix: 'seat',
-      ),
+      // The ONE resolution's inputs, ambient exactly as the station mounts them
+      // — omittable, because an un-migrated station mounts neither yet.
+      if (mountFacts) SubstationFactsSnapshot: facts ?? _assetFacts(),
+      if (mountScope)
+        sdk.SubstationScope: const sdk.SubstationScope(
+          name: 'seat',
+          root: '/w/seat',
+          prefix: 'seat',
+        ),
     },
   ),
   args: stepArgs('tg-1/land/rebase'),
@@ -504,6 +510,99 @@ void main() {
         throwsA(same(kRouteCancelled)),
       );
       expect(cancelled.subcommands, ['ls-files']);
+    });
+
+    test('RebaseCapability without asset facts preserves legacy restoration '
+        'and flares once', () async {
+      // The MIGRATION posture: a station composed before the projection existed
+      // still LANDS. It cannot compute the exact selected set, so it restores
+      // the pathspec this guard used before the resolution existed — and says
+      // so, once, on the transport.
+      for (final missing in const <({bool facts, bool scope, String data})>[
+        (facts: false, scope: true, data: 'snapshot'),
+        (facts: true, scope: false, data: 'scope'),
+        (facts: false, scope: false, data: 'snapshot,scope'),
+      ]) {
+        final flares = RecordingExplorationTransport();
+        final runner = _MaterializerAwareRebaseRunner(
+          tracked: '${kWorktreeOverlaySubtrees.join('\n')}\n',
+        );
+        final outcome =
+            await RebaseCapability(
+              runner: runner,
+              assetRegistry: _assetRegistry,
+            ).route(
+              _capCtx(
+                delivery: _FakeDelivery(),
+                transport: flares,
+                mountFacts: missing.facts,
+                mountScope: missing.scope,
+              ).context,
+              stepArgs('tg-1/land/rebase'),
+            );
+
+        expect(outcome, isA<Advance>(), reason: missing.data);
+        // The PRE-BEAD pathspec, exactly — never a fabricated resolver answer.
+        expect(runner.calls[0].args, [
+          'ls-files',
+          '--',
+          ...kWorktreeOverlaySubtrees,
+        ], reason: missing.data);
+        expect(runner.subcommands, [
+          'ls-files',
+          'restore',
+          'status',
+          'fetch',
+          'rebase',
+        ], reason: missing.data);
+        expect(
+          flares.flares.map((flare) => flare.name),
+          [kAssetFactsUnavailableFlare],
+          reason: 'exactly ONE flare per attempted effect',
+        );
+        expect(
+          flares.flares.single.data,
+          {'consumer': 'rebase', 'missing': missing.data},
+          reason: 'it names the consumer and what is missing',
+        );
+      }
+    });
+
+    test('mounted asset facts without the current key refuse loudly', () async {
+      // Once the station HAS migrated, selection is strict again: a snapshot
+      // that carries some other seat's facts is a composition error, not a
+      // reason to restore a guessed set.
+      final elsewhere = SubstationFactsSnapshot(
+        <SubstationKey, SubstationFacts>{
+          const SubstationKey('another-seat'): SubstationFacts(
+            root: '/w/another-seat',
+            dartPackages: const <String>[kFixturePackage],
+            packageRoots: const <String, String>{
+              kFixturePackage: '/packs/fixture',
+            },
+          ),
+        },
+      );
+      final flares = RecordingExplorationTransport();
+      final runner = _MaterializerAwareRebaseRunner(tracked: '');
+
+      await expectLater(
+        RebaseCapability(runner: runner, assetRegistry: _assetRegistry).route(
+          _capCtx(
+            delivery: _FakeDelivery(),
+            facts: elsewhere,
+            transport: flares,
+          ).context,
+          stepArgs('tg-1/land/rebase'),
+        ),
+        throwsA(isA<StateError>()),
+      );
+      expect(runner.subcommands, isEmpty);
+      expect(
+        flares.flares,
+        isEmpty,
+        reason: 'a mounted station never degrades',
+      );
     });
 
     test('with NO registry injected the guard skips restoration entirely — the '

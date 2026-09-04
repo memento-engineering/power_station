@@ -33,6 +33,9 @@ library;
 import 'dart:async';
 import 'dart:io';
 
+// SHOW-only on purpose: grid_engine exports a `SubstationScope` of its own that
+// would ambiguate the grid_sdk value this file resolves against.
+import 'package:grid_engine/grid_engine.dart' show ServiceBundle;
 import 'package:grid_sdk/grid_sdk.dart';
 import 'package:package_config/package_config.dart';
 import 'package:path/path.dart' as p;
@@ -365,6 +368,49 @@ GridAssetResolution resolveGridAssets({
     artifacts: artifacts,
     renderArguments: renderArguments,
   );
+}
+
+/// The ONE flare an EFFECT-edge consumer raises when it holds a station
+/// registry but the station has not mounted the facts projection yet
+/// (`power_station#one-asset-resolution-defines-tree-and-writers`).
+///
+/// Its `consumer` datum names the effect that wanted the resolution (`agent`,
+/// `rebase`); its `missing` datum is `snapshot`, `scope`, or `snapshot,scope`.
+const String kAssetFactsUnavailableFlare = 'assets.factsUnavailable';
+
+/// The ambient pair one effect needs to run [resolveGridAssets] — or null,
+/// having raised [kAssetFactsUnavailableFlare] EXACTLY once, when the station
+/// has not mounted [SubstationFactsAssets] and a [SubstationScope] yet.
+///
+/// Read with the EFFECT verb ([TreeContext.getInheritedSeedOfExactType],
+/// ADR-0008 D3): a spawn and a route are not builds, so they take the latest
+/// facts WITHOUT subscribing.
+///
+/// Absent facts are a MIGRATION state, not a violated invariant: a station
+/// composed before the projection existed still has repository-provided assets
+/// in its worktrees, and the pre-projection path is the honest answer for it.
+/// So this reports and degrades where a build REFUSES. Once both values are
+/// mounted the resolution is strict again — a snapshot missing the substation's
+/// own key still throws from [resolveGridAssets].
+({SubstationFactsSnapshot snapshot, SubstationScope scope})?
+ambientAssetFactsOrFlare(TreeContext context, {required String consumer}) {
+  final snapshot = context
+      .getInheritedSeedOfExactType<SubstationFactsSnapshot>();
+  final scope = context.getInheritedSeedOfExactType<SubstationScope>();
+  if (snapshot != null && scope != null) {
+    return (snapshot: snapshot, scope: scope);
+  }
+  context.getInheritedSeedOfExactType<ServiceBundle>()?.transport?.flare(
+    kAssetFactsUnavailableFlare,
+    <String, String>{
+      'consumer': consumer,
+      'missing': <String>[
+        if (snapshot == null) 'snapshot',
+        if (scope == null) 'scope',
+      ].join(','),
+    },
+  );
+  return null;
 }
 
 /// Whether [selector] holds against [facts] — the ONE evaluator, exhaustive

@@ -12,6 +12,8 @@ import 'dart:async';
 import 'package:genesis_tree/genesis_tree.dart';
 import 'package:github_grid_assets/github_grid_assets.dart';
 import 'package:grid_assets/grid_assets.dart';
+import 'package:grid_assets/station_asset_registry.dart'
+    show GeneratedGridAssetRegistrant;
 import 'package:grid_engine/grid_engine.dart' show ServiceBundle;
 import 'package:grid_runtime/grid_runtime.dart' show PrOpener;
 import 'package:grid_sdk/grid_sdk.dart' as sdk;
@@ -342,6 +344,22 @@ void main() {
       [1, 2],
       reason: 'the changed seat re-resolved and now mounts the gated asset',
     );
+  });
+
+  test('SubstationSeed defaults to the generated registry when omitted', () {
+    // The compatibility seam: the six `SubstationSeed(...)` calls a composing
+    // station authored before this parameter existed keep compiling AND keep
+    // resolving against the registry generated for the vended stack's own
+    // closure — the identical object, never a rebuilt one.
+    final seed = SubstationSeed(name: 'compat', root: '/compat');
+
+    expect(
+      identical(seed.assetRegistry, GeneratedGridAssetRegistrant.registry),
+      isTrue,
+    );
+    // Construction alone reads no facts: only a BUILD watches the aspect.
+    expect(seed.assetRenderArguments, isEmpty);
+    expect(seed.assetRosterOverride, isNull);
   });
 
   test('the seat arming rung SHADOWS the station on the type it arms and '

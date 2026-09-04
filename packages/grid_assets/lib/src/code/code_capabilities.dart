@@ -401,35 +401,29 @@ class AgentCapability extends ProcessCapability {
   /// edge, so a provision cannot select a different set than the substation
   /// tree mounted.
   ///
-  /// The ambient snapshot is read with the EFFECT verb
-  /// ([TreeContext.getInheritedSeedOfExactType], ADR-0008 D3): this is a spawn,
-  /// not a build, so it takes the latest facts WITHOUT subscribing. Absent facts
-  /// are LOUD: a station that composed a registry but no [SubstationFactsAssets]
-  /// would otherwise provision silently empty worktrees.
-  GridAssetResolution _resolveWorktreeAssets(
+  /// The ambient pair is read with the EFFECT verb through
+  /// [ambientAssetFactsOrFlare] (ADR-0008 D3): this is a spawn, not a build, so
+  /// it takes the latest facts WITHOUT subscribing.
+  ///
+  /// NULL when the station has not mounted the projection yet — a MIGRATION
+  /// state, not a violated invariant. A station composed before this projection
+  /// existed still spawns: its worktrees keep whatever `.claude`/`.agents`
+  /// assets the repository itself provides, and the one
+  /// [kAssetFactsUnavailableFlare] the helper raised is how an operator sees
+  /// that it is running on the pre-projection path. Selection stays STRICT once
+  /// both values are mounted: a snapshot without this substation's own key
+  /// still refuses loudly from [resolveGridAssets].
+  GridAssetResolution? _resolveWorktreeAssets(
     TreeContext context,
     sdk.GridAssetRegistry registry,
     Workspace workspace,
   ) {
-    final snapshot = context
-        .getInheritedSeedOfExactType<SubstationFactsSnapshot>();
-    if (snapshot == null) {
-      throw StateError(
-        'AgentCapability requires the ambient SubstationFactsSnapshot '
-        '(SubstationFactsAssets mounts it)',
-      );
-    }
-    final scope = context.getInheritedSeedOfExactType<sdk.SubstationScope>();
-    if (scope == null) {
-      throw StateError(
-        'AgentCapability requires the ambient SubstationScope to resolve its '
-        "substation's assets",
-      );
-    }
+    final ambient = ambientAssetFactsOrFlare(context, consumer: 'agent');
+    if (ambient == null) return null;
     return resolveGridAssets(
       registry: registry,
-      snapshot: snapshot,
-      substation: SubstationKey(scope.name),
+      snapshot: ambient.snapshot,
+      substation: SubstationKey(ambient.scope.name),
       rosterOverride: _assetRosterOverride,
       renderArguments: {
         'runner': kDefaultOverlayRunner,
@@ -475,8 +469,13 @@ class AgentCapability extends ProcessCapability {
   ) {
     final registry = _assetRegistry;
     if (registry == null) return const [];
+    final resolution = _resolveWorktreeAssets(context, registry, workspace);
+    // Un-migrated station: it flared, and the worktree keeps the repository's
+    // own assets. Writing a fabricated set would be the very drift this
+    // resolution exists to end.
+    if (resolution == null) return const [];
     final report = _materializer.materializeSync(
-      resolution: _resolveWorktreeAssets(context, registry, workspace),
+      resolution: resolution,
       targetRoot: workspace.workspaceDir,
       sourceRef: _overlaySourceRef,
       subtrees: kWorktreeOverlaySubtrees,

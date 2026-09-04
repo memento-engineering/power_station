@@ -16,8 +16,9 @@
 /// one it no longer selects.
 ///
 /// The station composes its GENERATED registry in
-/// (`registry: GeneratedGridAssetRegistrant.registry`), so this Command names no
-/// pack and discovers none: `power_station#station-registries-use-resolved-package-closures`
+/// (`registry: GeneratedGridAssetRegistrant.registry`) — or omits it and takes
+/// exactly that object as the default — so this Command names no pack and
+/// discovers none: `power_station#station-registries-use-resolved-package-closures`
 /// owns membership, and `power_station#one-asset-resolution-defines-tree-and-writers`
 /// owns selection.
 library;
@@ -29,6 +30,7 @@ import 'package:args/command_runner.dart';
 import 'package:grid_sdk/grid_sdk.dart' as sdk;
 import 'package:path/path.dart' as p;
 
+import '../../station_asset_registry.dart' show GeneratedGridAssetRegistrant;
 import 'asset_resolution.dart';
 import 'overlay_install.dart';
 import 'overlay_materializer.dart' show kDefaultOverlayRunner;
@@ -68,7 +70,7 @@ class AssetsCommand extends Command<int> {
   /// `{{runner}}`. Omission uses the enclosing runner's executable name.
   AssetsCommand({
     required sdk.GridDelegate Function() delegate,
-    required sdk.GridAssetRegistry registry,
+    sdk.GridAssetRegistry? registry,
     GridAssetRosterOverride? rosterOverride,
     SubstationFactsRepositoryFactory factsRepository = _fileFactsRepository,
     OverlayInstallService service = const OverlayInstallService(),
@@ -80,7 +82,9 @@ class AssetsCommand extends Command<int> {
     addSubcommand(
       AssetsInstallCommand(
         delegate: delegate,
-        registry: registry,
+        // Resolved ONCE here, so the umbrella and its subcommand can never
+        // answer from two different registries.
+        registry: registry ?? GeneratedGridAssetRegistrant.registry,
         rosterOverride: rosterOverride,
         factsRepository: factsRepository,
         service: service,
@@ -118,6 +122,11 @@ class AssetsInstallCommand extends Command<int> {
   /// defaults are the real filesystem observer and the vending package
   /// checkout's short sha).
   ///
+  /// An omitted [registry] resolves to `GeneratedGridAssetRegistrant.registry`
+  /// — the closure this package's own station generated — so a station that
+  /// composed this Command before the registry seam existed keeps installing
+  /// the same set.
+  ///
   /// [rosterOverride] carries the station's explicit include/exclude exceptions
   /// to what the selectors decide. When [runnerInvocation] is supplied, the
   /// installed assets render it into `{{runner}}`; omission uses the enclosing
@@ -125,7 +134,7 @@ class AssetsInstallCommand extends Command<int> {
   /// tests capture them.
   AssetsInstallCommand({
     required sdk.GridDelegate Function() delegate,
-    required sdk.GridAssetRegistry registry,
+    sdk.GridAssetRegistry? registry,
     GridAssetRosterOverride? rosterOverride,
     SubstationFactsRepositoryFactory factsRepository = _fileFactsRepository,
     OverlayInstallService service = const OverlayInstallService(),
@@ -134,7 +143,7 @@ class AssetsInstallCommand extends Command<int> {
     StringSink? out,
     StringSink? err,
   }) : _delegate = delegate,
-       _registry = registry,
+       _registry = registry ?? GeneratedGridAssetRegistrant.registry,
        _rosterOverride = rosterOverride,
        _factsRepository = factsRepository,
        _service = service,

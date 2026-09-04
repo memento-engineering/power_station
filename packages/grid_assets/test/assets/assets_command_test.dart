@@ -11,6 +11,7 @@ import 'dart:io';
 import 'package:args/command_runner.dart';
 import 'package:genesis_tree/genesis_tree.dart';
 import 'package:grid_assets/grid_assets.dart';
+import 'package:grid_assets/station_asset_registry.dart';
 import 'package:grid_sdk/grid_sdk.dart' as sdk;
 import 'package:grid_sdk/grid_sdk.dart' show GridAssetDefinition;
 import 'package:path/path.dart' as p;
@@ -506,6 +507,78 @@ void main() {
       expect(h.lastRepository().disposed, isTrue);
     },
   );
+
+  test('AssetsCommand defaults to the generated registry when omitted', () async {
+    // The compatibility seam: a station that composed this Command before the
+    // registry parameter existed keeps installing the SAME set, because
+    // omission resolves to the one generated object — never a second registry
+    // built here.
+    final observed = <sdk.GridAssetRegistry>[];
+    final out = StringBuffer();
+    final err = StringBuffer();
+
+    SubstationFactsRepository observe({
+      required Map<SubstationKey, String> roots,
+      required sdk.GridAssetRegistry registry,
+    }) {
+      observed.add(registry);
+      return FakeSubstationFactsRepository(
+        SubstationFactsSnapshot(<SubstationKey, SubstationFacts>{
+          kGridHomeSubstation: SubstationFacts(
+            root: roots[kGridHomeSubstation]!,
+            dartPackages: const <String>['grid_assets', 'grid_sdk'],
+            packageRoots: <String, String>{'grid_assets': _packageRoot()},
+          ),
+        }),
+      );
+    }
+
+    final umbrella = CommandRunner<int>('space', 'test station')
+      ..addCommand(
+        // NO `registry:` argument at all — the pre-bead call shape.
+        AssetsCommand(
+          delegate: () => _StationDelegate(temp.path),
+          factsRepository: observe,
+          sourceRef: (_) => 'testref',
+          out: out,
+          err: err,
+        ),
+      );
+
+    final code = await umbrella.run(['assets', 'install', '--no-diff']);
+
+    expect(code, 0, reason: err.toString());
+    expect(observed, hasLength(1));
+    expect(
+      identical(observed.single, GeneratedGridAssetRegistrant.registry),
+      isTrue,
+      reason: 'the umbrella resolves the omitted registry to the generated one',
+    );
+
+    // The same identity through the subcommand's OWN construction seam, which a
+    // station may compose directly.
+    final direct = CommandRunner<int>('space', 'test station')
+      ..addCommand(
+        AssetsInstallCommand(
+          delegate: () => _StationDelegate(temp.path),
+          factsRepository: observe,
+          sourceRef: (_) => 'testref',
+          out: out,
+          err: err,
+        ),
+      );
+
+    expect(
+      await direct.run(['install', '--no-diff']),
+      0,
+      reason: err.toString(),
+    );
+    expect(observed, hasLength(2));
+    expect(
+      identical(observed.last, GeneratedGridAssetRegistrant.registry),
+      isTrue,
+    );
+  });
 
   group('it COMMITS NOTHING — by construction', () {
     test('the operator-install source names no git and no process surface', () {

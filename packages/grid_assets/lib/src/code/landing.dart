@@ -106,8 +106,9 @@ class RebaseCapability extends RouteCapability {
   /// materializer-OWNED paths from — the SAME one the provision writer used
   /// (`power_station#one-asset-resolution-defines-tree-and-writers`), so the
   /// restore set is exactly what was written and never a guessed prefix. Null
-  /// disables the restore leg outright: the explicit posture for a direct
-  /// capability test with no asset tree in play.
+  /// disables the restore leg outright, and emits no flare: the explicit
+  /// posture for a direct capability test with no asset tree in play, which is
+  /// NOT the un-migrated station [_resolvedOwnedPaths] degrades for.
   const RebaseCapability({
     GitRunner? runner,
     sdk.GridAssetRegistry? assetRegistry,
@@ -123,32 +124,26 @@ class RebaseCapability extends RouteCapability {
   /// The EXACT worktree paths the provision writer materialized for THIS
   /// substation — [resolveGridAssets] scoped to [kWorktreeOverlaySubtrees].
   ///
-  /// Read at this ROUTE edge with the non-binding verb (ADR-0008 D3). A missing
-  /// snapshot or scope with a registry injected is LOUD: restoring the wrong set
-  /// would either leave rendered dirt in the way of the rebase or restore paths
-  /// this station never owned.
+  /// Read at this ROUTE edge with the non-binding verb, through
+  /// [ambientAssetFactsOrFlare] (ADR-0008 D3).
+  ///
+  /// A station that has not mounted the projection yet falls back to
+  /// [kWorktreeOverlaySubtrees] itself — the pathspec this guard restored
+  /// BEFORE the resolution existed — and the helper's one
+  /// [kAssetFactsUnavailableFlare] says so. Landing an un-migrated station is
+  /// worth more than a precise pathspec it cannot compute; the writer that
+  /// wrote those trees was running the same pre-projection path. Once the facts
+  /// ARE mounted the resolution is strict: a snapshot without this substation's
+  /// key refuses loudly rather than restoring a set this station never owned.
   List<String> _resolvedOwnedPaths(TreeContext context) {
     final registry = _assetRegistry;
     if (registry == null) return const [];
-    final snapshot = context
-        .getInheritedSeedOfExactType<SubstationFactsSnapshot>();
-    if (snapshot == null) {
-      throw StateError(
-        'RebaseCapability requires the ambient SubstationFactsSnapshot '
-        '(SubstationFactsAssets mounts it)',
-      );
-    }
-    final scope = context.getInheritedSeedOfExactType<sdk.SubstationScope>();
-    if (scope == null) {
-      throw StateError(
-        'RebaseCapability requires the ambient SubstationScope to resolve the '
-        "substation's materialized paths",
-      );
-    }
+    final ambient = ambientAssetFactsOrFlare(context, consumer: 'rebase');
+    if (ambient == null) return kWorktreeOverlaySubtrees;
     return resolveGridAssets(
           registry: registry,
-          snapshot: snapshot,
-          substation: SubstationKey(scope.name),
+          snapshot: ambient.snapshot,
+          substation: SubstationKey(ambient.scope.name),
           rosterOverride: _assetRosterOverride,
         )
         .artifactsUnder(kWorktreeOverlaySubtrees)

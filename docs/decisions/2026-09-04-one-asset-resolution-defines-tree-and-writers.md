@@ -54,6 +54,25 @@ Check mode reports `IN SYNC`, `DRIFTED`, `HAND-EDITED`, `MISSING`, or
 `STALE`, writes nothing, and succeeds only when all paths are `IN SYNC`.
 Hand-edited and stale paths are reported and never repaired or deleted.
 
+Registry parameters on `SubstationSeed`, `AssetsCommand` and
+`AssetsInstallCommand` are OPTIONAL and resolve to the one generated
+`GeneratedGridAssetRegistrant.registry` object when omitted, so a station
+composed before this seam existed keeps compiling and keeps selecting the
+same set.
+
+An un-migrated station — one that has not mounted `SubstationFactsAssets`
+and a `SubstationScope` yet — does not fabricate a resolver answer at a
+process edge. `AgentCapability` leaves the worktree's repository-provided
+`.claude`/`.agents` assets untouched and still spawns; the landing guard
+falls back to the pre-resolution `kWorktreeOverlaySubtrees` pathspec and
+still lands. Each attempted effect emits exactly one
+`assets.factsUnavailable` flare naming its `consumer` and what was
+`missing`. Selection is strict once both ambient values are mounted: a
+snapshot without the substation's own key refuses loudly, and a substation
+BUILD refuses loudly with no snapshot at all. The station-side composition
+migration is owned by `space-eos`, blocked by this bead through grid link
+`tranquility-06xl23`.
+
 ### Consequences
 
 * Good, because mounted availability and both materialized views cannot
@@ -62,6 +81,9 @@ Hand-edited and stale paths are reported and never repaired or deleted.
   outside build.
 * Bad, because a selected artifact whose source package root is absent from
   facts now refuses loudly instead of disappearing from a source walk.
-* Bad, because a composing station must now mount `SubstationFactsAssets` and
-  hand its generated registry to `SubstationSeed`; a station that does not
-  refuses loudly rather than mounting an empty asset set.
+* Bad, because a composing station must still mount `SubstationFactsAssets`
+  before a substation seat can build; a station that does not refuses loudly
+  rather than mounting an empty asset set.
+* Bad, because the process-edge degrade is a second, weaker path that must be
+  deleted once every station has migrated — a flare is easier to miss than a
+  crash.
