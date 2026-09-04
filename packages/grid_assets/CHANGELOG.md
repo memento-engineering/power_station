@@ -1,3 +1,7 @@
+## 0.6.0-rc.15
+
+- Fixed: the discovery gather no longer treats a record clipped at its OWN bound (`kMaxDiscoverySnippetChars`, `kMaxHistoryCommits`) or a clipped anchor/symbol extraction (`kMaxAnchors`) as a deterministic gap — every mature surface exceeds those bounds, and the override held every round at `discovery-route` while the lenses reported zero gaps. A clip is rendered as context the lens narrates; only `failed` overrides a lens, and only the lens's own insufficient-evidence outcome holds the round on a clip. `gatherHistory` records `unavailable` over an empty resolved path list instead of logging the whole repository (pow-gcx9, #225).
+
 ## 0.6.0-rc.14
 
 - Added: the `grid:` block accepts an optional `teaches:` sequence per skill asset (the deterministic commands its prose teaches), parsed by `parseGridBlock`, emitted by the registrant generator only when non-empty, and authored for the baseline skill/command pairs; unclaimed packs generate byte-identical output. Floors `grid_sdk ^0.3.0-rc.15` for `GridAssetDefinition.teaches` (pow-prw4, #228).
