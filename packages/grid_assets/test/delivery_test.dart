@@ -8,6 +8,7 @@
 //
 // Fakes only; the sole real I/O is a temp worktree (the body ledger, and the
 // describe pass's worktree-exists guard, read the real filesystem).
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:beads_dart/beads_dart.dart';
@@ -208,6 +209,42 @@ void main() {
         );
       },
     );
+
+    test('a METERED describe call projects its usage into the terminal payload '
+        'and never overwrites a route key', () async {
+      File(p.join(work.path, usageReportPath('tg-1/$kDeliverStep')))
+        ..parent.createSync(recursive: true)
+        ..writeAsStringSync(
+          jsonEncode({
+            'result':
+                '{"type":"feat","description":"do a thing",'
+                '"summary":"A first sentence. A second one."}',
+            'usage': {'input_tokens': 700, 'output_tokens': 90},
+            'num_turns': 1,
+            'modelUsage': {'claude-haiku-4-5': <String, Object?>{}},
+          }),
+        );
+      final outcome =
+          await DeliverRouteCapability(
+            gitRunner: CannedGitRunner(log: 'feat(x): do a thing\x00'),
+            inference: FakeInferenceRunner(),
+          ).route(
+            _deliverContext(workspaceDir: work.path, delivery: _FakeDelivery()),
+            _deliverArgs(),
+          );
+      final payload = (outcome as Advance).payload!;
+      expect(payload['tokensIn'], '700');
+      expect(payload['tokensOut'], '90');
+      expect(payload['numTurns'], '1');
+      expect(payload['model'], 'claude-haiku-4-5');
+      expect(payload['describe_harness'], 'claude');
+      expect(payload['describe_model'], 'haiku');
+      expect(payload['describe_stop'], 'ok');
+      // The route's own keys are intact.
+      expect(payload['verdict'], 'deliver');
+      expect(payload['title_source'], 'inference');
+      expect(payload['pr_title'], startsWith('feat'));
+    });
 
     test('an OFFLINE workspace (no worktree on disk) still advances — the body '
         'ledger is skipped and delivery opens with an empty body; a land never '
