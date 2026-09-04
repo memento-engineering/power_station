@@ -3220,7 +3220,8 @@ Future<HistoryEvidence> gatherHistory(
       paths: const [],
       command: '',
       state: EvidenceState.unavailable,
-      error: 'no anchor resolved in the workspace, so there is no surface '
+      error:
+          'no anchor resolved in the workspace, so there is no surface '
           'history to gather',
     );
   }
