@@ -107,8 +107,8 @@ void main() {
       expect(outcome, isA<Failed>());
       final failed = outcome as Failed;
       expect(
-        failed.nonResult,
-        isTrue,
+        failed.kind,
+        CapabilityFailureKind.noResult,
         reason: 'a gate, never a letter grade the route matrix could soften',
       );
       expect(failed.reason, contains(rel));
@@ -209,7 +209,7 @@ void main() {
 
       expect(outcome, isA<Failed>());
       final failed = outcome as Failed;
-      expect(failed.nonResult, isTrue);
+      expect(failed.kind, CapabilityFailureKind.noResult);
       expect(failed.reason, contains(rel));
       expect(failed.reason, contains('exit 65'));
       expect(failed.reason, contains('could not be parsed'));
@@ -227,7 +227,7 @@ void main() {
 
       expect(outcome, isA<Failed>());
       final failed = outcome as Failed;
-      expect(failed.nonResult, isTrue);
+      expect(failed.kind, CapabilityFailureKind.noResult);
       expect(failed.reason, contains('no pinned diff'));
       expect(formatter.calls, isEmpty);
     });

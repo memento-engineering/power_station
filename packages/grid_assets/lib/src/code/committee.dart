@@ -705,7 +705,7 @@ class DeclaredTestsCapability extends ServiceCapability {
 ///
 /// It NEVER rewrites the diff on the builder's behalf: a silent reformat would
 /// hand the critics code the builder never wrote. A dirty answer is
-/// [Failed.nonResult] — a GATE, not a letter grade — whose reason NAMES the
+/// [Failed.noResult] — a GATE, not a letter grade — whose reason NAMES the
 /// files, so the next round fixes exactly them and the route's matrix (and the
 /// grade vector it reads) is untouched. The critic lanes `dependsOn` this step,
 /// so the non-result withholds every one of them before a single token is spent.
@@ -738,18 +738,18 @@ class FormatCleanCapability extends ServiceCapability {
     final workspaceDir = workspace.workspaceDir;
     final pinned = File(pinnedDiffPath(workspaceDir));
     if (!await pinned.exists()) {
-      return Failed.nonResult('format-clean: no pinned diff at ${pinned.path}');
+      return Failed.noResult('format-clean: no pinned diff at ${pinned.path}');
     }
     final String diff;
     try {
       diff = await pinned.readAsString();
     } on Object catch (error) {
-      return Failed.nonResult(
+      return Failed.noResult(
         'format-clean: could not read pinned diff at ${pinned.path}: $error',
       );
     }
     if (args.cancel.isCancelled) {
-      return const Failed.nonResult('format-clean: cancelled');
+      return const Failed.noResult('format-clean: cancelled');
     }
     final dartFiles =
         changedFilesIn(diff)
@@ -762,15 +762,15 @@ class FormatCleanCapability extends ServiceCapability {
       files: dartFiles,
     );
     if (args.cancel.isCancelled) {
-      return const Failed.nonResult('format-clean: cancelled');
+      return const Failed.noResult('format-clean: cancelled');
     }
     return switch (outcome) {
       DartFormatClean(:final files) => Ok({'checked': '${files.length}'}),
-      DartFormatDirty(:final files) => Failed.nonResult(
+      DartFormatDirty(:final files) => Failed.noResult(
         'format-clean: dart format would change: ${files.join(', ')}',
       ),
       DartFormatProbeFailed(:final file, :final exitCode, :final output) =>
-        Failed.nonResult(
+        Failed.noResult(
           'format-clean: dart format probe failed for $file'
           '${exitCode == null ? '' : ' (exit $exitCode)'}'
           '${output.trim().isEmpty ? '' : ': ${output.trim()}'}',
