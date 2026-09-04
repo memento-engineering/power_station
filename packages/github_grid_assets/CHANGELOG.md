@@ -1,3 +1,8 @@
+## 0.1.0-rc.12
+
+- Fixed: `deliver` REUSES an open pull request for the branch (one GET, PATCH when the title/body changed, `step.delivered` with `reused: true`) instead of racing a create into HTTP 422 and stranding a reworked round `held` (pow-r4eo, #211).
+- Floors tightened to `grid_assets ^0.6.0-rc.12`.
+
 ## 0.1.0-rc.11
 
 - Fixed: the App transport encodes its body as UTF-8 at the SINK
