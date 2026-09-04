@@ -109,7 +109,8 @@ Future<_Run> _buildAcpRun({
   );
   final steers = _Steers();
   final capability = AgentCapability(
-    overlayRoot: p.join(workspaceDir.path, 'absent-overlay'),
+    // NO asset registry: this suite isolates the session adapter, so the
+    // provision leg materializes nothing at all.
     steers: steers,
   );
   final runtime = SubprocessProvider(

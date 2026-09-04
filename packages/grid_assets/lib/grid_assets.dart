@@ -77,35 +77,39 @@
 /// ephemeral staged bead and hands to `specify`. [vendedSkillIds] enumerates
 /// them; [PackagedAssetLoader.renderSkill] renders one by id.
 ///
-/// The DELIVERY leg is [OverlayMaterializer]: the CLI-free lib that expands a
-/// `station_overlay` tree onto a target ROOT, PATH-PRESERVING. The overlay is
-/// ROOT-RELATIVE — its internal layout MIRRORS the target, so
-/// `station_overlay/claude/skills/discover/SKILL.md` lands at
-/// `<root>/.claude/skills/discover/SKILL.md` with no kind mapping anywhere: the
-/// overlay AUTHOR decides where an asset lands by where it sits in the tree.
-/// ONE root-parametric materializer, two callers, two roots — this package's OWN
+/// The DELIVERY leg is ONE RESOLUTION and two writers (bead `pow-4peu`,
+/// `power_station#one-asset-resolution-defines-tree-and-writers`).
+/// [resolveGridAssets] evaluates the station-generated [GridAssetRegistry]'s
+/// declared selectors against an immutable [SubstationFactsSnapshot] — observed
+/// OUTSIDE build by a [SubstationFactsRepository] and projected into the tree by
+/// [SubstationFactsAssets], aspect-scoped per [SubstationKey] — and returns the
+/// SELECTED generated definitions plus each one's exact source and target path.
+/// Registry membership is potential availability; a definition MOUNTED in a
+/// substation's assets is actual availability, and it is the same value.
+/// [OverlayMaterializer] then writes exactly that set: this package's OWN
 /// provision-time wire ([AgentCapability], onto a per-bead WORKTREE root, so a
 /// station-spawned agent can `/invoke` a vended skill; SCOPED to
 /// [kWorktreeOverlaySubtrees] — the per-harness SKILL trees `.claude/skills`
 /// and `.agents/skills` — because a loose `.claude/settings.json` is repo-owned
-/// territory) and the operator install Command (onto a STATION repo root, whole
-/// tree). It renders each file, REFUSES to install one whose holes are unbound,
-/// and NEVER clobbers a file it did not generate.
+/// territory) and the operator install Command (onto a STATION repo root,
+/// unscoped). It renders each file, REFUSES to install one whose holes are
+/// unbound, NEVER clobbers a file it did not generate, and never deletes a
+/// generated file the resolution stopped selecting ([OverlayFileStale]).
 ///
 /// The OPERATOR leg of that delivery is [AssetsCommand] over
-/// `src/assets/overlay_install.dart`: `<cli> assets install` resolves the
-/// in-scope overlay roots NON-PRESCRIPTIVELY ([resolveStationOverlayRoots] —
-/// `package:extension_discovery` over the grid home's package config; every pack
-/// shipping the asset manifest AND a `station_overlay/` is in scope, none is
-/// hardcoded), expands them onto a repo root ([OverlayInstallService]), and
-/// prints the DIFF ([renderInstallReport]). It COMMITS NOTHING — the operator
+/// `src/assets/overlay_install.dart`: `<cli> assets install` observes the grid
+/// home's facts once, resolves the station registry against them, writes the
+/// selected artifacts ([OverlayInstallService]) and prints the DIFF
+/// ([renderInstallReport]). No runtime package-extension walk decides scope any
+/// more — the generated registry does. It COMMITS NOTHING — the operator
 /// reviews and commits. Each installed file carries a PROVENANCE stamp
 /// (`overlay_provenance.dart`) naming the grid_assets ref it came from, which is
 /// what lets the vended assets be COMMITTED rather than gitignored: the stamp
 /// tells a generated file from a hand-authored one, and `assets install --check`
-/// FAILS on any file that is missing or has drifted from source. [mountedValuesOf]
-/// is the one offline delegate-mount walker both this leg (for the grid home) and
-/// [mountedRosterOf] (for the substation roster) ride.
+/// classifies every path `IN SYNC`, `DRIFTED`, `HAND-EDITED`, `MISSING` or
+/// `STALE`, writing nothing. [mountedValuesOf] is the one offline delegate-mount
+/// walker both this leg (for the grid home) and [mountedRosterOf] (for the
+/// substation roster) ride.
 ///
 /// The SPEC-READINESS INTAKE LENS (bead `pow-q7n`, `src/code/readiness.dart`)
 /// heads that spec circuit: a deterministic intake contract ([IntakeCapability]
@@ -157,6 +161,7 @@ export 'src/agent/site_binding.dart';
 export 'src/agent/typed_environment.dart';
 export 'src/agent/usage_report.dart';
 export 'src/assets/asset_loader.dart';
+export 'src/assets/asset_resolution.dart';
 export 'src/assets/assets_command.dart';
 export 'src/assets/composition_assets.dart';
 export 'src/assets/grid_asset_pack.dart';

@@ -58,9 +58,12 @@ import 'package:beads_dart/beads_dart.dart';
 import 'package:genesis_tree/genesis_tree.dart';
 import 'package:grid_engine/grid_engine.dart';
 import 'package:grid_runtime/grid_runtime.dart';
+import 'package:grid_sdk/grid_sdk.dart' as sdk;
+import 'package:path/path.dart' as p;
 
 import '../agent/captured_output.dart';
 import '../agent/path_check.dart';
+import '../assets/asset_resolution.dart';
 import '../assets/overlay_materializer.dart';
 import 'route_failure.dart';
 
@@ -98,14 +101,55 @@ class RebaseCapability extends RouteCapability {
   /// Creates the capability, optionally over an injected [runner] (tests
   /// inject the SAME [RecordingGitRunner] fake the GitHub PR delivery method's `GitOps`
   /// already uses — Fakes, not mocks); defaults to the real [SystemGitRunner].
+  ///
+  /// [assetRegistry] is the station-generated registry this guard resolves the
+  /// materializer-OWNED paths from — the SAME one the provision writer used
+  /// (`power_station#one-asset-resolution-defines-tree-and-writers`), so the
+  /// restore set is exactly what was written and never a guessed prefix. Null
+  /// disables the restore leg outright, and emits no flare: the explicit
+  /// posture for a direct capability test with no asset tree in play, which is
+  /// NOT the un-migrated station [_resolvedOwnedPaths] degrades for.
   const RebaseCapability({
     GitRunner? runner,
-    List<String> materializedSubtrees = kWorktreeOverlaySubtrees,
+    sdk.GridAssetRegistry? assetRegistry,
+    GridAssetRosterOverride? assetRosterOverride,
   }) : _runner = runner,
-       _materializedSubtrees = materializedSubtrees;
+       _assetRegistry = assetRegistry,
+       _assetRosterOverride = assetRosterOverride;
 
   final GitRunner? _runner;
-  final List<String> _materializedSubtrees;
+  final sdk.GridAssetRegistry? _assetRegistry;
+  final GridAssetRosterOverride? _assetRosterOverride;
+
+  /// The EXACT worktree paths the provision writer materialized for THIS
+  /// substation — [resolveGridAssets] scoped to [kWorktreeOverlaySubtrees].
+  ///
+  /// Read at this ROUTE edge with the non-binding verb, through
+  /// [ambientAssetFactsOrFlare] (ADR-0008 D3).
+  ///
+  /// A station that has not mounted the projection yet falls back to
+  /// [kWorktreeOverlaySubtrees] itself — the pathspec this guard restored
+  /// BEFORE the resolution existed — and the helper's one
+  /// [kAssetFactsUnavailableFlare] says so. Landing an un-migrated station is
+  /// worth more than a precise pathspec it cannot compute; the writer that
+  /// wrote those trees was running the same pre-projection path. Once the facts
+  /// ARE mounted the resolution is strict: a snapshot without this substation's
+  /// key refuses loudly rather than restoring a set this station never owned.
+  List<String> _resolvedOwnedPaths(TreeContext context) {
+    final registry = _assetRegistry;
+    if (registry == null) return const [];
+    final ambient = ambientAssetFactsOrFlare(context, consumer: 'rebase');
+    if (ambient == null) return kWorktreeOverlaySubtrees;
+    return resolveGridAssets(
+          registry: registry,
+          snapshot: ambient.snapshot,
+          substation: ambient.substation,
+          rosterOverride: _assetRosterOverride,
+        )
+        .artifactsUnder(kWorktreeOverlaySubtrees)
+        .map((artifact) => artifact.relativePath)
+        .toList(growable: false);
+  }
 
   @override
   Future<RouteVerdict> route(TreeContext context, StepArgs args) async {
@@ -119,40 +163,43 @@ class RebaseCapability extends RouteCapability {
     final workDir = workspace.workspaceDir;
     final base = workspace.baseBranch;
 
-    final tracked = await runner.run(
-      workingDirectory: workDir,
-      args: ['ls-files', '--', ..._materializedSubtrees],
-    );
-    if (args.cancel.isCancelled) throw kRouteCancelled;
-    if (!tracked.ok) {
-      throw RouteFailure(
-        'could not enumerate materializer-owned paths before rebase: '
-        '${tracked.output.trim()}',
-      );
-    }
-    final trackedPaths = tracked.output
-        .split('\n')
-        .map((path) => path.trim())
-        .where((path) => path.isNotEmpty)
-        .toList();
-    if (trackedPaths.isNotEmpty) {
-      final restore = await runner.run(
+    final ownedPaths = _resolvedOwnedPaths(context);
+    if (ownedPaths.isNotEmpty) {
+      final tracked = await runner.run(
         workingDirectory: workDir,
-        args: [
-          'restore',
-          '--source=HEAD',
-          '--staged',
-          '--worktree',
-          '--',
-          ...trackedPaths,
-        ],
+        args: ['ls-files', '--', ...ownedPaths],
       );
       if (args.cancel.isCancelled) throw kRouteCancelled;
-      if (!restore.ok) {
+      if (!tracked.ok) {
         throw RouteFailure(
-          'could not restore materializer-owned paths before rebase: '
-          '${restore.output.trim()}',
+          'could not enumerate materializer-owned paths before rebase: '
+          '${tracked.output.trim()}',
         );
+      }
+      final trackedPaths = tracked.output
+          .split('\n')
+          .map((path) => path.trim())
+          .where((path) => path.isNotEmpty)
+          .toList();
+      if (trackedPaths.isNotEmpty) {
+        final restore = await runner.run(
+          workingDirectory: workDir,
+          args: [
+            'restore',
+            '--source=HEAD',
+            '--staged',
+            '--worktree',
+            '--',
+            ...trackedPaths,
+          ],
+        );
+        if (args.cancel.isCancelled) throw kRouteCancelled;
+        if (!restore.ok) {
+          throw RouteFailure(
+            'could not restore materializer-owned paths before rebase: '
+            '${restore.output.trim()}',
+          );
+        }
       }
     }
     final residue = await runner.run(
@@ -166,10 +213,31 @@ class RebaseCapability extends RouteCapability {
         '${residue.output.trim()}',
       );
     }
-    if (residue.output.trim().isNotEmpty) {
+    // The materialized HEADS (`.claude/`, `.agents/`) are the writer's
+    // territory for this check: the restore above put every tracked owned path
+    // back, and what remains there is a render difference between a human
+    // checkout and a lane worktree — never work worth holding a rebase for.
+    // Everything else IS the agent's uncommitted work and still refuses.
+    // (Delivery's own post-commit residue gate is unscoped, so nothing here
+    // widens what a bead may commit — A5.) The refusal carries the captured
+    // porcelain the way every captured-output escalation in this file does:
+    // exit code first, advice stripped, TAIL cut
+    // (`power_station#captured-process-output-escalates-tail-first`).
+    final outsideMaterializer = residue.output
+        .split('\n')
+        .where(
+          (line) => line.isNotEmpty && !_isMaterializedPorcelainRecord(line),
+        )
+        .join('\n')
+        .trim();
+    if (outsideMaterializer.isNotEmpty) {
+      final tail = landReasonTail(
+        planOutputWithoutPubAdvice(outsideMaterializer),
+        kRevalidateReasonTailChars,
+      );
       return Escalate(
-        'rebase refused: uncommitted changes remain outside the materialized '
-        'overlay scopes: ${residue.output.trim()}',
+        'rebase refused (exit ${residue.exitCode}): uncommitted changes remain '
+        'outside materialized assets: $tail',
       );
     }
 
@@ -196,6 +264,35 @@ class RebaseCapability extends RouteCapability {
     await runner.run(workingDirectory: workDir, args: ['rebase', '--abort']);
     return Escalate('rebase onto $base conflicted: ${rebase.output.trim()}');
   }
+}
+
+/// Whether one `git status --porcelain` record names ONLY paths under a
+/// materialized asset head (`.claude/`, `.agents/` — [kOverlayTargetHeads]).
+///
+/// A record is `XY <path>` or, for a rename/copy, `XY <from> -> <to>`; a path
+/// with special characters is quoted. BOTH sides of a rename must be under a
+/// head, so a rename that moved a real file INTO one still refuses the rebase.
+bool _isMaterializedPorcelainRecord(String line) {
+  if (line.length < 4) return false;
+  return line
+      .substring(3)
+      .split(' -> ')
+      .every((raw) => _isUnderMaterializedHead(_unquotePorcelainPath(raw)));
+}
+
+/// [raw] with porcelain's surrounding quotes removed, when it carries them.
+String _unquotePorcelainPath(String raw) {
+  final path = raw.trim();
+  return path.length >= 2 && path.startsWith('"') && path.endsWith('"')
+      ? path.substring(1, path.length - 1)
+      : path;
+}
+
+bool _isUnderMaterializedHead(String path) {
+  final normalized = p.normalize(path);
+  return kOverlayTargetHeads.any(
+    (head) => normalized == head || p.isWithin(head, normalized),
+  );
 }
 
 /// The REVALIDATE step — re-runs the bead's OWN Validation Plan (the SAME

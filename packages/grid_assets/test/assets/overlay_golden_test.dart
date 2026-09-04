@@ -15,10 +15,13 @@ import 'dart:io';
 import 'package:beads_dart/beads_dart.dart';
 import 'package:grid_assets/grid_assets.dart';
 import 'package:grid_engine/grid_engine.dart';
+import 'package:grid_assets/station_asset_registry.dart';
 import 'package:grid_engine/testing.dart';
 import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 import 'package:yaml/yaml.dart';
+
+import '../support/asset_resolution_fixture.dart';
 
 /// Every path the wire is allowed to write under a worktree — each vended
 /// skill's `SKILL.md`, in EVERY harness skill tree the station arms, plus the
@@ -78,9 +81,19 @@ void main() {
           workspaceDir: worktree.path,
           branch: 'grid/tg-1',
         ),
+        // The one resolution's inputs: the substation this worktree belongs to
+        // and the facts observed at its root.
+        ...liveAssetContextValues(),
       },
     ),
     args: stepArgs('tg-1/agent'),
+  );
+
+  /// The provision wire as the station composes it: the GENERATED registry,
+  /// resolved against the ambient facts above.
+  AgentCapability capability() => AgentCapability(
+    devRoot: '/dev/root',
+    assetRegistry: GeneratedGridAssetRegistrant.registry,
   );
 
   /// Every file the spawn left under the worktree, worktree-relative + sorted.
@@ -98,7 +111,7 @@ void main() {
   test('the provision wire emits EXACTLY the golden set into a BUILD WORKTREE '
       '— both harness skill trees, no settings.json, no agent-defs, and no '
       'loose file anywhere at the root', () {
-    const cap = AgentCapability(devRoot: '/dev/root');
+    final cap = capability();
     final c = ctx();
 
     cap.spawn(c.context, c.args);
@@ -108,7 +121,7 @@ void main() {
 
   test('every materialized SKILL.md is frontmatter-led and fully bound — no '
       'template residue ever reaches the agent', () {
-    const cap = AgentCapability(devRoot: '/dev/root');
+    final cap = capability();
     final c = ctx();
 
     cap.spawn(c.context, c.args);
@@ -125,7 +138,7 @@ void main() {
     'discovers a skill by yaml-parsing the `---` block, so a stamp that broke '
     'it would silently un-discover every vended skill',
     () {
-      const cap = AgentCapability(devRoot: '/dev/root');
+      final cap = capability();
       final c = ctx();
 
       cap.spawn(c.context, c.args);
@@ -153,7 +166,7 @@ void main() {
     "each written asset dir self-ignores, so land's `git add -A` cannot carry "
     "the vended overlay into the bead's PR (A23(6))",
     () {
-      const cap = AgentCapability(devRoot: '/dev/root');
+      final cap = capability();
       final c = ctx();
 
       cap.spawn(c.context, c.args);
@@ -192,7 +205,7 @@ void main() {
       0,
     );
 
-    const cap = AgentCapability(devRoot: '/dev/root');
+    final cap = capability();
     final c = ctx();
 
     cap.spawn(c.context, c.args);
@@ -221,7 +234,7 @@ void main() {
           ..createSync(recursive: true)
           ..writeAsStringSync(handAuthored);
 
-    const cap = AgentCapability(devRoot: '/dev/root');
+    final cap = capability();
     final c = ctx();
 
     cap.spawn(c.context, c.args);

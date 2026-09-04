@@ -7,13 +7,105 @@
 // `ProviderScope` (the availability registry `runGrid` mounts at the production
 // root). The synthetic roots never exist on disk; the mount gate's predicate is
 // only inspected, never invoked, so its default `ProcessBdRunner` never spawns.
+import 'dart:async';
+
 import 'package:genesis_tree/genesis_tree.dart';
 import 'package:github_grid_assets/github_grid_assets.dart';
 import 'package:grid_assets/grid_assets.dart';
+import 'package:grid_assets/station_asset_registry.dart'
+    show GeneratedGridAssetRegistrant;
 import 'package:grid_engine/grid_engine.dart' show ServiceBundle;
+// Fake-only: the recording transport this file asserts the migration flare on.
+import 'package:grid_engine/testing.dart' show RecordingExplorationTransport;
 import 'package:grid_runtime/grid_runtime.dart' show PrOpener;
 import 'package:grid_sdk/grid_sdk.dart' as sdk;
 import 'package:test/test.dart';
+
+/// The station-generated asset registry a seat resolves its own availability
+/// from: one unconditional skill and one gated behind a package the seat's
+/// facts may or may not carry.
+const sdk.GridAssetDefinition _always = sdk.GridAssetDefinition(
+  assetKey: sdk.AssetKey(
+    package: 'fixture_assets',
+    kind: sdk.AssetKind.skill,
+    id: 'always',
+  ),
+  description: 'mounted at every seat',
+  artifacts: <sdk.AssetArtifact>[
+    sdk.AssetArtifact(
+      target: sdk.AssetDeliveryTarget.claude,
+      path: 'extension/station_overlay/claude/skills/always/SKILL.md',
+    ),
+  ],
+);
+const sdk.GridAssetDefinition _gatedAsset = sdk.GridAssetDefinition(
+  assetKey: sdk.AssetKey(
+    package: 'fixture_assets',
+    kind: sdk.AssetKind.skill,
+    id: 'gated',
+  ),
+  description: 'mounted only where grid_sdk is resolved',
+  selector: sdk.RequiresPackage('grid_sdk'),
+  artifacts: <sdk.AssetArtifact>[
+    sdk.AssetArtifact(
+      target: sdk.AssetDeliveryTarget.claude,
+      path: 'extension/station_overlay/claude/skills/gated/SKILL.md',
+    ),
+  ],
+);
+
+final sdk.GridAssetRegistry _assetRegistry = sdk.GridAssetRegistry(
+  <sdk.GridAssetPackDefinition>[
+    sdk.GridAssetPackDefinition(
+      package: 'fixture_assets',
+      assets: const <sdk.GridAssetDefinition>[_always, _gatedAsset],
+    ),
+  ],
+);
+
+/// The facts observed for [names]; a name in [withGridSdk] additionally
+/// resolves `grid_sdk`, which is what the gated asset's selector asks for.
+SubstationFactsSnapshot _facts(
+  Iterable<String> names, {
+  Set<String> withGridSdk = const <String>{},
+}) => SubstationFactsSnapshot(<SubstationKey, SubstationFacts>{
+  for (final name in names)
+    SubstationKey(name): SubstationFacts(
+      root: '/home/me/$name',
+      dartPackages: <String>{
+        'fixture_assets',
+        if (withGridSdk.contains(name)) 'grid_sdk',
+      },
+      packageRoots: const <String, String>{'fixture_assets': '/packs/fixture'},
+    ),
+});
+
+/// A Fake observer — a seat never constructs one; the station injects it.
+class _FakeFactsRepository implements SubstationFactsRepository {
+  _FakeFactsRepository(this._current);
+
+  SubstationFactsSnapshot _current;
+  final StreamController<SubstationFactsSnapshot> _controller =
+      StreamController<SubstationFactsSnapshot>.broadcast(sync: true);
+
+  @override
+  SubstationFactsSnapshot get current => _current;
+
+  @override
+  Stream<SubstationFactsSnapshot> get changes => _controller.stream;
+
+  void emit(SubstationFactsSnapshot next) {
+    if (next == _current) return;
+    _current = next;
+    _controller.add(next);
+  }
+
+  @override
+  void refresh() {}
+
+  @override
+  void dispose() => unawaited(_controller.close());
+}
 
 /// Complete, standalone environments: the availability walk compares in the
 /// `AgentEnvironment.flattened` normal form, so a preference entry must be its
@@ -97,16 +189,35 @@ _Mounted _mount(Seed root) {
 }
 
 /// The station tree a downstream consumer authors: a raw grid root over the
-/// given seats, under the availability registry scope.
-Seed _station(List<Seed> seats, {AgentArming? arming}) => sdk.ProviderScope(
-  child: InheritedSeed<EnvironmentRegistry>(
-    value: _registry,
-    child: arming == null
-        ? sdk.RawAssetGrid(root: '/home/me/station', assets: seats)
-        : TypedEnvironmentProvider(
-            arming: arming,
-            child: sdk.RawAssetGrid(root: '/home/me/station', assets: seats),
-          ),
+/// given seats, under the availability registry scope and the ONE facts
+/// projection every seat resolves its own assets through.
+Seed _station(
+  List<Seed> seats, {
+  AgentArming? arming,
+  SubstationFactsRepository? facts,
+}) => sdk.ProviderScope(
+  child: SubstationFactsAssets(
+    repository:
+        facts ??
+        _FakeFactsRepository(
+          _facts(const <String>[
+            'mine',
+            'plain',
+            'armed',
+            'quiet',
+            'ambient',
+            'org',
+          ]),
+        ),
+    child: InheritedSeed<EnvironmentRegistry>(
+      value: _registry,
+      child: arming == null
+          ? sdk.RawAssetGrid(root: '/home/me/station', assets: seats)
+          : TypedEnvironmentProvider(
+              arming: arming,
+              child: sdk.RawAssetGrid(root: '/home/me/station', assets: seats),
+            ),
+    ),
   ),
 );
 
@@ -121,7 +232,14 @@ void main() {
   test('a downstream seat mounts offline: the projection resolves and the '
       'work subtree gets a git bundle behind the mount gate', () {
     final mounted = _mount(
-      _station([SubstationSeed(name: 'mine', root: '../mine', prefix: 'mn')]),
+      _station([
+        SubstationSeed(
+          name: 'mine',
+          root: '../mine',
+          prefix: 'mn',
+          assetRegistry: _assetRegistry,
+        ),
+      ]),
     );
     addTearDown(mounted.owner.dispose);
 
@@ -146,14 +264,208 @@ void main() {
     );
   });
 
+  test('selected generated definitions are mounted and excluded definitions '
+      'are absent', () {
+    // `withGridSdk` decides the gated asset's selector at THIS seat: `armed`
+    // resolves grid_sdk, `plain` does not.
+    final repository = _FakeFactsRepository(
+      _facts(const <String>['plain', 'armed'], withGridSdk: const {'armed'}),
+    );
+    final plainBuilds = <int>[];
+    final mounted = _mount(
+      _station([
+        SubstationSeed(
+          name: 'plain',
+          root: '../plain',
+          assetRegistry: _assetRegistry,
+        ),
+        SubstationSeed(
+          name: 'armed',
+          root: '../armed',
+          assetRegistry: _assetRegistry,
+          assetRosterOverride: GridAssetRosterOverride(
+            exclude: const [
+              sdk.AssetKey(
+                package: 'fixture_assets',
+                kind: sdk.AssetKind.skill,
+                id: 'always',
+              ),
+            ],
+          ),
+        ),
+      ], facts: repository),
+    );
+    addTearDown(mounted.owner.dispose);
+
+    List<sdk.GridAssetDefinition> mountedFixtureAssets() => mounted.walk
+        .seeds<sdk.GridAssetDefinition>()
+        .where((definition) => definition.assetKey.package == 'fixture_assets')
+        .toList();
+
+    expect(
+      mounted.walk.values<MountedSubstationSeed>().map((s) => s.scope.name),
+      unorderedEquals(<String>['plain', 'armed']),
+    );
+    // `plain` mounts the unconditional asset BY IDENTITY — the same `const`
+    // value the registry holds — and not the gated one its facts do not select.
+    expect(
+      mountedFixtureAssets().where((d) => identical(d, _always)),
+      hasLength(1),
+      reason: 'only `plain` mounts it: `armed` EXCLUDED it by roster',
+    );
+    // `armed` resolves grid_sdk, so the gated asset IS mounted there.
+    expect(
+      mountedFixtureAssets().where((d) => identical(d, _gatedAsset)),
+      hasLength(1),
+      reason: 'the seat whose facts select it mounts the gated definition',
+    );
+
+    // A facts change at ONE seat rebuilds ONLY that seat: `plain` gains
+    // grid_sdk and mounts the gated asset; `armed` is untouched.
+    plainBuilds.add(
+      mounted.walk
+          .seeds<sdk.GridAssetDefinition>()
+          .where((d) => d.assetKey.id == 'gated')
+          .length,
+    );
+    repository.emit(
+      _facts(
+        const <String>['plain', 'armed'],
+        withGridSdk: const {'armed', 'plain'},
+      ),
+    );
+    mounted.owner.flush();
+    plainBuilds.add(
+      mounted.walk
+          .seeds<sdk.GridAssetDefinition>()
+          .where((d) => d.assetKey.id == 'gated')
+          .length,
+    );
+    expect(
+      plainBuilds,
+      [1, 2],
+      reason: 'the changed seat re-resolved and now mounts the gated asset',
+    );
+  });
+
+  test('SubstationSeed defaults to the generated registry when omitted', () {
+    // The compatibility seam: the six `SubstationSeed(...)` calls a composing
+    // station authored before this parameter existed keep compiling AND keep
+    // resolving against the registry generated for the vended stack's own
+    // closure — the identical object, never a rebuilt one.
+    final seed = SubstationSeed(name: 'compat', root: '/compat');
+
+    expect(
+      identical(seed.assetRegistry, GeneratedGridAssetRegistrant.registry),
+      isTrue,
+    );
+    // Construction alone reads no facts: only a BUILD watches the aspect.
+    expect(seed.assetRenderArguments, isEmpty);
+    expect(seed.assetRosterOverride, isNull);
+  });
+
+  test('SubstationSeed without asset facts preserves legacy build and flares '
+      'once', () {
+    // The MIGRATION state: a station composed before this projection existed
+    // mounts no `SubstationFactsAssets`. Its seats must still BUILD — the
+    // whole GitHub/Git/eligibility/identity stack is what that station is —
+    // so the seat lands on its pre-resolution asset stack and SAYS SO once
+    // (`power_station#one-asset-resolution-defines-tree-and-writers`).
+    final flares = RecordingExplorationTransport();
+    final mounted = _mount(
+      sdk.ProviderScope(
+        child: InheritedSeed<ServiceBundle>(
+          value: ServiceBundle(transport: flares),
+          child: InheritedSeed<EnvironmentRegistry>(
+            value: _registry,
+            child: sdk.RawAssetGrid(
+              root: '/home/me/station',
+              assets: [
+                SubstationSeed(
+                  name: 'compat',
+                  root: '../compat',
+                  assetRegistry: _assetRegistry,
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+    addTearDown(mounted.owner.dispose);
+
+    // The pre-resolution stack is intact: the seat projects, and its work
+    // subtree still gets the git bundle behind the mount gate.
+    expect(mounted.walk.values<MountedSubstationSeed>(), hasLength(1));
+    expect(_gated(mounted.walk).sourceControl, isA<GitSourceControl>());
+    // ...and it mounts NO generated definition. An absent projection is not a
+    // reason to guess a selector answer.
+    expect(
+      mounted.walk.seeds<sdk.GridAssetDefinition>().where(
+        (d) => d.assetKey.package == 'fixture_assets',
+      ),
+      isEmpty,
+    );
+    // EXACTLY one — a build that flared per rebuild would drown the signal
+    // the flare exists to give.
+    expect(flares.flares.map((flare) => flare.name), [
+      kAssetFactsUnavailableFlare,
+    ]);
+    expect(flares.flares.single.data, {
+      'consumer': 'substation',
+      'missing': 'snapshot',
+    });
+
+    // Once the projection IS mounted, selection is strict again: a snapshot
+    // that does not carry this seat's key is a composition error, never a
+    // reason to degrade — and no compatibility flare softens it.
+    final strictFlares = RecordingExplorationTransport();
+    expect(
+      () => _mount(
+        sdk.ProviderScope(
+          child: InheritedSeed<ServiceBundle>(
+            value: ServiceBundle(transport: strictFlares),
+            child: SubstationFactsAssets(
+              repository: _FakeFactsRepository(
+                SubstationFactsSnapshot(
+                  const <SubstationKey, SubstationFacts>{},
+                ),
+              ),
+              child: InheritedSeed<EnvironmentRegistry>(
+                value: _registry,
+                child: sdk.RawAssetGrid(
+                  root: '/home/me/station',
+                  assets: [
+                    SubstationSeed(
+                      name: 'strict',
+                      root: '../strict',
+                      assetRegistry: _assetRegistry,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+      throwsA(isA<StateError>()),
+    );
+    expect(strictFlares.flares, isEmpty);
+  });
+
   test('the seat arming rung SHADOWS the station on the type it arms and '
       'leaves every other type resolving through the station', () {
     final mounted = _mount(
       _station([
-        SubstationSeed(name: 'plain', root: '../plain'),
+        SubstationSeed(
+          name: 'plain',
+          root: '../plain',
+          assetRegistry: _assetRegistry,
+        ),
         SubstationSeed(
           name: 'armed',
           root: '../armed',
+          assetRegistry: _assetRegistry,
           arming: const AgentArming(build: BuildAgentEnvironment([_seatBuild])),
         ),
       ], arming: _stationArming),
@@ -177,7 +489,13 @@ void main() {
   test('OFFLINE POSTURE: a null githubPoll composes no reconciler leg and '
       'provides no reconciler values', () {
     final mounted = _mount(
-      _station([SubstationSeed(name: 'quiet', root: '../quiet')]),
+      _station([
+        SubstationSeed(
+          name: 'quiet',
+          root: '../quiet',
+          assetRegistry: _assetRegistry,
+        ),
+      ]),
     );
     addTearDown(mounted.owner.dispose);
 
@@ -191,7 +509,13 @@ void main() {
   test('OFFLINE POSTURE: a null app composes no App legs at all, so the '
       'ambient opener stands', () {
     final mounted = _mount(
-      _station([SubstationSeed(name: 'ambient', root: '../ambient')]),
+      _station([
+        SubstationSeed(
+          name: 'ambient',
+          root: '../ambient',
+          assetRegistry: _assetRegistry,
+        ),
+      ]),
     );
     addTearDown(mounted.owner.dispose);
 
@@ -224,6 +548,7 @@ void main() {
         SubstationSeed(
           name: 'org',
           root: '../org',
+          assetRegistry: _assetRegistry,
           app: identity,
           // The key variable is UNSET, so the loader resolves null and the
           // seat composes INERT: an absent key is a POSTURE, never an error.

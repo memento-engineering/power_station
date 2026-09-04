@@ -7,9 +7,73 @@
 // `Station(substations)` child — so a migrated suite drives an identical tree
 // and no assertion has to move.
 import 'package:genesis_tree/genesis_tree.dart';
+import 'package:grid_assets/grid_assets.dart'
+    show
+        PackagedAssetLoader,
+        SubstationFacts,
+        SubstationFactsAssets,
+        SubstationFactsRepository,
+        SubstationFactsSnapshot,
+        SubstationKey;
 import 'package:grid_engine/grid_engine.dart';
+import 'package:grid_sdk/grid_sdk.dart' as sdk;
 import 'package:grid_sdk/grid_sdk.dart'
     show GridConfiguration, GridDelegate, GridHandle, Provider, runGrid;
+import 'package:path/path.dart' as p;
+
+/// The substation id every acceptance harness composes (`SubstationConfig`'s
+/// `substationId`), and therefore the identity its assets resolve under.
+const String kAcceptanceSubstation = 'tg';
+
+/// A [SubstationFactsRepository] over ONE fixed snapshot — the harness shape of
+/// an observer whose roots never change during a test.
+class _StaticFactsRepository implements SubstationFactsRepository {
+  const _StaticFactsRepository(this.current);
+
+  @override
+  final SubstationFactsSnapshot current;
+
+  @override
+  Stream<SubstationFactsSnapshot> get changes =>
+      const Stream<SubstationFactsSnapshot>.empty();
+
+  @override
+  void refresh() {}
+
+  @override
+  void dispose() {}
+}
+
+/// The ASSET half of a station root, as a live composition mounts it: the ONE
+/// facts projection (`SubstationFactsAssets`) plus the substation identity a
+/// capability resolves its assets under.
+///
+/// In production the identity comes from `sdk.Substation` and the projection
+/// from the composing station; these harnesses mount the engine's own
+/// `SubstationScope` directly, so they supply both explicitly rather than
+/// leaving the provision wire without the facts it refuses to guess.
+Seed stationAssetProjection({required String substation, required Seed child}) {
+  final packageRoot = p.dirname(PackagedAssetLoader().root);
+  return SubstationFactsAssets(
+    repository: _StaticFactsRepository(
+      SubstationFactsSnapshot(<SubstationKey, SubstationFacts>{
+        SubstationKey(substation): SubstationFacts(
+          root: packageRoot,
+          dartPackages: const <String>['grid_assets', 'grid_sdk'],
+          packageRoots: <String, String>{'grid_assets': packageRoot},
+        ),
+      }),
+    ),
+    child: InheritedSeed<sdk.SubstationScope>(
+      value: sdk.SubstationScope(
+        name: substation,
+        root: packageRoot,
+        prefix: substation,
+      ),
+      child: child,
+    ),
+  );
+}
 
 /// The station tree under test: the work-axis ambient stack, as a
 /// `GridDelegate`'s master build.
@@ -59,7 +123,10 @@ class _StationRootDelegate extends GridDelegate {
         Provider<ProcessLeaseVendor>.value(leaseVendor),
         if (registry != null) Provider<CapabilityRegistry>.value(registry),
       ],
-      child: Station(substations),
+      child: stationAssetProjection(
+        substation: kAcceptanceSubstation,
+        child: Station(substations),
+      ),
     );
   }
 }

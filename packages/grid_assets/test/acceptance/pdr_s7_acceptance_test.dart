@@ -195,13 +195,16 @@ Seed _root({
           value: registry,
           child: InheritedSeed<SessionResolver>(
             value: kCodeResolver,
-            child: Station([
-              SubstationScope(
-                configNotifier: SubstationConfigNotifier(_tgConfig),
-                services: services,
-                key: const ValueKey('scope.tg'),
-              ),
-            ]),
+            child: stationAssetProjection(
+              substation: kAcceptanceSubstation,
+              child: Station([
+                SubstationScope(
+                  configNotifier: SubstationConfigNotifier(_tgConfig),
+                  services: services,
+                  key: const ValueKey('scope.tg'),
+                ),
+              ]),
+            ),
           ),
         ),
       ),

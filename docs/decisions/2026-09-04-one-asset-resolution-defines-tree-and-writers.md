@@ -1,0 +1,79 @@
+---
+status: accepted
+date: 2026-09-04
+decision-makers: ["Nico Spencer"]
+consulted: []
+informed: []
+register:
+  spec: 1
+  slug: one-asset-resolution-defines-tree-and-writers
+  surfaces:
+    - "packages/grid_assets/**"
+    - "packages/github_grid_assets/**"
+  obsoletes: []
+  updates:
+    - a24-bead-pow-a74-the-operator-install-leg-discovers-its-over
+  obsoleted-by: null
+  updated-by: []
+  bead: pow-4peu
+  legacy-id: null
+---
+
+# One asset resolution defines tree availability and both writers
+
+## Context and Problem Statement
+
+The station registry describes potential assets, but overlay discovery made
+checkout installation, worktree provision, landing restoration, and mounted
+substation availability answer selection through different mechanisms.
+
+## Decision Outcome
+
+One pure `resolveGridAssets` evaluation over the station-generated
+`GridAssetRegistry`, an immutable `SubstationFactsSnapshot`, render values,
+and an optional roster override is authoritative. It returns the original
+selected `GridAssetDefinition` values and the exact Claude/agents artifact
+source and target paths. Registry membership is potential availability; a
+definition is actually available exactly when that same Seed is mounted in
+the selected substation assets list.
+
+A repository observes configured substation roots outside build and emits
+immutable snapshots. A stateful asset projects those snapshots through
+`InheritedModelSeed<SubstationFactsSnapshot, SubstationKey>`; each substation
+build watches one constructor-stable key and performs no I/O.
+
+`assets install`, worktree provision through `OverlayMaterializer`, and the
+landing pre-rebase guard consume the same resolved artifacts. Writers do not
+enumerate an overlay source. This updates A24(1): runtime
+`extension_discovery` is retired from installation. A24's explicit command,
+offline posture, no-commit rule, and audience deny-list remain. A26's
+worktree scope, provenance, synchronous core, and non-destructive behavior
+remain.
+
+Check mode reports `IN SYNC`, `DRIFTED`, `HAND-EDITED`, `MISSING`, or
+`STALE`, writes nothing, and succeeds only when all paths are `IN SYNC`.
+Hand-edited and stale paths are reported and never repaired or deleted.
+
+Registry parameters on `SubstationSeed`, `AssetsCommand`, and
+`AssetsInstallCommand` are optional compatibility inputs and resolve to the
+one generated `GeneratedGridAssetRegistrant.registry` object when omitted.
+An un-migrated station does not fabricate a resolver answer. When no facts
+snapshot is mounted, `SubstationSeed` preserves its pre-resolution asset stack,
+mounts no generated definitions, and emits one `assets.factsUnavailable` flare
+with `consumer: substation` and `missing: snapshot`. Provision leaves
+repository-provided harness assets untouched, and landing uses the
+pre-resolution worktree skill subtrees when either its snapshot or scope is
+absent; each attempted process effect emits one flare with `consumer: agent` or
+`consumer: rebase` and the exact missing ambient names. Once the required
+ambient values are mounted, resolution remains strict and missing keyed facts
+refuse loudly. The space-owned projection/composition migration is tracked by
+`space-eos`, blocked by this bead through grid link `tranquility-06xl23`.
+
+### Consequences
+
+* Good, because mounted availability and both materialized views cannot
+  select different asset sets.
+* Good, because selector evaluation remains pure and root observation stays
+  outside build.
+* Bad, because a selected artifact whose source package root is absent from
+  facts now refuses loudly instead of disappearing from a source walk.

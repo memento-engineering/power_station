@@ -11,9 +11,48 @@ import 'package:grid_assets/grid_assets.dart';
 import 'package:beads_dart/beads_dart.dart';
 import 'package:grid_engine/grid_engine.dart';
 import 'package:grid_runtime/grid_runtime.dart';
+import 'package:grid_sdk/grid_sdk.dart' as sdk;
+import 'package:grid_sdk/grid_sdk.dart' show GridAssetDefinition;
+import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
 import 'support/asset_fakes.dart';
+import 'support/asset_resolution_fixture.dart';
+
+/// The station-generated registry this seat resolves against: one
+/// unconditional skill and one gated behind a package the facts may or may not
+/// carry — so a FACTS change moves the guard's own path set.
+final sdk.GridAssetRegistry _assetRegistry = sdk.GridAssetRegistry(
+  <sdk.GridAssetPackDefinition>[
+    sdk.GridAssetPackDefinition(
+      package: kFixturePackage,
+      assets: <GridAssetDefinition>[
+        fixtureSkill('discover'),
+        fixtureSkill('gated', selector: const sdk.RequiresPackage('grid_sdk')),
+      ],
+    ),
+  ],
+);
+
+/// The facts observed at the seat's root; [packages] decides whether the gated
+/// asset is selected.
+SubstationFactsSnapshot _assetFacts({
+  Iterable<String> packages = const <String>[kFixturePackage],
+}) => SubstationFactsSnapshot(<SubstationKey, SubstationFacts>{
+  const SubstationKey('seat'): SubstationFacts(
+    root: '/w/seat',
+    dartPackages: packages,
+    packageRoots: const <String, String>{kFixturePackage: '/packs/fixture'},
+  ),
+});
+
+/// What the resolver says this seat's worktree assets ARE — the value the guard
+/// must pass to `git ls-files`, computed the ONE way.
+List<String> _ownedPaths(SubstationFactsSnapshot snapshot) => resolveGridAssets(
+  registry: _assetRegistry,
+  snapshot: snapshot,
+  substation: const SubstationKey('seat'),
+).artifactsUnder(kWorktreeOverlaySubtrees).map((a) => a.relativePath).toList();
 
 /// A rebase/revalidate context whose ambient bundle binds [delivery] (null ⇒ the
 /// commit-only arm). The source control is always present and provisioning-only
@@ -21,6 +60,10 @@ import 'support/asset_fakes.dart';
 ({FakeTreeContext context, StepArgs args}) _capCtx({
   DeliveryMethod? delivery,
   Bead? beadOverride,
+  SubstationFactsSnapshot? facts,
+  ExplorationTransport? transport,
+  bool mountFacts = true,
+  bool mountScope = true,
 }) => (
   context: FakeTreeContext(
     values: {
@@ -34,7 +77,17 @@ import 'support/asset_fakes.dart';
       ServiceBundle: ServiceBundle(
         sourceControl: _FakeSourceControl(),
         delivery: delivery,
+        transport: transport,
       ),
+      // The ONE resolution's inputs, ambient exactly as the station mounts them
+      // — omittable, because an un-migrated station mounts neither yet.
+      if (mountFacts) SubstationFactsSnapshot: facts ?? _assetFacts(),
+      if (mountScope)
+        sdk.SubstationScope: const sdk.SubstationScope(
+          name: 'seat',
+          root: '/w/seat',
+          prefix: 'seat',
+        ),
     },
   ),
   args: stepArgs('tg-1/land/rebase'),
@@ -122,6 +175,7 @@ void main() {
         final c = _capCtx();
         final outcome = await RebaseCapability(
           runner: runner,
+          assetRegistry: _assetRegistry,
         ).route(c.context, c.args);
         expect(outcome, isA<Advance>());
         expect(runner.calls, isEmpty);
@@ -133,6 +187,7 @@ void main() {
       final c = _capCtx(delivery: _FakeDelivery());
       final outcome = await RebaseCapability(
         runner: runner,
+        assetRegistry: _assetRegistry,
       ).route(c.context, c.args);
       expect(outcome, isA<Advance>());
       expect((outcome as Advance).payload, {'outcome': 'clean'});
@@ -148,6 +203,7 @@ void main() {
       final c = _capCtx(delivery: _FakeDelivery());
       final outcome = await RebaseCapability(
         runner: runner,
+        assetRegistry: _assetRegistry,
       ).route(c.context, c.args);
       expect(outcome, isA<Advance>());
       expect(runner.subcommands, [
@@ -160,7 +216,7 @@ void main() {
       expect(runner.calls[0].args, [
         'ls-files',
         '--',
-        ...kWorktreeOverlaySubtrees,
+        ..._ownedPaths(_assetFacts()),
       ]);
       expect(runner.calls[1].args, [
         'restore',
@@ -182,6 +238,7 @@ void main() {
         final c = _capCtx(delivery: _FakeDelivery());
         final outcome = await RebaseCapability(
           runner: runner,
+          assetRegistry: _assetRegistry,
         ).route(c.context, c.args);
         expect(outcome, isA<Escalate>());
         expect(
@@ -199,7 +256,10 @@ void main() {
       );
       final c = _capCtx(delivery: _FakeDelivery());
       await expectLater(
-        RebaseCapability(runner: runner).route(c.context, c.args),
+        RebaseCapability(
+          runner: runner,
+          assetRegistry: _assetRegistry,
+        ).route(c.context, c.args),
         throwsA(isA<RouteFailure>()),
       );
       expect(runner.subcommands, ['ls-files', 'restore']);
@@ -215,7 +275,10 @@ void main() {
         );
         final c = _capCtx(delivery: _FakeDelivery());
         await expectLater(
-          RebaseCapability(runner: runner).route(c.context, c.args),
+          RebaseCapability(
+            runner: runner,
+            assetRegistry: _assetRegistry,
+          ).route(c.context, c.args),
           throwsA(isA<RouteFailure>()),
         );
         expect(runner.subcommands, [
@@ -234,6 +297,7 @@ void main() {
         final c = _capCtx(delivery: _FakeDelivery());
         final outcome = await RebaseCapability(
           runner: runner,
+          assetRegistry: _assetRegistry,
         ).route(c.context, c.args);
         expect(outcome, isA<Escalate>());
         expect(
@@ -250,6 +314,308 @@ void main() {
         expect(runner.calls.last.args, ['rebase', '--abort']);
       },
     );
+  });
+
+  group('the pre-rebase guard rides the ONE resolution', () {
+    test('resolver-selected owned paths change with substation facts across '
+        'rebase', () async {
+      // BEFORE: the gated asset's package is absent, so the guard owns two
+      // paths. AFTER: the package appears and the guard owns four — the SAME
+      // move the provision writer just made.
+      final before = _assetFacts();
+      final after = _assetFacts(
+        packages: const <String>[kFixturePackage, 'grid_sdk'],
+      );
+      expect(_ownedPaths(before), hasLength(2));
+      expect(_ownedPaths(after), hasLength(4));
+
+      final firstRunner = _MaterializerAwareRebaseRunner(
+        tracked: '${_ownedPaths(before).join('\n')}\n',
+      );
+      final firstOutcome =
+          await RebaseCapability(
+            runner: firstRunner,
+            assetRegistry: _assetRegistry,
+          ).route(
+            _capCtx(delivery: _FakeDelivery(), facts: before).context,
+            stepArgs('tg-1/land/rebase'),
+          );
+      final secondRunner = _MaterializerAwareRebaseRunner(
+        tracked: '${_ownedPaths(after).join('\n')}\n',
+      );
+      final secondOutcome =
+          await RebaseCapability(
+            runner: secondRunner,
+            assetRegistry: _assetRegistry,
+          ).route(
+            _capCtx(delivery: _FakeDelivery(), facts: after).context,
+            stepArgs('tg-1/land/rebase'),
+          );
+
+      expect(firstOutcome, isA<Advance>());
+      expect(secondOutcome, isA<Advance>());
+      expect(firstRunner.calls[0].args, [
+        'ls-files',
+        '--',
+        ..._ownedPaths(before),
+      ]);
+      expect(secondRunner.calls[0].args, [
+        'ls-files',
+        '--',
+        ..._ownedPaths(after),
+      ]);
+      expect(
+        secondRunner.calls[0].args,
+        isNot(firstRunner.calls[0].args),
+        reason:
+            'a facts change moves the guard set, exactly as it moves the '
+            'writer set',
+      );
+      // The restore is the EXACT selected set, never a subtree prefix.
+      expect(secondRunner.calls[1].args, [
+        'restore',
+        '--source=HEAD',
+        '--staged',
+        '--worktree',
+        '--',
+        ..._ownedPaths(after),
+      ]);
+
+      // Generated residue under BOTH harness heads is the writer's own render:
+      // the rebase proceeds.
+      final generatedResidue = _MaterializerAwareRebaseRunner(
+        tracked: '${_ownedPaths(after).join('\n')}\n',
+        status:
+            ' M ${p.join('.claude', 'skills', 'discover', 'SKILL.md')}\n'
+            '?? ${p.join('.agents', 'skills', 'gated', '.gitignore')}\n',
+      );
+      final proceeds =
+          await RebaseCapability(
+            runner: generatedResidue,
+            assetRegistry: _assetRegistry,
+          ).route(
+            _capCtx(delivery: _FakeDelivery(), facts: after).context,
+            stepArgs('tg-1/land/rebase'),
+          );
+      expect(proceeds, isA<Advance>());
+      expect(generatedResidue.subcommands, [
+        'ls-files',
+        'restore',
+        'status',
+        'fetch',
+        'rebase',
+      ]);
+
+      // Unrelated residue still REFUSES — exit-code-led, advice-stripped, and
+      // TAIL-cut through the shared helpers
+      // (`power_station#captured-process-output-escalates-tail-first`).
+      const unrelated = ' M lib/src/agent_work.dart';
+      final mixed = _MaterializerAwareRebaseRunner(
+        tracked: '${_ownedPaths(after).join('\n')}\n',
+        status:
+            ' M ${p.join('.claude', 'skills', 'discover', 'SKILL.md')}\n'
+            '$unrelated\n',
+      );
+      final refused =
+          await RebaseCapability(
+            runner: mixed,
+            assetRegistry: _assetRegistry,
+          ).route(
+            _capCtx(delivery: _FakeDelivery(), facts: after).context,
+            stepArgs('tg-1/land/rebase'),
+          );
+      expect(refused, isA<Escalate>());
+      expect(
+        (refused as Escalate).reason,
+        'rebase refused (exit 0): uncommitted changes remain outside '
+        'materialized assets: '
+        '${landReasonTail(planOutputWithoutPubAdvice(unrelated), kRevalidateReasonTailChars)}',
+      );
+      expect(mixed.subcommands, ['ls-files', 'restore', 'status']);
+    });
+
+    test(
+      'a RENAME out of a materialized head still refuses — both sides of the '
+      'record must be generated territory',
+      () async {
+        final runner = _MaterializerAwareRebaseRunner(
+          tracked: '',
+          status:
+              'R  ${p.join('.claude', 'skills', 'discover', 'SKILL.md')} -> '
+              '${p.join('docs', 'SKILL.md')}\n',
+        );
+        final outcome =
+            await RebaseCapability(
+              runner: runner,
+              assetRegistry: _assetRegistry,
+            ).route(
+              _capCtx(delivery: _FakeDelivery()).context,
+              stepArgs('tg-1/land/rebase'),
+            );
+
+        expect(outcome, isA<Escalate>());
+        expect(
+          (outcome as Escalate).reason,
+          contains(p.join('docs', 'SKILL.md')),
+        );
+      },
+    );
+
+    test('a rename WITHIN the materialized heads (quoted paths included) does '
+        'not block the rebase', () async {
+      final runner = _MaterializerAwareRebaseRunner(
+        tracked: '',
+        status:
+            'R  "${p.join('.claude', 'skills', 'a b', 'SKILL.md')}" -> '
+            '"${p.join('.agents', 'skills', 'a b', 'SKILL.md')}"\n',
+      );
+      final outcome =
+          await RebaseCapability(
+            runner: runner,
+            assetRegistry: _assetRegistry,
+          ).route(
+            _capCtx(delivery: _FakeDelivery()).context,
+            stepArgs('tg-1/land/rebase'),
+          );
+
+      expect(outcome, isA<Advance>());
+    });
+
+    test('a status FAILURE is loud, and a cancelled route throws before the '
+        'refusal is even assembled', () async {
+      final failing = _MaterializerAwareRebaseRunner(
+        tracked: '',
+        failSubcommand: 'status',
+      );
+      await expectLater(
+        RebaseCapability(runner: failing, assetRegistry: _assetRegistry).route(
+          _capCtx(delivery: _FakeDelivery()).context,
+          stepArgs('tg-1/land/rebase'),
+        ),
+        throwsA(isA<RouteFailure>()),
+      );
+
+      final cancel = CancelToken()..cancel();
+      final cancelled = _MaterializerAwareRebaseRunner(
+        tracked: '${_ownedPaths(_assetFacts()).join('\n')}\n',
+      );
+      await expectLater(
+        RebaseCapability(
+          runner: cancelled,
+          assetRegistry: _assetRegistry,
+        ).route(
+          _capCtx(delivery: _FakeDelivery()).context,
+          StepArgs(nodePath: 'tg-1/land/rebase', cancel: cancel),
+        ),
+        throwsA(same(kRouteCancelled)),
+      );
+      expect(cancelled.subcommands, ['ls-files']);
+    });
+
+    test('RebaseCapability without asset facts preserves legacy restoration '
+        'and flares once', () async {
+      // The MIGRATION posture: a station composed before the projection existed
+      // still LANDS. It cannot compute the exact selected set, so it restores
+      // the pathspec this guard used before the resolution existed — and says
+      // so, once, on the transport.
+      for (final missing in const <({bool facts, bool scope, String data})>[
+        (facts: false, scope: true, data: 'snapshot'),
+        (facts: true, scope: false, data: 'scope'),
+        (facts: false, scope: false, data: 'snapshot,scope'),
+      ]) {
+        final flares = RecordingExplorationTransport();
+        final runner = _MaterializerAwareRebaseRunner(
+          tracked: '${kWorktreeOverlaySubtrees.join('\n')}\n',
+        );
+        final outcome =
+            await RebaseCapability(
+              runner: runner,
+              assetRegistry: _assetRegistry,
+            ).route(
+              _capCtx(
+                delivery: _FakeDelivery(),
+                transport: flares,
+                mountFacts: missing.facts,
+                mountScope: missing.scope,
+              ).context,
+              stepArgs('tg-1/land/rebase'),
+            );
+
+        expect(outcome, isA<Advance>(), reason: missing.data);
+        // The PRE-BEAD pathspec, exactly — never a fabricated resolver answer.
+        expect(runner.calls[0].args, [
+          'ls-files',
+          '--',
+          ...kWorktreeOverlaySubtrees,
+        ], reason: missing.data);
+        expect(runner.subcommands, [
+          'ls-files',
+          'restore',
+          'status',
+          'fetch',
+          'rebase',
+        ], reason: missing.data);
+        expect(
+          flares.flares.map((flare) => flare.name),
+          [kAssetFactsUnavailableFlare],
+          reason: 'exactly ONE flare per attempted effect',
+        );
+        expect(
+          flares.flares.single.data,
+          {'consumer': 'rebase', 'missing': missing.data},
+          reason: 'it names the consumer and what is missing',
+        );
+      }
+    });
+
+    test('mounted asset facts without the current key refuse loudly', () async {
+      // Once the station HAS migrated, selection is strict again: a snapshot
+      // that carries some other seat's facts is a composition error, not a
+      // reason to restore a guessed set.
+      final elsewhere = SubstationFactsSnapshot(
+        <SubstationKey, SubstationFacts>{
+          const SubstationKey('another-seat'): SubstationFacts(
+            root: '/w/another-seat',
+            dartPackages: const <String>[kFixturePackage],
+            packageRoots: const <String, String>{
+              kFixturePackage: '/packs/fixture',
+            },
+          ),
+        },
+      );
+      final flares = RecordingExplorationTransport();
+      final runner = _MaterializerAwareRebaseRunner(tracked: '');
+
+      await expectLater(
+        RebaseCapability(runner: runner, assetRegistry: _assetRegistry).route(
+          _capCtx(
+            delivery: _FakeDelivery(),
+            facts: elsewhere,
+            transport: flares,
+          ).context,
+          stepArgs('tg-1/land/rebase'),
+        ),
+        throwsA(isA<StateError>()),
+      );
+      expect(runner.subcommands, isEmpty);
+      expect(
+        flares.flares,
+        isEmpty,
+        reason: 'a mounted station never degrades',
+      );
+    });
+
+    test('with NO registry injected the guard skips restoration entirely — the '
+        'explicit disabled posture, not a silent empty set', () async {
+      final runner = _MaterializerAwareRebaseRunner(tracked: 'ignored\n');
+      final outcome = await RebaseCapability(runner: runner).route(
+        _capCtx(delivery: _FakeDelivery()).context,
+        stepArgs('tg-1/land/rebase'),
+      );
+
+      expect(outcome, isA<Advance>());
+      expect(runner.subcommands, ['status', 'fetch', 'rebase']);
+    });
   });
 
   group('RevalidateCapability', () {

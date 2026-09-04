@@ -147,7 +147,8 @@ Future<_Run> _buildRun({required _ProbeAdapter adapter}) async {
   );
   final steers = _Steers();
   final capability = AgentCapability(
-    overlayRoot: p.join(workspaceDir.path, 'absent-overlay'),
+    // NO asset registry: this suite isolates the session adapter, so the
+    // provision leg materializes nothing at all.
     sessionAdapters: AgentSessionAdapterRegistry(<String, AgentSessionAdapter>{
       'probe': adapter,
     }),

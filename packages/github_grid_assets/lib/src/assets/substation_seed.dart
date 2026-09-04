@@ -32,10 +32,16 @@ import 'package:grid_assets/grid_assets.dart'
         CriticAgentEnvironment,
         GatherAgentEnvironment,
         GitGridAssets,
+        GridAssetRosterOverride,
         MountEligibilityAssets,
         SeatEnvironments,
         SpecAgentEnvironment,
-        TypedEnvironmentProvider;
+        SubstationKey,
+        TypedEnvironmentProvider,
+        ambientAssetFactsOrFlare,
+        resolveGridAssets;
+import 'package:grid_assets/station_asset_registry.dart'
+    show GeneratedGridAssetRegistrant;
 import 'package:grid_runtime/grid_runtime.dart' show GitOps;
 import 'package:grid_sdk/grid_sdk.dart' as sdk;
 import 'package:grid_sdk/grid_sdk.dart' show Provider, ProviderTreeContext;
@@ -132,6 +138,9 @@ class SubstationSeed extends StatelessSeed {
   SubstationSeed({
     required this.name,
     required this.root,
+    sdk.GridAssetRegistry? assetRegistry,
+    this.assetRenderArguments = const <String, String>{},
+    this.assetRosterOverride,
     this.prefix,
     this.app,
     this.githubPoll,
@@ -141,7 +150,9 @@ class SubstationSeed extends StatelessSeed {
     this.githubTransportFactory = createGitHubHttpTransport,
     this.mountEligibilityRunnerFor,
     Key? key,
-  }) : super(key: key ?? ValueKey<String>('seat:$name'));
+  }) : assetRegistry = assetRegistry ?? GeneratedGridAssetRegistrant.registry,
+       _assetFactsKey = SubstationKey(name),
+       super(key: key ?? ValueKey<String>('seat:$name'));
 
   /// The substation's name (its tree identity).
   final String name;
@@ -149,6 +160,34 @@ class SubstationSeed extends StatelessSeed {
   /// The substation's ONE root — absolute, or relative to the ambient
   /// `GridRoot` (resolved by the SDK's own `Substation` build).
   final String root;
+
+  /// The STATION-GENERATED asset registry this seat resolves its own
+  /// availability from — POTENTIAL availability, which [resolveGridAssets]
+  /// narrows to the ACTUAL set this seat mounts
+  /// (`power_station#one-asset-resolution-defines-tree-and-writers`).
+  ///
+  /// OMITTING it takes [GeneratedGridAssetRegistrant.registry], the registry
+  /// generated for the station composing THIS package's closure
+  /// (`power_station#station-registries-use-resolved-package-closures`) — which
+  /// is what a downstream station composing the vended stack wants, and what a
+  /// seat authored before the resolution existed keeps getting. Pass one
+  /// explicitly to resolve against a different closure (a test fixture, or a
+  /// station that generates its own registrant).
+  final sdk.GridAssetRegistry assetRegistry;
+
+  /// The `{{hole}}` bindings a materializing consumer renders this seat's
+  /// assets against; the seat's own mount needs none, but the value travels
+  /// with the resolution so every consumer renders identically.
+  final Map<String, String> assetRenderArguments;
+
+  /// This seat's explicit include/exclude exceptions to what the selectors
+  /// decide.
+  final GridAssetRosterOverride? assetRosterOverride;
+
+  /// This seat's stable facts ASPECT — built ONCE from [name], so `build`
+  /// subscribes to the same value every time and one seat's changed facts
+  /// cannot rebuild another's.
+  final SubstationKey _assetFactsKey;
 
   /// The work store's issue-id prefix; null means the name (the SDK default).
   final String? prefix;
@@ -196,6 +235,33 @@ class SubstationSeed extends StatelessSeed {
 
   @override
   Seed build(TreeContext context) {
+    // WATCH this seat's OWN facts aspect (the D-H build verb, ADR-0008 D3):
+    // `ambientAssetFactsOrFlare` takes the stable aspect and subscribes to it,
+    // so the repository observes roots outside build, a change to ANOTHER
+    // seat's facts leaves this build alone
+    // (`power_station#adr-0006-typed-environment-lookup-selects-by-value`),
+    // and a station that has not mounted the projection yet keeps BUILDING —
+    // it lands on its pre-resolution stack behind one
+    // `assets.factsUnavailable` flare rather than throwing at every seat. The
+    // SAME helper the two process edges use; there is no second migration
+    // path to keep in step.
+    final ambient = ambientAssetFactsOrFlare(
+      context,
+      consumer: 'substation',
+      aspect: _assetFactsKey,
+    );
+    // PURE: selector evaluation only — no file read, no package parse, no
+    // watcher, no state mutation. An absent projection mounts NO generated
+    // definition; it never guesses one.
+    final selected = ambient == null
+        ? const <sdk.GridAssetDefinition>[]
+        : resolveGridAssets(
+            registry: assetRegistry,
+            snapshot: ambient.snapshot,
+            substation: ambient.substation,
+            renderArguments: assetRenderArguments,
+            rosterOverride: assetRosterOverride,
+          ).definitions;
     final githubPoll = this.githubPoll;
     final mountEligibilityRunnerFor = this.mountEligibilityRunnerFor;
     final landingPolicy = this.landingPolicy;
@@ -224,6 +290,9 @@ class SubstationSeed extends StatelessSeed {
       root,
       prefix: prefix,
       assets: [
+        // Mounted presence IS availability: the SELECTED generated definitions
+        // are the same `const` Seeds the registry holds, spread unchanged.
+        ...selected,
         Nest(
           // MountEligibilityAssets is INNERMOST on purpose: GitGridAssets
           // builds a FRESH ServiceBundle and preserves nothing from ambient,

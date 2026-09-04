@@ -1,17 +1,23 @@
 // The `assets install` Command — the THIN CLI adapter over the operator-install
 // lib: parses argv, resolves the grid home from the injected resident-station
-// context, renders the diff, commits nothing. Everything behavioral is the
-// lib's (overlay_install_test.dart); this suite pins the adapter contract a
-// composing station (`space assets install`) relies on. Offline: fake delegate,
-// fake root resolver, injected source ref (so no git subprocess), captured sinks.
+// context, OBSERVES that root once through the injected facts repository,
+// resolves the station registry against it, renders the diff, commits nothing.
+// Everything behavioral is the lib's (overlay_install_test.dart); this suite
+// pins the adapter contract a composing station (`space assets install`) relies
+// on. Offline: fake delegate, fake facts repository, injected source ref (so no
+// git subprocess), captured sinks.
 import 'dart:io';
 
 import 'package:args/command_runner.dart';
 import 'package:genesis_tree/genesis_tree.dart';
 import 'package:grid_assets/grid_assets.dart';
+import 'package:grid_assets/station_asset_registry.dart';
 import 'package:grid_sdk/grid_sdk.dart' as sdk;
+import 'package:grid_sdk/grid_sdk.dart' show GridAssetDefinition;
 import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
+
+import '../support/asset_resolution_fixture.dart';
 
 /// The composing station's resident-station context, rooted at [root].
 class _StationDelegate extends sdk.GridDelegate {
@@ -59,22 +65,28 @@ String _packageRoot() => p.dirname(PackagedAssetLoader().root);
 
 void main() {
   late Directory temp;
-  late Directory overlay;
+  late Directory fixtureRoot;
+  late TestAssetResolutionFixture fixture;
 
   setUp(() {
     temp = Directory.systemTemp.createTempSync('grid-assets-cmd-');
-    overlay = Directory(p.join(temp.path, 'pack'));
-    _write(
-      overlay,
-      ['.claude', 'skills', 'discover', 'SKILL.md'],
-      '---\nname: discover\n---\n'
-      'call {{runner}} search, file into {{gridHome}}\n',
+    fixtureRoot = Directory(p.join(temp.path, 'fixture'))..createSync();
+    fixture = TestAssetResolutionFixture(
+      root: fixtureRoot,
+      assets: <GridAssetDefinition>[fixtureSkill('discover')],
+      bodies: <String, String>{
+        'extension/station_overlay/claude/skills/discover/SKILL.md':
+            fixtureSkillBody(
+              'discover',
+              'call {{runner}} search, file into {{gridHome}}',
+            ),
+        'extension/station_overlay/agents/skills/discover/SKILL.md':
+            fixtureSkillBody(
+              'discover',
+              'call {{runner}} search, file into {{gridHome}}',
+            ),
+      },
     );
-    _write(overlay, [
-      '.claude',
-      'agents',
-      'governor.md',
-    ], '---\nname: governor\n---\nthe operator\n');
   });
   tearDown(() {
     if (temp.existsSync()) temp.deleteSync(recursive: true);
@@ -83,47 +95,76 @@ void main() {
   ({
     CommandRunner<int> runner,
     _StationDelegate Function() lastDelegate,
+    FakeSubstationFactsRepository Function() lastRepository,
+    List<String> observedRoots,
     StringBuffer out,
     StringBuffer err,
   })
   harness({
-    List<String>? roots,
     String? runnerInvocation,
     String? delegateRoot,
-    Future<List<StationOverlaySource>> Function(String gridHome)? resolveRoots,
+    List<GridAssetDefinition>? assets,
+    GridAssetRosterOverride? rosterOverride,
   }) {
     final out = StringBuffer();
     final err = StringBuffer();
-    _StationDelegate? last;
+    final observedRoots = <String>[];
+    _StationDelegate? lastDelegate;
+    FakeSubstationFactsRepository? lastRepository;
+    final registry = assets == null
+        ? fixture.registry
+        : sdk.GridAssetRegistry(<sdk.GridAssetPackDefinition>[
+            sdk.GridAssetPackDefinition(
+              package: kFixturePackage,
+              assets: assets,
+            ),
+          ]);
     final runner = CommandRunner<int>('space', 'test station')
       ..addCommand(
         AssetsCommand(
-          delegate: () => last = _StationDelegate(delegateRoot ?? temp.path),
+          delegate: () =>
+              lastDelegate = _StationDelegate(delegateRoot ?? temp.path),
+          registry: registry,
+          rosterOverride: rosterOverride,
           runnerInvocation: runnerInvocation,
-          roots:
-              resolveRoots ??
-              (gridHome) async => [
-                for (final root in roots ?? [overlay.path])
-                  StationOverlaySource(
-                    root: root,
-                    mappings: kDefaultStationOverlayMappings,
-                  ),
-              ],
+          // The OBSERVATION seam: the Command owns and disposes whatever this
+          // returns, and it observes the root it resolved.
+          factsRepository: ({required roots, required registry}) {
+            observedRoots.addAll(roots.values);
+            return lastRepository = FakeSubstationFactsRepository(
+              SubstationFactsSnapshot(<SubstationKey, SubstationFacts>{
+                kGridHomeSubstation: SubstationFacts(
+                  root: roots[kGridHomeSubstation]!,
+                  dartPackages: const <String>[kFixturePackage, 'grid_sdk'],
+                  packageRoots: <String, String>{
+                    kFixturePackage: fixture.packageRoot,
+                  },
+                ),
+              }),
+            );
+          },
           sourceRef: (_) => 'testref',
           out: out,
           err: err,
         ),
       );
-    return (runner: runner, lastDelegate: () => last!, out: out, err: err);
+    return (
+      runner: runner,
+      lastDelegate: () => lastDelegate!,
+      lastRepository: () => lastRepository!,
+      observedRoots: observedRoots,
+      out: out,
+      err: err,
+    );
   }
 
   File installedSkill(Directory root) =>
       File(p.join(root.path, '.claude', 'skills', 'discover', 'SKILL.md'));
 
   test(
-    'expands the overlay onto the grid home ROOT by default, PATH-PRESERVING — '
-    'binding {{runner}} from the CLI verb and {{gridHome}} from the mounted '
-    'GridRoot, and stamping each file with the source ref',
+    'writes the selected assets onto the grid home ROOT by default — binding '
+    '{{runner}} from the CLI verb and {{gridHome}} from the mounted GridRoot, '
+    'and stamping each file with the source ref',
     () async {
       final h = harness();
 
@@ -138,10 +179,10 @@ void main() {
       expect(hasProvenance(body), isTrue);
       expect(
         File(
-          p.join(temp.path, '.claude', 'agents', 'governor.md'),
+          p.join(temp.path, '.agents', 'skills', 'discover', 'SKILL.md'),
         ).existsSync(),
         isTrue,
-        reason: 'the agent def expands alongside the skills',
+        reason: 'the agents leg is written alongside the claude one',
       );
       expect(h.out.toString(), contains('--- /dev/null'));
       expect(h.out.toString(), contains('NOTHING was committed'));
@@ -150,6 +191,17 @@ void main() {
         isTrue,
         reason: 'the command owns the delegate it asked for',
       );
+      expect(
+        h.lastRepository().disposed,
+        isTrue,
+        reason: 'and the fact observer it constructed',
+      );
+      expect(
+        h.lastRepository().refreshes,
+        1,
+        reason: 'the roots are observed ONCE, outside any build',
+      );
+      expect(h.observedRoots, [p.normalize(temp.path)]);
     },
   );
 
@@ -168,11 +220,12 @@ void main() {
     },
   );
 
-  test('--root overlays onto an explicit repo root', () async {
+  test('--root writes onto an explicit repo root', () async {
     final elsewhere = Directory(p.join(temp.path, 'elsewhere'))
       ..createSync(recursive: true);
 
-    final code = await harness().runner.run([
+    final h = harness();
+    final code = await h.runner.run([
       'assets',
       'install',
       '--root',
@@ -185,6 +238,11 @@ void main() {
       installedSkill(temp).existsSync(),
       isFalse,
       reason: 'the default root was not touched',
+    );
+    expect(
+      h.observedRoots,
+      [p.normalize(elsewhere.path)],
+      reason: 'the facts are observed at the root actually being written',
     );
   });
 
@@ -275,13 +333,28 @@ void main() {
   );
 
   test('an UNBOUND hole exits non-zero and says so on stdout (LOUD)', () async {
-    _write(overlay, [
-      '.claude',
+    final h = harness(
+      assets: <GridAssetDefinition>[
+        fixtureSkill('discover'),
+        fixtureSkill('ops'),
+      ],
+    );
+    _write(Directory(fixture.packageRoot), [
+      'extension',
+      'station_overlay',
+      'claude',
       'skills',
       'ops',
       'SKILL.md',
-    ], '---\nname: ops\n---\nboot {{unbound}}\n');
-    final h = harness();
+    ], fixtureSkillBody('ops', 'boot {{unbound}}'));
+    _write(Directory(fixture.packageRoot), [
+      'extension',
+      'station_overlay',
+      'agents',
+      'skills',
+      'ops',
+      'SKILL.md',
+    ], fixtureSkillBody('ops', 'boot {{unbound}}'));
 
     final code = await h.runner.run(['assets', 'install']);
 
@@ -297,30 +370,47 @@ void main() {
   });
 
   test(
-    'no overlay in scope is a LOUD non-answer, never a silent no-op',
+    'a registry that selects nothing installable is a LOUD non-answer, never a '
+    'silent no-op',
     () async {
-      final h = harness(roots: const []);
+      final h = harness(assets: <GridAssetDefinition>[fixtureRubric('graded')]);
 
       final code = await h.runner.run(['assets', 'install']);
 
       expect(code, 1);
-      expect(h.err.toString(), contains('no package in ${temp.path} vends'));
+      expect(
+        h.err.toString(),
+        contains('selects no installable asset for ${temp.path}'),
+      );
+      expect(
+        h.lastRepository().disposed,
+        isTrue,
+        reason: 'the refusal still disposes what it constructed',
+      );
     },
   );
 
-  test('grid-home override is trimmed and normalized before install', () async {
-    String? resolvedHome;
+  test('a roster exclusion withholds an asset from the install', () async {
     final h = harness(
-      resolveRoots: (gridHome) async {
-        resolvedHome = gridHome;
-        return [
-          StationOverlaySource(
-            root: overlay.path,
-            mappings: kDefaultStationOverlayMappings,
+      rosterOverride: GridAssetRosterOverride(
+        exclude: const [
+          sdk.AssetKey(
+            package: kFixturePackage,
+            kind: sdk.AssetKind.skill,
+            id: 'discover',
           ),
-        ];
-      },
+        ],
+      ),
     );
+
+    final code = await h.runner.run(['assets', 'install']);
+
+    expect(code, 1, reason: 'nothing remains to install');
+    expect(installedSkill(temp).existsSync(), isFalse);
+  });
+
+  test('grid-home override is trimmed and normalized before install', () async {
+    final h = harness();
 
     expect(
       await h.runner.run([
@@ -331,27 +421,18 @@ void main() {
       ]),
       0,
     );
-    expect(resolvedHome, p.normalize(temp.path));
+    expect(
+      installedSkill(temp).readAsStringSync(),
+      contains('file into ${p.normalize(temp.path)}'),
+    );
   });
 
   test('absent grid-home still resolves by mounted tree position', () async {
-    String? resolvedHome;
     final authored = p.join(temp.path, 'authored', '..');
-    final h = harness(
-      delegateRoot: authored,
-      resolveRoots: (gridHome) async {
-        resolvedHome = gridHome;
-        return [
-          StationOverlaySource(
-            root: overlay.path,
-            mappings: kDefaultStationOverlayMappings,
-          ),
-        ];
-      },
-    );
+    final h = harness(delegateRoot: authored);
 
     expect(await h.runner.run(['assets', 'install']), 0);
-    expect(resolvedHome, p.normalize(authored));
+    expect(h.observedRoots, [p.normalize(authored)]);
   });
 
   test(
@@ -384,12 +465,7 @@ void main() {
         ..addCommand(
           AssetsCommand(
             delegate: () => _RootlessDelegate(temp.path),
-            roots: (gridHome) async => [
-              StationOverlaySource(
-                root: overlay.path,
-                mappings: kDefaultStationOverlayMappings,
-              ),
-            ],
+            registry: fixture.registry,
             sourceRef: (_) => 'testref',
             out: out,
             err: err,
@@ -404,28 +480,105 @@ void main() {
   );
 
   test(
-    'a LOUD lib refusal (no package config) is reported, never a stack trace',
+    'a LOUD lib refusal (a selected source that is missing) is reported, never '
+    'a stack trace',
     () async {
-      final out = StringBuffer();
-      final err = StringBuffer();
-      final runner = CommandRunner<int>('space', 'test station')
-        ..addCommand(
-          AssetsCommand(
-            delegate: () => _StationDelegate(temp.path),
-            roots: (gridHome) async =>
-                throw StateError('no package config at $gridHome'),
-            sourceRef: (_) => 'testref',
-            out: out,
-            err: err,
-          ),
-        );
+      final h = harness();
+      File(
+        p.join(
+          fixture.packageRoot,
+          'extension',
+          'station_overlay',
+          'claude',
+          'skills',
+          'discover',
+          'SKILL.md',
+        ),
+      ).deleteSync();
 
-      final code = await runner.run(['assets', 'install']);
+      final code = await h.runner.run(['assets', 'install']);
 
       expect(code, 1);
-      expect(err.toString(), contains('assets install: no package config'));
+      expect(
+        h.err.toString(),
+        contains('assets install: selected artifact source is missing'),
+      );
+      expect(h.lastDelegate().disposed, isTrue);
+      expect(h.lastRepository().disposed, isTrue);
     },
   );
+
+  test('AssetsCommand defaults to the generated registry when omitted', () async {
+    // The compatibility seam: a station that composed this Command before the
+    // registry parameter existed keeps installing the SAME set, because
+    // omission resolves to the one generated object — never a second registry
+    // built here.
+    final observed = <sdk.GridAssetRegistry>[];
+    final out = StringBuffer();
+    final err = StringBuffer();
+
+    SubstationFactsRepository observe({
+      required Map<SubstationKey, String> roots,
+      required sdk.GridAssetRegistry registry,
+    }) {
+      observed.add(registry);
+      return FakeSubstationFactsRepository(
+        SubstationFactsSnapshot(<SubstationKey, SubstationFacts>{
+          kGridHomeSubstation: SubstationFacts(
+            root: roots[kGridHomeSubstation]!,
+            dartPackages: const <String>['grid_assets', 'grid_sdk'],
+            packageRoots: <String, String>{'grid_assets': _packageRoot()},
+          ),
+        }),
+      );
+    }
+
+    final umbrella = CommandRunner<int>('space', 'test station')
+      ..addCommand(
+        // NO `registry:` argument at all — the pre-bead call shape.
+        AssetsCommand(
+          delegate: () => _StationDelegate(temp.path),
+          factsRepository: observe,
+          sourceRef: (_) => 'testref',
+          out: out,
+          err: err,
+        ),
+      );
+
+    final code = await umbrella.run(['assets', 'install', '--no-diff']);
+
+    expect(code, 0, reason: err.toString());
+    expect(observed, hasLength(1));
+    expect(
+      identical(observed.single, GeneratedGridAssetRegistrant.registry),
+      isTrue,
+      reason: 'the umbrella resolves the omitted registry to the generated one',
+    );
+
+    // The same identity through the subcommand's OWN construction seam, which a
+    // station may compose directly.
+    final direct = CommandRunner<int>('space', 'test station')
+      ..addCommand(
+        AssetsInstallCommand(
+          delegate: () => _StationDelegate(temp.path),
+          factsRepository: observe,
+          sourceRef: (_) => 'testref',
+          out: out,
+          err: err,
+        ),
+      );
+
+    expect(
+      await direct.run(['install', '--no-diff']),
+      0,
+      reason: err.toString(),
+    );
+    expect(observed, hasLength(2));
+    expect(
+      identical(observed.last, GeneratedGridAssetRegistrant.registry),
+      isTrue,
+    );
+  });
 
   group('it COMMITS NOTHING — by construction', () {
     test('the operator-install source names no git and no process surface', () {
@@ -448,7 +601,7 @@ void main() {
           isNot(contains(forbidden)),
           reason:
               'the operator leg commits nothing and writes no git artifact — '
-              'the operator reviews the diff and commits',
+              'the operator reads the diff and commits',
         );
       }
     });

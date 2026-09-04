@@ -1,16 +1,20 @@
-// The vended-asset OVERLAY materialization lib: [OverlayMaterializer] expands
-// `station_overlay`-shaped roots onto a target ROOT, PATH-PRESERVING (the
-// overlay's own tree IS the target layout — no kind mapping), rendering each
-// file, refusing a half-bound one, stamping what it writes, never clobbering
-// what it did not generate, and unioning by tree position (the ORDER the roots
-// are given in). The WIRE half (the provision hook that drives this into a live
-// worktree, and the git exclusion it writes there) is covered in
-// `track_h_code_extension_test.dart` + `overlay_golden_test.dart`.
+// The vended-asset WRITER: [OverlayMaterializer] writes ONE resolved asset set
+// onto a target ROOT — each selected artifact read from its exact declared
+// source and written at its exact declared target — rendering each file,
+// refusing a half-bound one, stamping what it writes, never clobbering what it
+// did not generate, and reporting (never sweeping) a generated file the
+// resolution no longer selects. The WIRE half (the provision hook that drives
+// this into a live worktree, and the git exclusion it writes there) is covered
+// in `track_h_code_extension_test.dart` + `overlay_golden_test.dart`.
 import 'dart:io';
 
 import 'package:grid_assets/grid_assets.dart';
+import 'package:grid_assets/station_asset_registry.dart';
+import 'package:grid_sdk/grid_sdk.dart';
 import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
+
+import '../support/asset_resolution_fixture.dart';
 
 /// Resolves this package's `extension/` dir the CWD-INDEPENDENT way (the
 /// loader's own package-config resolution), so the live-tree test never
@@ -22,105 +26,134 @@ import 'package:test/test.dart';
 /// from inside a test body here.
 String _extensionDir() => PackagedAssetLoader().root;
 
+/// The LIVE station registry resolved against this checkout — the real vended
+/// pack, selected exactly as a station selects it.
+GridAssetResolution _liveResolution({Map<String, String> args = const {}}) {
+  final packageRoot = p.dirname(_extensionDir());
+  return resolveGridAssets(
+    registry: GeneratedGridAssetRegistrant.registry,
+    snapshot: SubstationFactsSnapshot(<SubstationKey, SubstationFacts>{
+      kFixtureSubstation: SubstationFacts(
+        root: packageRoot,
+        dartPackages: const <String>['grid_assets', 'grid_sdk'],
+        packageRoots: <String, String>{'grid_assets': packageRoot},
+      ),
+    }),
+    substation: kFixtureSubstation,
+    renderArguments: args,
+  );
+}
+
 /// Writes [contents] at [segments] under [root] (creating parents).
 File _write(Directory root, List<String> segments, String contents) =>
     File(p.join(root.path, p.joinAll(segments)))
       ..createSync(recursive: true)
       ..writeAsStringSync(contents);
 
-/// A stampable (frontmatter-led) SKILL.md body — what the overlay actually
-/// vends, and the only shape the provenance stamp accepts for a `.md`.
-String _skill(String name, [String body = 'body']) =>
-    '---\nname: $name\n---\n$body\n';
-
 void main() {
   late Directory temp;
-  late Directory overlay;
   late Directory target;
 
   setUp(() {
     temp = Directory.systemTemp.createTempSync('grid-overlay-');
-    overlay = Directory(p.join(temp.path, 'overlay'));
     target = Directory(p.join(temp.path, 'target'));
   });
   tearDown(() {
     if (temp.existsSync()) temp.deleteSync(recursive: true);
   });
 
-  group('OverlayMaterializer — fresh expand (PATH-PRESERVING)', () {
+  TestAssetResolutionFixture fixture({
+    List<GridAssetDefinition>? assets,
+    Map<String, String> bodies = const <String, String>{},
+    Iterable<String> extraPackages = const <String>[],
+  }) => TestAssetResolutionFixture(
+    root: temp,
+    assets: assets ?? <GridAssetDefinition>[fixtureSkill('foo')],
+    bodies: bodies,
+    extraPackages: extraPackages,
+  );
+
+  group('OverlayMaterializer — writes the RESOLUTION, never a walk', () {
     test(
-      "the overlay's own tree IS the target layout — a file at <overlay>/<rel> "
-      'lands at <root>/<rel>, with no kind mapping, including a nested '
-      'multi-file asset dir and a LOOSE file outside any asset dir',
+      'each selected artifact is read from its declared source and written at '
+      'its declared target — skills, a loose settings file, and nothing else',
       () async {
-        _write(overlay, [
-          '.claude',
-          'skills',
-          'foo',
-          'SKILL.md',
-        ], _skill('foo'));
-        _write(overlay, [
-          '.claude',
-          'skills',
-          'foo',
-          'references',
-          'notes.md',
-        ], _skill('notes'));
-        _write(overlay, [
-          '.claude',
-          'agents',
-          'governor.md',
-        ], _skill('governor'));
-        _write(overlay, ['.claude', 'settings.json'], '{\n  "hooks": {}\n}\n');
+        final f = fixture(
+          assets: <GridAssetDefinition>[
+            fixtureSkill('foo'),
+            fixtureSettings('harness'),
+            fixtureRubric('graded'),
+          ],
+          bodies: const <String, String>{
+            'extension/station_overlay/claude/settings.json':
+                '{\n  "hooks": {}\n}\n',
+          },
+        );
+        // An UNDECLARED file beside a declared one: a source walk would carry
+        // it; the resolution cannot see it.
+        f.writeStraySource(
+          'extension/station_overlay/claude/skills/foo/NOTES.md',
+          fixtureSkillBody('notes'),
+        );
 
         final report = await const OverlayMaterializer().materialize(
-          overlayRoots: [overlay.path],
+          resolution: f.resolution(),
           targetRoot: target.path,
           sourceRef: 'testref',
         );
 
-        expect(
-          report.written.map((f) => f.relativePath),
-          unorderedEquals([
-            p.join('.claude', 'skills', 'foo', 'SKILL.md'),
-            p.join('.claude', 'skills', 'foo', 'references', 'notes.md'),
-            p.join('.claude', 'agents', 'governor.md'),
-            p.join('.claude', 'settings.json'),
-          ]),
-        );
-        // A loose file under `.claude/` is LEGAL now — the format is the target's
-        // own layout, and `settings.json` genuinely lives there.
+        expect(report.written.map((file) => file.relativePath), [
+          p.join('.claude', 'skills', 'foo', 'SKILL.md'),
+          p.join('.agents', 'skills', 'foo', 'SKILL.md'),
+          p.join('.claude', 'settings.json'),
+        ]);
         expect(
           File(p.join(target.path, '.claude', 'settings.json')).existsSync(),
           isTrue,
+          reason: 'a declared loose file under `.claude/` is legal',
         );
         expect(
           File(
-            p.join(target.path, '.claude', 'agents', 'governor.md'),
-          ).readAsStringSync(),
-          contains('name: governor'),
+            p.join(target.path, '.claude', 'skills', 'foo', 'NOTES.md'),
+          ).existsSync(),
+          isFalse,
+          reason: 'an undeclared source file is installed NOWHERE',
         );
         expect(report.blocked, isEmpty);
         expect(report.refused, isEmpty);
+        expect(report.stale, isEmpty);
         expect(report.installedSkillIdsUnder(kClaudeSkillsSubtree), ['foo']);
+        expect(
+          report.written.first.sourceRoot,
+          f.packageRoot,
+          reason: 'the vending package root is the recorded source',
+        );
       },
     );
 
     test(
-      'subtrees SCOPE the expansion — the worktree leg takes the skills tree '
-      'only, never a loose .claude/settings.json',
+      'subtrees SCOPE the write — the worktree leg takes the skill trees only, '
+      'never a loose .claude/settings.json',
       () async {
-        _write(overlay, ['.claude', 'skills', 'a', 'SKILL.md'], _skill('a'));
-        _write(overlay, ['.claude', 'settings.json'], '{\n  "hooks": {}\n}\n');
+        final f = fixture(
+          assets: <GridAssetDefinition>[
+            fixtureSkill('a'),
+            fixtureSettings('harness'),
+          ],
+          bodies: const <String, String>{
+            'extension/station_overlay/claude/settings.json':
+                '{\n  "hooks": {}\n}\n',
+          },
+        );
 
         final report = await const OverlayMaterializer().materialize(
-          overlayRoots: [overlay.path],
+          resolution: f.resolution(),
           targetRoot: target.path,
           sourceRef: 'testref',
           subtrees: const [kClaudeSkillsSubtree],
         );
 
-        expect(report.written.map((f) => f.relativePath), [
+        expect(report.written.map((file) => file.relativePath), [
           p.join('.claude', 'skills', 'a', 'SKILL.md'),
         ]);
         expect(
@@ -131,37 +164,34 @@ void main() {
       },
     );
 
-    test('an overlay root with nothing in scope contributes nothing (an empty '
-        'overlay is not an error)', () async {
-      final empty = Directory(p.join(temp.path, 'empty'))
-        ..createSync(recursive: true);
-      final report = await const OverlayMaterializer().materialize(
-        overlayRoots: [empty.path],
-        targetRoot: target.path,
-        sourceRef: 'testref',
-        subtrees: const [kClaudeSkillsSubtree],
-      );
-      expect(report.files, isEmpty);
-    });
-
     test(
-      'an empty overlayRoots list contributes nothing (not an error)',
+      'a resolution that selects nothing writes nothing (not an error)',
       () async {
+        final f = fixture(
+          assets: <GridAssetDefinition>[
+            fixtureSkill(
+              'gated',
+              selector: const RequiresPackage('absent_pack'),
+            ),
+          ],
+        );
+
         final report = await const OverlayMaterializer().materialize(
-          overlayRoots: const [],
+          resolution: f.resolution(),
           targetRoot: target.path,
           sourceRef: 'testref',
         );
+
         expect(report.files, isEmpty);
       },
     );
 
     test('materializeSync — the entry point the provision wire rides, since '
         'ProcessCapability.spawn cannot await — mirrors materialize', () {
-      _write(overlay, ['.claude', 'skills', 'foo', 'SKILL.md'], _skill('foo'));
+      final f = fixture();
 
       final report = const OverlayMaterializer().materializeSync(
-        overlayRoots: [overlay.path],
+        resolution: f.resolution(),
         targetRoot: target.path,
         sourceRef: 'testref',
       );
@@ -173,11 +203,42 @@ void main() {
         contains('name: foo'),
       );
       expect(
-        report.written.single.relativePath,
-        p.join('.claude', 'skills', 'foo', 'SKILL.md'),
+        report.written.map((file) => file.relativePath),
+        contains(p.join('.claude', 'skills', 'foo', 'SKILL.md')),
       );
       expect(report.blocked, isEmpty);
       expect(report.refused, isEmpty);
+    });
+
+    test('a selected artifact whose SOURCE is missing THROWS — a shrunken '
+        'install is never silent', () {
+      final f = fixture();
+      File(
+        p.join(
+          f.packageRoot,
+          'extension',
+          'station_overlay',
+          'claude',
+          'skills',
+          'foo',
+          'SKILL.md',
+        ),
+      ).deleteSync();
+
+      expect(
+        () => const OverlayMaterializer().materializeSync(
+          resolution: f.resolution(),
+          targetRoot: target.path,
+          sourceRef: 'testref',
+        ),
+        throwsA(
+          isA<StateError>().having(
+            (error) => error.message,
+            'message',
+            contains('selected artifact source is missing'),
+          ),
+        ),
+      );
     });
   });
 
@@ -185,17 +246,16 @@ void main() {
     test(
       'every written file carries the stamp, naming the source ref',
       () async {
-        _write(overlay, ['.claude', 'skills', 'a', 'SKILL.md'], _skill('a'));
+        final f = fixture();
 
         await const OverlayMaterializer().materialize(
-          overlayRoots: [overlay.path],
+          resolution: f.resolution(renderArguments: const {'runner': 'space'}),
           targetRoot: target.path,
           sourceRef: 'abc1234',
-          args: const {'runner': 'space'},
         );
 
         final body = File(
-          p.join(target.path, '.claude', 'skills', 'a', 'SKILL.md'),
+          p.join(target.path, '.claude', 'skills', 'foo', 'SKILL.md'),
         ).readAsStringSync();
         expect(hasProvenance(body), isTrue);
         expect(body, contains('abc1234'));
@@ -211,29 +271,29 @@ void main() {
     test('a re-materialize is IDEMPOTENT: an unchanged generated file is left '
         'byte-for-byte alone, even under a DIFFERENT source ref (a stale ref is '
         'not drift — re-stamping would churn the tree for nothing)', () async {
-      _write(overlay, ['.claude', 'skills', 'a', 'SKILL.md'], _skill('a'));
+      final f = fixture();
       const m = OverlayMaterializer();
       final first = await m.materialize(
-        overlayRoots: [overlay.path],
+        resolution: f.resolution(),
         targetRoot: target.path,
         sourceRef: 'ref1',
       );
       final onDisk = File(
-        p.join(target.path, '.claude', 'skills', 'a', 'SKILL.md'),
+        p.join(target.path, '.claude', 'skills', 'foo', 'SKILL.md'),
       ).readAsStringSync();
 
       final second = await m.materialize(
-        overlayRoots: [overlay.path],
+        resolution: f.resolution(),
         targetRoot: target.path,
         sourceRef: 'ref2',
       );
 
-      expect(first.written, hasLength(1));
+      expect(first.written, hasLength(2));
       expect(second.written, isEmpty);
-      expect(second.unchanged, hasLength(1));
+      expect(second.unchanged, hasLength(2));
       expect(
         File(
-          p.join(target.path, '.claude', 'skills', 'a', 'SKILL.md'),
+          p.join(target.path, '.claude', 'skills', 'foo', 'SKILL.md'),
         ).readAsStringSync(),
         onDisk,
       );
@@ -243,18 +303,18 @@ void main() {
       'a DRIFTED generated file is regenerated; a HAND-AUTHORED one (no stamp) '
       'is BLOCKED, never clobbered',
       () async {
-        _write(overlay, [
-          '.claude',
-          'skills',
-          'a',
-          'SKILL.md',
-        ], _skill('a', 'new body'));
-        _write(overlay, ['.claude', 'skills', 'b', 'SKILL.md'], _skill('b'));
+        final f = fixture(
+          assets: <GridAssetDefinition>[fixtureSkill('a'), fixtureSkill('b')],
+          bodies: <String, String>{
+            'extension/station_overlay/claude/skills/a/SKILL.md':
+                fixtureSkillBody('a', 'new body'),
+          },
+        );
         final drifted = _write(
           target,
           ['.claude', 'skills', 'a', 'SKILL.md'],
           stampProvenance(
-            _skill('a', 'OLD body'),
+            fixtureSkillBody('a', 'OLD body'),
             relativePath: '.claude/skills/a/SKILL.md',
             sourceRef: 'old',
             runner: 'space',
@@ -268,15 +328,16 @@ void main() {
         ], 'I wrote this');
 
         final report = await const OverlayMaterializer().materialize(
-          overlayRoots: [overlay.path],
+          resolution: f.resolution(),
           targetRoot: target.path,
           sourceRef: 'ref2',
+          subtrees: const [kClaudeSkillsSubtree],
         );
 
-        expect(report.updated.map((f) => f.relativePath), [
+        expect(report.updated.map((file) => file.relativePath), [
           p.join('.claude', 'skills', 'a', 'SKILL.md'),
         ]);
-        expect(report.blocked.map((f) => f.relativePath), [
+        expect(report.blocked.map((file) => file.relativePath), [
           p.join('.claude', 'skills', 'b', 'SKILL.md'),
         ]);
         expect(drifted.readAsStringSync(), contains('new body'));
@@ -293,20 +354,20 @@ void main() {
 
     test('a dryRun writes NOTHING — every outcome is what WOULD happen (the '
         '--check drift mode)', () async {
-      _write(overlay, ['.claude', 'skills', 'a', 'SKILL.md'], _skill('a'));
+      final f = fixture();
 
       final report = await const OverlayMaterializer().materialize(
-        overlayRoots: [overlay.path],
+        resolution: f.resolution(),
         targetRoot: target.path,
         sourceRef: 'testref',
         dryRun: true,
       );
 
       expect(report.dryRun, isTrue);
-      expect(report.written, hasLength(1));
+      expect(report.written, hasLength(2));
       expect(
         File(
-          p.join(target.path, '.claude', 'skills', 'a', 'SKILL.md'),
+          p.join(target.path, '.claude', 'skills', 'foo', 'SKILL.md'),
         ).existsSync(),
         isFalse,
         reason: 'a --check is a PLAN',
@@ -318,10 +379,10 @@ void main() {
       'would mutate a file OUTSIDE the target root (and this is exactly how an '
       'operator seat hand-wires its assets today)',
       () async {
-        _write(overlay, ['.claude', 'skills', 'a', 'SKILL.md'], _skill('a'));
+        final f = fixture(assets: <GridAssetDefinition>[fixtureSkill('a')]);
         // The seat's shape: `.claude/skills/a/SKILL.md -> <outside>/SKILL.md`.
         final outside = _write(
-          Directory(p.join(temp.path, 'extension')),
+          Directory(p.join(temp.path, 'elsewhere')),
           ['skills', 'a', 'SKILL.md'],
           'the REAL file, outside the target root',
         );
@@ -330,9 +391,10 @@ void main() {
           ..createSync(outside.path);
 
         final report = await const OverlayMaterializer().materialize(
-          overlayRoots: [overlay.path],
+          resolution: f.resolution(),
           targetRoot: target.path,
           sourceRef: 'testref',
+          subtrees: const [kClaudeSkillsSubtree],
         );
 
         expect(report.blocked.single.symlink, isTrue);
@@ -352,15 +414,15 @@ void main() {
       "the operator seat's REAL shape (`.claude/skills/x -> "
       '../../extension/skills/x`)',
       () async {
-        _write(overlay, ['.claude', 'skills', 'a', 'SKILL.md'], _skill('a'));
+        final f = fixture(assets: <GridAssetDefinition>[fixtureSkill('a')]);
         // The real file lives OUTSIDE the target root, and — the dangerous part
         // — it already carries a stamp, so only the ancestor check can stop the
         // write from following the dir link and mutating it.
         final outside = _write(
-          Directory(p.join(temp.path, 'extension')),
+          Directory(p.join(temp.path, 'elsewhere')),
           ['skills', 'a', 'SKILL.md'],
           stampProvenance(
-            _skill('a', 'OLD body'),
+            fixtureSkillBody('a', 'OLD body'),
             relativePath: '.claude/skills/a/SKILL.md',
             sourceRef: 'old',
             runner: 'space',
@@ -371,12 +433,13 @@ void main() {
         ).createSync(recursive: true);
         Link(
           p.join(target.path, '.claude', 'skills', 'a'),
-        ).createSync(p.join(temp.path, 'extension', 'skills', 'a'));
+        ).createSync(p.join(temp.path, 'elsewhere', 'skills', 'a'));
 
         final report = await const OverlayMaterializer().materialize(
-          overlayRoots: [overlay.path],
+          resolution: f.resolution(),
           targetRoot: target.path,
           sourceRef: 'testref',
+          subtrees: const [kClaudeSkillsSubtree],
         );
 
         expect(report.blocked.single.symlink, isTrue);
@@ -396,7 +459,7 @@ void main() {
       'a DANGLING symlink is BLOCKED too, not a crash — existsSync() is false '
       'through a broken link, so a naive write would follow it and throw',
       () async {
-        _write(overlay, ['.claude', 'skills', 'a', 'SKILL.md'], _skill('a'));
+        final f = fixture(assets: <GridAssetDefinition>[fixtureSkill('a')]);
         Link(p.join(target.path, '.claude', 'skills', 'a', 'SKILL.md'))
           ..parent.createSync(recursive: true)
           ..createSync(p.join(temp.path, 'nowhere', 'SKILL.md'));
@@ -404,9 +467,10 @@ void main() {
         late final OverlayMaterializeReport report;
         expect(
           () async => report = await const OverlayMaterializer().materialize(
-            overlayRoots: [overlay.path],
+            resolution: f.resolution(),
             targetRoot: target.path,
             sourceRef: 'testref',
+            subtrees: const [kClaudeSkillsSubtree],
           ),
           returnsNormally,
         );
@@ -418,17 +482,36 @@ void main() {
 
     test('a vended file that cannot carry a stamp THROWS — never installed '
         'indistinguishably from a hand-authored one', () {
-      _write(overlay, ['.claude', 'notes.txt'], 'plain text');
+      const unstampable = GridAssetDefinition(
+        assetKey: AssetKey(
+          package: kFixturePackage,
+          kind: AssetKind.resource,
+          id: 'notes',
+        ),
+        description: 'plain text has no provenance syntax',
+        artifacts: <AssetArtifact>[
+          AssetArtifact(
+            target: AssetDeliveryTarget.claude,
+            path: 'extension/station_overlay/claude/notes.txt',
+          ),
+        ],
+      );
+      final f = fixture(
+        assets: const <GridAssetDefinition>[unstampable],
+        bodies: const <String, String>{
+          'extension/station_overlay/claude/notes.txt': 'plain text',
+        },
+      );
 
       expect(
         () => const OverlayMaterializer().materializeSync(
-          overlayRoots: [overlay.path],
+          resolution: f.resolution(),
           targetRoot: target.path,
           sourceRef: 'testref',
         ),
         throwsA(
           isA<StateError>().having(
-            (e) => e.message,
+            (error) => error.message,
             'message',
             contains('no provenance syntax'),
           ),
@@ -437,20 +520,127 @@ void main() {
     });
   });
 
-  group('OverlayMaterializer — render + refuse', () {
-    test('declared args are substituted into every copied file', () async {
-      _write(overlay, [
+  group('OverlayMaterializer — STALE targets are named, never swept', () {
+    test('a stamped target the resolution no longer selects is reported and '
+        'left byte-for-byte alone, in BOTH modes', () async {
+      final f = fixture(assets: <GridAssetDefinition>[fixtureSkill('kept')]);
+      final withdrawn = stampProvenance(
+        fixtureSkillBody('withdrawn'),
+        relativePath: '.claude/skills/withdrawn/SKILL.md',
+        sourceRef: 'old',
+        runner: 'space',
+      );
+      final orphan = _write(target, [
         '.claude',
         'skills',
-        'foo',
+        'withdrawn',
         'SKILL.md',
-      ], _skill('foo', 'run {{runner}} search in {{gridHome}}'));
+      ], withdrawn);
+      // An UNSTAMPED neighbour: somebody else's file, and not this lib's to
+      // speak about at all.
+      final foreign = _write(target, [
+        '.claude',
+        'skills',
+        'theirs',
+        'SKILL.md',
+      ], 'hand written');
 
-      await const OverlayMaterializer().materialize(
-        overlayRoots: [overlay.path],
+      final write = await const OverlayMaterializer().materialize(
+        resolution: f.resolution(),
         targetRoot: target.path,
         sourceRef: 'testref',
-        args: const {'runner': 'space', 'gridHome': '/grid/home'},
+      );
+      final check = await const OverlayMaterializer().materialize(
+        resolution: f.resolution(),
+        targetRoot: target.path,
+        sourceRef: 'testref',
+        dryRun: true,
+      );
+
+      expect(write.stale.map((file) => file.relativePath), [
+        p.join('.claude', 'skills', 'withdrawn', 'SKILL.md'),
+      ]);
+      expect(
+        check.stale.map((file) => file.relativePath),
+        write.stale.map((file) => file.relativePath),
+      );
+      expect(orphan.readAsStringSync(), withdrawn);
+      expect(foreign.readAsStringSync(), 'hand written');
+      expect(
+        write.stale.single.checkClassification,
+        OverlayCheckClassification.stale,
+      );
+      expect(
+        write.installedSkillIdsUnder(kClaudeSkillsSubtree),
+        ['kept'],
+        reason: 'a stale skill is not installed by this call',
+      );
+    });
+
+    test('the stale scan honours the SCOPE — an unscoped install reads both '
+        'harness heads, a worktree leg reads only its skill trees', () async {
+      final f = fixture(assets: <GridAssetDefinition>[fixtureSkill('kept')]);
+      _write(
+        target,
+        ['.claude', 'settings.json'],
+        stampProvenance(
+          '{\n  "hooks": {}\n}\n',
+          relativePath: '.claude/settings.json',
+          sourceRef: 'old',
+          runner: 'space',
+        ),
+      );
+      _write(
+        target,
+        ['.agents', 'skills', 'gone', 'SKILL.md'],
+        stampProvenance(
+          fixtureSkillBody('gone'),
+          relativePath: '.agents/skills/gone/SKILL.md',
+          sourceRef: 'old',
+          runner: 'space',
+        ),
+      );
+
+      final unscoped = const OverlayMaterializer().materializeSync(
+        resolution: f.resolution(),
+        targetRoot: target.path,
+        sourceRef: 'testref',
+      );
+      final scoped = const OverlayMaterializer().materializeSync(
+        resolution: f.resolution(),
+        targetRoot: target.path,
+        sourceRef: 'testref',
+        subtrees: kWorktreeOverlaySubtrees,
+      );
+
+      expect(unscoped.stale.map((file) => file.relativePath), [
+        p.join('.agents', 'skills', 'gone', 'SKILL.md'),
+        p.join('.claude', 'settings.json'),
+      ]);
+      expect(
+        scoped.stale.map((file) => file.relativePath),
+        [p.join('.agents', 'skills', 'gone', 'SKILL.md')],
+        reason: 'the loose settings file is outside the worktree scope',
+      );
+    });
+  });
+
+  group('OverlayMaterializer — render + refuse', () {
+    test('declared args are substituted into every written file', () async {
+      final f = fixture(
+        bodies: <String, String>{
+          'extension/station_overlay/claude/skills/foo/SKILL.md':
+              fixtureSkillBody('foo', 'run {{runner}} search in {{gridHome}}'),
+        },
+      );
+
+      await const OverlayMaterializer().materialize(
+        resolution: f.resolution(
+          renderArguments: const {'runner': 'space', 'gridHome': '/grid/home'},
+        ),
+        targetRoot: target.path,
+        sourceRef: 'testref',
+        subtrees: const [kClaudeSkillsSubtree],
       );
 
       expect(
@@ -465,18 +655,18 @@ void main() {
       'a file left with an UNBOUND hole is REFUSED — never written (a half-bound '
       'skill would read as literal text to the agent)',
       () async {
-        _write(overlay, [
-          '.claude',
-          'skills',
-          'foo',
-          'SKILL.md',
-        ], _skill('foo', 'run {{runner}} in {{gridHome}}'));
+        final f = fixture(
+          bodies: <String, String>{
+            'extension/station_overlay/claude/skills/foo/SKILL.md':
+                fixtureSkillBody('foo', 'run {{runner}} in {{gridHome}}'),
+          },
+        );
 
         final report = await const OverlayMaterializer().materialize(
-          overlayRoots: [overlay.path],
+          resolution: f.resolution(renderArguments: const {'runner': 'space'}),
           targetRoot: target.path,
           sourceRef: 'testref',
-          args: const {'runner': 'space'},
+          subtrees: const [kClaudeSkillsSubtree],
         );
 
         expect(
@@ -494,6 +684,7 @@ void main() {
         );
         expect(refused.holes, ['{{gridHome}}']);
         expect(refused.reason, contains('{{gridHome}}'));
+        expect(refused.checkClassification, OverlayCheckClassification.drifted);
         expect(
           report.installedSkillIdsUnder(kClaudeSkillsSubtree),
           isEmpty,
@@ -503,15 +694,16 @@ void main() {
     );
   });
 
-  group('OverlayMaterializeReport — the wire\'s git fence is LOUD', () {
+  group("OverlayMaterializeReport — the wire's git fence is LOUD", () {
     test(
       'writtenAssetDirsUnder names the asset dirs the wire must fence',
       () async {
-        _write(overlay, ['.claude', 'skills', 'a', 'SKILL.md'], _skill('a'));
-        _write(overlay, ['.claude', 'skills', 'b', 'SKILL.md'], _skill('b'));
+        final f = fixture(
+          assets: <GridAssetDefinition>[fixtureSkill('a'), fixtureSkill('b')],
+        );
 
         final report = await const OverlayMaterializer().materialize(
-          overlayRoots: [overlay.path],
+          resolution: f.resolution(),
           targetRoot: target.path,
           sourceRef: 'testref',
         );
@@ -528,10 +720,30 @@ void main() {
       'git-fence it per-asset-dir without ignoring repo-owned territory '
       '(A23(6)/A23(7), re-homed from the walk to the caller it protects)',
       () async {
-        _write(overlay, ['.claude', 'skills', 'stray.md'], _skill('stray'));
+        const loose = GridAssetDefinition(
+          assetKey: AssetKey(
+            package: kFixturePackage,
+            kind: AssetKind.resource,
+            id: 'stray',
+          ),
+          description: 'declared loose under the skills tree',
+          artifacts: <AssetArtifact>[
+            AssetArtifact(
+              target: AssetDeliveryTarget.claude,
+              path: 'extension/station_overlay/claude/skills/stray.md',
+            ),
+          ],
+        );
+        final f = fixture(
+          assets: const <GridAssetDefinition>[loose],
+          bodies: <String, String>{
+            'extension/station_overlay/claude/skills/stray.md':
+                fixtureSkillBody('stray'),
+          },
+        );
 
         final report = await const OverlayMaterializer().materialize(
-          overlayRoots: [overlay.path],
+          resolution: f.resolution(),
           targetRoot: target.path,
           sourceRef: 'testref',
         );
@@ -540,7 +752,7 @@ void main() {
           () => report.writtenAssetDirsUnder(kClaudeSkillsSubtree),
           throwsA(
             isA<StateError>().having(
-              (e) => e.message,
+              (error) => error.message,
               'message',
               allOf(contains('stray.md'), contains('malformed overlay')),
             ),
@@ -550,74 +762,15 @@ void main() {
     );
   });
 
-  group('OverlayMaterializer — union by tree position', () {
-    test('two roots with distinct skills both land — a true union', () async {
-      final a = Directory(p.join(temp.path, 'a'));
-      _write(a, ['.claude', 'skills', 'alpha', 'SKILL.md'], _skill('alpha'));
-      final b = Directory(p.join(temp.path, 'b'));
-      _write(b, ['.claude', 'skills', 'beta', 'SKILL.md'], _skill('beta'));
-
-      final report = await const OverlayMaterializer().materialize(
-        overlayRoots: [a.path, b.path],
-        targetRoot: target.path,
-        sourceRef: 'testref',
-      );
-
-      expect(report.written, hasLength(2));
-      expect(report.installedSkillIdsUnder(kClaudeSkillsSubtree), [
-        'alpha',
-        'beta',
-      ]);
-    });
-
+  group('OverlayMaterializer — the live grid_assets registry', () {
     test(
-      'two roots offering the SAME path — the EARLIER tree position wins, and '
-      'the loser is not even considered',
+      'the REAL registry round-trips the vended discover skill at its declared '
+      'target: a frontmatter-led SKILL.md with no {{ residue',
       () async {
-        final a = Directory(p.join(temp.path, 'a'));
-        _write(a, [
-          '.claude',
-          'skills',
-          'discover',
-          'SKILL.md',
-        ], _skill('discover', 'root A wins'));
-        final b = Directory(p.join(temp.path, 'b'));
-        _write(b, [
-          '.claude',
-          'skills',
-          'discover',
-          'SKILL.md',
-        ], _skill('discover', 'root B loses'));
-
         final report = await const OverlayMaterializer().materialize(
-          overlayRoots: [a.path, b.path],
+          resolution: _liveResolution(args: const {'runner': 'space'}),
           targetRoot: target.path,
           sourceRef: 'testref',
-        );
-
-        expect(
-          File(
-            p.join(target.path, '.claude', 'skills', 'discover', 'SKILL.md'),
-          ).readAsStringSync(),
-          contains('root A wins'),
-        );
-        expect(report.written.single.sourceRoot, a.path);
-      },
-    );
-  });
-
-  group('OverlayMaterializer — the live grid_assets station_overlay', () {
-    test(
-      'the REAL extension/station_overlay round-trips the vended discover skill '
-      'at its ROOT-RELATIVE path: a frontmatter-led SKILL.md with no {{ residue',
-      () async {
-        final overlayRoot = p.join(_extensionDir(), 'station_overlay');
-
-        final report = await const OverlayMaterializer().materialize(
-          overlayRoots: [overlayRoot],
-          targetRoot: target.path,
-          sourceRef: 'testref',
-          args: const {'runner': 'space'},
         );
 
         final installed = File(
