@@ -101,6 +101,31 @@ void main() {
       final r = AgentEnvironment.resolve([root(), mid(), leaf]);
       expect(r.base, const EnvBaseStandalone());
     });
+
+    test('operator-seat declarations fold last-non-null-wins', () {
+      final resolved = AgentEnvironment.resolve(const [
+        AgentEnvironment(
+          drivenArgs: ['--root-driven'],
+          roleAsset: '.root/$kSeatHole.md',
+          roleArgs: ['--root-role', kSeatHole],
+          memoryDirArgs: ['--root-memory', kMemoryDirHole],
+          primeMode: SeatPrimeMode.hook,
+        ),
+        AgentEnvironment(),
+        AgentEnvironment(
+          drivenArgs: ['--leaf-driven'],
+          roleAsset: '.leaf/$kSeatHole.md',
+          roleArgs: ['--leaf-role', kSeatHole],
+          memoryDirArgs: ['--leaf-memory', kMemoryDirHole],
+          primeMode: SeatPrimeMode.prompt,
+        ),
+      ]);
+      expect(resolved.drivenArgs, ['--leaf-driven']);
+      expect(resolved.roleAsset, '.leaf/$kSeatHole.md');
+      expect(resolved.roleArgs, ['--leaf-role', kSeatHole]);
+      expect(resolved.memoryDirArgs, ['--leaf-memory', kMemoryDirHole]);
+      expect(resolved.primeMode, SeatPrimeMode.prompt);
+    });
   });
 
   group(
@@ -230,6 +255,36 @@ void main() {
       );
       expect(const AgentEnvironment().needsSiteEndpoint, isFalse); // default
     });
+
+    test('operator-seat declaration holes are guarded loudly', () {
+      expect(
+        const AgentEnvironment(roleAsset: '.roles/plain.md').validate(),
+        'roleAsset must carry the {{seat}} hole',
+      );
+      expect(
+        const AgentEnvironment(
+          roleAsset: '.roles/$kSeatHole.md',
+          roleArgs: ['--role', 'plain'],
+        ).validate(),
+        'roleArgs must carry the {{seat}} hole',
+      );
+      expect(
+        const AgentEnvironment(roleArgs: [kSeatHole]).validate(),
+        'roleArgs is set but roleAsset is unset',
+      );
+      expect(
+        const AgentEnvironment(memoryDirArgs: ['--memory', 'plain']).validate(),
+        'memoryDirArgs must carry the {{memoryDir}} hole',
+      );
+      expect(
+        const AgentEnvironment(
+          roleAsset: '.roles/$kSeatHole.md',
+          roleArgs: ['--role', kSeatHole],
+          memoryDirArgs: ['--memory', kMemoryDirHole],
+        ).validate(),
+        isNull,
+      );
+    });
   });
 
   group('value equality', () {
@@ -259,6 +314,36 @@ void main() {
       expect(a.hashCode, b.hashCode);
       expect(a, isNot(c));
       expect(a, isNot(channel));
+    });
+
+    test('operator-seat declarations participate in the value contract', () {
+      const a = AgentEnvironment(
+        drivenArgs: ['--driven'],
+        roleAsset: '.roles/$kSeatHole.md',
+        roleArgs: ['--role', kSeatHole],
+        memoryDirArgs: ['--memory', kMemoryDirHole],
+        primeMode: SeatPrimeMode.hook,
+      );
+      const b = AgentEnvironment(
+        drivenArgs: ['--driven'],
+        roleAsset: '.roles/$kSeatHole.md',
+        roleArgs: ['--role', kSeatHole],
+        memoryDirArgs: ['--memory', kMemoryDirHole],
+        primeMode: SeatPrimeMode.hook,
+      );
+      const different = AgentEnvironment(
+        drivenArgs: ['--interactive'],
+        roleAsset: '.roles/$kSeatHole.md',
+        roleArgs: ['--role', kSeatHole],
+        memoryDirArgs: ['--memory', kMemoryDirHole],
+        primeMode: SeatPrimeMode.prompt,
+      );
+      expect(a, b);
+      expect(a.hashCode, b.hashCode);
+      expect(a, isNot(different));
+      expect(a.toString(), contains('drivenArgs: [--driven]'));
+      expect(a.toString(), contains('roleAsset: .roles/$kSeatHole.md'));
+      expect(a.toString(), contains('primeMode: SeatPrimeMode.hook'));
     });
   });
 }
