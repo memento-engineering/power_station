@@ -2,6 +2,8 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:grid_assets/grid_assets.dart';
+import 'package:grid_assets/station_asset_registry.dart';
+import 'package:grid_sdk/grid_sdk.dart';
 import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
@@ -65,7 +67,11 @@ void main() {
         ..writeAsStringSync('sentinel');
 
       expect(
-        () => resolveStationGridAssetPacks(stationRoot: temp.path),
+        () => runStationAssetRegistryGenerator(
+          stationRoot: temp.path,
+          outputPath: output.path,
+          out: StringBuffer(),
+        ),
         throwsA(
           isA<StalePackageGraphException>().having(
             (error) => error.packageNames,
@@ -75,6 +81,181 @@ void main() {
         ),
       );
       expect(output.readAsStringSync(), 'sentinel');
+    });
+
+    test('render is a static deterministic registrant', () {
+      fixture
+        ..addPackage('zest', dependency: 'transitive')
+        ..addPackage('serenity', dependency: 'direct main')
+        ..writeGraph();
+      final packs = resolveStationGridAssetPacks(stationRoot: temp.path);
+      final source = renderStationAssetRegistryLibrary(packs.reversed);
+
+      expect(source, contains(kStationAssetRegistryGeneratedMarker));
+      expect(
+        source,
+        contains('ignore_for_file: depend_on_referenced_packages'),
+      );
+      expect(
+        source.indexOf('package:serenity/serenity.dart'),
+        lessThan(source.indexOf('package:zest/zest.dart')),
+      );
+      expect(
+        source,
+        contains('serenity_grid_asset_pack.GridAssetsPack.definition'),
+      );
+      expect(source, contains('static final GridAssetRegistry registry'));
+      expect(source, isNot(contains('static const GridAssetRegistry')));
+      expect(source, isNot(contains('GridAssetDefinition(')));
+      expect(source, renderStationAssetRegistryLibrary(packs));
+    });
+
+    test('duplicate identities refuse before output changes', () {
+      fixture
+        ..addPackage('serenity', dependency: 'direct main')
+        ..writeGraph();
+      final pack = resolveStationGridAssetPacks(stationRoot: temp.path).single;
+      expect(
+        () => renderStationAssetRegistryLibrary(<ResolvedGridAssetPack>[
+          pack,
+          pack,
+        ]),
+        throwsA(
+          isA<ArgumentError>().having(
+            (error) => '${error.message}',
+            'message',
+            contains('duplicate AssetKey'),
+          ),
+        ),
+      );
+
+      final duplicateArtifacts =
+          'grid:\n'
+          '  assets:\n'
+          '    - id: probe\n'
+          '      kind: rubric\n'
+          '      description: "Probe."\n'
+          '      artifacts:\n'
+          '        - target: mcp\n'
+          '          path: extension/rubrics/probe.md\n'
+          '        - target: mcp\n'
+          '          path: extension/rubrics/probe.md\n';
+      final second = _StationFixture(temp)
+        ..addPackage(
+          'serenity',
+          dependency: 'direct main',
+          gridBody: duplicateArtifacts,
+        )
+        ..writeGraph();
+      final output = File(p.join(temp.path, 'lib', 'registry.dart'))
+        ..createSync(recursive: true)
+        ..writeAsStringSync('sentinel');
+      expect(
+        () => runStationAssetRegistryGenerator(
+          stationRoot: second.root.path,
+          outputPath: output.path,
+          out: StringBuffer(),
+        ),
+        throwsA(
+          isA<GridBlockException>().having(
+            (error) => error.message,
+            'message',
+            contains('duplicate delivery target'),
+          ),
+        ),
+      );
+      expect(output.readAsStringSync(), 'sentinel');
+    });
+
+    test('write and check are atomic and emit no aggregate config', () {
+      fixture
+        ..addPackage('serenity', dependency: 'direct main')
+        ..writeGraph();
+      final output = File(p.join(temp.path, 'lib', 'registry.dart'))
+        ..createSync(recursive: true)
+        ..writeAsStringSync('stale');
+      final mcp = File(
+        p.join(
+          temp.path,
+          'packages',
+          'serenity',
+          'extension',
+          'mcp',
+          'config.yaml',
+        ),
+      )..createSync(recursive: true);
+      mcp.writeAsStringSync('sentinel mcp\n');
+
+      expect(
+        runStationAssetRegistryGenerator(
+          stationRoot: temp.path,
+          outputPath: output.path,
+          check: true,
+          out: StringBuffer(),
+        ),
+        1,
+      );
+      expect(output.readAsStringSync(), 'stale');
+
+      expect(
+        runStationAssetRegistryGenerator(
+          stationRoot: temp.path,
+          outputPath: output.path,
+          out: StringBuffer(),
+        ),
+        0,
+      );
+      final generated = output.readAsStringSync();
+      expect(
+        runStationAssetRegistryGenerator(
+          stationRoot: temp.path,
+          outputPath: output.path,
+          check: true,
+          out: StringBuffer(),
+        ),
+        0,
+      );
+      expect(
+        runStationAssetRegistryGenerator(
+          stationRoot: temp.path,
+          outputPath: output.path,
+          out: StringBuffer(),
+        ),
+        0,
+      );
+      expect(output.readAsStringSync(), generated);
+      expect(mcp.readAsStringSync(), 'sentinel mcp\n');
+      expect(
+        File(p.join(temp.path, 'station_asset_registry.yaml')).existsSync(),
+        isFalse,
+      );
+    });
+
+    test('checked-in registrant constructs offline', () {
+      final registry = GeneratedGridAssetRegistrant.registry;
+      expect(registry.packs, <GridAssetPackDefinition>[
+        GridAssetsPack.definition,
+      ]);
+      expect(
+        identical(registry.packs.single, GridAssetsPack.definition),
+        isTrue,
+      );
+      expect(registry.assets, hasLength(28));
+
+      final source = File(
+        p.join(Directory.current.path, 'lib', 'station_asset_registry.dart'),
+      ).readAsStringSync();
+      for (final forbidden in <String>[
+        'dart:io',
+        'package:yaml',
+        'package:package_config',
+        'parseGridBlock(',
+        'findExtensions(',
+        'Service',
+        'reflect',
+      ]) {
+        expect(source, isNot(contains(forbidden)));
+      }
     });
   });
 }

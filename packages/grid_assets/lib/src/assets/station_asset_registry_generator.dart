@@ -7,6 +7,7 @@ library;
 
 import 'dart:io';
 
+import 'package:dart_style/dart_style.dart';
 import 'package:grid_sdk/grid_sdk.dart';
 import 'package:package_config/package_config.dart';
 import 'package:path/path.dart' as p;
@@ -197,6 +198,114 @@ List<ResolvedGridAssetPack> resolveStationGridAssetPacks({
     for (final package in resolved) package.definition,
   ]);
   return List<ResolvedGridAssetPack>.unmodifiable(resolved);
+}
+
+/// Renders a Flutter-registrant-style library from [packages].
+String renderStationAssetRegistryLibrary(
+  Iterable<ResolvedGridAssetPack> packages,
+) {
+  final ordered = <ResolvedGridAssetPack>[...packages]
+    ..sort((a, b) => a.name.compareTo(b.name));
+  for (final package in ordered) {
+    if (package.definition.package != package.name) {
+      throw StationAssetRegistryException(
+        'resolved package "${package.name}" contributes definition '
+        '"${package.definition.package}"',
+      );
+    }
+  }
+  final _ = GridAssetRegistry(<GridAssetPackDefinition>[
+    for (final package in ordered) package.definition,
+  ]);
+
+  final buffer = StringBuffer()
+    ..writeln('// $kStationAssetRegistryGeneratedMarker — do not edit.')
+    ..writeln(
+      '// Sources: .dart_tool/package_config.json, pubspec.lock, and each',
+    )
+    ..writeln('// participating package\'s top-level `grid:` block.')
+    ..writeln(
+      '// Regenerate: dart run tool/generate_station_asset_registry.dart',
+    )
+    ..writeln()
+    ..writeln('// Transitive imports are intentional: this is resolved output.')
+    ..writeln('// ignore_for_file: depend_on_referenced_packages')
+    ..writeln()
+    ..writeln('library;')
+    ..writeln()
+    ..writeln("import 'package:grid_sdk/grid_sdk.dart';");
+  for (final package in ordered) {
+    buffer.writeln(
+      "import '${package.publicLibraryUri}' as ${_packAlias(package.name)};",
+    );
+  }
+  buffer
+    ..writeln()
+    ..writeln('/// The complete asset registry generated for this station.')
+    ..writeln('abstract final class GeneratedGridAssetRegistrant {')
+    ..writeln('  /// Every pack in the resolved station closure.')
+    ..writeln('  ///')
+    ..writeln('  /// Built, not `const`: the SDK factory validates duplicate')
+    ..writeln(
+      '  /// logical and artifact identity before exposing the registry.',
+    )
+    ..writeln('  static final GridAssetRegistry registry = GridAssetRegistry(')
+    ..writeln('    <GridAssetPackDefinition>[');
+  for (final package in ordered) {
+    buffer.writeln(
+      '      ${_packAlias(package.name)}.GridAssetsPack.definition,',
+    );
+  }
+  buffer
+    ..writeln('    ],')
+    ..writeln('  );')
+    ..writeln('}');
+  return DartFormatter(
+    languageVersion: DartFormatter.latestLanguageVersion,
+  ).format(buffer.toString(), uri: kGeneratedStationAssetRegistryPath);
+}
+
+String _packAlias(String packageName) => '${packageName}_grid_asset_pack';
+
+/// Generates or checks one station-local Dart registrant.
+///
+/// Discovery, parsing, validation, and rendering all finish before [outputPath]
+/// is compared or written.
+int runStationAssetRegistryGenerator({
+  required String stationRoot,
+  String outputPath = kGeneratedStationAssetRegistryPath,
+  bool check = false,
+  StringSink? out,
+}) {
+  final sink = out ?? stdout;
+  final packages = resolveStationGridAssetPacks(stationRoot: stationRoot);
+  final source = renderStationAssetRegistryLibrary(packages);
+  final output = File(
+    p.isAbsolute(outputPath) ? outputPath : p.join(stationRoot, outputPath),
+  );
+  final assetCount = packages.fold<int>(
+    0,
+    (count, package) => count + package.assets.length,
+  );
+  final report = '${packages.length} packs, $assetCount assets';
+
+  if (check) {
+    if (!output.existsSync() || output.readAsStringSync() != source) {
+      sink.writeln(
+        'STALE ${output.path} — run '
+        '`dart run tool/generate_station_asset_registry.dart`',
+      );
+      sink.writeln('station assets: $report');
+      return 1;
+    }
+    sink.writeln('station assets: $report');
+    return 0;
+  }
+
+  output.parent.createSync(recursive: true);
+  output.writeAsStringSync(source);
+  sink.writeln('station assets: wrote ${output.path} — $report');
+  return 0;
 }
 
 PackageConfig _parsePackageConfig(File file) {
