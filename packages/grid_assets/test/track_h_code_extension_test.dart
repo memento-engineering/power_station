@@ -324,6 +324,17 @@ void main() {
           ),
           isTrue,
         );
+        // The root-guard probe is answered, never RECORDED — `calls` stays the
+        // provisioning argv.
+        expect(
+          runner.calls.any(
+            (args) =>
+                args.length >= 2 &&
+                args.first == 'rev-parse' &&
+                args.contains('--show-toplevel'),
+          ),
+          isFalse,
+        );
       },
     );
 
@@ -715,9 +726,14 @@ void main() {
           'ps',
           'pow-1',
         );
+        // A provisioner git itself calls successful — it registers the
+        // worktree and materializes the directory — that leaves the checkout
+        // unlinked. The refusal must be the `.git` assertion's, never the
+        // work-tree-root guard's.
+        final runner = _MaterializingWorktreeRunner(materializeGitEntry: false);
         final sc = GitSourceControl(
           provisioner: StationGitService(
-            runner: CannedGitRunner(),
+            runner: runner,
             prOpener: _NoopPrOpener(),
           ),
           root: RootCheckout(
@@ -1448,6 +1464,7 @@ class _MaterializingWorktreeRunner extends CannedGitRunner {
     this.checkoutEntries = const {},
     this.failWorktreeAdd = false,
     this.refuseWorktreeRemove = false,
+    this.materializeGitEntry = true,
   });
 
   /// The tracked files a fresh checkout materializes (relative path → body).
@@ -1460,6 +1477,11 @@ class _MaterializingWorktreeRunner extends CannedGitRunner {
   /// Whether `worktree remove` refuses — the unverifiable-unwind case.
   final bool refuseWorktreeRemove;
 
+  /// Whether a successful `worktree add` materializes the checkout's `.git`
+  /// marker. False models a provisioner that reports success but leaves the
+  /// directory unlinked from git.
+  final bool materializeGitEntry;
+
   /// git's `.git/worktrees` registry: path → branch.
   final Map<String, String> registered = {};
 
@@ -1471,6 +1493,15 @@ class _MaterializingWorktreeRunner extends CannedGitRunner {
     required String workingDirectory,
     required List<String> args,
   }) async {
+    // [GitOps]'s work-tree-root guard probe — answered as a work-tree ROOT and
+    // NOT recorded, so `calls` stays the provisioning argv the tests assert on.
+    // Line 0 is `--show-toplevel`, line 1 the EMPTY `--show-prefix` that means
+    // "this cwd IS the root". Mirrors grid_engine's `RecordingGitRunner`.
+    if (args.length >= 2 &&
+        args.first == 'rev-parse' &&
+        args.contains('--show-toplevel')) {
+      return GitRunResult(exitCode: 0, output: '$workingDirectory\n\n');
+    }
     if (args.length >= 2 && args[0] == 'worktree') {
       switch (args[1]) {
         case 'add':
@@ -1530,7 +1561,9 @@ class _MaterializingWorktreeRunner extends CannedGitRunner {
       );
     }
     Directory(path).createSync(recursive: true);
-    File(p.join(path, '.git')).writeAsStringSync('gitdir: fake');
+    if (materializeGitEntry) {
+      File(p.join(path, '.git')).writeAsStringSync('gitdir: fake');
+    }
     for (final entry in checkoutEntries.entries) {
       File(p.join(path, entry.key))
         ..createSync(recursive: true)
