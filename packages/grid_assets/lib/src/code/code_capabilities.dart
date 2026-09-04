@@ -423,7 +423,7 @@ class AgentCapability extends ProcessCapability {
     return resolveGridAssets(
       registry: registry,
       snapshot: ambient.snapshot,
-      substation: SubstationKey(ambient.scope.name),
+      substation: ambient.substation,
       rosterOverride: _assetRosterOverride,
       renderArguments: {
         'runner': kDefaultOverlayRunner,

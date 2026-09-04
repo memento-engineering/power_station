@@ -143,7 +143,7 @@ class RebaseCapability extends RouteCapability {
     return resolveGridAssets(
           registry: registry,
           snapshot: ambient.snapshot,
-          substation: SubstationKey(ambient.scope.name),
+          substation: ambient.substation,
           rosterOverride: _assetRosterOverride,
         )
         .artifactsUnder(kWorktreeOverlaySubtrees)

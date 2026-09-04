@@ -370,35 +370,58 @@ GridAssetResolution resolveGridAssets({
   );
 }
 
-/// The ONE flare an EFFECT-edge consumer raises when it holds a station
-/// registry but the station has not mounted the facts projection yet
+/// The ONE flare a consumer raises when it holds a station registry but the
+/// station has not mounted the facts projection yet
 /// (`power_station#one-asset-resolution-defines-tree-and-writers`).
 ///
-/// Its `consumer` datum names the effect that wanted the resolution (`agent`,
-/// `rebase`); its `missing` datum is `snapshot`, `scope`, or `snapshot,scope`.
+/// Its `consumer` datum names who wanted the resolution (`substation`,
+/// `agent`, `rebase`); its `missing` datum is `snapshot`, `scope`, or
+/// `snapshot,scope`.
 const String kAssetFactsUnavailableFlare = 'assets.factsUnavailable';
 
-/// The ambient pair one effect needs to run [resolveGridAssets] — or null,
+/// The ambient pair a consumer needs to run [resolveGridAssets] — or null,
 /// having raised [kAssetFactsUnavailableFlare] EXACTLY once, when the station
-/// has not mounted [SubstationFactsAssets] and a [SubstationScope] yet.
+/// has not mounted [SubstationFactsAssets] (and, at an effect, a
+/// [SubstationScope]) yet.
 ///
-/// Read with the EFFECT verb ([TreeContext.getInheritedSeedOfExactType],
-/// ADR-0008 D3): a spawn and a route are not builds, so they take the latest
-/// facts WITHOUT subscribing.
+/// ONE helper, two verbs (ADR-0008 D3). A BUILD passes its own constructor-
+/// stable [aspect] and WATCHES it with [TreeContext.dependOnInheritedSeedOfExactType]:
+/// the substation it resolves for is what it was authored as, so it needs no
+/// ambient scope and one seat's changed facts leave every other seat alone. A
+/// process EFFECT — a spawn, a route — omits [aspect], READS both the snapshot
+/// and the ambient [SubstationScope] with the non-binding
+/// [TreeContext.getInheritedSeedOfExactType], and takes the latest facts
+/// WITHOUT subscribing.
 ///
 /// Absent facts are a MIGRATION state, not a violated invariant: a station
 /// composed before the projection existed still has repository-provided assets
-/// in its worktrees, and the pre-projection path is the honest answer for it.
-/// So this reports and degrades where a build REFUSES. Once both values are
-/// mounted the resolution is strict again — a snapshot missing the substation's
-/// own key still throws from [resolveGridAssets].
-({SubstationFactsSnapshot snapshot, SubstationScope scope})?
-ambientAssetFactsOrFlare(TreeContext context, {required String consumer}) {
-  final snapshot = context
-      .getInheritedSeedOfExactType<SubstationFactsSnapshot>();
-  final scope = context.getInheritedSeedOfExactType<SubstationScope>();
-  if (snapshot != null && scope != null) {
-    return (snapshot: snapshot, scope: scope);
+/// in its worktrees and a stack that must keep building, so this reports and
+/// degrades rather than refusing. Each caller owns what "degrade" means — the
+/// pre-resolution asset stack, the untouched worktree, the pre-resolution
+/// pathspec — and none of them fabricates a second selector answer. Once the
+/// ambient values ARE mounted the resolution is strict again: a snapshot
+/// missing the substation's own key still throws from [resolveGridAssets].
+({SubstationFactsSnapshot snapshot, SubstationKey substation})?
+ambientAssetFactsOrFlare(
+  TreeContext context, {
+  required String consumer,
+  SubstationKey? aspect,
+}) {
+  final snapshot = aspect == null
+      ? context.getInheritedSeedOfExactType<SubstationFactsSnapshot>()
+      : context.dependOnInheritedSeedOfExactType<SubstationFactsSnapshot>(
+          aspect: aspect,
+        );
+  // Only an EFFECT asks the tree which substation it is running under; a build
+  // already knows, and subscribing to a scope it did not need would widen what
+  // rebuilds it.
+  final scope = aspect == null
+      ? context.getInheritedSeedOfExactType<SubstationScope>()
+      : null;
+  final substation =
+      aspect ?? (scope == null ? null : SubstationKey(scope.name));
+  if (snapshot != null && substation != null) {
+    return (snapshot: snapshot, substation: substation);
   }
   context.getInheritedSeedOfExactType<ServiceBundle>()?.transport?.flare(
     kAssetFactsUnavailableFlare,
@@ -406,7 +429,7 @@ ambientAssetFactsOrFlare(TreeContext context, {required String consumer}) {
       'consumer': consumer,
       'missing': <String>[
         if (snapshot == null) 'snapshot',
-        if (scope == null) 'scope',
+        if (aspect == null && scope == null) 'scope',
       ].join(','),
     },
   );

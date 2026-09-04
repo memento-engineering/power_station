@@ -1,7 +1,7 @@
 ---
 status: accepted
 date: 2026-09-04
-decision-makers: ["agent"]
+decision-makers: ["Nico Spencer"]
 consulted: []
 informed: []
 register:
@@ -31,11 +31,11 @@ substation availability answer selection through different mechanisms.
 
 One pure `resolveGridAssets` evaluation over the station-generated
 `GridAssetRegistry`, an immutable `SubstationFactsSnapshot`, render values,
-and an optional validated roster override is authoritative. It returns the
-original selected `GridAssetDefinition` values and the exact Claude/agents
-artifact source and target paths. Registry membership is potential
-availability; a definition is actually available exactly when that same Seed
-is mounted in the selected substation assets list.
+and an optional roster override is authoritative. It returns the original
+selected `GridAssetDefinition` values and the exact Claude/agents artifact
+source and target paths. Registry membership is potential availability; a
+definition is actually available exactly when that same Seed is mounted in
+the selected substation assets list.
 
 A repository observes configured substation roots outside build and emits
 immutable snapshots. A stateful asset projects those snapshots through
@@ -54,24 +54,20 @@ Check mode reports `IN SYNC`, `DRIFTED`, `HAND-EDITED`, `MISSING`, or
 `STALE`, writes nothing, and succeeds only when all paths are `IN SYNC`.
 Hand-edited and stale paths are reported and never repaired or deleted.
 
-Registry parameters on `SubstationSeed`, `AssetsCommand` and
-`AssetsInstallCommand` are OPTIONAL and resolve to the one generated
-`GeneratedGridAssetRegistrant.registry` object when omitted, so a station
-composed before this seam existed keeps compiling and keeps selecting the
-same set.
-
-An un-migrated station — one that has not mounted `SubstationFactsAssets`
-and a `SubstationScope` yet — does not fabricate a resolver answer at a
-process edge. `AgentCapability` leaves the worktree's repository-provided
-`.claude`/`.agents` assets untouched and still spawns; the landing guard
-falls back to the pre-resolution `kWorktreeOverlaySubtrees` pathspec and
-still lands. Each attempted effect emits exactly one
-`assets.factsUnavailable` flare naming its `consumer` and what was
-`missing`. Selection is strict once both ambient values are mounted: a
-snapshot without the substation's own key refuses loudly, and a substation
-BUILD refuses loudly with no snapshot at all. The station-side composition
-migration is owned by `space-eos`, blocked by this bead through grid link
-`tranquility-06xl23`.
+Registry parameters on `SubstationSeed`, `AssetsCommand`, and
+`AssetsInstallCommand` are optional compatibility inputs and resolve to the
+one generated `GeneratedGridAssetRegistrant.registry` object when omitted.
+An un-migrated station does not fabricate a resolver answer. When no facts
+snapshot is mounted, `SubstationSeed` preserves its pre-resolution asset stack,
+mounts no generated definitions, and emits one `assets.factsUnavailable` flare
+with `consumer: substation` and `missing: snapshot`. Provision leaves
+repository-provided harness assets untouched, and landing uses the
+pre-resolution worktree skill subtrees when either its snapshot or scope is
+absent; each attempted process effect emits one flare with `consumer: agent` or
+`consumer: rebase` and the exact missing ambient names. Once the required
+ambient values are mounted, resolution remains strict and missing keyed facts
+refuse loudly. The space-owned projection/composition migration is tracked by
+`space-eos`, blocked by this bead through grid link `tranquility-06xl23`.
 
 ### Consequences
 
@@ -81,9 +77,3 @@ migration is owned by `space-eos`, blocked by this bead through grid link
   outside build.
 * Bad, because a selected artifact whose source package root is absent from
   facts now refuses loudly instead of disappearing from a source walk.
-* Bad, because a composing station must still mount `SubstationFactsAssets`
-  before a substation seat can build; a station that does not refuses loudly
-  rather than mounting an empty asset set.
-* Bad, because the process-edge degrade is a second, weaker path that must be
-  deleted once every station has migrated — a flare is easier to miss than a
-  crash.

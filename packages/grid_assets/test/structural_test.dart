@@ -157,11 +157,49 @@ void main() {
         ),
       ).readAsStringSync();
       expect(substationSeed, contains('resolveGridAssets('));
+
+      // ONE compatibility seam, three consumers. Every reader of the ambient
+      // facts goes through `ambientAssetFactsOrFlare`, so a station that has
+      // not mounted the projection yet degrades the SAME way everywhere and no
+      // fourth migration path can drift in
+      // (`power_station#one-asset-resolution-defines-tree-and-writers`).
+      for (final consumer in <MapEntry<String, String>>[
+        MapEntry(
+          'src/code/code_capabilities.dart',
+          source('src/code/code_capabilities.dart'),
+        ),
+        MapEntry('src/code/landing.dart', source('src/code/landing.dart')),
+        MapEntry('substation_seed.dart', substationSeed),
+      ]) {
+        expect(
+          consumer.value,
+          contains('ambientAssetFactsOrFlare('),
+          reason: consumer.key,
+        );
+      }
+      final resolution = source('src/assets/asset_resolution.dart');
       expect(
-        substationSeed,
+        resolution,
         contains('dependOnInheritedSeedOfExactType<SubstationFactsSnapshot>'),
         reason:
-            'a substation BUILD watches its facts aspect, never snapshots it',
+            'the helper WATCHES when a build hands it an aspect (ADR-0008 D3)',
+      );
+      // The two verbs live in the helper and nowhere else: a consumer that
+      // reached for the tree itself would be the drift this pins shut.
+      for (final consumer in <String>[
+        'src/code/code_capabilities.dart',
+        'src/code/landing.dart',
+      ]) {
+        expect(
+          source(consumer),
+          isNot(contains('InheritedSeedOfExactType<SubstationFactsSnapshot>')),
+          reason: 'the ambient read belongs to the helper: $consumer',
+        );
+      }
+      expect(
+        substationSeed,
+        isNot(contains('InheritedSeedOfExactType<SubstationFactsSnapshot>')),
+        reason: 'the ambient read belongs to the helper: substation_seed.dart',
       );
 
       // ONE writer, ONE observer: the stamped write and the package-config read
@@ -195,6 +233,30 @@ void main() {
         observers,
         isNot(contains('src/assets/overlay_install.dart')),
         reason: 'no writer observes a package graph of its own',
+      );
+    });
+
+    test('the accepted decision names its human maker and the compatibility '
+        'posture it ratified', () {
+      final decision = File(
+        p.join(
+          libDir.parent.parent.parent.path,
+          'docs',
+          'decisions',
+          '2026-09-04-one-asset-resolution-defines-tree-and-writers.md',
+        ),
+      ).readAsStringSync();
+      expect(
+        decision,
+        contains('decision-makers: ["Nico Spencer"]'),
+        reason: 'an accepted register entry has a HUMAN maker, never "agent"',
+      );
+      expect(
+        decision,
+        contains('`consumer: substation`'),
+        reason:
+            'the record carries the substation BUILD degrade, not just the '
+            'two process edges',
       );
     });
   });

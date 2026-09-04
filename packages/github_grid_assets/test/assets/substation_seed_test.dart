@@ -15,6 +15,8 @@ import 'package:grid_assets/grid_assets.dart';
 import 'package:grid_assets/station_asset_registry.dart'
     show GeneratedGridAssetRegistrant;
 import 'package:grid_engine/grid_engine.dart' show ServiceBundle;
+// Fake-only: the recording transport this file asserts the migration flare on.
+import 'package:grid_engine/testing.dart' show RecordingExplorationTransport;
 import 'package:grid_runtime/grid_runtime.dart' show PrOpener;
 import 'package:grid_sdk/grid_sdk.dart' as sdk;
 import 'package:test/test.dart';
@@ -360,6 +362,97 @@ void main() {
     // Construction alone reads no facts: only a BUILD watches the aspect.
     expect(seed.assetRenderArguments, isEmpty);
     expect(seed.assetRosterOverride, isNull);
+  });
+
+  test('SubstationSeed without asset facts preserves legacy build and flares '
+      'once', () {
+    // The MIGRATION state: a station composed before this projection existed
+    // mounts no `SubstationFactsAssets`. Its seats must still BUILD — the
+    // whole GitHub/Git/eligibility/identity stack is what that station is —
+    // so the seat lands on its pre-resolution asset stack and SAYS SO once
+    // (`power_station#one-asset-resolution-defines-tree-and-writers`).
+    final flares = RecordingExplorationTransport();
+    final mounted = _mount(
+      sdk.ProviderScope(
+        child: InheritedSeed<ServiceBundle>(
+          value: ServiceBundle(transport: flares),
+          child: InheritedSeed<EnvironmentRegistry>(
+            value: _registry,
+            child: sdk.RawAssetGrid(
+              root: '/home/me/station',
+              assets: [
+                SubstationSeed(
+                  name: 'compat',
+                  root: '../compat',
+                  assetRegistry: _assetRegistry,
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+    addTearDown(mounted.owner.dispose);
+
+    // The pre-resolution stack is intact: the seat projects, and its work
+    // subtree still gets the git bundle behind the mount gate.
+    expect(mounted.walk.values<MountedSubstationSeed>(), hasLength(1));
+    expect(_gated(mounted.walk).sourceControl, isA<GitSourceControl>());
+    // ...and it mounts NO generated definition. An absent projection is not a
+    // reason to guess a selector answer.
+    expect(
+      mounted.walk.seeds<sdk.GridAssetDefinition>().where(
+        (d) => d.assetKey.package == 'fixture_assets',
+      ),
+      isEmpty,
+    );
+    // EXACTLY one — a build that flared per rebuild would drown the signal
+    // the flare exists to give.
+    expect(flares.flares.map((flare) => flare.name), [
+      kAssetFactsUnavailableFlare,
+    ]);
+    expect(flares.flares.single.data, {
+      'consumer': 'substation',
+      'missing': 'snapshot',
+    });
+  });
+
+  test('mounted asset facts without this seat\'s key refuse loudly', () {
+    // Once the projection IS mounted, selection is strict again: a snapshot
+    // that does not carry this seat's key is a composition error, never a
+    // reason to degrade — and no compatibility flare softens it.
+    final strictFlares = RecordingExplorationTransport();
+    expect(
+      () => _mount(
+        sdk.ProviderScope(
+          child: InheritedSeed<ServiceBundle>(
+            value: ServiceBundle(transport: strictFlares),
+            child: SubstationFactsAssets(
+              repository: _FakeFactsRepository(
+                SubstationFactsSnapshot(
+                  const <SubstationKey, SubstationFacts>{},
+                ),
+              ),
+              child: InheritedSeed<EnvironmentRegistry>(
+                value: _registry,
+                child: sdk.RawAssetGrid(
+                  root: '/home/me/station',
+                  assets: [
+                    SubstationSeed(
+                      name: 'strict',
+                      root: '../strict',
+                      assetRegistry: _assetRegistry,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+      throwsA(isA<StateError>()),
+    );
+    expect(strictFlares.flares, isEmpty);
   });
 
   test('the seat arming rung SHADOWS the station on the type it arms and '
