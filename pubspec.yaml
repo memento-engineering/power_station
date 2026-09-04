@@ -8,6 +8,7 @@ workspace:
   - packages/federated_grid_assets
   - packages/zero_conf_grid_assets
   - packages/github_grid_assets
+  - packages/analytical_grid_assets
 
 # Cross-repo linkage: the the_grid framework packages (grid_engine, grid_cli,
 # beads_dart, …) are declared `any` in each pack and resolved via the
