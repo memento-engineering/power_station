@@ -1189,6 +1189,20 @@ void main() {
         (await gatherHistory(null, '/w', const [])).state,
         EvidenceState.unavailable,
       );
+      // An EMPTY resolved path list never reaches the source (bead
+      // `pow-gcx9`): a whole-repository log is not surface history.
+      var invoked = 0;
+      final overEmpty = await gatherHistory(
+        (_, _) async {
+          invoked++;
+          throw StateError('must not run');
+        },
+        '/w',
+        const [],
+      );
+      expect(invoked, 0);
+      expect(overEmpty.state, EvidenceState.unavailable);
+      expect(overEmpty.error, contains('no anchor resolved'));
       // A source that THROWS is FAILED, per requested unit, with its reason.
       final thrown = await gatherPriorArt(
         (_) async => throw StateError('store is down'),
@@ -1512,8 +1526,8 @@ void main() {
       );
     });
 
-    test('a BROKEN state becomes a gap carrying its recorded reason', () {
-      for (final state in [EvidenceState.truncated, EvidenceState.failed]) {
+    test('a CRASHED state becomes a gap carrying its recorded reason', () {
+      for (final state in [EvidenceState.failed]) {
         final base = _completeAnchors();
         final holed = DiscoveryAnchors(
           round: base.round,
@@ -1540,6 +1554,36 @@ void main() {
         expect(_project(holed, kCodeLens).isSufficient, isTrue);
         expect(_project(holed, kDecisionLens).isSufficient, isTrue);
       }
+    });
+
+    test('truncated is bounded context and never a deterministic gap', () {
+      // bead `pow-gcx9`: a record clipped at a DECLARED bound is a bounded
+      // answer. Every mature surface exceeds the snippet and history bounds, so
+      // treating the clip as a broken promise held every real bead at
+      // discovery-route; only the lens's own insufficient-evidence outcome may.
+      final base = _completeAnchors();
+      final clipped = DiscoveryAnchors(
+        round: base.round,
+        workBeadId: base.workBeadId,
+        beadFields: base.beadFields,
+        anchors: base.anchors,
+        symbols: base.symbols,
+        priorArtQueries: [
+          PriorArtQueryEvidence(
+            id: base.priorArtQueries.single.id,
+            query: 'AnchorsCapability',
+            state: EvidenceState.truncated,
+            truncated: true,
+          ),
+        ],
+        decisionLookups: base.decisionLookups,
+        history: base.history,
+      );
+      final prior = _project(clipped, kPriorArtLens);
+      expect(prior.isSufficient, isTrue);
+      expect(prior.gaps, isEmpty);
+      // The clip stays VISIBLE so the lens narrates it.
+      expect(prior.renderedEvidence, contains('TRUNCATED'));
     });
 
     test('unavailable is explicit context and never a deterministic gap', () {

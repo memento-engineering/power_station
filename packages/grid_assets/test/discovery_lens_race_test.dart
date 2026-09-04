@@ -316,9 +316,10 @@ void main() {
       );
     }
 
-    // Only a source that was PRESENT and BROKE is a deterministic gap.
-    // `unavailable` is absence — its control is below.
-    for (final state in [EvidenceState.truncated, EvidenceState.failed]) {
+    // Only a source that was PRESENT and CRASHED is a deterministic gap.
+    // `unavailable` is absence and `truncated` a bounded answer (bead
+    // `pow-gcx9`) — their controls are below.
+    for (final state in [EvidenceState.failed]) {
       test('a ${state.name} record regathers at round 0 and ESCALATES at the '
           'cap', () async {
         plantHoledGather(state);
@@ -370,6 +371,44 @@ void main() {
               command: '',
               state: EvidenceState.unavailable,
               error: 'no composing station runner is configured',
+            ),
+          ],
+          history: complete.history,
+        ),
+      );
+      for (final lens in kDiscoveryLenses) {
+        _plantReport(ws.path, lens, round: 1);
+      }
+      final outcome = await _route(
+        ws.path,
+        recorded: {for (final lens in kDiscoveryLenses) lens: 1},
+      );
+      expect(outcome, isA<Advance>());
+      final payload = (outcome as Advance).payload!;
+      expect(payload['verdict'], 'advance');
+      expect(payload.containsKey('grade'), isFalse);
+      expect(readDiscoveryRegatherLedger(ws.path), isNull);
+    });
+
+    test('truncated lets the lens verdict stand and spends no budget', () async {
+      // bead `pow-gcx9`: a record clipped at a DECLARED bound is a bounded
+      // answer, not a broken promise. Every mature surface exceeds the snippet
+      // and history bounds, so an override here held every real bead at
+      // discovery-route. The lens narrates the clip; only its OWN
+      // insufficient-evidence outcome may hold the round on it.
+      final complete = completeGather(bead: workBead('tg-1'), round: 1);
+      plantGather(
+        ws.path,
+        DiscoveryAnchors(
+          round: complete.round,
+          workBeadId: complete.workBeadId,
+          beadFields: complete.beadFields,
+          priorArtQueries: const [
+            PriorArtQueryEvidence(
+              id: 'prior-art-query:the-symbol@sha256:fake',
+              query: 'the-symbol',
+              state: EvidenceState.truncated,
+              truncated: true,
             ),
           ],
           history: complete.history,
