@@ -1,3 +1,8 @@
+## 0.1.0-rc.13
+
+- Changed: `SubstationSeed` builds through grid_assets' single availability resolution — the seat mounts the selected generated definition Seeds from the resolved `SubstationFactsSnapshot`, and every seat keeps building without facts (the pre-resolution path) instead of failing closed (pow-4peu, #216).
+- Floors tightened to `grid_assets ^0.6.0-rc.13`.
+
 ## 0.1.0-rc.12
 
 - Fixed: `deliver` REUSES an open pull request for the branch (one GET, PATCH when the title/body changed, `step.delivered` with `reused: true`) instead of racing a create into HTTP 422 and stranding a reworked round `held` (pow-r4eo, #211).

@@ -1,5 +1,5 @@
 name: dart_grid_assets
-version: 0.1.2
+version: 0.1.3
 description: >-
   The DART domain grid assets — the typed grid.dart envelope + pub dev-time
   linkage + the exported DartCommand.
