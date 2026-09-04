@@ -669,7 +669,21 @@ void main() {
         isA<Map<String, dynamic>>(),
         reason: 'stampable: a JSON object',
       );
-      expect(settings.readAsStringSync(), contains('bd prime --hook-json'));
+      expect(
+        settings.readAsStringSync(),
+        contains('{{runner}} prime --hook-json'),
+        reason: 'the SessionStart hook is the GRID prime verb (bead pow-lv6t)',
+      );
+      expect(
+        settings.readAsStringSync(),
+        isNot(contains('bd prime')),
+        reason: 'the dead bd hook is replaced, not kept beside it',
+      );
+      expect(
+        settings.readAsStringSync(),
+        isNot(contains('PreCompact')),
+        reason: 'no PreCompact guard — a hook cannot undo a compaction',
+      );
     });
 
     test('no station_overlay file — skill OR governor agent-def — still '
