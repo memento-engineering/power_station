@@ -1383,6 +1383,12 @@ List<String> specStructuralFindings(Bead bead) {
 /// An unterminated fence is left as-is (its content stays scannable —
 /// fail-closed), and inline spans never cross a newline.
 ///
+/// LINE-COUNT PRESERVING, and that is a NAMED invariant: `proseOnly(s)` has
+/// exactly as many lines as `s`. Every seam gives back the newlines it blanked
+/// (the blockquote and inline-span strips are single-line replacements; the
+/// fence strip pads explicitly), so an offset into the stripped text maps to
+/// the AUTHORED line and [parseSpecContract] can name the line a record is on.
+///
 /// PUBLIC because the DOCS committee (`docs_committee.dart`) reads headings
 /// from PROSE by the same rule — one definition, two readers.
 String proseOnly(String spec) {
@@ -1404,7 +1410,15 @@ String proseOnly(String spec) {
 
     prose
       ..write(spec.substring(copiedThrough, openerAt))
-      ..write('  ');
+      ..write('  ')
+      // LINE-COUNT PRESERVING: the blanked region gives back the newlines it
+      // swallowed, so an offset into the stripped text maps to the AUTHORED
+      // line and a record finding can name it. The two-space seam still LEADS,
+      // so stripping can only break a token across it, never splice one
+      // together.
+      ..write(
+        '\n' * '\n'.allMatches(spec.substring(openerAt, fence.end)).length,
+      );
     copiedThrough = fence.end;
     openerAt = null;
     openerLength = null;
@@ -1417,17 +1431,34 @@ String proseOnly(String spec) {
       .replaceAll(RegExp(r'`[^`\n]*`'), '  ');
 }
 
+/// The section whose `## ` heading starts at [headingAt]: its [start] offset in
+/// [design] and its [body] — the text after the heading line up to the next
+/// `## ` heading (or the end).
+///
+/// The SOURCE-LOCATED form of [sectionBodyAt], which is now one line over it.
+/// [parseSpecContract] needs the offset to turn a body-local match into the
+/// document line a record is authored on, without recomputing the body's start.
+({int start, String body}) sectionAt(String design, int headingAt) {
+  final afterHeading = design.indexOf('\n', headingAt);
+  if (afterHeading < 0) return (start: design.length, body: '');
+  final next = design.indexOf('\n## ', afterHeading);
+  final end = next < 0 ? design.length : next;
+  return (start: afterHeading, body: design.substring(afterHeading, end));
+}
+
 /// The body of the section whose `## ` heading starts at [headingAt] — the
 /// text after the heading line up to the next `## ` heading (or the end).
 ///
 /// PUBLIC for the same reason as [proseOnly]: `changeShapeOf` reads the bead's
 /// `## Touches` body with it.
-String sectionBodyAt(String design, int headingAt) {
-  final afterHeading = design.indexOf('\n', headingAt);
-  if (afterHeading < 0) return '';
-  final next = design.indexOf('\n## ', afterHeading);
-  return design.substring(afterHeading, next < 0 ? design.length : next);
-}
+String sectionBodyAt(String design, int headingAt) =>
+    sectionAt(design, headingAt).body;
+
+/// The 1-based line of [offset] in [text] — the ONE line-number reckoning, so
+/// every [SpecContractFinding] counts the same way, and the only place a line
+/// number is computed.
+int lineOf(String text, int offset) =>
+    1 + '\n'.allMatches(text.substring(0, offset.clamp(0, text.length))).length;
 
 /// The offset of the heading LINE that opens [heading]'s section in [design],
 /// or `-1` when there is none — the LAST match when several exist.
