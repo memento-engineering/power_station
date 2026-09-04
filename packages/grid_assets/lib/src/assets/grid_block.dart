@@ -327,3 +327,284 @@ Map<String, String> _mappings(Object? raw, String package) {
     for (final entry in mappings.entries) '${entry.key}': '${entry.value}',
   });
 }
+
+/// Renders [block] as the public Dart library a station composes.
+///
+/// Emits VALUES, never subclasses: one `static const GridAssetDefinition` per
+/// logical asset (`the_grid#asset-definitions-are-const-collections-are-validated`
+/// keeps the definition `const`), and ONE `static final
+/// GridAssetPackDefinition` — the collections validate at construction, so they
+/// are deeply immutable rather than `const`.
+String renderGridAssetPackLibrary(GridBlock block) {
+  final buffer = StringBuffer()
+    ..writeln('// $kGridBlockGeneratedMarker — do not edit.')
+    ..writeln(
+      '// Source of truth: the `grid:` block in '
+      'packages/${block.package}/pubspec.yaml.',
+    )
+    ..writeln('// Regenerate: dart run tool/generate_grid_assets.dart')
+    ..writeln()
+    ..writeln('/// The asset surface `${block.package}` vends, as the neutral')
+    ..writeln('/// `grid_sdk` declaration contract.')
+    ..writeln('library;')
+    ..writeln()
+    ..writeln("import 'package:grid_sdk/grid_sdk.dart';")
+    ..writeln()
+    ..writeln('/// The `${block.package}` asset pack.')
+    ..writeln('abstract final class GridAssetsPack {')
+    ..writeln('  /// The vending Dart package.')
+    ..writeln("  static const String package = '${block.package}';")
+    ..writeln();
+  for (final asset in block.assets) {
+    buffer
+      ..writeln('  /// `${asset.assetKey.canonical}`.')
+      ..writeln(
+        '  static const GridAssetDefinition '
+        '${assetFieldName(asset.assetKey)} = GridAssetDefinition(',
+      )
+      ..writeln('    assetKey: AssetKey(')
+      ..writeln('      package: package,')
+      ..writeln('      kind: AssetKind.${asset.assetKey.kind.name},')
+      ..writeln("      id: '${asset.assetKey.id}',")
+      ..writeln('    ),')
+      ..writeln('    description: ${_dartString(asset.description)},')
+      ..writeln('    audience: AssetAudience.${asset.audience.name},')
+      ..writeln('    visibility: AssetVisibility.${asset.visibility.name},')
+      ..writeln('    selector: ${selectorExpression(asset.selector)},')
+      ..writeln('    artifacts: <AssetArtifact>[');
+    for (final artifact in asset.artifacts) {
+      buffer
+        ..writeln('      AssetArtifact(')
+        ..writeln(
+          '        target: AssetDeliveryTarget.${artifact.target.name},',
+        )
+        ..writeln("        path: '${artifact.path}',");
+      if (artifact.arguments.isNotEmpty) {
+        buffer.writeln('        arguments: <AssetArgument>[');
+        for (final argument in artifact.arguments) {
+          buffer
+            ..writeln('          AssetArgument(')
+            ..writeln("            name: '${argument.name}',")
+            ..writeln(
+              '            description: ${_dartString(argument.description)},',
+            )
+            ..writeln('            isRequired: ${argument.isRequired},')
+            ..writeln('          ),');
+        }
+        buffer.writeln('        ],');
+      }
+      buffer.writeln('      ),');
+    }
+    buffer
+      ..writeln('    ],')
+      ..writeln('  );')
+      ..writeln();
+  }
+  buffer
+    ..writeln('  /// Every declared asset, in declaration order.')
+    ..writeln(
+      '  static const List<GridAssetDefinition> assets = '
+      '<GridAssetDefinition>[',
+    );
+  for (final asset in block.assets) {
+    buffer.writeln('    ${assetFieldName(asset.assetKey)},');
+  }
+  buffer
+    ..writeln('  ];')
+    ..writeln()
+    ..writeln('  /// The validated pack. Built, not `const`: the collections')
+    ..writeln('  /// validate duplicates at construction')
+    ..writeln(
+      '  /// (`the_grid#asset-definitions-are-const-collections-are-'
+      'validated`).',
+    )
+    ..writeln('  static final GridAssetPackDefinition definition =')
+    ..writeln(
+      '      GridAssetPackDefinition(package: package, assets: assets);',
+    )
+    ..writeln()
+    ..writeln("  /// This pack's overlay head → target mappings.")
+    ..writeln('  static const Map<String, String> stationOverlayMappings =')
+    ..writeln('      <String, String>{');
+  for (final entry in block.stationOverlayMappings.entries) {
+    buffer.writeln("        '${entry.key}': '${entry.value}',");
+  }
+  buffer
+    ..writeln('      };')
+    ..writeln('}');
+  return buffer.toString();
+}
+
+/// The generated field name for [key] — `<kind><PascalCaseId>`.
+String assetFieldName(AssetKey key) {
+  final words = key.id
+      .split(RegExp('[^A-Za-z0-9]+'))
+      .where((word) => word.isNotEmpty);
+  return key.kind.name +
+      words.map((word) => word[0].toUpperCase() + word.substring(1)).join();
+}
+
+/// The Dart source expression for [selector] — an exhaustive `switch` over the
+/// sealed `grid_sdk` union, so a new variant breaks this renderer loudly.
+String selectorExpression(AssetSelector selector) => switch (selector) {
+  AlwaysApplies() => 'AlwaysApplies()',
+  RequiresPackage(:final packageName) => "RequiresPackage('$packageName')",
+  RequiresPath(:final relativePath) => "RequiresPath('$relativePath')",
+  RequiresAll(:final selectors) =>
+    'RequiresAll(<AssetSelector>['
+        '${selectors.map(selectorExpression).join(', ')}])',
+};
+
+String _dartString(String value) {
+  final escaped = value
+      .replaceAll(r'\', r'\\')
+      .replaceAll(r'$', r'\$')
+      .replaceAll("'", r"\'");
+  return "'$escaped'";
+}
+
+String _yamlString(String value) {
+  final escaped = value.replaceAll(r'\', r'\\').replaceAll('"', r'\"');
+  return '"$escaped"';
+}
+
+/// Renders [block] as the MCP-shaped compatibility mirror
+/// (`extension/mcp/config.yaml`, the `package:extension_discovery` shape).
+///
+/// Carries ONLY MCP concepts. The grid-only `kind`, `selector`, and the
+/// non-MCP delivery legs stay in the block and in the generated Dart. `agent`,
+/// `hook`, and `settings` assets are not mirrored — MCP has no section for
+/// them.
+String renderMcpConfig(GridBlock block) {
+  final resources = <GridAssetDefinition>[];
+  final prompts = <GridAssetDefinition>[];
+  final skills = <GridAssetDefinition>[];
+  for (final asset in block.assets) {
+    switch (asset.assetKey.kind) {
+      case AssetKind.resource:
+      case AssetKind.rubric:
+        resources.add(asset);
+      case AssetKind.prompt:
+        prompts.add(asset);
+      case AssetKind.skill:
+        skills.add(asset);
+      case AssetKind.agent:
+      case AssetKind.hook:
+      case AssetKind.settings:
+        break;
+    }
+  }
+  final buffer = StringBuffer()
+    ..writeln('# $kGridBlockGeneratedMarker — do not edit.')
+    ..writeln(
+      '# Source of truth: the `grid:` block in '
+      'packages/${block.package}/pubspec.yaml.',
+    )
+    ..writeln('#')
+    ..writeln(
+      '# The MCP-shaped compatibility mirror of that block, authored in',
+    )
+    ..writeln('# the Dart/Flutter "Packaged AI Assets" format (per')
+    ..writeln('# flutter.dev/go/packaged-ai-assets — the')
+    ..writeln('# package:extension_discovery `extension/mcp/config.yaml`')
+    ..writeln('# shape). It carries only MCP concepts; grid-only kind,')
+    ..writeln('# selector, and non-MCP delivery legs stay in the block and in')
+    ..writeln('# lib/src/assets/grid_asset_pack.dart.')
+    ..writeln('name: ${block.package}')
+    ..writeln('version: 1');
+  _writeMcpSection(
+    buffer,
+    heading: 'resources',
+    preamble: '# Rubric prose — one resource per committee lane.',
+    assets: resources,
+    leg: AssetDeliveryTarget.mcp,
+    withAudience: false,
+  );
+  _writeMcpSection(
+    buffer,
+    heading: 'prompts',
+    preamble: '# Prompts — mustache-templated instruction bodies.',
+    assets: prompts,
+    leg: AssetDeliveryTarget.mcp,
+    withAudience: false,
+  );
+  _writeMcpSection(
+    buffer,
+    heading: 'skills',
+    preamble:
+        '# Skills — the agentskills SKILL.md assets the station_overlay\n'
+        '# vends. `audience: operator` is the DENY-list a build agent brief\n'
+        '# reads through `operatorSkillIds`; the claude leg is mirrored here,\n'
+        '# and every other leg lives in the block.',
+    assets: skills,
+    leg: AssetDeliveryTarget.claude,
+    withAudience: true,
+  );
+  buffer
+    ..writeln('station_overlay:')
+    ..writeln('  mappings:');
+  for (final entry in block.stationOverlayMappings.entries) {
+    buffer.writeln('    ${entry.key}: ${entry.value}');
+  }
+  return buffer.toString();
+}
+
+void _writeMcpSection(
+  StringBuffer buffer, {
+  required String heading,
+  required String preamble,
+  required List<GridAssetDefinition> assets,
+  required AssetDeliveryTarget leg,
+  required bool withAudience,
+}) {
+  if (assets.isEmpty) return;
+  buffer
+    ..writeln()
+    ..writeln(preamble)
+    ..writeln('$heading:');
+  for (final asset in assets) {
+    final artifact = _legOf(asset, leg);
+    buffer
+      ..writeln('  - id: ${asset.assetKey.id}')
+      ..writeln('    description: ${_yamlString(asset.description)}')
+      ..writeln('    path: ${_mcpPath(artifact.path)}')
+      ..writeln('    visibility: ${asset.visibility.name}');
+    if (withAudience) {
+      buffer.writeln('    audience: ${_mcpAudience(asset.audience)}');
+    }
+    if (artifact.arguments.isEmpty) continue;
+    buffer.writeln('    args:');
+    for (final argument in artifact.arguments) {
+      buffer
+        ..writeln('      - name: ${argument.name}')
+        ..writeln('        description: ${_yamlString(argument.description)}')
+        ..writeln('        required: ${argument.isRequired}');
+    }
+  }
+}
+
+AssetArtifact _legOf(GridAssetDefinition asset, AssetDeliveryTarget target) {
+  for (final artifact in asset.artifacts) {
+    if (artifact.target == target) return artifact;
+  }
+  _refuse(
+    '${asset.assetKey.kind.name}/${asset.assetKey.id}',
+    'artifacts',
+    'the MCP mirror needs a ${target.name} leg and none is declared',
+  );
+}
+
+/// MCP paths are relative to `extension/`; the block's are package-relative.
+String _mcpPath(String packageRelative) =>
+    packageRelative.startsWith('extension/')
+    ? packageRelative.substring('extension/'.length)
+    : packageRelative;
+
+/// The MCP spelling of an audience — exhaustive over the `grid_sdk` enum. The
+/// manifest's long-standing word for `human` is `operator`; `both` is
+/// agent-invocable, so it mirrors as `agent`.
+String _mcpAudience(AssetAudience audience) => switch (audience) {
+  AssetAudience.human => 'operator',
+  AssetAudience.agent => 'agent',
+  AssetAudience.both => 'agent',
+};
