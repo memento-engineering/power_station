@@ -145,7 +145,8 @@ const String kSpecExemplarAcceptance = '''
 /// The step carries the five labeled fields ([kStepFieldLabels]) and NO fenced
 /// implementation block: a code block is optional EVIDENCE, and an exemplar
 /// that shipped one taught the opposite.
-const String kSpecExemplarDesign = '''
+const String kSpecExemplarDesign =
+    '''
 ## Implementation Plan
 
 ### Step 1 — Add the `Heartbeat` frame
@@ -246,23 +247,29 @@ final String _stepFieldLabelLine = kStepFieldLabels
     .map((label) => '`$label:`')
     .join(', ');
 
-/// The EXACT structural contract the deterministic `spec-validation` lane
-/// enforces ([specStructuralFindings]), in the words the specify agent reads.
-/// [buildSpecifyBrief] renders it VERBATIM, so the gate's contract and the
-/// architect's instructions are literally ONE string.
+/// The PHASE boundary, in one sentence, written into the brief
+/// ([kSpecStructuralContract]), the packaged `spec-validation` rubric and the
+/// decision that ratified the grammar alike — so no surface can read the record
+/// rules as live while another reads them as measured.
+const String _specContractShadowBoundary =
+    'Record-contract findings are shadow-only until an explicit activation '
+    'ruling; the five presence and placeholder checks remain the live A/F '
+    'gate, and all five committee lanes remain unconditional.';
+
+/// The EXACT structural contract taught to the specify agent, in the words it
+/// reads. Items 1–5 are enforced by [specStructuralFindings]; items 6–10 are
+/// parsed by [parseSpecContract] in shadow measurement only. [buildSpecifyBrief]
+/// renders this string VERBATIM, so neither phase can hide a rule from the
+/// architect.
 ///
-/// Bead `pow-77g`: `pow-kzx`'s plan was graded **A** by `plan-completeness` and
-/// **F** here, for lacking a step FORMAT the brief never named. A gate whose
-/// contract the brief does not state is a trap. The round-trip fence in test —
-/// the exemplar below PASSES [specStructuralFindings] — is what keeps the two
-/// honest as either side moves.
+/// The shipped exemplar is round-tripped through both readings in test: it
+/// passes [specStructuralFindings] and parses without a record finding.
 final String kSpecStructuralContract =
     '''
 ### The structural contract (a DETERMINISTIC gate, run before any critic reads your spec)
 
-`spec-validation` is not a critic and holds no opinion: it greps the bead you
-write and hard-blocks the build on any miss. It checks EXACTLY this, and nothing
-else:
+`spec-validation` is not a critic and holds no opinion. Its live A/F result is
+the five presence and placeholder checks in items 1–5:
 
 1. **Acceptance** carries at least one `- [ ]` checkbox line.
 2. **The design carries all four `## ` headings**, spelled exactly:
@@ -279,6 +286,13 @@ else:
 4. **`## Validation Plan` carries at least one `- ` item.**
 5. **No placeholder token in PROSE.** These exact tokens, case-insensitively:
    $_bannedTokenLine.
+
+$_specContractShadowBoundary
+
+Items 6–10 are the strict record grammar measured over the retained corpus by
+`spec_contract_shadow.dart`; they do not affect `SpecValidationCapability`'s
+grade before that ruling:
+
 6. **Every acceptance criterion is an ADDRESSABLE record**:
    `$kAcceptanceRecordForm` — ids UNIQUE and CONTIGUOUS from `AC-1`. The id is
    what the validation plan maps onto.
@@ -308,7 +322,8 @@ verbatim — points at work rather than deferring it, so backtick any banned tok
 you must name. The same cuts the other way: a `## Touches` heading that exists
 only inside a code block is evidence, not a section.
 
-Below is a COMPLETE spec that passes this gate. Copy its SHAPE.
+Below is a COMPLETE spec that passes the live gate and parses clean under the
+shadow grammar. Copy its SHAPE.
 
 `````markdown
 $kSpecExemplarAcceptance
@@ -1209,15 +1224,13 @@ String specBeadBlock(Bead bead) {
 /// state — grades F, so the specify stage can never be silently skipped.
 /// Fail-closed: a missing ambient bead grades F too.
 ///
-/// **And one level down, the RECORD grammar** ([parseSpecContract]): inside
-/// those sections every criterion, step, touch, citation and validation item
-/// is a LINE-ORIENTED record with a documented form, and the lane reads them
-/// into one typed [SpecContract]. Addressable `AC-<n>` ids, the exact one-to-
-/// one acceptance↔validation mapping, repo-relative paths, resolvable decision
-/// identities and the five labeled step fields are all mechanically decidable,
-/// so they are decided HERE — each deviation named with the line it is on, and
-/// none of them guessed at. It is the same gate, not a sibling validator: one
-/// function, one contract string, one parser.
+/// **Shadow measurement, not a second live gate level:** [parseSpecContract]
+/// reads the line-oriented records into [SpecContract] and returns typed,
+/// source-located findings without repair. Those findings are consumed by
+/// `spec_contract_shadow.dart`; they do not enter this capability's grade
+/// before an explicit activation ruling. All four semantic critics remain
+/// unconditional because test proof, plan coherence, and decision
+/// interpretation remain inference.
 ///
 /// Every rule it enforces is STATED to the agent it judges: the specify brief
 /// renders [kSpecStructuralContract] verbatim, and the exemplar that contract
@@ -1236,9 +1249,9 @@ String specBeadBlock(Bead bead) {
 /// What the structure check does NOT judge — whether a named command actually
 /// PROVES its criterion, whether the plan is COHERENT, whether a resolvable
 /// decision is INTERPRETED correctly — is exactly what the four LLM lanes own.
-/// Structure and referential integrity belong to code; the residue is
-/// inference, and reading a `Test:` line is not the same as knowing it can
-/// fail.
+/// Structure and referential integrity are represented and measured in code but
+/// do not route in this phase; the residue is inference, and reading a `Test:`
+/// line is not the same as knowing it can fail.
 class SpecValidationCapability extends ServiceCapability {
   /// Creates the spec-validation gate.
   const SpecValidationCapability();
@@ -1350,17 +1363,11 @@ final RegExp _numberedStep = RegExp(
   caseSensitive: false,
 );
 
-/// The structural findings for [bead]'s spec — empty iff the spec is whole.
-/// Pure and exposed for unit tests; [SpecValidationCapability] grades A iff
-/// this returns empty. Each finding names what is missing (guards LOUD), so
-/// the route's gate reason — and the rework round's operator — never has to
-/// diff the spec by hand.
-///
-/// Two levels, one gate: the five PRESENCE checks below run first and in their
-/// original order (so every message a route already reports is byte-identical),
-/// then [parseSpecContract] reads the RECORD grammar inside whichever sections
-/// those checks just found whole. That cascade is the whole reason one defect
-/// stays one finding.
+/// The LIVE structural findings for [bead]'s spec — empty iff the five
+/// presence and placeholder checks pass. Pure and exposed for unit tests;
+/// [SpecValidationCapability] grades A iff this returns empty. Each finding
+/// names what is missing (guards LOUD), and every existing finding string is
+/// byte-unchanged.
 List<String> specStructuralFindings(Bead bead) {
   final findings = <String>[];
   final acceptance = bead.acceptanceCriteria;
@@ -1423,23 +1430,9 @@ List<String> specStructuralFindings(Bead bead) {
     findings.add('design: `## Validation Plan` has no items');
   }
 
-  // The RECORD grammar — the same contract, one level down. It runs only over
-  // sections whose PRESENCE check above PASSED: a section that is missing or
-  // empty is already ONE loud finding, and re-reading it as a dozen malformed
-  // records would bury it.
-  findings.addAll(
-    parseSpecContract(
-      acceptance: acceptance,
-      design: design,
-      only: {
-        if (hasCheckboxes) SpecContractSection.acceptance,
-        if (hasNumberedSteps) SpecContractSection.plan,
-        if (touchesAt >= 0) SpecContractSection.touches,
-        if (decisionsAt >= 0) SpecContractSection.decisions,
-        if (hasValidationItems) SpecContractSection.validation,
-      },
-    ).findings.map((finding) => finding.render()),
-  );
+  // Record-contract findings are SHADOW ONLY until an explicit activation
+  // ruling. `parseSpecContract` is invoked by `spec_contract_shadow.dart`, not
+  // appended to this live A/F list.
 
   // Placeholder tokens anywhere in the spec's PROSE — quotation contexts
   // (quoted code, cited clauses) are evidence, not deferral, and never trip.
@@ -1930,7 +1923,8 @@ class SpecContractFinding {
   /// The LOUD message naming what is wrong and the form that is required.
   final String message;
 
-  /// The string [specStructuralFindings] joins into its rationale.
+  /// A stable human-readable rendering for shadow evidence, tests, and a future
+  /// explicit activation ruling.
   String render() => '$field line $line: $message';
 }
 
@@ -2121,11 +2115,13 @@ String? _stepFieldValue(List<_AuthoredLine> slice, String label) {
 /// documented form contributes a finding and NOTHING to the projection, so a
 /// guess can never reach a cross-record check.
 ///
-/// [only] narrows the parse to the sections whose PRESENCE checks already
-/// passed. That cascade is what keeps one defect to one finding: an acceptance
-/// field with no checkboxes at all is [specStructuralFindings]' own finding,
-/// and re-reporting it as a dozen malformed records would bury it.
-({SpecContract contract, List<SpecContractFinding> findings}) parseSpecContract({
+/// [only] narrows the parse to a chosen set of sections. That cascade is what
+/// keeps one defect to one finding: an acceptance field with no checkboxes at
+/// all is already [specStructuralFindings]' own live finding, and re-reading it
+/// as a dozen malformed records would bury it. The shadow measurement parses
+/// whole, because it counts migration cost rather than grading a bead.
+({SpecContract contract, List<SpecContractFinding> findings})
+parseSpecContract({
   required String acceptance,
   required String design,
   Set<SpecContractSection> only = const {
@@ -2144,14 +2140,15 @@ String? _stepFieldValue(List<_AuthoredLine> slice, String label) {
   final validations = <ValidationMapping>[];
   var narrative = DecisionLookupNarrative.cited;
 
-  void report(
-    SpecContractRule rule,
-    String field,
-    int line,
-    String message,
-  ) => findings.add(
-    SpecContractFinding(rule: rule, field: field, line: line, message: message),
-  );
+  void report(SpecContractRule rule, String field, int line, String message) =>
+      findings.add(
+        SpecContractFinding(
+          rule: rule,
+          field: field,
+          line: line,
+          message: message,
+        ),
+      );
 
   // ---- acceptance: `- [ ] AC-<n> — <criterion>` ---------------------------
   var acceptanceRecordsClean = true;
@@ -2199,7 +2196,9 @@ String? _stepFieldValue(List<_AuthoredLine> slice, String label) {
     // second defect would bury the one the architect actually has to fix.
     final ids = criteria.map((criterion) => criterion.id).toList()..sort();
     final expected = [for (var i = 1; i <= criteria.length; i++) i];
-    if (acceptanceRecordsClean && criteria.isNotEmpty && '$ids' != '$expected') {
+    if (acceptanceRecordsClean &&
+        criteria.isNotEmpty &&
+        '$ids' != '$expected') {
       acceptanceRecordsClean = false;
       report(
         SpecContractRule.acceptanceIdNotContiguous,
