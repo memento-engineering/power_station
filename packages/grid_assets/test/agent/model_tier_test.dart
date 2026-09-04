@@ -278,6 +278,86 @@ void main() {
     });
   });
 
+  // Bead `pow-zetn` — a subscription-billed harness reports tokens and no
+  // money, so its cost is DERIVED from prices declared beside this ladder. The
+  // fence is the coverage: the ladder may not stamp a model the table cannot
+  // price, or that lane silently leaves the station's spend report.
+  group('every pinned model carries a declared price (pow-zetn)', () {
+    test('every explicit built-in model has a declared usage price', () {
+      final registry = buildBuiltinEnvironmentRegistry();
+      final prices = const AgentConfig().modelPrices;
+      final explicitlyPinned = kBuiltinEnvironments.entries.where(
+        (entry) => entry.value.model != null,
+      );
+
+      expect(explicitlyPinned, isNotEmpty);
+      for (final entry in explicitlyPinned) {
+        // Resolved through the PRODUCTION ladder, never a second handwritten id
+        // list: the price is keyed by what `resolveAgentConfig` actually stamps.
+        final resolved = resolveAgentConfig(
+          tier: AgentTier.frontier,
+          ambient: const AgentConfig(),
+          beadMetadata: const <String, dynamic>{},
+          stepParams: const <String, String>{},
+          registry: registry,
+          typedEnvironment: registry.resolve(entry.key),
+        );
+        expect(
+          prices,
+          contains(resolved.params['model']),
+          reason: '${entry.key} resolved an unpriced model',
+        );
+      }
+    });
+
+    test('AgentConfig preserves an injected price table as a value', () {
+      const custom = <String, ModelTokenPrice>{
+        'custom': ModelTokenPrice(
+          inputUsdPerMillion: 1,
+          cacheReadUsdPerMillion: 0.1,
+          cacheCreationUsdPerMillion: 1.25,
+          outputUsdPerMillion: 2,
+        ),
+      };
+      final configured = const AgentConfig().merge(modelPrices: custom);
+      expect(configured.modelPrices, custom);
+      expect(configured, const AgentConfig(modelPrices: custom));
+      expect(
+        configured.hashCode,
+        const AgentConfig(modelPrices: custom).hashCode,
+      );
+      // A DIFFERENT table is a different config — the value carries it.
+      expect(configured, isNot(const AgentConfig()));
+    });
+
+    test('a declared price prices the classes it is handed, in USD', () {
+      const price = ModelTokenPrice(
+        inputUsdPerMillion: 4,
+        cacheReadUsdPerMillion: 0.4,
+        cacheCreationUsdPerMillion: 5,
+        outputUsdPerMillion: 20,
+      );
+      expect(
+        price.costUsd(
+          inputTokens: 1000000,
+          cacheReadInputTokens: 1000000,
+          cacheCreationInputTokens: 1000000,
+          outputTokens: 1000000,
+        ),
+        closeTo(29.4, 0.000000001),
+      );
+      expect(
+        price.costUsd(
+          inputTokens: 0,
+          cacheReadInputTokens: 0,
+          cacheCreationInputTokens: 0,
+          outputTokens: 0,
+        ),
+        0,
+      );
+    });
+  });
+
   group('the fences — the layering is real', () {
     test('the station model surface stays one knob per TIER', () {
       // Three tiers, three armings.
