@@ -26,35 +26,13 @@ const _specCritics =
     'spec-validation,coherence,decision-alignment,acceptance-testability,'
     'plan-completeness';
 
-/// A bead carrying a structurally WHOLE spec (every section, no placeholders).
+/// A bead carrying a structurally WHOLE spec — the SHIPPED exemplar itself, so
+/// this suite's "conforming" fixture cannot drift from the one the brief
+/// teaches and the round-trip fence proves.
 Bead _specced() => bead('tg-1').copyWith(
   title: 'Wire the federation bus',
-  acceptanceCriteria:
-      '- [ ] A peer heartbeat surfaces within 1s\n'
-      '- [ ] A malformed frame is refused loudly',
-  design: '''
-## Implementation Plan
-1. Add `Heartbeat` — `lib/src/heartbeat.dart`
-   ```dart
-   class Heartbeat {
-     const Heartbeat(this.peerId);
-     final String peerId;
-   }
-   ```
-   Test: `dart test test/heartbeat_test.dart` → expect PASS
-   Commit: `feat(bus): add the peer heartbeat`
-
-## Touches
-**Files:**
-- `lib/src/heartbeat.dart` — created
-
-## ADR Alignment
-No ADR applies — verified via grep on `heartbeat`, `bus`.
-
-## Validation Plan
-- [ ] A peer heartbeat surfaces within 1s → `dart test test/heartbeat_test.dart` → PASS
-- [ ] A malformed frame is refused loudly → `dart test test/wire_test.dart` → PASS
-''',
+  acceptanceCriteria: kSpecExemplarAcceptance,
+  design: kSpecExemplarDesign,
 );
 
 ({FakeTreeContext context, StepArgs args}) _laneCtx({
@@ -568,7 +546,7 @@ void main() {
 
       test('a plan without numbered steps', () {
         final b = _specced().copyWith(
-          design: _specced().design.replaceFirst('1. Add', 'Add'),
+          design: _specced().design.replaceFirst('### Step 1 — Add', 'Add'),
         );
         expect(specStructuralFindings(b).single, contains('no numbered steps'));
       });
@@ -649,8 +627,8 @@ void main() {
         const ticks = '\x60\x60\x60';
         final quoting = _specced().copyWith(
           design: _specced().design.replaceFirst(
-            'Commit: `feat(bus): add the peer heartbeat`\n',
-            'Commit: `feat(bus): add the peer heartbeat`\n'
+            'Commit: `feat(bus): add the peer heartbeat frame`\n',
+            'Commit: `feat(bus): add the peer heartbeat frame`\n'
                 '\n'
                 'The exemplar this brief ships, quoted:\n'
                 '${ticks}markdown\n'
@@ -666,8 +644,8 @@ void main() {
           'identifier merely containing the letters never trips', () {
         final withTodo = _specced().copyWith(
           design: _specced().design.replaceFirst(
-            'No ADR applies',
-            'TODO: check ADRs. No ADR applies',
+            'No recorded decision governs',
+            'TODO: check the register. No recorded decision governs',
           ),
         );
         expect(
@@ -675,9 +653,14 @@ void main() {
           contains('placeholder: "TODO"'),
         );
 
+        // The exemplar's ids are KEPT: the mutation under test is the banned
+        // PHRASE, not the record form, and a fixture that broke both would
+        // prove neither.
         final withPhrase = _specced().copyWith(
-          acceptanceCriteria:
-              '- [ ] add appropriate error handling to the wire',
+          acceptanceCriteria: kSpecExemplarAcceptance.replaceFirst(
+            'AC-1 — ',
+            'AC-1 — add appropriate error handling to the wire; ',
+          ),
         );
         expect(
           specStructuralFindings(withPhrase).single,
@@ -735,80 +718,60 @@ void main() {
         );
       });
 
+      // The three FENCE fixtures below vary ONE thing against the shipped
+      // exemplar — the fence spliced beside a step's `Change:` — so a failure
+      // can only ever be about the fence, never about the record grammar.
+      Bead fenced(String id, String evidence) => bead(id).copyWith(
+        acceptanceCriteria: kSpecExemplarAcceptance,
+        design: kSpecExemplarDesign.replaceFirst(
+          'Test: `cd packages/grid_assets',
+          '$evidence\nTest: `cd packages/grid_assets',
+        ),
+      );
+
       test('a longer outer fence ignores shorter fenced blocks', () {
         const ticks = '\x60\x60\x60';
-        final b = bead('tg-long-fence').copyWith(
-          acceptanceCriteria: '- [ ] Canonical sections remain visible',
-          design:
-              '''
-## Implementation Plan
-### Step 1 — Quote the embedded validator
-$ticks`markdown
-${ticks}dart
-final pulse = true;
-$ticks`
-
-## Touches
-- `lib/src/pulse.dart` — unchanged
-
-## ADR Alignment
-No ADR applies — verified via grep on `pulse`, `validator`.
-
-## Validation Plan
-- [ ] Canonical sections remain visible → `dart test` → PASS
-Observe the literal language tag "${ticks}dart".
-''',
+        expect(
+          specStructuralFindings(
+            fenced(
+              'tg-long-fence',
+              'Quoted whole, inner fence and all:\n'
+                  '$ticks`markdown\n'
+                  '${ticks}dart\n'
+                  'final pulse = true;\n'
+                  '$ticks`',
+            ),
+          ),
+          isEmpty,
         );
-        expect(specStructuralFindings(b), isEmpty);
       });
 
       test('an unterminated line fence leaves the document tail scannable', () {
         const ticks = '\x60\x60\x60';
-        final b = bead('tg-open-fence').copyWith(
-          acceptanceCriteria: '- [ ] Canonical sections remain visible',
-          design:
-              '''
-## Implementation Plan
-### Step 1 — Preserve the diagnostic transcript
-${ticks}dart
-final pulse = true;
-
-## Touches
-- `lib/src/pulse.dart` — unchanged
-
-## ADR Alignment
-No ADR applies — verified via grep on `pulse`, `diagnostic`.
-
-## Validation Plan
-- [ ] Canonical sections remain visible → `dart test` → PASS
-Observe the literal language tag "${ticks}dart".
-''',
+        expect(
+          specStructuralFindings(
+            fenced(
+              'tg-open-fence',
+              'The diagnostic transcript, preserved:\n'
+                  '${ticks}dart\n'
+                  'final pulse = true;',
+            ),
+          ),
+          isEmpty,
         );
-        expect(specStructuralFindings(b), isEmpty);
       });
 
       test('inline triple backticks are not fence delimiters', () {
         const ticks = '\x60\x60\x60';
-        final b = bead('tg-inline-fence').copyWith(
-          acceptanceCriteria: '- [ ] Canonical sections remain visible',
-          design:
-              '''
-## Implementation Plan
-### Step 1 — Validate the embedded language tag
-Validate with ruby -e 's.include?("${ticks}dart")'.
-
-## Touches
-- `lib/src/pulse.dart` — unchanged
-
-## ADR Alignment
-No ADR applies — verified via grep on `pulse`, `validator`.
-
-## Validation Plan
-- [ ] Canonical sections remain visible → `dart test` → PASS
-Validate again with ruby -e 's.include?("${ticks}dart")'.
-''',
+        expect(
+          specStructuralFindings(
+            fenced(
+              'tg-inline-fence',
+              'Validate with ruby -e \'s.include?("${ticks}dart")\'.',
+            ),
+          ),
+          isEmpty,
         );
-        expect(specStructuralFindings(b), isEmpty);
       });
     });
 
@@ -822,20 +785,31 @@ Validate again with ruby -e 's.include?("${ticks}dart")'.
         expect(specStructuralFindings(exemplar), isEmpty);
       });
 
-      test('an ORDINAL-HEADING plan grades A — the `pow-kzx` shape the '
-          'plan-completeness critic graded A and this lane F\'d on format', () {
-        final headed = _specced().copyWith(
+      test('an ORDERED-LIST plan still grades A — the record grammar lands on '
+          'what a step CONTAINS, never on which openers count', () {
+        // The exemplar now SHIPS the ordinal-HEADING shape (a step carrying a
+        // fenced block has to take it), so this fence runs the other way: the
+        // `1. …` list item stays a step, fields and all.
+        final listed = _specced().copyWith(
           design: _specced().design.replaceFirst(
-            '1. Add `Heartbeat` — `lib/src/heartbeat.dart`',
-            '### Step 1 — Add `Heartbeat` in `lib/src/heartbeat.dart`',
+            '### Step 1 — Add the `Heartbeat` frame',
+            '1. Add the `Heartbeat` frame',
           ),
         );
-        expect(specStructuralFindings(headed), isEmpty);
+        expect(specStructuralFindings(listed), isEmpty);
+
+        final bold = _specced().copyWith(
+          design: _specced().design.replaceFirst(
+            '### Step 1 — Add the `Heartbeat` frame',
+            '**Step 1:** Add the `Heartbeat` frame',
+          ),
+        );
+        expect(specStructuralFindings(bold), isEmpty);
       });
 
       test('a BULLETED plan still F\'s — the ordinal stays MANDATORY', () {
         final bulleted = _specced().copyWith(
-          design: _specced().design.replaceFirst('1. Add', '- Add'),
+          design: _specced().design.replaceFirst('### Step 1 — Add', '- Add'),
         );
         expect(
           specStructuralFindings(bulleted).single,
@@ -847,7 +821,7 @@ Validate again with ruby -e 's.include?("${ticks}dart")'.
           'plan — the check reads the `## Implementation Plan` body', () {
         final elsewhere = _specced().copyWith(
           design: _specced().design
-              .replaceFirst('1. Add', '- Add')
+              .replaceFirst('### Step 1 — Add', '- Add')
               .replaceFirst(
                 '## Validation Plan\n',
                 '## Validation Plan\n1. run the suite\n',
@@ -1099,7 +1073,7 @@ Validate again with ruby -e 's.include?("${ticks}dart")'.
         ),
       );
       // The spec IS the bead's acceptance + design — both render.
-      expect(prompt, contains('- [ ] A peer heartbeat surfaces within 1s'));
+      expect(prompt, contains(kSpecExemplarAcceptance));
       expect(prompt, contains('## Implementation Plan'));
       // NO pinned-diff scope — that is the CODE committee's instrument.
       expect(prompt, isNot(contains('pinned')));

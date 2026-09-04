@@ -1206,6 +1206,16 @@ String specBeadBlock(Bead bead) {
 /// state — grades F, so the specify stage can never be silently skipped.
 /// Fail-closed: a missing ambient bead grades F too.
 ///
+/// **And one level down, the RECORD grammar** ([parseSpecContract]): inside
+/// those sections every criterion, step, touch, citation and validation item
+/// is a LINE-ORIENTED record with a documented form, and the lane reads them
+/// into one typed [SpecContract]. Addressable `AC-<n>` ids, the exact one-to-
+/// one acceptance↔validation mapping, repo-relative paths, resolvable decision
+/// identities and the five labeled step fields are all mechanically decidable,
+/// so they are decided HERE — each deviation named with the line it is on, and
+/// none of them guessed at. It is the same gate, not a sibling validator: one
+/// function, one contract string, one parser.
+///
 /// Every rule it enforces is STATED to the agent it judges: the specify brief
 /// renders [kSpecStructuralContract] verbatim, and the exemplar that contract
 /// ships is round-tripped through [specStructuralFindings] in test (bead
@@ -1220,9 +1230,12 @@ String specBeadBlock(Bead bead) {
 /// same strip governs the STRUCTURE check — a `## ` heading or a step ordinal
 /// quoted inside a fence is evidence, not structure.
 ///
-/// What the structure check does NOT judge — whether the criteria are truly
-/// testable, the plan truly complete, the ADR citations truly load-bearing —
-/// is exactly what the four LLM lanes own.
+/// What the structure check does NOT judge — whether a named command actually
+/// PROVES its criterion, whether the plan is COHERENT, whether a resolvable
+/// decision is INTERPRETED correctly — is exactly what the four LLM lanes own.
+/// Structure and referential integrity belong to code; the residue is
+/// inference, and reading a `Test:` line is not the same as knowing it can
+/// fail.
 class SpecValidationCapability extends ServiceCapability {
   /// Creates the spec-validation gate.
   const SpecValidationCapability();
@@ -1339,6 +1352,12 @@ final RegExp _numberedStep = RegExp(
 /// this returns empty. Each finding names what is missing (guards LOUD), so
 /// the route's gate reason — and the rework round's operator — never has to
 /// diff the spec by hand.
+///
+/// Two levels, one gate: the five PRESENCE checks below run first and in their
+/// original order (so every message a route already reports is byte-identical),
+/// then [parseSpecContract] reads the RECORD grammar inside whichever sections
+/// those checks just found whole. That cascade is the whole reason one defect
+/// stays one finding.
 List<String> specStructuralFindings(Bead bead) {
   final findings = <String>[];
   final acceptance = bead.acceptanceCriteria;
@@ -1356,10 +1375,11 @@ List<String> specStructuralFindings(Bead bead) {
   final structure = proseOnly(design);
 
   // Testable acceptance: at least one `- [ ]` checkbox criterion.
-  if (!RegExp(
+  final hasCheckboxes = RegExp(
     r'^\s*-\s*\[[ xX]\]\s*\S',
     multiLine: true,
-  ).hasMatch(acceptance)) {
+  ).hasMatch(acceptance);
+  if (!hasCheckboxes) {
     findings.add('acceptance: no testable `- [ ]` checkbox criteria');
   }
 
@@ -1368,30 +1388,55 @@ List<String> specStructuralFindings(Bead bead) {
   // and a mention neither satisfies the gate nor displaces the real section
   // further down (bead `pow-o3ti`).
   final planAt = headingOffset(structure, '## Implementation Plan');
+  final hasNumberedSteps =
+      planAt >= 0 && _numberedStep.hasMatch(sectionBodyAt(structure, planAt));
   if (planAt < 0) {
     findings.add('design: no `## Implementation Plan` section');
-  } else if (!_numberedStep.hasMatch(sectionBodyAt(structure, planAt))) {
+  } else if (!hasNumberedSteps) {
     findings.add(
       'design: `## Implementation Plan` has no numbered steps — every step '
       'must open with an ordinal (`1.` / `1)` list items, or `### Step 1 — …` '
       'headings)',
     );
   }
-  if (headingOffset(structure, '## Touches') < 0) {
+  final touchesAt = headingOffset(structure, '## Touches');
+  if (touchesAt < 0) {
     findings.add('design: no `## Touches` section');
   }
-  if (headingOffset(structure, '## ADR Alignment') < 0) {
+  final decisionsAt = headingOffset(structure, '## ADR Alignment');
+  if (decisionsAt < 0) {
     findings.add('design: no `## ADR Alignment` section');
   }
   final validationAt = headingOffset(structure, '## Validation Plan');
+  final hasValidationItems =
+      validationAt >= 0 &&
+      RegExp(
+        r'^\s*-\s*\S',
+        multiLine: true,
+      ).hasMatch(sectionBodyAt(structure, validationAt));
   if (validationAt < 0) {
     findings.add('design: no `## Validation Plan` section');
-  } else {
-    final body = sectionBodyAt(structure, validationAt);
-    if (!RegExp(r'^\s*-\s*\S', multiLine: true).hasMatch(body)) {
-      findings.add('design: `## Validation Plan` has no items');
-    }
+  } else if (!hasValidationItems) {
+    findings.add('design: `## Validation Plan` has no items');
   }
+
+  // The RECORD grammar — the same contract, one level down. It runs only over
+  // sections whose PRESENCE check above PASSED: a section that is missing or
+  // empty is already ONE loud finding, and re-reading it as a dozen malformed
+  // records would bury it.
+  findings.addAll(
+    parseSpecContract(
+      acceptance: acceptance,
+      design: design,
+      only: {
+        if (hasCheckboxes) SpecContractSection.acceptance,
+        if (hasNumberedSteps) SpecContractSection.plan,
+        if (touchesAt >= 0) SpecContractSection.touches,
+        if (decisionsAt >= 0) SpecContractSection.decisions,
+        if (hasValidationItems) SpecContractSection.validation,
+      },
+    ).findings.map((finding) => finding.render()),
+  );
 
   // Placeholder tokens anywhere in the spec's PROSE — quotation contexts
   // (quoted code, cited clauses) are evidence, not deferral, and never trip.
