@@ -2,20 +2,30 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:github_grid_assets/github_grid_assets.dart';
+import 'package:grid_assets/grid_assets.dart';
 import 'package:grid_runtime/grid_runtime.dart';
 import 'package:test/test.dart';
 
 class _FakeTransport implements GitHubHttpTransport {
-  _FakeTransport(this.responses, {this.error});
+  _FakeTransport(this.responses, {this.error, this.errorPathSuffix});
 
   final List<GitHubHttpResponse> responses;
   final Object? error;
+
+  /// When set, [error] is thrown only for a request whose path ends with it —
+  /// the incident's shape, where the installation-token exchange SUCCEEDS and
+  /// the `/pulls` POST throws. When null, the FIRST send throws.
+  final String? errorPathSuffix;
   final requests = <GitHubHttpRequest>[];
 
   @override
   Future<GitHubHttpResponse> send(GitHubHttpRequest request) async {
     requests.add(request);
-    if (error case final value?) throw value;
+    final suffix = errorPathSuffix;
+    if (error case final value?
+        when suffix == null || request.uri.path.endsWith(suffix)) {
+      throw value;
+    }
     return responses.removeAt(0);
   }
 }
@@ -157,6 +167,73 @@ void main() {
         'ssh://git@github.com/memento-engineering/power_station.git',
       ),
       ('memento-engineering', 'power_station'),
+    );
+  });
+
+  test('a thrown latin1 encoding error escalates type-first and cause-last, '
+      'without the request body', () async {
+    // The REAL dart:convert shape: latin1 refuses the first code unit above
+    // U+00FF and embeds the WHOLE json request as the invalid value, which
+    // `Error.safeToString` then renders BACK-SLASH-ESCAPED and quoted.
+    final requestJson = jsonEncode(<String, Object>{
+      'title': 'Bot PR',
+      'body': 'validation plan — ${'plan step. ' * 200}',
+      'head': 'grid/pow-b14a',
+      'base': 'main',
+    });
+    final transport = _FakeTransport(
+      _successResponses(),
+      errorPathSuffix: '/pulls',
+      error: ArgumentError.value(
+        requestJson,
+        'string',
+        'Contains invalid characters.',
+      ),
+    );
+    final result = await (await _opener(
+      transport,
+      owner: 'memento-engineering',
+      repository: 'power_station',
+    )).open(
+      workDir: '/unused',
+      branch: 'grid/pow-b14a',
+      baseBranch: 'main',
+      title: 'Bot PR',
+    );
+
+    expect(result.isOpened, isFalse);
+    final reason = _resultReason(result);
+    expect(reason, contains('ArgumentError'));
+    expect(reason, isNot(contains(r'\"base\":\"main\"')));
+    expect(reason, isNot(contains('"base":"main"')));
+    expect(reason.length, lessThanOrEqualTo(461));
+    expect(reason.substring(reason.length - 200), isNot(contains('Verify')));
+    // The incident itself: the tail-first capture must keep the CAUSE.
+    expect(
+      landReasonTail('pr open failed — $reason'),
+      contains('ArgumentError'),
+    );
+  });
+
+  test('the HTTP-status path renders owner/repo, status, detail, and action '
+      'unchanged', () async {
+    final transport = _FakeTransport(<GitHubHttpResponse>[
+      ..._tokenResponse(),
+      const GitHubHttpResponse(
+        statusCode: 404,
+        body: '{"message":"Not Found"}',
+      ),
+    ]);
+    final result = await (await _opener(
+      transport,
+      owner: 'owner',
+      repository: 'repo',
+    )).open(workDir: '/unused', branch: 'b', baseBranch: 'main', title: 't');
+
+    expect(
+      _resultReason(result),
+      'GitHub refused PR creation for owner/repo (HTTP 404: Not Found). '
+      'Install the App for owner/repo and verify the repository coordinates.',
     );
   });
 }
