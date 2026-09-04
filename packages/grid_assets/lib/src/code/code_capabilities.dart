@@ -582,6 +582,10 @@ AgentBrief buildAgentBrief(
     )
     ..writeln('- Implement the task and COMMIT your work on that branch.')
     ..writeln(
+      '- Before you commit, run `dart format` on every changed Dart file; the '
+      'review circuit refuses an unformatted diff.',
+    )
+    ..writeln(
       '- Every commit message is CONVENTIONAL COMMITS v1.0.0: '
       '`<type>[(scope)][!]: <description>`, type one of '
       '${kConventionalTypes.join(' | ')}. The description is IMPERATIVE, '
