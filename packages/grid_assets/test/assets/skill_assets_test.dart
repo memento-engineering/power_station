@@ -684,6 +684,22 @@ void main() {
         isNot(contains('PreCompact')),
         reason: 'no PreCompact guard — a hook cannot undo a compaction',
       );
+
+      expect(
+        governor.readAsStringSync().split('{{runner}} seat governor').length -
+            1,
+        1,
+      );
+      for (final leg in const ['claude', 'agents']) {
+        final operations = File(
+          p.join(overlay, leg, 'skills', 'station-operations', 'SKILL.md'),
+        ).readAsStringSync();
+        expect(
+          operations.split('{{runner}} seat governor').length - 1,
+          1,
+          reason: '$leg carries its own governor-seat boot instruction',
+        );
+      }
     });
 
     test('no station_overlay file — skill OR governor agent-def — still '
