@@ -908,8 +908,10 @@ void main() {
       expect(back.anchors.single.contents.digest, isNotEmpty);
       expect(back.anchors.single.contents.state, EvidenceState.complete);
       expect(back.priorArtQueries.single.hits.single.beadId, 'pow-96y');
-      expect(back.decisionLookups.single.decisions.single.identity,
-          'power_station#a21');
+      expect(
+        back.decisionLookups.single.decisions.single.identity,
+        'power_station#a21',
+      );
       expect(back.history!.commits.single.sha, 'abc123def');
       expect(back.evidenceIds, anchors.evidenceIds);
       expect(back.priorArtWired, isTrue);
@@ -929,8 +931,9 @@ void main() {
     });
 
     test('a decode is REFUSED, never emptied, on any malformed record', () {
-      final wire = jsonDecode(jsonEncode(_completeAnchors().toJson()))
-          as Map<String, Object?>;
+      final wire =
+          jsonDecode(jsonEncode(_completeAnchors().toJson()))
+              as Map<String, Object?>;
       expect(DiscoveryAnchors.fromJson({...wire, 'version': 1}), isNull);
       expect(DiscoveryAnchors.fromJson({...wire, 'round': -1}), isNull);
       expect(DiscoveryAnchors.fromJson({...wire, 'round': '7'}), isNull);
@@ -1087,14 +1090,20 @@ void main() {
           ],
         }),
       );
-      final surfaced = await commandDecisionIndexSource(ok)(dir.path, [
-        'power_station/lib/a.dart',
-        'power_station/lib/a.dart',
-      ]);
+      final surfaced = await commandDecisionIndexSource(
+        ok,
+        runnerInvocation: 'dart run lunar:lunar',
+      )(dir.path, ['power_station/lib/a.dart', 'power_station/lib/a.dart']);
       expect(
         ok.commands,
-        ['space decisions index --surface power_station/lib/a.dart'],
-        reason: 'one call per DEDUPLICATED surface, no register-dir argument',
+        [
+          'dart run lunar:lunar decisions index --surface '
+              'power_station/lib/a.dart',
+        ],
+        reason:
+            'one call per DEDUPLICATED surface, rendered from the COMPOSING '
+            'station\'s invocation and never a literal binary name, with no '
+            'register-dir argument',
       );
       expect(surfaced.single.state, EvidenceState.complete);
       final entry = surfaced.single.decisions.single;
@@ -1106,6 +1115,7 @@ void main() {
         _CannedShellRunner(
           output: jsonEncode({'spec': 1, 'decisions': <Object?>[]}),
         ),
+        runnerInvocation: 'dart run lunar:lunar',
       )(dir.path, ['power_station/lib/a.dart']);
       expect(empty.single.state, EvidenceState.complete);
       expect(empty.single.decisions, isEmpty);
@@ -1113,12 +1123,14 @@ void main() {
       // Malformed JSON and a non-zero exit are BOTH loud failures.
       final malformed = await commandDecisionIndexSource(
         _CannedShellRunner(output: 'not json'),
+        runnerInvocation: 'dart run lunar:lunar',
       )(dir.path, ['power_station/lib/a.dart']);
       expect(malformed.single.state, EvidenceState.failed);
       expect(malformed.single.error, contains('malformed index JSON'));
 
       final crashed = await commandDecisionIndexSource(
-        _CannedShellRunner(exitCode: 127, output: 'command not found: space'),
+        _CannedShellRunner(exitCode: 127, output: 'command not found: lunar'),
+        runnerInvocation: 'dart run lunar:lunar',
       )(dir.path, ['power_station/lib/a.dart']);
       expect(crashed.single.state, EvidenceState.failed);
       expect(crashed.single.error, contains('command not found'));
@@ -1137,9 +1149,40 @@ void main() {
             ],
           }),
         ),
+        runnerInvocation: 'dart run lunar:lunar',
       )(dir.path, ['power_station/lib/a.dart']);
       expect(unresolvable.single.state, EvidenceState.failed);
       expect(unresolvable.single.error, contains('no-such-entry'));
+    });
+
+    test('an ABSENT station runner records UNAVAILABLE and never reaches the '
+        'shell — this pack names no decisions binary', () async {
+      final never = _CannedShellRunner(output: '{}');
+      for (final invocation in [null, '', '   ']) {
+        final records = await commandDecisionIndexSource(
+          never,
+          runnerInvocation: invocation,
+        )('/w', ['power_station/lib/a.dart', 'power_station/lib/a.dart']);
+        expect(never.commands, isEmpty, reason: 'no shell call is made at all');
+        expect(records, hasLength(1), reason: 'one record per DEDUP surface');
+        expect(records.single.state, EvidenceState.unavailable);
+        expect(records.single.surface, 'power_station/lib/a.dart');
+        expect(
+          records.single.command,
+          isEmpty,
+          reason:
+              'a command this pack never ran is never stamped as provenance',
+        );
+        expect(records.single.error, contains('no composing station runner'));
+      }
+      // The unwired-SOURCE arm records the same shape, with its own reason —
+      // and likewise invents no command.
+      final unwired = await gatherDecisions(null, '/w', [
+        'power_station/lib/a.dart',
+      ]);
+      expect(unwired.single.state, EvidenceState.unavailable);
+      expect(unwired.single.command, isEmpty);
+      expect(unwired.single.error, contains('no decision-index source'));
     });
 
     test('the history source batches ONE log; an empty log is COMPLETE and an '
@@ -1161,9 +1204,10 @@ void main() {
         kMaxHistoryCommits + 1,
         (i) => 'sha$i\t2026-09-0${i % 9}T00:00:00Z\tsubject $i',
       ).join('\n');
-      final capped = await gitHistorySource(
-        _CannedLogRunner(output: many),
-      )('/w', ['lib/a.dart']);
+      final capped = await gitHistorySource(_CannedLogRunner(output: many))(
+        '/w',
+        ['lib/a.dart'],
+      );
       expect(capped.commits, hasLength(kMaxHistoryCommits));
       expect(capped.state, EvidenceState.truncated);
 
@@ -1180,52 +1224,53 @@ void main() {
       expect(crashed.error, contains('bad revision'));
     });
 
-    test('the gather stamps the round and the work bead onto its artifact',
-        () async {
-      final dir = Directory.systemTemp.createTempSync('anchors-round');
-      addTearDown(() => dir.deleteSync(recursive: true));
-      final outcome = await AnchorsCapability(
-        rubricIds: const ['coherence'],
-        rubrics: (id) => '($id bands)',
-        resolver: (_, paths) => [
-          for (final path in paths) unresolvedAnchor(path, source: '/w'),
-        ],
-        priorArt: (queries) async => [
-          for (final query in queries)
-            PriorArtQueryEvidence(
-              id: 'prior-art-query:$query@sha256:fake',
-              query: query,
-              state: EvidenceState.complete,
-            ),
-        ],
-        decisions: (_, surfaces) async => const [],
-        history: (_, __) async => completeHistory(),
-      ).run(
-        FakeTreeContext(
-          values: {
-            Bead: bead('tg-1').copyWith(
-              description: 'Extend `buildSpecifyBrief` in `lib/src/x.dart`.',
-            ),
-            Workspace: testWorkspace('tg-1', workspaceDir: dir.path),
-          },
-        ),
-        stepArgs(
-          'tg-1/spec_review/discovery/$kAnchorsStep',
-          params: const {'grid.round': '3'},
-        ),
-      );
-      expect(outcome, isA<Ok>());
-      expect((outcome as Ok).payload![kVerdictRoundKey], '3');
-      final written = readDiscoveryAnchors(dir.path)!;
-      expect(written.round, 3);
-      expect(written.workBeadId, 'tg-1');
-      expect(written.anchors.single.anchor, 'lib/src/x.dart');
-      expect(written.evidenceIds, isNotEmpty);
-      expect(
-        (outcome).payload!['evidence'],
-        '${written.evidenceIds.length}',
-      );
-    });
+    test(
+      'the gather stamps the round and the work bead onto its artifact',
+      () async {
+        final dir = Directory.systemTemp.createTempSync('anchors-round');
+        addTearDown(() => dir.deleteSync(recursive: true));
+        final outcome =
+            await AnchorsCapability(
+              rubricIds: const ['coherence'],
+              rubrics: (id) => '($id bands)',
+              resolver: (_, paths) => [
+                for (final path in paths) unresolvedAnchor(path, source: '/w'),
+              ],
+              priorArt: (queries) async => [
+                for (final query in queries)
+                  PriorArtQueryEvidence(
+                    id: 'prior-art-query:$query@sha256:fake',
+                    query: query,
+                    state: EvidenceState.complete,
+                  ),
+              ],
+              decisions: (_, surfaces) async => const [],
+              history: (_, __) async => completeHistory(),
+            ).run(
+              FakeTreeContext(
+                values: {
+                  Bead: bead('tg-1').copyWith(
+                    description:
+                        'Extend `buildSpecifyBrief` in `lib/src/x.dart`.',
+                  ),
+                  Workspace: testWorkspace('tg-1', workspaceDir: dir.path),
+                },
+              ),
+              stepArgs(
+                'tg-1/spec_review/discovery/$kAnchorsStep',
+                params: const {'grid.round': '3'},
+              ),
+            );
+        expect(outcome, isA<Ok>());
+        expect((outcome as Ok).payload![kVerdictRoundKey], '3');
+        final written = readDiscoveryAnchors(dir.path)!;
+        expect(written.round, 3);
+        expect(written.workBeadId, 'tg-1');
+        expect(written.anchors.single.anchor, 'lib/src/x.dart');
+        expect(written.evidenceIds, isNotEmpty);
+        expect((outcome).payload!['evidence'], '${written.evidenceIds.length}');
+      },
+    );
   });
 
   group('capability-specific projection', () {
@@ -1271,11 +1316,7 @@ void main() {
         for (final id in projection.evidenceIds) {
           expect(prompt, contains(id));
         }
-        for (final command in [
-          'space decisions index',
-          'git log',
-          'grep -',
-        ]) {
+        for (final command in ['space decisions index', 'git log', 'grep -']) {
           expect(prompt, isNot(contains(command)));
         }
       }
@@ -1312,13 +1353,8 @@ void main() {
       );
     });
 
-    test('every non-complete state becomes a gap carrying its recorded reason',
-        () {
-      for (final state in [
-        EvidenceState.truncated,
-        EvidenceState.unavailable,
-        EvidenceState.failed,
-      ]) {
+    test('a BROKEN state becomes a gap carrying its recorded reason', () {
+      for (final state in [EvidenceState.truncated, EvidenceState.failed]) {
         final base = _completeAnchors();
         final holed = DiscoveryAnchors(
           round: base.round,
@@ -1339,15 +1375,62 @@ void main() {
         );
         final prior = _project(holed, kPriorArtLens);
         expect(prior.isSufficient, isFalse);
-        expect(
-          prior.gaps.single.evidenceId,
-          base.priorArtQueries.single.id,
-        );
+        expect(prior.gaps.single.evidenceId, base.priorArtQueries.single.id);
         expect(prior.gaps.single.reason, contains('the store never answered'));
         // The SAME hole is invisible to the lanes that were not handed it.
         expect(_project(holed, kCodeLens).isSufficient, isTrue);
         expect(_project(holed, kDecisionLens).isSufficient, isTrue);
       }
+    });
+
+    test('unavailable is explicit context and never a deterministic gap', () {
+      final base = _completeAnchors();
+      final projection = _project(
+        DiscoveryAnchors(
+          round: base.round,
+          workBeadId: base.workBeadId,
+          beadFields: base.beadFields,
+          decisionLookups: [
+            DecisionSurfaceEvidence(
+              id: base.decisionLookups.single.id,
+              surface: 'power_station/lib/a.dart',
+              command: '',
+              state: EvidenceState.unavailable,
+              error: 'no composing station runner is configured',
+            ),
+          ],
+          history: base.history,
+        ),
+        kDecisionLens,
+      );
+      // A source NOBODY COMPOSED is A21(5)'s "nobody looked" line: the lens is
+      // told, and narrates around it. It never overrides the lens's report.
+      expect(projection.isSufficient, isTrue);
+      expect(projection.evidenceIds, contains(base.decisionLookups.single.id));
+      expect(projection.renderedEvidence, contains('UNAVAILABLE'));
+      expect(
+        projection.renderedEvidence,
+        contains('no composing station runner'),
+      );
+      // The prior-art lane's own optional source behaves identically.
+      final noPriorArt = _project(
+        DiscoveryAnchors(
+          round: base.round,
+          workBeadId: base.workBeadId,
+          beadFields: base.beadFields,
+          priorArtQueries: [
+            PriorArtQueryEvidence(
+              id: base.priorArtQueries.single.id,
+              query: 'AnchorsCapability',
+              state: EvidenceState.unavailable,
+            ),
+          ],
+          history: base.history,
+        ),
+        kPriorArtLens,
+      );
+      expect(noPriorArt.isSufficient, isTrue);
+      expect(noPriorArt.renderedEvidence, contains('UNAVAILABLE'));
     });
 
     test('a clipped extraction is named, so a short list is never silent', () {
@@ -1438,41 +1521,43 @@ void main() {
       }
     });
 
-    test('an UNAVAILABLE or FAILED query never prints as "searched, no hits"',
-        () {
-      const unavailable = DiscoveryDossier(
-        anchors: DiscoveryAnchors(
-          priorArtQueries: [
-            PriorArtQueryEvidence(
-              id: 'prior-art-query:q@sha256:fake',
-              query: 'q',
-              state: EvidenceState.unavailable,
-              error: 'no prior-art source is composed',
-            ),
-          ],
-        ),
-      );
-      final rendered = renderDiscoveryDossier(unavailable);
-      expect(rendered, contains('nobody looked'));
-      expect(rendered, isNot(contains('searched, no hits')));
+    test(
+      'an UNAVAILABLE or FAILED query never prints as "searched, no hits"',
+      () {
+        const unavailable = DiscoveryDossier(
+          anchors: DiscoveryAnchors(
+            priorArtQueries: [
+              PriorArtQueryEvidence(
+                id: 'prior-art-query:q@sha256:fake',
+                query: 'q',
+                state: EvidenceState.unavailable,
+                error: 'no prior-art source is composed',
+              ),
+            ],
+          ),
+        );
+        final rendered = renderDiscoveryDossier(unavailable);
+        expect(rendered, contains('nobody looked'));
+        expect(rendered, isNot(contains('searched, no hits')));
 
-      const failed = DiscoveryDossier(
-        anchors: DiscoveryAnchors(
-          priorArtQueries: [
-            PriorArtQueryEvidence(
-              id: 'prior-art-query:q@sha256:fake',
-              query: 'q',
-              state: EvidenceState.failed,
-              error: 'absent alpha: no work store',
-            ),
-          ],
-        ),
-      );
-      final failedText = renderDiscoveryDossier(failed);
-      expect(failedText, contains('the search FAILED'));
-      expect(failedText, contains('absent alpha'));
-      expect(failedText, isNot(contains('searched, no hits')));
-    });
+        const failed = DiscoveryDossier(
+          anchors: DiscoveryAnchors(
+            priorArtQueries: [
+              PriorArtQueryEvidence(
+                id: 'prior-art-query:q@sha256:fake',
+                query: 'q',
+                state: EvidenceState.failed,
+                error: 'absent alpha: no work store',
+              ),
+            ],
+          ),
+        );
+        final failedText = renderDiscoveryDossier(failed);
+        expect(failedText, contains('the search FAILED'));
+        expect(failedText, contains('absent alpha'));
+        expect(failedText, isNot(contains('searched, no hits')));
+      },
+    );
   });
 }
 

@@ -121,12 +121,15 @@ class PackagedAssetLoader {
   /// EVIDENCE, not a bead: the deterministic gather already resolved the bead's
   /// fields along with everything else, so the portable mirror carries the same
   /// projection-only contract the in-pipeline lens does.
-  String renderDiscoveryPrompt(String lens, String lensBrief, String evidence) =>
-      _mustache(loadPromptTemplate('discovery'), {
-        'lens': lens,
-        'lensBrief': lensBrief,
-        'evidence': evidence,
-      });
+  String renderDiscoveryPrompt(
+    String lens,
+    String lensBrief,
+    String evidence,
+  ) => _mustache(loadPromptTemplate('discovery'), {
+    'lens': lens,
+    'lensBrief': lensBrief,
+    'evidence': evidence,
+  });
 
   /// The mustache-templated SKILL.md body for [skillId]
   /// (`extension/station_overlay/claude/skills/<skillId>/SKILL.md` — the

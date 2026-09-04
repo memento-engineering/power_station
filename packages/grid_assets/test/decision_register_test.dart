@@ -23,10 +23,14 @@ void main() {
       );
     });
 
-    test('the composing station\'s runner is substitutable', () {
+    test('the composing station\'s runner is substitutable — a MULTI-TOKEN '
+        'downstream invocation renders verbatim', () {
       expect(
-        rosterDecisionIndexCommand(surface: 'x/y.dart', runner: 'lunar'),
-        'lunar decisions index --surface x/y.dart',
+        rosterDecisionIndexCommand(
+          surface: 'x/y.dart',
+          runner: 'dart run lunar:lunar',
+        ),
+        'dart run lunar:lunar decisions index --surface x/y.dart',
       );
     });
 
@@ -104,7 +108,8 @@ Read `lib/elsewhere.dart` first.
   group('rosterQualifiedPaths is the ONE qualifier both lookups share', () {
     test('the PRE-specify gather and the POST-specify spec qualify a path '
         'identically — same order, same dedupe, same prefix', () {
-      const design = '## Touches\n'
+      const design =
+          '## Touches\n'
           '- `lib/a.dart` — modified; `lib/a.dart:Alpha`\n'
           '- `lib/b.dart` — created\n'
           '- `lib/a.dart` — the duplicate collapses\n';

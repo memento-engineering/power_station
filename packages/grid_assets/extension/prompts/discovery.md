@@ -17,8 +17,10 @@ NOT been built. Your job is TWO things, and nothing else:
 
 Use only this projection. Do not inspect the tree, run decision-index or
 prior-art searches, or read git history. If a required record is marked
-TRUNCATED, UNAVAILABLE, or FAILED, emit the typed insufficient-evidence result;
-do not compensate with tools.
+TRUNCATED or FAILED, emit the typed insufficient-evidence result; do not
+compensate with tools. UNAVAILABLE means the optional source was absent — name
+that limitation and synthesize the evidence you do have; absence is not
+insufficiency.
 
 ## What counts as an OFFENCE (the gate is CITE-THE-OFFENCE)
 Cite each decision by its canonical `<repo>#<slug>` identity, for example
@@ -94,8 +96,8 @@ Both arrays may be EMPTY — a clean bead with no findings is a real, expected
 result. NEVER invent a violation to look useful: a false hold stalls the work, and
 this gate exists to be trusted.
 
-The INSUFFICIENT-EVIDENCE report, when a record you NEEDED is marked TRUNCATED,
-UNAVAILABLE or FAILED. Name it by its canonical id and repeat its recorded
+The INSUFFICIENT-EVIDENCE report is only for a record you NEEDED that is marked
+TRUNCATED or FAILED. Name it by its canonical id and repeat its recorded
 reason:
 
 ```json

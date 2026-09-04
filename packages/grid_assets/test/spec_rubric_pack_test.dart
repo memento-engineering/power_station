@@ -275,7 +275,8 @@ void main() {
           completeGather(
             bead: bead('tg-1').copyWith(
               title: 'Wire the federation bus',
-              description: 'DECIDED: extend the existing bus; no new transport.',
+              description:
+                  'DECIDED: extend the existing bus; no new transport.',
             ),
             round: 0,
           ),
@@ -333,6 +334,28 @@ void main() {
         for (final prompt in [packaged, runtime]) {
           expect(prompt, contains('Canonical evidence projection'));
           expect(prompt, contains('insufficient-evidence'));
+          // Both mirrors carry the SAME state split: only a source that was
+          // PRESENT and broke selects the typed result; an ABSENT one is
+          // narrated. The old three-state instruction is gone from both.
+          expect(prompt, contains('TRUNCATED or FAILED'), reason: lens);
+          expect(
+            prompt,
+            anyOf(
+              contains('UNAVAILABLE means the optional'),
+              contains('`UNAVAILABLE` means the optional'),
+            ),
+            reason: lens,
+          );
+          expect(
+            prompt,
+            isNot(contains('TRUNCATED, UNAVAILABLE or FAILED')),
+            reason: lens,
+          );
+          expect(
+            prompt,
+            isNot(contains('TRUNCATED, UNAVAILABLE, or FAILED')),
+            reason: lens,
+          );
           for (final id in projection.evidenceIds) {
             expect(prompt, contains(id), reason: lens);
           }

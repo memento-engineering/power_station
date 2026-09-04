@@ -164,6 +164,14 @@ const int kMaxHistoryCommits = 12;
 /// ([truncated]), an unwired source ([unavailable]) and a crashed one
 /// ([failed]) are known NON-answers. A lens is handed the state, never a bare
 /// snippet, so it can never read "nobody looked" as "nothing is there".
+///
+/// Three of those states are the lens's CONTEXT; only two are a deterministic
+/// GAP (`_isDeterministicEvidenceGap`). [truncated] and [failed] override the
+/// lens's report with an [InsufficientEvidenceReport] and spend the one-round
+/// regather budget, because the gather promised a record and then broke it.
+/// [unavailable] does NOT: the optional source was simply never composed, so
+/// the lens narrates the limitation and its report stands, exactly as it did
+/// before the canonical profile existed.
 enum EvidenceState {
   /// The lookup ran and its whole result is carried (an empty result included).
   complete,
@@ -272,7 +280,8 @@ BoundedEvidence boundDiscoveryEvidence({
   final digest = sha256.convert(utf8.encode(fullText)).toString();
   final wasTruncated = fullText.length > kMaxDiscoverySnippetChars;
   final resolvedState =
-      state ?? (wasTruncated ? EvidenceState.truncated : EvidenceState.complete);
+      state ??
+      (wasTruncated ? EvidenceState.truncated : EvidenceState.complete);
   return BoundedEvidence(
     id: '$kind:${Uri.encodeComponent(subject)}@sha256:$digest',
     source: source,
@@ -1344,8 +1353,9 @@ class DiscoveryAnchors {
   /// Whether every prior-art query actually reached a source — an unwired pull
   /// is reported LOUDLY in the dossier, never mistaken for "no prior art
   /// exists".
-  bool get priorArtWired =>
-      priorArtQueries.every((query) => query.state != EvidenceState.unavailable);
+  bool get priorArtWired => priorArtQueries.every(
+    (query) => query.state != EvidenceState.unavailable,
+  );
 
   /// Every canonical evidence identity this gather carries — the profile the
   /// dossier cites and a downstream consumer verifies against.
@@ -1394,7 +1404,10 @@ class DiscoveryAnchors {
     final workBeadId = (json['workBeadId'] as String?)?.trim() ?? '';
     if (round is! int || round < 0 || workBeadId.isEmpty) return null;
 
-    final beadFields = _decodeAll(json['beadFields'], BeadFieldEvidence.fromJson);
+    final beadFields = _decodeAll(
+      json['beadFields'],
+      BeadFieldEvidence.fromJson,
+    );
     final rubricEvidence = _decodeAll(
       json['rubricEvidence'],
       RubricEvidence.fromJson,
@@ -1489,10 +1502,7 @@ class EvidenceGap {
   final String reason;
 
   /// The wire shape.
-  Map<String, Object?> toJson() => {
-    'evidenceId': evidenceId,
-    'reason': reason,
-  };
+  Map<String, Object?> toJson() => {'evidenceId': evidenceId, 'reason': reason};
 
   /// Decodes one gap; an id-less or reason-less entry yields null.
   static EvidenceGap? fromJson(Object? json) {
@@ -1549,9 +1559,15 @@ class DiscoveryEvidenceProjection {
 /// The artifact's [DiscoveryAnchors.round] and [DiscoveryAnchors.workBeadId] are
 /// checked FIRST: a bundle from another round or another bead is not this lens's
 /// evidence at all. Then the lens's slice is selected and rendered, and any
-/// record that is not [EvidenceState.complete] — plus an extraction truncation
-/// marker or an absent history — becomes an [EvidenceGap] carrying the
-/// canonical id and the RECORDED reason.
+/// record that is a DETERMINISTIC GAP — [EvidenceState.truncated] or
+/// [EvidenceState.failed], per `_isDeterministicEvidenceGap` — plus an
+/// extraction truncation marker or an absent history, becomes an [EvidenceGap]
+/// carrying the canonical id and the RECORDED reason.
+///
+/// An [EvidenceState.unavailable] record is RENDERED like every other and
+/// contributes its evidence id, but it is NOT a gap: an uncomposed optional
+/// source is context the lens narrates around, never an insufficiency that
+/// overrides it.
 ///
 /// The slices are ISOLATED by construction: no rubric prose enters a lens; no
 /// decision/history/prior-art record enters the code lane; no code snippet,
@@ -1591,7 +1607,7 @@ DiscoveryEvidenceProjection projectDiscoveryEvidence(
   void take(String label, BoundedEvidence evidence) {
     ids.add(evidence.id);
     _renderEvidence(b, label, evidence);
-    if (evidence.state != EvidenceState.complete) {
+    if (_isDeterministicEvidenceGap(evidence.state)) {
       gaps.add(
         EvidenceGap(
           evidenceId: evidence.id,
@@ -1692,7 +1708,7 @@ DiscoveryEvidenceProjection projectDiscoveryEvidence(
         }
         b.writeln();
         ids.add(lookup.id);
-        if (lookup.state != EvidenceState.complete) {
+        if (_isDeterministicEvidenceGap(lookup.state)) {
           gaps.add(
             EvidenceGap(
               evidenceId: lookup.id,
@@ -1736,7 +1752,7 @@ DiscoveryEvidenceProjection projectDiscoveryEvidence(
         }
         b.writeln();
         ids.add(query.id);
-        if (query.state != EvidenceState.complete) {
+        if (_isDeterministicEvidenceGap(query.state)) {
           gaps.add(
             EvidenceGap(
               evidenceId: query.id,
@@ -1768,7 +1784,8 @@ DiscoveryEvidenceProjection projectDiscoveryEvidence(
           ..writeln('- state: ${history.state.name.toUpperCase()}')
           ..writeln('- id: `${history.id}`');
         if (history.error.isNotEmpty) b.writeln('- error: ${history.error}');
-        if (history.commits.isEmpty && history.state == EvidenceState.complete) {
+        if (history.commits.isEmpty &&
+            history.state == EvidenceState.complete) {
           b.writeln('- these surfaces have NO history — a real result.');
         }
         for (final commit in history.commits) {
@@ -1777,7 +1794,7 @@ DiscoveryEvidenceProjection projectDiscoveryEvidence(
         }
         b.writeln();
         ids.add(history.id);
-        if (history.state != EvidenceState.complete) {
+        if (_isDeterministicEvidenceGap(history.state)) {
           gaps.add(
             EvidenceGap(
               evidenceId: history.id,
@@ -1845,9 +1862,29 @@ String _stateReason(EvidenceState state, String error) => switch (state) {
   EvidenceState.truncated =>
     error.isEmpty ? 'TRUNCATED — the record was clipped at its bound' : error,
   EvidenceState.unavailable =>
-    error.isEmpty ? 'UNAVAILABLE — no source was wired, so nobody looked' : error,
+    error.isEmpty
+        ? 'UNAVAILABLE — no source was wired, so nobody looked'
+        : error,
   EvidenceState.failed =>
     error.isEmpty ? 'FAILED — the lookup crashed' : 'FAILED — $error',
+};
+
+/// Whether [state] is a DETERMINISTIC GAP — a record the gather PROMISED and
+/// then could not deliver, which therefore overrides a lens's report and spends
+/// the one-round regather budget.
+///
+/// Only a source that was PRESENT and then broke qualifies. [EvidenceState
+/// .unavailable] means the optional source was never composed — nobody looked —
+/// and that is A21(5)'s posture exactly ("a station that composed no
+/// `PriorArtSource` gets a dossier line that says NOBODY LOOKED"): it stays
+/// VISIBLE in the projection so the lens can narrate the limitation, but it
+/// never overrides the lens and never escalates. Absence is not a broken
+/// promise; a crash is.
+bool _isDeterministicEvidenceGap(EvidenceState state) => switch (state) {
+  EvidenceState.complete => false,
+  EvidenceState.unavailable => false,
+  EvidenceState.truncated => true,
+  EvidenceState.failed => true,
 };
 
 /// The CURATED context the route hands to the architect — the deterministic
@@ -2015,9 +2052,14 @@ final class DiscoveryHold extends DiscoveryVerdict {
 /// This is the one distinction A21(3) does NOT already cover. An ABSENT lens
 /// remains MISSING and eventually ADVANCES (the gate never fires on absence,
 /// and a false HOLD is strictly worse than a wasted round). But a lane that
-/// says, in a typed report, that required evidence was TRUNCATED, UNAVAILABLE
-/// or FAILED has answered — with a non-answer. Advancing on that would hand the
-/// architect a dossier whose incompleteness nobody ever saw.
+/// says, in a typed report, that required evidence was TRUNCATED or FAILED has
+/// answered — with a non-answer. Advancing on that would hand the architect a
+/// dossier whose incompleteness nobody ever saw.
+///
+/// [EvidenceState.unavailable] is on the OTHER side of that line, with absence:
+/// an optional source nobody composed is A21(5)'s "NOBODY LOOKED" line, not a
+/// broken promise. It never reaches here — the lens narrates without it, its
+/// report stands, and no regather budget is spent.
 final class DiscoveryEvidenceHold extends DiscoveryVerdict {
   /// Creates the hold over each lens's named [gaps].
   const DiscoveryEvidenceHold({required this.gaps, required this.reason});
@@ -2643,7 +2685,38 @@ List<ResolvedAnchor> resolveAnchorsOnDisk(
   List<String> anchors,
 ) => [for (final anchor in anchors) resolveAnchorOnDisk(workspaceDir, anchor)];
 
-/// The real [DecisionIndexSource]: the composing station's ROSTER-MODE
+/// One flat record per deduplicated surface for the two arms that never REACH
+/// a shell: no source composed, and no runner invocation configured.
+///
+/// The `command` is deliberately EMPTY. Rendering
+/// [rosterDecisionIndexCommand]'s default here would stamp a runner verb this
+/// pack never ran as the record's provenance — the exact "we looked with
+/// `space`" claim that is false on every station whose verb is not `space`.
+List<DecisionSurfaceEvidence> _decisionSourceRecords(
+  List<String> surfaces, {
+  required EvidenceState state,
+  required String error,
+}) {
+  final seen = <String>{};
+  return [
+    for (final surface in surfaces)
+      if (seen.add(surface))
+        DecisionSurfaceEvidence(
+          id: boundDiscoveryEvidence(
+            kind: 'decision-surface',
+            subject: surface,
+            source: 'decision-index',
+            fullText: '',
+          ).id,
+          surface: surface,
+          command: '',
+          state: state,
+          error: error,
+        ),
+  ];
+}
+
+/// The SHELL fallback [DecisionIndexSource]: the composing station's ROSTER-MODE
 /// `decisions index --surface <repo>/<path>` verb, run through the pack's
 /// existing [ShellRunner] seam once per deduplicated surface inside ONE batch
 /// call.
@@ -2656,52 +2729,86 @@ List<ResolvedAnchor> resolveAnchorsOnDisk(
 /// ([EvidenceState.complete]); a non-zero exit, malformed JSON, a missing or
 /// duplicate slug file, or an unreadable entry is [EvidenceState.failed] with
 /// the output/exception preserved — a crashed lookup is never graded clean.
-DecisionIndexSource commandDecisionIndexSource(ShellRunner runner) =>
-    (workspaceDir, surfaces) async {
-      final out = <DecisionSurfaceEvidence>[];
-      final seen = <String>{};
-      for (final surface in surfaces) {
-        if (!seen.add(surface)) continue;
-        final command = rosterDecisionIndexCommand(surface: surface);
-        try {
-          final result = await runner.run(
-            workingDirectory: workspaceDir,
-            command: command,
-          );
-          if (!result.ok) {
-            out.add(
-              _decisionSurface(
-                surface: surface,
-                command: command,
-                entries: const [],
-                error:
-                    'exit ${result.exitCode}: '
-                    '${result.output.trim()}',
-              ),
-            );
-            continue;
-          }
-          out.add(
-            _decisionLookup(
-              workspaceDir: workspaceDir,
-              surface: surface,
-              command: command,
-              output: result.output,
-            ),
-          );
-        } catch (e) {
+///
+/// [runnerInvocation] is the composing station's OWN invocation, threaded from
+/// `buildCodeRegistry(overlayArgs:)['runner']`. Blank or absent ⇒ NO shell call
+/// is made at all and every surface is recorded [EvidenceState.unavailable]:
+/// nobody looked, which is explicit context and NOT a deterministic gap.
+///
+/// **This deliberately departs from A23(4)** (`decisions#a23-bead-pow-kzx-the-
+/// station-overlay-delivery-lib-renders-an`), which binds the overlay's
+/// `runner` arg in-store from `kDefaultOverlayRunner` (`'space'`) with
+/// `buildCodeRegistry(overlayArgs:)` overriding, precisely so an unconfigured
+/// station still gets a WORKING vended skill. That default is right where A23
+/// put it and is untouched: it RENDERS prose into a materialized skill, where a
+/// wrong verb is legible to its reader. This is the other kind of use — the
+/// pack EXECUTING the verb itself and grading the result as evidence — where
+/// the same default is a hazard, not a convenience: on a station whose verb is
+/// `dart run lunar:lunar`, `space` is exit 127, and under this circuit's gate a
+/// crashed lookup would hold every bead naming a roster-qualified surface. So
+/// the executing path takes NO default: it runs only what the station composed,
+/// and records honest absence otherwise.
+DecisionIndexSource commandDecisionIndexSource(
+  ShellRunner runner, {
+  String? runnerInvocation,
+}) {
+  final stationRunner = runnerInvocation?.trim() ?? '';
+  return (workspaceDir, surfaces) async {
+    if (stationRunner.isEmpty) {
+      return _decisionSourceRecords(
+        surfaces,
+        state: EvidenceState.unavailable,
+        error: 'no composing station runner is configured',
+      );
+    }
+    final out = <DecisionSurfaceEvidence>[];
+    final seen = <String>{};
+    for (final surface in surfaces) {
+      if (!seen.add(surface)) continue;
+      final command = rosterDecisionIndexCommand(
+        surface: surface,
+        runner: stationRunner,
+      );
+      try {
+        final result = await runner.run(
+          workingDirectory: workspaceDir,
+          command: command,
+        );
+        if (!result.ok) {
           out.add(
             _decisionSurface(
               surface: surface,
               command: command,
               entries: const [],
-              error: '$e',
+              error:
+                  'exit ${result.exitCode}: '
+                  '${result.output.trim()}',
             ),
           );
+          continue;
         }
+        out.add(
+          _decisionLookup(
+            workspaceDir: workspaceDir,
+            surface: surface,
+            command: command,
+            output: result.output,
+          ),
+        );
+      } catch (e) {
+        out.add(
+          _decisionSurface(
+            surface: surface,
+            command: command,
+            entries: const [],
+            error: '$e',
+          ),
+        );
       }
-      return out;
-    };
+    }
+    return out;
+  };
+}
 
 /// Parses ONE `decisions index` run and resolves every returned slug on disk.
 DecisionSurfaceEvidence _decisionLookup({
@@ -2763,7 +2870,9 @@ DecisionSurfaceEvidence _decisionLookup({
     final String body;
     try {
       final dir = Directory(
-        p.isAbsolute(originPath) ? originPath : p.join(workspaceDir, originPath),
+        p.isAbsolute(originPath)
+            ? originPath
+            : p.join(workspaceDir, originPath),
       );
       final slugLine = RegExp(
         '^\\s*slug:\\s*${RegExp.escape(slug)}\\s*\$',
@@ -2858,73 +2967,74 @@ DecisionSurfaceEvidence _decisionSurface({
 /// A non-zero git, or a record that does not split into SHA / ISO timestamp /
 /// subject, is [EvidenceState.failed]; an EMPTY successful log is
 /// [EvidenceState.complete] (a surface with no history is a real answer).
-HistorySource gitHistorySource(GitRunner runner) => (workspaceDir, paths) async {
-  final args = [
-    'log',
-    '--max-count=${kMaxHistoryCommits + 1}',
-    '--format=%H%x09%aI%x09%s',
-    '--',
-    ...paths,
-  ];
-  final command = 'git ${args.join(' ')}';
-  try {
-    final result = await runner.run(
-      workingDirectory: workspaceDir,
-      args: args,
-    );
-    if (!result.ok) {
-      return _history(
-        paths: paths,
-        command: command,
-        commits: const [],
-        error: 'exit ${result.exitCode}: ${result.output.trim()}',
-      );
-    }
-    final records = result.output
-        .split('\n')
-        .map((line) => line.trim())
-        .where((line) => line.isNotEmpty)
-        .toList();
-    final commits = <HistoryCommitEvidence>[];
-    for (final record in records.take(kMaxHistoryCommits)) {
-      final parts = record.split('\t');
-      if (parts.length != 3) {
+HistorySource gitHistorySource(GitRunner runner) =>
+    (workspaceDir, paths) async {
+      final args = [
+        'log',
+        '--max-count=${kMaxHistoryCommits + 1}',
+        '--format=%H%x09%aI%x09%s',
+        '--',
+        ...paths,
+      ];
+      final command = 'git ${args.join(' ')}';
+      try {
+        final result = await runner.run(
+          workingDirectory: workspaceDir,
+          args: args,
+        );
+        if (!result.ok) {
+          return _history(
+            paths: paths,
+            command: command,
+            commits: const [],
+            error: 'exit ${result.exitCode}: ${result.output.trim()}',
+          );
+        }
+        final records = result.output
+            .split('\n')
+            .map((line) => line.trim())
+            .where((line) => line.isNotEmpty)
+            .toList();
+        final commits = <HistoryCommitEvidence>[];
+        for (final record in records.take(kMaxHistoryCommits)) {
+          final parts = record.split('\t');
+          if (parts.length != 3) {
+            return _history(
+              paths: paths,
+              command: command,
+              commits: const [],
+              error: 'unparseable log record: $record',
+            );
+          }
+          commits.add(
+            HistoryCommitEvidence(
+              id: boundDiscoveryEvidence(
+                kind: 'history-commit',
+                subject: parts[0],
+                source: command,
+                fullText: record,
+              ).id,
+              sha: parts[0],
+              authoredAt: parts[1],
+              subject: parts[2],
+            ),
+          );
+        }
+        return _history(
+          paths: paths,
+          command: command,
+          commits: commits,
+          truncated: records.length > kMaxHistoryCommits,
+        );
+      } catch (e) {
         return _history(
           paths: paths,
           command: command,
           commits: const [],
-          error: 'unparseable log record: $record',
+          error: '$e',
         );
       }
-      commits.add(
-        HistoryCommitEvidence(
-          id: boundDiscoveryEvidence(
-            kind: 'history-commit',
-            subject: parts[0],
-            source: command,
-            fullText: record,
-          ).id,
-          sha: parts[0],
-          authoredAt: parts[1],
-          subject: parts[2],
-        ),
-      );
-    }
-    return _history(
-      paths: paths,
-      command: command,
-      commits: commits,
-      truncated: records.length > kMaxHistoryCommits,
-    );
-  } catch (e) {
-    return _history(
-      paths: paths,
-      command: command,
-      commits: const [],
-      error: '$e',
-    );
-  }
-};
+    };
 
 /// Assembles the round's history record — the shared shape every arm of
 /// [gitHistorySource] lands on.
@@ -2985,33 +3095,30 @@ Future<List<PriorArtQueryEvidence>> gatherPriorArt(
 /// Every roster-qualified surface's decision lookup, gathered through [source]
 /// — or an explicit [EvidenceState.unavailable]/[EvidenceState.failed] record
 /// per surface when no source is wired / the batch threw.
+///
+/// The two arms are NOT the same answer. An absent source is nobody LOOKING;
+/// a composed source that threw is a lookup that BROKE. Neither invents a
+/// command string it never ran (see [_decisionSourceRecords]).
 Future<List<DecisionSurfaceEvidence>> gatherDecisions(
   DecisionIndexSource? source,
   String workspaceDir,
   List<String> surfaces,
 ) async {
-  List<DecisionSurfaceEvidence> flat(EvidenceState state, String error) => [
-    for (final surface in surfaces)
-      DecisionSurfaceEvidence(
-        id: boundDiscoveryEvidence(
-          kind: 'decision-surface',
-          subject: surface,
-          source: rosterDecisionIndexCommand(surface: surface),
-          fullText: '',
-        ).id,
-        surface: surface,
-        command: rosterDecisionIndexCommand(surface: surface),
-        state: state,
-        error: error,
-      ),
-  ];
   if (source == null) {
-    return flat(EvidenceState.unavailable, 'no decision-index source is composed');
+    return _decisionSourceRecords(
+      surfaces,
+      state: EvidenceState.unavailable,
+      error: 'no decision-index source is composed',
+    );
   }
   try {
     return await source(workspaceDir, surfaces);
   } catch (e) {
-    return flat(EvidenceState.failed, '$e');
+    return _decisionSourceRecords(
+      surfaces,
+      state: EvidenceState.failed,
+      error: '$e',
+    );
   }
 }
 
@@ -3040,12 +3147,7 @@ Future<HistoryEvidence> gatherHistory(
   try {
     return await source(workspaceDir, paths);
   } catch (e) {
-    return _history(
-      paths: paths,
-      command: '',
-      commits: const [],
-      error: '$e',
-    );
+    return _history(paths: paths, command: '', commits: const [], error: '$e');
   }
 }
 
@@ -3422,7 +3524,9 @@ class AnchorsCapability extends ServiceCapability {
       'decisions': '${decisions.length}',
       'history': '${history.commits.length}',
       'evidence': '${anchors.evidenceIds.length}',
-      'priorArt': _priorArt == null ? 'not-wired' : '${anchors.priorArt.length}',
+      'priorArt': _priorArt == null
+          ? 'not-wired'
+          : '${anchors.priorArt.length}',
     });
   }
 }
@@ -3442,12 +3546,14 @@ const String kLensWorkingAgreement = '''
   route reads your report and makes the call.
 - Stay CHEAP: you were handed a BOUNDED evidence bundle; synthesize it. Do NOT
   read the tree, do NOT run a decision-index lookup, do NOT run a prior-art
-  search, and do NOT read git history — every one of those already ran
-  deterministically, and the result is in your prompt.
-- Use ONLY the supplied projection. If a record you needed is marked TRUNCATED,
-  UNAVAILABLE or FAILED, say so in the typed insufficient-evidence report and
-  stop. Reaching for a tool to fill that hole is the exact waste this circuit
-  removes.''';
+  search, and do NOT read git history — every one of those already ran when a
+  source was composed, and the recorded state is in your prompt.
+- Use ONLY the supplied projection. If a required record is TRUNCATED or FAILED,
+  emit the typed insufficient-evidence report and stop. Do not use a tool to
+  fill the hole.
+- UNAVAILABLE means the optional deterministic source was absent. Name that
+  limitation and synthesize the evidence you do have; do not emit an
+  insufficient-evidence report for absence.''';
 
 /// The stamp instruction every lens prompt writes after its report template —
 /// the discovery twin of [kVerdictStampInstruction]. BOTH stamps are required
@@ -3659,9 +3765,10 @@ class DiscoveryLensCapability extends ProcessCapability {
       ..write(projection.renderedEvidence)
       ..writeln(
         'Every record above carries its STATE. `COMPLETE` is a real answer, an '
-        'empty one included. `TRUNCATED`, `UNAVAILABLE` and `FAILED` are known '
-        'NON-answers: do NOT compensate for one with a tool, and do NOT treat '
-        'it as "nothing is there".',
+        'empty one included. `TRUNCATED` and `FAILED` are deterministic gaps: '
+        'do NOT compensate with a tool, and do NOT treat either as "nothing is '
+        'there". `UNAVAILABLE` means the optional source was absent: narrate '
+        'that limitation and continue with the supplied evidence.',
       )
       ..writeln()
       ..writeln('## What counts as an OFFENCE (the gate is CITE-THE-OFFENCE)')
@@ -3754,8 +3861,8 @@ class DiscoveryLensCapability extends ProcessCapability {
       )
       ..writeln()
       ..writeln(
-        'The INSUFFICIENT-EVIDENCE report, when a record you NEEDED is marked '
-        'TRUNCATED, UNAVAILABLE or FAILED. Name the record by its canonical id '
+        'The INSUFFICIENT-EVIDENCE report is only for a record you NEEDED that '
+        'is marked TRUNCATED or FAILED. Name the record by its canonical id '
         'and repeat its recorded reason — do NOT reach for a tool to fill the '
         'hole, and do NOT report clean over it:',
       )
@@ -3805,8 +3912,10 @@ String lensBrief(String lens) => switch (lens) {
         'Be QUOTED: the entry body and its `status` are in your evidence — '
         'quote them from there. A lookup marked FAILED is NOT an empty union: '
         'report insufficient evidence rather than grading a crashed index '
-        'clean. You were handed no code snippet, prior-art or history '
-        'evidence, and you must not go get any.',
+        'clean. A lookup marked UNAVAILABLE means this station composed no '
+        'decision index at all: say so plainly and synthesize the bead fields '
+        'you do have — absence is not insufficiency. You were handed no code '
+        'snippet, prior-art or history evidence, and you must not go get any.',
   kPriorArtLens =>
     'PRIOR ART. SYNTHESIZE the query hits and the surface history you were '
         'handed: what has already been done, decided, or attempted here? Each '
@@ -3816,8 +3925,9 @@ String lensBrief(String lens) => switch (lens) {
         'an offence when this bead redoes something a decision already settled. '
         'You were handed no code snippet and no decision entry, and you must '
         'not go get any.',
-  _ => 'Synthesize the evidence you were handed and report what the architect '
-      'needs.',
+  _ =>
+    'Synthesize the evidence you were handed and report what the architect '
+        'needs.',
 };
 
 /// The ONE freshness fence + decode every lens-report read path runs through —
@@ -4022,14 +4132,14 @@ class DiscoveryRouteCapability extends RouteCapability {
             MapEntry(
               lens,
               // A deterministic gap OVERRIDES whatever the model wrote: a lane
-              // cannot hide a truncation, an unwired source or a crashed
-              // lookup behind a clean-looking report.
+              // cannot hide a truncation or a crashed lookup behind a
+              // clean-looking report. An UNAVAILABLE record is not such a gap
+              // — an uncomposed optional source leaves the lens's own verdict
+              // authoritative, which is how this lane behaved before the
+              // canonical profile existed.
               switch (projections[lens]) {
                 final projection? when !projection.isSufficient =>
-                  InsufficientEvidenceReport(
-                    lens: lens,
-                    gaps: projection.gaps,
-                  ),
+                  InsufficientEvidenceReport(lens: lens, gaps: projection.gaps),
                 _ => read(dir, lens, '$parent/$lens', round: round),
               },
             ),
