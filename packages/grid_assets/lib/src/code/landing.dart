@@ -44,8 +44,10 @@
 /// verb, and M5 D-4a stripped those verbs off the interface entirely. A delivery
 /// method owns git DIRECTLY now, so the outcome shapes below ([LandPushOutcome],
 /// [LandPrOutcome], [isPrAlreadyOpen], [extractPrUrl]) survive as ITS
-/// vocabulary — force-with-lease push and reuse-an-open-PR. The stderr tail an
-/// operator reads as the FT-1 `failureReason` is assembled by
+/// vocabulary — force-with-lease push and reuse-an-open-PR (which the App
+/// identity now performs by ASKING GitHub for the branch's open PR, leaving the
+/// two `gh`-transcript readers as vocabulary for a `gh`-shaped opener). The
+/// stderr tail an operator reads as the FT-1 `failureReason` is assembled by
 /// [capturedOutputReason]'s mechanism, which moved to `captured_output.dart` so
 /// the standalone ACP bridge could share it.
 library;
@@ -339,35 +341,58 @@ class LandPushOutcome {
   final String output;
 }
 
-/// The result of a delivery method's open-or-REUSE — a [url] on a fresh open OR a
-/// reuse ([reused] true when an already-open PR was adopted), or a
-/// [failureReason] (the gh stderr) when neither.
+/// The result of a delivery method's REUSE-or-open — a [url] (with its [number]
+/// when the opener supplies one) on a reuse ([reused] true when an already-open
+/// PR was adopted) OR a fresh open, or a [failureReason] when neither.
 ///
 /// Reuse is what makes delivery IDEMPOTENT across a rework round (bead `tg-w3c`):
-/// round one's PR is still OPEN, so `gh pr create` errors "already exists" — a
-/// SUCCESS (the branch is delivered and the PR is there), not a failure that
-/// escalates a DONE, approved bead.
+/// round one's PR is still OPEN, and adopting it is a SUCCESS (the branch is
+/// delivered and the PR is there), not a failure that escalates a DONE, approved
+/// bead. The App-identity delivery ASKS GitHub for that PR before creating one,
+/// so reuse no longer depends on recognising a creation refusal after the fact.
 class LandPrOutcome {
-  const LandPrOutcome._({this.url, this.reused = false, this.failureReason});
+  const LandPrOutcome._({
+    this.url,
+    this.number,
+    this.reused = false,
+    this.failureReason,
+  });
 
-  /// A PR was freshly opened at [url].
-  factory LandPrOutcome.opened(String url) => LandPrOutcome._(url: url);
+  /// A PR was freshly opened at [url], carrying [number] when the opener
+  /// supplied one (the `gh` opener does not; the App opener always does).
+  factory LandPrOutcome.opened(String url, {int? number}) =>
+      LandPrOutcome._(url: url, number: number);
 
   /// An already-open PR for the branch was REUSED (idempotent land) at [url].
-  factory LandPrOutcome.reused(String url) =>
-      LandPrOutcome._(url: url, reused: true);
+  /// A reuse always names its [number] — it was read off the PR itself.
+  factory LandPrOutcome.reused(String url, {required int number}) =>
+      LandPrOutcome._(url: url, number: number, reused: true);
 
-  /// Neither open nor reuse — [reason] is the gh stderr delivery stamps.
+  /// Neither open nor reuse — [reason] is the opener failure delivery stamps.
   factory LandPrOutcome.failed(String reason) =>
       LandPrOutcome._(failureReason: reason);
 
   /// The opened/reused PR url; null on failure.
   final String? url;
 
+  /// The opened/reused PR number, when the opener supplied it.
+  final int? number;
+
   /// Whether an already-open PR was reused rather than freshly opened.
   final bool reused;
 
-  /// The failure reason (gh stderr); null on success.
+  /// The failure reason; null on success.
+  ///
+  /// NOT captured process output — it is derived from the opener's own HTTP
+  /// response (or its `gh` stderr). So
+  /// `power_station#captured-process-output-escalates-tail-first`, which shapes
+  /// this file's CAPTURED-LOG escalations as
+  /// `'<verb> failed (exit N)<suffix>: <tail>'` over
+  /// [planOutputWithoutPubAdvice] (first caller [RevalidateCapability.route]),
+  /// governs a different path and is untouched here. Delivery passes this
+  /// reason through [landReasonTail] alone — the posture
+  /// `power_station#app-pr-transport-encodes-utf8-and-escalates-type-first`
+  /// already set for it: type first, cause LAST, so the tail keeps the cause.
   final String? failureReason;
 
   /// Whether delivery produced a PR (opened or reused).
@@ -375,8 +400,12 @@ class LandPrOutcome {
 }
 
 /// Whether [ghOutput] is `gh pr create`'s "a pull request … already exists"
-/// refusal — the rework-round symptom (round one's PR is still open). Detected so
-/// delivery treats it as success rather than a failure that escalates a DONE bead.
+/// refusal — the rework-round symptom (round one's PR is still open).
+///
+/// A PASSIVE reading of a refusal, kept as landing vocabulary for a `gh`-shaped
+/// opener. The App-identity delivery no longer infers reuse this way: it ASKS
+/// GitHub for the branch's open PR before creating one, so a refusal that
+/// reaches it is a real refusal.
 bool isPrAlreadyOpen(String ghOutput) => ghOutput.contains('already exists');
 
 /// The PR url embedded in gh output — both a successful `gh pr create` (stdout)

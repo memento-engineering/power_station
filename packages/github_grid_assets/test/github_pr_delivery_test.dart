@@ -6,8 +6,14 @@
 // PR title/body, writes the body ledger, advances) and GitHubPrDelivery (the
 // bound DeliveryMethod — commit residue → force-with-lease push → open-or-REUSE).
 //
+// The reuse leg is driven through a fake GitHub App TRANSPORT rather than a
+// PrOpener fake, because reuse is a REST conversation (GET the branch's open
+// PR, PATCH it only when its text drifted) that a generic opener fake cannot
+// express — the argv under assertion is the HTTP one.
+//
 // Fakes only; the sole real I/O is a temp worktree (the body ledger, and the
 // describe pass's worktree-exists guard, read the real filesystem).
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:beads_dart/beads_dart.dart';
@@ -181,34 +187,145 @@ void main() {
       expect(pr.opened, isEmpty, reason: 'a refused push never opens a PR');
     });
 
-    test('a rework round left round one\'s PR OPEN: `gh pr create`\'s "already '
-        'exists" refusal is REUSED ⇒ Ok(pr_url, reused), never an escalation of '
-        'a DONE, approved bead', () async {
-      final git = RecordingGitRunner();
-      final pr = _AlreadyOpenPrOpener('https://github.com/memento/x/pull/9');
-      final outcome = await method(
-        git: git,
-        pr: pr,
-      ).deliver(_request(workspaceDir: work.path));
+    test('an existing open PR with stale text is GET then PATCH reused, '
+        'with no creation POST', () async {
+      const freshBody = '## Summary\n\nfresh manifest\n';
+      File(prBodyPath(work.path))
+        ..parent.createSync(recursive: true)
+        ..writeAsStringSync(freshBody);
+      final transport = _FakeGitHubTransport(<GitHubHttpResponse>[
+        _appTokenResponse,
+        GitHubHttpResponse(
+          statusCode: HttpStatus.ok,
+          body: jsonEncode(<Object?>[
+            <String, Object?>{
+              'html_url': 'https://github.com/memento/x/pull/9',
+              'number': 9,
+              'title': 'old title',
+              'body': 'old body',
+            },
+          ]),
+        ),
+        const GitHubHttpResponse(statusCode: HttpStatus.ok, body: '{}'),
+      ]);
+      final outcome =
+          await method(
+            git: RecordingGitRunner(),
+            pr: await _appOpener(transport),
+          ).deliver(
+            _request(
+              workspaceDir: work.path,
+              payload: const {'pr_title': 'feat(x): fresh title'},
+            ),
+          );
 
-      expect(outcome, isA<Ok>());
-      expect((outcome as Ok).payload, {
+      expect((outcome as Ok).payload, <String, String>{
         'pr_url': 'https://github.com/memento/x/pull/9',
+        'pr_number': '9',
         'reused': 'true',
+      });
+      final pulls = _pullRequests(transport);
+      expect(pulls.map((request) => request.method), <String>['GET', 'PATCH']);
+      expect(pulls.first.uri.queryParameters, <String, String>{
+        'head': 'memento:grid/tg-1',
+        'base': 'main',
+      });
+      expect(jsonDecode(pulls.last.body!), <String, Object>{
+        'title': 'feat(x): fresh title',
+        'body': freshBody,
       });
     });
 
+    test('an existing open PR with current text is reused without PATCH or '
+        'creation POST', () async {
+      const body = 'current body';
+      File(prBodyPath(work.path))
+        ..parent.createSync(recursive: true)
+        ..writeAsStringSync(body);
+      final transport = _FakeGitHubTransport(<GitHubHttpResponse>[
+        _appTokenResponse,
+        GitHubHttpResponse(
+          statusCode: HttpStatus.ok,
+          body: jsonEncode(<Object?>[
+            <String, Object?>{
+              'html_url': 'https://github.com/memento/x/pull/9',
+              'number': 9,
+              'title': 'feat(x): current title',
+              'body': body,
+            },
+          ]),
+        ),
+      ]);
+      final outcome =
+          await method(
+            git: RecordingGitRunner(),
+            pr: await _appOpener(transport),
+          ).deliver(
+            _request(
+              workspaceDir: work.path,
+              payload: const {'pr_title': 'feat(x): current title'},
+            ),
+          );
+
+      expect((outcome as Ok).payload?['reused'], 'true');
+      expect(
+        _pullRequests(transport).map((request) => request.method),
+        <String>['GET'],
+      );
+    });
+
+    test('an empty open-PR lookup POSTs a new PR as today', () async {
+      final transport = _FakeGitHubTransport(<GitHubHttpResponse>[
+        _appTokenResponse,
+        const GitHubHttpResponse(statusCode: HttpStatus.ok, body: '[]'),
+        const GitHubHttpResponse(
+          statusCode: HttpStatus.created,
+          body:
+              '{"html_url":"https://github.com/memento/x/pull/10",'
+              '"number":10}',
+        ),
+      ]);
+      final outcome = await method(
+        git: RecordingGitRunner(),
+        pr: await _appOpener(transport),
+      ).deliver(_request(workspaceDir: work.path));
+
+      expect((outcome as Ok).payload, <String, String>{
+        'pr_url': 'https://github.com/memento/x/pull/10',
+        'pr_number': '10',
+        'reused': 'false',
+      });
+      expect(
+        _pullRequests(transport).map((request) => request.method),
+        <String>['GET', 'POST'],
+      );
+    });
+
     test(
-      'an already-open PR whose url gh did not print is STILL reused (the '
-      'branch is delivered, the PR exists) ⇒ Ok, never an escalation',
+      'a POST HTTP 422 after an empty lookup remains a type-first Failed',
       () async {
+        final transport = _FakeGitHubTransport(<GitHubHttpResponse>[
+          _appTokenResponse,
+          const GitHubHttpResponse(statusCode: HttpStatus.ok, body: '[]'),
+          const GitHubHttpResponse(
+            statusCode: HttpStatus.unprocessableEntity,
+            body: '{"message":"Validation Failed"}',
+          ),
+        ]);
         final outcome = await method(
           git: RecordingGitRunner(),
-          pr: _AlreadyOpenPrOpener(''),
+          pr: await _appOpener(transport),
         ).deliver(_request(workspaceDir: work.path));
 
-        expect(outcome, isA<Ok>());
-        expect((outcome as Ok).payload, {'pr_url': '', 'reused': 'true'});
+        expect(outcome, isA<Failed>());
+        expect(
+          (outcome as Failed).reason,
+          contains('HTTP 422: Validation Failed'),
+        );
+        expect(
+          _pullRequests(transport).map((request) => request.method),
+          <String>['GET', 'POST'],
+        );
       },
     );
 
@@ -530,26 +647,59 @@ class _RejectedPushRunner implements GitRunner {
   }
 }
 
-/// A [PrOpener] that always REFUSES with gh's "a pull request … already exists"
-/// transcript (round one's PR is still open) — the rework-round idempotency case.
-/// [existingUrl] is echoed on the refusal's url line ('' models a gh that printed
-/// no url).
-class _AlreadyOpenPrOpener implements PrOpener {
-  _AlreadyOpenPrOpener(this.existingUrl);
+/// A [GitHubHttpTransport] answering each send from [responses] in order and
+/// recording every request — the whole offline GitHub, installation-token
+/// exchange included (Fakes, not mocks).
+final class _FakeGitHubTransport implements GitHubHttpTransport {
+  _FakeGitHubTransport(this.responses);
 
-  final String existingUrl;
+  /// The canned answers, consumed in send order.
+  final List<GitHubHttpResponse> responses;
+
+  /// Every request, in call order.
+  final List<GitHubHttpRequest> requests = [];
 
   @override
-  Future<PullRequestResult> open({
-    required String workDir,
-    required String branch,
-    required String baseBranch,
-    required String title,
-    String body = '',
-  }) async => PullRequestResult.failed(
-    PrOpenFailure(
-      'gh pr create failed: a pull request for branch "$branch" into branch '
-      '"$baseBranch" already exists:\n$existingUrl',
+  Future<GitHubHttpResponse> send(GitHubHttpRequest request) async {
+    requests.add(request);
+    return responses.removeAt(0);
+  }
+}
+
+/// The installation-token exchange's answer, valid well past the fixed clock.
+const _appTokenResponse = GitHubHttpResponse(
+  statusCode: HttpStatus.created,
+  body:
+      '{"token":"installation-token",'
+      '"expires_at":"2026-09-04T18:00:00Z"}',
+);
+
+/// The pull-request calls only — the token exchange is filtered out, so a test
+/// asserts the REST conversation delivery actually had about the PR.
+Iterable<GitHubHttpRequest> _pullRequests(_FakeGitHubTransport transport) =>
+    transport.requests.where(
+      (request) => request.uri.path.startsWith('/repos/memento/x/pulls'),
+    );
+
+/// The real App opener over [transport] and the test key — offline end to end.
+Future<GitHubAppPrOpener> _appOpener(_FakeGitHubTransport transport) async {
+  final config = GitHubAppConfig(appId: '123', installationId: 456);
+  final pem = await File(
+    'test/fixtures/github_app_test_private.pem',
+  ).readAsString();
+  final tokens = GitHubAppTokenProvider(
+    config: config,
+    privateKey: GitHubAppPrivateKey(path: '/test/key.pem', pem: pem),
+    transport: transport,
+    clock: () => DateTime.utc(2026, 9, 4, 16),
+  );
+  return GitHubAppPrOpener(
+    client: GitHubAppClient(
+      config: config,
+      tokens: tokens,
+      transport: transport,
     ),
+    owner: 'memento',
+    repository: 'x',
   );
 }
