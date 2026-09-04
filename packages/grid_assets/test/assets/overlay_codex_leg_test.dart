@@ -62,7 +62,7 @@ void main() {
         ..sort();
 
   test('the agents leg vends EXACTLY the claude leg skill ids', () {
-    expect(skillIdsIn(agentsSkills), kVendedSkills);
+    expect(skillIdsIn(agentsSkills), vendedSkillIds);
     expect(skillIdsIn(agentsSkills), skillIdsIn(claudeSkills));
   });
 
@@ -76,7 +76,7 @@ void main() {
             .toList()
           ..sort();
     expect(files, [
-      for (final id in kVendedSkills)
+      for (final id in vendedSkillIds)
         p.join('agents', 'skills', id, 'SKILL.md'),
     ]);
   });

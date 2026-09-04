@@ -55,7 +55,7 @@ void main() {
   group('PackagedAssetLoader — the vended skills', () {
     test('every vended skill loads to a non-empty SKILL.md whose frontmatter '
         'parses as REAL yaml and names itself', () {
-      for (final skillId in kVendedSkills) {
+      for (final skillId in vendedSkillIds) {
         final template = loader.loadSkillTemplate(skillId);
         expect(template, isNotEmpty);
         // agentskills frontmatter — the harness's skill discovery parses the
@@ -301,7 +301,7 @@ void main() {
       final skillIds = {for (final s in skills) s['id'] as String};
       expect(
         skillIds,
-        containsAll(kVendedSkills),
+        containsAll(vendedSkillIds),
         reason: 'every vended skill is declared in the manifest',
       );
 
@@ -366,7 +366,7 @@ void main() {
       final skills = (manifest['skills'] as YamlList).cast<YamlMap>();
 
       for (final entry in reHomed.entries) {
-        expect(kVendedSkills, contains(entry.key));
+        expect(vendedSkillIds, contains(entry.key));
         final template = loader.loadSkillTemplate(entry.key);
         final holes = {
           for (final m in RegExp(r'\{\{(\w+)\}\}').allMatches(template))
@@ -481,12 +481,12 @@ void main() {
     test('the AUDIENCE split: an operator skill is never named in a build '
         "agent's brief — one of them PUSHES, which the brief forbids", () {
       expect(
-        kOperatorSkills,
+        operatorSkillIds,
         {...reHomed.keys, 'handoff'},
         reason: 'handoff is operator-audience without being a re-homed skill',
       );
       expect(
-        kOperatorSkills,
+        operatorSkillIds,
         isNot(contains('discover')),
         reason: 'discover is the agent-audience skill the brief DOES name',
       );
@@ -604,7 +604,7 @@ void main() {
           reason:
               'the pre-root-relative `station_overlay/skills/` home is gone',
         );
-        for (final id in kVendedSkills) {
+        for (final id in vendedSkillIds) {
           expect(
             File(
               p.join(overlay, 'claude', 'skills', id, 'SKILL.md'),

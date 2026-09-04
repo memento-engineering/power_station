@@ -464,8 +464,8 @@ void main() {
           reason: 'every vended file binds against runner + gridHome',
         );
         expect(report.blocked, isEmpty);
-        expect(report.installedSkillIds, kVendedSkills);
-        for (final id in kVendedSkills) {
+        expect(report.installedSkillIds, vendedSkillIds);
+        for (final id in vendedSkillIds) {
           final skill = File(
             p.join(temp.path, '.claude', 'skills', id, 'SKILL.md'),
           );
