@@ -161,6 +161,7 @@ export 'src/assets/assets_command.dart';
 export 'src/assets/composition_assets.dart';
 export 'src/assets/grid_asset_pack.dart';
 export 'src/assets/grid_block.dart';
+export 'src/assets/station_asset_registry_generator.dart';
 export 'src/assets/mounted_tree.dart';
 export 'src/assets/overlay_install.dart';
 export 'src/assets/overlay_manifest.dart';

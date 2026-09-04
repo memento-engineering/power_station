@@ -25,6 +25,7 @@ dependencies:
   grid_sdk: ^0.3.0-rc.11
   json_annotation: ^4.9.0
   meta: ^1.16.0
+  package_config: ^2.2.0
   path: ^1.9.0
   yaml: ^3.1.2
 
