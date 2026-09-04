@@ -1282,6 +1282,7 @@ void main() {
           'tokensIn': '9',
           'tokensOut': '8',
           'costUsd': '0.02',
+          'costSource': 'reported',
           'model': 'claude-sonnet-5',
         });
       },

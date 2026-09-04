@@ -3691,7 +3691,21 @@ class DiscoveryLensCapability extends ProcessCapability {
       args.nodePath,
       round: round,
     );
-    final usage = readUsageFields(workspaceDir, args.nodePath);
+    // The declared prices ride the ambient config VALUE; the flare sink is the
+    // injected transport IMPL. Non-binding verb — `result()` is an effect edge.
+    final prices =
+        (context.getInheritedSeedOfExactType<AgentConfig>() ??
+                const AgentConfig())
+            .modelPrices;
+    final usage = readUsageFields(
+      workspaceDir,
+      args.nodePath,
+      modelPrices: prices,
+      flare: context
+          .getInheritedSeedOfExactType<ServiceBundle>()
+          ?.transport
+          ?.flare,
+    );
     return {
       // ALWAYS stamped, report or not: this is the route's evidence that the
       // lane FINISHED this round (classify LOUD) rather than has not been

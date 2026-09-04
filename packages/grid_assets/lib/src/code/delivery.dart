@@ -140,6 +140,7 @@ class DeliverRouteCapability extends RouteCapability {
       ],
       git: _gitRunner,
       inference: _inference,
+      flare: services.transport?.flare,
     );
     if (args.cancel.isCancelled) throw kRouteCancelled;
 

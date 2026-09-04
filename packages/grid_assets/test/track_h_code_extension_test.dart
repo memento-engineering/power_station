@@ -824,19 +824,25 @@ void main() {
   group('Track H — AgentCapability.result() usage telemetry (FT-2)', () {
     // The result() hook reads the harness's `--output-format json` envelope from
     // the per-step telemetry file; here a test writes it into a temp workspace.
-    ({FakeTreeContext context, StepArgs args}) resultCtx(String workspaceDir) =>
-        (
-          context: FakeTreeContext(
-            values: {
-              Workspace: testWorkspace(
-                'tg-1',
-                workspaceDir: workspaceDir,
-                branch: 'grid/tg-1',
-              ),
-            },
+    ({FakeTreeContext context, StepArgs args}) resultCtx(
+      String workspaceDir, {
+      ExplorationTransport? transport,
+    }) => (
+      context: FakeTreeContext(
+        values: {
+          Workspace: testWorkspace(
+            'tg-1',
+            workspaceDir: workspaceDir,
+            branch: 'grid/tg-1',
           ),
-          args: stepArgs('tg-1/agent'),
-        );
+          // The ambient config carries the declared prices; the bundle carries
+          // the emit-only flare sink (bead `pow-zetn`).
+          AgentConfig: const AgentConfig(),
+          ServiceBundle: ServiceBundle(transport: transport),
+        },
+      ),
+      args: stepArgs('tg-1/agent'),
+    );
 
     void writeUsage(String workspaceDir, String content) {
       File(p.join(workspaceDir, usageReportPath('tg-1/agent')))
@@ -860,9 +866,33 @@ void main() {
         'tokensIn': '12',
         'tokensOut': '34',
         'costUsd': '0.03',
+        'costSource': 'reported',
         'numTurns': '4',
         'harnessDurationMs': '900',
         'model': 'claude-opus-4-8',
+      });
+    });
+
+    test('an unpriced model keeps usage and emits the pricing flare', () async {
+      final dir = Directory.systemTemp.createTempSync('agent-usage-unpriced-');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final transport = RecordingExplorationTransport();
+      writeUsage(
+        dir.path,
+        '{"usage":{"input_tokens":12,"output_tokens":3},'
+        '"modelUsage":{"unpriced-codex":{}}}',
+      );
+      final c = resultCtx(dir.path, transport: transport);
+      final out = await const AgentCapability().result(c.context, c.args);
+
+      // Tokens kept, NO cost invented — and the flare names what to price.
+      expect(out, {
+        'tokensIn': '12',
+        'tokensOut': '3',
+        'model': 'unpriced-codex',
+      });
+      expect(transport.named(kUsagePriceUnknownFlare).single.data, {
+        'model': 'unpriced-codex',
       });
     });
 

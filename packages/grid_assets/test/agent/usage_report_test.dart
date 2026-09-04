@@ -49,6 +49,10 @@ const String _wellFormed = '''
 ''';
 
 void main() {
+  // The station's declared prices, as every production `result()` edge reads
+  // them off the ambient AgentConfig (bead `pow-zetn`).
+  const prices = kUsageModelPrices;
+
   group('FT-2 UsageReport.tryParse — the well-formed envelope', () {
     test('recovers every named field and projects the result map', () {
       final report = UsageReport.tryParse(_wellFormed);
@@ -56,6 +60,9 @@ void main() {
       expect(report!.tokensIn, 15234);
       expect(report.tokensOut, 2841);
       expect(report.costUsd, 0.1834);
+      expect(report.costSource, UsageCostSource.reported);
+      expect(report.cacheReadInputTokens, 12000);
+      expect(report.cacheCreationInputTokens, 0);
       expect(report.numTurns, 7);
       expect(report.harnessDurationMs, 45231);
       expect(report.model, 'claude-opus-4-8,claude-haiku-4-5-20251001');
@@ -63,7 +70,10 @@ void main() {
       expect(report.toResultFields(), {
         'tokensIn': '15234',
         'tokensOut': '2841',
+        'cache_read_input_tokens': '12000',
+        'cache_creation_input_tokens': '0',
         'costUsd': '0.1834',
+        'costSource': 'reported',
         'numTurns': '7',
         'harnessDurationMs': '45231',
         'model': 'claude-opus-4-8,claude-haiku-4-5-20251001',
@@ -80,11 +90,110 @@ void main() {
 
     test('codex exec --json JSONL usage parses (FT-2 for codex)', () {
       final r = UsageReport.tryParse(codexJsonl)!;
-      expect(r.tokensIn, 13574);
+      // `input_tokens` is GROSS here (13574, the 8960 cached subset included);
+      // the field means UNCACHED prompt tokens, as it does for claude.
+      expect(r.tokensIn, 4614);
       expect(r.tokensOut, 5);
-      expect(r.costUsd, isNull); // codex (ChatGPT auth) reports no cost
+      expect(r.costUsd, isNull); // no cost, and no model to price on
+      expect(r.costSource, isNull);
       expect(r.model, isNull); // codex has no modelUsage attribution
-      expect(r.toResultFields(), {'tokensIn': '13574', 'tokensOut': '5'});
+      expect(r.toResultFields(), {
+        'tokensIn': '4614',
+        'tokensOut': '5',
+        'cache_read_input_tokens': '8960',
+      });
+    });
+
+    // AC-4 — the token classes codex DOES report are preserved; the ones it
+    // does not are ABSENT, never a synthesized zero.
+    test('codex cache tokens are preserved only when reported', () {
+      final native = UsageReport.tryParse(codexJsonl)!;
+      expect(native.tokensIn, 4614);
+      expect(native.cacheReadInputTokens, 8960);
+      expect(native.cacheCreationInputTokens, isNull);
+      expect(native.toResultFields(), {
+        'tokensIn': '4614',
+        'tokensOut': '5',
+        'cache_read_input_tokens': '8960',
+      });
+
+      // The ACP envelope names the model but carries NO cache split at all.
+      final acp = UsageReport.tryParse(
+        '{"modelUsage":{"gpt-5.6-sol":{}},'
+        '"usage":{"input_tokens":11,"output_tokens":22}}',
+        modelPrices: kUsageModelPrices,
+      )!;
+      expect(acp.cacheReadInputTokens, isNull);
+      expect(acp.cacheCreationInputTokens, isNull);
+      expect(acp.toResultFields(), isNot(contains('cache_read_input_tokens')));
+      expect(
+        acp.toResultFields(),
+        isNot(contains('cache_creation_input_tokens')),
+      );
+    });
+
+    // AC-1 — the headline: a codex-shaped envelope now HAS a cost, and a
+    // claude-shaped one keeps the billed number it reported.
+    test('derives codex cost and preserves reported claude cost', () {
+      const codex =
+          '{"modelUsage":{"gpt-5.6-sol":{}},'
+          '"num_turns":2,"result":"done",'
+          '"usage":{"input_tokens":1000,"output_tokens":100}}';
+      final derived = UsageReport.tryParse(
+        codex,
+        modelPrices: kUsageModelPrices,
+      )!;
+      expect(derived.tokensIn, 1000);
+      expect(derived.tokensOut, 100);
+      // 1000 × $4/M + 100 × $20/M.
+      expect(derived.costUsd, closeTo(0.006, 0.000000001));
+      expect(derived.costSource, UsageCostSource.derived);
+      expect(derived.toResultFields()['costSource'], 'derived');
+
+      final reported = UsageReport.tryParse(
+        _wellFormed,
+        modelPrices: kUsageModelPrices,
+      )!;
+      expect(reported.costUsd, 0.1834);
+      expect(reported.costSource, UsageCostSource.reported);
+      expect(reported.toResultFields()['costSource'], 'reported');
+    });
+
+    // AC-2 — the unknown-model posture: tokens kept, cost NULL, one flare.
+    test('unknown model keeps tokens and flares without zero cost', () {
+      final flares = <({String name, Map<String, String> data})>[];
+      final report = UsageReport.tryParse(
+        '{"modelUsage":{"unpriced-codex":{}},'
+        '"usage":{"input_tokens":10,"output_tokens":2}}',
+        modelPrices: kUsageModelPrices,
+        flare: (name, data) => flares.add((name: name, data: data)),
+      )!;
+
+      expect(report.tokensIn, 10);
+      expect(report.tokensOut, 2);
+      expect(report.costUsd, isNull);
+      expect(report.costSource, isNull);
+      expect(report.toResultFields(), {
+        'tokensIn': '10',
+        'tokensOut': '2',
+        'model': 'unpriced-codex',
+      });
+      // Exactly ONE flare, naming the model an operator has to price.
+      expect(flares, hasLength(1));
+      expect(flares.single.name, kUsagePriceUnknownFlare);
+      expect(flares.single.data, {'model': 'unpriced-codex'});
+    });
+
+    test('a codex-acp REASONING-EFFORT suffix still finds its price', () {
+      final report = UsageReport.tryParse(
+        '{"modelUsage":{"gpt-5.6-sol[xhigh]":{}},'
+        '"usage":{"input_tokens":1000,"output_tokens":100}}',
+        modelPrices: kUsageModelPrices,
+      )!;
+      // The OBSERVED id rides verbatim; only the price LOOKUP is by base id.
+      expect(report.model, 'gpt-5.6-sol[xhigh]');
+      expect(report.costUsd, closeTo(0.006, 0.000000001));
+      expect(report.costSource, UsageCostSource.derived);
     });
   });
 
@@ -116,7 +225,7 @@ void main() {
         File(p.join(dir.path, usageReportPath(nodePath)))
           ..createSync(recursive: true)
           ..writeAsStringSync(copilotJsonl);
-        expect(readUsageFields(dir.path, nodePath), {
+        expect(readUsageFields(dir.path, nodePath, modelPrices: prices), {
           'premiumRequests': '1',
           'harnessDurationMs': '3735',
         });
@@ -168,6 +277,7 @@ void main() {
       expect(noUsage, isNotNull);
       expect(noUsage!.toResultFields(), {
         'costUsd': '0.5',
+        'costSource': 'reported',
         'numTurns': '3',
         'harnessDurationMs': '900',
       });
@@ -244,10 +354,13 @@ void main() {
       File(p.join(dir.path, usageReportPath(nodePath)))
         ..createSync(recursive: true)
         ..writeAsStringSync(_wellFormed);
-      expect(readUsageFields(dir.path, nodePath), {
+      expect(readUsageFields(dir.path, nodePath, modelPrices: prices), {
         'tokensIn': '15234',
         'tokensOut': '2841',
+        'cache_read_input_tokens': '12000',
+        'cache_creation_input_tokens': '0',
         'costUsd': '0.1834',
+        'costSource': 'reported',
         'numTurns': '7',
         'harnessDurationMs': '45231',
         'model': 'claude-opus-4-8,claude-haiku-4-5-20251001',
@@ -257,7 +370,10 @@ void main() {
     test('an ABSENT file ⇒ empty (never throws)', () {
       final dir = Directory.systemTemp.createTempSync('usage-absent-');
       addTearDown(() => dir.deleteSync(recursive: true));
-      expect(readUsageFields(dir.path, 'tg-1/agent'), isEmpty);
+      expect(
+        readUsageFields(dir.path, 'tg-1/agent', modelPrices: prices),
+        isEmpty,
+      );
     });
 
     test('a MALFORMED file ⇒ empty (never throws)', () {
@@ -267,7 +383,7 @@ void main() {
       File(p.join(dir.path, usageReportPath(nodePath)))
         ..createSync(recursive: true)
         ..writeAsStringSync('{ this is not json');
-      expect(readUsageFields(dir.path, nodePath), isEmpty);
+      expect(readUsageFields(dir.path, nodePath, modelPrices: prices), isEmpty);
     });
   });
 
@@ -347,13 +463,18 @@ void main() {
     });
 
     test('a modelUsage-ONLY envelope still yields a report (model rescues '
-        'isEmpty)', () {
+        'isEmpty), and its per-model token counts are recovered', () {
       final report = UsageReport.tryParse(
         '{"modelUsage": {"claude-opus-4-8": {"outputTokens": 10}}}',
+        modelPrices: kUsageModelPrices,
       );
       expect(report, isNotNull);
       expect(report!.isEmpty, isFalse);
-      expect(report.toResultFields(), {'model': 'claude-opus-4-8'});
+      // Tokens without a declared price: recorded, and NO cost invented.
+      expect(report.toResultFields(), {
+        'tokensOut': '10',
+        'model': 'claude-opus-4-8',
+      });
     });
 
     test('a missing / non-map / empty / junk modelUsage yields NO model field, '
@@ -415,12 +536,23 @@ void main() {
         ),
         isTrue,
       );
-      expect(readUsageFields(dir.path, 'tg-1/spec_review/specify'), {
-        'tokensIn': '11',
-        'tokensOut': '22',
-        'numTurns': '3',
-        'model': 'gpt-5.6-sol',
-      });
+      // The channel-rendered envelope reports no cost either — so the read
+      // DERIVES one (11 × $4/M + 22 × $20/M) and says so.
+      expect(
+        readUsageFields(
+          dir.path,
+          'tg-1/spec_review/specify',
+          modelPrices: prices,
+        ),
+        {
+          'tokensIn': '11',
+          'tokensOut': '22',
+          'costUsd': '0.000484',
+          'costSource': 'derived',
+          'numTurns': '3',
+          'model': 'gpt-5.6-sol',
+        },
+      );
       expect(
         CarriedSpec.tryParse(
           readEnvelopeResultText(dir.path, 'tg-1/spec_review/specify'),
@@ -444,7 +576,14 @@ void main() {
           isTrue,
         );
         expect(File(p.join(dir.path, out)).existsSync(), isTrue);
-        expect(readUsageFields(dir.path, 'tg-1/spec_review/specify'), isEmpty);
+        expect(
+          readUsageFields(
+            dir.path,
+            'tg-1/spec_review/specify',
+            modelPrices: prices,
+          ),
+          isEmpty,
+        );
       },
     );
 

@@ -751,8 +751,22 @@ class SpecifyCapability extends ProcessCapability {
   ) async {
     final workspace = context.getInheritedSeedOfExactType<Workspace>();
     if (workspace == null) return null;
+    // The spec seat is the codex-armed one: without the ambient price table
+    // its cost is null and the lane leaves the spend report entirely.
+    final prices =
+        (context.getInheritedSeedOfExactType<AgentConfig>() ??
+                const AgentConfig())
+            .modelPrices;
     final fields = <String, String>{
-      ...readUsageFields(workspace.workspaceDir, args.nodePath),
+      ...readUsageFields(
+        workspace.workspaceDir,
+        args.nodePath,
+        modelPrices: prices,
+        flare: context
+            .getInheritedSeedOfExactType<ServiceBundle>()
+            ?.transport
+            ?.flare,
+      ),
       ...?CarriedSpec.tryParse(
         readEnvelopeResultText(workspace.workspaceDir, args.nodePath),
       )?.toResultFields(),
