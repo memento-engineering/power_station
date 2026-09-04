@@ -184,7 +184,7 @@ const String kFailedDecisionLookupPrefix = 'The roster lookup FAILED';
 /// sentence and [parseSpecContract] recognizes it by
 /// [kNoGoverningDecisionPrefix], so the form the brief DICTATES is the one the
 /// gate ACCEPTS.
-final String kNoGoverningDecisionSentence =
+const String kNoGoverningDecisionSentence =
     '$kNoGoverningDecisionPrefix — verified via '
     '`$kDefaultOverlayRunner decisions index --surface` over '
     '`<the roster-qualified paths>`.';
@@ -202,7 +202,7 @@ final String kNoGoverningDecisionSentence =
 /// citing nothing; it must SAY the lookup crashed and show its output. Naming
 /// that form is what lets [parseSpecContract] distinguish the two rather than
 /// collapsing a crash into a vacuous empty section.
-final String kFailedDecisionLookupSentence =
+const String kFailedDecisionLookupSentence =
     '$kFailedDecisionLookupPrefix — reported verbatim, never read as an empty '
     'union: `$kDefaultOverlayRunner decisions index --surface` over '
     '`<the roster-qualified paths>` exited non-zero with `<the exact output>`.';

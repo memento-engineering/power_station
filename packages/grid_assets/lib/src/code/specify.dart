@@ -97,7 +97,6 @@ import '../agent/seat_environments.dart';
 import '../agent/site_binding.dart';
 import '../agent/typed_environment.dart';
 import '../agent/usage_report.dart';
-import '../assets/overlay_materializer.dart' show kDefaultOverlayRunner;
 import 'committee.dart';
 import 'conventional_commit.dart' show lintConventionalSubject;
 import 'decision_register.dart';
@@ -132,53 +131,46 @@ const List<String> kSpecCommitteeRubrics = [
 /// A structurally WHOLE spec — the acceptance half of the exemplar the specify
 /// brief ships. Round-tripped through [specStructuralFindings] in test: what the
 /// architect is told to copy is PROVEN to pass the gate that grades it.
+///
+/// Every criterion is an ADDRESSABLE record ([kAcceptanceRecordForm]), because
+/// the id is what [kValidationRecordForm] maps onto.
 const String kSpecExemplarAcceptance = '''
-- [ ] `Heartbeat` parses a well-formed peer frame
-- [ ] A malformed peer frame is refused LOUDLY (throws, never returns null)''';
+- [ ] AC-1 — `Heartbeat.parse` returns a frame for a well-formed peer line
+- [ ] AC-2 — `Heartbeat.parse` throws `FormatException` on an empty frame''';
 
 /// The design half of that exemplar — one complete step in the ordinal-heading
-/// shape, all four sections, every element the four LLM lanes look for.
+/// shape, all four sections, every element the four LLM lanes look for, and
+/// every RECORD form the deterministic gate parses.
+///
+/// The step carries the five labeled fields ([kStepFieldLabels]) and NO fenced
+/// implementation block: a code block is optional EVIDENCE, and an exemplar
+/// that shipped one taught the opposite.
 const String kSpecExemplarDesign = '''
 ## Implementation Plan
 
 ### Step 1 — Add the `Heartbeat` frame
 
-Create `packages/grid_assets/lib/src/bus/heartbeat.dart`:
-
-```dart
-/// One peer heartbeat frame.
-class Heartbeat {
-  /// Creates a heartbeat from [peerId].
-  const Heartbeat(this.peerId);
-
-  /// Parses [frame] — throws [FormatException] on a malformed frame (LOUD;
-  /// never a null return).
-  factory Heartbeat.parse(String frame) => frame.isEmpty
-      ? throw const FormatException('empty heartbeat frame')
-      : Heartbeat(frame);
-
-  /// The peer that sent it.
-  final String peerId;
-}
-```
-
-Test: `cd packages/grid_assets && dart test test/heartbeat_test.dart` → expect
-`All tests passed!`.
+Paths: `packages/grid_assets/lib/src/bus/heartbeat.dart`, `packages/grid_assets/test/heartbeat_test.dart`
+Change: a `Heartbeat` value carrying `peerId`, with a `Heartbeat.parse` factory
+that refuses an empty frame LOUDLY — it throws `FormatException` and never
+returns null. One probe per acceptance id covers the two paths.
+Test: `cd packages/grid_assets && dart test test/heartbeat_test.dart`
+Expect: `All tests passed!`
 Commit: `feat(bus): add the peer heartbeat frame`
 
 ## Touches
-- `packages/grid_assets/lib/src/bus/heartbeat.dart` — created;
-  `lib/src/bus/heartbeat.dart:Heartbeat`
+- `packages/grid_assets/lib/src/bus/heartbeat.dart` — created; `Heartbeat`, `Heartbeat.parse`
+- `packages/grid_assets/test/heartbeat_test.dart` — created; one probe per acceptance id
 
 Re-validated against the live tree: `Heartbeat` has no caller yet and no sibling
 bead adds one.
 
 ## ADR Alignment
-No ADR applies — verified via grep on `heartbeat`, `bus`, `frame`.
+$kNoGoverningDecisionSentence Queried: `power_station/packages/grid_assets/lib/src/bus/heartbeat.dart`, `power_station/packages/grid_assets/test/heartbeat_test.dart`.
 
 ## Validation Plan
-- [ ] `Heartbeat` parses a well-formed peer frame → `cd packages/grid_assets && dart test test/heartbeat_test.dart` → `All tests passed!`
-- [ ] A malformed peer frame is refused LOUDLY → `cd packages/grid_assets && dart test test/heartbeat_test.dart` → `All tests passed!`''';
+- [ ] AC-1 → `cd packages/grid_assets && dart test test/heartbeat_test.dart` → `All tests passed!`
+- [ ] AC-2 → `cd packages/grid_assets && dart test test/heartbeat_test.dart` → `All tests passed!`''';
 
 /// Result key carrying the acceptance text authored by the specify step.
 const String kCarriedSpecAcceptanceKey = 'specAcceptance';
@@ -247,6 +239,13 @@ final String _bannedTokenLine = kSpecPlaceholderTokens
     .map((token) => '`$token`')
     .join(', ');
 
+/// [kStepFieldLabels] as one backticked line — the brief names EVERY labeled
+/// line a step must carry, in the order the parser reads them, so the gate can
+/// never require a field the brief did not teach.
+final String _stepFieldLabelLine = kStepFieldLabels
+    .map((label) => '`$label:`')
+    .join(', ');
+
 /// The EXACT structural contract the deterministic `spec-validation` lane
 /// enforces ([specStructuralFindings]), in the words the specify agent reads.
 /// [buildSpecifyBrief] renders it VERBATIM, so the gate's contract and the
@@ -280,6 +279,27 @@ else:
 4. **`## Validation Plan` carries at least one `- ` item.**
 5. **No placeholder token in PROSE.** These exact tokens, case-insensitively:
    $_bannedTokenLine.
+6. **Every acceptance criterion is an ADDRESSABLE record**:
+   `$kAcceptanceRecordForm` — ids UNIQUE and CONTIGUOUS from `AC-1`. The id is
+   what the validation plan maps onto.
+7. **Every implementation step carries five LABELED lines**, each opening its
+   own line: $_stepFieldLabelLine. `Change:` states the BEHAVIOUR and INVARIANT
+   a zero-context builder must produce; a fenced code block beside it is
+   optional EVIDENCE, never a required field. `Paths:` cites backticked
+   REPO-RELATIVE paths (no leading `/`, no `..`); `Commit:` is a
+   conventional-commit subject. The step opener is `$kStepRecordForm`, and the
+   ordinal-list openers rule 3 names still count.
+8. **Every `## Touches` item is** `$kTouchRecordForm` — exactly ONE
+   repo-relative backticked path and one disposition word.
+9. **Every `## ADR Alignment` item is** `$kDecisionRecordForm`, whose citation
+   resolves as `<repo>#<slug>`, a `docs/decisions/` or `docs/adr/` path, or a
+   legacy `ADR-<nnnn>` id. The section is NEVER silent about the lookup: when
+   the roster union is empty for every queried surface, write
+   "$kNoGoverningDecisionSentence"; when the lookup FAILED or exited non-zero,
+   write "$kFailedDecisionLookupSentence" — an unknown union is not an empty
+   one, and a crashed index is never graded clean.
+10. **Every `## Validation Plan` item is** `$kValidationRecordForm`, exactly
+   ONCE for every acceptance id and NEVER for an id no criterion declares.
 
 Headings and ordinals are read from PROSE, and so are those tokens: markdown
 QUOTATION is exempt (fenced blocks, `inline code` spans, `>` blockquote lines).
@@ -817,18 +837,23 @@ AgentBrief buildSpecifyBrief(
     ..writeln()
     ..writeln(
       '**## Implementation Plan** — numbered steps a builder with zero '
-      'context can follow. EVERY step carries all four elements: the literal '
-      'Dart code to write (a real code block, not pseudo-code, honoring the '
-      'memento house set — freezed sealed unions consumed with exhaustive '
-      '`switch`, Fakes not mocks, no `print` in lib code); the exact file '
-      'path from the repo root (backticked); the exact test command with '
-      'expected output (`dart test test/<file>_test.dart` → expect PASS); and '
-      'a conventional-commit message. When the plan touches genesis_tree / '
-      'grid code, spec it to the D-H doctrine (ADR-0008): watch deps in '
-      '`build` via `dependOn*`; no public synchronous accessor over '
-      '`StateNotifier` state; config = VALUES in the tree, impls = DI; guards '
-      'LOUD or GONE. No placeholders: the structural contract below enumerates '
-      'every banned token, and a spec that defers its own content is F-gated.',
+      'context can follow. EVERY step opens with an ordinal and carries the '
+      'five labeled lines the structural contract names '
+      '($_stepFieldLabelLine). `Paths:` is the exact file path from the repo '
+      'root (backticked); `Change:` states the BEHAVIOUR and INVARIANT the '
+      'builder must produce, in the memento house set (freezed sealed unions '
+      'consumed with exhaustive `switch`, Fakes not mocks, no `print` in lib '
+      'code); `Test:` is the exact test command and `Expect:` its expected '
+      'output (`dart test test/<file>_test.dart` → expect PASS); `Commit:` is '
+      'a conventional-commit message. A fenced Dart block beside `Change:` is '
+      'optional EVIDENCE where the exact text matters — write one when it '
+      'earns its space, never as a required field. When the plan touches '
+      'genesis_tree / grid code, spec it to the D-H doctrine (ADR-0008): '
+      'watch deps in `build` via `dependOn*`; no public synchronous accessor '
+      'over `StateNotifier` state; config = VALUES in the tree, impls = DI; '
+      'guards LOUD or GONE. No placeholders: the structural contract below '
+      'enumerates every banned token, and a spec that defers its own content '
+      'is F-gated.',
     )
     ..writeln()
     ..writeln(
@@ -849,18 +874,19 @@ AgentBrief buildSpecifyBrief(
     ..writeln(
       'Re-run the block over the FINAL `## Touches` you write. '
       '$kDecisionWriteRule '
-      'Quote each load-bearing decision and say how the plan aligns. If the '
-      'union is empty for every queried surface, write exactly: No recorded '
-      'decision governs these surfaces — verified via '
-      '`$kDefaultOverlayRunner decisions index --surface` over '
-      '`<the roster-qualified paths>`.',
+      'Quote each load-bearing decision and say how the plan aligns. The '
+      'section is NEVER silent about the lookup itself: if the union is empty '
+      'for every queried surface, write exactly: '
+      '$kNoGoverningDecisionSentence If the lookup FAILED or exited non-zero, '
+      'that is NOT an empty union — write exactly: '
+      '$kFailedDecisionLookupSentence',
     )
     ..writeln()
     ..writeln(
       '**## Validation Plan** — one item per acceptance criterion, mapped '
-      '1:1: `- [ ] <criterion> → \'<exact command>\' → <expected output>`. No '
-      'gaps — every criterion has its validation, every validation names its '
-      'criterion.',
+      '1:1 BY ID: `$kValidationRecordForm`. No gaps and no strays — every '
+      'criterion is validated exactly once, and no item names an id no '
+      'criterion declares.',
     )
     ..writeln()
     ..writeln(kSpecStructuralContract)
