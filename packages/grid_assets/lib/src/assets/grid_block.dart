@@ -11,6 +11,7 @@ library;
 
 import 'dart:io';
 
+import 'package:dart_style/dart_style.dart';
 import 'package:grid_sdk/grid_sdk.dart';
 import 'package:path/path.dart' as p;
 import 'package:yaml/yaml.dart';
@@ -624,11 +625,25 @@ const String kGeneratedPackPath = 'lib/src/assets/grid_asset_pack.dart';
 /// The generated MCP mirror, relative to the package root.
 const String kGeneratedMcpPath = 'extension/mcp/config.yaml';
 
+/// Normalizes a rendered output so a fresh render is byte-equal to what the
+/// repository formatter would leave on disk.
+///
+/// Dart outputs go through the same [DartFormatter] `dart format` runs; every
+/// other output — the YAML mirror included — passes through untouched.
+String _formatGeneratedOutput(String relativePath, String source) {
+  if (p.extension(relativePath) != '.dart') return source;
+  return DartFormatter(
+    languageVersion: DartFormatter.latestLanguageVersion,
+  ).format(source, uri: relativePath);
+}
+
 /// Regenerates — or, with [check], VERIFIES — both generated outputs from the
 /// `grid:` block at `<packageRoot>/pubspec.yaml`.
 ///
 /// ATOMIC: both outputs are rendered from ONE parse before either is written,
 /// so a malformed block ([GridBlockException]) leaves both files untouched.
+/// Generated Dart is formatter-normalized before BOTH the [check] comparison
+/// and the write, so a fresh render survives `dart format --set-exit-if-changed`.
 /// Returns a process exit code — `0` current, `1` stale under [check].
 /// [out] defaults to `stdout`.
 int runGridAssetsGenerator({
@@ -643,9 +658,13 @@ int runGridAssetsGenerator({
         File(p.join(packageRoot, relative)).existsSync() ||
         Directory(p.join(packageRoot, relative)).existsSync(),
   );
-  final outputs = <String, String>{
+  final rendered = <String, String>{
     kGeneratedPackPath: renderGridAssetPackLibrary(block),
     kGeneratedMcpPath: renderMcpConfig(block),
+  };
+  final outputs = <String, String>{
+    for (final entry in rendered.entries)
+      entry.key: _formatGeneratedOutput(entry.key, entry.value),
   };
   final report =
       '${block.assets.length} assets, '

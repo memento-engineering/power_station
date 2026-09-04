@@ -15,6 +15,7 @@ dependencies:
   beads_dart: ^0.2.0-rc.7
   crypto: ^3.0.6
   dart_grid_assets: ^0.1.1
+  dart_style: ^3.1.7
   extension_discovery: ^2.1.0
   federated_grid_assets: ^0.3.0-rc.2
   freezed_annotation: ^3.0.0

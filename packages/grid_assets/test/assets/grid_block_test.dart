@@ -5,6 +5,7 @@
 // Offline; the block reader is exercised through an injected Fake path probe.
 import 'dart:io';
 
+import 'package:dart_style/dart_style.dart';
 import 'package:grid_assets/grid_assets.dart';
 import 'package:grid_sdk/grid_sdk.dart';
 import 'package:path/path.dart' as p;
@@ -435,24 +436,48 @@ void main() {
       },
     );
 
-    test('a write makes --check clean, and re-running is a no-op', () {
-      writePubspec(_skill());
-      expect(
-        runGridAssetsGenerator(packageRoot: temp.path, out: StringBuffer()),
-        0,
-      );
-      expect(
-        runGridAssetsGenerator(
-          packageRoot: temp.path,
-          check: true,
-          out: StringBuffer(),
-        ),
-        0,
-      );
-      expect(
-        File(p.join(temp.path, kGeneratedPackPath)).readAsStringSync(),
-        contains(kGridBlockGeneratedMarker),
-      );
-    });
+    test(
+      'a write formats Dart only, makes --check clean, and re-running is a no-op',
+      () {
+        writePubspec(_skill());
+        expect(
+          runGridAssetsGenerator(packageRoot: temp.path, out: StringBuffer()),
+          0,
+        );
+
+        final dartFile = File(p.join(temp.path, kGeneratedPackPath));
+        final mcpFile = File(p.join(temp.path, kGeneratedMcpPath));
+        final generatedDart = dartFile.readAsStringSync();
+        final generatedMcp = mcpFile.readAsStringSync();
+        expect(generatedDart, contains(kGridBlockGeneratedMarker));
+        expect(
+          DartFormatter(
+            languageVersion: DartFormatter.latestLanguageVersion,
+          ).format(generatedDart, uri: kGeneratedPackPath),
+          generatedDart,
+          reason: 'the generator writes formatter-normalized Dart',
+        );
+        expect(
+          generatedMcp,
+          renderMcpConfig(_parse(_skill())),
+          reason: 'non-Dart outputs remain the pure renderer bytes',
+        );
+        expect(
+          runGridAssetsGenerator(
+            packageRoot: temp.path,
+            check: true,
+            out: StringBuffer(),
+          ),
+          0,
+        );
+
+        expect(
+          runGridAssetsGenerator(packageRoot: temp.path, out: StringBuffer()),
+          0,
+        );
+        expect(dartFile.readAsStringSync(), generatedDart);
+        expect(mcpFile.readAsStringSync(), generatedMcp);
+      },
+    );
   });
 }
