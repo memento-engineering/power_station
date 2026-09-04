@@ -362,17 +362,40 @@ class RecordingShellRunner implements ShellRunner {
 /// residue gate probes `git status --porcelain`, and a fake that echoed the
 /// canned diff there would read as uncommitted residue and Gate the land.
 class CannedGitRunner implements GitRunner {
-  /// Creates the runner over its canned log/diff answers.
-  CannedGitRunner({this.log = '', this.diff = '', this.diffOk = true});
+  /// Creates the runner over its canned answers. The `nameStatus`/`numstat`
+  /// defaults describe the SAME one-file change the legacy `--stat` answer
+  /// does, so a fixture that only cares about the log/patch still yields a
+  /// non-empty delta to the describe pass.
+  CannedGitRunner({
+    this.log = '',
+    this.diff = '',
+    this.diffOk = true,
+    this.nameStatus = 'M\x00lib/x.dart\x00',
+    this.numstat = '2\t1\tlib/x.dart\x00',
+    this.shortstat = ' 1 file changed, 2 insertions(+), 1 deletion(-)',
+    this.nameStatusOk = true,
+  });
 
   /// The `git log --format=…%x00` body (NUL-separated commit records).
   final String log;
 
-  /// The `git diff origin/<base>...HEAD` body.
+  /// The `git diff origin/<base>...HEAD` body (the PATCH — `PinDiffCapability`).
   final String diff;
 
-  /// Whether the `git diff` read succeeds (false ⇒ a non-zero git).
+  /// Whether the patch read succeeds (false ⇒ a non-zero git).
   final bool diffOk;
+
+  /// The `git diff --name-status -z` body.
+  final String nameStatus;
+
+  /// The `git diff --numstat -z` body.
+  final String numstat;
+
+  /// The `git diff --shortstat` body.
+  final String shortstat;
+
+  /// Whether the `--name-status` read succeeds (false ⇒ a non-zero git).
+  final bool nameStatusOk;
 
   /// Every argv, in call order.
   final List<List<String>> calls = [];
@@ -385,6 +408,18 @@ class CannedGitRunner implements GitRunner {
     calls.add(List.unmodifiable(args));
     if (args.first == 'log') return GitRunResult(exitCode: 0, output: log);
     if (args.first == 'diff') {
+      if (args.contains('--name-status')) {
+        return GitRunResult(
+          exitCode: nameStatusOk ? 0 : 128,
+          output: nameStatus,
+        );
+      }
+      if (args.contains('--numstat')) {
+        return GitRunResult(exitCode: 0, output: numstat);
+      }
+      if (args.contains('--shortstat')) {
+        return GitRunResult(exitCode: 0, output: shortstat);
+      }
       if (args.contains('--stat')) {
         return const GitRunResult(exitCode: 0, output: ' lib/x.dart | 2 +-');
       }

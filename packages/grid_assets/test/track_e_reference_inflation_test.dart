@@ -11,7 +11,8 @@
 // buildCriticPrompt` (committee.dart), the spec stage's pair (bead
 // `pow-6ao`, specify.dart): `buildSpecifyBrief` +
 // `SpecCriticCapability.buildSpecCriticPrompt`, and the landing describe pass's
-// `buildDescribePrompt` (bead `pow-8dx`, pr_composition.dart) — and every path
+// `buildDescribePrompt` (bead `pow-8dx`, pr_composition.dart) over
+// `buildDescribeManifest`'s facts (describe_manifest.dart) — and every path
 // that reaches a spawned agent (the process cwd AND any path interpolated into
 // the brief text) comes from the ambient `Workspace` seed, never a bead field.
 //
@@ -294,23 +295,37 @@ void main() {
         expect(prompt, contains('Wire the federation bus'));
       });
 
-      test('buildDescribePrompt (pow-8dx): no bead-stamped path — its branch '
-          'comes from the ACTIVATION and its delta from git; the bead is '
-          'CONTENT-only why-context', () {
-        final prompt = buildDescribePrompt(
-          bead: _poisonedBead(),
-          beadId: 'tg-m2q',
-          baseBranch: _activation().baseBranch,
-          commitLog: 'feat(x): do a thing',
-          diffStat: ' lib/x.dart | 2 +-',
-          diff: '+the change',
+      test('the describe MANIFEST + prompt: no bead-stamped path — the branch '
+          'comes from the ACTIVATION and the file facts from git; the bead is '
+          'CONTENT-only intent', () {
+        final poisoned = _poisonedBead();
+        final manifest = buildDescribeManifest(
+          DescribeManifest(
+            beadId: 'tg-m2q',
+            beadTitle: poisoned.title,
+            baseBranch: _activation().baseBranch,
+            intent: poisoned.acceptanceCriteria,
+            commits: const ['feat(x): do a thing'],
+            files: changedFilesFrom(
+              nameStatus: 'M\x00lib/x.dart\x00',
+              numstat: '2\t1\tlib/x.dart\x00',
+            ),
+            shortstat: ' 1 file changed, 2 insertions(+), 1 deletion(-)',
+          ),
         );
+        final prompt = buildDescribePrompt(
+          beadId: 'tg-m2q',
+          manifest: manifest,
+        );
+        expect(manifest, isNot(contains(_poison)));
         expect(prompt, isNot(contains(_poison)));
         // The one ref in the prompt is the activation's base branch (§8.1).
         expect(prompt, contains('origin/main...HEAD'));
-        // Bead CONTENT flows through as why-context (a REFERENCE read, §8.5)…
+        // Bead CONTENT flows through as intent (a REFERENCE read, §8.5)…
         expect(prompt, contains('Wire the federation bus'));
-        // …and the bead id appears ONLY in the never-write-it rule (pow-8dx).
+        expect(prompt, contains('A peer heartbeat surfaces within 1s.'));
+        // …and the bead id appears ONLY in the never-write-it rule and the
+        // manifest's intent provenance — never as a resolved path.
         expect(prompt, contains('NEVER write the tracker id `tg-m2q`'));
       });
     });

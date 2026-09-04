@@ -432,54 +432,63 @@ void main() {
     });
   });
 
-  group('buildDescribePrompt — one-shot, diff-pinned, foreign-ref-forbidden', () {
-    test(
-      'carries the delta + the v1.0.0 rules + the no-foreign-reference rule, '
-      'and asks for NO tool use',
-      () {
-        final prompt = buildDescribePrompt(
-          bead: const Bead(
-            id: 'tg-1',
-            title: 'better titles',
-            description: 'why',
+  group(
+    'buildDescribePrompt — one-shot, manifest-fed, foreign-ref-forbidden',
+    () {
+      String prompt() => buildDescribePrompt(
+        beadId: 'tg-1',
+        manifest: buildDescribeManifest(
+          DescribeManifest(
+            beadId: 'tg-1',
+            beadTitle: 'better titles',
+            baseBranch: 'main',
+            intent: '- [ ] a testable criterion',
+            commits: const ['feat(x): do a thing'],
+            files: changedFilesFrom(
+              nameStatus: 'M\x00lib/x.dart\x00',
+              numstat: '2\t1\tlib/x.dart\x00',
+            ),
+            shortstat: ' 1 file changed, 2 insertions(+), 1 deletion(-)',
           ),
-          beadId: 'tg-1',
-          baseBranch: 'main',
-          commitLog: 'feat(x): do a thing',
-          diffStat: ' lib/x.dart | 2 +-',
-          diff: '--- a/lib/x.dart\n+++ b/lib/x.dart\n+the change',
-        );
-        expect(prompt, contains('do NOT run a tool'));
-        expect(prompt, contains('IMPERATIVE MOOD'));
-        expect(prompt, contains('NEVER write the tracker id `tg-1`'));
-        expect(prompt, contains('`Refs:` git trailer'));
-        expect(prompt, contains('+the change'));
-        expect(prompt, contains('lib/x.dart | 2 +-'));
-        expect(prompt, contains('CONTEXT ONLY'));
-      },
-    );
+        ),
+      );
 
-    test(
-      'asks for a 2-5 sentence human digest, prose-only, and EXEMPLIFIES it in '
-      'the answer object',
-      () {
-        final prompt = buildDescribePrompt(
-          bead: const Bead(id: 'tg-1', title: 'better titles'),
-          beadId: 'tg-1',
-          baseBranch: 'main',
-          commitLog: 'feat(x): do a thing',
-          diffStat: ' lib/x.dart | 2 +-',
-          diff: '+the change',
-        );
-        expect(prompt, contains('HUMAN DIGEST'));
-        expect(prompt, contains('2 to 5 complete sentences'));
-        expect(prompt, contains('NEVER opens the diff'));
-        expect(prompt, contains('no heading, no bullet list, no code fence'));
-        expect(prompt, contains('"summary":"The land step now reads its own'));
-        // The old, weak contract ("a short paragraph or two, or bullets") is
-        // GONE — the exemplar is the contract a model actually copies.
-        expect(prompt, isNot(contains('or bullets')));
-      },
-    );
-  });
+      test(
+        'carries the MANIFEST + the v1.0.0 rules + the no-foreign-reference '
+        'rule, asks for NO tool use, and forbids inventing a fact',
+        () {
+          final text = prompt();
+          expect(text, contains('do NOT run a tool'));
+          expect(text, contains('IMPERATIVE MOOD'));
+          expect(text, contains('NEVER write the tracker id `tg-1`'));
+          expect(text, contains('`Refs:` git trailer'));
+          expect(text, contains('USE ONLY THE FACTS IN THE MANIFEST'));
+          expect(text, contains('## The change manifest'));
+          expect(text, contains('- M lib/x.dart +2 -1'));
+          expect(text, contains('- diffstat: 1 file changed'));
+          expect(text, contains('- [ ] a testable criterion'));
+          // The PATCH is gone: the prompt carries facts, never hunks.
+          expect(text, isNot(contains('@@')));
+          expect(text, isNot(contains('--- a/lib/x.dart')));
+          expect(text, isNot(contains('### The diff')));
+        },
+      );
+
+      test(
+        'asks for a 2-5 sentence human digest, prose-only, and EXEMPLIFIES it '
+        'in the answer object',
+        () {
+          final text = prompt();
+          expect(text, contains('HUMAN DIGEST'));
+          expect(text, contains('2 to 5 complete sentences'));
+          expect(text, contains('NEVER opens the diff'));
+          expect(text, contains('no heading, no bullet list, no code fence'));
+          expect(text, contains('"summary":"The land step now reads its own'));
+          // The old, weak contract ("a short paragraph or two, or bullets") is
+          // GONE — the exemplar is the contract a model actually copies.
+          expect(text, isNot(contains('or bullets')));
+        },
+      );
+    },
+  );
 }
