@@ -16,6 +16,7 @@ import 'dart:io';
 
 import 'package:grid_assets/grid_assets.dart';
 import 'package:beads_dart/beads_dart.dart';
+import 'package:path/path.dart' as p;
 import 'package:grid_engine/grid_engine.dart';
 import 'package:grid_runtime/grid_runtime.dart';
 import 'package:test/test.dart';
@@ -432,6 +433,41 @@ void main() {
         'transport': 'structural',
         'round': '0',
       });
+    });
+
+    // The record grammar is MEASURED, not graded: a spec written before the
+    // grammar existed must keep the grade it shipped with, or landing the
+    // parser would have F'd the whole fleet's backlog at once.
+    test('a retained pre-grammar shipped spec grades A while shadow records '
+        'findings', () async {
+      final root = p.dirname(PackagedAssetLoader().root);
+      final retained = readSpecCorpus(
+        root,
+      ).firstWhere((entry) => entry.bead == 'pow-26dd');
+      final preContract = bead(retained.bead).copyWith(
+        acceptanceCriteria: retained.acceptance,
+        design: retained.design,
+      );
+      final parsed = parseSpecContract(
+        acceptance: retained.acceptance,
+        design: retained.design,
+      );
+
+      expect(parsed.findings, isNotEmpty);
+      expect(specStructuralFindings(preContract), isEmpty);
+
+      final c = _laneCtx(rubric: kSpecGatingRubric, beadOverride: preContract);
+      final out = await const SpecValidationCapability().run(c.context, c.args);
+      expect((out as Ok).payload!['grade'], 'A');
+
+      final report = renderSpecContractShadowReport([retained]);
+      expect(
+        report,
+        contains(
+          '| `${retained.bead}` | ${retained.closedAt} | '
+          '${retained.outcome} | ${parsed.findings.length} |',
+        ),
+      );
     });
 
     test(

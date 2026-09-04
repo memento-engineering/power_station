@@ -2,7 +2,10 @@
 //
 // Proves: the retained corpus is on disk and whole; every DECLARED overlap and
 // residue clause is quoted VERBATIM from the packaged rubric it names (so the
-// claim "this lane already asks for it" can never be invented); the report is
+// claim "this lane already asks for it" can never be invented); the SHADOW-ONLY
+// boundary is one sentence stated in the brief, the packaged rubric and the
+// accepted decision alike, so no surface can read the record rules as live
+// while another reads them as measured; the report is
 // pinned to its own regeneration; this measurement rides the recorded-artifact
 // writer the pack's other retained-corpus measurement uses rather than forking
 // it; and this bead changes NO routing — the committee's lane set is
@@ -38,7 +41,11 @@ void main() {
       expect(corpus, hasLength(10));
       for (final entry in corpus) {
         expect(entry.acceptance.trim(), isNotEmpty, reason: entry.bead);
-        expect(entry.design, contains('## Implementation Plan'), reason: entry.bead);
+        expect(
+          entry.design,
+          contains('## Implementation Plan'),
+          reason: entry.bead,
+        );
         expect(entry.outcome, 'shipped', reason: entry.bead);
         expect(entry.closedAt, isNotEmpty, reason: entry.bead);
       }
@@ -116,14 +123,16 @@ void main() {
     });
   });
 
-  test('the checked-in report EQUALS the regenerated one — '
-      '`dart run tool/spec_contract_shadow.dart --record` is the only writer',
-      () {
-    expect(
-      File(p.join(_root, kSpecContractShadowReport)).readAsStringSync(),
-      renderSpecContractShadowReport(corpus),
-    );
-  });
+  test(
+    'the checked-in report EQUALS the regenerated one — '
+    '`dart run tool/spec_contract_shadow.dart --record` is the only writer',
+    () {
+      expect(
+        File(p.join(_root, kSpecContractShadowReport)).readAsStringSync(),
+        renderSpecContractShadowReport(corpus),
+      );
+    },
+  );
 
   test('a read-only run over the checked-in report exits 0', () async {
     expect(await runSpecContractShadow(root: _root, record: false), 0);
@@ -133,9 +142,9 @@ void main() {
     test('`recordArtifact` is the ONE writer of a recorded artifact — no '
         'second temp-file-plus-rename site anywhere in lib/', () {
       final renamers = [
-        for (final file in Directory(p.join(_root, 'lib'))
-            .listSync(recursive: true)
-            .whereType<File>())
+        for (final file in Directory(
+          p.join(_root, 'lib'),
+        ).listSync(recursive: true).whereType<File>())
           if (file.path.endsWith('.dart') &&
               file.readAsStringSync().contains('.rename('))
             p.relative(file.path, from: _root),
@@ -162,6 +171,36 @@ void main() {
       await recordArtifact(file, 'replaced');
       expect(file.readAsStringSync(), 'replaced');
     });
+  });
+
+  test('the brief, rubric, and accepted decision state the shadow boundary', () {
+    const boundary =
+        'Record-contract findings are shadow-only until an explicit activation '
+        'ruling; the five presence and placeholder checks remain the live A/F '
+        'gate, and all five committee lanes remain unconditional.';
+    final decision = File(
+      p.normalize(
+        p.join(
+          _root,
+          '..',
+          '..',
+          'docs',
+          'decisions',
+          '2026-09-03-the-spec-structural-contract-becomes-a-typed-record-grammar.md',
+        ),
+      ),
+    ).readAsStringSync();
+
+    expect(kSpecStructuralContract, contains(boundary));
+    expect(loader.loadRubric(kSpecGatingRubric), contains(boundary));
+    expect(decision, contains(boundary));
+    expect(kSpecCommitteeRubrics, [
+      'spec-validation',
+      'coherence',
+      'decision-alignment',
+      'acceptance-testability',
+      'plan-completeness',
+    ]);
   });
 
   test('this bead changes NO routing: the lane set is unchanged and no critic '

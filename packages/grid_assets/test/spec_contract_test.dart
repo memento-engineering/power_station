@@ -82,10 +82,10 @@ final List<_Mutation> _mutations = [
     name: 'a `Paths:` field citing nothing repo-relative',
     rule: SpecContractRule.stepPath,
     mutate: (b) => b.copyWith(
-      design: _withoutLineContaining(b.design, 'Paths: ').replaceFirst(
-        'Change: ',
-        'Paths: `/etc/heartbeat.dart`\nChange: ',
-      ),
+      design: _withoutLineContaining(
+        b.design,
+        'Paths: ',
+      ).replaceFirst('Change: ', 'Paths: `/etc/heartbeat.dart`\nChange: '),
     ),
   ),
   (
@@ -248,7 +248,10 @@ void main() {
     test('prose, a bare word, and a non-register path do not resolve', () {
       expect(isResolvableDecisionReference('the heartbeat decision'), isFalse);
       expect(isResolvableDecisionReference('ADR-8'), isFalse);
-      expect(isResolvableDecisionReference('lib/src/code/specify.dart'), isFalse);
+      expect(
+        isResolvableDecisionReference('lib/src/code/specify.dart'),
+        isFalse,
+      );
       expect(isResolvableDecisionReference('#slug'), isFalse);
     });
   });
@@ -260,10 +263,7 @@ void main() {
       expect(parsed.contract.criteria, isEmpty);
       expect(parsed.contract.steps, isEmpty);
       expect(parsed.contract.validations, isEmpty);
-      expect(
-        parsed.contract.decisionNarrative,
-        DecisionLookupNarrative.cited,
-      );
+      expect(parsed.contract.decisionNarrative, DecisionLookupNarrative.cited);
     });
 
     test('a malformed record contributes a FINDING and nothing to the '
@@ -325,10 +325,8 @@ void main() {
   });
 
   group('the `## ADR Alignment` lookup NARRATIVE is typed', () {
-    ({String acceptance, String design}) spec(String body) => (
-      acceptance: '- [ ] AC-1 — one',
-      design: '## ADR Alignment\n$body\n',
-    );
+    ({String acceptance, String design}) spec(String body) =>
+        (acceptance: '- [ ] AC-1 — one', design: '## ADR Alignment\n$body\n');
 
     ({SpecContract contract, List<SpecContractFinding> findings}) parse(
       String body,
@@ -443,11 +441,13 @@ void main() {
           reason: parsed.findings.map((f) => f.render()).join('\n'),
         );
         expect(parsed.findings.single.line, greaterThan(0));
-        // The gate REPORTS it too: a rule the parser holds and the lane never
-        // surfaces would be a silent guard.
+        // The LIVE gate stays silent: a single-rule mutation of the exemplar
+        // still passes all five presence and placeholder checks, so it grades A
+        // while the shadow report carries the finding.
         expect(
           specStructuralFindings(mutated),
-          contains(parsed.findings.single.render()),
+          isEmpty,
+          reason: 'record-contract findings are measured only in shadow',
         );
       });
     }
@@ -491,10 +491,7 @@ void main() {
     test('a bulleted plan reports only the ORDINAL finding, never five '
         'missing-field findings', () {
       final b = _exemplar().copyWith(
-        design: kSpecExemplarDesign.replaceFirst(
-          '### Step 1 — Add',
-          '- Add',
-        ),
+        design: kSpecExemplarDesign.replaceFirst('### Step 1 — Add', '- Add'),
       );
       expect(
         specStructuralFindings(b).single,
