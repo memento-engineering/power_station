@@ -45,6 +45,8 @@ import '../assets/overlay_provenance.dart';
 import '../assets/vended_assets.dart';
 import 'circuit_migration.dart';
 import 'committee.dart';
+import 'committee_selection.dart';
+import 'committee_selection_evidence.dart';
 import 'conventional_commit.dart';
 import 'delivery.dart';
 import 'discovery.dart';
@@ -1254,6 +1256,8 @@ DefaultCapabilityRegistry buildCodeRegistry({
   BdRunner Function(String workspaceRoot)? specifyBdRunnerFor,
   sdk.GridAssetRegistry? assetRegistry,
   GridAssetRosterOverride? assetRosterOverride,
+  InferenceRunner? committeeClassifier,
+  CommitteeSelectionStore? committeeSelectionStore,
   String? overlaySourceRef,
   Map<String, String> overlayArgs = const {},
   AgentSessionAdapterRegistry sessionAdapters = kBuiltinAgentSessionAdapters,
@@ -1279,6 +1283,17 @@ DefaultCapabilityRegistry buildCodeRegistry({
   // composes the generated closure, it never builds a second catalog.
   final resolvedAssetRegistry =
       assetRegistry ?? GeneratedGridAssetRegistrant.registry;
+  // The SHADOW committee selector's three seams (bead `pow-1nl.1.1`), composed
+  // ONCE so the selector and both wrapped routes share one store.
+  final selectionStore =
+      committeeSelectionStore ?? const FileCommitteeSelectionStore();
+  final selectionInference =
+      committeeClassifier ?? const SystemInferenceRunner();
+  Future<({bool ok, String output})> classify(RuntimeConfig config) async {
+    final run = await selectionInference.run(config);
+    return (ok: run.ok, output: run.output);
+  }
+
   return DefaultCapabilityRegistry(
     capabilities: {
       // The SPEC-READINESS INTAKE LENS (bead `pow-q7n`) — the cheap ladder at
@@ -1353,7 +1368,13 @@ DefaultCapabilityRegistry buildCodeRegistry({
       // advance | RESPEC | escalate matrix. The code committee keeps the binary
       // `route` below; the two matrices are now independent (ADR-0000 A14,
       // which departs from A13(5)'s shared-route posture).
-      'spec-route': const SpecRouteCapability(),
+      // The SPEC route, WRAPPED in shadow bookkeeping (bead `pow-1nl.1.1`).
+      // The delegate and its matrix are untouched: the wrapper returns the
+      // delegate's exact verdict object and only writes a receipt beside it.
+      'spec-route': CommitteeShadowRouteCapability(
+        delegate: const SpecRouteCapability(),
+        store: selectionStore,
+      ),
       'agent': AgentCapability(
         devRoot: devRoot,
         assetRegistry: resolvedAssetRegistry,
@@ -1381,7 +1402,21 @@ DefaultCapabilityRegistry buildCodeRegistry({
       // source: the checks are mechanical, so the prose in `extension/rubrics/`
       // documents the contract rather than feeding a model.
       kDocsCheckCapabilityId: const DocsCheckCapability(),
-      'route': const CodeRouteCapability(),
+      // The CODE/DOCS route, WRAPPED in the same shadow bookkeeping.
+      'route': CommitteeShadowRouteCapability(
+        delegate: const CodeRouteCapability(),
+        store: selectionStore,
+      ),
+      // The shadow selector itself — one capability, three circuits, selected
+      // by `params['committeeStage']`. It depends on nothing priced and
+      // nothing depends on it.
+      kCommitteeSelectionStep: CommitteeSelectionCapability(
+        classifier: classify,
+        evidenceSource: const DiscoveryCommitteeSelectionEvidenceSource(
+          pinnedDiffPathFor: pinnedDiffPath,
+        ),
+        store: selectionStore,
+      ),
       'rebase': RebaseCapability(
         runner: gitRunner,
         assetRegistry: resolvedAssetRegistry,

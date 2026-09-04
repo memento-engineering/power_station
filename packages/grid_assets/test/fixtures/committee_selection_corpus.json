@@ -1,0 +1,975 @@
+[
+  {
+    "version": 1,
+    "sampleId": "fcd2ca3713d1dfa1a170857496f276657aee62bd611e3bae9412aaf6941502a2",
+    "joinId": "a8160693c22dda4f24e91680375b3dbfc52e7367d2dc2c35f3cb9af79abb8eaf",
+    "run": {
+      "version": 1,
+      "policyVersion": "1",
+      "stage": "spec_review",
+      "workBeadId": "pow-1nl",
+      "round": 2,
+      "nodePath": "pow-1nl/spec_review/committee-selection",
+      "selection": {
+        "policyVersion": "1",
+        "evidenceDigest": "585a0281f90a03239bbc001d2b48dff0d2fe4a1cf22d9d829b8a758738bb60f7",
+        "matchedRuleIds": [
+          "spec-intent",
+          "spec-acceptance"
+        ],
+        "selectedRubricIds": [
+          "spec-validation",
+          "coherence",
+          "acceptance-testability"
+        ],
+        "source": "deterministic",
+        "laneInputDigests": {
+          "spec-validation": "48b2d83d4e1a63fb47eba9864a4d15dae52f26ca42fe75837bfba2bcaa566ae6",
+          "coherence": "81d1a9d5c04f8eee93cd9bf660c22dd8f123ee1367413b5b5548607f55b4e7ab",
+          "decision-alignment": "85f5b13a85e2f428f88bd70d65af61b679c2a33342b2c30b2db203a32054ddd6",
+          "acceptance-testability": "39515bfd43e53c9042a8c8609ec4faa42be4760519b19fa855756263dd13f6e8",
+          "plan-completeness": "f9c3e2ec8e17ab605abd45e51f100f0297843a2043af0bae0aabc545ccd42baf"
+        }
+      },
+      "evidence": {
+        "stage": "spec_review",
+        "workBeadId": "pow-1nl",
+        "round": 2,
+        "intent": [
+          "title:bead-field:pow-1nl.title@sha256:aa"
+        ],
+        "acceptance": [
+          "acceptance_criteria:bead-field:pow-1nl.ac@sha256:bb"
+        ],
+        "paths": [],
+        "decisions": [],
+        "priorArt": [],
+        "context": [],
+        "flags": [],
+        "changedPaths": [],
+        "pinnedDiffDigest": "",
+        "missingEvidenceIds": [],
+        "truncated": false
+      },
+      "fullRubricIds": [
+        "spec-validation",
+        "coherence",
+        "decision-alignment",
+        "acceptance-testability",
+        "plan-completeness"
+      ],
+      "gatingRubricIds": [
+        "spec-validation"
+      ],
+      "attempts": [],
+      "missingFields": []
+    },
+    "route": {
+      "nodePath": "pow-1nl/spec_review/route",
+      "type": "advance",
+      "reason": "",
+      "payload": {
+        "verdict": "advance",
+        "grades": "spec-validation=A,coherence=B,decision-alignment=D,acceptance-testability=A,plan-completeness=B",
+        "rule": "single-finding-advance",
+        "fix_in_flight": "decision-alignment=D",
+        "fix_in_flight_finding": "cite ADR-0003 D3/D4 on the rc pin"
+      }
+    },
+    "selectedRubricIds": [
+      "spec-validation",
+      "coherence",
+      "acceptance-testability"
+    ],
+    "omittedRubricIds": [
+      "decision-alignment",
+      "plan-completeness"
+    ],
+    "lanes": [
+      {
+        "report": {
+          "lane": "spec-validation",
+          "gradeCounts": {
+            "A": 1
+          },
+          "adverseVerdicts": 0,
+          "gateCausing": 0,
+          "overridden": 0,
+          "upheld": 0,
+          "unresolved": 0,
+          "respecConverged": 0,
+          "respecUnconverged": 0,
+          "respecNoFollowUp": 0,
+          "runs": 1,
+          "runsFromFallback": 0,
+          "meanCostUsd": 0.0,
+          "meanDurationMs": 61000
+        },
+        "usage": {
+          "lane": "spec-validation",
+          "beadId": "pow-1nl",
+          "fromFallback": false,
+          "costUsd": 0.0,
+          "durationMs": 61000
+        },
+        "gateDisposition": null,
+        "rubricId": "spec-validation",
+        "nodePath": "pow-1nl/spec_review/spec-validation",
+        "gating": true,
+        "grade": "A",
+        "transport": "file",
+        "rationale": "the spec-validation lane said so",
+        "finding": null,
+        "owner": null,
+        "refinement": null,
+        "model": null,
+        "tokensIn": 0,
+        "tokensOut": 0,
+        "costUsd": 0.0,
+        "premiumRequests": 0,
+        "numTurns": 0,
+        "durationMs": 61000,
+        "truncated": false,
+        "missingFields": []
+      },
+      {
+        "report": {
+          "lane": "coherence",
+          "gradeCounts": {
+            "B": 1
+          },
+          "adverseVerdicts": 0,
+          "gateCausing": 0,
+          "overridden": 0,
+          "upheld": 0,
+          "unresolved": 0,
+          "respecConverged": 0,
+          "respecUnconverged": 0,
+          "respecNoFollowUp": 0,
+          "runs": 1,
+          "runsFromFallback": 0,
+          "meanCostUsd": 0.31,
+          "meanDurationMs": 61000
+        },
+        "usage": {
+          "lane": "coherence",
+          "beadId": "pow-1nl",
+          "fromFallback": false,
+          "costUsd": 0.31,
+          "durationMs": 61000
+        },
+        "gateDisposition": null,
+        "rubricId": "coherence",
+        "nodePath": "pow-1nl/spec_review/coherence",
+        "gating": false,
+        "grade": "B",
+        "transport": "file",
+        "rationale": "the coherence lane said so",
+        "finding": null,
+        "owner": null,
+        "refinement": "pow-1nl.2 duplicates this scope",
+        "model": "sonnet",
+        "tokensIn": 4200,
+        "tokensOut": 380,
+        "costUsd": 0.31,
+        "premiumRequests": 0,
+        "numTurns": 6,
+        "durationMs": 61000,
+        "truncated": false,
+        "missingFields": []
+      },
+      {
+        "report": {
+          "lane": "decision-alignment",
+          "gradeCounts": {
+            "D": 1
+          },
+          "adverseVerdicts": 1,
+          "gateCausing": 1,
+          "overridden": 1,
+          "upheld": 0,
+          "unresolved": 0,
+          "respecConverged": 0,
+          "respecUnconverged": 0,
+          "respecNoFollowUp": 1,
+          "runs": 1,
+          "runsFromFallback": 0,
+          "meanCostUsd": 0.28,
+          "meanDurationMs": 61000
+        },
+        "usage": {
+          "lane": "decision-alignment",
+          "beadId": "pow-1nl",
+          "fromFallback": false,
+          "costUsd": 0.28,
+          "durationMs": 61000
+        },
+        "gateDisposition": "overridden",
+        "rubricId": "decision-alignment",
+        "nodePath": "pow-1nl/spec_review/decision-alignment",
+        "gating": false,
+        "grade": "D",
+        "transport": "envelope",
+        "rationale": "the decision-alignment lane said so",
+        "finding": "cite ADR-0003 D3/D4 on the rc pin",
+        "owner": "architect",
+        "refinement": null,
+        "model": "sonnet",
+        "tokensIn": 4200,
+        "tokensOut": 380,
+        "costUsd": 0.28,
+        "premiumRequests": 0,
+        "numTurns": 6,
+        "durationMs": 61000,
+        "truncated": false,
+        "missingFields": []
+      },
+      {
+        "report": {
+          "lane": "acceptance-testability",
+          "gradeCounts": {
+            "A": 1
+          },
+          "adverseVerdicts": 0,
+          "gateCausing": 0,
+          "overridden": 0,
+          "upheld": 0,
+          "unresolved": 0,
+          "respecConverged": 0,
+          "respecUnconverged": 0,
+          "respecNoFollowUp": 0,
+          "runs": 1,
+          "runsFromFallback": 0,
+          "meanCostUsd": 0.24,
+          "meanDurationMs": 61000
+        },
+        "usage": {
+          "lane": "acceptance-testability",
+          "beadId": "pow-1nl",
+          "fromFallback": false,
+          "costUsd": 0.24,
+          "durationMs": 61000
+        },
+        "gateDisposition": null,
+        "rubricId": "acceptance-testability",
+        "nodePath": "pow-1nl/spec_review/acceptance-testability",
+        "gating": false,
+        "grade": "A",
+        "transport": "file",
+        "rationale": "the acceptance-testability lane said so",
+        "finding": null,
+        "owner": null,
+        "refinement": null,
+        "model": "sonnet",
+        "tokensIn": 4200,
+        "tokensOut": 380,
+        "costUsd": 0.24,
+        "premiumRequests": 0,
+        "numTurns": 6,
+        "durationMs": 61000,
+        "truncated": false,
+        "missingFields": []
+      },
+      {
+        "report": {
+          "lane": "plan-completeness",
+          "gradeCounts": {
+            "B": 1
+          },
+          "adverseVerdicts": 0,
+          "gateCausing": 0,
+          "overridden": 0,
+          "upheld": 0,
+          "unresolved": 0,
+          "respecConverged": 0,
+          "respecUnconverged": 0,
+          "respecNoFollowUp": 0,
+          "runs": 1,
+          "runsFromFallback": 0,
+          "meanCostUsd": 0.33,
+          "meanDurationMs": 61000
+        },
+        "usage": {
+          "lane": "plan-completeness",
+          "beadId": "pow-1nl",
+          "fromFallback": false,
+          "costUsd": 0.33,
+          "durationMs": 61000
+        },
+        "gateDisposition": null,
+        "rubricId": "plan-completeness",
+        "nodePath": "pow-1nl/spec_review/plan-completeness",
+        "gating": false,
+        "grade": "B",
+        "transport": "file",
+        "rationale": "the plan-completeness lane said so",
+        "finding": null,
+        "owner": null,
+        "refinement": null,
+        "model": "sonnet",
+        "tokensIn": 4200,
+        "tokensOut": 380,
+        "costUsd": 0.33,
+        "premiumRequests": 0,
+        "numTurns": 6,
+        "durationMs": 61000,
+        "truncated": false,
+        "missingFields": []
+      }
+    ],
+    "actionLaneIds": [
+      "decision-alignment"
+    ],
+    "gateDisposition": "overridden",
+    "downstreamJoinKeys": {
+      "workBeadId": "pow-1nl",
+      "round": "2",
+      "stage": "spec_review",
+      "routeNodePath": "pow-1nl/spec_review/route",
+      "siblingScope": "pow-1nl/spec_review/"
+    },
+    "actual": {
+      "samples": [
+        {
+          "lane": "spec-validation",
+          "beadId": "pow-1nl",
+          "fromFallback": false,
+          "costUsd": 0.0,
+          "durationMs": 61000
+        },
+        {
+          "lane": "coherence",
+          "beadId": "pow-1nl",
+          "fromFallback": false,
+          "costUsd": 0.31,
+          "durationMs": 61000
+        },
+        {
+          "lane": "decision-alignment",
+          "beadId": "pow-1nl",
+          "fromFallback": false,
+          "costUsd": 0.28,
+          "durationMs": 61000
+        },
+        {
+          "lane": "acceptance-testability",
+          "beadId": "pow-1nl",
+          "fromFallback": false,
+          "costUsd": 0.24,
+          "durationMs": 61000
+        },
+        {
+          "lane": "plan-completeness",
+          "beadId": "pow-1nl",
+          "fromFallback": false,
+          "costUsd": 0.33,
+          "durationMs": 61000
+        }
+      ],
+      "contributingRunIds": [
+        "spec-validation",
+        "coherence",
+        "decision-alignment",
+        "acceptance-testability",
+        "plan-completeness"
+      ],
+      "missingLaneIds": [],
+      "tokensIn": 16800,
+      "tokensOut": 1520,
+      "costUsd": 1.1600000000000001,
+      "premiumRequests": 0,
+      "numTurns": 24,
+      "durationMs": 305000
+    },
+    "classifier": {
+      "samples": [],
+      "contributingRunIds": [],
+      "missingLaneIds": [],
+      "tokensIn": 0,
+      "tokensOut": 0,
+      "costUsd": 0.0,
+      "premiumRequests": 0,
+      "numTurns": 0,
+      "durationMs": 0
+    },
+    "counterfactual": {
+      "samples": [
+        {
+          "lane": "spec-validation",
+          "beadId": "pow-1nl",
+          "fromFallback": false,
+          "costUsd": 0.0,
+          "durationMs": 61000
+        },
+        {
+          "lane": "coherence",
+          "beadId": "pow-1nl",
+          "fromFallback": false,
+          "costUsd": 0.31,
+          "durationMs": 61000
+        },
+        {
+          "lane": "acceptance-testability",
+          "beadId": "pow-1nl",
+          "fromFallback": false,
+          "costUsd": 0.24,
+          "durationMs": 61000
+        }
+      ],
+      "contributingRunIds": [
+        "spec-validation",
+        "coherence",
+        "acceptance-testability"
+      ],
+      "missingLaneIds": [],
+      "tokensIn": 8400,
+      "tokensOut": 760,
+      "costUsd": 0.55,
+      "premiumRequests": 0,
+      "numTurns": 12,
+      "durationMs": 183000
+    },
+    "truncated": false,
+    "missingFields": []
+  },
+  {
+    "version": 1,
+    "sampleId": "1015c4163130dfeed4ccab91abf497727a18492255deb4739a6968d736021a40",
+    "joinId": "98a3b300b61a04c1cc1b42fb83996997cbdc115c4eded86d9a16d704fcbf70fb",
+    "run": {
+      "version": 1,
+      "policyVersion": "1",
+      "stage": "code_review",
+      "workBeadId": "pow-1nl",
+      "round": 3,
+      "nodePath": "pow-1nl/review/committee-selection",
+      "selection": {
+        "policyVersion": "1",
+        "evidenceDigest": "936727386103748ccc52f32377f35a3c69b6a5388af44d42019b74ee4e7a6cd0",
+        "matchedRuleIds": [],
+        "selectedRubricIds": [
+          "code-validation",
+          "declared-tests-present",
+          "spec-adherence",
+          "regression-risk",
+          "test-coverage"
+        ],
+        "source": "fullFallback",
+        "laneInputDigests": {
+          "code-validation": "efef060971a46cee5b36d91352649722f052437f1dfb7d0cb8a9119985463c9f",
+          "declared-tests-present": "31ea15f689a3462fcc15656edfa01aabb39bb8e6cda8e814c6f044ae9dd17e1a",
+          "spec-adherence": "a75119171802b49d7bdb72be1d3cee016be12e1bb5c6d7d9cd1b6331169f2707",
+          "regression-risk": "236ca6100eef09ef913e5313f2224901d5461ac56727a4ea966848243f55a8e3",
+          "test-coverage": "95068ee5c946a265c24c15acf8ceaec433421eec152333e2e83252c708d3e22c"
+        }
+      },
+      "evidence": {
+        "stage": "code_review",
+        "workBeadId": "pow-1nl",
+        "round": 3,
+        "intent": [
+          "title:bead-field:pow-1nl.title@sha256:aa"
+        ],
+        "acceptance": [],
+        "paths": [],
+        "decisions": [],
+        "priorArt": [],
+        "context": [],
+        "flags": [],
+        "changedPaths": [],
+        "pinnedDiffDigest": "",
+        "missingEvidenceIds": [
+          "pinned-diff:no-targets"
+        ],
+        "truncated": true
+      },
+      "fullRubricIds": [
+        "code-validation",
+        "declared-tests-present",
+        "spec-adherence",
+        "regression-risk",
+        "test-coverage"
+      ],
+      "gatingRubricIds": [
+        "code-validation",
+        "declared-tests-present"
+      ],
+      "attempts": [
+        {
+          "attempt": 1,
+          "kind": "malformed",
+          "usage": {
+            "lane": "committee-selection",
+            "beadId": "pow-1nl",
+            "fromFallback": false,
+            "costUsd": 0.004,
+            "durationMs": 2100
+          },
+          "acceptedRubricIds": [],
+          "rejectedRubricIds": [],
+          "outputDigest": "1f0d3d4d3ecb2d2a5f2b8b2f3f0c6a9c1d2e3f405162738495a6b7c8d9e0f1a2",
+          "reason": "",
+          "launched": true,
+          "model": "haiku",
+          "tokensIn": 1800,
+          "tokensOut": 22,
+          "costUsd": 0.004,
+          "premiumRequests": 0,
+          "numTurns": 1,
+          "harnessDurationMs": 2100
+        },
+        {
+          "attempt": 2,
+          "kind": "unknown",
+          "usage": {
+            "lane": "committee-selection",
+            "beadId": "pow-1nl",
+            "fromFallback": false,
+            "costUsd": 0.005,
+            "durationMs": 2400
+          },
+          "acceptedRubricIds": [],
+          "rejectedRubricIds": [
+            "adr-alignment",
+            "spec-adherence"
+          ],
+          "outputDigest": "2a1b0c9d8e7f60514233445566778899aabbccddeeff00112233445566778899",
+          "reason": "classifier:not-ok",
+          "launched": true,
+          "model": "haiku",
+          "tokensIn": 1800,
+          "tokensOut": 31,
+          "costUsd": 0.005,
+          "premiumRequests": 0,
+          "numTurns": 1,
+          "harnessDurationMs": 2400
+        }
+      ],
+      "missingFields": [
+        "evidence-source:pinned diff carried no targets"
+      ]
+    },
+    "route": {
+      "nodePath": "pow-1nl/review/route",
+      "type": "escalate",
+      "reason": "a critic returned F (test-coverage) — rework",
+      "payload": {}
+    },
+    "selectedRubricIds": [
+      "code-validation",
+      "declared-tests-present",
+      "spec-adherence",
+      "regression-risk",
+      "test-coverage"
+    ],
+    "omittedRubricIds": [],
+    "lanes": [
+      {
+        "report": {
+          "lane": "code-validation",
+          "gradeCounts": {
+            "A": 1
+          },
+          "adverseVerdicts": 0,
+          "gateCausing": 0,
+          "overridden": 0,
+          "upheld": 0,
+          "unresolved": 0,
+          "respecConverged": 0,
+          "respecUnconverged": 0,
+          "respecNoFollowUp": 0,
+          "runs": 1,
+          "runsFromFallback": 0,
+          "meanCostUsd": 0.0,
+          "meanDurationMs": 240000
+        },
+        "usage": {
+          "lane": "code-validation",
+          "beadId": "pow-1nl",
+          "fromFallback": false,
+          "costUsd": 0.0,
+          "durationMs": 240000
+        },
+        "gateDisposition": null,
+        "rubricId": "code-validation",
+        "nodePath": "pow-1nl/review/code-validation",
+        "gating": true,
+        "grade": "A",
+        "transport": "file",
+        "rationale": "the code-validation lane said so",
+        "finding": null,
+        "owner": null,
+        "refinement": null,
+        "model": null,
+        "tokensIn": 0,
+        "tokensOut": 0,
+        "costUsd": 0,
+        "premiumRequests": 0,
+        "numTurns": 0,
+        "durationMs": 240000,
+        "truncated": false,
+        "missingFields": []
+      },
+      {
+        "report": {
+          "lane": "declared-tests-present",
+          "gradeCounts": {
+            "A": 1
+          },
+          "adverseVerdicts": 0,
+          "gateCausing": 0,
+          "overridden": 0,
+          "upheld": 0,
+          "unresolved": 0,
+          "respecConverged": 0,
+          "respecUnconverged": 0,
+          "respecNoFollowUp": 0,
+          "runs": 1,
+          "runsFromFallback": 0,
+          "meanCostUsd": 0.0,
+          "meanDurationMs": 240000
+        },
+        "usage": {
+          "lane": "declared-tests-present",
+          "beadId": "pow-1nl",
+          "fromFallback": false,
+          "costUsd": 0.0,
+          "durationMs": 240000
+        },
+        "gateDisposition": null,
+        "rubricId": "declared-tests-present",
+        "nodePath": "pow-1nl/review/declared-tests-present",
+        "gating": true,
+        "grade": "A",
+        "transport": "file",
+        "rationale": "the declared-tests-present lane said so",
+        "finding": null,
+        "owner": null,
+        "refinement": null,
+        "model": null,
+        "tokensIn": 0,
+        "tokensOut": 0,
+        "costUsd": 0,
+        "premiumRequests": 0,
+        "numTurns": 0,
+        "durationMs": 240000,
+        "truncated": false,
+        "missingFields": []
+      },
+      {
+        "report": {
+          "lane": "spec-adherence",
+          "gradeCounts": {
+            "B": 1
+          },
+          "adverseVerdicts": 0,
+          "gateCausing": 0,
+          "overridden": 0,
+          "upheld": 0,
+          "unresolved": 0,
+          "respecConverged": 0,
+          "respecUnconverged": 0,
+          "respecNoFollowUp": 0,
+          "runs": 1,
+          "runsFromFallback": 0,
+          "meanCostUsd": 0.58,
+          "meanDurationMs": 240000
+        },
+        "usage": {
+          "lane": "spec-adherence",
+          "beadId": "pow-1nl",
+          "fromFallback": false,
+          "costUsd": 0.58,
+          "durationMs": 240000
+        },
+        "gateDisposition": null,
+        "rubricId": "spec-adherence",
+        "nodePath": "pow-1nl/review/spec-adherence",
+        "gating": false,
+        "grade": "B",
+        "transport": "file",
+        "rationale": "the spec-adherence lane said so",
+        "finding": null,
+        "owner": null,
+        "refinement": null,
+        "model": "sonnet",
+        "tokensIn": 51000,
+        "tokensOut": 640,
+        "costUsd": 0.58,
+        "premiumRequests": 0,
+        "numTurns": 12,
+        "durationMs": 240000,
+        "truncated": true,
+        "missingFields": []
+      },
+      {
+        "report": {
+          "lane": "regression-risk",
+          "gradeCounts": {
+            "C": 1
+          },
+          "adverseVerdicts": 0,
+          "gateCausing": 0,
+          "overridden": 0,
+          "upheld": 0,
+          "unresolved": 0,
+          "respecConverged": 0,
+          "respecUnconverged": 0,
+          "respecNoFollowUp": 0,
+          "runs": 1,
+          "runsFromFallback": 0,
+          "meanCostUsd": 0.61,
+          "meanDurationMs": 240000
+        },
+        "usage": {
+          "lane": "regression-risk",
+          "beadId": "pow-1nl",
+          "fromFallback": false,
+          "costUsd": 0.61,
+          "durationMs": 240000
+        },
+        "gateDisposition": null,
+        "rubricId": "regression-risk",
+        "nodePath": "pow-1nl/review/regression-risk",
+        "gating": false,
+        "grade": "C",
+        "transport": "file",
+        "rationale": "the regression-risk lane said so",
+        "finding": null,
+        "owner": null,
+        "refinement": null,
+        "model": "sonnet",
+        "tokensIn": 51000,
+        "tokensOut": 640,
+        "costUsd": 0.61,
+        "premiumRequests": 0,
+        "numTurns": 12,
+        "durationMs": 240000,
+        "truncated": false,
+        "missingFields": []
+      },
+      {
+        "report": {
+          "lane": "test-coverage",
+          "gradeCounts": {
+            "F": 1
+          },
+          "adverseVerdicts": 1,
+          "gateCausing": 1,
+          "overridden": 0,
+          "upheld": 1,
+          "unresolved": 0,
+          "respecConverged": 0,
+          "respecUnconverged": 0,
+          "respecNoFollowUp": 1,
+          "runs": 1,
+          "runsFromFallback": 0,
+          "meanCostUsd": null,
+          "meanDurationMs": null
+        },
+        "usage": {
+          "lane": "test-coverage",
+          "beadId": "pow-1nl",
+          "fromFallback": false,
+          "costUsd": null,
+          "durationMs": null
+        },
+        "gateDisposition": "upheld",
+        "rubricId": "test-coverage",
+        "nodePath": "pow-1nl/review/test-coverage",
+        "gating": false,
+        "grade": "F",
+        "transport": "fail-closed-default",
+        "rationale": "no verdict artifact and no envelope — fail-closed",
+        "finding": null,
+        "owner": null,
+        "refinement": null,
+        "model": null,
+        "tokensIn": null,
+        "tokensOut": null,
+        "costUsd": null,
+        "premiumRequests": null,
+        "numTurns": null,
+        "durationMs": null,
+        "truncated": false,
+        "missingFields": [
+          "costUsd",
+          "tokensIn",
+          "tokensOut",
+          "durationMs",
+          "model"
+        ]
+      }
+    ],
+    "actionLaneIds": [
+      "test-coverage"
+    ],
+    "gateDisposition": "upheld",
+    "downstreamJoinKeys": {
+      "workBeadId": "pow-1nl",
+      "round": "3",
+      "stage": "code_review",
+      "routeNodePath": "pow-1nl/review/route",
+      "siblingScope": "pow-1nl/review/"
+    },
+    "actual": {
+      "samples": [
+        {
+          "lane": "code-validation",
+          "beadId": "pow-1nl",
+          "fromFallback": false,
+          "costUsd": 0.0,
+          "durationMs": 240000
+        },
+        {
+          "lane": "declared-tests-present",
+          "beadId": "pow-1nl",
+          "fromFallback": false,
+          "costUsd": 0.0,
+          "durationMs": 240000
+        },
+        {
+          "lane": "spec-adherence",
+          "beadId": "pow-1nl",
+          "fromFallback": false,
+          "costUsd": 0.58,
+          "durationMs": 240000
+        },
+        {
+          "lane": "regression-risk",
+          "beadId": "pow-1nl",
+          "fromFallback": false,
+          "costUsd": 0.61,
+          "durationMs": 240000
+        },
+        {
+          "lane": "test-coverage",
+          "beadId": "pow-1nl",
+          "fromFallback": false,
+          "costUsd": null,
+          "durationMs": null
+        }
+      ],
+      "contributingRunIds": [
+        "code-validation",
+        "declared-tests-present",
+        "spec-adherence",
+        "regression-risk",
+        "test-coverage"
+      ],
+      "missingLaneIds": [
+        "test-coverage"
+      ],
+      "tokensIn": null,
+      "tokensOut": null,
+      "costUsd": null,
+      "premiumRequests": null,
+      "numTurns": null,
+      "durationMs": null
+    },
+    "classifier": {
+      "samples": [
+        {
+          "lane": "committee-selection",
+          "beadId": "pow-1nl",
+          "fromFallback": false,
+          "costUsd": 0.004,
+          "durationMs": 2100
+        },
+        {
+          "lane": "committee-selection",
+          "beadId": "pow-1nl",
+          "fromFallback": false,
+          "costUsd": 0.005,
+          "durationMs": 2400
+        }
+      ],
+      "contributingRunIds": [
+        "classifier-attempt-1",
+        "classifier-attempt-2"
+      ],
+      "missingLaneIds": [],
+      "tokensIn": 3600,
+      "tokensOut": 53,
+      "costUsd": 0.009000000000000001,
+      "premiumRequests": 0,
+      "numTurns": 2,
+      "durationMs": 4500
+    },
+    "counterfactual": {
+      "samples": [
+        {
+          "lane": "code-validation",
+          "beadId": "pow-1nl",
+          "fromFallback": false,
+          "costUsd": 0.0,
+          "durationMs": 240000
+        },
+        {
+          "lane": "declared-tests-present",
+          "beadId": "pow-1nl",
+          "fromFallback": false,
+          "costUsd": 0.0,
+          "durationMs": 240000
+        },
+        {
+          "lane": "spec-adherence",
+          "beadId": "pow-1nl",
+          "fromFallback": false,
+          "costUsd": 0.58,
+          "durationMs": 240000
+        },
+        {
+          "lane": "regression-risk",
+          "beadId": "pow-1nl",
+          "fromFallback": false,
+          "costUsd": 0.61,
+          "durationMs": 240000
+        },
+        {
+          "lane": "test-coverage",
+          "beadId": "pow-1nl",
+          "fromFallback": false,
+          "costUsd": null,
+          "durationMs": null
+        },
+        {
+          "lane": "committee-selection",
+          "beadId": "pow-1nl",
+          "fromFallback": false,
+          "costUsd": 0.004,
+          "durationMs": 2100
+        },
+        {
+          "lane": "committee-selection",
+          "beadId": "pow-1nl",
+          "fromFallback": false,
+          "costUsd": 0.005,
+          "durationMs": 2400
+        }
+      ],
+      "contributingRunIds": [
+        "code-validation",
+        "declared-tests-present",
+        "spec-adherence",
+        "regression-risk",
+        "test-coverage",
+        "classifier-attempt-1",
+        "classifier-attempt-2"
+      ],
+      "missingLaneIds": [
+        "test-coverage"
+      ],
+      "tokensIn": null,
+      "tokensOut": null,
+      "costUsd": null,
+      "premiumRequests": null,
+      "numTurns": null,
+      "durationMs": null
+    },
+    "truncated": true,
+    "missingFields": [
+      "selection-run:stale"
+    ]
+  }
+]

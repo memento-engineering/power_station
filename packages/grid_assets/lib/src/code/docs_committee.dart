@@ -42,6 +42,7 @@ import 'package:path/path.dart' as p;
 
 import 'circuit_migration.dart';
 import 'committee.dart';
+import 'committee_selection.dart';
 import 'specify.dart';
 
 /// The lane whose every CITED file path must resolve in the tree.
@@ -545,6 +546,22 @@ const Circuit kDocsReviewCircuit = Circuit(
       params: {'rubric': 'spec-adherence'},
       dependsOn: {kPinDiffStep},
     ),
+    // The SHADOW committee selector (bead `pow-1nl.1.1`) — the CODE stage (a
+    // docs diff is still a diff), a non-authoritative sibling of the four
+    // lanes, and a dependency of nothing.
+    CapabilityStep(
+      stepId: kCommitteeSelectionStep,
+      capabilityId: kCommitteeSelectionStep,
+      dependsOn: {kPinDiffStep},
+      params: {
+        kCommitteeSelectionStageParam: 'code_review',
+        kCommitteeFullRubricsParam:
+            'citation-paths-resolve,terminology-ban,section-structure,'
+            'spec-adherence',
+        kCommitteeGatingRubricsParam:
+            'citation-paths-resolve,terminology-ban,section-structure',
+      },
+    ),
     CapabilityStep(
       stepId: 'route',
       capabilityId: 'route',
@@ -562,6 +579,9 @@ const Circuit kDocsReviewCircuit = Circuit(
             'citation-paths-resolve,terminology-ban,section-structure,'
             'spec-adherence',
         'gating': 'citation-paths-resolve,terminology-ban,section-structure',
+        // The stage the SHADOW receipt is filed under (bead `pow-1nl.1.1`);
+        // this route's matrix never reads it.
+        kCommitteeSelectionStageParam: 'code_review',
       },
     ),
   ],
@@ -624,11 +644,21 @@ Circuit withReviewCircuitId(Circuit base, String circuitId) {
 /// in space_station `lib/src/up_command.dart`. The docs committee is armed only
 /// when that line becomes `const ChangeShapeCircuitResolver(kCodeCircuit)`.
 class ChangeShapeCircuitResolver implements SessionResolver {
-  /// Creates the resolver over the CURRENT code root circuit [code].
-  const ChangeShapeCircuitResolver(this.code);
+  /// Creates the resolver over the CURRENT code root circuit [code], mounting
+  /// [selectionPolicy] as the ambient shadow-selection policy value.
+  const ChangeShapeCircuitResolver(
+    this.code, {
+    this.selectionPolicy = kCommitteeSelectionPolicy,
+  });
 
   /// The CURRENT code root circuit — `kCodeCircuit` in production.
   final Circuit code;
+
+  /// The shadow committee-selection policy this session's selector reads
+  /// (bead `pow-1nl.1.1`). Config = VALUES in the tree (ADR-0008 D-H): it is
+  /// mounted as an `InheritedSeed` above the session and re-read at every
+  /// capability entry, never cached in a field the selector consults.
+  final CommitteeSelectionPolicy selectionPolicy;
 
   /// The root circuit for [shape] — [ChangeShape.docs] and
   /// [ChangeShape.metadata] share the docs committee (neither carries a test
@@ -641,7 +671,12 @@ class ChangeShapeCircuitResolver implements SessionResolver {
 
   @override
   Seed sessionFor({required Bead bead, SessionProjection? session}) =>
-      CodeCircuitResolver(
-        circuitFor(changeShapeOf(bead)),
-      ).sessionFor(bead: bead, session: session);
+      InheritedSeed<CommitteeSelectionPolicy>(
+        value: selectionPolicy,
+        child: CodeCircuitResolver(
+          // Recomputed on EVERY build — the classification is never cached, so
+          // a bead whose Touches change moves committees on the next build.
+          circuitFor(changeShapeOf(bead)),
+        ).sessionFor(bead: bead, session: session),
+      );
 }

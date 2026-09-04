@@ -99,6 +99,7 @@ import '../agent/typed_environment.dart';
 import '../agent/usage_report.dart';
 import '../assets/overlay_materializer.dart' show kDefaultOverlayRunner;
 import 'committee.dart';
+import 'committee_selection.dart';
 import 'conventional_commit.dart' show lintConventionalSubject;
 import 'decision_register.dart';
 import 'discovery.dart';
@@ -480,6 +481,23 @@ const Circuit kSpecReviewCircuit = Circuit(
       params: {'rubric': 'plan-completeness'},
       dependsOn: {kClearCritiqueStep},
     ),
+    // The SHADOW committee selector (bead `pow-1nl.1.1`) — a NON-AUTHORITATIVE
+    // sibling of the spec lanes. It joins on the hygiene wipe alone (the same
+    // round-freshness dependency every lane has) and NOTHING joins on it, so
+    // the route decides over the full committee exactly as before. It reads the
+    // round-stamped discovery artifacts, never `.grid/critique`.
+    CapabilityStep(
+      stepId: kCommitteeSelectionStep,
+      capabilityId: kCommitteeSelectionStep,
+      dependsOn: {kClearCritiqueStep},
+      params: {
+        kCommitteeSelectionStageParam: 'spec_review',
+        kCommitteeFullRubricsParam:
+            'spec-validation,coherence,decision-alignment,'
+            'acceptance-testability,plan-completeness',
+        kCommitteeGatingRubricsParam: kSpecGatingRubric,
+      },
+    ),
     CapabilityStep(
       stepId: 'route',
       // The SPEC route (bead `pow-7nm`) — the three-way matrix (advance |
@@ -498,6 +516,9 @@ const Circuit kSpecReviewCircuit = Circuit(
             'spec-validation,coherence,decision-alignment,'
             'acceptance-testability,plan-completeness',
         'gating': kSpecGatingRubric,
+        // The stage the SHADOW receipt is filed under (bead `pow-1nl.1.1`);
+        // this route's matrix never reads it.
+        kCommitteeSelectionStageParam: 'spec_review',
         // The DECLARATIVE backward-motion edge. The route does not REPORT a
         // rewind — the engine refuses a reported one outright. It stamps
         // `grade: 'F'` on its own result and the engine DERIVES the wave off

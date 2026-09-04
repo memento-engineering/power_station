@@ -175,6 +175,10 @@ void main() {
         kClearCritiqueStep,
         kSpecGatingRubric,
         ...kSpecLlmRubrics,
+        // The SHADOW selector (bead `pow-1nl.1.1`) is a step of this circuit,
+        // but a dependency of nothing — the route below still joins on the
+        // five rubric lanes and nothing else.
+        kCommitteeSelectionStep,
         'route',
       });
       // The READINESS LADDER is the head (bead `pow-q7n`) — cheapest first, and
@@ -221,8 +225,35 @@ void main() {
       // the backward-motion edge the engine's derivation walks: a `grade: 'F'`
       // stamped by THIS step invalidates `specify` ∪ its transitive dependents
       // ∪ this route.
+      // The selector rides the SAME round-freshness dependency every lane has,
+      // and carries the full/gating rosters as VALUES so the policy library
+      // never imports a committee's constants.
+      final selector = byId[kCommitteeSelectionStep]! as CapabilityStep;
+      expect(selector.capabilityId, kCommitteeSelectionStep);
+      expect(selector.dependsOn, {kClearCritiqueStep});
+      expect(
+        selector.params[kCommitteeSelectionStageParam],
+        CommitteeStage.specReview.wire,
+      );
+      expect(
+        selector.params[kCommitteeFullRubricsParam],
+        kSpecCommitteeRubrics.join(','),
+      );
+      expect(selector.params[kCommitteeGatingRubricsParam], kSpecGatingRubric);
+
       final route = byId['route']! as CapabilityStep;
-      expect(route.dependsOn, {kSpecGatingRubric, ...kSpecLlmRubrics});
+      expect(
+        route.dependsOn,
+        {kSpecGatingRubric, ...kSpecLlmRubrics},
+        reason:
+            'the route joins the FULL committee and NEVER the shadow selector '
+            '— classification can therefore never withhold a verdict',
+      );
+      expect(route.dependsOn, isNot(contains(kCommitteeSelectionStep)));
+      expect(
+        route.params[kCommitteeSelectionStageParam],
+        CommitteeStage.specReview.wire,
+      );
       expect(route.params['gating'], kSpecGatingRubric);
       expect(route.params['critics'], _specCritics);
       expect(route.params[kValidatesParamKey], kSpecifyStep);
@@ -247,6 +278,9 @@ void main() {
         kClearCritiqueStep,
         kSpecGatingRubric,
         ...kSpecLlmRubrics,
+        // The shadow selector is downstream of the wipe too, so a respec round
+        // re-measures the round it actually reviewed.
+        kCommitteeSelectionStep,
         'route',
       });
       // TWO invariants ride this, not one.
