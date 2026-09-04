@@ -116,6 +116,11 @@ class SeatDisc {
   void ensure() => Directory(directory).createSync(recursive: true);
 
   /// Every `kind: handoff` note on the disc, with its modification time.
+  ///
+  /// That time is the file's mtime, which this platform reports at WHOLE-SECOND
+  /// resolution, so two notes written in the same second TIE. The tie is broken
+  /// by the greater relative path, which makes [newestHandoff] deterministic
+  /// rather than merely usually-right.
   List<({SeatHandoff handoff, DateTime at})> handoffs() {
     final dir = Directory(directory);
     if (!dir.existsSync()) return const [];
@@ -150,6 +155,12 @@ class SeatDisc {
 
   /// Whether a handoff NEWER than [instant] sits on the disc — the launcher's
   /// harness-neutral RELAUNCH predicate.
+  ///
+  /// Because mtimes land on whole seconds (see [handoffs]) while [instant] is
+  /// a full-precision clock reading, a handoff written in the SAME second as
+  /// the launch reads as not-newer. That direction is deliberate: missing one
+  /// relaunch is recoverable, while treating a pre-existing handoff as fresh
+  /// would relaunch forever.
   bool hasHandoffNewerThan(DateTime instant) =>
       handoffs().any((entry) => entry.at.isAfter(instant));
 }
