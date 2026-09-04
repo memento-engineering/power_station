@@ -501,8 +501,8 @@ class AgentCapability extends ProcessCapability {
     // package closure, so a downstream pack's `audience: human` declaration
     // has the same force as grid_assets's own declaration — reading only this
     // package's pack would install a downstream operator skill and then OFFER
-    // it (`power_station#station-operator-audiences-derive-from-the-resolved-
-    // registry`).
+    // it
+    // (`power_station#station-operator-audiences-derive-from-the-resolved-registry`).
     final withheld = operatorSkillIds(registry);
     return [
       for (final id in report.installedSkillIdsUnder(kClaudeSkillsSubtree))
