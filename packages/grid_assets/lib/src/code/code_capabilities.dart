@@ -22,7 +22,10 @@ import 'package:genesis_tree/genesis_tree.dart';
 import 'package:beads_dart/beads_dart.dart';
 import 'package:grid_engine/grid_engine.dart';
 import 'package:grid_runtime/grid_runtime.dart';
+import 'package:grid_sdk/grid_sdk.dart' as sdk;
 import 'package:path/path.dart' as p;
+
+import '../../station_asset_registry.dart' show GeneratedGridAssetRegistrant;
 
 import '../agent/agent_domain.dart';
 import '../agent/acp_session_adapter.dart';
@@ -36,8 +39,8 @@ import '../agent/site_binding.dart';
 import '../agent/typed_environment.dart';
 import '../agent/usage_report.dart';
 import '../assets/asset_loader.dart';
+import '../assets/asset_resolution.dart';
 import '../assets/overlay_materializer.dart';
-import '../assets/overlay_manifest.dart';
 import '../assets/overlay_provenance.dart';
 import '../assets/vended_assets.dart';
 import 'circuit_migration.dart';
@@ -178,14 +181,19 @@ class AgentCapability extends ProcessCapability {
   /// registered — a relative link then refuses, never silently applies a
   /// broken override). [linkService] is injectable for tests.
   ///
-  /// [materializer]/[overlayRoot]/[overlayArgs] are the station_overlay delivery
-  /// seam (bead `pow-kzx`): the vended skills materialized into the per-bead
-  /// worktree at provision, so the spawned `claude -p` can `/invoke` them.
+  /// [materializer]/[assetRegistry]/[assetRosterOverride]/[overlayArgs] are the
+  /// asset delivery seam (bead `pow-kzx`, re-homed onto the one resolution by
+  /// `pow-4peu`): the SELECTED vended skills materialized into the per-bead
+  /// worktree at provision, so the spawned `claude -p` can `/invoke` them. A
+  /// NULL [assetRegistry] disables materialization outright — the explicit
+  /// posture an isolated capability test (a session-adapter suite) takes so a
+  /// spawn touches no asset tree at all.
   const AgentCapability({
     String? devRoot,
     DartLinkService linkService = const DartLinkService(),
     OverlayMaterializer materializer = const OverlayMaterializer(),
-    String? overlayRoot,
+    sdk.GridAssetRegistry? assetRegistry,
+    GridAssetRosterOverride? assetRosterOverride,
     String overlaySourceRef = kUnknownSourceRef,
     Map<String, String> overlayArgs = const {},
     AgentSessionAdapterRegistry sessionAdapters = kBuiltinAgentSessionAdapters,
@@ -195,7 +203,8 @@ class AgentCapability extends ProcessCapability {
        _devRoot = devRoot,
        _linkService = linkService,
        _materializer = materializer,
-       _overlayRoot = overlayRoot,
+       _assetRegistry = assetRegistry,
+       _assetRosterOverride = assetRosterOverride,
        _overlaySourceRef = overlaySourceRef,
        _overlayArgs = overlayArgs;
 
@@ -206,11 +215,14 @@ class AgentCapability extends ProcessCapability {
   final DartLinkService _linkService;
   final OverlayMaterializer _materializer;
 
-  /// The `station_overlay` dir [_linkWorkspace] expands into every provisioned
-  /// worktree (bead `pow-kzx`); null ⇒ this package's OWN vended overlay
-  /// (`<PackagedAssetLoader.root>/station_overlay`). Tests inject a fixture so
-  /// the wire is provable without the live tree.
-  final String? _overlayRoot;
+  /// The STATION-GENERATED registry [_linkWorkspace] resolves against for every
+  /// provisioned worktree; null ⇒ no materialization at all (the explicit
+  /// disabled posture — see the constructor).
+  final sdk.GridAssetRegistry? _assetRegistry;
+
+  /// The station's explicit include/exclude exceptions to what the selectors
+  /// decide.
+  final GridAssetRosterOverride? _assetRosterOverride;
 
   /// The grid_assets ref every materialized file's provenance header records.
   /// The code registry resolves this once at station composition; direct
@@ -275,7 +287,7 @@ class AgentCapability extends ProcessCapability {
         '(WorkBead/SessionScope mount them)',
       );
     }
-    final skills = _linkWorkspace(selected.bead, workspace);
+    final skills = _linkWorkspace(context, selected.bead, workspace);
     // The commit policy the brief teaches rides the station's composition knob
     // (bead `pow-8dx`) — read with the effect verb at the spawn edge (ADR-0008
     // D3); absent ⇒ the default `Refs` token.
@@ -363,7 +375,11 @@ class AgentCapability extends ProcessCapability {
   /// override file.
   /// Returns the vended skill ids [_materializeStationOverlay] left installed in
   /// the worktree (empty when there is no worktree on disk yet).
-  List<String> _linkWorkspace(Bead bead, Workspace workspace) {
+  List<String> _linkWorkspace(
+    TreeContext context,
+    Bead bead,
+    Workspace workspace,
+  ) {
     if (!Directory(workspace.workspaceDir).existsSync()) return const [];
     final outcome = _linkService.applySync(
       metadata: bead.metadata,
@@ -377,52 +393,45 @@ class AgentCapability extends ProcessCapability {
         '${outcome.reason}',
       );
     }
-    return _materializeStationOverlay(workspace);
+    return _materializeStationOverlay(context, workspace);
   }
 
-  /// Expands the vended `station_overlay` into the worktree ROOT — PATH-
-  /// PRESERVING, so the overlay's own `.claude/skills/<id>/` lands at
-  /// `<workspaceDir>/.claude/skills/<id>/` with no mapping in this wire — and
-  /// returns the skill ids now installed there (ADR-0001's delivery leg:
-  /// `claude --dangerously-skip-permissions -p` is NON-bare, so it discovers
-  /// `.claude/skills/`, and print mode invokes a skill only when the brief names
-  /// it explicitly — hence the returned ids ride [buildAgentBrief]).
+  /// Resolves what THIS substation's assets actually are — the one pure
+  /// [resolveGridAssets] evaluation every other consumer runs — at the SPAWN
+  /// edge, so a provision cannot select a different set than the substation
+  /// tree mounted.
   ///
-  /// SCOPED to [kWorktreeOverlaySubtrees]: the overlay is ONE tree with two
-  /// consumers, but a per-bead worktree gets the per-harness SKILL trees only
-  /// (`.claude/skills` for Claude Code, `.agents/skills` for Codex — which
-  /// Copilot CLI reads as well, so both legs together reach every harness the
-  /// station arms). The operator-seat assets (`.claude/agents/governor.md`,
-  /// `.claude/settings.json`) belong to the human's seat, and a LOOSE file
-  /// under a repo-owned dir cannot be git-fenced per-asset-dir — A23(6)
-  /// rejected a shared `.claude/.gitignore` precisely because `.claude/` is
-  /// repo-owned territory in the repos the grid cuts worktrees from
-  /// (power_station and lenny TRACK `.claude/settings.json`; `bd init` tracks
-  /// `.agents/skills/beads/`). Installing one there would either leak into the
-  /// bead's PR or overwrite a tracked repo file from a provision hook.
-  ///
-  /// Same synchronous constraint as the pub-link write above, and the same
-  /// never-clobber posture ([OverlayMaterializer] refuses to overwrite a file it
-  /// did not generate, and REFUSES to install one whose holes are unbound rather
-  /// than shipping literal `{{runner}}` text to an agent). A missing overlay dir
-  /// contributes nothing rather than erroring — the empty-overlay case, not a
-  /// violated invariant.
-  List<String> _materializeStationOverlay(Workspace workspace) {
-    final loader = PackagedAssetLoader();
-    final overlayRoot = _overlayRoot ?? p.join(loader.root, 'station_overlay');
-    if (!Directory(overlayRoot).existsSync()) return const [];
-    final source = _overlayRoot == null
-        ? loader.loadStationOverlaySource()
-        : StationOverlaySource(
-            root: overlayRoot,
-            mappings: kDefaultStationOverlayMappings,
-          );
-    final report = _materializer.materializeSync(
-      overlaySources: [source],
-      targetRoot: workspace.workspaceDir,
-      sourceRef: _overlaySourceRef,
-      subtrees: kWorktreeOverlaySubtrees,
-      args: {
+  /// The ambient snapshot is read with the EFFECT verb
+  /// ([TreeContext.getInheritedSeedOfExactType], ADR-0008 D3): this is a spawn,
+  /// not a build, so it takes the latest facts WITHOUT subscribing. Absent facts
+  /// are LOUD: a station that composed a registry but no [SubstationFactsAssets]
+  /// would otherwise provision silently empty worktrees.
+  GridAssetResolution _resolveWorktreeAssets(
+    TreeContext context,
+    sdk.GridAssetRegistry registry,
+    Workspace workspace,
+  ) {
+    final snapshot = context
+        .getInheritedSeedOfExactType<SubstationFactsSnapshot>();
+    if (snapshot == null) {
+      throw StateError(
+        'AgentCapability requires the ambient SubstationFactsSnapshot '
+        '(SubstationFactsAssets mounts it)',
+      );
+    }
+    final scope = context.getInheritedSeedOfExactType<sdk.SubstationScope>();
+    if (scope == null) {
+      throw StateError(
+        'AgentCapability requires the ambient SubstationScope to resolve its '
+        "substation's assets",
+      );
+    }
+    return resolveGridAssets(
+      registry: registry,
+      snapshot: snapshot,
+      substation: SubstationKey(scope.name),
+      rosterOverride: _assetRosterOverride,
+      renderArguments: {
         'runner': kDefaultOverlayRunner,
         // The station's registered root checkout is the closest thing this
         // capability holds to a grid home; a station that knows its real one
@@ -431,6 +440,46 @@ class AgentCapability extends ProcessCapability {
         'gridHome': _devRoot ?? workspace.workspaceDir,
         ..._overlayArgs,
       },
+    );
+  }
+
+  /// Materializes the RESOLVED assets into the worktree ROOT — each selected
+  /// artifact at its declared root-relative path — and returns the skill ids now
+  /// installed there (ADR-0001's delivery leg:
+  /// `claude --dangerously-skip-permissions -p` is NON-bare, so it discovers
+  /// `.claude/skills/`, and print mode invokes a skill only when the brief names
+  /// it explicitly — hence the returned ids ride [buildAgentBrief]).
+  ///
+  /// SCOPED to [kWorktreeOverlaySubtrees]: one resolution, two consumers, but a
+  /// per-bead worktree gets the per-harness SKILL trees only (`.claude/skills`
+  /// for Claude Code, `.agents/skills` for Codex — which Copilot CLI reads as
+  /// well, so both legs together reach every harness the station arms). The
+  /// operator-seat assets (`.claude/agents/governor.md`, `.claude/settings.json`)
+  /// belong to the human's seat, and a LOOSE file under a repo-owned dir cannot
+  /// be git-fenced per-asset-dir — A23(6) rejected a shared `.claude/.gitignore`
+  /// precisely because `.claude/` is repo-owned territory in the repos the grid
+  /// cuts worktrees from (power_station and lenny TRACK
+  /// `.claude/settings.json`; `bd init` tracks `.agents/skills/beads/`).
+  /// Installing one there would either leak into the bead's PR or overwrite a
+  /// tracked repo file from a provision hook.
+  ///
+  /// Same synchronous constraint as the pub-link write above, and the same
+  /// never-clobber posture ([OverlayMaterializer] refuses to overwrite a file it
+  /// did not generate, and REFUSES to install one whose holes are unbound rather
+  /// than shipping literal `{{runner}}` text to an agent). A null registry
+  /// materializes nothing at all — the explicit disabled posture, not a
+  /// violated invariant.
+  List<String> _materializeStationOverlay(
+    TreeContext context,
+    Workspace workspace,
+  ) {
+    final registry = _assetRegistry;
+    if (registry == null) return const [];
+    final report = _materializer.materializeSync(
+      resolution: _resolveWorktreeAssets(context, registry, workspace),
+      targetRoot: workspace.workspaceDir,
+      sourceRef: _overlaySourceRef,
+      subtrees: kWorktreeOverlaySubtrees,
     );
     for (final subtree in kWorktreeOverlaySubtrees) {
       _excludeOverlayFromGit(
@@ -1184,6 +1233,8 @@ DefaultCapabilityRegistry buildCodeRegistry({
   DecisionIndexSource? discoveryDecisions,
   HistorySource? discoveryHistory,
   BdRunner Function(String workspaceRoot)? specifyBdRunnerFor,
+  sdk.GridAssetRegistry? assetRegistry,
+  GridAssetRosterOverride? assetRosterOverride,
   String? overlaySourceRef,
   Map<String, String> overlayArgs = const {},
   AgentSessionAdapterRegistry sessionAdapters = kBuiltinAgentSessionAdapters,
@@ -1202,6 +1253,13 @@ DefaultCapabilityRegistry buildCodeRegistry({
   final stationOverlayRoot = p.join(loader.root, 'station_overlay');
   final resolvedOverlaySourceRef =
       overlaySourceRef ?? resolveOverlaySourceRefSync(stationOverlayRoot);
+  // ONE registry object for the whole composition: the provision writer and the
+  // landing guard resolve against the SAME value, so they cannot select
+  // different asset sets. Absent ⇒ the station's own GENERATED registrant
+  // (`power_station#station-registries-use-resolved-package-closures`) — this
+  // composes the generated closure, it never builds a second catalog.
+  final resolvedAssetRegistry =
+      assetRegistry ?? GeneratedGridAssetRegistrant.registry;
   return DefaultCapabilityRegistry(
     capabilities: {
       // The SPEC-READINESS INTAKE LENS (bead `pow-q7n`) — the cheap ladder at
@@ -1279,6 +1337,8 @@ DefaultCapabilityRegistry buildCodeRegistry({
       'spec-route': const SpecRouteCapability(),
       'agent': AgentCapability(
         devRoot: devRoot,
+        assetRegistry: resolvedAssetRegistry,
+        assetRosterOverride: assetRosterOverride,
         overlaySourceRef: resolvedOverlaySourceRef,
         overlayArgs: overlayArgs,
         sessionAdapters: sessionAdapters,
@@ -1303,7 +1363,11 @@ DefaultCapabilityRegistry buildCodeRegistry({
       // documents the contract rather than feeding a model.
       kDocsCheckCapabilityId: const DocsCheckCapability(),
       'route': const CodeRouteCapability(),
-      'rebase': RebaseCapability(runner: gitRunner),
+      'rebase': RebaseCapability(
+        runner: gitRunner,
+        assetRegistry: resolvedAssetRegistry,
+        assetRosterOverride: assetRosterOverride,
+      ),
       'revalidate': RevalidateCapability(runner: shellRunner),
       kClearCritiqueStep: ClearCritiqueCapability(clearer: critiqueDirClearer),
       // The diff-pinning pre-critic step (bead `pow-6wo`) shares the `code`

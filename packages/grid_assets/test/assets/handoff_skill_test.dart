@@ -21,6 +21,7 @@
 import 'dart:io';
 
 import 'package:grid_assets/grid_assets.dart';
+import 'package:grid_assets/station_asset_registry.dart';
 import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 import 'package:yaml/yaml.dart';
@@ -261,11 +262,22 @@ void main() {
 
     test('a grid home gets .claude/skills/handoff and .agents/skills/handoff, '
         'both fully bound', () async {
+      final packageRoot = p.dirname(root);
       final report = await const OverlayInstallService().install(
-        overlayRoots: [overlay],
+        resolution: resolveGridAssets(
+          registry: GeneratedGridAssetRegistrant.registry,
+          snapshot: SubstationFactsSnapshot(<SubstationKey, SubstationFacts>{
+            const SubstationKey('home'): SubstationFacts(
+              root: packageRoot,
+              dartPackages: const <String>['grid_assets', 'grid_sdk'],
+              packageRoots: <String, String>{'grid_assets': packageRoot},
+            ),
+          }),
+          substation: const SubstationKey('home'),
+          renderArguments: const {'runner': 'space', 'gridHome': '/grid/home'},
+        ),
         targetRoot: temp.path,
         sourceRef: 'testref',
-        args: {'runner': 'space', 'gridHome': '/grid/home'},
       );
 
       expect(report.refused, isEmpty);

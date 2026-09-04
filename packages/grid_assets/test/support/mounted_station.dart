@@ -7,9 +7,40 @@
 // `Station(substations)` child — so a migrated suite drives an identical tree
 // and no assertion has to move.
 import 'package:genesis_tree/genesis_tree.dart';
+import 'package:grid_assets/grid_assets.dart'
+    show SubstationFactsAssets, SubstationFactsRepository;
 import 'package:grid_engine/grid_engine.dart';
+import 'package:grid_sdk/grid_sdk.dart' as sdk;
 import 'package:grid_sdk/grid_sdk.dart'
     show GridConfiguration, GridDelegate, GridHandle, Provider, runGrid;
+
+import 'asset_resolution_fixture.dart';
+
+/// The ASSET half of a station root, as a live composition mounts it: the ONE
+/// facts projection (`SubstationFactsAssets`) plus the substation identity a
+/// capability resolves its assets under.
+///
+/// In production the identity comes from `sdk.Substation` and the projection
+/// from the composing station; these harnesses mount the engine's own
+/// `SubstationScope` directly, so they supply both explicitly rather than
+/// leaving the provision wire without the facts it refuses to guess.
+Seed stationAssetProjection({
+  required String substation,
+  required Seed child,
+  SubstationFactsRepository? repository,
+}) => SubstationFactsAssets(
+  repository:
+      repository ??
+      StaticSubstationFactsRepository(liveStationFacts(substation: substation)),
+  child: InheritedSeed<sdk.SubstationScope>(
+    value: sdk.SubstationScope(
+      name: substation,
+      root: liveAssetPackageRoot(),
+      prefix: substation,
+    ),
+    child: child,
+  ),
+);
 
 /// The station tree under test: the work-axis ambient stack, as a
 /// `GridDelegate`'s master build.
@@ -25,6 +56,7 @@ class _StationRootDelegate extends GridDelegate {
     required this.leaseVendor,
     required this.registry,
     required this.substations,
+    required this.assetSubstation,
   }) : super(const GridConfiguration());
 
   /// The work-axis notifier the mounted `WorkList` observes.
@@ -48,6 +80,9 @@ class _StationRootDelegate extends GridDelegate {
   /// The station's substation scopes.
   final List<SubstationScope> substations;
 
+  /// The substation identity this station's assets resolve under.
+  final String assetSubstation;
+
   @override
   Seed build(TreeContext context, GridConfiguration configuration) {
     final registry = this.registry;
@@ -59,10 +94,17 @@ class _StationRootDelegate extends GridDelegate {
         Provider<ProcessLeaseVendor>.value(leaseVendor),
         if (registry != null) Provider<CapabilityRegistry>.value(registry),
       ],
-      child: Station(substations),
+      child: stationAssetProjection(
+        substation: assetSubstation,
+        child: Station(substations),
+      ),
     );
   }
 }
+
+/// The substation id every acceptance harness composes (`SubstationConfig`'s
+/// `substationId`), and therefore the identity its assets resolve under.
+const String kAcceptanceSubstation = 'tg';
 
 /// A station mounted for a test — the `runGrid` tree half wired to the
 /// [StationDriver] off-tree half exactly as production wires them
@@ -81,6 +123,7 @@ class MountedStation {
     required SessionResolver resolver,
     required List<SubstationScope> substations,
     CapabilityRegistry? registry,
+    String assetSubstation = kAcceptanceSubstation,
   }) : _driver = StationDriver(bridge: bridge, registry: registry),
        _delegate = _StationRootDelegate(
          notifier: bridge.notifier,
@@ -89,6 +132,7 @@ class MountedStation {
          leaseVendor: defaultProcessLeaseVendor(stationServices),
          registry: registry,
          substations: substations,
+         assetSubstation: assetSubstation,
        );
 
   /// The join bridge feeding the work axis — the driver owns its lifecycle.

@@ -32,10 +32,14 @@ import 'package:grid_assets/grid_assets.dart'
         CriticAgentEnvironment,
         GatherAgentEnvironment,
         GitGridAssets,
+        GridAssetRosterOverride,
         MountEligibilityAssets,
         SeatEnvironments,
         SpecAgentEnvironment,
-        TypedEnvironmentProvider;
+        SubstationFactsSnapshot,
+        SubstationKey,
+        TypedEnvironmentProvider,
+        resolveGridAssets;
 import 'package:grid_runtime/grid_runtime.dart' show GitOps;
 import 'package:grid_sdk/grid_sdk.dart' as sdk;
 import 'package:grid_sdk/grid_sdk.dart' show Provider, ProviderTreeContext;
@@ -132,6 +136,9 @@ class SubstationSeed extends StatelessSeed {
   SubstationSeed({
     required this.name,
     required this.root,
+    required this.assetRegistry,
+    this.assetRenderArguments = const <String, String>{},
+    this.assetRosterOverride,
     this.prefix,
     this.app,
     this.githubPoll,
@@ -141,7 +148,8 @@ class SubstationSeed extends StatelessSeed {
     this.githubTransportFactory = createGitHubHttpTransport,
     this.mountEligibilityRunnerFor,
     Key? key,
-  }) : super(key: key ?? ValueKey<String>('seat:$name'));
+  }) : _assetFactsKey = SubstationKey(name),
+       super(key: key ?? ValueKey<String>('seat:$name'));
 
   /// The substation's name (its tree identity).
   final String name;
@@ -149,6 +157,26 @@ class SubstationSeed extends StatelessSeed {
   /// The substation's ONE root — absolute, or relative to the ambient
   /// `GridRoot` (resolved by the SDK's own `Substation` build).
   final String root;
+
+  /// The STATION-GENERATED asset registry (`GeneratedGridAssetRegistrant`) this
+  /// seat resolves its own availability from — POTENTIAL availability, which
+  /// [resolveGridAssets] narrows to the ACTUAL set this seat mounts
+  /// (`power_station#one-asset-resolution-defines-tree-and-writers`).
+  final sdk.GridAssetRegistry assetRegistry;
+
+  /// The `{{hole}}` bindings a materializing consumer renders this seat's
+  /// assets against; the seat's own mount needs none, but the value travels
+  /// with the resolution so every consumer renders identically.
+  final Map<String, String> assetRenderArguments;
+
+  /// This seat's explicit include/exclude exceptions to what the selectors
+  /// decide.
+  final GridAssetRosterOverride? assetRosterOverride;
+
+  /// This seat's stable facts ASPECT — built ONCE from [name], so `build`
+  /// subscribes to the same value every time and one seat's changed facts
+  /// cannot rebuild another's.
+  final SubstationKey _assetFactsKey;
 
   /// The work store's issue-id prefix; null means the name (the SDK default).
   final String? prefix;
@@ -196,6 +224,29 @@ class SubstationSeed extends StatelessSeed {
 
   @override
   Seed build(TreeContext context) {
+    // WATCH this seat's OWN facts aspect (the D-H build verb, ADR-0008 D3):
+    // the repository observes roots outside build and re-projects them, and a
+    // change to ANOTHER seat's facts leaves this build alone
+    // (`power_station#adr-0006-typed-environment-lookup-selects-by-value`).
+    final snapshot = context
+        .dependOnInheritedSeedOfExactType<SubstationFactsSnapshot>(
+          aspect: _assetFactsKey,
+        );
+    if (snapshot == null) {
+      throw StateError(
+        'SubstationSeed($name) requires the ambient SubstationFactsSnapshot '
+        '(grid_assets SubstationFactsAssets mounts it)',
+      );
+    }
+    // PURE: selector evaluation only — no file read, no package parse, no
+    // watcher, no state mutation.
+    final selected = resolveGridAssets(
+      registry: assetRegistry,
+      snapshot: snapshot,
+      substation: _assetFactsKey,
+      renderArguments: assetRenderArguments,
+      rosterOverride: assetRosterOverride,
+    );
     final githubPoll = this.githubPoll;
     final mountEligibilityRunnerFor = this.mountEligibilityRunnerFor;
     final landingPolicy = this.landingPolicy;
@@ -224,6 +275,9 @@ class SubstationSeed extends StatelessSeed {
       root,
       prefix: prefix,
       assets: [
+        // Mounted presence IS availability: the SELECTED generated definitions
+        // are the same `const` Seeds the registry holds, spread unchanged.
+        ...selected.definitions,
         Nest(
           // MountEligibilityAssets is INNERMOST on purpose: GitGridAssets
           // builds a FRESH ServiceBundle and preserves nothing from ambient,

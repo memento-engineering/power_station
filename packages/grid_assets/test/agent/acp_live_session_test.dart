@@ -151,7 +151,8 @@ Future<_LiveRun> _buildLiveAcpRun({
   );
   final steers = _LiveSteers();
   final capability = AgentCapability(
-    overlayRoot: p.join(workspace.path, 'absent-overlay'),
+    // NO asset registry: this suite isolates the session adapter, so the
+    // provision leg materializes nothing at all.
     sessionAdapters: AgentSessionAdapterRegistry(<String, AgentSessionAdapter>{
       kAcpSessionAdapterId: adapter,
     }),

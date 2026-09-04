@@ -15,6 +15,9 @@ import 'dart:io';
 import 'package:dart_grid_assets/dart_grid_assets.dart';
 import 'package:genesis_tree/genesis_tree.dart' show ValueKey;
 import 'package:grid_assets/grid_assets.dart';
+import 'package:grid_assets/station_asset_registry.dart';
+import 'package:grid_sdk/grid_sdk.dart' as sdk;
+import 'package:grid_sdk/grid_sdk.dart' show GridAssetDefinition;
 import 'package:beads_dart/beads_dart.dart';
 import 'package:grid_engine/grid_engine.dart';
 import 'package:grid_runtime/grid_runtime.dart';
@@ -22,6 +25,7 @@ import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
 import 'support/asset_fakes.dart';
+import 'support/asset_resolution_fixture.dart';
 
 /// The capability's (ambient tree, per-step args) pair — the context rip-out
 /// shape: the Bead/Workspace/ServiceBundle ride the tree as ambient values; the
@@ -942,8 +946,9 @@ void main() {
           agentDeadline: null,
         );
         addTearDown(runtime.dispose);
-        const cap = AgentCapability(
+        final cap = AgentCapability(
           devRoot: '/dev/root',
+          assetRegistry: GeneratedGridAssetRegistrant.registry,
           overlaySourceRef: 'testref',
         );
 
@@ -1075,6 +1080,33 @@ void main() {
             workspaceDir: workspaceDir,
             branch: 'grid/tg-1',
           ),
+          // The one resolution's inputs — the substation and its observed facts.
+          ...liveAssetContextValues(),
+        },
+      ),
+      args: stepArgs('tg-1/agent'),
+    );
+
+    /// The same ambient shape as [ctxAt], but with the FIXTURE pack's facts —
+    /// the offline isolation seam is now the registry + its facts, not a root.
+    ({FakeTreeContext context, StepArgs args}) fixtureCtxAt(
+      String workspaceDir,
+      TestAssetResolutionFixture fixture,
+    ) => (
+      context: FakeTreeContext(
+        values: {
+          Bead: bead('tg-1'),
+          Workspace: testWorkspace(
+            'tg-1',
+            workspaceDir: workspaceDir,
+            branch: 'grid/tg-1',
+          ),
+          SubstationFactsSnapshot: fixture.snapshot,
+          sdk.SubstationScope: sdk.SubstationScope(
+            name: kFixtureSubstation.name,
+            root: fixture.substationRoot,
+            prefix: 'fx',
+          ),
         },
       ),
       args: stepArgs('tg-1/agent'),
@@ -1163,8 +1195,9 @@ void main() {
       'not literal template text',
       () {
         final c = ctxAt(worktree.path);
-        const cap = AgentCapability(
+        final cap = AgentCapability(
           devRoot: '/dev/root',
+          assetRegistry: GeneratedGridAssetRegistrant.registry,
           overlaySourceRef: 'testref',
         );
         cap.spawn(c.context, c.args);
@@ -1184,8 +1217,9 @@ void main() {
     test('the BRIEF names the installed skill, so a print-mode claude -p can '
         '/invoke it (print mode selects no skill on its own — ADR-0001)', () {
       final c = ctxAt(worktree.path);
-      const cap = AgentCapability(
+      final cap = AgentCapability(
         devRoot: '/dev/root',
+        assetRegistry: GeneratedGridAssetRegistrant.registry,
         overlaySourceRef: 'testref',
       );
       final cfg = cap.spawn(c.context, c.args);
@@ -1205,8 +1239,9 @@ void main() {
         '.gitignore — land commits with `git add -A`, so without this every '
         "bead's PR would carry the vended skills", () {
       final c = ctxAt(worktree.path);
-      const cap = AgentCapability(
+      final cap = AgentCapability(
         devRoot: '/dev/root',
+        assetRegistry: GeneratedGridAssetRegistrant.registry,
         overlaySourceRef: 'testref',
       );
       cap.spawn(c.context, c.args);
@@ -1226,8 +1261,9 @@ void main() {
       "the worktree (including the agent's own .claude/ files)",
       () {
         final c = ctxAt(worktree.path);
-        const cap = AgentCapability(
+        final cap = AgentCapability(
           devRoot: '/dev/root',
+          assetRegistry: GeneratedGridAssetRegistrant.registry,
           overlaySourceRef: 'testref',
         );
         cap.spawn(c.context, c.args);
@@ -1257,8 +1293,9 @@ void main() {
       existing.writeAsStringSync('OPERATOR-AUTHORED — do not touch');
 
       final c = ctxAt(worktree.path);
-      const cap = AgentCapability(
+      final cap = AgentCapability(
         devRoot: '/dev/root',
+        assetRegistry: GeneratedGridAssetRegistrant.registry,
         overlaySourceRef: 'testref',
       );
       cap.spawn(c.context, c.args);
@@ -1268,10 +1305,11 @@ void main() {
 
     test("a station's overlayArgs override the wire's default binding", () {
       final c = ctxAt(worktree.path);
-      const cap = AgentCapability(
+      final cap = AgentCapability(
         devRoot: '/dev/root',
+        assetRegistry: GeneratedGridAssetRegistrant.registry,
         overlaySourceRef: 'testref',
-        overlayArgs: {'runner': 'grid'},
+        overlayArgs: const {'runner': 'grid'},
       );
       cap.spawn(c.context, c.args);
 
@@ -1280,71 +1318,74 @@ void main() {
       expect(body, isNot(contains('space search --json')));
     });
 
-    test(
-      'an injected overlayRoot materializes a FIXTURE instead of the real tree '
-      '(the offline test-isolation seam)',
-      () {
-        final fixture = Directory.systemTemp.createTempSync('overlay-fixture-');
-        addTearDown(() {
-          if (fixture.existsSync()) fixture.deleteSync(recursive: true);
-        });
+    test('an injected asset REGISTRY materializes a fixture instead of the '
+        "station's own pack (the offline test-isolation seam)", () {
+      final fixtureRoot = Directory.systemTemp.createTempSync(
+        'overlay-fixture-',
+      );
+      addTearDown(() {
+        if (fixtureRoot.existsSync()) fixtureRoot.deleteSync(recursive: true);
+      });
+      final fixture = TestAssetResolutionFixture(
+        root: fixtureRoot,
+        assets: <GridAssetDefinition>[fixtureSkill('fixture-skill')],
+        bodies: <String, String>{
+          'extension/station_overlay/claude/skills/fixture-skill/SKILL.md':
+              fixtureSkillBody('fixture-skill', 'fixture body'),
+          'extension/station_overlay/agents/skills/fixture-skill/SKILL.md':
+              fixtureSkillBody('fixture-skill', 'fixture body'),
+        },
+      );
+
+      final c = fixtureCtxAt(worktree.path, fixture);
+      final cap = AgentCapability(
+        devRoot: '/dev/root',
+        assetRegistry: fixture.registry,
+        overlaySourceRef: 'testref',
+      );
+      final cfg = cap.spawn(c.context, c.args);
+
+      expect(
         File(
-            p.join(
-              fixture.path,
-              '.claude',
-              'skills',
-              'fixture-skill',
-              'SKILL.md',
-            ),
-          )
-          ..createSync(recursive: true)
-          ..writeAsStringSync('---\nname: fixture-skill\n---\nfixture body\n');
-
-        final c = ctxAt(worktree.path);
-        final cap = AgentCapability(
-          devRoot: '/dev/root',
-          overlayRoot: fixture.path,
-          overlaySourceRef: 'testref',
-        );
-        final cfg = cap.spawn(c.context, c.args);
-
-        expect(
-          File(
-            p.join(
-              worktree.path,
-              '.claude',
-              'skills',
-              'fixture-skill',
-              'SKILL.md',
-            ),
-          ).readAsStringSync(),
-          contains('fixture body'),
-        );
-        expect(discoverSkill(worktree).existsSync(), isFalse);
-        expect(cfg.args.last, contains('`/fixture-skill`'));
-      },
-    );
+          p.join(
+            worktree.path,
+            '.claude',
+            'skills',
+            'fixture-skill',
+            'SKILL.md',
+          ),
+        ).readAsStringSync(),
+        contains('fixture body'),
+      );
+      expect(discoverSkill(worktree).existsSync(), isFalse);
+      expect(cfg.args.last, contains('`/fixture-skill`'));
+    });
 
     test(
       'an asset whose holes are UNBOUND is never installed and never fails the '
       'spawn — and the brief does not name it',
       () {
-        final fixture = Directory.systemTemp.createTempSync('overlay-unbound-');
+        final fixtureRoot = Directory.systemTemp.createTempSync(
+          'overlay-unbound-',
+        );
         addTearDown(() {
-          if (fixture.existsSync()) fixture.deleteSync(recursive: true);
+          if (fixtureRoot.existsSync()) fixtureRoot.deleteSync(recursive: true);
         });
-        File(
-            p.join(fixture.path, '.claude', 'skills', 'half-bound', 'SKILL.md'),
-          )
-          ..createSync(recursive: true)
-          ..writeAsStringSync(
-            '---\nname: half-bound\n---\ncall {{nobodyBindsThis}}\n',
-          );
+        final fixture = TestAssetResolutionFixture(
+          root: fixtureRoot,
+          assets: <GridAssetDefinition>[fixtureSkill('half-bound')],
+          bodies: <String, String>{
+            'extension/station_overlay/claude/skills/half-bound/SKILL.md':
+                fixtureSkillBody('half-bound', 'call {{nobodyBindsThis}}'),
+            'extension/station_overlay/agents/skills/half-bound/SKILL.md':
+                fixtureSkillBody('half-bound', 'call {{nobodyBindsThis}}'),
+          },
+        );
 
-        final c = ctxAt(worktree.path);
+        final c = fixtureCtxAt(worktree.path, fixture);
         final cap = AgentCapability(
           devRoot: '/dev/root',
-          overlayRoot: fixture.path,
+          assetRegistry: fixture.registry,
           overlaySourceRef: 'testref',
         );
         late final RuntimeConfig cfg;
@@ -1370,15 +1411,10 @@ void main() {
       'a spawn that installs NO skills carries no skills paragraph — the brief '
       'only names what is actually there',
       () {
-        final empty = Directory.systemTemp.createTempSync('overlay-empty-');
-        addTearDown(() {
-          if (empty.existsSync()) empty.deleteSync(recursive: true);
-        });
-
         final c = ctxAt(worktree.path);
-        final cap = AgentCapability(
+        // NO registry: materialization is explicitly disabled.
+        const cap = AgentCapability(
           devRoot: '/dev/root',
-          overlayRoot: empty.path,
           overlaySourceRef: 'testref',
         );
         final cfg = cap.spawn(c.context, c.args);
@@ -1408,13 +1444,10 @@ void main() {
     });
 
     /// The capability with BOTH provision legs inert: the bead carries no
-    /// `grid.dart` envelope (so the pub-link write is a no-op) and the overlay
-    /// root does not exist (so no skill materialization), leaving the carry read
+    /// `grid.dart` envelope (so the pub-link write is a no-op) and NO asset
+    /// registry is injected (so no materialization), leaving the carry read
     /// under test as the only thing this spawn touches the real filesystem for.
-    AgentCapability capability() => AgentCapability(
-      devRoot: '/dev/root',
-      overlayRoot: p.join(worktree.path, 'no-overlay'),
-    );
+    AgentCapability capability() => const AgentCapability(devRoot: '/dev/root');
 
     ({FakeTreeContext context, StepArgs args}) ctxAt(String workspaceDir) => (
       context: FakeTreeContext(

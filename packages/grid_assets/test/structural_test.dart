@@ -100,6 +100,105 @@ void main() {
     });
   });
 
+  group('ONE resolution defines availability and both writers', () {
+    final libDir = _libDir();
+
+    String source(String relative) =>
+        File(p.join(libDir.path, relative)).readAsStringSync();
+
+    test('one resolver defines tree availability and both writer file sets', () {
+      final materializer = source('src/assets/overlay_materializer.dart');
+      final install = source('src/assets/overlay_install.dart');
+
+      // The WRITER takes a resolution and has no source-roster vocabulary left.
+      expect(materializer, contains('required GridAssetResolution resolution'));
+      for (final retired in const [
+        'overlayRoots',
+        'overlaySources',
+        'StationOverlaySource',
+        '_mappedRelativePath',
+        'listSync(recursive: true)',
+      ]) {
+        expect(
+          materializer,
+          isNot(contains(retired)),
+          reason: 'the writer enumerates no source tree: $retired',
+        );
+      }
+      // Runtime extension discovery is RETIRED from installation (this updates
+      // A24(1) — `power_station#one-asset-resolution-defines-tree-and-writers`).
+      for (final retired in const [
+        'extension_discovery',
+        'findExtensions',
+        'resolveStationOverlay',
+      ]) {
+        expect(install, isNot(contains(retired)), reason: retired);
+      }
+      expect(
+        File(p.join(libDir.parent.path, 'pubspec.yaml')).readAsStringSync(),
+        isNot(contains('extension_discovery')),
+        reason: 'the retired discovery dependency is gone from the pubspec too',
+      );
+
+      // Every consumer answers through the SAME function.
+      for (final path in const [
+        'src/assets/assets_command.dart',
+        'src/code/code_capabilities.dart',
+        'src/code/landing.dart',
+      ]) {
+        expect(source(path), contains('resolveGridAssets('), reason: path);
+      }
+      final substationSeed = File(
+        p.join(
+          _packageLib('github_grid_assets').path,
+          'src',
+          'assets',
+          'substation_seed.dart',
+        ),
+      ).readAsStringSync();
+      expect(substationSeed, contains('resolveGridAssets('));
+      expect(
+        substationSeed,
+        contains('dependOnInheritedSeedOfExactType<SubstationFactsSnapshot>'),
+        reason:
+            'a substation BUILD watches its facts aspect, never snapshots it',
+      );
+
+      // ONE writer, ONE observer: the stamped write and the package-config read
+      // each live in exactly one production file of this feature.
+      final writers = <String>[
+        for (final file
+            in libDir
+                .listSync(recursive: true)
+                .whereType<File>()
+                .where((file) => file.path.endsWith('.dart')))
+          if (file.readAsStringSync().contains('writeAsStringSync(stamped)'))
+            p.relative(file.path, from: libDir.path),
+      ];
+      expect(writers, ['src/assets/overlay_materializer.dart']);
+      final observers = <String>[
+        for (final file
+            in libDir
+                .listSync(recursive: true)
+                .whereType<File>()
+                .where((file) => file.path.endsWith('.dart')))
+          if (file.readAsStringSync().contains('PackageConfig.parseString'))
+            p.relative(file.path, from: libDir.path),
+      ];
+      expect(
+        observers,
+        containsAll(<String>['src/assets/asset_resolution.dart']),
+        reason:
+            'the facts repository is this feature\'s only package-graph read',
+      );
+      expect(
+        observers,
+        isNot(contains('src/assets/overlay_install.dart')),
+        reason: 'no writer observes a package graph of its own',
+      );
+    });
+  });
+
   group(
     'bead `pow-hxme` cites its OWN amendment (A37), never the stale A35',
     () {
