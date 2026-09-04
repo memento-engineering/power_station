@@ -106,6 +106,7 @@ import '../agent/path_check.dart';
 import '../agent/seat_environments.dart';
 import '../agent/site_binding.dart';
 import '../agent/usage_report.dart';
+import 'committee_selection.dart';
 import 'fix_in_flight.dart';
 import 'route_failure.dart';
 import 'specify.dart' show headingOffset, proseOnly, sectionBodyAt;
@@ -1059,6 +1060,23 @@ const Circuit kCodeReviewCircuit = Circuit(
       params: {'rubric': 'test-coverage'},
       dependsOn: {kFormatCleanStep, kDeclaredTestsRubric},
     ),
+    // The SHADOW committee selector (bead `pow-1nl.1.1`) — a NON-AUTHORITATIVE
+    // sibling of the priced lanes, not a dependency of any of them and not a
+    // dependency of the route. It reads the pinned scope the critics read, asks
+    // which lanes this change would actually have needed, and records the
+    // answer. Nothing waits for it, so it can never withhold a committee round;
+    // it produces no grade, so it can never move one.
+    CapabilityStep(
+      stepId: kCommitteeSelectionStep,
+      capabilityId: kCommitteeSelectionStep,
+      dependsOn: {kPinDiffStep},
+      params: {
+        kCommitteeSelectionStageParam: 'code_review',
+        kCommitteeFullRubricsParam:
+            'code-validation,declared-tests-present,spec-adherence,regression-risk,test-coverage',
+        kCommitteeGatingRubricsParam: 'code-validation,declared-tests-present',
+      },
+    ),
     CapabilityStep(
       stepId: 'route',
       capabilityId: 'route',
@@ -1072,6 +1090,9 @@ const Circuit kCodeReviewCircuit = Circuit(
         'critics':
             'code-validation,declared-tests-present,spec-adherence,regression-risk,test-coverage',
         'gating': 'code-validation,declared-tests-present',
+        // The stage the SHADOW receipt is filed under. The route's own matrix
+        // never reads it (bead `pow-1nl.1.1`).
+        kCommitteeSelectionStageParam: 'code_review',
       },
     ),
   ],

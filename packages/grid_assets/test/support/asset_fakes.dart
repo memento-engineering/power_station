@@ -236,6 +236,11 @@ const List<String> kSpecCriticNodes = [
   'spec_review/plan-completeness',
 ];
 const String kSpecRouteNode = 'spec_review/route';
+
+/// The spec circuit's SHADOW committee selector (bead `pow-1nl.1.1`) — a
+/// member of [kSpecPhaseNodes] but NOT of [kSpecCriticNodes]: it grades
+/// nothing, so no grade map ever carries it.
+const String kSpecSelectionNode = 'spec_review/committee-selection';
 const String kAgentNode = 'agent';
 const String kClearCritiqueNode = 'review/clear-critique';
 const String kPinDiffNode = 'review/pin-diff';
@@ -245,6 +250,11 @@ const String kPinDiffNode = 'review/pin-diff';
 /// [kCodeReviewNodes] but NOT of [kCriticNodes]: it produces no letter grade,
 /// only a typed non-result, so no grade map ever carries it.
 const String kFormatCleanNode = 'review/format-clean';
+
+/// The code/docs committee's SHADOW committee selector (bead `pow-1nl.1.1`) —
+/// a member of [kCodeReviewNodes] but NOT of [kCriticNodes], for the same
+/// reason as [kFormatCleanNode]: it produces no letter grade at all.
+const String kCodeSelectionNode = 'review/committee-selection';
 const List<String> kCriticNodes = [
   'review/code-validation',
   'review/declared-tests-present',
@@ -280,6 +290,7 @@ const Set<String> kSpecPhaseNodes = {
   'spec_review/decision-alignment',
   'spec_review/acceptance-testability',
   'spec_review/plan-completeness',
+  kSpecSelectionNode,
   kSpecRouteNode,
 };
 
@@ -315,6 +326,7 @@ const Set<String> kCodeReviewNodes = {
   kPinDiffNode,
   kFormatCleanNode,
   ...kCriticNodes,
+  kCodeSelectionNode,
   kRouteNode,
 };
 

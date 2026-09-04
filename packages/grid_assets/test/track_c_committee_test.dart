@@ -145,6 +145,7 @@ Branch _stepBranch(Branch root, String nodePath) => _allBranches(
 String _c(String stepId) => 'critic(tgdog-s/tg-1/$stepId)';
 const _declared =
     'START declared-tests-present(tgdog-s/tg-1/declared-tests-present)';
+const _selector = 'START committee-selection(tgdog-s/tg-1/committee-selection)';
 
 void main() {
   group('Track C4 — the code_review committee frontier', () {
@@ -177,11 +178,15 @@ void main() {
       c.advance({'tg-1/clear-critique': _done(), 'tg-1/pin-diff': _done()});
       // format-clean + declared-tests-present are the only dependents of
       // pin-diff — the cheap, agent-free checks run BEFORE a priced lane.
+      // The SHADOW selector (bead `pow-1nl.1.1`) fans out with them: it reads
+      // the same pinned scope, costs nothing priced, and — unlike them — is a
+      // dependency of nothing.
       expect(
         c.events,
         containsAll([
           'START format-clean(tgdog-s/tg-1/format-clean)',
           _declared,
+          _selector,
         ]),
       );
       expect(c.events.any((e) => e.contains('critic(')), isFalse);
@@ -345,6 +350,36 @@ void main() {
         expect(verdict.readAsBytesSync(), bytes[rubric]);
         expect(verdict.lastModifiedSync(), modified[rubric], reason: stamp);
       }
+    });
+
+    test('the SHADOW selector is a dependency of NOTHING — the route opens '
+        'with it still pending (bead pow-1nl.1.1)', () {
+      // The selector never appears in the route's join set, so a classifier
+      // that is slow, refused, or still running cannot withhold a verdict.
+      final route = kCodeReviewCircuit.stepById('route')! as CapabilityStep;
+      expect(route.dependsOn, kCommitteeRubrics.toSet());
+      expect(route.dependsOn, isNot(contains(kCommitteeSelectionStep)));
+
+      final c = _Committee('tg-1')..mount();
+      addTearDown(c.dispose);
+      c.advance({'tg-1/clear-critique': _done()});
+      c.advance({'tg-1/clear-critique': _done(), 'tg-1/pin-diff': _done()});
+      // EVERY lane terminal except the selector, which stays pending.
+      c.advance({
+        'tg-1/format-clean': _done(),
+        'tg-1/code-validation': _done(),
+        'tg-1/declared-tests-present': _done(),
+        'tg-1/spec-adherence': _done(),
+        'tg-1/regression-risk': _done(),
+        'tg-1/test-coverage': _done(),
+      });
+      expect(
+        c.events.any((e) => e.contains('START route(tgdog-s/tg-1/route)')),
+        isTrue,
+        reason:
+            'the committee is authoritative on its own; the cost optimizer '
+            'never gates throughput',
+      );
     });
   });
 }

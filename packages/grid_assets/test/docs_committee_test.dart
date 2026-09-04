@@ -90,6 +90,9 @@ void main() {
           kTerminologyBanRubric,
           kSectionStructureRubric,
           'spec-adherence',
+          // The SHADOW selector (bead `pow-1nl.1.1`) — a step of this circuit,
+          // a dependency of nothing.
+          kCommitteeSelectionStep,
           'route',
         ]);
         expect(
@@ -107,7 +110,37 @@ void main() {
         final route = kDocsReviewCircuit.stepById('route')! as CapabilityStep;
         expect(route.params['critics'], kDocsCommitteeRubrics.join(','));
         expect(route.params['gating'], kDocsGatingRubrics.join(','));
-        expect(route.dependsOn, kDocsCommitteeRubrics.toSet());
+        expect(
+          route.dependsOn,
+          kDocsCommitteeRubrics.toSet(),
+          reason:
+              'the authoritative route joins the FULL docs committee and never '
+              'the shadow selector',
+        );
+        expect(route.dependsOn, isNot(contains(kCommitteeSelectionStep)));
+        expect(
+          route.params[kCommitteeSelectionStageParam],
+          CommitteeStage.codeReview.wire,
+        );
+
+        // The selector reads the CODE stage (a docs diff is still a diff) and
+        // carries the docs rosters as values.
+        final selector =
+            kDocsReviewCircuit.stepById(kCommitteeSelectionStep)!
+                as CapabilityStep;
+        expect(selector.dependsOn, {kPinDiffStep});
+        expect(
+          selector.params[kCommitteeSelectionStageParam],
+          CommitteeStage.codeReview.wire,
+        );
+        expect(
+          selector.params[kCommitteeFullRubricsParam],
+          kDocsCommitteeRubrics.join(','),
+        );
+        expect(
+          selector.params[kCommitteeGatingRubricsParam],
+          kDocsGatingRubrics.join(','),
+        );
       });
 
       test('the frontier fans the four lanes out, then joins on the route', () {
@@ -129,12 +162,19 @@ void main() {
           kTerminologyBanRubric,
           kSectionStructureRubric,
           'spec-adherence',
+          // The selector fans out BESIDE the four lanes, never ahead of them.
+          kCommitteeSelectionStep,
         ]);
+        // The route is eligible on the FOUR lanes alone — the selector is
+        // still PENDING beside it, which is the whole shadow property.
         expect(
           frontier(
             done([kClearCritiqueStep, kPinDiffStep, ...kDocsCommitteeRubrics]),
           ),
-          ['route'],
+          [kCommitteeSelectionStep, 'route'],
+          reason:
+              'the route never waits for the selector, so classification can '
+              'never withhold a docs verdict',
         );
       });
     },
