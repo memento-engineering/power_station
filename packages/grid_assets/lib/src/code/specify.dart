@@ -2165,9 +2165,12 @@ String? _stepFieldValue(List<_AuthoredLine> slice, String label) {
         ),
       );
     }
+    // Contiguity is only MEANINGFUL once every record parsed: a malformed
+    // criterion leaves a hole in the id set, and reporting that hole as a
+    // second defect would bury the one the architect actually has to fix.
     final ids = criteria.map((criterion) => criterion.id).toList()..sort();
     final expected = [for (var i = 1; i <= criteria.length; i++) i];
-    if (criteria.isNotEmpty && '$ids' != '$expected') {
+    if (acceptanceRecordsClean && criteria.isNotEmpty && '$ids' != '$expected') {
       acceptanceRecordsClean = false;
       report(
         SpecContractRule.acceptanceIdNotContiguous,

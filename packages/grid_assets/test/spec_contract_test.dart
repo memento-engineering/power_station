@@ -5,9 +5,149 @@
 // names the spec's OWN line); the record parser is TOTAL (no throw, no repair)
 // and source-located; and the two composed resolvers — repo-relativity over
 // the pack's one citation-path reader, and decision-citation RESOLUTION —
-// answer exactly what they claim to.
+// answer exactly what they claim to. Its centre is the SINGLE-RULE mutation
+// table: one mutation of the SHIPPED exemplar per rule, each asserting exactly
+// one finding of exactly that rule — the round-trip fence extended from "the
+// exemplar passes the gate" to "every rule the gate holds is the one it
+// names".
+
+import 'package:beads_dart/beads_dart.dart';
 import 'package:grid_assets/grid_assets.dart';
 import 'package:test/test.dart';
+
+import 'support/asset_fakes.dart';
+
+/// The bead the exemplar the brief SHIPS is carried on.
+Bead _exemplar() => bead('tg-1').copyWith(
+  acceptanceCriteria: kSpecExemplarAcceptance,
+  design: kSpecExemplarDesign,
+);
+
+/// [text] without the LAST line containing [needle] — how a mutation deletes a
+/// record without restating the exemplar's wording.
+String _withoutLineContaining(String text, String needle) {
+  final lines = text.split('\n');
+  final at = lines.lastIndexWhere((line) => line.contains(needle));
+  expect(at, greaterThanOrEqualTo(0), reason: 'no line contains "$needle"');
+  return (lines..removeAt(at)).join('\n');
+}
+
+/// One single-rule mutation of the shipped exemplar and the rule it must trip.
+typedef _Mutation = ({
+  String name,
+  SpecContractRule rule,
+  Bead Function(Bead exemplar) mutate,
+});
+
+final List<_Mutation> _mutations = [
+  (
+    name: 'an acceptance criterion without its AC id',
+    rule: SpecContractRule.acceptanceRecord,
+    mutate: (b) => b.copyWith(
+      acceptanceCriteria: b.acceptanceCriteria.replaceFirst('AC-1 — ', ''),
+    ),
+  ),
+  (
+    name: 'a duplicated acceptance id',
+    rule: SpecContractRule.acceptanceIdDuplicate,
+    mutate: (b) => b.copyWith(
+      acceptanceCriteria: b.acceptanceCriteria.replaceAll('AC-2 —', 'AC-1 —'),
+    ),
+  ),
+  (
+    name: 'acceptance ids that skip a number',
+    rule: SpecContractRule.acceptanceIdNotContiguous,
+    mutate: (b) => b.copyWith(
+      acceptanceCriteria: b.acceptanceCriteria.replaceFirst('AC-2 —', 'AC-3 —'),
+      design: b.design.replaceFirst('AC-2 →', 'AC-3 →'),
+    ),
+  ),
+  (
+    name: 'a step opener carrying no title',
+    rule: SpecContractRule.stepTitle,
+    mutate: (b) => b.copyWith(
+      design: b.design.replaceFirst(
+        '### Step 1 — Add the `Heartbeat` frame',
+        '### Step 1',
+      ),
+    ),
+  ),
+  (
+    name: 'a step missing one of its five labeled lines',
+    rule: SpecContractRule.stepField,
+    mutate: (b) =>
+        b.copyWith(design: _withoutLineContaining(b.design, 'Test: ')),
+  ),
+  (
+    name: 'a `Paths:` field citing nothing repo-relative',
+    rule: SpecContractRule.stepPath,
+    mutate: (b) => b.copyWith(
+      design: _withoutLineContaining(b.design, 'Paths: ').replaceFirst(
+        'Change: ',
+        'Paths: `/etc/heartbeat.dart`\nChange: ',
+      ),
+    ),
+  ),
+  (
+    name: 'a `Commit:` that is not a conventional-commit subject',
+    rule: SpecContractRule.stepCommit,
+    mutate: (b) => b.copyWith(
+      design: b.design.replaceFirst(
+        'feat(bus): add the peer heartbeat frame',
+        'Add the peer heartbeat frame',
+      ),
+    ),
+  ),
+  (
+    name: 'a `## Touches` item declaring no disposition',
+    rule: SpecContractRule.touchRecord,
+    mutate: (b) => b.copyWith(
+      design: b.design.replaceFirst(
+        '— created; `Heartbeat`, `Heartbeat.parse`',
+        '— adds `Heartbeat`',
+      ),
+    ),
+  ),
+  (
+    name: 'a `## ADR Alignment` item citing nothing the index can resolve',
+    rule: SpecContractRule.decisionRecord,
+    mutate: (b) => b.copyWith(
+      design: b.design.replaceFirst(
+        kNoGoverningDecisionPrefix,
+        '- The heartbeat decision was applied, per',
+      ),
+    ),
+  ),
+  (
+    name: 'a `## ADR Alignment` section silent about the lookup',
+    rule: SpecContractRule.decisionSectionSilent,
+    mutate: (b) => b.copyWith(
+      design: b.design.replaceFirst(
+        kNoGoverningDecisionPrefix,
+        'Nothing much seems to govern this',
+      ),
+    ),
+  ),
+  (
+    name: 'a validation item that names no AC id',
+    rule: SpecContractRule.validationRecord,
+    mutate: (b) => b.copyWith(
+      design: b.design.replaceFirst('- [ ] AC-1 →', '- [ ] the parse works →'),
+    ),
+  ),
+  (
+    name: 'a validation item naming an id no criterion declares',
+    rule: SpecContractRule.validationUnknownCriterion,
+    mutate: (b) =>
+        b.copyWith(design: b.design.replaceFirst('AC-2 →', 'AC-9 →')),
+  ),
+  (
+    name: 'a criterion with no validation item',
+    rule: SpecContractRule.validationCoverage,
+    mutate: (b) =>
+        b.copyWith(design: _withoutLineContaining(b.design, 'AC-2 →')),
+  ),
+];
 
 void main() {
   group('proseOnly preserves the LINE COUNT of everything it blanks', () {
@@ -255,5 +395,157 @@ void main() {
       expect(parsed.findings.single.rule, SpecContractRule.decisionRecord);
       expect(parsed.contract.citations, isEmpty);
     });
+  });
+
+  group('the shipped exemplar ↔ the record grammar (the round-trip fence)', () {
+    test('the exemplar the brief SHIPS parses clean, in both readings', () {
+      expect(specStructuralFindings(_exemplar()), isEmpty);
+      final parsed = parseSpecContract(
+        acceptance: kSpecExemplarAcceptance,
+        design: kSpecExemplarDesign,
+      );
+      expect(parsed.findings, isEmpty);
+      final contract = parsed.contract;
+      expect(contract.criteria.map((c) => c.id), [1, 2]);
+      expect(contract.steps.single.ordinal, 1);
+      expect(contract.steps.single.title, 'Add the `Heartbeat` frame');
+      expect(contract.steps.single.paths, hasLength(2));
+      expect(contract.steps.single.commit, startsWith('feat(bus):'));
+      expect(contract.touches.map((t) => t.disposition), [
+        TouchDisposition.created,
+        TouchDisposition.created,
+      ]);
+      expect(contract.decisionNarrative, DecisionLookupNarrative.emptyUnion);
+      expect(contract.validations.map((v) => v.criterionId), [1, 2]);
+    });
+
+    test('the exemplar carries NO fenced implementation block — a code block '
+        'is optional evidence, and an exemplar shipping one taught the '
+        'opposite', () {
+      expect(kSpecExemplarDesign, isNot(contains('\x60\x60\x60')));
+      for (final label in kStepFieldLabels) {
+        expect(kSpecExemplarDesign, contains('\n$label: '));
+      }
+    });
+  });
+
+  group('one rule, one finding', () {
+    for (final mutation in _mutations) {
+      test('${mutation.name} ⇒ ${mutation.rule.name}', () {
+        final mutated = mutation.mutate(_exemplar());
+        final parsed = parseSpecContract(
+          acceptance: mutated.acceptanceCriteria,
+          design: mutated.design,
+        );
+        expect(
+          parsed.findings.map((f) => f.rule).toList(),
+          [mutation.rule],
+          reason: parsed.findings.map((f) => f.render()).join('\n'),
+        );
+        expect(parsed.findings.single.line, greaterThan(0));
+        // The gate REPORTS it too: a rule the parser holds and the lane never
+        // surfaces would be a silent guard.
+        expect(
+          specStructuralFindings(mutated),
+          contains(parsed.findings.single.render()),
+        );
+      });
+    }
+
+    test('every rule is covered by a mutation', () {
+      expect(
+        _mutations.map((m) => m.rule).toSet(),
+        SpecContractRule.values.toSet(),
+      );
+    });
+
+    test('a criterion validated TWICE is named too, on the second mapping', () {
+      final doubled = _exemplar().copyWith(
+        design: kSpecExemplarDesign.replaceFirst('AC-2 →', 'AC-1 →'),
+      );
+      final parsed = parseSpecContract(
+        acceptance: doubled.acceptanceCriteria,
+        design: doubled.design,
+      );
+      final coverage = parsed.findings
+          .where((f) => f.rule == SpecContractRule.validationCoverage)
+          .toList();
+      expect(coverage, hasLength(2));
+      expect(coverage.first.message, contains('AC-1 is validated 2 times'));
+      expect(coverage.last.message, contains('AC-2 has no'));
+    });
+  });
+
+  group('the cascade keeps one defect to one finding', () {
+    test('an acceptance field with no checkboxes reports only the PRESENCE '
+        'finding, never a record finding per line', () {
+      final b = _exemplar().copyWith(
+        acceptanceCriteria: 'works well and is fast',
+      );
+      expect(
+        specStructuralFindings(b).single,
+        contains('no testable `- [ ]` checkbox criteria'),
+      );
+    });
+
+    test('a bulleted plan reports only the ORDINAL finding, never five '
+        'missing-field findings', () {
+      final b = _exemplar().copyWith(
+        design: kSpecExemplarDesign.replaceFirst(
+          '### Step 1 — Add',
+          '- Add',
+        ),
+      );
+      expect(
+        specStructuralFindings(b).single,
+        contains('has no numbered steps'),
+      );
+    });
+
+    test('a section-less design reports the four PRESENCE findings and no '
+        'record findings at all', () {
+      final b = _exemplar().copyWith(design: 'Just do the thing.');
+      final findings = specStructuralFindings(b);
+      expect(findings, hasLength(4));
+      for (final finding in findings) {
+        expect(finding, startsWith('design: no `## '));
+      }
+    });
+
+    test('a `## Validation Plan` with no items reports only the PRESENCE '
+        'finding — never one uncovered-criterion finding per criterion', () {
+      final design = kSpecExemplarDesign;
+      final b = _exemplar().copyWith(
+        design:
+            '${design.substring(0, design.indexOf('## Validation Plan'))}'
+            '## Validation Plan\n',
+      );
+      expect(
+        specStructuralFindings(b).single,
+        contains('`## Validation Plan` has no items'),
+      );
+    });
+  });
+
+  test('the brief STATES every form the gate enforces — a gate whose contract '
+      'the brief does not state is a trap', () {
+    final rendered = buildSpecifyBrief(
+      _exemplar(),
+      testWorkspace('tg-1', workspaceDir: '/w/tg-1', branch: 'grid/tg-1'),
+    ).render();
+    for (final form in [
+      kAcceptanceRecordForm,
+      kStepRecordForm,
+      kTouchRecordForm,
+      kDecisionRecordForm,
+      kValidationRecordForm,
+      kNoGoverningDecisionSentence,
+      kFailedDecisionLookupSentence,
+    ]) {
+      expect(rendered, contains(form), reason: 'the brief must state: $form');
+    }
+    for (final label in kStepFieldLabels) {
+      expect(rendered, contains('`$label:`'));
+    }
   });
 }
