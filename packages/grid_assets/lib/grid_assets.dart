@@ -70,6 +70,19 @@
 /// `--state-root` seam ([addStateRootOption] / [resolveStateRoot]), so
 /// `filing` and `approve` cannot answer the same contract two ways.
 ///
+/// The SEAT pair makes an operator seat OCCUPIABLE with its own disc (bead
+/// `pow-lv6t`): [PrimeCommand] is the grid's own SessionStart hook target — it
+/// echoes `bd prime` and injects only the seat's newest handoff — and
+/// [SeatCommand] is the OUTER harness that launches a seat's occupant with its
+/// role definition and disc and relaunches it on handoff. Both are
+/// harness-neutral: every vendor token is an [AgentEnvironment] declaration
+/// ([AgentEnvironment.roleArgs], [AgentEnvironment.memoryDirArgs],
+/// [AgentEnvironment.primeMode], [AgentEnvironment.drivenArgs],
+/// [AgentEnvironment.roleAsset]). A composing station adds them beside `filing`
+/// and `approve`; that one-line composition is space_station's own bead, the
+/// way `power_station#a11-bead-pow-ovh-the-search-domain-roster-resolution-is-an-o`
+/// landed `search`.
+///
 /// The VENDED SKILLS (bead `pow-88p`, `extension/station_overlay/skills/`) are
 /// those agentic halves: `discover` is the grid home's HITL front door — it
 /// dispatches on arg shape (topic research / bead advisory / bead directed),
@@ -211,3 +224,7 @@ export 'src/search/search_command.dart';
 export 'src/search/semantic_search.dart';
 export 'src/search/station_index.dart';
 export 'src/search/station_search.dart';
+export 'src/seat/prime_command.dart';
+export 'src/seat/seat_command.dart';
+export 'src/seat/seat_disc.dart';
+export 'src/seat/seat_launch.dart';
