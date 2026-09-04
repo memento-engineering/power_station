@@ -20,10 +20,11 @@ register:
 ## The spec's structural contract becomes a typed RECORD GRAMMAR (2026-09-03) — bead `pow-5ufz`
 
 **Decision (AI).** The spec stays ONE human-readable Markdown document — no
-second JSON or YAML contract is embedded beside it — but the structure the gate
-enforces becomes a line-oriented record grammar with stable identifiers, parsed
-by ONE total function, `parseSpecContract`, in `specify.dart`. Five exported
-constants are the single source of every form:
+second JSON or YAML contract is embedded beside it — but the structure the spec
+is WRITTEN in becomes a line-oriented record grammar with stable identifiers,
+parsed by ONE total function, `parseSpecContract`, in `specify.dart` — measured
+in shadow in this phase, never graded (call 4). Five exported constants are the
+single source of every form:
 
 * `kAcceptanceRecordForm` — `- [ ] AC-<n> — <criterion>`, ids unique and `1..N`;
 * `kStepRecordForm` + `kStepFieldLabels` — a step carries all five labeled
@@ -34,9 +35,9 @@ constants are the single source of every form:
   once per acceptance id and never for an id no criterion declares.
 
 The same constants are interpolated into `kSpecStructuralContract` and
-`buildSpecifyBrief`, so the gate cannot enforce a form its brief withholds
-(A19(1)); the shipped exemplar is written in the grammar and a test parses it
-clean.
+`buildSpecifyBrief`, so neither phase can enforce or measure a form its brief
+withholds (A19(1)); the shipped exemplar is written in the grammar and a test
+parses it clean.
 
 **Four calls this makes, and why each is the binding one.**
 
@@ -70,7 +71,12 @@ shipped specs for no gain in what the gate can actually decide. The measured
 cost of holding that line is recorded — see the phantom-step class below.
 
 **4. Phase one is MEASUREMENT ONLY; all four semantic critics are retained.**
-`kSpecCommitteeRubrics`, `kSpecLlmRubrics` and `kSpecReviewCircuit` are
+Record-contract findings are shadow-only until an explicit activation ruling; the five presence and placeholder checks remain the live A/F gate, and all five committee lanes remain unconditional.
+`parseSpecContract` therefore never contributes findings to
+`specStructuralFindings` in this phase. Activation requires a later accepted
+ruling that names the migration posture and explicitly wires those findings
+into the live result; the retained-corpus measurement cannot activate itself.
+`kSpecCommitteeRubrics`, `kSpecLlmRubrics` and `kSpecReviewCircuit` remain
 unchanged: no critic is removed, skipped, or made conditional on parser output,
 and a test pins that lane set. `spec_contract_shadow.dart` runs the parser over
 ten specs that ALREADY SHIPPED under the pre-change contract and renders what it
@@ -85,8 +91,9 @@ property in prose — each clause quoted verbatim from the packaged rubric and
 asserted as a substring in test — not that the lane CAUGHT it, since these specs
 passed those lanes carrying the deviations counted. Establishing redundancy
 needs a corpus written UNDER the new brief. Structure and referential integrity
-move to code; whether a test PROVES behavior, whether a plan is COHERENT, and
-whether a decision is INTERPRETED correctly stay inference.
+are represented and measured in code but do not route in this phase; whether a
+test PROVES behavior, whether a plan is COHERENT, and whether a decision is
+INTERPRETED correctly stay inference.
 
 **The decision lane's failed lookup stays typed, not flattened.** Per
 `the-spec-decision-lane-queries-the-roster-union`, an empty roster union is a
@@ -119,16 +126,17 @@ back.
 
 **Consequences.**
 
-* Good: an addressable id now exists for every criterion, so acceptance ↔
-  validation is a one-to-one mapping code can check, and an unmapped or
-  phantom-mapped criterion is a fact rather than a critic's impression.
-* Good: every finding names a rule and an authored line, so a rejected spec
-  tells the architect where to look instead of what to feel.
+* Good: an addressable id exists for every criterion the strict parser accepts,
+  so acceptance ↔ validation integrity is a fact the shadow report can measure.
+* Good: every shadow finding names a rule and an authored line, so the measured
+  migration cost identifies the exact record deviation without changing a
+  bead's grade.
 * Good: the expensive half of the old plan format — pre-written implementation
   code — stops being mandatory in the brief, the rubric, and every later context.
-* Bad: real migration cost. No pre-grammar spec in the retained corpus parses
-  clean, so the first specs written after this lands will trip forms their
-  authors have not internalised yet.
+* Bad: real migration cost, deferred rather than avoided. No pre-grammar spec in
+  the retained corpus parses clean, so the specs written between this ruling and
+  an activation one keep tripping forms their authors have not internalised yet
+  — visibly in the report, and only there.
 * Bad: some counts are contract FRICTION rather than sloppiness — a gate-only
   final step writing `Commit: none` is a deliberate, readable choice the grammar
   refuses. Those are the calls a follow-up should revisit with the numbers in
