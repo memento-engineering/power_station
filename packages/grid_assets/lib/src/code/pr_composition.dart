@@ -57,13 +57,6 @@ const String kDefaultDescribeModel = 'haiku';
 /// not listed).
 const int kMaxLintExamples = 3;
 
-/// The diff the describe prompt carries, capped — a runaway diff must not blow
-/// up the inference call's context.
-const int kMaxDiffChars = 60000;
-
-/// The bead's own prose the describe prompt carries as WHY-context, capped.
-const int kMaxContextChars = 1200;
-
 /// The human DIGEST the PR body leads with, capped — a model that answers with a
 /// whole essay (or a pasted diff) must not become the PR body. Truncation is the
 /// belt; the prompt asks for 2–5 sentences.
@@ -411,36 +404,28 @@ String fallbackDescriptionFor(Bead bead, {required String foreignRef}) {
   return title.isEmpty ? kFallbackDescription : title;
 }
 
-/// The ONE-SHOT describe prompt (bead `pow-8dx`) — a pure text→JSON completion
-/// with NO tool use: the branch's own delta is HANDED to the model (the land
-/// step reads it with git and pins it here), so the call is cheap, fast, and
-/// cannot wander outside the change under review. The bead's prose rides as
-/// WHY-context ONLY, under an explicit never-cite-it rule — the title/body
-/// describe the CODE, not the tracker (directive item 3).
+/// The ONE-SHOT describe prompt — a pure text→JSON completion with NO tool use
+/// over a BOUNDED, DETERMINISTIC [buildDescribeManifest] rendering of the
+/// branch's facts.
+///
+/// The model is a WORD PROCESSOR here, not an investigator: it never sees a
+/// patch hunk, never reads a file, and may not add a fact the manifest does not
+/// carry. The bead's intent, the commits, the file facts, the change shape and
+/// the circuit receipts all arrive INSIDE [manifest]; [beadId] is here only to
+/// name the foreign reference the answer must never contain.
 String buildDescribePrompt({
-  required Bead bead,
   required String beadId,
-  required String baseBranch,
-  required String commitLog,
-  required String diffStat,
-  required String diff,
+  required String manifest,
   String trailerToken = kDefaultTrailerToken,
 }) {
-  final context = _truncate(
-    [
-      bead.title,
-      bead.description,
-    ].where((s) => s.trim().isNotEmpty).join('\n\n'),
-    kMaxContextChars,
-  );
   final b = StringBuffer()
     ..writeln('# Describe this change for its pull request')
     ..writeln()
     ..writeln(
-      'You are writing the PULL REQUEST TITLE and DESCRIPTION for the branch '
-      'below. Everything you need is already in this prompt — do NOT run a '
-      'tool, do NOT read a file, do NOT ask a question. Reply with ONE JSON '
-      'object and nothing else.',
+      'You are writing the PULL REQUEST TITLE and DESCRIPTION for the change '
+      'manifest below. Everything you need is already in this prompt — do NOT '
+      'run a tool, do NOT read a file, do NOT ask a question. Reply with ONE '
+      'JSON object and nothing else.',
     )
     ..writeln()
     ..writeln('## The rules (Conventional Commits v1.0.0 — non-negotiable)')
@@ -483,32 +468,16 @@ String buildDescribePrompt({
       '`"breakingChange"` with one sentence naming what breaks. Otherwise both '
       'stay false/empty.',
     )
+    ..writeln(
+      '- USE ONLY THE FACTS IN THE MANIFEST. Do NOT invent a file, a test, a '
+      'symbol or a motive it does not carry, and where a section says records '
+      'were omitted, do NOT describe the omitted ones as if you had read them. '
+      'The manifest is the whole evidence; you supply the WORDING, not facts.',
+    )
     ..writeln()
-    ..writeln('## The change under review (`origin/$baseBranch...HEAD`)')
+    ..writeln('## The change manifest (the ONLY facts you have)')
     ..writeln()
-    ..writeln('### Commits on the branch')
-    ..writeln('```')
-    ..writeln(commitLog.trim().isEmpty ? '(none)' : commitLog.trim())
-    ..writeln('```')
-    ..writeln()
-    ..writeln('### Files changed')
-    ..writeln('```')
-    ..writeln(diffStat.trim().isEmpty ? '(none)' : diffStat.trim())
-    ..writeln('```')
-    ..writeln()
-    ..writeln('### The diff')
-    ..writeln('```diff')
-    ..writeln(_truncate(diff, kMaxDiffChars))
-    ..writeln('```');
-  if (context.isNotEmpty) {
-    b
-      ..writeln()
-      ..writeln(
-        '## Why this work exists (CONTEXT ONLY — never quote or cite it)',
-      )
-      ..writeln(context);
-  }
-  b
+    ..writeln(manifest.trim())
     ..writeln()
     ..writeln('## Your answer')
     ..writeln(

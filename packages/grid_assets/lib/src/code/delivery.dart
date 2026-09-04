@@ -32,6 +32,7 @@ import 'package:path/path.dart' as p;
 
 import '../agent/agent_harness.dart';
 import '../agent/environment_registry.dart';
+import 'describe_manifest.dart';
 import 'pr_composition.dart';
 import 'pr_describe.dart';
 import 'route_failure.dart';
@@ -108,16 +109,35 @@ class DeliverRouteCapability extends RouteCapability {
     // completes the terminal node and delivers nothing.
     if (services.delivery == null || workspace == null) return const Advance();
 
-    // THE DESCRIBE PASS: one cheap inference call over the branch's ACTUAL delta.
-    // Fail-safe by construction — every failure path yields the deterministic,
-    // id-free fallback subject.
+    // The observer-written receipts, read at ENTRY from the SESSION-WIDE
+    // sibling view: the SAME values the PR body's receipt sections render, so
+    // the manifest and the body can never tell a reader different stories.
+    final validation = siblings.resultOf('${args.beadId}/land/revalidate');
+    final review = siblings.resultOf('${args.beadId}/review/route');
+
+    // THE DESCRIBE PASS: one cheap inference call over a BOUNDED MANIFEST of
+    // the branch's facts. Fail-safe by construction — every failure path yields
+    // the deterministic, id-free fallback subject.
     final described = await describeBranch(
       bead: bead,
       beadId: args.beadId,
+      nodePath: args.nodePath,
       workspace: workspace,
       composition: composition,
       ambient: agentConfig,
       registry: harnesses,
+      receipts: [
+        DescribeReceipt(
+          label: 'validation',
+          nodePath: '${args.beadId}/land/revalidate',
+          result: validation,
+        ),
+        DescribeReceipt(
+          label: 'committee',
+          nodePath: '${args.beadId}/review/route',
+          result: review,
+        ),
+      ],
       git: _gitRunner,
       inference: _inference,
     );
@@ -155,9 +175,10 @@ class DeliverRouteCapability extends RouteCapability {
       }
     }
 
-    final validation = siblings.resultOf('${args.beadId}/land/revalidate');
-    final review = siblings.resultOf('${args.beadId}/review/route');
     return Advance({
+      // The describe call's FT-2 usage FIRST, so the route's own keys always
+      // win a collision: telemetry can never rewrite a verdict.
+      ...described.usage,
       'verdict': 'deliver',
       'pr_title': title,
       'title_source': described.source,

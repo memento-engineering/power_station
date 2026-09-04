@@ -6,10 +6,11 @@
 /// the bead can only ever restate the bead. A title derived from the DIFF says
 /// what actually changed — which is the whole point of a conventional-commit
 /// git log. So the land step reads the branch's own delta with git and hands it
-/// to a CHEAP model (`haiku` by default) as a pure text→JSON completion: no
-/// tools, no file writes, no wandering — the model sees exactly the code the
-/// committee graded (the same `origin/<base>...HEAD` three-dot range
-/// [PinDiffCapability] pins the critics to) and nothing else.
+/// to a CHEAP model (`haiku` by default) as a bounded MANIFEST of facts
+/// (`describe_manifest.dart`), never as a patch, in a pure text→JSON
+/// completion: no tools, no file writes, no wandering — the model sees exactly
+/// the change the committee graded (the same `origin/<base>...HEAD` three-dot
+/// range [PinDiffCapability] pins the critics to) and nothing else.
 ///
 /// **Why a [ServiceCapability]'s injected runner and not a new spawned step**:
 /// the landing circuit's own doctrine (`landing.dart`) — "`rebase` and
@@ -26,7 +27,8 @@
 /// identical.
 ///
 /// **FAIL-SAFE, always** — the description is PROVENANCE, never a gate: no
-/// runner wired, no worktree on disk, an unreadable log, an empty delta, an
+/// runner wired, no worktree on disk, an unreadable log, an empty CHANGED-FILE
+/// set, an
 /// illegal harness/target combo, a non-zero run, a timeout, or unparseable
 /// output each return the empty [DescribeOutcome], and the composition falls
 /// back to its deterministic id-free subject. A land NEVER fails over PR prose.
@@ -42,6 +44,9 @@ import 'package:grid_runtime/grid_runtime.dart';
 import '../agent/agent_environment.dart';
 import '../agent/agent_harness.dart';
 import '../agent/environment_registry.dart';
+import '../agent/usage_report.dart';
+import 'describe_manifest.dart';
+import 'docs_committee.dart';
 import 'pr_composition.dart';
 
 /// The injectable ONE-SHOT inference seam (Fakes, not mocks — the offline suite
@@ -110,15 +115,17 @@ class SystemInferenceRunner implements InferenceRunner {
 }
 
 /// What the describe pass produced — the inferred [description] (null ⇒ the
-/// deterministic fallback), the branch's [commits] policy report, and which
-/// channel produced the title ([source]: `inference` | `fallback`).
+/// deterministic fallback), the branch's [commits] policy report, which channel
+/// produced the title ([source]: `inference` | `fallback`), and the call's
+/// [usage].
 class DescribeOutcome {
   /// Creates the outcome; the const default IS the fallback (no inference, no
-  /// commits read).
+  /// commits read, no usage spent).
   const DescribeOutcome({
     this.description,
     this.commits = const CommitLintReport(),
     this.source = 'fallback',
+    this.usage = const {},
   });
 
   /// The inferred title/body parts; null ⇒ fall back deterministically.
@@ -129,11 +136,21 @@ class DescribeOutcome {
 
   /// `inference` | `fallback` — receipt provenance.
   final String source;
+
+  /// The FT-2 usage fields this describe call spent, ready to merge into the
+  /// terminal route's `Advance` payload (`grid.result.<nodePath>.*` — the
+  /// station's normal usage projection, A20(5)). EMPTY when no call was made.
+  final Map<String, String> usage;
 }
 
-/// Reads the bead branch's own delta and runs the ONE-SHOT describe inference
-/// over it. Every failure path returns a fallback [DescribeOutcome] — the
-/// description is decoration, never a land blocker.
+/// Reads the bead branch's own delta AS FACTS and runs the ONE-SHOT describe
+/// inference over a bounded manifest of them. Every failure path returns a
+/// fallback [DescribeOutcome] — the description is decoration, never a land
+/// blocker.
+///
+/// [nodePath] is the delivering node's path: it names the FT-2 telemetry file
+/// this call's usage envelope lands at ([usageReportPath]), so the otherwise
+/// unmetered describe call is projected exactly like every spawned seat's.
 ///
 /// The two guards that keep the WHOLE offline suite free of real git and real
 /// claude are the first two lines: an unwired [inference] (a bare
@@ -146,10 +163,12 @@ class DescribeOutcome {
 Future<DescribeOutcome> describeBranch({
   required Bead bead,
   required String beadId,
+  required String nodePath,
   required Workspace workspace,
   required PrComposition composition,
   required AgentConfig ambient,
   required EnvironmentRegistry registry,
+  List<DescribeReceipt> receipts = const [],
   GitRunner? git,
   InferenceRunner? inference,
 }) async {
@@ -163,7 +182,8 @@ Future<DescribeOutcome> describeBranch({
   final base = 'origin/${workspace.baseBranch}';
 
   // The branch's OWN commits (subject + body, NUL-separated) — the commit-policy
-  // lint's input (directive item 5) and the prompt's provenance.
+  // lint's input (directive item 5) and the manifest's canonical account of what
+  // changed and why.
   final log = await runner.run(
     workingDirectory: workDir,
     args: ['log', '--format=%s%n%b%x00', '$base..HEAD'],
@@ -175,20 +195,29 @@ Future<DescribeOutcome> describeBranch({
     trailerToken: composition.trailerToken,
   );
 
-  // The branch's delta from the MERGE-BASE (three-dot — the SAME range
-  // `PinDiffCapability` pins the critics' review scope to, so the description
-  // describes exactly what the committee graded).
-  final stat = await runner.run(
+  // The branch's delta as FACTS, never as a patch: name-status + numstat (both
+  // `-z`) and the aggregate shortstat, over the SAME three-dot merge-base range
+  // `PinDiffCapability` pins the critics to — so the PR still describes exactly
+  // the code the committee graded. The patch-producing `git diff $base...HEAD`
+  // read is GONE: nothing here reads a hunk.
+  final nameStatus = await runner.run(
     workingDirectory: workDir,
-    args: ['diff', '--stat', '$base...HEAD'],
+    args: ['diff', '--name-status', '-z', '$base...HEAD'],
   );
-  final diff = await runner.run(
+  final numstat = await runner.run(
     workingDirectory: workDir,
-    args: ['diff', '$base...HEAD'],
+    args: ['diff', '--numstat', '-z', '$base...HEAD'],
   );
-  if (!diff.ok || diff.output.trim().isEmpty) {
-    return DescribeOutcome(commits: commits);
-  }
+  final shortstat = await runner.run(
+    workingDirectory: workDir,
+    args: ['diff', '--shortstat', '$base...HEAD'],
+  );
+  if (!nameStatus.ok) return DescribeOutcome(commits: commits);
+  final files = changedFilesFrom(
+    nameStatus: nameStatus.output,
+    numstat: numstat.ok ? numstat.output : '',
+  );
+  if (files.isEmpty) return DescribeOutcome(commits: commits);
 
   // The AMBIENT AgentConfig ONLY (never the bead's `grid.agent` envelope): the
   // describe pass is STATION policy over the landing prose, not the bead's work
@@ -206,30 +235,54 @@ Future<DescribeOutcome> describeBranch({
   }
   if (env.validate() != null) return DescribeOutcome(commits: commits);
 
+  final manifest = buildDescribeManifest(
+    DescribeManifest(
+      beadId: beadId,
+      beadTitle: bead.title,
+      baseBranch: workspace.baseBranch,
+      intent: bead.acceptanceCriteria,
+      commits: messages,
+      files: files,
+      shortstat: shortstat.ok ? shortstat.output : '',
+      shape: changeShapeOf(bead),
+      receipts: receipts,
+    ),
+  );
+
   final run = await inference.run(
     spawnFor(
       environment: env,
       model: config.params['model'],
       brief: AgentBrief(
         task: buildDescribePrompt(
-          bead: bead,
           beadId: beadId,
-          baseBranch: workspace.baseBranch,
-          commitLog: messages.join('\n\n---\n\n'),
-          diffStat: stat.ok ? stat.output : '',
-          diff: diff.output,
+          manifest: manifest,
           trailerToken: composition.trailerToken,
         ),
       ),
       workspace: workspace,
-      // describe is ambient claude (provider-managed): no endpoint, no usageOut.
+      // FT-2 capture: the describe call was the one inference the station spent
+      // unmetered. `describe` is ambient claude (provider-managed): no endpoint.
+      usageOut: usageReportPath(nodePath),
     ),
   );
-  final described = run.ok ? PrDescription.parse(run.output) : null;
+  // With capture armed the harness redirects its WHOLE `--output-format json`
+  // envelope to the telemetry file, so the model's answer is that envelope's
+  // `result` text; a harness with no usage surface still answers on stdout.
+  // Both reads are fail-safe (absent/unreadable/malformed ⇒ null / '').
+  final answer = readEnvelopeResultText(workDir, nodePath) ?? run.output;
+  final described = run.ok ? PrDescription.parse(answer) : null;
+  final model = config.params['model'];
   return DescribeOutcome(
     description: described,
     commits: commits,
     source: described == null ? 'fallback' : 'inference',
+    usage: {
+      ...readUsageFields(workDir, nodePath),
+      'describe_harness': config.harness,
+      if (model != null && model.isNotEmpty) 'describe_model': model,
+      'describe_stop': run.ok ? 'ok' : 'failed',
+    },
   );
 }
 
