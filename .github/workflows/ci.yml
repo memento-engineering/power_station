@@ -30,7 +30,7 @@ jobs:
         run: dart analyze
       - name: Test packages
         run: |
-          for pkg in grid_assets dart_grid_assets federated_grid_assets zero_conf_grid_assets; do
+          for pkg in grid_assets dart_grid_assets federated_grid_assets zero_conf_grid_assets analytical_grid_assets; do
             echo "::group::$pkg"
             (cd packages/$pkg && dart test)
             echo "::endgroup::"

@@ -9,6 +9,7 @@ each pack exports **domain components + CLI components** (the CLI-SDK model):
 | `packages/dart_grid_assets` | the DART domain (the typed `grid.dart` envelope + pub dev-time linkage + the exported `DartCommand`) |
 | `packages/federated_grid_assets` | the federation surface (station server + cross-station asset leasing) |
 | `packages/zero_conf_grid_assets` | zero-conf station discovery (mDNS advertisement/browse) |
+| `packages/analytical_grid_assets` | the ANALYTICAL domain (station health and effectiveness REPORTING over the session-ledger metrics projection: split token distributions + the exported `MetricsCommand`) |
 
 The butane `burn` asset (`butane_grid_assets`) moved to its system's repo —
 `butane_flutter/packages/butane_grid_assets` (grid assets live with their
