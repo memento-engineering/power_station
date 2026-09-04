@@ -74,7 +74,7 @@
 /// those agentic halves: `discover` is the grid home's HITL front door — it
 /// dispatches on arg shape (topic research / bead advisory / bead directed),
 /// researches via the vended `search` Command, and on the human's yes files an
-/// ephemeral staged bead and hands to `specify`. [kVendedSkills] enumerates
+/// ephemeral staged bead and hands to `specify`. [vendedSkillIds] enumerates
 /// them; [PackagedAssetLoader.renderSkill] renders one by id.
 ///
 /// The DELIVERY leg is [OverlayMaterializer]: the CLI-free lib that expands a
@@ -159,11 +159,14 @@ export 'src/agent/usage_report.dart';
 export 'src/assets/asset_loader.dart';
 export 'src/assets/assets_command.dart';
 export 'src/assets/composition_assets.dart';
+export 'src/assets/grid_asset_pack.dart';
+export 'src/assets/grid_block.dart';
 export 'src/assets/mounted_tree.dart';
 export 'src/assets/overlay_install.dart';
 export 'src/assets/overlay_manifest.dart';
 export 'src/assets/overlay_materializer.dart';
 export 'src/assets/overlay_provenance.dart';
+export 'src/assets/vended_assets.dart';
 export 'src/code/circuit_migration.dart';
 export 'src/code/code_capabilities.dart';
 export 'src/code/committee.dart';

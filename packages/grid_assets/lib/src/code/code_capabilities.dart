@@ -39,6 +39,7 @@ import '../assets/asset_loader.dart';
 import '../assets/overlay_materializer.dart';
 import '../assets/overlay_manifest.dart';
 import '../assets/overlay_provenance.dart';
+import '../assets/vended_assets.dart';
 import 'circuit_migration.dart';
 import 'committee.dart';
 import 'conventional_commit.dart';
@@ -446,9 +447,13 @@ class AgentCapability extends ProcessCapability {
     // ONE leg answers for both: the agents leg is pinned byte-identical to the
     // claude leg (`overlay_codex_leg_test.dart`), so its id set is the same
     // set. Reading both would just deduplicate what one read already gives.
+    //
+    // The deny-list is DERIVED from the generated pack's `audience: human`
+    // declarations; it is no longer a hand-maintained const list.
+    final withheld = operatorSkillIds;
     return [
       for (final id in report.installedSkillIdsUnder(kClaudeSkillsSubtree))
-        if (!kOperatorSkills.contains(id)) id,
+        if (!withheld.contains(id)) id,
     ];
   }
 

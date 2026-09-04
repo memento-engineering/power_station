@@ -39,61 +39,6 @@ import 'package:path/path.dart' as p;
 
 import 'overlay_manifest.dart';
 
-/// The skill ids this package vends
-/// (`extension/station_overlay/skills/<id>/SKILL.md`) — the agentic halves of
-/// the coupled skill+command pairs (ADR-0001). `OverlayMaterializer` does not
-/// read this constant (it installs whatever files exist under the overlay); it
-/// is the by-id render surface's own index, and the skill-manifest test's.
-const List<String> kVendedSkills = [
-  'asset-author',
-  'discover',
-  'gate-medicine',
-  'handoff',
-  'harvest-review',
-  'intake-refinement',
-  'release',
-  'station-operations',
-];
-
-/// The vended skills whose AUDIENCE is the OPERATOR — the human at the grid
-/// home, whose `.claude/` the `install` Command fills. The provision wire
-/// installs them into a per-bead worktree like any other overlay file (one
-/// tree, two consumers), but NEVER names them in a build agent's brief
-/// (`buildAgentBrief`). The mirror of each skill's `audience:` in
-/// `extension/mcp/config.yaml`, fenced by test.
-///
-/// The split is load-bearing, not cosmetic. Most of these drive the STATION
-/// (boot it, land its work, clear its gates, cut its releases) — and
-/// `harvest-review` teaches "push and open a PR with receipts", which the very
-/// brief that would offer it FORBIDS ("Do NOT push and do NOT open a pull
-/// request"). Offering a build agent a skill that contradicts its working
-/// agreement is a live hazard. `asset-author` drives nothing and is withheld
-/// on its own ground: it is the operator's authoring manual — doctrine for the
-/// human composing and installing the station's asset surface — and a build
-/// agent's composition guidance arrives through its bead's design and
-/// validation plan, never through a station-owner manual its brief did not
-/// ask for. `handoff` is withheld on the same ground: it ENDS a turn by asking
-/// the OUTER harness to compact, clear, or relaunch the seat, and it writes to
-/// an Agent Disc that exists at a grid home and not in a bead's worktree —
-/// both contradict a build agent's working agreement, which is to finish the
-/// bead and commit.
-///
-/// A DENY-list, not an allow-list of agent skills: the wire materializes
-/// whatever overlay it is handed, so a skill this package does not vend (a
-/// third-party asset pack's, an injected fixture's) is a skill whose pack meant
-/// it for its agents. Naming it is what makes it invocable — dropping it
-/// silently is the failure this doctrine forbids. Only a DECLARED operator
-/// audience withholds a skill.
-const List<String> kOperatorSkills = [
-  'asset-author',
-  'gate-medicine',
-  'handoff',
-  'harvest-review',
-  'intake-refinement',
-  'release',
-  'station-operations',
-];
-
 /// Loads grid_assets' bundled rubric/prompt assets from `extension/`.
 class PackagedAssetLoader {
   /// Creates a loader. [root] explicitly points at the `extension/` dir (tests

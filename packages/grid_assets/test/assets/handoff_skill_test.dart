@@ -64,9 +64,9 @@ void main() {
   group('the handoff skill is VENDED on both legs', () {
     test('the id is enumerated, operator-audience, and present under '
         'claude/skills and agents/skills', () {
-      expect(kVendedSkills, contains('handoff'));
+      expect(vendedSkillIds, contains('handoff'));
       expect(
-        kOperatorSkills,
+        operatorSkillIds,
         contains('handoff'),
         reason:
             "a build agent's brief never names it: the disc it writes lives "
