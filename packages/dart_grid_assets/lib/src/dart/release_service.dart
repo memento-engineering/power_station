@@ -1054,9 +1054,18 @@ class ReleaseService {
 /// Entries a throwaway candidate copy must NOT carry: workspace-resolved
 /// caches, the repo's own lock, the machine-local generated overrides, and
 /// build output. Everything else is copied so analysis sees the real sources.
+///
+/// `analysis_options.yaml` is excluded too, because the house one `include:`s a
+/// repo-root file by relative path — outside the checkout that resolves to
+/// nothing and analysis reports `include_file_not_found`, failing every
+/// candidate for a reason that has nothing to do with its floors. The leg's
+/// invariant is narrow on purpose: does the candidate COMPILE against the
+/// minimums it declares. Repo lint conformance is the workspace-green gate's
+/// job, and it runs against the real tree where the include resolves.
 const Set<String> _throwawayExclusions = {
   '.dart_tool',
   '.git',
+  'analysis_options.yaml',
   'build',
   'pubspec.lock',
   'pubspec_overrides.yaml',

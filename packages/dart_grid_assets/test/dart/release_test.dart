@@ -388,21 +388,68 @@ void main() {
       },
     );
 
-    test('the copy resolves STANDALONE, never through the workspace', () async {
+    test('the copy resolves STANDALONE and drops repo-local residue', () async {
       final fixture = _writeUnitFloorWorkspace('^0.2.0-rc.3');
       addTearDown(() => fixture.root.delete(recursive: true));
+      // Residue the copy must drop: the repo's lock, the machine-local dev
+      // overrides, the workspace-resolved cache, and — critically — an
+      // analysis_options.yaml whose `include:` points OUTSIDE the package and
+      // so resolves to nothing once the copy leaves the checkout.
+      File(
+        p.join(fixture.candidate.path, 'analysis_options.yaml'),
+      ).writeAsStringSync('include: ../../analysis_options.yaml\n');
+      File(
+        p.join(fixture.candidate.path, 'pubspec.lock'),
+      ).writeAsStringSync('# stale\n');
+      File(
+        p.join(fixture.candidate.path, 'pubspec_overrides.yaml'),
+      ).writeAsStringSync('# stale machine-local dev override\n');
+      Directory(
+        p.join(fixture.candidate.path, '.dart_tool'),
+      ).createSync(recursive: true);
+
       String? copiedPubspec;
+      final entries = <String>{};
+      final fake = _FakeProcess.queue([
+        ProcessResult(1, 0, '', ''),
+        ProcessResult(2, 0, 'No issues found!', ''),
+      ]);
       final result = await ReleaseService(
         runProcess: (executable, arguments, {workingDirectory}) async {
+          final copy = workingDirectory!;
           copiedPubspec ??= File(
-            p.join(workingDirectory!, 'pubspec.yaml'),
+            p.join(copy, 'pubspec.yaml'),
           ).readAsStringSync();
-          return ProcessResult(0, 0, '', '');
+          entries.addAll(
+            Directory(copy).listSync().map((e) => p.basename(e.path)),
+          );
+          return fake.call(
+            executable,
+            arguments,
+            workingDirectory: workingDirectory,
+          );
         },
       ).validateDeclaredFloors(packageDir: fixture.candidate.path);
 
       expect(copiedPubspec, isNot(contains('resolution: workspace')));
       expect(copiedPubspec, contains('grid_trajectory: ^0.2.0-rc.3'));
+      expect(entries, containsAll(<String>['lib', 'pubspec.yaml']));
+      expect(
+        entries.intersection(<String>{
+          '.dart_tool',
+          'analysis_options.yaml',
+          'pubspec.lock',
+        }),
+        isEmpty,
+        reason: 'a repo-root `include:` cannot resolve in the throwaway copy',
+      );
+      // The one pubspec_overrides.yaml present is the GENERATED floor pin —
+      // never the machine-local dev override that sat beside the source.
+      expect(entries, contains('pubspec_overrides.yaml'));
+      expect(
+        fake.overrideSnapshots.first,
+        contains("grid_trajectory: '0.2.0-rc.3'"),
+      );
       expect(result.passed, isTrue);
       expect(result.message, contains('declared-floor validation passed'));
     });
