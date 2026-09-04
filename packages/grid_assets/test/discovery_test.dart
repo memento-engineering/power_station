@@ -56,7 +56,7 @@ DiscoveryVerdict _decide(
 
 /// A Fake [LensReportReader] over canned reports (Fakes, not mocks).
 LensReportReader _reader(Map<String, LensReport?> canned) =>
-    (_, lens, __) => canned[lens];
+    (_, lens, __, {required int round}) => canned[lens];
 
 Future<RouteVerdict> _runRoute(Map<String, LensReport?> canned) =>
     DiscoveryRouteCapability(reader: _reader(canned)).route(
@@ -69,7 +69,7 @@ Future<RouteVerdict> _runRoute(Map<String, LensReport?> canned) =>
       ),
       stepArgs(
         'tg-1/spec_review/discovery/$kDiscoveryRouteStep',
-        params: {'lenses': kDiscoveryLenses.join(',')},
+        params: {'lenses': kDiscoveryLenses.join(','), 'grid.round': '0'},
       ),
     );
 
@@ -78,7 +78,13 @@ Future<RouteVerdict> _runRoute(Map<String, LensReport?> canned) =>
 Future<RouteVerdict> _runRouteAt(
   Map<String, LensReport?> canned, {
   required String workspaceDir,
-}) => DiscoveryRouteCapability(reader: _reader(canned)).route(
+}) => DiscoveryRouteCapability(
+  reader: _reader(canned),
+  // A canned-null lane has recorded no result either, so the live route
+  // classifies it LATE and waits: millisecond tuning keeps the suite offline-fast.
+  lanePoll: const Duration(milliseconds: 5),
+  laneWaitBudget: const Duration(milliseconds: 50),
+).route(
   FakeTreeContext(
     values: {
       Bead: workBead('tg-1'),
@@ -88,7 +94,7 @@ Future<RouteVerdict> _runRouteAt(
   ),
   stepArgs(
     'tg-1/spec_review/discovery/$kDiscoveryRouteStep',
-    params: {'lenses': kDiscoveryLenses.join(',')},
+    params: {'lenses': kDiscoveryLenses.join(','), 'grid.round': '0'},
   ),
 );
 
@@ -605,6 +611,7 @@ void main() {
           bead: workBead('tg-1'),
           lens: kDecisionLens,
           nodePath: 'tg-1/spec_review/discovery/$kDecisionLens',
+          round: 0,
           workspaceDir: '/w/tg-1',
         );
         expect(prompt, contains('A DECISION ENTRY BINDS'));
@@ -694,14 +701,15 @@ void main() {
     });
 
     test(
-      'the regather ledger OUTLIVES the anchors wipe (sibling of the dir)',
+      'the regather ledger OUTLIVES the anchors sweep (sibling of the dir)',
       () {
         expect(
           p.isWithin(discoveryDirPath('/w'), discoveryRegatherLedgerPath('/w')),
           isFalse,
           reason:
-              'AnchorsCapability WIPES the gather dir at the head of every '
-              'round — a counter kept inside it restarts the bound at 0 forever',
+              'AnchorsCapability SWEEPS the gather dir at the head of every '
+              'round — a counter kept inside it is unstamped, so the sweep '
+              'deletes it and the bound restarts at 0 forever',
         );
       },
     );

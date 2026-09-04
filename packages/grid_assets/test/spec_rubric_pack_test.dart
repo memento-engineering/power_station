@@ -368,6 +368,7 @@ void main() {
       bead: bead('tg-1'),
       lens: kPriorArtLens,
       nodePath: 'tg-1/spec_review/discovery/$kPriorArtLens',
+      round: 0,
       workspaceDir: '/w/tg-1',
     );
     final packaged = loader.loadPromptTemplate('discovery');
@@ -439,6 +440,7 @@ void main() {
               bead: bead('tg-1'),
               lens: kDecisionLens,
               nodePath: 'tg-1/spec_review/discovery/$kDecisionLens',
+              round: 0,
               workspaceDir: '/w/tg-1',
             ),
         'discovery.dart:lensBrief': lensBrief(kDecisionLens),
