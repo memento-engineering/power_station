@@ -1660,25 +1660,28 @@ DiscoveryEvidenceProjection projectDiscoveryEvidence(
           )
           ..writeln();
       }
+      // A clipped EXTRACTION is the same kind of bounded answer as a clipped
+      // record (bead `pow-gcx9`): the bead names more surfaces or symbols than
+      // [kMaxAnchors] carries. It is NAMED so a short list is never silent, but
+      // it is context the lens narrates, never a deterministic gap — the lens's
+      // own insufficient-evidence outcome is the only hold on it.
       if (anchors.anchorsTruncated) {
-        gaps.add(
-          const EvidenceGap(
-            evidenceId: 'gather:anchors',
-            reason:
-                'the bead names MORE code surfaces than the gather carries — '
-                'the anchor extraction was clipped at its bound',
-          ),
-        );
+        b
+          ..writeln(
+            'CLIPPED: the bead names MORE code surfaces than the gather '
+            'carries — the anchor extraction was clipped at its bound '
+            '($kMaxAnchors); the list above is the head of it.',
+          )
+          ..writeln();
       }
       if (anchors.symbolsTruncated) {
-        gaps.add(
-          const EvidenceGap(
-            evidenceId: 'gather:symbols',
-            reason:
-                'the bead names MORE symbols than the gather carries — the '
-                'symbol extraction was clipped at its bound',
-          ),
-        );
+        b
+          ..writeln(
+            'CLIPPED: the bead names MORE symbols than the gather carries — '
+            'the symbol extraction was clipped at its bound; the list above '
+            'is the head of it.',
+          )
+          ..writeln();
       }
     case kDecisionLens:
       beadFields();

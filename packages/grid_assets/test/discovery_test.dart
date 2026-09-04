@@ -1650,10 +1650,12 @@ void main() {
         decisionLookups: base.decisionLookups,
         history: base.history,
       );
-      expect(
-        _project(clipped, kCodeLens).gaps.map((g) => g.evidenceId),
-        containsAll(['gather:anchors', 'gather:symbols']),
-      );
+      // bead `pow-gcx9`: a clipped extraction is NAMED, never a gap.
+      final code = _project(clipped, kCodeLens);
+      expect(code.isSufficient, isTrue);
+      expect(code.gaps, isEmpty);
+      expect(code.renderedEvidence, contains('MORE code surfaces'));
+      expect(code.renderedEvidence, contains('MORE symbols'));
     });
 
     test('an empty successful lookup reads differently from a missing one', () {
