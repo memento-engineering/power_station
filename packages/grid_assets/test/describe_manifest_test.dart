@@ -78,48 +78,45 @@ void main() {
   });
 
   group('buildDescribeManifest — stable, bounded, hunk-free', () {
-    test(
-      'renders the five sections in a FIXED order, with counts and '
-      'receipt provenance',
-      () {
-        final text = buildDescribeManifest(_small());
-        final one = text.indexOf('## 1.');
-        final two = text.indexOf('## 2.');
-        final three = text.indexOf('## 3.');
-        final four = text.indexOf('## 4.');
-        final five = text.indexOf('## 5.');
-        expect([
-          one,
-          two,
-          three,
-          four,
-          five,
-        ], everyElement(greaterThanOrEqualTo(0)));
-        expect(one < two && two < three && three < four && four < five, isTrue);
-        expect(text, contains('## 2. Commits — 1 total, in git order'));
-        expect(text, contains('## 3. Files — 2 changed'));
-        expect(
-          text,
-          contains(
-            '- diffstat: 2 files changed, 32 insertions(+), 1 deletion(-)',
-          ),
-        );
-        expect(text, contains('- M lib/x.dart +2 -1'));
-        expect(text, contains('- A test/x_test.dart +30 -0'));
-        expect(text, contains('- observed (git): 2 changed files (1 test)'));
-        expect(text, contains('- areas (2 total): lib, test'));
-        expect(
-          text,
-          contains('- validation: rc=0 [from `tg-1/land/revalidate`]'),
-        );
-        expect(
-          text,
-          contains(
-            '- committee: grades=A,A,B spread=1 [from `tg-1/review/route`]',
-          ),
-        );
-      },
-    );
+    test('renders the five sections in a FIXED order, with counts and '
+        'receipt provenance', () {
+      final text = buildDescribeManifest(_small());
+      final one = text.indexOf('## 1.');
+      final two = text.indexOf('## 2.');
+      final three = text.indexOf('## 3.');
+      final four = text.indexOf('## 4.');
+      final five = text.indexOf('## 5.');
+      expect([
+        one,
+        two,
+        three,
+        four,
+        five,
+      ], everyElement(greaterThanOrEqualTo(0)));
+      expect(one < two && two < three && three < four && four < five, isTrue);
+      expect(text, contains('## 2. Commits — 1 total, in git order'));
+      expect(text, contains('## 3. Files — 2 changed'));
+      expect(
+        text,
+        contains(
+          '- diffstat: 2 files changed, 32 insertions(+), 1 deletion(-)',
+        ),
+      );
+      expect(text, contains('- M lib/x.dart +2 -1'));
+      expect(text, contains('- A test/x_test.dart +30 -0'));
+      expect(text, contains('- observed (git): 2 changed files (1 test)'));
+      expect(text, contains('- areas (2 total): lib, test'));
+      expect(
+        text,
+        contains('- validation: rc=0 [from `tg-1/land/revalidate`]'),
+      );
+      expect(
+        text,
+        contains(
+          '- committee: grades=A,A,B spread=1 [from `tg-1/review/route`]',
+        ),
+      );
+    });
 
     test('the SAME facts render byte-identically', () {
       expect(buildDescribeManifest(_small()), buildDescribeManifest(_small()));
@@ -146,63 +143,58 @@ void main() {
       expect(text, contains('- acceptance: (none recorded)'));
     });
 
-    test(
-      'a VERY LARGE branch truncates at record boundaries under 16 KiB, '
-      'and every REQUIRED line survives',
-      () {
-        final nameStatus = StringBuffer();
-        final numstat = StringBuffer();
-        for (var i = 0; i < 900; i++) {
-          nameStatus.write(
-            'M\x00packages/grid_assets/lib/src/code/f$i.dart\x00',
-          );
-          numstat.write('$i\t$i\tpackages/grid_assets/lib/src/code/f$i.dart\x00');
-        }
-        final text = buildDescribeManifest(
-          DescribeManifest(
-            beadId: 'tg-1',
-            beadTitle: 'huge',
-            baseBranch: 'main',
-            commits: [
-              for (var i = 0; i < 400; i++)
-                'feat(x): commit number $i\n\n${'body ' * 80}',
-            ],
-            files: changedFilesFrom(
-              nameStatus: nameStatus.toString(),
-              numstat: numstat.toString(),
-            ),
-            shortstat: ' 900 files changed, 1 insertion(+)',
-            receipts: const [
-              DescribeReceipt(
-                label: 'committee',
-                nodePath: 'tg-1/review/route',
-                result: {'grades': 'A'},
-              ),
-            ],
+    test('a VERY LARGE branch truncates at record boundaries under 16 KiB, '
+        'and every REQUIRED line survives', () {
+      final nameStatus = StringBuffer();
+      final numstat = StringBuffer();
+      for (var i = 0; i < 900; i++) {
+        nameStatus.write('M\x00packages/grid_assets/lib/src/code/f$i.dart\x00');
+        numstat.write('$i\t$i\tpackages/grid_assets/lib/src/code/f$i.dart\x00');
+      }
+      final text = buildDescribeManifest(
+        DescribeManifest(
+          beadId: 'tg-1',
+          beadTitle: 'huge',
+          baseBranch: 'main',
+          commits: [
+            for (var i = 0; i < 400; i++)
+              'feat(x): commit number $i\n\n${'body ' * 80}',
+          ],
+          files: changedFilesFrom(
+            nameStatus: nameStatus.toString(),
+            numstat: numstat.toString(),
           ),
-        );
-        expect(utf8.encode(text).length, lessThanOrEqualTo(16 * 1024));
-        // The counts survive truncation, and say how much was dropped.
-        expect(text, contains('## 2. Commits — 400 total, in git order'));
-        expect(text, contains('## 3. Files — 900 changed'));
-        expect(text, contains('- diffstat: 900 files changed, 1 insertion(+)'));
-        expect(text, matches(RegExp(r'… \d+ of 400 commit records omitted')));
-        expect(text, matches(RegExp(r'… \d+ of 900 file records omitted')));
-        expect(text, contains('- observed (git): 900 changed files (0 test)'));
-        expect(
-          text,
-          contains('- committee: grades=A [from `tg-1/review/route`]'),
-        );
-        // Record boundary: every admitted file line is a WHOLE record —
-        // `- <status> <path> +N -N` (or `(binary)`). A record cut mid-way by
-        // the byte budget could not match.
-        final record = RegExp(r'^- M \S+ (\+\d+ -\d+|\(binary\))$');
-        for (final line in const LineSplitter().convert(text)) {
-          if (!line.startsWith('- M packages/')) continue;
-          expect(line, matches(record));
-        }
-      },
-    );
+          shortstat: ' 900 files changed, 1 insertion(+)',
+          receipts: const [
+            DescribeReceipt(
+              label: 'committee',
+              nodePath: 'tg-1/review/route',
+              result: {'grades': 'A'},
+            ),
+          ],
+        ),
+      );
+      expect(utf8.encode(text).length, lessThanOrEqualTo(16 * 1024));
+      // The counts survive truncation, and say how much was dropped.
+      expect(text, contains('## 2. Commits — 400 total, in git order'));
+      expect(text, contains('## 3. Files — 900 changed'));
+      expect(text, contains('- diffstat: 900 files changed, 1 insertion(+)'));
+      expect(text, matches(RegExp(r'… \d+ of 400 commit records omitted')));
+      expect(text, matches(RegExp(r'… \d+ of 900 file records omitted')));
+      expect(text, contains('- observed (git): 900 changed files (0 test)'));
+      expect(
+        text,
+        contains('- committee: grades=A [from `tg-1/review/route`]'),
+      );
+      // Record boundary: every admitted file line is a WHOLE record —
+      // `- <status> <path> +N -N` (or `(binary)`). A record cut mid-way by
+      // the byte budget could not match.
+      final record = RegExp(r'^- M \S+ (\+\d+ -\d+|\(binary\))$');
+      for (final line in const LineSplitter().convert(text)) {
+        if (!line.startsWith('- M packages/')) continue;
+        expect(line, matches(record));
+      }
+    });
 
     test('REQUIRED lines alone over the ceiling still clamp to 16 KiB', () {
       final text = buildDescribeManifest(

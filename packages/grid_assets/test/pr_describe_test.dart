@@ -204,20 +204,17 @@ void main() {
   });
 
   group('every failure path falls back — a land NEVER fails over PR prose', () {
-    test(
-      'a failing `git diff --name-status` ⇒ fallback, but the commit lint '
-      'still lands',
-      () async {
-        final outcome = await _describe(
-          workspaceDir: work.path,
-          git: CannedGitRunner(log: 'wip\x00', nameStatusOk: false),
-          inference: _ExplodingInferenceRunner(),
-        );
-        expect(outcome.source, 'fallback');
-        expect(outcome.commits.total, 1);
-        expect(outcome.commits.compliant, 0);
-      },
-    );
+    test('a failing `git diff --name-status` ⇒ fallback, but the commit lint '
+        'still lands', () async {
+      final outcome = await _describe(
+        workspaceDir: work.path,
+        git: CannedGitRunner(log: 'wip\x00', nameStatusOk: false),
+        inference: _ExplodingInferenceRunner(),
+      );
+      expect(outcome.source, 'fallback');
+      expect(outcome.commits.total, 1);
+      expect(outcome.commits.compliant, 0);
+    });
 
     test('an EMPTY changed-file set ⇒ fallback, no inference spent', () async {
       final outcome = await _describe(
@@ -248,40 +245,36 @@ void main() {
   });
 
   group('the describe call is METERED (FT-2) and its answer is the envelope', () {
-    test(
-      'an FT-2 envelope on disk supplies BOTH the answer text and the usage '
-      'fields',
-      () async {
-        final telemetry = File(
-          p.join(work.path, usageReportPath('tg-1/deliver')),
-        )..parent.createSync(recursive: true);
-        telemetry.writeAsStringSync(
-          jsonEncode({
-            'result': _answer,
-            'usage': {'input_tokens': 812, 'output_tokens': 143},
-            'num_turns': 1,
-            'duration_ms': 2400,
-            'modelUsage': {'claude-haiku-4-5': <String, Object?>{}},
-          }),
-        );
-        final outcome = await _describe(
-          workspaceDir: work.path,
-          git: CannedGitRunner(log: 'feat(x): do a thing\x00'),
-          // stdout is EMPTY: the real harness redirected it into the envelope.
-          inference: FakeInferenceRunner(),
-        );
-        expect(outcome.source, 'inference');
-        expect(outcome.description!.type, 'feat');
-        expect(outcome.usage['tokensIn'], '812');
-        expect(outcome.usage['tokensOut'], '143');
-        expect(outcome.usage['numTurns'], '1');
-        expect(outcome.usage['harnessDurationMs'], '2400');
-        expect(outcome.usage['model'], 'claude-haiku-4-5');
-        expect(outcome.usage['describe_harness'], 'claude');
-        expect(outcome.usage['describe_model'], 'haiku');
-        expect(outcome.usage['describe_stop'], 'ok');
-      },
-    );
+    test('an FT-2 envelope on disk supplies BOTH the answer text and the usage '
+        'fields', () async {
+      final telemetry = File(p.join(work.path, usageReportPath('tg-1/deliver')))
+        ..parent.createSync(recursive: true);
+      telemetry.writeAsStringSync(
+        jsonEncode({
+          'result': _answer,
+          'usage': {'input_tokens': 812, 'output_tokens': 143},
+          'num_turns': 1,
+          'duration_ms': 2400,
+          'modelUsage': {'claude-haiku-4-5': <String, Object?>{}},
+        }),
+      );
+      final outcome = await _describe(
+        workspaceDir: work.path,
+        git: CannedGitRunner(log: 'feat(x): do a thing\x00'),
+        // stdout is EMPTY: the real harness redirected it into the envelope.
+        inference: FakeInferenceRunner(),
+      );
+      expect(outcome.source, 'inference');
+      expect(outcome.description!.type, 'feat');
+      expect(outcome.usage['tokensIn'], '812');
+      expect(outcome.usage['tokensOut'], '143');
+      expect(outcome.usage['numTurns'], '1');
+      expect(outcome.usage['harnessDurationMs'], '2400');
+      expect(outcome.usage['model'], 'claude-haiku-4-5');
+      expect(outcome.usage['describe_harness'], 'claude');
+      expect(outcome.usage['describe_model'], 'haiku');
+      expect(outcome.usage['describe_stop'], 'ok');
+    });
 
     test(
       'NO envelope on disk ⇒ stdout is the answer, and the stop outcome still '
@@ -298,24 +291,27 @@ void main() {
       },
     );
 
-    test('the manifest carries the circuit receipts the ROUTE threads in', () async {
-      final inference = FakeInferenceRunner(output: _answer);
-      await _describe(
-        workspaceDir: work.path,
-        git: CannedGitRunner(),
-        inference: inference,
-        receipts: const [
-          DescribeReceipt(
-            label: 'validation',
-            nodePath: 'tg-1/land/revalidate',
-            result: {'rc': '0'},
-          ),
-        ],
-      );
-      expect(
-        inference.calls.single.args.last,
-        contains('- validation: rc=0 [from `tg-1/land/revalidate`]'),
-      );
-    });
+    test(
+      'the manifest carries the circuit receipts the ROUTE threads in',
+      () async {
+        final inference = FakeInferenceRunner(output: _answer);
+        await _describe(
+          workspaceDir: work.path,
+          git: CannedGitRunner(),
+          inference: inference,
+          receipts: const [
+            DescribeReceipt(
+              label: 'validation',
+              nodePath: 'tg-1/land/revalidate',
+              result: {'rc': '0'},
+            ),
+          ],
+        );
+        expect(
+          inference.calls.single.args.last,
+          contains('- validation: rc=0 [from `tg-1/land/revalidate`]'),
+        );
+      },
+    );
   });
 }

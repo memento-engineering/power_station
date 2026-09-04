@@ -453,26 +453,23 @@ void main() {
         ),
       );
 
-      test(
-        'carries the MANIFEST + the v1.0.0 rules + the no-foreign-reference '
-        'rule, asks for NO tool use, and forbids inventing a fact',
-        () {
-          final text = prompt();
-          expect(text, contains('do NOT run a tool'));
-          expect(text, contains('IMPERATIVE MOOD'));
-          expect(text, contains('NEVER write the tracker id `tg-1`'));
-          expect(text, contains('`Refs:` git trailer'));
-          expect(text, contains('USE ONLY THE FACTS IN THE MANIFEST'));
-          expect(text, contains('## The change manifest'));
-          expect(text, contains('- M lib/x.dart +2 -1'));
-          expect(text, contains('- diffstat: 1 file changed'));
-          expect(text, contains('- [ ] a testable criterion'));
-          // The PATCH is gone: the prompt carries facts, never hunks.
-          expect(text, isNot(contains('@@')));
-          expect(text, isNot(contains('--- a/lib/x.dart')));
-          expect(text, isNot(contains('### The diff')));
-        },
-      );
+      test('carries the MANIFEST + the v1.0.0 rules + the no-foreign-reference '
+          'rule, asks for NO tool use, and forbids inventing a fact', () {
+        final text = prompt();
+        expect(text, contains('do NOT run a tool'));
+        expect(text, contains('IMPERATIVE MOOD'));
+        expect(text, contains('NEVER write the tracker id `tg-1`'));
+        expect(text, contains('`Refs:` git trailer'));
+        expect(text, contains('USE ONLY THE FACTS IN THE MANIFEST'));
+        expect(text, contains('## The change manifest'));
+        expect(text, contains('- M lib/x.dart +2 -1'));
+        expect(text, contains('- diffstat: 1 file changed'));
+        expect(text, contains('- [ ] a testable criterion'));
+        // The PATCH is gone: the prompt carries facts, never hunks.
+        expect(text, isNot(contains('@@')));
+        expect(text, isNot(contains('--- a/lib/x.dart')));
+        expect(text, isNot(contains('### The diff')));
+      });
 
       test(
         'asks for a 2-5 sentence human digest, prose-only, and EXEMPLIFIES it '

@@ -224,13 +224,14 @@ void main() {
             'modelUsage': {'claude-haiku-4-5': <String, Object?>{}},
           }),
         );
-      final outcome = await DeliverRouteCapability(
-        gitRunner: CannedGitRunner(log: 'feat(x): do a thing\x00'),
-        inference: FakeInferenceRunner(),
-      ).route(
-        _deliverContext(workspaceDir: work.path, delivery: _FakeDelivery()),
-        _deliverArgs(),
-      );
+      final outcome =
+          await DeliverRouteCapability(
+            gitRunner: CannedGitRunner(log: 'feat(x): do a thing\x00'),
+            inference: FakeInferenceRunner(),
+          ).route(
+            _deliverContext(workspaceDir: work.path, delivery: _FakeDelivery()),
+            _deliverArgs(),
+          );
       final payload = (outcome as Advance).payload!;
       expect(payload['tokensIn'], '700');
       expect(payload['tokensOut'], '90');
