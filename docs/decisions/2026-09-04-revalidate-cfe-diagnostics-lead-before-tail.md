@@ -12,7 +12,7 @@ register:
   obsoletes: []
   updates: ["captured-process-output-escalates-tail-first"]
   obsoleted-by: null
-  updated-by: []
+  updated-by: ["code-validation-preserves-diagnostics-and-reports-deadline"]
   bead: pow-gvfx
   legacy-id: null
 ---

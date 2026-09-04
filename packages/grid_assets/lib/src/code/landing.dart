@@ -307,8 +307,8 @@ const String _revalidateLogRelativePath = '.grid/critique/revalidate.log';
 /// stale-base hole (a plan that passed pre-rebase may fail post-rebase).
 ///
 /// A non-zero plan writes its full combined output to
-/// `.grid/critique/revalidate.log`, then [Escalate]s. Recognized `Error:`,
-/// `Failed to load`, and `[E]` lines lead that reason before the retained tail
+/// `.grid/critique/revalidate.log`, then [Escalate]s. `Error:`, `Failed to
+/// load`, and line-leading `[E]` diagnostics lead that reason before the tail
 /// ([validationDiagnosticLines], shared with the gating lane); all other tools
 /// retain the established tail-first reason byte-for-byte.
 ///

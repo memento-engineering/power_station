@@ -40,16 +40,22 @@ const int kValidationDiagnosticHeadChars = 320;
 /// file it failed to load, so an undeduplicated lead would spend the whole
 /// budget on one cause.
 ///
-/// The front end carries `Error:` or `Failed to load`; the analyzer and the
-/// other line-oriented validation tools carry `[E]`. Every other output shape
-/// is served by the retained tail, which is where its fatal line lives.
+/// The front end carries `Error:` or `Failed to load`; a line-oriented tool
+/// OPENS its diagnostic with `[E]`. Every other output shape is served by the
+/// retained tail, which is where its fatal line lives.
+///
+/// `[E]` is matched only at the START of a line, and that is load-bearing:
+/// `dart test`'s compact reporter marks a failing PROGRESS line with a
+/// trailing `[E]` (`00:02 +512 -1: test/foo_test.dart: renders it [E]`), and
+/// promoting those would lead the reason with progress instead of the cause —
+/// exactly the tail-first receipt bead `pow-gy41` pinned.
 List<String> validationDiagnosticLines(String output) {
   final diagnostics = <String>{};
   for (final line in output.split('\n')) {
     final diagnostic = line.trim();
     if (diagnostic.contains('Error:') ||
         diagnostic.contains('Failed to load') ||
-        diagnostic.contains('[E]')) {
+        diagnostic.startsWith('[E]')) {
       diagnostics.add(diagnostic);
     }
   }
