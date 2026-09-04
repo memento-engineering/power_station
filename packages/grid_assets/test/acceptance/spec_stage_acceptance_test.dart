@@ -74,12 +74,17 @@ final List<String> _specCriticSteps = [
   for (final n in kSpecCriticNodes) _step(n),
 ];
 
+/// A downstream station's own verb — multi-token, and nothing like the
+/// first-party default, so a prompt that still names `space` is unmistakable.
+const String _lunarRunner = 'dart run lunar:lunar';
+
 MountedStation _buildStation(
   Fakes f,
   FakeSnapshotSource work,
   FakeSnapshotSource state, {
   BdRunner Function(String workspaceRoot)? specifyBdRunnerFor,
   ExplorationTransport? transport,
+  Map<String, String> overlayArgs = const {},
 }) {
   final bridge = StationJoinBridge(work: work, state: state);
   return MountedStation(
@@ -94,6 +99,7 @@ MountedStation _buildStation(
       specifyBdRunnerFor:
           specifyBdRunnerFor ??
           (_) => SpecifyReadbackBdRunner(beads: [durableSpecifiedBead('tg-1')]),
+      overlayArgs: overlayArgs,
     ),
     substations: [
       SubstationScope(
@@ -237,11 +243,14 @@ void main() {
       final specifyReadback = SpecifyReadbackBdRunner(
         beads: [durableSpecifiedBead('tg-1')],
       );
+      // Composed as a DOWNSTREAM station: the runner it publishes is the one
+      // every rendered decision lookup must name, end to end.
       final station = _buildStation(
         f,
         work,
         state,
         specifyBdRunnerFor: (_) => specifyReadback,
+        overlayArgs: const {'runner': _lunarRunner},
       );
       addTearDown(station.dispose);
       addTearDown(f.provider.close);
@@ -283,7 +292,9 @@ void main() {
       expect(brief, contains('bd update tg-1 --actor specify --acceptance'));
       expect(brief, contains('bd update tg-1 --actor specify --design'));
       expect(brief, contains('## ADR Alignment'));
-      expect(brief, contains('space decisions index --surface'));
+      expect(brief, contains('$_lunarRunner decisions index --surface'));
+      expect(brief, isNot(contains('space decisions index')));
+      expect(brief, isNot(contains('{{runner}}')));
       for (final token in kLocalOnlyTokens) {
         expect(brief, isNot(contains(token)));
       }
@@ -329,6 +340,20 @@ void main() {
         isNot(contains(_step(kAgentNode))),
         reason: 'the build agent must NOT spawn before the spec gate',
       );
+      // The critic reads the SAME verb the architect was handed — the whole
+      // point: the lane that grades decision alignment must be able to RUN the
+      // lookup it is told to run.
+      final decisionBrief = f.provider.started
+          .firstWhere((s) => s.name == _step('spec_review/decision-alignment'))
+          .config
+          .args
+          .last;
+      expect(
+        decisionBrief,
+        contains('$_lunarRunner decisions index --surface'),
+      );
+      expect(decisionBrief, isNot(contains('space decisions index')));
+      expect(decisionBrief, isNot(contains('{{runner}}')));
       expect(
         _wroteCursor(f, kSpecGateNode, 'complete'),
         isTrue,

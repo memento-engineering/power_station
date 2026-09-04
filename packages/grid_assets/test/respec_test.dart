@@ -609,7 +609,7 @@ void main() {
           _gating: {'round': '1'},
         },
         ambientBead: ambient,
-        specifyResult: const {
+        specifyResult: {
           kCarriedSpecAcceptanceKey: kSpecExemplarAcceptance,
           kCarriedSpecDesignKey: kSpecExemplarDesign,
         },

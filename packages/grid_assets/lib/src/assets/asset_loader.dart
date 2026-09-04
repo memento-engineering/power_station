@@ -38,6 +38,10 @@ import 'package:beads_dart/beads_dart.dart';
 import 'package:path/path.dart' as p;
 
 import 'overlay_manifest.dart';
+import 'overlay_materializer.dart' show kDefaultOverlayRunner;
+
+/// Any `{{key}}` hole left after substitution — a RENDERED asset has none.
+final RegExp _templateHole = RegExp(r'\{\{[^}]*\}\}');
 
 /// Loads grid_assets' bundled rubric/prompt assets from `extension/`.
 class PackagedAssetLoader {
@@ -85,7 +89,7 @@ class PackagedAssetLoader {
   String renderCriticPrompt(String rubricId, Bead bead) =>
       _mustache(loadPromptTemplate('critic'), {
         'rubric': rubricId,
-        'rubricText': loadRubric(rubricId),
+        'rubricText': _stationRubric(rubricId),
         'bead': beadBlock(bead),
       });
 
@@ -95,7 +99,7 @@ class PackagedAssetLoader {
   String renderSpecCriticPrompt(String rubricId, Bead bead) =>
       _mustache(loadPromptTemplate('spec-critic'), {
         'rubric': rubricId,
-        'rubricText': loadRubric(rubricId),
+        'rubricText': _stationRubric(rubricId),
         'bead': beadBlock(bead),
       });
 
@@ -108,7 +112,7 @@ class PackagedAssetLoader {
   String renderReadinessPrompt(String rubricId, Bead bead) =>
       _mustache(loadPromptTemplate('readiness'), {
         'rubric': rubricId,
-        'rubricText': loadRubric(rubricId),
+        'rubricText': _stationRubric(rubricId),
         'bead': beadBlock(bead),
       });
 
@@ -162,22 +166,66 @@ class PackagedAssetLoader {
   /// Throws a [StateError] when any `{{…}}` hole survives substitution — an
   /// installed skill has NO unbound template holes (a leftover `{{runner}}`
   /// would read as a literal in the seat's skill, a silent packaging bug).
-  String renderSkill(String skillId, {required Map<String, String> args}) {
-    final rendered = _mustache(loadSkillTemplate(skillId), args);
-    final residue = RegExp(r'\{\{[^}]*\}\}').allMatches(rendered);
-    if (residue.isNotEmpty) {
-      final holes = {for (final m in residue) m.group(0)!};
-      throw StateError(
-        'renderSkill("$skillId"): unbound template hole(s) '
-        '${holes.join(', ')} — bind every declared arg '
-        '(got: ${args.keys.join(', ')})',
+  String renderSkill(String skillId, {required Map<String, String> args}) =>
+      _renderOrRefuse(
+        'renderSkill("$skillId")',
+        loadSkillTemplate(skillId),
+        args,
       );
-    }
-    return rendered;
-  }
 
-  /// A `RubricSource` tear-off bound to this loader (wire into `CriticCapability`).
+  /// A `RubricSource` tear-off bound to this loader — the RAW packaged prose,
+  /// template holes intact. A rubric that carries a station-arg hole (the
+  /// `decision-alignment` bands render `{{runner}}`) must be read through
+  /// [boundRubricSource] before it reaches an agent.
   String Function(String) get rubricSource => loadRubric;
+
+  /// A `RubricSource` whose station-arg holes are BOUND from [args] — the
+  /// composing station's rubric source, wired once by `buildCodeRegistry` and
+  /// injected into every capability that renders rubric prose into a prompt.
+  ///
+  /// Carries [renderSkill]'s guard verbatim, because it protects the same named
+  /// invariant on the same kind of asset: a rendered packaged asset has NO
+  /// unbound template hole. A surviving `{{runner}}` would read as a literal in
+  /// a critic's prompt — the silent packaging bug ADR-0000 A12 made loud — so
+  /// this THROWS rather than substituting half a command.
+  String Function(String) boundRubricSource({
+    required Map<String, String> args,
+  }) =>
+      (rubricId) => _renderOrRefuse(
+        'loadRubric("$rubricId")',
+        loadRubric(rubricId),
+        args,
+      );
+
+  /// The rubric bands as the FIRST-PARTY station renders them — the packaged
+  /// prose with its station-arg holes bound to the default overlay runner. The
+  /// portable mirrors below embed rubric prose, so they bind it exactly as the
+  /// in-pipeline path does rather than shipping a hole to their reader.
+  String _stationRubric(String rubricId) => boundRubricSource(
+    args: const {'runner': kDefaultOverlayRunner},
+  )(rubricId);
+
+  /// Substitutes every `{{key}}` in [template] from [args] and REFUSES the
+  /// result while any hole survives — [what] names the read for the error.
+  ///
+  /// The ONE by-id render+refuse primitive this loader owns (the tree-level
+  /// counterpart is `OverlayMaterializer`'s non-throwing `OverlayFileRefused`:
+  /// a provision hook must not fail a bead's agent over one unconfigured
+  /// operator arg, where a by-id read has a caller to throw at).
+  static String _renderOrRefuse(
+    String what,
+    String template,
+    Map<String, String> args,
+  ) {
+    final rendered = _mustache(template, args);
+    final residue = _templateHole.allMatches(rendered);
+    if (residue.isEmpty) return rendered;
+    final holes = {for (final m in residue) m.group(0)!};
+    throw StateError(
+      '$what: unbound template hole(s) ${holes.join(', ')} — bind every '
+      'declared arg (got: ${args.keys.join(', ')})',
+    );
+  }
 
   /// Substitutes every `{{key}}` in [template] from [vars] (a tiny, dependency-
   /// free mustache for flat string args — the only templating D-9 needs now).

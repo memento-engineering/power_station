@@ -68,6 +68,12 @@ final Map<String, RegExp> _forbiddenResidue = {
   'the foreign rubric ADR': RegExp('ADR 0012'),
 };
 
+/// [text] as the FIRST-PARTY station renders it — the packaged `{{runner}}`
+/// hole bound to the default overlay verb, the way `buildCodeRegistry` binds it
+/// from `overlayArgs['runner']` for the composing station.
+String _bound(PackagedAssetLoader loader, String text) =>
+    text.replaceAll('{{runner}}', kDefaultOverlayRunner);
+
 void main() {
   final root = _extensionDir();
   final loader = PackagedAssetLoader(root: root);
@@ -395,8 +401,18 @@ void main() {
 
   test('every asset that LOOKS UP names the roster-mode lookup — and the '
       'discovery prompt, which no longer looks anything up, names none', () {
+    // The decision-alignment bands RENDER the verb (`{{runner}}`) rather than
+    // naming one, so the composing station's own invocation reaches the critic;
+    // the portable prompt templates still carry the first-party default.
+    final decisionBands = loader.loadRubric('decision-alignment');
+    expect(
+      decisionBands,
+      contains('{{runner}} decisions index --surface <repo>/<path>'),
+    );
+    expect(decisionBands, isNot(contains('space decisions index')));
+
     final assets = <String, String>{
-      'rubrics/decision-alignment.md': loader.loadRubric('decision-alignment'),
+      'rubrics/decision-alignment.md': _bound(loader, decisionBands),
       'prompts/readiness.md': loader.loadPromptTemplate('readiness'),
       'prompts/spec-critic.md': loader.loadPromptTemplate('spec-critic'),
     };
@@ -562,7 +578,7 @@ void main() {
       );
 
       for (final text in [
-        loader.loadRubric('decision-alignment'),
+        _bound(loader, loader.loadRubric('decision-alignment')),
         loader.loadPromptTemplate('spec-critic'),
       ]) {
         expect(text, contains(surfaceLookup));

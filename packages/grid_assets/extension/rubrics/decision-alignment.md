@@ -26,7 +26,7 @@ prompt above has already rendered one lookup line per unique roster-qualified
 path in the spec's `## Touches` section. Run each of them:
 
 ```sh
-space decisions index --surface <repo>/<path>
+{{runner}} decisions index --surface <repo>/<path>
 ```
 
 Call roster mode with no explicit register-directory arguments. That omission

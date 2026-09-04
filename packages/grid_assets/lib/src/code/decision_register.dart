@@ -139,12 +139,12 @@ String rosterDecisionLookupBlock(
 /// FAILED lookup is explicitly refused as a clean grade (`decisions index` in
 /// roster mode throws on a malformed sibling entry, and a crashed lookup read
 /// as "no decision applies" would ship the very blindness this rule removes).
-const String kDecisionLookupRule =
+String decisionLookupRule({String runner = kDefaultOverlayRunner}) =>
     'Look decisions up through the composing station\'s ROSTER-MODE index, '
     'never a local register grep. Read every literal path in the spec\'s '
     '`## Touches` section, prefix each repository-relative path with its '
     'substation repository name, and run '
-    '`$kDefaultOverlayRunner decisions index --surface <repo>/<path>` once per '
+    '`$runner decisions index --surface <repo>/<path>` once per '
     'unique roster-qualified path. Pass NO register-directory argument: that '
     'omission is LOAD-BEARING — the grid adapter resolves the live '
     'mounted-substation roster and the command returns the UNION of every '
@@ -204,9 +204,9 @@ const String kFailedDecisionLookupPrefix = 'The roster lookup FAILED';
 /// sentence and [parseSpecContract] recognizes it by
 /// [kNoGoverningDecisionPrefix], so the form the brief DICTATES is the one the
 /// gate ACCEPTS.
-const String kNoGoverningDecisionSentence =
+String noGoverningDecisionSentence({String runner = kDefaultOverlayRunner}) =>
     '$kNoGoverningDecisionPrefix — verified via '
-    '`$kDefaultOverlayRunner decisions index --surface` over '
+    '`$runner decisions index --surface` over '
     '`<the roster-qualified paths>`.';
 
 /// The sentence a spec writes when the roster lookup FAILED — the FORM of
@@ -222,7 +222,17 @@ const String kNoGoverningDecisionSentence =
 /// citing nothing; it must SAY the lookup crashed and show its output. Naming
 /// that form is what lets [parseSpecContract] distinguish the two rather than
 /// collapsing a crash into a vacuous empty section.
-const String kFailedDecisionLookupSentence =
+String failedDecisionLookupSentence({String runner = kDefaultOverlayRunner}) =>
     '$kFailedDecisionLookupPrefix — reported verbatim, never read as an empty '
-    'union: `$kDefaultOverlayRunner decisions index --surface` over '
+    'union: `$runner decisions index --surface` over '
     '`<the roster-qualified paths>` exited non-zero with `<the exact output>`.';
+
+/// The DEFAULT-runner rendering of [decisionLookupRule] — the form a caller
+/// that composes no station verb (a fence, a parse test) reads.
+final String kDecisionLookupRule = decisionLookupRule();
+
+/// The DEFAULT-runner rendering of [noGoverningDecisionSentence].
+final String kNoGoverningDecisionSentence = noGoverningDecisionSentence();
+
+/// The DEFAULT-runner rendering of [failedDecisionLookupSentence].
+final String kFailedDecisionLookupSentence = failedDecisionLookupSentence();
