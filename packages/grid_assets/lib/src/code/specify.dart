@@ -97,6 +97,7 @@ import '../agent/seat_environments.dart';
 import '../agent/site_binding.dart';
 import '../agent/typed_environment.dart';
 import '../agent/usage_report.dart';
+import '../assets/overlay_materializer.dart' show kDefaultOverlayRunner;
 import 'committee.dart';
 import 'conventional_commit.dart' show lintConventionalSubject;
 import 'decision_register.dart';
@@ -145,7 +146,7 @@ const String kSpecExemplarAcceptance = '''
 /// The step carries the five labeled fields ([kStepFieldLabels]) and NO fenced
 /// implementation block: a code block is optional EVIDENCE, and an exemplar
 /// that shipped one taught the opposite.
-const String kSpecExemplarDesign =
+String specExemplarDesign({String runner = kDefaultOverlayRunner}) =>
     '''
 ## Implementation Plan
 
@@ -167,11 +168,15 @@ Re-validated against the live tree: `Heartbeat` has no caller yet and no sibling
 bead adds one.
 
 ## ADR Alignment
-$kNoGoverningDecisionSentence Queried: `power_station/packages/grid_assets/lib/src/bus/heartbeat.dart`, `power_station/packages/grid_assets/test/heartbeat_test.dart`.
+${noGoverningDecisionSentence(runner: runner)} Queried: `power_station/packages/grid_assets/lib/src/bus/heartbeat.dart`, `power_station/packages/grid_assets/test/heartbeat_test.dart`.
 
 ## Validation Plan
 - [ ] AC-1 → `cd packages/grid_assets && dart test test/heartbeat_test.dart` → `All tests passed!`
 - [ ] AC-2 → `cd packages/grid_assets && dart test test/heartbeat_test.dart` → `All tests passed!`''';
+
+/// The DEFAULT-runner rendering of [specExemplarDesign] — the exemplar the
+/// structural round-trip fence grades.
+final String kSpecExemplarDesign = specExemplarDesign();
 
 /// Result key carrying the acceptance text authored by the specify step.
 const String kCarriedSpecAcceptanceKey = 'specAcceptance';
@@ -264,7 +269,7 @@ const String _specContractShadowBoundary =
 ///
 /// The shipped exemplar is round-tripped through both readings in test: it
 /// passes [specStructuralFindings] and parses without a record finding.
-final String kSpecStructuralContract =
+String specStructuralContract({String runner = kDefaultOverlayRunner}) =>
     '''
 ### The structural contract (a DETERMINISTIC gate, run before any critic reads your spec)
 
@@ -309,9 +314,9 @@ grade before that ruling:
    resolves as `<repo>#<slug>`, a `docs/decisions/` or `docs/adr/` path, or a
    legacy `ADR-<nnnn>` id. The section is NEVER silent about the lookup: when
    the roster union is empty for every queried surface, write
-   "$kNoGoverningDecisionSentence"; when the lookup FAILED or exited non-zero,
-   write "$kFailedDecisionLookupSentence" — an unknown union is not an empty
-   one, and a crashed index is never graded clean.
+   "${noGoverningDecisionSentence(runner: runner)}"; when the lookup FAILED or
+   exited non-zero, write "${failedDecisionLookupSentence(runner: runner)}" — an
+   unknown union is not an empty one, and a crashed index is never graded clean.
 10. **Every `## Validation Plan` item is** `$kValidationRecordForm`, exactly
    ONCE for every acceptance id and NEVER for an id no criterion declares.
 
@@ -328,8 +333,11 @@ shadow grammar. Copy its SHAPE.
 `````markdown
 $kSpecExemplarAcceptance
 
-$kSpecExemplarDesign
+${specExemplarDesign(runner: runner)}
 `````''';
+
+/// The DEFAULT-runner rendering of [specStructuralContract].
+final String kSpecStructuralContract = specStructuralContract();
 
 /// The spec-readiness committee circuit (id `spec_review`) — the READINESS
 /// LADDER (bead `pow-q7n`: `intake` → `readiness` → `readiness-route`, the cheap
@@ -547,17 +555,24 @@ class SpecifyCapability extends ProcessCapability {
   /// [sessionAdapters] and [steers] are the CHANNEL seams — this seat is armed
   /// on a channel harness as readily as the build seat is (bead `pow-39tl`), so
   /// it carries the same two injected collaborators.
+  ///
+  /// [decisionRunner] is the COMPOSING STATION's verb, threaded into every
+  /// decision-lookup line the brief renders (`buildCodeRegistry` binds it from
+  /// `overlayArgs['runner']`). Absent ⇒ the first-party [kDefaultOverlayRunner].
   const SpecifyCapability({
     BdRunner Function(String workspaceRoot) runnerFor = _processRunnerFor,
     AgentSessionAdapterRegistry sessionAdapters = kBuiltinAgentSessionAdapters,
     AgentSteerSource steers = const NoAgentSteerSource(),
+    String decisionRunner = kDefaultOverlayRunner,
   }) : _runnerFor = runnerFor,
        _sessionAdapters = sessionAdapters,
-       _steers = steers;
+       _steers = steers,
+       _decisionRunner = decisionRunner;
 
   final BdRunner Function(String workspaceRoot) _runnerFor;
   final AgentSessionAdapterRegistry _sessionAdapters;
   final AgentSteerSource _steers;
+  final String _decisionRunner;
 
   static BdRunner _processRunnerFor(String workspaceRoot) =>
       ProcessBdRunner(workspaceRoot: workspaceRoot);
@@ -651,6 +666,7 @@ class SpecifyCapability extends ProcessCapability {
         workspace,
         guidance: guidance,
         dossier: dossier,
+        runner: _decisionRunner,
       ),
       model: config.params['model'],
       endpoint: siteBinding.endpointFor(
@@ -767,6 +783,7 @@ AgentBrief buildSpecifyBrief(
   Workspace workspace, {
   RespecLedger? guidance,
   DiscoveryDossier? dossier,
+  String runner = kDefaultOverlayRunner,
 }) {
   final title = bead.title.isNotEmpty ? bead.title : 'work bead ${bead.id}';
   final substation = bead.metadata['rig'];
@@ -776,6 +793,7 @@ AgentBrief buildSpecifyBrief(
       design: bead.design,
       substation: substation is String ? substation : '',
     ),
+    runner: runner,
   );
   final t = StringBuffer()
     ..writeln('# Specify: $title')
@@ -881,7 +899,7 @@ AgentBrief buildSpecifyBrief(
     )
     ..writeln()
     ..writeln(
-      '**## ADR Alignment** — MANDATORY. $kDecisionLookupRule '
+      '**## ADR Alignment** — MANDATORY. ${decisionLookupRule(runner: runner)} '
       'For the surfaces this bead already names that is:',
     )
     ..writeln()
@@ -895,9 +913,9 @@ AgentBrief buildSpecifyBrief(
       'Quote each load-bearing decision and say how the plan aligns. The '
       'section is NEVER silent about the lookup itself: if the union is empty '
       'for every queried surface, write exactly: '
-      '$kNoGoverningDecisionSentence If the lookup FAILED or exited non-zero, '
-      'that is NOT an empty union — write exactly: '
-      '$kFailedDecisionLookupSentence',
+      '${noGoverningDecisionSentence(runner: runner)} If the lookup FAILED '
+      'or exited non-zero, that is NOT an empty union — write exactly: '
+      '${failedDecisionLookupSentence(runner: runner)}',
     )
     ..writeln()
     ..writeln(
@@ -907,7 +925,7 @@ AgentBrief buildSpecifyBrief(
       'criterion declares.',
     )
     ..writeln()
-    ..writeln(kSpecStructuralContract)
+    ..writeln(specStructuralContract(runner: runner))
     ..writeln()
     ..writeln('### 3. The machine gate')
     ..writeln(
@@ -1001,7 +1019,18 @@ class SpecCriticCapability extends CriticCapability {
   /// Creates the spec critic, optionally over a rubric source (D-9 wires
   /// the Packaged-AI-Asset loader; absent ⇒ an inline placeholder so the
   /// circuit is testable with no real assets).
-  const SpecCriticCapability({super.rubrics, super.verdictTextReader});
+  ///
+  /// [decisionRunner] is the COMPOSING STATION's verb, threaded into every
+  /// decision-lookup line this prompt renders (`buildCodeRegistry` binds it from
+  /// `overlayArgs['runner']`, and binds the injected rubric source's own
+  /// `{{runner}}` hole from the same value). Absent ⇒ [kDefaultOverlayRunner].
+  const SpecCriticCapability({
+    super.rubrics,
+    super.verdictTextReader,
+    String decisionRunner = kDefaultOverlayRunner,
+  }) : _decisionRunner = decisionRunner;
+
+  final String _decisionRunner;
 
   /// The SPEC family IS held to the owner column (bead `pow-hxme`, ADR-0000
   /// A37): its route decides on ownership, and [buildSpecCriticPrompt] teaches
@@ -1116,6 +1145,7 @@ class SpecCriticCapability extends CriticCapability {
         design: bead.design,
         substation: rig is String ? rig : '',
       ),
+      runner: _decisionRunner,
     );
     final b = StringBuffer()
       ..writeln('# Spec review — rubric: `$rubric`')
@@ -1139,7 +1169,7 @@ class SpecCriticCapability extends CriticCapability {
         'against the REAL tree before grading: grep/read the files and '
         'symbols the plan names (a named symbol that neither resolves nor is '
         'announced as new is a finding, not a style nit). '
-        '$kDecisionLookupRule',
+        '${decisionLookupRule(runner: _decisionRunner)}',
       )
       ..writeln()
       ..writeln('```sh')

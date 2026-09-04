@@ -1190,7 +1190,15 @@ DefaultCapabilityRegistry buildCodeRegistry({
   AgentSteerSource steers = const NoAgentSteerSource(),
 }) {
   final loader = PackagedAssetLoader();
-  final rubricSource = rubrics ?? loader.rubricSource;
+  // The COMPOSING STATION's verb, resolved ONCE from the same `overlayArgs` map
+  // the vended skills render against (A23(4)). Everything the spec path tells an
+  // agent to RUN is rendered from it: the roster-lookup block and the register
+  // read rule (`SpecifyCapability`/`SpecCriticCapability`), and the `{{runner}}`
+  // hole the packaged `decision-alignment` bands carry. A downstream station
+  // whose verb is not `space` was otherwise handed a command that exits 127.
+  final decisionRunner = overlayArgs['runner'] ?? kDefaultOverlayRunner;
+  final rubricSource =
+      rubrics ?? loader.boundRubricSource(args: {'runner': decisionRunner});
   final stationOverlayRoot = p.join(loader.root, 'station_overlay');
   final resolvedOverlaySourceRef =
       overlaySourceRef ?? resolveOverlaySourceRefSync(stationOverlayRoot);
@@ -1248,13 +1256,21 @@ DefaultCapabilityRegistry buildCodeRegistry({
       // The spec stage + its committee lanes (bead `pow-6ao`; `specify` folded
       // into the spec circuit by `pow-ui8`).
       kSpecifyStep: specifyBdRunnerFor == null
-          ? SpecifyCapability(sessionAdapters: sessionAdapters, steers: steers)
+          ? SpecifyCapability(
+              sessionAdapters: sessionAdapters,
+              steers: steers,
+              decisionRunner: decisionRunner,
+            )
           : SpecifyCapability(
               runnerFor: specifyBdRunnerFor,
               sessionAdapters: sessionAdapters,
               steers: steers,
+              decisionRunner: decisionRunner,
             ),
-      'spec-critic': SpecCriticCapability(rubrics: rubricSource),
+      'spec-critic': SpecCriticCapability(
+        rubrics: rubricSource,
+        decisionRunner: decisionRunner,
+      ),
       kSpecGatingRubric: const SpecValidationCapability(),
       // The SPEC committee's own route (bead `pow-7nm`) — the three-way
       // advance | RESPEC | escalate matrix. The code committee keeps the binary

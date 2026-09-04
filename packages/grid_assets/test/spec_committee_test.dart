@@ -477,7 +477,7 @@ void main() {
         final c = _laneCtx(
           rubric: kSpecGatingRubric,
           beadOverride: ambient,
-          specifyResult: const {
+          specifyResult: {
             kCarriedSpecAcceptanceKey: kSpecExemplarAcceptance,
             kCarriedSpecDesignKey: kSpecExemplarDesign,
           },

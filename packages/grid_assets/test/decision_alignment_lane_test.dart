@@ -7,6 +7,7 @@
 // Offline only — renders prompts, runs no station and no index.
 import 'package:beads_dart/beads_dart.dart';
 import 'package:grid_assets/grid_assets.dart';
+import 'package:genesis_tree/genesis_tree.dart';
 import 'package:grid_engine/grid_engine.dart';
 import 'package:test/test.dart';
 
@@ -61,13 +62,47 @@ Bead _fixture(String design) => bead('pow-fixture').copyWith(
   metadata: const <String, dynamic>{'rig': 'power_station'},
 );
 
-/// The lane prompt as the STATION composes it — the packaged loader is the
-/// injected [RubricSource] (D-9), so the prompt carries the vendored rubric's
-/// own prose, not the no-assets placeholder.
-String _lanePrompt(Bead bead) =>
-    SpecCriticCapability(
-      rubrics: PackagedAssetLoader().rubricSource,
-    ).buildSpecCriticPrompt(
+/// The lane's own step, as the spec circuit declares it.
+const CapabilityStep _laneStep = CapabilityStep(
+  stepId: 'decision-alignment',
+  capabilityId: 'spec-critic',
+  params: {'rubric': 'decision-alignment'},
+);
+
+const Circuit _laneCircuit = Circuit(
+  id: 'spec_review',
+  terminalStepId: 'decision-alignment',
+  steps: [_laneStep],
+);
+
+StepMount _laneMount() => StepMount(
+  step: _laneStep,
+  nodePath: 'pow-fixture/spec_review/decision-alignment',
+  circuit: _laneCircuit,
+  circuitPath: 'pow-fixture/spec_review',
+  session: const SessionHandle('pow-fixture-session'),
+  node: const NodeCursor(),
+  key: const ValueKey('pow-fixture/spec_review/decision-alignment#0.0'),
+);
+
+/// The lane capability as the STATION composes it — resolved out of the REAL
+/// `code` registry, so the prompt carries the vendored rubric's own prose (the
+/// registry's bound [RubricSource], D-9) and the station verb the registry
+/// derived from [overlayArgs], never a hand-wired pair the wire never uses.
+SpecCriticCapability _composedLane({
+  Map<String, String> overlayArgs = const {},
+}) {
+  final host =
+      buildCodeRegistry(
+            overlayArgs: overlayArgs,
+            overlaySourceRef: 'test',
+          ).host(_laneMount())
+          as CapabilityHost;
+  return host.capability as SpecCriticCapability;
+}
+
+String _lanePrompt(Bead bead, {Map<String, String> overlayArgs = const {}}) =>
+    _composedLane(overlayArgs: overlayArgs).buildSpecCriticPrompt(
       bead,
       'decision-alignment',
       'pow-fixture/spec_review/decision-alignment',
@@ -214,6 +249,47 @@ void main() {
         PackagedAssetLoader().loadRubric('decision-alignment'),
         contains('# decision-alignment'),
       );
+    });
+  });
+
+  // The DEAD-COMMAND defect: every rendered decision surface named `space`,
+  // the FIRST-PARTY station's verb, on every station. A downstream station
+  // (lunar, whose verb is `dart run lunar:lunar`) was handed a lookup that
+  // exits 127, so its critics hand-read whole registers instead.
+  group('the station\'s own verb reaches every rendered decision surface', () {
+    test('a multi-token runner binds the generated lookup AND the packaged '
+        'rubric', () {
+      const runner = 'dart run lunar:lunar';
+      expect(
+        PackagedAssetLoader().loadRubric('decision-alignment'),
+        contains('{{runner}} decisions index --surface <repo>/<path>'),
+        reason: 'the rubric renders the verb, it does not name one',
+      );
+
+      final prompt = _lanePrompt(
+        _fixture(kContradictingDesign),
+        overlayArgs: const {'runner': runner},
+      );
+      expect(
+        RegExp(
+          RegExp.escape('$runner decisions index --surface'),
+        ).allMatches(prompt).length,
+        greaterThanOrEqualTo(2),
+        reason: 'the generated lookup block AND the rubric bands',
+      );
+      expect(prompt, isNot(contains('space ')));
+      expect(prompt, isNot(contains('{{runner}}')));
+    });
+
+    test('the default composition still binds the first-party verb', () {
+      final prompt = _lanePrompt(_fixture(kContradictingDesign));
+      expect(
+        RegExp(
+          RegExp.escape('space decisions index --surface'),
+        ).allMatches(prompt).length,
+        greaterThanOrEqualTo(2),
+      );
+      expect(prompt, isNot(contains('{{runner}}')));
     });
   });
 }
