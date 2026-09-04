@@ -92,6 +92,7 @@ import 'dart:math' as math;
 
 import 'package:genesis_tree/genesis_tree.dart';
 import 'package:beads_dart/beads_dart.dart';
+import 'package:dart_grid_assets/dart_grid_assets.dart';
 import 'package:grid_engine/grid_engine.dart';
 import 'package:grid_runtime/grid_runtime.dart';
 import 'package:meta/meta.dart';
@@ -168,6 +169,20 @@ const String _pinnedDiffName = 'pinned.diff';
 /// [CriticCapability.buildCriticPrompt] (which names it to the critic).
 String pinnedDiffPath(String workspaceDir) =>
     p.join(workspaceDir, _critiqueDir, _pinnedDiffName);
+
+/// The FORMATTING pre-critic step id (bead `pow-jicn`) every critic lane
+/// `dependsOn`, sequenced beside [kDeclaredTestsRubric] after [kPinDiffStep].
+///
+/// The live finding: three codex-built branches in one epoch passed the FULL
+/// committee (three inference critics ≈ $0.57/run plus the deterministic gating
+/// lane) and were delivered, then failed CI at its FIRST step — the workspace
+/// format gate — on four unformatted files each. Every review lane was spent on
+/// a diff a one-second deterministic check would have refused, and no merge
+/// queue saw green until a human rebased and reformatted by hand.
+/// [FormatCleanCapability] asks that question BEFORE the critics, and a dirty
+/// answer is a typed non-result (never a letter grade), so the round fails with
+/// the offending files NAMED and the builder's next round fixes exactly them.
+const String kFormatCleanStep = 'format-clean';
 
 final RegExp _diffHeader = RegExp(
   r'^diff --git a/(\S+) b/(\S+)$',
@@ -678,6 +693,92 @@ class DeclaredTestsCapability extends ServiceCapability {
   }
 }
 
+/// Mechanical, no-agent refusal of an UNFORMATTED diff (bead `pow-jicn`).
+///
+/// Reads the round-fresh pinned scope [PinDiffCapability] wrote, keeps the Dart
+/// files it touches that still EXIST in the worktree (a deleted path and a
+/// non-Dart path are not formatter inputs), and asks the DART domain's
+/// [DartFormatService] whether the formatter would change any of them. The
+/// Dart-specific command lives with the Dart pack that vends the `dart` verbs;
+/// this step composes it by id, so a substation whose domain is not Dart simply
+/// composes nothing.
+///
+/// It NEVER rewrites the diff on the builder's behalf: a silent reformat would
+/// hand the critics code the builder never wrote. A dirty answer is
+/// [Failed.nonResult] — a GATE, not a letter grade — whose reason NAMES the
+/// files, so the next round fixes exactly them and the route's matrix (and the
+/// grade vector it reads) is untouched. The critic lanes `dependsOn` this step,
+/// so the non-result withholds every one of them before a single token is spent.
+///
+/// A probe that cannot decide is equally LOUD: a missing or unreadable pinned
+/// scope in a worktree that EXISTS, and a formatter that failed operationally,
+/// are both typed non-results — never a silent pass.
+///
+/// Offline/dry-run posture: a null [Workspace], or a workspace directory that
+/// does not exist on disk, is a no-op [Ok] with NO process spawned — the same
+/// posture [PinDiffCapability] holds for the synthetic `/grid/worktrees/...`
+/// path an offline suite mounts.
+class FormatCleanCapability extends ServiceCapability {
+  /// Creates the gate over the DART domain's [formatter] seam (tests inject a
+  /// canned Fake — Fakes, not mocks); absent ⇒ the real [DartFormatService].
+  const FormatCleanCapability({
+    DartFormatService formatter = const DartFormatService(),
+  }) : _formatter = formatter;
+
+  final DartFormatService _formatter;
+
+  @override
+  Future<StepOutcome> run(TreeContext context, StepArgs args) async {
+    // Read the ambient workspace at ENTRY (while mounted); after every await
+    // only the captured values + the cancel token are touched.
+    final workspace = context.getInheritedSeedOfExactType<Workspace>();
+    if (workspace == null || !Directory(workspace.workspaceDir).existsSync()) {
+      return const Ok({'checked': '0'});
+    }
+    final workspaceDir = workspace.workspaceDir;
+    final pinned = File(pinnedDiffPath(workspaceDir));
+    if (!await pinned.exists()) {
+      return Failed.nonResult('format-clean: no pinned diff at ${pinned.path}');
+    }
+    final String diff;
+    try {
+      diff = await pinned.readAsString();
+    } on Object catch (error) {
+      return Failed.nonResult(
+        'format-clean: could not read pinned diff at ${pinned.path}: $error',
+      );
+    }
+    if (args.cancel.isCancelled) {
+      return const Failed.nonResult('format-clean: cancelled');
+    }
+    final dartFiles =
+        changedFilesIn(diff)
+            .where((path) => path.endsWith('.dart'))
+            .where((path) => File(p.join(workspaceDir, path)).existsSync())
+            .toList()
+          ..sort();
+    final outcome = await _formatter.check(
+      workspaceDir: workspaceDir,
+      files: dartFiles,
+    );
+    if (args.cancel.isCancelled) {
+      return const Failed.nonResult('format-clean: cancelled');
+    }
+    return switch (outcome) {
+      DartFormatClean(:final files) => Ok({'checked': '${files.length}'}),
+      DartFormatDirty(:final files) => Failed.nonResult(
+        'format-clean: dart format would change: ${files.join(', ')}',
+      ),
+      DartFormatProbeFailed(:final file, :final exitCode, :final output) =>
+        Failed.nonResult(
+          'format-clean: dart format probe failed for $file'
+          '${exitCode == null ? '' : ' (exit $exitCode)'}'
+          '${output.trim().isEmpty ? '' : ': ${output.trim()}'}',
+        ),
+    };
+  }
+}
+
 /// The absolute path of the round's critique dir under [workspaceDir] — the
 /// canonical home of every lane's verdict file (`<rubric>.json`). Derived
 /// identically by [ClearCritiqueCapability] (the code + spec committees' wipe)
@@ -886,9 +987,17 @@ typedef DirectoryClearer = void Function(String dir);
 
 /// The adversarial code-committee circuit (id `code_review`) — a hygiene step
 /// (gate-integrity #3, [ClearCritiqueCapability]) → a diff-pinning pre-critic
-/// step (bead `pow-6wo`, [PinDiffCapability]) → four critic lanes fanned out in
-/// parallel → a `route` step that joins on all four and aggregates their grades
-/// (M5 Track C / C1).
+/// step (bead `pow-6wo`, [PinDiffCapability]) → the DETERMINISTIC FRONTIER
+/// ([kFormatCleanStep] + [kDeclaredTestsRubric], fanned out in parallel) → four
+/// critic lanes fanned out in parallel → a `route` step that joins on all four
+/// and aggregates their grades (M5 Track C / C1).
+///
+/// **The deterministic frontier (bead `pow-jicn`)**: [kFormatCleanStep] and
+/// [kDeclaredTestsRubric] are cheap, agent-free checks over the pinned scope, so
+/// they run BEFORE the priced lanes and every critic `dependsOn` BOTH. A
+/// [FormatCleanCapability] non-result therefore withholds all four critics —
+/// including the three inference ones — instead of letting a diff CI would
+/// refuse in one second consume a full committee round first.
 ///
 /// **Scope-pinning (bead `pow-6wo`)**: [kPinDiffStep] runs BEFORE any critic and
 /// computes the bead branch's OWN delta (`git diff origin/<base>...HEAD`). An
@@ -917,9 +1026,8 @@ const Circuit kCodeReviewCircuit = Circuit(
       dependsOn: {kClearCritiqueStep},
     ),
     CapabilityStep(
-      stepId: kGatingRubric,
-      capabilityId: 'critic',
-      params: {'rubric': kGatingRubric},
+      stepId: kFormatCleanStep,
+      capabilityId: kFormatCleanStep,
       dependsOn: {kPinDiffStep},
     ),
     CapabilityStep(
@@ -928,22 +1036,28 @@ const Circuit kCodeReviewCircuit = Circuit(
       dependsOn: {kPinDiffStep},
     ),
     CapabilityStep(
+      stepId: kGatingRubric,
+      capabilityId: 'critic',
+      params: {'rubric': kGatingRubric},
+      dependsOn: {kFormatCleanStep, kDeclaredTestsRubric},
+    ),
+    CapabilityStep(
       stepId: 'spec-adherence',
       capabilityId: 'critic',
       params: {'rubric': 'spec-adherence'},
-      dependsOn: {kPinDiffStep},
+      dependsOn: {kFormatCleanStep, kDeclaredTestsRubric},
     ),
     CapabilityStep(
       stepId: 'regression-risk',
       capabilityId: 'critic',
       params: {'rubric': 'regression-risk'},
-      dependsOn: {kPinDiffStep},
+      dependsOn: {kFormatCleanStep, kDeclaredTestsRubric},
     ),
     CapabilityStep(
       stepId: 'test-coverage',
       capabilityId: 'critic',
       params: {'rubric': 'test-coverage'},
-      dependsOn: {kPinDiffStep},
+      dependsOn: {kFormatCleanStep, kDeclaredTestsRubric},
     ),
     CapabilityStep(
       stepId: 'route',
