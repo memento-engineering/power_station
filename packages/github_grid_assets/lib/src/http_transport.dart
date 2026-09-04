@@ -61,7 +61,14 @@ class IoGitHubHttpTransport implements GitHubHttpTransport {
     try {
       final ioRequest = await client.openUrl(request.method, request.uri);
       request.headers.forEach(ioRequest.headers.set);
-      if (request.body case final body?) ioRequest.write(body);
+      // UTF-8 at the SINK, never `write`: an `HttpClientRequest`'s `IOSink`
+      // encoding falls back to iso-8859-1 whenever `Content-Type` carries no
+      // charset, and latin1 THROWS `ArgumentError.value(<the whole request>,
+      // 'string', 'Contains invalid characters.')` on the first code unit
+      // above U+00FF. Encoding HERE covers every caller — the `/pulls` POST
+      // and the installation-token exchange alike; a header-side fix would
+      // depend on each caller remembering the charset.
+      if (request.body case final body?) ioRequest.add(utf8.encode(body));
       final response = await ioRequest.close();
       final headers = <String, String>{};
       response.headers.forEach(
