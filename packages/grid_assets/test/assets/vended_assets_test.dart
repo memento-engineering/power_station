@@ -70,15 +70,18 @@ void main() {
     expect(offenders, isEmpty);
   });
 
-  test('the audience doctrine survives VERBATIM on the block audience field', () {
-    final pubspec = File(p.join(root, 'pubspec.yaml')).readAsStringSync();
-    for (final sentence in const [
-      'The split is load-bearing, not cosmetic.',
-      'Offering a build agent a skill that contradicts its working',
-      'A DENY-list, not an allow-list of agent skills',
-      'Only a DECLARED operator',
-    ]) {
-      expect(pubspec, contains(sentence), reason: 'verbatim: $sentence');
-    }
-  });
+  test(
+    'the audience doctrine survives VERBATIM on the block audience field',
+    () {
+      final pubspec = File(p.join(root, 'pubspec.yaml')).readAsStringSync();
+      for (final sentence in const [
+        'The split is load-bearing, not cosmetic.',
+        'Offering a build agent a skill that contradicts its working',
+        'A DENY-list, not an allow-list of agent skills',
+        'Only a DECLARED operator',
+      ]) {
+        expect(pubspec, contains(sentence), reason: 'verbatim: $sentence');
+      }
+    },
+  );
 }

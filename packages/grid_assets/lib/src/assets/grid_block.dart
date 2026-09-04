@@ -123,7 +123,9 @@ GridBlock parseGridBlock({
     }
     final id = raw['id'];
     if (id is! String || id.trim().isEmpty) {
-      throw GridBlockException('grid: "$name": assets: an entry declares no id');
+      throw GridBlockException(
+        'grid: "$name": assets: an entry declares no id',
+      );
     }
     final kind = _kind(raw['kind'], id);
     final label = '${kind.name}/$id';
@@ -214,22 +216,26 @@ AssetSelector parseAssetSelector(Object? raw, String label) {
   final head = colon < 0 ? token : token.substring(0, colon);
   final argument = colon < 0 ? '' : token.substring(colon + 1).trim();
   return switch (head) {
-    'unknown' || 'any' => argument.isEmpty
-        ? const AlwaysApplies()
-        : _refuse(label, 'selector', '"$head" takes no argument'),
-    'dart-package' => argument.isEmpty
-        ? _refuse(
-            label,
-            'selector',
-            '"dart-package" requires a package name ("dart-package:<name>")',
-          )
-        : RequiresPackage(argument),
-    'decision-register' => argument.isEmpty
-        ? const RequiresPath(kDecisionRegisterPath)
-        : _refuse(label, 'selector', '"decision-register" takes no argument'),
-    'station' => argument.isEmpty
-        ? const RequiresPath(kStationStorePath)
-        : _refuse(label, 'selector', '"station" takes no argument'),
+    'unknown' || 'any' =>
+      argument.isEmpty
+          ? const AlwaysApplies()
+          : _refuse(label, 'selector', '"$head" takes no argument'),
+    'dart-package' =>
+      argument.isEmpty
+          ? _refuse(
+              label,
+              'selector',
+              '"dart-package" requires a package name ("dart-package:<name>")',
+            )
+          : RequiresPackage(argument),
+    'decision-register' =>
+      argument.isEmpty
+          ? const RequiresPath(kDecisionRegisterPath)
+          : _refuse(label, 'selector', '"decision-register" takes no argument'),
+    'station' =>
+      argument.isEmpty
+          ? const RequiresPath(kStationStorePath)
+          : _refuse(label, 'selector', '"station" takes no argument'),
     'never' => _refuse(
       label,
       'selector',

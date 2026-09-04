@@ -20,7 +20,8 @@ abstract final class GridAssetsPack {
       kind: AssetKind.rubric,
       id: 'code-validation',
     ),
-    description: 'The GATING lane — runs the bead\'s own Validation Plan; F on any non-zero command.',
+    description:
+        'The GATING lane — runs the bead\'s own Validation Plan; F on any non-zero command.',
     audience: AssetAudience.agent,
     visibility: AssetVisibility.public,
     selector: AlwaysApplies(),
@@ -39,7 +40,8 @@ abstract final class GridAssetsPack {
       kind: AssetKind.rubric,
       id: 'spec-adherence',
     ),
-    description: 'Does the diff implement the bead\'s Implementation Plan + acceptance criteria?',
+    description:
+        'Does the diff implement the bead\'s Implementation Plan + acceptance criteria?',
     audience: AssetAudience.agent,
     visibility: AssetVisibility.public,
     selector: AlwaysApplies(),
@@ -58,7 +60,8 @@ abstract final class GridAssetsPack {
       kind: AssetKind.rubric,
       id: 'regression-risk',
     ),
-    description: 'The blast radius — how likely is the change to break existing behavior?',
+    description:
+        'The blast radius — how likely is the change to break existing behavior?',
     audience: AssetAudience.agent,
     visibility: AssetVisibility.public,
     selector: AlwaysApplies(),
@@ -96,7 +99,8 @@ abstract final class GridAssetsPack {
       kind: AssetKind.rubric,
       id: 'spec-validation',
     ),
-    description: 'The GATING spec lane — a deterministic structural check over the bead\'s spec; F on any missing section or placeholder.',
+    description:
+        'The GATING spec lane — a deterministic structural check over the bead\'s spec; F on any missing section or placeholder.',
     audience: AssetAudience.agent,
     visibility: AssetVisibility.public,
     selector: AlwaysApplies(),
@@ -115,7 +119,8 @@ abstract final class GridAssetsPack {
       kind: AssetKind.rubric,
       id: 'coherence',
     ),
-    description: 'Does the spec carve scope cleanly from sibling beads AND extend existing code rather than duplicate it?',
+    description:
+        'Does the spec carve scope cleanly from sibling beads AND extend existing code rather than duplicate it?',
     audience: AssetAudience.agent,
     visibility: AssetVisibility.public,
     selector: AlwaysApplies(),
@@ -134,7 +139,8 @@ abstract final class GridAssetsPack {
       kind: AssetKind.rubric,
       id: 'adr-alignment',
     ),
-    description: 'Does the spec cite and align with the substation\'s docs/adr register (ADR-0000 amendments included)?',
+    description:
+        'Does the spec cite and align with the substation\'s docs/adr register (ADR-0000 amendments included)?',
     audience: AssetAudience.agent,
     visibility: AssetVisibility.public,
     selector: AlwaysApplies(),
@@ -147,13 +153,15 @@ abstract final class GridAssetsPack {
   );
 
   /// `grid_assets/rubric/decision-alignment`.
-  static const GridAssetDefinition rubricDecisionAlignment = GridAssetDefinition(
+  static const GridAssetDefinition
+  rubricDecisionAlignment = GridAssetDefinition(
     assetKey: AssetKey(
       package: package,
       kind: AssetKind.rubric,
       id: 'decision-alignment',
     ),
-    description: 'Does the spec cite and align with every recorded decision the station\'s ROSTER union governs its touched surfaces with?',
+    description:
+        'Does the spec cite and align with every recorded decision the station\'s ROSTER union governs its touched surfaces with?',
     audience: AssetAudience.agent,
     visibility: AssetVisibility.public,
     selector: RequiresPath('docs/decisions'),
@@ -166,13 +174,15 @@ abstract final class GridAssetsPack {
   );
 
   /// `grid_assets/rubric/acceptance-testability`.
-  static const GridAssetDefinition rubricAcceptanceTestability = GridAssetDefinition(
+  static const GridAssetDefinition
+  rubricAcceptanceTestability = GridAssetDefinition(
     assetKey: AssetKey(
       package: package,
       kind: AssetKind.rubric,
       id: 'acceptance-testability',
     ),
-    description: 'Are the acceptance criteria testable by exact commands, with a 1:1 validation-plan mapping?',
+    description:
+        'Are the acceptance criteria testable by exact commands, with a 1:1 validation-plan mapping?',
     audience: AssetAudience.agent,
     visibility: AssetVisibility.public,
     selector: AlwaysApplies(),
@@ -191,7 +201,8 @@ abstract final class GridAssetsPack {
       kind: AssetKind.rubric,
       id: 'plan-completeness',
     ),
-    description: 'Is the implementation plan literal and decision-free — exact Dart code, file paths, test commands, commits?',
+    description:
+        'Is the implementation plan literal and decision-free — exact Dart code, file paths, test commands, commits?',
     audience: AssetAudience.agent,
     visibility: AssetVisibility.public,
     selector: AlwaysApplies(),
@@ -210,7 +221,8 @@ abstract final class GridAssetsPack {
       kind: AssetKind.rubric,
       id: 'bead-readiness',
     ),
-    description: 'The INTAKE lens — is the BEAD ready to specify (scope, acceptance shape, cited constraints, a decided approach)? D or worse HOLDS it for refinement.',
+    description:
+        'The INTAKE lens — is the BEAD ready to specify (scope, acceptance shape, cited constraints, a decided approach)? D or worse HOLDS it for refinement.',
     audience: AssetAudience.agent,
     visibility: AssetVisibility.public,
     selector: AlwaysApplies(),
@@ -223,13 +235,15 @@ abstract final class GridAssetsPack {
   );
 
   /// `grid_assets/rubric/citation-paths-resolve`.
-  static const GridAssetDefinition rubricCitationPathsResolve = GridAssetDefinition(
+  static const GridAssetDefinition
+  rubricCitationPathsResolve = GridAssetDefinition(
     assetKey: AssetKey(
       package: package,
       kind: AssetKind.rubric,
       id: 'citation-paths-resolve',
     ),
-    description: 'The DOCS gating lane — every file path a changed doc cites must resolve in the tree.',
+    description:
+        'The DOCS gating lane — every file path a changed doc cites must resolve in the tree.',
     audience: AssetAudience.agent,
     visibility: AssetVisibility.public,
     selector: AlwaysApplies(),
@@ -248,7 +262,8 @@ abstract final class GridAssetsPack {
       kind: AssetKind.rubric,
       id: 'terminology-ban',
     ),
-    description: 'The DOCS gating lane — the org seam word is `extension`; the banned word is reserved for third-party proper nouns.',
+    description:
+        'The DOCS gating lane — the org seam word is `extension`; the banned word is reserved for third-party proper nouns.',
     audience: AssetAudience.agent,
     visibility: AssetVisibility.public,
     selector: AlwaysApplies(),
@@ -267,7 +282,8 @@ abstract final class GridAssetsPack {
       kind: AssetKind.rubric,
       id: 'section-structure',
     ),
-    description: 'The DOCS gating lane — the sections a bead names (metadata.docs_sections) must be present in every changed doc.',
+    description:
+        'The DOCS gating lane — the sections a bead names (metadata.docs_sections) must be present in every changed doc.',
     audience: AssetAudience.agent,
     visibility: AssetVisibility.public,
     selector: AlwaysApplies(),
@@ -281,12 +297,9 @@ abstract final class GridAssetsPack {
 
   /// `grid_assets/prompt/critic`.
   static const GridAssetDefinition promptCritic = GridAssetDefinition(
-    assetKey: AssetKey(
-      package: package,
-      kind: AssetKind.prompt,
-      id: 'critic',
-    ),
-    description: 'One adversarial critic, grading the work against a single rubric in isolation.',
+    assetKey: AssetKey(package: package, kind: AssetKind.prompt, id: 'critic'),
+    description:
+        'One adversarial critic, grading the work against a single rubric in isolation.',
     audience: AssetAudience.agent,
     visibility: AssetVisibility.public,
     selector: AlwaysApplies(),
@@ -302,12 +315,14 @@ abstract final class GridAssetsPack {
           ),
           AssetArgument(
             name: 'rubricText',
-            description: 'The rubric\'s prose bands, loaded from resources/<rubric>.',
+            description:
+                'The rubric\'s prose bands, loaded from resources/<rubric>.',
             isRequired: true,
           ),
           AssetArgument(
             name: 'bead',
-            description: 'The full work bead under review (title/task/design/acceptance/notes).',
+            description:
+                'The full work bead under review (title/task/design/acceptance/notes).',
             isRequired: true,
           ),
         ],
@@ -322,7 +337,8 @@ abstract final class GridAssetsPack {
       kind: AssetKind.prompt,
       id: 'spec-critic',
     ),
-    description: 'One adversarial spec-readiness critic, grading the bead\'s SPEC (not a diff) against a single rubric in isolation.',
+    description:
+        'One adversarial spec-readiness critic, grading the bead\'s SPEC (not a diff) against a single rubric in isolation.',
     audience: AssetAudience.agent,
     visibility: AssetVisibility.public,
     selector: AlwaysApplies(),
@@ -338,12 +354,14 @@ abstract final class GridAssetsPack {
           ),
           AssetArgument(
             name: 'rubricText',
-            description: 'The rubric\'s prose bands, loaded from resources/<rubric>.',
+            description:
+                'The rubric\'s prose bands, loaded from resources/<rubric>.',
             isRequired: true,
           ),
           AssetArgument(
             name: 'bead',
-            description: 'The full work bead whose acceptance + design fields are the spec under review.',
+            description:
+                'The full work bead whose acceptance + design fields are the spec under review.',
             isRequired: true,
           ),
         ],
@@ -358,7 +376,8 @@ abstract final class GridAssetsPack {
       kind: AssetKind.prompt,
       id: 'readiness',
     ),
-    description: 'The cheap pre-specify intake lens, grading the work BEAD itself (no spec and no diff exists yet).',
+    description:
+        'The cheap pre-specify intake lens, grading the work BEAD itself (no spec and no diff exists yet).',
     audience: AssetAudience.agent,
     visibility: AssetVisibility.public,
     selector: AlwaysApplies(),
@@ -374,12 +393,14 @@ abstract final class GridAssetsPack {
           ),
           AssetArgument(
             name: 'rubricText',
-            description: 'The rubric\'s prose bands, loaded from resources/<rubric>.',
+            description:
+                'The rubric\'s prose bands, loaded from resources/<rubric>.',
             isRequired: true,
           ),
           AssetArgument(
             name: 'bead',
-            description: 'The full work bead under intake (title/task/design/acceptance/notes).',
+            description:
+                'The full work bead under intake (title/task/design/acceptance/notes).',
             isRequired: true,
           ),
         ],
@@ -394,7 +415,8 @@ abstract final class GridAssetsPack {
       kind: AssetKind.prompt,
       id: 'discovery',
     ),
-    description: 'One read-only explorer in the discovery circuit — gathers context and CITES any offence; it grades nothing.',
+    description:
+        'One read-only explorer in the discovery circuit — gathers context and CITES any offence; it grades nothing.',
     audience: AssetAudience.agent,
     visibility: AssetVisibility.public,
     selector: AlwaysApplies(),
@@ -405,7 +427,8 @@ abstract final class GridAssetsPack {
         arguments: <AssetArgument>[
           AssetArgument(
             name: 'lens',
-            description: 'The lens this explorer runs (explore-code | explore-decision | explore-prior-art).',
+            description:
+                'The lens this explorer runs (explore-code | explore-decision | explore-prior-art).',
             isRequired: true,
           ),
           AssetArgument(
@@ -415,7 +438,8 @@ abstract final class GridAssetsPack {
           ),
           AssetArgument(
             name: 'bead',
-            description: 'The full work bead being explored (title/task/design/acceptance/notes).',
+            description:
+                'The full work bead being explored (title/task/design/acceptance/notes).',
             isRequired: true,
           ),
         ],
@@ -430,7 +454,8 @@ abstract final class GridAssetsPack {
       kind: AssetKind.skill,
       id: 'asset-author',
     ),
-    description: 'Author and install grid assets through B-style in-tree providers: watched nullable dependencies, diagnostic unavailability, explicit create/value ownership, scoped overrides, and assembly-only boot.',
+    description:
+        'Author and install grid assets through B-style in-tree providers: watched nullable dependencies, diagnostic unavailability, explicit create/value ownership, scoped overrides, and assembly-only boot.',
     audience: AssetAudience.human,
     visibility: AssetVisibility.public,
     selector: RequiresPackage('grid_sdk'),
@@ -448,12 +473,9 @@ abstract final class GridAssetsPack {
 
   /// `grid_assets/skill/discover`.
   static const GridAssetDefinition skillDiscover = GridAssetDefinition(
-    assetKey: AssetKey(
-      package: package,
-      kind: AssetKind.skill,
-      id: 'discover',
-    ),
-    description: 'The grid home\'s HITL front door — dispatches on arg shape (topic research / bead advisory / bead directed), researches via the vended `search` Command, and on the human\'s yes files an ephemeral staged bead and starts the design conversation (hand-off: specify).',
+    assetKey: AssetKey(package: package, kind: AssetKind.skill, id: 'discover'),
+    description:
+        'The grid home\'s HITL front door — dispatches on arg shape (topic research / bead advisory / bead directed), researches via the vended `search` Command, and on the human\'s yes files an ephemeral staged bead and starts the design conversation (hand-off: specify).',
     audience: AssetAudience.agent,
     visibility: AssetVisibility.public,
     selector: AlwaysApplies(),
@@ -464,7 +486,8 @@ abstract final class GridAssetsPack {
         arguments: <AssetArgument>[
           AssetArgument(
             name: 'runner',
-            description: 'The composing station\'s executable name (e.g. `space`) — the verb the skill\'s search calls ride.',
+            description:
+                'The composing station\'s executable name (e.g. `space`) — the verb the skill\'s search calls ride.',
             isRequired: true,
           ),
         ],
@@ -475,7 +498,8 @@ abstract final class GridAssetsPack {
         arguments: <AssetArgument>[
           AssetArgument(
             name: 'runner',
-            description: 'The composing station\'s executable name (e.g. `space`) — the verb the skill\'s search calls ride.',
+            description:
+                'The composing station\'s executable name (e.g. `space`) — the verb the skill\'s search calls ride.',
             isRequired: true,
           ),
         ],
@@ -490,7 +514,8 @@ abstract final class GridAssetsPack {
       kind: AssetKind.skill,
       id: 'gate-medicine',
     ),
-    description: 'Diagnose and clear gated sessions — read the worktree critique artifacts, separate systemic failures from genuinely bad work, and re-arm with a rework round.',
+    description:
+        'Diagnose and clear gated sessions — read the worktree critique artifacts, separate systemic failures from genuinely bad work, and re-arm with a rework round.',
     audience: AssetAudience.human,
     visibility: AssetVisibility.public,
     selector: AlwaysApplies(),
@@ -501,7 +526,8 @@ abstract final class GridAssetsPack {
         arguments: <AssetArgument>[
           AssetArgument(
             name: 'runner',
-            description: 'The composing station\'s executable name — the verb its rework calls ride.',
+            description:
+                'The composing station\'s executable name — the verb its rework calls ride.',
             isRequired: true,
           ),
         ],
@@ -512,7 +538,8 @@ abstract final class GridAssetsPack {
         arguments: <AssetArgument>[
           AssetArgument(
             name: 'runner',
-            description: 'The composing station\'s executable name — the verb its rework calls ride.',
+            description:
+                'The composing station\'s executable name — the verb its rework calls ride.',
             isRequired: true,
           ),
         ],
@@ -522,12 +549,9 @@ abstract final class GridAssetsPack {
 
   /// `grid_assets/skill/handoff`.
   static const GridAssetDefinition skillHandoff = GridAssetDefinition(
-    assetKey: AssetKey(
-      package: package,
-      kind: AssetKind.skill,
-      id: 'handoff',
-    ),
-    description: 'Write the seat\'s own handoff onto its Agent Disc, bank the durable learnings as separate disc notes, index it, and end the turn with the one line that tells the OUTER harness to compact, clear, or relaunch. Also the successor\'s read: consume the newest handoff and delete it.',
+    assetKey: AssetKey(package: package, kind: AssetKind.skill, id: 'handoff'),
+    description:
+        'Write the seat\'s own handoff onto its Agent Disc, bank the durable learnings as separate disc notes, index it, and end the turn with the one line that tells the OUTER harness to compact, clear, or relaunch. Also the successor\'s read: consume the newest handoff and delete it.',
     audience: AssetAudience.human,
     visibility: AssetVisibility.public,
     selector: AlwaysApplies(),
@@ -538,7 +562,8 @@ abstract final class GridAssetsPack {
         arguments: <AssetArgument>[
           AssetArgument(
             name: 'runner',
-            description: 'The composing station\'s executable name — the verb the skill\'s `status` read rides.',
+            description:
+                'The composing station\'s executable name — the verb the skill\'s `status` read rides.',
             isRequired: true,
           ),
         ],
@@ -549,7 +574,8 @@ abstract final class GridAssetsPack {
         arguments: <AssetArgument>[
           AssetArgument(
             name: 'runner',
-            description: 'The composing station\'s executable name — the verb the skill\'s `status` read rides.',
+            description:
+                'The composing station\'s executable name — the verb the skill\'s `status` read rides.',
             isRequired: true,
           ),
         ],
@@ -564,7 +590,8 @@ abstract final class GridAssetsPack {
       kind: AssetKind.skill,
       id: 'harvest-review',
     ),
-    description: 'Review and land what a station built — verify each terminal session\'s branch delta, committee grades, and validation plan in the real worktree, then push and open a PR with receipts.',
+    description:
+        'Review and land what a station built — verify each terminal session\'s branch delta, committee grades, and validation plan in the real worktree, then push and open a PR with receipts.',
     audience: AssetAudience.human,
     visibility: AssetVisibility.public,
     selector: AlwaysApplies(),
@@ -575,7 +602,8 @@ abstract final class GridAssetsPack {
         arguments: <AssetArgument>[
           AssetArgument(
             name: 'runner',
-            description: 'The composing station\'s executable name — the verb its rework calls ride.',
+            description:
+                'The composing station\'s executable name — the verb its rework calls ride.',
             isRequired: true,
           ),
         ],
@@ -586,7 +614,8 @@ abstract final class GridAssetsPack {
         arguments: <AssetArgument>[
           AssetArgument(
             name: 'runner',
-            description: 'The composing station\'s executable name — the verb its rework calls ride.',
+            description:
+                'The composing station\'s executable name — the verb its rework calls ride.',
             isRequired: true,
           ),
         ],
@@ -601,29 +630,34 @@ abstract final class GridAssetsPack {
       kind: AssetKind.skill,
       id: 'intake-refinement',
     ),
-    description: 'Shape work beads so a resident station can drive them — the required validation_plan metadata, driveable issue types, dependency wiring, and stamped grid.approved approval via the approve verb.',
+    description:
+        'Shape work beads so a resident station can drive them — the required validation_plan metadata, driveable issue types, dependency wiring, and stamped grid.approved approval via the approve verb.',
     audience: AssetAudience.human,
     visibility: AssetVisibility.public,
     selector: AlwaysApplies(),
     artifacts: <AssetArtifact>[
       AssetArtifact(
         target: AssetDeliveryTarget.claude,
-        path: 'extension/station_overlay/claude/skills/intake-refinement/SKILL.md',
+        path:
+            'extension/station_overlay/claude/skills/intake-refinement/SKILL.md',
         arguments: <AssetArgument>[
           AssetArgument(
             name: 'runner',
-            description: 'The composing station\'s executable name (e.g. `space`) — the verb its boot/status/down calls ride.',
+            description:
+                'The composing station\'s executable name (e.g. `space`) — the verb its boot/status/down calls ride.',
             isRequired: true,
           ),
         ],
       ),
       AssetArtifact(
         target: AssetDeliveryTarget.agents,
-        path: 'extension/station_overlay/agents/skills/intake-refinement/SKILL.md',
+        path:
+            'extension/station_overlay/agents/skills/intake-refinement/SKILL.md',
         arguments: <AssetArgument>[
           AssetArgument(
             name: 'runner',
-            description: 'The composing station\'s executable name (e.g. `space`) — the verb its boot/status/down calls ride.',
+            description:
+                'The composing station\'s executable name (e.g. `space`) — the verb its boot/status/down calls ride.',
             isRequired: true,
           ),
         ],
@@ -633,12 +667,9 @@ abstract final class GridAssetsPack {
 
   /// `grid_assets/skill/release`.
   static const GridAssetDefinition skillRelease = GridAssetDefinition(
-    assetKey: AssetKey(
-      package: package,
-      kind: AssetKind.skill,
-      id: 'release',
-    ),
-    description: 'Cut a disciplined pub.dev release — the consolidated genesis+lenny publishing playbook. Owns the judgement (when to publish, patch vs. breaking, breaking-CHANGELOG framing, tag-drift reconciliation) and CALLS the vended `dart release` Command for the deterministic work (version math, scrub gate, dry-run, pub.dev poll, dependency order).',
+    assetKey: AssetKey(package: package, kind: AssetKind.skill, id: 'release'),
+    description:
+        'Cut a disciplined pub.dev release — the consolidated genesis+lenny publishing playbook. Owns the judgement (when to publish, patch vs. breaking, breaking-CHANGELOG framing, tag-drift reconciliation) and CALLS the vended `dart release` Command for the deterministic work (version math, scrub gate, dry-run, pub.dev poll, dependency order).',
     audience: AssetAudience.human,
     visibility: AssetVisibility.public,
     selector: AlwaysApplies(),
@@ -649,7 +680,8 @@ abstract final class GridAssetsPack {
         arguments: <AssetArgument>[
           AssetArgument(
             name: 'runner',
-            description: 'The composing station\'s executable name — the verb the skill\'s `dart release` calls ride.',
+            description:
+                'The composing station\'s executable name — the verb the skill\'s `dart release` calls ride.',
             isRequired: true,
           ),
         ],
@@ -660,7 +692,8 @@ abstract final class GridAssetsPack {
         arguments: <AssetArgument>[
           AssetArgument(
             name: 'runner',
-            description: 'The composing station\'s executable name — the verb the skill\'s `dart release` calls ride.',
+            description:
+                'The composing station\'s executable name — the verb the skill\'s `dart release` calls ride.',
             isRequired: true,
           ),
         ],
@@ -675,29 +708,34 @@ abstract final class GridAssetsPack {
       kind: AssetKind.skill,
       id: 'station-operations',
     ),
-    description: 'Operate the resident station — boot, bounce, tear down, read status, seed a grid home\'s state store, and diagnose a station that is up but driving nothing.',
+    description:
+        'Operate the resident station — boot, bounce, tear down, read status, seed a grid home\'s state store, and diagnose a station that is up but driving nothing.',
     audience: AssetAudience.human,
     visibility: AssetVisibility.public,
     selector: AlwaysApplies(),
     artifacts: <AssetArtifact>[
       AssetArtifact(
         target: AssetDeliveryTarget.claude,
-        path: 'extension/station_overlay/claude/skills/station-operations/SKILL.md',
+        path:
+            'extension/station_overlay/claude/skills/station-operations/SKILL.md',
         arguments: <AssetArgument>[
           AssetArgument(
             name: 'runner',
-            description: 'The composing station\'s executable name (e.g. `space`) — the verb its boot/status/down calls ride.',
+            description:
+                'The composing station\'s executable name (e.g. `space`) — the verb its boot/status/down calls ride.',
             isRequired: true,
           ),
         ],
       ),
       AssetArtifact(
         target: AssetDeliveryTarget.agents,
-        path: 'extension/station_overlay/agents/skills/station-operations/SKILL.md',
+        path:
+            'extension/station_overlay/agents/skills/station-operations/SKILL.md',
         arguments: <AssetArgument>[
           AssetArgument(
             name: 'runner',
-            description: 'The composing station\'s executable name (e.g. `space`) — the verb its boot/status/down calls ride.',
+            description:
+                'The composing station\'s executable name (e.g. `space`) — the verb its boot/status/down calls ride.',
             isRequired: true,
           ),
         ],
@@ -707,12 +745,9 @@ abstract final class GridAssetsPack {
 
   /// `grid_assets/agent/governor`.
   static const GridAssetDefinition agentGovernor = GridAssetDefinition(
-    assetKey: AssetKey(
-      package: package,
-      kind: AssetKind.agent,
-      id: 'governor',
-    ),
-    description: 'The governor seat\'s persona, tool surface, and cost posture.',
+    assetKey: AssetKey(package: package, kind: AssetKind.agent, id: 'governor'),
+    description:
+        'The governor seat\'s persona, tool surface, and cost posture.',
     audience: AssetAudience.human,
     visibility: AssetVisibility.public,
     selector: AlwaysApplies(),
@@ -731,7 +766,8 @@ abstract final class GridAssetsPack {
       kind: AssetKind.settings,
       id: 'harness',
     ),
-    description: 'The harness settings this pack contributes to an operator seat.',
+    description:
+        'The harness settings this pack contributes to an operator seat.',
     audience: AssetAudience.human,
     visibility: AssetVisibility.public,
     selector: AlwaysApplies(),
@@ -778,12 +814,13 @@ abstract final class GridAssetsPack {
   /// The validated pack. Built, not `const`: the collections
   /// validate duplicates at construction
   /// (`the_grid#asset-definitions-are-const-collections-are-validated`).
-  static final GridAssetPackDefinition definition =
-      GridAssetPackDefinition(package: package, assets: assets);
+  static final GridAssetPackDefinition definition = GridAssetPackDefinition(
+    package: package,
+    assets: assets,
+  );
 
   /// This pack's overlay head → target mappings.
-  static const Map<String, String> stationOverlayMappings =
-      <String, String>{
-        'claude': '.claude',
-      };
+  static const Map<String, String> stationOverlayMappings = <String, String>{
+    'claude': '.claude',
+  };
 }

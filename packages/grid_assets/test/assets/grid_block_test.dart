@@ -84,32 +84,37 @@ void main() {
       );
     });
 
-    test('the parameterised and path tokens map to their grid_sdk variants', () {
-      expect(
-        _parse(_skill(selector: 'dart-package:grid_sdk')).assets.single.selector,
-        isA<RequiresPackage>().having(
-          (s) => s.packageName,
-          'packageName',
-          'grid_sdk',
-        ),
-      );
-      expect(
-        _parse(_skill(selector: 'decision-register')).assets.single.selector,
-        isA<RequiresPath>().having(
-          (s) => s.relativePath,
-          'relativePath',
-          'docs/decisions',
-        ),
-      );
-      expect(
-        _parse(_skill(selector: 'station')).assets.single.selector,
-        isA<RequiresPath>().having(
-          (s) => s.relativePath,
-          'relativePath',
-          '.grid',
-        ),
-      );
-    });
+    test(
+      'the parameterised and path tokens map to their grid_sdk variants',
+      () {
+        expect(
+          _parse(
+            _skill(selector: 'dart-package:grid_sdk'),
+          ).assets.single.selector,
+          isA<RequiresPackage>().having(
+            (s) => s.packageName,
+            'packageName',
+            'grid_sdk',
+          ),
+        );
+        expect(
+          _parse(_skill(selector: 'decision-register')).assets.single.selector,
+          isA<RequiresPath>().having(
+            (s) => s.relativePath,
+            'relativePath',
+            'docs/decisions',
+          ),
+        );
+        expect(
+          _parse(_skill(selector: 'station')).assets.single.selector,
+          isA<RequiresPath>().having(
+            (s) => s.relativePath,
+            'relativePath',
+            '.grid',
+          ),
+        );
+      },
+    );
 
     test('`never` is refused LOUD, naming the absent grid_sdk variant', () {
       expect(
@@ -264,32 +269,29 @@ void main() {
   });
 
   group('the MCP mirror carries only MCP concepts', () {
-    test(
-      'human renders as operator, extension/ is stripped, and agent- and '
-      'settings-kind assets are NOT mirrored',
-      () {
-        final block = parseGridBlock(
-          pubspecYaml: _pubspec(
-            '${_skill(audience: 'human')}'
-            '    - id: governor\n'
-            '      kind: agent\n'
-            '      description: "The seat."\n'
-            '      audience: human\n'
-            '      artifacts:\n'
-            '        - target: claude\n'
-            '          path: $_skillPath\n',
-          ),
-          pathExists: FakePathProbe({_skillPath}).call,
-        );
-        final yaml = renderMcpConfig(block);
-        expect(yaml, contains(kGridBlockGeneratedMarker));
-        expect(yaml, contains('audience: operator'));
-        expect(yaml, contains('path: x/SKILL.md'));
-        expect(yaml, isNot(contains('id: governor')));
-        expect(yaml, isNot(contains('kind:')));
-        expect(yaml, isNot(contains('selector:')));
-      },
-    );
+    test('human renders as operator, extension/ is stripped, and agent- and '
+        'settings-kind assets are NOT mirrored', () {
+      final block = parseGridBlock(
+        pubspecYaml: _pubspec(
+          '${_skill(audience: 'human')}'
+          '    - id: governor\n'
+          '      kind: agent\n'
+          '      description: "The seat."\n'
+          '      audience: human\n'
+          '      artifacts:\n'
+          '        - target: claude\n'
+          '          path: $_skillPath\n',
+        ),
+        pathExists: FakePathProbe({_skillPath}).call,
+      );
+      final yaml = renderMcpConfig(block);
+      expect(yaml, contains(kGridBlockGeneratedMarker));
+      expect(yaml, contains('audience: operator'));
+      expect(yaml, contains('path: x/SKILL.md'));
+      expect(yaml, isNot(contains('id: governor')));
+      expect(yaml, isNot(contains('kind:')));
+      expect(yaml, isNot(contains('selector:')));
+    });
   });
 
   group('the committed outputs ARE a fresh render of the committed block', () {
@@ -414,21 +416,24 @@ void main() {
       });
     });
 
-    test('--check exits non-zero and names the stale path, writing nothing', () {
-      writePubspec(_skill());
-      final out = StringBuffer();
-      expect(
-        runGridAssetsGenerator(packageRoot: temp.path, check: true, out: out),
-        isNot(0),
-      );
-      expect(out.toString(), contains('STALE $kGeneratedPackPath'));
-      expect(out.toString(), contains('STALE $kGeneratedMcpPath'));
-      expect(
-        File(p.join(temp.path, kGeneratedPackPath)).readAsStringSync(),
-        contains('code-validation'),
-        reason: '--check writes nothing',
-      );
-    });
+    test(
+      '--check exits non-zero and names the stale path, writing nothing',
+      () {
+        writePubspec(_skill());
+        final out = StringBuffer();
+        expect(
+          runGridAssetsGenerator(packageRoot: temp.path, check: true, out: out),
+          isNot(0),
+        );
+        expect(out.toString(), contains('STALE $kGeneratedPackPath'));
+        expect(out.toString(), contains('STALE $kGeneratedMcpPath'));
+        expect(
+          File(p.join(temp.path, kGeneratedPackPath)).readAsStringSync(),
+          contains('code-validation'),
+          reason: '--check writes nothing',
+        );
+      },
+    );
 
     test('a write makes --check clean, and re-running is a no-op', () {
       writePubspec(_skill());
