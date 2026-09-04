@@ -415,9 +415,7 @@ void main() {
       'consumer': 'substation',
       'missing': 'snapshot',
     });
-  });
 
-  test('mounted asset facts without this seat\'s key refuse loudly', () {
     // Once the projection IS mounted, selection is strict again: a snapshot
     // that does not carry this seat's key is a composition error, never a
     // reason to degrade — and no compatibility flare softens it.
