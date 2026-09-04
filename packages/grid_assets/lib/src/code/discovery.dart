@@ -165,13 +165,16 @@ const int kMaxHistoryCommits = 12;
 /// ([failed]) are known NON-answers. A lens is handed the state, never a bare
 /// snippet, so it can never read "nobody looked" as "nothing is there".
 ///
-/// Three of those states are the lens's CONTEXT; only two are a deterministic
-/// GAP (`_isDeterministicEvidenceGap`). [truncated] and [failed] override the
-/// lens's report with an [InsufficientEvidenceReport] and spend the one-round
-/// regather budget, because the gather promised a record and then broke it.
-/// [unavailable] does NOT: the optional source was simply never composed, so
-/// the lens narrates the limitation and its report stands, exactly as it did
-/// before the canonical profile existed.
+/// Three of those states are the lens's CONTEXT; only one is a deterministic
+/// GAP (`_isDeterministicEvidenceGap`). [failed] overrides the lens's report
+/// with an [InsufficientEvidenceReport] and spends the one-round regather
+/// budget, because the gather promised a record and then crashed. [unavailable]
+/// does NOT: the optional source was simply never composed, so the lens
+/// narrates the limitation and its report stands, exactly as it did before the
+/// canonical profile existed. [truncated] does NOT either (bead `pow-gcx9`):
+/// the record was clipped at a bound the gather declares, which every mature
+/// surface exceeds; the lens narrates the clip, and only its own
+/// insufficient-evidence outcome can hold the round on it.
 enum EvidenceState {
   /// The lookup ran and its whole result is carried (an empty result included).
   complete,
@@ -1657,25 +1660,28 @@ DiscoveryEvidenceProjection projectDiscoveryEvidence(
           )
           ..writeln();
       }
+      // A clipped EXTRACTION is the same kind of bounded answer as a clipped
+      // record (bead `pow-gcx9`): the bead names more surfaces or symbols than
+      // [kMaxAnchors] carries. It is NAMED so a short list is never silent, but
+      // it is context the lens narrates, never a deterministic gap — the lens's
+      // own insufficient-evidence outcome is the only hold on it.
       if (anchors.anchorsTruncated) {
-        gaps.add(
-          const EvidenceGap(
-            evidenceId: 'gather:anchors',
-            reason:
-                'the bead names MORE code surfaces than the gather carries — '
-                'the anchor extraction was clipped at its bound',
-          ),
-        );
+        b
+          ..writeln(
+            'CLIPPED: the bead names MORE code surfaces than the gather '
+            'carries — the anchor extraction was clipped at its bound '
+            '($kMaxAnchors); the list above is the head of it.',
+          )
+          ..writeln();
       }
       if (anchors.symbolsTruncated) {
-        gaps.add(
-          const EvidenceGap(
-            evidenceId: 'gather:symbols',
-            reason:
-                'the bead names MORE symbols than the gather carries — the '
-                'symbol extraction was clipped at its bound',
-          ),
-        );
+        b
+          ..writeln(
+            'CLIPPED: the bead names MORE symbols than the gather carries — '
+            'the symbol extraction was clipped at its bound; the list above '
+            'is the head of it.',
+          )
+          ..writeln();
       }
     case kDecisionLens:
       beadFields();
@@ -1873,17 +1879,26 @@ String _stateReason(EvidenceState state, String error) => switch (state) {
 /// then could not deliver, which therefore overrides a lens's report and spends
 /// the one-round regather budget.
 ///
-/// Only a source that was PRESENT and then broke qualifies. [EvidenceState
+/// Only a source that was PRESENT and then CRASHED qualifies. [EvidenceState
 /// .unavailable] means the optional source was never composed — nobody looked —
 /// and that is A21(5)'s posture exactly ("a station that composed no
 /// `PriorArtSource` gets a dossier line that says NOBODY LOOKED"): it stays
 /// VISIBLE in the projection so the lens can narrate the limitation, but it
-/// never overrides the lens and never escalates. Absence is not a broken
-/// promise; a crash is.
+/// never overrides the lens and never escalates. [EvidenceState.truncated] is
+/// the same kind of context, not a gap (bead `pow-gcx9`): the record was
+/// clipped at a bound the gather DECLARES ([kMaxDiscoverySnippetChars],
+/// [kMaxHistoryCommits], [kMaxAnchors]), and a mature source file or the
+/// history of a mature surface ALWAYS exceeds those bounds — treating the clip
+/// as a broken promise held every bead naming a real file at
+/// `discovery-route` (lunar, 2026-09-04: three of three live rounds, the fix
+/// bead included). The lens is handed the state and narrates "clipped at N";
+/// when it genuinely needs what was clipped, its OWN insufficient-evidence
+/// outcome still holds the round. Absence and a clip are bounded answers; a
+/// crash is not.
 bool _isDeterministicEvidenceGap(EvidenceState state) => switch (state) {
   EvidenceState.complete => false,
   EvidenceState.unavailable => false,
-  EvidenceState.truncated => true,
+  EvidenceState.truncated => false,
   EvidenceState.failed => true,
 };
 
@@ -3190,6 +3205,26 @@ Future<HistoryEvidence> gatherHistory(
       error: 'no history source is composed',
     );
   }
+  // No resolved surface ⇒ no surface history. A batched `git log --` over an
+  // EMPTY path list is the whole repository's log — noise that is always
+  // clipped at [kMaxHistoryCommits] — so the record is honest absence, and the
+  // source is never invoked (bead `pow-gcx9`).
+  if (paths.isEmpty) {
+    return HistoryEvidence(
+      id: boundDiscoveryEvidence(
+        kind: 'history',
+        subject: '',
+        source: '',
+        fullText: '',
+      ).id,
+      paths: const [],
+      command: '',
+      state: EvidenceState.unavailable,
+      error:
+          'no anchor resolved in the workspace, so there is no surface '
+          'history to gather',
+    );
+  }
   try {
     return await source(workspaceDir, paths);
   } catch (e) {
@@ -4206,11 +4241,14 @@ class DiscoveryRouteCapability extends RouteCapability {
             MapEntry(
               lens,
               // A deterministic gap OVERRIDES whatever the model wrote: a lane
-              // cannot hide a truncation or a crashed lookup behind a
-              // clean-looking report. An UNAVAILABLE record is not such a gap
-              // — an uncomposed optional source leaves the lens's own verdict
-              // authoritative, which is how this lane behaved before the
-              // canonical profile existed.
+              // cannot hide a crashed lookup behind a clean-looking report.
+              // An UNAVAILABLE record is not such a gap — an uncomposed
+              // optional source leaves the lens's own verdict authoritative,
+              // which is how this lane behaved before the canonical profile
+              // existed — and neither is a TRUNCATED one (bead `pow-gcx9`):
+              // a clip at a declared bound is a bounded answer the lens
+              // narrates, and only the lens's own insufficient-evidence
+              // outcome holds the round on it.
               switch (projections[lens]) {
                 final projection? when !projection.isSufficient =>
                   InsufficientEvidenceReport(lens: lens, gaps: projection.gaps),
