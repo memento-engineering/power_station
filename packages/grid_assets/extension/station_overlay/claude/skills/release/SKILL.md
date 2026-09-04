@@ -38,7 +38,11 @@ Each op emits ONE JSON object under `--json`. Read the fields; never scrape.
 - **Stable promotion** — `{{runner}} dart release promote --repo-dir <repo-dir> --stable-tag <stable-tag> --validation <validation.json> --json`
   -> `{tag, created, exitCode}`.
 - **Scrub gate** — `{{runner}} dart release scrub --dir <package-dir> --json`
-  -> `{root, clean, filesScanned, hits:[{file, line, text, match}]}`.
+  -> `{root, clean, filesScanned, hits:[{file, line, text, match}], declaredFloors:{candidate, pins:[{package, declaredConstraint, floor}], pubGetExitCode, analyzeExitCode, passed, message, stdout, stderr}}`.
+  Read both `clean` and `declaredFloors.passed`. A false value stops the release;
+  `declaredFloors.message` names the analyzed symbol diagnostics and every
+  workspace sibling exact floor. This leg resolves pub.dev and belongs only to
+  this release verb, never the offline workspace test command.
 - **Publish order** — `{{runner}} dart release order --manifest <deps.json> --json`
   -> `{order:[...]}` (a `{package:[in-set deps]}` manifest in; dependency-first
   sequence out). A cycle exits non-zero with a loud message.
@@ -127,8 +131,14 @@ Run them in sequence; a failure STOPS the release.
    format` (or the repo's equivalent). A plain shell gate, not a `dart release`
    op.
 2. **Scrub** — `{{runner}} dart release scrub --dir <package-dir> --json`. Read
-   `clean`. If false, each `hits[]` entry names the `file`, `line`, and `match`
-   to strip; fix, re-run, expect `clean: true`.
+   `clean`, which folds in BOTH legs. If false, each `hits[]` entry names the
+   `file`, `line`, and `match` to strip, and `declaredFloors.passed: false`
+   means the candidate does not compile against the minimums its own
+   `pubspec.yaml` promises — a member used above a declared floor. A pub
+   workspace resolves siblings by path, so that stays invisible until a fresh
+   resolve holds the older published sibling; RAISE the named sibling's
+   constraint to the version that introduced the symbol rather than loosening
+   the gate. Fix, re-run, expect `clean: true`.
 3. **No internal working docs inside the package dir** — handoffs, scratch, and
    design notes ship in the archive if they live under the package. Move them out.
 4. **CHANGELOG entry + version bump, committed** — bump `pubspec.yaml` to

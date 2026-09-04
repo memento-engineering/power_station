@@ -463,6 +463,32 @@ void main() {
           '“N checked-in files are modified in git” means gate 4 is incomplete',
         ),
       );
+      expect(
+        rendered,
+        contains(
+          'declaredFloors:{candidate, pins:[{package, declaredConstraint, '
+          'floor}], pubGetExitCode, analyzeExitCode, passed, message, stdout, '
+          'stderr}',
+        ),
+      );
+      expect(
+        rendered,
+        contains('Read both `clean` and `declaredFloors.passed`'),
+      );
+      expect(
+        rendered,
+        contains(
+          'This leg resolves pub.dev and belongs only to\n'
+          '  this release verb, never the offline workspace test command.',
+        ),
+      );
+      expect(
+        rendered,
+        contains(
+          '`declaredFloors.passed: false`\n'
+          '   means the candidate does not compile against the minimums its own',
+        ),
+      );
     });
 
     test(
