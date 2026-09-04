@@ -122,11 +122,7 @@ class LaneOverlap {
 /// of the packaged rubric in `spec_contract_shadow_test.dart`, so "this lane
 /// already asks for it" can never be invented.
 const List<LaneOverlap> kSpecContractLaneOverlap = [
-  LaneOverlap(
-    rule: SpecContractRule.acceptanceRecord,
-    rubric: '',
-    clause: '',
-  ),
+  LaneOverlap(rule: SpecContractRule.acceptanceRecord, rubric: '', clause: ''),
   LaneOverlap(
     rule: SpecContractRule.acceptanceIdDuplicate,
     rubric: '',
@@ -208,13 +204,15 @@ class SemanticResidue {
 const List<SemanticResidue> kSpecContractSemanticResidue = [
   SemanticResidue(
     rubric: 'acceptance-testability',
-    claim: 'a mapped command can still be vacuous — the parser sees that a '
+    claim:
+        'a mapped command can still be vacuous — the parser sees that a '
         'command IS there, never whether it can fail',
     clause: 'a validation item that passes even',
   ),
   SemanticResidue(
     rubric: 'plan-completeness',
-    claim: 'a step can carry all five labeled fields and still leave a '
+    claim:
+        'a step can carry all five labeled fields and still leave a '
         'judgment call to the builder',
     clause: 'A judgment call is any step where the builder must',
   ),
@@ -225,7 +223,8 @@ const List<SemanticResidue> kSpecContractSemanticResidue = [
   ),
   SemanticResidue(
     rubric: 'coherence',
-    claim: 'a well-formed plan can parallel-build beside a concept the packs '
+    claim:
+        'a well-formed plan can parallel-build beside a concept the packs '
         'already own — no record form can see a duplicate abstraction',
     clause: 'A coherent spec extends what is there',
   ),
@@ -333,7 +332,9 @@ String renderSpecContractShadowReport(List<SpecCorpusEntry> corpus) {
     ..writeln()
     ..writeln('## Findings per rule, and the lane that already asks for it')
     ..writeln()
-    ..writeln('| rule | corpus findings | lane that already asks | clause quoted from that rubric |')
+    ..writeln(
+      '| rule | corpus findings | lane that already asks | clause quoted from that rubric |',
+    )
     ..writeln('| --- | --- | --- | --- |');
   for (final overlap in kSpecContractLaneOverlap) {
     out.writeln(
@@ -394,7 +395,9 @@ String renderSpecContractShadowReport(List<SpecCorpusEntry> corpus) {
     ..writeln()
     ..writeln('## The semantic residue — what no record form can decide')
     ..writeln()
-    ..writeln('| lane | what it uniquely catches | clause quoted from that rubric |')
+    ..writeln(
+      '| lane | what it uniquely catches | clause quoted from that rubric |',
+    )
     ..writeln('| --- | --- | --- |');
   for (final residue in kSpecContractSemanticResidue) {
     out.writeln(
