@@ -444,8 +444,8 @@ class ScrubResult {
   final int filesScanned;
 
   /// Present when the complete release scrub gate ran (i.e. through
-  /// [ReleaseService.scrubPackage]); null for a content-only [
-  /// ReleaseService.scrubDir] scan.
+  /// [ReleaseService.scrubPackage]); null for a content-only
+  /// [ReleaseService.scrubDir] scan.
   final DeclaredFloorsValidationResult? declaredFloors;
 
   /// The gate passes iff nothing leaked (genesis `publishing.md`: expect empty)
