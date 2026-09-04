@@ -1,3 +1,10 @@
+## 0.6.0-rc.14
+
+- Added: the `grid:` block accepts an optional `teaches:` sequence per skill asset (the deterministic commands its prose teaches), parsed by `parseGridBlock`, emitted by the registrant generator only when non-empty, and authored for the baseline skill/command pairs; unclaimed packs generate byte-identical output. Floors `grid_sdk ^0.3.0-rc.15` for `GridAssetDefinition.teaches` (pow-prw4, #228).
+- Fixed: the discovery gather's roster decision lookup qualifies surfaces from the SESSION's substation (`metadata['rig']` is a session-bead field no work bead carries), never shells a `<repo>`-prefixed surface (recorded `unavailable` instead), and runs the station's verb from the composing grid home (`overlayArgs['gridHome'] ?? devRoot`) rather than the work worktree — every explore-decision lens held its round on rc.12/rc.13 (pow-974y, #226). Stations pass `'gridHome'` beside `'runner'` in `buildCodeRegistry(overlayArgs:)`.
+- Fixed: `--state-root` on the filing verbs takes the GRID HOME its help names — the resolver appends `.grid` when the root holds one, accepts a state store unchanged, and refuses a root holding neither child loudly; an unconsulted cross-store edge is reported as UNCHECKED, never as missing (pow-ixag, #227).
+- Fixed: the code-validation gating lane preserves the validation failure output the way land/revalidate does — the shared captured-output leaf recognizes `[E]` beside `Error:` / `Failed to load`, and the full log lands in `.grid/critique/code-validation.log` (#224).
+
 ## 0.6.0-rc.13
 
 - Breaking: asset availability is resolved ONCE — `resolveGridAssets` over a repository-observed `SubstationFactsSnapshot` defines the tree's selected definitions and BOTH overlay writers (`assets install`, `OverlayMaterializer`) and the landing pre-rebase guard consume that same resolution; `--check` reports drift. Un-migrated stations without facts keep the pre-resolution path (pow-4peu, #216). Migration: compose a station's assets through `resolveGridAssets`/`GridAssetRegistry` — a writer must never build a second catalog; `github_grid_assets ^0.1.0-rc.13` carries the matching `SubstationSeed`.
