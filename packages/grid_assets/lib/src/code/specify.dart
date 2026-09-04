@@ -99,8 +99,12 @@ import '../agent/typed_environment.dart';
 import '../agent/usage_report.dart';
 import '../assets/overlay_materializer.dart' show kDefaultOverlayRunner;
 import 'committee.dart';
+import 'conventional_commit.dart' show lintConventionalSubject;
 import 'decision_register.dart';
 import 'discovery.dart';
+// The pack's ONE citation-path reader. `docs_committee.dart` imports this
+// library in turn — the same two-way seam `committee.dart` already has here.
+import 'docs_committee.dart' show normalizeCitedPath;
 import 'readiness.dart';
 import 'respec.dart';
 
@@ -1289,11 +1293,16 @@ final List<RegExp> _placeholderPatterns = [
 /// fails LOUD. In a heading or bold lead-in a bare ordinal IS the step number,
 /// so no trailing `.`/`)` is required there; in running prose one is, which is
 /// why `2026-07-11 …` and `3.5x faster` do not match.
+///
+/// The three ordinals are CAPTURED (and nothing else changed) so
+/// [parseSpecContract] can read a step's number without a second grammar: the
+/// accepted language is byte-for-byte the one already ratified, because WHICH
+/// openers count is settled and only what a step CONTAINS is newly graded.
 final RegExp _numberedStep = RegExp(
   r'^[ \t]*(?:'
-  r'\d+[.)]\s' // 1. …  /  1) …
-  r'|#{1,6}[ \t]*(?:step[ \t]*)?\d+\b' // ### Step 1 — …  /  ### 1. …
-  r'|\*\*[ \t]*(?:step[ \t]*)?\d+\b' // **Step 1:** …  /  **1.** …
+  r'(\d+)[.)]\s' // 1. …  /  1) …
+  r'|#{1,6}[ \t]*(?:step[ \t]*)?(\d+)\b' // ### Step 1 — …  /  ### 1. …
+  r'|\*\*[ \t]*(?:step[ \t]*)?(\d+)\b' // **Step 1:** …  /  **1.** …
   r')',
   multiLine: true,
   caseSensitive: false,
@@ -1495,4 +1504,911 @@ int headingOffset(String design, String heading) {
     multiLine: true,
   ).allMatches(design).toList();
   return matches.isEmpty ? -1 : matches.last.start;
+}
+
+// ---------------------------------------------------------------------------
+// The RECORD grammar — the deterministic contract one level below the
+// section-PRESENCE checks above.
+//
+// The record FORMS are constants because [kSpecStructuralContract] interpolates
+// them and the parser's doc comments quote them: one edit moves the brief and
+// the gate together, which is the "a gate whose contract the brief does not
+// state is a trap" rule applied to the new rules.
+// ---------------------------------------------------------------------------
+
+/// The acceptance-criterion record form — an addressable, stable id per
+/// criterion, so the validation plan can map onto it BY NAME.
+const String kAcceptanceRecordForm = '- [ ] AC-<n> — <criterion>';
+
+/// The implementation-step record form. The ordinal-LIST openers already
+/// accepted (`1. …` / `1) …` / `**Step 1:** …`) still parse as steps; this is
+/// the shape the brief TEACHES, because a step carrying a fenced block must
+/// take it.
+const String kStepRecordForm = '### Step <n> — <title>';
+
+/// The labeled lines every implementation step carries, in brief order.
+///
+/// `Change:` states the BEHAVIOUR/INVARIANT the builder must produce. A fenced
+/// code block is optional EVIDENCE beside it, never a required field: making
+/// the architect pre-write the implementation duplicates the most expensive
+/// output in the circuit and bloats every later context.
+const List<String> kStepFieldLabels = [
+  'Paths',
+  'Change',
+  'Test',
+  'Expect',
+  'Commit',
+];
+
+/// The `## Touches` record form — one repo-relative backticked path, one
+/// disposition, then the symbols the item adds or exposes.
+const String kTouchRecordForm =
+    '- `<repo-relative/path>` — <created|modified|deleted|renamed>; <symbols>';
+
+/// The `## ADR Alignment` record form. RESOLUTION is deterministic (the
+/// citation is an identity the roster index can answer, and the disposition is
+/// a declared word); INTERPRETATION stays the `decision-alignment` lane's.
+const String kDecisionRecordForm =
+    '- `<repo>#<slug>` — <applied|extended|updated|superseded>: <clause>';
+
+/// The `## Validation Plan` record form — the restatement is optional; the id
+/// is what carries the mapping.
+const String kValidationRecordForm =
+    '- [ ] AC-<n>[ — <restatement>] → `<command>` → <expected>';
+
+/// What a `## Touches` item declares happened to its path.
+enum TouchDisposition {
+  /// The path is created by this bead.
+  created,
+
+  /// The path exists and this bead edits it.
+  modified,
+
+  /// The path is removed by this bead.
+  deleted,
+
+  /// The path is moved or renamed by this bead.
+  renamed,
+}
+
+/// What a `## ADR Alignment` item declares about its cited decision.
+enum DecisionDisposition {
+  /// The plan implements the decision as recorded.
+  applied,
+
+  /// The plan extends the decision without contradicting it.
+  extended,
+
+  /// The plan records a change to the decision.
+  updated,
+
+  /// The plan replaces the decision with a new entry.
+  superseded,
+}
+
+/// What a spec's `## ADR Alignment` section declares about the roster LOOKUP
+/// itself — the distinction
+/// `power_station#the-spec-decision-lane-queries-the-roster-union` (3) makes
+/// load-bearing: "An empty union is a real result; a CRASHED lookup is not. A
+/// lookup that fails or exits non-zero must be reported verbatim and never
+/// graded clean."
+///
+/// The grammar therefore types all three outcomes rather than collapsing a
+/// crash into a vacuous citation-less section: an empty union and an unknown
+/// union are different results, and only one of them means "nothing governs
+/// these surfaces".
+enum DecisionLookupNarrative {
+  /// The section cites recorded decisions and makes no claim about the lookup.
+  cited,
+
+  /// The union was EMPTY for every queried surface
+  /// ([kNoGoverningDecisionPrefix]) — a real result.
+  emptyUnion,
+
+  /// The lookup FAILED and the section reports it verbatim
+  /// ([kFailedDecisionLookupPrefix]). Citations are not REQUIRED — the union is
+  /// UNKNOWN, not empty — but the section is never silent about why.
+  failedLookup,
+}
+
+/// One `- [ ] AC-<n> — <criterion>` record.
+class AcceptanceCriterion {
+  /// Creates a criterion record.
+  const AcceptanceCriterion({
+    required this.id,
+    required this.text,
+    required this.line,
+  });
+
+  /// The `<n>` in `AC-<n>`.
+  final int id;
+
+  /// The criterion prose after the separator.
+  final String text;
+
+  /// The 1-based line of the record in the acceptance field.
+  final int line;
+}
+
+/// One implementation-step record and its five labeled fields.
+class ImplementationStep {
+  /// Creates a step record.
+  const ImplementationStep({
+    required this.ordinal,
+    required this.title,
+    required this.paths,
+    required this.change,
+    required this.testCommand,
+    required this.expected,
+    required this.commit,
+    required this.line,
+  });
+
+  /// The step's ordinal, as written.
+  final int ordinal;
+
+  /// The title after the ordinal, `''` when the opener carries none.
+  final String title;
+
+  /// The repo-relative paths the `Paths:` field cites, in document order.
+  final List<String> paths;
+
+  /// The behaviour/invariant the step must produce.
+  final String change;
+
+  /// The `Test:` command.
+  final String testCommand;
+
+  /// The `Expect:` output.
+  final String expected;
+
+  /// The `Commit:` conventional-commit subject.
+  final String commit;
+
+  /// The 1-based line of the step's opener in the design field.
+  final int line;
+}
+
+/// One `## Touches` record.
+class Touch {
+  /// Creates a touch record.
+  const Touch({
+    required this.path,
+    required this.symbols,
+    required this.disposition,
+    required this.line,
+  });
+
+  /// The repo-relative path.
+  final String path;
+
+  /// The rest of the item after the disposition — the symbols it names.
+  final String symbols;
+
+  /// What the bead does to [path].
+  final TouchDisposition disposition;
+
+  /// The 1-based line of the record in the design field.
+  final int line;
+}
+
+/// One `## ADR Alignment` record.
+class DecisionCitation {
+  /// Creates a citation record.
+  const DecisionCitation({
+    required this.reference,
+    required this.disposition,
+    required this.line,
+  });
+
+  /// The resolvable identity — `<repo>#<slug>`, a `docs/decisions/` or
+  /// `docs/adr/` path, or a legacy `ADR-<nnnn>` id.
+  final String reference;
+
+  /// What the plan does with the decision.
+  final DecisionDisposition disposition;
+
+  /// The 1-based line of the record in the design field.
+  final int line;
+}
+
+/// One `## Validation Plan` record.
+class ValidationMapping {
+  /// Creates a validation record.
+  const ValidationMapping({
+    required this.criterionId,
+    required this.command,
+    required this.expected,
+    required this.line,
+  });
+
+  /// The `<n>` of the `AC-<n>` this item validates.
+  final int criterionId;
+
+  /// The exact command.
+  final String command;
+
+  /// The expected output.
+  final String expected;
+
+  /// The 1-based line of the record in the design field.
+  final int line;
+}
+
+/// The typed projection of ONE spec's line-oriented records.
+///
+/// Only what the documented grammar RECOGNIZED lands here: a malformed record
+/// contributes a [SpecContractFinding] and NOTHING to these lists, so no
+/// downstream check ever reads a guessed value.
+class SpecContract {
+  /// Creates a contract projection.
+  const SpecContract({
+    required this.criteria,
+    required this.steps,
+    required this.touches,
+    required this.citations,
+    required this.decisionNarrative,
+    required this.validations,
+  });
+
+  /// The acceptance records, in document order.
+  final List<AcceptanceCriterion> criteria;
+
+  /// The implementation-step records, in document order.
+  final List<ImplementationStep> steps;
+
+  /// The `## Touches` records, in document order.
+  final List<Touch> touches;
+
+  /// The `## ADR Alignment` records, in document order.
+  final List<DecisionCitation> citations;
+
+  /// What the `## ADR Alignment` section declares about the roster lookup —
+  /// citations, an EMPTY union, or a FAILED one.
+  final DecisionLookupNarrative decisionNarrative;
+
+  /// The `## Validation Plan` records, in document order.
+  final List<ValidationMapping> validations;
+}
+
+/// The spec sections [parseSpecContract] reads — the cascade's currency.
+enum SpecContractSection {
+  /// The bead's acceptance field.
+  acceptance,
+
+  /// `## Implementation Plan`.
+  plan,
+
+  /// `## Touches`.
+  touches,
+
+  /// `## ADR Alignment`.
+  decisions,
+
+  /// `## Validation Plan`.
+  validation,
+}
+
+/// Every rule [parseSpecContract] can report — one rule, one finding, so a
+/// single-rule fixture mutation fails with a single precise message.
+enum SpecContractRule {
+  /// A `- [ ]` acceptance line that is not [kAcceptanceRecordForm].
+  acceptanceRecord,
+
+  /// Two acceptance records declaring the same id.
+  acceptanceIdDuplicate,
+
+  /// The acceptance ids are not exactly `1..N`.
+  acceptanceIdNotContiguous,
+
+  /// A step opener carrying no title.
+  stepTitle,
+
+  /// A step missing one of [kStepFieldLabels].
+  stepField,
+
+  /// A `Paths:` field citing no repo-relative backticked path.
+  stepPath,
+
+  /// A `Commit:` field that is not a conventional-commit subject.
+  stepCommit,
+
+  /// A `## Touches` item without one repo-relative path and a disposition.
+  touchRecord,
+
+  /// A `## ADR Alignment` item without a resolvable citation + disposition.
+  decisionRecord,
+
+  /// A `## ADR Alignment` section that cites nothing and declares NEITHER an
+  /// empty union NOR a failed lookup — a silent section, which is the one
+  /// reading the roster-union decision forbids.
+  decisionSectionSilent,
+
+  /// A `## Validation Plan` item that is not [kValidationRecordForm].
+  validationRecord,
+
+  /// A validation item naming an id no acceptance record declares.
+  validationUnknownCriterion,
+
+  /// A criterion with no validation item, or one mapped more than once.
+  validationCoverage,
+}
+
+/// One source-located deviation from the documented grammar.
+class SpecContractFinding {
+  /// Creates a finding.
+  const SpecContractFinding({
+    required this.rule,
+    required this.field,
+    required this.line,
+    required this.message,
+  });
+
+  /// The rule this finding reports.
+  final SpecContractRule rule;
+
+  /// The bead field the line is in — `acceptance` or `design`.
+  final String field;
+
+  /// The 1-based line in [field].
+  final int line;
+
+  /// The LOUD message naming what is wrong and the form that is required.
+  final String message;
+
+  /// The string [specStructuralFindings] joins into its rationale.
+  String render() => '$field line $line: $message';
+}
+
+/// [raw] as a REPO-RELATIVE path, or null when it is not one.
+///
+/// Composes [normalizeCitedPath] — the pack's ONE citation-path reader — and
+/// adds the two guards repo-relativity needs and citation does not: an ABSOLUTE
+/// path and any `..` segment are refused.
+String? repoRelativePathOf(String raw) {
+  final cited = normalizeCitedPath(raw);
+  if (cited == null) return null;
+  if (cited.startsWith('/')) return null;
+  if (cited.split('/').contains('..')) return null;
+  return cited;
+}
+
+/// Whether [raw] is a citation identity the roster index can ANSWER: the
+/// canonical `<repo>#<slug>`, a `docs/decisions/` or `docs/adr/` path, or a
+/// legacy `ADR-<nnnn>` id (which a migrated entry still resolves by).
+///
+/// RESOLUTION only — whether the clause is READ correctly is the
+/// `decision-alignment` lane's judgement, never this parser's.
+bool isResolvableDecisionReference(String raw) {
+  final token = raw.trim();
+  if (RegExp(r'^[A-Za-z0-9_.-]+#[a-z0-9][a-z0-9-]*$').hasMatch(token)) {
+    return true;
+  }
+  if (RegExp(r'^ADR-\d{4}\b').hasMatch(token)) return true;
+  final path = repoRelativePathOf(token);
+  return path != null &&
+      (path.startsWith('docs/decisions/') || path.startsWith('docs/adr/'));
+}
+
+/// The separator a record may put between its id and its text.
+const String _recordSeparator = r'(?:—|–|-|:)';
+
+/// [kAcceptanceRecordForm], as a per-LINE matcher.
+final RegExp _acceptanceRecord = RegExp(
+  r'^[ \t]*-[ \t]*\[[ xX]\][ \t]*AC-(\d+)[ \t]*' +
+      _recordSeparator +
+      r'[ \t]*(\S.*)$',
+);
+
+/// Any `- [ ]` checkbox line — the SUPERSET [_acceptanceRecord] and
+/// [_validationRecord] must match, so a checkbox that is not a record is a
+/// named deviation rather than a silent omission.
+final RegExp _checkboxLine = RegExp(r'^[ \t]*-[ \t]*\[[ xX]\][ \t]*(\S.*)$');
+
+/// Any `- ` list item — the superset the section record forms must match.
+final RegExp _listItem = RegExp(r'^[ \t]*-[ \t]+(\S.*)$');
+
+/// [kValidationRecordForm], as a per-LINE matcher. `->` is taken for `→`, so
+/// an ASCII keyboard is never a structural F.
+final RegExp _validationRecord = RegExp(
+  r'^[ \t]*-[ \t]*\[[ xX]\][ \t]*AC-(\d+)[ \t]*(?:' +
+      _recordSeparator +
+      r'[^\n]*?)?(?:→|->)[ \t]*`([^`\n]+)`[ \t]*(?:→|->)[ \t]*(\S.*)$',
+);
+
+/// A markdown inline `code` span.
+final RegExp _backtickedSpan = RegExp(r'`([^`\n]+)`');
+
+/// The `<label>:` line opening a step field — an optional `- ` bullet and
+/// optional `**` bold are accepted decoration.
+RegExp _stepFieldLine(String label) => RegExp(
+  '^[ \\t]*(?:[-*][ \\t]*)?(?:\\*\\*)?${RegExp.escape(label)}(?:\\*\\*)?'
+  '[ \\t]*:[ \\t]*',
+);
+
+/// Every step field label as one alternation — a field's VALUE ends where the
+/// next label begins.
+final RegExp _anyStepFieldLine = RegExp(
+  '^[ \\t]*(?:[-*][ \\t]*)?(?:\\*\\*)?(?:${kStepFieldLabels.join('|')})'
+  '(?:\\*\\*)?[ \\t]*:',
+);
+
+/// A markdown heading line — a field value never runs through one.
+final RegExp _headingLine = RegExp(r'^[ \t]{0,3}#{1,6}[ \t]');
+
+/// The disposition word a `## Touches` item declares.
+final RegExp _touchDisposition = RegExp(
+  r'\b(created|modified|deleted|renamed)\b',
+  caseSensitive: false,
+);
+
+/// The disposition word a `## ADR Alignment` item declares.
+final RegExp _decisionDisposition = RegExp(
+  r'\b(applied|extended|updated|superseded)\b',
+  caseSensitive: false,
+);
+
+/// One authored line the record grammar can SEE: its 1-based [line] in the
+/// bead field and its RAW [text].
+typedef _AuthoredLine = ({int line, String text});
+
+/// The authored lines of `[from, to]` that the grammar SEES.
+///
+/// A line is invisible exactly when its [proseOnly] counterpart is blank —
+/// i.e. it is markdown QUOTATION (a fenced block, a `>` blockquote, a line
+/// that is nothing but `code` spans). That is the SAME rule the section-
+/// presence checks read structure by, and it works line-for-line only because
+/// [proseOnly] preserves the line count. The record's own text comes from the
+/// RAW field, so a backticked command or path survives to be parsed.
+List<_AuthoredLine> _authoredLines(
+  List<String> raw,
+  List<String> prose,
+  int from,
+  int to,
+) => [
+  for (var i = from < 1 ? 1 : from; i <= to && i <= raw.length; i++)
+    if (prose[i - 1].trim().isNotEmpty) (line: i, text: raw[i - 1]),
+];
+
+/// The 1-based, inclusive line range of [heading]'s section BODY in [prose],
+/// or null when the section is absent.
+({int from, int to})? _sectionLineRange(String prose, String heading) {
+  final at = headingOffset(prose, heading);
+  if (at < 0) return null;
+  final section = sectionAt(prose, at);
+  return (
+    from: lineOf(prose, section.start) + 1,
+    to: lineOf(prose, section.start + section.body.length),
+  );
+}
+
+/// The value of the `<label>:` field inside a step's [slice], or null when the
+/// step carries no such label.
+///
+/// The value is the label line's remainder plus every CONTIGUOUS following line
+/// that is not another label, a step opener, or a heading — contiguity is what
+/// makes a blank line (or a fenced block, which is invisible here) end the
+/// field. `Commit:` is the one exception and takes its own line only: a
+/// conventional-commit SUBJECT is one line by definition.
+String? _stepFieldValue(List<_AuthoredLine> slice, String label) {
+  final opener = _stepFieldLine(label);
+  for (var i = 0; i < slice.length; i++) {
+    final match = opener.firstMatch(slice[i].text);
+    if (match == null) continue;
+    final value = StringBuffer(slice[i].text.substring(match.end));
+    if (label != 'Commit') {
+      var previous = slice[i].line;
+      for (var j = i + 1; j < slice.length; j++) {
+        final next = slice[j];
+        if (next.line != previous + 1) break;
+        if (_anyStepFieldLine.hasMatch(next.text)) break;
+        if (_numberedStep.hasMatch(next.text)) break;
+        if (_headingLine.hasMatch(next.text)) break;
+        value.write('\n${next.text}');
+        previous = next.line;
+      }
+    }
+    return value.toString().trim();
+  }
+  return null;
+}
+
+/// Projects [acceptance] + [design] — the bead's RAW fields — into a
+/// [SpecContract], appending every deviation from the documented grammar to the
+/// returned findings.
+///
+/// TOTAL: it never throws and never repairs. A record that does not match its
+/// documented form contributes a finding and NOTHING to the projection, so a
+/// guess can never reach a cross-record check.
+///
+/// [only] narrows the parse to the sections whose PRESENCE checks already
+/// passed. That cascade is what keeps one defect to one finding: an acceptance
+/// field with no checkboxes at all is [specStructuralFindings]' own finding,
+/// and re-reporting it as a dozen malformed records would bury it.
+({SpecContract contract, List<SpecContractFinding> findings}) parseSpecContract({
+  required String acceptance,
+  required String design,
+  Set<SpecContractSection> only = const {
+    SpecContractSection.acceptance,
+    SpecContractSection.plan,
+    SpecContractSection.touches,
+    SpecContractSection.decisions,
+    SpecContractSection.validation,
+  },
+}) {
+  final findings = <SpecContractFinding>[];
+  final criteria = <AcceptanceCriterion>[];
+  final steps = <ImplementationStep>[];
+  final touches = <Touch>[];
+  final citations = <DecisionCitation>[];
+  final validations = <ValidationMapping>[];
+  var narrative = DecisionLookupNarrative.cited;
+
+  void report(
+    SpecContractRule rule,
+    String field,
+    int line,
+    String message,
+  ) => findings.add(
+    SpecContractFinding(rule: rule, field: field, line: line, message: message),
+  );
+
+  // ---- acceptance: `- [ ] AC-<n> — <criterion>` ---------------------------
+  var acceptanceRecordsClean = true;
+  if (only.contains(SpecContractSection.acceptance)) {
+    final raw = acceptance.split('\n');
+    final prose = proseOnly(acceptance).split('\n');
+    final seen = <int, int>{};
+    for (final entry in _authoredLines(raw, prose, 1, raw.length)) {
+      if (!_checkboxLine.hasMatch(entry.text)) continue;
+      final match = _acceptanceRecord.firstMatch(entry.text);
+      if (match == null) {
+        acceptanceRecordsClean = false;
+        report(
+          SpecContractRule.acceptanceRecord,
+          'acceptance',
+          entry.line,
+          'not the `$kAcceptanceRecordForm` record form — every criterion '
+              'carries an addressable id the validation plan maps onto',
+        );
+        continue;
+      }
+      final id = int.parse(match.group(1)!);
+      if (seen.containsKey(id)) {
+        acceptanceRecordsClean = false;
+        report(
+          SpecContractRule.acceptanceIdDuplicate,
+          'acceptance',
+          entry.line,
+          'AC-$id is already declared on line ${seen[id]} — ids are UNIQUE, '
+              'or the validation mapping is ambiguous',
+        );
+        continue;
+      }
+      seen[id] = entry.line;
+      criteria.add(
+        AcceptanceCriterion(
+          id: id,
+          text: match.group(2)!.trim(),
+          line: entry.line,
+        ),
+      );
+    }
+    final ids = criteria.map((criterion) => criterion.id).toList()..sort();
+    final expected = [for (var i = 1; i <= criteria.length; i++) i];
+    if (criteria.isNotEmpty && '$ids' != '$expected') {
+      acceptanceRecordsClean = false;
+      report(
+        SpecContractRule.acceptanceIdNotContiguous,
+        'acceptance',
+        criteria.first.line,
+        'the acceptance ids are $ids — they must be CONTIGUOUS from AC-1, '
+            'i.e. $expected',
+      );
+    }
+  }
+
+  final designRaw = design.split('\n');
+  final designProse = proseOnly(design);
+  final designProseLines = designProse.split('\n');
+
+  // ---- `## Implementation Plan`: ordinal openers + five labeled fields ----
+  final planRange = only.contains(SpecContractSection.plan)
+      ? _sectionLineRange(designProse, '## Implementation Plan')
+      : null;
+  if (planRange != null) {
+    final body = _authoredLines(
+      designRaw,
+      designProseLines,
+      planRange.from,
+      planRange.to,
+    );
+    final openers = [
+      for (var i = 0; i < body.length; i++)
+        if (_numberedStep.hasMatch(body[i].text)) i,
+    ];
+    for (var k = 0; k < openers.length; k++) {
+      final slice = body.sublist(
+        openers[k],
+        k + 1 < openers.length ? openers[k + 1] : body.length,
+      );
+      final opener = slice.first;
+      final match = _numberedStep.firstMatch(opener.text)!;
+      final ordinal = int.parse(
+        (match.group(1) ?? match.group(2) ?? match.group(3))!,
+      );
+      final title = opener.text
+          .substring(match.end)
+          .replaceFirst(RegExp(r'^[\s—–\-:.)*]+'), '')
+          .trim();
+      if (title.isEmpty) {
+        report(
+          SpecContractRule.stepTitle,
+          'design',
+          opener.line,
+          'step $ordinal carries no title — the opener is `$kStepRecordForm`',
+        );
+      }
+      final values = {
+        for (final label in kStepFieldLabels)
+          label: _stepFieldValue(slice, label),
+      };
+      final missing = [
+        for (final label in kStepFieldLabels)
+          if ((values[label] ?? '').isEmpty) label,
+      ];
+      if (missing.isNotEmpty) {
+        report(
+          SpecContractRule.stepField,
+          'design',
+          opener.line,
+          'step $ordinal is missing ${missing.map((l) => '`$l:`').join(', ')} '
+              '— every step carries '
+              '${kStepFieldLabels.map((l) => '`$l:`').join(', ')} on its own '
+              'line',
+        );
+      }
+      final paths = [
+        for (final span in _backtickedSpan.allMatches(values['Paths'] ?? ''))
+          if (repoRelativePathOf(span.group(1)!) case final path?) path,
+      ];
+      if ((values['Paths'] ?? '').isNotEmpty && paths.isEmpty) {
+        report(
+          SpecContractRule.stepPath,
+          'design',
+          opener.line,
+          'step $ordinal cites no repo-relative backticked path in `Paths:` '
+              '— no leading `/`, no `..`',
+        );
+      }
+      final commit = (values['Commit'] ?? '').replaceAll('`', '').trim();
+      final violations = commit.isEmpty
+          ? const <String>[]
+          : lintConventionalSubject(commit);
+      if (violations.isNotEmpty) {
+        report(
+          SpecContractRule.stepCommit,
+          'design',
+          opener.line,
+          'step $ordinal\'s `Commit:` is not a conventional-commit subject: '
+              '${violations.join('; ')}',
+        );
+      }
+      steps.add(
+        ImplementationStep(
+          ordinal: ordinal,
+          title: title,
+          paths: paths,
+          change: values['Change'] ?? '',
+          testCommand: values['Test'] ?? '',
+          expected: values['Expect'] ?? '',
+          commit: commit,
+          line: opener.line,
+        ),
+      );
+    }
+  }
+
+  // ---- `## Touches`: one repo-relative path + one disposition per item ----
+  final touchRange = only.contains(SpecContractSection.touches)
+      ? _sectionLineRange(designProse, '## Touches')
+      : null;
+  if (touchRange != null) {
+    for (final entry in _authoredLines(
+      designRaw,
+      designProseLines,
+      touchRange.from,
+      touchRange.to,
+    )) {
+      if (!_listItem.hasMatch(entry.text)) continue;
+      final paths = [
+        for (final span in _backtickedSpan.allMatches(entry.text))
+          if (repoRelativePathOf(span.group(1)!) case final path?) path,
+      ];
+      final disposition = _touchDisposition.firstMatch(entry.text);
+      if (paths.length != 1 || disposition == null) {
+        report(
+          SpecContractRule.touchRecord,
+          'design',
+          entry.line,
+          'not the `$kTouchRecordForm` record form — exactly ONE '
+              'repo-relative backticked path and one disposition word',
+        );
+        continue;
+      }
+      touches.add(
+        Touch(
+          path: paths.single,
+          symbols: entry.text.substring(disposition.end).trim(),
+          disposition: TouchDisposition.values.byName(
+            disposition.group(1)!.toLowerCase(),
+          ),
+          line: entry.line,
+        ),
+      );
+    }
+  }
+
+  // ---- `## ADR Alignment`: a resolvable citation, or a NAMED lookup --------
+  final decisionRange = only.contains(SpecContractSection.decisions)
+      ? _sectionLineRange(designProse, '## ADR Alignment')
+      : null;
+  if (decisionRange != null) {
+    final body = _authoredLines(
+      designRaw,
+      designProseLines,
+      decisionRange.from,
+      decisionRange.to,
+    );
+    final prose = body.map((entry) => entry.text).join('\n');
+    // A CRASHED lookup is read FIRST: a section reporting one may also quote
+    // whatever local register it could still read, and reading that as an
+    // empty union is the exact failure the roster-union decision forbids.
+    if (prose.contains(kFailedDecisionLookupPrefix)) {
+      narrative = DecisionLookupNarrative.failedLookup;
+    } else if (prose.contains(kNoGoverningDecisionPrefix)) {
+      narrative = DecisionLookupNarrative.emptyUnion;
+    }
+    final items = body
+        .where((entry) => _listItem.hasMatch(entry.text))
+        .toList();
+    if (narrative != DecisionLookupNarrative.emptyUnion) {
+      for (final entry in items) {
+        final tokens = [
+          for (final span in _backtickedSpan.allMatches(entry.text))
+            span.group(1)!,
+          ...entry.text.split(RegExp(r'[\s,;`]+')),
+        ];
+        final reference = tokens
+            .where(isResolvableDecisionReference)
+            .firstOrNull;
+        final disposition = _decisionDisposition.firstMatch(entry.text);
+        if (reference == null || disposition == null) {
+          report(
+            SpecContractRule.decisionRecord,
+            'design',
+            entry.line,
+            'not the `$kDecisionRecordForm` record form — a citation the '
+                'roster index can RESOLVE plus a disposition word',
+          );
+          continue;
+        }
+        citations.add(
+          DecisionCitation(
+            reference: reference.trim(),
+            disposition: DecisionDisposition.values.byName(
+              disposition.group(1)!.toLowerCase(),
+            ),
+            line: entry.line,
+          ),
+        );
+      }
+    }
+    if (narrative == DecisionLookupNarrative.cited && items.isEmpty) {
+      report(
+        SpecContractRule.decisionSectionSilent,
+        'design',
+        decisionRange.from - 1,
+        '`## ADR Alignment` cites nothing and declares neither outcome — say '
+            '"$kNoGoverningDecisionPrefix …" when the union is EMPTY, or '
+            '"$kFailedDecisionLookupPrefix …" and the verbatim output when the '
+            'lookup CRASHED; an unknown union is not an empty one',
+      );
+    }
+  }
+
+  // ---- `## Validation Plan`: `AC-<n> → command → expected`, 1:1 -----------
+  final validationRange = only.contains(SpecContractSection.validation)
+      ? _sectionLineRange(designProse, '## Validation Plan')
+      : null;
+  var validationRecordsClean = true;
+  if (validationRange != null) {
+    for (final entry in _authoredLines(
+      designRaw,
+      designProseLines,
+      validationRange.from,
+      validationRange.to,
+    )) {
+      if (!_checkboxLine.hasMatch(entry.text)) continue;
+      final match = _validationRecord.firstMatch(entry.text);
+      if (match == null) {
+        validationRecordsClean = false;
+        report(
+          SpecContractRule.validationRecord,
+          'design',
+          entry.line,
+          'not the `$kValidationRecordForm` record form — the id is what '
+              'carries the mapping',
+        );
+        continue;
+      }
+      validations.add(
+        ValidationMapping(
+          criterionId: int.parse(match.group(1)!),
+          command: match.group(2)!.trim(),
+          expected: match.group(3)!.trim(),
+          line: entry.line,
+        ),
+      );
+    }
+  }
+
+  // ---- the 1:1 mapping, only once BOTH ends parsed clean -------------------
+  final bothEndsParsed =
+      only.contains(SpecContractSection.acceptance) &&
+      validationRange != null &&
+      acceptanceRecordsClean &&
+      validationRecordsClean;
+  var mappingClean = true;
+  if (bothEndsParsed) {
+    final declared = {for (final criterion in criteria) criterion.id};
+    for (final mapping in validations) {
+      if (declared.contains(mapping.criterionId)) continue;
+      mappingClean = false;
+      report(
+        SpecContractRule.validationUnknownCriterion,
+        'design',
+        mapping.line,
+        'AC-${mapping.criterionId} is not declared by any acceptance '
+            'criterion — a validation item never names an unknown id',
+      );
+    }
+  }
+  if (bothEndsParsed && mappingClean) {
+    for (final criterion in criteria) {
+      final mapped = validations
+          .where((mapping) => mapping.criterionId == criterion.id)
+          .toList();
+      if (mapped.isEmpty) {
+        report(
+          SpecContractRule.validationCoverage,
+          'acceptance',
+          criterion.line,
+          'AC-${criterion.id} has no `## Validation Plan` item — every '
+              'criterion is validated EXACTLY once',
+        );
+      } else if (mapped.length > 1) {
+        report(
+          SpecContractRule.validationCoverage,
+          'design',
+          mapped[1].line,
+          'AC-${criterion.id} is validated ${mapped.length} times (first on '
+              'line ${mapped.first.line}) — every criterion is validated '
+              'EXACTLY once',
+        );
+      }
+    }
+  }
+
+  return (
+    contract: SpecContract(
+      criteria: criteria,
+      steps: steps,
+      touches: touches,
+      citations: citations,
+      decisionNarrative: narrative,
+      validations: validations,
+    ),
+    findings: findings,
+  );
 }

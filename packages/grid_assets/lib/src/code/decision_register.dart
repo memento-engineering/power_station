@@ -161,3 +161,48 @@ const String kDecisionWriteRule =
     'it, NEVER append to it. When `docs/decisions/` does not exist in the '
     'substation, CREATE it with the entry; a missing directory is not a '
     'reason to fall back to ADR-0000.';
+
+/// The prefix a spec's `## ADR Alignment` section is recognized by when the
+/// roster union was EMPTY for every queried surface.
+const String kNoGoverningDecisionPrefix =
+    'No recorded decision governs these surfaces';
+
+/// The prefix a spec's `## ADR Alignment` section is recognized by when the
+/// roster lookup FAILED.
+const String kFailedDecisionLookupPrefix = 'The roster lookup FAILED';
+
+/// The sentence a spec writes when the roster union is EMPTY for every queried
+/// surface — the FORM of [kDecisionLookupRule]'s "an empty union is a real
+/// result" clause.
+///
+/// Homed HERE, beside the rule whose clause it renders, rather than minted a
+/// second time on the spec path:
+/// `power_station#the-spec-decision-lane-queries-the-roster-union` (1) makes
+/// `kDecisionLookupRule` "the single string all of [the rendered lookup
+/// surfaces] embed", and a duplicate carrying the same load-bearing clause is
+/// exactly the drift that decision closed. `buildSpecifyBrief` renders this
+/// sentence and [parseSpecContract] recognizes it by
+/// [kNoGoverningDecisionPrefix], so the form the brief DICTATES is the one the
+/// gate ACCEPTS.
+final String kNoGoverningDecisionSentence =
+    '$kNoGoverningDecisionPrefix — verified via '
+    '`$kDefaultOverlayRunner decisions index --surface` over '
+    '`<the roster-qualified paths>`.';
+
+/// The sentence a spec writes when the roster lookup FAILED — the FORM of
+/// [kDecisionLookupRule]'s "a lookup that FAILS or exits non-zero is NOT 'no
+/// decision applies'" clause.
+///
+/// The companion of [kNoGoverningDecisionSentence], and the reason the two are
+/// separate FORMS rather than one:
+/// `power_station#the-spec-decision-lane-queries-the-roster-union` (3) —
+/// "An empty union is a real result; a CRASHED lookup is not. A lookup that
+/// fails or exits non-zero must be reported verbatim and never graded clean."
+/// A crashed lookup leaves the union UNKNOWN, so the section cannot be read as
+/// citing nothing; it must SAY the lookup crashed and show its output. Naming
+/// that form is what lets [parseSpecContract] distinguish the two rather than
+/// collapsing a crash into a vacuous empty section.
+final String kFailedDecisionLookupSentence =
+    '$kFailedDecisionLookupPrefix — reported verbatim, never read as an empty '
+    'union: `$kDefaultOverlayRunner decisions index --surface` over '
+    '`<the roster-qualified paths>` exited non-zero with `<the exact output>`.';
