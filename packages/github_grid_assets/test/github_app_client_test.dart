@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:github_grid_assets/github_grid_assets.dart';
 import 'package:test/test.dart';
@@ -72,7 +73,7 @@ void main() {
         'Authorization': 'Bearer first',
         'X-GitHub-Api-Version': '2022-11-28',
         'X-Custom': 'value',
-        'Content-Type': 'application/json',
+        'Content-Type': 'application/json; charset=utf-8',
       });
       expect(
         request.body,
@@ -109,4 +110,41 @@ void main() {
       expect(transport.requests, isEmpty);
     },
   );
+
+  test('IoGitHubHttpTransport writes a non-Latin-1 body as UTF-8', () async {
+    // Content-Type carries NO charset ON PURPOSE: that is the exact condition
+    // under which dart:io resolves an HttpClientRequest's sink to iso-8859-1,
+    // so this assertion FAILS on a `write`-based transport.
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    addTearDown(() => server.close(force: true));
+    const body = '{"body":"a plan — with an em dash"}';
+    late List<int> receivedBytes;
+    late String receivedContentType;
+    final serve = () async {
+      final request = await server.first;
+      receivedContentType = request.headers.value('content-type') ?? '';
+      receivedBytes = await request.fold<List<int>>(
+        <int>[],
+        (bytes, chunk) => bytes..addAll(chunk),
+      );
+      request.response
+        ..statusCode = HttpStatus.created
+        ..write('{"ok":true}');
+      await request.response.close();
+    }();
+
+    final response = await IoGitHubHttpTransport().send(
+      GitHubHttpRequest(
+        method: 'POST',
+        uri: Uri.parse('http://${server.address.address}:${server.port}/pulls'),
+        headers: const <String, String>{'Content-Type': 'application/json'},
+        body: body,
+      ),
+    );
+    await serve;
+
+    expect(receivedBytes, utf8.encode(body));
+    expect(receivedContentType, 'application/json');
+    expect(response.statusCode, HttpStatus.created);
+  });
 }
