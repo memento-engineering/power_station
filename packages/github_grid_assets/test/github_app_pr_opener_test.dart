@@ -190,16 +190,17 @@ void main() {
         'Contains invalid characters.',
       ),
     );
-    final result = await (await _opener(
-      transport,
-      owner: 'memento-engineering',
-      repository: 'power_station',
-    )).open(
-      workDir: '/unused',
-      branch: 'grid/pow-b14a',
-      baseBranch: 'main',
-      title: 'Bot PR',
-    );
+    final result =
+        await (await _opener(
+          transport,
+          owner: 'memento-engineering',
+          repository: 'power_station',
+        )).open(
+          workDir: '/unused',
+          branch: 'grid/pow-b14a',
+          baseBranch: 'main',
+          title: 'Bot PR',
+        );
 
     expect(result.isOpened, isFalse);
     final reason = _resultReason(result);
