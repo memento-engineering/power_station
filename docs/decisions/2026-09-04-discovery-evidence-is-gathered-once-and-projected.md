@@ -41,16 +41,21 @@ pack has only a shell, `buildCodeRegistry` passes the station invocation from
 falls back to a literal binary name. A blank runner records the decision source
 as unavailable and performs no shell call.
 
-That is a deliberate, narrow departure from A23(4), which binds `runner`
-in-store from `kDefaultOverlayRunner` (`'space'`) so an unconfigured station
-still installs a working vended skill. A23(4)'s default is untouched and still
-right where it is: it RENDERS prose into a materialized skill, where a wrong
-verb is legible to whoever reads it. This decision governs the other use — the
-pack EXECUTING that verb itself and grading the result as evidence — where the
-same default is a hazard rather than a convenience. On a station whose verb is
-`dart run lunar:lunar`, `space` exits 127, and under the gate below a crashed
-lookup would hold every bead naming a roster-qualified surface. So the executing
-path takes no default at all.
+That is a deliberate, narrow departure from
+`power_station#a23-bead-pow-kzx-the-station-overlay-delivery-lib-renders-an`,
+whose clause (4) rules: "**The wire binds the overlay's args IN-STORE** —
+`runner` from a new `kDefaultOverlayRunner` const (`'space'`, the first-party
+station's verb) […] with `buildCodeRegistry(overlayArgs:)` /
+`AgentCapability(overlayArgs:)` overriding both." That default is untouched and
+still right where it stands: `AgentCapability._materializeStationOverlay` binds
+it into the RENDERED skill, where an unbound hole would refuse the install and a
+wrong verb is legible prose to whoever reads it. This decision governs the OTHER
+use — the pack EXECUTING that verb itself and grading the result as evidence —
+where the same default is a hazard rather than a convenience. On a station whose
+verb is `dart run lunar:lunar`, `space` exits 127, and under the gate below a
+crashed lookup would hold every bead naming a roster-qualified surface. So the
+executing path takes no default at all: it reads `overlayArgs['runner']` raw,
+and an unset one is `unavailable`, never `'space'`.
 
 This updates A21(3) with a narrow distinction. An absent lens remains MISSING
 and eventually advances as A21 requires. Required evidence that is TRUNCATED or
