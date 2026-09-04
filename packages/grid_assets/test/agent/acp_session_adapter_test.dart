@@ -651,6 +651,8 @@ void main() {
         promptMode: PromptMode.none,
         target: InferenceTarget.providerManaged,
         sessionAdapter: kAcpSessionAdapterId,
+        roleAsset: '.agents/agents/$kSeatHole.md',
+        primeMode: SeatPrimeMode.prompt,
       ),
     );
     expect(
@@ -663,6 +665,8 @@ void main() {
         target: InferenceTarget.providerManaged,
         model: 'gpt-5.6-sol',
         sessionAdapter: kAcpSessionAdapterId,
+        roleAsset: '.agents/agents/$kSeatHole.md',
+        primeMode: SeatPrimeMode.prompt,
       ),
     );
     expect(
