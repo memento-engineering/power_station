@@ -1,3 +1,15 @@
+## 0.6.0-rc.12
+
+- Breaking: the vended asset surface is DECLARED in the package's own `pubspec.yaml` `grid:` block and CODEGEN'd into a typed Dart registrant (`GeneratedGridAssetRegistrant`); the hand-maintained `kVendedSkills`/`kOperatorSkills` mirrors are retired and `extension/mcp/config.yaml` is generated from the same block (pow-u6hj, #205). Migration: a downstream pack that listed its assets in the const mirrors declares them in its `grid:` block and runs the generator (`dart run tool/generate_grid_assets.dart`); nothing else changes for stations that only compose the vended packs.
+- Breaking (floor): `grid_engine ^0.3.0-rc.15` — critic verdict failures ride the typed `CapabilityFailure` seam (`CapabilityFailureKind.invalidResult`), `CriticCapability` declares its own `SupervisionPolicy` (retry its lane only, never grade F, gate on exhaustion), and the six `Failed.nonResult` call sites are gone (pow-dzc, #214).
+- Added: the station Dart registrant is generated from the resolved package closure — every dependency's `grid:` block is unioned once (pow-bafc, #212).
+- Added: discovery evidence is gathered ONCE into a bounded, round-stamped `DiscoveryDossier` with provenance and explicit truncation, and each inference lane receives a capability-specific projection; the decision-index gather runs through the composed decisions command or the station's runner, and an ABSENT tool is `unavailable`, never a gap (pow-ri9c, #208).
+- Added: `parseSpecContract` — the typed record grammar for specs (AC-n ids, labeled steps, exact `AC-n -> command -> expected` validation mappings) measured in SHADOW by `spec_contract_shadow.dart`; the five live presence checks remain the A/F gate (pow-5ufz, #207).
+- Added: `format-clean`, a deterministic code-review step before the critics that gates unformatted Dart naming the files (pow-jicn, #209).
+- Added: PR-description inference receives a bounded (16 KiB) deterministic change manifest — commit subjects, diffstat, change shape, bead identity, receipts — instead of the raw diff (pow-c7lb, #203).
+- Fixed: the decision-alignment brief renders the roster lookup from the STATION's runner (`overlayArgs['runner']`) and the rubric uses the `{{runner}}` hole — no more hardcoded `space decisions index` (pow-q7ty, #213).
+- Floors tightened to `dart_grid_assets ^0.1.2`.
+
 ## 0.6.0-rc.11
 
 - Fixed: `SpecifyCapability` is harness-neutral — it routes the spec seat

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.2
+
+- Added: `DartFormatService` — the deterministic `dart format --output=none --set-exit-if-changed` probe the code-review circuit's `format-clean` gate composes; names the unformatted files (pow-jicn, #209).
+
 ## 0.1.1
 
 - `release poll` detects published prerelease versions (#95).
