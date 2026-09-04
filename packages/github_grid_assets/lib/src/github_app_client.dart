@@ -43,7 +43,8 @@ class GitHubAppClient {
           'Authorization': 'Bearer $token',
           'X-GitHub-Api-Version': '2022-11-28',
           ...headers,
-          if (jsonBody != null) 'Content-Type': 'application/json',
+          if (jsonBody != null)
+            'Content-Type': 'application/json; charset=utf-8',
         },
         body: jsonBody == null ? null : jsonEncode(jsonBody),
       ),

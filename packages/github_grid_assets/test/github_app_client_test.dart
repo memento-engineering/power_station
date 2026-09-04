@@ -72,7 +72,7 @@ void main() {
         'Authorization': 'Bearer first',
         'X-GitHub-Api-Version': '2022-11-28',
         'X-Custom': 'value',
-        'Content-Type': 'application/json',
+        'Content-Type': 'application/json; charset=utf-8',
       });
       expect(
         request.body,
