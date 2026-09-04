@@ -23,6 +23,7 @@ final String _critics = kCommitteeRubrics.join(',');
 ({FakeTreeContext context, StepArgs args}) _routeCtx(
   Map<String, String> grades, {
   Map<String, String> rationales = const {},
+  Map<String, String> diagnosticHeads = const {},
 }) {
   const parent = 'tg-1/review';
   final effectiveGrades = {kDeclaredTestsRubric: 'A', ...grades};
@@ -40,6 +41,8 @@ final String _critics = kCommitteeRubrics.join(',');
                 'grade': entry.value,
                 if (rationales[entry.key] case final rationale?)
                   'rationale': rationale,
+                if (diagnosticHeads[entry.key] case final head?)
+                  'diagnostic_head': head,
               },
           },
         ),
@@ -56,8 +59,13 @@ final String _critics = kCommitteeRubrics.join(',');
 Future<RouteVerdict> _route(
   Map<String, String> grades, {
   Map<String, String> rationales = const {},
+  Map<String, String> diagnosticHeads = const {},
 }) {
-  final c = _routeCtx(grades, rationales: rationales);
+  final c = _routeCtx(
+    grades,
+    rationales: rationales,
+    diagnosticHeads: diagnosticHeads,
+  );
   return const CodeRouteCapability().route(c.context, c.args);
 }
 
@@ -135,6 +143,68 @@ void main() {
         (out as Escalate).reason,
         'code-validation failed: hard block: '
         'exit 127 — candidate missing commands: rg',
+      );
+    });
+
+    test('diagnostic head precedes the code-validation hard block', () async {
+      final out = await _route(
+        const {
+          'code-validation': 'F',
+          'spec-adherence': 'A',
+          'regression-risk': 'A',
+          'test-coverage': 'A',
+        },
+        rationales: const {
+          'code-validation':
+              'validation plan failed (exit 1); full log: '
+              '.grid/critique/code-validation.log: Some tests failed.',
+        },
+        diagnosticHeads: const {
+          'code-validation':
+              'Failed to load "test/a_test.dart":\n'
+              'lib/a.dart:4:2: Error: Missing member.\n'
+              '[E] analyzer failed',
+        },
+      );
+
+      expect(out, isA<Escalate>());
+      final reason = (out as Escalate).reason;
+      expect(
+        reason,
+        startsWith(
+          'Failed to load "test/a_test.dart":\n'
+          'lib/a.dart:4:2: Error: Missing member.\n'
+          '[E] analyzer failed\n'
+          'code-validation failed: hard block: ',
+        ),
+      );
+      expect(reason, contains('.grid/critique/code-validation.log'));
+      expect(reason, endsWith('Some tests failed.'));
+    });
+
+    test('deadline rationale remains explicit in the hard block', () async {
+      final out = await _route(
+        const {
+          'code-validation': 'F',
+          'spec-adherence': 'A',
+          'regression-risk': 'A',
+          'test-coverage': 'A',
+        },
+        rationales: const {
+          'code-validation':
+              'validation plan exceeded the 10-minute kGatingDeadline; '
+              'full log: .grid/critique/code-validation.log: partial output',
+        },
+      );
+
+      expect(out, isA<Escalate>());
+      expect(
+        (out as Escalate).reason,
+        allOf(
+          startsWith('code-validation failed: hard block: '),
+          contains('exceeded the 10-minute kGatingDeadline'),
+          contains('.grid/critique/code-validation.log'),
+        ),
       );
     });
 

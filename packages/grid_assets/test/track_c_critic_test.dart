@@ -297,6 +297,30 @@ void main() {
         GateOutcome.clear,
       );
     });
+
+    test(
+      'an armed deadline stamp clears the gating probe with no rc',
+      () async {
+        final dir = Directory.systemTemp.createTempSync(
+          'critic-gate-deadline-',
+        );
+        addTearDown(() => dir.deleteSync(recursive: true));
+        final c = _ctx(rubric: kGatingRubric, workspaceDir: dir.path);
+        const cap = CriticCapability();
+        expect(
+          await cap.probeCompletionArtifact(c.context, c.args),
+          GateOutcome.present,
+        );
+        File('${dir.path}/.grid/critique-incarnation/$kGatingRubric.deadline')
+          ..createSync(recursive: true)
+          ..writeAsStringSync('10m\n');
+        expect(
+          await cap.probeCompletionArtifact(c.context, c.args),
+          GateOutcome.clear,
+          reason: 'a watchdog kill leaves no rc — the stamp is the evidence',
+        );
+      },
+    );
   });
 
   group('Track C2 — code-validation (the GATING lane)', () {
@@ -312,13 +336,25 @@ void main() {
         expect(cfg.args[0], '-c');
         expect(
           cfg.args[1],
-          'mkdir -p .grid/critique; ( melos analyze && melos test ) ; '
-          r'echo $? > .grid/critique/code-validation.rc',
+          'mkdir -p .grid/critique .grid/critique-incarnation; '
+          ': > .grid/critique/code-validation.log; '
+          r'printf "10m\n" > '
+          '.grid/critique-incarnation/code-validation.deadline; '
+          '( melos analyze && melos test ) '
+          '> .grid/critique/code-validation.log 2>&1; '
+          r'echo $? > .grid/critique/code-validation.rc; '
+          'rm -f .grid/critique-incarnation/code-validation.deadline',
         );
         expect(cfg.args[1], isNot(contains('command -v')));
         // The rc is captured to the critique dir so result() can read the grade.
         expect(cfg.args[1], contains('.grid/critique/code-validation.rc'));
         expect(cfg.args[1], contains(r'echo $?'));
+        // The deadline stamp lives OUTSIDE the round-swept critique dir (A34's
+        // rule) — a mid-round sweep must not erase the timeout's evidence.
+        expect(
+          cfg.args[1],
+          isNot(contains('.grid/critique/code-validation.deadline')),
+        );
         expect(cfg.workDir, '/w/tg-1');
         expect(cfg.lifecycle, Lifecycle.oneTurn);
         // tg-uad follow-through: the gating lane is minutes-scale by
@@ -351,6 +387,23 @@ void main() {
         StepSignal.complete,
       );
       expect(cap.interpretEvent(const Died(name: name)), StepSignal.failed);
+      // ...except the WATCHDOG kill, which result() grades as a timeout off
+      // the armed deadline stamp.
+      expect(
+        cap.interpretEvent(
+          const Died(
+            name: name,
+            reason:
+                'watchdog: session exceeded its 10m deadline and was killed '
+                '(presumed hung)',
+          ),
+        ),
+        StepSignal.complete,
+      );
+      expect(
+        cap.interpretEvent(const Died(name: name, reason: 'process vanished')),
+        StepSignal.failed,
+      );
     });
 
     test('result() grades A on rc 0, F on a non-zero rc, F when the rc is '
@@ -380,12 +433,18 @@ void main() {
         'round': '0',
       });
 
-      // rc non-zero ⇒ F.
+      // rc non-zero ⇒ F, carrying the exit class, the log path, and the tail.
+      File(
+        '${dir.path}/.grid/critique/code-validation.log',
+      ).writeAsStringSync('failure tail');
       rcFile.writeAsStringSync('1\n');
       expect(await cap.result(c.context, c.args), {
         'grade': 'F',
         'transport': 'file',
         'round': '0',
+        'rationale':
+            'validation plan failed (exit 1); full log: '
+            '.grid/critique/code-validation.log: failure tail',
       });
     });
 
@@ -403,12 +462,157 @@ void main() {
       File('${dir.path}/.grid/critique/code-validation.rc')
         ..createSync(recursive: true)
         ..writeAsStringSync('127\n');
+      File(
+        '${dir.path}/.grid/critique/code-validation.log',
+      ).writeAsStringSync('rg: command not found');
 
       expect(await const CriticCapability().result(c.context, c.args), {
         'grade': 'F',
         'transport': 'file',
         'round': '0',
-        'rationale': 'exit 127 — candidate missing commands: rg',
+        'rationale':
+            'validation plan failed (exit 127); '
+            'exit 127 — candidate missing commands: rg; full log: '
+            '.grid/critique/code-validation.log: rg: command not found',
+      });
+    });
+
+    // The live finding this lane's log exists for (gate `tranquility-x45iwr`):
+    // the script discarded the plan's stdout/stderr, so a gated operator read
+    // `code-validation failed: hard block` and had to re-derive the cause by
+    // hand. The script is exercised for real here — a fake shell could not
+    // prove the redirection or the rc BYTES.
+    test('gating script preserves combined output and rc bytes', () async {
+      final dir = Directory.systemTemp.createTempSync('critic-gate-script-');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final withPlan = bead('tg-1').copyWith(
+        metadata: const {
+          'validation_plan':
+              'printf "stdout-line\\n"; printf "stderr-line\\n" >&2; exit 1',
+        },
+      );
+      final c = _ctx(
+        rubric: kGatingRubric,
+        workspaceDir: dir.path,
+        beadOverride: withPlan,
+      );
+      final cfg = const CriticCapability().spawn(c.context, c.args);
+
+      final process = await Process.run(
+        cfg.command,
+        cfg.args,
+        workingDirectory: cfg.workDir,
+      );
+
+      // The outer sh still exits clean, so the step completes and the route
+      // stays the single decision point.
+      expect(process.exitCode, 0);
+      expect(process.stdout, isEmpty);
+      expect(process.stderr, isEmpty);
+      expect(
+        File(
+          '${dir.path}/.grid/critique/code-validation.log',
+        ).readAsStringSync(),
+        'stdout-line\nstderr-line\n',
+      );
+      expect(
+        File(
+          '${dir.path}/.grid/critique/code-validation.rc',
+        ).readAsStringSync(),
+        '1\n',
+        reason: 'the rc bytes are read by more than this lane',
+      );
+      expect(
+        File(
+          '${dir.path}/.grid/critique-incarnation/code-validation.deadline',
+        ).existsSync(),
+        isFalse,
+        reason: 'a plan that FINISHED disarms the stamp',
+      );
+    });
+
+    test('non-zero code-validation reason leads bounded unique diagnostics '
+        'and retains the tail', () async {
+      final dir = Directory.systemTemp.createTempSync('critic-gate-log-');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      const failedToLoad = 'Failed to load "test/a_test.dart":';
+      const error = 'lib/a.dart:4:2: Error: Missing member.';
+      const bracketed = '[E] analyzer failed';
+      final output = [
+        failedToLoad,
+        error,
+        bracketed,
+        failedToLoad,
+        error,
+        bracketed,
+        for (var i = 0; i < 120; i++) 'loading test/case_$i.dart',
+        'Some tests failed.',
+      ].join('\n');
+      File('${dir.path}/.grid/critique/code-validation.log')
+        ..createSync(recursive: true)
+        ..writeAsStringSync(output);
+      File(
+        '${dir.path}/.grid/critique/code-validation.rc',
+      ).writeAsStringSync('1\n');
+      final c = _ctx(rubric: kGatingRubric, workspaceDir: dir.path);
+
+      final result = await const CriticCapability().result(c.context, c.args);
+
+      expect(result?['diagnostic_head'], '$failedToLoad\n$error\n$bracketed');
+      expect(
+        result?['diagnostic_head']?.length,
+        lessThanOrEqualTo(kValidationDiagnosticHeadChars),
+      );
+      expect(
+        result?['rationale'],
+        allOf(
+          startsWith('validation plan failed (exit 1); full log: '),
+          contains('.grid/critique/code-validation.log'),
+          endsWith('Some tests failed.'),
+        ),
+      );
+    });
+
+    test('watchdog deadline becomes a durable gating failure', () async {
+      final dir = Directory.systemTemp.createTempSync('critic-gate-timeout-');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      File('${dir.path}/.grid/critique/code-validation.log')
+        ..createSync(recursive: true)
+        ..writeAsStringSync('last output before the watchdog\n');
+      File('${dir.path}/.grid/critique-incarnation/code-validation.deadline')
+        ..createSync(recursive: true)
+        ..writeAsStringSync('10m\n');
+      final c = _ctx(rubric: kGatingRubric, workspaceDir: dir.path);
+      const cap = CriticCapability();
+      const node = 'tg-1/review/code-validation';
+
+      expect(
+        cap.interpretEvent(
+          const Died(
+            name: node,
+            reason:
+                'watchdog: session exceeded its 10m deadline and was killed '
+                '(presumed hung)',
+          ),
+        ),
+        StepSignal.complete,
+      );
+      expect(
+        cap.interpretEvent(const Died(name: node, reason: 'process vanished')),
+        StepSignal.failed,
+      );
+      expect(
+        await cap.probeCompletionArtifact(c.context, c.args),
+        GateOutcome.clear,
+      );
+      expect(await cap.result(c.context, c.args), {
+        'grade': 'F',
+        'transport': 'file',
+        'round': '0',
+        'rationale':
+            'validation plan exceeded the 10-minute kGatingDeadline; '
+            'full log: .grid/critique/code-validation.log: '
+            'last output before the watchdog',
       });
     });
   });

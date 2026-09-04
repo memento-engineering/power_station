@@ -301,45 +301,16 @@ bool _isUnderMaterializedHead(String path) {
 /// `failureReason` cap can never be the only copy of the cause.
 const String _revalidateLogRelativePath = '.grid/critique/revalidate.log';
 
-/// The character budget the leading CFE diagnostics may take out of
-/// [kRevalidateReasonTailChars]. Wide enough for the two-line
-/// `Failed to load` + `file:line:col: Error: <symbol>` pair the front end
-/// prints, narrow enough that the exit-class and log-path line still lands
-/// inside the engine's 500-char persisted prefix.
-const int _kRevalidateCfeHeadChars = 320;
-
-/// Every Dart front-end diagnostic line in [output], deduplicated in encounter
-/// order — the CFE repeats the SAME `Error:` once per test file it failed to
-/// load, so an undeduplicated lead would spend the whole budget on one cause.
-List<String> _cfeDiagnosticLines(String output) {
-  final diagnostics = <String>{};
-  for (final line in output.split('\n')) {
-    final diagnostic = line.trim();
-    if (diagnostic.contains('Error:') ||
-        diagnostic.contains('Failed to load')) {
-      diagnostics.add(diagnostic);
-    }
-  }
-  return diagnostics.toList(growable: false);
-}
-
-/// [diagnostics] joined and cut to [_kRevalidateCfeHeadChars], marked with a
-/// trailing … when cut — the unabridged lines stay in the log on disk.
-String _boundedCfeHead(List<String> diagnostics) {
-  final joined = diagnostics.join('\n');
-  if (joined.length <= _kRevalidateCfeHeadChars) return joined;
-  return '${joined.substring(0, _kRevalidateCfeHeadChars - 1)}…';
-}
-
 /// The REVALIDATE step — re-runs the bead's OWN Validation Plan (the SAME
 /// command the code-review committee's gating lane runs,
 /// `committee.dart`'s `kGatingRubric`) against the REBASED tree, closing the
 /// stale-base hole (a plan that passed pre-rebase may fail post-rebase).
 ///
 /// A non-zero plan writes its full combined output to
-/// `.grid/critique/revalidate.log`, then [Escalate]s. Dart CFE `Error:` and
-/// `Failed to load` lines lead that reason before the retained tail; all other
-/// tools retain the established tail-first reason byte-for-byte.
+/// `.grid/critique/revalidate.log`, then [Escalate]s. `Error:`, `Failed to
+/// load`, and line-leading `[E]` diagnostics lead that reason before the tail
+/// ([validationDiagnosticLines], shared with the gating lane); all other tools
+/// retain the established tail-first reason byte-for-byte.
 ///
 /// Offline-safe: mirrors [RebaseCapability] — with no delivery
 /// method bound, skips straight to [Advance] with NO shell exec at all (a plan
@@ -379,13 +350,14 @@ class RevalidateCapability extends RouteCapability {
     // committee lanes already own, so no reason cap can hide the cause. A
     // write failure is LOUD: an escalation must never claim provenance it
     // failed to persist.
-    File(p.join(critiqueDirPath(workspace.workspaceDir), 'revalidate.log'))
-      ..createSync(recursive: true)
-      ..writeAsStringSync(result.output);
+    writeCapturedOutputLog(
+      path: p.join(critiqueDirPath(workspace.workspaceDir), 'revalidate.log'),
+      output: result.output,
+    );
     // The exit code LEADS (the class of failure), then the PATH diagnostic,
     // then the log — advice-stripped and TAIL-cut, because the fatal line is
     // LAST and the old head truncation cut exactly it (bead `pow-gy41`).
-    final cfeDiagnostics = _cfeDiagnosticLines(cleanedOutput);
+    final cfeDiagnostics = validationDiagnosticLines(cleanedOutput);
     final prefix = 'revalidate failed (exit ${result.exitCode})$suffix';
     if (cfeDiagnostics.isEmpty) {
       return Escalate(
@@ -398,7 +370,7 @@ class RevalidateCapability extends RouteCapability {
     // the cause (file:line:column + the missing symbol) FIRST and 20 lines of
     // `loading …` noise last. Those recognized lines LEAD, then the ordinary
     // cause-last tail follows — both inside the one existing budget.
-    final head = _boundedCfeHead(cfeDiagnostics);
+    final head = boundedValidationDiagnosticHead(cfeDiagnostics);
     final tail = landReasonTail(
       cleanedOutput,
       kRevalidateReasonTailChars - head.length - 2,

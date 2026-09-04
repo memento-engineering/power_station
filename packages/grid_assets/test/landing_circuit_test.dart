@@ -724,11 +724,14 @@ void main() {
       const failedToLoad = 'Failed to load "test/a_test.dart":';
       const error =
           "lib/src/failure_policy.dart:30:28: Error: Member not found: 'noResult'.";
+      const bracketedError = '[E] analyzer failed to resolve the library';
       final output = [
         failedToLoad,
         error,
+        bracketedError,
         failedToLoad,
         error,
+        bracketedError,
         for (var i = 0; i < 120; i++) '00:01 +0 -1: loading test/case_$i.dart',
         'Some tests failed.',
         'Failing tests:',
@@ -755,9 +758,13 @@ void main() {
       const marker =
           'revalidate failed (exit 1); full log: '
           '.grid/critique/revalidate.log: ';
-      expect(reason, startsWith('$failedToLoad\n$error\n$marker'));
+      expect(
+        reason,
+        startsWith('$failedToLoad\n$error\n$bracketedError\n$marker'),
+      );
       expect(reason.split(failedToLoad), hasLength(2));
       expect(reason.split(error), hasLength(2));
+      expect(reason.split(bracketedError), hasLength(2));
       expect(
         reason.length - marker.length,
         lessThanOrEqualTo(kRevalidateReasonTailChars),
