@@ -2685,8 +2685,9 @@ List<ResolvedAnchor> resolveAnchorsOnDisk(
   List<String> anchors,
 ) => [for (final anchor in anchors) resolveAnchorOnDisk(workspaceDir, anchor)];
 
-/// One flat record per deduplicated surface for the two arms that never REACH
-/// a shell: no source composed, and no runner invocation configured.
+/// One flat record per deduplicated surface for every arm that never REACHES a
+/// shell: no source composed, no runner invocation configured, no grid home
+/// bound, and no substation to qualify the surface with.
 ///
 /// The `command` is deliberately EMPTY. Rendering
 /// [rosterDecisionIndexCommand]'s default here would stamp a runner verb this
@@ -2735,6 +2736,23 @@ List<DecisionSurfaceEvidence> _decisionSourceRecords(
 /// is made at all and every surface is recorded [EvidenceState.unavailable]:
 /// nobody looked, which is explicit context and NOT a deterministic gap.
 ///
+/// [gridHome] is the COMPOSING STATION's grid home, threaded from the same
+/// in-store binding (`buildCodeRegistry(overlayArgs:)['gridHome']`), and it is
+/// the shell's working directory. It is NOT the work worktree: the runner is
+/// the station's own JIT verb (`dart run lunar:lunar …`), which resolves only
+/// where that station's package is, so running it from a per-bead worktree dies
+/// `Could not find package`. Surfaces are roster-qualified, so the cwd carries
+/// no path meaning of its own. Blank or absent ⇒ the same honest absence as a
+/// blank runner (`no composing grid home is bound`) — the worktree is NEVER
+/// substituted as a fallback.
+///
+/// A surface still prefixed [kUnknownSubstationPrefix] is likewise never
+/// shelled. `<repo>` is the PROMPT placeholder an agent substitutes with its
+/// own repository name; handed to a shell it parses as an input redirect
+/// (`sh: repo: No such file`), so every lookup crashed and the lens read a
+/// systematic failure. Nobody can look without a substation, so that is what
+/// gets recorded.
+///
 /// **This deliberately departs from A23(4)** (`decisions#a23-bead-pow-kzx-the-
 /// station-overlay-delivery-lib-renders-an`), which binds the overlay's
 /// `runner` arg in-store from `kDefaultOverlayRunner` (`'space'`) with
@@ -2751,27 +2769,55 @@ List<DecisionSurfaceEvidence> _decisionSourceRecords(
 DecisionIndexSource commandDecisionIndexSource(
   ShellRunner runner, {
   String? runnerInvocation,
+  String? gridHome,
 }) {
   final stationRunner = runnerInvocation?.trim() ?? '';
+  final stationGridHome = gridHome?.trim() ?? '';
   return (workspaceDir, surfaces) async {
-    if (stationRunner.isEmpty) {
-      return _decisionSourceRecords(
-        surfaces,
-        state: EvidenceState.unavailable,
-        error: 'no composing station runner is configured',
-      );
-    }
     final out = <DecisionSurfaceEvidence>[];
     final seen = <String>{};
     for (final surface in surfaces) {
       if (!seen.add(surface)) continue;
+      // The three arms that never REACH a shell, in precedence order. Each
+      // records the same unavailable shape an absent source does — unwired
+      // evidence the lens can read, never a crashed probe it must grade.
+      if (surface.startsWith('$kUnknownSubstationPrefix/')) {
+        out.addAll(
+          _decisionSourceRecords(
+            [surface],
+            state: EvidenceState.unavailable,
+            error: 'substation unknown — no roster-qualified surface',
+          ),
+        );
+        continue;
+      }
+      if (stationRunner.isEmpty) {
+        out.addAll(
+          _decisionSourceRecords(
+            [surface],
+            state: EvidenceState.unavailable,
+            error: 'no composing station runner is configured',
+          ),
+        );
+        continue;
+      }
+      if (stationGridHome.isEmpty) {
+        out.addAll(
+          _decisionSourceRecords(
+            [surface],
+            state: EvidenceState.unavailable,
+            error: 'no composing grid home is bound',
+          ),
+        );
+        continue;
+      }
       final command = rosterDecisionIndexCommand(
         surface: surface,
         runner: stationRunner,
       );
       try {
         final result = await runner.run(
-          workingDirectory: workspaceDir,
+          workingDirectory: stationGridHome,
           command: command,
         );
         if (!result.ok) {
@@ -3424,6 +3470,12 @@ class AnchorsCapability extends ServiceCapability {
     // the captured values + the cancel token are touched (ADR-0008 D3).
     final bead = context.getInheritedSeedOfExactType<Bead>();
     final workspace = context.getInheritedSeedOfExactType<Workspace>();
+    // The SESSION's own substation — the value the engine stamps as a session
+    // bead's `metadata.rig`, mounted here as an ambient config VALUE. A WORK
+    // bead carries no `rig` (it is a session-bead field), so deriving the
+    // roster prefix from the work bead alone left EVERY surface prefixed
+    // `<repo>`.
+    final substation = context.getInheritedSeedOfExactType<SubstationConfig>();
     if (bead == null) {
       return const Failed(
         'discovery/anchors: no ambient work bead to gather for (the '
@@ -3461,10 +3513,18 @@ class AnchorsCapability extends ServiceCapability {
     // cancel token is checked between them.
     final round = verdictRound(args);
     final extracted = beadAnchors(bead);
+    // The bead's own `metadata['rig']` stays an OVERRIDE (the operator bridge
+    // that stamps it in flight keeps working); the session config is the
+    // standing answer; neither ⇒ '' ⇒ [kUnknownSubstationPrefix], which the
+    // decision source records unavailable rather than shelling.
     final rig = bead.metadata['rig'];
     final surfaces = rosterQualifiedPaths(
       paths: extracted.paths,
-      substation: rig is String ? rig : '',
+      substation: [if (rig is String) rig, substation?.substationId ?? '']
+          .firstWhere(
+            (candidate) => candidate.trim().isNotEmpty,
+            orElse: () => '',
+          ),
     );
     final resolved = live
         ? (_resolver ?? resolveAnchorsOnDisk)(workspaceDir, extracted.paths)
