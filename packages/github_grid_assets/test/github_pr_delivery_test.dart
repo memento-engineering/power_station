@@ -459,6 +459,11 @@ class _ResidueGitRunner implements GitRunner {
     required String workingDirectory,
     required List<String> args,
   }) async {
+    final root = gitRootProbeAnswer(
+      workingDirectory: workingDirectory,
+      args: args,
+    );
+    if (root != null) return root;
     calls.add(List.unmodifiable(args));
     if (args.isNotEmpty && args.first == 'status') {
       return const GitRunResult(
@@ -481,9 +486,19 @@ class _ProbeErrorGitRunner implements GitRunner {
   Future<GitRunResult> run({
     required String workingDirectory,
     required List<String> args,
-  }) async => args.isNotEmpty && args.first == 'status'
-      ? const GitRunResult(exitCode: 128, output: 'fatal: not a git repository')
-      : const GitRunResult(exitCode: 0, output: '');
+  }) async {
+    final root = gitRootProbeAnswer(
+      workingDirectory: workingDirectory,
+      args: args,
+    );
+    if (root != null) return root;
+    return args.isNotEmpty && args.first == 'status'
+        ? const GitRunResult(
+            exitCode: 128,
+            output: 'fatal: not a git repository',
+          )
+        : const GitRunResult(exitCode: 0, output: '');
+  }
 }
 
 /// A [GitRunner] whose `push` fails (exit 1) with a realistic force-with-lease
@@ -496,6 +511,11 @@ class _RejectedPushRunner implements GitRunner {
     required String workingDirectory,
     required List<String> args,
   }) async {
+    final root = gitRootProbeAnswer(
+      workingDirectory: workingDirectory,
+      args: args,
+    );
+    if (root != null) return root;
     if (args.isNotEmpty && args.first == 'push') {
       return const GitRunResult(
         exitCode: 1,

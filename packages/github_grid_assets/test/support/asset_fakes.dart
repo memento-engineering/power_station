@@ -300,6 +300,30 @@ class RecordingShellRunner implements ShellRunner {
   }
 }
 
+/// The work-tree-root guard's probe answer for [workingDirectory], or null when
+/// [args] is not that probe.
+///
+/// [GitOps] probes `rev-parse --show-toplevel --show-prefix` before every
+/// guarded op and REFUSES the op unless the answer names a work-tree ROOT. A
+/// fake that leaves the probe unanswered therefore fails every guarded call
+/// before the behaviour under test runs — and, worse, can make a refusal test
+/// pass for the GUARD's reason instead of its own. Answering it faithfully (as
+/// `grid_engine`'s `RecordingGitRunner` does) keeps the fakes reading the same
+/// as live git: line 0 is the toplevel, line 1 the EMPTY prefix that means
+/// "this cwd IS the root".
+///
+/// Answer it FIRST in a fake's `run`, and do not record it, so the recorded
+/// argv stays the argv under test.
+GitRunResult? gitRootProbeAnswer({
+  required String workingDirectory,
+  required List<String> args,
+}) =>
+    args.length >= 2 &&
+        args.first == 'rev-parse' &&
+        args.contains('--show-toplevel')
+    ? GitRunResult(exitCode: 0, output: '$workingDirectory\n\n')
+    : null;
+
 /// A [GitRunner] with canned per-subcommand answers (Fakes, not mocks) — the
 /// describe pass's branch-delta reads (bead `pow-8dx`): `git log` returns [log],
 /// `git diff --stat` a fixed one-file stat, and `git diff` returns [diff] with

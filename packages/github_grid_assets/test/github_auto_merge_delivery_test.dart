@@ -6,6 +6,8 @@ import 'package:grid_engine/grid_engine.dart';
 import 'package:grid_runtime/grid_runtime.dart';
 import 'package:test/test.dart';
 
+import 'support/asset_fakes.dart';
+
 class _Git implements GitRunner {
   final calls = <List<String>>[];
   @override
@@ -13,6 +15,11 @@ class _Git implements GitRunner {
     required String workingDirectory,
     required List<String> args,
   }) async {
+    final root = gitRootProbeAnswer(
+      workingDirectory: workingDirectory,
+      args: args,
+    );
+    if (root != null) return root;
     calls.add(args);
     return const GitRunResult(exitCode: 0, output: '');
   }
