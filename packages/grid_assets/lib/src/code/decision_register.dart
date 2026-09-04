@@ -72,14 +72,34 @@ String _touchesSection(String design) {
 List<String> rosterQualifiedSurfaces({
   required String design,
   required String substation,
+}) => rosterQualifiedPaths(
+  paths: [
+    for (final match in _backticked.allMatches(_touchesSection(design)))
+      match.group(1)!,
+  ],
+  substation: substation,
+);
+
+/// The ONE path qualifier — `<substation>/<path>` for every token in [paths]
+/// that could be a repository-relative path, deduplicated in first-appearance
+/// order, with [kUnknownSubstationPrefix] as the fallback prefix.
+///
+/// A `lib/src/x.dart:Symbol` token contributes its PATH half; a token that is
+/// not a path (a bare symbol, a shell line, prose) is skipped. Shared by the
+/// deterministic PRE-specify gather ([AnchorsCapability], which qualifies the
+/// bead's code anchors) and the POST-specify [rosterQualifiedSurfaces] (which
+/// qualifies the spec's `## Touches`), so the two lookups cannot drift.
+List<String> rosterQualifiedPaths({
+  required Iterable<String> paths,
+  required String substation,
 }) {
   final prefix = substation.trim().isEmpty
       ? kUnknownSubstationPrefix
       : substation.trim();
   final seen = <String>{};
   final surfaces = <String>[];
-  for (final match in _backticked.allMatches(_touchesSection(design))) {
-    final token = match.group(1)!.split(':').first.trim();
+  for (final raw in paths) {
+    final token = raw.split(':').first.trim();
     if (!_pathToken.hasMatch(token)) continue;
     if (!token.contains('/') && !token.contains('.')) continue;
     final surface = '$prefix/$token';

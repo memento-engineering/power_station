@@ -115,6 +115,83 @@ class _PriorArtSemanticBackend implements SemanticSearchBackend {
   ];
 }
 
+/// A recording batch [AnchorResolver]: one call per round, over every anchor.
+class _RecordingAnchorResolver {
+  final List<List<String>> calls = [];
+
+  List<ResolvedAnchor> call(String workspaceDir, List<String> anchors) {
+    calls.add(List.unmodifiable(anchors));
+    return [
+      for (final anchor in anchors)
+        ResolvedAnchor(
+          anchor: anchor,
+          resolved: true,
+          contents: boundDiscoveryEvidence(
+            kind: 'code-anchor',
+            subject: anchor,
+            source: '$workspaceDir/$anchor',
+            fullText: '// $anchor',
+          ),
+        ),
+    ];
+  }
+}
+
+/// A recording batch [PriorArtSource]: one call per round, over every query.
+class _RecordingPriorArt {
+  final List<List<String>> calls = [];
+
+  Future<List<PriorArtQueryEvidence>> call(List<String> queries) async {
+    calls.add(List.unmodifiable(queries));
+    return [
+      for (final query in queries)
+        PriorArtQueryEvidence(
+          id: 'prior-art-query:$query@sha256:fake',
+          query: query,
+          state: EvidenceState.complete,
+        ),
+    ];
+  }
+}
+
+/// A recording batch [DecisionIndexSource]: one call per round, over every
+/// roster-qualified surface.
+class _RecordingDecisionIndex {
+  final List<List<String>> calls = [];
+
+  Future<List<DecisionSurfaceEvidence>> call(
+    String workspaceDir,
+    List<String> surfaces,
+  ) async {
+    calls.add(List.unmodifiable(surfaces));
+    return [
+      for (final surface in surfaces)
+        DecisionSurfaceEvidence(
+          id: 'decision-surface:$surface@sha256:fake',
+          surface: surface,
+          command: 'index',
+          state: EvidenceState.complete,
+        ),
+    ];
+  }
+}
+
+/// A recording batch [HistorySource] over the real [GitRunner] argv shape.
+class _RecordingHistory {
+  final List<List<String>> argv = [];
+
+  Future<HistoryEvidence> call(String workspaceDir, List<String> paths) async {
+    argv.add([
+      'log',
+      '--max-count=${kMaxHistoryCommits + 1}',
+      '--format=%H%x09%aI%x09%s',
+      '--',
+      ...paths,
+    ]);
+    return completeHistory(paths: paths);
+  }
+}
+
 GraphSnapshot _graph({required List<Bead> beads, required Set<String> ready}) =>
     GraphSnapshot.fromParts(
       beads: beads,
@@ -196,12 +273,30 @@ class _TempWorkspace implements SourceControl {
   }) async {}
 }
 
+/// A prior-art seam that ran and found nothing — a COMPLETE empty, which is a
+/// real answer (an UNWIRED seam is not).
+Future<List<PriorArtQueryEvidence>> _completePriorArt(
+  List<String> queries,
+) async => [
+  for (final query in queries)
+    PriorArtQueryEvidence(
+      id: 'prior-art-query:$query@sha256:fake',
+      query: query,
+      state: EvidenceState.complete,
+    ),
+];
+
 MountedStation _buildStation(
   Fakes f,
   FakeSnapshotSource work,
   FakeSnapshotSource state,
   String workspaceDir, {
   PriorArtSource? priorArt,
+  DecisionIndexSource? decisions,
+  HistorySource? history,
+  AnchorResolver? anchorResolver,
+  ShellRunner? shellRunner,
+  Map<String, String> overlayArgs = const {},
 }) {
   final bridge = StationJoinBridge(work: work, state: state);
   return MountedStation(
@@ -211,12 +306,16 @@ MountedStation _buildStation(
     registry: buildCodeRegistry(
       rubrics: (id) => '($id rubric bands)',
       gitRunner: f.git,
-      shellRunner: RecordingShellRunner(),
+      shellRunner: shellRunner ?? RecordingShellRunner(),
+      overlayArgs: overlayArgs,
       // A no-op clearer: this suite PLANTS the lens reports the fake lens
       // processes would have written, so the round-freshness wipe must not race
       // them. The wipe's own contract is fenced in `discovery_test.dart`.
       critiqueDirClearer: (_) {},
-      priorArt: priorArt,
+      priorArt: priorArt ?? _completePriorArt,
+      discoveryDecisions: decisions,
+      discoveryHistory: history,
+      anchorResolver: anchorResolver,
     ),
     substations: [
       SubstationScope(
@@ -323,17 +422,29 @@ void main() {
         dirExists: (_) => true,
         semanticBackendMount: (_) async => _PriorArtSemanticBackend(),
       );
-      final priorArt = await stationPriorArt(
+      final coverage = await stationPriorArt(
         _PriorArtDelegate.new,
         gridHome: '/grid/home',
         service: service,
       )(['conceptual wording', 'exact-id']);
 
+      // ONE coverage record per requested query, in input order — a partial
+      // sweep can never flatten into a clean-looking hit list.
+      expect(coverage.map((query) => query.query), [
+        'conceptual wording',
+        'exact-id',
+      ]);
+      for (final query in coverage) {
+        expect(query.state, EvidenceState.complete);
+        expect(query.id, isNotEmpty);
+      }
+      final priorArt = [for (final query in coverage) ...query.hits];
       expect(priorArt.map((hit) => hit.query), [
         'conceptual wording',
         'exact-id',
       ]);
       expect(priorArt.map((hit) => hit.beadId), ['exact-topic', 'exact-id']);
+      expect(priorArt.every((hit) => hit.evidenceId.isNotEmpty), isTrue);
       expect(priorArt.last.field, 'id');
       expect(
         priorArt.every((hit) => !hit.snippet.contains('semantic-only')),
@@ -362,11 +473,32 @@ void main() {
   Future<Fakes> driveToRoute(
     Map<String, LensReport> reports, {
     PriorArtSource? priorArt,
+    DecisionIndexSource? decisions,
+    HistorySource? history,
+    AnchorResolver? anchorResolver,
+    Bead? workBeadOverride,
+    ShellRunner? shellRunner,
+    Map<String, String> overlayArgs = const {},
   }) async {
     final f = buildFakes(createdId: _sid);
     final work = FakeSnapshotSource(_graph(beads: const [], ready: const {}));
     final state = FakeSnapshotSource(_graph(beads: const [], ready: const {}));
-    final station = _buildStation(f, work, state, tmp.path, priorArt: priorArt);
+    final station = _buildStation(
+      f,
+      work,
+      state,
+      tmp.path,
+      // The route REFUSES to advance over evidence it knows is incomplete, so
+      // a lane's own proof needs a COMPLETE gather: an unwired prior-art seam
+      // is a recorded UNAVAILABLE, which is exactly what this circuit now
+      // treats as a known non-answer.
+      priorArt: priorArt ?? _completePriorArt,
+      decisions: decisions,
+      history: history,
+      anchorResolver: anchorResolver,
+      shellRunner: shellRunner,
+      overlayArgs: overlayArgs,
+    );
     addTearDown(station.dispose);
     addTearDown(f.provider.close);
     addTearDown(work.close);
@@ -377,7 +509,9 @@ void main() {
 
     // The ladder is fast-forwarded (its own choreography is
     // `readiness_acceptance_test.dart`) → the bead is released into DISCOVERY.
-    work.push(_graph(beads: [workBead('tg-1')], ready: {'tg-1'}));
+    work.push(
+      _graph(beads: [workBeadOverride ?? workBead('tg-1')], ready: {'tg-1'}),
+    );
     await _settle(f);
     state.push(_state(_ladderDone()));
     await _settle(f);
@@ -423,6 +557,138 @@ void main() {
     await _settle(f);
     return f;
   }
+
+  group('the discovery circuit — one gather, three projections', () {
+    test('deterministic evidence sources run once per round', () async {
+      final resolver = _RecordingAnchorResolver();
+      final priorArt = _RecordingPriorArt();
+      final decisions = _RecordingDecisionIndex();
+      final history = _RecordingHistory();
+      // A bead naming TWO code paths, so every seam has real input.
+      final work = workBead('tg-1').copyWith(
+        description:
+            'Extend `lib/src/code/discovery.dart` and '
+            '`lib/src/code/committee.dart`; call `AnchorsCapability`.',
+        metadata: const {'rig': 'power_station'},
+      );
+
+      final f = await driveToRoute(
+        {for (final lens in kDiscoveryLenses) lens: LensReport(lens: lens)},
+        workBeadOverride: work,
+        anchorResolver: resolver.call,
+        priorArt: priorArt.call,
+        decisions: decisions.call,
+        history: history.call,
+      );
+
+      // ONE batched call per seam, for the WHOLE round — and spawning all
+      // three lenses added none.
+      expect(resolver.calls, hasLength(1));
+      expect(resolver.calls.single, [
+        'lib/src/code/discovery.dart',
+        'lib/src/code/committee.dart',
+      ]);
+      expect(priorArt.calls, hasLength(1));
+      expect(priorArt.calls.single, ['AnchorsCapability']);
+      expect(decisions.calls, hasLength(1));
+      expect(decisions.calls.single, [
+        'power_station/lib/src/code/discovery.dart',
+        'power_station/lib/src/code/committee.dart',
+      ]);
+      expect(history.argv, hasLength(1));
+      expect(history.argv.single, [
+        'log',
+        '--max-count=${kMaxHistoryCommits + 1}',
+        '--format=%H%x09%aI%x09%s',
+        '--',
+        'lib/src/code/discovery.dart',
+        'lib/src/code/committee.dart',
+      ]);
+      expect(_spawned(f).toSet(), kDiscoveryLensNodes.map(_step).toSet());
+
+      // The ARTIFACT the three lenses read: round-stamped, bead-stamped, with
+      // every state and every provenance recorded.
+      final gather = readDiscoveryAnchors(tmp.path)!;
+      expect(gather.round, 0);
+      expect(gather.workBeadId, 'tg-1');
+      expect(gather.anchors.map((a) => a.anchor), [
+        'lib/src/code/discovery.dart',
+        'lib/src/code/committee.dart',
+      ]);
+      for (final anchor in gather.anchors) {
+        expect(anchor.contents.state, EvidenceState.complete);
+        expect(anchor.contents.digest, isNotEmpty);
+        expect(anchor.contents.source, contains(anchor.anchor));
+      }
+      expect(gather.decisionLookups, hasLength(2));
+      for (final lookup in gather.decisionLookups) {
+        expect(lookup.state, EvidenceState.complete);
+      }
+      expect(gather.history!.state, EvidenceState.complete);
+      expect(gather.priorArtWired, isTrue);
+      expect(gather.evidenceIds, isNotEmpty);
+
+      // And each lens was handed ONLY its own slice of it.
+      final spawns = {
+        for (final spawn in f.provider.started)
+          spawn.name: spawn.config.args.join('\n'),
+      };
+      expect(
+        spawns[_step('spec_review/discovery/$kCodeLens')],
+        contains('lib/src/code/discovery.dart'),
+      );
+      expect(
+        spawns[_step('spec_review/discovery/$kCodeLens')],
+        isNot(contains('power_station/lib/src/code/discovery.dart')),
+      );
+      for (final entry in spawns.entries) {
+        expect(entry.value, isNot(contains('space decisions index')));
+        expect(entry.value, isNot(contains('git log')));
+      }
+    });
+
+    test('decision-index composition uses only the station runner', () async {
+      final work = workBead('tg-1').copyWith(
+        description: 'Inspect `lib/src/code/discovery.dart`.',
+        metadata: const {'rig': 'power_station'},
+      );
+
+      // An UNCONFIGURED station: no `overlayArgs['runner']`. The gather makes
+      // NO shell call at all — this pack never guesses a decisions binary —
+      // and records honest absence. A23(4)'s in-store `kDefaultOverlayRunner`
+      // binds the RENDERED skill arg, deliberately not this executing path.
+      final absent = RecordingShellRunner();
+      await driveToRoute(
+        {for (final lens in kDiscoveryLenses) lens: LensReport(lens: lens)},
+        workBeadOverride: work,
+        shellRunner: absent,
+      );
+      expect(absent.calls, isEmpty);
+      expect(
+        readDiscoveryAnchors(tmp.path)!.decisionLookups.single.state,
+        EvidenceState.unavailable,
+      );
+
+      // A station that DID compose one: its own invocation is what runs,
+      // verbatim, and a non-zero exit is a loud FAILED — never an empty union.
+      final failing = RecordingShellRunner()..exitCode = 17;
+      await driveToRoute(
+        {for (final lens in kDiscoveryLenses) lens: LensReport(lens: lens)},
+        workBeadOverride: work,
+        shellRunner: failing,
+        overlayArgs: const {'runner': 'dart run lunar:lunar'},
+      );
+      expect(
+        failing.calls.single.command,
+        'dart run lunar:lunar decisions index --surface '
+        'power_station/lib/src/code/discovery.dart',
+      );
+      expect(
+        readDiscoveryAnchors(tmp.path)!.decisionLookups.single.state,
+        EvidenceState.failed,
+      );
+    });
+  });
 
   group('the discovery circuit — an OFFENDER spawns NO architect', () {
     test(
@@ -499,33 +765,44 @@ void main() {
           field: 'notes',
           snippet: 'Approved with Nico',
           query: 'work bead',
+          evidenceId: 'prior-art-hit:tg-b@sha256:fake',
         );
-        final f = await driveToRoute({
-          for (final lens in kDiscoveryLenses)
-            lens: LensReport(
-              lens: lens,
-              context: lens == kPriorArtLens
-                  ? const [
-                      ContextNote(
-                        note: 'the sibling has human approval',
-                        beadCitation: BeadFieldCitation(
-                          beadId: 'tg-b',
-                          field: BeadCitationField.notes,
-                          excerpt: 'Approved with Nico',
+        final f = await driveToRoute(
+          {
+            for (final lens in kDiscoveryLenses)
+              lens: LensReport(
+                lens: lens,
+                context: lens == kPriorArtLens
+                    ? const [
+                        ContextNote(
+                          note: 'the sibling has human approval',
+                          beadCitation: BeadFieldCitation(
+                            beadId: 'tg-b',
+                            field: BeadCitationField.notes,
+                            excerpt: 'Approved with Nico',
+                          ),
                         ),
-                      ),
-                      ContextNote(
-                        note: 'the work bead has human approval',
-                        beadCitation: BeadFieldCitation(
-                          beadId: 'tg-1',
-                          field: BeadCitationField.notes,
-                          excerpt: 'Approved with Nico',
+                        ContextNote(
+                          note: 'the work bead has human approval',
+                          beadCitation: BeadFieldCitation(
+                            beadId: 'tg-1',
+                            field: BeadCitationField.notes,
+                            excerpt: 'Approved with Nico',
+                          ),
                         ),
-                      ),
-                    ]
-                  : const [],
+                      ]
+                    : const [],
+              ),
+          },
+          priorArt: (_) async => const [
+            PriorArtQueryEvidence(
+              id: 'prior-art-query:work bead@sha256:fake',
+              query: 'work bead',
+              state: EvidenceState.complete,
+              hits: [sibling],
             ),
-        }, priorArt: (_) async => const [sibling]);
+          ],
+        );
 
         expect(_wroteCursor(f, kDiscoveryRouteNode, 'complete'), isTrue);
         final dossier = readDiscoveryDossier(tmp.path)!;

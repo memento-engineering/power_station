@@ -1156,6 +1156,17 @@ class GitSourceControl implements SourceControl {
 /// ref once while the code registry is composed, then threads that stable value
 /// into [AgentCapability], so per-bead agent spawn never shells out for it.
 ///
+/// [discoveryDecisions]/[discoveryHistory] override the deterministic gather's
+/// roster-mode decision-index and git-history seams (bead-level Fakes; absent ⇒
+/// [commandDecisionIndexSource]/[gitHistorySource] over this registry's own
+/// [shellRunner]/[gitRunner]).
+///
+/// An injected [discoveryDecisions] is AUTHORITATIVE — it is the seam an
+/// in-process `decisions index` composition rides. The shell fallback executes
+/// nothing but `overlayArgs['runner']`, so this pack never names a decisions
+/// binary: a missing or blank runner records every surface `unavailable`
+/// WITHOUT touching [SystemShellRunner].
+///
 /// [specifyBdRunnerFor] controls only the specify step's post-exit work-bead
 /// read-back. It defaults to [ProcessBdRunner] and lets offline suites inject
 /// Fakes instead of spawning `bd`.
@@ -1170,6 +1181,8 @@ DefaultCapabilityRegistry buildCodeRegistry({
   InferenceRunner? inference,
   AnchorResolver? anchorResolver,
   PriorArtSource? priorArt,
+  DecisionIndexSource? discoveryDecisions,
+  HistorySource? discoveryHistory,
   BdRunner Function(String workspaceRoot)? specifyBdRunnerFor,
   String? overlaySourceRef,
   Map<String, String> overlayArgs = const {},
@@ -1204,6 +1217,28 @@ DefaultCapabilityRegistry buildCodeRegistry({
         rubrics: rubricSource,
         resolver: anchorResolver,
         priorArt: priorArt,
+        // The gather runs the roster-mode decision index and the surfaces' git
+        // history ONCE per round, through the registry's OWN shell/git seams —
+        // no second runner abstraction, and the same recording fakes ride
+        // offline.
+        //
+        // The decision index is the station's OWN verb, so this pack never
+        // names an executable: an injected [DecisionIndexSource] (the
+        // in-process composition seam) wins, and the shell fallback runs ONLY
+        // the invocation the station composed into `overlayArgs['runner']`.
+        // Absent ⇒ no shell call and an honest `unavailable` record. A23(4)'s
+        // in-store `kDefaultOverlayRunner` still binds the RENDERED skill arg
+        // above; it deliberately does not bind this EXECUTING path, where a
+        // guessed verb is exit 127 rather than legible prose.
+        decisions:
+            discoveryDecisions ??
+            commandDecisionIndexSource(
+              shellRunner ?? const SystemShellRunner(),
+              runnerInvocation: overlayArgs['runner'],
+            ),
+        history:
+            discoveryHistory ??
+            gitHistorySource(gitRunner ?? SystemGitRunner()),
         clearer: critiqueDirClearer,
       ),
       // ONE capability, three lens lanes (`params['lens']`) — the id is the

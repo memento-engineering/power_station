@@ -112,16 +112,24 @@ class PackagedAssetLoader {
         'bead': beadBlock(bead),
       });
 
-  /// Renders the `discovery` prompt template for [lens] + [bead] — the discovery
-  /// circuit's portable mirror (of `DiscoveryLensCapability.buildLensPrompt`).
-  /// It takes a LENS BRIEF, not a rubric: an explorer gathers and cites, it does
-  /// not grade, so there are no bands to load.
-  String renderDiscoveryPrompt(String lens, String lensBrief, Bead bead) =>
-      _mustache(loadPromptTemplate('discovery'), {
-        'lens': lens,
-        'lensBrief': lensBrief,
-        'bead': beadBlock(bead),
-      });
+  /// Renders the `discovery` prompt template for [lens] + [lensBrief] + the
+  /// lens's [evidence] projection — the discovery circuit's portable mirror (of
+  /// `DiscoveryLensCapability.buildLensPrompt`).
+  ///
+  /// It takes a LENS BRIEF, not a rubric: an explorer synthesizes and cites, it
+  /// does not grade, so there are no bands to load. And it takes rendered
+  /// EVIDENCE, not a bead: the deterministic gather already resolved the bead's
+  /// fields along with everything else, so the portable mirror carries the same
+  /// projection-only contract the in-pipeline lens does.
+  String renderDiscoveryPrompt(
+    String lens,
+    String lensBrief,
+    String evidence,
+  ) => _mustache(loadPromptTemplate('discovery'), {
+    'lens': lens,
+    'lensBrief': lensBrief,
+    'evidence': evidence,
+  });
 
   /// The mustache-templated SKILL.md body for [skillId]
   /// (`extension/station_overlay/claude/skills/<skillId>/SKILL.md` — the
