@@ -2228,10 +2228,28 @@ class CodeRouteCapability extends RouteCapability {
               when value.trim().isNotEmpty)
             value.trim(),
       ];
+      // The gating lane's DIAGNOSTIC head (the failing file/tool line) leads
+      // the whole reason: the engine persists a head-first prefix of a
+      // `failureReason`, so an operator reading a parked gate must meet the
+      // cause BEFORE the lane name and the log path that explain it. Only the
+      // code-validation lane emits this key, so every other gate's reason is
+      // byte-identical — as is a code-validation failure with no recognized
+      // diagnostic line, whose tail-first rationale still leads.
+      final diagnosticHeads = [
+        for (final id in failedGates)
+          if (siblings.resultOf('$parent/$id')[_gatingDiagnosticHeadKey]
+              case final value? when value.trim().isNotEmpty)
+            value.trim(),
+      ];
+      final lead = diagnosticHeads.isEmpty
+          ? ''
+          : '${diagnosticHeads.join('\n')}\n';
       final suffix = failedRationales.isEmpty
           ? ''
           : ': ${failedRationales.join('; ')}';
-      return Escalate('${failedGates.join(', ')} failed: hard block$suffix');
+      return Escalate(
+        '$lead${failedGates.join(', ')} failed: hard block$suffix',
+      );
     }
 
     // The grade SPREAD across the PRESENT lanes. Missing grades are IGNORED
