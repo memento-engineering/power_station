@@ -258,6 +258,37 @@ void main() {
       }
     });
   });
+
+  test('decision entry records the registrant boundary', () {
+    final source = File(
+      p.join(
+        Directory.current.path,
+        '..',
+        '..',
+        'docs',
+        'decisions',
+        '2026-09-04-station-registries-use-resolved-package-closures.md',
+      ),
+    ).readAsStringSync();
+    expect(
+      source,
+      contains('slug: station-registries-use-resolved-package-closures'),
+    );
+    expect(
+      source,
+      contains(
+        'packages/grid_assets/lib/src/assets/'
+        'station_asset_registry_generator.dart',
+      ),
+    );
+    expect(
+      source,
+      contains('packages/grid_assets/lib/station_asset_registry.dart'),
+    );
+    expect(source, contains('static final GridAssetRegistry'));
+    expect(source, contains('every lock entry must'));
+    expect(source, isNot(contains(r'${decision_bead}')));
+  });
 }
 
 final class _StationFixture {
