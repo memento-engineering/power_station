@@ -6,12 +6,18 @@ import 'package:grid_assets/grid_assets.dart';
 import 'package:grid_engine/grid_engine.dart';
 import 'package:grid_runtime/grid_runtime.dart';
 
+import 'github_app_pr_opener.dart';
+
 /// The substation's GitHub delivery method: commit residue, force-with-lease
-/// push, then open or reuse the pull request.
+/// push, then reuse or open the pull request.
 ///
 /// It is idempotent so a rework round can deliver after rebasing while the
-/// prior round's pull request remains open. The residue check preserves the
-/// committed-whole-tree guarantee and fails closed when the probe is unreadable.
+/// prior round's pull request remains open. Reuse is ACTIVE, not inferred: with
+/// the App opener bound, delivery asks GitHub for the branch's open pull
+/// request FIRST and refreshes it, because a creation POST against a branch
+/// that already has one is refused `HTTP 422` and used to strand a green,
+/// already-delivered round. The residue check preserves the committed-whole-tree
+/// guarantee and fails closed when the probe is unreadable.
 class GitHubPrDelivery implements DeliveryMethod {
   /// Creates the method over the commit/push [gitOps], the [prOpener], and the
   /// raw [gitRunner] the force-push runs through (null ⇒ the real, clean-env
@@ -100,7 +106,11 @@ class GitHubPrDelivery implements DeliveryMethod {
         'pr open failed — ${landReasonTail(pr.failureReason ?? '')}',
       );
     }
-    return Ok({'pr_url': pr.url!, 'reused': '${pr.reused}'});
+    return Ok({
+      'pr_url': pr.url!,
+      if (pr.number case final number?) 'pr_number': '$number',
+      'reused': '${pr.reused}',
+    });
   }
 
   /// `--force-with-lease` ALWAYS: a rework round rebased this branch, so a plain
@@ -117,13 +127,45 @@ class GitHubPrDelivery implements DeliveryMethod {
     return LandPushOutcome(ok: result.ok, output: result.output);
   }
 
-  /// Opens the PR, or REUSES the one a prior round left open (idempotent).
+  /// REUSES the PR a prior round left open, or opens a new one (idempotent).
+  ///
+  /// The reuse probe runs only for the [GitHubAppPrOpener], which owns the
+  /// authenticated client the filtered lookup needs; a `gh`-shaped or fake
+  /// opener keeps the create-only path. A lookup or update GitHub REFUSED is a
+  /// failure, never a fall-through to create: only an EMPTY lookup — GitHub
+  /// answering that this branch has no open PR — licenses the POST, and a 422
+  /// after that answer is therefore a real refusal that keeps escalating.
   Future<LandPrOutcome> _openOrReuse({
     required Workspace workspace,
     required String workspaceDir,
     required String title,
     required String body,
   }) async {
+    if (_prOpener case final GitHubAppPrOpener appOpener) {
+      final existing = await appOpener.reuseOpen(
+        workDir: workspaceDir,
+        branch: workspace.branch,
+        baseBranch: workspace.baseBranch,
+        title: title,
+        body: body,
+      );
+      if (existing != null) {
+        if (!existing.isOpened) {
+          return LandPrOutcome.failed(
+            existing.failure?.reason ?? 'open PR reuse did not complete',
+          );
+        }
+        final ref = existing.ref!;
+        final number = ref.number;
+        if (number == null) {
+          return LandPrOutcome.failed(
+            'GitHub open-PR lookup returned no usable pull request number',
+          );
+        }
+        return LandPrOutcome.reused(ref.url, number: number);
+      }
+    }
+
     final result = await _prOpener.open(
       workDir: workspaceDir,
       branch: workspace.branch,
@@ -131,16 +173,13 @@ class GitHubPrDelivery implements DeliveryMethod {
       title: title,
       body: body,
     );
-    if (result.isOpened) return LandPrOutcome.opened(result.ref!.url);
-    // Idempotent: `gh pr create` refusing because a prior round's PR is still
-    // OPEN is a SUCCESS, not a failure — the branch is delivered and the PR is
-    // there. An "already exists" without a parseable url still counts as reused
-    // (the PR exists) rather than escalating a DONE bead.
-    final reason = result.failure?.reason ?? 'pr open did not complete';
-    if (isPrAlreadyOpen(reason)) {
-      return LandPrOutcome.reused(extractPrUrl(reason) ?? '');
+    if (result.isOpened) {
+      final ref = result.ref!;
+      return LandPrOutcome.opened(ref.url, number: ref.number);
     }
-    return LandPrOutcome.failed(reason);
+    return LandPrOutcome.failed(
+      result.failure?.reason ?? 'pr open did not complete',
+    );
   }
 
   /// The composed PR body the terminal route left in the worktree ledger; an
