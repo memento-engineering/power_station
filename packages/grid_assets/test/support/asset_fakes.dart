@@ -20,6 +20,7 @@ export 'package:grid_engine/testing.dart';
 export 'mounted_station.dart';
 
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:beads_dart/beads_dart.dart';
 import 'package:grid_engine/grid_engine.dart';
@@ -669,3 +670,53 @@ Map<String, dynamic> callMetadata(List<String> argv) {
   }
   return merged;
 }
+
+/// A COMPLETE canonical evidence profile for [bead] at [round] — every family
+/// present, every record [EvidenceState.complete], so
+/// [projectDiscoveryEvidence] yields a gap-free bundle for all three lenses.
+///
+/// The route now REFUSES to advance over a gather whose evidence is known
+/// incomplete, so any suite that drives the live route needs a real artifact on
+/// disk. This is that artifact, in ONE place, so a suite proving a lane's
+/// behaviour never has to hand-roll a schema-v2 envelope.
+DiscoveryAnchors completeGather({
+  required Bead bead,
+  required int round,
+  List<ResolvedAnchor> anchors = const [],
+  List<String> symbols = const [],
+  Map<String, String> rubrics = const {},
+  List<PriorArtQueryEvidence> priorArtQueries = const [],
+  List<DecisionSurfaceEvidence> decisionLookups = const [],
+  HistoryEvidence? history,
+}) => DiscoveryAnchors(
+  round: round,
+  workBeadId: bead.id,
+  beadFields: boundedBeadFields(bead),
+  rubrics: rubrics,
+  rubricEvidence: rubricEvidenceOf(rubrics),
+  anchors: anchors,
+  symbols: symbols,
+  priorArtQueries: priorArtQueries,
+  decisionLookups: decisionLookups,
+  history: history ?? completeHistory(),
+);
+
+/// A COMPLETE, empty git-history record — a real "these surfaces have no
+/// history" answer, which is what the prior-art lens needs to be sufficient.
+HistoryEvidence completeHistory({
+  List<String> paths = const [],
+  List<HistoryCommitEvidence> commits = const [],
+}) => HistoryEvidence(
+  id: 'history:${paths.join('|')}@sha256:fake',
+  paths: paths,
+  command: 'git log --',
+  state: EvidenceState.complete,
+  commits: commits,
+);
+
+/// Writes [anchors] to the canonical gather path under [workspaceDir] — what
+/// `AnchorsCapability` would have written.
+void plantGather(String workspaceDir, DiscoveryAnchors anchors) =>
+    File(anchorsPath(workspaceDir))
+      ..createSync(recursive: true)
+      ..writeAsStringSync(jsonEncode(anchors.toJson()));

@@ -101,6 +101,45 @@ Read `lib/elsewhere.dart` first.
     });
   });
 
+  group('rosterQualifiedPaths is the ONE qualifier both lookups share', () {
+    test('the PRE-specify gather and the POST-specify spec qualify a path '
+        'identically — same order, same dedupe, same prefix', () {
+      const design = '## Touches\n'
+          '- `lib/a.dart` — modified; `lib/a.dart:Alpha`\n'
+          '- `lib/b.dart` — created\n'
+          '- `lib/a.dart` — the duplicate collapses\n';
+      final fromSpec = rosterQualifiedSurfaces(
+        design: design,
+        substation: 'power_station',
+      );
+      final fromGather = rosterQualifiedPaths(
+        paths: const [
+          'lib/a.dart',
+          'lib/a.dart:Alpha',
+          'lib/b.dart',
+          'lib/a.dart',
+        ],
+        substation: 'power_station',
+      );
+      expect(fromSpec, [
+        'power_station/lib/a.dart',
+        'power_station/lib/b.dart',
+      ]);
+      expect(fromGather, fromSpec);
+    });
+
+    test('an empty substation falls back to the placeholder prefix, and prose '
+        'is never a surface', () {
+      expect(
+        rosterQualifiedPaths(
+          paths: const ['lib/a.dart', 'Alpha', 'a b/c.dart', ''],
+          substation: '  ',
+        ),
+        ['$kUnknownSubstationPrefix/lib/a.dart'],
+      );
+    });
+  });
+
   group('the WRITE rule is unchanged by the roster move', () {
     test('it names its four load-bearing tokens', () {
       for (final token in [

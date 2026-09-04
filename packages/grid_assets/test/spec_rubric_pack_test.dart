@@ -268,18 +268,32 @@ void main() {
   });
 
   group('renderDiscoveryPrompt — the portable mirror of the explorer lens', () {
-    test(
-      'substitutes every hole (no `{{` survives), embeds the bead + the lens '
-      'brief, and carries the CITE-THE-OFFENCE contract — it GRADES nothing',
-      () {
-        final review = bead('tg-1').copyWith(
-          title: 'Wire the federation bus',
-          description: 'DECIDED: extend the existing bus; no new transport.',
+    /// The SAME projection the in-pipeline lens is handed, so the portable
+    /// mirror and the runtime prompt are proven to consume one contract.
+    DiscoveryEvidenceProjection projectionFor(String lens) =>
+        projectDiscoveryEvidence(
+          completeGather(
+            bead: bead('tg-1').copyWith(
+              title: 'Wire the federation bus',
+              description: 'DECIDED: extend the existing bus; no new transport.',
+            ),
+            round: 0,
+          ),
+          lens: lens,
+          round: 0,
+          workBeadId: 'tg-1',
         );
+
+    test(
+      'substitutes every hole (no `{{` survives), embeds the SAME projection '
+      'the runtime lens gets, and carries the CITE-THE-OFFENCE contract — it '
+      'GRADES nothing',
+      () {
+        final projection = projectionFor(kDecisionLens);
         final prompt = loader.renderDiscoveryPrompt(
           kDecisionLens,
           lensBrief(kDecisionLens),
-          review,
+          projection.renderedEvidence,
         );
         expect(prompt, isNot(contains('{{')));
         expect(prompt, contains(kDecisionLens));
@@ -299,6 +313,39 @@ void main() {
         expect(prompt, contains('Stay CHEAP'));
       },
     );
+
+    test('runtime and packaged discovery prompts consume the SAME projection '
+        'and name NO deterministic lookup command', () {
+      for (final lens in kDiscoveryLenses) {
+        final projection = projectionFor(lens);
+        final packaged = loader.renderDiscoveryPrompt(
+          lens,
+          lensBrief(lens),
+          projection.renderedEvidence,
+        );
+        final runtime = const DiscoveryLensCapability().buildLensPrompt(
+          lens: lens,
+          nodePath: 'tg-1/spec_review/discovery/$lens',
+          round: 0,
+          workspaceDir: '/w/tg-1',
+          projection: projection,
+        );
+        for (final prompt in [packaged, runtime]) {
+          expect(prompt, contains('Canonical evidence projection'));
+          expect(prompt, contains('insufficient-evidence'));
+          for (final id in projection.evidenceIds) {
+            expect(prompt, contains(id), reason: lens);
+          }
+          for (final command in [
+            'space decisions index',
+            'git log',
+            'grep -',
+          ]) {
+            expect(prompt, isNot(contains(command)), reason: '$lens/$command');
+          }
+        }
+      }
+    });
   });
 
   group('extension/mcp/config.yaml declares the spec pack', () {
@@ -323,12 +370,12 @@ void main() {
     });
   });
 
-  test('all decision assets name the roster-mode lookup', () {
+  test('every asset that LOOKS UP names the roster-mode lookup — and the '
+      'discovery prompt, which no longer looks anything up, names none', () {
     final assets = <String, String>{
       'rubrics/decision-alignment.md': loader.loadRubric('decision-alignment'),
       'prompts/readiness.md': loader.loadPromptTemplate('readiness'),
       'prompts/spec-critic.md': loader.loadPromptTemplate('spec-critic'),
-      'prompts/discovery.md': loader.loadPromptTemplate('discovery'),
     };
 
     for (final entry in assets.entries) {
@@ -342,6 +389,17 @@ void main() {
         expect(entry.value, isNot(contains(token)), reason: entry.key);
       }
     }
+
+    // The discovery lens consumes a PROJECTION of a lookup the deterministic
+    // gather already ran, so it must carry no lookup command of its own.
+    final discovery = loader.loadPromptTemplate('discovery');
+    expect(discovery, isNot(contains('space decisions index')));
+    expect(discovery, isNot(contains('git log')));
+    expect(discovery, contains('{{evidence}}'));
+    expect(discovery, contains('Use only this projection'));
+    for (final token in kLocalOnlyTokens) {
+      expect(discovery, isNot(contains(token)));
+    }
   });
 
   test('searching assets pass NO register-directory argument', () {
@@ -349,7 +407,6 @@ void main() {
       loader.loadRubric('decision-alignment'),
       loader.loadPromptTemplate('readiness'),
       loader.loadPromptTemplate('spec-critic'),
-      loader.loadPromptTemplate('discovery'),
     ];
 
     for (final text in searchingAssets) {
@@ -365,11 +422,16 @@ void main() {
 
   test('discovery prompts require structured FOREIGN bead citations', () {
     final runtime = const DiscoveryLensCapability().buildLensPrompt(
-      bead: bead('tg-1'),
       lens: kPriorArtLens,
       nodePath: 'tg-1/spec_review/discovery/$kPriorArtLens',
       round: 0,
       workspaceDir: '/w/tg-1',
+      projection: projectDiscoveryEvidence(
+        completeGather(bead: bead('tg-1'), round: 0),
+        lens: kPriorArtLens,
+        round: 0,
+        workBeadId: 'tg-1',
+      ),
     );
     final packaged = loader.loadPromptTemplate('discovery');
     for (final prompt in [runtime, packaged]) {
@@ -437,11 +499,16 @@ void main() {
         'prompts/discovery.md': loader.loadPromptTemplate('discovery'),
         'discovery.dart:buildLensPrompt': const DiscoveryLensCapability()
             .buildLensPrompt(
-              bead: bead('tg-1'),
               lens: kDecisionLens,
               nodePath: 'tg-1/spec_review/discovery/$kDecisionLens',
               round: 0,
               workspaceDir: '/w/tg-1',
+              projection: projectDiscoveryEvidence(
+                completeGather(bead: bead('tg-1'), round: 0),
+                lens: kDecisionLens,
+                round: 0,
+                workBeadId: 'tg-1',
+              ),
             ),
         'discovery.dart:lensBrief': lensBrief(kDecisionLens),
       };
@@ -474,10 +541,16 @@ void main() {
       for (final text in [
         loader.loadRubric('decision-alignment'),
         loader.loadPromptTemplate('spec-critic'),
-        loader.loadPromptTemplate('discovery'),
       ]) {
         expect(text, contains(surfaceLookup));
       }
+      // The discovery lens is the exception, and deliberately so: the gather
+      // runs that exact command before fan-out, so the lens mirrors the
+      // RESULT, never the command.
+      expect(
+        loader.loadPromptTemplate('discovery'),
+        isNot(contains(surfaceLookup)),
+      );
       expect(
         loader.loadPromptTemplate('readiness'),
         contains(rosterDecisionIndexCommand()),

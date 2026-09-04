@@ -88,7 +88,12 @@ Future<RouteVerdict> _route(
 
 void main() {
   late Directory ws;
-  setUp(() => ws = Directory.systemTemp.createTempSync('discovery-race-'));
+  setUp(() {
+    ws = Directory.systemTemp.createTempSync('discovery-race-');
+    // The route projects every lane off the canonical gather before it joins,
+    // so the live posture needs the real round-1 artifact on disk.
+    plantGather(ws.path, completeGather(bead: workBead('tg-1'), round: 1));
+  });
   tearDown(() => ws.deleteSync(recursive: true));
 
   group('the lens-report freshness fence (the stamp discovery never had)', () {
@@ -286,5 +291,165 @@ void main() {
         expect(full['transport'], 'file');
       },
     );
+  });
+  group('insufficient evidence regathers once then holds', () {
+    /// Replaces the planted gather with one whose PRIOR-ART coverage carries
+    /// [state] — the hole only the prior-art lane is handed.
+    void plantHoledGather(EvidenceState state) {
+      final complete = completeGather(bead: workBead('tg-1'), round: 1);
+      plantGather(
+        ws.path,
+        DiscoveryAnchors(
+          round: complete.round,
+          workBeadId: complete.workBeadId,
+          beadFields: complete.beadFields,
+          priorArtQueries: [
+            PriorArtQueryEvidence(
+              id: 'prior-art-query:the-symbol@sha256:fake',
+              query: 'the-symbol',
+              state: state,
+              error: 'the roster seat never answered',
+            ),
+          ],
+          history: complete.history,
+        ),
+      );
+    }
+
+    for (final state in [
+      EvidenceState.truncated,
+      EvidenceState.unavailable,
+      EvidenceState.failed,
+    ]) {
+      test('a ${state.name} record regathers at round 0 and ESCALATES at the '
+          'cap', () async {
+        plantHoledGather(state);
+        for (final lens in kDiscoveryLenses) {
+          _plantReport(ws.path, lens, round: 1);
+        }
+        final recorded = {for (final lens in kDiscoveryLenses) lens: 1};
+
+        // Round 0: a deterministic hole is a BROKEN LANE — regather once.
+        final first = await _route(ws.path, recorded: recorded);
+        expect(first, isA<Advance>());
+        final payload = (first as Advance).payload!;
+        expect(payload['grade'], 'F');
+        expect(payload['verdict'], 'regather');
+        expect(payload['lenses'], kPriorArtLens);
+        expect(readDiscoveryRegatherLedger(ws.path)!.round, 1);
+
+        // Round 1 (the cap): the hole is still there and STATED — HOLD.
+        final second = await _route(ws.path, recorded: recorded);
+        expect(second, isA<Escalate>());
+        final reason = (second as Escalate).reason;
+        expect(reason, contains('DISCOVERY EVIDENCE HOLD'));
+        expect(reason, contains(kPriorArtLens));
+        expect(reason, contains('prior-art-query:the-symbol@sha256:fake'));
+        expect(reason, contains('the roster seat never answered'));
+        expect(
+          reason,
+          isNot(contains('DISCOVERY HOLD —')),
+          reason: 'a known non-answer is NOT a cited offence',
+        );
+      });
+    }
+
+    test('the negative control: a merely ABSENT lens at the SAME cap still '
+        'ADVANCES with the miss recorded (A21(3))', () async {
+      writeDiscoveryRegatherLedger(
+        ws.path,
+        const DiscoveryRegatherLedger(round: kMaxRegatherRounds),
+      );
+      _plantReport(ws.path, kCodeLens, round: 1);
+      _plantReport(ws.path, kPriorArtLens, round: 1);
+      final out = await _route(
+        ws.path,
+        recorded: {for (final lens in kDiscoveryLenses) lens: 1},
+      );
+      expect(out, isA<Advance>());
+      final payload = (out as Advance).payload!;
+      expect(payload['verdict'], 'advance');
+      expect(payload['missing'], kDecisionLens);
+    });
+
+    test('a lens that WRITES the typed insufficient result is read as one, and '
+        'a model report can never hide a deterministic hole', () async {
+      // The typed outcome decodes off the canonical file, under the same
+      // dual-stamp fence a report rides.
+      File(lensReportPath(ws.path, kCodeLens))
+        ..createSync(recursive: true)
+        ..writeAsStringSync(
+          jsonEncode({
+            'outcome': 'insufficient-evidence',
+            'lens': kCodeLens,
+            'version': 2,
+            'nodePath': '$_parent/$kCodeLens',
+            kVerdictRoundKey: 1,
+            'gaps': [
+              {'evidenceId': 'code-anchor:lib@sha256:x', 'reason': 'CLIPPED'},
+            ],
+          }),
+        );
+      final outcome = readLensReport(
+        ws.path,
+        kCodeLens,
+        '$_parent/$kCodeLens',
+        round: 1,
+      );
+      expect(outcome, isA<InsufficientEvidenceReport>());
+      expect((outcome! as InsufficientEvidenceReport).gaps, hasLength(1));
+
+      // An insufficient report with NO named gap is not a statement at all.
+      expect(
+        DiscoveryLensOutcome.fromJson({
+          'outcome': 'insufficient-evidence',
+          'lens': kCodeLens,
+          'gaps': <Object?>[],
+        }),
+        isNull,
+      );
+
+      // And a CLEAN model report over a holed gather is overridden.
+      plantGather(
+        ws.path,
+        DiscoveryAnchors(
+          round: 1,
+          workBeadId: 'tg-1',
+          beadFields: boundedBeadFields(workBead('tg-1')),
+          history: HistoryEvidence(
+            id: 'history:none@sha256:fake',
+            paths: const [],
+            command: '',
+            state: EvidenceState.failed,
+            error: 'git would not launch',
+          ),
+        ),
+      );
+      for (final lens in kDiscoveryLenses) {
+        _plantReport(ws.path, lens, round: 1);
+      }
+      final overridden = await _route(
+        ws.path,
+        recorded: {for (final lens in kDiscoveryLenses) lens: 1},
+      );
+      expect((overridden as Advance).payload!['lenses'], kPriorArtLens);
+      expect(overridden.payload!['grade'], 'F');
+    });
+
+    test('a live worktree whose gather is UNREADABLE is explicit insufficiency '
+        'for every lane, never a clean empty', () async {
+      File(anchorsPath(ws.path)).writeAsStringSync('{ not json');
+      for (final lens in kDiscoveryLenses) {
+        _plantReport(ws.path, lens, round: 1);
+      }
+      final out = await _route(
+        ws.path,
+        recorded: {for (final lens in kDiscoveryLenses) lens: 1},
+      );
+      expect(
+        (out as Advance).payload!['lenses']!.split(',').toSet(),
+        kDiscoveryLenses.toSet(),
+      );
+    });
   });
 }
