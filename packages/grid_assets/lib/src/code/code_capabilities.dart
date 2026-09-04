@@ -496,9 +496,14 @@ class AgentCapability extends ProcessCapability {
     // claude leg (`overlay_codex_leg_test.dart`), so its id set is the same
     // set. Reading both would just deduplicate what one read already gives.
     //
-    // The deny-list is DERIVED from the generated pack's `audience: human`
-    // declarations; it is no longer a hand-maintained const list.
-    final withheld = operatorSkillIds;
+    // The deny-list is DERIVED from the SAME station-generated registry the
+    // resolution and materializer consume. That registry is the resolved
+    // package closure, so a downstream pack's `audience: human` declaration
+    // has the same force as grid_assets's own declaration — reading only this
+    // package's pack would install a downstream operator skill and then OFFER
+    // it (`power_station#station-operator-audiences-derive-from-the-resolved-
+    // registry`).
+    final withheld = operatorSkillIds(registry);
     return [
       for (final id in report.installedSkillIdsUnder(kClaudeSkillsSubtree))
         if (!withheld.contains(id)) id,

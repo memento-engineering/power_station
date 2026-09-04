@@ -5,6 +5,7 @@
 import 'dart:io';
 
 import 'package:grid_assets/grid_assets.dart';
+import 'package:grid_assets/station_asset_registry.dart';
 import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
@@ -37,7 +38,11 @@ void main() {
       'release',
       'station-operations',
     ]);
-    expect(operatorSkillIds, const [
+    // The deny-list is STATION-scoped now, so it is read off the station's
+    // generated registry. This station composes exactly one pack — grid_assets
+    // — so the projection is still this package's own operator set, exactly.
+    final operatorIds = operatorSkillIds(GeneratedGridAssetRegistrant.registry);
+    expect(operatorIds, const [
       'asset-author',
       'gate-medicine',
       'handoff',
@@ -46,7 +51,7 @@ void main() {
       'release',
       'station-operations',
     ]);
-    expect(operatorSkillIds, isNot(contains('discover')));
+    expect(operatorIds, isNot(contains('discover')));
   });
 
   test('no hand-maintained const skill-id list survives anywhere in lib/', () {
