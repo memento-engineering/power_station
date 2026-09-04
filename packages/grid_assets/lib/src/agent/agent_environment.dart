@@ -46,13 +46,6 @@
 ///    implemented transport selector and its adapter owns command rendering.
 ///    A separate capability boolean and ACP-only command/args would duplicate
 ///    that value path, so these gc fields are intentionally not mirrored.
-///  - `supports_hooks`: whether the tool has a hook mechanism (settings.json /
-///    plugins). Unread by the_grid's spawn. Back when: per-environment
-///    lifecycle-hook orchestration.
-///  - `instructions_file` (`CLAUDE.md` vs `AGENTS.md`): which project-
-///    instructions filename the tool reads. the_grid's worktrees already carry
-///    the right file per repo; it is not chosen per environment. Back when: a
-///    harness whose instructions filename varies by tool.
 ///  - `resume_command`: the full shell resume TEMPLATE (`{{.SessionKey}}`), a
 ///    higher-precedence alternative to `resume_flag`/`resume_style`. the_grid's
 ///    resume is expressible as flag+style. Back when: a tool whose resume argv
@@ -67,18 +60,21 @@
 ///  - `option_defaults`: overrides `options_schema` defaults without redefining
 ///    the schema — inert without `options_schema` (deferred). Back when: with
 ///    `options_schema`.
-///  - `print_args`: the argv enabling one-shot non-interactive mode (`-p`,
-///    `exec`). In the_grid this folds into a layer's [args]/[argsAppend] once
-///    harnesses become DATA (bead `pow-ebf.4`). Back when: one-shot vs
-///    interactive must toggle per environment separately from [args].
 ///  - `title_model`: the cheap model gc uses to auto-title a session. the_grid
 ///    does not title sessions. Back when: session titling.
+///
+/// Three of those deferrals are REDEEMED by bead `pow-lv6t`, whose operator-seat
+/// launcher is the "back when" each named: `print_args` -> [drivenArgs],
+/// `instructions_file` -> [roleAsset], and `supports_hooks`, narrowed to the one
+/// seat priming path -> [primeMode].
 ///
 /// gc's resolution machinery (`ResolvedProvider`, `ProviderProvenance`, the
 /// chain-walk helpers) is not a field set — the registry (bead `pow-ebf.3`)
 /// owns name→env storage + the base-name walk; this type owns the VALUE + the
 /// pure fold ([AgentEnvironment.resolve]).
 library;
+
+import 'package:path/path.dart' as p;
 
 /// How the brief is DELIVERED to the tool (gc `prompt_mode`) — transport, as
 /// DATA. Sealed by the enum: consumers switch exhaustively (house style).
@@ -103,6 +99,28 @@ enum ResumeStyle {
   /// grammar is not claude's (gc's own doc comment).
   subcommand,
 }
+
+/// How the newest HANDOFF on an operator seat's disc reaches its occupant
+/// (bead `pow-lv6t`). Sealed by the enum: consumers switch exhaustively
+/// (house style). ONE priming path per harness, DECLARED, never guessed.
+enum SeatPrimeMode {
+  /// The harness fires a session-start HOOK the grid answers (the `prime`
+  /// verb, `seat/prime_command.dart`); the launcher passes nothing on argv.
+  hook,
+
+  /// The launcher PREPENDS the handoff body to the occupant's first prompt
+  /// through the declared [AgentEnvironment.promptMode] transport; a channel
+  /// harness receives it as the first session message.
+  prompt,
+}
+
+/// The hole a seat-scoped declaration renders the SEAT NAME into
+/// ([AgentEnvironment.roleAsset], [AgentEnvironment.roleArgs]).
+const String kSeatHole = '{{seat}}';
+
+/// The hole [AgentEnvironment.memoryDirArgs] renders the ABSOLUTE disc
+/// directory into.
+const String kMemoryDirHole = '{{memoryDir}}';
 
 /// WHERE inference runs (ADR-0002 D3) — the KIND only; the endpoint URL is a
 /// MACHINE FACT the site binding supplies (bead `pow-ebf.6`), never here. The
@@ -263,6 +281,11 @@ class AgentEnvironment {
     this.resumeStyle,
     this.usageJsonArgs,
     this.sessionAdapter,
+    this.drivenArgs,
+    this.roleAsset,
+    this.roleArgs,
+    this.memoryDirArgs,
+    this.primeMode,
   });
 
   /// The inheritance pointer (gc `base`) — tri-state, LOAD-BEARING. Default
@@ -323,6 +346,43 @@ class AgentEnvironment {
   /// Adapter registry id for channel transport; null keeps one-turn transport.
   final String? sessionAdapter;
 
+  /// Argv only a DRIVEN session rides — the station's headless one-turn spawn
+  /// posture (claude's permission skip, opencode's `run` subcommand). [spawnFor]
+  /// renders it in the [args] slot; an OPERATOR SEAT launch omits it, so the
+  /// subtraction the seat needs is DECLARED per harness instead of computed
+  /// from a flag literal in the launcher. This UN-DEFERS gc's `print_args`,
+  /// whose deferral audit above named exactly this moment ("one-shot vs
+  /// interactive must toggle per environment separately from [args]"). REPLACE
+  /// across layers (last non-null wins), like [args].
+  final List<String>? drivenArgs;
+
+  /// WHERE this harness reads an operator seat's authored ROLE DEFINITION, as a
+  /// GRID-HOME-RELATIVE path template carrying [kSeatHole]. The seat launcher
+  /// REFUSES when the rendered path is absent — a seat is authored before it is
+  /// occupied. This UN-DEFERS gc's `instructions_file` ("a harness whose
+  /// instructions filename varies by tool"). `null` means this harness has no
+  /// authored-persona home and cannot be occupied.
+  final String? roleAsset;
+
+  /// How this harness takes that role definition ON ARGV, as a template
+  /// carrying [kSeatHole]. `null` means the harness has NO native role flag:
+  /// the definition reaches it through the overlay flavor's own projection,
+  /// already materialized at install, and the launcher passes nothing.
+  final List<String>? roleArgs;
+
+  /// How this harness is pointed at the seat's DISC as its native memory, as a
+  /// template carrying [kMemoryDirHole], which renders an ABSOLUTE path.
+  /// `null` means the harness has no native memory home: the disc is still the
+  /// seat's memory and the role definition tells the occupant to read its
+  /// index. NOTHING is injected per session for any harness
+  /// (`the_grid#agent-disc-file-shape-and-home` section 5).
+  final List<String>? memoryDirArgs;
+
+  /// How the newest handoff reaches the occupant. `null` inherits; the default
+  /// when no layer declares one is [SeatPrimeMode.prompt] — the transport every
+  /// harness already has.
+  final SeatPrimeMode? primeMode;
+
   /// A NAMED-invariant guard (guards LOUD or GONE — ADR-0000 A8): a
   /// [PromptMode.flag] transport with no [promptFlag] is unspawnable, and a
   /// [resumeStyle] set with no [resumeFlag] is meaningless. Returns the human
@@ -347,6 +407,21 @@ class AgentEnvironment {
     }
     if (adapter != null && (promptMode ?? PromptMode.arg) != PromptMode.none) {
       return 'sessionAdapter requires promptMode none';
+    }
+    final asset = roleAsset;
+    if (asset != null && !asset.contains(kSeatHole)) {
+      return 'roleAsset must carry the $kSeatHole hole';
+    }
+    final role = roleArgs;
+    if (role != null && !role.any((arg) => arg.contains(kSeatHole))) {
+      return 'roleArgs must carry the $kSeatHole hole';
+    }
+    if (role != null && asset == null) {
+      return 'roleArgs is set but roleAsset is unset';
+    }
+    final memory = memoryDirArgs;
+    if (memory != null && !memory.any((arg) => arg.contains(kMemoryDirHole))) {
+      return 'memoryDirArgs must carry the $kMemoryDirHole hole';
     }
     return null;
   }
@@ -412,6 +487,11 @@ class AgentEnvironment {
     ResumeStyle? resumeStyle;
     List<String>? usageJsonArgs;
     String? sessionAdapter;
+    List<String>? drivenArgs;
+    String? roleAsset;
+    List<String>? roleArgs;
+    List<String>? memoryDirArgs;
+    SeatPrimeMode? primeMode;
 
     for (final layer in effective) {
       command = layer.command ?? command;
@@ -427,6 +507,11 @@ class AgentEnvironment {
       resumeStyle = layer.resumeStyle ?? resumeStyle;
       if (layer.usageJsonArgs != null) usageJsonArgs = layer.usageJsonArgs;
       sessionAdapter = layer.sessionAdapter ?? sessionAdapter;
+      if (layer.drivenArgs != null) drivenArgs = layer.drivenArgs;
+      roleAsset = layer.roleAsset ?? roleAsset;
+      if (layer.roleArgs != null) roleArgs = layer.roleArgs;
+      if (layer.memoryDirArgs != null) memoryDirArgs = layer.memoryDirArgs;
+      primeMode = layer.primeMode ?? primeMode;
     }
 
     return AgentEnvironment(
@@ -444,6 +529,11 @@ class AgentEnvironment {
       resumeStyle: resumeStyle,
       usageJsonArgs: usageJsonArgs,
       sessionAdapter: sessionAdapter,
+      drivenArgs: drivenArgs,
+      roleAsset: roleAsset,
+      roleArgs: roleArgs,
+      memoryDirArgs: memoryDirArgs,
+      primeMode: primeMode,
     );
   }
 
@@ -463,7 +553,12 @@ class AgentEnvironment {
       other.resumeFlag == resumeFlag &&
       other.resumeStyle == resumeStyle &&
       _listEq(other.usageJsonArgs, usageJsonArgs) &&
-      other.sessionAdapter == sessionAdapter;
+      other.sessionAdapter == sessionAdapter &&
+      _listEq(other.drivenArgs, drivenArgs) &&
+      other.roleAsset == roleAsset &&
+      _listEq(other.roleArgs, roleArgs) &&
+      _listEq(other.memoryDirArgs, memoryDirArgs) &&
+      other.primeMode == primeMode;
 
   @override
   int get hashCode {
@@ -485,6 +580,11 @@ class AgentEnvironment {
       resumeStyle,
       usageJsonArgs == null ? null : Object.hashAll(usageJsonArgs!),
       sessionAdapter,
+      drivenArgs == null ? null : Object.hashAll(drivenArgs!),
+      roleAsset,
+      roleArgs == null ? null : Object.hashAll(roleArgs!),
+      memoryDirArgs == null ? null : Object.hashAll(memoryDirArgs!),
+      primeMode,
     );
   }
 
@@ -495,7 +595,46 @@ class AgentEnvironment {
       'promptFlag: $promptFlag, env: $env, model: $model, target: $target, '
       'pathCheck: $pathCheck, resumeFlag: $resumeFlag, '
       'resumeStyle: $resumeStyle, usageJsonArgs: $usageJsonArgs, '
-      'sessionAdapter: $sessionAdapter)';
+      'sessionAdapter: $sessionAdapter, drivenArgs: $drivenArgs, '
+      'roleAsset: $roleAsset, roleArgs: $roleArgs, '
+      'memoryDirArgs: $memoryDirArgs, primeMode: $primeMode)';
+}
+
+/// [environment]'s [AgentEnvironment.roleAsset] with [kSeatHole] bound to
+/// [seat]; `null` when the harness declares no authored-persona home.
+String? renderRoleAsset(AgentEnvironment environment, String seat) =>
+    environment.roleAsset?.replaceAll(kSeatHole, seat);
+
+/// [environment]'s [AgentEnvironment.roleArgs] with [kSeatHole] bound to
+/// [seat]; empty when the harness declares none.
+List<String> renderRoleArgs(AgentEnvironment environment, String seat) => [
+  for (final arg in environment.roleArgs ?? const <String>[])
+    arg.replaceAll(kSeatHole, seat),
+];
+
+/// [environment]'s [AgentEnvironment.memoryDirArgs] with [kMemoryDirHole] bound
+/// to [absoluteDiscPath]; empty when the harness declares none.
+///
+/// THROWS an [ArgumentError] when [absoluteDiscPath] is relative or carries a
+/// double quote: a declaration may embed the path inside a JSON argument, and a
+/// silently corrupted argv is the failure this guard refuses loudly.
+List<String> renderMemoryDirArgs(
+  AgentEnvironment environment,
+  String absoluteDiscPath,
+) {
+  final declared = environment.memoryDirArgs;
+  if (declared == null) return const <String>[];
+  if (!p.isAbsolute(absoluteDiscPath) || absoluteDiscPath.contains('"')) {
+    throw ArgumentError.value(
+      absoluteDiscPath,
+      'absoluteDiscPath',
+      'the disc path must be ABSOLUTE and free of double quotes',
+    );
+  }
+  return [
+    for (final arg in declared)
+      arg.replaceAll(kMemoryDirHole, absoluteDiscPath),
+  ];
 }
 
 bool _listEq(List<String>? a, List<String>? b) {

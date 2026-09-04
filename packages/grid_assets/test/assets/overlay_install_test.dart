@@ -604,7 +604,13 @@ void main() {
         final settings = File(
           p.join(checkout.path, '.claude', 'settings.json'),
         );
-        expect(settings.readAsStringSync(), contains('bd prime --hook-json'));
+        expect(
+          settings.readAsStringSync(),
+          contains('space prime --hook-json'),
+          reason:
+              'the SessionStart hook binds the installer runner (bead pow-lv6t)',
+        );
+        expect(settings.readAsStringSync(), isNot(contains('{{runner}}')));
         expect(
           jsonDecode(settings.readAsStringSync()),
           isA<Map<String, dynamic>>().having(

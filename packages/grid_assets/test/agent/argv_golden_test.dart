@@ -106,6 +106,8 @@ void main() {
           promptMode: PromptMode.none,
           target: InferenceTarget.providerManaged,
           sessionAdapter: kAcpSessionAdapterId,
+          roleAsset: '.agents/agents/$kSeatHole.md',
+          primeMode: SeatPrimeMode.prompt,
         ),
       );
       expect(
@@ -118,6 +120,8 @@ void main() {
           target: InferenceTarget.providerManaged,
           model: 'gpt-5.6-sol',
           sessionAdapter: kAcpSessionAdapterId,
+          roleAsset: '.agents/agents/$kSeatHole.md',
+          primeMode: SeatPrimeMode.prompt,
         ),
       );
     });
@@ -134,6 +138,59 @@ void main() {
     test('the other three builtins remain on the one-turn argv path', () {
       for (final name in <String>['claude', 'pi', 'opencode']) {
         expect(kBuiltinEnvironments[name]!.sessionAdapter, isNull);
+      }
+    });
+  });
+
+  group('the SEAT argv per builtin (bead pow-lv6t)', () {
+    List<String> seatArgs(String name) {
+      final launch =
+          planSeatLaunch(
+                environment: kBuiltinEnvironments[name]!,
+                seat: 'governor',
+                gridHome: '/home',
+                discDirectory: '/home/.grid/seats/governor',
+              )
+              as SeatTtyLaunch;
+      return launch.args;
+    }
+
+    test('claude takes the role definition and the disc natively', () {
+      expect(seatArgs('claude'), [
+        '--agent',
+        'governor',
+        '--settings',
+        '{"autoMemoryDirectory":"/home/.grid/seats/governor"}',
+      ]);
+      expect(kBuiltinEnvironments['claude']!.primeMode, SeatPrimeMode.hook);
+    });
+
+    test('the driven posture is DROPPED from an operator seat', () {
+      expect(
+        seatArgs('claude'),
+        isNot(contains('--dangerously-skip-permissions')),
+      );
+      expect(seatArgs('opencode'), isNot(contains('run')));
+    });
+
+    test('the other four declare no native role or memory flag and prime by '
+        'prompt', () {
+      for (final name in <String>['codex', 'copilot', 'pi', 'opencode']) {
+        final environment = kBuiltinEnvironments[name]!;
+        expect(environment.roleArgs, isNull, reason: name);
+        expect(environment.memoryDirArgs, isNull, reason: name);
+        expect(environment.primeMode, SeatPrimeMode.prompt, reason: name);
+        expect(
+          environment.roleAsset,
+          '.agents/agents/{{seat}}.md',
+          reason: name,
+        );
+      }
+    });
+
+    test('every builtin declaration is LEGAL', () {
+      for (final entry in kBuiltinEnvironments.entries) {
+        expect(entry.value.validate(), isNull, reason: entry.key);
       }
     });
   });

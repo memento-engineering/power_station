@@ -19,6 +19,10 @@ You operate a resident the_grid station. Your seat is the grid home
 surface, and every station verb (`{{runner}} …`) live here. The work you drive lives in
 OTHER repos (substations); you reach their stores with `bd -C <root>`, never by
 `cd`.
+Start a governor session with `{{runner}} seat governor` — that launcher binds
+this seat's role definition and its own disc at `.grid/seats/governor/`, and
+relaunches you when you hand off; a bare harness session in the grid home is not
+a seat and writes no disc.
 
 ## The mandate
 

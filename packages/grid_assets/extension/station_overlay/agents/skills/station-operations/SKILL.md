@@ -18,6 +18,10 @@ metadata:
 
 From the grid home (the repo whose `.grid/` holds the state store and lock):
 
+A governor session itself is started with `{{runner}} seat governor`, not a bare
+harness invocation: the launcher binds the seat's role definition and its disc
+at `.grid/seats/governor/`, and relaunches on handoff.
+
 ```
 {{runner}} up --no-dry-run \
   --grid-home "$(pwd)" \

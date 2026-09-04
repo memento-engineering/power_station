@@ -255,6 +255,7 @@ RuntimeConfig spawnFor({
   final wantUsage = usageOut != null && environment.usageJsonArgs != null;
   final inner = <String>[
     ...?environment.args,
+    ...?environment.drivenArgs,
     if (effectiveModel != null) ...['--model', effectiveModel],
     ...environment.argsAppend,
     if (wantUsage) ...environment.usageJsonArgs!,
@@ -317,15 +318,22 @@ Map<String, String> agentProcessEnvironment({
 /// the ACP channel adapter while keeping their command, args, and tool posture
 /// as values. Codex alone pins its native `gpt-5.6-sol`; the ACP adapter resolves
 /// that base against the qualified ids offered by the live session.
+/// Each builtin also declares how it takes an OPERATOR SEAT (bead `pow-lv6t`) —
+/// role definition, disc, and priming path — so the seat launcher carries no
+/// vendor flag.
 const Map<String, AgentEnvironment> kBuiltinEnvironments = {
   'claude': AgentEnvironment(
     command: 'claude',
-    args: ['--dangerously-skip-permissions'],
+    drivenArgs: ['--dangerously-skip-permissions'],
     promptMode: PromptMode.flag,
     promptFlag: '-p',
     target: InferenceTarget.providerManaged,
     usageJsonArgs: ['--output-format', 'json'],
     resumeFlag: '--resume',
+    roleAsset: '.claude/agents/$kSeatHole.md',
+    roleArgs: ['--agent', kSeatHole],
+    memoryDirArgs: ['--settings', '{"autoMemoryDirectory":"$kMemoryDirHole"}'],
+    primeMode: SeatPrimeMode.hook,
   ),
   'copilot': AgentEnvironment(
     command: 'copilot',
@@ -333,18 +341,24 @@ const Map<String, AgentEnvironment> kBuiltinEnvironments = {
     promptMode: PromptMode.none,
     target: InferenceTarget.providerManaged,
     sessionAdapter: 'acp',
+    roleAsset: '.agents/agents/$kSeatHole.md',
+    primeMode: SeatPrimeMode.prompt,
   ),
   'pi': AgentEnvironment(
     command: 'pi',
     promptMode: PromptMode.flag,
     promptFlag: '-p',
     target: InferenceTarget.openAiCompatible,
+    roleAsset: '.agents/agents/$kSeatHole.md',
+    primeMode: SeatPrimeMode.prompt,
   ),
   'opencode': AgentEnvironment(
     command: 'opencode',
-    args: ['run'],
+    drivenArgs: ['run'],
     promptMode: PromptMode.arg,
     target: InferenceTarget.providerManaged,
+    roleAsset: '.agents/agents/$kSeatHole.md',
+    primeMode: SeatPrimeMode.prompt,
   ),
   'codex': AgentEnvironment(
     command: 'npx',
@@ -354,6 +368,8 @@ const Map<String, AgentEnvironment> kBuiltinEnvironments = {
     target: InferenceTarget.providerManaged,
     model: 'gpt-5.6-sol',
     sessionAdapter: 'acp',
+    roleAsset: '.agents/agents/$kSeatHole.md',
+    primeMode: SeatPrimeMode.prompt,
   ),
 };
 
