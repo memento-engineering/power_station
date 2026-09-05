@@ -1276,15 +1276,38 @@ DefaultCapabilityRegistry buildCodeRegistry({
   // The COMPOSING STATION's verb, resolved ONCE from the same `overlayArgs` map
   // the vended skills render against (A23(4)). Everything the spec path tells an
   // agent to RUN is rendered from it: the roster-lookup block and the register
-  // read rule (`SpecifyCapability`/`SpecCriticCapability`), and the `{{runner}}`
-  // hole the packaged `decision-alignment` bands carry. A downstream station
-  // whose verb is not `space` was otherwise handed a command that exits 127.
+  // read rule across the readiness lens, `SpecifyCapability` and
+  // `SpecCriticCapability`. A downstream station whose verb is not `space` was
+  // otherwise handed a command that exits 127. (The packaged
+  // `decision-alignment` bands no longer carry a `{{runner}}` hole of their
+  // own — a rubric knows neither the grid home nor the surfaces, so it defers
+  // to the lines the live prompt renders.)
   final decisionRunner = overlayArgs['runner'] ?? kDefaultOverlayRunner;
   // The COMPOSING STATION's grid home, from the SAME in-store binding A23(4)
   // gives `runner` — the cwd the station's JIT verb actually resolves from.
   // Unlike `decisionRunner` this takes no `kDefaultOverlayRunner`-style
   // fallback beyond the registered root checkout: an unbound grid home records
   // honest absence rather than running the verb somewhere it cannot resolve.
+  //
+  // ONE resolution serves BOTH kinds of use: the EXECUTING gather below (its
+  // `ShellRunner.workingDirectory`) and every RENDERED spec-path prompt
+  // (readiness, specify, the spec critics), which qualify the lookup they name
+  // with `cd '<grid home>' &&`. They were the arm that broke: a lane standing
+  // in a per-bead worktree was told to run the station's JIT verb from there,
+  // where it exits `Could not find package`, so the lane fell back to a local
+  // register grep and never read a sibling substation's register at all.
+  //
+  // Sharing the HOME does not merge the two paths, and
+  // `power_station#discovery-evidence-is-gathered-once-and-projected` is why
+  // it must not: "the executing path takes no default at all: it reads
+  // `overlayArgs['runner']` raw, and an unset one is `unavailable`, never
+  // `'space'`." That holds below — `commandDecisionIndexSource` is still
+  // handed `overlayArgs['runner']` raw, never `decisionRunner`, because an
+  // EXECUTED wrong verb is exit 127 evidence that would hold a bead, where a
+  // RENDERED one is legible prose (A23(4)'s in-store default, untouched). The
+  // grid home is symmetric across both: unbound is honest absence either way —
+  // `unavailable` in the gather's records, and "the index is unavailable" in
+  // the prompts.
   final decisionGridHome = overlayArgs['gridHome'] ?? devRoot;
   final rubricSource =
       rubrics ?? loader.boundRubricSource(args: {'runner': decisionRunner});
@@ -1317,7 +1340,11 @@ DefaultCapabilityRegistry buildCodeRegistry({
       // (clear-critique only wipes DOWNSTREAM of specify), and the offline suite
       // injects the same no-op clearer for both.
       kIntakeStep: IntakeCapability(clearer: critiqueDirClearer),
-      kReadinessStep: ReadinessCriticCapability(rubrics: rubricSource),
+      kReadinessStep: ReadinessCriticCapability(
+        rubrics: rubricSource,
+        decisionRunner: decisionRunner,
+        decisionGridHome: decisionGridHome,
+      ),
       kReadinessRouteStep: const ReadinessRouteCapability(),
       // The DISCOVERY circuit (`discovery.dart`) — the nested gather + violation
       // gate between the readiness ladder and `specify`. `anchors` shares the
@@ -1372,16 +1399,19 @@ DefaultCapabilityRegistry buildCodeRegistry({
               sessionAdapters: sessionAdapters,
               steers: steers,
               decisionRunner: decisionRunner,
+              decisionGridHome: decisionGridHome,
             )
           : SpecifyCapability(
               runnerFor: specifyBdRunnerFor,
               sessionAdapters: sessionAdapters,
               steers: steers,
               decisionRunner: decisionRunner,
+              decisionGridHome: decisionGridHome,
             ),
       'spec-critic': SpecCriticCapability(
         rubrics: rubricSource,
         decisionRunner: decisionRunner,
+        decisionGridHome: decisionGridHome,
       ),
       kSpecGatingRubric: const SpecValidationCapability(),
       // The SPEC committee's own route (bead `pow-7nm`) — the three-way

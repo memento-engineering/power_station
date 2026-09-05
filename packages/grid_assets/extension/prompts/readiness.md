@@ -14,15 +14,19 @@ specify agent and no 4-critic committee will run.
 {{bead}}
 
 ## Stay cheap — this is a lens, not a committee
-Spend a BOUNDED look, not an exploration: list the roster union of recorded
-decisions ONCE with the command below, and grep ONLY the surfaces the bead
-actually names. It takes no register-directory argument on purpose — the grid
-adapter resolves the live mounted-substation roster, so a SIBLING substation's
-decisions are in the answer too.
+Spend a BOUNDED look, not an exploration: take ONE pass over the roster union of
+recorded decisions, and grep ONLY the surfaces the bead actually names.
 
-```sh
-space decisions index
-```
+This portable mirror is rendered with NO composing grid home, so it names no
+`decisions index` invocation. That verb belongs to the composing station and
+resolves only where that station's own package is, so a copied line exits
+`Could not find package` here and would spend this lane's whole budget on a
+crash. Make the one pass over `docs/decisions/` in every mounted register
+instead — this substation's and every sibling substation's. The in-pipeline lens
+renders the cwd-qualified roster command whenever its station binds a grid home;
+that command takes no register-directory argument on purpose — the grid adapter
+resolves the live mounted-substation roster, so a SIBLING substation's decisions
+are in the answer too.
 
 Do not design the change and do not write a plan — that is the architect's job
 downstream, and duplicating it here defeats this lane's purpose. Judge the

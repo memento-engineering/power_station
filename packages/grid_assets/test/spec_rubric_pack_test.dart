@@ -399,29 +399,45 @@ void main() {
     });
   });
 
-  test('every asset that LOOKS UP names the roster-mode lookup — and the '
+  test('no PACKAGED asset mints a decision lookup of its own — and the '
       'discovery prompt, which no longer looks anything up, names none', () {
-    // The decision-alignment bands RENDER the verb (`{{runner}}`) rather than
-    // naming one, so the composing station's own invocation reaches the critic;
-    // the portable prompt templates still carry the first-party default.
-    final decisionBands = loader.loadRubric('decision-alignment');
-    expect(
-      decisionBands,
-      contains('{{runner}} decisions index --surface <repo>/<path>'),
-    );
-    expect(decisionBands, isNot(contains('space decisions index')));
-
+    // A packaged asset is composed by NOBODY: it knows neither the station's
+    // verb nor the grid home that verb resolves from, so any command it ships
+    // is one its reader cannot run. The bands used to carry a `{{runner}}`
+    // hole and the portable mirrors the first-party `space` default; both are
+    // gone, and each asset now defers to the live prompt (which renders the
+    // cwd-qualified line) or, failing that, to the registers on disk.
     final assets = <String, String>{
-      'rubrics/decision-alignment.md': _bound(loader, decisionBands),
+      'rubrics/decision-alignment.md': _bound(
+        loader,
+        loader.loadRubric('decision-alignment'),
+      ),
       'prompts/readiness.md': loader.loadPromptTemplate('readiness'),
       'prompts/spec-critic.md': loader.loadPromptTemplate('spec-critic'),
     };
 
     for (final entry in assets.entries) {
-      expect(entry.value, contains('space decisions index'), reason: entry.key);
+      expect(
+        entry.value,
+        isNot(contains('decisions index --surface')),
+        reason: entry.key,
+      );
+      expect(
+        entry.value,
+        isNot(contains('space decisions index')),
+        reason: entry.key,
+      );
+      expect(entry.value, isNot(contains('{{runner}}')), reason: entry.key);
+      // The roster union is still the standard, and the manual fallback is
+      // still EVERY mounted register — never this repo's alone.
       expect(
         entry.value,
         contains('mounted-substation roster'),
+        reason: entry.key,
+      );
+      expect(
+        entry.value.toLowerCase(),
+        contains('every mounted register'),
         reason: entry.key,
       );
       for (final token in kLocalOnlyTokens) {
@@ -572,27 +588,35 @@ void main() {
       }
     });
 
-    test('every searching asset mirrors the lens command VERBATIM', () {
+    test('no searching asset carries a cwd-less lookup the live prompt would '
+        'have qualified', () {
       final surfaceLookup = rosterDecisionIndexCommand(
         surface: '$kUnknownSubstationPrefix/$kRosterSurfacePlaceholder',
       );
 
+      // The unqualified forms — what a packaged asset could ship, and what
+      // dies `Could not find package` in a lane worktree.
+      for (final text in [
+        _bound(loader, loader.loadRubric('decision-alignment')),
+        loader.loadPromptTemplate('spec-critic'),
+        loader.loadPromptTemplate('readiness'),
+        loader.loadPromptTemplate('discovery'),
+      ]) {
+        expect(text, isNot(contains(surfaceLookup)));
+        expect(text, isNot(contains(rosterDecisionIndexCommand())));
+      }
+      // The two that DO look up still say where to look instead.
       for (final text in [
         _bound(loader, loader.loadRubric('decision-alignment')),
         loader.loadPromptTemplate('spec-critic'),
       ]) {
-        expect(text, contains(surfaceLookup));
+        expect(text, contains('docs/decisions/'));
       }
-      // The discovery lens is the exception, and deliberately so: the gather
-      // runs that exact command before fan-out, so the lens mirrors the
-      // RESULT, never the command.
+      // The discovery lens neither looks up nor names a fallback: the gather
+      // already ran the lookup, so the lens mirrors the RESULT.
       expect(
         loader.loadPromptTemplate('discovery'),
-        isNot(contains(surfaceLookup)),
-      );
-      expect(
-        loader.loadPromptTemplate('readiness'),
-        contains(rosterDecisionIndexCommand()),
+        isNot(contains('mounted register')),
       );
     });
   });

@@ -34,11 +34,51 @@ void main() {
       );
     });
 
+    test('a bound GRID HOME qualifies the verb with its cwd — the station\'s '
+        'JIT verb resolves only from there', () {
+      expect(
+        rosterDecisionIndexCommand(
+          surface: '$kUnknownSubstationPrefix/$kRosterSurfacePlaceholder',
+          runner: 'dart run lunar:lunar',
+          gridHome: '/grid/lunar',
+        ),
+        "cd '/grid/lunar' && dart run lunar:lunar decisions index "
+        '--surface <repo>/<path>',
+      );
+      expect(
+        rosterDecisionIndexCommand(gridHome: '/grid/lunar'),
+        "cd '/grid/lunar' && space decisions index",
+      );
+    });
+
+    test('a grid home is SHELL-QUOTED — a space or an apostrophe still renders '
+        'ONE argument', () {
+      expect(
+        rosterDecisionIndexCommand(gridHome: '/grid homes/lunar'),
+        "cd '/grid homes/lunar' && space decisions index",
+      );
+      expect(
+        rosterDecisionIndexCommand(gridHome: "/nico's grid"),
+        'cd \'/nico\'"\'"\'s grid\' && space decisions index',
+      );
+    });
+
+    test('an ABSENT or blank grid home keeps the BARE verb — the executing '
+        'gather binds its own working directory', () {
+      for (final home in [null, '', '   ']) {
+        expect(
+          rosterDecisionIndexCommand(surface: 'a/b.dart', gridHome: home),
+          'space decisions index --surface a/b.dart',
+        );
+      }
+    });
+
     test('NO register-directory argument is ever rendered — the omission is '
         'what resolves the roster', () {
       for (final command in [
         rosterDecisionIndexCommand(),
         rosterDecisionIndexCommand(surface: 'a/b.dart'),
+        rosterDecisionIndexCommand(surface: 'a/b.dart', gridHome: '/g'),
       ]) {
         expect(command, isNot(contains('docs/adr')));
         expect(command, isNot(contains('docs/decisions')));
@@ -50,21 +90,35 @@ void main() {
   });
 
   group('rosterDecisionLookupBlock is one command per surface', () {
-    test('every surface gets its own line, in order', () {
+    test('every surface gets its own line, in order, each cwd-qualified', () {
       expect(
-        rosterDecisionLookupBlock(const ['a/b.dart', 'c/d.dart']),
-        'space decisions index --surface a/b.dart\n'
-        'space decisions index --surface c/d.dart',
+        rosterDecisionLookupBlock(const [
+          'a/b.dart',
+          'c/d.dart',
+        ], gridHome: '/grid/lunar'),
+        "cd '/grid/lunar' && space decisions index --surface a/b.dart\n"
+        "cd '/grid/lunar' && space decisions index --surface c/d.dart",
       );
     });
 
     test('an empty surface list renders the TEMPLATE form, so a PRE-SPECIFY '
         'brief still names the verb', () {
       expect(
-        rosterDecisionLookupBlock(const []),
-        'space decisions index '
+        rosterDecisionLookupBlock(const [], gridHome: '/grid/lunar'),
+        "cd '/grid/lunar' && space decisions index "
         '--surface $kUnknownSubstationPrefix/$kRosterSurfacePlaceholder',
       );
+    });
+
+    test('an UNBOUND grid home renders NOTHING — a prompt names no command it '
+        'cannot run from where it stands', () {
+      for (final home in [null, '', '  ']) {
+        expect(
+          rosterDecisionLookupBlock(const ['a/b.dart'], gridHome: home),
+          isEmpty,
+        );
+        expect(rosterDecisionLookupBlock(const [], gridHome: home), isEmpty);
+      }
     });
 
     test('surfaces derived from a spec dedupe in document order', () {
@@ -80,9 +134,12 @@ void main() {
       expect(
         rosterDecisionLookupBlock(
           rosterQualifiedSurfaces(design: design, substation: 'power_station'),
+          gridHome: '/grid/lunar',
         ),
-        'space decisions index --surface power_station/lib/a.dart\n'
-        'space decisions index --surface power_station/lib/b.dart',
+        "cd '/grid/lunar' && space decisions index "
+        '--surface power_station/lib/a.dart\n'
+        "cd '/grid/lunar' && space decisions index "
+        '--surface power_station/lib/b.dart',
       );
     });
 
@@ -142,6 +199,102 @@ Read `lib/elsewhere.dart` first.
         ),
         ['$kUnknownSubstationPrefix/lib/a.dart'],
       );
+    });
+  });
+
+  group('decisionLookupRule states the lookup it can actually name', () {
+    test('BOUND: it renders the cwd-qualified verb and says why the cwd is '
+        'there, keeping every roster clause', () {
+      final rule = decisionLookupRule(
+        runner: 'dart run lunar:lunar',
+        gridHome: '/grid/lunar',
+      );
+      expect(
+        rule,
+        contains(
+          "cd '/grid/lunar' && dart run lunar:lunar decisions index "
+          '--surface <repo>/<path>',
+        ),
+      );
+      expect(rule, contains('Could not find package'));
+      for (final token in [
+        'UNION',
+        'LOAD-BEARING',
+        'originRegister',
+        '<repo>#<slug>',
+        'register.legacy-id',
+        'real result, not an error',
+        'never grade a crashed index clean',
+      ]) {
+        expect(rule, contains(token));
+      }
+      expect(rule, isNot(contains('docs/adr')));
+    });
+
+    test('UNBOUND: it names NO invocation and sends the lane to every mounted '
+        'register — the honest form, and the exported default', () {
+      for (final home in [null, '', '   ']) {
+        final rule = decisionLookupRule(
+          runner: 'dart run lunar:lunar',
+          gridHome: home,
+        );
+        expect(rule, kDecisionLookupRule);
+        expect(rule, contains('composing grid home is bound'));
+        expect(rule, contains('docs/decisions/'));
+        expect(rule, contains('EVERY mounted register'));
+        // The FORCE clauses survive the loss of the command.
+        for (final token in [
+          'UNION',
+          'LOAD-BEARING',
+          '<repo>#<slug>',
+          'register.legacy-id',
+          'real result, not an error',
+        ]) {
+          expect(rule, contains(token));
+        }
+        expect(rule, isNot(contains('decisions index --surface')));
+        expect(rule, isNot(contains('lunar decisions index')));
+      }
+    });
+  });
+
+  group('the narrative sentences follow the same binding', () {
+    test('BOUND: both quote the cwd-qualified verb under their parsed '
+        'prefixes', () {
+      const home = '/grid/lunar';
+      final empty = noGoverningDecisionSentence(gridHome: home);
+      final failed = failedDecisionLookupSentence(gridHome: home);
+      expect(empty, startsWith(kNoGoverningDecisionPrefix));
+      expect(failed, startsWith(kFailedDecisionLookupPrefix));
+      for (final sentence in [empty, failed]) {
+        expect(
+          sentence,
+          contains("cd '/grid/lunar' && space decisions index --surface"),
+        );
+      }
+    });
+
+    test('UNBOUND: both name the direct register read instead, and keep the '
+        'prefixes the spec gate parses', () {
+      expect(
+        kNoGoverningDecisionSentence,
+        startsWith(kNoGoverningDecisionPrefix),
+      );
+      expect(
+        kFailedDecisionLookupSentence,
+        startsWith(kFailedDecisionLookupPrefix),
+      );
+      for (final sentence in [
+        kNoGoverningDecisionSentence,
+        kFailedDecisionLookupSentence,
+      ]) {
+        expect(sentence, contains('every mounted decision register'));
+        expect(sentence, isNot(contains('decisions index')));
+        // A backticked register PATH here would parse as a citation
+        // (`isResolvableDecisionReference`), so the sentence that declares
+        // the union empty must not carry one.
+        expect(sentence, isNot(contains('docs/decisions/')));
+      }
     });
   });
 

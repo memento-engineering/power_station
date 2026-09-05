@@ -17,19 +17,27 @@ You are standing in the bead's worktree. Verify the spec's claims against the
 REAL tree before grading: grep/read the files and symbols the plan names, and
 check every recorded decision that governs its touched surfaces. Lookup is
 ROSTER-MODE: read every literal path in the spec's `## Touches` section, prefix
-each repository-relative path with its substation repository name, and run one
-lookup per unique roster-qualified path.
+each repository-relative path with its substation repository name, and resolve
+one lookup per unique roster-qualified path.
 
-```sh
-space decisions index --surface <repo>/<path>
-```
+This portable mirror is rendered with NO composing grid home, so it names no
+`decisions index` invocation. That verb belongs to the composing station and
+resolves only where that station's own package is: a line copied into a per-bead
+worktree exits `Could not find package`, and a lane that reads the crash as
+"unavailable" falls back to a local-register grep, which is exactly the
+blindness roster mode removes. Read `docs/decisions/` in EVERY mounted register
+instead — this substation's and every sibling substation's — and name the
+registers you read. The in-pipeline prompt renders the cwd-qualified command
+whenever its station binds a grid home; when you are handed one of those lines,
+run it exactly as written and nothing it does not render.
 
-Pass NO register-directory argument: that omission is load-bearing — the grid
-adapter resolves the live mounted-substation roster and the command returns the
-UNION of every mounted register rather than only this repo's. Retain results
-from every `originRegister`; a sibling register has exactly the same force as
-the local one. A lookup that FAILS or exits non-zero is NOT an empty union —
-report the failure verbatim and never grade a crashed index clean.
+Either way the standard is the same: no register-directory argument is ever
+passed, because that omission is load-bearing — the grid adapter resolves the
+live mounted-substation roster and returns the UNION of every mounted register
+rather than only this repo's. Retain results from every `originRegister`; a
+sibling register has exactly the same force as the local one. A lookup that
+FAILS or exits non-zero, or a register you could not read, is NOT an empty
+union — report the failure verbatim and never grade it clean.
 
 Cite each decision by its canonical `<repo>#<slug>` identity, for example
 `the_grid#admission-authority-boundary`; migrated entries may also carry

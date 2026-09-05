@@ -78,6 +78,35 @@ final List<String> _specCriticSteps = [
 /// first-party default, so a prompt that still names `space` is unmistakable.
 const String _lunarRunner = 'dart run lunar:lunar';
 
+/// That station's GRID HOME — where its JIT verb resolves. It is NOT the
+/// bead's worktree, which is the whole point: run from the worktree, the same
+/// verb exits `Could not find package lunar`.
+const String _lunarHome = '/grid/lunar';
+
+/// The one form every rendered lunar lookup must take.
+const String _qualifiedLookup =
+    "cd '$_lunarHome' && $_lunarRunner decisions index --surface";
+
+/// Fails unless EVERY lunar lookup in [prompt] is cwd-qualified: strip the
+/// qualified command and no bare invocation may survive.
+void _everyLookupIsRunnable(String prompt, {required String reason}) {
+  expect(prompt, contains(_qualifiedLookup), reason: reason);
+  expect(
+    prompt.replaceAll(_qualifiedLookup, '').contains('lunar:lunar decisions'),
+    isFalse,
+    reason: 'an UNQUALIFIED lunar lookup survives in $reason',
+  );
+  expect(prompt, isNot(contains('space decisions index')), reason: reason);
+  expect(prompt, isNot(contains('{{runner}}')), reason: reason);
+  // The live receipt this fences: three decision-alignment rounds reported
+  // exactly this, then fell back to a local register grep.
+  expect(
+    prompt,
+    isNot(contains('Could not find package lunar')),
+    reason: reason,
+  );
+}
+
 MountedStation _buildStation(
   Fakes f,
   FakeSnapshotSource work,
@@ -250,7 +279,7 @@ void main() {
         work,
         state,
         specifyBdRunnerFor: (_) => specifyReadback,
-        overlayArgs: const {'runner': _lunarRunner},
+        overlayArgs: const {'runner': _lunarRunner, 'gridHome': _lunarHome},
       );
       addTearDown(station.dispose);
       addTearDown(f.provider.close);
@@ -292,9 +321,7 @@ void main() {
       expect(brief, contains('bd update tg-1 --actor specify --acceptance'));
       expect(brief, contains('bd update tg-1 --actor specify --design'));
       expect(brief, contains('## ADR Alignment'));
-      expect(brief, contains('$_lunarRunner decisions index --surface'));
-      expect(brief, isNot(contains('space decisions index')));
-      expect(brief, isNot(contains('{{runner}}')));
+      _everyLookupIsRunnable(brief, reason: 'the specify brief');
       for (final token in kLocalOnlyTokens) {
         expect(brief, isNot(contains(token)));
       }
@@ -348,12 +375,10 @@ void main() {
           .config
           .args
           .last;
-      expect(
+      _everyLookupIsRunnable(
         decisionBrief,
-        contains('$_lunarRunner decisions index --surface'),
+        reason: 'the decision-alignment critic prompt',
       );
-      expect(decisionBrief, isNot(contains('space decisions index')));
-      expect(decisionBrief, isNot(contains('{{runner}}')));
       expect(
         _wroteCursor(f, kSpecGateNode, 'complete'),
         isTrue,
