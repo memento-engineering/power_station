@@ -23,6 +23,7 @@ import '../agent/agent_environment.dart';
 import '../agent/agent_harness.dart';
 import '../agent/agent_session.dart';
 import '../agent/environment_registry.dart';
+import '../agent/permission_policy.dart';
 import 'seat_disc.dart';
 import 'seat_launch.dart';
 
@@ -41,15 +42,21 @@ String _currentDirectory() => Directory.current.path;
 /// spawning a harness.
 class SeatChannelClient {
   /// Creates the terminal client over [adapter] and the child's [write] sink.
+  /// [diagnostics] receives the operator-facing notes this client writes
+  /// (an answered permission request, a channel-side cancellation).
   SeatChannelClient({
     required this.adapter,
     required void Function(List<int>) write,
-  }) : _write = write;
+    StringSink? diagnostics,
+  }) : _write = write,
+       _diagnostics = diagnostics;
 
   /// The selected channel adapter.
   final AgentSessionAdapter adapter;
   final void Function(List<int>) _write;
+  final StringSink? _diagnostics;
   bool _started = false;
+  String? _protocolSessionId;
 
   /// Starts the session with [text]. Refuses a second initial message loudly.
   void prime(String text) {
@@ -67,6 +74,63 @@ class SeatChannelClient {
       return;
     }
     _write(adapter.encodeSteer(text));
+  }
+
+  /// Offers one decoded [event] to this client BEFORE the runner renders it.
+  ///
+  /// Returns true when the event was AUTHORIZATION traffic this client answered
+  /// or absorbed, and false for the harness output the runner prints.
+  ///
+  /// **This seat authorizes nothing** (bead `pow-ed1c`). It is a terminal
+  /// occupying a seat directly — there is no admitted attempt behind it and no
+  /// durable carrier to record an authorization on — so the policy in effect is
+  /// [AgentPermissionPolicy.unavailable] and the answer is the deterministic
+  /// refusal that follows from it. Fabricating an attempt id here would
+  /// manufacture exactly the authority the boundary exists to require.
+  bool handleProtocolControl(AgentProtocolEvent event) {
+    switch (event) {
+      case AgentProtocolProgress() ||
+          AgentProtocolCompleted() ||
+          AgentProtocolFailed():
+        return false;
+      case AgentProtocolSessionBound(:final protocolSessionId):
+        // Tracked ONLY so a refusal can name the protocol identity it refused
+        // on; it grants this seat nothing.
+        _protocolSessionId = protocolSessionId;
+        return true;
+      case AgentProtocolPermissionRequested(:final request):
+        _refusePermission(request);
+        return true;
+      case AgentProtocolPermissionFallback(:final decision):
+        _diagnostics?.writeln(
+          'seat: the channel cancelled a ${decision.capability.name} '
+          'permission request — ${decision.reason}.',
+        );
+        return true;
+    }
+  }
+
+  void _refusePermission(AgentPermissionRequest request) {
+    final decision = decideAgentPermission(
+      policy: const AgentPermissionPolicy.unavailable(),
+      request: request,
+      admittedAttemptId: '',
+      boundSessionId: _protocolSessionId,
+      audited: false,
+    );
+    _diagnostics?.writeln(
+      'seat: refused a ${request.capability.name} permission request on '
+      'protocol session ${_protocolSessionId ?? '(unbound)'} — '
+      '${decision.reason}.',
+    );
+    // IMMEDIATE and bounded: the answer goes out now, so the harness's turn is
+    // never held open waiting for an authority this path does not have.
+    switch (adapter) {
+      case final AgentAuthorizationAdapter authorization:
+        _write(authorization.encodePermissionDecision(decision));
+      case _:
+        return;
+    }
   }
 }
 
@@ -134,12 +198,18 @@ class ProcessSeatRunner {
         ...launch.processEnvironment,
       },
     );
-    final events = adapter.decode(process.stdout).listen(_render);
-    final errors = process.stderr.transform(utf8.decoder).listen(_err.write);
     final client = SeatChannelClient(
       adapter: adapter,
       write: process.stdin.add,
+      diagnostics: _err,
     );
+    // AUTHORIZATION traffic is answered before anything is rendered: the
+    // renderer prints harness output, it does not decide.
+    final events = adapter.decode(process.stdout).listen((event) {
+      if (client.handleProtocolControl(event)) return;
+      _render(event);
+    });
+    final errors = process.stderr.transform(utf8.decoder).listen(_err.write);
     final priming = launch.priming;
     if (priming != null) client.prime(priming);
     final input = _terminalLines.listen(client.send);
