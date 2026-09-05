@@ -32,7 +32,7 @@ library;
 import 'dart:async';
 
 import 'package:beads_dart/beads_dart.dart'
-    show BdRunner, Bead, ProcessBdRunner;
+    show BdRunner, BdTimeoutException, Bead, ProcessBdRunner;
 import 'package:genesis_tree/genesis_tree.dart';
 import 'package:grid_engine/grid_engine.dart';
 import 'package:grid_runtime/grid_runtime.dart';
@@ -62,25 +62,60 @@ import '../search/station_search.dart';
 /// has NO successor of its own: a read that never answers keeps the id in
 /// flight, so every recheck re-reports `read pending` and the bead never mints
 /// (a proxied dolt store that never replies, a bd process that never exits).
-/// This deadline is what gives that read a terminal state — the failure arm,
-/// whose cached refusal a changed snapshot clears for the next attempt.
+/// This deadline is what ends a hung read: it turns the pending clause into
+/// the failure arm, whose cached refusal expires after
+/// [kMountEligibilityReadRetryBackoff] and is then read again.
 ///
 /// It stays distinct from the molecule pour deadline
 /// (`the_grid#the-pour-gets-its-own-bd-deadline` is the PRECEDENT for a named
 /// per-operation budget over a shared bd service, not the budget itself): the
 /// pour is one heavy write, this is a read fanned over two stores, and each is
-/// tuned on its own evidence. It is a deadline, NOT a retry — the killed read
-/// refuses loudly and waits for a changed snapshot.
+/// tuned on its own evidence. It bounds ONE attempt and nothing else: how long
+/// the station waits before the next attempt is
+/// [kMountEligibilityReadRetryBackoff]'s job.
 const Duration kMountEligibilityReadDeadline = Duration(seconds: 60);
 
-/// Raised when [kMountEligibilityReadDeadline] kills a fresh mount-eligibility
-/// read.
+/// How long a FAILED fresh mount-eligibility read stays cached before the next
+/// predicate evaluation reads again — the FIRST wait, doubled per consecutive
+/// failure of the SAME bead and saturating at [_kMountEligibilityReadRetryCap].
 ///
-/// A hung store is the one read failure invisible in the store's OWN output —
-/// there is no exit code and no stderr to attribute it by — so the flare names
-/// `beadId`, the `storeRoot` whose read hung and the `error`, and an operator
-/// reading the boot log sees WHICH store stalled. Every other read failure
-/// already names itself in the refusal clause and flares nothing.
+/// A read fails for two very different reasons and the cache could not tell
+/// them apart. A store that is genuinely wrong about a bead answers the same
+/// way every time. A store that is merely BUSY answers fine a moment later: at
+/// a lunar boot every refused snapshot in the frontier starts its read at once
+/// while sessions mint, and bd's own process deadline
+/// (`ProcessBdRunner.defaultTimeout`) kills the losers of that burst — the same
+/// queries run by hand against the same stores answer in a fraction of a
+/// second. Caching a failure until the snapshot changed made those transient
+/// losses PERMANENT: nothing re-read, so a refused bead needed an EDIT to its
+/// own content before anything would look at it again, and approved work sat
+/// unmountable across boots (incident `tg-e5cb`).
+///
+/// So a failed read is a RETRYABLE state, never a terminal one. The backoff is
+/// what keeps the recovery from re-running the burst it recovers from: the
+/// losers come back spread out, and a store that is genuinely down is asked at
+/// a falling rate rather than on every recheck.
+const Duration kMountEligibilityReadRetryBackoff = Duration(seconds: 30);
+
+/// The ceiling the [kMountEligibilityReadRetryBackoff] doubling saturates at.
+///
+/// The doubling spaces retries out; it must never become abandonment. A bead
+/// refused five times running is still read every five minutes, so a store
+/// that comes back is noticed without an operator touching anything.
+const Duration _kMountEligibilityReadRetryCap = Duration(minutes: 5);
+
+/// Raised when a fresh mount-eligibility read dies on a deadline — either
+/// [kMountEligibilityReadDeadline] killing the whole read, or bd's own process
+/// deadline killing one call inside it (`BdTimeoutException`).
+///
+/// A store that does not answer is the one read failure invisible in the
+/// store's OWN output — there is no exit code and no stderr to attribute it by
+/// — so the flare names `beadId`, the `storeRoot` whose read died and the
+/// `error`, and an operator reading the boot log sees WHICH store stalled.
+/// BOTH deadlines flare because they are the same event seen at two different
+/// budgets: from the boot log a killed bd and a hung read are indistinguishable
+/// unless something names the store. Every other read failure names itself in
+/// its own output and in the refusal clause, and flares nothing.
 const String kMountEligibilityReadTimeoutFlare = 'mountEligibility.readTimeout';
 
 /// Injects grid_assets mount eligibility into the ambient service bundle.
@@ -91,6 +126,12 @@ const String kMountEligibilityReadTimeoutFlare = 'mountEligibility.readTimeout';
 /// refusal that names the read failure. The read is BOUNDED by
 /// [kMountEligibilityReadDeadline] so "in flight" always ends: a store that
 /// never answers becomes a named failure, never a permanent pending clause.
+///
+/// That named failure is RETRYABLE. It answers rechecks for
+/// [kMountEligibilityReadRetryBackoff] (doubled per consecutive failure of the
+/// same bead), and the first evaluation after that reads again — so a bead
+/// whose read lost a boot burst recovers on its own, and no bead ever needs an
+/// edit to its content to be looked at a second time.
 ///
 /// The fresh read is a `FilingService.inspect` rather than a bare bead query,
 /// because a receipt bound to a filing basis can only be judged against a
@@ -104,20 +145,30 @@ class MountEligibilityAssets extends SingleChildStatefulSeed {
   /// Creates the mount-boundary assets node.
   ///
   /// [runnerFor] is the injected bd runner factory. The default delegates all
-  /// process policy to [ProcessBdRunner]. [readDeadline] bounds each fresh
-  /// read (config is a VALUE in the tree, ADR-0008).
+  /// process policy to [ProcessBdRunner]; [now] is the injected clock the
+  /// retry schedule is measured on. [readDeadline] bounds each fresh read and
+  /// [retryBackoff] spaces the attempts (config is a VALUE in the tree,
+  /// ADR-0008).
   const MountEligibilityAssets({
     BdRunner Function(String storeRoot) runnerFor = _processRunnerFor,
+    DateTime Function() now = DateTime.now,
     this.readDeadline = kMountEligibilityReadDeadline,
+    this.retryBackoff = kMountEligibilityReadRetryBackoff,
     super.child,
     super.key,
-  }) : _runnerFor = runnerFor;
+  }) : _runnerFor = runnerFor,
+       _now = now;
 
   final BdRunner Function(String storeRoot) _runnerFor;
+  final DateTime Function() _now;
 
   /// How long ONE fresh read may run before it is killed and refused; see
   /// [kMountEligibilityReadDeadline] for why the read needs a deadline at all.
   final Duration readDeadline;
+
+  /// How long the FIRST failure of a bead's read is cached before it is read
+  /// again; see [kMountEligibilityReadRetryBackoff] for the doubling and cap.
+  final Duration retryBackoff;
 
   static BdRunner _processRunnerFor(String storeRoot) =>
       ProcessBdRunner(workspaceRoot: storeRoot);
@@ -127,19 +178,39 @@ class MountEligibilityAssets extends SingleChildStatefulSeed {
       _MountEligibilityAssetsState();
 }
 
+/// One cached fresh-read failure: what failed, WHEN it failed, and how many
+/// consecutive reads of this bead have now failed.
+///
+/// The instant is what makes the cache EXPIRE instead of terminate; the count
+/// is what makes each expiry wait longer than the one before it.
+class _MountEligibilityReadFailure {
+  const _MountEligibilityReadFailure({
+    required this.error,
+    required this.failedAt,
+    required this.consecutiveAttempts,
+  });
+
+  final Object error;
+  final DateTime failedAt;
+  final int consecutiveAttempts;
+}
+
 class _MountEligibilityAssetsState
     extends SingleChildState<MountEligibilityAssets> {
   ServiceBundle? _ambient;
   sdk.SubstationScope? _scope;
   sdk.GridRoot? _gridRoot;
   BdRunner Function(String storeRoot)? _runnerFor;
+  DateTime Function()? _clock;
   Duration? _readDeadline;
+  Duration? _retryBackoff;
   FilingService? _filing;
   final Map<String, Bead> _snapshotsById = <String, Bead>{};
   final Set<String> _readsInFlight = <String>{};
   final Map<String, MountEligibilityDecision> _freshDecisionsById =
       <String, MountEligibilityDecision>{};
-  final Map<String, Object> _readFailuresById = <String, Object>{};
+  final Map<String, _MountEligibilityReadFailure> _readFailuresById =
+      <String, _MountEligibilityReadFailure>{};
   var _generation = 0;
   var _revision = 0;
   var _disposed = false;
@@ -154,10 +225,14 @@ class _MountEligibilityAssetsState
     // a re-provided root re-derives every cached recheck under it.
     final gridRoot = context.dependOnInheritedSeedOfExactType<sdk.GridRoot>();
     final runnerFor = seed._runnerFor;
+    final now = seed._now;
     final readDeadline = seed.readDeadline;
+    final retryBackoff = seed.retryBackoff;
     if (scope == _scope &&
         gridRoot == _gridRoot &&
         readDeadline == _readDeadline &&
+        retryBackoff == _retryBackoff &&
+        identical(now, _clock) &&
         identical(runnerFor, _runnerFor)) {
       return;
     }
@@ -165,7 +240,9 @@ class _MountEligibilityAssetsState
     _scope = scope;
     _gridRoot = gridRoot;
     _runnerFor = runnerFor;
+    _clock = now;
     _readDeadline = readDeadline;
+    _retryBackoff = retryBackoff;
     _filing = scope == null
         ? null
         : FilingService(
@@ -192,12 +269,17 @@ class _MountEligibilityAssetsState
         final freshDecision = _freshDecisionsById[bead.id];
         if (freshDecision != null) return freshDecision;
 
+        // A cached failure is a WAIT, not a verdict: it answers rechecks until
+        // its backoff runs out, and the evaluation that finds it expired falls
+        // through and reads again — so a transient failure clears itself and
+        // an unchanged bead is never abandoned. The record stays until a read
+        // ANSWERS; it is what makes the next wait longer than this one.
         final failure = _readFailuresById[bead.id];
-        if (failure != null) {
+        if (failure != null && seed._now().isBefore(_retryDueAt(failure))) {
           return MountEligibilityDecision.refused(
             clause:
                 'fresh mount-eligibility read failed for ${bead.id} '
-                'in ${scope.root}: $failure',
+                'in ${scope.root}: ${failure.error}',
           );
         }
 
@@ -226,6 +308,21 @@ class _MountEligibilityAssetsState
           clause: 'fresh mount-eligibility read pending: ${bead.id}',
         );
     }
+  }
+
+  /// The instant a cached [failure] may be read again: [retryBackoff] doubled
+  /// once per consecutive failure of this bead, saturating at the cap.
+  DateTime _retryDueAt(_MountEligibilityReadFailure failure) {
+    var wait = seed.retryBackoff;
+    for (var doubling = 1; doubling < failure.consecutiveAttempts; doubling++) {
+      if (wait >= _kMountEligibilityReadRetryCap) break;
+      wait *= 2;
+    }
+    return failure.failedAt.add(
+      wait > _kMountEligibilityReadRetryCap
+          ? _kMountEligibilityReadRetryCap
+          : wait,
+    );
   }
 
   Future<void> _readFresh(
@@ -288,13 +385,18 @@ class _MountEligibilityAssetsState
     Object error,
   ) {
     if (!_isCurrent(snapshot, generation)) return;
+    final prior = _readFailuresById[snapshot.id];
     setState(() {
       _readsInFlight.remove(snapshot.id);
       _freshDecisionsById.remove(snapshot.id);
-      _readFailuresById[snapshot.id] = error;
+      _readFailuresById[snapshot.id] = _MountEligibilityReadFailure(
+        error: error,
+        failedAt: seed._now(),
+        consecutiveAttempts: (prior?.consecutiveAttempts ?? 0) + 1,
+      );
       _revision++;
     });
-    if (error is! TimeoutException) return;
+    if (error is! TimeoutException && error is! BdTimeoutException) return;
     // The refusal clause reaches whoever asks for THIS bead's decision; the
     // flare reaches the operator reading the boot log, where a stalled store
     // otherwise shows up only as a bead that never mints.
@@ -346,7 +448,9 @@ class _MountEligibilityAssetsState
         scope,
         _gridRoot,
         seed._runnerFor,
+        seed._now,
         seed.readDeadline,
+        seed.retryBackoff,
         _revision,
       ],
       child: child,
