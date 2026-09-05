@@ -1212,25 +1212,81 @@ void main() {
       expect(thrown.single.error, contains('store is down'));
     });
 
-    test('the decision-index source keeps every originRegister, resolves each '
-        'slug, and FAILS loud on a crashed or malformed lookup', () async {
+    test('a spec-2 decision-index envelope parses complete despite '
+        'diagnostics, keeps every originRegister, resolves each slug, and '
+        'FAILS loud on a crashed or malformed lookup', () async {
       final dir = Directory.systemTemp.createTempSync('decisions-index');
       addTearDown(() => dir.deleteSync(recursive: true));
       final register = Directory(p.join(dir.path, 'docs', 'decisions'))
         ..createSync(recursive: true);
-      File(p.join(register.path, 'entry.md')).writeAsStringSync(
-        '---\nstatus: accepted\nregister:\n  slug: the-entry\n---\nthe clause',
-      );
+      final entryFile =
+          File(p.join(register.path, '2026-09-04-discovery-evidence.md'))
+            ..writeAsStringSync(
+              '---\nstatus: accepted\nregister:\n  spec: 1\n'
+              '  slug: discovery-evidence-is-gathered-once-and-projected\n'
+              '---\nthe gather is deterministic',
+            );
+      const surface =
+          'power_station/packages/grid_assets/lib/src/code/discovery.dart';
+      const slug = 'discovery-evidence-is-gathered-once-and-projected';
+      const declared = [
+        'packages/grid_assets/lib/src/code/discovery.dart',
+        'packages/grid_assets/lib/src/code/code_capabilities.dart',
+        'packages/grid_assets/extension/prompts/discovery.md',
+      ];
+      // Copied from a live `decisions index --surface` answer: the register
+      // publishes OUTPUT schema 2 — `edges` on every decision, `diagnostics`
+      // riding beside them — while entries stay at format `spec: 1`.
       final ok = _CannedShellRunner(
         output: jsonEncode({
-          'spec': 1,
+          'spec': 2,
           'decisions': [
             {
-              'slug': 'the-entry',
-              'originRegister': 'sibling_station',
-              'originPath': 'docs/decisions',
+              'originRegister': 'power_station',
+              'originPath': register.path,
+              'slug': slug,
               'status': 'accepted',
-              'surfaces': ['packages/**'],
+              'surfaces': declared,
+              'edges': [
+                {
+                  'kind': 'updates',
+                  'reference':
+                      'a21-bead-pow-96y-the-discovery-circuit-a-nested-read-'
+                      'only-ga',
+                  'resolution': 'resolved',
+                  'targetRegister': 'power_station',
+                  'targetSlug':
+                      'a21-bead-pow-96y-the-discovery-circuit-a-nested-read-'
+                      'only-ga',
+                },
+                {
+                  'kind': 'updates',
+                  'reference':
+                      'a23-bead-pow-kzx-the-station-overlay-delivery-lib-'
+                      'renders-an',
+                  'resolution': 'resolved',
+                  'targetRegister': 'power_station',
+                  'targetSlug':
+                      'a23-bead-pow-kzx-the-station-overlay-delivery-lib-'
+                      'renders-an',
+                },
+                {
+                  'kind': 'updates',
+                  'reference':
+                      'the-spec-decision-lane-queries-the-roster-union',
+                  'resolution': 'resolved',
+                  'targetRegister': 'power_station',
+                  'targetSlug':
+                      'the-spec-decision-lane-queries-the-roster-union',
+                },
+              ],
+            },
+          ],
+          'diagnostics': [
+            {
+              'ruleId': 'entry-schema',
+              'file': 'docs/decisions/2026-01-01-unparsed.md',
+              'message': 'missing `register.slug`',
             },
           ],
         }),
@@ -1239,13 +1295,10 @@ void main() {
         ok,
         runnerInvocation: 'dart run lunar:lunar',
         gridHome: '/grid/lunar',
-      )(dir.path, ['power_station/lib/a.dart', 'power_station/lib/a.dart']);
+      )(dir.path, [surface, surface]);
       expect(
         ok.commands,
-        [
-          'dart run lunar:lunar decisions index --surface '
-              'power_station/lib/a.dart',
-        ],
+        ['dart run lunar:lunar decisions index --surface $surface'],
         reason:
             'one call per DEDUPLICATED surface, rendered from the COMPOSING '
             'station\'s invocation and never a literal binary name, with no '
@@ -1258,28 +1311,35 @@ void main() {
             'the station\'s JIT verb runs at ITS grid home, never at the '
             'work worktree (${dir.path}) where the package does not resolve',
       );
-      expect(surfaced.single.state, EvidenceState.complete);
-      final entry = surfaced.single.decisions.single;
-      expect(entry.identity, 'sibling_station#the-entry');
-      expect(entry.body.snippet, contains('the clause'));
-
-      // An EMPTY union at exit 0 is a REAL result.
-      final empty = await commandDecisionIndexSource(
-        _CannedShellRunner(
-          output: jsonEncode({'spec': 1, 'decisions': <Object?>[]}),
-        ),
-        runnerInvocation: 'dart run lunar:lunar',
-        gridHome: '/grid/lunar',
-      )(dir.path, ['power_station/lib/a.dart']);
-      expect(empty.single.state, EvidenceState.complete);
-      expect(empty.single.decisions, isEmpty);
+      final record = surfaced.single;
+      expect(record.surface, surface);
+      expect(record.command, ok.commands.single);
+      expect(
+        record.state,
+        EvidenceState.complete,
+        reason:
+            'a producer-owned `diagnostics` array is CONTEXT — it never '
+            'downgrades the union this consumer read: ${record.error}',
+      );
+      expect(record.error, isEmpty);
+      expect(record.truncated, isFalse);
+      final entry = record.decisions.single;
+      expect(entry.identity, 'power_station#$slug');
+      expect(entry.originRegister, 'power_station');
+      expect(entry.originPath, register.path);
+      expect(entry.slug, slug);
+      expect(entry.status, 'accepted');
+      expect(entry.surfaces, declared);
+      expect(entry.entryPath, entryFile.path);
+      expect(entry.body.state, EvidenceState.complete);
+      expect(entry.body.snippet, contains('the gather is deterministic'));
 
       // Malformed JSON and a non-zero exit are BOTH loud failures.
       final malformed = await commandDecisionIndexSource(
         _CannedShellRunner(output: 'not json'),
         runnerInvocation: 'dart run lunar:lunar',
         gridHome: '/grid/lunar',
-      )(dir.path, ['power_station/lib/a.dart']);
+      )(dir.path, [surface]);
       expect(malformed.single.state, EvidenceState.failed);
       expect(malformed.single.error, contains('malformed index JSON'));
 
@@ -1287,7 +1347,7 @@ void main() {
         _CannedShellRunner(exitCode: 127, output: 'command not found: lunar'),
         runnerInvocation: 'dart run lunar:lunar',
         gridHome: '/grid/lunar',
-      )(dir.path, ['power_station/lib/a.dart']);
+      )(dir.path, [surface]);
       expect(crashed.single.state, EvidenceState.failed);
       expect(crashed.single.error, contains('command not found'));
 
@@ -1295,22 +1355,64 @@ void main() {
       final unresolvable = await commandDecisionIndexSource(
         _CannedShellRunner(
           output: jsonEncode({
-            'spec': 1,
+            'spec': 2,
             'decisions': [
               {
                 'slug': 'no-such-entry',
                 'originRegister': 'power_station',
                 'originPath': 'docs/decisions',
+                'status': 'accepted',
+                'surfaces': <String>[],
+                'edges': <Object?>[],
               },
             ],
+            'diagnostics': <Object?>[],
           }),
         ),
         runnerInvocation: 'dart run lunar:lunar',
         gridHome: '/grid/lunar',
-      )(dir.path, ['power_station/lib/a.dart']);
+      )(dir.path, [surface]);
       expect(unresolvable.single.state, EvidenceState.failed);
       expect(unresolvable.single.error, contains('no-such-entry'));
     });
+
+    test('a spec-1 decision-index envelope remains compatible — the legacy '
+        'output any older composed CLI still emits is read, and its EMPTY '
+        'union at exit 0 is a REAL result', () async {
+      final empty = await commandDecisionIndexSource(
+        _CannedShellRunner(
+          output: jsonEncode({'spec': 1, 'decisions': <Object?>[]}),
+        ),
+        runnerInvocation: 'dart run lunar:lunar',
+        gridHome: '/grid/lunar',
+      )('/w', ['power_station/lib/a.dart']);
+      expect(empty.single.state, EvidenceState.complete);
+      expect(empty.single.decisions, isEmpty);
+      expect(empty.single.error, isEmpty);
+    });
+
+    test(
+      'unsupported decision-index specs fail and name the seen value',
+      () async {
+        for (final seen in <Object?>[0, 3, '2', null]) {
+          final records = await commandDecisionIndexSource(
+            _CannedShellRunner(
+              output: jsonEncode({'spec': seen, 'decisions': <Object?>[]}),
+            ),
+            runnerInvocation: 'dart run lunar:lunar',
+            gridHome: '/grid/lunar',
+          )('/w', ['power_station/lib/a.dart']);
+          expect(records.single.state, EvidenceState.failed, reason: '$seen');
+          expect(records.single.decisions, isEmpty, reason: '$seen');
+          expect(
+            records.single.error,
+            'index answered unsupported `spec`: ${jsonEncode(seen)}; '
+            'accepted specs are 1 and 2',
+            reason: 'the record names the exact value the index answered',
+          );
+        }
+      },
+    );
 
     test('an ABSENT station runner records UNAVAILABLE and never reaches the '
         'shell — this pack names no decisions binary', () async {

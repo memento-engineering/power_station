@@ -2871,7 +2871,25 @@ DecisionIndexSource commandDecisionIndexSource(
   };
 }
 
+/// The `decisions index` OUTPUT schema versions this consumer reads.
+///
+/// This is the ENVELOPE's `spec`, which is NOT the per-entry format spec an
+/// authored decision declares (`register.spec`, still 1 and untouched here).
+/// The register's current output is schema 2 — `{spec, decisions, diagnostics}`
+/// with `edges` on each decision — and schema 1 is the legacy output any older
+/// composed CLI still emits. The producer's own rule is that readers support
+/// every version at or below their own, so both are read; any OTHER value is a
+/// loud failed record naming what was seen, because a consumer that guesses at
+/// an envelope it does not know grades noise as evidence.
+const Set<int> _acceptedDecisionIndexSpecs = {1, 2};
+
 /// Parses ONE `decisions index` run and resolves every returned slug on disk.
+///
+/// Only an [_acceptedDecisionIndexSpecs] envelope is read. Schema 2's top-level
+/// `diagnostics` and per-decision `edges` are PRODUCER-owned context this
+/// consumer neither validates nor projects: a register that lints dirty still
+/// answers a complete union here, and a new member added beside them never
+/// turns a good answer into a deterministic gap.
 DecisionSurfaceEvidence _decisionLookup({
   required String workspaceDir,
   required String surface,
@@ -2889,12 +2907,15 @@ DecisionSurfaceEvidence _decisionLookup({
       error: 'malformed index JSON: $e',
     );
   }
-  if (decoded is! Map || decoded['spec'] != 1) {
+  final seenSpec = decoded is Map ? decoded['spec'] : null;
+  if (decoded is! Map || !_acceptedDecisionIndexSpecs.contains(seenSpec)) {
     return _decisionSurface(
       surface: surface,
       command: command,
       entries: const [],
-      error: 'index answered no `spec: 1` envelope',
+      error:
+          'index answered unsupported `spec`: ${jsonEncode(seenSpec)}; '
+          'accepted specs are ${_acceptedDecisionIndexSpecs.join(' and ')}',
     );
   }
   final raw = decoded['decisions'];
