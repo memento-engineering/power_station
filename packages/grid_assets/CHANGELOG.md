@@ -5,6 +5,7 @@
 
 ## 0.6.0-rc.15
 
+- Fixed: the discovery gather carries the WORK BEAD's own citation fields (`boundedBeadFields`) WHOLE — `kMaxDiscoverySnippetChars` bounds FOREIGN evidence (prior-art hits, anchor contents, decision entries, history) so it cannot flood a lens, and it never clips the brief the lens is judging. A description past 4 KB arrived at every lens truncated, and the prior-art lens correctly refused to judge a clipped brief — holding the bead's own discovery round. `boundDiscoveryEvidence` gains `truncateSnippet` (default `true`, so every foreign caller is unchanged); digests, evidence ids and the `EvidenceState` meanings are untouched (pow-xfm0).
 - Fixed: the discovery gather no longer treats a record clipped at its OWN bound (`kMaxDiscoverySnippetChars`, `kMaxHistoryCommits`) or a clipped anchor/symbol extraction (`kMaxAnchors`) as a deterministic gap — every mature surface exceeds those bounds, and the override held every round at `discovery-route` while the lenses reported zero gaps. A clip is rendered as context the lens narrates; only `failed` overrides a lens, and only the lens's own insufficient-evidence outcome holds the round on a clip. `gatherHistory` records `unavailable` over an empty resolved path list instead of logging the whole repository (pow-gcx9, #225).
 
 ## 0.6.0-rc.14

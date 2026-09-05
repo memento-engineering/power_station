@@ -1128,27 +1128,78 @@ void main() {
       );
     });
 
-    test('a body over the snippet bound is TRUNCATED, hashed whole', () {
-      final long = 'x' * (kMaxDiscoverySnippetChars + 500);
-      final bounded = boundDiscoveryEvidence(
-        kind: 'code-anchor',
-        subject: 'lib/big.dart',
-        source: 'lib/big.dart',
-        fullText: long,
+    test(
+      'a FOREIGN body over the snippet bound is TRUNCATED, hashed whole',
+      () {
+        final long = 'x' * (kMaxDiscoverySnippetChars + 500);
+        final bounded = boundDiscoveryEvidence(
+          kind: 'prior-art-hit',
+          subject: 'search|pow-x|description',
+          source: 'search:the gather',
+          fullText: long,
+        );
+        expect(bounded.state, EvidenceState.truncated);
+        expect(bounded.snippet, hasLength(kMaxDiscoverySnippetChars));
+        expect(
+          bounded.digest,
+          boundDiscoveryEvidence(
+            kind: 'other',
+            subject: 'elsewhere',
+            source: '',
+            fullText: long,
+          ).digest,
+          reason: 'the digest is over the COMPLETE text, not the snippet',
+        );
+        expect(bounded.id, contains('sha256:${bounded.digest}'));
+      },
+    );
+
+    test('the WORK BEAD\'s own fields are carried WHOLE, however long', () {
+      final long = 'y' * (kMaxDiscoverySnippetChars + 500);
+      final fields = boundedBeadFields(
+        bead('pow-x').copyWith(description: long),
       );
-      expect(bounded.state, EvidenceState.truncated);
-      expect(bounded.snippet, hasLength(kMaxDiscoverySnippetChars));
+      final description = fields.singleWhere(
+        (field) => field.field == BeadCitationField.description,
+      );
       expect(
-        bounded.digest,
+        description.evidence.snippet,
+        long,
+        reason:
+            'the bead under review is the round\'s PRIMARY input — the '
+            'snippet bound is for FOREIGN evidence, and a lens handed a '
+            'clipped brief correctly refuses to judge it',
+      );
+      expect(description.evidence.state, EvidenceState.complete);
+      expect(
+        description.evidence.digest,
         boundDiscoveryEvidence(
           kind: 'other',
           subject: 'elsewhere',
           source: '',
           fullText: long,
         ).digest,
-        reason: 'the digest is over the COMPLETE text, not the snippet',
+        reason: 'the identity is still the digest of the COMPLETE field',
       );
-      expect(bounded.id, contains('sha256:${bounded.digest}'));
+      expect(
+        description.evidence.id,
+        contains('sha256:${description.evidence.digest}'),
+      );
+      // The projection a lens actually reads carries the whole field too, and
+      // records NO gap over it.
+      final projected = projectDiscoveryEvidence(
+        DiscoveryAnchors(
+          round: 0,
+          workBeadId: 'pow-x',
+          beadFields: fields,
+          history: completeHistory(),
+        ),
+        lens: kPriorArtLens,
+        round: 0,
+        workBeadId: 'pow-x',
+      );
+      expect(projected.renderedEvidence, contains(long));
+      expect(projected.gaps, isEmpty);
     });
 
     test('a resolved anchor carries bounded contents; a missing one is a '

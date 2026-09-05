@@ -140,10 +140,15 @@ const int kMaxAnchors = 12;
 /// files) — enough to show the architect what the neighborhood looks like.
 const int kMaxNeighbors = 8;
 
-/// The bound on ONE piece of bounded evidence's rendered SNIPPET. The full text
-/// is always hashed; only the snippet is clipped, and a clip is RECORDED
-/// ([EvidenceState.truncated]) so bounded evidence can never masquerade as
-/// complete evidence.
+/// The bound on ONE piece of FOREIGN bounded evidence's rendered SNIPPET — a
+/// prior-art hit, an anchor's contents, a decision entry, a history record. The
+/// full text is always hashed; only the snippet is clipped, and a clip is
+/// RECORDED ([EvidenceState.truncated]) so bounded evidence can never
+/// masquerade as complete evidence.
+///
+/// It does NOT bound the WORK BEAD's own fields: the bead under review is the
+/// round's primary input, not evidence gathered around it, so
+/// [boundedBeadFields] carries it whole.
 const int kMaxDiscoverySnippetChars = 4096;
 
 /// The bound on the decision entries kept for ONE roster-qualified surface.
@@ -225,7 +230,8 @@ class BoundedEvidence {
   /// WHERE the evidence came from (a file path, a bead field, a command).
   final String source;
 
-  /// The evidence text, clipped to [kMaxDiscoverySnippetChars].
+  /// The evidence text — clipped to [kMaxDiscoverySnippetChars] for foreign
+  /// evidence, carried WHOLE for the work bead's own fields.
   final String snippet;
 
   /// The SHA-256 of the COMPLETE text (never of the clipped snippet).
@@ -272,6 +278,12 @@ class BoundedEvidence {
 /// Bounds [fullText] into one [BoundedEvidence] record: hashes the COMPLETE
 /// text, clips the snippet at [kMaxDiscoverySnippetChars], and derives the
 /// state ([EvidenceState.truncated] on a clip) unless [state] forces one.
+///
+/// [truncateSnippet] false carries the text whole and therefore records
+/// [EvidenceState.complete] — reserved for the WORK BEAD's own fields
+/// ([boundedBeadFields]), which are the round's primary input rather than
+/// evidence gathered around it. Every foreign source keeps the default clip.
+/// The digest, the id and an explicit [state] are identical either way.
 BoundedEvidence boundDiscoveryEvidence({
   required String kind,
   required String subject,
@@ -279,9 +291,11 @@ BoundedEvidence boundDiscoveryEvidence({
   required String fullText,
   EvidenceState? state,
   String error = '',
+  bool truncateSnippet = true,
 }) {
   final digest = sha256.convert(utf8.encode(fullText)).toString();
-  final wasTruncated = fullText.length > kMaxDiscoverySnippetChars;
+  final wasTruncated =
+      truncateSnippet && fullText.length > kMaxDiscoverySnippetChars;
   final resolvedState =
       state ??
       (wasTruncated ? EvidenceState.truncated : EvidenceState.complete);
@@ -299,8 +313,9 @@ BoundedEvidence boundDiscoveryEvidence({
   );
 }
 
-/// ONE bead field, bounded — the work bead's own prose, resolved ONCE by the
-/// deterministic gather so no lens re-reads the bead through a tool.
+/// ONE bead field — the work bead's own prose, resolved ONCE by the
+/// deterministic gather so no lens re-reads the bead through a tool. Carried
+/// WHOLE, however long ([boundedBeadFields]).
 class BeadFieldEvidence {
   /// Creates the record.
   const BeadFieldEvidence({
@@ -315,7 +330,8 @@ class BeadFieldEvidence {
   /// Which field.
   final BeadCitationField field;
 
-  /// The bounded field text.
+  /// The field text — identified and stated like any other record, but never
+  /// clipped at [kMaxDiscoverySnippetChars].
   final BoundedEvidence evidence;
 
   /// The wire shape.
@@ -1309,7 +1325,8 @@ class DiscoveryAnchors {
   /// The work bead this gather was taken for.
   final String workBeadId;
 
-  /// The bead's own fields, bounded — so no lens re-reads the bead.
+  /// The bead's own fields, carried WHOLE — so no lens re-reads the bead, and
+  /// none of them reads a CLIPPED copy of the brief it must judge.
   final List<BeadFieldEvidence> beadFields;
 
   /// The spec committee's own grading rubrics, id → prose. ADR-0000 A19's
@@ -2556,8 +2573,24 @@ ResolvedAnchor resolveAnchorOnDisk(String workspaceDir, String anchor) {
   }
 }
 
-/// The bead's own fields, bounded ONCE — the intake block every lens used to
+/// The bead's own fields, resolved ONCE — the intake block every lens used to
 /// re-render from the live bead.
+///
+/// Carried WHOLE (`truncateSnippet: false`), so a field is always
+/// [EvidenceState.complete]. [kMaxDiscoverySnippetChars] exists so FOREIGN
+/// evidence cannot flood a lens; the bead under review is the round's PRIMARY
+/// INPUT, and clipping it handed each lens a truncated copy of the very brief
+/// it must judge — a lens that cannot read the whole brief correctly refuses to
+/// judge it, so every bead whose description ran past the bound held its own
+/// discovery round.
+///
+/// That is deliberate about the TRUNCATED clause of
+/// `power_station#discovery-evidence-is-gathered-once-and-projected` — "Required
+/// evidence that is TRUNCATED or FAILED is a known non-answer: it overrides a
+/// clean-looking report, regathers the affected lane once, and then holds":
+/// carrying the fields whole takes the bead's OWN prose out of that clause's
+/// domain (there is nothing left to clip), while every foreign record stays
+/// inside it, bounded and stated exactly as before.
 List<BeadFieldEvidence> boundedBeadFields(Bead bead) => [
   for (final field in BeadCitationField.values)
     BeadFieldEvidence(
@@ -2568,6 +2601,7 @@ List<BeadFieldEvidence> boundedBeadFields(Bead bead) => [
         subject: '${bead.id}.${field.wire}',
         source: 'bead:${bead.id}#${field.wire}',
         fullText: beadFieldValue(bead, field),
+        truncateSnippet: false,
       ),
     ),
 ];
