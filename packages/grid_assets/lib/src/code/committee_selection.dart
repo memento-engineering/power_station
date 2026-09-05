@@ -12,8 +12,11 @@
 ///  - [CommitteeSelectionCapability] always resolves to [Ok] and NEVER emits a
 ///    grade, an [Escalate], a [Rewind] or a [Failed] — the cost optimizer must
 ///    never gate throughput;
-///  - [CommitteeShadowRouteCapability] returns the authoritative route's
-///    verdict OBJECT unchanged; it only writes a receipt beside it.
+///  - [CommitteeShadowRouteCapability] never converts, substitutes or waits on
+///    the authoritative ruling: a rewind and an escalate come back as the
+///    delegate's own verdict OBJECT, and an advance comes back with its own
+///    payload intact, carrying the shadow's RESERVED `committeeShadow*`
+///    bookkeeping entries beside it.
 ///
 /// **Selection is stage-specific.** `spec_review` reasons over the round-stamped
 /// discovery artifacts (intent, decisions, paths, prior art); `code_review`
@@ -39,6 +42,16 @@
 /// expose. Nothing here touches that package's store mechanics (its connection,
 /// DDL, appender or fence layers), so promoting the vocabulary later moves the
 /// value types without dragging a database into `grid_assets`.
+///
+/// **The step RESULT is the durable copy.** Both artifacts are written under
+/// the workspace, and the workspace is the per-round WORKTREE — reaped at
+/// session close, taking the whole evidence packet with it. So the packet also
+/// rides the result map the engine appends beside each step transition
+/// ([committeeSelectionResultProjection], [committeeShadowResultProjection]):
+/// the carrier a later fold ALREADY reads, COMPOSED — never a second sink and
+/// never a new record type. The worktree file stays the IN-ROUND working
+/// artifact (the observer's source, the posture the critic verdict already
+/// has); the step result is the copy that outlives the round.
 ///
 /// **The policy source of truth is THIS FILE.** There is no configuration
 /// document, no reload path, no watcher and no second committee pipeline: the
@@ -2253,6 +2266,178 @@ CommitteeShadowReceipt replayCommitteeShadowReceipt(
   truncated: recorded.truncated,
 );
 
+// ── the durable step-result projections ─────────────────────────────────────
+
+/// [run]'s evidence packet as the step-result entries the engine appends
+/// durably beside the step transition — the copy that OUTLIVES the per-round
+/// worktree the store's own artifact is reaped with.
+///
+/// COMPOSITION, not a second sink: the carrier is the existing [Ok] payload a
+/// downstream fold already reads, so nothing here mints a record type, opens a
+/// file or reaches a database. The worktree artifact stays the in-round working
+/// copy; this is the durable one.
+///
+/// BOUNDED by construction — identities, digests, ids and counts only. No
+/// prose, no raw evidence, no rationale: [CommitteeSelectionEvidence]'s fact
+/// lanes, a classifier's reason and its output text are all excluded, and the
+/// only evidence that crosses is its digest and the NAMES of what was missing.
+///
+/// The `sampleId`/`joinId` here are derived exactly as
+/// [buildCommitteeShadowReceipt] derives them, so the selector entry and the
+/// later route entry of the same round carry IDENTICAL identities and a
+/// per-rule fold can join the two on them.
+Map<String, String> committeeSelectionResultProjection(
+  CommitteeSelectionRun run,
+) {
+  final selection = run.selection;
+  final selected = selection.selectedRubricIds.toSet();
+  return {
+    'shadow': 'selection',
+    'source': selection.source.wire,
+    'stage': run.stage.wire,
+    'selected': selection.selectedRubricIds.join(','),
+    'matchedRules': selection.matchedRuleIds.join(','),
+    'classifierAttempts': '${run.attempts.length}',
+    'sampleId': committeeSampleId(
+      policyVersion: run.policyVersion,
+      stage: run.stage,
+      workBeadId: run.workBeadId,
+      round: run.round,
+      evidenceDigest: selection.evidenceDigest,
+    ),
+    'joinId': committeeJoinId(
+      stage: run.stage,
+      workBeadId: run.workBeadId,
+      round: run.round,
+      routeParentPath: committeeSelectionParentPath(run.nodePath),
+    ),
+    'policyVersion': run.policyVersion,
+    'workBeadId': run.workBeadId,
+    'round': canonicalCommitteeJson(run.round),
+    'nodePath': run.nodePath,
+    'omitted': [
+      for (final id in run.fullRubricIds)
+        if (!selected.contains(id)) id,
+    ].join(','),
+    'evidenceDigest': selection.evidenceDigest,
+    'missingEvidenceIds': run.evidence.missingEvidenceIds.join(','),
+    'laneInputDigests': canonicalCommitteeJson(selection.laneInputDigests),
+    'classifierAttemptKinds': [
+      for (final attempt in run.attempts) attempt.kind.wire,
+    ].join(','),
+  };
+}
+
+/// [receipt]'s evidence packet as the RESERVED `committeeShadow*` step-result
+/// entries a shadowed advance carries — the durable half of the receipt the
+/// worktree file is reaped with.
+///
+/// The `committeeShadow` prefix is the reservation: a conforming authoritative
+/// route payload carries no such key, so spreading these entries LAST can only
+/// win a collision against a payload that broke that reservation.
+///
+/// Same bound as [committeeSelectionResultProjection], applied to the receipt's
+/// wider surface: the omitted lanes cross as their rubric ids mapped to a
+/// grade, a transport and a gate disposition; the accounting crosses as
+/// contributor ids and totals. A lane's rationale, finding, owner, refinement
+/// and model, the route's own reason and payload, and every raw evidence lane
+/// are all excluded.
+Map<String, String> committeeShadowResultProjection(
+  CommitteeShadowReceipt receipt,
+) {
+  final run = receipt.run;
+  final selection = run.selection;
+  final lanes = {for (final lane in receipt.lanes) lane.rubricId: lane};
+
+  /// One `omitted rubric id -> column` map, over EVERY omitted lane: a lane the
+  /// committee never observed maps to null rather than dropping out, so the
+  /// omission set and the observation set always have the same members.
+  String omittedColumn(Object? Function(CommitteeLaneReceipt lane) column) =>
+      canonicalCommitteeJson({
+        for (final id in receipt.omittedRubricIds)
+          id: switch (lanes[id]) {
+            final CommitteeLaneReceipt lane => column(lane),
+            null => null,
+          },
+      });
+
+  return {
+    'committeeShadowSampleId': receipt.sampleId,
+    'committeeShadowJoinId': receipt.joinId,
+    'committeeShadowPolicyVersion': run.policyVersion,
+    'committeeShadowWorkBeadId': run.workBeadId,
+    'committeeShadowRound': canonicalCommitteeJson(run.round),
+    'committeeShadowNodePath': run.nodePath,
+    'committeeShadowRouteNodePath': receipt.route.nodePath,
+    'committeeShadowStage': run.stage.wire,
+    'committeeShadowSource': selection.source.wire,
+    'committeeShadowSelected': receipt.selectedRubricIds.join(','),
+    'committeeShadowOmitted': receipt.omittedRubricIds.join(','),
+    'committeeShadowMatchedRules': selection.matchedRuleIds.join(','),
+    'committeeShadowEvidenceDigest': selection.evidenceDigest,
+    'committeeShadowMissingEvidenceIds': run.evidence.missingEvidenceIds.join(
+      ',',
+    ),
+    'committeeShadowLaneInputDigests': canonicalCommitteeJson(
+      selection.laneInputDigests,
+    ),
+    'committeeShadowClassifierAttemptKinds': [
+      for (final attempt in run.attempts) attempt.kind.wire,
+    ].join(','),
+    'committeeShadowActionLaneIds': receipt.actionLaneIds.join(','),
+    'committeeShadowGateDisposition': switch (receipt.gateDisposition) {
+      final GateDisposition disposition => _gateDispositionWire(disposition),
+      null => canonicalCommitteeJson(null),
+    },
+    'committeeShadowDownstreamJoinKeys': canonicalCommitteeJson(
+      receipt.downstreamJoinKeys,
+    ),
+    'committeeShadowOmittedLaneGrades': omittedColumn((lane) => lane.grade),
+    'committeeShadowOmittedLaneTransports': omittedColumn(
+      (lane) => lane.transport,
+    ),
+    'committeeShadowOmittedLaneDispositions': omittedColumn(
+      (lane) => switch (lane.gateDisposition) {
+        final GateDisposition disposition => _gateDispositionWire(disposition),
+        null => null,
+      },
+    ),
+    'committeeShadowActualContributingRunIds': receipt.actual.contributingRunIds
+        .join(','),
+    'committeeShadowActualMissingLaneIds': receipt.actual.missingLaneIds.join(
+      ',',
+    ),
+    'committeeShadowActualTokensIn': canonicalCommitteeJson(
+      receipt.actual.tokensIn,
+    ),
+    'committeeShadowActualTokensOut': canonicalCommitteeJson(
+      receipt.actual.tokensOut,
+    ),
+    'committeeShadowActualCostUsd': canonicalCommitteeJson(
+      receipt.actual.costUsd,
+    ),
+    'committeeShadowCounterfactualContributingRunIds': receipt
+        .counterfactual
+        .contributingRunIds
+        .join(','),
+    'committeeShadowCounterfactualMissingLaneIds': receipt
+        .counterfactual
+        .missingLaneIds
+        .join(','),
+    'committeeShadowCounterfactualTokensIn': canonicalCommitteeJson(
+      receipt.counterfactual.tokensIn,
+    ),
+    'committeeShadowCounterfactualTokensOut': canonicalCommitteeJson(
+      receipt.counterfactual.tokensOut,
+    ),
+    'committeeShadowCounterfactualCostUsd': canonicalCommitteeJson(
+      receipt.counterfactual.costUsd,
+    ),
+    'committeeShadowTruncated': canonicalCommitteeJson(receipt.truncated),
+    'committeeShadowMissingFields': receipt.missingFields.join(','),
+  };
+}
+
 // ── persistence ─────────────────────────────────────────────────────────────
 
 /// The workspace path one stage's selection run is persisted at.
@@ -2540,14 +2725,10 @@ class CommitteeSelectionCapability extends ServiceCapability {
       missingFields: missingFields,
     );
 
-    final payload = <String, String>{
-      'shadow': 'selection',
-      'source': selection.source.wire,
-      'stage': stage.wire,
-      'selected': selection.selectedRubricIds.join(','),
-      'matchedRules': selection.matchedRuleIds.join(','),
-      'classifierAttempts': '${attempts.length}',
-    };
+    // The DURABLE copy: the store write below lands in the per-round worktree
+    // and is reaped with it, so the whole evidence packet also rides the step
+    // result, which the engine appends beside the step transition.
+    final payload = committeeSelectionResultProjection(run);
     if (workspaceDir.isEmpty) {
       return Ok({...payload, 'missingFields': 'workspace'});
     }
@@ -2791,10 +2972,17 @@ const String kCommitteeFixInFlightFindingKey = 'fix_in_flight_finding';
 
 /// The AUTHORITATIVE route, wrapped in shadow bookkeeping.
 ///
-/// It delegates once, writes a receipt beside the answer, and returns the
-/// delegate's exact [RouteVerdict] OBJECT. It never converts, decorates, waits
-/// for or substitutes the verdict, and every shadow read/codec/write exception
-/// is swallowed — a telemetry failure must not change a routing decision.
+/// It delegates once, writes a receipt beside the answer, and rules exactly
+/// what the delegate ruled. A [Rewind] and an [Escalate] carry no result map,
+/// so there is nowhere to promote to and the delegate's own OBJECT comes back;
+/// an [Advance] comes back carrying its whole payload plus the RESERVED
+/// `committeeShadow*` entries of [committeeShadowResultProjection], which is
+/// the receipt's only durable copy once the worktree is reaped.
+///
+/// It never converts, decorates, waits for or substitutes the RULING, and
+/// every shadow read/codec/write exception is swallowed — a telemetry failure
+/// must not change a routing decision, and a failed artifact write in
+/// particular never discards an already-built projection.
 class CommitteeShadowRouteCapability extends RouteCapability {
   /// Wraps [delegate], writing receipts through [store].
   const CommitteeShadowRouteCapability({
@@ -2819,18 +3007,37 @@ class CommitteeShadowRouteCapability extends RouteCapability {
     final captured = _CommitteeShadowRouteInput.capture(context, args, policy);
     final verdict = await delegate.route(context, args);
     final input = captured;
+    CommitteeShadowReceipt? built;
     if (input != null) {
       try {
-        store.writeReceipt(
-          input.workspaceDir,
-          input.receiptFor(verdict, store: store),
-        );
+        built = input.receiptFor(verdict, store: store);
       } on Object {
-        // Shadow telemetry is non-authoritative: a failed receipt changes
-        // nothing about the verdict below.
+        // Shadow telemetry is non-authoritative: a receipt we could not build
+        // changes nothing about the verdict below.
+      }
+      final receipt = built;
+      if (receipt != null) {
+        try {
+          store.writeReceipt(input.workspaceDir, receipt);
+        } on Object {
+          // The worktree artifact is the IN-ROUND working copy and is written
+          // best-effort; losing it never discards the durable projection.
+        }
       }
     }
-    return verdict;
+    final receipt = built;
+    if (receipt == null) return verdict;
+    // The durable copy rides the ONE result carrier the verdict already has.
+    // A rewind and an escalate carry none, so they come back as the delegate's
+    // own OBJECT — identical, field for field.
+    return switch (verdict) {
+      Advance(:final payload) => Advance({
+        ...?payload,
+        ...committeeShadowResultProjection(receipt),
+      }),
+      Rewind() => verdict,
+      Escalate() => verdict,
+    };
   }
 
   @override
