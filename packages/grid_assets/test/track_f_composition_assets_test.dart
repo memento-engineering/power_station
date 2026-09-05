@@ -215,6 +215,26 @@ class _Transport implements ExplorationTransport {
       flares.add((name: name, data: Map<String, String>.unmodifiable(data)));
 }
 
+/// The clock the retry probes step by hand.
+///
+/// The backoff is measured on the INJECTED clock, so a probe asserts the whole
+/// schedule — thirty seconds through the five-minute ceiling — without waiting
+/// on any of it.
+class _FakeClock {
+  DateTime _at = DateTime.utc(2026, 9, 5);
+
+  DateTime now() => _at;
+
+  void advance(Duration by) => _at = _at.add(by);
+}
+
+/// bd's OWN process kill: the failure a lunar boot burst produces, and a class
+/// apart from the asset's deadline over the whole read.
+const BdTimeoutException _bdProcessKill = BdTimeoutException(
+  command: ['bd', 'query', 'id=pow-test'],
+  timeout: Duration(seconds: 15),
+);
+
 class _Host extends StatefulSeed {
   const _Host({required this.onCreate, required this.describe});
   final void Function(_HostState) onCreate;
@@ -245,13 +265,17 @@ Seed _underSubstation(String name, String root, Seed child) =>
 ({TreeOwner owner, ServiceBundle? Function() bundle}) _mountEligibilityAsset(
   BdRunner Function(String storeRoot) runnerFor, {
   Duration readDeadline = kMountEligibilityReadDeadline,
+  Duration retryBackoff = kMountEligibilityReadRetryBackoff,
+  _FakeClock? clock,
   _Transport? transport,
 }) {
   ServiceBundle? observed;
   final owner = TreeOwner();
   final asset = MountEligibilityAssets(
     runnerFor: runnerFor,
+    now: clock == null ? DateTime.now : clock.now,
     readDeadline: readDeadline,
+    retryBackoff: retryBackoff,
     child: _Probe(
       (context) =>
           observed = context.dependOnInheritedSeedOfExactType<ServiceBundle>(),
@@ -600,14 +624,7 @@ void main() {
     'MountEligibilityAssets timed-out refusal recheck is a loud refusal',
     () async {
       final clause = await _runFailedRefusalRecheck(
-        _RecordingMountBdRunner(
-          (_) => Future<BdResult>.error(
-            const BdTimeoutException(
-              command: ['bd', 'query', 'id=pow-test'],
-              timeout: Duration(seconds: 15),
-            ),
-          ),
-        ),
+        _RecordingMountBdRunner((_) => Future<BdResult>.error(_bdProcessKill)),
       );
       expect(clause, contains('fresh mount-eligibility read failed'));
       expect(clause, contains('bd timed out after 15000ms'));
@@ -746,7 +763,143 @@ void main() {
   );
 
   test(
-    'MountEligibilityAssets read deadline is a distinct sixty-second value',
+    'MountEligibilityAssets retries an unchanged snapshot after backoff',
+    () async {
+      // The boot burst in one probe: bd's own process deadline kills the first
+      // read, and the very same query answers the moment it is asked again.
+      final clock = _FakeClock();
+      final scripted = _freshFiling(
+        const Bead(id: 'pow-test', metadata: _legacyReceipt, labels: []),
+      );
+      var queries = 0;
+      final runner = _RecordingMountBdRunner((args) {
+        if (args.first == 'query' && queries++ == 0) {
+          return Future<BdResult>.error(_bdProcessKill);
+        }
+        return scripted(args);
+      });
+      final mounted = _mountEligibilityAsset((_) => runner, clock: clock);
+      const snapshot = Bead(id: 'pow-test', metadata: {}, labels: []);
+
+      expect(
+        _refusalClause(mounted.bundle()!.mountEligibility!(snapshot)),
+        'fresh mount-eligibility read pending: pow-test',
+      );
+      await pumpEventQueue();
+      mounted.owner.flush();
+      expect(
+        _refusalClause(mounted.bundle()!.mountEligibility!(snapshot)),
+        contains('bd timed out after 15000ms'),
+      );
+
+      // One second short of the backoff the cache still answers and nothing is
+      // read: the retry is a WAIT, not a poll on every recheck.
+      clock.advance(
+        kMountEligibilityReadRetryBackoff - const Duration(seconds: 1),
+      );
+      expect(
+        _refusalClause(mounted.bundle()!.mountEligibility!(snapshot)),
+        contains('fresh mount-eligibility read failed'),
+      );
+      expect(runner.calls, [_freshFilingCalls.first]);
+
+      // At the backoff the SAME snapshot — never edited, never re-approved — is
+      // read again, and the read that works is the one that decides.
+      clock.advance(const Duration(seconds: 1));
+      expect(
+        _refusalClause(mounted.bundle()!.mountEligibility!(snapshot)),
+        'fresh mount-eligibility read pending: pow-test',
+      );
+      await pumpEventQueue();
+      mounted.owner.flush();
+      expect(
+        mounted.bundle()!.mountEligibility!(snapshot),
+        isA<MountEligible>(),
+      );
+      expect(runner.calls, [_freshFilingCalls.first, ..._freshFilingCalls]);
+    },
+  );
+
+  test('MountEligibilityAssets retry backoff doubles and caps', () async {
+    final clock = _FakeClock();
+    final runner = _RecordingMountBdRunner(
+      (_) => Future<BdResult>.error(_bdProcessKill),
+    );
+    final mounted = _mountEligibilityAsset((_) => runner, clock: clock);
+    const snapshot = Bead(id: 'pow-test', metadata: {}, labels: []);
+
+    Future<void> readAndFail() async {
+      expect(
+        _refusalClause(mounted.bundle()!.mountEligibility!(snapshot)),
+        'fresh mount-eligibility read pending: pow-test',
+      );
+      await pumpEventQueue();
+      mounted.owner.flush();
+      expect(
+        _refusalClause(mounted.bundle()!.mountEligibility!(snapshot)),
+        contains('fresh mount-eligibility read failed'),
+      );
+    }
+
+    await readAndFail();
+    // Each consecutive failure of the same unchanged bead waits twice as long
+    // as the last, and the doubling SATURATES: a store that stays down is
+    // asked at a falling rate, never abandoned.
+    const schedule = [
+      Duration(seconds: 30),
+      Duration(seconds: 60),
+      Duration(minutes: 2),
+      Duration(minutes: 4),
+      Duration(minutes: 5),
+      Duration(minutes: 5),
+    ];
+    for (final wait in schedule) {
+      final before = runner.calls.length;
+      clock.advance(wait - const Duration(seconds: 1));
+      expect(
+        _refusalClause(mounted.bundle()!.mountEligibility!(snapshot)),
+        contains('fresh mount-eligibility read failed'),
+        reason: 'refusal expired before $wait',
+      );
+      expect(runner.calls.length, before, reason: 'read again before $wait');
+
+      clock.advance(const Duration(seconds: 1));
+      await readAndFail();
+      expect(runner.calls.length, before + 1, reason: 'no read at $wait');
+    }
+  });
+
+  test(
+    'MountEligibilityAssets BdTimeoutException flares bead and store',
+    () async {
+      final transport = _Transport();
+      final mounted = _mountEligibilityAsset(
+        (_) => _RecordingMountBdRunner(
+          (_) => Future<BdResult>.error(_bdProcessKill),
+        ),
+        transport: transport,
+      );
+      const snapshot = Bead(id: 'pow-test', metadata: {}, labels: []);
+      mounted.bundle()!.mountEligibility!(snapshot);
+
+      await pumpEventQueue();
+      mounted.owner.flush();
+
+      // bd killing its own process and the asset killing a hung read are the
+      // same event to an operator reading the boot log; only the flare says
+      // WHICH store, so both classes flare.
+      expect(transport.flares.length, 1);
+      final flare = transport.flares.single;
+      expect(flare.name, kMountEligibilityReadTimeoutFlare);
+      expect(flare.data['beadId'], 'pow-test');
+      expect(flare.data['storeRoot'], '/work/ps');
+      expect(flare.data['error'], contains('BdTimeoutException'));
+      expect(flare.data['error'], contains('bd timed out after 15000ms'));
+    },
+  );
+
+  test(
+    'MountEligibilityAssets read timings are distinct, retunable values',
     () {
       expect(kMountEligibilityReadDeadline, const Duration(seconds: 60));
       expect(
@@ -758,6 +911,20 @@ void main() {
         const MountEligibilityAssets(
           readDeadline: Duration(seconds: 5),
         ).readDeadline,
+        const Duration(seconds: 5),
+      );
+
+      // The wait BETWEEN attempts is a second, independent knob: bounding one
+      // read says nothing about how soon the next one is worth making.
+      expect(kMountEligibilityReadRetryBackoff, const Duration(seconds: 30));
+      expect(
+        const MountEligibilityAssets().retryBackoff,
+        kMountEligibilityReadRetryBackoff,
+      );
+      expect(
+        const MountEligibilityAssets(
+          retryBackoff: Duration(seconds: 5),
+        ).retryBackoff,
         const Duration(seconds: 5),
       );
     },
