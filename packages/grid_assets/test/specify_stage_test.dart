@@ -299,6 +299,55 @@ void main() {
       expect(rendered, contains('## Validation Plan'));
     });
 
+    test('a BOUND grid home makes every lookup the brief names RUNNABLE — the '
+        'cwd the station\'s verb resolves from rides the command', () {
+      final bound = buildSpecifyBrief(
+        _fullBead(),
+        testWorkspace('tg-1', workspaceDir: '/w/tg-1', branch: 'grid/tg-1'),
+        runner: 'dart run lunar:lunar',
+        gridHome: '/grid/lunar',
+      ).render();
+      const qualified =
+          "cd '/grid/lunar' && dart run lunar:lunar decisions index --surface";
+      expect(bound, contains('$qualified <repo>/<path>'));
+      expect(
+        bound,
+        contains(
+          decisionLookupRule(
+            runner: 'dart run lunar:lunar',
+            gridHome: '/grid/lunar',
+          ),
+        ),
+      );
+      // The exemplar and the structural contract render the SAME binding —
+      // the architect is never shown a form it is then told not to write.
+      expect(
+        bound,
+        contains(
+          noGoverningDecisionSentence(
+            runner: 'dart run lunar:lunar',
+            gridHome: '/grid/lunar',
+          ),
+        ),
+      );
+      expect(
+        bound,
+        contains(
+          failedDecisionLookupSentence(
+            runner: 'dart run lunar:lunar',
+            gridHome: '/grid/lunar',
+          ),
+        ),
+      );
+      expect(bound, isNot(contains('space decisions index')));
+      // No unqualified survivor: strip the qualified form and nothing that
+      // invokes lunar is left.
+      expect(
+        bound.replaceAll(qualified, '').contains('lunar:lunar decisions'),
+        isFalse,
+      );
+    });
+
     test('the plan contract is the station\'s: Dart code, exact paths, exact '
         'dart test commands, conventional commits, the house set + D-H', () {
       expect(rendered, contains('dart test'));
@@ -312,11 +361,12 @@ void main() {
     test('the ADR Alignment section is MANDATORY and queries the ROSTER union, '
         'never a local register', () {
       expect(rendered, contains('MANDATORY'));
+      // This brief composes NO grid home, so the rule is the honest form: it
+      // names no invocation the architect could not run from its worktree.
       expect(rendered, contains(kDecisionLookupRule));
-      expect(
-        rendered,
-        contains('space decisions index --surface <repo>/<path>'),
-      );
+      expect(rendered, contains('EVERY mounted register'));
+      expect(rendered, isNot(contains('decisions index --surface')));
+      expect(rendered, isNot(contains('```sh\n```')));
       for (final token in kLocalOnlyTokens) {
         expect(rendered, isNot(contains(token)));
       }

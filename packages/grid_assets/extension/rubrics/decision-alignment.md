@@ -22,19 +22,27 @@ weigh ONLY decision alignment.
 
 Lookup belongs to the deterministic command; judgement stays in this rubric.
 Do not enumerate files and do not infer candidates from title keywords. The
-prompt above has already rendered one lookup line per unique roster-qualified
-path in the spec's `## Touches` section. Run each of them:
+prompt above owns the lookup: it has already rendered one line per unique
+roster-qualified path in the spec's `## Touches` section, each qualified by the
+composing station's grid home. Run those lines EXACTLY as written — the leading
+`cd` is load-bearing, because the station's verb resolves only where that
+station's own package is, and the same line run from this worktree exits
+`Could not find package`. Do not rewrite one and do not invent an invocation the
+prompt did not render.
 
-```sh
-{{runner}} decisions index --surface <repo>/<path>
-```
+When the prompt says no composing grid home is bound, the roster index is
+genuinely unavailable here: there is no command to run, and the only sanctioned
+fallback is to read `docs/decisions/` in EVERY mounted register by hand — this
+substation's and every sibling substation's — naming in your rationale which
+registers you read. A local-register-only read is never sufficient on its own.
 
-Call roster mode with no explicit register-directory arguments. That omission
+Roster mode passes no explicit register-directory arguments. That omission
 is load-bearing: the grid adapter resolves the live mounted-substation roster
 and the command returns the union rather than only the current repo's
 register. Parse the structured JSON `decisions` array and retain results from
 every `originRegister`; a sibling register has exactly the same force as the
-local one.
+local one. That union is the standard however you reached it — by the rendered
+command, or by reading the registers yourself.
 
 For each returned record, read the selected entry under its `originPath`,
 which is a `docs/decisions/` directory, by matching the returned `slug`:
@@ -50,9 +58,10 @@ a claim that no decision applies is verifiable. An empty `decisions` array for
 every touched path means no recorded decision governs the spec's surfaces; do
 not manufacture a citation.
 
-A lookup that FAILS or exits non-zero is NOT an empty union. A malformed entry
-in one mounted register can abort the whole index; report the failure verbatim
-in your rationale and never grade the lane clean on a crashed lookup.
+A lookup that FAILS or exits non-zero is NOT an empty union, and neither is a
+register you could not read. A malformed entry in one mounted register can abort
+the whole index; report the failure verbatim in your rationale and never grade
+the lane clean on a crashed lookup or an unread register.
 
 ## Bands
 

@@ -25,6 +25,20 @@ const String kUnknownSubstationPrefix = '<repo>';
 /// written `## Touches` yet, so there is no real surface to qualify.
 const String kRosterSurfacePlaceholder = '<path>';
 
+/// One POSIX single-quoted shell token — the apostrophe inside is closed,
+/// escaped and reopened (`'"'"'`), so a grid home carrying one still renders
+/// as ONE argument.
+///
+/// `agent_harness.dart`'s private `_sq` is deliberately NOT reused: its
+/// contract takes already-sanitized telemetry paths and does not escape an
+/// embedded apostrophe, so borrowing it here would widen its input class
+/// silently.
+String _shellQuoted(String value) {
+  const quote = '\'';
+  const escapedQuote = '\'"\'"\'';
+  return '$quote${value.replaceAll(quote, escapedQuote)}$quote';
+}
+
 /// The composing station's ROSTER-MODE decision lookup, as shell text.
 ///
 /// [surface] is a ROSTER-QUALIFIED path (`<repo>/<path>`); absent ⇒ the whole
@@ -33,12 +47,30 @@ const String kRosterSurfacePlaceholder = '<path>';
 /// mounted-substation roster and return the union rather than only the current
 /// repo's register. [runner] is the composing station's verb
 /// ([kDefaultOverlayRunner] by default).
+///
+/// [gridHome] is the COMPOSING STATION's grid home, and a non-blank one renders
+/// the verb CWD-QUALIFIED (`cd '<gridHome>' && …`). A station's verb is its own
+/// JIT invocation (`dart run lunar:lunar …`) and resolves only where that
+/// station's package is, so the bare form handed to an agent standing in a
+/// per-bead worktree exits `Could not find package`. Surfaces are
+/// roster-qualified, so the cwd carries no path meaning of its own.
+///
+/// Absent or blank ⇒ the BARE verb, unchanged. That is what
+/// [commandDecisionIndexSource] renders: the EXECUTING path already binds the
+/// same grid home as its [ShellRunner]'s `workingDirectory`, so a textual `cd`
+/// there would be a second, divergent cwd. A blank grid home never means "run
+/// it here" for a PROMPT — [rosterDecisionLookupBlock] renders nothing at all.
 String rosterDecisionIndexCommand({
   String? surface,
   String runner = kDefaultOverlayRunner,
-}) => surface == null
-    ? '$runner decisions index'
-    : '$runner decisions index --surface $surface';
+  String? gridHome,
+}) {
+  final home = gridHome?.trim() ?? '';
+  final verb = surface == null
+      ? '$runner decisions index'
+      : '$runner decisions index --surface $surface';
+  return home.isEmpty ? verb : 'cd ${_shellQuoted(home)} && $verb';
+}
 
 /// A backticked span in a spec's `## Touches` section.
 final RegExp _backticked = RegExp(r'`([^`]+)`');
@@ -108,28 +140,77 @@ List<String> rosterQualifiedPaths({
   return surfaces;
 }
 
-/// The per-surface roster lookup an agent must run, one command per line.
+/// The per-surface roster lookup an agent must run, one command per line, each
+/// CWD-QUALIFIED by [gridHome].
 ///
 /// Empty [surfaces] renders the TEMPLATE form, so a pre-specify brief still
 /// names the exact verb the architect will run once it has written
 /// `## Touches`.
+///
+/// A null or blank [gridHome] renders NOTHING — an empty block, and the caller
+/// drops its shell fence. This is the PROMPT-facing counterpart of
+/// [rosterDecisionIndexCommand]'s bare form: an agent handed a lookup line it
+/// cannot run from where it stands falls back to a local register grep, which
+/// is the roster blindness this whole contract exists to remove. Say the index
+/// is unavailable ([decisionLookupRule] does) rather than name a command that
+/// dies `Could not find package`.
 String rosterDecisionLookupBlock(
   List<String> surfaces, {
   String runner = kDefaultOverlayRunner,
-}) =>
-    (surfaces.isEmpty
-            ? [
+  String? gridHome,
+}) {
+  final home = gridHome?.trim() ?? '';
+  if (home.isEmpty) return '';
+  return (surfaces.isEmpty
+          ? [
+              rosterDecisionIndexCommand(
+                surface: '$kUnknownSubstationPrefix/$kRosterSurfacePlaceholder',
+                runner: runner,
+                gridHome: home,
+              ),
+            ]
+          : [
+              for (final surface in surfaces)
                 rosterDecisionIndexCommand(
-                  surface:
-                      '$kUnknownSubstationPrefix/$kRosterSurfacePlaceholder',
+                  surface: surface,
                   runner: runner,
+                  gridHome: home,
                 ),
-              ]
-            : [
-                for (final surface in surfaces)
-                  rosterDecisionIndexCommand(surface: surface, runner: runner),
-              ])
-        .join('\n');
+            ])
+      .join('\n');
+}
+
+/// The register's READ rule when NO composing grid home is bound — the honest
+/// form, which names no invocation at all.
+///
+/// The lane reads the registers by hand instead, and every clause the bound
+/// rule carries about FORCE survives: the sibling register keeps equal weight,
+/// the citation identity stays canonical, an empty result is still real, and an
+/// unreadable register is still refused as a clean grade. What is dropped is
+/// the COMMAND — a station verb resolves only from its own grid home, so a
+/// lookup line rendered without one exits `Could not find package` in the
+/// lane's worktree. An agent handed that line falls back to a local grep and
+/// reports the tool unavailable, which is the roster blindness this contract
+/// exists to remove, wearing a passing grade.
+const String _unavailableDecisionLookupRule =
+    'The composing station\'s ROSTER-MODE `decisions index` is UNAVAILABLE '
+    'here: no composing grid home is bound, and that verb resolves only where '
+    'the station\'s own package is, so naming it for this worktree would name '
+    'a command that cannot run (`Could not find package`). Read the registers '
+    'DIRECTLY instead: inspect `docs/decisions/` in EVERY mounted register — '
+    'this substation\'s and every sibling substation\'s — for entries whose '
+    'recorded surfaces match the repository-relative paths under review (for '
+    'a spec, every literal path in its `## Touches` section). Keep what every '
+    'register holds: a SIBLING substation\'s entry has exactly the same force '
+    'as a local one, and reading only this repo\'s register is the blindness '
+    'the roster UNION exists to remove. Quote the LOAD-BEARING clause of each '
+    'entry that governs and cite it by its canonical `<repo>#<slug>` identity '
+    '— for example `the_grid#admission-authority-boundary` (a migrated entry '
+    'may also carry `register.legacy-id`, whose old citation still resolves). '
+    'Finding no governing entry after reading every register is a real '
+    'result, not an error: say so and name the paths and the registers that '
+    'verified it. A register you could NOT read is NOT "no decision applies": '
+    'report the failure verbatim and never grade an unread register clean.';
 
 /// The register's READ rule — stated to every agent on the spec path.
 ///
@@ -139,28 +220,52 @@ String rosterDecisionLookupBlock(
 /// FAILED lookup is explicitly refused as a clean grade (`decisions index` in
 /// roster mode throws on a malformed sibling entry, and a crashed lookup read
 /// as "no decision applies" would ship the very blindness this rule removes).
-String decisionLookupRule({String runner = kDefaultOverlayRunner}) =>
-    'Look decisions up through the composing station\'s ROSTER-MODE index, '
-    'never a local register grep. Read every literal path in the spec\'s '
-    '`## Touches` section, prefix each repository-relative path with its '
-    'substation repository name, and run '
-    '`$runner decisions index --surface <repo>/<path>` once per '
-    'unique roster-qualified path. Pass NO register-directory argument: that '
-    'omission is LOAD-BEARING — the grid adapter resolves the live '
-    'mounted-substation roster and the command returns the UNION of every '
-    'mounted register rather than only this repo\'s. Read the structured JSON '
-    '`decisions` array and KEEP results from every `originRegister`: a SIBLING '
-    'substation\'s entry has exactly the same force as a local one. Resolve '
-    'each returned record by its `slug` under its `originPath`, quote the '
-    'load-bearing clause, and cite it by its canonical `<repo>#<slug>` '
-    'identity — for example `the_grid#admission-authority-boundary` (a '
-    'migrated entry may also carry `register.legacy-id`, whose old citation '
-    'still resolves). An EMPTY `decisions` array for every queried '
-    'surface means no recorded decision governs these surfaces: say so and '
-    'name the roster-qualified paths that verified it — an empty union is a '
-    'real result, not an error. A lookup that FAILS or exits non-zero is NOT '
-    '"no decision applies": report the failure verbatim and never grade a '
-    'crashed index clean.';
+///
+/// [gridHome] is the composing station's grid home ([rosterDecisionIndexCommand]
+/// renders the `cd`). A null or blank one yields
+/// [_unavailableDecisionLookupRule]: the rule REFUSES to name a verb the lane
+/// cannot run, and directs the direct register read instead.
+String decisionLookupRule({
+  String runner = kDefaultOverlayRunner,
+  String? gridHome,
+}) {
+  final home = gridHome?.trim() ?? '';
+  if (home.isEmpty) return _unavailableDecisionLookupRule;
+  final command = rosterDecisionIndexCommand(
+    surface: '$kUnknownSubstationPrefix/$kRosterSurfacePlaceholder',
+    runner: runner,
+    gridHome: home,
+  );
+  return 'Look decisions up through the composing station\'s ROSTER-MODE '
+      'index, '
+      'never a local register grep. Read every literal path in the spec\'s '
+      '`## Touches` section, prefix each repository-relative path with its '
+      'substation repository name, and run '
+      '`$command` once per '
+      'unique roster-qualified path. Run it FROM the composing station\'s grid '
+      'home exactly as shown — that verb resolves only where the station\'s '
+      'own package is, and the same command run from this worktree exits '
+      'non-zero with `Could not find package`. '
+      'Pass NO register-directory argument: that '
+      'omission is LOAD-BEARING — the grid adapter resolves the live '
+      'mounted-substation roster and the command returns the UNION of every '
+      'mounted register rather than only this repo\'s. Read the structured '
+      'JSON '
+      '`decisions` array and KEEP results from every `originRegister`: a '
+      'SIBLING '
+      'substation\'s entry has exactly the same force as a local one. Resolve '
+      'each returned record by its `slug` under its `originPath`, quote the '
+      'load-bearing clause, and cite it by its canonical `<repo>#<slug>` '
+      'identity — for example `the_grid#admission-authority-boundary` (a '
+      'migrated entry may also carry `register.legacy-id`, whose old citation '
+      'still resolves). An EMPTY `decisions` array for every queried '
+      'surface means no recorded decision governs these surfaces: say so and '
+      'name the roster-qualified paths that verified it — an empty union is a '
+      'real result, not an error. A lookup that FAILS or exits non-zero is '
+      'NOT '
+      '"no decision applies": report the failure verbatim and never grade a '
+      'crashed index clean.';
+}
 
 /// The register's WRITE rule — stated to every agent that could RECORD a
 /// decision (the specify architect writes one; the spec critic grades it).
@@ -204,10 +309,26 @@ const String kFailedDecisionLookupPrefix = 'The roster lookup FAILED';
 /// sentence and [parseSpecContract] recognizes it by
 /// [kNoGoverningDecisionPrefix], so the form the brief DICTATES is the one the
 /// gate ACCEPTS.
-String noGoverningDecisionSentence({String runner = kDefaultOverlayRunner}) =>
-    '$kNoGoverningDecisionPrefix — verified via '
-    '`$runner decisions index --surface` over '
-    '`<the roster-qualified paths>`.';
+String noGoverningDecisionSentence({
+  String runner = kDefaultOverlayRunner,
+  String? gridHome,
+}) {
+  final home = gridHome?.trim() ?? '';
+  if (home.isEmpty) {
+    // NOT the literal `docs/decisions/` path the READ rule names: a
+    // backticked register path inside `## ADR Alignment` parses as a
+    // resolvable CITATION ([isResolvableDecisionReference]), so a sentence
+    // that declares an empty union would smuggle one in.
+    return '$kNoGoverningDecisionPrefix — verified by direct inspection of '
+        'every mounted decision register over '
+        '`<the roster-qualified paths>`, the composing station\'s roster '
+        'index being unavailable here.';
+  }
+  return '$kNoGoverningDecisionPrefix — verified via '
+      '`${rosterDecisionIndexCommand(runner: runner, gridHome: home)} '
+      '--surface` over '
+      '`<the roster-qualified paths>`.';
+}
 
 /// The sentence a spec writes when the roster lookup FAILED — the FORM of
 /// [kDecisionLookupRule]'s "a lookup that FAILS or exits non-zero is NOT 'no
@@ -222,10 +343,26 @@ String noGoverningDecisionSentence({String runner = kDefaultOverlayRunner}) =>
 /// citing nothing; it must SAY the lookup crashed and show its output. Naming
 /// that form is what lets [parseSpecContract] distinguish the two rather than
 /// collapsing a crash into a vacuous empty section.
-String failedDecisionLookupSentence({String runner = kDefaultOverlayRunner}) =>
-    '$kFailedDecisionLookupPrefix — reported verbatim, never read as an empty '
-    'union: `$runner decisions index --surface` over '
-    '`<the roster-qualified paths>` exited non-zero with `<the exact output>`.';
+String failedDecisionLookupSentence({
+  String runner = kDefaultOverlayRunner,
+  String? gridHome,
+}) {
+  final home = gridHome?.trim() ?? '';
+  if (home.isEmpty) {
+    // Same reason as above: no backticked register path in a section whose
+    // every backticked token is read as a citation.
+    return '$kFailedDecisionLookupPrefix — reported verbatim, never read as '
+        'an empty union: reading every mounted decision register '
+        'over `<the roster-qualified paths>` failed with '
+        '`<the exact output>`.';
+  }
+  return '$kFailedDecisionLookupPrefix — reported verbatim, never read as an '
+      'empty union: '
+      '`${rosterDecisionIndexCommand(runner: runner, gridHome: home)} '
+      '--surface` over '
+      '`<the roster-qualified paths>` exited non-zero with '
+      '`<the exact output>`.';
+}
 
 /// The DEFAULT-runner rendering of [decisionLookupRule] — the form a caller
 /// that composes no station verb (a fence, a parse test) reads.

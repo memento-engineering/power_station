@@ -551,7 +551,10 @@ void main() {
         contains('"nodePath":"pow-kzx/spec_review/readiness","round":0}'),
       );
       expect(prompt, contains('Stay cheap'));
-      expect(prompt, contains('space decisions index'));
+      // This lens composes NO grid home, so it names no invocation at all.
+      expect(prompt, contains('composing grid home is bound'));
+      expect(prompt, contains('EVERY mounted register'));
+      expect(prompt, isNot(contains('space decisions index')));
       for (final token in kLocalOnlyTokens) {
         expect(prompt, isNot(contains(token)));
       }
@@ -561,6 +564,33 @@ void main() {
       );
       expect(prompt, contains('mktemp "/w/pow-kzx/.grid/critique/'));
       expect(prompt, contains('mv -f -- "\$verdict_tmp"'));
+    });
+
+    test('a BOUND station composes a lens lookup it can RUN — its own verb, '
+        'from the grid home that verb resolves in', () {
+      final prompt =
+          const ReadinessCriticCapability(
+            decisionRunner: 'dart run lunar:lunar',
+            decisionGridHome: '/grid/lunar',
+          ).buildReadinessPrompt(
+            _refined(),
+            kReadinessRubric,
+            'pow-kzx/spec_review/readiness',
+            '/w/pow-kzx',
+            round: 0,
+          );
+      expect(
+        prompt,
+        contains("cd '/grid/lunar' && dart run lunar:lunar decisions index"),
+      );
+      expect(prompt, contains('mounted-substation roster'));
+      expect(prompt, contains('ONCE'));
+      // The whole-union form: no `--surface`, and no register directory.
+      expect(prompt, isNot(contains('decisions index --surface')));
+      expect(prompt, isNot(contains('space decisions index')));
+      for (final token in kLocalOnlyTokens) {
+        expect(prompt, isNot(contains(token)));
+      }
     });
 
     test('anti-anchoring: it names ONLY its own rubric, never a spec-committee '

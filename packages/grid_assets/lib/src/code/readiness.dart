@@ -80,6 +80,7 @@ import '../agent/model_tier.dart';
 import '../agent/seat_environments.dart';
 import '../agent/site_binding.dart';
 import '../agent/usage_report.dart';
+import '../assets/overlay_materializer.dart' show kDefaultOverlayRunner;
 import 'committee.dart';
 import 'decision_register.dart';
 import 'fix_in_flight.dart';
@@ -352,7 +353,25 @@ class ReadinessCriticCapability extends CriticCapability {
   /// Creates the readiness lane, optionally over a rubric source (D-9 wires the
   /// Packaged-AI-Asset loader; absent ⇒ an inline placeholder so the circuit is
   /// testable with no real assets).
-  const ReadinessCriticCapability({super.rubrics, super.verdictTextReader});
+  ///
+  /// [decisionRunner] is the COMPOSING STATION's verb and [decisionGridHome]
+  /// its grid home — the same pair `buildCodeRegistry` binds from
+  /// `overlayArgs` for the spec lanes. The lens is told to run the roster
+  /// index ONCE, so it needs the verb the station actually composed and the
+  /// cwd that verb resolves from; an unbound grid home means the prompt names
+  /// NO command and says the index is unavailable, rather than spending this
+  /// lane's whole bounded look on an invocation that exits
+  /// `Could not find package`.
+  const ReadinessCriticCapability({
+    super.rubrics,
+    super.verdictTextReader,
+    String decisionRunner = kDefaultOverlayRunner,
+    String? decisionGridHome,
+  }) : _decisionRunner = decisionRunner,
+       _decisionGridHome = decisionGridHome;
+
+  final String _decisionRunner;
+  final String? _decisionGridHome;
 
   @override
   RuntimeConfig spawn(TreeContext context, StepArgs args) {
@@ -453,7 +472,23 @@ class ReadinessCriticCapability extends CriticCapability {
     required int round,
   }) {
     final path = p.join(critiqueDirPath(workspaceDir), '$rubric.json');
-    final rosterIndex = rosterDecisionIndexCommand();
+    // The station's own verb, run FROM the grid home it resolves in. Unbound ⇒
+    // the shared unavailable rule: no invocation is named, and the lens reads
+    // the mounted registers directly.
+    final home = _decisionGridHome?.trim() ?? '';
+    final rosterIndex = rosterDecisionIndexCommand(
+      runner: _decisionRunner,
+      gridHome: home,
+    );
+    final lookupDirection = home.isEmpty
+        ? '. ${decisionLookupRule(runner: _decisionRunner)}'
+        : ': run `$rosterIndex` '
+              'ONCE to see what the roster union already decides. It takes NO '
+              'register-directory argument on purpose — the grid adapter '
+              'resolves the live mounted-substation roster, so a SIBLING '
+              'substation\'s decisions are in the answer too; the `cd` is what '
+              'makes it run at all, because the composing station\'s verb '
+              'resolves only where that station\'s own package is.';
     final b = StringBuffer()
       ..writeln('# Spec-readiness intake — rubric: `$rubric`')
       ..writeln()
@@ -475,10 +510,7 @@ class ReadinessCriticCapability extends CriticCapability {
       ..writeln('## Stay cheap — this is a lens, not a committee')
       ..writeln(
         'You are standing in the bead\'s worktree. Spend a BOUNDED look, not '
-        'an exploration: run `$rosterIndex` ONCE to see what the roster union '
-        'already decides. It takes NO register-directory argument on purpose — '
-        'the grid adapter resolves the live mounted-substation roster, so a '
-        'SIBLING substation\'s decisions are in the answer too. Grep ONLY the '
+        'an exploration$lookupDirection Grep ONLY the '
         'surfaces the bead actually names. Do NOT design the change, do NOT '
         'write a plan, do NOT read the tree broadly — that is the architect\'s '
         'job downstream, and duplicating it here defeats this lane\'s purpose. '

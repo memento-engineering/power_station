@@ -147,7 +147,15 @@ const String kSpecExemplarAcceptance = '''
 /// The step carries the five labeled fields ([kStepFieldLabels]) and NO fenced
 /// implementation block: a code block is optional EVIDENCE, and an exemplar
 /// that shipped one taught the opposite.
-String specExemplarDesign({String runner = kDefaultOverlayRunner}) =>
+///
+/// [runner]/[gridHome] are the composing station's verb and the grid home it
+/// resolves from: the exemplar's `## ADR Alignment` line renders the SAME
+/// empty-union form the brief then demands, so the architect is never shown a
+/// sentence the gate would not accept.
+String specExemplarDesign({
+  String runner = kDefaultOverlayRunner,
+  String? gridHome,
+}) =>
     '''
 ## Implementation Plan
 
@@ -169,7 +177,7 @@ Re-validated against the live tree: `Heartbeat` has no caller yet and no sibling
 bead adds one.
 
 ## ADR Alignment
-${noGoverningDecisionSentence(runner: runner)} Queried: `power_station/packages/grid_assets/lib/src/bus/heartbeat.dart`, `power_station/packages/grid_assets/test/heartbeat_test.dart`.
+${noGoverningDecisionSentence(runner: runner, gridHome: gridHome)} Queried: `power_station/packages/grid_assets/lib/src/bus/heartbeat.dart`, `power_station/packages/grid_assets/test/heartbeat_test.dart`.
 
 ## Validation Plan
 - [ ] AC-1 → `cd packages/grid_assets && dart test test/heartbeat_test.dart` → `All tests passed!`
@@ -270,7 +278,13 @@ const String _specContractShadowBoundary =
 ///
 /// The shipped exemplar is round-tripped through both readings in test: it
 /// passes [specStructuralFindings] and parses without a record finding.
-String specStructuralContract({String runner = kDefaultOverlayRunner}) =>
+///
+/// [runner]/[gridHome] thread through to the two lookup-narrative sentences
+/// item 9 quotes and to the embedded [specExemplarDesign].
+String specStructuralContract({
+  String runner = kDefaultOverlayRunner,
+  String? gridHome,
+}) =>
     '''
 ### The structural contract (a DETERMINISTIC gate, run before any critic reads your spec)
 
@@ -315,8 +329,9 @@ grade before that ruling:
    resolves as `<repo>#<slug>`, a `docs/decisions/` or `docs/adr/` path, or a
    legacy `ADR-<nnnn>` id. The section is NEVER silent about the lookup: when
    the roster union is empty for every queried surface, write
-   "${noGoverningDecisionSentence(runner: runner)}"; when the lookup FAILED or
-   exited non-zero, write "${failedDecisionLookupSentence(runner: runner)}" — an
+   "${noGoverningDecisionSentence(runner: runner, gridHome: gridHome)}"; when
+   the lookup FAILED or exited non-zero, write
+   "${failedDecisionLookupSentence(runner: runner, gridHome: gridHome)}" — an
    unknown union is not an empty one, and a crashed index is never graded clean.
 10. **Every `## Validation Plan` item is** `$kValidationRecordForm`, exactly
    ONCE for every acceptance id and NEVER for an id no criterion declares.
@@ -334,7 +349,7 @@ shadow grammar. Copy its SHAPE.
 `````markdown
 $kSpecExemplarAcceptance
 
-${specExemplarDesign(runner: runner)}
+${specExemplarDesign(runner: runner, gridHome: gridHome)}
 `````''';
 
 /// The DEFAULT-runner rendering of [specStructuralContract].
@@ -580,20 +595,30 @@ class SpecifyCapability extends ProcessCapability {
   /// [decisionRunner] is the COMPOSING STATION's verb, threaded into every
   /// decision-lookup line the brief renders (`buildCodeRegistry` binds it from
   /// `overlayArgs['runner']`). Absent ⇒ the first-party [kDefaultOverlayRunner].
+  ///
+  /// [decisionGridHome] is that station's GRID HOME, from the same binding
+  /// (`overlayArgs['gridHome']`, else the registered root checkout) — the cwd
+  /// the verb resolves from, which the brief renders into the lookup itself.
+  /// Absent ⇒ the brief names NO lookup command and says the index is
+  /// unavailable: the architect stands in a per-bead worktree, where an
+  /// unqualified station verb dies `Could not find package`.
   const SpecifyCapability({
     BdRunner Function(String workspaceRoot) runnerFor = _processRunnerFor,
     AgentSessionAdapterRegistry sessionAdapters = kBuiltinAgentSessionAdapters,
     AgentSteerSource steers = const NoAgentSteerSource(),
     String decisionRunner = kDefaultOverlayRunner,
+    String? decisionGridHome,
   }) : _runnerFor = runnerFor,
        _sessionAdapters = sessionAdapters,
        _steers = steers,
-       _decisionRunner = decisionRunner;
+       _decisionRunner = decisionRunner,
+       _decisionGridHome = decisionGridHome;
 
   final BdRunner Function(String workspaceRoot) _runnerFor;
   final AgentSessionAdapterRegistry _sessionAdapters;
   final AgentSteerSource _steers;
   final String _decisionRunner;
+  final String? _decisionGridHome;
 
   static BdRunner _processRunnerFor(String workspaceRoot) =>
       ProcessBdRunner(workspaceRoot: workspaceRoot);
@@ -688,6 +713,7 @@ class SpecifyCapability extends ProcessCapability {
         guidance: guidance,
         dossier: dossier,
         runner: _decisionRunner,
+        gridHome: _decisionGridHome,
       ),
       model: config.params['model'],
       endpoint: siteBinding.endpointFor(
@@ -820,9 +846,20 @@ class SpecifyCapability extends ProcessCapability {
 /// re-specify agent corrects against the committee's own words with no human in
 /// the loop. Absent ⇒ the brief is byte-identical to the pre-pow-7nm one.
 ///
+/// **The lookup the brief NAMES is one the architect can run.** [runner] is the
+/// composing station's verb and [gridHome] the cwd that verb resolves from
+/// (`buildCodeRegistry` binds both from `overlayArgs`); every rendered lookup
+/// is `cd '<gridHome>' && <runner> decisions index …`. With no grid home bound
+/// the brief renders NO shell fence at all and [decisionLookupRule] says the
+/// index is unavailable — an architect standing in a per-bead worktree, handed
+/// the bare verb, gets `Could not find package` and falls back to a local
+/// register grep, which is exactly the sibling-register blindness roster mode
+/// exists to remove.
+///
 /// Q3′ (Track E): the only paths interpolated are the ambient [Workspace]'s
-/// (`workspaceDir`/`branch`); bead reads are content + the bead ID (a
-/// reference, never a path). The ledger contributes rubric ids, grades and
+/// (`workspaceDir`/`branch`) and the composing station's [gridHome] (an
+/// operator-bound value, not a bead read); bead reads are content + the bead ID
+/// (a reference, never a path). The ledger contributes rubric ids, grades and
 /// critic prose — never a path.
 AgentBrief buildSpecifyBrief(
   Bead bead,
@@ -830,17 +867,28 @@ AgentBrief buildSpecifyBrief(
   RespecLedger? guidance,
   DiscoveryDossier? dossier,
   String runner = kDefaultOverlayRunner,
+  String? gridHome,
 }) {
   final title = bead.title.isNotEmpty ? bead.title : 'work bead ${bead.id}';
   final substation = bead.metadata['rig'];
   final id = bead.id;
+  // Empty exactly when no composing grid home is bound: the lookup fence is
+  // DROPPED rather than shown as a command the architect cannot run from this
+  // worktree, and [decisionLookupRule] states the unavailability itself.
   final lookupBlock = rosterDecisionLookupBlock(
     rosterQualifiedSurfaces(
       design: bead.design,
       substation: substation is String ? substation : '',
     ),
     runner: runner,
+    gridHome: gridHome,
   );
+  final lookupIntro = lookupBlock.isEmpty
+      ? ''
+      : ' For the surfaces this bead already names that is:';
+  final rerunLead = lookupBlock.isEmpty
+      ? 'Re-read the registers against'
+      : 'Re-run the block over';
   final t = StringBuffer()
     ..writeln('# Specify: $title')
     ..writeln()
@@ -945,23 +993,28 @@ AgentBrief buildSpecifyBrief(
     )
     ..writeln()
     ..writeln(
-      '**## ADR Alignment** — MANDATORY. ${decisionLookupRule(runner: runner)} '
-      'For the surfaces this bead already names that is:',
-    )
-    ..writeln()
-    ..writeln('```sh')
-    ..writeln(lookupBlock)
-    ..writeln('```')
+      '**## ADR Alignment** — MANDATORY. '
+      '${decisionLookupRule(runner: runner, gridHome: gridHome)}$lookupIntro',
+    );
+  if (lookupBlock.isNotEmpty) {
+    t
+      ..writeln()
+      ..writeln('```sh')
+      ..writeln(lookupBlock)
+      ..writeln('```');
+  }
+  t
     ..writeln()
     ..writeln(
-      'Re-run the block over the FINAL `## Touches` you write. '
+      '$rerunLead the FINAL `## Touches` you write. '
       '$kDecisionWriteRule '
       'Quote each load-bearing decision and say how the plan aligns. The '
       'section is NEVER silent about the lookup itself: if the union is empty '
       'for every queried surface, write exactly: '
-      '${noGoverningDecisionSentence(runner: runner)} If the lookup FAILED '
+      '${noGoverningDecisionSentence(runner: runner, gridHome: gridHome)} '
+      'If the lookup FAILED '
       'or exited non-zero, that is NOT an empty union — write exactly: '
-      '${failedDecisionLookupSentence(runner: runner)}',
+      '${failedDecisionLookupSentence(runner: runner, gridHome: gridHome)}',
     )
     ..writeln()
     ..writeln(
@@ -971,7 +1024,7 @@ AgentBrief buildSpecifyBrief(
       'criterion declares.',
     )
     ..writeln()
-    ..writeln(specStructuralContract(runner: runner))
+    ..writeln(specStructuralContract(runner: runner, gridHome: gridHome))
     ..writeln()
     ..writeln('### 3. The machine gate')
     ..writeln(
@@ -1068,15 +1121,24 @@ class SpecCriticCapability extends CriticCapability {
   ///
   /// [decisionRunner] is the COMPOSING STATION's verb, threaded into every
   /// decision-lookup line this prompt renders (`buildCodeRegistry` binds it from
-  /// `overlayArgs['runner']`, and binds the injected rubric source's own
-  /// `{{runner}}` hole from the same value). Absent ⇒ [kDefaultOverlayRunner].
+  /// `overlayArgs['runner']`). Absent ⇒ [kDefaultOverlayRunner].
+  ///
+  /// [decisionGridHome] is that station's GRID HOME, from the same binding —
+  /// the cwd the verb resolves from, rendered into the lookup. Absent ⇒ the
+  /// prompt names NO lookup command and says the index is unavailable, which
+  /// is what this critic was observing in the field: told to run a verb that
+  /// exits `Could not find package` in its worktree, the lane fell back to a
+  /// local register grep and never saw a sibling register at all.
   const SpecCriticCapability({
     super.rubrics,
     super.verdictTextReader,
     String decisionRunner = kDefaultOverlayRunner,
-  }) : _decisionRunner = decisionRunner;
+    String? decisionGridHome,
+  }) : _decisionRunner = decisionRunner,
+       _decisionGridHome = decisionGridHome;
 
   final String _decisionRunner;
+  final String? _decisionGridHome;
 
   /// The SPEC family IS held to the owner column (bead `pow-hxme`, ADR-0000
   /// A37): its route decides on ownership, and [buildSpecCriticPrompt] teaches
@@ -1186,12 +1248,19 @@ class SpecCriticCapability extends CriticCapability {
   }) {
     final path = p.join(workspaceDir, '.grid', 'critique', '$rubric.json');
     final rig = bead.metadata['rig'];
+    // Empty exactly when no composing grid home is bound — the fence is
+    // dropped rather than naming a verb this lane cannot run.
     final lookupBlock = rosterDecisionLookupBlock(
       rosterQualifiedSurfaces(
         design: bead.design,
         substation: rig is String ? rig : '',
       ),
       runner: _decisionRunner,
+      gridHome: _decisionGridHome,
+    );
+    final lookupRule = decisionLookupRule(
+      runner: _decisionRunner,
+      gridHome: _decisionGridHome,
     );
     final b = StringBuffer()
       ..writeln('# Spec review — rubric: `$rubric`')
@@ -1215,12 +1284,16 @@ class SpecCriticCapability extends CriticCapability {
         'against the REAL tree before grading: grep/read the files and '
         'symbols the plan names (a named symbol that neither resolves nor is '
         'announced as new is a finding, not a style nit). '
-        '${decisionLookupRule(runner: _decisionRunner)}',
-      )
-      ..writeln()
-      ..writeln('```sh')
-      ..writeln(lookupBlock)
-      ..writeln('```')
+        '$lookupRule',
+      );
+    if (lookupBlock.isNotEmpty) {
+      b
+        ..writeln()
+        ..writeln('```sh')
+        ..writeln(lookupBlock)
+        ..writeln('```');
+    }
+    b
       ..writeln()
       ..writeln(
         '$kDecisionWriteRule '

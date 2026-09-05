@@ -174,9 +174,17 @@ class PackagedAssetLoader {
       );
 
   /// A `RubricSource` tear-off bound to this loader — the RAW packaged prose,
-  /// template holes intact. A rubric that carries a station-arg hole (the
-  /// `decision-alignment` bands render `{{runner}}`) must be read through
-  /// [boundRubricSource] before it reaches an agent.
+  /// template holes intact. Any rubric that carries a station-arg hole must be
+  /// read through [boundRubricSource] before it reaches an agent.
+  ///
+  /// No packaged rubric carries one today: the `decision-alignment` bands used
+  /// to render a `{{runner}}` command of their own, and no longer do. A rubric
+  /// cannot render a RUNNABLE lookup, because the composing station's verb also
+  /// needs the GRID HOME it resolves from and the roster-qualified surface it
+  /// asks about — both of which only the live prompt knows. So the bands now
+  /// direct the critic to the lines that prompt already rendered (or, when it
+  /// reports no bound grid home, to the mounted registers on disk), which is
+  /// the one place a command can be both complete and cwd-correct.
   String Function(String) get rubricSource => loadRubric;
 
   /// A `RubricSource` whose station-arg holes are BOUND from [args] — the
@@ -198,9 +206,14 @@ class PackagedAssetLoader {
       );
 
   /// The rubric bands as the FIRST-PARTY station renders them — the packaged
-  /// prose with its station-arg holes bound to the default overlay runner. The
+  /// prose with any station-arg hole bound to the default overlay runner. The
   /// portable mirrors below embed rubric prose, so they bind it exactly as the
   /// in-pipeline path does rather than shipping a hole to their reader.
+  ///
+  /// Those mirrors are rendered with NO composing grid home (they have no
+  /// station at all), which is why they name no lookup invocation: a portable
+  /// asset cannot know the cwd a station's verb resolves from, and a command
+  /// that ships without it is one the reader's lane cannot run.
   String _stationRubric(String rubricId) => boundRubricSource(
     args: const {'runner': kDefaultOverlayRunner},
   )(rubricId);
