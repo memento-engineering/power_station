@@ -113,6 +113,12 @@ final SiteBinding _bound = SiteBinding({
   'local': Uri.parse('http://127.0.0.1:8080'),
 });
 
+/// The ambient config a `HarnessProvider` over [_registry] publishes. Its
+/// harness must be a name [_registry] ARMS: the provider's boot gate refuses an
+/// ambient arming that names an unarmed environment, and the default 'claude'
+/// is not in this fixture's palette.
+const AgentConfig _ambient = AgentConfig(harness: 'frontier');
+
 typedef _Mounted = ({TreeOwner owner, List<AvailableEnvironments> seen});
 
 /// Mounts registry -> site binding -> the availability seed -> a watcher, and
@@ -350,7 +356,12 @@ void main() {
         final seen = <AvailableEnvironments>[];
         final owner = TreeOwner();
         owner.mountRoot(
-          HarnessProvider(registry: _registry, child: _Watcher(seen)),
+          HarnessProvider(
+            registry: _registry,
+            config: _ambient,
+            siteBinding: _bound,
+            child: _Watcher(seen),
+          ),
         );
         owner.flush();
         await _settle(owner);
@@ -369,13 +380,12 @@ void main() {
       final seen = <AvailableEnvironments>[];
       final owner = TreeOwner();
       owner.mountRoot(
-        InheritedSeed<SiteBinding>(
-          value: _bound,
-          child: HarnessProvider(
-            registry: _registry,
-            probe: probe.call,
-            child: _Watcher(seen),
-          ),
+        HarnessProvider(
+          registry: _registry,
+          config: _ambient,
+          siteBinding: _bound,
+          probe: probe.call,
+          child: _Watcher(seen),
         ),
       );
       owner.flush();
@@ -392,17 +402,18 @@ void main() {
       final seen = <AvailableEnvironments>[];
       final owner = TreeOwner();
       owner.mountRoot(
-        InheritedSeed<SiteBinding>(
-          value: _bound,
+        HarnessProvider(
+          registry: _registry,
+          config: _ambient,
+          siteBinding: _bound,
+          probe: probe.call,
           child: HarnessProvider(
-            registry: _registry,
-            probe: probe.call,
-            child: HarnessProvider(
-              // The seat's OWN arming rung (D5): a different registry, no
-              // probe of its own.
-              registry: const EnvironmentRegistry(custom: {'seat': _seat}),
-              child: _Watcher(seen),
-            ),
+            // The seat's OWN arming rung (D5): a different registry, no
+            // probe of its own.
+            registry: const EnvironmentRegistry(custom: {'seat': _seat}),
+            config: const AgentConfig(harness: 'seat'),
+            siteBinding: _bound,
+            child: _Watcher(seen),
           ),
         ),
       );
@@ -428,7 +439,12 @@ void main() {
       final defaults = <AgentPermissionPolicy?>[];
       final bare = TreeOwner();
       bare.mountRoot(
-        HarnessProvider(registry: _registry, child: _PolicyWatcher(defaults)),
+        HarnessProvider(
+          registry: _registry,
+          config: _ambient,
+          siteBinding: _bound,
+          child: _PolicyWatcher(defaults),
+        ),
       );
       bare.flush();
       await _settle(bare);
@@ -449,9 +465,13 @@ void main() {
       owner.mountRoot(
         HarnessProvider(
           registry: _registry,
+          config: _ambient,
+          siteBinding: _bound,
           permissionPolicy: station,
           child: HarnessProvider(
             registry: _registry,
+            config: _ambient,
+            siteBinding: _bound,
             child: _PolicyWatcher(nested),
           ),
         ),
@@ -479,9 +499,13 @@ void main() {
         owner.mountRoot(
           HarnessProvider(
             registry: _registry,
+            config: _ambient,
+            siteBinding: _bound,
             permissionPolicy: station,
             child: HarnessProvider(
               registry: _registry,
+              config: _ambient,
+              siteBinding: _bound,
               permissionPolicy: const AgentPermissionPolicy.scoped(
                 id: 'seat',
                 grants: <AgentPermissionCapability, AgentPermissionGrant>{
@@ -520,6 +544,8 @@ void main() {
         lockdown.mountRoot(
           HarnessProvider(
             registry: _registry,
+            config: _ambient,
+            siteBinding: _bound,
             permissionPolicy: const AgentPermissionPolicy.unavailable(),
             child: _PolicyWatcher(locked),
           ),
@@ -602,6 +628,8 @@ AvailableEnvironments _resolvedUnderHarness({
   owner.mountRoot(
     HarnessProvider(
       registry: registry,
+      config: _ambient,
+      siteBinding: _bound,
       child: _Effect((context) => observed = availableEnvironmentsOf(context)),
     ),
   );
