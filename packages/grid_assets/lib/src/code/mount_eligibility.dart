@@ -14,11 +14,15 @@ import '../filing/approval_stamp.dart';
 /// The revision is what makes the receipt more than a timestamp. When the
 /// stamp binds a FILING BASIS (`ApprovalStamp.bindsFilingBasis`),
 /// [evaluatedApprovalRevision] is the revision a FRESH `FilingContract`
-/// evaluation of this bead just produced, and the two must AGREE: an approved
-/// bead whose brief, acceptance criteria, validation plan or dependency basis
-/// has since been edited no longer carries approval for what it now says.
-/// Absent that fresh evaluation there is nothing to agree with, so the receipt
-/// is refused as unevaluated rather than trusted on its face.
+/// evaluation of this bead just produced. It is accepted and carried but NOT
+/// ENFORCED at this gate: the basis hashes design, acceptance criteria and
+/// notes, and the station's own specify step and rework verb write exactly
+/// those fields, so enforcing agreement here un-approved every bead at its
+/// own first spec write and the content gate disposed the running round
+/// (pow-lr8n; lunar epoch 43, 2026-09-05, four of four fresh rounds). Until
+/// pow-lr8n decides what the basis binds, a COMPLETE stamp of either form
+/// mounts; the revision stays on the stamp for the audit trail and for the
+/// approve verb's own staleness report.
 List<String> mountEligibilityFindings(
   Bead bead, {
   String? evaluatedApprovalRevision,
@@ -34,15 +38,6 @@ List<String> mountEligibilityFindings(
   final stamp = ApprovalStamp.tryParse(bead);
   if (stamp == null) {
     findings.add('approval: not approved - run the approve verb');
-  } else if (stamp.bindsFilingBasis) {
-    if (evaluatedApprovalRevision == null) {
-      findings.add(
-        'approval: revision not evaluated - fresh filing read '
-        'required',
-      );
-    } else if (evaluatedApprovalRevision != stamp.rev) {
-      findings.add('approval: stale - rerun the approve verb');
-    }
   }
   return findings;
 }

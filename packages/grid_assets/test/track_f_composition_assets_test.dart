@@ -483,8 +483,8 @@ void main() {
   );
 
   test(
-    'fresh approval checks reject changed bead and validation plan',
-    () async {
+    'a bound receipt mounts without a revision comparison (pow-lr8n bridge)',
+    () {
       final rev = _revisionOf(_approvedWork);
       final snapshot = _stamped(_approvedWork, rev);
 
@@ -492,32 +492,43 @@ void main() {
       // evaluates back to the very revision it carries.
       expect(_revisionOf(snapshot), rev);
 
-      final edited = await _runSuccessfulRefusalRecheck(
-        _stamped(_approvedWork.copyWith(description: 'A rewritten brief'), rev),
-        snapshot: snapshot,
+      // A bead whose brief or plan changed under the approval recomputes a
+      // DIFFERENT revision — and still mounts: the station's own specify step
+      // and rework verb write the fields the basis hashes, so the gate no
+      // longer compares (pow-lr8n owns the re-instatement).
+      final edited = _stamped(
+        _approvedWork.copyWith(description: 'A rewritten brief'),
+        rev,
+      );
+      expect(_revisionOf(edited), isNot(rev));
+      expect(
+        mountEligibilityDecision(
+          edited,
+          evaluatedApprovalRevision: _revisionOf(edited),
+        ),
+        isA<MountEligible>(),
+      );
+      final replanned = _stamped(
+        _approvedWork.copyWith(
+          metadata: const {'validation_plan': 'dart analyze'},
+        ),
+        rev,
       );
       expect(
-        _refusalClause(edited.decision),
-        'approval: stale - rerun the approve verb',
+        mountEligibilityDecision(
+          replanned,
+          evaluatedApprovalRevision: _revisionOf(replanned),
+        ),
+        isA<MountEligible>(),
       );
 
-      final replanned = await _runSuccessfulRefusalRecheck(
-        _stamped(
-          _approvedWork.copyWith(
-            metadata: const {'validation_plan': 'dart analyze'},
-          ),
-          rev,
-        ),
-        snapshot: snapshot,
-      );
-      expect(
-        _refusalClause(replanned.decision),
-        'approval: stale - rerun the approve verb',
-      );
+      // Off the tree there is no fresh evaluation at all, and the receipt is
+      // still trusted on its face — same as the legacy raw-sha arm.
+      expect(mountEligibilityDecision(snapshot), isA<MountEligible>());
     },
   );
 
-  test('fresh approval checks reject changed dependency basis', () async {
+  test('a bound receipt mounts when its dependency basis changed', () {
     const wired = Bead(
       id: 'pow-test',
       title: 'Approved work',
@@ -535,52 +546,37 @@ void main() {
     );
     final snapshot = _stamped(wired, rev);
 
-    final unchanged = await _runSuccessfulRefusalRecheck(
-      snapshot,
-      snapshot: snapshot,
-      blockers: const ['pow-one'],
-      links: const ['tg-89y8'],
-    );
-    expect(unchanged.decision, isA<MountEligible>());
-
-    final unwired = await _runSuccessfulRefusalRecheck(
-      snapshot,
-      snapshot: snapshot,
-      links: const ['tg-89y8'],
-    );
-    expect(
-      _refusalClause(unwired.decision),
-      'approval: stale - rerun the approve verb',
-    );
-
-    final unlinked = await _runSuccessfulRefusalRecheck(
-      snapshot,
-      snapshot: snapshot,
-      blockers: const ['pow-one'],
-    );
-    expect(
-      _refusalClause(unlinked.decision),
-      'approval: stale - rerun the approve verb',
-    );
+    final unwiredRev = _revisionOf(wired, links: const {'tg-89y8'});
+    final unlinkedRev = _revisionOf(wired, blockers: const ['pow-one']);
+    expect(unwiredRev, isNot(rev));
+    expect(unlinkedRev, isNot(rev));
+    for (final fresh in [rev, unwiredRev, unlinkedRev]) {
+      expect(
+        mountEligibilityDecision(
+          snapshot,
+          freshBead: snapshot,
+          evaluatedApprovalRevision: fresh,
+        ),
+        isA<MountEligible>(),
+        reason: fresh,
+      );
+    }
   });
 
-  test('unchanged bound receipt waits for matching fresh revision', () async {
+  test('a bound receipt is synchronous and query-free on the tree', () {
     final snapshot = _stamped(_approvedWork, _revisionOf(_approvedWork));
-
-    // Off the tree there is no evaluation to agree with, so the pure predicate
-    // refuses rather than trusting the receipt on its face.
-    expect(
-      _refusalClause(mountEligibilityDecision(snapshot)),
-      'approval: revision not evaluated - fresh filing read required',
+    final runner = _RecordingMountBdRunner(
+      (_) async => throw StateError('bound receipt queried bd'),
     );
+    final mounted = _mountEligibilityAsset((_) => runner);
 
-    // Mounted, the same receipt stays refused through the pending read and
-    // becomes eligible only once the recomputed revision matches.
-    final result = await _runSuccessfulRefusalRecheck(
-      snapshot,
-      snapshot: snapshot,
-    );
-    expect(result.decision, isA<MountEligible>());
+    expect(mounted.bundle(), isNotNull);
+    // No revision comparison ⇒ no fresh read is needed to decide: the stamped
+    // snapshot mounts in the same synchronous call, exactly like the legacy
+    // raw-sha receipt above.
+    final decision = mounted.bundle()!.mountEligibility!(snapshot);
+    expect(decision, isA<MountEligible>());
+    expect(runner.calls, isEmpty);
   });
 
   test(
