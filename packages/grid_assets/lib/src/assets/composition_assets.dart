@@ -52,12 +52,43 @@ import '../code/mount_eligibility.dart';
 import '../filing/filing_contract.dart';
 import '../search/station_search.dart';
 
+/// Deadline over one fresh mount-eligibility read.
+///
+/// A refused snapshot's recheck is a single [FilingService.inspect] fanned over
+/// two stores — the substation store's bead row plus its dependency rows, and
+/// the grid state store's link rows — and the pending refusal it flies under
+/// has NO successor of its own: a read that never answers keeps the id in
+/// flight, so every recheck re-reports `read pending` and the bead never mints
+/// (a proxied dolt store that never replies, a bd process that never exits).
+/// This deadline is what gives that read a terminal state — the failure arm,
+/// whose cached refusal a changed snapshot clears for the next attempt.
+///
+/// It stays distinct from the molecule pour deadline
+/// (`the_grid#the-pour-gets-its-own-bd-deadline` is the PRECEDENT for a named
+/// per-operation budget over a shared bd service, not the budget itself): the
+/// pour is one heavy write, this is a read fanned over two stores, and each is
+/// tuned on its own evidence. It is a deadline, NOT a retry — the killed read
+/// refuses loudly and waits for a changed snapshot.
+const Duration kMountEligibilityReadDeadline = Duration(seconds: 60);
+
+/// Raised when [kMountEligibilityReadDeadline] kills a fresh mount-eligibility
+/// read.
+///
+/// A hung store is the one read failure invisible in the store's OWN output —
+/// there is no exit code and no stderr to attribute it by — so the flare names
+/// `beadId`, the `storeRoot` whose read hung and the `error`, and an operator
+/// reading the boot log sees WHICH store stalled. Every other read failure
+/// already names itself in the refusal clause and flares nothing.
+const String kMountEligibilityReadTimeoutFlare = 'mountEligibility.readTimeout';
+
 /// Injects grid_assets mount eligibility into the ambient service bundle.
 ///
 /// Eligible snapshots pass through synchronously. A refused snapshot starts one
 /// scoped fresh FILING read; while it is in flight the refusal stays LOUD, and
 /// completion re-provides the bundle with either the fresh decision or a
-/// refusal that names the read failure.
+/// refusal that names the read failure. The read is BOUNDED by
+/// [kMountEligibilityReadDeadline] so "in flight" always ends: a store that
+/// never answers becomes a named failure, never a permanent pending clause.
 ///
 /// The fresh read is a `FilingService.inspect` rather than a bare bead query,
 /// because a receipt bound to a filing basis can only be judged against a
@@ -71,14 +102,20 @@ class MountEligibilityAssets extends SingleChildStatefulSeed {
   /// Creates the mount-boundary assets node.
   ///
   /// [runnerFor] is the injected bd runner factory. The default delegates all
-  /// process policy to [ProcessBdRunner].
+  /// process policy to [ProcessBdRunner]. [readDeadline] bounds each fresh
+  /// read (config is a VALUE in the tree, ADR-0008).
   const MountEligibilityAssets({
     BdRunner Function(String storeRoot) runnerFor = _processRunnerFor,
+    this.readDeadline = kMountEligibilityReadDeadline,
     super.child,
     super.key,
   }) : _runnerFor = runnerFor;
 
   final BdRunner Function(String storeRoot) _runnerFor;
+
+  /// How long ONE fresh read may run before it is killed and refused; see
+  /// [kMountEligibilityReadDeadline] for why the read needs a deadline at all.
+  final Duration readDeadline;
 
   static BdRunner _processRunnerFor(String storeRoot) =>
       ProcessBdRunner(workspaceRoot: storeRoot);
@@ -94,6 +131,7 @@ class _MountEligibilityAssetsState
   sdk.SubstationScope? _scope;
   sdk.GridRoot? _gridRoot;
   BdRunner Function(String storeRoot)? _runnerFor;
+  Duration? _readDeadline;
   FilingService? _filing;
   final Map<String, Bead> _snapshotsById = <String, Bead>{};
   final Set<String> _readsInFlight = <String>{};
@@ -114,8 +152,10 @@ class _MountEligibilityAssetsState
     // a re-provided root re-derives every cached recheck under it.
     final gridRoot = context.dependOnInheritedSeedOfExactType<sdk.GridRoot>();
     final runnerFor = seed._runnerFor;
+    final readDeadline = seed.readDeadline;
     if (scope == _scope &&
         gridRoot == _gridRoot &&
+        readDeadline == _readDeadline &&
         identical(runnerFor, _runnerFor)) {
       return;
     }
@@ -123,6 +163,7 @@ class _MountEligibilityAssetsState
     _scope = scope;
     _gridRoot = gridRoot;
     _runnerFor = runnerFor;
+    _readDeadline = readDeadline;
     _filing = scope == null
         ? null
         : FilingService(
@@ -174,6 +215,7 @@ class _MountEligibilityAssetsState
               scope,
               filing,
               _gridRoot?.stateStore.runtimeDir,
+              seed.readDeadline,
               _generation,
             ),
           );
@@ -189,15 +231,21 @@ class _MountEligibilityAssetsState
     sdk.SubstationScope scope,
     FilingService filing,
     String? stateRoot,
+    Duration deadline,
     int generation,
   ) async {
     MountEligibilityDecision decision;
     try {
-      final inspected = await filing.inspect(
-        storeRoot: scope.root,
-        beadId: snapshot.id,
-        stateRoot: stateRoot,
-      );
+      // ONE deadline over the WHOLE read (bead row, dependency rows, and the
+      // state store's link rows): what must not hang is the read this bead is
+      // waiting on, not any single call inside it.
+      final inspected = await filing
+          .inspect(
+            storeRoot: scope.root,
+            beadId: snapshot.id,
+            stateRoot: stateRoot,
+          )
+          .timeout(deadline);
       final fresh = inspected.bead;
       if (fresh == null) {
         throw StateError(
@@ -211,7 +259,7 @@ class _MountEligibilityAssetsState
         evaluatedApprovalRevision: inspected.report.approvalRevision,
       );
     } on Object catch (error) {
-      _completeFailure(snapshot, generation, error);
+      _completeFailure(snapshot, scope.root, generation, error);
       return;
     }
     _completeDecision(snapshot, generation, decision);
@@ -231,13 +279,27 @@ class _MountEligibilityAssetsState
     });
   }
 
-  void _completeFailure(Bead snapshot, int generation, Object error) {
+  void _completeFailure(
+    Bead snapshot,
+    String storeRoot,
+    int generation,
+    Object error,
+  ) {
     if (!_isCurrent(snapshot, generation)) return;
     setState(() {
       _readsInFlight.remove(snapshot.id);
       _freshDecisionsById.remove(snapshot.id);
       _readFailuresById[snapshot.id] = error;
       _revision++;
+    });
+    if (error is! TimeoutException) return;
+    // The refusal clause reaches whoever asks for THIS bead's decision; the
+    // flare reaches the operator reading the boot log, where a stalled store
+    // otherwise shows up only as a bead that never mints.
+    _ambient?.transport?.flare(kMountEligibilityReadTimeoutFlare, {
+      'beadId': snapshot.id,
+      'storeRoot': storeRoot,
+      'error': '$error',
     });
   }
 
@@ -277,7 +339,14 @@ class _MountEligibilityAssetsState
         ambient ?? const ServiceBundle(),
         mountEligibility: predicate,
       ),
-      derivedFrom: [ambient, scope, _gridRoot, seed._runnerFor, _revision],
+      derivedFrom: [
+        ambient,
+        scope,
+        _gridRoot,
+        seed._runnerFor,
+        seed.readDeadline,
+        _revision,
+      ],
       child: child,
     );
   }
