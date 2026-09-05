@@ -78,6 +78,99 @@ BdResult _queryReply(Bead bead) => BdResult(
   stderr: '',
 );
 
+BdResult _depListReply(List<String> blockers) => BdResult(
+  exitCode: 0,
+  stdout: jsonEncode({
+    'schema_version': 1,
+    'data': [
+      for (final blocker in blockers)
+        {'issue_id': 'pow-test', 'depends_on_id': blocker, 'type': 'blocks'},
+    ],
+  }),
+  stderr: '',
+);
+
+BdResult _linkListReply(List<String> blockers) => BdResult(
+  exitCode: 0,
+  stdout: jsonEncode({
+    'schema_version': 1,
+    'data': [
+      for (final blocker in blockers)
+        {
+          'id': 'tgdog-link-$blocker',
+          'issue_type': 'link',
+          'status': 'open',
+          'metadata': {
+            'grid.link.from': 'pow-test',
+            'grid.link.to': blocker,
+            'grid.link.type': 'blocks',
+          },
+        },
+    ],
+  }),
+  stderr: '',
+);
+
+/// Scripts the whole fresh FILING read: the substation store's exact query and
+/// dependency rows, and the grid state store's open link beads.
+Future<BdResult> Function(List<String>) _freshFiling(
+  Bead fresh, {
+  List<String> blockers = const [],
+  List<String> links = const [],
+}) =>
+    (args) async => switch (args.first) {
+      'query' => _queryReply(fresh),
+      'dep' => _depListReply(blockers),
+      'list' => _linkListReply(links),
+      _ => throw StateError('unscripted bd call: \$args'),
+    };
+
+/// The three argv the fresh filing read spawns, in order.
+const List<List<String>> _freshFilingCalls = [
+  ['query', 'id=pow-test', '--all', '--json', '--limit', '0'],
+  ['dep', 'list', 'pow-test', '--json'],
+  ['list', '-t', 'link', '--status', 'open', '--json', '--limit', '0'],
+];
+
+/// A complete receipt of the retired shape: an actor, a UTC instant and a raw
+/// store-HEAD git sha, which names no basis to re-derive.
+const Map<String, dynamic> _legacyReceipt = {
+  'validation_plan': 'dart test',
+  'grid.approved_by': 'nico',
+  'grid.approved_at': '2026-09-02T14:30:00.000Z',
+  'grid.approved_rev': '9f1c2d3e4b5a69788899aabbccddeeff00112233',
+};
+
+/// The revision an approve run over [bead] with this dependency basis stamps.
+String _revisionOf(
+  Bead bead, {
+  List<String> blockers = const [],
+  Set<String> links = const {},
+}) => const FilingContract().evaluate(bead, [
+  for (final blocker in blockers)
+    BeadDependency(issueId: bead.id, dependsOnId: blocker),
+], linkedBlockers: links).approvalRevision;
+
+/// [bead] carrying the receipt the approve verb would write for [rev].
+Bead _stamped(Bead bead, String rev) => bead.copyWith(
+  metadata: {
+    ...bead.metadata,
+    kApprovedByKey: 'nico',
+    kApprovedAtKey: '2026-09-02T14:30:00.000Z',
+    kApprovedRevKey: rev,
+  },
+);
+
+/// The approved work the bound-receipt probes are about.
+const Bead _approvedWork = Bead(
+  id: 'pow-test',
+  title: 'Approved work',
+  description: 'A concrete brief',
+  acceptanceCriteria: '- [ ] checked',
+  metadata: {'validation_plan': 'dart test'},
+  labels: [],
+);
+
 class _SourceControl implements SourceControl {
   @override
   String get baseBranch => 'main';
@@ -150,14 +243,20 @@ Seed _underSubstation(String name, String root, Seed child) =>
   ServiceBundle? observed;
   final owner = TreeOwner();
   owner.mountRoot(
-    _underSubstation(
-      'power_station',
-      '/work/ps',
-      MountEligibilityAssets(
-        runnerFor: runnerFor,
-        child: _Probe(
-          (context) => observed = context
-              .dependOnInheritedSeedOfExactType<ServiceBundle>(),
+    // The grid home encloses the substation exactly as a `RawAssetGrid` does:
+    // its state store is where the filing contract reads cross-store link
+    // proofs from.
+    InheritedSeed<sdk.GridRoot>(
+      value: const sdk.GridRoot(path: '/work/grid'),
+      child: _underSubstation(
+        'power_station',
+        '/work/ps',
+        MountEligibilityAssets(
+          runnerFor: runnerFor,
+          child: _Probe(
+            (context) => observed = context
+                .dependOnInheritedSeedOfExactType<ServiceBundle>(),
+          ),
         ),
       ),
     ),
@@ -172,15 +271,22 @@ String? _refusalClause(MountEligibilityDecision decision) => switch (decision) {
 };
 
 Future<({MountEligibilityDecision decision, _RecordingMountBdRunner runner})>
-_runSuccessfulRefusalRecheck(Bead fresh) async {
-  final runner = _RecordingMountBdRunner((_) async => _queryReply(fresh));
+_runSuccessfulRefusalRecheck(
+  Bead fresh, {
+  Bead snapshot = const Bead(id: 'pow-test', metadata: {}, labels: []),
+  List<String> blockers = const [],
+  List<String> links = const [],
+}) async {
+  final runner = _RecordingMountBdRunner(
+    _freshFiling(fresh, blockers: blockers, links: links),
+  );
+  final roots = <String>[];
   final mounted = _mountEligibilityAsset((root) {
-    expect(root, '/work/ps');
+    roots.add(root);
     return runner;
   });
   expect(mounted.bundle(), isNotNull);
 
-  const snapshot = Bead(id: 'pow-test', metadata: {}, labels: []);
   final pending = mounted.bundle()!.mountEligibility!(snapshot);
   expect(
     _refusalClause(pending),
@@ -192,9 +298,10 @@ _runSuccessfulRefusalRecheck(Bead fresh) async {
 
   final decision = mounted.bundle()!.mountEligibility!(snapshot);
   expect(mounted.bundle()!.mountEligibility!(snapshot), decision);
-  expect(runner.calls, [
-    ['query', 'id=pow-test', '--all', '--json', '--limit', '0'],
-  ]);
+  expect(runner.calls, _freshFilingCalls);
+  // The work store is the SUBSTATION's; the link proofs come from the grid
+  // home's state store, resolved from the ambient root.
+  expect(roots, ['/work/ps', '/work/grid/.grid']);
   return (decision: decision, runner: runner);
 }
 
@@ -318,14 +425,7 @@ void main() {
     'MountEligibilityAssets refusal recheck clears a stale refusal',
     () async {
       final result = await _runSuccessfulRefusalRecheck(
-        const Bead(
-          id: 'pow-test',
-          metadata: {
-            'validation_plan': 'dart test',
-            'grid.approved_at': '2026-09-02T14:30:00.000Z',
-          },
-          labels: ['grid.approved'],
-        ),
+        const Bead(id: 'pow-test', metadata: _legacyReceipt, labels: []),
       );
       expect(result.decision, isA<MountEligible>());
     },
@@ -340,20 +440,116 @@ void main() {
       final mounted = _mountEligibilityAsset((_) => runner);
 
       expect(mounted.bundle(), isNotNull);
+      // A COMPLETE legacy receipt names a store HEAD, not a filing basis:
+      // there is nothing to re-derive, so it still mounts without a read.
       final decision = mounted.bundle()!.mountEligibility!(
-        const Bead(
-          id: 'pow-test',
-          metadata: {
-            'validation_plan': 'dart test',
-            'grid.approved_at': '2026-09-02T14:30:00.000Z',
-          },
-          labels: ['grid.approved'],
-        ),
+        const Bead(id: 'pow-test', metadata: _legacyReceipt, labels: []),
       );
       expect(decision, isA<MountEligible>());
       expect(runner.calls, isEmpty);
     },
   );
+
+  test(
+    'fresh approval checks reject changed bead and validation plan',
+    () async {
+      final rev = _revisionOf(_approvedWork);
+      final snapshot = _stamped(_approvedWork, rev);
+
+      // The receipt itself is excluded from the basis, so a stamped bead
+      // evaluates back to the very revision it carries.
+      expect(_revisionOf(snapshot), rev);
+
+      final edited = await _runSuccessfulRefusalRecheck(
+        _stamped(_approvedWork.copyWith(description: 'A rewritten brief'), rev),
+        snapshot: snapshot,
+      );
+      expect(
+        _refusalClause(edited.decision),
+        'approval: stale - rerun the approve verb',
+      );
+
+      final replanned = await _runSuccessfulRefusalRecheck(
+        _stamped(
+          _approvedWork.copyWith(
+            metadata: const {'validation_plan': 'dart analyze'},
+          ),
+          rev,
+        ),
+        snapshot: snapshot,
+      );
+      expect(
+        _refusalClause(replanned.decision),
+        'approval: stale - rerun the approve verb',
+      );
+    },
+  );
+
+  test('fresh approval checks reject changed dependency basis', () async {
+    const wired = Bead(
+      id: 'pow-test',
+      title: 'Approved work',
+      description:
+          'A concrete brief. Blocked by: pow-one. '
+          'BLOCKED on tg-89y8 across stores.',
+      acceptanceCriteria: '- [ ] checked',
+      metadata: {'validation_plan': 'dart test'},
+      labels: [],
+    );
+    final rev = _revisionOf(
+      wired,
+      blockers: const ['pow-one'],
+      links: const {'tg-89y8'},
+    );
+    final snapshot = _stamped(wired, rev);
+
+    final unchanged = await _runSuccessfulRefusalRecheck(
+      snapshot,
+      snapshot: snapshot,
+      blockers: const ['pow-one'],
+      links: const ['tg-89y8'],
+    );
+    expect(unchanged.decision, isA<MountEligible>());
+
+    final unwired = await _runSuccessfulRefusalRecheck(
+      snapshot,
+      snapshot: snapshot,
+      links: const ['tg-89y8'],
+    );
+    expect(
+      _refusalClause(unwired.decision),
+      'approval: stale - rerun the approve verb',
+    );
+
+    final unlinked = await _runSuccessfulRefusalRecheck(
+      snapshot,
+      snapshot: snapshot,
+      blockers: const ['pow-one'],
+    );
+    expect(
+      _refusalClause(unlinked.decision),
+      'approval: stale - rerun the approve verb',
+    );
+  });
+
+  test('unchanged bound receipt waits for matching fresh revision', () async {
+    final snapshot = _stamped(_approvedWork, _revisionOf(_approvedWork));
+
+    // Off the tree there is no evaluation to agree with, so the pure predicate
+    // refuses rather than trusting the receipt on its face.
+    expect(
+      _refusalClause(mountEligibilityDecision(snapshot)),
+      'approval: revision not evaluated - fresh filing read required',
+    );
+
+    // Mounted, the same receipt stays refused through the pending read and
+    // becomes eligible only once the recomputed revision matches.
+    final result = await _runSuccessfulRefusalRecheck(
+      snapshot,
+      snapshot: snapshot,
+    );
+    expect(result.decision, isA<MountEligible>());
+  });
 
   test(
     'MountEligibilityAssets failed refusal recheck is a loud refusal',

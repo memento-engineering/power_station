@@ -3,7 +3,6 @@ import 'dart:io';
 
 import 'package:args/command_runner.dart';
 import 'package:beads_dart/beads_dart.dart' show BdRunner, ProcessBdRunner;
-import 'package:grid_runtime/grid_runtime.dart' show GitRunner, SystemGitRunner;
 import 'package:path/path.dart' as p;
 
 import '../search/station_search.dart';
@@ -14,7 +13,6 @@ import 'state_root_option.dart';
 String _currentDirectory() => Directory.current.path;
 BdRunner _processRunnerFor(String storeRoot) =>
     ProcessBdRunner(workspaceRoot: storeRoot);
-final RegExp _sha = RegExp(r'^[0-9a-f]{7,40}$');
 
 /// The outcome of one approve run — a sealed union so every consumer faces both
 /// arms.
@@ -77,12 +75,17 @@ final class ApprovalRefused extends ApprovalOutcome {
 
 /// UI-drivable approval: the four-row filing preflight, then ONE stamped
 /// `bd update`. Nothing is written unless every row passes.
+///
+/// The receipt is bound to the preflight that earned it: the stamped revision
+/// is the passing report's [FilingReport.approvalRevision], so it names WHAT
+/// was approved rather than which commit the store happened to sit on. Git is
+/// not consulted at all — a store HEAD moves for reasons that have nothing to
+/// do with the bead, and never moves when the bead alone is edited.
 final class ApproveService {
-  /// Creates the service over the filing preflight and three injectable seams.
+  /// Creates the service over the filing preflight and two injectable seams.
   ApproveService({
     FilingService? filing,
     BdRunner Function(String storeRoot) runnerFor = _processRunnerFor,
-    GitRunner? git,
     DateTime Function() now = DateTime.now,
   }) : filing =
            filing ??
@@ -91,14 +94,12 @@ final class ApproveService {
              links: CrossLinkBlockerSource(runnerFor: runnerFor),
            ),
        _runnerFor = runnerFor,
-       _git = git,
        _now = now;
 
   /// The preflight this verb GATES on.
   final FilingService filing;
 
   final BdRunner Function(String storeRoot) _runnerFor;
-  final GitRunner? _git;
   final DateTime Function() _now;
 
   /// Approves [beadId] in [storeRoot] on behalf of [actor].
@@ -127,24 +128,10 @@ final class ApproveService {
         report: report,
       );
     }
-    final head = await (_git ?? SystemGitRunner()).run(
-      workingDirectory: storeRoot,
-      args: const ['rev-parse', 'HEAD'],
-    );
-    final rev = head.output.trim();
-    if (!head.ok || !_sha.hasMatch(rev)) {
-      return ApprovalRefused(
-        beadId: beadId,
-        reason:
-            'could not read the approval revision of $storeRoot '
-            '(git rev-parse HEAD: $rev)',
-        report: report,
-      );
-    }
     final stamp = ApprovalStamp(
       by: actor,
       at: _now().toUtc().toIso8601String(),
-      rev: rev,
+      rev: report.approvalRevision,
     );
     final written = await _runnerFor(storeRoot).run([
       'update',

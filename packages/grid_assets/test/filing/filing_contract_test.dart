@@ -21,6 +21,113 @@ class _RecordingBdRunner implements BdRunner {
 }
 
 void main() {
+  test('approval revision is deterministic and covers filing basis', () {
+    const bead = Bead(
+      id: 'pow-filed',
+      title: 'A filed bead',
+      issueType: IssueType.task,
+      priority: 2,
+      description: 'Blocked by: pow-one\nDepends on pow-two',
+      design: 'The chosen approach',
+      acceptanceCriteria: '- [ ] checked',
+      notes: 'operator context',
+      specId: 'pow-spec',
+      metadata: {'validation_plan': 'dart test'},
+    );
+    const one = BeadDependency(issueId: 'pow-filed', dependsOnId: 'pow-one');
+    const two = BeadDependency(issueId: 'pow-filed', dependsOnId: 'pow-two');
+
+    String rev(
+      Bead subject,
+      List<BeadDependency> edges, [
+      Set<String>? linked,
+    ]) => const FilingContract()
+        .evaluate(subject, edges, linkedBlockers: linked)
+        .approvalRevision;
+
+    final baseline = rev(bead, const [one, two]);
+    expect(baseline, startsWith(kFilingApprovalRevisionPrefix));
+    expect(
+      baseline.substring(kFilingApprovalRevisionPrefix.length),
+      matches(RegExp(r'^[0-9a-f]{64}$')),
+    );
+
+    // Equivalent input in a different ORDER is the same basis.
+    expect(rev(bead, const [two, one]), baseline);
+    expect(rev(bead, const [two, one, two]), baseline);
+    expect(
+      rev(bead, const [one, two], const {'pow-two', 'pow-one'}),
+      rev(bead, const [one, two], const {'pow-one', 'pow-two'}),
+    );
+
+    // Every covered field moves it.
+    for (final changed in <Bead>[
+      bead.copyWith(id: 'pow-elsewhere'),
+      bead.copyWith(title: 'A renamed bead'),
+      bead.copyWith(description: 'Blocked by: pow-one\nDepends on pow-three'),
+      bead.copyWith(design: 'A different approach'),
+      bead.copyWith(acceptanceCriteria: '- [ ] checked twice'),
+      bead.copyWith(notes: 'different context'),
+      bead.copyWith(specId: 'pow-other-spec'),
+      bead.copyWith(issueType: IssueType.chore),
+      bead.copyWith(priority: 1),
+      bead.copyWith(metadata: const {'validation_plan': 'dart analyze'}),
+      bead.copyWith(metadata: const {}),
+    ]) {
+      expect(
+        rev(changed, const [one, two]),
+        isNot(baseline),
+        reason: changed.toString(),
+      );
+    }
+
+    // Each dependency PROOF is covered independently: the named blocker, the
+    // local outgoing edge, and the linked-blocker proof.
+    expect(rev(bead, const [one]), isNot(baseline));
+    expect(rev(bead, const [one], const {'pow-two'}), isNot(baseline));
+    expect(rev(bead, const [one, two], const {'pow-two'}), isNot(baseline));
+    expect(rev(bead, const [], const {'pow-one', 'pow-two'}), isNot(baseline));
+
+    // The basis records the proofs FOUND, not the posture of the lookup: an
+    // unconsulted state store and a consulted one holding no matching link
+    // both witness "no linked proof", so they agree.
+    expect(rev(bead, const [one, two], const {}), baseline);
+
+    // Lifecycle motion, ownership and the receipt itself are EXCLUDED, so
+    // writing the stamp can never invalidate the stamp it writes.
+    for (final untouched in <Bead>[
+      bead.copyWith(status: BeadStatus.closed),
+      bead.copyWith(assignee: 'nico', owner: 'nico'),
+      bead.copyWith(
+        createdAt: DateTime.utc(2026),
+        updatedAt: DateTime.utc(2026, 2),
+        closedAt: DateTime.utc(2026, 3),
+      ),
+      bead.copyWith(labels: const ['grid.approved']),
+      bead.copyWith(
+        metadata: {
+          ...bead.metadata,
+          kApprovedByKey: 'nico',
+          kApprovedAtKey: '2026-09-02T14:30:00.000Z',
+          kApprovedRevKey: baseline,
+        },
+      ),
+    ]) {
+      expect(
+        rev(untouched, const [one, two]),
+        baseline,
+        reason: untouched.toString(),
+      );
+    }
+
+    // A report with no bead to evaluate carries no revision.
+    expect(FilingReport.missing('pow-gone').approvalRevision, isEmpty);
+    expect(
+      const FilingContract().evaluate(bead, const [one, two]).toJson(),
+      containsPair('approval_revision', baseline),
+    );
+  });
+
   test('dependency requirement is exact and directional', () {
     const bead = Bead(
       id: 'pow-filed',

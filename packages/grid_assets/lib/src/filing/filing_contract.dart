@@ -1,7 +1,11 @@
+import 'dart:convert';
+
 import 'package:beads_dart/beads_dart.dart';
+import 'package:crypto/crypto.dart';
 import 'package:grid_engine/grid_engine.dart';
 
 import '../search/station_search.dart';
+import 'approval_stamp.dart';
 
 /// The four mechanical checks reported for a newly filed bead.
 enum FilingRequirement {
@@ -48,6 +52,7 @@ final class FilingReport {
   const FilingReport({
     required this.beadId,
     required this.requirements,
+    this.approvalRevision = '',
     this.error,
   });
 
@@ -64,6 +69,14 @@ final class FilingReport {
   /// Four rows for a found bead, in [FilingRequirement.values] order.
   final List<FilingRequirementRow> requirements;
 
+  /// The revision this filing WOULD be approved against — the deterministic
+  /// digest of everything the four rows are evaluated over. Empty for a report
+  /// with no bead to evaluate.
+  ///
+  /// This is what `ApproveService` stamps as `grid.approved_rev` and what the
+  /// mount gate re-derives to tell a live receipt from a stale one.
+  final String approvalRevision;
+
   /// Lookup-level refusal; non-null reports never pass.
   final String? error;
 
@@ -77,6 +90,7 @@ final class FilingReport {
   Map<String, Object> toJson() => {
     'id': beadId,
     'passed': passed,
+    'approval_revision': approvalRevision,
     'requirements': [for (final row in requirements) row.toJson()],
     if (error case final error?) 'error': error,
   };
@@ -176,6 +190,46 @@ final class CrossLinkBlockerSource {
 const String kUnconsultedCrossStoreDetail =
     'cross-store edges not consulted — pass --state-root';
 
+/// The version-1 approval revision of one evaluated filing.
+///
+/// It digests exactly what an approval is a judgement ABOUT: the bead's work
+/// fields, its validation plan, and — per named blocker, sorted — whether a
+/// local outgoing `blocks` edge and an open linked-blocker proof were found.
+/// Lifecycle timestamps, status, assignee/owner, result metadata and the
+/// receipt itself are all EXCLUDED, so stamping the receipt can never
+/// invalidate the receipt it stamps, and a bead moving through its lifecycle
+/// does not revoke a governor's approval of its content.
+String _approvalRevisionOf(
+  Bead bead, {
+  required Set<String> named,
+  required Set<String> localBlocks,
+  required Set<String>? linkedBlockers,
+}) {
+  final plan = bead.metadata['validation_plan'];
+  final basis = <String, Object?>{
+    'id': bead.id,
+    'title': bead.title,
+    'description': bead.description,
+    'design': bead.design,
+    'acceptanceCriteria': bead.acceptanceCriteria,
+    'notes': bead.notes,
+    'specId': bead.specId,
+    'issueType': bead.issueType.wire,
+    'priority': bead.priority,
+    'validationPlan': plan is String ? plan : null,
+    'dependencies': [
+      for (final id in named.toList()..sort())
+        {
+          'id': id,
+          'blocks': localBlocks.contains(id),
+          'linked': linkedBlockers?.contains(id) ?? false,
+        },
+    ],
+  };
+  final digest = sha256.convert(utf8.encode(jsonEncode(basis)));
+  return '$kFilingApprovalRevisionPrefix$digest';
+}
+
 /// Pure evaluator for the four-row filing report.
 ///
 /// This is the FILING COMPLETENESS contract of
@@ -209,12 +263,12 @@ final class FilingContract {
     Set<String>? linkedBlockers,
   }) {
     final validationPlan = bead.metadata['validation_plan'];
-    final wired = {
+    final localBlocks = {
       for (final edge in dependencies)
         if (edge.issueId == bead.id && edge.type == DependencyType.blocks)
           edge.dependsOnId,
-      ...?linkedBlockers,
     };
+    final wired = {...localBlocks, ...?linkedBlockers};
     final ownPrefix = _prefixOf(bead.id);
     final knownPrefixes = <String>{
       ownPrefix,
@@ -243,6 +297,12 @@ final class FilingContract {
           ].join('; ');
     return FilingReport(
       beadId: bead.id,
+      approvalRevision: _approvalRevisionOf(
+        bead,
+        named: named,
+        localBlocks: localBlocks,
+        linkedBlockers: linkedBlockers,
+      ),
       requirements: [
         FilingRequirementRow(
           requirement: FilingRequirement.driveableType,
@@ -293,25 +353,48 @@ final class FilingService {
   /// The station state store's cross-link reader.
   final CrossLinkBlockerSource links;
 
-  /// Checks [beadId] in the store rooted at [storeRoot].
+  /// Reads [beadId] in the store rooted at [storeRoot] and evaluates it,
+  /// returning BOTH the exact bead read and its report.
+  ///
+  /// This is the ONE read/evaluate path: the filing verb, the approve verb and
+  /// the mount gate all reach the store through it, so the report's
+  /// [FilingReport.approvalRevision] is always the digest of the very bead
+  /// alongside it.
   ///
   /// A null [stateRoot] leaves the cross-store link beads UNREAD, and that is
   /// what the contract is told: it receives null rather than an empty set, so
   /// an unconsulted lookup is never reported as an absent edge.
-  Future<FilingReport> check({
+  Future<({Bead? bead, FilingReport report})> inspect({
     required String storeRoot,
     required String beadId,
     String? stateRoot,
   }) async {
     final read = await source.readExact(storeRoot: storeRoot, beadId: beadId);
     final bead = read.bead;
-    if (bead == null) return FilingReport.missing(beadId);
-    return contract.evaluate(
-      bead,
-      read.dependencies,
-      linkedBlockers: stateRoot == null
-          ? null
-          : await links.wiredFor(stateRoot: stateRoot, beadId: beadId),
+    if (bead == null) {
+      return (bead: null, report: FilingReport.missing(beadId));
+    }
+    return (
+      bead: bead,
+      report: contract.evaluate(
+        bead,
+        read.dependencies,
+        linkedBlockers: stateRoot == null
+            ? null
+            : await links.wiredFor(stateRoot: stateRoot, beadId: beadId),
+      ),
     );
   }
+
+  /// Checks [beadId] in the store rooted at [storeRoot] — [inspect] without
+  /// the bead.
+  Future<FilingReport> check({
+    required String storeRoot,
+    required String beadId,
+    String? stateRoot,
+  }) async => (await inspect(
+    storeRoot: storeRoot,
+    beadId: beadId,
+    stateRoot: stateRoot,
+  )).report;
 }

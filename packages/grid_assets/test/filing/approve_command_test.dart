@@ -4,7 +4,6 @@ import 'dart:io';
 import 'package:args/command_runner.dart';
 import 'package:beads_dart/beads_dart.dart';
 import 'package:grid_assets/grid_assets.dart';
-import 'package:grid_runtime/grid_runtime.dart';
 import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
@@ -48,24 +47,6 @@ final class _ScriptedBdRunner implements BdRunner {
       argvs.where((argv) => argv.first == 'update').toList();
 }
 
-final class _FakeGitRunner implements GitRunner {
-  _FakeGitRunner(this.result);
-
-  final GitRunResult result;
-  final List<({String workingDirectory, List<String> args})> calls = [];
-
-  @override
-  Future<GitRunResult> run({
-    required String workingDirectory,
-    required List<String> args,
-  }) async {
-    calls.add((workingDirectory: workingDirectory, args: args));
-    return result;
-  }
-}
-
-const String _sha = '9f1c2d3e4b5a69788899aabbccddeeff00112233';
-
 String _beadReply({required String description}) => jsonEncode({
   'schema_version': 1,
   'data': [
@@ -106,17 +87,11 @@ String _linkReply(List<Map<String, String>> links) => jsonEncode({
   StringBuffer out,
   StringBuffer err,
   _ScriptedBdRunner bd,
-  _FakeGitRunner git,
   List<String> roots,
 })
-_harness(
-  _ScriptedBdRunner bd, {
-  GitRunResult gitResult = const GitRunResult(exitCode: 0, output: '$_sha\n'),
-  String? stateRoot,
-}) {
+_harness(_ScriptedBdRunner bd, {String? stateRoot}) {
   final out = StringBuffer();
   final err = StringBuffer();
-  final git = _FakeGitRunner(gitResult);
   final roots = <String>[];
   return (
     runner: CommandRunner<int>('space', 'test station')
@@ -127,7 +102,6 @@ _harness(
               roots.add(root);
               return bd;
             },
-            git: git,
             now: () => DateTime.utc(2026, 9, 2, 14, 30),
           ),
           storeRoot: () => '/work/power_station',
@@ -139,7 +113,6 @@ _harness(
     out: out,
     err: err,
     bd: bd,
-    git: git,
     roots: roots,
   );
 }
@@ -175,10 +148,9 @@ void main() {
     expect(dependencies['passed'], isFalse);
     expect(dependencies['detail'], contains('pow-n6n.1'));
     expect(h.bd.updates, isEmpty);
-    expect(h.git.calls, isEmpty);
   });
 
-  test('stamps a wired bead in ONE bd update', () async {
+  test('stamps the deterministic filing revision in one update', () async {
     final h = _harness(
       _ScriptedBdRunner({
         'query': _beadReply(
@@ -193,28 +165,33 @@ void main() {
       0,
       reason: '${h.out}${h.err}',
     );
-    expect(h.git.calls, [
-      (
-        workingDirectory: '/work/power_station',
-        args: const ['rev-parse', 'HEAD'],
-      ),
-    ]);
     expect(h.bd.updates, hasLength(1));
     final argv = h.bd.updates.single;
     expect(argv.take(2), ['update', 'pow-child']);
     expect(argv, containsAllInOrder(['--actor', 'nico']));
     expect(argv, isNot(contains('--add-label')));
     expect(argv.where((arg) => arg == '--set-metadata'), hasLength(3));
+
+    final report = jsonDecode(h.out.toString()) as Map<String, dynamic>;
+    final filing = report['filing'] as Map<String, dynamic>;
+    final revision = filing['approval_revision'] as String;
+    // The stamp is the revision the PASSING preflight evaluated — the receipt
+    // names WHAT was approved, not which commit the store sat on.
+    expect(revision, startsWith(kFilingApprovalRevisionPrefix));
     expect(callMetadata(argv), {
       'grid.approved_by': 'nico',
       'grid.approved_at': '2026-09-02T14:30:00.000Z',
-      'grid.approved_rev': _sha,
+      'grid.approved_rev': revision,
     });
-    final report = jsonDecode(h.out.toString()) as Map<String, dynamic>;
     expect(report['approved'], isTrue);
     expect(report['by'], 'nico');
     expect(DateTime.parse(report['at'] as String).isUtc, isTrue);
-    expect(report['rev'], _sha);
+    expect(report['rev'], revision);
+
+    // The verb reached NO git: `/work/power_station` is a fiction, and only
+    // the injected bd runner was ever spawned against it.
+    expect(Directory('/work/power_station').existsSync(), isFalse);
+    expect(h.roots, everyElement(isNot(endsWith('.git'))));
   });
 
   test('a foreign blocker needs its link bead', () async {
@@ -296,7 +273,6 @@ void main() {
     );
     expect(h.err.toString(), allOf(contains('.grid'), contains('.beads')));
     expect(h.bd.argvs, isEmpty);
-    expect(h.git.calls, isEmpty);
   });
 
   test(
@@ -332,25 +308,6 @@ void main() {
     expect(await h.runner.run(['approve', 'pow-child']), 64);
     expect(h.err.toString(), contains('--actor'));
     expect(h.bd.argvs, isEmpty);
-    expect(h.git.calls, isEmpty);
-  });
-
-  test('an unreadable revision refuses before any write', () async {
-    final h = _harness(
-      _ScriptedBdRunner({
-        'query': _beadReply(description: 'No local ordering.'),
-        'dep': _depReply(const []),
-      }),
-      gitResult: const GitRunResult(
-        exitCode: -1,
-        output: 'not a git repository',
-        launched: false,
-      ),
-    );
-
-    expect(await h.runner.run(['approve', '--actor', 'nico', 'pow-child']), 1);
-    expect(h.out.toString(), contains('approval revision'));
-    expect(h.bd.updates, isEmpty);
   });
 
   test('a refused bd update is reported, never claimed as approval', () async {

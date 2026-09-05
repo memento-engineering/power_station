@@ -27,7 +27,11 @@ void main() {
       );
     });
 
-    test('only the approve verb clears it', () {
+    test('complete legacy approval receipt clears pending state', () {
+      // The receipt shape the fleet's already-approved work carries: an actor,
+      // a UTC instant, and a raw store-HEAD sha. It names no filing basis to
+      // re-derive, so it clears the gate synchronously and downstream packs
+      // keep mounting through the compatibility arm.
       final approved = filed.copyWith(
         metadata: <String, dynamic>{
           ...filed.metadata,
@@ -38,6 +42,7 @@ void main() {
         },
       );
 
+      expect(isApprovalStamped(approved), isTrue);
       expect(mountEligibilityFindings(approved), isEmpty);
     });
   });
