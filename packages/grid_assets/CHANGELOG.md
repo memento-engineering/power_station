@@ -1,3 +1,8 @@
+## 0.6.0-rc.16
+
+- Fixed: the shelled decision lookup accepts the decisions index envelope `spec: 2` beside `spec: 1` (`_acceptedDecisionIndexSpecs`); against decisions_grid_assets 0.2.1 every explore-decision surface FAILED on rc.13–rc.15 and the round held at `discovery-route` (pow-rokz, #231).
+- Fixed: approval receipts are complete and bound to the filing basis — `ApprovalStamp.tryParse` requires a nonblank `grid.approved_by`, a UTC `grid.approved_at`, and a recognized `grid.approved_rev` (a legacy raw git sha, or the `filing:v1:sha256:` digest the approve verb now writes over the bead's filing contract); a lone `grid.approved_at` no longer mounts, and mount eligibility re-checks the fresh bead against the stamped revision (pow-9rah, #232).
+
 ## 0.6.0-rc.15
 
 - Fixed: the discovery gather no longer treats a record clipped at its OWN bound (`kMaxDiscoverySnippetChars`, `kMaxHistoryCommits`) or a clipped anchor/symbol extraction (`kMaxAnchors`) as a deterministic gap — every mature surface exceeds those bounds, and the override held every round at `discovery-route` while the lenses reported zero gaps. A clip is rendered as context the lens narrates; only `failed` overrides a lens, and only the lens's own insufficient-evidence outcome holds the round on a clip. `gatherHistory` records `unavailable` over an empty resolved path list instead of logging the whole repository (pow-gcx9, #225).
