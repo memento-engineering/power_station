@@ -57,12 +57,24 @@ class _BridgeResult {
     required this.stderr,
     required this.trace,
     required this.usageEnvelope,
+    required this.bound,
+    required this.asks,
+    required this.fallbacks,
   });
 
   final Map<String, dynamic> frame;
   final RuntimeConfig config;
   final String stderr;
   final List<Map<String, dynamic>> trace;
+
+  /// The `session_bound` frame the bridge published after `session/new`.
+  final Map<String, dynamic>? bound;
+
+  /// Every normalized permission ask the bridge published.
+  final List<AgentPermissionRequest> asks;
+
+  /// Every bridge-local cancellation record the bridge flushed.
+  final List<AgentPermissionDecision> fallbacks;
 
   /// The FT-2 envelope the bridge wrote, read before the temp workspace is
   /// deleted; null when this run asked for no `usageOut` or none landed.
@@ -72,6 +84,10 @@ class _BridgeResult {
 Future<_Run> _buildAcpRun({
   required String probePath,
   required String identity,
+  AgentPermissionPolicy policy = const AgentPermissionPolicy.trustedHeadless(
+    id: 'acp-lease-test',
+  ),
+  RecordingExplorationTransport? transport,
 }) async {
   final workspaceDir = await Directory.systemTemp.createTemp(
     'grid_assets_acp_lease_',
@@ -104,6 +120,13 @@ Future<_Run> _buildAcpRun({
       AgentConfig: const AgentConfig(harness: 'probe'),
       EnvironmentRegistry: EnvironmentRegistry(
         custom: <String, AgentEnvironment>{'probe': environment},
+      ),
+      // EXPLICIT, both of them (bead `pow-ed1c`): the trusted-headless posture
+      // is only ever reached by configuration, and it is only reachable at all
+      // because a carrier exists to record what it authorizes.
+      AgentPermissionPolicy: policy,
+      ServiceBundle: ServiceBundle(
+        transport: transport ?? RecordingExplorationTransport(),
       ),
     },
   );
@@ -187,12 +210,28 @@ Future<void> _waitForOutput(_Run run, String text) async {
   );
 }
 
+/// The STATION stand-in for a direct bridge run: the same decision function the
+/// channel session uses, over an explicitly trusted-headless policy.
+AgentPermissionDecision? _headlessStation(AgentPermissionRequest request) =>
+    decideAgentPermission(
+      policy: const AgentPermissionPolicy.trustedHeadless(
+        id: 'acp-bridge-test',
+      ),
+      request: request,
+      admittedAttemptId: request.attemptId,
+      boundSessionId: request.sessionId,
+      audited: true,
+    );
+
 Future<_BridgeResult> _runBridge({
   required String probePath,
   required List<String> probeArgs,
   String? model = 'gpt-5.6-sol',
   bool cancelOnProgress = false,
   String? usageOut,
+  String attemptId = 'attempt-bridge',
+  AgentPermissionDecision? Function(AgentPermissionRequest) station =
+      _headlessStation,
 }) async {
   final workspace = await Directory.systemTemp.createTemp(
     'grid_assets_acp_bridge_',
@@ -219,13 +258,22 @@ Future<_BridgeResult> _runBridge({
     config.command,
     config.args,
     workingDirectory: config.workDir,
-    environment: <String, String>{...Platform.environment, ...config.env},
+    environment: <String, String>{
+      ...Platform.environment,
+      ...config.env,
+      // The engine's allocation env overlay, which is where the bridge learns
+      // the attempt it was ADMITTED under.
+      kGridAttemptEnvironment: attemptId,
+    },
     includeParentEnvironment: false,
   );
   final error = StringBuffer();
   final errorDone = process.stderr.transform(utf8.decoder).forEach(error.write);
   final terminal = Completer<Map<String, dynamic>>();
   var cancelled = false;
+  Map<String, dynamic>? bound;
+  final asks = <AgentPermissionRequest>[];
+  final fallbacks = <AgentPermissionDecision>[];
   final subscription = process.stdout
       .transform(utf8.decoder)
       .transform(const LineSplitter())
@@ -236,6 +284,30 @@ Future<_BridgeResult> _runBridge({
           process.stdin.writeln(
             jsonEncode(<String, Object?>{'kind': 'cancel'}),
           );
+        }
+        switch (frame['kind']) {
+          case 'session_bound':
+            bound = frame;
+          case 'permission_request':
+            final request = AgentPermissionRequest.fromJson(
+              (frame['request']! as Map<String, dynamic>)
+                  .cast<String, Object?>(),
+            );
+            asks.add(request);
+            final decision = station(request);
+            if (decision != null) {
+              process.stdin.add(
+                const AcpSessionAdapter().encodePermissionDecision(decision),
+              );
+              unawaited(process.stdin.flush());
+            }
+          case 'permission_fallback':
+            fallbacks.add(
+              AgentPermissionDecision.fromJson(
+                (frame['decision']! as Map<String, dynamic>)
+                    .cast<String, Object?>(),
+              ),
+            );
         }
         if (!terminal.isCompleted &&
             (frame['kind'] == 'completed' || frame['kind'] == 'failed')) {
@@ -280,6 +352,9 @@ Future<_BridgeResult> _runBridge({
     stderr: error.toString(),
     trace: traceEntries,
     usageEnvelope: envelope,
+    bound: bound,
+    asks: asks,
+    fallbacks: fallbacks,
   );
 }
 
@@ -288,11 +363,14 @@ List<String> _methods(_BridgeResult result) => result.trace
     .map((entry) => entry['method']! as String)
     .toList(growable: false);
 
+/// The hermetic ACP agent fixture, resolved from either run directory.
+String _probePath() => <String>[
+  p.absolute('test/fixtures/acp_agent_probe.dart'),
+  p.absolute('packages/grid_assets/test/fixtures/acp_agent_probe.dart'),
+].firstWhere((path) => File(path).existsSync());
+
 void main() {
-  final probePath = <String>[
-    p.absolute('test/fixtures/acp_agent_probe.dart'),
-    p.absolute('packages/grid_assets/test/fixtures/acp_agent_probe.dart'),
-  ].firstWhere((path) => File(path).existsSync());
+  final probePath = _probePath();
 
   test(
     'one adapter drives two agent values and steers before protocol completion',
@@ -409,43 +487,300 @@ void main() {
     timeout: const Timeout(Duration(seconds: 40)),
   );
 
-  test('permission posture never selects reject', () async {
-    final client = GridAllowAllAcpClient(onUpdate: (_) {});
-    RequestPermissionRequest request(List<PermissionOption> options) =>
-        RequestPermissionRequest(
-          sessionId: 's',
-          options: options,
-          toolCall: ToolCallUpdate(toolCallId: 'tool'),
-        );
-    PermissionOption option(String id, PermissionOptionKind kind) =>
-        PermissionOption(optionId: id, name: id, kind: kind);
-
-    final always = await client.requestPermission(
-      request(<PermissionOption>[
-        option('reject', PermissionOptionKind.rejectAlways),
-        option('once', PermissionOptionKind.allowOnce),
-        option('always', PermissionOptionKind.allowAlways),
-      ]),
-    );
-    expect(always.outcome, isA<SelectedOutcome>());
-    expect((always.outcome as SelectedOutcome).optionId, 'always');
-
-    final once = await client.requestPermission(
-      request(<PermissionOption>[
-        option('reject', PermissionOptionKind.rejectOnce),
-        option('once', PermissionOptionKind.allowOnce),
-      ]),
-    );
-    expect((once.outcome as SelectedOutcome).optionId, 'once');
-
-    final cancelled = await client.requestPermission(
-      request(<PermissionOption>[
+  // The ACP client no longer HAS a posture: it applies the station's decision
+  // and nothing else (bead `pow-ed1c`). The blanket allow-always answer that
+  // used to live here is gone, not wrapped.
+  test(
+    'permission bridge applies only the station decision',
+    () async {
+      PermissionOption option(String id, PermissionOptionKind kind) =>
+          PermissionOption(optionId: id, name: 'LABEL $id', kind: kind);
+      final offered = <PermissionOption>[
         option('reject-once', PermissionOptionKind.rejectOnce),
         option('reject-always', PermissionOptionKind.rejectAlways),
-      ]),
-    );
-    expect(cancelled.outcome, isA<CancelledOutcome>());
-  });
+        option('once', PermissionOptionKind.allowOnce),
+        option('always', PermissionOptionKind.allowAlways),
+      ];
+      RequestPermissionRequest ask({
+        ToolKind? kind = ToolKind.execute,
+        List<PermissionOption>? options,
+      }) => RequestPermissionRequest(
+        sessionId: 'acp-1',
+        options: options ?? offered,
+        toolCall: ToolCallUpdate(
+          toolCallId: 'tool',
+          kind: kind,
+          title: 'SECRET TOOL TITLE',
+          rawInput: <String, dynamic>{'secret': 'RAW INPUT'},
+        ),
+      );
+
+      final seen = <AgentPermissionRequest>[];
+      final fallbacks = <AgentPermissionDecision>[];
+      GridPolicyAcpClient client(
+        AgentPermissionDecision? Function(AgentPermissionRequest) station,
+      ) => GridPolicyAcpClient(
+        attemptId: 'attempt-1',
+        onUpdate: (_) {},
+        decide: (request) async {
+          seen.add(request);
+          return station(request);
+        },
+        audit: fallbacks.add,
+      );
+
+      // EXACTLY the station's outcome, whatever else is offered: a one-shot
+      // authorization takes the one-shot option even though a durable one is
+      // right there, and a refusal is applied just as faithfully.
+      for (final (outcome, optionId) in <(AgentPermissionOutcome, String)>[
+        (AgentPermissionOutcome.allowOnce, 'once'),
+        (AgentPermissionOutcome.allowAlways, 'always'),
+        (AgentPermissionOutcome.rejectOnce, 'reject-once'),
+        (AgentPermissionOutcome.rejectAlways, 'reject-always'),
+      ]) {
+        final response = await client(
+          (request) => AgentPermissionDecision(
+            requestId: request.requestId,
+            attemptId: request.attemptId,
+            sessionId: request.sessionId,
+            capability: request.capability,
+            policyId: 'station',
+            outcome: outcome,
+            reason: 'probe',
+          ),
+        ).requestPermission(ask());
+        expect(
+          (response.outcome as SelectedOutcome).optionId,
+          optionId,
+          reason: outcome.name,
+        );
+      }
+      expect(fallbacks, isEmpty);
+
+      // The ask that crossed carries IDENTITY and SHAPE only.
+      final crossed = seen.first;
+      expect(crossed.attemptId, 'attempt-1');
+      expect(crossed.sessionId, 'acp-1');
+      expect(crossed.capability, AgentPermissionCapability.execute);
+      expect(crossed.offered, <AgentPermissionOutcome>[
+        AgentPermissionOutcome.rejectOnce,
+        AgentPermissionOutcome.rejectAlways,
+        AgentPermissionOutcome.allowOnce,
+        AgentPermissionOutcome.allowAlways,
+      ]);
+      final rendered = jsonEncode(crossed.toJson());
+      for (final leak in const <String>[
+        'SECRET TOOL TITLE',
+        'RAW INPUT',
+        'LABEL',
+        'reject-once',
+        'tool',
+      ]) {
+        expect(rendered, isNot(contains(leak)), reason: leak);
+      }
+
+      // An UNNAMED or uncategorized tool normalizes to the non-grantable
+      // sentinel, so no policy can scope it.
+      for (final kind in <ToolKind?>[null, ToolKind.other]) {
+        seen.clear();
+        await client((_) => null).requestPermission(ask(kind: kind));
+        expect(seen.single.capability, AgentPermissionCapability.unknown);
+      }
+      // Every named kind normalizes to its own capability — no default arm.
+      for (final kind in ToolKind.values) {
+        expect(
+          acpPermissionCapability(kind) == AgentPermissionCapability.unknown,
+          kind == ToolKind.other,
+          reason: kind.name,
+        );
+      }
+
+      // END TO END: the bridge publishes the binding, asks, and applies the
+      // answer to the option the harness actually offered.
+      final probePath = _probePath();
+      final scoped = await _runBridge(
+        probePath: probePath,
+        probeArgs: const <String>['--identity=scoped-probe'],
+        attemptId: 'attempt-bridge',
+        station: (request) => decideAgentPermission(
+          policy: const AgentPermissionPolicy.scoped(
+            id: 'station-execute-once',
+            grants: <AgentPermissionCapability, AgentPermissionGrant>{
+              AgentPermissionCapability.execute: AgentPermissionGrant.allowOnce,
+            },
+          ),
+          request: request,
+          admittedAttemptId: 'attempt-bridge',
+          boundSessionId: request.sessionId,
+          audited: true,
+        ),
+      );
+      expect(scoped.frame, containsPair('kind', 'completed'));
+      expect(scoped.bound, isNotNull);
+      expect(scoped.bound!['attemptId'], 'attempt-bridge');
+      expect(scoped.bound!['sessionId'], 'session-scoped-probe');
+      expect(scoped.asks.single.attemptId, 'attempt-bridge');
+      expect(scoped.asks.single.capability, AgentPermissionCapability.execute);
+      expect(scoped.fallbacks, isEmpty);
+      expect(
+        scoped.trace
+            .where((entry) => entry['kind'] == 'permission')
+            .map((entry) => entry['optionId']),
+        // ONE-SHOT, though the probe also offers the durable option.
+        everyElement(startsWith('allow-once-')),
+      );
+    },
+    timeout: const Timeout(Duration(seconds: 30)),
+  );
+
+  test(
+    'permission cancellation is fail closed',
+    () async {
+      PermissionOption option(String id, PermissionOptionKind kind) =>
+          PermissionOption(optionId: id, name: id, kind: kind);
+      final offered = <PermissionOption>[
+        option('once', PermissionOptionKind.allowOnce),
+        option('reject-once', PermissionOptionKind.rejectOnce),
+      ];
+      final request = RequestPermissionRequest(
+        sessionId: 'acp-1',
+        options: offered,
+        toolCall: ToolCallUpdate(toolCallId: 'tool', kind: ToolKind.execute),
+      );
+      AgentPermissionDecision answer(
+        AgentPermissionRequest ask, {
+        String? requestId,
+        String? attemptId,
+        String? sessionId,
+        AgentPermissionCapability? capability,
+        AgentPermissionOutcome outcome = AgentPermissionOutcome.allowAlways,
+      }) => AgentPermissionDecision(
+        requestId: requestId ?? ask.requestId,
+        attemptId: attemptId ?? ask.attemptId,
+        sessionId: sessionId ?? ask.sessionId,
+        capability: capability ?? ask.capability,
+        policyId: 'station',
+        outcome: outcome,
+        reason: 'probe',
+      );
+
+      final fallbacks = <AgentPermissionDecision>[];
+      Future<RequestPermissionResponse> settle(
+        AgentPermissionDecider decide, {
+        Duration timeout = const Duration(seconds: 5),
+      }) => GridPolicyAcpClient(
+        attemptId: 'attempt-1',
+        onUpdate: (_) {},
+        decide: decide,
+        audit: fallbacks.add,
+        timeout: timeout,
+      ).requestPermission(request);
+
+      // No answer, a REPLAYED or mismatched one, a throwing exchange, a bounded
+      // timeout, and an authorized kind the harness never offered. Every one is
+      // a cancellation, recorded first, and NONE of them selects an option.
+      final refusals = <String, Future<RequestPermissionResponse>>{
+        'no answer': settle((_) async => null),
+        'replayed request': settle(
+          (ask) async => answer(ask, requestId: 'acp-permission-99'),
+        ),
+        'foreign attempt': settle(
+          (ask) async => answer(ask, attemptId: 'attempt-other'),
+        ),
+        'superseded session': settle(
+          (ask) async => answer(ask, sessionId: 'acp-old'),
+        ),
+        'different capability': settle(
+          (ask) async =>
+              answer(ask, capability: AgentPermissionCapability.read),
+        ),
+        'exchange threw': settle((_) async => throw StateError('bridge broke')),
+        'decision timed out': settle(
+          (_) => Completer<AgentPermissionDecision?>().future,
+          timeout: const Duration(milliseconds: 20),
+        ),
+        // The station authorized DURABLY but only a one-shot option exists;
+        // narrowing here would be the client deciding.
+        'unoffered kind': settle((ask) async => answer(ask)),
+      };
+      for (final entry in refusals.entries) {
+        expect(
+          (await entry.value).outcome,
+          isA<CancelledOutcome>(),
+          reason: entry.key,
+        );
+      }
+      expect(fallbacks, hasLength(refusals.length));
+      expect(
+        fallbacks.every((decision) => !decision.grants),
+        isTrue,
+        reason: 'a fail-closed fallback never grants',
+      );
+      expect(
+        fallbacks.map((decision) => decision.policyId).toSet(),
+        <String>{''},
+        reason: 'no station policy produced these',
+      );
+
+      // A STATION cancellation is already recorded upstream, so the bridge adds
+      // no second record of it.
+      fallbacks.clear();
+      expect(
+        (await settle(
+          (ask) async => answer(ask, outcome: AgentPermissionOutcome.cancelled),
+        )).outcome,
+        isA<CancelledOutcome>(),
+      );
+      expect(fallbacks, isEmpty);
+
+      // END TO END: an answer whose identity does not match the ask is
+      // cancelled by the bridge, and that cancellation is FLUSHED as a record —
+      // the station never produced it, so this frame is the only place it
+      // exists. (An answer naming an unknown ask never routes at all: the
+      // bridge drops it, and the ask cancels on its bound timeout.)
+      final mismatched = await _runBridge(
+        probePath: _probePath(),
+        probeArgs: const <String>['--identity=mismatch-probe'],
+        station: (ask) => AgentPermissionDecision(
+          requestId: ask.requestId,
+          attemptId: ask.attemptId,
+          sessionId: 'a-superseded-session',
+          capability: ask.capability,
+          policyId: 'station',
+          outcome: AgentPermissionOutcome.allowAlways,
+          reason: 'probe',
+        ),
+      );
+      expect(mismatched.asks, hasLength(1));
+      expect(mismatched.fallbacks, hasLength(1));
+      expect(mismatched.fallbacks.single.grants, isFalse);
+      expect(
+        mismatched.fallbacks.single.requestId,
+        mismatched.asks.single.requestId,
+      );
+      expect(
+        mismatched.trace
+            .where((entry) => entry['kind'] == 'permission')
+            .map((entry) => entry['outcome']),
+        everyElement('cancelled'),
+      );
+      // NO ADMITTED ATTEMPT: the bridge stamps a blank attempt and the station's
+      // own guard refuses it — the whole run authorizes nothing.
+      final unadmitted = await _runBridge(
+        probePath: _probePath(),
+        probeArgs: const <String>['--identity=unadmitted-probe'],
+        attemptId: '',
+      );
+      expect(unadmitted.asks.single.attemptId, isEmpty);
+      expect(
+        unadmitted.trace
+            .where((entry) => entry['kind'] == 'permission')
+            .map((entry) => entry['optionId']),
+        everyElement(startsWith('reject-always-')),
+      );
+    },
+    timeout: const Timeout(Duration(seconds: 60)),
+  );
 
   test(
     'model pin is resolved before prompt',

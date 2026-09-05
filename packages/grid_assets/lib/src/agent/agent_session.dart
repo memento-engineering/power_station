@@ -73,6 +73,14 @@ abstract interface class AgentAuthorizationAdapter {
   List<int> encodePermissionDecision(AgentPermissionDecision decision);
 }
 
+/// The engine's allocation-env key naming the attempt an incarnation was
+/// ADMITTED under.
+///
+/// The engine mints it once per mount and layers it over the spawn's
+/// environment, so a supervised child can stamp its own asks with the attempt
+/// the grid already knows it by. ABSENT means unknown, never "any".
+const String kGridAttemptEnvironment = 'GRID_ATTEMPT_ID';
+
 /// The out-of-band flare every policy-produced authorization is recorded on.
 ///
 /// It rides the SAME emit-only [ExplorationTransport] the orphan observation

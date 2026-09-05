@@ -121,6 +121,9 @@ Future<void> _beginPrompt(Map<String, dynamic> request) async {
       'toolCall': <String, Object?>{
         'toolCallId': 'tool-$turn',
         'title': 'probe tool $turn',
+        // A NAMED kind, so the bridge normalizes a real capability rather than
+        // the non-grantable `unknown` sentinel.
+        'kind': 'execute',
       },
       'options': <Map<String, String>>[
         <String, String>{

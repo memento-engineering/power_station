@@ -16,6 +16,7 @@ import 'package:grid_runtime/grid_runtime.dart';
 import 'agent_environment.dart';
 import 'agent_harness.dart';
 import 'agent_session.dart';
+import 'permission_policy.dart';
 import 'usage_report.dart';
 
 /// Stable registry identity for the ACP session adapter.
@@ -108,40 +109,175 @@ class AcpBridgeSpec {
   );
 }
 
+/// How long the bridge waits for the STATION's answer to one permission ask
+/// before cancelling it locally.
+///
+/// BOUNDED on purpose: the decision is made in the parent grid process, so the
+/// round trip is milliseconds. An answer that never arrives — a wedged parent,
+/// a closed control stream — must cancel the ask rather than hold the harness's
+/// turn open forever.
+const Duration kAcpPermissionDecisionTimeout = Duration(seconds: 30);
+
+/// Asks the station to decide one normalized permission [request].
+///
+/// Returns null when the station produced no usable answer at all, which the
+/// bridge treats as a cancellation. It is never the bridge's job to invent one.
+typedef AgentPermissionDecider =
+    Future<AgentPermissionDecision?> Function(AgentPermissionRequest request);
+
+/// Records one BRIDGE-LOCAL cancellation — an authorization the station never
+/// produced, so nothing upstream has recorded it yet.
+typedef AgentPermissionAuditSink =
+    void Function(AgentPermissionDecision decision);
+
+/// Normalizes an ACP tool kind onto the grid's permission vocabulary.
+///
+/// An absent kind and [ToolKind.other] both normalize to
+/// [AgentPermissionCapability.unknown]: an action the harness would not name is
+/// one no policy can scope, and it is never grantable.
+AgentPermissionCapability acpPermissionCapability(ToolKind? kind) =>
+    switch (kind) {
+      null => AgentPermissionCapability.unknown,
+      ToolKind.read => AgentPermissionCapability.read,
+      ToolKind.edit => AgentPermissionCapability.edit,
+      ToolKind.delete => AgentPermissionCapability.delete,
+      ToolKind.move => AgentPermissionCapability.move,
+      ToolKind.search => AgentPermissionCapability.search,
+      ToolKind.execute => AgentPermissionCapability.execute,
+      ToolKind.think => AgentPermissionCapability.think,
+      ToolKind.fetch => AgentPermissionCapability.fetch,
+      ToolKind.switchMode => AgentPermissionCapability.switchMode,
+      ToolKind.other => AgentPermissionCapability.unknown,
+    };
+
+/// Projects the KINDS an ACP request offers, dropping its option ids and its
+/// human-facing labels — the station decides on shape, never on prose.
+List<AgentPermissionOutcome> acpOfferedOutcomes(
+  List<PermissionOption> options,
+) {
+  final offered = <AgentPermissionOutcome>[];
+  for (final option in options) {
+    final outcome = switch (option.kind) {
+      PermissionOptionKind.allowOnce => AgentPermissionOutcome.allowOnce,
+      PermissionOptionKind.allowAlways => AgentPermissionOutcome.allowAlways,
+      PermissionOptionKind.rejectOnce => AgentPermissionOutcome.rejectOnce,
+      PermissionOptionKind.rejectAlways => AgentPermissionOutcome.rejectAlways,
+    };
+    if (!offered.contains(outcome)) offered.add(outcome);
+  }
+  return List<AgentPermissionOutcome>.unmodifiable(offered);
+}
+
 /// ACP client posture for a grid agent doing real work in its worktree.
 ///
 /// The harness owns its filesystem and terminal tools, so this client
-/// advertises none of its own. Permission requests prefer a durable allow,
-/// fall back to a one-shot allow, and never select either reject option.
-class GridAllowAllAcpClient implements Client {
-  /// Creates the client with a session update sink.
-  GridAllowAllAcpClient({required this.onUpdate});
+/// advertises none of its own.
+///
+/// **Permission asks are the STATION's call, not this client's** (bead
+/// `pow-ed1c`). The predecessor answered every ask with the widest grant the
+/// harness offered, so an agent acquired whatever standing permission it asked
+/// for. This one normalizes the ask, hands it to [decide], and applies EXACTLY
+/// the answer that comes back: it never ranks options, never prefers a durable
+/// grant, and has no allow path of its own. Anything else — no answer, an
+/// answer for a different ask, a decision timeout, a kind the harness did not
+/// offer — is a [CancelledOutcome], recorded through [audit] first.
+class GridPolicyAcpClient implements Client {
+  /// Creates the client for the incarnation admitted under [attemptId].
+  GridPolicyAcpClient({
+    required this.attemptId,
+    required this.onUpdate,
+    required this.decide,
+    required this.audit,
+    this.timeout = kAcpPermissionDecisionTimeout,
+  });
+
+  /// The admitted attempt this bridge was spawned under; stamped onto every
+  /// ask so the station can refuse one that is not its own.
+  final String attemptId;
 
   /// Receives every ACP session update.
   final void Function(SessionUpdate update) onUpdate;
+
+  /// The one asynchronous station-decision exchange.
+  final AgentPermissionDecider decide;
+
+  /// Records a cancellation this client produced locally.
+  final AgentPermissionAuditSink audit;
+
+  /// The bound on [decide].
+  final Duration timeout;
+
+  int _asks = 0;
 
   @override
   Future<RequestPermissionResponse> requestPermission(
     RequestPermissionRequest params,
   ) async {
-    PermissionOption? selected;
-    for (final kind in const <PermissionOptionKind>[
-      PermissionOptionKind.allowAlways,
-      PermissionOptionKind.allowOnce,
-    ]) {
-      for (final option in params.options) {
-        if (option.kind == kind) {
-          selected = option;
-          break;
-        }
-      }
-      if (selected != null) break;
-    }
-    return RequestPermissionResponse(
-      outcome: selected == null
-          ? CancelledOutcome()
-          : SelectedOutcome(optionId: selected.optionId),
+    final request = AgentPermissionRequest(
+      requestId: 'acp-permission-${++_asks}',
+      attemptId: attemptId,
+      sessionId: params.sessionId,
+      // NORMALIZED, and nothing else crosses: not the tool title, its raw
+      // input or output, its metadata, nor any option label.
+      capability: acpPermissionCapability(params.toolCall.kind),
+      offered: acpOfferedOutcomes(params.options),
     );
+    AgentPermissionDecision? decision;
+    try {
+      decision = await decide(request).timeout(timeout);
+    } on Object {
+      // A failed exchange, a closed control stream, a bounded timeout: all the
+      // same fact — no authorization exists. Never an inferred one.
+      decision = null;
+    }
+    if (decision == null) {
+      return _cancel(request, 'the station returned no authorization');
+    }
+    if (decision.requestId != request.requestId ||
+        decision.attemptId != request.attemptId ||
+        decision.sessionId != request.sessionId ||
+        decision.capability != request.capability) {
+      return _cancel(request, 'the station answered a different request');
+    }
+    final kind = switch (decision.outcome) {
+      AgentPermissionOutcome.allowOnce => PermissionOptionKind.allowOnce,
+      AgentPermissionOutcome.allowAlways => PermissionOptionKind.allowAlways,
+      AgentPermissionOutcome.rejectOnce => PermissionOptionKind.rejectOnce,
+      AgentPermissionOutcome.rejectAlways => PermissionOptionKind.rejectAlways,
+      // The station itself cancelled — already recorded upstream, so this must
+      // not write a second record of the same decision.
+      AgentPermissionOutcome.cancelled => null,
+    };
+    if (kind == null) {
+      return RequestPermissionResponse(outcome: CancelledOutcome());
+    }
+    for (final option in params.options) {
+      if (option.kind == kind) {
+        return RequestPermissionResponse(
+          outcome: SelectedOutcome(optionId: option.optionId),
+        );
+      }
+    }
+    // The authorized kind is not on offer. NARROWING here would be this client
+    // deciding, which is exactly what it must not do.
+    return _cancel(
+      request,
+      'the harness offered no option of the authorized kind',
+    );
+  }
+
+  RequestPermissionResponse _cancel(
+    AgentPermissionRequest request,
+    String reason,
+  ) {
+    audit(
+      AgentPermissionDecision.cancelled(
+        request: request,
+        policyId: '',
+        reason: reason,
+      ),
+    );
+    return RequestPermissionResponse(outcome: CancelledOutcome());
   }
 
   @override
@@ -194,7 +330,12 @@ class GridAllowAllAcpClient implements Client {
 }
 
 /// Launches the package-resolved ACP bridge and normalizes its event stream.
-class AcpSessionAdapter implements AgentSessionAdapter {
+///
+/// It also carries the AUTHORIZATION half ([AgentAuthorizationAdapter]): ACP
+/// has a permission handshake, so the station's decision has a wire form to go
+/// back over.
+class AcpSessionAdapter
+    implements AgentSessionAdapter, AgentAuthorizationAdapter {
   /// Creates the stateless adapter.
   const AcpSessionAdapter();
 
@@ -251,9 +392,18 @@ class AcpSessionAdapter implements AgentSessionAdapter {
   @override
   List<int> encodeSteer(String text) => _input('steer', text);
 
-  List<int> _input(String kind, String text) => utf8.encode(
-    '${jsonEncode(<String, Object?>{'kind': kind, 'text': text})}\n',
-  );
+  @override
+  List<int> encodePermissionDecision(AgentPermissionDecision decision) =>
+      _frame(<String, Object?>{
+        'kind': 'permission_decision',
+        'decision': decision.toJson(),
+      });
+
+  List<int> _input(String kind, String text) =>
+      _frame(<String, Object?>{'kind': kind, 'text': text});
+
+  List<int> _frame(Map<String, Object?> frame) =>
+      utf8.encode('${jsonEncode(frame)}\n');
 
   @override
   Stream<AgentProtocolEvent> decode(Stream<List<int>> stdout) => stdout
@@ -279,6 +429,21 @@ class AcpSessionAdapter implements AgentSessionAdapter {
         ),
       ),
       'failed' => AgentProtocolEvent.failed(reason: frame['reason']! as String),
+      // The AUTHORIZATION frames (bead `pow-ed1c`), all non-terminal.
+      'session_bound' => AgentProtocolEvent.sessionBound(
+        attemptId: frame['attemptId']! as String,
+        protocolSessionId: frame['sessionId']! as String,
+      ),
+      'permission_request' => AgentProtocolEvent.permissionRequested(
+        request: AgentPermissionRequest.fromJson(
+          (frame['request']! as Map<String, dynamic>).cast<String, Object?>(),
+        ),
+      ),
+      'permission_fallback' => AgentProtocolEvent.permissionFallback(
+        decision: AgentPermissionDecision.fromJson(
+          (frame['decision']! as Map<String, dynamic>).cast<String, Object?>(),
+        ),
+      ),
       _ => throw FormatException('unknown ACP bridge frame: $frame'),
     };
   }
