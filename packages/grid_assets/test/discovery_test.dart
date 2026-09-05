@@ -1128,6 +1128,51 @@ void main() {
       );
     });
 
+    test('ONE decision entry cited under several surfaces is ONE evidence id, '
+        'not a colliding profile', () {
+      // The register answers every roster-qualified surface of a repo with
+      // the same entries, so a live gather carries the same decision body
+      // under each of its lookups (12 surfaces × the same entries on
+      // pow-ed1c, 2026-09-05). rc.16 refused its OWN gather over it and
+      // every discovery round held at discovery-route.
+      final wire =
+          jsonDecode(jsonEncode(_completeAnchors().toJson()))
+              as Map<String, Object?>;
+      final lookup =
+          (wire['decisionLookups']! as List).single as Map<String, Object?>;
+      final shared = DiscoveryAnchors.fromJson({
+        ...wire,
+        'decisionLookups': [
+          lookup,
+          {
+            ...lookup,
+            'id': 'decision-surface:power_station/test@sha256:fake',
+            'surface': 'power_station/test/discovery_test.dart',
+          },
+        ],
+      });
+      expect(
+        shared,
+        isNotNull,
+        reason: 'the same decision is the same evidence',
+      );
+      expect(shared!.decisionLookups, hasLength(2));
+      expect(
+        shared.evidenceIds.where((id) => id.startsWith('decision-entry:')),
+        hasLength(1),
+      );
+      // The guard still holds for every OTHER repeat: two lookups with the
+      // same lookup id, or a decision body id reused by a foreign record.
+      expect(
+        DiscoveryAnchors.fromJson({
+          ...wire,
+          'decisionLookups': [lookup, lookup],
+        }),
+        isNull,
+        reason: 'a duplicated LOOKUP id is still a collision',
+      );
+    });
+
     test(
       'a FOREIGN body over the snippet bound is TRUNCATED, hashed whole',
       () {
