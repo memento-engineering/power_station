@@ -1,3 +1,7 @@
+## 0.6.0-rc.18
+
+- Fixed: the explore-decision lane renders a decision entry's body ONCE however many roster-qualified surfaces cite it — the first surface carries the body, every later surface cites the entry by identity as "also governs this surface". The roster-mode decisions index answers every surface of a repo with the same entries, so a bead touching 12 power_station surfaces carried 12 copies of each (550 KB for 12 distinct bodies on pow-ed1c) and the cheap lens died `prompt_too_long`, holding the round on a failed lane. Per-surface lookup records and the evidence-id profile (rc.17, pow-bvui) are unchanged (pow-alwh, #239).
+
 ## 0.6.0-rc.17
 
 - Fixed: `DiscoveryAnchors.fromJson` no longer refuses the gather the deterministic gather itself writes — the colliding-profile guard counted a decision ENTRY once per roster-qualified surface while `evidenceIds` collapsed the same body cited under several lookups, so on rc.16 (the first release whose decision lookups resolve) every discovery round with decision entries decoded to an empty gather and held at `discovery-route` on `gather:round -1 / gather:workBeadId ``. Decision entry ids are counted distinct; a duplicated lookup id or a body id reused by a foreign record still refuses (pow-bvui, #237).
