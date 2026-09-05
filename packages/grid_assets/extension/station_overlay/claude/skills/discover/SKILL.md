@@ -188,7 +188,12 @@ one. Record the approved design first, then run the approve verb from the
 owning store root. The verb re-runs the four-row filing preflight and, only if
 every row passes, writes the STAMP in ONE `bd update`: `grid.approved_by` (the
 `--actor`), `grid.approved_at` (the UTC ISO-8601 instant) and
-`grid.approved_rev` (the store root's git HEAD sha).
+`grid.approved_rev` (the digest of the FILING BASIS the preflight just
+evaluated — the bead's work fields, its validation plan and its dependency
+proofs). The revision is what the mount gate re-derives: edit an approved
+bead's description, acceptance, design, validation plan or blockers and the
+mount gate refuses it with `approval: stale - rerun the approve verb` until
+the verb runs again.
 
 ```bash
 bd update <id> --description "<approved description>" \

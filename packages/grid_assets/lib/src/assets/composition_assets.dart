@@ -32,7 +32,7 @@ library;
 import 'dart:async';
 
 import 'package:beads_dart/beads_dart.dart'
-    show BdCliService, BdRunner, Bead, ProcessBdRunner;
+    show BdRunner, Bead, ProcessBdRunner;
 import 'package:genesis_tree/genesis_tree.dart';
 import 'package:grid_engine/grid_engine.dart';
 import 'package:grid_runtime/grid_runtime.dart';
@@ -49,13 +49,24 @@ import '../agent/environment_probe.dart';
 import '../agent/environment_registry.dart';
 import '../code/code_capabilities.dart';
 import '../code/mount_eligibility.dart';
+import '../filing/filing_contract.dart';
+import '../search/station_search.dart';
 
 /// Injects grid_assets mount eligibility into the ambient service bundle.
 ///
 /// Eligible snapshots pass through synchronously. A refused snapshot starts one
-/// scoped fresh-bead query; while it is in flight the refusal stays LOUD, and
+/// scoped fresh FILING read; while it is in flight the refusal stays LOUD, and
 /// completion re-provides the bundle with either the fresh decision or a
 /// refusal that names the read failure.
+///
+/// The fresh read is a `FilingService.inspect` rather than a bare bead query,
+/// because a receipt bound to a filing basis can only be judged against a
+/// re-evaluation of that basis — the bead's own fields plus the dependency
+/// proofs the substation store and the grid state store hold. A bound receipt
+/// therefore refuses SYNCHRONOUSLY as unevaluated (there is no revision to
+/// compare yet) and mounts only once the recomputed revision matches the
+/// stamped one. The legacy raw-sha receipt has no basis to re-derive, so a
+/// complete one still passes through synchronously and queries nothing.
 class MountEligibilityAssets extends SingleChildStatefulSeed {
   /// Creates the mount-boundary assets node.
   ///
@@ -81,8 +92,9 @@ class _MountEligibilityAssetsState
     extends SingleChildState<MountEligibilityAssets> {
   ServiceBundle? _ambient;
   sdk.SubstationScope? _scope;
+  sdk.GridRoot? _gridRoot;
   BdRunner Function(String storeRoot)? _runnerFor;
-  BdCliService? _bd;
+  FilingService? _filing;
   final Map<String, Bead> _snapshotsById = <String, Bead>{};
   final Set<String> _readsInFlight = <String>{};
   final Map<String, MountEligibilityDecision> _freshDecisionsById =
@@ -97,12 +109,26 @@ class _MountEligibilityAssetsState
     _ambient = context.dependOnInheritedSeedOfExactType<ServiceBundle>();
     final scope = context
         .dependOnInheritedSeedOfExactType<sdk.SubstationScope>();
+    // The grid home names the STATE store the filing contract reads its
+    // cross-store link proofs from. Subscribed (the D-H build verb, ADR-0008):
+    // a re-provided root re-derives every cached recheck under it.
+    final gridRoot = context.dependOnInheritedSeedOfExactType<sdk.GridRoot>();
     final runnerFor = seed._runnerFor;
-    if (scope == _scope && identical(runnerFor, _runnerFor)) return;
+    if (scope == _scope &&
+        gridRoot == _gridRoot &&
+        identical(runnerFor, _runnerFor)) {
+      return;
+    }
 
     _scope = scope;
+    _gridRoot = gridRoot;
     _runnerFor = runnerFor;
-    _bd = scope == null ? null : BdCliService(runnerFor(scope.root));
+    _filing = scope == null
+        ? null
+        : FilingService(
+            source: ExactSubstationBeadSource(runnerFor: runnerFor),
+            links: CrossLinkBlockerSource(runnerFor: runnerFor),
+          );
     _generation++;
     _revision++;
     _resetRechecks();
@@ -133,16 +159,24 @@ class _MountEligibilityAssetsState
         }
 
         if (_readsInFlight.add(bead.id)) {
-          final bd = _bd;
-          if (bd == null) {
+          final filing = _filing;
+          if (filing == null) {
             _readsInFlight.remove(bead.id);
             return MountEligibilityDecision.refused(
               clause:
                   'fresh mount-eligibility read failed for ${bead.id} '
-                  'in ${scope.root}: bd service unavailable',
+                  'in ${scope.root}: filing service unavailable',
             );
           }
-          unawaited(_readFresh(bead, scope, bd, _generation));
+          unawaited(
+            _readFresh(
+              bead,
+              scope,
+              filing,
+              _gridRoot?.stateStore.runtimeDir,
+              _generation,
+            ),
+          );
         }
         return MountEligibilityDecision.refused(
           clause: 'fresh mount-eligibility read pending: ${bead.id}',
@@ -153,19 +187,29 @@ class _MountEligibilityAssetsState
   Future<void> _readFresh(
     Bead snapshot,
     sdk.SubstationScope scope,
-    BdCliService bd,
+    FilingService filing,
+    String? stateRoot,
     int generation,
   ) async {
     MountEligibilityDecision decision;
     try {
-      final beads = await bd.query('id=${snapshot.id}', includeClosed: true);
-      if (beads.length != 1 || beads.single.id != snapshot.id) {
+      final inspected = await filing.inspect(
+        storeRoot: scope.root,
+        beadId: snapshot.id,
+        stateRoot: stateRoot,
+      );
+      final fresh = inspected.bead;
+      if (fresh == null) {
         throw StateError(
-          'fresh mount-eligibility query for ${scope.root} expected '
-          '${snapshot.id}, got [${beads.map((bead) => bead.id).join(', ')}]',
+          'fresh mount-eligibility read for ${scope.root} found no '
+          '${snapshot.id}',
         );
       }
-      decision = mountEligibilityDecision(snapshot, freshBead: beads.single);
+      decision = mountEligibilityDecision(
+        snapshot,
+        freshBead: fresh,
+        evaluatedApprovalRevision: inspected.report.approvalRevision,
+      );
     } on Object catch (error) {
       _completeFailure(snapshot, generation, error);
       return;
@@ -233,7 +277,7 @@ class _MountEligibilityAssetsState
         ambient ?? const ServiceBundle(),
         mountEligibility: predicate,
       ),
-      derivedFrom: [ambient, scope, seed._runnerFor, _revision],
+      derivedFrom: [ambient, scope, _gridRoot, seed._runnerFor, _revision],
       child: child,
     );
   }

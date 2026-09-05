@@ -158,7 +158,7 @@ When the work extends something the tree already owns, write the pointer into
 the bead body as `path:line` plus the relationship:
 
 ```
-COMPOSE: packages/grid_assets/lib/src/filing/filing_contract.dart:188 owns the
+COMPOSE: packages/grid_assets/lib/src/filing/filing_contract.dart:242 owns the
 four-row completeness contract — CALL it; do not add a second predicate.
 ```
 
@@ -233,9 +233,14 @@ label is not read — so the mount race is closed without a timer:
   ```
 
   The verb stamps `grid.approved_by` (the `--actor`), `grid.approved_at` (the
-  UTC ISO-8601 instant) and `grid.approved_rev` (the store root's git HEAD
-  sha); that one stamped write is the final transition into the mounted
-  frontier. A refusal writes nothing — it reports `"approved": false`
+  UTC ISO-8601 instant) and `grid.approved_rev` (the digest of the FILING
+  BASIS the preflight just evaluated — the bead's work fields, its validation
+  plan and its dependency proofs); that one stamped write is the final
+  transition into the mounted frontier. Approval is granted to that basis, not
+  to the bead id: EDITING an approved bead's description, acceptance, design,
+  validation plan or blockers refuses it at the gate with
+  `approval: stale - rerun the approve verb`, so rerun the verb after any
+  approved-bead edit. A refusal writes nothing — it reports `"approved": false`
   with a `reason` plus the failing filing rows; fix them and rerun the verb.
 - Removing the `grid.approved_*` stamp from a bead that is ALREADY mounted does
   not evict it
