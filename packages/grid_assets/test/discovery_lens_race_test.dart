@@ -5,15 +5,22 @@
 // before the re-keyed `anchors` sweep runs, and a lens the wave has not reached
 // yet still holds LAST generation's report on disk.
 //
+// The same exposure has a SECOND axis the round stamp cannot see: a RE-MINTED
+// session (a rework, a void-rekey re-mount, a bounce resume) restarts its round
+// counter at 0 under BYTE-IDENTICAL node paths, so the PRIOR session's report
+// clears the node + round stamps and joins as this round's verdict.
+//
 // What this file pins:
-//   1. a PRIOR generation's report never joins as current — the fence is both
-//      stamps, and it rules the envelope fallback too;
+//   1. a PRIOR generation's report never joins as current — the fence is all
+//      three stamps (session, node, round), and it rules the envelope fallback
+//      too;
 //   2. the route never decides over a lane that is merely LATE: it WAITS, and
 //      the report that lands mid-wait joins (no regather round spent);
 //   3. a lane that FINISHED this round artifact-less is LOUD and IMMEDIATE —
 //      named on the payload, never silently dropped;
-//   4. the anchors SWEEP is round-aware: it keeps THIS round's reports and
-//      deletes prior/foreign/unstamped/non-report files;
+//   4. the anchors SWEEP is generation-aware: it keeps THIS session's
+//      this-round reports and deletes prior-session/prior-round/foreign/
+//      unstamped/non-report files;
 //   5. every lens result payload carries the round it was recorded against.
 import 'dart:async';
 import 'dart:convert';
@@ -33,9 +40,13 @@ const _parent = 'tg-1/spec_review/discovery';
 /// every capability under test reads off the ambient tree.
 const String _session = 'session-current';
 
+/// The generation that ran BEFORE the re-mint: same worktree, same node paths,
+/// and a round counter that has since restarted at 0.
+const String _priorSession = 'session-prior';
+
 /// Plants one lens report at the canonical path, stamped for [sessionId]
 /// (default: THIS session), [nodePath] (default: THIS circuit's sibling lens
-/// node) and [round].
+/// node) and [round]. [violations] rides the cite-the-offence payload.
 void _plantReport(
   String ws,
   String lens, {
@@ -43,6 +54,7 @@ void _plantReport(
   String sessionId = _session,
   String? nodePath,
   String note = 'the lens angle',
+  List<Object?> violations = const [],
 }) {
   File(lensReportPath(ws, lens))
     ..createSync(recursive: true)
@@ -56,10 +68,27 @@ void _plantReport(
         'context': [
           {'note': note, 'source': 'CLAUDE.md'},
         ],
-        'violations': <Object?>[],
+        'violations': violations,
       }),
     );
 }
+
+/// One CITED, gating violation — the payload that turns a joined report into a
+/// HOLD, so a stale report that joins is visible as a verdict and not merely as
+/// a passing round.
+const Map<String, Object?> _gatingViolation = {
+  'kind': 'decision',
+  'standard':
+      'power_station#discovery-lens-reports-carry-the-round-and-the-'
+      'wipe-sweeps',
+  'quote': 'A lens report carries BOTH stamps and one fence reads them',
+  'contradiction': 'the prior session\'s reading of this bead',
+  'contradicts': true,
+  'acknowledged': false,
+  'ratified': true,
+  'removesOffence': false,
+  'precedent': '',
+};
 
 /// The route over a LIVE workspace, with the lanes' recorded results as the
 /// engine's [SiblingView] holds them (`{lens: round}`) — the wait/loud
@@ -93,6 +122,28 @@ Future<RouteVerdict> _route(
         params: {'lenses': kDiscoveryLenses.join(','), 'grid.round': '$round'},
       ),
     );
+
+/// Runs the real [AnchorsCapability] — the generation-aware sweep at the head
+/// of a round — for THIS session at [round].
+Future<StepOutcome> _sweepFor(String ws, {required int round}) =>
+    const AnchorsCapability().run(
+      FakeTreeContext(
+        values: {
+          Bead: workBead('tg-1'),
+          Workspace: testWorkspace('tg-1', workspaceDir: ws),
+          SessionHandle: const SessionHandle(_session),
+        },
+      ),
+      stepArgs('$_parent/$kAnchorsStep', params: {'grid.round': '$round'}),
+    );
+
+/// Writes the harness RESULT ENVELOPE for [nodePath] — read transport 2, which
+/// rides the same fence the canonical file does.
+void _plantEnvelope(String ws, String nodePath, Map<String, Object?> report) {
+  File(p.join(ws, usageReportPath(nodePath)))
+    ..createSync(recursive: true)
+    ..writeAsStringSync(jsonEncode({'result': jsonEncode(report)}));
+}
 
 void main() {
   late Directory ws;
@@ -247,10 +298,10 @@ void main() {
 
   group('the round-aware anchors sweep (the wipe between lanes)', () {
     test(
-      'a sweep landing AFTER a same-round lens already wrote KEEPS that '
-      'report and deletes only stale/foreign/unstamped/non-report files',
+      'a sweep landing after a same-session same-round lens keeps that report',
       () async {
-        _plantReport(ws.path, kCodeLens, round: 1); // this round's, already in.
+        // THIS session's, this round's — already in, and the one survivor.
+        _plantReport(ws.path, kCodeLens, round: 1);
         _plantReport(ws.path, kPriorArtLens, round: 0); // a prior generation's.
         _plantReport(
           ws.path,
@@ -261,26 +312,121 @@ void main() {
         File(
           p.join(discoveryDirPath(ws.path), 'dossier.json'),
         ).writeAsStringSync('{ not json');
-        final outcome = await const AnchorsCapability().run(
-          FakeTreeContext(
-            values: {
-              Bead: workBead('tg-1'),
-              Workspace: testWorkspace('tg-1', workspaceDir: ws.path),
-              SessionHandle: const SessionHandle(_session),
-            },
-          ),
-          stepArgs('$_parent/$kAnchorsStep', params: const {'grid.round': '1'}),
-        );
-        expect(outcome, isA<Ok>());
+        expect(await _sweepFor(ws.path, round: 1), isA<Ok>());
         expect(
           Directory(
             discoveryDirPath(ws.path),
           ).listSync().map((e) => p.basename(e.path)).toList()..sort(),
           ['anchors.json', '$kCodeLens.json'],
-          reason: 'this round\'s report survives; everything else is swept',
+          reason:
+              'this session\'s round-1 report survives beside the rewritten '
+              'gather; everything else is swept',
         );
       },
     );
+
+    test('a PRIOR session report is swept and the route waits for THIS '
+        'session', () async {
+      // The re-mint: the SAME node path, the SAME round number (the counter
+      // restarted at 0 and has climbed back to 1), a DIFFERENT generation. The
+      // prior session's report CITES a gating offence, so if it ever joins the
+      // route ESCALATES on it — a stale verdict, visible.
+      _plantReport(
+        ws.path,
+        kDecisionLens,
+        round: 1,
+        sessionId: _priorSession,
+        violations: const [_gatingViolation],
+      );
+      _plantReport(ws.path, kCodeLens, round: 1);
+      _plantReport(ws.path, kPriorArtLens, round: 1);
+
+      expect(await _sweepFor(ws.path, round: 1), isA<Ok>());
+      expect(
+        File(lensReportPath(ws.path, kDecisionLens)).existsSync(),
+        isFalse,
+        reason:
+            'a report from ANOTHER session is a PRIOR generation — swept on '
+            'exactly the rule a prior round\'s is',
+      );
+      expect(
+        Directory(
+          discoveryDirPath(ws.path),
+        ).listSync().map((e) => p.basename(e.path)).toList()..sort(),
+        ['anchors.json', '$kCodeLens.json', '$kPriorArtLens.json'],
+      );
+
+      // The gather this round's route reads back (the sweep's own rewrite is
+      // the deterministic step's, not this fixture's).
+      plantGather(ws.path, completeGather(bead: workBead('tg-1'), round: 1));
+      // The re-keyed lens lands THIS session's clean report mid-wait.
+      Timer(
+        const Duration(milliseconds: 120),
+        () => _plantReport(ws.path, kDecisionLens, round: 1),
+      );
+      final out = await _route(
+        ws.path,
+        recorded: {kCodeLens: 1, kPriorArtLens: 1},
+      );
+      final payload = (out as Advance).payload!;
+      expect(
+        payload['verdict'],
+        'advance',
+        reason: 'the prior session\'s cited offence never reached the matrix',
+      );
+      expect(
+        payload.containsKey('grade'),
+        isFalse,
+        reason: 'a waited-for lane is not a regather — nothing is invalidated',
+      );
+      expect(payload['missing'], isEmpty);
+      expect(readDiscoveryRegatherLedger(ws.path), isNull);
+    });
+  });
+
+  group('the envelope fallback rides the same three stamps', () {
+    test('the envelope fallback refuses prior or missing sessions and accepts '
+        'THIS session', () {
+      const nodePath = '$_parent/$kCodeLens';
+      // No canonical file at all — the read falls through to transport 2.
+      expect(File(lensReportPath(ws.path, kCodeLens)).existsSync(), isFalse);
+
+      DiscoveryLensOutcome? readWith(Object? sessionStamp) {
+        _plantEnvelope(ws.path, nodePath, {
+          'outcome': 'report',
+          'lens': kCodeLens,
+          'version': 2,
+          if (sessionStamp != null) 'sessionId': sessionStamp,
+          'nodePath': nodePath,
+          kVerdictRoundKey: 1,
+          'context': <Object?>[],
+          'violations': <Object?>[],
+        });
+        return readLensReport(
+          ws.path,
+          kCodeLens,
+          nodePath,
+          round: 1,
+          sessionId: _session,
+        );
+      }
+
+      expect(
+        readWith(_priorSession),
+        isNull,
+        reason:
+            'the envelope is keyed by node path alone — a not-yet-re-run '
+            'lane\'s envelope is the PRIOR session\'s',
+      );
+      expect(
+        readWith(null),
+        isNull,
+        reason:
+            'an absent session stamp is a MISS, exactly as a foreign '
+            'one is',
+      );
+      expect(readWith(_session), isA<LensReport>());
+    });
   });
 
   group('the lens result payload carries its round', () {
