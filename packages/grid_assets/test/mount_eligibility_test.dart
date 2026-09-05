@@ -4,9 +4,6 @@ import 'package:grid_engine/grid_engine.dart';
 import 'package:test/test.dart';
 
 const String _notApproved = 'approval: not approved - run the approve verb';
-const String _unevaluated =
-    'approval: revision not evaluated - fresh filing read required';
-const String _stale = 'approval: stale - rerun the approve verb';
 
 /// A complete receipt of the shape the verb wrote BEFORE revisions bound the
 /// filing basis: an actor, a UTC instant and a raw store-HEAD git sha.
@@ -211,35 +208,33 @@ void main() {
     expect(isApprovalStamped(_bead(stamp: _boundReceipt())), isTrue);
   });
 
-  test('bound receipt refuses changed bead and validation plan', () {
+  test('bound receipt mounts regardless of the evaluated revision', () {
     final bound = _bead(stamp: _boundReceipt());
     expect(ApprovalStamp.tryParse(bound)!.bindsFilingBasis, isTrue);
 
-    // No fresh evaluation ⇒ nothing to agree with, so the receipt is refused
-    // rather than trusted on its face.
-    expect(mountEligibilityFindings(bound), [_unevaluated]);
-    expect(_clause(mountEligibilityDecision(bound)), _unevaluated);
-
-    // A fresh evaluation that disagrees means the bead changed under the
-    // approval.
+    // pow-lr8n bridge: the revision is carried on the stamp but NOT compared
+    // at the mount gate — the station's own specify step and rework verb write
+    // the fields the basis hashes, so a comparison un-approved every bead at
+    // its own first spec write (lunar epoch 43, 2026-09-05). No evaluation,
+    // a disagreeing evaluation and an agreeing evaluation all mount.
+    expect(mountEligibilityFindings(bound), isEmpty);
+    expect(_clause(mountEligibilityDecision(bound)), isNull);
     expect(
       mountEligibilityFindings(bound, evaluatedApprovalRevision: _otherRev),
-      [_stale],
+      isEmpty,
     );
     expect(
       _clause(
         mountEligibilityDecision(bound, evaluatedApprovalRevision: _otherRev),
       ),
-      _stale,
+      isNull,
     );
-
-    // Agreement mounts.
     expect(
       mountEligibilityFindings(bound, evaluatedApprovalRevision: _boundRev),
       isEmpty,
     );
 
-    // An INCOMPLETE receipt never reaches the comparison, however fresh the
+    // An INCOMPLETE receipt is still not a stamp, however fresh the
     // evaluation is.
     expect(
       mountEligibilityFindings(
@@ -254,7 +249,7 @@ void main() {
       mountEligibilityFindings(
         _bead(type: IssueType.epic, plan: null, stamp: _boundReceipt()),
       ),
-      ['type: not driveable', 'validation_plan: missing', _unevaluated],
+      ['type: not driveable', 'validation_plan: missing'],
     );
   });
 
