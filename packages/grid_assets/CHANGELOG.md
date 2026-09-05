@@ -1,3 +1,9 @@
+## 0.6.0-rc.17
+
+- Fixed: `DiscoveryAnchors.fromJson` no longer refuses the gather the deterministic gather itself writes — the colliding-profile guard counted a decision ENTRY once per roster-qualified surface while `evidenceIds` collapsed the same body cited under several lookups, so on rc.16 (the first release whose decision lookups resolve) every discovery round with decision entries decoded to an empty gather and held at `discovery-route` on `gather:round -1 / gather:workBeadId ``. Decision entry ids are counted distinct; a duplicated lookup id or a body id reused by a foreign record still refuses (pow-bvui, #237).
+- Fixed: `MountEligibilityAssets` bounds its fresh read — `kMountEligibilityReadDeadline` (60s) wraps the `bd.query` in `_readFresh`, a timeout is routed through the existing failure cache as a refused decision naming the bead, store root and deadline, and is flared by name (`kMountEligibilityReadTimeoutFlare`) so the operator can see WHICH store's read hangs; genesis and decisions beads sat at `fresh mount-eligibility read pending` forever across nine lunar boots (pow-7i3k, #236).
+- Fixed: the work bead's OWN citation fields (description, design, acceptance, notes) are carried WHOLE into the gather — `boundDiscoveryEvidence` gains `truncateSnippet` (default true; only `BeadFieldEvidence` opts out), so a description over `kMaxDiscoverySnippetChars` no longer holds its own discovery round as TRUNCATED; foreign evidence keeps the bound (pow-xfm0, #235).
+
 ## 0.6.0-rc.16
 
 - Fixed: the shelled decision lookup accepts the decisions index envelope `spec: 2` beside `spec: 1` (`_acceptedDecisionIndexSpecs`); against decisions_grid_assets 0.2.1 every explore-decision surface FAILED on rc.13–rc.15 and the round held at `discovery-route` (pow-rokz, #231).
@@ -5,7 +11,6 @@
 
 ## 0.6.0-rc.15
 
-- Fixed: the discovery gather carries the WORK BEAD's own citation fields (`boundedBeadFields`) WHOLE — `kMaxDiscoverySnippetChars` bounds FOREIGN evidence (prior-art hits, anchor contents, decision entries, history) so it cannot flood a lens, and it never clips the brief the lens is judging. A description past 4 KB arrived at every lens truncated, and the prior-art lens correctly refused to judge a clipped brief — holding the bead's own discovery round. `boundDiscoveryEvidence` gains `truncateSnippet` (default `true`, so every foreign caller is unchanged); digests, evidence ids and the `EvidenceState` meanings are untouched (pow-xfm0).
 - Fixed: the discovery gather no longer treats a record clipped at its OWN bound (`kMaxDiscoverySnippetChars`, `kMaxHistoryCommits`) or a clipped anchor/symbol extraction (`kMaxAnchors`) as a deterministic gap — every mature surface exceeds those bounds, and the override held every round at `discovery-route` while the lenses reported zero gaps. A clip is rendered as context the lens narrates; only `failed` overrides a lens, and only the lens's own insufficient-evidence outcome holds the round on a clip. `gatherHistory` records `unavailable` over an empty resolved path list instead of logging the whole repository (pow-gcx9, #225).
 
 ## 0.6.0-rc.14
