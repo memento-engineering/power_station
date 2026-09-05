@@ -1484,6 +1484,13 @@ class DiscoveryAnchors {
 
   /// How many evidence ids the record CARRIES (duplicates included) — compared
   /// against the deduplicated [evidenceIds] to refuse a colliding profile.
+  ///
+  /// Decision ENTRIES are the one legitimate repeat: the register answers every
+  /// roster-qualified surface of the same repo with the same entries, so one
+  /// decision body rides under several lookups with ONE canonical id (the same
+  /// decision is the same evidence wherever it is cited). They are counted
+  /// DISTINCT here — a body id colliding with any OTHER kind of record still
+  /// shrinks [evidenceIds] below this count and refuses the profile.
   static int _evidenceIdCount(DiscoveryAnchors a) =>
       a.beadFields.length +
       a.rubricEvidence.length +
@@ -1491,7 +1498,10 @@ class DiscoveryAnchors {
       a.priorArtQueries.length +
       a.priorArtQueries.fold<int>(0, (n, q) => n + q.hits.length) +
       a.decisionLookups.length +
-      a.decisionLookups.fold<int>(0, (n, d) => n + d.decisions.length) +
+      {
+        for (final lookup in a.decisionLookups)
+          for (final decision in lookup.decisions) decision.body.id,
+      }.length +
       (a.history == null ? 0 : 1 + a.history!.commits.length);
 }
 
