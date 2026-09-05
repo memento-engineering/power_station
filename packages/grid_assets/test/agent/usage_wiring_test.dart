@@ -74,6 +74,9 @@ FakeTreeContext _context(
       workspaceDir: workspaceDir,
       branch: 'grid/tg-1',
     ),
+    // The discovery lens's `result()` reads the session generation to fence the
+    // report it reports provenance for.
+    SessionHandle: const SessionHandle('session-current'),
     AgentConfig: config,
     ServiceBundle: ServiceBundle(transport: transport),
   },
