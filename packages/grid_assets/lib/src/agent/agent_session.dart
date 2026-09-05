@@ -29,9 +29,18 @@ sealed class AgentProtocolEvent with _$AgentProtocolEvent {
     required UsageReport usage,
   }) = AgentProtocolCompleted;
 
-  /// Reports a harness protocol failure.
-  const factory AgentProtocolEvent.failed({required String reason}) =
-      AgentProtocolFailed;
+  /// Reports a harness protocol failure, and WHY it failed.
+  ///
+  /// [kind] is the engine's own failure vocabulary, carried from wherever the
+  /// fact is actually known — a harness that ends its turn on a provider
+  /// refusal produced NO usable result, and only the adapter watching that
+  /// terminal can say so. It defaults to [CapabilityFailureKind.work], the
+  /// historical untyped meaning, so an adapter that cannot tell reports
+  /// exactly what it reported before.
+  const factory AgentProtocolEvent.failed({
+    required String reason,
+    @Default(CapabilityFailureKind.work) CapabilityFailureKind kind,
+  }) = AgentProtocolFailed;
 
   /// Reports that the harness bound a protocol session for [attemptId].
   ///
@@ -342,8 +351,8 @@ class AgentSession implements ProcessSession {
             result: <String, String>{...result, ...usage.toResultFields()},
           ),
         );
-      case AgentProtocolFailed(:final reason):
-        _fail(reason);
+      case AgentProtocolFailed(:final reason, :final kind):
+        _fail(reason, kind: kind);
       case AgentProtocolSessionBound(
         attemptId: final bound,
         :final protocolSessionId,
@@ -464,10 +473,21 @@ class AgentSession implements ProcessSession {
     return disposition;
   }
 
-  void _fail(String reason) {
+  /// Fails the channel with [reason], carrying [kind] onto the engine's own
+  /// update.
+  ///
+  /// Every GRID-side failure — a dead process, a malformed frame, an
+  /// undeliverable authorization — keeps the default
+  /// [CapabilityFailureKind.work]: this side observed a broken channel, not a
+  /// harness that declared its own outcome. Only a protocol failure that
+  /// carries a kind overrides it.
+  void _fail(
+    String reason, {
+    CapabilityFailureKind kind = CapabilityFailureKind.work,
+  }) {
     if (_terminal) return;
     _terminal = true;
-    _updates.add(ProcessSessionUpdate.failed(reason: reason));
+    _updates.add(ProcessSessionUpdate.failed(reason: reason, kind: kind));
   }
 
   @override
