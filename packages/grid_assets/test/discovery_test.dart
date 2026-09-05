@@ -1173,6 +1173,56 @@ void main() {
       );
     });
 
+    test('the decision lane renders a body cited under several surfaces ONCE '
+        'and cites it by identity everywhere else', () {
+      // The register answers every roster-qualified surface with the same
+      // entries: 12 surfaces × 12 entries carried 550 KB for 12 distinct
+      // bodies on pow-ed1c and the cheap lens died prompt_too_long
+      // (pow-alwh, 2026-09-05).
+      final base = _completeAnchors();
+      final shared = base.decisionLookups.single;
+      final anchors = DiscoveryAnchors(
+        round: base.round,
+        workBeadId: base.workBeadId,
+        beadFields: base.beadFields,
+        rubrics: base.rubrics,
+        rubricEvidence: base.rubricEvidence,
+        anchors: base.anchors,
+        symbols: base.symbols,
+        priorArtQueries: base.priorArtQueries,
+        decisionLookups: [
+          shared,
+          DecisionSurfaceEvidence(
+            id: 'decision-surface:power_station/test@sha256:fake',
+            surface: 'power_station/test/discovery_test.dart',
+            command: 'space decisions index --surface power_station/test',
+            state: shared.state,
+            decisions: shared.decisions,
+          ),
+        ],
+        history: base.history,
+      );
+      final projection = _project(anchors, kDecisionLens);
+      final body = shared.decisions.single.body;
+      final text = projection.renderedEvidence;
+      expect(
+        RegExp(RegExp.escape(body.snippet)).allMatches(text),
+        hasLength(1),
+        reason: 'the body is rendered once, under the first surface',
+      );
+      expect(text, contains('also governs this surface'));
+      expect(
+        text,
+        contains('under surface `power_station/lib/src/code/discovery.dart`'),
+      );
+      expect(projection.evidenceIds.where((id) => id == body.id), hasLength(1));
+      // Both surface lookups still render as records (provenance is kept).
+      expect(
+        text,
+        contains('#### Surface `power_station/test/discovery_test.dart`'),
+      );
+    });
+
     test(
       'a FOREIGN body over the snippet bound is TRUNCATED, hashed whole',
       () {
