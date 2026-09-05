@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:beads_dart/beads_dart.dart';
@@ -206,8 +207,12 @@ class _Trust implements Trust {
 }
 
 class _Transport implements ExplorationTransport {
+  final List<({String name, Map<String, String> data})> flares =
+      <({String name, Map<String, String> data})>[];
+
   @override
-  void flare(String name, Map<String, String> data) {}
+  void flare(String name, Map<String, String> data) =>
+      flares.add((name: name, data: Map<String, String>.unmodifiable(data)));
 }
 
 class _Host extends StatefulSeed {
@@ -238,10 +243,20 @@ Seed _underSubstation(String name, String root, Seed child) =>
     );
 
 ({TreeOwner owner, ServiceBundle? Function() bundle}) _mountEligibilityAsset(
-  BdRunner Function(String storeRoot) runnerFor,
-) {
+  BdRunner Function(String storeRoot) runnerFor, {
+  Duration readDeadline = kMountEligibilityReadDeadline,
+  _Transport? transport,
+}) {
   ServiceBundle? observed;
   final owner = TreeOwner();
+  final asset = MountEligibilityAssets(
+    runnerFor: runnerFor,
+    readDeadline: readDeadline,
+    child: _Probe(
+      (context) =>
+          observed = context.dependOnInheritedSeedOfExactType<ServiceBundle>(),
+    ),
+  );
   owner.mountRoot(
     // The grid home encloses the substation exactly as a `RawAssetGrid` does:
     // its state store is where the filing contract reads cross-store link
@@ -251,18 +266,35 @@ Seed _underSubstation(String name, String root, Seed child) =>
       child: _underSubstation(
         'power_station',
         '/work/ps',
-        MountEligibilityAssets(
-          runnerFor: runnerFor,
-          child: _Probe(
-            (context) => observed = context
-                .dependOnInheritedSeedOfExactType<ServiceBundle>(),
-          ),
-        ),
+        // A station mounts the observation sink above its assets; without one
+        // the asset simply flares nowhere.
+        transport == null
+            ? asset
+            : InheritedSeed<ServiceBundle>(
+                value: ServiceBundle(transport: transport),
+                child: asset,
+              ),
       ),
     ),
   );
   owner.flush();
   return (owner: owner, bundle: () => observed);
+}
+
+/// A read deadline short enough to observe in a test — the SHAPE the exported
+/// [kMountEligibilityReadDeadline] carries at station scale.
+const Duration _probeDeadline = Duration(milliseconds: 20);
+
+/// Settles the tree in real-time slices until [done] holds — the read these
+/// probes wait on lands on a wall-clock timer, so a fixed delay would only be
+/// a guess about how loaded the box is. Capped, so a read that never lands
+/// fails the probe's own expectation rather than hanging the suite.
+Future<void> _settleUntil(TreeOwner owner, bool Function() done) async {
+  for (var slice = 0; slice < 100 && !done(); slice++) {
+    await Future<void>.delayed(_probeDeadline);
+    await pumpEventQueue();
+    owner.flush();
+  }
 }
 
 String? _refusalClause(MountEligibilityDecision decision) => switch (decision) {
@@ -583,6 +615,155 @@ void main() {
       );
       expect(clause, contains('fresh mount-eligibility read failed'));
       expect(clause, contains('bd timed out after 15000ms'));
+    },
+  );
+
+  test('MountEligibilityAssets hanging fresh read becomes a cached timeout '
+      'refusal', () async {
+    // The store that never answers: a proxied dolt store, or a bd process
+    // that never exits. Nothing below the asset will ever complete it.
+    final hanging = Completer<BdResult>();
+    final runner = _RecordingMountBdRunner((_) => hanging.future);
+    final mounted = _mountEligibilityAsset(
+      (_) => runner,
+      readDeadline: _probeDeadline,
+    );
+    const snapshot = Bead(id: 'pow-test', metadata: {}, labels: []);
+
+    expect(
+      _refusalClause(mounted.bundle()!.mountEligibility!(snapshot)),
+      'fresh mount-eligibility read pending: pow-test',
+    );
+
+    // Rechecking is what the engine does on every recheck, and it must not
+    // start a second read while the first is in flight.
+    await _settleUntil(
+      mounted.owner,
+      () => !_refusalClause(
+        mounted.bundle()!.mountEligibility!(snapshot),
+      )!.contains('pending'),
+    );
+
+    final clause = _refusalClause(
+      mounted.bundle()!.mountEligibility!(snapshot),
+    );
+    expect(clause, contains('fresh mount-eligibility read failed'));
+    expect(clause, contains('pow-test'));
+    expect(clause, contains('/work/ps'));
+    expect(clause, contains('TimeoutException'));
+    expect(clause, isNot(contains('pending')));
+
+    // The killed read left `_readsInFlight`, so the recheck reads the cached
+    // failure instead of spawning a second read behind the first.
+    expect(
+      _refusalClause(mounted.bundle()!.mountEligibility!(snapshot)),
+      clause,
+    );
+    expect(runner.calls, [
+      ['query', 'id=pow-test', '--all', '--json', '--limit', '0'],
+    ]);
+  });
+
+  test('MountEligibilityAssets fresh read completing before deadline preserves '
+      'decision', () async {
+    final scripted = _freshFiling(
+      const Bead(id: 'pow-test', metadata: _legacyReceipt, labels: []),
+    );
+    final runner = _RecordingMountBdRunner((args) async {
+      await Future<void>.delayed(const Duration(milliseconds: 2));
+      return scripted(args);
+    });
+    final mounted = _mountEligibilityAsset(
+      (_) => runner,
+      readDeadline: const Duration(seconds: 30),
+    );
+    const snapshot = Bead(id: 'pow-test', metadata: {}, labels: []);
+
+    expect(
+      _refusalClause(mounted.bundle()!.mountEligibility!(snapshot)),
+      'fresh mount-eligibility read pending: pow-test',
+    );
+
+    await _settleUntil(
+      mounted.owner,
+      () => mounted.bundle()!.mountEligibility!(snapshot) is MountEligible,
+    );
+
+    // The whole three-call read still runs and still decides: the deadline
+    // bounds a read, it does not shorten one.
+    expect(mounted.bundle()!.mountEligibility!(snapshot), isA<MountEligible>());
+    expect(runner.calls, _freshFilingCalls);
+  });
+
+  test(
+    'MountEligibilityAssets timeout flares the bead and store root by name',
+    () async {
+      final transport = _Transport();
+      final hanging = Completer<BdResult>();
+      final mounted = _mountEligibilityAsset(
+        (_) => _RecordingMountBdRunner((_) => hanging.future),
+        readDeadline: _probeDeadline,
+        transport: transport,
+      );
+      const snapshot = Bead(id: 'pow-test', metadata: {}, labels: []);
+      mounted.bundle()!.mountEligibility!(snapshot);
+
+      await _settleUntil(mounted.owner, () => transport.flares.isNotEmpty);
+      // The recheck reads the cached failure; the flare stays a one-shot.
+      mounted.bundle()!.mountEligibility!(snapshot);
+
+      expect(transport.flares.length, 1);
+      final flare = transport.flares.single;
+      expect(flare.name, kMountEligibilityReadTimeoutFlare);
+      expect(flare.name, 'mountEligibility.readTimeout');
+      expect(flare.data['beadId'], 'pow-test');
+      expect(flare.data['storeRoot'], '/work/ps');
+      expect(flare.data['error'], contains('TimeoutException'));
+
+      // A store that ANSWERS with a failure names itself in its own output, so
+      // it keeps refusing loudly and flares nothing.
+      final answered = _Transport();
+      final loud = _mountEligibilityAsset(
+        (_) => _RecordingMountBdRunner(
+          (_) async => const BdResult(
+            exitCode: 1,
+            stdout: '',
+            stderr: 'query failed at store',
+          ),
+        ),
+        readDeadline: _probeDeadline,
+        transport: answered,
+      );
+      loud.bundle()!.mountEligibility!(snapshot);
+      await _settleUntil(
+        loud.owner,
+        () => !_refusalClause(
+          loud.bundle()!.mountEligibility!(snapshot),
+        )!.contains('pending'),
+      );
+      expect(
+        _refusalClause(loud.bundle()!.mountEligibility!(snapshot)),
+        contains('query failed at store'),
+      );
+      expect(answered.flares, isEmpty);
+    },
+  );
+
+  test(
+    'MountEligibilityAssets read deadline is a distinct sixty-second value',
+    () {
+      expect(kMountEligibilityReadDeadline, const Duration(seconds: 60));
+      expect(
+        const MountEligibilityAssets().readDeadline,
+        kMountEligibilityReadDeadline,
+      );
+      // Its own knob, not the pour's: a station can retune this read alone.
+      expect(
+        const MountEligibilityAssets(
+          readDeadline: Duration(seconds: 5),
+        ).readDeadline,
+        const Duration(seconds: 5),
+      );
     },
   );
 

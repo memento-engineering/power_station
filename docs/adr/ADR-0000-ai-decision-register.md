@@ -761,3 +761,46 @@ with A35, A8 and ADR-0002 D5. Does not touch `pow-n6n.2`'s typed subclasses or
 **Affects (if promoted):** `packages/grid_assets/lib/src/agent/seat_environments.dart` (NEW — `SpecAgentEnvironment`, `CriticAgentEnvironment`, `CriticAgentEnvironment.preferenceFor`, `CriticAgentEnvironment.of`, `GatherAgentEnvironment`, `BuildAgentEnvironment`, `CriticLane`, `CriticEnvironmentSeed`), `packages/grid_assets/lib/grid_assets.dart` (one export), the six spawn sites in `lib/src/code/{specify,committee,readiness,discovery,code_capabilities}.dart` (one argument + imports each), and `genesis_tree: ^0.3.0` in three workspace pubspecs. Tests: `packages/grid_assets/test/agent/seat_environment_test.dart`. Composes with A35 (the rung, unchanged) and A20 (the model ladder still stamps an explicit `params['model']`). DISTINCT from `pow-n6n.4`'s amendment, which records the role retirement.
 
 **Status:** Pending — Nico promotes or rejects.
+
+## A40 (2026-09-04) — bead `pow-7i3k`: the fresh mount-eligibility read gets its OWN named deadline, and ONLY a deadline kill flares
+
+**Decision (AI).** The recheck read in `MountEligibilityAssets` is bounded by a
+new exported `kMountEligibilityReadDeadline` (`Duration(seconds: 60)`), authored
+as a `MountEligibilityAssets.readDeadline` VALUE so a station can retune it,
+tracked by the state's dependency barrier and by
+`DerivedServiceBundleSeed.derivedFrom`. The calls made autonomously around that:
+(1) THE DEADLINE COVERS THE WHOLE `FilingService.inspect`, not each bd call
+inside it — what must not hang is the read the bead is waiting on, and a
+per-call bound would still admit a read that stalls three times under the limit.
+(2) A KILLED READ IS THE EXISTING FAILURE ARM, NOT A NEW STATE — the
+`TimeoutException` rides `_completeFailure`, so it inherits the cached refusal,
+the `_isCurrent` barrier and `_forget`-on-changed-snapshot as its ONLY retry
+lifecycle; no reader, cache or retry loop was added. (3) ONLY A TIMEOUT FLARES
+(`kMountEligibilityReadTimeoutFlare`, `mountEligibility.readTimeout`, carrying
+`beadId`/`storeRoot`/`error`): every other read failure already names itself in
+its own output and in the refusal clause, while a hung store has neither an exit
+code nor a stderr — the flare is the operator's only way to see WHICH store
+stalled. (4) THE CONSTANT IS ITS OWN, NOT the pour's: 60s matches that order of
+magnitude but a pour is one heavy write and this is a read fanned over two
+stores.
+
+**Why.** The pending clause had no successor: a store that never answered left
+the id in `_readsInFlight` forever, so every recheck re-reported
+`fresh mount-eligibility read pending: <id>` and the bead never minted (incident
+`tg-e5cb`; genesis beads flared it once per lunar boot and sat at `readyBeads[0]`
+all day). The state machine around the read was already complete — only its
+terminal edge was missing. `the_grid#the-pour-gets-its-own-bd-deadline` is the
+PRECEDENT for a named per-operation budget over a shared bd service, not the
+budget itself, which is why this is a separate constant rather than a shared or
+loosened one.
+
+**Affects (if promoted):**
+`packages/grid_assets/lib/src/assets/composition_assets.dart`
+(`kMountEligibilityReadDeadline`, `kMountEligibilityReadTimeoutFlare`,
+`MountEligibilityAssets.readDeadline`, `_readFresh`, `_completeFailure`) and
+`packages/grid_assets/test/track_f_composition_assets_test.dart`. Composes with
+A7 (the read stays inside the existing `ServiceBundle` carrier — no parallel
+reader) and A8 (config is a VALUE, the runner stays injected, and the guard is
+loud: a killed read REFUSES).
+
+**Status:** Pending — Nico promotes or rejects.
