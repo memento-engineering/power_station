@@ -853,7 +853,7 @@ void main() {
       'session bead is intentionally reaped later by the RestartReconciler',
       () async {
         // Gate the create so dispose lands mid-mint.
-        final runner = GatedCreateBdRunner();
+        final runner = _Rc20GatedCreateBdRunner();
         final provider = FakeRuntimeProvider();
         final ctx = StationServices(
           provider: provider,
@@ -869,6 +869,24 @@ void main() {
         );
         addTearDown(provider.close);
 
+        // Since grid_engine 0.3.0-rc.20 (tg-1u3c) every mint asks the
+        // station admission authority for a RESERVATION, which WorkList
+        // records on the production path. This suite mounts the SessionScope
+        // directly, so it admits the bead through the same authority first —
+        // exactly as the engine's own `_reserveAndCreate` fixture does.
+        final work = bead('tg-1');
+        final admitted = ctx.admission.admitPending(
+          _joined(beads: [work], ready: {'tg-1'}),
+          _tgConfig,
+          const ServiceBundle(),
+          [StationAdmissionCandidate(bead: work, session: null)],
+        );
+        expect(
+          admitted.admitted.map((r) => r.candidate.bead.id),
+          ['tg-1'],
+          reason: 'the bead must hold an admission reservation before it mints',
+        );
+
         // Mount the real reentrant subtree root (a SessionScope rooting the
         // `code` circuit) with NO existing session ⇒ it MINTS. The ambient
         // Bead is mounted above (as WorkBead does since the context rip-out)
@@ -883,8 +901,8 @@ void main() {
               child: InheritedSeed<CapabilityRegistry>(
                 value: buildCodeRegistry(),
                 child: InheritedSeed<Bead>(
-                  value: bead('tg-1'),
-                  child: kCodeResolver.sessionFor(bead: bead('tg-1')),
+                  value: work,
+                  child: kCodeResolver.sessionFor(bead: work),
                 ),
               ),
             ),
@@ -892,7 +910,9 @@ void main() {
         );
 
         // The mint is parked awaiting createSession. Dispose now (the unmount).
-        await pumpEventQueue();
+        // Polled on REAL ticks: the authority's reservation hop plus the
+        // writer's own async chain is longer than one microtask pump.
+        await _pumpUntilReal(() => runner.createPending);
         expect(runner.createPending, isTrue, reason: 'create is in-flight');
         owner.dispose();
 
@@ -1094,5 +1114,40 @@ class _RecordingGroups implements ProcessGroupController {
       _alive.clear();
     }
     return true;
+  }
+}
+
+/// [GatedCreateBdRunner] taught grid_engine 0.3.0-rc.20's mint prelude: the
+/// station admission authority READS open `mount-attempt` records (`bd list`,
+/// answered here as an empty list) and RECORDS the attempt (a `create --type
+/// mount-attempt`, answered immediately) BEFORE it issues the session
+/// `create` — which stays the ONE gated call, so `createPending` still means
+/// "the session mint is in flight", exactly what PDR §7 (e) parks on.
+class _Rc20GatedCreateBdRunner extends GatedCreateBdRunner {
+  int _mountAttempts = 0;
+
+  @override
+  Future<BdResult> run(
+    List<String> args, {
+    Duration? timeout,
+    String? stdin,
+  }) async {
+    final sub = args.isNotEmpty ? args.first : '';
+    if (sub == 'list') {
+      return const BdResult(
+        exitCode: 0,
+        stdout: '{"schema_version":1,"data":[]}',
+        stderr: '',
+      );
+    }
+    if (sub == 'create' && args.contains('mount-attempt')) {
+      _mountAttempts++;
+      return BdResult(
+        exitCode: 0,
+        stdout: '{"schema_version":1,"data":{"id":"tgdog-att$_mountAttempts"}}',
+        stderr: '',
+      );
+    }
+    return super.run(args, timeout: timeout, stdin: stdin);
   }
 }
