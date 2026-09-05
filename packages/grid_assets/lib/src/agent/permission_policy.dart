@@ -8,15 +8,19 @@
 /// admission authority that let it run at all.
 ///
 /// This library is the protocol-neutral vocabulary that replaces that blanket
-/// answer. It is pure: values in, one [AgentPermissionDecision] out, no IO and
-/// no protocol types. The ACP wire lives in `acp_session_adapter.dart`, the
-/// channel plumbing in `agent_session.dart`, and the station configuration is a
-/// VALUE mounted by `HarnessProvider` (ADR-0008: config = values in the tree).
+/// answer. It is pure: values in, one [AgentPermissionDecision] out, no IO, no
+/// protocol types and no `TreeContext`. The ACP wire lives in
+/// `acp_session_adapter.dart`, the channel plumbing in `agent_session.dart`, the
+/// station configuration is a VALUE mounted by `HarnessProvider` (ADR-0008:
+/// config = values in the tree), and the per-channel RESOLUTION of that value —
+/// which needs the tree, so it does not belong here — is `seatChannelPolicy` in
+/// `seat_environments.dart`.
 ///
 /// **Fail closed.** Every unknown — no policy, an unrecognized capability, an
 /// unadmitted attempt, an unbound or stale protocol session, no durable audit
-/// carrier — refuses. A grant happens only when a station explicitly configured
-/// one for exactly that capability.
+/// carrier — refuses. A grant happens only for a channel with an ADMITTED
+/// identity: a station's explicit configuration, or the armed typed seat the
+/// resolver derives that station's trusted-headless posture from.
 library;
 
 /// The protocol-neutral kind of action one permission request asks for.
@@ -102,13 +106,20 @@ enum AgentPermissionOutcome {
 /// read at a capability's effect edge, never cached. A nested provider shadows
 /// it by exact type, so a substation can narrow (or widen) its own subtree.
 ///
-/// [AgentPermissionPolicy.unavailable] is the default and the safe floor: it
-/// grants nothing. A station opts in per capability with
-/// [AgentPermissionPolicy.scoped], or reinstates the whole pre-boundary
-/// posture — explicitly, and only explicitly — with
-/// [AgentPermissionPolicy.trustedHeadless].
+/// **Where each constructor belongs.**
+/// [AgentPermissionPolicy.unavailable] is the FLOOR for a session with no
+/// admitted seat identity — a direct construction, an isolated test, the
+/// operator-seat channel — and it is equally the station's explicit LOCK-DOWN:
+/// mounted, it wins over every derivation below it and grants nothing.
+/// [AgentPermissionPolicy.scoped] is a station opting in per capability.
+/// [AgentPermissionPolicy.trustedHeadless] is the pre-boundary posture,
+/// reachable only from an admitted identity: either a station configuring it
+/// outright, or `seatChannelPolicy` deriving it at a capability's effect edge
+/// for a channel running under an ARMED typed seat. No composition reaches it
+/// by omission.
 class AgentPermissionPolicy {
-  /// The default: no policy is in effect, so nothing is authorized.
+  /// No policy is in effect, so nothing is authorized — the floor for a
+  /// session with no admitted seat identity, and the station's own lock-down.
   const AgentPermissionPolicy.unavailable()
     : id = '',
       grants = const <AgentPermissionCapability, AgentPermissionGrant>{},
@@ -123,8 +134,14 @@ class AgentPermissionPolicy {
   const AgentPermissionPolicy.scoped({required this.id, required this.grants})
     : isTrustedHeadless = false;
 
-  /// The pre-boundary posture, reachable ONLY by explicit configuration: every
+  /// The pre-boundary posture, reachable ONLY from an ADMITTED identity: every
   /// NAMED capability may be granted durably.
+  ///
+  /// Two things reach it and nothing else: a station configuring it outright,
+  /// and `seatChannelPolicy` deriving it for a channel whose exact typed seat
+  /// is armed — [id] is then that seat's audit id, so an operator reading a
+  /// decision sees WHICH seat authorized. An unarmed channel, and any channel
+  /// under an explicit [AgentPermissionPolicy.unavailable], never gets here.
   ///
   /// [AgentPermissionCapability.unknown] stays refused even here — a trusted
   /// station still cannot authorize an action nobody can name.

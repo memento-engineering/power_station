@@ -281,11 +281,13 @@ class AgentSession implements ProcessSession {
   /// observation; it is never a session failure.
   final ExplorationTransport? transport;
 
-  /// The STATION's authorization boundary for this channel, read as a VALUE at
-  /// the capability's effect edge. Defaults to
-  /// [AgentPermissionPolicy.unavailable] — an unconfigured composition grants
-  /// nothing, which is how the boundary can be added without trusting anything
-  /// by omission.
+  /// The STATION's authorization boundary for this channel, RESOLVED at the
+  /// capability's effect edge (`seatChannelPolicy`) and passed in as a VALUE.
+  ///
+  /// Defaults to [AgentPermissionPolicy.unavailable] for a DIRECT construction
+  /// — a session built without a capability, so without a seat identity to
+  /// resolve from — which grants nothing. A capability's channel gets its seat's
+  /// derived policy instead; nothing is ever trusted by omission.
   final AgentPermissionPolicy policy;
 
   final StreamController<ProcessSessionUpdate> _updates =

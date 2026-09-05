@@ -232,8 +232,13 @@ void main() {
       'lib/src/agent/permission_policy.dart',
       'lib/src/agent/acp_session_adapter.dart',
       'lib/src/agent/acp_bridge.dart',
+      // The RESOLVER too: the seat rung is where a role indirection would be
+      // most tempting to re-introduce, and it is the one place the derived
+      // trusted-headless posture is minted.
+      'lib/src/agent/seat_environments.dart',
     ]) {
       final source = _source(relative);
+      expect(source, isNot(contains('AgentRole')), reason: relative);
       expect(source, isNot(contains('AgentTier')), reason: relative);
       expect(source, isNot(contains('ModelTiers')), reason: relative);
     }
