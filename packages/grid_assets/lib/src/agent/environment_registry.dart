@@ -118,8 +118,9 @@ class EnvironmentRegistry {
   /// registry validated it at boot", so nothing regresses. A name [validate]
   /// would refuse is SKIPPED, not thrown on - a boot-refused registry never
   /// reaches work in the first place. [SiteBinding] binding is deliberately
-  /// NOT re-checked per member: it is a whole-registry boot refusal, so a
-  /// per-member filter here would be unreachable.
+  /// NOT re-checked per member: it is a boot refusal over the set an arming
+  /// REACHES ([validate]'s check 4), and the availability probe is what turns
+  /// an unbound member into ABSENCE here (ADR-0000 A38).
   Iterable<AgentEnvironment> get validatedEnvironments sync* {
     for (final name in names) {
       final AgentEnvironment env;
@@ -141,8 +142,20 @@ class EnvironmentRegistry {
   ///     direct successor to `AgentHarness.supports`) plus a `command` to spawn;
   ///  3. every name an ARMING maps to is ARMED ([armedNames] — the label→name
   ///     pairs a composition root arms; label-agnostic here);
-  ///  4. every machine fact an armed environment needs is BOUND
-  ///     ([SiteBinding.validate], bead `pow-ebf.6`).
+  ///  4. every machine fact a REACHED environment needs is BOUND
+  ///     ([SiteBinding.validate]).
+  ///
+  /// Checks 1–3 run over the WHOLE armed set ([names]); check 4 runs over the
+  /// environments an arming REACHES — [armedNames]'s values — plus every
+  /// [custom] entry, the box's own authoring. A shipped [builtins] entry no
+  /// arming names is never endpoint-checked: the station palette carries
+  /// endpoint-needing defaults (`pi` is [InferenceTarget.openAiCompatible]), and
+  /// refusing boot over a default nobody reaches would make a bare
+  /// provider-managed station unbootable. Narrowing the SCOPE of check 4 does
+  /// not soften it — an environment a station actually arms, or authored
+  /// itself, still refuses LOUD when its endpoint is unbound (ADR-0002 D3:
+  /// never a silent default).
+  ///
   /// The composition root throws on a non-null return.
   String? validate({
     Map<String, String> armedNames = const {},
@@ -190,7 +203,14 @@ class EnvironmentRegistry {
             'environment.';
       }
     }
-    return siteBinding.validate(resolved);
+    // Check 4, over the REACHED set only (see the doc above). `resolved` is
+    // built in `names` order, which is sorted — so the FIRST refusal is
+    // deterministic whichever entries survive the filter.
+    final endpointNames = <String>{...armedNames.values, ...custom.keys};
+    return siteBinding.validate({
+      for (final entry in resolved.entries)
+        if (endpointNames.contains(entry.key)) entry.key: entry.value,
+    });
   }
 
   /// The legal-combo refusal for a RESOLVED [env] armed as [name], or null when

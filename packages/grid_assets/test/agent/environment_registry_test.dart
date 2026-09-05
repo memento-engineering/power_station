@@ -201,4 +201,83 @@ void main() {
       expect(registry.validate(siteBinding: binding), isNull);
     });
   });
+
+  // Check 4 (the site-binding tail) runs over what an arming REACHES plus the
+  // box's own `custom` authoring — NOT over every shipped builtin. Checks 1-3
+  // keep running over the whole armed set.
+  group('EnvironmentRegistry.validate - the endpoint check\'s SCOPE', () {
+    const endpointNeeding = AgentEnvironment(
+      command: 'pi',
+      target: InferenceTarget.openAiCompatible,
+    );
+    const providerManaged = AgentEnvironment(
+      command: 'claude',
+      target: InferenceTarget.providerManaged,
+    );
+
+    test('an UNARMED builtin with an unbound endpoint does not refuse', () {
+      const registry = EnvironmentRegistry(
+        custom: {},
+        builtins: {'pi': endpointNeeding, 'claude': providerManaged},
+      );
+      expect(
+        registry.validate(
+          armedNames: {'ambient': 'claude'},
+          siteBinding: SiteBinding.none,
+        ),
+        isNull,
+      );
+    });
+
+    test('the SAME builtin, once an arming NAMES it, refuses', () {
+      const registry = EnvironmentRegistry(
+        custom: {},
+        builtins: {'pi': endpointNeeding, 'claude': providerManaged},
+      );
+      final refusal = registry.validate(
+        armedNames: {'ambient': 'pi'},
+        siteBinding: SiteBinding.none,
+      );
+      expect(refusal, allOf(contains('"pi"'), contains('endpoint')));
+    });
+
+    test('the station default palette boots on a bare, unbound box', () {
+      expect(
+        buildBuiltinEnvironmentRegistry().validate(
+          armedNames: {'ambient': 'claude'},
+          siteBinding: SiteBinding.none,
+        ),
+        isNull,
+      );
+    });
+
+    test('a CUSTOM endpoint environment refuses even when unarmed', () {
+      const registry = EnvironmentRegistry(
+        custom: {'local': endpointNeeding},
+        builtins: {'claude': providerManaged},
+      );
+      final refusal = registry.validate(
+        armedNames: {'ambient': 'claude'},
+        siteBinding: SiteBinding.none,
+      );
+      expect(refusal, allOf(contains('"local"'), contains('endpoint')));
+    });
+
+    test('an ILLEGAL UNARMED entry is still refused by the legality pass', () {
+      const registry = EnvironmentRegistry(
+        custom: {},
+        builtins: {
+          'claude': providerManaged,
+          'broken': AgentEnvironment(model: 'unspawnable'),
+        },
+      );
+      expect(
+        registry.validate(
+          armedNames: {'ambient': 'claude'},
+          siteBinding: SiteBinding.none,
+        ),
+        allOf(contains('"broken"'), contains('not spawnable')),
+      );
+    });
+  });
 }

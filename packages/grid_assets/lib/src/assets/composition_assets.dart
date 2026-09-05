@@ -48,6 +48,7 @@ import '../agent/availability_assets.dart';
 import '../agent/environment_probe.dart';
 import '../agent/environment_registry.dart';
 import '../agent/permission_policy.dart';
+import '../agent/site_binding.dart';
 import '../code/code_capabilities.dart';
 import '../code/mount_eligibility.dart';
 import '../filing/filing_contract.dart';
@@ -519,18 +520,41 @@ class DerivedServiceBundleSeed extends InheritedSeed<ServiceBundle> {
 /// in effect for that subtree. Without that, a seat overriding only its
 /// registry would keep reading an ancestor's presence set, computed over a
 /// different registry.
+///
+/// **The machine facts (ADR-0002 D3).** This is also the station's SITE
+/// BINDING root: it holds a [SiteBinding] — environment name → the inference
+/// endpoint it reaches on THIS box — and mounts it as an
+/// `InheritedSeed<SiteBinding>` above the availability seed, which watches it.
+/// Unsupplied, the binding is read from the machine-local [kSiteBindingFile] at
+/// CONSTRUCTION, so `buildWithChild` stays free of I/O.
+///
+/// **One boot-eager gate.** Before it mounts anything, `buildWithChild` runs
+/// [EnvironmentRegistry.validate] over the registry it is about to publish,
+/// arming it with this provider's own [AgentConfig.harness] and the binding it
+/// is about to mount, and THROWS [SiteBindingError] on a refusal. That single
+/// call is the whole of moment 1: an unresolvable base, an illegal combo, an
+/// arming that names an unarmed environment, and an unbound machine fact all
+/// fail HERE — before any work mounts — rather than at the spawn edge (guards
+/// LOUD or GONE, ADR-0000 A8). There is no second boot-eager path: this asset
+/// never calls `SiteBinding.validate` itself.
 class HarnessProvider extends SingleChildStatelessSeed {
   /// Creates the harness asset over the station-default [registry] and ambient
   /// [config]; [child] is supplied by an enclosing [Nest].
-  const HarnessProvider({
+  ///
+  /// [siteBinding] is the box's machine facts. NULL (the default) reads the
+  /// conventional machine-local [kSiteBindingFile] — the one I/O this asset
+  /// does, and it happens HERE rather than in `buildWithChild`, so a rebuild
+  /// never re-reads the disc and the mounted value keeps its identity.
+  HarnessProvider({
     this.registry,
     this.config = const AgentConfig(),
     this.permissionPolicy,
     this.probe,
     this.probeInterval = kEnvironmentProbeInterval,
+    SiteBinding? siteBinding,
     super.child,
     super.key,
-  });
+  }) : siteBinding = siteBinding ?? SiteBinding.loadJsonFile(kSiteBindingFile);
 
   /// The station's environment registry; null ⇒ [buildBuiltinEnvironmentRegistry].
   final EnvironmentRegistry? registry;
@@ -568,8 +592,25 @@ class HarnessProvider extends SingleChildStatelessSeed {
   /// The bounded re-probe interval used when [probe] is armed (a VALUE).
   final Duration probeInterval;
 
+  /// This box's MACHINE FACTS (ADR-0002 D3) — environment name → the inference
+  /// endpoint it reaches here. A VALUE, mounted for the subtree; the endpoint
+  /// url lives ONLY in the machine-local file, never in committed source, argv,
+  /// or a bead.
+  final SiteBinding siteBinding;
+
   @override
   Seed buildWithChild(TreeContext context, Seed child) {
+    final mountedRegistry = registry ?? buildBuiltinEnvironmentRegistry();
+    // MOMENT 1, the ONE boot-eager gate (ADR-0002 D3): the registry this
+    // provider is about to publish, armed at the config it is about to publish,
+    // against the machine facts it is about to mount. A refusal throws before a
+    // single descendant mounts — never a silent default, and never a check
+    // deferred to the spawn edge.
+    final refusal = mountedRegistry.validate(
+      armedNames: {'ambient': config.harness},
+      siteBinding: siteBinding,
+    );
+    if (refusal != null) throw SiteBindingError(refusal);
     final own = probe;
     // WATCH the ambient arming (the D-H build verb): a station that re-arms
     // above this seat re-mounts this seat's probe pass too.
@@ -580,8 +621,8 @@ class HarnessProvider extends SingleChildStatelessSeed {
         : EnvironmentProbeArming(probe: own, interval: probeInterval);
     // The availability seed sits BELOW the registry seed: it READS the registry
     // it probes, and its `AvailableEnvironments` must shadow nothing above it.
-    // Bead `pow-2eg` mounts `InheritedSeed<SiteBinding>` in this same nest — it
-    // belongs ABOVE this seed, which watches the site binding.
+    // The `InheritedSeed<SiteBinding>` mounted below sits ABOVE this seed, which
+    // watches the site binding to re-probe when the machine facts change.
     final armed = arming == null
         ? child
         : InheritedSeed<EnvironmentProbeArming>(
@@ -602,9 +643,15 @@ class HarnessProvider extends SingleChildStatelessSeed {
     final below = policy == null
         ? armed
         : InheritedSeed<AgentPermissionPolicy>(value: policy, child: armed);
+    // The machine facts sit above the availability seed (which watches them) and
+    // below the config seeds, so a nested provider's binding shadows this one by
+    // exact type — the same rung ADR-0002 D5 gives arming.
     return InheritedSeed<EnvironmentRegistry>(
-      value: registry ?? buildBuiltinEnvironmentRegistry(),
-      child: InheritedSeed<AgentConfig>(value: config, child: below),
+      value: mountedRegistry,
+      child: InheritedSeed<AgentConfig>(
+        value: config,
+        child: InheritedSeed<SiteBinding>(value: siteBinding, child: below),
+      ),
     );
   }
 }
