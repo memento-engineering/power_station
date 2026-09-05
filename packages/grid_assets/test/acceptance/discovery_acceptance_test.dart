@@ -849,6 +849,44 @@ void main() {
       },
     );
 
+    test('a description PAST the snippet bound reaches the lens WHOLE and the '
+        'route advances', () async {
+      // The bound exists so FOREIGN evidence cannot flood a lens. The work
+      // bead is the round's PRIMARY input: clipped, the prior-art lens read a
+      // truncated copy of the brief it must judge and — correctly — refused to
+      // judge it, so every bead whose description ran past 4 KB held its own
+      // discovery round.
+      const sentinel = 'THE-TAIL-THE-LENS-MUST-JUDGE';
+      final description =
+          '${'A real brief the architect plans against. ' * 200}$sentinel';
+      expect(description.length, greaterThan(kMaxDiscoverySnippetChars));
+
+      final f = await driveToRoute({
+        for (final lens in kDiscoveryLenses) lens: LensReport(lens: lens),
+      }, workBeadOverride: workBead('tg-1').copyWith(description: description));
+
+      // The GATHER on disk carried the field whole — the tail past the bound
+      // included — and states it COMPLETE.
+      final field = readDiscoveryAnchors(tmp.path)!.beadFields.singleWhere(
+        (record) => record.field == BeadCitationField.description,
+      );
+      expect(field.evidence.snippet, description);
+      expect(field.evidence.state, EvidenceState.complete);
+
+      // And so did the PROMPT the prior-art lens was actually spawned with.
+      final promptedLens = f.provider.started.singleWhere(
+        (spawn) => spawn.name == _step('spec_review/discovery/$kPriorArtLens'),
+      );
+      expect(promptedLens.config.args.join('\n'), contains(sentinel));
+
+      expect(_wroteCursor(f, kDiscoveryRouteNode, 'complete'), isTrue);
+      expect(
+        _wroteCursor(f, kDiscoveryRouteNode, 'gated'),
+        isFalse,
+        reason: 'a long brief is not an offence — it can never hold a bead',
+      );
+    });
+
     test('the route ADVANCES, the curated dossier lands in the worktree, and the '
         'architect brief RENDERS it — the grading rubrics included', () async {
       final f = await driveToRoute({
