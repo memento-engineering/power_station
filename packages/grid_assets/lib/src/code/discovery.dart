@@ -1723,6 +1723,14 @@ DiscoveryEvidenceProjection projectDiscoveryEvidence(
           )
           ..writeln();
       }
+      // ONE body per decision entry, however many surfaces cite it: the
+      // register answers every roster-qualified surface of a repo with the
+      // same entries, so a bead touching 12 surfaces carried 12 copies of
+      // each — 550 KB for 12 distinct entries on pow-ed1c, and the cheap lens
+      // died `prompt_too_long` (pow-alwh). The first surface renders the
+      // body; every later one cites it by identity. The evidence-id profile is
+      // unchanged (pow-bvui counts the body once).
+      final renderedUnder = <String, String>{};
       for (final lookup in anchors.decisionLookups) {
         b
           ..writeln('#### Surface `${lookup.surface}`')
@@ -1750,6 +1758,17 @@ DiscoveryEvidenceProjection projectDiscoveryEvidence(
           );
         }
         for (final decision in lookup.decisions) {
+          final under = renderedUnder[decision.body.id];
+          if (under != null) {
+            b
+              ..writeln(
+                '##### `${decision.identity}` — also governs this surface; '
+                'its body is rendered ONCE above, under surface `$under`.',
+              )
+              ..writeln();
+            continue;
+          }
+          renderedUnder[decision.body.id] = lookup.surface;
           b.writeln(
             '##### `${decision.identity}` (status: ${decision.status}, '
             'entry: `${decision.entryPath}`)',
