@@ -360,6 +360,9 @@ Iterable<String> _spawned(Fakes f) => f.provider.started.map((s) => s.name);
 void _plantReport(String dir, String lens, LensReport report) {
   final json = {
     ...report.toJson(),
+    // All THREE freshness stamps the read fence checks: the session generation
+    // this circuit is mounted under, the lens's own node path, and the round.
+    'sessionId': _sid,
     'nodePath': 'tg-1/spec_review/discovery/$lens',
     kVerdictRoundKey: 0,
   };

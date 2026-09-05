@@ -29,12 +29,18 @@ import 'support/asset_fakes.dart';
 
 const _parent = 'tg-1/spec_review/discovery';
 
-/// Plants one lens report at the canonical path, stamped for [nodePath]
-/// (default: THIS circuit's sibling lens node) and [round].
+/// THIS session's generation — the id every fixture below is stamped with and
+/// every capability under test reads off the ambient tree.
+const String _session = 'session-current';
+
+/// Plants one lens report at the canonical path, stamped for [sessionId]
+/// (default: THIS session), [nodePath] (default: THIS circuit's sibling lens
+/// node) and [round].
 void _plantReport(
   String ws,
   String lens, {
   required int round,
+  String sessionId = _session,
   String? nodePath,
   String note = 'the lens angle',
 }) {
@@ -44,6 +50,7 @@ void _plantReport(
       jsonEncode({
         'lens': lens,
         'version': 1,
+        'sessionId': sessionId,
         'nodePath': nodePath ?? '$_parent/$lens',
         kVerdictRoundKey: round,
         'context': [
@@ -72,6 +79,7 @@ Future<RouteVerdict> _route(
         values: {
           Bead: workBead('tg-1'),
           Workspace: testWorkspace('tg-1', workspaceDir: ws),
+          SessionHandle: const SessionHandle(_session),
           SiblingView: SiblingView(
             results: {
               for (final entry in recorded.entries)
@@ -100,7 +108,13 @@ void main() {
     test('a PRIOR generation report is refused; THIS round\'s joins', () {
       _plantReport(ws.path, kCodeLens, round: 0);
       expect(
-        readLensReport(ws.path, kCodeLens, '$_parent/$kCodeLens', round: 1),
+        readLensReport(
+          ws.path,
+          kCodeLens,
+          '$_parent/$kCodeLens',
+          round: 1,
+          sessionId: _session,
+        ),
         isNull,
         reason: 'round 0 is a prior generation — it must never join as current',
       );
@@ -111,6 +125,7 @@ void main() {
           kCodeLens,
           '$_parent/$kCodeLens',
           round: 1,
+          sessionId: _session,
         )?.lens,
         kCodeLens,
       );
@@ -129,6 +144,7 @@ void main() {
           kDecisionLens,
           '$_parent/$kDecisionLens',
           round: 1,
+          sessionId: _session,
         ),
         isNull,
       );
@@ -136,6 +152,7 @@ void main() {
         jsonEncode({
           'lens': kDecisionLens,
           'version': 1,
+          'sessionId': _session,
           'nodePath': '$_parent/$kDecisionLens',
           'context': <Object?>[],
           'violations': <Object?>[],
@@ -147,6 +164,7 @@ void main() {
           kDecisionLens,
           '$_parent/$kDecisionLens',
           round: 1,
+          sessionId: _session,
         ),
         isNull,
         reason: 'an absent round stamp is a MISS, exactly as a foreign one is',
@@ -248,6 +266,7 @@ void main() {
             values: {
               Bead: workBead('tg-1'),
               Workspace: testWorkspace('tg-1', workspaceDir: ws.path),
+              SessionHandle: const SessionHandle(_session),
             },
           ),
           stepArgs('$_parent/$kAnchorsStep', params: const {'grid.round': '1'}),
@@ -273,7 +292,10 @@ void main() {
           params: const {'lens': kCodeLens, 'grid.round': '2'},
         );
         final context = FakeTreeContext(
-          values: {Workspace: testWorkspace('tg-1', workspaceDir: ws.path)},
+          values: {
+            Workspace: testWorkspace('tg-1', workspaceDir: ws.path),
+            SessionHandle: const SessionHandle(_session),
+          },
         );
         final empty = await const DiscoveryLensCapability().result(
           context,
@@ -457,6 +479,7 @@ void main() {
             'outcome': 'insufficient-evidence',
             'lens': kCodeLens,
             'version': 2,
+            'sessionId': _session,
             'nodePath': '$_parent/$kCodeLens',
             kVerdictRoundKey: 1,
             'gaps': [
@@ -469,6 +492,7 @@ void main() {
         kCodeLens,
         '$_parent/$kCodeLens',
         round: 1,
+        sessionId: _session,
       );
       expect(outcome, isA<InsufficientEvidenceReport>());
       expect((outcome! as InsufficientEvidenceReport).gaps, hasLength(1));

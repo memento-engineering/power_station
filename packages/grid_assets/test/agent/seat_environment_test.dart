@@ -51,6 +51,9 @@ FakeTreeContext _ctx([Map<Type, Object> seat = const {}]) => FakeTreeContext(
       workspaceDir: '/w/tg-1',
       branch: 'grid/tg-1',
     ),
+    // The discovery lens reads the session generation at its spawn edge (the
+    // third freshness stamp it is told to copy into its report).
+    SessionHandle: const SessionHandle('session-current'),
     AgentConfig: const AgentConfig(),
     EnvironmentRegistry: _registry,
     ...seat,

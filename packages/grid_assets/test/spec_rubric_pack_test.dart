@@ -332,6 +332,7 @@ void main() {
         );
         final runtime = const DiscoveryLensCapability().buildLensPrompt(
           lens: lens,
+          sessionId: 'session-current',
           nodePath: 'tg-1/spec_review/discovery/$lens',
           round: 0,
           workspaceDir: '/w/tg-1',
@@ -478,6 +479,7 @@ void main() {
   test('discovery prompts require structured FOREIGN bead citations', () {
     final runtime = const DiscoveryLensCapability().buildLensPrompt(
       lens: kPriorArtLens,
+      sessionId: 'session-current',
       nodePath: 'tg-1/spec_review/discovery/$kPriorArtLens',
       round: 0,
       workspaceDir: '/w/tg-1',
@@ -555,6 +557,7 @@ void main() {
         'discovery.dart:buildLensPrompt': const DiscoveryLensCapability()
             .buildLensPrompt(
               lens: kDecisionLens,
+              sessionId: 'session-current',
               nodePath: 'tg-1/spec_review/discovery/$kDecisionLens',
               round: 0,
               workspaceDir: '/w/tg-1',

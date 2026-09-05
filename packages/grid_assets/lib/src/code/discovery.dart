@@ -3475,17 +3475,27 @@ void clearDiscoveryRegatherLedger(String workspaceDir) {
   }
 }
 
-/// The round-aware discovery sweep [AnchorsCapability] runs at the head of
+/// The generation-aware discovery sweep [AnchorsCapability] runs at the head of
 /// every round — the twin of [sweepStaleCritique]. It ensures
 /// [discoveryDirPath] exists and deletes every entry in it EXCEPT a lens report
-/// of THIS round: a `<lens>.json` whose stamps pass the one shared fence
+/// of THIS generation: a `<lens>.json` whose stamps pass the one shared fence
 /// ([_freshLensReport]) for the sibling node path `<circuitPath>/<lens>` at
-/// [round]. Everything else — a PRIOR round's report, a FOREIGN node's, an
-/// unstamped or unparseable file, and the previous round's `anchors.json` /
-/// `dossier.json` (neither carries a lens stamp, and the gather rewrites the
-/// first immediately) — is deleted, exactly what the blanket wipe deleted.
+/// [round], written by session [sessionId]. Everything else — a PRIOR SESSION's
+/// report, a PRIOR round's, a FOREIGN node's, an unstamped or unparseable file,
+/// and the previous round's `anchors.json` / `dossier.json` (neither carries a
+/// lens stamp, and the gather rewrites the first immediately) — is deleted,
+/// exactly what the blanket wipe deleted.
 ///
-/// KEEPING this round's reports is the whole point. Under the
+/// The SESSION stamp is what makes the ROUND stamp mean anything across a
+/// RE-MINT. A rework, a void-rekey re-mount and a bounce resume all restart the
+/// round counter at 0 under BYTE-IDENTICAL node paths, so on the round stamp
+/// alone a prior session's round-N report is indistinguishable from this
+/// session's: it survives the sweep, the lens step "completes" without
+/// replacing it, and the route joins it as this round's verdict. A report from
+/// ANOTHER session is a PRIOR GENERATION by definition, and it is swept on
+/// exactly the rule a prior round's is.
+///
+/// KEEPING this generation's reports is the whole point. Under the
 /// `validates: `[kAnchorsStep] derived wave the engine re-keys the gather
 /// closure NODE BY NODE, so a re-keyed LENS can legitimately write THIS
 /// round's report BEFORE this step's own successor runs; a blanket wipe then
@@ -3497,6 +3507,7 @@ void sweepStaleDiscovery(
   String workspaceDir, {
   required String circuitPath,
   required int round,
+  required String sessionId,
 }) {
   final dir = Directory(discoveryDirPath(workspaceDir));
   if (!dir.existsSync()) {
@@ -3511,6 +3522,7 @@ void sweepStaleDiscovery(
         keep =
             _freshLensReport(
               jsonDecode(entry.readAsStringSync()),
+              sessionId: sessionId,
               nodePath: '$circuitPath/$lens',
               round: round,
             ) !=
@@ -3595,21 +3607,34 @@ class AnchorsCapability extends ServiceCapability {
     // roster prefix from the work bead alone left EVERY surface prefixed
     // `<repo>`.
     final substation = context.getInheritedSeedOfExactType<SubstationConfig>();
+    // The engine's SESSION GENERATION — what keys the sweep's keep test, so a
+    // re-minted session (whose round counter restarts at 0 under the same node
+    // paths) can never inherit the PRIOR session's reports.
+    final session = context.getInheritedSeedOfExactType<SessionHandle>();
     if (bead == null) {
       return const Failed(
         'discovery/anchors: no ambient work bead to gather for (the '
         'WorkBead/SessionScope mounts it)',
       );
     }
+    if (session == null) {
+      return const Failed(
+        'discovery/anchors: no ambient SessionHandle to key the sweep to — a '
+        'sweep that cannot name its generation would keep a PRIOR session\'s '
+        'reports (SessionScope provides it)',
+      );
+    }
     final workspaceDir = workspace?.workspaceDir ?? '';
     final live =
         workspaceDir.isNotEmpty && Directory(workspaceDir).existsSync();
 
-    // Round-freshness: a ROUND-AWARE SWEEP, never a blanket wipe. It deletes
-    // exactly what the read fence would refuse and KEEPS a report stamped for
-    // this circuit's lens node paths at THIS round, so a sweep landing mid-wave
-    // cannot destroy a re-keyed lens's finished work. Best-effort — the A17(8)
-    // posture; an injected clearer stays the offline no-op seam.
+    // Round-freshness: a GENERATION-AWARE SWEEP, never a blanket wipe. It
+    // deletes exactly what the read fence would refuse and KEEPS a report
+    // stamped for THIS session at this circuit's lens node paths at THIS round,
+    // so a sweep landing mid-wave cannot destroy a re-keyed lens's finished
+    // work — and a RE-MINTED session, whose round counter restarts at 0, can
+    // never inherit the prior session's. Best-effort — the A17(8) posture; an
+    // injected clearer stays the offline no-op seam.
     if (live) {
       try {
         final clearer = _clearer;
@@ -3620,6 +3645,7 @@ class AnchorsCapability extends ServiceCapability {
             workspaceDir,
             circuitPath: parentPath(args.nodePath),
             round: verdictRound(args),
+            sessionId: session.sessionId,
           );
         }
       } catch (_) {
@@ -3735,23 +3761,28 @@ const String kLensWorkingAgreement = '''
   insufficient-evidence report for absence.''';
 
 /// The stamp instruction every lens prompt writes after its report template —
-/// the discovery twin of [kVerdictStampInstruction]. BOTH stamps are required
-/// and copied verbatim: `nodePath` proves the report is THIS node's (A4's
-/// foreign-node fence), `round` proves it is THIS round's (A15(5) alt-A's
-/// round fence — a re-gather wave re-runs the lens in the SAME worktree under
-/// the SAME node path, so an earlier generation's report file is otherwise
-/// indistinguishable from this one's). A report carrying the wrong stamps, or
-/// missing either, is read as MISSING — never as a verdict: the route
-/// re-gathers the lane once and, at the cap, ADVANCES with the miss recorded
-/// LOUDLY (A21(3)).
+/// the discovery twin of [kVerdictStampInstruction]. All THREE stamps are
+/// required and copied verbatim: `sessionId` proves the report is THIS
+/// session's (a re-minted session restarts its round counter at 0 under the
+/// SAME node paths, so the round stamp alone cannot see the re-mint),
+/// `nodePath` proves it is THIS node's (A4's foreign-node fence), and `round`
+/// proves it is THIS round's (A15(5) alt-A's round fence — a re-gather wave
+/// re-runs the lens in the SAME worktree under the SAME node path, so an
+/// earlier generation's report file is otherwise indistinguishable from this
+/// one's). A report carrying the wrong stamps, or missing ANY of them, is read
+/// as MISSING — never as a verdict: the route re-gathers the lane once and, at
+/// the cap, ADVANCES with the miss recorded LOUDLY (A21(3)).
 const String kLensStampInstruction =
-    'The `nodePath` and `round` values above are REQUIRED freshness stamps — '
-    'copy them byte-for-byte into your report. `nodePath` proves the report is '
-    'YOURS and not another node\'s stray file; `round` proves it is THIS '
-    'round\'s — a re-gather wave re-runs you in the SAME worktree under the '
-    'SAME node path, so an earlier round\'s report file is otherwise '
-    'indistinguishable from yours. A report carrying the wrong stamps, or '
-    'missing either, is read as MISSING and your lane is re-gathered.';
+    'The `sessionId`, `nodePath` and `round` values above are REQUIRED '
+    'freshness stamps — copy all three byte-for-byte into your report. '
+    '`sessionId` proves the report is THIS session\'s, not one a previous '
+    'session left behind at the same path with a round counter that has since '
+    'restarted; `nodePath` proves the report is YOURS and not another node\'s '
+    'stray file; `round` proves it is THIS round\'s — a re-gather wave re-runs '
+    'you in the SAME worktree under the SAME node path, so an earlier round\'s '
+    'report file is otherwise indistinguishable from yours. A report carrying '
+    'the wrong stamps, or missing ANY of them, is read as MISSING and your lane '
+    'is re-gathered.';
 
 /// ONE read-only explorer — the discovery circuit's agent lane, on the CHEAP tier
 /// ([AgentTier.cheap] ⇒ [kCheapModelDefault], `haiku`).
@@ -3785,10 +3816,14 @@ class DiscoveryLensCapability extends ProcessCapability {
     final lens = _lensOf(args);
     final bead = context.getInheritedSeedOfExactType<Bead>();
     final workspace = context.getInheritedSeedOfExactType<Workspace>();
-    if (bead == null || workspace == null) {
+    // The engine's SESSION GENERATION — the third freshness stamp the lens is
+    // told to copy, without which its report cannot be told from a prior
+    // session's at the same node path and round.
+    final session = context.getInheritedSeedOfExactType<SessionHandle>();
+    if (bead == null || workspace == null || session == null) {
       throw StateError(
-        'DiscoveryLensCapability requires the ambient Bead + Workspace '
-        '(WorkBead/SessionScope mount them)',
+        'DiscoveryLensCapability requires the ambient Bead + Workspace + '
+        'SessionHandle (WorkBead/SessionScope mount them)',
       );
     }
     final ambient =
@@ -3826,6 +3861,7 @@ class DiscoveryLensCapability extends ProcessCapability {
       brief: AgentBrief(
         task: buildLensPrompt(
           lens: lens,
+          sessionId: session.sessionId,
           nodePath: args.nodePath,
           round: round,
           workspaceDir: workspaceDir,
@@ -3861,7 +3897,8 @@ class DiscoveryLensCapability extends ProcessCapability {
     StepArgs args,
   ) async {
     final workspace = context.getInheritedSeedOfExactType<Workspace>();
-    if (workspace == null) return null;
+    final session = context.getInheritedSeedOfExactType<SessionHandle>();
+    if (workspace == null || session == null) return null;
     final workspaceDir = workspace.workspaceDir;
     final round = verdictRound(args);
     final report = readLensReport(
@@ -3869,6 +3906,7 @@ class DiscoveryLensCapability extends ProcessCapability {
       _lensOf(args),
       args.nodePath,
       round: round,
+      sessionId: session.sessionId,
     );
     // The declared prices ride the ambient config VALUE; the flare sink is the
     // injected transport IMPL. Non-binding verb — `result()` is an effect edge.
@@ -3912,13 +3950,15 @@ class DiscoveryLensCapability extends ProcessCapability {
   }
 
   /// The lens's prompt (exposed for unit tests). It carries the SAME hardening as
-  /// `CriticCapability.buildCriticPrompt` — the `nodePath` FRESHNESS STAMP (the
-  /// foreign-node fence, A4 as re-scoped by A15(5)), the workspace-derived
-  /// ABSOLUTE write path (gate-integrity #4 — cwd-invariant), and the file-write
-  /// instruction LAST (recency). What differs is the JOB: it gathers, it cites,
-  /// and it decides nothing.
+  /// `CriticCapability.buildCriticPrompt` — the FRESHNESS STAMPS the read fence
+  /// reads back ([sessionId] naming the engine's session generation, [nodePath]
+  /// the foreign-node fence, A4 as re-scoped by A15(5), and [round]), the
+  /// workspace-derived ABSOLUTE write path (gate-integrity #4 — cwd-invariant),
+  /// and the file-write instruction LAST (recency). What differs is the JOB: it
+  /// gathers, it cites, and it decides nothing.
   String buildLensPrompt({
     required String lens,
+    required String sessionId,
     required String nodePath,
     required int round,
     required String workspaceDir,
@@ -4031,7 +4071,8 @@ class DiscoveryLensCapability extends ProcessCapability {
         'the evidence above let you do your job:',
       )
       ..writeln(
-        '{"outcome":"report","lens":"$lens","version":2,"nodePath":"$nodePath",'
+        '{"outcome":"report","lens":"$lens","version":2,'
+        '"sessionId":"$sessionId","nodePath":"$nodePath",'
         '"$kVerdictRoundKey":$round,'
         '"context":[{"note":"<what the architect needs to know>",'
         '"source":"<the evidence id or source you read it from>",'
@@ -4061,7 +4102,8 @@ class DiscoveryLensCapability extends ProcessCapability {
       )
       ..writeln(
         '{"outcome":"insufficient-evidence","lens":"$lens","version":2,'
-        '"nodePath":"$nodePath","$kVerdictRoundKey":$round,'
+        '"sessionId":"$sessionId","nodePath":"$nodePath",'
+        '"$kVerdictRoundKey":$round,'
         '"gaps":[{"evidenceId":"<the canonical id above>",'
         '"reason":"<the recorded reason above>"}]}',
       )
@@ -4126,17 +4168,26 @@ String lensBrief(String lens) => switch (lens) {
 /// The ONE freshness fence + decode every lens-report read path runs through —
 /// [readLensReport]'s canonical file, its envelope fallback, and
 /// [sweepStaleDiscovery]'s keep test (gate-integrity #3: one canonical logic
-/// rules all read paths). Returns null unless [json] is a map whose `nodePath`
-/// stamp equals [nodePath] AND whose `round` stamp — parsed by the shared
-/// [stampedRound] — equals [round]. An ABSENT or unreadable stamp is a MISS
-/// exactly as a foreign one is (A4: a mismatch, an absent stamp included, is
-/// treated as missing).
+/// rules all read paths). Returns null unless [json] is a map carrying all
+/// THREE stamps: a `sessionId` equal to [sessionId], a `nodePath` equal to
+/// [nodePath], and a `round` stamp — parsed by the shared [stampedRound] —
+/// equal to [round]. An ABSENT or unreadable stamp is a MISS exactly as a
+/// foreign one is (A4: a mismatch, an absent stamp included, is treated as
+/// missing).
+///
+/// The SESSION stamp fences the RE-MINT the round stamp cannot see. A re-minted
+/// session (a rework, a void-rekey re-mount, a bounce resume) restarts its
+/// round counter at 0 under the SAME node paths, so a PRIOR session's report
+/// clears both older stamps and joins as this round's verdict. Session, node
+/// and round together name ONE generation, and only that generation joins.
 DiscoveryLensOutcome? _freshLensReport(
   Object? json, {
+  required String sessionId,
   required String nodePath,
   required int round,
 }) {
   if (json is! Map) return null;
+  if (json['sessionId'] != sessionId) return null;
   if (json['nodePath'] != nodePath) return null;
   if (stampedRound(json[kVerdictRoundKey]) != round) return null;
   return DiscoveryLensOutcome.fromJson(json);
@@ -4144,24 +4195,29 @@ DiscoveryLensOutcome? _freshLensReport(
 
 /// Reads ONE lens's report — the A13(3) transport stack, minus the fail-closed
 /// default (a gather lane's silence is MISSING, never a verdict):
-///  1. the canonical DUAL-STAMPED file (a report whose `nodePath` is not ours
-///     is foreign; whose `round` is not [round] is a PRIOR generation's — both
-///     refused, through the one [_freshLensReport] fence);
+///  1. the canonical TRIPLE-STAMPED file (a report whose `sessionId` is not
+///     [sessionId] was written by a PRIOR session — whose round counter has
+///     since restarted at 0 under these same node paths; whose `nodePath` is
+///     not ours is foreign; whose `round` is not [round] is a PRIOR
+///     generation's — all three refused, through the one [_freshLensReport]
+///     fence);
 ///  2. the harness RESULT ENVELOPE, under the SAME fence (the envelope is keyed
 ///     by node path alone, so a not-yet-re-run lane's envelope is last
-///     generation's — it must clear the round stamp to join);
+///     generation's — it must clear the session AND round stamps to join);
 ///  3. else null ⇒ MISSING ⇒ the route re-gathers it once.
 DiscoveryLensOutcome? readLensReport(
   String workspaceDir,
   String lens,
   String nodePath, {
   required int round,
+  required String sessionId,
 }) {
   final file = File(lensReportPath(workspaceDir, lens));
   if (file.existsSync()) {
     try {
       final report = _freshLensReport(
         jsonDecode(file.readAsStringSync()),
+        sessionId: sessionId,
         nodePath: nodePath,
         round: round,
       );
@@ -4178,6 +4234,7 @@ DiscoveryLensOutcome? readLensReport(
   try {
     return _freshLensReport(
       jsonDecode(text.substring(start, end + 1)),
+      sessionId: sessionId,
       nodePath: nodePath,
       round: round,
     );
@@ -4195,6 +4252,7 @@ typedef LensReportReader =
       String lens,
       String lensNodePath, {
       required int round,
+      required String sessionId,
     });
 
 /// The DISCOVERY decision point (ZERO agents) — the circuit's terminal.
@@ -4261,10 +4319,21 @@ class DiscoveryRouteCapability extends RouteCapability {
     // the captured values.
     final workspace = context.getInheritedSeedOfExactType<Workspace>();
     final workBead = context.getInheritedSeedOfExactType<Bead>();
+    // The engine's SESSION GENERATION — the join's third freshness stamp, so a
+    // report a PRIOR session left at this node path can never become this
+    // round's verdict.
+    final session = context.getInheritedSeedOfExactType<SessionHandle>();
     if (workBead == null) {
       throw StateError(
         'DiscoveryRouteCapability requires the ambient Bead '
         '(WorkBead mounts it)',
+      );
+    }
+    if (session == null) {
+      throw StateError(
+        'DiscoveryRouteCapability requires the ambient SessionHandle — a join '
+        'that cannot name its generation would read a PRIOR session\'s report '
+        'as this round\'s verdict (SessionScope provides it)',
       );
     }
     final parent = parentPath(args.nodePath);
@@ -4283,8 +4352,8 @@ class DiscoveryRouteCapability extends RouteCapability {
         const SiblingView();
 
     // THE JOIN — WAIT or LOUD, never a silent drop and never a partial
-    // decision. A lane joins ONLY through a report carrying THIS node path and
-    // THIS round. A lane without one is CLASSIFIED:
+    // decision. A lane joins ONLY through a report carrying THIS session, THIS
+    // node path and THIS round. A lane without one is CLASSIFIED:
     //  - it RECORDED a result for this round ⇒ it finished artifact-less: a
     //    broken LANE. Decide now — the matrix re-gathers it once and, at the
     //    cap, ADVANCES with the miss recorded LOUDLY (A21(3): the gate never
@@ -4336,7 +4405,13 @@ class DiscoveryRouteCapability extends RouteCapability {
               switch (projections[lens]) {
                 final projection? when !projection.isSufficient =>
                   InsufficientEvidenceReport(lens: lens, gaps: projection.gaps),
-                _ => read(dir, lens, '$parent/$lens', round: round),
+                _ => read(
+                  dir,
+                  lens,
+                  '$parent/$lens',
+                  round: round,
+                  sessionId: session.sessionId,
+                ),
               },
             ),
         ]);

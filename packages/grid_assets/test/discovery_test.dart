@@ -17,6 +17,10 @@ import 'support/asset_fakes.dart';
 
 const String _adr = 'docs/adr/ADR-0000-ai-decision-register.md A17(4)';
 
+/// The engine session generation every capability fixture mounts — the third
+/// freshness stamp, beside `nodePath` and `round`.
+const SessionHandle _session = SessionHandle('session-current');
+
 DiscoveryFinding _cited({
   ViolationKind kind = ViolationKind.decision,
   String standard = _adr,
@@ -57,7 +61,8 @@ DiscoveryVerdict _decide(
 
 /// A Fake [LensReportReader] over canned reports (Fakes, not mocks).
 LensReportReader _reader(Map<String, DiscoveryLensOutcome?> canned) =>
-    (_, lens, __, {required int round}) => canned[lens];
+    (_, lens, __, {required int round, required String sessionId}) =>
+        canned[lens];
 
 Future<RouteVerdict> _runRoute(Map<String, DiscoveryLensOutcome?> canned) =>
     DiscoveryRouteCapability(reader: _reader(canned)).route(
@@ -65,6 +70,7 @@ Future<RouteVerdict> _runRoute(Map<String, DiscoveryLensOutcome?> canned) =>
         values: {
           Bead: workBead('tg-1'),
           Workspace: testWorkspace('tg-1', workspaceDir: '/w/tg-1'),
+          SessionHandle: _session,
           SiblingView: const SiblingView(),
         },
       ),
@@ -91,6 +97,7 @@ Future<RouteVerdict> _runRouteAt(
         values: {
           Bead: workBead('tg-1'),
           Workspace: testWorkspace('tg-1', workspaceDir: workspaceDir),
+          SessionHandle: _session,
           SiblingView: const SiblingView(),
         },
       ),
@@ -197,6 +204,7 @@ DiscoveryEvidenceProjection _project(DiscoveryAnchors anchors, String lens) =>
 String _promptFor(DiscoveryEvidenceProjection projection) =>
     const DiscoveryLensCapability().buildLensPrompt(
       lens: projection.lens,
+      sessionId: _session.sessionId,
       nodePath: 'pow-x/spec_review/discovery/${projection.lens}',
       round: projection.round,
       workspaceDir: '/w/pow-x',
@@ -685,6 +693,7 @@ void main() {
                       'Extend `buildSpecifyBrief` in `lib/src/code/specify.dart`.',
                 ),
                 Workspace: testWorkspace('tg-1', workspaceDir: '/w/tg-1'),
+                SessionHandle: _session,
               },
             ),
             stepArgs('tg-1/spec_review/discovery/$kAnchorsStep'),
@@ -733,6 +742,7 @@ void main() {
                   'space-31x',
                   workspaceDir: '/w/space-31x',
                 ),
+                SessionHandle: _session,
                 SubstationConfig: const SubstationConfig(
                   substationId: 'space_station',
                 ),
@@ -802,6 +812,7 @@ void main() {
                   'space-31x',
                   workspaceDir: '/w/space-31x',
                 ),
+                SessionHandle: _session,
               },
             ),
             stepArgs('space-31x/spec_review/discovery/$kAnchorsStep'),
@@ -846,6 +857,7 @@ void main() {
             values: {
               Bead: workBead('tg-1'),
               Workspace: testWorkspace('tg-1', workspaceDir: '/w/tg-1'),
+              SessionHandle: _session,
               AgentConfig: const AgentConfig(),
             },
           ),
@@ -905,12 +917,59 @@ void main() {
       expect(RegExp('writeAsStringSync').allMatches(source), hasLength(1));
     });
 
+    test('the lens prompt stamps the ambient session generation', () {
+      // The THIRD freshness stamp, threaded from the ambient SessionHandle at
+      // the spawn edge: without it a re-minted session's round-N report is
+      // indistinguishable from the PRIOR session's at the same node path.
+      final rendered = spawnLens(kCodeLens).args.join('\n');
+      for (final shape in [
+        '{"outcome":"report","lens":"$kCodeLens","version":2,'
+            '"sessionId":"${_session.sessionId}",'
+            '"nodePath":"tg-1/spec_review/discovery/$kCodeLens",',
+        '{"outcome":"insufficient-evidence","lens":"$kCodeLens","version":2,'
+            '"sessionId":"${_session.sessionId}",'
+            '"nodePath":"tg-1/spec_review/discovery/$kCodeLens",',
+      ]) {
+        expect(
+          rendered,
+          contains(shape),
+          reason: 'the spawn edge did not render the AMBIENT session id',
+        );
+      }
+      expect(rendered, contains(kLensStampInstruction));
+      expect(kLensStampInstruction, contains('`sessionId`'));
+      expect(
+        kLensStampInstruction,
+        contains('copy all three byte-for-byte'),
+        reason: 'the instruction still asks for TWO stamps',
+      );
+      // And the prompt builder renders whatever generation it is handed — the
+      // id is a VALUE read off the tree, never a constant baked in here.
+      expect(
+        const DiscoveryLensCapability().buildLensPrompt(
+          lens: kCodeLens,
+          sessionId: 'session-other',
+          nodePath: 'tg-1/spec_review/discovery/$kCodeLens',
+          round: 4,
+          workspaceDir: '/w/tg-1',
+          projection: projectDiscoveryEvidence(
+            completeGather(bead: workBead('tg-1'), round: 4),
+            lens: kCodeLens,
+            round: 4,
+            workBeadId: 'tg-1',
+          ),
+        ),
+        contains('"sessionId":"session-other"'),
+      );
+    });
+
     test(
       'the lens prompt teaches that a decision entry binds and a bead is not a '
       'decision, plus INTENT-NOT-PRESENCE and both JSON fields',
       () {
         final prompt = const DiscoveryLensCapability().buildLensPrompt(
           lens: kDecisionLens,
+          sessionId: _session.sessionId,
           nodePath: 'tg-1/spec_review/discovery/$kDecisionLens',
           round: 0,
           workspaceDir: '/w/tg-1',
@@ -1675,6 +1734,7 @@ void main() {
                         'Extend `buildSpecifyBrief` in `lib/src/x.dart`.',
                   ),
                   Workspace: testWorkspace('tg-1', workspaceDir: dir.path),
+                  SessionHandle: _session,
                 },
               ),
               stepArgs(
