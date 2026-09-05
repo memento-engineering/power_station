@@ -47,6 +47,7 @@ import '../agent/agent_harness.dart';
 import '../agent/availability_assets.dart';
 import '../agent/environment_probe.dart';
 import '../agent/environment_registry.dart';
+import '../agent/permission_policy.dart';
 import '../code/code_capabilities.dart';
 import '../code/mount_eligibility.dart';
 import '../filing/filing_contract.dart';
@@ -524,6 +525,7 @@ class HarnessProvider extends SingleChildStatelessSeed {
   const HarnessProvider({
     this.registry,
     this.config = const AgentConfig(),
+    this.permissionPolicy = const AgentPermissionPolicy.unavailable(),
     this.probe,
     this.probeInterval = kEnvironmentProbeInterval,
     super.child,
@@ -535,6 +537,17 @@ class HarnessProvider extends SingleChildStatelessSeed {
 
   /// The station-default agent config (the ladder's ambient rung).
   final AgentConfig config;
+
+  /// The station's AUTHORIZATION boundary for long-lived agent channels — a
+  /// VALUE, mounted below the registry and config seeds so a nested provider
+  /// (a substation, a seat) shadows it by exact type.
+  ///
+  /// Defaults to [AgentPermissionPolicy.unavailable]: a channel harness's
+  /// mid-turn permission asks are refused until a station configures otherwise.
+  /// A station widens per capability with [AgentPermissionPolicy.scoped], or
+  /// reinstates the old blanket posture — explicitly — with
+  /// [AgentPermissionPolicy.trustedHeadless]. No builtin is ever trusted.
+  final AgentPermissionPolicy permissionPolicy;
 
   /// The station's LIVE availability probe (ADR-0006 D3), injected — impls are
   /// DI. A station arms it as `probe: const ProcessEnvironmentProbe().call`.
@@ -575,7 +588,17 @@ class HarnessProvider extends SingleChildStatelessSeed {
           );
     return InheritedSeed<EnvironmentRegistry>(
       value: registry ?? buildBuiltinEnvironmentRegistry(),
-      child: InheritedSeed<AgentConfig>(value: config, child: below),
+      child: InheritedSeed<AgentConfig>(
+        value: config,
+        // The authorization boundary sits BELOW the config seeds and above the
+        // arming pass, so every channel spawned in this subtree reads exactly
+        // the policy this provider published — and a nested provider's own
+        // policy shadows it by exact type.
+        child: InheritedSeed<AgentPermissionPolicy>(
+          value: permissionPolicy,
+          child: below,
+        ),
+      ),
     );
   }
 }

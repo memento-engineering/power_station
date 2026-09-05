@@ -26,6 +26,22 @@ class _Watcher extends StatelessSeed {
   }
 }
 
+/// Records the ambient STATION permission policy on every build, SUBSCRIBING
+/// so a re-published policy rebuilds it (bead `pow-ed1c`).
+class _PolicyWatcher extends StatelessSeed {
+  const _PolicyWatcher(this.seen);
+  final List<AgentPermissionPolicy> seen;
+
+  @override
+  Seed build(TreeContext context) {
+    seen.add(
+      context.dependOnInheritedSeedOfExactType<AgentPermissionPolicy>() ??
+          const AgentPermissionPolicy.unavailable(),
+    );
+    return const _Leaf();
+  }
+}
+
 /// The `pow-n6n.2` shape, PRIVATE here: the TYPE is the scope.
 class _SpecPreference extends ModelPreference {
   const _SpecPreference(super.entries);
@@ -395,6 +411,74 @@ void main() {
       expect(seen.last.contains(_seat), isTrue);
       expect(seen.last.contains(_frontier), isFalse);
       expect(probe.calls, contains('seat'));
+      owner.dispose();
+    });
+  });
+
+  // The AUTHORIZATION boundary is station configuration, so it is a VALUE in
+  // the tree exactly like the registry and the config (ADR-0008: config =
+  // values, impls = DI). Bead `pow-ed1c`.
+  group('pow-ed1c - the station permission policy is a mounted VALUE', () {
+    test('HarnessProvider mounts permission policy by value', () async {
+      // UNCONFIGURED, the station grants nothing: the default is the
+      // unavailable policy, mounted (not merely absent).
+      final defaults = <AgentPermissionPolicy>[];
+      final bare = TreeOwner();
+      bare.mountRoot(
+        HarnessProvider(registry: _registry, child: _PolicyWatcher(defaults)),
+      );
+      bare.flush();
+      await _settle(bare);
+      expect(defaults.last, const AgentPermissionPolicy.unavailable());
+      expect(
+        defaults.last.grantFor(AgentPermissionCapability.edit),
+        AgentPermissionGrant.deny,
+      );
+      bare.dispose();
+
+      // A station's explicit scope survives the mount unchanged, and a NESTED
+      // provider shadows it by exact type — the seat's own boundary, the same
+      // rung ADR-0002 D5 gives arming.
+      const station = AgentPermissionPolicy.scoped(
+        id: 'station',
+        grants: <AgentPermissionCapability, AgentPermissionGrant>{
+          AgentPermissionCapability.read: AgentPermissionGrant.allowAlways,
+        },
+      );
+      final seen = <AgentPermissionPolicy>[];
+      final owner = TreeOwner();
+      owner.mountRoot(
+        HarnessProvider(
+          registry: _registry,
+          permissionPolicy: station,
+          child: HarnessProvider(
+            registry: _registry,
+            permissionPolicy: const AgentPermissionPolicy.scoped(
+              id: 'seat',
+              grants: <AgentPermissionCapability, AgentPermissionGrant>{
+                AgentPermissionCapability.edit: AgentPermissionGrant.allowOnce,
+              },
+            ),
+            child: _PolicyWatcher(seen),
+          ),
+        ),
+      );
+      owner.flush();
+      await _settle(owner);
+      expect(seen.last.id, 'seat');
+      expect(
+        seen.last.grantFor(AgentPermissionCapability.edit),
+        AgentPermissionGrant.allowOnce,
+      );
+      // The station's own grant does NOT leak through the seat's shadow.
+      expect(
+        seen.last.grantFor(AgentPermissionCapability.read),
+        AgentPermissionGrant.deny,
+      );
+      // And no builtin is trusted: reaching the old blanket posture takes an
+      // explicit `trustedHeadless` value.
+      expect(seen.last.isTrustedHeadless, isFalse);
+      expect(station.isTrustedHeadless, isFalse);
       owner.dispose();
     });
   });
