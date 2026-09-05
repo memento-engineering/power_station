@@ -12,7 +12,9 @@ import 'dart:io';
 import 'package:acp_dart/acp_dart.dart';
 
 import 'acp_session_adapter.dart';
+import 'agent_session.dart';
 import 'captured_output.dart';
+import 'permission_policy.dart';
 import 'usage_report.dart';
 
 /// Starts the bridge and converts setup errors into one normalized failure.
@@ -74,8 +76,15 @@ Future<void> runAcpBridge() async {
       .catchError((Object _) {});
 
   late final _AcpBridgeDriver driver;
-  final client = GridAllowAllAcpClient(
+  // The admitted attempt this incarnation was spawned under (the engine's
+  // allocation env overlay). ABSENT means unknown, never "any": every ask then
+  // carries a blank attempt, which the station refuses.
+  final attemptId = Platform.environment[kGridAttemptEnvironment] ?? '';
+  final client = GridPolicyAcpClient(
+    attemptId: attemptId,
     onUpdate: (update) => driver.onSessionUpdate(update),
+    decide: (request) => driver.askStation(request),
+    audit: (decision) => driver.auditBridgeCancellation(decision),
   );
   final childOutput = process.stdout.asBroadcastStream();
   final outputClosed = childOutput.drain<void>();
@@ -86,7 +95,7 @@ Future<void> runAcpBridge() async {
         driver.failFromAgent('emitted malformed JSON: $error'),
   );
   final connection = ClientSideConnection((_) => client, stream);
-  driver = _AcpBridgeDriver(spec, process, connection, stderrTail);
+  driver = _AcpBridgeDriver(spec, process, connection, stderrTail, attemptId);
   // The child's stdout closing and its process exiting are the SAME fact — the
   // agent is gone — and either observation can win the race, so both ride one
   // reporter. It waits, bounded, for the real exit status and for the stderr
@@ -152,11 +161,26 @@ Future<void> runAcpBridge() async {
 }
 
 class _AcpBridgeDriver {
-  _AcpBridgeDriver(this.spec, this.process, this.connection, this.stderrTail);
+  _AcpBridgeDriver(
+    this.spec,
+    this.process,
+    this.connection,
+    this.stderrTail,
+    this.attemptId,
+  );
 
   final AcpBridgeSpec spec;
   final Process process;
   final ClientSideConnection connection;
+
+  /// The admitted attempt every authorization ask is stamped with.
+  final String attemptId;
+
+  /// Asks awaiting the station's answer, keyed by bridge-local request id.
+  /// Every entry is completed EXACTLY once — with the station's decision, or
+  /// with null on any terminal, cancellation or closed control stream.
+  final Map<String, Completer<AgentPermissionDecision?>> pendingPermissions =
+      <String, Completer<AgentPermissionDecision?>>{};
 
   /// The child's retained stderr tail — the only diagnosis a failed ACP run
   /// leaves behind (bead `pow-39tl`).
@@ -191,6 +215,13 @@ class _AcpBridgeDriver {
       NewSessionRequest(cwd: spec.cwd, mcpServers: const <McpServerBase>[]),
     );
     sessionId = response.sessionId;
+    // The BINDING, announced the instant it exists: it is what makes a later
+    // permission ask addressable, and what makes a reconnect's asks stale.
+    emit(<String, Object?>{
+      'kind': 'session_bound',
+      'attemptId': attemptId,
+      'sessionId': response.sessionId,
+    });
     selectedModel = response.models?.currentModelId;
     final want = spec.model;
     if (want == null) return;
@@ -234,16 +265,69 @@ class _AcpBridgeDriver {
             enqueue(prompt);
           case 'cancel':
             await cancel();
+          case 'permission_decision':
+            answerPermission(frame['decision']);
           default:
             throw FormatException('unknown ACP bridge input: $frame');
         }
       }
+      // The parent's control stream is gone: nothing can answer an ask now.
+      clearPendingPermissions();
       await cancel();
     } on Object catch (error) {
       fail('malformed ACP bridge input: $error');
       await cancel();
     }
   }
+
+  /// Publishes one normalized ask and waits for the station's answer.
+  ///
+  /// A terminal bridge answers null immediately: the turn is over, so no
+  /// authorization can be produced for it.
+  Future<AgentPermissionDecision?> askStation(AgentPermissionRequest request) {
+    if (terminal) return Future<AgentPermissionDecision?>.value();
+    final completer = Completer<AgentPermissionDecision?>();
+    pendingPermissions[request.requestId] = completer;
+    emit(<String, Object?>{
+      'kind': 'permission_request',
+      'request': request.toJson(),
+    });
+    return completer.future;
+  }
+
+  /// Routes one station answer to the ask that is waiting for it. An unknown
+  /// or already-answered id is a REPLAY and is dropped — the pending entry is
+  /// completed exactly once.
+  void answerPermission(Object? raw) {
+    if (raw is! Map<String, dynamic>) {
+      throw const FormatException('ACP bridge decision must be an object');
+    }
+    final decision = AgentPermissionDecision.fromJson(
+      raw.cast<String, Object?>(),
+    );
+    final pending = pendingPermissions.remove(decision.requestId);
+    if (pending == null || pending.isCompleted) return;
+    pending.complete(decision);
+  }
+
+  /// Answers every waiting ask with "no authorization" — the fail-closed exit
+  /// from a terminal, a cancellation or a closed control stream.
+  void clearPendingPermissions() {
+    final waiting = pendingPermissions.values.toList(growable: false);
+    pendingPermissions.clear();
+    for (final pending in waiting) {
+      if (!pending.isCompleted) pending.complete(null);
+    }
+  }
+
+  /// FLUSHES the record of a cancellation this bridge made on its own, before
+  /// the harness is told. The station never saw this one, so this frame is the
+  /// only place it exists.
+  void auditBridgeCancellation(AgentPermissionDecision decision) =>
+      emit(<String, Object?>{
+        'kind': 'permission_fallback',
+        'decision': decision.toJson(),
+      });
 
   void enqueue(String prompt) {
     if (terminal) return;
@@ -271,6 +355,7 @@ class _AcpBridgeDriver {
     switch (response.stopReason) {
       case StopReason.endTurn:
         terminal = true;
+        clearPendingPermissions();
         writeUsage();
         emit(<String, Object?>{
           'kind': 'completed',
@@ -292,6 +377,7 @@ class _AcpBridgeDriver {
   }
 
   Future<void> cancel() async {
+    clearPendingPermissions();
     if (terminal || sessionId == null) return;
     try {
       await connection.cancel(CancelNotification(sessionId: sessionId!));
@@ -377,6 +463,9 @@ class _AcpBridgeDriver {
   void fail(String reason) {
     if (terminal) return;
     terminal = true;
+    // No ask survives the terminal: each one is answered "no authorization"
+    // and cancelled, never left hanging on a dead turn.
+    clearPendingPermissions();
     writeUsage();
     emit(<String, Object?>{'kind': 'failed', 'reason': reason});
   }

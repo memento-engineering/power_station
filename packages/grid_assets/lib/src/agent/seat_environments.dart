@@ -21,12 +21,18 @@
 /// offline projection of all four resolutions at a point in the tree. A
 /// station's own NAMED environments and ladders stay in that station's package
 /// - mechanism is vended, posture is not.
+///
+/// The armed seat is also a channel's ADMITTED IDENTITY, so [seatChannelPolicy]
+/// resolves the station's authorization boundary off the same typed seed. It
+/// lives here rather than beside the pure vocabulary in `permission_policy.dart`
+/// because it needs the tree, and that library takes no `TreeContext`.
 library;
 
 import 'package:genesis_tree/genesis_tree.dart';
 
 import 'agent_environment.dart';
 import 'environment_registry.dart';
+import 'permission_policy.dart';
 import 'typed_environment.dart';
 
 /// The SPEC seat - `SpecifyCapability` (its first-round and its respec spawn are
@@ -263,6 +269,46 @@ final class TypedEnvironmentProvider extends SingleChildStatelessSeed {
     }
     return below;
   }
+}
+
+/// The BUILD seat's audit id, stamped onto every authorization its channel
+/// makes. An AUDIT id, never a lookup key: nothing resolves by this string.
+const String kBuildSeatPolicyId = 'seat:build';
+
+/// The SPEC seat's audit id - [kBuildSeatPolicyId]'s counterpart.
+const String kSpecSeatPolicyId = 'seat:spec';
+
+/// The station permission policy in effect for ONE capability's channel, keyed
+/// by the seat's own preference type [TSeat] and stamped with [seatId].
+///
+/// Total, in strict precedence:
+///  1. an EXPLICITLY mounted [AgentPermissionPolicy] wins outright, returned
+///     unchanged - including [AgentPermissionPolicy.unavailable], which is how a
+///     station locks a subtree down over an armed seat;
+///  2. else, an ARMED exact [TSeat] is the channel's admitted identity, so it
+///     derives [AgentPermissionPolicy.trustedHeadless] under [seatId];
+///  3. else [AgentPermissionPolicy.unavailable] - a channel with no seat
+///     identity authorizes nothing.
+///
+/// THE IDENTITY IS THE EXACT TYPE (ADR-0006 D2: the TYPE is the scope), read
+/// from the [InheritedSeed] [TypedEnvironmentProvider] mounts off
+/// [AgentArming]. The GENERIC [ModelPreference] is deliberately NOT consulted:
+/// it is the station's shared model default, not an arming of this seat, and
+/// treating it as an identity would hand a grant to any channel that inherited
+/// a default. Nothing here reads a name, a runtime type, an environment's
+/// availability, or the model-spend axis - a permission is not a spend.
+///
+/// THE EFFECT VERB (`getInheritedSeedOfExactType`), per ADR-0008 D3: both
+/// callers are `createSession` edges, not `build`s.
+AgentPermissionPolicy seatChannelPolicy<TSeat extends ModelPreference>(
+  TreeContext context, {
+  required String seatId,
+}) {
+  final explicit = context.getInheritedSeedOfExactType<AgentPermissionPolicy>();
+  if (explicit != null) return explicit;
+  final seat = context.getInheritedSeedOfExactType<TSeat>();
+  if (seat == null) return const AgentPermissionPolicy.unavailable();
+  return AgentPermissionPolicy.trustedHeadless(id: seatId);
 }
 
 /// The four typed lookups RESOLVED at one point in the tree - the offline

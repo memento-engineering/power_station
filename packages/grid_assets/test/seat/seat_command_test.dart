@@ -232,6 +232,130 @@ void main() {
     expect(() => primed.prime('TWICE'), throwsStateError);
   });
 
+  // The operator seat occupies a channel DIRECTLY: no admitted attempt stands
+  // behind this terminal and no durable carrier records what it authorizes, so
+  // it answers a permission request deterministically and non-authorizing
+  // (bead `pow-ed1c`).
+  test('unadmitted channel seat denies permission requests', () {
+    Map<String, Object?> frame(List<int> bytes) =>
+        (jsonDecode(utf8.decode(bytes)) as Map<String, dynamic>)
+            .cast<String, Object?>();
+
+    final frames = <List<int>>[];
+    final diagnostics = StringBuffer();
+    final client = SeatChannelClient(
+      adapter: const AcpSessionAdapter(),
+      write: frames.add,
+      diagnostics: diagnostics,
+    );
+    client.prime('BRIEF');
+    expect(frame(frames.single), {'kind': 'brief', 'text': 'BRIEF'});
+
+    // The binding is TRACKED, not honoured: it writes nothing and authorizes
+    // nothing — it only lets a refusal name what it refused on.
+    expect(
+      client.handleProtocolControl(
+        const AgentProtocolEvent.sessionBound(
+          attemptId: 'attempt-1',
+          protocolSessionId: 'acp-1',
+        ),
+      ),
+      isTrue,
+    );
+    expect(frames, hasLength(1));
+
+    // A request is answered IMMEDIATELY with the narrowest refusal on offer,
+    // and with a cancellation when the harness offers no refusal at all.
+    const request = AgentPermissionRequest(
+      requestId: 'req-1',
+      attemptId: 'attempt-1',
+      sessionId: 'acp-1',
+      capability: AgentPermissionCapability.execute,
+      offered: <AgentPermissionOutcome>[
+        AgentPermissionOutcome.rejectOnce,
+        AgentPermissionOutcome.allowOnce,
+        AgentPermissionOutcome.allowAlways,
+      ],
+    );
+    expect(
+      client.handleProtocolControl(
+        const AgentProtocolEvent.permissionRequested(request: request),
+      ),
+      isTrue,
+    );
+    expect(
+      client.handleProtocolControl(
+        const AgentProtocolEvent.permissionRequested(
+          request: AgentPermissionRequest(
+            requestId: 'req-2',
+            attemptId: 'attempt-1',
+            sessionId: 'acp-1',
+            capability: AgentPermissionCapability.edit,
+            offered: <AgentPermissionOutcome>[
+              AgentPermissionOutcome.allowOnce,
+              AgentPermissionOutcome.allowAlways,
+            ],
+          ),
+        ),
+      ),
+      isTrue,
+    );
+    final answers = frames
+        .map(frame)
+        .where((f) => f['kind'] == 'permission_decision')
+        .map((f) => (f['decision']! as Map<String, dynamic>))
+        .toList(growable: false);
+    expect(answers.map((d) => <Object?>[d['requestId'], d['outcome']]), [
+      <Object?>['req-1', 'rejectOnce'],
+      <Object?>['req-2', 'cancelled'],
+    ]);
+    expect(answers.map((d) => d['policyId']).toSet(), <String>{''});
+    // The refusal names the protocol identity it refused on.
+    expect(diagnostics.toString(), contains('acp-1'));
+
+    // A channel-side cancellation is only reported; it is never answered again.
+    final before = frames.length;
+    expect(
+      client.handleProtocolControl(
+        AgentProtocolEvent.permissionFallback(
+          decision: AgentPermissionDecision.cancelled(
+            request: request,
+            policyId: '',
+            reason: 'the station returned no authorization',
+          ),
+        ),
+      ),
+      isTrue,
+    );
+    expect(frames, hasLength(before));
+    expect(diagnostics.toString(), contains('the channel cancelled'));
+
+    // Harness OUTPUT is not this client's business — the runner renders it.
+    for (final event in <AgentProtocolEvent>[
+      const AgentProtocolEvent.progress(),
+      const AgentProtocolEvent.completed(
+        result: <String, String>{},
+        usage: UsageReport(),
+      ),
+      const AgentProtocolEvent.failed(reason: 'boom'),
+    ]) {
+      expect(client.handleProtocolControl(event), isFalse);
+    }
+
+    // And the occupancy is unchanged: the next terminal line is still a steer.
+    client.send('NEXT');
+    expect(frame(frames.last), {'kind': 'steer', 'text': 'NEXT'});
+    // Nothing this seat wrote ever authorized anything.
+    expect(
+      frames
+          .map(frame)
+          .map((f) => f['decision'])
+          .whereType<Map<String, dynamic>>()
+          .map((d) => d['outcome']),
+      isNot(anyElement(anyOf('allowOnce', 'allowAlways'))),
+    );
+  });
+
   test('it relaunches iff a handoff NEWER than the launch exists', () async {
     authorSeat('governor');
     final run = await occupy(

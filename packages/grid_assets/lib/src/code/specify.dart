@@ -747,6 +747,17 @@ class SpecifyCapability extends ProcessCapability {
         commands: _steers.watch(args.beadId),
         attemptId: attemptId,
         instanceFence: instanceFence,
+        // The EFFECT-edge reads (ADR-0008 D3): the flare carrier the decisions
+        // are recorded on, and the station's authorization boundary resolved
+        // from this seat's own arming. Without a carrier, or without either an
+        // explicit policy or an armed SPEC seat, the channel authorizes nothing.
+        transport: context
+            .getInheritedSeedOfExactType<ServiceBundle>()
+            ?.transport,
+        policy: seatChannelPolicy<SpecAgentEnvironment>(
+          context,
+          seatId: kSpecSeatPolicyId,
+        ),
       ),
       probe: () => probeCompletionArtifact(context, args),
       resultFields: () => result(context, args),

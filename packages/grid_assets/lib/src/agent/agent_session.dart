@@ -9,6 +9,7 @@ import 'package:grid_runtime/grid_runtime.dart';
 import 'agent_environment.dart';
 import 'agent_harness.dart';
 import 'captured_output.dart';
+import 'permission_policy.dart';
 import 'usage_report.dart';
 
 part 'agent_session.freezed.dart';
@@ -31,7 +32,63 @@ sealed class AgentProtocolEvent with _$AgentProtocolEvent {
   /// Reports a harness protocol failure.
   const factory AgentProtocolEvent.failed({required String reason}) =
       AgentProtocolFailed;
+
+  /// Reports that the harness bound a protocol session for [attemptId].
+  ///
+  /// NON-TERMINAL. It is what makes an authorization addressable: every later
+  /// permission ask names [protocolSessionId], and a reconnect re-binds, so a
+  /// request from the superseded session is stale on arrival.
+  const factory AgentProtocolEvent.sessionBound({
+    required String attemptId,
+    required String protocolSessionId,
+  }) = AgentProtocolSessionBound;
+
+  /// Reports one mid-turn permission ask awaiting the STATION's answer.
+  ///
+  /// NON-TERMINAL, and normalized: [request] carries identities and offered
+  /// answers only — never the harness's tool title, input, output or labels.
+  const factory AgentProtocolEvent.permissionRequested({
+    required AgentPermissionRequest request,
+  }) = AgentProtocolPermissionRequested;
+
+  /// Reports an authorization the CHANNEL itself already settled — always a
+  /// cancellation, never a grant.
+  ///
+  /// NON-TERMINAL. The bridge answers the harness locally when the station's
+  /// decision could not be applied (no answer, a mismatched one, a timeout, a
+  /// cancellation); this carries that record up so the one durable audit trail
+  /// still sees it. Nothing is written back for it.
+  const factory AgentProtocolEvent.permissionFallback({
+    required AgentPermissionDecision decision,
+  }) = AgentProtocolPermissionFallback;
 }
+
+/// The OPTIONAL authorization half of an [AgentSessionAdapter].
+///
+/// An adapter implements it when its protocol has a permission handshake; one
+/// that does not is answered nothing at all, which is fail-closed — the harness
+/// never receives a grant it was not given.
+abstract interface class AgentAuthorizationAdapter {
+  /// Encodes one station [decision] for delivery over the channel.
+  List<int> encodePermissionDecision(AgentPermissionDecision decision);
+}
+
+/// The engine's allocation-env key naming the attempt an incarnation was
+/// ADMITTED under.
+///
+/// The engine mints it once per mount and layers it over the spawn's
+/// environment, so a supervised child can stamp its own asks with the attempt
+/// the grid already knows it by. ABSENT means unknown, never "any".
+const String kGridAttemptEnvironment = 'GRID_ATTEMPT_ID';
+
+/// The out-of-band flare every policy-produced authorization is recorded on.
+///
+/// It rides the SAME emit-only [ExplorationTransport] the orphan observation
+/// uses (D-8) — the station's existing durable carrier, no new store. Unlike
+/// that observation, though, its absence is not benign: with no carrier there
+/// is no record, and [decideAgentPermission] refuses rather than granting
+/// something nobody could read back.
+const String kAgentAuthorizationDecisionFlare = 'agent.authorizationDecision';
 
 /// Per-harness launch, encoding, and decoding behavior.
 abstract interface class AgentSessionAdapter {
@@ -195,6 +252,7 @@ class AgentSession implements ProcessSession {
     required this.attemptId,
     required this.instanceFence,
     this.transport,
+    this.policy = const AgentPermissionPolicy.unavailable(),
   });
 
   /// The sole owner of the supervised child and its byte interaction surface.
@@ -223,12 +281,26 @@ class AgentSession implements ProcessSession {
   /// observation; it is never a session failure.
   final ExplorationTransport? transport;
 
+  /// The STATION's authorization boundary for this channel, RESOLVED at the
+  /// capability's effect edge (`seatChannelPolicy`) and passed in as a VALUE.
+  ///
+  /// Defaults to [AgentPermissionPolicy.unavailable] for a DIRECT construction
+  /// — a session built without a capability, so without a seat identity to
+  /// resolve from — which grants nothing. A capability's channel gets its seat's
+  /// derived policy instead; nothing is ever trusted by omission.
+  final AgentPermissionPolicy policy;
+
   final StreamController<ProcessSessionUpdate> _updates =
       StreamController<ProcessSessionUpdate>();
   final Set<String> _seen = <String>{};
   StreamSubscription<AgentProtocolEvent>? _decoderSub;
   StreamSubscription<ProcessSessionCommand>? _commandSub;
   bool _terminal = false;
+
+  /// The harness protocol session currently bound to [attemptId]; null until a
+  /// valid [AgentProtocolEvent.sessionBound] arrives, and REPLACED on a
+  /// reconnect so the prior id's asks become stale.
+  String? _protocolSessionId;
 
   @override
   Stream<ProcessSessionUpdate> get updates => _updates.stream;
@@ -272,6 +344,77 @@ class AgentSession implements ProcessSession {
         );
       case AgentProtocolFailed(:final reason):
         _fail(reason);
+      case AgentProtocolSessionBound(
+        attemptId: final bound,
+        :final protocolSessionId,
+      ):
+        // ONLY the admitted attempt's binding counts. A blank or foreign
+        // attempt, or a blank session id, leaves this channel UNBOUND — every
+        // later ask then fails closed for want of a bound session rather than
+        // being answered against a binding nobody admitted.
+        if (bound.trim().isEmpty ||
+            bound != attemptId ||
+            protocolSessionId.trim().isEmpty) {
+          return;
+        }
+        _protocolSessionId = protocolSessionId;
+      case AgentProtocolPermissionRequested(:final request):
+        _authorize(request);
+      case AgentProtocolPermissionFallback(:final decision):
+        // Already answered by the bridge, and always a cancellation: record it
+        // and write NOTHING — a second response would race the first.
+        _audit(decision);
+    }
+  }
+
+  /// Decides one permission ask against the station's [policy], RECORDS the
+  /// decision, then answers the harness — in that order, so no grant can reach
+  /// a harness without a durable record of it existing first.
+  void _authorize(AgentPermissionRequest request) {
+    // The authorization half is OPTIONAL on an adapter, and the two interfaces
+    // are unrelated, so the narrowing is a pattern rather than a promotion.
+    final authorization = switch (adapter) {
+      final AgentAuthorizationAdapter authorization => authorization,
+      _ => null,
+    };
+    final decision = authorization != null
+        ? decideAgentPermission(
+            policy: policy,
+            request: request,
+            admittedAttemptId: attemptId,
+            boundSessionId: _protocolSessionId,
+            // The audit carrier IS the authorization's durability. Absent, the
+            // decision function refuses; it never grants unrecorded.
+            audited: transport != null,
+          )
+        : AgentPermissionDecision.cancelled(
+            request: request,
+            policyId: policy.id,
+            reason: 'the channel adapter cannot answer an authorization',
+          );
+    _audit(decision);
+    if (authorization == null) return;
+    unawaited(_respond(authorization, decision));
+  }
+
+  void _audit(AgentPermissionDecision decision) => transport?.flare(
+    kAgentAuthorizationDecisionFlare,
+    decision.auditFields(channelSessionId: name),
+  );
+
+  Future<void> _respond(
+    AgentAuthorizationAdapter authorization,
+    AgentPermissionDecision decision,
+  ) async {
+    try {
+      await runtime.write(
+        name,
+        authorization.encodePermissionDecision(decision),
+      );
+    } on Object catch (error) {
+      // The answer never reached the harness: the ask stays unanswered and the
+      // bridge cancels it. The channel itself is broken, so fail LOUD.
+      _fail('authorization response failed: $error');
     }
   }
 

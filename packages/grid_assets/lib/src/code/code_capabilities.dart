@@ -353,10 +353,19 @@ class AgentCapability extends ProcessCapability {
       attemptId: attemptId,
       instanceFence: instanceFence,
       // The out-of-band flare sink, read at this EFFECT edge with the
-      // non-binding verb (ADR-0008 D3); absent => no flares, never a failure.
+      // non-binding verb (ADR-0008 D3); absent => no flares, never a failure —
+      // except for an AUTHORIZATION, where absent means no durable record and
+      // so no grant at all ([decideAgentPermission]).
       transport: context
           .getInheritedSeedOfExactType<ServiceBundle>()
           ?.transport,
+      // The station's authorization boundary, resolved the same way: an
+      // explicitly mounted policy wins, else this seat's own ARMING is the
+      // channel's admitted identity, else nothing is authorized.
+      policy: seatChannelPolicy<BuildAgentEnvironment>(
+        context,
+        seatId: kBuildSeatPolicyId,
+      ),
     );
   }
 

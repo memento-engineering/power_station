@@ -26,6 +26,24 @@ class _Watcher extends StatelessSeed {
   }
 }
 
+/// Records the ambient STATION permission policy on every build, SUBSCRIBING
+/// so a re-published policy rebuilds it (bead `pow-ed1c`).
+///
+/// NULLABLE on purpose: ABSENT (no station configured a boundary, so the
+/// channel's own seat resolves one) and an explicit `unavailable()` LOCK-DOWN
+/// are different facts, and a watcher that defaulted one to the other could not
+/// tell them apart.
+class _PolicyWatcher extends StatelessSeed {
+  const _PolicyWatcher(this.seen);
+  final List<AgentPermissionPolicy?> seen;
+
+  @override
+  Seed build(TreeContext context) {
+    seen.add(context.dependOnInheritedSeedOfExactType<AgentPermissionPolicy>());
+    return const _Leaf();
+  }
+}
+
 /// The `pow-n6n.2` shape, PRIVATE here: the TYPE is the scope.
 class _SpecPreference extends ModelPreference {
   const _SpecPreference(super.entries);
@@ -397,6 +415,122 @@ void main() {
       expect(probe.calls, contains('seat'));
       owner.dispose();
     });
+  });
+
+  // The AUTHORIZATION boundary is station configuration, so it is a VALUE in
+  // the tree exactly like the registry and the config (ADR-0008: config =
+  // values, impls = DI). Bead `pow-ed1c`.
+  group('pow-ed1c - the station permission policy is a mounted VALUE', () {
+    test('an unconfigured HarnessProvider mounts no policy seed', () async {
+      // ABSENCE, not a mounted `unavailable()`: a station that configured no
+      // boundary leaves the channel's own seat to resolve one, and a seed here
+      // would make that impossible to tell from a deliberate lock-down.
+      final defaults = <AgentPermissionPolicy?>[];
+      final bare = TreeOwner();
+      bare.mountRoot(
+        HarnessProvider(registry: _registry, child: _PolicyWatcher(defaults)),
+      );
+      bare.flush();
+      await _settle(bare);
+      expect(defaults, isNotEmpty);
+      expect(defaults.last, isNull);
+      bare.dispose();
+
+      // A NESTED unconfigured provider is equally silent: it re-provides its
+      // registry, and keeps INHERITING the boundary published above it.
+      const station = AgentPermissionPolicy.scoped(
+        id: 'station',
+        grants: <AgentPermissionCapability, AgentPermissionGrant>{
+          AgentPermissionCapability.read: AgentPermissionGrant.allowAlways,
+        },
+      );
+      final nested = <AgentPermissionPolicy?>[];
+      final owner = TreeOwner();
+      owner.mountRoot(
+        HarnessProvider(
+          registry: _registry,
+          permissionPolicy: station,
+          child: HarnessProvider(
+            registry: _registry,
+            child: _PolicyWatcher(nested),
+          ),
+        ),
+      );
+      owner.flush();
+      await _settle(owner);
+      expect(nested.last, station);
+      owner.dispose();
+    });
+
+    test(
+      'HarnessProvider mounts an explicit permission policy by value',
+      () async {
+        // A station's explicit scope survives the mount unchanged, and a NESTED
+        // provider shadows it by exact type — the seat's own boundary, the same
+        // rung ADR-0002 D5 gives arming.
+        const station = AgentPermissionPolicy.scoped(
+          id: 'station',
+          grants: <AgentPermissionCapability, AgentPermissionGrant>{
+            AgentPermissionCapability.read: AgentPermissionGrant.allowAlways,
+          },
+        );
+        final seen = <AgentPermissionPolicy?>[];
+        final owner = TreeOwner();
+        owner.mountRoot(
+          HarnessProvider(
+            registry: _registry,
+            permissionPolicy: station,
+            child: HarnessProvider(
+              registry: _registry,
+              permissionPolicy: const AgentPermissionPolicy.scoped(
+                id: 'seat',
+                grants: <AgentPermissionCapability, AgentPermissionGrant>{
+                  AgentPermissionCapability.edit:
+                      AgentPermissionGrant.allowOnce,
+                },
+              ),
+              child: _PolicyWatcher(seen),
+            ),
+          ),
+        );
+        owner.flush();
+        await _settle(owner);
+        final shadowed = seen.last!;
+        expect(shadowed.id, 'seat');
+        expect(
+          shadowed.grantFor(AgentPermissionCapability.edit),
+          AgentPermissionGrant.allowOnce,
+        );
+        // The station's own grant does NOT leak through the seat's shadow.
+        expect(
+          shadowed.grantFor(AgentPermissionCapability.read),
+          AgentPermissionGrant.deny,
+        );
+        // And no builtin is trusted: reaching the old blanket posture takes an
+        // explicit `trustedHeadless` value.
+        expect(shadowed.isTrustedHeadless, isFalse);
+        expect(station.isTrustedHeadless, isFalse);
+        owner.dispose();
+
+        // The LOCK-DOWN is a value like any other: an explicit `unavailable()`
+        // is mounted, so it is distinguishable from absence and wins wherever it
+        // is read.
+        final locked = <AgentPermissionPolicy?>[];
+        final lockdown = TreeOwner();
+        lockdown.mountRoot(
+          HarnessProvider(
+            registry: _registry,
+            permissionPolicy: const AgentPermissionPolicy.unavailable(),
+            child: _PolicyWatcher(locked),
+          ),
+        );
+        lockdown.flush();
+        await _settle(lockdown);
+        expect(locked.last, const AgentPermissionPolicy.unavailable());
+        expect(locked.last, isNotNull);
+        lockdown.dispose();
+      },
+    );
   });
 
   group('pow-n6n.3 - ProcessEnvironmentProbe composition', () {

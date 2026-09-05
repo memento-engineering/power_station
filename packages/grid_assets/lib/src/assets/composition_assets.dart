@@ -47,6 +47,7 @@ import '../agent/agent_harness.dart';
 import '../agent/availability_assets.dart';
 import '../agent/environment_probe.dart';
 import '../agent/environment_registry.dart';
+import '../agent/permission_policy.dart';
 import '../code/code_capabilities.dart';
 import '../code/mount_eligibility.dart';
 import '../filing/filing_contract.dart';
@@ -524,6 +525,7 @@ class HarnessProvider extends SingleChildStatelessSeed {
   const HarnessProvider({
     this.registry,
     this.config = const AgentConfig(),
+    this.permissionPolicy,
     this.probe,
     this.probeInterval = kEnvironmentProbeInterval,
     super.child,
@@ -535,6 +537,23 @@ class HarnessProvider extends SingleChildStatelessSeed {
 
   /// The station-default agent config (the ladder's ambient rung).
   final AgentConfig config;
+
+  /// The station's AUTHORIZATION boundary for long-lived agent channels — a
+  /// VALUE, mounted below the registry and config seeds so a nested provider
+  /// (a substation, a seat) shadows it by exact type.
+  ///
+  /// NULL (the default) means the station configured NO boundary of its own, and
+  /// it mounts no seed at all: a nested `null` keeps inheriting an ancestor's
+  /// policy, and a root `null` leaves the resolution to the channel's own seat
+  /// (`seatChannelPolicy`). Mounting [AgentPermissionPolicy.unavailable] here
+  /// instead would make ABSENCE indistinguishable from a LOCK-DOWN, and the
+  /// lock-down is the value that must win.
+  ///
+  /// A station widens per capability with [AgentPermissionPolicy.scoped], locks
+  /// a subtree down with [AgentPermissionPolicy.unavailable], or states the
+  /// blanket posture — explicitly — with
+  /// [AgentPermissionPolicy.trustedHeadless]. No builtin is ever trusted.
+  final AgentPermissionPolicy? permissionPolicy;
 
   /// The station's LIVE availability probe (ADR-0006 D3), injected — impls are
   /// DI. A station arms it as `probe: const ProcessEnvironmentProbe().call`.
@@ -563,7 +582,7 @@ class HarnessProvider extends SingleChildStatelessSeed {
     // it probes, and its `AvailableEnvironments` must shadow nothing above it.
     // Bead `pow-2eg` mounts `InheritedSeed<SiteBinding>` in this same nest — it
     // belongs ABOVE this seed, which watches the site binding.
-    final below = arming == null
+    final armed = arming == null
         ? child
         : InheritedSeed<EnvironmentProbeArming>(
             value: arming,
@@ -573,6 +592,16 @@ class HarnessProvider extends SingleChildStatelessSeed {
               child: child,
             ),
           );
+    // The authorization boundary sits BELOW the config seeds and above the
+    // arming pass, so every channel spawned in this subtree reads exactly the
+    // policy this provider published — and a nested provider's own policy
+    // shadows it by exact type. UNCONFIGURED, it mounts nothing: absence must
+    // stay distinguishable from an explicit lock-down, and a nested provider
+    // that arms only its registry must keep inheriting the policy above it.
+    final policy = permissionPolicy;
+    final below = policy == null
+        ? armed
+        : InheritedSeed<AgentPermissionPolicy>(value: policy, child: armed);
     return InheritedSeed<EnvironmentRegistry>(
       value: registry ?? buildBuiltinEnvironmentRegistry(),
       child: InheritedSeed<AgentConfig>(value: config, child: below),

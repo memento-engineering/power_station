@@ -147,6 +147,14 @@ Future<_LiveRun> _buildLiveAcpRun({
       EnvironmentRegistry: EnvironmentRegistry(
         custom: <String, AgentEnvironment>{name: environment},
       ),
+      // This opt-in live run drives an installed harness through real tools, so
+      // it mounts the pre-boundary posture EXPLICITLY — and, with it, the
+      // carrier every authorization is recorded on. No builtin and no default
+      // is trusted (bead `pow-ed1c`).
+      AgentPermissionPolicy: const AgentPermissionPolicy.trustedHeadless(
+        id: 'acp-live-test',
+      ),
+      ServiceBundle: ServiceBundle(transport: RecordingExplorationTransport()),
     },
   );
   final steers = _LiveSteers();

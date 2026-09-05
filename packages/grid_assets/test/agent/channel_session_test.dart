@@ -152,8 +152,51 @@ class _JsonAdapter implements AgentSessionAdapter {
         ),
       ),
       'failed' => AgentProtocolEvent.failed(reason: frame['reason'] as String),
+      'session_bound' => AgentProtocolEvent.sessionBound(
+        attemptId: frame['attemptId'] as String,
+        protocolSessionId: frame['sessionId'] as String,
+      ),
+      'permission' => AgentProtocolEvent.permissionRequested(
+        request: AgentPermissionRequest.fromJson(
+          (frame['request'] as Map<String, dynamic>).cast<String, Object?>(),
+        ),
+      ),
+      'permission_fallback' => AgentProtocolEvent.permissionFallback(
+        decision: AgentPermissionDecision.fromJson(
+          (frame['decision'] as Map<String, dynamic>).cast<String, Object?>(),
+        ),
+      ),
       _ => throw FormatException('unknown protocol frame: $frame'),
     };
+  }
+}
+
+/// The same fake plus the OPTIONAL authorization half. The bare [_JsonAdapter]
+/// is the other case: a protocol with no permission handshake, which can
+/// answer nothing at all.
+class _AuthorizingAdapter extends _JsonAdapter
+    implements AgentAuthorizationAdapter {
+  @override
+  List<int> encodePermissionDecision(
+    AgentPermissionDecision decision,
+  ) => utf8.encode(
+    '${jsonEncode(<String, Object?>{'type': 'permission_decision', ...decision.toJson()})}\n',
+  );
+}
+
+/// Wraps a [RecordingExplorationTransport] to also sample an external counter
+/// at flare time — how the audit-BEFORE-response order is proven.
+class _OrderingTransport implements ExplorationTransport {
+  _OrderingTransport(this._inner, this._sample);
+
+  final RecordingExplorationTransport _inner;
+  final int Function() _sample;
+  void Function(int)? onFlare;
+
+  @override
+  void flare(String name, Map<String, String> data) {
+    onFlare?.call(_sample());
+    _inner.flare(name, data);
   }
 }
 
@@ -188,10 +231,11 @@ String _steerJson({
 
 AgentSession _session({
   required _Runtime runtime,
-  required _JsonAdapter adapter,
+  required AgentSessionAdapter adapter,
   Stream<ProcessSessionCommand> commands =
       const Stream<ProcessSessionCommand>.empty(),
   ExplorationTransport? transport,
+  AgentPermissionPolicy policy = const AgentPermissionPolicy.unavailable(),
 }) => AgentSession(
   runtime: runtime,
   name: 'session',
@@ -201,6 +245,7 @@ AgentSession _session({
   attemptId: 'attempt-live',
   instanceFence: 'fence-live',
   transport: transport,
+  policy: policy,
 );
 
 Future<void> _pump() async {
@@ -614,6 +659,312 @@ void main() {
         await runtime.close();
       },
     );
+  });
+
+  // The AUTHORIZATION boundary (bead `pow-ed1c`). A long-lived channel's
+  // permission asks used to be answered with the widest grant on offer; they
+  // are now decided by the STATION, bound to the admitted attempt and the
+  // bound protocol session, and recorded before they are answered.
+  group('the station decides authorizations', () {
+    const scoped = AgentPermissionPolicy.scoped(
+      id: 'station-probe',
+      grants: <AgentPermissionCapability, AgentPermissionGrant>{
+        AgentPermissionCapability.edit: AgentPermissionGrant.allowAlways,
+        AgentPermissionCapability.read: AgentPermissionGrant.allowOnce,
+      },
+    );
+
+    String bound({
+      String attemptId = 'attempt-live',
+      String sessionId = 'acp-1',
+    }) => jsonEncode(<String, Object?>{
+      'type': 'session_bound',
+      'attemptId': attemptId,
+      'sessionId': sessionId,
+    });
+
+    String ask({
+      String requestId = 'req-1',
+      String attemptId = 'attempt-live',
+      String sessionId = 'acp-1',
+      String capability = 'edit',
+      List<String> offered = const <String>[
+        'rejectOnce',
+        'allowOnce',
+        'allowAlways',
+      ],
+    }) => jsonEncode(<String, Object?>{
+      'type': 'permission',
+      'request': <String, Object?>{
+        'requestId': requestId,
+        'attemptId': attemptId,
+        'sessionId': sessionId,
+        'capability': capability,
+        'offered': offered,
+      },
+    });
+
+    List<Map<String, Object?>> answers(_Runtime runtime) => runtime.writes
+        .map(
+          (bytes) => (jsonDecode(utf8.decode(bytes)) as Map<String, dynamic>)
+              .cast<String, Object?>(),
+        )
+        .where((frame) => frame['type'] == 'permission_decision')
+        .toList(growable: false);
+
+    Future<({_Runtime runtime, AgentSession session})> live({
+      AgentSessionAdapter? adapter,
+      ExplorationTransport? transport,
+      AgentPermissionPolicy policy = scoped,
+    }) async {
+      final runtime = _Runtime();
+      await runtime.start(
+        'session',
+        const RuntimeConfig(workDir: '/tmp', command: 'probe'),
+      );
+      final session = _session(
+        runtime: runtime,
+        adapter: adapter ?? _AuthorizingAdapter(),
+        transport: transport,
+        policy: policy,
+      );
+      // The update sink must have a LISTENER or `close()` never completes.
+      unawaited(session.updates.drain<void>());
+      await session.start();
+      await _pump();
+      return (runtime: runtime, session: session);
+    }
+
+    test(
+      'authorization decisions bind attempt session and capability',
+      () async {
+        final run = await live(transport: RecordingExplorationTransport());
+        run.runtime.emitOutput(bound());
+        await _pump();
+
+        // A LISTED capability, on the admitted attempt and the bound session,
+        // at exactly the scope the station configured.
+        run.runtime.emitOutput(ask());
+        // A listed capability with a NARROWER station rule stays narrow.
+        run.runtime.emitOutput(ask(requestId: 'req-2', capability: 'read'));
+        // An UNLISTED capability, an unclassifiable one, a stale attempt and a
+        // foreign protocol session are all refused — the last two without the
+        // policy ever being consulted.
+        run.runtime.emitOutput(ask(requestId: 'req-3', capability: 'execute'));
+        run.runtime.emitOutput(ask(requestId: 'req-4', capability: 'unknown'));
+        run.runtime.emitOutput(
+          ask(requestId: 'req-5', attemptId: 'attempt-old'),
+        );
+        run.runtime.emitOutput(ask(requestId: 'req-6', sessionId: 'acp-old'));
+        await _pump();
+
+        expect(
+          answers(
+            run.runtime,
+          ).map((frame) => <Object?>[frame['requestId'], frame['outcome']]),
+          <List<Object?>>[
+            <Object?>['req-1', 'allowAlways'],
+            <Object?>['req-2', 'allowOnce'],
+            <Object?>['req-3', 'rejectOnce'],
+            <Object?>['req-4', 'rejectOnce'],
+            <Object?>['req-5', 'rejectOnce'],
+            <Object?>['req-6', 'rejectOnce'],
+          ],
+        );
+        // Every answer names the request it answers and the policy that made
+        // it, so the harness cannot apply one to a different ask.
+        for (final frame in answers(run.runtime)) {
+          expect(frame['policyId'], 'station-probe');
+          expect(frame['attemptId'], isNotEmpty);
+          expect(frame['sessionId'], isNotEmpty);
+        }
+        await run.session.close();
+        await run.runtime.close();
+
+        // UNBOUND: an ask that arrives before any binding is refused, because
+        // there is no session identity to compare it against.
+        final unbound = await live(transport: RecordingExplorationTransport());
+        unbound.runtime.emitOutput(ask());
+        await _pump();
+        expect(answers(unbound.runtime).single['outcome'], 'rejectOnce');
+        await unbound.session.close();
+        await unbound.runtime.close();
+
+        // NO POLICY: the default composition grants nothing, whatever the
+        // harness asks for or offers.
+        final unavailable = await live(
+          transport: RecordingExplorationTransport(),
+          policy: const AgentPermissionPolicy.unavailable(),
+        );
+        unavailable.runtime.emitOutput(bound());
+        unavailable.runtime.emitOutput(ask());
+        await _pump();
+        expect(answers(unavailable.runtime).single['outcome'], 'rejectOnce');
+        await unavailable.session.close();
+        await unavailable.runtime.close();
+
+        // NO AUDIT CARRIER: an authorization nobody could read back is not
+        // granted, even under an explicit trusted-headless policy.
+        final unaudited = await live(
+          policy: const AgentPermissionPolicy.trustedHeadless(id: 'headless'),
+        );
+        unaudited.runtime.emitOutput(bound());
+        unaudited.runtime.emitOutput(ask());
+        await _pump();
+        expect(answers(unaudited.runtime).single['outcome'], 'rejectOnce');
+        await unaudited.session.close();
+        await unaudited.runtime.close();
+
+        // NO AUTHORIZATION ADAPTER: nothing is written at all, so the bridge's
+        // own bounded fallback cancels the ask. Never a grant.
+        final voiceless = await live(
+          adapter: _JsonAdapter(),
+          transport: RecordingExplorationTransport(),
+          policy: const AgentPermissionPolicy.trustedHeadless(id: 'headless'),
+        );
+        voiceless.runtime.emitOutput(bound());
+        voiceless.runtime.emitOutput(ask());
+        await _pump();
+        expect(answers(voiceless.runtime), isEmpty);
+        await voiceless.session.close();
+        await voiceless.runtime.close();
+      },
+    );
+
+    test('reconnect invalidates stale session authorization', () async {
+      final run = await live(transport: RecordingExplorationTransport());
+      run.runtime.emitOutput(bound());
+      run.runtime.emitOutput(ask());
+      await _pump();
+      expect(answers(run.runtime).single['outcome'], 'allowAlways');
+
+      // The SAME attempt reconnects: the new protocol session becomes the
+      // bound one and the old id is stale on arrival.
+      run.runtime.emitOutput(bound(sessionId: 'acp-2'));
+      run.runtime.emitOutput(ask(requestId: 'req-stale'));
+      run.runtime.emitOutput(ask(requestId: 'req-fresh', sessionId: 'acp-2'));
+      await _pump();
+      expect(
+        answers(
+          run.runtime,
+        ).map((frame) => <Object?>[frame['requestId'], frame['outcome']]),
+        <List<Object?>>[
+          <Object?>['req-1', 'allowAlways'],
+          <Object?>['req-stale', 'rejectOnce'],
+          <Object?>['req-fresh', 'allowAlways'],
+        ],
+      );
+
+      // A binding for an attempt this channel was NOT admitted under changes
+      // nothing: it neither rebinds nor unbinds.
+      run.runtime.emitOutput(
+        bound(attemptId: 'attempt-other', sessionId: 'acp-3'),
+      );
+      run.runtime.emitOutput(ask(requestId: 'req-foreign', sessionId: 'acp-3'));
+      run.runtime.emitOutput(ask(requestId: 'req-still', sessionId: 'acp-2'));
+      // A blank binding is malformed and equally inert.
+      run.runtime.emitOutput(bound(sessionId: ''));
+      run.runtime.emitOutput(ask(requestId: 'req-after', sessionId: 'acp-2'));
+      await _pump();
+      expect(
+        answers(run.runtime)
+            .skip(3)
+            .map((frame) => <Object?>[frame['requestId'], frame['outcome']]),
+        <List<Object?>>[
+          <Object?>['req-foreign', 'rejectOnce'],
+          <Object?>['req-still', 'allowAlways'],
+          <Object?>['req-after', 'allowAlways'],
+        ],
+      );
+
+      // After the TERMINAL, an authorization event produces nothing at all.
+      final before = run.runtime.writes.length;
+      run.runtime.emitOutput(
+        jsonEncode(<String, Object?>{
+          'type': 'completed',
+          'result': <String, String>{'text': 'done'},
+        }),
+      );
+      await _pump();
+      run.runtime.emitOutput(ask(requestId: 'req-late', sessionId: 'acp-2'));
+      await _pump();
+      expect(run.runtime.writes.length, before);
+
+      await run.session.close();
+      await run.runtime.close();
+    });
+
+    test('authorization audit is redacted and precedes response', () async {
+      final runtime = _Runtime();
+      await runtime.start(
+        'session',
+        const RuntimeConfig(workDir: '/tmp', command: 'probe'),
+      );
+      // Records how many bytes had been written to the channel at the instant
+      // each flare fired: the ORDER proof, without a clock.
+      final writesAtFlare = <int>[];
+      final transport = RecordingExplorationTransport();
+      final ordered = _OrderingTransport(transport, () => runtime.writes.length)
+        ..onFlare = writesAtFlare.add;
+      final session = _session(
+        runtime: runtime,
+        adapter: _AuthorizingAdapter(),
+        transport: ordered,
+        policy: scoped,
+      );
+      unawaited(session.updates.drain<void>());
+      await session.start();
+      await _pump();
+      final briefWrites = runtime.writes.length;
+
+      runtime.emitOutput(bound());
+      runtime.emitOutput(ask());
+      await _pump();
+
+      final flare = transport.named(kAgentAuthorizationDecisionFlare).single;
+      expect(flare.data, <String, String>{
+        'channelSessionId': 'session',
+        'requestId': 'req-1',
+        'attemptId': 'attempt-live',
+        'protocolSessionId': 'acp-1',
+        'capability': 'edit',
+        'policyId': 'station-probe',
+        'outcome': 'allowAlways',
+        'reason': 'policy "station-probe" allows edit durably',
+      });
+      // REDACTED: identities and the grid's own reason, never the work.
+      expect(flare.data.values.join('\n'), isNot(contains('secret brief')));
+      // RECORDED FIRST: the flare fired before the response reached the wire.
+      expect(writesAtFlare, <int>[briefWrites]);
+      expect(runtime.writes.length, briefWrites + 1);
+
+      // A bridge-local CANCELLATION rides the same record and is answered
+      // NOTHING — a second response would race the one the bridge already
+      // sent.
+      final after = runtime.writes.length;
+      runtime.emitOutput(
+        jsonEncode(<String, Object?>{
+          'type': 'permission_fallback',
+          'decision': <String, Object?>{
+            'requestId': 'req-2',
+            'attemptId': 'attempt-live',
+            'sessionId': 'acp-1',
+            'capability': 'execute',
+            'policyId': '',
+            'outcome': 'cancelled',
+            'reason': 'the station did not answer in time',
+          },
+        }),
+      );
+      await _pump();
+      expect(runtime.writes.length, after);
+      final fallback = transport.named(kAgentAuthorizationDecisionFlare).last;
+      expect(fallback.data['requestId'], 'req-2');
+      expect(fallback.data['outcome'], 'cancelled');
+
+      await session.close();
+      await runtime.close();
+    });
   });
 
   test('malformed protocol frame fails and cancels decoder', () async {

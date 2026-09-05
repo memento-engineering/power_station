@@ -55,13 +55,16 @@ extension AgentProtocolEventPatterns on AgentProtocolEvent {
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeMap<TResult extends Object?>({TResult Function( AgentProtocolProgress value)?  progress,TResult Function( AgentProtocolCompleted value)?  completed,TResult Function( AgentProtocolFailed value)?  failed,required TResult orElse(),}){
+@optionalTypeArgs TResult maybeMap<TResult extends Object?>({TResult Function( AgentProtocolProgress value)?  progress,TResult Function( AgentProtocolCompleted value)?  completed,TResult Function( AgentProtocolFailed value)?  failed,TResult Function( AgentProtocolSessionBound value)?  sessionBound,TResult Function( AgentProtocolPermissionRequested value)?  permissionRequested,TResult Function( AgentProtocolPermissionFallback value)?  permissionFallback,required TResult orElse(),}){
 final _that = this;
 switch (_that) {
 case AgentProtocolProgress() when progress != null:
 return progress(_that);case AgentProtocolCompleted() when completed != null:
 return completed(_that);case AgentProtocolFailed() when failed != null:
-return failed(_that);case _:
+return failed(_that);case AgentProtocolSessionBound() when sessionBound != null:
+return sessionBound(_that);case AgentProtocolPermissionRequested() when permissionRequested != null:
+return permissionRequested(_that);case AgentProtocolPermissionFallback() when permissionFallback != null:
+return permissionFallback(_that);case _:
   return orElse();
 
 }
@@ -79,13 +82,16 @@ return failed(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult map<TResult extends Object?>({required TResult Function( AgentProtocolProgress value)  progress,required TResult Function( AgentProtocolCompleted value)  completed,required TResult Function( AgentProtocolFailed value)  failed,}){
+@optionalTypeArgs TResult map<TResult extends Object?>({required TResult Function( AgentProtocolProgress value)  progress,required TResult Function( AgentProtocolCompleted value)  completed,required TResult Function( AgentProtocolFailed value)  failed,required TResult Function( AgentProtocolSessionBound value)  sessionBound,required TResult Function( AgentProtocolPermissionRequested value)  permissionRequested,required TResult Function( AgentProtocolPermissionFallback value)  permissionFallback,}){
 final _that = this;
 switch (_that) {
 case AgentProtocolProgress():
 return progress(_that);case AgentProtocolCompleted():
 return completed(_that);case AgentProtocolFailed():
-return failed(_that);}
+return failed(_that);case AgentProtocolSessionBound():
+return sessionBound(_that);case AgentProtocolPermissionRequested():
+return permissionRequested(_that);case AgentProtocolPermissionFallback():
+return permissionFallback(_that);}
 }
 /// A variant of `map` that fallback to returning `null`.
 ///
@@ -99,13 +105,16 @@ return failed(_that);}
 /// }
 /// ```
 
-@optionalTypeArgs TResult? mapOrNull<TResult extends Object?>({TResult? Function( AgentProtocolProgress value)?  progress,TResult? Function( AgentProtocolCompleted value)?  completed,TResult? Function( AgentProtocolFailed value)?  failed,}){
+@optionalTypeArgs TResult? mapOrNull<TResult extends Object?>({TResult? Function( AgentProtocolProgress value)?  progress,TResult? Function( AgentProtocolCompleted value)?  completed,TResult? Function( AgentProtocolFailed value)?  failed,TResult? Function( AgentProtocolSessionBound value)?  sessionBound,TResult? Function( AgentProtocolPermissionRequested value)?  permissionRequested,TResult? Function( AgentProtocolPermissionFallback value)?  permissionFallback,}){
 final _that = this;
 switch (_that) {
 case AgentProtocolProgress() when progress != null:
 return progress(_that);case AgentProtocolCompleted() when completed != null:
 return completed(_that);case AgentProtocolFailed() when failed != null:
-return failed(_that);case _:
+return failed(_that);case AgentProtocolSessionBound() when sessionBound != null:
+return sessionBound(_that);case AgentProtocolPermissionRequested() when permissionRequested != null:
+return permissionRequested(_that);case AgentProtocolPermissionFallback() when permissionFallback != null:
+return permissionFallback(_that);case _:
   return null;
 
 }
@@ -122,12 +131,15 @@ return failed(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>({TResult Function( Map<String, String> fields)?  progress,TResult Function( Map<String, String> result,  UsageReport usage)?  completed,TResult Function( String reason)?  failed,required TResult orElse(),}) {final _that = this;
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>({TResult Function( Map<String, String> fields)?  progress,TResult Function( Map<String, String> result,  UsageReport usage)?  completed,TResult Function( String reason)?  failed,TResult Function( String attemptId,  String protocolSessionId)?  sessionBound,TResult Function( AgentPermissionRequest request)?  permissionRequested,TResult Function( AgentPermissionDecision decision)?  permissionFallback,required TResult orElse(),}) {final _that = this;
 switch (_that) {
 case AgentProtocolProgress() when progress != null:
 return progress(_that.fields);case AgentProtocolCompleted() when completed != null:
 return completed(_that.result,_that.usage);case AgentProtocolFailed() when failed != null:
-return failed(_that.reason);case _:
+return failed(_that.reason);case AgentProtocolSessionBound() when sessionBound != null:
+return sessionBound(_that.attemptId,_that.protocolSessionId);case AgentProtocolPermissionRequested() when permissionRequested != null:
+return permissionRequested(_that.request);case AgentProtocolPermissionFallback() when permissionFallback != null:
+return permissionFallback(_that.decision);case _:
   return orElse();
 
 }
@@ -145,12 +157,15 @@ return failed(_that.reason);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult when<TResult extends Object?>({required TResult Function( Map<String, String> fields)  progress,required TResult Function( Map<String, String> result,  UsageReport usage)  completed,required TResult Function( String reason)  failed,}) {final _that = this;
+@optionalTypeArgs TResult when<TResult extends Object?>({required TResult Function( Map<String, String> fields)  progress,required TResult Function( Map<String, String> result,  UsageReport usage)  completed,required TResult Function( String reason)  failed,required TResult Function( String attemptId,  String protocolSessionId)  sessionBound,required TResult Function( AgentPermissionRequest request)  permissionRequested,required TResult Function( AgentPermissionDecision decision)  permissionFallback,}) {final _that = this;
 switch (_that) {
 case AgentProtocolProgress():
 return progress(_that.fields);case AgentProtocolCompleted():
 return completed(_that.result,_that.usage);case AgentProtocolFailed():
-return failed(_that.reason);}
+return failed(_that.reason);case AgentProtocolSessionBound():
+return sessionBound(_that.attemptId,_that.protocolSessionId);case AgentProtocolPermissionRequested():
+return permissionRequested(_that.request);case AgentProtocolPermissionFallback():
+return permissionFallback(_that.decision);}
 }
 /// A variant of `when` that fallback to returning `null`
 ///
@@ -164,12 +179,15 @@ return failed(_that.reason);}
 /// }
 /// ```
 
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>({TResult? Function( Map<String, String> fields)?  progress,TResult? Function( Map<String, String> result,  UsageReport usage)?  completed,TResult? Function( String reason)?  failed,}) {final _that = this;
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>({TResult? Function( Map<String, String> fields)?  progress,TResult? Function( Map<String, String> result,  UsageReport usage)?  completed,TResult? Function( String reason)?  failed,TResult? Function( String attemptId,  String protocolSessionId)?  sessionBound,TResult? Function( AgentPermissionRequest request)?  permissionRequested,TResult? Function( AgentPermissionDecision decision)?  permissionFallback,}) {final _that = this;
 switch (_that) {
 case AgentProtocolProgress() when progress != null:
 return progress(_that.fields);case AgentProtocolCompleted() when completed != null:
 return completed(_that.result,_that.usage);case AgentProtocolFailed() when failed != null:
-return failed(_that.reason);case _:
+return failed(_that.reason);case AgentProtocolSessionBound() when sessionBound != null:
+return sessionBound(_that.attemptId,_that.protocolSessionId);case AgentProtocolPermissionRequested() when permissionRequested != null:
+return permissionRequested(_that.request);case AgentProtocolPermissionFallback() when permissionFallback != null:
+return permissionFallback(_that.decision);case _:
   return null;
 
 }
@@ -182,7 +200,7 @@ return failed(_that.reason);case _:
 
 class AgentProtocolProgress implements AgentProtocolEvent {
   const AgentProtocolProgress({final  Map<String, String> fields = const <String, String>{}}): _fields = fields;
-
+  
 
  final  Map<String, String> _fields;
 @JsonKey() Map<String, String> get fields {
@@ -254,7 +272,7 @@ as Map<String, String>,
 
 class AgentProtocolCompleted implements AgentProtocolEvent {
   const AgentProtocolCompleted({required final  Map<String, String> result, required this.usage}): _result = result;
-
+  
 
  final  Map<String, String> _result;
  Map<String, String> get result {
@@ -328,7 +346,7 @@ as UsageReport,
 
 class AgentProtocolFailed implements AgentProtocolEvent {
   const AgentProtocolFailed({required this.reason});
-
+  
 
  final  String reason;
 
@@ -383,6 +401,206 @@ class _$AgentProtocolFailedCopyWithImpl<$Res>
   return _then(AgentProtocolFailed(
 reason: null == reason ? _self.reason : reason // ignore: cast_nullable_to_non_nullable
 as String,
+  ));
+}
+
+
+}
+
+/// @nodoc
+
+
+class AgentProtocolSessionBound implements AgentProtocolEvent {
+  const AgentProtocolSessionBound({required this.attemptId, required this.protocolSessionId});
+  
+
+ final  String attemptId;
+ final  String protocolSessionId;
+
+/// Create a copy of AgentProtocolEvent
+/// with the given fields replaced by the non-null parameter values.
+@JsonKey(includeFromJson: false, includeToJson: false)
+@pragma('vm:prefer-inline')
+$AgentProtocolSessionBoundCopyWith<AgentProtocolSessionBound> get copyWith => _$AgentProtocolSessionBoundCopyWithImpl<AgentProtocolSessionBound>(this, _$identity);
+
+
+
+@override
+bool operator ==(Object other) {
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is AgentProtocolSessionBound&&(identical(other.attemptId, attemptId) || other.attemptId == attemptId)&&(identical(other.protocolSessionId, protocolSessionId) || other.protocolSessionId == protocolSessionId));
+}
+
+
+@override
+int get hashCode => Object.hash(runtimeType,attemptId,protocolSessionId);
+
+@override
+String toString() {
+  return 'AgentProtocolEvent.sessionBound(attemptId: $attemptId, protocolSessionId: $protocolSessionId)';
+}
+
+
+}
+
+/// @nodoc
+abstract mixin class $AgentProtocolSessionBoundCopyWith<$Res> implements $AgentProtocolEventCopyWith<$Res> {
+  factory $AgentProtocolSessionBoundCopyWith(AgentProtocolSessionBound value, $Res Function(AgentProtocolSessionBound) _then) = _$AgentProtocolSessionBoundCopyWithImpl;
+@useResult
+$Res call({
+ String attemptId, String protocolSessionId
+});
+
+
+
+
+}
+/// @nodoc
+class _$AgentProtocolSessionBoundCopyWithImpl<$Res>
+    implements $AgentProtocolSessionBoundCopyWith<$Res> {
+  _$AgentProtocolSessionBoundCopyWithImpl(this._self, this._then);
+
+  final AgentProtocolSessionBound _self;
+  final $Res Function(AgentProtocolSessionBound) _then;
+
+/// Create a copy of AgentProtocolEvent
+/// with the given fields replaced by the non-null parameter values.
+@pragma('vm:prefer-inline') $Res call({Object? attemptId = null,Object? protocolSessionId = null,}) {
+  return _then(AgentProtocolSessionBound(
+attemptId: null == attemptId ? _self.attemptId : attemptId // ignore: cast_nullable_to_non_nullable
+as String,protocolSessionId: null == protocolSessionId ? _self.protocolSessionId : protocolSessionId // ignore: cast_nullable_to_non_nullable
+as String,
+  ));
+}
+
+
+}
+
+/// @nodoc
+
+
+class AgentProtocolPermissionRequested implements AgentProtocolEvent {
+  const AgentProtocolPermissionRequested({required this.request});
+  
+
+ final  AgentPermissionRequest request;
+
+/// Create a copy of AgentProtocolEvent
+/// with the given fields replaced by the non-null parameter values.
+@JsonKey(includeFromJson: false, includeToJson: false)
+@pragma('vm:prefer-inline')
+$AgentProtocolPermissionRequestedCopyWith<AgentProtocolPermissionRequested> get copyWith => _$AgentProtocolPermissionRequestedCopyWithImpl<AgentProtocolPermissionRequested>(this, _$identity);
+
+
+
+@override
+bool operator ==(Object other) {
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is AgentProtocolPermissionRequested&&(identical(other.request, request) || other.request == request));
+}
+
+
+@override
+int get hashCode => Object.hash(runtimeType,request);
+
+@override
+String toString() {
+  return 'AgentProtocolEvent.permissionRequested(request: $request)';
+}
+
+
+}
+
+/// @nodoc
+abstract mixin class $AgentProtocolPermissionRequestedCopyWith<$Res> implements $AgentProtocolEventCopyWith<$Res> {
+  factory $AgentProtocolPermissionRequestedCopyWith(AgentProtocolPermissionRequested value, $Res Function(AgentProtocolPermissionRequested) _then) = _$AgentProtocolPermissionRequestedCopyWithImpl;
+@useResult
+$Res call({
+ AgentPermissionRequest request
+});
+
+
+
+
+}
+/// @nodoc
+class _$AgentProtocolPermissionRequestedCopyWithImpl<$Res>
+    implements $AgentProtocolPermissionRequestedCopyWith<$Res> {
+  _$AgentProtocolPermissionRequestedCopyWithImpl(this._self, this._then);
+
+  final AgentProtocolPermissionRequested _self;
+  final $Res Function(AgentProtocolPermissionRequested) _then;
+
+/// Create a copy of AgentProtocolEvent
+/// with the given fields replaced by the non-null parameter values.
+@pragma('vm:prefer-inline') $Res call({Object? request = null,}) {
+  return _then(AgentProtocolPermissionRequested(
+request: null == request ? _self.request : request // ignore: cast_nullable_to_non_nullable
+as AgentPermissionRequest,
+  ));
+}
+
+
+}
+
+/// @nodoc
+
+
+class AgentProtocolPermissionFallback implements AgentProtocolEvent {
+  const AgentProtocolPermissionFallback({required this.decision});
+  
+
+ final  AgentPermissionDecision decision;
+
+/// Create a copy of AgentProtocolEvent
+/// with the given fields replaced by the non-null parameter values.
+@JsonKey(includeFromJson: false, includeToJson: false)
+@pragma('vm:prefer-inline')
+$AgentProtocolPermissionFallbackCopyWith<AgentProtocolPermissionFallback> get copyWith => _$AgentProtocolPermissionFallbackCopyWithImpl<AgentProtocolPermissionFallback>(this, _$identity);
+
+
+
+@override
+bool operator ==(Object other) {
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is AgentProtocolPermissionFallback&&(identical(other.decision, decision) || other.decision == decision));
+}
+
+
+@override
+int get hashCode => Object.hash(runtimeType,decision);
+
+@override
+String toString() {
+  return 'AgentProtocolEvent.permissionFallback(decision: $decision)';
+}
+
+
+}
+
+/// @nodoc
+abstract mixin class $AgentProtocolPermissionFallbackCopyWith<$Res> implements $AgentProtocolEventCopyWith<$Res> {
+  factory $AgentProtocolPermissionFallbackCopyWith(AgentProtocolPermissionFallback value, $Res Function(AgentProtocolPermissionFallback) _then) = _$AgentProtocolPermissionFallbackCopyWithImpl;
+@useResult
+$Res call({
+ AgentPermissionDecision decision
+});
+
+
+
+
+}
+/// @nodoc
+class _$AgentProtocolPermissionFallbackCopyWithImpl<$Res>
+    implements $AgentProtocolPermissionFallbackCopyWith<$Res> {
+  _$AgentProtocolPermissionFallbackCopyWithImpl(this._self, this._then);
+
+  final AgentProtocolPermissionFallback _self;
+  final $Res Function(AgentProtocolPermissionFallback) _then;
+
+/// Create a copy of AgentProtocolEvent
+/// with the given fields replaced by the non-null parameter values.
+@pragma('vm:prefer-inline') $Res call({Object? decision = null,}) {
+  return _then(AgentProtocolPermissionFallback(
+decision: null == decision ? _self.decision : decision // ignore: cast_nullable_to_non_nullable
+as AgentPermissionDecision,
   ));
 }
 
