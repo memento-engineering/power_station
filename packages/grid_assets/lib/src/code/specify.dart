@@ -93,7 +93,6 @@ import '../agent/agent_harness.dart';
 import '../agent/agent_session.dart';
 import '../agent/environment_registry.dart';
 import '../agent/model_tier.dart';
-import '../agent/permission_policy.dart';
 import '../agent/seat_environments.dart';
 import '../agent/site_binding.dart';
 import '../agent/typed_environment.dart';
@@ -748,15 +747,17 @@ class SpecifyCapability extends ProcessCapability {
         commands: _steers.watch(args.beadId),
         attemptId: attemptId,
         instanceFence: instanceFence,
-        // The EFFECT-edge reads (ADR-0008 D3): the station's authorization
-        // boundary and the flare carrier its decisions are recorded on. Both
-        // absent ⇒ the spec seat's channel authorizes nothing.
+        // The EFFECT-edge reads (ADR-0008 D3): the flare carrier the decisions
+        // are recorded on, and the station's authorization boundary resolved
+        // from this seat's own arming. Without a carrier, or without either an
+        // explicit policy or an armed SPEC seat, the channel authorizes nothing.
         transport: context
             .getInheritedSeedOfExactType<ServiceBundle>()
             ?.transport,
-        policy:
-            context.getInheritedSeedOfExactType<AgentPermissionPolicy>() ??
-            const AgentPermissionPolicy.unavailable(),
+        policy: seatChannelPolicy<SpecAgentEnvironment>(
+          context,
+          seatId: kSpecSeatPolicyId,
+        ),
       ),
       probe: () => probeCompletionArtifact(context, args),
       resultFields: () => result(context, args),

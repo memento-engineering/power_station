@@ -34,7 +34,6 @@ import '../agent/agent_harness.dart';
 import '../agent/agent_session.dart';
 import '../agent/environment_registry.dart';
 import '../agent/model_tier.dart';
-import '../agent/permission_policy.dart';
 import '../agent/seat_environments.dart';
 import '../agent/site_binding.dart';
 import '../agent/typed_environment.dart';
@@ -360,11 +359,13 @@ class AgentCapability extends ProcessCapability {
       transport: context
           .getInheritedSeedOfExactType<ServiceBundle>()
           ?.transport,
-      // The station's authorization boundary, read the same way. Absent ⇒ the
-      // unavailable policy: the channel's permission asks are refused.
-      policy:
-          context.getInheritedSeedOfExactType<AgentPermissionPolicy>() ??
-          const AgentPermissionPolicy.unavailable(),
+      // The station's authorization boundary, resolved the same way: an
+      // explicitly mounted policy wins, else this seat's own ARMING is the
+      // channel's admitted identity, else nothing is authorized.
+      policy: seatChannelPolicy<BuildAgentEnvironment>(
+        context,
+        seatId: kBuildSeatPolicyId,
+      ),
     );
   }
 
