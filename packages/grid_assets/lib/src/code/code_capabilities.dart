@@ -34,6 +34,7 @@ import '../agent/agent_harness.dart';
 import '../agent/agent_session.dart';
 import '../agent/environment_registry.dart';
 import '../agent/model_tier.dart';
+import '../agent/permission_policy.dart';
 import '../agent/seat_environments.dart';
 import '../agent/site_binding.dart';
 import '../agent/typed_environment.dart';
@@ -353,10 +354,17 @@ class AgentCapability extends ProcessCapability {
       attemptId: attemptId,
       instanceFence: instanceFence,
       // The out-of-band flare sink, read at this EFFECT edge with the
-      // non-binding verb (ADR-0008 D3); absent => no flares, never a failure.
+      // non-binding verb (ADR-0008 D3); absent => no flares, never a failure —
+      // except for an AUTHORIZATION, where absent means no durable record and
+      // so no grant at all ([decideAgentPermission]).
       transport: context
           .getInheritedSeedOfExactType<ServiceBundle>()
           ?.transport,
+      // The station's authorization boundary, read the same way. Absent ⇒ the
+      // unavailable policy: the channel's permission asks are refused.
+      policy:
+          context.getInheritedSeedOfExactType<AgentPermissionPolicy>() ??
+          const AgentPermissionPolicy.unavailable(),
     );
   }
 

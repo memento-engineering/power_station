@@ -162,6 +162,12 @@ class ProcessSeatRunner {
         );
       case AgentProtocolFailed(:final reason):
         _err.writeln(reason);
+      case AgentProtocolSessionBound() ||
+          AgentProtocolPermissionRequested() ||
+          AgentProtocolPermissionFallback():
+        // AUTHORIZATION traffic, not output: answered by [SeatChannelClient]
+        // before it ever reaches the renderer.
+        return;
     }
   }
 }
