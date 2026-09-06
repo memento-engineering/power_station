@@ -428,7 +428,10 @@ class AcpSessionAdapter
           model: frame['model'] as String?,
         ),
       ),
-      'failed' => AgentProtocolEvent.failed(reason: frame['reason']! as String),
+      'failed' => AgentProtocolEvent.failed(
+        reason: frame['reason']! as String,
+        kind: _decodeFailureKind(frame['failureKind']),
+      ),
       // The AUTHORIZATION frames (bead `pow-ed1c`), all non-terminal.
       'session_bound' => AgentProtocolEvent.sessionBound(
         attemptId: frame['attemptId']! as String,
@@ -446,6 +449,21 @@ class AcpSessionAdapter
       ),
       _ => throw FormatException('unknown ACP bridge frame: $frame'),
     };
+  }
+
+  /// Decodes the OPTIONAL engine failure kind a `failed` frame may declare.
+  ///
+  /// ABSENT is the historical untyped failure — [CapabilityFailureKind.work] —
+  /// which is what every frame written before the bridge could name a kind
+  /// means. An UNRECOGNIZED value is a protocol error and is thrown over,
+  /// never quietly downgraded to `work`: a kind nobody can read is exactly the
+  /// misreport this seam exists to prevent.
+  CapabilityFailureKind _decodeFailureKind(Object? declared) {
+    if (declared == null) return CapabilityFailureKind.work;
+    for (final kind in CapabilityFailureKind.values) {
+      if (kind.name == declared) return kind;
+    }
+    throw FormatException('unknown ACP bridge failure kind: $declared');
   }
 }
 

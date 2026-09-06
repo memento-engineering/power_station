@@ -84,6 +84,8 @@ class _BridgeResult {
 Future<_Run> _buildAcpRun({
   required String probePath,
   required String identity,
+  List<String> probeArgs = const <String>[],
+  bool leased = true,
   AgentPermissionPolicy policy = const AgentPermissionPolicy.trustedHeadless(
     id: 'acp-lease-test',
   ),
@@ -103,7 +105,7 @@ Future<_Run> _buildAcpRun({
   );
   final environment = AgentEnvironment(
     command: Platform.resolvedExecutable,
-    args: <String>[probePath, '--identity=$identity'],
+    args: <String>[probePath, '--identity=$identity', ...probeArgs],
     env: <String, String>{'GRID_ACP_PROBE_TRACE': trace.path},
     promptMode: PromptMode.none,
     sessionAdapter: kAcpSessionAdapterId,
@@ -166,19 +168,25 @@ Future<_Run> _buildAcpRun({
     spawn: stationProcessSpawner,
     dispatch: stationProcessDispatcher,
   );
-  final allocation = vendor
-      .leaseFor(request)
-      .createAllocation(
-        AllocationContext(
-          treeContext: tree,
-          args: args,
-          transport: runtime,
-          address: const AllocationAddress('session-1', 'work-1/agent'),
-          env: const <String, String>{},
-          sink: reports.add,
-          kind: StepKind.job,
-        ),
-      );
+  // LEASED is the station's own fork (the host routes every ProcessCapability
+  // through the ambient vendor). `leased: false` mints the capability's DIRECT
+  // `ProcessAllocation` instead — the engine seam that carries a channel's
+  // declared failure kind onto its report.
+  final allocation = leased
+      ? vendor
+            .leaseFor(request)
+            .createAllocation(
+              AllocationContext(
+                treeContext: tree,
+                args: args,
+                transport: runtime,
+                address: const AllocationAddress('session-1', 'work-1/agent'),
+                env: const <String, String>{},
+                sink: reports.add,
+                kind: StepKind.job,
+              ),
+            )
+      : capability.createAllocation(allocationContext);
   final run = _Run(
     allocation: allocation,
     runtime: runtime,
@@ -190,6 +198,21 @@ Future<_Run> _buildAcpRun({
   );
   addTearDown(run.close);
   return run;
+}
+
+/// Polls until the allocation reports a failure, so a terminal that arrives
+/// through the channel drive (not through `startOrAdopt`'s own future) is
+/// observed without a fixed sleep.
+Future<AllocationFailed> _waitForFailure(_Run run) async {
+  for (var i = 0; i < 2000; i++) {
+    final failures = run.reports.whereType<AllocationFailed>();
+    if (failures.isNotEmpty) return failures.first;
+    if (run.reports.whereType<AllocationCompleted>().isNotEmpty) {
+      throw StateError('ACP allocation COMPLETED; expected a failure');
+    }
+    await Future<void>.delayed(const Duration(milliseconds: 5));
+  }
+  throw StateError('ACP allocation never failed; reports=${run.reports}');
 }
 
 Future<void> _waitForOutput(_Run run, String text) async {
@@ -485,6 +508,178 @@ void main() {
       );
     },
     timeout: const Timeout(Duration(seconds: 40)),
+  );
+
+  // The CAPACITY-REFUSAL terminal, the live genesis-7ob shape: the agent
+  // implemented the whole bead, then its LAST turn ended POSITIVELY on the
+  // provider's apology, before the commit it had announced. Read as a
+  // completion — a full turn, a real usage envelope — it flared step.complete
+  // over an uncommitted tree and gated the round as a stale/no-op bead.
+  test('an end turn whose final line is a provider capacity refusal is a typed '
+      'NON-RESULT; an ordinary end turn is untouched', () async {
+    const capacity =
+        'Selected model is at capacity. Please try a different model.';
+    final refused = await _runBridge(
+      probePath: probePath,
+      probeArgs: <String>[
+        '--identity=capacity-probe',
+        // The LIVE shape: a prior line saying what the agent did, then the
+        // refusal, padded — never a bare one-line result.
+        '--final-message=I implemented the bead and will commit now.\n'
+            '   $capacity  ',
+      ],
+      usageOut: 'capacity.usage.json',
+    );
+    expect(refused.frame['kind'], 'failed', reason: '${refused.frame}');
+    expect(refused.frame['reason'], capacity, reason: 'the COMPLETE line');
+    expect(refused.frame['failureKind'], 'noResult');
+    // The envelope is the evidence the turn RAN, and it survives the typed
+    // failure exactly as it survives a completion.
+    final refusedUsage = UsageReport.tryParse(refused.usageEnvelope);
+    expect(refusedUsage?.tokensIn, 11);
+    expect(refusedUsage?.tokensOut, 7);
+    expect(refusedUsage?.numTurns, 1);
+
+    final completed = await _runBridge(
+      probePath: probePath,
+      probeArgs: const <String>['--identity=capacity-control'],
+      usageOut: 'control.usage.json',
+    );
+    expect(completed.frame['kind'], 'completed', reason: '${completed.frame}');
+    expect(
+      (completed.frame['result']! as Map<String, dynamic>)['text'],
+      contains('READY FOR STEER capacity-control'),
+    );
+    expect(completed.frame['failureKind'], isNull);
+    final controlUsage = UsageReport.tryParse(completed.usageEnvelope);
+    expect(controlUsage?.tokensIn, 11);
+    expect(controlUsage?.tokensOut, 7);
+    expect(controlUsage?.numTurns, 1);
+  }, timeout: const Timeout(Duration(seconds: 40)));
+
+  test('the capacity refusal reaches the engine as a DECLARED non-result '
+      'allocation the engine resolves to infra, never a completion', () async {
+    const capacity =
+        'Selected model is at capacity. Please try a different model.';
+    final run = await _buildAcpRun(
+      probePath: probePath,
+      identity: 'capacity-alloc',
+      probeArgs: const <String>['--final-message=$capacity'],
+      // The DIRECT process allocation: `ProcessAllocation._driveChannel` is the
+      // engine seam that reads a channel failure's declared kind. The lease
+      // dispatcher this suite otherwise drives still collapses every
+      // `ProcessSessionFailed` to an untyped `Failed(reason)` — an engine-side
+      // gap, and the reason this probe names the seam it asserts on.
+      leased: false,
+    );
+    unawaited(run.allocation.startOrAdopt());
+    final failure = await _waitForFailure(run);
+    expect(failure.reason, capacity);
+    expect(failure.kind, CapabilityFailureKind.noResult);
+    expect(run.reports.whereType<AllocationCompleted>(), isEmpty);
+    // DECLARED, not inferred — and that provenance is the whole ruling. The
+    // engine's own resolution reads it (`declared process-session non-results
+    // are infra`): a kind this side NAMED resolves without consulting the
+    // elapsed-time floor, which is what the live shape needs. genesis-7ob's
+    // refusal arrived after a FULL turn — 38k tokens in, a real usage
+    // envelope — so the artifact-less fast-exit evidence never applied to it.
+    expect(failure.kindDeclared, isTrue);
+    expect(
+      resolveFailureClass(
+        kind: failure.kind,
+        ranFor: const Duration(minutes: 1),
+        kindDeclared: failure.kindDeclared,
+      ),
+      StepFailureClass.infra,
+      reason: 'grid_assets declares the KIND; the engine resolves the CLASS',
+    );
+    // The control that makes the line above load-bearing: the SAME kind over
+    // the SAME long turn, undeclared, is not infra. The declaration is what
+    // buys it — never the clock, and never anything grid_assets re-implements.
+    expect(
+      resolveFailureClass(
+        kind: failure.kind,
+        ranFor: const Duration(minutes: 1),
+      ),
+      StepFailureClass.noResult,
+    );
+    await run.close();
+  }, timeout: const Timeout(Duration(seconds: 40)));
+
+  // The KIND is carried, not re-derived: whatever the bridge DECLARED on the
+  // wire is what the engine's update reports. An absent declaration keeps the
+  // historical untyped meaning, so every failure written before this seam
+  // existed still means what it meant.
+  test(
+    'a declared failure kind survives decode and the channel session',
+    () async {
+      Future<ProcessSessionUpdate> terminalFor(
+        Map<String, Object?> frame,
+      ) async {
+        const name = 'session-raw/work-1/agent';
+        final runtime = FakeRuntimeProvider();
+        await runtime.start(
+          name,
+          const RuntimeConfig(
+            workDir: '.',
+            command: 'probe',
+            lifecycle: Lifecycle.longLived,
+          ),
+        );
+        final commands = StreamController<ProcessSessionCommand>();
+        addTearDown(commands.close);
+        final session = AgentSession(
+          runtime: runtime,
+          name: name,
+          adapter: const AcpSessionAdapter(),
+          brief: const AgentBrief(task: 'raw frame probe'),
+          commands: commands.stream,
+          attemptId: 'attempt-raw',
+          instanceFence: 'fence-raw',
+        );
+        addTearDown(session.close);
+        final terminal = session.updates.first;
+        await session.start();
+        runtime.emitInteraction(name, utf8.encode('${jsonEncode(frame)}\n'));
+        return terminal.timeout(const Duration(seconds: 5));
+      }
+
+      expect(
+        await terminalFor(<String, Object?>{
+          'kind': 'failed',
+          'reason': 'Selected model is at capacity.',
+          'failureKind': 'noResult',
+        }),
+        isA<ProcessSessionFailed>()
+            .having((f) => f.reason, 'reason', 'Selected model is at capacity.')
+            .having((f) => f.kind, 'kind', CapabilityFailureKind.noResult),
+      );
+
+      expect(
+        await terminalFor(<String, Object?>{
+          'kind': 'failed',
+          'reason': 'the harness died',
+        }),
+        isA<ProcessSessionFailed>()
+            .having((f) => f.reason, 'reason', 'the harness died')
+            .having((f) => f.kind, 'kind', CapabilityFailureKind.work),
+        reason: 'an undeclared kind keeps the historical untyped meaning',
+      );
+
+      expect(
+        await terminalFor(<String, Object?>{
+          'kind': 'failed',
+          'reason': 'ignored',
+          'failureKind': 'somethingElse',
+        }),
+        isA<ProcessSessionFailed>().having(
+          (f) => f.reason,
+          'reason',
+          contains('unknown ACP bridge failure kind: somethingElse'),
+        ),
+        reason: 'a kind nobody can read is LOUD, never a downgrade to work',
+      );
+    },
   );
 
   // The ACP client no longer HAS a posture: it applies the station's decision

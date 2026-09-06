@@ -10,6 +10,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:acp_dart/acp_dart.dart';
+import 'package:grid_engine/grid_engine.dart' show CapabilityFailureKind;
 
 import 'acp_session_adapter.dart';
 import 'agent_session.dart';
@@ -43,6 +44,33 @@ Future<void> main(List<String> args) => runZoned(
 /// stderr pipe to drain before reporting. Bounded so a wedged pipe can never
 /// hold a failure open; generous enough that the exit code is normally known.
 const Duration kChildReapGrace = Duration(seconds: 2);
+
+/// The provider refusals a harness returns as its FINAL RESULT rather than as
+/// a protocol error — keyed by the provider each prefix was observed from.
+///
+/// A capacity refusal is a NON-RESULT wearing a completion's clothes: the agent
+/// stops mid-work, the turn ends positively, and the message the model would
+/// have written is replaced by the provider's apology. Read as a completion it
+/// grades the run's *tail* instead of its work (the live genesis-7ob round: a
+/// bead implemented but uncommitted, then gated as 'stale/no-op').
+///
+/// A NAMED TABLE, not a search: the match is `startsWith` against the whole
+/// trimmed final line, never a regular expression and never a substring scan of
+/// free result text — an agent that merely QUOTES this sentence in its report
+/// still completes.
+const Map<String, String> _providerNoResultPrefixes = <String, String>{
+  'codex': 'Selected model is at capacity',
+};
+
+/// The complete trimmed FINAL line of [text] when that line is one of the
+/// [_providerNoResultPrefixes]; null for every other result, which stays a
+/// completion.
+String? _providerNoResultLine(String text) {
+  final finalLine = text.trim().split('\n').last.trim();
+  return _providerNoResultPrefixes.values.any(finalLine.startsWith)
+      ? finalLine
+      : null;
+}
 
 /// Spawns the configured ACP agent and drives one session until parent teardown.
 Future<void> runAcpBridge() async {
@@ -357,6 +385,19 @@ class _AcpBridgeDriver {
         terminal = true;
         clearPendingPermissions();
         writeUsage();
+        // A POSITIVE terminal whose last word is a provider refusal: the turn
+        // ended, the usage envelope is real, and there is still no result. Say
+        // so in the engine's own vocabulary rather than handing the review
+        // circuit the apology as the run's output.
+        final refusal = _providerNoResultLine(text.toString());
+        if (refusal != null) {
+          emit(<String, Object?>{
+            'kind': 'failed',
+            'reason': refusal,
+            'failureKind': CapabilityFailureKind.noResult.name,
+          });
+          return;
+        }
         emit(<String, Object?>{
           'kind': 'completed',
           'result': <String, String>{

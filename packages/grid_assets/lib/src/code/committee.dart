@@ -1279,7 +1279,11 @@ void sweepStaleCritique(
 ///    no reviewable change routes to a human ruling INSTEAD of reaching the
 ///    critics (a stale bead whose work is already in mainline, or a net-zero
 ///    diff). The critics `dependsOn` this step, so the escalation withholds them
-///    — they never run against a scope that isn't the bead's.
+///    — they never run against a scope that isn't the bead's. An empty delta
+///    over ZERO commits is disambiguated by `git status --porcelain` FIRST: a
+///    DIRTY worktree there is uncommitted work, not staleness, and says so —
+///    the live genesis-7ob round ruled a finished, validation-green, merely
+///    uncommitted tree a 'stale/no-op bead'. An unreadable status is LOUD.
 ///  - **git could not compute the delta ⇒ a thrown [RouteFailure]** — LOUD. An
 ///    unresolvable `origin/<base>` (or a `git` that won't launch) means the scope
 ///    is UNKNOWN; failing closed routes to supervision rather than silently
@@ -1391,6 +1395,36 @@ class PinDiffCapability extends RouteCapability {
     // EMPTY delta ⇒ the distinct no-op terminal: a human ruling, not the critics
     // (A9's empty-delta gate, re-homed onto Escalate — the SAME park).
     if (diffText.trim().isEmpty) {
+      // ZERO commits is NOT automatically a stale bead. A build agent whose
+      // turn ended before the commit it had announced leaves the entire change
+      // sitting UNCOMMITTED in the worktree — the live genesis-7ob round, where
+      // a provider capacity refusal ended the turn, the tree was green and
+      // complete, and the human ruling still read 'stale/no-op'. Ask the
+      // worktree which of the two it is before naming it.
+      if (commits.isEmpty) {
+        final status = await runner.run(
+          workingDirectory: workspaceDir,
+          args: ['status', '--porcelain'],
+        );
+        if (args.cancel.isCancelled) throw kRouteCancelled;
+        // The tree state is UNKNOWN — and both rulings below are claims ABOUT
+        // that state. Fail LOUD rather than guess one of them.
+        if (!status.ok) {
+          throw RouteFailure(
+            'pin-diff: could not read `git status --porcelain` in '
+            '$workspaceDir — ${_reasonTail(status.output)}',
+          );
+        }
+        if (status.output.trim().isNotEmpty) {
+          return Escalate(
+            'pin-diff: uncommitted work present — the branch has ZERO commits '
+            'beyond $baseRef, but its worktree is DIRTY, so the work was DONE '
+            'and never committed (a turn that ended before its commit). This '
+            'is neither stale nor a no-op. Routed for a human ruling; the diff '
+            'the critics would review does not exist yet.',
+          );
+        }
+      }
       return Escalate(
         commits.isEmpty
             ? 'pin-diff: stale/no-op bead — the branch has ZERO commits beyond '

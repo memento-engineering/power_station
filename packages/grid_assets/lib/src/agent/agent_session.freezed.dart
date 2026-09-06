@@ -131,12 +131,12 @@ return permissionFallback(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>({TResult Function( Map<String, String> fields)?  progress,TResult Function( Map<String, String> result,  UsageReport usage)?  completed,TResult Function( String reason)?  failed,TResult Function( String attemptId,  String protocolSessionId)?  sessionBound,TResult Function( AgentPermissionRequest request)?  permissionRequested,TResult Function( AgentPermissionDecision decision)?  permissionFallback,required TResult orElse(),}) {final _that = this;
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>({TResult Function( Map<String, String> fields)?  progress,TResult Function( Map<String, String> result,  UsageReport usage)?  completed,TResult Function( String reason,  CapabilityFailureKind kind)?  failed,TResult Function( String attemptId,  String protocolSessionId)?  sessionBound,TResult Function( AgentPermissionRequest request)?  permissionRequested,TResult Function( AgentPermissionDecision decision)?  permissionFallback,required TResult orElse(),}) {final _that = this;
 switch (_that) {
 case AgentProtocolProgress() when progress != null:
 return progress(_that.fields);case AgentProtocolCompleted() when completed != null:
 return completed(_that.result,_that.usage);case AgentProtocolFailed() when failed != null:
-return failed(_that.reason);case AgentProtocolSessionBound() when sessionBound != null:
+return failed(_that.reason,_that.kind);case AgentProtocolSessionBound() when sessionBound != null:
 return sessionBound(_that.attemptId,_that.protocolSessionId);case AgentProtocolPermissionRequested() when permissionRequested != null:
 return permissionRequested(_that.request);case AgentProtocolPermissionFallback() when permissionFallback != null:
 return permissionFallback(_that.decision);case _:
@@ -157,12 +157,12 @@ return permissionFallback(_that.decision);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult when<TResult extends Object?>({required TResult Function( Map<String, String> fields)  progress,required TResult Function( Map<String, String> result,  UsageReport usage)  completed,required TResult Function( String reason)  failed,required TResult Function( String attemptId,  String protocolSessionId)  sessionBound,required TResult Function( AgentPermissionRequest request)  permissionRequested,required TResult Function( AgentPermissionDecision decision)  permissionFallback,}) {final _that = this;
+@optionalTypeArgs TResult when<TResult extends Object?>({required TResult Function( Map<String, String> fields)  progress,required TResult Function( Map<String, String> result,  UsageReport usage)  completed,required TResult Function( String reason,  CapabilityFailureKind kind)  failed,required TResult Function( String attemptId,  String protocolSessionId)  sessionBound,required TResult Function( AgentPermissionRequest request)  permissionRequested,required TResult Function( AgentPermissionDecision decision)  permissionFallback,}) {final _that = this;
 switch (_that) {
 case AgentProtocolProgress():
 return progress(_that.fields);case AgentProtocolCompleted():
 return completed(_that.result,_that.usage);case AgentProtocolFailed():
-return failed(_that.reason);case AgentProtocolSessionBound():
+return failed(_that.reason,_that.kind);case AgentProtocolSessionBound():
 return sessionBound(_that.attemptId,_that.protocolSessionId);case AgentProtocolPermissionRequested():
 return permissionRequested(_that.request);case AgentProtocolPermissionFallback():
 return permissionFallback(_that.decision);}
@@ -179,12 +179,12 @@ return permissionFallback(_that.decision);}
 /// }
 /// ```
 
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>({TResult? Function( Map<String, String> fields)?  progress,TResult? Function( Map<String, String> result,  UsageReport usage)?  completed,TResult? Function( String reason)?  failed,TResult? Function( String attemptId,  String protocolSessionId)?  sessionBound,TResult? Function( AgentPermissionRequest request)?  permissionRequested,TResult? Function( AgentPermissionDecision decision)?  permissionFallback,}) {final _that = this;
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>({TResult? Function( Map<String, String> fields)?  progress,TResult? Function( Map<String, String> result,  UsageReport usage)?  completed,TResult? Function( String reason,  CapabilityFailureKind kind)?  failed,TResult? Function( String attemptId,  String protocolSessionId)?  sessionBound,TResult? Function( AgentPermissionRequest request)?  permissionRequested,TResult? Function( AgentPermissionDecision decision)?  permissionFallback,}) {final _that = this;
 switch (_that) {
 case AgentProtocolProgress() when progress != null:
 return progress(_that.fields);case AgentProtocolCompleted() when completed != null:
 return completed(_that.result,_that.usage);case AgentProtocolFailed() when failed != null:
-return failed(_that.reason);case AgentProtocolSessionBound() when sessionBound != null:
+return failed(_that.reason,_that.kind);case AgentProtocolSessionBound() when sessionBound != null:
 return sessionBound(_that.attemptId,_that.protocolSessionId);case AgentProtocolPermissionRequested() when permissionRequested != null:
 return permissionRequested(_that.request);case AgentProtocolPermissionFallback() when permissionFallback != null:
 return permissionFallback(_that.decision);case _:
@@ -345,10 +345,11 @@ as UsageReport,
 
 
 class AgentProtocolFailed implements AgentProtocolEvent {
-  const AgentProtocolFailed({required this.reason});
+  const AgentProtocolFailed({required this.reason, this.kind = CapabilityFailureKind.work});
   
 
  final  String reason;
+@JsonKey() final  CapabilityFailureKind kind;
 
 /// Create a copy of AgentProtocolEvent
 /// with the given fields replaced by the non-null parameter values.
@@ -360,16 +361,16 @@ $AgentProtocolFailedCopyWith<AgentProtocolFailed> get copyWith => _$AgentProtoco
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is AgentProtocolFailed&&(identical(other.reason, reason) || other.reason == reason));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is AgentProtocolFailed&&(identical(other.reason, reason) || other.reason == reason)&&(identical(other.kind, kind) || other.kind == kind));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,reason);
+int get hashCode => Object.hash(runtimeType,reason,kind);
 
 @override
 String toString() {
-  return 'AgentProtocolEvent.failed(reason: $reason)';
+  return 'AgentProtocolEvent.failed(reason: $reason, kind: $kind)';
 }
 
 
@@ -380,7 +381,7 @@ abstract mixin class $AgentProtocolFailedCopyWith<$Res> implements $AgentProtoco
   factory $AgentProtocolFailedCopyWith(AgentProtocolFailed value, $Res Function(AgentProtocolFailed) _then) = _$AgentProtocolFailedCopyWithImpl;
 @useResult
 $Res call({
- String reason
+ String reason, CapabilityFailureKind kind
 });
 
 
@@ -397,10 +398,11 @@ class _$AgentProtocolFailedCopyWithImpl<$Res>
 
 /// Create a copy of AgentProtocolEvent
 /// with the given fields replaced by the non-null parameter values.
-@pragma('vm:prefer-inline') $Res call({Object? reason = null,}) {
+@pragma('vm:prefer-inline') $Res call({Object? reason = null,Object? kind = null,}) {
   return _then(AgentProtocolFailed(
 reason: null == reason ? _self.reason : reason // ignore: cast_nullable_to_non_nullable
-as String,
+as String,kind: null == kind ? _self.kind : kind // ignore: cast_nullable_to_non_nullable
+as CapabilityFailureKind,
   ));
 }
 

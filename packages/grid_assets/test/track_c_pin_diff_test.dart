@@ -30,6 +30,8 @@ class _CannedGitRunner implements GitRunner {
     this.logOut = '',
     this.diffOut = '',
     this.diffOk = true,
+    this.statusOut = '',
+    this.statusOk = true,
     this.toplevelOut,
     this.toplevelOk = true,
   });
@@ -37,6 +39,11 @@ class _CannedGitRunner implements GitRunner {
   String logOut;
   String diffOut;
   bool diffOk;
+
+  /// The `status --porcelain` answer; empty is a CLEAN worktree, which is what
+  /// a genuinely stale bead leaves behind.
+  String statusOut;
+  bool statusOk;
 
   /// The `rev-parse --show-toplevel` answer; null ECHOES the call's
   /// `workingDirectory` — what real git reports when the dir IS the checkout
@@ -68,6 +75,14 @@ class _CannedGitRunner implements GitRunner {
           : const GitRunResult(
               exitCode: 128,
               output: 'fatal: bad revision origin/main...HEAD',
+            );
+    }
+    if (sub == 'status') {
+      return statusOk
+          ? GitRunResult(exitCode: 0, output: statusOut)
+          : const GitRunResult(
+              exitCode: 128,
+              output: 'fatal: not a git repository',
             );
     }
     return GitRunResult(exitCode: 0, output: sub == 'log' ? logOut : '');
@@ -182,6 +197,103 @@ void main() {
         expect(reason, contains('net'));
       },
     );
+
+    // The genesis-7ob round: the build agent implemented the whole bead, its
+    // turn ended before the commit it had announced, and pin-diff ruled the
+    // finished, validation-green worktree a 'stale/no-op bead'. ZERO commits
+    // and a DIRTY tree are a third fact, and the human ruling must read it.
+    for (final status in <String>[
+      ' M packages/grid_assets/lib/src/code/committee.dart\n',
+      '?? packages/grid_assets/lib/src/code/new_capability.dart\n',
+    ]) {
+      test('ZERO commits over a DIRTY worktree -> Gate naming the UNCOMMITTED '
+          'work, never stale/no-op (status: ${status.trim()})', () async {
+        final dir = Directory.systemTemp.createTempSync('pin-diff-dirty-');
+        addTearDown(() => dir.deleteSync(recursive: true));
+        final runner = _CannedGitRunner(
+          logOut: '',
+          diffOut: '',
+          statusOut: status,
+        );
+        final c = _ctx(dir.path);
+        final outcome = await PinDiffCapability(
+          runner: runner,
+        ).route(c.context, c.args);
+        expect(outcome, isA<Escalate>());
+        final reason = (outcome as Escalate).reason;
+        expect(reason, contains('uncommitted work present'));
+        expect(
+          reason,
+          isNot(contains('stale/no-op')),
+          reason: 'the exact wording that misled the live human ruling',
+        );
+        expect(runner.calls, contains(equals(['status', '--porcelain'])));
+        expect(
+          File(pinnedDiffPath(dir.path)).existsSync(),
+          isFalse,
+          reason: 'still nothing for the critics to review',
+        );
+      });
+    }
+
+    test('ZERO commits over a CLEAN worktree keeps the stale/no-op ruling, '
+        'and the status probe is what proves it', () async {
+      final dir = Directory.systemTemp.createTempSync('pin-diff-clean-');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final runner = _CannedGitRunner(logOut: '', diffOut: '');
+      final c = _ctx(dir.path);
+      final outcome = await PinDiffCapability(
+        runner: runner,
+      ).route(c.context, c.args);
+      expect(outcome, isA<Escalate>());
+      final reason = (outcome as Escalate).reason;
+      expect(reason, contains('stale/no-op bead'));
+      expect(reason, isNot(contains('uncommitted work present')));
+      expect(runner.calls, contains(equals(['status', '--porcelain'])));
+    });
+
+    test('a COMMITTED net-empty branch keeps its no-op ruling and never reads '
+        'the worktree status', () async {
+      final dir = Directory.systemTemp.createTempSync('pin-diff-noop-status-');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final runner = _CannedGitRunner(
+        logOut: 'abc123 add\ndef456 revert',
+        diffOut: '   \n',
+        statusOut: ' M never-read.dart\n',
+      );
+      final c = _ctx(dir.path);
+      final outcome = await PinDiffCapability(
+        runner: runner,
+      ).route(c.context, c.args);
+      expect(outcome, isA<Escalate>());
+      expect((outcome as Escalate).reason, contains('no-op bead'));
+      expect(
+        runner.calls.where((call) => call.first == 'status'),
+        isEmpty,
+        reason: 'commits exist -> the tree state cannot change the ruling',
+      );
+    });
+
+    test('an UNREADABLE worktree status -> a thrown RouteFailure (LOUD), never '
+        'a guessed ruling about a tree nobody could read', () async {
+      final dir = Directory.systemTemp.createTempSync('pin-diff-statuserr-');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final runner = _CannedGitRunner(logOut: '', diffOut: '', statusOk: false);
+      final c = _ctx(dir.path);
+      await expectLater(
+        PinDiffCapability(runner: runner).route(c.context, c.args),
+        throwsA(
+          isA<RouteFailure>().having(
+            (e) => e.reason,
+            'reason',
+            allOf(
+              contains('git status --porcelain'),
+              contains('not a git repository'),
+            ),
+          ),
+        ),
+      );
+    });
 
     test('git cannot compute the delta -> a thrown RouteFailure (LOUD), never '
         'a silent Escalate that would masquerade as a stale bead', () async {

@@ -7,6 +7,7 @@ late final File? _trace;
 late final List<String> _models;
 late final String _current;
 late final String _stopReason;
+late final String? _finalMessage;
 late final Set<String> _flags;
 
 int _turn = 0;
@@ -22,6 +23,10 @@ Future<void> main(List<String> args) async {
       .toList(growable: false);
   _current = _arg(args, '--current=') ?? 'gpt-5.6-sol[xhigh]';
   _stopReason = _arg(args, '--stop-reason=') ?? 'end_turn';
+  // The CAPACITY-REFUSAL arm: replaces the agent-message chunk this probe would
+  // otherwise write, so a test can end a turn on a provider refusal instead of
+  // on work. Absent, every byte of this probe's output is unchanged.
+  _finalMessage = _arg(args, '--final-message=');
   // The DYING-CHILD arm (bead `pow-39tl`): write noise then one fatal line to
   // stderr and exit non-zero WITHOUT ever speaking the protocol — the live
   // codex shape the bridge previously reported with no exit code and no log.
@@ -170,9 +175,9 @@ Future<void> _handlePermissionResponse(Map<String, dynamic> response) async {
     'sessionUpdate': 'agent_message_chunk',
     'content': <String, Object?>{
       'type': 'text',
-      'text': turn == 1
-          ? 'READY FOR STEER $_identity '
-          : 'FINISHED $_identity ',
+      'text':
+          _finalMessage ??
+          (turn == 1 ? 'READY FOR STEER $_identity ' : 'FINISHED $_identity '),
     },
   });
   await stdout.flush();
