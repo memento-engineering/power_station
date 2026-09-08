@@ -407,14 +407,14 @@ void main() {
       expect(out.toString(), contains('UNDECLARED selector'));
     });
 
-    test('the real block declares 28 assets across five kinds', () {
+    test('the real block declares 32 assets across five kinds', () {
       final block = parseGridBlock(
         pubspecYaml: File(p.join(root, 'pubspec.yaml')).readAsStringSync(),
         pathExists: (relative) =>
             File(p.join(root, relative)).existsSync() ||
             Directory(p.join(root, relative)).existsSync(),
       );
-      expect(block.assets, hasLength(28));
+      expect(block.assets, hasLength(32));
       expect(block.assets.map((a) => a.assetKey.kind).toSet(), {
         AssetKind.rubric,
         AssetKind.prompt,
@@ -468,7 +468,7 @@ void main() {
     });
 
     test('the pack validates and both legs of every skill are keyed', () {
-      expect(GridAssetsPack.definition.assets, hasLength(28));
+      expect(GridAssetsPack.definition.assets, hasLength(32));
       final discover = GridAssetsPack.assets.firstWhere(
         (a) => a.assetKey.id == 'discover',
       );

@@ -69,6 +69,22 @@ resources:
     description: "The DOCS gating lane — the sections a bead names (metadata.docs_sections) must be present in every changed doc."
     path: rubrics/section-structure.md
     visibility: public
+  - id: ruling-adherence
+    description: "A DESIGN judge lens — is every ruling the bead names honoured, cited by the ruling's own entry sentence?"
+    path: rubrics/ruling-adherence.md
+    visibility: public
+  - id: ordering-and-rollback
+    description: "A DESIGN judge lens — causal ordering, interlocks, restore order, breaker semantics and partial-failure rollback."
+    path: rubrics/ordering-and-rollback.md
+    visibility: public
+  - id: fold-fidelity-and-ops
+    description: "A DESIGN judge lens — does every decision-bearing fact keep a carrier through the folds, and is the result operable?"
+    path: rubrics/fold-fidelity-and-ops.md
+    visibility: public
+  - id: cite-verification
+    description: "A DESIGN judge lens — every cited path, line and symbol resolves at the round's base commit; an invented citation is a blocker."
+    path: rubrics/cite-verification.md
+    visibility: public
 
 # Prompts — mustache-templated instruction bodies.
 prompts:
