@@ -14,10 +14,12 @@ import 'package:github_grid_assets/github_grid_assets.dart';
 import 'package:grid_assets/grid_assets.dart';
 import 'package:grid_assets/station_asset_registry.dart'
     show GeneratedGridAssetRegistrant;
-import 'package:grid_engine/grid_engine.dart' show ServiceBundle;
+import 'package:grid_engine/grid_engine.dart'
+    show ExplorationTransport, ServiceBundle;
 // Fake-only: the recording transport this file asserts the migration flare on.
 import 'package:grid_engine/testing.dart' show RecordingExplorationTransport;
 import 'package:grid_runtime/grid_runtime.dart' show PrOpener;
+import 'package:grid_sdk/grid_sdk.dart' show Provider;
 import 'package:grid_sdk/grid_sdk.dart' as sdk;
 import 'package:test/test.dart';
 
@@ -220,6 +222,67 @@ Seed _station(
     ),
   ),
 );
+
+/// A token provider that signs nothing — the seat's App legs are not what this
+/// file exercises; the reconciler's tree POSITION is.
+final class _Tokens implements GitHubAppTokenProvider {
+  @override
+  Future<String> accessToken() async => 'token';
+}
+
+/// Every GitHub request fails, so the seat's first poll cycle throws.
+final class _FailingTransport implements GitHubHttpTransport {
+  @override
+  Future<GitHubHttpResponse> send(GitHubHttpRequest request) async =>
+      const GitHubHttpResponse(statusCode: 500, body: 'boom');
+}
+
+GitHubAppClient _failingClient() => GitHubAppClient(
+  config: GitHubAppConfig(
+    appId: 'app',
+    installationId: 1,
+    apiBaseUri: Uri.parse('https://api.github.test'),
+  ),
+  tokens: _Tokens(),
+  transport: _FailingTransport(),
+);
+
+/// The station-level rung the vended seat must preserve: an ambient
+/// [ServiceBundle] carrying the seat's flare transport, plus the two values a
+/// live reconciler leg is composed over.
+Seed _stationWithTransport({
+  required ExplorationTransport transport,
+  required Seed child,
+}) => sdk.ProviderScope(
+  child: InheritedSeed<ServiceBundle>(
+    value: ServiceBundle(transport: transport),
+    child: Provider<GitHubSelfTrust>.value(
+      GitHubSelfTrust(githubUser: 'nico'),
+      child: Provider<GitHubAppClient>.value(
+        _failingClient(),
+        child: SubstationFactsAssets(
+          repository: _FakeFactsRepository(_facts(const <String>['mine'])),
+          child: InheritedSeed<EnvironmentRegistry>(
+            value: _registry,
+            child: child,
+          ),
+        ),
+      ),
+    ),
+  ),
+);
+
+Future<void> _waitForFlare(
+  RecordingExplorationTransport flares,
+  String name,
+) async {
+  final deadline = DateTime.now().add(const Duration(seconds: 10));
+  while (DateTime.now().isBefore(deadline)) {
+    if (flares.named(name).isNotEmpty) return;
+    await Future<void>.delayed(const Duration(milliseconds: 5));
+  }
+  fail('the composed seat never flared $name');
+}
 
 /// The EFFECTIVE seat bundle — the one `SubstationWork` resolves. Each seat
 /// mounts two: `GitGridAssets`' fresh bundle and, innermost, the bundle
@@ -569,6 +632,56 @@ void main() {
       reason:
           'the paired positive: the previous test\'s isEmpty is falsifiable',
     );
+  });
+
+  test('the composed seat preserves the station transport to the '
+      'reconciler', () async {
+    // The FOLD ORDER claim: `GitGridAssets` builds a FRESH `ServiceBundle`
+    // carrying source control and NOTHING from ambient, so a reconciler folded
+    // BELOW it resolves a bundle whose transport is null and every failed cycle
+    // goes to `developer.log` — which is why the wedged seats' resident logs
+    // carried zero reconciler flares. Mounted above it, the reconciler keeps
+    // the station's carrier.
+    final flares = RecordingExplorationTransport();
+    final mounted = _mount(
+      _stationWithTransport(
+        transport: flares,
+        child: sdk.RawAssetGrid(
+          root: '/home/me/station',
+          assets: [
+            SubstationSeed(
+              name: 'mine',
+              root: '../mine',
+              assetRegistry: _assetRegistry,
+              githubPoll: const GitHubReconcilerConfig(
+                owner: 'memento',
+                repository: 'power_station',
+                substation: 'mine',
+                installationId: 'installation',
+                // One cycle inside this test's lifetime.
+                interval: Duration(hours: 1),
+                minimumSpacing: Duration.zero,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+    final runtime = mounted.walk.values<GitHubReconcilerRuntime>().single;
+    addTearDown(() async {
+      await runtime.stop();
+      mounted.owner.dispose();
+    });
+
+    await _waitForFlare(flares, 'reconciler.cycleFailed');
+
+    final flare = flares.named('reconciler.cycleFailed').first;
+    expect(flare.data, containsPair('seat', 'mine'));
+    expect(flare.data, containsPair('repository', 'memento/power_station'));
+    expect(flare.data['error'], contains('GitHubPollException'));
+    // The A7 pairing is untouched: GitGridAssets is still the seat's source of
+    // source control, behind the mount gate it derives.
+    expect(_gated(mounted.walk).sourceControl, isA<GitSourceControl>());
   });
 
   test('SubstationAppIdentity is a VALUE: equality by value and nowhere to '

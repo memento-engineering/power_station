@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:beads_dart/beads_dart.dart';
+import 'package:grid_runtime/grid_runtime.dart' show GridIssueTypes;
 
 import 'ci_feedback.dart';
 import 'reconciler_event.dart';
@@ -16,6 +17,24 @@ import 'resident_feedback_command.dart';
 /// reads back, so a re-drive would mint a SECOND round for one CI failure.
 const String kCiFeedbackDeliveryLeg = 'ci-feedback';
 
+/// The flare name carried by a check this leg declined to act on.
+const String kCiFeedbackIgnoredFlare = 'reconciler.ciFeedbackIgnored';
+
+/// Reports one CI-feedback outcome the leg declined to act on.
+///
+/// The SAME shape the reconciler asset already reports a failed cycle and a
+/// malformed intake row with, because it IS that reporting: the asset that owns
+/// the seat's `ExplorationTransport` binds a callback here (see
+/// [CiFeedbackProjection.bindReporter]), so this leg needs no transport of its
+/// own and there is no second reporting path to keep in step.
+typedef CiFeedbackReporter =
+    void Function(
+      String flareName,
+      String action,
+      Object error,
+      StackTrace stackTrace,
+    );
+
 /// Projects normalized check results into the durable bead/control rails.
 final class CiFeedbackProjection {
   CiFeedbackProjection({
@@ -23,13 +42,34 @@ final class CiFeedbackProjection {
     required this.commandSender,
     required this.gridRoot,
     required this.substation,
-  });
+  }) : _store = BdCliService(bd);
 
   final BdRunner bd;
   final FeedbackCommandSender commandSender;
   final String gridRoot;
   final String substation;
+
+  /// The TYPE-SCOPED session read this leg correlates a check against.
+  ///
+  /// Composed over the SAME [bd] runner, so the store and its actor are
+  /// unchanged; only the READ FORM moved. `bd export --all` — which this leg
+  /// used to run — is refused outright by a proxied-server store ("export is
+  /// not supported in proxied-server mode"), which failed the leg on every
+  /// cycle and head-of-line blocked the seat's whole poll behind one pending
+  /// observation. `bd list -t session --all` is the form such a store answers.
+  final BdCliService _store;
+
   final Set<String> _handled = <String>{};
+  CiFeedbackReporter? _reporter;
+
+  /// Binds [reporter] as this leg's flare rail, replacing any previous binding.
+  void bindReporter(CiFeedbackReporter reporter) => _reporter = reporter;
+
+  /// Unbinds [reporter] when it is still the bound one, leaving a binding some
+  /// other owner has since installed alone.
+  void unbindReporter(CiFeedbackReporter reporter) {
+    if (identical(_reporter, reporter)) _reporter = null;
+  }
 
   Future<void> call(NormalizedGitHubEvent event) async {
     switch (event) {
@@ -42,31 +82,38 @@ final class CiFeedbackProjection {
 
   Future<void> _projectCheck(CheckConcluded event) async {
     if (!event.headBranch.startsWith('grid/')) return;
-    final records = await _exportAll();
-    final workKeys = <String>[];
-    final current = <Map<String, Object?>>[];
     final beadId = event.headBranch.substring('grid/'.length).trim();
     if (beadId.isEmpty) return;
-    for (final record in records) {
-      if (record['issue_type'] != 'session') continue;
-      final metadata = _metadata(record);
-      final workBead = metadata['work_bead'];
-      if (workBead is String) {
-        workKeys.add(workBead);
-        if (workBead == beadId) current.add(record);
-      }
+    // ONE type-scoped read per projected check, widened past bd's open-only
+    // default so a closed session still counts. The filtering happens HERE, in
+    // Dart, and never as a `work_bead` metadata equality the store would apply:
+    // the rework ledger `maxReworkRound` counts is the RETIRED `<bead>#r<N>`
+    // keys, and an exact match would drop exactly those.
+    final sessions = await _store.listScope(
+      type: GridIssueTypes.session,
+      includeClosed: true,
+    );
+    final workBeadKeys = <String>[];
+    final current = <Bead>[];
+    for (final session in sessions.beads) {
+      final workBead = session.metadata['work_bead'];
+      if (workBead is! String) continue;
+      workBeadKeys.add(workBead);
+      if (workBead == beadId) current.add(session);
     }
     if (current.length != 1) {
-      throw StateError(
-        'expected exactly one current session for $beadId; '
-        'found ${current.length}',
+      _ignore(
+        beadId,
+        'expected exactly one current session; found ${current.length}',
       );
+      return;
     }
-    final sessionId = current.single['id'];
-    if (sessionId is! String || sessionId.isEmpty) {
-      throw StateError('current session for $beadId has no string id');
+    final sessionId = current.single.id.trim();
+    if (sessionId.isEmpty) {
+      _ignore(beadId, 'its current session carries no id');
+      return;
     }
-    final decision = decideCiFeedback(event, sessionId, workKeys);
+    final decision = decideCiFeedback(event, sessionId, workBeadKeys);
     if (decision == null || decision.action == CiFeedbackAction.ignore) return;
     if (!_handled.add(decision.idempotencyKey)) return;
     try {
@@ -106,50 +153,21 @@ final class CiFeedbackProjection {
     }
   }
 
-  Future<List<Map<String, Object?>>> _exportAll() async {
-    final result = await bd.run(const ['export', '--all']);
-    if (!result.ok) {
-      throw StateError('bd export --all failed: ${result.stderr}');
-    }
-    try {
-      Object? decoded;
-      try {
-        decoded = jsonDecode(result.stdout);
-      } on FormatException {
-        decoded = const LineSplitter()
-            .convert(result.stdout)
-            .where((line) => line.trim().isNotEmpty)
-            .map(jsonDecode)
-            .toList(growable: false);
-      }
-      if (decoded is Map && decoded.containsKey('data')) {
-        decoded = decoded['data'];
-      } else if (decoded is Map) {
-        decoded = [decoded];
-      }
-      if (decoded is! List) throw const FormatException('export is not a list');
-      return decoded
-          .map((item) {
-            if (item is! Map) {
-              throw const FormatException('bead is not an object');
-            }
-            return item.cast<String, Object?>();
-          })
-          .toList(growable: false);
-    } on Object catch (error) {
-      throw StateError('malformed bd export --all output: $error');
-    }
-  }
-
-  Map<String, Object?> _metadata(Map<String, Object?> record) {
-    final raw = record['metadata'];
-    if (raw == null) return const {};
-    if (raw is Map) return raw.cast<String, Object?>();
-    if (raw is String) {
-      final decoded = jsonDecode(raw);
-      if (decoded is Map) return decoded.cast<String, Object?>();
-    }
-    throw const FormatException('bead metadata is malformed');
+  /// Flares that [beadId]'s check was ignored for [reason], and returns.
+  ///
+  /// A session count of zero or of two is a shape the state store LEGITIMATELY
+  /// holds — a check arriving after its PR landed and its session closed and
+  /// re-keyed is the ordinary case — so it can never be a throw. Throwing here
+  /// wedged the reconciler permanently: the leg never acknowledged, the cycle
+  /// aborted before the poll, and the seat re-drove that one observation
+  /// forever while every newer issue, pull and check went unobserved.
+  void _ignore(String beadId, String reason) {
+    _reporter?.call(
+      kCiFeedbackIgnoredFlare,
+      'ignored a check for $beadId',
+      StateError('CI feedback ignored for $beadId: $reason'),
+      StackTrace.current,
+    );
   }
 
   Future<void> _markLandingReady(CiFeedbackDecision decision) async {

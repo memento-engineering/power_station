@@ -105,11 +105,14 @@ final class _BdRunner implements BdRunner {
   }
 }
 
+/// The seat's grid STATE store, in PROXIED-SERVER mode: it answers the
+/// type-scoped session list and REFUSES `export`, exactly as every org store
+/// and lunar's own state store do.
 final class _StateBdRunner implements BdRunner {
-  _StateBdRunner(this.export);
+  _StateBdRunner(this.sessions);
 
-  /// The payload this fake returns for `bd export --all`.
-  String export;
+  /// The enveloped payload this fake returns for `bd list -t session --all`.
+  String sessions;
   final argvs = <List<String>>[];
 
   @override
@@ -119,9 +122,15 @@ final class _StateBdRunner implements BdRunner {
     String? stdin,
   }) async {
     argvs.add(List<String>.of(args));
-    return args.first == 'export'
-        ? BdResult(exitCode: 0, stdout: export, stderr: '')
-        : const BdResult(exitCode: 0, stdout: '{}', stderr: '');
+    return switch (args.first) {
+      'export' => const BdResult(
+        exitCode: 1,
+        stdout: '',
+        stderr: 'Error: export is not supported in proxied-server mode',
+      ),
+      'list' => BdResult(exitCode: 0, stdout: sessions, stderr: ''),
+      _ => const BdResult(exitCode: 0, stdout: '{}', stderr: ''),
+    };
   }
 }
 
@@ -144,15 +153,19 @@ final class _RecordingFeedbackSender implements FeedbackCommandSender {
   }
 }
 
-/// One `bd export --all` payload holding one session bead per work-bead key.
-String _sessionLedger(List<String> workBeads) => jsonEncode([
-  for (var i = 0; i < workBeads.length; i++)
-    {
-      'id': 'grid_state-session-$i',
-      'issue_type': 'session',
-      'metadata': {'work_bead': workBeads[i]},
-    },
-]);
+/// One enveloped `bd list -t session --all --json` payload holding one session
+/// bead per work-bead key.
+String _sessionLedger(List<String> workBeads) => jsonEncode({
+  'schema_version': 1,
+  'data': [
+    for (var i = 0; i < workBeads.length; i++)
+      {
+        'id': 'grid_state-session-$i',
+        'issue_type': 'session',
+        'metadata': {'work_bead': workBeads[i]},
+      },
+  ],
+});
 
 /// A transport serving one open self-authored issue, one `grid/pow-test` pull,
 /// and one completed check with [conclusion].
