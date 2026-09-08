@@ -270,9 +270,13 @@ class StationServer {
     await req.response.close();
   }
 
-  /// Stops the server (and the reap ticker, if one was started).
+  /// Stops the server and BOTH of its clocks: the optional coarse reap ticker
+  /// (when [start] was given a `reapInterval`) and the lease manager's own
+  /// earliest-deadline timer. Held leases and queued waiters are left as they
+  /// are — closing the socket is what ends the lessee's side.
   Future<void> close() {
     _reapTimer?.cancel();
+    _leases.close();
     return _server.close(force: true);
   }
 }
