@@ -11,6 +11,7 @@ register:
   surfaces:
     - "packages/grid_assets/lib/src/code/design_committee.dart"
     - "packages/grid_assets/lib/src/code/docs_committee.dart"
+    - "packages/grid_assets/lib/src/code/code_capabilities.dart"
     - "packages/grid_assets/extension/rubrics/ruling-adherence.md"
     - "packages/grid_assets/extension/rubrics/ordering-and-rollback.md"
     - "packages/grid_assets/extension/rubrics/fold-fidelity-and-ops.md"
