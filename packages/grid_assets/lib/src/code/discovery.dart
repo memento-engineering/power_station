@@ -152,7 +152,21 @@ const int kMaxNeighbors = 8;
 const int kMaxDiscoverySnippetChars = 4096;
 
 /// The bound on the decision entries kept for ONE roster-qualified surface.
-const int kMaxDecisionEntriesPerSurface = 12;
+///
+/// Sized to the LARGEST real surface rather than to a comfortable page: a
+/// mature register declares most of its entries against `packages/**`, so a
+/// single first-party surface answers 81 entries today. At the old bound of 12
+/// the window was filled by whatever sorted first (every ADR-0000 `A<n>`
+/// amendment), and every slug-style entry past it was structurally
+/// unreachable — a bead citing one held its own round at `discovery-route`
+/// with no exit, because the bead cannot choose which entries a clip keeps.
+///
+/// The bound stays a BOUND: a surface past it is still clipped, still records
+/// its receipt, and is still the known non-answer [EvidenceState.truncated]
+/// names. What changed is WHICH entries the window keeps — the ones the bead
+/// NAMES come first ([_decisionLookup]), so growth past this number can cost a
+/// lens context but can no longer hide a cited decision.
+const int kMaxDecisionEntriesPerSurface = 96;
 
 /// The bound on the prior-art hits kept for ONE query.
 const int kMaxPriorArtHitsPerQuery = 12;
@@ -559,7 +573,9 @@ class DecisionSurfaceEvidence {
   /// [EvidenceState.complete] is a REAL empty union.
   final EvidenceState state;
 
-  /// Whether the entry list was clipped at [kMaxDecisionEntriesPerSurface].
+  /// Whether the entry list was clipped at [kMaxDecisionEntriesPerSurface] —
+  /// which only ever drops an entry the bead did NOT name, since the cited ones
+  /// are selected first.
   final bool truncated;
 
   /// The failure detail — REQUIRED (non-empty) for [EvidenceState.failed].
@@ -2539,10 +2555,15 @@ typedef PriorArtSource =
 /// `decisions index --surface <repo>/<path>` verb, run ONCE per round over
 /// every roster-qualified surface. Absent ⇒ every surface is recorded
 /// [EvidenceState.unavailable].
+///
+/// The WORK BEAD rides along because a bounded lookup must know what the bead
+/// CITES before it decides what to drop: [_decisionLookup] keeps every named
+/// entry ahead of the index-order fill.
 typedef DecisionIndexSource =
     Future<List<DecisionSurfaceEvidence>> Function(
       String workspaceDir,
       List<String> rosterQualifiedSurfaces,
+      Bead workBead,
     );
 
 /// The pluggable HISTORY seam — one batched `git log` over the round's RESOLVED
@@ -2809,6 +2830,11 @@ List<DecisionSurfaceEvidence> _decisionSourceRecords(
 /// duplicate slug file, or an unreadable entry is [EvidenceState.failed] with
 /// the output/exception preserved — a crashed lookup is never graded clean.
 ///
+/// What the index answers is SELECTED name-first against the work bead's own
+/// prose before it is clipped ([_decisionLookup]), so the entries a bead cites
+/// survive a surface whose union runs past
+/// [kMaxDecisionEntriesPerSurface].
+///
 /// [runnerInvocation] is the composing station's OWN invocation, threaded from
 /// `buildCodeRegistry(overlayArgs:)['runner']`. Blank or absent ⇒ NO shell call
 /// is made at all and every surface is recorded [EvidenceState.unavailable]:
@@ -2851,7 +2877,7 @@ DecisionIndexSource commandDecisionIndexSource(
 }) {
   final stationRunner = runnerInvocation?.trim() ?? '';
   final stationGridHome = gridHome?.trim() ?? '';
-  return (workspaceDir, surfaces) async {
+  return (workspaceDir, surfaces, workBead) async {
     final out = <DecisionSurfaceEvidence>[];
     final seen = <String>{};
     for (final surface in surfaces) {
@@ -2917,6 +2943,7 @@ DecisionIndexSource commandDecisionIndexSource(
             surface: surface,
             command: command,
             output: result.output,
+            workBead: workBead,
           ),
         );
       } catch (e) {
@@ -2946,18 +2973,177 @@ DecisionIndexSource commandDecisionIndexSource(
 /// an envelope it does not know grades noise as evidence.
 const Set<int> _acceptedDecisionIndexSpecs = {1, 2};
 
-/// Parses ONE `decisions index` run and resolves every returned slug on disk.
+/// ONE validated `decisions index` record, before its body is read off disk —
+/// the shape name-first selection ranks, and the only place the producer's raw
+/// map is carried past validation.
+class _IndexedDecision {
+  const _IndexedDecision({
+    required this.record,
+    required this.slug,
+    required this.originRegister,
+    required this.originPath,
+  });
+
+  /// The producer's own record, kept whole for the fields resolution reads.
+  final Map<Object?, Object?> record;
+
+  /// The entry's slug.
+  final String slug;
+
+  /// The register the entry came from.
+  final String originRegister;
+
+  /// The register directory the index reported.
+  final String originPath;
+
+  /// The canonical citation identity — `<originRegister>#<slug>`.
+  String get identity => '$originRegister#$slug';
+
+  /// The legacy `A<n>` / `ADR-<nnnn>` id this slug carries, or `''`. Promoting
+  /// an ADR-0000 amendment into the register keeps its id as the slug's leading
+  /// segment, and a bead goes on citing the ID long after the slug exists.
+  String get alias => _legacyDecisionAlias(slug);
+}
+
+/// ONE decision the bead cites EXPLICITLY — a canonical `<register>#<slug>` or
+/// a legacy `A<n>`/`ADR-<nnnn>` id.
+///
+/// A bare slug is only ever matched against what the index RETURNED (nothing
+/// can be concluded from hyphenated prose), but an explicit citation the index
+/// cannot answer is a defect in the bead's own citations, and it fails loud
+/// naming the citation rather than hiding inside a clip receipt.
+class _DecisionRequest {
+  const _DecisionRequest.canonical(String identity)
+    : _identity = identity,
+      _alias = '';
+
+  const _DecisionRequest.legacy(String alias) : _identity = '', _alias = alias;
+
+  final String _identity;
+  final String _alias;
+
+  /// What the failure reason CALLS this citation.
+  String get label => _identity.isEmpty ? _alias : _identity.split('#').last;
+
+  /// Whether [candidate] is the entry this citation asked for.
+  bool isAnsweredBy(_IndexedDecision candidate) => _identity.isEmpty
+      ? candidate.alias == _alias
+      : candidate.identity.toLowerCase() == _identity;
+}
+
+/// A canonical `<register>#<slug>` citation. The slug half must be HYPHENATED
+/// and start with a letter — what every authored slug looks like, and what
+/// keeps prose such as `pr#256` out of the explicit set, where a false citation
+/// would fail a surface that is perfectly answerable.
+final RegExp _canonicalDecisionCitation = RegExp(
+  r'(?<![a-z0-9_#-])([a-z0-9_]+)#([a-z][a-z0-9]*(?:-[a-z0-9]+)+)(?![a-z0-9_-])',
+);
+
+/// A legacy ADR-0000 amendment id (`A48`) or ADR id (`ADR-0008`).
+final RegExp _legacyDecisionCitation = RegExp(
+  r'(?<![a-z0-9_#-])(a\d+|adr-\d{4})(?![a-z0-9_-])',
+);
+
+/// The leading legacy id of [slug], or `''` when it carries none.
+String _legacyDecisionAlias(String slug) =>
+    RegExp(
+      r'^(a\d+|adr-\d{4})(?:-|$)',
+    ).firstMatch(slug.toLowerCase())?.group(1) ??
+    '';
+
+/// The bead prose a decision citation can live in — description, design and
+/// notes, lowercased so every match is case-insensitive.
+///
+/// Title and acceptance criteria are deliberately OUT: a title is a summary
+/// whose words cite nothing, and acceptance criteria are the bead's own exit
+/// tests, so admitting either would pad the named set with prose that names no
+/// decision at all.
+String _decisionCitationText(Bead bead) =>
+    '${bead.description}\n${bead.design}\n${bead.notes}'.toLowerCase();
+
+/// Every decision [cited] names EXPLICITLY, deduplicated, in first-appearance
+/// order.
+List<_DecisionRequest> _explicitDecisionRequests(String cited) {
+  final found = <(int, String, _DecisionRequest)>[];
+  for (final match in _canonicalDecisionCitation.allMatches(cited)) {
+    final identity = match.group(0)!;
+    found.add((match.start, identity, _DecisionRequest.canonical(identity)));
+  }
+  for (final match in _legacyDecisionCitation.allMatches(cited)) {
+    final alias = match.group(0)!;
+    found.add((match.start, alias, _DecisionRequest.legacy(alias)));
+  }
+  found.sort((a, b) => a.$1.compareTo(b.$1));
+  final seen = <String>{};
+  return [
+    for (final (_, key, request) in found)
+      if (seen.add(key)) request,
+  ];
+}
+
+/// Whether [cited] NAMES [candidate] — by slug, by canonical identity, or by
+/// the slug's legacy id.
+bool _isNamedDecision(_IndexedDecision candidate, String cited) =>
+    _citesToken(cited, candidate.slug.toLowerCase()) ||
+    _citesToken(cited, candidate.identity.toLowerCase()) ||
+    (candidate.alias.isNotEmpty && _citesToken(cited, candidate.alias));
+
+/// Whether [needle] occurs in [haystack] as a WHOLE token — never as the head
+/// or the tail of a longer one, so `A2` can never claim the entry a bead cited
+/// as `A25`.
+///
+/// `-` and `_` count as token characters precisely BECAUSE a slug is
+/// hyphenated: without them `a21-bead-pow` would claim a hit inside
+/// `a21-bead-pow-96y-…`. [haystack] is already lowercased, so only lowercase
+/// letters need to continue a token.
+bool _citesToken(String haystack, String needle) {
+  if (needle.isEmpty) return false;
+  for (
+    var at = haystack.indexOf(needle);
+    at >= 0;
+    at = haystack.indexOf(needle, at + 1)
+  ) {
+    final before = at == 0 ? null : haystack.codeUnitAt(at - 1);
+    final end = at + needle.length;
+    final after = end == haystack.length ? null : haystack.codeUnitAt(end);
+    if (!_isTokenChar(before) && !_isTokenChar(after)) return true;
+  }
+  return false;
+}
+
+/// Whether [unit] CONTINUES a token (lowercase ASCII letter, digit, `-`, `_`).
+bool _isTokenChar(int? unit) =>
+    unit != null &&
+    ((unit >= 0x61 && unit <= 0x7a) ||
+        (unit >= 0x30 && unit <= 0x39) ||
+        unit == 0x2d ||
+        unit == 0x5f);
+
+/// Parses ONE `decisions index` run, selects NAME-FIRST, and resolves every
+/// selected slug on disk.
 ///
 /// Only an [_acceptedDecisionIndexSpecs] envelope is read. Schema 2's top-level
 /// `diagnostics` and per-decision `edges` are PRODUCER-owned context this
 /// consumer neither validates nor projects: a register that lints dirty still
 /// answers a complete union here, and a new member added beside them never
 /// turns a good answer into a deterministic gap.
+///
+/// The whole `decisions` array is VALIDATED before anything is selected, so a
+/// malformed record past the bound still fails loud rather than hiding behind
+/// the clip. Then the entries [workBead] NAMES ([_isNamedDecision]) are kept,
+/// in index order, ahead of an index-order fill of the rest up to
+/// [kMaxDecisionEntriesPerSurface]; only an omitted UNNAMED entry sets the
+/// clip receipt. Two shapes are loud failures rather than partial answers: a
+/// named set that does not fit the bound, and an EXPLICIT citation
+/// ([_explicitDecisionRequests]) the index does not answer at all — the second
+/// is a defect in the bead's own citations, which TRUNCATED would have
+/// disguised as a clip nobody can act on.
 DecisionSurfaceEvidence _decisionLookup({
   required String workspaceDir,
   required String surface,
   required String command,
   required String output,
+  required Bead workBead,
 }) {
   final Object? decoded;
   try {
@@ -2990,8 +3176,8 @@ DecisionSurfaceEvidence _decisionLookup({
       error: 'index answered no `decisions` array',
     );
   }
-  final entries = <DecisionEntryEvidence>[];
-  for (final record in raw.take(kMaxDecisionEntriesPerSurface)) {
+  final indexed = <_IndexedDecision>[];
+  for (final record in raw) {
     if (record is! Map) {
       return _decisionSurface(
         surface: surface,
@@ -3011,23 +3197,79 @@ DecisionSurfaceEvidence _decisionLookup({
         error: 'index answered a record with no slug/originRegister/originPath',
       );
     }
+    indexed.add(
+      _IndexedDecision(
+        record: record,
+        slug: slug,
+        originRegister: originRegister,
+        originPath: originPath,
+      ),
+    );
+  }
+
+  final cited = _decisionCitationText(workBead);
+  final absent = [
+    for (final request in _explicitDecisionRequests(cited))
+      if (!indexed.any(request.isAnsweredBy)) request.label,
+  ];
+  if (absent.isNotEmpty) {
+    return _decisionSurface(
+      surface: surface,
+      command: command,
+      entries: const [],
+      error: 'named decision absent from index: ${absent.join(', ')}',
+    );
+  }
+
+  final selected = <_IndexedDecision>[];
+  final fill = <_IndexedDecision>[];
+  for (final candidate in indexed) {
+    (_isNamedDecision(candidate, cited) ? selected : fill).add(candidate);
+  }
+  if (selected.length > kMaxDecisionEntriesPerSurface) {
+    return _decisionSurface(
+      surface: surface,
+      command: command,
+      entries: const [],
+      error:
+          'named decision set exceeds '
+          'kMaxDecisionEntriesPerSurface=$kMaxDecisionEntriesPerSurface: '
+          '${selected.map((entry) => entry.identity).join(', ')}',
+    );
+  }
+  selected.addAll(fill.take(kMaxDecisionEntriesPerSurface - selected.length));
+
+  // ONE read per register directory, not one per selected entry: the bound is
+  // eight times what it was, and a mature register holds ~100 entry files, so
+  // re-listing and re-reading the whole directory per slug is quadratic for no
+  // gain. The per-slug match below is the same exact multiline `slug:` regex
+  // over the same `.md` file set — only the text it runs over is memoized, and
+  // only for the length of this one lookup.
+  final registerFiles = <String, List<({String path, String text})>>{};
+  final entries = <DecisionEntryEvidence>[];
+  for (final candidate in selected) {
+    final record = candidate.record;
+    final slug = candidate.slug;
+    final originRegister = candidate.originRegister;
+    final originPath = candidate.originPath;
     final String entryPath;
     final String body;
     try {
-      final dir = Directory(
-        p.isAbsolute(originPath)
-            ? originPath
-            : p.join(workspaceDir, originPath),
-      );
+      final dirPath = p.isAbsolute(originPath)
+          ? originPath
+          : p.join(workspaceDir, originPath);
+      final files = registerFiles[dirPath] ??= [
+        for (final file in Directory(dirPath).listSync().whereType<File>())
+          if (file.path.endsWith('.md'))
+            (path: file.path, text: file.readAsStringSync()),
+      ];
       final slugLine = RegExp(
         '^\\s*slug:\\s*${RegExp.escape(slug)}\\s*\$',
         multiLine: true,
       );
       final matches = [
-        for (final file in dir.listSync().whereType<File>())
-          if (file.path.endsWith('.md') &&
-              slugLine.hasMatch(file.readAsStringSync()))
-            file,
+        for (final file in files)
+          if (slugLine.hasMatch(file.text)) file,
       ];
       if (matches.length != 1) {
         return _decisionSurface(
@@ -3040,7 +3282,7 @@ DecisionSurfaceEvidence _decisionLookup({
         );
       }
       entryPath = matches.single.path;
-      body = matches.single.readAsStringSync();
+      body = matches.single.text;
     } catch (e) {
       return _decisionSurface(
         surface: surface,
@@ -3075,7 +3317,7 @@ DecisionSurfaceEvidence _decisionLookup({
     surface: surface,
     command: command,
     entries: entries,
-    truncated: raw.length > kMaxDecisionEntriesPerSurface,
+    truncated: selected.length < indexed.length,
   );
 }
 
@@ -3244,10 +3486,14 @@ Future<List<PriorArtQueryEvidence>> gatherPriorArt(
 /// The two arms are NOT the same answer. An absent source is nobody LOOKING;
 /// a composed source that threw is a lookup that BROKE. Neither invents a
 /// command string it never ran (see [_decisionSourceRecords]).
+///
+/// [workBead] is the round's own bead, handed to the source so a bounded
+/// lookup keeps what the bead CITES ([DecisionIndexSource]).
 Future<List<DecisionSurfaceEvidence>> gatherDecisions(
   DecisionIndexSource? source,
   String workspaceDir,
   List<String> surfaces,
+  Bead workBead,
 ) async {
   if (source == null) {
     return _decisionSourceRecords(
@@ -3257,7 +3503,7 @@ Future<List<DecisionSurfaceEvidence>> gatherDecisions(
     );
   }
   try {
-    return await source(workspaceDir, surfaces);
+    return await source(workspaceDir, surfaces, workBead);
   } catch (e) {
     return _decisionSourceRecords(
       surfaces,
@@ -3680,7 +3926,12 @@ class AnchorsCapability extends ServiceCapability {
     final queries = priorArtQueries(bead, extracted.symbols);
     final priorArt = await gatherPriorArt(_priorArt, queries);
     if (args.cancel.isCancelled) return const Failed('cancelled');
-    final decisions = await gatherDecisions(_decisions, workspaceDir, surfaces);
+    final decisions = await gatherDecisions(
+      _decisions,
+      workspaceDir,
+      surfaces,
+      bead,
+    );
     if (args.cancel.isCancelled) return const Failed('cancelled');
     final history = await gatherHistory(_history, workspaceDir, [
       for (final anchor in resolved)

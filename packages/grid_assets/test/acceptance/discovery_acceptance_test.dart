@@ -155,15 +155,19 @@ class _RecordingPriorArt {
 }
 
 /// A recording batch [DecisionIndexSource]: one call per round, over every
-/// roster-qualified surface.
+/// roster-qualified surface, for ONE work bead — the bead rides along so a
+/// bounded lookup can keep what it cites.
 class _RecordingDecisionIndex {
   final List<List<String>> calls = [];
+  final List<String> beadIds = [];
 
   Future<List<DecisionSurfaceEvidence>> call(
     String workspaceDir,
     List<String> surfaces,
+    Bead workBead,
   ) async {
     calls.add(List.unmodifiable(surfaces));
+    beadIds.add(workBead.id);
     return [
       for (final surface in surfaces)
         DecisionSurfaceEvidence(
@@ -598,6 +602,13 @@ void main() {
         'power_station/lib/src/code/discovery.dart',
         'power_station/lib/src/code/committee.dart',
       ]);
+      expect(
+        decisions.beadIds,
+        ['tg-1'],
+        reason:
+            'the gather hands the source the ROUND\'s own bead, so a bounded '
+            'lookup keeps what that bead cites',
+      );
       expect(history.argv, hasLength(1));
       expect(history.argv.single, [
         'log',
