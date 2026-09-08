@@ -386,14 +386,71 @@ List<String> _methods(_BridgeResult result) => result.trace
     .map((entry) => entry['method']! as String)
     .toList(growable: false);
 
-/// The hermetic ACP agent fixture, resolved from either run directory.
+/// The hermetic ACP agent fixture SOURCE, resolved from either run directory.
 String _probePath() => <String>[
   p.absolute('test/fixtures/acp_agent_probe.dart'),
   p.absolute('packages/grid_assets/test/fixtures/acp_agent_probe.dart'),
 ].firstWhere((path) => File(path).existsSync());
 
+/// How many times this suite compiled the fixture. Asserted, not assumed: a
+/// child compiled from source PER TEST is what made this suite load sensitive.
+int _probeCompileCount = 0;
+
+/// Compiles the ACP fixture ONCE for the whole suite and returns the artifact
+/// every real-child test launches, so a cold compile is paid up front instead
+/// of on the critical path of each protocol exchange.
+///
+/// A KERNEL snapshot, not a `jit-snapshot`: a JIT snapshot is trained by
+/// RUNNING the script, and this fixture is a protocol server that blocks on
+/// stdin until its peer closes it — the training run never returns. Compiling
+/// to kernel pays the front end once with no training run at all.
+Future<String> _compileProbe(Directory into) async {
+  final output = p.join(into.path, 'acp_agent_probe.dill');
+  _probeCompileCount++;
+  final compiled = await Process.run(Platform.resolvedExecutable, <String>[
+    'compile',
+    'kernel',
+    '-o',
+    output,
+    _probePath(),
+  ]);
+  if (compiled.exitCode != 0 || !File(output).existsSync()) {
+    throw StateError(
+      'could not compile the ACP probe fixture '
+      '(exit ${compiled.exitCode}): ${compiled.stdout}\n${compiled.stderr}',
+    );
+  }
+  return output;
+}
+
 void main() {
-  final probePath = _probePath();
+  late final String probePath;
+  Directory? snapshotDir;
+
+  setUpAll(() async {
+    final directory = await Directory.systemTemp.createTemp(
+      'grid_assets_acp_probe_',
+    );
+    snapshotDir = directory;
+    probePath = await _compileProbe(directory);
+  });
+
+  tearDownAll(() async {
+    final directory = snapshotDir;
+    if (directory != null && directory.existsSync()) {
+      await directory.delete(recursive: true);
+    }
+  });
+
+  test('ACP probe fixture is compiled exactly once per suite', () {
+    expect(_probeCompileCount, 1, reason: 'one compile for the whole suite');
+    expect(File(probePath).existsSync(), isTrue);
+    expect(
+      probePath,
+      isNot(_probePath()),
+      reason: 'every child launches the COMPILED probe, never the source',
+    );
+  });
 
   test(
     'one adapter drives two agent values and steers before protocol completion',
@@ -792,7 +849,6 @@ void main() {
 
       // END TO END: the bridge publishes the binding, asks, and applies the
       // answer to the option the harness actually offered.
-      final probePath = _probePath();
       final scoped = await _runBridge(
         probePath: probePath,
         probeArgs: const <String>['--identity=scoped-probe'],
@@ -934,7 +990,7 @@ void main() {
       // exists. (An answer naming an unknown ask never routes at all: the
       // bridge drops it, and the ask cancels on its bound timeout.)
       final mismatched = await _runBridge(
-        probePath: _probePath(),
+        probePath: probePath,
         probeArgs: const <String>['--identity=mismatch-probe'],
         station: (ask) => AgentPermissionDecision(
           requestId: ask.requestId,
@@ -962,7 +1018,7 @@ void main() {
       // NO ADMITTED ATTEMPT: the bridge stamps a blank attempt and the station's
       // own guard refuses it — the whole run authorizes nothing.
       final unadmitted = await _runBridge(
-        probePath: _probePath(),
+        probePath: probePath,
         probeArgs: const <String>['--identity=unadmitted-probe'],
         attemptId: '',
       );
