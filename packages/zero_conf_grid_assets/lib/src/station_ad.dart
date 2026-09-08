@@ -1,7 +1,10 @@
 /// The wire shape a `_grid._tcp` service instance carries — the D-Z8 pin:
 /// "one discovery asset ... service instance carrying station id, control
 /// endpoint, offered substation prefixes, trust hints." [StationAd] is that
-/// shape, transport-free: the mDNS TXT record encodes/decodes it
+/// shape, transport-free: it carries the station's federation-bus endpoint AND
+/// its optional control door ([StationAd.controlDoor]) in the ONE
+/// advertisement, so a client that browses the LAN needs no second service
+/// type to find the door. The mDNS TXT record encodes/decodes it
 /// ([StationAd.toTxt]/[StationAd.fromTxt]), and once a [TrustGate] approves one
 /// it converts directly into `federated_grid_assets`' [Peer]
 /// ([StationAd.toPeer]) — the seam D-Z8 promises ("slots behind the
@@ -29,6 +32,7 @@ class StationAd {
     required this.station,
     required this.host,
     required this.port,
+    this.controlDoor,
     this.substations = const [],
     this.trustHint,
   });
@@ -41,6 +45,18 @@ class StationAd {
 
   /// The federation bus port.
   final int port;
+
+  /// The station's CONTROL DOOR as a bare `host:port` authority — no scheme,
+  /// no route — where station control answers HTTP `/status` and the
+  /// authenticated WebSocket `/stream`. `null` when the station exposes no LAN
+  /// control door, which is the DEFAULT posture: a station opens one only when
+  /// it is told to bind it. Distinct from [host]:[port], which is the
+  /// federation bus; a station may answer the two on different ports.
+  ///
+  /// This rides the ONE `_grid._tcp` advertisement rather than a second
+  /// service type, so a client picks a station and dials its door from a
+  /// single browse.
+  final String? controlDoor;
 
   /// The substation prefixes this station hosts (D-A1); empty = a hub
   /// candidate (D-B1).
@@ -58,12 +74,15 @@ class StationAd {
   /// assets"). [Topology.gridHub] subscribes to these and only these.
   bool get isHubCandidate => substations.isEmpty;
 
-  /// The TXT record this ad publishes: station id, broker endpoint, hosted
-  /// substations, trust hint (D-Z8's four fields) as `key=value` character
-  /// strings.
+  /// The TXT record this ad publishes: station id, broker endpoint, control
+  /// door, hosted substations, trust hint as `key=value` character strings.
+  /// `door` is emitted only when there is one — TXT records are size-bounded,
+  /// and an ad without the key is exactly the record shipped before the door
+  /// existed.
   Map<String, String> toTxt() => {
     'id': station,
     'broker': address,
+    if (controlDoor != null) 'door': controlDoor!,
     'substations': substations.join(','),
     if (trustHint != null) 'trust': trustHint!,
   };
@@ -81,6 +100,7 @@ class StationAd {
       station: txt['id'] ?? '',
       host: host,
       port: port,
+      controlDoor: txt['door'],
       substations: (subs == null || subs.isEmpty) ? const [] : subs.split(','),
       trustHint: txt['trust'],
     );
@@ -90,7 +110,13 @@ class StationAd {
   /// seam back into the lease bus's static [Membership] shape. Callers only
   /// reach this after a [TrustGate] has approved the ad (discovered ≠ trusted,
   /// D-Z6); this method itself performs no trust check.
-  Peer toPeer() => Peer(id: station, host: host, port: port, token: trustHint);
+  Peer toPeer() => Peer(
+    id: station,
+    host: host,
+    port: port,
+    token: trustHint,
+    controlDoor: controlDoor,
+  );
 
   @override
   bool operator ==(Object other) =>
@@ -98,17 +124,25 @@ class StationAd {
       other.station == station &&
       other.host == host &&
       other.port == port &&
+      other.controlDoor == controlDoor &&
       _listEq(other.substations, substations) &&
       other.trustHint == trustHint;
 
   @override
-  int get hashCode =>
-      Object.hash(station, host, port, Object.hashAll(substations), trustHint);
+  int get hashCode => Object.hash(
+    station,
+    host,
+    port,
+    controlDoor,
+    Object.hashAll(substations),
+    trustHint,
+  );
 
   @override
   String toString() =>
       'StationAd($station @ $address'
       '${substations.isEmpty ? ', hub' : ', hosts ${substations.join(',')}'}'
+      '${controlDoor != null ? ', door $controlDoor' : ''}'
       '${trustHint != null ? ', +trust' : ''})';
 
   static bool _listEq(List<String> a, List<String> b) {

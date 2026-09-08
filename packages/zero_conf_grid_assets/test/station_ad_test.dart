@@ -53,6 +53,69 @@ void main() {
       expect(ad.port, 0);
     });
 
+    test('control-door endpoint round-trips through TXT', () {
+      const ad = StationAd(
+        station: 'the-dashboard',
+        host: 'linux-dashboard.local',
+        port: 8080,
+        controlDoor: 'linux-dashboard.local:4400',
+        substations: ['dash'],
+        trustHint: 'sekret',
+      );
+      final txt = ad.toTxt();
+      expect(txt['door'], 'linux-dashboard.local:4400');
+      final decoded = StationAd.fromTxt(txt);
+      expect(decoded.controlDoor, 'linux-dashboard.local:4400');
+      expect(decoded, ad); // the door is part of the ad's value identity
+    });
+
+    test('omits the door field from TXT when no control door is exposed', () {
+      const ad = StationAd(station: 'x', host: 'h', port: 1);
+      expect(ad.toTxt().containsKey('door'), isFalse);
+      expect(StationAd.fromTxt(ad.toTxt()).controlDoor, isNull);
+    });
+
+    test('rc.1 TXT without a control door remains wire-compatible', () {
+      // The record shape already on the wire from stations running the
+      // released pack: four keys, in this order, no `door`.
+      const shipped = <String, String>{
+        'id': 'studio',
+        'broker': 'studio.local:8080',
+        'substations': 'power_station',
+        'trust': 'sekret',
+      };
+      final decoded = StationAd.fromTxt(shipped);
+      expect(decoded.controlDoor, isNull);
+      // Re-encoding an ad that carries no door changes neither the key set nor
+      // the wire order — an already-shipped ad decodes exactly as it did.
+      expect(
+        decoded.toTxt().entries.map((e) => '${e.key}=${e.value}').toList(),
+        shipped.entries.map((e) => '${e.key}=${e.value}').toList(),
+      );
+    });
+
+    test(
+      'toPeer carries the control-door endpoint as nullable Peer metadata',
+      () {
+        const withDoor = StationAd(
+          station: 'the-dashboard',
+          host: 'linux-dashboard.local',
+          port: 8080,
+          controlDoor: 'linux-dashboard.local:4400',
+        );
+        expect(withDoor.toPeer().controlDoor, 'linux-dashboard.local:4400');
+        // The bus address is untouched by the door — they are two endpoints.
+        expect(withDoor.toPeer().address, 'linux-dashboard.local:8080');
+
+        const noDoor = StationAd(
+          station: 'studio',
+          host: 'studio.local',
+          port: 1,
+        );
+        expect(noDoor.toPeer().controlDoor, isNull);
+      },
+    );
+
     test('toPeer carries the trust hint as the Peer token', () {
       const ad = StationAd(
         station: 'the-dashboard',

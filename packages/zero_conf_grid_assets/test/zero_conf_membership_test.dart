@@ -64,6 +64,30 @@ void main() {
       },
     );
 
+    test('discover surfaces the station control door on its Peer', () async {
+      const doored = StationAd(
+        station: 'studio',
+        host: 'studio.local',
+        port: 8080,
+        controlDoor: 'studio.local:4400',
+        substations: ['power_station'],
+      );
+      final browser = FakeMdnsBrowser([hub, doored]);
+      final loop = ZeroConfMembership(
+        browser: browser,
+        resolver: TopologyResolver(
+          topology: Topology.mesh,
+          trust: TrustGate(allowed: {'hub': null, 'studio': null}),
+        ),
+        selfStation: 'self',
+      );
+
+      final membership = await loop.discover();
+      expect(membership.byId('studio')?.controlDoor, 'studio.local:4400');
+      // A station that advertised no door reaches membership without one.
+      expect(membership.byId('hub')?.controlDoor, isNull);
+    });
+
     test('an untrusted discovery never reaches the Membership', () async {
       final log = <String>[];
       final browser = FakeMdnsBrowser([hub, spoke]);

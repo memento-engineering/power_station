@@ -17,7 +17,8 @@ import 'package:meta/meta.dart';
 
 /// One configured peer station: where to reach it and the LAN-trust token to
 /// present. The address ([host]:[port]) is the identity for the bus; [id] is a
-/// human label.
+/// human label. [controlDoor] is the OPTIONAL second endpoint a client dials
+/// to drive the station, distinct from the bus address.
 @immutable
 class Peer {
   /// Creates a peer config entry.
@@ -26,6 +27,7 @@ class Peer {
     required this.host,
     required this.port,
     this.token,
+    this.controlDoor,
   });
 
   /// The peer's station id / human label (e.g. `the-dashboard`).
@@ -41,6 +43,12 @@ class Peer {
   /// `null` when the peer requires no token.
   final String? token;
 
+  /// The peer's CONTROL DOOR as a bare `host:port` authority — no scheme, no
+  /// route — where its station-control surface answers. `null` when the peer
+  /// advertises no control door, which is the default posture; a client that
+  /// finds one can dial the station without being told its port.
+  final String? controlDoor;
+
   /// `host:port`, the bus address.
   String get address => '$host:$port';
 
@@ -50,6 +58,7 @@ class Peer {
     'host': host,
     'port': port,
     if (token != null) 'token': token,
+    if (controlDoor != null) 'controlDoor': controlDoor,
   };
 
   /// Parses [j].
@@ -58,6 +67,7 @@ class Peer {
     host: j['host'] as String,
     port: j['port'] as int,
     token: j['token'] as String?,
+    controlDoor: j['controlDoor'] as String?,
   );
 
   @override
@@ -66,13 +76,17 @@ class Peer {
       other.id == id &&
       other.host == host &&
       other.port == port &&
-      other.token == token;
+      other.token == token &&
+      other.controlDoor == controlDoor;
 
   @override
-  int get hashCode => Object.hash(id, host, port, token);
+  int get hashCode => Object.hash(id, host, port, token, controlDoor);
 
   @override
-  String toString() => 'Peer($id @ $address${token != null ? ' +token' : ''})';
+  String toString() =>
+      'Peer($id @ $address'
+      '${controlDoor != null ? ' +door $controlDoor' : ''}'
+      '${token != null ? ' +token' : ''})';
 }
 
 /// A station's static membership: the ordered list of [peers] it federates with.
