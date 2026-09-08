@@ -565,7 +565,8 @@ void main() {
   group("the ROUND-TRIP — grid_assets' REAL vended assets", () {
     test(
       'install lands every vended skill AND the COMPLETE operator asset set — '
-      'the governor agent-def and the harness settings — with no residue',
+      'the governor AND refiner agent-defs and the harness settings — with no '
+      'residue',
       () async {
         final report = await const OverlayInstallService().install(
           resolution: _liveResolution(
@@ -600,6 +601,30 @@ void main() {
         );
         expect(governor.readAsStringSync(), contains('name: governor'));
         expect(hasProvenance(governor.readAsStringSync()), isTrue);
+
+        final refiner = File(
+          p.join(checkout.path, '.claude', 'agents', 'refiner.md'),
+        );
+        expect(
+          refiner.existsSync(),
+          isTrue,
+          reason: 'the refiner seat has a role definition to bind',
+        );
+        final refinerBody = refiner.readAsStringSync();
+        expect(hasProvenance(refinerBody), isTrue);
+        expect(refinerBody, contains('name: refiner'));
+        expect(
+          refinerBody,
+          contains('space seat refiner'),
+          reason: 'the launcher line binds the INSTALLER runner, not a hole',
+        );
+        expect(refinerBody, contains('.grid/seats/refiner/'));
+        expect(refinerBody, isNot(contains('{{runner}}')));
+        expect(
+          refinerBody,
+          isNot(contains('{{')),
+          reason: 'no template residue',
+        );
 
         final settings = File(
           p.join(checkout.path, '.claude', 'settings.json'),

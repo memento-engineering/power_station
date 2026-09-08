@@ -873,7 +873,7 @@ void main() {
       expect(
         flowed,
         contains('record that the refiner wrote the stamp on it'),
-        reason: "the receipt says the human ruled THROUGH this seat",
+        reason: 'the receipt says the human ruled THROUGH this seat',
       );
 
       // Multi-agent ceiling: read-only refinement subagents, no circuits.
