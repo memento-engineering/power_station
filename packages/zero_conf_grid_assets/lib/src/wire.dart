@@ -25,9 +25,10 @@ class _Record {
 /// announcement needs no prior query) advertising [ad]: an answer-only packet
 /// (`QDCOUNT` 0) carrying a PTR ([kGridServiceType] → the station's instance),
 /// an SRV (the instance → `host:port`, kept for interop with standard
-/// `dns-sd`/`avahi-browse` tooling), a TXT (the D-Z8 wire: station id, broker
-/// endpoint, hosted substations, trust hint — [StationAd.toTxt]), and — only
-/// when [ad]'s host is a literal IPv4 address — an A record.
+/// `dns-sd`/`avahi-browse` tooling), a TXT (the whole wire: station id, broker
+/// endpoint, control door, hosted substations, trust hint — [StationAd.toTxt];
+/// the door is present only when the station exposes one), and — only when
+/// [ad]'s host is a literal IPv4 address — an A record.
 ///
 /// `ANCOUNT` counts every record regardless of DNS "section"; the querying
 /// side (`package:multicast_dns`'s decoder) sums answer+authority+additional

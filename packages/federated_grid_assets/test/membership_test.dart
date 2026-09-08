@@ -21,6 +21,32 @@ void main() {
       expect(noTok.toJson().containsKey('token'), isFalse);
     });
 
+    test('controlDoor is optional and round-trips through JSON', () {
+      const withDoor = Peer(
+        id: 'the-dashboard',
+        host: 'linux-dashboard.local',
+        port: 8080,
+        controlDoor: 'linux-dashboard.local:4400',
+      );
+      const noDoor = Peer(id: 'studio', host: '127.0.0.1', port: 9090);
+
+      expect(withDoor.toJson()['controlDoor'], 'linux-dashboard.local:4400');
+      expect(Peer.fromJson(withDoor.toJson()), withDoor);
+      // Omitted from JSON when null, and a document that never carried the key
+      // (every membership document written before the control door existed)
+      // still parses — as a peer with no door.
+      expect(noDoor.toJson().containsKey('controlDoor'), isFalse);
+      expect(Peer.fromJson(noDoor.toJson()).controlDoor, isNull);
+      expect(
+        Peer.fromJson(const {
+          'id': 'studio',
+          'host': 'h',
+          'port': 1,
+        }).controlDoor,
+        isNull,
+      );
+    });
+
     test('address is host:port and equality is value-based', () {
       const a = Peer(id: 'x', host: 'h', port: 1);
       const b = Peer(id: 'x', host: 'h', port: 1);

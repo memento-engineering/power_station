@@ -14,16 +14,19 @@ import 'station_ad.dart';
 /// ([TopologyResolver]).
 abstract class MdnsBrowser {
   /// Browses for [kGridServiceType] instances for [timeout], yielding one
-  /// [StationAd] per instance that answers with a decodable TXT record.
+  /// [StationAd] per instance that answers with a decodable TXT record —
+  /// including that station's [StationAd.controlDoor] when it advertises one.
   Stream<StationAd> browse({Duration timeout = const Duration(seconds: 5)});
 }
 
 /// The real implementation: `package:multicast_dns`'s one-shot mDNS querier
 /// (RFC 6762 §5.1) — a PTR lookup for [kGridServiceType], then a TXT lookup
-/// per discovered instance. The D-Z8 wire (station id, broker endpoint,
-/// hosted substations, trust hint) lives entirely in TXT
-/// ([StationAd.fromTxt]); SRV/A are advertised (`wire.dart`) for interop with
-/// standard `dns-sd`/`avahi-browse` tooling but are not needed to build a
+/// per discovered instance. The wire (station id, broker endpoint, control
+/// door, hosted substations, trust hint) lives entirely in TXT
+/// ([StationAd.fromTxt]) — the control door rides the SAME record, so a
+/// browse that finds a station also learns where to dial it, with no second
+/// service type to look up. SRV/A are advertised (`wire.dart`) for interop
+/// with standard `dns-sd`/`avahi-browse` tooling but are not needed to build a
 /// [StationAd] here.
 class MulticastDnsBrowser implements MdnsBrowser {
   /// Creates a browser; [client] defaults to a fresh [MDnsClient].

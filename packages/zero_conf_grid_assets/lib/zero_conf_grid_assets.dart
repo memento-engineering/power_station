@@ -5,9 +5,12 @@
 /// Three pieces:
 ///
 /// 1. **mDNS/DNS-SD advertise + browse** ([MdnsAdvertiser]/[MdnsBrowser],
-///    service type [kGridServiceType] = `_grid._tcp`; the TXT wire is
-///    [StationAd]: station id, broker endpoint, hosted substations, trust
-///    hints). [MulticastDnsAdvertiser]/[MulticastDnsBrowser] are the real,
+///    service type [kGridServiceType] = `_grid._tcp` — ONE instance per
+///    station, and no second service type; the TXT wire is [StationAd]:
+///    station id, broker endpoint, the optional control door
+///    ([StationAd.controlDoor], where station control answers `/status` and
+///    `/stream`), hosted substations, trust hints).
+///    [MulticastDnsAdvertiser]/[MulticastDnsBrowser] are the real,
 ///    `dart:io`-backed implementations — a bounded RFC 6762 responder that
 ///    only ever sends unsolicited announcements, and `package:multicast_dns`'s
 ///    one-shot querier, respectively.
@@ -17,7 +20,8 @@
 ///    station running nothing but federation assets,
 ///    [StationAd.isHubCandidate]). The output is a plain
 ///    `federated_grid_assets` [Membership] — nothing downstream needs to know
-///    discovery produced it.
+///    discovery produced it, and each [Peer] carries the discovered control
+///    door so a client dials a station without being told its port.
 /// 3. **The discovered-is-not-TRUSTED TRUST GATE** ([TrustGate], D-Z6):
 ///    allow-list this round, matching [Peer.token]'s LAN-trust posture; LOUD
 ///    both ways, naming the claimed identity.
