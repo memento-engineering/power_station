@@ -3005,13 +3005,19 @@ class _IndexedDecision {
   String get alias => _legacyDecisionAlias(slug);
 }
 
-/// ONE decision the bead cites EXPLICITLY — a canonical `<register>#<slug>` or
-/// a legacy `A<n>`/`ADR-<nnnn>` id.
+/// ONE decision the bead cites EXPLICITLY — a canonical `<register>#<slug>`
+/// under a register the gathered index CONTAINS, or an `ADR-<nnnn>` id.
 ///
 /// A bare slug is only ever matched against what the index RETURNED (nothing
 /// can be concluded from hyphenated prose), but an explicit citation the index
 /// cannot answer is a defect in the bead's own citations, and it fails loud
 /// naming the citation rather than hiding inside a clip receipt.
+///
+/// A bare legacy `A<n>` token is NEVER one of these. Organic bead prose writes
+/// `A1`/`A2` as OPTION LABELS, so failing a surface on the absence of one
+/// would hold every bead in the org over a sentence that cites nothing. `A<n>`
+/// still ORDERS a returned entry ([_isNamedDecision]); it only never fails on
+/// absence.
 class _DecisionRequest {
   const _DecisionRequest.canonical(String identity)
     : _identity = identity,
@@ -3039,9 +3045,11 @@ final RegExp _canonicalDecisionCitation = RegExp(
   r'(?<![a-z0-9_#-])([a-z0-9_]+)#([a-z][a-z0-9]*(?:-[a-z0-9]+)+)(?![a-z0-9_-])',
 );
 
-/// A legacy ADR-0000 amendment id (`A48`) or ADR id (`ADR-0008`).
-final RegExp _legacyDecisionCitation = RegExp(
-  r'(?<![a-z0-9_#-])(a\d+|adr-\d{4})(?![a-z0-9_-])',
+/// An ADR id (`ADR-0008`) — the one NON-canonical shape unambiguous enough to
+/// fail a surface on absence. A bare `A<n>` is deliberately out (see
+/// [_DecisionRequest]).
+final RegExp _explicitAdrCitation = RegExp(
+  r'(?<![a-z0-9_#-])(adr-\d{4})(?![a-z0-9_-])',
 );
 
 /// The leading legacy id of [slug], or `''` when it carries none.
@@ -3063,13 +3071,22 @@ String _decisionCitationText(Bead bead) =>
 
 /// Every decision [cited] names EXPLICITLY, deduplicated, in first-appearance
 /// order.
-List<_DecisionRequest> _explicitDecisionRequests(String cited) {
+///
+/// A canonical token counts only when [originRegisters] — the registers this
+/// index run actually ANSWERED with — holds its register half. `id#some-value`
+/// under a register nobody indexed is PROSE, and failing a surface on it would
+/// hold a bead over a hash in a sentence.
+List<_DecisionRequest> _explicitDecisionRequests(
+  String cited, {
+  required Set<String> originRegisters,
+}) {
   final found = <(int, String, _DecisionRequest)>[];
   for (final match in _canonicalDecisionCitation.allMatches(cited)) {
+    if (!originRegisters.contains(match.group(1)!.toLowerCase())) continue;
     final identity = match.group(0)!;
     found.add((match.start, identity, _DecisionRequest.canonical(identity)));
   }
-  for (final match in _legacyDecisionCitation.allMatches(cited)) {
+  for (final match in _explicitAdrCitation.allMatches(cited)) {
     final alias = match.group(0)!;
     found.add((match.start, alias, _DecisionRequest.legacy(alias)));
   }
@@ -3208,8 +3225,14 @@ DecisionSurfaceEvidence _decisionLookup({
   }
 
   final cited = _decisionCitationText(workBead);
+  final originRegisters = {
+    for (final candidate in indexed) candidate.originRegister.toLowerCase(),
+  };
   final absent = [
-    for (final request in _explicitDecisionRequests(cited))
+    for (final request in _explicitDecisionRequests(
+      cited,
+      originRegisters: originRegisters,
+    ))
       if (!indexed.any(request.isAnsweredBy)) request.label,
   ];
   if (absent.isNotEmpty) {

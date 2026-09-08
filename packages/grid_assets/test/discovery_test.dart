@@ -1725,7 +1725,7 @@ void main() {
               dir.path,
               [surface],
               bead('pow-cite').copyWith(
-                design: 'This aligns with `power_station#missing-decision`.',
+                design: 'This aligns with `power_station#no-such-slug`.',
               ),
             );
         final record = records.single;
@@ -1740,10 +1740,79 @@ void main() {
         expect(record.decisions, isEmpty);
         expect(
           record.error,
-          'named decision absent from index: missing-decision',
+          'named decision absent from index: no-such-slug',
+          reason:
+              'the register half IS one the index answered, so the missing '
+              'name is the bead\'s own defect and it is named',
         );
       },
     );
+
+    test('organic option labels and prose-shaped hashes do not fail decision '
+        'lookup', () async {
+      final records =
+          await commandDecisionIndexSource(
+            _CannedShellRunner(
+              output: jsonEncode({'spec': 2, 'decisions': <Object?>[]}),
+            ),
+            runnerInvocation: 'dart run lunar:lunar',
+            gridHome: '/grid/lunar',
+          )(
+            '/w',
+            ['power_station/lib/a.dart'],
+            bead('pow-prose').copyWith(
+              description: 'Option A1 vs A2; see pr#256-fix and id#some-value.',
+            ),
+          );
+      final record = records.single;
+      expect(
+        record.state,
+        EvidenceState.complete,
+        reason:
+            'organic prose labels options A1/A2 and writes hashes; none of '
+            'that is a citation, and failing on it would hold every bead in '
+            'the org: ${record.error}',
+      );
+      expect(record.truncated, isFalse);
+      expect(record.error, isEmpty);
+      expect(record.decisions, isEmpty);
+    });
+
+    test('a canonical-shaped token under an unknown register does not '
+        'fail', () async {
+      final dir = Directory.systemTemp.createTempSync('decisions-unknown');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final register = Directory(p.join(dir.path, 'docs', 'decisions'))
+        ..createSync(recursive: true);
+      const surface = 'power_station/packages/grid_assets/lib/src/x.dart';
+      Future<DecisionSurfaceEvidence> lookup(Bead workBead) async =>
+          (await commandDecisionIndexSource(
+            _fakeDecisionIndex(register, count: 3),
+            runnerInvocation: 'dart run lunar:lunar',
+            gridHome: '/grid/lunar',
+          )(dir.path, [surface], workBead)).single;
+      final prose = await lookup(
+        bead(
+          'pow-cite',
+        ).copyWith(notes: 'Tracked as `unknown_register#some-slug`.'),
+      );
+      final neutral = await lookup(_citesNothing);
+      expect(
+        prose.state,
+        EvidenceState.complete,
+        reason:
+            'the index answered only `power_station`, so a hash under any '
+            'other register is prose, not a citation: ${prose.error}',
+      );
+      expect(prose.state, neutral.state);
+      expect(prose.truncated, neutral.truncated);
+      expect(prose.error, neutral.error);
+      expect(
+        prose.decisions.map((entry) => entry.slug),
+        neutral.decisions.map((entry) => entry.slug),
+        reason: 'prose changes NOTHING about the projection',
+      );
+    });
 
     test('decision surface bound is 96 and clips the 97th entry', () async {
       expect(
