@@ -19,6 +19,7 @@ library;
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:meta/meta.dart';
 import 'package:path/path.dart' as p;
 import 'package:pub_semver/pub_semver.dart';
 import 'package:yaml/yaml.dart';
@@ -519,6 +520,8 @@ class PollResult {
   const PollResult({
     required this.package,
     required this.wanted,
+    required this.statusCode,
+    required this.versions,
     required this.latest,
     required this.isPublished,
   });
@@ -528,6 +531,16 @@ class PollResult {
 
   /// The version the caller is waiting for.
   final String wanted;
+
+  /// The pub.dev API status code for this probe — 200 for a listed package,
+  /// 404 for one that has never been published, anything else a fetch the
+  /// caller must refuse rather than read as "not yet".
+  final int statusCode;
+
+  /// Every version string pub.dev listed, in API order (empty when the fetch
+  /// was not a parseable 200). The complete list, so a caller can pick a
+  /// predecessor without a second pub.dev parser.
+  final List<String> versions;
 
   /// The pub.dev `latest` version, or null when the API had no version / the
   /// fetch failed (a not-yet-resolvable package is `null`, never an error).
@@ -541,8 +554,180 @@ class PollResult {
   Map<String, dynamic> toJson() => {
     'package': package,
     'wanted': wanted,
+    'statusCode': statusCode,
+    'versions': versions,
     'latest': latest,
     'isPublished': isPublished,
+  };
+}
+
+/// Where a workspace release wave stopped — the structured frontier a
+/// [ReleaseWaveFailure] names, so an operator reads "which stage, which
+/// package" without scraping prose.
+enum ReleaseWaveStage {
+  /// Reading and validating the workspace root and its members.
+  workspace,
+
+  /// Computing the changed-package set against pub.dev.
+  discovery,
+
+  /// Planning the wave itself (the change class is refused here).
+  plan,
+
+  /// The scrub gate over one changed package.
+  scrub,
+
+  /// Resolving the dependency-order publish sequence.
+  order,
+
+  /// The `dart pub publish --dry-run` gate over one ordered package.
+  dryRun,
+
+  /// Resolving the origin-reachable release commit the wave validates at.
+  releaseCommit,
+
+  /// The consumer validation a direct stable wave must pass before any tag.
+  validateConsumers,
+
+  /// Cutting one package's git tag.
+  tag,
+
+  /// Pushing one package's git tag (the push IS the publish).
+  push,
+
+  /// Waiting for one package's version to propagate to pub.dev.
+  poll;
+
+  /// The wire name the structured failure carries.
+  String get wireName => switch (this) {
+    ReleaseWaveStage.workspace => 'workspace',
+    ReleaseWaveStage.discovery => 'discovery',
+    ReleaseWaveStage.plan => 'plan',
+    ReleaseWaveStage.scrub => 'scrub',
+    ReleaseWaveStage.order => 'order',
+    ReleaseWaveStage.dryRun => 'dry-run',
+    ReleaseWaveStage.releaseCommit => 'release-commit',
+    ReleaseWaveStage.validateConsumers => 'validate-consumers',
+    ReleaseWaveStage.tag => 'tag',
+    ReleaseWaveStage.push => 'push',
+    ReleaseWaveStage.poll => 'poll',
+  };
+}
+
+/// A workspace release wave that STOPPED — the named [stage], the [package] it
+/// stopped on (null for a wave-level stop), and a self-contained [message].
+///
+/// A wave never degrades: every gate, process and propagation failure raises
+/// this, so every package ordered after the stop stays untagged and unpushed.
+@immutable
+class ReleaseWaveFailure implements Exception {
+  /// Creates the structured stop.
+  const ReleaseWaveFailure({
+    required this.stage,
+    required this.message,
+    this.package,
+  });
+
+  /// The stage that refused.
+  final ReleaseWaveStage stage;
+
+  /// The package the stage was working on, or null for a wave-level stop
+  /// (workspace, order, release commit, consumer validation).
+  final String? package;
+
+  /// The self-contained diagnostic, naming what failed and what to do.
+  final String message;
+
+  /// JSON form — the structured contract the release skill parses.
+  Map<String, dynamic> toJson() => {
+    'stage': stage.wireName,
+    'package': package,
+    'message': message,
+  };
+
+  @override
+  String toString() => package == null
+      ? 'release wave stopped at ${stage.wireName}: $message'
+      : 'release wave stopped at ${stage.wireName} for $package: $message';
+}
+
+/// One package in a workspace release wave: what it is, where it lives, the
+/// published version it moves off, and the tag whose push publishes it.
+@immutable
+class ReleaseWavePackage {
+  /// Creates the wave entry for [package].
+  const ReleaseWavePackage({
+    required this.package,
+    required this.directory,
+    required this.publishedPredecessor,
+    required this.localVersion,
+    required this.dependencies,
+    required this.tag,
+  });
+
+  /// The pub package name.
+  final String package;
+
+  /// The member directory, relative to the workspace root.
+  final String directory;
+
+  /// The published version [localVersion] bumps off, or null when this is a
+  /// first release (pub.dev has never seen the package).
+  final Version? publishedPredecessor;
+
+  /// The version authored in the member's `pubspec.yaml` — the one the wave
+  /// publishes.
+  final Version localVersion;
+
+  /// The IN-WAVE packages this one depends on, sorted — the edges the publish
+  /// order is resolved from.
+  final List<String> dependencies;
+
+  /// The `<package>-v<version>` tag whose push publishes this package.
+  final String tag;
+
+  /// JSON form.
+  Map<String, dynamic> toJson() => {
+    'package': package,
+    'directory': directory,
+    'publishedPredecessor': publishedPredecessor?.toString(),
+    'localVersion': localVersion.toString(),
+    'dependencies': dependencies,
+    'tag': tag,
+  };
+}
+
+/// A workspace release wave: the dependency-ordered set of packages whose
+/// authored versions are not on pub.dev yet, for one change class.
+@immutable
+class ReleaseWavePlan {
+  /// Creates the wave plan.
+  const ReleaseWavePlan({
+    required this.workspaceRoot,
+    required this.change,
+    required this.dryRun,
+    required this.packages,
+  });
+
+  /// The absolute, normalized workspace root the wave ran from.
+  final String workspaceRoot;
+
+  /// The change class every package in the wave moves by.
+  final ReleaseChange change;
+
+  /// Whether the wave stopped after its gates (no tag, no push, no poll).
+  final bool dryRun;
+
+  /// The changed packages, dependency-first: a package's in-wave dependencies
+  /// all precede it.
+  final List<ReleaseWavePackage> packages;
+
+  /// JSON form — the structured contract the release skill parses.
+  Map<String, dynamic> toJson() => {
+    'workspaceRoot': workspaceRoot,
+    'change': change.name,
+    'dryRun': dryRun,
+    'packages': [for (final package in packages) package.toJson()],
   };
 }
 
@@ -574,11 +759,18 @@ typedef ProcessRunner =
 /// inject a Fake.
 typedef HttpGetter = Future<HttpFetch> Function(Uri url);
 
+/// The wait seam — the pause a release wave takes between propagation polls.
+/// The default is [Future.delayed]; tests inject a Fake that records the
+/// requested durations and returns instantly, so a wave suite never sleeps.
+typedef ReleaseWait = Future<void> Function(Duration duration);
+
 Future<ProcessResult> _defaultProcessRunner(
   String executable,
   List<String> arguments, {
   String? workingDirectory,
 }) => Process.run(executable, arguments, workingDirectory: workingDirectory);
+
+Future<void> _defaultWait(Duration duration) => Future<void>.delayed(duration);
 
 Future<HttpFetch> _defaultHttpGetter(Uri url) async {
   final client = HttpClient();
@@ -596,16 +788,19 @@ Future<HttpFetch> _defaultHttpGetter(Uri url) async {
 /// coupled `release` skill+command (ADR-0001). Pure version/tag/scrub/order
 /// logic plus two thin IO edges behind injected seams.
 class ReleaseService {
-  /// Creates the service over the [runProcess] + [httpGet] seams (defaults hit
-  /// the real process/network; tests inject Fakes).
+  /// Creates the service over the [runProcess] + [httpGet] + [wait] seams
+  /// (defaults hit the real process/network/clock; tests inject Fakes).
   const ReleaseService({
     ProcessRunner runProcess = _defaultProcessRunner,
     HttpGetter httpGet = _defaultHttpGetter,
+    ReleaseWait wait = _defaultWait,
   }) : _run = runProcess,
-       _http = httpGet;
+       _http = httpGet,
+       _wait = wait;
 
   final ProcessRunner _run;
   final HttpGetter _http;
+  final ReleaseWait _wait;
 
   /// Internal vocabulary working documents may not carry: explicit
   /// decision-register prose or `spike`. Case-insensitive, matching the
@@ -1022,7 +1217,7 @@ class ReleaseService {
       Uri.parse('https://pub.dev/api/packages/$package'),
     );
     String? latest;
-    var isPublished = false;
+    final versions = <String>[];
     if (fetch.statusCode == 200) {
       try {
         final decoded = jsonDecode(fetch.body);
@@ -1033,22 +1228,616 @@ class ReleaseService {
           }
           final versionsField = decoded['versions'];
           if (versionsField is List) {
-            isPublished = versionsField.any(
-              (entry) => entry is Map && entry['version'] == version,
-            );
+            for (final entry in versionsField) {
+              if (entry is Map && entry['version'] is String) {
+                versions.add(entry['version'] as String);
+              }
+            }
           }
         }
       } on FormatException {
         latest = null; // a non-JSON body is "not resolvable yet", not a crash
+        versions.clear();
       }
     }
     return PollResult(
       package: package,
       wanted: version,
+      statusCode: fetch.statusCode,
+      versions: List<String>.unmodifiable(versions),
       latest: latest,
-      isPublished: isPublished,
+      isPublished: versions.contains(version),
     );
   }
+
+  /// Publishes a whole pub WORKSPACE in one wave: computes the changed-package
+  /// set against pub.dev, runs every existing release gate, validates the
+  /// consumers a direct stable wave owes, then cuts and pushes one tag per
+  /// package in dependency order, waiting for each to propagate before the
+  /// next dependent moves. THE TAG PUSH IS THE PUBLISH — tag-triggered
+  /// trusted publishing does the upload — so this composes the existing ops
+  /// and never runs `dart pub publish` for real.
+  ///
+  /// [change] is the operator's declared change class and it is load-bearing:
+  ///
+  /// - [ReleaseChange.breaking] is REFUSED before any filesystem, process or
+  ///   network work. A breaking base goes rc-first and is promoted through the
+  ///   separate `validate-consumers` then `promote` operations; the refusal
+  ///   says so.
+  /// - [ReleaseChange.rc] cuts pre-release tags and does NOT validate
+  ///   consumers here: the candidate is cut FIRST, and the separate ops carry
+  ///   its gate.
+  /// - docs/additive/fix MAY tag directly (no rc soak) but are STILL
+  ///   consumer-validated: [consumers] is required, every one is resolved
+  ///   against the release commit (an origin-reachable SHA, which pub accepts
+  ///   as a git `ref:` exactly as it accepts a tag) BEFORE the first tag, and
+  ///   one failing consumer refuses the whole wave — a "non-breaking" change
+  ///   that fails a consumer is breaking, and the refusal names the rc path it
+  ///   drops to.
+  ///
+  /// Gates run to completion before ANY mutation, so a preflight stop leaves
+  /// zero tags. Once the wave mutates, a stop leaves only what its own stage
+  /// already did (a pushed tag whose propagation never landed, say) and every
+  /// LATER package untagged and unpushed. Every stop is a [ReleaseWaveFailure]
+  /// naming the stage and package.
+  ///
+  /// [dryRunOnly] runs the gates and the consumer validation and returns the
+  /// ordered plan without cutting a tag, pushing, or polling; consumer
+  /// override files are restored byte-for-byte either way.
+  Future<ReleaseWavePlan> publishWorkspace({
+    required String workspaceRoot,
+    required ReleaseChange change,
+    List<ReleaseConsumer> consumers = const [],
+    bool dryRunOnly = false,
+    Duration pollInterval = const Duration(seconds: 5),
+    int maxPollAttempts = 120,
+  }) async {
+    if (change == ReleaseChange.breaking) {
+      throw const ReleaseWaveFailure(
+        stage: ReleaseWaveStage.plan,
+        message:
+            'a breaking wave is refused: a breaking change must go rc-first '
+            'and pass every consumer before promotion. Cut candidates with '
+            '`--change rc`, then run the separate `release validate-consumers` '
+            'and `release promote` operations to promote the stable base.',
+      );
+    }
+    if (maxPollAttempts < 1) {
+      throw ArgumentError.value(
+        maxPollAttempts,
+        'maxPollAttempts',
+        'must be at least one poll attempt',
+      );
+    }
+    if (pollInterval.isNegative) {
+      throw ArgumentError.value(
+        pollInterval,
+        'pollInterval',
+        'must not be negative',
+      );
+    }
+
+    final root = p.normalize(p.absolute(workspaceRoot));
+    final members = _workspaceMembers(root);
+    final changed = <_ChangedMember>[];
+    for (final member in members) {
+      final resolved = await _resolveChangedMember(member, change);
+      if (resolved != null) changed.add(resolved);
+    }
+    if (changed.isEmpty) {
+      return ReleaseWavePlan(
+        workspaceRoot: root,
+        change: change,
+        dryRun: dryRunOnly,
+        packages: const [],
+      );
+    }
+
+    for (final member in changed) {
+      await _runScrubGate(member);
+    }
+
+    final names = {for (final member in changed) member.name};
+    final PublishOrder order;
+    try {
+      order = publishOrder({
+        for (final member in changed)
+          member.name: [
+            for (final dependency in member.dependencies)
+              if (names.contains(dependency) && dependency != member.name)
+                dependency,
+          ]..sort(),
+      });
+    } on StateError catch (error) {
+      throw ReleaseWaveFailure(
+        stage: ReleaseWaveStage.order,
+        message: error.message,
+      );
+    }
+    final byName = {for (final member in changed) member.name: member};
+    final ordered = [
+      for (final name in order.order)
+        ReleaseWavePackage(
+          package: name,
+          directory: p.normalize(
+            p.relative(byName[name]!.directory, from: root),
+          ),
+          publishedPredecessor: byName[name]!.predecessor,
+          localVersion: byName[name]!.version,
+          dependencies: List<String>.unmodifiable(
+            [
+              for (final dependency in byName[name]!.dependencies)
+                if (names.contains(dependency) && dependency != name)
+                  dependency,
+            ]..sort(),
+          ),
+          tag: tagFor(package: name, version: byName[name]!.version.toString()),
+        ),
+    ];
+
+    for (final package in ordered) {
+      final result = await dryRun(
+        packageDir: byName[package.package]!.directory,
+        package: package.package,
+      );
+      if (!result.clean) {
+        throw ReleaseWaveFailure(
+          stage: ReleaseWaveStage.dryRun,
+          package: package.package,
+          message:
+              'the publish dry-run gate failed for ${package.package} (exit '
+              '${result.exitCode}, ${result.warningCount} warning(s))'
+              '${result.warnings.isEmpty ? '' : '\n${result.warnings.join('\n')}'}',
+        );
+      }
+    }
+
+    if (!change.isBreaking) {
+      await _validateStableWave(root: root, consumers: consumers);
+    }
+
+    final plan = ReleaseWavePlan(
+      workspaceRoot: root,
+      change: change,
+      dryRun: dryRunOnly,
+      packages: List<ReleaseWavePackage>.unmodifiable(ordered),
+    );
+    if (dryRunOnly) return plan;
+
+    for (final package in ordered) {
+      await _publishWavePackage(
+        root: root,
+        package: package,
+        pollInterval: pollInterval,
+        maxPollAttempts: maxPollAttempts,
+      );
+    }
+    return plan;
+  }
+
+  /// Reads the workspace root's `pubspec.yaml` and yields every PUBLISHABLE
+  /// member (`publish_to: none` is skipped — it never reaches pub.dev). An
+  /// escaping or duplicated member path, a duplicated package name, a missing
+  /// or malformed member pubspec, and a member without a semantic version are
+  /// all LOUD workspace-stage refusals.
+  List<_WorkspaceMember> _workspaceMembers(String root) {
+    final rootPubspecFile = File(p.join(root, 'pubspec.yaml'));
+    final Map<Object?, Object?> rootPubspec;
+    try {
+      rootPubspec = _readPubspec(rootPubspecFile);
+    } on FileSystemException catch (error) {
+      throw ReleaseWaveFailure(
+        stage: ReleaseWaveStage.workspace,
+        message: '${error.message}: ${error.path}',
+      );
+    } on FormatException catch (error) {
+      throw ReleaseWaveFailure(
+        stage: ReleaseWaveStage.workspace,
+        message: error.message,
+      );
+    }
+    final declared = rootPubspec['workspace'];
+    if (declared is! List || declared.isEmpty) {
+      throw ReleaseWaveFailure(
+        stage: ReleaseWaveStage.workspace,
+        message:
+            '${rootPubspecFile.path} declares no pub workspace members — '
+            '`--workspace` must point at a pub workspace root.',
+      );
+    }
+    final members = <_WorkspaceMember>[];
+    final seenPaths = <String>{};
+    final seenNames = <String>{};
+    for (final entry in declared) {
+      if (entry is! String || entry.isEmpty) {
+        throw ReleaseWaveFailure(
+          stage: ReleaseWaveStage.workspace,
+          message:
+              '${rootPubspecFile.path} workspace entries must be non-empty '
+              'strings; found "$entry".',
+        );
+      }
+      final directory = p.normalize(p.join(root, entry));
+      if (!p.isWithin(root, directory)) {
+        throw ReleaseWaveFailure(
+          stage: ReleaseWaveStage.workspace,
+          message:
+              'workspace member "$entry" resolves outside the workspace root '
+              '($directory).',
+        );
+      }
+      if (!seenPaths.add(directory)) {
+        throw ReleaseWaveFailure(
+          stage: ReleaseWaveStage.workspace,
+          message: 'workspace member "$entry" is declared more than once.',
+        );
+      }
+      final pubspecFile = File(p.join(directory, 'pubspec.yaml'));
+      final Map<Object?, Object?> pubspec;
+      final String name;
+      try {
+        pubspec = _readPubspec(pubspecFile);
+        name = _pubspecName(pubspec, pubspecFile.path);
+      } on FileSystemException catch (error) {
+        throw ReleaseWaveFailure(
+          stage: ReleaseWaveStage.workspace,
+          message: '${error.message}: ${error.path}',
+        );
+      } on FormatException catch (error) {
+        throw ReleaseWaveFailure(
+          stage: ReleaseWaveStage.workspace,
+          message: '${pubspecFile.path}: ${error.message}',
+        );
+      }
+      if (!seenNames.add(name)) {
+        throw ReleaseWaveFailure(
+          stage: ReleaseWaveStage.workspace,
+          message:
+              'workspace package "$name" is declared by more than one member.',
+        );
+      }
+      if (pubspec['publish_to'] == 'none') continue;
+      final rawVersion = pubspec['version'];
+      if (rawVersion is! String || rawVersion.isEmpty) {
+        throw ReleaseWaveFailure(
+          stage: ReleaseWaveStage.workspace,
+          package: name,
+          message:
+              '${pubspecFile.path} has no version — a publishable member must '
+              'author the version the wave publishes.',
+        );
+      }
+      final Version version;
+      try {
+        version = Version.parse(rawVersion);
+      } on FormatException catch (error) {
+        throw ReleaseWaveFailure(
+          stage: ReleaseWaveStage.workspace,
+          package: name,
+          message:
+              '${pubspecFile.path} version "$rawVersion" is not a semantic '
+              'version: ${error.message}',
+        );
+      }
+      final List<String> dependencies;
+      try {
+        dependencies = _directDependencyNames(pubspec, pubspecFile.path);
+      } on FormatException catch (error) {
+        throw ReleaseWaveFailure(
+          stage: ReleaseWaveStage.workspace,
+          package: name,
+          message: error.message,
+        );
+      }
+      members.add(
+        _WorkspaceMember(
+          name: name,
+          directory: directory,
+          version: version,
+          dependencies: dependencies,
+        ),
+      );
+    }
+    return members;
+  }
+
+  /// Decides whether [member] is IN the wave: unchanged (its authored version
+  /// is already on pub.dev) yields null; otherwise the published predecessor
+  /// its version bumps off — null for a first release — is resolved through
+  /// the existing [planVersion], so the wave can never invent version math.
+  Future<_ChangedMember?> _resolveChangedMember(
+    _WorkspaceMember member,
+    ReleaseChange change,
+  ) async {
+    final probe = await poll(
+      package: member.name,
+      version: member.version.toString(),
+    );
+    if (probe.statusCode == 404) {
+      final isRcShaped =
+          member.version.preRelease.length == 2 &&
+          member.version.preRelease[0] == 'rc' &&
+          member.version.preRelease[1] is int;
+      if (change.isPreRelease && !isRcShaped) {
+        throw ReleaseWaveFailure(
+          stage: ReleaseWaveStage.discovery,
+          package: member.name,
+          message:
+              'an rc wave publishes rc.N pre-releases, but the first release '
+              'of ${member.name} is authored as ${member.version}.',
+        );
+      }
+      if (!change.isPreRelease && member.version.preRelease.isNotEmpty) {
+        throw ReleaseWaveFailure(
+          stage: ReleaseWaveStage.discovery,
+          package: member.name,
+          message:
+              'a ${change.name} wave publishes stable versions, but the first '
+              'release of ${member.name} is authored as the pre-release '
+              '${member.version}.',
+        );
+      }
+      return _ChangedMember(member: member, predecessor: null);
+    }
+    if (probe.statusCode != 200) {
+      throw ReleaseWaveFailure(
+        stage: ReleaseWaveStage.discovery,
+        package: member.name,
+        message:
+            'pub.dev answered ${probe.statusCode} for ${member.name}; refusing '
+            'to read that as "not published yet".',
+      );
+    }
+    if (probe.isPublished) return null;
+    final published = <Version>[];
+    for (final raw in probe.versions) {
+      try {
+        published.add(Version.parse(raw));
+      } on FormatException catch (error) {
+        throw ReleaseWaveFailure(
+          stage: ReleaseWaveStage.discovery,
+          package: member.name,
+          message:
+              'pub.dev listed "$raw" for ${member.name}, which is not a '
+              'semantic version: ${error.message}',
+        );
+      }
+    }
+    published.sort((a, b) => b.compareTo(a));
+    for (final candidate in published) {
+      final ReleaseVersionPlan plan;
+      try {
+        plan = planVersion(current: candidate.toString(), change: change);
+      } on ArgumentError {
+        continue; // this published version cannot carry the change class
+      }
+      if (plan.next == member.version) {
+        return _ChangedMember(member: member, predecessor: candidate);
+      }
+    }
+    throw ReleaseWaveFailure(
+      stage: ReleaseWaveStage.discovery,
+      package: member.name,
+      message:
+          'no published version of ${member.name} reaches the authored '
+          '${member.version} under `--change ${change.name}` — re-author the '
+          'version or declare the change class the bump actually carries.',
+    );
+  }
+
+  /// Runs the existing complete scrub gate (content scan + declared floors)
+  /// for one wave member and refuses the wave unless it comes back clean.
+  Future<void> _runScrubGate(_ChangedMember member) async {
+    final ScrubResult result;
+    try {
+      result = await scrubPackage(member.directory);
+    } on ReleaseWaveFailure {
+      rethrow;
+    } on Object catch (error) {
+      throw ReleaseWaveFailure(
+        stage: ReleaseWaveStage.scrub,
+        package: member.name,
+        message: '$error',
+      );
+    }
+    if (result.clean) return;
+    final floors = result.declaredFloors;
+    throw ReleaseWaveFailure(
+      stage: ReleaseWaveStage.scrub,
+      package: member.name,
+      message: [
+        'the scrub gate failed for ${member.name}',
+        if (result.hits.isNotEmpty)
+          '${result.hits.length} internal ref(s): '
+              '${result.hits.map((hit) => '${hit.file}:${hit.line}').join(', ')}',
+        if (floors != null && !floors.passed) floors.message,
+      ].join('\n'),
+    );
+  }
+
+  /// The direct stable wave's consumer gate: resolve the origin-reachable
+  /// release commit, validate every consumer against it, restore the consumer
+  /// overrides, and refuse the wave — before any tag exists — when one fails.
+  Future<void> _validateStableWave({
+    required String root,
+    required List<ReleaseConsumer> consumers,
+  }) async {
+    if (consumers.isEmpty) {
+      throw const ReleaseWaveFailure(
+        stage: ReleaseWaveStage.validateConsumers,
+        message:
+            'a docs/additive/fix wave may tag directly but is still '
+            'consumer-validated: pass `--consumers <manifest.json>` naming '
+            'every consumer this wave must not break.',
+      );
+    }
+    final sha = await _releaseCommitSha(root);
+    final snapshots = <({File file, List<int>? bytes})>[];
+    for (final consumer in consumers) {
+      final file = File(p.join(consumer.directory, 'pubspec_overrides.yaml'));
+      snapshots.add((
+        file: file,
+        bytes: file.existsSync() ? file.readAsBytesSync() : null,
+      ));
+    }
+    final ConsumerValidationReport report;
+    try {
+      report = await validateConsumers(rcTag: sha, consumers: consumers);
+    } on StateError catch (error) {
+      throw ReleaseWaveFailure(
+        stage: ReleaseWaveStage.validateConsumers,
+        message: error.message,
+      );
+    } finally {
+      for (final snapshot in snapshots) {
+        final bytes = snapshot.bytes;
+        if (bytes == null) {
+          if (snapshot.file.existsSync()) snapshot.file.deleteSync();
+        } else {
+          snapshot.file.writeAsBytesSync(bytes);
+        }
+      }
+    }
+    if (report.allPassed) return;
+    final failed = report.results
+        .where((result) => !result.passed)
+        .map((result) => result.name)
+        .join(', ');
+    throw ReleaseWaveFailure(
+      stage: ReleaseWaveStage.validateConsumers,
+      message:
+          'consumer validation failed at $sha for: $failed. A "non-breaking" '
+          'change that fails a consumer is breaking — cut it as a candidate '
+          'with `--change rc` instead.',
+    );
+  }
+
+  /// The commit consumers resolve against: `HEAD`, refused unless it is
+  /// reachable from an `origin/` ref (an unpushed commit is a git ref no
+  /// consumer could ever fetch).
+  Future<String> _releaseCommitSha(String root) async {
+    final head = await _run('git', const [
+      'rev-parse',
+      'HEAD',
+    ], workingDirectory: root);
+    final sha = head.stdout.toString().trim();
+    if (head.exitCode != 0 || sha.isEmpty) {
+      throw ReleaseWaveFailure(
+        stage: ReleaseWaveStage.releaseCommit,
+        message:
+            'git rev-parse HEAD failed in $root (exit ${head.exitCode}): '
+            '${head.stderr}',
+      );
+    }
+    final remotes = await _run('git', [
+      'branch',
+      '--remotes',
+      '--contains',
+      sha,
+    ], workingDirectory: root);
+    if (remotes.exitCode != 0) {
+      throw ReleaseWaveFailure(
+        stage: ReleaseWaveStage.releaseCommit,
+        message:
+            'git branch --remotes --contains $sha failed in $root (exit '
+            '${remotes.exitCode}): ${remotes.stderr}',
+      );
+    }
+    final reachable = [
+      for (final line in const LineSplitter().convert(
+        remotes.stdout.toString(),
+      ))
+        line.replaceFirst(RegExp(r'^[*\s]+'), '').trim(),
+    ].where((ref) => ref.startsWith('origin/'));
+    if (reachable.isEmpty) {
+      throw ReleaseWaveFailure(
+        stage: ReleaseWaveStage.releaseCommit,
+        message:
+            'the release commit $sha is not reachable from any origin/ ref — '
+            'push it before releasing, so consumers can resolve the wave '
+            'against it.',
+      );
+    }
+    return sha;
+  }
+
+  /// Cuts, pushes and waits out ONE package. The push is the publish, so the
+  /// propagation poll is the barrier the next dependent waits behind.
+  Future<void> _publishWavePackage({
+    required String root,
+    required ReleaseWavePackage package,
+    required Duration pollInterval,
+    required int maxPollAttempts,
+  }) async {
+    final tagged = await createGitTag(repoDir: root, tag: package.tag);
+    if (!tagged.created) {
+      throw ReleaseWaveFailure(
+        stage: ReleaseWaveStage.tag,
+        package: package.package,
+        message:
+            'git tag ${package.tag} failed (exit ${tagged.exitCode}): '
+            '${tagged.stderr}',
+      );
+    }
+    final pushed = await _run('git', [
+      'push',
+      'origin',
+      package.tag,
+    ], workingDirectory: root);
+    if (pushed.exitCode != 0) {
+      throw ReleaseWaveFailure(
+        stage: ReleaseWaveStage.push,
+        package: package.package,
+        message:
+            'git push origin ${package.tag} failed (exit ${pushed.exitCode}): '
+            '${pushed.stderr}',
+      );
+    }
+    for (var attempt = 1; attempt <= maxPollAttempts; attempt++) {
+      final probe = await poll(
+        package: package.package,
+        version: package.localVersion.toString(),
+      );
+      if (probe.isPublished) return;
+      if (attempt < maxPollAttempts) await _wait(pollInterval);
+    }
+    throw ReleaseWaveFailure(
+      stage: ReleaseWaveStage.poll,
+      package: package.package,
+      message:
+          '${package.package} ${package.localVersion} did not appear on '
+          'pub.dev after $maxPollAttempts poll(s); every later package in the '
+          'wave is left untagged and unpushed.',
+    );
+  }
+}
+
+/// One publishable pub-workspace member, as authored on disk.
+class _WorkspaceMember {
+  const _WorkspaceMember({
+    required this.name,
+    required this.directory,
+    required this.version,
+    required this.dependencies,
+  });
+
+  final String name;
+  final String directory;
+  final Version version;
+  final List<String> dependencies;
+}
+
+/// A member the wave publishes, plus the published version it moves off.
+class _ChangedMember {
+  const _ChangedMember({required this.member, required this.predecessor});
+
+  final _WorkspaceMember member;
+  final Version? predecessor;
+
+  String get name => member.name;
+  String get directory => member.directory;
+  Version get version => member.version;
+  List<String> get dependencies => member.dependencies;
 }
 
 /// Entries a throwaway candidate copy must NOT carry: workspace-resolved
@@ -1129,6 +1918,29 @@ Set<String> _workspacePackageNames(Directory candidateDir) {
     if (parent.path == cursor.path) return const <String>{};
     cursor = parent;
   }
+}
+
+/// The names in a pubspec's top-level `dependencies` map — the only edges a
+/// release wave orders by (`dev_dependencies` are not part of the published
+/// runtime contract, exactly as in [_declaredFloorPins]).
+List<String> _directDependencyNames(
+  Map<Object?, Object?> pubspec,
+  String pubspecPath,
+) {
+  final declared = pubspec['dependencies'];
+  if (declared == null) return const <String>[];
+  if (declared is! Map) {
+    throw FormatException('$pubspecPath dependencies must be a map');
+  }
+  final names = <String>[];
+  for (final key in declared.keys) {
+    if (key is! String) {
+      throw FormatException('$pubspecPath dependency names must be strings');
+    }
+    names.add(key);
+  }
+  names.sort();
+  return List<String>.unmodifiable(names);
 }
 
 List<DeclaredFloorPin> _declaredFloorPins(

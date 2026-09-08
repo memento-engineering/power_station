@@ -48,3 +48,18 @@ melos:
       description: >-
         Check formatting for all Dart files. Fails if any file needs changes.
       run: dart format --output=none --set-exit-if-changed .
+
+    release:
+      description: >-
+        Release the whole workspace in ONE command: compute which packages are
+        not on pub.dev yet, run every gate, validate the consumers a direct
+        stable wave owes, then cut and push one `<package>-v<version>` tag per
+        package in dependency order, waiting for each to reach pub.dev before
+        the next dependent moves (the tag push IS the publish — the
+        tag-triggered workflow uploads). Pass the change class and, for a
+        docs/additive/fix wave, the consumers manifest:
+        `dart run melos run release -- --change fix --consumers <manifest.json>`
+        (add `--dry-run` to stop after the gates); candidates are
+        `dart run melos run release -- --change rc`. All computation lives in
+        dart_grid_assets — this script is one invocation, no shell logic.
+      run: dart run dart_grid_assets:dart_grid_assets dart release publish --workspace . --json

@@ -32,6 +32,22 @@ dart run melos run test
 dart run melos run analyze
 ```
 
+## Releasing
+
+One command releases the whole workspace: it computes which packages are not on
+pub.dev yet, runs every gate, validates the consumers a direct stable wave owes,
+then cuts and pushes one `<package>-v<version>` tag per package in dependency
+order — and the tag-triggered publish workflow does the upload.
+
+```sh
+dart run melos run release -- --change fix --consumers <manifest.json>
+dart run melos run release -- --change fix --consumers <manifest.json> --dry-run
+dart run melos run release -- --change rc
+```
+
+See `packages/dart_grid_assets/README.md` for the wave's stages, the consumers
+manifest shape, and why a breaking change is refused here.
+
 ## Sibling repositories
 
 power_station is one repo of the
