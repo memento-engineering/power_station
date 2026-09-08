@@ -38,7 +38,12 @@ final class _Cursors implements GitHubCursorStore {
   Future<void> save(GitHubReconcilerCursor value) async => cursor = value;
 }
 
-typedef _Snapshot = ({List<String> pending, List<String> observed});
+typedef _Snapshot = ({
+  List<String> pending,
+  List<String> observed,
+  Map<String, List<String>> acked,
+  DateTime? since,
+});
 
 final class _RecordingCursors implements GitHubCursorStore {
   _RecordingCursors(this.inner, this.calls, this.saves);
@@ -58,6 +63,11 @@ final class _RecordingCursors implements GitHubCursorStore {
           .map((entry) => entry.observationId)
           .toList(growable: false),
       observed: List<String>.of(value.observationIds),
+      acked: <String, List<String>>{
+        for (final entry in value.pending)
+          entry.observationId: List<String>.of(entry.acked),
+      },
+      since: value.since,
     ));
     await inner.save(value);
   }
@@ -123,6 +133,99 @@ final _issueEvent = NormalizedGitHubEvent.issueOpened(
   body: '',
 );
 
+/// The grid STATE store in PROXIED-SERVER mode — the posture every org store
+/// and lunar's own state store actually run in: the type-scoped session list is
+/// answered, and `export` is REFUSED. A leg that reached export here would fail
+/// on every cycle, which is exactly how five seats stopped polling.
+final class _StateBd implements BdRunner {
+  _StateBd(this.sessions);
+
+  /// The enveloped payload `bd list -t session --all --json` answers with.
+  final String sessions;
+  final argvs = <List<String>>[];
+
+  @override
+  Future<BdResult> run(
+    List<String> args, {
+    Duration? timeout,
+    String? stdin,
+  }) async {
+    argvs.add(List<String>.of(args));
+    return switch (args.first) {
+      'export' => const BdResult(
+        exitCode: 1,
+        stdout: '',
+        stderr: 'Error: export is not supported in proxied-server mode',
+      ),
+      'list' => BdResult(exitCode: 0, stdout: sessions, stderr: ''),
+      _ => const BdResult(exitCode: 0, stdout: '{}', stderr: ''),
+    };
+  }
+}
+
+final class _Sender implements FeedbackCommandSender {
+  final calls = <String>[];
+
+  @override
+  Future<FeedbackCommandResult> rework({
+    required String gridRoot,
+    required String beadId,
+    required String note,
+    required String idempotencyKey,
+  }) async {
+    calls.add(idempotencyKey);
+    return const FeedbackCommandCompleted(<String, Object?>{});
+  }
+}
+
+/// One session row per work-bead key, enveloped as `bd list --json` returns it.
+String _sessions(List<String> workBeads, {List<String>? ids}) => jsonEncode({
+  'schema_version': 1,
+  'data': [
+    for (var i = 0; i < workBeads.length; i++)
+      {
+        'id': ids == null ? 'grid_state-session-$i' : ids[i],
+        'issue_type': 'session',
+        'metadata': {'work_bead': workBeads[i]},
+      },
+  ],
+});
+
+/// The wedged shape, verbatim: ONE completed check on a `grid/<bead>` branch,
+/// acked by the sink leg only.
+const _checkId = 'poll:check:C_1:2026-09-03T16:24:00Z:failure';
+final _checkCompletedAt = DateTime.parse('2026-09-03T16:24:00Z');
+
+const _checkEvent = NormalizedGitHubEvent.checkConcluded(
+  nodeId: 'C_1',
+  actor: 'actions',
+  repository: 'memento/power',
+  substation: 'power',
+  observationId: _checkId,
+  headBranch: 'grid/pow-2xmo',
+  checkName: 'build',
+  conclusion: 'failure',
+);
+
+/// An intake row updated AFTER the wedged check — one of the 53 rows GitHub
+/// listed for power_station that the blocked poll never observed.
+Map<String, Object?> _rowUpdatedAfterCheck() => <String, Object?>{
+  ..._issueRow(),
+  'updated_at': '2026-09-05T18:40:00Z',
+};
+
+GitHubReconcilerCursor _wedged() => const GitHubReconcilerCursor()
+    .enqueue(_checkEvent)
+    .ack(_checkId, kSinkDeliveryLeg);
+
+CiFeedbackProjection _feedback(_StateBd state, _Sender sender) =>
+    CiFeedbackProjection(
+      bd: state,
+      commandSender: sender,
+      gridRoot: '/grid',
+      substation: 'power',
+    );
+
 GitHubReconciler _reconciler({
   required _Transport transport,
   required GitHubCursorStore cursors,
@@ -137,6 +240,88 @@ GitHubReconciler _reconciler({
 );
 
 void main() {
+  test('a proxied-mode store drains the wedged check and advances the '
+      'poll in ONE cycle', () async {
+    final state = _StateBd(_sessions(<String>['pow-2xmo']));
+    final sender = _Sender();
+    final cursors = _Cursors(_wedged());
+    final saves = <_Snapshot>[];
+    final reconciler = _reconciler(
+      transport: _Transport(<GitHubHttpResponse>[
+        _response(<Object?>[_rowUpdatedAfterCheck()]),
+        _response(const <Object?>[]),
+      ]),
+      cursors: _RecordingCursors(cursors, <String>[], saves),
+      emit: (_) async {},
+    )..addObserver(kCiFeedbackDeliveryLeg, _feedback(state, sender).call);
+
+    await reconciler.reconcileOnce();
+
+    // The leg ACKED: an intermediate cursor carries both delivery legs.
+    expect(
+      saves.map((save) => save.acked[_checkId]),
+      contains(
+        orderedEquals(<String>[kSinkDeliveryLeg, kCiFeedbackDeliveryLeg]),
+      ),
+    );
+    // ...the queue DRAINED, and the observation is claimed.
+    expect(cursors.cursor.pending, isEmpty);
+    expect(cursors.cursor.hasObserved(_checkId), isTrue);
+    // ...and the poll behind it MOVED: `since` passes the wedged check time.
+    expect(cursors.cursor.since, isNotNull);
+    expect(cursors.cursor.since!.isAfter(_checkCompletedAt), isTrue);
+    // ONE type-scoped read, and nothing reached the refused verb.
+    expect(state.argvs.where((argv) => argv.first == 'list').single, <String>[
+      'list',
+      '-t',
+      'session',
+      '--all',
+      '--json',
+      '--limit',
+      '0',
+    ]);
+    expect(state.argvs.map((argv) => argv.first), isNot(contains('export')));
+    expect(sender.calls, hasLength(1));
+  });
+
+  for (final shape in <({String name, String sessions})>[
+    (name: 'no live session', sessions: '{"schema_version":1,"data":[]}'),
+    (
+      name: 'two current sessions',
+      sessions: _sessions(<String>['pow-2xmo', 'pow-2xmo']),
+    ),
+    (
+      name: 'a current session with a blank id',
+      sessions: _sessions(<String>['pow-2xmo'], ids: <String>['  ']),
+    ),
+  ]) {
+    test('a stale check whose bead resolves to ${shape.name} still '
+        'drains', () async {
+      final state = _StateBd(shape.sessions);
+      final sender = _Sender();
+      final flares = <String>[];
+      final cursors = _Cursors(_wedged());
+      final projection = _feedback(state, sender)
+        ..bindReporter((name, action, error, stackTrace) => flares.add(name));
+      final reconciler = _reconciler(
+        transport: _Transport(<GitHubHttpResponse>[
+          _response(<Object?>[_rowUpdatedAfterCheck()]),
+          _response(const <Object?>[]),
+        ]),
+        cursors: cursors,
+        emit: (_) async {},
+      )..addObserver(kCiFeedbackDeliveryLeg, projection.call);
+
+      await reconciler.reconcileOnce();
+
+      expect(flares, <String>[kCiFeedbackIgnoredFlare]);
+      expect(sender.calls, isEmpty);
+      expect(cursors.cursor.pending, isEmpty);
+      expect(cursors.cursor.hasObserved(_checkId), isTrue);
+      expect(cursors.cursor.since!.isAfter(_checkCompletedAt), isTrue);
+    });
+  }
+
   test(
     'pending is persisted before the sink and claimed after observers',
     () async {

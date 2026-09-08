@@ -107,19 +107,36 @@ class _Transport implements ExplorationTransport {
   void flare(String name, Map<String, String> data) {}
 }
 
+/// A state store in PROXIED-SERVER mode: it answers the type-scoped session
+/// list and refuses `export` exactly as a live org store does.
 final class _FeedbackBdRunner implements BdRunner {
   @override
   Future<BdResult> run(
     List<String> args, {
     Duration? timeout,
     String? stdin,
-  }) async => const BdResult(
-    exitCode: 0,
-    stdout:
-        '{"id":"session-1","issue_type":"session",'
-        '"metadata":{"work_bead":"pow-test"}}\n',
-    stderr: '',
-  );
+  }) async => switch (args.first) {
+    'export' => const BdResult(
+      exitCode: 1,
+      stdout: '',
+      stderr: 'Error: export is not supported in proxied-server mode',
+    ),
+    'list' => BdResult(
+      exitCode: 0,
+      stdout: jsonEncode({
+        'schema_version': 1,
+        'data': [
+          {
+            'id': 'session-1',
+            'issue_type': 'session',
+            'metadata': {'work_bead': 'pow-test'},
+          },
+        ],
+      }),
+      stderr: '',
+    ),
+    _ => const BdResult(exitCode: 0, stdout: '{}', stderr: ''),
+  };
 }
 
 final class _FeedbackSender implements FeedbackCommandSender {

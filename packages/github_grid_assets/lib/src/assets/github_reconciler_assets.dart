@@ -8,6 +8,7 @@ import 'package:grid_sdk/grid_sdk.dart' show ProviderTreeContext;
 
 import '../code/github_app_pr_opener.dart';
 import '../credentials.dart';
+import '../github/ci_feedback_projection.dart';
 import '../github/github_reconciler.dart';
 import '../github/github_reconciler_runtime.dart';
 import '../github/reconciler_cursor.dart';
@@ -70,6 +71,52 @@ typedef GitHubReconcilerRuntimeFactory =
       required ExplorationTransport? transport,
     });
 
+/// Reports one reconciler failure for [config] on [transport].
+///
+/// The seat's ONE reporting path: the injected transport first, and
+/// `developer.log` when there is none — or when the flare itself throws, which
+/// is reported and then falls through to the log rather than escaping into the
+/// caller. Every reconciler-owned failure goes through here — a malformed
+/// intake row, a failed cycle, and the CI-feedback leg's ignored shapes — so
+/// one seat speaks with one voice and there is no second path to keep in step.
+void _reportGitHubReconciler({
+  required GitHubReconcilerConfig config,
+  required ExplorationTransport? transport,
+  required String flareName,
+  required String action,
+  required Object error,
+  required StackTrace stackTrace,
+}) {
+  final message =
+      'GitHub reconciler $action for seat=${config.substation} '
+      'repository=${config.owner}/${config.repository}: $error';
+  final data = <String, String>{
+    'seat': config.substation,
+    'repository': '${config.owner}/${config.repository}',
+    'error': '$error',
+    'stack_trace': '$stackTrace',
+  };
+  if (transport != null) {
+    try {
+      transport.flare(flareName, data);
+      return;
+    } on Object catch (flareError, flareStackTrace) {
+      developer.log(
+        '$message; flare $flareName failed: $flareError',
+        name: 'github_grid_assets.reconciler',
+        error: flareError,
+        stackTrace: flareStackTrace,
+      );
+    }
+  }
+  developer.log(
+    message,
+    name: 'github_grid_assets.reconciler',
+    error: error,
+    stackTrace: stackTrace,
+  );
+}
+
 /// Creates the production polling runtime for [config].
 GitHubReconcilerRuntime createGitHubReconcilerRuntime({
   required GitHubReconcilerConfig config,
@@ -83,36 +130,14 @@ GitHubReconcilerRuntime createGitHubReconcilerRuntime({
     String action,
     Object error,
     StackTrace stackTrace,
-  ) {
-    final message =
-        'GitHub reconciler $action for seat=${config.substation} '
-        'repository=${config.owner}/${config.repository}: $error';
-    final data = <String, String>{
-      'seat': config.substation,
-      'repository': '${config.owner}/${config.repository}',
-      'error': '$error',
-      'stack_trace': '$stackTrace',
-    };
-    if (transport != null) {
-      try {
-        transport.flare(flareName, data);
-        return;
-      } on Object catch (flareError, flareStackTrace) {
-        developer.log(
-          '$message; flare $flareName failed: $flareError',
-          name: 'github_grid_assets.reconciler',
-          error: flareError,
-          stackTrace: flareStackTrace,
-        );
-      }
-    }
-    developer.log(
-      message,
-      name: 'github_grid_assets.reconciler',
-      error: error,
-      stackTrace: stackTrace,
-    );
-  }
+  ) => _reportGitHubReconciler(
+    config: config,
+    transport: transport,
+    flareName: flareName,
+    action: action,
+    error: error,
+    stackTrace: stackTrace,
+  );
 
   final reconciler = GitHubReconciler(
     owner: config.owner,
@@ -139,6 +164,12 @@ GitHubReconcilerRuntime createGitHubReconcilerRuntime({
 }
 
 /// Owns and provides a live reconciler runtime when the composition is armed.
+///
+/// It also binds the seat's flare rail onto the [CiFeedbackProjection] the
+/// binding above provides, so the CI-feedback delivery leg reports on the SAME
+/// transport a failed cycle does. This asset is where that transport is already
+/// resolved, so binding here adds no second observer, no second provider and no
+/// second reporting path.
 class GitHubReconcilerAssets extends SingleChildStatefulSeed {
   /// Creates an optionally armed reconciler provider.
   const GitHubReconcilerAssets({
@@ -167,6 +198,10 @@ final class _GitHubReconcilerAssetsState
   GitHubCursorStore? _builtCursors;
   GitHubEventSink? _builtEmit;
   ExplorationTransport? _builtTransport;
+  CiFeedbackProjection? _reportingProjection;
+  CiFeedbackReporter? _boundReporter;
+  GitHubReconcilerConfig? _reporterConfig;
+  ExplorationTransport? _reporterTransport;
 
   GitHubReconcilerAssets get _assets => seed;
 
@@ -176,8 +211,12 @@ final class _GitHubReconcilerAssetsState
     final client = context.watch<GitHubAppClient>();
     final cursors = context.watch<GitHubCursorStore>();
     final emit = context.watch<GitHubEventSink>();
+    final feedback = context.watch<CiFeedbackProjection>();
     final config = _assets.config;
     final transport = services?.transport;
+    // Bound INDEPENDENTLY of the runtime: the leg's visibility is not something
+    // an absent App client should silently take away.
+    _bindReporter(feedback, config, transport);
     final enabled =
         config?.arm == GitHubReconcilerArm.live &&
         client != null &&
@@ -226,8 +265,58 @@ final class _GitHubReconcilerAssetsState
     if (previous != null) unawaited(previous.stop());
   }
 
+  /// Binds THIS asset's reporter onto [projection] whenever the projection, the
+  /// config or the transport it closes over has changed.
+  void _bindReporter(
+    CiFeedbackProjection? projection,
+    GitHubReconcilerConfig? config,
+    ExplorationTransport? transport,
+  ) {
+    if (identical(projection, _reportingProjection) &&
+        config == _reporterConfig &&
+        identical(transport, _reporterTransport)) {
+      return;
+    }
+    _unbindReporter();
+    if (projection == null || config == null) return;
+    void reporter(
+      String flareName,
+      String action,
+      Object error,
+      StackTrace stackTrace,
+    ) => _reportGitHubReconciler(
+      config: config,
+      transport: transport,
+      flareName: flareName,
+      action: action,
+      error: error,
+      stackTrace: stackTrace,
+    );
+
+    projection.bindReporter(reporter);
+    _reportingProjection = projection;
+    _boundReporter = reporter;
+    _reporterConfig = config;
+    _reporterTransport = transport;
+  }
+
+  /// Unbinds only the reporter THIS asset bound; a binding some other owner has
+  /// since installed on the same projection stands.
+  void _unbindReporter() {
+    final projection = _reportingProjection;
+    final reporter = _boundReporter;
+    if (projection != null && reporter != null) {
+      projection.unbindReporter(reporter);
+    }
+    _reportingProjection = null;
+    _boundReporter = null;
+    _reporterConfig = null;
+    _reporterTransport = null;
+  }
+
   @override
   void dispose() {
+    _unbindReporter();
     final runtime = _runtime;
     _runtime = null;
     if (runtime != null) unawaited(runtime.stop());

@@ -275,10 +275,17 @@ class SubstationSeed extends StatelessSeed {
       // projection below must read the SEAT's seats, not the station's.
       if (arming != null) TypedEnvironmentProvider(arming: arming),
       _MountedSubstationSeedAssets(githubPollingConfigured: githubPoll != null),
-      const GitGridAssets(),
+      // ABOVE GitGridAssets on purpose. That seed builds a FRESH ServiceBundle
+      // carrying source control and NOTHING from ambient, so a reconciler
+      // folded below it resolves a bundle whose `transport` is null and every
+      // failed cycle goes to `developer.log` instead of the station stream.
+      // Mounted here, the reconciler subscribes to the STATION's bundle and
+      // keeps its flare rail. GitGridAssets stays the forced ancestor of
+      // GitHubGridAssets (A7) — their relative order is untouched.
       if (githubPoll != null && githubPoll.arm == GitHubReconcilerArm.live)
         _SubstationGitHubReconcilerBindingAssets(config: githubPoll),
       if (githubPoll != null) GitHubReconcilerAssets(config: githubPoll),
+      const GitGridAssets(),
       GitHubGridAssets(policy: landingPolicy),
       if (mountEligibilityRunnerFor == null)
         const MountEligibilityAssets()
