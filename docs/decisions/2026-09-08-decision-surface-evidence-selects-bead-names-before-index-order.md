@@ -23,7 +23,7 @@ The decision-surface gather MUST select every decision named by the work bead be
 
 Each surface keeps at most 96 entries. Named entries retain index order ahead of unnamed fill entries. More than 96 named entries is a FAILED lookup rather than a partial named answer. After the named set is secured, omitted unnamed entries retain the existing TRUNCATED receipt, so growth past the cap remains a known non-answer.
 
-An explicit canonical or legacy reference that has no matching index record is FAILED with the missing name in the reason and is never represented as TRUNCATED. Existing slugs may be recognized from the returned register set, but arbitrary hyphenated bead prose is not inferred to be a missing citation.
+An explicit reference (a canonical token under a register the index contains, or an `ADR-<nnnn>` id) that has no matching index record is FAILED with the missing name in the reason and is never represented as TRUNCATED; a bare legacy `A<n>` token or a canonical-shaped token under an unknown register never fails a surface. Existing slugs may be recognized from the returned register set, but arbitrary hyphenated bead prose is not inferred to be a missing citation.
 
 This extends `power_station#discovery-evidence-is-gathered-once-and-projected`: `AnchorsCapability` remains the one deterministic gather, `commandDecisionIndexSource` remains its roster-mode read-only extension seam, and `DecisionSurfaceEvidence` plus `EvidenceState` remain the one evidence and completeness vocabulary.
 
