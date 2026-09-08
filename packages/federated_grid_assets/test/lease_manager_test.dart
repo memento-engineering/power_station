@@ -4,6 +4,11 @@
 //   2. max-lifetime + a FIFO wait-queue (starvation bound)
 //   3. owner-clock reaping (no cross-machine time math)
 //   4. request idempotency (a dup key → a single grant)
+//
+// Plus the manager's OWN schedule: it arms one timer at its earliest deadline
+// and pumps itself, so an idle station still reaps and still denies an overdue
+// waiter with no other traffic. The timer factory is injected beside the clock,
+// so those deadlines are driven here rather than by wall-time.
 import 'dart:async';
 
 import 'package:federated_grid_assets/federated_grid_assets.dart';
@@ -16,19 +21,96 @@ class _Clock {
   void advance(Duration d) => now = now.add(d);
 }
 
+/// A fake one-shot [Timer]: the manager's own scheduling, driven by the test.
+/// [deadline] is the owner-clock instant it was armed for.
+class _ManualTimer implements Timer {
+  _ManualTimer(this.delay, this.deadline, this._callback);
+
+  final Duration delay;
+  final DateTime deadline;
+  final void Function() _callback;
+  bool _active = true;
+
+  @override
+  bool get isActive => _active;
+
+  @override
+  int get tick => 0;
+
+  @override
+  void cancel() => _active = false;
+
+  /// Fires the callback ONCE — inactive first, so the manager re-arming from
+  /// inside the callback is never mistaken for this timer still being live.
+  void fire() {
+    if (!_active) return;
+    _active = false;
+    _callback();
+  }
+}
+
+/// Hands out [_ManualTimer]s against the same fake clock the manager reads, and
+/// records every one so a test can see how the manager re-arms.
+class _ManualTimerFactory {
+  _ManualTimerFactory(this._clock);
+
+  final _Clock _clock;
+
+  /// Every timer handed out, in creation order (cancelled ones included).
+  final List<_ManualTimer> created = [];
+
+  Timer call(Duration delay, void Function() callback) {
+    final t = _ManualTimer(delay, _clock.now.add(delay), callback);
+    created.add(t);
+    return t;
+  }
+
+  /// The timers still armed — never more than one, if the manager holds its
+  /// one-pending-timer invariant.
+  List<_ManualTimer> get live =>
+      created.where((t) => t.isActive).toList(growable: false);
+
+  /// Advances the clock to the earliest armed deadline and fires that timer:
+  /// the manager waking ITSELF up, with no other call made on it.
+  void fireNext() {
+    final armed = live;
+    if (armed.isEmpty) throw StateError('no timer is armed');
+    final next = armed.reduce(
+      (a, b) => b.deadline.isBefore(a.deadline) ? b : a,
+    );
+    if (next.deadline.isAfter(_clock.now)) _clock.now = next.deadline;
+    next.fire();
+  }
+}
+
+/// A denial carrying exactly [message].
+Matcher _deniedWith(String message) => throwsA(
+  isA<LeaseDeniedException>().having((e) => e.message, 'message', message),
+);
+
+/// A kind-agnostic dispatch handler — the bus only ever sees opaque maps.
+Future<Map<String, dynamic>> _echoHandler(Map<String, dynamic> payload) async =>
+    {'echo': payload};
+
 LeaseManager _manager(
   _Clock clock, {
   int offered = 1,
   Duration ttl = const Duration(seconds: 300),
   Duration maxLifetime = const Duration(seconds: 3600),
   int maxQueueDepth = 64,
+  Duration? heartbeat,
+  int missedHeartbeatThreshold = 3,
+  Timer Function(Duration delay, void Function() callback)? timerFactory,
 }) => LeaseManager(
   station: 'b',
   offerings: {'kind-a': offered, 'kind-b': 1},
   ttl: ttl,
   maxLifetime: maxLifetime,
   maxQueueDepth: maxQueueDepth,
+  heartbeat: heartbeat,
+  missedHeartbeatThreshold: missedHeartbeatThreshold,
   clock: clock.call,
+  timerFactory: timerFactory,
 );
 
 void main() {
@@ -417,5 +499,233 @@ void main() {
         throwsA(isA<LeaseInvalidException>()),
       );
     });
+  });
+
+  group('the manager owns its schedule', () {
+    test(
+      'idle full-capacity manager denies a waiter from its owned timer',
+      () async {
+        final clock = _Clock();
+        final timers = _ManualTimerFactory(clock);
+        final m = _manager(clock, timerFactory: timers.call);
+        m.grant(const LeaseRequest(lessee: 'held', kind: 'kind-a'));
+        final waiter = m.acquire(
+          const LeaseRequest(lessee: 'late', kind: 'kind-a'),
+          maxWait: const Duration(seconds: 10),
+        );
+        final denied = expectLater(waiter, _deniedWith('wait expired'));
+        // The ONLY thing that touches the manager from here — no request pumps it.
+        timers.fireNext();
+        await denied;
+      },
+    );
+
+    test('two kinds expire at their own timer deadlines in order', () async {
+      final clock = _Clock();
+      final start = clock.now;
+      final timers = _ManualTimerFactory(clock);
+      final m = _manager(clock, timerFactory: timers.call);
+      m.grant(const LeaseRequest(lessee: 'held-a', kind: 'kind-a'));
+      m.grant(const LeaseRequest(lessee: 'held-b', kind: 'kind-b'));
+      final a = m.acquire(
+        const LeaseRequest(lessee: 'a', kind: 'kind-a'),
+        maxWait: const Duration(seconds: 10),
+      );
+      final b = m.acquire(
+        const LeaseRequest(lessee: 'b', kind: 'kind-b'),
+        maxWait: const Duration(seconds: 20),
+      );
+      // Recorders first, so each denial is logged before its expectation
+      // resolves — listeners run in registration order.
+      final order = <String>[];
+      unawaited(a.then((_) {}, onError: (Object _) => order.add('kind-a')));
+      unawaited(b.then((_) {}, onError: (Object _) => order.add('kind-b')));
+      final deniedA = expectLater(a, _deniedWith('wait expired'));
+      final deniedB = expectLater(b, _deniedWith('wait expired'));
+
+      timers.fireNext(); // kind-a's 10s wait
+      await deniedA;
+      expect(timers.live, hasLength(1), reason: 'one timer, never two');
+      expect(
+        timers.live.single.deadline,
+        start.add(const Duration(seconds: 20)),
+        reason: "the first denial does not mask kind-b's later deadline",
+      );
+
+      timers.fireNext(); // kind-b's 20s wait
+      await deniedB;
+      expect(order, ['kind-a', 'kind-b']);
+      expect(
+        timers.live.single.deadline,
+        start.add(const Duration(seconds: 300)),
+        reason: 'with the queues drained the held TTLs are the next deadline',
+      );
+    });
+
+    test('scheduler re-arms at the earliest deadline with at most one live '
+        'timer', () async {
+      final clock = _Clock();
+      final start = clock.now;
+      final timers = _ManualTimerFactory(clock);
+      final m = _manager(
+        clock,
+        ttl: const Duration(seconds: 30),
+        maxLifetime: const Duration(seconds: 20),
+        heartbeat: const Duration(seconds: 10),
+        missedHeartbeatThreshold: 1,
+        timerFactory: timers.call,
+      );
+
+      final held = m.grant(const LeaseRequest(lessee: 'held', kind: 'kind-a'));
+      expect(timers.live, hasLength(1));
+      expect(
+        timers.live.single.deadline,
+        start.add(const Duration(seconds: 10)),
+        reason: 'the heartbeat window is the earliest of the three held bounds',
+      );
+
+      final waiter = m.acquire(
+        const LeaseRequest(lessee: 'next', kind: 'kind-a'),
+        maxWait: const Duration(seconds: 2),
+      );
+      expect(timers.live, hasLength(1));
+      expect(
+        timers.live.single.deadline,
+        start.add(const Duration(seconds: 2)),
+        reason: 'a nearer waiter deadline takes the timer',
+      );
+
+      m.release(held.leaseId, token: held.fencingToken);
+      final granted =
+          await waiter; // the release hands the slot to the FIFO head
+      expect(timers.live, hasLength(1));
+      expect(
+        timers.live.single.deadline,
+        start.add(const Duration(seconds: 10)),
+        reason: "the grant re-arms on the new lease's own bounds",
+      );
+
+      m.release(granted.leaseId, token: granted.fencingToken);
+      expect(timers.live, isEmpty, reason: 'no deadline left → nothing armed');
+    });
+
+    test('scheduler clamps negative delays to zero', () {
+      // A clock that has always moved on by the time the manager re-arms, so
+      // every deadline it computes is already in the past.
+      var now = DateTime.utc(2026);
+      DateTime advancingClock() {
+        final reading = now;
+        now = now.add(const Duration(seconds: 1));
+        return reading;
+      }
+
+      final delays = <Duration>[];
+      final m = LeaseManager(
+        station: 'b',
+        offerings: const {'kind-a': 1},
+        ttl: const Duration(microseconds: 1),
+        clock: advancingClock,
+        timerFactory: (delay, callback) {
+          delays.add(delay);
+          return _ManualTimer(delay, now, callback);
+        },
+      );
+
+      m.grant(const LeaseRequest(lessee: 'x', kind: 'kind-a'));
+      expect(delays, isNotEmpty);
+      expect(delays.any((d) => d.isNegative), isFalse);
+      expect(delays.last, Duration.zero);
+    });
+
+    test('owned timer reaps a held lease and grants its waiter', () async {
+      final clock = _Clock();
+      final timers = _ManualTimerFactory(clock);
+      final m = _manager(
+        clock,
+        ttl: const Duration(seconds: 10),
+        timerFactory: timers.call,
+      );
+      final held = m.grant(const LeaseRequest(lessee: 'held', kind: 'kind-a'));
+      final waiter = m.acquire(
+        const LeaseRequest(lessee: 'next', kind: 'kind-a'),
+        maxWait: const Duration(seconds: 60),
+      );
+
+      timers.fireNext(); // the held lease's 10s TTL, ahead of the 60s wait
+      final granted = await waiter;
+      expect(granted.leaseId, isNot(held.leaseId));
+      expect(m.isValid(held.leaseId), isFalse);
+      expect(m.isValid(granted.leaseId), isTrue);
+    });
+
+    test(
+      'close cancels scheduling once without draining leases or waiters',
+      () async {
+        final clock = _Clock();
+        final timers = _ManualTimerFactory(clock);
+        final ended = <String>[];
+        final m = LeaseManager(
+          station: 'b',
+          offerings: const {'kind-a': 1},
+          ttl: const Duration(seconds: 30),
+          clock: clock.call,
+          timerFactory: timers.call,
+          onLeaseEnded: ended.add,
+        );
+        final held = m.grant(
+          const LeaseRequest(lessee: 'held', kind: 'kind-a'),
+        );
+        final waiter = m.acquire(
+          const LeaseRequest(lessee: 'next', kind: 'kind-a'),
+          maxWait: const Duration(seconds: 10),
+        );
+        var settled = false;
+        unawaited(
+          waiter.then(
+            (_) => settled = true,
+            onError: (Object _) => settled = true,
+          ),
+        );
+        expect(timers.live, hasLength(1));
+
+        m.close();
+        m.close(); // idempotent
+        await Future<void>.delayed(Duration.zero);
+
+        expect(timers.live, isEmpty);
+        expect(settled, isFalse, reason: 'close does not drain the wait-queue');
+        expect(m.isValid(held.leaseId), isTrue, reason: 'close does not reap');
+        expect(ended, isEmpty, reason: 'close is not a lease ending');
+        expect(timers.live, isEmpty, reason: 'a closed manager never re-arms');
+      },
+    );
+  });
+
+  group('the station server owns the manager lifecycle', () {
+    test('station server without a reap interval denies an idle waiting lease '
+        'at leaseWait', () async {
+      final server = await StationServer.start(
+        station: 'idle',
+        offerings: const {'kind-a': 1},
+        host: '127.0.0.1',
+        leaseWait: const Duration(milliseconds: 250),
+        handler: _echoHandler,
+      );
+      addTearDown(server.close);
+      final client = HttpStationClient(host: '127.0.0.1', port: server.port);
+      addTearDown(client.close);
+
+      await client.requestLease(
+        const LeaseRequest(lessee: 'holder', kind: 'kind-a'),
+      );
+      // No reapInterval and no further traffic: only the manager's own deadline
+      // timer can move this waiting request on.
+      await expectLater(
+        client.requestLease(
+          const LeaseRequest(lessee: 'waiter', kind: 'kind-a'),
+        ),
+        _deniedWith('wait expired'),
+      );
+    }, timeout: const Timeout(Duration(seconds: 20)));
   });
 }

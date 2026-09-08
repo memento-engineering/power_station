@@ -23,8 +23,19 @@
 /// *disconnected* one. With [heartbeat] unset, behaviour is unchanged (idle TTL +
 /// max-lifetime only).
 ///
-/// Pure, synchronous, injectable clock + id generator so it is fully testable
-/// without a wall-clock, randomness, or real IO.
+/// The manager also OWNS its schedule. Every deadline it holds — a lease's idle
+/// TTL, its max lifetime, its heartbeat window, and a queued request's `maxWait`
+/// — is backed by ONE pending timer armed at the EARLIEST of them, re-armed on
+/// every state change that can move that minimum. Without it, expiry only ever
+/// advanced when some OTHER request happened to pump the manager, so an idle
+/// station held an overdue waiter open forever and freed a dead lease's slot
+/// only on the next unrelated call. The timer's callback is the same pump [tick]
+/// runs — the one every request path already drives — so all expiry semantics
+/// stay in one place and the [clock] remains the sole source of every
+/// COMPARISON. Stop the scheduling with [close].
+///
+/// Pure, synchronous, injectable clock + id generator + timer factory so it is
+/// fully testable without a wall-clock, randomness, or real IO.
 library;
 
 import 'dart:async';
@@ -71,8 +82,11 @@ class LeaseManager {
   /// the immovable cap on a lease's total life (renewal cannot push past it).
   /// [maxQueueDepth] bounds the FIFO wait-queue. [heartbeat] (when set) is the
   /// expected liveness cadence; a lease with no [beat] within
-  /// [heartbeat] × [missedHeartbeatThreshold] is reaped as disconnected. [clock]
-  /// and [idGen] are injectable for deterministic tests.
+  /// [heartbeat] × [missedHeartbeatThreshold] is reaped as disconnected. [clock],
+  /// [idGen] and [timerFactory] are injectable for deterministic tests;
+  /// [timerFactory] defaults to `dart:async`'s [Timer] and is how the manager
+  /// arms its own earliest-deadline timer (a test drives expiry by firing a fake
+  /// one against the same injected [clock]).
   ///
   /// Fencing deliberately uses one manager-wide counter. A fencing token only
   /// needs to be an owner-issued monotonic version; sharing the sequence across
@@ -89,6 +103,7 @@ class LeaseManager {
     this.onLeaseEnded,
     DateTime Function()? clock,
     String Function(int seq)? idGen,
+    Timer Function(Duration delay, void Function() callback)? timerFactory,
   }) : offerings = Map.unmodifiable(_validateOfferings(offerings)),
        _queues = {for (final kind in offerings.keys) kind: <_Waiter>[]},
        _grantsByKindAndKey = {
@@ -96,7 +111,8 @@ class LeaseManager {
        },
        assert(missedHeartbeatThreshold > 0, 'threshold must be positive'),
        _clock = clock ?? DateTime.now,
-       _idGen = idGen ?? ((seq) => '$station-lease-$seq');
+       _idGen = idGen ?? ((seq) => '$station-lease-$seq'),
+       _timerFactory = timerFactory ?? Timer.new;
 
   /// The station id this manager speaks for.
   final String station;
@@ -132,6 +148,12 @@ class LeaseManager {
 
   final DateTime Function() _clock;
   final String Function(int seq) _idGen;
+  final Timer Function(Duration delay, void Function() callback) _timerFactory;
+
+  /// The ONE pending deadline timer (see [_rearm]), or `null` when the manager
+  /// holds no deadline at all — or has been [close]d.
+  Timer? _deadlineTimer;
+  bool _closed = false;
   final Map<String, _Held> _held = {};
   final Map<String, List<_Waiter>> _queues;
   final Map<String, Map<String, LeaseGrant>> _grantsByKindAndKey;
@@ -226,6 +248,7 @@ class LeaseManager {
     }
     final w = _Waiter(req, Completer<LeaseGrant>(), _clock().add(maxWait));
     queue.add(w);
+    _rearm(); // the wait deadline is ours to enforce, traffic or not
     return w.completer.future;
   }
 
@@ -291,7 +314,26 @@ class LeaseManager {
 
   /// Advances time-driven state: reap expired leases/lifetimes by the owner clock,
   /// expire overdue waiters, then grant freed slots to the FIFO head. Idempotent.
+  ///
+  /// The manager already calls this from its own deadline timer, so a caller
+  /// never has to poll; a coarse external ticker remains a harmless safety net.
   void tick() => _pump();
+
+  /// Stops the manager's OWN scheduling: cancels the pending deadline timer so
+  /// nothing more fires from it. Idempotent — a second call is a no-op.
+  ///
+  /// Deliberately NOT a drain. Held leases stay held, queued waiters stay
+  /// pending (their futures are neither granted nor denied) and [onLeaseEnded]
+  /// never fires here: tearing the lessee-facing surface down belongs to whoever
+  /// owns it (the station server closes this beside its socket). After [close]
+  /// the manager still answers every call correctly — it is simply back to
+  /// advancing only when something pumps it.
+  void close() {
+    if (_closed) return;
+    _closed = true;
+    _deadlineTimer?.cancel();
+    _deadlineTimer = null;
+  }
 
   /// Validates a lease handle + fencing [token] for the given [leaseId].
   void _validate(String leaseId, int token) {
@@ -360,6 +402,7 @@ class LeaseManager {
     if (req.idempotencyKey.isNotEmpty) {
       _grantsByKindAndKey[req.kind]![req.idempotencyKey] = grant;
     }
+    _rearm(); // a fresh lease brings three deadlines with it
     return grant;
   }
 
@@ -408,6 +451,7 @@ class LeaseManager {
     for (final id in dead) {
       _remove(id, _held[id]!);
     }
+    _rearm();
   }
 
   /// Reap, expire overdue waiters, then grant freed slots to the FIFO head.
@@ -416,6 +460,7 @@ class LeaseManager {
     for (final kind in offerings.keys) {
       _pumpKind(kind);
     }
+    _rearm();
   }
 
   void _pumpKind(String kind) {
@@ -432,6 +477,57 @@ class LeaseManager {
       final w = queue.removeAt(0);
       w.completer.complete(_issue(w.req));
     }
+    _rearm();
+  }
+
+  /// Re-points the manager's ONE pending timer at the earliest deadline it now
+  /// holds, cancelling whatever was armed before. Called after every state
+  /// change that can move that minimum (a grant, an enqueue, a reap, a waiter
+  /// expiry or completion, a release), so nested pump work never leaves a second
+  /// timer live — the last call wins, and the fire arrives no later than the
+  /// soonest thing that could change.
+  ///
+  /// The callback is [_pump] and NOTHING else: reaping, waiter expiry and FIFO
+  /// granting are not restated here, they stay where they already live. A
+  /// deadline already in the past arms at [Duration.zero] rather than a negative
+  /// delay, and arming nothing is the right answer when the manager holds no
+  /// deadline (or is closed).
+  void _rearm() {
+    _deadlineTimer?.cancel();
+    _deadlineTimer = null;
+    if (_closed) return;
+    final earliest = _earliestDeadline();
+    if (earliest == null) return;
+    final delay = earliest.difference(_clock());
+    _deadlineTimer = _timerFactory(
+      delay.isNegative ? Duration.zero : delay,
+      _pump,
+    );
+  }
+
+  /// The soonest instant any held lease or queued waiter could need attention:
+  /// the minimum over every lease's idle expiry, hard deadline and (when set)
+  /// heartbeat deadline — the three ORTHOGONAL bounds [_reap] compares — and
+  /// every waiter's wait deadline. `null` when the manager holds neither.
+  DateTime? _earliestDeadline() {
+    DateTime? earliest;
+    for (final h in _held.values) {
+      earliest = _earlier(earliest, h.expiry);
+      earliest = _earlier(earliest, h.hardDeadline);
+      earliest = _earlier(earliest, h.heartbeatDeadline);
+    }
+    for (final queue in _queues.values) {
+      for (final w in queue) {
+        earliest = _earlier(earliest, w.deadline);
+      }
+    }
+    return earliest;
+  }
+
+  static DateTime? _earlier(DateTime? a, DateTime? b) {
+    if (a == null) return b;
+    if (b == null) return a;
+    return b.isBefore(a) ? b : a;
   }
 
   int _availableFor(String kind) =>
