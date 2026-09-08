@@ -7,18 +7,25 @@
 // over the PINNED scope, before the priced lanes, and refuses the round with
 // the offending files NAMED.
 //
-// Two postures pinned here: the answer is a typed NON-RESULT (a gate, never a
-// letter grade the route's matrix could soften), and the diff is never
-// rewritten on the builder's behalf — every case asserts the source bytes
-// survive the check unchanged. The default probe runs the real `dart format`
-// over a real temp worktree (the whole point is that this check is
-// deterministic); the non-Dart/deleted-path and operational-failure cases ride
-// an injected Fake (Fakes, not mocks) so their claims are exact.
+// Three postures pinned here. A DECIDED dirty verdict is substantive WORK (the
+// probe ran and named files) — never a letter grade the route's matrix could
+// soften, and never the silent infra exit a breaker counts toward
+// `harness.throttled`; an UNDECIDABLE probe stays a typed non-result. And the
+// diff is never rewritten on the builder's behalf — every case asserts the
+// source bytes survive the check unchanged. The default probe runs the real
+// `dart format` over a real temp worktree (the whole point is that this check
+// is deterministic); the non-Dart/deleted-path and operational-failure cases
+// ride an injected Fake (Fakes, not mocks) so their claims are exact.
+import 'dart:async';
 import 'dart:io';
 
 import 'package:dart_grid_assets/dart_grid_assets.dart';
+import 'package:genesis_tree/genesis_tree.dart';
 import 'package:grid_assets/grid_assets.dart';
 import 'package:grid_engine/grid_engine.dart';
+import 'package:grid_engine/src/molecule/bead_path_key.dart';
+import 'package:grid_engine/src/molecule/inherited_circuit.dart';
+import 'package:grid_sdk/grid_sdk.dart' show ProviderScope;
 import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
@@ -108,8 +115,10 @@ void main() {
       final failed = outcome as Failed;
       expect(
         failed.kind,
-        CapabilityFailureKind.noResult,
-        reason: 'a gate, never a letter grade the route matrix could soften',
+        CapabilityFailureKind.work,
+        reason:
+            'the probe RAN and refused — substantive work, never the '
+            'artifact-less exit the breaker reads as harness silence',
       );
       expect(failed.reason, contains(rel));
       expect(failed.reason, contains('dart format would change'));
@@ -245,5 +254,141 @@ void main() {
       expect((outcome as Ok).payload, {'checked': '0'});
       expect(formatter.calls, isEmpty);
     });
+
+    test('the HOST parks the dirty verdict at ONE gate on its FIRST attempt, '
+        'naming every file and flaring no harness throttle', () async {
+      // The live regression (lunar epoch 51): the dirty verdict rode an
+      // untyped exit with empty exit output, so the breaker classed it INFRA,
+      // counted five silent harness exits, flared `harness.throttled` and made
+      // the operator dig the file name out of the flare's `underlying` field.
+      // The REAL capability, over the REAL host, must instead spend its ONE
+      // deterministic attempt and park a gate that reads.
+      final dir = _tempDir('format-clean-host-');
+      // Planted and pinned in REVERSE lexical order: the reason is sorted by
+      // the probe, not by the order the diff happened to name them.
+      const zeta = 'packages/example/lib/zeta.dart';
+      const alpha = 'packages/example/lib/alpha.dart';
+      final zetaFile = _plant(dir, zeta, _unformatted);
+      final alphaFile = _plant(dir, alpha, _unformatted);
+      _pin(dir, [zeta, alpha]);
+
+      final fakes = buildFakes();
+      final flares = RecordingExplorationTransport();
+      final owner = TreeOwner();
+      addTearDown(() {
+        owner.dispose();
+        unawaited(fakes.provider.close());
+      });
+
+      owner.mountRoot(
+        ProviderScope(
+          child: InheritedSeed<StationServices>(
+            value: fakes.ctx,
+            child: InheritedSeed<ServiceBundle>(
+              value: ServiceBundle(transport: flares),
+              child: InheritedSeed<Workspace>(
+                value: testWorkspace(
+                  'tg-1',
+                  workspaceDir: dir.path,
+                  branch: 'grid/tg-1',
+                ),
+                child: InheritedSeed<CapabilityRegistry>(
+                  value: RecordingCapabilityRegistry(clock: DateTime(2026)),
+                  child: InheritedSeed<InheritedCircuit>(
+                    value: _hostCircuit,
+                    child: const CapabilityHost(
+                      capability: FormatCleanCapability(),
+                      mount: _hostMount,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      // The real `dart format` runs one process per file below this seam, so
+      // the wait yields REAL time (bead `pow-d26`) rather than pumping turns.
+      await settle(
+        () => fakes.runner.callsFor('create').isNotEmpty,
+        maxPumps: 400,
+        ioSlice: const Duration(milliseconds: 25),
+      );
+
+      final gatedUpdates = fakes.runner
+          .callsFor('update')
+          .where((call) => call.contains(_hostStepBeadId))
+          .map(callMetadata)
+          .where((metadata) => metadata[MoleculeStepKeys.state] == 'gated')
+          .toList();
+      expect(
+        gatedUpdates,
+        hasLength(1),
+        reason: 'ONE deterministic attempt, parked — not a spent breaker',
+      );
+
+      expect(fakes.runner.callsFor('create'), hasLength(1));
+      expect(
+        fakes.runner.callsFor('create').single,
+        containsAllInOrder(['--type', 'gate']),
+      );
+      final gateReason = fakes.runner
+          .callsFor('update')
+          .map(callMetadata)
+          .firstWhere((metadata) => metadata.containsKey('reason'))['reason'];
+      expect(
+        gateReason,
+        contains(StepFailureClass.work.wire),
+        reason: 'the operator reads the failure CLASS off the gate itself',
+      );
+      expect(gateReason, contains('$alpha, $zeta'));
+
+      expect(
+        flares.named(kHarnessThrottledFlare),
+        isEmpty,
+        reason: 'a decided refusal is never counted as a silent infra exit',
+      );
+      expect(zetaFile.readAsStringSync(), _unformatted);
+      expect(alphaFile.readAsStringSync(), _unformatted);
+    });
   });
 }
+
+// ── the dirty-verdict host probe's mount ─────────────────────────────────────
+//
+// One step, one circuit, one session: the smallest tree that lets the REAL
+// `FormatCleanCapability` report through the REAL `CapabilityHost`, so the
+// classification and `FormatCleanCapability.supervisionPolicy` are resolved by
+// the engine rather than restated by the test.
+
+const _hostNodePath = 'tg-1/review/$kFormatCleanStep';
+const _hostStepBeadId = 'tgdog-step-format-clean';
+
+const _hostCircuitValue = Circuit(
+  id: 'code_review',
+  terminalStepId: kFormatCleanStep,
+  steps: [
+    CapabilityStep(stepId: kFormatCleanStep, capabilityId: kFormatCleanStep),
+  ],
+);
+
+const _hostMount = StepMount(
+  step: CapabilityStep(
+    stepId: kFormatCleanStep,
+    capabilityId: kFormatCleanStep,
+  ),
+  nodePath: _hostNodePath,
+  circuit: _hostCircuitValue,
+  circuitPath: 'tg-1/review',
+  session: SessionHandle('tgdog-s'),
+  // A FRESH mount: no restart is spent yet, so the declared budget of one is
+  // exhausted by this first report.
+  node: NodeCursor(state: StepState.running),
+  key: ValueKey('$_hostStepBeadId#0'),
+);
+
+final _hostCircuit = InheritedCircuit(
+  root: BeadPathKey(const ['tg-1', 'tgdog-s', _hostStepBeadId]),
+  beadIdByNodePath: const {_hostNodePath: _hostStepBeadId},
+  cursor: const {},
+);

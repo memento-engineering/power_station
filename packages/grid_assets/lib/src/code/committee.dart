@@ -215,9 +215,10 @@ String pinnedDiffPath(String workspaceDir) =>
 /// format gate — on four unformatted files each. Every review lane was spent on
 /// a diff a one-second deterministic check would have refused, and no merge
 /// queue saw green until a human rebased and reformatted by hand.
-/// [FormatCleanCapability] asks that question BEFORE the critics, and a dirty
-/// answer is a typed non-result (never a letter grade), so the round fails with
-/// the offending files NAMED and the builder's next round fixes exactly them.
+/// [FormatCleanCapability] asks that question BEFORE the critics. A
+/// dirty answer is a typed work failure (never a letter grade), so the round
+/// parks with the offending files NAMED and the builder's next round fixes
+/// exactly them.
 const String kFormatCleanStep = 'format-clean';
 
 final RegExp _diffHeader = RegExp(
@@ -740,15 +741,18 @@ class DeclaredTestsCapability extends ServiceCapability {
 /// composes nothing.
 ///
 /// It NEVER rewrites the diff on the builder's behalf: a silent reformat would
-/// hand the critics code the builder never wrote. A dirty answer is
-/// [Failed.noResult] — a GATE, not a letter grade — whose reason NAMES the
-/// files, so the next round fixes exactly them and the route's matrix (and the
-/// grade vector it reads) is untouched. The critic lanes `dependsOn` this step,
-/// so the non-result withholds every one of them before a single token is spent.
+/// hand the critics code the builder never wrote. A dirty answer is a plain
+/// [Failed] — [CapabilityFailureKind.work], because the probe RAN and returned
+/// a substantive refusal that names files — and NOT a letter grade, so the
+/// route's matrix (and the grade vector it reads) is untouched. The critic
+/// lanes `dependsOn` this step, so the refusal withholds every one of them
+/// before a single token is spent, and [supervisionPolicy] spends one attempt
+/// on it before the host parks it at a gate.
 ///
-/// A probe that cannot decide is equally LOUD: a missing or unreadable pinned
-/// scope in a worktree that EXISTS, and a formatter that failed operationally,
-/// are both typed non-results — never a silent pass.
+/// A probe that cannot decide is a DIFFERENT answer, and equally LOUD: a
+/// missing or unreadable pinned scope in a worktree that EXISTS, and a
+/// formatter that failed operationally, are typed non-results — never a silent
+/// pass, and never confused with a decided dirty verdict.
 ///
 /// Offline/dry-run posture: a null [Workspace], or a workspace directory that
 /// does not exist on disk, is a no-op [Ok] with NO process spawned — the same
@@ -802,7 +806,10 @@ class FormatCleanCapability extends ServiceCapability {
     }
     return switch (outcome) {
       DartFormatClean(:final files) => Ok({'checked': '${files.length}'}),
-      DartFormatDirty(:final files) => Failed.noResult(
+      // The formatter DECIDED and named the offending files: substantive work
+      // the builder must fix, never an environment refusal the host should
+      // read as harness silence.
+      DartFormatDirty(:final files) => Failed(
         'format-clean: dart format would change: ${files.join(', ')}',
       ),
       DartFormatProbeFailed(:final file, :final exitCode, :final output) =>
@@ -813,6 +820,29 @@ class FormatCleanCapability extends ServiceCapability {
         ),
     };
   }
+
+  /// Spends exactly ONE attempt on a dirty verdict, then parks it at a gate.
+  ///
+  /// `dart format` is deterministic over an unchanged worktree: a restart
+  /// re-reads the same bytes and returns the same file list, so every restart
+  /// the circuit's default budget would grant is futile and only delays the
+  /// operator's gate. [RetryPolicy.maxRestarts] of one makes the first attempt
+  /// the last (the engine tests exhaustion AFTER bumping the restart cursor),
+  /// and [ExhaustionBehavior.parkAtGate] hands it to the host's existing
+  /// escalation path, so the gate reason NAMES the would-change files.
+  ///
+  /// Only `work` is declared. An undecidable probe — a missing or unreadable
+  /// pinned scope, a formatter that would not launch — keeps the circuit's own
+  /// budget, because that IS the transient a restart can clear.
+  @override
+  SupervisionPolicy supervisionPolicy(StepArgs args) => const SupervisionPolicy(
+    byKind: {
+      CapabilityFailureKind.work: RetryPolicy(
+        maxRestarts: 1,
+        onExhaustion: ExhaustionBehavior.parkAtGate,
+      ),
+    },
+  );
 }
 
 /// The absolute path of the round's critique dir under [workspaceDir] — the
@@ -1031,7 +1061,7 @@ typedef DirectoryClearer = void Function(String dir);
 /// **The deterministic frontier (bead `pow-jicn`)**: [kFormatCleanStep] and
 /// [kDeclaredTestsRubric] are cheap, agent-free checks over the pinned scope, so
 /// they run BEFORE the priced lanes and every critic `dependsOn` BOTH. A
-/// [FormatCleanCapability] non-result therefore withholds all four critics —
+/// [FormatCleanCapability] refusal therefore withholds all four critics —
 /// including the three inference ones — instead of letting a diff CI would
 /// refuse in one second consume a full committee round first.
 ///
