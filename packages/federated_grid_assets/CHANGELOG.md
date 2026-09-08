@@ -1,3 +1,7 @@
+## 0.3.0-rc.5
+
+- Fixed: `LeaseManager` owns its wait deadlines. An injected `timerFactory` seam (defaults to `Timer.new`) arms ONE timer at the earliest held or queued deadline and re-arms it on every acquire, release, and expiry, so `leaseWait` is enforced without an external `reapInterval` pump; `close()` cancels it and `StationServer.close` calls it. `tick()` and `reapInterval` are unchanged and `serve_command.dart` is untouched (pow-gc1, #258).
+
 ## 0.3.0-rc.4
 
 - Added: `Peer.controlDoor`, an optional StationControl door endpoint carried through JSON (omitted when unset, part of equality) so a discovered peer resolves its control door without a second service type (pow-awgw, #255).
