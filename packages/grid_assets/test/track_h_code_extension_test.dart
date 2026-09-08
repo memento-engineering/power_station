@@ -373,7 +373,283 @@ void main() {
       File(p.join(workspaceDir, '.git'))
         ..createSync(recursive: true)
         ..writeAsStringSync('gitdir: fake');
-      final runner = CannedGitRunner();
+      // Adoption now also REFRESHES the base, so the git seam is injected
+      // (scripted already-current) — never left to fall through to the real
+      // [SystemGitRunner].
+      final runner = _AdoptedBaseRefreshGitRunner(behindOutput: '0');
+      final sc = GitSourceControl(
+        provisioner: StationGitService(
+          runner: CannedGitRunner(),
+          prOpener: _NoopPrOpener(),
+        ),
+        root: RootCheckout(
+          path: rootDir.path,
+          defaultBranch: 'main',
+          substation: 'ps',
+        ),
+        gitRunner: runner,
+      );
+
+      await sc.provisionWorkspace(beadId: 'pow-1', workspaceDir: workspaceDir);
+
+      expect(
+        runner.calls.any((call) => call.args.first == 'worktree'),
+        isFalse,
+        reason: 'an adopted checkout is never re-provisioned',
+      );
+    });
+
+    test(
+      'GitSourceControl.provisionWorkspace fast-forwards a zero-ahead adopted '
+      'worktree and materializes prerequisite files',
+      () async {
+        final tree = _adoptedWorktree('pow-1');
+        addTearDown(() => tree.root.deleteSync(recursive: true));
+        const fixture = 'test/fixtures/auth0_android_source_sheet_up.xml';
+        final runner = _AdoptedBaseRefreshGitRunner(
+          behindOutput: '3',
+          aheadOutput: '0',
+          headOutput: '0e08cbf1111111111111111111111111111111a1',
+          prerequisiteFiles: const {fixture: '<sheet/>'},
+        );
+
+        await _adoptingSourceControl(
+          root: tree.root,
+          runner: runner,
+        ).provisionWorkspace(beadId: 'pow-1', workspaceDir: tree.workspaceDir);
+
+        // The fetch updates the SHARED remote-tracking ref, so it runs at the
+        // root checkout; every measurement and the merge run in the worktree.
+        expect(runner.calls.first.workingDirectory, tree.root.path);
+        expect(runner.calls.first.args, ['fetch', 'origin', 'main']);
+        final inWorkspace = runner.calls
+            .where((call) => call.workingDirectory == tree.workspaceDir)
+            .map((call) => call.args)
+            .toList();
+        expect(inWorkspace, [
+          ['rev-list', '--count', 'HEAD..refs/remotes/origin/main'],
+          ['rev-list', '--count', 'refs/remotes/origin/main..HEAD'],
+          ['merge', '--ff-only', 'refs/remotes/origin/main'],
+          ['rev-parse', 'HEAD'],
+        ]);
+        // The whole point: the prerequisite that landed after provisioning is
+        // in the agent's tree.
+        expect(
+          File(p.join(tree.workspaceDir, fixture)).readAsStringSync(),
+          '<sheet/>',
+        );
+        expect(
+          _receipt(tree.workspaceDir),
+          'base-refresh bead=pow-1 outcome=fast-forwarded remote=origin '
+          'base=main behind=3 '
+          'head=0e08cbf1111111111111111111111111111111a1\n',
+        );
+
+        // The HEAD probe is COSMETIC — it names the resulting sha in the
+        // receipt. An unreadable one degrades the receipt, never the merge.
+        final blind = _adoptedWorktree('pow-2');
+        addTearDown(() => blind.root.deleteSync(recursive: true));
+        await _adoptingSourceControl(
+          root: blind.root,
+          runner: _AdoptedBaseRefreshGitRunner(
+            behindOutput: '3',
+            aheadOutput: '0',
+            headOk: false,
+            prerequisiteFiles: const {fixture: '<sheet/>'},
+          ),
+        ).provisionWorkspace(beadId: 'pow-2', workspaceDir: blind.workspaceDir);
+
+        expect(File(p.join(blind.workspaceDir, fixture)).existsSync(), isTrue);
+        expect(
+          _receipt(blind.workspaceDir),
+          'base-refresh bead=pow-2 outcome=fast-forwarded remote=origin '
+          'base=main behind=3 head=unreadable\n',
+        );
+      },
+    );
+
+    test('GitSourceControl.provisionWorkspace leaves an ahead adopted branch '
+        'untouched', () async {
+      final tree = _adoptedWorktree('pow-1');
+      addTearDown(() => tree.root.deleteSync(recursive: true));
+      final before = _snapshot(Directory(tree.workspaceDir));
+      final runner = _AdoptedBaseRefreshGitRunner(
+        behindOutput: '2',
+        aheadOutput: '1',
+        prerequisiteFiles: const {'never/materialized.txt': 'x'},
+      );
+
+      await _adoptingSourceControl(
+        root: tree.root,
+        runner: runner,
+      ).provisionWorkspace(beadId: 'pow-1', workspaceDir: tree.workspaceDir);
+
+      // A branch carrying its own commits is the landing circuit's problem,
+      // not provisioning's: no motion verb is issued at all.
+      expect(
+        runner.calls.any(
+          (call) =>
+              const {'merge', 'rebase', 'reset'}.contains(call.args.first),
+        ),
+        isFalse,
+      );
+      expect(
+        _snapshot(Directory(tree.workspaceDir))
+          ..remove('.grid')
+          ..remove(p.join('.grid', 'base-refresh.log')),
+        before,
+      );
+      expect(
+        _receipt(tree.workspaceDir),
+        'base-refresh bead=pow-1 outcome=skipped reason=branch-has-commits '
+        'remote=origin base=main ahead=1 behind=2\n',
+      );
+    });
+
+    test('GitSourceControl.provisionWorkspace reads the adopted base from '
+        'RootCheckout.defaultBranch', () async {
+      final tree = _adoptedWorktree('pow-1');
+      addTearDown(() => tree.root.deleteSync(recursive: true));
+      final runner = _AdoptedBaseRefreshGitRunner(
+        behindOutput: '1',
+        aheadOutput: '0',
+        headOutput: 'abc1234',
+      );
+
+      await _adoptingSourceControl(
+        root: tree.root,
+        runner: runner,
+        defaultBranch: 'release',
+      ).provisionWorkspace(beadId: 'pow-1', workspaceDir: tree.workspaceDir);
+
+      expect(runner.calls.map((call) => call.args), [
+        ['fetch', 'origin', 'release'],
+        ['rev-list', '--count', 'HEAD..refs/remotes/origin/release'],
+        ['rev-list', '--count', 'refs/remotes/origin/release..HEAD'],
+        ['merge', '--ff-only', 'refs/remotes/origin/release'],
+        ['rev-parse', 'HEAD'],
+      ]);
+      // Never a hardcoded mainline — the REGISTERED base drives every ref.
+      expect(
+        runner.calls
+            .expand((call) => call.args)
+            .any((arg) => arg.contains('main')),
+        isFalse,
+      );
+    });
+
+    test('GitSourceControl.provisionWorkspace keeps fetch, count, and merge '
+        'failures non-fatal', () async {
+      final cases = <({String operation, _AdoptedBaseRefreshGitRunner runner})>[
+        (
+          operation: 'fetch',
+          runner: _AdoptedBaseRefreshGitRunner(fetchOk: false),
+        ),
+        (
+          operation: 'behind-count',
+          runner: _AdoptedBaseRefreshGitRunner(behindOutput: 'not-a-count'),
+        ),
+        (
+          operation: 'ahead-count',
+          runner: _AdoptedBaseRefreshGitRunner(
+            behindOutput: '3',
+            aheadOk: false,
+          ),
+        ),
+        (
+          operation: 'merge',
+          runner: _AdoptedBaseRefreshGitRunner(
+            behindOutput: '3',
+            aheadOutput: '0',
+            mergeOk: false,
+          ),
+        ),
+      ];
+
+      for (final probe in cases) {
+        final tree = _adoptedWorktree('pow-1');
+        addTearDown(() => tree.root.deleteSync(recursive: true));
+
+        // Completing normally IS the assertion: a refresh that cannot run
+        // costs a stale tree, never a refused mount.
+        await _adoptingSourceControl(
+          root: tree.root,
+          runner: probe.runner,
+        ).provisionWorkspace(beadId: 'pow-1', workspaceDir: tree.workspaceDir);
+
+        expect(
+          File(p.join(tree.workspaceDir, '.git')).existsSync(),
+          isTrue,
+          reason: '${probe.operation}: the adopted checkout survives',
+        );
+        expect(
+          _receipt(tree.workspaceDir),
+          allOf(
+            contains('outcome=failed'),
+            contains('operation=${probe.operation}'),
+          ),
+          reason: '${probe.operation}: the failure is receipted',
+        );
+      }
+    });
+
+    test('GitSourceControl.provisionWorkspace leaves a current adopted '
+        'worktree byte-untouched', () async {
+      final tree = _adoptedWorktree('pow-1');
+      addTearDown(() => tree.root.deleteSync(recursive: true));
+      final before = _snapshot(Directory(tree.workspaceDir));
+      final runner = _AdoptedBaseRefreshGitRunner(behindOutput: '0');
+
+      await _adoptingSourceControl(
+        root: tree.root,
+        runner: runner,
+      ).provisionWorkspace(beadId: 'pow-1', workspaceDir: tree.workspaceDir);
+
+      expect(_snapshot(Directory(tree.workspaceDir)), before);
+      // Silent: a receipt per mount on an already-current tree is noise.
+      expect(
+        File(
+          p.join(tree.workspaceDir, '.grid', 'base-refresh.log'),
+        ).existsSync(),
+        isFalse,
+      );
+    });
+
+    test('GitSourceControl.provisionWorkspace skips a non-origin adopted root '
+        'with a receipt', () async {
+      final tree = _adoptedWorktree('pow-1');
+      addTearDown(() => tree.root.deleteSync(recursive: true));
+      final runner = _AdoptedBaseRefreshGitRunner(behindOutput: '3');
+
+      await _adoptingSourceControl(
+        root: tree.root,
+        runner: runner,
+        remote: 'upstream',
+      ).provisionWorkspace(beadId: 'pow-1', workspaceDir: tree.workspaceDir);
+
+      // `GitOps.commitsBehindRemoteDefault` counts against `origin` by
+      // construction, so a foreign remote is skipped WHOLE rather than
+      // measured against the wrong ref.
+      expect(runner.calls, isEmpty);
+      expect(
+        _receipt(tree.workspaceDir),
+        'base-refresh bead=pow-1 outcome=skipped reason=unsupported-remote '
+        'remote=upstream base=main\n',
+      );
+    });
+
+    test('GitSourceControl.provisionWorkspace refreshes only adopted '
+        'worktrees', () async {
+      final rootDir = Directory.systemTemp.createTempSync('pow1g7-root-');
+      addTearDown(() => rootDir.deleteSync(recursive: true));
+      final workspaceDir = WorktreeLayout.worktreePath(
+        rootDir.path,
+        'ps',
+        'pow-1',
+      );
+      final runner = _MaterializingWorktreeRunner(
+        checkoutEntries: {'lib/source.dart': 'void source() {}'},
+      );
       final sc = GitSourceControl(
         provisioner: StationGitService(
           runner: runner,
@@ -384,11 +660,24 @@ void main() {
           defaultBranch: 'main',
           substation: 'ps',
         ),
+        gitRunner: runner,
       );
 
       await sc.provisionWorkspace(beadId: 'pow-1', workspaceDir: workspaceDir);
 
-      expect(runner.calls, isEmpty);
+      // A FRESH cut is already at the base — the refresh belongs to adoption
+      // alone, so the fresh path stays exactly as it was.
+      expect(File(p.join(workspaceDir, '.git')).existsSync(), isTrue);
+      expect(runner.calls.any((args) => args.first == 'fetch'), isFalse);
+      expect(
+        File(p.join(workspaceDir, '.grid', 'base-refresh.log')).existsSync(),
+        isFalse,
+      );
+      // …and provisioning that is not wired at all still no-ops.
+      await const GitSourceControl().provisionWorkspace(
+        beadId: 'pow-1',
+        workspaceDir: '/does/not/exist/anywhere',
+      );
     });
 
     test('GitSourceControl.provisionWorkspace restores scaffold residue when '
@@ -1672,6 +1961,156 @@ void main() {
 /// - `worktree prune` drops registrations whose directory is gone;
 /// - `show-ref --verify --quiet refs/heads/<b>` and `branch -D <b>` answer and
 ///   mutate [branches].
+/// Materializes an ADOPTED per-bead worktree under a fresh temp root: the
+/// [WorktreeLayout] path carrying a `.git` entry (the adopt signal
+/// `provisionWorkspace` keys on) plus one tracked file, so a byte-for-byte
+/// snapshot has something to compare.
+({Directory root, String workspaceDir}) _adoptedWorktree(String beadId) {
+  final rootDir = Directory.systemTemp.createTempSync('pow1g7-root-');
+  final workspaceDir = WorktreeLayout.worktreePath(rootDir.path, 'ps', beadId);
+  File(p.join(workspaceDir, '.git'))
+    ..createSync(recursive: true)
+    ..writeAsStringSync('gitdir: fake');
+  File(p.join(workspaceDir, 'lib', 'source.dart'))
+    ..createSync(recursive: true)
+    ..writeAsStringSync('void source() {}');
+  return (root: rootDir, workspaceDir: workspaceDir);
+}
+
+/// A [GitSourceControl] over an adopted [root], with the base-refresh git seam
+/// injected — the provisioner is present (adoption still requires it wired) but
+/// is never reached on this path.
+GitSourceControl _adoptingSourceControl({
+  required Directory root,
+  required GitRunner runner,
+  String defaultBranch = 'main',
+  String remote = 'origin',
+}) => GitSourceControl(
+  provisioner: StationGitService(
+    runner: CannedGitRunner(),
+    prOpener: _NoopPrOpener(),
+  ),
+  root: RootCheckout(
+    path: root.path,
+    defaultBranch: defaultBranch,
+    substation: 'ps',
+    remote: remote,
+  ),
+  gitRunner: runner,
+);
+
+/// The base-refresh receipt the worktree carries.
+String _receipt(String workspaceDir) =>
+    File(p.join(workspaceDir, '.grid', 'base-refresh.log')).readAsStringSync();
+
+/// Every entity under [dir] as `relative path → bytes` (a directory or link
+/// maps to null) — the byte-for-byte before/after comparison.
+Map<String, String?> _snapshot(Directory dir) {
+  final entries = <String, String?>{};
+  for (final entity in dir.listSync(recursive: true, followLinks: false)) {
+    final key = p.relative(entity.path, from: dir.path);
+    entries[key] = entity is File ? entity.readAsStringSync() : null;
+  }
+  return entries;
+}
+
+/// The adopt-time BASE REFRESH seam (bead `pow-1g7`) — records every argv with
+/// the cwd it ran in, scripts each probe independently, and materializes
+/// [prerequisiteFiles] into the workspace only once `merge --ff-only`
+/// SUCCEEDS, standing in for the commits that landed after provisioning.
+/// Fakes, not mocks: an argv the refresh should never issue comes back FAILED,
+/// so a stray command cannot pass silently.
+class _AdoptedBaseRefreshGitRunner implements GitRunner {
+  _AdoptedBaseRefreshGitRunner({
+    this.fetchOk = true,
+    this.behindOutput = '0',
+    this.aheadOk = true,
+    this.aheadOutput = '0',
+    this.mergeOk = true,
+    this.headOk = true,
+    this.headOutput = '',
+    this.prerequisiteFiles = const {},
+  });
+
+  /// Whether `git fetch <remote> <base>` succeeds.
+  final bool fetchOk;
+
+  /// The `rev-list --count HEAD..<remote>/<base>` body — non-numeric models an
+  /// unreadable count.
+  final String behindOutput;
+
+  /// Whether `rev-list --count <remote>/<base>..HEAD` succeeds.
+  final bool aheadOk;
+
+  /// The ahead-count body.
+  final String aheadOutput;
+
+  /// Whether `merge --ff-only` succeeds — false is git REFUSING the
+  /// fast-forward.
+  final bool mergeOk;
+
+  /// Whether the post-merge `rev-parse HEAD` succeeds.
+  final bool headOk;
+
+  /// The post-merge HEAD sha.
+  final String headOutput;
+
+  /// The files a successful fast-forward brings in (relative path → body).
+  final Map<String, String> prerequisiteFiles;
+
+  /// Every invocation, in call order, with the cwd it ran in.
+  final List<({String workingDirectory, List<String> args})> calls = [];
+
+  @override
+  Future<GitRunResult> run({
+    required String workingDirectory,
+    required List<String> args,
+  }) async {
+    calls.add((
+      workingDirectory: workingDirectory,
+      args: List.unmodifiable(args),
+    ));
+    if (args.first == 'fetch') {
+      return fetchOk
+          ? const GitRunResult(exitCode: 0, output: '')
+          : const GitRunResult(exitCode: 128, output: 'fatal: could not fetch');
+    }
+    if (args.first == 'rev-list' && args.length == 3) {
+      if (args[2].startsWith('HEAD..')) {
+        return GitRunResult(exitCode: 0, output: '$behindOutput\n');
+      }
+      if (args[2].endsWith('..HEAD')) {
+        return aheadOk
+            ? GitRunResult(exitCode: 0, output: '$aheadOutput\n')
+            : const GitRunResult(exitCode: 128, output: 'fatal: bad revision');
+      }
+    }
+    if (args.first == 'merge') {
+      if (!mergeOk) {
+        return const GitRunResult(
+          exitCode: 128,
+          output: 'fatal: Not possible to fast-forward, aborting.',
+        );
+      }
+      for (final entry in prerequisiteFiles.entries) {
+        File(p.join(workingDirectory, entry.key))
+          ..createSync(recursive: true)
+          ..writeAsStringSync(entry.value);
+      }
+      return const GitRunResult(exitCode: 0, output: '');
+    }
+    if (args.first == 'rev-parse' && args.length == 2 && args[1] == 'HEAD') {
+      return headOk
+          ? GitRunResult(exitCode: 0, output: '$headOutput\n')
+          : const GitRunResult(exitCode: 128, output: 'fatal: bad revision');
+    }
+    return GitRunResult(
+      exitCode: 1,
+      output: 'unexpected argv: ${args.join(' ')}',
+    );
+  }
+}
+
 class _MaterializingWorktreeRunner extends CannedGitRunner {
   _MaterializingWorktreeRunner({
     this.checkoutEntries = const {},

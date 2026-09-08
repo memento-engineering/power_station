@@ -787,11 +787,18 @@ StepSignal _jobSignal(RuntimeEvent event) => switch (event) {
 ///
 /// The layout ("one git worktree per bead, cut from the substation's root") is
 /// THIS impl's opinion, not the engine's — the engine's concept is "a workspace".
+///
+/// ADOPTING an existing workspace does two repairs before handing it back: the
+/// stranded bead-store repair ([repairStrandedWorktreeStore]) and the BASE
+/// REFRESH ([_refreshAdoptedWorktreeBase]) — the provisioner pins the base
+/// exactly once, at cut time, so a worktree that waited between provisioning
+/// and mounting is stale against everything that landed in the gap.
 class GitSourceControl implements SourceControl {
   /// Wraps the optional provisioning seam ([provisioner]/[root]) plus the git
-  /// seam the failed-provision unwind runs on ([gitRunner]; absent ⇒ the real
-  /// [SystemGitRunner], the posture every other git consumer in this pack
-  /// takes — the offline suite injects a fake, Fakes not mocks).
+  /// seam the failed-provision unwind AND the adopt-time base refresh run on
+  /// ([gitRunner]; absent ⇒ the real [SystemGitRunner], the posture every other
+  /// git consumer in this pack takes — the offline suite injects a fake, Fakes
+  /// not mocks).
   const GitSourceControl({
     StationGitService? provisioner,
     RootCheckout? root,
@@ -849,6 +856,15 @@ class GitSourceControl implements SourceControl {
         workspaceDir: workspaceDir,
         rootRepoPath: root.path,
         beadId: beadId,
+      );
+      // …and re-read the BASE the provisioner pinned once, at cut time. Best
+      // effort: never throws, so an unreachable remote costs a stale tree, not
+      // a refused mount.
+      await _refreshAdoptedWorktreeBase(
+        runner: _gitRunner ?? SystemGitRunner(),
+        root: root,
+        beadId: beadId,
+        workspaceDir: workspaceDir,
       );
       return;
     }
@@ -1019,6 +1035,185 @@ class GitSourceControl implements SourceControl {
       're-establishes the proxied redirect to $rootProxy\n',
       mode: FileMode.append,
     );
+  }
+
+  /// Re-reads the BASE of an ADOPTED per-bead worktree and FAST-FORWARDS it
+  /// onto the registered remote's default branch when the branch has no
+  /// commits of its own (bead `pow-1g7`).
+  ///
+  /// [StationGitService.provisionWorktree] pins the base EXACTLY ONCE — when it
+  /// cuts `git worktree add -b grid/<bead> <path> <defaultBranch>` off a LOCAL
+  /// branch ref — and nothing ever revisits it. A bead that is provisioned and
+  /// then WAITS (a deferred P1 undeferred ahead of its prerequisites, a queued
+  /// mount) starts its agent on whatever the mainline was at cut time, so every
+  /// commit that landed in the gap is ABSENT from the tree the agent reads.
+  /// Usually harmless — a feature branch is normally a little behind and the
+  /// landing step integrates. It becomes a CORRECTNESS problem the moment the
+  /// bead's acceptance depends on an artifact that landed in that gap: a test
+  /// fixture the criteria say to drive from, a new API the bead is told to use,
+  /// a fix the bead is explicitly sequenced behind. The refinement is then
+  /// perfect and the round still fails — or, worse, the agent hand-authors a
+  /// duplicate fixture and re-implements a fix that already exists.
+  ///
+  /// Only a ZERO-AHEAD branch moves, and only by `merge --ff-only`: the one
+  /// motion that can neither rewrite nor lose a commit. A branch carrying its
+  /// own work is left ALONE — being behind is normal there, and integrating it
+  /// is the landing circuit's job (`rebase`/`revalidate`), not provisioning's.
+  ///
+  /// BEST EFFORT, never fatal, never throws. A worktree that could not be
+  /// refreshed is exactly the worktree we ship today, so refusing the mount
+  /// over an unreachable remote would trade a rare rework round for a hard
+  /// stop. Every outcome except "already current" leaves one line in
+  /// `.grid/base-refresh.log`, so the operator inspecting the worktree can see
+  /// why the tree is — or is not — current.
+  static Future<void> _refreshAdoptedWorktreeBase({
+    required GitRunner runner,
+    required RootCheckout root,
+    required String beadId,
+    required String workspaceDir,
+  }) async {
+    final remote = root.remote;
+    final base = root.defaultBranch;
+    try {
+      // [GitOps.commitsBehindRemoteDefault] reads `refs/remotes/origin/<base>`
+      // by CONSTRUCTION, so a root on any other remote cannot be counted with
+      // it. Skip the refresh whole rather than fetch one remote and measure
+      // against another — a wrong count would move the wrong tree.
+      if (remote != 'origin') {
+        _appendBaseRefreshReceipt(
+          workspaceDir,
+          'base-refresh bead=$beadId outcome=skipped '
+          'reason=unsupported-remote remote=$remote base=$base',
+        );
+        return;
+      }
+
+      // Fetched from the ROOT checkout: worktrees share one object store and
+      // one set of remote-tracking refs, so this updates the ref every probe
+      // below reads.
+      final fetch = await runner.run(
+        workingDirectory: root.path,
+        args: <String>['fetch', remote, base],
+      );
+      if (!fetch.ok) {
+        _appendBaseRefreshReceipt(
+          workspaceDir,
+          'base-refresh bead=$beadId outcome=failed operation=fetch '
+          'remote=$remote base=$base exit=${fetch.exitCode}',
+        );
+        return;
+      }
+
+      final behind = await GitOps(
+        runner,
+      ).commitsBehindRemoteDefault(workspaceDir, base);
+      if (behind == null || behind < 0) {
+        _appendBaseRefreshReceipt(
+          workspaceDir,
+          'base-refresh bead=$beadId outcome=failed operation=behind-count '
+          'remote=$remote base=$base',
+        );
+        return;
+      }
+      // Current — the common case. Byte-untouched AND silent: a receipt per
+      // mount on an already-current tree is noise, not evidence.
+      if (behind == 0) return;
+
+      final ahead = await _countCommitsAhead(
+        runner: runner,
+        workspaceDir: workspaceDir,
+        remote: remote,
+        base: base,
+      );
+      if (ahead == null) {
+        _appendBaseRefreshReceipt(
+          workspaceDir,
+          'base-refresh bead=$beadId outcome=failed operation=ahead-count '
+          'remote=$remote base=$base behind=$behind',
+        );
+        return;
+      }
+      if (ahead > 0) {
+        _appendBaseRefreshReceipt(
+          workspaceDir,
+          'base-refresh bead=$beadId outcome=skipped reason=branch-has-commits '
+          'remote=$remote base=$base ahead=$ahead behind=$behind',
+        );
+        return;
+      }
+
+      final merge = await runner.run(
+        workingDirectory: workspaceDir,
+        args: <String>['merge', '--ff-only', 'refs/remotes/$remote/$base'],
+      );
+      if (!merge.ok) {
+        _appendBaseRefreshReceipt(
+          workspaceDir,
+          'base-refresh bead=$beadId outcome=failed operation=merge '
+          'remote=$remote base=$base ahead=$ahead behind=$behind '
+          'exit=${merge.exitCode}',
+        );
+        return;
+      }
+
+      final head = await runner.run(
+        workingDirectory: workspaceDir,
+        args: const <String>['rev-parse', 'HEAD'],
+      );
+      final sha = head.ok ? head.output.trim() : '';
+      _appendBaseRefreshReceipt(
+        workspaceDir,
+        'base-refresh bead=$beadId outcome=fast-forwarded remote=$remote '
+        'base=$base behind=$behind head=${sha.isEmpty ? 'unreadable' : sha}',
+      );
+    } on Object catch (error) {
+      // The refresh is an OPTIONAL repair on the adopt path: whatever went
+      // wrong, the mount proceeds on the worktree we already had.
+      _appendBaseRefreshReceipt(
+        workspaceDir,
+        'base-refresh bead=$beadId outcome=failed operation=unexpected '
+        'remote=$remote base=$base '
+        'error=${error.toString().replaceAll(RegExp(r'\s+'), ' ').trim()}',
+      );
+    }
+  }
+
+  /// The commits [workspaceDir]'s HEAD carries that `<remote>/<base>` does not
+  /// — the "does this branch have work of its own?" probe. Null when the count
+  /// cannot be READ (a failed, empty, non-integer, or negative answer), which
+  /// callers treat as "cannot tell" and therefore never move the tree on.
+  static Future<int?> _countCommitsAhead({
+    required GitRunner runner,
+    required String workspaceDir,
+    required String remote,
+    required String base,
+  }) async {
+    final result = await runner.run(
+      workingDirectory: workspaceDir,
+      args: <String>['rev-list', '--count', 'refs/remotes/$remote/$base..HEAD'],
+    );
+    if (!result.ok) return null;
+    final count = int.tryParse(result.output.trim());
+    return (count == null || count < 0) ? null : count;
+  }
+
+  /// Appends ONE newline-terminated UTF-8 [line] to
+  /// `<workspace>/.grid/base-refresh.log`, creating `.grid` only when there is
+  /// an event to record (an already-current tree stays byte-untouched).
+  ///
+  /// Swallows its own I/O failure: a receipt is EVIDENCE, never a gate, so a
+  /// read-only or vanished workspace must not turn a best-effort refresh into
+  /// a failed mount.
+  static void _appendBaseRefreshReceipt(String workspaceDir, String line) {
+    try {
+      final gridDir = Directory(p.join(workspaceDir, '.grid'));
+      if (!gridDir.existsSync()) gridDir.createSync(recursive: true);
+      File(
+        p.join(gridDir.path, 'base-refresh.log'),
+      ).writeAsStringSync('$line\n', mode: FileMode.append, encoding: utf8);
+    } on Object {
+      // Best effort — see the doc comment.
+    }
   }
 
   static void _assertGitCheckout(String workspaceDir, String beadId) {
