@@ -1,3 +1,12 @@
+## 0.6.0-rc.21
+
+- Fixed: the discovery decision-surface lookup selects bead-named records FIRST and raises `kMaxDecisionEntriesPerSurface` from 12 to 96, so a bead citing decisions on an 81-entry surface no longer holds at discovery on a clipped index; more than 96 named records is a FAILED surface, not a silent clip. Explicit references are only canonical `register#slug` tokens under a register the gathered index contains, or `ADR-nnnn` ids; a bare legacy `A<n>` token never fails a surface (it only orders), and a canonical-shaped token under an unknown register is prose. `DecisionIndexSource` gains the requesting `Bead` as a third positional argument (pow-mrg8, #257).
+- Added: the interactive `refiner` role definition and its seat assets, vended with the baseline pack (pow-7nmo, #254).
+- Added: design round classification and verification — the spec round records whether a design is a verify or an infer round and the committee reads it (#251); the verify inference wiring is pinned by test (#253).
+- Fixed: `FormatCleanCapability` classifies a dirty-format verdict as `work`, never `infra` (#250).
+- Fixed: the agent capability reports a provider capacity refusal as a typed non-result instead of an end turn (#248).
+- Test: token-keyed `WorkBead` persistence is asserted (#249).
+
 ## 0.6.0-rc.20
 
 - Fixed: `FormatCleanCapability` reports a `DartFormatDirty` verdict as `CapabilityFailureKind.work` and declares a `supervisionPolicy` that spends ONE deterministic attempt on it before parking at a gate whose reason names the would-change files. A formatter that ran and refused is substantive work, not an environment refusal: on lunar epoch 51 the untyped non-result was classed `infra`, counted five silent harness exits, flared `harness.throttled` and hid the offending file under the flare's `underlying` field (pow-7jvc). An undecidable probe — missing or unreadable pinned scope, a formatter that would not launch — stays a non-result on the circuit's own budget.
