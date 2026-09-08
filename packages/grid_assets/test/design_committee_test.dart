@@ -13,6 +13,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:beads_dart/beads_dart.dart';
+import 'package:genesis_tree/genesis_tree.dart';
 import 'package:grid_assets/grid_assets.dart';
 import 'package:grid_engine/grid_engine.dart';
 import 'package:path/path.dart' as p;
@@ -117,6 +118,18 @@ Future<({Map<String, String> payload, FakeInferenceRunner inference})> _verify(
       );
   return (payload: (outcome as Ok).payload!, inference: inference);
 }
+
+/// The verify step's mount, exactly as the design circuit declares it — the
+/// handle a registry resolves a composed capability against.
+StepMount _designVerifyMount() => StepMount(
+  step: kDesignReviewCircuit.stepById(kDesignVerifyStep)! as CapabilityStep,
+  nodePath: 'pow-d1/review/$kDesignVerifyStep',
+  circuit: kDesignReviewCircuit,
+  circuitPath: 'pow-d1/review',
+  session: const SessionHandle('pow-d1-session'),
+  node: const NodeCursor(),
+  key: const ValueKey('pow-d1/review/design-verify#0.0'),
+);
 
 /// The verify artifact this round wrote.
 Map<String, Object?> _artifact(Directory dir) =>
@@ -549,6 +562,56 @@ void main() {
         _documentBody,
       );
     });
+
+    // The POSITIVE CONTROL over the registry's ONE one-shot inference seam.
+    // Every test above hand-builds `DesignVerifyCapability(inference: fake)`,
+    // so all of them stay green if the composition drops the wiring — and a
+    // verifier the registry composes UNWIRED refuses every real round, while
+    // one composed on `SystemInferenceRunner` spawns a real `claude` from an
+    // offline suite. So this resolves the STATION's own verifier off the same
+    // mount the circuit declares, and proves the injected fake is the runner
+    // it actually carries.
+    test(
+      'buildCodeRegistry forwards injected inference to design-verify',
+      () async {
+        final dir = _worktree();
+        final inference = FakeInferenceRunner(output: answer());
+        final host =
+            buildCodeRegistry(
+                  inference: inference,
+                  overlaySourceRef: 'test',
+                ).host(_designVerifyMount())
+                as CapabilityHost;
+        final capability = host.capability as DesignVerifyCapability;
+
+        final outcome = await capability.run(
+          FakeTreeContext(
+            values: {
+              Bead: _designBead(),
+              Workspace: testWorkspace('pow-d1', workspaceDir: dir.path),
+              SiblingView: SiblingView(results: threeFindings()),
+            },
+          ),
+          stepArgs(
+            'pow-d1/review/$kDesignVerifyStep',
+            params: {'grid.round': '2'},
+          ),
+        );
+
+        // The round ADJUDICATED: `answer()` leaves one finding
+        // confirmed-open, so the F names it. An unwired verifier grades F
+        // too, which is why the rationale and the call count carry the
+        // proof and the letter does not.
+        final payload = (outcome as Ok).payload!;
+        expect(payload['grade'], 'F');
+        expect(payload['rationale'], contains('ruling-adherence/R2'));
+        expect(inference.calls, hasLength(1));
+        expect(
+          inference.calls.single.args.last,
+          contains('ruling-adherence/R1'),
+        );
+      },
+    );
   });
 
   group('the verifier refuses LOUDLY', () {
