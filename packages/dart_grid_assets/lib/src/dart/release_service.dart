@@ -561,6 +561,134 @@ class PollResult {
   };
 }
 
+/// The public-API delta a release actually CARRIES — the requirement half of
+/// the classification pair (what the code did to consumers, read off the
+/// published baseline rather than off a commit message).
+enum ReleaseRequiredChange {
+  /// No public API moved between the baseline and HEAD.
+  none,
+
+  /// Public API grew, and nothing a consumer already reaches went away — a
+  /// PATCH covers it pre-1.0 (genesis `publishing.md`).
+  additive,
+
+  /// Public API a consumer may already call was removed or narrowed: a
+  /// caret-compatible upgrade would stop compiling.
+  breaking,
+}
+
+/// The version bump a release DECLARES — the declaration half of the pair,
+/// derived from the published baseline -> authored HEAD move (NOT from a
+/// commit message: a breaking change that carries no `!` and no
+/// `BREAKING CHANGE:` footer still declares whatever the pubspec says).
+enum ReleaseDeclaredChange {
+  /// The PATCH component moved (`0.3.1` -> `0.3.2`).
+  patch,
+
+  /// The MINOR component moved (`0.3.1` -> `0.4.0`).
+  minor,
+
+  /// The MAJOR component moved (`0.3.1` -> `1.0.0`).
+  major,
+
+  /// HEAD is itself a pre-release (`0.4.0-rc.1`) — the rc-first lane.
+  prerelease,
+
+  /// HEAD drops the baseline's pre-release suffix at the same core version
+  /// (`0.4.0-rc.1` -> `0.4.0`): a promotion, not a fresh bump.
+  promotion;
+
+  /// The noun the classification message uses ("declared 0.3.2 is a patch").
+  String get label => switch (this) {
+    ReleaseDeclaredChange.patch => 'patch',
+    ReleaseDeclaredChange.minor => 'minor',
+    ReleaseDeclaredChange.major => 'major',
+    ReleaseDeclaredChange.prerelease => 'prerelease',
+    ReleaseDeclaredChange.promotion => 'prerelease promotion',
+  };
+}
+
+/// Whether the declared bump COVERS the API delta the code carries.
+enum ReleaseClassificationVerdict {
+  /// The declared bump is at least as large as the delta requires.
+  ok,
+
+  /// The delta requires more than the declared bump gives — publishing this
+  /// version would break consumers on a caret-compatible upgrade.
+  understated,
+}
+
+/// The release CLASSIFICATION: the public API delta since the LAST PUBLISHED
+/// release, paired with the version bump this release declares.
+///
+/// The pairing is the point. A diff alone says "a symbol changed", which the
+/// git diff already said; a declared bump alone says nothing about the code.
+/// Together they answer the only question a release gate cares about: does
+/// what consumers will resolve still compile against what they already call.
+@immutable
+class ReleaseClassification {
+  /// Wraps the classification of [package] at [head] against [baseline].
+  const ReleaseClassification({
+    required this.package,
+    required this.baseline,
+    required this.head,
+    required this.removed,
+    required this.changed,
+    required this.added,
+    required this.requiredChange,
+    required this.declaredChange,
+    required this.verdict,
+    required this.message,
+  });
+
+  /// The classified package.
+  final String package;
+
+  /// The last published version the delta was measured against — what a
+  /// consumer resolves TODAY, never a golden file checked into the repo.
+  final Version baseline;
+
+  /// The version this working tree authors.
+  final Version head;
+
+  /// Removals, `<symbol>: <change>` each, sorted.
+  final List<String> removed;
+
+  /// Changes that are neither a plain removal nor a plain addition (an
+  /// unfamiliar change code lands here rather than being discarded), sorted.
+  final List<String> changed;
+
+  /// Additions, `<symbol>: <change>` each, sorted.
+  final List<String> added;
+
+  /// The change class the delta REQUIRES.
+  final ReleaseRequiredChange requiredChange;
+
+  /// The change class the authored version DECLARES.
+  final ReleaseDeclaredChange declaredChange;
+
+  /// Whether the declaration covers the requirement.
+  final ReleaseClassificationVerdict verdict;
+
+  /// The one-line verdict — it names the SYMBOL and the CONSEQUENCE, never
+  /// just "something changed".
+  final String message;
+
+  /// JSON form — the structured contract the release skill consumes.
+  Map<String, dynamic> toJson() => {
+    'package': package,
+    'baseline': baseline.toString(),
+    'head': head.toString(),
+    'removed': removed,
+    'changed': changed,
+    'added': added,
+    'requiredChange': requiredChange.name,
+    'declaredChange': declaredChange.name,
+    'verdict': verdict.name,
+    'message': message,
+  };
+}
+
 /// Where a workspace release wave stopped — the structured frontier a
 /// [ReleaseWaveFailure] names, so an operator reads "which stage, which
 /// package" without scraping prose.
@@ -823,6 +951,73 @@ class ReleaseService {
 
   /// Warnings-count marker in `dart pub publish --dry-run` output.
   static final RegExp _warningCount = RegExp(r'Package has (\d+) warning');
+
+  /// The external API-diff tool the classification gate shells out to. It is
+  /// NOT a dependency of this package — an unadopted analyzer has no business
+  /// in the org's release-gate dependency graph — so it is invoked as an
+  /// executable through the [ProcessRunner] seam and swapping it is one change
+  /// at one seam.
+  static const String _apiTool = 'dart-apitool';
+
+  /// The activation every "analyzer missing" refusal carries, so the operator
+  /// reads the fix in the failure rather than hunting for it.
+  static const String _apiToolActivation =
+      'dart pub global activate dart_apitool';
+
+  /// POSIX "command not found" — the shape a missing [_apiTool] takes when the
+  /// runner reports an exit code instead of throwing.
+  static const int _commandNotFound = 127;
+
+  /// `dart-apitool` change codes that take something AWAY from consumers.
+  static const Set<String> _apiRemovalCodes = {
+    'CI01', // interface removed
+    'CI05', // supertype removed
+    'CI08', // type parameter removed
+    'CE01', // executable parameters removed
+    'CE10', // executable removed
+    'CP02', // entry point removed
+    'CF01', // field removed
+    'CPI02', // iOS platform removed
+    'CPA02', // Android platform removed
+    'CPA04', // Android platform min SDK removed
+    'CPA07', // Android platform target SDK removed
+    'CPA10', // Android platform compile SDK removed
+    'CD02', // dependency removed
+  };
+
+  /// `dart-apitool` change codes that GIVE consumers something new.
+  static const Set<String> _apiAdditionCodes = {
+    'CI02', // interface added
+    'CI04', // supertype added
+    'CI07', // type parameter added
+    'CE02', // executable parameters added
+    'CE11', // executable added
+    'CP01', // new entry point
+    'CF02', // field added
+    'CPI01', // iOS platform added
+    'CPA01', // Android platform added
+    'CPA03', // Android platform min SDK added
+    'CPA06', // Android platform target SDK added
+    'CPA09', // Android platform compile SDK added
+    'CD01', // dependency added
+  };
+
+  /// The declaration-kind prefixes `dart-apitool` renders on a node label.
+  /// Exactly the four it emits — an unlisted label is reported whole rather
+  /// than half-stripped by a guessed prefix.
+  static const List<String> _declarationPrefixes = [
+    'Class ',
+    'Constructor ',
+    'Field ',
+    'Method ',
+  ];
+
+  /// The `CE01` detail line — the one change whose consequence is stated
+  /// exactly (`calls that supply <name> no longer compile`) rather than
+  /// generically.
+  static final RegExp _removedParameter = RegExp(
+    r'Parameter "([^"]+)" removed',
+  );
 
   /// Computes the next version for [change] off [current], per genesis
   /// `publishing.md`'s pre-1.0 discipline: docs/additive/fix -> PATCH; breaking
@@ -1248,6 +1443,422 @@ class ReleaseService {
       latest: latest,
       isPublished: versions.contains(version),
     );
+  }
+
+  /// CLASSIFIES a release: diffs the package's PUBLIC API at HEAD against the
+  /// API of its LAST PUBLISHED version and pairs that delta with the version
+  /// bump the pubspec declares.
+  ///
+  /// The baseline is the greatest version pub.dev lists — what a consumer
+  /// resolves today — and never a golden file in the repo: a checked-in golden
+  /// moves with the diff and can only tell you a symbol changed, which the
+  /// diff already told you.
+  ///
+  /// The API extraction is NOT owned here. The semver rules are subtle
+  /// (generics, optional parameters, sealed types, re-exports) and owning them
+  /// wrong makes the gate lie in the safe-looking direction, so the delta comes
+  /// from the external `dart-apitool` CLI, shelled out through the same
+  /// [ProcessRunner] seam `dart pub publish` rides. `dart_apitool` is therefore
+  /// NOT a dependency of this package, and replacing it is a one-seam change.
+  ///
+  /// The tool MUST be activated to run. When it cannot be launched this throws
+  /// a LOUD [StateError] carrying the activation command — a gate that silently
+  /// passes when its analyzer is missing is worse than no gate, so there is no
+  /// path from a missing analyzer to a verdict. A missing baseline, a failing
+  /// tool, a missing report and a malformed report are all the same kind of
+  /// refusal.
+  ///
+  /// The seam ruling — shell out rather than depend on `package:dart_apitool`,
+  /// and rather than owning the extraction in-house — is recorded as
+  /// `release-classification-shells-out-to-dart-apitool`.
+  Future<ReleaseClassification> classifyRelease({
+    required String packageDir,
+    required String package,
+  }) async {
+    final dir = p.normalize(p.absolute(packageDir));
+    final pubspecFile = File(p.join(dir, 'pubspec.yaml'));
+    final pubspec = _readPubspec(pubspecFile);
+    final declared = _pubspecName(pubspec, pubspecFile.path);
+    if (declared != package) {
+      throw FormatException(
+        '${pubspecFile.path} declares package "$declared", not "$package" — '
+        'classify the package the directory actually holds.',
+      );
+    }
+    final rawVersion = pubspec['version'];
+    if (rawVersion is! String || rawVersion.isEmpty) {
+      throw FormatException(
+        '${pubspecFile.path} has no version — classification pairs the API '
+        'delta with the version this release DECLARES.',
+      );
+    }
+    final Version head;
+    try {
+      head = Version.parse(rawVersion);
+    } on FormatException catch (error) {
+      throw FormatException(
+        '${pubspecFile.path} version "$rawVersion" is not a semantic version: '
+        '${error.message}',
+      );
+    }
+
+    final baseline = await _publishedBaseline(package: package, head: head);
+    final leaves = await _apiDelta(
+      package: package,
+      baseline: baseline,
+      packageDir: dir,
+    );
+
+    final removed = <String>[];
+    final changed = <String>[];
+    final added = <String>[];
+    for (final leaf in leaves) {
+      if (_apiRemovalCodes.contains(leaf.code)) {
+        removed.add(leaf.entry);
+      } else if (_apiAdditionCodes.contains(leaf.code)) {
+        added.add(leaf.entry);
+      } else {
+        changed.add(leaf.entry);
+      }
+    }
+    removed.sort();
+    changed.sort();
+    added.sort();
+
+    final breaking = [
+      for (final leaf in leaves)
+        if (leaf.isBreaking) leaf,
+    ]..sort((a, b) => a.entry.compareTo(b.entry));
+    final requiredChange = breaking.isNotEmpty
+        ? ReleaseRequiredChange.breaking
+        : leaves.isEmpty
+        ? ReleaseRequiredChange.none
+        : ReleaseRequiredChange.additive;
+    final declaredChange = _declaredChange(baseline: baseline, head: head);
+
+    final String message;
+    final ReleaseClassificationVerdict verdict;
+    switch (requiredChange) {
+      case ReleaseRequiredChange.none:
+        verdict = ReleaseClassificationVerdict.ok;
+        message =
+            '$package: no public API change between $baseline and $head; '
+            'declared $head is a ${declaredChange.label}.';
+      case ReleaseRequiredChange.additive:
+        verdict = ReleaseClassificationVerdict.ok;
+        message =
+            '$package: ${leaves.length} public API change(s) since $baseline, '
+            'none breaking; declared $head is a ${declaredChange.label}, which '
+            'covers an additive change.';
+      case ReleaseRequiredChange.breaking:
+        final rcFirst = _rcFirstFor(package: package, baseline: baseline);
+        final understated = _core(head) < _core(rcFirst);
+        verdict = understated
+            ? ReleaseClassificationVerdict.understated
+            : ReleaseClassificationVerdict.ok;
+        message = understated
+            ? _understatedMessage(
+                package: package,
+                leaf: breaking.first,
+                head: head,
+                declaredChange: declaredChange,
+                rcFirst: rcFirst,
+              )
+            : '$package: ${leaves.length} public API change(s) since '
+                  '$baseline, ${breaking.length} breaking; declared $head is a '
+                  '${declaredChange.label} that reaches the required $rcFirst.';
+    }
+
+    return ReleaseClassification(
+      package: package,
+      baseline: baseline,
+      head: head,
+      removed: List<String>.unmodifiable(removed),
+      changed: List<String>.unmodifiable(changed),
+      added: List<String>.unmodifiable(added),
+      requiredChange: requiredChange,
+      declaredChange: declaredChange,
+      verdict: verdict,
+      message: message,
+    );
+  }
+
+  /// Resolves the classification BASELINE: the greatest version pub.dev lists
+  /// for [package], through the existing [poll] (so registry access stays on
+  /// the one [HttpGetter] seam). A pre-release counts — it is what a consumer
+  /// pinning `^X.Y.Z-rc.N` resolves. A package with nothing published, and a
+  /// baseline that is not below [head], are both LOUD refusals: there is no
+  /// safe fallback baseline to classify against.
+  Future<Version> _publishedBaseline({
+    required String package,
+    required Version head,
+  }) async {
+    final probe = await poll(package: package, version: head.toString());
+    if (probe.statusCode != 200) {
+      throw StateError(
+        'pub.dev answered ${probe.statusCode} for $package; the classification '
+        'baseline is the LAST PUBLISHED release and this gate refuses to '
+        'guess one.',
+      );
+    }
+    final published = <Version>[];
+    for (final raw in probe.versions) {
+      try {
+        published.add(Version.parse(raw));
+      } on FormatException catch (error) {
+        throw StateError(
+          'pub.dev listed "$raw" for $package, which is not a semantic '
+          'version: ${error.message}',
+        );
+      }
+    }
+    if (published.isEmpty) {
+      throw StateError(
+        '$package has no published version, so there is no baseline to '
+        'classify the local API against.',
+      );
+    }
+    published.sort();
+    final baseline = published.last;
+    if (baseline >= head) {
+      throw StateError(
+        'the greatest published version of $package is $baseline, which is not '
+        'below the authored $head — author the version this release publishes '
+        'before classifying it.',
+      );
+    }
+    return baseline;
+  }
+
+  /// Runs `dart-apitool diff` over the [ProcessRunner] seam and parses its JSON
+  /// report into flat leaves. The report goes to a temporary file (the tool
+  /// prints progress on stdout, so stdout is not a parseable channel) that is
+  /// deleted either way.
+  Future<List<_ApiDeltaLeaf>> _apiDelta({
+    required String package,
+    required Version baseline,
+    required String packageDir,
+  }) async {
+    final temp = Directory.systemTemp.createTempSync('release-classify-');
+    try {
+      final reportPath = p.join(temp.path, 'api-diff.json');
+      final ProcessResult result;
+      try {
+        result = await _run(_apiTool, [
+          'diff',
+          '--old',
+          'pub://$package/$baseline',
+          '--new',
+          packageDir,
+          // The version check is dart-apitool's own opinion about the bump;
+          // this gate forms its own verdict from the delta, so the tool is
+          // asked for the DELTA only.
+          '--version-check-mode=none',
+          '--report-format=json',
+          '--report-file-path',
+          reportPath,
+        ], workingDirectory: packageDir);
+      } on ProcessException catch (error) {
+        throw StateError(_apiToolUnavailable(error.message));
+      }
+      if (result.exitCode == _commandNotFound) {
+        throw StateError(
+          _apiToolUnavailable('exit $_commandNotFound (command not found)'),
+        );
+      }
+      if (result.exitCode != 0) {
+        throw StateError(
+          '$_apiTool diff failed for $package against $baseline (exit '
+                  '${result.exitCode}); this release is NOT classified.\n'
+                  '${result.stderr}'
+              .trimRight(),
+        );
+      }
+      final reportFile = File(reportPath);
+      if (!reportFile.existsSync()) {
+        throw StateError(
+          '$_apiTool exited 0 but wrote no report at $reportPath; this release '
+          'is NOT classified.',
+        );
+      }
+      final Object? decoded;
+      try {
+        decoded = jsonDecode(reportFile.readAsStringSync());
+      } on FormatException catch (error) {
+        throw StateError(
+          '$_apiTool wrote a report that is not JSON: ${error.message}',
+        );
+      }
+      return _apiDeltaLeaves(decoded);
+    } finally {
+      temp.deleteSync(recursive: true);
+    }
+  }
+
+  /// The LOUD "the gate has no analyzer" refusal. A gate that silently passes
+  /// when its analyzer is missing is worse than no gate, so this is the only
+  /// thing a missing [_apiTool] can produce — never a verdict.
+  String _apiToolUnavailable(String detail) =>
+      'the release classification gate could not run $_apiTool ($detail). It '
+      'refuses to pass a release it did not analyze: activate the tool with '
+      '`$_apiToolActivation` and re-run.';
+
+  /// Flattens `report.breakingChanges` / `report.nonBreakingChanges` — each a
+  /// tree of declaration nodes over change leaves — into one leaf list, each
+  /// leaf carrying its enclosing declarations as a dotted symbol. The tool
+  /// nests (`Class PollResult` > `Constructor new`), so the nearest label
+  /// ALONE would render the useless `exported new lost parameter statusCode`;
+  /// the qualified `PollResult.new` is the name a consumer actually writes. A
+  /// leaf missing `changeCode`, `isBreaking` or `changeDescription` is a
+  /// refusal, not a skipped entry.
+  List<_ApiDeltaLeaf> _apiDeltaLeaves(Object? decoded) {
+    if (decoded is! Map) {
+      throw StateError('$_apiTool report must be a JSON object.');
+    }
+    final report = decoded.cast<Object?, Object?>()['report'];
+    if (report is! Map) {
+      throw StateError('$_apiTool report has no `report` object.');
+    }
+    final sections = report.cast<Object?, Object?>();
+    final leaves = <_ApiDeltaLeaf>[];
+    for (final key in const ['breakingChanges', 'nonBreakingChanges']) {
+      final root = sections[key];
+      if (root == null) continue;
+      if (root is! Map) {
+        throw StateError('$_apiTool report `$key` must be an object.');
+      }
+      final children = root.cast<Object?, Object?>()['children'];
+      if (children is! List) {
+        throw StateError('$_apiTool report `$key` must carry a children list.');
+      }
+      // The root's own label is the section banner ("BREAKING CHANGES"), never
+      // a declaration — descend past it with no carried symbol.
+      for (final child in children) {
+        _collectApiDeltaLeaves(child, '', leaves);
+      }
+    }
+    return leaves;
+  }
+
+  void _collectApiDeltaLeaves(
+    Object? node,
+    String symbol,
+    List<_ApiDeltaLeaf> into,
+  ) {
+    if (node is! Map) {
+      throw StateError('$_apiTool report nodes must be objects.');
+    }
+    final entry = node.cast<Object?, Object?>();
+    final children = entry['children'];
+    if (children != null) {
+      if (children is! List) {
+        throw StateError('$_apiTool report node children must be a list.');
+      }
+      final label = entry['label'];
+      final declaration = label is String && label.isNotEmpty
+          ? _declarationSymbol(label)
+          : '';
+      final nested = switch ((symbol.isEmpty, declaration.isEmpty)) {
+        (_, true) => symbol,
+        (true, false) => declaration,
+        (false, false) => '$symbol.$declaration',
+      };
+      for (final child in children) {
+        _collectApiDeltaLeaves(child, nested, into);
+      }
+      return;
+    }
+    final code = entry['changeCode'];
+    final isBreaking = entry['isBreaking'];
+    final description = entry['changeDescription'];
+    if (code is! String || isBreaking is! bool || description is! String) {
+      throw StateError(
+        '$_apiTool report leaf is missing changeCode/isBreaking/'
+        'changeDescription: ${jsonEncode(entry)}',
+      );
+    }
+    into.add(
+      _ApiDeltaLeaf(
+        symbol: symbol,
+        code: code,
+        description: description,
+        isBreaking: isBreaking,
+      ),
+    );
+  }
+
+  /// Strips the declaration-kind prefix `dart-apitool` puts on a node label
+  /// (`Method captureScreenshot` -> `captureScreenshot`) so the message names
+  /// the symbol a consumer writes. An unrecognized label passes through whole.
+  String _declarationSymbol(String label) {
+    for (final prefix in _declarationPrefixes) {
+      if (label.startsWith(prefix)) return label.substring(prefix.length);
+    }
+    return label;
+  }
+
+  /// The bump [head] declares off [baseline] — read off the versions, so a
+  /// commit that carries neither `!` nor a `BREAKING CHANGE:` footer still
+  /// declares exactly what it authored.
+  ReleaseDeclaredChange _declaredChange({
+    required Version baseline,
+    required Version head,
+  }) {
+    if (head.preRelease.isNotEmpty) return ReleaseDeclaredChange.prerelease;
+    if (baseline.preRelease.isNotEmpty && _core(baseline) == _core(head)) {
+      return ReleaseDeclaredChange.promotion;
+    }
+    if (head.major != baseline.major) return ReleaseDeclaredChange.major;
+    if (head.minor != baseline.minor) return ReleaseDeclaredChange.minor;
+    return ReleaseDeclaredChange.patch;
+  }
+
+  /// The rc-first version a breaking change off [baseline] requires — computed
+  /// by the existing [planVersion], so classification never invents version
+  /// math and stays on ADR-0003 D3's rc-first lane.
+  Version _rcFirstFor({required String package, required Version baseline}) {
+    try {
+      return planVersion(
+        current: baseline.toString(),
+        change: ReleaseChange.rc,
+      ).next;
+    } on ArgumentError catch (error) {
+      throw StateError(
+        'the published baseline $baseline of $package cannot plan an rc-first '
+        'breaking version (${error.message}), so the required version is not '
+        'derivable and the delta is NOT classified.',
+      );
+    }
+  }
+
+  /// The core `major.minor.patch` of [version], pre-release suffix dropped —
+  /// the comparison a bump-size question actually asks.
+  Version _core(Version version) =>
+      Version(version.major, version.minor, version.patch);
+
+  /// The understated verdict's message. It names the SYMBOL and the
+  /// CONSEQUENCE: a message that only says a thing changed is not worth a gate.
+  String _understatedMessage({
+    required String package,
+    required _ApiDeltaLeaf leaf,
+    required Version head,
+    required ReleaseDeclaredChange declaredChange,
+    required Version rcFirst,
+  }) {
+    final tail =
+        'declared $head is a ${declaredChange.label}, a breaking change '
+        'requires $rcFirst';
+    final parameter = _removedParameter.firstMatch(leaf.description);
+    if (leaf.code == 'CE01' && parameter != null && leaf.symbol.isNotEmpty) {
+      final name = parameter.group(1)!;
+      return '$package: exported ${leaf.symbol} lost parameter $name, so existing '
+          'calls that supply $name no longer compile; $tail';
+    }
+    final subject = leaf.symbol.isEmpty
+        ? 'the package API'
+        : 'exported ${leaf.symbol}';
+    return '$package: $subject changed — ${leaf.description} — so existing '
+        'consumers may no longer compile; $tail';
   }
 
   /// Publishes a whole pub WORKSPACE in one wave: computes the changed-package
@@ -1813,6 +2424,27 @@ class ReleaseService {
 }
 
 /// One publishable pub-workspace member, as authored on disk.
+/// One flattened change from a `dart-apitool` JSON report: the nearest
+/// enclosing declaration, the change code, its description and whether the
+/// tool judged it breaking.
+class _ApiDeltaLeaf {
+  const _ApiDeltaLeaf({
+    required this.symbol,
+    required this.code,
+    required this.description,
+    required this.isBreaking,
+  });
+
+  final String symbol;
+  final String code;
+  final String description;
+  final bool isBreaking;
+
+  /// The rendered delta entry. A change with no enclosing declaration (a
+  /// package-level entry point or dependency move) reads as its description.
+  String get entry => symbol.isEmpty ? description : '$symbol: $description';
+}
+
 class _WorkspaceMember {
   const _WorkspaceMember({
     required this.name,

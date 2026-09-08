@@ -33,6 +33,7 @@ class ReleaseCommand extends Command<int> {
     );
     addSubcommand(ReleasePromoteCommand(service: service, out: o, err: e));
     addSubcommand(ReleaseScrubCommand(service: service, out: o, err: e));
+    addSubcommand(ReleaseClassifyCommand(service: service, out: o, err: e));
     addSubcommand(ReleaseOrderCommand(service: service, out: o, err: e));
     addSubcommand(ReleaseDryRunCommand(service: service, out: o, err: e));
     addSubcommand(ReleasePollCommand(service: service, out: o));
@@ -45,9 +46,9 @@ class ReleaseCommand extends Command<int> {
   @override
   final String description =
       'Deterministic Dart-package release ops (the machine substrate under the '
-      'operator `release` skill): version plan, scrub gate, publish order, '
-      'dry-run, pub.dev poll, and the one-command workspace wave — each a '
-      'structured JSON result.';
+      'operator `release` skill): version plan, scrub gate, semver '
+      'classification, publish order, dry-run, pub.dev poll, and the '
+      'one-command workspace wave — each a structured JSON result.';
 }
 
 /// Decodes the shared `{consumers: [{name, directory, links}]}` manifest both
@@ -401,6 +402,95 @@ class ReleaseScrubCommand extends Command<int> {
       }
     }
     return result.clean ? 0 : 1;
+  }
+}
+
+/// `dart release classify` — the SEMVER verdict: compare the package's public
+/// API at HEAD against the API of its LAST PUBLISHED version and pair that
+/// delta with the version bump this release declares.
+///
+/// The other ops each check one thing in isolation: `plan` takes the change
+/// class as an INPUT, `scrub` checks declared floors, `dry-run` checks
+/// packaging. None of them CLASSIFIES, so a breaking change mis-declared as a
+/// patch passes every gate. This op is the pairing they lack.
+class ReleaseClassifyCommand extends Command<int> {
+  /// Creates the op over [service], rendering to [out]/[err].
+  ReleaseClassifyCommand({
+    required ReleaseService service,
+    required StringSink out,
+    required StringSink err,
+  }) : _service = service,
+       _out = out,
+       _err = err {
+    argParser
+      ..addOption(
+        'dir',
+        mandatory: true,
+        help:
+            'The package dir to classify — its pubspec authors the HEAD '
+            'version the verdict is measured against.',
+      )
+      ..addOption(
+        'package',
+        mandatory: true,
+        help:
+            'The pub package name; it must match the directory\'s pubspec and '
+            'names the pub.dev listing the baseline comes from.',
+      )
+      ..addFlag(
+        'json',
+        negatable: false,
+        help: 'Emit the structured result as one JSON object.',
+      );
+  }
+
+  final ReleaseService _service;
+  final StringSink _out;
+  final StringSink _err;
+
+  @override
+  final String name = 'classify';
+  @override
+  final String description =
+      'Diff the public API against the last published release and pair it '
+      'with the declared version bump (the semver verdict).';
+
+  @override
+  Future<int> run() async {
+    final args = argResults!;
+    final dir = args.option('dir')!;
+    if (!Directory(dir).existsSync()) {
+      _err.writeln('release classify: no such dir: $dir');
+      return 64;
+    }
+    final ReleaseClassification result;
+    try {
+      result = await _service.classifyRelease(
+        packageDir: dir,
+        package: args.option('package')!,
+      );
+    } on StateError catch (error) {
+      // The baseline, the analyzer or its report was unavailable. There is NO
+      // verdict on stdout: a gate that passes without its analyzer is worse
+      // than no gate.
+      _err.writeln('release classify: ${error.message}');
+      return 1;
+    } on FileSystemException catch (error) {
+      _err.writeln('release classify: ${error.message}: ${error.path}');
+      return 64;
+    } on FormatException catch (error) {
+      _err.writeln('release classify: ${error.message}');
+      return 64;
+    }
+    if (args.flag('json')) {
+      _out.writeln(jsonEncode(result.toJson()));
+    } else {
+      _out.writeln(result.message);
+    }
+    return switch (result.verdict) {
+      ReleaseClassificationVerdict.ok => 0,
+      ReleaseClassificationVerdict.understated => 1,
+    };
   }
 }
 
