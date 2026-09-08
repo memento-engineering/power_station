@@ -1,3 +1,8 @@
+## 0.1.0-rc.14
+
+- Fixed: the CI feedback leg no longer runs `bd export --all`, which every proxied-server store refuses; one head-of-line `CheckConcluded` observation wedged a seat's GitHub poll forever and the failure never reached the station log (5 of 8 lunar seats were dark from 2026-09-03). `CiFeedbackProjection` composes one typed `BdCliService.listScope` session read, ignores-with-a-flare zero, many, or id-less matching sessions, gains a `CiFeedbackReporter` seam bound onto the binding-provided value, and the reconciler subscribes to the station transport above the substation git bundle; a source fence keeps `bd export` out of `lib/` (pow-2xmo, #261).
+- Fixed: approval receipts bind to the filing basis (#232).
+
 ## 0.1.0-rc.13
 
 - Changed: `SubstationSeed` builds through grid_assets' single availability resolution — the seat mounts the selected generated definition Seeds from the resolved `SubstationFactsSnapshot`, and every seat keeps building without facts (the pre-resolution path) instead of failing closed (pow-4peu, #216).
