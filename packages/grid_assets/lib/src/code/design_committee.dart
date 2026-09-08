@@ -658,9 +658,13 @@ class DesignVerifyCapability extends ServiceCapability {
     );
   }
 
-  /// Renders the ONE spawn this step makes. Separated so every ambient read
-  /// stays at [run]'s entry and this is pure over its arguments plus the
-  /// context's own effect-edge lookups.
+  /// Renders the ONE spawn this step makes, resolving the agent scope exactly
+  /// as [CriticCapability.spawn] does.
+  ///
+  /// Called SYNCHRONOUSLY from [run] — no `await` precedes it on the path here,
+  /// so the branch is still mounted and its three effect-edge lookups (the
+  /// non-binding verb, ADR-0008 D3) are legal. Everything the call needs
+  /// afterwards is a captured value.
   RuntimeConfig _spawnFor({
     required TreeContext context,
     required Bead bead,
