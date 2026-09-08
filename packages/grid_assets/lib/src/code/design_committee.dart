@@ -602,16 +602,16 @@ class DesignVerifyCapability extends ServiceCapability {
       return refuse('the verifier could not resolve an agent environment: $e');
     }
     final run = await inference.run(spawn);
-    // With FT-2 capture armed the harness redirects its whole envelope to the
-    // telemetry file, so the answer is that envelope's `result` text; a harness
-    // with no usage surface still answers on stdout.
-    final answer =
-        readEnvelopeResultText(workspaceDir, args.nodePath) ?? run.output;
     if (!run.ok) {
       return refuse(
         'the verify inference did not complete — no adjudication was produced',
       );
     }
+    // With FT-2 capture armed the harness redirects its whole envelope to the
+    // telemetry file, so the answer is that envelope's `result` text; a harness
+    // with no usage surface still answers on stdout.
+    final answer =
+        readEnvelopeResultText(workspaceDir, args.nodePath) ?? run.output;
     final DesignVerificationReport report;
     try {
       report = DesignVerificationReport.parse(
@@ -622,7 +622,7 @@ class DesignVerifyCapability extends ServiceCapability {
     } on FormatException catch (e) {
       return refuse('the verifier answer breaks the contract — ${e.message}');
     } on Object catch (e) {
-      return refuse('the verifier answer is not readable JSON: $e');
+      return refuse('the verifier answer could not be read: $e');
     }
 
     // 6. The writes — the whole response was validated above, so a document is
