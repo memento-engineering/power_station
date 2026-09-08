@@ -63,6 +63,51 @@ _CannedShellRunner _fakeDecisionIndex(
   );
 }
 
+/// The composing station's UNFILTERED roster verb — `decisions index` with NO
+/// `--surface`, which is what a lookup falls back to when a citation is absent
+/// from the surface it was queried on.
+const String _unfilteredIndex = 'dart run lunar:lunar decisions index';
+
+/// A canned EMPTY surface answer: a real empty union for the surface queried —
+/// the shape that used to FAIL a bead citing a decision governing another one.
+final String _emptySurfaceIndex = jsonEncode({
+  'spec': 2,
+  'decisions': <Object?>[],
+  'diagnostics': <Object?>[],
+});
+
+/// A canned answer for [_unfilteredIndex]: ONE accepted decision, written to
+/// [register] so its body resolves, declaring [surfaces] — deliberately NOT the
+/// surface the bead citing it is queried on.
+ShellRunResult _registerWideAnswer(
+  Directory register, {
+  required String slug,
+  String originRegister = 'lenny',
+  List<String> surfaces = const ['lenny/lib/src/tools/tap.dart'],
+  String body = 'a tap is resolved against the node, never the screen',
+}) {
+  File(p.join(register.path, '$slug.md')).writeAsStringSync(
+    '---\nstatus: accepted\nregister:\n  spec: 1\n  slug: $slug\n---\n$body',
+  );
+  return ShellRunResult(
+    exitCode: 0,
+    output: jsonEncode({
+      'spec': 2,
+      'decisions': [
+        {
+          'originRegister': originRegister,
+          'originPath': register.path,
+          'slug': slug,
+          'status': 'accepted',
+          'surfaces': surfaces,
+          'edges': const <Object?>[],
+        },
+      ],
+      'diagnostics': const <Object?>[],
+    }),
+  );
+}
+
 DiscoveryFinding _cited({
   ViolationKind kind = ViolationKind.decision,
   String standard = _adr,
@@ -255,11 +300,20 @@ String _promptFor(DiscoveryEvidenceProjection projection) =>
 
 /// A [ShellRunner] answering one canned (exitCode, output) for every call, and
 /// recording each (workingDirectory, command) — Fakes, not mocks.
+///
+/// [answers] overrides that single canned result for the EXACT command texts it
+/// keys, which is how a surface-filtered lookup and the unfiltered
+/// register-wide one are given different answers by one runner.
 class _CannedShellRunner implements ShellRunner {
-  _CannedShellRunner({this.exitCode = 0, this.output = ''});
+  _CannedShellRunner({
+    this.exitCode = 0,
+    this.output = '',
+    this.answers = const {},
+  });
 
   final int exitCode;
   final String output;
+  final Map<String, ShellRunResult> answers;
   final List<({String workingDirectory, String command})> calls = [];
 
   /// The command text of every recorded call, in order.
@@ -271,7 +325,8 @@ class _CannedShellRunner implements ShellRunner {
     required String command,
   }) async {
     calls.add((workingDirectory: workingDirectory, command: command));
-    return ShellRunResult(exitCode: exitCode, output: output);
+    return answers[command] ??
+        ShellRunResult(exitCode: exitCode, output: output);
   }
 }
 
@@ -1744,6 +1799,234 @@ void main() {
           reason:
               'the register half IS one the index answered, so the missing '
               'name is the bead\'s own defect and it is named',
+        );
+      },
+    );
+
+    test('a canonical citation this surface does not declare is carried as '
+        'NAMED ELSEWHERE, never failed', () async {
+      // Lunar epoch 56, `lenny-dgp` round 2: the bead cited an ACCEPTED lenny
+      // decision from two surfaces that decision does not declare, and the
+      // surface-scoped answer reported it absent. Existence is a REGISTER
+      // question, so the correct citation had to be stripped to pass.
+      final dir = Directory.systemTemp.createTempSync('decisions-elsewhere');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final register = Directory(p.join(dir.path, 'docs', 'decisions'))
+        ..createSync(recursive: true);
+      const slug = 'core-tap-at-is-node-relative';
+      const surface = 'lenny/lib/src/loop_driver.dart';
+      const declared = ['lenny/lib/src/tools/tap.dart'];
+      final shell = _CannedShellRunner(
+        output: _emptySurfaceIndex,
+        answers: {
+          _unfilteredIndex: _registerWideAnswer(
+            register,
+            slug: slug,
+            surfaces: declared,
+          ),
+        },
+      );
+      final record =
+          (await commandDecisionIndexSource(
+                shell,
+                runnerInvocation: 'dart run lunar:lunar',
+                gridHome: '/grid/lunar',
+              )(
+                dir.path,
+                [surface],
+                bead('lenny-dgp').copyWith(
+                  description: 'Round 2 is governed by `lenny#$slug`.',
+                ),
+              ))
+              .single;
+
+      expect(
+        record.state,
+        EvidenceState.complete,
+        reason:
+            'the decision EXISTS — it simply governs another surface, which is '
+            'not a defect in the bead: ${record.error}',
+      );
+      expect(record.error, isEmpty);
+      expect(record.truncated, isFalse);
+      expect(
+        record.decisions,
+        isEmpty,
+        reason: 'this surface really is governed by nothing — a real empty',
+      );
+      final note = record.namedElsewhere.single;
+      expect(note.identity, 'lenny#$slug');
+      expect(note.slug, slug);
+      expect(note.status, 'accepted');
+      expect(note.surfaces, declared);
+      expect(note.entryPath, p.join(register.path, '$slug.md'));
+      expect(note.body.state, EvidenceState.complete);
+      expect(
+        note.body.snippet,
+        contains('resolved against the node'),
+        reason: 'the lens can still READ the decision the bead named',
+      );
+      expect(
+        shell.commands,
+        [
+          'dart run lunar:lunar decisions index --surface $surface',
+          _unfilteredIndex,
+        ],
+        reason:
+            'the register-wide answer is asked for only once a citation the '
+            'surface cannot answer needs it',
+      );
+
+      // It survives the version-2 wire, and a record written BEFORE the note
+      // existed still decodes.
+      final wire =
+          jsonDecode(jsonEncode(record.toJson())) as Map<String, Object?>;
+      final back = DecisionSurfaceEvidence.fromJson(wire)!;
+      expect(back.namedElsewhere.single.identity, note.identity);
+      expect(back.namedElsewhere.single.body.id, note.body.id);
+      expect(back.state, EvidenceState.complete);
+      final legacy = Map<String, Object?>.from(wire)..remove('namedElsewhere');
+      expect(
+        DecisionSurfaceEvidence.fromJson(legacy)!.namedElsewhere,
+        isEmpty,
+        reason: 'an ABSENT key is the empty list, not a refused decode',
+      );
+
+      // And the decision lens READS it — labelled, with its body, no gap.
+      final projection = _project(
+        DiscoveryAnchors(
+          round: 7,
+          workBeadId: 'pow-x',
+          decisionLookups: [record],
+        ),
+        kDecisionLens,
+      );
+      expect(projection.gaps, isEmpty);
+      expect(projection.evidenceIds, contains(note.body.id));
+      expect(projection.renderedEvidence, contains('NAMED ELSEWHERE'));
+      expect(projection.renderedEvidence, contains(note.identity));
+      expect(
+        projection.renderedEvidence,
+        contains('resolved against the node'),
+      );
+      expect(
+        projection.renderedEvidence,
+        contains('does NOT declare surface `$surface`'),
+        reason: 'the lens never reads a cited entry as GOVERNING this surface',
+      );
+    });
+
+    test('an ADR citation this surface does not declare resolves through its '
+        'register-wide alias', () async {
+      // The `tg-nidl` half of the same incident: three ADR ids, all present in
+      // their register, cited from a surface with an empty index.
+      final dir = Directory.systemTemp.createTempSync('decisions-adr');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final register = Directory(p.join(dir.path, 'docs', 'decisions'))
+        ..createSync(recursive: true);
+      const slug = 'adr-0042-the-lease-manager-owns-its-deadlines';
+      final shell = _CannedShellRunner(
+        output: _emptySurfaceIndex,
+        answers: {
+          _unfilteredIndex: _registerWideAnswer(
+            register,
+            slug: slug,
+            originRegister: 'the_grid',
+            surfaces: const ['the_grid/lib/src/federation/lease.dart'],
+            body: 'the lease manager owns its own deadlines',
+          ),
+        },
+      );
+      final record =
+          (await commandDecisionIndexSource(
+                shell,
+                runnerInvocation: 'dart run lunar:lunar',
+                gridHome: '/grid/lunar',
+              )(
+                dir.path,
+                const ['the_grid/lib/src/runtime/spawn.dart'],
+                bead(
+                  'tg-nidl',
+                ).copyWith(design: 'This holds ADR-0042 exactly.'),
+              ))
+              .single;
+
+      expect(
+        record.state,
+        EvidenceState.complete,
+        reason:
+            'the legacy id resolves through the SAME alias register-wide as it '
+            'does on a surface: ${record.error}',
+      );
+      expect(record.error, isEmpty);
+      expect(record.decisions, isEmpty);
+      expect(record.namedElsewhere.single.identity, 'the_grid#$slug');
+      expect(
+        record.namedElsewhere.single.body.snippet,
+        contains('owns its own deadlines'),
+      );
+    });
+
+    test(
+      'the register-wide decision lookup runs ONCE for a whole batch',
+      () async {
+        final dir = Directory.systemTemp.createTempSync('decisions-once');
+        addTearDown(() => dir.deleteSync(recursive: true));
+        final register = Directory(p.join(dir.path, 'docs', 'decisions'))
+          ..createSync(recursive: true);
+        const slug = 'core-tap-at-is-node-relative';
+        const surfaces = [
+          'lenny/lib/src/loop_driver.dart',
+          'lenny/lib/src/conversation_builder.dart',
+        ];
+        final shell = _CannedShellRunner(
+          output: _emptySurfaceIndex,
+          answers: {
+            _unfilteredIndex: _registerWideAnswer(register, slug: slug),
+          },
+        );
+        final records =
+            await commandDecisionIndexSource(
+              shell,
+              runnerInvocation: 'dart run lunar:lunar',
+              gridHome: '/grid/lunar',
+            )(
+              dir.path,
+              surfaces,
+              bead('lenny-dgp').copyWith(notes: 'Both follow `lenny#$slug`.'),
+            );
+
+        expect(records, hasLength(2));
+        for (final record in records) {
+          expect(record.state, EvidenceState.complete, reason: record.error);
+          expect(record.namedElsewhere.single.identity, 'lenny#$slug');
+        }
+        expect(
+          shell.commands,
+          [
+            'dart run lunar:lunar decisions index --surface ${surfaces.first}',
+            _unfilteredIndex,
+            'dart run lunar:lunar decisions index --surface ${surfaces.last}',
+          ],
+          reason:
+              'existence is asked of the register ONCE per gather, however many '
+              'surfaces need the answer',
+        );
+        expect(
+          records.first.namedElsewhere.single.body.id,
+          records.last.namedElsewhere.single.body.id,
+          reason: 'the same decision is the same evidence wherever it is cited',
+        );
+        final gather = DiscoveryAnchors(
+          round: 7,
+          workBeadId: 'pow-x',
+          decisionLookups: records,
+        );
+        expect(
+          DiscoveryAnchors.fromJson(jsonDecode(jsonEncode(gather.toJson()))),
+          isNotNull,
+          reason:
+              'one body under two lookups is ONE id, not a colliding profile',
         );
       },
     );

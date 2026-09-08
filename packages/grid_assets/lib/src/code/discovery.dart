@@ -558,6 +558,7 @@ class DecisionSurfaceEvidence {
     this.truncated = false,
     this.error = '',
     this.decisions = const [],
+    this.namedElsewhere = const [],
   });
 
   /// The canonical identity of this surface's lookup.
@@ -584,6 +585,17 @@ class DecisionSurfaceEvidence {
   /// The entries, in index order.
   final List<DecisionEntryEvidence> decisions;
 
+  /// The entries the bead CITES that this surface's index does not answer, but
+  /// their own REGISTER does.
+  ///
+  /// A decision declares the surfaces it governs, and a bead routinely cites
+  /// one from a surface it does not declare — which is a correct citation, not
+  /// a defect. Existence is therefore a register-wide question: such an entry
+  /// is carried HERE, with its body, while [state] stays complete/truncated, so
+  /// the lens can still read the decision the bead named. Only a citation
+  /// absent from its whole register FAILS the surface.
+  final List<DecisionEntryEvidence> namedElsewhere;
+
   /// The wire shape.
   Map<String, Object?> toJson() => {
     'id': id,
@@ -593,10 +605,16 @@ class DecisionSurfaceEvidence {
     'truncated': truncated,
     'error': error,
     'decisions': [for (final entry in decisions) entry.toJson()],
+    'namedElsewhere': [for (final entry in namedElsewhere) entry.toJson()],
   };
 
   /// Decodes one record STRICTLY; an unknown state, an empty id, a failed
   /// record with no error, or ANY malformed entry yields null.
+  ///
+  /// A record written before [namedElsewhere] existed carries no such key at
+  /// all, and an ABSENT key decodes as the empty list — a version-2 gather
+  /// already on disk stays readable. A key that is PRESENT and malformed is
+  /// still refused like every other entry list.
   static DecisionSurfaceEvidence? fromJson(Object? json) {
     if (json is! Map) return null;
     final id = (json['id'] as String?)?.trim() ?? '';
@@ -604,14 +622,16 @@ class DecisionSurfaceEvidence {
     if (id.isEmpty || state == null) return null;
     final error = (json['error'] as String?) ?? '';
     if (state == EvidenceState.failed && error.trim().isEmpty) return null;
-    final rawEntries = json['decisions'];
-    if (rawEntries is! List) return null;
-    final decisions = <DecisionEntryEvidence>[];
-    for (final raw in rawEntries) {
-      final entry = DecisionEntryEvidence.fromJson(raw);
-      if (entry == null) return null;
-      decisions.add(entry);
-    }
+    final decisions = _decodeAll(
+      json['decisions'],
+      DecisionEntryEvidence.fromJson,
+    );
+    if (decisions == null) return null;
+    final rawElsewhere = json['namedElsewhere'];
+    final namedElsewhere = rawElsewhere == null
+        ? const <DecisionEntryEvidence>[]
+        : _decodeAll(rawElsewhere, DecisionEntryEvidence.fromJson);
+    if (namedElsewhere == null) return null;
     return DecisionSurfaceEvidence(
       id: id,
       surface: (json['surface'] as String?) ?? '',
@@ -620,6 +640,7 @@ class DecisionSurfaceEvidence {
       truncated: json['truncated'] == true,
       error: error,
       decisions: decisions,
+      namedElsewhere: namedElsewhere,
     );
   }
 }
@@ -1405,6 +1426,8 @@ class DiscoveryAnchors {
     for (final lookup in decisionLookups) lookup.id,
     for (final lookup in decisionLookups)
       for (final decision in lookup.decisions) decision.body.id,
+    for (final lookup in decisionLookups)
+      for (final decision in lookup.namedElsewhere) decision.body.id,
     if (history case final value?) value.id,
     if (history case final value?)
       for (final commit in value.commits) commit.id,
@@ -1504,9 +1527,12 @@ class DiscoveryAnchors {
   /// Decision ENTRIES are the one legitimate repeat: the register answers every
   /// roster-qualified surface of the same repo with the same entries, so one
   /// decision body rides under several lookups with ONE canonical id (the same
-  /// decision is the same evidence wherever it is cited). They are counted
-  /// DISTINCT here — a body id colliding with any OTHER kind of record still
-  /// shrinks [evidenceIds] below this count and refuses the profile.
+  /// decision is the same evidence wherever it is cited). The same holds ACROSS
+  /// the two entry lists — a decision on-surface under one lookup and
+  /// [DecisionSurfaceEvidence.namedElsewhere] under another is still one body.
+  /// They are counted DISTINCT here — a body id colliding with any OTHER kind
+  /// of record still shrinks [evidenceIds] below this count and refuses the
+  /// profile.
   static int _evidenceIdCount(DiscoveryAnchors a) =>
       a.beadFields.length +
       a.rubricEvidence.length +
@@ -1515,8 +1541,10 @@ class DiscoveryAnchors {
       a.priorArtQueries.fold<int>(0, (n, q) => n + q.hits.length) +
       a.decisionLookups.length +
       {
-        for (final lookup in a.decisionLookups)
+        for (final lookup in a.decisionLookups) ...[
           for (final decision in lookup.decisions) decision.body.id,
+          for (final decision in lookup.namedElsewhere) decision.body.id,
+        ],
       }.length +
       (a.history == null ? 0 : 1 + a.history!.commits.length);
 }
@@ -1788,6 +1816,32 @@ DiscoveryEvidenceProjection projectDiscoveryEvidence(
           b.writeln(
             '##### `${decision.identity}` (status: ${decision.status}, '
             'entry: `${decision.entryPath}`)',
+          );
+          take(decision.identity, decision.body);
+        }
+        // The entries the bead CITED that this surface does not declare. They
+        // are read exactly like the governing ones — the bead named them, and
+        // a lens that cannot read what the bead cites judges blind — but they
+        // are LABELLED, so the lens never reads one as governing this surface.
+        for (final decision in lookup.namedElsewhere) {
+          final under = renderedUnder[decision.body.id];
+          if (under != null) {
+            b
+              ..writeln(
+                '##### `${decision.identity}` — NAMED ELSEWHERE: this bead '
+                'cites it, and it does NOT declare this surface; its body is '
+                'rendered ONCE above, under surface `$under`.',
+              )
+              ..writeln();
+            continue;
+          }
+          renderedUnder[decision.body.id] = lookup.surface;
+          b.writeln(
+            '##### `${decision.identity}` — NAMED ELSEWHERE (status: '
+            '${decision.status}, entry: `${decision.entryPath}`): this bead '
+            'cites it and its register records it, but it does NOT declare '
+            'surface `${lookup.surface}`; it governs '
+            '${decision.surfaces.isEmpty ? 'no declared surface' : decision.surfaces.map((s) => '`$s`').join(', ')}.',
           );
           take(decision.identity, decision.body);
         }
@@ -2835,6 +2889,12 @@ List<DecisionSurfaceEvidence> _decisionSourceRecords(
 /// survive a surface whose union runs past
 /// [kMaxDecisionEntriesPerSurface].
 ///
+/// A citation this surface's answer does not hold costs ONE extra run of the
+/// same verb with NO `--surface` — the unfiltered roster answer, memoized for
+/// the whole batch, because existence is a REGISTER-wide question and a
+/// decision governs only the surfaces it declares. It is asked lazily: a bead
+/// citing nothing, or citing only what its surfaces answer, never makes it.
+///
 /// [runnerInvocation] is the composing station's OWN invocation, threaded from
 /// `buildCodeRegistry(overlayArgs:)['runner']`. Blank or absent ⇒ NO shell call
 /// is made at all and every surface is recorded [EvidenceState.unavailable]:
@@ -2880,6 +2940,33 @@ DecisionIndexSource commandDecisionIndexSource(
   return (workspaceDir, surfaces, workBead) async {
     final out = <DecisionSurfaceEvidence>[];
     final seen = <String>{};
+    // Read ONCE per batch, and only if a citation asks for it: the unfiltered
+    // roster answer (existence is register-wide), and the register directories
+    // every selected entry is resolved out of.
+    _DecisionIndexAnswer? unfiltered;
+    final registerFiles = <String, List<({String path, String text})>>{};
+    Future<_DecisionIndexAnswer> registerWide() async {
+      final memoized = unfiltered;
+      if (memoized != null) return memoized;
+      final command = rosterDecisionIndexCommand(runner: stationRunner);
+      try {
+        final result = await runner.run(
+          workingDirectory: stationGridHome,
+          command: command,
+        );
+        return unfiltered = result.ok
+            ? _readDecisionIndex(result.output)
+            : _DecisionIndexAnswer.unreadable(
+                'register-wide lookup exit ${result.exitCode}: '
+                '${result.output.trim()}',
+              );
+      } catch (e) {
+        return unfiltered = _DecisionIndexAnswer.unreadable(
+          'register-wide lookup failed: $e',
+        );
+      }
+    }
+
     for (final surface in surfaces) {
       if (!seen.add(surface)) continue;
       // The three arms that never REACH a shell, in precedence order. Each
@@ -2938,12 +3025,14 @@ DecisionIndexSource commandDecisionIndexSource(
           continue;
         }
         out.add(
-          _decisionLookup(
+          await _decisionLookup(
             workspaceDir: workspaceDir,
             surface: surface,
             command: command,
             output: result.output,
             workBead: workBead,
+            registerWide: registerWide,
+            registerFiles: registerFiles,
           ),
         );
       } catch (e) {
@@ -3136,8 +3225,35 @@ bool _isTokenChar(int? unit) =>
         unit == 0x2d ||
         unit == 0x5f);
 
-/// Parses ONE `decisions index` run, selects NAME-FIRST, and resolves every
-/// selected slug on disk.
+/// ONE validated `decisions index` envelope — every record it answered, in
+/// index order, or the loud reason the answer is unreadable.
+///
+/// The SAME validation runs over a per-surface answer and over the unfiltered
+/// register-wide one ([_registerWideDecisions]): a lookup that reads a
+/// register-wide answer it could not validate is exactly the "graded noise as
+/// evidence" this consumer refuses.
+class _DecisionIndexAnswer {
+  const _DecisionIndexAnswer.read(this.decisions) : error = '';
+
+  const _DecisionIndexAnswer.unreadable(this.error)
+    : decisions = const <_IndexedDecision>[];
+
+  /// The validated records, in the index's own order.
+  final List<_IndexedDecision> decisions;
+
+  /// The failure detail — empty exactly when the answer was read.
+  final String error;
+
+  /// Whether the envelope validated.
+  bool get ok => error.isEmpty;
+
+  /// Every register this answer came from, lowercased.
+  Set<String> get registers => {
+    for (final candidate in decisions) candidate.originRegister.toLowerCase(),
+  };
+}
+
+/// Validates ONE `decisions index` envelope.
 ///
 /// Only an [_acceptedDecisionIndexSpecs] envelope is read. Schema 2's top-level
 /// `diagnostics` and per-decision `edges` are PRODUCER-owned context this
@@ -3145,73 +3261,42 @@ bool _isTokenChar(int? unit) =>
 /// answers a complete union here, and a new member added beside them never
 /// turns a good answer into a deterministic gap.
 ///
-/// The whole `decisions` array is VALIDATED before anything is selected, so a
+/// The whole `decisions` array is validated before anything is selected, so a
 /// malformed record past the bound still fails loud rather than hiding behind
-/// the clip. Then the entries [workBead] NAMES ([_isNamedDecision]) are kept,
-/// in index order, ahead of an index-order fill of the rest up to
-/// [kMaxDecisionEntriesPerSurface]; only an omitted UNNAMED entry sets the
-/// clip receipt. Two shapes are loud failures rather than partial answers: a
-/// named set that does not fit the bound, and an EXPLICIT citation
-/// ([_explicitDecisionRequests]) the index does not answer at all — the second
-/// is a defect in the bead's own citations, which TRUNCATED would have
-/// disguised as a clip nobody can act on.
-DecisionSurfaceEvidence _decisionLookup({
-  required String workspaceDir,
-  required String surface,
-  required String command,
-  required String output,
-  required Bead workBead,
-}) {
+/// the clip.
+_DecisionIndexAnswer _readDecisionIndex(String output) {
   final Object? decoded;
   try {
     decoded = jsonDecode(output);
   } catch (e) {
-    return _decisionSurface(
-      surface: surface,
-      command: command,
-      entries: const [],
-      error: 'malformed index JSON: $e',
-    );
+    return _DecisionIndexAnswer.unreadable('malformed index JSON: $e');
   }
   final seenSpec = decoded is Map ? decoded['spec'] : null;
   if (decoded is! Map || !_acceptedDecisionIndexSpecs.contains(seenSpec)) {
-    return _decisionSurface(
-      surface: surface,
-      command: command,
-      entries: const [],
-      error:
-          'index answered unsupported `spec`: ${jsonEncode(seenSpec)}; '
-          'accepted specs are ${_acceptedDecisionIndexSpecs.join(' and ')}',
+    return _DecisionIndexAnswer.unreadable(
+      'index answered unsupported `spec`: ${jsonEncode(seenSpec)}; '
+      'accepted specs are ${_acceptedDecisionIndexSpecs.join(' and ')}',
     );
   }
   final raw = decoded['decisions'];
   if (raw is! List) {
-    return _decisionSurface(
-      surface: surface,
-      command: command,
-      entries: const [],
-      error: 'index answered no `decisions` array',
+    return const _DecisionIndexAnswer.unreadable(
+      'index answered no `decisions` array',
     );
   }
   final indexed = <_IndexedDecision>[];
   for (final record in raw) {
     if (record is! Map) {
-      return _decisionSurface(
-        surface: surface,
-        command: command,
-        entries: const [],
-        error: 'index answered a non-map decision record',
+      return const _DecisionIndexAnswer.unreadable(
+        'index answered a non-map decision record',
       );
     }
     final slug = (record['slug'] as String?)?.trim() ?? '';
     final originRegister = (record['originRegister'] as String?)?.trim() ?? '';
     final originPath = (record['originPath'] as String?)?.trim() ?? '';
     if (slug.isEmpty || originRegister.isEmpty || originPath.isEmpty) {
-      return _decisionSurface(
-        surface: surface,
-        command: command,
-        entries: const [],
-        error: 'index answered a record with no slug/originRegister/originPath',
+      return const _DecisionIndexAnswer.unreadable(
+        'index answered a record with no slug/originRegister/originPath',
       );
     }
     indexed.add(
@@ -3223,25 +3308,192 @@ DecisionSurfaceEvidence _decisionLookup({
       ),
     );
   }
+  return _DecisionIndexAnswer.read(indexed);
+}
+
+/// The memoized, unfiltered register-wide answer — resolved AT MOST ONCE per
+/// batch, and only when a citation needs it ([_needsRegisterWideLookup]).
+typedef _RegisterWideDecisions = Future<_DecisionIndexAnswer> Function();
+
+/// Whether resolving [cited] needs the REGISTER-WIDE answer as well as this
+/// surface's.
+///
+/// Two shapes need it, and nothing else does — a bead that cites nothing never
+/// costs a second lookup:
+///  - an explicit citation this surface's records do not answer (the decision
+///    may still exist in its register, governing other surfaces);
+///  - a canonical token under a register THIS surface's answer never mentioned
+///    (it is prose only if the whole roster does not know that register
+///    either, which only the unfiltered answer can say).
+bool _needsRegisterWideLookup(
+  String cited, {
+  required List<_IndexedDecision> indexed,
+  required Set<String> onSurface,
+}) {
+  for (final request in _explicitDecisionRequests(
+    cited,
+    originRegisters: onSurface,
+  )) {
+    if (!indexed.any(request.isAnsweredBy)) return true;
+  }
+  for (final match in _canonicalDecisionCitation.allMatches(cited)) {
+    if (!onSurface.contains(match.group(1)!.toLowerCase())) return true;
+  }
+  return false;
+}
+
+/// Resolves ONE selected index record to its entry file and bounded body — or
+/// the loud reason it could not be.
+///
+/// [registerFiles] is the batch's memo of `<register dir> → its `.md` files`:
+/// ONE read per register directory, not one per selected entry. The bound is
+/// eight times what it was, and a mature register holds ~100 entry files, so
+/// re-listing and re-reading the whole directory per slug is quadratic for no
+/// gain. The per-slug match is the same exact multiline `slug:` regex over the
+/// same file set — only the text it runs over is memoized.
+({DecisionEntryEvidence? entry, String error}) _resolveDecisionEntry(
+  _IndexedDecision candidate, {
+  required String workspaceDir,
+  required Map<String, List<({String path, String text})>> registerFiles,
+}) {
+  final record = candidate.record;
+  final slug = candidate.slug;
+  final originPath = candidate.originPath;
+  final String entryPath;
+  final String body;
+  try {
+    final dirPath = p.isAbsolute(originPath)
+        ? originPath
+        : p.join(workspaceDir, originPath);
+    final files = registerFiles[dirPath] ??= [
+      for (final file in Directory(dirPath).listSync().whereType<File>())
+        if (file.path.endsWith('.md'))
+          (path: file.path, text: file.readAsStringSync()),
+    ];
+    final slugLine = RegExp(
+      '^\\s*slug:\\s*${RegExp.escape(slug)}\\s*\$',
+      multiLine: true,
+    );
+    final matches = [
+      for (final file in files)
+        if (slugLine.hasMatch(file.text)) file,
+    ];
+    if (matches.length != 1) {
+      return (
+        entry: null,
+        error:
+            '${matches.length} entry files match `slug: $slug` under '
+            '$originPath (exactly one must)',
+      );
+    }
+    entryPath = matches.single.path;
+    body = matches.single.text;
+  } catch (e) {
+    return (
+      entry: null,
+      error: 'could not resolve `slug: $slug` under $originPath — $e',
+    );
+  }
+  return (
+    entry: DecisionEntryEvidence(
+      identity: candidate.identity,
+      originRegister: candidate.originRegister,
+      originPath: originPath,
+      slug: slug,
+      status: (record['status'] as String?)?.trim() ?? '',
+      surfaces: [
+        if (record['surfaces'] case final List<Object?> declared)
+          for (final declaredSurface in declared)
+            if (declaredSurface is String) declaredSurface,
+      ],
+      entryPath: entryPath,
+      body: boundDiscoveryEvidence(
+        kind: 'decision-entry',
+        subject: candidate.identity,
+        source: entryPath,
+        fullText: body,
+      ),
+    ),
+    error: '',
+  );
+}
+
+/// Parses ONE `decisions index` run, selects NAME-FIRST, and resolves every
+/// selected slug on disk.
+///
+/// The entries [workBead] NAMES ([_isNamedDecision]) are kept, in index order,
+/// ahead of an index-order fill of the rest up to
+/// [kMaxDecisionEntriesPerSurface]; only an omitted UNNAMED entry sets the clip
+/// receipt.
+///
+/// EXISTENCE of an explicit citation ([_explicitDecisionRequests]) is a
+/// REGISTER-wide question, not a per-surface one. A decision declares the
+/// surfaces it governs, so a bead routinely and correctly cites one from a
+/// surface that decision does not declare; answering that against this
+/// surface's records alone failed the surface on a citation nobody could act
+/// on except by DELETING it. So a request this surface does not answer is
+/// re-asked of [registerWide] — the same unfiltered roster answer, read once
+/// per batch — and a hit is carried as a named-elsewhere note
+/// ([DecisionSurfaceEvidence.namedElsewhere]) with its body, leaving the state
+/// complete/truncated.
+///
+/// Two shapes remain loud failures rather than partial answers: a named set
+/// that does not fit the bound, and a citation absent from its whole REGISTER
+/// — the second is a defect in the bead's own citations, which TRUNCATED would
+/// have disguised as a clip nobody can act on.
+Future<DecisionSurfaceEvidence> _decisionLookup({
+  required String workspaceDir,
+  required String surface,
+  required String command,
+  required String output,
+  required Bead workBead,
+  required _RegisterWideDecisions registerWide,
+  required Map<String, List<({String path, String text})>> registerFiles,
+}) async {
+  DecisionSurfaceEvidence failed(String error) => _decisionSurface(
+    surface: surface,
+    command: command,
+    entries: const [],
+    error: error,
+  );
+
+  final answer = _readDecisionIndex(output);
+  if (!answer.ok) return failed(answer.error);
+  final indexed = answer.decisions;
 
   final cited = _decisionCitationText(workBead);
-  final originRegisters = {
-    for (final candidate in indexed) candidate.originRegister.toLowerCase(),
-  };
-  final absent = [
-    for (final request in _explicitDecisionRequests(
-      cited,
-      originRegisters: originRegisters,
-    ))
-      if (!indexed.any(request.isAnsweredBy)) request.label,
-  ];
+  final onSurface = answer.registers;
+  var registers = onSurface;
+  var union = const <_IndexedDecision>[];
+  if (_needsRegisterWideLookup(cited, indexed: indexed, onSurface: onSurface)) {
+    final wide = await registerWide();
+    if (!wide.ok) return failed(wide.error);
+    union = wide.decisions;
+    registers = {...onSurface, ...wide.registers};
+  }
+
+  final absent = <String>[];
+  final elsewhere = <_IndexedDecision>[];
+  final claimed = <String>{};
+  for (final request in _explicitDecisionRequests(
+    cited,
+    originRegisters: registers,
+  )) {
+    if (indexed.any(request.isAnsweredBy)) continue;
+    final matched = [
+      for (final candidate in union)
+        if (request.isAnsweredBy(candidate)) candidate,
+    ];
+    if (matched.isEmpty) {
+      absent.add(request.label);
+      continue;
+    }
+    for (final candidate in matched) {
+      if (claimed.add(candidate.identity)) elsewhere.add(candidate);
+    }
+  }
   if (absent.isNotEmpty) {
-    return _decisionSurface(
-      surface: surface,
-      command: command,
-      entries: const [],
-      error: 'named decision absent from index: ${absent.join(', ')}',
-    );
+    return failed('named decision absent from index: ${absent.join(', ')}');
   }
 
   final selected = <_IndexedDecision>[];
@@ -3249,97 +3501,41 @@ DecisionSurfaceEvidence _decisionLookup({
   for (final candidate in indexed) {
     (_isNamedDecision(candidate, cited) ? selected : fill).add(candidate);
   }
-  if (selected.length > kMaxDecisionEntriesPerSurface) {
-    return _decisionSurface(
-      surface: surface,
-      command: command,
-      entries: const [],
-      error:
-          'named decision set exceeds '
-          'kMaxDecisionEntriesPerSurface=$kMaxDecisionEntriesPerSurface: '
-          '${selected.map((entry) => entry.identity).join(', ')}',
+  // The NAMED set is what the bead cited, wherever it lives: an on-surface
+  // entry and a named-elsewhere note both spend the same budget, so the two
+  // lists together are what the bound is checked against.
+  if (selected.length + elsewhere.length > kMaxDecisionEntriesPerSurface) {
+    return failed(
+      'named decision set exceeds '
+      'kMaxDecisionEntriesPerSurface=$kMaxDecisionEntriesPerSurface: '
+      '${[...selected, ...elsewhere].map((entry) => entry.identity).join(', ')}',
     );
   }
-  selected.addAll(fill.take(kMaxDecisionEntriesPerSurface - selected.length));
+  selected.addAll(
+    fill.take(
+      kMaxDecisionEntriesPerSurface - selected.length - elsewhere.length,
+    ),
+  );
 
-  // ONE read per register directory, not one per selected entry: the bound is
-  // eight times what it was, and a mature register holds ~100 entry files, so
-  // re-listing and re-reading the whole directory per slug is quadratic for no
-  // gain. The per-slug match below is the same exact multiline `slug:` regex
-  // over the same `.md` file set — only the text it runs over is memoized, and
-  // only for the length of this one lookup.
-  final registerFiles = <String, List<({String path, String text})>>{};
   final entries = <DecisionEntryEvidence>[];
-  for (final candidate in selected) {
-    final record = candidate.record;
-    final slug = candidate.slug;
-    final originRegister = candidate.originRegister;
-    final originPath = candidate.originPath;
-    final String entryPath;
-    final String body;
-    try {
-      final dirPath = p.isAbsolute(originPath)
-          ? originPath
-          : p.join(workspaceDir, originPath);
-      final files = registerFiles[dirPath] ??= [
-        for (final file in Directory(dirPath).listSync().whereType<File>())
-          if (file.path.endsWith('.md'))
-            (path: file.path, text: file.readAsStringSync()),
-      ];
-      final slugLine = RegExp(
-        '^\\s*slug:\\s*${RegExp.escape(slug)}\\s*\$',
-        multiLine: true,
+  final notes = <DecisionEntryEvidence>[];
+  for (final (into, candidates) in [(entries, selected), (notes, elsewhere)]) {
+    for (final candidate in candidates) {
+      final resolved = _resolveDecisionEntry(
+        candidate,
+        workspaceDir: workspaceDir,
+        registerFiles: registerFiles,
       );
-      final matches = [
-        for (final file in files)
-          if (slugLine.hasMatch(file.text)) file,
-      ];
-      if (matches.length != 1) {
-        return _decisionSurface(
-          surface: surface,
-          command: command,
-          entries: const [],
-          error:
-              '${matches.length} entry files match `slug: $slug` under '
-              '$originPath (exactly one must)',
-        );
-      }
-      entryPath = matches.single.path;
-      body = matches.single.text;
-    } catch (e) {
-      return _decisionSurface(
-        surface: surface,
-        command: command,
-        entries: const [],
-        error: 'could not resolve `slug: $slug` under $originPath — $e',
-      );
+      final entry = resolved.entry;
+      if (entry == null) return failed(resolved.error);
+      into.add(entry);
     }
-    entries.add(
-      DecisionEntryEvidence(
-        identity: '$originRegister#$slug',
-        originRegister: originRegister,
-        originPath: originPath,
-        slug: slug,
-        status: (record['status'] as String?)?.trim() ?? '',
-        surfaces: [
-          if (record['surfaces'] case final List<Object?> declared)
-            for (final declaredSurface in declared)
-              if (declaredSurface is String) declaredSurface,
-        ],
-        entryPath: entryPath,
-        body: boundDiscoveryEvidence(
-          kind: 'decision-entry',
-          subject: '$originRegister#$slug',
-          source: entryPath,
-          fullText: body,
-        ),
-      ),
-    );
   }
   return _decisionSurface(
     surface: surface,
     command: command,
     entries: entries,
+    namedElsewhere: notes,
     truncated: selected.length < indexed.length,
   );
 }
@@ -3350,6 +3546,7 @@ DecisionSurfaceEvidence _decisionSurface({
   required String surface,
   required String command,
   required List<DecisionEntryEvidence> entries,
+  List<DecisionEntryEvidence> namedElsewhere = const [],
   bool truncated = false,
   String error = '',
 }) => DecisionSurfaceEvidence(
@@ -3357,18 +3554,30 @@ DecisionSurfaceEvidence _decisionSurface({
     kind: 'decision-surface',
     subject: surface,
     source: command,
-    fullText: entries.map((e) => e.identity).join('\n'),
+    // A named-elsewhere note is part of what this lookup ANSWERED, so it is
+    // part of the record's canonical identity — marked, never merged, so the
+    // same entry governing a surface and merely cited on it never digest to
+    // the same lookup.
+    fullText: [
+      for (final entry in entries) entry.identity,
+      for (final entry in namedElsewhere) 'named-elsewhere:${entry.identity}',
+    ].join('\n'),
   ).id,
   surface: surface,
   command: command,
   state: error.isNotEmpty
       ? EvidenceState.failed
-      : (truncated || entries.any((e) => e.body.state != EvidenceState.complete)
+      : (truncated ||
+                [
+                  ...entries,
+                  ...namedElsewhere,
+                ].any((e) => e.body.state != EvidenceState.complete)
             ? EvidenceState.truncated
             : EvidenceState.complete),
   truncated: truncated,
   error: error,
   decisions: entries,
+  namedElsewhere: namedElsewhere,
 );
 
 /// The real [HistorySource]: ONE `git log` over every resolved surface, through
