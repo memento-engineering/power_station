@@ -21,6 +21,48 @@ const String _adr = 'docs/adr/ADR-0000-ai-decision-register.md A17(4)';
 /// freshness stamp, beside `nodePath` and `round`.
 const SessionHandle _session = SessionHandle('session-current');
 
+/// The work bead a decision probe that is NOT about naming hands the source: it
+/// cites nothing, so selection is pure index order.
+final Bead _citesNothing = bead('pow-quiet');
+
+/// A canned roster-mode `decisions index` answer over [count] records, with one
+/// VALID entry file written per record under [register] — the fixture
+/// name-first selection ranks.
+///
+/// Record `n` carries slug `a<n>-fake-decision-<n>`, so a bead can name it by
+/// its full slug OR by the legacy `A<n>` id the register keeps as that slug's
+/// leading segment.
+_CannedShellRunner _fakeDecisionIndex(
+  Directory register, {
+  required int count,
+}) {
+  for (var n = 1; n <= count; n++) {
+    File(
+      p.join(register.path, '2026-09-08-fake-decision-$n.md'),
+    ).writeAsStringSync(
+      '---\nstatus: accepted\nregister:\n  spec: 1\n'
+      '  slug: a$n-fake-decision-$n\n---\nfake decision $n body',
+    );
+  }
+  return _CannedShellRunner(
+    output: jsonEncode({
+      'spec': 2,
+      'decisions': [
+        for (var n = 1; n <= count; n++)
+          {
+            'originRegister': 'power_station',
+            'originPath': register.path,
+            'slug': 'a$n-fake-decision-$n',
+            'status': 'accepted',
+            'surfaces': const ['packages/grid_assets/lib/src/x.dart'],
+            'edges': const <Object?>[],
+          },
+      ],
+      'diagnostics': const <Object?>[],
+    }),
+  );
+}
+
 DiscoveryFinding _cited({
   ViolationKind kind = ViolationKind.decision,
   String standard = _adr,
@@ -723,8 +765,8 @@ void main() {
       );
       final outcome =
           await AnchorsCapability(
-            decisions: (workspaceDir, surfaces) async {
-              final records = await source(workspaceDir, surfaces);
+            decisions: (workspaceDir, surfaces, workBead) async {
+              final records = await source(workspaceDir, surfaces, workBead);
               gathered.addAll(records);
               return records;
             },
@@ -792,8 +834,8 @@ void main() {
       );
       final outcome =
           await AnchorsCapability(
-            decisions: (workspaceDir, surfaces) async {
-              final records = await source(workspaceDir, surfaces);
+            decisions: (workspaceDir, surfaces, workBead) async {
+              final records = await source(workspaceDir, surfaces, workBead);
               gathered.addAll(records);
               return records;
             },
@@ -1387,7 +1429,9 @@ void main() {
         EvidenceState.unavailable,
       );
       expect(
-        (await gatherDecisions(null, '/w', ['repo/a.dart'])).single.state,
+        (await gatherDecisions(null, '/w', [
+          'repo/a.dart',
+        ], _citesNothing)).single.state,
         EvidenceState.unavailable,
       );
       expect(
@@ -1500,7 +1544,7 @@ void main() {
         ok,
         runnerInvocation: 'dart run lunar:lunar',
         gridHome: '/grid/lunar',
-      )(dir.path, [surface, surface]);
+      )(dir.path, [surface, surface], _citesNothing);
       expect(
         ok.commands,
         ['dart run lunar:lunar decisions index --surface $surface'],
@@ -1544,7 +1588,7 @@ void main() {
         _CannedShellRunner(output: 'not json'),
         runnerInvocation: 'dart run lunar:lunar',
         gridHome: '/grid/lunar',
-      )(dir.path, [surface]);
+      )(dir.path, [surface], _citesNothing);
       expect(malformed.single.state, EvidenceState.failed);
       expect(malformed.single.error, contains('malformed index JSON'));
 
@@ -1552,7 +1596,7 @@ void main() {
         _CannedShellRunner(exitCode: 127, output: 'command not found: lunar'),
         runnerInvocation: 'dart run lunar:lunar',
         gridHome: '/grid/lunar',
-      )(dir.path, [surface]);
+      )(dir.path, [surface], _citesNothing);
       expect(crashed.single.state, EvidenceState.failed);
       expect(crashed.single.error, contains('command not found'));
 
@@ -1576,7 +1620,7 @@ void main() {
         ),
         runnerInvocation: 'dart run lunar:lunar',
         gridHome: '/grid/lunar',
-      )(dir.path, [surface]);
+      )(dir.path, [surface], _citesNothing);
       expect(unresolvable.single.state, EvidenceState.failed);
       expect(unresolvable.single.error, contains('no-such-entry'));
     });
@@ -1590,7 +1634,7 @@ void main() {
         ),
         runnerInvocation: 'dart run lunar:lunar',
         gridHome: '/grid/lunar',
-      )('/w', ['power_station/lib/a.dart']);
+      )('/w', ['power_station/lib/a.dart'], _citesNothing);
       expect(empty.single.state, EvidenceState.complete);
       expect(empty.single.decisions, isEmpty);
       expect(empty.single.error, isEmpty);
@@ -1606,7 +1650,7 @@ void main() {
             ),
             runnerInvocation: 'dart run lunar:lunar',
             gridHome: '/grid/lunar',
-          )('/w', ['power_station/lib/a.dart']);
+          )('/w', ['power_station/lib/a.dart'], _citesNothing);
           expect(records.single.state, EvidenceState.failed, reason: '$seen');
           expect(records.single.decisions, isEmpty, reason: '$seen');
           expect(
@@ -1619,14 +1663,201 @@ void main() {
       },
     );
 
+    test('decision selection puts a bead-named 25th entry first in a '
+        '30-entry surface', () async {
+      final dir = Directory.systemTemp.createTempSync('decisions-named');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final register = Directory(p.join(dir.path, 'docs', 'decisions'))
+        ..createSync(recursive: true);
+      const surface = 'power_station/packages/grid_assets/lib/src/x.dart';
+      // The bead cites the 25th entry two ways: by its full slug, and by the
+      // legacy `A25` id that slug leads with. Neither is anywhere near the
+      // head of the index's own order.
+      for (final citation in ['`a25-fake-decision-25`', '`A25`']) {
+        final records =
+            await commandDecisionIndexSource(
+              _fakeDecisionIndex(register, count: 30),
+              runnerInvocation: 'dart run lunar:lunar',
+              gridHome: '/grid/lunar',
+            )(
+              dir.path,
+              [surface],
+              bead(
+                'pow-cite',
+              ).copyWith(description: 'This bead is governed by $citation.'),
+            );
+        final record = records.single;
+        expect(
+          record.state,
+          EvidenceState.complete,
+          reason: '$citation: ${record.error}',
+        );
+        expect(record.truncated, isFalse, reason: citation);
+        expect(
+          record.decisions.first.slug,
+          'a25-fake-decision-25',
+          reason: 'the NAMED entry leads, whatever the index ordered',
+        );
+        expect(
+          record.decisions.map((entry) => entry.slug),
+          hasLength(30),
+          reason:
+              'naming REORDERS a surface that fits the bound; it never drops '
+              'an entry, and nothing is reported truncated',
+        );
+      }
+    });
+
+    test(
+      'a canonical bead-named slug absent from the index FAILS by name',
+      () async {
+        final dir = Directory.systemTemp.createTempSync('decisions-absent');
+        addTearDown(() => dir.deleteSync(recursive: true));
+        final register = Directory(p.join(dir.path, 'docs', 'decisions'))
+          ..createSync(recursive: true);
+        const surface = 'power_station/packages/grid_assets/lib/src/x.dart';
+        final records =
+            await commandDecisionIndexSource(
+              _fakeDecisionIndex(register, count: 3),
+              runnerInvocation: 'dart run lunar:lunar',
+              gridHome: '/grid/lunar',
+            )(
+              dir.path,
+              [surface],
+              bead('pow-cite').copyWith(
+                design: 'This aligns with `power_station#no-such-slug`.',
+              ),
+            );
+        final record = records.single;
+        expect(
+          record.state,
+          EvidenceState.failed,
+          reason:
+              'a citation the index cannot answer is a defect in the BEAD, and '
+              'a clip receipt would disguise it as a bound nobody can act on',
+        );
+        expect(record.truncated, isFalse);
+        expect(record.decisions, isEmpty);
+        expect(
+          record.error,
+          'named decision absent from index: no-such-slug',
+          reason:
+              'the register half IS one the index answered, so the missing '
+              'name is the bead\'s own defect and it is named',
+        );
+      },
+    );
+
+    test('organic option labels and prose-shaped hashes do not fail decision '
+        'lookup', () async {
+      final records =
+          await commandDecisionIndexSource(
+            _CannedShellRunner(
+              output: jsonEncode({'spec': 2, 'decisions': <Object?>[]}),
+            ),
+            runnerInvocation: 'dart run lunar:lunar',
+            gridHome: '/grid/lunar',
+          )(
+            '/w',
+            ['power_station/lib/a.dart'],
+            bead('pow-prose').copyWith(
+              description: 'Option A1 vs A2; see pr#256-fix and id#some-value.',
+            ),
+          );
+      final record = records.single;
+      expect(
+        record.state,
+        EvidenceState.complete,
+        reason:
+            'organic prose labels options A1/A2 and writes hashes; none of '
+            'that is a citation, and failing on it would hold every bead in '
+            'the org: ${record.error}',
+      );
+      expect(record.truncated, isFalse);
+      expect(record.error, isEmpty);
+      expect(record.decisions, isEmpty);
+    });
+
+    test('a canonical-shaped token under an unknown register does not '
+        'fail', () async {
+      final dir = Directory.systemTemp.createTempSync('decisions-unknown');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final register = Directory(p.join(dir.path, 'docs', 'decisions'))
+        ..createSync(recursive: true);
+      const surface = 'power_station/packages/grid_assets/lib/src/x.dart';
+      Future<DecisionSurfaceEvidence> lookup(Bead workBead) async =>
+          (await commandDecisionIndexSource(
+            _fakeDecisionIndex(register, count: 3),
+            runnerInvocation: 'dart run lunar:lunar',
+            gridHome: '/grid/lunar',
+          )(dir.path, [surface], workBead)).single;
+      final prose = await lookup(
+        bead(
+          'pow-cite',
+        ).copyWith(notes: 'Tracked as `unknown_register#some-slug`.'),
+      );
+      final neutral = await lookup(_citesNothing);
+      expect(
+        prose.state,
+        EvidenceState.complete,
+        reason:
+            'the index answered only `power_station`, so a hash under any '
+            'other register is prose, not a citation: ${prose.error}',
+      );
+      expect(prose.state, neutral.state);
+      expect(prose.truncated, neutral.truncated);
+      expect(prose.error, neutral.error);
+      expect(
+        prose.decisions.map((entry) => entry.slug),
+        neutral.decisions.map((entry) => entry.slug),
+        reason: 'prose changes NOTHING about the projection',
+      );
+    });
+
+    test('decision surface bound is 96 and clips the 97th entry', () async {
+      expect(
+        kMaxDecisionEntriesPerSurface,
+        96,
+        reason: 'the bound fits the largest real first-party surface',
+      );
+      final dir = Directory.systemTemp.createTempSync('decisions-bound');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final register = Directory(p.join(dir.path, 'docs', 'decisions'))
+        ..createSync(recursive: true);
+      const surface = 'power_station/packages/grid_assets/lib/src/x.dart';
+      final records = await commandDecisionIndexSource(
+        _fakeDecisionIndex(register, count: kMaxDecisionEntriesPerSurface + 1),
+        runnerInvocation: 'dart run lunar:lunar',
+        gridHome: '/grid/lunar',
+      )(dir.path, [surface], _citesNothing);
+      final record = records.single;
+      expect(record.decisions, hasLength(kMaxDecisionEntriesPerSurface));
+      expect(
+        record.decisions.last.slug,
+        'a$kMaxDecisionEntriesPerSurface-fake-decision-'
+        '$kMaxDecisionEntriesPerSurface',
+        reason: 'an UNNAMED surface still fills in the index\'s own order',
+      );
+      expect(
+        record.truncated,
+        isTrue,
+        reason: 'growth past the bound stays a RECORDED clip',
+      );
+      expect(record.state, EvidenceState.truncated);
+    });
+
     test('an ABSENT station runner records UNAVAILABLE and never reaches the '
         'shell — this pack names no decisions binary', () async {
       final never = _CannedShellRunner(output: '{}');
       for (final invocation in [null, '', '   ']) {
-        final records = await commandDecisionIndexSource(
-          never,
-          runnerInvocation: invocation,
-        )('/w', ['power_station/lib/a.dart', 'power_station/lib/a.dart']);
+        final records =
+            await commandDecisionIndexSource(
+              never,
+              runnerInvocation: invocation,
+            )('/w', [
+              'power_station/lib/a.dart',
+              'power_station/lib/a.dart',
+            ], _citesNothing);
         expect(never.commands, isEmpty, reason: 'no shell call is made at all');
         expect(records, hasLength(1), reason: 'one record per DEDUP surface');
         expect(records.single.state, EvidenceState.unavailable);
@@ -1643,11 +1874,15 @@ void main() {
       // work worktree is never substituted as a place to run the verb.
       final unbound = _CannedShellRunner(output: '{}');
       for (final home in [null, '', '   ']) {
-        final records = await commandDecisionIndexSource(
-          unbound,
-          runnerInvocation: 'dart run lunar:lunar',
-          gridHome: home,
-        )('/w', ['power_station/lib/a.dart', 'power_station/lib/a.dart']);
+        final records =
+            await commandDecisionIndexSource(
+              unbound,
+              runnerInvocation: 'dart run lunar:lunar',
+              gridHome: home,
+            )('/w', [
+              'power_station/lib/a.dart',
+              'power_station/lib/a.dart',
+            ], _citesNothing);
         expect(unbound.calls, isEmpty, reason: 'no shell call is made at all');
         expect(records, hasLength(1), reason: 'one record per DEDUP surface');
         expect(records.single.state, EvidenceState.unavailable);
@@ -1659,7 +1894,7 @@ void main() {
       // and likewise invents no command.
       final unwired = await gatherDecisions(null, '/w', [
         'power_station/lib/a.dart',
-      ]);
+      ], _citesNothing);
       expect(unwired.single.state, EvidenceState.unavailable);
       expect(unwired.single.command, isEmpty);
       expect(unwired.single.error, contains('no decision-index source'));
@@ -1724,7 +1959,7 @@ void main() {
                     state: EvidenceState.complete,
                   ),
               ],
-              decisions: (_, surfaces) async => const [],
+              decisions: (_, _, _) async => const [],
               history: (_, __) async => completeHistory(),
             ).run(
               FakeTreeContext(
