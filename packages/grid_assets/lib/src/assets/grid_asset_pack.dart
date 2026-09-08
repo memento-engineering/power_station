@@ -845,6 +845,22 @@ abstract final class GridAssetsPack {
     ],
   );
 
+  /// `grid_assets/agent/refiner`.
+  static const GridAssetDefinition agentRefiner = GridAssetDefinition(
+    assetKey: AssetKey(package: package, kind: AssetKind.agent, id: 'refiner'),
+    description:
+        'The refiner seat\'s persona, intake mandate, and governor boundary.',
+    audience: AssetAudience.human,
+    visibility: AssetVisibility.public,
+    selector: AlwaysApplies(),
+    artifacts: <AssetArtifact>[
+      AssetArtifact(
+        target: AssetDeliveryTarget.claude,
+        path: 'extension/station_overlay/claude/agents/refiner.md',
+      ),
+    ],
+  );
+
   /// `grid_assets/settings/harness`.
   static const GridAssetDefinition settingsHarness = GridAssetDefinition(
     assetKey: AssetKey(
@@ -898,6 +914,7 @@ abstract final class GridAssetsPack {
     skillRelease,
     skillStationOperations,
     agentGovernor,
+    agentRefiner,
     settingsHarness,
   ];
 

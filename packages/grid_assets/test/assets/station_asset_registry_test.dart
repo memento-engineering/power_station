@@ -240,7 +240,7 @@ void main() {
         identical(registry.packs.single, GridAssetsPack.definition),
         isTrue,
       );
-      expect(registry.assets, hasLength(32));
+      expect(registry.assets, hasLength(33));
 
       final source = File(
         p.join(Directory.current.path, 'lib', 'station_asset_registry.dart'),
