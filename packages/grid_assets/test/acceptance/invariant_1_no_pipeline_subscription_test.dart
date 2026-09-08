@@ -21,6 +21,7 @@ import 'package:genesis_tree/genesis_tree.dart';
 import 'package:grid_assets/grid_assets.dart';
 import 'package:beads_dart/beads_dart.dart';
 import 'package:grid_engine/grid_engine.dart';
+import 'package:grid_sdk/grid_sdk.dart' show ProviderScope;
 import 'package:test/test.dart';
 
 import '../support/asset_fakes.dart';
@@ -210,31 +211,35 @@ void main() {
         // as the invariant-1(a) listener-count probe through this path too.
         final joined = CountingJoinedSnapshotNotifier(JoinedSnapshot.empty());
         final owner = TreeOwner();
-        final root = InheritedSeed<JoinedSnapshotNotifier>(
-          value: joined,
-          child: InheritedSeed<StationServices>(
-            value: f.ctx,
-            // Mounted automatically by the runGrid station root (tg-h4u); this
-            // manual TreeOwner-driven tree bypasses that root entirely, so the
-            // molecule process path needs its own vendor here — the SAME
-            // default that root installs.
-            child: InheritedSeed<ProcessLeaseVendor>(
-              value: defaultProcessLeaseVendor(f.ctx),
-              child: InheritedSeed<CapabilityRegistry>(
-                value: buildCodeRegistry(),
-                child: InheritedSeed<SessionResolver>(
-                  value: kCodeResolver,
-                  child: Station([
-                    SubstationScope(
-                      configNotifier: SubstationConfigNotifier(
-                        const SubstationConfig(
-                          substationId: 'tg',
-                          ownedSubstations: {'tg'},
+        final root = ProviderScope(
+          // The availability registry the production root (runGrid) always
+          // mounts — a `watch<T>()` miss parks here instead of asserting.
+          child: InheritedSeed<JoinedSnapshotNotifier>(
+            value: joined,
+            child: InheritedSeed<StationServices>(
+              value: f.ctx,
+              // Mounted automatically by the runGrid station root (tg-h4u); this
+              // manual TreeOwner-driven tree bypasses that root entirely, so the
+              // molecule process path needs its own vendor here — the SAME
+              // default that root installs.
+              child: InheritedSeed<ProcessLeaseVendor>(
+                value: defaultProcessLeaseVendor(f.ctx),
+                child: InheritedSeed<CapabilityRegistry>(
+                  value: buildCodeRegistry(),
+                  child: InheritedSeed<SessionResolver>(
+                    value: kCodeResolver,
+                    child: Station([
+                      SubstationScope(
+                        configNotifier: SubstationConfigNotifier(
+                          const SubstationConfig(
+                            substationId: 'tg',
+                            ownedSubstations: {'tg'},
+                          ),
                         ),
+                        key: const ValueKey('scope.tg'),
                       ),
-                      key: const ValueKey('scope.tg'),
-                    ),
-                  ]),
+                    ]),
+                  ),
                 ),
               ),
             ),
