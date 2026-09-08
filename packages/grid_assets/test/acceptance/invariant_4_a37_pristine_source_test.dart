@@ -194,10 +194,16 @@ void main() {
               branch: 'grid/genesis-7r9',
             ),
           ],
-          reapWorktree: ({required root, required worktree}) async {
-            reapLog.add(worktree.beadId);
-            return ReapOutcome.removed();
-          },
+          reapWorktree:
+              ({
+                required root,
+                required worktree,
+                dryRun = false,
+                overrideUnsafe = false,
+              }) async {
+                reapLog.add(worktree.beadId);
+                return ReapOutcome.removed();
+              },
           workRoot: const RootCheckout(
             path: '/tmp/genesis-grid',
             defaultBranch: 'main',

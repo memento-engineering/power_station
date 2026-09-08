@@ -389,10 +389,12 @@ void main() {
         final wb1Id = _workBead(root, 'tg-1')!.branchId;
         final wb2Id = _workBead(root, 'tg-2')!.branchId;
         final workListId = _workListId(root);
-        // The bead-keyed SessionScope subtree root beneath the WorkBead. Since
-        // the context rip-out, WorkBead first mounts the ambient
-        // `InheritedSeed<Bead>` (unkeyed), so the session root is the first
-        // KEYED descendant, no longer the immediate child.
+        // The keyed subtree root beneath the WorkBead. Since the context
+        // rip-out, WorkBead first mounts the ambient `InheritedSeed<Bead>`
+        // (unkeyed), so the subtree root is the first KEYED descendant, no
+        // longer the immediate child. Online, that root is the reservation
+        // provider WorkBead keys on `(bead.id, reservationMountToken)` so a
+        // FRESH admission grant deliberately remounts the session subtree.
         Branch effectChild(Branch wb) {
           Branch? found;
           void walk(Branch b) {
@@ -408,10 +410,22 @@ void main() {
           return found!;
         }
 
-        final sessionRootId = effectChild(_workBead(root, 'tg-1')!).branchId;
+        final sessionRoot = effectChild(_workBead(root, 'tg-1')!);
+        final sessionRootId = sessionRoot.branchId;
+        final sessionRootKey = sessionRoot.key;
+        // Assert the SHAPE, not the token: the record's first field is the
+        // bead id, and its second is whatever mount identity the grant
+        // carries (a private null-token sentinel while this arm is offline).
+        // Naming that sentinel here would pin the test to an engine-private
+        // type; what §7 proves is that the id half is the bead and that the
+        // WHOLE key then holds still across the transitions below.
         expect(
-          effectChild(_workBead(root, 'tg-1')!).key,
-          const ValueKey('tg-1:session'),
+          sessionRootKey,
+          isA<ValueKey<(String, Object)>>().having(
+            (k) => k.value.$1,
+            'bead id',
+            'tg-1',
+          ),
         );
 
         // --- (a) agent → committee (a reconcile transition: the agent retires
@@ -467,7 +481,7 @@ void main() {
         );
 
         // The running frontier SWAPPED: the agent step was killed and the four
-        // critics spawned; the WorkBead branch + its bead-keyed subtree root
+        // critics spawned; the WorkBead branch + its token-keyed subtree root
         // PERSISTED.
         expect(
           f.provider.started,
@@ -513,7 +527,17 @@ void main() {
         expect(
           effectChild(_workBead(root, 'tg-1')!).branchId,
           sessionRootId,
-          reason: 'the bead-keyed subtree root persists (config threaded down)',
+          reason:
+              'the token-keyed subtree root persists (config threaded down)',
+        );
+        // Value equality, NOT identity: `WorkBead.build` mints a fresh but
+        // EQUAL key on every rebuild, and value equality is exactly the
+        // identity genesis_tree reconciles on — so an unchanged key here is
+        // what kept the branch above rather than remounting it.
+        expect(
+          effectChild(_workBead(root, 'tg-1')!).key,
+          sessionRootKey,
+          reason: 'no fresh grant ⇒ the reservation mount key is unchanged',
         );
         // No new mint (the sessions are adopted; the happy path mints no gate).
         expect(f.runner.callsFor('create'), isEmpty);
@@ -663,6 +687,16 @@ void main() {
           wb1Id,
           reason: 'the WorkBead branch still persists at land',
         );
+        expect(
+          effectChild(_workBead(root, 'tg-1')!).branchId,
+          sessionRootId,
+          reason: 'the token-keyed subtree root still persists at land',
+        );
+        expect(
+          effectChild(_workBead(root, 'tg-1')!).key,
+          sessionRootKey,
+          reason: 'the reservation mount key is unchanged at land',
+        );
         expect(_recordingDelivery.requests, isNotEmpty);
       },
     );
@@ -693,10 +727,16 @@ void main() {
               branch: 'grid/tg-live',
             ),
           ],
-          reapWorktree: ({required root, required worktree}) async {
-            reaped.add(worktree.beadId);
-            return ReapOutcome.removed();
-          },
+          reapWorktree:
+              ({
+                required root,
+                required worktree,
+                dryRun = false,
+                overrideUnsafe = false,
+              }) async {
+                reaped.add(worktree.beadId);
+                return ReapOutcome.removed();
+              },
           workRoot: const RootCheckout(
             path: '/tmp/grid',
             defaultBranch: 'main',
