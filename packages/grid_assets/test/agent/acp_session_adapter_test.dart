@@ -200,23 +200,36 @@ Future<_Run> _buildAcpRun({
   return run;
 }
 
+/// The ONE wall-clock bound on a real ACP fixture's progress.
+///
+/// It is a LIVENESS tripwire, never a latency assertion: every wait below
+/// returns the instant its observable outcome lands, and trips only when that
+/// outcome never arrives at all. A child that is merely SLOW — the machine is
+/// running another suite, the front end is compiling the bridge — is not a
+/// defect, and the bounds this replaced kept reporting it as one.
+const Duration _fixtureLivenessCeiling = Duration(seconds: 30);
+
 /// Polls until the allocation reports a failure, so a terminal that arrives
 /// through the channel drive (not through `startOrAdopt`'s own future) is
 /// observed without a fixed sleep.
 Future<AllocationFailed> _waitForFailure(_Run run) async {
-  for (var i = 0; i < 2000; i++) {
+  final waited = Stopwatch()..start();
+  while (true) {
     final failures = run.reports.whereType<AllocationFailed>();
     if (failures.isNotEmpty) return failures.first;
     if (run.reports.whereType<AllocationCompleted>().isNotEmpty) {
       throw StateError('ACP allocation COMPLETED; expected a failure');
     }
+    if (waited.elapsed > _fixtureLivenessCeiling) {
+      throw StateError('ACP allocation never failed; reports=${run.reports}');
+    }
     await Future<void>.delayed(const Duration(milliseconds: 5));
   }
-  throw StateError('ACP allocation never failed; reports=${run.reports}');
 }
 
 Future<void> _waitForOutput(_Run run, String text) async {
-  for (var i = 0; i < 1000; i++) {
+  final waited = Stopwatch()..start();
+  while (true) {
     if (run.runtime.peek(run.name, 0).contains(text)) return;
     final failures = run.reports.whereType<AllocationFailed>();
     if (failures.isNotEmpty) {
@@ -225,12 +238,14 @@ Future<void> _waitForOutput(_Run run, String text) async {
         '${failures.map((failure) => failure.reason).join('; ')}',
       );
     }
+    if (waited.elapsed > _fixtureLivenessCeiling) {
+      throw StateError(
+        'ACP allocation never emitted "$text"; reports=${run.reports}, '
+        'output=${run.runtime.peek(run.name, 0)}',
+      );
+    }
     await Future<void>.delayed(const Duration(milliseconds: 5));
   }
-  throw StateError(
-    'ACP allocation never emitted "$text"; reports=${run.reports}, '
-    'output=${run.runtime.peek(run.name, 0)}',
-  );
 }
 
 /// The STATION stand-in for a direct bridge run: the same decision function the
@@ -346,7 +361,12 @@ Future<_BridgeResult> _runBridge({
 
   Map<String, dynamic> frame;
   try {
-    frame = await terminal.future.timeout(const Duration(seconds: 10));
+    frame = await terminal.future.timeout(
+      _fixtureLivenessCeiling,
+      onTimeout: () => throw StateError(
+        'the ACP bridge never reached a terminal frame; stderr=$error',
+      ),
+    );
   } finally {
     await subscription.cancel();
     process.kill();
@@ -470,7 +490,7 @@ void main() {
             body: 'apply the correction and finish',
           ),
         );
-        await done.timeout(const Duration(seconds: 10));
+        await done.timeout(_fixtureLivenessCeiling);
 
         expect(run.config.args.join('\n'), isNot(contains('ACP channel work')));
         expect(
@@ -500,7 +520,8 @@ void main() {
         await run.close();
       }
     },
-    timeout: const Timeout(Duration(seconds: 40)),
+    // NO competing deadline: `_fixtureLivenessCeiling` is the only tripwire.
+    timeout: Timeout.none,
   );
 
   test(
@@ -564,7 +585,8 @@ void main() {
         throwsFormatException,
       );
     },
-    timeout: const Timeout(Duration(seconds: 40)),
+    // NO competing deadline: `_fixtureLivenessCeiling` is the only tripwire.
+    timeout: Timeout.none,
   );
 
   // The CAPACITY-REFUSAL terminal, the live genesis-7ob shape: the agent
@@ -612,7 +634,7 @@ void main() {
     expect(controlUsage?.tokensIn, 11);
     expect(controlUsage?.tokensOut, 7);
     expect(controlUsage?.numTurns, 1);
-  }, timeout: const Timeout(Duration(seconds: 40)));
+  }, timeout: Timeout.none);
 
   test('the capacity refusal reaches the engine as a DECLARED non-result '
       'allocation the engine resolves to infra, never a completion', () async {
@@ -661,7 +683,7 @@ void main() {
       StepFailureClass.noResult,
     );
     await run.close();
-  }, timeout: const Timeout(Duration(seconds: 40)));
+  }, timeout: Timeout.none);
 
   // The KIND is carried, not re-derived: whatever the bridge DECLARED on the
   // wire is what the engine's update reports. An absent declaration keeps the
@@ -881,7 +903,8 @@ void main() {
         everyElement(startsWith('allow-once-')),
       );
     },
-    timeout: const Timeout(Duration(seconds: 30)),
+    // NO competing deadline: `_fixtureLivenessCeiling` is the only tripwire.
+    timeout: Timeout.none,
   );
 
   test(
@@ -1030,7 +1053,8 @@ void main() {
         everyElement(startsWith('reject-always-')),
       );
     },
-    timeout: const Timeout(Duration(seconds: 60)),
+    // NO competing deadline: `_fixtureLivenessCeiling` is the only tripwire.
+    timeout: Timeout.none,
   );
 
   test(
@@ -1138,7 +1162,8 @@ void main() {
         allOf(contains('[low]'), contains('[high]')),
       );
     },
-    timeout: const Timeout(Duration(seconds: 30)),
+    // NO competing deadline: `_fixtureLivenessCeiling` is the only tripwire.
+    timeout: Timeout.none,
   );
 
   // The DIAGNOSIS four live codex specify runs never left behind (bead
@@ -1176,7 +1201,7 @@ void main() {
       'tokensOut': '0',
       'numTurns': '0',
     });
-  }, timeout: const Timeout(Duration(seconds: 30)));
+  }, timeout: Timeout.none);
 
   test('adapter launch is package resolved and brief free', () {
     const brief = AgentBrief(task: 'SECRET BRIEF');
