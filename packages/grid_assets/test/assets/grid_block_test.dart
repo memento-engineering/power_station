@@ -407,14 +407,14 @@ void main() {
       expect(out.toString(), contains('UNDECLARED selector'));
     });
 
-    test('the real block declares 32 assets across five kinds', () {
+    test('the real block declares 33 assets across five kinds', () {
       final block = parseGridBlock(
         pubspecYaml: File(p.join(root, 'pubspec.yaml')).readAsStringSync(),
         pathExists: (relative) =>
             File(p.join(root, relative)).existsSync() ||
             Directory(p.join(root, relative)).existsSync(),
       );
-      expect(block.assets, hasLength(32));
+      expect(block.assets, hasLength(33));
       expect(block.assets.map((a) => a.assetKey.kind).toSet(), {
         AssetKind.rubric,
         AssetKind.prompt,
@@ -468,13 +468,23 @@ void main() {
     });
 
     test('the pack validates and both legs of every skill are keyed', () {
-      expect(GridAssetsPack.definition.assets, hasLength(32));
+      expect(GridAssetsPack.definition.assets, hasLength(33));
       final discover = GridAssetsPack.assets.firstWhere(
         (a) => a.assetKey.id == 'discover',
       );
       expect(discover.artifactKeys.map((k) => k.canonical), [
         'grid_assets/skill/discover@claude',
         'grid_assets/skill/discover@agents',
+      ]);
+      // A seat role definition is CLAUDE-ONLY: each harness leg is an
+      // independent instruction source, and no leg but claude reads a role
+      // definition today
+      // (`power_station#a-harness-may-carry-its-own-instructions`).
+      final refiner = GridAssetsPack.assets.firstWhere(
+        (a) => a.assetKey.id == 'refiner',
+      );
+      expect(refiner.artifactKeys.map((k) => k.canonical), [
+        'grid_assets/agent/refiner@claude',
       ]);
     });
   });

@@ -701,9 +701,10 @@ void main() {
       },
     );
 
-    test('it carries the COMPLETE operator asset set — the governor agent-def '
-        'and the harness settings, not just the skills. These were hand-copied '
-        'into the station and drifted; vending them is what ends that', () {
+    test('it carries the COMPLETE operator asset set — the governor AND '
+        'refiner agent-defs and the harness settings, not just the skills. '
+        'These were hand-copied into the station and drifted; vending them is '
+        'what ends that', () {
       final governor = File(p.join(overlay, 'claude', 'agents', 'governor.md'));
       expect(governor.existsSync(), isTrue);
       expect(
@@ -755,6 +756,145 @@ void main() {
           reason: '$leg carries its own governor-seat boot instruction',
         );
       }
+
+      // The REFINER seat's role definition, beside the governor's on the one
+      // claude leg (`power_station#a-harness-may-carry-its-own-instructions`:
+      // each harness leg is an independent instruction source, so no agents/
+      // twin is owed — governor.md has none either).
+      final refinerFile = File(
+        p.join(overlay, 'claude', 'agents', 'refiner.md'),
+      );
+      expect(refinerFile.existsSync(), isTrue);
+      final refiner = refinerFile.readAsStringSync();
+      // Prose assertions read the FLOWED body so a re-wrap of a paragraph
+      // never falsifies a sentence that is still there; markers that cannot
+      // span a line break read the raw body.
+      final flowed = refiner.replaceAll(RegExp(r'\s+'), ' ');
+
+      expect(
+        refiner,
+        startsWith('---\n'),
+        reason: 'stampable: the frontmatter must open on line 1',
+      );
+      expect(refiner, contains('name: refiner'));
+      expect(refiner, contains('\n# The Refiner\n'));
+      expect(
+        refiner.split('\n').where((line) => line.startsWith('## ')).toList(),
+        const [
+          '## The mandate',
+          '## The operating loop',
+          '## Cost — a request costs what the context costs',
+          '## Human gates — never cross without an explicit, per-item go',
+          '## Safety invariants (non-negotiable)',
+          '## Tool grammar',
+          '## The skills',
+        ],
+        reason: "the refiner wears the governor's section shape",
+      );
+
+      // The seat binds ONCE, to its own disc, and hands the governor receipts
+      // on the governor's disc — never a handoff on someone else's.
+      expect(refiner.split('{{runner}} seat refiner').length - 1, 1);
+      expect(refiner, contains('.grid/seats/refiner/'));
+      expect(refiner, contains('MEMORY.md'));
+      expect(refiner, contains('`kind: handoff`'));
+      expect(
+        flowed,
+        contains('the seat launcher relaunches you primed with it'),
+      );
+      expect(
+        refiner,
+        contains('`kind: receipt` note on `.grid/seats/governor/`'),
+      );
+
+      // The mandate: what makes a filed bead APPROVABLE.
+      expect(
+        flowed,
+        contains('Make every filed bead APPROVABLE and keep the backlog TRUE'),
+      );
+      for (final marker in const [
+        '**Prior art searched**',
+        '**The premise verified against the tree**',
+        '**`validation_plan` scoped to every consumer**',
+        '**Acceptance criteria a named command can falsify**',
+        '**Dependency edges wired at intake**',
+        '**EITHER/OR forks surfaced to the human**',
+        '**Staleness reconciled**',
+      ]) {
+        expect(refiner, contains(marker), reason: '$marker is mandated');
+      }
+      expect(
+        refiner,
+        contains(
+          '{{runner}} filing --json --state-root "<grid home>" "<bead>"',
+        ),
+        reason: 'the filing verb IS the exit oracle',
+      );
+      expect(
+        refiner,
+        isNot(contains('refinerExitFindings')),
+        reason:
+            'the exit criterion is a CALL to the filing verb, never a '
+            'predicate of this seat’s own',
+      );
+
+      // The interview rule, and the same-turn encoding of every ruling.
+      expect(
+        flowed,
+        contains(
+          'Interview the human — one decision at a time, with the context '
+          'that decides it.',
+        ),
+      );
+      expect(flowed, contains('Never hand over a list of slugs'));
+      expect(flowed, contains('encode the ruling THE SAME TURN'));
+      expect(flowed, contains('decision-register entry'));
+
+      // The boundary with the governor: this seat never runs the loop.
+      expect(
+        flowed,
+        contains(
+          'no harvest, no gate-medicine, no rework, no merges, and no bounces',
+        ),
+      );
+
+      // Actor, approval, and the stamp it never removes.
+      expect(refiner, contains('--actor refiner'));
+      expect(
+        refiner,
+        contains(
+          '{{runner}} approve --actor refiner --json --state-root '
+          '"<grid home>"',
+        ),
+      );
+      expect(flowed, contains('APPROVAL STAYS HUMAN'));
+      expect(flowed, contains('explicit per-bead human ruling'));
+      expect(flowed, contains('never un-stamps'));
+      expect(
+        flowed,
+        contains('record that the refiner wrote the stamp on it'),
+        reason: 'the receipt says the human ruled THROUGH this seat',
+      );
+
+      // Multi-agent ceiling: read-only refinement subagents, no circuits.
+      expect(flowed, contains('refinement subagents that READ'));
+      expect(
+        flowed,
+        contains(
+          'You may NOT run Workflow-tool design rounds and you may NOT '
+          'convene judge panels',
+        ),
+      );
+
+      expect(
+        refiner
+            .substring(refiner.indexOf('## The skills'))
+            .split('\n')
+            .where((line) => line.startsWith('- `'))
+            .map((line) => line.split('`')[1])
+            .toList(),
+        const ['intake-refinement', 'discover', 'decide', 'handoff'],
+      );
     });
 
     test('no station_overlay file — skill OR governor agent-def — still '

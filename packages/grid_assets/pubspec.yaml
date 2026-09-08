@@ -509,6 +509,15 @@ grid:
         - target: claude
           path: extension/station_overlay/claude/agents/governor.md
 
+    - id: refiner
+      kind: agent
+      description: "The refiner seat's persona, intake mandate, and governor boundary."
+      audience: human
+      visibility: public
+      artifacts:
+        - target: claude
+          path: extension/station_overlay/claude/agents/refiner.md
+
     - id: harness
       kind: settings
       description: "The harness settings this pack contributes to an operator seat."
