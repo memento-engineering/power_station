@@ -1,3 +1,8 @@
+## 0.3.0-rc.2
+
+- Added: `StationAd.controlDoor` and `Peer.controlDoor` — the advertisement's TXT carries the StationControl door endpoint (`door=host:port`, optional, omitted when unset) so a browser can resolve the control door from the one `_grid._tcp` ad; the token stays out of the ad (pow-awgw, #255).
+- Floors `federated_grid_assets` to `^0.3.0-rc.4`, where `Peer.controlDoor` was introduced.
+
 # Changelog
 
 ## 0.3.0-rc.1

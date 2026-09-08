@@ -1,3 +1,7 @@
+## 0.3.0-rc.4
+
+- Added: `Peer.controlDoor`, an optional StationControl door endpoint carried through JSON (omitted when unset, part of equality) so a discovered peer resolves its control door without a second service type (pow-awgw, #255).
+
 # Changelog
 
 ## 0.3.0-rc.3
