@@ -233,6 +233,42 @@ grid:
         - target: mcp
           path: extension/rubrics/section-structure.md
 
+    - id: ruling-adherence
+      kind: rubric
+      description: "A DESIGN judge lens — is every ruling the bead names honoured, cited by the ruling's own entry sentence?"
+      audience: agent
+      visibility: public
+      artifacts:
+        - target: mcp
+          path: extension/rubrics/ruling-adherence.md
+
+    - id: ordering-and-rollback
+      kind: rubric
+      description: "A DESIGN judge lens — causal ordering, interlocks, restore order, breaker semantics and partial-failure rollback."
+      audience: agent
+      visibility: public
+      artifacts:
+        - target: mcp
+          path: extension/rubrics/ordering-and-rollback.md
+
+    - id: fold-fidelity-and-ops
+      kind: rubric
+      description: "A DESIGN judge lens — does every decision-bearing fact keep a carrier through the folds, and is the result operable?"
+      audience: agent
+      visibility: public
+      artifacts:
+        - target: mcp
+          path: extension/rubrics/fold-fidelity-and-ops.md
+
+    - id: cite-verification
+      kind: rubric
+      description: "A DESIGN judge lens — every cited path, line and symbol resolves at the round's base commit; an invented citation is a blocker."
+      audience: agent
+      visibility: public
+      artifacts:
+        - target: mcp
+          path: extension/rubrics/cite-verification.md
+
     # ── prompts (mirrored into the manifest's `prompts:` section) ────────────
     - id: critic
       kind: prompt

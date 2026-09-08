@@ -5,6 +5,14 @@
 /// [CodeRouteCapability] matrix. No committee machinery is added — a new review
 /// type IS a new rubric pack plus its circuit.
 ///
+/// **The DESIGN round is that sentence taken literally** (`design_committee.dart`,
+/// which EXTENDS this library rather than forking it): a fourth
+/// [ChangeShape] — admitted, like every other, by a PATH predicate
+/// ([isDesignPath] over `docs/design/**`) and by nothing else — reuses these
+/// three deterministic gates verbatim and swaps the single `spec-adherence`
+/// critic for four adversarial judge lenses plus a verifier. The classification
+/// stays ONE path vocabulary here; there is no second channel to drift.
+///
 /// **Why it exists.** A docs-only bead (acceptance "Docs only, no code") drew
 /// `test-coverage` = F ("no tests for the change") — unsatisfiable BY DESIGN on
 /// a prose diff, so the A/A/F spread tripped the human-ultimatum arm and every
@@ -80,6 +88,12 @@ const String kDocsCheckCapabilityId = 'docs-check';
 /// The docs review circuit's registry id.
 const String kDocsReviewCircuitId = 'docs_review';
 
+/// The DESIGN review circuit's registry id (`design_committee.dart` owns the
+/// circuit itself; the id lives here because [ChangeShapeCircuitResolver] is
+/// the one place a shape becomes a circuit, and this library must not import
+/// its own extension).
+const String kDesignReviewCircuitId = 'design_review';
+
 /// The root circuit's review step id — the [SubCircuitStep] whose `circuitId`
 /// [withReviewCircuitId] re-points. A LITERAL: it is a persisted cursor key.
 const String kReviewStepId = 'review';
@@ -89,6 +103,13 @@ const String kDocsSectionsKey = 'docs_sections';
 
 /// Which committee a bead's change belongs to.
 enum ChangeShape {
+  /// A DESIGN ROUND — prose under the repo-root `docs/design/` tree and
+  /// nothing else ([isDesignPath]). A strict SUBSET of [docs] with its own
+  /// committee: the three deterministic docs gates stay, the single
+  /// `spec-adherence` critic is replaced by four ADVERSARIAL judge lenses, and
+  /// a VERIFY step adjudicates their findings before the route sees one.
+  design,
+
   /// Prose only — `docs/**` and `*.md`.
   docs,
 
@@ -109,6 +130,41 @@ bool isDocsPath(String path) {
   if (normalized.isEmpty || normalized == '.') return false;
   if (normalized.toLowerCase().endsWith('.md')) return true;
   return p.posix.split(normalized).contains('docs');
+}
+
+/// The SOLE allow-listed design-round prefix — the repo-ROOT `docs/design`
+/// tree. A design round's document lives here; no other location is admitted.
+const String kDesignPathPrefix = 'docs/design';
+
+/// Whether [path] is a DESIGN-ROUND path — a repo-relative file at any depth
+/// under [kDesignPathPrefix] (the glob `docs/design/**`).
+///
+/// An ALLOW-list of exactly ONE prefix (ratified A36's rule, applied one notch
+/// narrower than [isMetadataPath]'s extension list): the classification stays a
+/// PATH predicate in this one file, so there is no second, drifting
+/// classification channel — no bead-metadata key, no configured glob. A design
+/// round declares itself by WHERE its document lives, and a reader answers
+/// "is this a design round?" by reading `## Touches`.
+///
+/// Strictly narrower than [isDocsPath] — every design path is a docs path, so
+/// [changeShapeOf] must test this arm FIRST or it would never be reached:
+///  - the directory itself (`docs/design`, `docs/design/`) is not a document;
+///  - `docs/design.md` is a docs path, not a design one (the prefix is a
+///    DIRECTORY, matched by whole segments — never by string prefix);
+///  - a nested lookalike (`packages/x/docs/design/a.md`) is refused: the tree
+///    is the repo's, not a package's;
+///  - an absolute path or one that traverses out (`../docs/design/a.md`) is
+///    refused — a cited path is repo-relative or it is not admitted.
+bool isDesignPath(String path) {
+  final normalized = p.posix.normalize(path.trim());
+  if (normalized.isEmpty || normalized == '.') return false;
+  if (p.posix.isAbsolute(normalized)) return false;
+  final segments = p.posix.split(normalized);
+  // `docs` + `design` + at least one more segment: the prefix names a
+  // directory, so the shortest admissible path is a file directly inside it.
+  if (segments.length < 3) return false;
+  if (segments[0] != 'docs' || segments[1] != 'design') return false;
+  return !segments.contains('..');
 }
 
 /// The file extensions a METADATA path may carry — prose and configuration,
@@ -196,11 +252,18 @@ List<String> citedPaths(String markdown) {
   return paths.toList()..sort();
 }
 
-/// The bead's DECLARED change shape — [ChangeShape.docs] iff its `## Touches`
-/// section cites at least one path and EVERY cited path is a docs path;
+/// The bead's DECLARED change shape — [ChangeShape.design] iff its `## Touches`
+/// section cites at least one path and EVERY cited path is a design path
+/// ([isDesignPath]); [ChangeShape.docs] iff every cited path is a docs path;
 /// [ChangeShape.metadata] iff every cited path is a METADATA path
 /// ([isMetadataPath]) but not every one is prose (a `CHANGELOG.md` beside a
 /// `pubspec.yaml` — the pow-x6k receipt).
+///
+/// The DESIGN arm is evaluated FIRST because [isDesignPath] is a strict subset
+/// of [isDocsPath] — the docs arm would otherwise swallow every design round.
+/// A MIXED set falls straight through the ladder unchanged (docs → metadata →
+/// code), so a design document beside an ordinary doc is an ordinary docs bead
+/// and a design document beside source is a code bead.
 ///
 /// Fail-to-code by construction: a bead with no `## Touches` section, one that
 /// cites nothing, or one citing a single unlisted surface gets the CODE
@@ -211,6 +274,7 @@ ChangeShape changeShapeOf(Bead bead) {
   if (touchesAt < 0) return ChangeShape.code;
   final cited = citedPaths(sectionBodyAt(bead.design, touchesAt));
   if (cited.isEmpty) return ChangeShape.code;
+  if (cited.every(isDesignPath)) return ChangeShape.design;
   if (cited.every(isDocsPath)) return ChangeShape.docs;
   if (cited.every(isMetadataPath)) return ChangeShape.metadata;
   return ChangeShape.code;
@@ -662,8 +726,11 @@ class ChangeShapeCircuitResolver implements SessionResolver {
 
   /// The root circuit for [shape] — [ChangeShape.docs] and
   /// [ChangeShape.metadata] share the docs committee (neither carries a test
-  /// to cover), and [ChangeShape.code] keeps the default.
+  /// to cover), [ChangeShape.design] roots the design committee (the docs
+  /// gates plus the adversarial judges and their verifier), and
+  /// [ChangeShape.code] keeps the default.
   Circuit circuitFor(ChangeShape shape) => switch (shape) {
+    ChangeShape.design => withReviewCircuitId(code, kDesignReviewCircuitId),
     ChangeShape.docs ||
     ChangeShape.metadata => withReviewCircuitId(code, kDocsReviewCircuitId),
     ChangeShape.code => code,

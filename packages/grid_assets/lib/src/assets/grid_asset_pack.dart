@@ -295,6 +295,88 @@ abstract final class GridAssetsPack {
     ],
   );
 
+  /// `grid_assets/rubric/ruling-adherence`.
+  static const GridAssetDefinition rubricRulingAdherence = GridAssetDefinition(
+    assetKey: AssetKey(
+      package: package,
+      kind: AssetKind.rubric,
+      id: 'ruling-adherence',
+    ),
+    description:
+        'A DESIGN judge lens — is every ruling the bead names honoured, cited by the ruling\'s own entry sentence?',
+    audience: AssetAudience.agent,
+    visibility: AssetVisibility.public,
+    selector: AlwaysApplies(),
+    artifacts: <AssetArtifact>[
+      AssetArtifact(
+        target: AssetDeliveryTarget.mcp,
+        path: 'extension/rubrics/ruling-adherence.md',
+      ),
+    ],
+  );
+
+  /// `grid_assets/rubric/ordering-and-rollback`.
+  static const GridAssetDefinition
+  rubricOrderingAndRollback = GridAssetDefinition(
+    assetKey: AssetKey(
+      package: package,
+      kind: AssetKind.rubric,
+      id: 'ordering-and-rollback',
+    ),
+    description:
+        'A DESIGN judge lens — causal ordering, interlocks, restore order, breaker semantics and partial-failure rollback.',
+    audience: AssetAudience.agent,
+    visibility: AssetVisibility.public,
+    selector: AlwaysApplies(),
+    artifacts: <AssetArtifact>[
+      AssetArtifact(
+        target: AssetDeliveryTarget.mcp,
+        path: 'extension/rubrics/ordering-and-rollback.md',
+      ),
+    ],
+  );
+
+  /// `grid_assets/rubric/fold-fidelity-and-ops`.
+  static const GridAssetDefinition
+  rubricFoldFidelityAndOps = GridAssetDefinition(
+    assetKey: AssetKey(
+      package: package,
+      kind: AssetKind.rubric,
+      id: 'fold-fidelity-and-ops',
+    ),
+    description:
+        'A DESIGN judge lens — does every decision-bearing fact keep a carrier through the folds, and is the result operable?',
+    audience: AssetAudience.agent,
+    visibility: AssetVisibility.public,
+    selector: AlwaysApplies(),
+    artifacts: <AssetArtifact>[
+      AssetArtifact(
+        target: AssetDeliveryTarget.mcp,
+        path: 'extension/rubrics/fold-fidelity-and-ops.md',
+      ),
+    ],
+  );
+
+  /// `grid_assets/rubric/cite-verification`.
+  static const GridAssetDefinition rubricCiteVerification = GridAssetDefinition(
+    assetKey: AssetKey(
+      package: package,
+      kind: AssetKind.rubric,
+      id: 'cite-verification',
+    ),
+    description:
+        'A DESIGN judge lens — every cited path, line and symbol resolves at the round\'s base commit; an invented citation is a blocker.',
+    audience: AssetAudience.agent,
+    visibility: AssetVisibility.public,
+    selector: AlwaysApplies(),
+    artifacts: <AssetArtifact>[
+      AssetArtifact(
+        target: AssetDeliveryTarget.mcp,
+        path: 'extension/rubrics/cite-verification.md',
+      ),
+    ],
+  );
+
   /// `grid_assets/prompt/critic`.
   static const GridAssetDefinition promptCritic = GridAssetDefinition(
     assetKey: AssetKey(package: package, kind: AssetKind.prompt, id: 'critic'),
@@ -799,6 +881,10 @@ abstract final class GridAssetsPack {
     rubricCitationPathsResolve,
     rubricTerminologyBan,
     rubricSectionStructure,
+    rubricRulingAdherence,
+    rubricOrderingAndRollback,
+    rubricFoldFidelityAndOps,
+    rubricCiteVerification,
     promptCritic,
     promptSpecCritic,
     promptReadiness,

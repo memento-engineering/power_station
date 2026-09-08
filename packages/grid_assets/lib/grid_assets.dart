@@ -199,6 +199,7 @@ export 'src/code/committee_selection_evidence.dart';
 export 'src/code/conventional_commit.dart';
 export 'src/code/decision_register.dart';
 export 'src/code/delivery.dart';
+export 'src/code/design_committee.dart';
 export 'src/code/describe_manifest.dart';
 export 'src/code/discovery.dart';
 export 'src/code/docs_committee.dart';

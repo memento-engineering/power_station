@@ -1,7 +1,10 @@
-// The DOCS-CHANGE rubric pack — the third pack in the loader.
+// The DOCS-CHANGE rubric pack — the third pack in the loader — and the DESIGN
+// judge pack that extends it.
 //
 // Proves: the three docs rubrics load through the SAME RubricSource, each names
-// itself and its hard-block contract; the manifest declares all three; the
+// itself and its hard-block contract; the four DESIGN judge rubrics load the
+// same way, each teaching the shared finding grammar, the severity vocabulary
+// and its OWN distinct lens; the manifest declares all seven; the
 // ported-prose residue fence holds here too (the sibling fence in
 // `test/spec_rubric_pack_test.dart` guards the spec pack); and — the
 // self-consistency check — the `terminology-ban` lane grades the pack's OWN
@@ -75,19 +78,95 @@ void main() {
     });
   });
 
+  group('the DESIGN judges load through that SAME RubricSource', () {
+    for (final rubricId in kDesignJudgeRubrics) {
+      test('loadRubric("$rubricId") teaches the shared finding contract', () {
+        final text = loader.loadRubric(rubricId);
+        expect(text, isNotEmpty);
+        expect(text, contains(rubricId));
+        expect(text, contains('DESIGN JUDGE'));
+        // Adversarial by instruction, not by hope.
+        expect(text, contains('REFUTE'));
+        // The exact line grammar `parseDesignFindings` enforces.
+        expect(
+          text,
+          contains(
+            '- [BLOCKER|MAJOR|MINOR] <finding-id> — <claim>; receipt: '
+            '<path:line or quoted ruling entry sentence>',
+          ),
+        );
+        for (final severity in kDesignSeverities) {
+          expect(text, contains('**$severity**'));
+        }
+        expect(text, contains('UNIQUE within this'));
+        expect(text, contains('receipt'));
+        // The severity → letter map the lane is HELD to.
+        expect(text, contains('worst finding is MINOR'));
+        expect(text, contains('worst finding is MAJOR'));
+        expect(text, contains('worst finding is BLOCKER'));
+        expect(text, contains('no finding. Your rationale is EMPTY'));
+      });
+    }
+
+    test('each judge names its OWN lens and disclaims the other three', () {
+      const lenses = {
+        'ruling-adherence': ['ruling', 'entry sentence'],
+        'ordering-and-rollback': [
+          'Causal ordering',
+          'Interlocks',
+          'Restore order',
+          'Breaker semantics',
+          'rollback',
+        ],
+        'fold-fidelity-and-ops': [
+          'carrier',
+          'Migration',
+          'Rollout',
+          'Observation',
+          'Operator recovery',
+        ],
+        'cite-verification': [
+          'BASE COMMIT',
+          'branch-only',
+          'current tree',
+          'invented citation',
+        ],
+      };
+      expect(lenses.keys, kDesignJudgeRubrics);
+      lenses.forEach((rubricId, terms) {
+        final text = loader.loadRubric(rubricId);
+        for (final term in terms) {
+          expect(text, contains(term), reason: '$rubricId lost "$term"');
+        }
+        expect(
+          text,
+          contains('blind to the other lanes'),
+          reason: '$rubricId must weigh ONE lens (anti-anchoring)',
+        );
+      });
+    });
+
+    test('the committee is the docs gates plus exactly those judges', () {
+      expect(kDesignCommitteeRubrics, [
+        ...kDocsGatingRubrics,
+        ...kDesignJudgeRubrics,
+      ]);
+    });
+  });
+
   group('extension/mcp/config.yaml declares the docs pack', () {
-    test('all three docs rubrics ride as resources', () {
+    test('all three docs rubrics and all four judges ride as resources', () {
       final manifest = File(
         p.join(root, 'mcp', 'config.yaml'),
       ).readAsStringSync();
-      for (final rubricId in kDocsGatingRubrics) {
+      for (final rubricId in kDesignCommitteeRubrics) {
         expect(manifest, contains('rubrics/$rubricId.md'));
       }
     });
   });
 
   group('the grep-clean fence — no foreign source-context references', () {
-    for (final rubricId in kDocsGatingRubrics) {
+    for (final rubricId in kDesignCommitteeRubrics) {
       test('rubrics/$rubricId.md is clean', () {
         final text = loader.loadRubric(rubricId);
         for (final residue in _forbiddenResidue.entries) {
@@ -108,7 +187,7 @@ void main() {
     test('every shipped rubric states the ban without tripping it', () {
       final addedLines = <String, List<String>>{
         for (final rubricId in [
-          ...kDocsGatingRubrics,
+          ...kDesignCommitteeRubrics,
           'decision-alignment',
           'coherence',
         ])

@@ -49,6 +49,7 @@ import 'committee_selection.dart';
 import 'committee_selection_evidence.dart';
 import 'conventional_commit.dart';
 import 'delivery.dart';
+import 'design_committee.dart';
 import 'discovery.dart';
 import 'docs_committee.dart';
 import 'fix_in_flight.dart';
@@ -1327,6 +1328,10 @@ DefaultCapabilityRegistry buildCodeRegistry({
       committeeSelectionStore ?? const FileCommitteeSelectionStore();
   final selectionInference =
       committeeClassifier ?? const SystemInferenceRunner();
+  // The registry's ONE one-shot inference seam: the landing describe pass and
+  // the design verifier resolve to the SAME instance, so a suite that injects
+  // a fake cannot silence one and leave the other reaching for a real `claude`.
+  final oneShotInference = inference ?? const SystemInferenceRunner();
   Future<({bool ok, String output})> classify(RuntimeConfig config) async {
     final run = await selectionInference.run(config);
     return (ok: run.ok, output: run.output);
@@ -1439,7 +1444,7 @@ DefaultCapabilityRegistry buildCodeRegistry({
       // DeliveryMethod (M5 D-4a).
       kDeliverStep: DeliverRouteCapability(
         gitRunner: gitRunner,
-        inference: inference ?? const SystemInferenceRunner(),
+        inference: oneShotInference,
       ),
       'critic': CriticCapability(rubrics: rubricSource),
       // The declared-tests gate reads the PINNED BASE's file list to tell a
@@ -1452,6 +1457,12 @@ DefaultCapabilityRegistry buildCodeRegistry({
       // source: the checks are mechanical, so the prose in `extension/rubrics/`
       // documents the contract rather than feeding a model.
       kDocsCheckCapabilityId: const DocsCheckCapability(),
+      // The DESIGN committee's one new capability (`design_committee.dart`) —
+      // the verifier that adjudicates the four adversarial judges before the
+      // route sees a letter. It shares the registry's ONE one-shot inference
+      // seam with the describe pass, so an offline suite that injects a fake
+      // silences both.
+      kDesignVerifyStep: DesignVerifyCapability(inference: oneShotInference),
       // The CODE/DOCS route, WRAPPED in the same shadow bookkeeping.
       'route': CommitteeShadowRouteCapability(
         delegate: const CodeRouteCapability(),
@@ -1492,6 +1503,7 @@ DefaultCapabilityRegistry buildCodeRegistry({
       kDiscoveryCircuitId: kDiscoveryCircuit,
       'code_review': kCodeReviewCircuit,
       kDocsReviewCircuitId: kDocsReviewCircuit,
+      kDesignReviewCircuitId: kDesignReviewCircuit,
       'landing': kLandingCircuit,
       // The FROZEN old-shape spec circuits (bead `pow-3p4`, extended by
       // `pow-q7n`): `spec_review_v1` (pre-fold) is reachable ONLY from
