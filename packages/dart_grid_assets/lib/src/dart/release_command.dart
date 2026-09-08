@@ -36,6 +36,7 @@ class ReleaseCommand extends Command<int> {
     addSubcommand(ReleaseOrderCommand(service: service, out: o, err: e));
     addSubcommand(ReleaseDryRunCommand(service: service, out: o, err: e));
     addSubcommand(ReleasePollCommand(service: service, out: o));
+    addSubcommand(ReleasePublishCommand(service: service, out: o, err: e));
   }
 
   @override
@@ -45,7 +46,19 @@ class ReleaseCommand extends Command<int> {
   final String description =
       'Deterministic Dart-package release ops (the machine substrate under the '
       'operator `release` skill): version plan, scrub gate, publish order, '
-      'dry-run, and pub.dev poll — each a structured JSON result.';
+      'dry-run, pub.dev poll, and the one-command workspace wave — each a '
+      'structured JSON result.';
+}
+
+/// Decodes the shared `{consumers: [{name, directory, links}]}` manifest both
+/// consumer-validating ops take. A malformed file throws — the caller renders
+/// it as a usage error.
+List<ReleaseConsumer> _consumersFromManifest(File file) {
+  final decoded = jsonDecode(file.readAsStringSync()) as Map<String, dynamic>;
+  return [
+    for (final entry in decoded['consumers'] as List)
+      ReleaseConsumer.fromJson((entry as Map).cast<String, Object?>()),
+  ];
 }
 
 /// `dart release plan` — compute the next version + git tag for a change class.
@@ -217,12 +230,7 @@ class ReleaseValidateConsumersCommand extends Command<int> {
     }
     final List<ReleaseConsumer> consumers;
     try {
-      final decoded =
-          jsonDecode(file.readAsStringSync()) as Map<String, dynamic>;
-      consumers = [
-        for (final entry in decoded['consumers'] as List)
-          ReleaseConsumer.fromJson((entry as Map).cast<String, Object?>()),
-      ];
+      consumers = _consumersFromManifest(file);
     } on Object catch (e) {
       _err.writeln('release validate-consumers: invalid manifest: $e');
       return 64;
@@ -570,5 +578,141 @@ class ReleasePollCommand extends Command<int> {
       );
     }
     return 0;
+  }
+}
+
+/// `dart release publish` — the ONE-COMMAND workspace wave: compute the
+/// changed-package set against pub.dev, run every gate, validate the consumers
+/// a direct stable wave owes, then cut and push one tag per package in
+/// dependency order, waiting for each to propagate (the tag push IS the
+/// publish — tag-triggered trusted publishing does the upload).
+class ReleasePublishCommand extends Command<int> {
+  /// Creates the op over [service], rendering to [out]/[err].
+  ReleasePublishCommand({
+    required ReleaseService service,
+    required StringSink out,
+    required StringSink err,
+  }) : _service = service,
+       _out = out,
+       _err = err {
+    argParser
+      ..addOption(
+        'workspace',
+        mandatory: true,
+        help: 'The pub workspace root to release from.',
+      )
+      ..addOption(
+        'change',
+        mandatory: true,
+        allowed: ['docs', 'additive', 'fix', 'breaking', 'rc'],
+        help:
+            'The wave\'s change class. docs/additive/fix tag directly but are '
+            'still consumer-validated; rc cuts candidates only; breaking is '
+            'refused (it goes rc-first, then promote).',
+      )
+      ..addOption(
+        'consumers',
+        help:
+            'JSON manifest containing a consumers list — REQUIRED for a '
+            'docs/additive/fix wave, unused by rc.',
+      )
+      ..addFlag(
+        'dry-run',
+        negatable: false,
+        help: 'Run every gate and stop: no tag, no push, no poll.',
+      )
+      ..addFlag(
+        'json',
+        negatable: false,
+        help: 'Emit the structured result as one JSON object.',
+      );
+  }
+
+  final ReleaseService _service;
+  final StringSink _out;
+  final StringSink _err;
+
+  @override
+  final String name = 'publish';
+  @override
+  final String description =
+      'Release a whole pub workspace in one wave: changed set, gates, consumer '
+      'validation, then dependency-ordered tag pushes with propagation polls.';
+
+  @override
+  Future<int> run() async {
+    final args = argResults!;
+    final change = ReleaseChange.parse(args.option('change'));
+    if (change == null) {
+      _err.writeln('release publish: unknown --change');
+      return 64;
+    }
+    final manifestPath = args.option('consumers');
+    var consumers = const <ReleaseConsumer>[];
+    if (manifestPath == null) {
+      if (!change.isBreaking) {
+        _err.writeln(
+          'release publish: --consumers <manifest.json> is required for a '
+          '${change.name} wave (it tags directly, so it is validated first).',
+        );
+        return 64;
+      }
+    } else {
+      final file = File(manifestPath);
+      if (!file.existsSync()) {
+        _err.writeln('release publish: no such manifest: ${file.path}');
+        return 64;
+      }
+      try {
+        consumers = _consumersFromManifest(file);
+      } on Object catch (e) {
+        _err.writeln('release publish: invalid manifest: $e');
+        return 64;
+      }
+    }
+    final json = args.flag('json');
+    try {
+      final plan = await _service.publishWorkspace(
+        workspaceRoot: args.option('workspace')!,
+        change: change,
+        consumers: consumers,
+        dryRunOnly: args.flag('dry-run'),
+      );
+      if (json) {
+        _out.writeln(jsonEncode(plan.toJson()));
+      } else if (plan.packages.isEmpty) {
+        _out.writeln('nothing to release: every authored version is published');
+      } else {
+        _out.writeln(
+          plan.dryRun
+              ? 'dry-run: ${plan.packages.length} package(s) would publish'
+              : 'released ${plan.packages.length} package(s)',
+        );
+        for (final package in plan.packages) {
+          _out.writeln(
+            '  ${package.tag}  '
+            '(${package.publishedPredecessor ?? 'first release'} -> '
+            '${package.localVersion})',
+          );
+        }
+      }
+      return 0;
+    } on ReleaseWaveFailure catch (failure) {
+      if (json) {
+        _out.writeln(jsonEncode(failure.toJson()));
+      } else {
+        _err.writeln('release publish: $failure');
+      }
+      return 1;
+    } on FileSystemException catch (error) {
+      _err.writeln('release publish: ${error.message}: ${error.path}');
+      return 64;
+    } on FormatException catch (error) {
+      _err.writeln('release publish: ${error.message}');
+      return 64;
+    } on ArgumentError catch (error) {
+      _err.writeln('release publish: ${error.message}');
+      return 64;
+    }
   }
 }

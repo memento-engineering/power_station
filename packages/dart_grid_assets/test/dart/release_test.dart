@@ -705,6 +705,8 @@ void main() {
         ).poll(package: 'beads_dart', version: '0.2.0-rc.1');
         expect(result.isPublished, isTrue);
         expect(result.latest, '0.1.1');
+        expect(result.statusCode, 200);
+        expect(result.versions, ['0.1.0', '0.1.1', '0.2.0-rc.1']);
         expect(
           fake.requested.toString(),
           'https://pub.dev/api/packages/beads_dart',
@@ -743,6 +745,7 @@ void main() {
         ).poll(package: 'genesis_tree', version: wanted);
         expect(result.isPublished, isFalse, reason: wanted);
         expect(result.latest, '0.1.5', reason: wanted);
+        expect(result.versions, ['0.1.4', '0.1.5'], reason: wanted);
       }
     });
 
@@ -757,30 +760,30 @@ void main() {
         ).poll(package: 'nope', version: '0.1.0');
         expect(result.latest, isNull);
         expect(result.isPublished, isFalse);
+        expect(result.statusCode, 404);
+        expect(result.versions, isEmpty);
       },
     );
   });
 
   group('DartCommand / dart release — the THIN exported Command', () {
-    test(
-      'release is a subcommand of the dart umbrella, with the eight ops',
-      () {
-        final release = DartCommand().subcommands['release']!;
-        expect(
-          release.subcommands.keys,
-          containsAll([
-            'plan',
-            'tag',
-            'validate-consumers',
-            'promote',
-            'scrub',
-            'order',
-            'dry-run',
-            'poll',
-          ]),
-        );
-      },
-    );
+    test('release is a subcommand of the dart umbrella, with the nine ops', () {
+      final release = DartCommand().subcommands['release']!;
+      expect(
+        release.subcommands.keys,
+        containsAll([
+          'plan',
+          'tag',
+          'validate-consumers',
+          'promote',
+          'scrub',
+          'order',
+          'dry-run',
+          'poll',
+          'publish',
+        ]),
+      );
+    });
 
     test('release plan --json emits the version plan + tag', () async {
       final buf = StringBuffer();
@@ -1036,6 +1039,8 @@ void main() {
       expect(json, {
         'package': 'genesis_tree',
         'wanted': '0.1.5',
+        'statusCode': 200,
+        'versions': ['0.1.5'],
         'latest': '0.1.5',
         'isPublished': true,
       });
