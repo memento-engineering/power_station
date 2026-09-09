@@ -1,3 +1,7 @@
+## 0.6.0-rc.23
+
+- Fixed: a decision-surface record is TRUNCATED only when its entry SET was clipped at `kMaxDecisionEntriesPerSurface` or a named entry failed to resolve; a decision doc over `kMaxDiscoverySnippetChars` keeps its own truncated state on the entry body and no longer fails the whole surface. With rc.22's register-wide resolution, 49 of 125 the_grid and 48 of 87 power_station decision docs are over the bound, so every spec round on those registers held at discovery with no narrow exit (lunar epoch 60: tg-nidl r3) (pow-jidn, #270).
+
 ## 0.6.0-rc.22
 
 - Fixed: explicit decision citations resolve REGISTER-WIDE, never per surface. On rc.21 a real accepted decision cited from a surface that does not declare it read as `absent` and failed the surface, so every bead citing a sibling-surface decision held at discovery with no exit (lunar epoch 56: tg-nidl, lenny-dgp); a record indexed elsewhere in the gathered register now resolves and is annotated `namedElsewhere` (pow-9xkj, #263).
