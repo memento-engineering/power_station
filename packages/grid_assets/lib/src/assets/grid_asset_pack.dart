@@ -635,10 +635,11 @@ abstract final class GridAssetsPack {
   static const GridAssetDefinition skillHandoff = GridAssetDefinition(
     assetKey: AssetKey(package: package, kind: AssetKind.skill, id: 'handoff'),
     description:
-        'Write the seat\'s own handoff onto its Agent Disc, bank the durable learnings as separate disc notes, index it, and end the turn with the one line that tells the OUTER harness to compact, clear, or relaunch. Also the successor\'s read: consume the newest handoff and delete it.',
+        'Write the seat\'s own handoff onto its Agent Disc, bank the durable learnings as separate disc notes, index it, and end the turn with the one line that tells the OUTER harness to compact, clear, or relaunch. Also the successor\'s read: consume the newest handoff through the succession verb',
     audience: AssetAudience.human,
     visibility: AssetVisibility.public,
     selector: AlwaysApplies(),
+    teaches: <String>['succession'],
     artifacts: <AssetArtifact>[
       AssetArtifact(
         target: AssetDeliveryTarget.claude,
@@ -647,7 +648,7 @@ abstract final class GridAssetsPack {
           AssetArgument(
             name: 'runner',
             description:
-                'The composing station\'s executable name — the verb the skill\'s `status` read rides.',
+                'The composing station\'s executable name — the verbs the skill\'s status and succession calls ride.',
             isRequired: true,
           ),
         ],
@@ -659,7 +660,7 @@ abstract final class GridAssetsPack {
           AssetArgument(
             name: 'runner',
             description:
-                'The composing station\'s executable name — the verb the skill\'s `status` read rides.',
+                'The composing station\'s executable name — the verbs the skill\'s status and succession calls ride.',
             isRequired: true,
           ),
         ],

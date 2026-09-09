@@ -78,10 +78,15 @@ String extractBdAdditionalContext(String stdout) {
   return '';
 }
 
-/// The ONE line that precedes an injected handoff body. PURE.
+/// The ONE line that precedes an injected handoff body.
+///
+/// It names the SUCCESSION VERB rather than a hand-performed delete: the
+/// destruction is licensed by "the disc is tracked, so git history is the
+/// archive", and only that verb archives the disc and proves the note reached
+/// `HEAD` before removing it. PURE.
 String handoffNamingLine(SeatHandoff handoff) =>
-    'Handoff ${handoff.relativePath} — act on Resume here, then delete this '
-    'file and its MEMORY.md line in this turn.';
+    'Handoff ${handoff.relativePath} — act on Resume here, then run the '
+    'succession verb in this turn.';
 
 /// The `additionalContext` this verb emits: [bdContext] VERBATIM, plus — only
 /// when [handoff] is non-null — [handoffNamingLine] and the handoff BODY. PURE.

@@ -452,7 +452,7 @@ void main() {
       );
     });
 
-    test('the real pack carries exactly the four baseline teaches claims', () {
+    test('the real pack carries exactly the five baseline teaches claims', () {
       expect(
         <String, List<String>>{
           for (final asset in GridAssetsPack.assets)
@@ -461,6 +461,7 @@ void main() {
         {
           'asset-author': ['assets'],
           'discover': ['search'],
+          'handoff': ['succession'],
           'intake-refinement': ['filing', 'approve', 'link'],
           'station-operations': ['up', 'down', 'status'],
         },

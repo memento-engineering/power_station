@@ -9,8 +9,11 @@
 //     `{{runner}}` hole renders like every other skill's;
 //   - the body carries SETTLE / WRITE (the ten sections, in order) / BANK /
 //     INDEX / SIGNAL (three cases, and the inner agent cannot restart itself) /
-//     RESUME (delete-on-consume), citing the disc shape from
+//     RESUME, citing the disc shape from
 //     `the_grid#agent-disc-file-shape-and-home` and inventing no other;
+//   - RESUME consumes through the `succession` VERB — both invocations, the
+//     safe preview and the refusal, and none of the four retired hand-delete
+//     phrases;
 //   - the two legs are INDEPENDENT instruction sources (a harness-specific
 //     instruction on each, per
 //     `power_station#a-harness-may-carry-its-own-instructions`);
@@ -221,20 +224,46 @@ void main() {
         expect(body, contains('no archive directory'));
         expect(body, contains('`PreCompact` guard'));
       });
-
-      test('$leg: the successor DELETES the handoff and its index line in the '
-          'same turn', () {
-        final body = legBody(leg);
-        expect(body, contains('handoff-*.md | sort | tail -1'));
-        expect(body, contains('DELETE the file AND its `MEMORY.md` pointer'));
-        expect(body, contains('git history is the archive'));
-        expect(
-          body,
-          contains('deleted UNREAD'),
-          reason: '$leg: a superseded handoff is never acted on',
-        );
-      });
     }
+  });
+
+  group('the successor consumes through the VERB, never by hand', () {
+    test('the successor runs succession instead of deleting by hand', () {
+      // The defect this closes: the delete-on-read rule was justified by "the
+      // disc is tracked, so git history is the archive", and nothing enforced
+      // the tracked half — an untracked disc destroyed its handoff into
+      // nothing. Both legs now hand that to the verb, which archives first.
+      for (final leg in _legs) {
+        final rendered = legBody(leg).replaceAll('{{runner}}', 'space');
+        expect(
+          rendered,
+          contains(
+            'space succession <seat> --grid-home "<grid home>" '
+            '--no-destructive',
+          ),
+          reason: '$leg: step 1 previews without destroying',
+        );
+        expect(
+          rendered,
+          contains('space succession <seat> --grid-home "<grid home>"\n'),
+          reason: '$leg: step 3 consumes in the same turn',
+        );
+        expect(rendered, contains('WOULD DELETE'));
+        expect(rendered, contains('REFUSED'));
+        for (final retired in const [
+          'handoff-*.md | sort | tail -1',
+          'DELETE the file AND its `MEMORY.md` pointer',
+          'git history is the archive',
+          'deleted UNREAD',
+        ]) {
+          expect(
+            rendered,
+            isNot(contains(retired)),
+            reason: '$leg: the hand-performed ritual is RETIRED — "$retired"',
+          );
+        }
+      }
+    });
   });
 
   group('the two legs are INDEPENDENT instruction sources', () {
