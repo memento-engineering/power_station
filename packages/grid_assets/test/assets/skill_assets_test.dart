@@ -394,7 +394,7 @@ void main() {
         contains('A pre-built instance never passes through `create:`'),
       );
       expect(manual, contains('The nearest provider wins'));
-      expect(manual, contains('per-seat override'));
+      expect(manual, contains('per-substation override'));
       expect(manual, contains('`GridDelegate.boot` is transitional'));
       expect(manual, contains('never entitled to `GitServices`'));
     });
