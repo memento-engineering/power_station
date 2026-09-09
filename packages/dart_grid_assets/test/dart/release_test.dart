@@ -1392,11 +1392,13 @@ void main() {
   });
 
   group('DartCommand / dart release — the THIN exported Command', () {
-    test('release is a subcommand of the dart umbrella, with the ten ops', () {
+    test('release is a subcommand of the dart umbrella, with the eleven '
+        'ops', () {
       final release = DartCommand().subcommands['release']!;
       expect(
         release.subcommands.keys,
         containsAll([
+          'discover',
           'plan',
           'tag',
           'validate-consumers',

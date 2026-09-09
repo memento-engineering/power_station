@@ -49,6 +49,43 @@ String _extensionDir() {
   );
 }
 
+/// The two INDEPENDENT instruction legs of the station overlay. A harness may
+/// carry its own instructions, so identical content between them is permitted
+/// and is the common case — but it is never required, and nothing here
+/// compares one leg's bytes to the other's. Each leg is asserted on its own.
+const List<String> _skillLegs = ['claude', 'agents'];
+
+/// Renders one LEG's SKILL.md for [skillId], binding every `{{key}}` from
+/// [args]. [PackagedAssetLoader.renderSkill] only reaches the claude leg, so
+/// the agents leg gets the same substitution here — including the same LOUD
+/// refusal when a hole survives, because an installed skill has no unbound
+/// hole on either leg.
+String _renderLeg(
+  String root,
+  String leg,
+  String skillId,
+  Map<String, String> args,
+) {
+  final file = File(
+    p.join(root, 'station_overlay', leg, 'skills', skillId, 'SKILL.md'),
+  );
+  expect(
+    file.existsSync(),
+    isTrue,
+    reason: 'the $leg leg vends $skillId at ${file.path}',
+  );
+  var rendered = file.readAsStringSync();
+  for (final entry in args.entries) {
+    rendered = rendered.replaceAll('{{${entry.key}}}', entry.value);
+  }
+  expect(
+    rendered,
+    isNot(contains('{{')),
+    reason: 'the $leg leg of $skillId renders with no unbound hole',
+  );
+  return rendered;
+}
+
 void main() {
   final root = _extensionDir();
   final loader = PackagedAssetLoader(root: root);
@@ -492,6 +529,212 @@ void main() {
           '   means the candidate does not compile against the minimums its own',
         ),
       );
+    });
+
+    test('EACH release leg prescribes melos for discovery, ordering and '
+        'version authoring, and states both of its limits', () {
+      for (final leg in _skillLegs) {
+        final rendered = _renderLeg(root, leg, 'release', {'runner': 'space'});
+        String why(String what) => 'the $leg release leg $what';
+
+        // The vended ops over melos.
+        expect(
+          rendered,
+          contains(
+            'space dart release discover --workspace <workspace-dir> '
+            '--diff <ref> --json',
+          ),
+          reason: why('calls the discovery op'),
+        );
+        expect(
+          rendered,
+          contains('`{workspaceRoot, diff, candidates, changed}`'),
+          reason: why('names the discovery result shape'),
+        );
+        expect(
+          rendered,
+          contains(
+            'space dart release order --workspace <workspace-dir> --json',
+          ),
+          reason: why('orders from the workspace'),
+        );
+        expect(
+          rendered,
+          contains('remains as the\n  compatibility input'),
+          reason: why('keeps --manifest as the compatibility input only'),
+        );
+
+        // The raw melos queries that replace the hand method.
+        expect(
+          rendered,
+          contains('dart run melos list\n  --no-published --json'),
+          reason: why('asks melos which versions are unpublished'),
+        );
+        expect(
+          rendered,
+          contains('NOT a pub.dev curl per package'),
+          reason: why('retires the per-package curl'),
+        );
+        expect(
+          rendered,
+          contains('`dart run melos list --diff=<ref> --json`'),
+          reason: why('asks melos what changed'),
+        );
+        expect(
+          rendered,
+          contains('NOT a `git log <ref>..HEAD -- packages/<pkg>` per package'),
+          reason: why('retires the per-package git log'),
+        );
+        expect(
+          rendered,
+          contains('`dart run melos list --depends-on=<package> --json`'),
+          reason: why('reads the rc closure from melos'),
+        );
+        expect(
+          rendered,
+          contains(
+            'Each workspace\'s existing\nscripts-only `melos:` block stands',
+          ),
+          reason: why('adds no melos command configuration'),
+        );
+
+        // Version + CHANGELOG + dependent constraints are melos's job now.
+        expect(
+          rendered,
+          contains('`dart run\n   melos version --no-git-commit-version`'),
+          reason: why('authors versions with melos'),
+        );
+        expect(
+          rendered,
+          contains(
+            '`--changelog`,\n   `--dependent-constraints` and '
+            '`--dependent-versions` defaults all stay ON',
+          ),
+          reason: why('keeps melos\'s changelog + dependent updates on'),
+        );
+        expect(
+          rendered,
+          contains(
+            '`--no-git-commit-version` disables melos\'s default\n   commit '
+            'and, by implication, its default tagging',
+          ),
+          reason: why('disables melos\'s commit and tags'),
+        );
+
+        // LIMIT 1 — commit-message honesty, and the classification it forces.
+        expect(
+          rendered,
+          contains(
+            '**`melos version` reads COMMIT MESSAGES, so it inherits their '
+            'honesty.**',
+          ),
+          reason: why('states the commit-message limit'),
+        );
+        expect(
+          rendered,
+          contains(
+            'lenny#96 was a breaking change\n   that carried no `!` and no '
+            '`BREAKING CHANGE:` footer, so `melos version`\n   would have cut '
+            'a PATCH',
+          ),
+          reason: why('names the measured case the limit came from'),
+        );
+        expect(
+          rendered,
+          contains('Adopting melos is\n   NOT a substitute for classification'),
+          reason: why('refuses melos as a classifier'),
+        );
+        expect(
+          rendered,
+          contains(
+            'space dart release classify --dir <package-dir> --package <name>\n'
+            '   --json',
+          ),
+          reason: why('requires the shipped classify op after versioning'),
+        );
+
+        // LIMIT 2 — publish order is a RUNTIME statement.
+        expect(
+          rendered,
+          contains(
+            '**Publish order is computed on RUNTIME dependencies only.**',
+          ),
+          reason: why('states the runtime-only ordering limit'),
+        );
+        expect(
+          rendered,
+          contains(
+            '`leonard_agent`,\n   `leonard_flutter` and `leonard_flutter_test` '
+            'form a DEV-dependency cycle',
+          ),
+          reason: why('names the dev cycle the limit came from'),
+        );
+        expect(
+          rendered,
+          contains(
+            'filters every edge against the package\'s top-level\n   '
+            '`dependencies:` before ordering',
+          ),
+          reason: why('states where the dev edges are dropped'),
+        );
+        expect(
+          rendered,
+          contains('A dev cycle is not a publish cycle'),
+          reason: why('separates a dev cycle from a publish cycle'),
+        );
+      }
+    });
+
+    test('EACH release leg keeps melos uploads RETIRED and tag-triggered '
+        'trusted publishing as the upload path', () {
+      for (final leg in _skillLegs) {
+        final rendered = _renderLeg(root, leg, 'release', {'runner': 'space'});
+        String why(String what) => 'the $leg release leg $what';
+
+        expect(
+          rendered,
+          contains(
+            '(`melos publish` compares against\n'
+            '   latest stable and is retired for uploads)',
+          ),
+          reason: why('keeps the prerelease reason melos publish is retired'),
+        );
+        expect(
+          rendered,
+          contains('`melos publish` remains retired for uploads'),
+          reason: why('keeps melos publish retired'),
+        );
+        expect(
+          rendered,
+          isNot(contains('melos publish --')),
+          reason: why('never invokes melos publish'),
+        );
+        expect(
+          rendered,
+          contains(
+            '## Publishing — push the tag; CI publishes (trusted publishing)',
+          ),
+          reason: why('keeps trusted publishing as the upload path'),
+        );
+        expect(
+          rendered,
+          contains('**Local `dart pub publish` is RETIRED.**'),
+          reason: why('keeps hand-publishing retired'),
+        );
+        expect(
+          rendered,
+          contains('**ONE TAG PER PUSH.**'),
+          reason: why('keeps the one-tag-per-push rule'),
+        );
+        expect(
+          rendered,
+          contains(
+            'trusted publishing must still\n   start from one per-package tag '
+            'push YOU control',
+          ),
+          reason: why('ties melos version back to the tag-push upload path'),
+        );
+      }
     });
 
     test(

@@ -464,6 +464,51 @@ class ScrubResult {
   };
 }
 
+/// The read-only WORKSPACE DISCOVERY answer — "what does this workspace need
+/// to release" — read off melos, which already knows it, instead of a
+/// per-package pub.dev curl plus a per-package
+/// `git log <ref>..HEAD -- packages/<pkg>` sweep.
+///
+/// [candidates] and [changed] answer DIFFERENT questions and are not
+/// interchangeable: a package can be unpublished without having changed since
+/// a ref (a version authored days ago and never tagged), and can have changed
+/// without being a candidate (an edit nobody bumped yet). Neither replaces the
+/// authoritative pub.dev predecessor check
+/// [ReleaseService.publishWorkspace] runs — this is the operator's PREFLIGHT,
+/// not the pre-publish gate.
+class ReleaseDiscovery {
+  /// Wraps the discovery over [workspaceRoot] against [diff], with its sorted
+  /// [candidates] and [changed] package names.
+  const ReleaseDiscovery({
+    required this.workspaceRoot,
+    required this.diff,
+    required this.candidates,
+    required this.changed,
+  });
+
+  /// The normalized absolute pub workspace root both queries ran in.
+  final String workspaceRoot;
+
+  /// The git ref the change query compared HEAD against.
+  final String diff;
+
+  /// The publishable members whose AUTHORED version is not on pub.dev, sorted
+  /// (`melos list --no-published`).
+  final List<String> candidates;
+
+  /// The publishable members that changed since [diff], sorted
+  /// (`melos list --diff=<ref>`).
+  final List<String> changed;
+
+  /// JSON form.
+  Map<String, dynamic> toJson() => {
+    'workspaceRoot': workspaceRoot,
+    'diff': diff,
+    'candidates': candidates,
+    'changed': changed,
+  };
+}
+
 /// The dependency-order publish sequence — the result of
 /// [ReleaseService.publishOrder].
 class PublishOrder {
@@ -1367,6 +1412,176 @@ class ReleaseService {
       );
     }
     return PublishOrder(order);
+  }
+
+  /// Answers "what does this workspace need to release" by asking MELOS, in
+  /// the pub workspace rooted at [workspaceRoot]: `melos list --no-published`
+  /// for the members whose authored version is not on pub.dev, and
+  /// `melos list --diff=<[diff]>` for the members that changed since that ref.
+  ///
+  /// Both queries ride the existing [ProcessRunner] seam as
+  /// `dart run melos list ...`, so the op needs no melos dependency here — the
+  /// workspace already declares one — and the whole surface tests offline. A
+  /// non-zero exit, non-JSON output, a non-array payload, a nameless entry or
+  /// a duplicated name is a LOUD [StateError] carrying the command, the exit
+  /// code and the process diagnostic; there is no partial candidate set.
+  ///
+  /// This is a read-only PREFLIGHT. It does not gate a publish and does not
+  /// weaken [publishWorkspace], which keeps resolving each member's published
+  /// predecessor against pub.dev immediately before it tags.
+  Future<ReleaseDiscovery> discoverWorkspace({
+    required String workspaceRoot,
+    required String diff,
+  }) async {
+    final root = p.normalize(p.absolute(workspaceRoot));
+    final candidates = await _melosPackageNames(root, const [
+      '--no-published',
+      '--json',
+      '--no-private',
+    ]);
+    final changed = await _melosPackageNames(root, [
+      '--diff=$diff',
+      '--json',
+      '--no-private',
+    ]);
+    return ReleaseDiscovery(
+      workspaceRoot: root,
+      diff: diff,
+      candidates: candidates,
+      changed: changed,
+    );
+  }
+
+  /// Resolves the dependency-order publish sequence for the pub workspace at
+  /// [workspaceRoot] from MELOS's own adjacency graph
+  /// (`melos list --json --graph --no-private`), so the graph that decides
+  /// publish order is never transcribed into a hand-written manifest.
+  ///
+  /// Melos emits ALL in-workspace edges — `dependencies`, `dev_dependencies`
+  /// AND `dependency_overrides` — and publish order is a statement about the
+  /// PUBLISHED runtime contract only. So every emitted edge is filtered
+  /// against the source package's top-level `dependencies` map (the same list
+  /// [publishWorkspace] orders by) before it reaches [publishOrder]. That is
+  /// load-bearing, not cosmetic: lenny's `leonard_agent`, `leonard_flutter`
+  /// and `leonard_flutter_test` form a DEV-dependency cycle, which is not a
+  /// publish cycle, and ordering the raw graph would refuse a releasable
+  /// workspace.
+  ///
+  /// A graph node that is not a publishable member of the workspace is a LOUD
+  /// [StateError] — melos and the pubspec must be describing the same
+  /// workspace. A RUNTIME cycle still reaches [publishOrder]'s existing loud
+  /// refusal, unchanged.
+  Future<PublishOrder> publishOrderFromMelosWorkspace({
+    required String workspaceRoot,
+  }) async {
+    final root = p.normalize(p.absolute(workspaceRoot));
+    final decoded = await _runMelosList(root, const [
+      '--json',
+      '--graph',
+      '--no-private',
+    ]);
+    if (decoded is! Map) {
+      throw StateError(
+        'melos graph in $root is not a {package: [dependencies]} object.',
+      );
+    }
+    final members = {
+      for (final member in _workspaceMembers(root)) member.name: member,
+    };
+    final deps = <String, List<String>>{};
+    for (final entry in decoded.entries) {
+      final node = entry.key;
+      if (node is! String || node.isEmpty) {
+        throw StateError('melos graph in $root has a nameless package key.');
+      }
+      final member = members[node];
+      if (member == null) {
+        throw StateError(
+          'melos graph in $root names "$node", which is not a publishable '
+          'member of that pub workspace (members: '
+          '${(members.keys.toList()..sort()).join(', ')}).',
+        );
+      }
+      final edges = entry.value;
+      if (edges is! List) {
+        throw StateError(
+          'melos graph in $root maps "$node" to something other than a list '
+          'of dependencies.',
+        );
+      }
+      final runtime = member.dependencies.toSet();
+      deps[node] = [
+        for (final edge in edges)
+          if (edge is String && edge != node && runtime.contains(edge)) edge,
+      ]..sort();
+    }
+    return publishOrder(deps);
+  }
+
+  /// Runs one `dart run melos list <arguments>` in [root] through the
+  /// [ProcessRunner] seam and yields its decoded JSON. A non-zero exit or
+  /// undecodable output is a LOUD [StateError] naming the command, the exit
+  /// code and the process diagnostic.
+  Future<Object?> _runMelosList(String root, List<String> arguments) async {
+    final argv = ['run', 'melos', 'list', ...arguments];
+    final result = await _run('dart', argv, workingDirectory: root);
+    if (result.exitCode != 0) {
+      throw StateError(
+        '`dart ${argv.join(' ')}` failed in $root with exit '
+        '${result.exitCode}${_melosDiagnostic(result)}',
+      );
+    }
+    try {
+      return jsonDecode('${result.stdout}'.trim());
+    } on FormatException catch (error) {
+      throw StateError(
+        '`dart ${argv.join(' ')}` in $root did not emit JSON: '
+        '${error.message}${_melosDiagnostic(result)}',
+      );
+    }
+  }
+
+  /// The unique, sorted `name` values of a `melos list --json` array. A
+  /// non-array payload, an entry that is not an object, a missing or empty
+  /// name, and a duplicated name are each a LOUD [StateError].
+  Future<List<String>> _melosPackageNames(
+    String root,
+    List<String> arguments,
+  ) async {
+    final decoded = await _runMelosList(root, arguments);
+    if (decoded is! List) {
+      throw StateError(
+        '`dart run melos list ${arguments.join(' ')}` in $root did not emit a '
+        'JSON array of packages.',
+      );
+    }
+    final names = <String>[];
+    for (final entry in decoded) {
+      if (entry is! Map) {
+        throw StateError(
+          'melos list in $root emitted a package entry that is not an object.',
+        );
+      }
+      final name = entry['name'];
+      if (name is! String || name.isEmpty) {
+        throw StateError('melos list in $root emitted a package with no name.');
+      }
+      if (names.contains(name)) {
+        throw StateError('melos list in $root named "$name" more than once.');
+      }
+      names.add(name);
+    }
+    names.sort();
+    return List<String>.unmodifiable(names);
+  }
+
+  /// The stderr/stdout tail every melos refusal carries, so the operator reads
+  /// what the process actually said instead of only that it failed.
+  String _melosDiagnostic(ProcessResult result) {
+    final stderrText = '${result.stderr}'.trim();
+    final stdoutText = '${result.stdout}'.trim();
+    final detail = stderrText.isNotEmpty ? stderrText : stdoutText;
+    return detail.isEmpty ? '.' : ':\n$detail';
   }
 
   /// Runs `dart pub publish --dry-run` in [packageDir] via the [ProcessRunner]
