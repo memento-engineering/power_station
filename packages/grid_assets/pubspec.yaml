@@ -28,8 +28,15 @@ dependencies:
   # solver can never resolve back onto the pre-cut rc this package no longer
   # compiles against.
   grid_engine: ^0.3.0-rc.20
-  grid_runtime: ^0.2.0-rc.13
-  grid_sdk: ^0.3.0-rc.16
+  # The SPECIFY-provenance seam floors (the specify capability stamps
+  # `spec.author=specify` through the station's owned-work writer): rc.19 is the
+  # first runtime cut that carries `StationBeadWriter.writeSpecifyAuthoredSpec`
+  # AND the provenance-aware `clearRoundAuthoredSpec` — rc.17/rc.18 shipped
+  # WITHOUT them, so the old `^0.2.0-rc.13` floor admitted a resolution this
+  # package no longer compiles against. rc.22 is the first SDK cut that exports
+  # the `SpecifyAuthoredSpecWriter` typedef the registry seam is typed on.
+  grid_runtime: ^0.2.0-rc.19
+  grid_sdk: ^0.3.0-rc.22
   grid_trajectory: ^0.2.0-rc.4
   json_annotation: ^4.9.0
   meta: ^1.16.0
