@@ -2129,6 +2129,78 @@ void main() {
       expect(record.state, EvidenceState.truncated);
     });
 
+    test('a decision doc over the snippet bound clips ITS OWN body and leaves '
+        'the surface COMPLETE', () async {
+      final dir = Directory.systemTemp.createTempSync('decisions-long-body');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final register = Directory(p.join(dir.path, 'docs', 'decisions'))
+        ..createSync(recursive: true);
+      const surface = 'power_station/packages/grid_assets/lib/src/x.dart';
+      final runner = _fakeDecisionIndex(register, count: 3);
+      // Entry 2 grows past the per-entry bound AFTER the index was canned, so
+      // the set the verb answered is unchanged and every entry still resolves.
+      File(
+        p.join(register.path, '2026-09-08-fake-decision-2.md'),
+      ).writeAsStringSync(
+        '---\nstatus: accepted\nregister:\n  spec: 1\n'
+        '  slug: a2-fake-decision-2\n---\n'
+        '${'long decision body ' * (kMaxDiscoverySnippetChars ~/ 8)}',
+      );
+      final record = (await commandDecisionIndexSource(
+        runner,
+        runnerInvocation: 'dart run lunar:lunar',
+        gridHome: '/grid/lunar',
+      )(dir.path, [surface], _citesNothing)).single;
+      expect(record.decisions, hasLength(3), reason: 'every entry resolved');
+      expect(record.truncated, isFalse, reason: 'nothing dropped at the bound');
+      expect(
+        record.state,
+        EvidenceState.complete,
+        reason:
+            'completeness is about the entry SET; a long doc never fails the '
+            'register it lives in (pow-jidn): ${record.error}',
+      );
+      final bodies = {
+        for (final entry in record.decisions) entry.slug: entry.body.state,
+      };
+      expect(bodies, {
+        'a1-fake-decision-1': EvidenceState.complete,
+        'a2-fake-decision-2': EvidenceState.truncated,
+        'a3-fake-decision-3': EvidenceState.complete,
+      }, reason: 'the clipped entry keeps its OWN truncated state');
+      expect(
+        record.decisions[1].body.snippet,
+        hasLength(kMaxDiscoverySnippetChars),
+      );
+    });
+
+    test('a SET clipped at the bound is still TRUNCATED even when every body '
+        'fits — the positive control for the surface state', () async {
+      final dir = Directory.systemTemp.createTempSync('decisions-set-clip');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final register = Directory(p.join(dir.path, 'docs', 'decisions'))
+        ..createSync(recursive: true);
+      const surface = 'power_station/packages/grid_assets/lib/src/x.dart';
+      final record = (await commandDecisionIndexSource(
+        _fakeDecisionIndex(register, count: kMaxDecisionEntriesPerSurface + 1),
+        runnerInvocation: 'dart run lunar:lunar',
+        gridHome: '/grid/lunar',
+      )(dir.path, [surface], _citesNothing)).single;
+      expect(
+        record.decisions.every(
+          (entry) => entry.body.state == EvidenceState.complete,
+        ),
+        isTrue,
+        reason: 'every fixture body is short',
+      );
+      expect(record.truncated, isTrue);
+      expect(
+        record.state,
+        EvidenceState.truncated,
+        reason: 'selected < indexed is the ONE clip the surface state reports',
+      );
+    });
+
     test('an ABSENT station runner records UNAVAILABLE and never reaches the '
         'shell — this pack names no decisions binary', () async {
       final never = _CannedShellRunner(output: '{}');
