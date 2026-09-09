@@ -12,7 +12,10 @@ register:
   obsoletes: []
   updates: []
   obsoleted-by: null
-  updated-by: []
+  updated-by:
+    - "committee-gate-single-finding-advance-and-the-refinement-flag"
+    - "design-rounds-run-as-station-circuits"
+    - "the-spec-decision-lane-queries-the-roster-union"
   bead: null
   legacy-id: "A13"
 ---

@@ -12,7 +12,8 @@ register:
   obsoletes: []
   updates: []
   obsoleted-by: null
-  updated-by: []
+  updated-by:
+    - "design-rounds-run-as-station-circuits"
   bead: null
   legacy-id: "A36"
 ---

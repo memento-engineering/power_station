@@ -12,7 +12,8 @@ register:
   obsoletes: []
   updates: []
   obsoleted-by: null
-  updated-by: []
+  updated-by:
+    - "discovery-evidence-is-gathered-once-and-projected"
   bead: null
   legacy-id: "A23"
 ---

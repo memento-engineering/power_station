@@ -12,7 +12,10 @@ register:
   obsoletes: []
   updates: []
   obsoleted-by: null
-  updated-by: []
+  updated-by:
+    - "one-asset-resolution-defines-tree-and-writers"
+    - "station-operator-audiences-derive-from-the-resolved-registry"
+    - "the-grid-block-is-the-single-asset-authority"
   bead: null
   legacy-id: "A24"
 ---

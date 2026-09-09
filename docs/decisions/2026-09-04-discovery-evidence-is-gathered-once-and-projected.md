@@ -17,7 +17,8 @@ register:
     - "the-spec-decision-lane-queries-the-roster-union"
     - "a23-bead-pow-kzx-the-station-overlay-delivery-lib-renders-an"
   obsoleted-by: null
-  updated-by: []
+  updated-by:
+    - "decision-surface-evidence-selects-bead-names-before-index-order"
   bead: pow-ri9c
   legacy-id: null
 ---

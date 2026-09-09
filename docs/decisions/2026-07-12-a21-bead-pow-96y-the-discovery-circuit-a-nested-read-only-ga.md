@@ -12,7 +12,9 @@ register:
   obsoletes: []
   updates: []
   obsoleted-by: null
-  updated-by: []
+  updated-by:
+    - "discovery-evidence-is-gathered-once-and-projected"
+    - "discovery-lens-reports-carry-the-round-and-the-wipe-sweeps"
   bead: null
   legacy-id: "A21"
 ---

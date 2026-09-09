@@ -12,7 +12,8 @@ register:
   obsoletes: []
   updates: []
   obsoleted-by: null
-  updated-by: []
+  updated-by:
+    - "approval-is-the-stamp-the-grid-approved-label-retires"
   bead: pow-glza
   legacy-id: null
 ---
