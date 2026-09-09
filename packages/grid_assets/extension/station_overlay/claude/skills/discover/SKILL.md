@@ -32,9 +32,9 @@ the grid know about X?" pass:
 ```
 
 It resolves the ATTACHED substations from the resident-station context (the
-roster is never hardcoded) and queries each seat's work store — backlog AND
-decision beads, all statuses (decisions live closed; "have we already decided
-this" needs them). One JSON object comes back:
+roster is never hardcoded) and queries each substation's work store — backlog
+AND decision beads, all statuses (decisions live closed; "have we already
+decided this" needs them). One JSON object comes back:
 
 ```
 {query, stores: [{substation, prefix, root, outcome, hits}], hitCount,
@@ -51,8 +51,8 @@ require `field=id` in a hit inside the lexical stores section; a semantic hit ne
 that a bead id exists.
 
 Per-store `outcome` is `searched` (with `beadsSearched` + `hits`), `absent`,
-or `failed` — a roster seat is never silently dropped, and neither do you:
-carry any absent/failed seat into your summary. Each hit is
+or `failed` — a roster substation is never silently dropped, and neither do
+you: carry any absent/failed substation into your summary. Each hit is
 `{id, store, status, type, title, field, snippet}`. Exit 0 = at least one
 store searched; exit 1 = NOTHING was searchable — that is a loud non-answer to
 report, never a cue to improvise.
@@ -120,8 +120,8 @@ predicate remains the authority for mount eligibility and approval; do not
 restate that boundary as Filing requirements.
 
 - **Target store: the substation whose repo the work would change** (the
-  search report's `root` for that seat is your `cd` target). No clear owner →
-  **the grid home's own store** (`.grid/.beads` under it).
+  search report's root for that substation is your `cd` target). No clear
+  owner → **the grid home's own store** (`.grid/.beads` under it).
 - **Local ordering:** put local bead ids on explicit `Blocked by:` or `Depends
   on:` description lines, then wire every one with `bd dep add <blocked>
   <blocker> --actor governor`. The filed bead is the first argument.

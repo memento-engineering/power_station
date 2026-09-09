@@ -32,10 +32,10 @@ at `.grid/seats/governor/`, and relaunches on handoff.
 - One `--substation` per work repo; `@prefix` only when the store's issue-id
   prefix differs from the name (`the_grid@tg=…`). Names and prefixes must be
   disjoint across substations — assembly refuses collisions.
-- Delivery is a per-substation BINDING, not a flag (the_grid ADR-0000 A51): every
-  coded seat authors `GitHubGridAssets`, so a LIVE arm (`--no-dry-run`) pushes and
-  opens a PR per landed bead. `--dry-run` binds nothing (the commit-only posture).
-  There is no land flag to omit.
+- Delivery is a per-substation BINDING, not a flag (the_grid ADR-0000 A51):
+  every coded substation authors `GitHubGridAssets`, so a LIVE arm
+  (`--no-dry-run`) pushes and opens a PR per landed bead. `--dry-run` binds
+  nothing (the commit-only posture). There is no land flag to omit.
 - The station is resident: it runs until `{{runner}} down`. Run it in the
   background and read the banner from its log.
 

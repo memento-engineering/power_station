@@ -89,45 +89,45 @@ The rules are load-bearing:
    provider's kind (create vs `.value`) is fixed for the life of a mounted
    branch — change the type or key to remount.
 4. Placement is scoping. The nearest provider wins. Put station defaults above
-   the seat fan-out; put a per-seat override inside that seat so it shadows the
-   default only for that subtree. Configuration is VALUES in the tree;
-   implementations enter through dependency injection.
+   the substation fan-out; put a per-substation override inside that
+   substation so it shadows the default only for that subtree. Configuration
+   is VALUES in the tree; implementations enter through dependency injection.
 5. No provider is universal. A station is not only code, git is not the only
    source-control system, and an asset is never entitled to `GitServices` —
-   the landed seat stack SPLIT that bundle, watching `StationGitService` and
-   `GitOps` individually. Watch the faculty actually needed, accept null, and
-   make the unavailable arm visible in diagnostics.
+   the landed substation stack SPLIT that bundle, watching
+   `StationGitService` and `GitOps` individually. Watch the faculty actually
+   needed, accept null, and make the unavailable arm visible in diagnostics.
 
-## The landed exemplar: SubstationSeat
+## The landed exemplar: SubstationSeed
 
-Per-seat composition is landed, not aspirational: space_station's
-`SubstationSeat` (space-47t) is the worked example of every rule above. It is
-ONE value-configured seat class (`name` / `root` / `prefix` /
-`GitHubAppConfig?`), and a seat's delivery posture is what its OWN subtree
-mounts:
+Per-substation composition is landed, not aspirational: space_station's
+`SubstationSeed` (space-47t) is the worked example of every rule above. It is
+ONE value-configured substation seed (`name` / `root` / `prefix` /
+`GitHubAppConfig?`), and a substation's delivery posture is what its OWN
+subtree mounts:
 
 - a null `app` mounts NO `PrOpener` provider at all — the commit-only posture
   is that ABSENCE, structural in the tree, never a null-valued provider
   (rule 2);
 - effect creation is gated on a watched `GitOps`: a dry arm authors no
-  `GitOps`, so the seat constructs no opener object either — inertness is
-  declared by absence and visible in the projection (rules 1 and 5);
-- the opener is constructed in-tree via `create:` (tree-owned — rule 3),
-  while the seat's own config value rides `Provider<GitHubAppConfig>.value`
+  `GitOps`, so the substation constructs no opener object either — inertness
+  is declared by absence and visible in the projection (rules 1 and 5);
+- the opener is constructed in-tree via `create:` (tree-owned — rule 3), while
+  the substation's own config value rides `Provider<GitHubAppConfig>.value`
   (adopted — there is nothing to own or dispose);
-- the seat-scoped opener shadows any station-level one — the per-seat
-  override of rule 4, resolved by tree position, never by a name keyed into
-  a registry.
+- the substation-scoped opener shadows any station-level one — the
+  per-substation override of rule 4, resolved by tree position, never by a
+  name keyed into a registry.
 
 ## Installation checklist
 
-- Compose the new const seed in the station or seat asset list at its intended
-  scope.
+- Compose the new const seed in the station or substation asset list at its
+  intended scope.
 - Use `create:` only when the tree constructs and owns the value; use `.value`
   for injected or otherwise owner-held instances; mount a `build`-derived
   value as an `InheritedSeed` over a value-equal type.
 - Exercise dependency absent, present, replaced, and removed states.
-- Exercise a seat-local provider shadowing a station default.
+- Exercise a substation-local provider shadowing a station default.
 - Keep effects out of `build`; the seed projects values and implementations for
   effect-boundary consumers.
 - Leave `GridDelegate.boot` as assembly-only transitional code. Move policy and
