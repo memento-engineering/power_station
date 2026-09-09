@@ -9,9 +9,9 @@
 /// resolved above, by a later resolver holding substation facts.
 library;
 
+import 'dart:convert';
 import 'dart:io';
 
-import 'package:dart_style/dart_style.dart';
 import 'package:grid_sdk/grid_sdk.dart';
 import 'package:path/path.dart' as p;
 import 'package:yaml/yaml.dart';
@@ -673,13 +673,60 @@ const String kGeneratedMcpPath = 'extension/mcp/config.yaml';
 /// Normalizes a rendered output so a fresh render is byte-equal to what the
 /// repository formatter would leave on disk.
 ///
-/// Dart outputs go through the same [DartFormatter] `dart format` runs; every
-/// other output — the YAML mirror included — passes through untouched.
-String _formatGeneratedOutput(String relativePath, String source) {
+/// Dart source runs through the current SDK executable
+/// ([Platform.resolvedExecutable]) as `dart format`, over a scratch copy under
+/// the system temp directory — [packageRoot] supplies only the working
+/// directory, so no file the caller owns is read or rewritten. Shelling the
+/// RUNNING SDK is what keeps this normalizer and the lane's gate the same
+/// formatter: the consuming workspace's resolved `dart_style` may sit a minor
+/// ahead of the SDK's bundled one, and one that does keeps a long
+/// `description:` argument on a single line where the SDK splits it — so a
+/// freshly regenerated pack passed `--check` here and still failed
+/// `dart format --set-exit-if-changed` in the lane. A bare `dart` from `PATH`
+/// would reintroduce the same drift, one SDK wide.
+///
+/// Every non-Dart output — the YAML mirror included — passes through untouched.
+///
+/// Guards LOUD or GONE: a formatter that refuses is a [GridBlockException]
+/// naming the output and the exit code, thrown before either committed output
+/// is compared or written.
+String _formatGeneratedOutput(
+  String relativePath,
+  String source, {
+  required String packageRoot,
+}) {
   if (p.extension(relativePath) != '.dart') return source;
-  return DartFormatter(
-    languageVersion: DartFormatter.latestLanguageVersion,
-  ).format(source, uri: relativePath);
+  final scratch = Directory.systemTemp.createTempSync('grid-block-format-');
+  try {
+    final input = File(p.join(scratch.path, p.basename(relativePath)))
+      ..writeAsStringSync(source);
+    final result = Process.runSync(
+      Platform.resolvedExecutable,
+      [
+        'format',
+        '--output=show',
+        '--show=none',
+        '--summary=none',
+        '--language-version=latest',
+        input.path,
+      ],
+      workingDirectory: packageRoot,
+      stdoutEncoding: utf8,
+      stderrEncoding: utf8,
+    );
+    if (result.exitCode == 0) return result.stdout as String;
+    final diagnostic = [
+      '${result.stderr}'.trim(),
+      '${result.stdout}'.trim(),
+    ].firstWhere((text) => text.isNotEmpty, orElse: () => '');
+    throw GridBlockException(
+      'grid: $relativePath: dart format refused the generated source '
+      '(exit ${result.exitCode})'
+      '${diagnostic.isEmpty ? '' : ': $diagnostic'}',
+    );
+  } finally {
+    scratch.deleteSync(recursive: true);
+  }
 }
 
 /// Regenerates — or, with [check], VERIFIES — both generated outputs from the
@@ -687,8 +734,11 @@ String _formatGeneratedOutput(String relativePath, String source) {
 ///
 /// ATOMIC: both outputs are rendered from ONE parse before either is written,
 /// so a malformed block ([GridBlockException]) leaves both files untouched.
-/// Generated Dart is formatter-normalized before BOTH the [check] comparison
-/// and the write, so a fresh render survives `dart format --set-exit-if-changed`.
+/// Every output is normalized by the running SDK's own formatter before BOTH
+/// the [check] comparison and the write, so a fresh render survives the lane's
+/// `dart format --set-exit-if-changed` whatever `dart_style` this workspace
+/// resolved. Synchronous, because every pack's `tool/` wrapper assigns the
+/// result straight to `exitCode`.
 /// Returns a process exit code — `0` current, `1` stale under [check].
 /// [out] defaults to `stdout`.
 int runGridAssetsGenerator({
@@ -709,7 +759,11 @@ int runGridAssetsGenerator({
   };
   final outputs = <String, String>{
     for (final entry in rendered.entries)
-      entry.key: _formatGeneratedOutput(entry.key, entry.value),
+      entry.key: _formatGeneratedOutput(
+        entry.key,
+        entry.value,
+        packageRoot: packageRoot,
+      ),
   };
   final report =
       '${block.assets.length} assets, '
