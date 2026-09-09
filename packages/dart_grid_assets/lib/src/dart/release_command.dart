@@ -26,6 +26,7 @@ class ReleaseCommand extends Command<int> {
   }) {
     final o = out ?? stdout;
     final e = err ?? stderr;
+    addSubcommand(ReleaseDiscoverCommand(service: service, out: o, err: e));
     addSubcommand(ReleasePlanCommand(service: service, out: o, err: e));
     addSubcommand(ReleaseTagCommand(service: service, out: o));
     addSubcommand(
@@ -46,9 +47,9 @@ class ReleaseCommand extends Command<int> {
   @override
   final String description =
       'Deterministic Dart-package release ops (the machine substrate under the '
-      'operator `release` skill): version plan, scrub gate, semver '
-      'classification, publish order, dry-run, pub.dev poll, and the '
-      'one-command workspace wave — each a structured JSON result.';
+      'operator `release` skill): workspace discovery, version plan, scrub '
+      'gate, semver classification, publish order, dry-run, pub.dev poll, and '
+      'the one-command workspace wave — each a structured JSON result.';
 }
 
 /// Decodes the shared `{consumers: [{name, directory, links}]}` manifest both
@@ -60,6 +61,77 @@ List<ReleaseConsumer> _consumersFromManifest(File file) {
     for (final entry in decoded['consumers'] as List)
       ReleaseConsumer.fromJson((entry as Map).cast<String, Object?>()),
   ];
+}
+
+/// `dart release discover` — ask melos what the workspace needs to release.
+class ReleaseDiscoverCommand extends Command<int> {
+  /// Creates the op over [service], rendering to [out]/[err].
+  ReleaseDiscoverCommand({
+    required ReleaseService service,
+    required StringSink out,
+    required StringSink err,
+  }) : _service = service,
+       _out = out,
+       _err = err {
+    argParser
+      ..addOption(
+        'workspace',
+        mandatory: true,
+        help: 'The pub workspace root to survey.',
+      )
+      ..addOption(
+        'diff',
+        mandatory: true,
+        help:
+            'The git ref HEAD is compared against for the changed-package '
+            'query (a ref, or a `<start>..<end>` range).',
+      )
+      ..addFlag(
+        'json',
+        negatable: false,
+        help: 'Emit the structured result as one JSON object.',
+      );
+  }
+
+  final ReleaseService _service;
+  final StringSink _out;
+  final StringSink _err;
+
+  @override
+  final String name = 'discover';
+  @override
+  final String description =
+      'Survey a pub workspace with melos: which members are unpublished, and '
+      'which changed since a ref.';
+
+  @override
+  Future<int> run() async {
+    final args = argResults!;
+    final ReleaseDiscovery discovery;
+    try {
+      discovery = await _service.discoverWorkspace(
+        workspaceRoot: args.option('workspace')!,
+        diff: args.option('diff')!,
+      );
+    } on ReleaseWaveFailure catch (failure) {
+      _err.writeln('release discover: $failure');
+      return 1;
+    } on StateError catch (error) {
+      // melos refused or answered something that is not a package list. A
+      // survey that reports an empty candidate set it never read is worse
+      // than no survey, so nothing reaches stdout.
+      _err.writeln('release discover: ${error.message}');
+      return 1;
+    }
+    if (args.flag('json')) {
+      _out.writeln(jsonEncode(discovery.toJson()));
+    } else {
+      for (final candidate in discovery.candidates) {
+        _out.writeln(candidate);
+      }
+    }
+    return 0;
+  }
 }
 
 /// `dart release plan` — compute the next version + git tag for a change class.
@@ -507,8 +579,15 @@ class ReleaseOrderCommand extends Command<int> {
     argParser
       ..addOption(
         'manifest',
-        mandatory: true,
-        help: 'A JSON file mapping package -> [in-set deps].',
+        help:
+            'A JSON file mapping package -> [in-set deps] — the hand-written '
+            'input, kept for compatibility.',
+      )
+      ..addOption(
+        'workspace',
+        help:
+            'A pub workspace root to read the graph from, via melos. Exactly '
+            'one of --workspace and --manifest is required.',
       )
       ..addFlag(
         'json',
@@ -525,35 +604,62 @@ class ReleaseOrderCommand extends Command<int> {
   final String name = 'order';
   @override
   final String description =
-      'Resolve the dependency-order publish sequence from a deps manifest.';
+      'Resolve the dependency-order publish sequence — from a melos workspace '
+      'graph (--workspace) or a deps manifest (--manifest).';
 
   @override
   Future<int> run() async {
     final args = argResults!;
-    final file = File(args.option('manifest')!);
-    if (!file.existsSync()) {
-      _err.writeln('release order: no such manifest: ${file.path}');
-      return 64;
-    }
-    final Map<String, List<String>> deps;
-    try {
-      final raw = jsonDecode(file.readAsStringSync()) as Map<String, dynamic>;
-      deps = {
-        for (final entry in raw.entries)
-          entry.key: [for (final d in entry.value as List) d as String],
-      };
-    } on Object catch (e) {
+    final manifestPath = args.option('manifest');
+    final workspacePath = args.option('workspace');
+    if ((manifestPath == null) == (workspacePath == null)) {
+      // Two graphs are two answers; no graph is none. Either way there is
+      // nothing to order, and guessing which input won is exactly the
+      // transcription risk the workspace mode exists to remove.
       _err.writeln(
-        'release order: manifest is not a {package: [deps]} object: $e',
+        'release order: pass exactly one of --workspace <dir> or --manifest '
+        '<deps.json>.',
       );
       return 64;
     }
     final PublishOrder order;
-    try {
-      order = _service.publishOrder(deps);
-    } on StateError catch (e) {
-      _err.writeln('release order: ${e.message}');
-      return 1;
+    if (workspacePath != null) {
+      try {
+        order = await _service.publishOrderFromMelosWorkspace(
+          workspaceRoot: workspacePath,
+        );
+      } on ReleaseWaveFailure catch (failure) {
+        _err.writeln('release order: $failure');
+        return 1;
+      } on StateError catch (e) {
+        _err.writeln('release order: ${e.message}');
+        return 1;
+      }
+    } else {
+      final file = File(manifestPath!);
+      if (!file.existsSync()) {
+        _err.writeln('release order: no such manifest: ${file.path}');
+        return 64;
+      }
+      final Map<String, List<String>> deps;
+      try {
+        final raw = jsonDecode(file.readAsStringSync()) as Map<String, dynamic>;
+        deps = {
+          for (final entry in raw.entries)
+            entry.key: [for (final d in entry.value as List) d as String],
+        };
+      } on Object catch (e) {
+        _err.writeln(
+          'release order: manifest is not a {package: [deps]} object: $e',
+        );
+        return 64;
+      }
+      try {
+        order = _service.publishOrder(deps);
+      } on StateError catch (e) {
+        _err.writeln('release order: ${e.message}');
+        return 1;
+      }
     }
     if (args.flag('json')) {
       _out.writeln(jsonEncode(order.toJson()));
