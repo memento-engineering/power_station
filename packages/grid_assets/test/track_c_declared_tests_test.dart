@@ -771,4 +771,92 @@ The regression coverage is listed under ## Declared Tests below.
       'rationale': 'Design-declared test files missing from pinned diff: $path',
     });
   });
+
+  test('pow-kdsl lenny-f8ja source sibling does not author retained suite', () async {
+    const retained = 'test/strike_counter_test.dart';
+    const base = 'packages/leonard_contract/test/strike_counter_test.dart';
+    const built =
+        'packages/leonard_contract/test/strike_counter_glados_test.dart';
+    // lenny-f8ja round 1, bisected: `create` governs the SOURCE sibling
+    // `src/strike_counter.dart`, and the suite that shares its stem is only RUN
+    // by an AC line. Reading the verb across the stem hard-blocked a round whose
+    // change was correct.
+    const design =
+        '''
+## Touches
+Change: create a Glados property suite importing
+package:leonard_contract/src/strike_counter.dart directly because StrikeCounter
+is intentionally package-internal
+AC-5 retained example-based suites -> cd packages/leonard_contract &&
+dart test test/contract `$retained`
+''';
+    final declarations = testDeclarations(design);
+    expect(declarations.authored, isEmpty);
+    expect(declaredTestFiles(design, baseFiles: const {base}), isEmpty);
+    final outcome = await _runGate(
+      design: design,
+      diff: _diffFor([built]),
+      existingFiles: const [base],
+    );
+    expect(outcome.payload?['grade'], 'A');
+
+    // The same sibling with the retained suite CITED rather than run: it reaches
+    // the base-gated `mentioned` bucket, where an unknown base still declares it
+    // (pow-qev) and a unique path-boundary suffix resolves it away.
+    const citedDesign =
+        '''
+## Touches
+Change: create a Glados property suite importing
+package:leonard_contract/src/strike_counter.dart directly because StrikeCounter
+is intentionally package-internal
+AC-5 keeps the retained example-based suite `$retained` green
+''';
+    final cited = testDeclarations(citedDesign);
+    expect(cited.authored, isEmpty);
+    expect(cited.mentioned, {retained});
+    expect(declaredTestFiles(citedDesign), {retained});
+    expect(declaredTestFiles(citedDesign, baseFiles: const {base}), isEmpty);
+
+    // And with the source sibling written as an INLINE span, which `proseOnly`
+    // blanks: the preserved boundary marker still cuts the verb off the suite.
+    const inlineDesign =
+        '''
+## Touches
+Change: create a Glados property suite over
+`packages/leonard_contract/lib/src/strike_counter.dart`, and AC-5 keeps the
+retained `$retained` green
+''';
+    final inline = testDeclarations(inlineDesign);
+    expect(inline.authored, isEmpty);
+    expect(inline.mentioned, {retained});
+    expect(declaredTestFiles(inlineDesign, baseFiles: const {base}), isEmpty);
+  });
+
+  test('pow-kdsl edit verb in test path window stays authored', () async {
+    const authored = 'test/strike_counter_test.dart';
+    const base = 'packages/leonard_contract/test/strike_counter_test.dart';
+    // The boundary cuts a verb off a path it never governed, and nothing else:
+    // a verb inside the test path's OWN window still promises it, base or no.
+    const design =
+        '''
+## Touches
+Change: create `$authored`, a Glados property suite over
+package:leonard_contract/src/strike_counter.dart
+''';
+    final declarations = testDeclarations(design);
+    expect(declarations.authored, {authored});
+    expect(declarations.mentioned, isEmpty);
+    expect(declaredTestFiles(design, baseFiles: const {base}), {authored});
+    final outcome = await _runGate(
+      design: design,
+      diff: _diffFor(['packages/leonard_contract/lib/src/strike_counter.dart']),
+      existingFiles: const [base],
+    );
+    expect(outcome.payload, {
+      'grade': 'F',
+      'transport': 'structural',
+      'rationale':
+          'Design-declared test files missing from pinned diff: $authored',
+    });
+  });
 }
