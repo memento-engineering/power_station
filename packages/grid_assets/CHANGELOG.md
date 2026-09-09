@@ -1,3 +1,9 @@
+## 0.6.0-rc.22
+
+- Fixed: explicit decision citations resolve REGISTER-WIDE, never per surface. On rc.21 a real accepted decision cited from a surface that does not declare it read as `absent` and failed the surface, so every bead citing a sibling-surface decision held at discovery with no exit (lunar epoch 56: tg-nidl, lenny-dgp); a record indexed elsewhere in the gathered register now resolves and is annotated `namedElsewhere` (pow-9xkj, #263).
+- Fixed: adopted worktrees fast-forward their base to the root checkout's default branch on re-adoption, best-effort with a receipt, so a surviving worktree no longer pins the base its first mint cut (pow-1g7, #260).
+- Test: `acp_session_adapter_test` compiles the ACP probe fixture once per suite and bounds its waits by wall clock instead of fixed iteration counts; four different tests had failed across a lane, a merge-queue run and a PR check on 2026-09-08 under load (pow-qw6e, #266).
+
 ## 0.6.0-rc.21
 
 - Fixed: the discovery decision-surface lookup selects bead-named records FIRST and raises `kMaxDecisionEntriesPerSurface` from 12 to 96, so a bead citing decisions on an 81-entry surface no longer holds at discovery on a clipped index; more than 96 named records is a FAILED surface, not a silent clip. Explicit references are only canonical `register#slug` tokens under a register the gathered index contains, or `ADR-nnnn` ids; a bare legacy `A<n>` token never fails a surface (it only orders), and a canonical-shaped token under an unknown register is prose. `DecisionIndexSource` gains the requesting `Bead` as a third positional argument (pow-mrg8, #257).
