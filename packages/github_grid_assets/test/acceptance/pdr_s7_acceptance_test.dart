@@ -5,7 +5,7 @@
 //  (a) a bead runs agent→committee→land as RECONCILE TRANSITIONS — the running
 //      frontier SWAPS (stop old / start new — the agent retiring fans the four
 //      critics out, then route + land swap through) while the WorkBead branch +
-//      its bead-keyed subtree root persist (progress is the per-node cursor
+//      its keyed subtree root persist (progress is the per-node cursor
 //      INSIDE the subtree, not a WorkBead-level swap);
 //  (b) sibling work is untouched across a transition (no spurious spawn/kill);
 //  (c) config build() does NOT run on a work tick (the WorkList branch identity
@@ -355,10 +355,13 @@ void main() {
         final wb1Id = _workBead(root, 'tg-1')!.branchId;
         final wb2Id = _workBead(root, 'tg-2')!.branchId;
         final workListId = _workListId(root);
-        // The bead-keyed SessionScope subtree root beneath the WorkBead. Since
-        // the context rip-out, WorkBead first mounts the ambient
-        // `InheritedSeed<Bead>` (unkeyed), so the session root is the first
-        // KEYED descendant, no longer the immediate child.
+        // The keyed subtree root beneath the WorkBead. WorkBead mounts an
+        // unkeyed ambient `InheritedSeed<Bead>` around the session root, so the
+        // root we walk to is the first KEYED descendant, not the immediate
+        // child. That root is WorkBead's admission-reservation provider, keyed
+        // by the `(bead id, reservation mount token)` record: a FRESH grant
+        // re-keys it and deliberately remounts the session subtree, so this key
+        // is exactly the identity a mere cursor advance must preserve.
         Branch effectChild(Branch wb) {
           Branch? found;
           void walk(Branch b) {
@@ -374,10 +377,22 @@ void main() {
           return found!;
         }
 
-        final sessionRootId = effectChild(_workBead(root, 'tg-1')!).branchId;
+        final sessionRoot = effectChild(_workBead(root, 'tg-1')!);
+        final sessionRootId = sessionRoot.branchId;
+        final sessionRootKey = sessionRoot.key;
+        // Assert the SHAPE, not the token: the bead-id half is ours to name,
+        // while the mount-token half is the engine's (an opaque grant identity,
+        // a private sentinel while this bead's reservation carries none), so the
+        // record type is all we pin. The persistence assertions below then
+        // compare against the observed key rather than re-deriving it.
         expect(
-          effectChild(_workBead(root, 'tg-1')!).key,
-          const ValueKey('tg-1:session'),
+          sessionRootKey,
+          isA<ValueKey<(String, Object)>>().having(
+            (key) => key.value.$1,
+            'bead id',
+            'tg-1',
+          ),
+          reason: 'the subtree root is keyed by this bead + its mount token',
         );
 
         // --- (a) agent → committee (a reconcile transition: the agent retires
@@ -433,7 +448,7 @@ void main() {
         );
 
         // The running frontier SWAPPED: the agent step was killed and the four
-        // critics spawned; the WorkBead branch + its bead-keyed subtree root
+        // critics spawned; the WorkBead branch + its keyed subtree root
         // PERSISTED.
         expect(
           f.provider.started,
@@ -476,10 +491,18 @@ void main() {
           wb1Id,
           reason: 'WorkBead branch persists across the transition',
         );
+        final committeeRoot = effectChild(_workBead(root, 'tg-1')!);
         expect(
-          effectChild(_workBead(root, 'tg-1')!).branchId,
+          committeeRoot.branchId,
           sessionRootId,
-          reason: 'the bead-keyed subtree root persists (config threaded down)',
+          reason: 'the keyed subtree root persists (config threaded down)',
+        );
+        expect(
+          committeeRoot.key,
+          sessionRootKey,
+          reason:
+              'and keeps its key — the cursor advance never re-keyed it, so '
+              'the grant did not remount the session subtree',
         );
         // No new mint (the sessions are adopted; the happy path mints no gate).
         expect(f.runner.callsFor('create'), isEmpty);
@@ -628,6 +651,17 @@ void main() {
           _workBead(root, 'tg-1')!.branchId,
           wb1Id,
           reason: 'the WorkBead branch still persists at land',
+        );
+        final landRoot = effectChild(_workBead(root, 'tg-1')!);
+        expect(
+          landRoot.branchId,
+          sessionRootId,
+          reason: 'the keyed subtree root persists through land too',
+        );
+        expect(
+          landRoot.key,
+          sessionRootKey,
+          reason: 'and still carries the same bead + mount-token key',
         );
         expect(
           f.git.subcommands,
