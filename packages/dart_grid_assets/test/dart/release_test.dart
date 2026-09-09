@@ -13,10 +13,21 @@ import 'package:test/test.dart';
 
 /// A Fake [ProcessRunner]: records the last argv and returns canned output.
 class _FakeProcess {
-  _FakeProcess(ProcessResult result) : _results = [result];
-  _FakeProcess.queue(List<ProcessResult> results) : _results = [...results];
+  _FakeProcess(ProcessResult result, {String? report})
+    : _results = [result],
+      _reports = [report];
+  _FakeProcess.queue(
+    List<ProcessResult> results, {
+    List<String?> reports = const [],
+  }) : _results = [...results],
+       _reports = [...reports];
 
   final List<ProcessResult> _results;
+
+  /// Per-call report documents. A non-null entry is written to the path the
+  /// call passed after `--report-file-path`, which the service picks itself —
+  /// the Fake has to answer the argv it actually got, not a fixed path.
+  final List<String?> _reports;
   final calls =
       <
         ({String executable, List<String> arguments, String? workingDirectory})
@@ -53,6 +64,14 @@ class _FakeProcess {
       throw StateError(
         'unexpected process call: $executable ${arguments.join(' ')}',
       );
+    }
+    final report = _reports.isEmpty ? null : _reports.removeAt(0);
+    if (report != null) {
+      final flag = arguments.indexOf('--report-file-path');
+      if (flag < 0 || flag + 1 >= arguments.length) {
+        throw StateError('a canned report needs a --report-file-path argument');
+      }
+      File(arguments[flag + 1]).writeAsStringSync(report);
     }
     return _results.removeAt(0);
   }
@@ -111,6 +130,77 @@ class _FakeHttp {
   ).writeAsStringSync('Object? classify() => StepFailureClass.noResult;\n');
   return (root: root, candidate: candidate);
 }
+
+/// Writes a minimal package directory whose pubspec authors [version] — the
+/// HEAD a classification measures against its published baseline.
+Directory _writeClassifyPackage({
+  required String name,
+  required String version,
+}) {
+  final dir = Directory.systemTemp.createTempSync('classify-pkg-');
+  File(p.join(dir.path, 'pubspec.yaml')).writeAsStringSync(
+    'name: $name\n'
+    'version: $version\n'
+    'environment:\n'
+    '  sdk: ^3.11.0\n',
+  );
+  return dir;
+}
+
+/// A pub.dev `/api/packages/<name>` body listing [versions] — `latest` stays
+/// separate, because pub.dev's `latest` is the greatest STABLE and a newer
+/// prerelease is still what an rc consumer resolves.
+String _pubVersionsBody({
+  required String name,
+  required List<String> versions,
+  required String latest,
+}) => jsonEncode({
+  'name': name,
+  'latest': <String, Object?>{'version': latest},
+  'versions': [
+    for (final version in versions) <String, Object?>{'version': version},
+  ],
+});
+
+/// A `dart-apitool diff --report-format=json` document, in the shape its JSON
+/// reporter writes: a `report` object carrying one tree per breaking-ness.
+String _apiToolReport({
+  Map<String, Object?>? breaking,
+  Map<String, Object?>? nonBreaking,
+}) => jsonEncode({
+  'reportName': 'API Changes Report',
+  'apiToolInfo': <String, Object?>{'toolName': 'dart_apitool'},
+  'report': <String, Object?>{
+    if (breaking != null) 'breakingChanges': breaking,
+    if (nonBreaking != null) 'nonBreakingChanges': nonBreaking,
+    if (breaking == null && nonBreaking == null) 'noChangesDetected': true,
+  },
+});
+
+/// A report section root — its label is the banner, never a declaration.
+Map<String, Object?> _apiToolSection(
+  String banner,
+  List<Map<String, Object?>> children,
+) => {'label': banner, 'children': children};
+
+/// A declaration node, labelled the way `getDeclarationNodeHeadline` renders
+/// one (`Method captureScreenshot`, `Class Zeta`, `Field gamma`).
+Map<String, Object?> _apiToolDeclaration(
+  String label,
+  List<Map<String, Object?>> children,
+) => {'label': label, 'children': children};
+
+/// One change leaf.
+Map<String, Object?> _apiToolChange({
+  required String code,
+  required String description,
+  required bool isBreaking,
+}) => {
+  'changeDescription': description,
+  'changeCode': code,
+  'isBreaking': isBreaking,
+  'type': isBreaking ? 'major' : 'minor',
+};
 
 void main() {
   group('planVersion — the pre-1.0 version discipline (publishing.md)', () {
@@ -766,8 +856,543 @@ void main() {
     );
   });
 
+  group('classifyRelease — the API delta paired with the DECLARED bump', () {
+    const package = 'leonard_flutter';
+
+    ReleaseService serviceFor({
+      required _FakeProcess process,
+      required _FakeHttp http,
+    }) => ReleaseService(runProcess: process.call, httpGet: http.call);
+
+    _FakeHttp publishedHttp(List<String> versions, {required String latest}) =>
+        _FakeHttp(
+          HttpFetch(
+            statusCode: 200,
+            body: _pubVersionsBody(
+              name: package,
+              versions: versions,
+              latest: latest,
+            ),
+          ),
+        );
+
+    test(
+      'a removed exported parameter understates a declared patch, naming the '
+      'symbol AND the compile consequence',
+      () async {
+        final dir = _writeClassifyPackage(name: package, version: '0.3.2');
+        addTearDown(() => dir.deleteSync(recursive: true));
+        final http = publishedHttp(['0.3.0', '0.3.1'], latest: '0.3.1');
+        final process = _FakeProcess(
+          ProcessResult(
+            1,
+            0,
+            '-- Generating report using: JSON Reporter --',
+            '',
+          ),
+          report: _apiToolReport(
+            breaking: _apiToolSection('BREAKING CHANGES', [
+              _apiToolDeclaration('Method captureScreenshot', [
+                _apiToolChange(
+                  code: 'CE01',
+                  description: 'Parameter "binding" removed',
+                  isBreaking: true,
+                ),
+              ]),
+            ]),
+          ),
+        );
+
+        final result = await serviceFor(
+          process: process,
+          http: http,
+        ).classifyRelease(packageDir: dir.path, package: package);
+
+        expect(result.baseline.toString(), '0.3.1');
+        expect(result.head.toString(), '0.3.2');
+        expect(result.removed, [
+          'captureScreenshot: Parameter "binding" removed',
+        ]);
+        expect(result.changed, isEmpty);
+        expect(result.added, isEmpty);
+        expect(result.requiredChange, ReleaseRequiredChange.breaking);
+        expect(result.declaredChange, ReleaseDeclaredChange.patch);
+        expect(result.verdict, ReleaseClassificationVerdict.understated);
+        expect(
+          result.message,
+          'leonard_flutter: exported captureScreenshot lost parameter binding, '
+          'so existing calls that supply binding no longer compile; declared '
+          '0.3.2 is a patch, a breaking change requires 0.4.0-rc.1',
+        );
+      },
+    );
+
+    test('the delta rides the PROCESS seam as `dart-apitool diff`', () async {
+      final dir = _writeClassifyPackage(name: package, version: '0.3.2');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final http = publishedHttp(['0.3.0', '0.3.1'], latest: '0.3.1');
+      final process = _FakeProcess(
+        ProcessResult(1, 0, '', ''),
+        report: _apiToolReport(),
+      );
+
+      await serviceFor(
+        process: process,
+        http: http,
+      ).classifyRelease(packageDir: dir.path, package: package);
+
+      expect(
+        http.requested,
+        Uri.parse('https://pub.dev/api/packages/leonard_flutter'),
+      );
+      expect(process.executable, 'dart-apitool');
+      final argv = process.arguments!;
+      expect(argv, hasLength(9));
+      expect(argv.sublist(0, 7), [
+        'diff',
+        '--old',
+        'pub://leonard_flutter/0.3.1',
+        '--new',
+        dir.path,
+        '--version-check-mode=none',
+        '--report-format=json',
+      ]);
+      expect(argv[7], '--report-file-path');
+      expect(p.basename(argv[8]), 'api-diff.json');
+      expect(process.workingDirectory, dir.path);
+    });
+
+    test('dart_apitool stays OUT of this package\'s dependency graph', () {
+      final pubspec = File('pubspec.yaml').readAsStringSync();
+      expect(
+        pubspec,
+        contains('name: dart_grid_assets'),
+        reason: 'the package suite runs from its own package root',
+      );
+      expect(pubspec, isNot(contains('dart_apitool')));
+    });
+
+    test('an addition-only delta is additive and a patch covers it', () async {
+      final dir = _writeClassifyPackage(name: package, version: '0.3.2');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final result = await serviceFor(
+        process: _FakeProcess(
+          ProcessResult(1, 0, '', ''),
+          report: _apiToolReport(
+            nonBreaking: _apiToolSection('Non-Breaking changes', [
+              _apiToolDeclaration('Method captureViewport', [
+                _apiToolChange(
+                  code: 'CE11',
+                  description: 'Executable "captureViewport" added',
+                  isBreaking: false,
+                ),
+              ]),
+            ]),
+          ),
+        ),
+        http: publishedHttp(['0.3.1'], latest: '0.3.1'),
+      ).classifyRelease(packageDir: dir.path, package: package);
+
+      expect(result.added, [
+        'captureViewport: Executable "captureViewport" added',
+      ]);
+      expect(result.removed, isEmpty);
+      expect(result.requiredChange, ReleaseRequiredChange.additive);
+      expect(result.declaredChange, ReleaseDeclaredChange.patch);
+      expect(result.verdict, ReleaseClassificationVerdict.ok);
+      expect(result.message, contains('covers an additive change'));
+    });
+
+    test('an unchanged API is `none`, and the patch stands', () async {
+      final dir = _writeClassifyPackage(name: package, version: '0.3.2');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final result = await serviceFor(
+        process: _FakeProcess(
+          ProcessResult(1, 0, '', ''),
+          report: _apiToolReport(),
+        ),
+        http: publishedHttp(['0.3.1'], latest: '0.3.1'),
+      ).classifyRelease(packageDir: dir.path, package: package);
+
+      expect(result.requiredChange, ReleaseRequiredChange.none);
+      expect(result.verdict, ReleaseClassificationVerdict.ok);
+      expect(result.message, contains('no public API change'));
+    });
+
+    test(
+      'the baseline is the GREATEST published version, prereleases included',
+      () async {
+        final dir = _writeClassifyPackage(name: package, version: '0.4.0-rc.2');
+        addTearDown(() => dir.deleteSync(recursive: true));
+        final process = _FakeProcess(
+          ProcessResult(1, 0, '', ''),
+          report: _apiToolReport(),
+        );
+
+        final result = await serviceFor(
+          process: process,
+          // pub.dev's `latest` is the greatest STABLE; the rc above it is
+          // what a consumer pinning `^0.4.0-rc.1` already resolves.
+          http: publishedHttp([
+            '0.3.0',
+            '0.3.1',
+            '0.4.0-rc.1',
+          ], latest: '0.3.1'),
+        ).classifyRelease(packageDir: dir.path, package: package);
+
+        expect(result.baseline.toString(), '0.4.0-rc.1');
+        expect(result.declaredChange, ReleaseDeclaredChange.prerelease);
+        expect(process.arguments![2], 'pub://leonard_flutter/0.4.0-rc.1');
+      },
+    );
+
+    test('a promotion off an rc baseline declares `promotion`', () async {
+      final dir = _writeClassifyPackage(name: package, version: '0.4.0');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final result = await serviceFor(
+        process: _FakeProcess(
+          ProcessResult(1, 0, '', ''),
+          report: _apiToolReport(),
+        ),
+        http: publishedHttp(['0.3.1', '0.4.0-rc.1'], latest: '0.3.1'),
+      ).classifyRelease(packageDir: dir.path, package: package);
+
+      expect(result.declaredChange, ReleaseDeclaredChange.promotion);
+    });
+
+    test(
+      'buckets are sorted and an UNFAMILIAR code lands in `changed`',
+      () async {
+        final dir = _writeClassifyPackage(name: package, version: '0.4.0');
+        addTearDown(() => dir.deleteSync(recursive: true));
+        final result = await serviceFor(
+          process: _FakeProcess(
+            ProcessResult(1, 0, '', ''),
+            report: _apiToolReport(
+              breaking: _apiToolSection('BREAKING CHANGES', [
+                _apiToolDeclaration('Method beta', [
+                  _apiToolChange(
+                    code: 'CE01',
+                    description: 'Parameter "b" removed',
+                    isBreaking: true,
+                  ),
+                ]),
+                _apiToolDeclaration('Class Zeta', [
+                  _apiToolChange(
+                    code: 'CI01',
+                    description: 'Interface "Zeta" removed',
+                    isBreaking: true,
+                  ),
+                ]),
+              ]),
+              nonBreaking: _apiToolSection('Non-Breaking changes', [
+                _apiToolDeclaration('Field gamma', [
+                  _apiToolChange(
+                    code: 'CF04',
+                    description: 'Field "gamma" type changed',
+                    isBreaking: false,
+                  ),
+                ]),
+                _apiToolDeclaration('Class Delta', [
+                  _apiToolChange(
+                    code: 'CZ99',
+                    description: 'Something this gate has never seen',
+                    isBreaking: false,
+                  ),
+                ]),
+                _apiToolDeclaration('Method alpha', [
+                  _apiToolChange(
+                    code: 'CE11',
+                    description: 'Executable "alpha" added',
+                    isBreaking: false,
+                  ),
+                ]),
+                // A package-level change has no enclosing declaration.
+                _apiToolChange(
+                  code: 'CD01',
+                  description: 'Dependency "meta" added',
+                  isBreaking: false,
+                ),
+              ]),
+            ),
+          ),
+          http: publishedHttp(['0.3.1'], latest: '0.3.1'),
+        ).classifyRelease(packageDir: dir.path, package: package);
+
+        expect(result.removed, [
+          'Zeta: Interface "Zeta" removed',
+          'beta: Parameter "b" removed',
+        ]);
+        expect(result.added, [
+          'Dependency "meta" added',
+          'alpha: Executable "alpha" added',
+        ]);
+        expect(result.changed, [
+          'Delta: Something this gate has never seen',
+          'gamma: Field "gamma" type changed',
+        ]);
+        expect(result.requiredChange, ReleaseRequiredChange.breaking);
+        expect(result.declaredChange, ReleaseDeclaredChange.minor);
+        expect(result.verdict, ReleaseClassificationVerdict.ok);
+        expect(result.message, contains('reaches the required 0.4.0-rc.1'));
+      },
+    );
+
+    test(
+      'a breaking change with no removed parameter still names its symbol',
+      () async {
+        final dir = _writeClassifyPackage(name: package, version: '0.3.2');
+        addTearDown(() => dir.deleteSync(recursive: true));
+        final result = await serviceFor(
+          process: _FakeProcess(
+            ProcessResult(1, 0, '', ''),
+            report: _apiToolReport(
+              breaking: _apiToolSection('BREAKING CHANGES', [
+                _apiToolDeclaration('Class Perception', [
+                  _apiToolChange(
+                    code: 'CI11',
+                    description: 'Sealed status changed',
+                    isBreaking: true,
+                  ),
+                ]),
+              ]),
+            ),
+          ),
+          http: publishedHttp(['0.3.1'], latest: '0.3.1'),
+        ).classifyRelease(packageDir: dir.path, package: package);
+
+        expect(result.changed, ['Perception: Sealed status changed']);
+        expect(result.verdict, ReleaseClassificationVerdict.understated);
+        expect(
+          result.message,
+          'leonard_flutter: exported Perception changed — Sealed status '
+          'changed — so existing consumers may no longer compile; declared '
+          '0.3.2 is a patch, a breaking change requires 0.4.0-rc.1',
+        );
+      },
+    );
+
+    test(
+      'a NESTED declaration is qualified — `PollResult.new`, never bare `new`',
+      () async {
+        final dir = _writeClassifyPackage(name: package, version: '0.1.3');
+        addTearDown(() => dir.deleteSync(recursive: true));
+        final result = await serviceFor(
+          // The shape a real `dart-apitool` run emits: the tool nests a
+          // constructor under its class, and both labels are needed to
+          // name the symbol a consumer writes.
+          process: _FakeProcess(
+            ProcessResult(1, 0, '', ''),
+            report: _apiToolReport(
+              breaking: _apiToolSection('BREAKING CHANGES', [
+                _apiToolDeclaration('Class PollResult', [
+                  _apiToolDeclaration('Constructor new', [
+                    _apiToolChange(
+                      code: 'CE02',
+                      description: 'Parameter "statusCode" added',
+                      isBreaking: true,
+                    ),
+                  ]),
+                ]),
+              ]),
+            ),
+          ),
+          http: publishedHttp(['0.1.2'], latest: '0.1.2'),
+        ).classifyRelease(packageDir: dir.path, package: package);
+
+        expect(result.added, ['PollResult.new: Parameter "statusCode" added']);
+        expect(result.requiredChange, ReleaseRequiredChange.breaking);
+        expect(result.verdict, ReleaseClassificationVerdict.understated);
+        expect(result.message, contains('exported PollResult.new changed'));
+      },
+    );
+
+    test('a missing analyzer NEVER yields a verdict — it refuses', () async {
+      final dir = _writeClassifyPackage(name: package, version: '0.3.2');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      await expectLater(
+        serviceFor(
+          process: _FakeProcess(
+            ProcessResult(1, 127, '', 'command not found: dart-apitool'),
+          ),
+          http: publishedHttp(['0.3.1'], latest: '0.3.1'),
+        ).classifyRelease(packageDir: dir.path, package: package),
+        throwsA(
+          isA<StateError>().having(
+            (error) => error.message,
+            'message',
+            allOf(
+              contains('dart pub global activate dart_apitool'),
+              contains('exit 127'),
+            ),
+          ),
+        ),
+      );
+    });
+
+    test('a process-LAUNCH failure carries the activation too', () async {
+      final dir = _writeClassifyPackage(name: package, version: '0.3.2');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      Future<ProcessResult> refuseToLaunch(
+        String executable,
+        List<String> arguments, {
+        String? workingDirectory,
+      }) async => throw ProcessException(
+        executable,
+        arguments,
+        'No such file or directory',
+        2,
+      );
+
+      await expectLater(
+        ReleaseService(
+          runProcess: refuseToLaunch,
+          httpGet: publishedHttp(['0.3.1'], latest: '0.3.1').call,
+        ).classifyRelease(packageDir: dir.path, package: package),
+        throwsA(
+          isA<StateError>().having(
+            (error) => error.message,
+            'message',
+            contains('dart pub global activate dart_apitool'),
+          ),
+        ),
+      );
+    });
+
+    test('a failing analyzer is a refusal, not a passing verdict', () async {
+      final dir = _writeClassifyPackage(name: package, version: '0.3.2');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      await expectLater(
+        serviceFor(
+          process: _FakeProcess(ProcessResult(1, 1, '', 'analysis exploded')),
+          http: publishedHttp(['0.3.1'], latest: '0.3.1'),
+        ).classifyRelease(packageDir: dir.path, package: package),
+        throwsA(
+          isA<StateError>().having(
+            (error) => error.message,
+            'message',
+            allOf(contains('exit 1'), contains('analysis exploded')),
+          ),
+        ),
+      );
+    });
+
+    test('an exit-0 run that wrote NO report is a refusal', () async {
+      final dir = _writeClassifyPackage(name: package, version: '0.3.2');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      await expectLater(
+        serviceFor(
+          process: _FakeProcess(ProcessResult(1, 0, '', '')),
+          http: publishedHttp(['0.3.1'], latest: '0.3.1'),
+        ).classifyRelease(packageDir: dir.path, package: package),
+        throwsA(
+          isA<StateError>().having(
+            (error) => error.message,
+            'message',
+            contains('wrote no report'),
+          ),
+        ),
+      );
+    });
+
+    test('a malformed report is a refusal, not an empty delta', () async {
+      final dir = _writeClassifyPackage(name: package, version: '0.3.2');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      await expectLater(
+        serviceFor(
+          process: _FakeProcess(
+            ProcessResult(1, 0, '', ''),
+            report: 'this is not a report',
+          ),
+          http: publishedHttp(['0.3.1'], latest: '0.3.1'),
+        ).classifyRelease(packageDir: dir.path, package: package),
+        throwsA(
+          isA<StateError>().having(
+            (error) => error.message,
+            'message',
+            contains('not JSON'),
+          ),
+        ),
+      );
+    });
+
+    test('a leaf missing its change code is a refusal, not a skip', () async {
+      final dir = _writeClassifyPackage(name: package, version: '0.3.2');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      await expectLater(
+        serviceFor(
+          process: _FakeProcess(
+            ProcessResult(1, 0, '', ''),
+            report: _apiToolReport(
+              breaking: _apiToolSection('BREAKING CHANGES', [
+                _apiToolDeclaration('Method captureScreenshot', [
+                  <String, Object?>{
+                    'changeDescription': 'Parameter "binding" removed',
+                    'isBreaking': true,
+                  },
+                ]),
+              ]),
+            ),
+          ),
+          http: publishedHttp(['0.3.1'], latest: '0.3.1'),
+        ).classifyRelease(packageDir: dir.path, package: package),
+        throwsA(
+          isA<StateError>().having(
+            (error) => error.message,
+            'message',
+            contains('missing changeCode'),
+          ),
+        ),
+      );
+    });
+
+    test('a never-published package has no baseline to classify', () async {
+      final dir = _writeClassifyPackage(name: package, version: '0.1.0');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      await expectLater(
+        serviceFor(
+          process: _FakeProcess.queue(const []),
+          http: _FakeHttp(const HttpFetch(statusCode: 404, body: '')),
+        ).classifyRelease(packageDir: dir.path, package: package),
+        throwsA(isA<StateError>()),
+      );
+    });
+
+    test('an unbumped HEAD is refused before the analyzer runs', () async {
+      final dir = _writeClassifyPackage(name: package, version: '0.3.1');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final process = _FakeProcess.queue(const []);
+      await expectLater(
+        serviceFor(
+          process: process,
+          http: publishedHttp(['0.3.0', '0.3.1'], latest: '0.3.1'),
+        ).classifyRelease(packageDir: dir.path, package: package),
+        throwsA(
+          isA<StateError>().having(
+            (error) => error.message,
+            'message',
+            contains('is not below the authored 0.3.1'),
+          ),
+        ),
+      );
+      expect(process.calls, isEmpty);
+    });
+
+    test('a --package that the directory does not hold is refused', () async {
+      final dir = _writeClassifyPackage(name: package, version: '0.3.2');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      await expectLater(
+        serviceFor(
+          process: _FakeProcess.queue(const []),
+          http: publishedHttp(['0.3.1'], latest: '0.3.1'),
+        ).classifyRelease(packageDir: dir.path, package: 'genesis_tree'),
+        throwsA(isA<FormatException>()),
+      );
+    });
+  });
+
   group('DartCommand / dart release — the THIN exported Command', () {
-    test('release is a subcommand of the dart umbrella, with the nine ops', () {
+    test('release is a subcommand of the dart umbrella, with the ten ops', () {
       final release = DartCommand().subcommands['release']!;
       expect(
         release.subcommands.keys,
@@ -777,6 +1402,7 @@ void main() {
           'validate-consumers',
           'promote',
           'scrub',
+          'classify',
           'order',
           'dry-run',
           'poll',
@@ -1118,6 +1744,218 @@ void main() {
         (json['declaredFloors'] as Map<String, dynamic>)['passed'],
         isTrue,
       );
+    });
+
+    test('release classify --json emits the documented single-object contract '
+        'and exits 1 on an understated bump', () async {
+      final dir = _writeClassifyPackage(
+        name: 'leonard_flutter',
+        version: '0.3.2',
+      );
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final out = StringBuffer();
+      final err = StringBuffer();
+      final runner = CommandRunner<int>('t', 'test')
+        ..addCommand(
+          ReleaseCommand(
+            service: ReleaseService(
+              runProcess: _FakeProcess(
+                ProcessResult(1, 0, '', ''),
+                report: _apiToolReport(
+                  breaking: _apiToolSection('BREAKING CHANGES', [
+                    _apiToolDeclaration('Method captureScreenshot', [
+                      _apiToolChange(
+                        code: 'CE01',
+                        description: 'Parameter "binding" removed',
+                        isBreaking: true,
+                      ),
+                    ]),
+                  ]),
+                ),
+              ).call,
+              httpGet: _FakeHttp(
+                HttpFetch(
+                  statusCode: 200,
+                  body: _pubVersionsBody(
+                    name: 'leonard_flutter',
+                    versions: ['0.3.0', '0.3.1'],
+                    latest: '0.3.1',
+                  ),
+                ),
+              ).call,
+            ),
+            out: out,
+            err: err,
+          ),
+        );
+
+      final code = await runner.run([
+        'release',
+        'classify',
+        '--dir',
+        dir.path,
+        '--package',
+        'leonard_flutter',
+        '--json',
+      ]);
+
+      expect(code, 1);
+      final lines = const LineSplitter().convert(out.toString());
+      expect(lines, hasLength(1));
+      final json = jsonDecode(lines.single) as Map<String, dynamic>;
+      expect(json.keys, [
+        'package',
+        'baseline',
+        'head',
+        'removed',
+        'changed',
+        'added',
+        'requiredChange',
+        'declaredChange',
+        'verdict',
+        'message',
+      ]);
+      expect(json['package'], 'leonard_flutter');
+      expect(json['baseline'], '0.3.1');
+      expect(json['head'], '0.3.2');
+      expect(json['removed'], [
+        'captureScreenshot: Parameter "binding" removed',
+      ]);
+      expect(json['changed'], isEmpty);
+      expect(json['added'], isEmpty);
+      expect(json['requiredChange'], 'breaking');
+      expect(json['declaredChange'], 'patch');
+      expect(json['verdict'], 'understated');
+      expect(
+        json['message'],
+        'leonard_flutter: exported captureScreenshot lost parameter binding, '
+        'so existing calls that supply binding no longer compile; declared '
+        '0.3.2 is a patch, a breaking change requires 0.4.0-rc.1',
+      );
+    });
+
+    test('release classify exits 0 on an additive patch, prose-only', () async {
+      final dir = _writeClassifyPackage(
+        name: 'leonard_flutter',
+        version: '0.3.2',
+      );
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final out = StringBuffer();
+      final runner = CommandRunner<int>('t', 'test')
+        ..addCommand(
+          ReleaseCommand(
+            service: ReleaseService(
+              runProcess: _FakeProcess(
+                ProcessResult(1, 0, '', ''),
+                report: _apiToolReport(
+                  nonBreaking: _apiToolSection('Non-Breaking changes', [
+                    _apiToolDeclaration('Method captureViewport', [
+                      _apiToolChange(
+                        code: 'CE11',
+                        description: 'Executable "captureViewport" added',
+                        isBreaking: false,
+                      ),
+                    ]),
+                  ]),
+                ),
+              ).call,
+              httpGet: _FakeHttp(
+                HttpFetch(
+                  statusCode: 200,
+                  body: _pubVersionsBody(
+                    name: 'leonard_flutter',
+                    versions: ['0.3.1'],
+                    latest: '0.3.1',
+                  ),
+                ),
+              ).call,
+            ),
+            out: out,
+          ),
+        );
+
+      final code = await runner.run([
+        'release',
+        'classify',
+        '--dir',
+        dir.path,
+        '--package',
+        'leonard_flutter',
+      ]);
+
+      expect(code, 0);
+      expect(out.toString().trim(), contains('covers an additive change'));
+      expect(out.toString(), isNot(contains('{')));
+    });
+
+    test(
+      'a missing dart-apitool exits 1 with NO verdict and the activation',
+      () async {
+        final dir = _writeClassifyPackage(
+          name: 'leonard_flutter',
+          version: '0.3.2',
+        );
+        addTearDown(() => dir.deleteSync(recursive: true));
+        final out = StringBuffer();
+        final err = StringBuffer();
+        final runner = CommandRunner<int>('t', 'test')
+          ..addCommand(
+            ReleaseCommand(
+              service: ReleaseService(
+                runProcess: _FakeProcess(
+                  ProcessResult(1, 127, '', 'command not found: dart-apitool'),
+                ).call,
+                httpGet: _FakeHttp(
+                  HttpFetch(
+                    statusCode: 200,
+                    body: _pubVersionsBody(
+                      name: 'leonard_flutter',
+                      versions: ['0.3.1'],
+                      latest: '0.3.1',
+                    ),
+                  ),
+                ).call,
+              ),
+              out: out,
+              err: err,
+            ),
+          );
+
+        final code = await runner.run([
+          'release',
+          'classify',
+          '--dir',
+          dir.path,
+          '--package',
+          'leonard_flutter',
+          '--json',
+        ]);
+
+        expect(code, 1);
+        expect(out.toString(), isEmpty);
+        expect(
+          err.toString(),
+          contains('dart pub global activate dart_apitool'),
+        );
+        expect(err.toString(), startsWith('release classify:'));
+      },
+    );
+
+    test('classify --dir on a missing dir exits 64 (usage)', () async {
+      final err = StringBuffer();
+      final runner = CommandRunner<int>('t', 'test')
+        ..addCommand(ReleaseCommand(out: StringBuffer(), err: err));
+      final code = await runner.run([
+        'release',
+        'classify',
+        '--dir',
+        '/no/such/dir',
+        '--package',
+        'leonard_flutter',
+        '--json',
+      ]);
+      expect(code, 64);
+      expect(err.toString(), contains('no such dir'));
     });
 
     test('scrub --dir on a missing dir exits 64 (usage)', () async {
