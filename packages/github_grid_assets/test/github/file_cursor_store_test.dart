@@ -86,6 +86,46 @@ void main() {
     expect(cursor.pullHeads['PR_512'], 'grid/512');
   });
 
+  test(
+    'a version-one document without workflow_runs_since loads null',
+    () async {
+      final file = File(store.cursorPath);
+      await file.parent.create(recursive: true);
+      await file.writeAsString(
+        '{"version":1,"since":null,"etags":{},"observation_ids":[]}',
+      );
+      final loaded = await store.load();
+      expect(loaded.workflowRunsSince, isNull);
+      expect(
+        loaded.toJson()['workflow_runs_since'],
+        isNull,
+        reason: 'the key is emitted and absent decodes as null, no bump',
+      );
+      expect(loaded.toJson()['version'], 1);
+    },
+  );
+
+  test('a malformed workflow_runs_since fails loudly', () async {
+    final file = File(store.cursorPath);
+    await file.parent.create(recursive: true);
+    await file.writeAsString(
+      '{"version":1,"since":null,"etags":{},"observation_ids":[],'
+      '"workflow_runs_since":7}',
+    );
+    await expectLater(store.load(), throwsFormatException);
+  });
+
+  test('the workflow-run window survives a save/load round trip', () async {
+    final cursor = GitHubReconcilerCursor(
+      workflowRunsSince: DateTime.parse('2026-09-07T06:00:00-05:00'),
+    );
+    await store.save(cursor);
+    expect(
+      (await store.load()).workflowRunsSince,
+      DateTime.parse('2026-09-07T11:00:00Z'),
+    );
+  });
+
   test('a version-one document without pending loads an empty queue', () async {
     final file = File(store.cursorPath);
     await file.parent.create(recursive: true);
@@ -109,6 +149,11 @@ void main() {
     const issueId = 'poll:issue:I_1:2026-08-09T00:00:00Z';
     const pullId = 'poll:issue:PR_2:2026-08-09T01:00:00Z';
     expect(cursor.pending, hasLength(2));
+    expect(
+      cursor.workflowRunsSince,
+      DateTime.parse('2026-08-09T02:00:00Z'),
+      reason: 'the recorded document carries the additive window',
+    );
     expect(cursor.pendingFor(issueId)!.acked, <String>['sink']);
     expect(cursor.hasObserved(issueId), isTrue);
     expect(cursor.pendingFor(pullId)!.acked, isEmpty);

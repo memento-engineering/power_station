@@ -7,6 +7,7 @@ import 'package:grid_runtime/grid_runtime.dart';
 import 'package:grid_sdk/grid_sdk.dart' show ProviderTreeContext;
 
 import '../code/github_app_pr_opener.dart';
+import '../code/workflow_run_intake_rule.dart';
 import '../credentials.dart';
 import '../github/ci_feedback_projection.dart';
 import '../github/github_reconciler.dart';
@@ -37,6 +38,8 @@ class GitHubReconcilerConfig {
     this.interval = const Duration(minutes: 1),
     this.minimumSpacing = const Duration(seconds: 5),
     this.arm = GitHubReconcilerArm.live,
+    this.defaultBranch = 'main',
+    this.workflowRuns = const <WorkflowRunIntakeRule>[],
   });
 
   /// GitHub repository owner.
@@ -59,6 +62,18 @@ class GitHubReconcilerConfig {
 
   /// Whether this composition may construct a runtime.
   final GitHubReconcilerArm arm;
+
+  /// The repository's default branch — what a rule declaring no branches
+  /// resolves to.
+  final String defaultBranch;
+
+  /// The seat's declared workflow-run intake rules, in authoritative order.
+  ///
+  /// EMPTY — the default — is the feature-off value: the reconciler's
+  /// workflow-run leg makes no request at all, and no workflow failure is
+  /// ever filed. Declaration order decides which of two overlapping rules
+  /// admits a run.
+  final List<WorkflowRunIntakeRule> workflowRuns;
 }
 
 /// Constructs a runtime from composition values and injected implementations.
@@ -146,6 +161,8 @@ GitHubReconcilerRuntime createGitHubReconcilerRuntime({
     client: client,
     cursors: cursors,
     emit: emit,
+    defaultBranch: config.defaultBranch,
+    workflowRuns: config.workflowRuns,
     onIntakeRowError: (error, stackTrace) => report(
       'reconciler.intakeRowSkipped',
       'skipped malformed intake row',

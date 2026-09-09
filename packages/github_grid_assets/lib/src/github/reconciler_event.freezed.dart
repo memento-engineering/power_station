@@ -11,6 +11,272 @@ part of 'reconciler_event.dart';
 
 // dart format off
 T _$identity<T>(T value) => value;
+
+/// @nodoc
+mixin _$WorkflowRunFailedJob {
+
+ String get jobName; String? get failedStepName;
+/// Create a copy of WorkflowRunFailedJob
+/// with the given fields replaced by the non-null parameter values.
+@JsonKey(includeFromJson: false, includeToJson: false)
+@pragma('vm:prefer-inline')
+$WorkflowRunFailedJobCopyWith<WorkflowRunFailedJob> get copyWith => _$WorkflowRunFailedJobCopyWithImpl<WorkflowRunFailedJob>(this as WorkflowRunFailedJob, _$identity);
+
+  /// Serializes this WorkflowRunFailedJob to a JSON map.
+  Map<String, dynamic> toJson();
+
+
+@override
+bool operator ==(Object other) {
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is WorkflowRunFailedJob&&(identical(other.jobName, jobName) || other.jobName == jobName)&&(identical(other.failedStepName, failedStepName) || other.failedStepName == failedStepName));
+}
+
+@JsonKey(includeFromJson: false, includeToJson: false)
+@override
+int get hashCode => Object.hash(runtimeType,jobName,failedStepName);
+
+@override
+String toString() {
+  return 'WorkflowRunFailedJob(jobName: $jobName, failedStepName: $failedStepName)';
+}
+
+
+}
+
+/// @nodoc
+abstract mixin class $WorkflowRunFailedJobCopyWith<$Res>  {
+  factory $WorkflowRunFailedJobCopyWith(WorkflowRunFailedJob value, $Res Function(WorkflowRunFailedJob) _then) = _$WorkflowRunFailedJobCopyWithImpl;
+@useResult
+$Res call({
+ String jobName, String? failedStepName
+});
+
+
+
+
+}
+/// @nodoc
+class _$WorkflowRunFailedJobCopyWithImpl<$Res>
+    implements $WorkflowRunFailedJobCopyWith<$Res> {
+  _$WorkflowRunFailedJobCopyWithImpl(this._self, this._then);
+
+  final WorkflowRunFailedJob _self;
+  final $Res Function(WorkflowRunFailedJob) _then;
+
+/// Create a copy of WorkflowRunFailedJob
+/// with the given fields replaced by the non-null parameter values.
+@pragma('vm:prefer-inline') @override $Res call({Object? jobName = null,Object? failedStepName = freezed,}) {
+  return _then(_self.copyWith(
+jobName: null == jobName ? _self.jobName : jobName // ignore: cast_nullable_to_non_nullable
+as String,failedStepName: freezed == failedStepName ? _self.failedStepName : failedStepName // ignore: cast_nullable_to_non_nullable
+as String?,
+  ));
+}
+
+}
+
+
+/// Adds pattern-matching-related methods to [WorkflowRunFailedJob].
+extension WorkflowRunFailedJobPatterns on WorkflowRunFailedJob {
+/// A variant of `map` that fallback to returning `orElse`.
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case final Subclass value:
+///     return ...;
+///   case _:
+///     return orElse();
+/// }
+/// ```
+
+@optionalTypeArgs TResult maybeMap<TResult extends Object?>(TResult Function( _WorkflowRunFailedJob value)?  $default,{required TResult orElse(),}){
+final _that = this;
+switch (_that) {
+case _WorkflowRunFailedJob() when $default != null:
+return $default(_that);case _:
+  return orElse();
+
+}
+}
+/// A `switch`-like method, using callbacks.
+///
+/// Callbacks receives the raw object, upcasted.
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case final Subclass value:
+///     return ...;
+///   case final Subclass2 value:
+///     return ...;
+/// }
+/// ```
+
+@optionalTypeArgs TResult map<TResult extends Object?>(TResult Function( _WorkflowRunFailedJob value)  $default,){
+final _that = this;
+switch (_that) {
+case _WorkflowRunFailedJob():
+return $default(_that);case _:
+  throw StateError('Unexpected subclass');
+
+}
+}
+/// A variant of `map` that fallback to returning `null`.
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case final Subclass value:
+///     return ...;
+///   case _:
+///     return null;
+/// }
+/// ```
+
+@optionalTypeArgs TResult? mapOrNull<TResult extends Object?>(TResult? Function( _WorkflowRunFailedJob value)?  $default,){
+final _that = this;
+switch (_that) {
+case _WorkflowRunFailedJob() when $default != null:
+return $default(_that);case _:
+  return null;
+
+}
+}
+/// A variant of `when` that fallback to an `orElse` callback.
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case Subclass(:final field):
+///     return ...;
+///   case _:
+///     return orElse();
+/// }
+/// ```
+
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( String jobName,  String? failedStepName)?  $default,{required TResult orElse(),}) {final _that = this;
+switch (_that) {
+case _WorkflowRunFailedJob() when $default != null:
+return $default(_that.jobName,_that.failedStepName);case _:
+  return orElse();
+
+}
+}
+/// A `switch`-like method, using callbacks.
+///
+/// As opposed to `map`, this offers destructuring.
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case Subclass(:final field):
+///     return ...;
+///   case Subclass2(:final field2):
+///     return ...;
+/// }
+/// ```
+
+@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( String jobName,  String? failedStepName)  $default,) {final _that = this;
+switch (_that) {
+case _WorkflowRunFailedJob():
+return $default(_that.jobName,_that.failedStepName);case _:
+  throw StateError('Unexpected subclass');
+
+}
+}
+/// A variant of `when` that fallback to returning `null`
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case Subclass(:final field):
+///     return ...;
+///   case _:
+///     return null;
+/// }
+/// ```
+
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( String jobName,  String? failedStepName)?  $default,) {final _that = this;
+switch (_that) {
+case _WorkflowRunFailedJob() when $default != null:
+return $default(_that.jobName,_that.failedStepName);case _:
+  return null;
+
+}
+}
+
+}
+
+/// @nodoc
+@JsonSerializable()
+
+class _WorkflowRunFailedJob implements WorkflowRunFailedJob {
+  const _WorkflowRunFailedJob({required this.jobName, this.failedStepName});
+  factory _WorkflowRunFailedJob.fromJson(Map<String, dynamic> json) => _$WorkflowRunFailedJobFromJson(json);
+
+@override final  String jobName;
+@override final  String? failedStepName;
+
+/// Create a copy of WorkflowRunFailedJob
+/// with the given fields replaced by the non-null parameter values.
+@override @JsonKey(includeFromJson: false, includeToJson: false)
+@pragma('vm:prefer-inline')
+_$WorkflowRunFailedJobCopyWith<_WorkflowRunFailedJob> get copyWith => __$WorkflowRunFailedJobCopyWithImpl<_WorkflowRunFailedJob>(this, _$identity);
+
+@override
+Map<String, dynamic> toJson() {
+  return _$WorkflowRunFailedJobToJson(this, );
+}
+
+@override
+bool operator ==(Object other) {
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is _WorkflowRunFailedJob&&(identical(other.jobName, jobName) || other.jobName == jobName)&&(identical(other.failedStepName, failedStepName) || other.failedStepName == failedStepName));
+}
+
+@JsonKey(includeFromJson: false, includeToJson: false)
+@override
+int get hashCode => Object.hash(runtimeType,jobName,failedStepName);
+
+@override
+String toString() {
+  return 'WorkflowRunFailedJob(jobName: $jobName, failedStepName: $failedStepName)';
+}
+
+
+}
+
+/// @nodoc
+abstract mixin class _$WorkflowRunFailedJobCopyWith<$Res> implements $WorkflowRunFailedJobCopyWith<$Res> {
+  factory _$WorkflowRunFailedJobCopyWith(_WorkflowRunFailedJob value, $Res Function(_WorkflowRunFailedJob) _then) = __$WorkflowRunFailedJobCopyWithImpl;
+@override @useResult
+$Res call({
+ String jobName, String? failedStepName
+});
+
+
+
+
+}
+/// @nodoc
+class __$WorkflowRunFailedJobCopyWithImpl<$Res>
+    implements _$WorkflowRunFailedJobCopyWith<$Res> {
+  __$WorkflowRunFailedJobCopyWithImpl(this._self, this._then);
+
+  final _WorkflowRunFailedJob _self;
+  final $Res Function(_WorkflowRunFailedJob) _then;
+
+/// Create a copy of WorkflowRunFailedJob
+/// with the given fields replaced by the non-null parameter values.
+@override @pragma('vm:prefer-inline') $Res call({Object? jobName = null,Object? failedStepName = freezed,}) {
+  return _then(_WorkflowRunFailedJob(
+jobName: null == jobName ? _self.jobName : jobName // ignore: cast_nullable_to_non_nullable
+as String,failedStepName: freezed == failedStepName ? _self.failedStepName : failedStepName // ignore: cast_nullable_to_non_nullable
+as String?,
+  ));
+}
+
+
+}
+
 NormalizedGitHubEvent _$NormalizedGitHubEventFromJson(
   Map<String, dynamic> json
 ) {
@@ -25,6 +291,10 @@ NormalizedGitHubEvent _$NormalizedGitHubEventFromJson(
           );
                 case 'checkConcluded':
           return CheckConcluded.fromJson(
+            json
+          );
+                case 'workflowRunConcluded':
+          return WorkflowRunConcluded.fromJson(
             json
           );
         
@@ -120,13 +390,14 @@ extension NormalizedGitHubEventPatterns on NormalizedGitHubEvent {
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeMap<TResult extends Object?>({TResult Function( IssueOpened value)?  issueOpened,TResult Function( PullRequestOpened value)?  pullRequestOpened,TResult Function( CheckConcluded value)?  checkConcluded,required TResult orElse(),}){
+@optionalTypeArgs TResult maybeMap<TResult extends Object?>({TResult Function( IssueOpened value)?  issueOpened,TResult Function( PullRequestOpened value)?  pullRequestOpened,TResult Function( CheckConcluded value)?  checkConcluded,TResult Function( WorkflowRunConcluded value)?  workflowRunConcluded,required TResult orElse(),}){
 final _that = this;
 switch (_that) {
 case IssueOpened() when issueOpened != null:
 return issueOpened(_that);case PullRequestOpened() when pullRequestOpened != null:
 return pullRequestOpened(_that);case CheckConcluded() when checkConcluded != null:
-return checkConcluded(_that);case _:
+return checkConcluded(_that);case WorkflowRunConcluded() when workflowRunConcluded != null:
+return workflowRunConcluded(_that);case _:
   return orElse();
 
 }
@@ -144,13 +415,14 @@ return checkConcluded(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult map<TResult extends Object?>({required TResult Function( IssueOpened value)  issueOpened,required TResult Function( PullRequestOpened value)  pullRequestOpened,required TResult Function( CheckConcluded value)  checkConcluded,}){
+@optionalTypeArgs TResult map<TResult extends Object?>({required TResult Function( IssueOpened value)  issueOpened,required TResult Function( PullRequestOpened value)  pullRequestOpened,required TResult Function( CheckConcluded value)  checkConcluded,required TResult Function( WorkflowRunConcluded value)  workflowRunConcluded,}){
 final _that = this;
 switch (_that) {
 case IssueOpened():
 return issueOpened(_that);case PullRequestOpened():
 return pullRequestOpened(_that);case CheckConcluded():
-return checkConcluded(_that);}
+return checkConcluded(_that);case WorkflowRunConcluded():
+return workflowRunConcluded(_that);}
 }
 /// A variant of `map` that fallback to returning `null`.
 ///
@@ -164,13 +436,14 @@ return checkConcluded(_that);}
 /// }
 /// ```
 
-@optionalTypeArgs TResult? mapOrNull<TResult extends Object?>({TResult? Function( IssueOpened value)?  issueOpened,TResult? Function( PullRequestOpened value)?  pullRequestOpened,TResult? Function( CheckConcluded value)?  checkConcluded,}){
+@optionalTypeArgs TResult? mapOrNull<TResult extends Object?>({TResult? Function( IssueOpened value)?  issueOpened,TResult? Function( PullRequestOpened value)?  pullRequestOpened,TResult? Function( CheckConcluded value)?  checkConcluded,TResult? Function( WorkflowRunConcluded value)?  workflowRunConcluded,}){
 final _that = this;
 switch (_that) {
 case IssueOpened() when issueOpened != null:
 return issueOpened(_that);case PullRequestOpened() when pullRequestOpened != null:
 return pullRequestOpened(_that);case CheckConcluded() when checkConcluded != null:
-return checkConcluded(_that);case _:
+return checkConcluded(_that);case WorkflowRunConcluded() when workflowRunConcluded != null:
+return workflowRunConcluded(_that);case _:
   return null;
 
 }
@@ -187,12 +460,13 @@ return checkConcluded(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>({TResult Function( String nodeId,  String actor,  String repository,  String substation,  String observationId,  int number,  String title,  String body)?  issueOpened,TResult Function( String nodeId,  String actor,  String repository,  String substation,  String observationId,  int number,  String title,  String body,  String headRef)?  pullRequestOpened,TResult Function( String nodeId,  String actor,  String repository,  String substation,  String observationId,  String headBranch,  String checkName,  String conclusion)?  checkConcluded,required TResult orElse(),}) {final _that = this;
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>({TResult Function( String nodeId,  String actor,  String repository,  String substation,  String observationId,  int number,  String title,  String body)?  issueOpened,TResult Function( String nodeId,  String actor,  String repository,  String substation,  String observationId,  int number,  String title,  String body,  String headRef)?  pullRequestOpened,TResult Function( String nodeId,  String actor,  String repository,  String substation,  String observationId,  String headBranch,  String checkName,  String conclusion)?  checkConcluded,TResult Function( String nodeId,  String actor,  String repository,  String substation,  String observationId,  int runId,  int runNumber,  String workflowPath,  String workflowName,  String event,  String headBranch,  String headSha,  String conclusion,  String htmlUrl,  List<WorkflowRunFailedJob> failedJobs)?  workflowRunConcluded,required TResult orElse(),}) {final _that = this;
 switch (_that) {
 case IssueOpened() when issueOpened != null:
 return issueOpened(_that.nodeId,_that.actor,_that.repository,_that.substation,_that.observationId,_that.number,_that.title,_that.body);case PullRequestOpened() when pullRequestOpened != null:
 return pullRequestOpened(_that.nodeId,_that.actor,_that.repository,_that.substation,_that.observationId,_that.number,_that.title,_that.body,_that.headRef);case CheckConcluded() when checkConcluded != null:
-return checkConcluded(_that.nodeId,_that.actor,_that.repository,_that.substation,_that.observationId,_that.headBranch,_that.checkName,_that.conclusion);case _:
+return checkConcluded(_that.nodeId,_that.actor,_that.repository,_that.substation,_that.observationId,_that.headBranch,_that.checkName,_that.conclusion);case WorkflowRunConcluded() when workflowRunConcluded != null:
+return workflowRunConcluded(_that.nodeId,_that.actor,_that.repository,_that.substation,_that.observationId,_that.runId,_that.runNumber,_that.workflowPath,_that.workflowName,_that.event,_that.headBranch,_that.headSha,_that.conclusion,_that.htmlUrl,_that.failedJobs);case _:
   return orElse();
 
 }
@@ -210,12 +484,13 @@ return checkConcluded(_that.nodeId,_that.actor,_that.repository,_that.substation
 /// }
 /// ```
 
-@optionalTypeArgs TResult when<TResult extends Object?>({required TResult Function( String nodeId,  String actor,  String repository,  String substation,  String observationId,  int number,  String title,  String body)  issueOpened,required TResult Function( String nodeId,  String actor,  String repository,  String substation,  String observationId,  int number,  String title,  String body,  String headRef)  pullRequestOpened,required TResult Function( String nodeId,  String actor,  String repository,  String substation,  String observationId,  String headBranch,  String checkName,  String conclusion)  checkConcluded,}) {final _that = this;
+@optionalTypeArgs TResult when<TResult extends Object?>({required TResult Function( String nodeId,  String actor,  String repository,  String substation,  String observationId,  int number,  String title,  String body)  issueOpened,required TResult Function( String nodeId,  String actor,  String repository,  String substation,  String observationId,  int number,  String title,  String body,  String headRef)  pullRequestOpened,required TResult Function( String nodeId,  String actor,  String repository,  String substation,  String observationId,  String headBranch,  String checkName,  String conclusion)  checkConcluded,required TResult Function( String nodeId,  String actor,  String repository,  String substation,  String observationId,  int runId,  int runNumber,  String workflowPath,  String workflowName,  String event,  String headBranch,  String headSha,  String conclusion,  String htmlUrl,  List<WorkflowRunFailedJob> failedJobs)  workflowRunConcluded,}) {final _that = this;
 switch (_that) {
 case IssueOpened():
 return issueOpened(_that.nodeId,_that.actor,_that.repository,_that.substation,_that.observationId,_that.number,_that.title,_that.body);case PullRequestOpened():
 return pullRequestOpened(_that.nodeId,_that.actor,_that.repository,_that.substation,_that.observationId,_that.number,_that.title,_that.body,_that.headRef);case CheckConcluded():
-return checkConcluded(_that.nodeId,_that.actor,_that.repository,_that.substation,_that.observationId,_that.headBranch,_that.checkName,_that.conclusion);}
+return checkConcluded(_that.nodeId,_that.actor,_that.repository,_that.substation,_that.observationId,_that.headBranch,_that.checkName,_that.conclusion);case WorkflowRunConcluded():
+return workflowRunConcluded(_that.nodeId,_that.actor,_that.repository,_that.substation,_that.observationId,_that.runId,_that.runNumber,_that.workflowPath,_that.workflowName,_that.event,_that.headBranch,_that.headSha,_that.conclusion,_that.htmlUrl,_that.failedJobs);}
 }
 /// A variant of `when` that fallback to returning `null`
 ///
@@ -229,12 +504,13 @@ return checkConcluded(_that.nodeId,_that.actor,_that.repository,_that.substation
 /// }
 /// ```
 
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>({TResult? Function( String nodeId,  String actor,  String repository,  String substation,  String observationId,  int number,  String title,  String body)?  issueOpened,TResult? Function( String nodeId,  String actor,  String repository,  String substation,  String observationId,  int number,  String title,  String body,  String headRef)?  pullRequestOpened,TResult? Function( String nodeId,  String actor,  String repository,  String substation,  String observationId,  String headBranch,  String checkName,  String conclusion)?  checkConcluded,}) {final _that = this;
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>({TResult? Function( String nodeId,  String actor,  String repository,  String substation,  String observationId,  int number,  String title,  String body)?  issueOpened,TResult? Function( String nodeId,  String actor,  String repository,  String substation,  String observationId,  int number,  String title,  String body,  String headRef)?  pullRequestOpened,TResult? Function( String nodeId,  String actor,  String repository,  String substation,  String observationId,  String headBranch,  String checkName,  String conclusion)?  checkConcluded,TResult? Function( String nodeId,  String actor,  String repository,  String substation,  String observationId,  int runId,  int runNumber,  String workflowPath,  String workflowName,  String event,  String headBranch,  String headSha,  String conclusion,  String htmlUrl,  List<WorkflowRunFailedJob> failedJobs)?  workflowRunConcluded,}) {final _that = this;
 switch (_that) {
 case IssueOpened() when issueOpened != null:
 return issueOpened(_that.nodeId,_that.actor,_that.repository,_that.substation,_that.observationId,_that.number,_that.title,_that.body);case PullRequestOpened() when pullRequestOpened != null:
 return pullRequestOpened(_that.nodeId,_that.actor,_that.repository,_that.substation,_that.observationId,_that.number,_that.title,_that.body,_that.headRef);case CheckConcluded() when checkConcluded != null:
-return checkConcluded(_that.nodeId,_that.actor,_that.repository,_that.substation,_that.observationId,_that.headBranch,_that.checkName,_that.conclusion);case _:
+return checkConcluded(_that.nodeId,_that.actor,_that.repository,_that.substation,_that.observationId,_that.headBranch,_that.checkName,_that.conclusion);case WorkflowRunConcluded() when workflowRunConcluded != null:
+return workflowRunConcluded(_that.nodeId,_that.actor,_that.repository,_that.substation,_that.observationId,_that.runId,_that.runNumber,_that.workflowPath,_that.workflowName,_that.event,_that.headBranch,_that.headSha,_that.conclusion,_that.htmlUrl,_that.failedJobs);case _:
   return null;
 
 }
@@ -499,6 +775,113 @@ as String,headBranch: null == headBranch ? _self.headBranch : headBranch // igno
 as String,checkName: null == checkName ? _self.checkName : checkName // ignore: cast_nullable_to_non_nullable
 as String,conclusion: null == conclusion ? _self.conclusion : conclusion // ignore: cast_nullable_to_non_nullable
 as String,
+  ));
+}
+
+
+}
+
+/// @nodoc
+@JsonSerializable()
+
+class WorkflowRunConcluded implements NormalizedGitHubEvent {
+  const WorkflowRunConcluded({required this.nodeId, required this.actor, required this.repository, required this.substation, required this.observationId, required this.runId, required this.runNumber, required this.workflowPath, required this.workflowName, required this.event, required this.headBranch, required this.headSha, required this.conclusion, required this.htmlUrl, required final  List<WorkflowRunFailedJob> failedJobs, final  String? $type}): _failedJobs = failedJobs,$type = $type ?? 'workflowRunConcluded';
+  factory WorkflowRunConcluded.fromJson(Map<String, dynamic> json) => _$WorkflowRunConcludedFromJson(json);
+
+@override final  String nodeId;
+@override final  String actor;
+@override final  String repository;
+@override final  String substation;
+@override final  String observationId;
+ final  int runId;
+ final  int runNumber;
+ final  String workflowPath;
+ final  String workflowName;
+ final  String event;
+ final  String headBranch;
+ final  String headSha;
+ final  String conclusion;
+ final  String htmlUrl;
+ final  List<WorkflowRunFailedJob> _failedJobs;
+ List<WorkflowRunFailedJob> get failedJobs {
+  if (_failedJobs is EqualUnmodifiableListView) return _failedJobs;
+  // ignore: implicit_dynamic_type
+  return EqualUnmodifiableListView(_failedJobs);
+}
+
+
+@JsonKey(name: 'runtimeType')
+final String $type;
+
+
+/// Create a copy of NormalizedGitHubEvent
+/// with the given fields replaced by the non-null parameter values.
+@override @JsonKey(includeFromJson: false, includeToJson: false)
+@pragma('vm:prefer-inline')
+$WorkflowRunConcludedCopyWith<WorkflowRunConcluded> get copyWith => _$WorkflowRunConcludedCopyWithImpl<WorkflowRunConcluded>(this, _$identity);
+
+@override
+Map<String, dynamic> toJson() {
+  return _$WorkflowRunConcludedToJson(this, );
+}
+
+@override
+bool operator ==(Object other) {
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is WorkflowRunConcluded&&(identical(other.nodeId, nodeId) || other.nodeId == nodeId)&&(identical(other.actor, actor) || other.actor == actor)&&(identical(other.repository, repository) || other.repository == repository)&&(identical(other.substation, substation) || other.substation == substation)&&(identical(other.observationId, observationId) || other.observationId == observationId)&&(identical(other.runId, runId) || other.runId == runId)&&(identical(other.runNumber, runNumber) || other.runNumber == runNumber)&&(identical(other.workflowPath, workflowPath) || other.workflowPath == workflowPath)&&(identical(other.workflowName, workflowName) || other.workflowName == workflowName)&&(identical(other.event, event) || other.event == event)&&(identical(other.headBranch, headBranch) || other.headBranch == headBranch)&&(identical(other.headSha, headSha) || other.headSha == headSha)&&(identical(other.conclusion, conclusion) || other.conclusion == conclusion)&&(identical(other.htmlUrl, htmlUrl) || other.htmlUrl == htmlUrl)&&const DeepCollectionEquality().equals(other._failedJobs, _failedJobs));
+}
+
+@JsonKey(includeFromJson: false, includeToJson: false)
+@override
+int get hashCode => Object.hash(runtimeType,nodeId,actor,repository,substation,observationId,runId,runNumber,workflowPath,workflowName,event,headBranch,headSha,conclusion,htmlUrl,const DeepCollectionEquality().hash(_failedJobs));
+
+@override
+String toString() {
+  return 'NormalizedGitHubEvent.workflowRunConcluded(nodeId: $nodeId, actor: $actor, repository: $repository, substation: $substation, observationId: $observationId, runId: $runId, runNumber: $runNumber, workflowPath: $workflowPath, workflowName: $workflowName, event: $event, headBranch: $headBranch, headSha: $headSha, conclusion: $conclusion, htmlUrl: $htmlUrl, failedJobs: $failedJobs)';
+}
+
+
+}
+
+/// @nodoc
+abstract mixin class $WorkflowRunConcludedCopyWith<$Res> implements $NormalizedGitHubEventCopyWith<$Res> {
+  factory $WorkflowRunConcludedCopyWith(WorkflowRunConcluded value, $Res Function(WorkflowRunConcluded) _then) = _$WorkflowRunConcludedCopyWithImpl;
+@override @useResult
+$Res call({
+ String nodeId, String actor, String repository, String substation, String observationId, int runId, int runNumber, String workflowPath, String workflowName, String event, String headBranch, String headSha, String conclusion, String htmlUrl, List<WorkflowRunFailedJob> failedJobs
+});
+
+
+
+
+}
+/// @nodoc
+class _$WorkflowRunConcludedCopyWithImpl<$Res>
+    implements $WorkflowRunConcludedCopyWith<$Res> {
+  _$WorkflowRunConcludedCopyWithImpl(this._self, this._then);
+
+  final WorkflowRunConcluded _self;
+  final $Res Function(WorkflowRunConcluded) _then;
+
+/// Create a copy of NormalizedGitHubEvent
+/// with the given fields replaced by the non-null parameter values.
+@override @pragma('vm:prefer-inline') $Res call({Object? nodeId = null,Object? actor = null,Object? repository = null,Object? substation = null,Object? observationId = null,Object? runId = null,Object? runNumber = null,Object? workflowPath = null,Object? workflowName = null,Object? event = null,Object? headBranch = null,Object? headSha = null,Object? conclusion = null,Object? htmlUrl = null,Object? failedJobs = null,}) {
+  return _then(WorkflowRunConcluded(
+nodeId: null == nodeId ? _self.nodeId : nodeId // ignore: cast_nullable_to_non_nullable
+as String,actor: null == actor ? _self.actor : actor // ignore: cast_nullable_to_non_nullable
+as String,repository: null == repository ? _self.repository : repository // ignore: cast_nullable_to_non_nullable
+as String,substation: null == substation ? _self.substation : substation // ignore: cast_nullable_to_non_nullable
+as String,observationId: null == observationId ? _self.observationId : observationId // ignore: cast_nullable_to_non_nullable
+as String,runId: null == runId ? _self.runId : runId // ignore: cast_nullable_to_non_nullable
+as int,runNumber: null == runNumber ? _self.runNumber : runNumber // ignore: cast_nullable_to_non_nullable
+as int,workflowPath: null == workflowPath ? _self.workflowPath : workflowPath // ignore: cast_nullable_to_non_nullable
+as String,workflowName: null == workflowName ? _self.workflowName : workflowName // ignore: cast_nullable_to_non_nullable
+as String,event: null == event ? _self.event : event // ignore: cast_nullable_to_non_nullable
+as String,headBranch: null == headBranch ? _self.headBranch : headBranch // ignore: cast_nullable_to_non_nullable
+as String,headSha: null == headSha ? _self.headSha : headSha // ignore: cast_nullable_to_non_nullable
+as String,conclusion: null == conclusion ? _self.conclusion : conclusion // ignore: cast_nullable_to_non_nullable
+as String,htmlUrl: null == htmlUrl ? _self.htmlUrl : htmlUrl // ignore: cast_nullable_to_non_nullable
+as String,failedJobs: null == failedJobs ? _self._failedJobs : failedJobs // ignore: cast_nullable_to_non_nullable
+as List<WorkflowRunFailedJob>,
   ));
 }
 

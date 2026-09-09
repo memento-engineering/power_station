@@ -132,7 +132,10 @@ Future<void> projectCiFeedback(
   switch (event) {
     case CheckConcluded() when projection != null:
       await projection(event);
-    case IssueOpened() || PullRequestOpened() || CheckConcluded():
+    case IssueOpened() ||
+        PullRequestOpened() ||
+        WorkflowRunConcluded() ||
+        CheckConcluded():
       return;
   }
 }

@@ -17,6 +17,7 @@ export 'src/code/github_delivery_policy.dart';
 export 'src/code/github_direct_merge_delivery.dart';
 export 'src/code/github_merge_runner.dart';
 export 'src/code/github_pr_delivery.dart';
+export 'src/code/workflow_run_intake_rule.dart';
 export 'src/github/file_cursor_store.dart';
 export 'src/github/ci_feedback.dart';
 export 'src/github/ci_feedback_projection.dart';

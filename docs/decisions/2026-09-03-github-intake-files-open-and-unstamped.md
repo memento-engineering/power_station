@@ -12,7 +12,7 @@ register:
   obsoletes: []
   updates: ["intake-argv-rides-bdcliservice-with-a-per-key-metadata-channel"]
   obsoleted-by: null
-  updated-by: []
+  updated-by: ["own-workflow-failures-are-self-approved"]
   bead: pow-5wo
   legacy-id: null
 ---
@@ -106,3 +106,13 @@ the suites `test/intake/github_intake_store_test.dart`,
 `test/github/github_reconciler_test.dart`. Public symbol renamed:
 `GitHubIntakeStore.upsertDeferred` -> `GitHubIntakeStore.upsert`. No symbol
 added. No change under `the_grid`, `grid_assets`, or any live bead store.
+
+**Updated by** `power_station#own-workflow-failures-are-self-approved`
+(accepted 2026-09-08, bead `pow-1rn.7`). That entry narrows ONE clause of this
+one: the sole-writer rule stands verbatim — `approve_command.dart`'s
+`ApproveService` is still the only writer of the `grid.approved_*` stamp, and
+the four-row filing preflight is still the only route to it — but "only after a
+HUMAN runs the approve verb" now admits a second authority, the seat's OWN
+repository workflow identity, and only under a rule the seat declared. Intake of
+a human's issue or pull request is UNCHANGED: it still files OPEN, unstamped,
+and unmountable until a human approves it.

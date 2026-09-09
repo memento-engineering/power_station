@@ -73,7 +73,14 @@ final class CiFeedbackProjection {
 
   Future<void> call(NormalizedGitHubEvent event) async {
     switch (event) {
+      // A workflow run is NOT a `grid/` pull-request session check: it carries
+      // no session to correlate, no rework round to increment and no landing
+      // to mark. It belongs to intake, and this leg returns from it — the
+      // arms are listed separately so the sealed union keeps that disjointness
+      // a COMPILE error to break rather than a comment to forget.
       case IssueOpened() || PullRequestOpened():
+        return;
+      case WorkflowRunConcluded():
         return;
       case CheckConcluded():
         await _projectCheck(event);
