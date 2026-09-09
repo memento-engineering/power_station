@@ -2,9 +2,17 @@ import 'dart:developer' as developer;
 
 import 'package:beads_dart/beads_dart.dart';
 import 'package:grid_assets/grid_assets.dart'
-    show ApprovalRefused, ApprovalStamped, ApproveService, FilingRequirementRow;
+    show
+        ApprovalRefused,
+        ApprovalStamped,
+        ApproveService,
+        FilingRequirementRow,
+        kApprovedAtKey,
+        kApprovedByKey,
+        kApprovedRevKey;
 import 'package:grid_sdk/grid_sdk.dart' show WorkBeadKeys;
 
+import '../github/issue_watch.dart';
 import '../github/reconciler_event.dart';
 
 /// The [GitHubIntakeRecord.kind] of a concluded workflow run.
@@ -211,10 +219,159 @@ class GitHubIntakeRecord {
       };
 }
 
+/// The `github.watch.*` metadata key naming the watched repository.
+const String kIssueWatchRepositoryKey = 'github.watch.repository';
+
+/// The `github.watch.*` metadata key naming the watched issue number.
+const String kIssueWatchNumberKey = 'github.watch.issue_number';
+
+/// The `github.watch.*` metadata key naming the watched issue's node id.
+const String kIssueWatchNodeIdKey = 'github.watch.issue_node_id';
+
+/// The `github.watch.*` metadata key naming the last projected observation.
+const String kIssueWatchObservationKey = 'github.watch.last_observation';
+
+/// The `github.watch.*` metadata key naming what last happened.
+const String kIssueWatchChangeKey = 'github.watch.change';
+
+/// The `github.watch.*` metadata key naming the issue's current state.
+const String kIssueWatchStateKey = 'github.watch.state';
+
+/// The `github.watch.*` metadata key naming the issue's current state reason.
+const String kIssueWatchStateReasonKey = 'github.watch.state_reason';
+
+/// The `github.watch.*` metadata key naming the issue's `updated_at`.
+const String kIssueWatchUpdatedAtKey = 'github.watch.updated_at';
+
+/// The [GitHubIssueWatchUpdate.change] value carried by a COMMENT.
+///
+/// A reply is not one of [GitHubIssueWatchChange]'s eight transitions, and
+/// borrowing one of their spellings for it would make the metadata lie.
+const String kIssueWatchCommentedChange = 'commented';
+
+/// One watched-issue observation, projected onto the bead that CAUSED it.
+///
+/// Beside [GitHubIntakeRecord] and deliberately unlike it: intake CREATES or
+/// correlates a bead by external ref, while a watch has a bead already — the
+/// one whose work filed the issue — and only ever reopens and annotates it.
+class GitHubIssueWatchUpdate {
+  /// Creates one watch update.
+  const GitHubIssueWatchUpdate({
+    required this.beadId,
+    required this.repository,
+    required this.issueNumber,
+    required this.issueNodeId,
+    required this.observationId,
+    required this.actor,
+    required this.change,
+    required this.state,
+    required this.stateReason,
+    required this.updatedAt,
+    required this.url,
+    required this.headline,
+    required this.detail,
+  });
+
+  /// The bead whose work caused the watched issue to be filed.
+  final String beadId;
+
+  /// `OWNER/REPOSITORY` of the watched issue.
+  final String repository;
+
+  /// The watched issue's number.
+  final int issueNumber;
+
+  /// GitHub's stable node id for the watched issue.
+  final String issueNodeId;
+
+  /// The observation this update was projected from.
+  final String observationId;
+
+  /// The login credited with the comment or transition, or null when GitHub
+  /// named nobody.
+  final String? actor;
+
+  /// The wire spelling of what happened — a [GitHubIssueWatchChange] or
+  /// [kIssueWatchCommentedChange].
+  final String change;
+
+  /// The issue's state as of this observation, or null when the observation
+  /// did not observe it.
+  ///
+  /// A COMMENT does not move the issue and carries no state: writing one here
+  /// would assert `open` for a reply on a closed issue, and clearing one would
+  /// erase what the last transition established. Null does NEITHER.
+  final String? state;
+
+  /// The issue's state reason as of this observation, or null when it has
+  /// none.
+  final String? stateReason;
+
+  /// The issue's `updated_at` as of this observation.
+  final DateTime updatedAt;
+
+  /// The addressable page for this observation, or null when it has none.
+  final String? url;
+
+  /// The one-line summary the appended note leads with.
+  final String headline;
+
+  /// The observation's own text — a comment body, or the state it landed in.
+  final String detail;
+
+  /// The DETERMINISTIC note appended to the originating bead.
+  ///
+  /// Deterministic so the same observation replayed after a crash appends
+  /// identical text: the delivered-id ledger is what stops a second append,
+  /// and a timestamped or randomized note would make a duplicate invisible to
+  /// a reader comparing them.
+  String get note => <String>[
+    'GitHub watch $repository#$issueNumber: $headline',
+    if (actor != null && actor != kIssueWatchResourceActor) 'By: @$actor',
+    if (url case final link?) 'URL: $link',
+    if (state case final value?)
+      if (stateReason case final reason?)
+        'State: $value ($reason)'
+      else
+        'State: $value',
+    'Observation: $observationId',
+    '',
+    detail,
+  ].join('\n');
+
+  /// The `github.watch.*` keys written through the merge channel.
+  Map<String, String> get metadata => <String, String>{
+    kIssueWatchRepositoryKey: repository,
+    kIssueWatchNumberKey: '$issueNumber',
+    kIssueWatchNodeIdKey: issueNodeId,
+    kIssueWatchObservationKey: observationId,
+    kIssueWatchChangeKey: change,
+    kIssueWatchUpdatedAtKey: updatedAt.toUtc().toIso8601String(),
+    if (state case final value?) kIssueWatchStateKey: value,
+    if (stateReason case final reason?) kIssueWatchStateReasonKey: reason,
+  };
+
+  /// The metadata keys this update REMOVES.
+  ///
+  /// The three approval-stamp keys always — a bead reopened by an external
+  /// reply is no longer a filing anyone approved — plus
+  /// [kIssueWatchStateReasonKey] when a STATE observation carries no reason, so
+  /// a reopened issue does not keep the reason it was closed with.
+  List<String> get unsetMetadata => <String>[
+    kApprovedByKey,
+    kApprovedAtKey,
+    kApprovedRevKey,
+    if (state != null && stateReason == null) kIssueWatchStateReasonKey,
+  ];
+}
+
 /// Upserts GitHub intake records by stable node id.
 abstract interface class GitHubIntakeStore {
   /// Creates an OPEN bead or updates its existing correlated bead.
   Future<void> upsert(GitHubIntakeRecord record);
+
+  /// Reopens and annotates the bead one watched-issue observation belongs to.
+  Future<void> appendIssueWatch(GitHubIssueWatchUpdate update);
 }
 
 /// bd-CLI implementation of [GitHubIntakeStore].
@@ -268,6 +425,28 @@ final class BdGitHubIntakeStore implements GitHubIntakeStore {
   final ApproveService? _approvals;
   final String? _workRoot;
   final String? _stateRoot;
+
+  /// Reopens [GitHubIssueWatchUpdate.beadId] and annotates it, in ONE update.
+  ///
+  /// It targets the ORIGINATING bead exactly — it never creates a bead, never
+  /// correlates one by external ref, and never opens a second store. A watched
+  /// issue already has the work that caused it; filing a fresh bead for a reply
+  /// would detach the answer from the question.
+  ///
+  /// The same update UNSETS all three approval-stamp keys and never calls
+  /// [ApproveService]. An issue in a repository we do not control, and every
+  /// commenter on it, is EXTERNAL — the self-approval authority the seat holds
+  /// is workflow-run-only and is not extended here — so the bead lands back
+  /// exactly where human intake leaves one: OPEN and unstamped.
+  @override
+  Future<void> appendIssueWatch(GitHubIssueWatchUpdate update) => _bd.update(
+    update.beadId,
+    status: BeadStatus.open,
+    appendNotes: update.note,
+    mergeMetadata: update.metadata,
+    unsetMetadata: update.unsetMetadata,
+    verifyTextRoundTrip: false,
+  );
 
   @override
   Future<void> upsert(GitHubIntakeRecord record) async {

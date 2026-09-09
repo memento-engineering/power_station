@@ -166,4 +166,53 @@ void main() {
     );
     await runtime.stop();
   });
+
+  test('schedule returns its request result, per key', () async {
+    final coordinator = GitHubPollCoordinator(minimumSpacing: Duration.zero);
+    expect(await coordinator.schedule('a', () async => 7), 7);
+    expect(
+      await coordinator.schedule(kForeignIssueWatchRateKey, () async => 'body'),
+      'body',
+    );
+    expect(await coordinator.schedule('a', () async {}), isNull);
+  });
+
+  test('the foreign key keeps a budget of its own on both sides', () async {
+    var now = DateTime.utc(2026, 9, 9);
+    final waits = <Duration>[];
+    final coordinator = GitHubPollCoordinator(
+      minimumSpacing: kUnauthenticatedGitHubMinimumSpacing,
+      now: () => now,
+      delay: (duration) async {
+        waits.add(duration);
+        now = now.add(duration);
+      },
+    );
+
+    await coordinator.schedule(kForeignIssueWatchRateKey, () async {});
+    await coordinator.schedule('installation-1', () async {});
+    expect(waits, isEmpty, reason: 'an installed start spends no foreign unit');
+
+    now = now.add(const Duration(seconds: 5));
+    await coordinator.schedule(kForeignIssueWatchRateKey, () async {});
+    expect(waits, <Duration>[const Duration(seconds: 60)]);
+
+    await coordinator.schedule('installation-1', () async {});
+    expect(waits, hasLength(1), reason: 'nor does it wait on the foreign one');
+  });
+
+  test('a failed foreign read leaves the key usable', () async {
+    final coordinator = GitHubPollCoordinator(minimumSpacing: Duration.zero);
+    await expectLater(
+      coordinator.schedule<int>(
+        kForeignIssueWatchRateKey,
+        () async => throw StateError('rate limited'),
+      ),
+      throwsStateError,
+    );
+    expect(
+      await coordinator.schedule(kForeignIssueWatchRateKey, () async => 1),
+      1,
+    );
+  });
 }

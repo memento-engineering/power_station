@@ -12,8 +12,11 @@ import '../credentials.dart';
 import '../github/ci_feedback_projection.dart';
 import '../github/github_reconciler.dart';
 import '../github/github_reconciler_runtime.dart';
+import '../github/issue_watch.dart';
 import '../github/reconciler_cursor.dart';
 import '../github_app_client.dart';
+import '../github_read_client.dart';
+import 'github_app_client_assets.dart';
 
 /// Selects whether a GitHub reconciler is constructed for a composition.
 enum GitHubReconcilerArm {
@@ -40,6 +43,9 @@ class GitHubReconcilerConfig {
     this.arm = GitHubReconcilerArm.live,
     this.defaultBranch = 'main',
     this.workflowRuns = const <WorkflowRunIntakeRule>[],
+    this.issueWatches = const <GitHubIssueWatch>[],
+    this.foreignReadTokenVariable,
+    this.foreignMinimumSpacing = kUnauthenticatedGitHubMinimumSpacing,
   });
 
   /// GitHub repository owner.
@@ -74,6 +80,33 @@ class GitHubReconcilerConfig {
   /// ever filed. Declaration order decides which of two overlapping rules
   /// admits a run.
   final List<WorkflowRunIntakeRule> workflowRuns;
+
+  /// The OUTBOUND issues this seat keeps watching after they were opened.
+  ///
+  /// EMPTY — the default — is the feature-off value: no watch request is made,
+  /// no foreign transport is constructed, and the named token variable is never
+  /// read. A watch naming this seat's own [owner]/[repository] rides the
+  /// existing installation lane; every other one is FOREIGN and rides the
+  /// token-less read lane, because a GitHub App cannot be installed on a third
+  /// party's repository.
+  final List<GitHubIssueWatch> issueWatches;
+
+  /// The NAME of the environment variable holding an optional personal token
+  /// for the foreign read lane; this library never holds the secret itself.
+  ///
+  /// Null — the default — is the token-less posture. A token is not authority:
+  /// it buys nothing but rate limit, and it can never reach a private
+  /// repository the way an installation can.
+  final String? foreignReadTokenVariable;
+
+  /// Minimum spacing between two FOREIGN reads.
+  ///
+  /// Defaults to [kUnauthenticatedGitHubMinimumSpacing]. Token-less reads are
+  /// clamped UP to that floor even when a seat configures less: GitHub's
+  /// unauthenticated allowance is 60 requests an hour, and 65 seconds keeps a
+  /// four-request reserve inside it. With a nonblank token the configured value
+  /// stands, because the allowance is then 5000 an hour.
+  final Duration foreignMinimumSpacing;
 }
 
 /// Constructs a runtime from composition values and injected implementations.
@@ -84,6 +117,7 @@ typedef GitHubReconcilerRuntimeFactory =
       required GitHubCursorStore cursors,
       required GitHubEventSink emit,
       required ExplorationTransport? transport,
+      required GitHubReadClient? foreignClient,
     });
 
 /// Reports one reconciler failure for [config] on [transport].
@@ -139,6 +173,7 @@ GitHubReconcilerRuntime createGitHubReconcilerRuntime({
   required GitHubCursorStore cursors,
   required GitHubEventSink emit,
   required ExplorationTransport? transport,
+  required GitHubReadClient? foreignClient,
 }) {
   void report(
     String flareName,
@@ -163,6 +198,8 @@ GitHubReconcilerRuntime createGitHubReconcilerRuntime({
     emit: emit,
     defaultBranch: config.defaultBranch,
     workflowRuns: config.workflowRuns,
+    issueWatches: config.issueWatches,
+    foreignClient: foreignClient,
     onIntakeRowError: (error, stackTrace) => report(
       'reconciler.intakeRowSkipped',
       'skipped malformed intake row',
@@ -192,6 +229,8 @@ class GitHubReconcilerAssets extends SingleChildStatefulSeed {
   const GitHubReconcilerAssets({
     this.config,
     this.runtimeFactory = createGitHubReconcilerRuntime,
+    this.environment = platformEnvironment,
+    this.foreignTransportFactory = createGitHubHttpTransport,
     super.child,
     super.key,
   });
@@ -201,6 +240,20 @@ class GitHubReconcilerAssets extends SingleChildStatefulSeed {
 
   /// Injectable runtime construction seam.
   final GitHubReconcilerRuntimeFactory runtimeFactory;
+
+  /// Injected environment reader for the FOREIGN lane's optional token.
+  ///
+  /// Consulted ONLY when at least one configured watch is foreign, so a seat
+  /// with no watches — or with installed-only watches — reads no environment at
+  /// all. This library never holds the secret; the config names the variable.
+  final EnvironmentReader environment;
+
+  /// Injected transport factory for the FOREIGN read client.
+  ///
+  /// SEPARATE from the App client's transport on purpose: the foreign lane must
+  /// never be able to pick up an installation token, and sharing a client is the
+  /// easiest way for that to happen by accident.
+  final GitHubHttpTransportFactory foreignTransportFactory;
 
   @override
   SingleChildState<GitHubReconcilerAssets> createState() =>
@@ -254,12 +307,49 @@ final class _GitHubReconcilerAssetsState
         cursors: cursors,
         emit: emit,
         transport: transport,
+        foreignClient: _foreignClient(config),
       );
       _replaceRuntime(replacement, config, client, cursors, emit, transport);
     }
     return InheritedSeed<GitHubReconcilerRuntime>(
       value: _runtime!,
       child: child,
+    );
+  }
+
+  /// The token-less read client for [config]'s FOREIGN watches, or null when it
+  /// has none.
+  ///
+  /// Constructed here and nowhere else, so the feature-off posture costs no
+  /// transport, no coordinator and no environment read. The foreign lane gets
+  /// its OWN [GitHubPollCoordinator] under [kForeignIssueWatchRateKey]: sharing
+  /// the installation's coordinator would let a 5000-per-hour lane spend a
+  /// 60-per-hour allowance.
+  GitHubReadClient? _foreignClient(GitHubReconcilerConfig config) {
+    final foreign = config.issueWatches
+        .where(
+          (watch) => !watch.isInstalledRepository(
+            owner: config.owner,
+            repository: config.repository,
+          ),
+        )
+        .toList(growable: false);
+    if (foreign.isEmpty) return null;
+    final variable = config.foreignReadTokenVariable;
+    final token = variable == null ? null : _assets.environment()[variable];
+    final authenticated = token != null && token.trim().isNotEmpty;
+    final spacing =
+        authenticated ||
+            config.foreignMinimumSpacing >= kUnauthenticatedGitHubMinimumSpacing
+        ? config.foreignMinimumSpacing
+        : kUnauthenticatedGitHubMinimumSpacing;
+    final coordinator = GitHubPollCoordinator(minimumSpacing: spacing);
+    return GitHubReadClient(
+      transport: _assets.foreignTransportFactory(),
+      apiBaseUri: Uri.https('api.github.com', ''),
+      personalToken: token,
+      schedule: (request) =>
+          coordinator.schedule(kForeignIssueWatchRateKey, request),
     );
   }
 

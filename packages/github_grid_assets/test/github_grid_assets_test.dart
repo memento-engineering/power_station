@@ -10,6 +10,8 @@ import 'package:grid_sdk/grid_sdk.dart' show Provider;
 import 'package:grid_sdk/grid_sdk.dart' as sdk;
 import 'package:test/test.dart';
 
+import 'support/issue_watch_fixtures.dart';
+
 MountEligibilityDecision _eligible(Bead bead) =>
     const MountEligibilityDecision.eligible();
 
@@ -561,5 +563,142 @@ void main() {
     expect(oldSender.events, isEmpty);
     expect(replacementSender.events, [contains('build')]);
     owner.unmountRoot();
+  });
+
+  group('the reconciler observer binding', () {
+    GitHubIssueWatchProjection projection(RecordingIntakeStore store) =>
+        GitHubIssueWatchProjection(
+          trust: GitHubSelfTrust(
+            githubUser: 'nico',
+            repository: 'memento/power_station',
+          ),
+          store: store,
+        );
+
+    NormalizedGitHubEvent comment() => NormalizedGitHubEvent.issueCommented(
+      nodeId: 'IC_first',
+      actor: 'ricardoboss',
+      repository: 'ricardoboss/radioactive_dart',
+      substation: 'power_station',
+      observationId: 'poll:issue-comment:IC_first',
+      originatingBeadId: 'lunar_station-6p9',
+      issueNodeId: 'I_kwDO',
+      issueAuthor: 'nico',
+      issueNumber: 1,
+      commentId: 11,
+      body: 'A reply.',
+      url: 'https://github.test/1',
+      updatedAt: DateTime.utc(2026, 9, 9, 11),
+    );
+
+    test('BOTH legs register under their own durable keys', () async {
+      final runtime = _RecordingRuntime();
+      final store = RecordingIntakeStore();
+      final owner = TreeOwner();
+      addTearDown(owner.dispose);
+      owner.mountRoot(
+        sdk.ProviderScope(
+          child: Provider<GitHubReconcilerRuntime>.value(
+            runtime,
+            child: Provider<CiFeedbackProjection>.value(
+              _projection(_FeedbackSender()),
+              child: Provider<GitHubIssueWatchProjection>.value(
+                projection(store),
+                child: const GitHubGridAssets(child: _Leaf()),
+              ),
+            ),
+          ),
+        ),
+      );
+      owner.flush();
+
+      expect(runtime.starts, 1, reason: 'ONE owner starts the runtime once');
+      // A duplicate registration is refused loudly, so this proves BOTH names
+      // are already taken by exactly one observer each.
+      expect(
+        () => runtime.reconciler.addObserver(
+          kCiFeedbackDeliveryLeg,
+          (_) async {},
+        ),
+        throwsArgumentError,
+      );
+      expect(
+        () => runtime.reconciler.addObserver(
+          kGitHubIssueWatchDeliveryLeg,
+          (_) async {},
+        ),
+        throwsArgumentError,
+      );
+
+      owner.unmountRoot();
+      await Future<void>.delayed(Duration.zero);
+      expect(runtime.stops, 1);
+      // Both were removed symmetrically, so both names are free again.
+      runtime.reconciler.addObserver(kCiFeedbackDeliveryLeg, (_) async {});
+      runtime.reconciler.addObserver(
+        kGitHubIssueWatchDeliveryLeg,
+        (_) async {},
+      );
+    });
+
+    test('a watch event reaches ONLY the watch projection', () async {
+      final runtime = _RecordingRuntime();
+      final store = RecordingIntakeStore();
+      final sender = _FeedbackSender();
+      final owner = TreeOwner();
+      addTearDown(owner.dispose);
+      owner.mountRoot(
+        sdk.ProviderScope(
+          child: Provider<GitHubReconcilerRuntime>.value(
+            runtime,
+            child: Provider<CiFeedbackProjection>.value(
+              _projection(sender),
+              child: Provider<GitHubIssueWatchProjection>.value(
+                projection(store),
+                child: const GitHubGridAssets(child: _Leaf()),
+              ),
+            ),
+          ),
+        ),
+      );
+      owner.flush();
+
+      await projectIssueWatch(projection(store), comment());
+      expect(store.watchUpdates, hasLength(1));
+      await projectCiFeedback(_projection(sender), comment());
+      expect(sender.events, isEmpty);
+      owner.unmountRoot();
+    });
+
+    test('an unmounted watch projection leaves the CI leg bound', () async {
+      final runtime = _RecordingRuntime();
+      final owner = TreeOwner();
+      addTearDown(owner.dispose);
+      owner.mountRoot(
+        sdk.ProviderScope(
+          child: Provider<GitHubReconcilerRuntime>.value(
+            runtime,
+            child: Provider<CiFeedbackProjection>.value(
+              _projection(_FeedbackSender()),
+              child: const GitHubGridAssets(child: _Leaf()),
+            ),
+          ),
+        ),
+      );
+      owner.flush();
+
+      expect(runtime.starts, 1);
+      expect(
+        () => runtime.reconciler.addObserver(
+          kGitHubIssueWatchDeliveryLeg,
+          (_) async {},
+        ),
+        throwsArgumentError,
+        reason: 'the leg is registered even with no projection to route to',
+      );
+      // And routing to nothing is inert rather than a throw.
+      await projectIssueWatch(null, comment());
+      owner.unmountRoot();
+    });
   });
 }

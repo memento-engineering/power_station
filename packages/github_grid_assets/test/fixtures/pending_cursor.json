@@ -5,6 +5,7 @@
   "etags": {"intake/issues": "\"issues\""},
   "observation_ids": ["poll:issue:I_1:2026-08-09T00:00:00Z"],
   "pull_heads": {"PR_2": "grid/pow-40a4"},
+  "issue_watches": {},
   "pending": [
     {
       "event": {

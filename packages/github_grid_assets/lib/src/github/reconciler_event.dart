@@ -1,5 +1,7 @@
 import 'package:freezed_annotation/freezed_annotation.dart';
 
+import 'issue_watch.dart';
+
 part 'reconciler_event.freezed.dart';
 part 'reconciler_event.g.dart';
 
@@ -89,6 +91,58 @@ sealed class NormalizedGitHubEvent with _$NormalizedGitHubEvent {
     required String htmlUrl,
     required List<WorkflowRunFailedJob> failedJobs,
   }) = WorkflowRunConcluded;
+
+  /// A comment observed on a WATCHED outbound issue.
+  ///
+  /// [nodeId] is the COMMENT's node id and [actor] is whoever wrote it — a
+  /// third-party maintainer, most of the time. The issue's own identity rides
+  /// [issueNodeId] / [issueAuthor] / [issueNumber] beside them, because
+  /// ownership of the watch is decided by who opened the ISSUE, never by who
+  /// replied to it. [originatingBeadId] is the bead the observation lands on.
+  ///
+  /// Free of trust, approval and lane policy: an installed-repository watch
+  /// and a foreign one emit exactly this envelope, and so must a later webhook
+  /// decoder.
+  const factory NormalizedGitHubEvent.issueCommented({
+    required String nodeId,
+    required String actor,
+    required String repository,
+    required String substation,
+    required String observationId,
+    required String originatingBeadId,
+    required String issueNodeId,
+    required String issueAuthor,
+    required int issueNumber,
+    required int commentId,
+    required String body,
+    required String url,
+    required DateTime updatedAt,
+  }) = IssueCommented;
+
+  /// A state transition observed on a WATCHED outbound issue.
+  ///
+  /// [nodeId] is the TRANSITION's identity — the timeline event's node id, or
+  /// the issue's own node id for a transition only the issue resource or an
+  /// HTTP status could report. [state] and [stateReason] are the issue's
+  /// CURRENT values, [locked] its current lock, and [change] names what
+  /// happened. [url] is null when the transition has no addressable page.
+  const factory NormalizedGitHubEvent.watchedIssueStateChanged({
+    required String nodeId,
+    required String actor,
+    required String repository,
+    required String substation,
+    required String observationId,
+    required String originatingBeadId,
+    required String issueNodeId,
+    required String issueAuthor,
+    required int issueNumber,
+    required GitHubIssueWatchChange change,
+    required String state,
+    required String? stateReason,
+    required bool locked,
+    required String? url,
+    required DateTime updatedAt,
+  }) = WatchedIssueStateChanged;
 
   /// Decodes one normalized envelope; malformed shapes throw.
   factory NormalizedGitHubEvent.fromJson(Map<String, Object?> json) =>

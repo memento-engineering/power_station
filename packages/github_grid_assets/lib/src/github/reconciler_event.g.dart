@@ -142,3 +142,92 @@ Map<String, dynamic> _$WorkflowRunConcludedToJson(
   'failedJobs': instance.failedJobs,
   'runtimeType': instance.$type,
 };
+
+IssueCommented _$IssueCommentedFromJson(Map<String, dynamic> json) =>
+    IssueCommented(
+      nodeId: json['nodeId'] as String,
+      actor: json['actor'] as String,
+      repository: json['repository'] as String,
+      substation: json['substation'] as String,
+      observationId: json['observationId'] as String,
+      originatingBeadId: json['originatingBeadId'] as String,
+      issueNodeId: json['issueNodeId'] as String,
+      issueAuthor: json['issueAuthor'] as String,
+      issueNumber: (json['issueNumber'] as num).toInt(),
+      commentId: (json['commentId'] as num).toInt(),
+      body: json['body'] as String,
+      url: json['url'] as String,
+      updatedAt: DateTime.parse(json['updatedAt'] as String),
+      $type: json['runtimeType'] as String?,
+    );
+
+Map<String, dynamic> _$IssueCommentedToJson(IssueCommented instance) =>
+    <String, dynamic>{
+      'nodeId': instance.nodeId,
+      'actor': instance.actor,
+      'repository': instance.repository,
+      'substation': instance.substation,
+      'observationId': instance.observationId,
+      'originatingBeadId': instance.originatingBeadId,
+      'issueNodeId': instance.issueNodeId,
+      'issueAuthor': instance.issueAuthor,
+      'issueNumber': instance.issueNumber,
+      'commentId': instance.commentId,
+      'body': instance.body,
+      'url': instance.url,
+      'updatedAt': instance.updatedAt.toIso8601String(),
+      'runtimeType': instance.$type,
+    };
+
+WatchedIssueStateChanged _$WatchedIssueStateChangedFromJson(
+  Map<String, dynamic> json,
+) => WatchedIssueStateChanged(
+  nodeId: json['nodeId'] as String,
+  actor: json['actor'] as String,
+  repository: json['repository'] as String,
+  substation: json['substation'] as String,
+  observationId: json['observationId'] as String,
+  originatingBeadId: json['originatingBeadId'] as String,
+  issueNodeId: json['issueNodeId'] as String,
+  issueAuthor: json['issueAuthor'] as String,
+  issueNumber: (json['issueNumber'] as num).toInt(),
+  change: $enumDecode(_$GitHubIssueWatchChangeEnumMap, json['change']),
+  state: json['state'] as String,
+  stateReason: json['stateReason'] as String?,
+  locked: json['locked'] as bool,
+  url: json['url'] as String?,
+  updatedAt: DateTime.parse(json['updatedAt'] as String),
+  $type: json['runtimeType'] as String?,
+);
+
+Map<String, dynamic> _$WatchedIssueStateChangedToJson(
+  WatchedIssueStateChanged instance,
+) => <String, dynamic>{
+  'nodeId': instance.nodeId,
+  'actor': instance.actor,
+  'repository': instance.repository,
+  'substation': instance.substation,
+  'observationId': instance.observationId,
+  'originatingBeadId': instance.originatingBeadId,
+  'issueNodeId': instance.issueNodeId,
+  'issueAuthor': instance.issueAuthor,
+  'issueNumber': instance.issueNumber,
+  'change': _$GitHubIssueWatchChangeEnumMap[instance.change]!,
+  'state': instance.state,
+  'stateReason': instance.stateReason,
+  'locked': instance.locked,
+  'url': instance.url,
+  'updatedAt': instance.updatedAt.toIso8601String(),
+  'runtimeType': instance.$type,
+};
+
+const _$GitHubIssueWatchChangeEnumMap = {
+  GitHubIssueWatchChange.closedCompleted: 'closed_completed',
+  GitHubIssueWatchChange.closedNotPlanned: 'closed_not_planned',
+  GitHubIssueWatchChange.reopened: 'reopened',
+  GitHubIssueWatchChange.locked: 'locked',
+  GitHubIssueWatchChange.transferred: 'transferred',
+  GitHubIssueWatchChange.deleted: 'deleted',
+  GitHubIssueWatchChange.convertedToDiscussion: 'converted_to_discussion',
+  GitHubIssueWatchChange.unreadable: 'unreadable',
+};

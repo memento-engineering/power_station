@@ -108,6 +108,7 @@ GitHubReconcilerRuntime _inert({
   required GitHubCursorStore cursors,
   required GitHubEventSink emit,
   required ExplorationTransport? transport,
+  required GitHubReadClient? foreignClient,
 }) => _InertRuntime(client: client);
 
 final _client = GitHubAppClient(
@@ -194,6 +195,7 @@ void main() {
       cursors: _Cursors(const GitHubReconcilerCursor().enqueue(_check)),
       emit: (_) async {},
       transport: flares,
+      foreignClient: null,
     );
     runtime.reconciler.addObserver(
       kCiFeedbackDeliveryLeg,

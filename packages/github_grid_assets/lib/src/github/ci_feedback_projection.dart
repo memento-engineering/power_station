@@ -82,6 +82,12 @@ final class CiFeedbackProjection {
         return;
       case WorkflowRunConcluded():
         return;
+      // A watched OUTBOUND issue is not a session check either: it carries no
+      // `grid/` head branch, no rework round and no landing. It belongs to the
+      // issue-watch leg, and the arms stay listed separately so the sealed
+      // union keeps that disjointness a COMPILE error to break.
+      case IssueCommented() || WatchedIssueStateChanged():
+        return;
       case CheckConcluded():
         await _projectCheck(event);
     }

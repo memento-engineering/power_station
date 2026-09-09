@@ -700,6 +700,72 @@ void main() {
     expect(a.hashCode, b.hashCode);
     expect('$a', contains('MY_APP_KEY'), reason: 'the NAME is config');
   });
+
+  group('AC-9 — external delegate constructor shapes still compile', () {
+    // COPIED from the current `SpaceDelegate.substations` and
+    // `LunarDelegate.substations`, which are authored OUTSIDE this repo. They
+    // are the compatibility contract: every value the outbound-issue watch
+    // adds is optional, so neither delegate needs an edit to keep composing.
+    //
+    // `const` on the config is load-bearing — a new REQUIRED field would fail
+    // this file at COMPILE time, which is the point.
+    const spaceSeat = GitHubReconcilerConfig(
+      owner: 'memento-engineering',
+      repository: 'power_station',
+      substation: 'power_station',
+      installationId: '152260260',
+    );
+    const lunarSeat = GitHubReconcilerConfig(
+      owner: 'nicholasspencer',
+      repository: 'radioactive_dart',
+      substation: 'radioactive_dart',
+      installationId: '152263848',
+    );
+
+    test('AC-9 — both shapes compile with no watch argument', () {
+      for (final config in const <GitHubReconcilerConfig>[
+        spaceSeat,
+        lunarSeat,
+      ]) {
+        expect(config.issueWatches, isEmpty, reason: 'feature-off default');
+        expect(config.foreignReadTokenVariable, isNull);
+        expect(config.foreignMinimumSpacing, const Duration(seconds: 65));
+        expect(config.arm, GitHubReconcilerArm.live);
+        expect(config.workflowRuns, isEmpty);
+      }
+    });
+
+    test('AC-9 — the seeds that mount them build unchanged', () {
+      final seeds = <SubstationSeed>[
+        SubstationSeed(
+          name: 'power_station',
+          root: '/umbrella/power_station',
+          app: const SubstationAppIdentity(
+            appId: '1',
+            installationId: 152260260,
+            privateKeyVar: 'GITHUB_APP_KEY',
+          ),
+          githubPoll: spaceSeat,
+          arming: const AgentArming(build: BuildAgentEnvironment([_seatBuild])),
+        ),
+        SubstationSeed(
+          name: 'radioactive_dart',
+          root: '../radioactive_dart',
+          app: const SubstationAppIdentity(
+            appId: '2',
+            installationId: 152263848,
+            privateKeyVar: 'GITHUB_APP_KEY',
+          ),
+          githubPoll: lunarSeat,
+        ),
+      ];
+
+      for (final seed in seeds) {
+        expect(seed.githubPoll!.issueWatches, isEmpty);
+        expect(seed.githubPoll!.arm, GitHubReconcilerArm.live);
+      }
+    });
+  });
 }
 
 /// An EMPTY process environment — the Fake that keeps the App-key read

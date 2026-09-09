@@ -62,4 +62,89 @@ void main() {
       expect(encoded, isNot(contains(rawKey)));
     }
   });
+
+  test('watch variants round-trip and carry no raw GitHub keys', () {
+    final events = <NormalizedGitHubEvent>[
+      NormalizedGitHubEvent.issueCommented(
+        nodeId: 'IC_first',
+        actor: 'ricardoboss',
+        repository: 'ricardoboss/radioactive_dart',
+        substation: 'power_station',
+        observationId: 'poll:issue-comment:IC_first',
+        originatingBeadId: 'lunar_station-6p9',
+        issueNodeId: 'I_kwDO',
+        issueAuthor: 'nico',
+        issueNumber: 1,
+        commentId: 11,
+        body: 'A maintainer reply.',
+        url: 'https://github.com/ricardoboss/radioactive_dart/issues/1',
+        updatedAt: DateTime.utc(2026, 9, 9, 11),
+      ),
+      NormalizedGitHubEvent.watchedIssueStateChanged(
+        nodeId: 'CE_closed',
+        actor: 'ricardoboss',
+        repository: 'ricardoboss/radioactive_dart',
+        substation: 'power_station',
+        observationId: 'poll:issue-state:CE_closed:closed_not_planned',
+        originatingBeadId: 'lunar_station-6p9',
+        issueNodeId: 'I_kwDO',
+        issueAuthor: 'nico',
+        issueNumber: 1,
+        change: GitHubIssueWatchChange.closedNotPlanned,
+        state: 'closed',
+        stateReason: 'not_planned',
+        locked: false,
+        url: null,
+        updatedAt: DateTime.utc(2026, 9, 9, 13),
+      ),
+    ];
+
+    for (final event in events) {
+      final encoded = jsonDecode(jsonEncode(event.toJson()));
+      expect(
+        NormalizedGitHubEvent.fromJson(encoded as Map<String, Object?>),
+        event,
+      );
+      for (final rawKey in const <String>[
+        'state_reason',
+        'node_id',
+        'html_url',
+        'timeline',
+        'user',
+      ]) {
+        expect(jsonEncode(event.toJson()), isNot(contains(rawKey)));
+      }
+    }
+    expect(
+      events.last.toJson()['change'],
+      'closed_not_planned',
+      reason: 'the enum has a stable snake wire spelling',
+    );
+    expect(events.first.toJson()['runtimeType'], 'issueCommented');
+    expect(events.last.toJson()['runtimeType'], 'watchedIssueStateChanged');
+  });
+
+  test('every change value has a distinct, stable wire spelling', () {
+    final wires = <String>{
+      for (final change in GitHubIssueWatchChange.values) change.wire,
+    };
+    expect(wires, hasLength(GitHubIssueWatchChange.values.length));
+    expect(wires, <String>{
+      'closed_completed',
+      'closed_not_planned',
+      'reopened',
+      'locked',
+      'transferred',
+      'deleted',
+      'converted_to_discussion',
+      'unreadable',
+    });
+    for (final change in GitHubIssueWatchChange.values) {
+      expect(GitHubIssueWatchChange.fromWire(change.wire), change);
+    }
+    expect(
+      () => GitHubIssueWatchChange.fromWire('exploded'),
+      throwsFormatException,
+    );
+  });
 }

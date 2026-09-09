@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:grid_runtime/grid_runtime.dart';
 
 import '../github_app_client.dart';
+import '../http_transport.dart';
 
 /// Reads the origin URL for the checkout rooted at [workDir].
 typedef GitRemoteReader = Future<String> Function(String workDir);
@@ -308,14 +309,6 @@ String _failureReason(
       '(HTTP $status${detail.isEmpty ? '' : ': $detail'}). $action';
 }
 
-/// The character budget a rendered cause gets in [_thrownFailureReason].
-///
-/// A CHARACTER cap, never a first-line cap: `Error.safeToString` escapes
-/// newlines into a literal backslash-n, so a `dart:convert` `ArgumentError`
-/// carrying a whole JSON request renders as ONE multi-kilobyte line and a
-/// first-line cap would be a no-op on exactly the failure that motivated this.
-const int _maxCauseChars = 300;
-
 /// The reason a THROWN error — transport, git remote read, or remote parse —
 /// escalates with: generic advice FIRST, cause LAST, type-led.
 ///
@@ -323,13 +316,10 @@ const int _maxCauseChars = 300;
 /// the TAIL of a string. Rendering `$error` FIRST meant the cut kept whatever
 /// an SDK error had embedded — for an encoding failure, the whole serialized
 /// request — and dropped the exception type and message; putting the cause
-/// last inverts that.
-String _thrownFailureReason(Object error) {
-  final rendered = error.toString();
-  final cause = rendered.length <= _maxCauseChars
-      ? rendered
-      : '${rendered.substring(0, _maxCauseChars)}…';
-  return 'Could not open the pull request with the GitHub App. Verify the '
-      'checkout origin, App installation, credentials, and network, then '
-      'retry. Cause (${error.runtimeType}): $cause';
-}
+/// last inverts that. The rendering and its character cap live in
+/// [githubFailureCause] beside the transport, so the foreign-read lane
+/// escalates identically.
+String _thrownFailureReason(Object error) =>
+    'Could not open the pull request with the GitHub App. Verify the '
+    'checkout origin, App installation, credentials, and network, then '
+    'retry. ${githubFailureCause(error)}';

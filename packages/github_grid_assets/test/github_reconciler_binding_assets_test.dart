@@ -73,6 +73,7 @@ final class _Factory {
     required GitHubCursorStore cursors,
     required GitHubEventSink emit,
     required ExplorationTransport? transport,
+    required GitHubReadClient? foreignClient,
   }) {
     configs.add(config);
     this.cursors.add(cursors);
@@ -283,6 +284,7 @@ final class _SeatFactory {
     required GitHubCursorStore cursors,
     required GitHubEventSink emit,
     required ExplorationTransport? transport,
+    required GitHubReadClient? foreignClient,
   }) {
     final runtime = GitHubReconcilerRuntime(
       installationId: config.installationId,
@@ -975,4 +977,111 @@ void main() {
       );
     });
   }
+
+  group('the watch projection', () {
+    /// Mounts a live seat and hands back the projection value it provides.
+    GitHubIssueWatchProjection? mount(
+      BdRunner runner, {
+      GitHubReconcilerArm arm = GitHubReconcilerArm.live,
+    }) {
+      GitHubIssueWatchProjection? projection;
+      final owner = TreeOwner();
+      addTearDown(owner.dispose);
+      owner.mountRoot(
+        sdk.ProviderScope(
+          child: Provider<sdk.SubstationScope>.value(
+            const sdk.SubstationScope(
+              name: 'seat',
+              root: '/work/seat',
+              prefix: 'pow',
+            ),
+            child: Provider<GitHubAppClient>.value(
+              _client,
+              child: GitHubReconcilerBindingAssets(
+                config: _config(
+                  owner: 'memento',
+                  repository: 'power_station',
+                  arm: arm,
+                ),
+                runner: runner,
+                trust: GitHubSelfTrust(githubUser: 'nico'),
+                child: _Probe((context) {
+                  projection = context.watch<GitHubIssueWatchProjection>();
+                }),
+              ),
+            ),
+          ),
+        ),
+      );
+      owner.flush();
+      return projection;
+    }
+
+    test('a live seat provides one, sharing the seat runner', () async {
+      final runner = _BdRunner();
+      final projection = mount(runner);
+      expect(projection, isNotNull);
+
+      await projection!(
+        NormalizedGitHubEvent.issueCommented(
+          nodeId: 'IC_first',
+          actor: 'ricardoboss',
+          repository: 'ricardoboss/radioactive_dart',
+          substation: 'seat',
+          observationId: 'poll:issue-comment:IC_first',
+          originatingBeadId: 'lunar_station-6p9',
+          issueNodeId: 'I_kwDO',
+          issueAuthor: 'nico',
+          issueNumber: 1,
+          commentId: 11,
+          body: 'A reply.',
+          url: 'https://github.test/1',
+          updatedAt: DateTime.utc(2026, 9, 9, 11),
+        ),
+      );
+
+      expect(runner.argvs, hasLength(1));
+      expect(
+        runner.argvs.single.take(2).toList(),
+        <String>['update', 'lunar_station-6p9'],
+        reason: 'ONE bd channel — the seat runner both projections share',
+      );
+    });
+
+    test('both projections resolve the SAME notion of self', () async {
+      final runner = _BdRunner();
+      final projection = mount(runner)!;
+
+      // The seat's admitted human login is SELF for a watch, exactly as it is
+      // for intake; an unrelated login is not.
+      await projection(
+        NormalizedGitHubEvent.issueCommented(
+          nodeId: 'IC_other',
+          actor: 'ricardoboss',
+          repository: 'ricardoboss/radioactive_dart',
+          substation: 'seat',
+          observationId: 'poll:issue-comment:IC_other',
+          originatingBeadId: 'lunar_station-6p9',
+          issueNodeId: 'I_kwDO',
+          issueAuthor: 'someone-else',
+          issueNumber: 1,
+          commentId: 12,
+          body: 'Not ours.',
+          url: 'https://github.test/1',
+          updatedAt: DateTime.utc(2026, 9, 9, 11),
+        ),
+      );
+
+      expect(runner.argvs, isEmpty);
+    });
+
+    test('an inert arm provides no watch projection', () {
+      for (final arm in const <GitHubReconcilerArm>[
+        GitHubReconcilerArm.dry,
+        GitHubReconcilerArm.offline,
+      ]) {
+        expect(mount(_BdRunner(), arm: arm), isNull);
+      }
+    });
+  });
 }

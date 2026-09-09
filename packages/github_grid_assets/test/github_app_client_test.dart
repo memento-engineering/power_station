@@ -147,4 +147,52 @@ void main() {
     expect(receivedContentType, 'application/json');
     expect(response.statusCode, HttpStatus.created);
   });
+
+  test('githubRestHeaders is the ONE home of the REST contract', () {
+    expect(githubRestHeaders(), <String, String>{
+      'Accept': 'application/vnd.github+json',
+      'X-GitHub-Api-Version': '2022-11-28',
+    });
+    expect(githubRestHeaders(token: 'value'), <String, String>{
+      'Accept': 'application/vnd.github+json',
+      'Authorization': 'Bearer value',
+      'X-GitHub-Api-Version': '2022-11-28',
+    });
+    for (final blank in <String?>[null, '', '   ']) {
+      expect(
+        githubRestHeaders(token: blank).containsKey('Authorization'),
+        isFalse,
+        reason: 'an empty bearer is malformed, not absent',
+      );
+    }
+    expect(
+      githubRestHeaders(
+        token: 'value',
+        headers: const <String, String>{'If-None-Match': '"tag"'},
+        jsonBody: true,
+      ),
+      <String, String>{
+        'Accept': 'application/vnd.github+json',
+        'Authorization': 'Bearer value',
+        'X-GitHub-Api-Version': '2022-11-28',
+        'If-None-Match': '"tag"',
+        'Content-Type': 'application/json; charset=utf-8',
+      },
+    );
+  });
+
+  test('the App client sends exactly the shared headers', () async {
+    final transport = FakeTransport();
+    await GitHubAppClient(
+      config: config,
+      tokens: FakeTokens(<String>['tok']),
+      transport: transport,
+    ).send(method: 'GET', path: '/rate_limit');
+
+    expect(
+      transport.requests.single.headers,
+      githubRestHeaders(token: 'tok'),
+      reason: 'both clients render their headers through one function',
+    );
+  });
 }

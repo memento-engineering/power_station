@@ -297,6 +297,14 @@ NormalizedGitHubEvent _$NormalizedGitHubEventFromJson(
           return WorkflowRunConcluded.fromJson(
             json
           );
+                case 'issueCommented':
+          return IssueCommented.fromJson(
+            json
+          );
+                case 'watchedIssueStateChanged':
+          return WatchedIssueStateChanged.fromJson(
+            json
+          );
         
           default:
             throw CheckedFromJsonException(
@@ -390,14 +398,16 @@ extension NormalizedGitHubEventPatterns on NormalizedGitHubEvent {
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeMap<TResult extends Object?>({TResult Function( IssueOpened value)?  issueOpened,TResult Function( PullRequestOpened value)?  pullRequestOpened,TResult Function( CheckConcluded value)?  checkConcluded,TResult Function( WorkflowRunConcluded value)?  workflowRunConcluded,required TResult orElse(),}){
+@optionalTypeArgs TResult maybeMap<TResult extends Object?>({TResult Function( IssueOpened value)?  issueOpened,TResult Function( PullRequestOpened value)?  pullRequestOpened,TResult Function( CheckConcluded value)?  checkConcluded,TResult Function( WorkflowRunConcluded value)?  workflowRunConcluded,TResult Function( IssueCommented value)?  issueCommented,TResult Function( WatchedIssueStateChanged value)?  watchedIssueStateChanged,required TResult orElse(),}){
 final _that = this;
 switch (_that) {
 case IssueOpened() when issueOpened != null:
 return issueOpened(_that);case PullRequestOpened() when pullRequestOpened != null:
 return pullRequestOpened(_that);case CheckConcluded() when checkConcluded != null:
 return checkConcluded(_that);case WorkflowRunConcluded() when workflowRunConcluded != null:
-return workflowRunConcluded(_that);case _:
+return workflowRunConcluded(_that);case IssueCommented() when issueCommented != null:
+return issueCommented(_that);case WatchedIssueStateChanged() when watchedIssueStateChanged != null:
+return watchedIssueStateChanged(_that);case _:
   return orElse();
 
 }
@@ -415,14 +425,16 @@ return workflowRunConcluded(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult map<TResult extends Object?>({required TResult Function( IssueOpened value)  issueOpened,required TResult Function( PullRequestOpened value)  pullRequestOpened,required TResult Function( CheckConcluded value)  checkConcluded,required TResult Function( WorkflowRunConcluded value)  workflowRunConcluded,}){
+@optionalTypeArgs TResult map<TResult extends Object?>({required TResult Function( IssueOpened value)  issueOpened,required TResult Function( PullRequestOpened value)  pullRequestOpened,required TResult Function( CheckConcluded value)  checkConcluded,required TResult Function( WorkflowRunConcluded value)  workflowRunConcluded,required TResult Function( IssueCommented value)  issueCommented,required TResult Function( WatchedIssueStateChanged value)  watchedIssueStateChanged,}){
 final _that = this;
 switch (_that) {
 case IssueOpened():
 return issueOpened(_that);case PullRequestOpened():
 return pullRequestOpened(_that);case CheckConcluded():
 return checkConcluded(_that);case WorkflowRunConcluded():
-return workflowRunConcluded(_that);}
+return workflowRunConcluded(_that);case IssueCommented():
+return issueCommented(_that);case WatchedIssueStateChanged():
+return watchedIssueStateChanged(_that);}
 }
 /// A variant of `map` that fallback to returning `null`.
 ///
@@ -436,14 +448,16 @@ return workflowRunConcluded(_that);}
 /// }
 /// ```
 
-@optionalTypeArgs TResult? mapOrNull<TResult extends Object?>({TResult? Function( IssueOpened value)?  issueOpened,TResult? Function( PullRequestOpened value)?  pullRequestOpened,TResult? Function( CheckConcluded value)?  checkConcluded,TResult? Function( WorkflowRunConcluded value)?  workflowRunConcluded,}){
+@optionalTypeArgs TResult? mapOrNull<TResult extends Object?>({TResult? Function( IssueOpened value)?  issueOpened,TResult? Function( PullRequestOpened value)?  pullRequestOpened,TResult? Function( CheckConcluded value)?  checkConcluded,TResult? Function( WorkflowRunConcluded value)?  workflowRunConcluded,TResult? Function( IssueCommented value)?  issueCommented,TResult? Function( WatchedIssueStateChanged value)?  watchedIssueStateChanged,}){
 final _that = this;
 switch (_that) {
 case IssueOpened() when issueOpened != null:
 return issueOpened(_that);case PullRequestOpened() when pullRequestOpened != null:
 return pullRequestOpened(_that);case CheckConcluded() when checkConcluded != null:
 return checkConcluded(_that);case WorkflowRunConcluded() when workflowRunConcluded != null:
-return workflowRunConcluded(_that);case _:
+return workflowRunConcluded(_that);case IssueCommented() when issueCommented != null:
+return issueCommented(_that);case WatchedIssueStateChanged() when watchedIssueStateChanged != null:
+return watchedIssueStateChanged(_that);case _:
   return null;
 
 }
@@ -460,13 +474,15 @@ return workflowRunConcluded(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>({TResult Function( String nodeId,  String actor,  String repository,  String substation,  String observationId,  int number,  String title,  String body)?  issueOpened,TResult Function( String nodeId,  String actor,  String repository,  String substation,  String observationId,  int number,  String title,  String body,  String headRef)?  pullRequestOpened,TResult Function( String nodeId,  String actor,  String repository,  String substation,  String observationId,  String headBranch,  String checkName,  String conclusion)?  checkConcluded,TResult Function( String nodeId,  String actor,  String repository,  String substation,  String observationId,  int runId,  int runNumber,  String workflowPath,  String workflowName,  String event,  String headBranch,  String headSha,  String conclusion,  String htmlUrl,  List<WorkflowRunFailedJob> failedJobs)?  workflowRunConcluded,required TResult orElse(),}) {final _that = this;
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>({TResult Function( String nodeId,  String actor,  String repository,  String substation,  String observationId,  int number,  String title,  String body)?  issueOpened,TResult Function( String nodeId,  String actor,  String repository,  String substation,  String observationId,  int number,  String title,  String body,  String headRef)?  pullRequestOpened,TResult Function( String nodeId,  String actor,  String repository,  String substation,  String observationId,  String headBranch,  String checkName,  String conclusion)?  checkConcluded,TResult Function( String nodeId,  String actor,  String repository,  String substation,  String observationId,  int runId,  int runNumber,  String workflowPath,  String workflowName,  String event,  String headBranch,  String headSha,  String conclusion,  String htmlUrl,  List<WorkflowRunFailedJob> failedJobs)?  workflowRunConcluded,TResult Function( String nodeId,  String actor,  String repository,  String substation,  String observationId,  String originatingBeadId,  String issueNodeId,  String issueAuthor,  int issueNumber,  int commentId,  String body,  String url,  DateTime updatedAt)?  issueCommented,TResult Function( String nodeId,  String actor,  String repository,  String substation,  String observationId,  String originatingBeadId,  String issueNodeId,  String issueAuthor,  int issueNumber,  GitHubIssueWatchChange change,  String state,  String? stateReason,  bool locked,  String? url,  DateTime updatedAt)?  watchedIssueStateChanged,required TResult orElse(),}) {final _that = this;
 switch (_that) {
 case IssueOpened() when issueOpened != null:
 return issueOpened(_that.nodeId,_that.actor,_that.repository,_that.substation,_that.observationId,_that.number,_that.title,_that.body);case PullRequestOpened() when pullRequestOpened != null:
 return pullRequestOpened(_that.nodeId,_that.actor,_that.repository,_that.substation,_that.observationId,_that.number,_that.title,_that.body,_that.headRef);case CheckConcluded() when checkConcluded != null:
 return checkConcluded(_that.nodeId,_that.actor,_that.repository,_that.substation,_that.observationId,_that.headBranch,_that.checkName,_that.conclusion);case WorkflowRunConcluded() when workflowRunConcluded != null:
-return workflowRunConcluded(_that.nodeId,_that.actor,_that.repository,_that.substation,_that.observationId,_that.runId,_that.runNumber,_that.workflowPath,_that.workflowName,_that.event,_that.headBranch,_that.headSha,_that.conclusion,_that.htmlUrl,_that.failedJobs);case _:
+return workflowRunConcluded(_that.nodeId,_that.actor,_that.repository,_that.substation,_that.observationId,_that.runId,_that.runNumber,_that.workflowPath,_that.workflowName,_that.event,_that.headBranch,_that.headSha,_that.conclusion,_that.htmlUrl,_that.failedJobs);case IssueCommented() when issueCommented != null:
+return issueCommented(_that.nodeId,_that.actor,_that.repository,_that.substation,_that.observationId,_that.originatingBeadId,_that.issueNodeId,_that.issueAuthor,_that.issueNumber,_that.commentId,_that.body,_that.url,_that.updatedAt);case WatchedIssueStateChanged() when watchedIssueStateChanged != null:
+return watchedIssueStateChanged(_that.nodeId,_that.actor,_that.repository,_that.substation,_that.observationId,_that.originatingBeadId,_that.issueNodeId,_that.issueAuthor,_that.issueNumber,_that.change,_that.state,_that.stateReason,_that.locked,_that.url,_that.updatedAt);case _:
   return orElse();
 
 }
@@ -484,13 +500,15 @@ return workflowRunConcluded(_that.nodeId,_that.actor,_that.repository,_that.subs
 /// }
 /// ```
 
-@optionalTypeArgs TResult when<TResult extends Object?>({required TResult Function( String nodeId,  String actor,  String repository,  String substation,  String observationId,  int number,  String title,  String body)  issueOpened,required TResult Function( String nodeId,  String actor,  String repository,  String substation,  String observationId,  int number,  String title,  String body,  String headRef)  pullRequestOpened,required TResult Function( String nodeId,  String actor,  String repository,  String substation,  String observationId,  String headBranch,  String checkName,  String conclusion)  checkConcluded,required TResult Function( String nodeId,  String actor,  String repository,  String substation,  String observationId,  int runId,  int runNumber,  String workflowPath,  String workflowName,  String event,  String headBranch,  String headSha,  String conclusion,  String htmlUrl,  List<WorkflowRunFailedJob> failedJobs)  workflowRunConcluded,}) {final _that = this;
+@optionalTypeArgs TResult when<TResult extends Object?>({required TResult Function( String nodeId,  String actor,  String repository,  String substation,  String observationId,  int number,  String title,  String body)  issueOpened,required TResult Function( String nodeId,  String actor,  String repository,  String substation,  String observationId,  int number,  String title,  String body,  String headRef)  pullRequestOpened,required TResult Function( String nodeId,  String actor,  String repository,  String substation,  String observationId,  String headBranch,  String checkName,  String conclusion)  checkConcluded,required TResult Function( String nodeId,  String actor,  String repository,  String substation,  String observationId,  int runId,  int runNumber,  String workflowPath,  String workflowName,  String event,  String headBranch,  String headSha,  String conclusion,  String htmlUrl,  List<WorkflowRunFailedJob> failedJobs)  workflowRunConcluded,required TResult Function( String nodeId,  String actor,  String repository,  String substation,  String observationId,  String originatingBeadId,  String issueNodeId,  String issueAuthor,  int issueNumber,  int commentId,  String body,  String url,  DateTime updatedAt)  issueCommented,required TResult Function( String nodeId,  String actor,  String repository,  String substation,  String observationId,  String originatingBeadId,  String issueNodeId,  String issueAuthor,  int issueNumber,  GitHubIssueWatchChange change,  String state,  String? stateReason,  bool locked,  String? url,  DateTime updatedAt)  watchedIssueStateChanged,}) {final _that = this;
 switch (_that) {
 case IssueOpened():
 return issueOpened(_that.nodeId,_that.actor,_that.repository,_that.substation,_that.observationId,_that.number,_that.title,_that.body);case PullRequestOpened():
 return pullRequestOpened(_that.nodeId,_that.actor,_that.repository,_that.substation,_that.observationId,_that.number,_that.title,_that.body,_that.headRef);case CheckConcluded():
 return checkConcluded(_that.nodeId,_that.actor,_that.repository,_that.substation,_that.observationId,_that.headBranch,_that.checkName,_that.conclusion);case WorkflowRunConcluded():
-return workflowRunConcluded(_that.nodeId,_that.actor,_that.repository,_that.substation,_that.observationId,_that.runId,_that.runNumber,_that.workflowPath,_that.workflowName,_that.event,_that.headBranch,_that.headSha,_that.conclusion,_that.htmlUrl,_that.failedJobs);}
+return workflowRunConcluded(_that.nodeId,_that.actor,_that.repository,_that.substation,_that.observationId,_that.runId,_that.runNumber,_that.workflowPath,_that.workflowName,_that.event,_that.headBranch,_that.headSha,_that.conclusion,_that.htmlUrl,_that.failedJobs);case IssueCommented():
+return issueCommented(_that.nodeId,_that.actor,_that.repository,_that.substation,_that.observationId,_that.originatingBeadId,_that.issueNodeId,_that.issueAuthor,_that.issueNumber,_that.commentId,_that.body,_that.url,_that.updatedAt);case WatchedIssueStateChanged():
+return watchedIssueStateChanged(_that.nodeId,_that.actor,_that.repository,_that.substation,_that.observationId,_that.originatingBeadId,_that.issueNodeId,_that.issueAuthor,_that.issueNumber,_that.change,_that.state,_that.stateReason,_that.locked,_that.url,_that.updatedAt);}
 }
 /// A variant of `when` that fallback to returning `null`
 ///
@@ -504,13 +522,15 @@ return workflowRunConcluded(_that.nodeId,_that.actor,_that.repository,_that.subs
 /// }
 /// ```
 
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>({TResult? Function( String nodeId,  String actor,  String repository,  String substation,  String observationId,  int number,  String title,  String body)?  issueOpened,TResult? Function( String nodeId,  String actor,  String repository,  String substation,  String observationId,  int number,  String title,  String body,  String headRef)?  pullRequestOpened,TResult? Function( String nodeId,  String actor,  String repository,  String substation,  String observationId,  String headBranch,  String checkName,  String conclusion)?  checkConcluded,TResult? Function( String nodeId,  String actor,  String repository,  String substation,  String observationId,  int runId,  int runNumber,  String workflowPath,  String workflowName,  String event,  String headBranch,  String headSha,  String conclusion,  String htmlUrl,  List<WorkflowRunFailedJob> failedJobs)?  workflowRunConcluded,}) {final _that = this;
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>({TResult? Function( String nodeId,  String actor,  String repository,  String substation,  String observationId,  int number,  String title,  String body)?  issueOpened,TResult? Function( String nodeId,  String actor,  String repository,  String substation,  String observationId,  int number,  String title,  String body,  String headRef)?  pullRequestOpened,TResult? Function( String nodeId,  String actor,  String repository,  String substation,  String observationId,  String headBranch,  String checkName,  String conclusion)?  checkConcluded,TResult? Function( String nodeId,  String actor,  String repository,  String substation,  String observationId,  int runId,  int runNumber,  String workflowPath,  String workflowName,  String event,  String headBranch,  String headSha,  String conclusion,  String htmlUrl,  List<WorkflowRunFailedJob> failedJobs)?  workflowRunConcluded,TResult? Function( String nodeId,  String actor,  String repository,  String substation,  String observationId,  String originatingBeadId,  String issueNodeId,  String issueAuthor,  int issueNumber,  int commentId,  String body,  String url,  DateTime updatedAt)?  issueCommented,TResult? Function( String nodeId,  String actor,  String repository,  String substation,  String observationId,  String originatingBeadId,  String issueNodeId,  String issueAuthor,  int issueNumber,  GitHubIssueWatchChange change,  String state,  String? stateReason,  bool locked,  String? url,  DateTime updatedAt)?  watchedIssueStateChanged,}) {final _that = this;
 switch (_that) {
 case IssueOpened() when issueOpened != null:
 return issueOpened(_that.nodeId,_that.actor,_that.repository,_that.substation,_that.observationId,_that.number,_that.title,_that.body);case PullRequestOpened() when pullRequestOpened != null:
 return pullRequestOpened(_that.nodeId,_that.actor,_that.repository,_that.substation,_that.observationId,_that.number,_that.title,_that.body,_that.headRef);case CheckConcluded() when checkConcluded != null:
 return checkConcluded(_that.nodeId,_that.actor,_that.repository,_that.substation,_that.observationId,_that.headBranch,_that.checkName,_that.conclusion);case WorkflowRunConcluded() when workflowRunConcluded != null:
-return workflowRunConcluded(_that.nodeId,_that.actor,_that.repository,_that.substation,_that.observationId,_that.runId,_that.runNumber,_that.workflowPath,_that.workflowName,_that.event,_that.headBranch,_that.headSha,_that.conclusion,_that.htmlUrl,_that.failedJobs);case _:
+return workflowRunConcluded(_that.nodeId,_that.actor,_that.repository,_that.substation,_that.observationId,_that.runId,_that.runNumber,_that.workflowPath,_that.workflowName,_that.event,_that.headBranch,_that.headSha,_that.conclusion,_that.htmlUrl,_that.failedJobs);case IssueCommented() when issueCommented != null:
+return issueCommented(_that.nodeId,_that.actor,_that.repository,_that.substation,_that.observationId,_that.originatingBeadId,_that.issueNodeId,_that.issueAuthor,_that.issueNumber,_that.commentId,_that.body,_that.url,_that.updatedAt);case WatchedIssueStateChanged() when watchedIssueStateChanged != null:
+return watchedIssueStateChanged(_that.nodeId,_that.actor,_that.repository,_that.substation,_that.observationId,_that.originatingBeadId,_that.issueNodeId,_that.issueAuthor,_that.issueNumber,_that.change,_that.state,_that.stateReason,_that.locked,_that.url,_that.updatedAt);case _:
   return null;
 
 }
@@ -882,6 +902,204 @@ as String,conclusion: null == conclusion ? _self.conclusion : conclusion // igno
 as String,htmlUrl: null == htmlUrl ? _self.htmlUrl : htmlUrl // ignore: cast_nullable_to_non_nullable
 as String,failedJobs: null == failedJobs ? _self._failedJobs : failedJobs // ignore: cast_nullable_to_non_nullable
 as List<WorkflowRunFailedJob>,
+  ));
+}
+
+
+}
+
+/// @nodoc
+@JsonSerializable()
+
+class IssueCommented implements NormalizedGitHubEvent {
+  const IssueCommented({required this.nodeId, required this.actor, required this.repository, required this.substation, required this.observationId, required this.originatingBeadId, required this.issueNodeId, required this.issueAuthor, required this.issueNumber, required this.commentId, required this.body, required this.url, required this.updatedAt, final  String? $type}): $type = $type ?? 'issueCommented';
+  factory IssueCommented.fromJson(Map<String, dynamic> json) => _$IssueCommentedFromJson(json);
+
+@override final  String nodeId;
+@override final  String actor;
+@override final  String repository;
+@override final  String substation;
+@override final  String observationId;
+ final  String originatingBeadId;
+ final  String issueNodeId;
+ final  String issueAuthor;
+ final  int issueNumber;
+ final  int commentId;
+ final  String body;
+ final  String url;
+ final  DateTime updatedAt;
+
+@JsonKey(name: 'runtimeType')
+final String $type;
+
+
+/// Create a copy of NormalizedGitHubEvent
+/// with the given fields replaced by the non-null parameter values.
+@override @JsonKey(includeFromJson: false, includeToJson: false)
+@pragma('vm:prefer-inline')
+$IssueCommentedCopyWith<IssueCommented> get copyWith => _$IssueCommentedCopyWithImpl<IssueCommented>(this, _$identity);
+
+@override
+Map<String, dynamic> toJson() {
+  return _$IssueCommentedToJson(this, );
+}
+
+@override
+bool operator ==(Object other) {
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is IssueCommented&&(identical(other.nodeId, nodeId) || other.nodeId == nodeId)&&(identical(other.actor, actor) || other.actor == actor)&&(identical(other.repository, repository) || other.repository == repository)&&(identical(other.substation, substation) || other.substation == substation)&&(identical(other.observationId, observationId) || other.observationId == observationId)&&(identical(other.originatingBeadId, originatingBeadId) || other.originatingBeadId == originatingBeadId)&&(identical(other.issueNodeId, issueNodeId) || other.issueNodeId == issueNodeId)&&(identical(other.issueAuthor, issueAuthor) || other.issueAuthor == issueAuthor)&&(identical(other.issueNumber, issueNumber) || other.issueNumber == issueNumber)&&(identical(other.commentId, commentId) || other.commentId == commentId)&&(identical(other.body, body) || other.body == body)&&(identical(other.url, url) || other.url == url)&&(identical(other.updatedAt, updatedAt) || other.updatedAt == updatedAt));
+}
+
+@JsonKey(includeFromJson: false, includeToJson: false)
+@override
+int get hashCode => Object.hash(runtimeType,nodeId,actor,repository,substation,observationId,originatingBeadId,issueNodeId,issueAuthor,issueNumber,commentId,body,url,updatedAt);
+
+@override
+String toString() {
+  return 'NormalizedGitHubEvent.issueCommented(nodeId: $nodeId, actor: $actor, repository: $repository, substation: $substation, observationId: $observationId, originatingBeadId: $originatingBeadId, issueNodeId: $issueNodeId, issueAuthor: $issueAuthor, issueNumber: $issueNumber, commentId: $commentId, body: $body, url: $url, updatedAt: $updatedAt)';
+}
+
+
+}
+
+/// @nodoc
+abstract mixin class $IssueCommentedCopyWith<$Res> implements $NormalizedGitHubEventCopyWith<$Res> {
+  factory $IssueCommentedCopyWith(IssueCommented value, $Res Function(IssueCommented) _then) = _$IssueCommentedCopyWithImpl;
+@override @useResult
+$Res call({
+ String nodeId, String actor, String repository, String substation, String observationId, String originatingBeadId, String issueNodeId, String issueAuthor, int issueNumber, int commentId, String body, String url, DateTime updatedAt
+});
+
+
+
+
+}
+/// @nodoc
+class _$IssueCommentedCopyWithImpl<$Res>
+    implements $IssueCommentedCopyWith<$Res> {
+  _$IssueCommentedCopyWithImpl(this._self, this._then);
+
+  final IssueCommented _self;
+  final $Res Function(IssueCommented) _then;
+
+/// Create a copy of NormalizedGitHubEvent
+/// with the given fields replaced by the non-null parameter values.
+@override @pragma('vm:prefer-inline') $Res call({Object? nodeId = null,Object? actor = null,Object? repository = null,Object? substation = null,Object? observationId = null,Object? originatingBeadId = null,Object? issueNodeId = null,Object? issueAuthor = null,Object? issueNumber = null,Object? commentId = null,Object? body = null,Object? url = null,Object? updatedAt = null,}) {
+  return _then(IssueCommented(
+nodeId: null == nodeId ? _self.nodeId : nodeId // ignore: cast_nullable_to_non_nullable
+as String,actor: null == actor ? _self.actor : actor // ignore: cast_nullable_to_non_nullable
+as String,repository: null == repository ? _self.repository : repository // ignore: cast_nullable_to_non_nullable
+as String,substation: null == substation ? _self.substation : substation // ignore: cast_nullable_to_non_nullable
+as String,observationId: null == observationId ? _self.observationId : observationId // ignore: cast_nullable_to_non_nullable
+as String,originatingBeadId: null == originatingBeadId ? _self.originatingBeadId : originatingBeadId // ignore: cast_nullable_to_non_nullable
+as String,issueNodeId: null == issueNodeId ? _self.issueNodeId : issueNodeId // ignore: cast_nullable_to_non_nullable
+as String,issueAuthor: null == issueAuthor ? _self.issueAuthor : issueAuthor // ignore: cast_nullable_to_non_nullable
+as String,issueNumber: null == issueNumber ? _self.issueNumber : issueNumber // ignore: cast_nullable_to_non_nullable
+as int,commentId: null == commentId ? _self.commentId : commentId // ignore: cast_nullable_to_non_nullable
+as int,body: null == body ? _self.body : body // ignore: cast_nullable_to_non_nullable
+as String,url: null == url ? _self.url : url // ignore: cast_nullable_to_non_nullable
+as String,updatedAt: null == updatedAt ? _self.updatedAt : updatedAt // ignore: cast_nullable_to_non_nullable
+as DateTime,
+  ));
+}
+
+
+}
+
+/// @nodoc
+@JsonSerializable()
+
+class WatchedIssueStateChanged implements NormalizedGitHubEvent {
+  const WatchedIssueStateChanged({required this.nodeId, required this.actor, required this.repository, required this.substation, required this.observationId, required this.originatingBeadId, required this.issueNodeId, required this.issueAuthor, required this.issueNumber, required this.change, required this.state, required this.stateReason, required this.locked, required this.url, required this.updatedAt, final  String? $type}): $type = $type ?? 'watchedIssueStateChanged';
+  factory WatchedIssueStateChanged.fromJson(Map<String, dynamic> json) => _$WatchedIssueStateChangedFromJson(json);
+
+@override final  String nodeId;
+@override final  String actor;
+@override final  String repository;
+@override final  String substation;
+@override final  String observationId;
+ final  String originatingBeadId;
+ final  String issueNodeId;
+ final  String issueAuthor;
+ final  int issueNumber;
+ final  GitHubIssueWatchChange change;
+ final  String state;
+ final  String? stateReason;
+ final  bool locked;
+ final  String? url;
+ final  DateTime updatedAt;
+
+@JsonKey(name: 'runtimeType')
+final String $type;
+
+
+/// Create a copy of NormalizedGitHubEvent
+/// with the given fields replaced by the non-null parameter values.
+@override @JsonKey(includeFromJson: false, includeToJson: false)
+@pragma('vm:prefer-inline')
+$WatchedIssueStateChangedCopyWith<WatchedIssueStateChanged> get copyWith => _$WatchedIssueStateChangedCopyWithImpl<WatchedIssueStateChanged>(this, _$identity);
+
+@override
+Map<String, dynamic> toJson() {
+  return _$WatchedIssueStateChangedToJson(this, );
+}
+
+@override
+bool operator ==(Object other) {
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is WatchedIssueStateChanged&&(identical(other.nodeId, nodeId) || other.nodeId == nodeId)&&(identical(other.actor, actor) || other.actor == actor)&&(identical(other.repository, repository) || other.repository == repository)&&(identical(other.substation, substation) || other.substation == substation)&&(identical(other.observationId, observationId) || other.observationId == observationId)&&(identical(other.originatingBeadId, originatingBeadId) || other.originatingBeadId == originatingBeadId)&&(identical(other.issueNodeId, issueNodeId) || other.issueNodeId == issueNodeId)&&(identical(other.issueAuthor, issueAuthor) || other.issueAuthor == issueAuthor)&&(identical(other.issueNumber, issueNumber) || other.issueNumber == issueNumber)&&(identical(other.change, change) || other.change == change)&&(identical(other.state, state) || other.state == state)&&(identical(other.stateReason, stateReason) || other.stateReason == stateReason)&&(identical(other.locked, locked) || other.locked == locked)&&(identical(other.url, url) || other.url == url)&&(identical(other.updatedAt, updatedAt) || other.updatedAt == updatedAt));
+}
+
+@JsonKey(includeFromJson: false, includeToJson: false)
+@override
+int get hashCode => Object.hash(runtimeType,nodeId,actor,repository,substation,observationId,originatingBeadId,issueNodeId,issueAuthor,issueNumber,change,state,stateReason,locked,url,updatedAt);
+
+@override
+String toString() {
+  return 'NormalizedGitHubEvent.watchedIssueStateChanged(nodeId: $nodeId, actor: $actor, repository: $repository, substation: $substation, observationId: $observationId, originatingBeadId: $originatingBeadId, issueNodeId: $issueNodeId, issueAuthor: $issueAuthor, issueNumber: $issueNumber, change: $change, state: $state, stateReason: $stateReason, locked: $locked, url: $url, updatedAt: $updatedAt)';
+}
+
+
+}
+
+/// @nodoc
+abstract mixin class $WatchedIssueStateChangedCopyWith<$Res> implements $NormalizedGitHubEventCopyWith<$Res> {
+  factory $WatchedIssueStateChangedCopyWith(WatchedIssueStateChanged value, $Res Function(WatchedIssueStateChanged) _then) = _$WatchedIssueStateChangedCopyWithImpl;
+@override @useResult
+$Res call({
+ String nodeId, String actor, String repository, String substation, String observationId, String originatingBeadId, String issueNodeId, String issueAuthor, int issueNumber, GitHubIssueWatchChange change, String state, String? stateReason, bool locked, String? url, DateTime updatedAt
+});
+
+
+
+
+}
+/// @nodoc
+class _$WatchedIssueStateChangedCopyWithImpl<$Res>
+    implements $WatchedIssueStateChangedCopyWith<$Res> {
+  _$WatchedIssueStateChangedCopyWithImpl(this._self, this._then);
+
+  final WatchedIssueStateChanged _self;
+  final $Res Function(WatchedIssueStateChanged) _then;
+
+/// Create a copy of NormalizedGitHubEvent
+/// with the given fields replaced by the non-null parameter values.
+@override @pragma('vm:prefer-inline') $Res call({Object? nodeId = null,Object? actor = null,Object? repository = null,Object? substation = null,Object? observationId = null,Object? originatingBeadId = null,Object? issueNodeId = null,Object? issueAuthor = null,Object? issueNumber = null,Object? change = null,Object? state = null,Object? stateReason = freezed,Object? locked = null,Object? url = freezed,Object? updatedAt = null,}) {
+  return _then(WatchedIssueStateChanged(
+nodeId: null == nodeId ? _self.nodeId : nodeId // ignore: cast_nullable_to_non_nullable
+as String,actor: null == actor ? _self.actor : actor // ignore: cast_nullable_to_non_nullable
+as String,repository: null == repository ? _self.repository : repository // ignore: cast_nullable_to_non_nullable
+as String,substation: null == substation ? _self.substation : substation // ignore: cast_nullable_to_non_nullable
+as String,observationId: null == observationId ? _self.observationId : observationId // ignore: cast_nullable_to_non_nullable
+as String,originatingBeadId: null == originatingBeadId ? _self.originatingBeadId : originatingBeadId // ignore: cast_nullable_to_non_nullable
+as String,issueNodeId: null == issueNodeId ? _self.issueNodeId : issueNodeId // ignore: cast_nullable_to_non_nullable
+as String,issueAuthor: null == issueAuthor ? _self.issueAuthor : issueAuthor // ignore: cast_nullable_to_non_nullable
+as String,issueNumber: null == issueNumber ? _self.issueNumber : issueNumber // ignore: cast_nullable_to_non_nullable
+as int,change: null == change ? _self.change : change // ignore: cast_nullable_to_non_nullable
+as GitHubIssueWatchChange,state: null == state ? _self.state : state // ignore: cast_nullable_to_non_nullable
+as String,stateReason: freezed == stateReason ? _self.stateReason : stateReason // ignore: cast_nullable_to_non_nullable
+as String?,locked: null == locked ? _self.locked : locked // ignore: cast_nullable_to_non_nullable
+as bool,url: freezed == url ? _self.url : url // ignore: cast_nullable_to_non_nullable
+as String?,updatedAt: null == updatedAt ? _self.updatedAt : updatedAt // ignore: cast_nullable_to_non_nullable
+as DateTime,
   ));
 }
 

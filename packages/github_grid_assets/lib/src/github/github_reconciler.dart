@@ -1,9 +1,13 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:developer' as developer;
 
 import '../code/workflow_run_intake_rule.dart';
 import '../github_app_client.dart';
+import '../github_read_client.dart';
+import '../http_transport.dart';
 
+import 'issue_watch.dart';
 import 'link_header.dart';
 import 'reconciler_cursor.dart';
 import 'reconciler_event.dart';
@@ -53,11 +57,34 @@ class GitHubReconciler {
     required GitHubEventSink emit,
     this.defaultBranch = 'main',
     this.workflowRuns = const <WorkflowRunIntakeRule>[],
+    this.issueWatches = const <GitHubIssueWatch>[],
+    GitHubReadClient? foreignClient,
     void Function(Object error, StackTrace stackTrace)? onIntakeRowError,
   }) : _client = client,
+       _foreign = foreignClient,
        _cursors = cursors,
        _emit = emit,
-       _onIntakeRowError = onIntakeRowError;
+       _onIntakeRowError = onIntakeRowError {
+    for (final watch in issueWatches) {
+      watch.validate();
+      if (watch.isInstalledRepository(owner: owner, repository: repository)) {
+        _installedWatches.add(watch);
+      } else {
+        _foreignWatches.add(watch);
+      }
+    }
+    // A foreign watch with no read client is a WIRING bug: the App client
+    // cannot serve it — its every request mints an installation token, and
+    // there is no installation on a repository we do not control — so the
+    // watch would silently never be polled.
+    if (_foreignWatches.isNotEmpty && foreignClient == null) {
+      throw ArgumentError.value(
+        issueWatches,
+        'issueWatches',
+        'a watch outside $owner/$repository needs a foreignClient',
+      );
+    }
+  }
 
   /// Repository owner.
   final String owner;
@@ -78,12 +105,23 @@ class GitHubReconciler {
   /// any transport, so a seat that has not opted in spends no request and no
   /// rate-limit unit on this leg.
   final List<WorkflowRunIntakeRule> workflowRuns;
+
+  /// The seat's declared OUTBOUND issue watches, in authoritative order.
+  ///
+  /// EMPTY is the feature-off value and the default: both watch legs return
+  /// before any transport, so a seat that has not opted in spends no request
+  /// and no rate-limit unit on them.
+  final List<GitHubIssueWatch> issueWatches;
   final GitHubAppClient _client;
+  final GitHubReadClient? _foreign;
+  final List<GitHubIssueWatch> _installedWatches = <GitHubIssueWatch>[];
+  final List<GitHubIssueWatch> _foreignWatches = <GitHubIssueWatch>[];
   final GitHubCursorStore _cursors;
   final GitHubEventSink _emit;
   final void Function(Object error, StackTrace stackTrace)? _onIntakeRowError;
   final List<_DeliveryLeg> _observers = <_DeliveryLeg>[];
   Future<void>? _inFlight;
+  Future<void> _cursorTail = Future<void>.value();
 
   /// Adds a sibling projection to the normalized event seam under [leg].
   ///
@@ -109,14 +147,45 @@ class GitHubReconciler {
 
   /// Runs one coalesced intake-then-feedback reconciliation.
   Future<void> reconcileOnce() =>
-      _inFlight ??= _reconcile().whenComplete(() => _inFlight = null);
+      _inFlight ??= _serialize(_reconcile).whenComplete(() => _inFlight = null);
+
+  /// Runs the FOREIGN issue-watch leg on its own, touching no App client.
+  ///
+  /// The lane split made observable: a caller that only wants the token-less
+  /// half — because that is the half with its own 60-per-hour budget — gets it
+  /// without spending an installation request. It shares the SAME cursor
+  /// operation tail as [reconcileOnce], so the two entrypoints can never
+  /// interleave two read-modify-write cycles over one cursor document.
+  Future<void> reconcileForeignIssueWatchesOnce() =>
+      _serialize(_reconcileForeignIssueWatches);
+
+  /// Runs [body] behind every cursor operation already queued.
+  ///
+  /// The tail deliberately never carries a failure forward: a cycle that threw
+  /// has already left the cursor at its last saved value, and poisoning the
+  /// tail would stop every later cycle for a failure they had no part in.
+  Future<void> _serialize(Future<void> Function() body) {
+    final prior = _cursorTail;
+    final released = Completer<void>();
+    _cursorTail = released.future;
+    return prior.then((_) => body()).whenComplete(released.complete);
+  }
 
   Future<void> _reconcile() async {
     var cursor = await _cursors.load();
     cursor = await _replayPending(cursor);
     cursor = await _intake(cursor);
     cursor = await _feedback(cursor);
-    await _runs(cursor);
+    cursor = await _runs(cursor);
+    cursor = await _pruneIssueWatches(cursor);
+    cursor = await _issueWatchLeg(cursor, _installedWatches, foreign: false);
+    await _issueWatchLeg(cursor, _foreignWatches, foreign: true);
+  }
+
+  Future<void> _reconcileForeignIssueWatches() async {
+    var cursor = await _cursors.load();
+    cursor = await _replayPending(cursor);
+    await _issueWatchLeg(cursor, _foreignWatches, foreign: true);
   }
 
   /// Re-delivers every PENDING observation, oldest first, before new polling.
@@ -553,6 +622,515 @@ class GitHubReconciler {
     return null;
   }
 
+  /// Drops cursor baselines for issues this seat no longer watches.
+  ///
+  /// Saves only when something actually changed, so a feature-off seat — and a
+  /// seat whose configuration is unchanged — writes nothing at all.
+  Future<GitHubReconcilerCursor> _pruneIssueWatches(
+    GitHubReconcilerCursor cursor,
+  ) async {
+    final pruned = cursor.retainIssueWatches(issueWatches);
+    if (identical(pruned, cursor)) return cursor;
+    await _cursors.save(pruned);
+    return pruned;
+  }
+
+  /// Polls one lane's watched OUTBOUND issues, in declaration order.
+  Future<GitHubReconcilerCursor> _issueWatchLeg(
+    GitHubReconcilerCursor cursor,
+    List<GitHubIssueWatch> watches, {
+    required bool foreign,
+  }) async {
+    var next = cursor;
+    for (final watch in watches) {
+      next = await _pollIssueWatch(next, watch, foreign: foreign);
+    }
+    return next;
+  }
+
+  /// GETs [path] through the lane [foreign] selects.
+  ///
+  /// The ONE place the split is made: an installed repository rides the App
+  /// client and its installation token, a foreign one the token-less sibling.
+  /// Neither can reach the other's client.
+  Future<GitHubHttpResponse> _watchGet(
+    bool foreign, {
+    required String path,
+    Map<String, String> headers = const <String, String>{},
+    Map<String, String> queryParameters = const <String, String>{},
+  }) => foreign
+      ? _foreign!.get(
+          path: path,
+          headers: headers,
+          queryParameters: queryParameters,
+        )
+      : _client.send(
+          method: 'GET',
+          path: path,
+          headers: headers,
+          queryParameters: queryParameters,
+        );
+
+  /// Observes one watched issue: its authoritative resource, then its timeline.
+  ///
+  /// The FIRST successful poll is a BASELINE. It emits every comment already on
+  /// the issue oldest-first — those are replies nobody has read yet — and one
+  /// synthetic state event when the issue is already closed or locked, but it
+  /// does NOT replay the transitions that produced that state; it simply
+  /// records the timeline mark they sit behind. Every later poll emits only
+  /// what is beyond the stored marks.
+  Future<GitHubReconcilerCursor> _pollIssueWatch(
+    GitHubReconcilerCursor cursor,
+    GitHubIssueWatch watch, {
+    required bool foreign,
+  }) async {
+    final key = watch.coordinateKey;
+    final record = cursor.issueWatches[key];
+    // Transferred, deleted and converted are TERMINAL: there is no resource
+    // left at these coordinates, so every further request would be spent to
+    // learn the same thing.
+    if (record != null && record.isTerminal) return cursor;
+
+    final issueKey = GitHubReconcilerCursor.issueWatchEtagKey(key);
+    final timelineKey = GitHubReconcilerCursor.issueWatchTimelineEtagKey(key);
+    final basePath =
+        '/repos/${Uri.encodeComponent(watch.owner)}/'
+        '${Uri.encodeComponent(watch.repository)}/issues/${watch.issueNumber}';
+
+    final issueConditional = record == null ? null : cursor.etags[issueKey];
+    final response = await _watchGet(
+      foreign,
+      path: basePath,
+      headers: <String, String>{
+        if (issueConditional case final etag?) 'If-None-Match': etag,
+      },
+    );
+    final status = response.statusCode;
+    if (_watchStatusChanges.containsKey(status)) {
+      return _recordWatchStatus(cursor, watch, record, status);
+    }
+    if (status == 304) {
+      // Unreachable unless a server answers a conditional we never sent: a
+      // `304` with no baseline is a response we cannot interpret at all.
+      if (record == null) {
+        throw GitHubPollException(endpoint: issueKey, statusCode: status);
+      }
+    } else {
+      _requireSuccess(issueKey, status);
+    }
+
+    final _IssueResource resource;
+    final String? issueEtag;
+    if (status == 304) {
+      resource = _IssueResource.fromRecord(record!);
+      issueEtag = issueConditional;
+    } else {
+      final body = _map(_decoded(response.body, issueKey), issueKey);
+      // `/issues/{number}` answers for pull requests too, and a pull's
+      // comments belong to the CI feedback rail, not to an outbound watch.
+      if (body.containsKey('pull_request')) {
+        throw FormatException(
+          '$issueKey resolved a pull request, not an issue',
+        );
+      }
+      final closedBy = body['closed_by'];
+      resource = _IssueResource(
+        nodeId: _string(body, 'node_id'),
+        author: _string(_nestedMap(body, 'user'), 'login', prefix: 'user'),
+        state: _string(body, 'state'),
+        stateReason: _nullableString(body, 'state_reason'),
+        locked: _boolean(body, 'locked'),
+        updatedAt: _date(_string(body, 'updated_at'), 'updated_at'),
+        url: _nullableString(body, 'html_url'),
+        closedBy: closedBy == null
+            ? null
+            : _string(
+                _map(closedBy, 'closed_by'),
+                'login',
+                prefix: 'closed_by',
+              ),
+      );
+      issueEtag = response.header('etag');
+    }
+
+    final timeline = await _issueTimeline(
+      cursor,
+      basePath,
+      timelineKey,
+      hasBaseline: record != null,
+      foreign: foreign,
+    );
+
+    final events = <NormalizedGitHubEvent>[];
+    final baseline = record == null;
+    var lastCommentId = record?.lastCommentId ?? 0;
+    var lastTimelineEventId = record?.lastTimelineEventId ?? 0;
+    // The state the timeline REPLAYS to, started from the durable baseline.
+    // Each emitted transition carries the values as of ITSELF, so a close
+    // followed by a reopen in one cycle does not report both as `open`.
+    var state = record?.lastState ?? resource.state;
+    var stateReason = record?.lastStateReason ?? resource.stateReason;
+    var locked = record?.locked ?? resource.locked;
+
+    for (final entry in timeline.entries) {
+      if (entry.event == 'commented') {
+        if (entry.id <= lastCommentId) continue;
+        lastCommentId = entry.id;
+        events.add(_commentEvent(watch, resource, entry));
+        continue;
+      }
+      if (entry.id <= lastTimelineEventId) continue;
+      lastTimelineEventId = entry.id;
+      final change = _timelineChange(entry, resource);
+      if (change == null) continue;
+      switch (change) {
+        case GitHubIssueWatchChange.closedCompleted:
+        case GitHubIssueWatchChange.closedNotPlanned:
+          state = 'closed';
+          stateReason =
+              _nullableString(entry.row, 'state_reason') ??
+              resource.stateReason;
+        case GitHubIssueWatchChange.reopened:
+          state = 'open';
+          stateReason = null;
+        case GitHubIssueWatchChange.locked:
+          locked = entry.event == 'locked';
+        case GitHubIssueWatchChange.transferred:
+        case GitHubIssueWatchChange.deleted:
+        case GitHubIssueWatchChange.convertedToDiscussion:
+        case GitHubIssueWatchChange.unreadable:
+          break;
+      }
+      if (baseline) continue;
+      events.add(
+        _stateEvent(
+          watch,
+          resource,
+          nodeId: _string(entry.row, 'node_id'),
+          actor: _entryActor(entry.row) ?? kIssueWatchResourceActor,
+          observationId:
+              'poll:issue-state:${_string(entry.row, 'node_id')}:${change.wire}',
+          change: change,
+          state: state,
+          stateReason: stateReason,
+          locked: locked,
+        ),
+      );
+    }
+
+    if (baseline) {
+      // A watch armed against an issue that is ALREADY closed or locked must
+      // say so once: the reply that never came is exactly what this feature
+      // exists to notice, and silence here would look like an open issue.
+      final change = resource.state == 'open'
+          ? (resource.locked ? GitHubIssueWatchChange.locked : null)
+          : _closedChange(resource.stateReason);
+      if (change != null) {
+        events.add(_resourceStateEvent(watch, resource, change));
+      }
+    } else if (resource.state != state ||
+        resource.stateReason != stateReason ||
+        resource.locked != locked) {
+      // The resource is AUTHORITATIVE. A transition the timeline did not
+      // explain — a row GitHub has not published yet, or one this version does
+      // not decode — still reaches the bead rather than going quiet.
+      final change = _resourceChange(
+        state: state,
+        stateReason: stateReason,
+        locked: locked,
+        resource: resource,
+      );
+      if (change != null) {
+        events.add(_resourceStateEvent(watch, resource, change));
+      }
+    }
+
+    // DELIVER FIRST, advance SECOND. A crash between the two replays the poll
+    // and the delivered-id ledger drops what already landed; the reverse order
+    // would skip an observation for good.
+    var next = await _deliver(cursor, events);
+    final emitted = events.whereType<WatchedIssueStateChanged>().lastOrNull;
+    next = next.recordIssueWatch(
+      key,
+      GitHubIssueWatchCursorRecord(
+        issueNodeId: resource.nodeId,
+        issueAuthor: resource.author,
+        lastCommentId: lastCommentId,
+        lastTimelineEventId: lastTimelineEventId,
+        lastState: resource.state,
+        lastStateReason: resource.stateReason,
+        locked: resource.locked,
+        lastUpdatedAt: resource.updatedAt,
+        // A successful read CLEARS a stale `unreadable`: access came back.
+        lastChange:
+            emitted?.change ??
+            (record?.lastChange == GitHubIssueWatchChange.unreadable
+                ? null
+                : record?.lastChange),
+      ),
+      issueEtag: issueEtag,
+      timelineEtag: timeline.etag,
+    );
+    await _cursors.save(next);
+    return next;
+  }
+
+  /// The statuses that ARE the transition — no body to read, no timeline left.
+  static const Map<int, GitHubIssueWatchChange> _watchStatusChanges =
+      <int, GitHubIssueWatchChange>{
+        301: GitHubIssueWatchChange.transferred,
+        410: GitHubIssueWatchChange.deleted,
+        404: GitHubIssueWatchChange.unreadable,
+      };
+
+  /// Records a transition reported only by an HTTP status.
+  ///
+  /// With NO baseline this THROWS: a `404` on the very first poll says nothing
+  /// about a watch — the coordinates may simply be wrong — and there is no
+  /// issue node id or author to attribute an observation to. Guessing would
+  /// file "your issue became unreadable" for an issue that never existed.
+  Future<GitHubReconcilerCursor> _recordWatchStatus(
+    GitHubReconcilerCursor cursor,
+    GitHubIssueWatch watch,
+    GitHubIssueWatchCursorRecord? record,
+    int status,
+  ) async {
+    final key = watch.coordinateKey;
+    if (record == null) {
+      throw GitHubPollException(
+        endpoint: GitHubReconcilerCursor.issueWatchEtagKey(key),
+        statusCode: status,
+      );
+    }
+    final change = _watchStatusChanges[status]!;
+    if (record.lastChange == change) return cursor;
+    var next = await _deliver(cursor, <NormalizedGitHubEvent>[
+      NormalizedGitHubEvent.watchedIssueStateChanged(
+        nodeId: record.issueNodeId,
+        actor: kIssueWatchResourceActor,
+        repository: '${watch.owner}/${watch.repository}',
+        substation: substation,
+        observationId:
+            'poll:issue-state:${record.issueNodeId}:$status:${change.wire}',
+        originatingBeadId: watch.originatingBeadId,
+        issueNodeId: record.issueNodeId,
+        issueAuthor: record.issueAuthor,
+        issueNumber: watch.issueNumber,
+        change: change,
+        state: record.lastState,
+        stateReason: record.lastStateReason,
+        locked: record.locked,
+        url: null,
+        updatedAt: record.lastUpdatedAt,
+      ),
+    ]);
+    // Both tags go with the record: whatever they were conditional on is gone.
+    next = next.recordIssueWatch(key, record.copyWith(lastChange: change));
+    await _cursors.save(next);
+    return next;
+  }
+
+  /// Every Link-paginated timeline row for one watched issue, oldest first.
+  ///
+  /// A `304` on the first page is the cheap answer this leg is built for: no
+  /// rows, and the tag it was conditional on is retained.
+  Future<({List<_TimelineEntry> entries, String? etag})> _issueTimeline(
+    GitHubReconcilerCursor cursor,
+    String basePath,
+    String timelineKey, {
+    required bool hasBaseline,
+    required bool foreign,
+  }) async {
+    final conditional = hasBaseline ? cursor.etags[timelineKey] : null;
+    var response = await _watchGet(
+      foreign,
+      path: '$basePath/timeline',
+      queryParameters: const <String, String>{'per_page': '100'},
+      headers: <String, String>{
+        if (conditional case final etag?) 'If-None-Match': etag,
+      },
+    );
+    if (response.statusCode == 304) {
+      return (entries: const <_TimelineEntry>[], etag: conditional);
+    }
+    _requireSuccess(timelineKey, response.statusCode);
+    final firstPageEtag = response.header('etag');
+    final entries = <_TimelineEntry>[];
+    while (true) {
+      for (final raw in _list(response.body, timelineKey)) {
+        final row = _map(raw, 'timeline');
+        final event = _nullableString(row, 'event');
+        if (event == null || !_watchedTimelineEvents.contains(event)) continue;
+        final id = row['id'];
+        // A row GitHub gives no id cannot be ordered against the stored mark,
+        // so it can only ever be re-emitted; skipping it is the honest choice.
+        if (id is! int) continue;
+        entries.add(
+          _TimelineEntry(
+            event: event,
+            id: id,
+            createdAt: _date(_string(row, 'created_at'), 'created_at'),
+            row: row,
+          ),
+        );
+      }
+      final nextPage = nextGitHubPageUri(response.header('link'));
+      if (nextPage == null) break;
+      response = await _watchGet(
+        foreign,
+        path: nextPage.path,
+        queryParameters: nextPage.queryParameters,
+      );
+      _requireSuccess(timelineKey, response.statusCode);
+    }
+    entries.sort((left, right) {
+      final byTime = left.createdAt.compareTo(right.createdAt);
+      return byTime != 0 ? byTime : left.id.compareTo(right.id);
+    });
+    return (entries: entries, etag: firstPageEtag);
+  }
+
+  /// The timeline rows a watch decodes; everything else is noise it skips.
+  static const Set<String> _watchedTimelineEvents = <String>{
+    'commented',
+    'closed',
+    'reopened',
+    'locked',
+    'unlocked',
+    'transferred',
+    'converted_to_discussion',
+  };
+
+  GitHubIssueWatchChange? _timelineChange(
+    _TimelineEntry entry,
+    _IssueResource resource,
+  ) => switch (entry.event) {
+    'closed' => _closedChange(
+      _nullableString(entry.row, 'state_reason') ?? resource.stateReason,
+    ),
+    'reopened' => GitHubIssueWatchChange.reopened,
+    'locked' || 'unlocked' => GitHubIssueWatchChange.locked,
+    'transferred' => GitHubIssueWatchChange.transferred,
+    'converted_to_discussion' => GitHubIssueWatchChange.convertedToDiscussion,
+    _ => null,
+  };
+
+  /// The change a `closed` observation carries; a missing reason is
+  /// `completed`, which is what GitHub's own default means.
+  GitHubIssueWatchChange _closedChange(String? reason) =>
+      reason == 'not_planned'
+      ? GitHubIssueWatchChange.closedNotPlanned
+      : GitHubIssueWatchChange.closedCompleted;
+
+  /// The change between the replayed state and the authoritative resource.
+  GitHubIssueWatchChange? _resourceChange({
+    required String state,
+    required String? stateReason,
+    required bool locked,
+    required _IssueResource resource,
+  }) {
+    if (resource.state != state) {
+      return resource.state == 'open'
+          ? GitHubIssueWatchChange.reopened
+          : _closedChange(resource.stateReason);
+    }
+    if (resource.state != 'open' && resource.stateReason != stateReason) {
+      return _closedChange(resource.stateReason);
+    }
+    return resource.locked != locked ? GitHubIssueWatchChange.locked : null;
+  }
+
+  NormalizedGitHubEvent _commentEvent(
+    GitHubIssueWatch watch,
+    _IssueResource resource,
+    _TimelineEntry entry,
+  ) {
+    final row = entry.row;
+    final updated =
+        _nullableString(row, 'updated_at') ?? _string(row, 'created_at');
+    return NormalizedGitHubEvent.issueCommented(
+      nodeId: _string(row, 'node_id'),
+      actor: _entryActor(row) ?? kIssueWatchResourceActor,
+      repository: '${watch.owner}/${watch.repository}',
+      substation: substation,
+      observationId: 'poll:issue-comment:${_string(row, 'node_id')}',
+      originatingBeadId: watch.originatingBeadId,
+      issueNodeId: resource.nodeId,
+      issueAuthor: resource.author,
+      issueNumber: watch.issueNumber,
+      commentId: entry.id,
+      body: _nullableString(row, 'body') ?? '',
+      url: _nullableString(row, 'html_url') ?? '',
+      updatedAt: _date(updated, 'updated_at'),
+    );
+  }
+
+  NormalizedGitHubEvent _stateEvent(
+    GitHubIssueWatch watch,
+    _IssueResource resource, {
+    required String nodeId,
+    required String actor,
+    required String observationId,
+    required GitHubIssueWatchChange change,
+    required String state,
+    required String? stateReason,
+    required bool locked,
+  }) => NormalizedGitHubEvent.watchedIssueStateChanged(
+    nodeId: nodeId,
+    actor: actor,
+    repository: '${watch.owner}/${watch.repository}',
+    substation: substation,
+    observationId: observationId,
+    originatingBeadId: watch.originatingBeadId,
+    issueNodeId: resource.nodeId,
+    issueAuthor: resource.author,
+    issueNumber: watch.issueNumber,
+    change: change,
+    state: state,
+    stateReason: stateReason,
+    locked: locked,
+    url: resource.url,
+    updatedAt: resource.updatedAt,
+  );
+
+  /// A transition attributed to the ISSUE RESOURCE rather than a timeline row.
+  ///
+  /// Its observation id carries the resource's `updated_at`, so a later
+  /// transition of the same kind is a distinct observation while a re-read of
+  /// the same one is not.
+  NormalizedGitHubEvent _resourceStateEvent(
+    GitHubIssueWatch watch,
+    _IssueResource resource,
+    GitHubIssueWatchChange change,
+  ) => _stateEvent(
+    watch,
+    resource,
+    nodeId: resource.nodeId,
+    actor: resource.state == 'open'
+        ? kIssueWatchResourceActor
+        : resource.closedBy ?? kIssueWatchResourceActor,
+    observationId:
+        'poll:issue-state:${resource.nodeId}:'
+        '${resource.updatedAt.toUtc().toIso8601String()}:${change.wire}',
+    change: change,
+    state: resource.state,
+    stateReason: resource.stateReason,
+    locked: resource.locked,
+  );
+
+  /// The login credited with one timeline row, or null when GitHub named none
+  /// — a comment by a since-deleted account carries a null `user`.
+  String? _entryActor(Map<String, Object?> row) {
+    for (final field in const <String>['user', 'actor']) {
+      final value = row[field];
+      if (value is Map) {
+        final login = Map<String, Object?>.from(value)['login'];
+        if (login is String) return login;
+      }
+    }
+    return null;
+  }
+
   Future<GitHubReconcilerCursor> _deliver(
     GitHubReconcilerCursor cursor,
     Iterable<NormalizedGitHubEvent> events,
@@ -702,4 +1280,64 @@ DateTime _date(String value, String field) {
   } on FormatException catch (error) {
     throw FormatException('$field must be a timestamp', error);
   }
+}
+
+/// The AUTHORITATIVE values of one watched issue for one poll.
+///
+/// Built from `/issues/{number}` when GitHub answered `200`, and from the
+/// durable record when it answered `304` — a conditional response has no body
+/// to read, and the record is exactly what the tag was conditional on.
+class _IssueResource {
+  const _IssueResource({
+    required this.nodeId,
+    required this.author,
+    required this.state,
+    required this.stateReason,
+    required this.locked,
+    required this.updatedAt,
+    required this.url,
+    required this.closedBy,
+  });
+
+  factory _IssueResource.fromRecord(GitHubIssueWatchCursorRecord record) =>
+      _IssueResource(
+        nodeId: record.issueNodeId,
+        author: record.issueAuthor,
+        state: record.lastState,
+        stateReason: record.lastStateReason,
+        locked: record.locked,
+        updatedAt: record.lastUpdatedAt,
+        url: null,
+        closedBy: null,
+      );
+
+  final String nodeId;
+  final String author;
+  final String state;
+  final String? stateReason;
+  final bool locked;
+  final DateTime updatedAt;
+  final String? url;
+  final String? closedBy;
+}
+
+/// One decoded, orderable timeline row.
+class _TimelineEntry {
+  const _TimelineEntry({
+    required this.event,
+    required this.id,
+    required this.createdAt,
+    required this.row,
+  });
+
+  final String event;
+  final int id;
+  final DateTime createdAt;
+  final Map<String, Object?> row;
+}
+
+bool _boolean(Map<String, Object?> map, String field) {
+  final value = map[field];
+  if (value is! bool) throw FormatException('$field must be a boolean');
+  return value;
 }

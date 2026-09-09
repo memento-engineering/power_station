@@ -127,6 +127,7 @@ final class _Factory {
   final configs = <GitHubReconcilerConfig>[];
   final transports = <ExplorationTransport?>[];
   final runtimes = <_RecordingRuntime>[];
+  final foreignClients = <GitHubReadClient?>[];
 
   GitHubReconcilerRuntime create({
     required GitHubReconcilerConfig config,
@@ -134,9 +135,11 @@ final class _Factory {
     required GitHubCursorStore cursors,
     required GitHubEventSink emit,
     required ExplorationTransport? transport,
+    required GitHubReadClient? foreignClient,
   }) {
     configs.add(config);
     transports.add(transport);
+    foreignClients.add(foreignClient);
     final runtime = _RecordingRuntime(client: client);
     runtimes.add(runtime);
     return runtime;
@@ -171,6 +174,8 @@ Seed _runtimeTree({
   required _Factory factory,
   required void Function(GitHubReconcilerRuntime?) observe,
   ExplorationTransport? transport,
+  EnvironmentReader? environment,
+  GitHubHttpTransportFactory? foreignTransportFactory,
 }) => InheritedSeed<ServiceBundle>(
   value: ServiceBundle(transport: transport),
   child: Provider<GitHubAppClient>.value(
@@ -182,6 +187,9 @@ Seed _runtimeTree({
         child: GitHubReconcilerAssets(
           config: config,
           runtimeFactory: factory.create,
+          environment: environment ?? platformEnvironment,
+          foreignTransportFactory:
+              foreignTransportFactory ?? createGitHubHttpTransport,
           child: GitHubGridAssets(
             child: _Probe(
               (context) => observe(context.watch<GitHubReconcilerRuntime>()),
@@ -221,6 +229,7 @@ void main() {
       cursors: _Cursors(),
       emit: (_) async {},
       transport: null,
+      foreignClient: null,
     );
     addTearDown(runtime.stop);
 
@@ -233,6 +242,7 @@ void main() {
       cursors: _Cursors(),
       emit: (_) async {},
       transport: null,
+      foreignClient: null,
     );
     addTearDown(plain.stop);
     expect(plain.reconciler.workflowRuns, isEmpty);
@@ -275,6 +285,7 @@ void main() {
         cursors: _Cursors(),
         emit: (_) async {},
         transport: flares,
+        foreignClient: null,
       );
 
       runtime.start();
@@ -415,5 +426,174 @@ void main() {
     expect(source, isNot(contains('bd create')));
     expect(source, isNot(contains('FileSystemWatcher')));
     expect(source, isNot(contains('Timer')));
+  });
+
+  group('outbound issue watches', () {
+    /// Mounts [tree] under a provider scope and flushes it, exactly as the
+    /// live-config probes above do.
+    void mount(Seed tree) {
+      final owner = TreeOwner();
+      owner.mountRoot(sdk.ProviderScope(child: tree));
+      owner.flush();
+      addTearDown(owner.unmountRoot);
+    }
+
+    const foreign = GitHubIssueWatch(
+      originatingBeadId: 'lunar_station-6p9',
+      owner: 'ricardoboss',
+      repository: 'radioactive_dart',
+      issueNumber: 1,
+    );
+    const installedOnly = GitHubIssueWatch(
+      originatingBeadId: 'pow-1rn',
+      owner: 'memento',
+      repository: 'power_station',
+      issueNumber: 7,
+    );
+
+    GitHubReconcilerConfig config({
+      List<GitHubIssueWatch> watches = const <GitHubIssueWatch>[],
+      String? tokenVariable,
+      Duration? spacing,
+    }) => GitHubReconcilerConfig(
+      owner: 'memento',
+      repository: 'power_station',
+      substation: 'power_station',
+      installationId: 'installation',
+      issueWatches: watches,
+      foreignReadTokenVariable: tokenVariable,
+      foreignMinimumSpacing: spacing ?? kUnauthenticatedGitHubMinimumSpacing,
+    );
+
+    test('the defaults are the feature-off values', () {
+      final off = config();
+      expect(off.issueWatches, isEmpty);
+      expect(off.foreignReadTokenVariable, isNull);
+      expect(off.foreignMinimumSpacing, const Duration(seconds: 65));
+      expect(
+        createGitHubReconcilerRuntime(
+          config: off,
+          client: _client,
+          cursors: _Cursors(),
+          emit: (_) async {},
+          transport: null,
+          foreignClient: null,
+        ).reconciler.issueWatches,
+        isEmpty,
+      );
+    });
+
+    test('no foreign watch constructs no transport and reads no variable', () {
+      var environmentReads = 0;
+      var transportBuilds = 0;
+      final factory = _Factory();
+      for (final watches in <List<GitHubIssueWatch>>[
+        const <GitHubIssueWatch>[],
+        const <GitHubIssueWatch>[installedOnly],
+      ]) {
+        mount(
+          _runtimeTree(
+            config: config(watches: watches, tokenVariable: 'TOKEN'),
+            factory: factory,
+            observe: (_) {},
+            environment: () {
+              environmentReads++;
+              return const <String, String>{};
+            },
+            foreignTransportFactory: () {
+              transportBuilds++;
+              return _Transport();
+            },
+          ),
+        );
+      }
+
+      expect(environmentReads, 0);
+      expect(transportBuilds, 0);
+      expect(factory.foreignClients, everyElement(isNull));
+      expect(factory.configs.last.issueWatches, hasLength(lessThan(2)));
+    });
+
+    test('a foreign watch builds ONE token-less read client', () {
+      var transportBuilds = 0;
+      final factory = _Factory();
+      mount(
+        _runtimeTree(
+          config: config(watches: const <GitHubIssueWatch>[foreign]),
+          factory: factory,
+          observe: (_) {},
+          environment: () => const <String, String>{},
+          foreignTransportFactory: () {
+            transportBuilds++;
+            return _Transport();
+          },
+        ),
+      );
+
+      expect(transportBuilds, 1);
+      final client = factory.foreignClients.single;
+      expect(client, isNotNull);
+      expect(client!.isAuthenticated, isFalse);
+    });
+
+    test('a nonblank token variable is resolved and used', () {
+      final factory = _Factory();
+      mount(
+        _runtimeTree(
+          config: config(
+            watches: const <GitHubIssueWatch>[foreign],
+            tokenVariable: 'GITHUB_FOREIGN_READ_TOKEN',
+          ),
+          factory: factory,
+          observe: (_) {},
+          environment: () => const <String, String>{
+            'GITHUB_FOREIGN_READ_TOKEN': 'personal',
+          },
+          foreignTransportFactory: _Transport.new,
+        ),
+      );
+
+      expect(factory.foreignClients.single!.isAuthenticated, isTrue);
+    });
+
+    test('a blank token variable stays the token-less posture', () {
+      final factory = _Factory();
+      mount(
+        _runtimeTree(
+          config: config(
+            watches: const <GitHubIssueWatch>[foreign],
+            tokenVariable: 'GITHUB_FOREIGN_READ_TOKEN',
+          ),
+          factory: factory,
+          observe: (_) {},
+          environment: () => const <String, String>{
+            'GITHUB_FOREIGN_READ_TOKEN': '   ',
+          },
+          foreignTransportFactory: _Transport.new,
+        ),
+      );
+
+      expect(factory.foreignClients.single!.isAuthenticated, isFalse);
+    });
+
+    test('the watch list reaches the reconciler through the factory', () {
+      final factory = _Factory();
+      mount(
+        _runtimeTree(
+          config: config(
+            watches: const <GitHubIssueWatch>[foreign, installedOnly],
+          ),
+          factory: factory,
+          observe: (_) {},
+          environment: () => const <String, String>{},
+          foreignTransportFactory: _Transport.new,
+        ),
+      );
+
+      expect(factory.configs.single.issueWatches, <GitHubIssueWatch>[
+        foreign,
+        installedOnly,
+      ]);
+    });
   });
 }

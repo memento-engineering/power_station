@@ -5,10 +5,16 @@ import 'package:test/test.dart';
 
 final class FakeGitHubIntakeStore implements GitHubIntakeStore {
   final List<GitHubIntakeRecord> records = [];
+  final List<GitHubIssueWatchUpdate> watchUpdates = [];
 
   @override
   Future<void> upsert(GitHubIntakeRecord record) async {
     records.add(record);
+  }
+
+  @override
+  Future<void> appendIssueWatch(GitHubIssueWatchUpdate update) async {
+    watchUpdates.add(update);
   }
 }
 
@@ -282,5 +288,57 @@ void main() {
     expect(store.records.map((record) => record.externalRef).toSet(), {
       'github:I_1',
     });
+  });
+
+  test('watched-issue observations are never filed as fresh intake', () async {
+    final store = FakeGitHubIntakeStore();
+    final projection = GitHubIntakeProjection(
+      trust: GitHubSelfTrust(githubUser: 'nico', repository: 'memento/power'),
+      store: store,
+    );
+
+    await projection(
+      NormalizedGitHubEvent.issueCommented(
+        nodeId: 'IC_first',
+        actor: 'ricardoboss',
+        repository: 'ricardoboss/radioactive_dart',
+        substation: 'power',
+        observationId: 'poll:issue-comment:IC_first',
+        originatingBeadId: 'lunar_station-6p9',
+        issueNodeId: 'I_kwDO',
+        issueAuthor: 'nico',
+        issueNumber: 1,
+        commentId: 11,
+        body: 'A reply.',
+        url: 'https://github.test/1',
+        updatedAt: DateTime.utc(2026, 9, 9, 11),
+      ),
+    );
+    await projection(
+      NormalizedGitHubEvent.watchedIssueStateChanged(
+        nodeId: 'CE_closed',
+        actor: 'ricardoboss',
+        repository: 'ricardoboss/radioactive_dart',
+        substation: 'power',
+        observationId: 'poll:issue-state:CE_closed:closed_completed',
+        originatingBeadId: 'lunar_station-6p9',
+        issueNodeId: 'I_kwDO',
+        issueAuthor: 'nico',
+        issueNumber: 1,
+        change: GitHubIssueWatchChange.closedCompleted,
+        state: 'closed',
+        stateReason: null,
+        locked: false,
+        url: null,
+        updatedAt: DateTime.utc(2026, 9, 9, 13),
+      ),
+    );
+
+    expect(store.records, isEmpty);
+    expect(
+      store.watchUpdates,
+      isEmpty,
+      reason: 'intake owns neither half of a watch',
+    );
   });
 }

@@ -25,30 +25,33 @@ class GitHubPollCoordinator {
   final Map<String, Future<void>> _tails = <String, Future<void>>{};
   final Map<String, DateTime> _lastStarts = <String, DateTime>{};
 
-  /// Schedules [request] behind work for [installationId].
-  Future<void> schedule(
-    String installationId,
-    Future<void> Function() request,
-  ) {
-    final prior = _tails[installationId] ?? Future<void>.value();
-    late final Future<void> run;
+  /// Schedules [request] behind work already queued under [key], and RETURNS
+  /// its result.
+  ///
+  /// [key] is an opaque quota identity, not necessarily an installation: the
+  /// token-less foreign read lane schedules under its own key so its 60-per-hour
+  /// allowance can never be spent by an installation poll, nor the reverse.
+  ///
+  /// The result is returned so a scheduled REQUEST — not just a whole cycle —
+  /// can ride the budget: a foreign GET has a response its caller needs.
+  Future<T> schedule<T>(String key, Future<T> Function() request) {
+    final prior = _tails[key] ?? Future<void>.value();
+    late final Future<T> run;
     run = prior
         .catchError((Object _) {})
-        .then((_) async {
-          final last = _lastStarts[installationId];
+        .then<T>((_) async {
+          final last = _lastStarts[key];
           if (last != null) {
             final wait = minimumSpacing - _now().difference(last);
             if (wait > Duration.zero) await _delay(wait);
           }
-          _lastStarts[installationId] = _now();
-          await request();
+          _lastStarts[key] = _now();
+          return request();
         })
         .whenComplete(() {
-          if (identical(_tails[installationId], run)) {
-            _tails.remove(installationId);
-          }
+          if (identical(_tails[key], run)) _tails.remove(key);
         });
-    _tails[installationId] = run;
+    _tails[key] = run;
     return run;
   }
 }
