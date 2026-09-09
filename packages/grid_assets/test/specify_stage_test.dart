@@ -16,8 +16,10 @@ import 'dart:io';
 
 import 'package:grid_assets/grid_assets.dart';
 import 'package:beads_dart/beads_dart.dart';
+import 'package:genesis_tree/genesis_tree.dart';
 import 'package:grid_engine/grid_engine.dart';
 import 'package:grid_runtime/grid_runtime.dart';
+import 'package:grid_sdk/grid_sdk.dart' show SpecifyAuthoredSpecWriter;
 import 'package:test/test.dart';
 
 import 'support/asset_fakes.dart';
@@ -42,6 +44,91 @@ import 'support/asset_fakes.dart';
   ),
   args: stepArgs('tg-1/spec_review/specify'),
 );
+
+/// The SPECIFY step exactly as [kSpecReviewCircuit] declares it — so a probe
+/// resolves the capability the STATION composes, never a hand-wired pair the
+/// wire never mounts.
+StepMount _specifyMount() => StepMount(
+  step: kSpecReviewCircuit.steps.whereType<CapabilityStep>().singleWhere(
+    (step) => step.stepId == kSpecifyStep,
+  ),
+  nodePath: 'tg-1/spec_review/specify',
+  circuit: kSpecReviewCircuit,
+  circuitPath: 'tg-1/spec_review',
+  session: const SessionHandle('tgdog-sess1'),
+  node: const NodeCursor(),
+  key: const ValueKey('tg-1/spec_review/specify#0.0'),
+);
+
+/// The specify capability as the REAL registry composes it, over the owned-work
+/// writer extension [writeSpecifyAuthoredSpec].
+SpecifyCapability _composedSpecify({
+  SpecifyAuthoredSpecWriter? writeSpecifyAuthoredSpec,
+  BdRunner Function(String workspaceRoot)? specifyBdRunnerFor,
+}) {
+  final host =
+      buildCodeRegistry(
+            overlaySourceRef: 'test',
+            specifyBdRunnerFor: specifyBdRunnerFor,
+            writeSpecifyAuthoredSpec: writeSpecifyAuthoredSpec,
+          ).host(_specifyMount())
+          as CapabilityHost;
+  return host.capability as SpecifyCapability;
+}
+
+/// A recording [SpecifyAuthoredSpecWriter] — Fakes, not mocks. Pass [record]
+/// as the tear-off; the capability sees a plain closure.
+final class _RecordingSpecWriter {
+  final List<({String beadId, String design, String acceptanceCriteria})>
+  calls = [];
+
+  Future<void> record(
+    String beadId, {
+    required String design,
+    required String acceptanceCriteria,
+  }) async => calls.add((
+    beadId: beadId,
+    design: design,
+    acceptanceCriteria: acceptanceCriteria,
+  ));
+}
+
+/// Writes ONE harness result envelope at [nodePath] under a fresh temp
+/// workspace, carrying [result] as the agent's final response text.
+Directory _envelopeWorkspace(
+  String? result, {
+  String nodePath = 'tg-1/spec_review/specify',
+}) {
+  final dir = Directory.systemTemp.createTempSync('specify-stamp-');
+  if (result != null) {
+    File('${dir.path}/${usageReportPath(nodePath)}')
+      ..createSync(recursive: true)
+      ..writeAsStringSync(
+        jsonEncode({
+          'type': 'result',
+          'duration_ms': 100,
+          'num_turns': 2,
+          'usage': {'input_tokens': 10, 'output_tokens': 5},
+          'result': result,
+        }),
+      );
+  }
+  return dir;
+}
+
+/// The station chokepoint over a recording runner — ONE writer instance, the
+/// per-id serialization intact (never a second writer built in a capability).
+StationBeadWriter _chokepoint(RecordingBdRunner runner) => StationBeadWriter(
+  bd: BdCliService(runner),
+  reader: runner,
+  ownership: BeadOwnershipPredicate(const {'tg'}),
+);
+
+/// The recorded MUTATIONS — `bd update --help` is `BdCliService`'s one-shot
+/// guarded-write CAPABILITY PROBE, not a write, so it never counts as one.
+List<List<String>> _mutations(RecordingBdRunner runner) => runner.calls
+    .where((call) => !(call.length == 2 && call[1] == '--help'))
+    .toList(growable: false);
 
 Bead _fullBead() => bead('tg-1').copyWith(
   title: 'Wire the federation bus',
@@ -487,6 +574,203 @@ void main() {
         expect(fields[kCarriedSpecDesignKey], design);
       },
     );
+  });
+
+  // The SPECIFY PROVENANCE stamp: the agent authored the prose with its own raw
+  // `bd update --actor specify`, which carries NO metadata, and `--actor` is an
+  // audit-trail string bd never replays — so nothing the agent runs can mark the
+  // prose as specify-authored, and a rework that preserves unmarked prose would
+  // preserve STALE specify text forever. The station stamps instead, through the
+  // one chokepoint, off the envelope the step already parses.
+  group('SpecifyCapability.result — the SPECIFY provenance stamp', () {
+    const acceptance =
+        '- [ ] AC-1 — the stamp carries the exact acceptance\n'
+        '- [ ] AC-2 — verbatim, both lines';
+    const design =
+        '## Implementation Plan\n\n### Step 1 — stamp the provenance\n';
+
+    setUp(BdCliService.resetGuardedWriteCapabilityForTesting);
+
+    test('well-formed envelope calls the registry writer seam with exact '
+        'carried spec', () async {
+      // BOTH registry branches — the default post-exit read-back runner and an
+      // injected one — thread the same extension; neither may drop it.
+      for (final composition
+          in <String, BdRunner Function(String workspaceRoot)?>{
+            'the default read-back runner': null,
+            'an injected read-back runner': (_) => SpecifyReadbackBdRunner(),
+          }.entries) {
+        final dir = _envelopeWorkspace(
+          jsonEncode({'acceptance': acceptance, 'design': design}),
+        );
+        addTearDown(() => dir.deleteSync(recursive: true));
+        final recorder = _RecordingSpecWriter();
+        final c = _ctx(workspaceDir: dir.path);
+        final fields = await _composedSpecify(
+          writeSpecifyAuthoredSpec: recorder.record,
+          specifyBdRunnerFor: composition.value,
+        ).result(c.context, c.args);
+
+        expect(recorder.calls, hasLength(1), reason: composition.key);
+        expect(recorder.calls.single.beadId, 'tg-1', reason: composition.key);
+        expect(recorder.calls.single.design, design, reason: composition.key);
+        expect(
+          recorder.calls.single.acceptanceCriteria,
+          acceptance,
+          reason: composition.key,
+        );
+        // The step's own carried result is the SAME pair — one read, one parse.
+        expect(fields?[kCarriedSpecAcceptanceKey], acceptance);
+        expect(fields?[kCarriedSpecDesignKey], design);
+        expect(fields?['tokensIn'], '10');
+      }
+
+      // The brief's audit trail is untouched: the agent still runs both raw
+      // `--actor specify` writes; the stamp is the station's SECOND write over
+      // them, never a change to what the architect was told to run.
+      final brief = buildSpecifyBrief(
+        _fullBead(),
+        testWorkspace('tg-1', workspaceDir: '/w/tg-1', branch: 'grid/tg-1'),
+      ).render();
+      expect(
+        brief,
+        contains("`bd update tg-1 --actor specify --acceptance '<criteria>'`"),
+      );
+      expect(
+        brief,
+        contains("`bd update tg-1 --actor specify --design '<spec>'`"),
+      );
+    });
+
+    test('an absent extension leaves today\'s behaviour exactly as it was '
+        '(no write, carried fields intact)', () async {
+      final dir = _envelopeWorkspace(
+        jsonEncode({'acceptance': acceptance, 'design': design}),
+      );
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final c = _ctx(workspaceDir: dir.path);
+      final fields = await _composedSpecify().result(c.context, c.args);
+      expect(fields?[kCarriedSpecAcceptanceKey], acceptance);
+      expect(fields?[kCarriedSpecDesignKey], design);
+    });
+
+    test('writeSpecifyAuthoredSpec emits one guarded provenance update', () async {
+      final runner = RecordingBdRunner()..exportBeads = [workBead('tg-1')];
+      await _chokepoint(runner).writeSpecifyAuthoredSpec(
+        'tg-1',
+        design: design,
+        acceptanceCriteria: acceptance,
+      );
+
+      // ONE bd call, the FULL argv: the design rides stdin (`--design-file -`),
+      // the acceptance rides argv, and the provenance merges in the SAME update
+      // — never a second, separately-failable metadata write.
+      expect(_mutations(runner), [
+        [
+          'update',
+          'tg-1',
+          '--json',
+          '--actor',
+          BdCliService.actor,
+          '--design-file',
+          '-',
+          '--acceptance',
+          acceptance,
+          '--set-metadata',
+          '${StationBeadWriter.specAuthorKey}='
+              '${StationBeadWriter.specifyAuthor}',
+        ],
+      ]);
+      expect(runner.stdins.last, design);
+      expect(BdCliService.actor, 'grid-controller');
+      // Invariant 2 at the writer: bd CLI only, never a `show` read-back and
+      // never raw `sql`.
+      expect(
+        runner.calls.map((call) => call.first),
+        everyElement(isNot(anyOf('show', 'sql'))),
+      );
+    });
+
+    test(
+      'clearRoundAuthoredSpec clears only specify-authored fields',
+      () async {
+        final staged = workBead(
+          'tg-1',
+        ).copyWith(design: design, acceptanceCriteria: acceptance);
+        // Only SPECIFY provenance is this station's to clear. Unmarked prose is
+        // pre-marker or hand-authored; `operator` is explicitly the human's.
+        for (final provenance in <String, String?>{
+          'unmarked': null,
+          StationBeadWriter.operatorAuthor: StationBeadWriter.operatorAuthor,
+        }.entries) {
+          BdCliService.resetGuardedWriteCapabilityForTesting();
+          final preserved = provenance.value == null
+              ? staged
+              : staged.copyWith(
+                  metadata: {StationBeadWriter.specAuthorKey: provenance.value},
+                );
+          final runner = RecordingBdRunner()..exportBeads = [preserved];
+          await _chokepoint(runner).clearRoundAuthoredSpec('tg-1');
+          expect(_mutations(runner), isEmpty, reason: provenance.key);
+          expect(runner.exportBeads.single.design, design);
+          expect(runner.exportBeads.single.acceptanceCriteria, acceptance);
+        }
+
+        BdCliService.resetGuardedWriteCapabilityForTesting();
+        final runner = RecordingBdRunner()
+          ..exportBeads = [
+            staged.copyWith(
+              metadata: const {
+                StationBeadWriter.specAuthorKey:
+                    StationBeadWriter.specifyAuthor,
+              },
+            ),
+          ];
+        await _chokepoint(runner).clearRoundAuthoredSpec('tg-1');
+        expect(_mutations(runner), [
+          [
+            'update',
+            'tg-1',
+            '--json',
+            '--actor',
+            BdCliService.actor,
+            '--if-assignee',
+            '',
+            '--if-status',
+            BeadStatus.open.wire,
+            '--design-file',
+            '-',
+            '--acceptance',
+            '',
+            '--unset-metadata',
+            StationBeadWriter.specAuthorKey,
+          ],
+        ]);
+        expect(runner.stdins.last, '');
+      },
+    );
+
+    for (final envelope in <String, String?>{
+      'no envelope at all': null,
+      'malformed JSON': 'not json',
+      'an empty object': '{}',
+      'a blank acceptance': '{"acceptance":" ","design":"d"}',
+      'a blank design': '{"acceptance":"a","design":"\\n"}',
+    }.entries) {
+      test('invalid envelopes never call the injected writer — '
+          '${envelope.key}', () async {
+        final dir = _envelopeWorkspace(envelope.value);
+        addTearDown(() => dir.deleteSync(recursive: true));
+        final recorder = _RecordingSpecWriter();
+        final c = _ctx(workspaceDir: dir.path);
+        // Capture-only posture: an unusable envelope is never a throw, and
+        // never an unstamped-but-written spec either.
+        await _composedSpecify(
+          writeSpecifyAuthoredSpec: recorder.record,
+        ).result(c.context, c.args);
+        expect(recorder.calls, isEmpty);
+      });
+    }
   });
 
   group(

@@ -84,6 +84,7 @@ import 'package:beads_dart/beads_dart.dart';
 import 'package:genesis_tree/genesis_tree.dart';
 import 'package:grid_engine/grid_engine.dart';
 import 'package:grid_runtime/grid_runtime.dart';
+import 'package:grid_sdk/grid_sdk.dart' show SpecifyAuthoredSpecWriter;
 import 'package:path/path.dart' as p;
 
 import '../agent/acp_session_adapter.dart';
@@ -602,23 +603,39 @@ class SpecifyCapability extends ProcessCapability {
   /// Absent ⇒ the brief names NO lookup command and says the index is
   /// unavailable: the architect stands in a per-bead worktree, where an
   /// unqualified station verb dies `Could not find package`.
+  ///
+  /// [writeSpecifyAuthoredSpec] is the composing station's OWNED-WORK writer
+  /// extension — the seam that stamps SPECIFY PROVENANCE. The agent's own
+  /// `bd update --actor specify` carries no metadata, and `--actor` is an
+  /// audit-trail string bd never replays, so nothing the agent runs can mark
+  /// the prose as specify-authored. This capability therefore re-writes the
+  /// exact pair the agent reported through the station's single
+  /// [StationBeadWriter] chokepoint, which merges
+  /// `{StationBeadWriter.specAuthorKey: StationBeadWriter.specifyAuthor}` in
+  /// the SAME guarded update — so a later rework knows which prose it may
+  /// clear and which is the operator's to preserve. Absent (every builder that
+  /// does not bind the extension) ⇒ no stamp and no extra bd call at all: this
+  /// is an ADDITIVE seam, and an unbound station keeps today's behaviour.
   const SpecifyCapability({
     BdRunner Function(String workspaceRoot) runnerFor = _processRunnerFor,
     AgentSessionAdapterRegistry sessionAdapters = kBuiltinAgentSessionAdapters,
     AgentSteerSource steers = const NoAgentSteerSource(),
     String decisionRunner = kDefaultOverlayRunner,
     String? decisionGridHome,
+    SpecifyAuthoredSpecWriter? writeSpecifyAuthoredSpec,
   }) : _runnerFor = runnerFor,
        _sessionAdapters = sessionAdapters,
        _steers = steers,
        _decisionRunner = decisionRunner,
-       _decisionGridHome = decisionGridHome;
+       _decisionGridHome = decisionGridHome,
+       _writeSpecifyAuthoredSpec = writeSpecifyAuthoredSpec;
 
   final BdRunner Function(String workspaceRoot) _runnerFor;
   final AgentSessionAdapterRegistry _sessionAdapters;
   final AgentSteerSource _steers;
   final String _decisionRunner;
   final String? _decisionGridHome;
+  final SpecifyAuthoredSpecWriter? _writeSpecifyAuthoredSpec;
 
   static BdRunner _processRunnerFor(String workspaceRoot) =>
       ProcessBdRunner(workspaceRoot: workspaceRoot);
@@ -802,6 +819,20 @@ class SpecifyCapability extends ProcessCapability {
   /// The CAPTURE-ONLY usage telemetry (FT-2) — identical posture to
   /// [AgentCapability.result]: an absent/malformed envelope yields no fields,
   /// NEVER a throw.
+  ///
+  /// It is ALSO where SPECIFY PROVENANCE is stamped. The agent authored the
+  /// prose with its own raw `bd update --actor specify`, which carries no
+  /// metadata; this hook takes the exact pair the agent reported back in its
+  /// final envelope and re-writes it through the station's owned-work writer
+  /// extension, so the marker is authored by the STATION and not by the thing
+  /// it fences. One envelope read, one parse, one write — and no write at all
+  /// when the extension is unbound or the envelope is absent/malformed, which
+  /// keeps the capture-only posture the usage half has always had.
+  ///
+  /// The write itself stays LOUD: a bound writer that refuses (ownership, a
+  /// guard mismatch, a dead `bd`) throws out of here rather than letting the
+  /// station report an UNSTAMPED but otherwise valid spec as complete — the
+  /// exact stale-prose state a later rework would then preserve forever.
   @override
   Future<Map<String, String>?> result(
     TreeContext context,
@@ -815,19 +846,35 @@ class SpecifyCapability extends ProcessCapability {
         (context.getInheritedSeedOfExactType<AgentConfig>() ??
                 const AgentConfig())
             .modelPrices;
+    // EVERY ambient read lands here, ahead of the stamp: the writer is the
+    // first await this hook has ever had, and an unmounted branch's context
+    // throws on a read across that gap.
+    final flare = context
+        .getInheritedSeedOfExactType<ServiceBundle>()
+        ?.transport
+        ?.flare;
+    // ONE read, ONE parse — the carried pair is both the stamped payload below
+    // and the step's own result fields, and re-reading the envelope could hand
+    // the two halves different prose.
+    final carried = CarriedSpec.tryParse(
+      readEnvelopeResultText(workspace.workspaceDir, args.nodePath),
+    );
+    final stamp = _writeSpecifyAuthoredSpec;
+    if (carried != null && stamp != null) {
+      await stamp(
+        args.beadId,
+        design: carried.design,
+        acceptanceCriteria: carried.acceptance,
+      );
+    }
     final fields = <String, String>{
       ...readUsageFields(
         workspace.workspaceDir,
         args.nodePath,
         modelPrices: prices,
-        flare: context
-            .getInheritedSeedOfExactType<ServiceBundle>()
-            ?.transport
-            ?.flare,
+        flare: flare,
       ),
-      ...?CarriedSpec.tryParse(
-        readEnvelopeResultText(workspace.workspaceDir, args.nodePath),
-      )?.toResultFields(),
+      ...?carried?.toResultFields(),
     };
     return fields.isEmpty ? null : fields;
   }

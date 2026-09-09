@@ -1445,6 +1445,16 @@ class GitSourceControl implements SourceControl {
 /// [specifyBdRunnerFor] controls only the specify step's post-exit work-bead
 /// read-back. It defaults to [ProcessBdRunner] and lets offline suites inject
 /// Fakes instead of spawning `bd`.
+///
+/// [writeSpecifyAuthoredSpec] is the composing station's OWNED-WORK writer
+/// extension, threaded straight into [SpecifyCapability] so the specify step
+/// can stamp `spec.author=specify` on the prose its agent authored. It is the
+/// SECOND capability seam of the note-append shape and rides the SAME single
+/// [StationBeadWriter] chokepoint: this pack never builds a writer, so
+/// derailment-invariant 2 ("only the chokepoint writes") is untouched. The
+/// parameter is OPTIONAL and absent by default — a builder that does not bind
+/// it (every one that exists today, the offline suites included) composes the
+/// step exactly as before and issues no stamping write.
 DefaultCapabilityRegistry buildCodeRegistry({
   DateTime Function()? clock,
   RubricSource? rubrics,
@@ -1459,6 +1469,7 @@ DefaultCapabilityRegistry buildCodeRegistry({
   DecisionIndexSource? discoveryDecisions,
   HistorySource? discoveryHistory,
   BdRunner Function(String workspaceRoot)? specifyBdRunnerFor,
+  sdk.SpecifyAuthoredSpecWriter? writeSpecifyAuthoredSpec,
   sdk.GridAssetRegistry? assetRegistry,
   GridAssetRosterOverride? assetRosterOverride,
   InferenceRunner? committeeClassifier,
@@ -1600,6 +1611,7 @@ DefaultCapabilityRegistry buildCodeRegistry({
               steers: steers,
               decisionRunner: decisionRunner,
               decisionGridHome: decisionGridHome,
+              writeSpecifyAuthoredSpec: writeSpecifyAuthoredSpec,
             )
           : SpecifyCapability(
               runnerFor: specifyBdRunnerFor,
@@ -1607,6 +1619,7 @@ DefaultCapabilityRegistry buildCodeRegistry({
               steers: steers,
               decisionRunner: decisionRunner,
               decisionGridHome: decisionGridHome,
+              writeSpecifyAuthoredSpec: writeSpecifyAuthoredSpec,
             ),
       'spec-critic': SpecCriticCapability(
         rubrics: rubricSource,
