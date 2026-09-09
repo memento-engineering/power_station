@@ -7,7 +7,7 @@ description: >
   self-initiates at a boundary (a long context, a natural task end, before a
   bounce or a harness upgrade, or when told "take a beat, then hand off"). Use
   before compaction, clear, or relaunch — and use its Resume section as the
-  SUCCESSOR, which consumes the newest handoff and deletes it.
+  SUCCESSOR, which consumes the newest handoff through the `succession` verb.
 compatibility: >
   Requires a seat whose Agent Disc is `<grid home>/.grid/seats/<seat>/`, the
   `{{runner}}` runner, bd (beads CLI), and git.
@@ -132,12 +132,31 @@ There is no `PreCompact` guard and no archive directory.
 
 You are the successor. Before you sweep, before you plan:
 
-1. Read the NEWEST `kind: handoff` note on your seat's disc:
-   `ls <grid home>/.grid/seats/<seat>/handoff-*.md | sort | tail -1`.
-2. Act on its **Resume here**, starting at step 1 verbatim.
-3. DELETE the file AND its `MEMORY.md` pointer line in the SAME turn that read
-   it. The disc is tracked, so git history is the archive.
+1. Resolve the handoff and ARCHIVE the disc, destroying nothing:
 
-A handoff that has a NEWER sibling is deleted UNREAD, with a one-line disc
-`observation` naming it: two live handoffs on one disc mean a succession was
-skipped, and only the newest one describes the board.
+   ```
+   {{runner}} succession <seat> --grid-home "<grid home>" --no-destructive
+   ```
+
+   `NO HANDOFF` ends the resume — there is nothing to consume. `REFUSED` is
+   shown to the human exactly as it reads, and neither note is touched.
+   `WOULD DELETE <path>` names the one note to read.
+
+2. Read that note and act on its **Resume here**, starting at step 1 verbatim.
+
+3. CONSUME it, in the SAME turn that read it:
+
+   ```
+   {{runner}} succession <seat> --grid-home "<grid home>"
+   ```
+
+   This second call resolves the disc again, commits whatever disc changes the
+   turn made, verifies the note is in `HEAD`, and only then removes the file
+   and its one `MEMORY.md` pointer line. The commit is what earns the
+   deletion: a disc that was never committed has no history to consume into.
+
+`--no-destructive` is the safe first run on an unfamiliar disc — it does
+everything except the deletion, so a refusal surfaces before anything is lost.
+Two live handoffs ALWAYS refuse, in either form, and the verb names both: two
+on one disc mean a succession was skipped, only the newest describes the
+board, and which one that is stays a human's call.

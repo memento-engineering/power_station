@@ -132,8 +132,7 @@ void main() {
           context,
           contains(
             'Handoff ${p.join('.grid', 'seats', 'governor', 'handoff.md')} — act '
-            'on Resume here, then delete this file and its MEMORY.md line in this '
-            'turn.',
+            'on Resume here, then run the succession verb in this turn.',
           ),
         );
         expect(context, endsWith('RESUME BODY'));
@@ -150,8 +149,8 @@ void main() {
       expect(
         composePrimeContext(bdContext: 'BD \n', handoff: handoff),
         'BD \n\n'
-        'Handoff .grid/seats/governor/h.md — act on Resume here, then delete '
-        'this file and its MEMORY.md line in this turn.\n\nBODY',
+        'Handoff .grid/seats/governor/h.md — act on Resume here, then run the '
+        'succession verb in this turn.\n\nBODY',
       );
     });
 

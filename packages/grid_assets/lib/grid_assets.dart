@@ -74,12 +74,19 @@
 /// ([kUnconsultedCrossStoreDetail]) rather than calling the unread edge
 /// missing.
 ///
-/// The SEAT pair makes an operator seat OCCUPIABLE with its own disc (bead
-/// `pow-lv6t`): [PrimeCommand] is the grid's own SessionStart hook target — it
-/// echoes `bd prime` and injects only the seat's newest handoff — and
-/// [SeatCommand] is the OUTER harness that launches a seat's occupant with its
-/// role definition and disc and relaunches it on handoff. Both are
-/// harness-neutral: every vendor token is an [AgentEnvironment] declaration
+/// The SEAT command set makes an operator seat OCCUPIABLE with its own disc
+/// (bead `pow-lv6t`): [PrimeCommand] is the grid's own SessionStart hook
+/// target — it echoes `bd prime` and injects only the seat's newest handoff —
+/// and [SeatCommand] is the OUTER harness that launches a seat's occupant with
+/// its role definition and disc and relaunches it on handoff.
+/// [SuccessionCommand] closes the loop at the other end: it CONSUMES that
+/// handoff through [SeatSuccessionService], which archives the seat disc in a
+/// path-scoped commit and proves the note is in `HEAD` before deleting it and
+/// its one `MEMORY.md` pointer line (`--no-destructive` stops after the
+/// proof). The destruction the disc doctrine licenses on "the disc is tracked,
+/// so git history is the archive" now has something ENFORCING the tracked
+/// half. All three are harness-neutral: every vendor token is an
+/// [AgentEnvironment] declaration
 /// ([AgentEnvironment.roleArgs], [AgentEnvironment.memoryDirArgs],
 /// [AgentEnvironment.primeMode], [AgentEnvironment.drivenArgs],
 /// [AgentEnvironment.roleAsset]). A composing station adds them beside `filing`
@@ -236,3 +243,4 @@ export 'src/seat/prime_command.dart';
 export 'src/seat/seat_command.dart';
 export 'src/seat/seat_disc.dart';
 export 'src/seat/seat_launch.dart';
+export 'src/seat/succession_command.dart';
