@@ -335,14 +335,65 @@ String _markTestCommandPaths(String design, Map<String, String> pathByMarker) =>
           : 'Test: dart test ${markers.join(' ')}';
     });
 
+/// An EXACT citation of a Dart file that is NOT a confident test path — the
+/// SOURCE sibling an edit verb may govern instead of the test beside it.
+///
+/// Verbatim: `(?<![A-Za-z0-9_.:/-])(?:package:)?[A-Za-z0-9_.-]+`
+/// `(?:/[A-Za-z0-9_.-]+)+(?<!_test)\.dart(?![A-Za-z0-9_./-])`. Read as four
+/// decisions, each made here so no reader has to guess:
+///
+/// - **At least one `/`.** A bare `committee.dart` names a FILE, not a path, and
+///   is far too easy to write about a test's own subject; only a path with a
+///   directory segment is exact enough to bound evidence. [_confidentTestPath]
+///   draws the same line for test paths.
+/// - **`package:` optional.** `package:leonard_contract/src/strike_counter.dart`
+///   and `lib/src/strike_counter.dart` are the same citation in two spellings;
+///   the leading lookbehind rejects `:` so a `package:` URI matches ONCE, whole,
+///   never again at its bare-path tail.
+/// - **`(?<!_test)` subtracts every `_test.dart` name.** A test path is the
+///   other pipeline's business ([_confidentTestPath], [_markerForTestPath]);
+///   this matcher answers only for the non-test files that bound it, so the two
+///   never claim the same span.
+/// - **Punctuation ends it.** The citation is usually UNQUOTED prose, so the
+///   trailing lookahead admits `,`/`` ` ``/whitespace/end and a `:544` line
+///   suffix, and refuses a longer name (`.dartfile`) or a longer path.
+final RegExp _dartPathReference = RegExp(
+  r'(?<![A-Za-z0-9_.:/-])'
+  r'(?:package:)?'
+  r'[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)+'
+  r'(?<!_test)\.dart'
+  r'(?![A-Za-z0-9_./-])',
+);
+
+/// Reserves a BOUNDARY-ONLY marker in [boundaryMarkers] — a token that holds a
+/// non-test Dart citation's position through `proseOnly` (which blanks the
+/// inline span it was written in) so [_evidenceWindow] can still cut on it.
+///
+/// It carries NO path, and it is deliberately kept OUT of `pathByMarker`: only
+/// that map's entries are bucketed ([_collectTestDeclarations]), so a
+/// boundary-only marker structurally cannot reach `authored`, `mentioned` or
+/// `fallback`. It bounds evidence; it never claims a file.
+String _markerForPathBoundary(Set<String> boundaryMarkers) {
+  final marker = 'GRID_SOURCE_PATH_${boundaryMarkers.length}_';
+  boundaryMarkers.add(marker);
+  return marker;
+}
+
 String _markConfidentTestPaths(
   String design,
   Map<String, String> pathByMarker,
+  Set<String> boundaryMarkers,
 ) => design.replaceAllMapped(_inlineCodeSpan, (match) {
-  final path = _confidentTestPath(match.group(1)!);
-  return path == null
-      ? match.group(0)!
-      : _markerForTestPath(path, pathByMarker);
+  final span = match.group(1)!;
+  final path = _confidentTestPath(span);
+  if (path != null) return _markerForTestPath(path, pathByMarker);
+  // An inline span that is EXACTLY one non-test Dart citation is preserved as a
+  // boundary: `proseOnly` would blank it, and a blanked source path cannot stop
+  // its own verb from reaching the test path beside it.
+  final cited = span.trim();
+  return _dartPathReference.stringMatch(cited) == cited
+      ? _markerForPathBoundary(boundaryMarkers)
+      : match.group(0)!;
 });
 
 String _statementAround(String text, String marker) {
@@ -374,40 +425,67 @@ final RegExp _testPathListGap = RegExp(
 );
 
 /// The slice of [statement] whose words govern the path at [marker]: the
-/// maximal RUN of sibling paths containing it, widened to the END of the path
-/// before the run and the START of the path after it.
+/// maximal RUN of sibling TEST paths containing it, widened to the END of the
+/// citation before the run and the START of the citation after it.
+///
+/// The window is keyed to the cited test path's EXACT occurrence — its own
+/// [marker], never its filename stem. A sibling source path is a HARD BOUNDARY:
+/// in `create a suite over src/x.dart`, `create` governs `src/x.dart` and the
+/// window of a `test/x_test.dart` cited later opens AFTER it, so the two files
+/// that merely share the stem `x` never inherit each other's verbs (bead
+/// `pow-kdsl`: the retained suite a design only RUNS was read as authored by the
+/// verb that created its subject).
 ///
 /// Evidence for one path never leaks onto another. In `Create A, built on the
 /// harness B already uses`, the A-B gap carries words, so the two are separate
 /// runs: A's window holds "Create" and B's holds only the reference clause.
 /// In `Modify A, B, and C` every gap is a bare list separator
 /// ([_testPathListGap]), so all three share one window and one verb promises
-/// them all. [markers] is every marker in play (`pathByMarker.keys`); each
-/// occurrence carries its OWN marker, so a marker absent from [statement] cuts
-/// nothing.
+/// them all — a run widens through a gap only between two TEST paths, because
+/// only test paths can share one promise here; a source citation cuts the run
+/// whatever separates it, so `Create src/x.dart and A` leaves A unclaimed.
+/// [markers] is every test marker in play (`pathByMarker.keys`) and
+/// [boundaryMarkers] every preserved inline source citation
+/// ([_markerForPathBoundary]); UNQUOTED source citations are found in
+/// [statement] directly ([_dartPathReference]). Each occurrence carries its OWN
+/// marker, so a marker absent from [statement] cuts nothing.
 String _evidenceWindow(
   String statement,
   String marker,
   Iterable<String> markers,
+  Iterable<String> boundaryMarkers,
 ) {
   final markerAt = statement.indexOf(marker);
   if (markerAt < 0) return statement;
-  final spans = <({int start, int end})>[
-    (start: markerAt, end: markerAt + marker.length),
+  final spans = <({int start, int end, bool boundary})>[
+    (start: markerAt, end: markerAt + marker.length, boundary: false),
   ];
-  for (final other in markers) {
-    if (other == marker) continue;
+  void addOccurrences(String other, {required bool boundary}) {
     var at = statement.indexOf(other);
     while (at >= 0) {
-      spans.add((start: at, end: at + other.length));
+      spans.add((start: at, end: at + other.length, boundary: boundary));
       at = statement.indexOf(other, at + 1);
     }
   }
+
+  for (final other in markers) {
+    if (other == marker) continue;
+    addOccurrences(other, boundary: false);
+  }
+  for (final other in boundaryMarkers) {
+    addOccurrences(other, boundary: true);
+  }
+  for (final cited in _dartPathReference.allMatches(statement)) {
+    spans.add((start: cited.start, end: cited.end, boundary: true));
+  }
   spans.sort((a, b) => a.start.compareTo(b.start));
   final self = spans.indexWhere((span) => span.start == markerAt);
-  bool listGap(int left) => _testPathListGap.hasMatch(
-    statement.substring(spans[left].end, spans[left + 1].start),
-  );
+  bool listGap(int left) =>
+      !spans[left].boundary &&
+      !spans[left + 1].boundary &&
+      _testPathListGap.hasMatch(
+        statement.substring(spans[left].end, spans[left + 1].start),
+      );
   var first = self;
   while (first > 0 && listGap(first - 1)) {
     first--;
@@ -482,6 +560,7 @@ bool _authoredEvidence(String window, String marker) {
 void _collectTestDeclarations({
   required String text,
   required Map<String, String> pathByMarker,
+  required Set<String> boundaryMarkers,
   required Set<String> authored,
   required Set<String> mentioned,
   required bool declarationSection,
@@ -489,7 +568,12 @@ void _collectTestDeclarations({
   for (final entry in pathByMarker.entries) {
     if (!text.contains(entry.key)) continue;
     final statement = _statementAround(text, entry.key);
-    final window = _evidenceWindow(statement, entry.key, pathByMarker.keys);
+    final window = _evidenceWindow(
+      statement,
+      entry.key,
+      pathByMarker.keys,
+      boundaryMarkers,
+    );
     if (_authoredEvidence(window, entry.key)) {
       authored.add(entry.value);
       continue;
@@ -543,10 +627,15 @@ typedef TestDeclarations = ({
 /// `_collectTestDeclarations`), reporting its three evidence buckets separately.
 TestDeclarations testDeclarations(String design) {
   final pathByMarker = <String, String>{};
+  // Boundary-only markers stay OUT of `pathByMarker`: they bound evidence
+  // ([_evidenceWindow]) and are never bucketed, because only `pathByMarker`'s
+  // entries are ([_collectTestDeclarations]).
+  final boundaryMarkers = <String>{};
   final commandMarkedDesign = _markTestCommandPaths(design, pathByMarker);
   final markedDesign = _markConfidentTestPaths(
     commandMarkedDesign,
     pathByMarker,
+    boundaryMarkers,
   );
   final prose = proseOnly(markedDesign);
   final authored = <String>{};
@@ -563,6 +652,7 @@ TestDeclarations testDeclarations(String design) {
   _collectTestDeclarations(
     text: prose,
     pathByMarker: pathByMarker,
+    boundaryMarkers: boundaryMarkers,
     authored: authored,
     mentioned: mentioned,
     declarationSection: false,
@@ -571,6 +661,7 @@ TestDeclarations testDeclarations(String design) {
     _collectTestDeclarations(
       text: body,
       pathByMarker: pathByMarker,
+      boundaryMarkers: boundaryMarkers,
       authored: authored,
       mentioned: mentioned,
       declarationSection: true,
