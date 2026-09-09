@@ -46,6 +46,35 @@ class GitHubHttpResponse {
   String? header(String name) => headers[name.toLowerCase()];
 }
 
+/// The character budget a rendered cause gets in [githubFailureCause].
+///
+/// A CHARACTER cap, never a first-line cap: an SDK error escapes newlines into
+/// a literal backslash-n, so a `dart:convert` `ArgumentError` carrying a whole
+/// JSON request renders as ONE multi-kilobyte line and a first-line cap would
+/// be a no-op on exactly the failure that motivated this.
+const int kMaxGitHubCauseChars = 300;
+
+/// Renders [error] as the TYPE-LED, bounded cause every GitHub failure in this
+/// package ends with.
+///
+/// Type FIRST and cause LAST because the reasons this renders into are passed
+/// through tail-keeping truncators: rendering the raw error first meant the cut
+/// kept whatever an SDK error had embedded — for an encoding failure, the whole
+/// serialized request — and dropped the exception type and message.
+///
+/// The cause is `error.toString()` and deliberately NOT `Error.safeToString`,
+/// which returns the DEFAULT `Object.toString` for anything that is not a
+/// `num`, `bool`, `String` or null: every exception this renders would collapse
+/// to `Instance of 'StateError'`, discarding the message that is the whole
+/// payload — and making the cap meaningless.
+String githubFailureCause(Object error) {
+  final rendered = error.toString();
+  final cause = rendered.length <= kMaxGitHubCauseChars
+      ? rendered
+      : '${rendered.substring(0, kMaxGitHubCauseChars)}…';
+  return 'Cause (${error.runtimeType}): $cause';
+}
+
 /// Transport seam for GitHub REST API requests.
 abstract interface class GitHubHttpTransport {
   /// Sends [request] and returns its response.

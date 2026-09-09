@@ -33,6 +33,10 @@ final class GitHubIntakeProjection {
     switch (event) {
       case CheckConcluded():
         return;
+      // A watched OUTBOUND issue is projected onto the bead that CAUSED it,
+      // not filed as fresh intake, so this seam returns from both arms.
+      case IssueCommented() || WatchedIssueStateChanged():
+        return;
       case IssueOpened() || PullRequestOpened():
         await _projectOpened(event);
       case WorkflowRunConcluded():

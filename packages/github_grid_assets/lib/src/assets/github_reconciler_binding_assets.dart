@@ -11,6 +11,7 @@ import '../github/reconciler_cursor.dart';
 import '../github/resident_feedback_command.dart';
 import '../intake/github_intake_projection.dart';
 import '../intake/github_intake_store.dart';
+import '../intake/github_issue_watch_projection.dart';
 import '../intake/github_self_trust.dart';
 import 'github_app_client_assets.dart';
 import 'github_reconciler_assets.dart';
@@ -98,32 +99,45 @@ class GitHubReconcilerBindingAssets extends SingleChildStatelessSeed {
         : sdk.GridStateStore.forGridRoot(gridRoot).runtimeDir;
     final stateRunner = stateRoot == null ? null : stateRunnerFor(stateRoot);
 
-    final projection = GitHubIntakeProjection(
+    // ONE trust and ONE store, SHARED by both projections. A second
+    // `GitHubSelfTrust` would be a second notion of who this seat is, and a
+    // second `BdGitHubIntakeStore` a second `bd` channel onto the same work
+    // store — the chokepoint this seat keeps to exactly one.
+    final seatTrust = GitHubSelfTrust(
       // The seat's OWN workflow identity is SELF beside the admitted human
       // login; every other repository — a fork's run above all — stays
       // external.
-      trust: GitHubSelfTrust(
-        githubUser: trust.githubUser,
-        repository: '${config.owner}/${config.repository}',
-      ),
-      store: BdGitHubIntakeStore(
-        runner,
-        approvals: ApproveService(
-          runnerFor: _approvalRunner(
-            scope.root,
-            stateRoot: stateRoot,
-            stateRunner: stateRunner,
-          ),
+      githubUser: trust.githubUser,
+      repository: '${config.owner}/${config.repository}',
+    );
+    final store = BdGitHubIntakeStore(
+      runner,
+      approvals: ApproveService(
+        runnerFor: _approvalRunner(
+          scope.root,
+          stateRoot: stateRoot,
+          stateRunner: stateRunner,
         ),
-        workRoot: scope.root,
-        stateRoot: stateRoot,
       ),
+      workRoot: scope.root,
+      stateRoot: stateRoot,
+    );
+
+    final projection = GitHubIntakeProjection(
+      trust: seatTrust,
+      store: store,
       workflowRuns: config.workflowRuns,
       defaultBranch: config.defaultBranch,
     );
     final GitHubEventSink sink = projection.call;
 
     Seed wired = InheritedSeed<GitHubEventSink>(value: sink, child: child);
+    // The VALUE only: this seed registers no observer and dispatches no event
+    // — `GitHubGridAssets`, mounted below the reconciler, does both.
+    wired = InheritedSeed<GitHubIssueWatchProjection>(
+      value: GitHubIssueWatchProjection(trust: seatTrust, store: store),
+      child: wired,
+    );
     if (gridRoot != null) {
       wired = InheritedSeed<CiFeedbackProjection>(
         value: CiFeedbackProjection(

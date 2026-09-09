@@ -602,4 +602,102 @@ void main() {
     expect(cursors.cursor.hasObserved(_issueId), isTrue);
     expect(cursors.cursor.pending, isEmpty);
   });
+
+  test('a watch observation rides the pending queue, acked per leg', () async {
+    const watch = GitHubIssueWatch(
+      originatingBeadId: 'lunar_station-6p9',
+      owner: 'ricardoboss',
+      repository: 'radioactive_dart',
+      issueNumber: 1,
+    );
+    final calls = <String>[];
+    final saves = <_Snapshot>[];
+    final cursors = _RecordingCursors(_Cursors(), calls, saves);
+    final transport = _Transport(<GitHubHttpResponse>[
+      GitHubHttpResponse(
+        statusCode: 200,
+        body: jsonEncode(<String, Object?>{
+          'node_id': 'I_kwDO',
+          'number': 1,
+          'user': <String, Object?>{'login': 'nico'},
+          'state': 'open',
+          'state_reason': null,
+          'locked': false,
+          'updated_at': '2026-09-09T10:00:00Z',
+          'html_url': 'https://github.test/1',
+          'closed_by': null,
+        }),
+      ),
+      GitHubHttpResponse(
+        statusCode: 200,
+        body: jsonEncode(<Object?>[
+          <String, Object?>{
+            'event': 'commented',
+            'id': 11,
+            'node_id': 'IC_first',
+            'user': <String, Object?>{'login': 'ricardoboss'},
+            'body': 'A reply.',
+            'created_at': '2026-09-09T11:00:00Z',
+          },
+        ]),
+      ),
+    ], calls);
+    final reconciler = GitHubReconciler(
+      owner: 'memento',
+      repository: 'power',
+      substation: 'power',
+      client: GitHubAppClient(
+        config: GitHubAppConfig(
+          appId: 'app',
+          installationId: 1,
+          apiBaseUri: Uri.parse('https://api.github.test'),
+        ),
+        tokens: _Tokens(),
+        transport: transport,
+      ),
+      cursors: cursors,
+      emit: (_) async => calls.add('sink'),
+      issueWatches: const <GitHubIssueWatch>[watch],
+      foreignClient: GitHubReadClient(
+        transport: transport,
+        apiBaseUri: Uri.parse('https://api.github.test'),
+      ),
+    );
+    reconciler.addObserver(kGitHubIssueWatchDeliveryLeg, (_) async {
+      calls.add('issue-watch');
+    });
+
+    await reconciler.reconcileForeignIssueWatchesOnce();
+
+    const id = 'poll:issue-comment:IC_first';
+    expect(
+      calls,
+      containsAllInOrder(<String>[
+        'save', // PENDING is persisted BEFORE any leg runs.
+        'sink',
+        'save',
+        'issue-watch',
+        'save',
+      ]),
+    );
+    expect(
+      saves.firstWhere((save) => save.pending.contains(id)).acked[id],
+      isEmpty,
+    );
+    expect(
+      saves.map((save) => save.acked[id]).whereType<List<String>>(),
+      containsAllInOrder(<List<String>>[
+        <String>[],
+        <String>['sink'],
+        <String>['sink', 'issue-watch'],
+      ]),
+    );
+    expect(cursors.inner.cursor.pending, isEmpty);
+    expect(cursors.inner.cursor.hasObserved(id), isTrue);
+    expect(
+      cursors.inner.cursor.issueWatches[watch.coordinateKey]!.lastCommentId,
+      11,
+      reason: 'the high-water mark advances only AFTER delivery',
+    );
+  });
 }

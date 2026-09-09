@@ -237,6 +237,31 @@ void main() {
       'Install the App for owner/repo and verify the repository coordinates.',
     );
   });
+
+  test(
+    'the thrown-failure reason ends with the SHARED cause formatter',
+    () async {
+      final error = ArgumentError.value('x' * 1000, 'string', 'Too long.');
+      final transport = _FakeTransport(
+        _successResponses(),
+        errorPathSuffix: '/pulls',
+        error: error,
+      );
+      final result = await (await _opener(
+        transport,
+        owner: 'owner',
+        repository: 'repo',
+      )).open(workDir: '/unused', branch: 'b', baseBranch: 'main', title: 't');
+
+      expect(
+        _resultReason(result),
+        'Could not open the pull request with the GitHub App. Verify the '
+        'checkout origin, App installation, credentials, and network, then '
+        'retry. ${githubFailureCause(error)}',
+        reason: 'one formatter, one rendering — the foreign lane shares it',
+      );
+    },
+  );
 }
 
 List<GitHubHttpResponse> _successResponses() => <GitHubHttpResponse>[

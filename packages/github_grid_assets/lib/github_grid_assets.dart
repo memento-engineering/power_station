@@ -4,6 +4,7 @@ library;
 
 export 'src/credentials.dart';
 export 'src/github_app_client.dart';
+export 'src/github_read_client.dart';
 export 'src/http_transport.dart';
 export 'src/token_provider.dart';
 export 'src/assets/github_grid_assets.dart';
@@ -25,8 +26,10 @@ export 'src/github/github_reconciler.dart';
 export 'src/github/github_reconciler_runtime.dart';
 export 'src/github/link_header.dart';
 export 'src/github/reconciler_cursor.dart';
+export 'src/github/issue_watch.dart';
 export 'src/github/reconciler_event.dart';
 export 'src/github/resident_feedback_command.dart';
 export 'src/intake/github_intake_projection.dart';
 export 'src/intake/github_intake_store.dart';
+export 'src/intake/github_issue_watch_projection.dart';
 export 'src/intake/github_self_trust.dart';

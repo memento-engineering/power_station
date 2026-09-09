@@ -573,4 +573,141 @@ void main() {
       );
     });
   });
+
+  group('outbound issue watch', () {
+    GitHubIssueWatchUpdate update({
+      String? state = 'closed',
+      String? stateReason = 'not_planned',
+      String? actor = 'ricardoboss',
+      String? url = 'https://github.com/ricardoboss/radioactive_dart/issues/1',
+      String change = 'closed_not_planned',
+    }) => GitHubIssueWatchUpdate(
+      beadId: 'lunar_station-6p9',
+      repository: 'ricardoboss/radioactive_dart',
+      issueNumber: 1,
+      issueNodeId: 'I_kwDO',
+      observationId: 'poll:issue-state:CE_closed:closed_not_planned',
+      actor: actor,
+      change: change,
+      state: state,
+      stateReason: stateReason,
+      updatedAt: DateTime.utc(2026, 9, 9, 13),
+      url: url,
+      headline: 'closed as not planned',
+      detail: 'The issue is now closed (not_planned).',
+    );
+
+    test('one update targets the ORIGINATING bead with exact argv', () async {
+      final runner = FakeBdRunner(<BdResult>[ok(<String, Object?>{})]);
+      await BdGitHubIntakeStore(runner).appendIssueWatch(update());
+
+      expect(runner.argvs, hasLength(1), reason: 'ONE bd call, one store');
+      final argv = runner.argvs.single;
+      expect(argv.take(3), <String>['update', 'lunar_station-6p9', '--json']);
+      expect(argv, containsAllInOrder(<String>['--status', 'open']));
+      expect(
+        argv,
+        containsAllInOrder(<String>[
+          '--set-metadata',
+          'github.watch.repository=ricardoboss/radioactive_dart',
+          '--set-metadata',
+          'github.watch.issue_number=1',
+          '--set-metadata',
+          'github.watch.issue_node_id=I_kwDO',
+          '--set-metadata',
+          'github.watch.last_observation='
+              'poll:issue-state:CE_closed:closed_not_planned',
+          '--set-metadata',
+          'github.watch.change=closed_not_planned',
+          '--set-metadata',
+          'github.watch.updated_at=2026-09-09T13:00:00.000Z',
+          '--set-metadata',
+          'github.watch.state=closed',
+          '--set-metadata',
+          'github.watch.state_reason=not_planned',
+        ]),
+        reason: 'PER KEY, never one whole metadata object',
+      );
+      expect(
+        argv,
+        containsAllInOrder(<String>[
+          '--unset-metadata',
+          'grid.approved_by',
+          '--unset-metadata',
+          'grid.approved_at',
+          '--unset-metadata',
+          'grid.approved_rev',
+        ]),
+      );
+      final note = argv[argv.indexOf('--append-notes') + 1];
+      expect(note, contains('GitHub watch ricardoboss/radioactive_dart#1'));
+      expect(note, contains('By: @ricardoboss'));
+      expect(note, contains('State: closed (not_planned)'));
+      expect(argv, isNot(contains('--body-file')));
+      expect(argv, isNot(contains('--acceptance')));
+      expect(argv, isNot(contains('--defer-until')));
+    });
+
+    test('a comment neither asserts nor erases the issue state', () async {
+      final runner = FakeBdRunner(<BdResult>[ok(<String, Object?>{})]);
+      await BdGitHubIntakeStore(runner).appendIssueWatch(
+        update(state: null, stateReason: null, change: 'commented'),
+      );
+
+      final argv = runner.argvs.single;
+      expect(argv.join(' '), isNot(contains('github.watch.state=')));
+      expect(argv.join(' '), isNot(contains('github.watch.state_reason')));
+      expect(
+        argv,
+        containsAllInOrder(<String>[
+          '--set-metadata',
+          'github.watch.change=commented',
+        ]),
+      );
+    });
+
+    test('a reopen UNSETS the reason it was closed with', () async {
+      final runner = FakeBdRunner(<BdResult>[ok(<String, Object?>{})]);
+      await BdGitHubIntakeStore(
+        runner,
+      ).appendIssueWatch(update(state: 'open', stateReason: null));
+
+      expect(
+        runner.argvs.single,
+        containsAllInOrder(<String>[
+          '--unset-metadata',
+          'github.watch.state_reason',
+        ]),
+      );
+    });
+
+    test('the note omits an actor GitHub named nobody for', () async {
+      final runner = FakeBdRunner(<BdResult>[ok(<String, Object?>{})]);
+      await BdGitHubIntakeStore(
+        runner,
+      ).appendIssueWatch(update(actor: kIssueWatchResourceActor, url: null));
+
+      final argv = runner.argvs.single;
+      final note = argv[argv.indexOf('--append-notes') + 1];
+      expect(note, isNot(contains('By: @')));
+      expect(note, isNot(contains('URL:')));
+    });
+
+    test('this path never reaches the approve verb', () async {
+      final runner = FakeBdRunner(<BdResult>[ok(<String, Object?>{})]);
+      await BdGitHubIntakeStore(
+        runner,
+        approvals: ApproveService(
+          runnerFor: (_) => throw StateError('an external reply is never SELF'),
+        ),
+        workRoot: '/unused',
+      ).appendIssueWatch(update());
+
+      expect(runner.argvs, hasLength(1));
+      expect(
+        runner.argvs.single,
+        isNot(contains(kFilingApprovalRevisionPrefix)),
+      );
+    });
+  });
 }

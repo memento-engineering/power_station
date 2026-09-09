@@ -1,3 +1,4 @@
+import 'issue_watch.dart';
 import 'reconciler_event.dart';
 
 /// One observation persisted PENDING, with the delivery legs that have acked.
@@ -50,6 +51,189 @@ class PendingObservation {
   };
 }
 
+/// The durable state of ONE watched outbound issue.
+///
+/// It is the BASELINE a later poll is diffed against: without it every cycle
+/// would re-emit every comment the issue has ever had, and a `304` would have
+/// no state to answer from at all.
+class GitHubIssueWatchCursorRecord {
+  /// Creates one watched-issue record.
+  const GitHubIssueWatchCursorRecord({
+    required this.issueNodeId,
+    required this.issueAuthor,
+    required this.lastCommentId,
+    required this.lastTimelineEventId,
+    required this.lastState,
+    required this.lastStateReason,
+    required this.locked,
+    required this.lastUpdatedAt,
+    required this.lastChange,
+  });
+
+  /// Decodes one record; a malformed shape throws.
+  factory GitHubIssueWatchCursorRecord.fromJson(Map<String, Object?> json) =>
+      GitHubIssueWatchCursorRecord(
+        issueNodeId: _requiredString(json, 'issue_node_id'),
+        issueAuthor: _requiredString(json, 'issue_author'),
+        lastCommentId: _requiredInt(json, 'last_comment_id'),
+        lastTimelineEventId: _requiredInt(json, 'last_timeline_event_id'),
+        lastState: _requiredString(json, 'last_state'),
+        lastStateReason: _optionalString(json, 'last_state_reason'),
+        locked: switch (json['locked']) {
+          final bool value => value,
+          _ => throw const FormatException(
+            'issue watch locked must be a boolean',
+          ),
+        },
+        lastUpdatedAt: _utcTimestamp(json, 'last_updated_at'),
+        lastChange: switch (_optionalString(json, 'last_change')) {
+          null => null,
+          final String wire => GitHubIssueWatchChange.fromWire(wire),
+        },
+      );
+
+  /// GitHub's stable node id for the watched ISSUE.
+  ///
+  /// The DURABLE identity of the watch: the coordinates it is keyed by can be
+  /// reused by GitHub after a transfer, the node id cannot.
+  final String issueNodeId;
+
+  /// The login that opened the issue — the identity ownership is decided by.
+  final String issueAuthor;
+
+  /// The greatest comment id already observed; `0` before the first poll.
+  final int lastCommentId;
+
+  /// The greatest timeline-event id already observed; `0` before the first
+  /// poll.
+  final int lastTimelineEventId;
+
+  /// The issue's last observed `state`.
+  final String lastState;
+
+  /// The issue's last observed `state_reason`, or null when it carried none.
+  final String? lastStateReason;
+
+  /// Whether the issue was locked when last observed.
+  final bool locked;
+
+  /// The issue's last observed `updated_at`, in UTC.
+  final DateTime lastUpdatedAt;
+
+  /// The last change emitted for this watch, or null when only comments have
+  /// been seen.
+  ///
+  /// It is also the STOP flag: [transferred], [deleted] and
+  /// [GitHubIssueWatchChange.convertedToDiscussion] are terminal, and a watch
+  /// that reached one spends no further request.
+  final GitHubIssueWatchChange? lastChange;
+
+  /// Whether this watch has reached a state no further request can improve.
+  bool get isTerminal => switch (lastChange) {
+    GitHubIssueWatchChange.transferred ||
+    GitHubIssueWatchChange.deleted ||
+    GitHubIssueWatchChange.convertedToDiscussion => true,
+    _ => false,
+  };
+
+  /// Returns an immutable copy with selected values replaced.
+  GitHubIssueWatchCursorRecord copyWith({
+    String? issueNodeId,
+    String? issueAuthor,
+    int? lastCommentId,
+    int? lastTimelineEventId,
+    String? lastState,
+    String? lastStateReason,
+    bool? locked,
+    DateTime? lastUpdatedAt,
+    GitHubIssueWatchChange? lastChange,
+  }) => GitHubIssueWatchCursorRecord(
+    issueNodeId: issueNodeId ?? this.issueNodeId,
+    issueAuthor: issueAuthor ?? this.issueAuthor,
+    lastCommentId: lastCommentId ?? this.lastCommentId,
+    lastTimelineEventId: lastTimelineEventId ?? this.lastTimelineEventId,
+    lastState: lastState ?? this.lastState,
+    lastStateReason: lastStateReason ?? this.lastStateReason,
+    locked: locked ?? this.locked,
+    lastUpdatedAt: lastUpdatedAt ?? this.lastUpdatedAt,
+    lastChange: lastChange ?? this.lastChange,
+  );
+
+  /// Encodes the record.
+  Map<String, Object?> toJson() => <String, Object?>{
+    'issue_node_id': issueNodeId,
+    'issue_author': issueAuthor,
+    'last_comment_id': lastCommentId,
+    'last_timeline_event_id': lastTimelineEventId,
+    'last_state': lastState,
+    'last_state_reason': lastStateReason,
+    'locked': locked,
+    'last_updated_at': lastUpdatedAt.toUtc().toIso8601String(),
+    'last_change': lastChange?.wire,
+  };
+
+  @override
+  bool operator ==(Object other) =>
+      other is GitHubIssueWatchCursorRecord &&
+      other.issueNodeId == issueNodeId &&
+      other.issueAuthor == issueAuthor &&
+      other.lastCommentId == lastCommentId &&
+      other.lastTimelineEventId == lastTimelineEventId &&
+      other.lastState == lastState &&
+      other.lastStateReason == lastStateReason &&
+      other.locked == locked &&
+      other.lastUpdatedAt == lastUpdatedAt &&
+      other.lastChange == lastChange;
+
+  @override
+  int get hashCode => Object.hash(
+    issueNodeId,
+    issueAuthor,
+    lastCommentId,
+    lastTimelineEventId,
+    lastState,
+    lastStateReason,
+    locked,
+    lastUpdatedAt,
+    lastChange,
+  );
+}
+
+String _requiredString(Map<String, Object?> json, String field) =>
+    switch (json[field]) {
+      final String value => value,
+      _ => throw FormatException('issue watch $field must be a string'),
+    };
+
+String? _optionalString(Map<String, Object?> json, String field) =>
+    switch (json[field]) {
+      null => null,
+      final String value => value,
+      _ => throw FormatException('issue watch $field must be a string or null'),
+    };
+
+int _requiredInt(Map<String, Object?> json, String field) =>
+    switch (json[field]) {
+      final int value => value,
+      _ => throw FormatException('issue watch $field must be an integer'),
+    };
+
+/// The UTC timestamp at [field]; a ZONE-LESS spelling is REFUSED.
+///
+/// `DateTime.parse` normalizes any explicit offset to UTC, but a spelling with
+/// no zone at all parses as LOCAL time — which would make one cursor document
+/// mean different instants on two machines, and silently re-emit observations
+/// whenever the seat moved. GitHub always sends a zone, so a document without
+/// one was written by hand and is refused loudly.
+DateTime _utcTimestamp(Map<String, Object?> json, String field) {
+  final raw = _requiredString(json, field);
+  final parsed = DateTime.parse(raw);
+  if (!parsed.isUtc) {
+    throw FormatException('issue watch $field must be a UTC timestamp');
+  }
+  return parsed;
+}
+
 /// Durable per-substation GitHub polling state.
 class GitHubReconcilerCursor {
   /// Creates polling state.
@@ -60,6 +244,7 @@ class GitHubReconcilerCursor {
     this.observationIds = const <String>[],
     this.pullHeads = const <String, String>{},
     this.pending = const <PendingObservation>[],
+    this.issueWatches = const <String, GitHubIssueWatchCursorRecord>{},
   });
 
   /// Intake high-water mark.
@@ -97,6 +282,16 @@ class GitHubReconcilerCursor {
   /// [enqueue] is idempotent by observation id.
   final List<PendingObservation> pending;
 
+  /// Watched OUTBOUND issue baselines, keyed by
+  /// [GitHubIssueWatch.coordinateKey].
+  ///
+  /// The SAME document as every other cursor value on purpose: an observation
+  /// and the delivery state that carries it must be one atomic save, and a
+  /// sibling store would reintroduce exactly the torn write this cursor
+  /// exists to prevent. A record and its two conditional tags in [etags] are
+  /// written and dropped together — see [recordIssueWatch].
+  final Map<String, GitHubIssueWatchCursorRecord> issueWatches;
+
   /// Whether [id] has already been durably claimed.
   bool hasObserved(String id) => observationIds.contains(id);
 
@@ -114,6 +309,8 @@ class GitHubReconcilerCursor {
     PullRequestOpened(:final observationId) => observationId,
     CheckConcluded(:final observationId) => observationId,
     WorkflowRunConcluded(:final observationId) => observationId,
+    IssueCommented(:final observationId) => observationId,
+    WatchedIssueStateChanged(:final observationId) => observationId,
   };
 
   /// The PENDING entry for [id], or null when [id] is not pending.
@@ -191,6 +388,95 @@ class GitHubReconcilerCursor {
     return copyWith(pullHeads: heads, etags: tags);
   }
 
+  static const String _watchEtagPrefix = 'issue-watch/';
+
+  /// The [etags] key holding the ISSUE-resource tag for [coordinateKey].
+  static String issueWatchEtagKey(String coordinateKey) =>
+      '$_watchEtagPrefix$coordinateKey/issue';
+
+  /// The [etags] key holding the TIMELINE first-page tag for [coordinateKey].
+  static String issueWatchTimelineEtagKey(String coordinateKey) =>
+      '$_watchEtagPrefix$coordinateKey/timeline';
+
+  /// Writes [record] for [coordinateKey] together with the FINAL value of both
+  /// conditional tags, retaining the newest 512 records and dropping the tags
+  /// of every record evicted with them.
+  ///
+  /// A null [issueEtag] or [timelineEtag] DROPS the tag it names: a baseline
+  /// and the conditional request that may be answered `304` against it never
+  /// diverge, because a `304` we cannot answer from the record is exactly the
+  /// unreachable state [GitHubReconcilerCursor] refuses loudly.
+  GitHubReconcilerCursor recordIssueWatch(
+    String coordinateKey,
+    GitHubIssueWatchCursorRecord record, {
+    String? issueEtag,
+    String? timelineEtag,
+  }) {
+    final records = <String, GitHubIssueWatchCursorRecord>{
+      coordinateKey: record,
+    };
+    for (final entry in issueWatches.entries) {
+      if (records.length >= 512) break;
+      if (entry.key == coordinateKey) continue;
+      records[entry.key] = entry.value;
+    }
+    return copyWith(
+      issueWatches: records,
+      etags: _watchTags(
+        records,
+        overrides: <String, String?>{
+          issueWatchEtagKey(coordinateKey): issueEtag,
+          issueWatchTimelineEtagKey(coordinateKey): timelineEtag,
+        },
+      ),
+    );
+  }
+
+  /// Drops every watch record — and both of its tags — whose coordinate is not
+  /// named by [watches].
+  ///
+  /// A seat that stops watching an issue stops paying for it: the baseline is
+  /// what makes the next poll cheap, and keeping one for an unwatched issue
+  /// only crowds the 512-record budget.
+  GitHubReconcilerCursor retainIssueWatches(
+    Iterable<GitHubIssueWatch> watches,
+  ) {
+    final keep = <String>{for (final watch in watches) watch.coordinateKey};
+    if (issueWatches.keys.every(keep.contains)) return this;
+    final records = <String, GitHubIssueWatchCursorRecord>{
+      for (final entry in issueWatches.entries)
+        if (keep.contains(entry.key)) entry.key: entry.value,
+    };
+    return copyWith(issueWatches: records, etags: _watchTags(records));
+  }
+
+  /// [etags] with every watch tag not backed by a record in [records] removed
+  /// and [overrides] applied — a null override REMOVES its key.
+  Map<String, String> _watchTags(
+    Map<String, GitHubIssueWatchCursorRecord> records, {
+    Map<String, String?> overrides = const <String, String?>{},
+  }) {
+    final live = <String>{
+      for (final key in records.keys) ...<String>[
+        issueWatchEtagKey(key),
+        issueWatchTimelineEtagKey(key),
+      ],
+    };
+    final tags = <String, String>{
+      for (final entry in etags.entries)
+        if (!entry.key.startsWith(_watchEtagPrefix) || live.contains(entry.key))
+          entry.key: entry.value,
+    };
+    for (final entry in overrides.entries) {
+      if (entry.value == null) {
+        tags.remove(entry.key);
+      } else {
+        tags[entry.key] = entry.value!;
+      }
+    }
+    return tags;
+  }
+
   /// Returns an immutable copy with selected values replaced.
   GitHubReconcilerCursor copyWith({
     DateTime? since,
@@ -200,6 +486,7 @@ class GitHubReconcilerCursor {
     List<String>? observationIds,
     Map<String, String>? pullHeads,
     List<PendingObservation>? pending,
+    Map<String, GitHubIssueWatchCursorRecord>? issueWatches,
   }) => GitHubReconcilerCursor(
     since: clearSince ? null : since ?? this.since,
     workflowRunsSince: workflowRunsSince ?? this.workflowRunsSince,
@@ -207,16 +494,17 @@ class GitHubReconcilerCursor {
     observationIds: List.unmodifiable(observationIds ?? this.observationIds),
     pullHeads: Map.unmodifiable(pullHeads ?? this.pullHeads),
     pending: List.unmodifiable(pending ?? this.pending),
+    issueWatches: Map.unmodifiable(issueWatches ?? this.issueWatches),
   );
 
   /// Encodes the versioned cursor document.
   ///
-  /// `pull_heads`, `pending` and `workflow_runs_since` are all ADDITIVE at
-  /// version 1: a document written before any of them existed decodes with an
-  /// empty value rather than being refused. The version is deliberately NOT
-  /// bumped — [fromJson] throws on `version != 1`, so a bump would make every
-  /// cursor already on disk at a live seat unloadable and stop that seat
-  /// polling.
+  /// `pull_heads`, `pending`, `workflow_runs_since` and `issue_watches` are all
+  /// ADDITIVE at version 1: a document written before any of them existed
+  /// decodes with an empty value rather than being refused. The version is
+  /// deliberately NOT bumped — [fromJson] throws on `version != 1`, so a bump
+  /// would make every cursor already on disk at a live seat unloadable and stop
+  /// that seat polling.
   Map<String, Object?> toJson() => <String, Object?>{
     'version': 1,
     'since': since?.toUtc().toIso8601String(),
@@ -225,6 +513,9 @@ class GitHubReconcilerCursor {
     'observation_ids': observationIds,
     'pull_heads': pullHeads,
     'pending': pending.map((entry) => entry.toJson()).toList(),
+    'issue_watches': <String, Object?>{
+      for (final entry in issueWatches.entries) entry.key: entry.value.toJson(),
+    },
   };
 
   /// Decodes a version-one cursor document.
@@ -273,6 +564,21 @@ class GitHubReconcilerCursor {
                 .toList(growable: false),
           _ => throw const FormatException('cursor pending must be a list'),
         }),
+        issueWatches: Map.unmodifiable(switch (json['issue_watches']) {
+          null => const <String, GitHubIssueWatchCursorRecord>{},
+          final Map<Object?, Object?> value =>
+            <String, GitHubIssueWatchCursorRecord>{
+              for (final entry in Map<String, Object?>.from(value).entries)
+                _issueWatchKey(
+                  entry.key,
+                ): GitHubIssueWatchCursorRecord.fromJson(
+                  Map<String, Object?>.from(entry.value! as Map),
+                ),
+            },
+          _ => throw const FormatException(
+            'cursor issue_watches must be a map',
+          ),
+        }),
       );
     } on FormatException {
       rethrow;
@@ -280,6 +586,20 @@ class GitHubReconcilerCursor {
       throw FormatException('malformed GitHub cursor collections', error);
     }
   }
+}
+
+/// The lower-cased `owner/repository#number` coordinate at [key].
+///
+/// LOUD rather than lenient: a key that is not a coordinate would key a
+/// baseline nothing can ever look up again, so the watch would silently
+/// re-emit every comment on every cycle — the exact failure the record
+/// prevents. It shares [GitHubIssueWatch.isCoordinateKey] with the AUTHORING
+/// side, so nothing can be written that this then refuses to read back.
+String _issueWatchKey(String key) {
+  if (!GitHubIssueWatch.isCoordinateKey(key)) {
+    throw FormatException('malformed issue watch coordinate "$key"');
+  }
+  return key;
 }
 
 /// Relocation seam for loading and atomically replacing one seat cursor.

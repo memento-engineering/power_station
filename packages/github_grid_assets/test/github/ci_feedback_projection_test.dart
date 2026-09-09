@@ -342,4 +342,68 @@ void main() {
     expect(mine.flares, isEmpty);
     expect(theirs.flares, hasLength(1));
   });
+
+  test('a watched-issue observation is not this leg\'s work', () async {
+    final projection = CiFeedbackProjection(
+      bd: _RefusingRunner(),
+      commandSender: _RefusingCommandSender(),
+      gridRoot: '/unused',
+      substation: 'power_station',
+    );
+
+    await projection(
+      NormalizedGitHubEvent.issueCommented(
+        nodeId: 'IC_first',
+        actor: 'ricardoboss',
+        repository: 'ricardoboss/radioactive_dart',
+        substation: 'power_station',
+        observationId: 'poll:issue-comment:IC_first',
+        originatingBeadId: 'lunar_station-6p9',
+        issueNodeId: 'I_kwDO',
+        issueAuthor: 'nico',
+        issueNumber: 1,
+        commentId: 11,
+        body: 'A reply.',
+        url: 'https://github.test/1',
+        updatedAt: DateTime.utc(2026, 9, 9, 11),
+      ),
+    );
+    await projection(
+      NormalizedGitHubEvent.watchedIssueStateChanged(
+        nodeId: 'CE_closed',
+        actor: 'ricardoboss',
+        repository: 'ricardoboss/radioactive_dart',
+        substation: 'power_station',
+        observationId: 'poll:issue-state:CE_closed:closed_completed',
+        originatingBeadId: 'lunar_station-6p9',
+        issueNodeId: 'I_kwDO',
+        issueAuthor: 'nico',
+        issueNumber: 1,
+        change: GitHubIssueWatchChange.closedCompleted,
+        state: 'closed',
+        stateReason: null,
+        locked: false,
+        url: null,
+        updatedAt: DateTime.utc(2026, 9, 9, 13),
+      ),
+    );
+  });
+}
+
+/// A runner that FAILS the test if the CI-feedback leg touches `bd` for a
+/// watched-issue observation.
+final class _RefusingRunner implements BdRunner {
+  @override
+  Future<BdResult> run(List<String> args, {Duration? timeout, String? stdin}) =>
+      throw StateError('a watched issue has no session to correlate');
+}
+
+final class _RefusingCommandSender implements FeedbackCommandSender {
+  @override
+  Future<FeedbackCommandResult> rework({
+    required String gridRoot,
+    required String beadId,
+    required String note,
+    required String idempotencyKey,
+  }) => throw StateError('a watched issue has no rework round');
 }

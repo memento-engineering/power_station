@@ -870,4 +870,431 @@ void main() {
       }
     },
   );
+
+  group('outbound issue watches', () {
+    const watch = GitHubIssueWatch(
+      originatingBeadId: 'lunar_station-6p9',
+      owner: 'ricardoboss',
+      repository: 'radioactive_dart',
+      issueNumber: 1,
+    );
+    const installed = GitHubIssueWatch(
+      originatingBeadId: 'pow-1rn',
+      owner: 'MEMENTO',
+      repository: 'Power',
+      issueNumber: 4,
+    );
+
+    Map<String, Object?> issue({
+      String state = 'open',
+      String? stateReason,
+      bool locked = false,
+      String updatedAt = '2026-09-09T10:00:00Z',
+    }) => <String, Object?>{
+      'node_id': 'I_kwDO',
+      'number': 1,
+      'user': <String, Object?>{'login': 'nico'},
+      'state': state,
+      'state_reason': stateReason,
+      'locked': locked,
+      'updated_at': updatedAt,
+      'html_url': 'https://github.test/ricardoboss/radioactive_dart/issues/1',
+      'closed_by': null,
+    };
+
+    ({
+      GitHubReconciler reconciler,
+      List<NormalizedGitHubEvent> events,
+      FakeGitHubCursorStore cursors,
+    })
+    build(
+      FakeGitHubHttpTransport transport, {
+      List<GitHubIssueWatch> watches = const <GitHubIssueWatch>[watch],
+      GitHubReconcilerCursor? cursor,
+    }) {
+      final events = <NormalizedGitHubEvent>[];
+      final cursors = FakeGitHubCursorStore(
+        cursor ?? const GitHubReconcilerCursor(),
+      );
+      return (
+        reconciler: GitHubReconciler(
+          owner: 'memento',
+          repository: 'power',
+          substation: 'power',
+          client: _client(transport),
+          cursors: cursors,
+          emit: (event) async => events.add(event),
+          issueWatches: watches,
+          foreignClient: GitHubReadClient(
+            transport: transport,
+            apiBaseUri: Uri.parse('https://api.github.test'),
+          ),
+        ),
+        events: events,
+        cursors: cursors,
+      );
+    }
+
+    test('a watch on the seat repository is INSTALLED, case-insensitively', () {
+      expect(
+        installed.isInstalledRepository(owner: 'memento', repository: 'power'),
+        isTrue,
+      );
+      expect(
+        watch.isInstalledRepository(owner: 'memento', repository: 'power'),
+        isFalse,
+      );
+      expect(watch.coordinateKey, 'ricardoboss/radioactive_dart#1');
+      expect(installed.coordinateKey, 'memento/power#4');
+    });
+
+    test('a coordinate the cursor could not read back is refused', () {
+      // Both sides share ONE pattern, so nothing can be authored that the
+      // cursor then refuses on load — which would brick the seat's polling.
+      expect(
+        GitHubIssueWatch.isCoordinateKey('memento-engineering/.github#1'),
+        isTrue,
+        reason: 'the org owns a repository literally named `.github`',
+      );
+      expect(GitHubIssueWatch.isCoordinateKey('owner/repo#0'), isFalse);
+      expect(GitHubIssueWatch.isCoordinateKey('Owner/Repo#1'), isFalse);
+      expect(GitHubIssueWatch.isCoordinateKey('owner#1'), isFalse);
+      expect(
+        const GitHubIssueWatch(
+          originatingBeadId: 'b',
+          owner: 'owner/nested',
+          repository: 'repo',
+          issueNumber: 1,
+        ).validate,
+        throwsArgumentError,
+      );
+      const dotGitHub = GitHubIssueWatch(
+        originatingBeadId: 'b',
+        owner: 'memento-engineering',
+        repository: '.github',
+        issueNumber: 1,
+      );
+      dotGitHub.validate();
+      expect(dotGitHub.coordinateKey, 'memento-engineering/.github#1');
+    });
+
+    test('a blank or non-positive watch is refused at construction', () {
+      for (final invalid in const <GitHubIssueWatch>[
+        GitHubIssueWatch(
+          originatingBeadId: '  ',
+          owner: 'o',
+          repository: 'r',
+          issueNumber: 1,
+        ),
+        GitHubIssueWatch(
+          originatingBeadId: 'b',
+          owner: '',
+          repository: 'r',
+          issueNumber: 1,
+        ),
+        GitHubIssueWatch(
+          originatingBeadId: 'b',
+          owner: 'o',
+          repository: ' ',
+          issueNumber: 1,
+        ),
+        GitHubIssueWatch(
+          originatingBeadId: 'b',
+          owner: 'o',
+          repository: 'r',
+          issueNumber: 0,
+        ),
+      ]) {
+        expect(invalid.validate, throwsArgumentError);
+        expect(
+          () => build(
+            FakeGitHubHttpTransport(),
+            watches: <GitHubIssueWatch>[invalid],
+          ),
+          throwsArgumentError,
+        );
+      }
+    });
+
+    test(
+      'the baseline poll emits comments but replays no transition',
+      () async {
+        final transport = FakeGitHubHttpTransport()
+          ..responses.addAll(<GitHubHttpResponse>[
+            _response(issue(), etag: '"issue"'),
+            _response(<Object?>[
+              <String, Object?>{
+                'event': 'commented',
+                'id': 11,
+                'node_id': 'IC_first',
+                'user': <String, Object?>{'login': 'ricardoboss'},
+                'body': 'A reply.',
+                'created_at': '2026-09-09T11:00:00Z',
+                'html_url': 'https://github.test/1#issuecomment-11',
+              },
+              <String, Object?>{
+                'event': 'closed',
+                'id': 91,
+                'node_id': 'CE_closed',
+                'actor': <String, Object?>{'login': 'ricardoboss'},
+                'created_at': '2026-09-09T09:00:00Z',
+              },
+              <String, Object?>{
+                'event': 'reopened',
+                'id': 92,
+                'node_id': 'CE_reopened',
+                'actor': <String, Object?>{'login': 'ricardoboss'},
+                'created_at': '2026-09-09T09:30:00Z',
+              },
+            ], etag: '"timeline"'),
+          ]);
+        final wired = build(transport);
+
+        await wired.reconciler.reconcileForeignIssueWatchesOnce();
+
+        expect(wired.events.whereType<IssueCommented>(), hasLength(1));
+        expect(
+          wired.events.whereType<WatchedIssueStateChanged>(),
+          isEmpty,
+          reason: 'the baseline records the mark those rows sit behind',
+        );
+        final record = wired.cursors.cursor.issueWatches[watch.coordinateKey]!;
+        expect(record.lastCommentId, 11);
+        expect(record.lastTimelineEventId, 92);
+        expect(record.issueNodeId, 'I_kwDO');
+        expect(record.issueAuthor, 'nico');
+        expect(
+          wired
+              .cursors
+              .cursor
+              .etags['issue-watch/${watch.coordinateKey}/issue'],
+          '"issue"',
+        );
+        expect(
+          wired
+              .cursors
+              .cursor
+              .etags['issue-watch/${watch.coordinateKey}/timeline'],
+          '"timeline"',
+        );
+      },
+    );
+
+    test('a baseline on an already-closed issue says so once', () async {
+      final transport = FakeGitHubHttpTransport()
+        ..responses.addAll(<GitHubHttpResponse>[
+          _response(issue(state: 'closed', stateReason: 'not_planned')),
+          _response(<Object?>[]),
+        ]);
+      final wired = build(transport);
+
+      await wired.reconciler.reconcileForeignIssueWatchesOnce();
+
+      final change = wired.events.whereType<WatchedIssueStateChanged>().single;
+      expect(change.change, GitHubIssueWatchChange.closedNotPlanned);
+      expect(
+        change.observationId,
+        'poll:issue-state:I_kwDO:2026-09-09T10:00:00.000Z:closed_not_planned',
+      );
+    });
+
+    test('a timeline page is followed through the SAME lane', () async {
+      final transport = FakeGitHubHttpTransport()
+        ..responses.addAll(<GitHubHttpResponse>[
+          _response(issue()),
+          _response(<Object?>[
+            <String, Object?>{
+              'event': 'commented',
+              'id': 11,
+              'node_id': 'IC_first',
+              'user': <String, Object?>{'login': 'ricardoboss'},
+              'body': 'page one',
+              'created_at': '2026-09-09T11:00:00Z',
+            },
+          ], link: '<https://api.github.test/x?page=2>; rel="next"'),
+          _response(<Object?>[
+            <String, Object?>{
+              'event': 'commented',
+              'id': 12,
+              'node_id': 'IC_second',
+              'user': <String, Object?>{'login': 'ricardoboss'},
+              'body': 'page two',
+              'created_at': '2026-09-09T11:30:00Z',
+            },
+          ]),
+        ]);
+      final wired = build(transport);
+
+      await wired.reconciler.reconcileForeignIssueWatchesOnce();
+
+      expect(
+        wired.events.whereType<IssueCommented>().map((event) => event.body),
+        <String>['page one', 'page two'],
+      );
+      for (final request in transport.requests) {
+        expect(request.headers.containsKey('Authorization'), isFalse);
+      }
+    });
+
+    test(
+      'an unchanged watch costs two conditional 304s and emits nothing',
+      () async {
+        final seeded = const GitHubReconcilerCursor().recordIssueWatch(
+          watch.coordinateKey,
+          GitHubIssueWatchCursorRecord(
+            issueNodeId: 'I_kwDO',
+            issueAuthor: 'nico',
+            lastCommentId: 11,
+            lastTimelineEventId: 92,
+            lastState: 'open',
+            lastStateReason: null,
+            locked: false,
+            lastUpdatedAt: DateTime.utc(2026, 9, 9, 10),
+            lastChange: null,
+          ),
+          issueEtag: '"issue"',
+          timelineEtag: '"timeline"',
+        );
+        final transport = FakeGitHubHttpTransport()
+          ..responses.addAll(<GitHubHttpResponse>[
+            _response('', status: 304),
+            _response('', status: 304),
+          ]);
+        final wired = build(transport, cursor: seeded);
+
+        await wired.reconciler.reconcileForeignIssueWatchesOnce();
+
+        expect(wired.events, isEmpty);
+        expect(transport.requests, hasLength(2));
+        expect(transport.requests.first.headers['If-None-Match'], '"issue"');
+        expect(transport.requests.last.headers['If-None-Match'], '"timeline"');
+        expect(
+          wired
+              .cursors
+              .cursor
+              .etags['issue-watch/${watch.coordinateKey}/issue'],
+          '"issue"',
+          reason: 'a 304 retains the tag it was conditional on',
+        );
+      },
+    );
+
+    test('a pull-shaped resource is refused loudly', () async {
+      final transport = FakeGitHubHttpTransport()
+        ..responses.add(
+          _response(<String, Object?>{
+            ...issue(),
+            'pull_request': <String, Object?>{'url': 'https://api.github.test'},
+          }),
+        );
+      final wired = build(transport);
+
+      await expectLater(
+        wired.reconciler.reconcileForeignIssueWatchesOnce(),
+        throwsFormatException,
+      );
+    });
+
+    test(
+      'a resource change with no timeline row still reaches the bead',
+      () async {
+        final seeded = const GitHubReconcilerCursor().recordIssueWatch(
+          watch.coordinateKey,
+          GitHubIssueWatchCursorRecord(
+            issueNodeId: 'I_kwDO',
+            issueAuthor: 'nico',
+            lastCommentId: 0,
+            lastTimelineEventId: 0,
+            lastState: 'open',
+            lastStateReason: null,
+            locked: false,
+            lastUpdatedAt: DateTime.utc(2026, 9, 9, 10),
+            lastChange: null,
+          ),
+        );
+        final transport = FakeGitHubHttpTransport()
+          ..responses.addAll(<GitHubHttpResponse>[
+            _response(
+              issue(
+                state: 'closed',
+                stateReason: 'completed',
+                updatedAt: '2026-09-09T13:00:00Z',
+              ),
+            ),
+            _response(<Object?>[]),
+          ]);
+        final wired = build(transport, cursor: seeded);
+
+        await wired.reconciler.reconcileForeignIssueWatchesOnce();
+
+        final change = wired.events
+            .whereType<WatchedIssueStateChanged>()
+            .single;
+        expect(change.change, GitHubIssueWatchChange.closedCompleted);
+        expect(
+          change.observationId,
+          'poll:issue-state:I_kwDO:2026-09-09T13:00:00.000Z:closed_completed',
+        );
+        expect(change.actor, kIssueWatchResourceActor);
+      },
+    );
+
+    test('a foreign-only cycle asks the App client for nothing', () async {
+      final transport = FakeGitHubHttpTransport()
+        ..responses.addAll(<GitHubHttpResponse>[
+          _response(issue()),
+          _response(<Object?>[]),
+        ]);
+      final wired = build(transport);
+
+      await wired.reconciler.reconcileForeignIssueWatchesOnce();
+
+      expect(transport.requests, hasLength(2));
+      expect(transport.requests.map((request) => request.uri.path), <String>[
+        '/repos/ricardoboss/radioactive_dart/issues/1',
+        '/repos/ricardoboss/radioactive_dart/issues/1/timeline',
+      ]);
+    });
+
+    test(
+      'an unconfigured watch loses its record on the next full cycle',
+      () async {
+        final seeded = const GitHubReconcilerCursor().recordIssueWatch(
+          'gone/away#9',
+          GitHubIssueWatchCursorRecord(
+            issueNodeId: 'I_gone',
+            issueAuthor: 'nico',
+            lastCommentId: 0,
+            lastTimelineEventId: 0,
+            lastState: 'open',
+            lastStateReason: null,
+            locked: false,
+            lastUpdatedAt: DateTime.utc(2026, 9, 9, 10),
+            lastChange: null,
+          ),
+          issueEtag: '"stale"',
+        );
+        final transport = FakeGitHubHttpTransport()
+          ..responses.addAll(<GitHubHttpResponse>[
+            _response('', status: 304),
+            _response('', status: 304),
+          ]);
+        final wired = build(
+          transport,
+          watches: const <GitHubIssueWatch>[],
+          cursor: seeded,
+        );
+
+        await wired.reconciler.reconcileOnce();
+
+        expect(wired.cursors.cursor.issueWatches, isEmpty);
+        expect(
+          wired.cursors.cursor.etags.containsKey(
+            'issue-watch/gone/away#9/issue',
+          ),
+          isFalse,
+        );
+      },
+    );
+  });
 }

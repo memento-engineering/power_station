@@ -17,6 +17,7 @@ import '../github/ci_feedback_projection.dart';
 import '../github/github_reconciler.dart';
 import '../github/github_reconciler_runtime.dart';
 import '../github/reconciler_event.dart';
+import '../intake/github_issue_watch_projection.dart';
 
 /// Binds GitHub delivery and resident CI feedback for a substation.
 ///
@@ -54,6 +55,7 @@ class GitHubGridAssets extends SingleChildStatelessSeed {
     final opener = context.watch<PrOpener>();
     final runtime = context.watch<GitHubReconcilerRuntime>();
     final feedback = context.watch<CiFeedbackProjection>();
+    final issueWatch = context.watch<GitHubIssueWatchProjection>();
     final knob = composition;
 
     var wired = child;
@@ -117,14 +119,16 @@ class GitHubGridAssets extends SingleChildStatelessSeed {
         child: wired,
       );
     }
-    return _FeedbackBinding(
+    return _ReconcilerObserverBinding(
       runtime: runtime,
-      projection: feedback,
+      feedback: feedback,
+      issueWatch: issueWatch,
       child: wired,
     );
   }
 }
 
+/// Routes one observation to the CI-feedback leg, or nowhere.
 Future<void> projectCiFeedback(
   CiFeedbackProjection? projection,
   NormalizedGitHubEvent event,
@@ -135,52 +139,111 @@ Future<void> projectCiFeedback(
     case IssueOpened() ||
         PullRequestOpened() ||
         WorkflowRunConcluded() ||
+        IssueCommented() ||
+        WatchedIssueStateChanged() ||
         CheckConcluded():
       return;
   }
 }
 
-final class _FeedbackBinding extends SingleChildStatefulSeed {
-  const _FeedbackBinding({
+/// Routes one observation to the WATCH leg, or nowhere.
+///
+/// The null-safe exhaustive adapter beside [projectCiFeedback]: a seat with no
+/// watch projection mounted is a no-op rather than a throw, and the sealed
+/// union keeps a new variant a compile error in BOTH adapters.
+Future<void> projectIssueWatch(
+  GitHubIssueWatchProjection? projection,
+  NormalizedGitHubEvent event,
+) async {
+  switch (event) {
+    case (IssueCommented() || WatchedIssueStateChanged())
+        when projection != null:
+      await projection(event);
+    case IssueOpened() ||
+        PullRequestOpened() ||
+        WorkflowRunConcluded() ||
+        CheckConcluded() ||
+        IssueCommented() ||
+        WatchedIssueStateChanged():
+      return;
+  }
+}
+
+/// Owns the reconciler runtime's lifecycle and BOTH of its durable observers.
+///
+/// One owner, not two: the runtime is started and stopped exactly once, and
+/// `ci-feedback` and `issue-watch` are registered and removed together. A
+/// second binding seed would race this one over the same runtime — both would
+/// call `start`, and one would `stop` a runtime the other still believes is
+/// running.
+final class _ReconcilerObserverBinding extends SingleChildStatefulSeed {
+  const _ReconcilerObserverBinding({
     required this.runtime,
-    required this.projection,
+    required this.feedback,
+    required this.issueWatch,
     required super.child,
   });
 
   final GitHubReconcilerRuntime? runtime;
-  final CiFeedbackProjection? projection;
+  final CiFeedbackProjection? feedback;
+  final GitHubIssueWatchProjection? issueWatch;
 
   @override
   SingleChildState<SingleChildStatefulSeed> createState() =>
-      _FeedbackBindingState();
+      _ReconcilerObserverBindingState();
 }
 
-final class _FeedbackBindingState
+final class _ReconcilerObserverBindingState
     extends SingleChildState<SingleChildStatefulSeed> {
   GitHubReconcilerRuntime? _runtime;
-  late final GitHubEventSink _sink;
+  late final GitHubEventSink _feedbackSink;
+  late final GitHubEventSink _issueWatchSink;
 
-  _FeedbackBinding get _binding => seed as _FeedbackBinding;
+  _ReconcilerObserverBinding get _binding => seed as _ReconcilerObserverBinding;
+
+  /// The two legs, in registration order, with their durable keys.
+  Map<String, GitHubEventSink> get _legs => <String, GitHubEventSink>{
+    kCiFeedbackDeliveryLeg: _feedbackSink,
+    kGitHubIssueWatchDeliveryLeg: _issueWatchSink,
+  };
 
   @override
   void initState() {
     super.initState();
-    _sink = (event) async {
-      await projectCiFeedback(_binding.projection, event);
+    // The sinks close over `_binding`, not over a captured projection, so a
+    // rebuilt projection is picked up without re-registering a leg — the
+    // durable acknowledgement key must survive a derived replacement.
+    _feedbackSink = (event) async {
+      await projectCiFeedback(_binding.feedback, event);
+    };
+    _issueWatchSink = (event) async {
+      await projectIssueWatch(_binding.issueWatch, event);
     };
     _runtime = _binding.runtime;
-    _runtime?.reconciler.addObserver(kCiFeedbackDeliveryLeg, _sink);
+    _register(_runtime);
     _runtime?.start();
+  }
+
+  void _register(GitHubReconcilerRuntime? runtime) {
+    if (runtime == null) return;
+    _legs.forEach(runtime.reconciler.addObserver);
+  }
+
+  void _unregister(GitHubReconcilerRuntime? runtime) {
+    if (runtime == null) return;
+    for (final leg in _legs.keys) {
+      runtime.reconciler.removeObserver(leg);
+    }
   }
 
   Future<void> _replaceRuntime(
     GitHubReconcilerRuntime? previous,
     GitHubReconcilerRuntime? replacement,
   ) async {
-    previous?.reconciler.removeObserver(kCiFeedbackDeliveryLeg);
+    _unregister(previous);
     await previous?.stop();
     if (identical(_runtime, replacement)) {
-      replacement?.reconciler.addObserver(kCiFeedbackDeliveryLeg, _sink);
+      _register(replacement);
       replacement?.start();
     }
   }
@@ -199,7 +262,7 @@ final class _FeedbackBindingState
   @override
   void dispose() {
     if (_runtime case final runtime?) {
-      runtime.reconciler.removeObserver(kCiFeedbackDeliveryLeg);
+      _unregister(runtime);
       unawaited(runtime.stop());
     }
     super.dispose();
