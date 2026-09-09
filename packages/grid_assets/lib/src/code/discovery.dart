@@ -572,6 +572,12 @@ class DecisionSurfaceEvidence {
 
   /// How the lookup went. An empty `decisions` list with
   /// [EvidenceState.complete] is a REAL empty union.
+  ///
+  /// The state answers for the entry SET — every selected entry resolved and
+  /// none was dropped at the bound. It never folds in an entry BODY's own
+  /// clip: a decision doc over [kMaxDiscoverySnippetChars] is carried with
+  /// [DecisionEntryEvidence.body] in [EvidenceState.truncated] while the
+  /// surface stays complete, so one long doc cannot fail a whole register.
   final EvidenceState state;
 
   /// Whether the entry list was clipped at [kMaxDecisionEntriesPerSurface] —
@@ -3565,15 +3571,15 @@ DecisionSurfaceEvidence _decisionSurface({
   ).id,
   surface: surface,
   command: command,
+  // Completeness is about the entry SET, never the entry BODIES: a decision
+  // doc longer than [kMaxDiscoverySnippetChars] keeps its OWN
+  // [EvidenceState.truncated] on `body`, where a lens that needs the whole
+  // text of ONE decision can name it by canonical id and the route can hold on
+  // THAT record. Folding a clipped body into the surface made every register
+  // with one long doc unanswerable (pow-jidn).
   state: error.isNotEmpty
       ? EvidenceState.failed
-      : (truncated ||
-                [
-                  ...entries,
-                  ...namedElsewhere,
-                ].any((e) => e.body.state != EvidenceState.complete)
-            ? EvidenceState.truncated
-            : EvidenceState.complete),
+      : (truncated ? EvidenceState.truncated : EvidenceState.complete),
   truncated: truncated,
   error: error,
   decisions: entries,
