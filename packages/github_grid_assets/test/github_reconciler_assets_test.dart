@@ -194,6 +194,50 @@ Seed _runtimeTree({
 );
 
 void main() {
+  test('the config carries workflow-run policy into the reconciler', () {
+    final rule = WorkflowRunIntakeRule(
+      workflowPath: '.github/workflows/ci.yaml',
+      validationPlan: 'dart test',
+    );
+    final off = GitHubReconcilerConfig(
+      owner: 'memento',
+      repository: 'power_station',
+      substation: 'power_station',
+      installationId: 'installation',
+    );
+    expect(off.workflowRuns, isEmpty, reason: 'feature-off is the default');
+    expect(off.defaultBranch, 'main');
+
+    final runtime = createGitHubReconcilerRuntime(
+      config: GitHubReconcilerConfig(
+        owner: 'memento',
+        repository: 'power_station',
+        substation: 'power_station',
+        installationId: 'installation',
+        defaultBranch: 'm3-runtime',
+        workflowRuns: [rule],
+      ),
+      client: _client,
+      cursors: _Cursors(),
+      emit: (_) async {},
+      transport: null,
+    );
+    addTearDown(runtime.stop);
+
+    expect(runtime.reconciler.workflowRuns, [same(rule)]);
+    expect(runtime.reconciler.defaultBranch, 'm3-runtime');
+
+    final plain = createGitHubReconcilerRuntime(
+      config: off,
+      client: _client,
+      cursors: _Cursors(),
+      emit: (_) async {},
+      transport: null,
+    );
+    addTearDown(plain.stop);
+    expect(plain.reconciler.workflowRuns, isEmpty);
+  });
+
   test('live config constructs and starts at consumer', () async {
     final factory = _Factory();
     final flares = _Flares();

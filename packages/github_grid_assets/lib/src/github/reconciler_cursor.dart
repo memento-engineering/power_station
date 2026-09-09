@@ -55,6 +55,7 @@ class GitHubReconcilerCursor {
   /// Creates polling state.
   const GitHubReconcilerCursor({
     this.since,
+    this.workflowRunsSince,
     this.etags = const <String, String>{},
     this.observationIds = const <String>[],
     this.pullHeads = const <String, String>{},
@@ -63,6 +64,15 @@ class GitHubReconcilerCursor {
 
   /// Intake high-water mark.
   final DateTime? since;
+
+  /// Workflow-run high-water mark — the greatest `created_at` examined.
+  ///
+  /// Bounds the `created>=` window the workflow-run leg requests, so a seat
+  /// with a long history does not re-read every run it has ever produced. The
+  /// bound is INCLUSIVE: a run created in the same second as the mark is
+  /// re-read and dropped by the observation ledger, which is cheaper than
+  /// never seeing it at all.
+  final DateTime? workflowRunsSince;
 
   /// Conditional response tags keyed by polling endpoint.
   final Map<String, String> etags;
@@ -103,6 +113,7 @@ class GitHubReconcilerCursor {
     IssueOpened(:final observationId) => observationId,
     PullRequestOpened(:final observationId) => observationId,
     CheckConcluded(:final observationId) => observationId,
+    WorkflowRunConcluded(:final observationId) => observationId,
   };
 
   /// The PENDING entry for [id], or null when [id] is not pending.
@@ -184,12 +195,14 @@ class GitHubReconcilerCursor {
   GitHubReconcilerCursor copyWith({
     DateTime? since,
     bool clearSince = false,
+    DateTime? workflowRunsSince,
     Map<String, String>? etags,
     List<String>? observationIds,
     Map<String, String>? pullHeads,
     List<PendingObservation>? pending,
   }) => GitHubReconcilerCursor(
     since: clearSince ? null : since ?? this.since,
+    workflowRunsSince: workflowRunsSince ?? this.workflowRunsSince,
     etags: Map.unmodifiable(etags ?? this.etags),
     observationIds: List.unmodifiable(observationIds ?? this.observationIds),
     pullHeads: Map.unmodifiable(pullHeads ?? this.pullHeads),
@@ -198,14 +211,16 @@ class GitHubReconcilerCursor {
 
   /// Encodes the versioned cursor document.
   ///
-  /// `pull_heads` and `pending` are both ADDITIVE at version 1: a document
-  /// written before either existed decodes with an empty value rather than being
-  /// refused. The version is deliberately NOT bumped — [fromJson] throws on
-  /// `version != 1`, so a bump would make every cursor already on disk at a live
-  /// seat unloadable and stop that seat polling.
+  /// `pull_heads`, `pending` and `workflow_runs_since` are all ADDITIVE at
+  /// version 1: a document written before any of them existed decodes with an
+  /// empty value rather than being refused. The version is deliberately NOT
+  /// bumped — [fromJson] throws on `version != 1`, so a bump would make every
+  /// cursor already on disk at a live seat unloadable and stop that seat
+  /// polling.
   Map<String, Object?> toJson() => <String, Object?>{
     'version': 1,
     'since': since?.toUtc().toIso8601String(),
+    'workflow_runs_since': workflowRunsSince?.toUtc().toIso8601String(),
     'etags': etags,
     'observation_ids': observationIds,
     'pull_heads': pullHeads,
@@ -223,6 +238,13 @@ class GitHubReconcilerCursor {
           final String value => DateTime.parse(value).toUtc(),
           null => null,
           _ => throw const FormatException('cursor since must be a string'),
+        },
+        workflowRunsSince: switch (json['workflow_runs_since']) {
+          final String value => DateTime.parse(value).toUtc(),
+          null => null,
+          _ => throw const FormatException(
+            'cursor workflow_runs_since must be a string',
+          ),
         },
         etags: Map.unmodifiable(
           Map<String, Object?>.from(

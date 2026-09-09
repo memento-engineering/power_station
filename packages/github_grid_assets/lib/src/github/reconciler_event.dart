@@ -3,6 +3,25 @@ import 'package:freezed_annotation/freezed_annotation.dart';
 part 'reconciler_event.freezed.dart';
 part 'reconciler_event.g.dart';
 
+/// One job of a concluded workflow run that did NOT succeed.
+///
+/// [failedStepName] is the FIRST step the job reported as failed or timed out,
+/// and is null when GitHub reported no such step — a job cancelled before any
+/// step ran has nothing to name, and inventing one would be a lie in the bead
+/// an agent reads.
+@freezed
+abstract class WorkflowRunFailedJob with _$WorkflowRunFailedJob {
+  /// Creates one failed-job summary.
+  const factory WorkflowRunFailedJob({
+    required String jobName,
+    String? failedStepName,
+  }) = _WorkflowRunFailedJob;
+
+  /// Decodes one failed-job summary; malformed shapes throw.
+  factory WorkflowRunFailedJob.fromJson(Map<String, Object?> json) =>
+      _$WorkflowRunFailedJobFromJson(json);
+}
+
 /// One transport-neutral GitHub observation consumed by projection siblings.
 ///
 /// Trust and issue/PR projection belong to the intake sibling; check-result,
@@ -47,6 +66,29 @@ sealed class NormalizedGitHubEvent with _$NormalizedGitHubEvent {
     required String checkName,
     required String conclusion,
   }) = CheckConcluded;
+
+  /// A completed workflow run observed on the repository itself.
+  ///
+  /// [actor] is `OWNER/REPOSITORY` rather than a login: a run has no human
+  /// author, and the identity that matters for trust is WHOSE workflow file
+  /// produced it. [failedJobs] carries only the jobs that concluded badly.
+  const factory NormalizedGitHubEvent.workflowRunConcluded({
+    required String nodeId,
+    required String actor,
+    required String repository,
+    required String substation,
+    required String observationId,
+    required int runId,
+    required int runNumber,
+    required String workflowPath,
+    required String workflowName,
+    required String event,
+    required String headBranch,
+    required String headSha,
+    required String conclusion,
+    required String htmlUrl,
+    required List<WorkflowRunFailedJob> failedJobs,
+  }) = WorkflowRunConcluded;
 
   /// Decodes one normalized envelope; malformed shapes throw.
   factory NormalizedGitHubEvent.fromJson(Map<String, Object?> json) =>

@@ -1,3 +1,10 @@
+## 0.1.0-rc.15
+
+- Added: the station reacts to a red workflow run that is not a station pull request. A seat declares `WorkflowRunIntakeRule`s on `GitHubReconcilerConfig.workflowRuns` (workflow path + events + branches + conclusions + priority + validation plan + approve); the reconciler gains a `/actions/runs?status=completed` leg that emits `NormalizedGitHubEvent.workflowRunConcluded` — with each failed job and its first failed step — for matching runs only, and intake files the failure as an OPEN `bug` carrying the run metadata, its validation plan and one falsifiable acceptance checkbox. An empty rule list is the default and makes the leg spend no request at all (pow-1rn.7).
+- Added: `GitHubSelfTrust` admits the seat's OWN `github-workflow` `OWNER/REPOSITORY` identity as `TrustLevel.self` beside the human login; every other repository — a fork's run above all — stays external, and the poll leg drops a foreign `head_repository` before it costs a jobs request.
+- Added: a rule with `approve: true` self-approves its SELF-authority filing by CALLING `grid_assets`' `ApproveService` as `github-workflow`. The four-row filing preflight is unchanged and is still the only route to the `grid.approved_*` stamp; a refused preflight leaves the bead OPEN, unstamped, with the failing rows in its notes. See `power_station#own-workflow-failures-are-self-approved`.
+- Added: `GitHubReconcilerCursor.workflow_runs_since` — ADDITIVE at cursor `version: 1`, so a cursor already on disk still loads.
+
 ## 0.1.0-rc.14
 
 - Fixed: the CI feedback leg no longer runs `bd export --all`, which every proxied-server store refuses; one head-of-line `CheckConcluded` observation wedged a seat's GitHub poll forever and the failure never reached the station log (5 of 8 lunar seats were dark from 2026-09-03). `CiFeedbackProjection` composes one typed `BdCliService.listScope` session read, ignores-with-a-flare zero, many, or id-less matching sessions, gains a `CiFeedbackReporter` seam bound onto the binding-provided value, and the reconciler subscribes to the station transport above the substation git bundle; a source fence keeps `bd export` out of `lib/` (pow-2xmo, #261).

@@ -1,8 +1,27 @@
+import 'dart:developer' as developer;
+
 import 'package:beads_dart/beads_dart.dart';
+import 'package:grid_assets/grid_assets.dart'
+    show ApprovalRefused, ApprovalStamped, ApproveService, FilingRequirementRow;
+import 'package:grid_sdk/grid_sdk.dart' show WorkBeadKeys;
+
+import '../github/reconciler_event.dart';
+
+/// The [GitHubIntakeRecord.kind] of a concluded workflow run.
+const String kWorkflowRunKind = 'workflow run';
+
+/// The `--actor` a self-approved workflow-run filing is recorded under.
+const String kWorkflowRunActor = 'github-workflow';
 
 /// Thin GitHub entity content projected into a bead.
+///
+/// The record is the SEAM: raw GitHub JSON never reaches the store, and the
+/// store never reaches back for a rule. Everything the filing needs — the bead
+/// type, its priority, its acceptance criterion, its metadata and whether the
+/// seat asked for it to be approved — is decided by the projection and carried
+/// here as values.
 class GitHubIntakeRecord {
-  /// Creates one normalized intake record.
+  /// Creates one normalized issue/pull-request intake record.
   const GitHubIntakeRecord({
     required this.nodeId,
     required this.kind,
@@ -11,29 +30,190 @@ class GitHubIntakeRecord {
     required this.actor,
     required this.title,
     required this.body,
-  });
+  }) : type = IssueType.chore,
+       priority = 2,
+       approve = false,
+       acceptanceCriteria = null,
+       openDuplicateFilter = null,
+       _beadTitle = null,
+       _description = null,
+       _metadata = null;
 
+  const GitHubIntakeRecord._({
+    required this.nodeId,
+    required this.kind,
+    required this.repository,
+    required this.number,
+    required this.actor,
+    required this.title,
+    required this.body,
+    required this.type,
+    required this.priority,
+    required this.approve,
+    required this.acceptanceCriteria,
+    required this.openDuplicateFilter,
+    required String beadTitle,
+    required String description,
+    required Map<String, String> metadata,
+  }) : _beadTitle = beadTitle,
+       _description = description,
+       _metadata = metadata;
+
+  /// Creates the workflow-run arm: a BUG, not a chore.
+  ///
+  /// A red workflow run is a defect in the repository, and the type is what
+  /// makes the bead driveable at all — the filing preflight's first row refuses
+  /// an undriveable type, so a chore-typed run would be filed and then refused
+  /// approval for a reason that has nothing to do with the run.
+  factory GitHubIntakeRecord.workflowRun({
+    required String nodeId,
+    required String repository,
+    required int runId,
+    required int runNumber,
+    required String workflowPath,
+    required String workflowName,
+    required String event,
+    required String headBranch,
+    required String headSha,
+    required String conclusion,
+    required String htmlUrl,
+    required List<WorkflowRunFailedJob> failedJobs,
+    required String validationPlan,
+    required int priority,
+    required bool approve,
+  }) {
+    final file = workflowPath.split('/').last;
+    final jobs = <String>[
+      for (final job in failedJobs)
+        '- ${job.jobName} — first failed step: '
+            '${job.failedStepName ?? 'not reported'}',
+    ];
+    // A run with no failed job still needs a falsifiable checkbox, and the
+    // workflow is the only name left to give it.
+    final named = failedJobs.isEmpty
+        ? workflowName
+        : failedJobs.map((job) => job.jobName).join(', ');
+    return GitHubIntakeRecord._(
+      nodeId: nodeId,
+      kind: kWorkflowRunKind,
+      repository: repository,
+      number: runNumber,
+      actor: kWorkflowRunActor,
+      title: workflowName,
+      body: htmlUrl,
+      type: IssueType.bug,
+      priority: priority,
+      approve: approve,
+      beadTitle:
+          '[GitHub workflow $repository $file#$runNumber] '
+          '$workflowName failed on $headBranch ($event)',
+      description: <String>[
+        'GitHub workflow $workflowName concluded $conclusion on $headBranch '
+            'in $repository.',
+        'Run: $htmlUrl',
+        'Head sha: $headSha',
+        'Event: $event',
+        'Conclusion: $conclusion',
+        '',
+        if (jobs.isEmpty) 'GitHub reported no failed job for this run.',
+        if (jobs.isNotEmpty) 'Failed jobs:',
+        ...jobs,
+      ].join('\n'),
+      acceptanceCriteria:
+          '- [ ] AC-1 — $named succeeds again for $workflowName on '
+          '$headBranch; falsifier: `$validationPlan`',
+      openDuplicateFilter: <String, String>{
+        'github.workflow_path': workflowPath,
+        'github.head_branch': headBranch,
+      },
+      metadata: <String, String>{
+        'github.node_id': nodeId,
+        'github.kind': kWorkflowRunKind,
+        'github.repository': repository,
+        'github.actor': kWorkflowRunActor,
+        'github.run_id': '$runId',
+        'github.workflow_path': workflowPath,
+        'github.head_branch': headBranch,
+        'github.head_sha': headSha,
+        'github.conclusion': conclusion,
+        WorkBeadKeys.validationPlan: validationPlan,
+      },
+    );
+  }
+
+  /// GitHub's stable node id for the observed entity.
   final String nodeId;
+
+  /// Human-readable entity kind, e.g. `issue` or [kWorkflowRunKind].
   final String kind;
+
+  /// `OWNER/REPOSITORY` the entity belongs to.
   final String repository;
+
+  /// The issue/pull number, or the run number for a workflow run.
   final int number;
+
+  /// The GitHub identity credited with the entity.
   final String actor;
+
+  /// The entity's own title.
   final String title;
+
+  /// The entity's own body.
   final String body;
 
+  /// The bead type this record is filed as.
+  final IssueType type;
+
+  /// The bead priority this record is filed at.
+  final int priority;
+
+  /// Whether the seat's rule asked for a SELF filing to be approved.
+  final bool approve;
+
+  /// The single acceptance checkbox, or null when the arm files none.
+  final String? acceptanceCriteria;
+
+  /// The metadata equality that suppresses a SECOND filing while an earlier
+  /// bead for the same subject is still OPEN, or null when the arm files every
+  /// distinct entity.
+  final Map<String, String>? openDuplicateFilter;
+
+  final String? _beadTitle;
+  final String? _description;
+  final Map<String, String>? _metadata;
+
+  /// The stable foreign identity the correlation read dedupes on.
   String get externalRef => 'github:$nodeId';
-  String get beadTitle => '[GitHub $kind $repository#$number] $title';
-  String get description => [
-    'GitHub $kind opened by @$actor in $repository#$number.',
-    'GitHub node_id: $nodeId',
-    if (body.isNotEmpty) '',
-    if (body.isNotEmpty) body,
-  ].join('\n');
+
+  /// The bead title.
+  String get beadTitle =>
+      _beadTitle ?? '[GitHub $kind $repository#$number] $title';
+
+  /// The bead description.
+  String get description =>
+      _description ??
+      [
+        'GitHub $kind opened by @$actor in $repository#$number.',
+        'GitHub node_id: $nodeId',
+        if (body.isNotEmpty) '',
+        if (body.isNotEmpty) body,
+      ].join('\n');
+
+  /// The bead metadata, written PER KEY through the merge channel.
+  Map<String, String> get metadata =>
+      _metadata ??
+      <String, String>{
+        'github.node_id': nodeId,
+        'github.kind': kind,
+        'github.repository': repository,
+        'github.actor': actor,
+      };
 }
 
 /// Upserts GitHub intake records by stable node id.
 abstract interface class GitHubIntakeStore {
-  /// Creates an OPEN, unstamped bead or updates its existing correlated bead.
+  /// Creates an OPEN bead or updates its existing correlated bead.
   Future<void> upsert(GitHubIntakeRecord record);
 }
 
@@ -45,27 +225,49 @@ abstract interface class GitHubIntakeStore {
 /// `beads_dart/test/services/bd_cli_service_test.dart` — instead of
 /// hand-building argv that no rail covers (bead `pow-0nvg`).
 ///
-/// **Metadata is written per key, never as one whole object.** The four intake
-/// keys ride [BdCliService.update]'s merge channel (one set-metadata flag per
-/// key), whose server-side merge overwrites named keys and preserves absent
-/// ones. bd's whole-object create-time metadata form REPLACES the map, which
-/// would clobber the `validation_plan` and approval-stamp keys other writers
-/// own on the same bead (`the_grid#bd-create-metadata-rides-a-follow-up-update`).
+/// **Metadata is written per key, never as one whole object.** The intake keys
+/// ride [BdCliService.update]'s merge channel (one set-metadata flag per key),
+/// whose server-side merge overwrites named keys and preserves absent ones.
+/// bd's whole-object create-time metadata form REPLACES the map, which would
+/// clobber the `validation_plan` and approval-stamp keys other writers own on
+/// the same bead (`the_grid#bd-create-metadata-rides-a-follow-up-update`).
 ///
-/// **Intake beads are filed OPEN, with no parking date and no approval
-/// marker.** Absence of the approve verb's `grid.approved_*` stamp IS the
-/// pending state: it is readiness-based rather than time-based, and it never
-/// fires on its own
+/// **Intake beads are filed OPEN, with no parking date.** Absence of the
+/// approve verb's `grid.approved_*` stamp IS the pending state: it is
+/// readiness-based rather than time-based, and it never fires on its own
 /// (`power_station#github-intake-files-open-and-unstamped`). This store passes
-/// no date argument and writes no approval key and no label; `grid_assets`'s
-/// `lib/src/filing/approve_command.dart` remains the only writer of the stamp
-/// that `mountEligibilityFindings` reads, so an intake bead is VISIBLE to
-/// `bd ready` and still unmountable until a human runs the approve verb.
+/// no date argument and writes no label.
+///
+/// **This store never writes an approval key.** A human's issue or pull stays
+/// unstamped exactly as before. A workflow run of the seat's OWN repository is
+/// SELF authority (`power_station#own-workflow-failures-are-self-approved`),
+/// and when its rule says so this store CALLS [ApproveService] — the same verb
+/// a human runs, with the same four-row filing preflight — under the actor
+/// [kWorkflowRunActor]. `grid_assets`'s `lib/src/filing/approve_command.dart`
+/// remains the ONLY writer of `grid.approved_by` / `grid.approved_at` /
+/// `grid.approved_rev`; a bead whose preflight fails is left OPEN and
+/// unstamped with the refusal in its notes.
 final class BdGitHubIntakeStore implements GitHubIntakeStore {
   /// Creates a store over the shared bounded runner.
-  BdGitHubIntakeStore(BdRunner runner) : _bd = BdCliService(runner);
+  ///
+  /// [approvals], [workRoot] and [stateRoot] wire the approval half. All three
+  /// are optional because a composition that files nothing self-authored needs
+  /// none of them — but a record that ASKS for approval without them is a
+  /// wiring bug and is refused LOUDLY rather than filed unstamped in silence.
+  BdGitHubIntakeStore(
+    BdRunner runner, {
+    ApproveService? approvals,
+    String? workRoot,
+    String? stateRoot,
+  }) : _bd = BdCliService(runner),
+       _approvals = approvals,
+       _workRoot = workRoot,
+       _stateRoot = stateRoot;
 
   final BdCliService _bd;
+  final ApproveService? _approvals;
+  final String? _workRoot;
+  final String? _stateRoot;
 
   @override
   Future<void> upsert(GitHubIntakeRecord record) async {
@@ -80,28 +282,110 @@ final class BdGitHubIntakeStore implements GitHubIntakeStore {
       if (bead.id.isEmpty) {
         throw const BdParseException('correlated bead has no string id');
       }
-      await _bd.update(
+      await _write(
         bead.id,
+        record,
         title: record.beadTitle,
         description: record.description,
-        mergeMetadata: _metadata(record),
+      );
+      await _approve(bead.id, record);
+      return;
+    }
+    if (await _openSubjectBead(record) case final existing?) {
+      developer.log(
+        'GitHub intake left ${record.externalRef} unfiled: $existing is still '
+        'OPEN for the same subject ${record.openDuplicateFilter}',
+        name: 'github_grid_assets.intake',
       );
       return;
     }
-    await _bd.create(
+    final id = await _bd.create(
       title: record.beadTitle,
-      type: IssueType.chore,
-      priority: 2,
+      type: record.type,
+      priority: record.priority,
       description: record.description,
       externalRef: record.externalRef,
-      setMetadata: _metadata(record),
     );
+    await _write(id, record);
+    await _approve(id, record);
   }
 
-  Map<String, String> _metadata(GitHubIntakeRecord record) => <String, String>{
-    'github.node_id': record.nodeId,
-    'github.kind': record.kind,
-    'github.repository': record.repository,
-    'github.actor': record.actor,
-  };
+  /// The id of an OPEN bead already filed for this record's subject, or null.
+  ///
+  /// A fresh run is a fresh node id, so the external-ref correlation above
+  /// cannot see it — without this read the station would file one bead per
+  /// night for one unfixed workflow. Appending to the existing bead instead is
+  /// deliberately NOT done: a note on a stamped bead evicts its live round.
+  Future<String?> _openSubjectBead(GitHubIntakeRecord record) async {
+    final filter = record.openDuplicateFilter;
+    if (filter == null) return null;
+    final open = (await _bd.listScope(
+      type: record.type,
+      status: BeadStatus.open,
+      metadataFields: filter,
+    )).beads;
+    return open.isEmpty ? null : open.first.id;
+  }
+
+  /// The record's acceptance criterion and per-key metadata, in ONE update.
+  ///
+  /// [BdCliService.update]'s text round-trip verification is declined because
+  /// it costs a `bd show`, and `bd show` writes `.beads/last-touched` and
+  /// self-triggers the workspace watcher — this write happens on the
+  /// reconciler's own poll cadence. The argv-transport guard that refuses text
+  /// bd cannot carry runs BEFORE execution either way and is untouched.
+  Future<void> _write(
+    String id,
+    GitHubIntakeRecord record, {
+    String? title,
+    String? description,
+  }) => _bd.update(
+    id,
+    title: title,
+    description: description,
+    acceptanceCriteria: record.acceptanceCriteria,
+    mergeMetadata: record.metadata,
+    verifyTextRoundTrip: false,
+  );
+
+  /// Stamps [beadId] through the approve VERB when the record asks for it.
+  Future<void> _approve(String beadId, GitHubIntakeRecord record) async {
+    if (!record.approve) return;
+    final approvals = _approvals;
+    final workRoot = _workRoot;
+    if (approvals == null || workRoot == null) {
+      throw StateError(
+        'a $kWorkflowRunKind record asked for approval but this store was '
+        'built with no ApproveService and no work root',
+      );
+    }
+    final outcome = await approvals.approve(
+      storeRoot: workRoot,
+      beadId: beadId,
+      actor: kWorkflowRunActor,
+      stateRoot: _stateRoot,
+    );
+    switch (outcome) {
+      case ApprovalStamped():
+        return;
+      case ApprovalRefused(:final reason, :final report):
+        // The failing ROWS, not just the verb's summary: the note is what an
+        // operator reads to know which field to correct, and "has failing
+        // rows" names none of them.
+        final failing = <String>[
+          for (final row
+              in report?.requirements ?? const <FilingRequirementRow>[])
+            if (!row.passed) '${row.requirement.wire}: ${row.detail}',
+        ];
+        await _bd.update(
+          beadId,
+          appendNotes: <String>[
+            'Self-approval refused by the filing preflight: $reason.',
+            ...failing,
+            'The bead stays OPEN and unstamped until the filing is corrected.',
+          ].join('\n'),
+          verifyTextRoundTrip: false,
+        );
+    }
+  }
 }

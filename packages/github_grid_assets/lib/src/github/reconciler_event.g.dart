@@ -6,6 +6,20 @@ part of 'reconciler_event.dart';
 // JsonSerializableGenerator
 // **************************************************************************
 
+_WorkflowRunFailedJob _$WorkflowRunFailedJobFromJson(
+  Map<String, dynamic> json,
+) => _WorkflowRunFailedJob(
+  jobName: json['jobName'] as String,
+  failedStepName: json['failedStepName'] as String?,
+);
+
+Map<String, dynamic> _$WorkflowRunFailedJobToJson(
+  _WorkflowRunFailedJob instance,
+) => <String, dynamic>{
+  'jobName': instance.jobName,
+  'failedStepName': instance.failedStepName,
+};
+
 IssueOpened _$IssueOpenedFromJson(Map<String, dynamic> json) => IssueOpened(
   nodeId: json['nodeId'] as String,
   actor: json['actor'] as String,
@@ -84,3 +98,47 @@ Map<String, dynamic> _$CheckConcludedToJson(CheckConcluded instance) =>
       'conclusion': instance.conclusion,
       'runtimeType': instance.$type,
     };
+
+WorkflowRunConcluded _$WorkflowRunConcludedFromJson(
+  Map<String, dynamic> json,
+) => WorkflowRunConcluded(
+  nodeId: json['nodeId'] as String,
+  actor: json['actor'] as String,
+  repository: json['repository'] as String,
+  substation: json['substation'] as String,
+  observationId: json['observationId'] as String,
+  runId: (json['runId'] as num).toInt(),
+  runNumber: (json['runNumber'] as num).toInt(),
+  workflowPath: json['workflowPath'] as String,
+  workflowName: json['workflowName'] as String,
+  event: json['event'] as String,
+  headBranch: json['headBranch'] as String,
+  headSha: json['headSha'] as String,
+  conclusion: json['conclusion'] as String,
+  htmlUrl: json['htmlUrl'] as String,
+  failedJobs: (json['failedJobs'] as List<dynamic>)
+      .map((e) => WorkflowRunFailedJob.fromJson(e as Map<String, dynamic>))
+      .toList(),
+  $type: json['runtimeType'] as String?,
+);
+
+Map<String, dynamic> _$WorkflowRunConcludedToJson(
+  WorkflowRunConcluded instance,
+) => <String, dynamic>{
+  'nodeId': instance.nodeId,
+  'actor': instance.actor,
+  'repository': instance.repository,
+  'substation': instance.substation,
+  'observationId': instance.observationId,
+  'runId': instance.runId,
+  'runNumber': instance.runNumber,
+  'workflowPath': instance.workflowPath,
+  'workflowName': instance.workflowName,
+  'event': instance.event,
+  'headBranch': instance.headBranch,
+  'headSha': instance.headSha,
+  'conclusion': instance.conclusion,
+  'htmlUrl': instance.htmlUrl,
+  'failedJobs': instance.failedJobs,
+  'runtimeType': instance.$type,
+};

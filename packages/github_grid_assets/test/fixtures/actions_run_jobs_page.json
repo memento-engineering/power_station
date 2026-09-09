@@ -1,0 +1,37 @@
+{
+  "total_count": 4,
+  "jobs": [
+    {
+      "id": 700001,
+      "name": "analyze",
+      "conclusion": "success",
+      "steps": [
+        {"number": 1, "name": "checkout", "conclusion": "success"},
+        {"number": 2, "name": "dart analyze", "conclusion": "success"}
+      ]
+    },
+    {
+      "id": 700002,
+      "name": "test",
+      "conclusion": "failure",
+      "steps": [
+        {"number": 1, "name": "checkout", "conclusion": "success"},
+        {"number": 2, "name": "dart test", "conclusion": "failure"},
+        {"number": 3, "name": "upload coverage", "conclusion": "skipped"}
+      ]
+    },
+    {
+      "id": 700003,
+      "name": "integration",
+      "conclusion": "timed_out",
+      "steps": [
+        {"number": 1, "name": "checkout", "conclusion": "success"}
+      ]
+    },
+    {
+      "id": 700004,
+      "name": "cancelled-before-any-step",
+      "conclusion": "failure"
+    }
+  ]
+}

@@ -85,7 +85,14 @@ final class _Factory {
 }
 
 final class _BdRunner implements BdRunner {
+  _BdRunner({this.filed});
+
+  /// The bead the approval preflight reads back, or null for "not found".
+  final Map<String, Object?>? filed;
   final argvs = <List<String>>[];
+
+  List<List<String>> verb(String name) =>
+      argvs.where((argv) => argv.first == name).toList();
 
   @override
   Future<BdResult> run(
@@ -94,9 +101,11 @@ final class _BdRunner implements BdRunner {
     String? stdin,
   }) async {
     argvs.add(List<String>.of(args));
-    final data = args.first == 'list'
-        ? <Object?>[]
-        : <String, Object?>{'id': 'pow-intake'};
+    final Object data = switch (args.first) {
+      'list' || 'dep' => <Object?>[],
+      'query' => filed == null ? <Object?>[] : <Object?>[filed],
+      _ => <String, Object?>{'id': 'pow-intake'},
+    };
     return BdResult(
       exitCode: 0,
       stdout: jsonEncode(<String, Object?>{'schema_version': 1, 'data': data}),
@@ -104,6 +113,47 @@ final class _BdRunner implements BdRunner {
     );
   }
 }
+
+/// The seat's own nightly rule.
+WorkflowRunIntakeRule _nightlyRule() => WorkflowRunIntakeRule(
+  workflowPath: '.github/workflows/ci.yaml',
+  validationPlan: 'dart test',
+  events: const {'schedule'},
+);
+
+/// One concluded run of [repository], matching [_nightlyRule] by default.
+NormalizedGitHubEvent _runEvent({
+  String repository = 'memento/power_station',
+}) => NormalizedGitHubEvent.workflowRunConcluded(
+  nodeId: 'WFR_1',
+  actor: repository,
+  repository: repository,
+  substation: 'seat',
+  observationId: 'poll:run:WFR_1:2026-09-07T06:11:00Z:failure',
+  runId: 9001,
+  runNumber: 128,
+  workflowPath: '.github/workflows/ci.yaml',
+  workflowName: 'CI',
+  event: 'schedule',
+  headBranch: 'main',
+  headSha: 'abcdef0',
+  conclusion: 'failure',
+  htmlUrl: 'https://github.test/memento/power_station/actions/runs/9001',
+  failedJobs: const [
+    WorkflowRunFailedJob(jobName: 'test', failedStepName: 'dart test'),
+  ],
+);
+
+/// The bead the seat's approval preflight reads back for a sound filing.
+const _filedBug = <String, Object?>{
+  'id': 'pow-intake',
+  'title': 'a red nightly',
+  'description': 'The nightly failed.',
+  'acceptance_criteria': '- [ ] AC-1 — CI is green; falsifier: `dart test`',
+  'issue_type': 'bug',
+  'priority': 1,
+  'metadata': <String, Object?>{'validation_plan': 'dart test'},
+};
 
 /// The seat's grid STATE store, in PROXIED-SERVER mode: it answers the
 /// type-scoped session list and REFUSES `export`, exactly as every org store
@@ -279,6 +329,7 @@ Seed _seatTree({
   GitHubAppClient? client,
   _StateBdRunner? stateBd,
   FeedbackCommandSender? sender,
+  void Function()? stateRunnerCount,
 }) {
   final inner = GitHubReconcilerAssets(
     config: config,
@@ -306,7 +357,10 @@ Seed _seatTree({
           runner: runner,
           trust: trust,
           feedbackCommandSender: sender,
-          stateRunnerFor: (_) => stateBd,
+          stateRunnerFor: (_) {
+            stateRunnerCount?.call();
+            return stateBd;
+          },
           child: inner,
         );
   final Seed seat = Provider<sdk.SubstationScope>.value(
@@ -339,12 +393,14 @@ GitHubReconcilerConfig _config({
   required String owner,
   required String repository,
   GitHubReconcilerArm arm = GitHubReconcilerArm.live,
+  List<WorkflowRunIntakeRule> workflowRuns = const <WorkflowRunIntakeRule>[],
 }) => GitHubReconcilerConfig(
   owner: owner,
   repository: repository,
   substation: 'seat',
   installationId: 'installation',
   arm: arm,
+  workflowRuns: workflowRuns,
 );
 
 Seed _boundTree({
@@ -384,6 +440,154 @@ Seed _boundTree({
 );
 
 void main() {
+  test('the sink self-approves the seat\'s OWN workflow failure', () async {
+    final runner = _BdRunner(filed: _filedBug);
+    GitHubEventSink? sink;
+    final owner = TreeOwner();
+    addTearDown(owner.dispose);
+    owner.mountRoot(
+      _boundTree(
+        scope: const sdk.SubstationScope(
+          name: 'seat',
+          root: '/work/seat',
+          prefix: 'pow',
+        ),
+        config: _config(
+          owner: 'memento',
+          repository: 'power_station',
+          workflowRuns: [_nightlyRule()],
+        ),
+        runner: runner,
+        runtimeFactory: _Factory().create,
+        observe: (_, value, __) => sink = value,
+      ),
+    );
+    owner.flush();
+
+    await sink!(_runEvent());
+
+    expect(
+      runner.verb('create').single,
+      containsAllInOrder([
+        'create',
+        '--type',
+        'bug',
+        '--priority',
+        '1',
+        '--external-ref',
+        'github:WFR_1',
+      ]),
+    );
+    final updates = runner.verb('update');
+    expect(updates, hasLength(2));
+    expect(
+      updates.first,
+      containsAllInOrder([
+        'update',
+        'pow-intake',
+        '--acceptance',
+        '--set-metadata',
+        'github.workflow_path=.github/workflows/ci.yaml',
+      ]),
+    );
+    expect(
+      updates.last,
+      containsAllInOrder([
+        '--actor',
+        'github-workflow',
+        '--set-metadata',
+        'grid.approved_by=github-workflow',
+      ]),
+      reason: 'the approve verb rides the SEAT runner, opening no bd channel',
+    );
+  });
+
+  test('a fork run of another repository is never filed', () async {
+    final runner = _BdRunner(filed: _filedBug);
+    GitHubEventSink? sink;
+    final owner = TreeOwner();
+    addTearDown(owner.dispose);
+    owner.mountRoot(
+      _boundTree(
+        scope: const sdk.SubstationScope(
+          name: 'seat',
+          root: '/work/seat',
+          prefix: 'pow',
+        ),
+        config: _config(
+          owner: 'memento',
+          repository: 'power_station',
+          workflowRuns: [_nightlyRule()],
+        ),
+        runner: runner,
+        runtimeFactory: _Factory().create,
+        observe: (_, value, __) => sink = value,
+      ),
+    );
+    owner.flush();
+
+    await sink!(_runEvent(repository: 'forker/power_station'));
+
+    expect(runner.argvs, isEmpty);
+  });
+
+  test('a seat declaring no rule files no workflow run at all', () async {
+    final runner = _BdRunner(filed: _filedBug);
+    GitHubEventSink? sink;
+    final owner = TreeOwner();
+    addTearDown(owner.dispose);
+    owner.mountRoot(
+      _boundTree(
+        scope: const sdk.SubstationScope(
+          name: 'seat',
+          root: '/work/seat',
+          prefix: 'pow',
+        ),
+        config: _config(owner: 'memento', repository: 'power_station'),
+        runner: runner,
+        runtimeFactory: _Factory().create,
+        observe: (_, value, __) => sink = value,
+      ),
+    );
+    owner.flush();
+
+    await sink!(_runEvent());
+
+    expect(runner.argvs, isEmpty);
+  });
+
+  test('the state runner is built once and shared with approval', () {
+    var built = 0;
+    final stateBd = _StateBdRunner(_sessionLedger(const []));
+    CiFeedbackProjection? projection;
+    final owner = TreeOwner();
+    addTearDown(owner.dispose);
+    owner.mountRoot(
+      _seatTree(
+        gridRoot: '/grid',
+        scope: const sdk.SubstationScope(
+          name: 'seat',
+          root: '/work/seat',
+          prefix: 'pow',
+        ),
+        config: _config(
+          owner: 'memento',
+          repository: 'power_station',
+          workflowRuns: [_nightlyRule()],
+        ),
+        runner: _BdRunner(),
+        runtimeFactory: _Factory().create,
+        stateBd: stateBd,
+        stateRunnerCount: () => built++,
+        observe: (value, _) => projection = value,
+      ),
+    );
+    owner.flush();
+
+    expect(built, 1, reason: 'approval reuses the feedback state runner');
+    expect(projection!.bd, same(stateBd));
+  });
+
   test('live binding provides both seams and constructs the runtime', () {
     final factory = _Factory();
     GitHubCursorStore? cursors;

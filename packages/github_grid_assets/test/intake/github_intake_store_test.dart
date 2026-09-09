@@ -2,6 +2,8 @@ import 'dart:convert';
 
 import 'package:beads_dart/beads_dart.dart';
 import 'package:github_grid_assets/github_grid_assets.dart';
+import 'package:grid_assets/grid_assets.dart'
+    show ApproveService, kFilingApprovalRevisionPrefix;
 import 'package:test/test.dart';
 
 class FakeBdRunner implements BdRunner {
@@ -59,6 +61,133 @@ BdResult ok(Object? data, {int schemaVersion = 1}) => BdResult(
   stdout: jsonEncode({'schema_version': schemaVersion, 'data': data}),
   stderr: '',
 );
+
+/// The seat's WORK store, scripted by argv SHAPE rather than a fixed queue, so
+/// the approval leg's reads can be answered wherever they land in the order.
+final class RecordingBdRunner implements BdRunner {
+  RecordingBdRunner({
+    this.correlated = const <Map<String, Object?>>[],
+    this.openBugs = const <Map<String, Object?>>[],
+    this.filed,
+    this.createdId = 'pow-run',
+  });
+
+  /// Answers the external-ref correlation read.
+  List<Map<String, Object?>> correlated;
+
+  /// Answers the OPEN same-subject `bug` read.
+  List<Map<String, Object?>> openBugs;
+
+  /// Answers the approval preflight's exact-id read; null means "not found".
+  Map<String, Object?>? filed;
+
+  /// The id `bd create` reports back.
+  String createdId;
+
+  final argvs = <List<String>>[];
+  final stdins = <String?>[];
+
+  List<List<String>> verb(String name) =>
+      argvs.where((argv) => argv.first == name).toList();
+
+  @override
+  Future<BdResult> run(
+    List<String> args, {
+    Duration? timeout,
+    String? stdin,
+  }) async {
+    argvs.add(List<String>.of(args));
+    stdins.add(stdin);
+    return switch (args) {
+      ['list', ...] when args.contains('--external-ref') => ok(correlated),
+      ['list', ...] when args.contains('link') => ok(const <Object?>[]),
+      ['list', ...] => ok(openBugs),
+      ['create', ...] => ok({'id': createdId}),
+      ['query', ...] => ok(filed == null ? const <Object?>[] : [filed]),
+      ['dep', ...] => ok(const <Object?>[]),
+      _ => ok({'id': args.length > 1 ? args[1] : createdId}),
+    };
+  }
+}
+
+/// The bead the approval preflight reads back for a well-formed filing.
+Map<String, Object?> filedBug({
+  String id = 'pow-run',
+  String validationPlan = 'dart test',
+  String acceptance = '- [ ] AC-1 — CI is green; falsifier: `dart test`',
+}) => <String, Object?>{
+  'id': id,
+  'title': 'a red nightly',
+  'description': 'The nightly failed.',
+  'acceptance_criteria': acceptance,
+  'issue_type': 'bug',
+  'priority': 1,
+  'metadata': <String, Object?>{'validation_plan': validationPlan},
+};
+
+GitHubIntakeRecord workflowRecord({
+  String nodeId = 'WFR_1',
+  String validationPlan = 'dart test',
+  int priority = 1,
+  bool approve = true,
+  List<WorkflowRunFailedJob> failedJobs = const [
+    WorkflowRunFailedJob(jobName: 'test', failedStepName: 'dart test'),
+  ],
+}) => GitHubIntakeRecord.workflowRun(
+  nodeId: nodeId,
+  repository: 'memento/power_station',
+  runId: 9001,
+  runNumber: 128,
+  workflowPath: '.github/workflows/ci.yaml',
+  workflowName: 'CI',
+  event: 'schedule',
+  headBranch: 'main',
+  headSha: 'abcdef0',
+  conclusion: 'failure',
+  htmlUrl: 'https://github.test/memento/power_station/actions/runs/9001',
+  failedJobs: failedJobs,
+  validationPlan: validationPlan,
+  priority: priority,
+  approve: approve,
+);
+
+/// A store wired exactly as the seat binding wires it: one runner for the work
+/// root and one for the grid state root, and the approve VERB over both.
+BdGitHubIntakeStore seatStore(
+  RecordingBdRunner runner, {
+  String? stateRoot = '/grid/.grid',
+}) => BdGitHubIntakeStore(
+  runner,
+  approvals: ApproveService(
+    runnerFor: (_) => runner,
+    now: () => DateTime.utc(2026, 9, 8, 12),
+  ),
+  workRoot: '/work/seat',
+  stateRoot: stateRoot,
+);
+
+const workflowMetadata = <String>[
+  '--set-metadata',
+  'github.node_id=WFR_1',
+  '--set-metadata',
+  'github.kind=workflow run',
+  '--set-metadata',
+  'github.repository=memento/power_station',
+  '--set-metadata',
+  'github.actor=github-workflow',
+  '--set-metadata',
+  'github.run_id=9001',
+  '--set-metadata',
+  'github.workflow_path=.github/workflows/ci.yaml',
+  '--set-metadata',
+  'github.head_branch=main',
+  '--set-metadata',
+  'github.head_sha=abcdef0',
+  '--set-metadata',
+  'github.conclusion=failure',
+  '--set-metadata',
+  'validation_plan=dart test',
+];
 
 void main() {
   group('BdGitHubIntakeStore', () {
@@ -222,6 +351,225 @@ void main() {
       await expectLater(
         BdGitHubIntakeStore(malformed).upsert(record),
         throwsA(isA<BdParseException>()),
+      );
+    });
+  });
+
+  group('BdGitHubIntakeStore workflow run', () {
+    test('mints one approved bug through the filing verb', () async {
+      final runner = RecordingBdRunner(filed: filedBug());
+
+      await seatStore(runner).upsert(workflowRecord());
+
+      expect(runner.verb('list').first, [
+        'list',
+        '--all',
+        '--external-ref',
+        'github:WFR_1',
+        '--json',
+        '--limit',
+        '0',
+      ]);
+      expect(runner.verb('list')[1], [
+        'list',
+        '-t',
+        'bug',
+        '--status',
+        'open',
+        '--metadata-field',
+        'github.head_branch=main',
+        '--metadata-field',
+        'github.workflow_path=.github/workflows/ci.yaml',
+        '--json',
+        '--limit',
+        '0',
+      ]);
+      expect(runner.verb('create').single, [
+        'create',
+        '--json',
+        '--actor',
+        'grid-controller',
+        '--title',
+        '[GitHub workflow memento/power_station ci.yaml#128] '
+            'CI failed on main (schedule)',
+        '--type',
+        'bug',
+        '--priority',
+        '1',
+        '--description',
+        contains('/actions/runs/9001'),
+        '--external-ref',
+        'github:WFR_1',
+      ]);
+
+      final updates = runner.verb('update');
+      expect(updates, hasLength(2));
+      expect(updates.first, [
+        'update',
+        'pow-run',
+        '--json',
+        '--actor',
+        'grid-controller',
+        '--acceptance',
+        contains('`dart test`'),
+        ...workflowMetadata,
+      ]);
+      expect(
+        updates.last,
+        containsAllInOrder([
+          'update',
+          'pow-run',
+          '--json',
+          '--actor',
+          'github-workflow',
+          '--set-metadata',
+          'grid.approved_by=github-workflow',
+          '--set-metadata',
+          'grid.approved_at=2026-09-08T12:00:00.000Z',
+        ]),
+        reason: 'the approve verb writes the stamp, this store never does',
+      );
+      expect(
+        updates.last.last,
+        startsWith('grid.approved_rev=$kFilingApprovalRevisionPrefix'),
+      );
+      expect(
+        runner.argvs.expand((argv) => argv),
+        isNot(contains('show')),
+        reason: 'no bd show on the reconciler poll path',
+      );
+    });
+
+    test('this store never hand-writes an approval key', () async {
+      final runner = RecordingBdRunner(filed: filedBug());
+
+      await seatStore(runner).upsert(workflowRecord());
+
+      final byController = runner.argvs
+          .where((argv) => argv.contains('grid-controller'))
+          .expand((argv) => argv)
+          .where((arg) => arg.contains('grid.approved'));
+      expect(byController, isEmpty);
+    });
+
+    test('a repeat observation updates its correlated bead', () async {
+      final runner = RecordingBdRunner(
+        correlated: [
+          {'id': 'pow-existing'},
+        ],
+        filed: filedBug(id: 'pow-existing'),
+      );
+
+      await seatStore(runner).upsert(workflowRecord());
+
+      expect(runner.verb('create'), isEmpty);
+      expect(
+        runner.verb('list'),
+        hasLength(2),
+        reason: 'a correlated bead skips the open-subject guard entirely',
+      );
+      expect(runner.verb('update').first, [
+        'update',
+        'pow-existing',
+        '--json',
+        '--actor',
+        'grid-controller',
+        '--title',
+        contains('#128'),
+        '--body-file',
+        '-',
+        '--acceptance',
+        contains('`dart test`'),
+        ...workflowMetadata,
+      ]);
+      expect(runner.stdins[1], contains('/actions/runs/9001'));
+    });
+
+    test('a fresh run for an OPEN same-workflow bead writes nothing', () async {
+      final runner = RecordingBdRunner(
+        openBugs: [
+          {'id': 'pow-yesterday'},
+        ],
+      );
+
+      await seatStore(runner).upsert(workflowRecord(nodeId: 'WFR_TONIGHT'));
+
+      expect(runner.verb('create'), isEmpty);
+      expect(runner.verb('update'), isEmpty);
+      expect(
+        runner.verb('list'),
+        hasLength(2),
+        reason: 'exactly the correlation read and the open-subject read',
+      );
+    });
+
+    test('approve false files the bug and stamps nothing', () async {
+      final runner = RecordingBdRunner(filed: filedBug());
+
+      await seatStore(runner).upsert(workflowRecord(approve: false));
+
+      expect(runner.verb('create'), hasLength(1));
+      expect(runner.verb('update'), hasLength(1));
+      expect(runner.verb('query'), isEmpty);
+      expect(
+        runner.argvs
+            .expand((argv) => argv)
+            .where((arg) => arg.contains('grid.approved')),
+        isEmpty,
+      );
+    });
+
+    test(
+      'workflow run refused preflight leaves it open and unstamped',
+      () async {
+        final runner = RecordingBdRunner(filed: filedBug(validationPlan: ''));
+
+        await seatStore(runner).upsert(workflowRecord(validationPlan: ''));
+
+        expect(runner.verb('create'), hasLength(1));
+        final updates = runner.verb('update');
+        expect(updates, hasLength(2));
+        expect(
+          updates.last,
+          containsAllInOrder(['update', 'pow-run', '--json', '--append-notes']),
+        );
+        expect(updates.last.last, contains('validation_plan is blank'));
+        expect(
+          runner.argvs
+              .expand((argv) => argv)
+              .where((arg) => arg.contains('grid.approved')),
+          isEmpty,
+          reason: 'a refused preflight writes NO approval key',
+        );
+        expect(
+          [...runner.verb('create'), ...updates].expand((argv) => argv),
+          isNot(contains('--status')),
+          reason: 'the bead stays OPEN — no write touches its status',
+        );
+      },
+    );
+
+    test('a store with no approve verb refuses an approving record', () async {
+      final runner = RecordingBdRunner(filed: filedBug());
+
+      await expectLater(
+        BdGitHubIntakeStore(runner).upsert(workflowRecord()),
+        throwsStateError,
+      );
+    });
+
+    test('no state root still approves, with links unconsulted', () async {
+      final runner = RecordingBdRunner(filed: filedBug());
+
+      await seatStore(runner, stateRoot: null).upsert(workflowRecord());
+
+      expect(
+        runner.verb('list').where((argv) => argv.contains('link')),
+        isEmpty,
+      );
+      expect(
+        runner.verb('update').last,
+        contains('grid.approved_by=github-workflow'),
       );
     });
   });

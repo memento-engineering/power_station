@@ -21,5 +21,32 @@
     "title": "A pull request",
     "body": "PR body",
     "headRef": "grid/pow-40a4"
+  },
+  {
+    "runtimeType": "workflowRunConcluded",
+    "nodeId": "WFR_9",
+    "actor": "memento/power",
+    "repository": "memento/power",
+    "substation": "power",
+    "observationId": "poll:run:WFR_9:2026-08-09T06:10:00Z:failure",
+    "runId": 9001,
+    "runNumber": 128,
+    "workflowPath": ".github/workflows/ci.yaml",
+    "workflowName": "CI",
+    "event": "schedule",
+    "headBranch": "main",
+    "headSha": "0f1e2d3",
+    "conclusion": "failure",
+    "htmlUrl": "https://github.test/memento/power/actions/runs/9001",
+    "failedJobs": [
+      {
+        "jobName": "analyze",
+        "failedStepName": "dart analyze"
+      },
+      {
+        "jobName": "test",
+        "failedStepName": null
+      }
+    ]
   }
 ]

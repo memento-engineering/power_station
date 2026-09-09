@@ -112,6 +112,43 @@ CiFeedbackProjection projection(FakeBdRunner bd, FakeSender sender) =>
     );
 
 void main() {
+  test('a concluded workflow run never enters the feedback logic', () async {
+    // No session read, no rework, no landing mark, no gate: a workflow run is
+    // intake's, and the sealed union makes that disjointness a compile error
+    // to break rather than a comment to forget.
+    final bd = FakeBdRunner('{"schema_version":1,"data":[]}');
+    final sender = FakeSender();
+    final projection = CiFeedbackProjection(
+      bd: bd,
+      commandSender: sender,
+      gridRoot: '/grid',
+      substation: 'seat',
+    );
+
+    await projection(
+      const NormalizedGitHubEvent.workflowRunConcluded(
+        nodeId: 'WFR_1',
+        actor: 'memento/power_station',
+        repository: 'memento/power_station',
+        substation: 'seat',
+        observationId: 'poll:run:WFR_1:2026-09-07T06:11:00Z:failure',
+        runId: 9001,
+        runNumber: 128,
+        workflowPath: '.github/workflows/ci.yaml',
+        workflowName: 'CI',
+        event: 'schedule',
+        headBranch: 'grid/pow-test',
+        headSha: 'abcdef0',
+        conclusion: 'failure',
+        htmlUrl: 'https://github.test/runs/9001',
+        failedJobs: <WorkflowRunFailedJob>[],
+      ),
+    );
+
+    expect(bd.calls, isEmpty, reason: 'not even the session read runs');
+    expect(sender.calls, isEmpty);
+  });
+
   test('one type-scoped session read replaces the export', () async {
     final bd = FakeBdRunner(ledger(['tg-1']));
     await projection(bd, FakeSender())(event('failure'));

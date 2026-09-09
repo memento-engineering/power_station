@@ -1,5 +1,6 @@
 import 'package:beads_dart/beads_dart.dart';
 import 'package:genesis_tree/genesis_tree.dart';
+import 'package:grid_assets/grid_assets.dart' show ApproveService;
 import 'package:grid_sdk/grid_sdk.dart' as sdk;
 import 'package:path/path.dart' as p;
 
@@ -87,23 +88,46 @@ class GitHubReconcilerBindingAssets extends SingleChildStatelessSeed {
         '${config.owner}-${config.repository}.cursor.json',
       ),
     );
-    final projection = GitHubIntakeProjection(
-      trust: trust,
-      store: BdGitHubIntakeStore(runner),
-    );
-    final GitHubEventSink sink = projection.call;
 
     // QUIET and SUBSCRIBING: no enclosing grid root is the offline/unit
     // posture, and `projectCiFeedback` already encodes a null projection as a
     // no-op, so intake is untouched when the feedback half is unbound.
     final gridRoot = sdk.GridRoot.maybeOf(context)?.path;
+    final stateRoot = gridRoot == null
+        ? null
+        : sdk.GridStateStore.forGridRoot(gridRoot).runtimeDir;
+    final stateRunner = stateRoot == null ? null : stateRunnerFor(stateRoot);
+
+    final projection = GitHubIntakeProjection(
+      // The seat's OWN workflow identity is SELF beside the admitted human
+      // login; every other repository — a fork's run above all — stays
+      // external.
+      trust: GitHubSelfTrust(
+        githubUser: trust.githubUser,
+        repository: '${config.owner}/${config.repository}',
+      ),
+      store: BdGitHubIntakeStore(
+        runner,
+        approvals: ApproveService(
+          runnerFor: _approvalRunner(
+            scope.root,
+            stateRoot: stateRoot,
+            stateRunner: stateRunner,
+          ),
+        ),
+        workRoot: scope.root,
+        stateRoot: stateRoot,
+      ),
+      workflowRuns: config.workflowRuns,
+      defaultBranch: config.defaultBranch,
+    );
+    final GitHubEventSink sink = projection.call;
+
     Seed wired = InheritedSeed<GitHubEventSink>(value: sink, child: child);
     if (gridRoot != null) {
       wired = InheritedSeed<CiFeedbackProjection>(
         value: CiFeedbackProjection(
-          bd: stateRunnerFor(
-            sdk.GridStateStore.forGridRoot(gridRoot).runtimeDir,
-          ),
+          bd: stateRunner!,
           commandSender:
               feedbackCommandSender ?? ResidentFeedbackCommandSender(),
           gridRoot: gridRoot,
@@ -114,4 +138,25 @@ class GitHubReconcilerBindingAssets extends SingleChildStatelessSeed {
     }
     return InheritedSeed<GitHubCursorStore>(value: cursors, child: wired);
   }
+
+  /// The approve verb's per-root spawn seam, closed over the runners this seat
+  /// ALREADY has.
+  ///
+  /// [ApproveService] reads and stamps in the WORK store and reads cross-store
+  /// link beads in the GRID STATE store, and asks for one runner per root. Both
+  /// are already injected here, so approval opens no third `bd` channel and the
+  /// chokepoint stays the seat's own runner. A root that is neither is a wiring
+  /// bug and throws — silently spawning a real `bd` at an unknown path is
+  /// exactly the escape this seam exists to close.
+  BdRunner Function(String) _approvalRunner(
+    String workRoot, {
+    required String? stateRoot,
+    required BdRunner? stateRunner,
+  }) => (root) {
+    if (root == workRoot) return runner;
+    if (stateRunner != null && root == stateRoot) return stateRunner;
+    throw StateError(
+      'GitHub intake approval has no bd runner for store root "$root"',
+    );
+  };
 }

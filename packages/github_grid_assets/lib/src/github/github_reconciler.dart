@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:developer' as developer;
 
+import '../code/workflow_run_intake_rule.dart';
 import '../github_app_client.dart';
 
 import 'link_header.dart';
@@ -50,6 +51,8 @@ class GitHubReconciler {
     required GitHubAppClient client,
     required GitHubCursorStore cursors,
     required GitHubEventSink emit,
+    this.defaultBranch = 'main',
+    this.workflowRuns = const <WorkflowRunIntakeRule>[],
     void Function(Object error, StackTrace stackTrace)? onIntakeRowError,
   }) : _client = client,
        _cursors = cursors,
@@ -64,6 +67,17 @@ class GitHubReconciler {
 
   /// Bound substation name.
   final String substation;
+
+  /// The repository's default branch — what a rule that declares no branches
+  /// resolves to.
+  final String defaultBranch;
+
+  /// The seat's declared workflow-run rules, in authoritative order.
+  ///
+  /// EMPTY is the feature-off value and the default: [_runs] returns before
+  /// any transport, so a seat that has not opted in spends no request and no
+  /// rate-limit unit on this leg.
+  final List<WorkflowRunIntakeRule> workflowRuns;
   final GitHubAppClient _client;
   final GitHubCursorStore _cursors;
   final GitHubEventSink _emit;
@@ -101,7 +115,8 @@ class GitHubReconciler {
     var cursor = await _cursors.load();
     cursor = await _replayPending(cursor);
     cursor = await _intake(cursor);
-    await _feedback(cursor);
+    cursor = await _feedback(cursor);
+    await _runs(cursor);
   }
 
   /// Re-delivers every PENDING observation, oldest first, before new polling.
@@ -349,6 +364,195 @@ class GitHubReconciler {
     return next;
   }
 
+  /// The `failure`-shaped conclusions this leg treats as "did not succeed".
+  static const Set<String> _failedConclusions = <String>{
+    'failure',
+    'timed_out',
+  };
+
+  /// Polls COMPLETED workflow runs and emits the ones a seat rule admits.
+  ///
+  /// The feedback leg above it enumerates OPEN PULLS and keeps only `grid/`
+  /// heads, so a scheduled run on the default branch — the red nightly nobody
+  /// notices — can never reach a projection through it. This leg is that
+  /// missing half, and it is DECLARATION-GATED: with no rule it returns before
+  /// the first request.
+  ///
+  /// A run that matches no rule is never followed up: the per-run jobs request
+  /// happens only after [matchWorkflowRunRule] has already admitted the run.
+  Future<GitHubReconcilerCursor> _runs(GitHubReconcilerCursor cursor) async {
+    if (workflowRuns.isEmpty) return cursor;
+    const key = 'intake/workflow-runs';
+    var response = await _client.send(
+      method: 'GET',
+      path: '/repos/$owner/$repository/actions/runs',
+      queryParameters: <String, String>{
+        'status': 'completed',
+        'per_page': '50',
+        if (cursor.workflowRunsSince case final since?)
+          'created': '>=${since.toUtc().toIso8601String()}',
+      },
+      headers: <String, String>{
+        if (cursor.etags[key] case final etag?) 'If-None-Match': etag,
+      },
+    );
+    if (response.statusCode == 304) return cursor;
+    _requireSuccess(key, response.statusCode);
+    final firstPageEtag = response.header('etag');
+    var next = cursor;
+    var mark = cursor.workflowRunsSince?.toUtc();
+    while (true) {
+      final page = await _runsPage(next, _runRows(response.body, key), mark);
+      next = page.cursor;
+      mark = page.latest;
+      final nextPage = nextGitHubPageUri(response.header('link'));
+      if (nextPage == null) break;
+      response = await _client.send(
+        method: 'GET',
+        path: nextPage.path,
+        queryParameters: nextPage.queryParameters,
+      );
+      _requireSuccess(key, response.statusCode);
+    }
+    final etags = <String, String>{...next.etags};
+    if (firstPageEtag != null) etags[key] = firstPageEtag;
+    final saved = next.copyWith(workflowRunsSince: mark, etags: etags);
+    await _cursors.save(saved);
+    return saved;
+  }
+
+  /// Examines one page of workflow-run rows, delivering its events and
+  /// returning the cursor plus the greatest `created_at` seen so far.
+  ///
+  /// A malformed row rides the SAME reporter a malformed intake row does: one
+  /// bad row is skipped and named, never allowed to wedge the leg.
+  Future<({GitHubReconcilerCursor cursor, DateTime? latest})> _runsPage(
+    GitHubReconcilerCursor cursor,
+    List<Object?> rows,
+    DateTime? latest,
+  ) async {
+    var next = cursor;
+    var mark = latest;
+    final events = <NormalizedGitHubEvent>[];
+    for (final raw in rows) {
+      try {
+        final row = _map(raw, 'workflow_run');
+        final created = _date(_string(row, 'created_at'), 'created_at');
+        if (mark == null || created.isAfter(mark)) mark = created;
+        final conclusion = _nullableString(row, 'conclusion');
+        if (conclusion == null) continue;
+        final nodeId = _string(row, 'node_id');
+        final updatedText = _string(row, 'updated_at');
+        final observationId = 'poll:run:$nodeId:$updatedText:$conclusion';
+        // The `created>=` window is INCLUSIVE and a nightly stays inside it
+        // all day, so a claimed run is dropped HERE — before its jobs request
+        // — rather than by `_deliver` after one has been spent on it.
+        if (next.hasObserved(observationId)) continue;
+        // A fork's run executes contributor-authored workflow code, so it is
+        // never the seat's own authority however well it matches.
+        final head = _string(
+          _nestedMap(row, 'head_repository'),
+          'full_name',
+          prefix: 'head_repository',
+        );
+        if (head != '$owner/$repository') continue;
+        final workflowPath = _string(row, 'path');
+        final event = _string(row, 'event');
+        final headBranch = _string(row, 'head_branch');
+        final rule = matchWorkflowRunRule(
+          workflowRuns,
+          workflowPath: workflowPath,
+          event: event,
+          headBranch: headBranch,
+          conclusion: conclusion,
+          defaultBranch: defaultBranch,
+        );
+        if (rule == null) continue;
+        final runId = _integer(row, 'id');
+        events.add(
+          NormalizedGitHubEvent.workflowRunConcluded(
+            nodeId: nodeId,
+            actor: '$owner/$repository',
+            repository: '$owner/$repository',
+            substation: substation,
+            observationId: observationId,
+            runId: runId,
+            runNumber: _integer(row, 'run_number'),
+            workflowPath: workflowPath,
+            workflowName: _string(row, 'name'),
+            event: event,
+            headBranch: headBranch,
+            headSha: _string(row, 'head_sha'),
+            conclusion: conclusion,
+            htmlUrl: _string(row, 'html_url'),
+            failedJobs: await _failedJobs(runId),
+          ),
+        );
+      } on FormatException catch (error, stackTrace) {
+        _reportIntakeRowError(error, stackTrace);
+      }
+    }
+    return (cursor: await _deliver(next, events), latest: mark);
+  }
+
+  /// The jobs of run [runId] that did NOT succeed, with the first step each
+  /// failed on.
+  ///
+  /// `filter=latest` keeps re-run history out: what the bead must name is the
+  /// attempt that is red NOW.
+  Future<List<WorkflowRunFailedJob>> _failedJobs(int runId) async {
+    final key = 'intake/workflow-run-jobs/$runId';
+    var response = await _client.send(
+      method: 'GET',
+      path: '/repos/$owner/$repository/actions/runs/$runId/jobs',
+      queryParameters: const <String, String>{
+        'filter': 'latest',
+        'per_page': '100',
+      },
+    );
+    _requireSuccess(key, response.statusCode);
+    final failed = <WorkflowRunFailedJob>[];
+    while (true) {
+      final page = _map(_decoded(response.body, key), key);
+      final jobs = page['jobs'];
+      if (jobs is! List) throw const FormatException('jobs must be a list');
+      for (final raw in jobs) {
+        final job = _map(raw, 'job');
+        if (!_failedConclusions.contains(_nullableString(job, 'conclusion'))) {
+          continue;
+        }
+        failed.add(
+          WorkflowRunFailedJob(
+            jobName: _string(job, 'name'),
+            failedStepName: _firstFailedStep(job),
+          ),
+        );
+      }
+      final nextPage = nextGitHubPageUri(response.header('link'));
+      if (nextPage == null) return failed;
+      response = await _client.send(
+        method: 'GET',
+        path: nextPage.path,
+        queryParameters: nextPage.queryParameters,
+      );
+      _requireSuccess(key, response.statusCode);
+    }
+  }
+
+  /// The first step of [job] that failed or timed out, or null when GitHub
+  /// reported none — a job killed before a step ran has no step to name.
+  String? _firstFailedStep(Map<String, Object?> job) {
+    final steps = job['steps'];
+    if (steps is! List) return null;
+    for (final raw in steps) {
+      final step = _map(raw, 'step');
+      if (_failedConclusions.contains(_nullableString(step, 'conclusion'))) {
+        return _string(step, 'name');
+      }
+    }
+    return null;
+  }
+
   Future<GitHubReconcilerCursor> _deliver(
     GitHubReconcilerCursor cursor,
     Iterable<NormalizedGitHubEvent> events,
@@ -437,6 +641,16 @@ Object? _decoded(String body, String endpoint) {
   } on FormatException catch (error) {
     throw FormatException('$endpoint contains malformed JSON', error);
   }
+}
+
+/// The `workflow_runs` array of one `/actions/runs` page.
+List<Object?> _runRows(String body, String endpoint) {
+  final page = _map(_decoded(body, endpoint), endpoint);
+  final rows = page['workflow_runs'];
+  if (rows is! List) {
+    throw const FormatException('workflow_runs must be a list');
+  }
+  return rows.cast<Object?>();
 }
 
 List<Object?> _list(String body, String endpoint) {

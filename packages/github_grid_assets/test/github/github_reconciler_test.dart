@@ -71,6 +71,33 @@ Future<Map<String, Object?>> _pullResource() async =>
     jsonDecode(await File('test/fixtures/pull_resource.json').readAsString())
         as Map<String, Object?>;
 
+/// The recorded `/actions/runs?status=completed` page: one matching nightly
+/// failure, one failure of an undeclared workflow, one fork-head run, and one
+/// green run.
+Future<Map<String, Object?>> _runsPage() async =>
+    jsonDecode(
+          await File('test/fixtures/actions_runs_page.json').readAsString(),
+        )
+        as Map<String, Object?>;
+
+/// The recorded `/actions/runs/<id>/jobs?filter=latest` page.
+Future<Map<String, Object?>> _jobsPage() async =>
+    jsonDecode(
+          await File('test/fixtures/actions_run_jobs_page.json').readAsString(),
+        )
+        as Map<String, Object?>;
+
+/// The seat's own nightly rule: `ci.yaml`, scheduled or dispatched, on the
+/// default branch, red or timed out.
+WorkflowRunIntakeRule _nightlyRule({int priority = 1, bool approve = true}) =>
+    WorkflowRunIntakeRule(
+      workflowPath: '.github/workflows/ci.yaml',
+      validationPlan: 'dart test',
+      events: const {'schedule', 'workflow_dispatch'},
+      priority: priority,
+      approve: approve,
+    );
+
 Map<String, Object?> _issue({
   bool pull = false,
   String state = 'open',
@@ -565,6 +592,259 @@ void main() {
     expect(store.cursor.etags['feedback/pulls'], '"pulls"');
     expect(transport.requests, hasLength(3));
     expect(transport.requests.last.uri.path, contains('a%2Fb/check-runs'));
+  });
+
+  group('workflow run', () {
+    test('default config is feature-off and never asks for runs', () async {
+      final transport = FakeGitHubHttpTransport()
+        ..responses.addAll(<GitHubHttpResponse>[
+          _response(const <Object?>[], etag: '"issues"'),
+          _response(const <Object?>[], etag: '"pulls"'),
+        ]);
+      final store = FakeGitHubCursorStore();
+      await GitHubReconciler(
+        owner: 'memento',
+        repository: 'power',
+        substation: 's',
+        client: _client(transport),
+        cursors: store,
+        emit: (_) async {},
+      ).reconcileOnce();
+
+      expect(transport.requests, hasLength(2));
+      expect(
+        transport.requests.map((request) => request.uri.path),
+        everyElement(isNot(contains('/actions/'))),
+      );
+      expect(store.cursor.workflowRunsSince, isNull);
+      expect(store.cursor.etags, isNot(contains('intake/workflow-runs')));
+    });
+
+    test('a matching failure emits once with its failed jobs', () async {
+      final transport = FakeGitHubHttpTransport()
+        ..responses.addAll(<GitHubHttpResponse>[
+          _response(const <Object?>[], etag: '"issues"'),
+          _response(const <Object?>[], etag: '"pulls"'),
+          _response(await _runsPage(), etag: '"runs"'),
+          _response(await _jobsPage()),
+        ]);
+      final store = FakeGitHubCursorStore();
+      final events = <NormalizedGitHubEvent>[];
+      await GitHubReconciler(
+        owner: 'memento',
+        repository: 'power',
+        substation: 'seat',
+        client: _client(transport),
+        cursors: store,
+        emit: (event) async => events.add(event),
+        workflowRuns: [_nightlyRule()],
+      ).reconcileOnce();
+
+      final run = events.single as WorkflowRunConcluded;
+      expect(run.nodeId, 'WFR_NIGHTLY');
+      expect(run.runId, 9001);
+      expect(run.runNumber, 128);
+      expect(run.workflowPath, '.github/workflows/ci.yaml');
+      expect(run.workflowName, 'CI');
+      expect(run.event, 'schedule');
+      expect(run.headBranch, 'main');
+      expect(run.conclusion, 'failure');
+      expect(run.substation, 'seat');
+      expect(run.actor, 'memento/power');
+      expect(run.repository, 'memento/power');
+      expect(
+        run.observationId,
+        'poll:run:WFR_NIGHTLY:2026-09-07T06:11:00Z:failure',
+      );
+      expect(
+        run.failedJobs.map((job) => job.jobName),
+        ['test', 'integration', 'cancelled-before-any-step'],
+        reason: 'a green job is not a failed job',
+      );
+      expect(run.failedJobs[0].failedStepName, 'dart test');
+      expect(
+        run.failedJobs[1].failedStepName,
+        isNull,
+        reason: 'no step of the timed-out job itself failed',
+      );
+      expect(run.failedJobs[2].failedStepName, isNull);
+    });
+
+    test('non-matching and fork-head rows never cost a jobs request', () async {
+      final transport = FakeGitHubHttpTransport()
+        ..responses.addAll(<GitHubHttpResponse>[
+          _response(const <Object?>[], etag: '"issues"'),
+          _response(const <Object?>[], etag: '"pulls"'),
+          _response(await _runsPage(), etag: '"runs"'),
+          _response(await _jobsPage()),
+        ]);
+      await GitHubReconciler(
+        owner: 'memento',
+        repository: 'power',
+        substation: 'seat',
+        client: _client(transport),
+        cursors: FakeGitHubCursorStore(),
+        emit: (_) async {},
+        workflowRuns: [_nightlyRule()],
+      ).reconcileOnce();
+
+      final jobs = transport.requests
+          .where((request) => request.uri.path.endsWith('/jobs'))
+          .toList();
+      expect(jobs, hasLength(1));
+      expect(jobs.single.uri.path, endsWith('/actions/runs/9001/jobs'));
+      expect(jobs.single.uri.queryParameters['filter'], 'latest');
+      for (final rejected in ['9002', '9003', '9004']) {
+        expect(
+          transport.requests.where(
+            (request) => request.uri.path.contains('/runs/$rejected/'),
+          ),
+          isEmpty,
+          reason: 'run $rejected matched no rule or came from a fork',
+        );
+      }
+    });
+
+    test('the window, the etag and the claim are all persisted', () async {
+      final transport = FakeGitHubHttpTransport()
+        ..responses.addAll(<GitHubHttpResponse>[
+          _response(const <Object?>[], etag: '"issues"'),
+          _response(const <Object?>[], etag: '"pulls"'),
+          _response(await _runsPage(), etag: '"runs"'),
+          _response(await _jobsPage()),
+        ]);
+      final store = FakeGitHubCursorStore();
+      await GitHubReconciler(
+        owner: 'memento',
+        repository: 'power',
+        substation: 'seat',
+        client: _client(transport),
+        cursors: store,
+        emit: (_) async {},
+        workflowRuns: [_nightlyRule()],
+      ).reconcileOnce();
+
+      expect(store.cursor.etags['intake/workflow-runs'], '"runs"');
+      expect(
+        store.cursor.workflowRunsSince,
+        DateTime.parse('2026-09-08T06:00:00Z'),
+        reason: 'the greatest created_at on the page, matching or not',
+      );
+      expect(
+        store.cursor.hasObserved(
+          'poll:run:WFR_NIGHTLY:2026-09-07T06:11:00Z:failure',
+        ),
+        isTrue,
+      );
+      expect(store.cursor.pending, isEmpty);
+
+      final runsRequest = transport.requests.firstWhere(
+        (request) => request.uri.path.endsWith('/actions/runs'),
+      );
+      expect(runsRequest.uri.queryParameters['status'], 'completed');
+      expect(runsRequest.uri.queryParameters['per_page'], '50');
+      expect(
+        runsRequest.uri.queryParameters,
+        isNot(contains('created')),
+        reason: 'a first poll has no window to narrow',
+      );
+    });
+
+    test(
+      'a claimed run is re-read inside the window and never re-fetched',
+      () async {
+        final transport = FakeGitHubHttpTransport()
+          ..responses.addAll(<GitHubHttpResponse>[
+            _response(const <Object?>[], etag: '"issues"'),
+            _response(const <Object?>[], etag: '"pulls"'),
+            _response(await _runsPage(), etag: '"runs2"'),
+          ]);
+        final store = FakeGitHubCursorStore(
+          GitHubReconcilerCursor(
+            workflowRunsSince: DateTime.parse('2026-09-07T06:00:00Z'),
+            observationIds: const <String>[
+              'poll:run:WFR_NIGHTLY:2026-09-07T06:11:00Z:failure',
+            ],
+          ),
+        );
+        final events = <NormalizedGitHubEvent>[];
+        await GitHubReconciler(
+          owner: 'memento',
+          repository: 'power',
+          substation: 'seat',
+          client: _client(transport),
+          cursors: store,
+          emit: (event) async => events.add(event),
+          workflowRuns: [_nightlyRule()],
+        ).reconcileOnce();
+
+        expect(events, isEmpty);
+        expect(
+          transport.requests.where(
+            (request) => request.uri.path.endsWith('/jobs'),
+          ),
+          isEmpty,
+          reason: 'an already-claimed run is dropped BEFORE its jobs request',
+        );
+        final runsRequest = transport.requests.firstWhere(
+          (request) => request.uri.path.endsWith('/actions/runs'),
+        );
+        expect(
+          runsRequest.uri.queryParameters['created'],
+          '>=2026-09-07T06:00:00.000Z',
+        );
+      },
+    );
+
+    test('a 304 on the runs endpoint costs nothing further', () async {
+      final transport = FakeGitHubHttpTransport()
+        ..responses.addAll(<GitHubHttpResponse>[
+          _response(const <Object?>[], etag: '"issues"'),
+          _response(const <Object?>[], etag: '"pulls"'),
+          _response('', status: 304),
+        ]);
+      final events = <NormalizedGitHubEvent>[];
+      await GitHubReconciler(
+        owner: 'memento',
+        repository: 'power',
+        substation: 'seat',
+        client: _client(transport),
+        cursors: FakeGitHubCursorStore(
+          const GitHubReconcilerCursor(
+            etags: <String, String>{'intake/workflow-runs': '"runs"'},
+          ),
+        ),
+        emit: (event) async => events.add(event),
+        workflowRuns: [_nightlyRule()],
+      ).reconcileOnce();
+
+      expect(events, isEmpty);
+      expect(transport.requests, hasLength(3));
+      expect(transport.requests.last.headers['If-None-Match'], '"runs"');
+    });
+
+    test('a rule declaring a non-default branch never matches main', () async {
+      final transport = FakeGitHubHttpTransport()
+        ..responses.addAll(<GitHubHttpResponse>[
+          _response(const <Object?>[], etag: '"issues"'),
+          _response(const <Object?>[], etag: '"pulls"'),
+          _response(await _runsPage(), etag: '"runs"'),
+        ]);
+      final events = <NormalizedGitHubEvent>[];
+      await GitHubReconciler(
+        owner: 'memento',
+        repository: 'power',
+        substation: 'seat',
+        client: _client(transport),
+        cursors: FakeGitHubCursorStore(),
+        emit: (event) async => events.add(event),
+        defaultBranch: 'release',
+        workflowRuns: [_nightlyRule()],
+      ).reconcileOnce();
+
+      expect(events, isEmpty);
+      expect(transport.requests, hasLength(3));
+    });
   });
 
   test(
