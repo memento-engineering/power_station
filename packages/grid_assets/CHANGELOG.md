@@ -1,3 +1,11 @@
+## 0.6.0-rc.24
+
+- Added: the specify capability stamps `spec.author = specify` on the spec it authors through `writeSpecifyAuthoredSpec` (the grid_runtime rc.19 chokepoint), so a rework re-authors specify text while preserving hand-written and governor-restored `design` / `acceptance_criteria` (pow-m8v5, #279; closes the loop opened by the_grid#390).
+- Added: `park` and `unpark` filing verbs that reclaim a stalled session slot in one command, composed over the engine `voidRetireMetadata` and liveness seams with a marker-based park predicate (pow-6fqs, #280).
+- Added: `seat succession`, the safe handoff-consumption verb (pow-s2sk, #276).
+- Fixed: the asset generator normalizes generated Dart with the SDK `dart format` executable instead of the consuming workspace resolved `dart_style`, so `--check` and `dart format --set-exit-if-changed` agree (pow-5ifa, #277).
+- Changed: floors `grid_runtime` at `^0.2.0-rc.19` and `grid_sdk` at `^0.3.0-rc.22`.
+
 ## 0.6.0-rc.23
 
 - Fixed: a decision-surface record is TRUNCATED only when its entry SET was clipped at `kMaxDecisionEntriesPerSurface` or a named entry failed to resolve; a decision doc over `kMaxDiscoverySnippetChars` keeps its own truncated state on the entry body and no longer fails the whole surface. With rc.22's register-wide resolution, 49 of 125 the_grid and 48 of 87 power_station decision docs are over the bound, so every spec round on those registers held at discovery with no narrow exit (lunar epoch 60: tg-nidl r3) (pow-jidn, #270).
