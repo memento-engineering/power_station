@@ -181,9 +181,13 @@ void main() {
 
     // The help documents the GRID HOME, and both accepted forms land on the
     // same `.grid` state store — so the documented value is the working one.
+    // It names the home rather than either store because BOTH kinds of state
+    // bead live under it: the link beads these two verbs read, and the
+    // session-lifecycle beads `park`/`unpark` close and retire.
     expect(
       kStateRootHelp,
-      'The grid home whose .grid/.beads holds the cross-store link beads.',
+      'The grid home whose .grid/.beads holds the cross-store link and '
+      'session-lifecycle state beads.',
     );
     final home = _gridHome();
     final store = p.join(home, '.grid');
