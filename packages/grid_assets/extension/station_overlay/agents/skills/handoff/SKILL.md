@@ -71,10 +71,15 @@ successor's wasted hour:
    agent-initiated, with the reason), and one sentence: what the successor is
    being brought back to do.
 2. **Rulings** — what the human decided this session, and WHERE each one is
-   encoded: bead id, dep edge, register entry, disc note. A ruling recorded
+   encoded: bead id WITH its title, dep edge, register entry (slug and title),
+   disc note. A ruling recorded
    nowhere else dies with this file.
-3. **Board state** — a table of ids by store with state, ONE line each, names
-   not just slugs. Read it, never remember it:
+3. **Board state** — a table of ids by store with state, ONE line each, and
+   the bead TITLE next to every id (`lenny-96sa — leonard_grid_assets: convert
+   the sample suite …`), never the id or slug alone: the successor and the
+   human read this on a phone and cannot open a store to decode an id. Gates
+   name the bead they block by id and title; decisions name the entry title
+   next to the slug. Read it, never remember it:
    `{{runner}} status --state-workspace <grid home>`, then
    `bd -C <store root> list --status=in_progress`.
 4. **In flight** — what is hot and why, plus the resources SETTLE named: the
