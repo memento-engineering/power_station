@@ -612,6 +612,12 @@ class AgentCapability extends ProcessCapability {
 /// the repo. (What agents write today — `feat(scope): <bead> — …` — is the exact
 /// anti-pattern.)
 ///
+/// The agreement also carries the **vended-reachability rule**: a command, a
+/// skill, or any other vended asset is not DONE until a real runner or install
+/// path can reach it, and the acceptance criteria have to prove that reachable
+/// surface rather than the artifact's mere existence (ADR-0001's `addCommand`
+/// composition is the canonical last mile).
+///
 /// [skills] are the vended skill ids the provision wire actually materialized
 /// into this worktree's `.claude/skills/` ([AgentCapability], bead `pow-kzx`).
 /// The agreement NAMES them, because a print-mode `claude -p` selects no skill
@@ -661,6 +667,12 @@ AgentBrief buildAgentBrief(
       'for this bead.',
     )
     ..writeln('- Implement the task and COMMIT your work on that branch.')
+    ..writeln(
+      '- A command, skill, or other VENDED asset is DONE only when a real '
+      'runner or install path makes it REACHABLE; acceptance criteria must '
+      'prove that reachability (a human can invoke a command), not merely '
+      'artifact existence.',
+    )
     ..writeln(
       '- Before you commit, run `dart format` on every changed Dart file; the '
       'review circuit refuses an unformatted diff.',

@@ -254,6 +254,31 @@ void main() {
       );
     });
 
+    test('the build brief makes vended commands and assets reachable before '
+        'DONE in one short rule', () {
+      // THE FAILURE (2026-09-10, power_station#276): a build agent added a
+      // `succession` verb to the seat asset and taught the vended /handoff
+      // skill to call it, then closed clean and green — nothing ever composed
+      // the command into a station runner, so every seat on every station was
+      // instructed to run a first step that could not run. The bead's
+      // acceptance covered the ASSET and the vended prose; no criterion named
+      // the last-mile composition. Same shape for a pack that vends a skill
+      // nothing installs. Static text — no bead/path interpolation, so the Q3′
+      // reference-inflation fence is untouched.
+      const rule =
+          '- A command, skill, or other VENDED asset is DONE only when a real '
+          'runner or install path makes it REACHABLE; acceptance criteria must '
+          'prove that reachability (a human can invoke a command), not merely '
+          'artifact existence.';
+      expect(rule, isNot(contains('\n')));
+      final rendered = buildAgentBrief(bead('tg-1'), _workspace()).render();
+      expect(rule.allMatches(rendered), hasLength(1));
+      // The brief is read on EVERY round, so its cost is per-round tokens: the
+      // rule is one bullet, never a section.
+      final baseline = rendered.replaceFirst('$rule\n', '');
+      expect(rendered.length - baseline.length, lessThanOrEqualTo(224));
+    });
+
     test('a station\'s trailer token flows into the brief', () {
       final brief = buildAgentBrief(
         bead('tg-1'),
