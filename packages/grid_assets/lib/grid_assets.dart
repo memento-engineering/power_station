@@ -74,6 +74,25 @@
 /// ([kUnconsultedCrossStoreDetail]) rather than calling the unread edge
 /// missing.
 ///
+/// The PARK PAIR rides that same seam, one rung further in: it is the
+/// operator's sanctioned exit for a session the engine's own writers can no
+/// longer reach. [ParkCommand] absorbs the five-step hand ritual — note,
+/// unstamp, defer, close, void-retire — across the two stores A37 separates,
+/// and [UnparkCommand] undoes it by clearing the defer DATE through
+/// `bd undefer` and then CALLING [ApproveService] for the re-stamp rather than
+/// re-expressing the preflight. [ParkService] is guarded on both sides: it
+/// ADMITS only on a durable park marker (an open `gate` bead blocking the
+/// session, or `grid.session.pause_state=paused` — [ParkMarker]), never on
+/// worktree staleness, which is collected as [WorktreeActivity] corroboration
+/// and reported in every receipt and refusal; and it REFUSES on a still-LIVE
+/// process fence, probed for MEMBERS (not a leader bool) through the
+/// `ProcessGroupController` seam, so a dead leader over live descendants reads
+/// live ([FenceLiveness]). `--override-live` waives only that second guard and
+/// prints what it waived. The retired join key is never composed here — the
+/// session update writes exactly what `voidRetireMetadata` returns, so a park
+/// receipt is indistinguishable in SHAPE from the engine's own void retire.
+/// A composing station adds both beside `filing` and `approve`.
+///
 /// The SEAT command set makes an operator seat OCCUPIABLE with its own disc
 /// (bead `pow-lv6t`): [PrimeCommand] is the grid's own SessionStart hook
 /// target — it echoes `bd prime` and injects only the seat's newest handoff —
@@ -227,6 +246,7 @@ export 'src/filing/approval_stamp.dart';
 export 'src/filing/approve_command.dart';
 export 'src/filing/filing_command.dart';
 export 'src/filing/filing_contract.dart';
+export 'src/filing/park_command.dart';
 export 'src/filing/state_root_option.dart';
 export 'src/io/recorded_artifact.dart';
 export 'src/lease/bus_lease.dart';

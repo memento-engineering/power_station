@@ -3,12 +3,18 @@ import 'dart:io';
 import 'package:args/args.dart';
 import 'package:path/path.dart' as p;
 
-/// The ONE `--state-root` option name both filing verbs expose.
+/// The ONE `--state-root` option name every filing verb exposes.
 const String kStateRootOption = 'state-root';
 
-/// The ONE help line both verbs print for [kStateRootOption].
+/// The ONE help line every verb prints for [kStateRootOption].
+///
+/// It names the GRID HOME rather than a store because that home is where BOTH
+/// kinds of state bead the filing verbs need live: the cross-store LINK beads
+/// `filing`/`approve` read, and the SESSION-LIFECYCLE beads `park`/`unpark`
+/// close and retire. One home, one option, one resolution.
 const String kStateRootHelp =
-    'The grid home whose .grid/.beads holds the cross-store link beads.';
+    'The grid home whose .grid/.beads holds the cross-store link and '
+    'session-lifecycle state beads.';
 
 /// The state-store directory a grid home holds — the child [resolveStateRoot]
 /// appends so the documented grid home reaches the link beads.
@@ -19,10 +25,11 @@ const String _stateStoreDir = '.grid';
 const String _beadsDir = '.beads';
 
 /// The default injected state root: NONE. Until a station threads its grid
-/// home in, only local `blocks` edges count as wiring.
+/// home in, only local `blocks` edges count as wiring — and the verbs that
+/// REQUIRE the home (`park`) refuse rather than guess at one.
 String? noStateRoot() => null;
 
-/// Registers [kStateRootOption] on [parser] — the seam both verbs ride so the
+/// Registers [kStateRootOption] on [parser] — the seam every verb rides so the
 /// option name and its help cannot drift apart between them.
 void addStateRootOption(ArgParser parser) =>
     parser.addOption(kStateRootOption, help: kStateRootHelp);
