@@ -39,14 +39,27 @@ pub.dev yet, runs every gate, validates the consumers a direct stable wave owes,
 then cuts and pushes one `<package>-v<version>` tag per package in dependency
 order — and the tag-triggered publish workflow does the upload.
 
+A release moves on two independent axes: `--change` is the semver move
+(`docs`/`additive`/`fix`/`breaking`) and `--rung` is the prerelease rung
+(`stable`/`dev`/`beta`/`rc`), which belongs to each PACKAGE rather than to the
+wave — omit it and each package's rung is read off its authored version, so a
+mixed `dev`/`beta` wave is fine.
+
 ```sh
 dart run melos run release -- --change fix --consumers <manifest.json>
 dart run melos run release -- --change fix --consumers <manifest.json> --dry-run
-dart run melos run release -- --change rc
+dart run melos run release -- --change breaking --rung dev
+dart run melos run release -- --change breaking --rung beta
+dart run melos run release -- --change breaking --rung rc --promotion-intent
 ```
 
+Breaking work enters the ladder at `dev` and walks to `beta` unattended;
+**only a human sets `rc`**, which is why that rung needs `--promotion-intent`
+(`--change rc --promotion-intent` is the compatibility spelling of the last
+line). A stable release still passes every consumer first.
+
 See `packages/dart_grid_assets/README.md` for the wave's stages, the consumers
-manifest shape, and why a breaking change is refused here.
+manifest shape, and why a breaking STABLE release is refused here.
 
 ## Sibling repositories
 

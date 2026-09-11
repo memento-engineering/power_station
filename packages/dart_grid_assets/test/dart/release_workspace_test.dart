@@ -132,7 +132,39 @@ HttpFetch _fixResponder(String package, int attempt) => switch (package) {
   _ => throw StateError('unexpected pub.dev poll for $package'),
 };
 
-/// The all-green candidate (`--change rc`) pub.dev script.
+/// The all-green DEV-rung pub.dev script: both predecessors are stable, so a
+/// breaking move enters the ladder at `dev.1`.
+HttpFetch _devResponder(String package, int attempt) => switch (package) {
+  'wave_base' =>
+    attempt == 0
+        ? _listing(const ['0.1.4'])
+        : _listing(const ['0.1.4', '0.2.0-dev.1']),
+  'wave_middle' =>
+    attempt == 0
+        ? _listing(const ['0.2.3'])
+        : _listing(const ['0.2.3', '0.3.0-dev.1']),
+  'wave_leaf' => attempt == 0 ? _unpublished : _listing(const ['0.1.0-dev.1']),
+  'wave_settled' => _listing(const ['0.1.0']),
+  _ => throw StateError('unexpected pub.dev poll for $package'),
+};
+
+/// A MIXED-rung pub.dev script: `wave_base` has already walked to `beta` off
+/// its own `dev.2`, while `wave_middle` is still entering at `dev.1`.
+HttpFetch _mixedRungResponder(String package, int attempt) => switch (package) {
+  'wave_base' =>
+    attempt == 0
+        ? _listing(const ['0.1.4', '0.2.0-dev.2'])
+        : _listing(const ['0.1.4', '0.2.0-dev.2', '0.2.0-beta.1']),
+  'wave_middle' =>
+    attempt == 0
+        ? _listing(const ['0.2.3'])
+        : _listing(const ['0.2.3', '0.3.0-dev.1']),
+  'wave_leaf' => _listing(const ['0.3.2']),
+  'wave_settled' => _listing(const ['0.1.0']),
+  _ => throw StateError('unexpected pub.dev poll for $package'),
+};
+
+/// An RC pub.dev script — the rung only a declared human intent admits.
 HttpFetch _rcResponder(String package, int attempt) => switch (package) {
   'wave_base' =>
     attempt == 0
@@ -302,6 +334,8 @@ class _RecordingReleaseService extends ReleaseService {
         ({
           String workspaceRoot,
           ReleaseChange change,
+          ReleaseRung? rung,
+          bool promotionIntent,
           List<ReleaseConsumer> consumers,
           bool dryRunOnly,
         })
@@ -311,6 +345,8 @@ class _RecordingReleaseService extends ReleaseService {
   Future<ReleaseWavePlan> publishWorkspace({
     required String workspaceRoot,
     required ReleaseChange change,
+    ReleaseRung? rung,
+    bool promotionIntent = false,
     List<ReleaseConsumer> consumers = const [],
     bool dryRunOnly = false,
     Duration pollInterval = const Duration(seconds: 5),
@@ -319,6 +355,8 @@ class _RecordingReleaseService extends ReleaseService {
     calls.add((
       workspaceRoot: workspaceRoot,
       change: change,
+      rung: rung,
+      promotionIntent: promotionIntent,
       consumers: consumers,
       dryRunOnly: dryRunOnly,
     ));
@@ -382,6 +420,12 @@ void main() {
             reason: 'an out-of-wave dep (path) is not an edge',
           );
           expect(plan.change, ReleaseChange.fix);
+          expect(
+            plan.packages.map((package) => package.rung),
+            everyElement(ReleaseRung.stable),
+            reason: 'no authored version carries a prerelease identifier',
+          );
+          expect(plan.promotionIntent, isFalse);
           expect(plan.dryRun, isFalse);
           expect(plan.workspaceRoot, p.normalize(harness.root.path));
 
@@ -456,7 +500,10 @@ void main() {
               _stoppedAt(
                 'discovery',
                 package: 'wave_base',
-                message: allOf(contains('0.1.5'), contains('--change fix')),
+                message: allOf(
+                  contains('0.1.5'),
+                  contains('--change fix --rung stable'),
+                ),
               ),
             ),
           );
@@ -486,7 +533,7 @@ void main() {
       });
 
       test(
-        'a pre-release authored as a stable first release refuses',
+        'an inferred rc first release refuses without declared intent',
         () async {
           final harness = _harness(leaf: '0.3.2-rc.1');
           await expectLater(
@@ -499,12 +546,36 @@ void main() {
               _stoppedAt(
                 'discovery',
                 package: 'wave_leaf',
-                message: contains('0.3.2-rc.1'),
+                message: allOf(
+                  contains('0.3.2-rc.1'),
+                  contains('rc means a human has declared intent to promote'),
+                ),
               ),
             ),
           );
         },
       );
+
+      test('a version on no supported rung refuses LOUDLY', () async {
+        final harness = _harness(leaf: '0.3.2-alpha.1');
+        await expectLater(
+          harness.service.publishWorkspace(
+            workspaceRoot: harness.root.path,
+            change: ReleaseChange.fix,
+            consumers: [_consumerAt(harness.consumer)],
+          ),
+          throwsA(
+            _stoppedAt(
+              'discovery',
+              package: 'wave_leaf',
+              message: allOf(
+                contains('0.3.2-alpha.1'),
+                contains('<dev|beta|rc>'),
+              ),
+            ),
+          ),
+        );
+      });
 
       test('a root that declares no workspace refuses LOUDLY', () async {
         final root = Directory.systemTemp.createTempSync('release-no-wave-');
@@ -515,7 +586,7 @@ void main() {
         await expectLater(
           const ReleaseService().publishWorkspace(
             workspaceRoot: root.path,
-            change: ReleaseChange.rc,
+            change: ReleaseChange.fix,
           ),
           throwsA(
             _stoppedAt(
@@ -713,98 +784,259 @@ void main() {
     });
   });
 
-  group('breaking waves are refused through the rc path', () {
-    test(
-      'breaking refuses before filesystem, process or network work',
-      () async {
-        final timeline = <String>[];
-        final process = _FakeProcess(timeline: timeline);
-        final pubDev = _FakePubDev(
-          timeline: timeline,
-          responder: (package, attempt) =>
-              throw StateError('unexpected poll for $package'),
-        );
-        await expectLater(
-          ReleaseService(
-            runProcess: process.call,
-            httpGet: pubDev.call,
-          ).publishWorkspace(
-            workspaceRoot: '/no/such/workspace',
-            change: ReleaseChange.breaking,
-          ),
-          throwsA(
-            _stoppedAt(
-              'plan',
-              package: null,
-              message: allOf(
-                contains('--change rc'),
-                contains('validate-consumers'),
-                contains('promote'),
-              ),
-            ),
-          ),
-        );
-        expect(timeline, isEmpty);
-      },
-    );
+  // Breaking work is agent work BELOW rc: it enters the ladder at dev, may
+  // occupy beta, and reaches rc only on a declared human intent. The rung is a
+  // property of each PACKAGE, so a wave carries a mix of them.
+  group('breaking prerelease rungs and promotion intent', () {
+    test('breaking dev and beta publish without promotion intent', () async {
+      final harness = _harness(
+        responder: _devResponder,
+        base: '0.2.0-dev.1',
+        middle: '0.3.0-dev.1',
+        leaf: '0.1.0-dev.1',
+      );
+      final plan = await harness.service.publishWorkspace(
+        workspaceRoot: harness.root.path,
+        change: ReleaseChange.breaking,
+        pollInterval: Duration.zero,
+      );
 
-    test(
-      'an rc wave cuts prerelease tags and skips consumer validation',
-      () async {
-        final harness = _harness(
-          responder: _rcResponder,
-          base: '0.2.0-rc.1',
-          middle: '0.3.0-rc.1',
-          leaf: '0.1.0-rc.1',
-        );
-        final plan = await harness.service.publishWorkspace(
-          workspaceRoot: harness.root.path,
-          change: ReleaseChange.rc,
-          pollInterval: Duration.zero,
-        );
+      expect(plan.packages.map((package) => package.tag), [
+        'wave_base-v0.2.0-dev.1',
+        'wave_middle-v0.3.0-dev.1',
+        'wave_leaf-v0.1.0-dev.1',
+      ]);
+      expect(
+        plan.packages.map((package) => package.rung),
+        everyElement(ReleaseRung.dev),
+      );
+      expect(
+        plan.packages.map(
+          (package) => package.publishedPredecessor?.toString(),
+        ),
+        ['0.1.4', '0.2.3', null],
+        reason:
+            'wave_leaf is a first release authored straight onto the ladder',
+      );
+      expect(plan.promotionIntent, isFalse);
+      expect(
+        harness.timeline,
+        isNot(contains('git rev-parse HEAD')),
+        reason: 'a prerelease wave is cut first; the separate ops gate it',
+      );
+      expect(
+        harness.process.calls.where(
+          (call) => call.workingDirectory == harness.consumer.path,
+        ),
+        isEmpty,
+      );
 
-        expect(plan.packages.map((package) => package.tag), [
-          'wave_base-v0.2.0-rc.1',
-          'wave_middle-v0.3.0-rc.1',
-          'wave_leaf-v0.1.0-rc.1',
-        ]);
-        expect(
-          plan.packages.map(
-            (package) => package.publishedPredecessor?.toString(),
-          ),
-          ['0.1.4', '0.2.3', null],
-        );
-        expect(
-          harness.timeline,
-          isNot(contains('git rev-parse HEAD')),
-          reason: 'the candidate is cut first; the separate ops carry its gate',
-        );
-        expect(
-          harness.process.calls.where(
-            (call) => call.workingDirectory == harness.consumer.path,
-          ),
-          isEmpty,
-        );
-      },
-    );
+      // The same wave one rung up, requested explicitly and still unattended.
+      final beta = _harness(
+        responder: (package, attempt) => switch (package) {
+          'wave_base' =>
+            attempt == 0
+                ? _listing(const ['0.1.4', '0.2.0-dev.2'])
+                : _listing(const ['0.1.4', '0.2.0-dev.2', '0.2.0-beta.1']),
+          'wave_middle' => _listing(const ['0.2.4']),
+          'wave_leaf' => _listing(const ['0.3.2']),
+          'wave_settled' => _listing(const ['0.1.0']),
+          _ => throw StateError('unexpected poll for $package'),
+        },
+        base: '0.2.0-beta.1',
+      );
+      final betaPlan = await beta.service.publishWorkspace(
+        workspaceRoot: beta.root.path,
+        change: ReleaseChange.breaking,
+        rung: ReleaseRung.beta,
+        pollInterval: Duration.zero,
+      );
+      expect(betaPlan.packages.single.tag, 'wave_base-v0.2.0-beta.1');
+      expect(betaPlan.packages.single.rung, ReleaseRung.beta);
+      expect(
+        betaPlan.packages.single.publishedPredecessor.toString(),
+        '0.2.0-dev.2',
+        reason: 'the counter restarts at 1 when the identifier changes',
+      );
+    });
 
-    test('an rc wave still refuses a stable-shaped first release', () async {
+    test('rc without promotion intent is refused before mutation', () async {
       final harness = _harness(
         responder: _rcResponder,
         base: '0.2.0-rc.1',
         middle: '0.3.0-rc.1',
-        leaf: '0.1.0',
+        leaf: '0.1.0-rc.1',
       );
       await expectLater(
         harness.service.publishWorkspace(
           workspaceRoot: harness.root.path,
-          change: ReleaseChange.rc,
+          change: ReleaseChange.breaking,
+          rung: ReleaseRung.rc,
         ),
         throwsA(
           _stoppedAt(
             'discovery',
-            package: 'wave_leaf',
-            message: contains('rc.N'),
+            package: 'wave_base',
+            message: contains(
+              'rc means a human has declared intent to promote',
+            ),
+          ),
+        ),
+      );
+      expect(
+        harness.timeline.where((entry) => entry.startsWith('git tag')),
+        isEmpty,
+      );
+    });
+
+    test('declared rc succeeds', () async {
+      final harness = _harness(
+        responder: _rcResponder,
+        base: '0.2.0-rc.1',
+        middle: '0.3.0-rc.1',
+        leaf: '0.1.0-rc.1',
+      );
+      final plan = await harness.service.publishWorkspace(
+        workspaceRoot: harness.root.path,
+        change: ReleaseChange.breaking,
+        rung: ReleaseRung.rc,
+        promotionIntent: true,
+        pollInterval: Duration.zero,
+      );
+      expect(plan.packages.map((package) => package.tag), [
+        'wave_base-v0.2.0-rc.1',
+        'wave_middle-v0.3.0-rc.1',
+        'wave_leaf-v0.1.0-rc.1',
+      ]);
+      expect(
+        plan.packages.map((package) => package.rung),
+        everyElement(ReleaseRung.rc),
+      );
+      expect(plan.promotionIntent, isTrue);
+      expect(
+        harness.timeline.where((entry) => entry.startsWith('git tag')),
+        hasLength(3),
+      );
+    });
+
+    test('stable breaking and consumer failure direct to dev', () async {
+      // A breaking move authored as a STABLE version: refused at the plan
+      // stage, before any gate, and pointed at the bottom of the ladder.
+      final stable = _harness(
+        responder: (package, attempt) => switch (package) {
+          'wave_base' => _listing(const ['0.1.4']),
+          'wave_middle' => _listing(const ['0.2.4']),
+          'wave_leaf' => _listing(const ['0.3.2']),
+          'wave_settled' => _listing(const ['0.1.0']),
+          _ => throw StateError('unexpected poll for $package'),
+        },
+        base: '0.2.0',
+      );
+      await expectLater(
+        stable.service.publishWorkspace(
+          workspaceRoot: stable.root.path,
+          change: ReleaseChange.breaking,
+          consumers: [_consumerAt(stable.consumer)],
+        ),
+        throwsA(
+          _stoppedAt(
+            'plan',
+            package: 'wave_base',
+            message: allOf(
+              contains('--change breaking --rung dev'),
+              contains('validate-consumers'),
+              contains('promote'),
+              isNot(contains('rc-first')),
+              isNot(contains('--change rc')),
+            ),
+          ),
+        ),
+      );
+      expect(
+        stable.timeline.where((entry) => entry.startsWith('git ')),
+        isEmpty,
+        reason: 'the plan stage runs before any gate, tag or push',
+      );
+
+      // A stable wave whose consumer fails is breaking by definition, and the
+      // remedy names the same dev rung rather than the retired rc path.
+      final failing = _harness(
+        script: (executable, arguments, workingDirectory) =>
+            executable == 'dart' &&
+                arguments.join(' ') == 'analyze' &&
+                workingDirectory != null &&
+                p.basename(workingDirectory) == 'consumer'
+            ? ProcessResult(0, 1, '', 'consumer analyze failed')
+            : _defaultScript(executable, arguments, workingDirectory),
+      );
+      await expectLater(
+        failing.service.publishWorkspace(
+          workspaceRoot: failing.root.path,
+          change: ReleaseChange.fix,
+          consumers: [_consumerAt(failing.consumer)],
+        ),
+        throwsA(
+          _stoppedAt(
+            'validate-consumers',
+            package: null,
+            message: allOf(
+              contains('--change breaking --rung dev'),
+              isNot(contains('rc-first')),
+              isNot(contains('--change rc')),
+            ),
+          ),
+        ),
+      );
+    });
+
+    test('mixed dev/beta wave carries each rung', () async {
+      final harness = _harness(
+        responder: _mixedRungResponder,
+        base: '0.2.0-beta.1',
+        middle: '0.3.0-dev.1',
+      );
+      final plan = await harness.service.publishWorkspace(
+        workspaceRoot: harness.root.path,
+        change: ReleaseChange.breaking,
+        pollInterval: Duration.zero,
+      );
+
+      expect(plan.packages.map((package) => package.package), [
+        'wave_base',
+        'wave_middle',
+      ]);
+      expect(plan.packages.map((package) => package.rung), [
+        ReleaseRung.beta,
+        ReleaseRung.dev,
+      ]);
+      expect(plan.packages.map((package) => package.tag), [
+        'wave_base-v0.2.0-beta.1',
+        'wave_middle-v0.3.0-dev.1',
+      ]);
+      expect(
+        plan.toJson()['packages'],
+        [containsPair('rung', 'beta'), containsPair('rung', 'dev')],
+        reason: 'the rung rides the per-package JSON the skill parses',
+      );
+      expect(plan.toJson()['promotionIntent'], false);
+
+      // An explicit --rung cannot re-rung a package behind its author's back.
+      final pinned = _harness(
+        responder: _mixedRungResponder,
+        base: '0.2.0-beta.1',
+        middle: '0.3.0-dev.1',
+      );
+      await expectLater(
+        pinned.service.publishWorkspace(
+          workspaceRoot: pinned.root.path,
+          change: ReleaseChange.breaking,
+          rung: ReleaseRung.dev,
+        ),
+        throwsA(
+          _stoppedAt(
+            'discovery',
+            package: 'wave_base',
+            message: allOf(contains('0.2.0-beta.1'), contains('dev rung')),
           ),
         ),
       );
@@ -823,6 +1055,7 @@ void main() {
           publishedPredecessor: Version.parse('0.1.4'),
           localVersion: Version.parse('0.1.5'),
           dependencies: const [],
+          rung: ReleaseRung.stable,
           tag: 'wave_base-v0.1.5',
         ),
       ],
@@ -876,6 +1109,12 @@ void main() {
         expect(service.calls, hasLength(1));
         expect(service.calls.single.workspaceRoot, temp.path);
         expect(service.calls.single.change, ReleaseChange.fix);
+        expect(
+          service.calls.single.rung,
+          isNull,
+          reason: 'an omitted --rung lets the service infer each package rung',
+        );
+        expect(service.calls.single.promotionIntent, isFalse);
         expect(service.calls.single.dryRunOnly, isFalse);
         expect(service.calls.single.consumers.single.name, 'space_station');
         expect(
@@ -908,13 +1147,73 @@ void main() {
         '--workspace',
         temp.path,
         '--change',
-        'rc',
+        'breaking',
+        '--rung',
+        'dev',
         '--dry-run',
       ]);
       expect(code, 0);
       expect(service.calls.single.dryRunOnly, isTrue);
-      expect(service.calls.single.change, ReleaseChange.rc);
+      expect(service.calls.single.change, ReleaseChange.breaking);
+      expect(service.calls.single.rung, ReleaseRung.dev);
       expect(service.calls.single.consumers, isEmpty);
+    });
+
+    test('publish delegates rung and promotion intent', () async {
+      final temp = Directory.systemTemp.createTempSync('release-publish-rung-');
+      addTearDown(() => temp.delete(recursive: true));
+      final service = _RecordingReleaseService(plan: cannedPlan(temp));
+      final out = StringBuffer();
+      final runner = CommandRunner<int>('t', 'test')
+        ..addCommand(
+          ReleaseCommand(service: service, out: out, err: StringBuffer()),
+        );
+
+      // The legacy `--change rc` spelling pins the rc rung and still needs the
+      // declared intent; the Command does no version arithmetic either way.
+      final code = await runner.run([
+        'release',
+        'publish',
+        '--workspace',
+        temp.path,
+        '--change',
+        'rc',
+        '--promotion-intent',
+        '--json',
+      ]);
+
+      expect(code, 0);
+      expect(service.calls, hasLength(1));
+      expect(service.calls.single.change, ReleaseChange.breaking);
+      expect(service.calls.single.rung, ReleaseRung.rc);
+      expect(service.calls.single.promotionIntent, isTrue);
+      expect(
+        jsonDecode(out.toString().trim()),
+        cannedPlan(temp).toJson(),
+        reason: 'the Command renders the service result and nothing else',
+      );
+    });
+
+    test('publish refuses a rung that conflicts with the rc alias', () async {
+      final service = _RecordingReleaseService();
+      final err = StringBuffer();
+      final runner = CommandRunner<int>('t', 'test')
+        ..addCommand(
+          ReleaseCommand(service: service, out: StringBuffer(), err: err),
+        );
+      final code = await runner.run([
+        'release',
+        'publish',
+        '--workspace',
+        '.',
+        '--change',
+        'rc',
+        '--rung',
+        'beta',
+      ]);
+      expect(code, 64);
+      expect(service.calls, isEmpty);
+      expect(err.toString(), contains('conflicts with `--rung beta`'));
     });
 
     test('a structured failure renders as JSON and exits 1', () async {
@@ -936,7 +1235,9 @@ void main() {
         '--workspace',
         '.',
         '--change',
-        'rc',
+        'breaking',
+        '--rung',
+        'dev',
         '--json',
       ]);
       expect(code, 1);
@@ -947,24 +1248,31 @@ void main() {
       });
     });
 
-    test('a stable wave without --consumers is a usage error', () async {
-      final service = _RecordingReleaseService();
-      final err = StringBuffer();
+    test('an omitted --consumers still reaches the service gate', () async {
+      // Whether the wave carries a stable package is not knowable from
+      // --change alone once the rung is inferred, so the requirement lives in
+      // the service's stable-member gate rather than in argv.
+      final temp = Directory.systemTemp.createTempSync('release-publish-gate-');
+      addTearDown(() => temp.delete(recursive: true));
+      final service = _RecordingReleaseService(plan: cannedPlan(temp));
       final runner = CommandRunner<int>('t', 'test')
         ..addCommand(
-          ReleaseCommand(service: service, out: StringBuffer(), err: err),
+          ReleaseCommand(
+            service: service,
+            out: StringBuffer(),
+            err: StringBuffer(),
+          ),
         );
       final code = await runner.run([
         'release',
         'publish',
         '--workspace',
-        '.',
+        temp.path,
         '--change',
         'fix',
       ]);
-      expect(code, 64);
-      expect(service.calls, isEmpty);
-      expect(err.toString(), contains('--consumers'));
+      expect(code, 0);
+      expect(service.calls.single.consumers, isEmpty);
     });
 
     test('a missing manifest is a usage error before delegation', () async {
@@ -1055,7 +1363,7 @@ void main() {
   group(
     'failing consumer validation refuses the wave before the first tag',
     () {
-      test('a failed consumer stops the wave and names the rc path', () async {
+      test('a failed consumer stops the wave and names the dev rung', () async {
         final harness = _harness(
           script: (executable, arguments, workingDirectory) =>
               executable == 'dart' &&
@@ -1078,7 +1386,7 @@ void main() {
               package: null,
               message: allOf(
                 contains('space_station'),
-                contains('--change rc'),
+                contains('--change breaking --rung dev'),
                 contains(_releaseSha),
               ),
             ),

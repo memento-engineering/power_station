@@ -214,7 +214,11 @@ void main() {
           ReleaseChange.additive,
           ReleaseChange.fix,
         ]) {
-          final plan = service.planVersion(current: '0.1.4', change: change);
+          final plan = service.planVersion(
+            current: '0.1.4',
+            change: change,
+            rung: ReleaseRung.stable,
+          );
           expect(plan.next.toString(), '0.1.5', reason: '$change -> patch');
           expect(plan.requiresBreakingChangelog, isFalse);
         }
@@ -227,6 +231,7 @@ void main() {
         final plan = service.planVersion(
           current: '0.1.4',
           change: ReleaseChange.breaking,
+          rung: ReleaseRung.stable,
         );
         expect(plan.next.toString(), '0.2.0');
         expect(plan.requiresBreakingChangelog, isTrue);
@@ -237,27 +242,10 @@ void main() {
       final plan = service.planVersion(
         current: '1.2.3',
         change: ReleaseChange.breaking,
+        rung: ReleaseRung.stable,
       );
       expect(plan.next.toString(), '2.0.0');
     });
-
-    test(
-      'rc plans the next breaking stable base as rc.1, then increments rc.N',
-      () {
-        final first = service.planVersion(
-          current: '0.1.4',
-          change: ReleaseChange.rc,
-        );
-        expect(first.next.toString(), '0.2.0-rc.1');
-        expect(first.requiresBreakingChangelog, isTrue);
-
-        final second = service.planVersion(
-          current: '0.2.0-rc.1',
-          change: ReleaseChange.rc,
-        );
-        expect(second.next.toString(), '0.2.0-rc.2');
-      },
-    );
 
     test(
       'a non-semver current is a LOUD ArgumentError (never a guessed bump)',
@@ -266,22 +254,219 @@ void main() {
           () => service.planVersion(
             current: 'not-a-version',
             change: ReleaseChange.fix,
+            rung: ReleaseRung.stable,
           ),
           throwsA(isA<ArgumentError>()),
         );
       },
     );
+  });
 
-    test('toJson carries the structured contract the skill parses', () {
-      final json = service
-          .planVersion(current: '0.1.4', change: ReleaseChange.breaking)
-          .toJson();
-      expect(json, {
-        'current': '0.1.4',
-        'next': '0.2.0',
-        'change': 'breaking',
-        'requiresBreakingChangelog': true,
-      });
+  // The two AXES of a release: ReleaseChange says how far the version moves,
+  // ReleaseRung says where on the prerelease ladder it lands. They were one
+  // field until `rc` was bound to `breaking`, which forced every 0.x breaking
+  // change onto the candidate rung by construction.
+  group('release axes — semver move and rung', () {
+    const service = ReleaseService();
+
+    test('ReleaseRung parses fail-closed and orders the ladder', () {
+      expect(ReleaseRung.values, [
+        ReleaseRung.stable,
+        ReleaseRung.dev,
+        ReleaseRung.beta,
+        ReleaseRung.rc,
+      ]);
+      for (final name in ['stable', 'dev', 'beta', 'rc']) {
+        expect(ReleaseRung.parse(name)?.name, name);
+      }
+      expect(ReleaseRung.parse(null), isNull);
+      expect(ReleaseRung.parse('candidate'), isNull);
+      expect(ReleaseRung.parse('RC'), isNull);
+
+      expect(ReleaseRung.defaultPrerelease, ReleaseRung.dev);
+      expect(ReleaseRung.stable.identifier, isNull);
+      expect(ReleaseRung.dev.identifier, 'dev');
+      expect(ReleaseRung.beta.identifier, 'beta');
+      expect(ReleaseRung.rc.identifier, 'rc');
+      expect(ReleaseRung.stable.isPrerelease, isFalse);
+      expect(ReleaseRung.dev.isPrerelease, isTrue);
+      expect(
+        [for (final rung in ReleaseRung.values) rung.requiresPromotionIntent],
+        [false, false, false, true],
+        reason: 'rc alone is the rung a human must set',
+      );
+
+      final ladder = [...ReleaseRung.values]..sort((a, b) => a.compareTo(b));
+      expect(ladder, [
+        ReleaseRung.dev,
+        ReleaseRung.beta,
+        ReleaseRung.rc,
+        ReleaseRung.stable,
+      ]);
+    });
+
+    test('ReleaseChange carries only semver moves', () {
+      expect(ReleaseChange.values, [
+        ReleaseChange.docs,
+        ReleaseChange.additive,
+        ReleaseChange.fix,
+        ReleaseChange.breaking,
+      ]);
+      expect(
+        [for (final change in ReleaseChange.values) change.isBreaking],
+        [false, false, false, true],
+        reason: 'breaking is the only move that breaks consumers',
+      );
+      expect(
+        ReleaseChange.parse('rc'),
+        ReleaseChange.breaking,
+        reason:
+            'the wire alias decodes to the MOVE; the rung is the other axis',
+      );
+      expect(ReleaseChange.parse('dev'), isNull);
+      expect(ReleaseChange.parse(null), isNull);
+    });
+
+    test('breaking plans stable, dev, beta, and human-declared rc', () {
+      String next(ReleaseRung rung) => service
+          .planVersion(
+            current: '0.1.4',
+            change: ReleaseChange.breaking,
+            rung: rung,
+            promotionIntent: rung == ReleaseRung.rc,
+          )
+          .next
+          .toString();
+
+      expect(next(ReleaseRung.stable), '0.2.0');
+      expect(next(ReleaseRung.dev), '0.2.0-dev.1');
+      expect(next(ReleaseRung.beta), '0.2.0-beta.1');
+      expect(next(ReleaseRung.rc), '0.2.0-rc.1');
+
+      final dev = service.planVersion(
+        current: '0.1.4',
+        change: ReleaseChange.breaking,
+        rung: ReleaseRung.dev,
+      );
+      expect(dev.rung, ReleaseRung.dev);
+      expect(dev.promotionIntent, isFalse);
+      expect(
+        dev.requiresBreakingChangelog,
+        isTrue,
+        reason: 'the CHANGELOG flag follows the move, not the rung',
+      );
+
+      // A fix at dev moves the PATCH and lands on the ladder, which the old
+      // rc-bound-to-breaking enum could not express at all.
+      expect(
+        service
+            .planVersion(
+              current: '0.1.4',
+              change: ReleaseChange.fix,
+              rung: ReleaseRung.dev,
+            )
+            .next
+            .toString(),
+        '0.1.5-dev.1',
+      );
+    });
+
+    test('rc without promotion intent is refused', () {
+      expect(
+        () => service.planVersion(
+          current: '0.1.4',
+          change: ReleaseChange.breaking,
+          rung: ReleaseRung.rc,
+        ),
+        throwsA(
+          isA<ArgumentError>().having(
+            (error) => error.message,
+            'message',
+            contains('rc means a human has declared intent to promote'),
+          ),
+        ),
+      );
+      expect(
+        service
+            .planVersion(
+              current: '0.1.4',
+              change: ReleaseChange.breaking,
+              rung: ReleaseRung.rc,
+              promotionIntent: true,
+            )
+            .next
+            .toString(),
+        '0.2.0-rc.1',
+      );
+    });
+
+    test('changing or lowering the rung resets the counter', () {
+      String next(String current, ReleaseRung rung) => service
+          .planVersion(
+            current: current,
+            change: ReleaseChange.breaking,
+            rung: rung,
+            promotionIntent: rung == ReleaseRung.rc,
+          )
+          .next
+          .toString();
+
+      // The same identifier increments; the target core never moves again.
+      expect(next('0.2.0-dev.1', ReleaseRung.dev), '0.2.0-dev.2');
+      expect(next('0.2.0-rc.1', ReleaseRung.rc), '0.2.0-rc.2');
+
+      // Up the ladder, and back DOWN it — the demote mechanism needs the
+      // backwards move to be legal, and both restart the counter at 1.
+      expect(next('0.2.0-dev.3', ReleaseRung.beta), '0.2.0-beta.1');
+      expect(next('0.2.0-beta.4', ReleaseRung.rc), '0.2.0-rc.1');
+      expect(next('0.2.0-rc.9', ReleaseRung.beta), '0.2.0-beta.1');
+      expect(next('0.2.0-rc.9', ReleaseRung.dev), '0.2.0-dev.1');
+
+      for (final malformed in ['0.2.0-alpha.1', '0.2.0-rc', '0.2.0-dev.x']) {
+        expect(
+          () => next(malformed, ReleaseRung.dev),
+          throwsA(isA<ArgumentError>()),
+          reason: '$malformed sits on no supported rung',
+        );
+      }
+    });
+
+    test('plan JSON carries rung and promotion intent', () {
+      expect(
+        service
+            .planVersion(
+              current: '0.1.4',
+              change: ReleaseChange.breaking,
+              rung: ReleaseRung.stable,
+            )
+            .toJson(),
+        {
+          'current': '0.1.4',
+          'next': '0.2.0',
+          'change': 'breaking',
+          'rung': 'stable',
+          'promotionIntent': false,
+          'requiresBreakingChangelog': true,
+        },
+      );
+      expect(
+        service
+            .planVersion(
+              current: '0.1.4',
+              change: ReleaseChange.breaking,
+              rung: ReleaseRung.rc,
+              promotionIntent: true,
+            )
+            .toJson(),
+        {
+          'current': '0.1.4',
+          'next': '0.2.0-rc.1',
+          'change': 'breaking',
+          'rung': 'rc',
+          'promotionIntent': true,
+          'requiresBreakingChangelog': true,
+        },
+      );
     });
   });
 
@@ -877,8 +1062,8 @@ void main() {
         );
 
     test(
-      'a removed exported parameter understates a declared patch, naming the '
-      'symbol AND the compile consequence',
+      'breaking classification names the dev-first target, the symbol AND the '
+      'compile consequence',
       () async {
         final dir = _writeClassifyPackage(name: package, version: '0.3.2');
         addTearDown(() => dir.deleteSync(recursive: true));
@@ -922,7 +1107,7 @@ void main() {
           result.message,
           'leonard_flutter: exported captureScreenshot lost parameter binding, '
           'so existing calls that supply binding no longer compile; declared '
-          '0.3.2 is a patch, a breaking change requires 0.4.0-rc.1',
+          '0.3.2 is a patch, a breaking change requires 0.4.0-dev.1',
         );
       },
     );
@@ -1134,7 +1319,7 @@ void main() {
         expect(result.requiredChange, ReleaseRequiredChange.breaking);
         expect(result.declaredChange, ReleaseDeclaredChange.minor);
         expect(result.verdict, ReleaseClassificationVerdict.ok);
-        expect(result.message, contains('reaches the required 0.4.0-rc.1'));
+        expect(result.message, contains('reaches the required 0.4.0-dev.1'));
       },
     );
 
@@ -1167,7 +1352,7 @@ void main() {
           result.message,
           'leonard_flutter: exported Perception changed — Sealed status '
           'changed — so existing consumers may no longer compile; declared '
-          '0.3.2 is a patch, a breaking change requires 0.4.0-rc.1',
+          '0.3.2 is a patch, a breaking change requires 0.4.0-dev.1',
         );
       },
     );
@@ -1435,7 +1620,32 @@ void main() {
       expect(json['requiresBreakingChangelog'], true);
     });
 
-    test('release plan --change rc --json emits an rc tag', () async {
+    test(
+      'release plan --change rc --json still needs declared intent',
+      () async {
+        final err = StringBuffer();
+        final runner = CommandRunner<int>('t', 'test')
+          ..addCommand(ReleaseCommand(out: StringBuffer(), err: err));
+        final code = await runner.run([
+          'release',
+          'plan',
+          '--package',
+          'grid_engine',
+          '--current',
+          '0.1.4',
+          '--change',
+          'rc',
+          '--json',
+        ]);
+        expect(code, 64);
+        expect(
+          err.toString(),
+          contains('rc means a human has declared intent to promote'),
+        );
+      },
+    );
+
+    test('release plan --rung dev emits the dev-first candidate', () async {
       final buf = StringBuffer();
       final runner = CommandRunner<int>('t', 'test')
         ..addCommand(ReleaseCommand(out: buf));
@@ -1447,14 +1657,82 @@ void main() {
         '--current',
         '0.1.4',
         '--change',
-        'rc',
+        'breaking',
+        '--rung',
+        'dev',
         '--json',
       ]);
       expect(code, 0);
       final json = jsonDecode(buf.toString().trim()) as Map<String, dynamic>;
-      expect(json['next'], '0.2.0-rc.1');
-      expect(json['tag'], 'grid_engine-v0.2.0-rc.1');
-      expect(json['requiresBreakingChangelog'], true);
+      expect(json['next'], '0.2.0-dev.1');
+      expect(json['rung'], 'dev');
+      expect(json['promotionIntent'], false);
+      expect(json['tag'], 'grid_engine-v0.2.0-dev.1');
+      expect(
+        json['requiresBreakingChangelog'],
+        true,
+        reason: 'an agent publishes breaking work at dev with no human in it',
+      );
+    });
+
+    test('legacy change rc alias emits breaking at rc', () async {
+      final buf = StringBuffer();
+      final runner = CommandRunner<int>('t', 'test')
+        ..addCommand(ReleaseCommand(out: buf));
+      Future<Map<String, dynamic>> plan(List<String> rungArgs) async {
+        buf.clear();
+        final code = await runner.run([
+          'release',
+          'plan',
+          '--package',
+          'grid_engine',
+          '--current',
+          '0.1.4',
+          '--change',
+          'rc',
+          '--promotion-intent',
+          ...rungArgs,
+          '--json',
+        ]);
+        expect(code, 0);
+        return jsonDecode(buf.toString().trim()) as Map<String, dynamic>;
+      }
+
+      final implied = await plan(const []);
+      expect(implied['change'], 'breaking');
+      expect(implied['rung'], 'rc');
+      expect(implied['promotionIntent'], true);
+      expect(implied['next'], '0.2.0-rc.1');
+      expect(implied['tag'], 'grid_engine-v0.2.0-rc.1');
+      expect(implied['requiresBreakingChangelog'], true);
+
+      expect(
+        await plan(const ['--rung', 'rc']),
+        implied,
+        reason: 'an explicit --rung rc AGREES with the alias',
+      );
+    });
+
+    test('legacy change rc alias refuses a conflicting rung', () async {
+      final err = StringBuffer();
+      final runner = CommandRunner<int>('t', 'test')
+        ..addCommand(ReleaseCommand(out: StringBuffer(), err: err));
+      final code = await runner.run([
+        'release',
+        'plan',
+        '--package',
+        'grid_engine',
+        '--current',
+        '0.1.4',
+        '--change',
+        'rc',
+        '--rung',
+        'dev',
+        '--promotion-intent',
+        '--json',
+      ]);
+      expect(code, 64);
+      expect(err.toString(), contains('conflicts with `--rung dev`'));
     });
 
     test('release tag --json emits the private tag result', () async {
@@ -1832,7 +2110,7 @@ void main() {
         json['message'],
         'leonard_flutter: exported captureScreenshot lost parameter binding, '
         'so existing calls that supply binding no longer compile; declared '
-        '0.3.2 is a patch, a breaking change requires 0.4.0-rc.1',
+        '0.3.2 is a patch, a breaking change requires 0.4.0-dev.1',
       );
     });
 

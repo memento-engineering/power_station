@@ -26,9 +26,16 @@ import 'package:yaml/yaml.dart';
 
 import 'pub_links.dart';
 
-/// The class of change a release carries — the input to the version bump
+/// The SEMVER MOVE a release carries — the input to the version bump
 /// (genesis `publishing.md`: "Additive API, fixes, docs -> patch"; "Breaking ->
 /// minor").
+///
+/// This axis says only HOW FAR the version moves. How far along the prerelease
+/// ladder it sits is the orthogonal [ReleaseRung]: the two were one field until
+/// `rc` was bound to `breaking`, which forced every 0.x breaking change onto the
+/// candidate rung by construction (`memento-engineering`'s
+/// `prerelease-rungs-are-dev-beta-rc-and-rc-is-human-only`, narrowing ADR-0003
+/// D3).
 enum ReleaseChange {
   /// A docs-only refresh (README/CHANGELOG/dartdoc) — PATCH.
   docs,
@@ -40,41 +47,113 @@ enum ReleaseChange {
   fix,
 
   /// A breaking change — MINOR pre-1.0 (`0.y.z` -> `0.(y+1).0`), MAJOR from 1.0.
-  breaking,
-
-  /// A breaking-release candidate — the next breaking stable base as `rc.N`.
-  rc;
+  breaking;
 
   /// Parses a wire/flag [value]; null for an unknown one (the caller refuses
   /// rather than guessing — fail-closed, matching `PubLinkContext.parse`).
+  ///
+  /// `'rc'` is the COMPATIBILITY ALIAS and nothing more: it decodes to
+  /// [ReleaseChange.breaking], and the caller supplies the [ReleaseRung.rc]
+  /// half (which a human must still declare). It is kept only so the release
+  /// skill's existing `--change rc` callers keep parsing this verb's JSON.
   static ReleaseChange? parse(String? value) => switch (value) {
     'docs' => ReleaseChange.docs,
     'additive' => ReleaseChange.additive,
     'fix' => ReleaseChange.fix,
-    'breaking' => ReleaseChange.breaking,
-    'rc' => ReleaseChange.rc,
+    'breaking' || 'rc' => ReleaseChange.breaking,
     _ => null,
   };
 
   /// Whether this change breaks consumers (the MINOR/MAJOR bump + the leading
   /// `Breaking:` CHANGELOG entry). docs/additive/fix are all a PATCH.
-  bool get isBreaking => switch (this) {
-    ReleaseChange.breaking || ReleaseChange.rc => true,
-    ReleaseChange.docs || ReleaseChange.additive || ReleaseChange.fix => false,
+  bool get isBreaking => this == ReleaseChange.breaking;
+}
+
+/// The PRERELEASE RUNG a release occupies — the axis orthogonal to
+/// [ReleaseChange], carried PER PACKAGE (one package genuinely at [rc] while
+/// another in the same wave is still at [dev] is the normal case).
+///
+/// The ladder, per `memento-engineering`'s org entry
+/// `prerelease-rungs-are-dev-beta-rc-and-rc-is-human-only` (which narrows
+/// ADR-0003 D3): a breaking change enters at [dev], walks to [beta] on a
+/// machine-checkable condition an agent can evaluate, and reaches [rc] only
+/// when a HUMAN declares intent to promote. Splitting the rung off the semver
+/// move is what keeps agent autonomy intact once [rc] is human-only — an agent
+/// publishes breaking work at [dev] or [beta] on its own authority.
+enum ReleaseRung {
+  /// No prerelease identifier at all — the published stable version.
+  stable,
+
+  /// The API is still MOVING. Every prerelease starts here; it is
+  /// [defaultPrerelease].
+  dev,
+
+  /// The API is FROZEN for this target version; the bugs are not. The entry
+  /// condition is machine-checkable — no breaking API change against the
+  /// previous prerelease of the same target version.
+  beta,
+
+  /// This exact commit ships as stable unless something surfaces. Its entry
+  /// condition is NOT computed: it is a person declaring intent to promote, so
+  /// it is the one rung a human must set ([requiresPromotionIntent]).
+  rc;
+
+  /// The rung a prerelease occupies when none is declared — [dev], because an
+  /// API that has not been frozen has not been frozen.
+  static const ReleaseRung defaultPrerelease = ReleaseRung.dev;
+
+  /// Parses a wire/flag [value]; null for null or an unknown one (the caller
+  /// refuses rather than guessing — fail-closed, matching [ReleaseChange.parse]).
+  static ReleaseRung? parse(String? value) => switch (value) {
+    'stable' => ReleaseRung.stable,
+    'dev' => ReleaseRung.dev,
+    'beta' => ReleaseRung.beta,
+    'rc' => ReleaseRung.rc,
+    _ => null,
   };
 
-  /// Whether this change plans a pre-release version.
-  bool get isPreRelease => this == ReleaseChange.rc;
+  /// The semver prerelease identifier this rung contributes (`dev` in
+  /// `0.2.0-dev.1`) — null for [stable], which contributes none.
+  String? get identifier => switch (this) {
+    ReleaseRung.stable => null,
+    ReleaseRung.dev => 'dev',
+    ReleaseRung.beta => 'beta',
+    ReleaseRung.rc => 'rc',
+  };
+
+  /// Whether this rung plans a PRE-release version (every rung but [stable]).
+  bool get isPrerelease => this != ReleaseRung.stable;
+
+  /// Whether reaching this rung needs a DECLARED human intent to promote —
+  /// true for [rc] alone. This is the guard that stops a package accreting two
+  /// dozen candidates at a rung only a person can set.
+  bool get requiresPromotionIntent => this == ReleaseRung.rc;
+
+  /// The ladder position, `dev < beta < rc < stable`. [stable] is last because
+  /// it is the destination the ladder climbs toward, not a prerelease step.
+  int get order => switch (this) {
+    ReleaseRung.dev => 0,
+    ReleaseRung.beta => 1,
+    ReleaseRung.rc => 2,
+    ReleaseRung.stable => 3,
+  };
+
+  /// Compares two rungs by [order]. Skipping UP is legal (a human may declare
+  /// intent at any moment) and moving BACK is legal too (the demote mechanism
+  /// requires it), so this ORDERS the ladder without gating motion along it.
+  int compareTo(ReleaseRung other) => order.compareTo(other.order);
 }
 
 /// The computed version move for a release — the result of
 /// [ReleaseService.planVersion].
 class ReleaseVersionPlan {
-  /// Wraps the [current] -> [next] move for [change].
+  /// Wraps the [current] -> [next] move for [change] at [rung].
   const ReleaseVersionPlan({
     required this.current,
     required this.next,
     required this.change,
+    required this.rung,
+    this.promotionIntent = false,
   });
 
   /// The current published version.
@@ -83,8 +162,15 @@ class ReleaseVersionPlan {
   /// The computed next version.
   final Version next;
 
-  /// The change class that drove the bump.
+  /// The semver move that drove the bump.
   final ReleaseChange change;
+
+  /// The prerelease rung [next] sits on — the axis independent of [change].
+  final ReleaseRung rung;
+
+  /// Whether a human DECLARED intent to promote. Only [ReleaseRung.rc] needs
+  /// it, and without it an rc plan is refused.
+  final bool promotionIntent;
 
   /// Whether the CHANGELOG entry must lead with `Breaking:` + a migration line
   /// (genesis `publishing.md`) — true iff [change] is breaking. The command
@@ -96,6 +182,8 @@ class ReleaseVersionPlan {
     'current': current.toString(),
     'next': next.toString(),
     'change': change.name,
+    'rung': rung.name,
+    'promotionIntent': promotionIntent,
     'requiresBreakingChangelog': requiresBreakingChangelog,
   };
 }
@@ -636,7 +724,7 @@ enum ReleaseDeclaredChange {
   /// The MAJOR component moved (`0.3.1` -> `1.0.0`).
   major,
 
-  /// HEAD is itself a pre-release (`0.4.0-rc.1`) — the rc-first lane.
+  /// HEAD is itself a pre-release (`0.4.0-dev.1`) — the prerelease ladder.
   prerelease,
 
   /// HEAD drops the baseline's pre-release suffix at the same core version
@@ -744,7 +832,7 @@ enum ReleaseWaveStage {
   /// Computing the changed-package set against pub.dev.
   discovery,
 
-  /// Planning the wave itself (the change class is refused here).
+  /// Planning the wave itself (a breaking STABLE member is refused here).
   plan,
 
   /// The scrub gate over one changed package.
@@ -759,7 +847,7 @@ enum ReleaseWaveStage {
   /// Resolving the origin-reachable release commit the wave validates at.
   releaseCommit,
 
-  /// The consumer validation a direct stable wave must pass before any tag.
+  /// The consumer validation a wave with a stable member owes before any tag.
   validateConsumers,
 
   /// Cutting one package's git tag.
@@ -825,7 +913,8 @@ class ReleaseWaveFailure implements Exception {
 }
 
 /// One package in a workspace release wave: what it is, where it lives, the
-/// published version it moves off, and the tag whose push publishes it.
+/// published version it moves off, the RUNG it publishes at, and the tag whose
+/// push publishes it.
 @immutable
 class ReleaseWavePackage {
   /// Creates the wave entry for [package].
@@ -835,6 +924,7 @@ class ReleaseWavePackage {
     required this.publishedPredecessor,
     required this.localVersion,
     required this.dependencies,
+    required this.rung,
     required this.tag,
   });
 
@@ -856,6 +946,10 @@ class ReleaseWavePackage {
   /// order is resolved from.
   final List<String> dependencies;
 
+  /// The prerelease rung [localVersion] sits on. The rung is a property of
+  /// EACH package, not of the wave, so a mixed `dev`/`beta` wave is ordinary.
+  final ReleaseRung rung;
+
   /// The `<package>-v<version>` tag whose push publishes this package.
   final String tag;
 
@@ -866,12 +960,14 @@ class ReleaseWavePackage {
     'publishedPredecessor': publishedPredecessor?.toString(),
     'localVersion': localVersion.toString(),
     'dependencies': dependencies,
+    'rung': rung.name,
     'tag': tag,
   };
 }
 
 /// A workspace release wave: the dependency-ordered set of packages whose
-/// authored versions are not on pub.dev yet, for one change class.
+/// authored versions are not on pub.dev yet, for one semver move. The RUNG is
+/// per package, so one wave can carry a `dev` package beside a `beta` one.
 @immutable
 class ReleaseWavePlan {
   /// Creates the wave plan.
@@ -880,16 +976,21 @@ class ReleaseWavePlan {
     required this.change,
     required this.dryRun,
     required this.packages,
+    this.promotionIntent = false,
   });
 
   /// The absolute, normalized workspace root the wave ran from.
   final String workspaceRoot;
 
-  /// The change class every package in the wave moves by.
+  /// The semver move every package in the wave bumps by.
   final ReleaseChange change;
 
   /// Whether the wave stopped after its gates (no tag, no push, no poll).
   final bool dryRun;
+
+  /// Whether a human DECLARED intent to promote — the bit that admits a
+  /// [ReleaseRung.rc] member into the wave at all.
+  final bool promotionIntent;
 
   /// The changed packages, dependency-first: a package's in-wave dependencies
   /// all precede it.
@@ -899,6 +1000,7 @@ class ReleaseWavePlan {
   Map<String, dynamic> toJson() => {
     'workspaceRoot': workspaceRoot,
     'change': change.name,
+    'promotionIntent': promotionIntent,
     'dryRun': dryRun,
     'packages': [for (final package in packages) package.toJson()],
   };
@@ -1064,15 +1166,40 @@ class ReleaseService {
     r'Parameter "([^"]+)" removed',
   );
 
-  /// Computes the next version for [change] off [current], per genesis
-  /// `publishing.md`'s pre-1.0 discipline: docs/additive/fix -> PATCH; breaking
-  /// -> MINOR pre-1.0 (`0.y.z` -> `0.(y+1).0`, escaping pub's `^0.1.0` =
-  /// `>=0.1.0 <0.2.0` caret range), MAJOR from 1.0. A non-semver [current] is a
-  /// LOUD [ArgumentError] (never a guessed bump).
+  /// Computes the next version for the [change] SEMVER MOVE at the [rung]
+  /// PRERELEASE RUNG, off [current]. The two axes are independent: [change]
+  /// says how far the version moves, [rung] says where on the ladder it lands.
+  ///
+  /// The move, per genesis `publishing.md`'s pre-1.0 discipline:
+  /// docs/additive/fix -> PATCH; breaking -> MINOR pre-1.0 (`0.y.z` ->
+  /// `0.(y+1).0`, escaping pub's `^0.1.0` = `>=0.1.0 <0.2.0` caret range),
+  /// MAJOR from 1.0.
+  ///
+  /// The rung, off a STABLE [current], applies that move and appends
+  /// `<rung>.1` (`0.1.4` + breaking + [ReleaseRung.beta] -> `0.2.0-beta.1`).
+  /// Off a prerelease [current] the target core is already fixed, so the
+  /// counter increments only when the identifier is UNCHANGED and resets to 1
+  /// on every rung change, in either direction (`0.2.0-dev.3` + beta ->
+  /// `0.2.0-beta.1`; `0.2.0-rc.9` + beta -> `0.2.0-beta.1`).
+  ///
+  /// [ReleaseRung.rc] is REFUSED unless [promotionIntent] is declared: rc means
+  /// a human has declared intent to promote. A non-semver [current], and a
+  /// prerelease [current] on no supported rung, are both LOUD [ArgumentError]s
+  /// (never a guessed bump).
   ReleaseVersionPlan planVersion({
     required String current,
     required ReleaseChange change,
+    required ReleaseRung rung,
+    bool promotionIntent = false,
   }) {
+    if (rung.requiresPromotionIntent && !promotionIntent) {
+      throw ArgumentError.value(
+        rung.name,
+        'rung',
+        'rc means a human has declared intent to promote, so it is refused '
+            'without a declared promotion intent',
+      );
+    }
     final Version now;
     try {
       now = Version.parse(current);
@@ -1083,40 +1210,49 @@ class ReleaseService {
         'not a semantic version: ${e.message}',
       );
     }
-    final next = switch (change) {
-      ReleaseChange.docs ||
-      ReleaseChange.additive ||
-      ReleaseChange.fix => now.nextPatch,
-      ReleaseChange.breaking => now.major == 0 ? now.nextMinor : now.nextMajor,
-      ReleaseChange.rc => _nextRc(now),
-    };
-    return ReleaseVersionPlan(current: now, next: next, change: change);
+    final next = rung.isPrerelease
+        ? _nextPrerelease(now, change, rung)
+        : _nextStable(now, change);
+    return ReleaseVersionPlan(
+      current: now,
+      next: next,
+      change: change,
+      rung: rung,
+      promotionIntent: promotionIntent,
+    );
   }
 
-  Version _nextRc(Version now) {
+  /// The STABLE half of the move — the pre-1.0 discipline, rung-free.
+  Version _nextStable(Version now, ReleaseChange change) => switch (change) {
+    ReleaseChange.docs ||
+    ReleaseChange.additive ||
+    ReleaseChange.fix => now.nextPatch,
+    ReleaseChange.breaking => now.major == 0 ? now.nextMinor : now.nextMajor,
+  };
+
+  /// The PRERELEASE half: the target core plus `<identifier>.<n>`.
+  Version _nextPrerelease(Version now, ReleaseChange change, ReleaseRung rung) {
+    final identifier = rung.identifier!;
     if (now.preRelease.isEmpty) {
-      final stableBase = now.major == 0 ? now.nextMinor : now.nextMajor;
-      return Version(
-        stableBase.major,
-        stableBase.minor,
-        stableBase.patch,
-        pre: 'rc.1',
-      );
+      final base = _nextStable(now, change);
+      return Version(base.major, base.minor, base.patch, pre: '$identifier.1');
     }
     final pre = now.preRelease;
-    if (pre.length == 2 && pre[0] == 'rc' && pre[1] is int) {
-      return Version(
-        now.major,
-        now.minor,
-        now.patch,
-        pre: 'rc.${(pre[1] as int) + 1}',
+    final currentRung = pre.length == 2 && pre[0] is String && pre[1] is int
+        ? ReleaseRung.parse(pre[0] as String)
+        : null;
+    if (currentRung == null || !currentRung.isPrerelease) {
+      throw ArgumentError.value(
+        now.toString(),
+        'current',
+        'a pre-release current must be a supported <dev|beta|rc>.N version to '
+            'plan the next pre-release',
       );
     }
-    throw ArgumentError.value(
-      now.toString(),
-      'current',
-      'pre-release current must be an rc.N version to plan the next rc',
-    );
+    // The core is already the target, so the rung decides the counter: the
+    // same identifier increments, any other rung restarts at 1.
+    final count = currentRung == rung ? (pre[1] as int) + 1 : 1;
+    return Version(now.major, now.minor, now.patch, pre: '$identifier.$count');
   }
 
   /// The per-package git tag `<package>-v<version>` (genesis `publishing.md`:
@@ -1766,8 +1902,8 @@ class ReleaseService {
             'none breaking; declared $head is a ${declaredChange.label}, which '
             'covers an additive change.';
       case ReleaseRequiredChange.breaking:
-        final rcFirst = _rcFirstFor(package: package, baseline: baseline);
-        final understated = _core(head) < _core(rcFirst);
+        final devFirst = _devFirstFor(package: package, baseline: baseline);
+        final understated = _core(head) < _core(devFirst);
         verdict = understated
             ? ReleaseClassificationVerdict.understated
             : ReleaseClassificationVerdict.ok;
@@ -1777,11 +1913,11 @@ class ReleaseService {
                 leaf: breaking.first,
                 head: head,
                 declaredChange: declaredChange,
-                rcFirst: rcFirst,
+                devFirst: devFirst,
               )
             : '$package: ${leaves.length} public API change(s) since '
                   '$baseline, ${breaking.length} breaking; declared $head is a '
-                  '${declaredChange.label} that reaches the required $rcFirst.';
+                  '${declaredChange.label} that reaches the required $devFirst.';
     }
 
     return ReleaseClassification(
@@ -2028,18 +2164,20 @@ class ReleaseService {
     return ReleaseDeclaredChange.patch;
   }
 
-  /// The rc-first version a breaking change off [baseline] requires — computed
-  /// by the existing [planVersion], so classification never invents version
-  /// math and stays on ADR-0003 D3's rc-first lane.
-  Version _rcFirstFor({required String package, required Version baseline}) {
+  /// The DEV-FIRST version a breaking change off [baseline] requires — the
+  /// bottom rung of the prerelease ladder breaking work enters at, computed by
+  /// the existing [planVersion] so classification never invents version math
+  /// (ADR-0003 D3 as narrowed by the org rung ruling).
+  Version _devFirstFor({required String package, required Version baseline}) {
     try {
       return planVersion(
         current: baseline.toString(),
-        change: ReleaseChange.rc,
+        change: ReleaseChange.breaking,
+        rung: ReleaseRung.defaultPrerelease,
       ).next;
     } on ArgumentError catch (error) {
       throw StateError(
-        'the published baseline $baseline of $package cannot plan an rc-first '
+        'the published baseline $baseline of $package cannot plan a dev-first '
         'breaking version (${error.message}), so the required version is not '
         'derivable and the delta is NOT classified.',
       );
@@ -2058,11 +2196,11 @@ class ReleaseService {
     required _ApiDeltaLeaf leaf,
     required Version head,
     required ReleaseDeclaredChange declaredChange,
-    required Version rcFirst,
+    required Version devFirst,
   }) {
     final tail =
         'declared $head is a ${declaredChange.label}, a breaking change '
-        'requires $rcFirst';
+        'requires $devFirst';
     final parameter = _removedParameter.firstMatch(leaf.description);
     if (leaf.code == 'CE01' && parameter != null && leaf.symbol.isNotEmpty) {
       final name = parameter.group(1)!;
@@ -2084,22 +2222,32 @@ class ReleaseService {
   /// trusted publishing does the upload — so this composes the existing ops
   /// and never runs `dart pub publish` for real.
   ///
-  /// [change] is the operator's declared change class and it is load-bearing:
+  /// The wave moves on TWO axes. [change] is the operator's declared semver
+  /// move; [rung] is the prerelease rung, which is a property of each PACKAGE
+  /// rather than of the wave:
   ///
-  /// - [ReleaseChange.breaking] is REFUSED before any filesystem, process or
-  ///   network work. A breaking base goes rc-first and is promoted through the
-  ///   separate `validate-consumers` then `promote` operations; the refusal
-  ///   says so.
-  /// - [ReleaseChange.rc] cuts pre-release tags and does NOT validate
-  ///   consumers here: the candidate is cut FIRST, and the separate ops carry
-  ///   its gate.
-  /// - docs/additive/fix MAY tag directly (no rc soak) but are STILL
-  ///   consumer-validated: [consumers] is required, every one is resolved
-  ///   against the release commit (an origin-reachable SHA, which pub accepts
-  ///   as a git `ref:` exactly as it accepts a tag) BEFORE the first tag, and
-  ///   one failing consumer refuses the whole wave — a "non-breaking" change
-  ///   that fails a consumer is breaking, and the refusal names the rc path it
-  ///   drops to.
+  /// - [rung] null (the default) INFERS each changed member's rung from its
+  ///   authored version — no prerelease is [ReleaseRung.stable], and a
+  ///   prerelease must be a supported `<dev|beta|rc>.<N>`. A mixed `dev`/`beta`
+  ///   wave is ordinary and each member keeps its own rung.
+  /// - [rung] supplied requires every changed member to already be authored at
+  ///   that rung; a member that is not is a LOUD discovery-stage refusal.
+  /// - A [ReleaseRung.rc] member is refused before any mutation unless
+  ///   [promotionIntent] is declared: rc means a human has declared intent to
+  ///   promote. `dev` and `beta` need no intent, so an agent publishes breaking
+  ///   work there on its own authority.
+  /// - A [ReleaseChange.breaking] member authored as a STABLE version is
+  ///   refused at the plan stage: breaking work enters the prerelease ladder at
+  ///   `dev`, and the stable base is promoted through the separate
+  ///   `validate-consumers` then `promote` operations.
+  ///
+  /// The consumer gate follows the PLAN, not the change class: a wave carrying
+  /// a stable member is consumer-validated ([consumers] is required, every one
+  /// is resolved against the release commit — an origin-reachable SHA, which
+  /// pub accepts as a git `ref:` exactly as it accepts a tag — BEFORE the first
+  /// tag, and one failing consumer refuses the whole wave, because a
+  /// "non-breaking" change that fails a consumer is breaking). An all-prerelease
+  /// wave is cut FIRST and the separate ops carry its gate.
   ///
   /// Gates run to completion before ANY mutation, so a preflight stop leaves
   /// zero tags. Once the wave mutates, a stop leaves only what its own stage
@@ -2113,21 +2261,13 @@ class ReleaseService {
   Future<ReleaseWavePlan> publishWorkspace({
     required String workspaceRoot,
     required ReleaseChange change,
+    ReleaseRung? rung,
+    bool promotionIntent = false,
     List<ReleaseConsumer> consumers = const [],
     bool dryRunOnly = false,
     Duration pollInterval = const Duration(seconds: 5),
     int maxPollAttempts = 120,
   }) async {
-    if (change == ReleaseChange.breaking) {
-      throw const ReleaseWaveFailure(
-        stage: ReleaseWaveStage.plan,
-        message:
-            'a breaking wave is refused: a breaking change must go rc-first '
-            'and pass every consumer before promotion. Cut candidates with '
-            '`--change rc`, then run the separate `release validate-consumers` '
-            'and `release promote` operations to promote the stable base.',
-      );
-    }
     if (maxPollAttempts < 1) {
       throw ArgumentError.value(
         maxPollAttempts,
@@ -2147,16 +2287,38 @@ class ReleaseService {
     final members = _workspaceMembers(root);
     final changed = <_ChangedMember>[];
     for (final member in members) {
-      final resolved = await _resolveChangedMember(member, change);
+      final resolved = await _resolveChangedMember(
+        member,
+        change,
+        rung,
+        promotionIntent,
+      );
       if (resolved != null) changed.add(resolved);
     }
     if (changed.isEmpty) {
       return ReleaseWavePlan(
         workspaceRoot: root,
         change: change,
+        promotionIntent: promotionIntent,
         dryRun: dryRunOnly,
         packages: const [],
       );
+    }
+
+    for (final member in changed) {
+      if (change.isBreaking && member.rung == ReleaseRung.stable) {
+        throw ReleaseWaveFailure(
+          stage: ReleaseWaveStage.plan,
+          package: member.name,
+          message:
+              'a breaking STABLE release of ${member.name} is refused: '
+              'breaking work enters the prerelease ladder first. Author it at '
+              'a prerelease rung and cut it with `--change breaking --rung '
+              'dev`, walk dev to beta, and promote the stable base through the '
+              'separate `release validate-consumers` and `release promote` '
+              'operations once a human declares rc.',
+        );
+      }
     }
 
     for (final member in changed) {
@@ -2197,6 +2359,7 @@ class ReleaseService {
                   dependency,
             ]..sort(),
           ),
+          rung: byName[name]!.rung,
           tag: tagFor(package: name, version: byName[name]!.version.toString()),
         ),
     ];
@@ -2218,13 +2381,16 @@ class ReleaseService {
       }
     }
 
-    if (!change.isBreaking) {
+    // The gate follows the PLAN, not the declared change: a stable member is
+    // what a consumer resolves on a caret upgrade, whatever moved it there.
+    if (ordered.any((package) => package.rung == ReleaseRung.stable)) {
       await _validateStableWave(root: root, consumers: consumers);
     }
 
     final plan = ReleaseWavePlan(
       workspaceRoot: root,
       change: change,
+      promotionIntent: promotionIntent,
       dryRun: dryRunOnly,
       packages: List<ReleaseWavePackage>.unmodifiable(ordered),
     );
@@ -2371,39 +2537,26 @@ class ReleaseService {
   /// is already on pub.dev) yields null; otherwise the published predecessor
   /// its version bumps off — null for a first release — is resolved through
   /// the existing [planVersion], so the wave can never invent version math.
+  ///
+  /// The member's RUNG rides along, resolved by [_rungFor] off its authored
+  /// version (or checked against [requestedRung]), so a wave preserves a
+  /// per-package rung instead of imposing one.
   Future<_ChangedMember?> _resolveChangedMember(
     _WorkspaceMember member,
     ReleaseChange change,
+    ReleaseRung? requestedRung,
+    bool promotionIntent,
   ) async {
     final probe = await poll(
       package: member.name,
       version: member.version.toString(),
     );
     if (probe.statusCode == 404) {
-      final isRcShaped =
-          member.version.preRelease.length == 2 &&
-          member.version.preRelease[0] == 'rc' &&
-          member.version.preRelease[1] is int;
-      if (change.isPreRelease && !isRcShaped) {
-        throw ReleaseWaveFailure(
-          stage: ReleaseWaveStage.discovery,
-          package: member.name,
-          message:
-              'an rc wave publishes rc.N pre-releases, but the first release '
-              'of ${member.name} is authored as ${member.version}.',
-        );
-      }
-      if (!change.isPreRelease && member.version.preRelease.isNotEmpty) {
-        throw ReleaseWaveFailure(
-          stage: ReleaseWaveStage.discovery,
-          package: member.name,
-          message:
-              'a ${change.name} wave publishes stable versions, but the first '
-              'release of ${member.name} is authored as the pre-release '
-              '${member.version}.',
-        );
-      }
-      return _ChangedMember(member: member, predecessor: null);
+      return _ChangedMember(
+        member: member,
+        predecessor: null,
+        rung: _rungFor(member, requestedRung, promotionIntent),
+      );
     }
     if (probe.statusCode != 200) {
       throw ReleaseWaveFailure(
@@ -2415,6 +2568,7 @@ class ReleaseService {
       );
     }
     if (probe.isPublished) return null;
+    final rung = _rungFor(member, requestedRung, promotionIntent);
     final published = <Version>[];
     for (final raw in probe.versions) {
       try {
@@ -2433,12 +2587,21 @@ class ReleaseService {
     for (final candidate in published) {
       final ReleaseVersionPlan plan;
       try {
-        plan = planVersion(current: candidate.toString(), change: change);
+        plan = planVersion(
+          current: candidate.toString(),
+          change: change,
+          rung: rung,
+          promotionIntent: promotionIntent,
+        );
       } on ArgumentError {
-        continue; // this published version cannot carry the change class
+        continue; // this published version cannot carry the move at this rung
       }
       if (plan.next == member.version) {
-        return _ChangedMember(member: member, predecessor: candidate);
+        return _ChangedMember(
+          member: member,
+          predecessor: candidate,
+          rung: rung,
+        );
       }
     }
     throw ReleaseWaveFailure(
@@ -2446,9 +2609,67 @@ class ReleaseService {
       package: member.name,
       message:
           'no published version of ${member.name} reaches the authored '
-          '${member.version} under `--change ${change.name}` — re-author the '
-          'version or declare the change class the bump actually carries.',
+          '${member.version} under `--change ${change.name} --rung '
+          '${rung.name}` — re-author the version or declare the change class '
+          'the bump actually carries.',
     );
+  }
+
+  /// The rung [member] publishes at: read off its AUTHORED version, and
+  /// checked against [requestedRung] when the caller supplied one (a wave
+  /// never re-rungs a package behind the author's back).
+  ///
+  /// [ReleaseRung.rc] is refused here — before any tag, push or poll — unless
+  /// [promotionIntent] is declared. Both refusals are loud discovery-stage
+  /// stops: an unsupported prerelease shape has no rung, and there is no safe
+  /// rung to guess.
+  ReleaseRung _rungFor(
+    _WorkspaceMember member,
+    ReleaseRung? requestedRung,
+    bool promotionIntent,
+  ) {
+    final pre = member.version.preRelease;
+    final ReleaseRung authored;
+    if (pre.isEmpty) {
+      authored = ReleaseRung.stable;
+    } else {
+      final parsed = pre.length == 2 && pre[0] is String && pre[1] is int
+          ? ReleaseRung.parse(pre[0] as String)
+          : null;
+      if (parsed == null || !parsed.isPrerelease || (pre[1] as int) < 1) {
+        throw ReleaseWaveFailure(
+          stage: ReleaseWaveStage.discovery,
+          package: member.name,
+          message:
+              '${member.name} is authored as ${member.version}, which sits on '
+              'no release rung: a pre-release must be '
+              '<dev|beta|rc>.<positive integer>.',
+        );
+      }
+      authored = parsed;
+    }
+    if (requestedRung != null && authored != requestedRung) {
+      throw ReleaseWaveFailure(
+        stage: ReleaseWaveStage.discovery,
+        package: member.name,
+        message:
+            '${member.name} is authored as ${member.version}, a '
+            '${authored.name} version, but the wave requested the '
+            '${requestedRung.name} rung — re-author the version or drop '
+            '`--rung`.',
+      );
+    }
+    if (authored.requiresPromotionIntent && !promotionIntent) {
+      throw ReleaseWaveFailure(
+        stage: ReleaseWaveStage.discovery,
+        package: member.name,
+        message:
+            '${member.name} is authored as ${member.version}: rc means a human '
+            'has declared intent to promote, so the rc rung is refused without '
+            'a declared promotion intent.',
+      );
+    }
+    return authored;
   }
 
   /// Runs the existing complete scrub gate (content scan + declared floors)
@@ -2481,9 +2702,10 @@ class ReleaseService {
     );
   }
 
-  /// The direct stable wave's consumer gate: resolve the origin-reachable
-  /// release commit, validate every consumer against it, restore the consumer
-  /// overrides, and refuse the wave — before any tag exists — when one fails.
+  /// The consumer gate a wave carrying a STABLE member owes: resolve the
+  /// origin-reachable release commit, validate every consumer against it,
+  /// restore the consumer overrides, and refuse the wave — before any tag
+  /// exists — when one fails.
   Future<void> _validateStableWave({
     required String root,
     required List<ReleaseConsumer> consumers,
@@ -2492,7 +2714,7 @@ class ReleaseService {
       throw const ReleaseWaveFailure(
         stage: ReleaseWaveStage.validateConsumers,
         message:
-            'a docs/additive/fix wave may tag directly but is still '
+            'a wave with a stable member may tag directly but is still '
             'consumer-validated: pass `--consumers <manifest.json>` naming '
             'every consumer this wave must not break.',
       );
@@ -2533,8 +2755,8 @@ class ReleaseService {
       stage: ReleaseWaveStage.validateConsumers,
       message:
           'consumer validation failed at $sha for: $failed. A "non-breaking" '
-          'change that fails a consumer is breaking — cut it as a candidate '
-          'with `--change rc` instead.',
+          'change that fails a consumer is breaking — put it on the prerelease '
+          'ladder with `--change breaking --rung dev` instead.',
     );
   }
 
@@ -2676,10 +2898,15 @@ class _WorkspaceMember {
 
 /// A member the wave publishes, plus the published version it moves off.
 class _ChangedMember {
-  const _ChangedMember({required this.member, required this.predecessor});
+  const _ChangedMember({
+    required this.member,
+    required this.predecessor,
+    required this.rung,
+  });
 
   final _WorkspaceMember member;
   final Version? predecessor;
+  final ReleaseRung rung;
 
   String get name => member.name;
   String get directory => member.directory;
