@@ -812,6 +812,12 @@ abstract final class GridAssetsPack {
                 'The composing station\'s executable name (e.g. `space`) — the verb its boot/status/down calls ride.',
             isRequired: true,
           ),
+          AssetArgument(
+            name: 'bootRunner',
+            description:
+                'What starts the RESIDENT (e.g. `dart run space:space`). Defaults to `runner`; set it only when the two runtimes differ, as they do when the verb runner is on PATH but the resident still needs the JIT form for --enable-vm-service.',
+            isRequired: false,
+          ),
         ],
       ),
       AssetArtifact(
@@ -824,6 +830,12 @@ abstract final class GridAssetsPack {
             description:
                 'The composing station\'s executable name (e.g. `space`) — the verb its boot/status/down calls ride.',
             isRequired: true,
+          ),
+          AssetArgument(
+            name: 'bootRunner',
+            description:
+                'What starts the RESIDENT (e.g. `dart run space:space`). Defaults to `runner`; set it only when the two runtimes differ, as they do when the verb runner is on PATH but the resident still needs the JIT form for --enable-vm-service.',
+            isRequired: false,
           ),
         ],
       ),

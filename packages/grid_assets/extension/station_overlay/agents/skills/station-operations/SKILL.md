@@ -1,13 +1,13 @@
 ---
 name: station-operations
 description: >
-  Operate the resident the_grid station: boot ({{runner}} up), bounce, tear
+  Operate the resident the_grid station: boot ({{bootRunner}} up), bounce, tear
   down, read /status, seed a grid home's state store, and diagnose a station
   that is up but driving nothing. Use when starting, restarting, or arming the
   station, when a boot looks healthy but ready > 0 with mounted 0 and no
   output, or when preparing a fresh grid home — even if the symptom is just
   "nothing is happening."
-compatibility: Requires dart + the `{{runner}}` runner (the station runs JIT via `dart run`, never an AOT binary), bd (beads CLI), git.
+compatibility: Requires dart, the `{{runner}}` verb runner, and `{{bootRunner}}` to start the resident (which runs JIT via `dart run`, never an AOT binary), bd (beads CLI), git.
 metadata:
   author: memento-engineering
 ---
@@ -23,7 +23,7 @@ harness invocation: the launcher binds the seat's role definition and its disc
 at `.grid/seats/governor/`, and relaunches on handoff.
 
 ```
-{{runner}} up --no-dry-run \
+{{bootRunner}} up --no-dry-run \
   --grid-home "$(pwd)" \
   --substation '<name>[@<prefix>]=<abs work-repo root>' ...
   [--max-agents N]
@@ -48,7 +48,7 @@ existing you should see `mounted`/`live sessions` > 0, per-bead worktrees under
 
 ```
 {{runner}} down --state-workspace "$(pwd)"        # scoped stop via the lock
-{{runner}} up ...                                 # same arming
+{{bootRunner}} up ...                                 # same arming
 ```
 
 Bounce whenever station-side state is latched (see the silent-death runbook) or
@@ -116,7 +116,7 @@ timeout heartbeat (~45min while work is in flight, ~3h idle). Scan gates via
 - The banner's "work-driving: ARMED" is derived from config, not from the tree
   actually driving — trust only effects.
 - A landed engine/sdk change is picked up by re-running from source on a bounce or
-  hot-reload — there is no recompile step. Run the `{{runner}}` station JIT (via
+  hot-reload — there is no recompile step. Run the `{{bootRunner}}` station JIT (via
   `dart run`), never a compiled binary: a binary loses the VM service, hot-reload,
   and the current-source guarantee (the station is JIT-only — see its CLAUDE.md).
 - The dry smoke CANNOT prove the write path (dry = no-op bd writer): the first

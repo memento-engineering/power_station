@@ -38,7 +38,8 @@ import 'package:beads_dart/beads_dart.dart';
 import 'package:path/path.dart' as p;
 
 import 'overlay_manifest.dart';
-import 'overlay_materializer.dart' show kDefaultOverlayRunner;
+import 'overlay_materializer.dart'
+    show kDefaultOverlayRunner, renderOverlayTemplate;
 
 /// Any `{{key}}` hole left after substitution — a RENDERED asset has none.
 final RegExp _templateHole = RegExp(r'\{\{[^}]*\}\}');
@@ -240,13 +241,16 @@ class PackagedAssetLoader {
     );
   }
 
-  /// Substitutes every `{{key}}` in [template] from [vars] (a tiny, dependency-
-  /// free mustache for flat string args — the only templating D-9 needs now).
-  static String _mustache(String template, Map<String, String> vars) {
-    var out = template;
-    vars.forEach((key, value) => out = out.replaceAll('{{$key}}', value));
-    return out;
-  }
+  /// Substitutes every `{{key}}` in [template] from [vars].
+  ///
+  /// DELEGATES to `renderOverlayTemplate` rather than carrying its own copy.
+  /// This was a second implementation of the same substitution — the
+  /// materializer's own doc already called them "the same dependency-free flat
+  /// mustache" — and the duplication was not free: the `{{bootRunner}}` default
+  /// was added to one of them and this path kept refusing the hole as unbound.
+  /// One renderer, one place for a default.
+  static String _mustache(String template, Map<String, String> vars) =>
+      renderOverlayTemplate(template, vars);
 
   /// Renders the full work [bead] into a prompt block (title/task/design/
   /// acceptance/notes) — the `{{bead}}` substitution.

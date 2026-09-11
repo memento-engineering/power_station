@@ -372,7 +372,11 @@ void main() {
   group('the re-homed OPERATOR skills', () {
     const reHomed = <String, Set<String>>{
       'asset-author': <String>{},
-      'station-operations': {'runner'},
+      // station-operations names BOTH runtimes: `runner` is the verb
+      // invocation a seat can reach, `bootRunner` is what starts the resident
+      // (which needs the JIT form for --enable-vm-service). It is the only
+      // skill that boots anything, so it is the only one carrying two.
+      'station-operations': {'runner', 'bootRunner'},
       'gate-medicine': {'runner'},
       'harvest-review': {'runner'},
       'intake-refinement': {'runner'},

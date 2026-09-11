@@ -97,6 +97,12 @@ const List<String> kOverlayTargetHeads = [kClaudeTargetHead, kAgentsTargetHead];
 /// materializer names it in every provenance stamp.
 const String kDefaultOverlayRunner = 'space';
 
+/// The hole naming the VERB invocation — the name a seat or operator calls.
+const String kRunnerArg = 'runner';
+
+/// The hole naming what starts the RESIDENT. Defaults to [kRunnerArg].
+const String kBootRunnerArg = 'bootRunner';
+
 /// Any `{{key}}` hole left in a rendered file — an installed asset has none.
 final RegExp _templateHole = RegExp(r'\{\{[^}]*\}\}');
 
@@ -410,6 +416,16 @@ class OverlayMaterializer {
     final selected = resolution.artifactsUnder(subtrees);
     final args = resolution.renderArguments;
     final runner = args['runner'] ?? kDefaultOverlayRunner;
+    // TWO RUNTIMES, TWO HOLES. `{{runner}}` is the VERB invocation — the name a
+    // seat or operator calls for read/status/approve, which must be reachable
+    // from a substation worktree where `dart run <station>:<station>` resolves
+    // nothing. `{{bootRunner}}` is what starts the RESIDENT, which today needs
+    // the JIT run form because that is what carries `--enable-vm-service` and
+    // therefore hot reload, `reload` and the leonard attach.
+    //
+    // Defaulting bootRunner to runner keeps every station that sets only
+    // `runner` rendering byte-identically, so this is additive. A station whose
+    // two runtimes differ sets both; one that never splits them never notices.
     for (final resolved in selected) {
       final source = File(resolved.sourcePath);
       if (!source.existsSync()) {
@@ -564,9 +580,25 @@ class OverlayMaterializer {
 
   /// Substitutes every `{{key}}` from [args] — the same dependency-free flat
   /// mustache `PackagedAssetLoader` renders skills with.
-  static String _render(String contents, Map<String, String> args) {
-    var out = contents;
-    args.forEach((key, value) => out = out.replaceAll('{{$key}}', value));
-    return out;
-  }
+  static String _render(String contents, Map<String, String> args) =>
+      renderOverlayTemplate(contents, args);
+}
+
+/// Renders [contents] against [args], applying the overlay's argument defaults.
+///
+/// PUBLIC because the two-runtime contract is worth asserting directly: a skill
+/// that renders a resident boot from `{{runner}}` instead of `{{bootRunner}}`
+/// tells an operator to start the station with a runtime carrying no VM
+/// service, and that mistake is invisible until someone tries to hot-reload.
+///
+/// [kBootRunnerArg] defaults to [kRunnerArg] so a station that names only one
+/// runtime renders exactly as it did before the split.
+String renderOverlayTemplate(String contents, Map<String, String> args) {
+  final effective = <String, String>{
+    if (args[kRunnerArg] != null) kBootRunnerArg: args[kRunnerArg]!,
+    ...args,
+  };
+  var out = contents;
+  effective.forEach((key, value) => out = out.replaceAll('{{$key}}', value));
+  return out;
 }
