@@ -11,6 +11,7 @@ library;
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:args/args.dart';
 import 'package:args/command_runner.dart';
 
 import 'release_service.dart';
@@ -61,6 +62,43 @@ List<ReleaseConsumer> _consumersFromManifest(File file) {
     for (final entry in decoded['consumers'] as List)
       ReleaseConsumer.fromJson((entry as Map).cast<String, Object?>()),
   ];
+}
+
+/// A `--rung`/`--change` argv refusal — carried as a throw so the two release
+/// ops that parse the pair render it identically and exit 64.
+class _RungUsageError implements Exception {
+  const _RungUsageError(this.message);
+
+  final String message;
+}
+
+/// Resolves the PRERELEASE RUNG from argv, honouring the legacy `--change rc`
+/// alias.
+///
+/// `--change rc` is the compatibility spelling of `--change breaking --rung
+/// rc`: it IMPLIES the rc rung, so it is accepted on its own, agrees with an
+/// explicit `--rung rc`, and CONFLICTS with any other explicit rung (a usage
+/// refusal, never a silently-picked winner). `--rung` alone is taken as given;
+/// omitting both yields [fallback].
+ReleaseRung? _rungFrom(
+  ArgResults args,
+  String? rawChange,
+  String op, {
+  ReleaseRung? fallback = ReleaseRung.stable,
+}) {
+  final rawRung = args.option('rung');
+  final explicit = rawRung == null ? null : ReleaseRung.parse(rawRung);
+  if (rawRung != null && explicit == null) {
+    throw _RungUsageError('$op: unknown --rung');
+  }
+  if (rawChange != 'rc') return explicit ?? fallback;
+  if (explicit != null && explicit != ReleaseRung.rc) {
+    throw _RungUsageError(
+      '$op: `--change rc` is the compatibility spelling of `--change breaking '
+      '--rung rc`, so it conflicts with `--rung ${explicit.name}` — drop one.',
+    );
+  }
+  return ReleaseRung.rc;
 }
 
 /// `dart release discover` — ask melos what the workspace needs to release.
@@ -160,8 +198,22 @@ class ReleasePlanCommand extends Command<int> {
         mandatory: true,
         allowed: ['docs', 'additive', 'fix', 'breaking', 'rc'],
         help:
-            'docs/additive/fix -> PATCH; breaking -> MINOR pre-1.0 / MAJOR '
-            'from 1.0; rc -> next breaking base as rc.N.',
+            'The SEMVER MOVE. docs/additive/fix -> PATCH; breaking -> MINOR '
+            'pre-1.0 / MAJOR from 1.0. `rc` is the compatibility spelling of '
+            '`--change breaking --rung rc`.',
+      )
+      ..addOption(
+        'rung',
+        allowed: ['stable', 'dev', 'beta', 'rc'],
+        help:
+            'The PRERELEASE RUNG, independent of --change. Omitted means '
+            'stable. dev/beta need no declared intent; rc requires '
+            '--promotion-intent.',
+      )
+      ..addFlag(
+        'promotion-intent',
+        negatable: false,
+        help: 'Declare the human intent to promote that the rc rung requires.',
       )
       ..addFlag(
         'json',
@@ -178,14 +230,22 @@ class ReleasePlanCommand extends Command<int> {
   final String name = 'plan';
   @override
   final String description =
-      'Compute the next version + git tag for a change class.';
+      'Compute the next version + git tag for a semver move at a rung.';
 
   @override
   Future<int> run() async {
     final args = argResults!;
-    final change = ReleaseChange.parse(args.option('change'));
+    final rawChange = args.option('change');
+    final change = ReleaseChange.parse(rawChange);
     if (change == null) {
       _err.writeln('release plan: unknown --change');
+      return 64;
+    }
+    final ReleaseRung rung;
+    try {
+      rung = _rungFrom(args, rawChange, 'release plan')!;
+    } on _RungUsageError catch (e) {
+      _err.writeln(e.message);
       return 64;
     }
     final ReleaseVersionPlan plan;
@@ -193,6 +253,8 @@ class ReleasePlanCommand extends Command<int> {
       plan = _service.planVersion(
         current: args.option('current')!,
         change: change,
+        rung: rung,
+        promotionIntent: args.flag('promotion-intent'),
       );
     } on ArgumentError catch (e) {
       _err.writeln('release plan: ${e.message}');
@@ -802,15 +864,29 @@ class ReleasePublishCommand extends Command<int> {
         mandatory: true,
         allowed: ['docs', 'additive', 'fix', 'breaking', 'rc'],
         help:
-            'The wave\'s change class. docs/additive/fix tag directly but are '
-            'still consumer-validated; rc cuts candidates only; breaking is '
-            'refused (it goes rc-first, then promote).',
+            'The wave\'s SEMVER MOVE. A breaking move must land on a '
+            'prerelease rung; `rc` is the compatibility spelling of '
+            '`--change breaking --rung rc`.',
+      )
+      ..addOption(
+        'rung',
+        allowed: ['stable', 'dev', 'beta', 'rc'],
+        help:
+            'Require every changed package to sit on this PRERELEASE RUNG. '
+            'Omitted, each package\'s rung is inferred from its authored '
+            'version, so a mixed dev/beta wave is fine.',
+      )
+      ..addFlag(
+        'promotion-intent',
+        negatable: false,
+        help:
+            'Declare the human intent to promote that an rc package requires.',
       )
       ..addOption(
         'consumers',
         help:
-            'JSON manifest containing a consumers list — REQUIRED for a '
-            'docs/additive/fix wave, unused by rc.',
+            'JSON manifest containing a consumers list — REQUIRED once the '
+            'wave carries a stable package, unused by an all-prerelease wave.',
       )
       ..addFlag(
         'dry-run',
@@ -838,22 +914,27 @@ class ReleasePublishCommand extends Command<int> {
   @override
   Future<int> run() async {
     final args = argResults!;
-    final change = ReleaseChange.parse(args.option('change'));
+    final rawChange = args.option('change');
+    final change = ReleaseChange.parse(rawChange);
     if (change == null) {
       _err.writeln('release publish: unknown --change');
       return 64;
     }
+    // A rung is OPTIONAL here: omitted, the service infers each package's rung
+    // from its authored version. The legacy `--change rc` spelling still pins
+    // it, so the alias keeps meaning breaking-at-rc.
+    final ReleaseRung? rung;
+    try {
+      rung = _rungFrom(args, rawChange, 'release publish', fallback: null);
+    } on _RungUsageError catch (e) {
+      _err.writeln(e.message);
+      return 64;
+    }
+    // The consumers gate lives in the service, on the PLANNED wave: whether a
+    // stable package is in it is not knowable from --change alone.
     final manifestPath = args.option('consumers');
     var consumers = const <ReleaseConsumer>[];
-    if (manifestPath == null) {
-      if (!change.isBreaking) {
-        _err.writeln(
-          'release publish: --consumers <manifest.json> is required for a '
-          '${change.name} wave (it tags directly, so it is validated first).',
-        );
-        return 64;
-      }
-    } else {
+    if (manifestPath != null) {
       final file = File(manifestPath);
       if (!file.existsSync()) {
         _err.writeln('release publish: no such manifest: ${file.path}');
@@ -871,6 +952,8 @@ class ReleasePublishCommand extends Command<int> {
       final plan = await _service.publishWorkspace(
         workspaceRoot: args.option('workspace')!,
         change: change,
+        rung: rung,
+        promotionIntent: args.flag('promotion-intent'),
         consumers: consumers,
         dryRunOnly: args.flag('dry-run'),
       );

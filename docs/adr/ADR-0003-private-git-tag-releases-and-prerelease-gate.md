@@ -1,6 +1,7 @@
 # ADR-0003 — Private git-tag releases + a pre-release-gated release process
 
-**Status:** **Partially superseded by practice (2026-08-05)** — **D3/D4 stand; D1/D2 do not.**
+**Status:** **Partially superseded (2026-08-05 by practice; 2026-09-10 by org ruling)**
+— **D1/D2 do not stand; D4 stands; D3 stands NARROWED.**
 Originally Accepted from an interactive design session on **2026-07-16**.
 
 > **CORRECTION, 2026-08-05.** This ADR's first structural premise — *"every `grid_*` package is
@@ -19,7 +20,8 @@ Originally Accepted from an interactive design session on **2026-07-16**.
 >   release channel is pub.dev; a consumer adopts a producer change by bumping a **semver
 >   constraint**. `space_station`'s pubspec already documents this in a comment as a "D1 source
 >   amendment"; that amendment was never recorded anywhere until now.
-> - **D3/D4 (the pre-release gate) — UNCHANGED AND HONOURED.** The property D3 names, *"a
+> - **D3/D4 (the pre-release gate) — UNCHANGED AND HONOURED** *(as of 2026-08-05; D3 was
+>   later NARROWED — see the 2026-09-10 block below)*. The property D3 names, *"a
 >   stable release is never born until its rc cleared every consumer"*, is intact. Only the
 >   carrier changed: an rc is a **pub.dev prerelease** (`0.2.0-rc.1`) rather than an rc git tag,
 >   and pub's own solver excludes prereleases from caret ranges, so an rc reaches only consumers
@@ -31,6 +33,32 @@ Originally Accepted from an interactive design session on **2026-07-16**.
 >
 > **Still open:** D5's dev/worktree path-override escape hatch is unaffected. D6's adoption
 > order is moot as written (it sequences tag adoption).
+
+> **NARROWING, 2026-09-10.** D3's first bullet — *"A BREAKING change MUST go rc-first and pass
+> every consumer before promotion"* — is **narrowed by the org register entry
+> `memento-engineering#prerelease-rungs-are-dev-beta-rc-and-rc-is-human-only`** (accepted
+> 2026-09-10; Nico + refiner; bead `org-6ku`), which splits the prerelease RUNG from the semver
+> MOVE and rules a three-rung ladder, per package: `dev`, `beta`, `rc`.
+>
+> **What is narrowed.** breaking work enters the ladder at dev, not at rc. A package may move up
+> to `beta` on a machine-checkable condition an agent evaluates (no breaking API change against
+> the previous prerelease of the same target version), and **only a human sets the rc rung** —
+> its entry condition is a declared intent to promote, never a computed one. So an agent may
+> publish a breaking change at `dev` or `beta` on its own authority, and may not reach `rc`.
+>
+> **What is NOT narrowed.** The second half of that sentence stands verbatim: nothing reaches a
+> stable version until **every consumer** passes. `release promote` still requires a green
+> consumer-validation report, so the property D3 actually names — *a stable release is never
+> born until its candidate cleared every consumer* — is intact. Only the rung the soak STARTS
+> at moved.
+>
+> **Where the mechanism lives:** `dart_grid_assets`' release service. `ReleaseChange` now carries
+> the semver move alone (`docs`/`additive`/`fix`/`breaking`) and the new `ReleaseRung` carries
+> `stable`/`dev`/`beta`/`rc`; `--change rc` survives as the compatibility spelling of
+> `--change breaking --rung rc` and still refuses without a declared promotion intent.
+>
+> This records an already-ratified ORG decision where the binding text lives (doc before code).
+> It mints **no new decision of its own** — the org entry is the authority.
 
 It is authored under the org's DOC-BEFORE-CODE rule ahead of
 the code that implements it, and contains **no new decision of its own** — it TRANSCRIBES a
@@ -114,6 +142,11 @@ git-tag pin (the `dev`/`worktree` path-override contexts are unchanged — see D
 `the_grid/docs/SCRATCH-pub-capability-and-repo-split.md`) finally emits the git half.
 
 ### D3 — Pre-release gate: breaking changes soak through an rc; non-breaking are validated.
+
+> **NARROWED 2026-09-10** — see the status block. Breaking work now enters the ladder
+> at `dev`, walks to `beta` on a machine-checkable condition, and reaches `rc` only
+> when a human declares intent to promote. The every-consumer requirement below is
+> unchanged. The bullets that follow are the ORIGINAL 2026-07-15 text.
 
 The `release` tooling gains a **pre-release change class** (rc). The process:
 
