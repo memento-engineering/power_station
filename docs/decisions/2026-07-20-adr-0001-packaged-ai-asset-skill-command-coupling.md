@@ -1,7 +1,7 @@
 ---
 status: accepted
 date: 2026-07-20
-decision-makers: ["agent"]
+decision-makers: ["nico"]
 consulted: []
 informed: []
 register:
@@ -12,15 +12,19 @@ register:
   obsoletes: []
   updates: []
   obsoleted-by: null
-  updated-by: []
-  bead: null
+  updated-by:
+    - a-mechanical-lookup-is-a-vended-command-with-a-bounded-output
+  bead: pow-p94
   legacy-id: "ADR-0001"
 ---
 # ADR-0001 — Packaged-AI-Asset = coupled skill + command
 
-**Status:** **DRAFT** — proving out over the next few days (Nico, 2026-07-10). Not yet Accepted; the
-first instances (below) are the dogfood. Nico ratifies the promotion Draft → Accepted once the
-pattern holds in practice. Recording bead: `pow-p94`.
+**Status corrected 2026-09-11.** The body below is the converted `ADR-0001` verbatim except for this
+block, which asserted a `DRAFT` state. The decisions pattern has no draft — an entry is binding on
+write (Nico, 2026-09-11) — and the frontmatter has read `accepted` since conversion, so the two
+surfaces disagreed. The direction was ratified interactively by Nico on 2026-07-10. Recording bead:
+`pow-p94`. Extended by
+[a-mechanical-lookup-is-a-vended-command-with-a-bounded-output](2026-09-11-a-mechanical-lookup-is-a-vended-command-with-a-bounded-output.md).
 
 ## Context
 
