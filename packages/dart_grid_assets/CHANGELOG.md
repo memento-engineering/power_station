@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.0-dev.1
 
 - Changed (BREAKING): `ReleaseChange` carries the SEMVER MOVE alone — `docs`, `additive`, `fix`, `breaking`. Its `rc` value and its `isPreRelease` getter are gone, and `isBreaking` is now true for `breaking` alone. The prerelease rung was never a semver move: binding `rc` to `breaking` made a 0.x package doing breaking work reach for the candidate rung by construction, every single time (the measured drift: `grid_sdk` 22 prereleases and still stable at 0.2.0, `grid_assets` 25 and still 0.4.0, against `genesis_tree`'s ten releases and zero prereleases).
 - Added: `ReleaseRung` — the PRERELEASE RUNG axis, carried per PACKAGE: `stable`, `dev`, `beta`, `rc`, with `parse` (fail-closed, null for null/unknown), `defaultPrerelease` (`dev`), `identifier`, `isPrerelease`, `requiresPromotionIntent` and a `compareTo`/`order` fixed as `dev < beta < rc < stable`. `dev` is where any prerelease starts; `beta` means the API is frozen for this target version; `rc` means a human has DECLARED intent to promote, and is the only rung a human must set.

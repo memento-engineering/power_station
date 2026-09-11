@@ -1,3 +1,11 @@
+## 0.6.0-rc.25
+
+- Added: `{{bootRunner}}` — the RESIDENT-BOOT invocation hole, independent of `{{runner}}` and DEFAULTING to it. A station has two runtimes and the overlay could name only one, so a station whose runner is on PATH could not spell its seat verbs with the global name without also re-spelling its resident boot — which needs the JIT run form, because that is what carries `--enable-vm-service` and therefore hot reload, the `reload` verb and the leonard attach. `station-operations` declares the hole on both targets and uses it at its five boot sites; `seat`, `down` and `status` stay on the verb hole, none of them needing a VM service. Purely additive: a station naming only one runtime renders byte-identically (lunar_station-cu7, #288).
+- Fixed: the overlay template substitution existed TWICE — the materializer's `_render` and the loader's `_mustache` — so a default bound in one was refused as an unbound hole by the other. Both now share the public `renderOverlayTemplate`, which is public because the two-runtime contract is worth asserting directly (#288).
+- Changed: the build-agent working agreement makes a command, skill or other vended asset DONE only when a real runner or install path REACHES it, and requires the acceptance criteria to prove that reachable surface. A verb could previously ship in an asset, be named by a vended skill, and pass a green plan while no runner composed the command — so the installed skill taught a first step that could not run (pow-yt8n, #283).
+- Changed: handoff board state and rulings carry bead TITLES next to ids, so a handoff read on a phone needs no store lookup; both overlay legs updated identically (Nico 2026-09-10, #282).
+- Changed: floors `dart_grid_assets` at `^0.2.0-dev.1`, the rung-split release service (#284).
+
 ## 0.6.0-rc.24
 
 - Added: the specify capability stamps `spec.author = specify` on the spec it authors through `writeSpecifyAuthoredSpec` (the grid_runtime rc.19 chokepoint), so a rework re-authors specify text while preserving hand-written and governor-restored `design` / `acceptance_criteria` (pow-m8v5, #279; closes the loop opened by the_grid#390).
