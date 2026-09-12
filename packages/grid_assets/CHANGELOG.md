@@ -1,8 +1,22 @@
-## Unreleased
+## 0.7.0-dev.1
+
+- Breaking: `AgentArming.seats` is now `Iterable<SeatPreference>` (was `Iterable<ModelPreference>`), and the `kAgentsTargetHead` / `kClaudeTargetHead` fields are removed (pow-ycoi, #298). Migration: a station that read `seats` as model preferences reads `SeatPreference` values and takes each seat's provider from `SeatPreference.provider()`; code that named the two target-head constants derives the head from the overlay mapping instead.
+- Added: the open seat mechanism from pow-ycoi (#298) — `SeatPreference`, `SeatProvider` and `CriticSeatProvider` are the published way a station arms a typed seat over Nest; `AgentArming` survives only as an `Iterable<SeatPreference>` shim. Published at the dev rung on the 0.3-line grid pins so space_station can consume it (space-qyw) ahead of the genesis_tree 0.4 wave.
+- Also in this line since 0.6.0: #292 #294 #295 #296 #301 #302 #303 #304 #305 #306 —
+  - fix(assets): surface governor-owned blockers in sweeps (#306)
+  - feat(agent): arm a relay seat by presence in the tree (#305)
+  - fix(specify): type validation plan read failures (#304)
+  - fix(code): run the validation plan as a child script (#302)
+  - fix(specify): parse-check validation plans before filing (#303)
+  - fix(grid-assets): anchor test readers on package root (#301)
+  - refactor(agent): open typed-seat arming over Nest (#298)
+  - feat(filing): vend a bounded one-bead show command (#296)
+  - fix(assets): allow boot runner to be configured separately (#295)
+  - feat(overlay): add agents_root mapping for repository root AGENTS.md (#294)
+  - fix(grid_assets): format registries at package language version (#292)
 
 - Added: `runRecall` takes an optional `workingDirectory` — the root its durable recall corpus path resolves against, defaulting to the process working directory, so the vended `tool/search_recall.dart` invocation is unchanged. A caller that owns a corpus elsewhere (the pack's own recall suite, which exercises record mode against a disposable copy) now names that root instead of assigning `Directory.current`. That property is process-global while `dart test` runs test files in concurrent isolates of ONE process, so the three suites that moved it raced the eleven that read package-local source by a relative path: a read scheduled inside another file's window threw `PathNotFoundException` or resolved a different tree, nondeterministically and never in isolation. The suite now anchors every package-local path on one cwd-independent package root and assigns the process working directory nowhere.
 
-## 0.6.1
 
 - Fixed: the asset generator formats a generated registry at the CONSUMING PACKAGE's own Dart language version — the inclusive floor of its `environment.sdk` — instead of `--language-version=latest`, so ONE committed `lib/src/assets/grid_asset_pack.dart` is current AND format-clean under every SDK a consumer runs. Under `latest` the rendered bytes were a function of whichever SDK happened to run the generator: an unchanged commit that was current on Dart 3.12 reported `STALE lib/src/assets/grid_asset_pack.dart` on 3.13, and no single committed file could satisfy both. The SDK `dart format` executable stays the formatter, and a pubspec whose `environment.sdk` is missing, malformed, or carries no inclusive floor is now refused LOUD before either output is rendered, compared, or written (pow-10fv; extends pow-5ifa, which put the SDK formatter executable in place; the duplicate tg-txbs was misfiled against the_grid and is closed).
 

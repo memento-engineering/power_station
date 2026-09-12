@@ -1,3 +1,8 @@
+## 0.1.1-dev.1
+
+- Floors `grid_assets` at `^0.7.0-dev.1` (sibling coherence for the seat-mechanism wave, pow-3xae).
+- No source change of its own; rides the wave for sibling coherence.
+
 ## 0.1.0
 
 - PROMOTED from 0.1.0-rc.16. This is the stable release of the 0.1.0 line; the code is the
