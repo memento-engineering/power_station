@@ -6,7 +6,10 @@ import 'package:beads_dart/beads_dart.dart' show Bead;
 import 'package:genesis_tree/genesis_tree.dart';
 import 'package:grid_assets/grid_assets.dart';
 import 'package:grid_sdk/grid_sdk.dart' as sdk;
+import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
+
+import '../support/package_root.dart';
 
 const _provider = EmbeddingProvider(
   id: 'fixture',
@@ -150,11 +153,10 @@ void main() {
   });
 
   test('search source files retain the sole-writer fence', () {
-    for (final path in [
-      'lib/src/search/station_search.dart',
-      'lib/src/search/search_command.dart',
-    ]) {
-      final source = File(path).readAsStringSync();
+    for (final leaf in ['station_search.dart', 'search_command.dart']) {
+      final source = File(
+        p.join(packageRoot(), 'lib', 'src', 'search', leaf),
+      ).readAsStringSync();
       expect(source, isNot(contains('EmbeddingClient')));
       expect(source, isNot(contains('replaceBead')));
       expect(source, isNot(contains('deleteBeads')));

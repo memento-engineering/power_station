@@ -1036,7 +1036,12 @@ diff --git a/test/committee_test.dart b/test/committee_test.dart
       final rows =
           jsonDecode(
                 File(
-                  'test/fixtures/committee_selection_corpus.json',
+                  p.join(
+                    packageRoot(),
+                    'test',
+                    'fixtures',
+                    'committee_selection_corpus.json',
+                  ),
                 ).readAsStringSync(),
               )
               as List<Object?>;

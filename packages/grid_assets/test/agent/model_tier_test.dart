@@ -376,7 +376,7 @@ void main() {
       'the TIER axis is dependency-free — it names no engine and no role',
       () {
         final src = File(
-          p.join('lib', 'src', 'agent', 'model_tier.dart'),
+          p.join(packageRoot(), 'lib', 'src', 'agent', 'model_tier.dart'),
         ).readAsStringSync();
         expect(
           src,

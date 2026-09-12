@@ -7,5 +7,10 @@
     {"name":"single-store-owner","query":"how do we stop two stations fighting over one store","expectedBeadIds":["tg-s6gk","tg-0edw"]}
   ],
   "exactIdGuard": "tg-5drf",
-  "baseline": {}
+  "baseline": {
+    "refinement-vocabulary": {"rank": 1, "score": 0.781},
+    "production-observability": {"rank": 1, "score": 0.836},
+    "station-effectiveness": {"rank": 1, "score": 0.724},
+    "single-store-owner": {"rank": 1, "score": 0.692}
+  }
 }

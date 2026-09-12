@@ -90,17 +90,27 @@ method.
 `'.'` so `tool/search_recall.dart` and every other caller are unchanged. It is
 the only production surface this bead touches.
 
-**(5) Record mode is seeded from a fixture no tool writes.** The recall suite
-seeded record mode from the DURABLE corpus and asserted that corpus's baseline
-was empty. `--record-baseline` rewrites that same corpus's own baseline after a
-green live run, so the assertion made a legitimate recording indistinguishable
-from a regression — and a stale populated copy left on disk read as a failure.
-The seed is now `semantic_recall_empty_baseline_set.json`, pinned empty, and the
-contract test holds both corpora to the same cases and exact-id guard so the
-seed cannot drift from what is actually searched. The durable corpus's baseline
-is deliberately left unasserted rather than populated: it is documented as a
-recorded LIVE baseline, and filling it from the pack's report fixtures would
-record a measurement that never happened.
+**(5) Record mode is seeded from a fixture no tool writes, and the durable
+corpus's baseline is PINNED.** The recall suite seeded record mode from the
+DURABLE corpus and asserted that corpus's baseline was empty, while
+`--record-baseline` rewrites that same corpus's own baseline — so the assertion
+made a legitimate recording indistinguishable from a regression. The seed is now
+`semantic_recall_empty_baseline_set.json`, pinned empty, it is the ONLY file
+pinned empty, and the contract test holds both corpora to the same cases and
+exact-id guard so the seed cannot drift from what is actually searched.
+
+The durable corpus carries the four rank/score records of the corpus this pack
+actually evaluates — `refinement-vocabulary` 1/0.781, `production-observability`
+1/0.836, `station-effectiveness` 1/0.724, `single-store-owner` 1/0.692, each the
+top semantic hit for that case in `semantic_recall_reports.json` — and the
+contract test asserts that map EXACTLY. Leaving it unasserted was the weaker
+call: the emptiness assertion moved to the seed, so nothing checked the durable
+file's baseline at all and an empty or drifted corpus passed the suite silently,
+with no command able to tell a populated corpus from an unpopulated one. A
+recall corpus whose baseline nothing asserts records nothing. The cost is
+explicit and accepted: a real `--record-baseline` run that moves a number now
+lands as a red test, and the new numbers are read off that failure and re-pinned
+in the same commit — which is what pinning a baseline is for.
 
 ## Consequences
 
@@ -147,10 +157,16 @@ seed alters that writer or record-mode semantics.
 ## Confirmation
 
 `grep -rn "Directory.current *=" packages/grid_assets/test` and
-`grep -rln "File('lib/\|File('test/\|Directory.current" packages/grid_assets/test`
-both print nothing and exit 1. `dart analyze`, `dart format --set-exit-if-changed`
-and three consecutive full-suite runs are green, and the diff introduces no
-`dart test -j`/`--concurrency` flag and no `@Tags`/`tags:` isolation.
+`grep -rln "Directory.current" packages/grid_assets/test` both print nothing and
+exit 1, and so does the MULTILINE reader audit
+`rg -U -n -t dart "(File|Directory)\(\s*(p\.join\(\s*)?\W(lib|test|extension|tool|bin)\W" test`.
+A single-line grep is NOT sufficient and was the gap that let this bead reach a
+second round: nine live readers survived it, hidden behind formatter line wraps,
+`p.join` spellings, an `extension/` prefix and a path variable, so the audit
+that gates this decision is the wrapped-source one. `dart analyze`,
+`dart format --set-exit-if-changed` and three consecutive full-suite runs are
+green, and the diff introduces no `dart test -j`/`--concurrency` flag and no
+`@Tags`/`tags:` isolation.
 
 ## Affects
 
@@ -159,6 +175,8 @@ and three consecutive full-suite runs are green, and the diff introduces no
 `packages/grid_assets/test/support/{package_root.dart,package_root_probe.dart,package_root_test.dart}`,
 new `packages/grid_assets/test/fixtures/asset_loader_cwd_probe.dart`, new
 `packages/grid_assets/test/search/fixtures/semantic_recall_empty_baseline_set.json`,
+the pinned baseline in
+`packages/grid_assets/test/search/fixtures/semantic_recall_set.json`,
 and the test files whose locators now join on `packageRoot()` (including the
 retained corpus's locator example in
 `test/fixtures/spec_corpus/pow-kzx.design.md`, whose parsed contract and shadow

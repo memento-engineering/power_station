@@ -5,7 +5,10 @@ import 'package:beads_dart/beads_dart.dart' show Bead;
 import 'package:grid_assets/grid_assets.dart' hide embeddingChangeKey;
 import 'package:grid_assets/src/search/embedding_change_key.dart';
 import 'package:grid_sdk/grid_sdk.dart' show SubstationScope;
+import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
+
+import '../support/package_root.dart';
 
 const _provider = EmbeddingProvider(
   id: 'fixture',
@@ -266,10 +269,10 @@ void main() {
 
   test('search remains inference-free and write-free', () {
     final search = File(
-      'lib/src/search/station_search.dart',
+      p.join(packageRoot(), 'lib', 'src', 'search', 'station_search.dart'),
     ).readAsStringSync();
     final command = File(
-      'lib/src/search/search_command.dart',
+      p.join(packageRoot(), 'lib', 'src', 'search', 'search_command.dart'),
     ).readAsStringSync();
     for (final forbidden in ['EmbeddingClient', 'replaceBead', 'deleteBeads']) {
       expect(search, isNot(contains(forbidden)));

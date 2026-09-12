@@ -19,9 +19,11 @@ import 'package:grid_engine/src/molecule/bead_path_key.dart';
 import 'package:grid_engine/src/molecule/inherited_circuit.dart';
 import 'package:grid_runtime/grid_runtime.dart';
 import 'package:grid_sdk/grid_sdk.dart' show ProviderScope;
+import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
 import 'support/asset_fakes.dart';
+import 'support/package_root.dart';
 
 /// The critic's (ambient tree, per-step args) pair — the context rip-out shape:
 /// the work Bead + Workspace ride the tree; the rubric rides the step params.
@@ -1147,7 +1149,13 @@ void main() {
           '${dir.path}/.grid/critique/${incident.rubric}.json',
         )..createSync(recursive: true);
         File(
-          'test/fixtures/critique/${incident.fixture}',
+          p.join(
+            packageRoot(),
+            'test',
+            'fixtures',
+            'critique',
+            incident.fixture,
+          ),
         ).copySync(verdict.path);
         final c = _ctx(
           rubric: incident.rubric,

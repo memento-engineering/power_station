@@ -21,10 +21,10 @@ final String _setPath = p.join(
 /// a baseline pinned empty because no tool ever writes this file.
 ///
 /// [_setPath] is the DURABLE corpus and `--record-baseline` rewrites its OWN
-/// baseline after a green live run, so what it holds is whatever the last real
-/// recording left there. Seeding record mode from this file instead keeps the
-/// record-mode assertions about what the writer PRODUCES rather than about
-/// what the durable corpus happens to carry today.
+/// baseline in place after a green live run — the corpus tests pin what it
+/// currently holds, so such a recording surfaces as a red they then re-pin.
+/// Seeding record mode from this file instead keeps the record-mode assertions
+/// about what the writer PRODUCES, and keeps the writer off the durable corpus.
 final String _emptyBaselineSetPath = p.join(
   'test',
   'search',
@@ -302,11 +302,8 @@ void main() {
     });
 
     test(
-      'both corpora carry the four real pairs and the seed is pinned empty',
+      'the durable corpus pins four recorded pairs and only the seed is empty',
       () {
-        // The durable corpus is asserted on its CASES only. Its baseline is
-        // written by `--record-baseline` after a green live run, so pinning that
-        // here would make a legitimate recording read as a test failure.
         final set = loadRecallSetFixture();
         expect(
           set.cases.map((row) => [row.name, row.query, row.expectedBeadIds]),
@@ -345,7 +342,23 @@ void main() {
           set.cases.map((row) => [row.name, row.query, row.expectedBeadIds]),
         );
         expect(seed.exactIdGuard, set.exactIdGuard);
+
+        // The SEED is the only file pinned empty, and the durable corpus is
+        // pinned POPULATED: every case carries the rank and score the last real
+        // recording left. Asserting the seed alone left the durable baseline
+        // unchecked, so an empty — or drifted — corpus passed this suite.
+        //
+        // `--record-baseline` rewrites the durable file, so a recording that
+        // moves a number lands HERE as a red test: the new numbers are read off
+        // the failure and pinned in the same commit, which is the point. A
+        // recall corpus whose baseline nothing asserts records nothing.
         expect(seed.baseline, isEmpty);
+        expect(set.baseline, {
+          'refinement-vocabulary': (rank: 1, score: 0.781),
+          'production-observability': (rank: 1, score: 0.836),
+          'station-effectiveness': (rank: 1, score: 0.724),
+          'single-store-owner': (rank: 1, score: 0.692),
+        });
       },
     );
 
