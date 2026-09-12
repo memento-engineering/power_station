@@ -8,6 +8,15 @@ import 'package:test/test.dart';
 
 const _skill = '---\nname: discover\n---\n\n# Discover\n\nbody\n';
 const _settings = '{\n  "hooks": {\n    "SessionStart": []\n  }\n}\n';
+const _instructions = '# Doctrine\n\nthe org rule\n';
+
+/// [body] stamped as the owned root block, the way an install writes it.
+String _rootBlock(String body, {String ref = 'abc1234'}) => stampProvenance(
+  body,
+  relativePath: kAgentsRootRelativePath,
+  sourceRef: ref,
+  runner: 'space',
+);
 
 void main() {
   group('stampProvenance', () {
@@ -152,5 +161,136 @@ void main() {
         );
       },
     );
+  });
+
+  group('MarkedBlockProvenance root AGENTS.md only', () {
+    test('the root file selects the marked syntax whatever its body opens on, '
+        'and no other path does', () {
+      for (final body in [_instructions, _skill, 'plain\n']) {
+        expect(
+          provenanceSyntaxFor(kAgentsRootRelativePath, body),
+          isA<MarkedBlockProvenance>(),
+        );
+      }
+      expect(
+        provenanceSyntaxFor('.claude/skills/discover/SKILL.md', _skill),
+        isA<YamlFrontmatterProvenance>(),
+      );
+      expect(
+        provenanceSyntaxFor('.claude/settings.json', _settings),
+        isA<JsonObjectProvenance>(),
+      );
+      expect(
+        () => provenanceSyntaxFor('docs/AGENTS.md', _instructions),
+        throwsA(isA<StateError>()),
+        reason: 'the departure is bounded to the ROOT file',
+      );
+      expect(
+        () => provenanceSyntaxFor('.agents/skills/x/NOTES.md', _instructions),
+        throwsA(
+          isA<StateError>().having(
+            (error) => error.message,
+            'message',
+            contains('no provenance syntax'),
+          ),
+        ),
+        reason: 'every OTHER plain markdown path is still refused',
+      );
+    });
+
+    test('the owned block is the exact boundary lines, with the stamp as its '
+        'FIRST interior line and the vended body below', () {
+      final block = _rootBlock(_instructions);
+
+      final lines = block.split('\n');
+      expect(lines.first, kGeneratedBlockBegin);
+      expect(lines[1], startsWith('<!-- $kProvenanceMarker'));
+      expect(lines[1], contains('abc1234'));
+      expect(lines[1], contains('`space assets install`'));
+      expect(lines[1], endsWith('-->'));
+      expect(lines[2], '# Doctrine');
+      expect(lines[lines.length - 2], kGeneratedBlockEnd);
+      expect(block, endsWith('$kGeneratedBlockEnd\n'));
+      expect(hasProvenance(block), isTrue);
+    });
+
+    test('the vended body round-trips — through stripProvenance and through '
+        'bodyOf, under any source ref', () {
+      const marked = MarkedBlockProvenance();
+
+      expect(stripProvenance(_rootBlock(_instructions)), _instructions);
+      expect(marked.bodyOf(_rootBlock(_instructions)), _instructions);
+      expect(
+        stripProvenance(_rootBlock(_instructions, ref: 'ref1')),
+        stripProvenance(_rootBlock(_instructions, ref: 'ref2')),
+        reason: 'only the BODY decides drift',
+      );
+    });
+
+    test('bodyOf claims ONE well-formed stamped block and refuses every other '
+        'shape', () {
+      const marked = MarkedBlockProvenance();
+      final block = _rootBlock(_instructions);
+
+      expect(
+        marked.bodyOf('# theirs\n\n$block\ntail\n'),
+        _instructions,
+        reason: 'the block is claimed from inside a larger composed file',
+      );
+      expect(marked.bodyOf('# theirs\n'), isNull);
+      expect(marked.bodyOf('$block$block'), isNull, reason: 'duplicated');
+      expect(
+        marked.bodyOf(
+          '$kGeneratedBlockEnd\n$_instructions'
+          '$kGeneratedBlockBegin\n',
+        ),
+        isNull,
+        reason: 'out of order',
+      );
+      expect(
+        marked.bodyOf(
+          '$kGeneratedBlockBegin\n$_instructions$kGeneratedBlockEnd\n',
+        ),
+        isNull,
+        reason: 'a hand-typed imitation carries no stamp on its first line',
+      );
+      expect(
+        marked.bodyOf('$kGeneratedBlockBegin\n$kGeneratedBlockEnd\n'),
+        isNull,
+        reason: 'an empty block vended nothing',
+      );
+      expect(
+        marked.bodyOf(
+          'prefix $kGeneratedBlockBegin\nx\n'
+          '$kGeneratedBlockEnd\n',
+        ),
+        isNull,
+        reason: 'a marker that does not own its line is not ours',
+      );
+      expect(marked.containsAnyMarker('# theirs\n'), isFalse);
+      expect(
+        marked.containsAnyMarker('prefix $kGeneratedBlockBegin inline\n'),
+        isTrue,
+        reason: 'detection is LOOSER than ownership, so a trace is refusable',
+      );
+    });
+
+    test('merge replaces only the owned span and preserves every byte around '
+        'it, or appends when there is none', () {
+      const marked = MarkedBlockProvenance();
+      const prefix = '# Their doc\r\n\r\nkeep me\r\n';
+      const suffix = '\n## after\n\ntail\n';
+      final block = _rootBlock(_instructions);
+      final next = _rootBlock('# Doctrine\n\nthe NEW rule\n');
+
+      final replaced = marked.merge('$prefix$block$suffix', block: next);
+      expect(replaced, '$prefix$next$suffix');
+      expect(marked.bodyOf(replaced), '# Doctrine\n\nthe NEW rule\n');
+
+      expect(marked.merge(prefix, block: block), '$prefix\n$block');
+      expect(marked.merge('no newline', block: block), 'no newline\n\n$block');
+      expect(marked.merge('spaced\n\n', block: block), 'spaced\n\n$block');
+      expect(marked.merge('', block: block), block);
+    });
   });
 }

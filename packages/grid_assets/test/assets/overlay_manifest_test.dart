@@ -50,4 +50,47 @@ void main() {
       );
     });
   }
+
+  test('the ROOT-FILE leg is a default mapping onto the repository root', () {
+    expect(
+      load('name: assets\n').mappings[kAgentsRootMappingKey],
+      kAgentsRootTargetHead,
+      reason: 'the one mapping whose target is the repo root itself',
+    );
+  });
+
+  test('`.` is a legal target for the root-file key and for NOTHING else — '
+      'anywhere else it would pour a harness head over the operator repo', () {
+    expect(
+      load(
+        'station_overlay:\n  mappings:\n    $kAgentsRootMappingKey: .\n',
+      ).mappings[kAgentsRootMappingKey],
+      kAgentsRootTargetHead,
+    );
+    for (final key in [
+      'claude',
+      'agents',
+      'github',
+      'codex',
+      'anything_else',
+    ]) {
+      expect(
+        () => load('station_overlay:\n  mappings:\n    $key: .\n'),
+        throwsFormatException,
+        reason: '`.` is not a target for $key',
+      );
+    }
+  });
+
+  for (final target in ['/absolute', '../outside', '..']) {
+    test('rejects unsafe target $target on the root-file key too', () {
+      expect(
+        () => load(
+          'station_overlay:\n  mappings:\n    $kAgentsRootMappingKey: '
+          '$target\n',
+        ),
+        throwsFormatException,
+      );
+    });
+  }
 }
