@@ -161,22 +161,43 @@ class _RecordingDecisionIndex {
   final List<List<String>> calls = [];
   final List<String> beadIds = [];
 
-  Future<List<DecisionSurfaceEvidence>> call(
+  Future<DecisionGatherEvidence> call(
     String workspaceDir,
     List<String> surfaces,
     Bead workBead,
   ) async {
     calls.add(List.unmodifiable(surfaces));
     beadIds.add(workBead.id);
-    return [
-      for (final surface in surfaces)
-        DecisionSurfaceEvidence(
-          id: 'decision-surface:$surface@sha256:fake',
-          surface: surface,
-          command: 'index',
-          state: EvidenceState.complete,
-        ),
-    ];
+    // One body, indexed ONCE at the gather, referenced by every surface — the
+    // canonical shape the real source answers with.
+    final shared = DecisionEntryEvidence(
+      identity: 'power_station#a21',
+      originRegister: 'power_station',
+      originPath: 'docs/decisions',
+      slug: 'a21',
+      status: 'accepted',
+      surfaces: const ['packages/**'],
+      entryPath: 'docs/decisions/a21.md',
+      body: boundDiscoveryEvidence(
+        kind: 'decision-entry',
+        subject: 'power_station#a21',
+        source: 'docs/decisions/a21.md',
+        fullText: 'a lens emits a REPORT, never a letter',
+      ),
+    );
+    return DecisionGatherEvidence(
+      decisionEntries: surfaces.isEmpty ? const {} : {shared.body.id: shared},
+      decisionLookups: [
+        for (final surface in surfaces)
+          DecisionSurfaceEvidence(
+            id: 'decision-surface:$surface@sha256:fake',
+            surface: surface,
+            command: 'index',
+            state: EvidenceState.complete,
+            decisions: [shared.body.id],
+          ),
+      ],
+    );
   }
 }
 
@@ -637,6 +658,19 @@ void main() {
       expect(gather.decisionLookups, hasLength(2));
       for (final lookup in gather.decisionLookups) {
         expect(lookup.state, EvidenceState.complete);
+      }
+      expect(
+        gather.decisionEntries,
+        hasLength(1),
+        reason:
+            'both surfaces select the SAME entry, and the canonical gather '
+            'carries its body exactly once',
+      );
+      for (final lookup in gather.decisionLookups) {
+        expect(
+          gather.decisionEntryFor(lookup.decisions.single).identity,
+          'power_station#a21',
+        );
       }
       expect(gather.history!.state, EvidenceState.complete);
       expect(gather.priorArtWired, isTrue);

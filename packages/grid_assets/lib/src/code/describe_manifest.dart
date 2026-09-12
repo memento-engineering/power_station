@@ -54,6 +54,74 @@ const int kMaxManifestReceiptValueChars = 120;
 /// so a section that truncates can always afford to SAY it truncated.
 const int kManifestOmissionReserveBytes = 128;
 
+/// A UTF-8 BYTE ceiling with an omission reserve — the one arithmetic every
+/// bounded model input in this pack does, in one place.
+///
+/// It answers two questions and owns no text of its own: how many bytes are
+/// left for droppable content once the REQUIRED blocks and the omission reserve
+/// are paid for ([availableBytesAfter]), and how to cut droppable content down
+/// to a ceiling at a RECORD boundary ([clampAtLineBoundary] — a line IS the
+/// boundary). Bytes, never characters: the ceilings these budgets protect are
+/// transport limits, and a multibyte body would sail past a character count.
+///
+/// Deliberately NOT a truncator: it never writes an omission marker, because
+/// what a truncation must SAY differs per surface (a manifest names the records
+/// it dropped; a lens prompt names how to ask for the withheld evidence). The
+/// caller owns the wording and reserves the bytes for it here.
+class BoundedTextBudget {
+  /// Creates a budget of [maxBytes] with [omissionReserveBytes] held back for
+  /// whatever the caller writes when it truncates.
+  const BoundedTextBudget({
+    required this.maxBytes,
+    this.omissionReserveBytes = 0,
+  });
+
+  /// The hard ceiling, in UTF-8 bytes.
+  final int maxBytes;
+
+  /// Bytes held back from [maxBytes] so a truncating assembly can always afford
+  /// to SAY it truncated.
+  final int omissionReserveBytes;
+
+  /// The bytes left for droppable content once [fixedBlocks] and the reserve
+  /// are paid for.
+  ///
+  /// SIGNED on purpose: a negative answer means the REQUIRED scaffold alone
+  /// does not fit, which is a defect in the caller's own template and not
+  /// something a clamp can fix. The caller decides whether to degrade (the
+  /// manifest does) or refuse LOUD (the lens prompt does).
+  int availableBytesAfter(Iterable<String> fixedBlocks) {
+    var available = maxBytes - omissionReserveBytes;
+    for (final block in fixedBlocks) {
+      available -= _bytes(block);
+    }
+    return available;
+  }
+
+  /// [text] with trailing whole LINES dropped until it fits [ceilingBytes]
+  /// (default [maxBytes]).
+  ///
+  /// A line is a record boundary, so the result is always a prefix of [text]
+  /// that ends where a record ended — never mid-record, and never mid-rune.
+  ///
+  /// Measured forward, one pass: re-measuring the whole remainder after each
+  /// dropped line is quadratic, and the bundles this clamps are megabytes.
+  String clampAtLineBoundary(String text, {int? ceilingBytes}) {
+    final ceiling = ceilingBytes ?? maxBytes;
+    if (_bytes(text) <= ceiling) return text;
+    final lines = const LineSplitter().convert(text);
+    var kept = 0;
+    var spent = 0;
+    for (final line in lines) {
+      final size = _bytes(line) + (kept == 0 ? 0 : 1); // + the joining newline
+      if (spent + size > ceiling) break;
+      spent += size;
+      kept++;
+    }
+    return lines.take(kept).join('\n');
+  }
+}
+
 /// One changed file — `git diff --name-status -z` joined with `--numstat -z`.
 class ChangedFile {
   /// Creates the fact.
@@ -270,10 +338,9 @@ String buildDescribeManifest(DescribeManifest facts) {
   // The record budget: the ceiling, less the omission reserve and every
   // REQUIRED header. Commits get at most HALF, so neither droppable section can
   // starve the other; files then get the rest.
-  var budget = kMaxManifestBytes - kManifestOmissionReserveBytes;
-  for (final block in blocks) {
-    budget -= _bytes(block.header.join('\n'));
-  }
+  var budget = _manifestBudget.availableBytesAfter([
+    for (final block in blocks) block.header.join('\n'),
+  ]);
   if (budget < 0) budget = 0;
   final spentOnCommits = commitsBlock.fill(budget ~/ 2);
   filesBlock.fill(budget - spentOnCommits);
@@ -283,8 +350,19 @@ String buildDescribeManifest(DescribeManifest facts) {
     if (out.isNotEmpty) out.add('');
     out.addAll(block.render());
   }
-  return _clampBytes(out.join('\n'));
+  return _manifestBudget.clampAtLineBoundary(out.join('\n'));
 }
+
+/// The manifest's own budget — the ceiling every assembly step here spends
+/// against. The last belt is [BoundedTextBudget.clampAtLineBoundary] at the
+/// full ceiling: if the REQUIRED lines alone still exceed it (a route that
+/// threads an absurd number of receipts), trailing LINES are dropped until the
+/// text fits. It never throws — the describe pass is decoration (A18(6)), so it
+/// degrades rather than refuses.
+const BoundedTextBudget _manifestBudget = BoundedTextBudget(
+  maxBytes: kMaxManifestBytes,
+  omissionReserveBytes: kManifestOmissionReserveBytes,
+);
 
 /// One rendered section: REQUIRED [header] lines that always survive, plus
 /// droppable [records] admitted while the byte budget allows.
@@ -398,16 +476,3 @@ String _clamp(String text, int max) {
 }
 
 int _bytes(String text) => utf8.encode(text).length;
-
-/// The last belt: if the REQUIRED lines alone still exceed the ceiling (a route
-/// that threads an absurd number of receipts), drop trailing LINES — a line IS
-/// a record boundary — until the text fits. Never throws: the describe pass is
-/// decoration (A18(6)), so it degrades rather than refuses.
-String _clampBytes(String text) {
-  if (_bytes(text) <= kMaxManifestBytes) return text;
-  final lines = const LineSplitter().convert(text);
-  while (lines.isNotEmpty && _bytes(lines.join('\n')) > kMaxManifestBytes) {
-    lines.removeLast();
-  }
-  return lines.join('\n');
-}

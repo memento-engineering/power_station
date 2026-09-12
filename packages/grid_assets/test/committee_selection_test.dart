@@ -1383,31 +1383,34 @@ DiscoveryAnchors _anchors({
       ],
     ),
   ],
+  decisionEntries: {_a21.body.id: _a21},
   decisionLookups: [
     DecisionSurfaceEvidence(
       id: 'decision-surface:power_station/lib@sha256:fake',
       surface: 'power_station/lib/src/code/discovery.dart',
       command: 'lunar decisions index --surface power_station/lib',
       state: EvidenceState.complete,
-      decisions: [
-        DecisionEntryEvidence(
-          identity: 'power_station#a21',
-          originRegister: 'power_station',
-          originPath: 'docs/decisions',
-          slug: 'a21',
-          status: 'accepted',
-          surfaces: const ['packages/**'],
-          entryPath: 'docs/decisions/a21.md',
-          body: boundDiscoveryEvidence(
-            kind: 'decision-entry',
-            subject: 'power_station#a21',
-            source: 'docs/decisions/a21.md',
-            fullText: 'a lens emits a REPORT, never a letter',
-          ),
-        ),
-      ],
+      decisions: [_a21.body.id],
     ),
   ],
+);
+
+/// The gather-level decision index the fixture above references: ONE body,
+/// carried once, whatever surface selects it.
+final DecisionEntryEvidence _a21 = DecisionEntryEvidence(
+  identity: 'power_station#a21',
+  originRegister: 'power_station',
+  originPath: 'docs/decisions',
+  slug: 'a21',
+  status: 'accepted',
+  surfaces: const ['packages/**'],
+  entryPath: 'docs/decisions/a21.md',
+  body: boundDiscoveryEvidence(
+    kind: 'decision-entry',
+    subject: 'power_station#a21',
+    source: 'docs/decisions/a21.md',
+    fullText: 'a lens emits a REPORT, never a letter',
+  ),
 );
 
 DiscoveryDossier _dossier() => DiscoveryDossier(

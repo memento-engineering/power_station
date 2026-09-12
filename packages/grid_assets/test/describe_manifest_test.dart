@@ -215,4 +215,45 @@ void main() {
       expect(utf8.encode(text).length, lessThanOrEqualTo(16 * 1024));
     });
   });
+
+  group('BoundedTextBudget — the shared byte ceiling', () {
+    test('reserves the fixed blocks and the omission allowance, signed', () {
+      const budget = BoundedTextBudget(maxBytes: 100, omissionReserveBytes: 10);
+      expect(budget.availableBytesAfter(const []), 90);
+      expect(budget.availableBytesAfter(const ['abc', 'de']), 85);
+      expect(
+        budget.availableBytesAfter(const ['…']),
+        87,
+        reason: 'BYTES, never characters — a multibyte block costs its bytes',
+      );
+      expect(
+        budget.availableBytesAfter(['x' * 200]),
+        -110,
+        reason:
+            'a scaffold that does not fit answers NEGATIVE, so the caller can '
+            'refuse rather than clamp a defect out of sight',
+      );
+    });
+
+    test('clamps at a LINE boundary, never mid-record or mid-rune', () {
+      const budget = BoundedTextBudget(maxBytes: 12);
+      expect(budget.clampAtLineBoundary('short'), 'short');
+      expect(
+        budget.clampAtLineBoundary('aaaa\nbbbb\ncccc\ndddd'),
+        'aaaa\nbbbb',
+      );
+      expect(
+        budget.clampAtLineBoundary('aaaa\nbbbb\ncccc', ceilingBytes: 4),
+        'aaaa',
+      );
+      expect(
+        budget.clampAtLineBoundary('aaaa\nbbbb', ceilingBytes: 0),
+        isEmpty,
+        reason: 'nothing fits, so nothing is kept — never a partial record',
+      );
+      final multibyte = budget.clampAtLineBoundary('…………\n…………');
+      expect(multibyte, '…………');
+      expect(utf8.encode(multibyte).length, lessThanOrEqualTo(12));
+    });
+  });
 }
