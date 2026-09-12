@@ -183,6 +183,46 @@ void main() {
             'never reach the overrides emitter',
       );
     });
+
+    test('PubLink git_path round-trips through JSON, equality, and '
+        'hashCode', () {
+      const link = PubLink(
+        package: 'genesis_tree',
+        hosted: '^0.4.0',
+        gitUrl: 'git@github.com:memento-engineering/genesis.git',
+        gitRef: 'genesis_tree-v0.4.0-dev.1',
+        gitPath: 'packages/tree',
+      );
+      expect(link.toJson(), {
+        'package': 'genesis_tree',
+        'hosted': '^0.4.0',
+        'git_url': 'git@github.com:memento-engineering/genesis.git',
+        'git_ref': 'genesis_tree-v0.4.0-dev.1',
+        'git_path': 'packages/tree',
+      });
+      expect(
+        const PubLink(package: 'genesis_tree').toJson().containsKey('git_path'),
+        isFalse,
+        reason:
+            'an undeclared git_path stays OFF the wire, so every manifest '
+            'written before the field keeps its meaning',
+      );
+      final decoded = PubLink.fromJson(link.toJson());
+      expect(decoded, link);
+      expect(decoded.hashCode, link.hashCode);
+      expect(
+        decoded,
+        isNot(
+          const PubLink(
+            package: 'genesis_tree',
+            hosted: '^0.4.0',
+            gitUrl: 'git@github.com:memento-engineering/genesis.git',
+            gitRef: 'genesis_tree-v0.4.0-dev.1',
+          ),
+        ),
+        reason: 'git_path is part of the value, not decoration',
+      );
+    });
   });
 
   group('pubspecOverridesFor — the pure context application', () {
@@ -193,14 +233,22 @@ void main() {
       expect(pubspecOverridesFor(config, PubLinkContext.stable), isNull);
     });
 
-    test('stable → emits a git override for a git-pinned link '
-        '(git: {url, ref, path: packages/<pkg>}) — ADR-0003 D2', () {
+    test('stable git override emits explicit and default package paths '
+        '— ADR-0003 D2', () {
+      // genesis keeps the genesis_tree package at packages/tree, so the
+      // packages/<pkg> convention would emit an override pub cannot resolve.
       const pinned = PubLinkConfig(
         links: [
           PubLink(
             package: 'genesis_tree',
             gitUrl: 'git@github.com:memento-engineering/genesis.git',
             gitRef: 'genesis_tree-v0.1.3',
+            gitPath: 'packages/tree',
+          ),
+          PubLink(
+            package: 'zeta',
+            gitUrl: 'git@github.com:memento-engineering/zeta.git',
+            gitRef: 'zeta-v1.0.0',
           ),
         ],
       );
@@ -214,7 +262,21 @@ void main() {
         contains("url: 'git@github.com:memento-engineering/genesis.git'"),
       );
       expect(yaml, contains("ref: 'genesis_tree-v0.1.3'"));
-      expect(yaml, contains("path: 'packages/genesis_tree'"));
+      expect(
+        yaml,
+        contains("path: 'packages/tree'"),
+        reason: 'a declared git_path is the repo-relative directory, verbatim',
+      );
+      expect(
+        yaml,
+        isNot(contains("path: 'packages/genesis_tree'")),
+        reason: 'the convention never overrides the declared directory',
+      );
+      expect(
+        yaml,
+        contains("path: 'packages/zeta'"),
+        reason: 'an undeclared git_path keeps the packages/<pkg> default',
+      );
     });
 
     test('stable → REFUSES a PARTIAL git pin LOUDLY: url without ref (never a '

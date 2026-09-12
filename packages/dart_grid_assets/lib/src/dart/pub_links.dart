@@ -53,7 +53,12 @@ enum PubLinkContext {
 /// One package's declared linkage: the dev-time [devPath] source (the override
 /// applied in dev/worktree contexts), the informational [hosted] pin, and the
 /// [gitUrl]+[gitRef] git-tag pin the stable context emits as a `git:` override
-/// (ADR-0003 D2).
+/// (ADR-0003 D2), optionally rooted at an explicit [gitPath].
+///
+/// [gitPath] defaults to `packages/<package>` when omitted — the convention,
+/// not a fact about the repo: a monorepo whose DIRECTORY name differs from the
+/// PACKAGE name (genesis keeps `genesis_tree` at `packages/tree`) must declare
+/// the real directory or the emitted override cannot resolve.
 @immutable
 class PubLink {
   /// Creates the linkage declaration for [package].
@@ -63,6 +68,7 @@ class PubLink {
     this.hosted,
     this.gitUrl,
     this.gitRef,
+    this.gitPath,
   });
 
   /// The pub package name (e.g. `genesis_tree`).
@@ -85,6 +91,12 @@ class PubLink {
   /// with [gitUrl]: both, or the stable emitter refuses LOUDLY.
   final String? gitRef;
 
+  /// The package's directory WITHIN the pinned repository, repo-relative (e.g.
+  /// `packages/tree` for `genesis_tree`) — used ONLY by the
+  /// [PubLinkContext.stable] git override. Null ⇒ the `packages/<package>`
+  /// default, so every manifest written before this field keeps its meaning.
+  final String? gitPath;
+
   /// JSON form (the envelope payload wire).
   Map<String, Object?> toJson() => {
     'package': package,
@@ -92,6 +104,7 @@ class PubLink {
     if (hosted != null) 'hosted': hosted,
     if (gitUrl != null) 'git_url': gitUrl,
     if (gitRef != null) 'git_ref': gitRef,
+    if (gitPath != null) 'git_path': gitPath,
   };
 
   /// The valid pub package-name shape (identifier chars only). Enforced at
@@ -115,6 +128,7 @@ class PubLink {
       hosted: json['hosted'] as String?,
       gitUrl: json['git_url'] as String?,
       gitRef: json['git_ref'] as String?,
+      gitPath: json['git_path'] as String?,
     );
   }
 
@@ -125,10 +139,12 @@ class PubLink {
       other.devPath == devPath &&
       other.hosted == hosted &&
       other.gitUrl == gitUrl &&
-      other.gitRef == gitRef;
+      other.gitRef == gitRef &&
+      other.gitPath == gitPath;
 
   @override
-  int get hashCode => Object.hash(package, devPath, hosted, gitUrl, gitRef);
+  int get hashCode =>
+      Object.hash(package, devPath, hosted, gitUrl, gitRef, gitPath);
 }
 
 /// The `pub` slice of the DART domain payload: the declared [links].
@@ -196,8 +212,10 @@ class PubLinkConfig {
 ///   that is itself relative (which would silently yield a still-relative,
 ///   broken override) — throws [StateError]: fail-closed, never a silently
 ///   broken override.
-/// - [PubLinkContext.stable] → a `git: {url, ref, path: packages/<pkg>}`
-///   override per git-pinned link (ADR-0003 D2). A link with a PARTIAL git pin
+/// - [PubLinkContext.stable] → a `git: {url, ref, path}` override per
+///   git-pinned link (ADR-0003 D2), where `path` is the link's
+///   [PubLink.gitPath] when it declares one and `packages/<pkg>` otherwise. A
+///   link with a PARTIAL git pin
 ///   (one of [PubLink.gitUrl]/[PubLink.gitRef] but not both) is a LOUD
 ///   [StateError] refusal — never a silent path fallback (D2). A link with NO
 ///   git pin contributes nothing (its `pubspec.yaml` hosted/git pin stands —
@@ -273,7 +291,10 @@ String? _pathOverridesFor(
 }
 
 /// The stable git-ref emission (ADR-0003 D2): each link that declares a git pin
-/// resolves to a `git: {url, ref, path: packages/<pkg>}` override. A link with
+/// resolves to a `git: {url, ref, path}` override, whose `path` is the link's
+/// declared [PubLink.gitPath] or, absent one, the `packages/<pkg>` convention
+/// (which is WRONG for any repo that names the directory differently — genesis
+/// holds `genesis_tree` at `packages/tree`). A link with
 /// a PARTIAL git pin (exactly one of [PubLink.gitUrl]/[PubLink.gitRef]) is a
 /// LOUD [StateError] refusal — never a silent path fallback (D2 + the house
 /// "guards LOUD or GONE"). A link with NEITHER git field contributes nothing:
@@ -311,7 +332,10 @@ String? _gitOverridesFor(PubLinkConfig config) {
       ..writeln('    git:')
       ..writeln('      url: ${_yamlQuote(link.gitUrl!)}')
       ..writeln('      ref: ${_yamlQuote(link.gitRef!)}')
-      ..writeln('      path: ${_yamlQuote('packages/${link.package}')}');
+      ..writeln(
+        '      path: '
+        '${_yamlQuote(link.gitPath ?? 'packages/${link.package}')}',
+      );
   }
   return buffer.toString();
 }
