@@ -906,6 +906,94 @@ void main() {
       });
     }
 
+    // The READ is typed too. An untyped throw out of this hook carries no
+    // kind, so the engine routes it as `work` — the circuit's own budget, no
+    // repair ride, no diagnostic. A slow or wobbling bd would then be a louder
+    // failure than the broken plan this hook exists to catch.
+    test(
+      'a thrown validation_plan read is an invalidResult with the cause',
+      () async {
+        final dir = carriedEnvelope();
+        final c = _ctx(workspaceDir: dir.path);
+        await expectLater(
+          _composedSpecify(
+            specifyBdRunnerFor: (_) => SpecifyReadbackBdRunner(
+              error: StateError('forced query failure'),
+            ),
+          ).result(c.context, c.args),
+          throwsA(
+            isA<CapabilityFailure>()
+                .having(
+                  (failure) => failure.kind,
+                  'kind',
+                  CapabilityFailureKind.invalidResult,
+                )
+                .having(
+                  (failure) => failure.reason,
+                  'reason',
+                  'validation_plan read failed: Bad state: forced query failure',
+                ),
+          ),
+        );
+      },
+    );
+
+    // Two rows for ONE exact id means the read itself is untrustworthy: both
+    // rows may carry a parseable plan and the check would still be proving
+    // nothing about the row the gating lane will run.
+    test(
+      'duplicate exact-id validation_plan rows are an invalidResult',
+      () async {
+        final row = durableSpecifiedBead(
+          'tg-1',
+        ).copyWith(metadata: const {'validation_plan': 'exit 27'});
+        final dir = carriedEnvelope();
+        final c = _ctx(workspaceDir: dir.path);
+        await expectLater(
+          _composedSpecify(
+            specifyBdRunnerFor: (_) =>
+                SpecifyReadbackBdRunner(beads: [row, row]),
+          ).result(c.context, c.args),
+          throwsA(
+            isA<CapabilityFailure>()
+                .having(
+                  (failure) => failure.kind,
+                  'kind',
+                  CapabilityFailureKind.invalidResult,
+                )
+                .having(
+                  (failure) => failure.reason,
+                  'reason',
+                  'validation_plan read failed: duplicate exact-id rows for '
+                      'tg-1 (2 matches)',
+                ),
+          ),
+        );
+      },
+    );
+
+    // The fresh read is a bd SUBPROCESS on every specify success path, so its
+    // count is part of the contract: ONE query, whether or not the stamp
+    // extension was bound.
+    test('an authored validation_plan performs one bd query per result '
+        'ride', () async {
+      final runner = SpecifyReadbackBdRunner(
+        beads: [
+          durableSpecifiedBead(
+            'tg-1',
+          ).copyWith(metadata: const {'validation_plan': 'exit 27'}),
+        ],
+      );
+      final dir = carriedEnvelope();
+      final c = _ctx(workspaceDir: dir.path);
+      await _composedSpecify(
+        specifyBdRunnerFor: (_) => runner,
+      ).result(c.context, c.args);
+      expect(runner.calls, [
+        ['query', 'id=tg-1', '--json', '--limit', '0'],
+      ]);
+    });
+
     test('an unparseable gate buys ONE repair ride, then a visible gate', () {
       final policy = const SpecifyCapability().supervisionPolicy(_ctx().args);
       expect(
