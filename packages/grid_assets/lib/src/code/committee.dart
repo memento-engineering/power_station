@@ -157,6 +157,27 @@ const String _critiqueDir = '.grid/critique';
 /// by the same script, and [sweepStaleCritique] retires them together.
 const String _gatingLogRelativePath = '$_critiqueDir/$kGatingRubric.log';
 
+/// The workspace-relative file [CriticCapability.spawn] writes the bead's OWN
+/// Validation Plan into — the CHILD script [_gatingScript]'s single statement
+/// runs. The wrapper's INPUT, where the log and the `.rc` are its OUTPUTS.
+///
+/// **Why a file and not an inline subshell.** `sh` parses a whole script before
+/// executing ANY of it, so a plan that merely fails to PARSE aborted the
+/// wrapper before its first statement — no log, no rc, no gate (the live
+/// finding: a single-quoted `ruby -e` program carrying an apostrophe stranded a
+/// session for 25 minutes, because an artifact-less exit is classified `infra`
+/// and backed off as if a deterministic runner could ever succeed on a retry).
+/// Handing the plan to a CHILD `sh` moves both parsing and execution below the
+/// wrapper's receipts, so every plan-level failure — parse error included — is
+/// an ordinary non-zero exit the rc records and the log explains.
+///
+/// Beside the log and the `.rc` on purpose: the ONE run's three artifacts,
+/// written for the same script, which [sweepStaleCritique] retires together. A
+/// sweep that lands MID-ROUND cannot break a running plan the way it could an
+/// armed deadline stamp: the child already holds the script open, and unlinking
+/// an open file leaves that descriptor readable.
+const String _gatingPlanRelativePath = '$_critiqueDir/$kGatingRubric.plan.sh';
+
 /// The workspace-relative ARMED-DEADLINE stamp — written before the Validation
 /// Plan starts and removed only after its rc lands, so a stamp that OUTLIVES
 /// the run is proof the lane was killed rather than finished.
@@ -1821,26 +1842,59 @@ class CriticCapability extends ProcessCapability {
     }
   }
 
-  /// Gives an invalid critic artifact one repair restart before a visible gate.
+  /// EVERY critic lane's invalid-artifact budget — declared once so the gating
+  /// rubric's tighter `noResult` policy cannot drift it ([supervisionPolicy]
+  /// names the reasoning for both).
+  static const RetryPolicy _criticInvalidResultRetry = RetryPolicy(
+    maxRestarts: 2,
+    backoff: Backoff.standard,
+    onExhaustion: ExhaustionBehavior.parkAtGate,
+  );
+
+  /// Gives an invalid critic artifact one repair restart before a visible gate,
+  /// and the DETERMINISTIC gating lane no restart budget at all.
   ///
   /// The engine tests exhaustion after incrementing the restart cursor, so
   /// [RetryPolicy.maxRestarts] of two means one initial attempt plus one
   /// repair. This conservative bound and [Backoff.standard] remain in force
   /// until tg-5drf supplies retained invalid-output and retry distributions.
   ///
-  /// Only `invalidResult` is declared: `work` (a real F) and `noResult` (no
-  /// artifact at all) keep the circuit's own budget, so a broken completion
-  /// CONTRACT is the only thing this narrows.
+  /// On an LLM rubric only `invalidResult` is declared: `work` (a real F) and
+  /// `noResult` (no artifact at all) keep the circuit's own budget, so a broken
+  /// completion CONTRACT is the only thing this narrows. A re-prompted model
+  /// legitimately might not repeat itself.
+  ///
+  /// **[kGatingRubric] additionally declares `noResult` — a budget of ONE, so
+  /// only the initial attempt is permitted.** This lane is `sh` running a
+  /// script, and a `noResult` here means the wrapper produced no rc for the
+  /// gate to read. Re-running an unchanged deterministic script cannot change
+  /// that, so the engine's `infra` backoff spends its whole harness-throttle
+  /// ladder — the observed 5 + 15 + 30 minutes — before parking the node at a
+  /// gate, and until that gate is minted the session sits open with nothing for
+  /// the governor's watch to fire on. Exhausting after the first attempt makes
+  /// the gate the FIRST thing an rc-less run produces. The failure CLASS stays
+  /// the engine's to decide, exactly as ratified; only the declared budget
+  /// changes, which the engine's clamp permits because it tightens.
   @override
-  SupervisionPolicy supervisionPolicy(StepArgs args) => const SupervisionPolicy(
-    byKind: {
-      CapabilityFailureKind.invalidResult: RetryPolicy(
-        maxRestarts: 2,
-        backoff: Backoff.standard,
-        onExhaustion: ExhaustionBehavior.parkAtGate,
+  SupervisionPolicy supervisionPolicy(StepArgs args) {
+    return switch (_rubricOf(args)) {
+      kGatingRubric => const SupervisionPolicy(
+        byKind: {
+          CapabilityFailureKind.invalidResult: _criticInvalidResultRetry,
+          CapabilityFailureKind.noResult: RetryPolicy(
+            maxRestarts: 1,
+            backoff: Backoff.harnessThrottle,
+            onExhaustion: ExhaustionBehavior.parkAtGate,
+          ),
+        },
       ),
-    },
-  );
+      _ => const SupervisionPolicy(
+        byKind: {
+          CapabilityFailureKind.invalidResult: _criticInvalidResultRetry,
+        },
+      ),
+    };
+  }
 
   /// Stamps THIS incarnation's spawn instant for [rubric] under [workspaceDir]
   /// — the marker [restampVerdictRound] reads as its freshness proof.
@@ -1886,10 +1940,20 @@ class CriticCapability extends ProcessCapability {
     }
     if (rubric == kGatingRubric) {
       // The validation runner — a deterministic `sh -c`, NOT an agent.
+      //
+      // The plan is STAMPED TO A FILE the wrapper's child runs, never spliced
+      // into the wrapper itself: see [_gatingPlanRelativePath] for the parse
+      // error that otherwise takes the whole script — log, rc and gate — down
+      // with it. Written synchronously here, while the tree values are in
+      // hand, so the file is durable before the process can be started.
+      _writeGatingPlan(
+        workspaceDir: workspace.workspaceDir,
+        plan: _validationPlan(bead),
+      );
       return RuntimeConfig(
         workDir: workspace.workspaceDir,
         command: 'sh',
-        args: ['-c', _gatingScript(_validationPlan(bead))],
+        args: ['-c', _gatingScript()],
         lifecycle: Lifecycle.oneTurn,
         deadline: kGatingDeadline,
       );
@@ -2539,22 +2603,54 @@ Map<String, String> _gatingFailureDetails({
   };
 }
 
+/// Stamps [plan] into [_gatingPlanRelativePath] under [workspaceDir] — the
+/// child script [_gatingScript]'s one statement runs.
+///
+/// BEST-EFFORT, exactly like [CriticCapability.recordCriticIncarnation] and the
+/// [ClearCritiqueCapability] sweep, and for a stronger reason than either: the
+/// invariant at stake is that **the gating lane always leaves an rc**, and an
+/// unwritten plan file does not dent it. [_gatingScript] carries no condition,
+/// so a child handed a file that is not there exits non-zero with `No such file
+/// or directory` on the log — an F whose rationale NAMES the missing plan, which
+/// is the loud terminal. Throwing here would instead produce the very thing
+/// these receipts exist to eliminate: an artifact-less exit, classified `infra`,
+/// carrying a stack trace where a gate reason belongs.
+///
+/// The offline suite's synthetic workspace dirs take this path, just as they do
+/// for the incarnation marker.
+void _writeGatingPlan({required String workspaceDir, required String plan}) {
+  try {
+    File(p.join(workspaceDir, _gatingPlanRelativePath))
+      ..createSync(recursive: true)
+      ..writeAsStringSync('$plan\n');
+  } on Object {
+    // See the doc comment above: the unconditional wrapper turns a missing
+    // plan file into a named, fail-closed F rather than a lost run.
+  }
+}
+
 /// The `sh -c` script the gating lane runs: ensure the artifact dirs, ARM the
-/// deadline stamp, run the plan in a subshell with its combined output TEED to
+/// deadline stamp, run the CHILD plan script with its combined output TEED to
 /// the log, capture ITS exit code to the rc file `result()` reads, then disarm
 /// the stamp. The outer `sh` exits clean regardless, so the step always
 /// `complete`s and the route is the single decision point.
+///
+/// **Every statement here is UNCONDITIONAL, and that is the point.** The
+/// wrapper carries no bead text at all — the plan lives in
+/// [_gatingPlanRelativePath], written by [CriticCapability.spawn] — so nothing
+/// a bead can author decides whether the receipts get written. A plan that does
+/// not parse now fails in the child, where it is an ordinary non-zero exit.
 ///
 /// The empty log is created BEFORE the stamp is armed, so a stamp always
 /// implies a readable log; the stamp is removed only AFTER the rc lands, so a
 /// surviving stamp always means the plan never finished. The rc line is
 /// unchanged, byte for byte — it is read by more than this lane.
-String _gatingScript(String plan) =>
+String _gatingScript() =>
     'mkdir -p $_critiqueDir $kCriticIncarnationDir; '
     ': > $_gatingLogRelativePath; '
     'printf "${kGatingDeadline.inMinutes}m\\n" > '
     '$_gatingDeadlineStampRelativePath; '
-    '( $plan ) > $_gatingLogRelativePath 2>&1; '
+    'sh $_gatingPlanRelativePath > $_gatingLogRelativePath 2>&1; '
     'echo \$? > $_critiqueDir/$kGatingRubric.rc; '
     'rm -f $_gatingDeadlineStampRelativePath';
 

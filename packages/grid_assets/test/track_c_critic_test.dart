@@ -329,10 +329,16 @@ void main() {
     test(
       'spawns `sh -c` running the bead\'s Validation Plan, capturing its rc',
       () {
+        final dir = Directory.systemTemp.createTempSync('critic-gate-spawn-');
+        addTearDown(() => dir.deleteSync(recursive: true));
         final withPlan = bead('tg-1').copyWith(
           metadata: const {'validation_plan': 'melos analyze && melos test'},
         );
-        final c = _ctx(rubric: kGatingRubric, beadOverride: withPlan);
+        final c = _ctx(
+          rubric: kGatingRubric,
+          workspaceDir: dir.path,
+          beadOverride: withPlan,
+        );
         final cfg = const CriticCapability().spawn(c.context, c.args);
         expect(cfg.command, 'sh');
         expect(cfg.args[0], '-c');
@@ -342,12 +348,22 @@ void main() {
           ': > .grid/critique/code-validation.log; '
           r'printf "10m\n" > '
           '.grid/critique-incarnation/code-validation.deadline; '
-          '( melos analyze && melos test ) '
+          'sh .grid/critique/code-validation.plan.sh '
           '> .grid/critique/code-validation.log 2>&1; '
           r'echo $? > .grid/critique/code-validation.rc; '
           'rm -f .grid/critique-incarnation/code-validation.deadline',
         );
         expect(cfg.args[1], isNot(contains('command -v')));
+        // The bead's plan is the CHILD script's content, never spliced into the
+        // wrapper: a plan that does not even parse must not be able to abort
+        // the statements that write the receipts.
+        expect(
+          File(
+            '${dir.path}/.grid/critique/code-validation.plan.sh',
+          ).readAsStringSync().trim(),
+          'melos analyze && melos test',
+        );
+        expect(cfg.args[1], isNot(contains('melos analyze')));
         // The rc is captured to the critique dir so result() can read the grade.
         expect(cfg.args[1], contains('.grid/critique/code-validation.rc'));
         expect(cfg.args[1], contains(r'echo $?'));
@@ -357,7 +373,7 @@ void main() {
           cfg.args[1],
           isNot(contains('.grid/critique/code-validation.deadline')),
         );
-        expect(cfg.workDir, '/w/tg-1');
+        expect(cfg.workDir, dir.path);
         expect(cfg.lifecycle, Lifecycle.oneTurn);
         // tg-uad follow-through: the gating lane is minutes-scale by
         // definition — it must NOT ride the runtime provider's 2-hour
@@ -368,10 +384,17 @@ void main() {
 
     test('a plan-less bead defaults to an explicit `false` (never silently '
         'passes)', () {
-      final c = _ctx(rubric: kGatingRubric);
-      final cfg = const CriticCapability().spawn(c.context, c.args);
-      // `( false )` ⇒ a non-zero rc ⇒ result() grades F.
-      expect(cfg.args[1], contains('( false )'));
+      final dir = Directory.systemTemp.createTempSync('critic-gate-planless-');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final c = _ctx(rubric: kGatingRubric, workspaceDir: dir.path);
+      const CriticCapability().spawn(c.context, c.args);
+      // `false` ⇒ a non-zero rc ⇒ result() grades F.
+      expect(
+        File(
+          '${dir.path}/.grid/critique/code-validation.plan.sh',
+        ).readAsStringSync().trim(),
+        'false',
+      );
     });
 
     test('ANY terminal exit completes the gating step (the grade rides '
@@ -531,6 +554,123 @@ void main() {
         isFalse,
         reason: 'a plan that FINISHED disarms the stamp',
       );
+    });
+
+    // The live finding (session `tranquility-v85de3`, 2026-09-12): `specify`
+    // stamped a plan whose single-quoted `ruby -e` program carried an
+    // apostrophe. `sh` parses a whole script BEFORE running any of it, so
+    // splicing that plan into the wrapper aborted every statement — no log, no
+    // rc, no gate. The harness then read the artifact-less exit as `infra` and
+    // spent its 5 + 15 + 30-minute throttle re-running a DETERMINISTIC script,
+    // leaving the session open with nothing for the governor's watch to fire
+    // on for 25 minutes. Exercised for real: only a real `sh` parses.
+    test('an unparseable validation plan leaves durable F receipts', () async {
+      final dir = Directory.systemTemp.createTempSync('critic-gate-parse-');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final withPlan = bead('tg-1').copyWith(
+        metadata: const {
+          // Balanced to Dart, UNBALANCED to sh — the receipt's own shape.
+          'validation_plan': 'ruby -e \'puts "the station lane\'s SDK"\'',
+        },
+      );
+      final c = _ctx(
+        rubric: kGatingRubric,
+        workspaceDir: dir.path,
+        beadOverride: withPlan,
+      );
+      final cfg = const CriticCapability().spawn(c.context, c.args);
+
+      final process = await Process.run(
+        cfg.command,
+        cfg.args,
+        workingDirectory: cfg.workDir,
+      );
+
+      // The wrapper is unaffected: it still exits clean with nothing escaping
+      // to the harness, so the step completes and the route decides.
+      expect(process.exitCode, 0);
+      expect(process.stdout, isEmpty);
+      expect(process.stderr, isEmpty);
+      final rc = File(
+        '${dir.path}/.grid/critique/code-validation.rc',
+      ).readAsStringSync();
+      expect(
+        int.parse(rc.trim()),
+        isNot(0),
+        reason: 'a parse error is the CHILD\'s non-zero exit, not a lost rc',
+      );
+      final log = File(
+        '${dir.path}/.grid/critique/code-validation.log',
+      ).readAsStringSync();
+      expect(log.toLowerCase(), contains('syntax error'));
+      expect(
+        File(
+          '${dir.path}/.grid/critique-incarnation/code-validation.deadline',
+        ).existsSync(),
+        isFalse,
+        reason: 'the plan FINISHED (badly) — the stamp must be disarmed',
+      );
+
+      // And the gate an operator actually reads carries that diagnostic.
+      final payload = await const CriticCapability().result(c.context, c.args);
+      expect(payload!['grade'], 'F');
+      expect(
+        (payload['rationale'] as String).toLowerCase(),
+        contains('syntax error'),
+      );
+    });
+
+    // The plan file is written BEST-EFFORT (the offline suite's synthetic
+    // workspace dirs take that path), which is only defensible because the
+    // wrapper is unconditional: a plan file that never landed is a NAMED
+    // fail-closed F, never the artifact-less exit this bead exists to end.
+    test('an unwritable plan file still leaves durable F receipts', () async {
+      final dir = Directory.systemTemp.createTempSync('critic-gate-unwrit-');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      // A regular FILE where the artifact dir must go — the write cannot
+      // succeed on any platform.
+      File('${dir.path}/.grid').writeAsStringSync('not a directory');
+      final c = _ctx(rubric: kGatingRubric, workspaceDir: dir.path);
+
+      // Spawn still hands back the unconditional wrapper.
+      final cfg = const CriticCapability().spawn(c.context, c.args);
+      expect(
+        File('${dir.path}/.grid/critique/code-validation.plan.sh').existsSync(),
+        isFalse,
+      );
+
+      // Re-point the wrapper at a workspace it CAN write, so the run proves
+      // what a missing plan file does rather than what an unwritable dir does.
+      final run = Directory.systemTemp.createTempSync('critic-gate-noplan-');
+      addTearDown(() => run.deleteSync(recursive: true));
+      final process = await Process.run(
+        cfg.command,
+        cfg.args,
+        workingDirectory: run.path,
+      );
+
+      expect(process.exitCode, 0);
+      expect(
+        int.parse(
+          File(
+            '${run.path}/.grid/critique/code-validation.rc',
+          ).readAsStringSync().trim(),
+        ),
+        isNot(0),
+      );
+      expect(
+        File(
+          '${run.path}/.grid/critique/code-validation.log',
+        ).readAsStringSync(),
+        contains('code-validation.plan.sh'),
+        reason: 'the log NAMES the plan file that never landed',
+      );
+      final payload = await const CriticCapability().result(
+        _ctx(rubric: kGatingRubric, workspaceDir: run.path).context,
+        c.args,
+      );
+      expect(payload!['grade'], 'F');
+      expect(payload['rationale'], contains('code-validation.plan.sh'));
     });
 
     test('non-zero code-validation reason leads bounded unique diagnostics '
@@ -1405,6 +1545,64 @@ void main() {
         const RetryPolicy(),
       );
       expect(Backoff.standard.delayFor(1), const Duration(seconds: 1));
+    });
+
+    // The 25-minute strand: a gating run that produces no rc is an `infra`
+    // non-result the engine backs off on `Backoff.harnessThrottle` (5 + 15 +
+    // 30 minutes) before it parks the node at a gate. Nothing about re-running
+    // an unchanged deterministic script can change the outcome, so the gating
+    // lane spends only its initial attempt and the gate becomes the FIRST
+    // thing an rc-less run produces.
+    test('gating no-result policy exhausts after the initial attempt', () {
+      final gating = const CriticCapability().supervisionPolicy(
+        stepArgs(
+          'tg-1/review/$kGatingRubric',
+          params: const {'rubric': kGatingRubric},
+        ),
+      );
+      expect(
+        gating.policyFor(CapabilityFailureKind.noResult),
+        const RetryPolicy(
+          // The engine increments the restart cursor BEFORE testing
+          // exhaustion, so one permits the initial attempt and nothing more.
+          maxRestarts: 1,
+          backoff: Backoff.harnessThrottle,
+          onExhaustion: ExhaustionBehavior.parkAtGate,
+        ),
+      );
+      // The broken-artifact budget is shared, byte for byte, with every other
+      // lane — this bead tightens ONE kind on ONE rubric.
+      expect(
+        gating.policyFor(CapabilityFailureKind.invalidResult),
+        const RetryPolicy(
+          maxRestarts: 2,
+          backoff: Backoff.standard,
+          onExhaustion: ExhaustionBehavior.parkAtGate,
+        ),
+      );
+      expect(gating.policyFor(CapabilityFailureKind.work), const RetryPolicy());
+
+      // An LLM rubric is untouched: a re-prompted model legitimately might not
+      // repeat itself, so its missing artifact keeps the circuit's budget.
+      final llm = const CriticCapability().supervisionPolicy(
+        stepArgs(
+          'tg-1/review/regression-risk',
+          params: const {'rubric': 'regression-risk'},
+        ),
+      );
+      expect(
+        llm.policyFor(CapabilityFailureKind.invalidResult),
+        const RetryPolicy(
+          maxRestarts: 2,
+          backoff: Backoff.standard,
+          onExhaustion: ExhaustionBehavior.parkAtGate,
+        ),
+      );
+      expect(
+        llm.policyFor(CapabilityFailureKind.noResult),
+        const RetryPolicy(),
+      );
+      expect(llm.policyFor(CapabilityFailureKind.work), const RetryPolicy());
     });
 
     test('an injected rubric source replaces the inline placeholder', () {

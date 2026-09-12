@@ -396,13 +396,24 @@ void main() {
       // --- The chokepoint discipline over the WHOLE recorded log ---
 
       // The cycle actually produced writes (else the assertions are vacuous):
-      // THREE creates, updates (birth stamp + identity + cursor advances), and
+      // FOUR creates, updates (birth stamp + identity + cursor advances), and
       // a close (the positive terminal). The creates, in order:
       //   1. the session bead itself,
       //   2. the `mount-attempt` bead — the DURABLE remount budget the engine
-      //      stamps at admission (the_grid tg-zlfu), and
+      //      stamps at admission (the_grid tg-zlfu),
       //   3. `create --graph`, pouring the session's `type=step` beads (the
-      //      molecule mint's second hop, tg-eli phase 2).
+      //      molecule mint's second hop, tg-eli phase 2), and
+      //   4. ONE `gate` at the deterministic `code-validation` lane. NOTHING
+      //      runs in this offline drive, so that lane's `.rc` never lands and
+      //      its completion artifact is never durable — a `noResult`, which
+      //      the lane now declares as a budget of ONE (see
+      //      `CriticCapability.supervisionPolicy`): re-running an unchanged
+      //      deterministic script cannot produce the rc it did not produce the
+      //      first time, so the gate is the FIRST thing an rc-less run yields
+      //      instead of arriving 25 minutes into a harness-throttle ladder.
+      //      Named HERE deliberately, and it is itself a chokepoint write —
+      //      `--actor grid-controller`, through the one writer, which is
+      //      exactly what this invariant is about.
       // Asserted by SHAPE, not by a bare count. A count alone says nothing
       // about WHICH write appeared — and it is also resolution-dependent: the
       // `mount-attempt` hop only exists once grid_engine >= tg-zlfu is
@@ -411,13 +422,19 @@ void main() {
       final createdTypes = _createdTypes(f.runner);
       expect(createdTypes.where((t) => t == 'session'), hasLength(1));
       expect(createdTypes.where((t) => t == 'graph'), hasLength(1));
+      expect(createdTypes.where((t) => t == 'gate'), hasLength(1));
       expect(
         createdTypes.toSet(),
-        everyElement(isIn(const ['session', 'mount-attempt', 'graph'])),
+        everyElement(isIn(const ['session', 'mount-attempt', 'graph', 'gate'])),
         reason:
             'an unrecognised create means a NEW write reached the '
             'chokepoint — name it here deliberately, never let it in silently',
       );
+      // The gate is the GATING lane's, not a stray park elsewhere.
+      expect([
+        for (final call in f.runner.callsFor('create'))
+          if (call.contains('gate')) call.join(' '),
+      ], everyElement(contains('tg-1/review/$kGatingRubric')));
       expect(f.runner.callsFor('update'), isNotEmpty);
       expect(f.runner.callsFor('close'), hasLength(1));
       // The land Service really ran its orchestration through the fakes.
