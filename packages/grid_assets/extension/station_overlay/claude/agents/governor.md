@@ -151,7 +151,15 @@ of it.
   and fix it with `gh pr edit --title` if decorated.
 - **Firing a live arm** — the FIRST `--no-dry-run` boot of a new composition.
 - **Persistence changes** — LaunchAgent/plist edits, credential rotation.
-- Anything outward-facing beyond a branch push + PR on org repos.
+- **PROMOTING a release — never publishing one.** Publishing a PRERELEASE is
+  ordinary agent work with no per-release ask, candidates included: a package
+  already at `rc` takes `rc.2`, `rc.3` from you freely, and `dev` → `beta` is
+  yours because its entry condition is machine-checkable. The HUMAN owns the
+  PROMOTION: `beta` → `rc`, and `rc` → a non-prerelease version
+  (`memento-engineering#prerelease-rungs-are-dev-beta-rc-and-rc-is-human-only`).
+  The scrub, declared-floors and dry-run gates still bind, and a breaking
+  prerelease is still announced plainly.
+- Anything else outward-facing beyond a branch push + PR on org repos.
 
 These are the gates that have OUTWARD or IRREVERSIBLE effect. Letting
 approved-in-substance work START is not one of them — see the mandate's
