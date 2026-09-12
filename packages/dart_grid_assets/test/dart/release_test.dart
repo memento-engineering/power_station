@@ -1980,7 +1980,8 @@ void main() {
     });
 
     test(
-      'release validate-consumers --json emits per-consumer results',
+      'release validate-consumers --json preserves git_path in the generated '
+      'override',
       () async {
         final temp = await Directory.systemTemp.createTemp('release-consumer-');
         addTearDown(() => temp.delete(recursive: true));
@@ -1993,9 +1994,12 @@ void main() {
                   'directory': temp.path,
                   'links': [
                     {
-                      'package': 'grid_engine',
+                      'package': 'genesis_tree',
                       'git_url':
-                          'git@github.com:memento-engineering/the_grid.git',
+                          'git@github.com:memento-engineering/genesis.git',
+                      // genesis holds genesis_tree at packages/tree, not at
+                      // the packages/<package> convention.
+                      'git_path': 'packages/tree',
                     },
                   ],
                 },
@@ -2018,7 +2022,7 @@ void main() {
           'release',
           'validate-consumers',
           '--rc-tag',
-          'grid_engine-v0.3.0-rc.1',
+          'genesis_tree-v0.4.0-rc.1',
           '--manifest',
           manifest.path,
           '--json',
@@ -2028,9 +2032,16 @@ void main() {
         expect(json['allPassed'], true);
         expect(json['results'], hasLength(1));
         expect((json['results'] as List).single['name'], 'space_station');
+        final override = File(
+          '${temp.path}/pubspec_overrides.yaml',
+        ).readAsStringSync();
+        expect(override, contains("ref: 'genesis_tree-v0.4.0-rc.1'"));
         expect(
-          File('${temp.path}/pubspec_overrides.yaml').readAsStringSync(),
-          contains("ref: 'grid_engine-v0.3.0-rc.1'"),
+          override,
+          contains("path: 'packages/tree'"),
+          reason:
+              'the candidate ref replaces git_ref alone — the manifest '
+              'directory rides through, so pub can resolve the override',
         );
       },
     );

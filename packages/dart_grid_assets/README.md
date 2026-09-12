@@ -109,3 +109,15 @@ The consumers manifest is the same shape `release validate-consumers` takes:
   ]
 }
 ```
+
+A link may add `"git_path"` when the producer's directory inside its repository
+is not `packages/<package name>` — genesis keeps `genesis_tree` at
+`packages/tree`. Omitting it keeps the `packages/<package name>` default, so an
+override that silently cannot resolve is a declaration the manifest is missing,
+not a shape the emitter guesses.
+
+`release validate-consumers` cannot validate a consumer that is a member of the
+same pub workspace as the package under test: pub refuses that override with
+`Cannot override workspace packages`, and no manifest shape works around it.
+Place the probe outside the workspace and point the manifest `directory` at that
+out-of-workspace probe consumer.

@@ -1655,6 +1655,10 @@ class ReleaseService {
 
   /// Pins every [consumers] link to [rcTag], writes `pubspec_overrides.yaml`,
   /// then runs `dart analyze && dart test` per consumer.
+  ///
+  /// The candidate ref is the ONLY thing the pin replaces: a link's declared
+  /// [PubLink.gitPath] rides through, so a producer whose repository directory
+  /// differs from its package name still resolves.
   Future<ConsumerValidationReport> validateConsumers({
     required String rcTag,
     required List<ReleaseConsumer> consumers,
@@ -1670,6 +1674,7 @@ class ReleaseService {
               hosted: link.hosted,
               gitUrl: link.gitUrl,
               gitRef: rcTag,
+              gitPath: link.gitPath,
             ),
         ],
       );
