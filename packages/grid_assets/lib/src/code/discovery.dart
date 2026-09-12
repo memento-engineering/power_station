@@ -4916,10 +4916,20 @@ class DiscoveryRouteCapability extends RouteCapability {
       ];
       if (waiting.isEmpty || !DateTime.now().isBefore(deadline)) break;
       await Future<void>.delayed(lanePoll);
+      // A context torn down across the wait is a route that no longer has a
+      // node to decide for. Unwind on the SAME channel as an explicit cancel —
+      // kept a separate statement from the token check so the handle is
+      // provably mounted before it is read again. This runs STRICTLY BEFORE
+      // the re-read below and leaves the join classification of
+      // `discovery-lens-reports-carry-the-round-and-the-wipe-sweeps` (4)
+      // untouched — "a lane that recorded nothing is LATE and is waited for
+      // (`lanePoll`/`laneWaitBudget`, the `SpecRouteCapability` shape)" still
+      // decides every lane that reaches the re-read.
+      if (!context.mounted) throw kRouteCancelled;
       if (args.cancel.isCancelled) throw kRouteCancelled;
-      // Re-read the ambient view for the next attempt (post-cancel-check — the
-      // effect verb is snapshot-at-read and safe across the wait, the
-      // `SpecRouteCapability` precedent).
+      // Re-read the ambient view for the next attempt (post-mounted- and
+      // post-cancel-check — the effect verb is snapshot-at-read and safe across
+      // the wait, the `SpecRouteCapability` precedent).
       siblings =
           context.getInheritedSeedOfExactType<SiblingView>() ??
           const SiblingView();

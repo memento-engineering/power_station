@@ -1726,6 +1726,14 @@ class CriticCapability extends ProcessCapability {
     final rubric = _rubricOf(args);
     final workspace = context.getInheritedSeedOfExactType<Workspace>();
     if (workspace == null) return GateOutcome.probeError;
+    // The out-of-band flare sink (D-8, emit-only). This is an EFFECT edge, so
+    // the non-binding verb is correct (ADR-0008 D3); absent ⇒ no flares, never
+    // a failure. Read at ENTRY, before the gating branch's first `await`: the
+    // sink is captured while the context is provably mounted, so no read of it
+    // crosses an async gap.
+    final transport = context
+        .getInheritedSeedOfExactType<ServiceBundle>()
+        ?.transport;
     final workspaceDir = workspace.workspaceDir;
     if (rubric == kGatingRubric) {
       try {
@@ -1745,12 +1753,6 @@ class CriticCapability extends ProcessCapability {
         return GateOutcome.probeError;
       }
     }
-    // The out-of-band flare sink (D-8, emit-only). This is an EFFECT edge, so
-    // the non-binding verb is correct (ADR-0008 D3); absent ⇒ no flares, never
-    // a failure.
-    final transport = context
-        .getInheritedSeedOfExactType<ServiceBundle>()
-        ?.transport;
     try {
       final round = verdictRound(args);
       // Nico, 2026-09-01 — keep the clause, change the writer: the round stamp
