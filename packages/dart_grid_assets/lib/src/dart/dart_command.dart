@@ -18,6 +18,8 @@ import 'dart_link_service.dart';
 import 'pub_links.dart';
 import 'release_command.dart';
 import 'release_service.dart';
+import 'verification_command.dart';
+import 'verification_service.dart';
 
 /// `dart` — the DART domain umbrella command (subcommands carry the verbs).
 class DartCommand extends Command<int> {
@@ -25,9 +27,20 @@ class DartCommand extends Command<int> {
   DartCommand({
     DartLinkService service = const DartLinkService(),
     ReleaseService releaseService = const ReleaseService(),
+    DartVerificationService verificationService =
+        const DartVerificationService(),
+    StringSink? verificationOut,
+    StringSink? verificationErr,
   }) {
     addSubcommand(DartLinkCommand(service: service));
     addSubcommand(ReleaseCommand(service: releaseService));
+    addSubcommand(
+      DartVerifyCommand(
+        service: verificationService,
+        out: verificationOut,
+        err: verificationErr,
+      ),
+    );
   }
 
   @override
@@ -36,7 +49,8 @@ class DartCommand extends Command<int> {
   @override
   final String description =
       'The DART domain: typed grid.dart configuration applied to a checkout '
-      '(pub dev-time linkage first).';
+      '(pub dev-time linkage first) plus the bounded-output verification '
+      'verbs.';
 }
 
 /// `dart link` — apply a work bead's declared pub linkage to a checkout:
