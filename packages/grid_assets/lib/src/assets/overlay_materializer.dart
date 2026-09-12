@@ -60,6 +60,7 @@ import 'package:path/path.dart' as p;
 
 import 'asset_loader.dart';
 import 'asset_resolution.dart';
+import 'overlay_manifest.dart';
 import 'overlay_provenance.dart';
 
 /// Where Claude Code discovers a skill inside a repo root

@@ -40,21 +40,7 @@ import 'package:grid_sdk/grid_sdk.dart';
 import 'package:package_config/package_config.dart';
 import 'package:path/path.dart' as p;
 
-/// The vended-tree prefix a [AssetDeliveryTarget.claude] artifact is declared
-/// under.
-const String _kClaudeArtifactHead = 'extension/station_overlay/claude';
-
-/// The vended-tree prefix an [AssetDeliveryTarget.agents] artifact is declared
-/// under.
-const String _kAgentsArtifactHead = 'extension/station_overlay/agents';
-
-/// Where Claude Code reads a repo's assets — the head every `claude` leg
-/// materializes under.
-const String kClaudeTargetHead = '.claude';
-
-/// Where the harness-neutral agents layout reads a repo's assets — the head
-/// every `agents` leg materializes under.
-const String kAgentsTargetHead = '.agents';
+import 'overlay_manifest.dart';
 
 /// ONE substation's stable identity — its tree [Key] AND the aspect a
 /// substation build subscribes to on [SubstationFactsModelSeed].
@@ -304,7 +290,8 @@ final class GridAssetResolution {
 /// roster override names an asset outside the registry; a selected asset's
 /// vending package has no root in the facts (its files could not be read, and
 /// silently dropping it is exactly the drift this resolution exists to end); a
-/// materialized artifact is declared outside its delivery leg's vended head; or
+/// materialized artifact is declared outside its delivery leg's vended head (the
+/// root-file leg vends exactly [kAgentsRootRelativePath] and nothing else); or
 /// two selected artifacts collide on one target path.
 GridAssetResolution resolveGridAssets({
   required GridAssetRegistry registry,
@@ -454,21 +441,52 @@ bool _selectorApplies(AssetSelector selector, SubstationFacts facts) =>
 
 /// The root-relative target [artifact] materializes to, or null when its leg is
 /// never written into a repository (`mcp`, `station`).
+///
+/// The delivery enum picks the MAPPING KEY; [kDefaultStationOverlayMappings]
+/// turns that key into the pair of heads, so the manifest's table is the single
+/// authority for where a declared artifact lands (there is no second table
+/// here).
+///
+/// ONE enum case, TWO agents surfaces. `AssetDeliveryTarget.agents` is
+/// documented in the SDK as covering BOTH `AGENTS.md` and `.agents/…`, so the
+/// enum ALONE cannot route them — the DECLARED SOURCE HEAD is what separates
+/// them: an `agents` artifact under the [kAgentsRootMappingKey] source dir is
+/// the root-FILE leg, and every other `agents` artifact is the
+/// [kAgentsMappingKey] TREE leg. Both then resolve through the same mapping.
 String? _materializedTarget(AssetArtifact artifact) {
-  final (sourceHead, targetHead) = switch (artifact.target) {
-    AssetDeliveryTarget.claude => (_kClaudeArtifactHead, kClaudeTargetHead),
-    AssetDeliveryTarget.agents => (_kAgentsArtifactHead, kAgentsTargetHead),
-    AssetDeliveryTarget.mcp || AssetDeliveryTarget.station => (null, null),
-  };
-  if (sourceHead == null || targetHead == null) return null;
   final source = p.normalize(artifact.path);
+  final mappingKey = switch (artifact.target) {
+    AssetDeliveryTarget.claude => kClaudeMappingKey,
+    AssetDeliveryTarget.agents =>
+      p.isWithin(_overlaySourceHead(kAgentsRootMappingKey), source)
+          ? kAgentsRootMappingKey
+          : kAgentsMappingKey,
+    AssetDeliveryTarget.mcp || AssetDeliveryTarget.station => null,
+  };
+  if (mappingKey == null) return null;
+  final sourceHead = _overlaySourceHead(mappingKey);
+  final targetHead = kDefaultStationOverlayMappings[mappingKey]!;
   if (!p.isWithin(sourceHead, source)) {
     throw StateError(
       '${artifact.target.name} artifact is outside $sourceHead: $source',
     );
   }
-  return p.join(targetHead, p.relative(source, from: sourceHead));
+  final within = p.normalize(p.relative(source, from: sourceHead));
+  if (mappingKey == kAgentsRootMappingKey &&
+      within != kAgentsRootRelativePath) {
+    throw StateError(
+      'the $mappingKey leg vends exactly $kAgentsRootRelativePath — the '
+      'repository root is not a tree this overlay pours into: $source',
+    );
+  }
+  return p.normalize(p.join(targetHead, within));
 }
+
+/// The vended-tree prefix the [mappingKey] leg declares its artifacts under —
+/// the mapping key read as a source DIRECTORY below
+/// [kStationOverlaySourceHead].
+String _overlaySourceHead(String mappingKey) =>
+    p.join(kStationOverlaySourceHead, mappingKey);
 
 /// The SINGLE source of root observations — injected, never constructed inside
 /// a build (config = VALUES in the tree, impls = DI).
