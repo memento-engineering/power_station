@@ -156,6 +156,43 @@ void main() {
     );
   });
 
+  test('the manifest mapping TABLE is what the resolver reads: every declared '
+      'artifact lands at the target its own source dir is mapped to', () {
+    final resolution = TestAssetResolutionFixture(
+      root: temp,
+      assets: <GridAssetDefinition>[
+        fixtureSkill('x'),
+        fixtureSettings('harness'),
+        fixtureAgentsInstructions(),
+      ],
+      bodies: <String, String>{
+        'extension/station_overlay/claude/settings.json':
+            '{\n  "on": true\n}\n',
+        ...fixtureAgentsInstructionsBodies(),
+      },
+    ).resolution();
+
+    expect(resolution.artifacts, isNotEmpty);
+    for (final artifact in resolution.artifacts) {
+      final declared = p.relative(
+        p.normalize(artifact.artifact.path),
+        from: kStationOverlaySourceHead,
+      );
+      final segments = p.split(declared);
+      final mapped = kDefaultStationOverlayMappings[segments.first];
+      expect(
+        mapped,
+        isNotNull,
+        reason: '${segments.first} is a mapped source dir',
+      );
+      expect(
+        artifact.relativePath,
+        p.normalize(p.join(mapped!, p.joinAll(segments.skip(1)))),
+        reason: 'no second table decides where ${artifact.artifact.path} lands',
+      );
+    }
+  });
+
   test('the root leg is a THIRD destination, not a re-route: both harness-head '
       'legs keep their exact targets beside it', () {
     final withRoot = TestAssetResolutionFixture(
