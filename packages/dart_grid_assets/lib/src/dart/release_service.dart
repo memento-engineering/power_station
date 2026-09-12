@@ -741,6 +741,233 @@ class PollResult {
   };
 }
 
+/// The HARD ceiling on ONE rendered ladder report, in UTF-8 bytes, counting the
+/// trailing newline the command writes. It binds BOTH renderings: the single
+/// JSON object and the one-line-per-package summary, which is strictly the
+/// smaller of the two — so the window the JSON encoding admits bounds them
+/// both.
+///
+/// A ladder report grows with the WORKSPACE, and a workspace grows without
+/// asking its reader, so an uncapped report is exactly the unbounded dump a
+/// vended command is required not to be
+/// (`a-mechanical-lookup-is-a-vended-command-with-a-bounded-output`: every
+/// vended command carries a hard cap AND an explicit truncation marker). The
+/// ladder is a TIME-VARYING read — the facts move as packages publish — so it
+/// caps its output and never suppresses a repeat.
+///
+/// The cap cuts WHOLE records, never a field, and whatever it cuts it NAMES
+/// ([ReleaseLadderReport.withheld]) together with how to reach it
+/// ([ReleaseLadderReport.show]). A silent clip would answer a staleness
+/// question confidently and partially, which is worse than not answering.
+///
+/// 8,000 bytes is the ceiling the org's other bounded read verb already holds,
+/// and one ladder record encodes to roughly 240 bytes, so a window carries
+/// about thirty packages — every workspace shipped today answers in one call.
+const int kLadderOutputCapBytes = 8000;
+
+/// Where ONE package sits on the prerelease ladder, and how stale it is there —
+/// the read-only facts a staleness prompt is decided from, projected off
+/// pub.dev's published versions list.
+///
+/// Facts only. This carries no judgement and files nothing: the rung is a
+/// property of the package (per `memento-engineering`'s
+/// `prerelease-rungs-are-dev-beta-rc-and-rc-is-human-only`), and a human still
+/// initiates every promotion.
+@immutable
+class ReleaseLadderPackage {
+  /// Wraps the ladder facts for [package].
+  const ReleaseLadderPackage({
+    required this.package,
+    required this.currentPublishedVersion,
+    required this.rung,
+    required this.rungCounter,
+    required this.lastStableVersion,
+    required this.prereleasesSinceStable,
+  });
+
+  /// The pub package name.
+  final String package;
+
+  /// The version pub.dev lists LAST — publication order, not semver order, so
+  /// a `beta.1` published after an `rc.5` is the current one (the demotion
+  /// mechanism's whole point is that the ladder may legally move DOWN). Null
+  /// for a package that has never been published.
+  final Version? currentPublishedVersion;
+
+  /// The rung [currentPublishedVersion] occupies; null for a package that has
+  /// never been published (never a guessed rung).
+  final ReleaseRung? rung;
+
+  /// The counter at [rung] (`3` for `0.2.0-beta.3`); zero for a stable current
+  /// version and for a package that has never been published.
+  final int rungCounter;
+
+  /// The last STABLE version pub.dev lists, in publication order; null when the
+  /// package has never published one.
+  final Version? lastStableVersion;
+
+  /// How many prereleases were published AFTER [lastStableVersion] — every
+  /// published prerelease when there is no stable version at all. This is the
+  /// staleness measure: a package accreting candidates against a stable it
+  /// never reaches.
+  final int prereleasesSinceStable;
+
+  /// Whether pub.dev lists any version of this package.
+  bool get hasPublishedVersion => currentPublishedVersion != null;
+
+  /// Whether pub.dev lists a STABLE version of this package.
+  bool get hasStableVersion => lastStableVersion != null;
+
+  /// Whether this package is over the shared staleness threshold — the same
+  /// [kStaleRcDemotionThreshold] the demotion mechanism applies, so the prompt
+  /// and the demotion cannot disagree about what "stale" means.
+  bool get isOverStalenessThreshold =>
+      prereleasesSinceStable >= kStaleRcDemotionThreshold;
+
+  /// JSON form — the structured contract the release skill consumes. Both
+  /// nullable versions and the nullable rung are ALWAYS present, so absence is
+  /// explicit rather than a missing key a parser could read as zero.
+  Map<String, dynamic> toJson() => {
+    'package': package,
+    'hasPublishedVersion': hasPublishedVersion,
+    'currentPublishedVersion': currentPublishedVersion?.toString(),
+    'rung': rung?.name,
+    'rungCounter': rungCounter,
+    'hasStableVersion': hasStableVersion,
+    'lastStableVersion': lastStableVersion?.toString(),
+    'prereleasesSinceStable': prereleasesSinceStable,
+    'isOverStalenessThreshold': isOverStalenessThreshold,
+  };
+}
+
+/// A workspace's ladder report — one [ReleaseLadderPackage] per publishable
+/// member, package-name sorted, plus the BOUNDED-OUTPUT contract every vended
+/// command carries: what this rendering withheld and how to ask for it.
+///
+/// [ReleaseService.reportLadder] returns the COMPLETE report (a UI renders all
+/// of it); [bounded] cuts the window a CLI writes.
+@immutable
+class ReleaseLadderReport {
+  /// Wraps [packages] — the records this report carries — as a window that
+  /// starts at [offset] within a workspace declaring [totalPackages]
+  /// publishable members.
+  ReleaseLadderReport({
+    required this.workspaceRoot,
+    required List<ReleaseLadderPackage> packages,
+    required this.totalPackages,
+    this.offset = 0,
+  }) : packages = List<ReleaseLadderPackage>.unmodifiable(packages);
+
+  /// The normalized absolute workspace root the report was read from.
+  final String workspaceRoot;
+
+  /// The records this rendering carries, sorted by package name.
+  final List<ReleaseLadderPackage> packages;
+
+  /// How many publishable members the workspace declares — the whole shape,
+  /// which a caller learns without paying for the records it did not get.
+  final int totalPackages;
+
+  /// The index of [packages]'s first record within the complete sorted set.
+  final int offset;
+
+  /// Whether every publishable member's record is in [packages].
+  bool get isComplete => packages.length == totalPackages;
+
+  /// How many records this rendering did NOT carry.
+  int get withheldPackages => totalPackages - packages.length;
+
+  /// What the cap withheld, named — null when nothing was.
+  String? get withheld =>
+      isComplete ? null : '$withheldPackages of $totalPackages package records';
+
+  /// How to ask for what was withheld — null when nothing was. It names the
+  /// NEXT unrendered offset, and `0` once the window has run past the end, so
+  /// following it always reaches a record this rendering did not carry.
+  String? get show {
+    if (isComplete) return null;
+    final next = offset + packages.length;
+    return 'rerun with --skip ${next < totalPackages ? next : 0}';
+  }
+
+  /// Cuts the bounded WINDOW a CLI renders: the records from [skip] onward that
+  /// fit under [capBytes] once encoded, with the truncation marker RESERVED
+  /// before any record is admitted — so a report that cuts can always afford to
+  /// say what it cut.
+  ///
+  /// The first record of a window is always admitted: a window that carries no
+  /// record tells the caller nothing and cannot be paged past.
+  ///
+  /// A window is cut from a COMPLETE report, never from another window — that
+  /// invariant is loud, because re-windowing a window would count [offset] and
+  /// [withheldPackages] off the wrong denominator.
+  ReleaseLadderReport bounded({
+    int skip = 0,
+    int capBytes = kLadderOutputCapBytes,
+  }) {
+    if (!isComplete) {
+      throw StateError(
+        'a ladder window is cut from the complete report, not from another '
+        'window ($withheldPackages of $totalPackages records are already '
+        'withheld).',
+      );
+    }
+    if (skip < 0) {
+      throw ArgumentError.value(skip, 'skip', 'must not be negative');
+    }
+    if (capBytes < 1) {
+      throw ArgumentError.value(capBytes, 'capBytes', 'must be at least 1');
+    }
+    final window = <ReleaseLadderPackage>[];
+    for (final record in packages.skip(skip)) {
+      final candidate = [...window, record];
+      if (window.isNotEmpty && _reservedBytes(candidate, skip) > capBytes) {
+        break;
+      }
+      window.add(record);
+    }
+    return ReleaseLadderReport(
+      workspaceRoot: workspaceRoot,
+      packages: window,
+      totalPackages: totalPackages,
+      offset: skip,
+    );
+  }
+
+  /// The encoded size of a candidate window with the truncation marker at its
+  /// WIDEST — the reservation that keeps the marker affordable however the
+  /// window lands.
+  int _reservedBytes(List<ReleaseLadderPackage> window, int skip) =>
+      utf8
+          .encode(
+            jsonEncode({
+              'workspaceRoot': workspaceRoot,
+              'packages': [for (final record in window) record.toJson()],
+              'offset': skip,
+              'totalPackages': totalPackages,
+              'withheldPackages': totalPackages,
+              'withheld': '$totalPackages of $totalPackages package records',
+              'show': 'rerun with --skip $totalPackages',
+            }),
+          )
+          .length +
+      1; // the newline the command writes after the object
+
+  /// JSON form — the structured contract the release skill consumes. The
+  /// bounded-output keys are ALWAYS present: [withheld] and [show] are null
+  /// exactly when nothing was withheld, so a complete answer says so rather
+  /// than leaving the parser to infer it from a missing key.
+  Map<String, dynamic> toJson() => {
+    'workspaceRoot': workspaceRoot,
+    'packages': [for (final record in packages) record.toJson()],
+    'offset': offset,
+    'totalPackages': totalPackages,
+    'withheldPackages': withheldPackages,
+    'withheld': withheld,
+    'show': show,
+  };
+}
+
 /// The public-API delta a release actually CARRIES — the requirement half of
 /// the classification pair (what the code did to consumers, read off the
 /// published baseline rather than off a commit message).
@@ -1946,6 +2173,142 @@ class ReleaseService {
     );
   }
 
+  /// Reports where every publishable workspace member sits on the prerelease
+  /// ladder: its current published version, the rung and counter that version
+  /// occupies, its last stable version, how many prereleases were published
+  /// since it, and whether that count is over [kStaleRcDemotionThreshold].
+  ///
+  /// READ-ONLY, and deliberately so: it cuts no tag, pushes nothing, runs no
+  /// process, waits on nothing and rewrites no version, so a sweep may run it
+  /// over every workspace at any moment. One pub.dev GET per publishable
+  /// member, through the same [poll] parser the wave uses — no second registry
+  /// reader.
+  ///
+  /// FACTS ONLY. Past the threshold the release machinery files a promotion
+  /// bead that competes for attention like any other work, and a human still
+  /// initiates the promotion — but that is JUDGEMENT, and it belongs to the
+  /// skill half (ADR-0001), which is why nothing here files, refuses or
+  /// promotes.
+  ///
+  /// The CURRENT version is pub.dev's LAST listed version — publication order,
+  /// never semver order. A `beta.1` published after an `rc.5` is a legal
+  /// demotion, and reading the greatest version instead would report a rung the
+  /// package has already stepped down from.
+  ///
+  /// Loud on anything it cannot read: a non-404, non-200 answer, a 200 carrying
+  /// no parseable version, a version that is not semver, and a current
+  /// prerelease on no rung are all [StateError]s naming the package. A 404 is
+  /// the one "nothing here" answer it accepts — that package has never been
+  /// published, which is a fact, not a failure. Workspace-shaped refusals
+  /// (a missing root, an escaping member, an unversioned member) stay the
+  /// [ReleaseWaveFailure]s [publishWorkspace] already raises, from the same
+  /// member boundary.
+  ///
+  /// The returned report is COMPLETE — every publishable member. The bounded
+  /// window a CLI renders is [ReleaseLadderReport.bounded].
+  Future<ReleaseLadderReport> reportLadder({
+    required String workspaceRoot,
+  }) async {
+    final root = p.normalize(p.absolute(workspaceRoot));
+    final members = _workspaceMembers(root)
+      ..sort((a, b) => a.name.compareTo(b.name));
+    final records = <ReleaseLadderPackage>[];
+    for (final member in members) {
+      records.add(await _ladderRecord(member));
+    }
+    return ReleaseLadderReport(
+      workspaceRoot: root,
+      packages: records,
+      totalPackages: records.length,
+    );
+  }
+
+  /// Projects ONE member's ladder facts off its pub.dev versions list.
+  Future<ReleaseLadderPackage> _ladderRecord(_WorkspaceMember member) async {
+    final PollResult probe;
+    try {
+      probe = await poll(
+        package: member.name,
+        version: member.version.toString(),
+      );
+    } on Object catch (error) {
+      throw StateError('pub.dev could not be read for ${member.name}: $error');
+    }
+    if (probe.statusCode == 404) {
+      return ReleaseLadderPackage(
+        package: member.name,
+        currentPublishedVersion: null,
+        rung: null,
+        rungCounter: 0,
+        lastStableVersion: null,
+        prereleasesSinceStable: 0,
+      );
+    }
+    if (probe.statusCode != 200) {
+      throw StateError(
+        'pub.dev answered ${probe.statusCode} for ${member.name}; refusing to '
+        'read that as an empty ladder.',
+      );
+    }
+    if (probe.versions.isEmpty) {
+      throw StateError(
+        'pub.dev listed no readable version for ${member.name}; refusing to '
+        'read that as an empty ladder.',
+      );
+    }
+    final published = <Version>[];
+    for (final raw in probe.versions) {
+      try {
+        published.add(Version.parse(raw));
+      } on FormatException catch (error) {
+        throw StateError(
+          'pub.dev listed "$raw" for ${member.name}, which is not a semantic '
+          'version: ${error.message}',
+        );
+      }
+    }
+    final current = published.last; // publication order, never semver order
+    final position = _ladderPosition(current);
+    if (position == null) {
+      throw StateError(
+        '${member.name} is published as $current, which sits on no release '
+        'rung: a pre-release must be <dev|beta|rc>.<positive integer>.',
+      );
+    }
+    var lastStable = -1;
+    for (var index = 0; index < published.length; index++) {
+      if (published[index].preRelease.isEmpty) lastStable = index;
+    }
+    return ReleaseLadderPackage(
+      package: member.name,
+      currentPublishedVersion: current,
+      rung: position.rung,
+      rungCounter: position.counter,
+      lastStableVersion: lastStable < 0 ? null : published[lastStable],
+      // Everything published after the last stable version is a prerelease by
+      // construction; with no stable version at all, that is the whole list.
+      prereleasesSinceStable: published.length - lastStable - 1,
+    );
+  }
+
+  /// The LADDER POSITION [version] occupies — its rung and the counter at that
+  /// rung (`0.2.0-beta.3` -> beta at 3; a stable version -> stable at 0). Null
+  /// when the version sits on NO rung: a prerelease that is not exactly
+  /// `<dev|beta|rc>.<positive integer>`.
+  ///
+  /// The single parser both ladder readers share — [_rungFor], which renders an
+  /// unrung version as a wave refusal, and [_ladderRecord], which renders one
+  /// as a report refusal. Neither guesses a rung.
+  static ({ReleaseRung rung, int counter})? _ladderPosition(Version version) {
+    final pre = version.preRelease;
+    if (pre.isEmpty) return (rung: ReleaseRung.stable, counter: 0);
+    if (pre.length != 2 || pre[0] is! String || pre[1] is! int) return null;
+    final rung = ReleaseRung.parse(pre[0] as String);
+    final counter = pre[1] as int;
+    if (rung == null || !rung.isPrerelease || counter < 1) return null;
+    return (rung: rung, counter: counter);
+  }
+
   /// CLASSIFIES a release: diffs the package's PUBLIC API at HEAD against the
   /// API of its LAST PUBLISHED version and pairs that delta with the version
   /// bump the pubspec declares.
@@ -2782,26 +3145,18 @@ class ReleaseService {
     ReleaseRung? requestedRung,
     bool promotionIntent,
   ) {
-    final pre = member.version.preRelease;
-    final ReleaseRung authored;
-    if (pre.isEmpty) {
-      authored = ReleaseRung.stable;
-    } else {
-      final parsed = pre.length == 2 && pre[0] is String && pre[1] is int
-          ? ReleaseRung.parse(pre[0] as String)
-          : null;
-      if (parsed == null || !parsed.isPrerelease || (pre[1] as int) < 1) {
-        throw ReleaseWaveFailure(
-          stage: ReleaseWaveStage.discovery,
-          package: member.name,
-          message:
-              '${member.name} is authored as ${member.version}, which sits on '
-              'no release rung: a pre-release must be '
-              '<dev|beta|rc>.<positive integer>.',
-        );
-      }
-      authored = parsed;
+    final position = _ladderPosition(member.version);
+    if (position == null) {
+      throw ReleaseWaveFailure(
+        stage: ReleaseWaveStage.discovery,
+        package: member.name,
+        message:
+            '${member.name} is authored as ${member.version}, which sits on '
+            'no release rung: a pre-release must be '
+            '<dev|beta|rc>.<positive integer>.',
+      );
     }
+    final authored = position.rung;
     if (requestedRung != null && authored != requestedRung) {
       throw ReleaseWaveFailure(
         stage: ReleaseWaveStage.discovery,
