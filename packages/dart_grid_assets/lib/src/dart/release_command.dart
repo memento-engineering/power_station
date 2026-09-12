@@ -28,6 +28,7 @@ class ReleaseCommand extends Command<int> {
     final o = out ?? stdout;
     final e = err ?? stderr;
     addSubcommand(ReleaseDiscoverCommand(service: service, out: o, err: e));
+    addSubcommand(ReleaseLadderCommand(service: service, out: o, err: e));
     addSubcommand(ReleasePlanCommand(service: service, out: o, err: e));
     addSubcommand(ReleaseTagCommand(service: service, out: o));
     addSubcommand(
@@ -48,9 +49,10 @@ class ReleaseCommand extends Command<int> {
   @override
   final String description =
       'Deterministic Dart-package release ops (the machine substrate under the '
-      'operator `release` skill): workspace discovery, version plan, scrub '
-      'gate, semver classification, publish order, dry-run, pub.dev poll, and '
-      'the one-command workspace wave — each a structured JSON result.';
+      'operator `release` skill): workspace discovery, the per-package ladder '
+      'report, version plan, scrub gate, semver classification, publish order, '
+      'dry-run, pub.dev poll, and the one-command workspace wave — each a '
+      'structured JSON result.';
 }
 
 /// Decodes the shared `{consumers: [{name, directory, links}]}` manifest both
@@ -167,6 +169,108 @@ class ReleaseDiscoverCommand extends Command<int> {
       for (final candidate in discovery.candidates) {
         _out.writeln(candidate);
       }
+    }
+    return 0;
+  }
+}
+
+/// `dart release ladder` — report where every workspace package sits on the
+/// prerelease ladder, and which packages are stale there.
+///
+/// READ-ONLY: it cuts no tag, pushes nothing and changes no version, so it is
+/// safe to run over any workspace at any time — which is the property that lets
+/// a sweep call it. It emits FACTS; deciding what to do about a stale package
+/// (filing the promotion bead a human then acts on) is the skill's judgement,
+/// and this verb neither files nor promotes.
+///
+/// BOUNDED, like every vended command: the report is windowed to
+/// [kLadderOutputCapBytes] and names what it withheld plus the `--skip` that
+/// reaches it. The ladder is a time-varying read — the facts move as packages
+/// publish — so every call reads pub.dev afresh and no answer is suppressed.
+class ReleaseLadderCommand extends Command<int> {
+  /// Creates the op over [service], rendering to [out]/[err].
+  ReleaseLadderCommand({
+    required ReleaseService service,
+    required StringSink out,
+    required StringSink err,
+  }) : _service = service,
+       _out = out,
+       _err = err {
+    argParser
+      ..addOption(
+        'workspace',
+        mandatory: true,
+        help: 'The pub workspace root to report on.',
+      )
+      ..addOption(
+        'skip',
+        defaultsTo: '0',
+        help:
+            'Start the bounded window at this record index — the truncation '
+            'marker names the next one to ask for.',
+      )
+      ..addFlag(
+        'json',
+        negatable: false,
+        help: 'Emit the structured result as one JSON object.',
+      );
+  }
+
+  final ReleaseService _service;
+  final StringSink _out;
+  final StringSink _err;
+
+  @override
+  final String name = 'ladder';
+  @override
+  final String description =
+      'Report each workspace package\'s prerelease rung, its counter at that '
+      'rung, its last stable version, how many prereleases followed it, and '
+      'whether that is over the staleness threshold.';
+
+  @override
+  Future<int> run() async {
+    final args = argResults!;
+    final rawSkip = args.option('skip')!;
+    final skip = int.tryParse(rawSkip);
+    if (skip == null || skip < 0) {
+      _err.writeln(
+        'release ladder: --skip takes a non-negative integer; got "$rawSkip".',
+      );
+      return 64;
+    }
+    final ReleaseLadderReport report;
+    try {
+      final complete = await _service.reportLadder(
+        workspaceRoot: args.option('workspace')!,
+      );
+      report = complete.bounded(skip: skip);
+    } on ReleaseWaveFailure catch (failure) {
+      _err.writeln('release ladder: $failure');
+      return 1;
+    } on StateError catch (error) {
+      // One unreadable registry answer voids the whole report: a ladder that
+      // silently drops the package it could not read would prompt on a
+      // workspace it never finished reading, so nothing reaches stdout.
+      _err.writeln('release ladder: ${error.message}');
+      return 1;
+    }
+    if (args.flag('json')) {
+      _out.writeln(jsonEncode(report.toJson()));
+    } else {
+      for (final record in report.packages) {
+        _out.writeln(
+          '${record.package} '
+          '${record.currentPublishedVersion ?? 'unpublished'} '
+          'rung=${record.rung?.name ?? 'none'} '
+          'counter=${record.rungCounter} '
+          'stable=${record.lastStableVersion ?? 'none'} '
+          'prereleases=${record.prereleasesSinceStable} '
+          'stale=${record.isOverStalenessThreshold}',
+        );
+      }
+      final withheld = report.withheld;
+      if (withheld != null) _out.writeln('$withheld withheld — ${report.show}');
     }
     return 0;
   }
