@@ -3,13 +3,32 @@ import 'dart:io';
 
 import 'package:grid_assets/grid_assets.dart';
 import 'package:grid_sdk/grid_sdk.dart' as sdk;
+import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
-const _setPath = 'test/search/fixtures/semantic_recall_set.json';
-const _reportsPath = 'test/search/fixtures/semantic_recall_reports.json';
+import '../support/package_root.dart';
+
+/// The corpus path RELATIVE to whichever root holds it — the checked-in package
+/// root here, a temp copy under [_inFixtureRoot].
+final String _setPath = p.join(
+  'test',
+  'search',
+  'fixtures',
+  'semantic_recall_set.json',
+);
+final String _reportsPath = p.join(
+  'test',
+  'search',
+  'fixtures',
+  'semantic_recall_reports.json',
+);
+
+/// The checked-in copy of a corpus fixture, anchored on the package root rather
+/// than on the process cwd.
+File _checkedIn(String relative) => File(p.join(packageRoot(), relative));
 
 RecallSet loadRecallSetFixture() =>
-    RecallSet.fromJsonString(File(_setPath).readAsStringSync());
+    RecallSet.fromJsonString(_checkedIn(_setPath).readAsStringSync());
 
 SearchHit _hit(String id, String field) => SearchHit(
   beadId: id,
@@ -52,7 +71,8 @@ StationSearchReport _report(
 );
 
 Map<String, StationSearchReport> loadReportFixtures() {
-  final decoded = jsonDecode(File(_reportsPath).readAsStringSync()) as Map;
+  final decoded =
+      jsonDecode(_checkedIn(_reportsPath).readAsStringSync()) as Map;
   expect(decoded['version'], 1);
   final rows = decoded['reports'] as Map<String, dynamic>;
   return rows.map((name, dynamic value) {
@@ -162,24 +182,25 @@ Map<String, dynamic> _liveEnvelope(
   };
 }
 
-Future<T> _inFixtureDirectory<T>(
-  Future<T> Function(String fixturePath) body,
+/// Runs [body] against a DISPOSABLE copy of the corpus under a temp root,
+/// handing it that root and the copied corpus path.
+///
+/// The root is passed to [runRecall] as its `workingDirectory`; nothing assigns
+/// `Directory.current`. That property is process-global and `dart test` runs
+/// test files in concurrent isolates of one process, so the record-mode write
+/// this fixture exists to contain used to move the cwd out from under every
+/// sibling suite reading a relative path.
+Future<T> _inFixtureRoot<T>(
+  Future<T> Function(String root, String fixturePath) body,
 ) async {
-  final original = Directory.current;
   final temporary = await Directory.systemTemp.createTemp('recall-test-');
-  final fixture = File(
-    '${temporary.path}/test/search/fixtures/semantic_recall_set.json',
-  );
+  final fixture = File(p.join(temporary.path, _setPath));
   await fixture.parent.create(recursive: true);
-  await File(_setPath).copy(fixture.path);
-  await File(
-    _reportsPath,
-  ).copy('${temporary.path}/test/search/fixtures/semantic_recall_reports.json');
-  Directory.current = temporary;
+  await _checkedIn(_setPath).copy(fixture.path);
+  await _checkedIn(_reportsPath).copy(p.join(temporary.path, _reportsPath));
   try {
-    return await body(fixture.path);
+    return await body(temporary.path, fixture.path);
   } finally {
-    Directory.current = original;
     await temporary.delete(recursive: true);
   }
 }
@@ -291,7 +312,7 @@ void main() {
     test(
       'live runner uses exact query order and is read-only by default',
       () async {
-        await _inFixtureDirectory((fixturePath) async {
+        await _inFixtureRoot((root, fixturePath) async {
           final before = await File(fixturePath).readAsString();
           final calls = <List<String>>[];
           Future<ProcessResult> fake(
@@ -308,6 +329,7 @@ void main() {
               gridHome: '/grid',
               recordBaseline: false,
               processRunner: fake,
+              workingDirectory: root,
             ),
             0,
           );
@@ -328,7 +350,7 @@ void main() {
 
     test('live runner refuses unavailable and incomplete coverage', () async {
       for (final mode in ['unavailable', 'incomplete']) {
-        await _inFixtureDirectory((_) async {
+        await _inFixtureRoot((root, _) async {
           Future<ProcessResult> fake(String _, List<String> argv) async =>
               ProcessResult(
                 1,
@@ -348,6 +370,7 @@ void main() {
               gridHome: '/grid',
               recordBaseline: false,
               processRunner: fake,
+              workingDirectory: root,
             ),
             1,
           );
@@ -356,7 +379,7 @@ void main() {
     });
 
     test('record mode writes every live rank and score', () async {
-      await _inFixtureDirectory((fixturePath) async {
+      await _inFixtureRoot((root, fixturePath) async {
         Future<ProcessResult> fake(String _, List<String> argv) async =>
             ProcessResult(1, 0, jsonEncode(_liveEnvelope(argv[2])), '');
         expect(
@@ -365,6 +388,7 @@ void main() {
             gridHome: '/grid',
             recordBaseline: true,
             processRunner: fake,
+            workingDirectory: root,
           ),
           0,
         );
