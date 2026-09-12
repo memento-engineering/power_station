@@ -80,7 +80,22 @@
 /// unstamp, defer, close, void-retire — across the two stores A37 separates,
 /// and [UnparkCommand] undoes it by clearing the defer DATE through
 /// `bd undefer` and then CALLING [ApproveService] for the re-stamp rather than
-/// re-expressing the preflight. [ParkService] is guarded on both sides: it
+/// re-expressing the preflight. [ShowService] and [ShowCommand] sit beside
+/// them as the explicit ONE-BEAD READ: no verb anywhere printed a single
+/// bead's prose, because `bead board`/`bead round` are serviced by the
+/// RESIDENT and refuse when it is down — so reading a bead meant knowing which
+/// seat mints its prefix and shelling `bd` from that root. `show` reads it
+/// through the SAME [ExactSubstationBeadSource.readExact] the filing preflight
+/// uses (one exact-id `bd query`, one `bd dep list`, no mutation surface) and
+/// renders id, prose, the `grid.approved_*` stamp and the dependency edges
+/// with NO station in the path. Its output is BOUNDED at
+/// [kShowOutputCapBytes] on both the plain and the JSON rendering, and what it
+/// cuts it NAMES with the withheld byte count
+/// (`power_station#a-mechanical-lookup-is-a-vended-command-with-a-bounded-output`);
+/// `--if-revision` suppresses the prose only against the bead's own
+/// `updated_at` revision, never against the text of the request. Round, lane
+/// and grade data stay with `bead round`, which owns them.
+/// [ParkService] is guarded on both sides: it
 /// ADMITS only on a durable park marker (an open `gate` bead blocking the
 /// session, or `grid.session.pause_state=paused` — [ParkMarker]), never on
 /// worktree staleness, which is collected as [WorktreeActivity] corroboration
@@ -247,6 +262,7 @@ export 'src/filing/approve_command.dart';
 export 'src/filing/filing_command.dart';
 export 'src/filing/filing_contract.dart';
 export 'src/filing/park_command.dart';
+export 'src/filing/show_command.dart';
 export 'src/filing/state_root_option.dart';
 export 'src/io/recorded_artifact.dart';
 export 'src/lease/bus_lease.dart';
