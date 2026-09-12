@@ -547,7 +547,15 @@ class DecisionEntryEvidence {
 }
 
 /// ONE roster-qualified surface's decision lookup — the exact command that ran,
-/// how it went, and the entries it returned.
+/// how it went, and REFERENCES to the entries it returned.
+///
+/// The entries themselves are NOT here. The register answers every
+/// roster-qualified surface of a repo with the same entries, so a bead naming
+/// twelve surfaces carried twelve COPIES of each body — 3.0 MB of a 3.2 MB
+/// gather artifact, and the cheap lens died `prompt_too_long`. The bodies are
+/// carried ONCE per gather, in [DiscoveryAnchors.decisionEntries], and each
+/// surface keeps the ordered body ids it selected. The ORDER and the per-surface
+/// bound are unchanged — only the carriage is.
 class DecisionSurfaceEvidence {
   /// Creates the record.
   const DecisionSurfaceEvidence({
@@ -588,19 +596,21 @@ class DecisionSurfaceEvidence {
   /// The failure detail — REQUIRED (non-empty) for [EvidenceState.failed].
   final String error;
 
-  /// The entries, in index order.
-  final List<DecisionEntryEvidence> decisions;
+  /// REFERENCES to the entries governing this surface, in index order — each a
+  /// [DecisionEntryEvidence.body] id resolvable through
+  /// [DiscoveryAnchors.decisionEntryFor].
+  final List<String> decisions;
 
-  /// The entries the bead CITES that this surface's index does not answer, but
-  /// their own REGISTER does.
+  /// REFERENCES to the entries the bead CITES that this surface's index does
+  /// not answer, but their own REGISTER does.
   ///
   /// A decision declares the surfaces it governs, and a bead routinely cites
   /// one from a surface it does not declare — which is a correct citation, not
   /// a defect. Existence is therefore a register-wide question: such an entry
-  /// is carried HERE, with its body, while [state] stays complete/truncated, so
+  /// is carried HERE, by reference, while [state] stays complete/truncated, so
   /// the lens can still read the decision the bead named. Only a citation
   /// absent from its whole register FAILS the surface.
-  final List<DecisionEntryEvidence> namedElsewhere;
+  final List<String> namedElsewhere;
 
   /// The wire shape.
   Map<String, Object?> toJson() => {
@@ -610,17 +620,17 @@ class DecisionSurfaceEvidence {
     'state': state.name,
     'truncated': truncated,
     'error': error,
-    'decisions': [for (final entry in decisions) entry.toJson()],
-    'namedElsewhere': [for (final entry in namedElsewhere) entry.toJson()],
+    'decisions': decisions,
+    'namedElsewhere': namedElsewhere,
   };
 
   /// Decodes one record STRICTLY; an unknown state, an empty id, a failed
-  /// record with no error, or ANY malformed entry yields null.
+  /// record with no error, or ANY malformed reference yields null.
   ///
-  /// A record written before [namedElsewhere] existed carries no such key at
-  /// all, and an ABSENT key decodes as the empty list — a version-2 gather
-  /// already on disk stays readable. A key that is PRESENT and malformed is
-  /// still refused like every other entry list.
+  /// Both reference arrays are REQUIRED and each entry must be a non-blank
+  /// String. A schema-2 gather — which carried entry OBJECTS here — is not
+  /// read as a schema-3 one: [DiscoveryAnchors.fromJson] refuses the version
+  /// before this decoder is ever reached.
   static DecisionSurfaceEvidence? fromJson(Object? json) {
     if (json is! Map) return null;
     final id = (json['id'] as String?)?.trim() ?? '';
@@ -628,16 +638,9 @@ class DecisionSurfaceEvidence {
     if (id.isEmpty || state == null) return null;
     final error = (json['error'] as String?) ?? '';
     if (state == EvidenceState.failed && error.trim().isEmpty) return null;
-    final decisions = _decodeAll(
-      json['decisions'],
-      DecisionEntryEvidence.fromJson,
-    );
-    if (decisions == null) return null;
-    final rawElsewhere = json['namedElsewhere'];
-    final namedElsewhere = rawElsewhere == null
-        ? const <DecisionEntryEvidence>[]
-        : _decodeAll(rawElsewhere, DecisionEntryEvidence.fromJson);
-    if (namedElsewhere == null) return null;
+    final decisions = _decodeAll(json['decisions'], _decodeReference);
+    final namedElsewhere = _decodeAll(json['namedElsewhere'], _decodeReference);
+    if (decisions == null || namedElsewhere == null) return null;
     return DecisionSurfaceEvidence(
       id: id,
       surface: (json['surface'] as String?) ?? '',
@@ -649,6 +652,32 @@ class DecisionSurfaceEvidence {
       namedElsewhere: namedElsewhere,
     );
   }
+}
+
+/// Decodes ONE decision-entry reference: a non-blank String, or null (⇒ the
+/// whole artifact is refused). A reference is carried VERBATIM — it is an
+/// evidence id, and trimming one would silently forge a different citation.
+String? _decodeReference(Object? raw) =>
+    raw is String && raw.trim().isNotEmpty ? raw : null;
+
+/// The round's WHOLE decision gather: every entry body ONCE, plus one lookup
+/// record per roster-qualified surface holding ordered REFERENCES into it.
+///
+/// This is the shape a [DecisionIndexSource] answers with, and the shape
+/// [gatherDecisions] lands on — the register is gathered once, and each surface
+/// is a projection over it.
+class DecisionGatherEvidence {
+  /// Creates the gather.
+  const DecisionGatherEvidence({
+    this.decisionEntries = const {},
+    this.decisionLookups = const [],
+  });
+
+  /// Every resolved entry, keyed by its own [DecisionEntryEvidence.body] id.
+  final Map<String, DecisionEntryEvidence> decisionEntries;
+
+  /// One lookup record per roster-qualified SURFACE, in surface order.
+  final List<DecisionSurfaceEvidence> decisionLookups;
 }
 
 /// ONE commit touching the bead's resolved surfaces.
@@ -1356,6 +1385,7 @@ class DiscoveryAnchors {
     this.anchorsTruncated = false,
     this.symbolsTruncated = false,
     this.priorArtQueries = const [],
+    this.decisionEntries = const {},
     this.decisionLookups = const [],
     this.history,
   });
@@ -1400,8 +1430,43 @@ class DiscoveryAnchors {
   /// One coverage record per prior-art QUERY, in query order.
   final List<PriorArtQueryEvidence> priorArtQueries;
 
-  /// One lookup record per roster-qualified SURFACE, in surface order.
+  /// Every decision entry this gather resolved, carried ONCE and keyed by its
+  /// own [DecisionEntryEvidence.body] id — the gather-level index every surface
+  /// lookup references.
+  ///
+  /// The register answers each roster-qualified surface of a repo with the same
+  /// entries, so carrying a body per surface multiplied the artifact by the
+  /// anchor count ([kMaxAnchors]). It is gathered ONCE; a surface is a
+  /// PROJECTION over it.
+  final Map<String, DecisionEntryEvidence> decisionEntries;
+
+  /// One lookup record per roster-qualified SURFACE, in surface order. Its
+  /// entry lists are REFERENCES into [decisionEntries].
   final List<DecisionSurfaceEvidence> decisionLookups;
+
+  /// The entry [bodyId] names — LOUD: a reference this gather does not carry is
+  /// a broken canonical profile, never a silently empty citation.
+  ///
+  /// Every persisted artifact is decoded with that invariant already checked
+  /// ([fromJson] refuses an unknown reference), so a throw here names an
+  /// IN-MEMORY profile assembled without its index.
+  DecisionEntryEvidence decisionEntryFor(String bodyId) {
+    if (bodyId.trim().isEmpty) {
+      throw StateError(
+        'discovery: a blank decision-entry reference cannot be resolved (this '
+        'gather carries ${decisionEntries.length} indexed entries)',
+      );
+    }
+    final entry = decisionEntries[bodyId];
+    if (entry == null) {
+      throw StateError(
+        'discovery: no decision entry is indexed under `$bodyId` — this '
+        'gather carries ${decisionEntries.length} entries, and a surface '
+        'lookup referencing one it does not hold is a broken evidence profile',
+      );
+    }
+    return entry;
+  }
 
   /// The round's batched git history over the resolved surfaces.
   final HistoryEvidence? history;
@@ -1430,18 +1495,17 @@ class DiscoveryAnchors {
     for (final query in priorArtQueries)
       for (final hit in query.hits) hit.evidenceId,
     for (final lookup in decisionLookups) lookup.id,
-    for (final lookup in decisionLookups)
-      for (final decision in lookup.decisions) decision.body.id,
-    for (final lookup in decisionLookups)
-      for (final decision in lookup.namedElsewhere) decision.body.id,
+    for (final entry in decisionEntries.values) entry.body.id,
     if (history case final value?) value.id,
     if (history case final value?)
       for (final commit in value.commits) commit.id,
   };
 
-  /// The wire shape.
+  /// The wire shape. Schema 3: the decision bodies are an INDEX written once,
+  /// with lexically ordered keys, and each surface lookup carries ordered
+  /// references into it.
   Map<String, Object?> toJson() => {
-    'version': 2,
+    'version': 3,
     'round': round,
     'workBeadId': workBeadId,
     'beadFields': [for (final f in beadFields) f.toJson()],
@@ -1452,19 +1516,29 @@ class DiscoveryAnchors {
     'anchorsTruncated': anchorsTruncated,
     'symbolsTruncated': symbolsTruncated,
     'priorArtQueries': [for (final q in priorArtQueries) q.toJson()],
+    'decisionEntries': {
+      for (final key in decisionEntries.keys.toList()..sort())
+        key: decisionEntries[key]!.toJson(),
+    },
     'decisionLookups': [for (final d in decisionLookups) d.toJson()],
     'history': history?.toJson(),
   };
 
   /// Decodes the gather STRICTLY — this artifact is the ONLY evidence three
   /// lenses get, so a partial decode is refused rather than silently emptied.
-  /// Null for a non-map, any `version` but 2, a negative/non-integer round, an
+  /// Null for a non-map, any `version` but 3, a negative/non-integer round, an
   /// empty work bead id, ANY malformed nested record (never dropped), an
-  /// unknown evidence state, a duplicate evidence id, or a failed record with
-  /// no error. The route reads that null as EXPLICIT insufficient evidence.
+  /// unknown evidence state, a duplicate evidence id, a broken decision-entry
+  /// reference ([_decodeDecisionEntries]), or a failed record with no error.
+  /// The route reads that null as EXPLICIT insufficient evidence.
+  ///
+  /// A schema-2 artifact is REFUSED, not adapted: it carried entry bodies
+  /// inside each lookup, so reading one as a reference list would turn every
+  /// citation into an unresolvable id. A stale gather is re-gathered — the
+  /// round-aware sweep already deletes one from a prior round.
   static DiscoveryAnchors? fromJson(Object? json) {
     if (json is! Map) return null;
-    if (json['version'] != 2) return null;
+    if (json['version'] != 3) return null;
     final round = json['round'];
     final workBeadId = (json['workBeadId'] as String?)?.trim() ?? '';
     if (round is! int || round < 0 || workBeadId.isEmpty) return null;
@@ -1486,6 +1560,8 @@ class DiscoveryAnchors {
       json['decisionLookups'],
       DecisionSurfaceEvidence.fromJson,
     );
+    final decisionEntries = _decodeDecisionEntries(json['decisionEntries']);
+    if (decisionEntries == null) return null;
     if (beadFields == null ||
         rubricEvidence == null ||
         anchors == null ||
@@ -1520,25 +1596,66 @@ class DiscoveryAnchors {
       anchorsTruncated: json['anchorsTruncated'] == true,
       symbolsTruncated: json['symbolsTruncated'] == true,
       priorArtQueries: priorArtQueries,
+      decisionEntries: decisionEntries,
       decisionLookups: decisionLookups,
       history: history,
     );
+    if (!_referencesResolve(decoded)) return null;
     if (decoded.evidenceIds.length != _evidenceIdCount(decoded)) return null;
     return decoded;
+  }
+
+  /// Decodes the gather-level decision index: a map of non-blank String keys to
+  /// well-formed [DecisionEntryEvidence], each keyed by its OWN body id.
+  ///
+  /// An ABSENT key decodes as the empty index — a gather that resolved no
+  /// entry writes no entries. Anything else malformed refuses the whole
+  /// artifact: a key that is not a String, a blank key, an entry that does not
+  /// decode, or a key that disagrees with its value's body id (which would make
+  /// every reference to it resolve to a body it does not name).
+  static Map<String, DecisionEntryEvidence>? _decodeDecisionEntries(
+    Object? raw,
+  ) {
+    if (raw == null) return const {};
+    if (raw is! Map) return null;
+    final entries = <String, DecisionEntryEvidence>{};
+    for (final pair in raw.entries) {
+      final key = pair.key;
+      if (key is! String || key.trim().isEmpty) return null;
+      final entry = DecisionEntryEvidence.fromJson(pair.value);
+      if (entry == null || entry.body.id != key) return null;
+      entries[key] = entry;
+    }
+    return entries;
+  }
+
+  /// Whether every lookup reference resolves AND every indexed entry is
+  /// referenced — the two halves of "the register is gathered once and each
+  /// surface is a projection over it".
+  ///
+  /// A dangling reference would hand a lens a citation with no body; an
+  /// unreferenced entry is a body no surface selected, which is exactly the
+  /// per-surface bound being bypassed through the index.
+  static bool _referencesResolve(DiscoveryAnchors a) {
+    final referenced = <String>{};
+    for (final lookup in a.decisionLookups) {
+      for (final reference in [...lookup.decisions, ...lookup.namedElsewhere]) {
+        if (!a.decisionEntries.containsKey(reference)) return false;
+        referenced.add(reference);
+      }
+    }
+    return referenced.length == a.decisionEntries.length;
   }
 
   /// How many evidence ids the record CARRIES (duplicates included) — compared
   /// against the deduplicated [evidenceIds] to refuse a colliding profile.
   ///
-  /// Decision ENTRIES are the one legitimate repeat: the register answers every
-  /// roster-qualified surface of the same repo with the same entries, so one
-  /// decision body rides under several lookups with ONE canonical id (the same
-  /// decision is the same evidence wherever it is cited). The same holds ACROSS
-  /// the two entry lists — a decision on-surface under one lookup and
-  /// [DecisionSurfaceEvidence.namedElsewhere] under another is still one body.
-  /// They are counted DISTINCT here — a body id colliding with any OTHER kind
-  /// of record still shrinks [evidenceIds] below this count and refuses the
-  /// profile.
+  /// Decision ENTRIES are counted from the gather-level index, which holds each
+  /// body ONCE however many surfaces cite it (the register answers every
+  /// roster-qualified surface of the same repo with the same entries, and the
+  /// same decision is the same evidence wherever it is cited). A body id
+  /// colliding with any OTHER kind of record still shrinks [evidenceIds] below
+  /// this count and refuses the profile.
   static int _evidenceIdCount(DiscoveryAnchors a) =>
       a.beadFields.length +
       a.rubricEvidence.length +
@@ -1546,12 +1663,7 @@ class DiscoveryAnchors {
       a.priorArtQueries.length +
       a.priorArtQueries.fold<int>(0, (n, q) => n + q.hits.length) +
       a.decisionLookups.length +
-      {
-        for (final lookup in a.decisionLookups) ...[
-          for (final decision in lookup.decisions) decision.body.id,
-          for (final decision in lookup.namedElsewhere) decision.body.id,
-        ],
-      }.length +
+      a.decisionEntries.length +
       (a.history == null ? 0 : 1 + a.history!.commits.length);
 }
 
@@ -1807,7 +1919,8 @@ DiscoveryEvidenceProjection projectDiscoveryEvidence(
             ),
           );
         }
-        for (final decision in lookup.decisions) {
+        for (final reference in lookup.decisions) {
+          final decision = anchors.decisionEntryFor(reference);
           final under = renderedUnder[decision.body.id];
           if (under != null) {
             b
@@ -1829,7 +1942,8 @@ DiscoveryEvidenceProjection projectDiscoveryEvidence(
         // are read exactly like the governing ones — the bead named them, and
         // a lens that cannot read what the bead cites judges blind — but they
         // are LABELLED, so the lens never reads one as governing this surface.
-        for (final decision in lookup.namedElsewhere) {
+        for (final reference in lookup.namedElsewhere) {
+          final decision = anchors.decisionEntryFor(reference);
           final under = renderedUnder[decision.body.id];
           if (under != null) {
             b
@@ -2616,11 +2730,14 @@ typedef PriorArtSource =
 /// every roster-qualified surface. Absent ⇒ every surface is recorded
 /// [EvidenceState.unavailable].
 ///
+/// It answers with the WHOLE gather ([DecisionGatherEvidence]): every resolved
+/// entry body once, plus one reference-carrying lookup per surface.
+///
 /// The WORK BEAD rides along because a bounded lookup must know what the bead
 /// CITES before it decides what to drop: [_decisionLookup] keeps every named
 /// entry ahead of the index-order fill.
 typedef DecisionIndexSource =
-    Future<List<DecisionSurfaceEvidence>> Function(
+    Future<DecisionGatherEvidence> Function(
       String workspaceDir,
       List<String> rosterQualifiedSurfaces,
       Bead workBead,
@@ -2945,6 +3062,9 @@ DecisionIndexSource commandDecisionIndexSource(
   final stationGridHome = gridHome?.trim() ?? '';
   return (workspaceDir, surfaces, workBead) async {
     final out = <DecisionSurfaceEvidence>[];
+    // The gather-level index: every resolved body ONCE, keyed by its own
+    // evidence id, however many surfaces select it.
+    final index = <String, DecisionEntryEvidence>{};
     final seen = <String>{};
     // Read ONCE per batch, and only if a citation asks for it: the unfiltered
     // roster answer (existence is register-wide), and the register directories
@@ -3039,6 +3159,7 @@ DecisionIndexSource commandDecisionIndexSource(
             workBead: workBead,
             registerWide: registerWide,
             registerFiles: registerFiles,
+            index: index,
           ),
         );
       } catch (e) {
@@ -3052,7 +3173,7 @@ DecisionIndexSource commandDecisionIndexSource(
         );
       }
     }
-    return out;
+    return DecisionGatherEvidence(decisionEntries: index, decisionLookups: out);
   };
 }
 
@@ -3455,6 +3576,7 @@ Future<DecisionSurfaceEvidence> _decisionLookup({
   required Bead workBead,
   required _RegisterWideDecisions registerWide,
   required Map<String, List<({String path, String text})>> registerFiles,
+  required Map<String, DecisionEntryEvidence> index,
 }) async {
   DecisionSurfaceEvidence failed(String error) => _decisionSurface(
     surface: surface,
@@ -3537,6 +3659,12 @@ Future<DecisionSurfaceEvidence> _decisionLookup({
       into.add(entry);
     }
   }
+  // Published into the gather-level index ONLY once this surface ANSWERED: a
+  // record that failed carries no reference, so an entry banked for it would
+  // sit in the index unreferenced and refuse the whole artifact on decode.
+  for (final entry in [...entries, ...notes]) {
+    index[entry.body.id] = entry;
+  }
   return _decisionSurface(
     surface: surface,
     command: command,
@@ -3582,8 +3710,8 @@ DecisionSurfaceEvidence _decisionSurface({
       : (truncated ? EvidenceState.truncated : EvidenceState.complete),
   truncated: truncated,
   error: error,
-  decisions: entries,
-  namedElsewhere: namedElsewhere,
+  decisions: [for (final entry in entries) entry.body.id],
+  namedElsewhere: [for (final entry in namedElsewhere) entry.body.id],
 );
 
 /// The real [HistorySource]: ONE `git log` over every resolved surface, through
@@ -3717,9 +3845,10 @@ Future<List<PriorArtQueryEvidence>> gatherPriorArt(
   }
 }
 
-/// Every roster-qualified surface's decision lookup, gathered through [source]
-/// — or an explicit [EvidenceState.unavailable]/[EvidenceState.failed] record
-/// per surface when no source is wired / the batch threw.
+/// The round's WHOLE decision gather — every entry body once, plus one lookup
+/// per roster-qualified surface — through [source], or an explicit
+/// [EvidenceState.unavailable]/[EvidenceState.failed] record per surface (and
+/// an EMPTY index) when no source is wired / the batch threw.
 ///
 /// The two arms are NOT the same answer. An absent source is nobody LOOKING;
 /// a composed source that threw is a lookup that BROKE. Neither invents a
@@ -3727,26 +3856,30 @@ Future<List<PriorArtQueryEvidence>> gatherPriorArt(
 ///
 /// [workBead] is the round's own bead, handed to the source so a bounded
 /// lookup keeps what the bead CITES ([DecisionIndexSource]).
-Future<List<DecisionSurfaceEvidence>> gatherDecisions(
+Future<DecisionGatherEvidence> gatherDecisions(
   DecisionIndexSource? source,
   String workspaceDir,
   List<String> surfaces,
   Bead workBead,
 ) async {
   if (source == null) {
-    return _decisionSourceRecords(
-      surfaces,
-      state: EvidenceState.unavailable,
-      error: 'no decision-index source is composed',
+    return DecisionGatherEvidence(
+      decisionLookups: _decisionSourceRecords(
+        surfaces,
+        state: EvidenceState.unavailable,
+        error: 'no decision-index source is composed',
+      ),
     );
   }
   try {
     return await source(workspaceDir, surfaces, workBead);
   } catch (e) {
-    return _decisionSourceRecords(
-      surfaces,
-      state: EvidenceState.failed,
-      error: '$e',
+    return DecisionGatherEvidence(
+      decisionLookups: _decisionSourceRecords(
+        surfaces,
+        state: EvidenceState.failed,
+        error: '$e',
+      ),
     );
   }
 }
@@ -4193,7 +4326,8 @@ class AnchorsCapability extends ServiceCapability {
       anchorsTruncated: extracted.pathsTruncated,
       symbolsTruncated: extracted.symbolsTruncated,
       priorArtQueries: priorArt,
-      decisionLookups: decisions,
+      decisionEntries: decisions.decisionEntries,
+      decisionLookups: decisions.decisionLookups,
       history: history,
     );
 
@@ -4215,7 +4349,8 @@ class AnchorsCapability extends ServiceCapability {
       'resolved': '${anchors.anchors.where((a) => a.resolved).length}',
       'symbols': '${extracted.symbols.length}',
       'rubrics': '${anchors.rubrics.length}',
-      'decisions': '${decisions.length}',
+      'decisions': '${decisions.decisionLookups.length}',
+      'decisionEntries': '${decisions.decisionEntries.length}',
       'history': '${history.commits.length}',
       'evidence': '${anchors.evidenceIds.length}',
       'priorArt': _priorArt == null

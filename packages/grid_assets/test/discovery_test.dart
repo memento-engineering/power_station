@@ -35,16 +35,23 @@ final Bead _citesNothing = bead('pow-quiet');
 /// Record `n` carries slug `a<n>-fake-decision-<n>`, so a bead can name it by
 /// its full slug OR by the legacy `A<n>` id the register keeps as that slug's
 /// leading segment.
+///
+/// [bodyChars] pads each entry file to exactly that many characters, so a probe
+/// about SIZE can build the worst real register — every body at
+/// [kMaxDiscoverySnippetChars], and every one of them distinct.
 _CannedShellRunner _fakeDecisionIndex(
   Directory register, {
   required int count,
+  int bodyChars = 0,
 }) {
   for (var n = 1; n <= count; n++) {
+    final text =
+        '---\nstatus: accepted\nregister:\n  spec: 1\n'
+        '  slug: a$n-fake-decision-$n\n---\nfake decision $n body';
     File(
       p.join(register.path, '2026-09-08-fake-decision-$n.md'),
     ).writeAsStringSync(
-      '---\nstatus: accepted\nregister:\n  spec: 1\n'
-      '  slug: a$n-fake-decision-$n\n---\nfake decision $n body',
+      bodyChars <= text.length ? text : text + '.' * (bodyChars - text.length),
     );
   }
   return _CannedShellRunner(
@@ -242,29 +249,14 @@ DiscoveryAnchors _completeAnchors() => DiscoveryAnchors(
       ],
     ),
   ],
+  decisionEntries: {_a21.body.id: _a21},
   decisionLookups: [
     DecisionSurfaceEvidence(
       id: 'decision-surface:power_station/lib@sha256:fake',
       surface: 'power_station/lib/src/code/discovery.dart',
       command: 'space decisions index --surface power_station/lib',
       state: EvidenceState.complete,
-      decisions: [
-        DecisionEntryEvidence(
-          identity: 'power_station#a21',
-          originRegister: 'power_station',
-          originPath: 'docs/decisions',
-          slug: 'a21',
-          status: 'accepted',
-          surfaces: const ['packages/**'],
-          entryPath: 'docs/decisions/a21.md',
-          body: boundDiscoveryEvidence(
-            kind: 'decision-entry',
-            subject: 'power_station#a21',
-            source: 'docs/decisions/a21.md',
-            fullText: 'a lens emits a REPORT, never a letter',
-          ),
-        ),
-      ],
+      decisions: [_a21.body.id],
     ),
   ],
   history: HistoryEvidence(
@@ -280,6 +272,24 @@ DiscoveryAnchors _completeAnchors() => DiscoveryAnchors(
         subject: 'rework the gather',
       ),
     ],
+  ),
+);
+
+/// The ONE decision entry `_completeAnchors` indexes — carried once per gather
+/// and referenced by every surface that selected it.
+final DecisionEntryEvidence _a21 = DecisionEntryEvidence(
+  identity: 'power_station#a21',
+  originRegister: 'power_station',
+  originPath: 'docs/decisions',
+  slug: 'a21',
+  status: 'accepted',
+  surfaces: const ['packages/**'],
+  entryPath: 'docs/decisions/a21.md',
+  body: boundDiscoveryEvidence(
+    kind: 'decision-entry',
+    subject: 'power_station#a21',
+    source: 'docs/decisions/a21.md',
+    fullText: 'a lens emits a REPORT, never a letter',
   ),
 );
 
@@ -300,6 +310,16 @@ String _promptFor(DiscoveryEvidenceProjection projection) =>
       workspaceDir: '/w/pow-x',
       projection: projection,
     );
+
+/// Schema v3 carries every decision body ONCE per gather and keeps ordered
+/// REFERENCES on each surface, so a probe that reads entries resolves them
+/// through the gather's own index — exactly as the lens projection and the
+/// committee selection do.
+extension on DecisionGatherEvidence {
+  List<DecisionEntryEvidence> entriesOf(Iterable<String> references) => [
+    for (final reference in references) decisionEntries[reference]!,
+  ];
+}
 
 /// A [ShellRunner] answering one canned (exitCode, output) for every call, and
 /// recording each (workingDirectory, command) — Fakes, not mocks.
@@ -825,7 +845,7 @@ void main() {
           await AnchorsCapability(
             decisions: (workspaceDir, surfaces, workBead) async {
               final records = await source(workspaceDir, surfaces, workBead);
-              gathered.addAll(records);
+              gathered.addAll(records.decisionLookups);
               return records;
             },
             clearer: (_) {},
@@ -894,7 +914,7 @@ void main() {
           await AnchorsCapability(
             decisions: (workspaceDir, surfaces, workBead) async {
               final records = await source(workspaceDir, surfaces, workBead);
-              gathered.addAll(records);
+              gathered.addAll(records.decisionLookups);
               return records;
             },
             clearer: (_) {},
@@ -1247,7 +1267,7 @@ void main() {
   });
 
   group('round-stamped canonical evidence', () {
-    test('every family and every state round-trips through schema v2', () {
+    test('every family and every state round-trips through schema v3', () {
       final anchors = _completeAnchors();
       final back = DiscoveryAnchors.fromJson(
         jsonDecode(jsonEncode(anchors.toJson())),
@@ -1260,7 +1280,9 @@ void main() {
       expect(back.anchors.single.contents.state, EvidenceState.complete);
       expect(back.priorArtQueries.single.hits.single.beadId, 'pow-96y');
       expect(
-        back.decisionLookups.single.decisions.single.identity,
+        back
+            .decisionEntryFor(back.decisionLookups.single.decisions.single)
+            .identity,
         'power_station#a21',
       );
       expect(back.history!.commits.single.sha, 'abc123def');
@@ -1279,6 +1301,226 @@ void main() {
         expect(wired!.state, state);
       }
       expect(EvidenceState.fromWire('elsewhere'), isNull);
+    });
+
+    test('schema v3 indexes decision bodies and refuses malformed '
+        'references', () {
+      final anchors = _completeAnchors();
+      final wire = jsonEncode(anchors.toJson());
+      final map = jsonDecode(wire) as Map<String, Object?>;
+      expect(map['version'], 3);
+      final index = map['decisionEntries']! as Map<String, Object?>;
+      expect(index.keys, [_a21.body.id]);
+      expect(
+        index.keys.toList(),
+        (index.keys.toList()..sort()),
+        reason: 'the index writes its keys in LEXICAL order, deterministically',
+      );
+      final lookup =
+          (map['decisionLookups']! as List).single as Map<String, Object?>;
+      expect(
+        lookup['decisions'],
+        [_a21.body.id],
+        reason: 'a surface carries ordered REFERENCES, never the body',
+      );
+      expect(lookup['namedElsewhere'], isEmpty);
+
+      // toJson → fromJson → toJson reproduces the same JSON VALUE.
+      final back = DiscoveryAnchors.fromJson(jsonDecode(wire))!;
+      expect(jsonEncode(back.toJson()), wire);
+      expect(back.decisionEntries.keys, [_a21.body.id]);
+      expect(back.decisionEntryFor(_a21.body.id).identity, 'power_station#a21');
+      expect(
+        back.evidenceIds.where((id) => id.startsWith('decision-entry:')),
+        hasLength(1),
+      );
+
+      // A schema-2 artifact is REFUSED, never read as a v3 one: its lookups
+      // carried entry OBJECTS where v3 reads reference STRINGS.
+      expect(DiscoveryAnchors.fromJson({...map, 'version': 2}), isNull);
+
+      Map<String, Object?> withLookup(Object? decisions) => {
+        ...map,
+        'decisionLookups': [
+          {...lookup, 'decisions': decisions},
+        ],
+      };
+      expect(
+        DiscoveryAnchors.fromJson(withLookup([_a21.toJson()])),
+        isNull,
+        reason: 'a non-string reference is refused, never coerced',
+      );
+      expect(
+        DiscoveryAnchors.fromJson(withLookup(['   '])),
+        isNull,
+        reason: 'a blank reference names no entry',
+      );
+      expect(
+        DiscoveryAnchors.fromJson(withLookup(const <Object?>[])),
+        isNull,
+        reason: 'an indexed entry NO surface references bypasses the bound',
+      );
+      expect(
+        DiscoveryAnchors.fromJson(
+          withLookup(['decision-entry:power_station%23a99@sha256:nope']),
+        ),
+        isNull,
+        reason: 'an unknown reference would hand a lens a body-less citation',
+      );
+      expect(
+        DiscoveryAnchors.fromJson({...map, 'decisionLookups': <Object?>[]}),
+        isNull,
+        reason: 'dropping every lookup strands the index it was written for',
+      );
+
+      Map<String, Object?> withIndex(Object? entries) => {
+        ...map,
+        'decisionEntries': entries,
+      };
+      expect(DiscoveryAnchors.fromJson(withIndex('not a map')), isNull);
+      expect(
+        DiscoveryAnchors.fromJson(withIndex({'  ': _a21.toJson()})),
+        isNull,
+        reason: 'a blank key is not an evidence id',
+      );
+      expect(
+        DiscoveryAnchors.fromJson(
+          withIndex({_a21.body.id: 'not an entry record'}),
+        ),
+        isNull,
+        reason: 'a malformed entry is refused, never dropped',
+      );
+      expect(
+        DiscoveryAnchors.fromJson(
+          withIndex({'decision-entry:elsewhere@sha256:x': _a21.toJson()}),
+        ),
+        isNull,
+        reason:
+            'a key disagreeing with its own body id would resolve every '
+            'reference to a body it does not name',
+      );
+      expect(
+        DiscoveryAnchors.fromJson(withIndex(null)),
+        isNull,
+        reason: 'an absent index still has to answer the lookup references',
+      );
+      expect(
+        DiscoveryAnchors.fromJson({
+          ...map,
+          'decisionEntries': <String, Object?>{},
+          'decisionLookups': <Object?>[],
+        }),
+        isNotNull,
+        reason: 'a gather that resolved NO entry is a real, empty answer',
+      );
+    });
+
+    test('twelve surfaces carry 96 maximum-size decision bodies ONCE, not '
+        'once each', () async {
+      // The measured defect: `anchors.json` was 3 201 633 bytes, 3 069 457 of
+      // it `decisionLookups` — twelve surfaces × the SAME ~300 KB entry list —
+      // and `explore-decision` answered `prompt_too_long` at ~202 302 tokens.
+      // The worktree is a system temp dir, never a package-local path
+      // (`power_station#test-tree-package-root-is-source-located`: nothing here
+      // reads or assigns the process working directory, and the only
+      // package-local anchor in this suite is `packageRoot()`).
+      final tmp = Directory.systemTemp.createTempSync('anchors-size');
+      addTearDown(() => tmp.deleteSync(recursive: true));
+      final register = Directory(p.join(tmp.path, 'docs', 'decisions'))
+        ..createSync(recursive: true);
+      final surfaces = [
+        for (var n = 0; n < kMaxAnchors; n++)
+          'power_station/packages/grid_assets/lib/src/code/f$n.dart',
+      ];
+      expect(surfaces, hasLength(12));
+      final gathered = await commandDecisionIndexSource(
+        _fakeDecisionIndex(
+          register,
+          count: kMaxDecisionEntriesPerSurface,
+          bodyChars: kMaxDiscoverySnippetChars,
+        ),
+        runnerInvocation: 'dart run lunar:lunar',
+        gridHome: '/grid/lunar',
+      )(tmp.path, surfaces, _citesNothing);
+
+      expect(gathered.decisionLookups, hasLength(12));
+      expect(gathered.decisionEntries, hasLength(96));
+      for (final lookup in gathered.decisionLookups) {
+        expect(lookup.state, EvidenceState.complete, reason: lookup.error);
+        expect(lookup.decisions, hasLength(96));
+        expect(
+          gathered.entriesOf(lookup.decisions).first.body.snippet,
+          hasLength(kMaxDiscoverySnippetChars),
+          reason: 'every body is at the snippet bound — the worst real case',
+        );
+      }
+
+      final anchors = DiscoveryAnchors(
+        round: 1,
+        workBeadId: _citesNothing.id,
+        beadFields: boundedBeadFields(_citesNothing),
+        decisionEntries: gathered.decisionEntries,
+        decisionLookups: gathered.decisionLookups,
+        history: completeHistory(),
+      );
+      File(anchorsPath(tmp.path))
+        ..createSync(recursive: true)
+        ..writeAsStringSync(jsonEncode(anchors.toJson()));
+      final serialized = File(anchorsPath(tmp.path)).readAsStringSync();
+      for (final entry in gathered.decisionEntries.values) {
+        expect(
+          RegExp(
+            RegExp.escape(jsonEncode(entry.body.snippet)),
+          ).allMatches(serialized),
+          hasLength(1),
+          reason: 'no body text appears more than once in the artifact',
+        );
+      }
+
+      // The bound that MOVED. One copy of the register's bodies is
+      // irreducible — 96 × 4096 chars is 393 216 bytes of snippet before a
+      // single id, digest or path — so the artifact is measured against THAT,
+      // not against a round number: at most twice the one-copy payload,
+      // whatever the anchor count. What it may no longer do is multiply by it.
+      const onePassBodies =
+          kMaxDecisionEntriesPerSurface * kMaxDiscoverySnippetChars;
+      expect(
+        utf8.encode(serialized).length,
+        lessThan(2 * onePassBodies),
+        reason: 'the register is carried ONCE, plus per-surface references',
+      );
+
+      // Against the carriage this replaces: the same gather with every body
+      // inlined under every lookup, which is what schema 2 wrote and what made
+      // the measured artifact 3.2 MB.
+      final inlined = utf8
+          .encode(
+            jsonEncode({
+              'decisionLookups': [
+                for (final lookup in gathered.decisionLookups)
+                  {
+                    ...lookup.toJson(),
+                    'decisions': [
+                      for (final reference in lookup.decisions)
+                        gathered.decisionEntries[reference]!.toJson(),
+                    ],
+                  },
+              ],
+            }),
+          )
+          .length;
+      expect(
+        utf8.encode(serialized).length * 8,
+        lessThan(inlined),
+        reason:
+            'twelve surfaces used to cost twelve copies of the register; they '
+            'now cost one, and a reference list each',
+      );
+      expect(
+        readDiscoveryAnchors(tmp.path)!.decisionEntries,
+        hasLength(96),
+        reason: 'and it reads back through the real artifact reader',
+      );
     });
 
     test('a decode is REFUSED, never emptied, on any malformed record', () {
@@ -1410,6 +1652,7 @@ void main() {
         anchors: base.anchors,
         symbols: base.symbols,
         priorArtQueries: base.priorArtQueries,
+        decisionEntries: base.decisionEntries,
         decisionLookups: [
           shared,
           DecisionSurfaceEvidence(
@@ -1423,7 +1666,7 @@ void main() {
         history: base.history,
       );
       final projection = _project(anchors, kDecisionLens);
-      final body = shared.decisions.single.body;
+      final body = base.decisionEntryFor(shared.decisions.single).body;
       final text = projection.renderedEvidence;
       expect(
         RegExp(RegExp.escape(body.snippet)).allMatches(text),
@@ -1550,7 +1793,7 @@ void main() {
       expect(
         (await gatherDecisions(null, '/w', [
           'repo/a.dart',
-        ], _citesNothing)).single.state,
+        ], _citesNothing)).decisionLookups.single.state,
         EvidenceState.unavailable,
       );
       expect(
@@ -1679,7 +1922,7 @@ void main() {
             'the station\'s JIT verb runs at ITS grid home, never at the '
             'work worktree (${dir.path}) where the package does not resolve',
       );
-      final record = surfaced.single;
+      final record = surfaced.decisionLookups.single;
       expect(record.surface, surface);
       expect(record.command, ok.commands.single);
       expect(
@@ -1691,7 +1934,7 @@ void main() {
       );
       expect(record.error, isEmpty);
       expect(record.truncated, isFalse);
-      final entry = record.decisions.single;
+      final entry = surfaced.entriesOf(record.decisions).single;
       expect(entry.identity, 'power_station#$slug');
       expect(entry.originRegister, 'power_station');
       expect(entry.originPath, register.path);
@@ -1708,16 +1951,22 @@ void main() {
         runnerInvocation: 'dart run lunar:lunar',
         gridHome: '/grid/lunar',
       )(dir.path, [surface], _citesNothing);
-      expect(malformed.single.state, EvidenceState.failed);
-      expect(malformed.single.error, contains('malformed index JSON'));
+      expect(malformed.decisionLookups.single.state, EvidenceState.failed);
+      expect(
+        malformed.decisionLookups.single.error,
+        contains('malformed index JSON'),
+      );
 
       final crashed = await commandDecisionIndexSource(
         _CannedShellRunner(exitCode: 127, output: 'command not found: lunar'),
         runnerInvocation: 'dart run lunar:lunar',
         gridHome: '/grid/lunar',
       )(dir.path, [surface], _citesNothing);
-      expect(crashed.single.state, EvidenceState.failed);
-      expect(crashed.single.error, contains('command not found'));
+      expect(crashed.decisionLookups.single.state, EvidenceState.failed);
+      expect(
+        crashed.decisionLookups.single.error,
+        contains('command not found'),
+      );
 
       // A slug the register cannot resolve is a failure, never a quiet skip.
       final unresolvable = await commandDecisionIndexSource(
@@ -1740,8 +1989,11 @@ void main() {
         runnerInvocation: 'dart run lunar:lunar',
         gridHome: '/grid/lunar',
       )(dir.path, [surface], _citesNothing);
-      expect(unresolvable.single.state, EvidenceState.failed);
-      expect(unresolvable.single.error, contains('no-such-entry'));
+      expect(unresolvable.decisionLookups.single.state, EvidenceState.failed);
+      expect(
+        unresolvable.decisionLookups.single.error,
+        contains('no-such-entry'),
+      );
     });
 
     test('a spec-1 decision-index envelope remains compatible — the legacy '
@@ -1754,9 +2006,9 @@ void main() {
         runnerInvocation: 'dart run lunar:lunar',
         gridHome: '/grid/lunar',
       )('/w', ['power_station/lib/a.dart'], _citesNothing);
-      expect(empty.single.state, EvidenceState.complete);
-      expect(empty.single.decisions, isEmpty);
-      expect(empty.single.error, isEmpty);
+      expect(empty.decisionLookups.single.state, EvidenceState.complete);
+      expect(empty.decisionLookups.single.decisions, isEmpty);
+      expect(empty.decisionLookups.single.error, isEmpty);
     });
 
     test(
@@ -1770,10 +2022,18 @@ void main() {
             runnerInvocation: 'dart run lunar:lunar',
             gridHome: '/grid/lunar',
           )('/w', ['power_station/lib/a.dart'], _citesNothing);
-          expect(records.single.state, EvidenceState.failed, reason: '$seen');
-          expect(records.single.decisions, isEmpty, reason: '$seen');
           expect(
-            records.single.error,
+            records.decisionLookups.single.state,
+            EvidenceState.failed,
+            reason: '$seen',
+          );
+          expect(
+            records.decisionLookups.single.decisions,
+            isEmpty,
+            reason: '$seen',
+          );
+          expect(
+            records.decisionLookups.single.error,
             'index answered unsupported `spec`: ${jsonEncode(seen)}; '
             'accepted specs are 1 and 2',
             reason: 'the record names the exact value the index answered',
@@ -1805,7 +2065,7 @@ void main() {
                 'pow-cite',
               ).copyWith(description: 'This bead is governed by $citation.'),
             );
-        final record = records.single;
+        final record = records.decisionLookups.single;
         expect(
           record.state,
           EvidenceState.complete,
@@ -1813,12 +2073,12 @@ void main() {
         );
         expect(record.truncated, isFalse, reason: citation);
         expect(
-          record.decisions.first.slug,
+          records.entriesOf(record.decisions).first.slug,
           'a25-fake-decision-25',
           reason: 'the NAMED entry leads, whatever the index ordered',
         );
         expect(
-          record.decisions.map((entry) => entry.slug),
+          records.entriesOf(record.decisions).map((entry) => entry.slug),
           hasLength(30),
           reason:
               'naming REORDERS a surface that fits the bound; it never drops '
@@ -1847,7 +2107,7 @@ void main() {
                 design: 'This aligns with `power_station#no-such-slug`.',
               ),
             );
-        final record = records.single;
+        final record = records.decisionLookups.single;
         expect(
           record.state,
           EvidenceState.failed,
@@ -1890,19 +2150,19 @@ void main() {
           ),
         },
       );
-      final record =
-          (await commandDecisionIndexSource(
-                shell,
-                runnerInvocation: 'dart run lunar:lunar',
-                gridHome: '/grid/lunar',
-              )(
-                dir.path,
-                [surface],
-                bead('lenny-dgp').copyWith(
-                  description: 'Round 2 is governed by `lenny#$slug`.',
-                ),
-              ))
-              .single;
+      final gathered =
+          await commandDecisionIndexSource(
+            shell,
+            runnerInvocation: 'dart run lunar:lunar',
+            gridHome: '/grid/lunar',
+          )(
+            dir.path,
+            [surface],
+            bead(
+              'lenny-dgp',
+            ).copyWith(description: 'Round 2 is governed by `lenny#$slug`.'),
+          );
+      final record = gathered.decisionLookups.single;
 
       expect(
         record.state,
@@ -1918,7 +2178,7 @@ void main() {
         isEmpty,
         reason: 'this surface really is governed by nothing — a real empty',
       );
-      final note = record.namedElsewhere.single;
+      final note = gathered.entriesOf(record.namedElsewhere).single;
       expect(note.identity, 'lenny#$slug');
       expect(note.slug, slug);
       expect(note.status, 'accepted');
@@ -1941,19 +2201,20 @@ void main() {
             'surface cannot answer needs it',
       );
 
-      // It survives the version-2 wire, and a record written BEFORE the note
-      // existed still decodes.
+      // It survives the wire as an ordered REFERENCE, and a record missing the
+      // array altogether is refused rather than silently emptied.
       final wire =
           jsonDecode(jsonEncode(record.toJson())) as Map<String, Object?>;
       final back = DecisionSurfaceEvidence.fromJson(wire)!;
-      expect(back.namedElsewhere.single.identity, note.identity);
-      expect(back.namedElsewhere.single.body.id, note.body.id);
+      expect(back.namedElsewhere.single, note.body.id);
       expect(back.state, EvidenceState.complete);
       final legacy = Map<String, Object?>.from(wire)..remove('namedElsewhere');
       expect(
-        DecisionSurfaceEvidence.fromJson(legacy)!.namedElsewhere,
-        isEmpty,
-        reason: 'an ABSENT key is the empty list, not a refused decode',
+        DecisionSurfaceEvidence.fromJson(legacy),
+        isNull,
+        reason:
+            'both reference arrays are REQUIRED — an absent one would drop '
+            'every citation the surface answered',
       );
 
       // And the decision lens READS it — labelled, with its body, no gap.
@@ -1961,6 +2222,7 @@ void main() {
         DiscoveryAnchors(
           round: 7,
           workBeadId: 'pow-x',
+          decisionEntries: gathered.decisionEntries,
           decisionLookups: [record],
         ),
         kDecisionLens,
@@ -2001,19 +2263,15 @@ void main() {
           ),
         },
       );
-      final record =
-          (await commandDecisionIndexSource(
-                shell,
-                runnerInvocation: 'dart run lunar:lunar',
-                gridHome: '/grid/lunar',
-              )(
-                dir.path,
-                const ['the_grid/lib/src/runtime/spawn.dart'],
-                bead(
-                  'tg-nidl',
-                ).copyWith(design: 'This holds ADR-0042 exactly.'),
-              ))
-              .single;
+      final gathered =
+          await commandDecisionIndexSource(
+            shell,
+            runnerInvocation: 'dart run lunar:lunar',
+            gridHome: '/grid/lunar',
+          )(dir.path, const [
+            'the_grid/lib/src/runtime/spawn.dart',
+          ], bead('tg-nidl').copyWith(design: 'This holds ADR-0042 exactly.'));
+      final record = gathered.decisionLookups.single;
 
       expect(
         record.state,
@@ -2024,11 +2282,9 @@ void main() {
       );
       expect(record.error, isEmpty);
       expect(record.decisions, isEmpty);
-      expect(record.namedElsewhere.single.identity, 'the_grid#$slug');
-      expect(
-        record.namedElsewhere.single.body.snippet,
-        contains('owns its own deadlines'),
-      );
+      final note = gathered.entriesOf(record.namedElsewhere).single;
+      expect(note.identity, 'the_grid#$slug');
+      expect(note.body.snippet, contains('owns its own deadlines'));
     });
 
     test(
@@ -2060,10 +2316,13 @@ void main() {
               bead('lenny-dgp').copyWith(notes: 'Both follow `lenny#$slug`.'),
             );
 
-        expect(records, hasLength(2));
-        for (final record in records) {
+        expect(records.decisionLookups, hasLength(2));
+        for (final record in records.decisionLookups) {
           expect(record.state, EvidenceState.complete, reason: record.error);
-          expect(record.namedElsewhere.single.identity, 'lenny#$slug');
+          expect(
+            records.entriesOf(record.namedElsewhere).single.identity,
+            'lenny#$slug',
+          );
         }
         expect(
           shell.commands,
@@ -2077,14 +2336,20 @@ void main() {
               'surfaces need the answer',
         );
         expect(
-          records.first.namedElsewhere.single.body.id,
-          records.last.namedElsewhere.single.body.id,
+          records.decisionLookups.first.namedElsewhere.single,
+          records.decisionLookups.last.namedElsewhere.single,
           reason: 'the same decision is the same evidence wherever it is cited',
+        );
+        expect(
+          records.decisionEntries,
+          hasLength(1),
+          reason: 'and it is CARRIED once, not once per surface',
         );
         final gather = DiscoveryAnchors(
           round: 7,
           workBeadId: 'pow-x',
-          decisionLookups: records,
+          decisionEntries: records.decisionEntries,
+          decisionLookups: records.decisionLookups,
         );
         expect(
           DiscoveryAnchors.fromJson(jsonDecode(jsonEncode(gather.toJson()))),
@@ -2111,7 +2376,7 @@ void main() {
               description: 'Option A1 vs A2; see pr#256-fix and id#some-value.',
             ),
           );
-      final record = records.single;
+      final record = records.decisionLookups.single;
       expect(
         record.state,
         EvidenceState.complete,
@@ -2132,18 +2397,20 @@ void main() {
       final register = Directory(p.join(dir.path, 'docs', 'decisions'))
         ..createSync(recursive: true);
       const surface = 'power_station/packages/grid_assets/lib/src/x.dart';
-      Future<DecisionSurfaceEvidence> lookup(Bead workBead) async =>
-          (await commandDecisionIndexSource(
+      Future<DecisionGatherEvidence> lookup(Bead workBead) async =>
+          commandDecisionIndexSource(
             _fakeDecisionIndex(register, count: 3),
             runnerInvocation: 'dart run lunar:lunar',
             gridHome: '/grid/lunar',
-          )(dir.path, [surface], workBead)).single;
-      final prose = await lookup(
+          )(dir.path, [surface], workBead);
+      final proseGather = await lookup(
         bead(
           'pow-cite',
         ).copyWith(notes: 'Tracked as `unknown_register#some-slug`.'),
       );
-      final neutral = await lookup(_citesNothing);
+      final neutralGather = await lookup(_citesNothing);
+      final prose = proseGather.decisionLookups.single;
+      final neutral = neutralGather.decisionLookups.single;
       expect(
         prose.state,
         EvidenceState.complete,
@@ -2155,8 +2422,8 @@ void main() {
       expect(prose.truncated, neutral.truncated);
       expect(prose.error, neutral.error);
       expect(
-        prose.decisions.map((entry) => entry.slug),
-        neutral.decisions.map((entry) => entry.slug),
+        proseGather.entriesOf(prose.decisions).map((entry) => entry.slug),
+        neutralGather.entriesOf(neutral.decisions).map((entry) => entry.slug),
         reason: 'prose changes NOTHING about the projection',
       );
     });
@@ -2177,10 +2444,10 @@ void main() {
         runnerInvocation: 'dart run lunar:lunar',
         gridHome: '/grid/lunar',
       )(dir.path, [surface], _citesNothing);
-      final record = records.single;
+      final record = records.decisionLookups.single;
       expect(record.decisions, hasLength(kMaxDecisionEntriesPerSurface));
       expect(
-        record.decisions.last.slug,
+        records.entriesOf(record.decisions).last.slug,
         'a$kMaxDecisionEntriesPerSurface-fake-decision-'
         '$kMaxDecisionEntriesPerSurface',
         reason: 'an UNNAMED surface still fills in the index\'s own order',
@@ -2210,11 +2477,12 @@ void main() {
         '  slug: a2-fake-decision-2\n---\n'
         '${'long decision body ' * (kMaxDiscoverySnippetChars ~/ 8)}',
       );
-      final record = (await commandDecisionIndexSource(
+      final gathered = await commandDecisionIndexSource(
         runner,
         runnerInvocation: 'dart run lunar:lunar',
         gridHome: '/grid/lunar',
-      )(dir.path, [surface], _citesNothing)).single;
+      )(dir.path, [surface], _citesNothing);
+      final record = gathered.decisionLookups.single;
       expect(record.decisions, hasLength(3), reason: 'every entry resolved');
       expect(record.truncated, isFalse, reason: 'nothing dropped at the bound');
       expect(
@@ -2225,7 +2493,8 @@ void main() {
             'register it lives in (pow-jidn): ${record.error}',
       );
       final bodies = {
-        for (final entry in record.decisions) entry.slug: entry.body.state,
+        for (final entry in gathered.entriesOf(record.decisions))
+          entry.slug: entry.body.state,
       };
       expect(bodies, {
         'a1-fake-decision-1': EvidenceState.complete,
@@ -2233,7 +2502,7 @@ void main() {
         'a3-fake-decision-3': EvidenceState.complete,
       }, reason: 'the clipped entry keeps its OWN truncated state');
       expect(
-        record.decisions[1].body.snippet,
+        gathered.entriesOf(record.decisions)[1].body.snippet,
         hasLength(kMaxDiscoverySnippetChars),
       );
     });
@@ -2245,15 +2514,16 @@ void main() {
       final register = Directory(p.join(dir.path, 'docs', 'decisions'))
         ..createSync(recursive: true);
       const surface = 'power_station/packages/grid_assets/lib/src/x.dart';
-      final record = (await commandDecisionIndexSource(
+      final gathered = await commandDecisionIndexSource(
         _fakeDecisionIndex(register, count: kMaxDecisionEntriesPerSurface + 1),
         runnerInvocation: 'dart run lunar:lunar',
         gridHome: '/grid/lunar',
-      )(dir.path, [surface], _citesNothing)).single;
+      )(dir.path, [surface], _citesNothing);
+      final record = gathered.decisionLookups.single;
       expect(
-        record.decisions.every(
-          (entry) => entry.body.state == EvidenceState.complete,
-        ),
+        gathered
+            .entriesOf(record.decisions)
+            .every((entry) => entry.body.state == EvidenceState.complete),
         isTrue,
         reason: 'every fixture body is short',
       );
@@ -2278,16 +2548,31 @@ void main() {
               'power_station/lib/a.dart',
             ], _citesNothing);
         expect(never.commands, isEmpty, reason: 'no shell call is made at all');
-        expect(records, hasLength(1), reason: 'one record per DEDUP surface');
-        expect(records.single.state, EvidenceState.unavailable);
-        expect(records.single.surface, 'power_station/lib/a.dart');
         expect(
-          records.single.command,
+          records.decisionLookups,
+          hasLength(1),
+          reason: 'one record per DEDUP surface',
+        );
+        expect(
+          records.decisionEntries,
+          isEmpty,
+          reason: 'nobody looked, so no body is indexed',
+        );
+        expect(records.decisionLookups.single.state, EvidenceState.unavailable);
+        expect(
+          records.decisionLookups.single.surface,
+          'power_station/lib/a.dart',
+        );
+        expect(
+          records.decisionLookups.single.command,
           isEmpty,
           reason:
               'a command this pack never ran is never stamped as provenance',
         );
-        expect(records.single.error, contains('no composing station runner'));
+        expect(
+          records.decisionLookups.single.error,
+          contains('no composing station runner'),
+        );
       }
       // A composed runner with NO grid home is the same honest absence: the
       // work worktree is never substituted as a place to run the verb.
@@ -2303,10 +2588,22 @@ void main() {
               'power_station/lib/a.dart',
             ], _citesNothing);
         expect(unbound.calls, isEmpty, reason: 'no shell call is made at all');
-        expect(records, hasLength(1), reason: 'one record per DEDUP surface');
-        expect(records.single.state, EvidenceState.unavailable);
-        expect(records.single.command, isEmpty);
-        expect(records.single.error, 'no composing grid home is bound');
+        expect(
+          records.decisionLookups,
+          hasLength(1),
+          reason: 'one record per DEDUP surface',
+        );
+        expect(
+          records.decisionEntries,
+          isEmpty,
+          reason: 'nobody looked, so no body is indexed',
+        );
+        expect(records.decisionLookups.single.state, EvidenceState.unavailable);
+        expect(records.decisionLookups.single.command, isEmpty);
+        expect(
+          records.decisionLookups.single.error,
+          'no composing grid home is bound',
+        );
       }
 
       // The unwired-SOURCE arm records the same shape, with its own reason —
@@ -2314,9 +2611,12 @@ void main() {
       final unwired = await gatherDecisions(null, '/w', [
         'power_station/lib/a.dart',
       ], _citesNothing);
-      expect(unwired.single.state, EvidenceState.unavailable);
-      expect(unwired.single.command, isEmpty);
-      expect(unwired.single.error, contains('no decision-index source'));
+      expect(unwired.decisionLookups.single.state, EvidenceState.unavailable);
+      expect(unwired.decisionLookups.single.command, isEmpty);
+      expect(
+        unwired.decisionLookups.single.error,
+        contains('no decision-index source'),
+      );
     });
 
     test('the history source batches ONE log; an empty log is COMPLETE and an '
@@ -2378,7 +2678,7 @@ void main() {
                     state: EvidenceState.complete,
                   ),
               ],
-              decisions: (_, _, _) async => const [],
+              decisions: (_, _, _) async => const DecisionGatherEvidence(),
               history: (_, __) async => completeHistory(),
             ).run(
               FakeTreeContext(
@@ -2505,6 +2805,7 @@ void main() {
               error: 'the store never answered',
             ),
           ],
+          decisionEntries: base.decisionEntries,
           decisionLookups: base.decisionLookups,
           history: base.history,
         );
@@ -2538,6 +2839,7 @@ void main() {
             truncated: true,
           ),
         ],
+        decisionEntries: base.decisionEntries,
         decisionLookups: base.decisionLookups,
         history: base.history,
       );
@@ -2609,6 +2911,7 @@ void main() {
         anchorsTruncated: true,
         symbolsTruncated: true,
         priorArtQueries: base.priorArtQueries,
+        decisionEntries: base.decisionEntries,
         decisionLookups: base.decisionLookups,
         history: base.history,
       );

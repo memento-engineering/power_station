@@ -209,8 +209,12 @@ CommitteeSelectionEvidence _build({
       decisions.add(
         'surface:${lookup.surface}|${lookup.state.name}|${lookup.id}',
       );
-      for (final entry in lookup.decisions) {
-        decisions.add('decision:${entry.body.id}');
+      // Resolved through the gather's OWN index, never looked up: the
+      // reference is the body id, and `decisionEntryFor` is the loud fence that
+      // a surface citing an entry this gather does not carry is a broken
+      // evidence profile rather than a silently thinner selection fact.
+      for (final reference in lookup.decisions) {
+        decisions.add('decision:${gather.decisionEntryFor(reference).body.id}');
       }
       truncated |= lookup.truncated || _isTruncated(lookup.state);
       if (_isGap(lookup.state)) missing.add('decisions:${lookup.surface}');
