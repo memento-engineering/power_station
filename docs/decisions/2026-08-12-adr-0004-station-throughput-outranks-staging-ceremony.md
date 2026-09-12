@@ -12,7 +12,9 @@ register:
   obsoletes: []
   updates: []
   obsoleted-by: null
-  updated-by: []
+  updated-by:
+    - memento-engineering#agents-publish-prereleases-humans-promote-to-stable
+    - memento-engineering#prerelease-rungs-are-dev-beta-rc-and-rc-is-human-only
   bead: null
   legacy-id: "ADR-0004"
 ---
@@ -70,8 +72,16 @@ ceremony must never be the reason a station sits idle.
 
 The human gates that remain are the ones with OUTWARD or IRREVERSIBLE effect: merging into a
 substation's main, the first live arm of a new composition, persistence and credential changes,
-anything outward-facing beyond a branch push and PR. Letting approved-in-substance work START is
-not one of them.
+and promoting a release. Letting approved-in-substance work START is not one of them.
+
+NARROWED 2026-09-11 by `memento-engineering#agents-publish-prereleases-humans-promote-to-stable`
+and `#prerelease-rungs-are-dev-beta-rc-and-rc-is-human-only`. This clause used to read "anything
+outward-facing beyond a branch push and PR", and that enumeration swept in PUBLISHING a
+prerelease, which is neither irreversible in effect nor a human act: pub excludes prereleases from
+ordinary stable caret ranges, so a candidate reaches no stable consumer. Publishing a prerelease
+is agent work at any rung it already occupies. What stays human is the PROMOTION — `beta` to `rc`,
+and `rc` to a non-prerelease version — which is the genuinely one-way step. No new decision is
+minted; the org entries carry the ruling and this clause records the narrowing.
 
 ### D3 — An ADR departure is recorded, not blocking.
 

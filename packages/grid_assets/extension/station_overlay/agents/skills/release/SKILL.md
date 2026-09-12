@@ -11,7 +11,8 @@ description: >
   dependency order — rides the vended `{{runner}} dart release` Command, whose
   JSON this skill PARSES. Use when the human says "release <package>", "publish
   <package> to pub.dev", "cut a release", "bump and publish", "ship the new
-  version", or "reconcile the release tags".
+  version", or "reconcile the release tags" — and ALSO on your own initiative
+  when a prerelease needs cutting, which is agent work needing no ask.
 compatibility: Requires dart + the `{{runner}}` runner, git, and pub.dev publish rights (the memento.engineering verified publisher).
 metadata:
   author: memento-engineering
@@ -113,12 +114,62 @@ Decide the `--change` class, then let `plan` do the math:
   `Breaking:` and carry a one-line migration. pub reads `^0.1.0` as
   `>=0.1.0 <0.2.0`, so a breaking change hidden in a patch silently reaches
   every resolver — that is why breaking moves to the next breaking base as an
-  rc before stable promotion.
+  rc before stable promotion. Under the rung split that entry rung is `dev`, not
+  `rc`: a breaking change is published by an agent at `dev` or `beta`, and only
+  a human promotes it onto the candidate rung.
 - **Adding a member to an exported abstract interface is breaking** for external
   implementers, even when every in-repo handle just delegates — call it breaking.
 - **Cross-package coherence:** when a sibling consumes API introduced in version
   X, tighten the sibling's constraint to `^X` in the SAME change and release in
   dependency order, so a resolved pair is always coherent.
+
+## Who may publish, and the rung ladder
+
+**An agent publishes PRERELEASES freely — no per-release human ask.** A release
+here is a TAG PUSH that CI publishes over trusted publishing; there is no
+credential to guard and no classifier refusal to route around. Candidates are
+included: once a package sits at `rc`, cutting `rc.2`, `rc.3`, `rc.4` is
+ordinary agent work.
+
+**A human makes the PROMOTIONS.** Do not conflate the two acts — that confusion
+cost a live session on 2026-09-11:
+
+| act | example | who |
+|---|---|---|
+| Setting the rung — one-time | `beta.4` → `rc.1`, `rc.9` → `1.0.0` | **human** |
+| Publishing at a rung — repeatable | `rc.1`, `rc.2`, `rc.3` … | **agent** |
+
+The ladder has three rungs, **per package** — a wave is a batch of
+independently runged publishes:
+
+- **`dev`** — the API is still moving. Every prerelease starts here, and a
+  BREAKING change enters here rather than being forced to a candidate.
+- **`beta`** — the API is frozen for this target version; the bugs are not. Its
+  entry condition is machine-checkable and an AGENT evaluates it: no breaking
+  API change against the previous prerelease of the same target version. So
+  `dev` → `beta` needs no human.
+- **`rc`** — this exact commit ships as stable unless something surfaces. Only
+  a human PROMOTES a package to it, and only a human promotes beyond it.
+
+The rung is independent of the SEMVER MOVE. `plan` takes them separately:
+`--change <docs|additive|fix|breaking>` for the move and
+`--rung <stable|dev|beta|rc>` for the ladder, with `--promotion-intent`
+required when the human has declared `rc`. `--change rc` survives as the
+compatibility spelling of `--change breaking --rung rc`.
+
+Counters reset when the identifier changes (`0.2.0-dev.3` + beta →
+`0.2.0-beta.1`). Skipping up is allowed, because a human may declare intent at
+any moment.
+
+**The demote has a limit, measured 2026-09-11.** A stale `rc` demoted to `beta`
+does not work once higher candidates exist: semver orders `0.6.0-beta.1` BELOW
+`0.6.0-rc.25` and pub resolves the highest, so the demoted version publishes and
+is never selected. For such a package the moves that actually advance it are a
+further `rc` (human-promoted) or promotion to stable.
+
+Governing entries:
+`memento-engineering#agents-publish-prereleases-humans-promote-to-stable` and
+`memento-engineering#prerelease-rungs-are-dev-beta-rc-and-rc-is-human-only`.
 
 ## Pre-release (rc) publishing
 

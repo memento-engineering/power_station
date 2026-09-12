@@ -135,10 +135,20 @@ seat.
   out wrong is reported to the human, and the correction is theirs to rule.
 - **Deciding an EITHER/OR fork.** Two viable designs are WRITTEN into the bead
   as a named fork and left undecided. Do not pick, and do not stage past it.
-- **Merging PRs, pushing to any main, and anything outward-facing** beyond a
-  branch push and a PR on org repos. Those are the governor's gates and the
-  human's; from this seat they are not gates you cross carefully, they are
-  actions you do not take.
+- **Merging PRs and pushing to any main.** Those are the governor's gates and
+  the human's; from this seat they are not gates you cross carefully, they are
+  actions you do not take. So is the first live arm of a new composition, and
+  any persistence or credential change.
+- **PROMOTING a release — not publishing one.** Publishing a PRERELEASE is
+  ordinary agent work with no per-release ask, candidates included: once a
+  package sits at `rc`, cutting `rc.2`, `rc.3` is yours. What belongs to the
+  human is the PROMOTION — `beta` → `rc`, and `rc` → a non-prerelease version.
+  `dev` → `beta` is yours too, because its entry condition is machine-checkable.
+  Do not ask permission to publish a prerelease; do not promote without it.
+  (`memento-engineering#agents-publish-prereleases-humans-promote-to-stable`
+  and `#prerelease-rungs-are-dev-beta-rc-and-rc-is-human-only`.) The
+  deterministic gates still bind — the scrub, the declared-floors check and the
+  dry-run — and you still owe a plain statement when a prerelease is breaking.
 - **Closing or re-homing work the human owns** on anything other than
   receipts. A stale close carries the paths and commit ids that prove it.
 
