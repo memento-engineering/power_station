@@ -44,12 +44,20 @@ Bead _beadPinning(String model) => bead('tg-1').copyWith(
 
 /// The ambient tree a spawner reads at entry: the work bead, the activation, and
 /// the station's [config] (the ladder's station rung).
-FakeTreeContext _ctx(Bead b, AgentConfig config) => FakeTreeContext(
+///
+/// [workspaceDir] keeps the synthetic default every model-selection probe rides
+/// (nothing on disk ⇒ no link probe); only the GATING lane, which stamps its
+/// Validation Plan to a file at spawn, passes a real directory.
+FakeTreeContext _ctx(
+  Bead b,
+  AgentConfig config, {
+  String workspaceDir = '/w/tg-1',
+}) => FakeTreeContext(
   values: {
     Bead: b,
     Workspace: testWorkspace(
       'tg-1',
-      workspaceDir: '/w/tg-1',
+      workspaceDir: workspaceDir,
       branch: 'grid/tg-1',
     ),
     AgentConfig: config,
@@ -296,11 +304,16 @@ void main() {
     }
 
     test('the gating lane is a RUNNER, not an agent — it names no model', () {
+      // A REAL workspace: this lane stamps the bead's Validation Plan to a
+      // file at spawn, so the plan — not the wrapper argv — is where the
+      // command lives.
+      final dir = Directory.systemTemp.createTempSync('ladder-gating-');
+      addTearDown(() => dir.deleteSync(recursive: true));
       final withPlan = bead('tg-1').copyWith(
         metadata: const {'validation_plan': 'dart analyze && dart test'},
       );
       final cfg = const CriticCapability().spawn(
-        _ctx(withPlan, const AgentConfig()),
+        _ctx(withPlan, const AgentConfig(), workspaceDir: dir.path),
         stepArgs(
           'tg-1/review/$kGatingRubric',
           params: {'rubric': kGatingRubric},
@@ -308,7 +321,12 @@ void main() {
       );
       expect(cfg.command, 'sh');
       expect(cfg.args, isNot(contains('--model')));
-      expect(cfg.args[1], contains('dart analyze && dart test'));
+      expect(
+        File(
+          p.join(dir.path, '.grid/critique/$kGatingRubric.plan.sh'),
+        ).readAsStringSync().trim(),
+        'dart analyze && dart test',
+      );
     });
   });
 

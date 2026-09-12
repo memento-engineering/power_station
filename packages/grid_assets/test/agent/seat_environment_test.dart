@@ -5,9 +5,12 @@
 //
 // Pure-Dart, offline: the synthetic workspace dir never exists on disk, so the
 // spawners' filesystem probes no-op (the documented offline posture of
-// `model_ladder_test.dart`). The models below are deliberately NOT the
-// tier defaults (opus/sonnet/haiku), so a typed win is distinguishable from the
-// tier floor by the `--model` argv alone.
+// `model_ladder_test.dart`) - the lone exception is the GATING lane, which
+// stamps its Validation Plan to a file at spawn and so rides a temp dir. The
+// models below are deliberately NOT the tier defaults (opus/sonnet/haiku), so a
+// typed win is distinguishable from the tier floor by the `--model` argv alone.
+import 'dart:io';
+
 import 'package:beads_dart/beads_dart.dart';
 import 'package:genesis_tree/genesis_tree.dart';
 import 'package:grid_assets/grid_assets.dart';
@@ -343,6 +346,10 @@ void main() {
     });
 
     test('the gating lane is still an sh runner and names no model', () {
+      // A REAL workspace: unlike every seat probe above, this lane stamps the
+      // bead's Validation Plan to a file at spawn.
+      final dir = Directory.systemTemp.createTempSync('seat-gating-');
+      addTearDown(() => dir.deleteSync(recursive: true));
       final gating = const CriticCapability().spawn(
         FakeTreeContext(
           values: {
@@ -351,7 +358,7 @@ void main() {
             ).copyWith(metadata: const {'validation_plan': 'dart analyze'}),
             Workspace: testWorkspace(
               'tg-1',
-              workspaceDir: '/w/tg-1',
+              workspaceDir: dir.path,
               branch: 'grid/tg-1',
             ),
             AgentConfig: const AgentConfig(),
