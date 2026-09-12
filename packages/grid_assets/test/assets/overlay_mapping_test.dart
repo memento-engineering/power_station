@@ -125,6 +125,35 @@ void main() {
     final root = resolution.artifacts.last;
     expect(root.artifact.target, AssetDeliveryTarget.agents);
     expect(root.sourcePath, p.join(fixture.packageRoot, root.artifact.path));
+
+    const OverlayMaterializer().materializeSync(
+      resolution: resolution,
+      targetRoot: target.path,
+      sourceRef: 'test',
+    );
+
+    final installed = File(p.join(target.path, kAgentsRootRelativePath));
+    expect(installed.existsSync(), isTrue, reason: 'at the repository ROOT');
+    expect(installed.readAsStringSync(), contains('the org doctrine'));
+    expect(
+      Directory(
+        p.join(target.path, kAgentsTargetHead, kAgentsRootMappingKey),
+      ).existsSync(),
+      isFalse,
+      reason: 'the root leg lands at the root, never under the tree head',
+    );
+    expect(
+      Directory(p.join(target.path, kAgentsRootMappingKey)).existsSync(),
+      isFalse,
+      reason: 'the mapping KEY is a source dir name, never a target dir',
+    );
+    expect(
+      File(
+        p.join(target.path, kAgentsTargetHead, 'skills', 'x', 'SKILL.md'),
+      ).existsSync(),
+      isTrue,
+      reason: 'the tree leg still installs beside it',
+    );
   });
 
   test('the root leg is a THIRD destination, not a re-route: both harness-head '
