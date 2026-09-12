@@ -9,6 +9,7 @@ import 'dart:io';
 import 'package:args/command_runner.dart';
 import 'package:dart_grid_assets/dart_grid_assets.dart';
 import 'package:path/path.dart' as p;
+import 'package:pub_semver/pub_semver.dart';
 import 'package:test/test.dart';
 
 /// A Fake [ProcessRunner]: records the last argv and returns canned output.
@@ -427,6 +428,223 @@ void main() {
           () => next(malformed, ReleaseRung.dev),
           throwsA(isA<ArgumentError>()),
           reason: '$malformed sits on no supported rung',
+        );
+      }
+    });
+
+    test('a stale rc demotes to beta.1 at the threshold', () {
+      ReleaseVersionPlan plan(String current) => service.planVersion(
+        current: current,
+        change: ReleaseChange.breaking,
+        rung: ReleaseRung.rc,
+        promotionIntent: true,
+      );
+
+      final demoted = plan('0.6.0-rc.5');
+      expect(
+        demoted.next.toString(),
+        '0.6.0-beta.1',
+        reason: 'a package on its fifth candidate was never a candidate',
+      );
+      expect(
+        demoted.rung,
+        ReleaseRung.beta,
+        reason: 'the EFFECTIVE rung comes down with the version',
+      );
+      expect(demoted.demotion, isNotNull);
+      expect(
+        demoted.promotionIntent,
+        isFalse,
+        reason:
+            'a demoted plan is no longer the candidate intent was declared '
+            'for',
+      );
+      expect(
+        [demoted.next.major, demoted.next.minor, demoted.next.patch],
+        [demoted.current.major, demoted.current.minor, demoted.current.patch],
+        reason: 'a demotion never moves the core version',
+      );
+
+      final candidate = plan('0.6.0-rc.4');
+      expect(candidate.next.toString(), '0.6.0-rc.5');
+      expect(candidate.rung, ReleaseRung.rc);
+      expect(candidate.demotion, isNull);
+      expect(candidate.promotionIntent, isTrue);
+    });
+
+    test('plan JSON reports a demotion and its threshold', () {
+      Map<String, dynamic> json(String current) => service
+          .planVersion(
+            current: current,
+            change: ReleaseChange.breaking,
+            rung: ReleaseRung.rc,
+            promotionIntent: true,
+          )
+          .toJson();
+
+      final demoted = json('0.6.0-rc.5');
+      expect(demoted['next'], '0.6.0-beta.1');
+      expect(demoted['rung'], 'beta');
+      expect(demoted['demotion'], contains('0.6.0-rc.5'));
+      expect(
+        demoted['demotion'],
+        contains('$kStaleRcDemotionThreshold release candidates'),
+        reason: 'the report names the threshold that applied',
+      );
+      expect(demoted['demotion'], contains('0.6.0-beta.1'));
+      expect(demoted.containsKey('demotionSkipped'), isFalse);
+
+      final ordinary = json('0.6.0-rc.4');
+      expect(ordinary['next'], '0.6.0-rc.5');
+      expect(
+        ordinary.keys,
+        isNot(anyElement(anyOf('demotion', 'demotionSkipped'))),
+        reason: 'an ordinary plan carries neither demotion key',
+      );
+    });
+
+    test('a demoted plan succeeds', () async {
+      final buf = StringBuffer();
+      final err = StringBuffer();
+      final runner = CommandRunner<int>('t', 'test')
+        ..addCommand(ReleaseCommand(out: buf, err: err));
+      final code = await runner.run([
+        'release',
+        'plan',
+        '--package',
+        'grid_sdk',
+        '--current',
+        '0.6.0-rc.5',
+        '--change',
+        'breaking',
+        '--rung',
+        'rc',
+        '--promotion-intent',
+        '--json',
+      ]);
+      expect(
+        code,
+        0,
+        reason: 'demotion reports; it never refuses, gates, or exits non-zero',
+      );
+      expect(err.toString(), isEmpty);
+      final json = jsonDecode(buf.toString().trim()) as Map<String, dynamic>;
+      expect(
+        Version.parse(json['next'] as String),
+        Version.parse('0.6.0-beta.1'),
+      );
+      expect(json['rung'], 'beta');
+      expect(json['tag'], 'grid_sdk-v0.6.0-beta.1');
+      expect(json['demotion'], contains('0.6.0-rc.5'));
+    });
+
+    test('the demotion threshold is an overridable constant with its '
+        'rationale', () {
+      expect(
+        kStaleRcDemotionThreshold,
+        5,
+        reason:
+            'grid_sdk reached 22 prereleases and grid_assets 25 without '
+            'promoting, while lenny promoted by rc.2',
+      );
+
+      ReleaseVersionPlan plan(String current, {int? threshold}) =>
+          service.planVersion(
+            current: current,
+            change: ReleaseChange.breaking,
+            rung: ReleaseRung.rc,
+            promotionIntent: true,
+            staleRcThreshold: threshold ?? kStaleRcDemotionThreshold,
+          );
+
+      final overridden = plan('0.6.0-rc.3', threshold: 3);
+      expect(overridden.next.toString(), '0.6.0-beta.1');
+      expect(overridden.rung, ReleaseRung.beta);
+      expect(overridden.demotion, contains('3 release candidates'));
+
+      expect(
+        plan('0.6.0-rc.3').next.toString(),
+        '0.6.0-rc.4',
+        reason: 'the same version does NOT demote under the default of five',
+      );
+    });
+
+    test('an rc rung set after a demotion plans rc.1', () {
+      final promoted = service.planVersion(
+        current: '0.6.0-beta.1',
+        change: ReleaseChange.breaking,
+        rung: ReleaseRung.rc,
+        promotionIntent: true,
+      );
+      expect(
+        promoted.next.toString(),
+        '0.6.0-rc.1',
+        reason:
+            'changing the identifier resets the counter, so the demoted '
+            'package starts its candidates over',
+      );
+      expect(promoted.rung, ReleaseRung.rc);
+      expect(promoted.promotionIntent, isTrue);
+      expect(promoted.demotion, isNull);
+      expect(promoted.demotionSkipped, isNull);
+      expect(
+        () => service.planVersion(
+          current: '0.6.0-beta.1',
+          change: ReleaseChange.breaking,
+          rung: ReleaseRung.rc,
+        ),
+        throwsA(isA<ArgumentError>()),
+        reason: 'the mechanism only ever moves DOWN — a human sets rc',
+      );
+    });
+
+    test('an unselectable demotion is skipped and reported', () {
+      final known = [
+        Version.parse('0.6.0-beta.2'),
+        Version.parse('0.6.0-rc.5'),
+        Version.parse('0.5.9-rc.7'),
+      ];
+      final plan = service.planVersion(
+        current: '0.6.0-rc.5',
+        change: ReleaseChange.breaking,
+        rung: ReleaseRung.rc,
+        promotionIntent: true,
+        knownVersions: known,
+      );
+
+      expect(
+        plan.next.toString(),
+        '0.6.0-rc.6',
+        reason: 'beta.1 sorts below a published rc.5, so the candidate stands',
+      );
+      expect(plan.rung, ReleaseRung.rc);
+      expect(plan.demotion, isNull);
+      expect(plan.demotionSkipped, contains('0.6.0-beta.1'));
+      expect(
+        plan.demotionSkipped,
+        contains('0.6.0-rc.5'),
+        reason: 'the report names the greatest blocking version',
+      );
+      expect(
+        plan.demotionSkipped,
+        contains('$kStaleRcDemotionThreshold release candidates'),
+      );
+      expect(
+        plan.toJson().containsKey('demotionSkipped'),
+        isTrue,
+        reason: 'a skip is reported, not silent',
+      );
+
+      for (final other in known.where(
+        (version) =>
+            version.major == plan.next.major &&
+            version.minor == plan.next.minor &&
+            version.patch == plan.next.patch,
+      )) {
+        expect(
+          plan.next.compareTo(other) > 0,
+          isTrue,
+          reason: '$other must not outrank the planned ${plan.next}',
         );
       }
     });
