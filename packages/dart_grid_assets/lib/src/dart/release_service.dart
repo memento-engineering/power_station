@@ -144,6 +144,27 @@ enum ReleaseRung {
   int compareTo(ReleaseRung other) => order.compareTo(other.order);
 }
 
+/// How many release candidates a package may accrue before its next prerelease
+/// is planned a rung DOWN, at `beta.1`, instead of as one more candidate — the
+/// default [ReleaseService.planVersion] applies and any caller may lower.
+///
+/// The number is MEASURED, not picked. `rc` is supposed to mean "this exact
+/// commit ships as stable unless something surfaces", and the packages that
+/// stopped meaning it say where the honest line sits: `grid_sdk` published 22
+/// prereleases and is still stable at 0.2.0, `grid_assets` 25 and still 0.4.0 —
+/// a package on its 22nd candidate was never a candidate. `lenny`, which
+/// actually promotes, went out at rc.1 and rc.2 and promoted its whole wave. So
+/// five sits comfortably above the pattern of a package that promotes and far
+/// below the drift of one that does not.
+///
+/// Demotion makes the LABEL honest without forcing out a release nobody is
+/// waiting for: `beta.1` after `rc.9` is valid semver, and it is the only
+/// motion this mechanism has. It NEVER refuses, caps the rung, or gates the
+/// next release — no forcing mechanism may block work that has nothing to do
+/// with the release, so a demotion that would be unsound is REPORTED and
+/// skipped ([ReleaseVersionPlan.demotionSkipped]), never turned into a stop.
+const int kStaleRcDemotionThreshold = 5;
+
 /// The computed version move for a release — the result of
 /// [ReleaseService.planVersion].
 class ReleaseVersionPlan {
@@ -154,6 +175,8 @@ class ReleaseVersionPlan {
     required this.change,
     required this.rung,
     this.promotionIntent = false,
+    this.demotion,
+    this.demotionSkipped,
   });
 
   /// The current published version.
@@ -172,6 +195,16 @@ class ReleaseVersionPlan {
   /// it, and without it an rc plan is refused.
   final bool promotionIntent;
 
+  /// Why this plan came DOWN a rung — the stale-rc demotion's reason, naming
+  /// the candidate it was planned off and the [kStaleRcDemotionThreshold] that
+  /// applied. Null for every plan that did not demote.
+  final String? demotion;
+
+  /// Why a stale-rc demotion was CONSIDERED and not applied — the rejected
+  /// `beta.1`, the known version it fails to sort above, and the threshold.
+  /// Null unless a demotion was skipped; a skip is a report, never a refusal.
+  final String? demotionSkipped;
+
   /// Whether the CHANGELOG entry must lead with `Breaking:` + a migration line
   /// (genesis `publishing.md`) — true iff [change] is breaking. The command
   /// FLAGS this; the skill FRAMES the prose.
@@ -185,8 +218,22 @@ class ReleaseVersionPlan {
     'rung': rung.name,
     'promotionIntent': promotionIntent,
     'requiresBreakingChangelog': requiresBreakingChangelog,
+    if (demotion != null) 'demotion': demotion,
+    if (demotionSkipped != null) 'demotionSkipped': demotionSkipped,
   };
 }
+
+/// The resolved PRERELEASE move — the computed version, the EFFECTIVE rung
+/// (which a stale-rc demotion lowers to [ReleaseRung.beta]), and at most one of
+/// the two stale-rc reports. Private because it is the internal shape
+/// [ReleaseService.planVersion] reads onto a [ReleaseVersionPlan]; the public
+/// contract is the plan and its JSON.
+typedef _PrereleaseMove = ({
+  Version next,
+  ReleaseRung rung,
+  String? demotion,
+  String? demotionSkipped,
+});
 
 /// The private git-tag operation's structured result.
 class ReleaseTagResult {
@@ -1186,11 +1233,25 @@ class ReleaseService {
   /// a human has declared intent to promote. A non-semver [current], and a
   /// prerelease [current] on no supported rung, are both LOUD [ArgumentError]s
   /// (never a guessed bump).
+  ///
+  /// A STALE candidate is DEMOTED instead of extended: asked for another `rc`
+  /// off an `rc.N` with `N >= [staleRcThreshold]`, the plan lands on the
+  /// same-core `beta.1` at [ReleaseRung.beta] and says why in
+  /// [ReleaseVersionPlan.demotion] (see [kStaleRcDemotionThreshold] for the
+  /// measured default). The mechanism only ever moves DOWN — it never sets
+  /// `rc`, never touches the core version, and never refuses: if `beta.1` would
+  /// not sort above every same-core prerelease in [knownVersions] (a caller's
+  /// already-published set, which should carry [current] at minimum), the
+  /// ordinary `rc.(N+1)` stands and the skip is reported in
+  /// [ReleaseVersionPlan.demotionSkipped]. [knownVersions] entries on another
+  /// core version are ignored — they cannot be reached by this bump.
   ReleaseVersionPlan planVersion({
     required String current,
     required ReleaseChange change,
     required ReleaseRung rung,
     bool promotionIntent = false,
+    int staleRcThreshold = kStaleRcDemotionThreshold,
+    Iterable<Version> knownVersions = const [],
   }) {
     if (rung.requiresPromotionIntent && !promotionIntent) {
       throw ArgumentError.value(
@@ -1210,15 +1271,33 @@ class ReleaseService {
         'not a semantic version: ${e.message}',
       );
     }
-    final next = rung.isPrerelease
-        ? _nextPrerelease(now, change, rung)
-        : _nextStable(now, change);
+    if (!rung.isPrerelease) {
+      return ReleaseVersionPlan(
+        current: now,
+        next: _nextStable(now, change),
+        change: change,
+        rung: rung,
+        promotionIntent: promotionIntent,
+      );
+    }
+    final move = _nextPrerelease(
+      now,
+      change,
+      rung,
+      staleRcThreshold,
+      knownVersions,
+    );
     return ReleaseVersionPlan(
       current: now,
-      next: next,
+      next: move.next,
       change: change,
-      rung: rung,
-      promotionIntent: promotionIntent,
+      // The EFFECTIVE rung, which a demotion lowers. A demoted plan is no
+      // longer a candidate, so the declared intent it was asked for is not
+      // carried onto it — reaching rc always takes a fresh declaration.
+      rung: move.rung,
+      promotionIntent: promotionIntent && move.demotion == null,
+      demotion: move.demotion,
+      demotionSkipped: move.demotionSkipped,
     );
   }
 
@@ -1230,12 +1309,26 @@ class ReleaseService {
     ReleaseChange.breaking => now.major == 0 ? now.nextMinor : now.nextMajor,
   };
 
-  /// The PRERELEASE half: the target core plus `<identifier>.<n>`.
-  Version _nextPrerelease(Version now, ReleaseChange change, ReleaseRung rung) {
+  /// The PRERELEASE half: the target core plus `<identifier>.<n>`, resolved
+  /// together with the EFFECTIVE rung a stale-rc demotion may lower it to and
+  /// the report that explains the motion. This stays the single
+  /// prerelease-arithmetic seam, so [planVersion] only reads these fields.
+  _PrereleaseMove _nextPrerelease(
+    Version now,
+    ReleaseChange change,
+    ReleaseRung rung,
+    int staleRcThreshold,
+    Iterable<Version> knownVersions,
+  ) {
     final identifier = rung.identifier!;
     if (now.preRelease.isEmpty) {
       final base = _nextStable(now, change);
-      return Version(base.major, base.minor, base.patch, pre: '$identifier.1');
+      return (
+        next: Version(base.major, base.minor, base.patch, pre: '$identifier.1'),
+        rung: rung,
+        demotion: null,
+        demotionSkipped: null,
+      );
     }
     final pre = now.preRelease;
     final currentRung = pre.length == 2 && pre[0] is String && pre[1] is int
@@ -1251,8 +1344,65 @@ class ReleaseService {
     }
     // The core is already the target, so the rung decides the counter: the
     // same identifier increments, any other rung restarts at 1.
-    final count = currentRung == rung ? (pre[1] as int) + 1 : 1;
-    return Version(now.major, now.minor, now.patch, pre: '$identifier.$count');
+    final counter = pre[1] as int;
+    final count = currentRung == rung ? counter + 1 : 1;
+    final ordinary = Version(
+      now.major,
+      now.minor,
+      now.patch,
+      pre: '$identifier.$count',
+    );
+    final stale =
+        rung == ReleaseRung.rc &&
+        currentRung == ReleaseRung.rc &&
+        counter >= staleRcThreshold;
+    if (!stale) {
+      return (
+        next: ordinary,
+        rung: rung,
+        demotion: null,
+        demotionSkipped: null,
+      );
+    }
+    // A package this many candidates deep was never a candidate, so the next
+    // prerelease is planned a rung DOWN and the label goes back to being true.
+    // The counter restarts by construction: the identifier changed.
+    final demoted = Version(
+      now.major,
+      now.minor,
+      now.patch,
+      pre: '${ReleaseRung.beta.identifier!}.1',
+    );
+    final blockers = [
+      for (final known in knownVersions)
+        if (known.major == now.major &&
+            known.minor == now.minor &&
+            known.patch == now.patch &&
+            known.compareTo(demoted) >= 0)
+          known,
+    ]..sort((a, b) => a.compareTo(b));
+    if (blockers.isEmpty) {
+      return (
+        next: demoted,
+        rung: ReleaseRung.beta,
+        demotion:
+            '$now is at or past $staleRcThreshold release candidates, so `rc` '
+            'no longer means this commit ships as stable; the next prerelease '
+            'is planned at $demoted, a rung down, instead of one more '
+            'candidate.',
+        demotionSkipped: null,
+      );
+    }
+    return (
+      next: ordinary,
+      rung: rung,
+      demotion: null,
+      demotionSkipped:
+          '$now is at or past $staleRcThreshold release candidates, but the '
+          'demotion to $demoted does not sort above the already-known '
+          '${blockers.last}, so it is skipped and the candidate continues at '
+          '$ordinary.',
+    );
   }
 
   /// The per-package git tag `<package>-v<version>` (genesis `publishing.md`:
@@ -2592,6 +2742,10 @@ class ReleaseService {
           change: change,
           rung: rung,
           promotionIntent: promotionIntent,
+          // The wave holds the whole published set, so it hands it over: a
+          // stale-rc demotion here would plan below a version pub.dev already
+          // serves, and the author's version is what the wave matches against.
+          knownVersions: published,
         );
       } on ArgumentError {
         continue; // this published version cannot carry the move at this rung
