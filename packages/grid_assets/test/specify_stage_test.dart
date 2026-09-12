@@ -386,6 +386,22 @@ void main() {
       expect(rendered, contains('## Validation Plan'));
     });
 
+    test('brief teaches the POSIX shell authoring rule', () {
+      // The plan the architect writes here is executed, a build later, as
+      // `sh -c '( <plan> )'`. Refusing an unparseable one at the specify
+      // boundary only helps if the brief said how to write a parseable one
+      // first — so the rule rides the machine-gate paragraph VERBATIM.
+      expect(
+        rendered,
+        contains(
+          'The plan runs under POSIX `sh -c` as a single line; use double '
+          'quotes around any text containing an apostrophe, never paste bead '
+          'prose into a single-quoted program, and check the line with `sh -n` '
+          'before writing it.',
+        ),
+      );
+    });
+
     test('a BOUND grid home makes every lookup the brief names RUNNABLE — the '
         'cwd the station\'s verb resolves from rides the command', () {
       final bound = buildSpecifyBrief(
@@ -562,10 +578,11 @@ void main() {
             }),
           );
         final c = _ctx(workspaceDir: dir.path);
-        final fields = await const SpecifyCapability().result(
-          c.context,
-          c.args,
-        );
+        // A carried result re-reads the bead for its authored machine gate, so
+        // even a usage-only assertion needs the read-back seam injected.
+        final fields = await SpecifyCapability(
+          runnerFor: (_) => SpecifyReadbackBdRunner(),
+        ).result(c.context, c.args);
         expect(fields, isNotNull);
         expect(fields!['tokensIn'], '10');
         expect(fields['tokensOut'], '5');
@@ -593,37 +610,32 @@ void main() {
 
     test('well-formed envelope calls the registry writer seam with exact '
         'carried spec', () async {
-      // BOTH registry branches — the default post-exit read-back runner and an
-      // injected one — thread the same extension; neither may drop it.
-      for (final composition
-          in <String, BdRunner Function(String workspaceRoot)?>{
-            'the default read-back runner': null,
-            'an injected read-back runner': (_) => SpecifyReadbackBdRunner(),
-          }.entries) {
-        final dir = _envelopeWorkspace(
-          jsonEncode({'acceptance': acceptance, 'design': design}),
-        );
-        addTearDown(() => dir.deleteSync(recursive: true));
-        final recorder = _RecordingSpecWriter();
-        final c = _ctx(workspaceDir: dir.path);
-        final fields = await _composedSpecify(
-          writeSpecifyAuthoredSpec: recorder.record,
-          specifyBdRunnerFor: composition.value,
-        ).result(c.context, c.args);
+      // The registry threads the extension into the seat it composes. Driven
+      // over an INJECTED read-back runner: a carried result also parse-checks
+      // the authored machine gate, which re-reads the bead, and the
+      // `specifyBdRunnerFor == null` arm composes the production
+      // `ProcessBdRunner` — a real `bd` this offline suite must never launch.
+      // That arm still runs in the invalid-envelope cases below, where an
+      // unusable envelope means no read-back at all.
+      final dir = _envelopeWorkspace(
+        jsonEncode({'acceptance': acceptance, 'design': design}),
+      );
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final recorder = _RecordingSpecWriter();
+      final c = _ctx(workspaceDir: dir.path);
+      final fields = await _composedSpecify(
+        writeSpecifyAuthoredSpec: recorder.record,
+        specifyBdRunnerFor: (_) => SpecifyReadbackBdRunner(),
+      ).result(c.context, c.args);
 
-        expect(recorder.calls, hasLength(1), reason: composition.key);
-        expect(recorder.calls.single.beadId, 'tg-1', reason: composition.key);
-        expect(recorder.calls.single.design, design, reason: composition.key);
-        expect(
-          recorder.calls.single.acceptanceCriteria,
-          acceptance,
-          reason: composition.key,
-        );
-        // The step's own carried result is the SAME pair — one read, one parse.
-        expect(fields?[kCarriedSpecAcceptanceKey], acceptance);
-        expect(fields?[kCarriedSpecDesignKey], design);
-        expect(fields?['tokensIn'], '10');
-      }
+      expect(recorder.calls, hasLength(1));
+      expect(recorder.calls.single.beadId, 'tg-1');
+      expect(recorder.calls.single.design, design);
+      expect(recorder.calls.single.acceptanceCriteria, acceptance);
+      // The step's own carried result is the SAME pair — one read, one parse.
+      expect(fields?[kCarriedSpecAcceptanceKey], acceptance);
+      expect(fields?[kCarriedSpecDesignKey], design);
+      expect(fields?['tokensIn'], '10');
 
       // The brief's audit trail is untouched: the agent still runs both raw
       // `--actor specify` writes; the stamp is the station's SECOND write over
@@ -649,7 +661,9 @@ void main() {
       );
       addTearDown(() => dir.deleteSync(recursive: true));
       final c = _ctx(workspaceDir: dir.path);
-      final fields = await _composedSpecify().result(c.context, c.args);
+      final fields = await _composedSpecify(
+        specifyBdRunnerFor: (_) => SpecifyReadbackBdRunner(),
+      ).result(c.context, c.args);
       expect(fields?[kCarriedSpecAcceptanceKey], acceptance);
       expect(fields?[kCarriedSpecDesignKey], design);
     });
@@ -771,6 +785,145 @@ void main() {
         expect(recorder.calls, isEmpty);
       });
     }
+  });
+
+  // The MACHINE GATE's syntactic floor. specify authors `validation_plan` and
+  // the code committee's gating lane runs it, a whole build later, as
+  // `sh -c '( <plan> )'`. On 2026-09-12 specify wrote a plan whose
+  // single-quoted `ruby -e` program carried an apostrophe lifted out of the
+  // design prose; the lane aborted at PARSE, the round read as infra, and the
+  // session stranded. Parsing the plan in the step that WROTE it turns that
+  // burnt build round into a re-specify with the shell's own diagnostic.
+  group('SpecifyCapability.result — the authored machine gate parses', () {
+    const acceptance = '- [ ] AC-1 — the gate is parseable';
+    const design = '## Implementation Plan\n\n### Step 1 — parse the gate\n';
+
+    setUp(BdCliService.resetGuardedWriteCapabilityForTesting);
+
+    /// The composed seat over a read-back that returns the authored bead
+    /// carrying [plan] (absent when null) — the FRESH bd row `result` reads.
+    SpecifyCapability specifyOverPlan(
+      String? plan, {
+      SpecifyAuthoredSpecWriter? writeSpecifyAuthoredSpec,
+    }) => _composedSpecify(
+      writeSpecifyAuthoredSpec: writeSpecifyAuthoredSpec,
+      specifyBdRunnerFor: (_) => SpecifyReadbackBdRunner(
+        beads: [
+          durableSpecifiedBead(
+            'tg-1',
+          ).copyWith(metadata: {if (plan != null) 'validation_plan': plan}),
+        ],
+      ),
+    );
+
+    Directory carriedEnvelope() {
+      final dir = _envelopeWorkspace(
+        jsonEncode({'acceptance': acceptance, 'design': design}),
+      );
+      addTearDown(() => dir.deleteSync(recursive: true));
+      return dir;
+    }
+
+    test('rejects an unparseable validation_plan with the first shell '
+        'diagnostic', () async {
+      // The INCIDENT's shape: an apostrophe copied out of the bead's prose
+      // ("station lane's SDK") into a single-quoted program — THREE apostrophes,
+      // so the third opens a quote nothing closes. The shorthand
+      // `echo 'it's broken` carries only two and PARSES clean, which is why it
+      // cannot stand in for this.
+      const plan = "echo 'station lane's SDK'";
+      // The reason quotes `sh` itself, so the expectation asks `sh` too rather
+      // than hard-coding one shell's wording.
+      final probe = await Process.run('sh', ['-n', '-c', '( $plan )']);
+      final diagnostic = '${probe.stderr}'.trim().split('\n').first.trim();
+      expect(probe.exitCode, isNot(0));
+      expect(diagnostic, isNotEmpty);
+
+      final dir = carriedEnvelope();
+      final recorder = _RecordingSpecWriter();
+      final c = _ctx(workspaceDir: dir.path);
+      await expectLater(
+        specifyOverPlan(
+          plan,
+          writeSpecifyAuthoredSpec: recorder.record,
+        ).result(c.context, c.args),
+        throwsA(
+          isA<CapabilityFailure>()
+              .having(
+                (failure) => failure.kind,
+                'kind',
+                CapabilityFailureKind.invalidResult,
+              )
+              .having(
+                (failure) => failure.reason,
+                'reason',
+                'validation_plan does not parse: $diagnostic',
+              ),
+        ),
+      );
+      // The provenance stamp is UPSTREAM of the refusal: the prose the
+      // architect did write stays marked as its own, so the next ride's
+      // clear-and-rewrite still knows which text is specify's.
+      expect(recorder.calls, hasLength(1));
+      expect(recorder.calls.single.design, design);
+    });
+
+    test('a parseable validation_plan is syntax-checked without execution and '
+        'preserves fields', () async {
+      // `exit 27` PARSES. Were `-n` ever to RUN it, the checking shell would
+      // exit 27 and the plan would be refused — so a returned result map IS the
+      // proof the check is parse-only.
+      final dir = carriedEnvelope();
+      final c = _ctx(workspaceDir: dir.path);
+      expect(await specifyOverPlan('exit 27').result(c.context, c.args), {
+        'tokensIn': '10',
+        'tokensOut': '5',
+        'numTurns': '2',
+        'harnessDurationMs': '100',
+        kCarriedSpecAcceptanceKey: acceptance,
+        kCarriedSpecDesignKey: design,
+      });
+    });
+
+    // PRESENCE is not this hook's to judge: `FilingContract.evaluate` and
+    // `mountEligibilityFindings` already own it, and a third completeness
+    // predicate is exactly what the two-contract boundary forbids.
+    for (final absent in <String, String?>{
+      'a missing validation_plan': null,
+      'a blank validation_plan': '   \n',
+    }.entries) {
+      test('${absent.key} is not this step\'s refusal', () async {
+        final dir = carriedEnvelope();
+        final c = _ctx(workspaceDir: dir.path);
+        expect(await specifyOverPlan(absent.value).result(c.context, c.args), {
+          'tokensIn': '10',
+          'tokensOut': '5',
+          'numTurns': '2',
+          'harnessDurationMs': '100',
+          kCarriedSpecAcceptanceKey: acceptance,
+          kCarriedSpecDesignKey: design,
+        });
+      });
+    }
+
+    test('an unparseable gate buys ONE repair ride, then a visible gate', () {
+      final policy = const SpecifyCapability().supervisionPolicy(_ctx().args);
+      expect(
+        policy.policyFor(CapabilityFailureKind.invalidResult),
+        const RetryPolicy(
+          maxRestarts: 2,
+          backoff: Backoff.standard,
+          onExhaustion: ExhaustionBehavior.parkAtGate,
+        ),
+      );
+      // A failed agent and a missing envelope keep the circuit's own budget —
+      // only the broken authored ARTIFACT is narrowed here.
+      expect(policy.policyFor(CapabilityFailureKind.work), const RetryPolicy());
+      expect(
+        policy.policyFor(CapabilityFailureKind.noResult),
+        const RetryPolicy(),
+      );
+    });
   });
 
   group(

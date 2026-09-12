@@ -860,11 +860,20 @@ class SpecifyCapability extends ProcessCapability {
       readEnvelopeResultText(workspace.workspaceDir, args.nodePath),
     );
     final stamp = _writeSpecifyAuthoredSpec;
-    if (carried != null && stamp != null) {
-      await stamp(
+    if (carried != null) {
+      if (stamp != null) {
+        await stamp(
+          args.beadId,
+          design: carried.design,
+          acceptanceCriteria: carried.acceptance,
+        );
+      }
+      // The architect reported a spec, so it also wrote the MACHINE GATE — the
+      // one thing in this bead a later lane executes. Parse it now, whether or
+      // not the stamp extension was bound.
+      await _parseCheckAuthoredValidationPlan(
+        workspace.workspaceDir,
         args.beadId,
-        design: carried.design,
-        acceptanceCriteria: carried.acceptance,
       );
     }
     final fields = <String, String>{
@@ -878,6 +887,85 @@ class SpecifyCapability extends ProcessCapability {
     };
     return fields.isEmpty ? null : fields;
   }
+
+  /// REFUSES a `validation_plan` this ride authored that the gating lane's own
+  /// shell cannot PARSE.
+  ///
+  /// The plan is the code committee's MACHINE GATE: a whole build later, that
+  /// lane runs it as `sh -c` with the plan in a `( … )` group (`_gatingScript`).
+  /// A plan whose quoting is broken — an apostrophe copied out of the bead's
+  /// prose into a single-quoted program is the field case — aborts that lane at
+  /// PARSE, before the first command runs, which reads as an infra failure and
+  /// burns the build round the gate was there to judge. Parsing it HERE fails
+  /// the step that AUTHORED it, so the shell's own diagnostic reaches the next
+  /// specify ride instead of a build's worth of tokens reaching nothing.
+  ///
+  /// `sh -n` parses and NEVER executes, and the plan is wrapped in the exact
+  /// group `_gatingScript` will wrap it in, so what is checked is what will run.
+  ///
+  /// The plan is read FRESH from bd, exactly as [probeCompletionArtifact] reads
+  /// the durable spec: the agent's own `bd update --set-metadata` landed after
+  /// the ambient [Bead] this branch was built from, so the tree's copy is a
+  /// round behind. This is a SYNTAX floor and nothing more — no bead, no key, or
+  /// a blank plan SKIPS, because PRESENCE is `FilingContract.evaluate`'s and
+  /// `mountEligibilityFindings`' to own and neither is subsumed here. A bd read
+  /// that fails, and duplicate exact-id rows, stay LOUD.
+  Future<void> _parseCheckAuthoredValidationPlan(
+    String workspaceDir,
+    String beadId,
+  ) async {
+    final queried = await BdCliService(
+      _runnerFor(workspaceDir),
+    ).query('id=$beadId');
+    final matches = queried
+        .where((candidate) => candidate.id == beadId)
+        .toList(growable: false);
+    if (matches.isEmpty) return;
+    // LOUD on duplicates: two rows for one exact id means the read itself is
+    // untrustworthy, and a syntax check over the wrong row proves nothing.
+    final plan = matches.single.metadata['validation_plan'];
+    if (plan is! String || plan.trim().isEmpty) return;
+    final parse = await Process.run('sh', [
+      '-n',
+      '-c',
+      '( ${plan.trim()} )',
+    ], workingDirectory: workspaceDir);
+    if (parse.exitCode == 0) return;
+    throw CapabilityFailure.invalidResult(
+      'validation_plan does not parse: ${_shellParseDiagnostic(parse)}',
+    );
+  }
+
+  /// The shell's OWN first word on why it refused — the line an architect can
+  /// act on (`unexpected EOF while looking for matching …`). A silent `sh`
+  /// falls back to the exit code, so the reason is never empty.
+  static String _shellParseDiagnostic(ProcessResult parse) {
+    final complaint = '${parse.stderr}'.trim();
+    if (complaint.isEmpty) return 'sh -n exited ${parse.exitCode}';
+    return complaint.split('\n').first.trim();
+  }
+
+  /// Gives an unparseable machine gate ONE repair ride before a visible gate.
+  ///
+  /// Identical budget and reasoning to [CriticCapability.supervisionPolicy]:
+  /// the engine tests exhaustion after incrementing the restart cursor, so
+  /// [RetryPolicy.maxRestarts] of two is one initial ride plus one repair — and
+  /// a repair is genuinely available here, because the refusal hands the next
+  /// ride the shell's own diagnostic.
+  ///
+  /// Only `invalidResult` is declared: `work` (the agent itself failed) and
+  /// `noResult` (no envelope at all) keep the circuit's own budget, so a broken
+  /// authored ARTIFACT is the only thing this narrows.
+  @override
+  SupervisionPolicy supervisionPolicy(StepArgs args) => const SupervisionPolicy(
+    byKind: {
+      CapabilityFailureKind.invalidResult: RetryPolicy(
+        maxRestarts: 2,
+        backoff: Backoff.standard,
+        onExhaustion: ExhaustionBehavior.parkAtGate,
+      ),
+    },
+  );
 }
 
 /// Assembles the specify agent's full-bead brief + the spec-writing working
@@ -1079,7 +1167,13 @@ AgentBrief buildSpecifyBrief(
       'shell command line>\'` (e.g. `cd packages/<pack> && dart analyze && '
       'dart test`). After the build, the code committee\'s gating lane runs '
       'EXACTLY this command in the worktree and hard-blocks on non-zero — '
-      'make it the one line that proves this bead\'s change.',
+      'make it the one line that proves this bead\'s change. '
+      // The AUTHORING rule behind the parse check the specify step now runs
+      // over this value: teach the quoting before refusing it.
+      'The plan runs under POSIX `sh -c` as a single line; use double quotes '
+      'around any text containing an apostrophe, never paste bead prose into a '
+      'single-quoted program, and check the line with `sh -n` before writing '
+      'it.',
     )
     ..writeln()
     ..writeln('## Pre-convene re-validation (before you exit)')
