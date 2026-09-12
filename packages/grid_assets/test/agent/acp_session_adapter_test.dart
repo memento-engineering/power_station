@@ -1299,11 +1299,11 @@ void main() {
   });
 
   test('ACP boundary stays behind neutral seam', () async {
-    File source(String relative) {
-      final local = File(relative);
-      if (local.existsSync()) return local;
-      return File(p.join('packages/grid_assets', relative));
-    }
+    // Anchored on the package root, never probed relative to the process cwd:
+    // the old form tried the path as-is and then under `packages/grid_assets`,
+    // so it only resolved when the process happened to sit at this package or
+    // at the workspace root — and it read whichever tree the cwd named.
+    File source(String relative) => File(p.join(packageRoot(), relative));
 
     final seam = source('lib/src/agent/agent_session.dart').readAsStringSync();
     for (final method in const <String>[
