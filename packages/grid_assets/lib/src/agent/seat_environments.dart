@@ -1,12 +1,14 @@
-/// The SEAT preference types (epic `pow-n6n`, bead `pow-n6n.2`) - the four
-/// `SeatPreference` subclasses the six spawn sites resolve by, plus the
-/// critics' lane aspect.
+/// The SEAT preference types (epic `pow-n6n`, bead `pow-n6n.2`) - the
+/// `SeatPreference` values this pack VENDS: the four subclasses the six spawn
+/// sites resolve by, the critics' lane aspect, and the RELAY seat, which no
+/// spawn site resolves because its PRESENCE is what it declares.
 ///
 /// `typed_environment.dart` owns the MECHANISM (bead `pow-n6n.1`); this library
-/// owns the VOCABULARY. Four is what this pack VENDS, never what the mechanism
-/// admits: a seat is any [SeatPreference], it vends its own provider seed, and
-/// [TypedEnvironmentProvider] mounts whatever ordered collection it is armed
-/// with - so a station adds a seat type without editing this pack. The TYPE is
+/// owns the VOCABULARY. Five values over four resolved seats is what this pack
+/// VENDS, never what the mechanism admits: a seat is any [SeatPreference], it
+/// vends its own provider seed, and [TypedEnvironmentProvider] mounts whatever
+/// ordered collection it is armed with - so a station adds a seat type
+/// without editing this pack. The TYPE is
 /// the scope (ADR-0006 D2): a station mounts
 /// `InheritedSeed<BuildAgentEnvironment>` beside `InheritedSeed<ModelPreference>`
 /// and the build seat shadows the station default without either naming a
@@ -17,6 +19,14 @@
 /// entries, [CriticAgentEnvironment.of] picks the lane's preference at the spawn
 /// edge, and [CriticEnvironmentSeed] scopes a BUILD-time dependent's
 /// invalidation to its own lane over `genesis_tree`'s `InheritedModelSeed`.
+///
+/// The RELAY is the one vended value no capability resolves BY: a station's
+/// protective relay over its own signals, whose PRESENCE in the tree is the
+/// entire declaration that the station has one, and whose absence must stay
+/// visible so the signal escalates to the governor
+/// (`memento-engineering#protect-the-governor`, rules 4 and 5). So
+/// [RelayAgentEnvironment.of] reads the exact type and stops rather than
+/// falling to the generic [ModelPreference] the way the seat resolvers do.
 ///
 /// The MECHANISM that mounts and resolves those seats lives here too:
 /// [SeatProvider] and [CriticSeatProvider] are the two provider shapes a seat
@@ -85,6 +95,108 @@ class GatherAgentEnvironment extends SeatPreference {
 
   @override
   SingleChildSeed provider() => SeatProvider<GatherAgentEnvironment>(this);
+}
+
+/// The RELAY seat - a station's protective relay over its own signals
+/// (`memento-engineering#protect-the-governor`). PROTECTIVE in the power-grid
+/// sense that already names the governor: the device that SENSES an abnormal
+/// condition and DECIDES whether it warrants action. Not the forwarding sense
+/// of the word, and never the breaker - a relay decides, something else acts.
+///
+/// ARMED BY PRESENCE, which is the whole of its existence rule (rule 4): a
+/// station has a relay when and only when one of these is mounted, so it rides
+/// the ordered collection beside the vended arming
+/// (`<SeatPreference>[...arming, RelayAgentEnvironment(...)]`) and nothing
+/// consults a configuration flag to discover it. Absence is a VALUE the caller
+/// must answer for, never a default to paper over: [of] and [environmentOf]
+/// return null and the signal escalates to the governor (rule 5).
+///
+/// WHICH IS WHY THE GENERIC IS NOT CONSULTED. The vended lookup falls from a
+/// seat's own type to the shared [ModelPreference], and that is right for a
+/// seat whose EXISTENCE is not in question; here it would manufacture a relay
+/// out of the station's model default and absorb a signal nothing was armed to
+/// absorb. It is the rule [seatChannelPolicy] already states for a channel's
+/// admitted identity, applied to existence rather than to authority.
+///
+/// A VALUE and nothing but (config = VALUES in the tree, impls are DI -
+/// ADR-0000 A8). [entries] are the station's own preference: this pack vends NO
+/// ladder, cheap or otherwise, because a ladder is station posture and lives in
+/// the station's package. [mission] is the narrow charter the relay runs under.
+/// [tools] NAMES the surfaces it may reach - read-only inspection of a
+/// session's worktree, its flares, its telemetry and its gates, plus the one
+/// write it owns, its own verdict - which the relay asset binds to
+/// implementations. [ceiling] bounds the relay population: a relay seat
+/// never consumes work-slot capacity (rule 3), and not counting against work is
+/// not the same as being uncounted, so it is admitted under its OWN bound by
+/// the engine that counts - a VALUE here, enforced there.
+class RelayAgentEnvironment extends SeatPreference {
+  /// Creates the relay seat over [entries], most-preferred first, with the
+  /// [mission] it runs, the [tools] it may reach and its population [ceiling].
+  const RelayAgentEnvironment(
+    super.entries, {
+    required this.mission,
+    required this.tools,
+    required this.ceiling,
+  }) : assert(ceiling > 0, 'A relay ceiling bounds a population: 1 or more.');
+
+  /// The narrow charter this relay runs under - the one question it answers.
+  final String mission;
+
+  /// The tool NAMES this relay may reach for. Names, not implementations: the
+  /// relay asset binds them, and this value stays const-authorable beside a
+  /// station's arming.
+  final Set<String> tools;
+
+  /// How many of this relay may run at once, under the relay population's own
+  /// bound rather than the work-slot pool's.
+  final int ceiling;
+
+  @override
+  SingleChildSeed provider() => SeatProvider<RelayAgentEnvironment>(this);
+
+  /// The relay armed at [context], or null when none is - the PRESENCE read,
+  /// and the only existence test there is.
+  ///
+  /// Reads the exact type and STOPS. It never falls to the generic
+  /// [ModelPreference]: that default says which model a scope prefers, never
+  /// that a relay was armed, and a null here is what tells the caller to flare
+  /// the governor instead of silently absorbing the signal.
+  ///
+  /// THE EFFECT VERB (`getInheritedSeedOfExactType`), per ADR-0008 D3 /
+  /// ADR-0000 A35(6): a relay is read where one would be spawned, not in a
+  /// `build`.
+  static RelayAgentEnvironment? of(TreeContext context) =>
+      context.getInheritedSeedOfExactType<RelayAgentEnvironment>();
+
+  /// The environment an armed relay would run on: the first entry of ITS OWN
+  /// preference present in the ambient [AvailableEnvironments].
+  ///
+  /// Null carries both absences on purpose - no relay armed, or none of its
+  /// preferred environments present - because the decision answers them
+  /// identically: a relay that cannot reach a verdict escalates, exactly as an
+  /// unmounted one does.
+  static AgentEnvironment? environmentOf(TreeContext context) {
+    final seat = of(context);
+    return seat == null ? null : firstAvailable(context, seat);
+  }
+
+  @override
+  bool operator ==(Object other) =>
+      other is RelayAgentEnvironment &&
+      other.runtimeType == runtimeType &&
+      _sameEntries(other.entries, entries) &&
+      other.mission == mission &&
+      _sameTools(other.tools, tools) &&
+      other.ceiling == ceiling;
+
+  @override
+  int get hashCode => Object.hash(
+    runtimeType,
+    Object.hashAll(entries),
+    mission,
+    Object.hashAllUnordered(tools),
+    ceiling,
+  );
 }
 
 /// The BUILD seat - the coding agent (`AgentCapability`).
@@ -238,10 +350,11 @@ final class CriticSeatProvider extends SingleChildStatelessSeed {
 /// no role map and no role rung: ADR-0006 D5 retired them and bead `pow-n6n.4`
 /// carried it out, leaving the typed lookup as the whole environment axis.
 ///
-/// Four is this pack's VENDED shape, not a closed universe. `AgentArming` IS an
-/// `Iterable<SeatPreference>` - the type [TypedEnvironmentProvider] arms - so a
-/// station that declares its own seat type composes it without a fifth field
-/// here: `<SeatPreference>[...arming, MyAgentEnvironment([...])]`. Iterating
+/// Four is this pack's VENDED ARMING, not a closed universe. `AgentArming` IS
+/// an `Iterable<SeatPreference>` - the type [TypedEnvironmentProvider] arms -
+/// so a fifth seat composes without a fifth field here, whether it is this
+/// pack's own [RelayAgentEnvironment] or a type the station declared:
+/// `<SeatPreference>[...arming, RelayAgentEnvironment(...)]`. Iterating
 /// yields the armed seats in the same stable order [seats] does, which is what
 /// a boot-eager arming guard walks to name an offending seat BY TYPE.
 class AgentArming extends Iterable<SeatPreference> {
@@ -303,9 +416,10 @@ class AgentArming extends Iterable<SeatPreference> {
 /// by EXACT type and finds the nearest ancestor of that type.
 ///
 /// THE SEAT SET IS OPEN. [arming] is any ordered `Iterable<SeatPreference>` -
-/// [AgentArming] is one - and each seat vends the seed that provides it
-/// (`SeatPreference.provider`), so this build enumerates no seat type and a
-/// station introduces one without editing this pack. Composition is
+/// [AgentArming] is one, and `[...arming, RelayAgentEnvironment(...)]` is how
+/// a station arms one beside it - and each seat vends the seed that
+/// provides it (`SeatPreference.provider`), so this build enumerates no seat
+/// type and a station introduces one without editing this pack. Composition is
 /// `genesis_tree`'s own `Nest`: it wraps [child] with each link in order, the
 /// FIRST outermost, which is the declaration order the arming yields.
 ///
@@ -372,6 +486,11 @@ AgentPermissionPolicy seatChannelPolicy<TSeat extends ModelPreference>(
 
 /// The four typed lookups RESOLVED at one point in the tree - the offline
 /// projection a station's banner prints and the suites assert. A pure VALUE.
+///
+/// FOUR, not five: [RelayAgentEnvironment] is read for its PRESENCE, and a
+/// banner that reported `<ambient>` for an unarmed relay would read as a
+/// resolution failure rather than as the absence it is. Ask
+/// [RelayAgentEnvironment.of] for that.
 final class SeatEnvironments {
   /// Creates the projection over its four resolved environments.
   const SeatEnvironments({this.build, this.spec, this.critic, this.gather});
@@ -434,6 +553,15 @@ bool _sameEntries(List<AgentEnvironment> a, List<AgentEnvironment> b) {
   if (a.length != b.length) return false;
   for (var i = 0; i < a.length; i++) {
     if (a[i] != b[i]) return false;
+  }
+  return true;
+}
+
+bool _sameTools(Set<String> a, Set<String> b) {
+  if (identical(a, b)) return true;
+  if (a.length != b.length) return false;
+  for (final tool in a) {
+    if (!b.contains(tool)) return false;
   }
   return true;
 }

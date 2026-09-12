@@ -43,6 +43,14 @@ const EnvironmentRegistry _registry = EnvironmentRegistry(
   builtins: kBuiltinEnvironments,
 );
 
+/// The four VENDED seats, authored exactly as a station cans them.
+const AgentArming _vended = AgentArming(
+  build: BuildAgentEnvironment([_strong]),
+  spec: SpecAgentEnvironment([_strong]),
+  critic: CriticAgentEnvironment([_shared]),
+  gather: GatherAgentEnvironment([_fast]),
+);
+
 const CriticLane _adr = CriticLane('decision-alignment');
 const CriticLane _coherence = CriticLane('coherence');
 
@@ -426,13 +434,6 @@ void main() {
   });
 
   group('pow-ycoi - the seat set is OPEN', () {
-    // The four vended seats, authored exactly as a station cans them.
-    const vended = AgentArming(
-      build: BuildAgentEnvironment([_strong]),
-      spec: SpecAgentEnvironment([_strong]),
-      critic: CriticAgentEnvironment([_shared]),
-      gather: GatherAgentEnvironment([_fast]),
-    );
     const fifth = _FifthAgentEnvironment([_fast]);
 
     test('a fifth seat type mounts through the open collection', () {
@@ -459,17 +460,17 @@ void main() {
       final root = owner.mountRoot(
         TypedEnvironmentProvider(
           // A vended arming SPREAD beside a seat the pack never heard of.
-          arming: <SeatPreference>[...vended, fifth],
+          arming: <SeatPreference>[..._vended, fifth],
           child: const _Leaf(),
         ),
       );
       owner.flush();
       final mounted = _mountedSeats(root);
       expect(mounted, <SeatPreference>[
-        vended.build!,
-        vended.spec!,
-        vended.critic!,
-        vended.gather!,
+        _vended.build!,
+        _vended.spec!,
+        _vended.critic!,
+        _vended.gather!,
         fifth,
       ]);
       expect(
@@ -491,7 +492,7 @@ void main() {
         InheritedSeed<EnvironmentRegistry>(
           value: _registry,
           child: TypedEnvironmentProvider(
-            arming: vended,
+            arming: _vended,
             child: _Probe((context) => observed = SeatEnvironments.of(context)),
           ),
         ),
@@ -505,6 +506,207 @@ void main() {
           critic: _shared,
           gather: _fast,
         ),
+      );
+    });
+  });
+
+  group('pow-dbss - the relay seat is armed by presence', () {
+    const mission =
+        'Sense one session and decide whether to absorb or escalate.';
+    const tools = {
+      'worktree.read',
+      'flares.read',
+      'telemetry.read',
+      'gates.read',
+      'verdict.write',
+    };
+    const relay = RelayAgentEnvironment(
+      [_fast],
+      mission: mission,
+      tools: tools,
+      ceiling: 2,
+    );
+
+    test('a mounted relay is present and resolves only its own entries', () {
+      RelayAgentEnvironment? seat;
+      AgentEnvironment? resolved;
+      final owner = TreeOwner();
+      owner.mountRoot(
+        InheritedSeed<AvailableEnvironments>(
+          value: AvailableEnvironments({_fast, _strong}),
+          child: InheritedSeed<ModelPreference>(
+            // The station default, present and preferring the OTHER model.
+            value: const ModelPreference([_strong]),
+            child: TypedEnvironmentProvider(
+              arming: <SeatPreference>[..._vended, relay],
+              child: _Probe((context) {
+                seat = RelayAgentEnvironment.of(context);
+                resolved = RelayAgentEnvironment.environmentOf(context);
+              }),
+            ),
+          ),
+        ),
+      );
+      owner.flush();
+      expect(seat, relay);
+      expect(resolved, _fast, reason: 'the relay walked its OWN entries');
+    });
+
+    test('an absent relay is null even with a generic mounted', () {
+      var read = false;
+      RelayAgentEnvironment? seat;
+      AgentEnvironment? resolved;
+      AgentEnvironment? manufactured;
+      final owner = TreeOwner();
+      owner.mountRoot(
+        InheritedSeed<AvailableEnvironments>(
+          value: AvailableEnvironments({_fast, _strong}),
+          child: InheritedSeed<ModelPreference>(
+            value: const ModelPreference([_strong]),
+            child: TypedEnvironmentProvider(
+              // Every VENDED seat armed, and no relay among them.
+              arming: _vended,
+              child: _Probe((context) {
+                read = true;
+                seat = RelayAgentEnvironment.of(context);
+                resolved = RelayAgentEnvironment.environmentOf(context);
+                // What the GENERIC fallback would have handed back, had the
+                // relay been read the way a resolved seat is.
+                manufactured = resolveEnvironment<RelayAgentEnvironment>(
+                  context,
+                );
+              }),
+            ),
+          ),
+        ),
+      );
+      owner.flush();
+      expect(read, isTrue, reason: 'the probe never built');
+      expect(seat, isNull);
+      expect(resolved, isNull);
+      expect(
+        manufactured,
+        _strong,
+        reason: 'the generic WOULD have manufactured a relay',
+      );
+    });
+
+    test('arming a relay leaves the four-seat projection unchanged', () {
+      SeatEnvironments? observed;
+      final owner = TreeOwner();
+      owner.mountRoot(
+        InheritedSeed<EnvironmentRegistry>(
+          value: _registry,
+          child: TypedEnvironmentProvider(
+            arming: <SeatPreference>[..._vended, relay],
+            child: _Probe((context) => observed = SeatEnvironments.of(context)),
+          ),
+        ),
+      );
+      owner.flush();
+      expect(
+        observed,
+        const SeatEnvironments(
+          build: _strong,
+          spec: _strong,
+          critic: _shared,
+          gather: _fast,
+        ),
+      );
+    });
+
+    test('declaration order ends with the relay type', () {
+      final owner = TreeOwner();
+      final root = owner.mountRoot(
+        TypedEnvironmentProvider(
+          arming: <SeatPreference>[..._vended, relay],
+          child: const _Leaf(),
+        ),
+      );
+      owner.flush();
+      final mounted = _mountedSeats(root);
+      expect(mounted, <SeatPreference>[
+        _vended.build!,
+        _vended.spec!,
+        _vended.critic!,
+        _vended.gather!,
+        relay,
+      ]);
+      expect(
+        mounted.map((seat) => seat.runtimeType.toString()).toList(),
+        <String>[
+          'BuildAgentEnvironment',
+          'SpecAgentEnvironment',
+          'CriticAgentEnvironment',
+          'GatherAgentEnvironment',
+          'RelayAgentEnvironment',
+        ],
+      );
+    });
+
+    test('value equality includes entries, mission, tools and ceiling', () {
+      // A DISTINCT instance: the same value with the tools authored in the
+      // other order, so the equality below cannot ride const canonicalization.
+      final reordered = RelayAgentEnvironment(
+        const [_fast],
+        mission: mission,
+        tools: {
+          'verdict.write',
+          'gates.read',
+          'telemetry.read',
+          'flares.read',
+          'worktree.read',
+        },
+        ceiling: 2,
+      );
+      expect(identical(reordered, relay), isFalse);
+      expect(reordered, relay);
+      expect(reordered.hashCode, relay.hashCode);
+
+      const varied = <String, RelayAgentEnvironment>{
+        'entries': RelayAgentEnvironment(
+          [_strong],
+          mission: mission,
+          tools: tools,
+          ceiling: 2,
+        ),
+        'mission': RelayAgentEnvironment(
+          [_fast],
+          mission: 'Escalate everything.',
+          tools: tools,
+          ceiling: 2,
+        ),
+        'tools': RelayAgentEnvironment(
+          [_fast],
+          mission: mission,
+          tools: {'worktree.read'},
+          ceiling: 2,
+        ),
+        'ceiling': RelayAgentEnvironment(
+          [_fast],
+          mission: mission,
+          tools: tools,
+          ceiling: 3,
+        ),
+      };
+      varied.forEach((axis, other) {
+        expect(relay, isNot(other), reason: 'a $axis-only change is a VALUE');
+      });
+
+      expect(relay, isNot(const ModelPreference([_fast])));
+    });
+
+    test('the relay ceiling is a carried positive value', () {
+      expect(relay.ceiling, 2);
+      expect(
+        () => RelayAgentEnvironment(
+          const [_fast],
+          mission: mission,
+          tools: tools,
+          ceiling: 0,
+        ),
+        throwsA(isA<AssertionError>()),
+        reason: 'an unbounded relay population is its own failure',
       );
     });
   });
