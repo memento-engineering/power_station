@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.0
+
+- PROMOTED from 0.2.0-dev.1. This is the stable release of the 0.2.0 line; the code is the
+  candidate's, unchanged. Every family dependency constraint is rewritten from its prerelease
+  form to the stable one, because pub refuses a stable package that depends on a prerelease.
+- Consumers on a `^0.2.0-rc.N` constraint resolve this automatically: a caret range admits the
+  release above its own prereleases, so no downstream pubspec edit is required to pick it up.
+
 ## 0.2.0-dev.1
 
 - Changed (BREAKING): `ReleaseChange` carries the SEMVER MOVE alone — `docs`, `additive`, `fix`, `breaking`. Its `rc` value and its `isPreRelease` getter are gone, and `isBreaking` is now true for `breaking` alone. The prerelease rung was never a semver move: binding `rc` to `breaking` made a 0.x package doing breaking work reach for the candidate rung by construction, every single time (the measured drift: `grid_sdk` 22 prereleases and still stable at 0.2.0, `grid_assets` 25 and still 0.4.0, against `genesis_tree`'s ten releases and zero prereleases).

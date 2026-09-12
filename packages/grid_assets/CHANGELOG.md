@@ -1,3 +1,11 @@
+## 0.6.0
+
+- PROMOTED from 0.6.0-rc.26. This is the stable release of the 0.6.0 line; the code is the
+  candidate's, unchanged. Every family dependency constraint is rewritten from its prerelease
+  form to the stable one, because pub refuses a stable package that depends on a prerelease.
+- Consumers on a `^0.6.0-rc.N` constraint resolve this automatically: a caret range admits the
+  release above its own prereleases, so no downstream pubspec edit is required to pick it up.
+
 ## 0.6.0-rc.26
 
 - Changed: the refiner and governor agent definitions no longer present PUBLISHING as an action the seat does not take. Both now carry the org ruling: publishing a PRERELEASE is ordinary agent work with no per-release ask, candidates included, while the human owns the PROMOTION — `beta` to `rc`, and `rc` to a non-prerelease version. `dev` to `beta` stays agent work on its machine-checkable condition. Every other gate in those lists is unchanged: merging to main, the first live arm, persistence and credential changes (org-6si, pow-2cnz).

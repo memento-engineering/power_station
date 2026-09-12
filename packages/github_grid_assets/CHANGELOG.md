@@ -1,3 +1,11 @@
+## 0.1.0
+
+- PROMOTED from 0.1.0-rc.16. This is the stable release of the 0.1.0 line; the code is the
+  candidate's, unchanged. Every family dependency constraint is rewritten from its prerelease
+  form to the stable one, because pub refuses a stable package that depends on a prerelease.
+- Consumers on a `^0.1.0-rc.N` constraint resolve this automatically: a caret range admits the
+  release above its own prereleases, so no downstream pubspec edit is required to pick it up.
+
 ## 0.1.0-rc.16
 
 - Changed: the `grid_assets` floor is `^0.6.0-rc.16` — the intake store tests reference `kFilingApprovalRevisionPrefix`, first exported there; the release scrub gate analyzes the package at its declared floors and caught the rc.13 floor.
