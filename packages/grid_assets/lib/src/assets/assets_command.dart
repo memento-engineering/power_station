@@ -33,7 +33,7 @@ import 'package:path/path.dart' as p;
 import '../../station_asset_registry.dart' show GeneratedGridAssetRegistrant;
 import 'asset_resolution.dart';
 import 'overlay_install.dart';
-import 'overlay_materializer.dart' show kDefaultOverlayRunner;
+import 'overlay_materializer.dart' show kBootRunnerArg, kDefaultOverlayRunner;
 import 'overlay_provenance.dart' show resolveOverlaySourceRefSync;
 
 /// Creates the fact observer for [roots] over [registry] — the injectable
@@ -68,6 +68,14 @@ class AssetsCommand extends Command<int> {
   ///
   /// When [runnerInvocation] is supplied, the installed assets render it into
   /// `{{runner}}`. Omission uses the enclosing runner's executable name.
+  ///
+  /// [bootRunner] is the exact invocation that starts the RESIDENT station,
+  /// rendered into `{{bootRunner}}`. A station sets it only when its two
+  /// runtimes DIFFER — the verb invocation has to be reachable from a
+  /// substation worktree, while the resident still needs the JIT run form
+  /// because that is what carries `--enable-vm-service`. Omission leaves the
+  /// boot sites on [runnerInvocation], so a one-runtime station installs
+  /// exactly what it installed before.
   AssetsCommand({
     required sdk.GridDelegate Function() delegate,
     sdk.GridAssetRegistry? registry,
@@ -75,6 +83,7 @@ class AssetsCommand extends Command<int> {
     SubstationFactsRepositoryFactory factsRepository = _fileFactsRepository,
     OverlayInstallService service = const OverlayInstallService(),
     String? runnerInvocation,
+    String? bootRunner,
     String Function(String packageRoot)? sourceRef,
     StringSink? out,
     StringSink? err,
@@ -89,6 +98,7 @@ class AssetsCommand extends Command<int> {
         factsRepository: factsRepository,
         service: service,
         runnerInvocation: runnerInvocation,
+        bootRunner: bootRunner,
         sourceRef: sourceRef,
         out: out,
         err: err,
@@ -130,8 +140,11 @@ class AssetsInstallCommand extends Command<int> {
   /// [rosterOverride] carries the station's explicit include/exclude exceptions
   /// to what the selectors decide. When [runnerInvocation] is supplied, the
   /// installed assets render it into `{{runner}}`; omission uses the enclosing
-  /// runner's executable name. [out]/[err] default to the real stdout/stderr;
-  /// tests capture them.
+  /// runner's executable name. [bootRunner] is the exact invocation that starts
+  /// the RESIDENT station, rendered into `{{bootRunner}}`; omission leaves that
+  /// hole on its [runnerInvocation]-derived default, so a station naming ONE
+  /// runtime installs byte-identical files. [out]/[err] default to the real
+  /// stdout/stderr; tests capture them.
   AssetsInstallCommand({
     required sdk.GridDelegate Function() delegate,
     sdk.GridAssetRegistry? registry,
@@ -139,6 +152,7 @@ class AssetsInstallCommand extends Command<int> {
     SubstationFactsRepositoryFactory factsRepository = _fileFactsRepository,
     OverlayInstallService service = const OverlayInstallService(),
     String? runnerInvocation,
+    String? bootRunner,
     String Function(String packageRoot)? sourceRef,
     StringSink? out,
     StringSink? err,
@@ -148,6 +162,7 @@ class AssetsInstallCommand extends Command<int> {
        _factsRepository = factsRepository,
        _service = service,
        _runnerInvocation = runnerInvocation,
+       _bootRunner = bootRunner,
        _sourceRef = sourceRef ?? resolveOverlaySourceRefSync,
        _out = out ?? stdout,
        _err = err ?? stderr {
@@ -194,6 +209,7 @@ class AssetsInstallCommand extends Command<int> {
   final SubstationFactsRepositoryFactory _factsRepository;
   final OverlayInstallService _service;
   final String? _runnerInvocation;
+  final String? _bootRunner;
   final String Function(String) _sourceRef;
   final StringSink _out;
   final StringSink _err;
@@ -237,6 +253,10 @@ class AssetsInstallCommand extends Command<int> {
               _runnerInvocation ??
               runner?.executableName ??
               kDefaultOverlayRunner,
+          // The RESIDENT's own invocation, and only when the station named one:
+          // an absent key leaves `{{bootRunner}}` on its runner-derived
+          // default, so a station with one runtime installs unchanged bytes.
+          if (_bootRunner != null) kBootRunnerArg: _bootRunner,
           'gridHome': gridHome,
         },
       );
