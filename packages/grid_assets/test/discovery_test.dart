@@ -7,6 +7,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:beads_dart/beads_dart.dart';
+import 'package:genesis_tree/genesis_tree.dart';
 import 'package:grid_assets/grid_assets.dart';
 import 'package:grid_engine/grid_engine.dart';
 import 'package:grid_runtime/grid_runtime.dart';
@@ -14,6 +15,7 @@ import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
 import 'support/asset_fakes.dart';
+import 'support/mounted_route_context.dart';
 import 'support/package_root.dart';
 
 const String _adr = 'docs/adr/ADR-0000-ai-decision-register.md A17(4)';
@@ -1181,6 +1183,67 @@ void main() {
         );
       },
     );
+
+    // The positive control for the mid-wait MOUNTED guard, symmetric with
+    // `respec_test.dart`'s. Every other route test in this file drives a
+    // `FakeTreeContext`, whose `mounted` is a flag the test assigns; this one
+    // tears down a REAL tree under the running route, so what is proven is
+    // that a genesis branch handle goes unmounted with its subtree and that
+    // the route unwinds on the handle it captured at entry. See
+    // `support/mounted_route_context.dart` for why the fake cannot carry it.
+    test('DiscoveryRouteCapability unmount during lanePoll throws '
+        'kRouteCancelled before a SiblingView re-read', () async {
+      // One lens over the group's COMPLETE planted gather (so the
+      // projection is sufficient and the lane is not short-circuited as
+      // insufficient-evidence), a reader that answers null, and no
+      // current-round result recorded: the join classifies it LATE and
+      // parks on `lanePoll` with the budget nowhere near spent.
+      final harness = mountRouteHarness(
+        siblings: const SiblingView(),
+        ambient: (child) => InheritedSeed<Bead>(
+          value: workBead('tg-1'),
+          child: InheritedSeed<Workspace>(
+            value: testWorkspace('tg-1', workspaceDir: ws.path),
+            child: InheritedSeed<SessionHandle>(value: _session, child: child),
+          ),
+        ),
+        route: (context) =>
+            DiscoveryRouteCapability(
+              reader: _reader(const {kDecisionLens: null}),
+              lanePoll: const Duration(milliseconds: 20),
+              laneWaitBudget: const Duration(seconds: 1),
+            ).route(
+              context,
+              stepArgs(
+                'tg-1/spec_review/discovery/$kDiscoveryRouteStep',
+                params: const {'lenses': kDecisionLens, 'grid.round': '0'},
+              ),
+            ),
+      );
+      addTearDown(harness.dispose);
+
+      // The entry read landed, so the tally is live and a later re-read
+      // would be visible.
+      expect(harness.siblingViewReads, greaterThanOrEqualTo(1));
+      final readsAtPark = harness.siblingViewReads;
+
+      harness.unmount();
+
+      // The EXACT cancellation handle — the same channel an explicit cancel
+      // unwinds on, never a verdict arm, and never the bare `StateError`
+      // genesis throws for a read on a dead branch. THIS is the assertion
+      // that discriminates: delete the guard and the re-read below raises
+      // that `StateError` instead.
+      await expectLater(harness.future, throwsA(same(kRouteCancelled)));
+      // And the ordering, pinned separately — see the `respec_test.dart`
+      // twin for why this holds by genesis's own refusal today and is kept
+      // against the day that refusal softens.
+      expect(
+        harness.siblingViewReads,
+        readsAtPark,
+        reason: 'the guard must fire BEFORE the post-wait re-read',
+      );
+    });
   });
 
   group('round-stamped canonical evidence', () {
