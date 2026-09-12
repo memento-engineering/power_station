@@ -65,6 +65,27 @@ group — never pkill by name.
 - `last sync` only moves when a store changes; a frozen timestamp on an idle
   board is normal.
 
+## Governor-work sweep
+
+A `/status` read answers what MOUNTED; it never answers what a stamped bead is
+waiting ON. A chore that mounts nowhere — a release node, say — runs under no
+builder, so it is invisible to a sweep built around sessions and gates, and a
+zero-ready or zero-session board is no evidence that nothing is driveable.
+
+For this sweep, stamped means `grid.approved_by`, `grid.approved_at`, and
+`grid.approved_rev` are all present; the retired `grid.approved` label does
+not count. Before treating a stamped-but-unmounted bead as waiting,
+enumerate every OPEN blocker: read its in-store dependencies with
+`bd -C <work-store-root> dep list <bead-id> --json` and its cross-store
+dependencies from `bd -C .grid list -t link --status open --json`, using
+each link's `grid.link.from` and `grid.link.to` endpoints. Read every
+unique blocker in its owning store with
+`bd -C <blocker-store-root> query id=<blocker-id> --all --json --limit 0`,
+and discard any blocker whose own status is not open. A blocker that is a
+release node or whose notes explicitly say an agent executes it is
+**GOVERNOR WORK**, not a human gate; list its id, title, owning store, and
+next executable action.
+
 ## Silent-death runbook (ready > 0, mounted 0, no errors)
 
 The station prints nothing when every session mint fails — the failure is
