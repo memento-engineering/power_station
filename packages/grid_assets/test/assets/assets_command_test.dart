@@ -51,6 +51,33 @@ class _RootlessDelegate extends sdk.GridDelegate {
       sdk.Station(name: 'test-station', root: root);
 }
 
+/// A recording [OverlayInstallService] — the render map the Command COMPOSED,
+/// observed without writing a byte (Fakes, not mocks). The materializer's own
+/// behaviour is pinned elsewhere; what this fake exists to see is which keys
+/// the adapter put in the map.
+class _RecordingInstallService implements OverlayInstallService {
+  final List<Map<String, String>> renderArguments = <Map<String, String>>[];
+
+  @override
+  Future<OverlayInstallReport> install({
+    required GridAssetResolution resolution,
+    required String targetRoot,
+    required String sourceRef,
+    bool check = false,
+  }) async {
+    renderArguments.add(resolution.renderArguments);
+    return OverlayInstallReport(
+      targetRoot: targetRoot,
+      resolution: resolution,
+      materialized: OverlayMaterializeReport(
+        files: const <OverlayFileOutcome>[],
+        dryRun: check,
+      ),
+      writtenContents: const <String, String>{},
+    );
+  }
+}
+
 File _write(Directory root, List<String> segments, String contents) =>
     File(p.join(root.path, p.joinAll(segments)))
       ..createSync(recursive: true)
@@ -102,9 +129,11 @@ void main() {
   })
   harness({
     String? runnerInvocation,
+    String? bootRunner,
     String? delegateRoot,
     List<GridAssetDefinition>? assets,
     GridAssetRosterOverride? rosterOverride,
+    OverlayInstallService service = const OverlayInstallService(),
   }) {
     final out = StringBuffer();
     final err = StringBuffer();
@@ -126,7 +155,9 @@ void main() {
               lastDelegate = _StationDelegate(delegateRoot ?? temp.path),
           registry: registry,
           rosterOverride: rosterOverride,
+          service: service,
           runnerInvocation: runnerInvocation,
+          bootRunner: bootRunner,
           // The OBSERVATION seam: the Command owns and disposes whatever this
           // returns, and it observes the root it resolved.
           factsRepository: ({required roots, required registry}) {
@@ -217,6 +248,45 @@ void main() {
         installedSkill(temp).readAsStringSync(),
         contains('call dart run lunar:lunar search, file into ${temp.path}'),
       );
+    },
+  );
+
+  test(
+    // A station has TWO runtimes: the verb invocation a seat can reach from a
+    // substation worktree, and the JIT run form the resident still needs for
+    // `--enable-vm-service`. The umbrella carries the second one exactly as it
+    // carries the first, and an omitted value adds no key at all — that is what
+    // keeps a one-runtime station rendering off the hole's own default.
+    'AssetsCommand forwards bootRunner and omission leaves the render map '
+    'unchanged',
+    () async {
+      final omitted = _RecordingInstallService();
+      expect(
+        await harness(
+          runnerInvocation: 'dart run lunar:lunar',
+          service: omitted,
+        ).runner.run(['assets', 'install', '--no-diff']),
+        0,
+      );
+      expect(omitted.renderArguments.single, <String, String>{
+        'runner': 'dart run lunar:lunar',
+        'gridHome': p.normalize(temp.path),
+      });
+
+      final supplied = _RecordingInstallService();
+      expect(
+        await harness(
+          runnerInvocation: 'lunar',
+          bootRunner: 'dart run lunar:lunar',
+          service: supplied,
+        ).runner.run(['assets', 'install', '--no-diff']),
+        0,
+      );
+      expect(supplied.renderArguments.single, <String, String>{
+        'runner': 'lunar',
+        kBootRunnerArg: 'dart run lunar:lunar',
+        'gridHome': p.normalize(temp.path),
+      });
     },
   );
 
