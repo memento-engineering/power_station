@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.1-dev.1
+
+- fix(release): honor declared git package paths in release overrides (#308)
+- feat(release): report each package's ladder rung and staleness (#299)
+- test(release): pin first-release rung consistency (#300)
+- feat(release): auto-demote stale release candidates to beta (#297)
+- feat(dart): add asymmetric verification commands (#293)
+
 ## 0.2.0
 
 - PROMOTED from 0.2.0-dev.1. This is the stable release of the 0.2.0 line; the code is the
