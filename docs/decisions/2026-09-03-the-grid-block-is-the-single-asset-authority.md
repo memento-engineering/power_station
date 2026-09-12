@@ -20,7 +20,8 @@ register:
     - a-harness-may-carry-its-own-instructions
     - the-handoff-ritual-vends-as-an-operator-audience-skill
   obsoleted-by: null
-  updated-by: []
+  updated-by:
+    - "station-operator-audiences-derive-from-the-resolved-registry"
   bead: pow-836a
   legacy-id: null
 ---

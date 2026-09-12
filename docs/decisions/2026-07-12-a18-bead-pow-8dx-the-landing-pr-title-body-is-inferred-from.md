@@ -12,7 +12,8 @@ register:
   obsoletes: []
   updates: []
   obsoleted-by: null
-  updated-by: []
+  updated-by:
+    - "describe-inference-reads-a-bounded-fact-manifest-not-the-patch"
   bead: null
   legacy-id: "A18"
 ---

@@ -14,7 +14,8 @@ register:
   obsoletes: []
   updates: []
   obsoleted-by: null
-  updated-by: []
+  updated-by:
+    - "the-grid-block-is-the-single-asset-authority"
   bead: pow-pry0
   legacy-id: null
 ---

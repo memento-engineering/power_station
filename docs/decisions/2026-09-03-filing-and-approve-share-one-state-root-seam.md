@@ -12,7 +12,8 @@ register:
   obsoletes: []
   updates: []
   obsoleted-by: null
-  updated-by: []
+  updated-by:
+    - "state-root-takes-the-grid-home-and-unchecked-is-not-missing"
   bead: pow-z2pj
   legacy-id: null
 ---

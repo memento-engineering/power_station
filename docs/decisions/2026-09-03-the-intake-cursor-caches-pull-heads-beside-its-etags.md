@@ -13,7 +13,8 @@ register:
   obsoletes: []
   updates: []
   obsoleted-by: null
-  updated-by: []
+  updated-by:
+    - "observation-durability-rides-the-cursor-document"
   bead: pow-40a4
   legacy-id: null
 ---

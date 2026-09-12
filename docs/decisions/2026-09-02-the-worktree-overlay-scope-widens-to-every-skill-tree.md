@@ -16,7 +16,8 @@ register:
   updates:
     - a26-bead-pow-hhs-the-station-overlay-becomes-a-root-relative
   obsoleted-by: null
-  updated-by: []
+  updated-by:
+    - "a-harness-may-carry-its-own-instructions"
   bead: pow-99g
   legacy-id: null
 ---

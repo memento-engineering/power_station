@@ -14,7 +14,8 @@ register:
   updates:
     - a24-bead-pow-a74-the-operator-install-leg-discovers-its-over
   obsoleted-by: null
-  updated-by: []
+  updated-by:
+    - "station-operator-audiences-derive-from-the-resolved-registry"
   bead: pow-4peu
   legacy-id: null
 ---

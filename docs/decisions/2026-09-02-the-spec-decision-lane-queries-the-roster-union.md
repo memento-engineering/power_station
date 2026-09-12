@@ -13,7 +13,8 @@ register:
   updates:
     - "a13-bead-pow-6ao-the-specify-stage-spec-readiness-committee"
   obsoleted-by: null
-  updated-by: []
+  updated-by:
+    - "discovery-evidence-is-gathered-once-and-projected"
   bead: null
   legacy-id: null
 ---

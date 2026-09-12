@@ -12,7 +12,9 @@ register:
   obsoletes: []
   updates: []
   obsoleted-by: null
-  updated-by: []
+  updated-by:
+    - "spec-section-headings-resolve-at-a-line-start"
+    - "the-spec-structural-contract-becomes-a-typed-record-grammar"
   bead: null
   legacy-id: "A19"
 ---

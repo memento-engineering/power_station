@@ -14,7 +14,8 @@ register:
   updates:
     - the-worktree-overlay-scope-widens-to-every-skill-tree
   obsoleted-by: null
-  updated-by: []
+  updated-by:
+    - "the-grid-block-is-the-single-asset-authority"
   bead: pow-emxf
   legacy-id: null
 ---

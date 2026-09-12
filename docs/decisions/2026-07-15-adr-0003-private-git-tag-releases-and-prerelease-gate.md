@@ -14,6 +14,7 @@ register:
   obsoleted-by: null
   updated-by:
     - memento-engineering#prerelease-rungs-are-dev-beta-rc-and-rc-is-human-only
+    - "live-capability-check-gates-promotion-not-consumer-suites"
   bead: null
   legacy-id: "ADR-0003"
 ---

@@ -12,7 +12,8 @@ register:
   obsoletes: []
   updates: []
   obsoleted-by: null
-  updated-by: []
+  updated-by:
+    - "the-worktree-overlay-scope-widens-to-every-skill-tree"
   bead: null
   legacy-id: "A26"
 ---
