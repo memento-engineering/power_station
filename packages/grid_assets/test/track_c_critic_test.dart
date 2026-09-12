@@ -614,7 +614,10 @@ void main() {
       // And the gate an operator actually reads carries that diagnostic.
       final payload = await const CriticCapability().result(c.context, c.args);
       expect(payload!['grade'], 'F');
-      expect((payload['rationale'] as String).toLowerCase(), contains('syntax error'));
+      expect(
+        (payload['rationale'] as String).toLowerCase(),
+        contains('syntax error'),
+      );
     });
 
     // The plan file is written BEST-EFFORT (the offline suite's synthetic
