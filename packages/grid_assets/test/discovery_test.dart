@@ -1447,8 +1447,11 @@ void main() {
           (map['decisionLookups']! as List).single as Map<String, Object?>;
       expect(
         lookup['decisions'],
-        [_a21.body.id],
-        reason: 'a surface carries ordered REFERENCES, never the body',
+        ['0'],
+        reason:
+            'a surface carries ordered REFERENCES, never the body — and each '
+            'one is an ORDINAL into the index order above, not the ~120-byte '
+            'id repeated per surface',
       );
       expect(lookup['namedElsewhere'], isEmpty);
 
@@ -1493,6 +1496,23 @@ void main() {
         ),
         isNull,
         reason: 'an unknown reference would hand a lens a body-less citation',
+      );
+      expect(
+        DiscoveryAnchors.fromJson(withLookup(['1'])),
+        isNull,
+        reason: 'an ordinal past the end of a 1-entry index names no body',
+      );
+      expect(
+        DiscoveryAnchors.fromJson(withLookup(['-1'])),
+        isNull,
+        reason: 'and neither does one before its start',
+      );
+      expect(
+        DiscoveryAnchors.fromJson(withLookup(['00'])),
+        isNull,
+        reason:
+            'a non-canonical ordinal decodes to a body the re-encode would '
+            'spell differently, so the round trip would not reproduce it',
       );
       expect(
         DiscoveryAnchors.fromJson({...map, 'decisionLookups': <Object?>[]}),
@@ -1542,8 +1562,7 @@ void main() {
       );
     });
 
-    test('twelve surfaces carry 96 maximum-size decision bodies ONCE, not '
-        'once each', () async {
+    test('twelve surfaces carry 96 maximum-size decision bodies once', () async {
       // The measured defect: `anchors.json` was 3 201 633 bytes, 3 069 457 of
       // it `decisionLookups` — twelve surfaces × the SAME ~300 KB entry list —
       // and `explore-decision` answered `prompt_too_long` at ~202 302 tokens.
@@ -1604,29 +1623,85 @@ void main() {
         );
       }
 
-      // The bound that MOVED. One copy of the register's bodies is
-      // irreducible — 96 × 4096 chars is 393 216 bytes of snippet before a
-      // single id, digest or path — so the artifact is measured against THAT,
-      // not against a round number: at most twice the one-copy payload,
-      // whatever the anchor count. What it may no longer do is multiply by it.
+      // The bound, stated as what the artifact is MADE OF rather than as a
+      // round number. One copy of the register's bodies is irreducible — 96 ×
+      // 4096 chars is 393 216 bytes of snippet before a single id, digest or
+      // path — so a literal "under 400 KB" whole-artifact threshold cannot
+      // express the invariant at all; it is already spent on the bodies. What
+      // this gather may add on top is the per-surface REFERENCE overhead, and
+      // that is what the anchor count multiplies.
       const onePassBodies =
           kMaxDecisionEntriesPerSurface * kMaxDiscoverySnippetChars;
+      const referenceCeiling = 96;
+      const bound =
+          onePassBodies +
+          kMaxAnchors * kMaxDecisionEntriesPerSurface * referenceCeiling;
+      final serializedBytes = utf8.encode(serialized).length;
+
+      // (1) The bodies, once each.
+      final bodyBytes = gathered.decisionEntries.values
+          .map((entry) => utf8.encode(entry.body.snippet).length)
+          .fold(0, (sum, bytes) => sum + bytes);
       expect(
-        utf8.encode(serialized).length,
-        lessThan(2 * onePassBodies),
-        reason: 'the register is carried ONCE, plus per-surface references',
+        (bodyBytes - onePassBodies).abs(),
+        lessThan(onePassBodies ~/ 100),
+        reason:
+            'the indexed bodies are ONE pass over the register '
+            '($bodyBytes B against $onePassBodies B), not twelve',
+      );
+
+      // (2) The references each surface carries in their place — bounded by
+      // the entry COUNT, never by how long a register identity happens to be.
+      final wire = jsonDecode(serialized) as Map<String, Object?>;
+      var referenceBytes = 0;
+      var references = 0;
+      for (final raw in wire['decisionLookups']! as List) {
+        final lookup = raw as Map<String, Object?>;
+        for (final key in const ['decisions', 'namedElsewhere']) {
+          for (final reference in lookup[key]! as List) {
+            final encoded = utf8.encode(jsonEncode(reference)).length;
+            expect(
+              encoded,
+              lessThanOrEqualTo(referenceCeiling),
+              reason:
+                  'reference ${jsonEncode(reference)} serializes to $encoded B, '
+                  'over the $referenceCeiling B ceiling the total bound assumes',
+            );
+            referenceBytes += encoded;
+            references += 1;
+          }
+        }
+      }
+      expect(
+        references,
+        kMaxAnchors * kMaxDecisionEntriesPerSurface,
+        reason: 'every surface still selects its full 96 entries',
+      );
+
+      // (3) Everything else: the index keys, the entry metadata, and the rest
+      // of the profile.
+      final otherBytes = serializedBytes - bodyBytes - referenceBytes;
+      expect(
+        serializedBytes,
+        lessThan(bound),
+        reason:
+            'anchors.json is bodies-ONCE plus bounded reference overhead: '
+            'bodyBytes=$bodyBytes referenceBytes=$referenceBytes '
+            'otherBytes=$otherBytes serializedBytes=$serializedBytes '
+            'bound=$bound',
       );
 
       // Against the carriage this replaces: the same gather with every body
       // inlined under every lookup, which is what schema 2 wrote and what made
       // the measured artifact 3.2 MB.
+      final codec = DecisionReferenceCodec(gathered.decisionEntries.keys);
       final inlined = utf8
           .encode(
             jsonEncode({
               'decisionLookups': [
                 for (final lookup in gathered.decisionLookups)
                   {
-                    ...lookup.toJson(),
+                    ...lookup.toJson(codec),
                     'decisions': [
                       for (final reference in lookup.decisions)
                         gathered.decisionEntries[reference]!.toJson(),
@@ -2330,14 +2405,20 @@ void main() {
 
       // It survives the wire as an ordered REFERENCE, and a record missing the
       // array altogether is refused rather than silently emptied.
+      final codec = DecisionReferenceCodec(gathered.decisionEntries.keys);
       final wire =
-          jsonDecode(jsonEncode(record.toJson())) as Map<String, Object?>;
-      final back = DecisionSurfaceEvidence.fromJson(wire)!;
+          jsonDecode(jsonEncode(record.toJson(codec))) as Map<String, Object?>;
+      expect(
+        wire['namedElsewhere'],
+        ['0'],
+        reason: 'the wire carries the ORDINAL, not the ~120-byte body id',
+      );
+      final back = DecisionSurfaceEvidence.fromJson(wire, codec)!;
       expect(back.namedElsewhere.single, note.body.id);
       expect(back.state, EvidenceState.complete);
       final legacy = Map<String, Object?>.from(wire)..remove('namedElsewhere');
       expect(
-        DecisionSurfaceEvidence.fromJson(legacy),
+        DecisionSurfaceEvidence.fromJson(legacy, codec),
         isNull,
         reason:
             'both reference arrays are REQUIRED — an absent one would drop '

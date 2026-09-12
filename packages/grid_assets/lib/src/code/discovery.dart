@@ -637,6 +637,9 @@ class DecisionSurfaceEvidence {
   /// REFERENCES to the entries governing this surface, in index order — each a
   /// [DecisionEntryEvidence.body] id resolvable through
   /// [DiscoveryAnchors.decisionEntryFor].
+  ///
+  /// In MEMORY a reference is the body id itself; on the WIRE it is that id's
+  /// ordinal in the gather's index ([DecisionReferenceCodec]).
   final List<String> decisions;
 
   /// REFERENCES to the entries the bead CITES that this surface's index does
@@ -650,34 +653,40 @@ class DecisionSurfaceEvidence {
   /// absent from its whole register FAILS the surface.
   final List<String> namedElsewhere;
 
-  /// The wire shape.
-  Map<String, Object?> toJson() => {
+  /// The wire shape, with both reference arrays written through [codec] — a
+  /// surface cannot be serialized without the index its references point into.
+  Map<String, Object?> toJson(DecisionReferenceCodec codec) => {
     'id': id,
     'surface': surface,
     'command': command,
     'state': state.name,
     'truncated': truncated,
     'error': error,
-    'decisions': decisions,
-    'namedElsewhere': namedElsewhere,
+    'decisions': [for (final reference in decisions) codec.encode(reference)],
+    'namedElsewhere': [
+      for (final reference in namedElsewhere) codec.encode(reference),
+    ],
   };
 
   /// Decodes one record STRICTLY; an unknown state, an empty id, a failed
   /// record with no error, or ANY malformed reference yields null.
   ///
-  /// Both reference arrays are REQUIRED and each entry must be a non-blank
-  /// String. A schema-2 gather — which carried entry OBJECTS here — is not
-  /// read as a schema-3 one: [DiscoveryAnchors.fromJson] refuses the version
-  /// before this decoder is ever reached.
-  static DecisionSurfaceEvidence? fromJson(Object? json) {
+  /// Both reference arrays are REQUIRED and every element must be an ordinal
+  /// [codec] resolves. A schema-2 gather — which carried entry OBJECTS here —
+  /// is not read as a schema-3 one: [DiscoveryAnchors.fromJson] refuses the
+  /// version before this decoder is ever reached.
+  static DecisionSurfaceEvidence? fromJson(
+    Object? json,
+    DecisionReferenceCodec codec,
+  ) {
     if (json is! Map) return null;
     final id = (json['id'] as String?)?.trim() ?? '';
     final state = EvidenceState.fromWire(json['state']);
     if (id.isEmpty || state == null) return null;
     final error = (json['error'] as String?) ?? '';
     if (state == EvidenceState.failed && error.trim().isEmpty) return null;
-    final decisions = _decodeAll(json['decisions'], _decodeReference);
-    final namedElsewhere = _decodeAll(json['namedElsewhere'], _decodeReference);
+    final decisions = _decodeAll(json['decisions'], codec.decode);
+    final namedElsewhere = _decodeAll(json['namedElsewhere'], codec.decode);
     if (decisions == null || namedElsewhere == null) return null;
     return DecisionSurfaceEvidence(
       id: id,
@@ -692,11 +701,66 @@ class DecisionSurfaceEvidence {
   }
 }
 
-/// Decodes ONE decision-entry reference: a non-blank String, or null (⇒ the
-/// whole artifact is refused). A reference is carried VERBATIM — it is an
-/// evidence id, and trimming one would silently forge a different citation.
-String? _decodeReference(Object? raw) =>
-    raw is String && raw.trim().isNotEmpty ? raw : null;
+/// The WIRE form of a decision reference: a body id's ordinal in the gather's
+/// index, written as a decimal string.
+///
+/// Carrying the bodies once fixed the 3.0 MB of duplicated register text, but
+/// left the ids themselves repeated per surface, and a body id is a canonical
+/// evidence identity — kind, URI-encoded register identity and a 64-hex digest,
+/// ~120 bytes each. Twelve surfaces × [kMaxDecisionEntriesPerSurface] of those
+/// is ~140 KB of pure repetition on top of the ~384 KB the bodies irreducibly
+/// cost. An ordinal is bounded by the per-surface CAP instead — at most two
+/// digits for a 96-entry index — so a gather's reference overhead is a function
+/// of how many entries it carries, never of how long their identities are.
+///
+/// The order is the index's LEXICALLY sorted keys, derived identically on both
+/// sides, which is what makes `toJson → fromJson → toJson` reproduce the same
+/// JSON value rather than merely an equivalent one.
+class DecisionReferenceCodec {
+  /// Builds the codec over a gather's [DiscoveryAnchors.decisionEntries] keys.
+  DecisionReferenceCodec(Iterable<String> bodyIds)
+    : order = List.unmodifiable(bodyIds.toList()..sort()) {
+    for (var ordinal = 0; ordinal < order.length; ordinal++) {
+      _ordinals[order[ordinal]] = ordinal;
+    }
+  }
+
+  /// The index keys in the order the artifact writes them.
+  final List<String> order;
+
+  final Map<String, int> _ordinals = {};
+
+  /// The ordinal [bodyId] is written as.
+  ///
+  /// Throws [StateError] for an id the index does not carry. "Every surface
+  /// reference resolves into the gather index" is the invariant this schema
+  /// exists to hold; writing an unresolvable one as a sentinel would hand a
+  /// lens a body-less citation the decoder could no longer tell from a real
+  /// entry.
+  String encode(String bodyId) {
+    final ordinal = _ordinals[bodyId];
+    if (ordinal == null) {
+      throw StateError(
+        'decision reference "$bodyId" is not in the gather index '
+        '(${order.length} indexed entries); a surface may only reference an '
+        'entry the gather carries',
+      );
+    }
+    return '$ordinal';
+  }
+
+  /// The body id [raw] names, or null — which REFUSES the whole artifact — for
+  /// a non-String, a blank, a non-numeric or out-of-range ordinal, or a
+  /// non-canonical spelling of one (`"01"`, `"+1"`), since re-encoding that
+  /// would not reproduce the artifact it was read from.
+  String? decode(Object? raw) {
+    if (raw is! String) return null;
+    final ordinal = int.tryParse(raw);
+    if (ordinal == null || ordinal < 0 || ordinal >= order.length) return null;
+    if ('$ordinal' != raw) return null;
+    return order[ordinal];
+  }
+}
 
 /// The round's WHOLE decision gather: every entry body ONCE, plus one lookup
 /// record per roster-qualified surface holding ordered REFERENCES into it.
@@ -1541,33 +1605,36 @@ class DiscoveryAnchors {
 
   /// The wire shape. Schema 3: the decision bodies are an INDEX written once,
   /// with lexically ordered keys, and each surface lookup carries ordered
-  /// references into it.
-  Map<String, Object?> toJson() => {
-    'version': 3,
-    'round': round,
-    'workBeadId': workBeadId,
-    'beadFields': [for (final f in beadFields) f.toJson()],
-    'rubrics': rubrics,
-    'rubricEvidence': [for (final r in rubricEvidence) r.toJson()],
-    'anchors': [for (final a in anchors) a.toJson()],
-    'symbols': symbols,
-    'anchorsTruncated': anchorsTruncated,
-    'symbolsTruncated': symbolsTruncated,
-    'priorArtQueries': [for (final q in priorArtQueries) q.toJson()],
-    'decisionEntries': {
-      for (final key in decisionEntries.keys.toList()..sort())
-        key: decisionEntries[key]!.toJson(),
-    },
-    'decisionLookups': [for (final d in decisionLookups) d.toJson()],
-    'history': history?.toJson(),
-  };
+  /// ordinal references into that order ([DecisionReferenceCodec]).
+  Map<String, Object?> toJson() {
+    final codec = DecisionReferenceCodec(decisionEntries.keys);
+    return {
+      'version': 3,
+      'round': round,
+      'workBeadId': workBeadId,
+      'beadFields': [for (final f in beadFields) f.toJson()],
+      'rubrics': rubrics,
+      'rubricEvidence': [for (final r in rubricEvidence) r.toJson()],
+      'anchors': [for (final a in anchors) a.toJson()],
+      'symbols': symbols,
+      'anchorsTruncated': anchorsTruncated,
+      'symbolsTruncated': symbolsTruncated,
+      'priorArtQueries': [for (final q in priorArtQueries) q.toJson()],
+      'decisionEntries': {
+        for (final key in codec.order) key: decisionEntries[key]!.toJson(),
+      },
+      'decisionLookups': [for (final d in decisionLookups) d.toJson(codec)],
+      'history': history?.toJson(),
+    };
+  }
 
   /// Decodes the gather STRICTLY — this artifact is the ONLY evidence three
   /// lenses get, so a partial decode is refused rather than silently emptied.
   /// Null for a non-map, any `version` but 3, a negative/non-integer round, an
   /// empty work bead id, ANY malformed nested record (never dropped), an
   /// unknown evidence state, a duplicate evidence id, a broken decision-entry
-  /// reference ([_decodeDecisionEntries]), or a failed record with no error.
+  /// index ([_decodeDecisionEntries]) or reference ([DecisionReferenceCodec]),
+  /// or a failed record with no error.
   /// The route reads that null as EXPLICIT insufficient evidence.
   ///
   /// A schema-2 artifact is REFUSED, not adapted: it carried entry bodies
@@ -1594,12 +1661,15 @@ class DiscoveryAnchors {
       json['priorArtQueries'],
       PriorArtQueryEvidence.fromJson,
     );
-    final decisionLookups = _decodeAll(
-      json['decisionLookups'],
-      DecisionSurfaceEvidence.fromJson,
-    );
+    // The index is decoded FIRST: it fixes the reference order every lookup's
+    // ordinals are read against.
     final decisionEntries = _decodeDecisionEntries(json['decisionEntries']);
     if (decisionEntries == null) return null;
+    final codec = DecisionReferenceCodec(decisionEntries.keys);
+    final decisionLookups = _decodeAll(
+      json['decisionLookups'],
+      (raw) => DecisionSurfaceEvidence.fromJson(raw, codec),
+    );
     if (beadFields == null ||
         rubricEvidence == null ||
         anchors == null ||
@@ -1638,7 +1708,7 @@ class DiscoveryAnchors {
       decisionLookups: decisionLookups,
       history: history,
     );
-    if (!_referencesResolve(decoded)) return null;
+    if (!_indexIsFullyReferenced(decoded)) return null;
     if (decoded.evidenceIds.length != _evidenceIdCount(decoded)) return null;
     return decoded;
   }
@@ -1667,20 +1737,20 @@ class DiscoveryAnchors {
     return entries;
   }
 
-  /// Whether every lookup reference resolves AND every indexed entry is
-  /// referenced — the two halves of "the register is gathered once and each
-  /// surface is a projection over it".
+  /// Whether every indexed entry is REFERENCED by some surface — the second
+  /// half of "the register is gathered once and each surface is a projection
+  /// over it".
   ///
-  /// A dangling reference would hand a lens a citation with no body; an
-  /// unreferenced entry is a body no surface selected, which is exactly the
-  /// per-surface bound being bypassed through the index.
-  static bool _referencesResolve(DiscoveryAnchors a) {
+  /// An unreferenced entry is a body no surface selected, which is exactly the
+  /// per-surface bound being bypassed through the index. The first half — no
+  /// DANGLING reference — is structural: [DecisionReferenceCodec.decode]
+  /// resolves an ordinal against the index or refuses the artifact, so a
+  /// decoded reference cannot name a body the gather does not carry.
+  static bool _indexIsFullyReferenced(DiscoveryAnchors a) {
     final referenced = <String>{};
     for (final lookup in a.decisionLookups) {
-      for (final reference in [...lookup.decisions, ...lookup.namedElsewhere]) {
-        if (!a.decisionEntries.containsKey(reference)) return false;
-        referenced.add(reference);
-      }
+      referenced.addAll(lookup.decisions);
+      referenced.addAll(lookup.namedElsewhere);
     }
     return referenced.length == a.decisionEntries.length;
   }
