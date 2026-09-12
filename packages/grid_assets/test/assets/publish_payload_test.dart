@@ -12,8 +12,12 @@ void main() {
     // which is a process property a concurrently scheduled suite could move out
     // from under a spawn.
     final root = packageRoot();
-    final result = await Process.run(Platform.resolvedExecutable, const [
+    // The root is named TWICE on purpose: `--directory` tells pub which package
+    // to pack, and `workingDirectory` pins the spawn's own cwd. Either alone
+    // would leave the dry run resolving something off the process cwd.
+    final result = await Process.run(Platform.resolvedExecutable, [
       'pub',
+      '--directory=$root',
       'publish',
       '--dry-run',
       '--verbose',

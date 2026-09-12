@@ -16,6 +16,21 @@ final String _setPath = p.join(
   'fixtures',
   'semantic_recall_set.json',
 );
+
+/// The record-mode SEED: the same cases and exact-id guard as [_setPath], with
+/// a baseline pinned empty because no tool ever writes this file.
+///
+/// [_setPath] is the DURABLE corpus and `--record-baseline` rewrites its OWN
+/// baseline after a green live run, so what it holds is whatever the last real
+/// recording left there. Seeding record mode from this file instead keeps the
+/// record-mode assertions about what the writer PRODUCES rather than about
+/// what the durable corpus happens to carry today.
+final String _emptyBaselineSetPath = p.join(
+  'test',
+  'search',
+  'fixtures',
+  'semantic_recall_empty_baseline_set.json',
+);
 final String _reportsPath = p.join(
   'test',
   'search',
@@ -185,6 +200,10 @@ Map<String, dynamic> _liveEnvelope(
 /// Runs [body] against a DISPOSABLE copy of the corpus under a temp root,
 /// handing it that root and the copied corpus path.
 ///
+/// The copy is seeded from [_emptyBaselineSetPath] under the production
+/// filename, so record mode populates a baseline that starts empty every run
+/// and the checked-in durable corpus is never the thing being written.
+///
 /// The root is passed to [runRecall] as its `workingDirectory`; nothing assigns
 /// the process working directory. That is a process property and `dart test`
 /// runs test files in concurrent isolates of one process, so the record-mode
@@ -196,7 +215,7 @@ Future<T> _inFixtureRoot<T>(
   final temporary = await Directory.systemTemp.createTemp('recall-test-');
   final fixture = File(p.join(temporary.path, _setPath));
   await fixture.parent.create(recursive: true);
-  await _checkedIn(_setPath).copy(fixture.path);
+  await _checkedIn(_emptyBaselineSetPath).copy(fixture.path);
   await _checkedIn(_reportsPath).copy(p.join(temporary.path, _reportsPath));
   try {
     return await body(temporary.path, fixture.path);
@@ -282,32 +301,53 @@ void main() {
       );
     });
 
-    test('fixture preserves the four real pairs and empty baseline', () {
-      final set = loadRecallSetFixture();
-      expect(set.cases.map((row) => [row.name, row.query, row.expectedBeadIds]), [
-        [
-          'refinement-vocabulary',
-          'refine',
-          ['tg-mles'],
-        ],
-        [
-          'production-observability',
-          'observability',
-          ['tg-dwc'],
-        ],
-        [
-          'station-effectiveness',
-          'are our automated work sessions getting healthier and more effective over time',
-          ['tg-5drf'],
-        ],
-        [
-          'single-store-owner',
-          'how do we stop two stations fighting over one store',
-          ['tg-s6gk', 'tg-0edw'],
-        ],
-      ]);
-      expect(set.baseline, isEmpty);
-    });
+    test(
+      'both corpora carry the four real pairs and the seed is pinned empty',
+      () {
+        // The durable corpus is asserted on its CASES only. Its baseline is
+        // written by `--record-baseline` after a green live run, so pinning that
+        // here would make a legitimate recording read as a test failure.
+        final set = loadRecallSetFixture();
+        expect(
+          set.cases.map((row) => [row.name, row.query, row.expectedBeadIds]),
+          [
+            [
+              'refinement-vocabulary',
+              'refine',
+              ['tg-mles'],
+            ],
+            [
+              'production-observability',
+              'observability',
+              ['tg-dwc'],
+            ],
+            [
+              'station-effectiveness',
+              'are our automated work sessions getting healthier and more effective over time',
+              ['tg-5drf'],
+            ],
+            [
+              'single-store-owner',
+              'how do we stop two stations fighting over one store',
+              ['tg-s6gk', 'tg-0edw'],
+            ],
+          ],
+        );
+
+        // The seed must not drift from the corpus it stands in for: record mode
+        // runs against the seed, so a case or guard present in only one file
+        // would make those assertions describe a corpus nobody searches.
+        final seed = RecallSet.fromJsonString(
+          _checkedIn(_emptyBaselineSetPath).readAsStringSync(),
+        );
+        expect(
+          seed.cases.map((row) => [row.name, row.query, row.expectedBeadIds]),
+          set.cases.map((row) => [row.name, row.query, row.expectedBeadIds]),
+        );
+        expect(seed.exactIdGuard, set.exactIdGuard);
+        expect(seed.baseline, isEmpty);
+      },
+    );
 
     test(
       'live runner uses exact query order and is read-only by default',

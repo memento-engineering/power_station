@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "cases": [
+    {"name":"refinement-vocabulary","query":"refine","expectedBeadIds":["tg-mles"]},
+    {"name":"production-observability","query":"observability","expectedBeadIds":["tg-dwc"]},
+    {"name":"station-effectiveness","query":"are our automated work sessions getting healthier and more effective over time","expectedBeadIds":["tg-5drf"]},
+    {"name":"single-store-owner","query":"how do we stop two stations fighting over one store","expectedBeadIds":["tg-s6gk","tg-0edw"]}
+  ],
+  "exactIdGuard": "tg-5drf",
+  "baseline": {}
+}
