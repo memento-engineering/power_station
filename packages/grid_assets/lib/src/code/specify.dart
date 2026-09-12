@@ -909,20 +909,38 @@ class SpecifyCapability extends ProcessCapability {
   /// round behind. This is a SYNTAX floor and nothing more — no bead, no key, or
   /// a blank plan SKIPS, because PRESENCE is `FilingContract.evaluate`'s and
   /// `mountEligibilityFindings`' to own and neither is subsumed here. A bd read
-  /// that fails, and duplicate exact-id rows, stay LOUD.
+  /// that fails, and duplicate exact-id rows, stay LOUD — and loud here means
+  /// TYPED: the named invariant is that an unreadable or non-unique fresh row
+  /// can never certify the machine gate, and an untyped throw carries no kind,
+  /// so it would be routed as `work` on the circuit's own budget instead of the
+  /// `invalidResult` budget [supervisionPolicy] declares for exactly this hook.
+  /// A wobbling bd is therefore the same shape of refusal as a broken plan.
   Future<void> _parseCheckAuthoredValidationPlan(
     String workspaceDir,
     String beadId,
   ) async {
-    final queried = await BdCliService(
-      _runnerFor(workspaceDir),
-    ).query('id=$beadId');
+    final List<Bead> queried;
+    try {
+      queried = await BdCliService(
+        _runnerFor(workspaceDir),
+      ).query('id=$beadId');
+    } on Object catch (error) {
+      throw CapabilityFailure.invalidResult(
+        'validation_plan read failed: $error',
+      );
+    }
     final matches = queried
         .where((candidate) => candidate.id == beadId)
         .toList(growable: false);
     if (matches.isEmpty) return;
     // LOUD on duplicates: two rows for one exact id means the read itself is
     // untrustworthy, and a syntax check over the wrong row proves nothing.
+    if (matches.length != 1) {
+      throw CapabilityFailure.invalidResult(
+        'validation_plan read failed: duplicate exact-id rows for $beadId '
+        '(${matches.length} matches)',
+      );
+    }
     final plan = matches.single.metadata['validation_plan'];
     if (plan is! String || plan.trim().isEmpty) return;
     final parse = await Process.run('sh', [
