@@ -804,3 +804,100 @@ reader) and A8 (config is a VALUE, the runner stays injected, and the guard is
 loud: a killed read REFUSES).
 
 **Status:** Pending — Nico promotes or rejects.
+
+## A41 (2026-09-12) — bead `pow-15jv`: the test tree's ONE package-root anchor is the helper's own SOURCE LOCATION, and the two suites that proved cwd-independence by moving the process cwd keep their proofs as CHILD-PROCESS probes
+
+**Decision (AI).** `packages/grid_assets/test/support/package_root.dart` exports
+one `packageRoot()`; every package-local path in the suite is
+`p.join(packageRoot(), …)`, and no test file reads or assigns the process
+working directory. The calls made autonomously around that:
+
+(1) THE ANCHOR IS THIS HELPER'S OWN SOURCE LOCATION, read off the top frame of a
+stack trace captured inside it, then walked up to the `pubspec.yaml` naming
+`grid_assets`. NOT `Platform.script`, which the plan named: under `dart test`
+that resolves to a throwaway kernel dill in the system temp dir
+(`file:///tmp/dart_test.kernel.*/test.dart_1.dill`, measured in this tree), not
+to a file in this package, so a walk from it can never reach the package root.
+It IS `Platform.script` inside the sibling probe executable, which is why the
+helper's refusal names it. And NOT `PackagedAssetLoader.root`, because
+`track_d_assets_test.dart` verifies that production resolution — a locator built
+on the code under test could not tell a broken loader from a broken locator.
+The walk shares no mechanism with the loader's (that resolves a `package:` URI
+through the package config; this reads a source location), which is what makes
+the loader probe's assertion below a cross-check of two independent derivations
+rather than a tautology.
+
+(2) THE TWO CWD-INDEPENDENCE PROOFS ARE PRESERVED AS CHILD PROCESSES, NOT
+DELETED. The plan deleted `track_d`'s foreign-cwd group along with its
+assignment; that group is the only live fence on A24's named invariant, so it
+instead spawns `test/fixtures/asset_loader_cwd_probe.dart` with
+`workingDirectory` set to a temp dir and asserts the root a no-explicit-root
+`PackagedAssetLoader()` resolved there EQUALS `p.join(packageRoot(), 'extension')`
+— a stronger claim than the old "some rubric loaded", and it moves no global.
+`test/support/package_root_test.dart` pins the anchor the same way. A child
+process is the only way to exercise a foreign working directory without
+reintroducing the hazard; `dart test -j 1` and tag isolation were refused because
+they hide the race rather than remove it.
+
+(3) THE SITE-BINDING CONSTRUCTION-TIME READ KEEPS ITS PROOF IN TWO HALVES.
+Passing an explicit `HarnessProvider.siteBinding` — the plan's fix — proves only
+what the AC-1 test already proves, so the conventional document is loaded by
+EXPLICIT path under a temp root, the provider is constructed from it, the
+document is DELETED, and the mount is then asserted to carry the same instance;
+and the DEFAULT read's POSITION is a structural fence over the provider's own
+class body (the `loadJsonFile(kSiteBindingFile)` call sits above
+`buildWithChild`, and is the pack's only caller). Scoped to that class body
+deliberately: the file declares several providers, so a whole-file index would
+compare against a sibling's build method.
+
+(4) `runRecall` GAINS EXACTLY ONE OPTIONAL `workingDirectory`, defaulted to `'.'`
+so `tool/search_recall.dart` and every other caller are unchanged. It is the
+only production surface this bead touches.
+
+**Why.** `Directory.current` is process-global and `dart test` runs test files in
+concurrent isolates of ONE process, so three suites that assigned it raced twelve
+that read package-local source relatively: the read threw
+`PathNotFoundException` or resolved a different tree, on isolate scheduling
+rather than on anything in the diff, so it never reproduced in isolation. A24
+already recorded the mechanism — "`Directory.current` is process-global and
+`dart test` runs suites concurrently, so the sibling suite that chdirs to a
+foreign dir to PROVE cwd-independent resolution (`track_d_assets_test`) raced
+any walk done from inside another suite's test body" — and fixed it for the
+asset suites by routing them through `PackagedAssetLoader.root`. That left the
+three writers in place, so the hazard returned as soon as new relative readers
+landed. This removes the writers instead, and gives the readers one anchor that
+is not the code under test.
+
+**Decision alignment.** The roster over the touched surfaces also returns
+`power_station#one-asset-resolution-defines-tree-and-writers` (bead `pow-4peu`,
+which `updates` A24): "One pure `resolveGridAssets` evaluation over the
+station-generated `GridAssetRegistry`, an immutable `SubstationFactsSnapshot`,
+render values, and an optional roster override is authoritative." Two touched
+suites exercise exactly that machinery —
+`test/assets/overlay_materializer_test.dart` and
+`test/assets/overlay_install_test.dart` call `resolveGridAssets` over
+`GeneratedGridAssetRegistrant.registry` with a hand-built
+`SubstationFactsSnapshot`, and `test/assets/station_asset_registry_test.dart`
+pins that registry's generation shape. The change at all three is confined to
+where the vending ROOT is read from: the one resolution call, the snapshot it is
+handed, the registry it evaluates, the roster override and every resolved
+artifact path are byte-unchanged, and no writer's behaviour is touched. A24's
+separate "Also (mechanical, no decision)" paragraph — the clause this bead
+extends — is not the clause `pow-4peu` updates, so the two compose rather than
+conflict. `power_station#a28-bead-pow-d26-the-acceptance-suite-flake-is-the-molecule`
+is also honoured: "the fix is homed HERE" — the harness and one package-local
+injection seam change, the_grid and A28's `settle` primitive do not, and the
+process-cwd race is a distinct defect from A28's real-filesystem wait race.
+
+**Affects (if promoted):** `packages/grid_assets/lib/src/search/search_recall.dart`
+(`runRecall`'s `workingDirectory`), `packages/grid_assets/CHANGELOG.md`, new
+`packages/grid_assets/test/support/{package_root.dart,package_root_probe.dart,package_root_test.dart}`,
+new `packages/grid_assets/test/fixtures/asset_loader_cwd_probe.dart`, and the
+thirty-nine test files whose locators now join on `packageRoot()` (including the
+retained corpus's locator example in
+`test/fixtures/spec_corpus/pow-kzx.design.md`, whose parsed contract and shadow
+finding counts are unchanged). Composes with A24 (the cwd-independent invariant
+is preserved, not weakened) and A8 (the helper and both probes REFUSE loudly
+rather than guessing a root).
+
+**Status:** Pending — Nico promotes or rejects.

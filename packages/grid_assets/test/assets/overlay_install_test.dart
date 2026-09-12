@@ -14,6 +14,14 @@ import '../support/asset_resolution_fixture.dart';
 import '../support/package_root.dart';
 
 /// The LIVE station registry resolved against this checkout.
+///
+/// `power_station#one-asset-resolution-defines-tree-and-writers` governs this
+/// machinery — "One pure `resolveGridAssets` evaluation over the
+/// station-generated `GridAssetRegistry`, an immutable
+/// `SubstationFactsSnapshot`, render values, and an optional roster override is
+/// authoritative." Only WHERE the vending root is read from changed: the one
+/// resolution call, the snapshot it is handed, the registry it evaluates and
+/// every resolved artifact path are unchanged.
 GridAssetResolution _liveResolution({Map<String, String> args = const {}}) {
   final root = packageRoot();
   return resolveGridAssets(

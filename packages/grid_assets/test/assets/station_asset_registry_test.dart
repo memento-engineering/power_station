@@ -244,6 +244,11 @@ void main() {
       );
       expect(registry.assets, hasLength(33));
 
+      // `power_station#one-asset-resolution-defines-tree-and-writers` owns the
+      // generation shape this fence reads ("the station-generated
+      // `GridAssetRegistry`"). Only where the SOURCE PATH is read from moved
+      // off the process working directory — the registrant, its packs and its
+      // asset count are untouched.
       final source = File(
         p.join(packageRoot(), 'lib', 'station_asset_registry.dart'),
       ).readAsStringSync();

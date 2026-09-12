@@ -32,6 +32,14 @@ const String _beadsBlock =
 
 /// The LIVE station registry resolved against this checkout — the real vended
 /// pack, selected exactly as a station selects it.
+///
+/// `power_station#one-asset-resolution-defines-tree-and-writers` governs this
+/// machinery — "One pure `resolveGridAssets` evaluation over the
+/// station-generated `GridAssetRegistry`, an immutable
+/// `SubstationFactsSnapshot`, render values, and an optional roster override is
+/// authoritative." Only WHERE the vending root is read from changed: the one
+/// resolution call, the snapshot it is handed, the registry it evaluates and
+/// every resolved artifact path are unchanged.
 GridAssetResolution _liveResolution({Map<String, String> args = const {}}) {
   final root = packageRoot();
   return resolveGridAssets(
