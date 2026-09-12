@@ -97,6 +97,11 @@ import '../agent/usage_report.dart';
 import '../search/station_search.dart';
 import 'committee.dart';
 import 'decision_register.dart';
+// The UTF-8 byte-ceiling arithmetic ONLY, as a pure VALUE type: the describe
+// manifest already owned "reserve the required blocks, clamp the droppable
+// remainder at a record boundary", and a second copy of that arithmetic is the
+// bug it would eventually disagree with.
+import 'describe_manifest.dart' show BoundedTextBudget;
 import 'landing.dart' show ShellRunner;
 import 'respec.dart';
 import 'route_failure.dart';
@@ -150,6 +155,39 @@ const int kMaxNeighbors = 8;
 /// round's primary input, not evidence gathered around it, so
 /// [boundedBeadFields] carries it whole.
 const int kMaxDiscoverySnippetChars = 4096;
+
+/// The bound on the ASSEMBLED `explore-decision` prompt, in UTF-8 BYTES
+/// (256 KiB).
+///
+/// The evidence bundle is bounded per record ([kMaxDiscoverySnippetChars]) and
+/// per surface ([kMaxDecisionEntriesPerSurface]), but nothing bounded their
+/// PRODUCT: a bead naming many surfaces against a mature register assembled a
+/// prompt the harness answered `api_error_status 400: Prompt is too long`
+/// (~202 302 tokens against a 200 000 limit, measured 2026-09-12), which the
+/// circuit reads as a model step that exited with no artifact — and three such
+/// exits in a row throttled the session. An oversize bundle is now CLIPPED and
+/// says so ([kDecisionLensEvidenceOmissionMarker]) instead.
+///
+/// Only the DECISION lens is bounded here. It is the one lane whose evidence
+/// scales with the register rather than with the bead, and a cap is a bound on
+/// what a lens can READ: applied where it is not needed, it would silently
+/// shrink evidence nobody measured as too large.
+const int kMaxDecisionLensPromptBytes = 256 * 1024;
+
+/// Bytes held back from [kMaxDecisionLensPromptBytes] for the omission marker,
+/// so a clipped assembly can always afford to SAY it clipped.
+const int kDecisionLensPromptOmissionReserveBytes = 512;
+
+/// What a clipped `explore-decision` bundle says in place of the records it
+/// dropped — VISIBLE in the prompt, and never silent.
+///
+/// It names the bound, what was withheld, and how to ask for it, which is what
+/// separates a bounded lookup from a lossy one.
+const String kDecisionLensEvidenceOmissionMarker =
+    '[TRUNCATED: canonical decision evidence exceeded the 256 KiB '
+    'explore-decision prompt cap; trailing evidence records were omitted. '
+    'Re-run discovery with fewer touched surfaces to inspect the withheld '
+    'records.]';
 
 /// The bound on the decision entries kept for ONE roster-qualified surface.
 ///
@@ -4587,6 +4625,33 @@ class DiscoveryLensCapability extends ProcessCapability {
     required int round,
     required String workspaceDir,
     required DiscoveryEvidenceProjection projection,
+  }) => assembleLensPrompt(
+    lens: lens,
+    sessionId: sessionId,
+    nodePath: nodePath,
+    round: round,
+    workspaceDir: workspaceDir,
+    projection: projection,
+  ).prompt;
+
+  /// The lens's prompt AND whether its evidence was clipped to fit.
+  ///
+  /// The assembly is three parts: an exact PREFIX, the sole droppable value
+  /// ([DiscoveryEvidenceProjection.renderedEvidence]), and an exact SUFFIX that
+  /// ends with [kLensStampInstruction] and the absolute file-write instruction.
+  /// The suffix is RESERVED before the evidence is admitted, because a prompt
+  /// that loses its stamps or its write path produces a report the read fence
+  /// discards — a clipped bundle is recoverable, a stampless report is not.
+  ///
+  /// Only [kDecisionLens] is bounded ([kMaxDecisionLensPromptBytes]); the other
+  /// two lenses assemble exactly as before and report `false`.
+  DiscoveryLensPromptAssembly assembleLensPrompt({
+    required String lens,
+    required String sessionId,
+    required String nodePath,
+    required int round,
+    required String workspaceDir,
+    required DiscoveryEvidenceProjection projection,
   }) {
     final path = lensReportPath(workspaceDir, lens);
     final b = StringBuffer()
@@ -4618,8 +4683,11 @@ class DiscoveryLensCapability extends ProcessCapability {
         'prior-art search, and do NOT read git history — those lookups already '
         'ran, and re-running them is the waste this circuit exists to remove.',
       )
-      ..writeln()
-      ..write(projection.renderedEvidence)
+      ..writeln();
+    final prefix = b.toString();
+    // The RESERVED tail: every instruction after the evidence, ending with the
+    // stamp instruction and the absolute write path. It is never clipped.
+    final tail = StringBuffer()
       ..writeln(
         'Every record above carries its STATE. `COMPLETE` is a real answer, an '
         'empty one included. `TRUNCATED` and `FAILED` are deterministic gaps: '
@@ -4741,8 +4809,76 @@ class DiscoveryLensCapability extends ProcessCapability {
         'your findings in your response text — stating them in prose alone does '
         'NOT satisfy this instruction. Write the file at `$path`.',
       );
-    return b.toString();
+    final suffix = tail.toString();
+    final evidence = projection.renderedEvidence;
+    if (lens != kDecisionLens) {
+      return DiscoveryLensPromptAssembly(
+        prompt: '$prefix$evidence$suffix',
+        evidenceTruncated: false,
+      );
+    }
+
+    // The marker rides its OWN two newlines, so the reserve has to cover both.
+    const marker = kDecisionLensEvidenceOmissionMarker;
+    final markerBytes = utf8.encode(marker).length + 2;
+    if (markerBytes > kDecisionLensPromptOmissionReserveBytes) {
+      throw StateError(
+        'discovery/$kDecisionLens: the omission marker is $markerBytes bytes '
+        'and its reserve is only '
+        '$kDecisionLensPromptOmissionReserveBytes — a clipped bundle could not '
+        'afford to SAY it was clipped',
+      );
+    }
+    const budget = BoundedTextBudget(
+      maxBytes: kMaxDecisionLensPromptBytes,
+      omissionReserveBytes: kDecisionLensPromptOmissionReserveBytes,
+    );
+    final available = budget.availableBytesAfter([prefix, suffix]);
+    if (available < 0) {
+      throw StateError(
+        'discovery/$kDecisionLens: the FIXED prompt scaffold plus its omission '
+        'reserve already exceed '
+        'kMaxDecisionLensPromptBytes=$kMaxDecisionLensPromptBytes by '
+        '${-available} bytes — no evidence would fit, so the template is the '
+        'defect and clipping cannot hide it',
+      );
+    }
+    final whole = '$prefix$evidence$suffix';
+    if (utf8.encode(whole).length <= kMaxDecisionLensPromptBytes) {
+      return DiscoveryLensPromptAssembly(
+        prompt: whole,
+        evidenceTruncated: false,
+      );
+    }
+    final clipped = budget.clampAtLineBoundary(
+      evidence,
+      ceilingBytes: available,
+    );
+    return DiscoveryLensPromptAssembly(
+      prompt: '$prefix$clipped\n$marker\n$suffix',
+      evidenceTruncated: true,
+    );
   }
+}
+
+/// ONE assembled lens prompt, and whether its evidence bundle was CLIPPED to
+/// fit the lane's byte cap.
+///
+/// The flag is machine-readable on purpose: a clipped bundle is a bounded
+/// answer the lens narrates, and the difference between that and a complete one
+/// must never be something a reader has to grep the prompt text for.
+class DiscoveryLensPromptAssembly {
+  /// Creates the assembly.
+  const DiscoveryLensPromptAssembly({
+    required this.prompt,
+    required this.evidenceTruncated,
+  });
+
+  /// The assembled prompt.
+  final String prompt;
+
+  /// Whether trailing evidence records were omitted to fit the cap.
+  final bool evidenceTruncated;
 }
 
 /// The per-lens angle — the ONE thing that differs between the three lanes.

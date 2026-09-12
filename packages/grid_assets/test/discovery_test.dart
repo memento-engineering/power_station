@@ -1037,6 +1037,133 @@ void main() {
       expect(RegExp('writeAsStringSync').allMatches(source), hasLength(1));
     });
 
+    test('explore-decision prompt assembly stays inside its byte budget', () {
+      // The measured failure: the harness answered `api_error_status 400:
+      // Prompt is too long` (~202 302 tokens against 200 000), which the
+      // circuit could only read as a model step that exited with no artifact.
+      const lens = DiscoveryLensCapability();
+      DiscoveryLensPromptAssembly assemble(
+        String which,
+        DiscoveryEvidenceProjection projection,
+      ) => lens.assembleLensPrompt(
+        lens: which,
+        sessionId: _session.sessionId,
+        nodePath: 'pow-x/spec_review/discovery/$which',
+        round: 7,
+        workspaceDir: '/w/pow-x',
+        projection: projection,
+      );
+      DiscoveryEvidenceProjection rendered(String which, String evidence) =>
+          DiscoveryEvidenceProjection(
+            lens: which,
+            round: 7,
+            workBeadId: 'pow-x',
+            evidenceIds: const [],
+            renderedEvidence: evidence,
+            gaps: const [],
+          );
+
+      // A decision bundle that FITS is untouched, flag and all.
+      final small = assemble(
+        kDecisionLens,
+        _project(_completeAnchors(), kDecisionLens),
+      );
+      expect(small.evidenceTruncated, isFalse);
+      expect(
+        small.prompt,
+        _promptFor(_project(_completeAnchors(), kDecisionLens)),
+      );
+
+      // ASCII and MULTIBYTE oversize bundles both land under the cap — the
+      // ceiling is BYTES, and a character count would sail past it.
+      for (final line in ['x' * 200, '…' * 200]) {
+        final oversize = assemble(
+          kDecisionLens,
+          rendered(kDecisionLens, '$line\n' * 4000),
+        );
+        expect(
+          utf8.encode(oversize.prompt).length,
+          lessThanOrEqualTo(kMaxDecisionLensPromptBytes),
+        );
+        expect(oversize.evidenceTruncated, isTrue);
+        expect(oversize.prompt, contains(kDecisionLensEvidenceOmissionMarker));
+        expect(
+          kDecisionLensEvidenceOmissionMarker,
+          allOf(
+            contains('256 KiB'),
+            contains('omitted'),
+            contains('Re-run discovery with fewer touched surfaces'),
+          ),
+          reason: 'a bounded lookup NAMES what it withheld and how to ask',
+        );
+        // The RESERVED tail survives byte-for-byte: a prompt that lost its
+        // stamps or its absolute write path yields a report the read fence
+        // discards, which is strictly worse than a clipped bundle.
+        String tail(String prompt) =>
+            prompt.substring(prompt.indexOf(kLensStampInstruction));
+        expect(tail(oversize.prompt), tail(small.prompt));
+        expect(
+          tail(oversize.prompt),
+          contains(lensReportPath('/w/pow-x', kDecisionLens)),
+        );
+        expect(
+          oversize.prompt.indexOf(kDecisionLensEvidenceOmissionMarker),
+          lessThan(oversize.prompt.indexOf(kLensStampInstruction)),
+          reason: 'the marker sits where the evidence was, before the tail',
+        );
+      }
+
+      // The other two lenses are UNBOUNDED and byte-identical to before.
+      for (final other in [kCodeLens, kPriorArtLens]) {
+        final huge = rendered(other, 'y' * (kMaxDecisionLensPromptBytes + 1));
+        final assembly = assemble(other, huge);
+        expect(assembly.evidenceTruncated, isFalse);
+        expect(
+          utf8.encode(assembly.prompt).length,
+          greaterThan(kMaxDecisionLensPromptBytes),
+        );
+        expect(assembly.prompt, contains(huge.renderedEvidence));
+        expect(
+          assembly.prompt,
+          lens.buildLensPrompt(
+            lens: other,
+            sessionId: _session.sessionId,
+            nodePath: 'pow-x/spec_review/discovery/$other',
+            round: 7,
+            workspaceDir: '/w/pow-x',
+            projection: huge,
+          ),
+          reason: 'buildLensPrompt is the same assembly, source-compatible',
+        );
+      }
+
+      // The scaffold guards are LOUD, not silent: an absolute write path that
+      // alone blows the cap is a defect in the template, and clipping the
+      // evidence to zero would hide it.
+      expect(
+        () => lens.assembleLensPrompt(
+          lens: kDecisionLens,
+          sessionId: _session.sessionId,
+          nodePath: 'pow-x/spec_review/discovery/$kDecisionLens',
+          round: 7,
+          workspaceDir: '/w/${'deep/' * 60000}',
+          projection: rendered(kDecisionLens, 'anything'),
+        ),
+        throwsA(
+          isA<StateError>().having(
+            (e) => e.message,
+            'message',
+            contains('kMaxDecisionLensPromptBytes=262144'),
+          ),
+        ),
+      );
+      expect(
+        utf8.encode(kDecisionLensEvidenceOmissionMarker).length + 2,
+        lessThanOrEqualTo(kDecisionLensPromptOmissionReserveBytes),
+        reason: 'the marker must always fit the bytes reserved for it',
+      );
+    });
+
     test('the lens prompt stamps the ambient session generation', () {
       // The THIRD freshness stamp, threaded from the ambient SessionHandle at
       // the spawn edge: without it a re-minted session's round-N report is
