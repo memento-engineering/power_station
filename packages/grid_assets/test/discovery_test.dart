@@ -14,6 +14,7 @@ import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
 import 'support/asset_fakes.dart';
+import 'support/package_root.dart';
 
 const String _adr = 'docs/adr/ADR-0000-ai-decision-register.md A17(4)';
 
@@ -2664,17 +2665,6 @@ void main() {
   });
 }
 
-/// This package's `lib/src` dir (the structural fence's walk).
-String _libSrc() {
-  var dir = Directory.current;
-  for (var i = 0; i < 6; i++) {
-    for (final rel in ['lib', p.join('packages', 'grid_assets', 'lib')]) {
-      final probe = Directory(p.join(dir.path, rel));
-      if (File(p.join(probe.path, 'grid_assets.dart')).existsSync()) {
-        return p.join(probe.path, 'src');
-      }
-    }
-    dir = dir.parent;
-  }
-  fail('could not locate packages/grid_assets/lib');
-}
+/// This package's `lib/src` dir (the structural fence's corpus), off the shared
+/// cwd-independent package root.
+String _libSrc() => p.join(packageRoot(), 'lib', 'src');

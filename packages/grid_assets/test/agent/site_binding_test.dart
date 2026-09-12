@@ -8,24 +8,14 @@ import 'package:grid_assets/grid_assets.dart';
 import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
-/// Locates `grid_assets/lib/<relative>` walking up from the test's working dir
-/// (robust whether the suite runs from the repo root or the package dir) —
-/// mirrors `track_e_reference_inflation_test.dart`'s `_libFile`.
-File _libFile(String relative) {
-  var dir = Directory.current;
-  for (var i = 0; i < 6; i++) {
-    for (final base in ['lib', p.join('packages', 'grid_assets', 'lib')]) {
-      final probe = File(p.join(dir.path, base, relative));
-      if (probe.existsSync()) return probe;
-    }
-    final parent = dir.parent;
-    if (parent.path == dir.path) break;
-    dir = parent;
-  }
-  fail(
-    'could not locate grid_assets/lib/$relative from ${Directory.current.path}',
-  );
-}
+import '../support/package_root.dart';
+
+/// `grid_assets/lib/<relative>`, off the shared cwd-independent package root.
+/// Never a walk up from the process working
+/// directory: that is a process property and `dart test` runs the suites
+/// concurrently, so a walk from here could read a directory another file had
+/// pointed somewhere else.
+File _libFile(String relative) => File(p.join(packageRoot(), 'lib', relative));
 
 void main() {
   // Resolved environments by target kind (pow-ebf.2 value type).

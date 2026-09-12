@@ -6,9 +6,10 @@
 // package config resolved `extension/`. Loads every code-committee rubric, then
 // prints the root it resolved so the parent can pin the exact directory.
 //
-// A child process rather than a `Directory.current` assignment: that property is
-// process-global and `dart test` runs suites concurrently, so chdir'ing here to
-// prove cwd-independence raced every sibling suite's source read.
+// A child process rather than an assignment to this process's working
+// directory: that is a process property and `dart test` runs suites
+// concurrently, so chdir'ing to prove cwd-independence raced every sibling
+// suite's source read.
 import 'dart:io';
 
 import 'package:grid_assets/grid_assets.dart';

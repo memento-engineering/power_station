@@ -50,6 +50,7 @@ import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
 import 'support/asset_fakes.dart';
+import 'support/package_root.dart';
 
 /// The sentinel prefix stamped onto EVERY poisoned bead path. A resolved path
 /// on a bead is the exact Q3′ regression shape — `grid.root` abused as a path,
@@ -85,24 +86,12 @@ Workspace _activation() => testWorkspace(
   baseBranch: 'main',
 );
 
-/// Locates `grid_assets/lib/<relative>` walking up from the test's working dir
-/// (robust whether the suite runs from the repo root or the package dir) —
-/// mirrors `structural_test.dart`'s `_libDir` locator.
-File _libFile(String relative) {
-  var dir = Directory.current;
-  for (var i = 0; i < 6; i++) {
-    for (final base in ['lib', p.join('packages', 'grid_assets', 'lib')]) {
-      final probe = File(p.join(dir.path, base, relative));
-      if (probe.existsSync()) return probe;
-    }
-    final parent = dir.parent;
-    if (parent.path == dir.path) break;
-    dir = parent;
-  }
-  fail(
-    'could not locate grid_assets/lib/$relative from ${Directory.current.path}',
-  );
-}
+/// `grid_assets/lib/<relative>`, off the shared cwd-independent package root.
+/// Never a walk up from the process working
+/// directory: that is a process property and `dart test` runs the suites
+/// concurrently, so a walk from here could read a directory another file had
+/// pointed somewhere else.
+File _libFile(String relative) => File(p.join(packageRoot(), 'lib', relative));
 
 /// The source text of the `AgentBrief` class body — sliced from its declaration
 /// to the next top-level declaration — for the structural field fence.

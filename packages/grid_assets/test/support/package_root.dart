@@ -1,13 +1,14 @@
 // The ONE package-root authority every source read in this suite resolves
 // against — cwd-independent by construction.
 //
-// `Directory.current` is a PROCESS property and `dart test` runs test files in
-// concurrent isolates of one process, so a path built off the cwd can be read
+// The working directory is a PROCESS property and `dart test` runs test files
+// in concurrent isolates of one process, so a path built off it can be read
 // while a sibling suite has that global pointed somewhere else: the read throws
 // `PathNotFoundException`, or — worse — resolves a different tree and asserts
 // against it. Which happens depends on isolate scheduling, not on the diff, so
-// it never reproduces in isolation. Nothing in this tree writes the cwd and
-// nothing reads it; every package-local path is `p.join(packageRoot(), …)`.
+// it never reproduces in isolation. Nothing in this tree assigns the working
+// directory and nothing reads it; every package-local path is
+// `p.join(packageRoot(), …)`.
 //
 // The anchor is this library's OWN location on disk, taken off a stack frame
 // captured here: the one thing an isolate knows about itself that no other

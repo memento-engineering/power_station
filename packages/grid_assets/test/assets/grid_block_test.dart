@@ -11,6 +11,8 @@ import 'package:grid_sdk/grid_sdk.dart';
 import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
+import '../support/package_root.dart';
+
 /// A Fake artifact probe: exactly [present] resolves, nothing else does.
 class FakePathProbe {
   FakePathProbe(this.present);
@@ -67,26 +69,9 @@ GridBlock _parse(String assets) => parseGridBlock(
   pathExists: FakePathProbe({_skillPath}).call,
 );
 
-/// The real package root, walked up from the cwd like the loader's own walk.
-String _packageRoot() {
-  var dir = Directory.current;
-  for (var i = 0; i < 6; i++) {
-    if (File(p.join(dir.path, 'pubspec.yaml')).existsSync() &&
-        Directory(p.join(dir.path, 'extension', 'rubrics')).existsSync()) {
-      return dir.path;
-    }
-    final nested = Directory(p.join(dir.path, 'packages', 'grid_assets'));
-    if (nested.existsSync()) return nested.path;
-    final parent = dir.parent;
-    if (parent.path == dir.path) break;
-    dir = parent;
-  }
-  fail('could not locate packages/grid_assets from ${Directory.current.path}');
-}
-
-/// The real package root, resolved once — also the formatter's working
-/// directory, so the oracle and the generator ask from the same place.
-final String _root = _packageRoot();
+/// The real package root — also the formatter's working directory, so the
+/// oracle and the generator ask from the same place.
+final String _root = packageRoot();
 
 /// The INDEPENDENT oracle: the RUNNING SDK's own `dart format`, spawned here
 /// as its own process, answering what bytes it would leave for [file].

@@ -9,23 +9,10 @@ import 'package:grid_assets/station_asset_registry.dart';
 import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
-String _packageRoot() {
-  var dir = Directory.current;
-  for (var i = 0; i < 6; i++) {
-    if (Directory(p.join(dir.path, 'extension', 'rubrics')).existsSync()) {
-      return dir.path;
-    }
-    final nested = Directory(p.join(dir.path, 'packages', 'grid_assets'));
-    if (nested.existsSync()) return nested.path;
-    final parent = dir.parent;
-    if (parent.path == dir.path) break;
-    dir = parent;
-  }
-  fail('could not locate packages/grid_assets from ${Directory.current.path}');
-}
+import '../support/package_root.dart';
 
 void main() {
-  final root = _packageRoot();
+  final root = packageRoot();
 
   test('the derived views reproduce the retired constants exactly', () {
     expect(vendedSkillIds, const [

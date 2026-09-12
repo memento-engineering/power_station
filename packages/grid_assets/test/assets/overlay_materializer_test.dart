@@ -16,6 +16,7 @@ import 'package:test/test.dart';
 
 import '../support/agents_root_fixture.dart';
 import '../support/asset_resolution_fixture.dart';
+import '../support/package_root.dart';
 
 /// A repository's OWN prose at the top of its root instruction file.
 const String _repoPreamble = '# power_station\n\nRead first: README.md\n\n';
@@ -29,27 +30,17 @@ const String _beadsBlock =
     'Run `bd ready` to find available work.\n'
     '<!-- END BEADS CODEX SETUP -->\n';
 
-/// Resolves this package's `extension/` dir the CWD-INDEPENDENT way (the
-/// loader's own package-config resolution), so the live-tree test never
-/// disagrees with the loader.
-///
-/// Never a cwd walk: `Directory.current` is process-global and the suites run
-/// concurrently, so the sibling suite that chdirs to a foreign dir to prove
-/// cwd-independent resolution (`track_d_assets_test`) would race a walk done
-/// from inside a test body here.
-String _extensionDir() => PackagedAssetLoader().root;
-
 /// The LIVE station registry resolved against this checkout — the real vended
 /// pack, selected exactly as a station selects it.
 GridAssetResolution _liveResolution({Map<String, String> args = const {}}) {
-  final packageRoot = p.dirname(_extensionDir());
+  final root = packageRoot();
   return resolveGridAssets(
     registry: GeneratedGridAssetRegistrant.registry,
     snapshot: SubstationFactsSnapshot(<SubstationKey, SubstationFacts>{
       kFixtureSubstation: SubstationFacts(
-        root: packageRoot,
+        root: root,
         dartPackages: const <String>['grid_assets', 'grid_sdk'],
-        packageRoots: <String, String>{'grid_assets': packageRoot},
+        packageRoots: <String, String>{'grid_assets': root},
       ),
     }),
     substation: kFixtureSubstation,
@@ -823,10 +814,9 @@ void main() {
       'the source has NO CLI and NO git dependency (UI-drivable — the Command is '
       'the only CLI seam, and the wire owns git exclusion)',
       () {
-        final packageRoot = p.dirname(_extensionDir());
         final source = File(
           p.join(
-            packageRoot,
+            packageRoot(),
             'lib',
             'src',
             'assets',

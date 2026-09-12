@@ -22,32 +22,14 @@ import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 import 'package:yaml/yaml.dart';
 
-/// Resolves this package's `extension/` dir by walking up from the cwd (the
-/// same walk the loader + track_d suite use), so the loader root and the
-/// manifest read never disagree on cwd.
-String _extensionDir() {
-  final candidates = <String>[
-    'extension',
-    p.join('packages', 'grid_assets', 'extension'),
-  ];
-  var dir = Directory.current;
-  for (var i = 0; i < 6; i++) {
-    for (final rel in candidates) {
-      final probe = Directory(p.join(dir.path, rel));
-      if (probe.existsSync() &&
-          Directory(p.join(probe.path, 'rubrics')).existsSync()) {
-        return probe.path;
-      }
-    }
-    final parent = dir.parent;
-    if (parent.path == dir.path) break;
-    dir = parent;
-  }
-  fail(
-    'could not locate packages/grid_assets/extension from '
-    '${Directory.current.path}',
-  );
-}
+import '../support/package_root.dart';
+
+/// This package's `extension/` dir, off the shared cwd-independent package
+/// root. Never a walk up from the process working
+/// directory: that is a process property and `dart test` runs the suites
+/// concurrently, so a walk from here could read a directory another file had
+/// pointed somewhere else.
+String _extensionDir() => p.join(packageRoot(), 'extension');
 
 /// The two INDEPENDENT instruction legs of the station overlay. A harness may
 /// carry its own instructions, so identical content between them is permitted
@@ -860,7 +842,7 @@ void main() {
         r'COMPOSE: (packages/\S+\.dart):(\d+)',
       ).firstMatch(template);
       expect(match, isNotNull, reason: 'the corpus carries the pointer');
-      final repoRoot = p.normalize(p.join(_extensionDir(), '..', '..', '..'));
+      final repoRoot = p.normalize(p.join(packageRoot(), '..', '..'));
       final target = File(p.join(repoRoot, match!.group(1)!));
       expect(
         target.existsSync(),

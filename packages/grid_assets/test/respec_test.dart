@@ -18,6 +18,7 @@ import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
 import 'support/asset_fakes.dart';
+import 'support/package_root.dart';
 
 const _gating = kSpecGatingRubric;
 const _critics =
@@ -151,6 +152,13 @@ const SpecRouteCapability _impatientRoute = SpecRouteCapability(
   lanePoll: Duration(milliseconds: 10),
   laneWaitBudget: Duration(milliseconds: 150),
 );
+
+/// The source of `grid_assets/lib/<relative>`, off the shared cwd-independent
+/// package root. Never a read relative to the process working directory: that
+/// is a process property and `dart test` runs the suites concurrently, so such
+/// a read landed inside whatever directory another file had set.
+String _libSource(String relative) =>
+    File(p.join(packageRoot(), 'lib', relative)).readAsStringSync();
 
 void main() {
   group('decideSpecRoute — the three-way spec matrix', () {
@@ -1171,7 +1179,7 @@ void main() {
   });
 
   test('validation paths contain no direct bead reads', () {
-    final specify = File('lib/src/code/specify.dart').readAsStringSync();
+    final specify = _libSource(p.join('src', 'code', 'specify.dart'));
     final validationRegion = specify.substring(
       specify.indexOf('class SpecValidationCapability'),
       specify.indexOf(
@@ -1179,7 +1187,7 @@ void main() {
         specify.indexOf('class SpecValidationCapability'),
       ),
     );
-    final respec = File('lib/src/code/respec.dart').readAsStringSync();
+    final respec = _libSource(p.join('src', 'code', 'respec.dart'));
     final deadlineRegion = respec.substring(
       respec.indexOf('if (!DateTime.now().isBefore(deadline))'),
       respec.indexOf('await Future<void>.delayed(lanePoll)'),

@@ -238,8 +238,8 @@ void main() {
 
       // The conventional document, read at its conventional relative path under
       // a root this test owns — never by pointing the PROCESS cwd at that root.
-      // `Directory.current` is process-global and `dart test` runs suites
-      // concurrently, so moving it here raced every sibling suite's source read.
+      // That is a process property and `dart test` runs suites concurrently, so
+      // moving it here raced every sibling suite's source read.
       final loaded = SiteBinding.loadJsonFile(site.path);
       expect(loaded.endpoints, {'local': _endpoint});
 

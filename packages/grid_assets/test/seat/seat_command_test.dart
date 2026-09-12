@@ -9,6 +9,8 @@ import 'package:grid_assets/grid_assets.dart';
 import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
+import '../support/package_root.dart';
+
 /// A fake harness process: records every plan and returns a programmed code.
 final class _RecordingRunner {
   _RecordingRunner({this.onLaunch, this.exitCode = 0});
@@ -112,13 +114,12 @@ void main() {
   }
 
   test('it carries NO vendor flag literal — the whole point of the rework', () {
-    String read(String rel) {
-      final local = File('lib/src/seat/$rel');
-      return (local.existsSync()
-              ? local
-              : File('packages/grid_assets/lib/src/seat/$rel'))
-          .readAsStringSync();
-    }
+    // Off the shared cwd-independent package root: the process working
+    // directory is a process property and `dart test` runs the suites
+    // concurrently, so a relative read resolved against another file's setting.
+    String read(String rel) => File(
+      p.join(packageRoot(), 'lib', 'src', 'seat', rel),
+    ).readAsStringSync();
 
     final source = read('seat_command.dart') + read('seat_launch.dart');
     for (final literal in const [

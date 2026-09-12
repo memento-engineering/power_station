@@ -15,14 +15,17 @@
 // Offline only — reads the bundled `extension/` files.
 import 'dart:io';
 
-import 'package:grid_assets/grid_assets.dart';
 import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
-/// The vended assets root, through the loader that already owns resolving it
-/// (package config first, cwd walk-up as fallback — so this suite runs from
-/// the package dir or the repo root alike).
-String _extensionDir() => PackagedAssetLoader().root;
+import '../support/package_root.dart';
+
+/// This package's `extension/` dir, off the shared cwd-independent package
+/// root. Never a walk up from the process working
+/// directory: that is a process property and `dart test` runs the suites
+/// concurrently, so a walk from here could read a directory another file had
+/// pointed somewhere else.
+String _extensionDir() => p.join(packageRoot(), 'extension');
 
 /// The section heading the cost posture lives under.
 const String kCostHeading = '## Cost — a request costs what the context costs';

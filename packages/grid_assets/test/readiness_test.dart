@@ -16,9 +16,11 @@ import 'dart:io';
 import 'package:beads_dart/beads_dart.dart';
 import 'package:grid_assets/grid_assets.dart';
 import 'package:grid_engine/grid_engine.dart';
+import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
 import 'support/asset_fakes.dart';
+import 'support/package_root.dart';
 
 /// A REFINED bead — a driveable type carrying a substantive human brief (modelled
 /// on the live `pow-kzx`, which the wide run's spec committee PASSED).
@@ -185,7 +187,7 @@ void main() {
       'grid_assets declares NO second driveable-type list — the engine\'s is '
       'CONSUMED (two definitions would drift and park work nobody meant to)',
       () {
-        final src = Directory('lib')
+        final src = Directory(p.join(packageRoot(), 'lib'))
             .listSync(recursive: true)
             .whereType<File>()
             .where((f) => f.path.endsWith('.dart'))

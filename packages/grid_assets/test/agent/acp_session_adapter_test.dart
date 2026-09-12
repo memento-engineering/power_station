@@ -13,6 +13,8 @@ import 'package:grid_runtime/grid_runtime.dart';
 import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
+import '../support/package_root.dart';
+
 class _Steers implements AgentSteerSource {
   final StreamController<ProcessSessionCommand> controller =
       StreamController<ProcessSessionCommand>();
@@ -406,11 +408,10 @@ List<String> _methods(_BridgeResult result) => result.trace
     .map((entry) => entry['method']! as String)
     .toList(growable: false);
 
-/// The hermetic ACP agent fixture SOURCE, resolved from either run directory.
-String _probePath() => <String>[
-  p.absolute('test/fixtures/acp_agent_probe.dart'),
-  p.absolute('packages/grid_assets/test/fixtures/acp_agent_probe.dart'),
-].firstWhere((path) => File(path).existsSync());
+/// The hermetic ACP agent fixture SOURCE, off the shared cwd-independent
+/// package root.
+String _probePath() =>
+    p.join(packageRoot(), 'test', 'fixtures', 'acp_agent_probe.dart');
 
 /// How many times this suite compiled the fixture. Asserted, not assumed: a
 /// child compiled from source PER TEST is what made this suite load sensitive.
@@ -1285,11 +1286,9 @@ void main() {
       isA<AcpSessionAdapter>(),
     );
 
-    final source = File('lib/src/code/code_capabilities.dart').existsSync()
-        ? File('lib/src/code/code_capabilities.dart').readAsStringSync()
-        : File(
-            'packages/grid_assets/lib/src/code/code_capabilities.dart',
-          ).readAsStringSync();
+    final source = File(
+      p.join(packageRoot(), 'lib', 'src', 'code', 'code_capabilities.dart'),
+    ).readAsStringSync();
     expect(
       RegExp(
         r'AgentSessionAdapterRegistry sessionAdapters =\s*'

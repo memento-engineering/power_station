@@ -21,9 +21,11 @@ import 'package:genesis_tree/genesis_tree.dart';
 import 'package:grid_assets/grid_assets.dart';
 import 'package:grid_engine/grid_engine.dart';
 import 'package:grid_runtime/grid_runtime.dart';
+import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
 import '../support/asset_fakes.dart';
+import '../support/package_root.dart';
 
 /// The ACP protocol session every armed channel binds to.
 const String _protocolSession = 'acp-session-1';
@@ -343,11 +345,11 @@ AgentPermissionPolicy _underProvider<TSeat extends ModelPreference>(
   return observed;
 }
 
-String _source(String relative) {
-  final local = File(relative);
-  if (local.existsSync()) return local.readAsStringSync();
-  return File('packages/grid_assets/$relative').readAsStringSync();
-}
+/// A package-local source file, off the shared cwd-independent package root.
+/// Never a read relative to the process working directory: that is a process
+/// property and `dart test` runs the suites concurrently.
+String _source(String relative) =>
+    File(p.joinAll([packageRoot(), ...relative.split('/')])).readAsStringSync();
 
 void main() {
   test('the seat identity comes from the typed seat arming', () {

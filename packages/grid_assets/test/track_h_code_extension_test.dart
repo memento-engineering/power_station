@@ -26,6 +26,7 @@ import 'package:test/test.dart';
 
 import 'support/asset_fakes.dart';
 import 'support/asset_resolution_fixture.dart';
+import 'support/package_root.dart';
 
 /// The capability's (ambient tree, per-step args) pair — the context rip-out
 /// shape: the Bead/Workspace/ServiceBundle ride the tree as ambient values; the
@@ -1487,7 +1488,8 @@ void main() {
       // Recompute that composition-time value the SAME way the registry does,
       // so the assertion pins the EXACT ref the null branch must resolve.
       final stationOverlayRoot = p.join(
-        PackagedAssetLoader().root,
+        packageRoot(),
+        'extension',
         'station_overlay',
       );
       final expectedRef = resolveOverlaySourceRefSync(stationOverlayRoot);

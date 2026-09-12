@@ -73,10 +73,10 @@ void main() {
         // walk-up is guaranteed to miss, so a passing load PROVES the package
         // config resolved it (not an accidental walk-up hit).
         //
-        // Run as a CHILD process, never by assigning `Directory.current`: that
-        // property is process-global and `dart test` runs suites concurrently,
-        // so proving cwd-independence here by moving the cwd raced every
-        // sibling suite's source reads.
+        // Run as a CHILD process, never by assigning the process working
+        // directory: that is a process property and `dart test` runs suites
+        // concurrently, so proving cwd-independence here by moving it raced
+        // every sibling suite's source reads.
         final foreign = await Directory.systemTemp.createTemp(
           'grid_assets_foreign_cwd_',
         );

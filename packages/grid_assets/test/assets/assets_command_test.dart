@@ -18,6 +18,7 @@ import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
 import '../support/asset_resolution_fixture.dart';
+import '../support/package_root.dart';
 
 /// The composing station's resident-station context, rooted at [root].
 class _StationDelegate extends sdk.GridDelegate {
@@ -82,13 +83,6 @@ File _write(Directory root, List<String> segments, String contents) =>
     File(p.join(root.path, p.joinAll(segments)))
       ..createSync(recursive: true)
       ..writeAsStringSync(contents);
-
-/// This package's root, resolved the CWD-INDEPENDENT way (the loader's own
-/// package-config resolution, whose root is `<packageRoot>/extension`). Never a
-/// cwd walk: `Directory.current` is process-global and the suites run
-/// concurrently, so a sibling suite that chdirs to prove cwd-independence would
-/// race a walk done here.
-String _packageRoot() => p.dirname(PackagedAssetLoader().root);
 
 void main() {
   late Directory temp;
@@ -597,7 +591,7 @@ void main() {
           kGridHomeSubstation: SubstationFacts(
             root: roots[kGridHomeSubstation]!,
             dartPackages: const <String>['grid_assets', 'grid_sdk'],
-            packageRoots: <String, String>{'grid_assets': _packageRoot()},
+            packageRoots: <String, String>{'grid_assets': packageRoot()},
           ),
         }),
       );
@@ -652,7 +646,7 @@ void main() {
 
   group('it COMMITS NOTHING — by construction', () {
     test('the operator-install source names no git and no process surface', () {
-      final dir = Directory(p.join(_packageRoot(), 'lib', 'src', 'assets'));
+      final dir = Directory(p.join(packageRoot(), 'lib', 'src', 'assets'));
       final source = [
         File(p.join(dir.path, 'assets_command.dart')).readAsStringSync(),
         File(p.join(dir.path, 'overlay_install.dart')).readAsStringSync(),
@@ -683,7 +677,7 @@ void main() {
       () {
         final source = File(
           p.join(
-            _packageRoot(),
+            packageRoot(),
             'lib',
             'src',
             'assets',

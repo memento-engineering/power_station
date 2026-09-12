@@ -186,9 +186,9 @@ Map<String, dynamic> _liveEnvelope(
 /// handing it that root and the copied corpus path.
 ///
 /// The root is passed to [runRecall] as its `workingDirectory`; nothing assigns
-/// `Directory.current`. That property is process-global and `dart test` runs
-/// test files in concurrent isolates of one process, so the record-mode write
-/// this fixture exists to contain used to move the cwd out from under every
+/// the process working directory. That is a process property and `dart test`
+/// runs test files in concurrent isolates of one process, so the record-mode
+/// write this fixture exists to contain used to move it out from under every
 /// sibling suite reading a relative path.
 Future<T> _inFixtureRoot<T>(
   Future<T> Function(String root, String fixturePath) body,
