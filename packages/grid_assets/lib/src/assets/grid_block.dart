@@ -13,7 +13,9 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:grid_sdk/grid_sdk.dart';
+import 'package:meta/meta.dart';
 import 'package:path/path.dart' as p;
+import 'package:pub_semver/pub_semver.dart';
 import 'package:yaml/yaml.dart';
 
 /// The marker BOTH generated outputs carry, so a reader tells a generated file
@@ -93,11 +95,23 @@ final class GridBlock {
 GridBlock parseGridBlock({
   required String pubspecYaml,
   required ArtifactPathProbe pathExists,
-}) {
+}) => _blockOf(_loadPubspecDocument(pubspecYaml), pathExists);
+
+/// Loads a pubspec into its YAML map, refusing LOUD when the document is not a
+/// map.
+///
+/// The ONE load: a caller that needs both the `grid:` block and another
+/// pubspec field ([runGridAssetsGenerator] needs `environment.sdk`) parses the
+/// document here once and reads both off it.
+YamlMap _loadPubspecDocument(String pubspecYaml) {
   final doc = loadYaml(pubspecYaml);
   if (doc is! YamlMap) {
     throw const GridBlockException('grid: the pubspec is not a YAML map');
   }
+  return doc;
+}
+
+GridBlock _blockOf(YamlMap doc, ArtifactPathProbe pathExists) {
   final name = doc['name'];
   if (name is! String || name.trim().isEmpty) {
     throw const GridBlockException(
@@ -670,6 +684,66 @@ const String kGeneratedPackPath = 'lib/src/assets/grid_asset_pack.dart';
 /// The generated MCP mirror, relative to the package root.
 const String kGeneratedMcpPath = 'extension/mcp/config.yaml';
 
+/// The `dart format` process seam — structurally [Process.runSync], narrowed
+/// to the arguments this normalizer passes.
+///
+/// Private, and spelled STRUCTURALLY again at the one public site that takes
+/// it: no runner name — alias or class — enters this library's public
+/// surface, so injecting the seam costs a caller no new import.
+typedef _FormatProcessRunner =
+    ProcessResult Function(
+      String executable,
+      List<String> arguments, {
+      String? workingDirectory,
+      Encoding? stdoutEncoding,
+      Encoding? stderrEncoding,
+    });
+
+/// The Dart LANGUAGE VERSION the package described by [doc] is authored
+/// against — the inclusive lower bound of its `environment.sdk` constraint,
+/// as `<major>.<minor>`.
+///
+/// This, never `latest`, is what the generated Dart is formatted at. A
+/// committed registry has to satisfy `dart format --set-exit-if-changed` on
+/// EVERY SDK a consumer runs, and that gate reads the package's own language
+/// version out of this same field. Rendering at `latest` instead made the
+/// bytes a function of whichever SDK ran the generator: the identical block,
+/// regenerated on a newer SDK, produced a file the older SDK called dirty and
+/// vice versa, so no single committed file could be clean on both.
+///
+/// Guards LOUD or GONE: a missing `environment:` map, a missing or malformed
+/// `sdk:` constraint, and a constraint with no inclusive floor are each a
+/// [GridBlockException] naming [package] and the field — thrown before either
+/// output is rendered, compared, or written, because a generator that cannot
+/// know the language version cannot produce a checkable file at all.
+String _packageLanguageVersion(YamlMap doc, String package) {
+  Never refuse(String reason) =>
+      throw GridBlockException('grid: "$package": environment.sdk: $reason');
+
+  final environment = doc['environment'];
+  if (environment is! YamlMap) {
+    refuse('the pubspec declares no `environment:` map');
+  }
+  final sdk = environment['sdk'];
+  if (sdk is! String || sdk.trim().isEmpty) {
+    refuse('must be a non-empty Dart SDK version constraint');
+  }
+  VersionConstraint? parsed;
+  try {
+    parsed = VersionConstraint.parse(sdk);
+  } on FormatException catch (error) {
+    refuse('"$sdk" is not a version constraint (${error.message})');
+  }
+  if (parsed is! VersionRange || parsed.min == null || !parsed.includeMin) {
+    refuse(
+      '"$sdk" declares no inclusive lower bound, so the language version '
+      'this package is authored against is unknowable',
+    );
+  }
+  final floor = parsed.min!;
+  return '${floor.major}.${floor.minor}';
+}
+
 /// Normalizes a rendered output so a fresh render is byte-equal to what the
 /// repository formatter would leave on disk.
 ///
@@ -685,6 +759,13 @@ const String kGeneratedMcpPath = 'extension/mcp/config.yaml';
 /// `dart format --set-exit-if-changed` in the lane. A bare `dart` from `PATH`
 /// would reintroduce the same drift, one SDK wide.
 ///
+/// [languageVersion] is the CONSUMING PACKAGE's own language version, never
+/// `latest`: it is what makes those two questions the same question on every
+/// SDK. See [_packageLanguageVersion].
+///
+/// [runProcess] is the process seam, defaulted to [Process.runSync]; a test
+/// substitutes a Fake to observe the invocation without spawning a Dart.
+///
 /// Every non-Dart output — the YAML mirror included — passes through untouched.
 ///
 /// Guards LOUD or GONE: a formatter that refuses is a [GridBlockException]
@@ -694,20 +775,22 @@ String _formatGeneratedOutput(
   String relativePath,
   String source, {
   required String packageRoot,
+  required String languageVersion,
+  required _FormatProcessRunner runProcess,
 }) {
   if (p.extension(relativePath) != '.dart') return source;
   final scratch = Directory.systemTemp.createTempSync('grid-block-format-');
   try {
     final input = File(p.join(scratch.path, p.basename(relativePath)))
       ..writeAsStringSync(source);
-    final result = Process.runSync(
+    final result = runProcess(
       Platform.resolvedExecutable,
       [
         'format',
         '--output=show',
         '--show=none',
         '--summary=none',
-        '--language-version=latest',
+        '--language-version=$languageVersion',
         input.path,
       ],
       workingDirectory: packageRoot,
@@ -734,25 +817,40 @@ String _formatGeneratedOutput(
 ///
 /// ATOMIC: both outputs are rendered from ONE parse before either is written,
 /// so a malformed block ([GridBlockException]) leaves both files untouched.
-/// Every output is normalized by the running SDK's own formatter before BOTH
-/// the [check] comparison and the write, so a fresh render survives the lane's
-/// `dart format --set-exit-if-changed` whatever `dart_style` this workspace
-/// resolved. Synchronous, because every pack's `tool/` wrapper assigns the
-/// result straight to `exitCode`.
+/// Every output is normalized by the running SDK's own formatter — at the
+/// language version the pubspec's `environment.sdk` floor declares — before
+/// BOTH the [check] comparison and the write, so ONE committed render survives
+/// the lane's `dart format --set-exit-if-changed` on every SDK the fleet runs
+/// and whatever `dart_style` this workspace resolved. Synchronous, because
+/// every pack's `tool/` wrapper assigns the result straight to `exitCode`.
 /// Returns a process exit code — `0` current, `1` stale under [check].
 /// [out] defaults to `stdout`.
 int runGridAssetsGenerator({
   required String packageRoot,
   bool check = false,
   StringSink? out,
+  @visibleForTesting
+  ProcessResult Function(
+        String executable,
+        List<String> arguments, {
+        String? workingDirectory,
+        Encoding? stdoutEncoding,
+        Encoding? stderrEncoding,
+      })
+      runProcess =
+      Process.runSync,
 }) {
   final sink = out ?? stdout;
-  final block = parseGridBlock(
-    pubspecYaml: File(p.join(packageRoot, 'pubspec.yaml')).readAsStringSync(),
-    pathExists: (relative) =>
+  final doc = _loadPubspecDocument(
+    File(p.join(packageRoot, 'pubspec.yaml')).readAsStringSync(),
+  );
+  final block = _blockOf(
+    doc,
+    (relative) =>
         File(p.join(packageRoot, relative)).existsSync() ||
         Directory(p.join(packageRoot, relative)).existsSync(),
   );
+  final languageVersion = _packageLanguageVersion(doc, block.package);
   final rendered = <String, String>{
     kGeneratedPackPath: renderGridAssetPackLibrary(block),
     kGeneratedMcpPath: renderMcpConfig(block),
@@ -763,6 +861,8 @@ int runGridAssetsGenerator({
         entry.key,
         entry.value,
         packageRoot: packageRoot,
+        languageVersion: languageVersion,
+        runProcess: runProcess,
       ),
   };
   final report =
