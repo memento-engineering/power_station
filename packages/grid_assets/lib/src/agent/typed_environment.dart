@@ -2,12 +2,13 @@
 /// capability asks for its inference environment by TYPE and VALUE instead of
 /// by name.
 ///
-/// Four surfaces and nothing else: [ModelPreference] (an ordered preference
-/// over complete [AgentEnvironment] values), [AvailableEnvironments] (which of
-/// them are PRESENT), [firstAvailable] (the ONE availability walk), and
-/// [resolveEnvironment] (specific type, then the generic, then the walk). The
-/// TYPE is the scope and nearest ancestor wins, so there is no invocation key,
-/// no rule table and no engine hook.
+/// Five surfaces and nothing else: [ModelPreference] (an ordered preference
+/// over complete [AgentEnvironment] values), [SeatPreference] (a preference
+/// that also vends the seed providing it, so the set of seats is OPEN),
+/// [AvailableEnvironments] (which of them are PRESENT), [firstAvailable] (the
+/// ONE availability walk), and [resolveEnvironment] (specific type, then the
+/// generic, then the walk). The TYPE is the scope and nearest ancestor wins,
+/// so there is no invocation key, no rule table and no engine hook.
 ///
 /// VALUE-KEYED SELECTION, NAME-KEYED TRANSPORT (ADR-0006 D2; the mechanism is
 /// ADR-0000 A35). Legality is not skipped - it moves to where values ENTER the
@@ -60,6 +61,31 @@ class ModelPreference {
 
   @override
   String toString() => '$runtimeType($entries)';
+}
+
+/// A SEAT's preference: a [ModelPreference] subtype that also vends the SEED
+/// which provides it, so the set of seats is OPEN.
+///
+/// A seat is a TYPE, and the type is the scope (ADR-0006 D2) - but a scope is
+/// only reachable once something MOUNTS it, and the mounting seed has to know
+/// the exact static type to provide under. [provider] is where a seat type
+/// answers that for itself, so a consumer can introduce a seat without
+/// editing the collection that arms it or the seed that mounts it.
+///
+/// The one member is deliberately BEHAVIOR, not state: selection still reads
+/// nothing but the type and [entries], so a seat carries no second key.
+/// Implementations return a fresh, unparented [SingleChildSeed] - typically a
+/// `SeatProvider<Self>(this)` - and take no [TreeContext]: the seed is
+/// authored, not resolved.
+abstract class SeatPreference extends ModelPreference {
+  /// Creates the seat's preference over [entries], most-preferred first.
+  const SeatPreference(super.entries);
+
+  /// The seed that provides THIS seat over a subtree, under this seat's own
+  /// exact static type. Called once per mount, in a `build`; it reads no
+  /// ambient state and holds no child of its own (an enclosing `Nest` supplies
+  /// the downstream).
+  SingleChildSeed provider();
 }
 
 /// The environments PRESENT right now - availability as PRESENCE (ADR-0006 D3),
