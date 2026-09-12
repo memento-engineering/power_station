@@ -627,7 +627,12 @@ class OverlayMaterializer {
     }
     final existing = target.readAsStringSync();
     final owned = marked.bodyOf(existing);
-    if (owned == rendered) return OverlayFileUnchanged(relativePath);
+    // Compared against the body the BLOCK carries, never the raw render: a block
+    // is newline-terminated by construction, so a source file that ends without
+    // one would otherwise read as drift forever and never converge.
+    if (owned != null && owned == marked.bodyOf(block)) {
+      return OverlayFileUnchanged(relativePath);
+    }
     if (owned == null) {
       if (marked.containsAnyMarker(existing)) {
         return OverlayFileBlocked(

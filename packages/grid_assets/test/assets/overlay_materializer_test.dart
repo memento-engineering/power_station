@@ -885,6 +885,35 @@ void main() {
       );
     });
 
+    test('a vended body with NO trailing newline still converges — the block '
+        'terminates itself, so the comparison must too', () {
+      final f = TestAssetResolutionFixture(
+        root: temp,
+        assets: <GridAssetDefinition>[fixtureAgentsInstructions()],
+        bodies: const <String, String>{
+          kFixtureAgentsRootSourcePath: '# Doctrine\n\nno trailing newline',
+        },
+      );
+      const m = OverlayMaterializer();
+
+      m.materializeSync(
+        resolution: f.resolution(),
+        targetRoot: target.path,
+        sourceRef: 'ref1',
+      );
+      final second = m.materializeSync(
+        resolution: f.resolution(),
+        targetRoot: target.path,
+        sourceRef: 'ref1',
+      );
+
+      expect(
+        second.unchanged.single.relativePath,
+        kAgentsRootRelativePath,
+        reason: 'a re-install of the same source is never perpetual drift',
+      );
+    });
+
     test('bd block is preserved while the generated AGENTS block composes', () {
       final f = rootFixture();
       const existing = '$_repoPreamble$_beadsBlock';
