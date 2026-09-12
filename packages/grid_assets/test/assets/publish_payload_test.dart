@@ -6,42 +6,49 @@ import 'package:test/test.dart';
 import '../support/package_root.dart';
 
 void main() {
-  test('pub publish includes the complete visible overlay payload', () async {
-    // The package root, and the dry run's working directory, come off the
-    // shared cwd-independent anchor — never the process working directory,
-    // which is a process property a concurrently scheduled suite could move out
-    // from under a spawn.
-    final root = packageRoot();
-    // The root is named TWICE on purpose: `--directory` tells pub which package
-    // to pack, and `workingDirectory` pins the spawn's own cwd. Either alone
-    // would leave the dry run resolving something off the process cwd.
-    final result = await Process.run(Platform.resolvedExecutable, [
-      'pub',
-      '--directory=$root',
-      'publish',
-      '--dry-run',
-      '--verbose',
-    ], workingDirectory: root);
-    expect(result.exitCode, 0, reason: '${result.stdout}\n${result.stderr}');
-    final output = '${result.stdout}\n${result.stderr}'.replaceAll('\\', '/');
-    final expected = [
-      for (final leg in const ['agents', 'claude'])
-        ...Directory(p.join(root, 'extension', 'station_overlay', leg))
-            .listSync(recursive: true)
-            .whereType<File>()
-            .map(
-              (file) => p.relative(file.path, from: root).replaceAll('\\', '/'),
-            ),
-    ]..sort();
-    expect(expected, hasLength(19));
-    for (final path in expected) {
-      expect(
-        output,
-        contains(path),
-        reason: '$path missing from publish payload',
-      );
-    }
-    expect(output, isNot(contains('extension/station_overlay/.claude/')));
-    expect(output, isNot(contains('extension/station_overlay/.agents/')));
-  });
+  test(
+    'pub publish includes the complete visible overlay payload',
+    () async {
+      // The package root, and the dry run's working directory, come off the
+      // shared cwd-independent anchor — never the process working directory,
+      // which is a process property a concurrently scheduled suite could move
+      // out from under a spawn.
+      final root = packageRoot();
+      // The root is named TWICE on purpose: `--directory` tells pub which
+      // package to pack, and `workingDirectory` pins the spawn's own cwd.
+      // Either alone would leave the dry run resolving something off the
+      // process cwd.
+      final result = await Process.run(Platform.resolvedExecutable, [
+        'pub',
+        '--directory=$root',
+        'publish',
+        '--dry-run',
+        '--verbose',
+      ], workingDirectory: root);
+      expect(result.exitCode, 0, reason: '${result.stdout}\n${result.stderr}');
+      final output = '${result.stdout}\n${result.stderr}'.replaceAll('\\', '/');
+      final expected = [
+        for (final leg in const ['agents', 'claude'])
+          ...Directory(p.join(root, 'extension', 'station_overlay', leg))
+              .listSync(recursive: true)
+              .whereType<File>()
+              .map(
+                (file) =>
+                    p.relative(file.path, from: root).replaceAll('\\', '/'),
+              ),
+      ]..sort();
+      expect(expected, hasLength(19));
+      for (final path in expected) {
+        expect(
+          output,
+          contains(path),
+          reason: '$path missing from publish payload',
+        );
+      }
+      expect(output, isNot(contains('extension/station_overlay/.claude/')));
+      expect(output, isNot(contains('extension/station_overlay/.agents/')));
+    },
+    // genesis_lint adds analyzer-extension work to this publish dry run on CI.
+    timeout: Timeout(Duration(minutes: 3)),
+  );
 }

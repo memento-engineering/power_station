@@ -732,9 +732,15 @@ class SpecRouteCapability extends RouteCapability {
           );
         }
         await Future<void>.delayed(lanePoll);
+        // A context torn down across the park is a route that no longer has a
+        // node to decide for. Unwind on the SAME channel as an explicit
+        // cancel — kept a separate statement from the token check so the
+        // handle is provably mounted before it is read again.
+        if (!context.mounted) throw kRouteCancelled;
         if (args.cancel.isCancelled) throw kRouteCancelled;
-        // Re-read the ambient view for the next attempt (post-cancel-check —
-        // the effect verb is snapshot-at-read and safe across the wait).
+        // Re-read the ambient view for the next attempt (post-mounted- and
+        // post-cancel-check — the effect verb is snapshot-at-read and safe
+        // across the wait).
         siblings =
             context.getInheritedSeedOfExactType<SiblingView>() ??
             const SiblingView();

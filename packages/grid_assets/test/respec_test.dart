@@ -12,12 +12,14 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:beads_dart/beads_dart.dart' show Bead;
+import 'package:genesis_tree/genesis_tree.dart';
 import 'package:grid_assets/grid_assets.dart';
 import 'package:grid_engine/grid_engine.dart';
 import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
 import 'support/asset_fakes.dart';
+import 'support/mounted_route_context.dart';
 import 'support/package_root.dart';
 
 const _gating = kSpecGatingRubric;
@@ -1146,6 +1148,72 @@ void main() {
       expect((out as Escalate).reason, contains('author-owed'));
       expect(out.reason, contains('whose names win?'));
       expect(readRespecLedger(ws.path, expectedSessionRoot: 'tg-1'), isNull);
+    });
+
+    // The positive control for the mid-park MOUNTED guard: every other route
+    // test here drives a `FakeTreeContext`, whose `mounted` is a flag the test
+    // itself assigns. This one tears down a REAL tree under the running route,
+    // so what is proven is that a genesis branch handle actually goes
+    // unmounted with its subtree and that the route unwinds on the handle it
+    // captured at entry — see `support/mounted_route_context.dart` for why the
+    // fake cannot carry that.
+    test('SpecRouteCapability unmount during lanePoll throws kRouteCancelled '
+        'before a SiblingView re-read', () async {
+      // One JUDGEMENT lane, no artifact planted and no result recorded, over
+      // a workspace that EXISTS: the live join classifies it LATE and parks
+      // on `lanePoll` with the budget nowhere near spent.
+      final harness = mountRouteHarness(
+        siblings: const SiblingView(),
+        ambient: (child) => InheritedSeed<Workspace>(
+          value: testWorkspace(
+            'tg-1',
+            workspaceDir: ws.path,
+            branch: 'grid/tg-1',
+          ),
+          child: child,
+        ),
+        route: (context) =>
+            const SpecRouteCapability(
+              lanePoll: Duration(milliseconds: 20),
+              laneWaitBudget: Duration(seconds: 1),
+            ).route(
+              context,
+              stepArgs(
+                'tg-1/spec_review/route',
+                params: const {
+                  'critics': 'coherence',
+                  'gating': _gating,
+                  'grid.round': '0',
+                },
+              ),
+            ),
+      );
+      addTearDown(harness.dispose);
+
+      // The entry read landed, so the tally is live and a later re-read
+      // would be visible.
+      expect(harness.siblingViewReads, greaterThanOrEqualTo(1));
+      final readsAtPark = harness.siblingViewReads;
+
+      harness.unmount();
+
+      // The EXACT cancellation handle — the same channel an explicit cancel
+      // unwinds on, never a verdict arm, and never the bare `StateError`
+      // genesis throws for a read on a dead branch. THIS is the assertion
+      // that discriminates: delete the guard and the re-read below raises
+      // that `StateError` instead.
+      await expectLater(harness.future, throwsA(same(kRouteCancelled)));
+      // And the ordering, pinned separately. Today genesis REFUSES a
+      // post-unmount read outright, so an unguarded route never reaches the
+      // provider either — this holds by that refusal as much as by the
+      // guard. It is here so the control still fails if that refusal is
+      // ever relaxed to a null answer, which would leave the guard as the
+      // only thing between an unmounted route and a decision.
+      expect(
+        harness.siblingViewReads,
+        readsAtPark,
+        reason: 'the guard must fire BEFORE the post-park re-read',
+      );
     });
   });
 
