@@ -1,9 +1,13 @@
 /// The SEAT preference types (epic `pow-n6n`, bead `pow-n6n.2`) - the four
-/// `ModelPreference` subclasses the six spawn sites resolve by, plus the
+/// `SeatPreference` subclasses the six spawn sites resolve by, plus the
 /// critics' lane aspect.
 ///
 /// `typed_environment.dart` owns the MECHANISM (bead `pow-n6n.1`); this library
-/// owns the VOCABULARY. The TYPE is the scope (ADR-0006 D2): a station mounts
+/// owns the VOCABULARY. Four is what this pack VENDS, never what the mechanism
+/// admits: a seat is any [SeatPreference], it vends its own provider seed, and
+/// [TypedEnvironmentProvider] mounts whatever ordered collection it is armed
+/// with - so a station adds a seat type without editing this pack. The TYPE is
+/// the scope (ADR-0006 D2): a station mounts
 /// `InheritedSeed<BuildAgentEnvironment>` beside `InheritedSeed<ModelPreference>`
 /// and the build seat shadows the station default without either naming a
 /// string. A seat scopes by nesting under its Substation.
@@ -15,10 +19,13 @@
 /// invalidation to its own lane over `genesis_tree`'s `InheritedModelSeed`.
 ///
 /// The MECHANISM that mounts and resolves those seats lives here too:
-/// [AgentArming] is the pure VALUE naming one environment per seat,
-/// [TypedEnvironmentProvider] is the ONE seed both the station rung and the
-/// per-substation rung mount (ADR-0002 D5), and [SeatEnvironments] is the
-/// offline projection of all four resolutions at a point in the tree. A
+/// [SeatProvider] and [CriticSeatProvider] are the two provider shapes a seat
+/// type vends, [AgentArming] is the pure VALUE naming one environment per
+/// VENDED seat (and an `Iterable<SeatPreference>`, so it composes with any
+/// other ordered collection of seats), [TypedEnvironmentProvider] is the ONE
+/// seed both the station rung and the per-substation rung mount (ADR-0002 D5),
+/// and [SeatEnvironments] is the offline projection of the four vended
+/// resolutions at a point in the tree. A
 /// station's own NAMED environments and ladders stay in that station's package
 /// - mechanism is vended, posture is not.
 ///
@@ -35,25 +42,58 @@ import 'environment_registry.dart';
 import 'permission_policy.dart';
 import 'typed_environment.dart';
 
+/// Provides ONE [SeatPreference] over a subtree under its EXACT static type
+/// [T] - the provider seed a plain seat type vends from `provider()`.
+///
+/// A `SingleChildStatelessSeed` rather than a bare `InheritedSeed` because
+/// `InheritedSeed` requires its child at construction and so cannot be a link
+/// in a `Nest`; this wrapper is the one line that bridges that, and it is what
+/// lets [TypedEnvironmentProvider] compose an arming it does not enumerate.
+///
+/// [T] is written by the seat type itself (`SeatProvider<SpecAgentEnvironment>`
+/// from `SpecAgentEnvironment.provider`), which is why the mounted value keeps
+/// the exact type `resolveEnvironment` reads by.
+final class SeatProvider<T extends SeatPreference>
+    extends SingleChildStatelessSeed {
+  /// Provides [value] over [child] as an `InheritedSeed<T>`.
+  const SeatProvider(this.value, {super.child, super.key});
+
+  /// The seat preference this seed provides.
+  final T value;
+
+  @override
+  Seed buildWithChild(TreeContext context, Seed child) =>
+      InheritedSeed<T>(value: value, child: child);
+}
+
 /// The SPEC seat - `SpecifyCapability` (its first-round and its respec spawn are
 /// the same site). Folded `pow-t1w`'s architect role, which bead `pow-n6n.4`
 /// deleted (ADR-0006 D5).
-class SpecAgentEnvironment extends ModelPreference {
+class SpecAgentEnvironment extends SeatPreference {
   /// Creates the spec seat's preference, most-preferred first.
   const SpecAgentEnvironment(super.entries);
+
+  @override
+  SingleChildSeed provider() => SeatProvider<SpecAgentEnvironment>(this);
 }
 
 /// The GATHER seat - the discovery explorers (`DiscoveryLensCapability`, one
 /// class over three lenses, all read-only and all one seat).
-class GatherAgentEnvironment extends ModelPreference {
+class GatherAgentEnvironment extends SeatPreference {
   /// Creates the gather seat's preference, most-preferred first.
   const GatherAgentEnvironment(super.entries);
+
+  @override
+  SingleChildSeed provider() => SeatProvider<GatherAgentEnvironment>(this);
 }
 
 /// The BUILD seat - the coding agent (`AgentCapability`).
-class BuildAgentEnvironment extends ModelPreference {
+class BuildAgentEnvironment extends SeatPreference {
   /// Creates the build seat's preference, most-preferred first.
   const BuildAgentEnvironment(super.entries);
+
+  @override
+  SingleChildSeed provider() => SeatProvider<BuildAgentEnvironment>(this);
 }
 
 /// One critic LANE: the rubric id a critic already carries
@@ -88,7 +128,7 @@ class CriticLane {
 /// value routes them: [entries] is the shared preference and [lanes] overrides
 /// it per rubric (ADR-0006 D4), so a station can send `decision-alignment` somewhere
 /// else without a second provider.
-class CriticAgentEnvironment extends ModelPreference {
+class CriticAgentEnvironment extends SeatPreference {
   /// Creates the critic seat's shared preference over [entries], with optional
   /// per-[lanes] overrides.
   const CriticAgentEnvironment(super.entries, {this.lanes = const {}});
@@ -96,6 +136,12 @@ class CriticAgentEnvironment extends ModelPreference {
   /// Per-lane overrides of [entries], keyed by the critic's own rubric id. A
   /// lane absent here rides [entries].
   final Map<CriticLane, List<AgentEnvironment>> lanes;
+
+  /// The critic's own provider is [CriticSeatProvider], not the plain
+  /// [SeatProvider]: a build-time dependent keeps D4's lane-scoped
+  /// invalidation, and a spawn edge pays nothing for it.
+  @override
+  SingleChildSeed provider() => CriticSeatProvider(this);
 
   /// The preference [lane] must walk: its own override when this value routes
   /// it, else the shared [entries]. Returns a bare [ModelPreference] because
@@ -164,6 +210,22 @@ class CriticEnvironmentSeed
   );
 }
 
+/// The CRITIC seat's provider seed - [SeatProvider]'s counterpart for the one
+/// seat whose value is aspect-scoped, so `provider()` can hand
+/// [TypedEnvironmentProvider] a `Nest` link that mounts a
+/// [CriticEnvironmentSeed] rather than a plain `InheritedSeed`.
+final class CriticSeatProvider extends SingleChildStatelessSeed {
+  /// Provides [value] over [child] as a [CriticEnvironmentSeed].
+  const CriticSeatProvider(this.value, {super.child, super.key});
+
+  /// The critic seat preference this seed provides.
+  final CriticAgentEnvironment value;
+
+  @override
+  Seed buildWithChild(TreeContext context, Seed child) =>
+      CriticEnvironmentSeed(value: value, child: child);
+}
+
 /// One ARMING of the TYPED environment seats - a station's or a seat's say in
 /// which environment each capability runs on. A pure VALUE; it carries no
 /// behavior and reaches no service. A null field leaves that seat to the
@@ -175,7 +237,14 @@ class CriticEnvironmentSeed
 /// FOUR TYPED SEATS AND NOTHING ELSE - the POST-role-retirement shape. There is
 /// no role map and no role rung: ADR-0006 D5 retired them and bead `pow-n6n.4`
 /// carried it out, leaving the typed lookup as the whole environment axis.
-class AgentArming {
+///
+/// Four is this pack's VENDED shape, not a closed universe. `AgentArming` IS an
+/// `Iterable<SeatPreference>` - the type [TypedEnvironmentProvider] arms - so a
+/// station that declares its own seat type composes it without a fifth field
+/// here: `<SeatPreference>[...arming, MyAgentEnvironment([...])]`. Iterating
+/// yields the armed seats in the same stable order [seats] does, which is what
+/// a boot-eager arming guard walks to name an offending seat BY TYPE.
+class AgentArming extends Iterable<SeatPreference> {
   /// Creates an arming over the seats it names; every field is optional.
   const AgentArming({this.build, this.spec, this.critic, this.gather});
 
@@ -192,17 +261,22 @@ class AgentArming {
   final GatherAgentEnvironment? gather;
 
   /// Whether this arming says nothing at all.
+  @override
   bool get isEmpty =>
       build == null && spec == null && critic == null && gather == null;
 
   /// The armed seats, BUILD first - the stable order a station's boot-eager
-  /// arming guard walks.
-  Iterable<ModelPreference> get seats => [
+  /// arming guard walks, and the order [TypedEnvironmentProvider] nests them
+  /// in (the first is outermost).
+  Iterable<SeatPreference> get seats => [
     if (build != null) build!,
     if (spec != null) spec!,
     if (critic != null) critic!,
     if (gather != null) gather!,
   ];
+
+  @override
+  Iterator<SeatPreference> get iterator => seats.iterator;
 
   @override
   bool operator ==(Object other) =>
@@ -228,6 +302,13 @@ class AgentArming {
 /// resolving through the enclosing provider, because [resolveEnvironment] reads
 /// by EXACT type and finds the nearest ancestor of that type.
 ///
+/// THE SEAT SET IS OPEN. [arming] is any ordered `Iterable<SeatPreference>` -
+/// [AgentArming] is one - and each seat vends the seed that provides it
+/// (`SeatPreference.provider`), so this build enumerates no seat type and a
+/// station introduces one without editing this pack. Composition is
+/// `genesis_tree`'s own `Nest`: it wraps [child] with each link in order, the
+/// FIRST outermost, which is the declaration order the arming yields.
+///
 /// THE MOUNTING SEED, so this is where the SUBSCRIBING build verb would belong
 /// if a value here were derived (ADR-0000 A35(6)). Nothing here is derived -
 /// [arming] is an authored VALUE - so this build reads no ambient state at all.
@@ -239,36 +320,14 @@ final class TypedEnvironmentProvider extends SingleChildStatelessSeed {
     super.key,
   });
 
-  /// The seats this provider mounts.
-  final AgentArming arming;
+  /// The seats this provider mounts, outermost first.
+  final Iterable<SeatPreference> arming;
 
   @override
-  Seed buildWithChild(TreeContext context, Seed child) {
-    var below = child;
-    final gather = arming.gather;
-    if (gather != null) {
-      below = InheritedSeed<GatherAgentEnvironment>(
-        value: gather,
-        child: below,
-      );
-    }
-    final critic = arming.critic;
-    if (critic != null) {
-      // CriticEnvironmentSeed, not a plain InheritedSeed: a BUILD-time
-      // dependent may scope its invalidation to ONE CriticLane (ADR-0006 D4).
-      // Spawn edges read the same value with the effect verb and pay nothing.
-      below = CriticEnvironmentSeed(value: critic, child: below);
-    }
-    final spec = arming.spec;
-    if (spec != null) {
-      below = InheritedSeed<SpecAgentEnvironment>(value: spec, child: below);
-    }
-    final build = arming.build;
-    if (build != null) {
-      below = InheritedSeed<BuildAgentEnvironment>(value: build, child: below);
-    }
-    return below;
-  }
+  Seed buildWithChild(TreeContext context, Seed child) => Nest(
+    children: [for (final seat in arming) seat.provider()],
+    child: child,
+  );
 }
 
 /// The BUILD seat's audit id, stamped onto every authorization its channel
