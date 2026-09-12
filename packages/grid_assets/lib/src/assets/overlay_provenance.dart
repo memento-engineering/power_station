@@ -18,6 +18,17 @@
 /// comments at all. So the stamp goes INSIDE each format — and a file type with
 /// no provenance syntax is REFUSED (guards LOUD or GONE: an unstampable file
 /// could never be told from a hand-authored one, so the overlay may not vend it).
+///
+/// The ROOT instruction file is the ONE bounded departure from that refusal
+/// (declared by the operator against
+/// `power_station#a26-bead-pow-hhs-the-station-overlay-becomes-a-root-relative`):
+/// a repository's `AGENTS.md` is plain prose, so it is neither frontmatter-led
+/// nor JSON, AND it is a file the repository already owns — `bd setup codex`
+/// writes its own block there. [MarkedBlockProvenance] carries the same two
+/// invariants at BLOCK granularity instead of file granularity: this tooling
+/// owns exactly the bytes between its own boundary lines, whose first interior
+/// line is the [kProvenanceMarker] stamp, and it never clobbers a byte outside
+/// them. Every other plain-Markdown path still THROWS.
 library;
 
 import 'dart:convert';
@@ -25,8 +36,17 @@ import 'dart:io';
 
 import 'package:path/path.dart' as p;
 
+import 'overlay_manifest.dart';
+
 /// The substring every stamped file carries — the detection AND strip key.
 const String kProvenanceMarker = 'generated from grid_assets@';
+
+/// The line opening the block this tooling owns inside a composed instruction
+/// file — the exact bytes, on their own line, and nothing else.
+const String kGeneratedBlockBegin = '<!-- BEGIN GRID ASSETS AGENTS -->';
+
+/// The line closing the block this tooling owns. See [kGeneratedBlockBegin].
+const String kGeneratedBlockEnd = '<!-- END GRID ASSETS AGENTS -->';
 
 /// The source ref recorded when the overlay's checkout cannot be probed (the
 /// package came from pub, or git is absent). Never a throw: an un-probable ref
@@ -57,6 +77,93 @@ final class JsonObjectProvenance extends ProvenanceSyntax {
   const JsonObjectProvenance();
 }
 
+/// A plain-Markdown file the repository ALSO owns (the root
+/// [kAgentsRootRelativePath]): the stamp cannot go anywhere in the file at
+/// large, so this tooling claims one BLOCK of it, bounded by
+/// [kGeneratedBlockBegin] and [kGeneratedBlockEnd], and stamps the block's first
+/// interior line.
+///
+/// Ownership is the whole point. [bodyOf] answers "is there exactly one
+/// well-formed block of MINE here, and what did it vend?" — and answers null for
+/// every malformed, duplicated or unstamped shape, so a caller can refuse rather
+/// than guess. [merge] replaces that one span and preserves every byte outside
+/// it. [containsAnyMarker] is deliberately LOOSER than [bodyOf]: any trace of
+/// these markers means the file has been through this tooling, so a trace with
+/// no well-formed block is a file to REFUSE, never one to append to.
+final class MarkedBlockProvenance extends ProvenanceSyntax {
+  /// Creates the marked-block syntax.
+  const MarkedBlockProvenance();
+
+  /// The line opening the owned block.
+  String get beginMarker => kGeneratedBlockBegin;
+
+  /// The line closing the owned block.
+  String get endMarker => kGeneratedBlockEnd;
+
+  /// [body] as the complete owned block: the boundary lines, [note] as the first
+  /// interior line, then [body]. Always newline-terminated, so a composed file
+  /// never grows a block that runs into its neighbour.
+  String wrapped(String body, {required String note}) => <String>[
+    beginMarker,
+    note,
+    ...const LineSplitter().convert(body),
+    endMarker,
+    '',
+  ].join('\n');
+
+  /// Whether [contents] carries ANY trace of this tooling's boundary markers.
+  bool containsAnyMarker(String contents) =>
+      contents.contains(beginMarker) || contents.contains(endMarker);
+
+  /// The un-stamped body the ONE well-formed owned block in [contents] vended,
+  /// or null when there is no such block.
+  ///
+  /// Null covers every shape a caller must not touch: no markers, a marker that
+  /// is not alone on its line, markers out of order, a DUPLICATED pair, an empty
+  /// block, and a block whose first interior line carries no [kProvenanceMarker]
+  /// (which is a hand-typed imitation, not something this tooling wrote).
+  String? bodyOf(String contents) {
+    final begins = _markerLineOffsets(contents, beginMarker);
+    final ends = _markerLineOffsets(contents, endMarker);
+    if (begins.length != 1 || ends.length != 1) return null;
+    final begin = begins.single;
+    final end = ends.single;
+    if (end <= begin) return null;
+    final interior = contents.substring(
+      _lineAfter(contents, begin + beginMarker.length),
+      end,
+    );
+    final lines = const LineSplitter().convert(interior);
+    if (lines.isEmpty || !lines.first.contains(kProvenanceMarker)) return null;
+    final body = lines.skip(1).join('\n');
+    return body.isEmpty ? '' : '$body\n';
+  }
+
+  /// [contents] with [block] in place of the one owned block it carries, or with
+  /// [block] APPENDED when it carries none.
+  ///
+  /// Pure surgery on character offsets, never a line re-join: every byte outside
+  /// the replaced span — a repository's own prose, another tool's generated block
+  /// — survives exactly as it was, line endings included.
+  String merge(String contents, {required String block}) {
+    final begins = _markerLineOffsets(contents, beginMarker);
+    final ends = _markerLineOffsets(contents, endMarker);
+    if (begins.length == 1 && ends.length == 1 && ends.single > begins.single) {
+      final after = _lineAfter(contents, ends.single + endMarker.length);
+      return contents.substring(0, begins.single) +
+          block +
+          contents.substring(after);
+    }
+    if (contents.isEmpty) return block;
+    final separator = contents.endsWith('\n\n')
+        ? ''
+        : contents.endsWith('\n')
+        ? '\n'
+        : '\n\n';
+    return '$contents$separator$block';
+  }
+}
+
 /// The provenance syntax for [relativePath] carrying [body].
 ///
 /// THROWS a [StateError] naming the path when the file type has no provenance
@@ -65,6 +172,12 @@ final class JsonObjectProvenance extends ProvenanceSyntax {
 ProvenanceSyntax provenanceSyntaxFor(String relativePath, String body) {
   final lines = const LineSplitter().convert(body);
   final extension = p.extension(relativePath);
+  // The ROOT instruction file, whatever its body opens on: it is prose the
+  // repository co-owns, so the stamp rides inside the block this tooling claims
+  // rather than anywhere in the file at large.
+  if (p.normalize(relativePath) == kAgentsRootRelativePath) {
+    return const MarkedBlockProvenance();
+  }
   if (extension == '.md' && lines.isNotEmpty && lines.first.trim() == '---') {
     return const YamlFrontmatterProvenance();
   }
@@ -73,8 +186,9 @@ ProvenanceSyntax provenanceSyntaxFor(String relativePath, String body) {
   }
   throw StateError(
     'no provenance syntax for "$relativePath" — a vended overlay file is a '
-    'frontmatter-led .md or a JSON object (.json); an unstampable file could '
-    'never be told from a hand-authored one, so it is never installed',
+    'frontmatter-led .md, a JSON object (.json), or the root '
+    '$kAgentsRootRelativePath; an unstampable file could never be told from a '
+    'hand-authored one, so it is never installed',
   );
 }
 
@@ -92,24 +206,33 @@ String stampProvenance(
   required String runner,
 }) {
   final syntax = provenanceSyntaxFor(relativePath, body);
-  final lines = const LineSplitter().convert(body);
-  final note = switch (syntax) {
-    YamlFrontmatterProvenance() =>
-      '# $kProvenanceMarker$sourceRef — do not edit; run '
-          '`$runner assets install`',
-    JsonObjectProvenance() =>
-      '  "\$generated": "$kProvenanceMarker$sourceRef — do not edit; run '
-          '`$runner assets install`",',
-  };
-  final at = switch (syntax) {
-    YamlFrontmatterProvenance() => 1,
-    JsonObjectProvenance() => _openingBraceLine(lines) + 1,
-  };
-  lines.insert(at, note);
+  final note =
+      '$kProvenanceMarker$sourceRef — do not edit; run '
+      '`$runner assets install`';
+  switch (syntax) {
+    case YamlFrontmatterProvenance():
+      return _stampInserted(body, note: '# $note', at: 1);
+    case JsonObjectProvenance():
+      final stamped = _stampInserted(
+        body,
+        note: '  "\$generated": "$note",',
+        at: _openingBraceLine(const LineSplitter().convert(body)) + 1,
+      );
+      _assertStillJson(stamped, relativePath);
+      return stamped;
+    case MarkedBlockProvenance():
+      // The block WRAPS its body rather than inserting a line into it: the
+      // marked syntax owns boundaries, not a position.
+      return syntax.wrapped(body, note: '<!-- $note -->');
+  }
+}
+
+/// [body] with [note] inserted as line [at] — the in-file syntaxes' shape, where
+/// the stamp is one line the format already tolerates.
+String _stampInserted(String body, {required String note, required int at}) {
+  final lines = const LineSplitter().convert(body)..insert(at, note);
   final out = lines.join('\n');
-  final stamped = body.endsWith('\n') ? '$out\n' : out;
-  if (syntax is JsonObjectProvenance) _assertStillJson(stamped, relativePath);
-  return stamped;
+  return body.endsWith('\n') ? '$out\n' : out;
 }
 
 /// Whether [contents] was generated by this tooling (it carries the stamp).
@@ -118,10 +241,21 @@ bool hasProvenance(String contents) => contents.contains(kProvenanceMarker);
 /// [contents] with its stamp line removed — the BODY, which is what a drift
 /// check compares. Identity for an unstamped file, and the exact inverse of
 /// [stampProvenance].
+///
+/// A [MarkedBlockProvenance] stamp rides between boundary lines this tooling
+/// wrote, so those lines come out too — otherwise the inverse would leak the
+/// block's own scaffolding into the body it is compared against. (A caller that
+/// needs the body of one owned block INSIDE a larger composed file asks
+/// [MarkedBlockProvenance.bodyOf], which validates ownership first.)
 String stripProvenance(String contents) {
   final kept = const LineSplitter()
       .convert(contents)
-      .where((line) => !line.contains(kProvenanceMarker));
+      .where(
+        (line) =>
+            !line.contains(kProvenanceMarker) &&
+            line != kGeneratedBlockBegin &&
+            line != kGeneratedBlockEnd,
+      );
   final out = kept.join('\n');
   return contents.endsWith('\n') ? '$out\n' : out;
 }
@@ -157,6 +291,27 @@ String resolveOverlaySourceRefSync(String overlayRoot) {
     return kUnknownSourceRef;
   }
 }
+
+/// Every character offset in [contents] where [marker] stands ALONE on its own
+/// line — the only form this tooling writes, and so the only form it OWNS.
+List<int> _markerLineOffsets(String contents, String marker) {
+  final offsets = <int>[];
+  var from = 0;
+  while (true) {
+    final at = contents.indexOf(marker, from);
+    if (at < 0) return offsets;
+    final after = at + marker.length;
+    from = after;
+    final opensLine = at == 0 || contents[at - 1] == '\n';
+    final closesLine = after == contents.length || contents[after] == '\n';
+    if (opensLine && closesLine) offsets.add(at);
+  }
+}
+
+/// [at], advanced past the newline that terminates its line (if any) — so a
+/// replaced span consumes its own line ending and no more.
+int _lineAfter(String contents, int at) =>
+    at < contents.length && contents[at] == '\n' ? at + 1 : at;
 
 /// The index of the line opening the JSON object, or -1.
 int _openingBraceLine(List<String> lines) {
