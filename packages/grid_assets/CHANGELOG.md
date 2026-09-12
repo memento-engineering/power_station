@@ -1,3 +1,7 @@
+## 0.6.1
+
+- Fixed: the asset generator formats a generated registry at the CONSUMING PACKAGE's own Dart language version — the inclusive floor of its `environment.sdk` — instead of `--language-version=latest`, so ONE committed `lib/src/assets/grid_asset_pack.dart` is current AND format-clean under every SDK a consumer runs. Under `latest` the rendered bytes were a function of whichever SDK happened to run the generator: an unchanged commit that was current on Dart 3.12 reported `STALE lib/src/assets/grid_asset_pack.dart` on 3.13, and no single committed file could satisfy both. The SDK `dart format` executable stays the formatter, and a pubspec whose `environment.sdk` is missing, malformed, or carries no inclusive floor is now refused LOUD before either output is rendered, compared, or written (pow-10fv; extends pow-5ifa, which put the SDK formatter executable in place; the duplicate tg-txbs was misfiled against the_grid and is closed).
+
 ## 0.6.0
 
 - PROMOTED from 0.6.0-rc.26. This is the stable release of the 0.6.0 line; the code is the
