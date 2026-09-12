@@ -263,6 +263,21 @@ void _writeMember(
   return (root: root, consumer: consumer);
 }
 
+/// Narrows a generated fixture workspace to `packages/leaf` alone — the member
+/// pub.dev answers 404 for. With one member there is exactly one discovery
+/// lookup, so a refusal on the FIRST-RELEASE branch is observable as a
+/// single-entry poll log with nothing after it.
+void _restrictWorkspaceToWaveLeaf(Directory root) {
+  File(p.join(root.path, 'pubspec.yaml')).writeAsStringSync(
+    'name: release_wave_workspace\n'
+    'publish_to: none\n'
+    'environment:\n'
+    '  sdk: ^3.11.0\n'
+    'workspace:\n'
+    '  - packages/leaf\n',
+  );
+}
+
 ReleaseConsumer _consumerAt(Directory directory) => ReleaseConsumer(
   name: 'space_station',
   directory: directory.path,
@@ -1039,6 +1054,202 @@ void main() {
             message: allOf(contains('0.2.0-beta.1'), contains('dev rung')),
           ),
         ),
+      );
+    });
+  });
+
+  // A FIRST RELEASE is the branch with no published predecessor to argue with:
+  // pub.dev answers 404, so nothing but the authored version says what rung the
+  // package is on. That is also the branch that reaches an irreversible tag push
+  // with no consumer to validate against, so the rung the author wrote and the
+  // rung the wave was asked for must agree BEFORE the wave touches anything.
+  group('first-release rung consistency', () {
+    /// The sole discovery lookup a restricted workspace makes: 404, and a
+    /// refusal must stop there.
+    HttpFetch firstReleaseOnly(String package, int attempt) =>
+        package == 'wave_leaf'
+        ? _unpublished
+        : throw StateError('unexpected pub.dev poll for $package');
+
+    /// Everything a refusal at discovery must have left untouched: one poll,
+    /// no scrub process, no dry-run, no tag, no push, no propagation wait.
+    void expectStoppedBeforeMutation({
+      required List<String> timeline,
+      required _FakeProcess process,
+      required _FakePubDev pubDev,
+      required _FakeWait wait,
+    }) {
+      expect(pubDev.calls, ['wave_leaf']);
+      expect(timeline, [
+        'poll wave_leaf',
+      ], reason: 'the refusal lands on the one discovery lookup');
+      expect(
+        process.calls,
+        isEmpty,
+        reason: 'no scrub, no publish dry-run, no tag and no push began',
+      );
+      expect(wait.waited, isEmpty, reason: 'no propagation poll began');
+    }
+
+    test(
+      'fix with requested stable refuses authored dev first release',
+      () async {
+        final harness = _harness(
+          responder: firstReleaseOnly,
+          leaf: '0.2.0-dev.1',
+        );
+        _restrictWorkspaceToWaveLeaf(harness.root);
+        await expectLater(
+          harness.service.publishWorkspace(
+            workspaceRoot: harness.root.path,
+            change: ReleaseChange.fix,
+            rung: ReleaseRung.stable,
+            consumers: [_consumerAt(harness.consumer)],
+          ),
+          throwsA(
+            _stoppedAt(
+              'discovery',
+              package: 'wave_leaf',
+              message: allOf(
+                contains('is authored as'),
+                contains('0.2.0-dev.1'),
+                contains('stable rung'),
+                contains('re-author the version or drop'),
+              ),
+            ),
+          ),
+        );
+        expectStoppedBeforeMutation(
+          timeline: harness.timeline,
+          process: harness.process,
+          pubDev: harness.pubDev,
+          wait: harness.wait,
+        );
+      },
+    );
+
+    test(
+      'fix with requested dev refuses authored stable first release',
+      () async {
+        final harness = _harness(responder: firstReleaseOnly, leaf: '0.2.0');
+        _restrictWorkspaceToWaveLeaf(harness.root);
+        await expectLater(
+          harness.service.publishWorkspace(
+            workspaceRoot: harness.root.path,
+            change: ReleaseChange.fix,
+            rung: ReleaseRung.dev,
+            consumers: [_consumerAt(harness.consumer)],
+          ),
+          throwsA(
+            _stoppedAt(
+              'discovery',
+              package: 'wave_leaf',
+              message: allOf(
+                contains('is authored as'),
+                contains('0.2.0'),
+                contains('dev rung'),
+                contains('re-author the version or drop'),
+              ),
+            ),
+          ),
+        );
+        expectStoppedBeforeMutation(
+          timeline: harness.timeline,
+          process: harness.process,
+          pubDev: harness.pubDev,
+          wait: harness.wait,
+        );
+      },
+    );
+
+    test(
+      'breaking with requested beta refuses authored dev first release',
+      () async {
+        final harness = _harness(
+          responder: firstReleaseOnly,
+          leaf: '0.2.0-dev.1',
+        );
+        _restrictWorkspaceToWaveLeaf(harness.root);
+        await expectLater(
+          harness.service.publishWorkspace(
+            workspaceRoot: harness.root.path,
+            change: ReleaseChange.breaking,
+            rung: ReleaseRung.beta,
+          ),
+          throwsA(
+            _stoppedAt(
+              'discovery',
+              package: 'wave_leaf',
+              message: allOf(
+                contains('is authored as'),
+                contains('0.2.0-dev.1'),
+                contains('beta rung'),
+                contains('re-author the version or drop'),
+              ),
+            ),
+          ),
+        );
+        expectStoppedBeforeMutation(
+          timeline: harness.timeline,
+          process: harness.process,
+          pubDev: harness.pubDev,
+          wait: harness.wait,
+        );
+      },
+    );
+
+    test('fix with inferred stable publishes first release', () async {
+      final harness = _harness(
+        responder: (package, attempt) => package == 'wave_leaf'
+            ? (attempt == 0 ? _unpublished : _listing(const ['0.3.2']))
+            : throw StateError('unexpected pub.dev poll for $package'),
+      );
+      _restrictWorkspaceToWaveLeaf(harness.root);
+      final plan = await harness.service.publishWorkspace(
+        workspaceRoot: harness.root.path,
+        change: ReleaseChange.fix,
+        consumers: [_consumerAt(harness.consumer)],
+        pollInterval: Duration.zero,
+      );
+
+      final leaf = plan.packages.single;
+      expect(leaf.tag, 'wave_leaf-v0.3.2');
+      expect(
+        leaf.publishedPredecessor,
+        isNull,
+        reason: 'a first release bumps off nothing',
+      );
+      expect(leaf.rung, ReleaseRung.stable);
+      expect(harness.timeline, contains('git tag wave_leaf-v0.3.2'));
+      expect(harness.timeline, contains('git push origin wave_leaf-v0.3.2'));
+    });
+
+    test('breaking with inferred dev publishes first release', () async {
+      final harness = _harness(
+        responder: (package, attempt) => package == 'wave_leaf'
+            ? (attempt == 0 ? _unpublished : _listing(const ['0.1.0-dev.1']))
+            : throw StateError('unexpected pub.dev poll for $package'),
+        leaf: '0.1.0-dev.1',
+      );
+      _restrictWorkspaceToWaveLeaf(harness.root);
+      final plan = await harness.service.publishWorkspace(
+        workspaceRoot: harness.root.path,
+        change: ReleaseChange.breaking,
+        pollInterval: Duration.zero,
+      );
+
+      final leaf = plan.packages.single;
+      expect(leaf.tag, 'wave_leaf-v0.1.0-dev.1');
+      expect(
+        leaf.publishedPredecessor,
+        isNull,
+        reason: 'a first release enters the ladder with nothing behind it',
+      );
+      expect(leaf.rung, ReleaseRung.dev);
+      expect(harness.timeline, contains('git tag wave_leaf-v0.1.0-dev.1'));
+      expect(
+        harness.timeline,
+        contains('git push origin wave_leaf-v0.1.0-dev.1'),
       );
     });
   });
