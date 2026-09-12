@@ -26,6 +26,8 @@ import 'package:grid_trajectory/grid_trajectory.dart'
 import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
+import 'support/package_root.dart';
+
 const _policy = kCommitteeSelectionPolicy;
 
 CommitteeSelectionEvidence _spec({
@@ -93,6 +95,12 @@ CommitteeSelection _selectCode(CommitteeSelectionEvidence evidence) =>
       fullRubricIds: kCommitteeRubrics,
       gatingRubricIds: kCodeGatingRubrics,
     );
+
+/// The source of `grid_assets/lib/<relative>`, off the shared cwd-independent
+/// package root — never a cwd-relative read, which a concurrently scheduled
+/// suite could resolve against a working directory it does not own.
+String _libSource(String relative) =>
+    File(p.join(packageRoot(), 'lib', relative)).readAsStringSync();
 
 void main() {
   group('policy tables', () {
@@ -1028,7 +1036,12 @@ diff --git a/test/committee_test.dart b/test/committee_test.dart
       final rows =
           jsonDecode(
                 File(
-                  'test/fixtures/committee_selection_corpus.json',
+                  p.join(
+                    packageRoot(),
+                    'test',
+                    'fixtures',
+                    'committee_selection_corpus.json',
+                  ),
                 ).readAsStringSync(),
               )
               as List<Object?>;
@@ -1142,13 +1155,13 @@ diff --git a/test/committee_test.dart b/test/committee_test.dart
   });
 
   group('source shape', () {
-    final policySource = File(
-      'lib/src/code/committee_selection.dart',
-    ).readAsStringSync();
-    final evidenceSource = File(
-      'lib/src/code/committee_selection_evidence.dart',
-    ).readAsStringSync();
-    final barrel = File('lib/grid_assets.dart').readAsStringSync();
+    final policySource = _libSource(
+      p.join('src', 'code', 'committee_selection.dart'),
+    );
+    final evidenceSource = _libSource(
+      p.join('src', 'code', 'committee_selection_evidence.dart'),
+    );
+    final barrel = _libSource('grid_assets.dart');
 
     test('the ONLY trajectory surface is the public barrel, value types', () {
       expect(

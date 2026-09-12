@@ -11,6 +11,7 @@ import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
 import '../support/asset_fakes.dart' show callMetadata;
+import '../support/package_root.dart';
 
 const String _workRoot = '/work/power_station';
 const String _workBead = 'pow-child';
@@ -443,7 +444,7 @@ void main() {
 
     // AC-2: and grid_assets authors NO key formatter of its own.
     final source = File(
-      p.join('lib', 'src', 'filing', 'park_command.dart'),
+      p.join(packageRoot(), 'lib', 'src', 'filing', 'park_command.dart'),
     ).readAsStringSync();
     expect(source, contains('voidRetireMetadata'));
     expect(source, isNot(contains('#void-')));

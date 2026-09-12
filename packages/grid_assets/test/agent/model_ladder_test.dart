@@ -23,9 +23,11 @@ import 'package:beads_dart/beads_dart.dart';
 import 'package:grid_assets/grid_assets.dart';
 import 'package:grid_engine/grid_engine.dart';
 import 'package:grid_runtime/grid_runtime.dart';
+import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
 import '../support/asset_fakes.dart';
+import '../support/package_root.dart';
 
 /// A bead whose `grid.agent` envelope pins [model] for every agent it spawns —
 /// the TOP rung.
@@ -110,9 +112,9 @@ Map<String, RuntimeConfig> _midSpawns(Bead b, AgentConfig config) => {
 };
 
 /// Every `.dart` source under `lib`, concatenated (the deletion fence's corpus).
+/// Anchored on the shared package root, never on the process cwd.
 String _libSource() {
-  final lib = Directory('lib');
-  if (!lib.existsSync()) fail('run this suite from packages/grid_assets');
+  final lib = Directory(p.join(packageRoot(), 'lib'));
   return lib
       .listSync(recursive: true)
       .whereType<File>()

@@ -25,6 +25,7 @@ import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
 import '../support/asset_fakes.dart';
+import '../support/package_root.dart';
 
 /// The model a spawned claude invocation actually asks for — the value right
 /// after `--model` in the argv the harness built.
@@ -58,19 +59,17 @@ FakeTreeContext _ctx(AgentConfig config) => FakeTreeContext(
   },
 );
 
-/// This package's `lib` dir (the suite runs with the package as its cwd).
-Directory _libDir() {
-  final lib = Directory('lib');
-  if (!lib.existsSync()) fail('run this suite from packages/grid_assets');
-  return lib;
-}
+/// This package's `lib` dir, off the shared cwd-independent package root.
+Directory _libDir() => Directory(p.join(packageRoot(), 'lib'));
 
 /// The package config `dart pub get` wrote — at the pub WORKSPACE root, which is
-/// an ancestor of this package, so walk up for it. LOUD when it cannot be found:
-/// a fence that silently finds nothing is a fence that is GONE.
+/// an ancestor of this package, so walk up for it FROM THE PACKAGE ROOT (never
+/// from the process cwd, which a concurrently scheduled suite could have moved).
+/// LOUD when it cannot be found: a fence that silently finds nothing is a fence
+/// that is GONE.
 File _packageConfig() {
   for (
-    var dir = Directory.current.absolute;
+    var dir = Directory(packageRoot()).absolute;
     dir.parent.path != dir.path;
     dir = dir.parent
   ) {
@@ -78,7 +77,7 @@ File _packageConfig() {
     if (config.existsSync()) return config;
   }
   fail(
-    'no .dart_tool/package_config.json above ${Directory.current.path} — '
+    'no .dart_tool/package_config.json above ${packageRoot()} — '
     'run `dart pub get` first',
   );
 }
@@ -377,7 +376,7 @@ void main() {
       'the TIER axis is dependency-free — it names no engine and no role',
       () {
         final src = File(
-          p.join('lib', 'src', 'agent', 'model_tier.dart'),
+          p.join(packageRoot(), 'lib', 'src', 'agent', 'model_tier.dart'),
         ).readAsStringSync();
         expect(
           src,

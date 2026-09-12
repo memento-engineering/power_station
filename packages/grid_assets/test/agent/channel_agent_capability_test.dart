@@ -12,6 +12,8 @@ import 'package:grid_runtime/grid_runtime.dart';
 import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
+import '../support/package_root.dart';
+
 class _ProbeAdapter implements AgentSessionAdapter {
   _ProbeAdapter(this.fixture, {this.args = const <String>[]});
 
@@ -230,10 +232,14 @@ Future<void> _waitForProgress(_Run run) async {
 }
 
 void main() {
-  final fixture = <String>[
-    p.absolute('test/fixtures/channel_probe.dart'),
-    p.absolute('packages/grid_assets/test/fixtures/channel_probe.dart'),
-  ].firstWhere((path) => File(path).existsSync());
+  // Off the shared cwd-independent package root: the process working directory
+  // is a process property and `dart test` runs the suites concurrently.
+  final fixture = p.join(
+    packageRoot(),
+    'test',
+    'fixtures',
+    'channel_probe.dart',
+  );
 
   test('lease allocation delivers brief only over channel and completes from '
       'protocol result', () async {

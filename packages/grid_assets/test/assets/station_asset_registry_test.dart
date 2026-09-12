@@ -7,6 +7,8 @@ import 'package:grid_sdk/grid_sdk.dart';
 import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
+import '../support/package_root.dart';
+
 void main() {
   group('resolved closure', () {
     late Directory temp;
@@ -242,8 +244,13 @@ void main() {
       );
       expect(registry.assets, hasLength(33));
 
+      // `power_station#one-asset-resolution-defines-tree-and-writers` owns the
+      // generation shape this fence reads ("the station-generated
+      // `GridAssetRegistry`"). Only where the SOURCE PATH is read from moved
+      // off the process working directory — the registrant, its packs and its
+      // asset count are untouched.
       final source = File(
-        p.join(Directory.current.path, 'lib', 'station_asset_registry.dart'),
+        p.join(packageRoot(), 'lib', 'station_asset_registry.dart'),
       ).readAsStringSync();
       for (final forbidden in <String>[
         'dart:io',
@@ -262,7 +269,7 @@ void main() {
   test('decision entry records the registrant boundary', () {
     final source = File(
       p.join(
-        Directory.current.path,
+        packageRoot(),
         '..',
         '..',
         'docs',

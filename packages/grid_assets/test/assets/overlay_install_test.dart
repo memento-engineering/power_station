@@ -11,23 +11,26 @@ import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
 import '../support/asset_resolution_fixture.dart';
-
-/// This package's `extension/` dir, resolved the CWD-INDEPENDENT way (the
-/// loader's own package-config resolution). Never a cwd walk: `Directory.current`
-/// is process-global and the suites run concurrently, so a sibling suite that
-/// chdirs to prove cwd-independence would race a walk done here.
-String _extensionDir() => PackagedAssetLoader().root;
+import '../support/package_root.dart';
 
 /// The LIVE station registry resolved against this checkout.
+///
+/// `power_station#one-asset-resolution-defines-tree-and-writers` governs this
+/// machinery — "One pure `resolveGridAssets` evaluation over the
+/// station-generated `GridAssetRegistry`, an immutable
+/// `SubstationFactsSnapshot`, render values, and an optional roster override is
+/// authoritative." Only WHERE the vending root is read from changed: the one
+/// resolution call, the snapshot it is handed, the registry it evaluates and
+/// every resolved artifact path are unchanged.
 GridAssetResolution _liveResolution({Map<String, String> args = const {}}) {
-  final packageRoot = p.dirname(_extensionDir());
+  final root = packageRoot();
   return resolveGridAssets(
     registry: GeneratedGridAssetRegistrant.registry,
     snapshot: SubstationFactsSnapshot(<SubstationKey, SubstationFacts>{
       kFixtureSubstation: SubstationFacts(
-        root: packageRoot,
+        root: root,
         dartPackages: const <String>['grid_assets', 'grid_sdk'],
-        packageRoots: <String, String>{'grid_assets': packageRoot},
+        packageRoots: <String, String>{'grid_assets': root},
       ),
     }),
     substation: kFixtureSubstation,

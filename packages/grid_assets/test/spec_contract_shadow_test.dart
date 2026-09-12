@@ -17,14 +17,15 @@ import 'package:path/path.dart' as p;
 import 'package:grid_assets/grid_assets.dart';
 import 'package:test/test.dart';
 
-/// The package root, resolved through the loader's OWN resolution (package
-/// config first, cwd walk-up fallback) rather than read off
-/// [Directory.current].
+import 'support/package_root.dart';
+
+/// The package root, off the shared cwd-independent anchor rather than read off
+/// the process working directory.
 ///
-/// Two suites in this pack legitimately chdir that process-global, so a
-/// relative read here would fail depending on which suite ran alongside it.
-/// This suite never writes [Directory.current] either.
-final String _root = p.dirname(PackagedAssetLoader().root);
+/// Nothing in this suite reads or writes that process-global any more, and
+/// neither does anything else in the tree: a relative read used to fail or
+/// resolve the wrong tree depending on which suite ran alongside it.
+final String _root = packageRoot();
 
 /// Whether [rubric] carries [clause], ignoring how the rubric HARD-WRAPS its
 /// prose: a clause quoted across a line break is still quoted verbatim.

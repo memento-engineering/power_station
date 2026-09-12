@@ -12,6 +12,8 @@ import 'package:grid_assets/grid_assets.dart';
 import 'package:grid_sdk/grid_sdk.dart';
 import 'package:path/path.dart' as p;
 
+import 'package_root.dart';
+
 /// The fixture pack's vending package name.
 const String kFixturePackage = 'fixture_assets';
 
@@ -232,9 +234,8 @@ class TestAssetResolutionFixture {
 /// The substation name every provision fixture mounts under.
 const String kFixtureSubstationName = 'fixture';
 
-/// This package's root, resolved the CWD-INDEPENDENT way (the loader's own
-/// package-config resolution, whose root is `<packageRoot>/extension`).
-String liveAssetPackageRoot() => p.dirname(PackagedAssetLoader().root);
+/// This package's root, off the suite's one cwd-independent anchor.
+String liveAssetPackageRoot() => packageRoot();
 
 /// The facts that select the LIVE `grid_assets` pack in full for
 /// [kFixtureSubstation] — the vending package's real root, plus the package
@@ -243,12 +244,12 @@ SubstationFactsSnapshot liveStationFacts({
   String substation = kFixtureSubstationName,
   Iterable<String> packages = const <String>['grid_assets', 'grid_sdk'],
 }) {
-  final packageRoot = liveAssetPackageRoot();
+  final vendingRoot = liveAssetPackageRoot();
   return SubstationFactsSnapshot(<SubstationKey, SubstationFacts>{
     SubstationKey(substation): SubstationFacts(
-      root: packageRoot,
+      root: vendingRoot,
       dartPackages: packages,
-      packageRoots: <String, String>{'grid_assets': packageRoot},
+      packageRoots: <String, String>{'grid_assets': vendingRoot},
     ),
   });
 }

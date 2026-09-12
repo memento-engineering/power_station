@@ -16,12 +16,12 @@ import 'dart:io';
 
 import 'package:grid_assets/grid_assets.dart';
 import 'package:beads_dart/beads_dart.dart';
-import 'package:path/path.dart' as p;
 import 'package:grid_engine/grid_engine.dart';
 import 'package:grid_runtime/grid_runtime.dart';
 import 'package:test/test.dart';
 
 import 'support/asset_fakes.dart';
+import 'support/package_root.dart';
 
 const _specCritics =
     'spec-validation,coherence,decision-alignment,acceptance-testability,'
@@ -474,7 +474,7 @@ void main() {
     // parser would have F'd the whole fleet's backlog at once.
     test('a retained pre-grammar shipped spec grades A while shadow records '
         'findings', () async {
-      final root = p.dirname(PackagedAssetLoader().root);
+      final root = packageRoot();
       final retained = readSpecCorpus(
         root,
       ).firstWhere((entry) => entry.bead == 'pow-26dd');

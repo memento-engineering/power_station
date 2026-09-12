@@ -11,6 +11,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:grid_sdk/grid_sdk.dart' as sdk;
+import 'package:path/path.dart' as p;
 
 import '../io/recorded_artifact.dart';
 import 'semantic_search.dart';
@@ -229,16 +230,31 @@ typedef ProcessRunner =
 /// The normal mode is read-only. [recordBaseline] atomically updates the
 /// corpus only after a completely green run. Returns zero on green and one on
 /// a search refusal or failed recall/guard.
+///
+/// [workingDirectory] is the root the corpus path resolves against — the
+/// process working directory by default, which is what the vended tool passes.
+/// A caller that owns a corpus somewhere else names it here rather than moving
+/// the process: `Directory.current` is process-global, so a test that assigned
+/// it raced every concurrently scheduled suite that reads a relative path.
 Future<int> runRecall({
   required String runner,
   required String gridHome,
   required bool recordBaseline,
   ProcessRunner processRunner = Process.run,
+  String workingDirectory = '.',
 }) async {
   if (runner.trim().isEmpty || !File(gridHome).isAbsolute) {
     return 1;
   }
-  final file = File('test/search/fixtures/semantic_recall_set.json');
+  final file = File(
+    p.join(
+      workingDirectory,
+      'test',
+      'search',
+      'fixtures',
+      'semantic_recall_set.json',
+    ),
+  );
   try {
     final set = RecallSet.fromJsonString(await file.readAsString());
     final reports = <String, StationSearchReport>{};

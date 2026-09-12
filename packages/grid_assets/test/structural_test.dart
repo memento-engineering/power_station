@@ -11,31 +11,21 @@ import 'dart:io';
 import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
-/// Resolves this package's `lib` directory, walking up from the test's working
-/// dir to find `packages/grid_assets/lib` (robust whether the suite runs from
-/// the repo root or the package dir).
-Directory _libDir() {
-  final candidates = <String>['lib', p.join('packages', 'grid_assets', 'lib')];
-  var dir = Directory.current;
-  for (var i = 0; i < 6; i++) {
-    for (final rel in candidates) {
-      final probe = Directory(p.join(dir.path, rel));
-      if (probe.existsSync() &&
-          File(p.join(probe.path, 'grid_assets.dart')).existsSync()) {
-        return probe;
-      }
-    }
-    final parent = dir.parent;
-    if (parent.path == dir.path) break;
-    dir = parent;
-  }
-  fail(
-    'could not locate packages/grid_assets/lib from ${Directory.current.path}',
-  );
-}
+import 'support/package_root.dart';
 
+/// This package's `lib` directory, off the shared cwd-independent package
+/// root. Never a walk up from the process working
+/// directory: that is a process property and `dart test` runs the suites
+/// concurrently, so a walk from here could read a directory another file had
+/// pointed somewhere else.
+Directory _libDir() => Directory(p.join(packageRoot(), 'lib'));
+
+/// A workspace SIBLING's resolved `lib`, read off the package config `dart pub
+/// get` wrote. The search starts at this package's own root rather than at the
+/// process cwd, so the answer stays package-config-authoritative without
+/// depending on a global another suite could move.
 Directory _packageLib(String packageName) {
-  var current = Directory.current;
+  var current = Directory(packageRoot()).absolute;
   File? configFile;
   while (true) {
     final candidate = File(

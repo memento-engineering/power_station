@@ -29,11 +29,13 @@ import 'package:beads_dart/beads_dart.dart';
 import 'package:grid_engine/grid_engine.dart';
 import 'package:grid_runtime/grid_runtime.dart' show RuntimeConfig;
 import 'package:grid_sdk/grid_sdk.dart' show ProviderScope;
+import 'package:path/path.dart' as p;
 import 'package:grid_trajectory/grid_trajectory.dart'
     show GateDisposition, UsageSample;
 import 'package:test/test.dart';
 
 import 'support/asset_fakes.dart';
+import 'support/package_root.dart';
 
 // ── Fakes ───────────────────────────────────────────────────────────────────
 
@@ -429,7 +431,7 @@ void main() {
       // The selector's cursor was NEVER advanced, yet the route still ran.
       expect(c.starts, contains('tgdog-s/tg-1/route'));
       expect(
-        c.starts.where((p) => p.endsWith('/committee-selection')),
+        c.starts.where((path) => path.endsWith('/committee-selection')),
         hasLength(1),
       );
     });
@@ -1395,7 +1397,7 @@ void main() {
 
     test('durable carrier source-shape fence', () {
       final source = File(
-        'lib/src/code/committee_selection.dart',
+        p.join(packageRoot(), 'lib', 'src', 'code', 'committee_selection.dart'),
       ).readAsStringSync();
       final code = [
         for (final line in source.split('\n'))

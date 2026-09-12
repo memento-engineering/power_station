@@ -3,7 +3,10 @@
 import 'dart:io';
 
 import 'package:grid_assets/grid_assets.dart';
+import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
+
+import '../support/package_root.dart';
 
 const String _attempt = 'attempt-live';
 const String _session = 'acp-session-live';
@@ -50,11 +53,11 @@ const AgentPermissionPolicy _editOnce = AgentPermissionPolicy.scoped(
   },
 );
 
-String _source(String relative) {
-  final local = File(relative);
-  if (local.existsSync()) return local.readAsStringSync();
-  return File('packages/grid_assets/$relative').readAsStringSync();
-}
+/// A package-local source file, off the shared cwd-independent package root.
+/// Never a read relative to the process working directory: that is a process
+/// property and `dart test` runs the suites concurrently.
+String _source(String relative) =>
+    File(p.joinAll([packageRoot(), ...relative.split('/')])).readAsStringSync();
 
 void main() {
   test('unknown unavailable stale and unaudited requests fail closed', () {

@@ -12,6 +12,7 @@ import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
 import '../support/asset_fakes.dart';
+import '../support/package_root.dart';
 
 /// Ends every probe tree (the `availability_seed_test.dart` idiom).
 class _Leaf extends MultiChildSeed {
@@ -90,23 +91,9 @@ List<SiteBinding?> _mounted(HarnessProvider Function(Seed child) provider) {
   return seen;
 }
 
-/// `grid_assets/lib`, located from wherever the suite was launched (the
+/// `grid_assets/lib`, off the shared cwd-independent anchor (the
 /// `site_binding_test.dart` `_libFile` idiom).
-Directory _libDir() {
-  var dir = Directory.current;
-  for (var i = 0; i < 6; i++) {
-    for (final base in ['lib', p.join('packages', 'grid_assets', 'lib')]) {
-      final probe = Directory(p.join(dir.path, base));
-      if (File(p.join(probe.path, 'grid_assets.dart')).existsSync()) {
-        return probe;
-      }
-    }
-    final parent = dir.parent;
-    if (parent.path == dir.path) break;
-    dir = parent;
-  }
-  fail('could not locate grid_assets/lib from ${Directory.current.path}');
-}
+Directory _libDir() => Directory(p.join(packageRoot(), 'lib'));
 
 /// Every `.dart` file under `grid_assets/lib`, as (path, source) pairs.
 Iterable<({String path, String source})> _libSources() sync* {
@@ -236,39 +223,80 @@ void main() {
   });
 
   group('AC-5 - the conventional file loads BEFORE the mount', () {
-    test('construction reads .grid/site.json and mounts it unchanged', () {
+    test('the conventional file parses, and the mount carries it unchanged '
+        'after the file is GONE', () {
       final tmp = Directory.systemTemp.createTempSync('site-binding-mount');
-      addTearDown(() => tmp.deleteSync(recursive: true));
-      File(p.join(tmp.path, kSiteBindingFile))
+      addTearDown(() {
+        if (tmp.existsSync()) tmp.deleteSync(recursive: true);
+      });
+      final site = File(p.join(tmp.path, kSiteBindingFile))
         ..createSync(recursive: true)
         ..writeAsStringSync(
           '{"version": $kSiteBindingVersion, '
           '"endpoints": {"local": "$_endpoint"}}',
         );
 
-      // The file is read at CONSTRUCTION, not in `buildWithChild`: the working
-      // directory is restored before anything mounts, and the mount still
-      // carries the loaded facts.
-      final prior = Directory.current;
-      final HarnessProvider provider;
-      final seen = <SiteBinding?>[];
-      try {
-        Directory.current = tmp;
-        provider = HarnessProvider(
-          registry: _localRegistry,
-          config: _armedLocal,
-          child: _Reader(seen),
-        );
-      } finally {
-        Directory.current = prior;
-      }
+      // The conventional document, read at its conventional relative path under
+      // a root this test owns — never by pointing the PROCESS cwd at that root.
+      // That is a process property and `dart test` runs suites concurrently, so
+      // moving it here raced every sibling suite's source read.
+      final loaded = SiteBinding.loadJsonFile(site.path);
+      expect(loaded.endpoints, {'local': _endpoint});
 
-      expect(provider.siteBinding.endpoints, {'local': _endpoint});
+      final seen = <SiteBinding?>[];
+      final provider = HarnessProvider(
+        registry: _localRegistry,
+        config: _armedLocal,
+        siteBinding: loaded,
+        child: _Reader(seen),
+      );
+
+      // Nothing re-reads the disc below construction: the document is DELETED
+      // before the first build, and the mount still carries the loaded facts
+      // with their identity intact.
+      tmp.deleteSync(recursive: true);
       final owner = TreeOwner();
       owner.mountRoot(provider);
       owner.flush();
-      expect(seen.last, same(provider.siteBinding));
+      expect(seen.last, same(loaded));
+      expect(seen.last?.endpoints, {'local': _endpoint});
       owner.dispose();
+    });
+
+    test('the DEFAULT read of the conventional path is the constructor\'s, '
+        'never the build\'s', () {
+      // What the explicit-value test above cannot reach: that the null default
+      // reads `kSiteBindingFile` once, at construction. Asserted structurally
+      // rather than by chdir'ing the process into a fixture root — the read
+      // sits lexically ABOVE `buildWithChild`, so it is in the initializer
+      // list, and no second caller of it exists anywhere in the pack.
+      final callers = [
+        for (final file in _libSources())
+          if (file.source.contains('loadJsonFile(kSiteBindingFile)')) file,
+      ];
+      expect(
+        callers.map((file) => file.path),
+        [p.join('src', 'assets', 'composition_assets.dart')],
+        reason: 'one conventional-path read, in the provider that mounts it',
+      );
+      // The provider's OWN class body — the file declares several, so a
+      // whole-file index would compare against a sibling's build method.
+      final source = callers.single.source;
+      final start = source.indexOf('class HarnessProvider');
+      expect(start, greaterThanOrEqualTo(0), reason: 'HarnessProvider moved');
+      final next = source.indexOf('\nclass ', start + 1);
+      final body = source.substring(start, next < 0 ? source.length : next);
+      final read = body.indexOf('loadJsonFile(kSiteBindingFile)');
+      final build = body.indexOf('Seed buildWithChild(');
+      expect(read, greaterThanOrEqualTo(0));
+      expect(build, greaterThanOrEqualTo(0));
+      expect(
+        read,
+        lessThan(build),
+        reason:
+            'a read below the constructor would re-run on every rebuild and '
+            'hand the subtree a NEW value each time',
+      );
     });
   });
 

@@ -3,13 +3,47 @@ import 'dart:io';
 
 import 'package:grid_assets/grid_assets.dart';
 import 'package:grid_sdk/grid_sdk.dart' as sdk;
+import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
-const _setPath = 'test/search/fixtures/semantic_recall_set.json';
-const _reportsPath = 'test/search/fixtures/semantic_recall_reports.json';
+import '../support/package_root.dart';
+
+/// The corpus path RELATIVE to whichever root holds it — the checked-in package
+/// root here, a temp copy under [_inFixtureRoot].
+final String _setPath = p.join(
+  'test',
+  'search',
+  'fixtures',
+  'semantic_recall_set.json',
+);
+
+/// The record-mode SEED: the same cases and exact-id guard as [_setPath], with
+/// a baseline pinned empty because no tool ever writes this file.
+///
+/// [_setPath] is the DURABLE corpus and `--record-baseline` rewrites its OWN
+/// baseline in place after a green live run — the corpus tests pin what it
+/// currently holds, so such a recording surfaces as a red they then re-pin.
+/// Seeding record mode from this file instead keeps the record-mode assertions
+/// about what the writer PRODUCES, and keeps the writer off the durable corpus.
+final String _emptyBaselineSetPath = p.join(
+  'test',
+  'search',
+  'fixtures',
+  'semantic_recall_empty_baseline_set.json',
+);
+final String _reportsPath = p.join(
+  'test',
+  'search',
+  'fixtures',
+  'semantic_recall_reports.json',
+);
+
+/// The checked-in copy of a corpus fixture, anchored on the package root rather
+/// than on the process cwd.
+File _checkedIn(String relative) => File(p.join(packageRoot(), relative));
 
 RecallSet loadRecallSetFixture() =>
-    RecallSet.fromJsonString(File(_setPath).readAsStringSync());
+    RecallSet.fromJsonString(_checkedIn(_setPath).readAsStringSync());
 
 SearchHit _hit(String id, String field) => SearchHit(
   beadId: id,
@@ -52,7 +86,8 @@ StationSearchReport _report(
 );
 
 Map<String, StationSearchReport> loadReportFixtures() {
-  final decoded = jsonDecode(File(_reportsPath).readAsStringSync()) as Map;
+  final decoded =
+      jsonDecode(_checkedIn(_reportsPath).readAsStringSync()) as Map;
   expect(decoded['version'], 1);
   final rows = decoded['reports'] as Map<String, dynamic>;
   return rows.map((name, dynamic value) {
@@ -162,24 +197,29 @@ Map<String, dynamic> _liveEnvelope(
   };
 }
 
-Future<T> _inFixtureDirectory<T>(
-  Future<T> Function(String fixturePath) body,
+/// Runs [body] against a DISPOSABLE copy of the corpus under a temp root,
+/// handing it that root and the copied corpus path.
+///
+/// The copy is seeded from [_emptyBaselineSetPath] under the production
+/// filename, so record mode populates a baseline that starts empty every run
+/// and the checked-in durable corpus is never the thing being written.
+///
+/// The root is passed to [runRecall] as its `workingDirectory`; nothing assigns
+/// the process working directory. That is a process property and `dart test`
+/// runs test files in concurrent isolates of one process, so the record-mode
+/// write this fixture exists to contain used to move it out from under every
+/// sibling suite reading a relative path.
+Future<T> _inFixtureRoot<T>(
+  Future<T> Function(String root, String fixturePath) body,
 ) async {
-  final original = Directory.current;
   final temporary = await Directory.systemTemp.createTemp('recall-test-');
-  final fixture = File(
-    '${temporary.path}/test/search/fixtures/semantic_recall_set.json',
-  );
+  final fixture = File(p.join(temporary.path, _setPath));
   await fixture.parent.create(recursive: true);
-  await File(_setPath).copy(fixture.path);
-  await File(
-    _reportsPath,
-  ).copy('${temporary.path}/test/search/fixtures/semantic_recall_reports.json');
-  Directory.current = temporary;
+  await _checkedIn(_emptyBaselineSetPath).copy(fixture.path);
+  await _checkedIn(_reportsPath).copy(p.join(temporary.path, _reportsPath));
   try {
-    return await body(fixture.path);
+    return await body(temporary.path, fixture.path);
   } finally {
-    Directory.current = original;
     await temporary.delete(recursive: true);
   }
 }
@@ -261,37 +301,71 @@ void main() {
       );
     });
 
-    test('fixture preserves the four real pairs and empty baseline', () {
-      final set = loadRecallSetFixture();
-      expect(set.cases.map((row) => [row.name, row.query, row.expectedBeadIds]), [
-        [
-          'refinement-vocabulary',
-          'refine',
-          ['tg-mles'],
-        ],
-        [
-          'production-observability',
-          'observability',
-          ['tg-dwc'],
-        ],
-        [
-          'station-effectiveness',
-          'are our automated work sessions getting healthier and more effective over time',
-          ['tg-5drf'],
-        ],
-        [
-          'single-store-owner',
-          'how do we stop two stations fighting over one store',
-          ['tg-s6gk', 'tg-0edw'],
-        ],
-      ]);
-      expect(set.baseline, isEmpty);
-    });
+    test(
+      'the durable corpus pins four recorded pairs and only the seed is empty',
+      () {
+        final set = loadRecallSetFixture();
+        expect(
+          set.cases.map((row) => [row.name, row.query, row.expectedBeadIds]),
+          [
+            [
+              'refinement-vocabulary',
+              'refine',
+              ['tg-mles'],
+            ],
+            [
+              'production-observability',
+              'observability',
+              ['tg-dwc'],
+            ],
+            [
+              'station-effectiveness',
+              'are our automated work sessions getting healthier and more effective over time',
+              ['tg-5drf'],
+            ],
+            [
+              'single-store-owner',
+              'how do we stop two stations fighting over one store',
+              ['tg-s6gk', 'tg-0edw'],
+            ],
+          ],
+        );
+
+        // The seed must not drift from the corpus it stands in for: record mode
+        // runs against the seed, so a case or guard present in only one file
+        // would make those assertions describe a corpus nobody searches.
+        final seed = RecallSet.fromJsonString(
+          _checkedIn(_emptyBaselineSetPath).readAsStringSync(),
+        );
+        expect(
+          seed.cases.map((row) => [row.name, row.query, row.expectedBeadIds]),
+          set.cases.map((row) => [row.name, row.query, row.expectedBeadIds]),
+        );
+        expect(seed.exactIdGuard, set.exactIdGuard);
+
+        // The SEED is the only file pinned empty, and the durable corpus is
+        // pinned POPULATED: every case carries the rank and score the last real
+        // recording left. Asserting the seed alone left the durable baseline
+        // unchecked, so an empty — or drifted — corpus passed this suite.
+        //
+        // `--record-baseline` rewrites the durable file, so a recording that
+        // moves a number lands HERE as a red test: the new numbers are read off
+        // the failure and pinned in the same commit, which is the point. A
+        // recall corpus whose baseline nothing asserts records nothing.
+        expect(seed.baseline, isEmpty);
+        expect(set.baseline, {
+          'refinement-vocabulary': (rank: 1, score: 0.781),
+          'production-observability': (rank: 1, score: 0.836),
+          'station-effectiveness': (rank: 1, score: 0.724),
+          'single-store-owner': (rank: 1, score: 0.692),
+        });
+      },
+    );
 
     test(
       'live runner uses exact query order and is read-only by default',
       () async {
-        await _inFixtureDirectory((fixturePath) async {
+        await _inFixtureRoot((root, fixturePath) async {
           final before = await File(fixturePath).readAsString();
           final calls = <List<String>>[];
           Future<ProcessResult> fake(
@@ -308,6 +382,7 @@ void main() {
               gridHome: '/grid',
               recordBaseline: false,
               processRunner: fake,
+              workingDirectory: root,
             ),
             0,
           );
@@ -328,7 +403,7 @@ void main() {
 
     test('live runner refuses unavailable and incomplete coverage', () async {
       for (final mode in ['unavailable', 'incomplete']) {
-        await _inFixtureDirectory((_) async {
+        await _inFixtureRoot((root, _) async {
           Future<ProcessResult> fake(String _, List<String> argv) async =>
               ProcessResult(
                 1,
@@ -348,6 +423,7 @@ void main() {
               gridHome: '/grid',
               recordBaseline: false,
               processRunner: fake,
+              workingDirectory: root,
             ),
             1,
           );
@@ -356,7 +432,7 @@ void main() {
     });
 
     test('record mode writes every live rank and score', () async {
-      await _inFixtureDirectory((fixturePath) async {
+      await _inFixtureRoot((root, fixturePath) async {
         Future<ProcessResult> fake(String _, List<String> argv) async =>
             ProcessResult(1, 0, jsonEncode(_liveEnvelope(argv[2])), '');
         expect(
@@ -365,6 +441,7 @@ void main() {
             gridHome: '/grid',
             recordBaseline: true,
             processRunner: fake,
+            workingDirectory: root,
           ),
           0,
         );

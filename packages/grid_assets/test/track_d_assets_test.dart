@@ -9,9 +9,10 @@
 // same four rubrics + the critic prompt (parsed as REAL yaml, not string-matched).
 //
 // Offline only — reads bundled files from a temp-free `extension/` dir. The
-// manifest tests pin an explicit root walked up from the cwd; a separate group
-// proves the loader ALSO resolves `extension/` via the package config with the
-// cwd set to a foreign dir (the repo-split fix). No live anything.
+// manifest tests pin an explicit root off the shared package-root anchor; a
+// separate group proves the loader ALSO resolves `extension/` via the package
+// config from a foreign working directory (the repo-split fix). No live
+// anything.
 import 'dart:io';
 
 import 'package:grid_assets/grid_assets.dart';
@@ -20,37 +21,16 @@ import 'package:test/test.dart';
 import 'package:yaml/yaml.dart';
 
 import 'support/asset_fakes.dart';
+import 'support/package_root.dart';
 
-/// Resolves this package's `extension/` dir by walking up from the cwd (robust
-/// whether the suite runs from the repo root or the package dir — the same walk
-/// the loader + the structural fence use). Used to pin an explicit loader [root]
-/// and to read the manifest from the SAME dir, so both never disagree on cwd.
-String _extensionDir() {
-  final candidates = <String>[
-    'extension',
-    p.join('packages', 'grid_assets', 'extension'),
-  ];
-  var dir = Directory.current;
-  for (var i = 0; i < 6; i++) {
-    for (final rel in candidates) {
-      final probe = Directory(p.join(dir.path, rel));
-      if (probe.existsSync() &&
-          Directory(p.join(probe.path, 'rubrics')).existsSync()) {
-        return probe.path;
-      }
-    }
-    final parent = dir.parent;
-    if (parent.path == dir.path) break;
-    dir = parent;
-  }
-  fail(
-    'could not locate packages/grid_assets/extension from '
-    '${Directory.current.path}',
-  );
-}
+/// The child executable that resolves the loader with no explicit root.
+const String _probe = 'asset_loader_cwd_probe.dart';
 
 void main() {
-  final root = _extensionDir();
+  // The explicit loader root, and the dir the manifest is read from, are the
+  // SAME cwd-independent answer — so the two can never disagree on where the
+  // assets are.
+  final root = p.join(packageRoot(), 'extension');
   final loader = PackagedAssetLoader(root: root);
 
   group('PackagedAssetLoader — the committee rubrics', () {
@@ -86,29 +66,35 @@ void main() {
   group(
     'PackagedAssetLoader — cwd-independent resolution (the repo-split fix)',
     () {
-      test('resolves rubrics with the cwd set to a foreign temp dir — via the '
+      test('resolves rubrics from a foreign working directory — via the '
           'package config, since no cwd walk-up from there can ever reach the '
-          'assets (the post-split space_station runner)', () {
+          'assets (the post-split space_station runner)', () async {
         // A dir that shares no ancestry with power_station's checkout: the cwd
         // walk-up is guaranteed to miss, so a passing load PROVES the package
         // config resolved it (not an accidental walk-up hit).
-        final foreign = Directory.systemTemp.createTempSync(
+        //
+        // Run as a CHILD process, never by assigning the process working
+        // directory: that is a process property and `dart test` runs suites
+        // concurrently, so proving cwd-independence here by moving it raced
+        // every sibling suite's source reads.
+        final foreign = await Directory.systemTemp.createTemp(
           'grid_assets_foreign_cwd_',
         );
-        final saved = Directory.current;
-        try {
-          Directory.current = foreign;
-          // No explicit root — resolution runs for real from the foreign cwd.
-          final resolved = PackagedAssetLoader();
-          for (final rubricId in [kGatingRubric, ...kLlmRubrics]) {
-            final text = resolved.loadRubric(rubricId);
-            expect(text, isNotEmpty);
-            expect(text, contains(rubricId));
-          }
-        } finally {
-          Directory.current = saved;
-          foreign.deleteSync(recursive: true);
-        }
+        addTearDown(() => foreign.delete(recursive: true));
+
+        final result = await Process.run(Platform.resolvedExecutable, <String>[
+          p.join(packageRoot(), 'test', 'fixtures', _probe),
+        ], workingDirectory: foreign.path);
+
+        expect(
+          result.exitCode,
+          0,
+          reason: '${result.stdout}\n${result.stderr}',
+        );
+        expect(result.stderr, isEmpty);
+        // Not merely "something loaded": the loader resolved the SAME
+        // `extension/` the explicit-root group reads its manifest from.
+        expect(result.stdout, root);
       });
     },
   );

@@ -12,6 +12,8 @@ import 'package:grid_assets/grid_assets.dart';
 import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
+import '../support/package_root.dart';
+
 const String _beadId = 'pow-cmnw';
 
 /// The injected work store, written UNNORMALIZED so every probe also proves
@@ -193,24 +195,19 @@ Matcher _withheldRow(String key) => matches(
   RegExp('^${RegExp.escape(key)}: [0-9]+ bytes withheld\$', multiLine: true),
 );
 
-/// This package's copy of the implementation, located whether the suite runs
-/// from the package dir or the workspace root. LOUD when it cannot be found —
-/// a source fence that silently reads nothing is a fence that is GONE.
+/// This package's copy of the implementation, off the shared cwd-independent
+/// package root. LOUD when it cannot be read — a source fence that silently
+/// reads nothing is a fence that is GONE.
+///
+/// Never a walk up from the process working directory: that is a process
+/// property and `dart test` runs the suites concurrently, so a walk from here
+/// could read a directory another file had pointed somewhere else.
 File _implementation() {
-  const relative = 'lib/src/filing/show_command.dart';
-  for (
-    var dir = Directory.current.absolute;
-    dir.parent.path != dir.path;
-    dir = dir.parent
-  ) {
-    for (final candidate in [
-      File(p.join(dir.path, relative)),
-      File(p.join(dir.path, 'packages', 'grid_assets', relative)),
-    ]) {
-      if (candidate.existsSync()) return candidate;
-    }
-  }
-  fail('show_command.dart not found from ${Directory.current.path}');
+  final file = File(
+    p.join(packageRoot(), 'lib', 'src', 'filing', 'show_command.dart'),
+  );
+  if (!file.existsSync()) fail('show_command.dart not found at ${file.path}');
+  return file;
 }
 
 void main() {

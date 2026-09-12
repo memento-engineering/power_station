@@ -16,31 +16,14 @@ import 'package:grid_assets/grid_assets.dart';
 import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
-/// Resolves this package's `extension/` dir by walking up from the cwd (the
-/// same walk the loader + the sibling pack tests use).
-String _extensionDir() {
-  final candidates = <String>[
-    'extension',
-    p.join('packages', 'grid_assets', 'extension'),
-  ];
-  var dir = Directory.current;
-  for (var i = 0; i < 6; i++) {
-    for (final rel in candidates) {
-      final probe = Directory(p.join(dir.path, rel));
-      if (probe.existsSync() &&
-          Directory(p.join(probe.path, 'rubrics')).existsSync()) {
-        return probe.path;
-      }
-    }
-    final parent = dir.parent;
-    if (parent.path == dir.path) break;
-    dir = parent;
-  }
-  fail(
-    'could not locate packages/grid_assets/extension from '
-    '${Directory.current.path}',
-  );
-}
+import 'support/package_root.dart';
+
+/// This package's `extension/` dir, off the shared cwd-independent package
+/// root. Never a walk up from the process working
+/// directory: that is a process property and `dart test` runs the suites
+/// concurrently, so a walk from here could read a directory another file had
+/// pointed somewhere else.
+String _extensionDir() => p.join(packageRoot(), 'extension');
 
 /// The residue fence: tokens from the deprecated source context the whole pack
 /// was rewritten out of. The docs rubrics are new prose, so this is a fence

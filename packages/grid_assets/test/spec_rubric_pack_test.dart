@@ -19,38 +19,19 @@ import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
 import 'support/asset_fakes.dart';
+import 'support/package_root.dart';
 
-/// Resolves this package's `extension/` dir by walking up from the cwd (the
-/// same walk the loader + track_d use).
-String _extensionDir() {
-  final candidates = <String>[
-    'extension',
-    p.join('packages', 'grid_assets', 'extension'),
-  ];
-  var dir = Directory.current;
-  for (var i = 0; i < 6; i++) {
-    for (final rel in candidates) {
-      final probe = Directory(p.join(dir.path, rel));
-      if (probe.existsSync() &&
-          Directory(p.join(probe.path, 'rubrics')).existsSync()) {
-        return probe.path;
-      }
-    }
-    final parent = dir.parent;
-    if (parent.path == dir.path) break;
-    dir = parent;
-  }
-  fail(
-    'could not locate packages/grid_assets/extension from '
-    '${Directory.current.path}',
-  );
-}
+/// This package's `extension/` dir, off the shared cwd-independent package
+/// root. Never a walk up from the process working
+/// directory: that is a process property and `dart test` runs the suites
+/// concurrently, so a walk from here could read a directory another file had
+/// pointed somewhere else.
+String _extensionDir() => p.join(packageRoot(), 'extension');
 
 /// This package's `lib/` — the sibling of [_extensionDir]'s result. The
 /// positive-control fence greps BOTH source trees: the brief that teaches the
 /// write rule is Dart, its portable mirrors are Markdown.
-Directory _libDir() =>
-    Directory(p.join(Directory(_extensionDir()).parent.path, 'lib'));
+Directory _libDir() => Directory(p.join(packageRoot(), 'lib'));
 
 /// The residue fence: tokens from the pack's DEPRECATED source context that
 /// must NOT survive the content rewrite. Each pattern names its concern.

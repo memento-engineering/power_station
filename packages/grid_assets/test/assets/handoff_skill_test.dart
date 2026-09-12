@@ -29,12 +29,14 @@ import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 import 'package:yaml/yaml.dart';
 
-/// This package's `extension/` dir, resolved the CWD-INDEPENDENT way (the
-/// loader's own package-config resolution), exactly as
-/// `overlay_install_test.dart` does. Never a cwd walk: `Directory.current` is
-/// process-global and the suites run concurrently, so a sibling suite that
-/// chdirs would race a walk done here.
-String _extensionDir() => PackagedAssetLoader().root;
+import '../support/package_root.dart';
+
+/// This package's `extension/` dir, off the shared cwd-independent package
+/// root. Never a walk up from the process working
+/// directory: that is a process property and `dart test` runs the suites
+/// concurrently, so a walk from here could read a directory another file had
+/// pointed somewhere else.
+String _extensionDir() => p.join(packageRoot(), 'extension');
 
 /// The two overlay legs this skill ships on — independent instruction
 /// sources.
@@ -291,15 +293,15 @@ void main() {
 
     test('a grid home gets .claude/skills/handoff and .agents/skills/handoff, '
         'both fully bound', () async {
-      final packageRoot = p.dirname(root);
+      final vendingRoot = packageRoot();
       final report = await const OverlayInstallService().install(
         resolution: resolveGridAssets(
           registry: GeneratedGridAssetRegistrant.registry,
           snapshot: SubstationFactsSnapshot(<SubstationKey, SubstationFacts>{
             const SubstationKey('home'): SubstationFacts(
-              root: packageRoot,
+              root: vendingRoot,
               dartPackages: const <String>['grid_assets', 'grid_sdk'],
-              packageRoots: <String, String>{'grid_assets': packageRoot},
+              packageRoots: <String, String>{'grid_assets': vendingRoot},
             ),
           }),
           substation: const SubstationKey('home'),

@@ -11,12 +11,17 @@ import 'dart:io';
 import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
+import '../support/package_root.dart';
+
 /// Resolves a package's `lib` dir through the resolved package config (walking
 /// up to the workspace `.dart_tool/package_config.json`) — the package config
 /// is the one authority on where a workspace member resolved. The `<pkg>.dart`
 /// barrel is the marker so a `lib` candidate matches only its own package.
+///
+/// The walk starts at THIS package's root rather than at the process cwd, which
+/// is process-global and which a concurrently scheduled suite could have moved.
 Directory _libDir(String pkg) {
-  var dir = Directory.current;
+  var dir = Directory(packageRoot()).absolute;
   for (var i = 0; i < 6; i++) {
     final config = File(p.join(dir.path, '.dart_tool', 'package_config.json'));
     if (config.existsSync()) {
@@ -41,7 +46,7 @@ Directory _libDir(String pkg) {
     if (parent.path == dir.path) break;
     dir = parent;
   }
-  fail('could not resolve package:$pkg/lib from ${Directory.current.path}');
+  fail('could not resolve package:$pkg/lib from ${packageRoot()}');
 }
 
 String _allSource(Directory libDir, {bool Function(File f) exclude = _never}) =>
