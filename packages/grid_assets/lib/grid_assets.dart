@@ -66,13 +66,14 @@
 /// deterministically evaluates its four mechanical authoring requirements,
 /// and [FilingCommand] is the thin CLI adapter the `discover` skill calls.
 /// Description and acceptance usefulness remain with the agentic half.
-/// Both filing verbs read the grid home's cross-store link beads through ONE
-/// `--state-root` seam ([addStateRootOption] / [resolveStateRoot]), so
-/// `filing` and `approve` cannot answer the same contract two ways. That seam
-/// takes the GRID HOME and appends its `.grid` state store; with no root at
-/// all the store is UNCONSULTED, which the report says
-/// ([kUnconsultedCrossStoreDetail]) rather than calling the unread edge
-/// missing.
+/// Both filing verbs still register ONE `--state-root` seam
+/// ([addStateRootOption] / [resolveStateRoot]) so `filing`, `approve`, `show`
+/// and the park pair cannot spell the grid home two ways; that seam takes the
+/// GRID HOME and appends its `.grid` state store. `filing` and `approve`
+/// VALIDATE it and read nothing through it: the cross-store link beads they
+/// used to project died with grid_engine's link surface (the_grid#447), so a
+/// named foreign blocker with no local `blocks` edge is reported missing,
+/// fail-closed.
 ///
 /// The PARK PAIR rides that same seam, one rung further in: it is the
 /// operator's sanctioned exit for a session the engine's own writers can no

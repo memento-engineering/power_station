@@ -96,26 +96,26 @@ PR merged.
   The BLOCKED bead is the first argument. The `filing` verb's `dependencies`
   row reads the ids named in the description and fails until each one has an
   outgoing `blocks` edge.
-- **Cross-store** — never a local dependency row, and never
-  `bd dep add <id> external:<project>:<id>`: mint an OPEN grid-state
-  `type=link` bead with the station's link verb, arming BOTH endpoint
-  prefixes:
+- **Cross-store** — never a raw foreign id in a local dependency row: a
+  cross-store blocker is bd's OWN `external:<project>:<capability>` dependency
+  row on the BLOCKED bead, and the station's link verb is the sugar that writes
+  it:
 
   ```bash
-  {{runner}} link <blocked bead> --blocked-by <blocker bead> \
-    --prefix <blocked bead prefix> --prefix <blocker bead prefix> \
-    --actor operator --reason "<why this ordering exists>"
+  {{runner}} link <blocked bead> --blocked-by <blocker bead>
   ```
 
-  The link bead carries `grid.link.from`, `grid.link.to` and
-  `grid.link.type=blocks`; the station projects it and the shared block guard
-  enforces it. A malformed link fails closed. `{{runner}} link ls` lists what
-  is wired.
+  It labels the target `export:<target>` and runs
+  `bd dep add <blocked> external:<project>:<target>`, where `<project>` is the
+  target substation's ROSTER NAME. It mints no bead and never touches the
+  station's state store. The edge LIFTS when the target ships —
+  `bd ship <target>` on a CLOSED target — so there is nothing to unwire by
+  hand. `{{runner}} link ls` lists the external rows the roster's stores carry.
 
 **Why:** an unwired blocker leaves the blocked bead in `ready`, so the station
 mounts it and its agent builds against an API the blocker has not shipped. A
-raw foreign-id dependency row is worse: `bd doctor --fix` can classify it as
-orphaned and sever it silently.
+raw foreign id in a local row is worse: `bd doctor --fix` can classify it as
+orphaned and sever it silently, and the frontier resolves nothing against it.
 
 ## FLAG an EITHER/OR fork — never decide it
 
@@ -158,7 +158,7 @@ When the work extends something the tree already owns, write the pointer into
 the bead body as `path:line` plus the relationship:
 
 ```
-COMPOSE: packages/grid_assets/lib/src/filing/filing_contract.dart:242 owns the
+COMPOSE: packages/grid_assets/lib/src/filing/filing_contract.dart:207 owns the
 four-row completeness contract — CALL it; do not add a second predicate.
 ```
 
@@ -170,17 +170,17 @@ checker of its own.
 ## The exit check — `filing` is the oracle, and it is a COMMAND
 
 Refinement EXITS on the verb, never on a reading. From the grid home (the verb
-resolves the owning store by the id's prefix), and ALWAYS with `--state-root`
-pointed at that grid home, so the cross-store link beads are actually read:
+resolves the owning store by the id's prefix):
 
 ```bash
 {{runner}} filing --json --state-root "<grid home>" "<bead>"
 ```
 
 `--state-root` takes the GRID HOME, the same value `--grid-home` takes; the
-verb appends its `.grid` state store itself. Omitting it does not make the
-check stricter — it makes the check BLIND to every blocker wired by a link
-bead.
+verb appends its `.grid` state store itself. It is the ONE spelling of the home
+across `filing`, `approve`, `show` and the park pair, and `filing`/`approve`
+VALIDATE it without reading through it: the preflight judges the bead's OWN
+outgoing `blocks` edges and nothing else.
 
 The report is one JSON object: `{id, passed, requirements, error?}`.
 `requirements` carries exactly four rows, in order — `driveable_type`,
@@ -197,14 +197,10 @@ correction:
   validation_plan to every consumer**.
 - `acceptance_criteria is blank` — author `- [ ]` checkboxes a named command
   can falsify.
-- `missing outgoing blocks edges: <ids>` — the store WAS consulted and each
-  named id is genuinely unwired: wire it per **Wire every dependency at
-  intake**.
-- `cross-store edges not consulted — pass --state-root` — the store was NOT
-  consulted, so nothing is known about the foreign blockers this bead names.
-  RERUN with `--state-root "<grid home>"`. Never wire an edge off this
-  detail: the blocker it would name may already be wired by an open link bead,
-  and the duplicate is a WRITE driven by a read that never happened.
+- `missing outgoing blocks edges: <ids>` — each named id is unwired: wire it
+  per **Wire every dependency at intake**. A FOREIGN id is named here like any
+  other, and it is wired the same way — with the link verb, which writes the
+  `external:` row on this very bead.
 
 Then RERUN the verb. Repeat until the report reads `"passed": true`; only then
 stage the bead for approval. Nothing else stages a bead — a reading of the

@@ -6,7 +6,6 @@ import 'package:github_grid_assets/github_grid_assets.dart';
 import 'package:grid_assets/grid_assets.dart';
 import 'package:grid_engine/grid_engine.dart';
 import 'package:grid_runtime/grid_runtime.dart';
-import 'package:grid_sdk/grid_sdk.dart' show Provider;
 import 'package:grid_sdk/grid_sdk.dart' as sdk;
 import 'package:test/test.dart';
 
@@ -84,6 +83,10 @@ class _SourceControl implements SourceControl {
   String branchFor(String beadId) => 'grid/$beadId';
   @override
   String workspaceFor(String beadId) => '/work/$beadId';
+
+  /// No worktree is cut here, so the provision-time commit is unknown.
+  @override
+  String? baseShaFor(String beadId) => null;
   @override
   Future<void> provisionWorkspace({
     required String beadId,

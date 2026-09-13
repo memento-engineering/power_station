@@ -35,7 +35,6 @@ import 'package:grid_assets/grid_assets.dart';
 import 'package:beads_dart/beads_dart.dart';
 import 'package:grid_engine/grid_engine.dart';
 import 'package:grid_runtime/grid_runtime.dart';
-import 'package:grid_sdk/grid_sdk.dart' show ProviderScope;
 import 'package:test/test.dart';
 
 import '../support/asset_fakes.dart';
@@ -1163,6 +1162,14 @@ class _RecordingGroups implements ProcessGroupController {
 /// mount-attempt`, answered immediately) BEFORE it issues the session
 /// `create` — which stays the ONE gated call, so `createPending` still means
 /// "the session mint is in flight", exactly what PDR §7 (e) parks on.
+///
+/// …and grid_runtime 0.2.1-dev.2's close path, which READS the bead back to
+/// ship every capability it exports (`StationBeadWriter._shipExports`,
+/// the_grid#445). That read is a `bd query`, whose envelope carries a LIST;
+/// the inherited fake answers every non-`create` call with a single object, so
+/// the query is answered here instead. An empty list is the truthful answer
+/// for a mid-mint session bead that was voided before anything labelled it:
+/// nothing is exported, so nothing ships.
 class _Rc20GatedCreateBdRunner extends GatedCreateBdRunner {
   int _mountAttempts = 0;
 
@@ -1173,7 +1180,7 @@ class _Rc20GatedCreateBdRunner extends GatedCreateBdRunner {
     String? stdin,
   }) async {
     final sub = args.isNotEmpty ? args.first : '';
-    if (sub == 'list') {
+    if (sub == 'list' || sub == 'query') {
       return const BdResult(
         exitCode: 0,
         stdout: '{"schema_version":1,"data":[]}',

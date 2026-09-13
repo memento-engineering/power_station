@@ -1,3 +1,31 @@
+## Unreleased
+
+- Changed: adopts the 2026-09-13 the_grid dev.3 wave — `genesis_tree ^0.4.0`, `grid_engine ^0.4.0-dev.3`, `grid_sdk ^0.4.0-dev.3`, `grid_runtime ^0.2.1-dev.2`, `grid_trajectory ^0.2.1-dev.2` and `beads_dart ^0.3.0-dev.2` (pow-abaw).
+- Breaking: `GitSourceControl.provisioner` is a `StationGitRepository`, not a `StationGitService`,
+  and `GitSourceControl` implements the new `SourceControl.baseShaFor` by delegating to it, so a
+  committee pins its review diff to the exact commit the provisioner cut from (grid_runtime
+  0.2.1-dev.1, the_grid#436). `GitGridAssets` watches `StationGitRepository` and `GitServices
+  .provisioner` carries one. Migration: a delegate that provided `Provider<StationGitService>`
+  provides `Provider<StationGitRepository>(StationGitRepository(service: <the service>))`; every
+  other `SourceControl` implementer adds `baseShaFor`, returning null when it cuts no worktree.
+- Breaking: the state-store cross-link surface is GONE with grid_engine's (the_grid#447).
+  `CrossLinkBlockerSource` is deleted, `FilingService` drops `links` and its `stateRoot` argument,
+  `FilingContract.evaluate` drops `linkedBlockers`, `kUnconsultedCrossStoreDetail` is deleted, and
+  `ApproveService.approve` / `UnparkService.unpark` drop `stateRoot`. A named FOREIGN blocker is now
+  judged by the bead's OWN outgoing `blocks` edges like any other and reported missing, fail-closed;
+  a cross-store blocker is authored as bd's `external:<project>:<capability>` row (`grid link`).
+  The `--state-root` option stays registered on `filing`/`approve` and is VALIDATED there — the ONE
+  spelling of the grid home across the verb set — but nothing reads through it any more; only the
+  park pair does. Migration: drop the arguments; re-prove a cross-store blocker with a bd
+  dependency row.
+- Unchanged: the v1 approval-revision basis. `_approvalRevisionOf` keeps its `linked` member, pinned
+  false, so no `grid.approved_rev` stamp already written is re-digested by this adoption; a golden
+  digest in `test/filing/filing_contract_test.dart` pins it.
+- Changed: the vended `intake-refinement`, `discover` and `station-operations` skills teach bd's
+  `external:` row and the post-cut `link` verb; the retired `type=link` bead, `grid.link.*` metadata,
+  `crossLinkTypeRefusal`, `StationJoinBridge._applyCrossLinks` and `applyBlockGuard` are named
+  nowhere under `station_overlay/`.
+
 ## 0.7.0-dev.1
 
 - Changed: the `seat` launcher CONSUMES the handoff itself. Before it primes a child it archives the disc, proves the archive, deletes the note and its one `MEMORY.md` pointer line, and hands the successor the body it just consumed; a succession that refuses stops the launch instead of starting a successor over an unresolved disc. Consuming was an instruction the successor was asked to follow, and four sessions did not — one of them could not, because its disc was gitignored. The `succession` verb is unchanged as the by-hand recovery path (pow-d5ol).

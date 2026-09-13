@@ -9,7 +9,8 @@ import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
 /// Replies by bd subcommand and records every argv, so a run can prove the
-/// filing verb wrote nothing (read-only by construction).
+/// filing verb wrote nothing (read-only by construction) and that it never
+/// reached a second store.
 final class _ScriptedBdRunner implements BdRunner {
   _ScriptedBdRunner(this.replies);
 
@@ -61,26 +62,9 @@ String _beadReply({required String description}) => jsonEncode({
   ],
 });
 
-String _linkReply(List<Map<String, String>> links) => jsonEncode({
-  'schema_version': 1,
-  'data': [
-    for (final (index, link) in links.indexed)
-      {
-        'id': 'tgdog-l$index',
-        'issue_type': 'link',
-        'status': 'open',
-        'metadata': link,
-      },
-  ],
-});
-
-_ScriptedBdRunner _bd({
-  required String description,
-  List<Map<String, String>> links = const [],
-}) => _ScriptedBdRunner({
+_ScriptedBdRunner _bd({required String description}) => _ScriptedBdRunner({
   'query': _beadReply(description: description),
   'dep': '{"schema_version":1,"data":[]}',
-  'list': _linkReply(links),
 });
 
 ({
@@ -88,24 +72,16 @@ _ScriptedBdRunner _bd({
   StringBuffer out,
   StringBuffer err,
   _ScriptedBdRunner bd,
-  List<String> linkRoots,
 })
 _harness(_ScriptedBdRunner bd, {String? stateRoot}) {
   final out = StringBuffer();
   final err = StringBuffer();
-  final linkRoots = <String>[];
   return (
     runner: CommandRunner<int>('space', 'test station')
       ..addCommand(
         FilingCommand(
           service: FilingService(
             source: ExactSubstationBeadSource(runnerFor: (_) => bd),
-            links: CrossLinkBlockerSource(
-              runnerFor: (root) {
-                linkRoots.add(root);
-                return bd;
-              },
-            ),
           ),
           storeRoot: () => '/work/power_station',
           stateRoot: () => stateRoot,
@@ -116,7 +92,6 @@ _harness(_ScriptedBdRunner bd, {String? stateRoot}) {
     out: out,
     err: err,
     bd: bd,
-    linkRoots: linkRoots,
   );
 }
 
@@ -129,44 +104,33 @@ Map<String, dynamic> _dependencyRow(StringBuffer out) =>
 const List<String> _mutations = ['create', 'update', 'close'];
 
 void main() {
-  const linked = {
-    'grid.link.from': 'pow-child',
-    'grid.link.to': 'tg-89y8',
-    'grid.link.type': 'blocks',
-  };
   const crossStore = 'BLOCKED on tg-89y8 across stores.';
 
-  test('an open link bead wires a named cross-store blocker', () async {
-    final h = _harness(
-      _bd(description: crossStore, links: const [linked]),
-      stateRoot: _gridHome(),
-    );
+  test('a named cross-store blocker needs the bead\'s OWN outgoing edge', () {
+    // grid_engine 0.4.0-dev.3 deleted the state-store link surface this verb
+    // used to project (the_grid#447): there is no second store to consult, so
+    // an unwired foreign id is reported missing like any other — fail-closed.
+    final h = _harness(_bd(description: crossStore), stateRoot: _gridHome());
 
     expect(
-      await h.runner.run(['filing', '--json', 'pow-child']),
-      0,
+      h.runner.run(['filing', '--json', 'pow-child']),
+      completion(1),
       reason: '${h.out}${h.err}',
-    );
-    expect(_dependencyRow(h.out)['passed'], isTrue);
-    expect(
-      _dependencyRow(h.out)['detail'],
-      'all named local blockers are wired',
-    );
-    expect(h.bd.argvs.any((argv) => argv.first == 'list'), isTrue);
-    expect(
-      h.bd.argvs.map((argv) => argv.first),
-      everyElement(isNot(isIn(_mutations))),
     );
   });
 
-  test('without the link bead the same blocker is missing', () async {
+  test('the state store is never read, even with a root resolved', () async {
     final h = _harness(_bd(description: crossStore), stateRoot: _gridHome());
 
     expect(await h.runner.run(['filing', '--json', 'pow-child']), 1);
-    expect(_dependencyRow(h.out)['passed'], isFalse);
     expect(
       _dependencyRow(h.out)['detail'],
       'missing outgoing blocks edges: tg-89y8',
+    );
+    expect(h.bd.argvs.map((argv) => argv.first), isNot(contains('list')));
+    expect(
+      h.bd.argvs.map((argv) => argv.first),
+      everyElement(isNot(isIn(_mutations))),
     );
   });
 
@@ -181,13 +145,12 @@ void main() {
 
     // The help documents the GRID HOME, and both accepted forms land on the
     // same `.grid` state store — so the documented value is the working one.
-    // It names the home rather than either store because BOTH kinds of state
-    // bead live under it: the link beads these two verbs read, and the
-    // session-lifecycle beads `park`/`unpark` close and retire.
+    // It names the home rather than either store because that is where the
+    // session-lifecycle beads `park`/`unpark` close and retire live.
     expect(
       kStateRootHelp,
-      'The grid home whose .grid/.beads holds the cross-store link and '
-      'session-lifecycle state beads.',
+      'The grid home whose .grid/.beads holds the session-lifecycle state '
+      'beads.',
     );
     final home = _gridHome();
     final store = p.join(home, '.grid');
@@ -195,7 +158,7 @@ void main() {
     expect(resolve('$home${p.separator}.'), store);
     expect(resolve(store), store);
 
-    // No value on either seam means the store is not consulted at all.
+    // No value on either seam means no home was named at all.
     expect(resolve(null), isNull);
     expect(resolve('   '), isNull);
     expect(resolveStateRoot(parser.parse(const []), () => home), store);
@@ -215,9 +178,9 @@ void main() {
     );
   });
 
-  test('documented grid home reaches the state store', () async {
+  test('the documented grid home is accepted on the flag', () async {
     final home = _gridHome();
-    final h = _harness(_bd(description: crossStore, links: const [linked]));
+    final h = _harness(_bd(description: 'Depends on pow-1rn.5.'));
 
     expect(
       await h.runner.run([
@@ -227,19 +190,20 @@ void main() {
         home,
         'pow-child',
       ]),
-      0,
+      1,
       reason: '${h.out}${h.err}',
     );
-    expect(h.linkRoots, [p.join(home, '.grid')]);
-    expect(_dependencyRow(h.out)['passed'], isTrue);
+    expect(
+      _dependencyRow(h.out)['detail'],
+      'missing outgoing blocks edges: pow-1rn.5',
+    );
     expect(h.err.toString(), isEmpty);
-    expect(h.out.toString(), isNot(contains('invalid issue type')));
   });
 
   test(
     'an unrelated state root is refused LOUD, and nothing is read',
     () async {
-      final h = _harness(_bd(description: crossStore, links: const [linked]));
+      final h = _harness(_bd(description: crossStore));
 
       expect(
         await h.runner.run([
@@ -253,60 +217,9 @@ void main() {
       );
       expect(h.err.toString(), allOf(contains('.grid'), contains('.beads')));
       expect(h.out.toString(), isEmpty);
-      expect(h.linkRoots, isEmpty);
+      expect(h.bd.argvs, isEmpty);
     },
   );
-
-  test('wired cross-store blocker is unchecked without a state root and '
-      'passes when consulted', () async {
-    final without = _harness(
-      _bd(description: crossStore, links: const [linked]),
-    );
-
-    expect(await without.runner.run(['filing', '--json', 'pow-child']), 1);
-    expect(without.linkRoots, isEmpty);
-    expect(without.bd.argvs.any((argv) => argv.first == 'list'), isFalse);
-    final unchecked = _dependencyRow(without.out);
-    expect(unchecked['passed'], isFalse);
-    expect(
-      unchecked['detail'],
-      'cross-store edges not consulted — pass --state-root',
-    );
-    expect(unchecked['detail'], isNot(contains('tg-89y8')));
-    expect(
-      unchecked['detail'],
-      isNot(contains('missing outgoing blocks edges')),
-    );
-
-    final consulted = _harness(
-      _bd(description: crossStore, links: const [linked]),
-      stateRoot: _gridHome(),
-    );
-    expect(
-      await consulted.runner.run(['filing', '--json', 'pow-child']),
-      0,
-      reason: '${consulted.out}${consulted.err}',
-    );
-    expect(
-      _dependencyRow(consulted.out)['detail'],
-      'all named local blockers are wired',
-    );
-  });
-
-  test('an unconsulted store names only the local edge as missing', () async {
-    final h = _harness(
-      _bd(
-        description: 'Depends on pow-1rn.5.\nBLOCKED on tg-89y8 across stores.',
-      ),
-    );
-
-    expect(await h.runner.run(['filing', '--json', 'pow-child']), 1);
-    expect(
-      _dependencyRow(h.out)['detail'],
-      'missing outgoing blocks edges: pow-1rn.5; '
-      'cross-store edges not consulted — pass --state-root',
-    );
-  });
 
   test('both verbs register ONE state-root seam', () {
     final filing = FilingCommand(out: StringBuffer(), err: StringBuffer());

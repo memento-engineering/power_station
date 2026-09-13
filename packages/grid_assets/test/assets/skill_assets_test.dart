@@ -433,19 +433,17 @@ void main() {
           'the_grid#a44-federated-work-sources-staleness-scope-member-removal-vs',
         ),
       );
-      expect(
-        filing,
-        contains(
-          'the_grid#a55-where-the-state-store-s-link-set-enters-the-pipeline-and',
-        ),
-      );
-      expect(filing, contains('type=link'));
-      expect(filing, contains('grid.link.from=<blocked bead id>'));
-      expect(filing, contains('grid.link.to=<blocker bead id>'));
-      expect(filing, contains('grid.link.type=blocks'));
-      expect(filing, contains('crossLinkTypeRefusal'));
-      expect(filing, contains('StationJoinBridge._applyCrossLinks'));
-      expect(filing, contains('applyBlockGuard'));
+      // The cross-store MECHANISM is bd's own external row since the link
+      // surface was cut (grid_engine 0.4.0-dev.3, the_grid#447) — the retired
+      // grid-state `type=link` bead is taught nowhere.
+      expect(filing, contains('external:<project>:<capability>'));
+      expect(filing, contains('export:<target>'));
+      expect(filing, contains('bd ship <target>'));
+      expect(filing, isNot(contains('type=link')));
+      expect(filing, isNot(contains('grid.link.')));
+      expect(filing, isNot(contains('crossLinkTypeRefusal')));
+      expect(filing, isNot(contains('StationJoinBridge._applyCrossLinks')));
+      expect(filing, isNot(contains('applyBlockGuard')));
       // The old ADR directory is retired: built, not typed literally, so
       // this fixture never re-adds the retired path string to the tree.
       const retiredAdrDir =
@@ -979,7 +977,7 @@ void main() {
       expect(template, contains('single tokens'));
       expect(template, contains('bd -C <store root> dep add <blocked bead>'));
       expect(rendered, contains('space link <blocked bead> --blocked-by'));
-      expect(template, contains('grid.link.type=blocks'));
+      expect(template, contains('external:<project>:<capability>'));
       expect(template, contains('FORK (author decides)'));
       expect(template, contains('An agent reads ONE bead: its own.'));
       expect(
@@ -1013,8 +1011,8 @@ void main() {
       );
     });
 
-    test('intake-refinement distinguishes unchecked cross-store edges from '
-        'missing wiring in both overlay legs', () {
+    test('intake-refinement teaches the missing-wiring detail and the bd '
+        'external row in both overlay legs', () {
       // The refiner acts on the verb's `detail` verbatim, so the corpus is
       // pinned to the strings the verb EMITS — not to a paraphrase of them.
       const missing = 'missing outgoing blocks edges: <ids>';
@@ -1033,26 +1031,38 @@ void main() {
 
         expect(
           body,
-          contains(kUnconsultedCrossStoreDetail),
-          reason: '$leg teaches the UNCHECKED detail verbatim',
+          contains(missing),
+          reason: '$leg teaches the genuinely-missing detail',
+        );
+        // The retired state-store link surface is not taught anywhere
+        // (grid_engine 0.4.0-dev.3, the_grid#447).
+        expect(body, isNot(contains('type=link')));
+        expect(body, isNot(contains('grid.link.')));
+        expect(body, isNot(contains('cross-store edges not consulted')));
+        // A cross-store blocker is bd's own external row, written by the
+        // link verb.
+        expect(
+          body,
+          contains('external:<project>:<capability>'),
+          reason: '$leg teaches bd\'s own cross-project row',
         );
         expect(
           body,
-          contains(missing),
-          reason: '$leg still teaches the genuinely-missing detail',
+          contains(
+            '{{runner}} link <blocked bead> --blocked-by <blocker bead>',
+          ),
+          reason: '$leg documents the link verb in its post-cut shape',
         );
-        // Unchecked never becomes a reason to WRITE an edge.
-        expect(body, contains('Never wire an edge off this'));
         // Both command examples pass the documented GRID HOME.
         expect(
           body,
           contains('{{runner}} filing --json $form "<bead>"'),
-          reason: '$leg documents the filing form that reads link beads',
+          reason: '$leg documents the one filing form',
         );
         expect(
           body,
           contains('{{runner}} approve --actor operator --json $form "<bead>"'),
-          reason: '$leg documents the approve form that reads link beads',
+          reason: '$leg documents the one approve form',
         );
       }
     });

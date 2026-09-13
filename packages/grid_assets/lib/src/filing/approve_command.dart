@@ -91,7 +91,6 @@ final class ApproveService {
            filing ??
            FilingService(
              source: ExactSubstationBeadSource(runnerFor: runnerFor),
-             links: CrossLinkBlockerSource(runnerFor: runnerFor),
            ),
        _runnerFor = runnerFor,
        _now = now;
@@ -103,21 +102,12 @@ final class ApproveService {
   final DateTime Function() _now;
 
   /// Approves [beadId] in [storeRoot] on behalf of [actor].
-  ///
-  /// [stateRoot] is the resolved state store holding the cross-store link
-  /// beads; null means the store is NOT consulted, so a named cross-store
-  /// blocker is reported unchecked rather than unwired.
   Future<ApprovalOutcome> approve({
     required String storeRoot,
     required String beadId,
     required String actor,
-    String? stateRoot,
   }) async {
-    final report = await filing.check(
-      storeRoot: storeRoot,
-      beadId: beadId,
-      stateRoot: stateRoot,
-    );
+    final report = await filing.check(storeRoot: storeRoot, beadId: beadId);
     if (!report.passed) {
       return ApprovalRefused(
         beadId: beadId,
@@ -226,11 +216,17 @@ class ApproveCommand extends Command<int> {
     }
     final ApprovalOutcome outcome;
     try {
+      // The shared state-root contract is VALIDATED here and nowhere read —
+      // the same posture `show` takes. The cross-store proof it used to feed
+      // died with grid_engine's link surface (the_grid#447); the option itself
+      // is the verb set's ONE spelling of "the grid home", so a verb that
+      // accepted it and skipped the check would report an unrelated root as
+      // fine.
+      resolveStateRoot(argResults!, _stateRoot);
       outcome = await _service.approve(
         storeRoot: p.normalize(_storeRoot()),
         beadId: beadId,
         actor: actor,
-        stateRoot: resolveStateRoot(argResults!, _stateRoot),
       );
     } on Object catch (error) {
       _err.writeln('approve: failed to approve $beadId: $error');

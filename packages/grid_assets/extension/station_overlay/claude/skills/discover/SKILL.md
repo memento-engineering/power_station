@@ -137,17 +137,16 @@ restate that boundary as Filing requirements.
   changes their location and not their force; citations are preserved through
   `register.legacy-id`. `the_grid#a44-federated-work-sources-staleness-scope-member-removal-vs`
   is the binding authority that rejects raw foreign-id dependency rows because
-  `bd doctor --fix` can classify them as orphaned and sever them, and
-  `the_grid#a55-where-the-state-store-s-link-set-enters-the-pipeline-and`
-  is the binding authority for the OPEN grid-state `type=link` mechanism.
-  Cross-store dependencies DO exist, but never author one as a local dependency
-  row or with `bd dep add <id> external:<project>:<capability>`. Use the
-  station's link-authoring verb, after its `crossLinkTypeRefusal` capability
-  check, to mint an OPEN grid-state `type=link` bead carrying
-  `grid.link.from=<blocked bead id>`, `grid.link.to=<blocker bead id>`, and
-  `grid.link.type=blocks` in its own metadata.
-  `StationJoinBridge._applyCrossLinks` projects it and the shared
-  `applyBlockGuard` enforces it. A malformed link fails closed.
+  `bd doctor --fix` can classify them as orphaned and sever them.
+  Cross-store dependencies DO exist, and a cross-store blocker is bd's OWN
+  `external:<project>:<capability>` dependency row on the BLOCKED bead — never
+  a raw foreign id in a local row. Author it with the station's link verb,
+  which is sugar for exactly that: it labels the target `export:<target>` and
+  runs `bd dep add <blocked> external:<project>:<target>`, mints no bead and
+  never touches the station's state store. The frontier resolves the row
+  against the armed roster and holds the consumer out of ready until the
+  target SHIPS (`bd ship <target>` on a CLOSED target); a row naming a project
+  the roster does not arm is refused LOUD and blocks, never silently passes.
   Default to homing coupled beads together when one repo owns the work, because
   that gives the station a locally resolvable graph; split them across stores
   when repo ownership calls for it — including the three-store split directed

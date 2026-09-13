@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:acp_dart/acp_dart.dart';
+import 'package:genesis_tree/genesis_tree.dart';
 import 'package:beads_dart/beads_dart.dart';
 import 'package:grid_assets/grid_assets.dart';
 import 'package:grid_engine/grid_engine.dart';
@@ -13,6 +14,7 @@ import 'package:grid_runtime/grid_runtime.dart';
 import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
+import '../support/allocation_mount.dart';
 import '../support/package_root.dart';
 
 class _Steers implements AgentSteerSource {
@@ -32,6 +34,7 @@ class _Run {
     required this.steers,
     required this.name,
     required this.trace,
+    required this.tree,
   });
 
   final Allocation allocation;
@@ -41,6 +44,7 @@ class _Run {
   final _Steers steers;
   final String name;
   final File trace;
+  final TreeContext tree;
   bool _closed = false;
 
   Future<void> close() async {
@@ -148,8 +152,7 @@ Future<_Run> _buildAcpRun({
   const name = 'session-1/work-1/agent';
   final reports = <AllocationReport>[];
   final args = StepArgs(nodePath: 'work-1/agent', cancel: CancelToken());
-  final allocationContext = AllocationContext(
-    treeContext: tree,
+  final allocationInputs = AllocationInputs(
     args: args,
     transport: runtime,
     address: const AllocationAddress('session-1', 'work-1/agent'),
@@ -164,7 +167,7 @@ Future<_Run> _buildAcpRun({
   final request = ProcessLeaseRequest(
     stepBeadId: 'step-1',
     capability: capability,
-    allocation: allocationContext,
+    inputs: allocationInputs,
   );
   final ProcessLeaseVendor vendor = SelfManagedProcessVendor(
     spawn: stationProcessSpawner,
@@ -178,8 +181,7 @@ Future<_Run> _buildAcpRun({
       ? vendor
             .leaseFor(request)
             .createAllocation(
-              AllocationContext(
-                treeContext: tree,
+              AllocationInputs(
                 args: args,
                 transport: runtime,
                 address: const AllocationAddress('session-1', 'work-1/agent'),
@@ -188,7 +190,7 @@ Future<_Run> _buildAcpRun({
                 kind: StepKind.job,
               ),
             )
-      : capability.createAllocation(allocationContext);
+      : capability.createAllocation(allocationInputs);
   final run = _Run(
     allocation: allocation,
     runtime: runtime,
@@ -197,6 +199,7 @@ Future<_Run> _buildAcpRun({
     steers: steers,
     name: name,
     trace: trace,
+    tree: tree,
   );
   addTearDown(run.close);
   return run;
@@ -481,7 +484,7 @@ void main() {
           probePath: probePath,
           identity: identity,
         );
-        final done = run.allocation.startOrAdopt();
+        final done = run.allocation.startMounted(run.tree);
         await _waitForOutput(run, 'READY FOR STEER');
         run.steers.controller.add(
           const ProcessSessionCommand(
@@ -652,7 +655,7 @@ void main() {
       // gap, and the reason this probe names the seam it asserts on.
       leased: false,
     );
-    unawaited(run.allocation.startOrAdopt());
+    unawaited(run.allocation.startMounted(run.tree));
     final failure = await _waitForFailure(run);
     expect(failure.reason, capacity);
     expect(failure.kind, CapabilityFailureKind.noResult);

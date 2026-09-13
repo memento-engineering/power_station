@@ -37,13 +37,8 @@ void main() {
     const one = BeadDependency(issueId: 'pow-filed', dependsOnId: 'pow-one');
     const two = BeadDependency(issueId: 'pow-filed', dependsOnId: 'pow-two');
 
-    String rev(
-      Bead subject,
-      List<BeadDependency> edges, [
-      Set<String>? linked,
-    ]) => const FilingContract()
-        .evaluate(subject, edges, linkedBlockers: linked)
-        .approvalRevision;
+    String rev(Bead subject, List<BeadDependency> edges) =>
+        const FilingContract().evaluate(subject, edges).approvalRevision;
 
     final baseline = rev(bead, const [one, two]);
     expect(baseline, startsWith(kFilingApprovalRevisionPrefix));
@@ -52,13 +47,22 @@ void main() {
       matches(RegExp(r'^[0-9a-f]{64}$')),
     );
 
+    // The v1 basis SHAPE is FROZEN: every `grid.approved_rev` already written
+    // is a digest over it, so retiring the state-store link surface
+    // (the_grid#447) must not re-digest a single bead. The `linked` member
+    // stays in the basis, pinned false — which is byte-for-byte what an
+    // unconsulted state store always produced. A GOLDEN digest, so a future
+    // edit to the basis cannot slip through as "just a refactor": changing it
+    // revokes every standing approval and needs a v2 prefix.
+    expect(
+      baseline,
+      '${kFilingApprovalRevisionPrefix}0811d3b73e7a2fa4c3dbd079481ef28fc363'
+      '864e6593d74a55b28810f825ab2d',
+    );
+
     // Equivalent input in a different ORDER is the same basis.
     expect(rev(bead, const [two, one]), baseline);
     expect(rev(bead, const [two, one, two]), baseline);
-    expect(
-      rev(bead, const [one, two], const {'pow-two', 'pow-one'}),
-      rev(bead, const [one, two], const {'pow-one', 'pow-two'}),
-    );
 
     // Every covered field moves it.
     for (final changed in <Bead>[
@@ -81,17 +85,10 @@ void main() {
       );
     }
 
-    // Each dependency PROOF is covered independently: the named blocker, the
-    // local outgoing edge, and the linked-blocker proof.
+    // Each dependency PROOF is covered independently: the named blocker and
+    // the local outgoing edge.
     expect(rev(bead, const [one]), isNot(baseline));
-    expect(rev(bead, const [one], const {'pow-two'}), isNot(baseline));
-    expect(rev(bead, const [one, two], const {'pow-two'}), isNot(baseline));
-    expect(rev(bead, const [], const {'pow-one', 'pow-two'}), isNot(baseline));
-
-    // The basis records the proofs FOUND, not the posture of the lookup: an
-    // unconsulted state store and a consulted one holding no matching link
-    // both witness "no linked proof", so they agree.
-    expect(rev(bead, const [one, two], const {}), baseline);
+    expect(rev(bead, const []), isNot(baseline));
 
     // Lifecycle motion, ownership and the receipt itself are EXCLUDED, so
     // writing the stamp can never invalidate the stamp it writes.
@@ -188,26 +185,30 @@ void main() {
       dependsOnId: 'pow-n6n.1',
     );
 
-    FilingRequirementRow dependency(
-      List<BeadDependency> edges,
-      Set<String> linked,
-    ) => const FilingContract()
-        .evaluate(bead, edges, linkedBlockers: linked)
-        .requirements
-        .singleWhere(
-          (row) => row.requirement == FilingRequirement.dependencies,
-        );
+    FilingRequirementRow dependency(List<BeadDependency> edges) =>
+        const FilingContract()
+            .evaluate(bead, edges)
+            .requirements
+            .singleWhere(
+              (row) => row.requirement == FilingRequirement.dependencies,
+            );
 
-    expect(dependency(const [], const {}).passed, isFalse);
+    expect(dependency(const []).passed, isFalse);
     expect(
-      dependency(const [], const {}).detail,
+      dependency(const []).detail,
       allOf(contains('pow-n6n.1'), contains('tg-89y8')),
     );
     expect(
-      dependency(const [local], const {}).detail,
+      dependency(const [local]).detail,
       allOf(isNot(contains('pow-n6n.1')), contains('tg-89y8')),
     );
-    expect(dependency(const [local], const {'tg-89y8'}).passed, isTrue);
+    expect(
+      dependency(const [
+        local,
+        BeadDependency(issueId: 'pow-n6n.2', dependsOnId: 'tg-89y8'),
+      ]).passed,
+      isTrue,
+    );
     expect(
       const FilingContract()
           .evaluate(
@@ -223,7 +224,7 @@ void main() {
     );
   });
 
-  test('an unconsulted state store yields UNCHECKED, never missing', () {
+  test('a named FOREIGN blocker is missing, fail-closed', () {
     const bead = Bead(
       id: 'pow-n6n.2',
       issueType: IssueType.task,
@@ -238,33 +239,30 @@ void main() {
       dependsOnId: 'pow-n6n.1',
     );
 
-    FilingRequirementRow dependency(
-      List<BeadDependency> edges, {
-      Set<String>? linked,
-    }) => const FilingContract()
-        .evaluate(bead, edges, linkedBlockers: linked)
-        .requirements
-        .singleWhere(
-          (row) => row.requirement == FilingRequirement.dependencies,
-        );
+    FilingRequirementRow dependency(List<BeadDependency> edges) =>
+        const FilingContract()
+            .evaluate(bead, edges)
+            .requirements
+            .singleWhere(
+              (row) => row.requirement == FilingRequirement.dependencies,
+            );
 
-    // UNCONSULTED (null): only the bead's own store can be called missing.
+    // There is no second lookup any more: grid_engine's state-store link
+    // surface is deleted (the_grid#447), so a foreign id is judged by the
+    // bead's OWN outgoing edges like every other named blocker — and an
+    // unwired one is MISSING, never quietly excused as unchecked.
     expect(
       dependency(const []).detail,
-      'missing outgoing blocks edges: pow-n6n.1; '
-      '$kUnconsultedCrossStoreDetail',
+      'missing outgoing blocks edges: pow-n6n.1, tg-89y8',
     );
     expect(dependency(const []).passed, isFalse);
-    expect(dependency(const [local]).detail, kUnconsultedCrossStoreDetail);
-    expect(dependency(const [local]).detail, isNot(contains('tg-89y8')));
-
-    // CONSULTED and empty: the same foreign id IS genuinely missing.
     expect(
-      dependency(const [local], linked: const {}).detail,
+      dependency(const [local]).detail,
       'missing outgoing blocks edges: tg-89y8',
     );
+    expect(dependency(const [local]).passed, isFalse);
 
-    // A local `blocks` edge to the foreign id needs no lookup at all.
+    // A local `blocks` edge to the foreign id wires it.
     expect(
       dependency(const [
         local,
@@ -273,40 +271,6 @@ void main() {
       'all named local blockers are wired',
     );
   });
-
-  test(
-    'an open link bead wires a foreign blocker, a malformed one does not',
-    () async {
-      final runner = _RecordingBdRunner([
-        '{"schema_version":1,"data":['
-            '{"id":"tgdog-l1","issue_type":"link","status":"open",'
-            '"metadata":{"grid.link.from":"pow-n6n.2",'
-            '"grid.link.to":"tg-89y8","grid.link.type":"blocks"}},'
-            '{"id":"tgdog-l2","issue_type":"link","status":"open",'
-            '"metadata":{"grid.link.from":"pow-n6n.2",'
-            '"grid.link.type":"blocks"}},'
-            '{"id":"tgdog-l3","issue_type":"link","status":"open",'
-            '"metadata":{"grid.link.from":"pow-other",'
-            '"grid.link.to":"tg-zzz","grid.link.type":"blocks"}}]}',
-      ]);
-
-      final wired = await CrossLinkBlockerSource(
-        runnerFor: (_) => runner,
-      ).wiredFor(stateRoot: '/work/home/.grid', beadId: 'pow-n6n.2');
-
-      expect(wired, {'tg-89y8'});
-      expect(runner.argvs.single, [
-        'list',
-        '-t',
-        'link',
-        '--status',
-        'open',
-        '--json',
-        '--limit',
-        '0',
-      ]);
-    },
-  );
 
   test('source is read-only by construction', () async {
     final runner = _RecordingBdRunner([

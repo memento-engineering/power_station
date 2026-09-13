@@ -53,12 +53,14 @@ Directory _packageLib(String packageName) {
   );
 }
 
-String _dartSourceUnder(Directory directory) => directory
-    .listSync(recursive: true)
-    .whereType<File>()
-    .where((file) => file.path.endsWith('.dart'))
-    .map((file) => file.readAsStringSync())
-    .join('\n');
+String _dartSourceUnder(Directory directory, {Set<String> except = const {}}) =>
+    directory
+        .listSync(recursive: true)
+        .whereType<File>()
+        .where((file) => file.path.endsWith('.dart'))
+        .where((file) => !except.contains(p.basename(file.path)))
+        .map((file) => file.readAsStringSync())
+        .join('\n');
 
 void main() {
   group('the opinions DO live in grid_assets (the fence is meaningful)', () {
@@ -77,7 +79,18 @@ void main() {
     });
 
     test('mount clauses remain assets-owned', () {
-      final engineSource = _dartSourceUnder(_packageLib('grid_engine'));
+      // ONE carve-out, and it is not a clause: grid_engine 0.4.0-dev.3 names
+      // `grid.approved_at` in `eligibility_basis_revision.dart` as an INPUT to
+      // the per-bead basis DIGEST (W2-B's level-shaped `admission.refused`
+      // idem key, the_grid#446) — a change detector, so a re-approval re-fires
+      // the record. It decides nothing: the mount DECISION still lives here,
+      // in `mountEligibilityDecision`. Excluded by file so the engine reading
+      // the stamp anywhere ELSE still fails this fence.
+      final engineLib = _packageLib('grid_engine');
+      final engineSource = _dartSourceUnder(
+        engineLib,
+        except: const {'eligibility_basis_revision.dart'},
+      );
       for (final clause in const [
         'validation_plan',
         'grid.approved',
@@ -85,6 +98,22 @@ void main() {
       ]) {
         expect(engineSource, isNot(contains(clause)));
       }
+      // The carve-out is exactly one const, and no decision rides it.
+      final basis = File(
+        p.join(
+          engineLib.path,
+          'src',
+          'domain',
+          'eligibility_basis_revision.dart',
+        ),
+      ).readAsStringSync();
+      expect(
+        basis,
+        contains("const String kEligibilityApprovalKey = 'grid.approved_at';"),
+      );
+      expect(basis, isNot(contains('MountRefused')));
+      expect(basis, isNot(contains('MountEligible')));
+
       expect(allSource, contains('validation_plan'));
       expect(allSource, contains('grid.approved'));
     });

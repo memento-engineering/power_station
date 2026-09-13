@@ -1047,11 +1047,19 @@ Future<int?> _countCommitsInRange({
 /// M5 D-4a stripped commit/push/PR off the [SourceControl] interface: that is
 /// DELIVERY detail, and it lives behind the substation's bound [DeliveryMethod]
 /// (`delivery.dart`'s the GitHub PR delivery method). What remains here is provisioning —
-/// [provisioner] ([StationGitService]) + [root] ([RootCheckout]) cut the per-bead
-/// worktree, so the host can materialize the workspace before the agent spawns.
-/// Absent ⇒ [provisionWorkspace] no-ops (the offline/dry-run build), while
-/// `workspaceFor`/`branchFor`/`baseBranch` still resolve — the layout is
+/// [provisioner] ([StationGitRepository]) + [root] ([RootCheckout]) cut the
+/// per-bead worktree, so the host can materialize the workspace before the agent
+/// spawns. Absent ⇒ [provisionWorkspace] no-ops (the offline/dry-run build),
+/// while `workspaceFor`/`branchFor`/`baseBranch` still resolve — the layout is
 /// deterministic + pure.
+///
+/// [baseShaFor] is the repository's own retained answer: [StationGitRepository]
+/// is the station-lifetime projection of provisioned worktrees and records each
+/// one's provision-time HEAD, so the committee pins its review diff to the exact
+/// base the provisioner cut from instead of a moving `origin/<base>`
+/// (grid_runtime 0.2.1-dev.1, the_grid#436). Unknown — no repository wired, or a
+/// bead this station never provisioned — answers null, the contract's
+/// "does not know it".
 ///
 /// The layout ("one git worktree per bead, cut from the substation's root") is
 /// THIS impl's opinion, not the engine's — the engine's concept is "a workspace".
@@ -1068,14 +1076,14 @@ class GitSourceControl implements SourceControl {
   /// git consumer in this pack takes — the offline suite injects a fake, Fakes
   /// not mocks).
   const GitSourceControl({
-    StationGitService? provisioner,
+    StationGitRepository? provisioner,
     RootCheckout? root,
     GitRunner? gitRunner,
   }) : _provisioner = provisioner,
        _root = root,
        _gitRunner = gitRunner;
 
-  final StationGitService? _provisioner;
+  final StationGitRepository? _provisioner;
   final RootCheckout? _root;
   final GitRunner? _gitRunner;
 
@@ -1098,6 +1106,9 @@ class GitSourceControl implements SourceControl {
 
   @override
   String get baseBranch => _root?.defaultBranch ?? 'main';
+
+  @override
+  String? baseShaFor(String beadId) => _provisioner?.baseShaFor(beadId);
 
   @override
   Future<void> provisionWorkspace({

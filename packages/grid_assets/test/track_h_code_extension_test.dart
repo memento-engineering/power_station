@@ -337,9 +337,11 @@ void main() {
           checkoutEntries: {'lib/source.dart': 'void source() {}'},
         );
         final sc = GitSourceControl(
-          provisioner: StationGitService(
-            runner: runner,
-            prOpener: _NoopPrOpener(),
+          provisioner: StationGitRepository(
+            service: StationGitService(
+              runner: runner,
+              prOpener: _NoopPrOpener(),
+            ),
           ),
           root: RootCheckout(
             path: rootDir.path,
@@ -404,9 +406,11 @@ void main() {
       // [SystemGitRunner].
       final runner = _AdoptedBaseRefreshGitRunner(behindOutput: '0');
       final sc = GitSourceControl(
-        provisioner: StationGitService(
-          runner: CannedGitRunner(),
-          prOpener: _NoopPrOpener(),
+        provisioner: StationGitRepository(
+          service: StationGitService(
+            runner: CannedGitRunner(),
+            prOpener: _NoopPrOpener(),
+          ),
         ),
         root: RootCheckout(
           path: rootDir.path,
@@ -677,9 +681,8 @@ void main() {
         checkoutEntries: {'lib/source.dart': 'void source() {}'},
       );
       final sc = GitSourceControl(
-        provisioner: StationGitService(
-          runner: runner,
-          prOpener: _NoopPrOpener(),
+        provisioner: StationGitRepository(
+          service: StationGitService(runner: runner, prOpener: _NoopPrOpener()),
         ),
         root: RootCheckout(
           path: rootDir.path,
@@ -722,9 +725,8 @@ void main() {
       residue.writeAsStringSync('{"ok":true}');
       final runner = _MaterializingWorktreeRunner(failWorktreeAdd: true);
       final sc = GitSourceControl(
-        provisioner: StationGitService(
-          runner: runner,
-          prOpener: _NoopPrOpener(),
+        provisioner: StationGitRepository(
+          service: StationGitService(runner: runner, prOpener: _NoopPrOpener()),
         ),
         root: RootCheckout(
           path: rootDir.path,
@@ -767,9 +769,8 @@ void main() {
         checkoutEntries: {'.grid/critique/pinned.diff': 'checkout'},
       );
       final sc = GitSourceControl(
-        provisioner: StationGitService(
-          runner: runner,
-          prOpener: _NoopPrOpener(),
+        provisioner: StationGitRepository(
+          service: StationGitService(runner: runner, prOpener: _NoopPrOpener()),
         ),
         root: RootCheckout(
           path: rootDir.path,
@@ -819,9 +820,11 @@ void main() {
           },
         );
         final sc = GitSourceControl(
-          provisioner: StationGitService(
-            runner: runner,
-            prOpener: _NoopPrOpener(),
+          provisioner: StationGitRepository(
+            service: StationGitService(
+              runner: runner,
+              prOpener: _NoopPrOpener(),
+            ),
           ),
           root: RootCheckout(
             path: rootDir.path,
@@ -879,9 +882,11 @@ void main() {
           checkoutEntries: {'.grid/critique/pinned.diff': 'checkout'},
         );
         final sc = GitSourceControl(
-          provisioner: StationGitService(
-            runner: runner,
-            prOpener: _NoopPrOpener(),
+          provisioner: StationGitRepository(
+            service: StationGitService(
+              runner: runner,
+              prOpener: _NoopPrOpener(),
+            ),
           ),
           root: RootCheckout(
             path: rootDir.path,
@@ -964,9 +969,11 @@ void main() {
         runner.branches.add('grid/pow-1');
 
         final sc = GitSourceControl(
-          provisioner: StationGitService(
-            runner: runner,
-            prOpener: _NoopPrOpener(),
+          provisioner: StationGitRepository(
+            service: StationGitService(
+              runner: runner,
+              prOpener: _NoopPrOpener(),
+            ),
           ),
           root: RootCheckout(
             path: rootDir.path,
@@ -1014,9 +1021,8 @@ void main() {
         refuseWorktreeRemove: true,
       );
       final sc = GitSourceControl(
-        provisioner: StationGitService(
-          runner: runner,
-          prOpener: _NoopPrOpener(),
+        provisioner: StationGitRepository(
+          service: StationGitService(runner: runner, prOpener: _NoopPrOpener()),
         ),
         root: RootCheckout(
           path: rootDir.path,
@@ -1070,9 +1076,11 @@ void main() {
         // work-tree-root guard's.
         final runner = _MaterializingWorktreeRunner(materializeGitEntry: false);
         final sc = GitSourceControl(
-          provisioner: StationGitService(
-            runner: runner,
-            prOpener: _NoopPrOpener(),
+          provisioner: StationGitRepository(
+            service: StationGitService(
+              runner: runner,
+              prOpener: _NoopPrOpener(),
+            ),
           ),
           root: RootCheckout(
             path: rootDir.path,
@@ -2013,9 +2021,11 @@ GitSourceControl _adoptingSourceControl({
   String defaultBranch = 'main',
   String remote = 'origin',
 }) => GitSourceControl(
-  provisioner: StationGitService(
-    runner: CannedGitRunner(),
-    prOpener: _NoopPrOpener(),
+  provisioner: StationGitRepository(
+    service: StationGitService(
+      runner: CannedGitRunner(),
+      prOpener: _NoopPrOpener(),
+    ),
   ),
   root: RootCheckout(
     path: root.path,

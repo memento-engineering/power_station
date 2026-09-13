@@ -49,8 +49,7 @@ _run(
   final reports = <AllocationReport>[];
   final alloc =
       cap.createAllocation(
-            AllocationContext(
-              treeContext: c.context,
+            AllocationInputs(
               args: c.args,
               transport: FakeRuntimeProvider(),
               address: AllocationAddress('tgdog-s', c.args.nodePath),
@@ -60,7 +59,7 @@ _run(
             ),
           )
           as LeaseAllocation<BusLease>;
-  await alloc.startOrAdopt();
+  await alloc.startOrAdopt(c.context);
   return (reports: reports, alloc: alloc);
 }
 

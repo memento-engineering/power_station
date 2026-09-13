@@ -12,13 +12,13 @@ environment:
 dependencies:
   acp_dart: ^0.4.0
   args: ^2.6.0
-  beads_dart: ^0.2.0
+  beads_dart: ^0.3.0-dev.2
   crypto: ^3.0.6
   dart_grid_assets: ^0.2.1-dev.1
   dart_style: ^3.1.7
   federated_grid_assets: ^0.3.0
   freezed_annotation: ^3.0.0
-  genesis_tree: ^0.3.0
+  genesis_tree: ^0.4.0
   # The PRERELEASE PIN is the opt-in half of ADR-0003 D3's gate: "A BREAKING
   # change MUST go rc-first and pass every consumer before promotion", and
   # "an rc reaches only consumers that opt in by pinning `^X.Y.Z-rc.N`". The
@@ -27,7 +27,7 @@ dependencies:
   # against that candidate — pinned at the rc that carries the cut so the
   # solver can never resolve back onto the pre-cut rc this package no longer
   # compiles against.
-  grid_engine: ^0.3.0
+  grid_engine: ^0.4.0-dev.3
   # The SPECIFY-provenance seam floors (the specify capability stamps
   # `spec.author=specify` through the station's owned-work writer): rc.19 is the
   # first runtime cut that carries `StationBeadWriter.writeSpecifyAuthoredSpec`
@@ -35,9 +35,9 @@ dependencies:
   # WITHOUT them, so the old `^0.2.0-rc.13` floor admitted a resolution this
   # package no longer compiles against. rc.22 is the first SDK cut that exports
   # the `SpecifyAuthoredSpecWriter` typedef the registry seam is typed on.
-  grid_runtime: ^0.2.0
-  grid_sdk: ^0.3.0
-  grid_trajectory: ^0.2.0
+  grid_runtime: ^0.2.1-dev.2
+  grid_sdk: ^0.4.0-dev.3
+  grid_trajectory: ^0.2.1-dev.2
   json_annotation: ^4.9.0
   meta: ^1.16.0
   package_config: ^2.2.0

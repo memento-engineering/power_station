@@ -112,15 +112,8 @@ class GitHubReconcilerBindingAssets extends SingleChildStatelessSeed {
     );
     final store = BdGitHubIntakeStore(
       runner,
-      approvals: ApproveService(
-        runnerFor: _approvalRunner(
-          scope.root,
-          stateRoot: stateRoot,
-          stateRunner: stateRunner,
-        ),
-      ),
+      approvals: ApproveService(runnerFor: _approvalRunner(scope.root)),
       workRoot: scope.root,
-      stateRoot: stateRoot,
     );
 
     final projection = GitHubIntakeProjection(
@@ -156,19 +149,15 @@ class GitHubReconcilerBindingAssets extends SingleChildStatelessSeed {
   /// The approve verb's per-root spawn seam, closed over the runners this seat
   /// ALREADY has.
   ///
-  /// [ApproveService] reads and stamps in the WORK store and reads cross-store
-  /// link beads in the GRID STATE store, and asks for one runner per root. Both
-  /// are already injected here, so approval opens no third `bd` channel and the
-  /// chokepoint stays the seat's own runner. A root that is neither is a wiring
-  /// bug and throws — silently spawning a real `bd` at an unknown path is
-  /// exactly the escape this seam exists to close.
-  BdRunner Function(String) _approvalRunner(
-    String workRoot, {
-    required String? stateRoot,
-    required BdRunner? stateRunner,
-  }) => (root) {
+  /// [ApproveService] reads and stamps in the WORK store and nowhere else —
+  /// the cross-store proof it once read from the grid state store died with
+  /// grid_engine's link surface (the_grid#447) — and asks for one runner per
+  /// root. That runner is already injected here, so approval opens no second
+  /// `bd` channel and the chokepoint stays the seat's own runner. Any other
+  /// root is a wiring bug and throws — silently spawning a real `bd` at an
+  /// unknown path is exactly the escape this seam exists to close.
+  BdRunner Function(String) _approvalRunner(String workRoot) => (root) {
     if (root == workRoot) return runner;
-    if (stateRunner != null && root == stateRoot) return stateRunner;
     throw StateError(
       'GitHub intake approval has no bd runner for store root "$root"',
     );

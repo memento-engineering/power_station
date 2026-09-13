@@ -77,9 +77,9 @@ For this sweep, stamped means `grid.approved_by`, `grid.approved_at`, and
 not count. Before treating a stamped-but-unmounted bead as waiting,
 enumerate every OPEN blocker: read its in-store dependencies with
 `bd -C <work-store-root> dep list <bead-id> --json` and its cross-store
-dependencies from `bd -C .grid list -t link --status open --json`, using
-each link's `grid.link.from` and `grid.link.to` endpoints. Read every
-unique blocker in its owning store with
+dependencies — bd `external:<project>:<capability>` rows on the bead itself —
+with the station's `link ls` verb, which lists the external rows every armed
+store carries. Read every unique blocker in its owning store with
 `bd -C <blocker-store-root> query id=<blocker-id> --all --json --limit 0`,
 and discard any blocker whose own status is not open. A blocker that is a
 release node or whose notes explicitly say an agent executes it is

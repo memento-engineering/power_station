@@ -875,8 +875,8 @@ void main() {
     }
     expect(
       kStateRootHelp,
-      'The grid home whose .grid/.beads holds the cross-store link and '
-      'session-lifecycle state beads.',
+      'The grid home whose .grid/.beads holds the session-lifecycle state '
+      'beads.',
     );
     expect(reference.options[kStateRootOption]?.help, kStateRootHelp);
     expect(

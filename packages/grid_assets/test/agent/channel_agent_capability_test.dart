@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:beads_dart/beads_dart.dart';
+import 'package:genesis_tree/genesis_tree.dart';
 import 'package:grid_assets/grid_assets.dart';
 import 'package:grid_engine/grid_engine.dart';
 import 'package:grid_engine/src/molecule/process_lease_vendor.dart';
@@ -12,6 +13,7 @@ import 'package:grid_runtime/grid_runtime.dart';
 import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
+import '../support/allocation_mount.dart';
 import '../support/package_root.dart';
 
 class _ProbeAdapter implements AgentSessionAdapter {
@@ -98,6 +100,7 @@ class _Run {
     required this.config,
     required this.steers,
     required this.name,
+    required this.tree,
   });
 
   final Allocation allocation;
@@ -106,6 +109,7 @@ class _Run {
   final RuntimeConfig config;
   final _Steers steers;
   final String name;
+  final TreeContext tree;
   bool _closed = false;
 
   Future<void> close() async {
@@ -165,8 +169,7 @@ Future<_Run> _buildRun({required _ProbeAdapter adapter}) async {
   const name = 'session-1/work-1/agent';
   final reports = <AllocationReport>[];
   final args = StepArgs(nodePath: 'work-1/agent', cancel: CancelToken());
-  final allocationContext = AllocationContext(
-    treeContext: tree,
+  final allocationInputs = AllocationInputs(
     args: args,
     transport: runtime,
     address: const AllocationAddress('session-1', 'work-1/agent'),
@@ -181,7 +184,7 @@ Future<_Run> _buildRun({required _ProbeAdapter adapter}) async {
   final request = ProcessLeaseRequest(
     stepBeadId: 'step-1',
     capability: capability,
-    allocation: allocationContext,
+    inputs: allocationInputs,
   );
   final ProcessLeaseVendor vendor = SelfManagedProcessVendor(
     spawn: stationProcessSpawner,
@@ -190,8 +193,7 @@ Future<_Run> _buildRun({required _ProbeAdapter adapter}) async {
   final allocation = vendor
       .leaseFor(request)
       .createAllocation(
-        AllocationContext(
-          treeContext: tree,
+        AllocationInputs(
           args: args,
           transport: runtime,
           address: const AllocationAddress('session-1', 'work-1/agent'),
@@ -207,6 +209,7 @@ Future<_Run> _buildRun({required _ProbeAdapter adapter}) async {
     config: config,
     steers: steers,
     name: name,
+    tree: tree,
   );
   addTearDown(run.close);
   return run;
@@ -244,7 +247,7 @@ void main() {
   test('lease allocation delivers brief only over channel and completes from '
       'protocol result', () async {
     final run = await _buildRun(adapter: _ProbeAdapter(fixture));
-    final done = run.allocation.startOrAdopt();
+    final done = run.allocation.startMounted(run.tree);
     await _waitForProgress(run);
     run.steers.controller.add(
       const ProcessSessionCommand(
@@ -278,7 +281,9 @@ void main() {
     final run = await _buildRun(
       adapter: _ProbeAdapter(fixture, args: const ['--exit-after-brief']),
     );
-    await run.allocation.startOrAdopt().timeout(const Duration(seconds: 10));
+    await run.allocation
+        .startMounted(run.tree)
+        .timeout(const Duration(seconds: 10));
 
     expect(run.reports.whereType<AllocationFailed>(), hasLength(1));
     expect(run.reports.whereType<AllocationCompleted>(), isEmpty);

@@ -18,10 +18,10 @@ import 'package:grid_engine/grid_engine.dart';
 import 'package:grid_engine/src/molecule/bead_path_key.dart';
 import 'package:grid_engine/src/molecule/inherited_circuit.dart';
 import 'package:grid_runtime/grid_runtime.dart';
-import 'package:grid_sdk/grid_sdk.dart' show ProviderScope;
 import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
+import 'support/allocation_mount.dart';
 import 'support/asset_fakes.dart';
 import 'support/package_root.dart';
 
@@ -111,8 +111,7 @@ Future<List<AllocationReport>> _runCriticAllocation({
   final reports = <AllocationReport>[];
   final allocation = ProcessAllocation(
     capability,
-    AllocationContext(
-      treeContext: c.context,
+    AllocationInputs(
       args: c.args,
       transport: provider,
       address: AllocationAddress('sess-1', nodePath),
@@ -124,8 +123,11 @@ Future<List<AllocationReport>> _runCriticAllocation({
     await allocation.dispose();
     await provider.close();
   });
-  await allocation.startOrAdopt();
-  allocation.deliverEventForTest(Exited(name: 'sess-1/$nodePath', exitCode: 0));
+  await allocation.startMounted(c.context);
+  allocation.deliverEventForTest(
+    Exited(name: 'sess-1/$nodePath', exitCode: 0),
+    c.context,
+  );
   for (var attempt = 0; reports.isEmpty && attempt < 100; attempt++) {
     await Future<void>.delayed(const Duration(milliseconds: 10));
   }
@@ -2673,10 +2675,10 @@ final _criticCircuit = InheritedCircuit(
 /// An effect that starts and stops and does nothing else — the host stimulus
 /// for a policy test (never a production allocation shape).
 final class _PassiveAllocation extends Allocation {
-  _PassiveAllocation(super.context);
+  _PassiveAllocation(super.inputs);
 
   @override
-  Future<void> startOrAdopt() {
+  Future<void> startOrAdopt(TreeContext treeContext) {
     state = AllocationState.live;
     return Future<void>.value();
   }
@@ -2695,7 +2697,8 @@ final class _CriticPolicyProbeCapability extends Capability {
   const _CriticPolicyProbeCapability();
 
   @override
-  Allocation createAllocation(AllocationContext ctx) => _PassiveAllocation(ctx);
+  Allocation createAllocation(AllocationInputs inputs) =>
+      _PassiveAllocation(inputs);
 
   @override
   SupervisionPolicy supervisionPolicy(StepArgs args) =>

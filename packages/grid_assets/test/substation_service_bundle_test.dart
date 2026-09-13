@@ -58,6 +58,11 @@ class _RecordingSourceControl implements SourceControl {
   @override
   String get baseBranch => 'main';
 
+  /// The fake cuts a bare directory, not a git worktree, so it knows no
+  /// provision-time commit.
+  @override
+  String? baseShaFor(String beadId) => null;
+
   @override
   Future<void> provisionWorkspace({
     required String beadId,

@@ -1,3 +1,11 @@
+## Unreleased
+
+- Changed: adopts the 2026-09-13 the_grid dev.3 wave — `genesis_tree ^0.4.0` and
+  `grid_engine ^0.4.0-dev.3` (pow-abaw).
+- Changed: the claim-lease fixtures adopt the lifecycle-driven allocation inputs — `AllocationContext`
+  is `AllocationInputs` with no stored `TreeContext`, and `Allocation.startOrAdopt` takes the
+  call-scoped `TreeContext` (grid_engine 0.4.0-dev.2, the_grid#417). No library change.
+
 ## 0.3.0
 
 - PROMOTED from 0.3.0-rc.5. This is the stable release of the 0.3.0 line; the code is the

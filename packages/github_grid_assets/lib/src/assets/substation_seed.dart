@@ -44,7 +44,6 @@ import 'package:grid_assets/station_asset_registry.dart'
     show GeneratedGridAssetRegistrant;
 import 'package:grid_runtime/grid_runtime.dart' show GitOps;
 import 'package:grid_sdk/grid_sdk.dart' as sdk;
-import 'package:grid_sdk/grid_sdk.dart' show Provider, ProviderTreeContext;
 
 import '../code/github_delivery_policy.dart';
 import '../credentials.dart';
