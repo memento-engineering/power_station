@@ -313,16 +313,6 @@ void main() {
         gridRoot: gridRoot,
         substation: 'power_station',
       );
-      const failed = NormalizedGitHubEvent.checkConcluded(
-        nodeId: 'check',
-        actor: 'nico',
-        repository: 'memento/power_station',
-        substation: 'power_station',
-        observationId: 'observation-1',
-        headBranch: 'grid/pow-test',
-        checkName: 'build',
-        conclusion: 'failure',
-      );
       final reconcilerRuntime = GitHubReconcilerRuntime(
         installationId: 'installation',
         reconciler: GitHubReconciler(
@@ -340,8 +330,13 @@ void main() {
           ),
           cursors: _CursorStore(),
           emit: (event) async {
-            expect(event, isA<CheckConcluded>());
-            await projection(failed);
+            // The POLLED observation drives the projection, not a stand-in: the
+            // feedback leg attributes this pull through its body's
+            // `Refs: pow-test` trailer — the `grid/` head it happens to carry
+            // takes no part — and the failing check aggregate is what the
+            // rework decision below reads.
+            expect(event, isA<PullRequestFeedback>());
+            await projection(event);
           },
         ),
         coordinator: GitHubPollCoordinator(minimumSpacing: Duration.zero),
@@ -460,16 +455,6 @@ void main() {
         gridRoot: gridRoot,
         substation: 'power_station',
       );
-      const failed = NormalizedGitHubEvent.checkConcluded(
-        nodeId: 'check',
-        actor: 'nico',
-        repository: 'memento/power_station',
-        substation: 'power_station',
-        observationId: 'observation-1',
-        headBranch: 'grid/pow-test',
-        checkName: 'build',
-        conclusion: 'failure',
-      );
       final reconcilerRuntime = GitHubReconcilerRuntime(
         installationId: 'installation',
         reconciler: GitHubReconciler(
@@ -487,8 +472,13 @@ void main() {
           ),
           cursors: _CursorStore(),
           emit: (event) async {
-            expect(event, isA<CheckConcluded>());
-            await projection(failed);
+            // The POLLED observation drives the projection, not a stand-in: the
+            // feedback leg attributes this pull through its body's
+            // `Refs: pow-test` trailer — the `grid/` head it happens to carry
+            // takes no part — and the failing check aggregate is what the
+            // rework decision below reads.
+            expect(event, isA<PullRequestFeedback>());
+            await projection(event);
           },
         ),
         coordinator: GitHubPollCoordinator(minimumSpacing: Duration.zero),
