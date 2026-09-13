@@ -32,6 +32,7 @@ import '../agent/acp_session_adapter.dart';
 import '../agent/agent_environment.dart';
 import '../agent/agent_harness.dart';
 import '../agent/agent_session.dart';
+import '../agent/captured_output.dart';
 import '../agent/environment_registry.dart';
 import '../agent/model_tier.dart';
 import '../agent/seat_environments.dart';
@@ -136,11 +137,49 @@ const Circuit kCodeCircuit = Circuit(
   ],
 );
 
+/// The BUILD step's own verb, as it opens a failure reason.
+const String kAgentStep = 'agent';
+
+/// The transport named in an ARGV-leg agent failure reason — there is no
+/// session adapter on that leg, and the bracket in [capturedOutputReason] names
+/// WHICH transport produced the failure, never a harness.
+const String kArgvTransport = 'argv';
+
+/// The build step's refusal when the agent returned and the round base is still
+/// this branch's HEAD.
+///
+/// The lunar_station-a7w round (2026-09-13) is the shape: a codex builder read
+/// its `<bead-id> + instruction` task prompt as a `/discover` DIRECTED request,
+/// loaded the skill, and ended the turn. One turn, no edits, no commit — and an
+/// EMPTY round then travelled all the way to the committee, which spent a human
+/// ruling reporting the consequences (a "missing from pinned diff" test file, an
+/// untouched getter, two F grades) of a fact nothing downstream could name.
+const String kNoRoundCommitDiagnostic =
+    'the build produced NO commit beyond the round base — an agent that returns '
+    'having committed nothing did not finish its turn';
+
+/// The build step's refusal when the round's commit count could not be READ.
+///
+/// Fail-CLOSED, and deliberately NOT the same sentence as [kNoRoundCommitDiagnostic]:
+/// "there is no commit" and "we cannot tell whether there is a commit" are
+/// different facts, and an operator acts on them differently.
+const String kRoundCommitUnreadableDiagnostic =
+    'the round base commit count could not be read';
+
 typedef _ResolvedAgentSelection = ({
   Bead bead,
   AgentEnvironment environment,
   String? model,
   Uri? endpoint,
+});
+
+/// What the ROUND-COMMIT fence captured at its effect edge, so the git await
+/// below it touches no tree context (ADR-0008 D3 / A8).
+typedef _RoundCommitFence = ({
+  String workspaceDir,
+  String baseBranch,
+  bool sourceControlled,
+  GitRunner runner,
 });
 
 typedef _ResolvedAgentRun = ({
@@ -192,6 +231,11 @@ class AgentCapability extends ProcessCapability {
   /// NULL [assetRegistry] disables materialization outright — the explicit
   /// posture an isolated capability test (a session-adapter suite) takes so a
   /// spawn touches no asset tree at all.
+  ///
+  /// [gitRunner] is the REGISTRY's one git seam (A9(5)), threaded here by
+  /// [buildCodeRegistry] so the round-commit fence counts through the same
+  /// runner `rebase`/`pin-diff`/`declared-tests` already share; absent ⇒ the
+  /// real [SystemGitRunner].
   const AgentCapability({
     String? devRoot,
     DartLinkService linkService = const DartLinkService(),
@@ -202,6 +246,7 @@ class AgentCapability extends ProcessCapability {
     Map<String, String> overlayArgs = const {},
     AgentSessionAdapterRegistry sessionAdapters = kBuiltinAgentSessionAdapters,
     AgentSteerSource steers = const NoAgentSteerSource(),
+    GitRunner? gitRunner,
   }) : _sessionAdapters = sessionAdapters,
        _steers = steers,
        _devRoot = devRoot,
@@ -210,10 +255,12 @@ class AgentCapability extends ProcessCapability {
        _assetRegistry = assetRegistry,
        _assetRosterOverride = assetRosterOverride,
        _overlaySourceRef = overlaySourceRef,
-       _overlayArgs = overlayArgs;
+       _overlayArgs = overlayArgs,
+       _gitRunner = gitRunner;
 
   final AgentSessionAdapterRegistry _sessionAdapters;
   final AgentSteerSource _steers;
+  final GitRunner? _gitRunner;
 
   final String? _devRoot;
   final DartLinkService _linkService;
@@ -319,6 +366,119 @@ class AgentCapability extends ProcessCapability {
     );
   }
 
+  /// The coding agent's working agreement IS "commit your work in the
+  /// worktree", so the engine may PROVE an inferred completion against the
+  /// workspace before the circuit advances (`the_grid#a38-…`: a oneTurn
+  /// session's completion is judged by COMMIT PRESENCE, not by turn count or
+  /// exit signal).
+  ///
+  /// That fence answers "was this turn CUT SHORT?" — it blocks on a tree left
+  /// DIRTY. [_probeRoundCommit] answers the other half the entry names as its
+  /// own limitation ("committed OR never edited"): a tree that is clean because
+  /// nothing was ever written. Both are the same doctrine; neither subsumes the
+  /// other, and this declaration keeps the first composed.
+  @override
+  CompletionContract get completionContract =>
+      CompletionContract.committedWorkspace;
+
+  /// Captures everything the round-commit fence needs, SYNCHRONOUSLY, at the
+  /// effect edge — nothing below reads the tree again (ADR-0008 D3 / A8:
+  /// `sourceControlOf` stays on the non-binding `get*` verb, and a capability
+  /// reads at entry then works from the captured values).
+  _RoundCommitFence _captureRoundCommitFence(
+    TreeContext context,
+    Workspace workspace,
+  ) => (
+    workspaceDir: workspace.workspaceDir,
+    baseBranch: workspace.baseBranch,
+    sourceControlled:
+        context.getInheritedSeedOfExactType<ServiceBundle>()?.sourceControl !=
+        null,
+    runner: _gitRunner ?? SystemGitRunner(),
+  );
+
+  /// Whether this round left a commit on the bead branch beyond its base.
+  ///
+  /// [GateOutcome.clear] ⇒ at least one commit (or nothing to fence against);
+  /// [GateOutcome.present] ⇒ the round base IS this branch's HEAD, so the agent
+  /// returned having committed nothing; [GateOutcome.probeError] ⇒ the count
+  /// could not be read, which fails CLOSED for the same reason `pin-diff`'s
+  /// unreadable `git status` does — every ruling downstream is a claim about a
+  /// tree state we would be guessing at.
+  ///
+  /// OFFLINE POSTURE, preserved exactly: no ambient [SourceControl] (the
+  /// synthetic `/grid/worktrees/…` [Workspace] `SessionScope` mounts when a
+  /// composition has none) or no workspace dir on disk ⇒ [GateOutcome.clear]
+  /// and NO git call at all — the same never-fence-a-workspace-we-cannot-address
+  /// rule the engine's own work-signal fence takes, and the same no-op
+  /// [GitSourceControl.provisionWorkspace] / [_linkWorkspace] / [PinDiffCapability]
+  /// already share.
+  ///
+  /// THE BASE REF is the LOCAL [Workspace.baseBranch], never `origin/<base>`.
+  /// A station whose local base is ahead of its remote (lunar_station ran 55
+  /// commits ahead on 2026-09-13) would otherwise be measured against a ref
+  /// that is not the tree the worktree was cut from — the separately filed
+  /// pinned-diff defect, which this fence must not reproduce.
+  ///
+  /// KNOWN LIMIT, stated rather than hidden: the base branch is a MOVING ref,
+  /// not the sha this round started from — [Workspace] carries no such sha to
+  /// read. So this counts commits on the branch, not commits of THIS round: a
+  /// REWORK round whose agent produces nothing still clears the fence on the
+  /// previous round's commits. It closes the first-round hole the measured
+  /// incident is, and narrowing it further needs a durable per-round base on
+  /// the [Workspace] — which is the engine's to add, not this asset's to
+  /// invent.
+  Future<GateOutcome> _probeRoundCommit(
+    TreeContext context,
+    StepArgs args,
+  ) async {
+    final workspace = context.getInheritedSeedOfExactType<Workspace>();
+    if (workspace == null) return GateOutcome.clear;
+    final fence = _captureRoundCommitFence(context, workspace);
+    if (!fence.sourceControlled) return GateOutcome.clear;
+    if (!Directory(fence.workspaceDir).existsSync()) return GateOutcome.clear;
+    // A LIVE, source-controlled workspace with no base to measure from: the one
+    // thing we may not do is call that a pass.
+    if (fence.baseBranch.trim().isEmpty) return GateOutcome.probeError;
+    final int? commits;
+    try {
+      commits = await _countCommitsInRange(
+        runner: fence.runner,
+        workspaceDir: fence.workspaceDir,
+        baseRef: fence.baseBranch.trim(),
+      );
+    } on Object {
+      return GateOutcome.probeError;
+    }
+    if (args.cancel.isCancelled) return GateOutcome.probeError;
+    if (commits == null) return GateOutcome.probeError;
+    return commits > 0 ? GateOutcome.clear : GateOutcome.present;
+  }
+
+  /// Gives an EMPTY round one more ride before a visible gate.
+  ///
+  /// The engine tests exhaustion AFTER incrementing the restart cursor, so
+  /// [RetryPolicy.maxRestarts] of two is one initial ride plus one retry — the
+  /// same budget and the same reasoning as [CriticCapability.supervisionPolicy].
+  /// A retry is genuinely available here: the second ride re-spawns into the
+  /// SAME worktree carrying the first ride's own final message as the failure
+  /// reason. `failed` is not a positive terminal and `review` `dependsOn`
+  /// `agent`, so neither ride advances the circuit, and the second one parks
+  /// VISIBLY instead of latching a dead node.
+  ///
+  /// Only `noResult` is declared: `work` (the harness itself failed) keeps the
+  /// circuit's own budget, so an empty round is the only thing this narrows.
+  @override
+  SupervisionPolicy supervisionPolicy(StepArgs args) => const SupervisionPolicy(
+    byKind: {
+      CapabilityFailureKind.noResult: RetryPolicy(
+        maxRestarts: 2,
+        backoff: Backoff.standard,
+        onExhaustion: ExhaustionBehavior.parkAtGate,
+      ),
+    },
+  );
+
   @override
   RuntimeConfig spawn(TreeContext context, StepArgs args) {
     final run = _resolveRun(context, args);
@@ -346,28 +506,48 @@ class AgentCapability extends ProcessCapability {
     final adapterId = selection.environment.sessionAdapter;
     if (adapterId == null) return null;
     final run = _resolveRun(context, args, selection: selection);
-    return AgentSession(
-      runtime: runtime,
-      name: name,
-      adapter: _sessionAdapters.require(adapterId),
-      brief: run.brief,
-      commands: _steers.watch(args.beadId),
-      attemptId: attemptId,
-      instanceFence: instanceFence,
-      // The out-of-band flare sink, read at this EFFECT edge with the
-      // non-binding verb (ADR-0008 D3); absent => no flares, never a failure —
-      // except for an AUTHORIZATION, where absent means no durable record and
-      // so no grant at all ([decideAgentPermission]).
-      transport: context
-          .getInheritedSeedOfExactType<ServiceBundle>()
-          ?.transport,
-      // The station's authorization boundary, resolved the same way: an
-      // explicitly mounted policy wins, else this seat's own ARMING is the
-      // channel's admitted identity, else nothing is authorized.
-      policy: seatChannelPolicy<BuildAgentEnvironment>(
-        context,
-        seatId: kBuildSeatPolicyId,
+    // The channel leg never reaches the engine's process dispatcher, so the
+    // ROUND-COMMIT fence [result] applies on the argv leg has to be re-applied
+    // here — the same decorator, the same probe, the same reason shape, so ONE
+    // brief behaves identically on either transport (bead `pow-39tl`).
+    return ArtifactFencedSession(
+      inner: AgentSession(
+        runtime: runtime,
+        name: name,
+        adapter: _sessionAdapters.require(adapterId),
+        brief: run.brief,
+        commands: _steers.watch(args.beadId),
+        attemptId: attemptId,
+        instanceFence: instanceFence,
+        // The out-of-band flare sink, read at this EFFECT edge with the
+        // non-binding verb (ADR-0008 D3); absent => no flares, never a failure —
+        // except for an AUTHORIZATION, where absent means no durable record and
+        // so no grant at all ([decideAgentPermission]).
+        transport: context
+            .getInheritedSeedOfExactType<ServiceBundle>()
+            ?.transport,
+        // The station's authorization boundary, resolved the same way: an
+        // explicitly mounted policy wins, else this seat's own ARMING is the
+        // channel's admitted identity, else nothing is authorized.
+        policy: seatChannelPolicy<BuildAgentEnvironment>(
+          context,
+          seatId: kBuildSeatPolicyId,
+        ),
       ),
+      probe: () => _probeRoundCommit(context, args),
+      // Reached only once the probe CLEARED, so this cannot double-refuse: the
+      // same fence inside [result] is already satisfied when it runs.
+      resultFields: () => result(context, args),
+      verb: kAgentStep,
+      adapter: adapterId,
+      // DECLARED here, and honoured by the direct `ProcessAllocation`. The
+      // station's lease vendor still flattens a channel failure's kind to the
+      // untyped default, so a live channel round takes the CIRCUIT's budget
+      // rather than the tightened one above — it still FAILS, and still
+      // withholds `review`, which is what this fence is for.
+      failureKind: CapabilityFailureKind.noResult,
+      blockedDiagnostic: kNoRoundCommitDiagnostic,
+      probeErrorDiagnostic: kRoundCommitUnreadableDiagnostic,
     );
   }
 
@@ -562,12 +742,22 @@ class AgentCapability extends ProcessCapability {
   @override
   StepSignal interpretEvent(RuntimeEvent event) => _jobSignal(event);
 
-  /// The CAPTURE-ONLY usage telemetry (FT-2): on a clean completion, read the
-  /// resolved harness's declared JSON usage envelope and contribute
-  /// tokensIn/tokensOut/costUsd/premiumRequests/numTurns/harnessDurationMs/model
-  /// to `grid.result.<nodePath>.*`. FAIL-SAFE: an absent, malformed, or
+  /// The ROUND-COMMIT FENCE, then the CAPTURE-ONLY usage telemetry (FT-2).
+  ///
+  /// **The fence.** A clean completion is not a finished turn: the deliverable
+  /// this seat's whole brief describes is a COMMIT, so a round whose agent
+  /// returned with the round base still at HEAD is a step FAILURE, typed
+  /// [CapabilityFailureKind.noResult] and carrying the harness's OWN final
+  /// message ([readEnvelopeResultText]) as its reason. That is what makes an
+  /// EMPTY round distinguishable downstream: without it the committee grades the
+  /// consequences (a test file "missing from pinned diff", an untouched getter,
+  /// two F grades) and a human spends a ruling on what was a builder refusal.
+  ///
+  /// **The telemetry**, unchanged and still fail-SAFE: an absent, malformed, or
   /// harness-without-usage envelope yields no fields (null), NEVER a throw —
-  /// telemetry can never fail, gate, or delay the agent step.
+  /// telemetry can never fail, gate, or delay the agent step. Only the FENCE
+  /// above it may refuse, and a round that cleared it returns byte-for-byte what
+  /// this hook always returned.
   @override
   Future<Map<String, String>?> result(
     TreeContext context,
@@ -577,22 +767,59 @@ class AgentCapability extends ProcessCapability {
     if (workspace == null) return null;
     // The declared prices ride the ambient config VALUE, the flare sink is the
     // injected transport IMPL — both read with the NON-BINDING verb, because
-    // `result()` is an effect edge, not a build (ADR-0008 D3).
+    // `result()` is an effect edge, not a build (ADR-0008 D3). Read at ENTRY,
+    // with the fence's own capture, so the git await below touches no context.
     final prices =
         (context.getInheritedSeedOfExactType<AgentConfig>() ??
                 const AgentConfig())
             .modelPrices;
+    final flare = context
+        .getInheritedSeedOfExactType<ServiceBundle>()
+        ?.transport
+        ?.flare;
+    final outcome = await _probeRoundCommit(context, args);
+    if (args.cancel.isCancelled) return null;
+    switch (outcome) {
+      case GateOutcome.clear:
+        break;
+      case GateOutcome.present:
+        throw CapabilityFailure.noResult(
+          _emptyRoundReason(workspace, args, kNoRoundCommitDiagnostic),
+        );
+      case GateOutcome.probeError:
+        throw CapabilityFailure.noResult(
+          _emptyRoundReason(workspace, args, kRoundCommitUnreadableDiagnostic),
+        );
+    }
     final usage = readUsageFields(
       workspace.workspaceDir,
       args.nodePath,
       modelPrices: prices,
-      flare: context
-          .getInheritedSeedOfExactType<ServiceBundle>()
-          ?.transport
-          ?.flare,
+      flare: flare,
     );
     return usage.isEmpty ? null : usage;
   }
+
+  /// The argv leg's refusal, in the station's captured-output SHAPE — the same
+  /// `<verb> failed (exit N) [<transport>]: <diagnostic> — <tail>` an operator
+  /// reads on the channel leg, so the two legs differ only in the bracket that
+  /// exists to name WHICH transport ran.
+  ///
+  /// The tail is the harness's OWN final message, recovered from the envelope
+  /// it already wrote for telemetry — the one place the builder said why it did
+  /// nothing ("I'm using the `discover` skill because this is a directed bead
+  /// request…"). Exit 0, honestly: the child said it was done.
+  String _emptyRoundReason(
+    Workspace workspace,
+    StepArgs args,
+    String diagnostic,
+  ) => capturedOutputReason(
+    verb: kAgentStep,
+    adapter: kArgvTransport,
+    output: readEnvelopeResultText(workspace.workspaceDir, args.nodePath) ?? '',
+    exitCode: 0,
+    diagnostic: diagnostic,
+  );
 }
 
 /// Assembles the agent's full-bead brief + local-first working agreement (the
@@ -784,6 +1011,34 @@ StepSignal _jobSignal(RuntimeEvent event) => switch (event) {
   Exited() || Died() => StepSignal.failed,
   _ => StepSignal.none,
 };
+
+/// The commits [workspaceDir]'s HEAD carries that [baseRef] does not —
+/// `git rev-list --count <baseRef>..HEAD`.
+///
+/// ONE helper, two questions, because they are the same count: "does this branch
+/// have work of its own?" (the adopt-time base refresh, which passes the
+/// REMOTE-TRACKING ref `refs/remotes/<remote>/<base>` because that is the ref
+/// its own `behind` probe reads by construction) and "did this ROUND produce a
+/// commit?" ([AgentCapability._probeRoundCommit], which passes the LOCAL base
+/// branch — see its doc comment for why the two refs are deliberately
+/// different). [baseRef] is therefore taken EXACT, never assembled here.
+///
+/// Null when the count cannot be READ (a failed, empty, non-integer, or
+/// negative answer), which every caller treats as "cannot tell" — the refresh
+/// declines to move the tree, the round fence fails closed.
+Future<int?> _countCommitsInRange({
+  required GitRunner runner,
+  required String workspaceDir,
+  required String baseRef,
+}) async {
+  final result = await runner.run(
+    workingDirectory: workspaceDir,
+    args: <String>['rev-list', '--count', '$baseRef..HEAD'],
+  );
+  if (!result.ok) return null;
+  final count = int.tryParse(result.output.trim());
+  return (count == null || count < 0) ? null : count;
+}
 
 /// The git [SourceControl] impl over grid_runtime — WORKSPACE PROVISIONING ONLY
 /// (the detail the engine knows only in CONCEPT — ADR-0008 D5; ships in the asset
@@ -1132,11 +1387,10 @@ class GitSourceControl implements SourceControl {
       // mount on an already-current tree is noise, not evidence.
       if (behind == 0) return;
 
-      final ahead = await _countCommitsAhead(
+      final ahead = await _countCommitsInRange(
         runner: runner,
         workspaceDir: workspaceDir,
-        remote: remote,
-        base: base,
+        baseRef: 'refs/remotes/$remote/$base',
       );
       if (ahead == null) {
         _appendBaseRefreshReceipt(
@@ -1189,25 +1443,6 @@ class GitSourceControl implements SourceControl {
         'error=${error.toString().replaceAll(RegExp(r'\s+'), ' ').trim()}',
       );
     }
-  }
-
-  /// The commits [workspaceDir]'s HEAD carries that `<remote>/<base>` does not
-  /// — the "does this branch have work of its own?" probe. Null when the count
-  /// cannot be READ (a failed, empty, non-integer, or negative answer), which
-  /// callers treat as "cannot tell" and therefore never move the tree on.
-  static Future<int?> _countCommitsAhead({
-    required GitRunner runner,
-    required String workspaceDir,
-    required String remote,
-    required String base,
-  }) async {
-    final result = await runner.run(
-      workingDirectory: workspaceDir,
-      args: <String>['rev-list', '--count', 'refs/remotes/$remote/$base..HEAD'],
-    );
-    if (!result.ok) return null;
-    final count = int.tryParse(result.output.trim());
-    return (count == null || count < 0) ? null : count;
   }
 
   /// Appends ONE newline-terminated UTF-8 [line] to
@@ -1658,6 +1893,10 @@ DefaultCapabilityRegistry buildCodeRegistry({
         delegate: const SpecRouteCapability(),
         store: selectionStore,
       ),
+      // The build step's ROUND-COMMIT fence counts through the registry's ONE
+      // git seam ([gitRunner]) — the same fake `rebase`, `pin-diff` and
+      // `declared-tests` ride offline; absent ⇒ the real [SystemGitRunner]
+      // (A9(5)).
       'agent': AgentCapability(
         devRoot: devRoot,
         assetRegistry: resolvedAssetRegistry,
@@ -1666,6 +1905,7 @@ DefaultCapabilityRegistry buildCodeRegistry({
         overlayArgs: overlayArgs,
         sessionAdapters: sessionAdapters,
         steers: steers,
+        gitRunner: gitRunner,
       ),
       // The old `land` binding is GONE: the PR is no longer a step. The TERMINAL
       // route advances and the engine actuates the substation's bound

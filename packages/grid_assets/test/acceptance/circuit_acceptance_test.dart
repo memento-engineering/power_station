@@ -249,6 +249,16 @@ MountedStation _buildStation(
 ///    gate — which this suite's happy path is not testing);
 ///  - `log --oneline <base>..HEAD` → one placeholder commit line (provenance
 ///    only; not itself gating, but kept consistent with a non-empty diff).
+///
+/// …plus ONE more, for the build step's round-commit fence
+/// (`AgentCapability`): `rev-list --count <base>..HEAD` → `1`, which is what
+/// [_provisionCheckout] genuinely planted (its "A REAL commit beyond
+/// origin/main"). It is answered WITHOUT delegating, so it is never recorded —
+/// the same carve-out `RecordingGitRunner` already makes for the `rev-parse`
+/// root probe, and for the same reason: `subcommands` is the LAND argv the
+/// suite asserts on ("land never committed"), and a read-only count taken at
+/// the build step's completion is not a land op.
+///
 /// Every OTHER subcommand still delegates straight through, recorded
 /// identically to the unwrapped fake.
 class _ToplevelAwareGitRunner implements GitRunner {
@@ -262,6 +272,9 @@ class _ToplevelAwareGitRunner implements GitRunner {
     required String workingDirectory,
     required List<String> args,
   }) async {
+    if (args.length >= 2 && args[0] == 'rev-list' && args[1] == '--count') {
+      return const GitRunResult(exitCode: 0, output: '1\n');
+    }
     final result = await _inner.run(
       workingDirectory: workingDirectory,
       args: args,
