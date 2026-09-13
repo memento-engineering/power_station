@@ -393,18 +393,41 @@ void main() {
       expect(complete.withheld, isNull);
       expect(complete.show, isNull);
 
+      expect(
+        kBoundedOutputCapBytes,
+        8000,
+        reason:
+            'the ladder holds no cap of its own — this is the SDK\'s one '
+            'bound, and the numbers below are read against it',
+      );
+
       final window = complete.bounded();
       expect(window.packages.length, lessThan(50));
       expect(window.offset, 0);
+      expect(
+        window.packages.map((record) => record.package),
+        complete.packages
+            .take(window.packages.length)
+            .map((record) => record.package),
+        reason:
+            'the window is the WHOLE leading records of the complete report — '
+            'the cap cuts records off the tail, never a field',
+      );
       expect(window.withheldPackages, 50 - window.packages.length);
       expect(
         window.withheld,
         '${window.withheldPackages} of 50 package records',
       );
       expect(window.show, 'rerun with --skip ${window.packages.length}');
+
+      // BOTH exact renderings, each counting the newline the command writes.
       expect(
         utf8.encode('${jsonEncode(window.toJson())}\n').length,
-        lessThanOrEqualTo(kLadderOutputCapBytes),
+        lessThanOrEqualTo(kBoundedOutputCapBytes),
+      );
+      expect(
+        renderedBytes(window.toPlain()),
+        lessThanOrEqualTo(kBoundedOutputCapBytes),
       );
 
       final next = complete.bounded(skip: window.packages.length);
@@ -412,6 +435,32 @@ void main() {
         next.packages.first.package,
         complete.packages[window.packages.length].package,
         reason: 'the marker\'s --skip reaches the first withheld record',
+      );
+      expect(
+        next.packages,
+        isNotEmpty,
+        reason: 'the first record of a window is always admitted',
+      );
+
+      // The two LOUD guards the window keeps: it is cut from a complete
+      // report, at a real index.
+      expect(
+        () => complete.bounded(skip: -1),
+        throwsA(isA<ArgumentError>()),
+        reason: 'a negative --skip is a caller bug, never an empty window',
+      );
+      expect(
+        () => window.bounded(),
+        throwsA(
+          isA<StateError>().having(
+            (error) => error.message,
+            'message',
+            contains('not from another window'),
+          ),
+        ),
+        reason:
+            're-windowing a window would count offset and withheldPackages '
+            'off the wrong denominator',
       );
 
       // Both renderings of the same window are bounded, and the plain one
@@ -439,8 +488,15 @@ void main() {
       expect(lines.first, startsWith('ladder_pkg_00 0.2.0 rung=stable '));
       expect(lines.last, '${window.withheld} withheld — ${window.show}');
       expect(
+        '$out',
+        '${window.toPlain()}\n',
+        reason:
+            'stdout IS the rendering the bound was computed against, plus the '
+            'one newline the cap already counted',
+      );
+      expect(
         utf8.encode('$out').length,
-        lessThanOrEqualTo(kLadderOutputCapBytes),
+        lessThanOrEqualTo(kBoundedOutputCapBytes),
       );
     });
   });

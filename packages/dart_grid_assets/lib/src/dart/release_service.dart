@@ -24,6 +24,7 @@ import 'package:path/path.dart' as p;
 import 'package:pub_semver/pub_semver.dart';
 import 'package:yaml/yaml.dart';
 
+import '../io/bounded_output.dart';
 import 'pub_links.dart';
 
 /// The SEMVER MOVE a release carries — the input to the version bump
@@ -741,30 +742,6 @@ class PollResult {
   };
 }
 
-/// The HARD ceiling on ONE rendered ladder report, in UTF-8 bytes, counting the
-/// trailing newline the command writes. It binds BOTH renderings: the single
-/// JSON object and the one-line-per-package summary, which is strictly the
-/// smaller of the two — so the window the JSON encoding admits bounds them
-/// both.
-///
-/// A ladder report grows with the WORKSPACE, and a workspace grows without
-/// asking its reader, so an uncapped report is exactly the unbounded dump a
-/// vended command is required not to be
-/// (`a-mechanical-lookup-is-a-vended-command-with-a-bounded-output`: every
-/// vended command carries a hard cap AND an explicit truncation marker). The
-/// ladder is a TIME-VARYING read — the facts move as packages publish — so it
-/// caps its output and never suppresses a repeat.
-///
-/// The cap cuts WHOLE records, never a field, and whatever it cuts it NAMES
-/// ([ReleaseLadderReport.withheld]) together with how to reach it
-/// ([ReleaseLadderReport.show]). A silent clip would answer a staleness
-/// question confidently and partially, which is worse than not answering.
-///
-/// 8,000 bytes is the ceiling the org's other bounded read verb already holds,
-/// and one ladder record encodes to roughly 240 bytes, so a window carries
-/// about thirty packages — every workspace shipped today answers in one call.
-const int kLadderOutputCapBytes = 8000;
-
 /// Where ONE package sits on the prerelease ladder, and how stale it is there —
 /// the read-only facts a staleness prompt is decided from, projected off
 /// pub.dev's published versions list.
@@ -890,21 +867,50 @@ class ReleaseLadderReport {
     return 'rerun with --skip ${next < totalPackages ? next : 0}';
   }
 
-  /// Cuts the bounded WINDOW a CLI renders: the records from [skip] onward that
-  /// fit under [capBytes] once encoded, with the truncation marker RESERVED
-  /// before any record is admitted — so a report that cuts can always afford to
-  /// say what it cut.
+  /// The PLAIN rendering, EXACTLY as [ReleaseLadderCommand] writes it: one line
+  /// per record, then the truncation marker line when this window withheld
+  /// something — and no trailing newline, because the command writes that.
+  ///
+  /// Exact is the point. This is one of the two renderings [bounded] measures
+  /// against the cap, so a command that printed anything else would publish an
+  /// output the bound never saw.
+  String toPlain() => [
+    for (final record in packages)
+      '${record.package} '
+          '${record.currentPublishedVersion ?? 'unpublished'} '
+          'rung=${record.rung?.name ?? 'none'} '
+          'counter=${record.rungCounter} '
+          'stable=${record.lastStableVersion ?? 'none'} '
+          'prereleases=${record.prereleasesSinceStable} '
+          'stale=${record.isOverStalenessThreshold}',
+    if (withheld != null) '$withheld withheld — $show',
+  ].join('\n');
+
+  /// Cuts the bounded WINDOW a CLI renders: the whole leading records from
+  /// [skip] onward whose PLAIN and JSON renderings both fit
+  /// [kBoundedOutputCapBytes].
+  ///
+  /// The cap, the both-renderings-fit predicate, the search for the largest
+  /// candidate and the marker contract are the SDK's, vended once by
+  /// [boundedOutput]
+  /// (`power_station#a-mechanical-lookup-is-a-vended-command-with-a-bounded-output`
+  /// puts those three properties in the CLI SDK, because a per-command
+  /// implementation is the failure the entry exists to stop). What stays here is
+  /// the only half this type knows: the ladder gives up whole RECORDS from the
+  /// tail, counts what it withheld in records, and sends the reader back with
+  /// `--skip`. The trim budget below is therefore a RECORD count, not a byte
+  /// count — the selector reads it as nothing but an ordering.
   ///
   /// The first record of a window is always admitted: a window that carries no
-  /// record tells the caller nothing and cannot be paged past.
+  /// record tells the caller nothing and cannot be paged past. That is what maps
+  /// the selector's zero-budget floor onto one record rather than none, and the
+  /// floor still has to fit — a single record over the cap refuses loudly rather
+  /// than print an unbounded answer.
   ///
   /// A window is cut from a COMPLETE report, never from another window — that
   /// invariant is loud, because re-windowing a window would count [offset] and
   /// [withheldPackages] off the wrong denominator.
-  ReleaseLadderReport bounded({
-    int skip = 0,
-    int capBytes = kLadderOutputCapBytes,
-  }) {
+  ReleaseLadderReport bounded({int skip = 0}) {
     if (!isComplete) {
       throw StateError(
         'a ladder window is cut from the complete report, not from another '
@@ -915,43 +921,22 @@ class ReleaseLadderReport {
     if (skip < 0) {
       throw ArgumentError.value(skip, 'skip', 'must not be negative');
     }
-    if (capBytes < 1) {
-      throw ArgumentError.value(capBytes, 'capBytes', 'must be at least 1');
-    }
-    final window = <ReleaseLadderPackage>[];
-    for (final record in packages.skip(skip)) {
-      final candidate = [...window, record];
-      if (window.isNotEmpty && _reservedBytes(candidate, skip) > capBytes) {
-        break;
-      }
-      window.add(record);
-    }
-    return ReleaseLadderReport(
+    final remaining = packages.skip(skip).toList(growable: false);
+    ReleaseLadderReport page(int records) => ReleaseLadderReport(
       workspaceRoot: workspaceRoot,
-      packages: window,
+      packages: remaining.take(records).toList(),
       totalPackages: totalPackages,
       offset: skip,
     );
+    return boundedOutput<ReleaseLadderReport>(
+      complete: page(remaining.length),
+      maximumTrimBudget: remaining.length,
+      renderPlain: (report) => report.toPlain(),
+      renderJson: (report) => jsonEncode(report.toJson()),
+      trim: (records) =>
+          page(records == 0 && remaining.isNotEmpty ? 1 : records),
+    );
   }
-
-  /// The encoded size of a candidate window with the truncation marker at its
-  /// WIDEST — the reservation that keeps the marker affordable however the
-  /// window lands.
-  int _reservedBytes(List<ReleaseLadderPackage> window, int skip) =>
-      utf8
-          .encode(
-            jsonEncode({
-              'workspaceRoot': workspaceRoot,
-              'packages': [for (final record in window) record.toJson()],
-              'offset': skip,
-              'totalPackages': totalPackages,
-              'withheldPackages': totalPackages,
-              'withheld': '$totalPackages of $totalPackages package records',
-              'show': 'rerun with --skip $totalPackages',
-            }),
-          )
-          .length +
-      1; // the newline the command writes after the object
 
   /// JSON form — the structured contract the release skill consumes. The
   /// bounded-output keys are ALWAYS present: [withheld] and [show] are null

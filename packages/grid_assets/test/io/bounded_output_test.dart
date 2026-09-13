@@ -1,9 +1,15 @@
-// The pack's ONE bounded-output selector, and the fence that keeps it one.
+// The ONE bounded-output selector both packs render through, and the fence
+// that keeps it one.
+//
+// The implementation lives in `dart_grid_assets` — the package this one
+// already depends on — and the library of the same name here re-exports it, so
+// the probes below exercise it through exactly the import every grid verb
+// uses.
 //
 // Pure end to end: the selector takes renderers and a trim callback, so every
-// probe below is a value in and a value out — no process, no store, no disk
-// except the source fence, which reads this package's own `lib/` off the
-// shared cwd-independent package root.
+// probe is a value in and a value out — no process, no store, no disk except
+// the source fence, which reads BOTH packs' `lib/` off the shared
+// cwd-independent package root and its workspace sibling.
 import 'dart:convert';
 import 'dart:io';
 
@@ -177,11 +183,11 @@ void main() {
     });
   });
 
-  group('AC-9 — the bound is the PACK\'s, not a verb\'s', () {
+  group('AC-9 — the bound is the PACKS\', not a verb\'s', () {
     test('one shared cap and dual-render search', () {
       final sources = _libSources();
 
-      // ONE cap value in the whole package, and it is the shared one.
+      // ONE cap value across BOTH packs, and it is the shared one.
       final capDeclarations = {
         for (final entry in sources.entries)
           if (_capDeclaration.hasMatch(entry.value))
@@ -191,16 +197,24 @@ void main() {
                 .toList(),
       };
       expect(capDeclarations, {
-        p.join('src', 'io', 'bounded_output.dart'): ['kBoundedOutputCapBytes'],
+        _implementation: ['kBoundedOutputCapBytes'],
       });
 
-      // The verb that arrived second never minted a cap of its own.
+      // No verb keeps a bound of its own: not `prime`, which arrived second,
+      // and not the `dart release ladder` that arrived third with a private
+      // cap and a private reservation arithmetic.
       for (final entry in sources.entries) {
-        expect(
-          entry.value,
-          isNot(contains('kPrimeOutputCapBytes')),
-          reason: '${entry.key} mints a third per-command cap',
-        );
+        for (final minted in const [
+          'kPrimeOutputCapBytes',
+          'kLadderOutputCapBytes',
+          '_reservedBytes',
+        ]) {
+          expect(
+            entry.value,
+            isNot(contains(minted)),
+            reason: '${entry.key} keeps the per-command bound $minted alive',
+          );
+        }
       }
 
       // The retired per-verb cap name survives ONLY as the deprecated alias.
@@ -218,7 +232,7 @@ void main() {
       // The dual-render FIT PREDICATE lives in one file. Everywhere else the
       // cap may only be reported, never compared against.
       for (final entry in sources.entries) {
-        if (entry.key == p.join('src', 'io', 'bounded_output.dart')) continue;
+        if (entry.key == _implementation) continue;
         expect(
           _collapsed(entry.value),
           isNot(contains('<= kBoundedOutputCapBytes')),
@@ -227,7 +241,7 @@ void main() {
       }
 
       // The outcome-budget SEARCH lives in one file too. The second `low <=
-      // high` in the package is `_ProseChunk.cutTo`, show's rune-prefix cut —
+      // high` in either pack is `_ProseChunk.cutTo`, show's rune-prefix cut —
       // policy, not candidate selection — and it is named here so a third one
       // cannot arrive unnoticed.
       expect(
@@ -239,13 +253,13 @@ void main() {
                   .length,
         },
         {
-          p.join('src', 'io', 'bounded_output.dart'): 1,
-          p.join('src', 'filing', 'show_command.dart'): 1,
+          _implementation: 1,
+          p.join('grid_assets', 'src', 'filing', 'show_command.dart'): 1,
         },
       );
 
       // Each consumer CALLS the selector, exactly once — and the consumers are
-      // exactly the two verbs that bound their output.
+      // exactly the three verbs that bound their output, across both packs.
       expect(
         {
           for (final entry in sources.entries)
@@ -253,14 +267,47 @@ void main() {
               entry.key: 'boundedOutput<'.allMatches(entry.value).length,
         },
         {
-          p.join('src', 'io', 'bounded_output.dart'): 1,
-          p.join('src', 'filing', 'show_command.dart'): 1,
-          p.join('src', 'seat', 'prime_command.dart'): 1,
+          _implementation: 1,
+          p.join('dart_grid_assets', 'src', 'dart', 'release_service.dart'): 1,
+          p.join('grid_assets', 'src', 'filing', 'show_command.dart'): 1,
+          p.join('grid_assets', 'src', 'seat', 'prime_command.dart'): 1,
         },
+      );
+      expect(
+        sources[p.join(
+          'dart_grid_assets',
+          'src',
+          'dart',
+          'release_service.dart',
+        )],
+        contains('boundedOutput<ReleaseLadderReport>('),
+        reason: 'the ladder SELECTS a window rather than searching for one',
+      );
+
+      // The library at the old grid path is EXPORT-ONLY: a compatibility
+      // surface for the verbs and the barrel that already import it, holding
+      // no cap, no predicate and no search of its own.
+      expect(
+        _code(sources[_shim]!),
+        'library; '
+        "export 'package:dart_grid_assets/dart_grid_assets.dart' "
+        'show boundedOutput, kBoundedOutputCapBytes, renderedBytes;',
       );
     });
   });
 }
+
+/// The one implementation's key in [_libSources].
+final String _implementation = p.join(
+  'dart_grid_assets',
+  'src',
+  'io',
+  'bounded_output.dart',
+);
+
+/// The grid re-export's key in [_libSources] — the path every grid verb and
+/// `grid_assets.dart` still import.
+final String _shim = p.join('grid_assets', 'src', 'io', 'bounded_output.dart');
 
 /// The declaration of an output-cap constant, whatever it is named.
 final RegExp _capDeclaration = RegExp(
@@ -272,16 +319,56 @@ final RegExp _capDeclaration = RegExp(
 /// the same after `dart format` re-wraps a signature.
 String _collapsed(String source) => source.replaceAll(RegExp(r'\s+'), ' ');
 
-/// Every Dart source under this package's `lib/`, keyed by its `lib`-relative
-/// path. LOUD when it finds none — a source fence that silently reads nothing
-/// is a fence that is GONE.
-Map<String, String> _libSources() {
-  final lib = Directory(p.join(packageRoot(), 'lib'));
+/// [source] with its comments and blank lines dropped and what is left joined
+/// into one line — the CODE a library declares, whatever the prose above it
+/// says.
+String _code(String source) => const LineSplitter()
+    .convert(source)
+    .map((line) => line.trim())
+    .where((line) => line.isNotEmpty && !line.startsWith('//'))
+    .join(' ');
+
+/// Every Dart source under BOTH packs' `lib/`, keyed by
+/// `<package>/<lib-relative path>`.
+///
+/// Both trees, because the bound is now one implementation ACROSS a dependency
+/// edge: it lives in `dart_grid_assets` and this pack re-exports it. A fence
+/// that read only this package's `lib/` could not see the implementation it
+/// fences, nor the third consumer that made the move necessary, and would go on
+/// passing while a second copy grew next door.
+Map<String, String> _libSources() => {
+  ..._packSources('grid_assets', packageRoot()),
+  ..._packSources('dart_grid_assets', _siblingPackageRoot('dart_grid_assets')),
+};
+
+/// Every Dart source under [root]'s `lib/`, keyed by `<package>/<relative>`.
+/// LOUD when it finds none — a source fence that silently reads nothing is a
+/// fence that is GONE.
+Map<String, String> _packSources(String package, String root) {
+  final lib = Directory(p.join(root, 'lib'));
   final sources = <String, String>{
     for (final entity in lib.listSync(recursive: true))
       if (entity is File && entity.path.endsWith('.dart'))
-        p.relative(entity.path, from: lib.path): entity.readAsStringSync(),
+        p.join(package, p.relative(entity.path, from: lib.path)): entity
+            .readAsStringSync(),
   };
   if (sources.isEmpty) fail('no Dart sources under ${lib.path}');
   return sources;
+}
+
+/// The workspace sibling named [package], resolved off this package's OWN
+/// source-located root — never off the process working directory, which is a
+/// shared mutable global under `dart test`.
+///
+/// LOUD when nothing there declares [package]: a fence that quietly skipped the
+/// tree holding the implementation is a fence that is GONE.
+String _siblingPackageRoot(String package) {
+  final root = p.join(p.dirname(packageRoot()), package);
+  final pubspec = File(p.join(root, 'pubspec.yaml'));
+  final declaresPackage = RegExp('^name:\\s*$package\\s*\$');
+  if (!pubspec.existsSync() ||
+      !pubspec.readAsLinesSync().any(declaresPackage.hasMatch)) {
+    fail('no pubspec.yaml naming $package at $root');
+  }
+  return root;
 }
