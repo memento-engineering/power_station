@@ -314,6 +314,20 @@ void main() {
         Directory(seatDiscPath(home.path, 'governor')).listSync(),
         isEmpty,
       );
+
+      // On a disc that does not exist yet, a refusal does not even create the
+      // directory: the write is all-or-nothing.
+      expect(
+        () => discOf('refiner').writeHandoffOnce(
+          fileName: name,
+          contents: note(name: name, seat: 'refiner', kind: 'journal'),
+        ),
+        throwsA(isA<SeatHandoffWriteException>()),
+      );
+      expect(
+        Directory(seatDiscPath(home.path, 'refiner')).existsSync(),
+        isFalse,
+      );
     });
 
     test('every OTHER disc kind is refused here too, and a handoff whose '

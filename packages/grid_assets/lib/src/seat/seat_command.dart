@@ -366,7 +366,7 @@ class SeatCommand extends Command<int> {
       // Observational: with amendment refused at the write edge, a handoff
       // still on the disc is a seat that has not handed off, and its AGE is
       // how an operator watching this loop sees that. No threshold and no
-      // expiry — the note is launched with either way.
+      // expiry — the occupant is primed with the note either way.
       final state = disc.newestHandoffState();
       if (state != null) {
         _out.writeln(

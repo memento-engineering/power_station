@@ -475,7 +475,6 @@ class SeatDisc {
       );
     }
 
-    ensure();
     final target = p.join(directory, fileName);
     final parsed = parseSeatHandoff(
       path: target,
@@ -490,6 +489,9 @@ class SeatDisc {
       );
     }
 
+    // Nothing above this line WRITES, so EVERY refusal leaves the disc exactly
+    // as it was — not even a directory created for a note that never landed.
+    ensure();
     final file = File(target);
     try {
       file.createSync(exclusive: true);
