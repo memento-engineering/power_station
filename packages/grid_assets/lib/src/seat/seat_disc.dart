@@ -5,12 +5,20 @@
 /// fixes it — one file per fact at `<gridHome>/.grid/seats/<seat>/<name>.md`,
 /// front matter then prose, with `kind: handoff` naming "the one note that is
 /// CONSUMED rather than kept ... the successor DELETES it in the turn that reads
-/// it". Nothing here WRITES a note: the occupant writes and deletes its own.
+/// it". Nothing here AUTHORS a note: the occupant composes its own prose.
 ///
-/// It does own the disc's INDEX INVARIANT, because the occupant demonstrably
-/// does not: `MEMORY.md` is the only thing that makes a note findable, and
-/// [SeatDisc.verifyIndexIntegrity] is the read-only check that it still covers
-/// the notes beside it.
+/// It does own two things the occupant demonstrably does not hold on its own.
+///
+/// The disc's INDEX INVARIANT: `MEMORY.md` is the only thing that makes a note
+/// findable, and [SeatDisc.verifyIndexIntegrity] is the read-only check that it
+/// still covers the notes beside it.
+///
+/// And the handoff's WRITE-ONCE lifetime
+/// (`memento-engineering#handoffs-are-working-memory-and-long-term-memory-stays-thin`):
+/// [SeatDisc.writeHandoffOnce] is the one mechanical writer, it refuses a
+/// second live handoff, and [seatHandoffAgeDiagnostic] renders how long an
+/// unconsumed one has sat there. Both are mechanism only — WHAT a handoff says
+/// and WHEN a boundary is reached stay with the vended `handoff` skill.
 ///
 /// Not to be confused with the four TYPED ENVIRONMENT seats of
 /// `agent/seat_environments.dart` (ADR-0006 D2 spawn sites); this is the
@@ -220,8 +228,116 @@ final class SeatDiscIntegrityException implements Exception {
   }
 }
 
+/// The one REMEDY a write refused for an occupied disc names: the live handoff
+/// is CONSUMED, and the next note is authored fresh at the next boundary.
+///
+/// Never "edit the existing one" and never "delete it by hand" — the succession
+/// verb is what archives the disc and proves the note reached `HEAD` before
+/// removing it (`power_station#handoff-succession-commits-before-consume`).
+const String kHandoffWriteRemedy =
+    'consume the existing handoff with succession, then write a new handoff';
+
+/// A handoff write REFUSED — what [SeatDisc.writeHandoffOnce] throws instead of
+/// amending, appending to, or overwriting a note that is already there.
+///
+/// **Why a refusal and not a warning.** A handoff is WORKING memory:
+/// `memento-engineering#handoffs-are-working-memory-and-long-term-memory-stays-thin`
+/// rules that it is "written once at a boundary, picked up, and deleted — a
+/// lifetime measured in minutes. It is never amended." CONSUMING one was
+/// already a verb and already enforced; WRITING one was a skill — prose an
+/// agent may follow or not — and nothing refused a second write. Measured
+/// 2026-09-12 on the live governor disc: one note was rewritten across THIRTY
+/// commits between 23:25 and 08:45, so the UTC stamp in its own file name was
+/// false by the time a successor read it, and its Resume section described a
+/// board nine hours younger than the sections above it.
+///
+/// Every refusal names the disc, the disc-local name it refused to write, and —
+/// when the disc already carries handoffs — every one of them, so a caller acts
+/// on the shape rather than on prose.
+final class SeatHandoffWriteException implements Exception {
+  /// Creates the refusal over the disc that refused it.
+  SeatHandoffWriteException({
+    required this.directory,
+    required this.fileName,
+    required this.detail,
+    Iterable<String> existingHandoffs = const <String>[],
+  }) : existingHandoffs = _sortedNames(existingHandoffs);
+
+  /// The ABSOLUTE disc directory the write was aimed at.
+  final String directory;
+
+  /// The disc-local name the write was aimed at — never a path, because
+  /// [SeatDisc.writeHandoffOnce] takes only a basename.
+  final String fileName;
+
+  /// Why the write was refused, in one sentence.
+  final String detail;
+
+  /// Grid-home-relative paths of every `kind: handoff` note ALREADY on the
+  /// disc, sorted and frozen so a report reads the same twice.
+  ///
+  /// Empty when the refusal was about the candidate itself — a name that is not
+  /// one disc-local `.md` basename, or prose the disc's own parser does not
+  /// recognize as a handoff.
+  final List<String> existingHandoffs;
+
+  @override
+  String toString() {
+    final live = existingHandoffs.isEmpty
+        ? ''
+        : ' Live handoff(s): ${existingHandoffs.join(', ')}.';
+    return 'SeatHandoffWriteException: refused to write "$fileName" onto '
+        '$directory — $detail$live';
+  }
+}
+
+/// The ONE line every seat reader renders beside an unconsumed handoff: which
+/// Agent Seat, which note on its Agent Disc, and how OLD it is. PURE.
+///
+/// **What it is for.** With the write-once constraint above, a handoff that is
+/// still on the disc hours after it was authored is not an amended handoff — it
+/// is a seat that never handed off, and the ruling calls that out as the shape
+/// to make visible: "an aging unconsumed note is visible evidence that a seat
+/// is not handing off". The vocabulary is `the_grid#agent-seat-and-agent-disc`'s
+/// — the standing position is an Agent Seat, what accretes on it is an Agent
+/// Disc — because a diagnostic that invents its own nouns cannot be searched
+/// for alongside the doctrine it reports on.
+///
+/// **It DEFINES NO THRESHOLD.** There is no expiry, no refusal and no deletion
+/// anywhere behind this string: nine hours is a defect a human recognizes, not
+/// a number this pack gets to pick, and a diagnostic that started refusing
+/// would destroy the very note it exists to surface.
+///
+/// The age is rendered `<d>d <h>h <m>m`, dropping the day component when it is
+/// zero and KEEPING hours and minutes always, so `age 9h 0m` reads the same
+/// whether it was reached from nine hours or from thirty-three.
+///
+/// [authoredAt] AFTER [now] is not silently clamped to zero: a disc mtime in
+/// the future means the clock is wrong somewhere, and an age of `0h 0m` would
+/// present that as a fresh handoff. It renders the skew instead. Sub-minute
+/// skew rounds to `0m in the future`, which still says "unavailable" rather
+/// than reporting an age.
+String seatHandoffAgeDiagnostic({
+  required String seat,
+  required SeatHandoff handoff,
+  required DateTime authoredAt,
+  required DateTime now,
+}) {
+  final head =
+      'Agent Seat "$seat" has unconsumed handoff ${handoff.relativePath} on '
+      'its Agent Disc — ';
+  final age = now.difference(authoredAt);
+  if (age.isNegative) {
+    return '${head}age unavailable: authored time is ${-age.inMinutes}m in '
+        'the future.';
+  }
+  final days = age.inDays == 0 ? '' : '${age.inDays}d ';
+  return '${head}age $days${age.inHours % 24}h ${age.inMinutes % 60}m.';
+}
+
 /// One operator seat's disc directory — the thin IO seam over
-/// [parseSeatHandoff]. Read-only except for [ensure].
+/// [parseSeatHandoff]. Read-only except for [ensure] and
+/// [writeHandoffOnce].
 class SeatDisc {
   /// Creates the disc over its ABSOLUTE [directory], under [gridHome].
   const SeatDisc({required this.directory, required this.gridHome});
@@ -266,12 +382,131 @@ class SeatDisc {
     return found;
   }
 
-  /// The NEWEST handoff, or `null` when the disc holds none. Newest is by file
-  /// modification time, ties broken by the greater relative path so the answer
-  /// is deterministic on a same-instant tie.
-  SeatHandoff? newestHandoff() {
+  /// The NEWEST handoff WITH the instant it was written, or `null` when the
+  /// disc holds none. Newest is by file modification time, ties broken by the
+  /// greater relative path so the answer is deterministic on a same-instant
+  /// tie.
+  ///
+  /// The instant is what [seatHandoffAgeDiagnostic] ages against, and it is the
+  /// same mtime [handoffs] orders by — one read, one truth, so a reader cannot
+  /// name one note and age another.
+  ({SeatHandoff handoff, DateTime at})? newestHandoffState() {
     final all = handoffs();
-    return all.isEmpty ? null : all.last.handoff;
+    return all.isEmpty ? null : all.last;
+  }
+
+  /// The NEWEST handoff, or `null` when the disc holds none — the note half of
+  /// [newestHandoffState], for the callers that need no age.
+  SeatHandoff? newestHandoff() => newestHandoffState()?.handoff;
+
+  /// Writes [contents] as this disc's ONE live handoff, at disc-local
+  /// [fileName], and returns the note it parsed back.
+  ///
+  /// **Write-once, by refusal.** The disc is resolved through [handoffs] FIRST,
+  /// so the constraint keys on front matter `kind: handoff`
+  /// (`the_grid#agent-disc-file-shape-and-home`) and never on a file-name
+  /// pattern: a note that declares the kind is a handoff whatever it is called,
+  /// and a lesson called `handoff-notes.md` is not one. When the disc already
+  /// carries one or more, this throws a [SeatHandoffWriteException] naming every
+  /// one of them and the [kHandoffWriteRemedy] — BEFORE parsing the candidate
+  /// and before touching the filesystem. That refusal is the whole point:
+  /// consuming a handoff was already an enforced verb while writing one was
+  /// prose, which is how one note came to be rewritten thirty times across nine
+  /// hours.
+  ///
+  /// The candidate must be one disc-local `.md` basename that is not the index,
+  /// and [parseSeatHandoff] must recognize the COMPLETE [contents] as a
+  /// handoff — so a `kind: journal` note, a half-written note and an empty one
+  /// are all refused without a file being created. No fifth note kind is
+  /// admitted here: the ruling is explicit that the checkpoint IS a handoff,
+  /// cycled fast.
+  ///
+  /// The target is created with `exclusive: true`, so an existing file at that
+  /// exact name loses the race loudly rather than being truncated — the one
+  /// window [handoffs] cannot close, because a note with no `kind: handoff` in
+  /// it is invisible to that scan.
+  ///
+  /// **It owns the NOTE and nothing else.** It never writes
+  /// [kSeatMemoryFileName]: the index append stays one explicit step in the
+  /// vended ritual, because the index is CHECKED here and never rewritten
+  /// (`power_station#seat-disc-index-integrity-is-checked-not-written`). It
+  /// deletes nothing, renames nothing, and decides nothing about what the note
+  /// should say.
+  SeatHandoff writeHandoffOnce({
+    required String fileName,
+    required String contents,
+  }) {
+    Never refuse(
+      String detail, {
+      Iterable<String> existing = const <String>[],
+    }) {
+      throw SeatHandoffWriteException(
+        directory: directory,
+        fileName: fileName,
+        detail: detail,
+        existingHandoffs: existing,
+      );
+    }
+
+    final live = handoffs();
+    if (live.isNotEmpty) {
+      refuse(
+        'the disc already carries ${live.length} live '
+        'handoff${live.length == 1 ? '' : 's'}, and a handoff is WORKING '
+        'memory written ONCE at a boundary, never amended — '
+        '$kHandoffWriteRemedy.',
+        existing: [for (final entry in live) entry.handoff.relativePath],
+      );
+    }
+
+    if (fileName.trim().isEmpty || p.basename(fileName) != fileName) {
+      refuse(
+        'a handoff name is ONE disc-local file name — no directory part, no '
+        'traversal.',
+      );
+    }
+    if (p.extension(fileName) != '.md') {
+      refuse('a disc note is Markdown, so the name ends in ".md".');
+    }
+    if (fileName == kSeatMemoryFileName) {
+      refuse(
+        '$kSeatMemoryFileName is the disc INDEX, not a note — it is never '
+        'written as a handoff.',
+      );
+    }
+
+    ensure();
+    final target = p.join(directory, fileName);
+    final parsed = parseSeatHandoff(
+      path: target,
+      relativePath: p.relative(target, from: gridHome),
+      contents: contents,
+    );
+    if (parsed == null) {
+      refuse(
+        'the candidate is not a handoff: its front matter must declare '
+        '"kind: $kHandoffKind" between two "---" fences, and no other note '
+        'kind is written here.',
+      );
+    }
+
+    final file = File(target);
+    try {
+      file.createSync(exclusive: true);
+    } on FileSystemException catch (error) {
+      refuse(
+        'the target already exists on the disc, so writing would overwrite '
+        'it — $kHandoffWriteRemedy (${error.osError?.message ?? error.message}).',
+      );
+    }
+    final handle = file.openSync(mode: FileMode.writeOnly);
+    try {
+      handle.writeStringSync(contents);
+      handle.flushSync();
+    } finally {
+      handle.closeSync();
+    }
+    return parsed;
   }
 
   /// Whether a handoff NEWER than [instant] sits on the disc — the launcher's
