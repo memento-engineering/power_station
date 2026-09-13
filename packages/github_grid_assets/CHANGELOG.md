@@ -1,3 +1,8 @@
+## 0.2.0-dev.1
+
+- Breaking: `GitHubReconcilerRuntime.start()`, `GitHubReconcilerRuntime.stop()`, and `GitHubReconcilerConfig.interval` are removed; reconciliation is now owned by the station tick, and live `GitHubReconcilerAssets` throws `StateError` at build unless ambient `TrajectoryConfig.obligationQueryExtensions` contains exactly one `GitHubReconciliationQuery`.
+- Migration: A station constructs one `GitHubReconciliationQuery`, registers that exact instance in `TrajectoryConfig.obligationQueryExtensions`, and provides that `TrajectoryConfig` above every live `GitHubReconcilerAssets` seat.
+
 ## 0.1.1-dev.1
 
 - Floors `grid_assets` at `^0.7.0-dev.1` (sibling coherence for the seat-mechanism wave, pow-3xae).
