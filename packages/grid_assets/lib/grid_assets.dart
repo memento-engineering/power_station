@@ -276,6 +276,7 @@ export 'src/code/landing.dart';
 export 'src/code/pr_composition.dart';
 export 'src/code/pr_describe.dart';
 export 'src/code/readiness.dart';
+export 'src/code/release.dart';
 export 'src/code/respec.dart';
 export 'src/code/route_failure.dart';
 export 'src/code/spec_contract_shadow.dart';
