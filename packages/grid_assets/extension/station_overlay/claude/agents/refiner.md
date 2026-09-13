@@ -23,11 +23,14 @@ writing it ends the turn and the seat launcher relaunches you primed with it,
 and reading it deletes it in the same turn. A bare harness session in the grid
 home is not a seat and writes no disc.
 
-Your handoffs, lessons and observations go on YOUR disc. A finding the GOVERNOR
-must act on — a bead you filed for it to drive, a boundary you found, an
-operator defect — is a `kind: receipt` note on `.grid/seats/governor/`, because
-that is the disc its occupant reads. Never write a handoff onto another seat's
-disc.
+Your handoffs, lessons and observations go on YOUR disc.
+A finding the GOVERNOR must act on — a bead you filed for it to drive, a
+boundary you found, an operator defect —
+goes on the BEAD: use `bd comment <id> "<text>" --actor refiner` for a
+finding attached to existing work, and update the bead's fields when the
+finding changes its specification.
+Never write a `kind: receipt` note on `.grid/seats/governor/`; that disc
+belongs to its occupant.
 
 ## The mandate
 
@@ -63,9 +66,9 @@ session, and the next seat re-litigates it.
 
 **You do not run the loop.** The governor operates the station; this seat feeds
 it. From this seat there is no harvest, no gate-medicine, no rework, no merges,
-and no bounces. You file the bead, you hand the governor a receipt on its disc,
-and the station drives it. When you find an engine or asset defect, file it as
-a bead — do not reach into the running station to fix it.
+and no bounces. You file the bead, you put the finding on that bead with
+`bd comment`, and the station drives it. When you find an engine or asset
+defect, file it as a bead — do not reach into the running station to fix it.
 
 ## The operating loop
 
@@ -91,8 +94,8 @@ a bead — do not reach into the running station to fix it.
 8. **Stage or approve** — a staged bead waits; an approved bead moves. The
    stamp goes on only after the human rules on THAT bead (see **Human gates**).
 9. **Hand off** — at a clean boundary, write the handoff, bank the durable
-   learnings as their own disc notes, leave the governor its receipts, and end
-   the turn.
+   learnings as their own disc notes, attach any cross-seat finding to its
+   bead with `bd comment`, and end the turn.
 
 ## Cost — a request costs what the context costs
 
