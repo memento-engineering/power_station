@@ -398,7 +398,7 @@ The design makes an autonomous call (line-anchored, LAST match, level- and
 trailing-text-permissive, 0-3 indent; the code committee's declaration loop
 routed through the same resolver; `changeShapeOf` left alone) that substantively
 extends A19(3), so it is recorded as a decision entry, never appended to the
-read-only `ADR-0000`. Create
+read-only `docs/adr/ADR-0000-ai-decision-register.md`. Create
 `docs/decisions/2026-09-03-spec-section-headings-resolve-at-a-line-start.md`
 (if the build runs on a later date, use that date in both the filename and the
 `date:` field — the slug never changes):
@@ -563,7 +563,7 @@ overlap. Baseline confirmed green before specifying: `dart analyze` →
 
 ## ADR Alignment
 Verified via grep on `heading`, `structural`, `prose`, `section lookup`,
-`specStructuralFindings` over `the ADR directory` and `docs/decisions` (21 files hit;
+`specStructuralFindings` over `docs/adr` and `docs/decisions` (21 files hit;
 every hit read).
 
 - `power_station#a19-bead-pow-77g-the-spec-s-structural-contract-becomes-one`
@@ -583,7 +583,7 @@ every hit read).
   Clause (1) — "a gate whose contract the brief does not state is a trap" — is
   why step 3 changes `kSpecStructuralContract` and the shipped rubric in the same
   commit as the code, not after it.
-- `ADR-0000` A17(4) (**Ratified**, Nico
+- `docs/adr/ADR-0000-ai-decision-register.md` A17(4) (**Ratified**, Nico
   2026-07-12) and its **Amendment (Nico, 2026-07-30, governor-relayed)**. A17(4)
   froze "`specStructuralFindings`/`_proseOnly` in `specify.dart` … BYTE-UNCHANGED";
   the amendment narrows it — "the freeze binds the STRUCTURE — no re-homing, the
@@ -595,7 +595,7 @@ every hit read).
   names and home in `specify.dart`, the fence stays scoped off human prose
   (`Bead.description` is never read here), and the new helper is ADDED beside
   them rather than displacing either.
-- `ADR-0000` A13(10) (Status **pending**, and
+- `docs/adr/ADR-0000-ai-decision-register.md` A13(10) (Status **pending**, and
   its content re-ratified through A19): "the placeholder fence reads PROSE, not
   QUOTATION… a spec that QUOTES a token as evidence is pointing at work, not
   deferring it." The line-start rule is that same principle applied to the
@@ -614,7 +614,7 @@ every hit read).
   entry in step 6 (`status: accepted`, a `register` block carrying `spec: 1`,
   resolving `surfaces`, `bead: pow-o3ti`, and an authored `updates:` edge to
   A19 — the shape every 2026-09 entry in this register uses). Nothing is
-  appended to `ADR-0000`, which is read-only
+  appended to `docs/adr/ADR-0000-ai-decision-register.md`, which is read-only
   legacy.
 - Org invariants: no new surface is named here, so "extension, never plugin" and
   the human-faculty naming rule are not engaged (`headingOffset` is a verb over

@@ -25,10 +25,10 @@ human-ratified decision, so none of it is minted as an ADR-0000 pending amendmen
 register rule: do not log a collaboratively-reached decision).
 
 **Why this is a NUMBERED ADR and not an ADR-0000 amendment.**
-`ADR-0004`, Consequences: "Nico's own
+`docs/adr/ADR-0004-station-throughput-outranks-staging-ceremony.md`, Consequences: "Nico's own
 directives are ratified on arrival and belong in a numbered ADR — never in the AI register.
 This ADR exists because that rule was violated when the directive was first recorded as an A31
-amendment." `ADR-0005`, Ground, is the
+amendment." `docs/adr/ADR-0005-landing-policy-grade-gated-auto-merge.md`, Ground, is the
 standing precedent for applying that clause: "ADR-0004 D3 does not apply: this is a
 twice-ratified human directive, not an autonomous governor departure. ADR-0004's Consequences
 require Nico's directives to live in a numbered ADR and never in ADR-0000." ADR-0004 D3
@@ -36,7 +36,7 @@ therefore does not govern THIS document either. It governs the separate, AUTONOM
 choices the first implementing bead makes, which are filed as pending ADR-0000 amendment `A35`:
 the policy is here, the mechanism is there.
 
-**Supersedes:** `ADR-0002` — its Decision preamble clause
+**Supersedes:** `docs/adr/ADR-0002-agent-environment-layer.md` — its Decision preamble clause
 "Selection resolves a NAME to an environment; a role points at an environment name; the ladder
 overrides the name rung by rung" (line 71), and the matching line of its section "The ladder, as
 settled" ("Each rung names an ENVIRONMENT; the more specific rung wins", line 170) — **for the

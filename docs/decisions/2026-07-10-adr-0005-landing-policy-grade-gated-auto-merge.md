@@ -53,7 +53,7 @@ Direct merge first preserves the branch on the remote. If branch protection is p
 
 This implements Nico's 2026-07-10 directive, reaffirmed 2026-08-21: finished work whose grades justify landing must not wait on a redundant human merge.
 
-`ADR-0004` D2 says, “A ready P0 or P1 never waits on a human when the station is halted.” Grade-gated native auto-merge is the delivery mechanism for that throughput rule.
+`docs/adr/ADR-0004-station-throughput-outranks-staging-ceremony.md` D2 says, “A ready P0 or P1 never waits on a human when the station is halted.” Grade-gated native auto-merge is the delivery mechanism for that throughput rule.
 
 ADR-0004 D3 does not apply: this is a twice-ratified human directive, not an autonomous governor departure. ADR-0004's Consequences require Nico's directives to live in a numbered ADR and never in ADR-0000.
 

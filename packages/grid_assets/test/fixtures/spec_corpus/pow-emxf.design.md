@@ -282,7 +282,7 @@ Re-validated against the live tree: `grep -rn "BYTE-IDENTICAL\|readAsBytesSync" 
 
 Verified via grep on `overlay`, `byte-identical`, `codex`, `harness`,
 `skill tree`, `guard` over both registers with
-`for register in the ADR directory docs/decisions; do [ ! -d "$register" ] || find "$register" -type f -not -path '*/views/*' -name '*.md' -exec grep -li "…" {} +; done`.
+`for register in docs/adr docs/decisions; do [ ! -d "$register" ] || find "$register" -type f -not -path '*/views/*' -name '*.md' -exec grep -li "…" {} +; done`.
 Three recorded decisions govern this surface; one is departed from, by name.
 
 1. **`power_station#the-worktree-overlay-scope-widens-to-every-skill-tree`**
@@ -295,7 +295,7 @@ Three recorded decisions govern this surface; one is departed from, by name.
    ruling ("Different harnesses can have different instructions"). Per the
    register's write rule, the reversal is recorded as a NEW `docs/decisions/`
    slug entry (Step 3) carrying `updates:` the pow-99g slug; the ratified entry
-   itself is not edited, and `ADR-0000` is not
+   itself is not edited, and `docs/adr/ADR-0000-ai-decision-register.md` is not
    appended to. Every OTHER clause of that entry — the per-harness subtree set,
    the derived `.gitignore` fence, "no loose file … is materialized into a
    worktree" — is preserved by this plan, which touches no `lib/` file.

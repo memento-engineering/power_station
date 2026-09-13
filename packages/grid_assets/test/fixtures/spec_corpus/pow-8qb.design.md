@@ -455,7 +455,7 @@ Run the machine gate (the same line the code committee's gating lane runs):
 `dart pub get` — a per-bead worktree sits two levels deeper than the checkout the
 overrides were written for.
 
-Then log the autonomous calls in the register. `ADR-0000`
+Then log the autonomous calls in the register. `docs/adr/ADR-0000-ai-decision-register.md`
 gets ONE new amendment at the NEXT FREE ordinal — grep `^## A[0-9]` to find it
 (A22 at spec time; the register moves, so check). It records, with
 `**Status:** pending`, the four calls this plan makes: (1) `PrDescription.body`
@@ -468,7 +468,7 @@ the body; (4) the 2–5 sentence shape is taught in the PROMPT and NOT checked i
 code — A18(6)'s fail-safe stands, so a thin digest is never a land blocker.
 
 Test: `cd packages/grid_assets && dart pub get && dart analyze && dart test` →
-expect `All tests passed!`; `grep -c '^## A2[0-9]' ../../ADR-0000` → a count one higher than before the edit.
+expect `All tests passed!`; `grep -c '^## A2[0-9]' ../../docs/adr/ADR-0000-ai-decision-register.md` → a count one higher than before the edit.
 Commit: `docs(adr): register the PR-digest calls (pending)`
 
 ## Touches
@@ -499,19 +499,19 @@ Commit: `docs(adr): register the PR-digest calls (pending)`
   fixture + a digest assertion.
 - `packages/grid_assets/test/landing_circuit_test.dart` — MODIFIED: the
   `FakeInferenceRunner` answer + the `## Summary` assertions.
-- `ADR-0000` — NEW pending amendment (next free
+- `docs/adr/ADR-0000-ai-decision-register.md` — NEW pending amendment (next free
   `A<n>`).
 
 Re-validated against the live tree: `grep -rn "PrDescription\|\.body\b" --include='*.dart' packages/` finds the field's ONLY consumers at `pr_composition.dart:349` (the render arm, migrated in Step 2) and `pr_composition_test.dart:147` (migrated in Step 5); every other `.body` hit is `pr.opened.single.body` — the PR record's own body, a different symbol, untouched. The `"body":` JSON key appears in exactly three test fixtures (`pr_composition_test.dart:140`, `landing_circuit_test.dart:471`, `pr_describe_test.dart:33`), all three migrated above. `bd dep list pow-8qb` reports NO dependencies and no siblings, so nothing this plan consumes is being added elsewhere; the plan is self-contained.
 
 ## ADR Alignment
 
-Grepped from the worktree root: `ls the ADR directory` → `ADR-0000-ai-decision-register.md`,
+Grepped from the worktree root: `ls docs/adr/` → `ADR-0000-ai-decision-register.md`,
 `ADR-0001-packaged-ai-asset-skill-command-coupling.md`; then
-`grep -li "pull request\|PR title\|describe\|summary\|conventional\|digest" the ADR files`
+`grep -li "pull request\|PR title\|describe\|summary\|conventional\|digest" docs/adr/*.md`
 → `ADR-0000` only.
 
-- `ADR-0000` **A18** (bead `pow-8dx`) — the
+- `docs/adr/ADR-0000-ai-decision-register.md` **A18** (bead `pow-8dx`) — the
   amendment this bead is the named follow-up to. Its Status line closes with:
   "LANDED + PROVEN: the #52/#53/#13 squash titles are clean conventional
   commits. Follow-up: **the human-readable digest (deferred bead)**." This bead
@@ -537,7 +537,7 @@ Grepped from the worktree root: `ls the ADR directory` → `ADR-0000-ai-decision
   - **A18(1)** — the inference reads `origin/<base>...HEAD`, the same three-dot
     range `PinDiffCapability` pins the critics to. Unchanged: the digest is
     another field on the SAME one-shot answer, not a second call.
-- `ADR-0000` **A10(3)** — "the carrier is a
+- `docs/adr/ADR-0000-ai-decision-register.md` **A10(3)** — "the carrier is a
   plain const class, not a freezed value". `PrDescription` and `PrComposition`
   stay plain const classes; the plan adds no freezed union (there is no sum type
   here — one answer shape, one render).
@@ -548,7 +548,7 @@ Grepped from the worktree root: `ls the ADR directory` → `ADR-0000-ai-decision
   knob and NO service in a branch. Everything in `pr_composition.dart` stays PURE
   — the git reads and the inference call remain in `pr_describe.dart` and reach
   the renderers as DATA, so no `dependOn*`/`StateNotifier` surface is touched.
-- `ADR-0001` — does not
+- `docs/adr/ADR-0001-packaged-ai-asset-skill-command-coupling.md` — does not
   apply: the plan ships no skill, command, or manifest section.
 
 ## Validation Plan
@@ -560,4 +560,4 @@ Grepped from the worktree root: `ls the ADR directory` → `ADR-0000-ai-decision
 - [ ] A runaway digest is capped at `kMaxSummaryChars`, and `sanitizeDigest` preserves paragraph breaks → `cd packages/grid_assets && dart test test/pr_composition_test.dart` → `All tests passed!` — tests "a runaway digest is CAPPED" and "sanitizeDigest is pure prose surgery".
 - [ ] `buildDescribePrompt` states the digest contract (2 to 5 sentences, human reader, prose-only) and its exemplar answer object carries a real `summary` → `cd packages/grid_assets && dart test test/pr_composition_test.dart` → `All tests passed!` — test "asks for a 2-5 sentence human digest".
 - [ ] The pack is green end to end — no analyzer issue, no regression in the landing / describe / reference-inflation suites → `cd packages/grid_assets && dart pub get && dart analyze && dart test` → `No issues found!` then `All tests passed!`
-- [ ] The autonomous calls are logged as ONE pending ADR-0000 amendment at the next free ordinal → `grep -c '^## A2' ADR-0000` → one higher than before the edit, and the new amendment's `**Status:**` line reads `pending`.
+- [ ] The autonomous calls are logged as ONE pending ADR-0000 amendment at the next free ordinal → `grep -c '^## A2' docs/adr/ADR-0000-ai-decision-register.md` → one higher than before the edit, and the new amendment's `**Status:**` line reads `pending`.

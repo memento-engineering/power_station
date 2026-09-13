@@ -180,7 +180,7 @@ as `37ef206`).
 
 ### Step 3 — Record the root cause in the AI decision register as A28 (pending)
 
-Append to `ADR-0000`, after the A26 / ratified
+Append to `docs/adr/ADR-0000-ai-decision-register.md`, after the A26 / ratified
 discovery-gate block, exactly this amendment (Status pending — only Nico
 promotes):
 
@@ -199,8 +199,8 @@ promotes):
 **Status:** pending.
 ```
 
-Test: `grep -c '^## A28 (2026-07-21)' ADR-0000`
-→ expect `1`, and `sed -n '/^## A28 /,/^\*\*Status:\*\*/p' ADR-0000 | grep -c 'Status:\*\* pending'` → expect `1`.
+Test: `grep -c '^## A28 (2026-07-21)' docs/adr/ADR-0000-ai-decision-register.md`
+→ expect `1`, and `sed -n '/^## A28 /,/^\*\*Status:\*\*/p' docs/adr/ADR-0000-ai-decision-register.md | grep -c 'Status:\*\* pending'` → expect `1`.
 Commit: `docs(adr): root-cause the acceptance flake to the pour's fs hop` (on the
 branch as `337cd5f`).
 
@@ -246,7 +246,7 @@ Commit: none — this step runs the gate; it writes no files.
   default of 20. No new public symbol.
 - `packages/grid_assets/test/settle_test.dart` — created; no public symbols
   (`main` plus the private `_tempPlanFileRoundTrip`).
-- `ADR-0000` — modified; amendment A28 appended,
+- `docs/adr/ADR-0000-ai-decision-register.md` — modified; amendment A28 appended,
   `**Status:** pending`.
 - bead `pow-d26` notes — the 40-run receipt (bd CLI, no file).
 - NOT touched, deliberately: the three identical private `_settle` fixed-point
@@ -259,20 +259,20 @@ Commit: none — this step runs the gate; it writes no files.
 Re-validated against the live tree: `grep -rn "settle(" packages/grid_assets/test --include='*.dart'` returns call sites in `settle_test.dart`, `station_kernel_test.dart` (5), and the `acceptance/` suites (circuit, discovery, spec_stage, readiness, migration_guard) — all positional-condition calls with at most named `maxPumps`, so the added optional `ioSlice` migrates none of them; `bd dep list pow-d26` reports no dependencies and `bd search settle` returns no other bead, so there is no sibling to carve scope from; the four commits above are present on branch `grid/pow-d26` with a clean `git status`, and `dart test test/settle_test.dart` was observed green (4 tests) while drafting this spec.
 
 ## ADR Alignment
-Verified via `ls the ADR directory` and `grep -li "settle\|flake\|acceptance\|pump\|wait" the ADR files` (keywords: `settle`, `flake`, `acceptance`, `pump`, `wait`, `molecule`) → `ADR-0000-ai-decision-register.md`, `ADR-0001-packaged-ai-asset-skill-command-coupling.md`, `ADR-0002-agent-environment-layer.md`.
+Verified via `ls docs/adr/` and `grep -li "settle\|flake\|acceptance\|pump\|wait" docs/adr/*.md` (keywords: `settle`, `flake`, `acceptance`, `pump`, `wait`, `molecule`) → `ADR-0000-ai-decision-register.md`, `ADR-0001-packaged-ai-asset-skill-command-coupling.md`, `ADR-0002-agent-environment-layer.md`.
 
-- `ADR-0000` A28 (Status: pending) — "the fix is
+- `docs/adr/ADR-0000-ai-decision-register.md` A28 (Status: pending) — "the fix is
   homed HERE (power_station's test harness), not upstream." This spec IS A28's
   implementation: Steps 1-2 are the `settle` change and its contract test, Step 3
   is the amendment itself. Nothing here overrides a recorded decision.
-- `ADR-0000` A28, on the wait doctrine it
+- `docs/adr/ADR-0000-ai-decision-register.md` A28, on the wait doctrine it
   extends — "it EXTENDS rather than reverses A27(7)(b)'s observable-targeted
   waits — the targets stay, and the wait underneath them can now actually reach
   them." The plan changes only the wait primitive; every acceptance-suite
-  observable target is left exactly as written. (`grep -n "^## A27" ADR-0000`
+  observable target is left exactly as written. (`grep -n "^## A27" docs/adr/ADR-0000-ai-decision-register.md`
   returns nothing — no `A27` heading survives in the current register, so A28's
   paraphrase is the citable record of that clause.)
-- `ADR-0000`, RATIFIED entry of 2026-07-14
+- `docs/adr/ADR-0000-ai-decision-register.md`, RATIFIED entry of 2026-07-14
   (Nico) — "a **PENDING** ADR-0000 amendment is **ADVISORY ONLY** … NEVER grounds
   for a discovery HOLD." A28 is cited here as advisory context and is filed
   `**Status:** pending`; this spec does not promote it and does not treat it as
@@ -280,11 +280,11 @@ Verified via `ls the ADR directory` and `grep -li "settle\|flake\|acceptance\|pu
 - Repo `CLAUDE.md` house set (genesis ADR-0001 D7) — "**Fakes, not mocks**; pure
   logic tested before IO is wired." Step 2's test uses the pack's existing fakes
   plus a real `dart:io` probe; no mock framework is added.
-- `ADR-0008` (the D-H genesis_tree doctrine, cited by repo `CLAUDE.md`)
+- `docs/adr/ADR-0008` (the D-H genesis_tree doctrine, cited by repo `CLAUDE.md`)
   does not apply: this bead touches only `test/` support code and the register —
   no `build`, no `InheritedSeed`, no `StateNotifier`, no `lib/` file is modified
   (see `## Touches`).
-- `ADR-0001` (skill/command coupling) and `ADR-0002` (agent
+- `docs/adr/ADR-0001` (skill/command coupling) and `docs/adr/ADR-0002` (agent
   environment layer) matched the keyword grep but govern packaged-asset shape and
   the model/environment layer — neither surface is touched by a test-harness wait.
 
@@ -294,5 +294,5 @@ Verified via `ls the ADR directory` and `grep -li "settle\|flake\|acceptance\|pu
 - [ ] `settle` evaluates its condition EXACTLY ONCE per round (1 check satisfied; 3 checks at `maxPumps: 3`) → `cd packages/grid_assets && dart test test/settle_test.dart` → `All tests passed!` (tests `an ALREADY-satisfied condition costs exactly one check` and `an unsatisfied condition is checked ONCE per bounded round`)
 - [ ] a pending REAL filesystem round trip lands inside `settle`'s budget → `cd packages/grid_assets && dart test test/settle_test.dart` → `All tests passed!` (test `a pending REAL filesystem round trip lands inside the budget`)
 - [ ] the full offline `grid_assets` suite passes and `dart analyze` is clean → `cd packages/grid_assets && dart analyze && dart test -j1 -x integration` → `No issues found!` then `All tests passed!`
-- [ ] `ADR-0000` carries A28 with `**Status:** pending` → `grep -c '^## A28 (2026-07-21)' ADR-0000 && sed -n '/^## A28 /,/^\*\*Status:\*\*/p' ADR-0000 | grep -c 'Status:\*\* pending'` → `1` then `1`
+- [ ] `ADR-0000` carries A28 with `**Status:** pending` → `grep -c '^## A28 (2026-07-21)' docs/adr/ADR-0000-ai-decision-register.md && sed -n '/^## A28 /,/^\*\*Status:\*\*/p' docs/adr/ADR-0000-ai-decision-register.md | grep -c 'Status:\*\* pending'` → `1` then `1`
 - [ ] the bead's notes carry the 40-run receipt → `bd show pow-d26 | grep -q '0/40 after'; echo $?` → `0`

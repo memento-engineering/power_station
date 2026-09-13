@@ -252,7 +252,7 @@ rules on the collision explicitly: "Read the existing entry and cite it when it
 is the same decision. Choose a different slug only when the new decision is
 substantively different." Round 2 refines the same mechanism, so the entry is
 amended in place — no second entry, no new slug, and legacy
-`ADR-0000` stays untouched.
+`docs/adr/ADR-0000-ai-decision-register.md` stays untouched.
 
 Make exactly three edits to that file.
 
@@ -312,7 +312,7 @@ whole run to the same base-gated bucket, so `pow-qev`'s fail-closed posture and
 `track_c_declared_tests_test.dart`.
 ```
 
-Test: `grep -q '_testPathListGap' docs/decisions/2026-09-03-declared-tests-evidence-is-scoped-to-the-path-it-governs.md && git diff --stat origin/main...HEAD -- ADR-0000`
+Test: `grep -q '_testPathListGap' docs/decisions/2026-09-03-declared-tests-evidence-is-scoped-to-the-path-it-governs.md && git diff --stat origin/main...HEAD -- docs/adr/ADR-0000-ai-decision-register.md`
 → exit 0 with EMPTY diffstat output.
 Commit: `docs(decisions): record the run rule for shared declared-test verbs`
 
@@ -402,7 +402,7 @@ before this spec was written.
 Verified via grep on `declared`, `committee`, `rubric`, `fail-closed`,
 `evidence`, then narrowed on `declared-tests`, `pow-0jc`, `pow-aoa`, `pow-qev`,
 run as
-`for register in the ADR directory docs/decisions; do [ ! -d "$register" ] || find "$register" -type f -not -path '*/views/*' -name '*.md' -exec grep -li ... {} +; done`
+`for register in docs/adr docs/decisions; do [ ! -d "$register" ] || find "$register" -type f -not -path '*/views/*' -name '*.md' -exec grep -li ... {} +; done`
 from the worktree root.
 
 - `power_station#declared-tests-evidence-is-scoped-to-the-path-it-governs`
@@ -429,7 +429,7 @@ from the worktree root.
   pinned. Guards LOUD or GONE: the rewritten `_evidenceWindow` seeds its own span
   into `spans` precisely so there is no silent "marker not found" fallback — the
   only early return is the pre-existing `markerAt < 0` contract.
-- `ADR-0005` D2 — "The default
+- `docs/adr/ADR-0005-landing-policy-grade-gated-auto-merge.md` D2 — "The default
   auto-merge policy enables GitHub native auto-merge only when the round's
   code-validation receipt has rc 0 and no committee grade is below B." This round
   RESTORES gate power rather than relaxing it: the regression made a real
@@ -437,7 +437,7 @@ from the worktree root.
   `pow-26dd r2 one verb authors an and-joined pair` case asserts the gate still
   answers `F` with the missing path named. `kDeclaredTestsRubric` remains in
   `kCodeGatingRubrics` (`committee.dart:119`) and an `F` still hard-blocks.
-- `ADR-0004` D3 —
+- `docs/adr/ADR-0004-station-throughput-outranks-staging-ceremony.md` D3 —
   "when compliance would halt the station and the correct action lies outside a
   ratified decision, the governor TAKES the action, records it ... and moves on."
   This round is that shape and records the action; D3's sentence names ADR-0000
@@ -471,5 +471,5 @@ from the worktree root.
 - [ ] The three round-1 receipts still classify as pinned and grade `A` → `cd packages/grid_assets && dart test test/track_c_declared_tests_test.dart --name "tg-5kb|space-fvg|tg-czsf"` → `+3: All tests passed!`
 - [ ] An AMBIGUOUS base suffix stays declared and an EMPTY base declares every base-gated path → `cd packages/grid_assets && dart test test/track_c_declared_tests_test.dart --name "ambiguous base suffix"` → `+1: All tests passed!`
 - [ ] Every pre-existing case in the suite still passes, 33 + 5 → `cd packages/grid_assets && dart test test/track_c_declared_tests_test.dart` → `+38: All tests passed!`
-- [ ] The recorded decision states the RUN rule and legacy ADR-0000 is untouched → `grep -q '_testPathListGap' docs/decisions/2026-09-03-declared-tests-evidence-is-scoped-to-the-path-it-governs.md && git diff --stat origin/main...HEAD -- ADR-0000` → exit 0 with EMPTY diffstat output
+- [ ] The recorded decision states the RUN rule and legacy ADR-0000 is untouched → `grep -q '_testPathListGap' docs/decisions/2026-09-03-declared-tests-evidence-is-scoped-to-the-path-it-governs.md && git diff --stat origin/main...HEAD -- docs/adr/ADR-0000-ai-decision-register.md` → exit 0 with EMPTY diffstat output
 - [ ] House gate green → `cd packages/grid_assets && dart analyze && dart test -j 4` → `No issues found!` then `+1114 ~1: All tests passed!`, exit 0

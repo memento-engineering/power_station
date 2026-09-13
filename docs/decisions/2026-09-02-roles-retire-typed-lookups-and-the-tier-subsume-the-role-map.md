@@ -19,7 +19,7 @@ register:
 ## Roles retire (2026-09-02) — bead `pow-n6n.4`: the typed lookup takes the ENVIRONMENT half of `AgentRole` and the declared `AgentTier` takes the MODEL half; nothing replaces the role itself
 
 **Decision (AI; MECHANISM only).** The POLICY is
-`ADR-0006` D5 (Nico, ratified
+`docs/adr/ADR-0006-typed-environment-lookup-selects-by-value.md` D5 (Nico, ratified
 2026-09-02): "Roles retire: AgentRole / AgentConfig.roleEnvironments
 (agent_harness.dart) and the role rung in resolveAgentConfig (agent_domain.dart) are
 subsumed by the typed lookups; pow-t1w's architect role folds into
@@ -42,7 +42,7 @@ arming and its banner to space_station's companion bead (`space-rz6`). (4)
 not deleted — it is a label-agnostic `Map<String, String>` carrying the ratified
 `pow-a9o` boot guard (a non-claude environment pinning a claude-native model), which is
 live and tested; only the role VOCABULARY retires, and its refusals now read
-`arming "<label>"`. (5) NO DEPRECATIONS (`ADR-0002`
+`arming "<label>"`. (5) NO DEPRECATIONS (`docs/adr/ADR-0002-agent-environment-layer.md`
 D4: "delete and undocument. until we go public, no deprecations") — no shim, no
 re-export, no deprecated alias, and the doc comments that named the retired symbols are
 rewritten rather than left dangling (an in-suite fence in

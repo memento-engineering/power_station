@@ -334,7 +334,7 @@ its fourth paragraph. Replace that sentence in
 // settles the event queue to let the scheduled flush run.
 ```
 
-The historical citations of `station_kernel_test.dart` in `ADR-0000`
+The historical citations of `station_kernel_test.dart` in `docs/adr/ADR-0000`
 and under `docs/decisions/` are RECORDS of what was true when written — leave
 every one of them untouched.
 
@@ -441,9 +441,9 @@ Re-validated against the live tree: `grep -rn StationKernel packages` finds 45 h
 ## ADR Alignment
 
 Verified via grep on `StationKernel`, `runGrid`, `flush`, `prerelease`,
-`pre-release` over `the ADR directory` and `docs/decisions`; the hits were
-`ADR-0003`,
-`ADR-0000`,
+`pre-release` over `docs/adr` and `docs/decisions`; the hits were
+`docs/adr/ADR-0003-private-git-tag-releases-and-prerelease-gate.md`,
+`docs/adr/ADR-0000-ai-decision-register.md`,
 `docs/decisions/2026-07-15-adr-0003-private-git-tag-releases-and-prerelease-gate.md`,
 `docs/decisions/2026-07-21-a28-bead-pow-d26-the-acceptance-suite-flake-is-the-molecule.md`
 and `docs/decisions/2026-07-11-a11-bead-pow-ovh-the-search-domain-roster-resolution-is-an-o.md`.
@@ -456,7 +456,7 @@ and `docs/decisions/2026-07-11-a11-bead-pow-ovh-the-search-domain-roster-resolut
   `afterFlush` on the `onFlushed` rail, which is the same wiring
   `grid_cli`'s `defaultRunMountedGrid` uses in production.
 - **`power_station#adr-0003-private-git-tag-releases-and-prerelease-gate` D3**
-  (legacy id `ADR-0003-…` D3; D3/D4 stand, D1/D2 superseded
+  (legacy id `docs/adr/ADR-0003-…` D3; D3/D4 stand, D1/D2 superseded
   2026-08-05) — *"Every downstream consumer resolves against the rc and runs
   `dart analyze && dart test`."* This bead IS power_station's D3 leg for the
   engine rc.11 / sdk rc.9 wave: Step 1 pins the floors, Step 9 runs the analyze
@@ -476,7 +476,7 @@ and `docs/decisions/2026-07-11-a11-bead-pow-ovh-the-search-domain-roster-resolut
   D-H rule 2 (*"no public synchronous accessor over `StateNotifier` state"*)
   is honoured by construction — the delegate is held by `runGrid`, never
   provided ambiently, and `MountedStation` exposes no `.state`.
-- **`ADR-0000` is READ-ONLY LEGACY.** The
+- **`docs/adr/ADR-0000-ai-decision-register.md` is READ-ONLY LEGACY.** The
   design's own call is recorded in Step 8 as a new `docs/decisions/` entry
   through the vended `decide` skill, never as an `A<n>` amendment.
 

@@ -447,7 +447,7 @@ Re-validated against the live tree: `grep -rn "_truncate\|landReasonTail\|revali
 ## ADR Alignment
 
 Verified via grep on `revalidate`, `landReasonTail`, `truncat`, `escalate`,
-`failureReason` over both registers (`the ADR directory` and `docs/decisions/`, excluding
+`failureReason` over both registers (`docs/adr/` and `docs/decisions/`, excluding
 `views/`). Two recorded decisions are load-bearing here; both are ALIGNED WITH, and
 neither is overridden.
 
@@ -475,7 +475,7 @@ neither is overridden.
 A `docs/decisions/` entry is RECORDED for the decision this design MAKES (the
 tail-first, advice-stripped, exit-code-led shape for captured process output) —
 Step 6, slug `captured-process-output-escalates-tail-first`. Nothing is appended to
-`ADR-0000`, which is read-only legacy.
+`docs/adr/ADR-0000-ai-decision-register.md`, which is read-only legacy.
 
 Org invariants checked: the seam word "extension" does not appear in this change (no
 seam is added); the new public symbols `planOutputWithoutPubAdvice` and

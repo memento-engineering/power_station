@@ -87,7 +87,7 @@ human runs the approve verb."* This entry UPDATES that clause and narrows it:
 the sole-writer half is preserved exactly, and the human-only half now admits
 one further authority — the seat's own workflow identity, under a declared rule.
 Human issue and pull intake is untouched and still files OPEN and unstamped.
-`ADR-0004` D1 supplies the posture this depends on — readiness is a
+`docs/adr/ADR-0004` D1 supplies the posture this depends on — readiness is a
 property of the bead's FIELDS, and *"approval ceremony must never be the reason
 a station sits idle"* — while the filing preflight remains the ceremony that
 cannot be skipped.

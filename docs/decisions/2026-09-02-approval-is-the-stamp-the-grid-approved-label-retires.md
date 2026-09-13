@@ -49,7 +49,7 @@ other, no third completeness predicate minted) — is untouched and still binds.
 The filing preflight is not modified by this bead, and `intakeFindings` in
 `lib/src/code/readiness.dart` remains the distinct intake gate.
 
-**Alignment.** `ADR-0004`
+**Alignment.** `docs/adr/ADR-0004-station-throughput-outranks-staging-ceremony.md`
 D1: *"Readiness is a property of the bead's FIELDS — which is what the
 mount-eligibility predicate exists to compute."* The stamp is such a field, and
 the predicate still computes readiness from fields alone. D2: *"Approval

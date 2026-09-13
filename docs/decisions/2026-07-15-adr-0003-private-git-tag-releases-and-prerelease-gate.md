@@ -86,7 +86,7 @@ human-ratified decision. Because a decision reached collaboratively with Nico is
 human-ratified, none of it is minted as an ADR-0000 pending amendment (the register rule — do
 not log a collaboratively-reached decision).
 
-**Executes:** genesis `ADR-0001` **Decision 8** ("path deps now, git
+**Executes:** genesis `docs/adr/ADR-0001-foundations.md` **Decision 8** ("path deps now, git
 pin at launch — switching to git refs/tags at stabilization"). ADR-0001 D8 ratified the *arc*;
 this ADR ratifies that **we have reached stabilization** and specifies the *mechanism* and the
 *process*.

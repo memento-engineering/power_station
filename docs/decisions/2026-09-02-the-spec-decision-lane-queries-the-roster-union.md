@@ -23,7 +23,7 @@ register:
 ## Context and Problem Statement
 
 The spec committee's decision lane read only the CURRENT repository's register.
-Its lookup was a shell loop — `for register in <the ADR directory> docs/decisions; do …
+Its lookup was a shell loop — `for register in docs/adr docs/decisions; do …
 find … -exec grep -li …` — rooted at the worktree, so a decision recorded in a
 SIBLING substation's register was structurally unreachable while grading. The
 discovery decision lens and the cheap intake lens read the same local-only
@@ -35,7 +35,8 @@ build — while directly contradicting
 `the_grid#a50-the-dev-mode-reload-tool-extending-adr-0001-d6-s-tool-en`: "**The
 trigger is explicit only** — an in-process filesystem watcher (an auto-reload-
 on-save would fire mid-build on a resident `--land` station) and a bare OS
-signal (un-introspectable) were both rejected." That substation keeps no local ADR directory at all, so no local grep could ever have surfaced the contradiction.
+signal (un-introspectable) were both rejected." That substation keeps no
+`docs/adr` at all, so no local grep could ever have surfaced the contradiction.
 The lane graded a spec internally coherent and correctly decided, against a
 register it could not see. Decisions span repositories; the lens was repo-local.
 
@@ -50,7 +51,7 @@ The `adr-alignment` lane is replaced on the LIVE spec path by
 `decision-alignment`, whose lookup is the composing station's roster-mode
 `decisions index --surface <repo>/<path>`, run once per unique roster-qualified
 path in the spec's own `## Touches` section. This UPDATES A13(4), which mapped
-`adr-alignment` over the substation's local ADR register with ADR-0000 `A<n>`
+`adr-alignment` over the substation `docs/adr/` register with ADR-0000 `A<n>`
 amendments binding; A13 remains in force for everything else it decided (the
 deterministic gating lane, the `SpecCriticCapability` subclass, the transport
 stack).

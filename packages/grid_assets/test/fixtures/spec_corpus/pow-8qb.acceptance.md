@@ -5,4 +5,4 @@
 - [ ] A runaway digest is capped at `kMaxSummaryChars`; `sanitizeDigest` preserves paragraph breaks and returns '' for ''.
 - [ ] `buildDescribePrompt` states the digest contract — 2 to 5 complete sentences, written for a reviewer who never opens the diff, prose only (no heading, no bullets, no fence) — and its exemplar answer object carries a real `summary` value.
 - [ ] The pack is green end to end: `dart analyze` clean and the full `grid_assets` suite passes (landing, describe, composition, reference-inflation).
-- [ ] The autonomous calls are logged as ONE new pending amendment in `ADR-0000`.
+- [ ] The autonomous calls are logged as ONE new pending amendment in `docs/adr/ADR-0000-ai-decision-register.md`.
