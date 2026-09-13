@@ -17,8 +17,17 @@ import 'resident_feedback_command.dart';
 /// reads back, so a re-drive would mint a SECOND round for one CI failure.
 const String kCiFeedbackDeliveryLeg = 'ci-feedback';
 
-/// The flare name carried by a check this leg declined to act on.
+/// The flare name carried by an observation this leg declined to act on.
 const String kCiFeedbackIgnoredFlare = 'reconciler.ciFeedbackIgnored';
+
+/// The flare name carried by an open pull request this leg could not attribute
+/// to a bead.
+///
+/// The DEGRADED event, never a dropped one. Silence about an open pull request
+/// is the defect this leg exists to remove: a pull nobody can attribute still
+/// reaches the reporter, weaker — it names no bead and mutates nothing — so a
+/// human can see it rather than discover it after `main` moved underneath it.
+const String kCiFeedbackUnattributedFlare = 'reconciler.ciFeedbackUnattributed';
 
 /// Reports one CI-feedback outcome the leg declined to act on.
 ///
@@ -35,7 +44,15 @@ typedef CiFeedbackReporter =
       StackTrace stackTrace,
     );
 
-/// Projects normalized check results into the durable bead/control rails.
+/// Projects normalized pull-request feedback into the durable bead/control
+/// rails.
+///
+/// ATTRIBUTION IS STATED, NEVER INFERRED. The leg used to parse `grid/<bead>`
+/// out of a head ref, which is branch-name-as-database: it worked only for a
+/// branch the station itself minted, so a pull request a seat opened reached no
+/// projection at all. It now reads exactly one EXPLICIT reference — a `Refs:`
+/// trailer in the pull body, else exactly one bead whose external ref is
+/// `gh-<number>` — and no branch value participates in any decision here.
 final class CiFeedbackProjection {
   CiFeedbackProjection({
     required this.bd,
@@ -88,22 +105,69 @@ final class CiFeedbackProjection {
       // union keeps that disjointness a COMPILE error to break.
       case IssueCommented() || WatchedIssueStateChanged():
         return;
-      case PullRequestFeedback():
-        return;
+      // The LEGACY per-check envelope. Nothing emits it any more, but a cursor
+      // written before the feedback poll changed shape can still REPLAY one,
+      // and it carries neither approved reference — only a head branch, which
+      // is exactly what stopped being an attribution. It is reported and
+      // acknowledged rather than acted on.
       case CheckConcluded():
-        await _projectCheck(event);
+        _flare(
+          kCiFeedbackIgnoredFlare,
+          'ignored a legacy check envelope on ${event.headBranch}',
+          'a checkConcluded observation states no pull-request reference',
+        );
+        return;
+      case PullRequestFeedback():
+        await _projectPullFeedback(event);
     }
   }
 
-  Future<void> _projectCheck(CheckConcluded event) async {
-    if (!event.headBranch.startsWith('grid/')) return;
-    final beadId = event.headBranch.substring('grid/'.length).trim();
-    if (beadId.isEmpty) return;
-    // ONE type-scoped read per projected check, widened past bd's open-only
-    // default so a closed session still counts. The filtering happens HERE, in
-    // Dart, and never as a `work_bead` metadata equality the store would apply:
-    // the rework ledger `maxReworkRound` counts is the RETIRED `<bead>#r<N>`
-    // keys, and an exact match would drop exactly those.
+  /// The bead [event] is attributed to, or null once it has been REPORTED.
+  ///
+  /// One `Refs:` trailer wins outright and costs no read. With no trailer the
+  /// pull's own number is looked up as bd's existing `gh-<number>` external
+  /// ref. Anything ambiguous — two distinct trailers, or zero/many beads
+  /// carrying the ref — is an event with no subject, so it degrades to
+  /// [kCiFeedbackUnattributedFlare] and mutates nothing.
+  Future<String?> _attribute(PullRequestFeedback event) async {
+    final references = pullRequestBodyBeadReferences(event.body);
+    if (references.length > 1) {
+      _unattributed(
+        event,
+        'its body states ${references.length} distinct Refs: trailers '
+        '(${references.join(', ')})',
+      );
+      return null;
+    }
+    if (references.length == 1) return references.single;
+    final externalRef = 'gh-${event.number}';
+    final matched = await _store.listScope(
+      externalRef: externalRef,
+      includeClosed: true,
+    );
+    final ids = <String>[
+      for (final bead in matched.beads)
+        if (bead.id.trim().isNotEmpty) bead.id.trim(),
+    ];
+    if (ids.length != 1) {
+      _unattributed(
+        event,
+        'its body states no Refs: trailer and ${ids.length} beads carry '
+        'external ref $externalRef',
+      );
+      return null;
+    }
+    return ids.single;
+  }
+
+  Future<void> _projectPullFeedback(PullRequestFeedback event) async {
+    final beadId = await _attribute(event);
+    if (beadId == null) return;
+    // ONE type-scoped read per projected observation, widened past bd's
+    // open-only default so a closed session still counts. The filtering happens
+    // HERE, in Dart, and never as a `work_bead` metadata equality the store
+    // would apply: the rework ledger `maxReworkRound` counts is the RETIRED
+    // `<bead>#r<N>` keys, and an exact match would drop exactly those.
     final sessions = await _store.listScope(
       type: GridIssueTypes.session,
       includeClosed: true,
@@ -128,8 +192,19 @@ final class CiFeedbackProjection {
       _ignore(beadId, 'its current session carries no id');
       return;
     }
-    final decision = decideCiFeedback(event, sessionId, workBeadKeys);
-    if (decision == null || decision.action == CiFeedbackAction.ignore) return;
+    final decision = decideCiFeedback(
+      beadId: beadId,
+      sessionId: sessionId,
+      workBeadKeys: workBeadKeys,
+      // The HEAD and its state, never the observation id: a pull's
+      // `updated_at` moves on every comment, and keying the rework ledger off
+      // that would mint a second round for one unchanged red. It also makes the
+      // stall crossing a no-op here — same head, same state, same key — which
+      // is exactly the "observation only" the bound promises.
+      feedbackIdentity: '${event.headSha}:${event.checkState.name}',
+      checkState: event.checkState,
+    );
+    if (decision.action == CiFeedbackAction.ignore) return;
     if (!_handled.add(decision.idempotencyKey)) return;
     try {
       switch (decision.action) {
@@ -146,8 +221,8 @@ final class CiFeedbackProjection {
             gridRoot: gridRoot,
             beadId: decision.beadId,
             note:
-                'CI check ${event.checkName} (${event.observationId}) '
-                'concluded ${event.conclusion}.',
+                'Pull request #${event.number} on ${event.headBranch} '
+                '(${event.headSha}) is failing its checks.',
             idempotencyKey: decision.idempotencyKey,
           );
           switch (result) {
@@ -168,22 +243,31 @@ final class CiFeedbackProjection {
     }
   }
 
-  /// Flares that [beadId]'s check was ignored for [reason], and returns.
+  /// Flares that [beadId]'s feedback was ignored for [reason], and returns.
   ///
   /// A session count of zero or of two is a shape the state store LEGITIMATELY
-  /// holds — a check arriving after its PR landed and its session closed and
+  /// holds — feedback arriving after its PR landed and its session closed and
   /// re-keyed is the ordinary case — so it can never be a throw. Throwing here
   /// wedged the reconciler permanently: the leg never acknowledged, the cycle
   /// aborted before the poll, and the seat re-drove that one observation
   /// forever while every newer issue, pull and check went unobserved.
-  void _ignore(String beadId, String reason) {
-    _reporter?.call(
-      kCiFeedbackIgnoredFlare,
-      'ignored a check for $beadId',
-      StateError('CI feedback ignored for $beadId: $reason'),
-      StackTrace.current,
-    );
-  }
+  void _ignore(String beadId, String reason) => _flare(
+    kCiFeedbackIgnoredFlare,
+    'ignored feedback for $beadId',
+    'CI feedback ignored for $beadId: $reason',
+  );
+
+  /// Flares that [event] names no bead, for [reason], and returns.
+  void _unattributed(PullRequestFeedback event, String reason) => _flare(
+    kCiFeedbackUnattributedFlare,
+    'reported an unattributed pull request #${event.number}',
+    'pull request #${event.number} on ${event.repository} could not be '
+        'attributed: $reason',
+  );
+
+  /// Reports [message] under [flareName] on the bound rail, if there is one.
+  void _flare(String flareName, String action, String message) => _reporter
+      ?.call(flareName, action, StateError(message), StackTrace.current);
 
   Future<void> _markLandingReady(CiFeedbackDecision decision) async {
     final result = await bd.run([
@@ -201,7 +285,7 @@ final class CiFeedbackProjection {
 
   Future<void> createCapGate(
     CiFeedbackDecision decision,
-    CheckConcluded event,
+    PullRequestFeedback event,
   ) async {
     final result = await bd.run([
       'create',
@@ -220,8 +304,8 @@ final class CiFeedbackProjection {
         'node': '${decision.beadId}/ci-feedback',
         'reason':
             'CI rework cap reached after ${decision.round} retired rounds; '
-            'check ${event.checkName} (${event.observationId}) requires '
-            'adjudication.',
+            'pull request #${event.number} (${event.headSha}) is '
+            '${event.checkState.name} and requires adjudication.',
       }),
     ]);
     if (result.ok || _alreadyExists(result, decision.beadId)) return;

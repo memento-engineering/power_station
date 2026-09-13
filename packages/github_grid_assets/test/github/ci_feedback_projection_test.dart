@@ -12,10 +12,13 @@ const String kProxiedExportRefusal =
     'Error: export is not supported in proxied-server mode';
 
 final class FakeBdRunner implements BdRunner {
-  FakeBdRunner(this.sessions);
+  FakeBdRunner(this.sessions, {this.externalRefMatches = const <String>[]});
 
   /// The enveloped payload `bd list -t session --all --json` answers with.
   String sessions;
+
+  /// The bead ids `bd list --external-ref gh-<n> --all --json` answers with.
+  List<String> externalRefMatches;
   final calls = <List<String>>[];
   final results = <BdResult>[];
 
@@ -34,6 +37,19 @@ final class FakeBdRunner implements BdRunner {
       );
     }
     if (args.first == 'list') {
+      if (args.contains('--external-ref')) {
+        return BdResult(
+          exitCode: 0,
+          stdout: jsonEncode(<String, Object?>{
+            'schema_version': 1,
+            'data': <Object?>[
+              for (final id in externalRefMatches)
+                <String, Object?>{'id': id, 'issue_type': 'task'},
+            ],
+          }),
+          stderr: '',
+        );
+      }
       return BdResult(exitCode: 0, stdout: sessions, stderr: '');
     }
     return results.isEmpty
@@ -77,17 +93,34 @@ final class RecordingReporter {
   ) => flares.add((name: name, action: action, error: error));
 }
 
-NormalizedGitHubEvent event(String conclusion, {String branch = 'grid/tg-1'}) =>
-    NormalizedGitHubEvent.checkConcluded(
-      nodeId: 'n',
-      actor: 'a',
-      repository: 'o/r',
-      substation: 'power',
-      observationId: 'obs',
-      headBranch: branch,
-      checkName: 'build',
-      conclusion: conclusion,
-    );
+/// One open-pull feedback observation. [body] is the PRIMARY attribution and
+/// [branch] is deliberately free: no decision may depend on it.
+NormalizedGitHubEvent event(
+  PullRequestCheckState checkState, {
+  String branch = 'org/lockfile-convention',
+  String body = 'A human digest.\n\nRefs: tg-1\n',
+  int number = 8,
+  String headSha = 'abc123',
+  bool stalled = false,
+  DateTime? greenSince,
+}) => NormalizedGitHubEvent.pullRequestFeedback(
+  nodeId: 'PR_8',
+  actor: 'nico',
+  repository: 'o/r',
+  substation: 'power',
+  observationId: 'poll:pull-feedback:PR_8:$headSha:${checkState.name}',
+  number: number,
+  body: body,
+  headBranch: branch,
+  headSha: headSha,
+  checkState: checkState,
+  mergeability: PullRequestMergeability.mergeable,
+  openedAt: DateTime.utc(2026, 9, 12, 8),
+  updatedAt: DateTime.utc(2026, 9, 12, 9),
+  greenSince: greenSince,
+  observedAt: DateTime.utc(2026, 9, 12, 10),
+  stalled: stalled,
+);
 
 /// One session row per key, in the version-1 `{schema_version, data}` envelope
 /// `bd list --json` returns. [ids] overrides the generated session ids.
@@ -149,11 +182,20 @@ void main() {
     expect(sender.calls, isEmpty);
   });
 
-  test('one type-scoped session read replaces the export', () async {
-    final bd = FakeBdRunner(ledger(['tg-1']));
-    await projection(bd, FakeSender())(event('failure'));
-
-    expect(bd.calls.first, <String>[
+  test('explicit pull references never depend on branch names', () async {
+    // AC-2, both halves. A pull whose branch contains no bead id at all is
+    // attributed from its ONE `Refs:` trailer, with no correlation read; a pull
+    // with no trailer falls back to the ONE bead carrying `gh-<number>`.
+    final trailered = FakeBdRunner(ledger(['tg-1']));
+    await projection(trailered, FakeSender())(
+      event(PullRequestCheckState.green),
+    );
+    expect(
+      trailered.calls.map((call) => call.join(' ')),
+      isNot(contains(contains('--external-ref'))),
+      reason: 'a stated trailer costs no correlation read',
+    );
+    expect(trailered.calls.first, <String>[
       'list',
       '-t',
       'session',
@@ -162,49 +204,217 @@ void main() {
       '--limit',
       '0',
     ]);
-    expect(
-      bd.calls.where((call) => call.first == 'list'),
-      hasLength(1),
-      reason: 'exactly ONE read per projected check',
+    expect(trailered.calls.last, <String>[
+      'update',
+      'tg-1',
+      '--actor',
+      'github-feedback',
+      '--set-metadata',
+      'grid.landing_ready=true',
+    ]);
+
+    final referenced = FakeBdRunner(
+      ledger(['tg-1']),
+      externalRefMatches: <String>['tg-1'],
     );
+    await projection(referenced, FakeSender())(
+      event(PullRequestCheckState.green, body: 'No trailer here.', number: 8),
+    );
+    expect(referenced.calls.first, <String>[
+      'list',
+      '--all',
+      '--external-ref',
+      'gh-8',
+      '--json',
+      '--limit',
+      '0',
+    ]);
+    expect(referenced.calls.last.take(2), <String>['update', 'tg-1']);
+
+    // And the branch itself is inert: `grid/tg-2` cannot override the trailer.
+    final misleading = FakeBdRunner(ledger(['tg-1']));
+    await projection(misleading, FakeSender())(
+      event(PullRequestCheckState.green, branch: 'grid/tg-2'),
+    );
+    expect(misleading.calls.last.take(2), <String>['update', 'tg-1']);
+  });
+
+  test('unattributed pull feedback flares without effects', () async {
+    // AC-3: reported, never dropped, and it mutates nothing.
+    for (final shape
+        in <
+          ({
+            String name,
+            FakeBdRunner bd,
+            NormalizedGitHubEvent event,
+            String reason,
+          })
+        >[
+          (
+            name: 'two distinct trailers',
+            bd: FakeBdRunner(ledger(['tg-1'])),
+            event: event(
+              PullRequestCheckState.green,
+              body: 'Refs: tg-1\nRefs: tg-2\n',
+            ),
+            reason: '2 distinct Refs:',
+          ),
+          (
+            name: 'no trailer and no external ref',
+            bd: FakeBdRunner(ledger(['tg-1'])),
+            event: event(PullRequestCheckState.green, body: 'No trailer.'),
+            reason: '0 beads carry external ref gh-8',
+          ),
+          (
+            name: 'no trailer and two external refs',
+            bd: FakeBdRunner(
+              ledger(['tg-1']),
+              externalRefMatches: <String>['tg-1', 'tg-2'],
+            ),
+            event: event(PullRequestCheckState.green, body: 'No trailer.'),
+            reason: '2 beads carry external ref gh-8',
+          ),
+        ]) {
+      final sender = FakeSender();
+      final reporter = RecordingReporter();
+      final subject = projection(shape.bd, sender)
+        ..bindReporter(reporter.report);
+
+      await subject(shape.event);
+
+      expect(sender.calls, isEmpty, reason: shape.name);
+      expect(
+        shape.bd.calls.map((call) => call.first),
+        everyElement('list'),
+        reason: '${shape.name} mutates nothing',
+      );
+      expect(reporter.flares, hasLength(1), reason: shape.name);
+      expect(reporter.flares.single.name, kCiFeedbackUnattributedFlare);
+      expect(reporter.flares.single.action, contains('#8'));
+      expect('${reporter.flares.single.error}', contains(shape.reason));
+    }
+  });
+
+  test('explicit grid pull feedback preserves actions', () async {
+    // AC-6: a `grid/` pull carrying its trailer keeps the green-to-landing and
+    // failing-to-rework-or-cap behavior EXACTLY — attribution just comes from
+    // the trailer now rather than from the branch it happens to share.
+    const branch = 'grid/tg-1';
+    final green = FakeBdRunner(ledger(['tg-1', 'tg-1#r1']));
+    await projection(green, FakeSender())(
+      event(PullRequestCheckState.green, branch: branch),
+    );
+    expect(green.calls.last, <String>[
+      'update',
+      'tg-1',
+      '--actor',
+      'github-feedback',
+      '--set-metadata',
+      'grid.landing_ready=true',
+    ]);
+
+    final failing = FakeBdRunner(ledger(['tg-1', 'tg-1#r1']));
+    final sender = FakeSender();
+    await projection(failing, sender)(
+      event(PullRequestCheckState.failing, branch: branch),
+    );
+    expect(sender.calls.single['beadId'], 'tg-1');
     expect(
-      bd.calls.map((call) => call.first),
-      isNot(contains('export')),
-      reason: 'a proxied-server store refuses export outright',
+      sender.calls.single['idempotencyKey'],
+      'github-ci:tg-1:r1:abc123:failing',
+    );
+    expect(sender.calls.single['note'], contains('#8'));
+    expect(sender.calls.single['note'], contains('abc123'));
+
+    // The RETIRED rework keys still count toward the cap: an exact `work_bead`
+    // match would drop exactly them and rework forever instead of gating.
+    final capped = FakeBdRunner(
+      ledger(['tg-1', 'tg-1#r1', 'tg-1#r2', 'tg-1#r3']),
+    );
+    final capSender = FakeSender();
+    await projection(capped, capSender)(
+      event(PullRequestCheckState.failing, branch: branch),
+    );
+    expect(capSender.calls, isEmpty);
+    expect(
+      capped.calls.firstWhere((call) => call.first == 'create'),
+      containsAllInOrder(<String>[
+        '--id',
+        'tg-1-ci-rework-cap',
+        '--title',
+        'CI rework cap reached for tg-1',
+        '--type',
+        'gate',
+      ]),
     );
   });
 
-  test('idempotency follows bead round and check identity', () async {
+  test('no fact to act on performs no read past attribution', () async {
+    for (final state in <PullRequestCheckState>[
+      PullRequestCheckState.notReported,
+      PullRequestCheckState.pending,
+      PullRequestCheckState.inconclusive,
+    ]) {
+      final bd = FakeBdRunner(ledger(['tg-1']));
+      final sender = FakeSender();
+      await projection(bd, sender)(event(state));
+      expect(sender.calls, isEmpty, reason: '$state acts on nothing');
+      expect(
+        bd.calls.map((call) => call.first),
+        everyElement('list'),
+        reason: '$state mutates nothing',
+      );
+    }
+  });
+
+  test('the stall crossing performs no merge or rework action', () async {
+    // AC-7's other half: the second, stalled observation shares the fresh
+    // one's head and state, so it shares its idempotency key and does nothing.
     final bd = FakeBdRunner(ledger(['tg-1']));
     final sender = FakeSender();
     final subject = projection(bd, sender);
-    await subject(event('failure'));
-    await subject(event('failure'));
+    final greenSince = DateTime.utc(2026, 9, 12, 9);
+    await subject(event(PullRequestCheckState.green, greenSince: greenSince));
+    final afterFresh = bd.calls.length;
+    await subject(
+      event(PullRequestCheckState.green, greenSince: greenSince, stalled: true),
+    );
+    expect(sender.calls, isEmpty);
+    expect(
+      bd.calls.where((call) => call.first == 'update'),
+      hasLength(1),
+      reason: 'the crossing repeats no mutation',
+    );
+    expect(bd.calls.length, greaterThanOrEqualTo(afterFresh));
+  });
+
+  test('idempotency follows bead round and head identity', () async {
+    final bd = FakeBdRunner(ledger(['tg-1']));
+    final sender = FakeSender();
+    final subject = projection(bd, sender);
+    await subject(event(PullRequestCheckState.failing));
+    await subject(event(PullRequestCheckState.failing));
     expect(sender.calls, hasLength(1));
     expect(
       sender.calls.single['idempotencyKey'],
-      'github-ci:tg-1:r0:build:obs',
+      'github-ci:tg-1:r0:abc123:failing',
+    );
+
+    // A NEW head is a new fact; a bumped `updated_at` on the same head is not,
+    // and the observation id deliberately takes no part in the key.
+    await subject(event(PullRequestCheckState.failing, headSha: 'def456'));
+    expect(sender.calls, hasLength(2));
+    expect(
+      sender.calls.last['idempotencyKey'],
+      'github-ci:tg-1:r0:def456:failing',
     );
 
     bd.sessions = ledger(['tg-1', 'tg-1#r1']);
-    await subject(event('failure'));
-    expect(sender.calls, hasLength(2));
-    expect(sender.calls.last['idempotencyKey'], 'github-ci:tg-1:r1:build:obs');
-  });
-
-  test('the RETIRED rework keys still count toward the round', () async {
-    // The scoped read is deliberately NOT narrowed by a `work_bead` metadata
-    // equality: `tg-1#r1`/`#r2`/`#r3` are the retired ledger `maxReworkRound`
-    // counts, and an exact match would drop exactly them — silently reworking
-    // forever instead of gating at the cap.
-    final bd = FakeBdRunner(ledger(['tg-1', 'tg-1#r1', 'tg-1#r2', 'tg-1#r3']));
-    final sender = FakeSender();
-    await projection(bd, sender)(event('failure'));
-
-    expect(sender.calls, isEmpty);
+    await subject(event(PullRequestCheckState.failing));
+    expect(sender.calls, hasLength(3));
     expect(
-      bd.calls.firstWhere((call) => call.first == 'create'),
-      containsAllInOrder(<String>['--id', 'tg-1-ci-rework-cap']),
+      sender.calls.last['idempotencyKey'],
+      'github-ci:tg-1:r1:abc123:failing',
     );
   });
 
@@ -212,9 +422,9 @@ void main() {
     final bd = FakeBdRunner(ledger(['tg-1']));
     final sender = FakeSender()..hold = Completer<void>();
     final subject = projection(bd, sender);
-    final first = subject(event('failure'));
+    final first = subject(event(PullRequestCheckState.failing));
     await Future<void>.delayed(Duration.zero);
-    final second = subject(event('failure'));
+    final second = subject(event(PullRequestCheckState.failing));
     sender.hold!.complete();
     await Future.wait([first, second]);
     expect(sender.calls, hasLength(1));
@@ -225,8 +435,8 @@ void main() {
     final sender = FakeSender()
       ..result = const FeedbackCommandRefused('rework_round_cap', 'cap');
     final subject = projection(bd, sender);
-    await subject(event('failure'));
-    await subject(event('failure'));
+    await subject(event(PullRequestCheckState.failing));
+    await subject(event(PullRequestCheckState.failing));
     final creates = bd.calls.where((call) => call.first == 'create').toList();
     expect(creates, hasLength(1));
     expect(
@@ -242,36 +452,59 @@ void main() {
     );
   });
 
-  test('green preserves ledger and marks landing-ready', () async {
-    final bd = FakeBdRunner(ledger(['tg-1', 'tg-1#r1']));
-    final sender = FakeSender();
-    await projection(bd, sender)(event('success'));
-    expect(sender.calls, isEmpty);
-    expect(bd.calls.last, [
-      'update',
-      'tg-1',
-      '--actor',
-      'github-feedback',
-      '--set-metadata',
-      'grid.landing_ready=true',
-    ]);
-  });
+  test('one type-scoped session read replaces the export', () async {
+    final bd = FakeBdRunner(ledger(['tg-1']));
+    await projection(bd, FakeSender())(event(PullRequestCheckState.failing));
 
-  test('out-of-scope checks perform no effects', () async {
-    final bd = FakeBdRunner('not json');
-    final sender = FakeSender();
-    await projection(bd, sender)(event('failure', branch: 'main'));
-    expect(bd.calls, isEmpty);
-    expect(sender.calls, isEmpty);
+    expect(
+      bd.calls.where((call) => call.first == 'list'),
+      hasLength(1),
+      reason: 'exactly ONE read per projected observation',
+    );
+    expect(
+      bd.calls.map((call) => call.first),
+      isNot(contains('export')),
+      reason: 'a proxied-server store refuses export outright',
+    );
   });
 
   test('a malformed session read still fails loudly', () async {
     // A store that answers nonsense is BROKEN, not a legitimate shape: the leg
     // keeps throwing so the observation stays pending and the cycle says so.
     await expectLater(
-      projection(FakeBdRunner('bad'), FakeSender())(event('failure')),
+      projection(FakeBdRunner('bad'), FakeSender())(
+        event(PullRequestCheckState.failing),
+      ),
       throwsA(isA<BdException>()),
     );
+  });
+
+  test('a legacy check envelope is reported and acted on never', () async {
+    // Nothing emits `checkConcluded` any more, but a cursor written before the
+    // feedback poll changed shape can still replay one — and it states no pull
+    // reference, only the head branch that stopped being an attribution.
+    final bd = FakeBdRunner(ledger(['pow-2xmo']));
+    final sender = FakeSender();
+    final reporter = RecordingReporter();
+    final subject = projection(bd, sender)..bindReporter(reporter.report);
+
+    await subject(
+      const NormalizedGitHubEvent.checkConcluded(
+        nodeId: 'C_1',
+        actor: 'actions',
+        repository: 'o/r',
+        substation: 'power',
+        observationId: 'poll:check:C_1:2026-09-03T16:24:00Z:failure',
+        headBranch: 'grid/pow-2xmo',
+        checkName: 'build',
+        conclusion: 'failure',
+      ),
+    );
+
+    expect(bd.calls, isEmpty, reason: 'not even a correlation read');
+    expect(sender.calls, isEmpty);
+    expect(reporter.flares.single.name, kCiFeedbackIgnoredFlare);
+    expect(reporter.flares.single.action, contains('grid/pow-2xmo'));
   });
 
   for (final shape in <({String name, String sessions, String reason})>[
@@ -297,7 +530,7 @@ void main() {
       final reporter = RecordingReporter();
       final subject = projection(bd, sender)..bindReporter(reporter.report);
 
-      await subject(event('failure'));
+      await subject(event(PullRequestCheckState.failing));
 
       expect(sender.calls, isEmpty);
       expect(
@@ -317,7 +550,7 @@ void main() {
     // thing lost — never the acknowledgement the outbox needs.
     expect(
       projection(FakeBdRunner('{"schema_version":1,"data":[]}'), FakeSender())(
-        event('failure'),
+        event(PullRequestCheckState.failing),
       ),
       completes,
     );
@@ -337,7 +570,7 @@ void main() {
       // MY binding was already replaced; unbinding it must not silence THEIRS.
       ..unbindReporter(mineReporter);
 
-    await subject(event('failure'));
+    await subject(event(PullRequestCheckState.failing));
 
     expect(mine.flares, isEmpty);
     expect(theirs.flares, hasLength(1));
