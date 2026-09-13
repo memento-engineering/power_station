@@ -9,6 +9,7 @@ import 'package:grid_assets/station_asset_registry.dart';
 import 'package:grid_sdk/grid_sdk.dart';
 import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
+import 'package:yaml/yaml.dart';
 
 import '../support/asset_resolution_fixture.dart';
 import '../support/package_root.dart';
@@ -727,6 +728,66 @@ void main() {
         expect(body, contains('space search --json "<token>"'));
         expect(body, contains('space link <blocked bead> --blocked-by'));
         expect(body, isNot(contains('mountEligibilityFindings')));
+      },
+    );
+
+    // Model defaults are governed by
+    // `power_station#roles-retire-typed-lookups-and-the-tier-subsume-the-role-map`:
+    // the spawn site "declares its `AgentTier` directly", and A20(3)'s "no
+    // `fallbackModel` and no unpinned spawn" is "true by construction only
+    // because that floor is total". A harness-read agent definition is that
+    // SAME floor at a different seam — the Agent tool reads `model:` off this
+    // frontmatter, so a definition declaring none inherits whatever the
+    // SPAWNING seat runs (measured 2026-09-13: a governor on Fable 5.1 spawned
+    // refiner subagents on Fable 5.1). The refiner is frontier-class
+    // interactive work, which the live tier ladder arms at
+    // `kFrontierModelDefault` — opus.
+    //
+    // Read from the AUTHORED source, not an installed copy: a station's
+    // generated `.claude/agents/refiner.md` is overwritten by the next assets
+    // install, so only the source carries the pin.
+    test(
+      'the refiner source frontmatter parses and pins one opus model directly '
+      'after its name',
+      () {
+        final source = File(
+          p.join(
+            packageRoot(),
+            'extension',
+            'station_overlay',
+            'claude',
+            'agents',
+            'refiner.md',
+          ),
+        ).readAsStringSync();
+
+        expect(source, startsWith('---\n'), reason: 'opens its frontmatter');
+        final fenceEnd = source.indexOf('\n---', 3);
+        expect(fenceEnd, greaterThan(0), reason: 'closes its frontmatter');
+        final block = source.substring(4, fenceEnd);
+
+        final frontmatter = loadYaml(block) as YamlMap;
+        expect(frontmatter['name'], 'refiner');
+        expect(frontmatter['description'], isNotEmpty);
+        expect(
+          frontmatter['model'],
+          'opus',
+          reason: 'the seat declares its own model rather than inheriting one',
+        );
+
+        final lines = block.split('\n');
+        expect(
+          lines.where((line) => line.startsWith('model:')),
+          ['model: opus'],
+          reason: 'exactly one model declaration, and it is opus',
+        );
+        final nameLine = lines.indexOf('name: refiner');
+        expect(nameLine, isNonNegative, reason: 'the name is declared');
+        expect(
+          lines[nameLine + 1],
+          'model: opus',
+          reason: 'the model is declared directly after the name',
+        );
       },
     );
   });
