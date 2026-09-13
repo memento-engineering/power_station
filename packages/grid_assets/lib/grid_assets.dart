@@ -110,9 +110,25 @@
 ///
 /// The SEAT command set makes an operator seat OCCUPIABLE with its own disc
 /// (bead `pow-lv6t`): [PrimeCommand] is the grid's own SessionStart hook
-/// target — it echoes `bd prime` and injects only the seat's newest handoff —
-/// and [SeatCommand] is the OUTER harness that launches a seat's occupant with
-/// its role definition and disc and relaunches it on handoff.
+/// target. It answers for the STATION and POINTS rather than restates
+/// (`memento-engineering#a-station-explains-itself-through-prime-and-bounded-help`):
+/// the station's identity and invocation, every verb it exposes BY NAME with
+/// that verb's own `help` beside it — DERIVED from the composed
+/// `CommandRunner`, never a list authored here that would drift the moment a
+/// station adds a verb — then where ratified decisions live and which verb
+/// searches them, the seat's disc, and the fenced service tick that wakes a
+/// seat. The issue tracker's `bd prime` reference follows VERBATIM under its
+/// own heading: still reachable, no longer the whole answer. Handoff injection
+/// is unchanged — only the seat's newest handoff, only on startup, clear and
+/// compact. The whole answer rides the pack's ONE output bound,
+/// [boundedOutput] at [kBoundedOutputCapBytes] — the same selector the `show`
+/// verb consumes, because a second implementation of a cap is the defect
+/// `power_station#a-mechanical-lookup-is-a-vended-command-with-a-bounded-output`
+/// exists to stop one layer down; prime supplies only its own trim order
+/// (tracker body, then handoff body, then whole verb-pointer records) and every
+/// cut NAMES the bytes withheld and how to ask for them.
+/// [SeatCommand] is the OUTER harness that launches a seat's
+/// occupant with its role definition and disc and relaunches it on handoff.
 /// [SuccessionCommand] closes the loop at the other end: it CONSUMES that
 /// handoff through [SeatSuccessionService], which archives the seat disc in a
 /// path-scoped commit and proves the note is in `HEAD` before deleting it and

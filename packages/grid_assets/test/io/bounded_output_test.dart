@@ -194,6 +194,15 @@ void main() {
         p.join('src', 'io', 'bounded_output.dart'): ['kBoundedOutputCapBytes'],
       });
 
+      // The verb that arrived second never minted a cap of its own.
+      for (final entry in sources.entries) {
+        expect(
+          entry.value,
+          isNot(contains('kPrimeOutputCapBytes')),
+          reason: '${entry.key} mints a third per-command cap',
+        );
+      }
+
       // The retired per-verb cap name survives ONLY as the deprecated alias.
       for (final entry in sources.entries) {
         for (final line in const LineSplitter().convert(entry.value)) {
@@ -235,7 +244,8 @@ void main() {
         },
       );
 
-      // Each consumer CALLS the selector, exactly once.
+      // Each consumer CALLS the selector, exactly once — and the consumers are
+      // exactly the two verbs that bound their output.
       expect(
         {
           for (final entry in sources.entries)
@@ -245,6 +255,7 @@ void main() {
         {
           p.join('src', 'io', 'bounded_output.dart'): 1,
           p.join('src', 'filing', 'show_command.dart'): 1,
+          p.join('src', 'seat', 'prime_command.dart'): 1,
         },
       );
     });

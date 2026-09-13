@@ -1,6 +1,10 @@
-// The `prime --hook-json` verb (bead `pow-lv6t`): echo bd, inject ONLY the
-// seat's newest handoff, exit 0 always. Offline — a Fake BdRunner, a real temp
-// disc, no harness and no `bd` process.
+// The `prime --hook-json` verb (beads `pow-lv6t`, `pow-5zpe`): orient the
+// session in the STATION — identity, invocation, every verb by name, the
+// decision register, the seat disc and the wake mechanism — then the tracker's
+// own reference, then ONLY the seat's newest handoff. Exit 0 always, bounded
+// always.
+//
+// Offline: a Fake BdRunner, a real temp disc, no harness and no `bd` process.
 import 'dart:convert';
 import 'dart:io';
 
@@ -38,12 +42,51 @@ final class _ThrowingBd implements BdRunner {
   }) async => throw StateError('bd is missing');
 }
 
+/// A verb a STATION composes — the thing prime must name without this package
+/// ever having heard of it.
+final class _StationVerb extends Command<int> {
+  _StationVerb(this.name, {this.aliases = const <String>[]});
+
+  @override
+  final String name;
+
+  @override
+  final List<String> aliases;
+
+  @override
+  final String description =
+      'A verb composed by the station, with a contract only its own help '
+      'carries: it takes a target, it writes a receipt, and it refuses when '
+      'the store is unreachable.';
+
+  @override
+  int run() => 0;
+}
+
 String _hook(String context) => jsonEncode({
   'hookSpecificOutput': {
     'hookEventName': 'SessionStart',
     'additionalContext': context,
   },
 });
+
+const String _startup = '{"hook_event_name":"SessionStart","source":"startup"}';
+
+/// Every UTF-8 byte of [sink], the trailing newline included.
+int _bytes(StringBuffer sink) => utf8.encode(sink.toString()).length;
+
+/// The verb-pointer records of [context] — the lines under `Verbs:`, up to the
+/// blank line that closes the section.
+List<String> _verbRecords(String context) {
+  final lines = const LineSplitter().convert(context);
+  final start = lines.indexOf('Verbs:');
+  if (start == -1) fail('no Verbs: section in\n$context');
+  final records = <String>[];
+  for (var i = start + 1; i < lines.length && lines[i].isNotEmpty; i++) {
+    records.add(lines[i]);
+  }
+  return records;
+}
 
 void main() {
   late Directory home;
@@ -67,25 +110,44 @@ void main() {
       );
   }
 
+  /// A composed station: the runner a real one builds, with `prime` attached
+  /// exactly the way `..addCommand(...)` attaches it.
+  CommandRunner<int> station({
+    required StringBuffer out,
+    String bdStdout = '',
+    int bdExitCode = 0,
+    BdRunner? bd,
+    Map<String, String> environment = const {},
+    String payload = _startup,
+    String executableName = 'space',
+    String description = 'The power station CLI.',
+  }) => CommandRunner<int>(executableName, description)
+    ..addCommand(
+      PrimeCommand(
+        runnerFor: (_) => bd ?? _FakeBd(bdStdout, exitCode: bdExitCode),
+        environment: () => environment,
+        cwd: () => home.path,
+        readStdin: () async => payload,
+        out: out,
+      ),
+    );
+
   Future<Map<String, Object?>> prime({
     required String bdStdout,
     int bdExitCode = 0,
     BdRunner? bd,
     Map<String, String> environment = const {},
-    String payload = '{"hook_event_name":"SessionStart","source":"startup"}',
+    String payload = _startup,
   }) async {
     final out = StringBuffer();
-    final code =
-        await (CommandRunner<int>('space', 'test')..addCommand(
-              PrimeCommand(
-                runnerFor: (_) => bd ?? _FakeBd(bdStdout, exitCode: bdExitCode),
-                environment: () => environment,
-                cwd: () => home.path,
-                readStdin: () async => payload,
-                out: out,
-              ),
-            ))
-            .run(['prime', '--hook-json']);
+    final code = await station(
+      out: out,
+      bdStdout: bdStdout,
+      bdExitCode: bdExitCode,
+      bd: bd,
+      environment: environment,
+      payload: payload,
+    ).run(['prime', '--hook-json']);
     expect(code, 0, reason: 'a hook that fails must not fail a session');
     return jsonDecode(out.toString().trim()) as Map<String, Object?>;
   }
@@ -95,22 +157,150 @@ void main() {
               as Map<String, Object?>)['additionalContext']!)
           as String;
 
-  group('no seat', () {
-    test("returns EXACTLY bd prime's additionalContext", () async {
-      final hook = await prime(bdStdout: _hook('BD SAYS THIS'));
-      expect(contextOf(hook), 'BD SAYS THIS');
+  group('the STATION answers for itself', () {
+    test('station identity, invocation, and every exposed verb', () async {
+      final out = StringBuffer();
+      final runner = station(out: out, bdStdout: _hook('BD'))
+        ..addCommand(_StationVerb('land'))
+        ..addCommand(_StationVerb('search'));
+
+      expect(await runner.run(['prime']), 0);
+
+      final context = out.toString();
+      expect(context, startsWith('Station: space — The power station CLI.\n'));
+      expect(context, contains('\nInvoke: ${runner.invocation}\n'));
+
+      // EXACTLY one pointer record per exposed key — no key unnamed, and no
+      // record that is not a key.
+      expect(_verbRecords(context), [
+        for (final key in runner.commands.keys.toList()..sort())
+          '- $key — space help $key',
+      ]);
+      expect(_verbRecords(context), contains('- land — space help land'));
+      expect(_verbRecords(context), contains('- search — space help search'));
     });
 
+    test('late-added command derives into prime', () async {
+      final out = StringBuffer();
+      // `prime` is attached FIRST, the way a station composes it, and the verb
+      // arrives afterwards. Nothing is handed to prime: it reads the runner.
+      final runner = station(out: out, bdStdout: _hook('BD'))
+        ..addCommand(_StationVerb('board', aliases: const ['b']));
+
+      expect(await runner.run(['prime']), 0);
+
+      final records = _verbRecords(out.toString());
+      expect(records, contains('- board — space help board'));
+      expect(
+        records,
+        contains('- b — space help b'),
+        reason: 'an alias is an exposed key, so it is a reachable verb',
+      );
+    });
+
+    test('decision register and search pointer', () async {
+      final out = StringBuffer();
+      final runner = station(out: out, bdStdout: _hook('BD'))
+        ..addCommand(_StationVerb('search'));
+
+      expect(await runner.run(['prime']), 0);
+
+      expect(
+        out.toString(),
+        contains(
+          'Decisions: docs/decisions/ in every mounted substation; ratified '
+          'decisions bind. Search with space search; usage: space help '
+          'search.',
+        ),
+      );
+    });
+
+    test('Agent Disc and fenced wake pointer', () async {
+      const wake =
+          'Wake: the resident station evaluates the seat wake predicate on '
+          'the existing fenced service tick; a seat adds no second wake '
+          'mechanism.';
+
+      final seated = StringBuffer();
+      expect(
+        await station(
+          out: seated,
+          bdStdout: _hook('BD'),
+          environment: {'GRID_SEAT': 'governor', 'GRID_HOME': home.path},
+        ).run(['prime']),
+        0,
+      );
+      expect(
+        seated.toString(),
+        contains(
+          'Agent Disc: ${p.join(home.path, '.grid', 'seats', 'governor')}.',
+        ),
+      );
+      expect(seated.toString(), contains(wake));
+
+      final bare = StringBuffer();
+      expect(await station(out: bare, bdStdout: _hook('BD')).run(['prime']), 0);
+      expect(
+        bare.toString(),
+        contains('Agent Disc: <grid home>/.grid/seats/<seat>/.'),
+        reason: 'with no seat the disc is named as a TEMPLATE, never guessed',
+      );
+      expect(bare.toString(), contains(wake));
+    });
+
+    test('verb pointers are shorter than command help', () async {
+      final out = StringBuffer();
+      final runner = station(out: out, bdStdout: _hook('BD'))
+        ..addCommand(_StationVerb('land'))
+        ..addCommand(_StationVerb('board', aliases: const ['b']));
+
+      expect(await runner.run(['prime']), 0);
+
+      final records = _verbRecords(out.toString());
+      for (final entry in runner.commands.entries) {
+        final pointer = '- ${entry.key} — space help ${entry.key}';
+        // The record is the pointer and NOTHING else: no summary, no
+        // description, no option list — whatever the verb's help answers,
+        // prime must not duplicate.
+        expect(records, contains(pointer), reason: entry.key);
+        expect(
+          utf8.encode(pointer).length,
+          lessThan(utf8.encode(entry.value.usage).length),
+          reason: entry.key,
+        );
+      }
+    });
+  });
+
+  group('no seat', () {
     test(
-      'an empty bd context stays empty (the measured 79-byte payload)',
+      'carries bd prime under its own heading, and is not only it',
       () async {
-        expect(contextOf(await prime(bdStdout: _hook(''))), '');
+        final context = contextOf(await prime(bdStdout: _hook('BD SAYS THIS')));
+        expect(
+          context,
+          contains('Tracker reference (bd prime):\nBD SAYS THIS'),
+        );
+        expect(context, startsWith('Station: '));
       },
     );
 
+    test('an unreadable tracker still POINTS at bd prime', () async {
+      expect(
+        contextOf(await prime(bdStdout: _hook(''))),
+        contains(
+          'Tracker reference (bd prime):\nUnavailable here; run bd '
+          'prime.',
+        ),
+      );
+    });
+
     test('a disc with a handoff is IGNORED without GRID_SEAT', () async {
       writeNote('governor', 'handoff.md', 'RESUME BODY');
-      expect(contextOf(await prime(bdStdout: _hook(''))), '');
+      expect(
+        contextOf(await prime(bdStdout: _hook(''))),
+        isNot(contains('RESUME BODY')),
+      );
     });
   });
 
@@ -127,7 +317,7 @@ void main() {
             environment: {...env, 'GRID_HOME': home.path},
           ),
         );
-        expect(context, startsWith('BD\n\n'));
+        expect(context, contains('Tracker reference (bd prime):\nBD\n\n'));
         expect(
           context,
           contains(
@@ -172,7 +362,7 @@ void main() {
           );
         }
         expect(freshContexts.toSet(), hasLength(1));
-        expect(freshContexts.first, startsWith('BD \n\n'));
+        expect(freshContexts.first, contains('BD \n'));
         expect(freshContexts.first, endsWith('RESUME BODY'));
 
         final resumed = contextOf(
@@ -182,7 +372,7 @@ void main() {
             payload: '{"hook_event_name":"SessionStart","source":"resume"}',
           ),
         );
-        expect(resumed, 'BD \n');
+        expect(resumed, contains('Tracker reference (bd prime):\nBD \n'));
         expect(resumed, isNot(contains('RESUME BODY')));
       },
     );
@@ -200,7 +390,7 @@ void main() {
             environment: {...env, 'GRID_HOME': home.path},
           ),
         );
-        expect(context, 'BD');
+        expect(context, endsWith('BD'));
         expect(context, isNot(contains('LESSON BODY')));
       },
     );
@@ -235,18 +425,80 @@ void main() {
   });
 
   group('a hook NEVER fails a session', () {
-    test(
-      'unparsable output, non-zero/missing bd, and junk stdin exit 0',
-      () async {
-        expect(contextOf(await prime(bdStdout: 'not json')), '');
-        expect(contextOf(await prime(bdStdout: _hook('X'), bdExitCode: 9)), '');
-        expect(contextOf(await prime(bdStdout: '', bd: _ThrowingBd())), '');
-        expect(
-          contextOf(await prime(bdStdout: _hook('X'), payload: '<<<')),
-          'X',
+    test('SessionStart behavior remains', () async {
+      writeNote('governor', 'handoff.md', 'RESUME BODY');
+      const seated = {'GRID_SEAT': 'governor'};
+
+      // A valid hook object, exit 0, on every source.
+      for (final source in ['startup', 'clear', 'compact']) {
+        final hook = await prime(
+          bdStdout: _hook('BD'),
+          environment: seated,
+          payload: '{"hook_event_name":"SessionStart","source":"$source"}',
         );
-      },
-    );
+        expect(
+          (hook['hookSpecificOutput']!
+              as Map<String, Object?>)['hookEventName'],
+          'SessionStart',
+        );
+        expect(contextOf(hook), endsWith('RESUME BODY'), reason: source);
+      }
+      for (final source in ['resume', 'teleported']) {
+        expect(
+          contextOf(
+            await prime(
+              bdStdout: _hook('BD'),
+              environment: seated,
+              payload: '{"hook_event_name":"SessionStart","source":"$source"}',
+            ),
+          ),
+          isNot(contains('RESUME BODY')),
+          reason: source,
+        );
+      }
+
+      // A dependency failure degrades to its own value and never to a failed
+      // session: the station still answers for itself.
+      for (final broken in [
+        await prime(bdStdout: 'not json', environment: seated),
+        await prime(bdStdout: _hook('X'), bdExitCode: 9, environment: seated),
+        await prime(bdStdout: '', bd: _ThrowingBd(), environment: seated),
+      ]) {
+        final context = contextOf(broken);
+        expect(context, startsWith('Station: '));
+        expect(context, contains('Unavailable here; run bd prime.'));
+        expect(context, endsWith('RESUME BODY'));
+      }
+      expect(
+        contextOf(
+          await prime(
+            bdStdout: _hook('X'),
+            environment: seated,
+            payload: '<<<',
+          ),
+        ),
+        allOf(
+          contains('Tracker reference (bd prime):\nX'),
+          isNot(contains('RESUME BODY')),
+        ),
+        reason: 'a malformed payload names no source, so nothing is injected',
+      );
+    });
+
+    test('tracker reference remains reachable', () async {
+      // bd's own context survives BYTE FOR BYTE under its own heading, and it
+      // is no longer the whole answer.
+      const body = 'BD LINE ONE\n\n  indented two\ntrailing spaces  ';
+      final context = contextOf(await prime(bdStdout: _hook(body)));
+
+      expect(context, contains('\nTracker reference (bd prime):\n$body'));
+      expect(context, contains('Station: space — The power station CLI.'));
+      expect(
+        context.indexOf('Station: '),
+        lessThan(context.indexOf('Tracker reference')),
+        reason: 'the station answers first; the tracker is subordinate',
+      );
+    });
 
     test('the BD_JSON_ENVELOPE wrapper is unwrapped', () {
       expect(
@@ -265,8 +517,147 @@ void main() {
             environment: {'GRID_SEAT': 'nobody', 'GRID_HOME': home.path},
           ),
         ),
-        'BD',
+        endsWith('Tracker reference (bd prime):\nBD'),
       );
     });
+  });
+
+  group('AC-8 — the answer is bounded, and every cut is NAMED', () {
+    // Multibyte in both bodies, each far over the cap on its own.
+    final trackerBody = '日本語の文脈・' * 5000;
+    final handoffBody = 'ハンドオフ本文' * 2000;
+
+    test(
+      'plain and hook output are bounded with explicit withholding',
+      () async {
+        writeNote('governor', 'handoff.md', handoffBody);
+        const environment = {'GRID_SEAT': 'governor'};
+        final relative = p.join('.grid', 'seats', 'governor', 'handoff.md');
+
+        // PLAIN: there is no hook payload, so no handoff is due. The oversized
+        // tracker body is the one cut, and it names exactly what it cost.
+        final plain = StringBuffer();
+        expect(
+          await station(
+            out: plain,
+            bdStdout: _hook(trackerBody),
+            environment: environment,
+          ).run(['prime']),
+          0,
+        );
+        expect(_bytes(plain), lessThanOrEqualTo(kBoundedOutputCapBytes));
+        expect(plain.toString(), startsWith('Station: '));
+        expect(
+          plain.toString(),
+          endsWith(
+            'Withheld: ${utf8.encode(trackerBody).length} tracker-reference '
+            'bytes; run bd prime.\n',
+          ),
+        );
+
+        // HOOK: both bodies are over, and each is replaced by its own count.
+        // This rendering is the larger of the two, so a bound measured only on
+        // the plain text would ship it over the cap.
+        final hook = StringBuffer();
+        expect(
+          await station(
+            out: hook,
+            bdStdout: _hook(trackerBody),
+            environment: environment,
+          ).run(['prime', '--hook-json']),
+          0,
+        );
+        expect(_bytes(hook), lessThanOrEqualTo(kBoundedOutputCapBytes));
+        final decoded = jsonDecode(hook.toString()) as Map<String, Object?>;
+        final context =
+            (decoded['hookSpecificOutput']!
+                    as Map<String, Object?>)['additionalContext']!
+                as String;
+        expect(
+          context,
+          contains(
+            'Withheld: ${utf8.encode(trackerBody).length} tracker-reference '
+            'bytes; run bd prime.',
+          ),
+        );
+        expect(
+          context,
+          endsWith(
+            'Withheld: ${utf8.encode(handoffBody).length} handoff-body bytes; '
+            'read $relative from the Agent Disc.',
+          ),
+        );
+        // What is withheld is the BODY, never the fact that a handoff exists.
+        expect(context, contains('Handoff $relative — act on Resume'));
+        expect(context, startsWith('Station: '));
+        expect(context, isNot(contains('�')));
+      },
+    );
+
+    test(
+      'verb pointers are dropped WHOLE, with the count and the bytes',
+      () async {
+        final out = StringBuffer();
+        final runner = station(out: out, bdStdout: _hook('BD'));
+        // More verb pointers than the cap can hold, each with a multibyte name.
+        for (var i = 0; i < 100; i++) {
+          runner.addCommand(_StationVerb('verb-日本語の長い動詞の名前-$i'));
+        }
+        final expected = [
+          for (final key in runner.commands.keys.toList()..sort())
+            '- $key — space help $key',
+        ];
+
+        expect(await runner.run(['prime']), 0);
+        expect(_bytes(out), lessThanOrEqualTo(kBoundedOutputCapBytes));
+
+        final records = _verbRecords(out.toString());
+        final note = records.last;
+        final kept = records.take(records.length - 1).toList();
+        // Every surviving record is a COMPLETE record — a leading prefix of the
+        // list, never a sliced line and never half a rune.
+        expect(kept, isNotEmpty);
+        expect(kept, expected.take(kept.length));
+        expect(
+          note,
+          'Withheld: ${expected.length - kept.length} verb-pointer records '
+          '(${expected.skip(kept.length).fold(0, (sum, record) => sum + utf8.encode(record).length)} '
+          'bytes); run space help.',
+        );
+      },
+    );
+
+    test(
+      'an oversized station orientation falls back to its own count',
+      () async {
+        final out = StringBuffer();
+        // A station whose own description cannot fit the cap: nothing but the
+        // floor is renderable, and the floor still POINTS.
+        final runner = station(
+          out: out,
+          bdStdout: 'not json',
+          description: 'サブステーションの説明' * 800,
+        );
+
+        expect(await runner.run(['prime']), 0);
+        expect(_bytes(out), lessThanOrEqualTo(kBoundedOutputCapBytes));
+        expect(
+          out.toString(),
+          matches(
+            RegExp(
+              r'^Withheld: [0-9]+ station-orientation bytes; run the station '
+              r'executable with help\.\n',
+            ),
+          ),
+        );
+        expect(
+          out.toString(),
+          endsWith(
+            'Tracker reference (bd prime):\nUnavailable here; run bd '
+            'prime.\n',
+          ),
+        );
+      },
+    );
   });
 }
