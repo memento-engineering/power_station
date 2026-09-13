@@ -19,7 +19,7 @@ register:
 ## A38 (2026-09-02) — bead `pow-n6n.3`: the MECHANISM of ADR-0006 D3's availability seed — presence is a BOOLEAN probe over the boot-validated set, arming is an AMBIENT VALUE so ADR-0002 D5 nesting composes, and the "failure signal" is the probe's own failure
 
 **Decision (AI; MECHANISM only).** The POLICY is ratified in
-`docs/adr/ADR-0006-typed-environment-lookup-selects-by-value.md` D3. The
+`ADR-0006` D3. The
 autonomous calls this bead made: (1) PRESENCE IS A BOOLEAN — `EnvironmentProbe`
 returns `Future<bool>`; a refusal reason no rung reads would be a dead field, and
 D3 makes the tree itself the answer. (2) THE PASS RUNS OVER

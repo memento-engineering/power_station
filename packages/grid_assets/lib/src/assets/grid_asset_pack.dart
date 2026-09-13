@@ -140,7 +140,7 @@ abstract final class GridAssetsPack {
       id: 'adr-alignment',
     ),
     description:
-        'Does the spec cite and align with the substation\'s docs/adr register (ADR-0000 amendments included)?',
+        'Does the spec cite and align with the substation\'s decisions register?',
     audience: AssetAudience.agent,
     visibility: AssetVisibility.public,
     selector: AlwaysApplies(),

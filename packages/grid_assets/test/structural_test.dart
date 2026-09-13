@@ -283,14 +283,22 @@ void main() {
       });
 
       test('A37 is exactly one register entry, and it names pow-hxme', () {
-        final register = File(
-          p.join(
-            libDir.parent.parent.parent.path,
-            'docs',
-            'adr',
-            'ADR-0000-ai-decision-register.md',
-          ),
-        ).readAsStringSync();
+        // The ADR-0000 register file is retired; A37 lives on as its own
+        // `docs/decisions/` entry (`legacy-id: "A37"`), found by that legacy
+        // id rather than by a guessed filename.
+        final decisionsDir = Directory(
+          p.join(libDir.parent.parent.parent.path, 'docs', 'decisions'),
+        );
+        final entries = decisionsDir
+            .listSync()
+            .whereType<File>()
+            .where((file) => file.path.endsWith('.md'))
+            .where(
+              (file) => file.readAsStringSync().contains('legacy-id: "A37"'),
+            )
+            .toList();
+        expect(entries, hasLength(1));
+        final register = entries.single.readAsStringSync();
         final headings = RegExp(
           r'^## A37 .*$',
           multiLine: true,

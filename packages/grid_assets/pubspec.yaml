@@ -168,7 +168,7 @@ grid:
 
     - id: adr-alignment
       kind: rubric
-      description: "Does the spec cite and align with the substation's docs/adr register (ADR-0000 amendments included)?"
+      description: "Does the spec cite and align with the substation's decisions register?"
       audience: agent
       visibility: public
       artifacts:

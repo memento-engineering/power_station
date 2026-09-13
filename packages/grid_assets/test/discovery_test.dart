@@ -18,7 +18,8 @@ import 'support/asset_fakes.dart';
 import 'support/mounted_route_context.dart';
 import 'support/package_root.dart';
 
-const String _adr = 'docs/adr/ADR-0000-ai-decision-register.md A17(4)';
+const String _adr =
+    'power_station#adr-0006-typed-environment-lookup-selects-by-value D2';
 
 /// The engine session generation every capability fixture mounts — the third
 /// freshness stamp, beside `nodePath` and `round`.

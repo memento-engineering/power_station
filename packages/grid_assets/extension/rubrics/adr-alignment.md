@@ -1,23 +1,19 @@
 # adr-alignment
 
 Does the spec respect the substation's recorded decisions? A substation's local
-decision register may contain `docs/adr/`, `docs/decisions/`, or both. Treat a
-missing directory as absent and continue with the other. `docs/adr/` is
-READ-ONLY LEGACY: it holds the ratified ADRs plus `ADR-0000`, whose `A<n>`
-amendments were converted with `status: accepted` and bind as accepted.
-`docs/decisions/` is where decisions are RECORDED now, and an entry BINDS ON
-WRITE. A spec
+decision register lives at `docs/decisions/`; treat a missing directory as
+absent. An entry BINDS ON WRITE. A spec
 that touches a surface those decisions govern must cite the relevant decision
 and either implement it, extend it, or explicitly propose overriding it. A spec
 that silently contradicts a recorded decision is the most expensive failure
 this committee can miss: it undoes deliberated work, usually unnoticed until
 the contradiction ships.
 
-Legacy ADR citations name the file plus an ADR number or `A<n>` clause, for
-example `docs/adr/ADR-0000-ai-decision-register.md A17(4)`. Entries in
-`docs/decisions/` use `<repo>#<slug>`, for example
-`the_grid#admission-authority-boundary`; migrated entries may also carry
-`register.legacy-id` so their old citations continue to resolve.
+Entries in `docs/decisions/` use `<repo>#<slug>`, for example
+`the_grid#admission-authority-boundary`. A migrated entry may also carry
+`register.legacy-id`, so a bare legacy identity such as `ADR-0006` or `A17(4)`
+(no path — the ADR directory that once held these is retired) still resolves
+to it.
 
 You are blind to the other lanes' concerns (fit, testability, plan detail) —
 weigh ONLY decision alignment.
@@ -29,11 +25,11 @@ keywords from the bead's title + touched surfaces, then run, from the worktree
 root:
 
 ```sh
-for register in docs/adr docs/decisions; do [ ! -d "$register" ] || find "$register" -type f -not -path '*/views/*' -name '*.md' -print; done
-for register in docs/adr docs/decisions; do [ ! -d "$register" ] || find "$register" -type f -not -path '*/views/*' -name '*.md' -exec grep -li "<keyword1>\|<keyword2>\|<keyword3>" {} +; done
+register=docs/decisions; [ ! -d "$register" ] || find "$register" -type f -not -path '*/views/*' -name '*.md' -print
+register=docs/decisions; [ ! -d "$register" ] || find "$register" -type f -not -path '*/views/*' -name '*.md' -exec grep -li "<keyword1>\|<keyword2>\|<keyword3>" {} +
 ```
 
-Read every hit — including ADR-0000's amendments, which often carry the
+Read every hit — recorded decisions often carry the
 placement/naming/seam rulings that bind a spec most directly. Record the
 keywords you used in your rationale (e.g. "verified via grep on `committee`,
 `rubric`, `gate` — A9 applies"), so the claim "no decision applies" is itself
@@ -76,10 +72,10 @@ verifiable.
   recorded entry binds on write. A spec free to contradict one must SAY it
   proposes overriding a recorded decision — that names the conflict for the
   human instead of hiding it.
-- Decisions are RECORDED at `docs/decisions/`, never appended to
-  `docs/adr/ADR-0000-ai-decision-register.md` — that file is READ-ONLY legacy.
-  A spec whose plan appends an `A<n>` amendment is writing to the wrong home:
-  grade it and name `docs/decisions/` plus the vended `decide` skill.
+- Decisions are RECORDED at `docs/decisions/` — there is no legacy register
+  fallback to append to any more. A spec whose plan appends an `A<n>`
+  amendment anywhere else is writing to the wrong home: grade it and name
+  `docs/decisions/` plus the vended `decide` skill.
 - Do not demand citations for decisions that genuinely do not touch the spec's
   surfaces — a padded ADR section citing everything is noise, not alignment.
   The A-grade signal is the LOAD-BEARING citation, quoted.

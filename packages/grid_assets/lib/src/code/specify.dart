@@ -327,8 +327,8 @@ grade before that ruling:
 8. **Every `## Touches` item is** `$kTouchRecordForm` — exactly ONE
    repo-relative backticked path and one disposition word.
 9. **Every `## ADR Alignment` item is** `$kDecisionRecordForm`, whose citation
-   resolves as `<repo>#<slug>`, a `docs/decisions/` or `docs/adr/` path, or a
-   legacy `ADR-<nnnn>` id. The section is NEVER silent about the lookup: when
+   resolves as `<repo>#<slug>`, a `docs/decisions/` path, or a legacy
+   `ADR-<nnnn>` id. The section is NEVER silent about the lookup: when
    the roster union is empty for every queried surface, write
    "${noGoverningDecisionSentence(runner: runner, gridHome: gridHome)}"; when
    the lookup FAILED or exited non-zero, write
@@ -470,8 +470,8 @@ const Circuit kSpecReviewCircuit = Circuit(
     // The DECISION lane
     // (`power_station#the-spec-decision-lane-queries-the-roster-union`): it
     // queries the composing station's ROSTER-MODE `decisions index` — the
-    // UNION of every mounted substation's register — not this repo's
-    // `docs/adr/`. Step id and rubric id MUST stay equal: the route joins a
+    // UNION of every mounted substation's register — not just this repo's
+    // local `docs/decisions/`. Step id and rubric id MUST stay equal: the route joins a
     // lane by reading `.grid/critique/<id>.json` at `<parent>/<id>`. A
     // survivor mid-`spec_review` finds no cursor key here, which the frontier
     // reads as `pending`: the lane simply re-runs, and a read-only critic
@@ -2076,8 +2076,8 @@ class DecisionCitation {
     required this.line,
   });
 
-  /// The resolvable identity — `<repo>#<slug>`, a `docs/decisions/` or
-  /// `docs/adr/` path, or a legacy `ADR-<nnnn>` id.
+  /// The resolvable identity — `<repo>#<slug>`, a `docs/decisions/` path,
+  /// or a legacy `ADR-<nnnn>` id.
   final String reference;
 
   /// What the plan does with the decision.
@@ -2250,8 +2250,8 @@ String? repoRelativePathOf(String raw) {
 }
 
 /// Whether [raw] is a citation identity the roster index can ANSWER: the
-/// canonical `<repo>#<slug>`, a `docs/decisions/` or `docs/adr/` path, or a
-/// legacy `ADR-<nnnn>` id (which a migrated entry still resolves by).
+/// canonical `<repo>#<slug>`, a `docs/decisions/` path, or a legacy
+/// `ADR-<nnnn>` id (which a migrated entry still resolves by).
 ///
 /// RESOLUTION only — whether the clause is READ correctly is the
 /// `decision-alignment` lane's judgement, never this parser's.
@@ -2262,8 +2262,7 @@ bool isResolvableDecisionReference(String raw) {
   }
   if (RegExp(r'^ADR-\d{4}\b').hasMatch(token)) return true;
   final path = repoRelativePathOf(token);
-  return path != null &&
-      (path.startsWith('docs/decisions/') || path.startsWith('docs/adr/'));
+  return path != null && path.startsWith('docs/decisions/');
 }
 
 /// The separator a record may put between its id and its text.

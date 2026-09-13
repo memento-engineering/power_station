@@ -3,5 +3,5 @@
 - [ ] `settle` evaluates its condition EXACTLY ONCE per round: an already-satisfied condition costs 1 check; a never-satisfied one at `maxPumps: 3` costs exactly 3 (the plateau the acceptance suites count `stableRounds` in)
 - [ ] a pending REAL filesystem round trip (temp dir -> plan write -> recursive delete, the shape `BdCliService.applyGraph` performs) lands inside `settle`'s budget
 - [ ] the full offline `grid_assets` suite passes and `dart analyze` reports no issues
-- [ ] `docs/adr/ADR-0000-ai-decision-register.md` carries amendment A28 with `**Status:** pending` (never Accepted, per the org register rule)
+- [ ] `ADR-0000` carries amendment A28 with `**Status:** pending` (never Accepted, per the org register rule)
 - [ ] the bead's notes carry the 40-run receipt (the `0/40 after` diagnosis-of-record), so the diagnosis survives the worktree

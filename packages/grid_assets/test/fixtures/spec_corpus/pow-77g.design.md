@@ -500,7 +500,7 @@ and stop banning tokens the brief never listed (step 1).
    Commit: `test(grid_assets): fence the brief ↔ gate round trip, both ordinal shapes, and the gaps that must still bite (pow-77g)`
 
 6. **Register the autonomous decisions.** Append amendment `A16` to
-   `docs/adr/ADR-0000-ai-decision-register.md` (after `A15`, at the end of the
+   `ADR-0000` (after `A15`, at the end of the
    file), following the file's exact `## A<n> (date) — bead: <headline>` +
    `**Decision:**` / `**Why:**` / `**Affects (if promoted):**` / `**Status:**
    pending.` shape. It registers four calls: (1) the structural contract becomes
@@ -531,7 +531,7 @@ and stop banning tokens the brief never listed (step 1).
 - `packages/grid_assets/extension/rubrics/spec-validation.md` — modified (step 4).
 - `packages/grid_assets/test/spec_committee_test.dart` — modified (step 5).
 - `packages/grid_assets/test/specify_stage_test.dart` — modified (step 5).
-- `docs/adr/ADR-0000-ai-decision-register.md` — modified (step 6).
+- `ADR-0000` — modified (step 6).
 
 **Public symbols added** (all reach the pack's API through the existing
 `export 'src/code/specify.dart';` in `lib/grid_assets.dart` — no export edit):
@@ -563,13 +563,13 @@ unaffected by every change here.
 
 ## ADR Alignment
 
-Verified via `ls docs/adr/` (one file: `ADR-0000-ai-decision-register.md`) and
-`grep -li "spec-validation\|structural\|specify\|numbered\|brief" docs/adr/*.md`
+Verified via `ls the ADR directory` (one file: `ADR-0000-ai-decision-register.md`) and
+`grep -li "spec-validation\|structural\|specify\|numbered\|brief" the ADR files`
 (one hit: the same file). ADR-0008/ADR-0011 are cited by this repo's `CLAUDE.md`
 but live in the sibling `the_grid` register; the D-H clause below is quoted from
 `CLAUDE.md` itself.
 
-- `docs/adr/ADR-0000-ai-decision-register.md` A13(2) — "the gating
+- `ADR-0000` A13(2) — "the gating
   `spec-validation` lane is a deterministic `ServiceCapability` … not an LLM
   critic … a spec-less / placeholder / section-less bead grades F with every
   missing element NAMED (guards LOUD)." The plan preserves this posture exactly:
@@ -577,7 +577,7 @@ but live in the sibling `the_grid` register; the D-H clause below is quoted from
   `{'grade','transport':'structural','rationale'}`, and step 2's new finding NAMES
   the two shapes it wanted. What changes is WHICH structures count as whole, not
   who decides.
-- `docs/adr/ADR-0000-ai-decision-register.md` A13(10) — "the placeholder fence
+- `ADR-0000` A13(10) — "the placeholder fence
   reads PROSE, not QUOTATION — `specStructuralFindings` strips the spec's markdown
   quotation contexts … before matching the banned tokens: a spec that QUOTES a
   token as evidence … is pointing at work, not deferring it." Step 2 extends that
@@ -585,16 +585,16 @@ but live in the sibling `the_grid` register; the D-H clause below is quoted from
   heading or ordinal quoted inside a fence is evidence, not structure. This is the
   completion of A13(10), not a departure — and it is load-bearing for this pack,
   whose own specs quote all four headings verbatim.
-- `docs/adr/ADR-0000-ai-decision-register.md` A13(6) — "The specify brief also
+- `ADR-0000` A13(6) — "The specify brief also
   sets the bead's `validation_plan` metadata … The stage is READ-ONLY on the tree."
   The brief is where the spec's contract is stated, so step 3 extends exactly this
   surface; `validation_plan` and the read-only posture are untouched.
-- `docs/adr/ADR-0000-ai-decision-register.md` A14(3) — "The deterministic
+- `ADR-0000` A14(3) — "The deterministic
   `spec-validation` F (A13(2)) stays a hard block to a human, unchanged." The plan
   does not touch `decideSpecRoute` or `SpecRouteCapability`: a structural F still
   escalates rather than auto-respecs. It removes the manufactured F's, so the
   escalation arm fires only on real ones.
-- `docs/adr/ADR-0000-ai-decision-register.md` A15(1) — "`specify` is FOLDED into
+- `ADR-0000` A15(1) — "`specify` is FOLDED into
   `kSpecReviewCircuit` as the head step." The plan changes the brief's CONTENT, not
   the circuit: `kSpecReviewCircuit`, `kSpecifyStep`, and every node path stay
   byte-identical.

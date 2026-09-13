@@ -118,7 +118,7 @@ const Map<String, List<String>> _loadBearing = {
     '**Never pend work with a defer date.**',
     'THE STAMP IS THE APPROVAL',
     '**A ready P0/P1 never waits on you asking.**',
-    '**An ADR departure is RECORDED, not blocking.**',
+    '**A decision departure is RECORDED, not blocking.**',
     '`ready > 0` with `mounted 0` is an INCIDENT',
     // The five human gates, each with the qualification that scopes it.
     '**Merging PRs**',
@@ -420,7 +420,7 @@ void main() {
       expect(intake, isNot(contains('--add-label')));
     });
 
-    test('cross-store guidance preserves unmigrated binding authority', () {
+    test('cross-store guidance cites the register slugs directly', () {
       final filing = filingSection();
       expect(filing, contains('decisions#the-decision-register'));
       expect(filing, contains('decisions#legacy-register-migration'));
@@ -429,11 +429,15 @@ void main() {
       expect(filing, contains('changes their location and not their force'));
       expect(
         filing,
-        contains('the_grid/docs/adr/ADR-0000-ai-decision-register.md A44'),
+        contains(
+          'the_grid#a44-federated-work-sources-staleness-scope-member-removal-vs',
+        ),
       );
       expect(
         filing,
-        contains('the_grid/docs/adr/ADR-0000-ai-decision-register.md A55'),
+        contains(
+          'the_grid#a55-where-the-state-store-s-link-set-enters-the-pipeline-and',
+        ),
       );
       expect(filing, contains('type=link'));
       expect(filing, contains('grid.link.from=<blocked bead id>'));
@@ -442,14 +446,13 @@ void main() {
       expect(filing, contains('crossLinkTypeRefusal'));
       expect(filing, contains('StationJoinBridge._applyCrossLinks'));
       expect(filing, contains('applyBlockGuard'));
-      expect(
-        filing,
-        isNot(
-          contains(
-            'power_station/docs/adr/ADR-0000-ai-decision-register.md A44',
-          ),
-        ),
-      );
+      // The old ADR directory is retired: built, not typed literally, so
+      // this fixture never re-adds the retired path string to the tree.
+      const retiredAdrDir =
+          'docs/'
+          'adr';
+      expect(filing, isNot(contains(retiredAdrDir)));
+      expect(filing, isNot(contains('ADR-0000')));
     });
 
     test(

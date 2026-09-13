@@ -43,7 +43,7 @@ blessing stays the human lever."* Its closed child `pow-1rn.4` restates it as a 
 INVARIANT: *"nothing arriving from GitHub ever mints a ready bead. Everything
 lands deferred; approval stays the human lever."* This entry keeps the first
 half of both sentences and retires the second. Two reasons, in order:
-(a) `docs/adr/ADR-0004-station-throughput-outranks-staging-ceremony.md` D1 was
+(a) `ADR-0004` D1 was
 ratified by Nico on 2026-08-12 — AFTER the epic's design (2026-08-07) and after
 `pow-1rn.4` landed (#110, 2026-08-10) — and retires deferral as the pending
 mechanism org-wide, so the epic's wording is superseded by a later ratified

@@ -135,12 +135,11 @@ restate that boundary as Filing requirements.
   `decisions#legacy-register-migration` records that the six legacy registers
   are not yet migrated. Their entries were already binding, so migration
   changes their location and not their force; citations are preserved through
-  `register.legacy-id`. Until that mechanical conversion,
-  `the_grid/docs/adr/ADR-0000-ai-decision-register.md A44` remains the
-  binding authority that rejects raw foreign-id dependency rows because
+  `register.legacy-id`. `the_grid#a44-federated-work-sources-staleness-scope-member-removal-vs`
+  is the binding authority that rejects raw foreign-id dependency rows because
   `bd doctor --fix` can classify them as orphaned and sever them, and
-  `the_grid/docs/adr/ADR-0000-ai-decision-register.md A55` remains the
-  binding authority for the OPEN grid-state `type=link` mechanism.
+  `the_grid#a55-where-the-state-store-s-link-set-enters-the-pipeline-and`
+  is the binding authority for the OPEN grid-state `type=link` mechanism.
   Cross-store dependencies DO exist, but never author one as a local dependency
   row or with `bd dep add <id> external:<project>:<capability>`. Use the
   station's link-authoring verb, after its `crossLinkTypeRefusal` capability

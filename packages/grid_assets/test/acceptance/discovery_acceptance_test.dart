@@ -230,9 +230,10 @@ GraphSnapshot _state(List<Bead> beads) => _graph(beads: beads, ready: const {});
 const _sid = 'tgdog-sess1';
 String _step(String relPath) => '$_sid/tg-1/$relPath';
 
-/// The ADR clause the decision lens cites — a REAL clause of the live register,
-/// so the proof can never pass on a fabricated citation.
-const String _adr = 'docs/adr/ADR-0000-ai-decision-register.md A17(3)';
+/// The decision clause the decision lens cites — a REAL clause of the live
+/// register, so the proof can never pass on a fabricated citation.
+const String _adr =
+    'power_station#adr-0006-typed-environment-lookup-selects-by-value D2';
 
 /// A session whose READINESS LADDER is complete and nothing else — the bead is
 /// released into DISCOVERY, which is this suite's focus.

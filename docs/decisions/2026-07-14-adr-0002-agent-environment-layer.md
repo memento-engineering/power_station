@@ -26,7 +26,7 @@ decision reached collaboratively with Nico is already human-ratified, none of it
 as an ADR-0000 pending amendment (the org register rule — do not log a
 collaboratively-reached decision).
 
-**Supersedes:** the_grid `docs/adr/ADR-0008-authoring-sdk-and-reentrant-engine.md`
+**Supersedes:** the_grid `ADR-0008`
 **Decision 10** ("the agent scope: harnesses over the agentic step") — its harness roster,
 its `AgentConfig` D-C config ladder, and its `ModelTarget` sealed type as the top-level axis.
 A companion the_grid bead stamps Decision 10 as superseded and strikes its

@@ -986,10 +986,9 @@ class DiscoveryFinding {
   /// What kind of standard is cited.
   final ViolationKind kind;
 
-  /// The CITATION — a legacy clause such as
-  /// `docs/adr/ADR-0000-ai-decision-register.md A17(4)`, or a decisions-register
-  /// slug such as `the_grid#admission-authority-boundary`. EMPTY means a vibe
-  /// and can never gate.
+  /// The CITATION — a legacy clause such as `ADR-0006 D2`, or a
+  /// decisions-register slug such as `the_grid#admission-authority-boundary`.
+  /// EMPTY means a vibe and can never gate.
   final String standard;
 
   /// The cited clause, quoted.

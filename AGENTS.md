@@ -9,9 +9,10 @@ Extracted from `the_grid` at the repo split (ADR-0011 placement).
 ## Read first, in order
 
 - `README.md` — the pack table + `dart pub get` / `melos run test|analyze`.
-- `docs/adr/ADR-0000-ai-decision-register.md` — the living AI-decision register
-  (A1…; every autonomous agent run lands its decisions here as a pending
-  amendment, per the org rule — never Accepted, only Nico promotes).
+- `docs/decisions/` — the live AI-decision register (an entry BINDS ON WRITE;
+  authored through the vended `decide` skill). The former `ADR-0000` register
+  file this repo used before the migration is retired; its rule now lives in
+  the decisions package's own specification.
 
 ## Conventions
 

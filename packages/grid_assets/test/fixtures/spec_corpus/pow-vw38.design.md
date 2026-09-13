@@ -515,7 +515,7 @@ intake stores — no overlap with any file above, so no dependency edge is neede
 
 Verified via grep on `settle`, `pumpEventQueue`, `hermetic`, `Platform.environment`,
 `EnvironmentReader`, `flake`, `fake`, `filesystem` over both registers
-(`docs/adr/` and `docs/decisions/`).
+(`the ADR directory` and `docs/decisions/`).
 
 - **`power_station#a28-bead-pow-d26-the-acceptance-suite-flake-is-the-molecule`**
   (`docs/decisions/2026-07-21-a28-bead-pow-d26-the-acceptance-suite-flake-is-the-molecule.md`,
@@ -534,14 +534,14 @@ Verified via grep on `settle`, `pumpEventQueue`, `hermetic`, `Platform.environme
   legitimacy does not reach a TEST DOUBLE, so Step 2 additionally REMOVES the IO from
   `_FakeRead`. Step 8 records that extension as its own entry rather than amending
   A28, which remains in force.
-- **`docs/adr/ADR-0002-agent-environment-layer.md` D3.** Cited and DISTINGUISHED. Its
+- **`ADR-0002` D3.** Cited and DISTINGUISHED. Its
   load-bearing clause is *"An environment whose machine fact is UNBOUND on this box
   REFUSES AT BOOT — loud, never a silent default."* Its literal subject is the named
   INFERENCE environments (harness/target/model) and their machine-local site binding,
   not POSIX process variables, so it does not govern `EnvironmentReader`. Its posture
   is nevertheless honoured rather than contradicted: Steps 6 and 7 remove the pack's
   one `?? Platform.environment` silent fallback and make a new one fail loudly.
-- **`docs/adr/ADR-0006-typed-environment-lookup-selects-by-value.md`.** Grepped
+- **`ADR-0006`.** Grepped
   (matches on the word "environment") and NOT applicable: it governs typed
   `AgentEnvironment` lookup through `TreeContext`, and this bead adds no tree lookup
   and changes no capability's environment resolution.
@@ -554,7 +554,7 @@ Verified via grep on `settle`, `pumpEventQueue`, `hermetic`, `Platform.environme
   `StateNotifier` changes. `GitHubAppClientAssets` already watches its deps in
   `buildWithChild` and takes its `credentialLoader` by DI, which is why the injected
   reader was never the problem.
-- `docs/adr/ADR-0000-ai-decision-register.md` is READ-ONLY legacy and is NOT appended
+- `ADR-0000` is READ-ONLY legacy and is NOT appended
   to; the new decision goes to `docs/decisions/` per Step 8.
 
 ## Validation Plan

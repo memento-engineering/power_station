@@ -167,7 +167,7 @@ void main() {
         '../docs/design/a.md',
         'docs/design/../../lib/src/code/committee.dart',
         // Ordinary docs, and ordinary source.
-        'docs/adr/ADR-0000-ai-decision-register.md',
+        'docs/misc/notes.md',
         'README.md',
         'lib/src/code/docs_committee.dart',
         '',
@@ -186,7 +186,7 @@ void main() {
     test('an ordinary docs bead is UNCHANGED by the new arm', () {
       final docs = bead(
         'pow-d2',
-      ).copyWith(design: '## Touches\n- `docs/adr/ADR-0009-x.md` — created\n');
+      ).copyWith(design: '## Touches\n- `docs/misc/notes.md` — created\n');
       expect(changeShapeOf(docs), ChangeShape.docs);
     });
 
@@ -195,7 +195,7 @@ void main() {
         design:
             '## Touches\n'
             '- `docs/design/r7.md`\n'
-            '- `docs/adr/ADR-0009-x.md`\n',
+            '- `docs/misc/notes.md`\n',
       );
       expect(changeShapeOf(withDocs), ChangeShape.docs);
       final withSource = bead('pow-d4').copyWith(

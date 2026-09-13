@@ -16,7 +16,7 @@ import 'support/asset_fakes.dart';
 
 /// A bead whose `## Touches` declares a DOCS-only surface.
 Bead _docsBead({String? sections}) => bead('pow-1').copyWith(
-  design: '## Touches\n- `docs/adr/ADR-0009-x.md` — created\n',
+  design: '## Touches\n- `docs/misc/notes.md` — created\n',
   metadata: sections == null ? const {} : {'docs_sections': sections},
 );
 
@@ -261,7 +261,7 @@ void main() {
         'swift_infer/example-config.json',
         'rust/Cargo.toml',
         'LICENSE',
-        'docs/adr/ADR-0000-ai-decision-register.md',
+        'docs/misc/notes.md',
       ]) {
         expect(isMetadataPath(path), isTrue, reason: path);
       }

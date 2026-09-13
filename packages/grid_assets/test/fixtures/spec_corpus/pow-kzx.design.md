@@ -14,7 +14,7 @@ re-introduce them:
 
 - The ADR-0000 register's last entry is **A21** (`pow-96y`, the discovery circuit, added by `#32`),
   so this bead's amendment is **A22**. (The register regresses as well as grows — `56b80f6` deleted
-  a mis-filed A21 — so the number was re-derived by `grep -n '^## A[0-9]' docs/adr/ADR-0000-ai-decision-register.md`, never assumed.)
+  a mis-filed A21 — so the number was re-derived by `grep -n '^## A[0-9]' ADR-0000`, never assumed.)
 - `buildAgentBrief` now takes a named `trailerToken` (bead `pow-8dx`/A18):
   `AgentBrief buildAgentBrief(Bead bead, Workspace workspace, {String trailerToken = kDefaultTrailerToken})`,
   and `AgentCapability.spawn` passes `trailerToken: composition.trailerToken`. The new `skills:`
@@ -1367,9 +1367,9 @@ cd packages/grid_assets && dart analyze && dart test
 ```
 → `No issues found!` then `All tests passed!`.
 
-Then append to `docs/adr/ADR-0000-ai-decision-register.md`, AFTER its current last entry — which is
+Then append to `ADR-0000`, AFTER its current last entry — which is
 **A21** (`pow-96y`, the discovery circuit; re-confirm with
-`grep -n '^## A[0-9]' docs/adr/ADR-0000-ai-decision-register.md | tail -1` before writing, since the
+`grep -n '^## A[0-9]' ADR-0000 | tail -1` before writing, since the
 register both grows and regresses) — in the file's existing entry format:
 
 ```markdown
@@ -1404,7 +1404,7 @@ Commit: `docs(grid_assets): record the overlay-delivery decisions as ADR-0000 A2
 - `packages/grid_assets/test/assets/skill_assets_test.dart` — MODIFIED: header comment (line 3) + the manifest `path` assertion (line 187).
 - `packages/grid_assets/test/assets/overlay_materializer_test.dart` — NEW.
 - `packages/grid_assets/test/track_h_code_extension_test.dart` — MODIFIED: one new group appended before `main()`'s closing brace (line 670); existing groups untouched; no new imports.
-- `docs/adr/ADR-0000-ai-decision-register.md` — MODIFIED: appended `A22`.
+- `ADR-0000` — MODIFIED: appended `A22`.
 
 Re-validated against the live tree at the CURRENT base (`1d5a165` — round 3's reset; `#31`/`#32` have landed and moved these files, so every line number and signature above was re-read, not carried over). Every touched/added symbol was grepped for callers:
 `AgentCapability(` — 13 hits: 11 test construction sites (8 in `track_h_code_extension_test.dart` at lines 153/275/521/536/545/599/611/637/666, 1 in `track_e_reference_inflation_test.dart:360`, and **1 NEW since the last spec round — `test/agent/role_model_ladder_test.dart:73`**, added by bead `pow-edp`), the ctor itself (`code_capabilities.dart:135`), and 1 production site (`buildCodeRegistry`, `code_capabilities.dart:908`). All pass zero or one existing named arg, so the three new all-defaulted params leave every one valid.
@@ -1419,14 +1419,14 @@ Sibling check: `bd dep list pow-kzx` → "pow-kzx has no dependencies" (no paren
 
 ## ADR Alignment
 
-`ls docs/adr/` in this worktree lists only `ADR-0000-ai-decision-register.md`;
-`grep -li "overlay\|skill\|materializ\|non-destructive\|provision\|deliver" docs/adr/*.md` hits only
+`ls the ADR directory` in this worktree lists only `ADR-0000-ai-decision-register.md`;
+`grep -li "overlay\|skill\|materializ\|non-destructive\|provision\|deliver" the ADR files` hits only
 that file (via A1/A5/A11/A12), and the warranted second sweep
-`grep -li "git\|commit\|land\|residue" docs/adr/*.md` (warranted because this plan's own design
+`grep -li "git\|commit\|land\|residue" the ADR files` (warranted because this plan's own design
 engineers around `GitOps.commitAll`/`git add -A`) hits it via A5. ADR-0001
 (`ADR-0001-packaged-ai-asset-skill-command-coupling.md`) is an **untracked draft in the main
 checkout**, so it exists in no per-bead worktree — it must be read from
-`/Users/nico/development/engineering.memento/power_station/docs/adr/ADR-0001-packaged-ai-asset-skill-command-coupling.md`
+`/Users/nico/development/engineering.memento/power_station/ADR-0001`
 (re-confirmed present and unchanged this round). Both documents were read in full.
 
 - **ADR-0001 (DRAFT, main checkout) — the direct governing doc.** Its "missing leg" clause is what

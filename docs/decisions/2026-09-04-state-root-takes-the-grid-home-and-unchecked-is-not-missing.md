@@ -38,7 +38,7 @@ and every consumer had to know the undocumented one.
 
 A selected root holding NEITHER child is refused by `StateError` naming the
 root and both expected children, and both verbs render that refusal on stderr
-with exit 1. Guards LOUD or GONE (`docs/adr/ADR-0008`): the silent arm of this
+with exit 1. Guards LOUD or GONE (`ADR-0008`): the silent arm of this
 guard would read no link beads at all and report every wired cross-store
 blocker as unwired — the same false fact this entry's second half removes.
 

@@ -39,7 +39,7 @@ create-time metadata write as an unconditional create-then-update pair; the
 visible cost here is that the new-node-id path spends three spawns where it
 previously spent two.
 
-**DEPARTURE from `docs/adr/ADR-0004-station-throughput-outranks-staging-ceremony.md`
+**DEPARTURE from `ADR-0004`
 D1 (status: Accepted, ratified by Nico 2026-08-12).** D1 says: *"This retires
 deferral as a PENDING/QUEUEING mechanism — the 'park it until someone gets to
 it' idiom that produced the 76 lapsed dates. It does not retire the ATOMIC

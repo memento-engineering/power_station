@@ -45,7 +45,7 @@ final Map<String, RegExp> _forbiddenResidue = {
   'Go source files': RegExp(r'\.go\b'),
   'Go tooling': RegExp(r'\bgo (test|build|vet)\b'),
   'Go package layout': RegExp('internal/'),
-  'the foreign ADR home': RegExp('docs/adrs'),
+  'the foreign ADR home': RegExp('adrs/'),
   'the foreign rubric ADR': RegExp('ADR 0012'),
 };
 
@@ -112,7 +112,7 @@ void main() {
       () {
         const verbatim =
             'run go test ./internal/lint/ before fs convene '
-            '(see factoryskills ADR 0012 in docs/adrs)';
+            '(see factoryskills ADR 0012 in adrs/)';
         final tripped = _forbiddenResidue.values
             .where((pattern) => pattern.hasMatch(verbatim))
             .length;
@@ -149,7 +149,6 @@ void main() {
       expect(text, contains('decisions index'));
       expect(text, contains('originRegister'));
       expect(text, contains('<repo>#<slug>'));
-      expect(text, isNot(contains('docs/adr')));
     });
 
     test('coherence speaks memento terminology (the seam word is extension) '
@@ -561,12 +560,11 @@ void main() {
       }
     });
 
-    test('the write rule NAMES its four load-bearing tokens', () {
+    test('the write rule NAMES its three load-bearing tokens', () {
       for (final token in [
         'docs/decisions/',
         '.claude/skills/decide/SKILL.md',
         'BINDS ON WRITE',
-        'READ-ONLY LEGACY',
       ]) {
         expect(kDecisionWriteRule, contains(token));
       }
