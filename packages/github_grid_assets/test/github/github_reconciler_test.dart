@@ -167,6 +167,55 @@ final class FakeBdRunner implements BdRunner {
   }
 }
 
+/// One row of the `?state=open` pulls page, in GitHub's own shape.
+Map<String, Object?> _openPull({
+  String nodeId = 'PR_8',
+  int number = 8,
+  String branch = 'org/lockfile-convention',
+  String sha = 'abc123',
+  String body = 'A human digest.\n\nRefs: pow-78jk\n',
+  String updatedAt = '2026-09-12T09:00:00Z',
+}) => <String, Object?>{
+  'node_id': nodeId,
+  'number': number,
+  'body': body,
+  'user': <String, Object?>{'login': 'nico'},
+  'created_at': '2026-09-12T08:00:00Z',
+  'updated_at': updatedAt,
+  'head': <String, Object?>{'ref': branch, 'sha': sha},
+};
+
+/// The FULL pull resource, the only place `mergeable` lives.
+Map<String, Object?> _pullDetail({Object? mergeable = true}) =>
+    <String, Object?>{'mergeable': mergeable};
+
+/// One check run of a `/check-runs` page.
+Map<String, Object?> _run({
+  String nodeId = 'CR_1',
+  String status = 'completed',
+  String? conclusion = 'success',
+  String completedAt = '2026-09-12T09:30:00Z',
+}) => <String, Object?>{
+  'node_id': nodeId,
+  'status': status,
+  'conclusion': conclusion,
+  'completed_at': completedAt,
+  'name': 'test',
+  'app': <String, Object?>{'slug': 'actions'},
+};
+
+Map<String, Object?> _checkRuns(List<Map<String, Object?>> runs) =>
+    <String, Object?>{'check_runs': runs};
+
+/// A cursor whose intake leg is already conditional, so a `304` skips it.
+GitHubReconcilerCursor _intakeSettled() => const GitHubReconcilerCursor(
+  etags: <String, String>{'intake/issues': '"intake"'},
+);
+
+/// The `If-None-Match` value [request] carried, or null.
+String? _conditional(GitHubHttpRequest request) =>
+    request.headers['If-None-Match'];
+
 void main() {
   test(
     'mixed /issues states project only open rows and claim every observation',
@@ -542,34 +591,340 @@ void main() {
     expect(transport.requests, hasLength(2));
   });
 
-  test('feedback filters branches and checks while preserving since', () async {
+  test('a non-grid green pull emits PR feedback', () async {
+    // The whole defect in one case: a pull on `org/…`, not `grid/…`, that the
+    // loop used to drop on the floor. It is emitted, it is durable, and its
+    // branch takes no part in any of it.
+    final transport = FakeGitHubHttpTransport()
+      ..responses.addAll(<GitHubHttpResponse>[
+        _response('', status: 304),
+        _response(<Object?>[_openPull()], etag: '"pulls"'),
+        _response(_pullDetail(), etag: '"detail"'),
+        _response(_checkRuns(<Map<String, Object?>>[_run()]), etag: '"checks"'),
+      ]);
+    final store = FakeGitHubCursorStore(_intakeSettled());
+    final events = <NormalizedGitHubEvent>[];
+    await GitHubReconciler(
+      owner: 'memento-engineering',
+      repository: 'power_station',
+      substation: 'power_station',
+      client: _client(transport),
+      cursors: store,
+      emit: (event) async => events.add(event),
+      now: () => DateTime.utc(2026, 9, 12, 9, 45),
+    ).reconcileOnce();
+
+    final feedback = events.single as PullRequestFeedback;
+    expect(feedback.headBranch, 'org/lockfile-convention');
+    expect(feedback.repository, 'memento-engineering/power_station');
+    expect(feedback.number, 8);
+    expect(feedback.body, contains('Refs: pow-78jk'));
+    expect(feedback.actor, 'nico');
+    expect(feedback.headSha, 'abc123');
+    expect(feedback.checkState, PullRequestCheckState.green);
+    expect(feedback.mergeability, PullRequestMergeability.mergeable);
+    expect(feedback.openedAt, DateTime.utc(2026, 9, 12, 8));
+    expect(feedback.updatedAt, DateTime.utc(2026, 9, 12, 9));
+    expect(feedback.greenSince, DateTime.utc(2026, 9, 12, 9, 30));
+    expect(feedback.observedAt, DateTime.utc(2026, 9, 12, 9, 45));
+    expect(feedback.stalled, isFalse);
+
+    // Through the DURABLE outbox, not past it.
+    expect(store.calls, contains('pending:${feedback.observationId}'));
+    expect(store.cursor.hasObserved(feedback.observationId), isTrue);
+    expect(store.cursor.pending, isEmpty);
+    expect(
+      store.cursor.pullFeedback['PR_8']!.checkState,
+      PullRequestCheckState.green,
+    );
+    expect(store.cursor.etags['feedback/pull/PR_8'], '"detail"');
+    expect(store.cursor.etags['feedback/checks/PR_8'], '"checks"');
+    expect(store.cursor.etags['feedback/pulls'], '"pulls"');
+    expect(transport.requests, hasLength(4));
+    expect(transport.requests.last.uri.path, contains('abc123/check-runs'));
+  });
+
+  test('pull feedback distinguishes every check state', () async {
+    // Five pulls, one per aggregate shape, in ONE page: an empty list and a
+    // failure are the two that must never read as green, and a still-running
+    // job must outrank the successes beside it.
+    final shapes = <({String node, List<Map<String, Object?>> runs})>[
+      (node: 'PR_none', runs: <Map<String, Object?>>[]),
+      (
+        node: 'PR_pending',
+        runs: <Map<String, Object?>>[
+          _run(),
+          _run(nodeId: 'CR_2', status: 'in_progress', conclusion: null),
+        ],
+      ),
+      (
+        node: 'PR_green',
+        runs: <Map<String, Object?>>[
+          _run(),
+          _run(nodeId: 'CR_2', completedAt: '2026-09-12T09:40:00Z'),
+        ],
+      ),
+      (
+        node: 'PR_failing',
+        runs: <Map<String, Object?>>[
+          _run(),
+          _run(nodeId: 'CR_2', conclusion: 'failure'),
+        ],
+      ),
+      (
+        node: 'PR_inconclusive',
+        runs: <Map<String, Object?>>[
+          _run(),
+          _run(nodeId: 'CR_2', conclusion: 'skipped'),
+        ],
+      ),
+    ];
+    final transport = FakeGitHubHttpTransport()
+      ..responses.add(_response('', status: 304))
+      ..responses.add(
+        _response(<Object?>[
+          for (var index = 0; index < shapes.length; index++)
+            _openPull(nodeId: shapes[index].node, number: index + 1),
+        ], etag: '"pulls"'),
+      );
+    for (final shape in shapes) {
+      transport.responses
+        ..add(_response(_pullDetail()))
+        ..add(_response(_checkRuns(shape.runs)));
+    }
+    final events = <PullRequestFeedback>[];
+    await GitHubReconciler(
+      owner: 'o',
+      repository: 'r',
+      substation: 's',
+      client: _client(transport),
+      cursors: FakeGitHubCursorStore(_intakeSettled()),
+      emit: (event) async => events.add(event as PullRequestFeedback),
+      now: () => DateTime.utc(2026, 9, 12, 9, 45),
+    ).reconcileOnce();
+
+    expect(
+      <String, PullRequestCheckState>{
+        for (final event in events) event.nodeId: event.checkState,
+      },
+      <String, PullRequestCheckState>{
+        'PR_none': PullRequestCheckState.notReported,
+        'PR_pending': PullRequestCheckState.pending,
+        'PR_green': PullRequestCheckState.green,
+        'PR_failing': PullRequestCheckState.failing,
+        'PR_inconclusive': PullRequestCheckState.inconclusive,
+      },
+    );
+    expect(
+      events.where((event) => event.checkState == PullRequestCheckState.green),
+      hasLength(1),
+      reason: 'a failure and an empty list are never green',
+    );
+    expect(
+      events.singleWhere((event) => event.nodeId == 'PR_green').greenSince,
+      DateTime.utc(2026, 9, 12, 9, 40),
+      reason: 'green since the LATEST successful completion',
+    );
+    for (final event in events) {
+      if (event.checkState == PullRequestCheckState.green) continue;
+      expect(
+        event.greenSince,
+        isNull,
+        reason: '${event.nodeId} was never green',
+      );
+      expect(event.stalled, isFalse);
+    }
+    // Every observation is distinct, so nothing collapses in the ledger.
+    expect(
+      events.map((event) => event.observationId).toSet(),
+      hasLength(shapes.length),
+    );
+  });
+
+  test('pull feedback maps every mergeability value', () async {
+    final wire = <String, Object?>{
+      'PR_mergeable': true,
+      'PR_conflicting': false,
+      'PR_unknown': null,
+    };
+    final transport = FakeGitHubHttpTransport()
+      ..responses.add(_response('', status: 304))
+      ..responses.add(
+        _response(<Object?>[
+          for (final node in wire.keys) _openPull(nodeId: node),
+        ], etag: '"pulls"'),
+      );
+    for (final mergeable in wire.values) {
+      transport.responses
+        ..add(_response(_pullDetail(mergeable: mergeable)))
+        ..add(_response(_checkRuns(<Map<String, Object?>>[_run()])));
+    }
+    final events = <PullRequestFeedback>[];
+    await GitHubReconciler(
+      owner: 'o',
+      repository: 'r',
+      substation: 's',
+      client: _client(transport),
+      cursors: FakeGitHubCursorStore(_intakeSettled()),
+      emit: (event) async => events.add(event as PullRequestFeedback),
+      now: () => DateTime.utc(2026, 9, 12, 9, 45),
+    ).reconcileOnce();
+
+    expect(
+      <String, PullRequestMergeability>{
+        for (final event in events) event.nodeId: event.mergeability,
+      },
+      <String, PullRequestMergeability>{
+        'PR_mergeable': PullRequestMergeability.mergeable,
+        'PR_conflicting': PullRequestMergeability.conflicting,
+        'PR_unknown': PullRequestMergeability.unknown,
+      },
+    );
+  });
+
+  test('green feedback crosses the one-hour stall bound from cache', () async {
+    var now = DateTime.utc(2026, 9, 12, 9, 45);
+    final transport = FakeGitHubHttpTransport()
+      ..responses.addAll(<GitHubHttpResponse>[
+        // Cycle one: a fresh green.
+        _response('', status: 304),
+        _response(<Object?>[_openPull()], etag: '"pulls"'),
+        _response(_pullDetail(), etag: '"detail"'),
+        _response(_checkRuns(<Map<String, Object?>>[_run()]), etag: '"checks"'),
+        // Cycle two: NOTHING changed, and the bound has passed.
+        _response('', status: 304),
+        _response('', status: 304),
+        // Cycle three: still nothing changed, and still past the bound.
+        _response('', status: 304),
+        _response('', status: 304),
+      ]);
+    final store = FakeGitHubCursorStore(_intakeSettled());
+    final events = <PullRequestFeedback>[];
+    final reconciler = GitHubReconciler(
+      owner: 'o',
+      repository: 'r',
+      substation: 's',
+      client: _client(transport),
+      cursors: store,
+      emit: (event) async => events.add(event as PullRequestFeedback),
+      now: () => now,
+    );
+
+    await reconciler.reconcileOnce();
+    expect(events.single.stalled, isFalse);
+
+    now = DateTime.utc(2026, 9, 12, 10, 30);
+    await reconciler.reconcileOnce();
+    expect(events, hasLength(2));
+    expect(events.last.stalled, isTrue);
+    expect(events.last.checkState, PullRequestCheckState.green);
+    expect(events.last.greenSince, DateTime.utc(2026, 9, 12, 9, 30));
+    expect(events.last.observedAt, now);
+    expect(events.last.body, contains('Refs: pow-78jk'));
+    expect(events.last.headBranch, 'org/lockfile-convention');
+    expect(
+      events.last.observationId,
+      isNot(events.first.observationId),
+      reason: 'the crossing is a DISTINCT observation',
+    );
+    expect(
+      transport.requests,
+      hasLength(6),
+      reason: 'an unchanged page spends no per-pull request',
+    );
+
+    now = DateTime.utc(2026, 9, 12, 11, 30);
+    await reconciler.reconcileOnce();
+    expect(events, hasLength(2), reason: 'the crossing emits exactly once');
+    expect(transport.requests, hasLength(8));
+  });
+
+  test('feedback request count stays bounded by etags', () async {
+    final transport = FakeGitHubHttpTransport()
+      ..responses.addAll(<GitHubHttpResponse>[
+        // Cycle one: everything is fresh.
+        _response('', status: 304),
+        _response(<Object?>[_openPull()], etag: '"pulls"'),
+        _response(_pullDetail(), etag: '"detail"'),
+        _response(_checkRuns(<Map<String, Object?>>[_run()]), etag: '"checks"'),
+        // Cycle two: the PAGE changed, both per-pull resources did not.
+        _response('', status: 304),
+        _response(<Object?>[_openPull()], etag: '"pulls-2"'),
+        _response('', status: 304),
+        _response('', status: 304),
+      ]);
+    final store = FakeGitHubCursorStore(_intakeSettled());
+    final events = <PullRequestFeedback>[];
+    final reconciler = GitHubReconciler(
+      owner: 'o',
+      repository: 'r',
+      substation: 's',
+      client: _client(transport),
+      cursors: store,
+      emit: (event) async => events.add(event as PullRequestFeedback),
+      now: () => DateTime.utc(2026, 9, 12, 9, 45),
+    );
+
+    await reconciler.reconcileOnce();
+    expect(transport.requests, hasLength(4));
+    expect(
+      transport.requests.skip(2).map(_conditional),
+      everyElement(isNull),
+      reason: 'nothing was cached to be conditional on',
+    );
+
+    await reconciler.reconcileOnce();
+    expect(
+      transport.requests,
+      hasLength(8),
+      reason: 'ONE detail and ONE check-runs request per listed pull',
+    );
+    expect(_conditional(transport.requests[5]), '"pulls"');
+    expect(_conditional(transport.requests[6]), '"detail"');
+    expect(_conditional(transport.requests[7]), '"checks"');
+    // Both `304`s were answered from the cursor, and the tags survived.
+    expect(events, hasLength(1), reason: 'an unchanged state deduplicates');
+    expect(store.cursor.etags['feedback/pull/PR_8'], '"detail"');
+    expect(store.cursor.etags['feedback/checks/PR_8'], '"checks"');
+    expect(store.cursor.etags['feedback/pulls'], '"pulls-2"');
+    expect(
+      store.cursor.pullFeedback['PR_8']!.checkState,
+      PullRequestCheckState.green,
+    );
+  });
+
+  test('a 304 the cursor cannot answer fails loudly', () async {
+    // Unreachable by construction — the tag is only sent when a record exists —
+    // so a server that answers one anyway is naming a state we must not
+    // invent a green for.
+    final transport = FakeGitHubHttpTransport()
+      ..responses.addAll(<GitHubHttpResponse>[
+        _response('', status: 304),
+        _response(<Object?>[_openPull()], etag: '"pulls"'),
+        _response('', status: 304),
+      ]);
+    await expectLater(
+      GitHubReconciler(
+        owner: 'o',
+        repository: 'r',
+        substation: 's',
+        client: _client(transport),
+        cursors: FakeGitHubCursorStore(_intakeSettled()),
+        emit: (_) async {},
+        now: () => DateTime.utc(2026, 9, 12, 9, 45),
+      ).reconcileOnce(),
+      throwsFormatException,
+    );
+  });
+
+  test('feedback preserves the intake high-water mark', () async {
     final since = DateTime.parse('2026-08-09T00:00:00Z');
     final transport = FakeGitHubHttpTransport()
       ..responses.addAll(<GitHubHttpResponse>[
-        _response(const <Object?>[], status: 304),
-        _response(<Object?>[
-          <String, Object?>{
-            'node_id': 'PR_1',
-            'head': <String, Object?>{'ref': 'feature/no', 'sha': 'skip'},
-          },
-          <String, Object?>{
-            'node_id': 'PR_2',
-            'head': <String, Object?>{'ref': 'grid/yes', 'sha': 'a/b'},
-          },
-        ], etag: '"pulls"'),
-        _response(<String, Object?>{
-          'check_runs': <Object?>[
-            <String, Object?>{'node_id': 'pending', 'status': 'in_progress'},
-            <String, Object?>{
-              'node_id': 'CR_1',
-              'status': 'completed',
-              'conclusion': 'success',
-              'completed_at': '2026-08-09T04:00:00Z',
-              'name': 'test',
-              'app': <String, Object?>{'slug': 'actions'},
-            },
-          ],
-        }, etag: '"checks"'),
+        _response('', status: 304),
+        _response(<Object?>[_openPull()], etag: '"pulls"'),
+        _response(_pullDetail()),
+        _response(_checkRuns(<Map<String, Object?>>[_run()])),
       ]);
     final store = FakeGitHubCursorStore(
       GitHubReconcilerCursor(
@@ -577,21 +932,16 @@ void main() {
         etags: const <String, String>{'intake/issues': '"intake"'},
       ),
     );
-    final events = <NormalizedGitHubEvent>[];
     await GitHubReconciler(
       owner: 'o',
       repository: 'r',
       substation: 's',
       client: _client(transport),
       cursors: store,
-      emit: (event) async => events.add(event),
+      emit: (_) async {},
+      now: () => DateTime.utc(2026, 9, 12, 9, 45),
     ).reconcileOnce();
-    expect(events.single, isA<CheckConcluded>());
     expect(store.cursor.since, since);
-    expect(store.cursor.etags['feedback/checks/PR_2'], '"checks"');
-    expect(store.cursor.etags['feedback/pulls'], '"pulls"');
-    expect(transport.requests, hasLength(3));
-    expect(transport.requests.last.uri.path, contains('a%2Fb/check-runs'));
   });
 
   group('workflow run', () {
