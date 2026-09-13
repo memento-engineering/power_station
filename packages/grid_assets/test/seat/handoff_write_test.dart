@@ -16,15 +16,21 @@
 //     creates no file;
 //   - AC-3 the stamped note keeps its bytes AND its modification time through a
 //     refused later write, so the stamp in its own file name cannot go stale;
+//   - AC-4 `seat`, `prime` and `succession --no-destructive` each render how
+//     long an unconsumed handoff has sat there, with no threshold behind it;
 //   - AC-6 the composed `succession <seat> --write-handoff <file>` surface
 //     writes once from stdin and exits 1 on the second invocation.
 //
 // Offline: system-temporary discs, real `CommandRunner` invocations, and Fakes
-// only for the injected stdin and clock seams. No harness, no `bd`, no network.
+// only for the injected stdin, process, git and clock seams. No harness, no
+// `bd`, no network.
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:args/command_runner.dart';
+import 'package:beads_dart/beads_dart.dart' show BdResult, BdRunner;
 import 'package:grid_assets/grid_assets.dart';
+import 'package:grid_runtime/grid_runtime.dart' show GitRunResult, GitRunner;
 import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
@@ -35,6 +41,68 @@ const String kEpoch69 = 'handoff-20260912t042326z-epoch-69-first-night.md';
 /// The instant that file name claims, as a local wall clock: what its stamp
 /// would have meant if it had been written once.
 final DateTime kEpoch69Stamped = DateTime(2026, 9, 11, 23, 25);
+
+/// The last write that note actually took: 08:45 the next morning, nine hours
+/// after it was named. Every AC-4 reader is fixed here.
+final DateTime kNineHoursOn = kEpoch69Stamped.add(const Duration(hours: 9));
+
+/// A harness process that never runs: records the plan and returns 0.
+final class _RecordingSeatRunner {
+  final launches = <SeatLaunch>[];
+
+  Future<int> call(SeatLaunch launch) async {
+    launches.add(launch);
+    return 0;
+  }
+}
+
+/// The one TTY environment the seat probes occupy.
+const _declared = AgentEnvironment(
+  command: 'harness',
+  argsAppend: ['--kept'],
+  promptMode: PromptMode.flag,
+  promptFlag: '-p',
+  roleAsset: '.roles/$kSeatHole.md',
+  roleArgs: ['--role', kSeatHole],
+  memoryDirArgs: ['--memory', kMemoryDirHole],
+  // Prompt priming, so the handoff BODY is observable in the plan: the age
+  // diagnostic must sit beside the note, never in place of it.
+  primeMode: SeatPrimeMode.prompt,
+);
+
+const _registry = EnvironmentRegistry(custom: {'declared': _declared});
+
+/// A `bd` that answers with a fixed hook object (Fakes, not mocks).
+final class _FakeBd implements BdRunner {
+  _FakeBd(this.stdout);
+  final String stdout;
+
+  @override
+  Future<BdResult> run(
+    List<String> args, {
+    Duration? timeout,
+    String? stdin,
+  }) async => BdResult(exitCode: 0, stdout: stdout, stderr: '');
+}
+
+/// A `git` that reports a CLEAN work-tree root and answers every proof — so
+/// `--no-destructive` reaches its preview without a real repository, and the
+/// probe measures the diagnostic rather than git.
+final class _CleanGitRunner implements GitRunner {
+  final calls = <List<String>>[];
+
+  @override
+  Future<GitRunResult> run({
+    required String workingDirectory,
+    required List<String> args,
+  }) async {
+    calls.add(List<String>.unmodifiable(args));
+    return switch (args.first) {
+      'rev-parse' => GitRunResult(exitCode: 0, output: '$workingDirectory\n\n'),
+      _ => const GitRunResult(exitCode: 0, output: ''),
+    };
+  }
+}
 
 /// A complete disc note — front matter then prose — of [kind].
 String note({
@@ -303,6 +371,209 @@ void main() {
     });
   });
 
+  group('AC-4 an unconsumed handoff is visible as an AGE', () {
+    const seat = 'governor';
+
+    /// A live handoff on [seat]'s disc, dated to the instant its own name
+    /// claims, plus the one index pointer line the succession preview needs.
+    void stampedDisc() {
+      discOf(seat)
+        ..ensure()
+        ..writeHandoffOnce(
+          fileName: kEpoch69,
+          contents: note(name: kEpoch69, seat: seat, body: 'RESUME BODY\n'),
+        );
+      File(discFile(seat, kEpoch69)).setLastModifiedSync(kEpoch69Stamped);
+      File(
+        p.join(seatDiscPath(home.path, seat), 'MEMORY.md'),
+      ).writeAsStringSync(
+        '# Memory index\n\n- [Handoff epoch 69]($kEpoch69) — first night\n',
+      );
+    }
+
+    /// What all three readers must say, nine hours on.
+    String expected() =>
+        'Agent Seat "$seat" has unconsumed handoff '
+        '${relative(seat, kEpoch69)} on its Agent Disc — age 9h 0m.';
+
+    test('the seat launcher names it before every launch, and launches '
+        'with the note anyway', () async {
+      stampedDisc();
+      File(p.join(home.path, '.roles', '$seat.md'))
+        ..createSync(recursive: true)
+        ..writeAsStringSync('---\nname: $seat\n---\nrole\n');
+      final out = StringBuffer();
+      final harness = _RecordingSeatRunner();
+
+      final code =
+          await (CommandRunner<int>('space', 'test')..addCommand(
+                SeatCommand(
+                  registry: _registry,
+                  runner: harness.call,
+                  gridHomeDefault: () => home.path,
+                  now: () => kNineHoursOn,
+                  out: out,
+                  err: StringBuffer(),
+                ),
+              ))
+              .run(['seat', seat, '--env', 'declared', '--once']);
+
+      expect(code, 0);
+      expect(out.toString(), contains(expected()));
+      expect(
+        (harness.launches.single as SeatTtyLaunch).args,
+        contains('RESUME BODY'),
+        reason: 'the age REPORTS — it never withholds the handoff',
+      );
+      expect(File(discFile(seat, kEpoch69)).existsSync(), isTrue);
+    });
+
+    test('prime carries it between the naming line and the body', () async {
+      stampedDisc();
+      final out = StringBuffer();
+
+      final code =
+          await (CommandRunner<int>('space', 'test')..addCommand(
+                PrimeCommand(
+                  runnerFor: (_) => _FakeBd(
+                    jsonEncode({
+                      'hookSpecificOutput': {
+                        'hookEventName': 'SessionStart',
+                        'additionalContext': 'BD',
+                      },
+                    }),
+                  ),
+                  environment: () => {
+                    'GRID_SEAT': seat,
+                    'GRID_HOME': home.path,
+                  },
+                  cwd: () => home.path,
+                  readStdin: () async =>
+                      '{"hook_event_name":"SessionStart","source":"startup"}',
+                  now: () => kNineHoursOn,
+                  out: out,
+                ),
+              ))
+              .run(['prime', '--hook-json']);
+
+      expect(code, 0);
+      final context =
+          ((jsonDecode(out.toString().trim())
+                      as Map<String, Object?>)['hookSpecificOutput']!
+                  as Map<String, Object?>)['additionalContext']!
+              as String;
+      expect(
+        context,
+        endsWith(
+          '${handoffNamingLine(SeatHandoff(path: discFile(seat, kEpoch69), relativePath: relative(seat, kEpoch69), body: ''))}\n'
+          '${expected()}\n'
+          '\n'
+          'RESUME BODY',
+        ),
+        reason: 'age is read BEFORE the board it describes',
+      );
+      expect(File(discFile(seat, kEpoch69)).existsSync(), isTrue);
+    });
+
+    test('the safe succession preview names it and still destroys '
+        'nothing', () async {
+      stampedDisc();
+      final memory = File(
+        p.join(seatDiscPath(home.path, seat), 'MEMORY.md'),
+      ).readAsStringSync();
+      final bytes = File(discFile(seat, kEpoch69)).readAsBytesSync();
+
+      final run = await succession(
+        home: home,
+        argv: [seat, '--grid-home', home.path, '--no-destructive'],
+        now: () => kNineHoursOn,
+        gitRunner: _CleanGitRunner(),
+      );
+
+      expect(run.code, 0, reason: run.err);
+      expect(run.out, contains(expected()));
+      expect(run.out, contains('WOULD DELETE ${relative(seat, kEpoch69)}'));
+      expect(File(discFile(seat, kEpoch69)).readAsBytesSync(), bytes);
+      expect(
+        File(
+          p.join(seatDiscPath(home.path, seat), 'MEMORY.md'),
+        ).readAsStringSync(),
+        memory,
+      );
+    });
+
+    test('the write refusal names the age of what it refused on', () async {
+      stampedDisc();
+      const second = 'handoff-20260912t084500z-still-going.md';
+
+      final run = await succession(
+        home: home,
+        argv: [seat, '--grid-home', home.path, '--write-handoff', second],
+        stdinNote: note(name: second, seat: seat),
+        now: () => kNineHoursOn,
+      );
+
+      expect(run.code, 1);
+      expect(
+        run.out,
+        contains(expected()),
+        reason: 'nine hours IS the diagnosis of the refused amendment',
+      );
+      expect(run.err, contains('REFUSED'));
+    });
+
+    test('the formatter keeps hours and minutes, names days, and refuses '
+        'to conceal clock skew', () {
+      const handoff = SeatHandoff(
+        path: '/grid/.grid/seats/governor/h.md',
+        relativePath: '.grid/seats/governor/h.md',
+        body: 'BODY',
+      );
+      final authored = DateTime(2026, 9, 11, 23, 25);
+      String age(Duration elapsed) => seatHandoffAgeDiagnostic(
+        seat: 'governor',
+        handoff: handoff,
+        authoredAt: authored,
+        now: authored.add(elapsed),
+      );
+      const head =
+          'Agent Seat "governor" has unconsumed handoff '
+          '.grid/seats/governor/h.md on its Agent Disc — ';
+
+      expect(age(const Duration(hours: 9)), '${head}age 9h 0m.');
+      expect(age(Duration.zero), '${head}age 0h 0m.');
+      expect(age(const Duration(minutes: 7)), '${head}age 0h 7m.');
+      expect(
+        age(const Duration(hours: 33, minutes: 12)),
+        '${head}age 1d 9h 12m.',
+      );
+      expect(
+        age(const Duration(minutes: -4)),
+        '${head}age unavailable: authored time is 4m in the future.',
+        reason: 'a future mtime is a broken clock, never a fresh handoff',
+      );
+    });
+
+    test('NO threshold: forty days old still only reports', () async {
+      stampedDisc();
+      final run = await succession(
+        home: home,
+        argv: [seat, '--grid-home', home.path, '--no-destructive'],
+        now: () => kEpoch69Stamped.add(const Duration(days: 40, hours: 2)),
+        gitRunner: _CleanGitRunner(),
+      );
+
+      expect(run.code, 0, reason: run.err);
+      expect(run.out, contains('age 40d 2h 0m.'));
+      expect(
+        run.out,
+        isNot(contains('EXPIRED')),
+        reason: 'there is no expiry — the age is evidence, not a verdict',
+      );
+      expect(File(discFile(seat, kEpoch69)).existsSync(), isTrue);
+    });
+  });
+
   group('AC-6 the composed surface writes once', () {
     test(
       'succession --write-handoff writes from stdin, then refuses',
@@ -416,12 +687,16 @@ Future<({int code, String out, String err})> succession({
   required List<String> argv,
   String stdinNote = '',
   DateTime Function()? now,
+  GitRunner? gitRunner,
 }) async {
   final out = StringBuffer();
   final err = StringBuffer();
   final command = CommandRunner<int>('space', 'test')
     ..addCommand(
       SuccessionCommand(
+        service: gitRunner == null
+            ? const SeatSuccessionService()
+            : SeatSuccessionService(runner: gitRunner),
         gridHomeDefault: () => home.path,
         readStdin: () async => stdinNote,
         now: now ?? DateTime.now,

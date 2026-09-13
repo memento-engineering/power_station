@@ -120,7 +120,8 @@
 /// seat. The issue tracker's `bd prime` reference follows VERBATIM under its
 /// own heading: still reachable, no longer the whole answer. Handoff injection
 /// is unchanged — only the seat's newest handoff, only on startup, clear and
-/// compact. The whole answer rides the pack's ONE output bound,
+/// compact, now with one [seatHandoffAgeDiagnostic] line beside it. The whole
+/// answer rides the pack's ONE output bound,
 /// [boundedOutput] at [kBoundedOutputCapBytes] — the same selector the `show`
 /// verb consumes, because a second implementation of a cap is the defect
 /// `power_station#a-mechanical-lookup-is-a-vended-command-with-a-bounded-output`
@@ -129,13 +130,23 @@
 /// cut NAMES the bytes withheld and how to ask for them.
 /// [SeatCommand] is the OUTER harness that launches a seat's
 /// occupant with its role definition and disc and relaunches it on handoff.
-/// [SuccessionCommand] closes the loop at the other end: it CONSUMES that
-/// handoff through [SeatSuccessionService], which archives the seat disc in a
-/// path-scoped commit and proves the note is in `HEAD` before deleting it and
+/// [SuccessionCommand] owns BOTH mechanical edges of the handoff's lifetime. It
+/// CONSUMES one through [SeatSuccessionService], which archives the seat disc in
+/// a path-scoped commit and proves the note is in `HEAD` before deleting it and
 /// its one `MEMORY.md` pointer line (`--no-destructive` stops after the
 /// proof). The destruction the disc doctrine licenses on "the disc is tracked,
 /// so git history is the archive" now has something ENFORCING the tracked
-/// half. All three are harness-neutral: every vendor token is an
+/// half. And `--write-handoff <file>` WRITES one, from a complete note on
+/// stdin, through [SeatDisc.writeHandoffOnce] — which refuses a second live
+/// handoff rather than amending the first, because a handoff is working memory
+/// "written once at a boundary, picked up, and deleted"
+/// (`memento-engineering#handoffs-are-working-memory-and-long-term-memory-stays-thin`).
+/// Consuming one was already enforced while writing one was only prose, which is
+/// how a single governor note came to be rewritten across thirty commits over
+/// nine hours; with amendment refused, an unconsumed note is simply a seat that
+/// has not handed off, and [seatHandoffAgeDiagnostic] is the threshold-free line
+/// every seat reader renders to make that visible. All three are
+/// harness-neutral: every vendor token is an
 /// [AgentEnvironment] declaration
 /// ([AgentEnvironment.roleArgs], [AgentEnvironment.memoryDirArgs],
 /// [AgentEnvironment.primeMode], [AgentEnvironment.drivenArgs],

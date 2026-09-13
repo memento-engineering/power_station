@@ -21,7 +21,10 @@
 /// that used to be the WHOLE answer stays reachable without being it — and,
 /// only when the process occupies an operator seat AND the SessionStart
 /// `source` is `startup`, `clear` or `compact`, APPENDS that seat's newest
-/// handoff after one naming line. A `resume` source reads no disc at all,
+/// handoff after one naming line and one [seatHandoffAgeDiagnostic] line — how
+/// long that note has sat unconsumed, which is the difference between a handoff
+/// written at this boundary and a seat that never handed off. A `resume` source
+/// reads no disc at all,
 /// because the context survives a resume and injecting there is pure inference
 /// cost (Nico, 2026-09-04). It injects nothing else — no disc summary
 /// and no disc-recording instructions:
@@ -115,10 +118,25 @@ String handoffNamingLine(SeatHandoff handoff) =>
     'succession verb in this turn.';
 
 /// The `additionalContext` this verb emits: [bdContext] VERBATIM, plus — only
-/// when [handoff] is non-null — [handoffNamingLine] and the handoff BODY. PURE.
-String composePrimeContext({required String bdContext, SeatHandoff? handoff}) {
+/// when [handoff] is non-null — [handoffNamingLine], an optional
+/// [handoffDiagnostic] line, and the handoff BODY. PURE.
+///
+/// [handoffDiagnostic] is [seatHandoffAgeDiagnostic]'s line, and it sits between
+/// the naming line and the body so a seat reads how OLD the note is before it
+/// reads the note: a handoff that has been sitting for hours is a succession
+/// that did not happen, and the body alone cannot say so. Omitted, this renders
+/// exactly what it rendered before the diagnostic existed.
+String composePrimeContext({
+  required String bdContext,
+  SeatHandoff? handoff,
+  String? handoffDiagnostic,
+}) {
   if (handoff == null) return bdContext;
-  final note = '${handoffNamingLine(handoff)}\n\n${handoff.body}';
+  final head = <String>[
+    handoffNamingLine(handoff),
+    if (handoffDiagnostic != null) handoffDiagnostic,
+  ].join('\n');
+  final note = '$head\n\n${handoff.body}';
   if (bdContext.isEmpty) return note;
   final separator = bdContext.endsWith('\n') ? '\n' : '\n\n';
   return '$bdContext$separator$note';
@@ -211,6 +229,7 @@ final class _PrimeAnswer {
     required this.orientation,
     required this.tracker,
     required this.handoff,
+    required this.handoffDiagnostic,
   });
 
   /// The station-orientation records — identity, invocation, the verb pointers
@@ -227,10 +246,19 @@ final class _PrimeAnswer {
   /// handoff exists cannot go and read it.
   final SeatHandoff? handoff;
 
+  /// How OLD that unconsumed handoff is, or null when there is none.
+  ///
+  /// NOT droppable. It is one line, and it is the line that distinguishes a
+  /// handoff written at this boundary from one that has been sitting for nine
+  /// hours — a trim that gave it up would leave the cheapest signal out while
+  /// keeping the expensive body.
+  final String? handoffDiagnostic;
+
   /// The `additionalContext` this answer is.
   String render() => composePrimeContext(
     bdContext: [...orientation, '', _trackerHeading, tracker].join('\n'),
     handoff: handoff,
+    handoffDiagnostic: handoffDiagnostic,
   );
 }
 
@@ -250,6 +278,7 @@ final class _PrimeMaterial {
     required this.trailer,
     required this.trackerBody,
     required this.handoff,
+    required this.handoffDiagnostic,
   });
 
   /// The station executable — what a withheld record tells the reader to run.
@@ -270,6 +299,10 @@ final class _PrimeMaterial {
 
   /// The seat's newest handoff, or null when none is injected.
   final SeatHandoff? handoff;
+
+  /// [seatHandoffAgeDiagnostic]'s line for that handoff, or null when there is
+  /// none. Carried through every candidate: one line is never the cut.
+  final String? handoffDiagnostic;
 
   late final List<int> _verbCosts = [
     for (final record in verbs) _bytesOf(record),
@@ -335,6 +368,7 @@ final class _PrimeMaterial {
               '${note.relativePath} from the Agent Disc.',
         ),
       },
+      handoffDiagnostic: handoffDiagnostic,
     );
   }
 
@@ -360,6 +394,7 @@ final class _PrimeMaterial {
             '${note.relativePath} from the Agent Disc.',
       ),
     },
+    handoffDiagnostic: handoffDiagnostic,
   );
 
   /// The orientation block: heading, the verb pointers under their own
@@ -377,20 +412,23 @@ final class _PrimeMaterial {
 
 /// `prime [--hook-json]` — the thin adapter over the pure composers above.
 class PrimeCommand extends Command<int> {
-  /// Creates the verb over its four injectable seams: [runnerFor] spawns `bd`
+  /// Creates the verb over its five injectable seams: [runnerFor] spawns `bd`
   /// in the cwd, [environment] reads `GRID_SEAT`/`GRID_HOME`, [cwd] is the
-  /// fallback grid home, and [readStdin] takes the hook payload. [out] is where
-  /// the hook object is written.
+  /// fallback grid home, [readStdin] takes the hook payload, and [now] is the
+  /// clock the unconsumed-handoff age is measured against. [out] is where the
+  /// hook object is written.
   PrimeCommand({
     BdRunner Function(String cwd) runnerFor = _processRunnerFor,
     Map<String, String> Function() environment = _processEnvironment,
     String Function() cwd = _currentDirectory,
     Future<String> Function() readStdin = _readStdinPayload,
+    DateTime Function() now = DateTime.now,
     StringSink? out,
   }) : _runnerFor = runnerFor,
        _environment = environment,
        _cwd = cwd,
        _readStdin = readStdin,
+       _now = now,
        _out = out ?? stdout {
     argParser.addFlag(
       'hook-json',
@@ -405,6 +443,7 @@ class PrimeCommand extends Command<int> {
   final Map<String, String> Function() _environment;
   final String Function() _cwd;
   final Future<String> Function() _readStdin;
+  final DateTime Function() _now;
   final StringSink _out;
 
   @override
@@ -476,6 +515,11 @@ class PrimeCommand extends Command<int> {
         environment[kGridHomeEnvironmentVariable]?.trim() ?? '';
     final home = declaredHome.isEmpty ? here : declaredHome;
     final executable = station.executableName;
+    final injected = _newestHandoffState(
+      home: home,
+      seat: seat,
+      payload: payload,
+    );
     return _PrimeMaterial(
       executableName: executable,
       heading: [
@@ -500,8 +544,31 @@ class PrimeCommand extends Command<int> {
             'mechanism.',
       ],
       trackerBody: await _trackerBody(here),
-      handoff: _newestHandoff(home: home, seat: seat, payload: payload),
+      handoff: injected?.handoff,
+      handoffDiagnostic: switch (injected) {
+        null => null,
+        final state => _ageOf(seat: seat, state: state),
+      },
     );
+  }
+
+  /// [seatHandoffAgeDiagnostic] for [state], or null when the clock itself
+  /// cannot be read — one more dependency isolated to its own degraded value,
+  /// because a hook must never fail a session.
+  String? _ageOf({
+    required String seat,
+    required ({SeatHandoff handoff, DateTime at}) state,
+  }) {
+    try {
+      return seatHandoffAgeDiagnostic(
+        seat: seat,
+        handoff: state.handoff,
+        authoredAt: state.at,
+        now: _now(),
+      );
+    } on Object {
+      return null;
+    }
   }
 
   /// The working directory, or '' when the process cannot name it.
@@ -539,9 +606,14 @@ class PrimeCommand extends Command<int> {
     }
   }
 
-  /// The seat's newest handoff, or null when there is no seat, no injection is
-  /// due for this source, or the disc cannot be read.
-  SeatHandoff? _newestHandoff({
+  /// The seat's newest handoff WITH the instant it was written, or null when
+  /// there is no seat, no injection is due for this source, or the disc cannot
+  /// be read.
+  ///
+  /// One disc read for both the note and its age: resolving them separately
+  /// would let a note written between the two reads be named with the other
+  /// one's timestamp.
+  ({SeatHandoff handoff, DateTime at})? _newestHandoffState({
     required String home,
     required String seat,
     required String payload,
@@ -551,7 +623,7 @@ class PrimeCommand extends Command<int> {
       return SeatDisc(
         directory: seatDiscPath(home, seat),
         gridHome: home,
-      ).newestHandoff();
+      ).newestHandoffState();
     } on Object {
       return null;
     }

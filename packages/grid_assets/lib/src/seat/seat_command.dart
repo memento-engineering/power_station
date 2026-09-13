@@ -246,8 +246,10 @@ class ProcessSeatRunner {
 class SeatCommand extends Command<int> {
   /// Creates the verb over its injectable seams: the environment [registry]
   /// selection reads, the [runner] that executes a plan, [gridHomeDefault], and
-  /// the [now] clock the relaunch predicate compares against. [out] and [err]
-  /// are the report sinks.
+  /// the [now] clock the relaunch predicate compares against — and that the
+  /// unconsumed-handoff age is measured from, read ONCE per occupancy so the
+  /// note this loop names and the note it ages are the same one. [out] and
+  /// [err] are the report sinks.
   SeatCommand({
     EnvironmentRegistry? registry,
     SeatProcessRunner? runner,
@@ -361,14 +363,28 @@ class SeatCommand extends Command<int> {
     final once = argResults!.flag('once');
     while (true) {
       final launchedAt = _now();
-      final handoff = disc.newestHandoff();
+      // Observational: with amendment refused at the write edge, a handoff
+      // still on the disc is a seat that has not handed off, and its AGE is
+      // how an operator watching this loop sees that. No threshold and no
+      // expiry — the note is launched with either way.
+      final state = disc.newestHandoffState();
+      if (state != null) {
+        _out.writeln(
+          seatHandoffAgeDiagnostic(
+            seat: seat,
+            handoff: state.handoff,
+            authoredAt: state.at,
+            now: launchedAt,
+          ),
+        );
+      }
       final code = await _runner(
         planSeatLaunch(
           environment: environment,
           seat: seat,
           gridHome: gridHome,
           discDirectory: disc.directory,
-          handoffBody: handoff?.body,
+          handoffBody: state?.handoff.body,
         ),
       );
       if (once || !disc.hasHandoffNewerThan(launchedAt)) return code;
