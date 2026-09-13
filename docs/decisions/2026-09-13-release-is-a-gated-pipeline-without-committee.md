@@ -23,10 +23,12 @@ register:
 
 ## Context and Problem Statement
 
-Every major path this station drives is a circuit. `code_capabilities.dart`
-registers discovery, spec, spec-review, code, code-review, design-review,
-docs-review and landing, and each one is a graph the engine walks: a step's
-verdict gates the next, and no agent may skip a step by not reading about it.
+Every major path this station drives is a circuit.
+`packages/grid_assets/lib/src/code/code_capabilities.dart` registers discovery,
+spec review, code, code review, design review, docs review and landing (plus the
+frozen spec-review shapes the migration guard roots), and each one is a graph the
+engine walks: a step's verdict gates the next, and no agent may skip a step by
+not reading about it.
 
 Release was not among them. It was driven by
 `packages/grid_assets/extension/station_overlay/claude/skills/release/SKILL.md`,
