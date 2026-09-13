@@ -72,6 +72,11 @@ final class _CursorStore implements GitHubCursorStore {
   Future<void> save(GitHubReconcilerCursor value) async => cursor = value;
 }
 
+/// The state store's session beads.
+///
+/// Only the skipped `self-mints` case below reaches this: `bd export` REFUSES
+/// against a proxied-server store, so whoever un-skips that test owes this
+/// helper a `bd list --json` read first.
 Future<List<Bead>> _sessions(ProcessBdRunner stateBd) async {
   final result = await stateBd.run(const ['export', '--all']);
   if (!result.ok) {
@@ -116,14 +121,143 @@ Future<void> _runBd(String root, List<String> args) async {
   }
 }
 
+/// The throwaway password for the read-only `beads_dart` SQL user this harness
+/// provisions in its own temporary store. Test-local, never a credential.
+const _testStorePassword = 'github-grid-assets-test';
+
+/// Boots the grid STATE store as a bd PROXIED SERVER, the only shape that
+/// yields a resolvable SQL endpoint.
+///
+/// `assembleStationWork` refuses a LIVE station (`dryRun: false`) whose state
+/// workspace resolves no endpoint, and the single built-in resolver reads bd's
+/// proxied-server artifacts: an embedded-mode store has nothing to hand it, so
+/// a plain `bd init` here is a `StoreRefusal` raised before the tree ever
+/// mounts. Only the state half needs this — the work store stays embedded
+/// because nothing reads it over SQL.
+///
+/// `bd dolt start` is deliberately NOT in this sequence. It swaps the
+/// workspace onto a SHARED server and deletes `.beads/dolt/proxy.pid` — the
+/// exact artifact the resolver reads — and leaves a `dolt sql-server` that
+/// outlives the temporary directory. The read-only user is provisioned
+/// offline against the stopped data dir instead, and the closing `bd list`
+/// re-spawns the proxy.
+Future<void> _initializeStateStore(String stateRoot) async {
+  await Directory(stateRoot).create(recursive: true);
+  await _runBd(stateRoot, const [
+    'init',
+    '--non-interactive',
+    '--quiet',
+    '--skip-agents',
+    '--skip-hooks',
+    '--prefix',
+    'grid_state',
+    '--proxied-server',
+  ]);
+  // Release the data dir that `init` left a proxy holding, so the offline
+  // `dolt sql` below can open it.
+  await Process.run('bd', const ['dolt', 'stop'], workingDirectory: stateRoot);
+  final user = await Process.run('dolt', [
+    '--data-dir=$stateRoot/.beads/dolt',
+    '--use-db=grid_state',
+    'sql',
+    '-q',
+    "CREATE USER IF NOT EXISTS 'beads_dart'@'%' IDENTIFIED BY "
+        "'$_testStorePassword'; GRANT SELECT ON *.* TO 'beads_dart'@'%';",
+  ]);
+  if (user.exitCode != 0) {
+    throw StateError('dolt user provisioning failed: ${user.stderr}');
+  }
+  final secret = File('$stateRoot/.beads/dolt/beads_dart.secret')
+    ..writeAsStringSync(_testStorePassword);
+  final chmod = await Process.run('chmod', ['600', secret.path]);
+  if (chmod.exitCode != 0) {
+    throw StateError('secret chmod failed: ${chmod.stderr}');
+  }
+  // Re-spawns the proxy, writing the `proxy.pid` the resolver reads.
+  await _runBd(stateRoot, const ['list', '--json']);
+}
+
+/// Every harness-owned store process still running out of [tempPath].
+///
+/// Matched on the process's own `--config` / `--root` arguments rather than on
+/// bd's PID files: bd re-spawns a proxy to serve the very command that stops
+/// the previous one, so a PID captured from `.beads/dolt/proxy.pid` names a
+/// process that is already gone while its successor is missed entirely. The
+/// process table is the only account that cannot go stale.
+Future<List<({int pid, String command})>> _harnessStoreProcesses(
+  String tempPath,
+) async {
+  final result = await Process.run('ps', ['-axo', 'pid=,command=']);
+  expect(result.exitCode, 0, reason: 'ps census failed: ${result.stderr}');
+
+  final resolvedTemp = Directory(tempPath).resolveSymbolicLinksSync();
+  final tempPrefix = '$resolvedTemp${Platform.pathSeparator}';
+  final row = RegExp(r'^\s*(\d+)\s+(.*)$');
+  final pathArgument = RegExp(
+    r'''(?:^|\s)--(?:config|root)(?:=|\s+)(?:"([^"]+)"|'([^']+)'|(\S+))''',
+  );
+
+  return [
+    for (final line in (result.stdout as String).split('\n'))
+      if (row.firstMatch(line) case final match?)
+        if (_namesTempPath(match.group(2)!, pathArgument, tempPrefix))
+          (pid: int.parse(match.group(1)!), command: match.group(2)!),
+  ];
+}
+
+/// Whether [command] is a store process configured under [tempPrefix].
+bool _namesTempPath(String command, RegExp pathArgument, String tempPrefix) {
+  if (!command.contains('dolt sql-server') &&
+      !command.contains('db-proxy-child')) {
+    return false;
+  }
+  for (final match in pathArgument.allMatches(command)) {
+    final raw = match.group(1) ?? match.group(2) ?? match.group(3)!;
+    final entry = File(raw);
+    final resolved = entry.existsSync()
+        ? entry.resolveSymbolicLinksSync()
+        : entry.absolute.path;
+    if (resolved.startsWith(tempPrefix)) return true;
+  }
+  return false;
+}
+
+/// Tears the proxied state store down: a SIGKILL fence driven by the process
+/// census, repeated until nothing the harness started still runs out of
+/// [tempPath].
+///
+/// `bd dolt stop` is NOT the instrument. It is a MODE CHANGE — it migrates the
+/// workspace back to embedded storage — which rewrites a store that is about to
+/// be deleted anyway, and it re-spawns a proxy to serve its own command, so the
+/// process it leaves behind is never the one it reported stopping.
+///
+/// The fence is LOUD because a survivor is not cosmetic: it holds a Dolt data
+/// dir that the temporary-directory delete is about to remove, and it outlives
+/// the test run.
+Future<void> _stopProxiedStateStore(String tempPath) async {
+  var survivors = await _harnessStoreProcesses(tempPath);
+  for (var round = 0; round < 40 && survivors.isNotEmpty; round++) {
+    for (final survivor in survivors) {
+      Process.killPid(survivor.pid, ProcessSignal.sigkill);
+    }
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+    survivors = await _harnessStoreProcesses(tempPath);
+  }
+
+  expect(
+    [for (final survivor in survivors) survivor.command],
+    isEmpty,
+    reason: 'harness-owned store processes survived under $tempPath',
+  );
+}
+
 Future<void> _seedStore({
   required String gridRoot,
   required String workRoot,
 }) async {
   final stateRoot = GridStateStore.forGridRoot(gridRoot).runtimeDir;
-  await Directory(stateRoot).create(recursive: true);
+  await _initializeStateStore(stateRoot);
   await Directory(workRoot).create(recursive: true);
-  await _runBd(stateRoot, const ['init', '--prefix', 'grid_state']);
   await _runBd(workRoot, const ['init', '--prefix', 'pow']);
   await _runBd(stateRoot, const [
     'config',
@@ -217,6 +351,13 @@ void main() {
       );
       final gridRoot = '${temporary.path}/grid';
       final workRoot = '${temporary.path}/work';
+      // Registered the moment the directory exists — and therefore run LAST,
+      // after the station teardown below — so a failure anywhere in the boot
+      // still fences the proxied store before the tree is removed.
+      addTearDown(() async {
+        await _stopProxiedStateStore(temporary.path);
+        await temporary.delete(recursive: true);
+      });
       await _seedStore(gridRoot: gridRoot, workRoot: workRoot);
       final stateStore = GridStateStore.forGridRoot(gridRoot);
       final stateBd = ProcessBdRunner(workspaceRoot: stateStore.runtimeDir);
@@ -292,7 +433,6 @@ void main() {
         await control.dispose();
         owner.unmountRoot();
         await runtime.shutdown();
-        await temporary.delete(recursive: true);
       });
       await _writeStationLock(gridRoot, control.url, 'feedback-token');
       final projection = CiFeedbackProjection(
@@ -364,6 +504,13 @@ void main() {
       );
       final gridRoot = '${temporary.path}/grid';
       final workRoot = '${temporary.path}/work';
+      // Registered the moment the directory exists — and therefore run LAST,
+      // after the station teardown below — so a failure anywhere in the boot
+      // still fences the proxied store before the tree is removed.
+      addTearDown(() async {
+        await _stopProxiedStateStore(temporary.path);
+        await temporary.delete(recursive: true);
+      });
       await _seedStore(gridRoot: gridRoot, workRoot: workRoot);
       final stateStore = GridStateStore.forGridRoot(gridRoot);
       final stateBd = ProcessBdRunner(workspaceRoot: stateStore.runtimeDir);
@@ -439,7 +586,6 @@ void main() {
         await control.dispose();
         owner.unmountRoot();
         await runtime.shutdown();
-        await temporary.delete(recursive: true);
       });
       await _writeStationLock(gridRoot, control.url, 'feedback-token');
       final projection = CiFeedbackProjection(
