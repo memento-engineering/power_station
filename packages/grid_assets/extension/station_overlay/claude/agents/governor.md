@@ -119,10 +119,11 @@ of it.
   and lands the successor at the floor — and this seat already owes the
   material: the operating loop's **Record** step files every sharp finding as a
   bead with receipts, and its **Report** step states the outcome and the
-  human's queue. At a clean boundary, write that handoff and then `/clear`:
-  cheaper AND better lineage than a summary. Compaction wins in exactly one
-  case — mid-thought, when the next step depends on detail that is not written
-  down anywhere yet.
+  human's queue. At a clean boundary, write that handoff and then EXIT: the
+  launcher consumes the note, archives it, and relaunches this seat primed with
+  it — cheaper AND better lineage than a summary. Ending IS the handoff path;
+  there is no in-place one. Compaction wins in exactly one case — mid-thought,
+  when the next step depends on detail that is not written down anywhere yet.
 
 ## Human gates — never cross without an explicit, per-item go
 

@@ -91,6 +91,18 @@ Anything else — a non-launch, a grid home that is no repository — is "couldn
 tell", and a run that cannot name the archive it would delete into deletes
 nothing.
 
+**The local sink is bounded, and never collides.** Git history folds an archive
+away and a directory does not, so each succession keeps the newest TEN local
+archives and prunes the rest — oldest first, and only names of the shape it
+writes, because a directory this station did not create is not this station's to
+delete. Retention runs last, on an archive already proved byte-identical, and a
+prune that fails is REPORTED without failing the succession: blocking a handoff
+on a stale directory would re-create the defect this decision closes. A stamp
+already taken is a second succession inside one UTC second, and it takes the
+next ordinal — `<stamp>-2`, `<stamp>-3` — rather than refusing. The stamp has
+second resolution and the relaunch loop is not paced by a human; stranding a
+seat on a clock tick is the same failure in a smaller window.
+
 `git add -f` is used on no path, in neither sink. That is the whole point of
 the fork: an ignored disc is ignored for a reason, and forcing it into history
 would trade a lost handoff for leaked PII.
@@ -99,6 +111,12 @@ would trade a lost handoff for leaked PII.
 the note, say one line, exit. The launcher relaunches. The vended `handoff`
 skill carries exactly one signal line and no in-place option, and its Resume
 section tells the successor the consumption already happened.
+
+The cut is HARD and station-wide: no vended file under `station_overlay/`
+instructs `/clear`, role definitions included. `governor.md` and `refiner.md`
+each told the seat to write the handoff "and then `/clear`" — the one path the
+launcher cannot consume — and an overlay that contradicts itself is read as an
+option rather than a retirement.
 
 This UPDATES `handoff-succession-commits-before-consume` at one clause. The
 archive precondition stands: nothing is destroyed until it is proved archived.
@@ -114,7 +132,8 @@ WHERE it lands when the disc is ignored.
 * Good, because the two sinks are decided by a probe rather than by a flag, so
   no seat has to know which kind of disc it sits on.
 * Bad, because a local archive accumulates under the disc where git history
-  would have folded it away, and nothing prunes it yet.
+  would have folded it away — bounded at ten, so the eleventh handoff back is
+  gone for good on an ignored disc, which a tracked one would still hold.
 * Bad, because a refusing succession now blocks the launch rather than only the
   resume — a disc with two live handoffs, or a grid home that is no repository
   at all, stops the seat until a human rules.
@@ -132,6 +151,11 @@ refusal, and that `git add -f` is invoked on no path;
 injects and that its naming line owes no verb;
 `test/seat/succession_command_test.dart` pins the local archive's
 byte-identical copies and the three `check-ignore` answers;
-`test/seat/handoff_skill_test.dart` pins the one signal line, the absence of
-`/clear`, and the Resume section's statement that the launcher consumed — homed
-under `test/seat/` so the bead's own validation plan reaches it.
+`test/seat/succession_command_test.dart` also pins the ordinal, the prune and
+the reported prune failure, and `test/seat/seat_archive_retention_test.dart`
+pins the ordering they rest on — `<stamp>-10` sorts before `<stamp>-2` as a
+string, so a string compare would prune the newest archive;
+`test/seat/handoff_skill_test.dart` pins the one signal line, the Resume
+section's statement that the launcher consumed, and the station-wide grep: no
+file under `station_overlay/` instructs `/clear` — homed under `test/seat/` so
+the bead's own validation plan reaches it.

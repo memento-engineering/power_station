@@ -37,6 +37,16 @@
 /// precondition itself is unchanged — nothing is destroyed until it is proved
 /// archived somewhere.
 ///
+/// **The local sink is BOUNDED, and never collides** (Nico, 2026-09-13). Git
+/// history folds an archive away; a directory does not, so each succession
+/// keeps the newest [kSeatArchiveRetention] archives and prunes the rest —
+/// retention runs last, on the proved archive, and a prune that fails is
+/// reported without failing the succession. Two successions inside one UTC
+/// second take the next ordinal (`<stamp>-2`, `<stamp>-3`) rather than
+/// refusing: the stamp has second resolution, the relaunch loop is not paced
+/// by a human, and stranding a seat on a clock tick is the defect this verb
+/// exists to close.
+///
 /// **The launcher is the caller** (Nico, 2026-09-13). `seat` performs this
 /// succession itself before it primes a successor, so a successor can neither
 /// start unprimed nor skip the consumption; this verb stays as the by-hand
@@ -114,6 +124,16 @@ String seatArchiveDisposition(SeatSuccessionReport report) =>
       SeatArchiveSink.local => 'ARCHIVED-LOCAL ${report.archive}',
     };
 
+/// The ONE phrase naming what retention did, or null when it did nothing —
+/// rendered identically by every reader of a [SeatSuccessionReport]. PURE.
+String? seatArchiveRetentionDisposition(SeatSuccessionReport report) =>
+    report.archivesPruned.isEmpty
+    ? null
+    : 'PRUNED ${report.archivesPruned.length} expired '
+          '${report.archivesPruned.length == 1 ? 'archive' : 'archives'} '
+          '(keeping the newest $kSeatArchiveRetention): '
+          '${report.archivesPruned.join(', ')}';
+
 /// What one succession run DID — the four outcomes, sealed by an enum so the
 /// CLI consumes them with an exhaustive `switch`.
 enum SeatSuccessionDisposition {
@@ -145,6 +165,8 @@ class SeatSuccessionReport {
     this.committed = false,
     this.sink,
     this.archive,
+    this.archivesPruned = const <String>[],
+    this.pruneRefusal,
     this.body,
     this.refusal,
   });
@@ -180,6 +202,20 @@ class SeatSuccessionReport {
   /// commit rather than a path.
   final String? archive;
 
+  /// The EXPIRED local archive directory names this run deleted, oldest first
+  /// — retention past [kSeatArchiveRetention], on [SeatArchiveSink.local]
+  /// only. Empty when the disc has not yet accrued that many.
+  final List<String> archivesPruned;
+
+  /// Why retention did not finish, or null when it did.
+  ///
+  /// Housekeeping NEVER refuses a succession: the archive this run wrote is
+  /// already proved byte-identical by the time retention runs, and blocking a
+  /// handoff on a stale directory that will not delete would re-create the
+  /// very defect this verb closes. It is reported instead, so a retention that
+  /// has quietly stopped is visible rather than silent.
+  final String? pruneRefusal;
+
   /// The BODY of the one handoff this run archived — what a launcher primes
   /// its successor with, read BEFORE the note was destroyed. Null on every
   /// disposition that resolved no single candidate.
@@ -210,8 +246,9 @@ class SeatSuccessionReport {
 ///
 /// **Only one of the two sinks rides git at all.** An IGNORED disc is archived
 /// by copying its two consumed files into `.archive/<utc-stamp>/` under the
-/// disc, and proved by reading the copies back — no `git` command runs on that
-/// path, and `git add -f` runs on NO path.
+/// disc, proved by reading the copies back, and pruned to the newest
+/// [kSeatArchiveRetention] — no `git` command runs on that path, and
+/// `git add -f` runs on NO path.
 ///
 /// [GitOps] has no PATHSPEC-scoped public method, and scoping is load-bearing
 /// here: a grid home is a live checkout, and `git add -A` would sweep the
@@ -312,6 +349,8 @@ class SeatSuccessionService {
     var staged = false;
     var committed = false;
     String? archive;
+    var pruned = const <String>[];
+    String? pruneRefusal;
     switch (sink.sink!) {
       case SeatArchiveSink.git:
         final done = await _archiveIntoGit(
@@ -337,6 +376,8 @@ class SeatSuccessionService {
           sources: <File>[File(candidate.path), memoryFile],
         );
         archive = done.archive;
+        pruned = done.pruned;
+        pruneRefusal = done.pruneRefusal;
         if (done.refusal != null) {
           return refuse(done.refusal!, handoffs: resolved);
         }
@@ -368,6 +409,8 @@ class SeatSuccessionService {
         committed: committed,
         sink: sink.sink,
         archive: archive,
+        archivesPruned: pruned,
+        pruneRefusal: pruneRefusal,
         body: candidate.body,
       );
     }
@@ -396,6 +439,8 @@ class SeatSuccessionService {
       committed: committed,
       sink: sink.sink,
       archive: archive,
+      archivesPruned: pruned,
+      pruneRefusal: pruneRefusal,
       body: candidate.body,
     );
   }
@@ -514,36 +559,48 @@ class SeatSuccessionService {
   }
 
   /// Archives an IGNORED disc into `.archive/<utc-stamp>/` beside its notes,
-  /// and returns that directory grid-home-relative.
+  /// prunes the archives that fall outside [kSeatArchiveRetention], and
+  /// returns the new directory grid-home-relative.
   ///
   /// The copies are PROVED the way the git sink proves `HEAD`: every source is
   /// read, written, and read back, and the run refuses on the first byte that
-  /// differs. The stamp directory is never reused — an archive that already
-  /// exists at this second is a second succession inside one second, and
-  /// overwriting it would destroy the very copy it is supposed to be.
+  /// differs. An archive is NEVER overwritten — a stamp already taken is a
+  /// second succession inside one second, so this run takes the next ordinal
+  /// (`<stamp>-2`, `<stamp>-3`, …) and both archives stay whole (Nico,
+  /// 2026-09-13). Refusing there stranded a seat on a clock tick.
+  ///
+  /// Retention runs LAST, on the proved archive, and its failures are
+  /// reported rather than raised — see [SeatSuccessionReport.pruneRefusal].
   ///
   /// No `git` runs here at all. `git add -f` is what the git sink would need
   /// for an ignored path, and forcing the disc back into history is exactly
   /// what the ignore exists to prevent.
-  ({String? refusal, String? archive}) _archiveLocally({
+  ({
+    String? refusal,
+    String? archive,
+    List<String> pruned,
+    String? pruneRefusal,
+  })
+  _archiveLocally({
     required String home,
     required String discDirectory,
     required List<File> sources,
   }) {
+    final archives = Directory(p.join(discDirectory, kSeatArchiveSubdirectory));
     final stamp = seatArchiveStamp(_now());
-    final directory = Directory(
-      p.join(discDirectory, kSeatArchiveSubdirectory, stamp),
+    // The first free ordinal. Bounded by the directories that already exist,
+    // so it terminates on the first name this second has not taken.
+    var ordinal = 1;
+    var directory = Directory(
+      p.join(archives.path, seatArchiveDirectoryName(stamp, ordinal)),
     );
-    final relative = p.relative(directory.path, from: home);
-    if (directory.existsSync()) {
-      return (
-        refusal:
-            'the local archive "$relative" already exists — a second '
-            'succession inside one second would overwrite the copy it is '
-            'archiving into. Nothing was deleted.',
-        archive: null,
+    while (directory.existsSync()) {
+      ordinal++;
+      directory = Directory(
+        p.join(archives.path, seatArchiveDirectoryName(stamp, ordinal)),
       );
     }
+    final relative = p.relative(directory.path, from: home);
     try {
       directory.createSync(recursive: true);
       for (final source in sources) {
@@ -557,6 +614,8 @@ class SeatSuccessionService {
                 'is NOT byte-identical to the copy on disk, so the archive '
                 'would lose the working bytes. Nothing was deleted.',
             archive: relative,
+            pruned: const <String>[],
+            pruneRefusal: null,
           );
         }
       }
@@ -567,9 +626,58 @@ class SeatSuccessionService {
             '${_oneLine(error.osError?.message ?? error.message)}. Nothing '
             'was deleted.',
         archive: relative,
+        pruned: const <String>[],
+        pruneRefusal: null,
       );
     }
-    return (refusal: null, archive: relative);
+    final retention = _pruneArchives(archives);
+    return (
+      refusal: null,
+      archive: relative,
+      pruned: retention.pruned,
+      pruneRefusal: retention.refusal,
+    );
+  }
+
+  /// Deletes the archives under [archives] that fall outside the newest
+  /// [kSeatArchiveRetention], oldest first, and names the ones it removed.
+  ///
+  /// Only names [parseSeatArchiveDirectoryName] recognises are candidates: a
+  /// directory this station did not write is not this station's to delete.
+  /// Never throws — the archive it is pruning around is already proved, and a
+  /// succession must not fail on housekeeping.
+  ({List<String> pruned, String? refusal}) _pruneArchives(Directory archives) {
+    final pruned = <String>[];
+    final List<String> present;
+    try {
+      present = <String>[
+        for (final entry in archives.listSync())
+          if (entry is Directory) p.basename(entry.path),
+      ];
+    } on FileSystemException catch (error) {
+      return (
+        pruned: pruned,
+        refusal:
+            'the local archives could not be listed, so the newest '
+            '$kSeatArchiveRetention could not be kept — '
+            '${_oneLine(error.osError?.message ?? error.message)}.',
+      );
+    }
+    for (final name in seatArchivesToPrune(present)) {
+      try {
+        Directory(p.join(archives.path, name)).deleteSync(recursive: true);
+        pruned.add(name);
+      } on FileSystemException catch (error) {
+        return (
+          pruned: pruned,
+          refusal:
+              'the expired local archive "$name" could not be pruned — '
+              '${_oneLine(error.osError?.message ?? error.message)}. The '
+              'succession itself completed.',
+        );
+      }
+    }
+    return (pruned: pruned, refusal: null);
   }
 
   /// The disc index's single pointer at [target], read fresh off [memoryFile]:
@@ -840,6 +948,7 @@ class SuccessionCommand extends Command<int> {
         _out
           ..writeln('$head — $archive')
           ..writeln('$head — WOULD DELETE ${report.candidate}');
+        _renderRetention(head, report);
         return 0;
       case SeatSuccessionDisposition.consumed:
         _out
@@ -848,7 +957,19 @@ class SuccessionCommand extends Command<int> {
             '$head — DELETED ${report.candidate} AND '
             '$kSeatMemoryFileName POINTER',
           );
+        _renderRetention(head, report);
         return 0;
     }
+  }
+
+  /// Writes what retention did — and, LOUDLY, what it could not do.
+  ///
+  /// A prune that failed never changes the exit code: the succession it ran
+  /// after is already complete and proved.
+  void _renderRetention(String head, SeatSuccessionReport report) {
+    final pruned = seatArchiveRetentionDisposition(report);
+    if (pruned != null) _out.writeln('$head — $pruned');
+    final refusal = report.pruneRefusal;
+    if (refusal != null) _err.writeln('$head — PRUNE INCOMPLETE: $refusal');
   }
 }

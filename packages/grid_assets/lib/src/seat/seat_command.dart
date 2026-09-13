@@ -462,6 +462,14 @@ class SeatCommand extends Command<int> {
           '$head — CONSUMED ${report.candidate} '
           '(${seatArchiveDisposition(report)}); priming the successor with it.',
         );
+        // Retention is the disc's own housekeeping and never gates a launch;
+        // the launcher only says what it did, and says when it could not.
+        final pruned = seatArchiveRetentionDisposition(report);
+        if (pruned != null) _out.writeln('$head — $pruned');
+        final pruneRefusal = report.pruneRefusal;
+        if (pruneRefusal != null) {
+          _err.writeln('$head — PRUNE INCOMPLETE: $pruneRefusal');
+        }
         return (body: report.body, refused: false);
       case SeatSuccessionDisposition.refused:
         _err.writeln('$head — HANDOFF NOT CONSUMED: ${report.refusal}');

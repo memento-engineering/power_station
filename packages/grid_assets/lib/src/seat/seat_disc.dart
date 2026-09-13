@@ -65,6 +65,73 @@ String seatArchiveStamp(DateTime at) {
       '${pad(utc.hour, 2)}${pad(utc.minute, 2)}${pad(utc.second, 2)}z';
 }
 
+/// How many `.archive/<stamp>/` directories one disc KEEPS. Every succession
+/// prunes what falls outside it (Nico, 2026-09-13).
+///
+/// The local archive exists to make ONE destruction safe, not to become a
+/// second history. The note it holds was working memory; its durable half was
+/// already banked as disc notes, beads and decisions before the handoff was
+/// written. An unbounded pile of it is worse than useless on the disc that
+/// earns this sink in the first place — the one a station gitignored for the
+/// PII it accretes. Ten is the depth an operator can still walk back by hand.
+const int kSeatArchiveRetention = 10;
+
+/// The `<YYYYMMDD>t<HHMMSS>z(-<n>)?` shape a local archive directory is named
+/// by — the stamp alone at [ordinal] 1, `<stamp>-2` at 2, and so on. PURE.
+///
+/// The stamp has SECOND resolution and the launcher's relaunch loop is not
+/// paced by a human, so two successions inside one second are a real case.
+/// Refusing the second one was the wrong half of that trade (Nico,
+/// 2026-09-13): the run that hands a seat over is not the place to lose on a
+/// clock tick, and an ordinal keeps BOTH archives whole.
+String seatArchiveDirectoryName(String stamp, int ordinal) =>
+    ordinal <= 1 ? stamp : '$stamp-$ordinal';
+
+final RegExp _archiveDirectoryName = RegExp(r'^(\d{8}t\d{6}z)(?:-(\d+))?$');
+
+/// [name] split back into the stamp and ordinal
+/// [seatArchiveDirectoryName] composed, or null when it is not a name this
+/// station wrote. PURE.
+///
+/// Null is load-bearing: retention DELETES, and a directory whose name it
+/// cannot parse is one it did not create, so it is never a prune candidate.
+({String stamp, int ordinal})? parseSeatArchiveDirectoryName(String name) {
+  final match = _archiveDirectoryName.firstMatch(name);
+  if (match == null) return null;
+  final ordinal = match.group(2);
+  if (ordinal == null) return (stamp: match.group(1)!, ordinal: 1);
+  final parsed = int.tryParse(ordinal);
+  // `-0` and `-1` are names this station never writes, and a leading zero
+  // would make two names for one archive — neither is ours to delete.
+  if (parsed == null || parsed < 2) return null;
+  if (seatArchiveDirectoryName(match.group(1)!, parsed) != name) return null;
+  return (stamp: match.group(1)!, ordinal: parsed);
+}
+
+/// The archive directory names in [names] that fall OUTSIDE the newest [keep],
+/// OLDEST first — exactly what one succession prunes. PURE.
+///
+/// Ordering is by the parsed (stamp, ordinal) pair rather than by the string:
+/// `<stamp>-10` sorts before `<stamp>-2` lexicographically, and retention that
+/// deletes the newest archive because of a string compare is worse than no
+/// retention at all. Unparseable names are dropped, never returned.
+List<String> seatArchivesToPrune(
+  Iterable<String> names, {
+  int keep = kSeatArchiveRetention,
+}) {
+  final parsed =
+      <({String name, String stamp, int ordinal})>[
+        for (final name in names)
+          if (parseSeatArchiveDirectoryName(name) case final at?)
+            (name: name, stamp: at.stamp, ordinal: at.ordinal),
+      ]..sort((a, b) {
+        final byStamp = a.stamp.compareTo(b.stamp);
+        return byStamp != 0 ? byStamp : a.ordinal.compareTo(b.ordinal);
+      });
+  if (keep < 0 || parsed.length <= keep) return const <String>[];
+  return <String>[for (final at in parsed.take(parsed.length - keep)) at.name];
+}
+
 /// The process env var naming the seat a session occupies. Set by the launcher;
 /// ABSENT means a bare harness session, which is NOT a seat and writes no disc.
 const String kSeatEnvironmentVariable = 'GRID_SEAT';

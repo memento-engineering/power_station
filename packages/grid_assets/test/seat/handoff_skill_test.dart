@@ -15,6 +15,10 @@
 //     line, and RESUME states that the LAUNCHER already consumed — the verb
 //     stays named as the hand-recovery path, and none of the four retired
 //     hand-delete phrases appears;
+//   - AC-5, RULING 2026-09-13 (governor): the cut is HARD and station-wide —
+//     NO vended file under `station_overlay/` instructs `/clear`, role
+//     definitions included, and the two that did (`claude/agents/governor.md`,
+//     `claude/agents/refiner.md`) now teach the same ending the skill does;
 //   - the two legs are INDEPENDENT instruction sources (a harness-specific
 //     instruction on each, per
 //     `power_station#a-harness-may-carry-its-own-instructions`);
@@ -30,6 +34,7 @@
 // deliverable it certifies.
 //
 // Offline only — reads the bundled `extension/` files; no live anything.
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:grid_assets/grid_assets.dart';
@@ -310,6 +315,63 @@ void main() {
             reason: '$leg: the hand-performed ritual is RETIRED — "$retired"',
           );
         }
+      }
+    });
+  });
+
+  group('AC-5 the HARD CUT reaches every vended instruction', () {
+    // RULING 2026-09-13 (governor): retiring `/clear` from the handoff skill
+    // alone left the role definitions still teaching it — governor.md and
+    // refiner.md each told the seat to write the handoff "and then /clear",
+    // which is the path the launcher can no longer consume. An overlay that
+    // contradicts itself is read as an option, so the grep is the acceptance.
+    test('no file under station_overlay/ instructs /clear', () {
+      final offenders = <String>[];
+      for (final entity in Directory(overlay).listSync(recursive: true)) {
+        if (entity is! File) continue;
+        final body = utf8.decode(
+          entity.readAsBytesSync(),
+          allowMalformed: true,
+        );
+        if (body.toLowerCase().contains('/clear')) {
+          offenders.add(p.relative(entity.path, from: overlay));
+        }
+      }
+      expect(
+        offenders,
+        isEmpty,
+        reason:
+            'a seat hands off by ENDING; `grep -ri /clear` over the overlay '
+            'returns nothing that instructs it',
+      );
+    });
+
+    test('the two role definitions teach the ENDING the skill teaches', () {
+      for (final role in const ['governor', 'refiner']) {
+        // Markdown prose is hard-wrapped, so the phrases are matched against
+        // the text with its wrapping collapsed — a re-wrap is not a change of
+        // instruction and must not be read as one.
+        final body = File(
+          p.join(overlay, 'claude', 'agents', '$role.md'),
+        ).readAsStringSync().replaceAll(RegExp(r'\s+'), ' ');
+        expect(
+          body,
+          contains('handoff and then EXIT'),
+          reason:
+              '$role: the bullet that carried `/clear` still has to name the '
+              'path that replaced it — a deletion alone leaves the seat with '
+              'no ending at all',
+        );
+        expect(
+          body,
+          contains('relaunches this seat primed with it'),
+          reason: '$role: the launcher is what makes ending safe',
+        );
+        expect(
+          body,
+          contains('Ending IS the handoff path; there is no in-place one.'),
+          reason: '$role: stated, so the next reader cannot re-derive /clear',
+        );
       }
     });
   });
