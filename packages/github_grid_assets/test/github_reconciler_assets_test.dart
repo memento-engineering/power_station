@@ -89,6 +89,9 @@ final class _AmbientOpener implements PrOpener {
       PullRequestResult.opened(const PullRequestRef(url: 'https://ambient'));
 }
 
+/// A runtime that never reaches GitHub. It overrides NOTHING: the runtime has
+/// no lifecycle left to fake — whether this seat reconciles is now a fact about
+/// the station's query, which every probe below reads there.
 final class _RecordingRuntime extends GitHubReconcilerRuntime {
   _RecordingRuntime({required GitHubAppClient client})
     : super(
@@ -103,24 +106,6 @@ final class _RecordingRuntime extends GitHubReconcilerRuntime {
         ),
         coordinator: GitHubPollCoordinator(minimumSpacing: Duration.zero),
       );
-
-  var starts = 0;
-  var stops = 0;
-  var _running = false;
-
-  @override
-  void start() {
-    if (_running) return;
-    _running = true;
-    starts++;
-  }
-
-  @override
-  Future<void> stop() async {
-    if (!_running) return;
-    _running = false;
-    stops++;
-  }
 }
 
 final class _Factory {
@@ -169,7 +154,37 @@ GitHubReconcilerConfig _config(
   arm: arm,
 );
 
+/// The station rung a live seat is composed under: a [sdk.TrajectoryConfig]
+/// registering [queries] as the tick's obligation extensions.
+Seed _station(List<sdk.ObligationQuery> queries, {required Seed child}) =>
+    InheritedSeed<sdk.TrajectoryConfig>(
+      value: sdk.TrajectoryConfig(obligationQueryExtensions: queries),
+      child: child,
+    );
+
 Seed _runtimeTree({
+  required GitHubReconcilerConfig? config,
+  required _Factory factory,
+  required void Function(GitHubReconcilerRuntime?) observe,
+  required GitHubReconciliationQuery query,
+  ExplorationTransport? transport,
+  EnvironmentReader? environment,
+  GitHubHttpTransportFactory? foreignTransportFactory,
+}) => _station(
+  <sdk.ObligationQuery>[query],
+  child: _seatTree(
+    config: config,
+    factory: factory,
+    observe: observe,
+    transport: transport,
+    environment: environment,
+    foreignTransportFactory: foreignTransportFactory,
+  ),
+);
+
+/// The seat itself, WITHOUT the station rung — so a probe can mount it under a
+/// deliberately wrong registration.
+Seed _seatTree({
   required GitHubReconcilerConfig? config,
   required _Factory factory,
   required void Function(GitHubReconcilerRuntime?) observe,
@@ -231,7 +246,6 @@ void main() {
       transport: null,
       foreignClient: null,
     );
-    addTearDown(runtime.stop);
 
     expect(runtime.reconciler.workflowRuns, [same(rule)]);
     expect(runtime.reconciler.defaultBranch, 'm3-runtime');
@@ -244,35 +258,146 @@ void main() {
       transport: null,
       foreignClient: null,
     );
-    addTearDown(plain.stop);
     expect(plain.reconciler.workflowRuns, isEmpty);
   });
 
-  test('live config constructs and starts at consumer', () async {
+  test(
+    'live assets attach only to the query registered in TrajectoryConfig',
+    () async {
+      final factory = _Factory();
+      final flares = _Flares();
+      final registered = GitHubReconciliationQuery();
+      final unregistered = GitHubReconciliationQuery();
+      GitHubReconcilerRuntime? observed;
+      final owner = TreeOwner();
+      owner.mountRoot(
+        sdk.ProviderScope(
+          child: _runtimeTree(
+            config: _config('one'),
+            factory: factory,
+            observe: (runtime) => observed = runtime,
+            query: registered,
+            transport: flares,
+          ),
+        ),
+      );
+      owner.flush();
+
+      expect(factory.configs, hasLength(1));
+      expect(factory.transports.single, same(flares));
+      expect(observed, same(factory.runtimes.single));
+      expect(registered.attached, <GitHubReconcilerRuntime>[
+        factory.runtimes.single,
+      ]);
+      expect(
+        unregistered.attached,
+        isEmpty,
+        reason: 'a query the station did not register gets no seat',
+      );
+
+      owner.unmountRoot();
+      expect(registered.attached, isEmpty);
+    },
+  );
+
+  test('live assets refuse missing or duplicate registered queries', () {
+    void mount(List<sdk.ObligationQuery> registration, _Factory factory) {
+      final owner = TreeOwner();
+      addTearDown(owner.dispose);
+      owner.mountRoot(
+        sdk.ProviderScope(
+          child: _station(
+            registration,
+            child: _seatTree(
+              config: _config('one'),
+              factory: factory,
+              observe: (_) {},
+            ),
+          ),
+        ),
+      );
+      owner.flush();
+    }
+
+    for (final registration in <List<sdk.ObligationQuery>>[
+      // NO registration at all — including an ambient config that never
+      // mentions GitHub, which is the wedge this bead exists to prevent.
+      const <sdk.ObligationQuery>[],
+      const <sdk.ObligationQuery>[_OtherQuery()],
+      <sdk.ObligationQuery>[
+        GitHubReconciliationQuery(),
+        GitHubReconciliationQuery(),
+      ],
+    ]) {
+      final expected = registration
+          .whereType<GitHubReconciliationQuery>()
+          .length;
+      final factory = _Factory();
+      expect(
+        () => mount(registration, factory),
+        throwsA(
+          isA<StateError>().having(
+            (error) => error.message,
+            'message',
+            allOf(
+              contains('TrajectoryConfig.obligationQueryExtensions'),
+              contains('offers $expected'),
+            ),
+          ),
+        ),
+        reason: 'registering $expected GitHub queries is a REFUSAL',
+      );
+      expect(factory.runtimes, isEmpty, reason: 'a refused seat runs nothing');
+    }
+
+    // The falsifier: selection is BY TYPE, so a station obligation that is not
+    // the GitHub one neither satisfies the requirement nor breaks it.
+    final query = GitHubReconciliationQuery();
     final factory = _Factory();
-    final flares = _Flares();
-    GitHubReconcilerRuntime? observed;
+    mount(<sdk.ObligationQuery>[const _OtherQuery(), query], factory);
+    expect(query.attached, <GitHubReconcilerRuntime>[factory.runtimes.single]);
+  });
+
+  test('a registered query replacement moves the SAME runtime', () async {
+    final factory = _Factory();
+    final first = GitHubReconciliationQuery();
+    final second = GitHubReconciliationQuery();
+    late _HostState host;
+    // ONE seat description, two registrations over it: the only thing the swap
+    // changes is which query the station registered.
+    final seat = _seatTree(
+      config: _config('one'),
+      factory: factory,
+      observe: (_) {},
+    );
+    Seed describe(GitHubReconciliationQuery query) =>
+        _station(<sdk.ObligationQuery>[query], child: seat);
     final owner = TreeOwner();
+    addTearDown(owner.dispose);
     owner.mountRoot(
       sdk.ProviderScope(
-        child: _runtimeTree(
-          config: _config('one'),
-          factory: factory,
-          observe: (runtime) => observed = runtime,
-          transport: flares,
+        child: _Host(
+          onCreate: (state) => host = state,
+          describe: () => describe(first),
         ),
       ),
     );
     owner.flush();
+    final runtime = factory.runtimes.single;
+    expect(first.attached, <GitHubReconcilerRuntime>[runtime]);
 
-    expect(factory.configs, hasLength(1));
-    expect(factory.transports.single, same(flares));
-    expect(observed, same(factory.runtimes.single));
-    expect(factory.runtimes.single.starts, 1);
-
-    owner.unmountRoot();
+    host.swap(() => describe(second));
+    owner.flush();
     await Future<void>.delayed(Duration.zero);
-    expect(factory.runtimes.single.stops, 1);
+    owner.flush();
+
+    expect(
+      factory.runtimes,
+      hasLength(1),
+      reason: 'only the SCHEDULE moved; the seat kept its cursor tail',
+    );
+    expect(first.attached, isEmpty);
+    expect(second.attached, <GitHubReconcilerRuntime>[runtime]);
   });
 
   test(
@@ -288,24 +413,24 @@ void main() {
         foreignClient: null,
       );
 
-      runtime.start();
-      try {
-        final report = await flares.first.future.timeout(
-          const Duration(seconds: 1),
-        );
-        expect(report.name, 'reconciler.cycleFailed');
-        expect(report.data, containsPair('seat', 'power_station'));
-        expect(report.data, containsPair('repository', 'owner/power_station'));
-        expect(report.data['error'], contains('GitHubPollException'));
-        expect(report.data['stack_trace'], isNotEmpty);
-      } finally {
-        await runtime.stop();
-      }
+      // The station's pass is what runs it, and the throw is what the pass
+      // accounts for — the flare is the seat's own copy of the same news.
+      await expectLater(runtime.runOnce(), throwsA(isA<GitHubPollException>()));
+
+      final report = await flares.first.future.timeout(
+        const Duration(seconds: 1),
+      );
+      expect(report.name, 'reconciler.cycleFailed');
+      expect(report.data, containsPair('seat', 'power_station'));
+      expect(report.data, containsPair('repository', 'owner/power_station'));
+      expect(report.data['error'], contains('GitHubPollException'));
+      expect(report.data['stack_trace'], isNotEmpty);
     },
   );
 
-  test('disposal stops runtime once', () async {
+  test('unmount detaches reconciliation from the station tick', () async {
     final factory = _Factory();
+    final query = GitHubReconciliationQuery();
     final owner = TreeOwner();
     owner.mountRoot(
       sdk.ProviderScope(
@@ -313,14 +438,19 @@ void main() {
           config: _config('one'),
           factory: factory,
           observe: (_) {},
+          query: query,
         ),
       ),
     );
     owner.flush();
+    expect(query.attached, hasLength(1));
+
     owner.unmountRoot();
-    await Future<void>.delayed(Duration.zero);
-    expect(factory.runtimes.single.starts, 1);
-    expect(factory.runtimes.single.stops, 1);
+
+    expect(query.attached, isEmpty);
+    // And the station's next pass really does nothing for this seat: the
+    // client above answers 500, so a reached runtime would have thrown.
+    expect(await query.repair(const <Map<String, String?>>[]), isEmpty);
   });
 
   test('inert arms construct nothing', () {
@@ -330,6 +460,7 @@ void main() {
       _config('one', arm: GitHubReconcilerArm.offline),
     ]) {
       final factory = _Factory();
+      final query = GitHubReconciliationQuery();
       GitHubReconcilerRuntime? observed;
       final owner = TreeOwner();
       owner.mountRoot(
@@ -338,24 +469,28 @@ void main() {
             config: config,
             factory: factory,
             observe: (runtime) => observed = runtime,
+            query: query,
           ),
         ),
       );
       owner.flush();
       expect(factory.configs, isEmpty);
       expect(observed, isNull);
+      expect(query.attached, isEmpty, reason: 'an inert arm rides no tick');
       owner.unmountRoot();
     }
   });
 
   test('config replacement re-provides runtime', () async {
     final factory = _Factory();
+    final query = GitHubReconciliationQuery();
     final observations = <GitHubReconcilerRuntime?>[];
     late _HostState host;
     Seed describe(GitHubReconcilerConfig config) => _runtimeTree(
       config: config,
       factory: factory,
       observe: observations.add,
+      query: query,
     );
     final owner = TreeOwner();
     owner.mountRoot(
@@ -377,12 +512,14 @@ void main() {
     expect(factory.configs.map((value) => value.owner), ['one', 'two']);
     expect(observations.last, same(factory.runtimes.last));
     expect(factory.runtimes.last, isNot(same(first)));
-    expect(first.stops, 1);
-    expect(factory.runtimes.last.starts, 1);
+    expect(
+      query.attached,
+      <GitHubReconcilerRuntime>[factory.runtimes.last],
+      reason: 'the superseded seat stops riding the tick at handover',
+    );
 
     owner.unmountRoot();
-    await Future<void>.delayed(Duration.zero);
-    expect(factory.runtimes.last.stops, 1);
+    expect(query.attached, isEmpty);
   });
 
   test('app opener provider', () {
@@ -437,6 +574,10 @@ void main() {
       owner.flush();
       addTearDown(owner.unmountRoot);
     }
+
+    /// A fresh registration per mount: these probes read the FACTORY, never
+    /// the tick, so each tree gets its own query and nothing is shared.
+    GitHubReconciliationQuery query() => GitHubReconciliationQuery();
 
     const foreign = GitHubIssueWatch(
       originatingBeadId: 'lunar_station-6p9',
@@ -496,6 +637,7 @@ void main() {
             config: config(watches: watches, tokenVariable: 'TOKEN'),
             factory: factory,
             observe: (_) {},
+            query: query(),
             environment: () {
               environmentReads++;
               return const <String, String>{};
@@ -522,6 +664,7 @@ void main() {
           config: config(watches: const <GitHubIssueWatch>[foreign]),
           factory: factory,
           observe: (_) {},
+          query: query(),
           environment: () => const <String, String>{},
           foreignTransportFactory: () {
             transportBuilds++;
@@ -546,6 +689,7 @@ void main() {
           ),
           factory: factory,
           observe: (_) {},
+          query: query(),
           environment: () => const <String, String>{
             'GITHUB_FOREIGN_READ_TOKEN': 'personal',
           },
@@ -566,6 +710,7 @@ void main() {
           ),
           factory: factory,
           observe: (_) {},
+          query: query(),
           environment: () => const <String, String>{
             'GITHUB_FOREIGN_READ_TOKEN': '   ',
           },
@@ -585,6 +730,7 @@ void main() {
           ),
           factory: factory,
           observe: (_) {},
+          query: query(),
           environment: () => const <String, String>{},
           foreignTransportFactory: _Transport.new,
         ),
@@ -596,4 +742,21 @@ void main() {
       ]);
     });
   });
+}
+
+/// A station obligation that is NOT the GitHub one — the falsifier for
+/// "selected from the registration by type".
+final class _OtherQuery extends sdk.ObligationQuery {
+  const _OtherQuery();
+
+  @override
+  String get name => 'not-github';
+
+  @override
+  String get sql => 'SELECT 1';
+
+  @override
+  Future<List<sdk.ObligationAppend>> repair(
+    List<Map<String, String?>> rows,
+  ) async => const <sdk.ObligationAppend>[];
 }

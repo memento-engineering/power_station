@@ -12,7 +12,7 @@ import 'package:genesis_tree/genesis_tree.dart';
 import 'package:github_grid_assets/github_grid_assets.dart';
 import 'package:grid_engine/grid_engine.dart';
 import 'package:grid_engine/testing.dart' show RecordingExplorationTransport;
-import 'package:grid_sdk/grid_sdk.dart' show Provider;
+import 'package:grid_sdk/grid_sdk.dart' show ObligationQuery, Provider;
 import 'package:grid_sdk/grid_sdk.dart' as sdk;
 import 'package:test/test.dart';
 
@@ -79,7 +79,8 @@ final class _Sender implements FeedbackCommandSender {
 }
 
 /// An inert runtime: it constructs a real reconciler so observers can be
-/// registered, and never polls.
+/// registered, and never polls — because nothing in this file ever asks the
+/// station's query to run it.
 final class _InertRuntime extends GitHubReconcilerRuntime {
   _InertRuntime({required GitHubAppClient client})
     : super(
@@ -94,12 +95,6 @@ final class _InertRuntime extends GitHubReconcilerRuntime {
         ),
         coordinator: GitHubPollCoordinator(minimumSpacing: Duration.zero),
       );
-
-  @override
-  void start() {}
-
-  @override
-  Future<void> stop() async {}
 }
 
 GitHubReconcilerRuntime _inert({
@@ -126,8 +121,6 @@ const _config = GitHubReconcilerConfig(
   repository: 'power_station',
   substation: 'power_station',
   installationId: 'installation',
-  // One cycle inside a test's lifetime: the loop parks for an hour after it.
-  interval: Duration(hours: 1),
   minimumSpacing: Duration.zero,
 );
 
@@ -151,33 +144,31 @@ CiFeedbackProjection _landedProjection() => CiFeedbackProjection(
   substation: 'power_station',
 );
 
-Future<void> _waitForFlare(RecordingExplorationTransport flares) async {
-  final deadline = DateTime.now().add(const Duration(seconds: 5));
-  while (DateTime.now().isBefore(deadline)) {
-    if (flares.flares.isNotEmpty) return;
-    await Future<void>.delayed(const Duration(milliseconds: 5));
-  }
-  fail('the failed cycle produced no flare');
-}
-
 Seed _seatTree({
   required RecordingExplorationTransport flares,
   required CiFeedbackProjection projection,
 }) => sdk.ProviderScope(
-  child: InheritedSeed<ServiceBundle>(
-    value: ServiceBundle(transport: flares),
-    child: Provider<GitHubAppClient>.value(
-      _client,
-      child: Provider<GitHubCursorStore>.value(
-        _Cursors(),
-        child: Provider<GitHubEventSink>.value(
-          (_) async {},
-          child: Provider<CiFeedbackProjection>.value(
-            projection,
-            child: const GitHubReconcilerAssets(
-              config: _config,
-              runtimeFactory: _inert,
-              child: _Leaf(),
+  // The station rung a live seat composes under: this file never runs the
+  // query, so the seat mounts, binds its rail, and reconciles nothing.
+  child: InheritedSeed<sdk.TrajectoryConfig>(
+    value: sdk.TrajectoryConfig(
+      obligationQueryExtensions: <ObligationQuery>[GitHubReconciliationQuery()],
+    ),
+    child: InheritedSeed<ServiceBundle>(
+      value: ServiceBundle(transport: flares),
+      child: Provider<GitHubAppClient>.value(
+        _client,
+        child: Provider<GitHubCursorStore>.value(
+          _Cursors(),
+          child: Provider<GitHubEventSink>.value(
+            (_) async {},
+            child: Provider<CiFeedbackProjection>.value(
+              projection,
+              child: const GitHubReconcilerAssets(
+                config: _config,
+                runtimeFactory: _inert,
+                child: _Leaf(),
+              ),
             ),
           ),
         ),
@@ -187,7 +178,7 @@ Seed _seatTree({
 );
 
 void main() {
-  test('a failed cycle flares EXACTLY once on the seat transport', () async {
+  test('a failed cycle flares locally AND refuses to the station', () async {
     final flares = RecordingExplorationTransport();
     final runtime = createGitHubReconcilerRuntime(
       config: _config,
@@ -202,13 +193,15 @@ void main() {
       (_) async => throw StateError('leg refused'),
     );
 
-    runtime.start();
-    await _waitForFlare(flares);
-    // STOP before the interval elapses, so the count below is one CYCLE's
-    // worth and not a race against a second poll.
-    await runtime.stop();
+    // The station's pass is the caller now, so the failure has TWO audiences:
+    // the seat's own rail, and the tick — which is the one that counts.
+    final query = GitHubReconciliationQuery()..attach(runtime);
+    await expectLater(
+      query.repair(const <Map<String, String?>>[]),
+      throwsA(isA<StateError>()),
+    );
 
-    expect(flares.flares, hasLength(1));
+    expect(flares.flares, hasLength(1), reason: 'one cycle, one flare');
     final flare = flares.flares.single;
     expect(flare.name, 'reconciler.cycleFailed');
     expect(flare.data, containsPair('seat', 'power_station'));

@@ -1,7 +1,5 @@
 library;
 
-import 'dart:async';
-
 import 'package:genesis_tree/genesis_tree.dart';
 import 'package:grid_assets/grid_assets.dart';
 import 'package:grid_engine/grid_engine.dart';
@@ -169,13 +167,14 @@ Future<void> projectIssueWatch(
   }
 }
 
-/// Owns the reconciler runtime's lifecycle and BOTH of its durable observers.
+/// Owns BOTH of the reconciler's durable observers — and nothing else.
 ///
-/// One owner, not two: the runtime is started and stopped exactly once, and
-/// `ci-feedback` and `issue-watch` are registered and removed together. A
-/// second binding seed would race this one over the same runtime — both would
-/// call `start`, and one would `stop` a runtime the other still believes is
-/// running.
+/// One owner, not two: `ci-feedback` and `issue-watch` are registered and
+/// removed together, so the two durable acknowledgement keys can never fall
+/// out of step. It NEITHER SCHEDULES NOR SUPERVISES reconciliation: the
+/// station's service tick decides when a seat runs
+/// (`GitHubReconciliationQuery`), and this binding only decides where a
+/// normalized observation goes once a run produced one.
 final class _ReconcilerObserverBinding extends SingleChildStatefulSeed {
   const _ReconcilerObserverBinding({
     required this.runtime,
@@ -221,7 +220,6 @@ final class _ReconcilerObserverBindingState
     };
     _runtime = _binding.runtime;
     _register(_runtime);
-    _runtime?.start();
   }
 
   void _register(GitHubReconcilerRuntime? runtime) {
@@ -236,35 +234,24 @@ final class _ReconcilerObserverBindingState
     }
   }
 
-  Future<void> _replaceRuntime(
-    GitHubReconcilerRuntime? previous,
-    GitHubReconcilerRuntime? replacement,
-  ) async {
-    _unregister(previous);
-    await previous?.stop();
-    if (identical(_runtime, replacement)) {
-      _register(replacement);
-      replacement?.start();
-    }
-  }
-
   @override
   Seed buildWithChild(TreeContext context, Seed child) {
     final replacement = _binding.runtime;
     if (!identical(_runtime, replacement)) {
-      final previous = _runtime;
+      // SYNCHRONOUS handover: registration is bookkeeping, not IO, so the
+      // superseded runtime's legs are free before the replacement claims
+      // the same durable keys — there is no window in which both hold them.
+      _unregister(_runtime);
       _runtime = replacement;
-      unawaited(_replaceRuntime(previous, replacement));
+      _register(replacement);
     }
     return child;
   }
 
   @override
   void dispose() {
-    if (_runtime case final runtime?) {
-      _unregister(runtime);
-      unawaited(runtime.stop());
-    }
+    _unregister(_runtime);
+    _runtime = null;
     super.dispose();
   }
 }

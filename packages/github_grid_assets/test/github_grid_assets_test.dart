@@ -227,15 +227,22 @@ final class _RecordingRuntime extends GitHubReconcilerRuntime {
         ),
         coordinator: GitHubPollCoordinator(minimumSpacing: Duration.zero),
       );
+}
 
-  var starts = 0;
-  var stops = 0;
-
-  @override
-  void start() => starts++;
-
-  @override
-  Future<void> stop() async => stops++;
+/// Whether [leg] is currently registered on [runtime]'s reconciler.
+///
+/// A duplicate registration is refused LOUDLY, so an attempt that throws is
+/// proof the name is taken and one that succeeds is proof it is free. This is
+/// the only lifecycle the binding has left — it no longer starts or stops
+/// anything.
+bool _legRegistered(GitHubReconcilerRuntime runtime, String leg) {
+  try {
+    runtime.reconciler.addObserver(leg, (_) async {});
+  } on ArgumentError {
+    return true;
+  }
+  runtime.reconciler.removeObserver(leg);
+  return false;
 }
 
 CiFeedbackProjection _projection(_FeedbackSender sender) =>
@@ -551,13 +558,17 @@ void main() {
       ),
     );
     owner.flush();
-    expect(oldRuntime.starts, 1);
+    expect(_legRegistered(oldRuntime, kCiFeedbackDeliveryLeg), isTrue);
 
     host.swap(() => describe(replacementRuntime, replacementProjection));
     owner.flush();
     await Future<void>.delayed(Duration.zero);
-    expect(oldRuntime.stops, 1);
-    expect(replacementRuntime.starts, 1);
+    expect(
+      _legRegistered(oldRuntime, kCiFeedbackDeliveryLeg),
+      isFalse,
+      reason: 'the superseded runtime gives its durable keys back',
+    );
+    expect(_legRegistered(replacementRuntime, kCiFeedbackDeliveryLeg), isTrue);
 
     await replacementRuntime.reconciler.reconcileOnce();
     expect(oldSender.events, isEmpty);
@@ -612,7 +623,6 @@ void main() {
       );
       owner.flush();
 
-      expect(runtime.starts, 1, reason: 'ONE owner starts the runtime once');
       // A duplicate registration is refused loudly, so this proves BOTH names
       // are already taken by exactly one observer each.
       expect(
@@ -632,7 +642,6 @@ void main() {
 
       owner.unmountRoot();
       await Future<void>.delayed(Duration.zero);
-      expect(runtime.stops, 1);
       // Both were removed symmetrically, so both names are free again.
       runtime.reconciler.addObserver(kCiFeedbackDeliveryLeg, (_) async {});
       runtime.reconciler.addObserver(
@@ -670,6 +679,60 @@ void main() {
       owner.unmountRoot();
     });
 
+    test('the binding schedules NOTHING it was handed', () async {
+      // The observer binding used to start the runtime it was given. It does
+      // not any more: mounting it must cost zero GitHub requests, because the
+      // station's tick is the only thing that decides a seat runs.
+      final transport = _CheckTransport();
+      final runtime = GitHubReconcilerRuntime(
+        installationId: 'installation',
+        reconciler: GitHubReconciler(
+          owner: 'memento',
+          repository: 'power_station',
+          substation: 'power_station',
+          client: GitHubAppClient(
+            config: GitHubAppConfig(
+              appId: 'app',
+              installationId: 1,
+              apiBaseUri: Uri.parse('https://api.github.test'),
+            ),
+            tokens: _Tokens(),
+            transport: transport,
+          ),
+          cursors: _CursorStore(),
+          emit: (_) async {},
+        ),
+        coordinator: GitHubPollCoordinator(minimumSpacing: Duration.zero),
+      );
+      final owner = TreeOwner();
+      addTearDown(owner.dispose);
+      owner.mountRoot(
+        sdk.ProviderScope(
+          child: Provider<GitHubReconcilerRuntime>.value(
+            runtime,
+            child: Provider<CiFeedbackProjection>.value(
+              _projection(_FeedbackSender()),
+              child: const GitHubGridAssets(child: _Leaf()),
+            ),
+          ),
+        ),
+      );
+      final scripted = transport.responses.length;
+      owner.flush();
+      await pumpEventQueue();
+
+      expect(
+        transport.responses,
+        hasLength(scripted),
+        reason: 'mounting the binding spends no GitHub request at all',
+      );
+      expect(_legRegistered(runtime, kCiFeedbackDeliveryLeg), isTrue);
+
+      // And the work still happens the moment somebody asks for it.
+      await runtime.runOnce();
+      expect(transport.responses, hasLength(lessThan(scripted)));
+    });
+
     test('an unmounted watch projection leaves the CI leg bound', () async {
       final runtime = _RecordingRuntime();
       final owner = TreeOwner();
@@ -687,7 +750,6 @@ void main() {
       );
       owner.flush();
 
-      expect(runtime.starts, 1);
       expect(
         () => runtime.reconciler.addObserver(
           kGitHubIssueWatchDeliveryLeg,

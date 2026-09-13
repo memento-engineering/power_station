@@ -5,7 +5,7 @@ import 'package:beads_dart/beads_dart.dart';
 import 'package:genesis_tree/genesis_tree.dart';
 import 'package:github_grid_assets/github_grid_assets.dart';
 import 'package:grid_engine/grid_engine.dart';
-import 'package:grid_sdk/grid_sdk.dart' show Provider;
+import 'package:grid_sdk/grid_sdk.dart' show ObligationQuery, Provider;
 import 'package:grid_sdk/grid_sdk.dart' as sdk;
 import 'package:test/test.dart';
 
@@ -273,8 +273,8 @@ final class _SeatTransport implements GitHubHttpTransport {
   }
 }
 
-/// Builds a REAL reconciler over the tree-provided cursors and sink, polling
-/// once on `start()` and then not again inside a test's lifetime.
+/// Builds a REAL reconciler over the tree-provided cursors and sink. It polls
+/// when — and only when — the station's registered query is asked to repair.
 final class _SeatFactory {
   final runtimes = <GitHubReconcilerRuntime>[];
 
@@ -297,20 +297,10 @@ final class _SeatFactory {
         emit: emit,
       ),
       coordinator: GitHubPollCoordinator(minimumSpacing: Duration.zero),
-      interval: const Duration(hours: 1),
     );
     runtimes.add(runtime);
     return runtime;
   }
-}
-
-Future<void> _waitFor(bool Function() ready, String description) async {
-  final deadline = DateTime.now().add(const Duration(seconds: 10));
-  while (DateTime.now().isBefore(deadline)) {
-    if (ready()) return;
-    await Future<void>.delayed(const Duration(milliseconds: 5));
-  }
-  fail(description);
 }
 
 int _verbCount(_StateBdRunner bd, String verb) =>
@@ -327,6 +317,7 @@ Seed _seatTree({
   required BdRunner runner,
   required GitHubReconcilerRuntimeFactory runtimeFactory,
   required void Function(CiFeedbackProjection?, GitHubEventSink?) observe,
+  GitHubReconciliationQuery? query,
   String? gridRoot,
   GitHubAppClient? client,
   _StateBdRunner? stateBd,
@@ -370,14 +361,33 @@ Seed _seatTree({
     child: Provider<GitHubAppClient>.value(client ?? _client, child: binding),
   );
   return sdk.ProviderScope(
-    child: gridRoot == null
-        ? seat
-        : Provider<sdk.GridRoot>.value(
-            sdk.GridRoot(path: gridRoot),
-            child: seat,
-          ),
+    child: _registeredUnder(
+      query,
+      child: gridRoot == null
+          ? seat
+          : Provider<sdk.GridRoot>.value(
+              sdk.GridRoot(path: gridRoot),
+              child: seat,
+            ),
+    ),
   );
 }
+
+/// The station rung every live seat composes under: a [sdk.TrajectoryConfig]
+/// registering [query] — a fresh one when the probe does not name it, since a
+/// probe that never asks the query to repair only needs the registration to
+/// EXIST.
+Seed _registeredUnder(
+  GitHubReconciliationQuery? query, {
+  required Seed child,
+}) => InheritedSeed<sdk.TrajectoryConfig>(
+  value: sdk.TrajectoryConfig(
+    obligationQueryExtensions: <ObligationQuery>[
+      query ?? GitHubReconciliationQuery(),
+    ],
+  ),
+  child: child,
+);
 
 final _appConfig = GitHubAppConfig(
   appId: 'app',
@@ -417,24 +427,27 @@ Seed _boundTree({
   )
   observe,
 }) => sdk.ProviderScope(
-  child: Provider<sdk.SubstationScope>.value(
-    scope,
-    child: Provider<GitHubAppClient>.value(
-      _client,
-      child: GitHubReconcilerBindingAssets(
-        config: config,
-        runner: runner,
-        trust: GitHubSelfTrust(githubUser: 'nico'),
-        child: GitHubReconcilerAssets(
+  child: _registeredUnder(
+    null,
+    child: Provider<sdk.SubstationScope>.value(
+      scope,
+      child: Provider<GitHubAppClient>.value(
+        _client,
+        child: GitHubReconcilerBindingAssets(
           config: config,
-          runtimeFactory: runtimeFactory,
-          child: _Probe((context) {
-            observe(
-              context.watch<GitHubCursorStore>(),
-              context.watch<GitHubEventSink>(),
-              context.watch<GitHubReconcilerRuntime>(),
-            );
-          }),
+          runner: runner,
+          trust: GitHubSelfTrust(githubUser: 'nico'),
+          child: GitHubReconcilerAssets(
+            config: config,
+            runtimeFactory: runtimeFactory,
+            child: _Probe((context) {
+              observe(
+                context.watch<GitHubCursorStore>(),
+                context.watch<GitHubEventSink>(),
+                context.watch<GitHubReconcilerRuntime>(),
+              );
+            }),
+          ),
         ),
       ),
     ),
@@ -636,20 +649,23 @@ void main() {
       final owner = TreeOwner();
       owner.mountRoot(
         sdk.ProviderScope(
-          child: Provider<GitHubAppClient>.value(
-            _client,
-            child: GitHubReconcilerBindingAssets(
-              config: config,
-              runner: runner,
-              trust: GitHubSelfTrust(githubUser: 'nico'),
-              child: GitHubReconcilerAssets(
+          child: _registeredUnder(
+            null,
+            child: Provider<GitHubAppClient>.value(
+              _client,
+              child: GitHubReconcilerBindingAssets(
                 config: config,
-                runtimeFactory: factory.create,
-                child: _Probe((context) {
-                  cursors = context.watch<GitHubCursorStore>();
-                  sink = context.watch<GitHubEventSink>();
-                  runtime = context.watch<GitHubReconcilerRuntime>();
-                }),
+                runner: runner,
+                trust: GitHubSelfTrust(githubUser: 'nico'),
+                child: GitHubReconcilerAssets(
+                  config: config,
+                  runtimeFactory: factory.create,
+                  child: _Probe((context) {
+                    cursors = context.watch<GitHubCursorStore>();
+                    sink = context.watch<GitHubEventSink>();
+                    runtime = context.watch<GitHubReconcilerRuntime>();
+                  }),
+                ),
               ),
             ),
           ),
@@ -901,11 +917,12 @@ void main() {
       final workBd = _BdRunner();
       final sender = _RecordingFeedbackSender();
       final factory = _SeatFactory();
+      final query = GitHubReconciliationQuery();
       final owner = TreeOwner();
-      addTearDown(() => factory.runtimes.single.stop());
       addTearDown(owner.dispose);
       owner.mountRoot(
         _seatTree(
+          query: query,
           gridRoot: temporary.path,
           scope: sdk.SubstationScope(
             name: 'seat',
@@ -927,15 +944,19 @@ void main() {
       );
       owner.flush();
 
-      await _waitFor(
-        () =>
-            sender.calls.length +
-                _verbCount(stateBd, 'update') +
-                _verbCount(stateBd, 'create') ==
-            1,
-        'the armed seat produced no CI feedback effect for '
-        '${seat.conclusion}',
+      // THE STATION'S PASS, made explicit: mounting armed nothing, and this
+      // is the one call that makes the seat reconcile.
+      expect(query.attached, <GitHubReconcilerRuntime>[
+        factory.runtimes.single,
+      ]);
+      expect(
+        sender.calls.length +
+            _verbCount(stateBd, 'update') +
+            _verbCount(stateBd, 'create'),
+        0,
+        reason: 'a mounted seat produces no CI feedback until the tick runs',
       );
+      await query.repair(const <Map<String, String?>>[]);
 
       expect(sender.calls, hasLength(seat.reworks));
       expect(_verbCount(stateBd, 'update'), seat.landingReady);
