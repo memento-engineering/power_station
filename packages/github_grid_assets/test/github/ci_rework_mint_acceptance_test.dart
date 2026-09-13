@@ -39,9 +39,21 @@ final class _ReconcileTransport implements GitHubHttpTransport {
         body: jsonEncode([
           {
             'node_id': 'pr',
+            'number': 8,
+            'body': 'A human digest.\n\nRefs: pow-test\n',
+            'user': {'login': 'nico'},
+            'created_at': '2026-08-23T00:00:00Z',
+            'updated_at': '2026-08-23T00:00:00Z',
             'head': {'ref': 'grid/pow-test', 'sha': 'abc'},
           },
         ]),
+      );
+    }
+    // The FULL resource, the only place `mergeable` lives.
+    if (path.contains('/pulls/')) {
+      return GitHubHttpResponse(
+        statusCode: 200,
+        body: jsonEncode({'mergeable': true}),
       );
     }
     return GitHubHttpResponse(
@@ -441,16 +453,6 @@ void main() {
         gridRoot: gridRoot,
         substation: 'power_station',
       );
-      const failed = NormalizedGitHubEvent.checkConcluded(
-        nodeId: 'check',
-        actor: 'nico',
-        repository: 'memento/power_station',
-        substation: 'power_station',
-        observationId: 'observation-1',
-        headBranch: 'grid/pow-test',
-        checkName: 'build',
-        conclusion: 'failure',
-      );
       final reconcilerRuntime = GitHubReconcilerRuntime(
         installationId: 'installation',
         reconciler: GitHubReconciler(
@@ -468,8 +470,13 @@ void main() {
           ),
           cursors: _CursorStore(),
           emit: (event) async {
-            expect(event, isA<CheckConcluded>());
-            await projection(failed);
+            // The POLLED observation drives the projection, not a stand-in: the
+            // feedback leg attributes this pull through its body's
+            // `Refs: pow-test` trailer — the `grid/` head it happens to carry
+            // takes no part — and the failing check aggregate is what the
+            // rework decision below reads.
+            expect(event, isA<PullRequestFeedback>());
+            await projection(event);
           },
         ),
         coordinator: GitHubPollCoordinator(minimumSpacing: Duration.zero),
@@ -594,16 +601,6 @@ void main() {
         gridRoot: gridRoot,
         substation: 'power_station',
       );
-      const failed = NormalizedGitHubEvent.checkConcluded(
-        nodeId: 'check',
-        actor: 'nico',
-        repository: 'memento/power_station',
-        substation: 'power_station',
-        observationId: 'observation-1',
-        headBranch: 'grid/pow-test',
-        checkName: 'build',
-        conclusion: 'failure',
-      );
       final reconcilerRuntime = GitHubReconcilerRuntime(
         installationId: 'installation',
         reconciler: GitHubReconciler(
@@ -621,8 +618,13 @@ void main() {
           ),
           cursors: _CursorStore(),
           emit: (event) async {
-            expect(event, isA<CheckConcluded>());
-            await projection(failed);
+            // The POLLED observation drives the projection, not a stand-in: the
+            // feedback leg attributes this pull through its body's
+            // `Refs: pow-test` trailer — the `grid/` head it happens to carry
+            // takes no part — and the failing check aggregate is what the
+            // rework decision below reads.
+            expect(event, isA<PullRequestFeedback>());
+            await projection(event);
           },
         ),
         coordinator: GitHubPollCoordinator(minimumSpacing: Duration.zero),

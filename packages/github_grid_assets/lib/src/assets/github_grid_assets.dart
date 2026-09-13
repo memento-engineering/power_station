@@ -132,13 +132,14 @@ Future<void> projectCiFeedback(
   NormalizedGitHubEvent event,
 ) async {
   switch (event) {
-    case CheckConcluded() when projection != null:
+    case (PullRequestFeedback() || CheckConcluded()) when projection != null:
       await projection(event);
     case IssueOpened() ||
         PullRequestOpened() ||
         WorkflowRunConcluded() ||
         IssueCommented() ||
         WatchedIssueStateChanged() ||
+        PullRequestFeedback() ||
         CheckConcluded():
       return;
   }
@@ -160,6 +161,7 @@ Future<void> projectIssueWatch(
     case IssueOpened() ||
         PullRequestOpened() ||
         WorkflowRunConcluded() ||
+        PullRequestFeedback() ||
         CheckConcluded() ||
         IssueCommented() ||
         WatchedIssueStateChanged():

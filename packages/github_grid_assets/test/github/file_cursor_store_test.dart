@@ -319,4 +319,163 @@ void main() {
       reason: 'nothing changed, so nothing is saved',
     );
   });
+  GitHubPullFeedbackCursorRecord feedback({
+    int number = 8,
+    String headSha = 'abc123',
+    PullRequestCheckState checkState = PullRequestCheckState.green,
+    PullRequestMergeability mergeability = PullRequestMergeability.mergeable,
+    DateTime? greenSince,
+  }) => GitHubPullFeedbackCursorRecord(
+    actor: 'nico',
+    number: number,
+    body: 'A human digest.\n\nRefs: pow-78jk\n',
+    headBranch: 'org/lockfile-convention',
+    headSha: headSha,
+    checkState: checkState,
+    mergeability: mergeability,
+    openedAt: DateTime.utc(2026, 9, 12, 8),
+    updatedAt: DateTime.utc(2026, 9, 12, 9),
+    greenSince: greenSince ?? DateTime.utc(2026, 9, 12, 9, 30),
+  );
+
+  test('pull feedback cache is additive bounded and co-evicts etags', () async {
+    final file = File(store.cursorPath);
+    await file.parent.create(recursive: true);
+    // ADDITIVE at version 1: a cursor written before this cache existed
+    // still loads, and loads with an empty cache rather than being refused.
+    await file.writeAsString(
+      '{"version":1,"since":null,"etags":{},"observation_ids":[]}',
+    );
+    final legacy = await store.load();
+    expect(legacy.pullFeedback, isEmpty);
+    expect(legacy.toJson()['version'], 1, reason: 'no version bump');
+    expect(legacy.toJson()['pull_feedback'], isEmpty);
+
+    // A record and BOTH of its conditional tags survive one save/load.
+    final saved = const GitHubReconcilerCursor().recordPullFeedback(
+      'PR_kwDO',
+      feedback(),
+      detailEtag: '"detail"',
+      checksEtag: '"checks"',
+    );
+    await store.save(saved);
+    final loaded = await store.load();
+    expect(loaded.pullFeedback['PR_kwDO'], feedback());
+    expect(loaded.etags['feedback/pull/PR_kwDO'], '"detail"');
+    expect(loaded.etags['feedback/checks/PR_kwDO'], '"checks"');
+    expect(loaded.toJson(), saved.toJson());
+
+    // The whole record is retained NEWEST-FIRST to 512, and the evicted
+    // record takes BOTH of its tags with it — a tag with no record behind it
+    // would earn a `304` nothing could answer.
+    var bounded = const GitHubReconcilerCursor();
+    for (var index = 0; index < 513; index++) {
+      bounded = bounded.recordPullFeedback(
+        'PR_$index',
+        feedback(number: index),
+        detailEtag: '"detail-$index"',
+        checksEtag: '"checks-$index"',
+      );
+    }
+    expect(bounded.pullFeedback, hasLength(512));
+    expect(bounded.pullFeedback.containsKey('PR_0'), isFalse);
+    expect(bounded.etags.containsKey('feedback/pull/PR_0'), isFalse);
+    expect(bounded.etags.containsKey('feedback/checks/PR_0'), isFalse);
+    expect(bounded.etags['feedback/pull/PR_512'], '"detail-512"');
+    expect(bounded.etags['feedback/checks/PR_512'], '"checks-512"');
+
+    // A null final tag DROPS the tag it names.
+    final dropped = bounded.recordPullFeedback(
+      'PR_512',
+      feedback(),
+      detailEtag: '"detail-again"',
+    );
+    expect(dropped.etags['feedback/pull/PR_512'], '"detail-again"');
+    expect(dropped.etags.containsKey('feedback/checks/PR_512'), isFalse);
+
+    // A CLOSED pull is dropped with both of its tags; retaining an unchanged
+    // open set saves nothing at all.
+    final two = const GitHubReconcilerCursor()
+        .recordPullFeedback(
+          'PR_open',
+          feedback(),
+          detailEtag: '"open-detail"',
+          checksEtag: '"open-checks"',
+        )
+        .recordPullFeedback(
+          'PR_closed',
+          feedback(),
+          detailEtag: '"closed-detail"',
+          checksEtag: '"closed-checks"',
+        );
+    final retained = two.retainPullFeedback(const <String>['PR_open']);
+    expect(retained.pullFeedback.keys, <String>['PR_open']);
+    expect(retained.etags.containsKey('feedback/pull/PR_closed'), isFalse);
+    expect(retained.etags.containsKey('feedback/checks/PR_closed'), isFalse);
+    expect(retained.etags['feedback/pull/PR_open'], '"open-detail"');
+    expect(retained.etags['feedback/checks/PR_open'], '"open-checks"');
+    expect(
+      retained.retainPullFeedback(const <String>['PR_open']),
+      same(retained),
+      reason: 'nothing changed, so nothing is saved',
+    );
+    expect(
+      two.retainPullFeedback(const <String>[
+        'PR_open',
+        'PR_closed',
+      ]).etags['feedback/pulls'],
+      isNull,
+      reason: 'the open-pulls PAGE key is not a per-pull tag',
+    );
+  });
+
+  test('a wrongly shaped pull_feedback value fails loudly', () async {
+    final file = File(store.cursorPath);
+    await file.parent.create(recursive: true);
+    const head = '{"version":1,"since":null,"etags":{},"observation_ids":[],';
+    const good =
+        '"actor":"nico","number":8,"body":"b","head_branch":"org/x",'
+        '"head_sha":"abc","check_state":"green","mergeability":"mergeable",'
+        '"opened_at":"2026-09-12T08:00:00.000Z",'
+        '"updated_at":"2026-09-12T09:00:00.000Z",'
+        '"green_since":"2026-09-12T09:30:00.000Z"';
+    for (final document in <String>[
+      // Not a map at all.
+      '$head"pull_feedback":[]}',
+      // A record missing a required field.
+      '$head"pull_feedback":{"PR_1":{"actor":"nico"}}}',
+      // An unsupported check-state spelling.
+      '$head"pull_feedback":{"PR_1":{${good.replaceFirst('"green"', '"exploded"')}}}}',
+      // An unsupported mergeability spelling.
+      '$head"pull_feedback":{"PR_1":{${good.replaceFirst('"mergeable"', '"maybe"')}}}}',
+      // A number that is not an integer.
+      '$head"pull_feedback":{"PR_1":{${good.replaceFirst('"number":8', '"number":"8"')}}}}',
+      // A body that is not a string.
+      '$head"pull_feedback":{"PR_1":{${good.replaceFirst('"body":"b"', '"body":true')}}}}',
+      // A timestamp with no zone at all, which would parse as LOCAL time.
+      '$head"pull_feedback":{"PR_1":{${good.replaceFirst('"2026-09-12T09:30:00.000Z"', '"2026-09-12T09:30:00"')}}}}',
+    ]) {
+      await file.writeAsString(document);
+      await expectLater(store.load(), throwsFormatException);
+    }
+    // The control: the same document, well-formed, loads.
+    await file.writeAsString('$head"pull_feedback":{"PR_1":{$good}}}');
+    final loaded = await store.load();
+    expect(
+      loaded.pullFeedback['PR_1']!.checkState,
+      PullRequestCheckState.green,
+    );
+    expect(
+      loaded.pullFeedback['PR_1']!.greenSince,
+      DateTime.utc(2026, 9, 12, 9, 30),
+    );
+    expect(
+      GitHubPullFeedbackCursorRecord.fromJson(
+        (jsonDecode('{$good, "green_since":null}') as Map)
+            .cast<String, Object?>(),
+      ).greenSince,
+      isNull,
+      reason: 'a pull that was never green carries no green instant',
+    );
+  });
 }

@@ -31,7 +31,9 @@ final class GitHubIntakeProjection {
   /// Handles one normalized event; raw GitHub JSON never enters this seam.
   Future<void> call(NormalizedGitHubEvent event) async {
     switch (event) {
-      case CheckConcluded():
+      // Open-pull FEEDBACK and the legacy per-check envelope are both the CI
+      // leg's, not intake's: neither files a bead.
+      case PullRequestFeedback() || CheckConcluded():
         return;
       // A watched OUTBOUND issue is projected onto the bead that CAUSED it,
       // not filed as fresh intake, so this seam returns from both arms.

@@ -43,6 +43,7 @@ final class GitHubIssueWatchProjection {
       // union keeps the disjointness a COMPILE error to break.
       case IssueOpened() ||
           PullRequestOpened() ||
+          PullRequestFeedback() ||
           CheckConcluded() ||
           WorkflowRunConcluded():
         return;

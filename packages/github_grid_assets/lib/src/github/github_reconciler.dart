@@ -18,6 +18,35 @@ typedef GitHubEventSink = Future<void> Function(NormalizedGitHubEvent event);
 /// The reserved delivery-leg name for the reconciler's own [GitHubEventSink].
 const String kSinkDeliveryLeg = 'sink';
 
+/// Reports that ONE open pull could not be observed this cycle.
+///
+/// [failure] is BOUNDED by construction — an HTTP status or an exception type
+/// and never a GitHub response body — because this rail ends on a seat's flare
+/// surface, where a body could carry a private title or a token echo. The
+/// [pullNumber] is what makes the report actionable: it names the pull a human
+/// must go look at.
+typedef GitHubPullFeedbackErrorReporter =
+    void Function(int pullNumber, String failure, StackTrace stackTrace);
+
+/// One open pull's observed snapshot and the two conditional tags that
+/// produced it — the whole result of the GitHub half of an observation.
+typedef _PullObservation = ({
+  GitHubPullFeedbackCursorRecord record,
+  String? detailEtag,
+  String? checksEtag,
+});
+
+/// How long an OPEN pull request may sit GREEN before the feedback leg reports
+/// it as stalled.
+///
+/// An OBSERVATION bound and nothing more: crossing it emits a second, distinct
+/// observation and performs no merge, no rework and no gate. Landing policy is
+/// ratified elsewhere and this constant does not touch it — it exists so that
+/// "green and nobody noticed" is a FACT on the wire rather than something a
+/// human has to go looking for. One hour is the shortest bound that cannot fire
+/// while GitHub's own required-check wait is still running.
+const Duration kPullRequestGreenStallBound = Duration(hours: 1);
+
 /// One named delivery leg: an observer plus its durable acknowledgement key.
 class _DeliveryLeg {
   const _DeliveryLeg(this.leg, this.sink);
@@ -60,11 +89,15 @@ class GitHubReconciler {
     this.issueWatches = const <GitHubIssueWatch>[],
     GitHubReadClient? foreignClient,
     void Function(Object error, StackTrace stackTrace)? onIntakeRowError,
+    GitHubPullFeedbackErrorReporter? onPullFeedbackError,
+    DateTime Function()? now,
   }) : _client = client,
        _foreign = foreignClient,
        _cursors = cursors,
        _emit = emit,
-       _onIntakeRowError = onIntakeRowError {
+       _onIntakeRowError = onIntakeRowError,
+       _onPullFeedbackError = onPullFeedbackError,
+       _now = now ?? DateTime.now {
     for (final watch in issueWatches) {
       watch.validate();
       if (watch.isInstalledRepository(owner: owner, repository: repository)) {
@@ -119,6 +152,10 @@ class GitHubReconciler {
   final GitHubCursorStore _cursors;
   final GitHubEventSink _emit;
   final void Function(Object error, StackTrace stackTrace)? _onIntakeRowError;
+  final GitHubPullFeedbackErrorReporter? _onPullFeedbackError;
+
+  /// The observation instant, injectable so a test owns the stall crossing.
+  final DateTime Function() _now;
   final List<_DeliveryLeg> _observers = <_DeliveryLeg>[];
   Future<void>? _inFlight;
   Future<void> _cursorTail = Future<void>.value();
@@ -350,6 +387,18 @@ class GitHubReconciler {
     );
   }
 
+  /// Reports the feedback state of EVERY open pull request, on every branch.
+  ///
+  /// It used to keep only `grid/` heads, which made a pull request opened by a
+  /// seat — rather than minted by a round — invisible to the whole loop: no CI
+  /// feedback, no green-and-unmerged event, no governor notification. It waited
+  /// for a human, and while it waited `main` moved under it. Attribution moved
+  /// OUT of this leg for the same reason: a branch name is a naming convention,
+  /// not a database, and the projection resolves an EXPLICIT reference instead.
+  ///
+  /// One observation per pull, never one per check: an aggregate state is the
+  /// only thing that can say "this head is green", and the per-check envelope
+  /// said it as soon as the FIRST job passed.
   Future<GitHubReconcilerCursor> _feedback(
     GitHubReconcilerCursor cursor,
   ) async {
@@ -365,73 +414,426 @@ class GitHubReconciler {
         if (cursor.etags[pullsKey] case final etag?) 'If-None-Match': etag,
       },
     );
-    if (pullsResponse.statusCode == 304) return cursor;
-    _requireSuccess(pullsKey, pullsResponse.statusCode);
-    final pulls = _list(pullsResponse.body, pullsKey);
-    var next = cursor;
-    for (final raw in pulls) {
-      final pull = _map(raw, 'pull');
-      final pullNodeId = _string(pull, 'node_id');
-      final head = _nestedMap(pull, 'head');
-      final branch = _string(head, 'ref', prefix: 'head');
-      final sha = _string(head, 'sha', prefix: 'head');
-      if (!branch.startsWith('grid/')) continue;
-      final checksKey = 'feedback/checks/$pullNodeId';
-      final checksResponse = await _client.send(
-        method: 'GET',
-        path:
-            '/repos/$owner/$repository/commits/${Uri.encodeComponent(sha)}/check-runs',
-        queryParameters: const <String, String>{'per_page': '100'},
-        headers: <String, String>{
-          if (next.etags[checksKey] case final etag?) 'If-None-Match': etag,
-        },
-      );
-      if (checksResponse.statusCode == 304) continue;
-      _requireSuccess(checksKey, checksResponse.statusCode);
-      final decoded = _decoded(checksResponse.body, checksKey);
-      final checkMap = _map(decoded, checksKey);
-      final checkRuns = checkMap['check_runs'];
-      if (checkRuns is! List) {
-        throw const FormatException('check_runs must be a list');
-      }
-      final events = <NormalizedGitHubEvent>[];
-      for (final checkRaw in checkRuns) {
-        final check = _map(checkRaw, 'check_run');
-        final status = _string(check, 'status');
-        if (status != 'completed') continue;
-        final conclusion = _string(check, 'conclusion');
-        final nodeId = _string(check, 'node_id');
-        final completedAt = _string(check, 'completed_at');
-        _date(completedAt, 'completed_at');
-        events.add(
-          NormalizedGitHubEvent.checkConcluded(
-            nodeId: nodeId,
-            actor: _string(_nestedMap(check, 'app'), 'slug', prefix: 'app'),
-            repository: '$owner/$repository',
-            substation: substation,
-            observationId: 'poll:check:$nodeId:$completedAt:$conclusion',
-            headBranch: branch,
-            checkName: _string(check, 'name'),
-            conclusion: conclusion,
-          ),
-        );
-      }
-      next = await _deliver(next, events);
-      if (checksResponse.header('etag') case final etag?) {
-        next = next.copyWith(
-          etags: <String, String>{...next.etags, checksKey: etag},
-        );
-        await _cursors.save(next);
-      }
+    final observedAt = _now().toUtc();
+    // An unchanged page spends NO further request — but a green pull can still
+    // cross the stall bound while nothing about it changed, which is precisely
+    // the state a poll that only reacts to change can never see.
+    if (pullsResponse.statusCode == 304) {
+      return _stallsFromCache(cursor, observedAt);
     }
+    _requireSuccess(pullsKey, pullsResponse.statusCode);
+    var next = cursor;
+    final open = <String>[];
+    for (final raw in _list(pullsResponse.body, pullsKey)) {
+      final row = _map(raw, 'pull');
+      final nodeId = _string(row, 'node_id');
+      // Claimed BEFORE the observation: a pull GitHub just listed as open is
+      // open whether or not we could observe it, and retaining it here is what
+      // keeps a skipped pull's baseline and tags from being evicted below.
+      open.add(nodeId);
+      next = await _pullFeedback(next, row, nodeId, observedAt);
+    }
+    next = next.retainPullFeedback(open);
     if (pullsResponse.header('etag') case final etag?) {
       next = next.copyWith(
         etags: <String, String>{...next.etags, pullsKey: etag},
       );
-      await _cursors.save(next);
     }
+    if (identical(next, cursor)) return cursor;
+    await _cursors.save(next);
     return next;
   }
+
+  /// Observes ONE open pull: at most one conditional detail request and one
+  /// conditional check-runs request, then one emitted observation.
+  ///
+  /// The snapshot and both response tags are recorded BEFORE delivery, so a
+  /// leg that throws replays the observation without re-spending the requests
+  /// that produced it.
+  ///
+  /// One pull's GITHUB OBSERVATION is its own failure domain. A detail or
+  /// check-runs request that fails is REPORTED and answered with the cursor
+  /// unchanged, so the other listed pulls are still observed and this one keeps
+  /// the exact baseline the next cycle re-observes from. One inaccessible pull
+  /// silencing every other open pull is the same defect at a smaller scale, and
+  /// this leg exists to remove it. Everything after the observation — the
+  /// record, the cursor saves and the delivery — stays OUTSIDE that boundary
+  /// and remains cycle-fatal, because those are exactly the failures the
+  /// pending outbox replays, and skipping one would lose the event.
+  Future<GitHubReconcilerCursor> _pullFeedback(
+    GitHubReconcilerCursor cursor,
+    Map<String, Object?> row,
+    String nodeId,
+    DateTime observedAt,
+  ) async {
+    // Parsed FIRST, and outside the boundary below: the number is the only
+    // handle a report has on WHICH pull was skipped, so a row that cannot yield
+    // one has nothing to degrade to and stays loud.
+    final number = _integer(row, 'number');
+    final _PullObservation observed;
+    try {
+      observed = await _observePull(cursor, row, nodeId, number);
+    } on Object catch (error, stackTrace) {
+      _reportPullFeedbackError(number, error, stackTrace);
+      // No retry inside the cycle: a retry spends the rate limit the next cycle
+      // needs against a failure the next cycle is already going to re-attempt.
+      return cursor;
+    }
+    final record = observed.record;
+    final greenSince = record.greenSince;
+    final stalled =
+        greenSince != null &&
+        !observedAt.isBefore(greenSince.add(kPullRequestGreenStallBound));
+    final next = cursor.recordPullFeedback(
+      nodeId,
+      record,
+      detailEtag: observed.detailEtag,
+      checksEtag: observed.checksEtag,
+    );
+    await _cursors.save(next);
+    return _deliver(next, <NormalizedGitHubEvent>[
+      NormalizedGitHubEvent.pullRequestFeedback(
+        nodeId: nodeId,
+        actor: record.actor,
+        repository: '$owner/$repository',
+        substation: substation,
+        observationId: _feedbackObservationId(
+          nodeId: nodeId,
+          headSha: record.headSha,
+          updatedAt: record.updatedAt,
+          checkState: record.checkState,
+          mergeability: record.mergeability,
+          greenSince: greenSince,
+          stalled: stalled,
+        ),
+        number: number,
+        body: record.body,
+        headBranch: record.headBranch,
+        headSha: record.headSha,
+        checkState: record.checkState,
+        mergeability: record.mergeability,
+        openedAt: record.openedAt,
+        updatedAt: record.updatedAt,
+        greenSince: greenSince,
+        observedAt: observedAt,
+        stalled: stalled,
+      ),
+    ]);
+  }
+
+  /// The GITHUB half of one pull's observation: every field read from [row] and
+  /// both conditional requests, and nothing durable.
+  ///
+  /// Split out so [_pullFeedback] can put its boundary around exactly the work
+  /// that reads GitHub. Every throw raised in here belongs to ONE pull, and
+  /// none of it has written a record, a tag or an event yet.
+  Future<_PullObservation> _observePull(
+    GitHubReconcilerCursor cursor,
+    Map<String, Object?> row,
+    String nodeId,
+    int number,
+  ) async {
+    final actor = _string(_nestedMap(row, 'user'), 'login', prefix: 'user');
+    final body = _nullableString(row, 'body') ?? '';
+    final openedAt = _date(_string(row, 'created_at'), 'created_at');
+    final updatedAt = _date(_string(row, 'updated_at'), 'updated_at');
+    final head = _nestedMap(row, 'head');
+    final branch = _string(head, 'ref', prefix: 'head');
+    final sha = _string(head, 'sha', prefix: 'head');
+    final cached = cursor.pullFeedback[nodeId];
+
+    final detail = await _pullMergeability(cursor, nodeId, number, cached);
+    // The check tag is spent only against the head it was earned on: a new head
+    // is a DIFFERENT resource, and answering it from the old head's aggregate
+    // would report the previous commit's green as this one's.
+    final checksBaseline = cached?.headSha == sha ? cached : null;
+    final checks = await _pullChecks(cursor, nodeId, sha, checksBaseline);
+    return (
+      record: GitHubPullFeedbackCursorRecord(
+        actor: actor,
+        number: number,
+        body: body,
+        headBranch: branch,
+        headSha: sha,
+        checkState: checks.state,
+        mergeability: detail.mergeability,
+        openedAt: openedAt,
+        updatedAt: updatedAt,
+        greenSince: checks.greenSince,
+      ),
+      detailEtag: detail.etag,
+      checksEtag: checks.etag,
+    );
+  }
+
+  /// Reports that pull [number] was SKIPPED this cycle, bounding what escapes.
+  ///
+  /// The failure is narrowed to an HTTP status or an exception TYPE before it
+  /// leaves: this rail ends on the seat's flare surface, and a GitHub response
+  /// body there can carry a private title, a token echo or an installation
+  /// detail that has no business on it. A reporter that throws is itself logged
+  /// and then dropped — reporting a skipped pull must never become the thing
+  /// that aborts the cycle the skip exists to keep running.
+  void _reportPullFeedbackError(
+    int number,
+    Object error,
+    StackTrace stackTrace,
+  ) {
+    final failure = switch (error) {
+      GitHubPollException(:final statusCode) => 'HTTP $statusCode',
+      _ => error.runtimeType.toString(),
+    };
+    final observer = _onPullFeedbackError;
+    if (observer != null) {
+      try {
+        observer(number, failure, stackTrace);
+        return;
+      } on Object catch (observerError, observerStackTrace) {
+        developer.log(
+          'GitHub reconciler pull-feedback reporter failed for '
+          'seat=$substation repository=$owner/$repository pull=#$number; '
+          'original failure: $failure',
+          name: 'github_grid_assets.reconciler',
+          error: observerError,
+          stackTrace: observerStackTrace,
+        );
+        return;
+      }
+    }
+    developer.log(
+      'GitHub reconciler skipped pull #$number for '
+      'seat=$substation repository=$owner/$repository: $failure',
+      name: 'github_grid_assets.reconciler',
+      error: failure,
+      stackTrace: stackTrace,
+    );
+  }
+
+  /// One conditional `/pulls/{number}` request, resolved to a mergeability.
+  ///
+  /// The issues-schema row and the open-pulls row both omit `mergeable`, so the
+  /// full resource is the only place it lives. A `304` is answered from the
+  /// cached record; a `304` with NO record is unreachable by construction —
+  /// the tag is only sent when a record exists — so it fails LOUDLY rather than
+  /// inventing a mergeability.
+  Future<({PullRequestMergeability mergeability, String? etag})>
+  _pullMergeability(
+    GitHubReconcilerCursor cursor,
+    String nodeId,
+    int number,
+    GitHubPullFeedbackCursorRecord? cached,
+  ) async {
+    final key = GitHubReconcilerCursor.pullFeedbackEtagKey(nodeId);
+    final conditional = cached == null ? null : cursor.etags[key];
+    final response = await _client.send(
+      method: 'GET',
+      path: '/repos/$owner/$repository/pulls/$number',
+      headers: <String, String>{
+        if (conditional case final etag?) 'If-None-Match': etag,
+      },
+    );
+    if (response.statusCode == 304) {
+      if (cached == null) {
+        throw FormatException(
+          'feedback detail for $nodeId answered 304 with no cached record',
+        );
+      }
+      return (mergeability: cached.mergeability, etag: conditional);
+    }
+    _requireSuccess(key, response.statusCode);
+    final pull = _map(_decoded(response.body, key), key);
+    return (
+      mergeability: switch (pull['mergeable']) {
+        true => PullRequestMergeability.mergeable,
+        false => PullRequestMergeability.conflicting,
+        // GitHub computes mergeability lazily and answers null until it has.
+        null => PullRequestMergeability.unknown,
+        _ => throw const FormatException('mergeable must be a boolean or null'),
+      },
+      etag: response.header('etag'),
+    );
+  }
+
+  /// One conditional check-runs request for [sha], aggregated to ONE state.
+  Future<({PullRequestCheckState state, DateTime? greenSince, String? etag})>
+  _pullChecks(
+    GitHubReconcilerCursor cursor,
+    String nodeId,
+    String sha,
+    GitHubPullFeedbackCursorRecord? baseline,
+  ) async {
+    final key = GitHubReconcilerCursor.pullFeedbackChecksEtagKey(nodeId);
+    final conditional = baseline == null ? null : cursor.etags[key];
+    final response = await _client.send(
+      method: 'GET',
+      path:
+          '/repos/$owner/$repository/commits/${Uri.encodeComponent(sha)}'
+          '/check-runs',
+      queryParameters: const <String, String>{'per_page': '100'},
+      headers: <String, String>{
+        if (conditional case final etag?) 'If-None-Match': etag,
+      },
+    );
+    if (response.statusCode == 304) {
+      if (baseline == null) {
+        throw FormatException(
+          'feedback checks for $nodeId answered 304 with no cached record',
+        );
+      }
+      return (
+        state: baseline.checkState,
+        greenSince: baseline.greenSince,
+        etag: conditional,
+      );
+    }
+    _requireSuccess(key, response.statusCode);
+    final page = _map(_decoded(response.body, key), key);
+    final runs = page['check_runs'];
+    if (runs is! List) {
+      throw const FormatException('check_runs must be a list');
+    }
+    final aggregate = _aggregateChecks(runs.cast<Object?>());
+    return (
+      state: aggregate.state,
+      greenSince: aggregate.greenSince,
+      etag: response.header('etag'),
+    );
+  }
+
+  /// Collapses one head's check runs into ONE state and its green instant.
+  ///
+  /// The precedence is deliberate and is the whole safety property: an EMPTY
+  /// list is `notReported` and never green; one bad conclusion outranks
+  /// everything still running; anything unfinished outranks the successes
+  /// beside it; and green requires EVERY run to have completed `success`.
+  ({PullRequestCheckState state, DateTime? greenSince}) _aggregateChecks(
+    List<Object?> runs,
+  ) {
+    if (runs.isEmpty) {
+      return (state: PullRequestCheckState.notReported, greenSince: null);
+    }
+    var pending = false;
+    var failing = false;
+    var allSucceeded = true;
+    DateTime? latestSuccess;
+    for (final raw in runs) {
+      final run = _map(raw, 'check_run');
+      if (_string(run, 'status') != 'completed') {
+        pending = true;
+        allSucceeded = false;
+        continue;
+      }
+      final conclusion = _nullableString(run, 'conclusion');
+      if (_badConclusions.contains(conclusion)) {
+        failing = true;
+        allSucceeded = false;
+        continue;
+      }
+      if (conclusion != 'success') {
+        allSucceeded = false;
+        continue;
+      }
+      final completedAt = _date(_string(run, 'completed_at'), 'completed_at');
+      if (latestSuccess == null || completedAt.isAfter(latestSuccess)) {
+        latestSuccess = completedAt;
+      }
+    }
+    if (failing) {
+      return (state: PullRequestCheckState.failing, greenSince: null);
+    }
+    if (pending) {
+      return (state: PullRequestCheckState.pending, greenSince: null);
+    }
+    if (allSucceeded) {
+      return (state: PullRequestCheckState.green, greenSince: latestSuccess);
+    }
+    return (state: PullRequestCheckState.inconclusive, greenSince: null);
+  }
+
+  /// Re-emits cached GREEN pulls that have crossed the stall bound, and
+  /// nothing else.
+  ///
+  /// The ONLY work an unchanged open-pulls page does: no detail request, no
+  /// check-runs request, no cursor rewrite. The crossing is visible because the
+  /// observation identity carries fresh-versus-stalled, so it claims a new id
+  /// exactly once and every later cycle deduplicates.
+  Future<GitHubReconcilerCursor> _stallsFromCache(
+    GitHubReconcilerCursor cursor,
+    DateTime observedAt,
+  ) async {
+    final events = <NormalizedGitHubEvent>[];
+    for (final entry in cursor.pullFeedback.entries) {
+      final record = entry.value;
+      final greenSince = record.greenSince;
+      if (record.checkState != PullRequestCheckState.green) continue;
+      if (greenSince == null) continue;
+      if (observedAt.isBefore(greenSince.add(kPullRequestGreenStallBound))) {
+        continue;
+      }
+      events.add(
+        NormalizedGitHubEvent.pullRequestFeedback(
+          nodeId: entry.key,
+          actor: record.actor,
+          repository: '$owner/$repository',
+          substation: substation,
+          observationId: _feedbackObservationId(
+            nodeId: entry.key,
+            headSha: record.headSha,
+            updatedAt: record.updatedAt,
+            checkState: record.checkState,
+            mergeability: record.mergeability,
+            greenSince: greenSince,
+            stalled: true,
+          ),
+          number: record.number,
+          body: record.body,
+          headBranch: record.headBranch,
+          headSha: record.headSha,
+          checkState: record.checkState,
+          mergeability: record.mergeability,
+          openedAt: record.openedAt,
+          updatedAt: record.updatedAt,
+          greenSince: greenSince,
+          observedAt: observedAt,
+          stalled: true,
+        ),
+      );
+    }
+    if (events.isEmpty) return cursor;
+    return _deliver(cursor, events);
+  }
+
+  /// The observation identity of one feedback snapshot.
+  ///
+  /// Built from the observed STATE and never from the observation INSTANT: an
+  /// unchanged pull must deduplicate on every cycle, while the fresh-to-stalled
+  /// crossing must claim a new id — exactly once.
+  String _feedbackObservationId({
+    required String nodeId,
+    required String headSha,
+    required DateTime updatedAt,
+    required PullRequestCheckState checkState,
+    required PullRequestMergeability mergeability,
+    required DateTime? greenSince,
+    required bool stalled,
+  }) =>
+      'poll:pull-feedback:$nodeId:$headSha:'
+      '${updatedAt.toUtc().toIso8601String()}:${checkState.name}:'
+      '${mergeability.name}:'
+      '${greenSince?.toUtc().toIso8601String() ?? 'never-green'}:'
+      '${stalled ? 'stalled' : 'fresh'}';
+
+  /// The completed conclusions that mean the head FAILED.
+  ///
+  /// Distinct from [_failedConclusions], which is the workflow-run leg's
+  /// narrower "did not succeed": these four are the same four the rework
+  /// decision has always acted on.
+  static const Set<String> _badConclusions = <String>{
+    'failure',
+    'timed_out',
+    'cancelled',
+    'action_required',
+  };
 
   /// The `failure`-shaped conclusions this leg treats as "did not succeed".
   static const Set<String> _failedConclusions = <String>{
@@ -441,9 +843,9 @@ class GitHubReconciler {
 
   /// Polls COMPLETED workflow runs and emits the ones a seat rule admits.
   ///
-  /// The feedback leg above it enumerates OPEN PULLS and keeps only `grid/`
-  /// heads, so a scheduled run on the default branch — the red nightly nobody
-  /// notices — can never reach a projection through it. This leg is that
+  /// The feedback leg above it enumerates OPEN PULLS, so a scheduled run on the
+  /// default branch — the red nightly nobody notices — can never reach a
+  /// projection through it. This leg is that
   /// missing half, and it is DECLARATION-GATED: with no rule it returns before
   /// the first request.
   ///
