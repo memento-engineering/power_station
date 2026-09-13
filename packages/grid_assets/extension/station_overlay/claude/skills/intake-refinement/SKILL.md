@@ -47,9 +47,10 @@ Every bead intended for the station needs:
 5. **A description an agent can act on alone** — the agent receives the bead
    text and a worktree, nothing else. Name packages and acceptance shape.
 
-Rows 1–4 are exactly the four rows the `filing` verb checks; row 5 is the
-judgement this skill's reader owns. Never re-derive rows 1–4 by reading the
-bead — run the verb (**The exit check**).
+Rows 1–4 are the PRESENCE half of the ten rows the `filing` verb checks — the
+other six ask whether what is present is VIABLE (**The exit check**). Row 5 is
+the judgement this skill's reader owns. Never re-derive a verb row by reading
+the bead — run the verb.
 
 ## Search prior art BEFORE accepting a filing
 
@@ -83,6 +84,23 @@ validation_plan=cd packages/<a> && dart pub get && dart analyze && dart test && 
 **Why:** a plan scoped to the diff's own package goes green while the consumer
 no longer compiles; the break surfaces at the NEXT bead's `pub get`, after the
 PR merged.
+
+This is YOURS, not the verb's. Identifying every affected consumer is
+blast-radius judgement over the package graph, not a mechanical read of the
+bead's text, so validation-plan consumer coverage is deliberately NOT a
+`filing` row — a lint that guessed at it would refuse legitimate work.
+
+## Keep the plan inside the critic lane's runtime cap
+
+The gating lane kills a validation plan at roughly 600 seconds. A plan that
+overruns latches failed, mints NO gate, and strands the session invisibly —
+there is nothing for an operator to clear. Budget the plan: scope it to the
+packages the change reaches, prefer targeted `dart test <path>` legs over a
+whole-repo sweep, and drop anything that rebuilds the world.
+
+This is YOURS too. Duration cannot be decided from bead text — it needs the
+plan executed or estimated — so the critic-lane time cap is deliberately NOT a
+`filing` row; a wrong refusal here would block work that runs perfectly well.
 
 ## Wire every dependency at intake
 
@@ -158,8 +176,8 @@ When the work extends something the tree already owns, write the pointer into
 the bead body as `path:line` plus the relationship:
 
 ```
-COMPOSE: packages/grid_assets/lib/src/filing/filing_contract.dart:242 owns the
-four-row completeness contract — CALL it; do not add a second predicate.
+COMPOSE: packages/grid_assets/lib/src/filing/filing_contract.dart:765 owns the
+ten-row completeness contract — CALL it; do not add a second predicate.
 ```
 
 **Why:** without the pointer the build stage re-expresses the primitive beside
@@ -183,13 +201,20 @@ check stricter — it makes the check BLIND to every blocker wired by a link
 bead.
 
 The report is one JSON object: `{id, passed, requirements, error?}`.
-`requirements` carries exactly four rows, in order — `driveable_type`,
-`validation_plan`, `acceptance_criteria`, `dependencies` — each
+`requirements` carries exactly ten rows, in order — `driveable_type`,
+`validation_plan`, `acceptance_criteria`, `dependencies`,
+`validation_plan_syntax`, `validation_plan_portability`, `repo_relative_paths`,
+`bead_references`, `release_versions`, `decision_references` — each
 `{requirement, passed, detail}`. `passed` is true only for a found bead whose
-four rows ALL pass.
+ten rows ALL pass.
+
+The first four ask whether a field is PRESENT. The six after them ask whether
+what is present is VIABLE: a bead used to pass filing carrying a plan that
+could not parse, acceptance criteria that went stale on the next release wave,
+and prose that broke the anchor extractor. Every one of those cost a round.
 
 For every row reporting `"passed": false`, apply its `detail` as the
-correction:
+correction. The detail NAMES the offending text — do not go looking for it:
 
 - `<type> is not driveable` — re-type the bead to `task`/`bug`/`feature`/
   `chore`, or re-home the work under a driveable child.
@@ -205,6 +230,33 @@ correction:
   RERUN with `--state-root "<grid home>"`. Never wire an edge off this
   detail: the blocker it would name may already be wired by an open link bead,
   and the duplicate is a WRITE driven by a read that never happened.
+- `validation_plan does not parse: <slice>` — the lane shell refused the named
+  construct: rewrite as one parseable POSIX-shell command. The two shapes that
+  cost rounds are a `#` inside a quoted `$(…)` command substitution, and an
+  apostrophe carried in from design prose into a single-quoted program
+  (`lane's`). Neither leaves a log: the lane dies at PARSE and surfaces as a
+  harness throttle.
+- `validation_plan is dash-incompatible: <slice>` — replace the Bash-only
+  construct with POSIX sh syntax. Process substitution (`<(…)`, `>(…)`) is
+  the usual one: it parses on a mac and parse-dies on CI, whose `sh` is dash.
+- `absolute file paths: <paths>` — use a repository-relative path. An absolute
+  path in bead text turns the round's receipt into a FAILED git-log record.
+  An absolute grid-home DIRECTORY is fine; a rooted FILE is not.
+- `unminted bead ids: <ids>` — mint it before citing it or cite an existing
+  attached-store id. Guessed ids have shipped; create the bead first and take
+  the id from the `Created` line.
+- `exact release versions in acceptance_criteria: <versions>` — use
+  release-relative language or a version range. Specify copies the acceptance
+  list into a plan leg, and a pin goes stale on the next wave.
+- `unrecorded decision citations: <citations>` — a round may not cite a
+  decision it creates; cite an existing entry or describe the proposed entry
+  without a citation. Discovery holds every round on a citation whose entry
+  cannot exist until the work lands.
+
+A row reporting that existence is `unchecked` is a REFUSAL about the LOOKUP,
+not about the bead: a store would not read, the decision index is unwired or
+crashed, or a shell could not be spawned. Restore the evidence source and
+rerun — never edit the bead to satisfy an unchecked row.
 
 Then RERUN the verb. Repeat until the report reads `"passed": true`; only then
 stage the bead for approval. Nothing else stages a bead — a reading of the
@@ -218,7 +270,7 @@ rerun. Never approve past an `error`.
 ## Staging: approve with the approve verb, only after refinement
 
 Drafts are created open and UNSTAMPED; the human's approval is the approve
-verb, which re-runs the same four-row filing preflight and then writes the
+verb, which re-runs the same ten-row filing preflight and then writes the
 `grid.approved_*` stamp in one `bd update`. Against a LIVE station, the
 mounted predicate refuses any unstamped bead with
 `approval: not approved - run the approve verb` — the retired `grid.approved`

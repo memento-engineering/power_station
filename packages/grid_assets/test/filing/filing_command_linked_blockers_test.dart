@@ -8,6 +8,8 @@ import 'package:grid_assets/grid_assets.dart';
 import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
+import '../support/filing_evidence.dart';
+
 /// Replies by bd subcommand and records every argv, so a run can prove the
 /// filing verb wrote nothing (read-only by construction).
 final class _ScriptedBdRunner implements BdRunner {
@@ -23,9 +25,18 @@ final class _ScriptedBdRunner implements BdRunner {
     String? stdin,
   }) async {
     argvs.add(args);
+    // The all-status ROSTER read and the exact-id read are both `query`, and
+    // they answer differently: the roster holds every id the store has ever
+    // minted, the exact read holds one bead.
+    final key =
+        args.first == 'query' &&
+            args.length > 1 &&
+            args[1].startsWith('status=')
+        ? 'roster'
+        : args.first;
     return BdResult(
       exitCode: 0,
-      stdout: replies[args.first] ?? '{"schema_version":1,"data":[]}',
+      stdout: replies[key] ?? '{"schema_version":1,"data":[]}',
       stderr: '',
     );
   }
@@ -74,11 +85,24 @@ String _linkReply(List<Map<String, String>> links) => jsonEncode({
   ],
 });
 
+/// The COMPLETE all-status catalog of the checked store — every id these
+/// fixtures cite exists, so `bead_references` is silent and the dependency row
+/// stays the only thing under test.
+String _rosterReply(List<String> ids) => jsonEncode({
+  'schema_version': 1,
+  'data': [
+    for (final id in ids)
+      {'id': id, 'title': id, 'issue_type': 'task', 'status': 'open'},
+  ],
+});
+
 _ScriptedBdRunner _bd({
   required String description,
   List<Map<String, String>> links = const [],
+  List<String> roster = const ['pow-child', 'pow-pry0', 'pow-one'],
 }) => _ScriptedBdRunner({
   'query': _beadReply(description: description),
+  'roster': _rosterReply(roster),
   'dep': '{"schema_version":1,"data":[]}',
   'list': _linkReply(links),
 });
@@ -105,6 +129,13 @@ _harness(_ScriptedBdRunner bd, {String? stateRoot}) {
                 linkRoots.add(root);
                 return bd;
               },
+            ),
+            // The plan probe is a Fake — these fixtures stand in a store root
+            // that does not exist on disk, and a real `sh` spawn there refuses
+            // for a reason that has nothing to do with the plan.
+            evidence: SystemFilingEvidenceSource(
+              probe: FakeValidationPlanProbe(),
+              beads: BdExportBeadSource(runnerFor: (_) => bd),
             ),
           ),
           storeRoot: () => '/work/power_station',

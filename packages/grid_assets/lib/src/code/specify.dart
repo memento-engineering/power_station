@@ -99,6 +99,17 @@ import '../agent/site_binding.dart';
 import '../agent/typed_environment.dart';
 import '../agent/usage_report.dart';
 import '../assets/overlay_materializer.dart' show kDefaultOverlayRunner;
+// The SHARED non-executing parse seam. The authored-plan floor here and the
+// filing contract's `validation_plan_syntax` row are ONE probe, so the stage
+// that writes a plan and the gate that files it cannot disagree about it.
+import '../filing/filing_contract.dart'
+    show
+        PlanParsed,
+        PlanRefused,
+        PlanUnavailable,
+        SystemValidationPlanProbe,
+        ValidationPlanProbe,
+        kLaneShell;
 import 'committee.dart';
 import 'committee_selection.dart';
 import 'conventional_commit.dart' show lintConventionalSubject;
@@ -616,6 +627,11 @@ class SpecifyCapability extends ProcessCapability {
   /// clear and which is the operator's to preserve. Absent (every builder that
   /// does not bind the extension) ⇒ no stamp and no extra bd call at all: this
   /// is an ADDITIVE seam, and an unbound station keeps today's behaviour.
+  ///
+  /// [validationPlanProbe] is the SHARED non-executing parse seam
+  /// ([ValidationPlanProbe]). The filing contract's `validation_plan_syntax`
+  /// row reads the same probe, so the stage that AUTHORS a plan and the gate
+  /// that FILES it can never disagree about whether it parses.
   const SpecifyCapability({
     BdRunner Function(String workspaceRoot) runnerFor = _processRunnerFor,
     AgentSessionAdapterRegistry sessionAdapters = kBuiltinAgentSessionAdapters,
@@ -623,12 +639,14 @@ class SpecifyCapability extends ProcessCapability {
     String decisionRunner = kDefaultOverlayRunner,
     String? decisionGridHome,
     SpecifyAuthoredSpecWriter? writeSpecifyAuthoredSpec,
+    ValidationPlanProbe validationPlanProbe = const SystemValidationPlanProbe(),
   }) : _runnerFor = runnerFor,
        _sessionAdapters = sessionAdapters,
        _steers = steers,
        _decisionRunner = decisionRunner,
        _decisionGridHome = decisionGridHome,
-       _writeSpecifyAuthoredSpec = writeSpecifyAuthoredSpec;
+       _writeSpecifyAuthoredSpec = writeSpecifyAuthoredSpec,
+       _validationPlanProbe = validationPlanProbe;
 
   final BdRunner Function(String workspaceRoot) _runnerFor;
   final AgentSessionAdapterRegistry _sessionAdapters;
@@ -636,6 +654,7 @@ class SpecifyCapability extends ProcessCapability {
   final String _decisionRunner;
   final String? _decisionGridHome;
   final SpecifyAuthoredSpecWriter? _writeSpecifyAuthoredSpec;
+  final ValidationPlanProbe _validationPlanProbe;
 
   static BdRunner _processRunnerFor(String workspaceRoot) =>
       ProcessBdRunner(workspaceRoot: workspaceRoot);
@@ -943,24 +962,25 @@ class SpecifyCapability extends ProcessCapability {
     }
     final plan = matches.single.metadata['validation_plan'];
     if (plan is! String || plan.trim().isEmpty) return;
-    final parse = await Process.run('sh', [
-      '-n',
-      '-c',
-      '( ${plan.trim()} )',
-    ], workingDirectory: workspaceDir);
-    if (parse.exitCode == 0) return;
-    throw CapabilityFailure.invalidResult(
-      'validation_plan does not parse: ${_shellParseDiagnostic(parse)}',
-    );
-  }
-
-  /// The shell's OWN first word on why it refused — the line an architect can
-  /// act on (`unexpected EOF while looking for matching …`). A silent `sh`
-  /// falls back to the exit code, so the reason is never empty.
-  static String _shellParseDiagnostic(ProcessResult parse) {
-    final complaint = '${parse.stderr}'.trim();
-    if (complaint.isEmpty) return 'sh -n exited ${parse.exitCode}';
-    return complaint.split('\n').first.trim();
+    // The shell's OWN first word on why it refused — the line an architect can
+    // act on (`unexpected EOF while looking for matching …`). The probe never
+    // answers with an empty reason: a silent shell falls back to its exit code.
+    switch (await _validationPlanProbe.parse(
+      plan: plan,
+      shell: kLaneShell,
+      workingDirectory: workspaceDir,
+    )) {
+      case PlanParsed():
+        return;
+      case PlanRefused(:final diagnostic):
+        throw CapabilityFailure.invalidResult(
+          'validation_plan does not parse: $diagnostic',
+        );
+      case PlanUnavailable(:final reason):
+        throw CapabilityFailure.invalidResult(
+          'validation_plan does not parse: $reason',
+        );
+    }
   }
 
   /// Gives an unparseable machine gate ONE repair ride before a visible gate.

@@ -248,6 +248,13 @@ class _MountEligibilityAssetsState
         : FilingService(
             source: ExactSubstationBeadSource(runnerFor: runnerFor),
             links: CrossLinkBlockerSource(runnerFor: runnerFor),
+            // This recheck reads the fresh bead and its approval REVISION;
+            // it never reads a requirement row. The revision digests bead
+            // content, which the viability rows contribute nothing to, so
+            // collecting their evidence would buy two process spawns and a
+            // store read per bead on the station's tick and change no answer
+            // read here.
+            evidence: const UnconsultedFilingEvidenceSource(),
           );
     _generation++;
     _revision++;

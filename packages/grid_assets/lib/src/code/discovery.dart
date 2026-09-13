@@ -94,6 +94,11 @@ import '../agent/seat_environments.dart';
 import '../agent/site_binding.dart';
 import '../agent/typed_environment.dart';
 import '../agent/usage_report.dart';
+// The shared, pure bead-text scanners. The anchor and decision-citation
+// grammars are ONE implementation: the filing contract judges the same
+// text this circuit gathers over, and two copies of a grammar are the bug
+// they would eventually disagree with.
+import '../filing/filing_text.dart';
 import '../search/station_search.dart';
 import 'committee.dart';
 import 'decision_register.dart';
@@ -137,9 +142,6 @@ const int kMaxRegatherRounds = 1;
 /// The bound on the deterministic prior-art pull — each query is one read-only
 /// pass over every attached store.
 const int kMaxPriorArtQueries = 3;
-
-/// The bound on the anchors pulled out of one bead.
-const int kMaxAnchors = 12;
 
 /// The bound on a resolved anchor's SURROUNDING PATTERN (its directory's other
 /// files) — enough to show the architect what the neighborhood looks like.
@@ -3326,7 +3328,7 @@ class _IndexedDecision {
   /// The legacy `A<n>` / `ADR-<nnnn>` id this slug carries, or `''`. Promoting
   /// an ADR-0000 amendment into the register keeps its id as the slug's leading
   /// segment, and a bead goes on citing the ID long after the slug exists.
-  String get alias => _legacyDecisionAlias(slug);
+  String get alias => legacyDecisionAlias(slug);
 }
 
 /// ONE decision the bead cites EXPLICITLY — a canonical `<register>#<slug>`
@@ -3361,38 +3363,6 @@ class _DecisionRequest {
       : candidate.identity.toLowerCase() == _identity;
 }
 
-/// A canonical `<register>#<slug>` citation. The slug half must be HYPHENATED
-/// and start with a letter — what every authored slug looks like, and what
-/// keeps prose such as `pr#256` out of the explicit set, where a false citation
-/// would fail a surface that is perfectly answerable.
-final RegExp _canonicalDecisionCitation = RegExp(
-  r'(?<![a-z0-9_#-])([a-z0-9_]+)#([a-z][a-z0-9]*(?:-[a-z0-9]+)+)(?![a-z0-9_-])',
-);
-
-/// An ADR id (`ADR-0008`) — the one NON-canonical shape unambiguous enough to
-/// fail a surface on absence. A bare `A<n>` is deliberately out (see
-/// [_DecisionRequest]).
-final RegExp _explicitAdrCitation = RegExp(
-  r'(?<![a-z0-9_#-])(adr-\d{4})(?![a-z0-9_-])',
-);
-
-/// The leading legacy id of [slug], or `''` when it carries none.
-String _legacyDecisionAlias(String slug) =>
-    RegExp(
-      r'^(a\d+|adr-\d{4})(?:-|$)',
-    ).firstMatch(slug.toLowerCase())?.group(1) ??
-    '';
-
-/// The bead prose a decision citation can live in — description, design and
-/// notes, lowercased so every match is case-insensitive.
-///
-/// Title and acceptance criteria are deliberately OUT: a title is a summary
-/// whose words cite nothing, and acceptance criteria are the bead's own exit
-/// tests, so admitting either would pad the named set with prose that names no
-/// decision at all.
-String _decisionCitationText(Bead bead) =>
-    '${bead.description}\n${bead.design}\n${bead.notes}'.toLowerCase();
-
 /// Every decision [cited] names EXPLICITLY, deduplicated, in first-appearance
 /// order.
 ///
@@ -3405,12 +3375,12 @@ List<_DecisionRequest> _explicitDecisionRequests(
   required Set<String> originRegisters,
 }) {
   final found = <(int, String, _DecisionRequest)>[];
-  for (final match in _canonicalDecisionCitation.allMatches(cited)) {
+  for (final match in kCanonicalDecisionCitation.allMatches(cited)) {
     if (!originRegisters.contains(match.group(1)!.toLowerCase())) continue;
     final identity = match.group(0)!;
     found.add((match.start, identity, _DecisionRequest.canonical(identity)));
   }
-  for (final match in _explicitAdrCitation.allMatches(cited)) {
+  for (final match in kExplicitAdrCitation.allMatches(cited)) {
     final alias = match.group(0)!;
     found.add((match.start, alias, _DecisionRequest.legacy(alias)));
   }
@@ -3571,7 +3541,7 @@ bool _needsRegisterWideLookup(
   )) {
     if (!indexed.any(request.isAnsweredBy)) return true;
   }
-  for (final match in _canonicalDecisionCitation.allMatches(cited)) {
+  for (final match in kCanonicalDecisionCitation.allMatches(cited)) {
     if (!onSurface.contains(match.group(1)!.toLowerCase())) return true;
   }
   return false;
@@ -3697,7 +3667,7 @@ Future<DecisionSurfaceEvidence> _decisionLookup({
   if (!answer.ok) return failed(answer.error);
   final indexed = answer.decisions;
 
-  final cited = _decisionCitationText(workBead);
+  final cited = decisionCitationText(workBead);
   final onSurface = answer.registers;
   var registers = onSurface;
   var union = const <_IndexedDecision>[];
@@ -4040,72 +4010,6 @@ Future<HistoryEvidence> gatherHistory(
     return _history(paths: paths, command: '', commits: const [], error: '$e');
   }
 }
-
-/// The PATH + SYMBOL anchors [bead] names — the round's ONLY tree-intake pass.
-/// Pure, deterministic (first-appearance order), bounded ([kMaxAnchors]), and
-/// exposed for unit tests.
-///
-/// A PATH is a known-extension repository-relative token, found either inside
-/// backticks OR as a plain path token in the prose (a bead that writes
-/// lib/src/x.dart without backticks names the same surface). A SYMBOL is a
-/// BACKTICKED identifier carrying an inner capital (`buildSpecifyBrief`,
-/// `kSpecReviewCircuit`) or an initial one (`Heartbeat`) — which is what keeps
-/// ordinary backticked prose (`bd`, `main`, `haiku`) out of the set.
-///
-/// [pathsTruncated]/[symbolsTruncated] record a hit on [kMaxAnchors]: the bead
-/// names MORE surfaces than this profile carries, and a lens must be told that
-/// rather than shown a silently short list.
-({
-  List<String> paths,
-  List<String> symbols,
-  bool pathsTruncated,
-  bool symbolsTruncated,
-})
-beadAnchors(Bead bead) {
-  final text = [
-    bead.title,
-    bead.description,
-    bead.design,
-    bead.acceptanceCriteria,
-    bead.notes,
-  ].join('\n');
-  final paths = <String>{};
-  final symbols = <String>{};
-  for (final match in _anchorSpan.allMatches(text)) {
-    final backticked = match.group(1);
-    final span = (backticked ?? match.group(2)!).trim();
-    if (_isPathAnchor(span)) {
-      paths.add(span);
-    } else if (backticked != null && _isSymbolAnchor(span)) {
-      symbols.add(span);
-    }
-  }
-  return (
-    paths: paths.take(kMaxAnchors).toList(),
-    symbols: symbols.take(kMaxAnchors).toList(),
-    pathsTruncated: paths.length > kMaxAnchors,
-    symbolsTruncated: symbols.length > kMaxAnchors,
-  );
-}
-
-/// A backticked span (group 1) OR a bare repository-relative path token
-/// (group 2) — alternated in ONE scan so both sources keep first-appearance
-/// order and a backticked path is never re-matched as a bare one.
-final RegExp _anchorSpan = RegExp(
-  r'`([^`\n]+)`|([\w./-]+\.(?:dart|md|yaml|yml|json))',
-);
-
-final RegExp _pathAnchor = RegExp(r'^[\w./-]+\.(dart|md|yaml|yml|json)$');
-final RegExp _symbolChars = RegExp(r'^[A-Za-z][A-Za-z0-9_]*$');
-final RegExp _capital = RegExp('[A-Z]');
-
-bool _isPathAnchor(String span) =>
-    span.contains('/') && _pathAnchor.hasMatch(span);
-
-bool _isSymbolAnchor(String span) =>
-    _symbolChars.hasMatch(span) &&
-    span.length >= 4 &&
-    (_capital.hasMatch(span[0]) || _capital.hasMatch(span.substring(1)));
 
 /// The PRIOR-ART queries for [bead] — its SYMBOL anchors (a symbol is a
 /// high-signal substring query; a whole title is not), else its distinctive title

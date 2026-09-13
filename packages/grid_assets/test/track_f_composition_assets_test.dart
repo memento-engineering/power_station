@@ -147,10 +147,17 @@ String _revisionOf(
   Bead bead, {
   List<String> blockers = const [],
   Set<String> links = const {},
-}) => const FilingContract().evaluate(bead, [
-  for (final blocker in blockers)
-    BeadDependency(issueId: bead.id, dependsOnId: blocker),
-], linkedBlockers: links).approvalRevision;
+}) => const FilingContract()
+    .evaluate(
+      bead,
+      [
+        for (final blocker in blockers)
+          BeadDependency(issueId: bead.id, dependsOnId: blocker),
+      ],
+      evidence: const FilingEvidence.unconsulted(),
+      linkedBlockers: links,
+    )
+    .approvalRevision;
 
 /// [bead] carrying the receipt the approve verb would write for [rev].
 Bead _stamped(Bead bead, String rev) => bead.copyWith(

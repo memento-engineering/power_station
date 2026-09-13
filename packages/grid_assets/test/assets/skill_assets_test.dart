@@ -68,6 +68,13 @@ String _renderLeg(
   return rendered;
 }
 
+/// [text] with every run of whitespace collapsed to one space.
+///
+/// A remedy clause is ONE string the verb emits; markdown wraps it across
+/// lines. Collapsing is what lets a leg be asserted against the exact clause
+/// without pinning where its prose happens to break.
+String _collapsed(String text) => text.replaceAll(RegExp(r'\s+'), ' ');
+
 void main() {
   final root = _extensionDir();
   final loader = PackagedAssetLoader(root: root);
@@ -782,13 +789,12 @@ void main() {
       );
       // The report contract the skill consumes, row for row.
       expect(template, contains('{id, passed, requirements, error?}'));
-      for (final row in const [
-        'driveable_type',
-        'validation_plan',
-        'acceptance_criteria',
-        'dependencies',
-      ]) {
-        expect(template, contains(row), reason: 'the corpus names $row');
+      for (final requirement in FilingRequirement.values) {
+        expect(
+          template,
+          contains(requirement.wire),
+          reason: 'the corpus names ${requirement.wire}',
+        );
       }
       expect(template, contains('"passed": false'));
       expect(template, contains('"passed": true'));
@@ -857,6 +863,113 @@ void main() {
         contains('class FilingContract'),
         reason: 'the cited line declares the primitive the corpus names',
       );
+    });
+
+    test('every overlay leg teaches the TEN-row contract and all six '
+        'viability remedies, each leg on its own', () {
+      // Each per-harness leg is an INDEPENDENT instruction source
+      // (`power_station#a-harness-may-carry-its-own-instructions`): identical
+      // content is permitted and is the common case, but it is never required
+      // and nothing here compares one leg's bytes to the other's.
+      for (final leg in _skillLegs) {
+        final body = _collapsed(
+          _renderLeg(root, leg, 'intake-refinement', {'runner': 'space'}),
+        );
+
+        expect(
+          body,
+          contains('carries exactly ten rows, in order'),
+          reason: '$leg states the row count the verb emits',
+        );
+        for (final requirement in FilingRequirement.values) {
+          expect(
+            body,
+            contains(requirement.wire),
+            reason: '$leg names ${requirement.wire}',
+          );
+        }
+        // The refiner applies each failing row's `detail`, so every remedy is
+        // pinned to the string the verb EMITS, not to a paraphrase.
+        for (final remedy in const [
+          kSyntaxCorrection,
+          kPortabilityCorrection,
+          kRepoRelativeCorrection,
+          kBeadReferenceCorrection,
+          kReleaseVersionCorrection,
+          kDecisionReferenceCorrection,
+        ]) {
+          expect(body, contains(remedy), reason: '$leg teaches "$remedy"');
+        }
+        expect(
+          body,
+          isNot(contains('four-row')),
+          reason: '$leg no longer claims a four-row contract',
+        );
+      }
+    });
+
+    test('every overlay leg keeps the two JUDGEMENT-only checks as guidance '
+        'and says why neither is a filing row', () {
+      for (final leg in _skillLegs) {
+        final body = _collapsed(
+          _renderLeg(root, leg, 'intake-refinement', {'runner': 'space'}),
+        );
+
+        // Duration needs the plan executed or estimated.
+        expect(body, contains('critic lane'));
+        expect(
+          body,
+          contains(
+            'Duration cannot be decided from bead text \u2014 it needs the plan '
+            'executed or estimated \u2014 so the critic-lane time cap is '
+            'deliberately NOT a `filing` row',
+          ),
+          reason: '$leg says WHY runtime is not mechanical',
+        );
+        // Consumer coverage needs blast-radius judgement.
+        expect(
+          body,
+          contains(
+            'Identifying every affected consumer is blast-radius judgement '
+            'over the package graph, not a mechanical read of the bead\'s '
+            'text, so validation-plan consumer coverage is deliberately NOT a '
+            '`filing` row',
+          ),
+          reason: '$leg says WHY consumer coverage is not mechanical',
+        );
+        // Neither is ever named as a requirement wire value.
+        for (final absent in const [
+          'validation_plan_runtime',
+          'validation_plan_coverage',
+        ]) {
+          expect(
+            body,
+            isNot(contains(absent)),
+            reason: '$leg mints no $absent',
+          );
+        }
+      }
+    });
+
+    test('every discover leg reports the SAME ten-row filing and approval '
+        'contract, each leg on its own', () {
+      for (final leg in _skillLegs) {
+        final body = _collapsed(
+          _renderLeg(root, leg, 'discover', {'runner': 'space'}),
+        );
+
+        expect(body, contains('checks the ten mechanical rows'));
+        expect(body, contains('re-runs the ten-row filing preflight'));
+        for (final requirement in FilingRequirement.values) {
+          expect(
+            body,
+            contains(requirement.wire),
+            reason: '$leg names ${requirement.wire}',
+          );
+        }
+        expect(body, isNot(contains('four mechanical rows')));
+        expect(body, isNot(contains('four-row filing preflight')));
+      }
     });
 
     test('intake-refinement distinguishes unchecked cross-store edges from '

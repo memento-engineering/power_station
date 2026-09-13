@@ -10,6 +10,8 @@ import 'package:grid_runtime/grid_runtime.dart';
 import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
+import '../support/filing_evidence.dart';
+
 import '../support/asset_fakes.dart' show callMetadata;
 import '../support/package_root.dart';
 
@@ -85,6 +87,9 @@ final class _FakeBd implements BdRunner {
   }
 
   List<Map<String, Object?>> _query(List<String> args) {
+    // The approval preflight's all-status ROSTER read is the store ENTIRE;
+    // every other query is the exact-id one.
+    if (args[1].startsWith('status=')) return store.beads.values.toList();
     final id = args[1].replaceFirst('id=', '');
     final bead = store.beads[id];
     return bead == null ? const [] : [bead];
@@ -307,6 +312,13 @@ _Harness _harness({
           service: UnparkService(
             approve: ApproveService(
               runnerFor: runnerFor,
+              // A Fake plan probe: this fixture's store root is synthetic, and
+              // a real `sh` spawn there refuses for a reason that has nothing
+              // to do with the plan.
+              evidence: SystemFilingEvidenceSource(
+                probe: FakeValidationPlanProbe(),
+                beads: BdExportBeadSource(runnerFor: runnerFor),
+              ),
               now: () => DateTime.utc(2026, 9, 9, 12),
             ),
             runnerFor: runnerFor,

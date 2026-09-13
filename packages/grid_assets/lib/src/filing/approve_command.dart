@@ -73,8 +73,13 @@ final class ApprovalRefused extends ApprovalOutcome {
   };
 }
 
-/// UI-drivable approval: the four-row filing preflight, then ONE stamped
+/// UI-drivable approval: the ten-row filing preflight, then ONE stamped
 /// `bd update`. Nothing is written unless every row passes.
+///
+/// The six VIABILITY rows gate this verb exactly as the four presence rows do,
+/// and they refuse on UNAVAILABLE evidence as readily as on bad text: a stamp
+/// says a governor approved what the bead SAYS, and a preflight that could not
+/// read the id catalog or the decision register has not checked what it says.
 ///
 /// The receipt is bound to the preflight that earned it: the stamped revision
 /// is the passing report's [FilingReport.approvalRevision], so it names WHAT
@@ -82,9 +87,17 @@ final class ApprovalRefused extends ApprovalOutcome {
 /// not consulted at all — a store HEAD moves for reasons that have nothing to
 /// do with the bead, and never moves when the bead alone is edited.
 final class ApproveService {
-  /// Creates the service over the filing preflight and two injectable seams.
+  /// Creates the service over the filing preflight and three injectable
+  /// seams. [evidence] reaches the default [FilingService] only — a caller
+  /// that composes its own [filing] has already bound one.
+  ///
+  /// With no [evidence] bound, the default one reads bead ids through
+  /// [runnerFor] rather than through a process runner of its own. A seat that
+  /// injects one runner keeps ONE bd chokepoint, and the viability rows must
+  /// not be the thing that opens a second channel behind its back.
   ApproveService({
     FilingService? filing,
+    FilingEvidenceSource? evidence,
     BdRunner Function(String storeRoot) runnerFor = _processRunnerFor,
     DateTime Function() now = DateTime.now,
   }) : filing =
@@ -92,6 +105,11 @@ final class ApproveService {
            FilingService(
              source: ExactSubstationBeadSource(runnerFor: runnerFor),
              links: CrossLinkBlockerSource(runnerFor: runnerFor),
+             evidence:
+                 evidence ??
+                 SystemFilingEvidenceSource(
+                   beads: BdExportBeadSource(runnerFor: runnerFor),
+                 ),
            ),
        _runnerFor = runnerFor,
        _now = now;
@@ -199,7 +217,7 @@ class ApproveCommand extends Command<int> {
 
   @override
   final String description =
-      'Stamp one bead approved once the four filing requirements pass.';
+      'Stamp one bead approved once the ten filing requirements pass.';
 
   @override
   String get invocation {
