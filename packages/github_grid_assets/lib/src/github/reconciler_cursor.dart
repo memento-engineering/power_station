@@ -199,23 +199,181 @@ class GitHubIssueWatchCursorRecord {
   );
 }
 
+/// The durable BASELINE of one OPEN pull request's feedback state.
+///
+/// It is what a `304` is answered from. The feedback poll is conditional on
+/// BOTH the pull resource and its check runs, and a conditional response has no
+/// body at all — without this record an unchanged pull could report nothing,
+/// which is the silence the feedback leg exists to remove. It also carries
+/// every field the emitted observation needs, so a `304` OPEN-PULLS page can
+/// still raise a green pull's one-hour stall without spending a request.
+class GitHubPullFeedbackCursorRecord {
+  /// Creates one pull-feedback baseline.
+  const GitHubPullFeedbackCursorRecord({
+    required this.actor,
+    required this.number,
+    required this.body,
+    required this.headBranch,
+    required this.headSha,
+    required this.checkState,
+    required this.mergeability,
+    required this.openedAt,
+    required this.updatedAt,
+    required this.greenSince,
+  });
+
+  /// Decodes one record; a malformed shape throws.
+  factory GitHubPullFeedbackCursorRecord.fromJson(Map<String, Object?> json) =>
+      GitHubPullFeedbackCursorRecord(
+        actor: _requiredString(json, 'actor'),
+        number: _requiredInt(json, 'number'),
+        body: _requiredString(json, 'body'),
+        headBranch: _requiredString(json, 'head_branch'),
+        headSha: _requiredString(json, 'head_sha'),
+        checkState: _enumValue(
+          PullRequestCheckState.values,
+          _requiredString(json, 'check_state'),
+          'check_state',
+        ),
+        mergeability: _enumValue(
+          PullRequestMergeability.values,
+          _requiredString(json, 'mergeability'),
+          'mergeability',
+        ),
+        openedAt: _utcTimestamp(json, 'opened_at'),
+        updatedAt: _utcTimestamp(json, 'updated_at'),
+        greenSince: switch (_optionalString(json, 'green_since')) {
+          null => null,
+          final String raw => _utcTimestamp(json, 'green_since', raw: raw),
+        },
+      );
+
+  /// The login that opened the pull request.
+  final String actor;
+
+  /// The pull request's number — also the `gh-<number>` external reference an
+  /// unreferenced body is attributed through.
+  final int number;
+
+  /// The pull request's body, verbatim; its `Refs:` trailer is the PRIMARY
+  /// attribution and must survive a `304`.
+  final String body;
+
+  /// The head ref. Held to emit it, never to parse a bead out of it.
+  final String headBranch;
+
+  /// The head commit the cached [checkState] describes.
+  final String headSha;
+
+  /// The aggregate check state last observed for [headSha].
+  final PullRequestCheckState checkState;
+
+  /// The mergeability last observed.
+  final PullRequestMergeability mergeability;
+
+  /// The pull request's `created_at`, in UTC.
+  final DateTime openedAt;
+
+  /// The pull request's `updated_at`, in UTC.
+  final DateTime updatedAt;
+
+  /// The latest successful check completion for [headSha], or null when
+  /// [checkState] is not [PullRequestCheckState.green].
+  final DateTime? greenSince;
+
+  /// Returns an immutable copy with selected values replaced.
+  GitHubPullFeedbackCursorRecord copyWith({
+    String? actor,
+    int? number,
+    String? body,
+    String? headBranch,
+    String? headSha,
+    PullRequestCheckState? checkState,
+    PullRequestMergeability? mergeability,
+    DateTime? openedAt,
+    DateTime? updatedAt,
+    DateTime? greenSince,
+  }) => GitHubPullFeedbackCursorRecord(
+    actor: actor ?? this.actor,
+    number: number ?? this.number,
+    body: body ?? this.body,
+    headBranch: headBranch ?? this.headBranch,
+    headSha: headSha ?? this.headSha,
+    checkState: checkState ?? this.checkState,
+    mergeability: mergeability ?? this.mergeability,
+    openedAt: openedAt ?? this.openedAt,
+    updatedAt: updatedAt ?? this.updatedAt,
+    greenSince: greenSince ?? this.greenSince,
+  );
+
+  /// Encodes the record.
+  Map<String, Object?> toJson() => <String, Object?>{
+    'actor': actor,
+    'number': number,
+    'body': body,
+    'head_branch': headBranch,
+    'head_sha': headSha,
+    'check_state': checkState.name,
+    'mergeability': mergeability.name,
+    'opened_at': openedAt.toUtc().toIso8601String(),
+    'updated_at': updatedAt.toUtc().toIso8601String(),
+    'green_since': greenSince?.toUtc().toIso8601String(),
+  };
+
+  @override
+  bool operator ==(Object other) =>
+      other is GitHubPullFeedbackCursorRecord &&
+      other.actor == actor &&
+      other.number == number &&
+      other.body == body &&
+      other.headBranch == headBranch &&
+      other.headSha == headSha &&
+      other.checkState == checkState &&
+      other.mergeability == mergeability &&
+      other.openedAt == openedAt &&
+      other.updatedAt == updatedAt &&
+      other.greenSince == greenSince;
+
+  @override
+  int get hashCode => Object.hash(
+    actor,
+    number,
+    body,
+    headBranch,
+    headSha,
+    checkState,
+    mergeability,
+    openedAt,
+    updatedAt,
+    greenSince,
+  );
+}
+
+/// The [values] member spelled [wire] at [field]; an unknown spelling throws.
+T _enumValue<T extends Enum>(List<T> values, String wire, String field) {
+  for (final value in values) {
+    if (value.name == wire) return value;
+  }
+  throw FormatException('pull feedback $field "$wire" is not a known value');
+}
+
 String _requiredString(Map<String, Object?> json, String field) =>
     switch (json[field]) {
       final String value => value,
-      _ => throw FormatException('issue watch $field must be a string'),
+      _ => throw FormatException('cursor $field must be a string'),
     };
 
 String? _optionalString(Map<String, Object?> json, String field) =>
     switch (json[field]) {
       null => null,
       final String value => value,
-      _ => throw FormatException('issue watch $field must be a string or null'),
+      _ => throw FormatException('cursor $field must be a string or null'),
     };
 
 int _requiredInt(Map<String, Object?> json, String field) =>
     switch (json[field]) {
       final int value => value,
-      _ => throw FormatException('issue watch $field must be an integer'),
+      _ => throw FormatException('cursor $field must be an integer'),
     };
 
 /// The UTC timestamp at [field]; a ZONE-LESS spelling is REFUSED.
@@ -225,11 +383,11 @@ int _requiredInt(Map<String, Object?> json, String field) =>
 /// mean different instants on two machines, and silently re-emit observations
 /// whenever the seat moved. GitHub always sends a zone, so a document without
 /// one was written by hand and is refused loudly.
-DateTime _utcTimestamp(Map<String, Object?> json, String field) {
-  final raw = _requiredString(json, field);
-  final parsed = DateTime.parse(raw);
+DateTime _utcTimestamp(Map<String, Object?> json, String field, {String? raw}) {
+  final text = raw ?? _requiredString(json, field);
+  final parsed = DateTime.parse(text);
   if (!parsed.isUtc) {
-    throw FormatException('issue watch $field must be a UTC timestamp');
+    throw FormatException('cursor $field must be a UTC timestamp');
   }
   return parsed;
 }
@@ -245,6 +403,7 @@ class GitHubReconcilerCursor {
     this.pullHeads = const <String, String>{},
     this.pending = const <PendingObservation>[],
     this.issueWatches = const <String, GitHubIssueWatchCursorRecord>{},
+    this.pullFeedback = const <String, GitHubPullFeedbackCursorRecord>{},
   });
 
   /// Intake high-water mark.
@@ -291,6 +450,14 @@ class GitHubReconcilerCursor {
   /// exists to prevent. A record and its two conditional tags in [etags] are
   /// written and dropped together — see [recordIssueWatch].
   final Map<String, GitHubIssueWatchCursorRecord> issueWatches;
+
+  /// OPEN pull-request feedback baselines, keyed by pull node id.
+  ///
+  /// The same document as every other cursor value, for the same reason
+  /// [issueWatches] is: one atomic save. A record and its two conditional tags
+  /// in [etags] are written, evicted and dropped together — see
+  /// [recordPullFeedback] and [retainPullFeedback].
+  final Map<String, GitHubPullFeedbackCursorRecord> pullFeedback;
 
   /// Whether [id] has already been durably claimed.
   bool hasObserved(String id) => observationIds.contains(id);
@@ -478,6 +645,98 @@ class GitHubReconcilerCursor {
     return tags;
   }
 
+  static const String _feedbackPullEtagPrefix = 'feedback/pull/';
+  static const String _feedbackChecksEtagPrefix = 'feedback/checks/';
+
+  /// The [etags] key holding the PULL-RESOURCE tag for [nodeId].
+  static String pullFeedbackEtagKey(String nodeId) =>
+      '$_feedbackPullEtagPrefix$nodeId';
+
+  /// The [etags] key holding the CHECK-RUNS tag for [nodeId].
+  ///
+  /// Deliberately the key the per-check poll already used, so a seat's cursor
+  /// keeps serving conditional check-run requests across the change instead of
+  /// re-fetching every open pull's checks once.
+  static String pullFeedbackChecksEtagKey(String nodeId) =>
+      '$_feedbackChecksEtagPrefix$nodeId';
+
+  /// Writes [record] for pull [nodeId] together with the FINAL value of both
+  /// conditional tags, retaining the newest 512 records and dropping the tags
+  /// of every record evicted with them.
+  ///
+  /// A null [detailEtag] or [checksEtag] DROPS the tag it names: a baseline and
+  /// the conditional request that may be answered `304` against it never
+  /// diverge, because a `304` no record can answer is exactly the unreachable
+  /// state this cursor refuses loudly.
+  GitHubReconcilerCursor recordPullFeedback(
+    String nodeId,
+    GitHubPullFeedbackCursorRecord record, {
+    String? detailEtag,
+    String? checksEtag,
+  }) {
+    final records = <String, GitHubPullFeedbackCursorRecord>{nodeId: record};
+    for (final entry in pullFeedback.entries) {
+      if (records.length >= 512) break;
+      if (entry.key == nodeId) continue;
+      records[entry.key] = entry.value;
+    }
+    return copyWith(
+      pullFeedback: records,
+      etags: _feedbackTags(
+        records,
+        overrides: <String, String?>{
+          pullFeedbackEtagKey(nodeId): detailEtag,
+          pullFeedbackChecksEtagKey(nodeId): checksEtag,
+        },
+      ),
+    );
+  }
+
+  /// Drops every feedback record — and both of its tags — whose pull node id is
+  /// not in [nodeIds].
+  ///
+  /// [nodeIds] is the set of pulls GitHub just listed as OPEN. A pull that
+  /// closed is never polled again, so keeping its baseline only crowds the
+  /// 512-record budget and its tags can never be spent.
+  GitHubReconcilerCursor retainPullFeedback(Iterable<String> nodeIds) {
+    final keep = nodeIds.toSet();
+    if (pullFeedback.keys.every(keep.contains)) return this;
+    final records = <String, GitHubPullFeedbackCursorRecord>{
+      for (final entry in pullFeedback.entries)
+        if (keep.contains(entry.key)) entry.key: entry.value,
+    };
+    return copyWith(pullFeedback: records, etags: _feedbackTags(records));
+  }
+
+  /// [etags] with every feedback tag not backed by a record in [records]
+  /// removed and [overrides] applied — a null override REMOVES its key.
+  Map<String, String> _feedbackTags(
+    Map<String, GitHubPullFeedbackCursorRecord> records, {
+    Map<String, String?> overrides = const <String, String?>{},
+  }) {
+    final live = <String>{
+      for (final key in records.keys) ...<String>[
+        pullFeedbackEtagKey(key),
+        pullFeedbackChecksEtagKey(key),
+      ],
+    };
+    final tags = <String, String>{
+      for (final entry in etags.entries)
+        if ((!entry.key.startsWith(_feedbackPullEtagPrefix) &&
+                !entry.key.startsWith(_feedbackChecksEtagPrefix)) ||
+            live.contains(entry.key))
+          entry.key: entry.value,
+    };
+    for (final entry in overrides.entries) {
+      if (entry.value == null) {
+        tags.remove(entry.key);
+      } else {
+        tags[entry.key] = entry.value!;
+      }
+    }
+    return tags;
+  }
+
   /// Returns an immutable copy with selected values replaced.
   GitHubReconcilerCursor copyWith({
     DateTime? since,
@@ -488,6 +747,7 @@ class GitHubReconcilerCursor {
     Map<String, String>? pullHeads,
     List<PendingObservation>? pending,
     Map<String, GitHubIssueWatchCursorRecord>? issueWatches,
+    Map<String, GitHubPullFeedbackCursorRecord>? pullFeedback,
   }) => GitHubReconcilerCursor(
     since: clearSince ? null : since ?? this.since,
     workflowRunsSince: workflowRunsSince ?? this.workflowRunsSince,
@@ -496,11 +756,13 @@ class GitHubReconcilerCursor {
     pullHeads: Map.unmodifiable(pullHeads ?? this.pullHeads),
     pending: List.unmodifiable(pending ?? this.pending),
     issueWatches: Map.unmodifiable(issueWatches ?? this.issueWatches),
+    pullFeedback: Map.unmodifiable(pullFeedback ?? this.pullFeedback),
   );
 
   /// Encodes the versioned cursor document.
   ///
-  /// `pull_heads`, `pending`, `workflow_runs_since` and `issue_watches` are all
+  /// `pull_heads`, `pending`, `workflow_runs_since`, `issue_watches` and
+  /// `pull_feedback` are all
   /// ADDITIVE at version 1: a document written before any of them existed
   /// decodes with an empty value rather than being refused. The version is
   /// deliberately NOT bumped — [fromJson] throws on `version != 1`, so a bump
@@ -516,6 +778,9 @@ class GitHubReconcilerCursor {
     'pending': pending.map((entry) => entry.toJson()).toList(),
     'issue_watches': <String, Object?>{
       for (final entry in issueWatches.entries) entry.key: entry.value.toJson(),
+    },
+    'pull_feedback': <String, Object?>{
+      for (final entry in pullFeedback.entries) entry.key: entry.value.toJson(),
     },
   };
 
@@ -578,6 +843,19 @@ class GitHubReconcilerCursor {
             },
           _ => throw const FormatException(
             'cursor issue_watches must be a map',
+          ),
+        }),
+        pullFeedback: Map.unmodifiable(switch (json['pull_feedback']) {
+          null => const <String, GitHubPullFeedbackCursorRecord>{},
+          final Map<Object?, Object?> value =>
+            <String, GitHubPullFeedbackCursorRecord>{
+              for (final entry in Map<String, Object?>.from(value).entries)
+                entry.key: GitHubPullFeedbackCursorRecord.fromJson(
+                  Map<String, Object?>.from(entry.value! as Map),
+                ),
+            },
+          _ => throw const FormatException(
+            'cursor pull_feedback must be a map',
           ),
         }),
       );
