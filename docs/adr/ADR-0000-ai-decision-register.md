@@ -854,6 +854,24 @@ mount and later idle opportunities are 30 s apart: worst-case initial wait moves
 from 0 to 30 s, steady spacing from 60 s to 30 s. `GitHubPollCoordinator` keeps
 its `minimumSpacing`, which is a TRANSPORT RATE and not a schedule.
 
+(6) THE INVARIANT IS FENCED IN SOURCE, NOT IN A DIFF. `no seat owns a wake
+mechanism` is now enforced by a committed fence over `lib/`
+(`test/github/reconciliation_wake_fence_test.dart`), in the idiom this pack
+already uses for its environment and `bd export` fences: NO library file may
+name a `Timer`, a periodic stream or a `Future.any` race; EXACTLY ONE may name
+a delayed future, and it must be the coordinator's injectable minimum-spacing
+default; and the scheduling surface — the runtime plus the two assets — may own
+no wall-clock loop. The pagination loops inside the reconciliation WORK are
+deliberately outside that last scope: they walk an HTTP response rather than
+the clock, and the bead is no licence to sweep them. A diff-shaped check was
+rejected as the guard: it goes quiet the moment the offending line is
+committed, so it would pass the exact regression it exists to catch. The fence
+reads CODE — whole-line comments are stripped, so prose may still name the
+construct it retired — and carries its own falsifiability probes, since an
+empty offender list must mean "nobody schedules themselves" rather than "the
+pattern never matched anything". This is a standing constraint on every future
+contributor to the pack, not just on this change.
+
 **Why.** The measured cost of a self-owned loop: this poll died on five of eight
 seats and stayed dead from 2026-09-03 until a human found it by hand, because
 the only thing that would have reported the death was the thing that died. Every
@@ -868,7 +886,9 @@ second to a report-only cycle, and both would trade loudness for compatibility.
 `packages/github_grid_assets/lib/src/assets/github_reconciler_assets.dart`
 (`GitHubReconcilerConfig.interval` removed, `_registeredQuery`, `_moveToQuery`)
 and `packages/github_grid_assets/lib/src/assets/github_grid_assets.dart` (the
-observer binding no longer schedules). Composes with A8's loud-guard rule and
+observer binding no longer schedules), fenced by
+`packages/github_grid_assets/test/github/reconciliation_wake_fence_test.dart`.
+Composes with A8's loud-guard rule and
 with `the_grid#agent-seat-and-agent-disc`, which forbids a second wake
 mechanism; a downstream station's seat composition is what changes if (1) is
 rejected.
