@@ -499,7 +499,7 @@ void main() {
       expect(
         context,
         endsWith(
-          '${handoffNamingLine(SeatHandoff(path: discFile(seat, kEpoch69), relativePath: relative(seat, kEpoch69), body: ''))}\n'
+          '${PrimeHandoff.unconsumed(SeatHandoff(path: discFile(seat, kEpoch69), relativePath: relative(seat, kEpoch69), body: '')).namingLine}\n'
           '${expected()}\n'
           '\n'
           'RESUME BODY',

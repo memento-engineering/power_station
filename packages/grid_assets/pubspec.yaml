@@ -88,8 +88,8 @@ dev_dependencies:
 #   human composing and installing the station's asset surface — and a build
 #   agent's composition guidance arrives through its bead's design and
 #   validation plan, never through a station-owner manual its brief did not
-#   ask for. `handoff` is withheld on the same ground: it ENDS a turn by asking
-#   the OUTER harness to compact, clear, or relaunch the seat, and it writes to
+#   ask for. `handoff` is withheld on the same ground: it ENDS a turn by exiting
+#   and leaving the OUTER harness to relaunch the seat, and it writes to
 #   an Agent Disc that exists at a grid home and not in a bead's worktree —
 #   both contradict a build agent's working agreement, which is to finish the
 #   bead and commit.
@@ -412,7 +412,7 @@ grid:
 
     - id: handoff
       kind: skill
-      description: "Write the seat's own handoff onto its Agent Disc, bank the durable learnings as separate disc notes, index it, and end the turn with the one line that tells the OUTER harness to compact, clear, or relaunch. Also the successor's read: consume the newest handoff through the succession verb"
+      description: "Write the seat's own handoff onto its Agent Disc, bank the durable learnings as separate disc notes, index it, and end the turn with the one line that tells the OUTER harness the seat handed off and is exiting — the launcher relaunches it. Also the successor's read: the launcher has ALREADY consumed the note it was primed with"
       audience: human
       visibility: public
       teaches: [succession]

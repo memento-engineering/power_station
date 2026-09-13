@@ -635,7 +635,7 @@ abstract final class GridAssetsPack {
   static const GridAssetDefinition skillHandoff = GridAssetDefinition(
     assetKey: AssetKey(package: package, kind: AssetKind.skill, id: 'handoff'),
     description:
-        'Write the seat\'s own handoff onto its Agent Disc, bank the durable learnings as separate disc notes, index it, and end the turn with the one line that tells the OUTER harness to compact, clear, or relaunch. Also the successor\'s read: consume the newest handoff through the succession verb',
+        'Write the seat\'s own handoff onto its Agent Disc, bank the durable learnings as separate disc notes, index it, and end the turn with the one line that tells the OUTER harness the seat handed off and is exiting — the launcher relaunches it. Also the successor\'s read: the launcher has ALREADY consumed the note it was primed with',
     audience: AssetAudience.human,
     visibility: AssetVisibility.public,
     selector: AlwaysApplies(),

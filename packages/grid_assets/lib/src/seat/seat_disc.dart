@@ -72,6 +72,18 @@ const String kSeatEnvironmentVariable = 'GRID_SEAT';
 /// The process env var naming the station grid home. Set by the launcher.
 const String kGridHomeEnvironmentVariable = 'GRID_HOME';
 
+/// The process env var carrying the handoff body the launcher CONSUMED for this
+/// occupancy — the delivery path of a `SeatPrimeMode.hook` harness, whose
+/// priming is a SessionStart hook rather than a prompt.
+///
+/// The launcher is the only writer (`pow-d5ol`, Nico 2026-09-13: "a successor
+/// cannot start unprimed"). A hook-primed child takes no prompt segment, and
+/// the note it would otherwise have read off the disc is gone by the time it
+/// starts — the launcher archived and deleted it — so the body travels in the
+/// process environment instead and `prime` injects it from there. ABSENT means
+/// this occupancy consumed nothing.
+const String kConsumedHandoffEnvironmentVariable = 'GRID_SEAT_HANDOFF';
+
 /// The ABSOLUTE disc directory of [seat] under [gridHome].
 String seatDiscPath(String gridHome, String seat) =>
     p.normalize(p.join(gridHome, kSeatsSubdirectory, seat));

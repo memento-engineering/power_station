@@ -65,6 +65,16 @@ const _unoccupiable = AgentEnvironment(
   primeMode: SeatPrimeMode.prompt,
 );
 
+/// A TTY harness that declares it wants the body in a PROMPT and that it takes
+/// no prompt: there is no transport left, so a consumed handoff would reach
+/// nobody.
+const _mute = AgentEnvironment(
+  command: 'mute',
+  promptMode: PromptMode.none,
+  roleAsset: '.roles/$kSeatHole.md',
+  primeMode: SeatPrimeMode.prompt,
+);
+
 const _channel = AgentEnvironment(
   command: 'npx',
   args: ['-y', 'agent-acp'],
@@ -80,6 +90,7 @@ const _registry = EnvironmentRegistry(
     'bare': _bare,
     'channel': _channel,
     'unoccupiable': _unoccupiable,
+    'mute': _mute,
   },
 );
 
@@ -228,25 +239,44 @@ void main() {
     );
   });
 
-  test('a hook-primed harness takes no prompt segment; a prompt-primed one '
-      'takes the CONSUMED handoff body', () async {
+  test('a hook-primed harness takes the CONSUMED body in its process '
+      'environment; a prompt-primed one takes it on argv', () async {
     authorSeat('governor');
     writeHandoff('governor', 'h.md', 'RESUME BODY');
     final hooked = await occupy(['governor', '--env', 'declared', '--once']);
+    final hookedLaunch = hooked.runner.launches.single as SeatTtyLaunch;
     expect(
-      (hooked.runner.launches.single as SeatTtyLaunch).args,
+      hookedLaunch.args,
       isNot(contains('RESUME BODY')),
       reason: 'a hook-primed harness is never handed the body on argv',
     );
+    // The BLOCKER this closes: the launcher deleted the note, so the child's
+    // SessionStart hook has no disc left to read it off. The body travels in
+    // the environment instead, and `prime` injects it from there.
+    expect(hookedLaunch.processEnvironment['GRID_SEAT_HANDOFF'], 'RESUME BODY');
     // The consume is unconditional, so the second occupancy needs its own
     // note: the first one is gone.
     expect(discFile('governor', 'h.md').existsSync(), isFalse);
     writeHandoff('governor', 'h.md', 'RESUME BODY');
     final prompted = await occupy(['governor', '--env', 'bare', '--once']);
-    expect((prompted.runner.launches.single as SeatTtyLaunch).args, [
-      '-p',
-      'RESUME BODY',
-    ]);
+    final promptedLaunch = prompted.runner.launches.single as SeatTtyLaunch;
+    expect(promptedLaunch.args, ['-p', 'RESUME BODY']);
+    expect(
+      promptedLaunch.processEnvironment.containsKey('GRID_SEAT_HANDOFF'),
+      isFalse,
+      reason: 'one transport per launch — never the body twice',
+    );
+  });
+
+  test('an UNPRIMED occupancy declares no consumed handoff at all', () async {
+    authorSeat('governor');
+    final run = await occupy(['governor', '--env', 'declared', '--once']);
+    expect(
+      (run.runner.launches.single as SeatTtyLaunch).processEnvironment
+          .containsKey('GRID_SEAT_HANDOFF'),
+      isFalse,
+      reason: 'an empty disc consumed nothing, so nothing is declared',
+    );
   });
 
   test(
@@ -594,6 +624,69 @@ void main() {
       );
       expect(discFile('governor', 'h.md').existsSync(), isFalse);
       expect(discFile('governor', 'MEMORY.md').readAsStringSync(), '');
+    });
+
+    test(
+      'an environment with NO transport refuses BEFORE the consume',
+      () async {
+        authorSeat('governor');
+        final note = writeHandoff('governor', 'h.md', 'RESUME BODY');
+        final bytes = note.readAsBytesSync();
+        final index = discFile('governor', 'MEMORY.md').readAsStringSync();
+        final git = RecordingGitRunner(ignored: true);
+
+        final run = await occupy([
+          'governor',
+          '--env',
+          'mute',
+          '--once',
+        ], git: git);
+
+        expect(run.code, 1);
+        expect(run.runner.launches, isEmpty);
+        expect(run.err, contains('HANDOFF NOT CONSUMED'));
+        expect(run.err, contains('promptMode none'));
+        expect(run.err, contains('a successor cannot start unprimed'));
+        // Destroying a note on the way to nobody is strictly worse than not
+        // launching: the disc is untouched and no git ran.
+        expect(note.readAsBytesSync(), bytes);
+        expect(discFile('governor', 'MEMORY.md').readAsStringSync(), index);
+        expect(git.calls, isEmpty);
+      },
+    );
+
+    test('the same environment occupies an EMPTY disc freely', () async {
+      authorSeat('governor');
+      final run = await occupy(['governor', '--env', 'mute', '--once']);
+      expect(run.code, 0, reason: run.err);
+      expect(run.runner.launches, hasLength(1));
+    });
+
+    // The "couldn't tell" branch, from the launcher's side: a grid home that is
+    // no repository exits 128 on `git check-ignore`, the succession refuses to
+    // pick an archive blind, and the launch stops with the disc intact. Ruled
+    // (the decision entry names the consequence) and pinned here so it can
+    // never become accidental.
+    test('a grid home that is NO repository refuses, and destroys '
+        'nothing', () async {
+      authorSeat('governor');
+      final note = writeHandoff('governor', 'h.md', 'RESUME BODY');
+      final bytes = note.readAsBytesSync();
+      final git = RecordingGitRunner(checkIgnoreExitCode: 128);
+
+      final run = await occupy([
+        'governor',
+        '--env',
+        'bare',
+        '--once',
+      ], git: git);
+
+      expect(run.code, 1);
+      expect(run.runner.launches, isEmpty);
+      expect(run.err, contains('HANDOFF NOT CONSUMED'));
+      expect(run.err, contains('exited 128'));
+      expect(note.readAsBytesSync(), bytes);
+      expect(git.calls.map((argv) => argv.first).toSet(), {'check-ignore'});
     });
 
     test(

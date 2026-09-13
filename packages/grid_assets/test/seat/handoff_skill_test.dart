@@ -24,6 +24,11 @@
 //   - AC-2 no note kind is added: the kinds either leg authors are exactly
 //     `handoff`, `lesson`, `receipt`, `observation`.
 //
+// Homed under `test/seat/` rather than `test/assets/` because it pins a SEAT
+// surface: the bead's own validation plan is `dart test test/seat`, and the
+// suite that pins AC-5 has to be inside it or the plan does not cover the
+// deliverable it certifies.
+//
 // Offline only — reads the bundled `extension/` files; no live anything.
 import 'dart:io';
 

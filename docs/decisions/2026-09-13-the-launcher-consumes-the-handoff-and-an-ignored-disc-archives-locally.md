@@ -57,6 +57,26 @@ write a second note beside the first. The `succession` verb stays as the
 by-hand RECOVERY path: a disc no launcher touched, or one carrying two live
 handoffs, which still refuses and names both.
 
+**The successor is primed on the transport its environment declares.** The
+launcher consumed the note, so the disc the child would once have read it off
+is empty by the time the child exists, and every harness needs its own delivery:
+
+* a PROMPT-primed environment takes the body as its prompt segment, or as a
+  channel session's first message;
+* a HOOK-primed environment — `claude`, the default `seat --env` — takes no
+  prompt at all. Its priming is the station's own SessionStart hook, so the
+  launcher declares the consumed body in `GRID_SEAT_HANDOFF` and `prime`
+  injects it from there. That declaration WINS over the disc, and a note found
+  on the disc instead is by construction one no launcher consumed — the
+  hand-started session, which is the one the succession verb is still owed.
+  `prime`'s naming line says which of the two it is injecting, because a
+  successor told to "run the succession verb in this turn" over a note the
+  launcher already destroyed is the defect one layer down;
+* an environment that declares NEITHER transport — `primeMode: prompt` with
+  `promptMode: none` and no session adapter — refuses BEFORE the consume. A
+  handoff destroyed on the way to nobody is strictly worse than a seat that
+  did not launch.
+
 **The archive has TWO sinks, chosen by the disc's own tracked state**, resolved
 by `git check-ignore -q -- .grid/seats/<seat>` before any mutation:
 
@@ -96,13 +116,22 @@ WHERE it lands when the disc is ignored.
 * Bad, because a local archive accumulates under the disc where git history
   would have folded it away, and nothing prunes it yet.
 * Bad, because a refusing succession now blocks the launch rather than only the
-  resume — a disc with two live handoffs stops the seat until a human rules.
+  resume — a disc with two live handoffs, or a grid home that is no repository
+  at all, stops the seat until a human rules.
+* Bad, because the consumed body now travels in the child's process
+  environment on a hook-primed harness, which is bounded by the platform's
+  environment limit rather than by the disc.
 
 ### Confirmation
 
 `packages/grid_assets/test/seat/seat_command_test.dart` pins the launcher's
-consumption on both sinks, the single relaunch, and that `git add -f` is
-invoked on no path; `test/seat/succession_command_test.dart` pins the local
-archive's byte-identical copies and the three `check-ignore` answers;
-`test/assets/handoff_skill_test.dart` pins the one signal line, the absence of
-`/clear`, and the Resume section's statement that the launcher consumed.
+consumption on both sinks, the single relaunch, the hook-primed child's
+`GRID_SEAT_HANDOFF` declaration, the transport refusal, the no-repository
+refusal, and that `git add -f` is invoked on no path;
+`test/seat/prime_command_test.dart` pins that the declaration is what `prime`
+injects and that its naming line owes no verb;
+`test/seat/succession_command_test.dart` pins the local archive's
+byte-identical copies and the three `check-ignore` answers;
+`test/seat/handoff_skill_test.dart` pins the one signal line, the absence of
+`/clear`, and the Resume section's statement that the launcher consumed — homed
+under `test/seat/` so the bead's own validation plan reaches it.

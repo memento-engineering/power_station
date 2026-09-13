@@ -16,6 +16,15 @@
 /// a child started over an unresolved disc would destroy the evidence by
 /// writing a second note beside it.
 ///
+/// "Primes" is the environment's OWN transport, resolved by
+/// [seatHandoffDeliveryRefusal] and rendered by [planSeatLaunch]: a prompt
+/// segment or a channel's first message under `SeatPrimeMode.prompt`, and
+/// [kConsumedHandoffEnvironmentVariable] under `SeatPrimeMode.hook`, where the
+/// child's own SessionStart hook (`prime`) injects it — the note it would once
+/// have read off the disc is gone by then, because this loop consumed it. An
+/// environment that declares NEITHER transport refuses BEFORE the consume: the
+/// note stays on the disc rather than being destroyed on the way to nobody.
+///
 /// Harness-NEUTRAL by construction: this library reads only declarations
 /// (`seat_launch.dart`), and a fence in `test/seat/seat_command_test.dart`
 /// greps it for vendor flag literals.
@@ -394,6 +403,23 @@ class SeatCommand extends Command<int> {
             now: launchedAt,
           ),
         );
+        // The consume is DESTRUCTIVE, so the transport is proved before the
+        // note is: an environment with nowhere to put the body would archive
+        // and delete a handoff it could hand to nobody.
+        final undeliverable = seatHandoffDeliveryRefusal(environment);
+        if (undeliverable != null) {
+          _err
+            ..writeln(
+              'seat: $seat — HANDOFF NOT CONSUMED: environment '
+              '"$environmentName" $undeliverable.',
+            )
+            ..writeln('seat: $seat — handoff ${state.handoff.relativePath}')
+            ..writeln(
+              'seat: $seat — nothing was launched: a successor cannot start '
+              'unprimed, so a handoff is never consumed into nothing.',
+            );
+          return 1;
+        }
       }
       final consumed = await _consume(gridHome: gridHome, seat: seat);
       if (consumed.refused) return 1;

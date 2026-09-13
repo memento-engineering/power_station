@@ -20,11 +20,19 @@
 /// prime` verbatim (Nico, 2026-09-03) under a labelled heading, so the material
 /// that used to be the WHOLE answer stays reachable without being it — and,
 /// only when the process occupies an operator seat AND the SessionStart
-/// `source` is `startup`, `clear` or `compact`, APPENDS that seat's newest
-/// handoff after one naming line and one [seatHandoffAgeDiagnostic] line — how
-/// long that note has sat unconsumed, which is the difference between a handoff
-/// written at this boundary and a seat that never handed off. A `resume` source
-/// reads no disc at all,
+/// `source` is `startup`, `clear` or `compact`, APPENDS that seat's handoff
+/// after one naming line.
+///
+/// WHICH handoff is the launcher's call. Since `pow-d5ol` the seat launcher
+/// consumes the note itself and hands this session the body in
+/// [kConsumedHandoffEnvironmentVariable] — that declaration wins, and it is the
+/// ONLY priming a `SeatPrimeMode.hook` harness gets, because the note it names
+/// is already archived and deleted. With no declaration the disc is read
+/// instead, which is the hand-started session: that note is named with one
+/// [seatHandoffAgeDiagnostic] line — how long it has sat unconsumed, the
+/// difference between a handoff written at this boundary and a seat that never
+/// handed off — and the succession verb is named as the recovery it is owed.
+/// A `resume` source reads neither,
 /// because the context survives a resume and injecting there is pure inference
 /// cost (Nico, 2026-09-04). It injects nothing else — no disc summary
 /// and no disc-recording instructions:
@@ -107,33 +115,91 @@ String extractBdAdditionalContext(String stdout) {
   return '';
 }
 
-/// The ONE line that precedes an injected handoff body.
+/// The ONE handoff body an answer injects, with the single line that NAMES it
+/// and the pointer that replaces the body when the bound withholds it.
 ///
-/// It names the SUCCESSION VERB rather than a hand-performed delete: the
-/// destruction is licensed by "the disc is tracked, so git history is the
-/// archive", and only that verb archives the disc and proves the note reached
-/// `HEAD` before removing it. PURE.
-String handoffNamingLine(SeatHandoff handoff) =>
-    'Handoff ${handoff.relativePath} — act on Resume here, then run the '
-    'succession verb in this turn.';
+/// Two ORIGINS, and what separates them is what the reader is owed:
+///
+///  - [PrimeHandoff.consumed] — the LAUNCHER archived this note, proved the
+///    archive, deleted it and its one `MEMORY.md` pointer line, and handed the
+///    body to this session through [kConsumedHandoffEnvironmentVariable]
+///    (`pow-d5ol`). There is nothing on the disc and no verb is owed — telling
+///    a successor to "run the succession verb in this turn" would send it after
+///    a note the launcher already destroyed;
+///  - [PrimeHandoff.unconsumed] — a note is still ON the disc, which by
+///    construction means no launcher consumed it: this session was started by
+///    hand, and the succession verb is the HAND-RECOVERY path that archives and
+///    deletes it.
+///
+/// PURE.
+final class PrimeHandoff {
+  const PrimeHandoff._({
+    required this.namingLine,
+    required this.body,
+    required this.recovery,
+  });
+
+  /// The note the launcher consumed for this occupancy, delivered in the
+  /// process environment.
+  factory PrimeHandoff.consumed(String body) => PrimeHandoff._(
+    namingLine:
+        'Handoff — CONSUMED by the launcher before this session started: it '
+        'archived the disc and deleted the note and its index line. Act on '
+        'Resume here; there is nothing on the disc and no verb to run.',
+    body: body,
+    recovery:
+        'the launcher archived this note before deleting it — its CONSUMED '
+        'line names the archive',
+  );
+
+  /// A note still live on the disc — no launcher consumed it.
+  factory PrimeHandoff.unconsumed(SeatHandoff handoff) => PrimeHandoff._(
+    namingLine:
+        'Handoff ${handoff.relativePath} — still on the disc, so no launcher '
+        'consumed it. Act on Resume here, then run the succession verb to '
+        'archive and delete it.',
+    body: handoff.body,
+    recovery: 'read ${handoff.relativePath} from the Agent Disc',
+  );
+
+  /// The ONE line that precedes the body.
+  final String namingLine;
+
+  /// The BODY: the prose the successor acts on, front matter never included.
+  final String body;
+
+  /// How to reach the body when the bound withheld it — the pointer, without
+  /// which a trim would leave the reader nowhere to go.
+  final String recovery;
+
+  /// This handoff with its body replaced by the pointer naming the [bytes]
+  /// withheld. The naming line SURVIVES: a seat that is not told a handoff
+  /// exists cannot go and read it.
+  PrimeHandoff withheld(int bytes) => PrimeHandoff._(
+    namingLine: namingLine,
+    body: 'Withheld: $bytes handoff-body bytes; $recovery.',
+    recovery: recovery,
+  );
+}
 
 /// The `additionalContext` this verb emits: [bdContext] VERBATIM, plus — only
-/// when [handoff] is non-null — [handoffNamingLine], an optional
+/// when [handoff] is non-null — its [PrimeHandoff.namingLine], an optional
 /// [handoffDiagnostic] line, and the handoff BODY. PURE.
 ///
 /// [handoffDiagnostic] is [seatHandoffAgeDiagnostic]'s line, and it sits between
 /// the naming line and the body so a seat reads how OLD the note is before it
 /// reads the note: a handoff that has been sitting for hours is a succession
-/// that did not happen, and the body alone cannot say so. Omitted, this renders
-/// exactly what it rendered before the diagnostic existed.
+/// that did not happen, and the body alone cannot say so. It belongs to the
+/// UNCONSUMED origin only — a note the launcher consumed at this launch has no
+/// age to report.
 String composePrimeContext({
   required String bdContext,
-  SeatHandoff? handoff,
+  PrimeHandoff? handoff,
   String? handoffDiagnostic,
 }) {
   if (handoff == null) return bdContext;
   final head = <String>[
-    handoffNamingLine(handoff),
+    handoff.namingLine,
     if (handoffDiagnostic != null) handoffDiagnostic,
   ].join('\n');
   final note = '$head\n\n${handoff.body}';
@@ -241,12 +307,13 @@ final class _PrimeAnswer {
   /// bytes withheld.
   final String tracker;
 
-  /// The seat's newest handoff, whose BODY may itself be a withheld-bytes
-  /// pointer. Its naming line survives either way: a seat that is not told a
-  /// handoff exists cannot go and read it.
-  final SeatHandoff? handoff;
+  /// The handoff this answer injects, whose BODY may itself be a
+  /// withheld-bytes pointer. Its naming line survives either way: a seat that
+  /// is not told a handoff exists cannot go and read it.
+  final PrimeHandoff? handoff;
 
-  /// How OLD that unconsumed handoff is, or null when there is none.
+  /// How OLD that unconsumed handoff is, or null when the injected note was
+  /// consumed by the launcher at this launch, or when there is none at all.
   ///
   /// NOT droppable. It is one line, and it is the line that distinguishes a
   /// handoff written at this boundary from one that has been sitting for nine
@@ -297,8 +364,8 @@ final class _PrimeMaterial {
   /// bd's own context, or null when it could not be read.
   final String? trackerBody;
 
-  /// The seat's newest handoff, or null when none is injected.
-  final SeatHandoff? handoff;
+  /// The handoff injected into this answer, or null when none is.
+  final PrimeHandoff? handoff;
 
   /// [seatHandoffAgeDiagnostic]'s line for that handoff, or null when there is
   /// none. Carried through every candidate: one line is never the cut.
@@ -360,13 +427,7 @@ final class _PrimeMaterial {
       handoff: switch (handoff) {
         null => null,
         final note when keepsHandoff => note,
-        final note => SeatHandoff(
-          path: note.path,
-          relativePath: note.relativePath,
-          body:
-              'Withheld: $_handoffCost handoff-body bytes; read '
-              '${note.relativePath} from the Agent Disc.',
-        ),
+        final note => note.withheld(_handoffCost),
       },
       handoffDiagnostic: handoffDiagnostic,
     );
@@ -386,13 +447,7 @@ final class _PrimeMaterial {
     },
     handoff: switch (handoff) {
       null => null,
-      final note => SeatHandoff(
-        path: note.path,
-        relativePath: note.relativePath,
-        body:
-            'Withheld: $_handoffCost handoff-body bytes; read '
-            '${note.relativePath} from the Agent Disc.',
-      ),
+      final note => note.withheld(_handoffCost),
     },
     handoffDiagnostic: handoffDiagnostic,
   );
@@ -413,10 +468,11 @@ final class _PrimeMaterial {
 /// `prime [--hook-json]` — the thin adapter over the pure composers above.
 class PrimeCommand extends Command<int> {
   /// Creates the verb over its five injectable seams: [runnerFor] spawns `bd`
-  /// in the cwd, [environment] reads `GRID_SEAT`/`GRID_HOME`, [cwd] is the
-  /// fallback grid home, [readStdin] takes the hook payload, and [now] is the
-  /// clock the unconsumed-handoff age is measured against. [out] is where the
-  /// hook object is written.
+  /// in the cwd, [environment] reads `GRID_SEAT`, `GRID_HOME` and the
+  /// launcher's [kConsumedHandoffEnvironmentVariable], [cwd] is the fallback
+  /// grid home, [readStdin] takes the hook payload, and [now] is the clock the
+  /// unconsumed-handoff age is measured against. [out] is where the hook object
+  /// is written.
   PrimeCommand({
     BdRunner Function(String cwd) runnerFor = _processRunnerFor,
     Map<String, String> Function() environment = _processEnvironment,
@@ -515,10 +571,11 @@ class PrimeCommand extends Command<int> {
         environment[kGridHomeEnvironmentVariable]?.trim() ?? '';
     final home = declaredHome.isEmpty ? here : declaredHome;
     final executable = station.executableName;
-    final injected = _newestHandoffState(
+    final injected = _injectedHandoff(
       home: home,
       seat: seat,
       payload: payload,
+      environment: environment,
     );
     return _PrimeMaterial(
       executableName: executable,
@@ -545,10 +602,7 @@ class PrimeCommand extends Command<int> {
       ],
       trackerBody: await _trackerBody(here),
       handoff: injected?.handoff,
-      handoffDiagnostic: switch (injected) {
-        null => null,
-        final state => _ageOf(seat: seat, state: state),
-      },
+      handoffDiagnostic: injected?.diagnostic,
     );
   }
 
@@ -606,19 +660,48 @@ class PrimeCommand extends Command<int> {
     }
   }
 
-  /// The seat's newest handoff WITH the instant it was written, or null when
-  /// there is no seat, no injection is due for this source, or the disc cannot
-  /// be read.
+  /// The handoff this answer injects and the age line beside it, or null when
+  /// there is no seat, no injection is due for this source, and nothing to
+  /// inject.
   ///
-  /// One disc read for both the note and its age: resolving them separately
-  /// would let a note written between the two reads be named with the other
-  /// one's timestamp.
-  ({SeatHandoff handoff, DateTime at})? _newestHandoffState({
+  /// The LAUNCHER'S declaration wins. Since `pow-d5ol` the seat launcher
+  /// consumes the note before the child exists and delivers the body in
+  /// [kConsumedHandoffEnvironmentVariable], so on a hook-primed harness — the
+  /// only kind that reaches this verb for its priming — the disc is EMPTY by
+  /// the time the hook runs. A disc read is still the fallback, and it is the
+  /// hand-recovery path: a note that survived on the disc is one no launcher
+  /// touched, which is exactly when the succession verb is owed.
+  ///
+  /// A consumed body carries no age: it was consumed at this launch, and the
+  /// launcher reported the age it had when it did. The disc path resolves the
+  /// note and its age in ONE read, so a note written between two reads can
+  /// never be named with the other one's timestamp.
+  ({PrimeHandoff handoff, String? diagnostic})? _injectedHandoff({
     required String home,
     required String seat,
     required String payload,
+    required Map<String, String> environment,
   }) {
     if (seat.isEmpty || !shouldInjectHandoff(payload)) return null;
+    final consumed =
+        environment[kConsumedHandoffEnvironmentVariable]?.trim() ?? '';
+    if (consumed.isNotEmpty) {
+      return (handoff: PrimeHandoff.consumed(consumed), diagnostic: null);
+    }
+    final state = _newestHandoffState(home: home, seat: seat);
+    if (state == null) return null;
+    return (
+      handoff: PrimeHandoff.unconsumed(state.handoff),
+      diagnostic: _ageOf(seat: seat, state: state),
+    );
+  }
+
+  /// The seat's newest handoff WITH the instant it was written, or null when
+  /// the disc holds none or cannot be read.
+  ({SeatHandoff handoff, DateTime at})? _newestHandoffState({
+    required String home,
+    required String seat,
+  }) {
     try {
       return SeatDisc(
         directory: seatDiscPath(home, seat),
