@@ -8,6 +8,7 @@ import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
 import '../support/asset_fakes.dart' show callMetadata;
+import '../support/filing_evidence.dart';
 
 /// Creates a REAL grid home — `<home>/.grid/.beads` — because the resolver
 /// probes the filesystem to tell a grid home from its own state store.
@@ -34,9 +35,17 @@ final class _ScriptedBdRunner implements BdRunner {
     String? stdin,
   }) async {
     argvs.add(args);
+    // The all-status ROSTER read and the exact-id read are both `query`, and
+    // they answer differently: the roster is every id the store ever minted.
+    final key =
+        args.first == 'query' &&
+            args.length > 1 &&
+            args[1].startsWith('status=')
+        ? 'roster'
+        : args.first;
     return BdResult(
       exitCode: args.first == 'update' ? updateExitCode : 0,
-      stdout: replies[args.first] ?? '{"schema_version":1,"data":[]}',
+      stdout: replies[key] ?? _rosterReply,
       stderr: args.first == 'update' && updateExitCode != 0
           ? 'bd: refused'
           : '',
@@ -46,6 +55,23 @@ final class _ScriptedBdRunner implements BdRunner {
   List<List<String>> get updates =>
       argvs.where((argv) => argv.first == 'update').toList();
 }
+
+/// The COMPLETE all-status catalog of the checked store. Every id these
+/// fixtures cite exists, so the `bead_references` row is silent and the
+/// dependency row stays the only preflight arm under test.
+final String _rosterReply = jsonEncode({
+  'schema_version': 1,
+  'data': [
+    for (final id in const [
+      'pow-child',
+      'pow-n6n',
+      'pow-n6n.1',
+      'pow-pry0',
+      'pow-one',
+    ])
+      {'id': id, 'title': id, 'issue_type': 'task', 'status': 'open'},
+  ],
+});
 
 String _beadReply({required String description}) => jsonEncode({
   'schema_version': 1,
@@ -102,6 +128,13 @@ _harness(_ScriptedBdRunner bd, {String? stateRoot}) {
               roots.add(root);
               return bd;
             },
+            // A Fake plan probe: these fixtures stand in a store root that
+            // does not exist on disk, where a real `sh` spawn refuses for a
+            // reason that has nothing to do with the plan.
+            evidence: SystemFilingEvidenceSource(
+              probe: FakeValidationPlanProbe(),
+              beads: BdExportBeadSource(runnerFor: (_) => bd),
+            ),
             now: () => DateTime.utc(2026, 9, 2, 14, 30),
           ),
           storeRoot: () => '/work/power_station',

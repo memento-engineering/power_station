@@ -63,8 +63,19 @@
 ///
 /// The FILING pair is the front-door completeness counterpart: [FilingService]
 /// reads one bead through [ExactSubstationBeadSource], [FilingContract]
-/// deterministically evaluates its four mechanical authoring requirements,
+/// deterministically evaluates its ten mechanical authoring requirements,
 /// and [FilingCommand] is the thin CLI adapter the `discover` skill calls.
+/// Four ask whether a field is PRESENT; six ask whether what is present is
+/// VIABLE — does the validation plan parse under the lane shell and under
+/// Dash, are its file paths repository-relative, do its cited bead ids exist,
+/// does acceptance avoid pinning an exact release, and is every cited decision
+/// already recorded. What those six need beyond the bead's own text arrives as
+/// [FilingEvidence] through the read-only [FilingEvidenceSource]; an
+/// unavailable source refuses by SOURCE and never reads as an absent
+/// reference. Whether a plan finishes inside the critic lane's cap, and
+/// whether it covers every affected consumer, stay with the agentic half:
+/// the first needs execution and the second needs blast-radius judgement, and
+/// a wrong refusal at the front door stops real work.
 /// Description and acceptance usefulness remain with the agentic half.
 /// Both filing verbs read the grid home's cross-store link beads through ONE
 /// `--state-root` seam ([addStateRootOption] / [resolveStateRoot]), so
@@ -289,6 +300,7 @@ export 'src/filing/approval_stamp.dart';
 export 'src/filing/approve_command.dart';
 export 'src/filing/filing_command.dart';
 export 'src/filing/filing_contract.dart';
+export 'src/filing/filing_text.dart';
 export 'src/filing/park_command.dart';
 export 'src/filing/show_command.dart';
 export 'src/filing/state_root_option.dart';

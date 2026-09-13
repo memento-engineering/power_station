@@ -69,7 +69,7 @@ final String? _skipWithoutBd = _bdAvailable
 
 void main() {
   test(
-    'real bd filing passes all four requirements',
+    'real bd filing passes all ten requirements',
     skip: _skipWithoutBd,
     () async {
       final store = await filingStore();
@@ -122,8 +122,12 @@ void main() {
       final rows = (report['requirements'] as List)
           .cast<Map<String, dynamic>>();
       expect(report['passed'], isTrue);
-      expect(rows, hasLength(4));
+      expect(rows, hasLength(FilingRequirement.values.length));
       expect(rows.every((row) => row['passed'] == true), isTrue);
+      expect(
+        [for (final row in rows) row['requirement']],
+        [for (final requirement in FilingRequirement.values) requirement.wire],
+      );
     },
   );
 
@@ -165,8 +169,23 @@ void main() {
       final rows = (report['requirements'] as List)
           .cast<Map<String, dynamic>>();
       expect(report['passed'], isFalse);
-      expect(rows, hasLength(4));
-      expect(rows.every((row) => row['passed'] == false), isTrue);
+      expect(rows, hasLength(FilingRequirement.values.length));
+      // Every PRESENCE row fails on this bead. The six VIABILITY rows are
+      // about text that is present-but-wrong, and this bead's text is fine:
+      // the plan is blank (the presence row's to own), it names no path, and
+      // its one cited id exists in the store the real bd read answers with.
+      expect(
+        [
+          for (final row in rows)
+            if (row['passed'] == false) row['requirement'],
+        ],
+        [
+          FilingRequirement.driveableType.wire,
+          FilingRequirement.validationPlan.wire,
+          FilingRequirement.acceptanceCriteria.wire,
+          FilingRequirement.dependencies.wire,
+        ],
+      );
     },
   );
 

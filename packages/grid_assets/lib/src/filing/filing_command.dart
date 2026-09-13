@@ -46,7 +46,7 @@ class FilingCommand extends Command<int> {
 
   @override
   final String description =
-      'Check one bead against the four mechanical filing requirements.';
+      'Check one bead against the ten mechanical filing requirements.';
 
   @override
   String get invocation {

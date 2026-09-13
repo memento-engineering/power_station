@@ -179,8 +179,20 @@ bd dep add <new bead id> <local blocker bead id> --actor governor
 
 Then run `{{runner}} filing --json "<new bead id>"`. Do not leave Filing after
 a non-zero result: correct the bead, rerun the command, and continue only after
-it exits 0. The command checks the four mechanical rows; the agentic half still
-judges whether the description and acceptance are useful.
+it exits 0. The command checks the ten mechanical rows — four PRESENCE rows
+(`driveable_type`, `validation_plan`, `acceptance_criteria`, `dependencies`)
+and six VIABILITY rows (`validation_plan_syntax`, `validation_plan_portability`,
+`repo_relative_paths`, `bead_references`, `release_versions`,
+`decision_references`). It now enforces that the validation plan parses under
+the lane shell, that it parses under dash so CI does not die at PARSE, that
+every file path the bead names is repository-relative, that every cited
+attached-store bead id actually exists, that acceptance pins no exact release
+version, and that every decision the bead cites is already recorded. Each
+failing row's `detail` NAMES the offending text and what to do about it; apply
+it verbatim. The agentic half still judges whether the description and
+acceptance are useful, whether the plan finishes inside the critic lane's
+runtime cap, and whether it covers every affected consumer — see
+`intake-refinement/SKILL.md`.
 
 Immediately verify that the created bead is discoverable with `{{runner}}
 search --json "<new bead id>"` and require an `id`-field hit. Never use `bd show`
@@ -190,7 +202,7 @@ it is absent from list/search surfaces.
 The bead stays outside the mounted frontier until the human approves it: it
 carries no `grid.approved_*` stamp, and no label added by hand substitutes for
 one. Record the approved design first, then run the approve verb from the
-owning store root. The verb re-runs the four-row filing preflight and, only if
+owning store root. The verb re-runs the ten-row filing preflight and, only if
 every row passes, writes the STAMP in ONE `bd update`: `grid.approved_by` (the
 `--actor`), `grid.approved_at` (the UTC ISO-8601 instant) and
 `grid.approved_rev` (the digest of the FILING BASIS the preflight just

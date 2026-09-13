@@ -20,6 +20,32 @@ class _RecordingBdRunner implements BdRunner {
   }
 }
 
+/// Complete viability evidence for the dependency probes below: every id these
+/// beads name exists, the plan parses under both shells, and nothing cites a
+/// decision. The six viability rows are therefore silent here, which is what
+/// leaves the dependency row the only thing these tests are about.
+const FilingEvidence _viable = FilingEvidence(
+  attachedPrefixes: {'pow', 'tg'},
+  laneParse: PlanParsed(),
+  portabilityParse: PlanParsed(),
+  beads: BeadIdsRead({
+    'pow-one',
+    'pow-two',
+    'pow-three',
+    'pow-filed',
+    'pow-n6n',
+    'pow-n6n.1',
+    'pow-n6n.2',
+    'tg-89y8',
+  }),
+);
+
+/// The [FilingRequirement.dependencies] row of [report] — named, never taken
+/// positionally: the report carries ten rows and the dependency row is no
+/// longer the last of them.
+FilingRequirementRow _dependencyRow(FilingReport report) => report.requirements
+    .singleWhere((row) => row.requirement == FilingRequirement.dependencies);
+
 void main() {
   test('approval revision is deterministic and covers filing basis', () {
     const bead = Bead(
@@ -42,7 +68,7 @@ void main() {
       List<BeadDependency> edges, [
       Set<String>? linked,
     ]) => const FilingContract()
-        .evaluate(subject, edges, linkedBlockers: linked)
+        .evaluate(subject, edges, evidence: _viable, linkedBlockers: linked)
         .approvalRevision;
 
     final baseline = rev(bead, const [one, two]);
@@ -123,7 +149,10 @@ void main() {
     // A report with no bead to evaluate carries no revision.
     expect(FilingReport.missing('pow-gone').approvalRevision, isEmpty);
     expect(
-      const FilingContract().evaluate(bead, const [one, two]).toJson(),
+      const FilingContract().evaluate(bead, const [
+        one,
+        two,
+      ], evidence: _viable).toJson(),
       containsPair('approval_revision', baseline),
     );
   });
@@ -154,7 +183,7 @@ void main() {
 
     FilingRequirementRow dependency(List<BeadDependency> edges) =>
         const FilingContract()
-            .evaluate(bead, edges)
+            .evaluate(bead, edges, evidence: _viable)
             .requirements
             .singleWhere(
               (row) => row.requirement == FilingRequirement.dependencies,
@@ -164,11 +193,13 @@ void main() {
     expect(dependency([one]).detail, contains('pow-two'));
     expect(dependency([one, two]).passed, isTrue);
     expect(
-      const FilingContract()
-          .evaluate(bead.copyWith(description: 'No local ordering.'), const [])
-          .requirements
-          .last
-          .passed,
+      _dependencyRow(
+        const FilingContract().evaluate(
+          bead.copyWith(description: 'No local ordering.'),
+          const [],
+          evidence: _viable,
+        ),
+      ).passed,
       isTrue,
     );
   });
@@ -192,7 +223,7 @@ void main() {
       List<BeadDependency> edges,
       Set<String> linked,
     ) => const FilingContract()
-        .evaluate(bead, edges, linkedBlockers: linked)
+        .evaluate(bead, edges, evidence: _viable, linkedBlockers: linked)
         .requirements
         .singleWhere(
           (row) => row.requirement == FilingRequirement.dependencies,
@@ -209,16 +240,13 @@ void main() {
     );
     expect(dependency(const [local], const {'tg-89y8'}).passed, isTrue);
     expect(
-      const FilingContract()
-          .evaluate(
-            bead.copyWith(
-              description: 'The design depends on whether we ship.',
-            ),
-            const [],
-          )
-          .requirements
-          .last
-          .passed,
+      _dependencyRow(
+        const FilingContract().evaluate(
+          bead.copyWith(description: 'The design depends on whether we ship.'),
+          const [],
+          evidence: _viable,
+        ),
+      ).passed,
       isTrue,
     );
   });
@@ -242,7 +270,7 @@ void main() {
       List<BeadDependency> edges, {
       Set<String>? linked,
     }) => const FilingContract()
-        .evaluate(bead, edges, linkedBlockers: linked)
+        .evaluate(bead, edges, evidence: _viable, linkedBlockers: linked)
         .requirements
         .singleWhere(
           (row) => row.requirement == FilingRequirement.dependencies,

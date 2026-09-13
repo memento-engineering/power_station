@@ -23,6 +23,7 @@ import 'package:grid_sdk/grid_sdk.dart' show SpecifyAuthoredSpecWriter;
 import 'package:test/test.dart';
 
 import 'support/asset_fakes.dart';
+import 'support/filing_evidence.dart';
 
 ({FakeTreeContext context, StepArgs args}) _ctx({
   Bead? beadOverride,
@@ -866,6 +867,78 @@ void main() {
       // clear-and-rewrite still knows which text is specify's.
       expect(recorder.calls, hasLength(1));
       expect(recorder.calls.single.design, design);
+    });
+
+    test('specify and filing read ONE probe: the same fake outcome refuses '
+        'both', () async {
+      // The incident's shape, and the reason the two must agree: an apostrophe
+      // copied out of design prose ("station lane's SDK") into a
+      // single-quoted program. Specify authors the plan; filing gates it. A
+      // second probe is a second opinion waiting to disagree.
+      const plan = "echo 'station lane's SDK'";
+      const diagnostic =
+          'sh: -c: line 1: unexpected EOF while looking for '
+          'matching `\'\'';
+      final probe = FakeValidationPlanProbe(
+        outcomes: const {
+          kLaneShell: PlanRefused(exitCode: 2, diagnostic: diagnostic),
+        },
+      );
+
+      final dir = carriedEnvelope();
+      final c = _ctx(workspaceDir: dir.path);
+      await expectLater(
+        SpecifyCapability(
+          runnerFor: (_) => SpecifyReadbackBdRunner(
+            beads: [
+              durableSpecifiedBead(
+                'tg-1',
+              ).copyWith(metadata: const {'validation_plan': plan}),
+            ],
+          ),
+          validationPlanProbe: probe,
+        ).result(c.context, c.args),
+        throwsA(
+          isA<CapabilityFailure>()
+              .having(
+                (failure) => failure.kind,
+                'kind',
+                CapabilityFailureKind.invalidResult,
+              )
+              .having(
+                (failure) => failure.reason,
+                'reason',
+                'validation_plan does not parse: $diagnostic',
+              ),
+        ),
+      );
+      // The probe was asked to PARSE, never to run: one lane-shell call,
+      // carrying the plan verbatim.
+      expect(probe.calls.single.shell, kLaneShell);
+      expect(probe.calls.single.plan, plan);
+
+      // The FILING gate reads the same outcome and names the same offending
+      // word — the whole point of one shared seam.
+      final row = const FilingContract()
+          .evaluate(
+            const Bead(
+              id: 'pow-filed',
+              issueType: IssueType.task,
+              acceptanceCriteria: '- [ ] checked',
+              metadata: {'validation_plan': plan},
+            ),
+            const [],
+            evidence: const FilingEvidence(
+              laneParse: PlanRefused(exitCode: 2, diagnostic: diagnostic),
+            ),
+          )
+          .requirements
+          .singleWhere(
+            (row) => row.requirement == FilingRequirement.validationPlanSyntax,
+          );
+      expect(row.passed, isFalse);
+      expect(row.detail, contains("lane's"));
+      expect(row.detail, contains(kSyntaxCorrection));
     });
 
     test('a parseable validation_plan is syntax-checked without execution and '

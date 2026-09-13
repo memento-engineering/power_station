@@ -760,6 +760,31 @@ void main() {
       expect(anchors.symbols, ['buildSpecifyBrief', 'Heartbeat']);
     });
 
+    test('the shared scanner reads ROOTED file anchors and still leaves an '
+        'absolute DIRECTORY unclassified', () {
+      const windows = r'C:\work\power_station\lib\src\x.dart';
+      final b = bead('tg-1').copyWith(
+        description:
+            'Receipts landed in /tmp/round/receipt.md and $windows, beside '
+            'lib/src/code/specify.dart. The grid home is '
+            '/Users/nico/development/engineering.memento/power_station/.grid '
+            'and it is a directory.',
+      );
+
+      final anchors = beadAnchors(b);
+
+      expect(anchors.paths, [
+        '/tmp/round/receipt.md',
+        windows,
+        'lib/src/code/specify.dart',
+      ]);
+      expect(
+        [for (final slice in absolutePathReferences(b)) slice.text],
+        ['/tmp/round/receipt.md', windows],
+      );
+      expect(absolutePathReferences(b).first.field, BeadTextField.description);
+    });
+
     test('the gather pulls the committee RUBRICS, resolves the anchors and runs '
         'the prior-art search through its seams', () async {
       final queried = <String>[];
