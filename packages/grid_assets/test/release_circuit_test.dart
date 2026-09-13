@@ -14,6 +14,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:dart_grid_assets/dart_grid_assets.dart';
+import 'package:genesis_tree/genesis_tree.dart';
 import 'package:grid_assets/grid_assets.dart';
 import 'package:grid_engine/grid_engine.dart';
 import 'package:grid_engine/testing.dart';
@@ -477,7 +478,66 @@ ${member == dependent ? 'dependencies:\n  $base: $declaredFloor\n' : ''}''');
   return root.path;
 }
 
+/// A mount for one release step, so a probe can resolve what the registry
+/// actually binds the step's capability id to.
+StepMount _mount(String stepId) {
+  final step = kReleaseCircuit.stepById(stepId)! as CapabilityStep;
+  return StepMount(
+    step: step,
+    nodePath: _node(stepId),
+    circuit: kReleaseCircuit,
+    circuitPath: '$_beadId/release',
+    session: const SessionHandle('tgdog-s'),
+    node: const NodeCursor(),
+    key: ValueKey('${_node(stepId)}#0.0'),
+  );
+}
+
 void main() {
+  group('the release pipeline is a registered circuit', () {
+    test('registers release beside existing circuits', () {
+      final registry = buildCodeRegistry(overlaySourceRef: 'test');
+      expect(identical(registry.circuit('release'), kReleaseCircuit), isTrue);
+      // Registering it changes nothing about the circuits already there.
+      for (final existing in const <String>[
+        'code',
+        'spec_review',
+        'code_review',
+        'landing',
+      ]) {
+        expect(registry.circuit(existing), isNotNull, reason: existing);
+      }
+      // Both release capability ids resolve — a station that roots the circuit
+      // gets the real legs, not the fail-soft idle leaf.
+      final gate = registry.host(_mount('scrub'));
+      expect(gate, isA<CapabilityHost>());
+      expect((gate as CapabilityHost).capability, isA<ReleaseGateCapability>());
+      final promotion = registry.host(_mount('promotion'));
+      expect(promotion, isA<CapabilityHost>());
+      expect(
+        (promotion as CapabilityHost).capability,
+        isA<ReleasePromotionRouteCapability>(),
+      );
+    });
+
+    test('the invoker is an injectable implementation seam', () async {
+      final request = _request();
+      final invoker = _FakeReleaseCommandInvoker(request: request);
+      final registry = buildCodeRegistry(
+        overlaySourceRef: 'test',
+        releaseCommands: invoker,
+      );
+      final host = registry.host(_mount('discover')) as CapabilityHost;
+      final capability = host.capability as ReleaseGateCapability;
+      await capability.run(
+        FakeTreeContext(values: <Type, Object>{ReleaseCircuitRequest: request}),
+        stepArgs(_node('discover'), params: const {'operation': 'discover'}),
+      );
+      expect(invoker.calls.single.first, 'release');
+      expect(invoker.calls.single[1], 'discover');
+    });
+  });
+
   group('the release pipeline composes the vended commands', () {
     test('calls only vended release commands in circuit order', () async {
       final request = _request();

@@ -57,6 +57,7 @@ import 'landing.dart';
 import 'pr_composition.dart';
 import 'pr_describe.dart';
 import 'readiness.dart';
+import 'release.dart';
 import 'respec.dart';
 import 'specify.dart';
 
@@ -1486,6 +1487,7 @@ DefaultCapabilityRegistry buildCodeRegistry({
   GridAssetRosterOverride? assetRosterOverride,
   InferenceRunner? committeeClassifier,
   CommitteeSelectionStore? committeeSelectionStore,
+  ReleaseCommandInvoker? releaseCommands,
   String? overlaySourceRef,
   Map<String, String> overlayArgs = const {},
   AgentSessionAdapterRegistry sessionAdapters = kBuiltinAgentSessionAdapters,
@@ -1550,6 +1552,12 @@ DefaultCapabilityRegistry buildCodeRegistry({
   // the design verifier resolve to the SAME instance, so a suite that injects
   // a fake cannot silence one and leave the other reaching for a real `claude`.
   final oneShotInference = inference ?? const SystemInferenceRunner();
+  // The RELEASE pipeline's ONE seam onto the vended release commands, resolved
+  // once so both release capabilities compose the same invoker. Absent ⇒ the
+  // in-process host over the real [ReleaseService]; a suite injects a recording
+  // Fake instead, and nothing in the offline path can reach a real publish.
+  final releaseInvoker =
+      releaseCommands ?? const InProcessReleaseCommandInvoker();
   Future<({bool ok, String output})> classify(RuntimeConfig config) async {
     final run = await selectionInference.run(config);
     return (ok: run.ok, output: run.output);
@@ -1716,6 +1724,12 @@ DefaultCapabilityRegistry buildCodeRegistry({
       kFormatCleanStep: FormatCleanCapability(
         formatter: dartFormatService ?? const DartFormatService(),
       ),
+      // The RELEASE pipeline (`release.dart`) — the deterministic legs and the
+      // human-promotion route. It composes the vended release commands and
+      // introduces no committee, no rubric and no inference seam.
+      kReleaseGateCapabilityId: ReleaseGateCapability(releaseInvoker),
+      kReleasePromotionRouteCapabilityId:
+          const ReleasePromotionRouteCapability(),
     },
     circuits: const {
       'code': kCodeCircuit,
@@ -1725,6 +1739,9 @@ DefaultCapabilityRegistry buildCodeRegistry({
       kDocsReviewCircuitId: kDocsReviewCircuit,
       kDesignReviewCircuitId: kDesignReviewCircuit,
       'landing': kLandingCircuit,
+      // The RELEASE pipeline is a ROOT circuit like `code`: a station roots it
+      // for release work, and it inflates no sub-circuit of its own.
+      'release': kReleaseCircuit,
       // The FROZEN old-shape spec circuits (bead `pow-3p4`, extended by
       // `pow-q7n`): `spec_review_v1` (pre-fold) is reachable ONLY from
       // [kSpecHeadCodeCircuit], `spec_review_v2` (pre-ladder) ONLY from
