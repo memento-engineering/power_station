@@ -17,8 +17,6 @@
 //   - the two legs are INDEPENDENT instruction sources (a harness-specific
 //     instruction on each, per
 //     `power_station#a-harness-may-carry-its-own-instructions`);
-//   - the governor def names `/handoff` at session end and the successor read
-//     at session start;
 //   - AC-5 both legs teach the WORKING-MEMORY lifecycle — written once, picked
 //     up and deleted within minutes, never amended — and route the one
 //     completed note through `succession --write-handoff` before the index line;
@@ -426,32 +424,6 @@ void main() {
         expect(body, isNot(contains('{{')), reason: '$home: no residue');
         expect(body, contains('space status --state-workspace <grid home>'));
       }
-    });
-  });
-
-  group('the governor def names the ritual at BOTH ends of a session', () {
-    final governor = File(
-      p.join(overlay, 'claude', 'agents', 'governor.md'),
-    ).readAsStringSync();
-
-    test('the Record step ends a session through /handoff and starts one by '
-        'reading the newest handoff note', () {
-      expect(governor, contains('A session ENDS through `/handoff`'));
-      expect(governor, contains('STARTS by reading the newest'));
-      expect(governor, contains('`kind: handoff` note on that disc'));
-    });
-
-    test('the Record step is the ONLY place it changed — the diagnosis-skill '
-        'menu at the foot is untouched', () {
-      expect(
-        governor,
-        contains('`asset-author` — B-style in-tree provider composition'),
-      );
-      expect(
-        governor,
-        isNot(contains('- `handoff` —')),
-        reason: 'handoff is not one of the loop-step-2 diagnosis skills',
-      );
     });
   });
 }

@@ -15,6 +15,12 @@
 // the section that owns it: a rewrite that keeps three and drops the fourth
 // fails HERE, by name.
 //
+// The three texts carry it at DIFFERENT altitudes. The role definition is
+// PUSHED — a seat pays for it on every turn — so it states the judgement and
+// nothing else; the runbook is PULLED when the board reads quiet, so it owns
+// the store grammar that enumerates both blocker sources. One owner per
+// sentence is what keeps them from drifting apart.
+//
 // SCOPE: this file reads the CLAUDE leg only. `governor.md` has no `agents/`
 // twin at all, and each per-harness leg of `station_overlay` is an INDEPENDENT
 // instruction source (`power_station#a-harness-may-carry-its-own-instructions`
@@ -51,13 +57,14 @@ String _handoff() => File(
   p.join(_claudeLeg(), 'skills', 'handoff', 'SKILL.md'),
 ).readAsStringSync();
 
-/// The four sentences the sweep rule is made of, each keyed by the failure it
-/// prevents.
+/// The four sentences the sweep PROCEDURE is made of, each keyed by the
+/// failure it prevents.
 ///
-/// They are asserted in BOTH sweep texts: the governor def is what a seat
-/// reads every session, the runbook is what it opens when the board looks
-/// quiet, and a board that is quiet for the reason this bead names must not
-/// depend on which of the two the seat happened to reach for.
+/// They are asserted on the RUNBOOK alone. The store grammar that enumerates
+/// both blocker sources has exactly one owner, and a second copy in the
+/// pushed role definition drifts the moment the grammar changes — so the
+/// governor def states the JUDGEMENT ([_governorSweepPolicy]) and the skill
+/// states how to reach it.
 const Map<String, String> _sweepSentences = {
   'the retired label is not mistaken for a stamp':
       'For this sweep, stamped means `grid.approved_by`, `grid.approved_at`, '
@@ -78,6 +85,25 @@ const Map<String, String> _sweepSentences = {
       'agent executes it is **GOVERNOR WORK**, not a human gate; list its '
       'id, title, owning store, and next executable action.',
 };
+
+/// The three sentences the governor's OWN Sweep step is made of — the same
+/// guarantee as [_sweepSentences], stated as judgement a seat carries on every
+/// turn rather than as a query it would have to re-run from memory.
+const Map<String, String> _governorSweepPolicy = {
+  'a stamped-but-unmounted bead is not a human gate until its blockers are '
+          'read':
+      'For a stamped-but-unmounted bead, enumerate every open blocker across '
+      'in-store and cross-store dependencies before calling it a human gate.',
+  'a closed blocker is not a blocker': 'Closed blockers do not count.',
+  'a driveable blocker is classified as GOVERNOR WORK, with a next action':
+      'A release node or a blocker whose notes say an agent executes it is '
+      'GOVERNOR WORK; name its id, owning store, and next executable action.',
+};
+
+/// Grammar the Sweep step must NOT restate: the store flags and field names
+/// belong to the runbook, which is pulled when it is needed, not pushed on
+/// every turn.
+const List<String> _sweepGrammar = ['bd -C', '--json', 'grid.approved_by'];
 
 /// The two sentences that make `empty by design` a CONCLUSION rather than an
 /// assumption the successor inherits.
@@ -115,34 +141,52 @@ String _section(String source, String start, String end, {required String of}) {
 }
 
 void main() {
-  test('the Claude governor and station-operations sweeps enumerate governor '
-      'work', () {
-    final sweeps = {
-      'the governor def’s operating-loop Sweep step': _section(
-        _governor(),
-        '1. **Sweep**',
-        '2. **Diagnose**',
-        of: 'agents/governor.md',
-      ),
-      'the station-operations governor-work runbook': _section(
-        _stationOperations(),
-        '## Governor-work sweep',
-        '## Silent-death runbook',
-        of: 'skills/station-operations/SKILL.md',
-      ),
-    };
+  test('the governor definition carries policy and the station-operations '
+      'skill owns procedure', () {
+    final sweep = _section(
+      _governor(),
+      '1. **Sweep**',
+      '2. **Diagnose**',
+      of: 'agents/governor.md',
+    );
 
-    sweeps.forEach((where, body) {
-      _sweepSentences.forEach((guarantee, sentence) {
-        expect(
-          body,
-          contains(sentence),
-          reason:
-              '$where must state, in its own body, that $guarantee — a stamped '
-              'bead behind a governor-driveable chore reads as a human gate '
-              'without it, and the station starves',
-        );
-      });
+    _governorSweepPolicy.forEach((guarantee, sentence) {
+      expect(
+        sweep,
+        contains(sentence),
+        reason:
+            'the governor def’s Sweep step must state, in its own body, that '
+            '$guarantee — a stamped bead behind a governor-driveable chore '
+            'reads as a human gate without it, and the station starves',
+      );
+    });
+
+    for (final grammar in _sweepGrammar) {
+      expect(
+        sweep,
+        isNot(contains(grammar)),
+        reason:
+            'the pushed role definition states the judgement; `$grammar` is '
+            'the runbook’s to own, and a second copy drifts from it',
+      );
+    }
+
+    final runbook = _section(
+      _stationOperations(),
+      '## Governor-work sweep',
+      '## Silent-death runbook',
+      of: 'skills/station-operations/SKILL.md',
+    );
+
+    _sweepSentences.forEach((guarantee, sentence) {
+      expect(
+        runbook,
+        contains(sentence),
+        reason:
+            'the station-operations governor-work runbook must state, in its '
+            'own body, that $guarantee — it is the one place the enumeration '
+            'is spelled out',
+      );
     });
   });
 
