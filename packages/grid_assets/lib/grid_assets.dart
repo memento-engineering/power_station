@@ -89,8 +89,8 @@
 /// uses (one exact-id `bd query`, one `bd dep list`, no mutation surface) and
 /// renders id, prose, the `grid.approved_*` stamp and the dependency edges
 /// with NO station in the path. Its output is BOUNDED at
-/// [kShowOutputCapBytes] on both the plain and the JSON rendering, and what it
-/// cuts it NAMES with the withheld byte count
+/// [kBoundedOutputCapBytes] on both the plain and the JSON rendering, and what
+/// it cuts it NAMES with the withheld byte count
 /// (`power_station#a-mechanical-lookup-is-a-vended-command-with-a-bounded-output`);
 /// `--if-revision` suppresses the prose only against the bead's own
 /// `updated_at` revision, never against the text of the request. Round, lane
@@ -264,6 +264,7 @@ export 'src/filing/filing_contract.dart';
 export 'src/filing/park_command.dart';
 export 'src/filing/show_command.dart';
 export 'src/filing/state_root_option.dart';
+export 'src/io/bounded_output.dart';
 export 'src/io/recorded_artifact.dart';
 export 'src/lease/bus_lease.dart';
 export 'src/search/embedding_index.dart';

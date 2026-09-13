@@ -484,6 +484,14 @@ void main() {
   });
 
   group('AC-5 — the hard cap, and an explicit marker for every cut', () {
+    test('the cap is the PACK\'s, under the old name too', () {
+      // The value moved to the shared selector when `prime` became the second
+      // verb to need it; the old name survives only so an out-of-tree caller
+      // that named it still compiles, and it must still be the SAME ceiling.
+      // ignore: deprecated_member_use_from_same_package
+      expect(kShowOutputCapBytes, kBoundedOutputCapBytes);
+    });
+
     // Multibyte in every variable string, plus edges too long to fit an equal
     // share, so a bound MUST cut all eight fields and drop every edge.
     final long = '日本語の説明・テスト🧪 ' * 260;
@@ -505,15 +513,15 @@ void main() {
       final h = _harness(_healthyBd(row: row, blockers: blockers));
 
       expect(await h.runner.run(['show', _beadId]), 0);
-      expect(_bytes(h.out), lessThanOrEqualTo(kShowOutputCapBytes));
+      expect(_bytes(h.out), lessThanOrEqualTo(kBoundedOutputCapBytes));
       // Near the ceiling, not far under it: a bound that withholds budget it
       // had room for is a quieter version of the same waste.
-      expect(_bytes(h.out), greaterThan(kShowOutputCapBytes - 800));
+      expect(_bytes(h.out), greaterThan(kBoundedOutputCapBytes - 800));
 
       final plain = h.out.toString();
       expect(plain, contains('ID: $_beadId'));
       expect(plain, contains('TRUNCATION:'));
-      expect(plain, contains('cap_bytes: $kShowOutputCapBytes'));
+      expect(plain, contains('cap_bytes: $kBoundedOutputCapBytes'));
       for (final key in const [
         'title',
         'description',
@@ -539,8 +547,8 @@ void main() {
       final h = _harness(_healthyBd(row: row, blockers: blockers));
 
       expect(await h.runner.run(['show', '--json', _beadId]), 0);
-      expect(_bytes(h.out), lessThanOrEqualTo(kShowOutputCapBytes));
-      expect(_bytes(h.out), greaterThan(kShowOutputCapBytes - 800));
+      expect(_bytes(h.out), lessThanOrEqualTo(kBoundedOutputCapBytes));
+      expect(_bytes(h.out), greaterThan(kBoundedOutputCapBytes - 800));
 
       final decoded = jsonDecode(h.out.toString()) as Map<String, dynamic>;
       expect(decoded['id'], _beadId);
@@ -549,7 +557,7 @@ void main() {
       expect(decoded['revision'], '2026-09-08T11:22:33.000Z');
 
       final truncation = decoded['truncation']! as Map<String, dynamic>;
-      expect(truncation['cap_bytes'], kShowOutputCapBytes);
+      expect(truncation['cap_bytes'], kBoundedOutputCapBytes);
       final withheld = truncation['withheld']! as Map<String, dynamic>;
       expect(
         withheld.keys,
@@ -585,19 +593,19 @@ void main() {
       );
 
       expect(await h.runner.run(['show', _beadId]), 1);
-      expect(_bytes(h.out), lessThanOrEqualTo(kShowOutputCapBytes));
+      expect(_bytes(h.out), lessThanOrEqualTo(kBoundedOutputCapBytes));
 
       final plain = h.out.toString();
       expect(plain, contains('REFUSED $_beadId'));
       expect(plain, contains('StateError'));
-      expect(plain, contains('cap_bytes: $kShowOutputCapBytes'));
+      expect(plain, contains('cap_bytes: $kBoundedOutputCapBytes'));
       expect(plain, _withheldRow('reason'));
 
       final json = _harness(
         _ScriptedBd({'query': _Throws(StateError('boom ${'x' * 40000}'))}),
       );
       expect(await json.runner.run(['show', '--json', _beadId]), 1);
-      expect(_bytes(json.out), lessThanOrEqualTo(kShowOutputCapBytes));
+      expect(_bytes(json.out), lessThanOrEqualTo(kBoundedOutputCapBytes));
       final decoded = jsonDecode(json.out.toString()) as Map<String, dynamic>;
       expect(decoded['shown'], isFalse);
       final withheld =

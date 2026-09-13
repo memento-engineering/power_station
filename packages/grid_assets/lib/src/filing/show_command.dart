@@ -16,8 +16,11 @@
 /// watcher). Nothing here spawns a station, a session or a coding agent.
 ///
 /// **Bounded output** (`power_station#a-mechanical-lookup-is-a-vended-command-with-a-bounded-output`):
-/// every rendering — plain or structured — fits [kShowOutputCapBytes], and
-/// anything cut is NAMED with the byte count withheld. The beads this renders
+/// every rendering — plain or structured — fits [kBoundedOutputCapBytes], and
+/// anything cut is NAMED with the byte count withheld. The cap, the predicate
+/// both renderings must satisfy and the search for the largest candidate that
+/// fits are the PACK's, vended once by [boundedOutput]; this verb supplies only
+/// which material it gives up first and how it counts it. The beads this renders
 /// are the long ones (an epic with ten rounds of notes is exactly what a seat
 /// asks for), so an uncapped render would land on the largest per-call cost in
 /// the system rather than reduce it. Suppression is keyed on the ANSWER, never
@@ -34,6 +37,7 @@ import 'package:beads_dart/beads_dart.dart'
 import 'package:freezed_annotation/freezed_annotation.dart';
 import 'package:path/path.dart' as p;
 
+import '../io/bounded_output.dart';
 import '../search/station_search.dart';
 import 'approval_stamp.dart';
 import 'state_root_option.dart';
@@ -44,15 +48,18 @@ String _currentDirectory() => Directory.current.path;
 BdRunner _processRunnerFor(String storeRoot) =>
     ProcessBdRunner(workspaceRoot: storeRoot);
 
-/// The HARD ceiling on one rendered result, in UTF-8 bytes, counting the
-/// trailing newline the command writes. It binds BOTH renderings: the plain
-/// text and the single-line JSON object.
+/// The pack-wide output cap under this verb's original name.
 ///
-/// The only thing never cut is the result's SKELETON — the bead id, its type,
-/// status, priority and revision, every JSON key and the truncation marker
-/// itself — because a render that drops the answer's identity to fit is worse
-/// than one that says what it withheld.
-const int kShowOutputCapBytes = 8000;
+/// Retained only so an out-of-tree caller that named it still compiles; the
+/// value, and the one implementation of the bound it belongs to, moved to
+/// [kBoundedOutputCapBytes] when `prime` became the second verb to need them.
+///
+/// The only thing this verb never cuts is the result's SKELETON — the bead id,
+/// its type, status, priority and revision, every JSON key and the truncation
+/// marker itself — because a render that drops the answer's identity to fit is
+/// worse than one that says what it withheld.
+@Deprecated('Use kBoundedOutputCapBytes.')
+const int kShowOutputCapBytes = kBoundedOutputCapBytes;
 
 /// The withheld-map key naming DROPPED dependency edges (a count of edges, not
 /// of bytes — an edge is kept whole or not at all).
@@ -146,7 +153,7 @@ sealed class ShowOutcome with _$ShowOutcome {
         ],
         if (withheld.isNotEmpty)
           'truncation': {
-            'cap_bytes': kShowOutputCapBytes,
+            'cap_bytes': kBoundedOutputCapBytes,
             'withheld': withheld,
           },
       },
@@ -162,7 +169,7 @@ sealed class ShowOutcome with _$ShowOutcome {
       'reason': reason,
       if (withheldReasonBytes > 0)
         'truncation': {
-          'cap_bytes': kShowOutputCapBytes,
+          'cap_bytes': kBoundedOutputCapBytes,
           'withheld': {'reason': withheldReasonBytes},
         },
     },
@@ -370,69 +377,77 @@ BeadShown _trimShown(
   );
 }
 
-/// Whether BOTH complete newline-terminated renderings of [outcome] — the JSON
-/// line and the plain text, truncation marker included — fit the cap.
-bool _fitsCap(ShowOutcome outcome) =>
-    utf8.encode('${jsonEncode(outcome.toJson())}\n').length <=
-        kShowOutputCapBytes &&
-    utf8.encode('${_renderPlain(outcome)}\n').length <= kShowOutputCapBytes;
+/// The single-line JSON rendering the bound is measured against — the schema
+/// a calling skill parses instead of scraping the plain text.
+String _renderJson(ShowOutcome outcome) => jsonEncode(outcome.toJson());
 
 /// The ONE bounding path every returned outcome passes through.
 ///
-/// Never a silent clip: whatever it cuts, it names. An outcome that already
-/// fits comes back untouched.
+/// The cap, the both-renderings-must-fit predicate and the search for the
+/// largest candidate that fits are the PACK's — [boundedOutput] owns them for
+/// every verb. What is THIS verb's is the policy below: which material it gives
+/// up, in what order, and in what units it reports the loss. Never a silent
+/// clip: whatever it cuts, it names. An outcome that already fits comes back
+/// untouched.
 ShowOutcome _bounded(ShowOutcome outcome) {
-  if (_fitsCap(outcome)) return outcome;
-  return switch (outcome) {
-    BeadShown() => _boundedShown(outcome),
-    ShowRefused() => _boundedRefused(outcome),
-    // The skeleton alone — id and revision — is all an unchanged answer is.
-    ShowUnchanged() => outcome,
+  final policy = _ShowTrimPolicy(outcome);
+  return boundedOutput<ShowOutcome>(
+    complete: outcome,
+    maximumTrimBudget: policy.maximumBudget,
+    renderPlain: _renderPlain,
+    renderJson: _renderJson,
+    trim: policy.at,
+  );
+}
+
+/// This verb's trim POLICY: one outcome's variable material, precomputed once,
+/// and what that outcome looks like when handed a payload budget.
+final class _ShowTrimPolicy {
+  factory _ShowTrimPolicy(ShowOutcome outcome) {
+    switch (outcome) {
+      case final BeadShown shown:
+        return _ShowTrimPolicy._(shown, _proseChunksOf(shown), [
+          for (final edge in shown.dependencies)
+            utf8.encode(jsonEncode(_dependencyJson(edge))).length,
+        ]);
+      case final ShowRefused refused:
+        return _ShowTrimPolicy._(refused, [
+          _ProseChunk('reason', refused.reason),
+        ], const <int>[]);
+      case final ShowUnchanged unchanged:
+        // The skeleton alone — id and revision — is all an unchanged answer
+        // is, so there is nothing here to give up.
+        return _ShowTrimPolicy._(
+          unchanged,
+          const <_ProseChunk>[],
+          const <int>[],
+        );
+    }
+  }
+
+  const _ShowTrimPolicy._(this._outcome, this._prose, this._edgeCosts);
+
+  final ShowOutcome _outcome;
+  final List<_ProseChunk> _prose;
+  final List<int> _edgeCosts;
+
+  /// The largest payload budget worth searching: every variable byte this
+  /// outcome could possibly spend.
+  int get maximumBudget =>
+      _prose.fold(0, (sum, chunk) => sum + chunk.cost) +
+      _edgeCosts.fold(0, (sum, cost) => sum + cost);
+
+  /// The outcome rendered down to [budget] — MONOTONE in it, because the water
+  /// fill and the leading-edge cut both grow with the share they are handed.
+  ShowOutcome at(int budget) => switch (_outcome) {
+    final BeadShown shown => _trimShown(shown, _prose, _edgeCosts, budget),
+    final ShowRefused refused => _trimRefused(refused, _prose.single, budget),
+    final ShowUnchanged unchanged => unchanged,
   };
 }
 
-BeadShown _boundedShown(BeadShown shown) {
-  final prose = _proseChunksOf(shown);
-  final edgeCosts = [
-    for (final edge in shown.dependencies)
-      utf8.encode(jsonEncode(_dependencyJson(edge))).length,
-  ];
-  var low = 0;
-  var high =
-      prose.fold(0, (sum, chunk) => sum + chunk.cost) +
-      edgeCosts.fold(0, (sum, cost) => sum + cost);
-  var best = 0;
-  while (low <= high) {
-    final mid = low + (high - low) ~/ 2;
-    if (_fitsCap(_trimShown(shown, prose, edgeCosts, mid))) {
-      best = mid;
-      low = mid + 1;
-    } else {
-      high = mid - 1;
-    }
-  }
-  return _trimShown(shown, prose, edgeCosts, best);
-}
-
-ShowRefused _boundedRefused(ShowRefused refused) {
-  final chunk = _ProseChunk('reason', refused.reason);
-  var low = 0;
-  var high = chunk.cost;
-  var best = _cutRefusal(refused, chunk, 0);
-  while (low <= high) {
-    final mid = low + (high - low) ~/ 2;
-    final candidate = _cutRefusal(refused, chunk, mid);
-    if (_fitsCap(candidate)) {
-      best = candidate;
-      low = mid + 1;
-    } else {
-      high = mid - 1;
-    }
-  }
-  return best;
-}
-
-ShowRefused _cutRefusal(ShowRefused refused, _ProseChunk chunk, int share) {
+/// [refused] with its reason cut to [share] and the cut NAMED in bytes.
+ShowRefused _trimRefused(ShowRefused refused, _ProseChunk chunk, int share) {
   final cut = chunk.cutTo(share);
   return refused.copyWith(
     reason: cut.text ?? '',
@@ -455,7 +470,7 @@ String _renderPlain(ShowOutcome outcome) {
         buffer
           ..writeln()
           ..writeln('TRUNCATION:')
-          ..writeln('cap_bytes: $kShowOutputCapBytes')
+          ..writeln('cap_bytes: $kBoundedOutputCapBytes')
           ..write('reason: $withheldReasonBytes bytes withheld');
       }
       return buffer.toString();
@@ -510,7 +525,7 @@ String _renderPlain(ShowOutcome outcome) {
       if (withheld.isNotEmpty) {
         buffer
           ..write('\nTRUNCATION:')
-          ..write('\ncap_bytes: $kShowOutputCapBytes');
+          ..write('\ncap_bytes: $kBoundedOutputCapBytes');
         for (final key in _proseKeys) {
           final count = withheld[key];
           if (count != null) {
