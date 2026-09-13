@@ -14,7 +14,8 @@ register:
   updates:
     - the_grid#agent-disc-file-shape-and-home
   obsoleted-by: null
-  updated-by: []
+  updated-by:
+    - the-launcher-consumes-the-handoff-and-an-ignored-disc-archives-locally
   bead: pow-g2mi
   legacy-id: null
 ---

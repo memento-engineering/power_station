@@ -1,6 +1,18 @@
 // The `seat <name>` launcher (bead `pow-lv6t`): harness-neutral, refusing,
-// relaunching. Offline — an injected process runner, a real temp grid home, no
-// harness spawned.
+// relaunching — and, since `pow-d5ol`, CONSUMING.
+//
+// Pins the acceptance of pow-d5ol:
+//   - AC-1 an ignored Fake disc holding one handoff launches the child primed
+//     with that body, and afterwards the note, its MEMORY.md pointer line and
+//     nothing else are gone, with `.archive/<stamp>/` holding byte-identical
+//     copies of both;
+//   - AC-2 a tracked Fake disc archives in the scoped commit exactly as before;
+//   - AC-3 a handoff written during the child's run relaunches once and is
+//     consumed the same way;
+//   - AC-4 `git add -f` is never invoked on any path.
+//
+// Offline — an injected process runner, an injected Fake git runner, a real
+// temp grid home, no harness spawned.
 import 'dart:convert';
 import 'dart:io';
 
@@ -10,6 +22,7 @@ import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
 import '../support/package_root.dart';
+import '../support/recording_git_runner.dart';
 
 /// A fake harness process: records every plan and returns a programmed code.
 final class _RecordingRunner {
@@ -72,8 +85,15 @@ const _registry = EnvironmentRegistry(
 
 void main() {
   late Directory home;
+  // The LOCAL archive clock, advanced one second per archive across the whole
+  // test: two archives in one test are two directories, exactly as two
+  // successions a second apart are on a live disc.
+  late int archiveTick;
 
-  setUp(() => home = Directory.systemTemp.createTempSync('seat-'));
+  setUp(() {
+    home = Directory.systemTemp.createTempSync('seat-');
+    archiveTick = 0;
+  });
   tearDown(() {
     if (home.existsSync()) home.deleteSync(recursive: true);
   });
@@ -82,36 +102,66 @@ void main() {
     ..createSync(recursive: true)
     ..writeAsStringSync('---\nname: $seat\n---\nrole\n');
 
-  void writeHandoff(String seat, String file, String body) =>
-      File(p.join(home.path, '.grid', 'seats', seat, file))
-        ..createSync(recursive: true)
-        ..writeAsStringSync('---\nname: h\nkind: handoff\n---\n$body\n');
+  File discFile(String seat, String file) =>
+      File(p.join(home.path, '.grid', 'seats', seat, file));
 
-  Future<({int code, _RecordingRunner runner, String err})> occupy(
+  /// Writes one `kind: handoff` note AND the one `MEMORY.md` pointer line that
+  /// makes it consumable — the shape the vended ritual always leaves behind.
+  File writeHandoff(String seat, String file, String body) {
+    final note = discFile(seat, file)
+      ..createSync(recursive: true)
+      ..writeAsStringSync('---\nname: h\nkind: handoff\n---\n$body\n');
+    final index = discFile(seat, 'MEMORY.md');
+    final existing = index.existsSync() ? index.readAsStringSync() : '';
+    index.writeAsStringSync('$existing- [Handoff]($file) — hook\n');
+    return note;
+  }
+
+  Future<({int code, _RecordingRunner runner, String out, String err})> occupy(
     List<String> argv, {
     void Function(int call)? onLaunch,
     int childExitCode = 0,
     DateTime Function()? now,
+    RecordingGitRunner? git,
+    DateTime Function()? archivedAt,
   }) async {
     final runner = _RecordingRunner(
       onLaunch: onLaunch,
       exitCode: childExitCode,
     );
+    final out = StringBuffer();
     final err = StringBuffer();
     final code =
         await (CommandRunner<int>('space', 'test')..addCommand(
               SeatCommand(
                 registry: _registry,
                 runner: runner.call,
+                // Ignored by default: a temp grid home is no repository, and a
+                // launcher test must never reach the real `git`.
+                succession: SeatSuccessionService(
+                  runner: git ?? RecordingGitRunner(ignored: true),
+                  now:
+                      archivedAt ??
+                      () => DateTime.utc(2026, 9, 13, 17, 45, ++archiveTick),
+                ),
                 gridHomeDefault: () => home.path,
                 now: now ?? DateTime.now,
-                out: StringBuffer(),
+                out: out,
                 err: err,
               ),
             ))
             .run(['seat', ...argv]);
-    return (code: code ?? 0, runner: runner, err: err.toString());
+    return (
+      code: code ?? 0,
+      runner: runner,
+      out: out.toString(),
+      err: err.toString(),
+    );
   }
+
+  /// The grid-home-relative local archive for [stamp].
+  Directory archiveOf(String seat, String stamp) =>
+      Directory(p.join(home.path, '.grid', 'seats', seat, '.archive', stamp));
 
   test('it carries NO vendor flag literal — the whole point of the rework', () {
     // Off the shared cwd-independent package root: the process working
@@ -179,14 +229,19 @@ void main() {
   });
 
   test('a hook-primed harness takes no prompt segment; a prompt-primed one '
-      'takes the handoff body', () async {
+      'takes the CONSUMED handoff body', () async {
     authorSeat('governor');
     writeHandoff('governor', 'h.md', 'RESUME BODY');
     final hooked = await occupy(['governor', '--env', 'declared', '--once']);
     expect(
       (hooked.runner.launches.single as SeatTtyLaunch).args,
       isNot(contains('RESUME BODY')),
+      reason: 'a hook-primed harness is never handed the body on argv',
     );
+    // The consume is unconditional, so the second occupancy needs its own
+    // note: the first one is gone.
+    expect(discFile('governor', 'h.md').existsSync(), isFalse);
+    writeHandoff('governor', 'h.md', 'RESUME BODY');
     final prompted = await occupy(['governor', '--env', 'bare', '--once']);
     expect((prompted.runner.launches.single as SeatTtyLaunch).args, [
       '-p',
@@ -357,36 +412,57 @@ void main() {
     );
   });
 
-  test('it relaunches iff a handoff NEWER than the launch exists', () async {
+  test('AC-3 a handoff written during the run relaunches ONCE, consumed the '
+      'same way', () async {
     authorSeat('governor');
+    final git = RecordingGitRunner(ignored: true);
     final run = await occupy(
-      ['governor', '--env', 'declared'],
+      ['governor', '--env', 'bare'],
+      git: git,
       now: () => DateTime.fromMillisecondsSinceEpoch(0),
       onLaunch: (call) {
-        final file = File(
-          p.join(home.path, '.grid', 'seats', 'governor', 'h.md'),
-        );
-        if (call == 1) {
-          writeHandoff('governor', 'h.md', 'RESUME BODY');
-        } else {
-          file.deleteSync();
-        }
+        if (call == 1) writeHandoff('governor', 'h.md', 'SECOND BOARD');
       },
     );
     expect(run.code, 0);
     expect(run.runner.launches, hasLength(2));
+    // The first occupancy had nothing to be primed with; the second carries
+    // the note written during the first.
+    expect(
+      (run.runner.launches[0] as SeatTtyLaunch).args,
+      isNot(contains('-p')),
+    );
+    expect((run.runner.launches[1] as SeatTtyLaunch).args, [
+      '-p',
+      'SECOND BOARD',
+    ]);
+    // Consumed the SAME way: archived locally, then destroyed.
+    expect(discFile('governor', 'h.md').existsSync(), isFalse);
+    expect(discFile('governor', 'MEMORY.md').readAsStringSync(), '');
+    expect(
+      File(
+        p.join(archiveOf('governor', '20260913t174501z').path, 'h.md'),
+      ).readAsStringSync(),
+      contains('SECOND BOARD'),
+      reason: 'the first occupancy had nothing to archive; this is the first',
+    );
+    expect(
+      git.calls.any((argv) => argv.contains('-f') || argv.contains('--force')),
+      isFalse,
+    );
   });
 
-  test('a handoff older than the launch does not relaunch', () async {
+  test('a CONSUMED handoff cannot relaunch the seat', () async {
     authorSeat('governor');
     writeHandoff('governor', 'old.md', 'OLD');
     final run = await occupy([
       'governor',
       '--env',
-      'declared',
+      'bare',
     ], now: () => DateTime(2100));
     expect(run.code, 0);
     expect(run.runner.launches, hasLength(1));
+    expect(discFile('governor', 'old.md').existsSync(), isFalse);
   });
 
   test('--once never relaunches, even with a fresh handoff', () async {
@@ -398,6 +474,153 @@ void main() {
     );
     expect(run.code, 23);
     expect(run.runner.launches, hasLength(1));
+  });
+
+  group('the LAUNCHER consumes before it primes (pow-d5ol)', () {
+    test('AC-1 an IGNORED disc: the child is primed with the body, and the '
+        'note, its index line and only those are gone', () async {
+      authorSeat('governor');
+      final note = writeHandoff('governor', 'h.md', 'RESUME BODY');
+      final noteBytes = note.readAsBytesSync();
+      // A second, banked note the index also names: the consume touches its
+      // pointer line no more than it touches the note itself.
+      discFile('governor', 'lesson-x.md')
+        ..createSync(recursive: true)
+        ..writeAsStringSync('---\nkind: lesson\n---\nkeep me\n');
+      final index = discFile('governor', 'MEMORY.md');
+      index.writeAsStringSync(
+        '${index.readAsStringSync()}- [Lesson](lesson-x.md) — keep me\n',
+      );
+      final memoryBefore = index.readAsStringSync();
+      final git = RecordingGitRunner(ignored: true);
+
+      final run = await occupy(
+        ['governor', '--env', 'bare', '--once'],
+        git: git,
+        // The ORDER is the point: by the time the child exists the disc is
+        // already consumed.
+        onLaunch: (_) {
+          expect(note.existsSync(), isFalse);
+          expect(
+            index.readAsStringSync(),
+            '- [Lesson](lesson-x.md) — keep me\n',
+          );
+        },
+      );
+
+      expect(run.code, 0, reason: run.err);
+      expect((run.runner.launches.single as SeatTtyLaunch).args, [
+        '-p',
+        'RESUME BODY',
+      ]);
+      expect(run.out, contains('CONSUMED'));
+      expect(
+        run.out,
+        contains(
+          'ARCHIVED-LOCAL '
+          '${p.join('.grid', 'seats', 'governor', '.archive', '20260913t174501z')}',
+        ),
+      );
+
+      // The archive holds BOTH consumed files, byte-identical.
+      final archive = archiveOf('governor', '20260913t174501z');
+      expect(File(p.join(archive.path, 'h.md')).readAsBytesSync(), noteBytes);
+      expect(
+        File(p.join(archive.path, 'MEMORY.md')).readAsStringSync(),
+        memoryBefore,
+      );
+      // The banked lesson is untouched on the disc.
+      expect(discFile('governor', 'lesson-x.md').existsSync(), isTrue);
+      // AC-4 — and no git MUTATION at all on an ignored disc.
+      expect(git.calls.map((argv) => argv.first).toSet(), {'check-ignore'});
+      expect(
+        git.calls.any(
+          (argv) => argv.contains('-f') || argv.contains('--force'),
+        ),
+        isFalse,
+        reason: 'git add -f would re-commit the PII the ignore exists for',
+      );
+    });
+
+    test('AC-2 a TRACKED disc archives in the scoped commit, exactly as '
+        'before', () async {
+      authorSeat('governor');
+      writeHandoff('governor', 'h.md', 'RESUME BODY');
+      final git = RecordingGitRunner(statusOutput: '?? .grid/\n');
+
+      final run = await occupy([
+        'governor',
+        '--env',
+        'bare',
+        '--once',
+      ], git: git);
+
+      expect(run.code, 0, reason: run.err);
+      expect((run.runner.launches.single as SeatTtyLaunch).args, [
+        '-p',
+        'RESUME BODY',
+      ]);
+      expect(run.out, contains('COMMITTED'));
+      expect(run.out, isNot(contains('ARCHIVED-LOCAL')));
+      expect(
+        git.calls,
+        contains(orderedEquals(['add', '-A', '--', '.grid/seats/governor'])),
+      );
+      expect(
+        git.calls,
+        contains(
+          orderedEquals([
+            'commit',
+            '--only',
+            '-m',
+            'chore(seat): archive governor disc',
+            '--',
+            '.grid/seats/governor',
+          ]),
+        ),
+      );
+      expect(
+        git.calls.any(
+          (argv) => argv.contains('-f') || argv.contains('--force'),
+        ),
+        isFalse,
+      );
+      // A tracked disc writes NO local archive: git history is the archive.
+      expect(
+        Directory(
+          p.join(home.path, '.grid', 'seats', 'governor', '.archive'),
+        ).existsSync(),
+        isFalse,
+      );
+      expect(discFile('governor', 'h.md').existsSync(), isFalse);
+      expect(discFile('governor', 'MEMORY.md').readAsStringSync(), '');
+    });
+
+    test(
+      'a succession that REFUSES stops the launch and destroys nothing',
+      () async {
+        authorSeat('governor');
+        writeHandoff('governor', 'a.md', 'FIRST');
+        writeHandoff('governor', 'b.md', 'SECOND');
+        final git = RecordingGitRunner(ignored: true);
+
+        final run = await occupy([
+          'governor',
+          '--env',
+          'bare',
+          '--once',
+        ], git: git);
+
+        expect(run.code, 1);
+        expect(run.runner.launches, isEmpty);
+        expect(run.err, contains('HANDOFF NOT CONSUMED'));
+        expect(run.err, contains('2 live handoffs'));
+        expect(run.err, contains('nothing was launched'));
+        expect(discFile('governor', 'a.md').existsSync(), isTrue);
+        expect(discFile('governor', 'b.md').existsSync(), isTrue);
+        expect(git.calls, isEmpty, reason: 'refused before any git call');
+      },
+    );
   });
 
   test(

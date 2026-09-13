@@ -2,12 +2,12 @@
 name: handoff
 description: >
   Write the seat's own handoff onto its Agent Disc, bank the durable learnings,
-  and tell the OUTER harness what to do next — never compact or clear blind.
+  and tell the OUTER harness what to do next — never end a session blind.
   One ritual, two requesters: the HUMAN types /handoff [slug], or the AGENT
   self-initiates at a boundary (a long context, a natural task end, before a
   bounce or a harness upgrade, or when told "take a beat, then hand off"). Use
-  before compaction, clear, or relaunch — and use its Resume section as the
-  SUCCESSOR, which consumes the newest handoff through the `succession` verb.
+  at a session boundary — and use its Resume section as the SUCCESSOR, whom
+  the launcher has already primed with the note it consumed.
 compatibility: >
   Requires a seat whose Agent Disc is `<grid home>/.grid/seats/<seat>/`, the
   `{{runner}}` runner, bd (beads CLI), and git.
@@ -134,8 +134,8 @@ step 4. The verb writes the note and nothing else.
 
 `REFUSED` means the disc already carries a live handoff. Change NOTHING — not
 that file, not the index, not this note under a second name. Read the live
-note, consume it through the succession Resume below, and author yours at the
-next clean boundary. Never edit an existing handoff file, never append to one,
+note, recover the disc through the succession verb below, and author yours at
+the next clean boundary. Never edit an existing handoff file, never append to one,
 and never write a second one beside it.
 
 ## 3. BANK the durable learnings
@@ -171,59 +171,52 @@ the disc, and nothing was written.
 
 ## 5. SIGNAL the outer harness — one line, then end the turn
 
-You cannot compact, clear, or restart yourself in any harness we run. The
-signal goes UP. End the turn with exactly ONE of these lines, and say nothing
-after it:
+You cannot restart yourself in any harness we run, so the signal goes UP — and
+there is exactly ONE of it. End the turn with this line, and say nothing after
+it:
 
-- **(a) Continue in place** — `Handoff written: <path>. Run /compact now — the handoff complements the summary, it does not replace it.`
-- **(b) Fresh start** — `Handoff written: <path>. Run /clear, or exit and let the seat launcher relaunch this seat.`
-- **(c) Headless / launcher-driven** — `Handoff written: <path>. Turn ended for relaunch.`
-  The launcher brings the seat back primed with it
-  (`claude --append-system-prompt-file <path>`). WHICH run mode it relaunches
-  into is the launcher's business, not this skill's.
+- `Handoff written: <path>; exit, the launcher relaunches this seat.`
 
-The launcher itself, and the `SessionStart` compact-matcher hook that
-references the newest handoff after an in-place compaction, are the
-prime/launcher bead's deliverable — not this skill's. This skill composes the
-note, routes it through the write verb, and says the line.
+Then EXIT — `/exit`, or the turn simply ending under the launcher. Exiting IS
+the handoff: the launcher consumes the note, primes the successor with it, and
+brings the seat back. There is no in-place path. A compacted or cleared context
+is the SAME occupant carrying on, not a successor, so neither one hands off.
 
-There is no `PreCompact` guard and no archive directory.
+The launcher itself is the prime/launcher bead's deliverable, not this skill's.
+This skill composes the note, routes it through the write verb, and says the
+line.
+
+There is no `PreCompact` guard. The only archive a handoff gets is the one the
+launcher writes before it deletes: git history when the disc is tracked, and
+`.grid/seats/<seat>/.archive/<utc-stamp>/` when git IGNORES the disc.
 
 ## Resume — the successor's side of the same ritual
 
-You are the successor. Before you sweep, before you plan:
+You are the successor, and the launcher has ALREADY CONSUMED the note that
+primed you. Before this session existed it archived the disc, PROVED the
+archive, and deleted the handoff and its one `MEMORY.md` pointer line — the
+body you were primed with IS that note. There is nothing on the disc to consume
+and no verb to run.
 
-1. Resolve the handoff and ARCHIVE the disc, destroying nothing:
+1. Act on its **Resume here**, starting at step 1 VERBATIM.
+2. Take over what it NAMED: the worktrees, branches, locks, resident process
+   and open PRs under **In flight** are yours now.
+3. Write your OWN note at your own boundary. Never amend the one you were
+   primed with — it no longer exists.
 
-   ```
-   {{runner}} succession <seat> --grid-home "<grid home>" --no-destructive
-   ```
+Where the launcher put the archive follows the disc's tracked state: a scoped
+`chore(seat): archive <seat> disc` commit when the disc is tracked, or
+`.grid/seats/<seat>/.archive/<utc-stamp>/` when git ignores it — the seats tree
+is ignored wherever a disc carries PII, and `git add -f` is never used to force
+it back into history.
 
-   `NO HANDOFF` ends the resume — there is nothing to consume. `REFUSED` is
-   shown to the human exactly as it reads, and neither note is touched.
-   `WOULD DELETE <path>` names the one note to read.
-
-2. Read that note and act on its **Resume here**, starting at step 1 verbatim.
-
-3. CONSUME it, in the SAME turn that read it:
-
-   ```
-   {{runner}} succession <seat> --grid-home "<grid home>"
-   ```
-
-   This second call resolves the disc again, commits whatever disc changes the
-   turn made, verifies the note is in `HEAD`, and only then removes the file
-   and its one `MEMORY.md` pointer line. The commit is what earns the
-   deletion: a disc that was never committed has no history to consume into.
-
-Either invocation first reports the AGE of every unconsumed handoff on the
-disc — `Agent Seat "<seat>" has unconsumed handoff <path> on its Agent Disc —
-age 9h 0m.` Nothing expires and nothing is deleted on account of it: a handoff
-that has been sitting for hours is simply a succession that has not happened,
-and that line is how you see it. Consume it.
-
-`--no-destructive` is the safe first run on an unfamiliar disc — it does
-everything except the deletion, so a refusal surfaces before anything is lost.
-Two live handoffs ALWAYS refuse, in either form, and the verb names both: two
-on one disc mean a succession was skipped, only the newest describes the
-board, and which one that is stays a human's call.
+`{{runner}} succession <seat> --grid-home "<grid home>"` stays as the
+HAND-RECOVERY path only: a disc no launcher touched, or one carrying two live
+handoffs. Two ALWAYS refuse, in either form, and the verb names both — two on
+one disc mean a succession was skipped, only the newest describes the board,
+and which one that is stays a human's call. `--no-destructive` does everything
+except the deletion and names what it WOULD have deleted. Either form first
+reports the AGE of every unconsumed handoff on the disc — `Agent Seat "<seat>"
+has unconsumed handoff <path> on its Agent Disc — age 9h 0m.` Nothing expires
+on account of it: a note that has sat for hours is a succession that did not
+happen.

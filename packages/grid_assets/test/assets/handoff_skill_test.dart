@@ -5,15 +5,16 @@
 //   - both legs ship `skills/handoff/SKILL.md`, and the id is vended with an
 //     OPERATOR audience (a build agent's brief never names it);
 //   - the frontmatter names both requesters (human `/handoff`, agent-initiated)
-//     and the three boundaries (compaction, clear, relaunch), and the
-//     `{{runner}}` hole renders like every other skill's;
+//     and the session boundary, and the `{{runner}}` hole renders like every
+//     other skill's;
 //   - the body carries SETTLE / WRITE (the ten sections, in order) / BANK /
-//     INDEX / SIGNAL (three cases, and the inner agent cannot restart itself) /
+//     INDEX / SIGNAL (ONE line, and the inner agent cannot restart itself) /
 //     RESUME, citing the disc shape from
 //     `the_grid#agent-disc-file-shape-and-home` and inventing no other;
-//   - RESUME consumes through the `succession` VERB — both invocations, the
-//     safe preview and the refusal, and none of the four retired hand-delete
-//     phrases;
+//   - AC-5 (pow-d5ol) SIGNAL carries no `/clear` option and exactly one signal
+//     line, and RESUME states that the LAUNCHER already consumed — the verb
+//     stays named as the hand-recovery path, and none of the four retired
+//     hand-delete phrases appears;
 //   - the two legs are INDEPENDENT instruction sources (a harness-specific
 //     instruction on each, per
 //     `power_station#a-harness-may-carry-its-own-instructions`);
@@ -103,7 +104,12 @@ void main() {
         final description = '${frontmatter['description']}';
         expect(description, contains('/handoff'));
         expect(description, contains('self-initiates'));
-        expect(description, contains('before compaction, clear, or relaunch'));
+        expect(description, contains('at a session boundary'));
+        expect(
+          description,
+          isNot(contains('/clear')),
+          reason: '/clear is retired as a handoff path (Nico, 2026-09-13)',
+        );
       }
     });
 
@@ -208,58 +214,90 @@ void main() {
         expect(body, contains('](handoff-<utc-stamp>-<slug>.md)'));
       });
 
-      test('$leg: SIGNAL states the inner agent cannot restart itself, and '
-          'gives three cases', () {
+      test('$leg: AC-5 SIGNAL is ONE line, exit is the only handoff path, and '
+          'no /clear option survives', () {
         final body = legBody(leg);
         expect(
           body,
-          contains('You cannot compact, clear, or restart yourself'),
+          contains('You cannot restart yourself'),
           reason: '$leg: the signal goes UP — that is the whole point',
         );
-        expect(body, contains('**(a) Continue in place**'));
-        expect(body, contains('Run /compact now'));
-        expect(body, contains('**(b) Fresh start**'));
-        expect(body, contains('Run /clear'));
-        expect(body, contains('**(c) Headless / launcher-driven**'));
+        // Exactly ONE signal line. The three cases collapsed: a compacted or
+        // cleared context is the same occupant carrying on, not a successor,
+        // so neither one hands off (Nico, 2026-09-13).
+        expect(
+          'Handoff written:'.allMatches(body).length,
+          1,
+          reason: '$leg: one signal line, not a menu',
+        );
+        expect(
+          body,
+          contains(
+            '- `Handoff written: <path>; exit, the launcher relaunches this '
+            'seat.`',
+          ),
+        );
+        expect(
+          body,
+          isNot(contains('/clear')),
+          reason: '$leg: /clear is RETIRED as a handoff path',
+        );
+        expect(body, isNot(contains('/compact')));
+        expect(body, isNot(contains('**(a) Continue in place**')));
+        expect(body, isNot(contains('**(b) Fresh start**')));
+        expect(body, isNot(contains('**(c) Headless / launcher-driven**')));
+        expect(body, contains('Exiting IS'));
         expect(
           body,
           contains("prime/launcher bead's deliverable"),
-          reason: '$leg: the launcher and the hook are NOT this deliverable',
+          reason: '$leg: the launcher is NOT this deliverable',
         );
-        expect(body, contains('no archive directory'));
+        // The archive is no longer "none": an ignored disc gets a local one.
+        expect(
+          body,
+          contains('.grid/seats/<seat>/.archive/<utc-stamp>/'),
+          reason: '$leg: the second archive sink is named',
+        );
+        expect(body, contains('git history when the disc is tracked'));
         expect(body, contains('`PreCompact` guard'));
       });
     }
   });
 
-  group('the successor consumes through the VERB, never by hand', () {
-    test('the successor runs succession instead of deleting by hand', () {
-      // The defect this closes: the delete-on-read rule was justified by "the
-      // disc is tracked, so git history is the archive", and nothing enforced
-      // the tracked half — an untracked disc destroyed its handoff into
-      // nothing. Both legs now hand that to the verb, which archives first.
+  group('AC-5 the LAUNCHER consumed; the verb is the recovery path', () {
+    test('RESUME states the consumption already happened and runs no verb', () {
+      // The defect class this closes (pow-jhmu, four instances): the successor
+      // was told to consume, and a successor that reads its own instructions
+      // late, or whose disc is gitignored, never did. The launcher does it now,
+      // before the successor exists.
       for (final leg in _legs) {
         final rendered = legBody(leg).replaceAll('{{runner}}', 'space');
+        expect(rendered, contains('ALREADY CONSUMED'));
+        expect(
+          rendered,
+          contains('body you were primed with IS that note'),
+          reason: '$leg: the successor reads the primed body and acts',
+        );
+        expect(rendered, contains('There is nothing on the disc to consume'));
         expect(
           rendered,
           contains(
-            'space succession <seat> --grid-home "<grid home>" '
-            '--no-destructive',
+            'space succession <seat> --grid-home "<grid home>"` stays as the\n'
+            'HAND-RECOVERY path only',
           ),
-          reason: '$leg: step 1 previews without destroying',
+          reason: '$leg: the verb survives for a disc no launcher touched',
         );
-        expect(
-          rendered,
-          contains('space succession <seat> --grid-home "<grid home>"\n'),
-          reason: '$leg: step 3 consumes in the same turn',
-        );
-        expect(rendered, contains('WOULD DELETE'));
+        expect(rendered, contains('WOULD have deleted'));
         expect(rendered, contains('REFUSED'));
+        // The archive fork is taught where the successor reads it.
+        expect(rendered, contains('chore(seat): archive <seat> disc'));
+        expect(rendered, contains('git add -f` is never used'));
         for (final retired in const [
           'handoff-*.md | sort | tail -1',
           'DELETE the file AND its `MEMORY.md` pointer',
           'git history is the archive',
           'deleted UNREAD',
+          'CONSUME it, in the SAME turn that read it',
         ]) {
           expect(
             rendered,
@@ -367,15 +405,16 @@ void main() {
   });
 
   group('the two legs are INDEPENDENT instruction sources', () {
-    test('the claude leg names the Claude Code relaunch flag; the agents leg '
+    test('the claude leg names Claude Code\'s own exit verb; the agents leg '
         'names none and carries its own harness note', () {
       final claude = legBody('claude');
       final agents = legBody('agents');
 
-      expect(claude, contains('claude --append-system-prompt-file <path>'));
+      expect(claude, contains('Then EXIT — `/exit`'));
       expect(claude, isNot(contains('## Harness note')));
 
-      expect(agents, isNot(contains('--append-system-prompt-file')));
+      expect(agents, isNot(contains('`/exit`')));
+      expect(agents, contains('Then EXIT, however your harness exits.'));
       expect(agents, contains('## Harness note'));
       expect(agents, contains('codex-style harness'));
     });

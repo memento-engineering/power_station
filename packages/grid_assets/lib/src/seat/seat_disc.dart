@@ -41,6 +41,30 @@ const String kHandoffKind = 'handoff';
 /// (`the_grid#agent-disc-file-shape-and-home`: "one pointer line per file").
 const String kSeatMemoryFileName = 'MEMORY.md';
 
+/// The disc-local directory a LOCAL archive is written under — the sink for a
+/// disc git IGNORES.
+///
+/// `power_station#handoff-succession-commits-before-consume` licensed the
+/// destruction of a consumed handoff on one premise: "the disc is tracked, so
+/// git history is the archive". A station may deliberately ignore its seats
+/// tree — lunar_station did, at 7b225e8, for the PII a disc accretes — and on
+/// such a disc the premise is not merely unheld, it is UNHOLDABLE: the only way
+/// to reach git history from there is `git add -f`, which would commit exactly
+/// the material the ignore exists to keep out. The archive moves under the disc
+/// instead, where that same ignore already covers it (Nico, 2026-09-13, fork
+/// option (a)).
+const String kSeatArchiveSubdirectory = '.archive';
+
+/// The UTC stamp one local archive directory is named by — the
+/// `<YYYYMMDD>t<HHMMSS>z` shape the handoff file name already carries, so an
+/// archive sorts beside the notes it holds. PURE.
+String seatArchiveStamp(DateTime at) {
+  final utc = at.toUtc();
+  String pad(int value, int width) => value.toString().padLeft(width, '0');
+  return '${pad(utc.year, 4)}${pad(utc.month, 2)}${pad(utc.day, 2)}t'
+      '${pad(utc.hour, 2)}${pad(utc.minute, 2)}${pad(utc.second, 2)}z';
+}
+
 /// The process env var naming the seat a session occupies. Set by the launcher;
 /// ABSENT means a bare harness session, which is NOT a seat and writes no disc.
 const String kSeatEnvironmentVariable = 'GRID_SEAT';

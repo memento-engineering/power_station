@@ -16,6 +16,10 @@
 //     what it WOULD have deleted;
 //   - AC-5 a disc with no handoff is a named no-op that never invokes git.
 //
+//   - AC-6 (pow-d5ol) an IGNORED disc archives LOCALLY instead — a
+//     `.archive/<utc-stamp>/` directory under the disc holding both consumed
+//     files byte-identical — and `git add -f` is never invoked on any path.
+//
 // The archive/HEAD/unrelated-staging probes run against a REAL temporary git
 // repository (nothing else can prove a path-scoped commit); the race, failure
 // and no-call probes ride a recording Fake GitRunner (Fakes, not mocks).
@@ -23,59 +27,11 @@ import 'dart:io';
 
 import 'package:args/command_runner.dart';
 import 'package:grid_assets/grid_assets.dart';
-import 'package:grid_runtime/grid_runtime.dart'
-    show GitRunResult, GitRunner, SystemGitRunner;
+import 'package:grid_runtime/grid_runtime.dart' show GitRunner, SystemGitRunner;
 import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
-/// A [GitRunner] that RECORDS every argv and answers from canned outcomes,
-/// with an optional side effect fired on a chosen subcommand — how the
-/// commit-window race is staged deterministically.
-class _RecordingGitRunner implements GitRunner {
-  _RecordingGitRunner({
-    this.fail = const <String>{},
-    this.duringCommit,
-    this.statusOutput = '',
-    this.statusStderr = '',
-  });
-
-  /// The first argv token of every call that must answer NOT ok.
-  final Set<String> fail;
-
-  /// Fired immediately before `git commit` answers — the commit window.
-  final void Function()? duringCommit;
-
-  /// What `git status --porcelain` reports (empty ⇒ a clean tree).
-  final String statusOutput;
-
-  /// What `git status --porcelain` writes on stderr (non-empty ⇒ a degraded
-  /// scan, which [GitOps.hasUncommittedWork] fails closed on).
-  final String statusStderr;
-
-  /// Every argv, in call order.
-  final List<List<String>> calls = <List<String>>[];
-
-  @override
-  Future<GitRunResult> run({
-    required String workingDirectory,
-    required List<String> args,
-  }) async {
-    calls.add(List<String>.unmodifiable(args));
-    if (args.first == 'commit') duringCommit?.call();
-    if (fail.contains(args.first)) {
-      return GitRunResult(exitCode: 1, output: 'refused: ${args.join(' ')}');
-    }
-    return switch (args.first) {
-      'rev-parse' => GitRunResult(exitCode: 0, output: '$workingDirectory\n\n'),
-      'status' => GitRunResult(
-        exitCode: 0,
-        output: statusOutput,
-        stderr: statusStderr,
-      ),
-      _ => const GitRunResult(exitCode: 0, output: ''),
-    };
-  }
-}
+import '../support/recording_git_runner.dart';
 
 void main() {
   late Directory home;
@@ -146,13 +102,17 @@ void main() {
   Future<({int code, String out, String err})> succession(
     List<String> argv, {
     GitRunner? runner,
+    DateTime? archivedAt,
   }) async {
     final out = StringBuffer();
     final err = StringBuffer();
     final command = CommandRunner<int>('space', 'test')
       ..addCommand(
         SuccessionCommand(
-          service: SeatSuccessionService(runner: runner ?? SystemGitRunner()),
+          service: SeatSuccessionService(
+            runner: runner ?? SystemGitRunner(),
+            now: () => archivedAt ?? DateTime.utc(2026, 9, 13, 17, 45, 1),
+          ),
           out: out,
           err: err,
         ),
@@ -200,7 +160,7 @@ void main() {
       writeMemory('refiner', '- [Handoff a](handoff-a.md) — hook\n');
       // A runner that reports a dirty tree, stages, then FAILS the commit —
       // exactly the shape of a rejecting pre-commit hook.
-      final runner = _RecordingGitRunner(
+      final runner = RecordingGitRunner(
         statusOutput: '?? .grid/\n',
         fail: const {'commit', 'cat-file'},
       );
@@ -234,7 +194,7 @@ void main() {
           'refiner',
           '- [a](handoff-a.md) — h\n- [b](handoff-b.md) — h\n',
         );
-        final quiet = _RecordingGitRunner();
+        final quiet = RecordingGitRunner();
 
         final two = await succession([
           'refiner',
@@ -266,7 +226,7 @@ void main() {
         // (b) One on the disc, a sibling written DURING the commit window.
         File(p.join(disc('refiner').path, 'handoff-b.md')).deleteSync();
         writeMemory('refiner', '- [a](handoff-a.md) — h\n');
-        final racing = _RecordingGitRunner(
+        final racing = RecordingGitRunner(
           statusOutput: '?? .grid/\n',
           duringCommit: () => writeHandoff('refiner', 'handoff-c.md'),
         );
@@ -417,7 +377,7 @@ void main() {
     test('no handoff is a clean no-op', () async {
       disc('refiner');
       writeMemory('refiner', '# Memory index\n');
-      final runner = _RecordingGitRunner();
+      final runner = RecordingGitRunner();
 
       final result = await succession([
         'refiner',
@@ -439,7 +399,7 @@ void main() {
       () async {
         writeHandoff('refiner', 'handoff-a.md');
         writeMemory('refiner', '- [a](handoff-a.md) — hook\n');
-        final warned = _RecordingGitRunner(
+        final warned = RecordingGitRunner(
           statusStderr:
               'warning: could not open directory: Permission denied\n',
         );
@@ -455,11 +415,18 @@ void main() {
         expect(result.err, contains('staged: no, committed: no'));
         expect(
           warned.calls.first,
+          const ['check-ignore', '-q', '--', '.grid/seats/refiner'],
+          reason:
+              'the archive SINK is resolved first: which archive this run '
+              'would delete into decides whether git is touched at all',
+        );
+        expect(
+          warned.calls[1],
           const ['rev-parse', '--show-toplevel', '--show-prefix'],
           reason:
-              "GitOps' work-tree-ROOT guard runs before any other git call — a "
-              'command run from a non-checkout would commit to the enclosing '
-              'repository',
+              "GitOps' work-tree-ROOT guard runs before any other git MUTATION "
+              '— a command run from a non-checkout would commit to the '
+              'enclosing repository',
         );
         expect(
           File(p.join(disc('refiner').path, 'handoff-a.md')).existsSync(),
@@ -467,6 +434,145 @@ void main() {
         );
       },
     );
+  });
+
+  group('AC-6 an IGNORED disc archives LOCALLY, never with `git add -f`', () {
+    // Measured 2026-09-13 on the live station: lunar_station 7b225e8 gitignored
+    // `.grid/seats` for the PII a disc accretes, and every succession after it
+    // refused — `could not stage the disc … The following paths are ignored`.
+    // The archive moves under the ignore rather than forcing past it.
+    test('copies both consumed files under .archive/<stamp>/ and deletes '
+        'without one git mutation', () async {
+      final note = writeHandoff('refiner', 'handoff-a.md');
+      const memory = '# Memory index\n\n- [Handoff a](handoff-a.md) — hook\n';
+      final noteBytes = note.readAsBytesSync();
+      writeMemory('refiner', memory);
+      final runner = RecordingGitRunner(ignored: true);
+
+      final result = await succession([
+        'refiner',
+        '--grid-home',
+        home.path,
+      ], runner: runner);
+
+      expect(result.code, 0, reason: result.err);
+      final stamp = p.join(
+        '.grid',
+        'seats',
+        'refiner',
+        '.archive',
+        '20260913t174501z',
+      );
+      expect(result.out, contains('ARCHIVED-LOCAL $stamp'));
+      expect(result.out, isNot(contains('COMMITTED')));
+      expect(
+        result.out,
+        contains(
+          'DELETED ${p.join('.grid', 'seats', 'refiner', 'handoff-a.md')} AND '
+          'MEMORY.md POINTER',
+        ),
+      );
+
+      // The archive holds BOTH files, byte-identical to what was destroyed.
+      final archive = p.join(home.path, stamp);
+      expect(
+        File(p.join(archive, 'handoff-a.md')).readAsBytesSync(),
+        noteBytes,
+      );
+      expect(File(p.join(archive, 'MEMORY.md')).readAsStringSync(), memory);
+
+      // …and the disc no longer carries either.
+      expect(note.existsSync(), isFalse);
+      expect(
+        File(p.join(disc('refiner').path, 'MEMORY.md')).readAsStringSync(),
+        '# Memory index\n\n',
+      );
+
+      // The ONLY git call is the fork probe: no add, no commit, and no force.
+      expect(runner.calls.map((argv) => argv.first).toSet(), {'check-ignore'});
+      expect(
+        runner.calls.any(
+          (argv) => argv.contains('-f') || argv.contains('--force'),
+        ),
+        isFalse,
+        reason: 'git add -f would re-commit the PII the ignore exists for',
+      );
+      // The archived copies are in a SUBDIRECTORY, so the disc scan cannot see
+      // them as a second live handoff.
+      expect(
+        SeatDisc(
+          directory: disc('refiner').path,
+          gridHome: home.path,
+        ).handoffs(),
+        isEmpty,
+      );
+    });
+
+    test('--no-destructive archives locally and destroys nothing', () async {
+      writeHandoff('refiner', 'handoff-a.md');
+      const memory = '- [Handoff a](handoff-a.md) — hook\n';
+      writeMemory('refiner', memory);
+
+      final result = await succession([
+        'refiner',
+        '--grid-home',
+        home.path,
+        '--no-destructive',
+      ], runner: RecordingGitRunner(ignored: true));
+
+      expect(result.code, 0, reason: result.err);
+      expect(result.out, contains('ARCHIVED-LOCAL'));
+      expect(result.out, contains('WOULD DELETE'));
+      expect(
+        File(p.join(disc('refiner').path, 'handoff-a.md')).existsSync(),
+        isTrue,
+      );
+      expect(
+        File(p.join(disc('refiner').path, 'MEMORY.md')).readAsStringSync(),
+        memory,
+      );
+    });
+
+    test('a stamp directory is never reused', () async {
+      writeHandoff('refiner', 'handoff-a.md');
+      writeMemory('refiner', '- [a](handoff-a.md) — hook\n');
+      Directory(
+        p.join(disc('refiner').path, '.archive', '20260913t174501z'),
+      ).createSync(recursive: true);
+
+      final result = await succession([
+        'refiner',
+        '--grid-home',
+        home.path,
+      ], runner: RecordingGitRunner(ignored: true));
+
+      expect(result.code, 1);
+      expect(result.err, contains('already exists'));
+      expect(
+        File(p.join(disc('refiner').path, 'handoff-a.md')).existsSync(),
+        isTrue,
+      );
+    });
+
+    test('a check-ignore that answers neither 0 nor 1 refuses', () async {
+      writeHandoff('refiner', 'handoff-a.md');
+      writeMemory('refiner', '- [a](handoff-a.md) — hook\n');
+      final runner = RecordingGitRunner(checkIgnoreExitCode: 128);
+
+      final result = await succession([
+        'refiner',
+        '--grid-home',
+        home.path,
+      ], runner: runner);
+
+      expect(result.code, 1);
+      expect(result.err, contains('whether this disc is tracked is UNKNOWN'));
+      expect(runner.calls.map((argv) => argv.first).toSet(), {'check-ignore'});
+      expect(
+        File(p.join(disc('refiner').path, 'handoff-a.md')).existsSync(),
+        isTrue,
+      );
+    });
   });
 
   group('the argv adapter is thin and loud', () {

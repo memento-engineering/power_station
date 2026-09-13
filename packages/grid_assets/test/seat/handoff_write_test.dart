@@ -32,9 +32,11 @@ import 'dart:io';
 import 'package:args/command_runner.dart';
 import 'package:beads_dart/beads_dart.dart' show BdResult, BdRunner;
 import 'package:grid_assets/grid_assets.dart';
-import 'package:grid_runtime/grid_runtime.dart' show GitRunResult, GitRunner;
+import 'package:grid_runtime/grid_runtime.dart' show GitRunner;
 import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
+
+import '../support/recording_git_runner.dart';
 
 /// The live governor note this bead was filed on — the file whose own UTC stamp
 /// was falsified by nine hours of amendment.
@@ -85,25 +87,6 @@ final class _FakeBd implements BdRunner {
     Duration? timeout,
     String? stdin,
   }) async => BdResult(exitCode: 0, stdout: stdout, stderr: '');
-}
-
-/// A `git` that reports a CLEAN work-tree root and answers every proof — so
-/// `--no-destructive` reaches its preview without a real repository, and the
-/// probe measures the diagnostic rather than git.
-final class _CleanGitRunner implements GitRunner {
-  final calls = <List<String>>[];
-
-  @override
-  Future<GitRunResult> run({
-    required String workingDirectory,
-    required List<String> args,
-  }) async {
-    calls.add(List<String>.unmodifiable(args));
-    return switch (args.first) {
-      'rev-parse' => GitRunResult(exitCode: 0, output: '$workingDirectory\n\n'),
-      _ => const GitRunResult(exitCode: 0, output: ''),
-    };
-  }
 }
 
 /// The shaped TEN-SECTION handoff the vended ritual authors, sanitized: no real
@@ -455,6 +438,9 @@ void main() {
                 SeatCommand(
                   registry: _registry,
                   runner: harness.call,
+                  succession: SeatSuccessionService(
+                    runner: RecordingGitRunner(),
+                  ),
                   gridHomeDefault: () => home.path,
                   now: () => kNineHoursOn,
                   out: out,
@@ -470,7 +456,10 @@ void main() {
         contains('RESUME BODY'),
         reason: 'the age REPORTS — it never withholds the handoff',
       );
-      expect(File(discFile(seat, kEpoch69)).existsSync(), isTrue);
+      // It is REPORTED and then CONSUMED: the age says how long the note sat
+      // before the successor was primed with it, never that it stays.
+      expect(File(discFile(seat, kEpoch69)).existsSync(), isFalse);
+      expect(out.toString(), contains('CONSUMED'));
     });
 
     test('prime carries it between the naming line and the body', () async {
@@ -532,7 +521,7 @@ void main() {
         home: home,
         argv: [seat, '--grid-home', home.path, '--no-destructive'],
         now: () => kNineHoursOn,
-        gitRunner: _CleanGitRunner(),
+        gitRunner: RecordingGitRunner(),
       );
 
       expect(run.code, 0, reason: run.err);
@@ -605,7 +594,7 @@ void main() {
         home: home,
         argv: [seat, '--grid-home', home.path, '--no-destructive'],
         now: () => kEpoch69Stamped.add(const Duration(days: 40, hours: 2)),
-        gitRunner: _CleanGitRunner(),
+        gitRunner: RecordingGitRunner(),
       );
 
       expect(run.code, 0, reason: run.err);
