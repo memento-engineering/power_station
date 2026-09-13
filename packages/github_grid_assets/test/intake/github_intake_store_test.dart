@@ -461,8 +461,12 @@ void main() {
       expect(runner.verb('create'), isEmpty);
       expect(
         runner.verb('list'),
-        hasLength(2),
-        reason: 'a correlated bead skips the open-subject guard entirely',
+        hasLength(1),
+        reason:
+            'the external-ref correlation read is the ONLY list: a correlated '
+            'bead skips the open-subject guard entirely, and the approval '
+            "preflight's state-store link read died with grid_engine's "
+            'cross-link surface (the_grid#447)',
       );
       expect(runner.verb('update').first, [
         'update',
