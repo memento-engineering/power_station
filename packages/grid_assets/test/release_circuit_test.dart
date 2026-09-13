@@ -1184,6 +1184,31 @@ void main() {
       expect(scrub.byKind, isEmpty);
     });
 
+    test('a paged ladder that stalls refuses instead of spinning', () async {
+      final request = _request();
+      final gate = ReleaseGateCapability(_StalledLadderInvoker());
+      final outcome = await gate.run(
+        FakeTreeContext(
+          values: <Type, Object>{
+            ReleaseCircuitRequest: request,
+            SiblingView: SiblingView(
+              results: <String, Map<String, String>>{
+                _node('discover'): <String, String>{
+                  kReleaseReceiptKey: jsonEncode(<String, Object?>{
+                    'operation': 'discover',
+                  }),
+                },
+              },
+            ),
+          },
+        ),
+        stepArgs(_node('ladder'), params: const {'operation': 'ladder'}),
+      );
+      expect(outcome, isA<Failed>());
+      expect((outcome as Failed).kind, CapabilityFailureKind.invalidResult);
+      expect(outcome.reason, contains('cannot reach the rest of the report'));
+    });
+
     test('the request refuses a wave it cannot publish', () {
       expect(
         () => ReleaseCircuitRequest(
@@ -1255,6 +1280,29 @@ ReleaseCircuitRequest _duplicate({
     ),
   ],
 );
+
+/// A ladder that keeps answering with the SAME first record — the paged read
+/// can never reach the rest of the report, and must refuse rather than spin.
+class _StalledLadderInvoker implements ReleaseCommandInvoker {
+  @override
+  Future<ReleaseCommandInvocation> run(List<String> arguments) async =>
+      _ok(<String, Object?>{
+        'workspaceRoot': '/w/release',
+        'packages': <Object?>[
+          <String, Object?>{
+            'package': _base,
+            'hasPublishedVersion': false,
+            'currentPublishedVersion': null,
+            'rung': null,
+          },
+        ],
+        'offset': 0,
+        'totalPackages': 2,
+        'withheldPackages': 1,
+        'withheld': '1 of 2 package records',
+        'show': 'rerun with --skip 1',
+      });
+}
 
 /// An invoker a policy probe never reaches.
 class _NeverInvoker implements ReleaseCommandInvoker {

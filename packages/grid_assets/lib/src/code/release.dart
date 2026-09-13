@@ -737,14 +737,18 @@ class ReleaseGateCapability extends ServiceCapability {
       }
       total = pageTotal;
       final page = _objectListAt(json, 'packages', what);
+      final before = records.length;
       for (final record in page) {
         records[_stringAt(record, 'package', what)] = record;
       }
       if (records.length >= total) break;
-      if (page.isEmpty) {
+      // The read must MAKE PROGRESS. An empty page, and a page that repeats
+      // records already read, are the same defect: the rest of the report is
+      // unreachable, and looping on it would hang the leg instead of refusing.
+      if (records.length == before) {
         throw _GateRefusal(
           Failed.invalidResult(
-            'release ladder: the page at --skip $skip carried no record while '
+            'release ladder: the page at --skip $skip added no record while '
             '${total - records.length} of $total remain — the paged read '
             'cannot reach the rest of the report.',
           ),
