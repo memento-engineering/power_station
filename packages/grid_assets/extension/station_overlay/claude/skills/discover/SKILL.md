@@ -1,17 +1,22 @@
 ---
 name: discover
 description: >
-  The grid home's front door — the ONLY human-in-the-loop stage. Dispatches on
-  arg shape: a bare invocation or a topic/idea/question researches what the
-  grid already knows (the attached substations' backlogs + decision beads +
-  code), then continues an existing bead or — on your yes — files a staged one
-  and starts the design conversation. A bead-id with no prompt is
-  advisory: it loads the bead and its graph and recommends the next lifecycle
-  step. A bead-id followed by an instruction is directed: same context load,
-  but it carries out the instruction (decompose, retype, close, fill in
-  design, kick off specify). Use when the human says "let's build", "I have an
-  idea", "plan this", "design this", "what's the state of <bead>", "what
-  should I do with <bead>", or "have we already decided this".
+  The grid home's front door — the ONLY human-in-the-loop stage, and it is
+  reached ONLY by a HUMAN's explicit invocation. Trigger on `/discover`, on
+  `/discover <bead-id>`, on `/discover <bead-id> <instruction>`, or when the
+  human says "let's build", "I have an idea", "plan this", "design this",
+  "what's the state of <bead>", "what should I do with <bead>", or "have we
+  already decided this". NEVER trigger on an assignment that merely opens with
+  a bead-id and an instruction: that shape is a station seat's task prompt, and
+  a seat standing in a per-bead worktree has work to carry out, not a front
+  door to walk through. Once invoked it dispatches on arg shape — a bare
+  invocation or a topic/idea/question researches what the grid already knows
+  (the attached substations' backlogs + decision beads + code), then continues
+  an existing bead or, on your yes, files a staged one and starts the design
+  conversation; a bead-id alone is advisory, loading the bead and its graph and
+  recommending the next lifecycle step; a bead-id with an instruction is
+  directed, taking the same context load and then carrying out that instruction
+  (decompose, retype, close, fill in design, kick off specify).
 ---
 
 # Discover

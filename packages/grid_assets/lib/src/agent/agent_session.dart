@@ -567,6 +567,12 @@ class ArtifactFencedSession implements ProcessSession {
   /// [resultFields] into the forwarded result. [verb] and [adapter] name the
   /// step and its transport in the failure reason.
   ///
+  /// [failureKind], [blockedDiagnostic] and [probeErrorDiagnostic] describe
+  /// what THIS capability's probe proves, for a composer whose fence is not an
+  /// artifact read. They default to the artifact-durability wording and to the
+  /// untyped [CapabilityFailureKind.work], so every caller predating them is
+  /// byte-for-byte unchanged.
+  ///
   /// Subscribes to [inner] EAGERLY, in the constructor: the engine's
   /// retained-terminal path calls `onRuntimeEvent` WITHOUT ever calling
   /// `start()`, so a decorator that attached in `start()` would forward
@@ -577,6 +583,9 @@ class ArtifactFencedSession implements ProcessSession {
     required this.resultFields,
     required this.verb,
     required this.adapter,
+    this.failureKind = CapabilityFailureKind.work,
+    this.blockedDiagnostic = 'declared completion artifact is not durable',
+    this.probeErrorDiagnostic = 'completion artifact probe failed',
   }) {
     _sub = inner.updates.listen(
       _onUpdate,
@@ -601,6 +610,18 @@ class ArtifactFencedSession implements ProcessSession {
 
   /// The session-adapter id named in a failure reason (e.g. `acp`).
   final String adapter;
+
+  /// The engine failure kind a refused completion carries, so a capability can
+  /// put its refusal on the retry budget it declared for that kind.
+  final CapabilityFailureKind failureKind;
+
+  /// The short cause a [GateOutcome.present] refusal opens with — the probe
+  /// READ the workspace and what it promised is not there.
+  final String blockedDiagnostic;
+
+  /// The short cause a [GateOutcome.probeError] refusal opens with — the probe
+  /// could not read the workspace at all.
+  final String probeErrorDiagnostic;
 
   final StreamController<ProcessSessionUpdate> _updates =
       StreamController<ProcessSessionUpdate>();
@@ -663,16 +684,15 @@ class ArtifactFencedSession implements ProcessSession {
           ),
         );
       case GateOutcome.present:
-        _updates.add(
-          _refuse(result, 'declared completion artifact is not durable'),
-        );
+        _updates.add(_refuse(result, blockedDiagnostic));
       case GateOutcome.probeError:
-        _updates.add(_refuse(result, 'completion artifact probe failed'));
+        _updates.add(_refuse(result, probeErrorDiagnostic));
     }
   }
 
   ProcessSessionUpdate _refuse(Map<String, String> result, String diagnostic) =>
       ProcessSessionUpdate.failed(
+        kind: failureKind,
         reason: capturedOutputReason(
           verb: verb,
           adapter: adapter,
