@@ -804,3 +804,73 @@ reader) and A8 (config is a VALUE, the runner stays injected, and the guard is
 loud: a killed read REFUSES).
 
 **Status:** Pending — Nico promotes or rejects.
+
+## A41 (2026-09-13) — bead `pow-9g0o`: a LIVE GitHub reconciler seat REFUSES to mount unless the station registered exactly one reconciliation query, and a failed run is reported TWICE
+
+**Decision (AI).** Moving the GitHub poll onto the station's fenced service tick
+was Nico's ruling of 2026-09-12 and is not logged here. These are the calls made
+around it that nobody ratified.
+
+(1) THE ABSENT REGISTRATION IS A MOUNT REFUSAL, NOT A POSTURE. A live
+`GitHubReconcilerAssets` resolves the one `GitHubReconciliationQuery` the
+station put in `TrajectoryConfig.obligationQueryExtensions`; zero matches and
+two matches both throw a `StateError` from `build`, naming the registration
+point and the count observed. Every other absence in this asset — no App
+client, no cursors, no grid root — is a designed inert posture, so this breaks
+the house pattern deliberately: an unregistered live seat would reconcile on
+NOBODY's schedule, which is the exact silence the bead exists to retire, and a
+silent fallback to a local loop would restore it. This is a COMPOSITION
+REQUIREMENT on every downstream station that mounts `SubstationSeed` with a
+live `githubPoll` (`SpaceDelegate`, `LunarDelegate`) — they must register a
+query or their seats stop mounting.
+
+(2) A FAILED RUN REPORTS TO TWO AUDIENCES. `GitHubReconcilerRuntime.runOnce`
+calls `onError` — the seat's existing `reconciler.cycleFailed` flare, unchanged
+— and then RETHROWS, so the tick records a `TickRefusalKind.queryFailed`
+against `github-reconciliation`. Reporting without rethrowing would have kept
+the old posture where a dying seat is visible only where nobody is counting.
+
+(3) THE QUERY'S SQL IS A CONSTANT ROW, `SELECT 1 AS github_reconciliation_due`.
+§5 asks an obligation to key off the external state it repairs; that state is
+GITHUB, which no local projection can see. The obligation is therefore always
+open, the repair decides there was nothing to do, and it appends nothing — so a
+pass carrying it stays quiet. An attachment set that is empty is a quiet repair
+rather than a refusal.
+
+(4) ATTACHMENT IS A SET, AND EVERY DETACH IS SYNCHRONOUS. `attach` is
+idempotent so a rebuild cannot double a seat's requests; runtime replacement,
+query replacement and dispose all detach before the tree returns, so a
+superseded or unmounted seat cannot ride one more pass. A query swap alone moves
+the SAME runtime rather than rebuilding it, which preserves the seat's cursor
+tail and its registered delivery legs. `attached` and `isAttached` were added as
+read-only probes so the refusal and detach invariants are assertable from a
+tree test without reaching into private state.
+
+(5) THE CADENCE DIFFERENCE IS RECORDED, NOT TUNED (the bead forbids tuning it).
+The retired loop offered an immediate first poll and then one opportunity every
+60 seconds. The released station default is a 30-second tick whose boot pass
+precedes seat attachment, so the first attached opportunity is 0–30 s after
+mount and later idle opportunities are 30 s apart: worst-case initial wait moves
+from 0 to 30 s, steady spacing from 60 s to 30 s. `GitHubPollCoordinator` keeps
+its `minimumSpacing`, which is a TRANSPORT RATE and not a schedule.
+
+**Why.** The measured cost of a self-owned loop: this poll died on five of eight
+seats and stayed dead from 2026-09-03 until a human found it by hand, because
+the only thing that would have reported the death was the thing that died. Every
+call above is chosen so that the failure modes are somebody's business — the
+station's — rather than the seat's own silence. (1) and (2) are the two that a
+human should rule on: the first can be softened to an inert posture and the
+second to a report-only cycle, and both would trade loudness for compatibility.
+
+**Affects (if promoted):**
+`packages/github_grid_assets/lib/src/github/github_reconciler_runtime.dart`
+(`GitHubReconcilerRuntime.runOnce`, `GitHubReconciliationQuery`),
+`packages/github_grid_assets/lib/src/assets/github_reconciler_assets.dart`
+(`GitHubReconcilerConfig.interval` removed, `_registeredQuery`, `_moveToQuery`)
+and `packages/github_grid_assets/lib/src/assets/github_grid_assets.dart` (the
+observer binding no longer schedules). Composes with A8's loud-guard rule and
+with `the_grid#agent-seat-and-agent-disc`, which forbids a second wake
+mechanism; a downstream station's seat composition is what changes if (1) is
+rejected.
+
+**Status:** Pending — Nico promotes or rejects.

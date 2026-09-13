@@ -19,7 +19,7 @@ import 'package:grid_engine/grid_engine.dart'
 // Fake-only: the recording transport this file asserts the migration flare on.
 import 'package:grid_engine/testing.dart' show RecordingExplorationTransport;
 import 'package:grid_runtime/grid_runtime.dart' show PrOpener;
-import 'package:grid_sdk/grid_sdk.dart' show Provider;
+import 'package:grid_sdk/grid_sdk.dart' show ObligationQuery, Provider;
 import 'package:grid_sdk/grid_sdk.dart' as sdk;
 import 'package:test/test.dart';
 
@@ -249,40 +249,35 @@ GitHubAppClient _failingClient() => GitHubAppClient(
 
 /// The station-level rung the vended seat must preserve: an ambient
 /// [ServiceBundle] carrying the seat's flare transport, plus the two values a
-/// live reconciler leg is composed over.
+/// live reconciler leg is composed over — and the station's own
+/// [sdk.TrajectoryConfig], which is where reconciliation's SCHEDULE now lives.
 Seed _stationWithTransport({
   required ExplorationTransport transport,
+  required GitHubReconciliationQuery reconciliation,
   required Seed child,
 }) => sdk.ProviderScope(
-  child: InheritedSeed<ServiceBundle>(
-    value: ServiceBundle(transport: transport),
-    child: Provider<GitHubSelfTrust>.value(
-      GitHubSelfTrust(githubUser: 'nico'),
-      child: Provider<GitHubAppClient>.value(
-        _failingClient(),
-        child: SubstationFactsAssets(
-          repository: _FakeFactsRepository(_facts(const <String>['mine'])),
-          child: InheritedSeed<EnvironmentRegistry>(
-            value: _registry,
-            child: child,
+  child: InheritedSeed<sdk.TrajectoryConfig>(
+    value: sdk.TrajectoryConfig(
+      obligationQueryExtensions: <ObligationQuery>[reconciliation],
+    ),
+    child: InheritedSeed<ServiceBundle>(
+      value: ServiceBundle(transport: transport),
+      child: Provider<GitHubSelfTrust>.value(
+        GitHubSelfTrust(githubUser: 'nico'),
+        child: Provider<GitHubAppClient>.value(
+          _failingClient(),
+          child: SubstationFactsAssets(
+            repository: _FakeFactsRepository(_facts(const <String>['mine'])),
+            child: InheritedSeed<EnvironmentRegistry>(
+              value: _registry,
+              child: child,
+            ),
           ),
         ),
       ),
     ),
   ),
 );
-
-Future<void> _waitForFlare(
-  RecordingExplorationTransport flares,
-  String name,
-) async {
-  final deadline = DateTime.now().add(const Duration(seconds: 10));
-  while (DateTime.now().isBefore(deadline)) {
-    if (flares.named(name).isNotEmpty) return;
-    await Future<void>.delayed(const Duration(milliseconds: 5));
-  }
-  fail('the composed seat never flared $name');
-}
 
 /// The EFFECTIVE seat bundle — the one `SubstationWork` resolves. Each seat
 /// mounts two: `GitGridAssets`' fresh bundle and, innermost, the bundle
@@ -643,9 +638,11 @@ void main() {
     // carried zero reconciler flares. Mounted above it, the reconciler keeps
     // the station's carrier.
     final flares = RecordingExplorationTransport();
+    final reconciliation = GitHubReconciliationQuery();
     final mounted = _mount(
       _stationWithTransport(
         transport: flares,
+        reconciliation: reconciliation,
         child: sdk.RawAssetGrid(
           root: '/home/me/station',
           assets: [
@@ -658,8 +655,6 @@ void main() {
                 repository: 'power_station',
                 substation: 'mine',
                 installationId: 'installation',
-                // One cycle inside this test's lifetime.
-                interval: Duration(hours: 1),
                 minimumSpacing: Duration.zero,
               ),
             ),
@@ -667,13 +662,17 @@ void main() {
         ),
       ),
     );
+    addTearDown(mounted.owner.dispose);
     final runtime = mounted.walk.values<GitHubReconcilerRuntime>().single;
-    addTearDown(() async {
-      await runtime.stop();
-      mounted.owner.dispose();
-    });
 
-    await _waitForFlare(flares, 'reconciler.cycleFailed');
+    // The vended seat attaches to the STATION's registered query, so the
+    // station's pass — not the seat — is what runs a cycle.
+    expect(reconciliation.attached, <GitHubReconcilerRuntime>[runtime]);
+    expect(flares.flares, isEmpty, reason: 'mounting polls nothing');
+    await expectLater(
+      reconciliation.repair(const <Map<String, String?>>[]),
+      throwsA(isA<GitHubPollException>()),
+    );
 
     final flare = flares.named('reconciler.cycleFailed').first;
     expect(flare.data, containsPair('seat', 'mine'));

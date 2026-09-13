@@ -1,10 +1,10 @@
-import 'dart:async';
 import 'dart:developer' as developer;
 
 import 'package:genesis_tree/genesis_tree.dart';
 import 'package:grid_engine/grid_engine.dart';
 import 'package:grid_runtime/grid_runtime.dart';
-import 'package:grid_sdk/grid_sdk.dart' show ProviderTreeContext;
+import 'package:grid_sdk/grid_sdk.dart'
+    show ObligationQuery, ProviderTreeContext, TrajectoryConfig;
 
 import '../code/github_app_pr_opener.dart';
 import '../code/workflow_run_intake_rule.dart';
@@ -38,7 +38,6 @@ class GitHubReconcilerConfig {
     required this.repository,
     required this.substation,
     required this.installationId,
-    this.interval = const Duration(minutes: 1),
     this.minimumSpacing = const Duration(seconds: 5),
     this.arm = GitHubReconcilerArm.live,
     this.defaultBranch = 'main',
@@ -59,9 +58,6 @@ class GitHubReconcilerConfig {
 
   /// Installation quota identity used by the poll coordinator.
   final String installationId;
-
-  /// Delay between polling attempts.
-  final Duration interval;
 
   /// Minimum spacing between starts for this installation.
   final Duration minimumSpacing;
@@ -211,7 +207,6 @@ GitHubReconcilerRuntime createGitHubReconcilerRuntime({
     installationId: config.installationId,
     reconciler: reconciler,
     coordinator: GitHubPollCoordinator(minimumSpacing: config.minimumSpacing),
-    interval: config.interval,
     onError: (error, stackTrace) =>
         report('reconciler.cycleFailed', 'cycle failed', error, stackTrace),
   );
@@ -263,6 +258,7 @@ class GitHubReconcilerAssets extends SingleChildStatefulSeed {
 final class _GitHubReconcilerAssetsState
     extends SingleChildState<GitHubReconcilerAssets> {
   GitHubReconcilerRuntime? _runtime;
+  GitHubReconciliationQuery? _builtQuery;
   GitHubReconcilerConfig? _builtConfig;
   GitHubAppClient? _builtClient;
   GitHubCursorStore? _builtCursors;
@@ -293,28 +289,75 @@ final class _GitHubReconcilerAssetsState
         cursors != null &&
         emit != null;
     if (!enabled) {
-      _replaceRuntime(null, null, null, null, null, null);
+      _replaceRuntime(null, null, null, null, null, null, null);
       return child;
     }
+    // THE STATION OWNS THE SCHEDULE: this seat contributes reconciliation
+    // work to the ratified service tick and adds no wake mechanism of its
+    // own. Resolved with the SUBSCRIBING build verb (ADR-0008 D3) so a
+    // re-provisioned station config moves this seat onto the new query.
+    final query = _registeredQuery(context, config!);
     if (config != _builtConfig ||
         !identical(client, _builtClient) ||
         !identical(cursors, _builtCursors) ||
         !identical(emit, _builtEmit) ||
         !identical(transport, _builtTransport)) {
       final replacement = _assets.runtimeFactory(
-        config: config!,
+        config: config,
         client: client,
         cursors: cursors,
         emit: emit,
         transport: transport,
         foreignClient: _foreignClient(config),
       );
-      _replaceRuntime(replacement, config, client, cursors, emit, transport);
+      _replaceRuntime(
+        replacement,
+        query,
+        config,
+        client,
+        cursors,
+        emit,
+        transport,
+      );
+    } else if (!identical(query, _builtQuery)) {
+      _moveToQuery(query);
     }
     return InheritedSeed<GitHubReconcilerRuntime>(
       value: _runtime!,
       child: child,
     );
+  }
+
+  /// THE ONE query this seat attaches to: the single
+  /// [GitHubReconciliationQuery] the station registered in
+  /// [TrajectoryConfig.obligationQueryExtensions], which is the only
+  /// registration point the harness merges into the tick.
+  ///
+  /// LOUD OR GONE. A live seat with NO registered query would reconcile on
+  /// nobody's schedule — the exact silence this design exists to retire —
+  /// and a seat matching TWO would reconcile twice per pass under one
+  /// installation budget. Both are refusals naming the registration point
+  /// and the count observed, never a quiet fallback to a local loop.
+  GitHubReconciliationQuery _registeredQuery(
+    TreeContext context,
+    GitHubReconcilerConfig config,
+  ) {
+    final trajectory = context
+        .dependOnInheritedSeedOfExactType<TrajectoryConfig>();
+    final registered =
+        (trajectory?.obligationQueryExtensions ?? const <ObligationQuery>[])
+            .whereType<GitHubReconciliationQuery>()
+            .toList(growable: false);
+    if (registered.length != 1) {
+      throw StateError(
+        'Seat ${config.substation} arms a live GitHub reconciler, which runs '
+        'on the station tick: the station must register EXACTLY ONE '
+        'GitHubReconciliationQuery in '
+        'TrajectoryConfig.obligationQueryExtensions, and this tree offers '
+        '${registered.length}.',
+      );
+    }
+    return registered.first;
   }
 
   /// The token-less read client for [config]'s FOREIGN watches, or null when it
@@ -355,6 +398,7 @@ final class _GitHubReconcilerAssetsState
 
   void _replaceRuntime(
     GitHubReconcilerRuntime? replacement,
+    GitHubReconciliationQuery? query,
     GitHubReconcilerConfig? config,
     GitHubAppClient? client,
     GitHubCursorStore? cursors,
@@ -363,13 +407,29 @@ final class _GitHubReconcilerAssetsState
   ) {
     final previous = _runtime;
     if (identical(previous, replacement)) return;
+    // SYNCHRONOUS detach, before the replacement is attached: a superseded
+    // runtime must not reconcile on one more pass.
+    if (previous != null) _builtQuery?.detach(previous);
     _runtime = replacement;
+    _builtQuery = query;
     _builtConfig = config;
     _builtClient = client;
     _builtCursors = cursors;
     _builtEmit = emit;
     _builtTransport = transport;
-    if (previous != null) unawaited(previous.stop());
+    if (replacement != null) query?.attach(replacement);
+  }
+
+  /// Moves the LIVE runtime between registered queries without rebuilding
+  /// it: the station replaced its trajectory config, not this seat's
+  /// construction inputs, so the seat keeps its cursor tail and its
+  /// registered delivery legs.
+  void _moveToQuery(GitHubReconciliationQuery query) {
+    final runtime = _runtime;
+    if (runtime == null) return;
+    _builtQuery?.detach(runtime);
+    _builtQuery = query;
+    query.attach(runtime);
   }
 
   /// Binds THIS asset's reporter onto [projection] whenever the projection, the
@@ -425,8 +485,12 @@ final class _GitHubReconcilerAssetsState
   void dispose() {
     _unbindReporter();
     final runtime = _runtime;
+    final query = _builtQuery;
     _runtime = null;
-    if (runtime != null) unawaited(runtime.stop());
+    _builtQuery = null;
+    // SYNCHRONOUS, like every other detach here: an unmounted seat must be
+    // gone from the station's next pass, not from some later microtask.
+    if (runtime != null) query?.detach(runtime);
     super.dispose();
   }
 }
