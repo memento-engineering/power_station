@@ -68,6 +68,157 @@ String _renderLeg(
   return rendered;
 }
 
+/// The two PUSHED role definitions. A seat loads one at session open and
+/// carries it on EVERY turn after — the largest single instruction surface a
+/// seat pays for, and the only one nobody pulls deliberately.
+const List<String> _roles = ['governor', 'refiner'];
+
+/// The ordered `## ` sections both role definitions expose.
+///
+/// One shape, one canonical list: a reader who has found the gates in one seat
+/// knows where they are in the other, and a section added to one alone fails
+/// here rather than quietly making the two files different documents.
+const List<String> _roleSections = [
+  '## The mandate',
+  '## The operating loop',
+  '## Cost — a request costs what the context costs',
+  '## Human gates — never cross without an explicit, per-item go',
+  '## Safety invariants (non-negotiable)',
+];
+
+/// Grammar and catalogs another surface already owns, each keyed by that
+/// owner.
+///
+/// These are DELETED from the pushed definitions rather than shortened: a verb
+/// cannot drift from its own `--help`, and a skill cannot drift from its own
+/// procedure, but a prose copy of either drifts the moment the owner changes —
+/// and nobody audits a 4,000-token file they did not write.
+const Map<String, String> _ownedElsewhere = {
+  '## Tool grammar': 'the verbs describe themselves',
+  '## The skills': 'the harness lists the skills it installed',
+  '{{runner}}': 'a station invocation is spelled by the verb, not by prose',
+  'bd -C': 'a store-query recipe belongs to the skill that runs it',
+  'bd batch': 'a store-query recipe belongs to the skill that runs it',
+  'bd export': 'a store-query recipe belongs to the skill that runs it',
+  '--state-root': 'a flag list is the verb’s own',
+  'gh pr edit': 'a repair recipe is circuit-owned procedure',
+};
+
+/// Every clause each role definition must KEEP — the mandate it operates
+/// under, the gates only a human may cross, and the invariants that hold
+/// whatever the station is doing. None of these has another owner, so deleting
+/// one deletes the policy itself.
+const Map<String, List<String>> _loadBearing = {
+  'governor': [
+    // The mandate, and the boundary that makes it an operator seat.
+    'You OPERATE; you do not engineer from this seat.',
+    'When you find an engine or asset defect, file a precise bead',
+    // ADR-0004 throughput, which outranks every other rule on the page.
+    'THROUGHPUT OUTRANKS CEREMONY',
+    '**Never pend work with a defer date.**',
+    'THE STAMP IS THE APPROVAL',
+    '**A ready P0/P1 never waits on you asking.**',
+    '**An ADR departure is RECORDED, not blocking.**',
+    '`ready > 0` with `mounted 0` is an INCIDENT',
+    // The five human gates, each with the qualification that scopes it.
+    '**Merging PRs**',
+    '`merge=human`',
+    '**Firing a live arm**',
+    '**Persistence changes**',
+    '**PROMOTING a release — never publishing one.**',
+    'Anything else outward-facing beyond a branch push + PR on org repos.',
+    // The four safety invariants.
+    '**Coexistence:**',
+    '**bd is the only writer:**',
+    '**Store discipline:**',
+    '**Fail-closed reading:**',
+    // The ratified cost posture, still ranked UNDER throughput.
+    '## Cost — a request costs what the context costs',
+    '**MEASURED 2026-09-03**',
+    'NEVER outranks the throughput rules in the mandate',
+  ],
+  'refiner': [
+    // The mandate: a human in the room, and one oracle for completeness.
+    'The human is in the room with you; the governor is not.',
+    'Make every filed bead APPROVABLE and keep the backlog TRUE',
+    "The station's filing verdict is the completeness oracle; follow its "
+        'failing details and mint no competing completeness predicate.',
+    'Interview the human — one decision at a time, with the context that '
+        'decides it.',
+    'encode the ruling THE SAME TURN',
+    '**You do not run the loop.**',
+    // The five human gates.
+    '**Approval.** APPROVAL STAYS HUMAN.',
+    'explicit per-bead human ruling',
+    'The refiner never un-stamps',
+    '**Deciding an EITHER/OR fork.**',
+    '**Merging PRs and pushing to any main.**',
+    '**PROMOTING a release — not publishing one.**',
+    '**Closing or re-homing work the human owns**',
+    // The six safety invariants.
+    '**You stamp `--actor refiner`.**',
+    '**bd is the only writer:**',
+    '**Store discipline:**',
+    '**Coexistence:**',
+    '**Multi-agent work has a ceiling here.**',
+    '**Fail-closed reading:**',
+  ],
+};
+
+/// What each seat must be able to tell it may NEVER do, from its own
+/// definition alone — without opening a command, a skill or the other seat's
+/// file.
+const Map<String, List<String>> _prohibitions = {
+  'governor': [
+    'you do not engineer from this seat',
+    'never broad-kill',
+    'never SQL',
+    'never lifecycle writes',
+    'never cross without an explicit, per-item go',
+    'do not work around it',
+    "Never write that seat's Agent Disc.",
+  ],
+  'refiner': [
+    'they are actions you do not take',
+    'never broad-kill',
+    'never SQL',
+    'NEVER lifecycle writes',
+    'you may NOT convene judge panels',
+    'The refiner never un-stamps',
+    'never work around it',
+    "Never write that seat's Agent Disc.",
+  ],
+};
+
+/// The ownership rule both seats now state, and the three affirmative phrases
+/// it REPLACED.
+///
+/// The refiner definition used to send a cross-seat finding to the governor's
+/// own disc. On 2026-09-12 a refiner did exactly that at 00:58; the governor's
+/// next index rewrite erased the pointer line at 06:24 and the note was never
+/// read. A finding goes where its actor already looks — the bead.
+const String _discOwnership =
+    'A finding another seat must act on belongs on the relevant bead. '
+    "Never write that seat's Agent Disc.";
+
+/// The retired channel, in every wording it was written in. Asserted with
+/// POLARITY: a definition that merely mentions the governor's disc while still
+/// routing a finding to it would pass a bare `contains` of [_discOwnership].
+const List<String> _retiredDiscChannel = [
+  'because that is the disc its occupant reads',
+  'hand the governor a receipt on its disc',
+  'leave the governor its receipts',
+];
+
+/// The MEASURED size of each definition before this reduction, in UTF-8 bytes
+/// and in estimated tokens. A cut that does not cut fails here.
+const Map<String, int> _baselineBytes = {'governor': 12916, 'refiner': 11945};
+const Map<String, int> _baselineTokens = {'governor': 4758, 'refiner': 4406};
+
+/// Characters per token, measured on this corpus. Prose, not code — a token is
+/// a shade under three characters of it.
+const double _charsPerToken = 2.69;
+
 void main() {
   final root = _extensionDir();
   final loader = PackagedAssetLoader(root: root);
@@ -942,10 +1093,6 @@ void main() {
         reason: 'stampable: the frontmatter must open on line 1',
       );
       expect(governor.readAsStringSync(), contains('name: governor'));
-      expect(
-        governor.readAsStringSync(),
-        contains('`asset-author` — B-style in-tree provider composition'),
-      );
 
       final settings = File(p.join(overlay, 'claude', 'settings.json'));
       expect(settings.existsSync(), isTrue);
@@ -970,11 +1117,9 @@ void main() {
         reason: 'no PreCompact guard — a hook cannot undo a compaction',
       );
 
-      expect(
-        governor.readAsStringSync().split('{{runner}} seat governor').length -
-            1,
-        1,
-      );
+      // The seat boot instruction has ONE owner now: the skill that is pulled
+      // when a station is being operated. The role definition names no station
+      // invocation at all.
       for (final leg in const ['claude', 'agents']) {
         final operations = File(
           p.join(overlay, leg, 'skills', 'station-operations', 'SKILL.md'),
@@ -990,15 +1135,14 @@ void main() {
       // claude leg (`power_station#a-harness-may-carry-its-own-instructions`:
       // each harness leg is an independent instruction source, so no agents/
       // twin is owed — governor.md has none either).
+      //
+      // What either definition SAYS is fenced in 'the vended ROLE DEFINITIONS
+      // are policy, not a verb manual' below; this test owns packaging only.
       final refinerFile = File(
         p.join(overlay, 'claude', 'agents', 'refiner.md'),
       );
       expect(refinerFile.existsSync(), isTrue);
       final refiner = refinerFile.readAsStringSync();
-      // Prose assertions read the FLOWED body so a re-wrap of a paragraph
-      // never falsifies a sentence that is still there; markers that cannot
-      // span a line break read the raw body.
-      final flowed = refiner.replaceAll(RegExp(r'\s+'), ' ');
 
       expect(
         refiner,
@@ -1008,56 +1152,9 @@ void main() {
       expect(refiner, contains('name: refiner'));
       expect(refiner, contains('\n# The Refiner\n'));
       expect(
-        refiner.split('\n').where((line) => line.startsWith('## ')).toList(),
-        const [
-          '## The mandate',
-          '## The operating loop',
-          '## Cost — a request costs what the context costs',
-          '## Human gates — never cross without an explicit, per-item go',
-          '## Safety invariants (non-negotiable)',
-          '## Tool grammar',
-          '## The skills',
-        ],
-        reason: "the refiner wears the governor's section shape",
-      );
-
-      // The seat binds ONCE, to its own disc, and hands the governor receipts
-      // on the governor's disc — never a handoff on someone else's.
-      expect(refiner.split('{{runner}} seat refiner').length - 1, 1);
-      expect(refiner, contains('.grid/seats/refiner/'));
-      expect(refiner, contains('MEMORY.md'));
-      expect(refiner, contains('`kind: handoff`'));
-      expect(
-        flowed,
-        contains('the seat launcher relaunches you primed with it'),
-      );
-      expect(
         refiner,
-        contains('`kind: receipt` note on `.grid/seats/governor/`'),
-      );
-
-      // The mandate: what makes a filed bead APPROVABLE.
-      expect(
-        flowed,
-        contains('Make every filed bead APPROVABLE and keep the backlog TRUE'),
-      );
-      for (final marker in const [
-        '**Prior art searched**',
-        '**The premise verified against the tree**',
-        '**`validation_plan` scoped to every consumer**',
-        '**Acceptance criteria a named command can falsify**',
-        '**Dependency edges wired at intake**',
-        '**EITHER/OR forks surfaced to the human**',
-        '**Staleness reconciled**',
-      ]) {
-        expect(refiner, contains(marker), reason: '$marker is mandated');
-      }
-      expect(
-        refiner,
-        contains(
-          '{{runner}} filing --json --state-root "<grid home>" "<bead>"',
-        ),
-        reason: 'the filing verb IS the exit oracle',
+        contains('.grid/seats/refiner/'),
+        reason: 'the seat is told which disc is its own',
       );
       expect(
         refiner,
@@ -1065,64 +1162,6 @@ void main() {
         reason:
             'the exit criterion is a CALL to the filing verb, never a '
             'predicate of this seat’s own',
-      );
-
-      // The interview rule, and the same-turn encoding of every ruling.
-      expect(
-        flowed,
-        contains(
-          'Interview the human — one decision at a time, with the context '
-          'that decides it.',
-        ),
-      );
-      expect(flowed, contains('Never hand over a list of slugs'));
-      expect(flowed, contains('encode the ruling THE SAME TURN'));
-      expect(flowed, contains('decision-register entry'));
-
-      // The boundary with the governor: this seat never runs the loop.
-      expect(
-        flowed,
-        contains(
-          'no harvest, no gate-medicine, no rework, no merges, and no bounces',
-        ),
-      );
-
-      // Actor, approval, and the stamp it never removes.
-      expect(refiner, contains('--actor refiner'));
-      expect(
-        refiner,
-        contains(
-          '{{runner}} approve --actor refiner --json --state-root '
-          '"<grid home>"',
-        ),
-      );
-      expect(flowed, contains('APPROVAL STAYS HUMAN'));
-      expect(flowed, contains('explicit per-bead human ruling'));
-      expect(flowed, contains('never un-stamps'));
-      expect(
-        flowed,
-        contains('record that the refiner wrote the stamp on it'),
-        reason: 'the receipt says the human ruled THROUGH this seat',
-      );
-
-      // Multi-agent ceiling: read-only refinement subagents, no circuits.
-      expect(flowed, contains('refinement subagents that READ'));
-      expect(
-        flowed,
-        contains(
-          'You may NOT run Workflow-tool design rounds and you may NOT '
-          'convene judge panels',
-        ),
-      );
-
-      expect(
-        refiner
-            .substring(refiner.indexOf('## The skills'))
-            .split('\n')
-            .where((line) => line.startsWith('- `'))
-            .map((line) => line.split('`')[1])
-            .toList(),
-        const ['intake-refinement', 'discover', 'decide', 'handoff'],
       );
     });
 
@@ -1142,19 +1181,6 @@ void main() {
         isEmpty,
         reason: 'approval is the approve verb; the label alone never mounts',
       );
-
-      final governor = File(
-        p.join(overlay, 'claude', 'agents', 'governor.md'),
-      ).readAsStringSync();
-      expect(
-        governor,
-        contains('{{runner}} approve --actor <name> <bead-id>'),
-        reason: 'the governor names the verb that replaced the guard',
-      );
-      expect(
-        governor,
-        contains('approval: not approved - run the approve verb'),
-      );
     });
 
     test('EVERY vended file can carry a provenance stamp — an unstampable one '
@@ -1170,6 +1196,132 @@ void main() {
           () => provenanceSyntaxFor(rel, file.readAsStringSync()),
           returnsNormally,
           reason: '$rel is stampable',
+        );
+      }
+    });
+  });
+
+  group('the vended ROLE DEFINITIONS are policy, not a verb manual', () {
+    final agents = p.join(root, 'station_overlay', 'claude', 'agents');
+
+    File roleFile(String role) => File(p.join(agents, '$role.md'));
+
+    String body(String role) => roleFile(role).readAsStringSync();
+
+    // The body with every run of whitespace collapsed to one space, so a PROSE
+    // assertion survives a re-wrap of the paragraph it lives in. Markers that
+    // cannot span a line break read the raw body just as well.
+    String flowed(String role) => body(role).replaceAll(RegExp(r'\s+'), ' ');
+
+    test('mandates, human gates, and safety invariants remain load-bearing', () {
+      for (final role in _roles) {
+        final text = flowed(role);
+        for (final clause in _loadBearing[role]!) {
+          expect(
+            text,
+            contains(clause),
+            reason:
+                '$role.md must still state "$clause" — no verb reports it, so '
+                'deleting it deletes the policy rather than a copy of one',
+          );
+        }
+      }
+    });
+
+    test('each role says what it must never do', () {
+      for (final role in _roles) {
+        final text = flowed(role);
+        for (final prohibition in _prohibitions[role]!) {
+          expect(
+            text,
+            contains(prohibition),
+            reason:
+                'a seat reads $role.md and nothing else at session open; it '
+                'must be able to tell from this file alone that "$prohibition"',
+          );
+        }
+      }
+    });
+
+    test('cross-seat findings never write another seat disc', () {
+      expect(
+        flowed('governor'),
+        contains('Your Agent Disc is your own. $_discOwnership'),
+      );
+      expect(
+        flowed('refiner'),
+        contains(
+          'Your handoffs, lessons and observations go on your Agent Disc. '
+          '$_discOwnership',
+        ),
+      );
+
+      for (final role in _roles) {
+        final text = flowed(role);
+        for (final retired in _retiredDiscChannel) {
+          expect(
+            text,
+            isNot(contains(retired)),
+            reason:
+                '$role.md must not route a finding onto another seat’s disc: '
+                'a note written there is erased by that seat’s next index '
+                'rewrite and never read',
+          );
+        }
+        expect(
+          text,
+          isNot(matches(RegExp('kind: receipt.*governor'))),
+          reason: '$role.md names no receipt note on the governor’s disc',
+        );
+      }
+    });
+
+    test('verb grammar and circuit-owned procedure are absent', () {
+      for (final role in _roles) {
+        final text = body(role);
+        _ownedElsewhere.forEach((marker, owner) {
+          expect(
+            text,
+            isNot(contains(marker)),
+            reason:
+                '$role.md must not carry `$marker` — $owner, and a pushed '
+                'copy drifts the moment that owner changes',
+          );
+        });
+      }
+    });
+
+    test('role definitions share one section structure', () {
+      for (final role in _roles) {
+        expect(
+          body(
+            role,
+          ).split('\n').where((line) => line.startsWith('## ')).toList(),
+          _roleSections,
+          reason: '$role.md exposes the canonical seat-role sections, in order',
+        );
+      }
+    });
+
+    test('both definitions shrink below the live baseline', () {
+      for (final role in _roles) {
+        final text = body(role);
+        final bytes = utf8.encode(text).length;
+        final tokens = (text.runes.length / _charsPerToken).round();
+
+        expect(
+          bytes,
+          lessThan(_baselineBytes[role]!),
+          reason:
+              '$role.md was ${_baselineBytes[role]} bytes of pushed prose; '
+              'this surface is paid for on every turn, so it shrinks',
+        );
+        expect(
+          tokens,
+          lessThan(_baselineTokens[role]!),
+          reason:
+              '$role.md was ~${_baselineTokens[role]} tokens; bytes can fall '
+              'while tokens do not, so both are measured',
         );
       }
     });

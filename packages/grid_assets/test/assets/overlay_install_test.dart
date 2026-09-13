@@ -617,11 +617,9 @@ void main() {
         final refinerBody = refiner.readAsStringSync();
         expect(hasProvenance(refinerBody), isTrue);
         expect(refinerBody, contains('name: refiner'));
-        expect(
-          refinerBody,
-          contains('space seat refiner'),
-          reason: 'the launcher line binds the INSTALLER runner, not a hole',
-        );
+        // The role definition is POLICY: it names no station invocation, so it
+        // carries no `{{runner}}` hole of its own. The installer's runner
+        // binding is proven below, on the settings file that does have one.
         expect(refinerBody, contains('.grid/seats/refiner/'));
         expect(refinerBody, isNot(contains('{{runner}}')));
         expect(
