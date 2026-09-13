@@ -38,7 +38,7 @@ resources:
     path: rubrics/coherence.md
     visibility: public
   - id: adr-alignment
-    description: "Does the spec cite and align with the substation's docs/adr register (ADR-0000 amendments included)?"
+    description: "Does the spec cite and align with the substation's decisions register?"
     path: rubrics/adr-alignment.md
     visibility: public
   - id: decision-alignment

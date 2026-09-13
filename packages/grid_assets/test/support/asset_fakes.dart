@@ -217,12 +217,14 @@ List<Bead> ladderDoneSession({
 );
 
 /// The LOCAL-ONLY register tokens the spec path no longer renders — the shell
-/// shape a `for register in docs/adr docs/decisions` grep is built from.
+/// shape a `for register in ...` grep loop over a local directory is built
+/// from (the retired dual ADR-directory/`docs/decisions` lookup, before the
+/// roster-union migration).
 ///
 /// Shared by every suite that fences the roster-mode lookup: a revert to a
 /// local register read reintroduces at least one of them.
 const List<String> kLocalOnlyTokens = [
-  'for register in docs/adr docs/decisions',
+  'for register in',
   r'[ ! -d "$register" ]',
   '-exec grep -li',
 ];

@@ -303,8 +303,8 @@
   declarations resolve against repo-relative pinned-diff paths by path suffix
   (#138).
 - Readiness, specify, spec review and discovery prompts search both local
-  decision homes (`docs/adr` and `docs/decisions`) through one missing-safe
-  command set, and packaged assets accept legacy clauses as well as decision
+  decision homes (the ADR directory and `docs/decisions`) through one
+  missing-safe command set, and packaged assets accept legacy clauses as well as decision
   slugs in a citation (#146).
 - The vended skills teach the enforced approval-label transition in place of
   defer staging, with pinned source rendering and operator installation (#151).

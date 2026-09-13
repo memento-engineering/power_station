@@ -15,11 +15,11 @@ This runs the record grammar (`parseSpecContract`) over 10 specs that ALREADY SH
 | `pow-emxf` | 2026-09-03T01:58:36Z | shipped | 20 | acceptanceRecord, stepField, validationRecord |
 | `pow-gy41` | 2026-09-03T02:25:57Z | shipped | 34 | acceptanceRecord, stepCommit, stepField, touchRecord, validationRecord |
 | `pow-kzx` | 2026-07-13T05:29:58Z | shipped | 75 | acceptanceRecord, decisionRecord, stepCommit, stepField, touchRecord, validationRecord |
-| `pow-o3ti` | 2026-09-03T13:34:58Z | shipped | 36 | acceptanceRecord, decisionRecord, stepCommit, stepField, touchRecord, validationRecord |
+| `pow-o3ti` | 2026-09-03T13:34:58Z | shipped | 37 | acceptanceRecord, decisionRecord, stepCommit, stepField, touchRecord, validationRecord |
 | `pow-vw38` | 2026-09-03T04:37:58Z | shipped | 44 | acceptanceRecord, decisionRecord, stepCommit, stepField, touchRecord, validationRecord |
 | `pow-zvaw` | 2026-09-03T13:27:23Z | shipped | 58 | acceptanceRecord, decisionRecord, stepCommit, stepField, touchRecord, validationRecord |
 
-408 findings across 10 shipped specs; 0 parse clean under the new grammar.
+409 findings across 10 shipped specs; 0 parse clean under the new grammar.
 
 ## Findings per rule, and the lane that already asks for it
 
@@ -33,7 +33,7 @@ This runs the record grammar (`parseSpecContract`) over 10 specs that ALREADY SH
 | `stepPath` | 0 | `plan-completeness` | "an exact file path from the repo root" |
 | `stepCommit` | 33 | `plan-completeness` | "a conventional-commit message" |
 | `touchRecord` | 53 | — (no lane states it) | — |
-| `decisionRecord` | 50 | `decision-alignment` | "the canonical `<repo>#<slug>` identity" |
+| `decisionRecord` | 51 | `decision-alignment` | "the canonical `<repo>#<slug>` identity" |
 | `decisionSectionSilent` | 0 | `decision-alignment` | "never grade the lane clean on a crashed lookup" |
 | `validationRecord` | 101 | `acceptance-testability` | "the exact command and its expected result" |
 | `validationUnknownCriterion` | 0 | `acceptance-testability` | "item mapped to no criterion" |

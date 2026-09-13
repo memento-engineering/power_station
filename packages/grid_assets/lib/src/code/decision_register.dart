@@ -281,11 +281,10 @@ const String kDecisionWriteRule =
     '`status`, `date`, `decision-makers`, and a `register` block carrying '
     '`spec: 1`, `surfaces`, and its edges). That skill is authoritative for '
     'the entry shape — follow it, never restate it. An entry BINDS ON WRITE: '
-    'there is no advisory tier and no `A<n>` serial to collide on. '
-    '`docs/adr/ADR-0000-ai-decision-register.md` is READ-ONLY LEGACY — cite '
-    'it, NEVER append to it. When `docs/decisions/` does not exist in the '
-    'substation, CREATE it with the entry; a missing directory is not a '
-    'reason to fall back to ADR-0000.';
+    'there is no advisory tier and no `A<n>` serial to collide on, and no '
+    'legacy register to fall back to. When `docs/decisions/` does not exist '
+    'in the substation, CREATE it with the entry; a missing directory is not '
+    'a reason to invent one.';
 
 /// The prefix a spec's `## ADR Alignment` section is recognized by when the
 /// roster union was EMPTY for every queried surface.

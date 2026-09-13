@@ -473,9 +473,9 @@ void main() {
       for (final token in kLocalOnlyTokens) {
         expect(rendered, isNot(contains(token)));
       }
-      expect(rendered, contains('ADR-0000'));
       expect(rendered, contains(kDecisionWriteRule));
       expect(rendered, isNot(contains('living AI-decision register')));
+      expect(rendered, isNot(contains('ADR-0000')));
       expect(rendered, contains('the_grid#admission-authority-boundary'));
       expect(rendered, contains('No recorded decision governs these surfaces'));
     });

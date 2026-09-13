@@ -50,11 +50,11 @@ under `docs/decisions/`, following the vended `decide` skill's contract
 `decision-makers`, and a `register` block carrying `spec: 1`, `surfaces`, and
 its edges). That skill is authoritative for the entry shape — follow it, never
 restate it. An entry BINDS ON WRITE: there is no advisory tier and no `A<n>`
-serial to collide on. `docs/adr/ADR-0000-ai-decision-register.md` is READ-ONLY
-LEGACY — cite it, NEVER append to it. When `docs/decisions/` does not exist in
-the substation, CREATE it with the entry; a missing directory is not a reason to
-fall back to ADR-0000. A spec that appends an `A<n>` amendment to ADR-0000 has
-DEPARTED from that rule — say so under `decision-alignment`.
+serial to collide on, and no legacy register to fall back to. When
+`docs/decisions/` does not exist in the substation, CREATE it with the entry; a
+missing directory is not a reason to invent one. A spec that appends an `A<n>`
+amendment anywhere but `docs/decisions/` has DEPARTED from that rule — say so
+under `decision-alignment`.
 
 ## Your verdict
 Grade the spec A (best) through F (worst) against `{{rubric}}` ONLY, then write

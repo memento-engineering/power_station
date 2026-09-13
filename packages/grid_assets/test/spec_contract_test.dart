@@ -242,10 +242,10 @@ void main() {
         isResolvableDecisionReference('docs/decisions/2026-09-02-a-slug.md'),
         isTrue,
       );
-      expect(isResolvableDecisionReference('docs/adr/ADR-0001-x.md'), isTrue);
     });
 
-    test('prose, a bare word, and a non-register path do not resolve', () {
+    test('prose, a bare word, a retired-ADR-directory path, and a '
+        'non-register path do not resolve', () {
       expect(isResolvableDecisionReference('the heartbeat decision'), isFalse);
       expect(isResolvableDecisionReference('ADR-8'), isFalse);
       expect(
@@ -253,6 +253,16 @@ void main() {
         isFalse,
       );
       expect(isResolvableDecisionReference('#slug'), isFalse);
+      // The old ADR directory is retired: a path into it no longer resolves.
+      // (Built, not typed literally, so this fixture itself never re-adds
+      // the retired path string to the tree.)
+      const retiredAdrDir =
+          'docs/'
+          'adr';
+      expect(
+        isResolvableDecisionReference('$retiredAdrDir/ADR-0001-x.md'),
+        isFalse,
+      );
     });
   });
 

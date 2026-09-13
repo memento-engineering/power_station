@@ -37,7 +37,7 @@ final Map<String, RegExp> _forbiddenResidue = {
   'the Go language': RegExp(r'\bGo\b'),
   'Go source files': RegExp(r'\.go\b'),
   'Go package layout': RegExp('internal/'),
-  'the foreign ADR home': RegExp('docs/adrs'),
+  'the foreign ADR home': RegExp('adrs/'),
 };
 
 void main() {

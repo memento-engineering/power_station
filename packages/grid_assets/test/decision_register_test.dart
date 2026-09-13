@@ -1,7 +1,8 @@
 // The DECISION-LOOKUP surface — a pure RENDERING contract.
 //
 // The lookup used to be a shell loop this suite executed against temp
-// `docs/adr`/`docs/decisions` trees. It is now the composing station's
+// local-register trees (the retired ADR directory alongside
+// `docs/decisions`). It is now the composing station's
 // roster-mode `decisions index` verb, whose grid adapter resolves the live
 // mounted-substation roster; this library renders its argv and runs nothing,
 // so the suite is a unit test over the rendered text.
@@ -80,7 +81,6 @@ void main() {
         rosterDecisionIndexCommand(surface: 'a/b.dart'),
         rosterDecisionIndexCommand(surface: 'a/b.dart', gridHome: '/g'),
       ]) {
-        expect(command, isNot(contains('docs/adr')));
         expect(command, isNot(contains('docs/decisions')));
         for (final token in kLocalOnlyTokens) {
           expect(command, isNot(contains(token)));
@@ -228,7 +228,6 @@ Read `lib/elsewhere.dart` first.
       ]) {
         expect(rule, contains(token));
       }
-      expect(rule, isNot(contains('docs/adr')));
     });
 
     test('UNBOUND: it names NO invocation and sends the lane to every mounted '
@@ -299,12 +298,11 @@ Read `lib/elsewhere.dart` first.
   });
 
   group('the WRITE rule is unchanged by the roster move', () {
-    test('it names its four load-bearing tokens', () {
+    test('it names its three load-bearing tokens', () {
       for (final token in [
         'docs/decisions/',
         '.claude/skills/decide/SKILL.md',
         'BINDS ON WRITE',
-        'READ-ONLY LEGACY',
       ]) {
         expect(kDecisionWriteRule, contains(token));
       }

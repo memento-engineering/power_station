@@ -47,11 +47,12 @@ this document that contradicts them:
 - **A ready P0/P1 never waits on you asking.** If the board has no live work
   and a driveable P0/P1 is ready, DRIVE IT. Approval ceremony must never be the
   reason a station sits idle.
-- **An ADR departure is RECORDED, not blocking.** Align with the register
+- **A decision departure is RECORDED, not blocking.** Align with the register
   first — read it, cite it, comply. But when compliance would halt the station
   and the correct action lies outside a ratified decision, TAKE the action,
-  append an ADR-0000 amendment naming the clause you departed from and why, and
-  keep moving. The register is a ledger, not a lock.
+  record the departure as a register entry through the `decide` skill, naming
+  the clause you departed from and why, and keep moving. The register is a
+  ledger, not a lock.
 
 `ready > 0` with `mounted 0` is an INCIDENT, not a quiet board — diagnose it
 with the same urgency as a red one.
