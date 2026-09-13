@@ -73,6 +73,71 @@ Map<String, dynamic> _$PullRequestOpenedToJson(PullRequestOpened instance) =>
       'runtimeType': instance.$type,
     };
 
+PullRequestFeedback _$PullRequestFeedbackFromJson(Map<String, dynamic> json) =>
+    PullRequestFeedback(
+      nodeId: json['nodeId'] as String,
+      actor: json['actor'] as String,
+      repository: json['repository'] as String,
+      substation: json['substation'] as String,
+      observationId: json['observationId'] as String,
+      number: (json['number'] as num).toInt(),
+      body: json['body'] as String,
+      headBranch: json['headBranch'] as String,
+      headSha: json['headSha'] as String,
+      checkState: $enumDecode(
+        _$PullRequestCheckStateEnumMap,
+        json['checkState'],
+      ),
+      mergeability: $enumDecode(
+        _$PullRequestMergeabilityEnumMap,
+        json['mergeability'],
+      ),
+      openedAt: DateTime.parse(json['openedAt'] as String),
+      updatedAt: DateTime.parse(json['updatedAt'] as String),
+      greenSince: json['greenSince'] == null
+          ? null
+          : DateTime.parse(json['greenSince'] as String),
+      observedAt: DateTime.parse(json['observedAt'] as String),
+      stalled: json['stalled'] as bool,
+      $type: json['runtimeType'] as String?,
+    );
+
+Map<String, dynamic> _$PullRequestFeedbackToJson(
+  PullRequestFeedback instance,
+) => <String, dynamic>{
+  'nodeId': instance.nodeId,
+  'actor': instance.actor,
+  'repository': instance.repository,
+  'substation': instance.substation,
+  'observationId': instance.observationId,
+  'number': instance.number,
+  'body': instance.body,
+  'headBranch': instance.headBranch,
+  'headSha': instance.headSha,
+  'checkState': _$PullRequestCheckStateEnumMap[instance.checkState]!,
+  'mergeability': _$PullRequestMergeabilityEnumMap[instance.mergeability]!,
+  'openedAt': instance.openedAt.toIso8601String(),
+  'updatedAt': instance.updatedAt.toIso8601String(),
+  'greenSince': instance.greenSince?.toIso8601String(),
+  'observedAt': instance.observedAt.toIso8601String(),
+  'stalled': instance.stalled,
+  'runtimeType': instance.$type,
+};
+
+const _$PullRequestCheckStateEnumMap = {
+  PullRequestCheckState.notReported: 'notReported',
+  PullRequestCheckState.pending: 'pending',
+  PullRequestCheckState.green: 'green',
+  PullRequestCheckState.failing: 'failing',
+  PullRequestCheckState.inconclusive: 'inconclusive',
+};
+
+const _$PullRequestMergeabilityEnumMap = {
+  PullRequestMergeability.unknown: 'unknown',
+  PullRequestMergeability.mergeable: 'mergeable',
+  PullRequestMergeability.conflicting: 'conflicting',
+};
+
 CheckConcluded _$CheckConcludedFromJson(Map<String, dynamic> json) =>
     CheckConcluded(
       nodeId: json['nodeId'] as String,

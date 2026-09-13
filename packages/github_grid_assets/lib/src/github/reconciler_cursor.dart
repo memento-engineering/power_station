@@ -307,6 +307,7 @@ class GitHubReconcilerCursor {
   static String observationIdOf(NormalizedGitHubEvent event) => switch (event) {
     IssueOpened(:final observationId) => observationId,
     PullRequestOpened(:final observationId) => observationId,
+    PullRequestFeedback(:final observationId) => observationId,
     CheckConcluded(:final observationId) => observationId,
     WorkflowRunConcluded(:final observationId) => observationId,
     IssueCommented(:final observationId) => observationId,

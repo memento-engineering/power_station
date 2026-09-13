@@ -124,6 +124,98 @@ void main() {
     expect(events.last.toJson()['runtimeType'], 'watchedIssueStateChanged');
   });
 
+  test('pull feedback round-trips actionable fields', () {
+    // Every check state and every mergeability, and BOTH shapes of
+    // `greenSince`: the field is the whole stall observation, so a null that
+    // decoded as an epoch — or a non-null that decoded as null — would silently
+    // turn "green for an hour" into "never green".
+    PullRequestFeedback feedback(
+      PullRequestCheckState checkState,
+      PullRequestMergeability mergeability, {
+      DateTime? greenSince,
+      bool stalled = false,
+    }) =>
+        NormalizedGitHubEvent.pullRequestFeedback(
+              nodeId: 'PR_kwDO',
+              actor: 'nico',
+              repository: 'memento-engineering/power_station',
+              substation: 'power_station',
+              observationId:
+                  'poll:pull-feedback:PR_kwDO:abc123:${checkState.name}',
+              number: 8,
+              body: 'A human digest.\n\nRefs: pow-78jk\n',
+              headBranch: 'org/lockfile-convention',
+              headSha: 'abc123',
+              checkState: checkState,
+              mergeability: mergeability,
+              openedAt: DateTime.utc(2026, 9, 12, 8),
+              updatedAt: DateTime.utc(2026, 9, 12, 9),
+              greenSince: greenSince,
+              observedAt: DateTime.utc(2026, 9, 12, 11),
+              stalled: stalled,
+            )
+            as PullRequestFeedback;
+
+    final cases = <PullRequestFeedback>[
+      for (final state in PullRequestCheckState.values)
+        for (final mergeability in PullRequestMergeability.values)
+          feedback(state, mergeability),
+      feedback(
+        PullRequestCheckState.green,
+        PullRequestMergeability.mergeable,
+        greenSince: DateTime.utc(2026, 9, 12, 9, 30),
+        stalled: true,
+      ),
+    ];
+
+    for (final event in cases) {
+      final encoded = jsonDecode(jsonEncode(event.toJson()));
+      expect(
+        NormalizedGitHubEvent.fromJson(encoded as Map<String, Object?>),
+        event,
+      );
+    }
+
+    final stalled = cases.last;
+    final decoded =
+        NormalizedGitHubEvent.fromJson(
+              jsonDecode(jsonEncode(stalled.toJson())) as Map<String, Object?>,
+            )
+            as PullRequestFeedback;
+    // The actionable set, field by field: the governor is informed through
+    // exactly these, so a dropped one is a governor that cannot decide.
+    expect(decoded.repository, 'memento-engineering/power_station');
+    expect(decoded.number, 8);
+    expect(decoded.body, contains('Refs: pow-78jk'));
+    expect(decoded.headBranch, 'org/lockfile-convention');
+    expect(decoded.headSha, 'abc123');
+    expect(decoded.checkState, PullRequestCheckState.green);
+    expect(decoded.mergeability, PullRequestMergeability.mergeable);
+    expect(decoded.openedAt, DateTime.utc(2026, 9, 12, 8));
+    expect(decoded.updatedAt, DateTime.utc(2026, 9, 12, 9));
+    expect(decoded.greenSince, DateTime.utc(2026, 9, 12, 9, 30));
+    expect(decoded.observedAt, DateTime.utc(2026, 9, 12, 11));
+    expect(decoded.stalled, isTrue);
+    expect(
+      cases.first.greenSince,
+      isNull,
+      reason: 'a non-green head was never green',
+    );
+    expect(stalled.toJson()['runtimeType'], 'pullRequestFeedback');
+    expect(stalled.toJson()['checkState'], 'green');
+    expect(stalled.toJson()['mergeability'], 'mergeable');
+    for (final rawKey in const <String>[
+      'check_runs',
+      'node_id',
+      'head_sha',
+      'created_at',
+      'updated_at',
+      'completed_at',
+    ]) {
+      expect(jsonEncode(stalled.toJson()), isNot(contains(rawKey)));
+    }
+  });
+
   test('every change value has a distinct, stable wire spelling', () {
     final wires = <String>{
       for (final change in GitHubIssueWatchChange.values) change.wire,

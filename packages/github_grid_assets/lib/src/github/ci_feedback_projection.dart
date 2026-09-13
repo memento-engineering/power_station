@@ -88,6 +88,8 @@ final class CiFeedbackProjection {
       // union keeps that disjointness a COMPILE error to break.
       case IssueCommented() || WatchedIssueStateChanged():
         return;
+      case PullRequestFeedback():
+        return;
       case CheckConcluded():
         await _projectCheck(event);
     }
