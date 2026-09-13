@@ -1,19 +1,44 @@
 /// `prime --hook-json` — the grid's OWN SessionStart hook target, replacing the
 /// vended `bd prime --hook-json` registration.
 ///
-/// It ECHOES `bd prime` verbatim (Nico, 2026-09-03) and, only when the process
-/// occupies an operator seat AND the SessionStart `source` is `startup`,
-/// `clear` or `compact`, APPENDS that seat's newest handoff after one naming
-/// line. A `resume` source echoes bd's context byte-for-byte and never reads the
-/// disc because the context survives a resume; injecting there is pure
-/// inference cost (Nico, 2026-09-04). It injects nothing else — no disc summary
+/// It answers for the STATION, and it POINTS rather than restates
+/// (`memento-engineering#a-station-explains-itself-through-prime-and-bounded-help`
+/// obligation 1). The station's identity, how it is invoked, every verb it
+/// exposes BY NAME, where ratified decisions live and which verb searches them,
+/// where the seat's own disc is, and what wakes a seat: those are the facts no
+/// other surface answers, and a seat that has to infer them builds a substitute
+/// for a verb that already exists. Every verb is a POINTER at its own `help` —
+/// whatever a verb's help can answer, prime must not duplicate, because the
+/// root help is already ~1,700 tokens and a copy of it here would cost the
+/// window twice.
+///
+/// The verb list is DERIVED from the composed [CommandRunner] at run time, not
+/// authored here. A hand-written list is the same defect one layer down: it
+/// drifts the moment a station composes a verb this package never heard of.
+///
+/// Beneath that it carries the issue tracker's own reference — it ECHOES `bd
+/// prime` verbatim (Nico, 2026-09-03) under a labelled heading, so the material
+/// that used to be the WHOLE answer stays reachable without being it — and,
+/// only when the process occupies an operator seat AND the SessionStart
+/// `source` is `startup`, `clear` or `compact`, APPENDS that seat's newest
+/// handoff after one naming line. A `resume` source reads no disc at all,
+/// because the context survives a resume and injecting there is pure inference
+/// cost (Nico, 2026-09-04). It injects nothing else — no disc summary
 /// and no disc-recording instructions:
 /// `the_grid#agent-disc-file-shape-and-home` section 5 says "Nothing injects
 /// the disc, or disc-recording instructions, per session", and the harness
 /// already loads the disc natively once `AgentEnvironment.memoryDirArgs` points
 /// its memory directory at it.
 ///
-/// It exits 0 in EVERY case. A hook that fails must not fail a session.
+/// The whole answer is BOUNDED by the pack's one [boundedOutput] selector, so
+/// the verb that exists to cut a session's opening cost cannot become the cost:
+/// prime supplies only its own trim POLICY — tracker body first, then the
+/// handoff body, then whole verb-pointer records — and every cut NAMES the
+/// bytes withheld and how to ask for them.
+///
+/// It exits 0 in EVERY case. A hook that fails must not fail a session, so
+/// every dependency — the tracker, the environment, the working directory, the
+/// disc, the payload — is isolated to its own degraded value.
 library;
 
 import 'dart:async';
@@ -23,6 +48,7 @@ import 'dart:io';
 import 'package:args/command_runner.dart';
 import 'package:beads_dart/beads_dart.dart' show BdRunner, ProcessBdRunner;
 
+import '../io/bounded_output.dart';
 import 'seat_disc.dart';
 
 /// The hook event this verb answers when a payload names none.
@@ -159,6 +185,196 @@ bool shouldInjectHandoff(String payload) => switch (hookSourceOf(payload)) {
   SessionStartSource.resume || null => false,
 };
 
+/// The heading over the verb POINTERS.
+const String _verbsHeading = 'Verbs:';
+
+/// The heading over the SUBORDINATE tracker reference — the material that used
+/// to be the whole answer, kept reachable and clearly not the station's own.
+const String _trackerHeading = 'Tracker reference (bd prime):';
+
+/// What stands under that heading when `bd` said nothing this prime can pass
+/// on. It POINTS: the tracker is still one command away.
+const String _trackerUnavailable = 'Unavailable here; run bd prime.';
+
+/// The UTF-8 weight of one line record — what dropping it gives back, and what
+/// keeping it costs.
+int _bytesOf(String text) => utf8.encode(text).length;
+
+/// One prime answer, assembled and ready to render — the value the pack's
+/// bound selects between.
+///
+/// Every part is already whole: an orientation line, a tracker section and a
+/// handoff are kept entire or replaced entire by a record that NAMES what went
+/// missing. Nothing here holds a fragment of a line, a rune or a JSON envelope.
+final class _PrimeAnswer {
+  const _PrimeAnswer({
+    required this.orientation,
+    required this.tracker,
+    required this.handoff,
+  });
+
+  /// The station-orientation records — identity, invocation, the verb pointers
+  /// and the decision/disc/wake facts — or the ONE line naming their withheld
+  /// bytes.
+  final List<String> orientation;
+
+  /// bd's own context VERBATIM, the unavailable pointer, or the line naming the
+  /// bytes withheld.
+  final String tracker;
+
+  /// The seat's newest handoff, whose BODY may itself be a withheld-bytes
+  /// pointer. Its naming line survives either way: a seat that is not told a
+  /// handoff exists cannot go and read it.
+  final SeatHandoff? handoff;
+
+  /// The `additionalContext` this answer is.
+  String render() => composePrimeContext(
+    bdContext: [...orientation, '', _trackerHeading, tracker].join('\n'),
+    handoff: handoff,
+  );
+}
+
+/// Everything one prime answer could say, with the cost of each droppable
+/// part — this verb's own trim POLICY, and nothing of the bound itself.
+///
+/// The droppable material is ONE priority-ordered list: the verb pointers, then
+/// the handoff body, then the tracker body. A budget keeps the longest PREFIX
+/// of it that fits, so the tracker reference goes first, the handoff body next
+/// and the verb pointers last — and the rendering only ever grows with the
+/// budget, which is what makes the pack's binary search over it correct.
+final class _PrimeMaterial {
+  _PrimeMaterial({
+    required this.executableName,
+    required this.heading,
+    required this.verbs,
+    required this.trailer,
+    required this.trackerBody,
+    required this.handoff,
+  });
+
+  /// The station executable — what a withheld record tells the reader to run.
+  final String executableName;
+
+  /// `Station:` and `Invoke:`.
+  final List<String> heading;
+
+  /// One `- <verb> — <executable> help <verb>` POINTER per key the composed
+  /// runner exposes, aliases included.
+  final List<String> verbs;
+
+  /// The `Decisions:`, `Agent Disc:` and `Wake:` records.
+  final List<String> trailer;
+
+  /// bd's own context, or null when it could not be read.
+  final String? trackerBody;
+
+  /// The seat's newest handoff, or null when none is injected.
+  final SeatHandoff? handoff;
+
+  late final List<int> _verbCosts = [
+    for (final record in verbs) _bytesOf(record),
+  ];
+  late final int _handoffCost = switch (handoff) {
+    null => 0,
+    final note => _bytesOf(note.body),
+  };
+  late final int _trackerCost = switch (trackerBody) {
+    null => 0,
+    final body => _bytesOf(body),
+  };
+  late final int _orientationCost = _bytesOf(
+    _orientationLines(verbs, null).join('\n'),
+  );
+
+  /// The largest budget worth searching: every droppable byte.
+  int get maximumTrimBudget =>
+      _verbCosts.fold(0, (sum, cost) => sum + cost) +
+      _handoffCost +
+      _trackerCost;
+
+  /// The whole answer, nothing withheld.
+  _PrimeAnswer get complete => trimTo(maximumTrimBudget);
+
+  /// The answer that spends at most [budget] bytes on droppable material.
+  _PrimeAnswer trimTo(int budget) {
+    if (budget <= 0) return _collapsed();
+    var spent = 0;
+    var keptVerbs = 0;
+    while (keptVerbs < verbs.length &&
+        spent + _verbCosts[keptVerbs] <= budget) {
+      spent += _verbCosts[keptVerbs];
+      keptVerbs++;
+    }
+    final keepsHandoff =
+        keptVerbs == verbs.length && spent + _handoffCost <= budget;
+    if (keepsHandoff) spent += _handoffCost;
+    final keepsTracker = keepsHandoff && spent + _trackerCost <= budget;
+    final droppedVerbs = verbs.length - keptVerbs;
+    return _PrimeAnswer(
+      orientation: _orientationLines(
+        verbs.take(keptVerbs).toList(growable: false),
+        droppedVerbs == 0
+            ? null
+            : 'Withheld: $droppedVerbs verb-pointer records '
+                  '(${_verbCosts.skip(keptVerbs).fold(0, (sum, cost) => sum + cost)} '
+                  'bytes); run $executableName help.',
+      ),
+      tracker: switch (trackerBody) {
+        null => _trackerUnavailable,
+        final body when keepsTracker => body,
+        _ => 'Withheld: $_trackerCost tracker-reference bytes; run bd prime.',
+      },
+      handoff: switch (handoff) {
+        null => null,
+        final note when keepsHandoff => note,
+        final note => SeatHandoff(
+          path: note.path,
+          relativePath: note.relativePath,
+          body:
+              'Withheld: $_handoffCost handoff-body bytes; read '
+              '${note.relativePath} from the Agent Disc.',
+        ),
+      },
+    );
+  }
+
+  /// The floor: the orientation itself replaced by the count of its withheld
+  /// bytes. Reached only when a station's own identity cannot fit the cap, and
+  /// it still POINTS at the help that carries it.
+  _PrimeAnswer _collapsed() => _PrimeAnswer(
+    orientation: [
+      'Withheld: $_orientationCost station-orientation bytes; run the '
+          'station executable with help.',
+    ],
+    tracker: switch (trackerBody) {
+      null => _trackerUnavailable,
+      _ => 'Withheld: $_trackerCost tracker-reference bytes; run bd prime.',
+    },
+    handoff: switch (handoff) {
+      null => null,
+      final note => SeatHandoff(
+        path: note.path,
+        relativePath: note.relativePath,
+        body:
+            'Withheld: $_handoffCost handoff-body bytes; read '
+            '${note.relativePath} from the Agent Disc.',
+      ),
+    },
+  );
+
+  /// The orientation block: heading, the verb pointers under their own
+  /// heading with [note] naming any dropped record, then the trailer.
+  List<String> _orientationLines(List<String> keptVerbs, String? note) => [
+    ...heading,
+    '',
+    _verbsHeading,
+    ...keptVerbs,
+    if (note != null) note,
+    '',
+    ...trailer,
+  ];
+}
+
 /// `prime [--hook-json]` — the thin adapter over the pure composers above.
 class PrimeCommand extends Command<int> {
   /// Creates the verb over its four injectable seams: [runnerFor] spawns `bd`
@@ -196,8 +412,8 @@ class PrimeCommand extends Command<int> {
 
   @override
   final String description =
-      "Answer a SessionStart hook: echo bd prime, then inject only the seat's "
-      'newest handoff.';
+      'Orient a session in this station: its verbs, its decisions, the seat '
+      "disc, then bd prime and the seat's newest handoff.";
 
   @override
   String get invocation {
@@ -210,11 +426,22 @@ class PrimeCommand extends Command<int> {
   Future<int> run() async {
     final hookJson = argResults!.flag('hook-json');
     final payload = hookJson ? await _payload() : '';
-    final context = await _context(payload);
+    final hookEventName = hookEventNameOf(payload);
+    final material = await _material(payload);
+    final context = boundedOutput<_PrimeAnswer>(
+      complete: material.complete,
+      maximumTrimBudget: material.maximumTrimBudget,
+      renderPlain: (answer) => answer.render(),
+      renderJson: (answer) => renderPrimeHookJson(
+        hookEventName: hookEventName,
+        additionalContext: answer.render(),
+      ),
+      trim: material.trimTo,
+    ).render();
     _out.writeln(
       hookJson
           ? renderPrimeHookJson(
-              hookEventName: hookEventNameOf(payload),
+              hookEventName: hookEventName,
               additionalContext: context,
             )
           : context,
@@ -231,32 +458,102 @@ class PrimeCommand extends Command<int> {
     }
   }
 
-  /// The composed context, or '' when ANY step fails — a hook that fails must
-  /// not fail a session, so every failure degrades to an empty injection and
-  /// exit 0.
-  Future<String> _context(String payload) async {
+  /// Everything this answer could say, each dependency isolated: a failing
+  /// tracker, environment, working directory or disc degrades to its own
+  /// unavailable value and NEVER to a failed session.
+  Future<_PrimeMaterial> _material(String payload) async {
+    final station = runner;
+    if (station == null) {
+      throw StateError(
+        'prime names the verbs of the runner it is composed into, and it is '
+        'composed into none',
+      );
+    }
+    final here = _here();
+    final environment = _environmentOrEmpty();
+    final seat = environment[kSeatEnvironmentVariable]?.trim() ?? '';
+    final declaredHome =
+        environment[kGridHomeEnvironmentVariable]?.trim() ?? '';
+    final home = declaredHome.isEmpty ? here : declaredHome;
+    final executable = station.executableName;
+    return _PrimeMaterial(
+      executableName: executable,
+      heading: [
+        'Station: $executable — ${station.description}',
+        'Invoke: ${station.invocation}',
+      ],
+      // DERIVED, never authored: the composed runner already knows its own
+      // command set, aliases included, and a list maintained here would drift
+      // the moment a station adds a verb.
+      verbs: [
+        for (final verb in station.commands.keys.toList()..sort())
+          '- $verb — $executable help $verb',
+      ],
+      trailer: [
+        'Decisions: docs/decisions/ in every mounted substation; ratified '
+            'decisions bind. Search with $executable search; usage: '
+            '$executable help search.',
+        'Agent Disc: '
+            '${seat.isEmpty ? '<grid home>/$kSeatsSubdirectory/<seat>/' : seatDiscPath(home, seat)}.',
+        'Wake: the resident station evaluates the seat wake predicate on the '
+            'existing fenced service tick; a seat adds no second wake '
+            'mechanism.',
+      ],
+      trackerBody: await _trackerBody(here),
+      handoff: _newestHandoff(home: home, seat: seat, payload: payload),
+    );
+  }
+
+  /// The working directory, or '' when the process cannot name it.
+  String _here() {
     try {
-      final here = _cwd();
+      return _cwd();
+    } on Object {
+      return '';
+    }
+  }
+
+  /// The process environment, or none.
+  Map<String, String> _environmentOrEmpty() {
+    try {
+      return _environment();
+    } on Object {
+      return const <String, String>{};
+    }
+  }
+
+  /// bd's own `additionalContext`, or null when the runner is empty, non-zero,
+  /// malformed or unreachable — every one of which is "ask bd yourself", not a
+  /// failed session.
+  Future<String?> _trackerBody(String here) async {
+    try {
       final result = await _runnerFor(here).run(const [
         'prime',
         '--hook-json',
       ], timeout: const Duration(seconds: 10));
-      final bdContext = result.ok
-          ? extractBdAdditionalContext(result.stdout)
-          : '';
-      final env = _environment();
-      final seat = env[kSeatEnvironmentVariable]?.trim() ?? '';
-      final declaredHome = env[kGridHomeEnvironmentVariable]?.trim() ?? '';
-      final home = declaredHome.isEmpty ? here : declaredHome;
-      final handoff = seat.isEmpty || !shouldInjectHandoff(payload)
-          ? null
-          : SeatDisc(
-              directory: seatDiscPath(home, seat),
-              gridHome: home,
-            ).newestHandoff();
-      return composePrimeContext(bdContext: bdContext, handoff: handoff);
+      if (!result.ok) return null;
+      final context = extractBdAdditionalContext(result.stdout);
+      return context.isEmpty ? null : context;
     } on Object {
-      return '';
+      return null;
+    }
+  }
+
+  /// The seat's newest handoff, or null when there is no seat, no injection is
+  /// due for this source, or the disc cannot be read.
+  SeatHandoff? _newestHandoff({
+    required String home,
+    required String seat,
+    required String payload,
+  }) {
+    if (seat.isEmpty || !shouldInjectHandoff(payload)) return null;
+    try {
+      return SeatDisc(
+        directory: seatDiscPath(home, seat),
+        gridHome: home,
+      ).newestHandoff();
+    } on Object {
+      return null;
     }
   }
 }

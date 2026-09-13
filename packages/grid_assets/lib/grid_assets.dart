@@ -89,8 +89,8 @@
 /// uses (one exact-id `bd query`, one `bd dep list`, no mutation surface) and
 /// renders id, prose, the `grid.approved_*` stamp and the dependency edges
 /// with NO station in the path. Its output is BOUNDED at
-/// [kShowOutputCapBytes] on both the plain and the JSON rendering, and what it
-/// cuts it NAMES with the withheld byte count
+/// [kBoundedOutputCapBytes] on both the plain and the JSON rendering, and what
+/// it cuts it NAMES with the withheld byte count
 /// (`power_station#a-mechanical-lookup-is-a-vended-command-with-a-bounded-output`);
 /// `--if-revision` suppresses the prose only against the bead's own
 /// `updated_at` revision, never against the text of the request. Round, lane
@@ -110,9 +110,25 @@
 ///
 /// The SEAT command set makes an operator seat OCCUPIABLE with its own disc
 /// (bead `pow-lv6t`): [PrimeCommand] is the grid's own SessionStart hook
-/// target — it echoes `bd prime` and injects only the seat's newest handoff —
-/// and [SeatCommand] is the OUTER harness that launches a seat's occupant with
-/// its role definition and disc and relaunches it on handoff.
+/// target. It answers for the STATION and POINTS rather than restates
+/// (`memento-engineering#a-station-explains-itself-through-prime-and-bounded-help`):
+/// the station's identity and invocation, every verb it exposes BY NAME with
+/// that verb's own `help` beside it — DERIVED from the composed
+/// `CommandRunner`, never a list authored here that would drift the moment a
+/// station adds a verb — then where ratified decisions live and which verb
+/// searches them, the seat's disc, and the fenced service tick that wakes a
+/// seat. The issue tracker's `bd prime` reference follows VERBATIM under its
+/// own heading: still reachable, no longer the whole answer. Handoff injection
+/// is unchanged — only the seat's newest handoff, only on startup, clear and
+/// compact. The whole answer rides the pack's ONE output bound,
+/// [boundedOutput] at [kBoundedOutputCapBytes] — the same selector the `show`
+/// verb consumes, because a second implementation of a cap is the defect
+/// `power_station#a-mechanical-lookup-is-a-vended-command-with-a-bounded-output`
+/// exists to stop one layer down; prime supplies only its own trim order
+/// (tracker body, then handoff body, then whole verb-pointer records) and every
+/// cut NAMES the bytes withheld and how to ask for them.
+/// [SeatCommand] is the OUTER harness that launches a seat's
+/// occupant with its role definition and disc and relaunches it on handoff.
 /// [SuccessionCommand] closes the loop at the other end: it CONSUMES that
 /// handoff through [SeatSuccessionService], which archives the seat disc in a
 /// path-scoped commit and proves the note is in `HEAD` before deleting it and
@@ -264,6 +280,7 @@ export 'src/filing/filing_contract.dart';
 export 'src/filing/park_command.dart';
 export 'src/filing/show_command.dart';
 export 'src/filing/state_root_option.dart';
+export 'src/io/bounded_output.dart';
 export 'src/io/recorded_artifact.dart';
 export 'src/lease/bus_lease.dart';
 export 'src/search/embedding_index.dart';
