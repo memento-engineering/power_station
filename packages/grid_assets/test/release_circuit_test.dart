@@ -150,6 +150,7 @@ class _FakeReleaseCommandInvoker implements ReleaseCommandInvoker {
     Map<String, _LadderFact>? ladder,
     List<String>? workspaceOrder,
     List<Map<String, Object?>>? wavePackages,
+    this.publishWavePackages,
     this.pollPublished = true,
     this.delegate,
     this.delegateOperations = const <String>{},
@@ -172,6 +173,10 @@ class _FakeReleaseCommandInvoker implements ReleaseCommandInvoker {
   final Map<String, _LadderFact> ladder;
   final List<String> workspaceOrder;
   final List<Map<String, Object?>> wavePackages;
+
+  /// The wave the IRREVERSIBLE run answers with, when it must differ from the
+  /// one the preflight cleared; null ⇒ both runs answer [wavePackages].
+  final List<Map<String, Object?>>? publishWavePackages;
   final bool pollPublished;
   final ReleaseCommandInvoker? delegate;
   final Set<String> delegateOperations;
@@ -280,12 +285,15 @@ class _FakeReleaseCommandInvoker implements ReleaseCommandInvoker {
           'warnings': <Object?>[],
         };
       case 'publish':
+        final dryRun = arguments.contains('--dry-run');
         return <String, Object?>{
           'workspaceRoot': request.workspaceRoot,
           'change': request.change.name,
           'promotionIntent': arguments.contains('--promotion-intent'),
-          'dryRun': arguments.contains('--dry-run'),
-          'packages': wavePackages,
+          'dryRun': dryRun,
+          'packages': dryRun
+              ? wavePackages
+              : (publishWavePackages ?? wavePackages),
         };
       case 'poll':
         final wanted = _option(arguments, '--version')!;
@@ -923,7 +931,65 @@ void main() {
       expect({
         for (final call in mismatched.calls) call[1],
       }, isNot(contains('poll')));
+
+      // And the SAME check binds the irreversible run: a wave that cleared its
+      // preflight in dependency order and then ran in another one is refused
+      // before a single poll, never reconciled after the fact.
+      final drifted = _FakeReleaseCommandInvoker(
+        request: request,
+        workspaceOrder: const <String>[_base, _dependent],
+        wavePackages: wave,
+        publishWavePackages: wave.reversed.toList(),
+      );
+      final stopped = await _drive(request, drifted);
+      expect(stopped.ran.last, 'publish');
+      expect((stopped.stop! as Failed).reason, contains('dependency order'));
+      expect({
+        for (final call in drifted.calls) call[1],
+      }, isNot(contains('poll')));
     });
+
+    test(
+      'the irreversible wave must match the plan the preflight cleared',
+      () async {
+        final request = _request();
+        final wave = <Map<String, Object?>>[
+          _FakeReleaseCommandInvoker.wavePackage(
+            package: _base,
+            directory: _baseDir,
+          ),
+          _FakeReleaseCommandInvoker.wavePackage(
+            package: _dependent,
+            directory: _dependentDir,
+            dependencies: const <String>[_base],
+          ),
+        ];
+        // Same packages, same order — a different VERSION, so only the fact
+        // comparison can catch it.
+        final drifted = _FakeReleaseCommandInvoker(
+          request: request,
+          workspaceOrder: const <String>[_base, _dependent],
+          wavePackages: wave,
+          publishWavePackages: <Map<String, Object?>>[
+            _FakeReleaseCommandInvoker.wavePackage(
+              package: _base,
+              directory: _baseDir,
+              version: '0.2.0-dev.1',
+            ),
+            wave[1],
+          ],
+        );
+        final report = await _drive(request, drifted);
+        expect(report.ran.last, 'publish');
+        final reason = (report.stop! as Failed).reason;
+        expect(reason, contains('position 0'));
+        expect(reason, contains('0.2.0-dev.1'));
+        expect(reason, contains('nothing publishes on a plan no gate saw'));
+        expect({
+          for (final call in drifted.calls) call[1],
+        }, isNot(contains('poll')));
+      },
+    );
 
     test('waits for pub.dev before a dependent tag', () async {
       final root = Directory.systemTemp.createTempSync('release-wave-');

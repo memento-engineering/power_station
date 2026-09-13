@@ -444,7 +444,7 @@ const Map<_ReleaseOperation, List<String>> _kRequiredReceipts = {
   _ReleaseOperation.order: [_kClassifyStep],
   _ReleaseOperation.dryRun: [_kOrderStep],
   _ReleaseOperation.preflight: [_kDryRunStep, _kOrderStep],
-  _ReleaseOperation.publish: [_kPreflightStep],
+  _ReleaseOperation.publish: [_kPreflightStep, _kOrderStep],
   _ReleaseOperation.poll: [_kPublishStep],
 };
 
@@ -1044,23 +1044,25 @@ class ReleaseGateCapability extends ServiceCapability {
     }
     final facts = _waveFacts(json, what);
     final ordered = [for (final fact in facts) fact['package'] as String];
-    if (preflight) {
-      final projected = _stringListAt(
-        receipts[_kOrderStep]!,
-        'projected',
-        'the order receipt',
+    // BOTH wave answers are checked against the workspace's own dependency
+    // order, not just the one that cleared: the whole point of the barrier is
+    // that a dependent is never tagged before what it resolves.
+    final projected = _stringListAt(
+      receipts[_kOrderStep]!,
+      'projected',
+      'the order receipt',
+    );
+    if (!_sameOrder(ordered, projected)) {
+      throw _GateRefusal(
+        Failed(
+          'release ${operation.wireName}: the wave would publish '
+          '[${ordered.join(' -> ')}] where the workspace dependency order is '
+          '[${projected.join(' -> ')}] — a dependent must never be tagged '
+          'before what it resolves.',
+        ),
       );
-      if (!_sameOrder(ordered, projected)) {
-        throw _GateRefusal(
-          Failed(
-            'release preflight: the wave would publish '
-            '[${ordered.join(' -> ')}] where the workspace dependency order is '
-            '[${projected.join(' -> ')}] — a dependent must never be tagged '
-            'before what it resolves.',
-          ),
-        );
-      }
-    } else {
+    }
+    if (!preflight) {
       final preflightReceipt = receipts[_kPreflightStep]!;
       final preflightFacts = _objectListAt(
         preflightReceipt,
@@ -1071,9 +1073,8 @@ class ReleaseGateCapability extends ServiceCapability {
         throw _GateRefusal(
           Failed(
             'release publish: the wave that ran differs from the wave the '
-            'preflight cleared — preflight ${jsonEncode(preflightFacts)}, '
-            'publish ${jsonEncode(facts)}. Nothing publishes on a plan no gate '
-            'saw.',
+            'preflight cleared at ${_firstWaveDifference(preflightFacts, facts)}'
+            ' — nothing publishes on a plan no gate saw.',
           ),
         );
       }
@@ -1298,6 +1299,21 @@ List<Map<String, Object?>> _waveFacts(Map<String, Object?> json, String what) =>
           'tag': _stringAt(package, 'tag', what),
         },
     ];
+
+/// Where two wave answers first disagree — the ONE record an operator needs,
+/// rather than two whole wave dumps a bounded failure reason would clip.
+String _firstWaveDifference(
+  List<Map<String, Object?>> expected,
+  List<Map<String, Object?>> actual,
+) {
+  for (var i = 0; i < expected.length && i < actual.length; i++) {
+    if (jsonEncode(expected[i]) == jsonEncode(actual[i])) continue;
+    return 'position $i: preflight ${jsonEncode(expected[i])}, published '
+        '${jsonEncode(actual[i])}';
+  }
+  return 'its length: the preflight carried ${expected.length} package(s), the '
+      'run carried ${actual.length}';
+}
 
 /// Why a scrub refused, in the vended result's own words.
 String _scrubReason(Map<String, Object?> json, Object? floors) {
