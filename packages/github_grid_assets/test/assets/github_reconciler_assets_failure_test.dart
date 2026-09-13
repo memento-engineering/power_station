@@ -131,19 +131,28 @@ const _config = GitHubReconcilerConfig(
   minimumSpacing: Duration.zero,
 );
 
-const _check = NormalizedGitHubEvent.checkConcluded(
-  nodeId: 'C_1',
-  actor: 'actions',
+/// One RED open pull request stating its bead in the body's `Refs:` trailer.
+final _check = NormalizedGitHubEvent.pullRequestFeedback(
+  nodeId: 'PR_1',
+  actor: 'nico',
   repository: 'memento/power_station',
   substation: 'power_station',
-  observationId: 'poll:check:C_1:2026-09-03T16:24:00Z:failure',
+  observationId: 'poll:pull-feedback:PR_1:abc123:failing',
+  number: 8,
+  body: 'A human digest.\n\nRefs: pow-2xmo\n',
   headBranch: 'grid/pow-2xmo',
-  checkName: 'build',
-  conclusion: 'failure',
+  headSha: 'abc123',
+  checkState: PullRequestCheckState.failing,
+  mergeability: PullRequestMergeability.mergeable,
+  openedAt: DateTime.utc(2026, 9, 3, 15),
+  updatedAt: DateTime.utc(2026, 9, 3, 16, 24),
+  greenSince: null,
+  observedAt: DateTime.utc(2026, 9, 3, 16, 30),
+  stalled: false,
 );
 
-/// A store holding NO session for the check's bead — the ordinary shape of a
-/// check that arrived after its PR landed and its session closed.
+/// A store holding NO session for the pull's bead — the ordinary shape of
+/// feedback that arrived after its PR landed and its session closed.
 CiFeedbackProjection _landedProjection() => CiFeedbackProjection(
   bd: _StateBd('{"schema_version":1,"data":[]}'),
   commandSender: _Sender(),

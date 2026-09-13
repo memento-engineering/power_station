@@ -191,20 +191,33 @@ String _sessions(List<String> workBeads, {List<String>? ids}) => jsonEncode({
   ],
 });
 
-/// The wedged shape, verbatim: ONE completed check on a `grid/<bead>` branch,
+/// The wedged shape, verbatim: ONE open pull request whose checks are RED,
 /// acked by the sink leg only.
-const _checkId = 'poll:check:C_1:2026-09-03T16:24:00Z:failure';
+///
+/// It rides a `grid/` branch because the wedged seat's did — but the bead is
+/// read from the body's `Refs:` trailer, and the branch takes no part in it.
+const _checkId =
+    'poll:pull-feedback:PR_1:abc123:2026-09-03T16:24:00.000Z:failing:'
+    'mergeable:never-green:fresh';
 final _checkCompletedAt = DateTime.parse('2026-09-03T16:24:00Z');
 
-const _checkEvent = NormalizedGitHubEvent.checkConcluded(
-  nodeId: 'C_1',
-  actor: 'actions',
+final _checkEvent = NormalizedGitHubEvent.pullRequestFeedback(
+  nodeId: 'PR_1',
+  actor: 'nico',
   repository: 'memento/power',
   substation: 'power',
   observationId: _checkId,
+  number: 8,
+  body: 'A human digest.\n\nRefs: pow-2xmo\n',
   headBranch: 'grid/pow-2xmo',
-  checkName: 'build',
-  conclusion: 'failure',
+  headSha: 'abc123',
+  checkState: PullRequestCheckState.failing,
+  mergeability: PullRequestMergeability.mergeable,
+  openedAt: DateTime.utc(2026, 9, 3, 15),
+  updatedAt: _checkCompletedAt,
+  greenSince: null,
+  observedAt: DateTime.utc(2026, 9, 3, 16, 30),
+  stalled: false,
 );
 
 /// An intake row updated AFTER the wedged check — one of the 53 rows GitHub

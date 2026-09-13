@@ -169,10 +169,17 @@ final class _CheckTransport implements GitHubHttpTransport {
       body: jsonEncode([
         {
           'node_id': 'PR_1',
+          'number': 8,
+          'body': 'A human digest.\n\nRefs: pow-test\n',
+          'user': {'login': 'nico'},
+          'created_at': '2026-08-23T00:00:00Z',
+          'updated_at': '2026-08-23T00:00:00Z',
           'head': {'ref': 'grid/pow-test', 'sha': 'abc'},
         },
       ]),
     ),
+    // The FULL resource, the only place `mergeable` lives.
+    GitHubHttpResponse(statusCode: 200, body: jsonEncode({'mergeable': true})),
     GitHubHttpResponse(
       statusCode: 200,
       body: jsonEncode({
@@ -561,7 +568,7 @@ void main() {
 
     await replacementRuntime.reconciler.reconcileOnce();
     expect(oldSender.events, isEmpty);
-    expect(replacementSender.events, [contains('build')]);
+    expect(replacementSender.events, [contains('Pull request #8')]);
     owner.unmountRoot();
   });
 
