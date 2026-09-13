@@ -1,5 +1,6 @@
 ---
 name: refiner
+model: opus
 description: >
   The interactive, human-facing seat of a resident the_grid station. Adopt this
   agent when work is being filed, sharpened, wired, forked, reconciled or
