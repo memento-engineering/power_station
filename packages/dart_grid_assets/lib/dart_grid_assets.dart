@@ -19,3 +19,4 @@ export 'src/dart/release_service.dart';
 export 'src/dart/verification_command.dart';
 export 'src/dart/verification_service.dart';
 export 'src/domain/domain_envelope.dart';
+export 'src/io/bounded_output.dart';

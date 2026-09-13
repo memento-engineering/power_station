@@ -183,10 +183,11 @@ class ReleaseDiscoverCommand extends Command<int> {
 /// (filing the promotion bead a human then acts on) is the skill's judgement,
 /// and this verb neither files nor promotes.
 ///
-/// BOUNDED, like every vended command: the report is windowed to
-/// [kLadderOutputCapBytes] and names what it withheld plus the `--skip` that
-/// reaches it. The ladder is a time-varying read — the facts move as packages
-/// publish — so every call reads pub.dev afresh and no answer is suppressed.
+/// BOUNDED, like every vended command: [ReleaseLadderReport.bounded] windows
+/// the report through the SDK's one output bound, and the window names what it
+/// withheld plus the `--skip` that reaches it. The ladder is a time-varying
+/// read — the facts move as packages publish — so every call reads pub.dev
+/// afresh and no answer is suppressed.
 class ReleaseLadderCommand extends Command<int> {
   /// Creates the op over [service], rendering to [out]/[err].
   ReleaseLadderCommand({
@@ -258,19 +259,12 @@ class ReleaseLadderCommand extends Command<int> {
     if (args.flag('json')) {
       _out.writeln(jsonEncode(report.toJson()));
     } else {
-      for (final record in report.packages) {
-        _out.writeln(
-          '${record.package} '
-          '${record.currentPublishedVersion ?? 'unpublished'} '
-          'rung=${record.rung?.name ?? 'none'} '
-          'counter=${record.rungCounter} '
-          'stable=${record.lastStableVersion ?? 'none'} '
-          'prereleases=${record.prereleasesSinceStable} '
-          'stale=${record.isOverStalenessThreshold}',
-        );
-      }
-      final withheld = report.withheld;
-      if (withheld != null) _out.writeln('$withheld withheld — ${report.show}');
+      // The EXACT rendering the bound was computed against — the report owns
+      // both of them, so stdout cannot drift from what fit. A window with no
+      // records renders to nothing, and nothing is what gets written: a lone
+      // newline would be an answer this verb never has.
+      final plain = report.toPlain();
+      if (plain.isNotEmpty) _out.writeln(plain);
     }
     return 0;
   }
