@@ -107,6 +107,35 @@ String _diffFor(Iterable<String> paths) => paths
 String _fixtureTestPath(String stem) =>
     'test/${stem}_${String.fromCharCode(116)}est.dart';
 
+/// A test path a design names as the SUBJECT of its own edit verb, and that
+/// same path at the pinned base.
+const _selfPath = 'test/self_reference_regression_test.dart';
+const _baseSelfPath =
+    'packages/grid_assets/test/self_reference_regression_test.dart';
+
+/// Asserts [design] promises [_selfPath] — a reference-shaped phrase about the
+/// file's OWN contents never demotes it to a base-gated mention, so a pinned
+/// diff without it still hard blocks.
+Future<void> _expectSelfReferenceAuthored(String design) async {
+  final declarations = testDeclarations(design);
+  expect(declarations.authored, {_selfPath}, reason: design);
+  expect(declarations.mentioned, isEmpty, reason: design);
+  expect(declaredTestFiles(design, baseFiles: const {_baseSelfPath}), {
+    _selfPath,
+  }, reason: design);
+  final outcome = await _runGate(
+    design: design,
+    diff: _diffFor(['packages/grid_assets/lib/src/code/committee.dart']),
+    existingFiles: const [_baseSelfPath],
+  );
+  expect(outcome.payload, {
+    'grade': 'F',
+    'transport': 'structural',
+    'rationale':
+        'Design-declared test files missing from pinned diff: $_selfPath',
+  }, reason: design);
+}
+
 void main() {
   test('missing declared files fail loudly', () async {
     final outcome = await _runGate(
@@ -899,5 +928,121 @@ package:leonard_contract/src/strike_counter.dart
       'rationale':
           'Design-declared test files missing from pinned diff: $authored',
     });
+  });
+
+  test(
+    'pow-wbhb create plus cite buckets the pattern source as mentioned',
+    () async {
+      const created = 'test/pattern_source_regression_test.dart';
+      const cited = 'test/existing_pattern_source_test.dart';
+      const baseCited =
+          'packages/grid_engine/test/existing_pattern_source_test.dart';
+      // One sentence CREATES a file and CITES another as the pattern it copies.
+      // The citation governs only the path it precedes, so the created path is a
+      // promise and the pattern source stays a base-gated mention.
+      const genericDesign =
+          '''
+## Touches
+- `$created` — created; regression file.
+Change: Create this regression file using the patterns from `$cited`.
+''';
+      final declarations = testDeclarations(genericDesign);
+      expect(declarations.authored, {created});
+      expect(declarations.mentioned, {cited});
+      // pow-qev's fail-closed posture: an unknown base declares the citation too.
+      expect(declaredTestFiles(genericDesign), {created, cited});
+      expect(declaredTestFiles(genericDesign, baseFiles: const {baseCited}), {
+        created,
+      });
+      final outcome = await _runGate(
+        design: genericDesign,
+        diff: _diffFor([created]),
+        existingFiles: const [baseCited],
+      );
+      expect(outcome.payload?['grade'], 'A');
+    },
+  );
+
+  test('pow-wbhb pattern-source vocabulary is reference evidence', () {
+    const created = 'test/pattern_source_regression_test.dart';
+    const cited = 'test/existing_pattern_source_test.dart';
+    const baseCited =
+        'packages/grid_engine/test/existing_pattern_source_test.dart';
+    const vocabularyClauses = [
+      'using the patterns from `$cited`',
+      'with the patterns in `$cited`',
+      'using the patterns described by `$cited`',
+      'modeled after `$cited`',
+      'modelled after `$cited`',
+      'following `$cited`',
+      'in the style of `$cited`',
+      'copied from `$cited`',
+      'adapted from `$cited`',
+    ];
+    for (final clause in vocabularyClauses) {
+      final design =
+          '''
+## Touches
+- `$created` — created; regression file.
+Change: Create this regression file $clause.
+''';
+      final declarations = testDeclarations(design);
+      expect(declarations.authored, {created}, reason: clause);
+      expect(declarations.mentioned, {cited}, reason: clause);
+      expect(declaredTestFiles(design), {created, cited}, reason: clause);
+      expect(declaredTestFiles(design, baseFiles: const {baseCited}), {
+        created,
+      }, reason: clause);
+    }
+  });
+
+  test('pow-wbhb following-review self-reference stays authored', () async {
+    // `following <A>` cites a pattern source; every other `following` is prose
+    // about the text that comes next. Demoting one of those would exempt a
+    // base-present file the design really does promise to change — the
+    // true-positive class the presence rule exists for.
+    await _expectSelfReferenceAuthored(
+      'Following review, add cases to `$_selfPath`.',
+    );
+    await _expectSelfReferenceAuthored(
+      'Add the following case to `$_selfPath`.',
+    );
+  });
+
+  test('pow-wbhb update-patterns self-reference stays authored', () async {
+    // `patterns in` is a pattern-source cue only when it names a DISTINCT
+    // target. Here it is the authored file's own noun phrase, so the edit verb
+    // keeps the path and its absence from the pinned diff still hard blocks.
+    await _expectSelfReferenceAuthored(
+      'Update the assertion patterns in `$_selfPath` to cover the new branch.',
+    );
+  });
+
+  test('pow-wbhb replays the tg-lizf Step 1 citation', () async {
+    const liveCreated =
+        'the_grid/packages/grid_engine/test/held_session_admission_leak_test.dart';
+    const liveCited =
+        'the_grid/packages/grid_engine/test/paused_session_admission_leak_test.dart';
+    // Measured 2026-09-13 (tg-lizf, gate tranquility-1l7xqm): the round hard
+    // blocked on `liveCited`, a base-present file the branch never touched and
+    // was never asked to touch.
+    const liveDesign =
+        '''
+## Touches
+- `$liveCreated` — created; authority-level regression file.
+Change: Create this authority-level regression file using the existing RecordingBdRunner, FakeRuntimeProvider, and the _bead, _snapshot, and _pump patterns from `$liveCited`.
+''';
+    final declarations = testDeclarations(liveDesign);
+    expect(declarations.authored, {liveCreated});
+    expect(declarations.mentioned, {liveCited});
+    expect(declaredTestFiles(liveDesign, baseFiles: const {liveCited}), {
+      liveCreated,
+    });
+    final outcome = await _runGate(
+      design: liveDesign,
+      diff: _diffFor([liveCreated]),
+      existingFiles: const [liveCited],
+    );
+    expect(outcome.payload?['grade'], 'A');
   });
 }

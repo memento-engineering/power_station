@@ -288,7 +288,23 @@ final RegExp _nonDeclarationTestStatement = RegExp(
 /// the exclusion to every path in a sentence, the same over-claim mirrored.
 final RegExp _referenceTestStatement = RegExp(
   r'\balready\s+(?:use[sd]|do(?:es)?|ha[sd])\b|'
-  r'\b(?:built|based|modell?ed)\s+on\b|'
+  // The PATTERN-SOURCE family: a statement that CREATES one file and names an
+  // existing suite as the shape it copies ("the _pump patterns from `<A>`",
+  // "modelled after `<A>`", "adapted from `<A>`"). Two of these words are
+  // ambiguous on their own, and each is narrowed where it is read rather than
+  // parsed: `following` cites a source ONLY when a marked test path is the very
+  // next token on the line ([_markerForTestPath]), so "Following review, add
+  // cases to `<A>`" and "add the following case to `<A>`" stay promises about
+  // `<A>`; and `pattern(s) in` is also the authored file's OWN noun phrase
+  // ("update the assertion patterns in `<A>`"), which [_authoredEvidence] keeps
+  // authored unless a bridge word names a distinct target.
+  r'\b(?:built|based)\s+on\b|'
+  r'\bmodell?ed\s+(?:on|after)\b|'
+  r'\b(?:the\s+)?patterns?\s+(?:from|in)\b|'
+  r'\busing\s+(?:the\s+)?patterns?\b|'
+  r'\bfollowing\b(?=[ \t]+GRID_TEST_PATH_\d+_)|'
+  r'\bin\s+the\s+style\s+of\b|'
+  r'\b(?:copied|adapted)\s+from\b|'
   r'\bmirror(?:s|ed|ing)?\b|'
   r'\breus(?:e|es|ed|ing)\b|'
   r'\b(?:the\s+)?same\s+shape\s+as\b|'
@@ -547,6 +563,32 @@ bool _authoredEvidence(String window, String marker) {
   }
   for (final match in _referenceTestStatement.allMatches(window)) {
     if (match.end <= markerAt && match.start > lastAt) {
+      // `pattern(s) in` is the one cue that is ALSO the authored file's own
+      // noun phrase: `Update the assertion patterns in <A>` edits <A>, while
+      // `Create this file with the patterns in <A>` cites it. What separates
+      // them is a bridge word naming a DISTINCT target — `using`/`with` —
+      // between the edit verb and the phrase, so with no bridge the verb keeps
+      // the path it already won. Every other cue demotes on position alone.
+      Match? authoredBeforeMarker;
+      for (final authored in _authoredTestStatement.allMatches(window)) {
+        if (authored.end <= markerAt) authoredBeforeMarker = authored;
+      }
+      final referenceText = match.group(0)!.toLowerCase();
+      final authoredMatch = authoredBeforeMarker;
+      if (authoredMatch != null) {
+        final bridge =
+            ' ${window.substring(authoredMatch.end, match.start).trim().toLowerCase()} ';
+        final authoredSelfReference =
+            const {
+              'pattern in',
+              'patterns in',
+              'the pattern in',
+              'the patterns in',
+            }.contains(referenceText) &&
+            !bridge.contains(' using ') &&
+            !bridge.contains(' with ');
+        if (authoredSelfReference) continue;
+      }
       lastAt = match.start;
       governing = false;
     }
