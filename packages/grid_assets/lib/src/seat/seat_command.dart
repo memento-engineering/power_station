@@ -2,8 +2,28 @@
 ///
 /// It launches the coding harness as a child with that seat's role definition
 /// and disc, and relaunches it when the occupant hands off. The signal goes UP
-/// because the inner agent cannot compact, clear, or restart itself (bead
-/// `pow-pry0`).
+/// because the inner agent cannot restart itself (bead `pow-pry0`), and the
+/// seat's only handoff path is ENDING the turn (Nico, 2026-09-13).
+///
+/// **The launcher CONSUMES** (Nico, 2026-09-13). Before it primes a child it
+/// performs the whole succession itself — archive the disc, prove the archive,
+/// delete the note and its one `MEMORY.md` pointer line — and primes the
+/// successor with the body it just consumed. A successor therefore cannot start
+/// unprimed and cannot skip the consumption, which is the defect class
+/// `pow-jhmu` measured four times: a seat that read its handoff and never
+/// consumed it, or consumed it into nothing. A succession that REFUSES stops
+/// the launch: the refusal names what it refused on, the disc is untouched, and
+/// a child started over an unresolved disc would destroy the evidence by
+/// writing a second note beside it.
+///
+/// "Primes" is the environment's OWN transport, resolved by
+/// [seatHandoffDeliveryRefusal] and rendered by [planSeatLaunch]: a prompt
+/// segment or a channel's first message under `SeatPrimeMode.prompt`, and
+/// [kConsumedHandoffEnvironmentVariable] under `SeatPrimeMode.hook`, where the
+/// child's own SessionStart hook (`prime`) injects it — the note it would once
+/// have read off the disc is gone by then, because this loop consumed it. An
+/// environment that declares NEITHER transport refuses BEFORE the consume: the
+/// note stays on the disc rather than being destroyed on the way to nobody.
 ///
 /// Harness-NEUTRAL by construction: this library reads only declarations
 /// (`seat_launch.dart`), and a fence in `test/seat/seat_command_test.dart`
@@ -26,6 +46,7 @@ import '../agent/environment_registry.dart';
 import '../agent/permission_policy.dart';
 import 'seat_disc.dart';
 import 'seat_launch.dart';
+import 'succession_command.dart';
 
 /// Runs one planned [SeatLaunch] and returns the child's exit code — the ONE IO
 /// seam the verb has, so a test drives the whole loop with a Fake and no
@@ -245,20 +266,23 @@ class ProcessSeatRunner {
 /// `seat <name> [--env <name>] [--grid-home <abs>] [--once]`.
 class SeatCommand extends Command<int> {
   /// Creates the verb over its injectable seams: the environment [registry]
-  /// selection reads, the [runner] that executes a plan, [gridHomeDefault], and
-  /// the [now] clock the relaunch predicate compares against — and that the
+  /// selection reads, the [runner] that executes a plan, the [succession] this
+  /// launcher consumes each handoff through, [gridHomeDefault], and the [now]
+  /// clock the relaunch predicate compares against — and that the
   /// unconsumed-handoff age is measured from, read ONCE per occupancy so the
   /// note this loop names and the note it ages are the same one. [out] and
   /// [err] are the report sinks.
   SeatCommand({
     EnvironmentRegistry? registry,
     SeatProcessRunner? runner,
+    SeatSuccessionService succession = const SeatSuccessionService(),
     String Function() gridHomeDefault = _currentDirectory,
     DateTime Function() now = DateTime.now,
     StringSink? out,
     StringSink? err,
   }) : _registry = registry ?? buildBuiltinEnvironmentRegistry(),
        _runner = runner ?? ProcessSeatRunner().call,
+       _succession = succession,
        _gridHomeDefault = gridHomeDefault,
        _now = now,
        _out = out ?? stdout,
@@ -287,6 +311,7 @@ class SeatCommand extends Command<int> {
 
   final EnvironmentRegistry _registry;
   final SeatProcessRunner _runner;
+  final SeatSuccessionService _succession;
   final String Function() _gridHomeDefault;
   final DateTime Function() _now;
   final StringSink _out;
@@ -363,10 +388,11 @@ class SeatCommand extends Command<int> {
     final once = argResults!.flag('once');
     while (true) {
       final launchedAt = _now();
-      // Observational: with amendment refused at the write edge, a handoff
-      // still on the disc is a seat that has not handed off, and its AGE is
-      // how an operator watching this loop sees that. No threshold and no
-      // expiry — the occupant is primed with the note either way.
+      // Observational, and BEFORE the consume: with amendment refused at the
+      // write edge, a handoff still on the disc is a seat that has not handed
+      // off, and its AGE is how an operator watching this loop sees that. No
+      // threshold and no expiry — the note is consumed and delivered either
+      // way.
       final state = disc.newestHandoffState();
       if (state != null) {
         _out.writeln(
@@ -377,18 +403,93 @@ class SeatCommand extends Command<int> {
             now: launchedAt,
           ),
         );
+        // The consume is DESTRUCTIVE, so the transport is proved before the
+        // note is: an environment with nowhere to put the body would archive
+        // and delete a handoff it could hand to nobody.
+        final undeliverable = seatHandoffDeliveryRefusal(environment);
+        if (undeliverable != null) {
+          _err
+            ..writeln(
+              'seat: $seat — HANDOFF NOT CONSUMED: environment '
+              '"$environmentName" $undeliverable.',
+            )
+            ..writeln('seat: $seat — handoff ${state.handoff.relativePath}')
+            ..writeln(
+              'seat: $seat — nothing was launched: a successor cannot start '
+              'unprimed, so a handoff is never consumed into nothing.',
+            );
+          return 1;
+        }
       }
+      final consumed = await _consume(gridHome: gridHome, seat: seat);
+      if (consumed.refused) return 1;
       final code = await _runner(
         planSeatLaunch(
           environment: environment,
           seat: seat,
           gridHome: gridHome,
           discDirectory: disc.directory,
-          handoffBody: state?.handoff.body,
+          handoffBody: consumed.body,
         ),
       );
       if (once || !disc.hasHandoffNewerThan(launchedAt)) return code;
       _out.writeln('seat: $seat handed off — relaunching.');
+    }
+  }
+
+  /// Performs the succession this launcher owes its next child and returns the
+  /// body to prime it with — or `refused`, which stops the launch.
+  ///
+  /// The archive comes first and the deletion is proved by it, so the note the
+  /// successor is primed with is the note that reached an archive. The two
+  /// sinks are the disc's own business ([SeatSuccessionService]); the launcher
+  /// only reports which one answered.
+  Future<({String? body, bool refused})> _consume({
+    required String gridHome,
+    required String seat,
+  }) async {
+    final report = await _succession.succeed(
+      gridHome: gridHome,
+      seat: seat,
+      destructive: true,
+    );
+    final head = 'seat: $seat';
+    switch (report.disposition) {
+      case SeatSuccessionDisposition.noHandoff:
+        return (body: null, refused: false);
+      case SeatSuccessionDisposition.consumed:
+        _out.writeln(
+          '$head — CONSUMED ${report.candidate} '
+          '(${seatArchiveDisposition(report)}); priming the successor with it.',
+        );
+        // Retention is the disc's own housekeeping and never gates a launch;
+        // the launcher only says what it did, and says when it could not.
+        final pruned = seatArchiveRetentionDisposition(report);
+        if (pruned != null) _out.writeln('$head — $pruned');
+        final pruneRefusal = report.pruneRefusal;
+        if (pruneRefusal != null) {
+          _err.writeln('$head — PRUNE INCOMPLETE: $pruneRefusal');
+        }
+        return (body: report.body, refused: false);
+      case SeatSuccessionDisposition.refused:
+        _err.writeln('$head — HANDOFF NOT CONSUMED: ${report.refusal}');
+        for (final path in report.handoffs) {
+          _err.writeln('$head — handoff $path');
+        }
+        _err.writeln(
+          '$head — nothing was launched: a successor that starts over an '
+          'unresolved disc writes a second note beside the first.',
+        );
+        return (body: null, refused: true);
+      case SeatSuccessionDisposition.preserved:
+        // Unreachable by construction — the launcher always asks for the
+        // destructive run — and reported rather than assumed away, because a
+        // preserved report here would mean the note was NOT consumed.
+        _err.writeln(
+          '$head — HANDOFF NOT CONSUMED: the succession preserved '
+          '${report.candidate} on a destructive run.',
+        );
+        return (body: null, refused: true);
     }
   }
 }

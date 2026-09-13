@@ -1,8 +1,9 @@
-// The `prime --hook-json` verb (beads `pow-lv6t`, `pow-5zpe`): orient the
-// session in the STATION — identity, invocation, every verb by name, the
-// decision register, the seat disc and the wake mechanism — then the tracker's
-// own reference, then ONLY the seat's newest handoff. Exit 0 always, bounded
-// always.
+// The `prime --hook-json` verb (beads `pow-lv6t`, `pow-5zpe`, `pow-d5ol`):
+// orient the session in the STATION — identity, invocation, every verb by name,
+// the decision register, the seat disc and the wake mechanism — then the
+// tracker's own reference, then ONE handoff: the body the LAUNCHER consumed for
+// this occupancy when it declared one, and otherwise whatever survived on the
+// disc, which is the hand-started session. Exit 0 always, bounded always.
 //
 // Offline: a Fake BdRunner, a real temp disc, no harness and no `bd` process.
 import 'dart:convert';
@@ -321,8 +322,9 @@ void main() {
         expect(
           context,
           contains(
-            'Handoff ${p.join('.grid', 'seats', 'governor', 'handoff.md')} — act '
-            'on Resume here, then run the succession verb in this turn.',
+            'Handoff ${p.join('.grid', 'seats', 'governor', 'handoff.md')} — '
+            'still on the disc, so no launcher consumed it. Act on Resume '
+            'here, then run the succession verb to archive and delete it.',
           ),
         );
         expect(context, endsWith('RESUME BODY'));
@@ -337,10 +339,14 @@ void main() {
         body: 'BODY',
       );
       expect(
-        composePrimeContext(bdContext: 'BD \n', handoff: handoff),
+        composePrimeContext(
+          bdContext: 'BD \n',
+          handoff: PrimeHandoff.unconsumed(handoff),
+        ),
         'BD \n\n'
-        'Handoff .grid/seats/governor/h.md — act on Resume here, then run the '
-        'succession verb in this turn.\n\nBODY',
+        'Handoff .grid/seats/governor/h.md — still on the disc, so no launcher '
+        'consumed it. Act on Resume here, then run the succession verb to '
+        'archive and delete it.\n\nBODY',
       );
     });
 
@@ -420,6 +426,140 @@ void main() {
       expect(
         contextOf(await prime(bdStdout: _hook(''), environment: env)),
         endsWith('RESUME BODY'),
+      );
+    });
+  });
+
+  // pow-d5ol: on a hook-primed harness the launcher has ALREADY consumed the
+  // note by the time this hook runs — the disc is empty and the body arrives in
+  // the process environment. A hook that only read the disc would leave every
+  // `claude`-env successor unprimed, which is the whole defect class.
+  group('the LAUNCHER\'s consumed handoff is the priming (pow-d5ol)', () {
+    const seated = {'GRID_SEAT': 'governor'};
+
+    test('an EMPTY disc still primes the successor — the shape the launcher '
+        'leaves behind', () async {
+      // Exactly the live state after a consume: the disc directory exists and
+      // holds no handoff at all.
+      Directory(
+        p.join(home.path, '.grid', 'seats', 'governor'),
+      ).createSync(recursive: true);
+      final context = contextOf(
+        await prime(
+          bdStdout: _hook('BD'),
+          environment: {
+            ...seated,
+            'GRID_HOME': home.path,
+            'GRID_SEAT_HANDOFF': 'CONSUMED BODY',
+          },
+        ),
+      );
+      expect(
+        context,
+        endsWith('CONSUMED BODY'),
+        reason:
+            'a hook-primed successor takes no prompt segment, so this IS its '
+            'priming',
+      );
+    });
+
+    test('the declared body is injected, named as consumed, and owes no '
+        'verb', () async {
+      final context = contextOf(
+        await prime(
+          bdStdout: _hook('BD'),
+          environment: {
+            ...seated,
+            'GRID_HOME': home.path,
+            'GRID_SEAT_HANDOFF': 'CONSUMED BODY',
+          },
+        ),
+      );
+      expect(context, endsWith('CONSUMED BODY'));
+      expect(
+        context,
+        contains(
+          'Handoff — CONSUMED by the launcher before this session started: it '
+          'archived the disc and deleted the note and its index line. Act on '
+          'Resume here; there is nothing on the disc and no verb to run.',
+        ),
+      );
+      expect(
+        context,
+        isNot(contains('run the succession verb')),
+        reason: 'the note the verb would consume no longer exists',
+      );
+      expect(
+        context,
+        isNot(contains('unconsumed handoff')),
+        reason: 'a note consumed at this launch has no age to report',
+      );
+    });
+
+    test('the declaration WINS over anything left on the disc', () async {
+      writeNote('governor', 'handoff.md', 'DISC BODY');
+      final context = contextOf(
+        await prime(
+          bdStdout: _hook('BD'),
+          environment: {
+            ...seated,
+            'GRID_HOME': home.path,
+            'GRID_SEAT_HANDOFF': 'CONSUMED BODY',
+          },
+        ),
+      );
+      expect(context, endsWith('CONSUMED BODY'));
+      expect(context, isNot(contains('DISC BODY')));
+    });
+
+    test('an EMPTY declaration falls back to the disc — the hand-started '
+        'session, which IS owed the verb', () async {
+      writeNote('governor', 'handoff.md', 'DISC BODY');
+      final context = contextOf(
+        await prime(
+          bdStdout: _hook('BD'),
+          environment: {
+            ...seated,
+            'GRID_HOME': home.path,
+            'GRID_SEAT_HANDOFF': '   ',
+          },
+        ),
+      );
+      expect(context, endsWith('DISC BODY'));
+      expect(context, contains('still on the disc'));
+      expect(context, contains('run the succession verb'));
+    });
+
+    test('a resume source injects neither', () async {
+      writeNote('governor', 'handoff.md', 'DISC BODY');
+      final context = contextOf(
+        await prime(
+          bdStdout: _hook('BD'),
+          environment: {
+            ...seated,
+            'GRID_HOME': home.path,
+            'GRID_SEAT_HANDOFF': 'CONSUMED BODY',
+          },
+          payload: '{"hook_event_name":"SessionStart","source":"resume"}',
+        ),
+      );
+      expect(context, isNot(contains('CONSUMED BODY')));
+      expect(context, isNot(contains('DISC BODY')));
+    });
+
+    test('a withheld consumed body points at the ARCHIVE, never at a disc '
+        'that no longer holds it', () {
+      final withheld = PrimeHandoff.consumed('BODY').withheld(4);
+      expect(
+        withheld.body,
+        'Withheld: 4 handoff-body bytes; the launcher archived this note '
+        'before deleting it — its CONSUMED line names the archive.',
+      );
+      expect(withheld.body, isNot(contains('from the Agent Disc')));
+      expect(
+        withheld.namingLine,
+        PrimeHandoff.consumed('BODY').namingLine,
+        reason: 'the fact that a handoff exists is never the cut',
       );
     });
   });
@@ -588,7 +728,7 @@ void main() {
           ),
         );
         // What is withheld is the BODY, never the fact that a handoff exists.
-        expect(context, contains('Handoff $relative — act on Resume'));
+        expect(context, contains('Handoff $relative — still on the disc'));
         expect(context, startsWith('Station: '));
         expect(context, isNot(contains('�')));
       },

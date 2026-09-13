@@ -92,9 +92,10 @@ seat.
 - **Hand off by preference; compact only mid-thought.** A compaction summary is
   lossy, uncurated, and costs a full-context pass at whatever size you were
   carrying — and this seat is the one that must not lose rulings. At a clean
-  boundary, write the handoff and then `/clear`. Compaction wins in exactly one
-  case: mid-thought, when the next step depends on detail that is not written
-  down anywhere yet.
+  boundary, write the handoff and then EXIT: the launcher consumes the note and
+  relaunches this seat primed with it. Ending IS the handoff path; there is no
+  in-place one. Compaction wins in exactly one case: mid-thought, when the next
+  step depends on detail that is not written down anywhere yet.
 
 ## Human gates — never cross without an explicit, per-item go
 

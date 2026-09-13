@@ -119,8 +119,11 @@
 /// searches them, the seat's disc, and the fenced service tick that wakes a
 /// seat. The issue tracker's `bd prime` reference follows VERBATIM under its
 /// own heading: still reachable, no longer the whole answer. Handoff injection
-/// is unchanged — only the seat's newest handoff, only on startup, clear and
-/// compact, now with one [seatHandoffAgeDiagnostic] line beside it. The whole
+/// is ONE note, only on startup, clear and compact, and WHICH note is the
+/// launcher's call: the body it consumed for this occupancy, declared in
+/// [kConsumedHandoffEnvironmentVariable], or — failing that — whatever survived
+/// on the disc, which is the hand-started session and the only one still owed
+/// the succession verb, named with one [seatHandoffAgeDiagnostic] line. The whole
 /// answer rides the pack's ONE output bound,
 /// [boundedOutput] at [kBoundedOutputCapBytes] — the same selector the `show`
 /// verb consumes, because a second implementation of a cap is the defect

@@ -17,13 +17,40 @@
 ///
 /// 1. resolve exactly ONE live handoff off the disc ([SeatDisc.handoffs]);
 /// 2. resolve exactly ONE `MEMORY.md` pointer line at it;
-/// 3. COMMIT the seat disc — and only the seat disc — when the tree is dirty;
-/// 4. PROVE both files are archived at `HEAD` and byte-identical to the
-///    working copy;
-/// 5. re-resolve the disc and refuse a sibling that appeared in the commit
+/// 3. resolve the archive SINK from the disc's own tracked state, and archive
+///    into it — a scoped commit of the seat disc when it is tracked, a local
+///    `.archive/<utc-stamp>/` directory under the disc when git IGNORES it;
+/// 4. PROVE both files reached that archive byte-identical to the working copy;
+/// 5. re-resolve the disc and refuse a sibling that appeared in the archive
 ///    window;
 /// 6. delete the handoff and its one pointer line — or, under
 ///    `--no-destructive`, stop here and name what it WOULD have deleted.
+///
+/// **Two sinks, one precondition** (Nico, 2026-09-13, fork option (a)). A
+/// station may ignore its seats tree for the PII a disc accretes —
+/// lunar_station did, at 7b225e8 — and from 2026-09-13 that refused every
+/// succession on the station: `could not stage the disc — git add -A --
+/// .grid/seats/governor failed: The following paths are ignored`. `git add -f`
+/// is NEVER the answer: it would commit the material the ignore exists to keep
+/// out. So an ignored disc archives LOCALLY, under the same ignore, and the
+/// proof is a byte comparison of the copies instead of a `HEAD` comparison. The
+/// precondition itself is unchanged — nothing is destroyed until it is proved
+/// archived somewhere.
+///
+/// **The local sink is BOUNDED, and never collides** (Nico, 2026-09-13). Git
+/// history folds an archive away; a directory does not, so each succession
+/// keeps the newest [kSeatArchiveRetention] archives and prunes the rest —
+/// retention runs last, on the proved archive, and a prune that fails is
+/// reported without failing the succession. Two successions inside one UTC
+/// second take the next ordinal (`<stamp>-2`, `<stamp>-3`) rather than
+/// refusing: the stamp has second resolution, the relaunch loop is not paced
+/// by a human, and stranding a seat on a clock tick is the defect this verb
+/// exists to close.
+///
+/// **The launcher is the caller** (Nico, 2026-09-13). `seat` performs this
+/// succession itself before it primes a successor, so a successor can neither
+/// start unprimed nor skip the consumption; this verb stays as the by-hand
+/// RECOVERY path for a disc no launcher touched.
 ///
 /// Every refusal is LOUD: it names what it refused on, whether the index was
 /// touched, and it deletes nothing.
@@ -72,6 +99,41 @@ Future<String> _readStdinNote() => stdin.transform(utf8.decoder).join();
 String seatArchiveCommitMessage(String seat) =>
     'chore(seat): archive $seat disc';
 
+/// WHERE a run archived the disc before it consumed the note — the fork is the
+/// disc's OWN tracked state, and the two sinks are exclusive. Sealed by an enum
+/// so every reader faces both with an exhaustive `switch`.
+enum SeatArchiveSink {
+  /// The disc is tracked: the archive is a pathspec-scoped commit, and the
+  /// proof is `HEAD` (`power_station#handoff-succession-commits-before-consume`
+  /// unchanged).
+  git,
+
+  /// The disc is gitignored: the archive is `.archive/<utc-stamp>/` under the
+  /// disc — covered by the same ignore, so nothing re-enters history — and the
+  /// proof is a byte comparison of the copies.
+  local,
+}
+
+/// The ONE phrase naming where a run archived the disc, rendered identically by
+/// every reader of a [SeatSuccessionReport]. PURE.
+String seatArchiveDisposition(SeatSuccessionReport report) =>
+    switch (report.sink) {
+      null => 'NOT ARCHIVED',
+      SeatArchiveSink.git =>
+        report.committed ? 'COMMITTED' : 'ALREADY ARCHIVED',
+      SeatArchiveSink.local => 'ARCHIVED-LOCAL ${report.archive}',
+    };
+
+/// The ONE phrase naming what retention did, or null when it did nothing —
+/// rendered identically by every reader of a [SeatSuccessionReport]. PURE.
+String? seatArchiveRetentionDisposition(SeatSuccessionReport report) =>
+    report.archivesPruned.isEmpty
+    ? null
+    : 'PRUNED ${report.archivesPruned.length} expired '
+          '${report.archivesPruned.length == 1 ? 'archive' : 'archives'} '
+          '(keeping the newest $kSeatArchiveRetention): '
+          '${report.archivesPruned.join(', ')}';
+
 /// What one succession run DID — the four outcomes, sealed by an enum so the
 /// CLI consumes them with an exhaustive `switch`.
 enum SeatSuccessionDisposition {
@@ -101,6 +163,11 @@ class SeatSuccessionReport {
     this.handoffs = const <String>[],
     this.staged = false,
     this.committed = false,
+    this.sink,
+    this.archive,
+    this.archivesPruned = const <String>[],
+    this.pruneRefusal,
+    this.body,
     this.refusal,
   });
 
@@ -126,6 +193,34 @@ class SeatSuccessionReport {
   /// different words.
   final bool committed;
 
+  /// WHERE the disc was archived, or null when the run never reached an
+  /// archive (no handoff, or a refusal before the sink was resolved).
+  final SeatArchiveSink? sink;
+
+  /// The grid-home-relative local archive directory, on
+  /// [SeatArchiveSink.local] only — null for the git sink, whose archive is a
+  /// commit rather than a path.
+  final String? archive;
+
+  /// The EXPIRED local archive directory names this run deleted, oldest first
+  /// — retention past [kSeatArchiveRetention], on [SeatArchiveSink.local]
+  /// only. Empty when the disc has not yet accrued that many.
+  final List<String> archivesPruned;
+
+  /// Why retention did not finish, or null when it did.
+  ///
+  /// Housekeeping NEVER refuses a succession: the archive this run wrote is
+  /// already proved byte-identical by the time retention runs, and blocking a
+  /// handoff on a stale directory that will not delete would re-create the
+  /// very defect this verb closes. It is reported instead, so a retention that
+  /// has quietly stopped is visible rather than silent.
+  final String? pruneRefusal;
+
+  /// The BODY of the one handoff this run archived — what a launcher primes
+  /// its successor with, read BEFORE the note was destroyed. Null on every
+  /// disposition that resolved no single candidate.
+  final String? body;
+
   /// Why the run refused, or null when it did not.
   final String? refusal;
 
@@ -149,6 +244,12 @@ class SeatSuccessionReport {
 /// rules are scope-independent, so re-deriving either here would be a second,
 /// diverging copy of a solved problem.
 ///
+/// **Only one of the two sinks rides git at all.** An IGNORED disc is archived
+/// by copying its two consumed files into `.archive/<utc-stamp>/` under the
+/// disc, proved by reading the copies back, and pruned to the newest
+/// [kSeatArchiveRetention] — no `git` command runs on that path, and
+/// `git add -f` runs on NO path.
+///
 /// [GitOps] has no PATHSPEC-scoped public method, and scoping is load-bearing
 /// here: a grid home is a live checkout, and `git add -A` would sweep the
 /// operator's unrelated work into an archive commit. So the two scoped
@@ -158,14 +259,21 @@ class SeatSuccessionReport {
 /// They run only AFTER the gate above has cleared the root guard on this exact
 /// working directory.
 class SeatSuccessionService {
-  /// Creates the service over its ONE IO seam beyond the disc itself: the
-  /// [runner] every `git` call rides (Fakes, not mocks). Absent ⇒ the real
-  /// [SystemGitRunner].
-  const SeatSuccessionService({GitRunner? runner}) : _runner = runner;
+  /// Creates the service over its two seams beyond the disc itself: the
+  /// [runner] every `git` call rides (Fakes, not mocks; absent ⇒ the real
+  /// [SystemGitRunner]), and the [now] clock a LOCAL archive directory is
+  /// stamped from.
+  const SeatSuccessionService({
+    GitRunner? runner,
+    DateTime Function() now = DateTime.now,
+  }) : _runner = runner,
+       _now = now;
 
   final GitRunner? _runner;
+  final DateTime Function() _now;
 
-  /// Archives [seat]'s disc under [gridHome] and consumes its one live
+  /// Archives [seat]'s disc under [gridHome] — into git history, or into the
+  /// disc's own `.archive/` when git ignores it — and consumes its one live
   /// handoff. With [destructive] false, everything happens EXCEPT the
   /// deletion.
   ///
@@ -223,75 +331,59 @@ class SeatSuccessionService {
     if (pointer.refusal != null) return refuse(pointer.refusal!);
 
     final runner = _runner ?? SystemGitRunner();
-    final ops = GitOps(runner);
-    final seatPathspec = p.join(kSeatsSubdirectory, seat);
 
-    // 3. Archive the disc — and only the disc — when the tree is dirty. The
-    //    gate carries the work-tree-root guard and the fail-closed degraded
-    //    scan; a `clear` tree cannot hold an unarchived disc.
+    // 3. The SINK is the disc's own tracked state, resolved before any
+    //    mutation: an ignored disc has no history to archive into, and the one
+    //    git verb that would force it there is the one that must never run.
+    final sink = await _resolveSink(
+      runner: runner,
+      home: home,
+      discDirectory: disc.directory,
+    );
+    if (sink.refusal != null) {
+      return refuse(sink.refusal!, handoffs: resolved);
+    }
+
+    // 4. Archive, and PROVE it, before anything can be destroyed.
+    final memoryRelative = p.relative(memoryFile.path, from: home);
     var staged = false;
     var committed = false;
-    switch (await ops.hasUncommittedWork(home)) {
-      case GateOutcome.probeError:
-        return refuse(
-          'the git work-tree gate would not clear "$home" — a seat disc is '
-          'archived only from a repository ROOT whose `git status` reads '
-          'cleanly. Nothing was staged, committed or deleted.',
-          handoffs: resolved,
+    String? archive;
+    var pruned = const <String>[];
+    String? pruneRefusal;
+    switch (sink.sink!) {
+      case SeatArchiveSink.git:
+        final done = await _archiveIntoGit(
+          runner: runner,
+          home: home,
+          seat: seat,
+          relatives: <String>[candidate.relativePath, memoryRelative],
         );
-      case GateOutcome.clear:
-        break;
-      case GateOutcome.present:
-        final add = await runner.run(
-          workingDirectory: home,
-          args: <String>['add', '-A', '--', seatPathspec],
-        );
-        if (!add.ok) {
+        staged = done.staged;
+        committed = done.committed;
+        if (done.refusal != null) {
           return refuse(
-            'could not stage the disc — `git add -A -- $seatPathspec` failed: '
-            '${_oneLine(add.output)}',
+            done.refusal!,
             handoffs: resolved,
+            staged: staged,
+            committed: committed,
           );
         }
-        staged = true;
-        // A FAILING scoped commit is not fatal on its own: the tree is dirty
-        // somewhere, but that dirt may be entirely outside this disc, and
-        // `git commit --only` refuses an empty scope. The archive PROOF below
-        // is the guard — it is what decides whether anything may be deleted.
-        final commit = await runner.run(
-          workingDirectory: home,
-          args: <String>[
-            'commit',
-            '--only',
-            '-m',
-            seatArchiveCommitMessage(seat),
-            '--',
-            seatPathspec,
-          ],
+      case SeatArchiveSink.local:
+        final done = _archiveLocally(
+          home: home,
+          discDirectory: disc.directory,
+          sources: <File>[File(candidate.path), memoryFile],
         );
-        committed = commit.ok;
+        archive = done.archive;
+        pruned = done.pruned;
+        pruneRefusal = done.pruneRefusal;
+        if (done.refusal != null) {
+          return refuse(done.refusal!, handoffs: resolved);
+        }
     }
 
-    // 4. Prove BOTH consumed files are in HEAD and byte-identical to the
-    //    working copy. `cat-file` proves presence; `diff --quiet` proves the
-    //    committed copy is the one about to be destroyed — a commit that
-    //    failed on a hook or a signature would otherwise pass presence alone.
-    for (final relative in <String>[
-      candidate.relativePath,
-      p.relative(memoryFile.path, from: home),
-    ]) {
-      final missing = await _proveArchived(runner, home, relative);
-      if (missing != null) {
-        return refuse(
-          missing,
-          handoffs: resolved,
-          staged: staged,
-          committed: committed,
-        );
-      }
-    }
-
-    // 5. Re-resolve: a sibling written during the commit window is the same
+    // 5. Re-resolve: a sibling written during the archive window is the same
     //    skipped succession as an initial two, and it must not be consumed
     //    unseen.
     final after = disc.handoffs();
@@ -315,6 +407,11 @@ class SeatSuccessionService {
         handoffs: resolved,
         staged: staged,
         committed: committed,
+        sink: sink.sink,
+        archive: archive,
+        archivesPruned: pruned,
+        pruneRefusal: pruneRefusal,
+        body: candidate.body,
       );
     }
 
@@ -340,7 +437,247 @@ class SeatSuccessionService {
       handoffs: resolved,
       staged: staged,
       committed: committed,
+      sink: sink.sink,
+      archive: archive,
+      archivesPruned: pruned,
+      pruneRefusal: pruneRefusal,
+      body: candidate.body,
     );
+  }
+
+  /// The archive sink for the disc at [discDirectory], or the refusal that
+  /// stops the run.
+  ///
+  /// `git check-ignore` answers the ONE question that decides it: 0 when the
+  /// path is ignored, 1 when it is not. Anything else — a non-launch, a grid
+  /// home that is no repository at all — is "couldn't tell", and a run that
+  /// cannot tell which archive it would be deleting into must not delete.
+  Future<({SeatArchiveSink? sink, String? refusal})> _resolveSink({
+    required GitRunner runner,
+    required String home,
+    required String discDirectory,
+  }) async {
+    final relative = p.relative(discDirectory, from: home);
+    final probe = await runner.run(
+      workingDirectory: home,
+      args: <String>['check-ignore', '-q', '--', relative],
+    );
+    if (!probe.launched) {
+      return (
+        sink: null,
+        refusal:
+            'git would not run in "$home", so the archive sink cannot be '
+            'resolved (${_oneLine(probe.output)}). Nothing was staged, '
+            'committed or deleted.',
+      );
+    }
+    return switch (probe.exitCode) {
+      0 => (sink: SeatArchiveSink.local, refusal: null),
+      1 => (sink: SeatArchiveSink.git, refusal: null),
+      final code => (
+        sink: null,
+        refusal:
+            '`git check-ignore -q -- $relative` exited $code in "$home", so '
+            'whether this disc is tracked is UNKNOWN — and the two archive '
+            'sinks are git history and the disc\'s own .archive/, which is not '
+            'a choice to make blind (${_oneLine(probe.output)}).',
+      ),
+    };
+  }
+
+  /// Archives a TRACKED disc into git history: the pathspec-scoped commit of
+  /// `power_station#handoff-succession-commits-before-consume`, then the proof
+  /// that every path in [relatives] is at `HEAD` and byte-identical to the
+  /// working copy.
+  ///
+  /// The gate carries the work-tree-root guard and the fail-closed degraded
+  /// scan; a `clear` tree cannot hold an unarchived disc. `git add -f` is never
+  /// used here or anywhere: this sink is reached only when the disc is NOT
+  /// ignored, so no force is needed, and on an ignored disc a force would
+  /// commit the material the ignore exists to keep out.
+  Future<({String? refusal, bool staged, bool committed})> _archiveIntoGit({
+    required GitRunner runner,
+    required String home,
+    required String seat,
+    required List<String> relatives,
+  }) async {
+    final ops = GitOps(runner);
+    final seatPathspec = p.join(kSeatsSubdirectory, seat);
+    var staged = false;
+    var committed = false;
+    switch (await ops.hasUncommittedWork(home)) {
+      case GateOutcome.probeError:
+        return (
+          refusal:
+              'the git work-tree gate would not clear "$home" — a seat disc is '
+              'archived only from a repository ROOT whose `git status` reads '
+              'cleanly. Nothing was staged, committed or deleted.',
+          staged: staged,
+          committed: committed,
+        );
+      case GateOutcome.clear:
+        break;
+      case GateOutcome.present:
+        final add = await runner.run(
+          workingDirectory: home,
+          args: <String>['add', '-A', '--', seatPathspec],
+        );
+        if (!add.ok) {
+          return (
+            refusal:
+                'could not stage the disc — `git add -A -- $seatPathspec` '
+                'failed: ${_oneLine(add.output)}',
+            staged: staged,
+            committed: committed,
+          );
+        }
+        staged = true;
+        // A FAILING scoped commit is not fatal on its own: the tree is dirty
+        // somewhere, but that dirt may be entirely outside this disc, and
+        // `git commit --only` refuses an empty scope. The archive PROOF below
+        // is the guard — it is what decides whether anything may be deleted.
+        final commit = await runner.run(
+          workingDirectory: home,
+          args: <String>[
+            'commit',
+            '--only',
+            '-m',
+            seatArchiveCommitMessage(seat),
+            '--',
+            seatPathspec,
+          ],
+        );
+        committed = commit.ok;
+    }
+    for (final relative in relatives) {
+      final missing = await _proveArchived(runner, home, relative);
+      if (missing != null) {
+        return (refusal: missing, staged: staged, committed: committed);
+      }
+    }
+    return (refusal: null, staged: staged, committed: committed);
+  }
+
+  /// Archives an IGNORED disc into `.archive/<utc-stamp>/` beside its notes,
+  /// prunes the archives that fall outside [kSeatArchiveRetention], and
+  /// returns the new directory grid-home-relative.
+  ///
+  /// The copies are PROVED the way the git sink proves `HEAD`: every source is
+  /// read, written, and read back, and the run refuses on the first byte that
+  /// differs. An archive is NEVER overwritten — a stamp already taken is a
+  /// second succession inside one second, so this run takes the next ordinal
+  /// (`<stamp>-2`, `<stamp>-3`, …) and both archives stay whole (Nico,
+  /// 2026-09-13). Refusing there stranded a seat on a clock tick.
+  ///
+  /// Retention runs LAST, on the proved archive, and its failures are
+  /// reported rather than raised — see [SeatSuccessionReport.pruneRefusal].
+  ///
+  /// No `git` runs here at all. `git add -f` is what the git sink would need
+  /// for an ignored path, and forcing the disc back into history is exactly
+  /// what the ignore exists to prevent.
+  ({
+    String? refusal,
+    String? archive,
+    List<String> pruned,
+    String? pruneRefusal,
+  })
+  _archiveLocally({
+    required String home,
+    required String discDirectory,
+    required List<File> sources,
+  }) {
+    final archives = Directory(p.join(discDirectory, kSeatArchiveSubdirectory));
+    final stamp = seatArchiveStamp(_now());
+    // The first free ordinal. Bounded by the directories that already exist,
+    // so it terminates on the first name this second has not taken.
+    var ordinal = 1;
+    var directory = Directory(
+      p.join(archives.path, seatArchiveDirectoryName(stamp, ordinal)),
+    );
+    while (directory.existsSync()) {
+      ordinal++;
+      directory = Directory(
+        p.join(archives.path, seatArchiveDirectoryName(stamp, ordinal)),
+      );
+    }
+    final relative = p.relative(directory.path, from: home);
+    try {
+      directory.createSync(recursive: true);
+      for (final source in sources) {
+        final target = File(p.join(directory.path, p.basename(source.path)));
+        final bytes = source.readAsBytesSync();
+        target.writeAsBytesSync(bytes, flush: true);
+        if (!_sameBytes(target.readAsBytesSync(), bytes)) {
+          return (
+            refusal:
+                'the local archive of "${p.relative(source.path, from: home)}" '
+                'is NOT byte-identical to the copy on disk, so the archive '
+                'would lose the working bytes. Nothing was deleted.',
+            archive: relative,
+            pruned: const <String>[],
+            pruneRefusal: null,
+          );
+        }
+      }
+    } on FileSystemException catch (error) {
+      return (
+        refusal:
+            'the local archive "$relative" could not be written — '
+            '${_oneLine(error.osError?.message ?? error.message)}. Nothing '
+            'was deleted.',
+        archive: relative,
+        pruned: const <String>[],
+        pruneRefusal: null,
+      );
+    }
+    final retention = _pruneArchives(archives);
+    return (
+      refusal: null,
+      archive: relative,
+      pruned: retention.pruned,
+      pruneRefusal: retention.refusal,
+    );
+  }
+
+  /// Deletes the archives under [archives] that fall outside the newest
+  /// [kSeatArchiveRetention], oldest first, and names the ones it removed.
+  ///
+  /// Only names [parseSeatArchiveDirectoryName] recognises are candidates: a
+  /// directory this station did not write is not this station's to delete.
+  /// Never throws — the archive it is pruning around is already proved, and a
+  /// succession must not fail on housekeeping.
+  ({List<String> pruned, String? refusal}) _pruneArchives(Directory archives) {
+    final pruned = <String>[];
+    final List<String> present;
+    try {
+      present = <String>[
+        for (final entry in archives.listSync())
+          if (entry is Directory) p.basename(entry.path),
+      ];
+    } on FileSystemException catch (error) {
+      return (
+        pruned: pruned,
+        refusal:
+            'the local archives could not be listed, so the newest '
+            '$kSeatArchiveRetention could not be kept — '
+            '${_oneLine(error.osError?.message ?? error.message)}.',
+      );
+    }
+    for (final name in seatArchivesToPrune(present)) {
+      try {
+        Directory(p.join(archives.path, name)).deleteSync(recursive: true);
+        pruned.add(name);
+      } on FileSystemException catch (error) {
+        return (
+          pruned: pruned,
+          refusal:
+              'the expired local archive "$name" could not be pruned — '
+              '${_oneLine(error.osError?.message ?? error.message)}. The '
+              'succession itself completed.',
+        );
+      }
+    }
+    return (pruned: pruned, refusal: null);
   }
 
   /// The disc index's single pointer at [target], read fresh off [memoryFile]:
@@ -403,6 +740,16 @@ class SeatSuccessionService {
 
 /// Collapses [text] to one trimmed line so a refusal stays greppable.
 String _oneLine(String text) => text.trim().replaceAll(RegExp(r'\s+'), ' ');
+
+/// Whether [left] and [right] are the same bytes — the local archive's proof.
+/// PURE.
+bool _sameBytes(List<int> left, List<int> right) {
+  if (left.length != right.length) return false;
+  for (var i = 0; i < left.length; i++) {
+    if (left[i] != right[i]) return false;
+  }
+  return true;
+}
 
 /// The THIN argv and sink adapter over [SeatSuccessionService] and
 /// [SeatDisc.writeHandoffOnce] — see [invocation] for the shape.
@@ -582,7 +929,7 @@ class SuccessionCommand extends Command<int> {
   /// Writes exactly what the run did and returns its exit code.
   int _render(SeatSuccessionReport report) {
     final head = 'succession: ${report.seat}';
-    final archive = report.committed ? 'COMMITTED' : 'ALREADY ARCHIVED';
+    final archive = seatArchiveDisposition(report);
     switch (report.disposition) {
       case SeatSuccessionDisposition.noHandoff:
         _out.writeln('$head — NO HANDOFF');
@@ -601,6 +948,7 @@ class SuccessionCommand extends Command<int> {
         _out
           ..writeln('$head — $archive')
           ..writeln('$head — WOULD DELETE ${report.candidate}');
+        _renderRetention(head, report);
         return 0;
       case SeatSuccessionDisposition.consumed:
         _out
@@ -609,7 +957,19 @@ class SuccessionCommand extends Command<int> {
             '$head — DELETED ${report.candidate} AND '
             '$kSeatMemoryFileName POINTER',
           );
+        _renderRetention(head, report);
         return 0;
     }
+  }
+
+  /// Writes what retention did — and, LOUDLY, what it could not do.
+  ///
+  /// A prune that failed never changes the exit code: the succession it ran
+  /// after is already complete and proved.
+  void _renderRetention(String head, SeatSuccessionReport report) {
+    final pruned = seatArchiveRetentionDisposition(report);
+    if (pruned != null) _out.writeln('$head — $pruned');
+    final refusal = report.pruneRefusal;
+    if (refusal != null) _err.writeln('$head — PRUNE INCOMPLETE: $refusal');
   }
 }

@@ -82,12 +82,49 @@ final class SeatChannelLaunch extends SeatLaunch {
       'SeatChannelLaunch($adapterId, primed: ${priming != null})';
 }
 
+/// Whether [environment] can DELIVER a consumed handoff body to its child, or
+/// the one-line reason it cannot — PURE.
+///
+/// The launcher asks this BEFORE it consumes (`pow-d5ol`, ruling 2: "a
+/// successor cannot start unprimed"). Consuming is destructive: the note is
+/// archived and deleted, so an environment that has no transport for the body
+/// would hand the successor nothing and destroy the evidence on the way. There
+/// are exactly two transports, and every environment declares which one it
+/// takes:
+///
+///  - [SeatPrimeMode.hook] — the body rides
+///    [kConsumedHandoffEnvironmentVariable] in the child's process environment
+///    and the station's own SessionStart hook (`prime`) injects it;
+///  - [SeatPrimeMode.prompt] — the body rides the first session message on a
+///    channel plan, or the prompt segment of a TTY plan.
+///
+/// A TTY environment that declares [SeatPrimeMode.prompt] with
+/// [PromptMode.none] declares BOTH that it wants the body and that it takes no
+/// prompt: there is no transport left, and the honest answer is a refusal
+/// rather than a silent drop.
+String? seatHandoffDeliveryRefusal(AgentEnvironment environment) =>
+    switch (environment.primeMode ?? SeatPrimeMode.prompt) {
+      SeatPrimeMode.hook => null,
+      SeatPrimeMode.prompt when environment.sessionAdapter != null => null,
+      SeatPrimeMode.prompt => switch (environment.promptMode ??
+          PromptMode.arg) {
+        PromptMode.arg || PromptMode.flag => null,
+        PromptMode.none =>
+          'it declares primeMode prompt with promptMode none, so a consumed '
+              'handoff has no transport to the child',
+      },
+    };
+
 /// Plans [seat]'s occupancy of [environment] — PURE.
 ///
 /// The driven-session posture is DECLARED and dropped: `spawnFor` renders
-/// [AgentEnvironment.drivenArgs] and an operator seat does not, and a prompt
-/// segment rides ONLY when [handoffBody] must be delivered by
-/// [SeatPrimeMode.prompt].
+/// [AgentEnvironment.drivenArgs] and an operator seat does not, and
+/// [handoffBody] rides the ONE transport [environment] declares: a prompt
+/// segment (or a channel's first message) under [SeatPrimeMode.prompt], and
+/// [kConsumedHandoffEnvironmentVariable] in the child's process environment
+/// under [SeatPrimeMode.hook], where the harness's own SessionStart hook —
+/// `prime` — injects it. A hook-primed child reads no disc for it: the
+/// launcher consumed the note before this plan existed.
 ///
 /// [gridHome] is the working directory and [discDirectory] the ABSOLUTE disc
 /// the memory declaration is rendered against.
@@ -108,14 +145,16 @@ SeatLaunch planSeatLaunch({
       'environment is not occupiable: no command resolved for seat "$seat"',
     );
   }
+  final (:priming, :hookDelivery) = switch (environment.primeMode ??
+      SeatPrimeMode.prompt) {
+    SeatPrimeMode.hook => (priming: null, hookDelivery: handoffBody),
+    SeatPrimeMode.prompt => (priming: handoffBody, hookDelivery: null),
+  };
   final processEnvironment = <String, String>{
     ...environment.env,
     kSeatEnvironmentVariable: seat,
     kGridHomeEnvironmentVariable: gridHome,
-  };
-  final priming = switch (environment.primeMode ?? SeatPrimeMode.prompt) {
-    SeatPrimeMode.hook => null,
-    SeatPrimeMode.prompt => handoffBody,
+    if (hookDelivery != null) kConsumedHandoffEnvironmentVariable: hookDelivery,
   };
   final adapter = environment.sessionAdapter;
   if (adapter != null) {
