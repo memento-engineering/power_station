@@ -1,5 +1,5 @@
-/// `succession <seat>` — the SUCCESSOR's half of the handoff ritual: ARCHIVE
-/// the seat's disc, then consume its one live handoff.
+/// `succession <seat>` — the handoff's two mechanical edges: WRITE one onto the
+/// seat's disc (once), and CONSUME one by archiving the disc first.
 ///
 /// `the_grid#agent-disc-file-shape-and-home` rules that a handoff is working
 /// memory the successor "DELETES in the turn that reads it", and justifies the
@@ -28,11 +28,28 @@
 /// Every refusal is LOUD: it names what it refused on, whether the index was
 /// touched, and it deletes nothing.
 ///
+/// **The other edge: `--write-handoff <file>`.** Consuming a handoff was an
+/// enforced verb while WRITING one was prose, and the asymmetry showed: one
+/// governor note was rewritten across thirty commits over nine hours, so its
+/// own file-name stamp lied. That mode reads the complete note on stdin and
+/// puts it through [SeatDisc.writeHandoffOnce], which refuses a second live
+/// handoff instead of amending the first
+/// (`memento-engineering#handoffs-are-working-memory-and-long-term-memory-stays-thin`:
+/// a handoff is "written once at a boundary, picked up, and deleted"). It writes
+/// the NOTE only — the one `MEMORY.md` pointer line stays an explicit step in
+/// the vended ritual, because the index is checked here and never rewritten.
+///
+/// Both modes render [seatHandoffAgeDiagnostic] for every handoff already on the
+/// disc, first, before they act. No threshold, no expiry: with amendment
+/// refused, an aging unconsumed note is simply a seat that has not handed off,
+/// and the age is how a reader sees that.
+///
 /// **Scope.** The verb owns the MECHANICS only. What a handoff says, when one
 /// is written, and the one line handed to the outer harness stay with the
 /// `/handoff` skill; no judgement moves into code here.
 library;
 
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:args/command_runner.dart';
@@ -43,6 +60,13 @@ import 'package:path/path.dart' as p;
 import 'seat_disc.dart';
 
 String _currentDirectory() => Directory.current.path;
+
+/// The whole note, off stdin, decoded as UTF-8.
+///
+/// DELIBERATELY unbounded in time: a truncated handoff is worse than a slow one,
+/// and this mode is invoked by a caller that has already composed the complete
+/// note and pipes it in one operation.
+Future<String> _readStdinNote() => stdin.transform(utf8.decoder).join();
 
 /// The message the scoped archive commit carries. PURE.
 String seatArchiveCommitMessage(String seat) =>
@@ -380,19 +404,24 @@ class SeatSuccessionService {
 /// Collapses [text] to one trimmed line so a refusal stays greppable.
 String _oneLine(String text) => text.trim().replaceAll(RegExp(r'\s+'), ' ');
 
-/// `succession <seat> [--grid-home <abs>] [--no-destructive]` — the THIN argv
-/// and sink adapter over [SeatSuccessionService].
+/// The THIN argv and sink adapter over [SeatSuccessionService] and
+/// [SeatDisc.writeHandoffOnce] — see [invocation] for the shape.
 class SuccessionCommand extends Command<int> {
   /// Creates the verb over its injectable seams: the [service] that does the
-  /// work, the [gridHomeDefault] a bare invocation falls back to, and the
-  /// [out]/[err] report sinks.
+  /// consume work, the [gridHomeDefault] a bare invocation falls back to, the
+  /// [readStdin] the write mode takes its note from, the [now] clock the age
+  /// diagnostic is measured against, and the [out]/[err] report sinks.
   SuccessionCommand({
     SeatSuccessionService service = const SeatSuccessionService(),
     String Function() gridHomeDefault = _currentDirectory,
+    Future<String> Function() readStdin = _readStdinNote,
+    DateTime Function() now = DateTime.now,
     StringSink? out,
     StringSink? err,
   }) : _service = service,
        _gridHomeDefault = gridHomeDefault,
+       _readStdin = readStdin,
+       _now = now,
        _out = out ?? stdout,
        _err = err ?? stderr {
     argParser
@@ -411,11 +440,22 @@ class SuccessionCommand extends Command<int> {
             '--no-destructive still archives and verifies, then names the '
             'file it WOULD have deleted — the safe first run on an '
             'unfamiliar disc.',
+      )
+      ..addOption(
+        'write-handoff',
+        valueHelp: 'file',
+        help:
+            "WRITE the complete note on stdin to the seat's disc under this "
+            'disc-local name, ONCE: a disc that already carries a live '
+            'handoff is refused, never amended. Writes the note only — the '
+            'MEMORY.md pointer line stays the caller\'s one explicit step.',
       );
   }
 
   final SeatSuccessionService _service;
   final String Function() _gridHomeDefault;
+  final Future<String> Function() _readStdin;
+  final DateTime Function() _now;
   final StringSink _out;
   final StringSink _err;
 
@@ -425,12 +465,15 @@ class SuccessionCommand extends Command<int> {
   @override
   final String description =
       "Consume a seat's newest handoff: archive its disc, verify the archive, "
-      'then delete the note and its index line.';
+      'then delete the note and its index line. With --write-handoff, write '
+      'one instead — once.';
 
   @override
   String get invocation {
     final executable = runner?.executableName;
-    const shape = 'succession <seat> [--grid-home <abs>] [--no-destructive]';
+    const shape =
+        'succession <seat> [--grid-home <abs>] [--no-destructive] '
+        '[--write-handoff <file>]';
     return executable == null ? shape : '$executable $shape';
   }
 
@@ -454,13 +497,86 @@ class SuccessionCommand extends Command<int> {
         '(got "$unresolved").',
       );
     }
+    final gridHome = p.normalize(unresolved);
+    final destructive = argResults!.flag('destructive');
+    final write = argResults!.option('write-handoff')?.trim();
+    // The two modes are OPPOSITE edges of one lifetime, and --no-destructive is
+    // a preview of the CONSUME path; asking for both names no coherent run.
+    if (write != null && write.isNotEmpty && !destructive) {
+      usageException(
+        'succession: --write-handoff writes a note and --no-destructive '
+        'previews a consume — ask for one run, not both.',
+      );
+    }
+
+    // Observational, and FIRST: what the disc already carries, and how long it
+    // has carried it. Reported in both modes and behind neither one's outcome.
+    _reportAge(gridHome: gridHome, seat: seat);
+
+    if (write != null && write.isNotEmpty) {
+      return _write(gridHome: gridHome, seat: seat, fileName: write);
+    }
     return _render(
       await _service.succeed(
-        gridHome: p.normalize(unresolved),
+        gridHome: gridHome,
         seat: seat,
-        destructive: argResults!.flag('destructive'),
+        destructive: destructive,
       ),
     );
+  }
+
+  /// Writes one [seatHandoffAgeDiagnostic] per handoff already on the disc.
+  ///
+  /// Every dependency is isolated: an unreadable disc costs a diagnostic, never
+  /// the run that was asked for.
+  void _reportAge({required String gridHome, required String seat}) {
+    try {
+      final observed = SeatDisc(
+        directory: seatDiscPath(gridHome, seat),
+        gridHome: gridHome,
+      ).handoffs();
+      if (observed.isEmpty) return;
+      final at = _now();
+      for (final entry in observed) {
+        _out.writeln(
+          seatHandoffAgeDiagnostic(
+            seat: seat,
+            handoff: entry.handoff,
+            authoredAt: entry.at,
+            now: at,
+          ),
+        );
+      }
+    } on Object {
+      return;
+    }
+  }
+
+  /// The write mode: the complete note off stdin, through the write-once gate.
+  Future<int> _write({
+    required String gridHome,
+    required String seat,
+    required String fileName,
+  }) async {
+    final head = 'succession: $seat';
+    final disc = SeatDisc(
+      directory: seatDiscPath(gridHome, seat),
+      gridHome: gridHome,
+    );
+    try {
+      final written = disc.writeHandoffOnce(
+        fileName: fileName,
+        contents: await _readStdin(),
+      );
+      _out.writeln('$head — HANDOFF WRITTEN ${written.relativePath}');
+      return 0;
+    } on SeatHandoffWriteException catch (refusal) {
+      _err.writeln('$head — REFUSED: ${refusal.detail}');
+      for (final path in refusal.existingHandoffs) {
+        _err.writeln('$head — handoff $path');
+      }
+      return 1;
+    }
   }
 
   /// Writes exactly what the run did and returns its exit code.

@@ -23,9 +23,16 @@ raised, it ends the same way: a curated note on your seat's disc, durable
 learnings banked separately, and ONE line telling the outer harness what to do
 next.
 
-A handoff is WORKING MEMORY — a hypertemporal artifact that lives exactly one
-succession. It is a disc note of `kind: handoff`, and its file shape, its home,
-its index line and the delete-on-consume rule are all fixed by
+A handoff is WORKING MEMORY — written once, picked up, and deleted within
+minutes. That is its whole lifetime: a hypertemporal artifact that lives exactly
+one succession. It is NEVER amended. If the board moves again, you have not
+handed off yet — the next note is authored at the next boundary, not bolted onto
+this one, because a note rewritten across a shift has no single author moment
+and its own timestamp stops being true. The write verb REFUSES a second live
+handoff, so this is a constraint and not only advice.
+
+It is a disc note of `kind: handoff`, and its file shape, its home, its index
+line and the delete-on-consume rule are all fixed by
 `the_grid#agent-disc-file-shape-and-home`.
 This skill invents no shape. A handoff never graduates, and never goes near a
 decisions register.
@@ -40,16 +47,28 @@ Before you write a word:
 - NAME every resource this seat owns: worktrees, branches, locks, the resident
   process, open PRs. The successor inherits them and cannot see them.
 
-## 2. WRITE the handoff onto the disc
+## 2. WRITE the handoff onto the disc — ONCE
+
+Compose all ten sections below IN FULL first, in your own context. Resolve
+nothing and write nothing until the last one is final: the write is one
+operation, and there is no second one to fix it with.
+
+Then resolve the stamp exactly once:
+
+```
+date -u +%Y%m%dt%H%M%Sz
+```
+
+`<utc-stamp>` is that ONE value — kebab-safe, and it sorts. Substitute it into
+the front-matter `name`, into the file name, and later into the index pointer
+line; reading the clock again would leave the three disagreeing.
+`<slug>` is the human's argument, or three kebab words naming the thread.
 
 One file, on your own seat's disc:
 
 ```
 <grid home>/.grid/seats/<seat>/handoff-<utc-stamp>-<slug>.md
 ```
-
-`<utc-stamp>` is `date -u +%Y%m%dt%H%M%Sz` — kebab-safe, and it sorts.
-`<slug>` is the human's argument, or three kebab words naming the thread.
 
 The front matter is the disc's. No new keys:
 
@@ -94,25 +113,54 @@ successor's wasted hour:
 10. **Ready** — the disc notes banked this session, by name, and an attestation
     that nothing is half-written.
 
+### Then write it, through the verb
+
+Send the COMPLETE note — front matter and all ten sections — on stdin, in ONE
+operation:
+
+```
+{{runner}} succession <seat> --grid-home "<grid home>" --write-handoff "handoff-<utc-stamp>-<slug>.md"
+```
+
+`HANDOFF WRITTEN <path>` is the only success, and it earns the index line in
+step 4. The verb writes the note and nothing else.
+
+`REFUSED` means the disc already carries a live handoff. Change NOTHING — not
+that file, not the index, not this note under a second name. Read the live
+note, consume it through the succession Resume below, and author yours at the
+next clean boundary. Never edit an existing handoff file, never append to one,
+and never write a second one beside it.
+
 ## 3. BANK the durable learnings
 
 A fact that outlives one succession is not a handoff section — it is its own
 disc note (`kind: lesson`, `kind: receipt`, or `kind: observation`), one fact
-per file, in the same front matter. Write those FIRST, then name them in
+per file, in the same front matter. Those, plus `kind: handoff`, are the WHOLE
+set: there is no fifth kind and no mid-shift channel, because a checkpoint IS
+a handoff, cycled fast. Write the durable notes FIRST, then name them in
 **Ready**.
 Never bank by pasting the handoff: the handoff is deleted on consume, so a
 fact that lives only inside it dies with it.
 
+Long-term memory stays THIN. Beads, decisions and trajectories already hold
+durable knowledge about this system, its stations and its substations, and each
+one is queryable on demand at no standing cost — so a disc note that duplicates
+what one of them already holds is deleted, not kept. Bank what the on-demand
+surface cannot answer.
+
 ## 4. INDEX it
 
-Add ONE pointer line to `<grid home>/.grid/seats/<seat>/MEMORY.md`:
+ONLY after `HANDOFF WRITTEN`, append ONE pointer line to
+`<grid home>/.grid/seats/<seat>/MEMORY.md`:
 
 ```
 - [Handoff <stamp> — <slug>](handoff-<utc-stamp>-<slug>.md) — <hook>
 ```
 
-The harness loads that index at session start, so a successor finds the
-handoff even where no hook is installed.
+Append it; never rewrite the index around it. The harness loads that index at
+session start, so a successor finds the handoff even where no hook is
+installed. After a `REFUSED` write there is no line to add: the index describes
+the disc, and nothing was written.
 
 ## 5. SIGNAL the outer harness — one line, then end the turn
 
@@ -128,8 +176,8 @@ after it:
 
 The launcher itself, and the `SessionStart` compact-matcher hook that
 references the newest handoff after an in-place compaction, are the
-prime/launcher bead's deliverable — not this skill's. This skill writes the
-file and says the line.
+prime/launcher bead's deliverable — not this skill's. This skill composes the
+note, routes it through the write verb, and says the line.
 
 There is no `PreCompact` guard and no archive directory.
 
@@ -159,6 +207,12 @@ You are the successor. Before you sweep, before you plan:
    turn made, verifies the note is in `HEAD`, and only then removes the file
    and its one `MEMORY.md` pointer line. The commit is what earns the
    deletion: a disc that was never committed has no history to consume into.
+
+Either invocation first reports the AGE of every unconsumed handoff on the
+disc — `Agent Seat "<seat>" has unconsumed handoff <path> on its Agent Disc —
+age 9h 0m.` Nothing expires and nothing is deleted on account of it: a handoff
+that has been sitting for hours is simply a succession that has not happened,
+and that line is how you see it. Consume it.
 
 `--no-destructive` is the safe first run on an unfamiliar disc — it does
 everything except the deletion, so a refusal surfaces before anything is lost.
