@@ -18,6 +18,15 @@ import '../github_app_client.dart';
 import '../github_read_client.dart';
 import 'github_app_client_assets.dart';
 
+/// The flare name carried by an open pull the feedback leg could not observe.
+///
+/// The per-pull DEGRADATION made visible. One pull whose detail or check-runs
+/// request failed is skipped for this cycle so the other open pulls are still
+/// observed — and skipping in SILENCE would reintroduce, one pull at a time,
+/// the same "nobody noticed" this leg exists to remove. The reported error
+/// names the pull and a bounded failure, never a GitHub response body.
+const String kPullFeedbackSkippedFlare = 'reconciler.pullFeedbackSkipped';
+
 /// Selects whether a GitHub reconciler is constructed for a composition.
 enum GitHubReconcilerArm {
   /// Construct and provide a polling runtime.
@@ -126,8 +135,9 @@ typedef GitHubReconcilerRuntimeFactory =
 /// `developer.log` when there is none — or when the flare itself throws, which
 /// is reported and then falls through to the log rather than escaping into the
 /// caller. Every reconciler-owned failure goes through here — a malformed
-/// intake row, a failed cycle, and the CI-feedback leg's ignored shapes — so
-/// one seat speaks with one voice and there is no second path to keep in step.
+/// intake row, a skipped pull's feedback, a failed cycle, and the CI-feedback
+/// leg's ignored shapes — so one seat speaks with one voice and there is no
+/// second path to keep in step.
 void _reportGitHubReconciler({
   required GitHubReconcilerConfig config,
   required ExplorationTransport? transport,
@@ -204,6 +214,12 @@ GitHubReconcilerRuntime createGitHubReconcilerRuntime({
       'reconciler.intakeRowSkipped',
       'skipped malformed intake row',
       error,
+      stackTrace,
+    ),
+    onPullFeedbackError: (pullNumber, failure, stackTrace) => report(
+      kPullFeedbackSkippedFlare,
+      'skipped pull feedback',
+      'pull #$pullNumber: $failure',
       stackTrace,
     ),
   );

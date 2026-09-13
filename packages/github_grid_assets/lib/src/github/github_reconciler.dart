@@ -18,6 +18,24 @@ typedef GitHubEventSink = Future<void> Function(NormalizedGitHubEvent event);
 /// The reserved delivery-leg name for the reconciler's own [GitHubEventSink].
 const String kSinkDeliveryLeg = 'sink';
 
+/// Reports that ONE open pull could not be observed this cycle.
+///
+/// [failure] is BOUNDED by construction — an HTTP status or an exception type
+/// and never a GitHub response body — because this rail ends on a seat's flare
+/// surface, where a body could carry a private title or a token echo. The
+/// [pullNumber] is what makes the report actionable: it names the pull a human
+/// must go look at.
+typedef GitHubPullFeedbackErrorReporter =
+    void Function(int pullNumber, String failure, StackTrace stackTrace);
+
+/// One open pull's observed snapshot and the two conditional tags that
+/// produced it — the whole result of the GitHub half of an observation.
+typedef _PullObservation = ({
+  GitHubPullFeedbackCursorRecord record,
+  String? detailEtag,
+  String? checksEtag,
+});
+
 /// How long an OPEN pull request may sit GREEN before the feedback leg reports
 /// it as stalled.
 ///
@@ -71,12 +89,14 @@ class GitHubReconciler {
     this.issueWatches = const <GitHubIssueWatch>[],
     GitHubReadClient? foreignClient,
     void Function(Object error, StackTrace stackTrace)? onIntakeRowError,
+    GitHubPullFeedbackErrorReporter? onPullFeedbackError,
     DateTime Function()? now,
   }) : _client = client,
        _foreign = foreignClient,
        _cursors = cursors,
        _emit = emit,
        _onIntakeRowError = onIntakeRowError,
+       _onPullFeedbackError = onPullFeedbackError,
        _now = now ?? DateTime.now {
     for (final watch in issueWatches) {
       watch.validate();
@@ -132,6 +152,7 @@ class GitHubReconciler {
   final GitHubCursorStore _cursors;
   final GitHubEventSink _emit;
   final void Function(Object error, StackTrace stackTrace)? _onIntakeRowError;
+  final GitHubPullFeedbackErrorReporter? _onPullFeedbackError;
 
   /// The observation instant, injectable so a test owns the stall crossing.
   final DateTime Function() _now;
@@ -406,6 +427,9 @@ class GitHubReconciler {
     for (final raw in _list(pullsResponse.body, pullsKey)) {
       final row = _map(raw, 'pull');
       final nodeId = _string(row, 'node_id');
+      // Claimed BEFORE the observation: a pull GitHub just listed as open is
+      // open whether or not we could observe it, and retaining it here is what
+      // keeps a skipped pull's baseline and tags from being evicted below.
       open.add(nodeId);
       next = await _pullFeedback(next, row, nodeId, observedAt);
     }
@@ -426,13 +450,89 @@ class GitHubReconciler {
   /// The snapshot and both response tags are recorded BEFORE delivery, so a
   /// leg that throws replays the observation without re-spending the requests
   /// that produced it.
+  ///
+  /// One pull's GITHUB OBSERVATION is its own failure domain. A detail or
+  /// check-runs request that fails is REPORTED and answered with the cursor
+  /// unchanged, so the other listed pulls are still observed and this one keeps
+  /// the exact baseline the next cycle re-observes from. One inaccessible pull
+  /// silencing every other open pull is the same defect at a smaller scale, and
+  /// this leg exists to remove it. Everything after the observation — the
+  /// record, the cursor saves and the delivery — stays OUTSIDE that boundary
+  /// and remains cycle-fatal, because those are exactly the failures the
+  /// pending outbox replays, and skipping one would lose the event.
   Future<GitHubReconcilerCursor> _pullFeedback(
     GitHubReconcilerCursor cursor,
     Map<String, Object?> row,
     String nodeId,
     DateTime observedAt,
   ) async {
+    // Parsed FIRST, and outside the boundary below: the number is the only
+    // handle a report has on WHICH pull was skipped, so a row that cannot yield
+    // one has nothing to degrade to and stays loud.
     final number = _integer(row, 'number');
+    final _PullObservation observed;
+    try {
+      observed = await _observePull(cursor, row, nodeId, number);
+    } on Object catch (error, stackTrace) {
+      _reportPullFeedbackError(number, error, stackTrace);
+      // No retry inside the cycle: a retry spends the rate limit the next cycle
+      // needs against a failure the next cycle is already going to re-attempt.
+      return cursor;
+    }
+    final record = observed.record;
+    final greenSince = record.greenSince;
+    final stalled =
+        greenSince != null &&
+        !observedAt.isBefore(greenSince.add(kPullRequestGreenStallBound));
+    final next = cursor.recordPullFeedback(
+      nodeId,
+      record,
+      detailEtag: observed.detailEtag,
+      checksEtag: observed.checksEtag,
+    );
+    await _cursors.save(next);
+    return _deliver(next, <NormalizedGitHubEvent>[
+      NormalizedGitHubEvent.pullRequestFeedback(
+        nodeId: nodeId,
+        actor: record.actor,
+        repository: '$owner/$repository',
+        substation: substation,
+        observationId: _feedbackObservationId(
+          nodeId: nodeId,
+          headSha: record.headSha,
+          updatedAt: record.updatedAt,
+          checkState: record.checkState,
+          mergeability: record.mergeability,
+          greenSince: greenSince,
+          stalled: stalled,
+        ),
+        number: number,
+        body: record.body,
+        headBranch: record.headBranch,
+        headSha: record.headSha,
+        checkState: record.checkState,
+        mergeability: record.mergeability,
+        openedAt: record.openedAt,
+        updatedAt: record.updatedAt,
+        greenSince: greenSince,
+        observedAt: observedAt,
+        stalled: stalled,
+      ),
+    ]);
+  }
+
+  /// The GITHUB half of one pull's observation: every field read from [row] and
+  /// both conditional requests, and nothing durable.
+  ///
+  /// Split out so [_pullFeedback] can put its boundary around exactly the work
+  /// that reads GitHub. Every throw raised in here belongs to ONE pull, and
+  /// none of it has written a record, a tag or an event yet.
+  Future<_PullObservation> _observePull(
+    GitHubReconcilerCursor cursor,
+    Map<String, Object?> row,
+    String nodeId,
+    int number,
+  ) async {
     final actor = _string(_nestedMap(row, 'user'), 'login', prefix: 'user');
     final body = _nullableString(row, 'body') ?? '';
     final openedAt = _date(_string(row, 'created_at'), 'created_at');
@@ -448,14 +548,8 @@ class GitHubReconciler {
     // would report the previous commit's green as this one's.
     final checksBaseline = cached?.headSha == sha ? cached : null;
     final checks = await _pullChecks(cursor, nodeId, sha, checksBaseline);
-
-    final greenSince = checks.greenSince;
-    final stalled =
-        greenSince != null &&
-        !observedAt.isBefore(greenSince.add(kPullRequestGreenStallBound));
-    var next = cursor.recordPullFeedback(
-      nodeId,
-      GitHubPullFeedbackCursorRecord(
+    return (
+      record: GitHubPullFeedbackCursorRecord(
         actor: actor,
         number: number,
         body: body,
@@ -465,40 +559,54 @@ class GitHubReconciler {
         mergeability: detail.mergeability,
         openedAt: openedAt,
         updatedAt: updatedAt,
-        greenSince: greenSince,
+        greenSince: checks.greenSince,
       ),
       detailEtag: detail.etag,
       checksEtag: checks.etag,
     );
-    await _cursors.save(next);
-    return _deliver(next, <NormalizedGitHubEvent>[
-      NormalizedGitHubEvent.pullRequestFeedback(
-        nodeId: nodeId,
-        actor: actor,
-        repository: '$owner/$repository',
-        substation: substation,
-        observationId: _feedbackObservationId(
-          nodeId: nodeId,
-          headSha: sha,
-          updatedAt: updatedAt,
-          checkState: checks.state,
-          mergeability: detail.mergeability,
-          greenSince: greenSince,
-          stalled: stalled,
-        ),
-        number: number,
-        body: body,
-        headBranch: branch,
-        headSha: sha,
-        checkState: checks.state,
-        mergeability: detail.mergeability,
-        openedAt: openedAt,
-        updatedAt: updatedAt,
-        greenSince: greenSince,
-        observedAt: observedAt,
-        stalled: stalled,
-      ),
-    ]);
+  }
+
+  /// Reports that pull [number] was SKIPPED this cycle, bounding what escapes.
+  ///
+  /// The failure is narrowed to an HTTP status or an exception TYPE before it
+  /// leaves: this rail ends on the seat's flare surface, and a GitHub response
+  /// body there can carry a private title, a token echo or an installation
+  /// detail that has no business on it. A reporter that throws is itself logged
+  /// and then dropped — reporting a skipped pull must never become the thing
+  /// that aborts the cycle the skip exists to keep running.
+  void _reportPullFeedbackError(
+    int number,
+    Object error,
+    StackTrace stackTrace,
+  ) {
+    final failure = switch (error) {
+      GitHubPollException(:final statusCode) => 'HTTP $statusCode',
+      _ => error.runtimeType.toString(),
+    };
+    final observer = _onPullFeedbackError;
+    if (observer != null) {
+      try {
+        observer(number, failure, stackTrace);
+        return;
+      } on Object catch (observerError, observerStackTrace) {
+        developer.log(
+          'GitHub reconciler pull-feedback reporter failed for '
+          'seat=$substation repository=$owner/$repository pull=#$number; '
+          'original failure: $failure',
+          name: 'github_grid_assets.reconciler',
+          error: observerError,
+          stackTrace: observerStackTrace,
+        );
+        return;
+      }
+    }
+    developer.log(
+      'GitHub reconciler skipped pull #$number for '
+      'seat=$substation repository=$owner/$repository: $failure',
+      name: 'github_grid_assets.reconciler',
+      error: failure,
+      stackTrace: stackTrace,
+    );
   }
 
   /// One conditional `/pulls/{number}` request, resolved to a mergeability.
@@ -735,9 +843,9 @@ class GitHubReconciler {
 
   /// Polls COMPLETED workflow runs and emits the ones a seat rule admits.
   ///
-  /// The feedback leg above it enumerates OPEN PULLS and keeps only `grid/`
-  /// heads, so a scheduled run on the default branch — the red nightly nobody
-  /// notices — can never reach a projection through it. This leg is that
+  /// The feedback leg above it enumerates OPEN PULLS, so a scheduled run on the
+  /// default branch — the red nightly nobody notices — can never reach a
+  /// projection through it. This leg is that
   /// missing half, and it is DECLARATION-GATED: with no rule it returns before
   /// the first request.
   ///

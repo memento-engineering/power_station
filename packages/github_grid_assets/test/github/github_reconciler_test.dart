@@ -4,6 +4,7 @@ import 'dart:io';
 
 import 'package:beads_dart/beads_dart.dart';
 import 'package:github_grid_assets/github_grid_assets.dart';
+import 'package:grid_engine/testing.dart' show RecordingExplorationTransport;
 import 'package:test/test.dart';
 
 class _Tokens implements GitHubAppTokenProvider {
@@ -211,6 +212,41 @@ Map<String, Object?> _checkRuns(List<Map<String, Object?>> runs) =>
 GitHubReconcilerCursor _intakeSettled() => const GitHubReconcilerCursor(
   etags: <String, String>{'intake/issues': '"intake"'},
 );
+
+/// A forbidden response whose BODY names something that must never be reported.
+const String _secretBody = '{"message":"not accessible: secret-token-echo"}';
+
+/// Pull 2's already-observed baseline: the exact record and tags a cycle that
+/// cannot observe it again must leave untouched.
+final GitHubPullFeedbackCursorRecord _baseline = GitHubPullFeedbackCursorRecord(
+  actor: 'nico',
+  number: 2,
+  body: 'A human digest.\n\nRefs: pow-earlier\n',
+  headBranch: 'org/release-path-ruling',
+  headSha: 'older-sha',
+  checkState: PullRequestCheckState.pending,
+  mergeability: PullRequestMergeability.unknown,
+  openedAt: DateTime.utc(2026, 9, 11, 8),
+  updatedAt: DateTime.utc(2026, 9, 11, 9),
+  greenSince: null,
+);
+
+/// A settled cursor already holding [_baseline] and both of its tags.
+GitHubReconcilerCursor _feedbackSettled() => GitHubReconcilerCursor(
+  etags: const <String, String>{
+    'intake/issues': '"intake"',
+    'feedback/pull/PR_2': '"detail-2"',
+    'feedback/checks/PR_2': '"checks-2"',
+  },
+  pullFeedback: <String, GitHubPullFeedbackCursorRecord>{'PR_2': _baseline},
+);
+
+/// The three open pulls of the failure-domain group, in listed order.
+List<Object?> _threeOpenPulls() => <Object?>[
+  _openPull(nodeId: 'PR_1', number: 1),
+  _openPull(nodeId: 'PR_2', number: 2),
+  _openPull(nodeId: 'PR_3', number: 3),
+];
 
 /// The `If-None-Match` value [request] carried, or null.
 String? _conditional(GitHubHttpRequest request) =>
@@ -893,28 +929,246 @@ void main() {
     );
   });
 
-  test('a 304 the cursor cannot answer fails loudly', () async {
+  test('a 304 the cursor cannot answer invents nothing', () async {
     // Unreachable by construction — the tag is only sent when a record exists —
     // so a server that answers one anyway is naming a state we must not
-    // invent a green for.
+    // invent a green for. The refusal stands: nothing is emitted and nothing is
+    // recorded. It is REPORTED as that one pull's skip rather than as a dead
+    // cycle, because a lying answer about pull 8 says nothing about pull 9.
     final transport = FakeGitHubHttpTransport()
       ..responses.addAll(<GitHubHttpResponse>[
         _response('', status: 304),
         _response(<Object?>[_openPull()], etag: '"pulls"'),
         _response('', status: 304),
       ]);
-    await expectLater(
-      GitHubReconciler(
+    final store = FakeGitHubCursorStore(_intakeSettled());
+    final events = <NormalizedGitHubEvent>[];
+    final skips = <({int number, String failure})>[];
+    await GitHubReconciler(
+      owner: 'o',
+      repository: 'r',
+      substation: 's',
+      client: _client(transport),
+      cursors: store,
+      emit: (event) async => events.add(event),
+      onPullFeedbackError: (number, failure, _) =>
+          skips.add((number: number, failure: failure)),
+      now: () => DateTime.utc(2026, 9, 12, 9, 45),
+    ).reconcileOnce();
+
+    expect(events, isEmpty, reason: 'no mergeability was invented');
+    expect(store.cursor.pullFeedback, isEmpty);
+    expect(skips.single.number, 8);
+    expect(skips.single.failure, 'FormatException');
+  });
+
+  group('pull feedback failure domains', () {
+    // Three open pulls, and the MIDDLE one is the one GitHub will not answer
+    // for. One inaccessible pull silencing the two beside it is this bead's own
+    // defect at a smaller scale, so the boundary is drawn around ONE pull's
+    // observation: the others are observed, the skip is reported, and the
+    // skipped pull's baseline is left exactly where the next cycle needs it.
+
+    test('a failed detail request skips only its own pull', () async {
+      final transport = FakeGitHubHttpTransport()
+        ..responses.addAll(<GitHubHttpResponse>[
+          _response('', status: 304),
+          _response(_threeOpenPulls(), etag: '"pulls"'),
+          // Pull 1, observed end to end.
+          _response(_pullDetail(), etag: '"detail-1"'),
+          _response(
+            _checkRuns(<Map<String, Object?>>[_run()]),
+            etag: '"checks-1"',
+          ),
+          // Pull 2's DETAIL is forbidden, body and all.
+          _response(_secretBody, status: 403),
+          // Pull 3, observed end to end AFTER the failure.
+          _response(_pullDetail(), etag: '"detail-3"'),
+          _response(
+            _checkRuns(<Map<String, Object?>>[_run()]),
+            etag: '"checks-3"',
+          ),
+        ]);
+      final store = FakeGitHubCursorStore(_feedbackSettled());
+      final events = <PullRequestFeedback>[];
+      final skips = <({int number, String failure})>[];
+      await GitHubReconciler(
         owner: 'o',
         repository: 'r',
         substation: 's',
         client: _client(transport),
-        cursors: FakeGitHubCursorStore(_intakeSettled()),
-        emit: (_) async {},
+        cursors: store,
+        emit: (event) async => events.add(event as PullRequestFeedback),
+        onPullFeedbackError: (number, failure, _) =>
+            skips.add((number: number, failure: failure)),
         now: () => DateTime.utc(2026, 9, 12, 9, 45),
-      ).reconcileOnce(),
-      throwsFormatException,
-    );
+      ).reconcileOnce();
+
+      expect(
+        events.map((event) => event.number),
+        <int>[1, 3],
+        reason: 'the pulls beside the failure are still observed',
+      );
+      expect(skips, hasLength(1), reason: 'ONE report for ONE skipped pull');
+      expect(skips.single.number, 2);
+      expect(skips.single.failure, 'HTTP 403');
+      expect(
+        skips.single.failure,
+        isNot(contains('secret')),
+        reason: 'a bounded status, never the response body',
+      );
+      // Pull 2 keeps the baseline the next cycle re-observes from.
+      expect(store.cursor.pullFeedback['PR_2'], _baseline);
+      expect(store.cursor.etags['feedback/pull/PR_2'], '"detail-2"');
+      expect(store.cursor.etags['feedback/checks/PR_2'], '"checks-2"');
+      expect(
+        store.cursor.pullFeedback.keys,
+        containsAll(<String>['PR_1', 'PR_2', 'PR_3']),
+        reason: 'a pull GitHub listed as open is open, observed or not',
+      );
+      expect(
+        store.cursor.etags['feedback/pulls'],
+        '"pulls"',
+        reason: 'the cycle still completed and saved',
+      );
+      expect(
+        transport.requests,
+        hasLength(7),
+        reason: 'one attempt for the skipped pull, and no retry inside it',
+      );
+    });
+
+    test('a failed check-runs request skips only its own pull', () async {
+      final transport = FakeGitHubHttpTransport()
+        ..responses.addAll(<GitHubHttpResponse>[
+          _response('', status: 304),
+          _response(_threeOpenPulls(), etag: '"pulls"'),
+          _response(_pullDetail(), etag: '"detail-1"'),
+          _response(
+            _checkRuns(<Map<String, Object?>>[_run()]),
+            etag: '"checks-1"',
+          ),
+          // Pull 2's detail SUCCEEDS with a new tag, and its checks do not.
+          _response(_pullDetail(), etag: '"detail-2-fresh"'),
+          _response(_secretBody, status: 422),
+          _response(_pullDetail(), etag: '"detail-3"'),
+          _response(
+            _checkRuns(<Map<String, Object?>>[_run()]),
+            etag: '"checks-3"',
+          ),
+        ]);
+      final store = FakeGitHubCursorStore(_feedbackSettled());
+      final events = <PullRequestFeedback>[];
+      final skips = <({int number, String failure})>[];
+      await GitHubReconciler(
+        owner: 'o',
+        repository: 'r',
+        substation: 's',
+        client: _client(transport),
+        cursors: store,
+        emit: (event) async => events.add(event as PullRequestFeedback),
+        onPullFeedbackError: (number, failure, _) =>
+            skips.add((number: number, failure: failure)),
+        now: () => DateTime.utc(2026, 9, 12, 9, 45),
+      ).reconcileOnce();
+
+      expect(events.map((event) => event.number), <int>[1, 3]);
+      expect(skips, hasLength(1));
+      expect(skips.single.number, 2);
+      expect(skips.single.failure, 'HTTP 422');
+      expect(skips.single.failure, isNot(contains('secret')));
+      expect(store.cursor.pullFeedback['PR_2'], _baseline);
+      expect(
+        store.cursor.etags['feedback/pull/PR_2'],
+        '"detail-2"',
+        reason:
+            'a HALF-observed pull banks NEITHER tag: the baseline the '
+            'surviving tag describes was never written',
+      );
+      expect(store.cursor.etags['feedback/checks/PR_2'], '"checks-2"');
+      expect(
+        store.cursor.pullFeedback.keys,
+        containsAll(<String>['PR_1', 'PR_2', 'PR_3']),
+      );
+      expect(store.cursor.etags['feedback/pulls'], '"pulls"');
+      expect(transport.requests, hasLength(8));
+    });
+
+    test('a failed open-pulls list stays cycle-fatal', () async {
+      // The PRECONDITION of every per-pull decision above: without the list
+      // there is no pull to skip, no open set to retain against, and a page
+      // etag recorded over an unread page would make the next `304` a lie.
+      final transport = FakeGitHubHttpTransport()
+        ..responses.addAll(<GitHubHttpResponse>[
+          _response('', status: 304),
+          _response(_secretBody, status: 500),
+        ]);
+      final store = FakeGitHubCursorStore(_feedbackSettled());
+      final skips = <int>[];
+      await expectLater(
+        GitHubReconciler(
+          owner: 'o',
+          repository: 'r',
+          substation: 's',
+          client: _client(transport),
+          cursors: store,
+          emit: (_) async {},
+          onPullFeedbackError: (number, _, _) => skips.add(number),
+          now: () => DateTime.utc(2026, 9, 12, 9, 45),
+        ).reconcileOnce(),
+        throwsA(isA<GitHubPollException>()),
+      );
+
+      expect(
+        transport.requests,
+        hasLength(2),
+        reason: 'the cycle died before any per-pull request',
+      );
+      expect(skips, isEmpty, reason: 'no pull was skipped; the LIST failed');
+      expect(store.calls, isEmpty, reason: 'nothing was saved');
+      expect(store.cursor.pullFeedback['PR_2'], _baseline);
+      expect(store.cursor.etags['feedback/pulls'], isNull);
+    });
+
+    test('the skipped pull reaches the seat flare, bounded', () async {
+      // The REACHABILITY of the report: a seat composes through the factory, so
+      // the callback has to land on the seat's OWN transport under the named
+      // flare — with the pull named, the failure bounded, and the response body
+      // nowhere on it.
+      final transport = FakeGitHubHttpTransport()
+        ..responses.addAll(<GitHubHttpResponse>[
+          _response('', status: 304),
+          _response(<Object?>[
+            _openPull(nodeId: 'PR_2', number: 2),
+          ], etag: '"pulls"'),
+          _response(_secretBody, status: 403),
+        ]);
+      final flares = RecordingExplorationTransport();
+      final runtime = createGitHubReconcilerRuntime(
+        config: const GitHubReconcilerConfig(
+          owner: 'memento-engineering',
+          repository: 'power_station',
+          substation: 'power_station',
+          installationId: 'installation',
+        ),
+        client: _client(transport),
+        cursors: FakeGitHubCursorStore(_feedbackSettled()),
+        emit: (_) async {},
+        transport: flares,
+        foreignClient: null,
+      );
+      await runtime.reconciler.reconcileOnce();
+
+      final flare = flares.named(kPullFeedbackSkippedFlare).single;
+      expect(flare.data['error'], 'pull #2: HTTP 403');
+      expect(flare.data['seat'], 'power_station');
+      expect(flare.data['repository'], 'memento-engineering/power_station');
+      expect(
+        flares.flares.map((entry) => entry.data.values.join()).join(),
+        isNot(contains('secret')),
+        reason: 'nothing from the response body reaches the seat surface',
+      );
+    });
   });
 
   test('feedback preserves the intake high-water mark', () async {
