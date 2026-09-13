@@ -18,7 +18,12 @@
 //     instruction on each, per
 //     `power_station#a-harness-may-carry-its-own-instructions`);
 //   - the governor def names `/handoff` at session end and the successor read
-//     at session start.
+//     at session start;
+//   - AC-5 both legs teach the WORKING-MEMORY lifecycle — written once, picked
+//     up and deleted within minutes, never amended — and route the one
+//     completed note through `succession --write-handoff` before the index line;
+//   - AC-2 no note kind is added: the kinds either leg authors are exactly
+//     `handoff`, `lesson`, `receipt`, `observation`.
 //
 // Offline only — reads the bundled `extension/` files; no live anything.
 import 'dart:io';
@@ -266,6 +271,101 @@ void main() {
         }
       }
     });
+  });
+
+  group('AC-5 the WORKING-MEMORY lifecycle is taught on both legs', () {
+    for (final leg in _legs) {
+      test('$leg: a handoff is written once, in minutes, never amended', () {
+        final body = legBody(leg);
+        // The defect: one governor note was rewritten across thirty commits
+        // over nine hours, so the UTC stamp in its own file name was false.
+        // The lifetime is the fix, and it is stated before the ritual starts.
+        expect(
+          body,
+          contains(
+            'A handoff is WORKING MEMORY — written once, picked up, and '
+            'deleted within\nminutes.',
+          ),
+        );
+        expect(body, contains('It is NEVER amended.'));
+        expect(
+          body,
+          contains('The write verb REFUSES a second live'),
+          reason: '$leg: the constraint is mechanical, not only advice',
+        );
+        expect(
+          body,
+          contains('Long-term memory stays THIN.'),
+          reason:
+              '$leg: beads, decisions and trajectories hold durable knowledge '
+              'on demand, so a disc note must not duplicate one',
+        );
+      });
+
+      test('$leg: the note is composed WHOLE, stamped once, then routed '
+          'through the write verb', () {
+        final rendered = legBody(leg).replaceAll('{{runner}}', 'space');
+        expect(rendered, contains('Compose all ten sections below IN FULL'));
+        expect(rendered, contains('resolve the stamp exactly once'));
+        expect(
+          rendered,
+          contains(
+            'space succession <seat> --grid-home "<grid home>" '
+            '--write-handoff "handoff-<utc-stamp>-<slug>.md"',
+          ),
+          reason:
+              '$leg: the skill CALLS the command rather than writing the file '
+              'itself — the write-once gate is behind the verb',
+        );
+        expect(
+          rendered,
+          contains('`HANDOFF WRITTEN <path>` is the only success'),
+        );
+        // A refusal changes NOTHING: not the live note, not the index, and not
+        // "the same note under a second name", which is the amendment in
+        // disguise.
+        expect(
+          rendered,
+          contains('Change NOTHING — not\nthat file, not the index'),
+        );
+        expect(rendered, contains('Never edit an existing handoff file'));
+        expect(rendered, contains('never append to one'));
+      });
+
+      test('$leg: the index line is earned by a successful write', () {
+        final body = legBody(leg);
+        expect(body, contains('ONLY after `HANDOFF WRITTEN`, append ONE '));
+        expect(
+          body,
+          contains('never rewrite the index around it'),
+          reason:
+              '$leg: the index is CHECKED, never rewritten wholesale '
+              '(power_station#seat-disc-index-integrity-is-checked-not-written)',
+        );
+        expect(
+          body,
+          contains('After a `REFUSED` write there is no line to add'),
+        );
+      });
+
+      test('$leg: AC-2 exactly four note kinds are authored, and none of '
+          'them is a mid-shift channel', () {
+        expect(
+          {
+            for (final match in RegExp(
+              r'kind:\s*([a-z]+)',
+            ).allMatches(legBody(leg)))
+              match.group(1)!,
+          },
+          {'handoff', 'lesson', 'receipt', 'observation'},
+          reason:
+              '$leg: the ruling DISSOLVED the journal fork — the checkpoint is '
+              'a handoff, cycled fast, so no fifth kind exists',
+        );
+        expect(legBody(leg), contains('there is no fifth kind'));
+        expect(legBody(leg), contains('a checkpoint IS'));
+      });
+    }
   });
 
   group('the two legs are INDEPENDENT instruction sources', () {

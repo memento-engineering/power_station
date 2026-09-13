@@ -19,7 +19,9 @@
 //   - AC-4 `seat`, `prime` and `succession --no-destructive` each render how
 //     long an unconsumed handoff has sat there, with no threshold behind it;
 //   - AC-6 the composed `succession <seat> --write-handoff <file>` surface
-//     writes once from stdin and exits 1 on the second invocation.
+//     writes once from stdin and exits 1 on the second invocation;
+//   - AC-7 a LEGACY note already amended across thirty commits is still
+//     archived and consumed by the unchanged succession path.
 //
 // Offline: system-temporary discs, real `CommandRunner` invocations, and Fakes
 // only for the injected stdin, process, git and clock seams. No harness, no
@@ -102,6 +104,35 @@ final class _CleanGitRunner implements GitRunner {
       _ => const GitRunResult(exitCode: 0, output: ''),
     };
   }
+}
+
+/// The shaped TEN-SECTION handoff the vended ritual authors, sanitized: no real
+/// bead id, no real seat state. [amendments] is how many "still going" blocks
+/// have been bolted onto it, which is the legacy shape AC-7 must still consume.
+String tenSectionHandoff({
+  required String name,
+  required String seat,
+  int amendments = 0,
+}) {
+  final sections = <String>[
+    '1. **Header** — $seat, 2026-09-12T04:23:26Z / 23:25 CDT, one boundary.',
+    '2. **Rulings** — none this session.',
+    '3. **Board state** — empty by design.',
+    '4. **In flight** — nothing; no worktree, no lock, no open PR.',
+    '5. **Tried and failed — do not retry** — nothing.',
+    '6. **Promises to the human** — none outstanding.',
+    '7. **Context the successor must not re-derive** — none.',
+    '8. **Unfiled observations** — none.',
+    '9. **Resume here** — 1. Read the board.',
+    '10. **Ready** — nothing banked, nothing half-written.',
+  ];
+  return note(
+    name: name,
+    seat: seat,
+    body:
+        '${sections.join('\n')}\n'
+        '${List<String>.generate(amendments, (i) => '\nAMENDED $i: the board moved again.\n').join()}',
+  );
 }
 
 /// A complete disc note — front matter then prose — of [kind].
@@ -665,6 +696,127 @@ void main() {
       expect(run.code, 1);
       expect(run.err, contains('ends in ".md"'));
       expect(run.out, isEmpty);
+    });
+  });
+
+  group('AC-7 a LEGACY amended handoff is still consumable', () {
+    const seat = 'governor';
+
+    Future<String> git(List<String> args, {bool expectOk = true}) async {
+      final result = await Process.run(
+        'git',
+        args,
+        workingDirectory: home.path,
+      );
+      if (expectOk) {
+        expect(
+          result.exitCode,
+          0,
+          reason: 'git ${args.join(' ')}: ${result.stderr}',
+        );
+      }
+      return '${result.stdout}';
+    }
+
+    test('thirty direct amendments across thirty commits still archive, '
+        'then consume the note and its one pointer line', () async {
+      await git(const ['init', '-q', '.']);
+      await git(const ['config', 'user.email', 'handoff@test']);
+      await git(const ['config', 'user.name', 'Handoff Test']);
+      await git(const ['config', 'commit.gpgsign', 'false']);
+      File(p.join(home.path, 'README.md')).writeAsStringSync('base\n');
+      await git(const ['add', 'README.md']);
+      await git(const ['commit', '-qm', 'base']);
+
+      // The legacy shape, reproduced exactly: the note is written DIRECTLY —
+      // the way it was before the write-once gate existed — and then amended in
+      // place thirty times, each amendment its own commit. This fixture must
+      // stay consumable: the constraint refuses NEW amendments, it does not
+      // strand the notes a shift already accreted.
+      final disc = Directory(seatDiscPath(home.path, seat))
+        ..createSync(recursive: true);
+      final file = File(p.join(disc.path, kEpoch69));
+      File(p.join(disc.path, 'MEMORY.md')).writeAsStringSync(
+        '# Memory index\n\n- [Handoff epoch 69]($kEpoch69) — first night\n'
+        '- [Lesson](lesson-x.md) — keep me\n',
+      );
+      File(p.join(disc.path, 'lesson-x.md')).writeAsStringSync(
+        note(name: 'lesson-x.md', seat: seat, kind: 'lesson'),
+      );
+      for (var amendment = 0; amendment < 30; amendment++) {
+        file.writeAsStringSync(
+          tenSectionHandoff(name: kEpoch69, seat: seat, amendments: amendment),
+        );
+        await git(const ['add', '-A', '--', '.grid']);
+        await git(['commit', '-qm', 'amend the handoff $amendment']);
+      }
+      expect(
+        int.parse(
+          (await git(const [
+            'rev-list',
+            '--count',
+            'HEAD',
+            '--',
+            '.grid/seats/$seat/$kEpoch69',
+          ])).trim(),
+        ),
+        30,
+        reason: 'the fixture IS the observed defect: thirty author moments',
+      );
+
+      final run = await succession(
+        home: home,
+        argv: [seat, '--grid-home', home.path],
+      );
+
+      expect(run.code, 0, reason: run.err);
+      // The archive is PROVED before anything is destroyed: the note the run
+      // deleted is the note at HEAD.
+      expect(
+        await git(const ['ls-tree', '-r', '--name-only', 'HEAD']),
+        contains('.grid/seats/$seat/$kEpoch69'),
+      );
+      expect(run.out, contains('ALREADY ARCHIVED'));
+      expect(
+        run.out,
+        contains('DELETED ${relative(seat, kEpoch69)} AND MEMORY.md POINTER'),
+      );
+      expect(file.existsSync(), isFalse);
+      expect(
+        File(p.join(disc.path, 'MEMORY.md')).readAsStringSync(),
+        '# Memory index\n\n- [Lesson](lesson-x.md) — keep me\n',
+        reason: 'one pointer line goes; every other byte on the index stays',
+      );
+      expect(
+        File(p.join(disc.path, 'lesson-x.md')).existsSync(),
+        isTrue,
+        reason: 'a durable note is not consumed with the handoff',
+      );
+    });
+
+    test('the write-once gate refuses the thirty-first amendment', () async {
+      final disc = Directory(seatDiscPath(home.path, seat))
+        ..createSync(recursive: true);
+      File(p.join(disc.path, kEpoch69)).writeAsStringSync(
+        tenSectionHandoff(name: kEpoch69, seat: seat, amendments: 30),
+      );
+
+      final run = await succession(
+        home: home,
+        argv: [seat, '--grid-home', home.path, '--write-handoff', kEpoch69],
+        stdinNote: tenSectionHandoff(
+          name: kEpoch69,
+          seat: seat,
+          amendments: 31,
+        ),
+      );
+
+      expect(run.code, 1);
+      expect(run.err, contains('REFUSED'));
+      expect(
+        File(p.join(disc.path, kEpoch69)).readAsStringSync(),
+        tenSectionHandoff(name: kEpoch69, seat: seat, amendments: 30),
+      );
     });
   });
 }
