@@ -42,62 +42,11 @@ import 'package:path/path.dart' as p;
 
 import 'seat_disc.dart';
 
-/// The disc's index — the file whose ONE pointer line is consumed with the
-/// handoff it names (the `/handoff` skill's INDEX step).
-const String kSeatMemoryFileName = 'MEMORY.md';
-
 String _currentDirectory() => Directory.current.path;
 
 /// The message the scoped archive commit carries. PURE.
 String seatArchiveCommitMessage(String seat) =>
     'chore(seat): archive $seat disc';
-
-/// [text] split into lines that KEEP their `\n`, so a line can be removed from
-/// a file without disturbing one other byte. A trailing fragment with no
-/// terminator is its own last entry. PURE.
-List<String> _linesKeepingTerminators(String text) {
-  final lines = <String>[];
-  var start = 0;
-  for (var i = 0; i < text.length; i++) {
-    if (text.codeUnitAt(i) == 0x0a) {
-      lines.add(text.substring(start, i + 1));
-      start = i + 1;
-    }
-  }
-  if (start < text.length) lines.add(text.substring(start));
-  return lines;
-}
-
-/// A Markdown inline link's target: the `x` of `](x)`.
-final RegExp _inlineLinkTarget = RegExp(r'\]\(([^()]*)\)');
-
-/// The indices of the lines in [memory] carrying a Markdown link whose target
-/// is EXACTLY [target] — the disc index's pointer at one note.
-///
-/// Exact, never a substring: `](handoff-a.md)` is a pointer at `handoff-a.md`
-/// and `](old-handoff-a.md)` is not. Indices are into
-/// [_linesKeepingTerminators], so [removeMemoryLine] consumes them directly.
-/// PURE.
-List<int> memoryPointerLines({required String memory, required String target}) {
-  final lines = _linesKeepingTerminators(memory);
-  final found = <int>[];
-  for (var i = 0; i < lines.length; i++) {
-    final hit = _inlineLinkTarget
-        .allMatches(lines[i])
-        .any((m) => m.group(1) == target);
-    if (hit) found.add(i);
-  }
-  return found;
-}
-
-/// [memory] with line [index] removed and EVERY remaining byte preserved —
-/// the removed line takes its own `\n` and nothing else. PURE.
-String removeMemoryLine({required String memory, required int index}) {
-  final lines = _linesKeepingTerminators(memory);
-  if (index < 0 || index >= lines.length) return memory;
-  lines.removeAt(index);
-  return lines.join();
-}
 
 /// What one succession run DID — the four outcomes, sealed by an enum so the
 /// CLI consumes them with an exhaustive `switch`.
