@@ -12,7 +12,8 @@ register:
   obsoletes: []
   updates: []
   obsoleted-by: null
-  updated-by: []
+  updated-by:
+    - pull-feedback-uses-explicit-references
   bead: null
   legacy-id: "ADR-0005"
 ---
