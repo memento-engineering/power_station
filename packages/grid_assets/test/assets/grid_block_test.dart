@@ -591,8 +591,8 @@ void main() {
           'asset-author': ['assets'],
           'discover': ['search'],
           'handoff': ['succession'],
-          'intake-refinement': ['filing', 'approve', 'link'],
-          'station-operations': ['up', 'down', 'status'],
+          'intake-refinement': ['filing', 'approve', 'link', 'mount'],
+          'station-operations': ['up', 'down', 'status', 'mount'],
         },
       );
     });

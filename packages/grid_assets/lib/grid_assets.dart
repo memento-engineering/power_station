@@ -80,10 +80,30 @@
 /// `filing`, `approve` and `unpark` take NO `--state-root`. The option existed
 /// for ONE reader — the grid home's cross-store link beads — and that read is
 /// gone (the_grid#447) with bd's own `external:` rows replacing it in the store
-/// these verbs already read. `park` and `show` keep the seam
+/// these verbs already read. `park`, `show` and `mount` keep the seam
 /// ([addStateRootOption] / [resolveStateRoot]), which takes the GRID HOME and
 /// appends its `.grid` state store, because they genuinely reach the
 /// session-lifecycle beads there.
+///
+/// [MountCommand] is the filing verb's counterpart on the OTHER question, and
+/// it is an EXPLAINER rather than an actuator: `filing` answers "is this bead
+/// APPROVABLE", `mount` answers "why will this bead not MOUNT", and the answer
+/// used to live in human memory as memorised dances (a hand-closed session
+/// leaves a bare `work_bead` key and the bead never re-mounts; the
+/// mount-attempt cap has no reset verb at all). [MountExplanationContract]
+/// turns them into ten ordered rows, each PASS / BLOCKED / UNCHECKED with its
+/// own evidence and — when it does not pass — the remedy, which the verb NAMES
+/// and never performs: several are destructive and belong to the governor. It
+/// COMPOSES the filing report whole rather than restating it, its
+/// `dependencies` row reuses the very [DependencyProjection] `filing` rendered
+/// (refined only with each local target's open/closed state), and its field
+/// clauses are the one `mountEligibilityFindings` predicate the engine's mount
+/// boundary already calls. Being OFFLINE is the point: it is the third consumer
+/// of the state-root seam because it reads SESSION-LIFECYCLE beads, and
+/// everything that lives only in a running station's memory — capacity,
+/// reservations, latches, process liveness, the engine-only mint and
+/// successor-retry counters — is reported UNCHECKED with a pointer to the
+/// resident `status` verb, never as a pass.
 ///
 /// The PARK PAIR rides that same seam, one rung further in: it is the
 /// operator's sanctioned exit for a session the engine's own writers can no
@@ -304,6 +324,7 @@ export 'src/filing/approval_stamp.dart';
 export 'src/filing/approve_command.dart';
 export 'src/filing/filing_command.dart';
 export 'src/filing/filing_contract.dart';
+export 'src/filing/mount_explanation.dart';
 export 'src/filing/park_command.dart';
 export 'src/filing/show_command.dart';
 export 'src/filing/state_root_option.dart';

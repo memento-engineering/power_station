@@ -236,6 +236,47 @@ A report carrying `error` (`bead not found`) is a REFUSAL, not a pass: the id
 is wrong or the cwd is the wrong store. Correct the id or the store root and
 rerun. Never approve past an `error`.
 
+## "Why won't this bead mount?" — `mount` is the oracle, and it is a COMMAND
+
+`filing` answers whether a bead is APPROVABLE. It does not answer whether the
+station will MOUNT it, and that second question used to be answered from memory
+— a hand-closed session leaves a bare `work_bead` key and the bead never
+re-mounts; a mount-attempt cap has no reset verb at all. It is a command now.
+Run it FIRST, before any inference, from the grid home:
+
+```bash
+{{runner}} mount --json --state-root "<grid home>" "<bead>"
+```
+
+The report is one JSON object: `{id, verdict, preconditions, filing, withheld?,
+withheld_retrieved_by?, error?}`. `preconditions` carries exactly ten rows, in
+order — `driveable_type`, `validation_plan`, `acceptance_criteria`,
+`dependencies`, `approval_stamp`, `session_occupancy`, `defer_state`,
+`verdict_cap`, `mount_attempt_cap`, `live_admission` — each
+`{precondition, outcome, detail, remedy?, evidence?}`. `outcome` is `PASS`,
+`BLOCKED` or `UNCHECKED`; the exit code is 0, 1 and 2 in that order.
+
+- **`BLOCKED`** — the row's own `remedy` says what to do. Apply it when it is a
+  bead edit this seat owns. Hand it over when it is `park`, `rework`, `resume`,
+  `unpark` or `bead rearm`: those are destructive, they belong to the governor,
+  and the verb itself performs none of them.
+- **`UNCHECKED` means NOT ASKED, and is never a pass.** `session_occupancy`,
+  `verdict_cap` and `mount_attempt_cap` go unchecked when no `--state-root`
+  names a grid home or that home's state store refuses the read;
+  `dependencies` goes unchecked when a local target could not be read back.
+  Supply the root and rerun, or write on the bead that the condition is
+  UNKNOWN — never record it as clear.
+- **`live_admission` is ALWAYS `UNCHECKED`**: capacity, slot reservations,
+  admission latches, process liveness and the engine-only mint and
+  successor-retry counters live in a running station's memory, not in any
+  store. It is the only residue worth escalating — read the resident's
+  `{{runner}} status`, and only then reach for relay inference, which is the
+  cheap pass OVER this mechanical answer and never a replacement for it.
+
+`filing` stays the approvability exit oracle: `mount` stages nothing and
+approves nothing. Its embedded `filing` member IS that same report, so one
+invocation answers both questions and neither is re-derived by reading fields.
+
 ## Staging: approve with the approve verb, only after refinement
 
 Drafts are created open and UNSTAMPED; the human's approval is the approve

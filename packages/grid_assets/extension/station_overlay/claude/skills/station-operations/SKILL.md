@@ -74,17 +74,26 @@ zero-ready or zero-session board is no evidence that nothing is driveable.
 
 For this sweep, stamped means `grid.approved_by`, `grid.approved_at`, and
 `grid.approved_rev` are all present; the retired `grid.approved` label does
-not count. Before treating a stamped-but-unmounted bead as waiting,
-enumerate every OPEN blocker: read its in-store dependencies with
-`bd -C <work-store-root> dep list <bead-id> --json` and its cross-store
-dependencies — bd `external:<project>:<capability>` rows on the bead itself —
-with the station's `link ls` verb, which lists the external rows every armed
-store carries. Read every unique blocker in its owning store with
-`bd -C <blocker-store-root> query id=<blocker-id> --all --json --limit 0`,
-and discard any blocker whose own status is not open. A blocker that is a
-release node or whose notes explicitly say an agent executes it is
-**GOVERNOR WORK**, not a human gate; list its id, title, owning store, and
-next executable action.
+not count. Before treating a stamped-but-unmounted bead as waiting, run the
+mount verb over it FIRST — `{{runner}} mount --json --state-root "$(pwd)"
+"<bead>"` — and read its ten ordered preconditions rather than reconstructing
+them by hand.
+
+That report answers `driveable_type`, `validation_plan`,
+`acceptance_criteria`, `dependencies`, `approval_stamp`, `session_occupancy`,
+`defer_state`, `verdict_cap`, `mount_attempt_cap` and `live_admission`, each
+`PASS`, `BLOCKED` or `UNCHECKED` with its own `detail` and, when it does not
+pass, its own `remedy`. The `dependencies` row already reports every bd row the
+bead holds — each local target's open/closed state and each `external:` row's
+roster resolution — so there is nothing left to enumerate by hand.
+`UNCHECKED` means NOT ASKED and is never a pass: supply the `--state-root`, or
+record the condition as unknown. `live_admission` is always unchecked, and is
+the one residue a `/status` read answers.
+
+The JUDGEMENT is still yours, and so is every remedy — the verb names them and
+performs none. A blocker that is a release node or whose notes explicitly say
+an agent executes it is **GOVERNOR WORK**, not a human gate; list its id,
+title, owning store, and next executable action.
 
 ## Silent-death runbook (ready > 0, mounted 0, no errors)
 

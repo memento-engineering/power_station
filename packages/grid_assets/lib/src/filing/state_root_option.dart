@@ -4,7 +4,13 @@ import 'package:args/args.dart';
 import 'package:path/path.dart' as p;
 
 /// The ONE `--state-root` option name the verbs that REACH the grid home's
-/// state store expose — `park` and `show`.
+/// state store expose — `park`, `show` and `mount`.
+///
+/// `mount` is the THIRD consumer and rides this seam rather than declaring an
+/// option of its own: its `session_occupancy`, `verdict_cap` and
+/// `mount_attempt_cap` rows are projections of the session-lifecycle, step and
+/// mount-attempt beads the grid home holds, which is exactly the store this
+/// option names.
 const String kStateRootOption = 'state-root';
 
 /// The ONE help line every verb prints for [kStateRootOption].

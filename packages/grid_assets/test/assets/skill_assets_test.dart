@@ -1076,6 +1076,183 @@ void main() {
     });
   });
 
+  group('the mount explainer is CALLED, not re-derived (bead `pow-1pfs`)', () {
+    /// The ten ordered preconditions the `mount` verb emits — the contract a
+    /// skill hands its reader, and the reason naming the command alone is not
+    /// enough: a reader who does not know the row set cannot act on a row.
+    const preconditions = <String>[
+      'driveable_type',
+      'validation_plan',
+      'acceptance_criteria',
+      'dependencies',
+      'approval_stamp',
+      'session_occupancy',
+      'defer_state',
+      'verdict_cap',
+      'mount_attempt_cap',
+      'live_admission',
+    ];
+
+    /// The two skills that answer "why will this bead not mount", each read on
+    /// its OWN leg — a harness may carry its own instructions, so the
+    /// invariant is asserted four times rather than once over a byte
+    /// comparison (`power_station#a-harness-may-carry-its-own-instructions`).
+    List<({String label, String body})> answeringLegs() => [
+      for (final skillId in const ['intake-refinement', 'station-operations'])
+        for (final leg in _skillLegs)
+          (
+            label: '$leg/$skillId',
+            body: File(
+              p.join(
+                root,
+                'station_overlay',
+                leg,
+                'skills',
+                skillId,
+                'SKILL.md',
+              ),
+            ).readAsStringSync(),
+          ),
+    ];
+
+    String flow(String body) => body.replaceAll(RegExp(r'\s+'), ' ');
+
+    test('each leg invokes the COMMAND first and states its ten-row '
+        'contract', () {
+      for (final leg in answeringLegs()) {
+        final flowed = flow(leg.body);
+        expect(
+          leg.body,
+          contains('{{runner}} mount --json --state-root'),
+          reason:
+              '${leg.label} must CALL the verb through its materialized runner '
+              'hole rather than reconstruct the answer by hand',
+        );
+        for (final precondition in preconditions) {
+          expect(
+            leg.body,
+            contains('`$precondition`'),
+            reason: '${leg.label} names the $precondition row it consumes',
+          );
+        }
+        for (final outcome in const ['`PASS`', '`BLOCKED`', '`UNCHECKED`']) {
+          expect(
+            flowed,
+            contains(outcome),
+            reason: '${leg.label} names $outcome',
+          );
+        }
+        expect(
+          flowed,
+          allOf(contains('NOT ASKED'), contains('never a pass')),
+          reason:
+              '${leg.label} must say UNCHECKED means unasked — an unchecked '
+              'condition read as clear is the failure this verb exists to stop',
+        );
+        expect(
+          flowed,
+          contains('remedy'),
+          reason: '${leg.label} consumes the row remedy it is handed',
+        );
+      }
+    });
+
+    test('the runner hole binds on every leg', () {
+      for (final leg in _skillLegs) {
+        expect(
+          _renderLeg(root, leg, 'intake-refinement', const {'runner': 'space'}),
+          contains('space mount --json --state-root'),
+        );
+        expect(
+          _renderLeg(root, leg, 'station-operations', const {
+            'runner': 'space',
+            'bootRunner': 'space',
+          }),
+          contains('space mount --json --state-root'),
+        );
+      }
+    });
+
+    test('filing stays the approvability exit oracle, and the destructive '
+        'remedies stay the GOVERNOR\'s', () {
+      for (final leg in _skillLegs) {
+        final body = File(
+          p.join(
+            root,
+            'station_overlay',
+            leg,
+            'skills',
+            'intake-refinement',
+            'SKILL.md',
+          ),
+        ).readAsStringSync();
+        final flowed = flow(body);
+        expect(
+          body,
+          contains(
+            '## The exit check — `filing` is the oracle, and it is a COMMAND',
+          ),
+          reason: '$leg keeps the approvability oracle it already had',
+        );
+        expect(
+          flowed,
+          contains('`filing` stays the approvability exit oracle'),
+          reason: '$leg does not let mount stage or approve a bead',
+        );
+        expect(
+          flowed,
+          contains('they belong to the governor'),
+          reason: '$leg hands the destructive remedies over',
+        );
+        for (final remedy in const [
+          '`park`',
+          '`rework`',
+          '`resume`',
+          '`unpark`',
+          '`bead rearm`',
+        ]) {
+          expect(flowed, contains(remedy), reason: '$leg names $remedy');
+        }
+        expect(
+          flowed,
+          contains('the verb itself performs none of them'),
+          reason: '$leg says the explainer never actuates',
+        );
+      }
+    });
+
+    test('the refiner role gains exactly ONE policy sentence and no tool '
+        'grammar', () {
+      final refiner = File(
+        p.join(root, 'station_overlay', 'claude', 'agents', 'refiner.md'),
+      ).readAsStringSync();
+
+      expect(
+        refiner.replaceAll(RegExp(r'\s+'), ' '),
+        contains(
+          'A bead that will not mount is explained by the mount verb before '
+          'any inference; UNCHECKED means not asked, and destructive remedies '
+          'belong to the governor.',
+        ),
+      );
+      // The PUSHED surface states the policy and nothing else: the invocation,
+      // the row names and the flag list are the skill's and the verb's own,
+      // and a copy here drifts the moment either changes.
+      for (final grammar in const [
+        'mount --json',
+        'precondition',
+        'driveable_type',
+        'live_admission',
+      ]) {
+        expect(
+          refiner,
+          isNot(contains(grammar)),
+          reason: 'refiner.md must not restate `$grammar`',
+        );
+      }
+    });
+  });
+
   group('the vended overlay is ROOT-RELATIVE and COMPLETE', () {
     final overlay = p.join(root, 'station_overlay');
 

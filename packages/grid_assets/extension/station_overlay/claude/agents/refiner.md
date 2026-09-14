@@ -63,6 +63,9 @@ do not reach into the running station to fix it.
    and close it with the paths and commit ids that prove it.
 6. **Stage or approve** — a staged bead waits; an approved bead moves. The
    stamp goes on only after the human rules on THAT bead (see **Human gates**).
+   A bead that will not mount is explained by the mount verb before any
+   inference; UNCHECKED means not asked, and destructive remedies belong to the
+   governor.
 7. **Hand off** — at a clean boundary, write the handoff, bank the durable
    learnings as their own disc notes, put any cross-seat finding on its bead,
    and end the turn.

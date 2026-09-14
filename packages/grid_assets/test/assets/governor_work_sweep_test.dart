@@ -8,18 +8,20 @@
 // human gate. The handoff inherited the omission, the successor trusted it,
 // and the station sat with zero live sessions for 26 hours.
 //
-// So the three authored texts must carry the INVERSE question — enumerate the
-// OPEN BLOCKERS of stamped-but-unmounted work, and classify the driveable ones
-// as GOVERNOR WORK — and the handoff must not claim `empty by design` until
-// that enumeration comes back empty. Each sentence is pinned exactly, inside
-// the section that owns it: a rewrite that keeps three and drops the fourth
-// fails HERE, by name.
+// So the three authored texts must carry the INVERSE question — what is
+// stamped-but-unmounted work waiting ON, and which of those blockers is
+// driveable GOVERNOR WORK — and the handoff must not claim `empty by design`
+// until that comes back empty. Each sentence is pinned exactly, inside the
+// section that owns it: a rewrite that keeps three and drops the fourth fails
+// HERE, by name.
 //
 // The three texts carry it at DIFFERENT altitudes. The role definition is
 // PUSHED — a seat pays for it on every turn — so it states the judgement and
 // nothing else; the runbook is PULLED when the board reads quiet, so it owns
-// the store grammar that enumerates both blocker sources. One owner per
-// sentence is what keeps them from drifting apart.
+// the INVOCATION that answers it. That invocation is now the `mount` verb: the
+// four hand-authored reads the runbook used to spell out are one command, and
+// the command answers six preconditions the dance never asked about at all.
+// One owner per sentence is what keeps them from drifting apart.
 //
 // SCOPE: this file reads the CLAUDE leg only. `governor.md` has no `agents/`
 // twin at all, and each per-harness leg of `station_overlay` is an INDEPENDENT
@@ -60,32 +62,61 @@ String _handoff() => File(
 /// The four sentences the sweep PROCEDURE is made of, each keyed by the
 /// failure it prevents.
 ///
-/// They are asserted on the RUNBOOK alone. The store grammar that enumerates
-/// both blocker sources has exactly one owner, and a second copy in the
-/// pushed role definition drifts the moment the grammar changes — so the
-/// governor def states the JUDGEMENT ([_governorSweepPolicy]) and the skill
-/// states how to reach it.
+/// They are asserted on the RUNBOOK alone. The store grammar that reaches the
+/// sweep's answer has exactly one owner, and a second copy in the pushed role
+/// definition drifts the moment the grammar changes — so the governor def
+/// states the JUDGEMENT ([_governorSweepPolicy]) and the skill states how to
+/// reach it.
+///
+/// The MECHANICAL half is no longer a query dance. It used to be four
+/// hand-authored reads — a `dep list`, a `link ls`, a per-blocker
+/// `query id=…` — which the operator had to reassemble correctly every time and
+/// which said nothing at all about session occupancy, defer state or either
+/// cap. The `mount` verb answers all ten preconditions in one call, so the
+/// runbook CALLS it and the choreography is gone ([_retiredChoreography]).
 const Map<String, String> _sweepSentences = {
   'the retired label is not mistaken for a stamp':
       'For this sweep, stamped means `grid.approved_by`, `grid.approved_at`, '
       'and `grid.approved_rev` are all present; the retired '
       '`grid.approved` label does not count.',
-  'both blocker sources are enumerated — in-store deps AND external rows':
-      'Before treating a stamped-but-unmounted bead as waiting, enumerate '
-      'every OPEN blocker: read its in-store dependencies with `bd -C '
-      '<work-store-root> dep list <bead-id> --json` and its cross-store '
-      'dependencies — bd `external:<project>:<capability>` rows on the bead '
-      "itself — with the station's `link ls` verb, which lists the external "
-      'rows every armed store carries.',
-  'each blocker is read in its OWNING store, and closed ones are discarded':
-      'Read every unique blocker in its owning store with `bd -C '
-      '<blocker-store-root> query id=<blocker-id> --all --json --limit 0`, '
-      'and discard any blocker whose own status is not open.',
+  'the mechanical sweep is the mount COMMAND, and it runs FIRST':
+      'Before treating a stamped-but-unmounted bead as waiting, run the '
+      'mount verb over it FIRST — `{{runner}} mount --json --state-root '
+      '"\$(pwd)" "<bead>"` — and read its ten ordered preconditions rather '
+      'than reconstructing them by hand.',
+  'an UNCHECKED row is not a pass':
+      '`UNCHECKED` means NOT ASKED and is never a pass: supply the '
+      '`--state-root`, or record the condition as unknown.',
   'a driveable blocker is classified as GOVERNOR WORK, with a next action':
       'A blocker that is a release node or whose notes explicitly say an '
       'agent executes it is **GOVERNOR WORK**, not a human gate; list its '
       'id, title, owning store, and next executable action.',
 };
+
+/// The ten preconditions the runbook hands the operator, named so a rewrite
+/// that keeps the invocation and drops the contract fails here.
+const List<String> _sweepPreconditions = [
+  'driveable_type',
+  'validation_plan',
+  'acceptance_criteria',
+  'dependencies',
+  'approval_stamp',
+  'session_occupancy',
+  'defer_state',
+  'verdict_cap',
+  'mount_attempt_cap',
+  'live_admission',
+];
+
+/// The hand-authored query choreography the verb RETIRED. A runbook that keeps
+/// one of these alive beside the command has two answers to one question, and
+/// the hand-assembled one is the one that was wrong.
+const List<String> _retiredChoreography = [
+  'dep list <bead-id>',
+  '`link ls` verb',
+  'query id=<blocker-id>',
+  'enumerate every OPEN blocker',
+];
 
 /// The three sentences the governor's OWN Sweep step is made of — the same
 /// guarantee as [_sweepSentences], stated as judgement a seat carries on every
@@ -185,10 +216,31 @@ void main() {
         contains(sentence),
         reason:
             'the station-operations governor-work runbook must state, in its '
-            'own body, that $guarantee — it is the one place the enumeration '
-            'is spelled out',
+            'own body, that $guarantee — it is the one place the sweep is '
+            'spelled out',
       );
     });
+
+    // The command's CONTRACT, not just its name: ten rows, in order.
+    for (final precondition in _sweepPreconditions) {
+      expect(
+        runbook,
+        contains('`$precondition`'),
+        reason: 'the runbook names the $precondition precondition it reads',
+      );
+    }
+
+    // And the dance it replaced is GONE — a second, hand-assembled answer to
+    // the same question is the defect this verb exists to end.
+    for (final retired in _retiredChoreography) {
+      expect(
+        runbook,
+        isNot(contains(retired)),
+        reason:
+            'the runbook must not keep the manual `$retired` choreography '
+            'beside the command that answers it',
+      );
+    }
   });
 
   test(
