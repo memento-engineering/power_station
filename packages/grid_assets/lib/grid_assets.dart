@@ -66,14 +66,24 @@
 /// deterministically evaluates its four mechanical authoring requirements,
 /// and [FilingCommand] is the thin CLI adapter the `discover` skill calls.
 /// Description and acceptance usefulness remain with the agentic half.
-/// Both filing verbs still register ONE `--state-root` seam
-/// ([addStateRootOption] / [resolveStateRoot]) so `filing`, `approve`, `show`
-/// and the park pair cannot spell the grid home two ways; that seam takes the
-/// GRID HOME and appends its `.grid` state store. `filing` and `approve`
-/// VALIDATE it and read nothing through it: the cross-store link beads they
-/// used to project died with grid_engine's link surface (the_grid#447), so a
-/// named foreign blocker with no local `blocks` edge is reported missing,
-/// fail-closed.
+/// The dependencies requirement is a [DependencyProjection] of the dependency
+/// rows bd holds for the bead — local targets and
+/// `external:<project>:<capability>` targets alike — and NOTHING in this
+/// package reads bead prose for blockers: a `Blocked by` sentence is prose
+/// (Nico, 2026-09-13, under `the_grid#the-grid-is-a-beads-controller`). Each
+/// external row resolves through the station roster both filing verbs take by
+/// the SAME injected seam ([noArmedSubstations] is the fail-closed default),
+/// so `filing` and `approve` cannot answer the same contract two ways; a
+/// project the roster does not arm — or a roster that was never supplied —
+/// refuses the row and NAMES the remedy.
+///
+/// `filing`, `approve` and `unpark` take NO `--state-root`. The option existed
+/// for ONE reader — the grid home's cross-store link beads — and that read is
+/// gone (the_grid#447) with bd's own `external:` rows replacing it in the store
+/// these verbs already read. `park` and `show` keep the seam
+/// ([addStateRootOption] / [resolveStateRoot]), which takes the GRID HOME and
+/// appends its `.grid` state store, because they genuinely reach the
+/// session-lifecycle beads there.
 ///
 /// The PARK PAIR rides that same seam, one rung further in: it is the
 /// operator's sanctioned exit for a session the engine's own writers can no
@@ -87,7 +97,8 @@
 /// RESIDENT and refuse when it is down — so reading a bead meant knowing which
 /// seat mints its prefix and shelling `bd` from that root. `show` reads it
 /// through the SAME [ExactSubstationBeadSource.readExact] the filing preflight
-/// uses (one exact-id `bd query`, one `bd dep list`, no mutation surface) and
+/// uses (ONE exact-id `bd query` on bd's RECORD surface, which carries the
+/// bead and its dependency rows together, no mutation surface) and
 /// renders id, prose, the `grid.approved_*` stamp and the dependency edges
 /// with NO station in the path. Its output is BOUNDED at
 /// [kBoundedOutputCapBytes] on both the plain and the JSON rendering, and what

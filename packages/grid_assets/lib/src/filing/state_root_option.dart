@@ -3,17 +3,22 @@ import 'dart:io';
 import 'package:args/args.dart';
 import 'package:path/path.dart' as p;
 
-/// The ONE `--state-root` option name every filing verb exposes.
+/// The ONE `--state-root` option name the verbs that REACH the grid home's
+/// state store expose — `park` and `show`.
 const String kStateRootOption = 'state-root';
 
 /// The ONE help line every verb prints for [kStateRootOption].
 ///
 /// It names the GRID HOME rather than a store because that home is where the
-/// state beads live — the SESSION-LIFECYCLE beads `park`/`unpark` close and
-/// retire. One home, one option, one resolution: `filing`, `approve` and
-/// `show` register and VALIDATE the same option so the verb set cannot spell
-/// the home two ways, even though only the park pair reads through it since
-/// the cross-store link beads were retired (the_grid#447).
+/// state beads live — the SESSION-LIFECYCLE beads `park` closes and retires,
+/// and the root `show` validates against. One home, one option, one
+/// resolution.
+///
+/// `filing`, `approve` and `unpark` no longer take it at all: their
+/// dependencies row is a projection of the WORK store's own bd rows and
+/// reaches no second store (Nico, 2026-09-13, under
+/// `the_grid#the-grid-is-a-beads-controller`). A verb that accepted a root it
+/// never reads teaches an operator that the root matters to its answer.
 const String kStateRootHelp =
     'The grid home whose .grid/.beads holds the session-lifecycle state beads.';
 
@@ -25,8 +30,8 @@ const String _stateStoreDir = '.grid';
 /// recognizes a path that is ALREADY the state store.
 const String _beadsDir = '.beads';
 
-/// The default injected state root: NONE. The verbs that REQUIRE the home
-/// (`park`/`unpark`) refuse rather than guess at one.
+/// The default injected state root: NONE. The verb that REQUIRES the home
+/// (`park`) refuses rather than guess at one.
 String? noStateRoot() => null;
 
 /// Registers [kStateRootOption] on [parser] — the seam every verb rides so the

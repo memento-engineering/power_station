@@ -407,10 +407,7 @@ void main() {
       );
       expect(
         intake,
-        contains(
-          '{{runner}} approve --actor operator --json '
-          '--state-root "<grid home>" "<bead>"',
-        ),
+        contains('{{runner}} approve --actor operator --json "<bead>"'),
       );
       for (final key in stampKeys) {
         expect(intake, contains(key), reason: 'intake names $key');
@@ -916,16 +913,8 @@ void main() {
 
     test('the exit oracle is the filing verb — the skill CALLS the command '
         'and owns no completeness predicate of its own', () {
-      expect(
-        template,
-        contains(
-          '{{runner}} filing --json --state-root "<grid home>" "<bead>"',
-        ),
-      );
-      expect(
-        rendered,
-        contains('space filing --json --state-root "<grid home>" "<bead>"'),
-      );
+      expect(template, contains('{{runner}} filing --json "<bead>"'));
+      expect(rendered, contains('space filing --json "<bead>"'));
       expect(
         template,
         contains(
@@ -944,7 +933,8 @@ void main() {
       }
       expect(template, contains('"passed": false'));
       expect(template, contains('"passed": true'));
-      expect(template, contains('missing outgoing blocks edges'));
+      expect(template, contains('bd holds no blocking dependency rows'));
+      expect(template, contains('unresolvable external dependency rows:'));
       expect(template, contains('is a REFUSAL, not a pass'));
       // The reinvention this bead was CURED of (governor, 2026-09-02): the
       // engine-side mount gate and a refiner-local predicate are BOTH absent.
@@ -1011,12 +1001,12 @@ void main() {
       );
     });
 
-    test('intake-refinement teaches the missing-wiring detail and the bd '
+    test('intake-refinement teaches the projection details and the bd '
         'external row in both overlay legs', () {
       // The refiner acts on the verb's `detail` verbatim, so the corpus is
       // pinned to the strings the verb EMITS — not to a paraphrase of them.
-      const missing = 'missing outgoing blocks edges: <ids>';
-      const form = '--state-root "<grid home>"';
+      const held = 'bd holds no blocking dependency rows';
+      const unresolvable = 'unresolvable external dependency rows:';
       for (final leg in const ['claude', 'agents']) {
         final body = File(
           p.join(
@@ -1031,14 +1021,26 @@ void main() {
 
         expect(
           body,
-          contains(missing),
-          reason: '$leg teaches the genuinely-missing detail',
+          contains(held),
+          reason: '$leg teaches the PASSING projection detail verbatim',
+        );
+        expect(
+          body,
+          contains(unresolvable),
+          reason: '$leg teaches the refusal the roster can produce',
         );
         // The retired state-store link surface is not taught anywhere
-        // (grid_engine 0.4.0-dev.3, the_grid#447).
+        // (grid_engine 0.4.0-dev.3, the_grid#447), and neither is the retired
+        // prose declaration grammar or the row it fed (pow-f6pc).
         expect(body, isNot(contains('type=link')));
         expect(body, isNot(contains('grid.link.')));
         expect(body, isNot(contains('cross-store edges not consulted')));
+        expect(body, isNot(contains('missing outgoing blocks edges')));
+        expect(
+          body,
+          contains('A blocker is a DECLARATION bd holds'),
+          reason: '$leg says prose declares nothing',
+        );
         // A cross-store blocker is bd's own external row, written by the
         // link verb.
         expect(
@@ -1053,16 +1055,22 @@ void main() {
           ),
           reason: '$leg documents the link verb in its post-cut shape',
         );
-        // Both command examples pass the documented GRID HOME.
+        // Neither command names a second store any more: the row is a
+        // projection of the WORK store's own bd rows.
         expect(
           body,
-          contains('{{runner}} filing --json $form "<bead>"'),
+          contains('{{runner}} filing --json "<bead>"'),
           reason: '$leg documents the one filing form',
         );
         expect(
           body,
-          contains('{{runner}} approve --actor operator --json $form "<bead>"'),
+          contains('{{runner}} approve --actor operator --json "<bead>"'),
           reason: '$leg documents the one approve form',
+        );
+        expect(
+          body,
+          isNot(contains('filing --json --state-root')),
+          reason: '$leg does not teach a root the verb no longer takes',
         );
       }
     });

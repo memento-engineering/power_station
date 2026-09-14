@@ -1,5 +1,50 @@
 ## Unreleased
 
+- Breaking: the `dependencies` filing requirement is a PROJECTION of the dependency rows bd holds
+  for the bead, and bead PROSE is never parsed for blockers again (Nico, 2026-09-13, under
+  `the_grid#the-grid-is-a-beads-controller`;
+  `power_station#the-dependencies-row-is-a-projection-of-bd-dependency-rows`). The declaration
+  grammar — a segment opening with `Blocked by` / `Blocked on` / `Depends on`, its tokens read as
+  ids by prefix or digit tail — and the declared-vs-wired comparison it fed are DELETED, with no
+  compatibility arm. `Blocked-by: pow-x` and `Blocked by pow-x` now project identically, because
+  neither is a row. New public surface: `DependencyProjection`, `ExternalBlocker`,
+  `ExternalResolution` and `noArmedSubstations`. Migration: wire the row
+  (`bd dep add <blocked> <blocker>`, or `link` for a cross-store capability) — a sentence never
+  declared one.
+- Breaking: `FilingContract.evaluate`, `FilingService.inspect`/`check`, `ApproveService.approve`,
+  `UnparkService.unpark` and the `filing`/`approve`/`unpark` commands take `armedSubstations` — the
+  station's roster by NAME, which an `external:<project>:<capability>` row's project resolves
+  against. It is FAIL-CLOSED: a project the roster does not arm refuses the row, and so does a
+  roster that was never supplied (`noArmedSubstations`, the default), each naming its own remedy.
+  No station threads the roster yet, so every `external:` row refuses both verbs until one does —
+  a composition gap, named in the refusal.
+- Breaking: `--state-root` retires from `filing`, `approve` and `unpark`, and the `stateRoot`
+  parameter is gone from `FilingCommand`, `ApproveCommand` and `UnparkCommand`. The option existed
+  on those verbs for ONE reader — the grid home's cross-store link beads — and that read is gone
+  (the_grid#447) with the dependencies row now reaching no second store at all; a verb that takes a
+  root it never reads teaches an operator that the root matters to its answer. `park` and `show`
+  keep the option and still reach the state store's session-lifecycle beads. Migration: drop
+  `stateRoot:` from those three constructors and pass the station's roster as `armedSubstations`
+  instead; drop `--state-root` from `filing`/`approve`/`unpark` invocations.
+- Breaking: a standing `grid.approved_rev` over a bead whose description NAMED a blocker
+  re-derives, because the basis `dependencies` member changed shape — from the ids the prose named
+  with their proofs to the rows bd holds, typed `local` or `external`. Those receipts read STALE
+  and their beads need re-approving; the governor sweeps in-flight work at the boot checklist. The
+  basis PREFIX stays `filing:v1:sha256:` — a new prefix is a v2 receipt scheme and its own bead.
+  The ROSTER is deliberately excluded from the basis: arming a substation must not revoke a
+  governor's approval of a bead nobody edited, so the mount gate needs no roster.
+- Changed: `ExactSubstationBeadSource.readExact` reads bd's RECORD surface
+  (`BdCliService.queryGraph`), which carries the bead and its dependency rows in ONE spawn, and no
+  longer calls `bd dep list` or normalizes its two row shapes. That surface is the only one an
+  `external:` target survives on — `bd dep list` resolves each row to an issue record, and a
+  cross-project target has none in this store. The two surfaces are reconciled by `beads_dart`'s
+  own `externalDepRowsFrom`, which REFUSES a record surface that dropped rows the resolving read
+  still holds; that control is the only remaining second spawn. `ExternalDepRef` and its parser
+  are CONSUMED from `beads_dart` — this package mints no second spelling of bd's vocabulary.
+- Changed: the vended `intake-refinement` corpus teaches the projection in both overlay legs — a
+  blocker is a declaration bd holds, the two refusal details verbatim, and the roster composition
+  gap where the row is taught and again where the refusal is corrected.
+
 - Changed: adopts the 2026-09-13 the_grid dev.3 wave — `genesis_tree ^0.4.0`, `grid_engine ^0.4.0-dev.3`, `grid_sdk ^0.4.0-dev.3`, `grid_runtime ^0.2.1-dev.2`, `grid_trajectory ^0.2.1-dev.2` and `beads_dart ^0.3.0-dev.2` (pow-abaw).
 - Breaking: `GitSourceControl.provisioner` is a `StationGitRepository`, not a `StationGitService`,
   and `GitSourceControl` implements the new `SourceControl.baseShaFor` by delegating to it, so a

@@ -96,112 +96,191 @@ final class FilingReport {
   };
 }
 
-/// Splits a description where a blocker DECLARATION can end: a sentence
-/// terminator followed by whitespace or end-of-input, or a line break. A `.`
-/// followed by a word character stays inside its segment, so dotted child ids
-/// (`pow-n6n.1`) survive the split.
-final RegExp _segmentBreak = RegExp(r'(?:[.!?;](?=\s|$)|\n)+');
+/// What the station ROSTER said about one `external:` row's project.
+enum ExternalResolution {
+  /// The roster arms a substation of that name — the row is an ordinary
+  /// prerequisite and the dependencies requirement passes on it.
+  armed,
 
-/// A segment DECLARES blockers only when it OPENS with the phrase, after any
-/// list or quote marker: `Blocked by: pow-one` on its own line declares, and
-/// `pow-pry0 carries a 'DEPENDS ON: tg-1n4y' receipt` only MENTIONS one.
-final RegExp _leadingBlockerPhrase = RegExp(
-  r'^[\s>*#-]*(?:\d+[.)]\s*)?(?:blocked\s+(?:by|on)|depends\s+on)\b',
-  caseSensitive: false,
-);
+  /// The roster was consulted and arms NO substation of that name. An edge
+  /// naming a store this station does not arm is never a silent pass.
+  notArmed,
 
-/// A `<prefix>-<tail>` token — the SHAPE of a bead id. Shape alone does not
-/// make one: [_isBeadId] decides.
-final RegExp _candidateId = RegExp(r'\b[a-z][a-z0-9_]*(?:-[a-z0-9_.]+)+\b');
-
-final RegExp _digit = RegExp(r'[0-9]');
-
-/// The store prefix of [id] — `pow` for `pow-n6n.1`; empty when [id] carries
-/// no prefix at all.
-String _prefixOf(String id) {
-  final hyphen = id.indexOf('-');
-  return hyphen <= 0 ? '' : id.substring(0, hyphen);
+  /// The roster was NOT consulted, so nothing can be said about the project.
+  /// Fail-closed, exactly as [notArmed] is: an unasked roster cannot clear a
+  /// cross-project blocker.
+  unconsulted,
 }
 
-/// True when [candidate] reads as a bead id rather than a hyphenated English
-/// compound (`cross-store`, `read-only`): its prefix is one this check already
-/// knows ([knownPrefixes] — the checked bead's own store, plus the store of
-/// every blocker already wired), or its tail carries a digit.
-///
-/// The prefix arm is what keeps digitless ids (`pow-one`, `filing-blocker`)
-/// readable; requiring a digit alone would silently stop naming them.
-///
-/// Since the_grid#447 "already wired" means a LOCAL outgoing `blocks` edge and
-/// nothing else, so a FOREIGN store's prefix reaches this check only when the
-/// bead already wires a local blocker in that store. A digitless foreign id
-/// (`pow-abaw` named from a `space-` bead) is therefore not read as an id at
-/// all and never reaches the dependency row — that row is fail-closed only for
-/// the tokens this check still recognises, and silent about the rest. Reading
-/// a foreign blocker from bd's own `external:` rows instead of from prose is
-/// pow-f6pc (power_station#330).
-bool _isBeadId(String candidate, Set<String> knownPrefixes) {
-  final hyphen = candidate.indexOf('-');
-  return knownPrefixes.contains(candidate.substring(0, hyphen)) ||
-      _digit.hasMatch(candidate.substring(hyphen + 1));
+/// One `external:<project>:<capability>` dependency row, with what the roster
+/// said about its project.
+final class ExternalBlocker {
+  /// Binds [ref] to its [resolution].
+  const ExternalBlocker({required this.ref, required this.resolution});
+
+  /// The parsed row — bd's OWN type
+  /// ([ExternalDepRef], `beads_dart`), never a second spelling of it.
+  final ExternalDepRef ref;
+
+  /// The roster's answer about [ExternalDepRef.project].
+  final ExternalResolution resolution;
+
+  /// Whether this row clears the dependencies requirement.
+  bool get passed => switch (resolution) {
+    ExternalResolution.armed => true,
+    ExternalResolution.notArmed || ExternalResolution.unconsulted => false,
+  };
 }
 
-/// The blocker ids DECLARED by [description] — read ONLY from segments that
-/// open with a blocker phrase, and only from tokens [_isBeadId] accepts.
-Set<String> _namedBlockers(String description, Set<String> knownPrefixes) => {
-  for (final segment in description.split(_segmentBreak))
-    if (_leadingBlockerPhrase.matchAsPrefix(segment) case final phrase?)
-      for (final match in _candidateId.allMatches(
-        segment.substring(phrase.end),
-      ))
-        if (_isBeadId(match.group(0)!, knownPrefixes)) match.group(0)!,
-};
+/// The dependencies requirement's whole content: the PROJECTION of the
+/// dependency rows bd holds for one bead.
+///
+/// `power_station#the-dependencies-row-is-a-projection-of-bd-dependency-rows`
+/// — ruled by Nico on 2026-09-13 under
+/// `the_grid#the-grid-is-a-beads-controller`: a blocker is a declaration bd
+/// holds, and bd's rows are the single typed view of it. Bead PROSE is never
+/// read for blockers; a `Blocked by` sentence is prose, and the hyphenated
+/// spelling is the same prose. There is nothing to compare the rows AGAINST,
+/// so the row reports what bd holds and refuses only what the roster cannot
+/// resolve.
+final class DependencyProjection {
+  /// Creates a projection over already-classified rows.
+  const DependencyProjection({
+    required this.local,
+    required this.external,
+    required this.armedSubstations,
+  });
+
+  /// Projects [beadId]'s own outgoing BLOCKING rows out of [dependencies].
+  ///
+  /// [armedSubstations] is the station's roster by NAME, or null when no
+  /// roster was supplied — the [ExternalResolution.unconsulted] arm.
+  factory DependencyProjection.of({
+    required String beadId,
+    required Iterable<BeadDependency> dependencies,
+    required Set<String>? armedSubstations,
+  }) {
+    final local = <String>{};
+    final external = <String, ExternalBlocker>{};
+    for (final edge in dependencies) {
+      if (edge.issueId != beadId || edge.type != DependencyType.blocks) {
+        continue;
+      }
+      // bd's own parser decides what an `external:` target is. A malformed
+      // spelling parses to null and is read as a LOCAL id — exactly what bd
+      // does with it, so the projection never invents a third reading.
+      final ref = ExternalDepRef.parse(edge.dependsOnId);
+      if (ref == null) {
+        local.add(edge.dependsOnId);
+        continue;
+      }
+      external[ref.wire] = ExternalBlocker(
+        ref: ref,
+        resolution: armedSubstations == null
+            ? ExternalResolution.unconsulted
+            : armedSubstations.contains(ref.project)
+            ? ExternalResolution.armed
+            : ExternalResolution.notArmed,
+      );
+    }
+    return DependencyProjection(
+      local: local.toList()..sort(),
+      external: (external.keys.toList()..sort())
+          .map((wire) => external[wire]!)
+          .toList(growable: false),
+      armedSubstations: armedSubstations,
+    );
+  }
+
+  /// The same-store blocking targets, sorted. bd's own `bd ready` business —
+  /// the projection reports them and judges nothing about them.
+  final List<String> local;
+
+  /// The `external:` blocking rows, sorted by wire form, each carrying its
+  /// roster resolution.
+  final List<ExternalBlocker> external;
+
+  /// The roster the external rows were resolved against, or null when none
+  /// was supplied.
+  final Set<String>? armedSubstations;
+
+  /// True unless an external row named a project the roster cannot resolve.
+  bool get passed => external.every((blocker) => blocker.passed);
+
+  /// The armed roster as an operator reads it.
+  String get _armedRoster {
+    final armed = armedSubstations;
+    if (armed == null) return '<not consulted>';
+    if (armed.isEmpty) return '<none>';
+    return (armed.toList()..sort()).join(', ');
+  }
+
+  /// The evidence line: what bd holds, and — when it refuses — which row the
+  /// roster could not resolve and what to do about it.
+  String get detail {
+    final refusals = [
+      for (final blocker in external)
+        if (!blocker.passed)
+          switch (blocker.resolution) {
+            ExternalResolution.notArmed =>
+              '${blocker.ref.wire} names "${blocker.ref.project}", which this '
+                  'station does not arm (armed: $_armedRoster) — arm that '
+                  'substation, or re-point the row at one the roster carries',
+            ExternalResolution.unconsulted =>
+              '${blocker.ref.wire} is unresolved: no station roster was '
+                  'supplied, so "${blocker.ref.project}" cannot be resolved to '
+                  'an armed substation — the composition that builds this verb '
+                  'passes its armed roster in as armedSubstations, and until '
+                  'one does every external: row refuses here',
+            ExternalResolution.armed => '',
+          },
+    ];
+    if (refusals.isNotEmpty) {
+      return 'unresolvable external dependency rows: ${refusals.join('; ')}';
+    }
+    final rows = [
+      ...local,
+      for (final blocker in external) '${blocker.ref.wire} (armed)',
+    ];
+    return rows.isEmpty
+        ? 'bd holds no blocking dependency rows'
+        : 'bd dependency rows: ${rows.join(', ')}';
+  }
+
+  /// The approval-revision basis: the ROWS bd holds, never the roster's answer
+  /// about them.
+  ///
+  /// The roster is the STATION's posture, not the bead's content — the same
+  /// reason the basis has always recorded the proofs FOUND rather than the
+  /// posture of the lookup. Arming a substation must not revoke a governor's
+  /// approval of a bead nobody edited.
+  List<Map<String, Object?>> get basis => [
+    for (final id in local) {'id': id, 'kind': 'local'},
+    for (final blocker in external)
+      {'id': blocker.ref.wire, 'kind': 'external'},
+  ];
+}
 
 /// The version-1 approval revision of one evaluated filing.
 ///
 /// It digests exactly what an approval is a judgement ABOUT: the bead's work
-/// fields, its validation plan, and — per named blocker, sorted — whether a
-/// local outgoing `blocks` edge was found, alongside a `linked` member that
-/// records the linked-blocker proof and is now always false (below).
-/// Lifecycle timestamps, status, assignee/owner, result metadata and the
-/// receipt itself are all EXCLUDED, so stamping the receipt can never
-/// invalidate the receipt it stamps, and a bead moving through its lifecycle
-/// does not revoke a governor's approval of its content.
+/// fields, its validation plan, and the DEPENDENCY ROWS bd holds for it
+/// ([DependencyProjection.basis]). Lifecycle timestamps, status,
+/// assignee/owner, result metadata and the receipt itself are all EXCLUDED, so
+/// stamping the receipt can never invalidate the receipt it stamps, and a bead
+/// moving through its lifecycle does not revoke a governor's approval of its
+/// content. The station's ROSTER is excluded for the same reason: arming a
+/// substation is the station's posture, not the bead's content.
 ///
-/// The `linked` member is FROZEN at false, and that is a BASIS CHANGE for one
-/// shape of bead rather than a no-op. The basis SHAPE stays v1
-/// ([kFilingApprovalRevisionPrefix]): every stamp already written is a digest
-/// over these same keys, and DROPPING the member would re-digest every
-/// approved bead in every store. Its VALUE, though, can no longer be true,
-/// because the state-store link surface that set it is deleted (grid_engine
-/// 0.4.0-dev.3, the_grid#447). A bead approved while that store was CONSULTED
-/// and a link MATCHED digested `linked: true`, and the matched blocker also
-/// put its store prefix into the `knownPrefixes` that let a digitless foreign
-/// id be NAMED at all. Both inputs are gone, so such a bead re-digests here
-/// and its standing `grid.approved_rev` reads stale. Which way it then breaks
-/// depends on the blocker's spelling: a digit-tailed foreign id stays named
-/// and its row fails CLOSED, so `approve`/`unpark` REFUSE the bead until a
-/// governor re-approves; a digitless one leaves the basis entirely and the row
-/// passes VACUOUSLY, so the bead re-stamps silently against a basis that no
-/// longer considers the blocker at all. The second is the quieter failure.
-///
-/// MEASURED 2026-09-13 over the ten open, stamped beads an open cross-store
-/// link named as blocked: four re-digested — `space-7tj`
-/// (`filing:v1:sha256:2ff365a6…` to `filing:v1:sha256:caf7bb15…`, now failing
-/// on `pow-f6pc`) and `lunar_station-zo3` fail closed, while `pow-jz93` and
-/// `pow-ndag` pass vacuously on digitless blockers. Mount is not blocked by
-/// any of it today, because `mountEligibilityFindings` carries the revision
-/// without enforcing it; the approve verb's staleness report and the audit
-/// trail are affected now. The re-approval sweep is the governor's, scoped in
-/// pow-abaw's PR, not done here.
-///
-/// Re-proving a cross-store blocker from bd's own `external:` rows is a v2
-/// basis behind a NEW prefix (pow-f6pc, power_station#330), and a v2 basis
-/// re-digests every store; that is its own bead.
-String _approvalRevisionOf(
-  Bead bead, {
-  required Set<String> named,
-  required Set<String> localBlocks,
-}) {
+/// The `dependencies` member is the one that MOVED with the 2026-09-13 ruling.
+/// It used to digest the ids a description NAMED, each with whether a local
+/// edge and a link proof were found; it now digests the rows bd holds, typed
+/// `local` or `external`. Every standing `grid.approved_rev` over a bead whose
+/// description named a blocker therefore re-derives, and the governor
+/// re-approves in-flight work at the boot checklist (pow-f6pc's notes). The
+/// basis PREFIX stays [kFilingApprovalRevisionPrefix]: a new prefix is a v2
+/// receipt SCHEME and its own bead, not a side effect of this row.
+String _approvalRevisionOf(Bead bead, DependencyProjection dependencies) {
   final plan = bead.metadata['validation_plan'];
   final basis = <String, Object?>{
     'id': bead.id,
@@ -214,10 +293,7 @@ String _approvalRevisionOf(
     'issueType': bead.issueType.wire,
     'priority': bead.priority,
     'validationPlan': plan is String ? plan : null,
-    'dependencies': [
-      for (final id in named.toList()..sort())
-        {'id': id, 'blocks': localBlocks.contains(id), 'linked': false},
-    ],
+    'dependencies': dependencies.basis,
   };
   final digest = sha256.convert(utf8.encode(jsonEncode(basis)));
   return '$kFilingApprovalRevisionPrefix$digest';
@@ -229,57 +305,39 @@ String _approvalRevisionOf(
 /// `power_station#approval-is-the-stamp-the-grid-approved-label-retires` —
 /// *"FILING COMPLETENESS in `lib/src/filing/`, MOUNT ELIGIBILITY in
 /// `lib/src/code/`, neither subsuming the other, no third completeness
-/// predicate minted"*. The unchecked cross-store arm is a refinement of this
-/// contract's own dependency row, not a fifth requirement and not a second
-/// predicate.
+/// predicate minted"*. The roster resolution of an `external:` row is a
+/// refinement of this contract's own dependency row, not a fifth requirement
+/// and not a second predicate.
 final class FilingContract {
   /// Creates the stateless evaluator.
   const FilingContract();
 
-  /// Evaluates [bead] against its [dependencies].
+  /// Evaluates [bead] against the dependency rows bd holds for it.
   ///
-  /// Wiring is the bead's OWN outgoing `blocks` edges and nothing else. The
-  /// cross-store arm is gone with the state-store link surface it read
-  /// (grid_engine 0.4.0-dev.3, the_grid#447): a named foreign blocker with no
-  /// local edge is reported missing, fail-closed, exactly like a local one —
-  /// PROVIDED the token is still read as an id. A digitless foreign id loses
-  /// the wired-blocker prefix that made it readable ([_isBeadId]) and is not
-  /// named at all, so its row passes vacuously. Both of those outcomes differ
-  /// from the pre-cut consulted evaluation, and both move the approval
-  /// revision ([_approvalRevisionOf]).
+  /// The dependencies row is a PURE PROJECTION of those rows — local targets
+  /// and `external:<project>:<capability>` targets alike — with each external
+  /// row resolved through [armedSubstations], the station's roster by NAME.
+  /// Bead PROSE is never read: `Blocked-by: pow-x` and `Blocked by pow-x` are
+  /// both sentences, and both project identically because neither is a row.
   ///
-  /// A blocker is DECLARED by a description segment that OPENS with
-  /// `Blocked by` / `Blocked on` / `Depends on`; a mid-sentence mention of the
-  /// phrase declares nothing. Within such a segment a `<prefix>-<tail>` token
-  /// is a bead id when its prefix is the bead's own store or that of an
-  /// already-wired blocker, or when its tail carries a digit.
-  FilingReport evaluate(Bead bead, Iterable<BeadDependency> dependencies) {
+  /// [armedSubstations] is NULL when no roster was supplied. An unasked roster
+  /// cannot clear a cross-project blocker, so an external row then refuses
+  /// fail-closed exactly as an unarmed project does — the difference is in the
+  /// detail, which says which condition it is and what to do about it.
+  FilingReport evaluate(
+    Bead bead,
+    Iterable<BeadDependency> dependencies, {
+    Set<String>? armedSubstations,
+  }) {
     final validationPlan = bead.metadata['validation_plan'];
-    final localBlocks = {
-      for (final edge in dependencies)
-        if (edge.issueId == bead.id && edge.type == DependencyType.blocks)
-          edge.dependsOnId,
-    };
-    final ownPrefix = _prefixOf(bead.id);
-    final knownPrefixes = <String>{
-      ownPrefix,
-      for (final id in localBlocks) _prefixOf(id),
-    }..remove('');
-    final named = _namedBlockers(bead.description, knownPrefixes);
-    final missing = named.difference(localBlocks).toList()..sort();
-    final dependencyPass = missing.isEmpty;
-    final dependencyDetail = dependencyPass
-        ? (named.isEmpty
-              ? 'no local blockers named'
-              : 'all named local blockers are wired')
-        : 'missing outgoing blocks edges: ${missing.join(', ')}';
+    final projection = DependencyProjection.of(
+      beadId: bead.id,
+      dependencies: dependencies,
+      armedSubstations: armedSubstations,
+    );
     return FilingReport(
       beadId: bead.id,
-      approvalRevision: _approvalRevisionOf(
-        bead,
-        named: named,
-        localBlocks: localBlocks,
-      ),
+      approvalRevision: _approvalRevisionOf(bead, projection),
       requirements: [
         FilingRequirementRow(
           requirement: FilingRequirement.driveableType,
@@ -304,8 +362,8 @@ final class FilingContract {
         ),
         FilingRequirementRow(
           requirement: FilingRequirement.dependencies,
-          passed: dependencyPass,
-          detail: dependencyDetail,
+          passed: projection.passed,
+          detail: projection.detail,
         ),
       ],
     );
@@ -334,26 +392,29 @@ final class FilingService {
   /// [FilingReport.approvalRevision] is always the digest of the very bead
   /// alongside it.
   ///
-  /// There is no cross-store leg any more: grid_engine 0.4.0-dev.3 deleted the
-  /// state-store link surface this service used to project (the_grid#447), and
-  /// bd's replacement `external:<project>:<capability>` row does not reach
-  /// [ExactSubstationBeadSource.readExact] — `bd dep list` cannot resolve an
-  /// external target, so those rows arrive only on bd's RECORD surface
-  /// (`BdCliService.queryGraph`). A named foreign blocker is therefore reported
-  /// missing, fail-closed, like any other unwired one — and a digitless one is
-  /// not named at all ([FilingContract.evaluate]). Either way its approval
-  /// revision moves, so a bead approved against a CONSULTED state store needs
-  /// re-approving.
+  /// ONE store answers it. The dependencies row is a projection of the rows
+  /// this store holds, cross-project rows included: bd carries those as
+  /// `external:<project>:<capability>` targets on its own RECORD surface
+  /// ([ExactSubstationBeadSource.readExact]), so there is no second store to
+  /// consult and no link bead to read.
   Future<({Bead? bead, FilingReport report})> inspect({
     required String storeRoot,
     required String beadId,
+    Set<String>? armedSubstations,
   }) async {
     final read = await source.readExact(storeRoot: storeRoot, beadId: beadId);
     final bead = read.bead;
     if (bead == null) {
       return (bead: null, report: FilingReport.missing(beadId));
     }
-    return (bead: bead, report: contract.evaluate(bead, read.dependencies));
+    return (
+      bead: bead,
+      report: contract.evaluate(
+        bead,
+        read.dependencies,
+        armedSubstations: armedSubstations,
+      ),
+    );
   }
 
   /// Checks [beadId] in the store rooted at [storeRoot] — [inspect] without
@@ -361,5 +422,10 @@ final class FilingService {
   Future<FilingReport> check({
     required String storeRoot,
     required String beadId,
-  }) async => (await inspect(storeRoot: storeRoot, beadId: beadId)).report;
+    Set<String>? armedSubstations,
+  }) async => (await inspect(
+    storeRoot: storeRoot,
+    beadId: beadId,
+    armedSubstations: armedSubstations,
+  )).report;
 }

@@ -14,7 +14,8 @@ register:
   obsoletes: []
   updates: ["filing-and-approve-share-one-state-root-seam"]
   obsoleted-by: null
-  updated-by: []
+  updated-by:
+    - "the-dependencies-row-is-a-projection-of-bd-dependency-rows"
   bead: pow-ixag
   legacy-id: null
 ---

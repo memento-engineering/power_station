@@ -8,6 +8,11 @@
   (the_grid#447); self-approval now reads and stamps in one store.
 - Changed: the seat's `SourceControl` fixtures implement `SourceControl.baseShaFor` (grid_engine
   0.4.0-dev.2, the_grid#436).
+- Note: this seat supplies NO station roster to the approve verb, so a self-authored record
+  carrying an `external:<project>:<capability>` dependency row refuses its filing preflight
+  fail-closed and is filed UNSTAMPED with the refusal in its notes, rather than stamped over a
+  blocker nothing resolved (pow-f6pc; `grid_assets`
+  `power_station#the-dependencies-row-is-a-projection-of-bd-dependency-rows`).
 
 ## 0.2.0-dev.1
 

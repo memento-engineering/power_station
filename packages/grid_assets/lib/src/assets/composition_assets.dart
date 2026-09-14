@@ -55,9 +55,9 @@ import '../search/station_search.dart';
 
 /// Deadline over one fresh mount-eligibility read.
 ///
-/// A refused snapshot's recheck is a single [FilingService.inspect] fanned over
-/// two stores — the substation store's bead row plus its dependency rows, and
-/// the grid state store's link rows — and the pending refusal it flies under
+/// A refused snapshot's recheck is a single [FilingService.inspect] — one
+/// record read of the substation store carrying the bead row and the
+/// dependency rows together — and the pending refusal it flies under
 /// has NO successor of its own: a read that never answers keeps the id in
 /// flight, so every recheck re-reports `read pending` and the bead never mints
 /// (a proxied dolt store that never replies, a bd process that never exits).
@@ -68,7 +68,7 @@ import '../search/station_search.dart';
 /// It stays distinct from the molecule pour deadline
 /// (`the_grid#the-pour-gets-its-own-bd-deadline` is the PRECEDENT for a named
 /// per-operation budget over a shared bd service, not the budget itself): the
-/// pour is one heavy write, this is a read fanned over two stores, and each is
+/// pour is one heavy write, this is a record read of one store, and each is
 /// tuned on its own evidence. It bounds ONE attempt and nothing else: how long
 /// the station waits before the next attempt is
 /// [kMountEligibilityReadRetryBackoff]'s job.
@@ -135,7 +135,7 @@ const String kMountEligibilityReadTimeoutFlare = 'mountEligibility.readTimeout';
 /// The fresh read is a `FilingService.inspect` rather than a bare bead query,
 /// because a receipt bound to a filing basis can only be judged against a
 /// re-evaluation of that basis — the bead's own fields plus the dependency
-/// proofs the substation store and the grid state store hold. A bound receipt
+/// ROWS the substation store holds. A bound receipt
 /// therefore refuses SYNCHRONOUSLY as unevaluated (there is no revision to
 /// compare yet) and mounts only once the recomputed revision matches the
 /// stamped one. The legacy raw-sha receipt has no basis to re-derive, so a
@@ -309,6 +309,12 @@ class _MountEligibilityAssetsState
     );
   }
 
+  /// The fresh read carries NO station roster, and does not need one: this
+  /// gate compares the re-derived [FilingReport.approvalRevision] against the
+  /// stamped one, and that basis is the bead's own content plus the DEPENDENCY
+  /// ROWS bd holds — never the roster's answer about them. Arming a substation
+  /// therefore cannot stale a receipt, and an unarmed `external:` project is
+  /// the frontier's fail-closed business, not this comparison's.
   Future<void> _readFresh(
     Bead snapshot,
     sdk.SubstationScope scope,
@@ -318,9 +324,9 @@ class _MountEligibilityAssetsState
   ) async {
     MountEligibilityDecision decision;
     try {
-      // ONE deadline over the WHOLE read (bead row and dependency rows): what
-      // must not hang is the read this bead is waiting on, not any single call
-      // inside it.
+      // ONE deadline over the WHOLE read (the bead row and its dependency
+      // rows): what must not hang is the read this bead is waiting on, not any
+      // single call inside it.
       final inspected = await filing
           .inspect(storeRoot: scope.root, beadId: snapshot.id)
           .timeout(deadline);

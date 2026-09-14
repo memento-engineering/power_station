@@ -535,6 +535,10 @@ final class BdGitHubIntakeStore implements GitHubIntakeStore {
         'built with no ApproveService and no work root',
       );
     }
+    // NO station roster reaches this seat, so a self-authored record carrying
+    // an `external:<project>:<capability>` dependency row refuses its filing
+    // preflight fail-closed and is filed unstamped with the refusal in its
+    // notes — never stamped over a blocker nothing resolved (pow-f6pc).
     final outcome = await approvals.approve(
       storeRoot: workRoot,
       beadId: beadId,

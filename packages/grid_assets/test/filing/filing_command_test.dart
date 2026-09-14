@@ -1,76 +1,13 @@
 import 'dart:convert';
-import 'dart:io';
 
-import 'package:args/command_runner.dart';
-import 'package:grid_assets/grid_assets.dart';
 import 'package:test/test.dart';
 
-Future<void> runBd(Directory store, List<String> args) async {
-  final initializesStore = args.first == 'init';
-  final result = await Process.run(
-    'bd',
-    [
-      if (!initializesStore) ...['-C', store.path],
-      ...args,
-    ],
-    workingDirectory: initializesStore ? store.path : null,
-    environment: {...Platform.environment, 'BD_NON_INTERACTIVE': '1'},
-  );
-  expect(
-    result.exitCode,
-    0,
-    reason: 'bd ${args.join(' ')}\n${result.stdout}\n${result.stderr}',
-  );
-}
-
-Future<Directory> filingStore() async {
-  final store = Directory.systemTemp.createTempSync('filing-command-');
-  addTearDown(() {
-    if (store.existsSync()) store.deleteSync(recursive: true);
-  });
-  await runBd(store, [
-    'init',
-    '--prefix',
-    'filing',
-    '--skip-agents',
-    '--skip-hooks',
-    '--non-interactive',
-  ]);
-  return store;
-}
-
-({CommandRunner<int> runner, StringBuffer out, StringBuffer err}) harness(
-  Directory store,
-) {
-  final out = StringBuffer();
-  final err = StringBuffer();
-  return (
-    runner: CommandRunner<int>('space', 'test station')
-      ..addCommand(
-        FilingCommand(storeRoot: () => store.path, out: out, err: err),
-      ),
-    out: out,
-    err: err,
-  );
-}
-
-// These tests drive a REAL bd binary end to end; a fake would not prove the
-// filing contract holds against bd's actual argv/exit-code surface.
-final bool _bdAvailable = () {
-  try {
-    return Process.runSync('bd', ['--version']).exitCode == 0;
-  } on ProcessException {
-    return false;
-  }
-}();
-final String? _skipWithoutBd = _bdAvailable
-    ? null
-    : 'requires a real bd binary on PATH (absent in CI)';
+import 'real_bd_store.dart';
 
 void main() {
   test(
     'real bd filing passes all four requirements',
-    skip: _skipWithoutBd,
+    skip: skipWithoutBd,
     () async {
       final store = await filingStore();
       await runBd(store, [
@@ -95,7 +32,7 @@ void main() {
         '--defer',
         '+1h',
         '--description',
-        'Package: grid_assets\nBlocked by: filing-blocker',
+        'Package: grid_assets',
         '--acceptance',
         '- [ ] dart test passes',
         '--metadata',
@@ -129,20 +66,9 @@ void main() {
 
   test(
     'reports every failed requirement and exits non-zero',
-    skip: _skipWithoutBd,
+    skip: skipWithoutBd,
     () async {
       final store = await filingStore();
-      await runBd(store, [
-        'create',
-        '--id',
-        'filing-blocker',
-        '--title',
-        'unwired blocker',
-        '--type',
-        'task',
-        '--actor',
-        'test',
-      ]);
       await runBd(store, [
         'create',
         '--id',
@@ -152,14 +78,24 @@ void main() {
         '--type',
         'epic',
         '--description',
-        'Depends on: filing-blocker',
+        'No plan, no acceptance, not driveable.',
         '--metadata',
         '{"validation_plan":" "}',
         '--actor',
         'test',
       ]);
+      // The one row a bead's own TEXT can no longer fail: the dependency row
+      // is a projection of the rows bd holds, and bd holds none.
+      await runBd(store, [
+        'dep',
+        'add',
+        'filing-bad',
+        'external:nowhere:cap',
+        '--actor',
+        'test',
+      ]);
 
-      final h = harness(store);
+      final h = harness(store, armed: const {'the_grid'});
       expect(await h.runner.run(['filing', '--json', 'filing-bad']), 1);
       final report = jsonDecode(h.out.toString()) as Map<String, dynamic>;
       final rows = (report['requirements'] as List)
@@ -167,10 +103,54 @@ void main() {
       expect(report['passed'], isFalse);
       expect(rows, hasLength(4));
       expect(rows.every((row) => row['passed'] == false), isTrue);
+      expect(
+        dependencyRow(h.out)['detail'],
+        contains('external:nowhere:cap names "nowhere"'),
+      );
     },
   );
 
-  test('usage and missing beads fail loudly', skip: _skipWithoutBd, () async {
+  test(
+    'AC-1 — over a REAL bd store, the two prose spellings agree',
+    skip: skipWithoutBd,
+    () async {
+      final store = await filingStore();
+      for (final (id, description) in const [
+        ('filing-hyphen', 'Blocked-by: filing-x'),
+        ('filing-spaced', 'Blocked by filing-x'),
+      ]) {
+        await runBd(store, [
+          'create',
+          '--id',
+          id,
+          '--title',
+          'prose',
+          '--type',
+          'task',
+          '--description',
+          description,
+          '--acceptance',
+          '- [ ] dart test passes',
+          '--metadata',
+          '{"validation_plan":"dart test"}',
+          '--actor',
+          'test',
+        ]);
+      }
+
+      final hyphen = harness(store);
+      final spaced = harness(store);
+      expect(await hyphen.runner.run(['filing', '--json', 'filing-hyphen']), 0);
+      expect(await spaced.runner.run(['filing', '--json', 'filing-spaced']), 0);
+      expect(dependencyRow(hyphen.out), dependencyRow(spaced.out));
+      expect(
+        dependencyRow(spaced.out)['detail'],
+        'bd holds no blocking dependency rows',
+      );
+    },
+  );
+
+  test('usage and missing beads fail loudly', skip: skipWithoutBd, () async {
     final store = await filingStore();
     expect(await harness(store).runner.run(['filing']), 64);
     expect(
