@@ -755,6 +755,26 @@ List<String> missingDeclaredTestFiles({
         .toList()
       ..sort();
 
+/// The ONE review base every committee probe measures a round against: the
+/// commit the workspace was PROVISIONED from, when the provisioner recorded it
+/// ([Workspace.baseSha]), and otherwise the remote base branch.
+///
+/// A9 pins the critics to the bead branch's OWN delta, and `origin/<baseBranch>`
+/// is only a STAND-IN for "the commit this branch was cut from". It stops being
+/// one the moment a substation's LOCAL base branch runs ahead of its remote: the
+/// live lunar_station-a7w round cut its worktree from a local `main` sitting 55
+/// unpushed commits ahead of `origin/main`, so all 55 landed inside
+/// `diff origin/main...HEAD` and spec-adherence graded the station's own
+/// housekeeping commit — 120 deletions the bead never authored — as the bead's
+/// work. The provisioner's recorded SHA names the actual cut, so pinning to it
+/// measures exactly the round. Null (a provisioner that records nothing, or the
+/// offline synthetic workspace) keeps the remote base branch.
+///
+/// A REVIEW base only. Landing still rebases onto `origin/<baseBranch>`: remote
+/// divergence is reconciled THERE, never in review.
+String _reviewBaseRef(Workspace workspace) =>
+    workspace.baseSha ?? 'origin/${workspace.baseBranch}';
+
 /// The repo-relative paths tracked at [baseRef] — the pinned base's own file
 /// list, read once with `git ls-tree -r --name-only <baseRef>` in
 /// [workspaceDir].
@@ -824,7 +844,7 @@ class DeclaredTestsCapability extends ServiceCapability {
         : await baseTreeFiles(
             runner: _runner ?? SystemGitRunner(),
             workspaceDir: workspace.workspaceDir,
-            baseRef: 'origin/${workspace.baseBranch}',
+            baseRef: _reviewBaseRef(workspace),
           );
     final missing = missingDeclaredTestFiles(
       design: bead.design,
@@ -1409,12 +1429,17 @@ void sweepStaleCritique(
 /// spec-adherence A explicitly cited a months-old mainline commit). Nothing
 /// pinned the review to the branch's own delta.
 ///
+/// The base it measures against is [_reviewBaseRef] — the provisioner's
+/// recorded cut point when the workspace carries one, else `origin/<base>` —
+/// resolved ONCE and fed to every probe below and to the pinned header, so the
+/// artifact the critics read always names the base it was computed from.
+///
 /// This step computes that delta once, up front:
-///  - `git log --oneline origin/<base>..HEAD` — the commit list under review
+///  - `git log --oneline <base>..HEAD` — the commit list under review
 ///    (provenance);
-///  - `git diff origin/<base>...HEAD` — the branch's own change from the
-///    MERGE-BASE (three-dot: a base that moved forward while the bead ran can
-///    never widen the scope), pinned to [pinnedDiffPath] for the critics.
+///  - `git diff <base>...HEAD` — the branch's own change from the MERGE-BASE
+///    (three-dot: a base that moved forward while the bead ran can never widen
+///    the scope), pinned to [pinnedDiffPath] for the critics.
 ///
 /// Three terminals:
 ///  - **EMPTY delta ⇒ [Escalate]** — the distinct no-op outcome. A branch with
@@ -1427,10 +1452,10 @@ void sweepStaleCritique(
 ///    the live genesis-7ob round ruled a finished, validation-green, merely
 ///    uncommitted tree a 'stale/no-op bead'. An unreadable status is LOUD.
 ///  - **git could not compute the delta ⇒ a thrown [RouteFailure]** — LOUD. An
-///    unresolvable `origin/<base>` (or a `git` that won't launch) means the scope
-///    is UNKNOWN; failing closed routes to supervision rather than silently
-///    escalating (a false stale-bead flag) or silently advancing (critics with an
-///    empty scope).
+///    unresolvable base — a bad ref, or a recorded SHA this checkout does not
+///    hold — (or a `git` that won't launch) means the scope is UNKNOWN; failing
+///    closed routes to supervision rather than silently escalating (a false
+///    stale-bead flag) or silently advancing (critics with an empty scope).
 ///  - **non-empty delta ⇒ [Advance]** — the pinned diff is written and the round
 ///    proceeds; the payload carries route-style provenance
 ///    (`base`/`commits`/`diffBytes`).
@@ -1473,7 +1498,7 @@ class PinDiffCapability extends RouteCapability {
     if (!Directory(workspaceDir).existsSync()) return const Advance();
 
     final runner = _runner ?? SystemGitRunner();
-    final baseRef = 'origin/${workspace.baseBranch}';
+    final baseRef = _reviewBaseRef(workspace);
 
     // The checkout-root guard (bead pow-4pr): the dir EXISTS — before trusting
     // it as the diff scope, require it to BE the checkout root. `git` walks up
