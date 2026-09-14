@@ -160,7 +160,8 @@ Set<String> _namedBlockers(String description, Set<String> knownPrefixes) => {
 ///
 /// It digests exactly what an approval is a judgement ABOUT: the bead's work
 /// fields, its validation plan, and — per named blocker, sorted — whether a
-/// local outgoing `blocks` edge and an open linked-blocker proof were found.
+/// local outgoing `blocks` edge was found, alongside a `linked` member that
+/// records the linked-blocker proof and is now always false (below).
 /// Lifecycle timestamps, status, assignee/owner, result metadata and the
 /// receipt itself are all EXCLUDED, so stamping the receipt can never
 /// invalidate the receipt it stamps, and a bead moving through its lifecycle
@@ -175,17 +176,23 @@ Set<String> _namedBlockers(String description, Set<String> knownPrefixes) => {
 /// 0.4.0-dev.3, the_grid#447). A bead approved while that store was CONSULTED
 /// and a link MATCHED digested `linked: true`, and the matched blocker also
 /// put its store prefix into the `knownPrefixes` that let a digitless foreign
-/// id be NAMED at all. Both inputs are gone, so such a bead re-digests here,
-/// its standing `grid.approved_rev` reads stale, and `approve`/`unpark` refuse
-/// it until a governor re-approves.
+/// id be NAMED at all. Both inputs are gone, so such a bead re-digests here
+/// and its standing `grid.approved_rev` reads stale. Which way it then breaks
+/// depends on the blocker's spelling: a digit-tailed foreign id stays named
+/// and its row fails CLOSED, so `approve`/`unpark` REFUSE the bead until a
+/// governor re-approves; a digitless one leaves the basis entirely and the row
+/// passes VACUOUSLY, so the bead re-stamps silently against a basis that no
+/// longer considers the blocker at all. The second is the quieter failure.
 ///
-/// MEASURED 2026-09-13 against space_station `space-7tj`, approved that day at
-/// `filing:v1:sha256:2ff365a6…`: this code digests it
-/// `filing:v1:sha256:caf7bb15…` and fails its dependency row closed on
-/// `pow-f6pc`. Mount is not blocked by that today only because
-/// `mountEligibilityFindings` carries the revision without enforcing it; the
-/// approve verb's staleness report and the audit trail are affected now. The
-/// re-approval sweep is the governor's, named in pow-abaw's PR, not done here.
+/// MEASURED 2026-09-13 over the ten open, stamped beads an open cross-store
+/// link named as blocked: four re-digested — `space-7tj`
+/// (`filing:v1:sha256:2ff365a6…` to `filing:v1:sha256:caf7bb15…`, now failing
+/// on `pow-f6pc`) and `lunar_station-zo3` fail closed, while `pow-jz93` and
+/// `pow-ndag` pass vacuously on digitless blockers. Mount is not blocked by
+/// any of it today, because `mountEligibilityFindings` carries the revision
+/// without enforcing it; the approve verb's staleness report and the audit
+/// trail are affected now. The re-approval sweep is the governor's, scoped in
+/// pow-abaw's PR, not done here.
 ///
 /// Re-proving a cross-store blocker from bd's own `external:` rows is a v2
 /// basis behind a NEW prefix (pow-f6pc, power_station#330), and a v2 basis
