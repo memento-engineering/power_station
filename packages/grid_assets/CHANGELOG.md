@@ -18,19 +18,22 @@
   spelling of the grid home across the verb set — but nothing reads through it any more; only the
   park pair does. Migration: drop the arguments; re-prove a cross-store blocker with a bd
   dependency row.
-- Breaking: a bead APPROVED against a consulted state store is RE-DIGESTED and its standing
-  `grid.approved_rev` is stale. The v1 basis SHAPE is unchanged — `_approvalRevisionOf` keeps its
-  `linked` member rather than dropping it, which would re-digest every approved bead in every store
-  — but the member is now pinned false, and the `knownPrefixes` that a matched link contributed are
-  gone with it. So a bead whose approval was taken with `--state-root` CONSULTED and an open link
-  MATCHED digests differently now, in two ways: `linked` flips true to false, and a DIGITLESS
-  foreign id (`pow-abaw` named from a `space-` bead) is no longer read as an id at all, so it leaves
-  the basis and its dependency row passes vacuously. A digit-tailed foreign id stays named and fails
-  CLOSED. Measured on space_station `space-7tj`: `filing:v1:sha256:2ff365a6…` becomes
-  `filing:v1:sha256:caf7bb15…`, `passed` false on `missing outgoing blocks edges: pow-f6pc`.
-  Consequence: `approve` and `unpark` REFUSE such a bead until a governor re-approves it; mount is
-  unaffected today only because `mountEligibilityFindings` carries the revision without enforcing
-  it. Migration: re-run the approve verb over every bead approved while a state root was passed.
+- Breaking: a bead whose approval was taken with `--state-root` CONSULTED and an open cross-store
+  link MATCHED is RE-DIGESTED, and its standing `grid.approved_rev` is stale. The v1 basis SHAPE is
+  unchanged — `_approvalRevisionOf` keeps its `linked` member rather than dropping it, which would
+  re-digest every approved bead in every store — but the member is now pinned false, and the
+  `knownPrefixes` a matched link contributed are gone with it. Two effects, and the quieter one is
+  the worse: a digit-tailed foreign id (`pow-f6pc`) stays named and its row fails CLOSED, while a
+  DIGITLESS one (`pow-abaw` named from a `space-` bead) is no longer read as an id at all, so it
+  leaves the basis and the row passes VACUOUSLY — re-digested, still green, and no longer
+  considering the blocker. Measured on space_station `space-7tj`: `filing:v1:sha256:2ff365a6…`
+  becomes `filing:v1:sha256:caf7bb15…`, `passed` false on
+  `missing outgoing blocks edges: pow-f6pc`. Consequence: `approve` and `unpark` REFUSE the
+  fail-closed shape until a governor re-approves, and silently re-stamp the vacuous one against a
+  basis that proves less; the stale revision stands in the audit trail and in approve's staleness
+  report either way. Mount is unaffected today only because `mountEligibilityFindings` carries the
+  revision without enforcing it. Migration: re-run the approve verb over every bead an open
+  cross-store link names as BLOCKED, and re-declare the blocker of any bead whose row now fails.
   `test/filing/filing_contract_test.dart` pins BOTH cases — the locally wired golden that does not
   move, and the cross-store shape that does, against the measured pre-cut digest.
 - Changed: the vended `intake-refinement`, `discover` and `station-operations` skills teach bd's
