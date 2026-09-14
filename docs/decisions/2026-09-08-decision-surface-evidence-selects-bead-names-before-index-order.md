@@ -13,7 +13,8 @@ register:
   updates:
     - "discovery-evidence-is-gathered-once-and-projected"
   obsoleted-by: null
-  updated-by: []
+  updated-by:
+    - notes-are-receipts-and-a-phantom-legacy-token-is-reported-not-failed
   bead: pow-mrg8
   legacy-id: null
 ---
