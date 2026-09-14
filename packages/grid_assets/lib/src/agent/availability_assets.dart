@@ -147,8 +147,10 @@ final class _AvailabilityProbePass {
 /// outside it (the `CapabilityHost` precedent in `grid_engine`'s
 /// `circuit/capability_host.dart`).
 ///
-/// Its ONLY field is the host State. The per-pass [TreeDependencyScope] rides
-/// into the host's probe run as a PARAMETER and is stored nowhere.
+/// Its ONLY field is the host State, and its dependency callback does one
+/// thing: hand the call-scoped reader and this pass's [TreeDependencyScope] to
+/// a single host method, which watches there. The scope rides into the host's
+/// probe run as a PARAMETER and is stored nowhere.
 final class _AvailabilityLifecycle implements TreeLifecycleParticipant {
   _AvailabilityLifecycle(this._host);
 
@@ -161,15 +163,7 @@ final class _AvailabilityLifecycle implements TreeLifecycleParticipant {
   void didChangeDependencies(
     TreeWatchingReader reader,
     TreeDependencyScope scope,
-  ) {
-    // WATCH the dep. The marker IS the pass: the host mints it from the
-    // registry and the site binding it watches, and from the bounded tick, so
-    // subscribing to it subscribes to exactly the changes that start a pass —
-    // and, being mounted by the host directly above this provider, it can
-    // never miss.
-    reader.watch<_AvailabilityProbePass>();
-    _host._startProbePass(scope);
-  }
+  ) => _host._startProbePass(reader, scope);
 
   @override
   void dispose() {}
@@ -214,9 +208,23 @@ class _AvailabilityAssetsState extends SingleChildState<AvailabilityAssets> {
   }
 
   /// Starts the pass [scope] qualifies: the bounded ticker (once per arming)
-  /// and ONE probe run. Called from the owning lifecycle's dependency callback,
-  /// so the scope handed to the run is always that pass's own.
-  void _startProbePass(TreeDependencyScope scope) {
+  /// and ONE probe run. Called from the owning lifecycle's dependency callback
+  /// — the `CapabilityHost` shape, where the participant holds only its host
+  /// and every watch happens here — so the scope handed to the run is always
+  /// that pass's own.
+  ///
+  /// The three watches are the participant's SUBSCRIPTION, not this pass's
+  /// read: the host's own `didChangeDependencies` already applied the registry
+  /// and the site binding (with their absent-value fallbacks) before the
+  /// subtree carrying the participant was built. Watching all three is what
+  /// makes the pass unmissable — the marker alone carries every pass the host
+  /// mints today, and the two values it mints them FROM are subscribed here so
+  /// that stays true by construction rather than by book-keeping.
+  void _startProbePass(TreeWatchingReader reader, TreeDependencyScope scope) {
+    reader
+      ..watch<EnvironmentRegistry>()
+      ..watch<SiteBinding>()
+      ..watch<_AvailabilityProbePass>();
     _ticker ??= seed.schedule(seed.interval, _reprobe);
     unawaited(_runProbe(scope));
   }

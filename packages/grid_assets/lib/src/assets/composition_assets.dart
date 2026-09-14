@@ -197,11 +197,12 @@ class _MountEligibilityReadFailure {
 /// ONE dependency pass of the mount-eligibility asset, as a tree VALUE —
 /// identity IS the pass.
 ///
-/// The host replaces it whenever the substation scope or the read configuration
-/// changes; mounting the replacement delivers a fresh dependency pass to
-/// [_MountEligibilityLifecycle], which invalidates the previous pass's scope.
-/// That is the whole supersession mechanism: a read begun under an older
-/// configuration cannot apply, and nothing counts generations.
+/// The host replaces it whenever the substation scope, the grid root or the
+/// read configuration changes; mounting the replacement delivers a fresh
+/// dependency pass to [_MountEligibilityLifecycle], which invalidates the
+/// previous pass's scope. That is the whole supersession mechanism: a read
+/// begun under an older configuration cannot apply, and nothing counts
+/// generations.
 final class _MountEligibilityDependencyPass {
   _MountEligibilityDependencyPass();
 }
@@ -216,11 +217,14 @@ final class _MountEligibilityDependencyPass {
 /// provider is therefore mounted above the subtree that carries the predicate,
 /// which is what makes [scope] safe to read there and LOUD everywhere else.
 ///
-/// It is also the one participant that holds NO host reference: the traffic
-/// runs host → participant (the host reads [scope] when a recheck starts a
-/// read), never participant → host, so a back-reference would be dead weight.
+/// Everything else is the `CapabilityHost` shape the other participants use:
+/// its only other field is the host State, and its dependency callback does
+/// one thing — hand the call-scoped reader and this pass's scope to a single
+/// host method, which watches and fills [_scope] there.
 final class _MountEligibilityLifecycle implements TreeLifecycleParticipant {
-  _MountEligibilityLifecycle();
+  _MountEligibilityLifecycle(this._host);
+
+  final _MountEligibilityAssetsState _host;
 
   TreeDependencyScope? _scope;
 
@@ -246,15 +250,7 @@ final class _MountEligibilityLifecycle implements TreeLifecycleParticipant {
   void didChangeDependencies(
     TreeWatchingReader reader,
     TreeDependencyScope scope,
-  ) {
-    // WATCH the dep. The marker IS the pass: the host mints it from the
-    // substation scope and read configuration it watches, so subscribing to it
-    // subscribes to exactly the changes that supersede an in-flight read — and,
-    // being mounted by the host directly above this provider, it can never
-    // miss.
-    reader.watch<_MountEligibilityDependencyPass>();
-    _scope = scope;
-  }
+  ) => _host._openDependencyPass(reader, scope);
 
   @override
   void dispose() {}
@@ -264,6 +260,7 @@ class _MountEligibilityAssetsState
     extends SingleChildState<MountEligibilityAssets> {
   ServiceBundle? _ambient;
   sdk.SubstationScope? _scope;
+  sdk.GridRoot? _gridRoot;
   BdRunner Function(String storeRoot)? _runnerFor;
   DateTime Function()? _clock;
   Duration? _readDeadline;
@@ -285,11 +282,24 @@ class _MountEligibilityAssetsState
     _ambient = context.dependOnInheritedSeedOfExactType<ServiceBundle>();
     final scope = context
         .dependOnInheritedSeedOfExactType<sdk.SubstationScope>();
+    // WATCH the grid home too. A relocated grid is a different set of stores
+    // from the one every cached recheck was answered against — the substation
+    // root alone cannot tell the two apart, because a station may keep its
+    // substation layout across a move.
+    //
+    // `dependOnInheritedSeedOfExactType`, not `sdk.GridRoot.maybeOf`: the SDK's
+    // reader is the Provider `watch`, which on a MISS parks a pending
+    // registration and asserts that a `ProviderScope` exists to park it with.
+    // This asset mounts perfectly well with no grid root above it — a bare
+    // substation is a supported composition here — so absence must stay a quiet
+    // null, exactly as it is for the substation scope read above.
+    final gridRoot = context.dependOnInheritedSeedOfExactType<sdk.GridRoot>();
     final runnerFor = seed._runnerFor;
     final now = seed._now;
     final readDeadline = seed.readDeadline;
     final retryBackoff = seed.retryBackoff;
     if (scope == _scope &&
+        gridRoot == _gridRoot &&
         readDeadline == _readDeadline &&
         retryBackoff == _retryBackoff &&
         identical(now, _clock) &&
@@ -298,6 +308,7 @@ class _MountEligibilityAssetsState
     }
 
     _scope = scope;
+    _gridRoot = gridRoot;
     _runnerFor = runnerFor;
     _clock = now;
     _readDeadline = readDeadline;
@@ -310,6 +321,25 @@ class _MountEligibilityAssetsState
     _pass = _MountEligibilityDependencyPass();
     _revision++;
     _resetRechecks();
+  }
+
+  /// Opens one dependency pass on behalf of the owning participant: SUBSCRIBES
+  /// it to the pass marker, then hands it the [scope] the predicate mounted
+  /// below the provider will run under.
+  ///
+  /// The marker IS the pass: the host mints it from the substation scope, the
+  /// grid root and the read configuration it watches above, so subscribing to
+  /// it subscribes to exactly the changes that supersede an in-flight read —
+  /// and, being mounted by the host directly above this provider, it can never
+  /// miss. The participant holds the scope rather than this State because the
+  /// tree hands a fresh one to the participant per pass and invalidates it on
+  /// teardown; the host only ever READS it, through the loud getter.
+  void _openDependencyPass(
+    TreeWatchingReader reader,
+    TreeDependencyScope scope,
+  ) {
+    reader.watch<_MountEligibilityDependencyPass>();
+    _lifecycle._scope = scope;
   }
 
   MountEligibilityDecision _decisionFor(Bead bead, sdk.SubstationScope scope) {
@@ -510,7 +540,7 @@ class _MountEligibilityAssetsState
     return InheritedSeed<_MountEligibilityDependencyPass>(
       value: _pass,
       child: LifecycleProvider<_MountEligibilityLifecycle>(
-        create: () => _lifecycle = _MountEligibilityLifecycle(),
+        create: () => _lifecycle = _MountEligibilityLifecycle(this),
         child: DerivedServiceBundleSeed(
           value: ServiceBundle.derive(
             ambient ?? const ServiceBundle(),

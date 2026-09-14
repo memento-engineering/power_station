@@ -1060,14 +1060,15 @@ void main() {
             .dependOnInheritedSeedOfExactType<ServiceBundle>(),
       );
       BdRunner runnerFor(String storeRoot) => reads.runner;
-      Seed describe(String root) => InheritedSeed<sdk.GridRoot>(
-        value: const sdk.GridRoot(path: '/work/grid'),
-        child: _underSubstation(
-          'power_station',
-          root,
-          MountEligibilityAssets(runnerFor: runnerFor, child: probe),
-        ),
-      );
+      Seed describe(String root, {String gridRoot = '/work/grid'}) =>
+          InheritedSeed<sdk.GridRoot>(
+            value: sdk.GridRoot(path: gridRoot),
+            child: _underSubstation(
+              'power_station',
+              root,
+              MountEligibilityAssets(runnerFor: runnerFor, child: probe),
+            ),
+          );
       final owner = TreeOwner();
       addTearDown(owner.dispose);
       owner.mountRoot(
@@ -1112,6 +1113,23 @@ void main() {
 
       // N+1 answers, and its decision is the only one ever projected.
       reads.answer(1);
+      await pumpEventQueue();
+      owner.flush();
+      expect(observed!.mountEligibility!(snapshot), isA<MountEligible>());
+
+      // The GRID HOME is the other half of store identity, and it is watched
+      // on its own account: relocating the grid while the substation root
+      // stands still is a different set of stores from the one that answer was
+      // read out of, so it supersedes the cached decision exactly as a
+      // substation change does — and a pass N+2 read starts for the same bead.
+      host.swap(() => describe('/work/other', gridRoot: '/elsewhere/grid'));
+      owner.flush();
+      expect(
+        _refusalClause(observed!.mountEligibility!(snapshot)),
+        'fresh mount-eligibility read pending: pow-test',
+      );
+      expect(reads.gates, hasLength(3));
+      reads.answer(2);
       await pumpEventQueue();
       owner.flush();
       expect(observed!.mountEligibility!(snapshot), isA<MountEligible>());
