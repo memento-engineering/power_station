@@ -120,14 +120,13 @@ Map<String, Object?> _beadRow({
   'metadata': metadata,
 };
 
-/// A `bd dep list` envelope in the released edge-row shape.
-String _depEnvelope(List<String> blockers) => jsonEncode({
-  'schema_version': 1,
-  'data': [
-    for (final blocker in blockers)
-      {'issue_id': _beadId, 'depends_on_id': blocker, 'type': 'blocks'},
-  ],
-});
+/// The dependency ROWS bd embeds in a bead's own RECORD — the surface the
+/// exact read takes them from, since it is the only one that can carry an
+/// `external:<project>:<capability>` target.
+List<Map<String, Object?>> _depRows(List<String> blockers) => [
+  for (final blocker in blockers)
+    {'issue_id': _beadId, 'depends_on_id': blocker, 'type': 'blocks'},
+];
 
 /// A REAL grid home — `<home>/.grid/.beads` — because the shared resolver
 /// probes the filesystem to tell a grid home from its own state store.
@@ -183,8 +182,16 @@ _Harness _harness(_ScriptedBd bd, {String? stateRoot}) {
 /// The whole bead as one plain rendering: a healthy bead plus two edges.
 _ScriptedBd _healthyBd({Map<String, Object?>? row, List<String>? blockers}) =>
     _ScriptedBd({
-      'query': _Ok(_queryEnvelope([row ?? _beadRow()])),
-      'dep': _Ok(_depEnvelope(blockers ?? const ['tg-89y8', 'space-pww'])),
+      'query': _Ok(
+        _queryEnvelope([
+          {
+            ...(row ?? _beadRow()),
+            'dependencies': _depRows(
+              blockers ?? const ['tg-89y8', 'space-pww'],
+            ),
+          },
+        ]),
+      ),
     });
 
 /// Every UTF-8 byte of [sink], the trailing newline included.
@@ -223,13 +230,16 @@ void main() {
       expect(h.roots, isNotEmpty);
       expect(h.roots.toSet(), {_storeRoot});
 
-      // One exact-id query, one dependency list, and NEVER `bd show`.
+      // ONE exact-id query — bd's record surface carries the bead and its
+      // dependency rows together — and NEVER `bd show`.
       final queries = h.bd.withVerb('query');
       expect(queries, hasLength(1));
       expect(queries.single, contains('id=$_beadId'));
-      expect(h.bd.withVerb('dep'), [
-        ['dep', 'list', _beadId, '--json'],
-      ]);
+      expect(
+        h.bd.withVerb('dep'),
+        isEmpty,
+        reason: 'the resolving surface drops external: rows; it is not read',
+      );
       expect(
         h.bd.argvs.map((argv) => argv.first),
         isNot(contains('show')),

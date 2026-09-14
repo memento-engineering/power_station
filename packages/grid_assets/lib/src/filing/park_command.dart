@@ -10,6 +10,7 @@ import 'package:path/path.dart' as p;
 import '../search/station_search.dart';
 import 'approval_stamp.dart';
 import 'approve_command.dart';
+import 'filing_command.dart' show noArmedSubstations;
 import 'filing_contract.dart';
 import 'state_root_option.dart';
 
@@ -562,8 +563,7 @@ final class ParkService {
       );
     }
 
-    final unparkHint =
-        'unpark --actor $actor --state-root $stateRoot $workBeadId';
+    final unparkHint = 'unpark --actor $actor $workBeadId';
     final receipt = _receipt(
       workBeadId: workBeadId,
       sessionId: session.id,
@@ -976,10 +976,14 @@ final class UnparkService {
   final ExactSubstationBeadSource _source;
 
   /// Unparks [workBeadId] in [workStoreRoot] on behalf of [actor].
+  ///
+  /// [armedSubstations] is the station's roster by NAME, passed straight
+  /// through to the approval preflight's dependency projection.
   Future<UnparkOutcome> unpark({
     required String workStoreRoot,
     required String workBeadId,
     required String actor,
+    Set<String>? armedSubstations,
   }) async {
     final read = await _source.readExact(
       storeRoot: workStoreRoot,
@@ -1005,6 +1009,7 @@ final class UnparkService {
       storeRoot: workStoreRoot,
       beadId: workBeadId,
       actor: actor,
+      armedSubstations: armedSubstations,
     );
     return switch (approval) {
       ApprovalStamped(:final stamp) => Unparked(
@@ -1024,22 +1029,27 @@ final class UnparkService {
   }
 }
 
-/// `unpark --actor <name> [--json] [--state-root <grid-home>] <work-bead-id>`
-/// — clear a parked bead's defer date and re-stamp its approval.
+/// `unpark --actor <name> [--json] <work-bead-id>` — clear a parked bead's
+/// defer date and re-stamp its approval.
 class UnparkCommand extends Command<int> {
   /// Creates the thin adapter over [service].
   ///
   /// [workStoreRoot] is the same station-injected, PREFIX-AWARE resolver
   /// [ParkCommand] takes.
+  ///
+  /// It takes NO `--state-root`: unpark clears the defer date in the WORK
+  /// store and re-runs the approval preflight over that same store's bd rows.
+  /// `park` keeps the option — it is the half that closes the SESSION bead in
+  /// the grid home's state store.
   UnparkCommand({
     UnparkService? service,
     String Function(String workBeadId) workStoreRoot = _currentDirectory,
-    String? Function() stateRoot = noStateRoot,
+    Set<String>? Function() armedSubstations = noArmedSubstations,
     StringSink? out,
     StringSink? err,
   }) : _service = service ?? UnparkService(),
        _workStoreRoot = workStoreRoot,
-       _stateRoot = stateRoot,
+       _armedSubstations = armedSubstations,
        _out = out ?? stdout,
        _err = err ?? stderr {
     argParser
@@ -1054,12 +1064,11 @@ class UnparkCommand extends Command<int> {
         'actor',
         help: 'The operator unparking, recorded as grid.approved_by. Required.',
       );
-    addStateRootOption(argParser);
   }
 
   final UnparkService _service;
   final String Function(String workBeadId) _workStoreRoot;
-  final String? Function() _stateRoot;
+  final Set<String>? Function() _armedSubstations;
   final StringSink _out;
   final StringSink _err;
 
@@ -1073,9 +1082,7 @@ class UnparkCommand extends Command<int> {
   @override
   String get invocation {
     final executable = runner?.executableName;
-    const shape =
-        'unpark --actor <name> [--json] [--state-root <grid-home>] '
-        '<work-bead-id>';
+    const shape = 'unpark --actor <name> [--json] <work-bead-id>';
     return executable == null ? shape : '$executable $shape';
   }
 
@@ -1099,14 +1106,11 @@ class UnparkCommand extends Command<int> {
     }
     final UnparkOutcome outcome;
     try {
-      // Validated, never read — the shared `--state-root` contract the whole
-      // verb set answers one way; the approval preflight's cross-store read it
-      // used to feed died with grid_engine's link surface (the_grid#447).
-      resolveStateRoot(argResults!, _stateRoot);
       outcome = await _service.unpark(
         workStoreRoot: p.normalize(_workStoreRoot(workBeadId)),
         workBeadId: workBeadId,
         actor: actor,
+        armedSubstations: _armedSubstations(),
       );
     } on Object catch (error) {
       _err.writeln('unpark: failed to unpark $workBeadId: $error');

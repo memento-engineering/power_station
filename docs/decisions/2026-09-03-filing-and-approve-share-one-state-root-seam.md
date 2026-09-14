@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: superseded by the-dependencies-row-is-a-projection-of-bd-dependency-rows
 date: 2026-09-03
 decision-makers: ["agent"]
 consulted: []
@@ -11,7 +11,7 @@ register:
     - "packages/grid_assets/lib/src/filing/**"
   obsoletes: []
   updates: []
-  obsoleted-by: null
+  obsoleted-by: the-dependencies-row-is-a-projection-of-bd-dependency-rows
   updated-by:
     - "state-root-takes-the-grid-home-and-unchecked-is-not-missing"
   bead: pow-z2pj

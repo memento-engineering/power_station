@@ -20,6 +20,19 @@ class _RecordingBdRunner implements BdRunner {
   }
 }
 
+/// The dependencies row of one evaluation — the only row this bead moves.
+FilingRequirementRow _dependencies(
+  Bead bead,
+  List<BeadDependency> edges, {
+  Set<String>? armed,
+}) => const FilingContract()
+    .evaluate(bead, edges, armedSubstations: armed)
+    .requirements
+    .singleWhere((row) => row.requirement == FilingRequirement.dependencies);
+
+BeadDependency _blocks(String from, String to) =>
+    BeadDependency(issueId: from, dependsOnId: to);
+
 void main() {
   test('approval revision is deterministic and covers filing basis', () {
     const bead = Bead(
@@ -27,7 +40,7 @@ void main() {
       title: 'A filed bead',
       issueType: IssueType.task,
       priority: 2,
-      description: 'Blocked by: pow-one\nDepends on pow-two',
+      description: 'The work',
       design: 'The chosen approach',
       acceptanceCriteria: '- [ ] checked',
       notes: 'operator context',
@@ -37,8 +50,13 @@ void main() {
     const one = BeadDependency(issueId: 'pow-filed', dependsOnId: 'pow-one');
     const two = BeadDependency(issueId: 'pow-filed', dependsOnId: 'pow-two');
 
-    String rev(Bead subject, List<BeadDependency> edges) =>
-        const FilingContract().evaluate(subject, edges).approvalRevision;
+    String rev(
+      Bead subject,
+      List<BeadDependency> edges, [
+      Set<String>? armed,
+    ]) => const FilingContract()
+        .evaluate(subject, edges, armedSubstations: armed)
+        .approvalRevision;
 
     final baseline = rev(bead, const [one, two]);
     expect(baseline, startsWith(kFilingApprovalRevisionPrefix));
@@ -47,19 +65,13 @@ void main() {
       matches(RegExp(r'^[0-9a-f]{64}$')),
     );
 
-    // The v1 basis SHAPE is FROZEN: every `grid.approved_rev` already written
-    // is a digest over these keys, so the `linked` member stays in the basis
-    // rather than being dropped, which would re-digest every approved bead in
-    // every store. This fixture is wired LOCALLY, so its digest is byte-for-
-    // byte the pre-cut value — the case the cut does NOT move. The case it
-    // DOES move is pinned below in 'the cross-store shape re-digests'.
     // A GOLDEN digest, so a future edit to the basis cannot slip through as
-    // "just a refactor": changing it revokes every standing approval and needs
-    // a v2 prefix.
+    // "just a refactor": changing it revokes every standing approval and is a
+    // v2 receipt scheme, not a refactor.
     expect(
       baseline,
-      '${kFilingApprovalRevisionPrefix}0811d3b73e7a2fa4c3dbd079481ef28fc363'
-      '864e6593d74a55b28810f825ab2d',
+      '${kFilingApprovalRevisionPrefix}e6635f6c8a3307a33271500460a95c176baa'
+      'adaf11f3a479663ae534aa33d52c',
     );
 
     // Equivalent input in a different ORDER is the same basis.
@@ -70,7 +82,7 @@ void main() {
     for (final changed in <Bead>[
       bead.copyWith(id: 'pow-elsewhere'),
       bead.copyWith(title: 'A renamed bead'),
-      bead.copyWith(description: 'Blocked by: pow-one\nDepends on pow-three'),
+      bead.copyWith(description: 'Different work'),
       bead.copyWith(design: 'A different approach'),
       bead.copyWith(acceptanceCriteria: '- [ ] checked twice'),
       bead.copyWith(notes: 'different context'),
@@ -87,10 +99,35 @@ void main() {
       );
     }
 
-    // Each dependency PROOF is covered independently: the named blocker and
-    // the local outgoing edge.
+    // The ROWS bd holds are the dependency basis — each one independently.
     expect(rev(bead, const [one]), isNot(baseline));
-    expect(rev(bead, const []), isNot(baseline));
+    expect(
+      rev(bead, const [
+        one,
+        two,
+        BeadDependency(
+          issueId: 'pow-filed',
+          dependsOnId: 'external:the_grid:tg-xh5d',
+        ),
+      ]),
+      isNot(baseline),
+    );
+
+    // The ROSTER is the STATION's posture, never the bead's content: arming a
+    // substation must not revoke a governor's approval of a bead nobody
+    // edited, so it is excluded from the basis.
+    const external = BeadDependency(
+      issueId: 'pow-filed',
+      dependsOnId: 'external:the_grid:tg-xh5d',
+    );
+    expect(
+      rev(bead, const [one, two, external], const {'the_grid'}),
+      rev(bead, const [one, two, external], const {}),
+    );
+    expect(
+      rev(bead, const [one, two, external], const {'the_grid'}),
+      rev(bead, const [one, two, external]),
+    );
 
     // Lifecycle motion, ownership and the receipt itself are EXCLUDED, so
     // writing the stamp can never invalidate the stamp it writes.
@@ -127,238 +164,169 @@ void main() {
     );
   });
 
-  test('the cross-store shape re-digests and its dependency row moves', () {
-    // The ONE shape this adoption is not neutral on. Pre-cut, a bead approved
-    // with `--state-root` CONSULTED and a matching open link bead digested
-    // `linked: true` per wired blocker, AND took the linked blocker's store
-    // prefix into `knownPrefixes`, which is what made a DIGITLESS foreign id
-    // readable as an id. The state-store link surface is deleted
-    // (grid_engine 0.4.0-dev.3, the_grid#447), so both inputs are gone and the
-    // digest of such a bead MOVES — its standing stamp is stale. HOW it then
-    // breaks depends on the blocker's spelling, and both halves are asserted
-    // below: a digit-tailed id fails the row CLOSED, so approve and unpark
-    // refuse the bead until a governor re-approves, while a digitless one
-    // leaves the basis entirely and the row passes VACUOUSLY.
-    //
-    // The pre-cut literal below was MEASURED on 2026-09-13 by running the
-    // pre-cut `FilingContract.evaluate(bead, [], linkedBlockers: {...})` from
-    // the primary checkout on `main` over this exact fixture. It is here so
-    // the change is a pinned fact rather than a claim, and so a later attempt
-    // to "restore digest stability" fails loudly instead of quietly.
-    const bead = Bead(
-      id: 'space-adopt',
-      title: 'Adopt the wave',
-      issueType: IssueType.task,
-      priority: 1,
-      description:
-          'BLOCKED BY: the wave tags (pow-abaw + pow-f6pc). '
-          'Cross-store; wired by the governor.',
-      design: 'Bump the floors',
-      acceptanceCriteria: '- [ ] AC-1',
-      notes: 'governor context',
-      specId: 'space-spec',
-      metadata: {'validation_plan': 'dart test'},
-    );
-    const preCutRevision =
-        '${kFilingApprovalRevisionPrefix}1acd2d4d399b3c8f4fd93c015c455b077157'
-        '038a786396a4e47ce2f0d17b73c0';
-
-    final report = const FilingContract().evaluate(
-      bead,
-      const <BeadDependency>[],
-    );
-
-    // It re-digests: the standing stamp no longer matches this evaluation.
-    expect(report.approvalRevision, isNot(preCutRevision));
-    expect(
-      report.approvalRevision,
-      '${kFilingApprovalRevisionPrefix}5f17fb5f253c41e36cda05a5cd23d1ef5e08'
-      '968c005355d3c44676dc07d14812',
-    );
-
-    // The row passed pre-cut on the link proof; it now fails CLOSED on the
-    // digit-tailed foreign id, which is still read as an id.
-    final dependency = report.requirements.singleWhere(
-      (row) => row.requirement == FilingRequirement.dependencies,
-    );
-    expect(report.passed, isFalse);
-    expect(dependency.passed, isFalse);
-    expect(dependency.detail, 'missing outgoing blocks edges: pow-f6pc');
-
-    // And the DIGITLESS foreign id is not named at all any more: with no local
-    // edge in its store, `pow` is not a known prefix and `abaw` carries no
-    // digit. That row passes VACUOUSLY — the cut is fail-closed only for the
-    // tokens the grammar still recognises, which is why pow-f6pc
-    // (power_station#330) retires the grammar for bd's own dependency rows.
-    final foreignOnly = const FilingContract().evaluate(
-      bead.copyWith(
-        description:
-            'BLOCKED BY: pow-abaw. Cross-store; wired by the '
-            'governor.',
-      ),
-      const <BeadDependency>[],
-    );
-    final foreignRow = foreignOnly.requirements.singleWhere(
-      (row) => row.requirement == FilingRequirement.dependencies,
-    );
-    expect(foreignRow.passed, isTrue);
-    expect(foreignRow.detail, 'no local blockers named');
-  });
-
-  test('dependency requirement is exact and directional', () {
+  test('the dependencies row projects bd rows, and only bd rows', () {
     const bead = Bead(
       id: 'pow-filed',
       issueType: IssueType.task,
-      description: 'Blocked by: pow-one\nDepends on pow-two',
+      description: 'The work',
       acceptanceCriteria: '- [ ] checked',
       metadata: {'validation_plan': 'dart test'},
     );
-    const incoming = BeadDependency(
-      issueId: 'pow-one',
-      dependsOnId: 'pow-filed',
-    );
-    const unrelated = BeadDependency(
-      issueId: 'pow-other',
-      dependsOnId: 'pow-two',
-    );
+    final incoming = _blocks('pow-one', 'pow-filed');
+    final unrelated = _blocks('pow-other', 'pow-two');
     const wrongType = BeadDependency(
       issueId: 'pow-filed',
       dependsOnId: 'pow-one',
       type: DependencyType.related,
     );
-    const one = BeadDependency(issueId: 'pow-filed', dependsOnId: 'pow-one');
-    const two = BeadDependency(issueId: 'pow-filed', dependsOnId: 'pow-two');
 
-    FilingRequirementRow dependency(List<BeadDependency> edges) =>
-        const FilingContract()
-            .evaluate(bead, edges)
-            .requirements
-            .singleWhere(
-              (row) => row.requirement == FilingRequirement.dependencies,
-            );
+    // Directional and type-exact: an incoming edge, another bead's edge and a
+    // non-blocking edge are not this bead's blockers.
+    final foreign = _dependencies(bead, [incoming, unrelated, wrongType]);
+    expect(foreign.passed, isTrue);
+    expect(foreign.detail, 'bd holds no blocking dependency rows');
 
-    expect(dependency([incoming, unrelated, wrongType]).passed, isFalse);
-    expect(dependency([one]).detail, contains('pow-two'));
-    expect(dependency([one, two]).passed, isTrue);
-    expect(
-      const FilingContract()
-          .evaluate(bead.copyWith(description: 'No local ordering.'), const [])
-          .requirements
-          .last
-          .passed,
-      isTrue,
-    );
+    // The bead's OWN outgoing blocking rows are the whole row, sorted.
+    final held = _dependencies(bead, [
+      _blocks('pow-filed', 'pow-two'),
+      _blocks('pow-filed', 'pow-one'),
+      incoming,
+    ]);
+    expect(held.passed, isTrue);
+    expect(held.detail, 'bd dependency rows: pow-one, pow-two');
   });
 
-  test('blockers are named at sentence scope, dotted ids intact', () {
+  test(
+    'AC-1: the hyphenated and spaced prose spellings project identically',
+    () {
+      const hyphenated = Bead(
+        id: 'pow-filed',
+        issueType: IssueType.task,
+        description: 'Blocked-by: pow-x. Depends-on pow-y.',
+        acceptanceCriteria: '- [ ] checked',
+        metadata: {'validation_plan': 'dart test'},
+      );
+      final spaced = hyphenated.copyWith(
+        description: 'Blocked by: pow-x. Depends on pow-y. Blocked on pow-z.',
+      );
+
+      // No row exists, so BOTH beads report the same empty projection — the
+      // grammar that read one spelling and not the other is GONE.
+      for (final subject in [hyphenated, spaced]) {
+        final row = _dependencies(subject, const []);
+        expect(row.passed, isTrue, reason: subject.description);
+        expect(
+          row.detail,
+          'bd holds no blocking dependency rows',
+          reason: subject.description,
+        );
+      }
+      expect(
+        _dependencies(hyphenated, const []).toJson(),
+        _dependencies(spaced, const []).toJson(),
+      );
+
+      // And with ONE bd row they agree again: what bd holds is the answer, and
+      // the prose — in either spelling — adds and subtracts nothing.
+      final wired = [_blocks('pow-filed', 'pow-x')];
+      expect(
+        _dependencies(hyphenated, wired).toJson(),
+        _dependencies(spaced, wired).toJson(),
+      );
+      expect(_dependencies(spaced, wired).detail, 'bd dependency rows: pow-x');
+
+      // A receipt QUOTING the phrase mid-sentence is prose too — the refusal
+      // that cost a round on 2026-09-13 cannot recur.
+      final quoting = hyphenated.copyWith(
+        description: "pow-pry0 carries a 'DEPENDS ON: tg-1n4y' receipt.",
+      );
+      expect(_dependencies(quoting, const []).passed, isTrue);
+    },
+  );
+
+  test('AC-2: an external row resolves through the roster', () {
     const bead = Bead(
-      id: 'pow-n6n.2',
+      id: 'pow-filed',
       issueType: IssueType.task,
-      description:
-          'Child 2 of epic pow-n6n. Depends on child pow-n6n.1 (local). '
-          'BLOCKED on tg-89y8 across stores.',
+      description: 'The work',
       acceptanceCriteria: '- [ ] checked',
       metadata: {'validation_plan': 'dart test'},
     );
-    const local = BeadDependency(
-      issueId: 'pow-n6n.2',
-      dependsOnId: 'pow-n6n.1',
+    final rows = [
+      _blocks('pow-filed', 'external:the_grid:tg-xh5d'),
+      _blocks('pow-filed', 'pow-local'),
+    ];
+
+    // ARMED: an ordinary prerequisite, reported beside the local rows.
+    final armed = _dependencies(bead, rows, armed: {'the_grid', 'space'});
+    expect(armed.passed, isTrue);
+    expect(
+      armed.detail,
+      'bd dependency rows: pow-local, external:the_grid:tg-xh5d (armed)',
     );
 
-    FilingRequirementRow dependency(List<BeadDependency> edges) =>
-        const FilingContract()
-            .evaluate(bead, edges)
-            .requirements
-            .singleWhere(
-              (row) => row.requirement == FilingRequirement.dependencies,
-            );
+    // NOT ARMED: the Q4 hard refusal — blocked, named, and told what to do.
+    final unarmed = _dependencies(bead, rows, armed: {'space'});
+    expect(unarmed.passed, isFalse);
+    expect(
+      unarmed.detail,
+      contains('external:the_grid:tg-xh5d names "the_grid"'),
+    );
+    expect(unarmed.detail, contains('armed: space'));
+    expect(unarmed.detail, contains('arm that substation'));
 
-    expect(dependency(const []).passed, isFalse);
+    // NO ROSTER: fail-closed too, and the detail says WHICH condition it is.
+    final unconsulted = _dependencies(bead, rows);
+    expect(unconsulted.passed, isFalse);
+    expect(unconsulted.detail, contains('no station roster was supplied'));
+    expect(unconsulted.detail, isNot(contains('does not arm')));
+
+    // A malformed `external:` spelling is read as a LOCAL id — the same thing
+    // bd does with it, never a third reading. The parser is bd's OWN
+    // ([ExternalDepRef], beads_dart): this package holds no second one.
+    expect(ExternalDepRef.parse('external:the_grid:'), isNull);
+    expect(ExternalDepRef.parse('external:solo'), isNull);
+    expect(ExternalDepRef.parse('pow-plain'), isNull);
     expect(
-      dependency(const []).detail,
-      allOf(contains('pow-n6n.1'), contains('tg-89y8')),
-    );
-    expect(
-      dependency(const [local]).detail,
-      allOf(isNot(contains('pow-n6n.1')), contains('tg-89y8')),
-    );
-    expect(
-      dependency(const [
-        local,
-        BeadDependency(issueId: 'pow-n6n.2', dependsOnId: 'tg-89y8'),
-      ]).passed,
-      isTrue,
-    );
-    expect(
-      const FilingContract()
-          .evaluate(
-            bead.copyWith(
-              description: 'The design depends on whether we ship.',
-            ),
-            const [],
-          )
-          .requirements
-          .last
-          .passed,
-      isTrue,
+      _dependencies(bead, [_blocks('pow-filed', 'external:solo')]).detail,
+      'bd dependency rows: external:solo',
     );
   });
 
-  test('a named FOREIGN blocker is missing, fail-closed', () {
-    const bead = Bead(
-      id: 'pow-n6n.2',
-      issueType: IssueType.task,
-      description:
-          'Depends on child pow-n6n.1 (local). '
-          'BLOCKED on tg-89y8 across stores.',
-      acceptanceCriteria: '- [ ] checked',
-      metadata: {'validation_plan': 'dart test'},
-    );
-    const local = BeadDependency(
-      issueId: 'pow-n6n.2',
-      dependsOnId: 'pow-n6n.1',
+  test('the projection exposes its rows for the explainer and the checks', () {
+    final projection = DependencyProjection.of(
+      beadId: 'pow-filed',
+      dependencies: [
+        _blocks('pow-filed', 'pow-b'),
+        _blocks('pow-filed', 'pow-a'),
+        _blocks('pow-filed', 'external:the_grid:cap'),
+        _blocks('pow-other', 'pow-c'),
+      ],
+      armedSubstations: const {'the_grid'},
     );
 
-    FilingRequirementRow dependency(List<BeadDependency> edges) =>
-        const FilingContract()
-            .evaluate(bead, edges)
-            .requirements
-            .singleWhere(
-              (row) => row.requirement == FilingRequirement.dependencies,
-            );
-
-    // There is no second lookup any more: grid_engine's state-store link
-    // surface is deleted (the_grid#447), so a foreign id is judged by the
-    // bead's OWN outgoing edges like every other named blocker — and an
-    // unwired one is MISSING, never quietly excused as unchecked.
-    expect(
-      dependency(const []).detail,
-      'missing outgoing blocks edges: pow-n6n.1, tg-89y8',
-    );
-    expect(dependency(const []).passed, isFalse);
-    expect(
-      dependency(const [local]).detail,
-      'missing outgoing blocks edges: tg-89y8',
-    );
-    expect(dependency(const [local]).passed, isFalse);
-
-    // A local `blocks` edge to the foreign id wires it.
-    expect(
-      dependency(const [
-        local,
-        BeadDependency(issueId: 'pow-n6n.2', dependsOnId: 'tg-89y8'),
-      ]).detail,
-      'all named local blockers are wired',
-    );
+    expect(projection.local, ['pow-a', 'pow-b']);
+    expect(projection.external.single.ref.project, 'the_grid');
+    expect(projection.external.single.ref.capability, 'cap');
+    expect(projection.external.single.resolution, ExternalResolution.armed);
+    expect(projection.passed, isTrue);
+    expect(projection.basis, [
+      {'id': 'pow-a', 'kind': 'local'},
+      {'id': 'pow-b', 'kind': 'local'},
+      {'id': 'external:the_grid:cap', 'kind': 'external'},
+    ]);
   });
 
-  test('source is read-only by construction', () async {
+  test('source is read-only, ONE spawn, and carries external rows', () async {
     final runner = _RecordingBdRunner([
       '{"schema_version":1,"data":['
-          '{"id":"pow-filed","title":"filed","issue_type":"task"}]}',
-      '{"schema_version":1,"data":['
+          '{"id":"pow-filed","title":"filed","issue_type":"task",'
+          '"dependencies":['
           '{"issue_id":"pow-filed","depends_on_id":"pow-one",'
-          '"type":"blocks"}]}',
+          '"type":"blocks"},'
+          '{"issue_id":"pow-filed",'
+          '"depends_on_id":"external:the_grid:tg-xh5d","type":"blocks"}'
+          ']}]}',
     ]);
     final source = ExactSubstationBeadSource(runnerFor: (_) => runner);
 
@@ -368,40 +336,83 @@ void main() {
     );
 
     expect(read.bead!.id, 'pow-filed');
+    expect(read.dependencies.map((edge) => edge.dependsOnId), [
+      'pow-one',
+      'external:the_grid:tg-xh5d',
+    ]);
+    // ONE record read. `bd dep list` is NOT spawned: it RESOLVES each row to
+    // the issue record it points at, and an `external:` target has no issue in
+    // this store, so the resolving surface returns the cross-project rows not
+    // at all.
     const query = ['query', 'id=pow-filed', '--all', '--json'];
-    expect(runner.argvs, hasLength(2));
+    expect(runner.argvs, hasLength(1));
     expect(
-      runner.argvs.first,
+      runner.argvs.single,
       anyOf(equals(query), equals([...query, '--limit', '0'])),
     );
-    expect(runner.argvs.last, ['dep', 'list', 'pow-filed', '--json']);
     expect(
       runner.argvs.expand((argv) => argv),
-      isNot(contains(anyOf('show', 'create', 'update', 'close'))),
+      isNot(contains(anyOf('show', 'dep', 'create', 'update', 'close'))),
     );
   });
 
-  test('source accepts current dependency-bead rows', () async {
-    final runner = _RecordingBdRunner([
+  test('an absent bead costs the same one read and reports missing', () async {
+    final runner = _RecordingBdRunner(['{"schema_version":1,"data":[]}']);
+    final read = await ExactSubstationBeadSource(
+      runnerFor: (_) => runner,
+    ).readExact(storeRoot: '/work/power_station', beadId: 'pow-gone');
+
+    expect(read.bead, isNull);
+    expect(read.dependencies, isEmpty);
+    expect(runner.argvs, hasLength(1));
+  });
+
+  test('the record surface is reconciled against the resolving one', () async {
+    // No rows on the record surface is AMBIGUOUS — a store with no dependency
+    // rows, or a surface that stopped carrying them. beads_dart's own control
+    // ([externalDepRowsFrom]) decides it, and only this case spawns the second
+    // read.
+    final empty = _RecordingBdRunner([
+      '{"schema_version":1,"data":['
+          '{"id":"pow-filed","title":"filed","issue_type":"task"}]}',
+      '{"schema_version":1,"data":[]}',
+    ]);
+    final read = await ExactSubstationBeadSource(
+      runnerFor: (_) => empty,
+    ).readExact(storeRoot: '/work/power_station', beadId: 'pow-filed');
+
+    expect(read.bead!.id, 'pow-filed');
+    expect(read.dependencies, isEmpty);
+    expect(empty.argvs.map((argv) => argv.first), ['query', 'dep']);
+
+    // A record surface that DROPPED rows the resolving read still holds is a
+    // silent ADMISSION of blocked work, so it REFUSES.
+    final dropped = _RecordingBdRunner([
       '{"schema_version":1,"data":['
           '{"id":"pow-filed","title":"filed","issue_type":"task"}]}',
       '{"schema_version":1,"data":['
-          '{"id":"pow-one","title":"blocker",'
-          '"dependency_type":"blocks"}]}',
+          '{"issue_id":"pow-filed","depends_on_id":"pow-one",'
+          '"type":"blocks"}]}',
     ]);
-    final source = ExactSubstationBeadSource(runnerFor: (_) => runner);
-
-    final read = await source.readExact(
-      storeRoot: '/work/power_station',
-      beadId: 'pow-filed',
+    await expectLater(
+      ExactSubstationBeadSource(
+        runnerFor: (_) => dropped,
+      ).readExact(storeRoot: '/work/power_station', beadId: 'pow-filed'),
+      throwsA(isA<BdExternalDepSurfaceUnavailable>()),
     );
+  });
 
-    expect(read.dependencies, [
-      isA<BeadDependency>()
-          .having((edge) => edge.issueId, 'issueId', 'pow-filed')
-          .having((edge) => edge.dependsOnId, 'dependsOnId', 'pow-one')
-          .having((edge) => edge.type, 'type', DependencyType.blocks),
+  test('a duplicate id in the exact read is LOUD', () async {
+    final runner = _RecordingBdRunner([
+      '{"schema_version":1,"data":['
+          '{"id":"pow-filed","issue_type":"task"},'
+          '{"id":"pow-filed","issue_type":"task"}]}',
     ]);
-    expect(runner.argvs, hasLength(2));
+    await expectLater(
+      ExactSubstationBeadSource(
+        runnerFor: (_) => runner,
+      ).readExact(storeRoot: '/work/power_station', beadId: 'pow-filed'),
+      throwsA(isA<StateError>()),
+    );
   });
 }

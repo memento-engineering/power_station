@@ -5,28 +5,38 @@ import 'package:args/command_runner.dart';
 import 'package:path/path.dart' as p;
 
 import 'filing_contract.dart';
-import 'state_root_option.dart';
 
 String _currentDirectory() => Directory.current.path;
+
+/// The default roster seam: NONE. Until a station threads its coded roster in,
+/// an `external:<project>:<capability>` dependency row cannot be resolved to an
+/// armed substation, and the dependencies row refuses fail-closed saying so.
+Set<String>? noArmedSubstations() => null;
 
 /// `filing <bead-id>` — deterministic enforcement of front-door completeness.
 class FilingCommand extends Command<int> {
   /// Creates the thin adapter over [service].
   ///
-  /// [stateRoot] is the station-injected grid home — the SAME injected default
-  /// the `approve` and `show` verbs take, so the option cannot mean two things
-  /// across the verb set. It is VALIDATED and nowhere read: the cross-store
-  /// proof it used to feed died with grid_engine's link surface
-  /// (the_grid#447).
+  /// [armedSubstations] is the station-injected roster by NAME — the SAME
+  /// injected default the `approve` verb takes, so the two verbs answer one
+  /// contract one way. It is what an `external:<project>:<capability>` row's
+  /// project resolves against, and its default refuses fail-closed
+  /// ([noArmedSubstations]).
+  ///
+  /// This verb takes NO `--state-root`. The option existed for ONE reader —
+  /// the grid state store's cross-store link beads — and the dependencies row
+  /// is now a projection of the WORK store's own bd rows, so there is no
+  /// second store to name. `park` and `show` keep it; they reach the state
+  /// store's session-lifecycle beads.
   FilingCommand({
     FilingService service = const FilingService(),
     String Function() storeRoot = _currentDirectory,
-    String? Function() stateRoot = noStateRoot,
+    Set<String>? Function() armedSubstations = noArmedSubstations,
     StringSink? out,
     StringSink? err,
   }) : _service = service,
        _storeRoot = storeRoot,
-       _stateRoot = stateRoot,
+       _armedSubstations = armedSubstations,
        _out = out ?? stdout,
        _err = err ?? stderr {
     argParser.addFlag(
@@ -34,12 +44,11 @@ class FilingCommand extends Command<int> {
       negatable: false,
       help: 'Emit {id, passed, requirements, error?} as one JSON object.',
     );
-    addStateRootOption(argParser);
   }
 
   final FilingService _service;
   final String Function() _storeRoot;
-  final String? Function() _stateRoot;
+  final Set<String>? Function() _armedSubstations;
   final StringSink _out;
   final StringSink _err;
 
@@ -53,7 +62,7 @@ class FilingCommand extends Command<int> {
   @override
   String get invocation {
     final executable = runner?.executableName;
-    const shape = 'filing [--json] [--state-root <path>] <bead-id>';
+    const shape = 'filing [--json] <bead-id>';
     return executable == null ? shape : '$executable $shape';
   }
 
@@ -67,10 +76,10 @@ class FilingCommand extends Command<int> {
     final beadId = rest.single.trim();
     final FilingReport report;
     try {
-      resolveStateRoot(argResults!, _stateRoot);
       report = await _service.check(
         storeRoot: p.normalize(_storeRoot()),
         beadId: beadId,
+        armedSubstations: _armedSubstations(),
       );
     } on Object catch (error) {
       _err.writeln('filing: failed to read $beadId: $error');

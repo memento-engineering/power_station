@@ -7,8 +7,8 @@ import 'package:path/path.dart' as p;
 
 import '../search/station_search.dart';
 import 'approval_stamp.dart';
+import 'filing_command.dart' show noArmedSubstations;
 import 'filing_contract.dart';
-import 'state_root_option.dart';
 
 String _currentDirectory() => Directory.current.path;
 BdRunner _processRunnerFor(String storeRoot) =>
@@ -102,12 +102,23 @@ final class ApproveService {
   final DateTime Function() _now;
 
   /// Approves [beadId] in [storeRoot] on behalf of [actor].
+  ///
+  /// [armedSubstations] is the station's roster by NAME, which is what an
+  /// `external:<project>:<capability>` dependency row's project resolves
+  /// against; null means no roster was supplied and such a row refuses
+  /// fail-closed, so the bead is never stamped over a blocker nothing
+  /// resolved.
   Future<ApprovalOutcome> approve({
     required String storeRoot,
     required String beadId,
     required String actor,
+    Set<String>? armedSubstations,
   }) async {
-    final report = await filing.check(storeRoot: storeRoot, beadId: beadId);
+    final report = await filing.check(
+      storeRoot: storeRoot,
+      beadId: beadId,
+      armedSubstations: armedSubstations,
+    );
     if (!report.passed) {
       return ApprovalRefused(
         beadId: beadId,
@@ -148,19 +159,23 @@ final class ApproveService {
   }
 }
 
-/// `approve --actor <name> [--json] [--state-root <path>] <bead-id>` — the
-/// approval VERB: the filing preflight, then the `grid.approved_*` stamp.
+/// `approve --actor <name> [--json] <bead-id>` — the approval VERB: the filing
+/// preflight, then the `grid.approved_*` stamp.
 class ApproveCommand extends Command<int> {
   /// Creates the thin adapter over [service].
+  ///
+  /// This verb takes NO `--state-root`, for the same reason `filing` does not:
+  /// the preflight it runs projects the WORK store's own bd rows and reaches
+  /// no second store.
   ApproveCommand({
     ApproveService? service,
     String Function() storeRoot = _currentDirectory,
-    String? Function() stateRoot = noStateRoot,
+    Set<String>? Function() armedSubstations = noArmedSubstations,
     StringSink? out,
     StringSink? err,
   }) : _service = service ?? ApproveService(),
        _storeRoot = storeRoot,
-       _stateRoot = stateRoot,
+       _armedSubstations = armedSubstations,
        _out = out ?? stdout,
        _err = err ?? stderr {
     argParser
@@ -175,12 +190,11 @@ class ApproveCommand extends Command<int> {
         'actor',
         help: 'The approver, recorded as grid.approved_by. Required.',
       );
-    addStateRootOption(argParser);
   }
 
   final ApproveService _service;
   final String Function() _storeRoot;
-  final String? Function() _stateRoot;
+  final Set<String>? Function() _armedSubstations;
   final StringSink _out;
   final StringSink _err;
 
@@ -194,8 +208,7 @@ class ApproveCommand extends Command<int> {
   @override
   String get invocation {
     final executable = runner?.executableName;
-    const shape =
-        'approve --actor <name> [--json] [--state-root <path>] <bead-id>';
+    const shape = 'approve --actor <name> [--json] <bead-id>';
     return executable == null ? shape : '$executable $shape';
   }
 
@@ -216,17 +229,11 @@ class ApproveCommand extends Command<int> {
     }
     final ApprovalOutcome outcome;
     try {
-      // The shared state-root contract is VALIDATED here and nowhere read —
-      // the same posture `show` takes. The cross-store proof it used to feed
-      // died with grid_engine's link surface (the_grid#447); the option itself
-      // is the verb set's ONE spelling of "the grid home", so a verb that
-      // accepted it and skipped the check would report an unrelated root as
-      // fine.
-      resolveStateRoot(argResults!, _stateRoot);
       outcome = await _service.approve(
         storeRoot: p.normalize(_storeRoot()),
         beadId: beadId,
         actor: actor,
+        armedSubstations: _armedSubstations(),
       );
     } on Object catch (error) {
       _err.writeln('approve: failed to approve $beadId: $error');

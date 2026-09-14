@@ -312,7 +312,6 @@ _Harness _harness({
             runnerFor: runnerFor,
           ),
           workStoreRoot: workStoreRoot,
-          stateRoot: () => home,
           out: out,
           err: err,
         ),
@@ -410,10 +409,7 @@ void main() {
           contains(_session),
           contains('operator bounce window needed'),
           contains('2026-09-16'),
-          contains(
-            'unpark --actor nico --state-root ${p.join(home, '.grid')} '
-            '$_workBead',
-          ),
+          contains('unpark --actor nico $_workBead'),
         ),
       );
       expect(h.work.beads[_workBead]!['notes'], receipt);
@@ -864,15 +860,18 @@ void main() {
     expect(err.toString(), contains('--state-root'));
   });
 
-  test('both new verbs register the ONE shared state-root seam', () {
+  test('PARK holds the state-root seam, and unpark no longer does', () {
     final park = ParkCommand(out: StringBuffer(), err: StringBuffer());
     final unpark = UnparkCommand(out: StringBuffer(), err: StringBuffer());
     final reference = ArgParser();
     addStateRootOption(reference);
 
-    for (final parser in [park.argParser, unpark.argParser]) {
-      expect(parser.options[kStateRootOption]?.help, kStateRootHelp);
-    }
+    // `park` reaches the grid home: it closes and void-retires the SESSION
+    // bead. `unpark` reaches only the work store — clear the defer date, then
+    // re-run the preflight over that store's own bd rows — so the option is
+    // GONE from it rather than accepted and ignored.
+    expect(park.argParser.options[kStateRootOption]?.help, kStateRootHelp);
+    expect(unpark.argParser.options.keys, isNot(contains(kStateRootOption)));
     expect(
       kStateRootHelp,
       'The grid home whose .grid/.beads holds the session-lifecycle state '
@@ -884,11 +883,7 @@ void main() {
       'park --actor <name> --reason <text> --until <date> [--override-live] '
       '[--json] [--state-root <grid-home>] <work-bead-id>',
     );
-    expect(
-      unpark.invocation,
-      'unpark --actor <name> [--json] [--state-root <grid-home>] '
-      '<work-bead-id>',
-    );
+    expect(unpark.invocation, 'unpark --actor <name> [--json] <work-bead-id>');
   });
 
   test('park then unpark restores mount eligibility', () async {
