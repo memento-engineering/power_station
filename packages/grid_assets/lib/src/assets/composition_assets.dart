@@ -41,7 +41,6 @@ import 'package:grid_runtime/grid_runtime.dart';
 // StatefulSeed that provided ServiceBundle — the thing this track replaces).
 // Prefix the SDK so the two never ambiguate; we only read the SDK scope values.
 import 'package:grid_sdk/grid_sdk.dart' as sdk;
-import 'package:grid_sdk/grid_sdk.dart' show ProviderTreeContext;
 
 import '../agent/agent_harness.dart';
 import '../agent/availability_assets.dart';
@@ -199,7 +198,6 @@ class _MountEligibilityAssetsState
     extends SingleChildState<MountEligibilityAssets> {
   ServiceBundle? _ambient;
   sdk.SubstationScope? _scope;
-  sdk.GridRoot? _gridRoot;
   BdRunner Function(String storeRoot)? _runnerFor;
   DateTime Function()? _clock;
   Duration? _readDeadline;
@@ -220,16 +218,11 @@ class _MountEligibilityAssetsState
     _ambient = context.dependOnInheritedSeedOfExactType<ServiceBundle>();
     final scope = context
         .dependOnInheritedSeedOfExactType<sdk.SubstationScope>();
-    // The grid home names the STATE store the filing contract reads its
-    // cross-store link proofs from. Subscribed (the D-H build verb, ADR-0008):
-    // a re-provided root re-derives every cached recheck under it.
-    final gridRoot = context.dependOnInheritedSeedOfExactType<sdk.GridRoot>();
     final runnerFor = seed._runnerFor;
     final now = seed._now;
     final readDeadline = seed.readDeadline;
     final retryBackoff = seed.retryBackoff;
     if (scope == _scope &&
-        gridRoot == _gridRoot &&
         readDeadline == _readDeadline &&
         retryBackoff == _retryBackoff &&
         identical(now, _clock) &&
@@ -238,7 +231,6 @@ class _MountEligibilityAssetsState
     }
 
     _scope = scope;
-    _gridRoot = gridRoot;
     _runnerFor = runnerFor;
     _clock = now;
     _readDeadline = readDeadline;
@@ -247,7 +239,6 @@ class _MountEligibilityAssetsState
         ? null
         : FilingService(
             source: ExactSubstationBeadSource(runnerFor: runnerFor),
-            links: CrossLinkBlockerSource(runnerFor: runnerFor),
           );
     _generation++;
     _revision++;
@@ -294,14 +285,7 @@ class _MountEligibilityAssetsState
             );
           }
           unawaited(
-            _readFresh(
-              bead,
-              scope,
-              filing,
-              _gridRoot?.stateStore.runtimeDir,
-              seed.readDeadline,
-              _generation,
-            ),
+            _readFresh(bead, scope, filing, seed.readDeadline, _generation),
           );
         }
         return MountEligibilityDecision.refused(
@@ -329,21 +313,16 @@ class _MountEligibilityAssetsState
     Bead snapshot,
     sdk.SubstationScope scope,
     FilingService filing,
-    String? stateRoot,
     Duration deadline,
     int generation,
   ) async {
     MountEligibilityDecision decision;
     try {
-      // ONE deadline over the WHOLE read (bead row, dependency rows, and the
-      // state store's link rows): what must not hang is the read this bead is
-      // waiting on, not any single call inside it.
+      // ONE deadline over the WHOLE read (bead row and dependency rows): what
+      // must not hang is the read this bead is waiting on, not any single call
+      // inside it.
       final inspected = await filing
-          .inspect(
-            storeRoot: scope.root,
-            beadId: snapshot.id,
-            stateRoot: stateRoot,
-          )
+          .inspect(storeRoot: scope.root, beadId: snapshot.id)
           .timeout(deadline);
       final fresh = inspected.bead;
       if (fresh == null) {
@@ -446,7 +425,6 @@ class _MountEligibilityAssetsState
       derivedFrom: [
         ambient,
         scope,
-        _gridRoot,
         seed._runnerFor,
         seed._now,
         seed.readDeadline,
@@ -465,7 +443,7 @@ class _MountEligibilityAssetsState
 }
 
 /// **GitServices** — the station's git-execution machinery as ONE ambient
-/// value: the shared [StationGitService] provisioner + the [GitOps]
+/// value: the shared [StationGitRepository] provisioner + the [GitOps]
 /// commit/push half (bead `pow-72b`).
 ///
 /// The delegate mounts it ONCE (an `InheritedSeed<GitServices>` above the
@@ -484,9 +462,10 @@ class GitServices {
   /// the offline posture for that half.
   const GitServices({this.provisioner, this.gitOps});
 
-  /// The station's shared worktree-provisioning service (leased per
-  /// substation); null ⇒ provisioning no-ops (offline).
-  final StationGitService? provisioner;
+  /// The station's shared worktree-provisioning repository (leased per
+  /// substation) — the station-lifetime projection that retains each
+  /// provisioned worktree's base commit; null ⇒ provisioning no-ops (offline).
+  final StationGitRepository? provisioner;
 
   /// Commit/push ops — the half the GitHub delivery asset needs to bind a delivery
   /// method; null ⇒ no delivery bound (commit-only).
@@ -514,8 +493,9 @@ class GitServices {
 /// `GitGridAssets` commits its work; adding the GitHub delivery asset lets it deliver.
 ///
 /// The git-execution machinery ("the station supplies the machinery the
-/// substation leases" — the shared [StationGitService] provisioner) is watched
-/// individually through `context.watch<StationGitService>()`. The observation
+/// substation leases" — the shared [StationGitRepository] provisioner) is
+/// watched individually through `context.watch<StationGitRepository>()`. The
+/// observation
 /// is nullable: absence is the offline/dry-run build (provisioning no-ops, but
 /// `workspaceFor`/`branchFor`/`baseBranch` still resolve from the root — the
 /// layout is deterministic + pure). Provider availability drives
@@ -533,7 +513,8 @@ class GitGridAssets extends SingleChildStatelessSeed {
 
   /// The base branch per-bead worktrees rebase/PR against — the substation
   /// root's mainline. A live [StationGitService.registerRootCheckout] PROBES
-  /// this from `origin/HEAD`; an offline asset authors it (defaulting to `main`).
+  /// this from `origin/HEAD`; an offline asset authors it (defaulting to
+  /// `main`).
   final String defaultBranch;
 
   /// The push remote (default `origin`).
@@ -545,7 +526,7 @@ class GitGridAssets extends SingleChildStatelessSeed {
     // root. `.of` refuses LOUD when no `Substation` encloses — an asset mounted
     // outside a substation is an authoring error, not a default (v3 §0).
     final scope = sdk.SubstationScope.of(context);
-    final provisioner = context.watch<StationGitService>();
+    final provisioner = context.watch<StationGitRepository>();
     return DerivedServiceBundleSeed(
       // ONE source control, resolved by TREE POSITION (the v3 "no string-keyed
       // bundle map"): the substation's own root, never a name selected against a

@@ -407,24 +407,21 @@ abstract interface class GitHubIntakeStore {
 final class BdGitHubIntakeStore implements GitHubIntakeStore {
   /// Creates a store over the shared bounded runner.
   ///
-  /// [approvals], [workRoot] and [stateRoot] wire the approval half. All three
-  /// are optional because a composition that files nothing self-authored needs
-  /// none of them — but a record that ASKS for approval without them is a
-  /// wiring bug and is refused LOUDLY rather than filed unstamped in silence.
+  /// [approvals] and [workRoot] wire the approval half. Both are optional
+  /// because a composition that files nothing self-authored needs neither —
+  /// but a record that ASKS for approval without them is a wiring bug and is
+  /// refused LOUDLY rather than filed unstamped in silence.
   BdGitHubIntakeStore(
     BdRunner runner, {
     ApproveService? approvals,
     String? workRoot,
-    String? stateRoot,
   }) : _bd = BdCliService(runner),
        _approvals = approvals,
-       _workRoot = workRoot,
-       _stateRoot = stateRoot;
+       _workRoot = workRoot;
 
   final BdCliService _bd;
   final ApproveService? _approvals;
   final String? _workRoot;
-  final String? _stateRoot;
 
   /// Reopens [GitHubIssueWatchUpdate.beadId] and annotates it, in ONE update.
   ///
@@ -542,7 +539,6 @@ final class BdGitHubIntakeStore implements GitHubIntakeStore {
       storeRoot: workRoot,
       beadId: beadId,
       actor: kWorkflowRunActor,
-      stateRoot: _stateRoot,
     );
     switch (outcome) {
       case ApprovalStamped():

@@ -976,14 +976,10 @@ final class UnparkService {
   final ExactSubstationBeadSource _source;
 
   /// Unparks [workBeadId] in [workStoreRoot] on behalf of [actor].
-  ///
-  /// [stateRoot] is the resolved state store, passed straight through to the
-  /// approval preflight's cross-store link read.
   Future<UnparkOutcome> unpark({
     required String workStoreRoot,
     required String workBeadId,
     required String actor,
-    String? stateRoot,
   }) async {
     final read = await _source.readExact(
       storeRoot: workStoreRoot,
@@ -1009,7 +1005,6 @@ final class UnparkService {
       storeRoot: workStoreRoot,
       beadId: workBeadId,
       actor: actor,
-      stateRoot: stateRoot,
     );
     return switch (approval) {
       ApprovalStamped(:final stamp) => Unparked(
@@ -1104,11 +1099,14 @@ class UnparkCommand extends Command<int> {
     }
     final UnparkOutcome outcome;
     try {
+      // Validated, never read — the shared `--state-root` contract the whole
+      // verb set answers one way; the approval preflight's cross-store read it
+      // used to feed died with grid_engine's link surface (the_grid#447).
+      resolveStateRoot(argResults!, _stateRoot);
       outcome = await _service.unpark(
         workStoreRoot: p.normalize(_workStoreRoot(workBeadId)),
         workBeadId: workBeadId,
         actor: actor,
-        stateRoot: resolveStateRoot(argResults!, _stateRoot),
       );
     } on Object catch (error) {
       _err.writeln('unpark: failed to unpark $workBeadId: $error');

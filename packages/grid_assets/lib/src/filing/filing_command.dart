@@ -13,9 +13,11 @@ String _currentDirectory() => Directory.current.path;
 class FilingCommand extends Command<int> {
   /// Creates the thin adapter over [service].
   ///
-  /// [stateRoot] is the station-injected grid home whose state store holds the
-  /// cross-store link beads — the SAME injected default the `approve` verb
-  /// takes, so the two verbs answer one contract one way.
+  /// [stateRoot] is the station-injected grid home — the SAME injected default
+  /// the `approve` and `show` verbs take, so the option cannot mean two things
+  /// across the verb set. It is VALIDATED and nowhere read: the cross-store
+  /// proof it used to feed died with grid_engine's link surface
+  /// (the_grid#447).
   FilingCommand({
     FilingService service = const FilingService(),
     String Function() storeRoot = _currentDirectory,
@@ -65,10 +67,10 @@ class FilingCommand extends Command<int> {
     final beadId = rest.single.trim();
     final FilingReport report;
     try {
+      resolveStateRoot(argResults!, _stateRoot);
       report = await _service.check(
         storeRoot: p.normalize(_storeRoot()),
         beadId: beadId,
-        stateRoot: resolveStateRoot(argResults!, _stateRoot),
       );
     } on Object catch (error) {
       _err.writeln('filing: failed to read $beadId: $error');

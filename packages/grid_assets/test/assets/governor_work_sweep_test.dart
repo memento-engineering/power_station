@@ -70,12 +70,13 @@ const Map<String, String> _sweepSentences = {
       'For this sweep, stamped means `grid.approved_by`, `grid.approved_at`, '
       'and `grid.approved_rev` are all present; the retired '
       '`grid.approved` label does not count.',
-  'both blocker sources are enumerated — in-store deps AND open link beads':
+  'both blocker sources are enumerated — in-store deps AND external rows':
       'Before treating a stamped-but-unmounted bead as waiting, enumerate '
       'every OPEN blocker: read its in-store dependencies with `bd -C '
       '<work-store-root> dep list <bead-id> --json` and its cross-store '
-      'dependencies from `bd -C .grid list -t link --status open --json`, '
-      "using each link's `grid.link.from` and `grid.link.to` endpoints.",
+      'dependencies — bd `external:<project>:<capability>` rows on the bead '
+      "itself — with the station's `link ls` verb, which lists the external "
+      'rows every armed store carries.',
   'each blocker is read in its OWNING store, and closed ones are discarded':
       'Read every unique blocker in its owning store with `bd -C '
       '<blocker-store-root> query id=<blocker-id> --all --json --limit 0`, '

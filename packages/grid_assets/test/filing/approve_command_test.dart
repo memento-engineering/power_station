@@ -69,19 +69,6 @@ String _depReply(List<String> blockers) => jsonEncode({
   ],
 });
 
-String _linkReply(List<Map<String, String>> links) => jsonEncode({
-  'schema_version': 1,
-  'data': [
-    for (final (index, link) in links.indexed)
-      {
-        'id': 'tgdog-l$index',
-        'issue_type': 'link',
-        'status': 'open',
-        'metadata': link,
-      },
-  ],
-});
-
 ({
   CommandRunner<int> runner,
   StringBuffer out,
@@ -118,12 +105,6 @@ _harness(_ScriptedBdRunner bd, {String? stateRoot}) {
 }
 
 void main() {
-  const linked = {
-    'grid.link.from': 'pow-child',
-    'grid.link.to': 'tg-89y8',
-    'grid.link.type': 'blocks',
-  };
-
   test('refuses an unwired mid-sentence blocker and writes nothing', () async {
     final h = _harness(
       _ScriptedBdRunner({
@@ -194,11 +175,10 @@ void main() {
     expect(h.roots, everyElement(isNot(endsWith('.git'))));
   });
 
-  test('a foreign blocker needs its link bead', () async {
-    _ScriptedBdRunner bd(List<Map<String, String>> links) => _ScriptedBdRunner({
+  test('a foreign blocker needs the bead\'s OWN outgoing edge', () async {
+    _ScriptedBdRunner bd(List<String> blockers) => _ScriptedBdRunner({
       'query': _beadReply(description: 'BLOCKED on tg-89y8 across stores.'),
-      'dep': _depReply(const []),
-      'list': _linkReply(links),
+      'dep': _depReply(blockers),
     });
     final home = _gridHome();
 
@@ -213,22 +193,22 @@ void main() {
     );
     expect(without.bd.updates, isEmpty);
 
-    final withLink = _harness(bd(const [linked]), stateRoot: home);
+    final wired = _harness(bd(const ['tg-89y8']), stateRoot: home);
     expect(
-      await withLink.runner.run(['approve', '--actor', 'nico', 'pow-child']),
+      await wired.runner.run(['approve', '--actor', 'nico', 'pow-child']),
       0,
-      reason: '${withLink.out}${withLink.err}',
+      reason: '${wired.out}${wired.err}',
     );
-    expect(withLink.bd.updates, hasLength(1));
+    expect(wired.bd.updates, hasLength(1));
   });
 
-  test('documented grid home reaches the state store', () async {
+  test('the documented grid home is validated, and only the WORK store is '
+      'read', () async {
     final home = _gridHome();
     final h = _harness(
       _ScriptedBdRunner({
-        'query': _beadReply(description: 'BLOCKED on tg-89y8 across stores.'),
+        'query': _beadReply(description: 'No local ordering.'),
         'dep': _depReply(const []),
-        'list': _linkReply(const [linked]),
       }),
     );
 
@@ -245,9 +225,11 @@ void main() {
       0,
       reason: '${h.out}${h.err}',
     );
-    expect(h.roots, contains(p.join(home, '.grid')));
+    // The state store the flag names is never opened: grid_engine deleted the
+    // cross-link surface the preflight read there (the_grid#447).
+    expect(h.roots, everyElement('/work/power_station'));
+    expect(h.roots, isNot(contains(p.join(home, '.grid'))));
     expect(h.err.toString(), isEmpty);
-    expect(h.out.toString(), isNot(contains('invalid issue type')));
   });
 
   test('an unrelated state root refuses before any read or write', () async {
@@ -276,13 +258,12 @@ void main() {
   });
 
   test(
-    'an unconsulted cross-store blocker is unchecked, never missing',
+    'a cross-store blocker is named MISSING with no state root at all',
     () async {
       final h = _harness(
         _ScriptedBdRunner({
           'query': _beadReply(description: 'BLOCKED on tg-89y8 across stores.'),
           'dep': _depReply(const []),
-          'list': _linkReply(const [linked]),
         }),
       );
 
@@ -292,12 +273,8 @@ void main() {
       );
       expect(
         h.out.toString(),
-        contains(
-          'FAIL dependencies: cross-store edges not consulted — '
-          'pass --state-root',
-        ),
+        contains('FAIL dependencies: missing outgoing blocks edges: tg-89y8'),
       );
-      expect(h.out.toString(), isNot(contains('tg-89y8')));
       expect(h.bd.updates, isEmpty);
     },
   );

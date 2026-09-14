@@ -1,3 +1,46 @@
+## Unreleased
+
+- Changed: adopts the 2026-09-13 the_grid dev.3 wave — `genesis_tree ^0.4.0`, `grid_engine ^0.4.0-dev.3`, `grid_sdk ^0.4.0-dev.3`, `grid_runtime ^0.2.1-dev.2`, `grid_trajectory ^0.2.1-dev.2` and `beads_dart ^0.3.0-dev.2` (pow-abaw).
+- Breaking: `GitSourceControl.provisioner` is a `StationGitRepository`, not a `StationGitService`,
+  and `GitSourceControl` implements the new `SourceControl.baseShaFor` by delegating to it, so a
+  committee pins its review diff to the exact commit the provisioner cut from (grid_runtime
+  0.2.1-dev.1, the_grid#436). `GitGridAssets` watches `StationGitRepository` and `GitServices
+  .provisioner` carries one. Migration: a delegate that provided `Provider<StationGitService>`
+  provides `Provider<StationGitRepository>(StationGitRepository(service: <the service>))`; every
+  other `SourceControl` implementer adds `baseShaFor`, returning null when it cuts no worktree.
+- Breaking: the state-store cross-link surface is GONE with grid_engine's (the_grid#447).
+  `CrossLinkBlockerSource` is deleted, `FilingService` drops `links` and its `stateRoot` argument,
+  `FilingContract.evaluate` drops `linkedBlockers`, `kUnconsultedCrossStoreDetail` is deleted, and
+  `ApproveService.approve` / `UnparkService.unpark` drop `stateRoot`. A named FOREIGN blocker is now
+  judged by the bead's OWN outgoing `blocks` edges like any other and reported missing, fail-closed;
+  a cross-store blocker is authored as bd's `external:<project>:<capability>` row (`grid link`).
+  The `--state-root` option stays registered on `filing`/`approve` and is VALIDATED there — the ONE
+  spelling of the grid home across the verb set — but nothing reads through it any more; only the
+  park pair does. Migration: drop the arguments; re-prove a cross-store blocker with a bd
+  dependency row.
+- Breaking: a bead whose approval was taken with `--state-root` CONSULTED and an open cross-store
+  link MATCHED is RE-DIGESTED, and its standing `grid.approved_rev` is stale. The v1 basis SHAPE is
+  unchanged — `_approvalRevisionOf` keeps its `linked` member rather than dropping it, which would
+  re-digest every approved bead in every store — but the member is now pinned false, and the
+  `knownPrefixes` a matched link contributed are gone with it. Two effects, and the quieter one is
+  the worse: a digit-tailed foreign id (`pow-f6pc`) stays named and its row fails CLOSED, while a
+  DIGITLESS one (`pow-abaw` named from a `space-` bead) is no longer read as an id at all, so it
+  leaves the basis and the row passes VACUOUSLY — re-digested, still green, and no longer
+  considering the blocker. Measured on space_station `space-7tj`: `filing:v1:sha256:2ff365a6…`
+  becomes `filing:v1:sha256:caf7bb15…`, `passed` false on
+  `missing outgoing blocks edges: pow-f6pc`. Consequence: `approve` and `unpark` REFUSE the
+  fail-closed shape until a governor re-approves, and silently re-stamp the vacuous one against a
+  basis that proves less; the stale revision stands in the audit trail and in approve's staleness
+  report either way. Mount is unaffected today only because `mountEligibilityFindings` carries the
+  revision without enforcing it. Migration: re-run the approve verb over every bead an open
+  cross-store link names as BLOCKED, and re-declare the blocker of any bead whose row now fails.
+  `test/filing/filing_contract_test.dart` pins BOTH cases — the locally wired golden that does not
+  move, and the cross-store shape that does, against the measured pre-cut digest.
+- Changed: the vended `intake-refinement`, `discover` and `station-operations` skills teach bd's
+  `external:` row and the post-cut `link` verb; the retired `type=link` bead, `grid.link.*` metadata,
+  `crossLinkTypeRefusal`, `StationJoinBridge._applyCrossLinks` and `applyBlockGuard` are named
+  nowhere under `station_overlay/`.
+
 ## 0.7.0-dev.1
 
 - Changed: the `seat` launcher CONSUMES the handoff itself. Before it primes a child it archives the disc, proves the archive, deletes the note and its one `MEMORY.md` pointer line, and hands the successor the body it just consumed; a succession that refuses stops the launch instead of starting a successor over an unresolved disc. Consuming was an instruction the successor was asked to follow, and four sessions did not — one of them could not, because its disc was gitignored. The `succession` verb is unchanged as the by-hand recovery path (pow-d5ol).

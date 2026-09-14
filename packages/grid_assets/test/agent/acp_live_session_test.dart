@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:beads_dart/beads_dart.dart';
+import 'package:genesis_tree/genesis_tree.dart';
 import 'package:grid_assets/grid_assets.dart';
 import 'package:grid_engine/grid_engine.dart';
 import 'package:grid_engine/src/molecule/process_lease_vendor.dart';
@@ -11,6 +12,8 @@ import 'package:grid_engine/testing.dart';
 import 'package:grid_runtime/grid_runtime.dart';
 import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
+
+import '../support/allocation_mount.dart';
 
 class _LiveSteers implements AgentSteerSource {
   final StreamController<ProcessSessionCommand> controller =
@@ -28,6 +31,7 @@ class _LiveRun {
     required this.steers,
     required this.workspace,
     required this.processName,
+    required this.tree,
   });
 
   final Allocation allocation;
@@ -36,6 +40,7 @@ class _LiveRun {
   final _LiveSteers steers;
   final Directory workspace;
   final String processName;
+  final TreeContext tree;
 
   Future<void> waitForProgressContaining(String text) async {
     for (var i = 0; i < 3600; i++) {
@@ -175,8 +180,7 @@ Future<_LiveRun> _buildLiveAcpRun({
   final processName = 'live-session/$nodePath';
   final reports = <AllocationReport>[];
   final args = StepArgs(nodePath: nodePath, cancel: CancelToken());
-  final leaseContext = AllocationContext(
-    treeContext: tree,
+  final leaseInputs = AllocationInputs(
     args: args,
     transport: runtime,
     address: AllocationAddress('live-session', nodePath),
@@ -190,7 +194,7 @@ Future<_LiveRun> _buildLiveAcpRun({
   final request = ProcessLeaseRequest(
     stepBeadId: '$workBeadId-step',
     capability: capability,
-    allocation: leaseContext,
+    inputs: leaseInputs,
   );
   final ProcessLeaseVendor vendor = SelfManagedProcessVendor(
     spawn: stationProcessSpawner,
@@ -199,8 +203,7 @@ Future<_LiveRun> _buildLiveAcpRun({
   final allocation = vendor
       .leaseFor(request)
       .createAllocation(
-        AllocationContext(
-          treeContext: tree,
+        AllocationInputs(
           args: args,
           transport: runtime,
           address: AllocationAddress('live-session', nodePath),
@@ -216,6 +219,7 @@ Future<_LiveRun> _buildLiveAcpRun({
     steers: steers,
     workspace: workspace,
     processName: processName,
+    tree: tree,
   );
 }
 
@@ -235,7 +239,7 @@ void main() {
           adapter: adapter,
         );
         try {
-          final done = run.allocation.startOrAdopt();
+          final done = run.allocation.startMounted(run.tree);
           await run.waitForProgressContaining('READY FOR STEER');
           run.sendSteer(
             'Create acp-$name.txt containing STEERED-$name, then finish.',

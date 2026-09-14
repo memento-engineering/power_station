@@ -8,25 +8,25 @@ const String kStateRootOption = 'state-root';
 
 /// The ONE help line every verb prints for [kStateRootOption].
 ///
-/// It names the GRID HOME rather than a store because that home is where BOTH
-/// kinds of state bead the filing verbs need live: the cross-store LINK beads
-/// `filing`/`approve` read, and the SESSION-LIFECYCLE beads `park`/`unpark`
-/// close and retire. One home, one option, one resolution.
+/// It names the GRID HOME rather than a store because that home is where the
+/// state beads live — the SESSION-LIFECYCLE beads `park`/`unpark` close and
+/// retire. One home, one option, one resolution: `filing`, `approve` and
+/// `show` register and VALIDATE the same option so the verb set cannot spell
+/// the home two ways, even though only the park pair reads through it since
+/// the cross-store link beads were retired (the_grid#447).
 const String kStateRootHelp =
-    'The grid home whose .grid/.beads holds the cross-store link and '
-    'session-lifecycle state beads.';
+    'The grid home whose .grid/.beads holds the session-lifecycle state beads.';
 
 /// The state-store directory a grid home holds — the child [resolveStateRoot]
-/// appends so the documented grid home reaches the link beads.
+/// appends so the documented grid home reaches the state beads.
 const String _stateStoreDir = '.grid';
 
 /// The bd workspace directory a state store holds — how [resolveStateRoot]
 /// recognizes a path that is ALREADY the state store.
 const String _beadsDir = '.beads';
 
-/// The default injected state root: NONE. Until a station threads its grid
-/// home in, only local `blocks` edges count as wiring — and the verbs that
-/// REQUIRE the home (`park`) refuse rather than guess at one.
+/// The default injected state root: NONE. The verbs that REQUIRE the home
+/// (`park`/`unpark`) refuse rather than guess at one.
 String? noStateRoot() => null;
 
 /// Registers [kStateRootOption] on [parser] — the seam every verb rides so the
@@ -42,13 +42,12 @@ void addStateRootOption(ArgParser parser) =>
 /// exactly as `--grid-home` takes it everywhere else on the runner, so a
 /// selected root that holds a `.grid` directory resolves to that child. A path
 /// that is already the state store (it holds `.beads`) resolves to itself, and
-/// a home holding both prefers `.grid`. Passing the grid home used to reach bd
-/// in the WORK store, where `list -t link` dies on `invalid issue type "link"`.
+/// a home holding both prefers `.grid`.
 ///
 /// Guards LOUD or GONE (the D-H doctrine, ADR-0008): a root holding neither
 /// child is REFUSED by [StateError] naming the root and both expected
-/// children, because silently reading no link beads reports every wired
-/// cross-store blocker as unwired.
+/// children, because a verb that silently accepted an unrelated root would
+/// report it as fine.
 String? resolveStateRoot(ArgResults results, String? Function() fallback) {
   final option = results.option(kStateRootOption)?.trim();
   final selected = option == null || option.isEmpty

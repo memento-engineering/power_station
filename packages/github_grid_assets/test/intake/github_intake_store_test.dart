@@ -152,18 +152,14 @@ GitHubIntakeRecord workflowRecord({
 );
 
 /// A store wired exactly as the seat binding wires it: one runner for the work
-/// root and one for the grid state root, and the approve VERB over both.
-BdGitHubIntakeStore seatStore(
-  RecordingBdRunner runner, {
-  String? stateRoot = '/grid/.grid',
-}) => BdGitHubIntakeStore(
+/// root, and the approve VERB over it.
+BdGitHubIntakeStore seatStore(RecordingBdRunner runner) => BdGitHubIntakeStore(
   runner,
   approvals: ApproveService(
     runnerFor: (_) => runner,
     now: () => DateTime.utc(2026, 9, 8, 12),
   ),
   workRoot: '/work/seat',
-  stateRoot: stateRoot,
 );
 
 const workflowMetadata = <String>[
@@ -465,8 +461,12 @@ void main() {
       expect(runner.verb('create'), isEmpty);
       expect(
         runner.verb('list'),
-        hasLength(2),
-        reason: 'a correlated bead skips the open-subject guard entirely',
+        hasLength(1),
+        reason:
+            'the external-ref correlation read is the ONLY list: a correlated '
+            'bead skips the open-subject guard entirely, and the approval '
+            "preflight's state-store link read died with grid_engine's "
+            'cross-link surface (the_grid#447)',
       );
       expect(runner.verb('update').first, [
         'update',
@@ -558,11 +558,14 @@ void main() {
       );
     });
 
-    test('no state root still approves, with links unconsulted', () async {
+    test('approval reads the WORK store only — no second store', () async {
       final runner = RecordingBdRunner(filed: filedBug());
 
-      await seatStore(runner, stateRoot: null).upsert(workflowRecord());
+      await seatStore(runner).upsert(workflowRecord());
 
+      // grid_engine 0.4.0-dev.3 deleted the state-store link surface the
+      // preflight used to consult (the_grid#447): there is no second store
+      // read left to make.
       expect(
         runner.verb('list').where((argv) => argv.contains('link')),
         isEmpty,

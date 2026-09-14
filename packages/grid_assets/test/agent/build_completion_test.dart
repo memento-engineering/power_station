@@ -86,6 +86,10 @@ class _FakeSourceControl implements SourceControl {
   @override
   String get baseBranch => 'main';
 
+  /// No worktree is cut here, so the provision-time commit is unknown.
+  @override
+  String? baseShaFor(String beadId) => null;
+
   @override
   Future<void> provisionWorkspace({
     required String beadId,

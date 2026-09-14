@@ -292,6 +292,11 @@ class _TempWorkspace implements SourceControl {
   @override
   String get baseBranch => 'main';
 
+  /// Nothing is provisioned from git here, so the provision-time commit is
+  /// genuinely unknown — the contract's null answer, never a fabricated sha.
+  @override
+  String? baseShaFor(String beadId) => null;
+
   @override
   Future<void> provisionWorkspace({
     required String beadId,

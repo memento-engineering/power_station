@@ -25,7 +25,6 @@ import 'package:grid_assets/grid_assets.dart';
 import 'package:grid_engine/grid_engine.dart';
 import 'package:grid_engine/src/molecule/bead_path_key.dart';
 import 'package:grid_engine/src/molecule/inherited_circuit.dart';
-import 'package:grid_sdk/grid_sdk.dart' show ProviderScope;
 import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 

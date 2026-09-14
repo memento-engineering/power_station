@@ -6,7 +6,6 @@ import 'package:genesis_tree/genesis_tree.dart';
 import 'package:grid_assets/grid_assets.dart';
 import 'package:grid_engine/grid_engine.dart';
 import 'package:grid_runtime/grid_runtime.dart';
-import 'package:grid_sdk/grid_sdk.dart' show Provider;
 import 'package:grid_sdk/grid_sdk.dart' as sdk;
 import 'package:test/test.dart';
 
@@ -91,46 +90,23 @@ BdResult _depListReply(List<String> blockers) => BdResult(
   stderr: '',
 );
 
-BdResult _linkListReply(List<String> blockers) => BdResult(
-  exitCode: 0,
-  stdout: jsonEncode({
-    'schema_version': 1,
-    'data': [
-      for (final blocker in blockers)
-        {
-          'id': 'tgdog-link-$blocker',
-          'issue_type': 'link',
-          'status': 'open',
-          'metadata': {
-            'grid.link.from': 'pow-test',
-            'grid.link.to': blocker,
-            'grid.link.type': 'blocks',
-          },
-        },
-    ],
-  }),
-  stderr: '',
-);
-
 /// Scripts the whole fresh FILING read: the substation store's exact query and
-/// dependency rows, and the grid state store's open link beads.
+/// its dependency rows. There is no second store — the state-store link read
+/// died with grid_engine's cross-link surface (the_grid#447).
 Future<BdResult> Function(List<String>) _freshFiling(
   Bead fresh, {
   List<String> blockers = const [],
-  List<String> links = const [],
 }) =>
     (args) async => switch (args.first) {
       'query' => _queryReply(fresh),
       'dep' => _depListReply(blockers),
-      'list' => _linkListReply(links),
       _ => throw StateError('unscripted bd call: \$args'),
     };
 
-/// The three argv the fresh filing read spawns, in order.
+/// The two argv the fresh filing read spawns, in order.
 const List<List<String>> _freshFilingCalls = [
   ['query', 'id=pow-test', '--all', '--json', '--limit', '0'],
   ['dep', 'list', 'pow-test', '--json'],
-  ['list', '-t', 'link', '--status', 'open', '--json', '--limit', '0'],
 ];
 
 /// A complete receipt of the retired shape: an actor, a UTC instant and a raw
@@ -143,14 +119,11 @@ const Map<String, dynamic> _legacyReceipt = {
 };
 
 /// The revision an approve run over [bead] with this dependency basis stamps.
-String _revisionOf(
-  Bead bead, {
-  List<String> blockers = const [],
-  Set<String> links = const {},
-}) => const FilingContract().evaluate(bead, [
-  for (final blocker in blockers)
-    BeadDependency(issueId: bead.id, dependsOnId: blocker),
-], linkedBlockers: links).approvalRevision;
+String _revisionOf(Bead bead, {List<String> blockers = const []}) =>
+    const FilingContract().evaluate(bead, [
+      for (final blocker in blockers)
+        BeadDependency(issueId: bead.id, dependsOnId: blocker),
+    ]).approvalRevision;
 
 /// [bead] carrying the receipt the approve verb would write for [rev].
 Bead _stamped(Bead bead, String rev) => bead.copyWith(
@@ -179,6 +152,10 @@ class _SourceControl implements SourceControl {
   String branchFor(String beadId) => 'grid/$beadId';
   @override
   String workspaceFor(String beadId) => '/work/$beadId';
+
+  /// No worktree is cut here, so the provision-time commit is unknown.
+  @override
+  String? baseShaFor(String beadId) => null;
   @override
   Future<void> provisionWorkspace({
     required String beadId,
@@ -331,10 +308,9 @@ _runSuccessfulRefusalRecheck(
   Bead fresh, {
   Bead snapshot = const Bead(id: 'pow-test', metadata: {}, labels: []),
   List<String> blockers = const [],
-  List<String> links = const [],
 }) async {
   final runner = _RecordingMountBdRunner(
-    _freshFiling(fresh, blockers: blockers, links: links),
+    _freshFiling(fresh, blockers: blockers),
   );
   final roots = <String>[];
   final mounted = _mountEligibilityAsset((root) {
@@ -355,9 +331,9 @@ _runSuccessfulRefusalRecheck(
   final decision = mounted.bundle()!.mountEligibility!(snapshot);
   expect(mounted.bundle()!.mountEligibility!(snapshot), decision);
   expect(runner.calls, _freshFilingCalls);
-  // The work store is the SUBSTATION's; the link proofs come from the grid
-  // home's state store, resolved from the ambient root.
-  expect(roots, ['/work/ps', '/work/grid/.grid']);
+  // ONE store, the SUBSTATION's own: the grid home's state store is never
+  // opened any more (the_grid#447 deleted the link surface it held).
+  expect(roots, ['/work/ps']);
   return (decision: decision, runner: runner);
 }
 
@@ -563,14 +539,10 @@ void main() {
       metadata: {'validation_plan': 'dart test'},
       labels: [],
     );
-    final rev = _revisionOf(
-      wired,
-      blockers: const ['pow-one'],
-      links: const {'tg-89y8'},
-    );
+    final rev = _revisionOf(wired, blockers: const ['pow-one', 'tg-89y8']);
     final snapshot = _stamped(wired, rev);
 
-    final unwiredRev = _revisionOf(wired, links: const {'tg-89y8'});
+    final unwiredRev = _revisionOf(wired, blockers: const ['tg-89y8']);
     final unlinkedRev = _revisionOf(wired, blockers: const ['pow-one']);
     expect(unwiredRev, isNot(rev));
     expect(unlinkedRev, isNot(rev));
@@ -959,24 +931,30 @@ void main() {
     expect(observed!.delivery, isNull);
   });
 
-  test('GitGridAssets watches and rebinds StationGitService', () async {
-    final first = StationGitService(
-      runner: _FakeGitRunner(),
-      prOpener: _FakePrOpener(),
+  test('GitGridAssets watches and rebinds StationGitRepository', () async {
+    final first = StationGitRepository(
+      service: StationGitService(
+        runner: _FakeGitRunner(),
+        prOpener: _FakePrOpener(),
+      ),
     );
-    final second = StationGitService(
-      runner: _FakeGitRunner(),
-      prOpener: _FakePrOpener(),
+    addTearDown(first.dispose);
+    final second = StationGitRepository(
+      service: StationGitService(
+        runner: _FakeGitRunner(),
+        prOpener: _FakePrOpener(),
+      ),
     );
+    addTearDown(second.dispose);
     ServiceBundle? observed;
     late _HostState host;
     final probe = _Probe(
       (context) =>
           observed = context.dependOnInheritedSeedOfExactType<ServiceBundle>(),
     );
-    Seed describe(StationGitService service) =>
-        Provider<StationGitService>.value(
-          service,
+    Seed describe(StationGitRepository repository) =>
+        Provider<StationGitRepository>.value(
+          repository,
           child: _underSubstation(
             'power_station',
             '/work/ps',

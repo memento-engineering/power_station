@@ -130,6 +130,15 @@ String _prefixOf(String id) {
 ///
 /// The prefix arm is what keeps digitless ids (`pow-one`, `filing-blocker`)
 /// readable; requiring a digit alone would silently stop naming them.
+///
+/// Since the_grid#447 "already wired" means a LOCAL outgoing `blocks` edge and
+/// nothing else, so a FOREIGN store's prefix reaches this check only when the
+/// bead already wires a local blocker in that store. A digitless foreign id
+/// (`pow-abaw` named from a `space-` bead) is therefore not read as an id at
+/// all and never reaches the dependency row — that row is fail-closed only for
+/// the tokens this check still recognises, and silent about the rest. Reading
+/// a foreign blocker from bd's own `external:` rows instead of from prose is
+/// pow-f6pc (power_station#330).
 bool _isBeadId(String candidate, Set<String> knownPrefixes) {
   final hyphen = candidate.indexOf('-');
   return knownPrefixes.contains(candidate.substring(0, hyphen)) ||
@@ -147,63 +156,51 @@ Set<String> _namedBlockers(String description, Set<String> knownPrefixes) => {
         if (_isBeadId(match.group(0)!, knownPrefixes)) match.group(0)!,
 };
 
-BdRunner _processRunnerFor(String stateRoot) =>
-    ProcessBdRunner(workspaceRoot: stateRoot);
-
-/// Reads the station's own state store for open link beads that wire a named
-/// cross-store blocker.
-final class CrossLinkBlockerSource {
-  /// Creates the source over an injectable spawn seam.
-  const CrossLinkBlockerSource({
-    BdRunner Function(String stateRoot) runnerFor = _processRunnerFor,
-  }) : _runnerFor = runnerFor;
-
-  final BdRunner Function(String stateRoot) _runnerFor;
-
-  /// The blocker ids wired for [beadId] by an open link bead in [stateRoot].
-  Future<Set<String>> wiredFor({
-    required String stateRoot,
-    required String beadId,
-  }) async {
-    final scope = await BdCliService(
-      _runnerFor(stateRoot),
-    ).listScope(type: GridIssueTypes.link, status: BeadStatus.open);
-    final snapshot = GraphSnapshot.fromParts(
-      beads: scope.beads,
-      dependencies: const <BeadDependency>[],
-      readyIds: const <String>[],
-      capturedAt: DateTime.fromMillisecondsSinceEpoch(0, isUtc: true),
-    );
-    return {
-      for (final link in projectCrossLinks(snapshot))
-        if (link.from == beadId && link.to.isNotEmpty) link.to,
-    };
-  }
-}
-
-/// The dependency detail for unwired blockers the state store was never asked
-/// about — an UNCHECKED condition, never the fact that the edge is missing.
-///
-/// A refiner instructed by `missing outgoing blocks edges` wires each named id;
-/// told that about an edge an open link bead already carries, it writes a
-/// duplicate. So the two conditions get two strings.
-const String kUnconsultedCrossStoreDetail =
-    'cross-store edges not consulted — pass --state-root';
-
 /// The version-1 approval revision of one evaluated filing.
 ///
 /// It digests exactly what an approval is a judgement ABOUT: the bead's work
 /// fields, its validation plan, and — per named blocker, sorted — whether a
-/// local outgoing `blocks` edge and an open linked-blocker proof were found.
+/// local outgoing `blocks` edge was found, alongside a `linked` member that
+/// records the linked-blocker proof and is now always false (below).
 /// Lifecycle timestamps, status, assignee/owner, result metadata and the
 /// receipt itself are all EXCLUDED, so stamping the receipt can never
 /// invalidate the receipt it stamps, and a bead moving through its lifecycle
 /// does not revoke a governor's approval of its content.
+///
+/// The `linked` member is FROZEN at false, and that is a BASIS CHANGE for one
+/// shape of bead rather than a no-op. The basis SHAPE stays v1
+/// ([kFilingApprovalRevisionPrefix]): every stamp already written is a digest
+/// over these same keys, and DROPPING the member would re-digest every
+/// approved bead in every store. Its VALUE, though, can no longer be true,
+/// because the state-store link surface that set it is deleted (grid_engine
+/// 0.4.0-dev.3, the_grid#447). A bead approved while that store was CONSULTED
+/// and a link MATCHED digested `linked: true`, and the matched blocker also
+/// put its store prefix into the `knownPrefixes` that let a digitless foreign
+/// id be NAMED at all. Both inputs are gone, so such a bead re-digests here
+/// and its standing `grid.approved_rev` reads stale. Which way it then breaks
+/// depends on the blocker's spelling: a digit-tailed foreign id stays named
+/// and its row fails CLOSED, so `approve`/`unpark` REFUSE the bead until a
+/// governor re-approves; a digitless one leaves the basis entirely and the row
+/// passes VACUOUSLY, so the bead re-stamps silently against a basis that no
+/// longer considers the blocker at all. The second is the quieter failure.
+///
+/// MEASURED 2026-09-13 over the ten open, stamped beads an open cross-store
+/// link named as blocked: four re-digested — `space-7tj`
+/// (`filing:v1:sha256:2ff365a6…` to `filing:v1:sha256:caf7bb15…`, now failing
+/// on `pow-f6pc`) and `lunar_station-zo3` fail closed, while `pow-jz93` and
+/// `pow-ndag` pass vacuously on digitless blockers. Mount is not blocked by
+/// any of it today, because `mountEligibilityFindings` carries the revision
+/// without enforcing it; the approve verb's staleness report and the audit
+/// trail are affected now. The re-approval sweep is the governor's, scoped in
+/// pow-abaw's PR, not done here.
+///
+/// Re-proving a cross-store blocker from bd's own `external:` rows is a v2
+/// basis behind a NEW prefix (pow-f6pc, power_station#330), and a v2 basis
+/// re-digests every store; that is its own bead.
 String _approvalRevisionOf(
   Bead bead, {
   required Set<String> named,
   required Set<String> localBlocks,
-  required Set<String>? linkedBlockers,
 }) {
   final plan = bead.metadata['validation_plan'];
   final basis = <String, Object?>{
@@ -219,11 +216,7 @@ String _approvalRevisionOf(
     'validationPlan': plan is String ? plan : null,
     'dependencies': [
       for (final id in named.toList()..sort())
-        {
-          'id': id,
-          'blocks': localBlocks.contains(id),
-          'linked': linkedBlockers?.contains(id) ?? false,
-        },
+        {'id': id, 'blocks': localBlocks.contains(id), 'linked': false},
     ],
   };
   final digest = sha256.convert(utf8.encode(jsonEncode(basis)));
@@ -243,65 +236,49 @@ final class FilingContract {
   /// Creates the stateless evaluator.
   const FilingContract();
 
-  /// Evaluates [bead] against its [dependencies] and the blockers wired by
-  /// open cross-store link beads ([linkedBlockers]).
+  /// Evaluates [bead] against its [dependencies].
   ///
-  /// [linkedBlockers] is NULL when the state store was not consulted, and an
-  /// empty set when it was consulted and no link matched. The two differ: an
-  /// unconsulted store cannot say a cross-store blocker is unwired, so its
-  /// unwired foreign ids are reported through [kUnconsultedCrossStoreDetail]
-  /// and never as missing outgoing edges.
+  /// Wiring is the bead's OWN outgoing `blocks` edges and nothing else. The
+  /// cross-store arm is gone with the state-store link surface it read
+  /// (grid_engine 0.4.0-dev.3, the_grid#447): a named foreign blocker with no
+  /// local edge is reported missing, fail-closed, exactly like a local one —
+  /// PROVIDED the token is still read as an id. A digitless foreign id loses
+  /// the wired-blocker prefix that made it readable ([_isBeadId]) and is not
+  /// named at all, so its row passes vacuously. Both of those outcomes differ
+  /// from the pre-cut consulted evaluation, and both move the approval
+  /// revision ([_approvalRevisionOf]).
   ///
   /// A blocker is DECLARED by a description segment that OPENS with
   /// `Blocked by` / `Blocked on` / `Depends on`; a mid-sentence mention of the
   /// phrase declares nothing. Within such a segment a `<prefix>-<tail>` token
   /// is a bead id when its prefix is the bead's own store or that of an
   /// already-wired blocker, or when its tail carries a digit.
-  FilingReport evaluate(
-    Bead bead,
-    Iterable<BeadDependency> dependencies, {
-    Set<String>? linkedBlockers,
-  }) {
+  FilingReport evaluate(Bead bead, Iterable<BeadDependency> dependencies) {
     final validationPlan = bead.metadata['validation_plan'];
     final localBlocks = {
       for (final edge in dependencies)
         if (edge.issueId == bead.id && edge.type == DependencyType.blocks)
           edge.dependsOnId,
     };
-    final wired = {...localBlocks, ...?linkedBlockers};
     final ownPrefix = _prefixOf(bead.id);
     final knownPrefixes = <String>{
       ownPrefix,
-      for (final id in wired) _prefixOf(id),
+      for (final id in localBlocks) _prefixOf(id),
     }..remove('');
     final named = _namedBlockers(bead.description, knownPrefixes);
-    final missing = named.difference(wired).toList()..sort();
+    final missing = named.difference(localBlocks).toList()..sort();
     final dependencyPass = missing.isEmpty;
-    // With the store unconsulted only the checked bead's OWN store can be
-    // called missing; every foreign id is merely unchecked.
-    final local = linkedBlockers != null
-        ? missing
-        : [
-            for (final id in missing)
-              if (_prefixOf(id) == ownPrefix) id,
-          ];
-    final hasUnconsulted = local.length != missing.length;
     final dependencyDetail = dependencyPass
         ? (named.isEmpty
               ? 'no local blockers named'
               : 'all named local blockers are wired')
-        : [
-            if (local.isNotEmpty)
-              'missing outgoing blocks edges: ${local.join(', ')}',
-            if (hasUnconsulted) kUnconsultedCrossStoreDetail,
-          ].join('; ');
+        : 'missing outgoing blocks edges: ${missing.join(', ')}';
     return FilingReport(
       beadId: bead.id,
       approvalRevision: _approvalRevisionOf(
         bead,
         named: named,
         localBlocks: localBlocks,
-        linkedBlockers: linkedBlockers,
       ),
       requirements: [
         FilingRequirementRow(
@@ -341,7 +318,6 @@ final class FilingService {
   const FilingService({
     this.source = const ExactSubstationBeadSource(),
     this.contract = const FilingContract(),
-    this.links = const CrossLinkBlockerSource(),
   });
 
   /// Exact read source.
@@ -349,9 +325,6 @@ final class FilingService {
 
   /// Pure contract evaluator.
   final FilingContract contract;
-
-  /// The station state store's cross-link reader.
-  final CrossLinkBlockerSource links;
 
   /// Reads [beadId] in the store rooted at [storeRoot] and evaluates it,
   /// returning BOTH the exact bead read and its report.
@@ -361,29 +334,26 @@ final class FilingService {
   /// [FilingReport.approvalRevision] is always the digest of the very bead
   /// alongside it.
   ///
-  /// A null [stateRoot] leaves the cross-store link beads UNREAD, and that is
-  /// what the contract is told: it receives null rather than an empty set, so
-  /// an unconsulted lookup is never reported as an absent edge.
+  /// There is no cross-store leg any more: grid_engine 0.4.0-dev.3 deleted the
+  /// state-store link surface this service used to project (the_grid#447), and
+  /// bd's replacement `external:<project>:<capability>` row does not reach
+  /// [ExactSubstationBeadSource.readExact] — `bd dep list` cannot resolve an
+  /// external target, so those rows arrive only on bd's RECORD surface
+  /// (`BdCliService.queryGraph`). A named foreign blocker is therefore reported
+  /// missing, fail-closed, like any other unwired one — and a digitless one is
+  /// not named at all ([FilingContract.evaluate]). Either way its approval
+  /// revision moves, so a bead approved against a CONSULTED state store needs
+  /// re-approving.
   Future<({Bead? bead, FilingReport report})> inspect({
     required String storeRoot,
     required String beadId,
-    String? stateRoot,
   }) async {
     final read = await source.readExact(storeRoot: storeRoot, beadId: beadId);
     final bead = read.bead;
     if (bead == null) {
       return (bead: null, report: FilingReport.missing(beadId));
     }
-    return (
-      bead: bead,
-      report: contract.evaluate(
-        bead,
-        read.dependencies,
-        linkedBlockers: stateRoot == null
-            ? null
-            : await links.wiredFor(stateRoot: stateRoot, beadId: beadId),
-      ),
-    );
+    return (bead: bead, report: contract.evaluate(bead, read.dependencies));
   }
 
   /// Checks [beadId] in the store rooted at [storeRoot] — [inspect] without
@@ -391,10 +361,5 @@ final class FilingService {
   Future<FilingReport> check({
     required String storeRoot,
     required String beadId,
-    String? stateRoot,
-  }) async => (await inspect(
-    storeRoot: storeRoot,
-    beadId: beadId,
-    stateRoot: stateRoot,
-  )).report;
+  }) async => (await inspect(storeRoot: storeRoot, beadId: beadId)).report;
 }

@@ -4,7 +4,6 @@ import 'package:genesis_tree/genesis_tree.dart';
 import 'package:grid_assets/grid_assets.dart';
 import 'package:grid_engine/grid_engine.dart';
 import 'package:grid_runtime/grid_runtime.dart';
-import 'package:grid_sdk/grid_sdk.dart' show ProviderTreeContext;
 
 import '../code/github_auto_merge_delivery.dart';
 import '../code/github_delivery_policy.dart';
