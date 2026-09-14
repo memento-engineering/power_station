@@ -14,6 +14,12 @@
 /// the probe implementation is DI while the interval is a VALUE — both carried
 /// together as [EnvironmentProbeArming], an ambient value a nested
 /// `HarnessProvider` INHERITS (ADR-0002 D5 per-substation arming).
+///
+/// STALENESS IS THE TREE'S ANSWER, not a hand-kept counter. One probe pass is a
+/// VALUE mounted above a `LifecycleProvider`; replacing that value is what
+/// starts a pass, and the [TreeDependencyScope] the participant is handed is
+/// what an in-flight pass tests before it publishes. `_disposed` still answers
+/// REMOVAL — the two questions stay separate.
 library;
 
 import 'dart:async';
@@ -126,13 +132,55 @@ class AvailabilityAssets extends SingleChildStatefulSeed {
       _AvailabilityAssetsState();
 }
 
+/// ONE probe pass, as a tree VALUE — identity IS the pass.
+///
+/// The host replaces it when a watched dependency changes and on every bounded
+/// tick; mounting the replacement delivers a fresh dependency pass to
+/// [_AvailabilityLifecycle], which invalidates the previous pass's scope before
+/// the newer probe starts. That is the whole supersession mechanism: a slow
+/// pass cannot publish over a newer one, and nothing counts generations.
+final class _AvailabilityProbePass {
+  _AvailabilityProbePass();
+}
+
+/// Owns the probe pass's dependency callback without retaining a tree reader
+/// outside it (the `CapabilityHost` precedent in `grid_engine`'s
+/// `circuit/capability_host.dart`).
+///
+/// Its ONLY field is the host State. The per-pass [TreeDependencyScope] rides
+/// into the host's probe run as a PARAMETER and is stored nowhere.
+final class _AvailabilityLifecycle implements TreeLifecycleParticipant {
+  _AvailabilityLifecycle(this._host);
+
+  final _AvailabilityAssetsState _host;
+
+  @override
+  void initState(TreeSnapshotReader reader) {}
+
+  @override
+  void didChangeDependencies(
+    TreeWatchingReader reader,
+    TreeDependencyScope scope,
+  ) {
+    // WATCH the dep. The marker IS the pass: the host mints it from the
+    // registry and the site binding it watches, and from the bounded tick, so
+    // subscribing to it subscribes to exactly the changes that start a pass —
+    // and, being mounted by the host directly above this provider, it can
+    // never miss.
+    reader.watch<_AvailabilityProbePass>();
+    _host._startProbePass(scope);
+  }
+
+  @override
+  void dispose() {}
+}
+
 class _AvailabilityAssetsState extends SingleChildState<AvailabilityAssets> {
   EnvironmentRegistry? _registry;
   SiteBinding _siteBinding = SiteBinding.none;
-  EnvironmentProbe? _probe;
   AvailableEnvironments? _present;
   ProbeTicker? _ticker;
-  var _generation = 0;
+  var _pass = _AvailabilityProbePass();
   var _disposed = false;
 
   @override
@@ -145,49 +193,52 @@ class _AvailabilityAssetsState extends SingleChildState<AvailabilityAssets> {
     final siteBinding =
         context.dependOnInheritedSeedOfExactType<SiteBinding>() ??
         SiteBinding.none;
-    final probe = seed.probe;
-    // `==` for all three: `SiteBinding` has value equality, and
-    // `EnvironmentRegistry` declares no `==` so it compares by IDENTITY — which
-    // is exactly what `InheritedSeed.updateShouldNotify` already compares, and
+    // `==` for both: `SiteBinding` has value equality, and `EnvironmentRegistry`
+    // declares no `==` so it compares by IDENTITY — which is exactly what
+    // `InheritedSeed.updateShouldNotify` already compares, and
     // `buildBuiltinEnvironmentRegistry()` returns a canonical `const`.
     if (_ticker != null &&
         registry == _registry &&
-        probe == _probe &&
         siteBinding == _siteBinding) {
       return;
     }
 
     _registry = registry;
     _siteBinding = siteBinding;
-    _probe = probe;
     // Fall back to the boot-validated default while the new pass is in flight
     // (ADR-0000 A35(5)) rather than publishing a stale set.
     _present = null;
     _ticker?.cancel();
-    _ticker = seed.schedule(seed.interval, _reprobe);
-    _generation++;
-    unawaited(_runProbe(registry, siteBinding, probe, _generation));
+    _ticker = null;
+    _pass = _AvailabilityProbePass();
   }
 
+  /// Starts the pass [scope] qualifies: the bounded ticker (once per arming)
+  /// and ONE probe run. Called from the owning lifecycle's dependency callback,
+  /// so the scope handed to the run is always that pass's own.
+  void _startProbePass(TreeDependencyScope scope) {
+    _ticker ??= seed.schedule(seed.interval, _reprobe);
+    unawaited(_runProbe(scope));
+  }
+
+  /// The bounded tick. It starts no probe of its own: it replaces the pass
+  /// marker, and the dependency pass that lands invalidates the older scope
+  /// before the newer run begins — so a tick can never publish behind itself.
   void _reprobe() {
     if (_disposed) return;
-    final registry = _registry;
-    final probe = _probe;
-    if (registry == null || probe == null) return;
-    _generation++;
-    unawaited(_runProbe(registry, _siteBinding, probe, _generation));
+    setState(() => _pass = _AvailabilityProbePass());
   }
 
   /// ONE probe pass. Probes only [EnvironmentRegistry.validatedEnvironments],
   /// so the published set can only ever hold registry members that passed boot
   /// legality (ADR-0000 A35(1)) — presence NARROWS the legal set, never widens
   /// it.
-  Future<void> _runProbe(
-    EnvironmentRegistry registry,
-    SiteBinding siteBinding,
-    EnvironmentProbe probe,
-    int generation,
-  ) async {
+  Future<void> _runProbe(TreeDependencyScope scope) async {
+    // The host's own dependency callback stores the registry BEFORE the subtree
+    // that owns this pass is ever built, so a pass without one cannot exist.
+    final registry = _registry!;
+    final siteBinding = _siteBinding;
+    final probe = seed.probe;
     final present = <AgentEnvironment>{};
     for (final environment in registry.validatedEnvironments) {
       final name = registry.nameOf(environment);
@@ -219,7 +270,9 @@ class _AvailabilityAssetsState extends SingleChildState<AvailabilityAssets> {
       }
       if (reachable) present.add(environment);
     }
-    if (_disposed || generation != _generation) return;
+    // Two questions, two guards: `_disposed` answers REMOVAL and the scope
+    // answers STALENESS (a newer pass started while this one was in flight).
+    if (_disposed || !scope.isCurrent) return;
     final next = AvailableEnvironments(present);
     // Value equality: an unchanged presence set re-publishes nothing, so a
     // five-minute tick never churns a single dependent.
@@ -237,13 +290,21 @@ class _AvailabilityAssetsState extends SingleChildState<AvailabilityAssets> {
         (registry == null
             ? AvailableEnvironments.none
             : AvailableEnvironments.fromRegistry(registry));
-    return InheritedSeed<AvailableEnvironments>(value: present, child: child);
+    return InheritedSeed<_AvailabilityProbePass>(
+      value: _pass,
+      child: LifecycleProvider<_AvailabilityLifecycle>(
+        create: () => _AvailabilityLifecycle(this),
+        child: InheritedSeed<AvailableEnvironments>(
+          value: present,
+          child: child,
+        ),
+      ),
+    );
   }
 
   @override
   void dispose() {
     _disposed = true;
-    _generation++;
     _ticker?.cancel();
     _ticker = null;
   }
