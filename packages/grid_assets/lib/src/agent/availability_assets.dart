@@ -213,18 +213,22 @@ class _AvailabilityAssetsState extends SingleChildState<AvailabilityAssets> {
   /// and every watch happens here — so the scope handed to the run is always
   /// that pass's own.
   ///
-  /// The three watches are the participant's SUBSCRIPTION, not this pass's
-  /// read: the host's own `didChangeDependencies` already applied the registry
-  /// and the site binding (with their absent-value fallbacks) before the
-  /// subtree carrying the participant was built. Watching all three is what
-  /// makes the pass unmissable — the marker alone carries every pass the host
-  /// mints today, and the two values it mints them FROM are subscribed here so
-  /// that stays true by construction rather than by book-keeping.
+  /// The marker is the participant's SUBSCRIPTION, not this pass's read: the
+  /// host's own `didChangeDependencies` already applied the registry and the
+  /// site binding (with their absent-value fallbacks) before the subtree
+  /// carrying the participant was built. Watching it is a COMPLETE
+  /// subscription, because the host mints a replacement marker on exactly the
+  /// changes that supersede a probe — and, mounting it directly above this
+  /// provider, can never let the lookup miss.
+  ///
+  /// Watching [EnvironmentRegistry] and [SiteBinding] here as well would be
+  /// worse than redundant. Both are OPTIONAL above this asset — the host falls
+  /// back to the builtin registry and to [SiteBinding.none] — and `watch` on a
+  /// MISS parks a pending registration, asserting that a `ProviderScope` exists
+  /// to park it with. A bare composition is supported here, so the subscription
+  /// stays on the one value this asset mounts itself.
   void _startProbePass(TreeWatchingReader reader, TreeDependencyScope scope) {
-    reader
-      ..watch<EnvironmentRegistry>()
-      ..watch<SiteBinding>()
-      ..watch<_AvailabilityProbePass>();
+    reader.watch<_AvailabilityProbePass>();
     _ticker ??= seed.schedule(seed.interval, _reprobe);
     unawaited(_runProbe(scope));
   }

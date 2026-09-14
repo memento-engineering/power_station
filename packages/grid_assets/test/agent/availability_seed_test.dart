@@ -452,6 +452,40 @@ void main() {
       expect(seen.last, AvailableEnvironments.none);
     });
 
+    test(
+      'the seed mounts with NEITHER ambient value and no ProviderScope',
+      () async {
+        // The host reads the registry and the site binding with `??` fallbacks,
+        // so a bare composition is SUPPORTED — and the supersession subscription
+        // must not quietly revoke it. A watch that missed here would park a
+        // pending registration with no `ProviderScope` to park it with, which
+        // asserts; the subscription therefore stays on the pass marker the asset
+        // mounts itself.
+        final probe = _FakeProbe();
+        final schedule = _FakeSchedule();
+        final seen = <AvailableEnvironments>[];
+        final owner = TreeOwner();
+        addTearDown(owner.dispose);
+        owner.mountRoot(
+          AvailabilityAssets(
+            probe: probe.call,
+            schedule: schedule.start,
+            child: _Watcher(seen),
+          ),
+        );
+        await _settle(owner);
+
+        // The builtin-registry fallback is what a bare mount probes, and its
+        // presence lands like any other pass.
+        final builtin = buildBuiltinEnvironmentRegistry();
+        expect(builtin.validatedEnvironments, isNotEmpty);
+        expect(probe.calls, isNotEmpty);
+        for (final name in probe.calls) {
+          expect(seen.last.contains(builtin.resolve(name)), isTrue);
+        }
+      },
+    );
+
     test('dispose cancels the tick and a later tick is a no-op', () async {
       final probe = _FakeProbe();
       final schedule = _FakeSchedule();
