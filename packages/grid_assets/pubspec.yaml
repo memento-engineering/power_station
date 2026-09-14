@@ -454,7 +454,7 @@ grid:
       description: "Shape work beads so a resident station can drive them — the required validation_plan metadata, driveable issue types, dependency wiring, and stamped grid.approved approval via the approve verb."
       audience: human
       visibility: public
-      teaches: [filing, approve, link]
+      teaches: [filing, approve, link, mount]
       artifacts:
         - target: claude
           path: extension/station_overlay/claude/skills/intake-refinement/SKILL.md
@@ -493,7 +493,7 @@ grid:
       description: "Operate the resident station — boot, bounce, tear down, read status, seed a grid home's state store, and diagnose a station that is up but driving nothing."
       audience: human
       visibility: public
-      teaches: [up, down, status]
+      teaches: [up, down, status, mount]
       artifacts:
         - target: claude
           path: extension/station_overlay/claude/skills/station-operations/SKILL.md

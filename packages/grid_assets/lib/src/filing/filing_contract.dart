@@ -328,6 +328,25 @@ final class FilingContract {
     Bead bead,
     Iterable<BeadDependency> dependencies, {
     Set<String>? armedSubstations,
+  }) => _evaluateWithProjection(
+    bead,
+    dependencies,
+    armedSubstations: armedSubstations,
+  ).report;
+
+  /// [evaluate], RETAINING the projection the dependencies row was rendered
+  /// from.
+  ///
+  /// The mount explainer's own `dependencies` precondition is a REFINEMENT of
+  /// this very projection — the rows bd holds, plus whether each local target
+  /// is still open — so it consumes the one this evaluation already built.
+  /// Rebuilding a second projection from a second read is how the two verbs
+  /// would come to disagree about the same rows.
+  ({DependencyProjection dependencyProjection, FilingReport report})
+  _evaluateWithProjection(
+    Bead bead,
+    Iterable<BeadDependency> dependencies, {
+    Set<String>? armedSubstations,
   }) {
     final validationPlan = bead.metadata['validation_plan'];
     final projection = DependencyProjection.of(
@@ -335,7 +354,7 @@ final class FilingContract {
       dependencies: dependencies,
       armedSubstations: armedSubstations,
     );
-    return FilingReport(
+    final report = FilingReport(
       beadId: bead.id,
       approvalRevision: _approvalRevisionOf(bead, projection),
       requirements: [
@@ -367,6 +386,7 @@ final class FilingContract {
         ),
       ],
     );
+    return (dependencyProjection: projection, report: report);
   }
 }
 
@@ -397,7 +417,20 @@ final class FilingService {
   /// `external:<project>:<capability>` targets on its own RECORD surface
   /// ([ExactSubstationBeadSource.readExact]), so there is no second store to
   /// consult and no link bead to read.
-  Future<({Bead? bead, FilingReport report})> inspect({
+  ///
+  /// [DependencyProjection] rides back out beside the report, and is null only
+  /// when there was no bead to evaluate. A consumer that needs the ROWS — the
+  /// mount explainer refines them with each local target's open/closed state —
+  /// reads the projection this evaluation already built instead of rebuilding
+  /// one, so the two verbs cannot disagree about the same rows.
+  Future<
+    ({
+      Bead? bead,
+      DependencyProjection? dependencyProjection,
+      FilingReport report,
+    })
+  >
+  inspect({
     required String storeRoot,
     required String beadId,
     Set<String>? armedSubstations,
@@ -405,15 +438,21 @@ final class FilingService {
     final read = await source.readExact(storeRoot: storeRoot, beadId: beadId);
     final bead = read.bead;
     if (bead == null) {
-      return (bead: null, report: FilingReport.missing(beadId));
+      return (
+        bead: null,
+        dependencyProjection: null,
+        report: FilingReport.missing(beadId),
+      );
     }
+    final evaluated = contract._evaluateWithProjection(
+      bead,
+      read.dependencies,
+      armedSubstations: armedSubstations,
+    );
     return (
       bead: bead,
-      report: contract.evaluate(
-        bead,
-        read.dependencies,
-        armedSubstations: armedSubstations,
-      ),
+      dependencyProjection: evaluated.dependencyProjection,
+      report: evaluated.report,
     );
   }
 

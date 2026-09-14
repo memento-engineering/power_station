@@ -259,7 +259,10 @@ void main() {
       );
 
       // Each consumer CALLS the selector, exactly once — and the consumers are
-      // exactly the three verbs that bound their output, across both packs.
+      // exactly the four verbs that bound their output, across both packs.
+      // `mount` is the fourth: it gives up evidence-list TAILS rather than
+      // prose bytes or whole records, which is precisely the type-specific
+      // half the selector leaves to its caller.
       expect(
         {
           for (final entry in sources.entries)
@@ -269,6 +272,7 @@ void main() {
         {
           _implementation: 1,
           p.join('dart_grid_assets', 'src', 'dart', 'release_service.dart'): 1,
+          p.join('grid_assets', 'src', 'filing', 'mount_explanation.dart'): 1,
           p.join('grid_assets', 'src', 'filing', 'show_command.dart'): 1,
           p.join('grid_assets', 'src', 'seat', 'prime_command.dart'): 1,
         },

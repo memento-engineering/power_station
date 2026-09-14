@@ -65,6 +65,28 @@ group — never pkill by name.
 - `last sync` only moves when a store changes; a frozen timestamp on an idle
   board is normal.
 
+## Why a stamped bead is not mounting
+
+Do not reason about it, and do not reconstruct the state by hand. The answer is
+a command:
+
+```bash
+{{runner}} mount --json --state-root "$(pwd)" "<bead>"
+```
+
+Ten preconditions come back in one order — `driveable_type`,
+`validation_plan`, `acceptance_criteria`, `dependencies`, `approval_stamp`,
+`session_occupancy`, `defer_state`, `verdict_cap`, `mount_attempt_cap`,
+`live_admission` — each `PASS`, `BLOCKED` or `UNCHECKED`, each with a `detail`
+and, unless it passes, a `remedy`. The blocker rows, the session occupancy, the
+defer hold and both caps are all read off the stores, so a hand-written
+dependency or session query adds nothing and can disagree.
+
+`UNCHECKED` means NOT ASKED and is never a pass — supply the `--state-root`, or
+record the condition as unknown. `live_admission` is always unchecked because
+capacity and liveness live in the resident's memory; that one goes to
+`{{runner}} status`. The verb performs no remedy: run the ones it names.
+
 ## Silent-death runbook (ready > 0, mounted 0, no errors)
 
 The station prints nothing when every session mint fails — the failure is

@@ -1,3 +1,33 @@
+## Unreleased
+
+- Added: the `mount` verb — the OFFLINE explainer for why one bead will not mount, vended as
+  `MountCommand` over `MountExplanationService` / `MountExplanationContract`. It emits ten ordered
+  preconditions (`driveable_type`, `validation_plan`, `acceptance_criteria`, `dependencies`,
+  `approval_stamp`, `session_occupancy`, `defer_state`, `verdict_cap`, `mount_attempt_cap`,
+  `live_admission`), each `PASS` / `BLOCKED` / `UNCHECKED` with a non-blank detail and — when it
+  does not pass — the remedy, which the verb NAMES and never performs. It COMPOSES the `filing`
+  report whole rather than restating it, reuses that report's own `DependencyProjection` for the
+  `dependencies` row, and projects the single `mountEligibilityFindings` predicate for the field
+  clauses; no second completeness predicate is minted. Fail-closed: an absent or unreadable state
+  store makes `session_occupancy`, `verdict_cap` and `mount_attempt_cap` unchecked rather than
+  green, an unreadable local dependency target makes `dependencies` unchecked, and
+  `live_admission` is ALWAYS unchecked with a pointer to the resident `status` verb. New public
+  surface: `MountOutcome`, `MountPrecondition`, `MountPreconditionRow`, `MountStateEvidence`,
+  `MountExplanationReport`, `MountExplanationContract`, `MountExplanationService`, `MountCommand`,
+  `boundedMountExplanation` and `renderMountExplanationPlain`.
+- Changed: `FilingService.inspect` returns `dependencyProjection` beside the bead and the report —
+  the very projection the `dependencies` requirement was rendered from, null only when there was no
+  bead to evaluate. A consumer that needs the ROWS reads that one rather than rebuilding a second
+  projection off a second read. Existing destructuring of `bead` / `report` is unaffected.
+- Changed: `mount` is the THIRD consumer of the shared `--state-root` seam
+  (`addStateRootOption` / `resolveStateRoot`) beside `park` and `show`, with the same option name,
+  help, default, grid-home resolution and loud invalid-root refusal. `filing`, `approve` and
+  `unpark` still take no `--state-root`.
+- Changed: the `intake-refinement` and `station-operations` skills call `mount` FIRST for every
+  "why will this bead not mount" question, and the governor-work sweep's hand-authored dependency,
+  session, defer and cap query choreography is replaced by that one invocation. Both skills add
+  `mount` to their authored `teaches` claim.
+
 ## 0.7.0-dev.2
 
 - Breaking: the `dependencies` filing requirement is a PROJECTION of the dependency rows bd holds

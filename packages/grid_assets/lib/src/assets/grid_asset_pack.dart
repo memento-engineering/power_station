@@ -720,7 +720,7 @@ abstract final class GridAssetsPack {
     audience: AssetAudience.human,
     visibility: AssetVisibility.public,
     selector: AlwaysApplies(),
-    teaches: <String>['filing', 'approve', 'link'],
+    teaches: <String>['filing', 'approve', 'link', 'mount'],
     artifacts: <AssetArtifact>[
       AssetArtifact(
         target: AssetDeliveryTarget.claude,
@@ -799,7 +799,7 @@ abstract final class GridAssetsPack {
     audience: AssetAudience.human,
     visibility: AssetVisibility.public,
     selector: AlwaysApplies(),
-    teaches: <String>['up', 'down', 'status'],
+    teaches: <String>['up', 'down', 'status', 'mount'],
     artifacts: <AssetArtifact>[
       AssetArtifact(
         target: AssetDeliveryTarget.claude,
