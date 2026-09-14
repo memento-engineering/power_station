@@ -134,12 +134,15 @@ void main() {
     // prefix into `knownPrefixes`, which is what made a DIGITLESS foreign id
     // readable as an id. The state-store link surface is deleted
     // (grid_engine 0.4.0-dev.3, the_grid#447), so both inputs are gone and the
-    // digest of such a bead MOVES — its standing stamp is stale and
-    // `approve`/`unpark` refuse it until a governor re-approves.
+    // digest of such a bead MOVES — its standing stamp is stale. HOW it then
+    // breaks depends on the blocker's spelling, and both halves are asserted
+    // below: a digit-tailed id fails the row CLOSED, so approve and unpark
+    // refuse the bead until a governor re-approves, while a digitless one
+    // leaves the basis entirely and the row passes VACUOUSLY.
     //
-    // The pre-cut literals below were MEASURED on 2026-09-13 by running the
+    // The pre-cut literal below was MEASURED on 2026-09-13 by running the
     // pre-cut `FilingContract.evaluate(bead, [], linkedBlockers: {...})` from
-    // the primary checkout on `main` over this exact fixture. They are here so
+    // the primary checkout on `main` over this exact fixture. It is here so
     // the change is a pinned fact rather than a claim, and so a later attempt
     // to "restore digest stability" fails loudly instead of quietly.
     const bead = Bead(
