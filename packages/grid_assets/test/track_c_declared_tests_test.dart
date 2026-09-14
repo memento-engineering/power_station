@@ -64,6 +64,7 @@ Future<Ok> _runGate({
   required String diff,
   Iterable<String> existingFiles = const [],
   _BaseTreeGitRunner? runner,
+  String? baseSha,
 }) async {
   final dir = Directory.systemTemp.createTempSync('declared-tests-');
   addTearDown(() => dir.deleteSync(recursive: true));
@@ -82,7 +83,15 @@ Future<Ok> _runGate({
         FakeTreeContext(
           values: {
             Bead: workBead('tg-1').copyWith(design: design),
-            Workspace: testWorkspace('tg-1', workspaceDir: dir.path),
+            // Mounted DIRECTLY rather than through `testWorkspace`, which
+            // carries no [Workspace.baseSha]: that field decides which base
+            // tree the gate's `ls-tree` reads.
+            Workspace: Workspace(
+              workspaceDir: dir.path,
+              branch: 'grid/tg-1',
+              baseBranch: 'main',
+              baseSha: baseSha,
+            ),
           },
         ),
         stepArgs('tg-1/review/$kDeclaredTestsRubric'),
@@ -422,6 +431,38 @@ Modify the authored regression test at
       'origin/main',
     ]);
   });
+
+  // The recorded review base (bead pow-5ljz): the gate's base tree is the SAME
+  // base the pinned diff was computed against, so a substation whose local base
+  // branch runs ahead of its remote classifies declarations against the commit
+  // the round was actually cut from.
+  test(
+    'pow-5ljz a recorded workspace base SHA is the tree the gate reads',
+    () async {
+      final path = _fixtureTestPath('recorded_base');
+      const recordedSha = '7b225e8f0a1c2d3e4f5061728394a5b6c7d8e9f0';
+      final runner = _BaseTreeGitRunner([path]);
+      final outcome = await _runGate(
+        design: 'Test: dart test $path',
+        diff: _diffFor(['lib/gate.dart']),
+        runner: runner,
+        baseSha: recordedSha,
+      );
+      expect(
+        outcome.payload?['grade'],
+        'A',
+        reason:
+            'a run reference to a file already on the RECORDED base is not '
+            'a declaration',
+      );
+      expect(runner.calls.single, [
+        'ls-tree',
+        '-r',
+        '--name-only',
+        recordedSha,
+      ]);
+    },
+  );
 
   test('pow-0jc a declaration section never probes the base', () async {
     final path = _fixtureTestPath('section_authored');

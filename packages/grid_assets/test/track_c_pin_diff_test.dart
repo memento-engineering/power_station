@@ -92,14 +92,18 @@ class _CannedGitRunner implements GitRunner {
 ({FakeTreeContext context, StepArgs args}) _ctx(
   String workspaceDir, {
   String base = 'main',
+  String? baseSha,
 }) => (
   context: FakeTreeContext(
     values: {
-      Workspace: testWorkspace(
-        'tg-1',
+      // Mounted DIRECTLY rather than through `testWorkspace`, which carries no
+      // [Workspace.baseSha]: that field is what decides the review base, so a
+      // round has to be able to arrive with one recorded and without one.
+      Workspace: Workspace(
         workspaceDir: workspaceDir,
         branch: 'grid/tg-1',
         baseBranch: base,
+        baseSha: baseSha,
       ),
     },
   ),
@@ -315,6 +319,102 @@ void main() {
       );
     });
 
+    // The recorded review base (bead pow-5ljz). `origin/<base>` is a STAND-IN
+    // for the commit the branch was cut from, and it stops being one when a
+    // substation's local base branch runs ahead of its remote. When the
+    // provisioner recorded the cut, THAT commit is the base — everywhere.
+    const recordedSha = '7b225e8f0a1c2d3e4f5061728394a5b6c7d8e9f0';
+
+    test('a recorded workspace base SHA replaces origin/<base> in BOTH the '
+        'commit log and the three-dot diff', () async {
+      final dir = Directory.systemTemp.createTempSync('pin-diff-sha-argv-');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final runner = _CannedGitRunner(
+        logOut: 'abc123 the round',
+        diffOut: '--- a/x\n+++ b/x\n+round',
+      );
+      final c = _ctx(dir.path, baseSha: recordedSha);
+      await PinDiffCapability(runner: runner).route(c.context, c.args);
+      expect(
+        runner.calls,
+        contains(equals(['log', '--oneline', '$recordedSha..HEAD'])),
+      );
+      expect(runner.calls, contains(equals(['diff', '$recordedSha...HEAD'])));
+      expect(
+        runner.calls.any((call) => call.any((a) => a.contains('origin/main'))),
+        isFalse,
+        reason: 'ONE resolution feeds every probe — no site keeps the remote',
+      );
+    });
+
+    test('a recorded workspace base SHA is the provenance the round REPORTS: '
+        'the route payload and all three pinned header lines', () async {
+      final dir = Directory.systemTemp.createTempSync('pin-diff-sha-header-');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final runner = _CannedGitRunner(
+        logOut: 'abc123 the round',
+        diffOut: '--- a/x.dart\n+++ b/x.dart\n+final x = 1;',
+      );
+      final c = _ctx(dir.path, baseSha: recordedSha);
+      final outcome = await PinDiffCapability(
+        runner: runner,
+      ).route(c.context, c.args);
+      expect((outcome as Advance).payload?['base'], recordedSha);
+      final body = File(pinnedDiffPath(dir.path)).readAsStringSync();
+      expect(
+        body,
+        contains('# Pinned review scope: grid/tg-1 vs $recordedSha'),
+      );
+      expect(body, contains('`git diff $recordedSha...HEAD`'));
+      expect(body, contains('`git log $recordedSha..HEAD`'));
+      expect(
+        body,
+        isNot(contains('origin/main')),
+        reason: 'the artifact names the base it was ACTUALLY computed from',
+      );
+    });
+
+    test('a recorded workspace base SHA is the base the human ruling is told '
+        'about when the worktree is DIRTY over zero commits', () async {
+      final dir = Directory.systemTemp.createTempSync('pin-diff-sha-dirty-');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final runner = _CannedGitRunner(
+        logOut: '',
+        diffOut: '',
+        statusOut: ' M lib/src/code/committee.dart\n',
+      );
+      final c = _ctx(dir.path, baseSha: recordedSha);
+      final outcome = await PinDiffCapability(
+        runner: runner,
+      ).route(c.context, c.args);
+      expect(
+        (outcome as Escalate).reason,
+        allOf(
+          contains('uncommitted work present'),
+          contains('ZERO commits beyond $recordedSha'),
+        ),
+      );
+    });
+
+    test('a NULL workspace base SHA keeps origin/<base> in the route payload '
+        'and in all three pinned header lines', () async {
+      final dir = Directory.systemTemp.createTempSync('pin-diff-nosha-header-');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final runner = _CannedGitRunner(
+        logOut: 'abc123 the round',
+        diffOut: '--- a/x.dart\n+++ b/x.dart\n+final x = 1;',
+      );
+      final c = _ctx(dir.path);
+      final outcome = await PinDiffCapability(
+        runner: runner,
+      ).route(c.context, c.args);
+      expect((outcome as Advance).payload?['base'], 'origin/main');
+      final body = File(pinnedDiffPath(dir.path)).readAsStringSync();
+      expect(body, contains('# Pinned review scope: grid/tg-1 vs origin/main'));
+      expect(body, contains('`git diff origin/main...HEAD`'));
+      expect(body, contains('`git log origin/main..HEAD`'));
+    });
+
     test(
       'no ambient Workspace -> Advance no-op (offline, never throws)',
       () async {
@@ -501,6 +601,102 @@ void main() {
       );
     });
   });
+
+  // The lunar_station-a7w shape (bead pow-5ljz), against REAL git: a substation
+  // that hosts its own grid has a LOCAL base branch far ahead of its remote —
+  // 55 unpushed commits on the live round — so `origin/<base>` names a commit
+  // the branch was never cut from and the merge-base swallows every one of
+  // them. Only a live git can pin that a recorded base SHA narrows the scope:
+  // the merge-base arithmetic IS the mechanism.
+  group('Track C — the recorded review base (bead pow-5ljz)', () {
+    test('REAL git: recorded workspace base SHA excludes local-base '
+        'housekeeping the round never authored', () async {
+      final origin = Directory.systemTemp.createTempSync('pin-base-origin-');
+      final work = Directory.systemTemp.createTempSync('pin-base-work-');
+      addTearDown(() => origin.deleteSync(recursive: true));
+      addTearDown(() => work.deleteSync(recursive: true));
+      _git(['init', '-q', '-b', 'main', '.'], origin.path);
+      File(p.join(origin.path, 'f.txt')).writeAsStringSync('shared\n');
+      _git(['add', '.'], origin.path);
+      _commit(origin.path, 'seed the shared mainline');
+
+      final clone = p.join(work.path, 'wt');
+      _git(['clone', '-q', origin.path, clone], work.path);
+
+      // Local `main` runs ahead of `origin/main` with work the substation could
+      // not push — the bead's branch is cut from the LOCAL tip, not the remote.
+      File(p.join(clone, 'disc.txt')).writeAsStringSync('agent disc\n');
+      _git(['add', '.'], clone);
+      _commit(clone, 'untrack the agent disc');
+      File(p.join(clone, 'telemetry.txt')).writeAsStringSync('scrubbed\n');
+      _git(['add', '.'], clone);
+      _commit(clone, 'scrub the telemetry capture');
+
+      // What the provisioner records at cut time: the commit the worktree
+      // actually starts on.
+      final baseSha = _headSha(clone);
+
+      _git(['checkout', '-q', '-b', 'grid/tg-1'], clone);
+      File(p.join(clone, 'round.dart')).writeAsStringSync('final round = 1;\n');
+      _git(['add', '.'], clone);
+      _commit(clone, 'add the round file');
+
+      // The control — the defect, reproduced: with no recorded base the pinned
+      // scope reaches back to the shared merge-base and hands the critics the
+      // substation's own housekeeping to grade.
+      final remote = _ctx(clone);
+      expect(
+        await const PinDiffCapability().route(remote.context, remote.args),
+        isA<Advance>(),
+      );
+      final unpinned = File(pinnedDiffPath(clone)).readAsStringSync();
+      expect(unpinned, contains('untrack the agent disc'));
+      expect(unpinned, contains('disc.txt'));
+
+      final recorded = _ctx(clone, baseSha: baseSha);
+      final outcome = await const PinDiffCapability().route(
+        recorded.context,
+        recorded.args,
+      );
+      expect(outcome, isA<Advance>());
+      expect(
+        (outcome as Advance).payload,
+        containsPair('commits', '1'),
+        reason: 'exactly the one commit this round authored',
+      );
+      final pinned = File(pinnedDiffPath(clone)).readAsStringSync();
+      expect(pinned, contains('add the round file'));
+      expect(pinned, contains('round.dart'));
+      expect(pinned, contains('final round = 1;'));
+      for (final housekeeping in const [
+        'untrack the agent disc',
+        'scrub the telemetry capture',
+        'disc.txt',
+        'telemetry.txt',
+      ]) {
+        expect(
+          pinned,
+          isNot(contains(housekeeping)),
+          reason:
+              'the round is graded on its own commit, never the substation'
+              "'s unpushed local-main work: $housekeeping",
+        );
+      }
+    });
+  });
+}
+
+/// Reads `git rev-parse HEAD` in [cwd] — the commit a provisioner records at
+/// cut time. Real-git test setup only.
+String _headSha(String cwd) {
+  final r = Process.runSync('git', [
+    'rev-parse',
+    'HEAD',
+  ], workingDirectory: cwd);
+  if (r.exitCode != 0) {
+    fail('git rev-parse HEAD in $cwd failed (${r.exitCode}): ${r.stderr}');
+  }
+  return (r.stdout as String).trim();
 }
 
 /// Runs `git` in [cwd], asserting success — real-git test setup only.
