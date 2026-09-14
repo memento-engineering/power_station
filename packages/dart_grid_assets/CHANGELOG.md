@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.2.1-dev.2
+
+- Breaking: `kLadderOutputCapBytes` is deleted and `ReleaseLadderReport.bounded` no longer accepts
+  a `capBytes` argument. The ladder report is windowed through the one shared output bound,
+  `boundedOutput`, which now ships from this package; `ReleaseLadderReport.toPlain()` renders the
+  exact text the bound was measured against, so a verb's stdout can no longer drift from the window
+  that fit (#325).
+- Migration: drop `capBytes:` from every `ReleaseLadderReport.bounded(...)` call and stop naming
+  `kLadderOutputCapBytes`; a caller that rendered the ladder line by line calls `report.toPlain()`
+  instead. The only call site in this org is this package's own `ReleaseLadderCommand.run`
+  (`lib/src/dart/release_command.dart`), which is migrated here; no published consumer names either
+  symbol.
+- Added: `boundedOutput` (`src/io/bounded_output.dart`), exported from `dart_grid_assets.dart` — the
+  shared cap-and-window helper the ladder report and future bounded verbs render through.
+
 ## 0.2.1-dev.1
 
 - fix(release): honor declared git package paths in release overrides (#308)

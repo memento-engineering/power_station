@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.1-dev.2
 
 - Changed: adopts the 2026-09-13 the_grid dev.3 wave — `genesis_tree ^0.4.0`, `grid_engine ^0.4.0-dev.3`, `grid_sdk ^0.4.0-dev.3`, `grid_runtime ^0.2.1-dev.2`, `grid_trajectory ^0.2.1-dev.2` and `beads_dart ^0.3.0-dev.2` (pow-abaw). Dependency floors only;
   no source change, and no API this package names moved.
