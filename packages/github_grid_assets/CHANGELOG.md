@@ -1,11 +1,17 @@
-## Unreleased
+## 0.2.0-dev.2
 
-- Changed: adopts the 2026-09-13 the_grid dev.3 wave — `genesis_tree ^0.4.0`, `grid_engine ^0.4.0-dev.3`, `grid_sdk ^0.4.0-dev.3`, `grid_runtime ^0.2.1-dev.2`, `grid_trajectory ^0.2.1-dev.2` and `beads_dart ^0.3.0-dev.2`, plus `grid_cli ^0.6.0-dev.3`
-  (pow-abaw).
 - Breaking: `BdGitHubIntakeStore` drops its `stateRoot` argument and the reconciler binding's
   approval runner resolves the WORK store only. The grid state store it opened held the cross-store
   link beads the filing preflight read, and grid_engine 0.4.0-dev.3 deleted that surface
   (the_grid#447); self-approval now reads and stamps in one store.
+- Migration: drop `stateRoot:` from every `BdGitHubIntakeStore(...)` construction and stop passing a
+  state-store root to its approvals; the only call sites in this org are this package's own
+  `GitHubReconcilerBindingAssets.buildChild` and its intake tests, both migrated here.
+  `GitHubReconcilerBindingAssets`' own constructor is unchanged — `stateRunnerFor` still serves the
+  feedback half — and a cross-store blocker is re-proved as a bd `external:<project>:<capability>`
+  dependency row instead.
+- Changed: adopts the 2026-09-13 the_grid dev.3 wave — `genesis_tree ^0.4.0`, `grid_engine ^0.4.0-dev.3`, `grid_sdk ^0.4.0-dev.3`, `grid_runtime ^0.2.1-dev.2`, `grid_trajectory ^0.2.1-dev.2` and `beads_dart ^0.3.0-dev.2`, plus `grid_cli ^0.6.0-dev.3`
+  (pow-abaw).
 - Changed: the seat's `SourceControl` fixtures implement `SourceControl.baseShaFor` (grid_engine
   0.4.0-dev.2, the_grid#436).
 - Note: this seat supplies NO station roster to the approve verb, so a self-authored record

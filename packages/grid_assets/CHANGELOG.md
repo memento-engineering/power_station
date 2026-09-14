@@ -1,4 +1,4 @@
-## Unreleased
+## 0.7.0-dev.2
 
 - Breaking: the `dependencies` filing requirement is a PROJECTION of the dependency rows bd holds
   for the bead, and bead PROSE is never parsed for blockers again (Nico, 2026-09-13, under
@@ -85,6 +85,46 @@
   `external:` row and the post-cut `link` verb; the retired `type=link` bead, `grid.link.*` metadata,
   `crossLinkTypeRefusal`, `StationJoinBridge._applyCrossLinks` and `applyBlockGuard` are named
   nowhere under `station_overlay/`.
+
+- Breaking: the decision gather returns ONE evidence record instead of a list. `gatherDecisions`,
+  `commandDecisionIndexSource`, `AnchorsCapability.decisions` and `buildCodeRegistry`'s
+  `discoveryDecisions` are typed on the new `DecisionGatherEvidence`
+  (`{decisionEntries, decisionLookups}`), and `DecisionSurfaceEvidence.decisions` /
+  `namedElsewhere` carry entry IDS (`List<String>`) that index into that map instead of inlining a
+  `DecisionEntryEvidence` per surface, so an entry named by several surfaces is resolved and carried
+  once. New public surface: `DecisionGatherEvidence`, `DecisionReferenceCodec`,
+  `DiscoveryAnchors.decisionEntries` / `decisionEntryFor`, `DiscoveryLensPromptAssembly`,
+  `kMaxDecisionLensPromptBytes`, `kDecisionLensPromptOmissionReserveBytes` and
+  `kDecisionLensEvidenceOmissionMarker` (#310, #327). Migration: resolve a surface's entries as
+  `gather.decisionEntries[id]` for each id in `surface.decisions`; a source function returns
+  `DecisionGatherEvidence(decisionEntries: ..., decisionLookups: ...)` rather than a bare list, and
+  `DecisionSurfaceEvidence.fromJson` / `toJson` take the `codec` that resolves those ids.
+- Breaking: `composePrimeContext` takes a `PrimeHandoff?`, not a `SeatHandoff?`, and the free
+  function `handoffNamingLine` is deleted. The naming line is now a member of the handoff record the
+  launcher hands over, because a note the LAUNCHER already consumed and archived names itself
+  differently from one still live on the disc (#328). Migration: pass
+  `PrimeHandoff.consumed(<the body delivered in kConsumedHandoffEnvironmentVariable>)` or
+  `PrimeHandoff.unconsumed(<the SeatHandoff>)`, and read `handoff.namingLine` instead of calling
+  `handoffNamingLine(...)`; `composePrimeContext` also grows an optional `handoffDiagnostic`.
+- Added: the seat archive-and-succession surface — `SeatDisc.writeHandoffOnce`,
+  `SeatDisc.newestHandoffState`, `SeatDisc.verifyIndexIntegrity`, `SeatArchiveSink`,
+  `seatArchiveDirectoryName` / `parseSeatArchiveDirectoryName`, `seatArchiveStamp`,
+  `seatArchiveDisposition`, `seatArchiveRetentionDisposition`, `seatArchivesToPrune`,
+  `seatHandoffAgeDiagnostic`, `seatHandoffDeliveryRefusal`, `kSeatArchiveRetention`,
+  `kSeatArchiveSubdirectory`, `kConsumedHandoffEnvironmentVariable`, `kHandoffWriteRemedy`,
+  `SeatHandoffWriteException`, `SeatDiscIntegrityException`, the new `SeatSuccessionReport` members
+  (`archive`, `archivesPruned`, `body`, `pruneRefusal`, `sink`) and the injectable `now` on
+  `PrimeCommand`, `SuccessionCommand` and `SeatSuccessionService` (#311, #312, #315, #328).
+- Added: the release circuit registration — `kReleaseCircuit`, `ReleaseCircuitRequest`,
+  `ReleaseGateCapability`, `ReleasePromotionRouteCapability`, `ReleasePackageTarget`,
+  `ReleaseCommandInvoker` / `InProcessReleaseCommandInvoker` / `ReleaseCommandInvocation`,
+  `kReleaseGateCapabilityId`, `kReleasePromotionRouteCapabilityId`, `kReleaseReceiptKey` and
+  `buildCodeRegistry`'s `releaseCommands` (#319).
+- Added: `AgentCapability.gitRunner` and `AgentCapability.completionContract`, `kAgentStep`,
+  `kArgvTransport`, `BoundedTextBudget`, the `ArtifactFencedSession` failure trio
+  (`failureKind`, `blockedDiagnostic`, `probeErrorDiagnostic`), `kNoRoundCommitDiagnostic` and
+  `kRoundCommitUnreadableDiagnostic` (#313, #314, #320, #321). `kShowOutputCapBytes` is now
+  deprecated in favour of the shared output bound.
 
 ## 0.7.0-dev.1
 

@@ -1,5 +1,7 @@
-## Unreleased
+## 0.3.1-dev.1
 
+- Note: this line is a PRERELEASE because the package now floors a prerelease engine, and pub
+  refuses a stable package that depends on a prerelease. No API of this package moved.
 - Changed: adopts the 2026-09-13 the_grid dev.3 wave — `genesis_tree ^0.4.0` and
   `grid_engine ^0.4.0-dev.3` (pow-abaw).
 - Changed: the claim-lease fixtures adopt the lifecycle-driven allocation inputs — `AllocationContext`
