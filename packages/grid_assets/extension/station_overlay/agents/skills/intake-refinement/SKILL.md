@@ -158,7 +158,7 @@ When the work extends something the tree already owns, write the pointer into
 the bead body as `path:line` plus the relationship:
 
 ```
-COMPOSE: packages/grid_assets/lib/src/filing/filing_contract.dart:203 owns the
+COMPOSE: packages/grid_assets/lib/src/filing/filing_contract.dart:228 owns the
 four-row completeness contract — CALL it; do not add a second predicate.
 ```
 
@@ -182,6 +182,12 @@ across `filing`, `approve`, `show` and the park pair, and `filing`/`approve`
 VALIDATE it without reading through it: the preflight judges the bead's OWN
 outgoing `blocks` edges and nothing else.
 
+A foreign id whose tail carries NO digit (`pow-abaw` named from a `space-`
+bead) is not read as an id at all, so the `dependencies` row can report
+`no local blockers named` on a bead that names a real cross-store blocker.
+A passing row is therefore proof about LOCAL blockers only — read the
+description yourself before staging a bead that names a foreign one.
+
 The report is one JSON object: `{id, passed, requirements, error?}`.
 `requirements` carries exactly four rows, in order — `driveable_type`,
 `validation_plan`, `acceptance_criteria`, `dependencies` — each
@@ -197,10 +203,18 @@ correction:
   validation_plan to every consumer**.
 - `acceptance_criteria is blank` — author `- [ ]` checkboxes a named command
   can falsify.
-- `missing outgoing blocks edges: <ids>` — each named id is unwired: wire it
-  per **Wire every dependency at intake**. A FOREIGN id is named here like any
-  other, and it is wired the same way — with the link verb, which writes the
-  `external:` row on this very bead.
+- `missing outgoing blocks edges: <ids>` — each named id is unwired in THIS
+  store: wire it per **Wire every dependency at intake**. A FOREIGN id is
+  named here too, and it CANNOT be cleared by wiring: the preflight reads the
+  bead's LOCAL outgoing `blocks` edges only, and the `external:` row the link
+  verb writes does not reach it — `bd dep list` cannot resolve an external
+  target. Wire the cross-store blocker with the link verb anyway, because that
+  is the row the frontier reads, then say on the bead that its dependency row
+  is held open by a foreign blocker and hand the approval to the governor.
+  Never add a raw foreign id to a local dependency row to turn the row green:
+  `bd doctor --fix` severs it and the approval is then a receipt for a proof
+  that was never taken. Projecting the `external:` rows into this row is
+  pow-f6pc (power_station#330).
 
 Then RERUN the verb. Repeat until the report reads `"passed": true`; only then
 stage the bead for approval. Nothing else stages a bead — a reading of the

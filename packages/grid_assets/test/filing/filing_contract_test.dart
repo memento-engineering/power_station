@@ -48,12 +48,14 @@ void main() {
     );
 
     // The v1 basis SHAPE is FROZEN: every `grid.approved_rev` already written
-    // is a digest over it, so retiring the state-store link surface
-    // (the_grid#447) must not re-digest a single bead. The `linked` member
-    // stays in the basis, pinned false — which is byte-for-byte what an
-    // unconsulted state store always produced. A GOLDEN digest, so a future
-    // edit to the basis cannot slip through as "just a refactor": changing it
-    // revokes every standing approval and needs a v2 prefix.
+    // is a digest over these keys, so the `linked` member stays in the basis
+    // rather than being dropped, which would re-digest every approved bead in
+    // every store. This fixture is wired LOCALLY, so its digest is byte-for-
+    // byte the pre-cut value — the case the cut does NOT move. The case it
+    // DOES move is pinned below in 'the cross-store shape re-digests'.
+    // A GOLDEN digest, so a future edit to the basis cannot slip through as
+    // "just a refactor": changing it revokes every standing approval and needs
+    // a v2 prefix.
     expect(
       baseline,
       '${kFilingApprovalRevisionPrefix}0811d3b73e7a2fa4c3dbd079481ef28fc363'
@@ -123,6 +125,81 @@ void main() {
       const FilingContract().evaluate(bead, const [one, two]).toJson(),
       containsPair('approval_revision', baseline),
     );
+  });
+
+  test('the cross-store shape re-digests and its dependency row moves', () {
+    // The ONE shape this adoption is not neutral on. Pre-cut, a bead approved
+    // with `--state-root` CONSULTED and a matching open link bead digested
+    // `linked: true` per wired blocker, AND took the linked blocker's store
+    // prefix into `knownPrefixes`, which is what made a DIGITLESS foreign id
+    // readable as an id. The state-store link surface is deleted
+    // (grid_engine 0.4.0-dev.3, the_grid#447), so both inputs are gone and the
+    // digest of such a bead MOVES — its standing stamp is stale and
+    // `approve`/`unpark` refuse it until a governor re-approves.
+    //
+    // The pre-cut literals below were MEASURED on 2026-09-13 by running the
+    // pre-cut `FilingContract.evaluate(bead, [], linkedBlockers: {...})` from
+    // the primary checkout on `main` over this exact fixture. They are here so
+    // the change is a pinned fact rather than a claim, and so a later attempt
+    // to "restore digest stability" fails loudly instead of quietly.
+    const bead = Bead(
+      id: 'space-adopt',
+      title: 'Adopt the wave',
+      issueType: IssueType.task,
+      priority: 1,
+      description:
+          'BLOCKED BY: the wave tags (pow-abaw + pow-f6pc). '
+          'Cross-store; wired by the governor.',
+      design: 'Bump the floors',
+      acceptanceCriteria: '- [ ] AC-1',
+      notes: 'governor context',
+      specId: 'space-spec',
+      metadata: {'validation_plan': 'dart test'},
+    );
+    const preCutRevision =
+        '${kFilingApprovalRevisionPrefix}1acd2d4d399b3c8f4fd93c015c455b077157'
+        '038a786396a4e47ce2f0d17b73c0';
+
+    final report = const FilingContract().evaluate(
+      bead,
+      const <BeadDependency>[],
+    );
+
+    // It re-digests: the standing stamp no longer matches this evaluation.
+    expect(report.approvalRevision, isNot(preCutRevision));
+    expect(
+      report.approvalRevision,
+      '${kFilingApprovalRevisionPrefix}5f17fb5f253c41e36cda05a5cd23d1ef5e08'
+      '968c005355d3c44676dc07d14812',
+    );
+
+    // The row passed pre-cut on the link proof; it now fails CLOSED on the
+    // digit-tailed foreign id, which is still read as an id.
+    final dependency = report.requirements.singleWhere(
+      (row) => row.requirement == FilingRequirement.dependencies,
+    );
+    expect(report.passed, isFalse);
+    expect(dependency.passed, isFalse);
+    expect(dependency.detail, 'missing outgoing blocks edges: pow-f6pc');
+
+    // And the DIGITLESS foreign id is not named at all any more: with no local
+    // edge in its store, `pow` is not a known prefix and `abaw` carries no
+    // digit. That row passes VACUOUSLY — the cut is fail-closed only for the
+    // tokens the grammar still recognises, which is why pow-f6pc
+    // (power_station#330) retires the grammar for bd's own dependency rows.
+    final foreignOnly = const FilingContract().evaluate(
+      bead.copyWith(
+        description:
+            'BLOCKED BY: pow-abaw. Cross-store; wired by the '
+            'governor.',
+      ),
+      const <BeadDependency>[],
+    );
+    final foreignRow = foreignOnly.requirements.singleWhere(
+      (row) => row.requirement == FilingRequirement.dependencies,
+    );
+    expect(foreignRow.passed, isTrue);
+    expect(foreignRow.detail, 'no local blockers named');
   });
 
   test('dependency requirement is exact and directional', () {
