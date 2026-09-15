@@ -321,17 +321,21 @@ PermissionOptionKind? _selected(RequestPermissionResponse response) =>
       _ => null,
     };
 
-/// Resolves the seat policy under a REAL [TypedEnvironmentProvider] — the same
-/// seed production mounts — with an optional explicit station policy above it.
+/// Resolves the seat policy under the REAL provider seeds [seats] vend — the
+/// same composition production mounts — with an optional explicit station
+/// policy above them.
+///
+/// [seats] is any ordered `Iterable<SeatPreference>`, so an ARMED and an
+/// UNARMED case differ only by what the collection carries.
 AgentPermissionPolicy _underProvider<TSeat extends ModelPreference>(
-  AgentArming arming, {
+  Iterable<SeatPreference> seats, {
   required String seatId,
   AgentPermissionPolicy? policy,
 }) {
   late final AgentPermissionPolicy observed;
   final owner = TreeOwner();
-  Seed tree = TypedEnvironmentProvider(
-    arming: arming,
+  Seed tree = Nest(
+    children: [for (final seat in seats) seat.provider()],
     child: _Probe(
       (context) => observed = seatChannelPolicy<TSeat>(context, seatId: seatId),
     ),
@@ -353,25 +357,25 @@ String _source(String relative) =>
 
 void main() {
   test('the seat identity comes from the typed seat arming', () {
-    const arming = AgentArming(
-      build: BuildAgentEnvironment(<AgentEnvironment>[]),
-      spec: SpecAgentEnvironment(<AgentEnvironment>[]),
-    );
+    const buildOnly = <SeatPreference>[
+      BuildAgentEnvironment(<AgentEnvironment>[]),
+    ];
+    const specOnly = <SeatPreference>[
+      SpecAgentEnvironment(<AgentEnvironment>[]),
+    ];
+    const arming = <SeatPreference>[...buildOnly, ...specOnly];
 
     // THE EXACT TYPE IS THE IDENTITY (ADR-0006 D2): each seat derives the
     // station's trusted-headless posture under its OWN const audit id.
     expect(
       _underProvider<BuildAgentEnvironment>(
-        const AgentArming(build: BuildAgentEnvironment(<AgentEnvironment>[])),
+        buildOnly,
         seatId: kBuildSeatPolicyId,
       ),
       const AgentPermissionPolicy.trustedHeadless(id: kBuildSeatPolicyId),
     );
     expect(
-      _underProvider<SpecAgentEnvironment>(
-        const AgentArming(spec: SpecAgentEnvironment(<AgentEnvironment>[])),
-        seatId: kSpecSeatPolicyId,
-      ),
+      _underProvider<SpecAgentEnvironment>(specOnly, seatId: kSpecSeatPolicyId),
       const AgentPermissionPolicy.trustedHeadless(id: kSpecSeatPolicyId),
     );
     expect(kBuildSeatPolicyId, 'seat:build');
@@ -380,8 +384,19 @@ void main() {
     // A DIFFERENT seat's arming is not this seat's identity.
     expect(
       _underProvider<SpecAgentEnvironment>(
-        const AgentArming(build: BuildAgentEnvironment(<AgentEnvironment>[])),
+        buildOnly,
         seatId: kSpecSeatPolicyId,
+      ),
+      const AgentPermissionPolicy.unavailable(),
+    );
+
+    // AN UNARMED collection confers NO identity at all: a channel with no seat
+    // authorizes nothing, and the refusal is the EMPTY collection's, not a
+    // missing field's.
+    expect(
+      _underProvider<BuildAgentEnvironment>(
+        const <SeatPreference>[],
+        seatId: kBuildSeatPolicyId,
       ),
       const AgentPermissionPolicy.unavailable(),
     );
