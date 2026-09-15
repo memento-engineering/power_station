@@ -10,6 +10,7 @@
 //
 // ADR-0008 D2 / M4-P1 §6, Track H. Zero I/O — fakes only (the FT-2 result()
 // tests read usage files a test writes into a temp dir; no real claude/git).
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:dart_grid_assets/dart_grid_assets.dart';
@@ -1150,6 +1151,7 @@ void main() {
     ({FakeTreeContext context, StepArgs args}) resultCtx(
       String workspaceDir, {
       ExplorationTransport? transport,
+      SourceControl? sourceControl,
     }) => (
       context: FakeTreeContext(
         values: {
@@ -1159,9 +1161,14 @@ void main() {
             branch: 'grid/tg-1',
           ),
           // The ambient config carries the declared prices; the bundle carries
-          // the emit-only flare sink (bead `pow-zetn`).
+          // the emit-only flare sink (bead `pow-zetn`). A non-null
+          // [sourceControl] ARMS the round-commit fence — absent one the
+          // workspace is not addressable and the fence disarms outright.
           AgentConfig: const AgentConfig(),
-          ServiceBundle: ServiceBundle(transport: transport),
+          ServiceBundle: ServiceBundle(
+            transport: transport,
+            sourceControl: sourceControl,
+          ),
         },
       ),
       args: stepArgs('tg-1/agent'),
@@ -1239,6 +1246,103 @@ void main() {
         expect(await const AgentCapability().result(c.context, c.args), isNull);
       },
     );
+
+    /// The build seat's ARGV-leg refusal, as the report the station persists.
+    /// A zero-commit round is the shortest honest path to it: the harness
+    /// exited, the fence found nothing on the branch, and the reason is all the
+    /// operator gets.
+    Future<AllocationFailed> emptyRoundReport(String workspaceDir) async {
+      final c = resultCtx(workspaceDir, sourceControl: _StubSourceControl());
+      try {
+        await AgentCapability(
+          gitRunner: _ZeroCommitGitRunner(),
+        ).result(c.context, c.args);
+      } on CapabilityFailure catch (failure) {
+        return AllocationFailed.from(failure);
+      }
+      fail('the round-commit fence did not refuse an empty round');
+    }
+
+    test('api error envelope prefixes the no-result allocation reason', () async {
+      final dir = Directory.systemTemp.createTempSync('agent-usage-api-error-');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      // The measured envelope (2026-09-12, session tranquility-2xxwup): the
+      // harness wrote its telemetry, the API had refused the request outright,
+      // and every downstream reader saw only a child that exited with nothing.
+      writeUsage(
+        dir.path,
+        jsonEncode(<String, Object?>{
+          'api_error_status': 400,
+          'result':
+              'Prompt is too long, the request is about 202302 tokens\n'
+              'against a 200000 limit',
+          'usage': <String, Object?>{'input_tokens': 202302},
+        }),
+      );
+
+      final report = await emptyRoundReport(dir.path);
+
+      // The KIND and its policy are untouched — only the reason gained the
+      // fact it was already sitting on.
+      expect(report.kind, CapabilityFailureKind.noResult);
+      expect(
+        report.reason,
+        startsWith('api_error_status 400: Prompt is too long'),
+      );
+      // The FIRST line only, then the reason the seat always built: the head is
+      // the diagnosis, and the engine persists the front of the string.
+      expect(
+        report.reason,
+        startsWith(
+          'api_error_status 400: Prompt is too long, the request is about '
+          '202302 tokens — agent failed (exit 0) [argv]: '
+          '$kNoRoundCommitDiagnostic',
+        ),
+      );
+    });
+
+    test('missing malformed and status-free envelopes preserve the current '
+        'no-result reason', () async {
+      const harnessText = 'I loaded the skill and ended the turn.';
+      // (what is on disk, what the reason's captured tail therefore carries).
+      final probes = <({String label, String? envelope, String output})>[
+        (label: 'absent', envelope: null, output: ''),
+        (label: 'malformed', envelope: '{ not json', output: ''),
+        (
+          label: 'status-free',
+          envelope: jsonEncode(<String, Object?>{
+            'result': harnessText,
+            'usage': <String, Object?>{'input_tokens': 12, 'output_tokens': 3},
+          }),
+          output: harnessText,
+        ),
+      ];
+
+      for (final probe in probes) {
+        final dir = Directory.systemTemp.createTempSync('agent-usage-safe-');
+        addTearDown(() => dir.deleteSync(recursive: true));
+        final envelope = probe.envelope;
+        if (envelope != null) writeUsage(dir.path, envelope);
+
+        final report = await emptyRoundReport(dir.path);
+
+        // Byte-for-byte the pre-API-error reason — no read of a telemetry file
+        // that does not carry a status may change a single character of it, and
+        // no filesystem or decode surprise may escape as a throw.
+        expect(report.kind, CapabilityFailureKind.noResult);
+        expect(
+          report.reason,
+          capturedOutputReason(
+            verb: kAgentStep,
+            adapter: kArgvTransport,
+            output: probe.output,
+            exitCode: 0,
+            diagnostic: kNoRoundCommitDiagnostic,
+          ),
+          reason: probe.label,
+        );
+      }
+    });
   });
 
   group('AgentCapability materializes the grid.dart pub linkage at provision '
@@ -2309,4 +2413,37 @@ class _NoopPrOpener implements PrOpener {
   }) async => PullRequestResult.opened(
     const PullRequestRef(url: 'https://example.test/pr/1'),
   );
+}
+
+/// A [GitRunner] that answers the round-commit count with ZERO — the agent
+/// returned and the bead branch is still at its base. Fakes, not mocks: it
+/// answers and asserts nothing.
+class _ZeroCommitGitRunner implements GitRunner {
+  @override
+  Future<GitRunResult> run({
+    required String workingDirectory,
+    required List<String> args,
+  }) async => const GitRunResult(exitCode: 0, output: '0');
+}
+
+/// The mere PRESENCE of a [SourceControl] is what tells the round-commit fence
+/// the workspace is a real, addressable checkout; nothing here is ever called.
+class _StubSourceControl implements SourceControl {
+  @override
+  String workspaceFor(String beadId) => '/w/$beadId';
+
+  @override
+  String branchFor(String beadId) => 'grid/$beadId';
+
+  @override
+  String get baseBranch => 'main';
+
+  @override
+  String? baseShaFor(String beadId) => null;
+
+  @override
+  Future<void> provisionWorkspace({
+    required String beadId,
+    required String workspaceDir,
+  }) async {}
 }

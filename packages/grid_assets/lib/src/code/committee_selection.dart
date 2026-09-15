@@ -2873,7 +2873,7 @@ class CommitteeSelectionCapability extends ServiceCapability {
     required String? model,
     required String reason,
   }) {
-    final report = _readUsageReport(workspaceDir, telemetryNode);
+    final report = readUsageReport(workspaceDir, telemetryNode);
     final text = answer.output.trim();
     return CommitteeClassifierAttempt(
       attempt: attempt,
@@ -2911,18 +2911,6 @@ String? _envelopeOrStdout(
   final envelope = readEnvelopeResultText(workspaceDir, nodePath);
   if (envelope != null && envelope.trim().isNotEmpty) return envelope;
   return stdoutText.trim().isEmpty ? null : stdoutText;
-}
-
-/// The harness usage envelope for [nodePath], parsed through the ONE FT-2
-/// codec. Fail-safe: an absent, unreadable or malformed envelope yields null.
-UsageReport? _readUsageReport(String workspaceDir, String nodePath) {
-  try {
-    final file = File(p.join(workspaceDir, usageReportPath(nodePath)));
-    if (!file.existsSync()) return null;
-    return UsageReport.tryParse(file.readAsStringSync());
-  } on Object {
-    return null;
-  }
 }
 
 // ── the shadow route wrapper ────────────────────────────────────────────────
