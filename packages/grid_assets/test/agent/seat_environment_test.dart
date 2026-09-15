@@ -43,13 +43,14 @@ const EnvironmentRegistry _registry = EnvironmentRegistry(
   builtins: kBuiltinEnvironments,
 );
 
-/// The four VENDED seats, authored exactly as a station cans them.
-const AgentArming _vended = AgentArming(
-  build: BuildAgentEnvironment([_strong]),
-  spec: SpecAgentEnvironment([_strong]),
-  critic: CriticAgentEnvironment([_shared]),
-  gather: GatherAgentEnvironment([_fast]),
-);
+/// The four VENDED seats, authored exactly as a station cans them: an ORDERED
+/// collection, BUILD first, each seat vending its own provider seed.
+const List<SeatPreference> _vended = <SeatPreference>[
+  BuildAgentEnvironment([_strong]),
+  SpecAgentEnvironment([_strong]),
+  CriticAgentEnvironment([_shared]),
+  GatherAgentEnvironment([_fast]),
+];
 
 const CriticLane _adr = CriticLane('decision-alignment');
 const CriticLane _coherence = CriticLane('coherence');
@@ -145,9 +146,9 @@ class _Probe extends StatelessSeed {
 }
 
 /// A FIFTH seat type, declared ENTIRELY here: `grid_assets` does not know it
-/// exists and no field on `AgentArming` names it. It is the whole proof that
+/// exists and nothing in the pack enumerates it. It is the whole proof that
 /// the seat set is open - it vends its own provider seed and rides the same
-/// armed collection the four vended seats do.
+/// ordered collection the four vended seats do.
 class _FifthAgentEnvironment extends SeatPreference {
   const _FifthAgentEnvironment(super.entries);
 
@@ -193,10 +194,10 @@ class _LaneProbe extends StatelessSeed {
   }
 }
 
-/// Hosts a SWAPPABLE [CriticAgentEnvironment] over a REAL
-/// [TypedEnvironmentProvider]: `TreeOwner` has no `updateRoot`, so the
-/// republish rides `setState`. Routing through the provider is the point -
-/// a plain `InheritedSeed` link would fail the aspect contract below.
+/// Hosts a SWAPPABLE [CriticAgentEnvironment] over the seat's OWN provider
+/// seed: `TreeOwner` has no `updateRoot`, so the republish rides `setState`.
+/// Routing through `provider()` is the point - a plain `InheritedSeed` link
+/// would fail the aspect contract below.
 class _LaneHost extends StatefulSeed {
   const _LaneHost({
     required this.initial,
@@ -222,10 +223,8 @@ class _LaneHostState extends State<_LaneHost> {
   }
 
   @override
-  Seed build(TreeContext context) => TypedEnvironmentProvider(
-    arming: <SeatPreference>[_value],
-    child: seed.child,
-  );
+  Seed build(TreeContext context) =>
+      Nest(children: [_value.provider()], child: seed.child);
 }
 
 void main() {
@@ -442,8 +441,10 @@ void main() {
       owner.mountRoot(
         InheritedSeed<AvailableEnvironments>(
           value: AvailableEnvironments({_fast}),
-          child: TypedEnvironmentProvider(
-            arming: const <SeatPreference>[fifth],
+          child: Nest(
+            children: [
+              for (final seat in const <SeatPreference>[fifth]) seat.provider(),
+            ],
             child: _Probe(
               (context) => observed =
                   resolveEnvironment<_FifthAgentEnvironment>(context),
@@ -455,24 +456,20 @@ void main() {
       expect(observed, _fast);
     });
 
-    test('AgentArming and Nest preserve declaration order and type names', () {
+    test('provider seeds in a Nest preserve order and type names', () {
       final owner = TreeOwner();
+      // The vended seats SPREAD beside a seat the pack never heard of, each
+      // mounting the seed IT vends - the consumer's own composition.
+      const seats = <SeatPreference>[..._vended, fifth];
       final root = owner.mountRoot(
-        TypedEnvironmentProvider(
-          // A vended arming SPREAD beside a seat the pack never heard of.
-          arming: <SeatPreference>[..._vended, fifth],
+        Nest(
+          children: [for (final seat in seats) seat.provider()],
           child: const _Leaf(),
         ),
       );
       owner.flush();
       final mounted = _mountedSeats(root);
-      expect(mounted, <SeatPreference>[
-        _vended.build!,
-        _vended.spec!,
-        _vended.critic!,
-        _vended.gather!,
-        fifth,
-      ]);
+      expect(mounted, seats);
       expect(
         mounted.map((seat) => seat.runtimeType.toString()).toList(),
         <String>[
@@ -485,14 +482,14 @@ void main() {
       );
     });
 
-    test('four-seat AgentArming preserves the vended composition', () {
+    test('the four vended seats preserve the vended composition', () {
       SeatEnvironments? observed;
       final owner = TreeOwner();
       owner.mountRoot(
         InheritedSeed<EnvironmentRegistry>(
           value: _registry,
-          child: TypedEnvironmentProvider(
-            arming: _vended,
+          child: Nest(
+            children: [for (final seat in _vended) seat.provider()],
             child: _Probe((context) => observed = SeatEnvironments.of(context)),
           ),
         ),
@@ -537,8 +534,11 @@ void main() {
           child: InheritedSeed<ModelPreference>(
             // The station default, present and preferring the OTHER model.
             value: const ModelPreference([_strong]),
-            child: TypedEnvironmentProvider(
-              arming: <SeatPreference>[..._vended, relay],
+            child: Nest(
+              children: [
+                for (final seat in <SeatPreference>[..._vended, relay])
+                  seat.provider(),
+              ],
               child: _Probe((context) {
                 seat = RelayAgentEnvironment.of(context);
                 resolved = RelayAgentEnvironment.environmentOf(context);
@@ -563,9 +563,9 @@ void main() {
           value: AvailableEnvironments({_fast, _strong}),
           child: InheritedSeed<ModelPreference>(
             value: const ModelPreference([_strong]),
-            child: TypedEnvironmentProvider(
+            child: Nest(
               // Every VENDED seat armed, and no relay among them.
-              arming: _vended,
+              children: [for (final seat in _vended) seat.provider()],
               child: _Probe((context) {
                 read = true;
                 seat = RelayAgentEnvironment.of(context);
@@ -597,8 +597,11 @@ void main() {
       owner.mountRoot(
         InheritedSeed<EnvironmentRegistry>(
           value: _registry,
-          child: TypedEnvironmentProvider(
-            arming: <SeatPreference>[..._vended, relay],
+          child: Nest(
+            children: [
+              for (final seat in <SeatPreference>[..._vended, relay])
+                seat.provider(),
+            ],
             child: _Probe((context) => observed = SeatEnvironments.of(context)),
           ),
         ),
@@ -617,21 +620,16 @@ void main() {
 
     test('declaration order ends with the relay type', () {
       final owner = TreeOwner();
+      const seats = <SeatPreference>[..._vended, relay];
       final root = owner.mountRoot(
-        TypedEnvironmentProvider(
-          arming: <SeatPreference>[..._vended, relay],
+        Nest(
+          children: [for (final seat in seats) seat.provider()],
           child: const _Leaf(),
         ),
       );
       owner.flush();
       final mounted = _mountedSeats(root);
-      expect(mounted, <SeatPreference>[
-        _vended.build!,
-        _vended.spec!,
-        _vended.critic!,
-        _vended.gather!,
-        relay,
-      ]);
+      expect(mounted, seats);
       expect(
         mounted.map((seat) => seat.runtimeType.toString()).toList(),
         <String>[

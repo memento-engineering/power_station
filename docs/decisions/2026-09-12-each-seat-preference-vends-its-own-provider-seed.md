@@ -14,7 +14,8 @@ register:
   obsoletes: []
   updates: []
   obsoleted-by: null
-  updated-by: []
+  updated-by:
+    - seat-provider-seeds-replace-agent-arming
   bead: pow-ycoi
   legacy-id: null
 ---

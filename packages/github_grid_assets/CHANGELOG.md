@@ -1,3 +1,14 @@
+## Unreleased
+
+- Breaking: `SubstationSeed.arming` is replaced by `SubstationSeed.seatSeeds`, a
+  `List<SingleChildSeed>` of the provider seeds the seats themselves vend, authored outermost-first
+  and copied at construction so the seat owns its own rung. `grid_assets` retired `AgentArming` and
+  `TypedEnvironmentProvider`, and this seed enumerates no seat type at all now. The seeds still nest
+  ahead of everything else, so a seat mounted here shadows the station BY EXACT TYPE and a type it
+  does not mount keeps resolving through the station; the selected-definition, Git, GitHub and
+  mount-gate order is unchanged.
+  Migration: replace `arming: AgentArming(build: BuildAgentEnvironment([…]))` with `seatSeeds: [const BuildAgentEnvironment([…]).provider()]` — one `seat.provider()` entry per preference, outermost first.
+
 ## 0.2.0-dev.2
 
 - Breaking: `BdGitHubIntakeStore` drops its `stateRoot` argument and the reconciler binding's

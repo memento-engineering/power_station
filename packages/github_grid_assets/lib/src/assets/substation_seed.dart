@@ -25,7 +25,6 @@ import 'package:beads_dart/beads_dart.dart' show BdRunner, ProcessBdRunner;
 import 'package:genesis_tree/genesis_tree.dart';
 import 'package:grid_assets/grid_assets.dart'
     show
-        AgentArming,
         AgentConfig,
         AvailableEnvironments,
         BuildAgentEnvironment,
@@ -37,7 +36,6 @@ import 'package:grid_assets/grid_assets.dart'
         SeatEnvironments,
         SpecAgentEnvironment,
         SubstationKey,
-        TypedEnvironmentProvider,
         ambientAssetFactsOrFlare,
         resolveGridAssets;
 import 'package:grid_assets/station_asset_registry.dart'
@@ -121,10 +119,11 @@ final class MountedSubstationSeed {
   /// standalone seed mount).
   final AgentConfig? agentConfig;
 
-  /// The four TYPED lookups resolved AT THIS SEAT'S POSITION — the seat's own
-  /// nested [TypedEnvironmentProvider] where it arms one, else the station's.
-  /// This is what makes the per-substation rung offline-PROVABLE through the
-  /// SDK's mounted-value walk (ADR-0002 D5, ADR-0006 D2).
+  /// The four TYPED lookups resolved AT THIS SEAT'S POSITION. A seat provider
+  /// seed nested by this substation shadows the station's BY EXACT TYPE, so a
+  /// type this seat mounts resolves here and every other type resolves through
+  /// the station's. This is what makes the per-substation rung offline-PROVABLE
+  /// through the SDK's mounted-value walk (ADR-0002 D5, ADR-0006 D2).
   final SeatEnvironments? environments;
 }
 
@@ -144,12 +143,15 @@ class SubstationSeed extends StatelessSeed {
     this.app,
     this.githubPoll,
     this.landingPolicy,
-    this.arming,
+    List<SingleChildSeed> seatSeeds = const <SingleChildSeed>[],
     this.githubAppCredentialLoader = const GitHubAppCredentialLoader(),
     this.githubTransportFactory = createGitHubHttpTransport,
     this.mountEligibilityRunnerFor,
     Key? key,
   }) : assetRegistry = assetRegistry ?? GeneratedGridAssetRegistrant.registry,
+       // COPIED at authoring: the seat OWNS its rung, so a caller that keeps
+       // mutating the list it passed cannot change what this seed mounts.
+       seatSeeds = List<SingleChildSeed>.of(seatSeeds),
        _assetFactsKey = SubstationKey(name),
        super(key: key ?? ValueKey<String>('seat:$name'));
 
@@ -207,14 +209,17 @@ class SubstationSeed extends StatelessSeed {
   /// reuse a PR and leave it unmerged.
   final GitHubDeliveryPolicy? landingPolicy;
 
-  /// The seat's AGENT ARMING — the PER-SUBSTATION rung of the ladder
-  /// (ADR-0002 D5). Non-null nests a [TypedEnvironmentProvider] OUTERMOST in
-  /// this seat's stack whose armed seats SHADOW the station's for everything
-  /// under this substation; an unarmed seat type keeps resolving through the
+  /// The seat's AGENT SEATS — the PER-SUBSTATION rung of the ladder
+  /// (ADR-0002 D5), authored as the provider seeds the seats themselves vend
+  /// (`SeatPreference.provider`), outermost first.
+  ///
+  /// Each is nested OUTERMOST in this seat's stack, so a seat it mounts
+  /// SHADOWS the station's BY EXACT TYPE for everything under this
+  /// substation; a type no seed here mounts keeps resolving through the
   /// station's. A VALUE on the seed, exactly like [app] / [githubPoll] /
   /// [landingPolicy] — per-seat identity is COMPOSITION, never a name-keyed
-  /// lookup.
-  final AgentArming? arming;
+  /// lookup, and this seed enumerates no seat type.
+  final List<SingleChildSeed> seatSeeds;
 
   /// Loads this seat's App private key; injectable for deterministic tests.
   final GitHubAppCredentialLoader githubAppCredentialLoader;
@@ -264,15 +269,14 @@ class SubstationSeed extends StatelessSeed {
     final githubPoll = this.githubPoll;
     final mountEligibilityRunnerFor = this.mountEligibilityRunnerFor;
     final landingPolicy = this.landingPolicy;
-    // The PER-SUBSTATION rung (ADR-0002 D5; ADR-0006 D2). A NESTED
-    // TypedEnvironmentProvider already shadows the station's for this seat's
-    // subtree, per TYPE: a seat that arms only `build` leaves spec/critic/
-    // gather resolving through the station's providers.
-    final arming = this.arming;
+    // The PER-SUBSTATION rung (ADR-0002 D5; ADR-0006 D2). A NESTED seat
+    // provider seed already shadows the station's for this seat's subtree, per
+    // TYPE: a seat that mounts only `build` leaves spec/critic/gather
+    // resolving through the station's providers.
     final children = <SingleChildSeed>[
       // OUTERMOST on purpose: every asset, every work mount and the offline
       // projection below must read the SEAT's seats, not the station's.
-      if (arming != null) TypedEnvironmentProvider(arming: arming),
+      ...seatSeeds,
       _MountedSubstationSeedAssets(githubPollingConfigured: githubPoll != null),
       // ABOVE GitGridAssets on purpose. That seed builds a FRESH ServiceBundle
       // carrying source control and NOTHING from ambient, so a reconciler

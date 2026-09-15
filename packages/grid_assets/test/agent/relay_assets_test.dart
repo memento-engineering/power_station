@@ -282,8 +282,11 @@ Seed _armed({
       // The station default, present and preferring the OTHER model: a relay
       // must never be manufactured out of it.
       value: const ModelPreference([_strong]),
-      child: TypedEnvironmentProvider(
-        arming: <SeatPreference>[if (seat != null) seat],
+      child: Nest(
+        children: [
+          for (final seat in <SeatPreference>[if (seat != null) seat])
+            seat.provider(),
+        ],
         child: RelayAssets(tools: tools, runner: runner, child: below),
       ),
     ),
