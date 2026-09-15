@@ -5,12 +5,21 @@
 // NARROW (a non-driveable type or an EMPTY description holds; a terse or
 // placeholder-MENTIONING human description does NOT — a structural fence on a
 // human's prose is a false-HOLD machine); driveability is CONSUMED from
-// grid_engine, never re-declared; the readiness matrix is total and FAIL-CLOSED
-// (a missing verdict holds, never advances); and the lens is CHEAP — exactly ONE
-// agent-backed step runs upstream of `specify`.
+// grid_engine, never re-declared; the readiness matrix is total and no arm ever
+// buys a free pass to the fan-out (a missing verdict never advances); and the
+// lens is CHEAP — exactly ONE agent-backed step runs upstream of `specify`.
+//
+// Also proves the route JOINS rather than routes over absence: a lane result
+// that has not been published yet is WAITED for (never a hold), a lane that
+// finished without publishing FAILS loudly naming the missing invocation, and a
+// lane still silent at its budget fails loudly too.
 //
 // Offline only: no live claude/git/network; the critique-dir clearer is a
-// recording no-op (Fakes, not mocks).
+// recording no-op (Fakes, not mocks). The join probes write real verdict JSON
+// into a `Directory.systemTemp` workspace — the only filesystem this suite
+// touches, torn down per test, and never the process working directory.
+import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:beads_dart/beads_dart.dart';
@@ -64,32 +73,110 @@ Future<RouteVerdict> _runIntake(Bead b, {DirectoryClearer clearer = _noop}) =>
       stepArgs('tg-1/$kIntakeNode'),
     );
 
-Future<RouteVerdict> _runRoute({String? grade, String rationale = ''}) {
-  const parent = 'tg-1/spec_review';
-  return const ReadinessRouteCapability().route(
-    FakeTreeContext(
-      values: {
-        SiblingView: SiblingView(
-          cursor: {
-            '$parent/$kReadinessStep': const NodeCursor(
-              state: StepState.complete,
-            ),
-          },
-          results: {
-            '$parent/$kReadinessStep': {
-              if (grade != null) 'grade': grade,
-              if (rationale.isNotEmpty) 'rationale': rationale,
+/// The spec_review parent every route probe hangs its lane off.
+const _parent = 'tg-1/spec_review';
+
+/// The readiness LANE's node path — the freshness stamp every verdict below
+/// carries (ADR-0000 A4's foreign-node fence).
+const _lanePath = '$_parent/$kReadinessStep';
+
+/// The route's own node path.
+const _routePath = '$_parent/$kReadinessRouteStep';
+
+/// The OFFLINE route drive: no [Workspace], so the lane's recorded step result
+/// is the join candidate (the synthetic posture the rest of this suite runs in).
+Future<RouteVerdict> _runRoute({String? grade, String rationale = ''}) =>
+    const ReadinessRouteCapability().route(
+      FakeTreeContext(
+        values: {
+          SiblingView: SiblingView(
+            cursor: {_lanePath: const NodeCursor(state: StepState.complete)},
+            results: {
+              _lanePath: {
+                if (grade != null) 'grade': grade,
+                if (rationale.isNotEmpty) 'rationale': rationale,
+              },
             },
-          },
-        ),
-      },
-    ),
-    stepArgs(
-      '$parent/$kReadinessRouteStep',
-      params: const {'lane': kReadinessStep},
-    ),
+          ),
+        },
+      ),
+      stepArgs(
+        _routePath,
+        params: const {'lane': kReadinessStep, 'grid.round': '0'},
+      ),
+    );
+
+/// A live temp WORKSPACE, torn down with the test. Never the process working
+/// directory — every path below is absolute and derived from this root.
+Directory _liveWorkspace() {
+  final dir = Directory.systemTemp.createTempSync('readiness-join-');
+  addTearDown(() {
+    if (dir.existsSync()) dir.deleteSync(recursive: true);
+  });
+  return dir;
+}
+
+/// Writes the `bead-readiness` lens's verdict to its CANONICAL path under
+/// [workspaceDir], exactly as the lane writes it: both freshness stamps, a
+/// non-empty rationale, flushed so the route's next read sees a complete file.
+void _publishVerdict(
+  String workspaceDir, {
+  required String grade,
+  String rationale = 'the bead decides its approach and names its surfaces',
+  String nodePath = _lanePath,
+  int round = 0,
+}) {
+  final dir = Directory(critiqueDirPath(workspaceDir))
+    ..createSync(recursive: true);
+  File(p.join(dir.path, '$kReadinessRubric.json')).writeAsStringSync(
+    jsonEncode({
+      'rubric': kReadinessRubric,
+      'version': 1,
+      'grade': grade,
+      'rationale': rationale,
+      'nodePath': nodePath,
+      kVerdictRoundKey: round,
+    }),
+    flush: true,
   );
 }
+
+/// The canonical verdict path the route NAMES in its provenance and its
+/// failures.
+String _verdictPath(String workspaceDir) =>
+    p.join(critiqueDirPath(workspaceDir), '$kReadinessRubric.json');
+
+/// A LIVE route drive over [dir], with the lane's cursor [state] and the join
+/// tuning under test.
+Future<RouteVerdict> _runLiveRoute(
+  Directory dir, {
+  StepState state = StepState.pending,
+  Duration lanePoll = const Duration(milliseconds: 2),
+  Duration laneWaitBudget = const Duration(seconds: 30),
+  FakeTreeContext? context,
+}) =>
+    ReadinessRouteCapability(
+      lanePoll: lanePoll,
+      laneWaitBudget: laneWaitBudget,
+    ).route(
+      context ?? _liveContext(dir, state: state),
+      stepArgs(
+        _routePath,
+        params: const {'lane': kReadinessStep, 'grid.round': '0'},
+      ),
+    );
+
+/// The ambient values a LIVE route drive reads: the temp workspace plus the
+/// lane's cursor.
+FakeTreeContext _liveContext(
+  Directory dir, {
+  StepState state = StepState.pending,
+}) => FakeTreeContext(
+  values: {
+    Workspace: testWorkspace('tg-1', workspaceDir: dir.path),
+    SiblingView: SiblingView(cursor: {_lanePath: NodeCursor(state: state)}),
+  },
+);
 
 void main() {
   test('ReadinessCriticCapability inherits artifact durability', () {
@@ -235,12 +322,16 @@ void main() {
       expect(decideReadiness(grade: 'Z', rationale: ''), isA<ReadinessHold>());
     });
 
-    test('a MISSING grade FAIL-CLOSES to a hold — a transport miss must never '
-        'buy a free pass to the expensive fan-out', () {
+    test('a MISSING grade is ABSENT, not a hold — nothing was published, so '
+        'there is nothing to route over (it still never DRIVES)', () {
       for (final missing in <String?>[null, '', '   ']) {
         final verdict = decideReadiness(grade: missing, rationale: '');
-        expect(verdict, isA<ReadinessHold>());
-        expect((verdict as ReadinessHold).rule, 'no-verdict');
+        expect(verdict, isA<ReadinessAbsent>());
+        expect(
+          verdict,
+          isNot(isA<ReadinessDrive>()),
+          reason: 'absence must never buy a free pass to the expensive fan-out',
+        );
       }
     });
 
@@ -398,6 +489,12 @@ void main() {
       expect(out.payload!['grade'], 'A');
       expect(out.payload!['lane'], kReadinessStep);
       expect(out.payload!['rule'], 'ready');
+      expect(out.payload!['source-state'], 'PRESENT');
+      expect(
+        out.payload!['transport'],
+        'sibling-view',
+        reason: 'the offline posture joins on the lane\'s recorded result',
+      );
     });
 
     test('grade D ⇒ Gate carrying the lens rationale VERBATIM', () async {
@@ -408,10 +505,179 @@ void main() {
       expect(out, isA<Escalate>());
       expect((out as Escalate).reason, contains('no acceptance shape'));
       expect(out.reason, contains('SPEC-READINESS HOLD'));
+      expect(out.reason, contains('VERDICT SOURCE: PRESENT'));
     });
 
-    test('NO verdict ⇒ Gate (fail-closed)', () async {
-      expect(await _runRoute(grade: null), isA<Escalate>());
+    test('NO verdict on a COMPLETED lane FAILS — it never mints a hold on an '
+        'absence', () async {
+      await expectLater(
+        _runRoute(grade: null),
+        throwsA(
+          isA<RouteFailure>().having(
+            (f) => f.reason,
+            'reason',
+            allOf(contains('ABSENT'), contains('missing invocation')),
+          ),
+        ),
+      );
+    });
+  });
+
+  // THE JOIN (the 2026-09-14 incident, twelve rounds across four substations):
+  // the route read the lane's result BEFORE it was visible and escalated on
+  // "no verdict" while the lens's grade sat on disk. Absence is now a join
+  // state — waited for, and LOUD when the lane really did not publish.
+  group('ReadinessRouteCapability — the lane JOIN (live workspace)', () {
+    test('a late readiness verdict is waited for and advances after its '
+        'current-round JSON lands', () async {
+      final dir = _liveWorkspace();
+      final context = _liveContext(dir);
+      var settled = false;
+      final routed = _runLiveRoute(dir, context: context).whenComplete(() {
+        settled = true;
+      });
+
+      // The lane is mid-flight: nothing on disk, nothing in the view. The
+      // route must still be WAITING, not holding.
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      expect(
+        settled,
+        isFalse,
+        reason: 'an ABSENT lane result is waited for, never escalated on',
+      );
+
+      // The lens publishes: its verdict lands first, its result becomes
+      // visible second — the real ordering the incident raced against.
+      _publishVerdict(dir.path, grade: 'B');
+      context.provide<SiblingView>(
+        SiblingView(
+          cursor: {_lanePath: const NodeCursor(state: StepState.complete)},
+          results: {
+            _lanePath: const {'grade': 'B', 'rationale': 'specifiable'},
+          },
+        ),
+      );
+
+      final out = await routed;
+      expect(out, isA<Advance>());
+      expect((out as Advance).payload!['grade'], 'B');
+      expect(out.payload!['source-state'], 'PRESENT');
+      expect(out.payload!['source-path'], _verdictPath(dir.path));
+      expect(out.payload!['transport'], 'file');
+      expect(
+        out,
+        isNot(isA<Escalate>()),
+        reason: 'a late verdict must never mint a gate',
+      );
+    });
+
+    test('a completed readiness lane without current-round JSON fails loudly '
+        'instead of holding', () async {
+      final dir = _liveWorkspace();
+      await expectLater(
+        _runLiveRoute(dir, state: StepState.complete),
+        throwsA(
+          isA<RouteFailure>().having(
+            (f) => f.reason,
+            'reason',
+            allOf(
+              contains('ABSENT'),
+              contains('missing invocation'),
+              contains(_lanePath),
+              contains(_verdictPath(dir.path)),
+            ),
+          ),
+        ),
+      );
+    });
+
+    test('present readiness JSON preserves passing and failing routes with '
+        'source provenance', () async {
+      for (final grade in ['A', 'B', 'C']) {
+        final dir = _liveWorkspace();
+        _publishVerdict(dir.path, grade: grade);
+        final out = await _runLiveRoute(dir, state: StepState.complete);
+        expect(out, isA<Advance>());
+        expect((out as Advance).payload, {
+          'verdict': 'drive',
+          'grade': grade,
+          'lane': kReadinessStep,
+          'rule': 'ready',
+          'source-state': 'PRESENT',
+          'source-path': _verdictPath(dir.path),
+          'transport': 'file',
+        });
+      }
+
+      for (final grade in ['D', 'E', 'F']) {
+        final dir = _liveWorkspace();
+        _publishVerdict(
+          dir.path,
+          grade: grade,
+          rationale: 'no acceptance shape; name the surfaces it touches',
+        );
+        final out = await _runLiveRoute(dir, state: StepState.complete);
+        expect(out, isA<Escalate>());
+        expect((out as Escalate).reason, contains('SPEC-READINESS HOLD'));
+        expect(out.reason, contains('no acceptance shape'));
+        expect(
+          out.reason,
+          contains(
+            'VERDICT SOURCE: PRESENT — ${_verdictPath(dir.path)} via file.',
+          ),
+        );
+      }
+
+      // The NEGATIVE controls — the fences are the committee reader's own, so
+      // a foreign node's verdict and a prior round's verdict are ABSENT here,
+      // never a grade this route could act on.
+      for (final stale in [
+        (nodePath: '$_parent/some-other-lane', round: 0),
+        (nodePath: _lanePath, round: 7),
+      ]) {
+        final dir = _liveWorkspace();
+        _publishVerdict(
+          dir.path,
+          grade: 'A',
+          nodePath: stale.nodePath,
+          round: stale.round,
+        );
+        await expectLater(
+          _runLiveRoute(dir, state: StepState.complete),
+          throwsA(
+            isA<RouteFailure>().having(
+              (f) => f.reason,
+              'reason',
+              contains('ABSENT'),
+            ),
+          ),
+          reason: 'a verdict failing a freshness fence never joins',
+        );
+      }
+    });
+
+    test('a readiness lane still silent past its wait budget fails loudly '
+        'naming the budget', () async {
+      final dir = _liveWorkspace();
+      await expectLater(
+        _runLiveRoute(
+          dir,
+          lanePoll: const Duration(milliseconds: 2),
+          laneWaitBudget: const Duration(milliseconds: 30),
+        ),
+        throwsA(
+          isA<RouteFailure>().having(
+            (f) => f.reason,
+            'reason',
+            allOf(
+              contains('0s'),
+              contains('30ms'),
+              contains(_lanePath),
+              contains(_verdictPath(dir.path)),
+            ),
+          ),
+        ),
+      );
     });
   });
 

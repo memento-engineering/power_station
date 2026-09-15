@@ -20,8 +20,10 @@
 ///  2. [ReadinessCriticCapability] — the JUDGEMENT, ONE agent, riding the
 ///     SHARED verdict transport ([CriticCapability], ADR-0000 A13(3)) with the
 ///     `bead-readiness` rubric.
-///  3. [ReadinessRouteCapability] — the decision point: `A`–`C` ⇒ drive;
-///     `D`–`F`, or a missing verdict, ⇒ HOLD.
+///  3. [ReadinessRouteCapability] — the decision point AND the lane's JOIN:
+///     `A`–`C` ⇒ drive; `D`–`F` ⇒ HOLD. An ABSENT lane result is NEITHER — it
+///     is a join state the route WAITS on, and a lane that finished without
+///     publishing one fails the route LOUDLY instead of minting a hold.
 ///
 /// **Tier 1 is DELIBERATELY NARROW.** It asserts only what a machine can be
 /// RIGHT about: a type the station drives, and a brief that exists. It applies
@@ -67,6 +69,8 @@
 /// and never spawns its agent — for a session minted before it existed.
 library;
 
+import 'dart:io';
+
 import 'package:beads_dart/beads_dart.dart';
 import 'package:genesis_tree/genesis_tree.dart';
 import 'package:grid_engine/grid_engine.dart';
@@ -86,6 +90,7 @@ import 'decision_register.dart';
 import 'fix_in_flight.dart';
 import 'refinement_flag.dart';
 import 'respec_ledger.dart';
+import 'route_failure.dart';
 
 /// The deterministic intake-contract step id (the ladder's head — zero agents).
 const String kIntakeStep = 'intake';
@@ -163,15 +168,36 @@ final class ReadinessHold extends ReadinessVerdict {
   final String reason;
 }
 
+/// NO verdict has been published for this round — a JOIN state, NOT a
+/// judgement. The lane has said nothing yet: its result may simply not be
+/// VISIBLE to the route, and its artifact may not be on disk, at the instant
+/// the route looked.
+///
+/// This arm is the correction recorded as
+/// `power_station#readiness-route-joins-on-a-published-verdict-never-on-absence`:
+/// absence is never routed, so [ReadinessRouteCapability] WAITS on it and
+/// re-reads, and a lane that FINISHED without publishing fails the route
+/// loudly. The no-free-pass invariant is untouched — absence still never
+/// advances a bead — but it no longer mints a human gate on a verdict that was
+/// merely late.
+final class ReadinessAbsent extends ReadinessVerdict {
+  /// Creates the absent-result arm.
+  const ReadinessAbsent();
+}
+
 /// The readiness MATRIX (pure — zero I/O; the whole decision, unit-testable).
 ///
-///  1. a MISSING/blank [grade] ⇒ [ReadinessHold] (`no-verdict`) — fail-closed.
-///     The lens's job is to withhold an expensive fan-out; a transport miss must
-///     never buy a free pass to it. The fail direction is SAFE by construction
-///     (ADR-0000 A13(7)): a false HOLD a governor unwinds, never a false drive.
+///  1. a MISSING/blank [grade] ⇒ [ReadinessAbsent] — the lane published
+///     NOTHING this round, so there is nothing to route over. Absence is a
+///     join state, not a verdict: the caller waits for the lane to publish and
+///     re-reads, and only a lane that FINISHED silent is a failure. The fail
+///     direction stays SAFE by construction (ADR-0000 A13(7)): absence never
+///     ADVANCES — what it stopped doing is minting a governor gate that names
+///     no finding.
 ///  2. `A`/`B`/`C` ⇒ [ReadinessDrive] — the bead is specifiable.
 ///  3. anything else (`D`/`E`/`F`, or an off-ladder letter) ⇒ [ReadinessHold]
-///     (`not-ready`) carrying the lens's [rationale] VERBATIM as the ask.
+///     (`not-ready`) carrying the lens's [rationale] VERBATIM as the ask. A
+///     PRESENT failing grade is the ONLY hold this ladder mints.
 ///
 /// There is no auto-fix arm (unlike the spec route's RESPEC, `respec.dart`): a
 /// respec re-runs an AGENT that can rewrite the spec, but nothing in this circuit
@@ -182,17 +208,7 @@ ReadinessVerdict decideReadiness({
   required String rationale,
 }) {
   final raw = grade?.trim() ?? '';
-  if (raw.isEmpty) {
-    return const ReadinessHold(
-      rule: 'no-verdict',
-      reason:
-          'SPEC-READINESS HOLD — the `$kReadinessRubric` lens returned NO '
-          'verdict (no grade reached the route). Fail-closed: a bead advances '
-          'to the specify stage only on a verdict that SAYS it is ready. '
-          'Re-arm the bead to re-run the lens; if this repeats, the lane '
-          'itself is broken.',
-    );
-  }
+  if (raw.isEmpty) return const ReadinessAbsent();
   final letter = raw.toUpperCase();
   if (letter == 'A' || letter == 'B' || letter == 'C') {
     return ReadinessDrive(letter);
@@ -568,40 +584,165 @@ String beadUnderIntake(Bead bead) {
   return b.toString();
 }
 
-/// TIER 3 — the readiness DECISION point (zero agents). Reads the readiness
-/// lane's grade + rationale off the ambient [SiblingView] (the effect verb —
-/// never a subscription/re-query, D-5), applies the pure [decideReadiness]
-/// matrix, and either advances ([Advance], with the route-style provenance the
-/// code and spec routes emit) or HOLDS ([Escalate], carrying the refinement ask).
+/// TIER 3 — the readiness DECISION point (zero agents) AND the readiness lane's
+/// JOIN. It decides over THREE states of the lane's result, never two:
 ///
-/// The lane it reads is its `lane` param (default [kReadinessStep]) — the same
-/// honesty the committee routes carry in their `critics`/`gating` params: a
-/// route NAMES the lanes it decided over.
+///  - **PRESENT and passing** (`A`–`C`) ⇒ [Advance], carrying the route-style
+///    provenance the code and spec routes emit plus the verdict's own SOURCE
+///    (`source-state`, `source-path`, `transport`).
+///  - **PRESENT and failing** (`D`–`F`, or an off-ladder letter) ⇒ [Escalate]
+///    carrying the refinement ask. This is the ONLY hold this route mints.
+///  - **ABSENT** ⇒ neither. Nothing has been published for this round, so there
+///    is nothing to decide: WAIT [lanePoll] and re-read. A lane that is ALREADY
+///    positively terminal has finished without publishing — a broken LANE, not
+///    a verdict — and that throws [RouteFailure] naming the missing invocation.
+///    A lane still silent at [laneWaitBudget] throws too. Absence NEVER holds.
+///
+/// **Why absence stopped being a hold.** On 2026-09-14 twelve rounds across
+/// four substations escalated here on "no verdict" WITH the lens's grade
+/// already on disk, written seconds either side of the escalation: the route
+/// read `SiblingView.resultOf` before the lane's result was visible and treated
+/// ABSENT exactly as it treated FAILED. Each cost a governor wake and a hand
+/// resolve, and the gate it minted named no finding anyone could act on — a
+/// hold on absence is not fail-closed, it is a false hold on a bead the lens
+/// had already passed. The correction is recorded as
+/// `power_station#readiness-route-joins-on-a-published-verdict-never-on-absence`;
+/// it AMENDS ADR-0000 A17(7)'s missing-verdict arm and keeps its no-free-pass
+/// half intact — absence still never advances the bead, it waits or it fails.
+///
+/// **The bounded mid-wave join is [SpecRouteCapability]'s shape, reused**
+/// (`respec.dart`), exactly as [DiscoveryRouteCapability] reuses it: re-read
+/// every [lanePoll] until the lane publishes, bounded by [laneWaitBudget], with
+/// the mounted- and cancel-checks BEFORE the ambient re-read, then refuse
+/// LOUDLY rather than decide over an unpublished lane. The wait is kept LOCAL
+/// to this route rather than hoisted into `RouteCapability`: hoisting it would
+/// change two sibling routes this bead does not touch.
+///
+/// **The live source is the committee's own reader.** A live workspace joins
+/// through [currentVerdictOnDisk] — the SAME single strict parser, canonical→
+/// round-fresh-stray transport, `nodePath` fence (ADR-0000 A4) and `round`
+/// fence (A15(5) alt-A via A34) `CriticCapability.result()` reads through — so
+/// this route adds NO second parser and cannot accept a foreign or stale
+/// verdict. The lane's completion contract is artifact DURABILITY
+/// ([ReadinessCriticCapability] inherits it), so a positively-terminal lane
+/// provably HAS a durable current-round artifact and one that does not truly
+/// did not run — which is what makes the ABSENT arm's loud failure honest
+/// rather than a guess. Offline (a
+/// workspace dir that does not exist — the synthetic path an offline suite
+/// mounts) there is no artifact to read, so the lane's recorded step result is
+/// the candidate, labelled `sibling-view`.
+///
+/// The lane it reads is its `lane` param (default [kReadinessStep]) and the
+/// verdict it reads is its `rubric` param (default [kReadinessRubric]) — the
+/// same honesty the committee routes carry in their `critics`/`gating` params:
+/// a route NAMES the lane it decided over and the artifact it decided on.
 class ReadinessRouteCapability extends RouteCapability {
-  /// Creates the readiness route.
-  const ReadinessRouteCapability();
+  /// Creates the readiness route, optionally over its JOIN tuning: the
+  /// [lanePoll] interval between re-reads, and the [laneWaitBudget] after which
+  /// a still-silent lane fails LOUDLY. The defaults cover one mid-tier lens
+  /// ride with margin; tests inject millisecond values.
+  const ReadinessRouteCapability({
+    this.lanePoll = const Duration(seconds: 15),
+    this.laneWaitBudget = const Duration(minutes: 20),
+  });
+
+  /// How often the WAIT re-reads the join (see [route]).
+  final Duration lanePoll;
+
+  /// How long the WAIT may last before the route refuses LOUDLY.
+  final Duration laneWaitBudget;
 
   @override
   Future<RouteVerdict> route(TreeContext context, StepArgs args) async {
-    // Read the ambient value at ENTRY (while mounted); the matrix is pure over
-    // the captured values.
-    final siblings =
+    // Read the ambient values at ENTRY (while mounted); after every await only
+    // the captured values + the cancel token are touched before re-reading.
+    final workspace = context.getInheritedSeedOfExactType<Workspace>();
+    final laneId = args.params['lane'] ?? kReadinessStep;
+    final rubric = args.params['rubric'] ?? kReadinessRubric;
+    final laneNodePath = '${parentPath(args.nodePath)}/$laneId';
+    final workspaceDir = workspace?.workspaceDir ?? '';
+    final sourcePath = p.join(critiqueDirPath(workspaceDir), '$rubric.json');
+    final round = verdictRound(args);
+    final live =
+        workspaceDir.isNotEmpty && Directory(workspaceDir).existsSync();
+    final deadline = DateTime.now().add(laneWaitBudget);
+    var siblings =
         context.getInheritedSeedOfExactType<SiblingView>() ??
         const SiblingView();
-    final laneId = args.params['lane'] ?? kReadinessStep;
-    final lane = siblings.resultOf('${parentPath(args.nodePath)}/$laneId');
 
-    return switch (decideReadiness(
-      grade: lane['grade'],
-      rationale: lane['rationale'] ?? '',
-    )) {
-      ReadinessDrive(:final grade) => Advance({
-        'verdict': 'drive',
-        'grade': grade,
-        'lane': laneId,
-        'rule': 'ready',
-      }),
-      ReadinessHold(:final reason) => Escalate(reason),
-    };
+    while (true) {
+      final candidate = live
+          ? currentVerdictOnDisk(
+              workspaceDir: workspaceDir,
+              rubric: rubric,
+              nodePath: laneNodePath,
+              round: round,
+            )
+          : _recordedCandidate(siblings.resultOf(laneNodePath));
+      final transport = candidate?['transport'] ?? '';
+
+      switch (decideReadiness(
+        grade: candidate?['grade'],
+        rationale: candidate?['rationale'] ?? '',
+      )) {
+        case ReadinessDrive(:final grade):
+          return Advance({
+            'verdict': 'drive',
+            'grade': grade,
+            'lane': laneId,
+            'rule': 'ready',
+            'source-state': 'PRESENT',
+            'source-path': sourcePath,
+            'transport': transport,
+          });
+        case ReadinessHold(:final reason):
+          return Escalate(
+            '$reason\nVERDICT SOURCE: PRESENT — $sourcePath via $transport.',
+          );
+        case ReadinessAbsent():
+          // The lane FINISHED and published nothing. Its completion contract is
+          // artifact durability, so this is a missing INVOCATION — name it and
+          // fail; a hold here would park the bead on a defect of the lane.
+          if (siblings.cursorOf(laneNodePath).isPositiveTerminal) {
+            throw RouteFailure(
+              'readiness-route: ABSENT — the `$rubric` lane at $laneNodePath is '
+              'positively terminal for round $round but published NO verdict: '
+              'nothing reached its step result and no current-round artifact '
+              'exists at $sourcePath. That is a missing invocation (a broken '
+              'LANE), not a grade — failing LOUDLY rather than holding the bead '
+              'on an absence.',
+            );
+          }
+          if (!DateTime.now().isBefore(deadline)) {
+            throw RouteFailure(
+              'readiness-route: waited ${laneWaitBudget.inSeconds}s '
+              '(${laneWaitBudget.inMilliseconds}ms) but the `$rubric` lane at '
+              '$laneNodePath is still non-terminal with no current-round '
+              '(round $round) verdict at $sourcePath — a stalled lane. Refusing '
+              'LOUDLY; deciding over an unpublished lane is withheld.',
+            );
+          }
+      }
+
+      await Future<void>.delayed(lanePoll);
+      // A context torn down across the wait is a route that no longer has a
+      // node to decide for. Unwind on the SAME channel as an explicit cancel —
+      // kept a separate statement from the token check so the handle is
+      // provably mounted before it is read again.
+      if (!context.mounted) throw kRouteCancelled;
+      if (args.cancel.isCancelled) throw kRouteCancelled;
+      // Re-read the ambient view for the next attempt (post-mounted- and
+      // post-cancel-check — the effect verb is snapshot-at-read and safe across
+      // the wait, the `SpecRouteCapability` precedent).
+      siblings =
+          context.getInheritedSeedOfExactType<SiblingView>() ??
+          const SiblingView();
+    }
   }
 }
+
+/// The OFFLINE join candidate — the lane's RECORDED step result, labelled with
+/// the transport it came through so an advance or a hold still names its
+/// source. An EMPTY result is null: absence, never an empty verdict.
+Map<String, String>? _recordedCandidate(Map<String, String> recorded) =>
+    recorded.isEmpty ? null : {...recorded, 'transport': 'sibling-view'};
