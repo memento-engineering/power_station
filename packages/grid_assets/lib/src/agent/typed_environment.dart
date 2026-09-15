@@ -151,6 +151,23 @@ AvailableEnvironments availableEnvironmentsOf(TreeContext context) =>
           buildBuiltinEnvironmentRegistry(),
     );
 
+/// The availability WALK as a PURE function: the first entry of [preference]
+/// present in [available], or null when none is present.
+///
+/// [firstAvailable]'s body with its tree read lifted out, so a caller that has
+/// ALREADY subscribed to the ambient presence set in a `build` (the D-H build
+/// verb — ADR-0008 D3) walks the same order without a second, non-binding read
+/// of the tree. Same walk, one copy.
+AgentEnvironment? firstAvailableFrom(
+  ModelPreference preference,
+  AvailableEnvironments available,
+) {
+  for (final candidate in preference.entries) {
+    if (available.contains(candidate)) return candidate;
+  }
+  return null;
+}
+
 /// The availability WALK: the first entry of [preference] present in the
 /// ambient [AvailableEnvironments], or null when none is present.
 ///
@@ -159,13 +176,7 @@ AvailableEnvironments availableEnvironmentsOf(TreeContext context) =>
 AgentEnvironment? firstAvailable(
   TreeContext context,
   ModelPreference preference,
-) {
-  final available = availableEnvironmentsOf(context);
-  for (final candidate in preference.entries) {
-    if (available.contains(candidate)) return candidate;
-  }
-  return null;
-}
+) => firstAvailableFrom(preference, availableEnvironmentsOf(context));
 
 /// The EFFECTIVE typed lookup - the one function a spawn site calls (bead
 /// `pow-n6n.2` wires the six of them).

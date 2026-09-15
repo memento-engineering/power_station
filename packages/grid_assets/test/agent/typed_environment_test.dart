@@ -294,4 +294,40 @@ void main() {
       expect(config.params['model'], 'haiku');
     });
   });
+
+  group('firstAvailableFrom is the pure availability walk', () {
+    test('it returns the FIRST present entry, in preference order', () {
+      const preference = ModelPreference([_unarmed, _strong, _fast]);
+      final available = AvailableEnvironments({_fast, _strong});
+      expect(firstAvailableFrom(preference, available), _strong);
+      // The SAME set walked by a preference that reverses the two present
+      // entries picks the other one: order comes from the preference.
+      expect(
+        firstAvailableFrom(const ModelPreference([_fast, _strong]), available),
+        _fast,
+      );
+    });
+
+    test('it returns null when no entry is present', () {
+      const preference = ModelPreference([_unarmed, _noCommand]);
+      expect(
+        firstAvailableFrom(preference, AvailableEnvironments({_fast})),
+        isNull,
+      );
+      expect(
+        firstAvailableFrom(
+          const ModelPreference([_fast]),
+          AvailableEnvironments.none,
+        ),
+        isNull,
+      );
+      expect(
+        firstAvailableFrom(
+          const ModelPreference([]),
+          AvailableEnvironments({_fast}),
+        ),
+        isNull,
+      );
+    });
+  });
 }
