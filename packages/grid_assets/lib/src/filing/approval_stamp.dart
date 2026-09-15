@@ -11,18 +11,31 @@ const String kApprovedRevKey = 'grid.approved_rev';
 
 /// The scheme + version prefix of an approval revision that binds the FILING
 /// BASIS — the digest `FilingContract.evaluate` derives from the bead's work
-/// fields, its validation plan and its dependency proofs.
+/// fields, its validation plan and the dependency ROWS bd holds for it.
 ///
 /// A revision carrying this prefix is COMPARABLE: re-evaluating the filing
 /// reproduces it exactly when nothing the governor approved has changed, and
 /// produces a different one the moment something has.
-const String kFilingApprovalRevisionPrefix = 'filing:v1:sha256:';
+///
+/// The version moved to `v2` when the basis stopped carrying a link-proof
+/// member. That member asserted a cross-store link bead had been found, and
+/// the hard cut that retired cross-store link beads made it permanently false
+/// — a digest member no evaluation can ever reproduce is a receipt nothing can
+/// re-derive. There is NO dual-basis compatibility path: a receipt minted
+/// under a retired version is [isStaleFilingApprovalStamp], never a second
+/// accepted basis, so every standing receipt reads as stale exactly ONCE and
+/// the governor re-approves in one sweep.
+const String kFilingApprovalRevisionPrefix = 'filing:v2:sha256:';
 
 /// A raw git sha, in the abbreviated-to-full range git itself accepts.
 final RegExp _legacyGitSha = RegExp(r'^[0-9a-f]{7,40}$');
 
-/// The lowercase hex body of a `filing:v1:sha256:` revision.
+/// The lowercase hex body of a [kFilingApprovalRevisionPrefix] revision.
 final RegExp _filingDigest = RegExp(r'^[0-9a-f]{64}$');
+
+/// A COMPLETE filing revision of any scheme version — the shape the approve
+/// verb mints, whichever version minted it.
+final RegExp _anyFilingRevision = RegExp(r'^filing:v\d+:sha256:[0-9a-f]{64}$');
 
 /// Whether [rev] is a revision this receipt scheme recognizes at all.
 bool _isApprovalRevision(String rev) =>
@@ -31,6 +44,52 @@ bool _isApprovalRevision(String rev) =>
         _filingDigest.hasMatch(
           rev.substring(kFilingApprovalRevisionPrefix.length),
         ));
+
+/// Whether [rev] is a complete filing revision minted under a RETIRED scheme
+/// version.
+///
+/// A malformed revision is not one: it was never a receipt this package wrote,
+/// so it is an ordinary unapproved bead rather than a migration.
+bool _isRetiredFilingRevision(String rev) =>
+    _anyFilingRevision.hasMatch(rev) &&
+    !rev.startsWith(kFilingApprovalRevisionPrefix);
+
+/// The COMPLETE receipt [bead] carries when its revision satisfies [accepts],
+/// or null when it carries none.
+///
+/// ONE reading of a receipt's actor, instant and revision, so an accepted
+/// receipt and a retired one can never disagree about anything but the scheme
+/// version that minted them.
+ApprovalStamp? _approvalStampWhere(
+  Bead bead,
+  bool Function(String rev) accepts,
+) {
+  final by = bead.metadata[kApprovedByKey];
+  if (by is! String || by.trim().isEmpty) return null;
+  final at = bead.metadata[kApprovedAtKey];
+  if (at is! String) return null;
+  final instant = DateTime.tryParse(at.trim());
+  if (instant == null || !instant.isUtc) return null;
+  final rev = bead.metadata[kApprovedRevKey];
+  if (rev is! String || !accepts(rev.trim())) return null;
+  return ApprovalStamp(by: by.trim(), at: at.trim(), rev: rev.trim());
+}
+
+/// Whether [bead] carries a COMPLETE receipt minted under a RETIRED filing
+/// scheme version — well-formed in every part, and unreproducible only because
+/// the basis its digest was taken over no longer exists.
+///
+/// This is the MIGRATION report, not a second accepted basis: a retired
+/// receipt is never an [ApprovalStamp] and never mounts. It exists so the
+/// refusal can say STALE with the approve verb as its remedy, instead of
+/// saying "not approved" about a bead a governor demonstrably approved.
+///
+/// False for every other shape — a current receipt, a raw git sha, a malformed
+/// revision, and an incomplete receipt missing an actor or a UTC instant. An
+/// upper-case or truncated digest was never minted by the verb, so it is an
+/// ordinary unapproved bead rather than work awaiting one re-approval.
+bool isStaleFilingApprovalStamp(Bead bead) =>
+    _approvalStampWhere(bead, _isRetiredFilingRevision) != null;
 
 /// The RECEIPT the approve verb writes — and the ONLY approval marker the
 /// mount gate reads: WHO approved, WHEN, and against WHICH revision of the
@@ -48,12 +107,18 @@ final class ApprovalStamp {
   /// null exactly like a hand-added label.
   ///
   /// [kApprovedRevKey] is accepted in two shapes. The authoritative one is a
-  /// [kFilingApprovalRevisionPrefix] digest, which the mount gate compares
-  /// against a fresh evaluation. The other is a raw git sha — a READ-ONLY
+  /// [kFilingApprovalRevisionPrefix] digest, which names the very content the
+  /// governor approved. The other is a raw git sha — a READ-ONLY
   /// COMPATIBILITY ARM for receipts the verb already wrote against a store
   /// HEAD, kept so approved in-flight work is not stranded by this tightening.
   /// The verb writes only [kFilingApprovalRevisionPrefix] revisions now, so
   /// the raw-sha arm can only shrink; nothing mints a new one.
+  ///
+  /// A receipt minted under a RETIRED filing scheme version is a third shape
+  /// and is NOT accepted here — see [isStaleFilingApprovalStamp], which
+  /// classifies it so the refusal can name the one remedy. A retired basis is
+  /// unreproducible by construction, so accepting it would be a second basis
+  /// nothing can re-derive.
   ///
   /// Retirement: the_grid tg-lt0s makes StationAdmissionAuthority grants authoritative.
   ///
@@ -62,17 +127,8 @@ final class ApprovalStamp {
   /// when it becomes the mount authority the raw-sha arm goes first and this
   /// whole interim receipt comparison follows it — a second grant scheme is
   /// never the answer.
-  static ApprovalStamp? tryParse(Bead bead) {
-    final by = bead.metadata[kApprovedByKey];
-    if (by is! String || by.trim().isEmpty) return null;
-    final at = bead.metadata[kApprovedAtKey];
-    if (at is! String) return null;
-    final instant = DateTime.tryParse(at.trim());
-    if (instant == null || !instant.isUtc) return null;
-    final rev = bead.metadata[kApprovedRevKey];
-    if (rev is! String || !_isApprovalRevision(rev.trim())) return null;
-    return ApprovalStamp(by: by.trim(), at: at.trim(), rev: rev.trim());
-  }
+  static ApprovalStamp? tryParse(Bead bead) =>
+      _approvalStampWhere(bead, _isApprovalRevision);
 
   /// The approver — the `--actor` the verb ran under.
   final String by;
@@ -104,7 +160,8 @@ final class ApprovalStamp {
 ///
 /// Delegates to [ApprovalStamp.tryParse] — there is no timestamp-only
 /// shortcut, because a lone `grid.approved_at` is exactly what a hand-written
-/// approval looks like.
+/// approval looks like, and no retired-scheme shortcut, because a receipt
+/// whose basis cannot be re-derived is not an approval of anything.
 ///
 /// This is the mount gate's approval clause — see `mountEligibilityFindings`
 /// in `lib/src/code/mount_eligibility.dart`.

@@ -4,6 +4,14 @@ import 'package:grid_engine/grid_engine.dart';
 import 'package:test/test.dart';
 
 const String _notApproved = 'approval: not approved - run the approve verb';
+const String _stale = 'approval: stale - rerun the approve verb';
+
+/// A RETIRED filing receipt: complete in every part, well-formed in every
+/// part, and minted under a basis scheme version this package no longer mints
+/// — the one shape the v2 cut has to name rather than call unapproved.
+const String _retiredRev =
+    'filing:v1:sha256:e6635f6c8a3307a33271500460a95c176baa'
+    'adaf11f3a479663ae534aa33d52c';
 
 /// A complete receipt of the shape the verb wrote BEFORE revisions bound the
 /// filing basis: an actor, a UTC instant and a raw store-HEAD git sha.
@@ -194,7 +202,10 @@ void main() {
       {..._legacyReceipt, 'grid.approved_rev': '9F1C2D3'},
       {..._legacyReceipt, 'grid.approved_rev': '9f1c2d'},
       {..._legacyReceipt, 'grid.approved_rev': 'filing:v1:sha256:abc'},
-      {..._legacyReceipt, 'grid.approved_rev': 'filing:v2:sha256:${'a' * 64}'},
+      {..._legacyReceipt, 'grid.approved_rev': 'filing:sha256:${'a' * 64}'},
+      {..._legacyReceipt, 'grid.approved_rev': 'filing:v1:sha256:${'a' * 63}'},
+      {..._legacyReceipt, 'grid.approved_rev': 'FILING:V1:SHA256:${'a' * 64}'},
+      {..._legacyReceipt, 'grid.approved_rev': 'filing:v1:sha256:${'A' * 64}'},
       {..._legacyReceipt, 'grid.approved_rev': 'a' * 64},
     ]) {
       final bead = _bead(stamp: incomplete);
@@ -203,6 +214,9 @@ void main() {
       expect(mountEligibilityFindings(bead), [
         _notApproved,
       ], reason: '$incomplete');
+      // A shape the verb never minted is an ordinary unapproved bead, not
+      // work awaiting the one-time re-approval sweep.
+      expect(isStaleFilingApprovalStamp(bead), isFalse, reason: '$incomplete');
     }
     expect(isApprovalStamped(_bead(stamp: _legacyReceipt)), isTrue);
     expect(isApprovalStamped(_bead(stamp: _boundReceipt())), isTrue);
@@ -275,6 +289,83 @@ void main() {
       expect(_clause(mountEligibilityDecision(legacy)), isNull, reason: rev);
     }
   });
+
+  test(
+    'AC-2: a retired filing receipt is refused as STALE, not unapproved',
+    () {
+      final retired = _bead(stamp: _boundReceipt(_retiredRev));
+
+      // Neither accepted-stamp API takes it: a basis nothing can re-derive is
+      // not an approval of anything, so it never mounts.
+      expect(ApprovalStamp.tryParse(retired), isNull);
+      expect(isApprovalStamped(retired), isFalse);
+      expect(isStaleFilingApprovalStamp(retired), isTrue);
+
+      // But the refusal NAMES it for what it is — a governor did approve this
+      // bead, and one re-approval is the whole remedy.
+      expect(mountEligibilityFindings(retired), [_stale]);
+      expect(_clause(mountEligibilityDecision(retired)), _stale);
+
+      // It is a SCHEME-VERSION reading, never a digest comparison: no evaluated
+      // revision, an agreeing one and a disagreeing one all say the same thing.
+      for (final evaluated in <String?>[null, _boundRev, _otherRev]) {
+        expect(
+          mountEligibilityFindings(
+            retired,
+            evaluatedApprovalRevision: evaluated,
+          ),
+          [_stale],
+          reason: '$evaluated',
+        );
+      }
+
+      // The earlier clauses keep their order and their precedence around it.
+      expect(
+        mountEligibilityFindings(
+          _bead(
+            type: IssueType.epic,
+            plan: null,
+            stamp: _boundReceipt(_retiredRev),
+          ),
+        ),
+        ['type: not driveable', 'validation_plan: missing', _stale],
+      );
+
+      // Every ACCEPTED shape stays accepted and is never called stale: the
+      // current scheme, and both ends of the raw-git-sha compatibility arm.
+      for (final live in <String>[
+        _boundRev,
+        'c635790',
+        '9f1c2d3e4b5a69788899aabbccddeeff00112233',
+      ]) {
+        final bead = _bead(stamp: _boundReceipt(live));
+        expect(isApprovalStamped(bead), isTrue, reason: live);
+        expect(isStaleFilingApprovalStamp(bead), isFalse, reason: live);
+        expect(mountEligibilityFindings(bead), isEmpty, reason: live);
+      }
+
+      // An INCOMPLETE receipt carrying a retired revision was never written by
+      // the verb, so it is unapproved rather than stale.
+      for (final incomplete in <Map<String, dynamic>>[
+        {'grid.approved_rev': _retiredRev},
+        {..._boundReceipt(_retiredRev)}..remove('grid.approved_by'),
+        {
+          ..._boundReceipt(_retiredRev),
+          'grid.approved_at': '2026-09-02T14:30:00',
+        },
+      ]) {
+        final bead = _bead(stamp: incomplete);
+        expect(
+          isStaleFilingApprovalStamp(bead),
+          isFalse,
+          reason: '$incomplete',
+        );
+        expect(mountEligibilityFindings(bead), [
+          _notApproved,
+        ], reason: '$incomplete');
+      }
+    },
+  );
 
   test('intake remains its distinct two-clause lifecycle contract', () {
     final bead = _bead(plan: null, stamp: const {});

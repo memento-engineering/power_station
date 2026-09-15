@@ -1,5 +1,22 @@
 ## Unreleased
 
+- Breaking: approval receipts are cut to `filing:v2:sha256:`. The digest is taken over the bead's
+  own filing fields (`id`, `title`, `description`, `design`, `acceptance_criteria`, `notes`,
+  `spec_id`, `issue_type`, `priority`, `validation_plan`) plus the local and `external:` rows of
+  `DependencyProjection.basis`, and it carries NO link-proof member: that member asserted a
+  cross-store link bead had been FOUND, which the hard cut retiring cross-store link beads made
+  permanently false, so no evaluation could ever reproduce a receipt holding it. Every receipt
+  minted under the retired scheme is therefore refused ONCE, as
+  `approval: stale - rerun the approve verb`, with the approve verb as its named remedy —
+  `isStaleFilingApprovalStamp` classifies it, `mountEligibilityFindings` reports it, and the `mount`
+  verb's `approval_stamp` row renders it BLOCKED naming the full retired `grid.approved_rev` in both
+  the JSON and plain renderings. There is NO dual-basis compatibility path: a retired receipt is
+  never an `ApprovalStamp`, never mounts, and nothing in this package still generates or accepts the
+  retired scheme. The raw-git-sha compatibility arm is untouched, and this is a SCHEME-VERSION
+  reading rather than a digest comparison, so it cannot fire on an ordinary edit to a field the
+  basis hashes. The one-time re-approval sweep over standing receipts is the governor's operational
+  work at the boot checklist, outside this package.
+
 - Added: the `mount` verb — the OFFLINE explainer for why one bead will not mount, vended as
   `MountCommand` over `MountExplanationService` / `MountExplanationContract`. It emits ten ordered
   preconditions (`driveable_type`, `validation_plan`, `acceptance_criteria`, `dependencies`,

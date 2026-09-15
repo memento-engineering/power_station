@@ -73,8 +73,11 @@ final class FilingReport {
   /// digest of everything the four rows are evaluated over. Empty for a report
   /// with no bead to evaluate.
   ///
-  /// This is what `ApproveService` stamps as `grid.approved_rev` and what the
-  /// mount gate re-derives to tell a live receipt from a stale one.
+  /// This is what `ApproveService` stamps as `grid.approved_rev`. The mount
+  /// gate does not compare it against the stamped one (see
+  /// `mountEligibilityFindings`); what that gate reads off the receipt is its
+  /// SCHEME VERSION, which tells a receipt minted under the current basis from
+  /// one minted under a retired, unreproducible one.
   final String approvalRevision;
 
   /// Lookup-level refusal; non-null reports never pass.
@@ -261,7 +264,8 @@ final class DependencyProjection {
   ];
 }
 
-/// The version-1 approval revision of one evaluated filing.
+/// The approval revision of one evaluated filing, under the CURRENT scheme
+/// version ([kFilingApprovalRevisionPrefix]).
 ///
 /// It digests exactly what an approval is a judgement ABOUT: the bead's work
 /// fields, its validation plan, and the DEPENDENCY ROWS bd holds for it
@@ -272,14 +276,20 @@ final class DependencyProjection {
 /// content. The station's ROSTER is excluded for the same reason: arming a
 /// substation is the station's posture, not the bead's content.
 ///
-/// The `dependencies` member is the one that MOVED with the 2026-09-13 ruling.
-/// It used to digest the ids a description NAMED, each with whether a local
-/// edge and a link proof were found; it now digests the rows bd holds, typed
-/// `local` or `external`. Every standing `grid.approved_rev` over a bead whose
-/// description named a blocker therefore re-derives, and the governor
-/// re-approves in-flight work at the boot checklist (pow-f6pc's notes). The
-/// basis PREFIX stays [kFilingApprovalRevisionPrefix]: a new prefix is a v2
-/// receipt SCHEME and its own bead, not a side effect of this row.
+/// The basis has NO link-proof member. The retired one recorded that a
+/// cross-store link bead had been FOUND for each declared id; the hard cut
+/// that retired cross-store link beads made it permanently false, so no
+/// evaluation could ever reproduce a receipt carrying it. It is replaced —
+/// not pinned, and not dropped in place — by the rows bd itself holds, typed
+/// `local` or `external`, which is the one surface a cross-project blocker
+/// still lives on.
+///
+/// That replacement is a new receipt SCHEME, so the version in
+/// [kFilingApprovalRevisionPrefix] moved with it and every receipt minted
+/// under the retired one reads as stale EXACTLY ONCE
+/// ([isStaleFilingApprovalStamp]). There is no dual-basis compatibility path:
+/// this function is the only thing that mints a revision, and it mints one
+/// version.
 String _approvalRevisionOf(Bead bead, DependencyProjection dependencies) {
   final plan = bead.metadata['validation_plan'];
   final basis = <String, Object?>{

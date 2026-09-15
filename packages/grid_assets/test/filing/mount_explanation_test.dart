@@ -102,6 +102,21 @@ const Map<String, Object?> _stamped = {
   kApprovedRevKey: 'abc1234',
 };
 
+/// A RETIRED filing receipt — complete and well-formed in every part, minted
+/// under a basis scheme version nothing re-derives.
+const String _retiredRev =
+    'filing:v1:sha256:e6635f6c8a3307a33271500460a95c176baa'
+    'adaf11f3a479663ae534aa33d52c';
+
+/// That receipt on an otherwise mountable bead.
+Map<String, Object?> _retiredStampBead() => _workBead(
+  metadata: <String, Object?>{
+    'validation_plan': 'dart test',
+    ..._stamped,
+    kApprovedRevKey: _retiredRev,
+  },
+);
+
 Map<String, Object?> _workBead({
   String id = _beadId,
   String type = 'task',
@@ -544,6 +559,39 @@ void main() {
         );
       },
     );
+
+    test('AC-2: a RETIRED approval receipt is BLOCKED as STALE, named and '
+        'remedied in both renderings', () async {
+      final json = _Harness(bead: _retiredStampBead());
+
+      expect(await json.mount(), 1, reason: '${json.out}${json.err}');
+      expect(json.outcomeOf(MountPrecondition.approvalStamp), 'BLOCKED');
+      final row = json.row(MountPrecondition.approvalStamp);
+      // STALE, not "not approved": a governor DID approve this bead, and the
+      // retired revision it was approved against is named in full so the
+      // operator can see which receipt the sweep is replacing.
+      expect(row['detail'], startsWith('approval: stale'));
+      expect(row['detail'], contains(_retiredRev));
+      expect(
+        row['remedy'],
+        contains('approve --actor <actor> --json $_beadId'),
+      );
+
+      // The plain rendering carries the same three facts — an operator who
+      // never passes --json is not told less.
+      final plain = _Harness(bead: _retiredStampBead());
+      expect(await plain.mountPlain(), 1, reason: '${plain.out}${plain.err}');
+      final text = plain.out.toString();
+      expect(text, contains('BLOCKED approval_stamp: approval: stale'));
+      expect(text, contains(_retiredRev));
+      expect(
+        text,
+        contains(
+          'REMEDY approval_stamp: approve --actor <actor> --json '
+          '$_beadId',
+        ),
+      );
+    });
   });
 
   group('AC-3 — the rows over durable state', () {

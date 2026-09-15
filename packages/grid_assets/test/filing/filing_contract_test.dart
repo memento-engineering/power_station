@@ -1,4 +1,7 @@
+import 'dart:convert';
+
 import 'package:beads_dart/beads_dart.dart';
+import 'package:crypto/crypto.dart';
 import 'package:grid_assets/grid_assets.dart';
 import 'package:test/test.dart';
 
@@ -49,6 +52,10 @@ void main() {
     );
     const one = BeadDependency(issueId: 'pow-filed', dependsOnId: 'pow-one');
     const two = BeadDependency(issueId: 'pow-filed', dependsOnId: 'pow-two');
+    const external = BeadDependency(
+      issueId: 'pow-filed',
+      dependsOnId: 'external:the_grid:tg-xh5d',
+    );
 
     String rev(
       Bead subject,
@@ -65,13 +72,50 @@ void main() {
       matches(RegExp(r'^[0-9a-f]{64}$')),
     );
 
-    // A GOLDEN digest, so a future edit to the basis cannot slip through as
-    // "just a refactor": changing it revokes every standing approval and is a
-    // v2 receipt scheme, not a refactor.
+    // The basis STATED, not pinned as an opaque golden hash: the expected map
+    // is written out whole, so equality proves its MEMBERSHIP, its key ORDER
+    // and its row shape at once. It also proves an ABSENCE — one extra member
+    // moves the digest, so a basis that still carried the retired link-proof
+    // member (or grew any other) could not match this.
+    String digestOf(Map<String, Object?> basis) =>
+        '$kFilingApprovalRevisionPrefix'
+        '${sha256.convert(utf8.encode(jsonEncode(basis)))}';
+    Map<String, Object?> basisOver(List<Map<String, Object?>> rows) => {
+      'id': 'pow-filed',
+      'title': 'A filed bead',
+      'description': 'The work',
+      'design': 'The chosen approach',
+      'acceptanceCriteria': '- [ ] checked',
+      'notes': 'operator context',
+      'specId': 'pow-spec',
+      'issueType': 'task',
+      'priority': 2,
+      'validationPlan': 'dart test',
+      'dependencies': rows,
+    };
+
     expect(
       baseline,
-      '${kFilingApprovalRevisionPrefix}e6635f6c8a3307a33271500460a95c176baa'
-      'adaf11f3a479663ae534aa33d52c',
+      digestOf(
+        basisOver(const [
+          {'id': 'pow-one', 'kind': 'local'},
+          {'id': 'pow-two', 'kind': 'local'},
+        ]),
+      ),
+    );
+
+    // An `external:` row rides that SAME basis, typed and sorted after the
+    // local ones. It is bd's row and nothing else: no link bead is read, and
+    // no proof-of-link member is digested beside it.
+    expect(
+      rev(bead, const [one, two, external], const {'the_grid'}),
+      digestOf(
+        basisOver(const [
+          {'id': 'pow-one', 'kind': 'local'},
+          {'id': 'pow-two', 'kind': 'local'},
+          {'id': 'external:the_grid:tg-xh5d', 'kind': 'external'},
+        ]),
+      ),
     );
 
     // Equivalent input in a different ORDER is the same basis.
@@ -101,25 +145,11 @@ void main() {
 
     // The ROWS bd holds are the dependency basis — each one independently.
     expect(rev(bead, const [one]), isNot(baseline));
-    expect(
-      rev(bead, const [
-        one,
-        two,
-        BeadDependency(
-          issueId: 'pow-filed',
-          dependsOnId: 'external:the_grid:tg-xh5d',
-        ),
-      ]),
-      isNot(baseline),
-    );
+    expect(rev(bead, const [one, two, external]), isNot(baseline));
 
     // The ROSTER is the STATION's posture, never the bead's content: arming a
     // substation must not revoke a governor's approval of a bead nobody
     // edited, so it is excluded from the basis.
-    const external = BeadDependency(
-      issueId: 'pow-filed',
-      dependsOnId: 'external:the_grid:tg-xh5d',
-    );
     expect(
       rev(bead, const [one, two, external], const {'the_grid'}),
       rev(bead, const [one, two, external], const {}),
