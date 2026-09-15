@@ -2878,20 +2878,34 @@ typedef HistorySource =
 /// The real [AnchorResolver]: does the path exist in the worktree, and what else
 /// lives in its directory (the SURROUNDING PATTERN the architect must match).
 /// Deterministic (sorted) and bounded ([kMaxNeighbors]).
+///
+/// A LINE-QUALIFIED anchor (`lib/src/x.dart:222`) carries the WINDOW around the
+/// cited line ([_windowCodeAnchor]) rather than the file's head.
+/// [boundDiscoveryEvidence] clips from character ZERO, so an ordinary source
+/// file over ~100 lines cited at a site in its second half was recorded
+/// [EvidenceState.truncated] with the cited line OUTSIDE the snippet: the lens
+/// reads that clipped record as evidence it NEEDED, the automatic re-gather
+/// cannot change a deterministic clip, and the round holds with no exit but
+/// respelling the citation so the file is never anchored at all — strictly
+/// worse evidence than the window. A window that fits is
+/// [EvidenceState.complete]; only a window that still overflows is clipped. An
+/// UNQUALIFIED anchor carries the whole file and keeps the head clip.
 ResolvedAnchor resolveAnchorOnDisk(String workspaceDir, String anchor) {
-  final path = p.join(workspaceDir, anchor);
+  final cited = _parseCodeAnchor(anchor);
+  final path = p.join(workspaceDir, cited.path);
   final file = File(path);
   if (!file.existsSync()) {
     return unresolvedAnchor(anchor, source: workspaceDir);
   }
   try {
     final text = file.readAsStringSync();
+    final line = cited.line;
     final neighbors =
         file.parent
             .listSync()
             .whereType<File>()
             .map((f) => p.relative(f.path, from: workspaceDir))
-            .where((n) => n != anchor)
+            .where((n) => n != cited.path)
             .toList()
           ..sort();
     final neighborsTruncated = neighbors.length > kMaxNeighbors;
@@ -2902,7 +2916,9 @@ ResolvedAnchor resolveAnchorOnDisk(String workspaceDir, String anchor) {
         kind: 'code-anchor',
         subject: anchor,
         source: path,
-        fullText: text,
+        fullText: line == null
+            ? text
+            : _windowCodeAnchor(text, path: cited.path, line: line),
         state: neighborsTruncated ? EvidenceState.truncated : null,
       ),
       neighbors: neighbors.take(kMaxNeighbors).toList(),
@@ -2922,6 +2938,63 @@ ResolvedAnchor resolveAnchorOnDisk(String workspaceDir, String anchor) {
       ),
     );
   }
+}
+
+/// How many lines EACH SIDE of a cited line one windowed anchor carries.
+///
+/// Sized so the whole window — about 120 lines of ordinary Dart — lands inside
+/// [kMaxDiscoverySnippetChars]: wide enough to read a declaration with the
+/// neighbours that give it meaning, narrow enough that the bound is not spent
+/// before the cited line arrives.
+const int _kCodeAnchorWindowRadius = 60;
+
+/// The PATH half and the CITED LINE of one code anchor — `lib/src/x.dart:222`
+/// answers both; an anchor with no `:NNN` qualifier answers itself and null.
+///
+/// The qualifier is stripped for every PHYSICAL use (the filesystem read, the
+/// neighbour comparison, the `git log` pathspec) and kept everywhere the anchor
+/// is QUOTED, so a lens is always told WHICH site the bead named. A qualifier
+/// no [int] can hold is not a line: the token stays whole and resolves as the
+/// stale path it is, rather than silently becoming an unqualified anchor.
+({String path, int? line}) _parseCodeAnchor(String anchor) {
+  final qualifier = _pathAnchor.firstMatch(anchor)?.group(1);
+  if (qualifier == null) return (path: anchor, line: null);
+  final line = int.tryParse(qualifier);
+  if (line == null) return (path: anchor, line: null);
+  return (
+    path: anchor.substring(0, anchor.length - qualifier.length - 1),
+    line: line,
+  );
+}
+
+/// [text] as the WINDOW around [line] — [_kCodeAnchorWindowRadius] lines each
+/// side, clamped to the file, headed by the exact range it covers so the
+/// snippet can never read as the whole file.
+///
+/// LOUD on a line the file does not have: a citation past the end of its own
+/// file is a STALE citation, and windowing something else in its place would
+/// hand the lens a confident snippet of the wrong code. The throw lands in
+/// [resolveAnchorOnDisk]'s catch as a [EvidenceState.failed] record that names
+/// the offence.
+String _windowCodeAnchor(
+  String text, {
+  required String path,
+  required int line,
+}) {
+  final lines = const LineSplitter().convert(text);
+  final count = lines.length;
+  if (line < 1 || line > count) {
+    throw RangeError(
+      'the bead cites $path:$line, but that file has $count lines — respell '
+      'the citation at a line that exists',
+    );
+  }
+  final above = line - _kCodeAnchorWindowRadius;
+  final below = line + _kCodeAnchorWindowRadius;
+  final first = above < 1 ? 1 : above;
+  final last = below > count ? count : below;
+  return '[lines $first-$last of $count]\n'
+      '${lines.sublist(first - 1, last).join('\n')}';
 }
 
 /// The bead's own fields, resolved ONCE — the intake block every lens used to
@@ -4196,7 +4269,10 @@ Future<HistoryEvidence> gatherHistory(
 ///
 /// A PATH is a known-extension repository-relative token, found either inside
 /// backticks OR as a plain path token in the prose (a bead that writes
-/// lib/src/x.dart without backticks names the same surface). A SYMBOL is a
+/// lib/src/x.dart without backticks names the same surface). It may carry the
+/// CITED LINE the bead named (`lib/src/x.dart:222`): the qualifier rides ON the
+/// anchor so [resolveAnchorOnDisk] can window the file at that site instead of
+/// clipping its head, and two sites in one file are two anchors. A SYMBOL is a
 /// BACKTICKED identifier carrying an inner capital (`buildSpecifyBrief`,
 /// `kSpecReviewCircuit`) or an initial one (`Heartbeat`) — which is what keeps
 /// ordinary backticked prose (`bd`, `main`, `haiku`) out of the set.
@@ -4241,10 +4317,12 @@ beadAnchors(Bead bead) {
 /// (group 2) — alternated in ONE scan so both sources keep first-appearance
 /// order and a backticked path is never re-matched as a bare one.
 final RegExp _anchorSpan = RegExp(
-  r'`([^`\n]+)`|([\w./-]+\.(?:dart|md|yaml|yml|json))',
+  r'`([^`\n]+)`|([\w./-]+\.(?:dart|md|yaml|yml|json)(?::\d+)?)',
 );
 
-final RegExp _pathAnchor = RegExp(r'^[\w./-]+\.(dart|md|yaml|yml|json)$');
+final RegExp _pathAnchor = RegExp(
+  r'^[\w./-]+\.(?:dart|md|yaml|yml|json)(?::(\d+))?$',
+);
 final RegExp _symbolChars = RegExp(r'^[A-Za-z][A-Za-z0-9_]*$');
 final RegExp _capital = RegExp('[A-Z]');
 
@@ -4561,9 +4639,13 @@ class AnchorsCapability extends ServiceCapability {
       bead,
     );
     if (args.cancel.isCancelled) return const Failed('cancelled');
+    // A `git log` pathspec is a PATH: the cited-line qualifier is stripped, and
+    // two sites in one file are one surface.
     final history = await gatherHistory(_history, workspaceDir, [
-      for (final anchor in resolved)
-        if (anchor.resolved) anchor.anchor,
+      ...{
+        for (final anchor in resolved)
+          if (anchor.resolved) _parseCodeAnchor(anchor.anchor).path,
+      },
     ]);
     if (args.cancel.isCancelled) return const Failed('cancelled');
 
