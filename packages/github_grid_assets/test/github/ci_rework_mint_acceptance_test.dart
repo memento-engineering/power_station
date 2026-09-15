@@ -9,6 +9,7 @@ import 'package:grid_engine/grid_engine.dart' hide Station, Substation;
 import 'package:grid_engine/testing.dart';
 import 'package:grid_sdk/grid_sdk.dart';
 import 'package:grid_sdk/grid_sdk.dart' as sdk;
+import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
 Circuit _leafCircuit(Bead _) =>
@@ -259,11 +260,16 @@ bool _namesTempPath(String command, RegExp pathArgument, String tempPrefix) {
 /// `lsof` is the only account of a working directory on this platform. If it
 /// is absent or refuses, this degrades to the store census alone — the
 /// behaviour that shipped before — and the bounded delete below absorbs the
-/// difference.
-Future<List<int>> _workspaceResidents(String tempPath) async {
+/// difference. [runProcess] and [selfPid] are injected so both that
+/// degradation and the parse are provable without a store to point them at.
+Future<List<int>> workspaceResidents(
+  String tempPath, {
+  required int selfPid,
+  required Future<ProcessResult> Function(String, List<String>) runProcess,
+}) async {
   final ProcessResult result;
   try {
-    result = await Process.run('lsof', [
+    result = await runProcess('lsof', [
       '-w',
       '-a',
       '-d',
@@ -275,18 +281,30 @@ Future<List<int>> _workspaceResidents(String tempPath) async {
   } on ProcessException {
     return const [];
   }
-  return [
-    for (final line in (result.stdout as String).split('\n'))
-      if (line.startsWith('p'))
-        // `pid` is this process: never in the kill set, whatever lsof says.
-        if (int.tryParse(line.substring(1)) case final resident?)
-          if (resident != pid) resident,
-  ];
+  return parseLsofPids(result.stdout as String, selfPid: selfPid);
 }
+
+/// The PIDs lsof's `-F` output names, minus [selfPid].
+///
+/// `-F` is a record format, not a table: one tagged field per line, and only a
+/// `p` record carries a PID. Every other row — a header, a `+D` warning, a
+/// permission complaint — names no process and is dropped rather than guessed
+/// at.
+List<int> parseLsofPids(String output, {required int selfPid}) => [
+  for (final line in output.split('\n'))
+    if (line.startsWith('p'))
+      // `selfPid` is this process: never in the kill set, whatever lsof says.
+      if (int.tryParse(line.substring(1)) case final resident?)
+        if (resident != selfPid) resident,
+];
+
+/// [workspaceResidents] against the live process table.
+Future<List<int>> _workspaceResidents(String tempPath) =>
+    workspaceResidents(tempPath, selfPid: pid, runProcess: Process.run);
 
 /// Tears the proxied state store down: a SIGKILL fence driven by the process
 /// census, repeated until nothing the harness started still runs out of
-/// [tempPath].
+/// [tempPath], and returning every PID it named on the way.
 ///
 /// `bd dolt stop` is NOT the instrument. It is a MODE CHANGE — it migrates the
 /// workspace back to embedded storage — which rewrites a store that is about to
@@ -298,21 +316,24 @@ Future<List<int>> _workspaceResidents(String tempPath) async {
 /// simply comes back. The LOUD assertion stays on the store census, which
 /// names the invariant that matters — no process is left holding the Dolt data
 /// dir the delete is about to remove. A transient bd client that outlives its
-/// SIGKILL is not that, and the bounded delete already answers it.
+/// SIGKILL is not that, and the awaited exit below already answers it.
 ///
-/// The fence is LOUD because a survivor is not cosmetic: it holds a Dolt data
-/// dir that the temporary-directory delete is about to remove, and it outlives
-/// the test run.
-Future<void> _stopProxiedStateStore(String tempPath) async {
+/// Signalling is all this does. The returned set is the account
+/// [_stopAndAwaitProxiedStateStore] then waits out: a fence that reports a
+/// clean census has proved the kernel accepted its signals, not that the
+/// processes are off the table with their files closed.
+Future<Set<int>> _stopProxiedStateStore(String tempPath) async {
+  final named = <int>{};
   var survivors = await _harnessStoreProcesses(tempPath);
   for (var round = 0; round < 40; round++) {
     final residents = await _workspaceResidents(tempPath);
     if (survivors.isEmpty && residents.isEmpty) break;
-    for (final pid in [
+    for (final target in [
       for (final survivor in survivors) survivor.pid,
       ...residents,
     ]) {
-      Process.killPid(pid, ProcessSignal.sigkill);
+      named.add(target);
+      Process.killPid(target, ProcessSignal.sigkill);
     }
     await Future<void>.delayed(const Duration(milliseconds: 50));
     survivors = await _harnessStoreProcesses(tempPath);
@@ -323,39 +344,187 @@ Future<void> _stopProxiedStateStore(String tempPath) async {
     isEmpty,
     reason: 'harness-owned store processes survived under $tempPath',
   );
+  return named;
 }
 
-/// Removes [temporary] once nothing is writing inside it, retrying the delete
-/// across a proxy spawned AFTER an empty census.
+/// The flock files bd's proxy pair holds open while it is serving a store.
+const _proxyLockNames = ['proxy.lock', 'proxy-child.lock'];
+
+/// The proxy locks under [tempPath] some process still holds.
 ///
-/// The fence above cannot be the whole story: bd re-spawns a
-/// `db-proxy-child` to serve a command issued before the fence ran, so a store
-/// process can appear once the census has already come back clean and write
-/// into `.beads/dolt/` while the recursive delete is walking it. macOS answers
-/// that unlink race with `ENOTEMPTY` — Linux tolerates it, which is why CI
-/// stayed green while this teardown failed on most runs here, abandoning the
-/// tree AND its store processes on disk.
-///
-/// Every attempt re-censuses, so a late arrival is killed before the next
-/// delete. Only [FileSystemException] is caught, and only for as long as the
-/// bound allows: a surviving store process still fails the fence's own
-/// expectation, and a delete that never succeeds still throws its original
-/// error, LOUDLY.
-Future<void> _deleteTemporaryWorkspace(Directory temporary) async {
-  const attempts = 40;
-  for (var attempt = 1; attempt <= attempts; attempt++) {
-    if (!temporary.existsSync()) return;
-    await _stopProxiedStateStore(temporary.path);
+/// A lock file that is absent, or present with no holder, belongs to a store
+/// that is already down. A lock with a holder is a proxy that is still UP —
+/// including one spawned after the census came back clean, which is the
+/// arrival the delete used to race and the reason the PID census alone cannot
+/// close this. Without lsof nothing can be distinguished, and the probe
+/// reports nothing held rather than inventing residue.
+Future<Set<String>> _heldProxyLocks(String tempPath) async {
+  final held = <String>{};
+  for (final name in _proxyLockNames) {
+    final path = '$tempPath/grid/.grid/.beads/dolt/$name';
+    if (!File(path).existsSync()) continue;
+    final ProcessResult result;
     try {
+      result = await Process.run('lsof', ['-w', '-t', path]);
+    } on ProcessException {
+      return const {};
+    }
+    final holders = [
+      for (final line in (result.stdout as String).split('\n'))
+        if (int.tryParse(line.trim()) case final holder?)
+          if (holder != pid) holder,
+    ];
+    if (holders.isNotEmpty) held.add(path);
+  }
+  return held;
+}
+
+/// Which of [pids] the process table still knows about.
+///
+/// SIGKILL is a signal, not an event: the kernel accepts it long before the
+/// process is off the table with its files closed. `ps` answers the question
+/// the delete actually asks.
+Future<Set<int>> _livePids(Set<int> pids) async {
+  if (pids.isEmpty) return const {};
+  final result = await Process.run('ps', ['-o', 'pid=', '-p', pids.join(',')]);
+  return {
+    for (final line in (result.stdout as String).split('\n'))
+      if (int.tryParse(line.trim()) case final live?) live,
+  };
+}
+
+/// Every harness process under [tempPath] still on the table — [named], plus a
+/// fresh census — SIGKILLed again as it is named.
+///
+/// The poll kills because the poll is the only thing watching: bd re-spawns a
+/// `db-proxy-child` to serve a command issued before the fence ran, and that
+/// arrival holds the store open for its full 30-second idle timeout. A probe
+/// that only looked would spin out its bound and fail a teardown one more
+/// signal would have finished.
+Future<Set<int>> _reapStoreResidue(String tempPath, Set<int> named) async {
+  final alive = <int>{
+    ...await _livePids(named),
+    for (final survivor in await _harnessStoreProcesses(tempPath)) survivor.pid,
+    ...await _workspaceResidents(tempPath),
+  };
+  for (final target in alive) {
+    Process.killPid(target, ProcessSignal.sigkill);
+  }
+  return alive;
+}
+
+/// Stops the proxied state store and does not return until it is GONE.
+///
+/// [_stopProxiedStateStore] signals; this awaits the consequence — every PID
+/// the fence named off the process table, and both proxy locks unheld. That is
+/// the one state in which a recursive delete cannot race a write, and reaching
+/// it deterministically is what makes this teardown a fence rather than a bet
+/// on a retry loop.
+Future<void> _stopAndAwaitProxiedStateStore(String tempPath) async {
+  final named = await _stopProxiedStateStore(tempPath);
+  await waitForProxiedStateStoreExit(
+    survivingPids: () => _reapStoreResidue(tempPath, named),
+    heldLockPaths: () => _heldProxyLocks(tempPath),
+    now: DateTime.now,
+    delay: (duration) => Future<void>.delayed(duration),
+  );
+}
+
+/// Polls [survivingPids] and [heldLockPaths] until both come back empty.
+///
+/// Returns only for a store that is wholly gone. Otherwise it throws a
+/// [StateError] naming the residue it timed out on — surviving PIDs, held lock
+/// paths — because residue nothing can remove is a live Dolt server writing
+/// into a directory the test is about to delete, and the only useful report of
+/// that is the one that names it. [now] and [delay] are injected so the bound
+/// can be proved without spending it.
+Future<void> waitForProxiedStateStoreExit({
+  required Future<Set<int>> Function() survivingPids,
+  required Future<Set<String>> Function() heldLockPaths,
+  required DateTime Function() now,
+  required Future<void> Function(Duration) delay,
+  Duration bound = const Duration(seconds: 10),
+  Duration pollInterval = const Duration(milliseconds: 50),
+}) async {
+  final deadline = now().add(bound);
+  while (true) {
+    final pids = (await survivingPids()).toList()..sort();
+    final locks = (await heldLockPaths()).toList()..sort();
+    if (pids.isEmpty && locks.isEmpty) return;
+    if (!now().isBefore(deadline)) {
+      throw StateError(
+        'the proxied state store did not exit within '
+        '${bound.inMilliseconds}ms: surviving pids [${pids.join(', ')}], '
+        'held locks [${locks.join(', ')}]',
+      );
+    }
+    await delay(pollInterval);
+  }
+}
+
+/// Removes [temporary] once the store inside it is gone.
+///
+/// The awaited stop above is the mechanism; the retry behind it is a counted
+/// fallback, not the fence. macOS answers an unlink that races a write with
+/// `ENOTEMPTY` — Linux tolerates it, which is why CI stayed green while this
+/// teardown failed here, abandoning the tree AND its store processes on disk —
+/// so a delete that still fails once the store is proven gone means the fence
+/// missed something, and [onDeleteFallback] counts every such miss for the
+/// case that asserts there are none.
+Future<void> _deleteTemporaryWorkspace(
+  Directory temporary, {
+  required void Function() onDeleteFallback,
+}) async {
+  if (!temporary.existsSync()) return;
+  await _stopAndAwaitProxiedStateStore(temporary.path);
+  await deleteTemporaryWorkspaceWithRetry(
+    delete: () async {
       await temporary.delete(recursive: true);
+    },
+    stillPresent: temporary.existsSync,
+    delay: (duration) => Future<void>.delayed(duration),
+    onDeleteFallback: onDeleteFallback,
+  );
+}
+
+/// Runs [delete] until it succeeds, [attempts] times at most.
+///
+/// A [FileSystemException] that leaves the directory gone is a delete another
+/// hand completed, and returns. One that leaves it present spends an attempt:
+/// [onDeleteFallback] once, a [delay] of [between], and another try. The final
+/// attempt rethrows, so the error the teardown reports is the original object
+/// and stack — never a summary of it.
+Future<void> deleteTemporaryWorkspaceWithRetry({
+  required Future<void> Function() delete,
+  required bool Function() stillPresent,
+  required Future<void> Function(Duration) delay,
+  required void Function() onDeleteFallback,
+  int attempts = 5,
+  Duration between = const Duration(milliseconds: 50),
+}) async {
+  for (var attempt = 1; attempt <= attempts; attempt++) {
+    try {
+      await delete();
       return;
     } on FileSystemException {
-      if (!temporary.existsSync()) return;
+      if (!stillPresent()) return;
       if (attempt == attempts) rethrow;
-      await Future<void>.delayed(const Duration(milliseconds: 50));
+      onDeleteFallback();
+      await delay(between);
     }
   }
 }
+
+/// The `ci-rework-mint-` workspaces on disk right now.
+///
+/// The leak this fixture is measured by: a teardown that reported success
+/// while a proxy re-created the store under it left one of these behind, and
+/// nothing in the test noticed. Counted before the workspace is made and again
+/// after it is removed, it does.
+int _temporaryWorkspaceCount() => Directory.systemTemp
+    .listSync(followLinks: false)
+    .where((entry) => p.basename(entry.path).startsWith('ci-rework-mint-'))
+    .length;
 
 Future<void> _seedStore({
   required String gridRoot,
@@ -452,16 +621,24 @@ void main() {
   test(
     'resident rework supersedes before gate auto-close',
     () async {
+      final leakedBefore = _temporaryWorkspaceCount();
       final temporary = await Directory.systemTemp.createTemp(
         'ci-rework-mint-',
       );
       final gridRoot = '${temporary.path}/grid';
       final workRoot = '${temporary.path}/work';
+      var fallbacks = 0;
+      void onRetry() => fallbacks++;
       // Registered the moment the directory exists — and therefore run LAST,
       // after the station teardown below — so a failure anywhere in the boot
-      // still fences the proxied store before the tree is removed.
+      // still fences the proxied store before the tree is removed. The two
+      // closing assertions are the teardown's own gate: a workspace left on
+      // disk is the leak, and a delete that needed a retry is a write the
+      // fence should have stopped before it started deleting.
       addTearDown(() async {
-        await _deleteTemporaryWorkspace(temporary);
+        await _deleteTemporaryWorkspace(temporary, onDeleteFallback: onRetry);
+        expect(_temporaryWorkspaceCount(), lessThanOrEqualTo(leakedBefore));
+        expect(fallbacks, 0, reason: 'the delete fell back to a retry');
       });
       await _seedStore(gridRoot: gridRoot, workRoot: workRoot);
       final stateStore = GridStateStore.forGridRoot(gridRoot);
@@ -535,9 +712,17 @@ void main() {
         commandHandler: runtime.commands,
       );
       addTearDown(() async {
+        // Snapshotted while the runtime is LIVE: `shutdown` takes the sources
+        // down but leaves the sockets the assembly opened established, and
+        // only an awaited close keeps this isolate off a proxy the delete
+        // registered above is about to remove.
+        final stores = List<StoreConnection>.of(runtime.openStores);
         await control.dispose();
         owner.unmountRoot();
         await runtime.shutdown();
+        for (final store in stores) {
+          await store.close();
+        }
       });
       await _writeStationLock(gridRoot, control.url, 'feedback-token');
       final projection = CiFeedbackProjection(
@@ -606,16 +791,26 @@ void main() {
   test(
     'resident rework self-mints and replay stays at one retired round',
     () async {
+      final leakedBefore = _temporaryWorkspaceCount();
       final temporary = await Directory.systemTemp.createTemp(
         'ci-rework-mint-',
       );
       final gridRoot = '${temporary.path}/grid';
       final workRoot = '${temporary.path}/work';
+      var fallbacks = 0;
+      void onRetry() => fallbacks++;
       // Registered the moment the directory exists — and therefore run LAST,
       // after the station teardown below — so a failure anywhere in the boot
-      // still fences the proxied store before the tree is removed.
+      // still fences the proxied store before the tree is removed. A workspace
+      // left on disk is the leak; the retry count rides the failure so whoever
+      // un-skips this case reads why the delete had to race.
       addTearDown(() async {
-        await _deleteTemporaryWorkspace(temporary);
+        await _deleteTemporaryWorkspace(temporary, onDeleteFallback: onRetry);
+        expect(
+          _temporaryWorkspaceCount(),
+          lessThanOrEqualTo(leakedBefore),
+          reason: 'the delete fell back to a retry $fallbacks times',
+        );
       });
       await _seedStore(gridRoot: gridRoot, workRoot: workRoot);
       final stateStore = GridStateStore.forGridRoot(gridRoot);
@@ -689,9 +884,17 @@ void main() {
         commandHandler: runtime.commands,
       );
       addTearDown(() async {
+        // Snapshotted while the runtime is LIVE: `shutdown` takes the sources
+        // down but leaves the sockets the assembly opened established, and
+        // only an awaited close keeps this isolate off a proxy the delete
+        // registered above is about to remove.
+        final stores = List<StoreConnection>.of(runtime.openStores);
         await control.dispose();
         owner.unmountRoot();
         await runtime.shutdown();
+        for (final store in stores) {
+          await store.close();
+        }
       });
       await _writeStationLock(gridRoot, control.url, 'feedback-token');
       final projection = CiFeedbackProjection(

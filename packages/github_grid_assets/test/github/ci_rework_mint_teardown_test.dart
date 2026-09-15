@@ -1,0 +1,144 @@
+import 'dart:io';
+
+import 'package:test/test.dart';
+
+// The fixture is imported for its TEARDOWN seams alone. A prefixed import runs
+// no `main`, so the store-booting acceptance case next door stays in its own
+// suite while every branch of the fence it depends on is proved here — with
+// fakes, against no bd and no Dolt.
+import 'ci_rework_mint_acceptance_test.dart' as fixture;
+
+const _lockRoot = '/tmp/ci-rework-mint-fake/grid/.grid/.beads/dolt';
+const _proxyLock = '$_lockRoot/proxy.lock';
+const _proxyChildLock = '$_lockRoot/proxy-child.lock';
+
+void main() {
+  test('the lsof census reads p records and drops this process', () {
+    // `-Fp` output as lsof actually writes it: one tagged field per line, a
+    // file-descriptor record between the process records, and a warning row
+    // `+D` emits for a directory it cannot descend into.
+    const output =
+        'p1234\n'
+        'fcwd\n'
+        'lsof: WARNING: can\'t stat() apfs file system /System/Volumes/Data\n'
+        'pnot-a-pid\n'
+        'p\n'
+        '5678\n'
+        'p4242\n'
+        'p5678\n';
+
+    expect(
+      fixture.parseLsofPids(output, selfPid: 4242),
+      orderedEquals(<int>[1234, 5678]),
+    );
+  });
+
+  test('a missing lsof censuses nothing rather than refusing', () async {
+    var invoked = 0;
+
+    final residents = await fixture.workspaceResidents(
+      '/tmp/ci-rework-mint-fake',
+      selfPid: 4242,
+      runProcess: (executable, arguments) async {
+        invoked++;
+        expect(executable, 'lsof');
+        expect(arguments, contains('/tmp/ci-rework-mint-fake'));
+        throw const ProcessException('lsof', ['-Fp'], 'No such file', 2);
+      },
+    );
+
+    expect(invoked, 1);
+    expect(residents, isEmpty);
+  });
+
+  test('the last delete attempt rethrows the original failure', () async {
+    final failure = FileSystemException(
+      'Deletion failed',
+      '/tmp/ci-rework-mint-fake',
+      const OSError('Directory not empty', 66),
+    );
+    var attempts = 0;
+    var fallbacks = 0;
+    final waits = <Duration>[];
+
+    await expectLater(
+      fixture.deleteTemporaryWorkspaceWithRetry(
+        delete: () async {
+          attempts++;
+          throw failure;
+        },
+        stillPresent: () => true,
+        delay: (duration) async => waits.add(duration),
+        onDeleteFallback: () => fallbacks++,
+      ),
+      throwsA(same(failure)),
+    );
+
+    expect(attempts, 5);
+    expect(fallbacks, 4, reason: 'every non-final attempt counts a fallback');
+    expect(waits, everyElement(const Duration(milliseconds: 50)));
+    expect(waits, hasLength(4));
+  });
+
+  test('the exit wait polls through pid and lock residue', () async {
+    final pidResidue = <Set<int>>[
+      {68187},
+      <int>{},
+      <int>{},
+    ];
+    final lockResidue = <Set<String>>[
+      <String>{},
+      {_proxyChildLock},
+      <String>{},
+    ];
+    final start = DateTime.utc(2026, 9, 15);
+    var pidPolls = 0;
+    var lockPolls = 0;
+    var ticks = 0;
+    final waits = <Duration>[];
+
+    await fixture.waitForProxiedStateStoreExit(
+      survivingPids: () async => pidResidue[pidPolls++],
+      heldLockPaths: () async => lockResidue[lockPolls++],
+      now: () => start.add(Duration(milliseconds: 50 * ticks++)),
+      delay: (duration) async => waits.add(duration),
+    );
+
+    expect(
+      pidPolls,
+      3,
+      reason: 'a store is gone only when BOTH come back bare',
+    );
+    expect(lockPolls, 3);
+    expect(waits, hasLength(2));
+    expect(waits, everyElement(const Duration(milliseconds: 50)));
+  });
+
+  test('the exit wait names the residue it timed out on', () async {
+    final start = DateTime.utc(2026, 9, 15);
+    final clock = <DateTime>[start, start.add(const Duration(seconds: 11))];
+    var ticks = 0;
+
+    await expectLater(
+      fixture.waitForProxiedStateStoreExit(
+        survivingPids: () async => {68187},
+        heldLockPaths: () async => {_proxyChildLock, _proxyLock},
+        now: () => clock[ticks++],
+        delay: (duration) async => fail('the bound was spent, not refused'),
+      ),
+      throwsA(
+        isA<StateError>().having(
+          (error) => error.message,
+          'message',
+          allOf(
+            contains('68187'),
+            contains(_proxyLock),
+            contains(_proxyChildLock),
+          ),
+        ),
+      ),
+    );
+
+    expect(ticks, 2, reason: 'the deadline, then the one poll that passed it');
+  });
+}
