@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:beads_dart/beads_dart.dart';
 import 'package:github_grid_assets/github_grid_assets.dart';
+import 'package:grid_sdk/grid_sdk.dart' as sdk;
 import 'package:test/test.dart';
 
 final class _Tokens implements GitHubAppTokenProvider {
@@ -163,6 +164,27 @@ final class _StateBd implements BdRunner {
   }
 }
 
+/// The seat's OWN work store — where the work bead a merged pull is landing
+/// actually lives. Separate from [_StateBd] on purpose: a shared fake could not
+/// tell the two rails apart.
+final class _WorkBd implements BdRunner {
+  _WorkBd({this.result = const BdResult(exitCode: 0, stdout: '', stderr: '')});
+
+  /// The result the landing-ready mutation answers with.
+  final BdResult result;
+  final argvs = <List<String>>[];
+
+  @override
+  Future<BdResult> run(
+    List<String> args, {
+    Duration? timeout,
+    String? stdin,
+  }) async {
+    argvs.add(List<String>.of(args));
+    return result;
+  }
+}
+
 final class _Sender implements FeedbackCommandSender {
   final calls = <String>[];
 
@@ -231,12 +253,53 @@ GitHubReconcilerCursor _wedged() => const GitHubReconcilerCursor()
     .enqueue(_checkEvent)
     .ack(_checkId, kSinkDeliveryLeg);
 
-CiFeedbackProjection _feedback(_StateBd state, _Sender sender) =>
+/// The same wedged shape with a GREEN aggregate: the state a merged pull
+/// request reaches, and the only one that decides a landing mark.
+final _greenCheckEvent = NormalizedGitHubEvent.pullRequestFeedback(
+  nodeId: 'PR_1',
+  actor: 'nico',
+  repository: 'memento/power',
+  substation: 'power',
+  observationId:
+      'poll:pull-feedback:PR_1:abc123:2026-09-03T16:24:00.000Z:green:'
+      'mergeable:never-green:fresh',
+  number: 8,
+  body: 'A human digest.\n\nRefs: pow-2xmo\n',
+  headBranch: 'grid/pow-2xmo',
+  headSha: 'abc123',
+  checkState: PullRequestCheckState.green,
+  mergeability: PullRequestMergeability.mergeable,
+  openedAt: DateTime.utc(2026, 9, 3, 15),
+  updatedAt: _checkCompletedAt,
+  greenSince: null,
+  observedAt: DateTime.utc(2026, 9, 3, 16, 30),
+  stalled: false,
+);
+
+final String _greenCheckId = GitHubReconcilerCursor.observationIdOf(
+  _greenCheckEvent,
+);
+
+GitHubReconcilerCursor _wedgedGreen() => const GitHubReconcilerCursor()
+    .enqueue(_greenCheckEvent)
+    .ack(_greenCheckId, kSinkDeliveryLeg);
+
+/// The substation every fixture here reconciles for.
+const sdk.SubstationScope _scope = sdk.SubstationScope(
+  name: 'power',
+  root: '/work/power',
+  prefix: 'pow',
+);
+
+/// A projection whose two rails are STATED. [work] is required: a default that
+/// fell back to [state] would hide the mis-binding these tests exist to catch.
+CiFeedbackProjection _feedback(_StateBd state, _Sender sender, _WorkBd work) =>
     CiFeedbackProjection(
       bd: state,
+      workBd: work,
+      scope: _scope,
       commandSender: sender,
       gridRoot: '/grid',
-      substation: 'power',
     );
 
 GitHubReconciler _reconciler({
@@ -259,14 +322,18 @@ void main() {
     final sender = _Sender();
     final cursors = _Cursors(_wedged());
     final saves = <_Snapshot>[];
-    final reconciler = _reconciler(
-      transport: _Transport(<GitHubHttpResponse>[
-        _response(<Object?>[_rowUpdatedAfterCheck()]),
-        _response(const <Object?>[]),
-      ]),
-      cursors: _RecordingCursors(cursors, <String>[], saves),
-      emit: (_) async {},
-    )..addObserver(kCiFeedbackDeliveryLeg, _feedback(state, sender).call);
+    final reconciler =
+        _reconciler(
+          transport: _Transport(<GitHubHttpResponse>[
+            _response(<Object?>[_rowUpdatedAfterCheck()]),
+            _response(const <Object?>[]),
+          ]),
+          cursors: _RecordingCursors(cursors, <String>[], saves),
+          emit: (_) async {},
+        )..addObserver(
+          kCiFeedbackDeliveryLeg,
+          _feedback(state, sender, _WorkBd()).call,
+        );
 
     await reconciler.reconcileOnce();
 
@@ -297,6 +364,75 @@ void main() {
     expect(sender.calls, hasLength(1));
   });
 
+  test('a work bead the scoped store cannot resolve drains and polls '
+      'on', () async {
+    // THE WEDGE, end to end. The landing mark used to THROW here, which failed
+    // the leg, left the observation pending, and aborted the cycle before the
+    // poll — so the seat re-drove this one pull request forever. It now
+    // degrades: one flare, a durable acknowledgement, and the poll behind it.
+    const noRows =
+        'Error resolving pow-2xmo: get pow-2xmo: sql: no rows in result set';
+    final state = _StateBd(_sessions(<String>['pow-2xmo']));
+    final work = _WorkBd(
+      result: const BdResult(exitCode: 1, stdout: '', stderr: noRows),
+    );
+    final sender = _Sender();
+    final flares = <({String name, String message})>[];
+    final cursors = _Cursors(_wedgedGreen());
+    final saves = <_Snapshot>[];
+    final projection = _feedback(state, sender, work)
+      ..bindReporter(
+        (name, action, error, stackTrace) =>
+            flares.add((name: name, message: '$error')),
+      );
+    final reconciler = _reconciler(
+      transport: _Transport(<GitHubHttpResponse>[
+        _response(<Object?>[_rowUpdatedAfterCheck()]),
+        _response(const <Object?>[]),
+      ]),
+      cursors: _RecordingCursors(cursors, <String>[], saves),
+      emit: (_) async {},
+    )..addObserver(kCiFeedbackDeliveryLeg, projection.call);
+
+    await reconciler.reconcileOnce();
+
+    // The leg ACKED durably...
+    expect(
+      saves.map((save) => save.acked[_greenCheckId]),
+      contains(
+        orderedEquals(<String>[kSinkDeliveryLeg, kCiFeedbackDeliveryLeg]),
+      ),
+    );
+    // ...the queue DRAINED and the observation is claimed...
+    expect(cursors.cursor.pending, isEmpty);
+    expect(cursors.cursor.hasObserved(_greenCheckId), isTrue);
+    // ...and the poll BEHIND it moved past the wedged check.
+    expect(cursors.cursor.since, isNotNull);
+    expect(cursors.cursor.since!.isAfter(_checkCompletedAt), isTrue);
+
+    // ONE flare, naming the bead, the store root that was attempted, and the
+    // store's own words.
+    expect(flares.map((flare) => flare.name), <String>[
+      kCiFeedbackLandingUnresolvedFlare,
+    ]);
+    expect(flares.single.message, contains('pow-2xmo'));
+    expect(flares.single.message, contains('/work/power'));
+    expect(flares.single.message, contains(noRows));
+
+    // The mutation was attempted against the WORK store, and the state store
+    // answered reads only.
+    expect(work.argvs.single, <String>[
+      'update',
+      'pow-2xmo',
+      '--actor',
+      'github-feedback',
+      '--set-metadata',
+      'grid.landing_ready=true',
+    ]);
+    expect(state.argvs.map((argv) => argv.first), everyElement('list'));
+    expect(sender.calls, isEmpty);
+  });
+
   for (final shape in <({String name, String sessions})>[
     (name: 'no live session', sessions: '{"schema_version":1,"data":[]}'),
     (
@@ -314,7 +450,7 @@ void main() {
       final sender = _Sender();
       final flares = <String>[];
       final cursors = _Cursors(_wedged());
-      final projection = _feedback(state, sender)
+      final projection = _feedback(state, sender, _WorkBd())
         ..bindReporter((name, action, error, stackTrace) => flares.add(name));
       final reconciler = _reconciler(
         transport: _Transport(<GitHubHttpResponse>[
