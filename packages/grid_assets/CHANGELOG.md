@@ -1,5 +1,15 @@
 ## Unreleased
 
+- Breaking: `AgentArming` and `TypedEnvironmentProvider` are removed. Every `SeatPreference` already
+  vends its own provider seed, so the four-field record only named four members of an open set and
+  the wrapper only spread those seeds into a `Nest` its consumer can author directly — neither
+  carried a mechanism of its own. `SeatProvider`, `CriticSeatProvider`, every seat type's
+  `provider()`, `SeatEnvironments` and `seatChannelPolicy` are unchanged, a seat still shadows by
+  EXACT type, and a boot-eager arming guard now walks any ordered `Iterable<SeatPreference>` rather
+  than a four-member record — so an UNARMED case is the empty collection rather than four null
+  fields.
+  Migration: replace `AgentArming(build: …, spec: …, critic: …, gather: …)` with an ordered `List<SeatPreference>`, and in place of `TypedEnvironmentProvider(arming: …)` spread `[for (final seat in seats) seat.provider()]` into your enclosing `Nest`.
+
 - Breaking: `PrimeCommand` takes a required `runnerInvocation`, and prime renders its pointers with
   it instead of the attached runner's `executableName`. The heading is now
   `Invoke: <invocation> prime [--hook-json]`, and each verb record and both decision-search pointers
