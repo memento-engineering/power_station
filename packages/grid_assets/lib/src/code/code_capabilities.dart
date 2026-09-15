@@ -809,17 +809,39 @@ class AgentCapability extends ProcessCapability {
   /// it already wrote for telemetry — the one place the builder said why it did
   /// nothing ("I'm using the `discover` skill because this is a directed bead
   /// request…"). Exit 0, honestly: the child said it was done.
+  ///
+  /// And when that same envelope reports an API ERROR
+  /// ([UsageReport.apiErrorReason]), it LEADS — `api_error_status 400: Prompt
+  /// is too long — agent failed (exit 0) [argv]: …`. The measured round
+  /// (2026-09-12, session tranquility-2xxwup) is why: three rides exited with
+  /// no artifact, every one of them a 400 the harness had already written to
+  /// disk, and the durable reason said only that the step produced nothing —
+  /// so the operator opened the telemetry file to learn what the step already
+  /// knew. The engine persists the reason's FIRST characters, so the diagnosis
+  /// goes in front of the log it explains.
+  ///
+  /// Capture-only and fail-safe, exactly as the rest of FT-2: the failure KIND
+  /// and its policy are untouched, and an absent, malformed, or error-free
+  /// envelope returns this reason byte-for-byte unchanged.
   String _emptyRoundReason(
     Workspace workspace,
     StepArgs args,
     String diagnostic,
-  ) => capturedOutputReason(
-    verb: kAgentStep,
-    adapter: kArgvTransport,
-    output: readEnvelopeResultText(workspace.workspaceDir, args.nodePath) ?? '',
-    exitCode: 0,
-    diagnostic: diagnostic,
-  );
+  ) {
+    final reason = capturedOutputReason(
+      verb: kAgentStep,
+      adapter: kArgvTransport,
+      output:
+          readEnvelopeResultText(workspace.workspaceDir, args.nodePath) ?? '',
+      exitCode: 0,
+      diagnostic: diagnostic,
+    );
+    final apiError = readUsageReport(
+      workspace.workspaceDir,
+      args.nodePath,
+    )?.apiErrorReason;
+    return apiError == null ? reason : '$apiError — $reason';
+  }
 }
 
 /// Assembles the agent's full-bead brief + local-first working agreement (the
