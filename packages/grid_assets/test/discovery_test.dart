@@ -386,6 +386,26 @@ class _CannedLogRunner implements GitRunner {
   }
 }
 
+/// What line 222 of the windowed fixture says, and nothing else in it does —
+/// the token a probe asserts is INSIDE the snippet the lens reads.
+const String _windowMarker = 'CITED-SITE-MARKER';
+
+/// A source file of exactly [lines] numbered lines, each padded to [width]
+/// characters, carrying [_windowMarker] on [markerLine].
+///
+/// A probe about WHICH lines an anchor carries needs a file whose every line
+/// names itself: it can then assert on the cited site without asserting on
+/// some real file's contents (which drift).
+String _numberedSource({
+  required int lines,
+  required int width,
+  required int markerLine,
+}) => [
+  for (var line = 1; line <= lines; line++)
+    (line == markerLine ? '// line $line $_windowMarker' : '// line $line')
+        .padRight(width, 'x'),
+].join('\n');
+
 void main() {
   group('the CITE-THE-OFFENCE gate (a vibe can never hold a bead)', () {
     test('a CITED, unacknowledged contradiction of a decision HOLDS', () {
@@ -1999,6 +2019,167 @@ void main() {
       expect(resolved.last.resolved, isFalse);
       expect(resolved.last.contents.state, EvidenceState.complete);
       expect(resolved.last.contents.snippet, isEmpty);
+    });
+
+    test('line-qualified anchors carry the cited window and truncate only an '
+        'overlong window', () {
+      final dir = Directory.systemTemp.createTempSync('anchors-window');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final lib = Directory(p.join(dir.path, 'lib'))..createSync();
+      File(p.join(lib.path, 'fixture.dart')).writeAsStringSync(
+        _numberedSource(lines: 250, width: 24, markerLine: 222),
+      );
+      File(p.join(lib.path, 'wide.dart')).writeAsStringSync(
+        _numberedSource(lines: 300, width: 90, markerLine: 150),
+      );
+
+      // The bead's own spelling survives extraction, backticked or bare, and
+      // two sites in one file are two anchors.
+      final extracted = beadAnchors(
+        bead('pow-window').copyWith(
+          description:
+              'The site is `lib/fixture.dart:222`; its neighbour is '
+              'lib/wide.dart:150, and the whole file is lib/fixture.dart.',
+        ),
+      );
+      expect(extracted.paths, [
+        'lib/fixture.dart:222',
+        'lib/wide.dart:150',
+        'lib/fixture.dart',
+      ]);
+
+      final resolved = resolveAnchorsOnDisk(dir.path, extracted.paths);
+      final cited = resolved.first;
+      expect(
+        cited.anchor,
+        'lib/fixture.dart:222',
+        reason: 'the lens is still told WHICH site the bead named',
+      );
+      expect(
+        cited.contents.source,
+        p.join(dir.path, 'lib', 'fixture.dart'),
+        reason: 'the qualifier is stripped for the physical read',
+      );
+      expect(cited.contents.snippet, startsWith('[lines 162-250 of 250]\n'));
+      expect(cited.contents.snippet, contains('// line 222 $_windowMarker'));
+      expect(
+        cited.contents.snippet,
+        isNot(contains('// line 161')),
+        reason: 'the window is bounded, not the file from its head',
+      );
+      expect(
+        cited.contents.state,
+        EvidenceState.complete,
+        reason: 'a window that FITS is complete evidence, never a hold',
+      );
+      expect(
+        cited.neighbors,
+        isNot(contains('lib/fixture.dart')),
+        reason: 'a windowed file is not its own neighbour',
+      );
+      expect(cited.neighbors, contains('lib/wide.dart'));
+
+      // Only a window that ITSELF overflows the bound is clipped — and it
+      // still says which range it selected.
+      final wide = resolved[1];
+      expect(wide.contents.snippet, startsWith('[lines 90-210 of 300]\n'));
+      expect(wide.contents.snippet, hasLength(kMaxDiscoverySnippetChars));
+      expect(wide.contents.state, EvidenceState.truncated);
+    });
+
+    test(
+      'line-qualified anchor identity is deterministic over window content',
+      () {
+        final dir = Directory.systemTemp.createTempSync('anchors-window-id');
+        addTearDown(() => dir.deleteSync(recursive: true));
+        final lib = Directory(p.join(dir.path, 'lib'))..createSync();
+        final file = File(p.join(lib.path, 'fixture.dart'));
+        final lines = _numberedSource(
+          lines: 250,
+          width: 24,
+          markerLine: 222,
+        ).split('\n');
+        file.writeAsStringSync(lines.join('\n'));
+
+        BoundedEvidence resolve() => resolveAnchorsOnDisk(dir.path, [
+          'lib/fixture.dart:222',
+        ]).single.contents;
+
+        final first = resolve();
+        expect(first.id, contains('sha256:${first.digest}'));
+        expect(
+          resolve().id,
+          first.id,
+          reason: 'the same anchor over the same file is the same record',
+        );
+        expect(resolve().digest, first.digest);
+
+        // Text OUTSIDE the window is not what the lens read, so the identity of
+        // what it DID read holds.
+        file.writeAsStringSync(
+          [
+            '// line 1 edited far above the window',
+            ...lines.skip(1),
+          ].join('\n'),
+        );
+        expect(resolve().id, first.id);
+
+        // Text INSIDE it is: the record is addressed by its own content.
+        file.writeAsStringSync(
+          [
+            ...lines.take(221),
+            '// line 222 edited inside the window',
+            ...lines.skip(222),
+          ].join('\n'),
+        );
+        final moved = resolve();
+        expect(moved.digest, isNot(first.digest));
+        expect(moved.id, isNot(first.id));
+        expect(moved.id, contains('sha256:${moved.digest}'));
+      },
+    );
+
+    test('unqualified long anchors retain the head clip', () {
+      final dir = Directory.systemTemp.createTempSync('anchors-head-clip');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final lib = Directory(p.join(dir.path, 'lib'))..createSync();
+      final source = _numberedSource(lines: 250, width: 24, markerLine: 222);
+      File(p.join(lib.path, 'fixture.dart')).writeAsStringSync(source);
+
+      final resolved = resolveAnchorsOnDisk(dir.path, [
+        'lib/fixture.dart',
+      ]).single.contents;
+      expect(resolved.snippet, hasLength(kMaxDiscoverySnippetChars));
+      expect(resolved.snippet, startsWith('// line 1'));
+      expect(resolved.snippet, isNot(contains(_windowMarker)));
+      expect(resolved.state, EvidenceState.truncated);
+      expect(
+        resolved.digest,
+        boundDiscoveryEvidence(
+          kind: 'code-anchor',
+          subject: 'lib/fixture.dart',
+          source: '',
+          fullText: source,
+        ).digest,
+        reason: 'an anchor naming no site still hashes the COMPLETE file',
+      );
+    });
+
+    test('a cited line the file does not have is a LOUD stale citation', () {
+      final dir = Directory.systemTemp.createTempSync('anchors-stale-line');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final lib = Directory(p.join(dir.path, 'lib'))..createSync();
+      File(
+        p.join(lib.path, 'fixture.dart'),
+      ).writeAsStringSync(_numberedSource(lines: 12, width: 20, markerLine: 3));
+
+      final stale = resolveAnchorsOnDisk(dir.path, [
+        'lib/fixture.dart:400',
+      ]).single;
+      expect(stale.resolved, isTrue, reason: 'the FILE is there');
+      expect(stale.contents.state, EvidenceState.failed);
+      expect(stale.contents.error, contains('lib/fixture.dart:400'));
+      expect(stale.contents.error, contains('12 lines'));
     });
 
     test('an ABSENT source is UNAVAILABLE per query/surface, never an empty '
