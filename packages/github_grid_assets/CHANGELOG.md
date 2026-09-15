@@ -1,5 +1,21 @@
 ## Unreleased
 
+- Breaking: `CiFeedbackProjection` takes `workBd` and `scope` and no longer takes `substation`. Its
+  landing-ready `bd update` ran through the grid STATE store runner it correlates sessions against,
+  where no substation's work bead has ever lived, so a merged pull request resolved to `sql: no rows
+  in result set` for every armed substation and THREW — wedging the reconciler before its poll and
+  re-flaring the same observation every tick. `bd` now carries the session read and the state-store
+  cap gate only; `workBd` carries the work-bead mutation to the store that mints that id, and
+  `substation` is derived from `scope.name`.
+  Migration: pass `workBd:` (the seat's own work-store runner) and `scope:` (the enclosing
+  `SubstationScope`) and drop `substation:`. The only production call site is this package's
+  `GitHubReconcilerBindingAssets`, which pairs the runner and scope it already watches.
+- Changed: a work bead the scoped store cannot resolve — absent, or carrying a prefix that scope
+  does not own — now reports the new `kCiFeedbackLandingUnresolvedFlare` and returns instead of
+  throwing. The flare names the bead, the attempted work-store root and the store's own stderr, and
+  fires once per decision idempotency key rather than once per cycle, so the observation is
+  acknowledged and the cycle reaches its poll.
+
 - Breaking: `SubstationSeed.arming` is replaced by `SubstationSeed.seatSeeds`, a
   `List<SingleChildSeed>` of the provider seeds the seats themselves vend, authored outermost-first
   and copied at construction so the seat owns its own rung. `grid_assets` retired `AgentArming` and
