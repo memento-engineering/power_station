@@ -354,8 +354,8 @@ final class _PrimeMaterial {
   /// `Station:` and `Invoke:`.
   final List<String> heading;
 
-  /// One `- <verb> — <executable> help <verb>` POINTER per key the composed
-  /// runner exposes, aliases included.
+  /// One `- <verb> — <station invocation> help <verb>` POINTER per key the
+  /// composed runner exposes, aliases included.
   final List<String> verbs;
 
   /// The `Decisions:`, `Agent Disc:` and `Wake:` records.
@@ -473,14 +473,24 @@ class PrimeCommand extends Command<int> {
   /// grid home, [readStdin] takes the hook payload, and [now] is the clock the
   /// unconsumed-handoff age is measured against. [out] is where the hook object
   /// is written.
+  ///
+  /// [runnerInvocation] is the composing station's OWN full invocation —
+  /// `dart run lunar:lunar` on a JIT station — and it is what every pointer
+  /// this verb renders is prefixed with. It is REQUIRED and has no default,
+  /// deliberately: a station that forgets to thread it fails to compile, where
+  /// a default would silently point every seat at a bare executable name that
+  /// nothing keeps current. Blank selects the attached runner's own
+  /// `executableName`, which is the pre-invocation shape.
   PrimeCommand({
+    required String runnerInvocation,
     BdRunner Function(String cwd) runnerFor = _processRunnerFor,
     Map<String, String> Function() environment = _processEnvironment,
     String Function() cwd = _currentDirectory,
     Future<String> Function() readStdin = _readStdinPayload,
     DateTime Function() now = DateTime.now,
     StringSink? out,
-  }) : _runnerFor = runnerFor,
+  }) : _runnerInvocation = runnerInvocation,
+       _runnerFor = runnerFor,
        _environment = environment,
        _cwd = cwd,
        _readStdin = readStdin,
@@ -495,6 +505,7 @@ class PrimeCommand extends Command<int> {
     );
   }
 
+  final String _runnerInvocation;
   final BdRunner Function(String cwd) _runnerFor;
   final Map<String, String> Function() _environment;
   final String Function() _cwd;
@@ -510,11 +521,29 @@ class PrimeCommand extends Command<int> {
       'Orient a session in this station: its verbs, its decisions, the seat '
       "disc, then bd prime and the seat's newest handoff.";
 
+  /// The composing station's configured invocation, trimmed; empty when the
+  /// station configured none.
+  String get _configuredInvocation => _runnerInvocation.trim();
+
+  /// The prefix EVERY pointer this verb renders is invoked through.
+  ///
+  /// The station's invocation wins over [executableName] because a bare
+  /// executable name is not a durable pointer: on a JIT station it resolves to
+  /// whatever global snapshot was last activated, which no one refreshes,
+  /// while the invocation the station composed always reaches the checkout.
+  String _pointerPrefix(String executableName) {
+    final configured = _configuredInvocation;
+    return configured.isEmpty ? executableName : configured;
+  }
+
   @override
   String get invocation {
-    final executable = runner?.executableName;
     const shape = 'prime [--hook-json]';
-    return executable == null ? shape : '$executable $shape';
+    final executable = runner?.executableName;
+    final prefix = executable == null
+        ? _configuredInvocation
+        : _pointerPrefix(executable);
+    return prefix.isEmpty ? shape : '$prefix $shape';
   }
 
   @override
@@ -571,6 +600,7 @@ class PrimeCommand extends Command<int> {
         environment[kGridHomeEnvironmentVariable]?.trim() ?? '';
     final home = declaredHome.isEmpty ? here : declaredHome;
     final executable = station.executableName;
+    final pointer = _pointerPrefix(executable);
     final injected = _injectedHandoff(
       home: home,
       seat: seat,
@@ -581,19 +611,19 @@ class PrimeCommand extends Command<int> {
       executableName: executable,
       heading: [
         'Station: $executable — ${station.description}',
-        'Invoke: ${station.invocation}',
+        'Invoke: $invocation',
       ],
       // DERIVED, never authored: the composed runner already knows its own
       // command set, aliases included, and a list maintained here would drift
       // the moment a station adds a verb.
       verbs: [
         for (final verb in station.commands.keys.toList()..sort())
-          '- $verb — $executable help $verb',
+          '- $verb — $pointer help $verb',
       ],
       trailer: [
         'Decisions: docs/decisions/ in every mounted substation; ratified '
-            'decisions bind. Search with $executable search; usage: '
-            '$executable help search.',
+            'decisions bind. Search with $pointer search; usage: '
+            '$pointer help search.',
         'Agent Disc: '
             '${seat.isEmpty ? '<grid home>/$kSeatsSubdirectory/<seat>/' : seatDiscPath(home, seat)}.',
         'Wake: the resident station evaluates the seat wake predicate on the '
