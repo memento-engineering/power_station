@@ -26,10 +26,19 @@
 /// declared price keeps its tokens, reports NO cost, and raises the
 /// [kUsagePriceUnknownFlare] naming it — never a silent zero.
 ///
+/// The envelope also carries the run's API-ERROR status when one ended it
+/// (`api_error_status`, with the harness's own message in `result`). That is
+/// the ONE place a `Prompt is too long` 400 is written down: the runtime sees
+/// only a child that exited with no artifact, so a failure reason built from
+/// the exit alone says nothing an operator can act on. [UsageReport.apiErrorReason]
+/// renders it as the one-line head a reason opens with — still capture-only,
+/// still diagnostic: it never changes a failure's KIND or a step's policy.
+///
 /// Everything here is FAIL-SAFE: an absent, empty, or malformed envelope yields
 /// NO fields — telemetry can never fail, gate, or delay a step (the acceptance
 /// property). The parse is a pure function over a string (fixture-testable with
-/// no I/O); only [readUsageFields] touches the filesystem.
+/// no I/O); [readUsageReport] is the ONE seam that touches the filesystem, and
+/// it swallows every surprise.
 library;
 
 import 'dart:convert';
@@ -88,6 +97,13 @@ typedef UsageFlare = void Function(String name, Map<String, String> data);
 /// invisibility this bead exists to end).
 const String kUsagePriceUnknownFlare = 'agent.usagePriceUnknown';
 
+/// The character budget [UsageReport.apiErrorReason] spends on the harness's
+/// own error message. Wide enough for the measured `Prompt is too long, the
+/// request is about 202302 tokens…` sentence, narrow enough that a reason this
+/// PREFIXES still leads the engine's 500-char persisted slice with the
+/// diagnosis rather than with the log it explains.
+const int kUsageApiErrorHeadChars = 200;
+
 /// The usage fields a harness JSON/JSONL run reports — every field OPTIONAL (a
 /// partial or version-skewed envelope contributes only what it carries). Pure
 /// value; parse with [tryParse], project with [toResultFields].
@@ -104,6 +120,8 @@ class UsageReport {
     this.numTurns,
     this.harnessDurationMs,
     this.model,
+    this.apiErrorStatus,
+    this.apiErrorMessage,
   });
 
   /// UNCACHED prompt tokens: `usage.input_tokens`, less the `cached_input_tokens`
@@ -156,7 +174,42 @@ class UsageReport {
   /// from the ledger.
   final String? model;
 
-  /// True when NO field was recovered (an envelope with no recognizable usage).
+  /// The HTTP status of the API error that ended the run
+  /// (`api_error_status` — 400 for the measured `Prompt is too long`), or null
+  /// when the envelope reported none. A clean run writes the key as `null`, so
+  /// its mere presence is not an error.
+  final int? apiErrorStatus;
+
+  /// The harness's own message for that error — the envelope's top-level
+  /// `result` text, retained ONLY beside an [apiErrorStatus], because on a
+  /// clean run that same field holds the agent's ANSWER rather than a fault.
+  final String? apiErrorMessage;
+
+  /// The one-line API-ERROR head a failure reason opens with —
+  /// `api_error_status 400: Prompt is too long`, bounded to
+  /// [kUsageApiErrorHeadChars] with a trailing `…` when it was cut.
+  ///
+  /// Null unless the envelope carried BOTH a status and a non-blank message:
+  /// "the API refused this run" and "we have no idea why the child exited" are
+  /// different diagnoses, and only the first is worth leading a reason with.
+  /// The FIRST line only — an API fault prints its sentence first and its
+  /// provider payload after, and the sentence is what an operator acts on.
+  String? get apiErrorReason {
+    final status = apiErrorStatus;
+    final message = apiErrorMessage;
+    if (status == null || message == null) return null;
+    final lines = const LineSplitter().convert(message.trim());
+    final head = lines.isEmpty ? '' : lines.first.trim();
+    if (head.isEmpty) return null;
+    final bounded = head.length <= kUsageApiErrorHeadChars
+        ? head
+        : '${head.substring(0, kUsageApiErrorHeadChars)}…';
+    return 'api_error_status $status: $bounded';
+  }
+
+  /// True when NO field was recovered (an envelope with no recognizable usage
+  /// and no reported API error — an error-only envelope is still READABLE,
+  /// because that is precisely the run this codec has to explain).
   bool get isEmpty =>
       tokensIn == null &&
       tokensOut == null &&
@@ -166,7 +219,9 @@ class UsageReport {
       premiumRequests == null &&
       numTurns == null &&
       harnessDurationMs == null &&
-      model == null;
+      model == null &&
+      apiErrorStatus == null &&
+      apiErrorMessage == null;
 
   /// Parses a harness JSON result envelope or JSONL event stream [content],
   /// FAIL-SAFE: `null`/blank/malformed content, a non-object shape, or an
@@ -227,6 +282,17 @@ class UsageReport {
       modelPrices: modelPrices,
       flare: flare,
     );
+    // The API fault, if the run ended in one. The message rides only BESIDE a
+    // status: `result` is the agent's answer on a clean run, and promoting that
+    // to an error message would turn every success into a fault.
+    final apiErrorStatus = _asInt(envelope['api_error_status']);
+    final rawResult = envelope['result'];
+    final apiErrorMessage =
+        apiErrorStatus != null &&
+            rawResult is String &&
+            rawResult.trim().isNotEmpty
+        ? rawResult
+        : null;
     final report = UsageReport(
       tokensIn: tokensIn,
       tokensOut: tokensOut,
@@ -239,6 +305,8 @@ class UsageReport {
       harnessDurationMs:
           _asInt(envelope['duration_ms']) ?? _asInt(usage['sessionDurationMs']),
       model: model,
+      apiErrorStatus: apiErrorStatus,
+      apiErrorMessage: apiErrorMessage,
     );
     return report.isEmpty ? null : report;
   }
@@ -249,6 +317,10 @@ class UsageReport {
   /// `numTurns`/`harnessDurationMs`/`model`, distinct from `grade`/`rationale`/
   /// `verdict`/`transport`). Only present fields appear — an unreported token
   /// class is ABSENT, never a zero.
+  ///
+  /// USAGE only: [apiErrorStatus]/[apiErrorMessage] are a diagnosis for a
+  /// FAILURE reason, not a column of the durable result a cleanly completed
+  /// step records, and a step that reached this projection did not fail.
   Map<String, String> toResultFields() => {
     if (tokensIn != null) 'tokensIn': '$tokensIn',
     if (tokensOut != null) 'tokensOut': '$tokensOut',
@@ -266,33 +338,62 @@ class UsageReport {
 }
 
 /// Reads + parses the usage telemetry the harness redirected for the step at
-/// [nodePath] under [workspaceDir], returning the result fields to merge — an
-/// EMPTY map when the file is absent, unreadable, or malformed. NEVER throws, so
-/// merging usage can never fail or gate a step (the FT-2 fail-safe property).
+/// [nodePath] under [workspaceDir] — the ONE filesystem seam every lane reads
+/// an FT-2 envelope through. `null` when the file is absent, unreadable, or
+/// malformed; NEVER a throw, so reading telemetry can never fail, gate, or
+/// delay a step (the FT-2 fail-safe property).
 ///
-/// [modelPrices] is REQUIRED, because a caller that forgets it silently drops
-/// every subscription-billed lane's cost — which is the defect bead `pow-zetn`
-/// closes. Every `result()` edge reads it off the ambient [AgentConfig]; the
-/// optional [flare] is that edge's `ExplorationTransport.flare`.
+/// Three callers, one read: the committee's classifier receipt, the build
+/// seat's failure reason, and [readUsageFields]'s result projection. They
+/// differed only in which private copy of this they carried, which is how the
+/// API-error status could be written to disk and still reach no operator.
+///
+/// [modelPrices] defaults to EMPTY, which is pure capture (no cost derivation)
+/// — the posture a DIAGNOSTIC reader wants, since deriving a cost it will not
+/// record only risks a spurious pricing flare. A `result()` edge, which has the
+/// ambient table and the transport to hand, passes both.
+UsageReport? readUsageReport(
+  String workspaceDir,
+  String nodePath, {
+  ModelPriceTable modelPrices = const <String, ModelTokenPrice>{},
+  UsageFlare? flare,
+}) {
+  try {
+    final file = File(p.join(workspaceDir, usageReportPath(nodePath)));
+    if (!file.existsSync()) return null;
+    return UsageReport.tryParse(
+      file.readAsStringSync(),
+      modelPrices: modelPrices,
+      flare: flare,
+    );
+  } catch (_) {
+    return null; // any I/O or decode surprise — fail-safe omit.
+  }
+}
+
+/// The step's usage telemetry as the result fields to merge — an EMPTY map when
+/// the envelope is absent, unreadable, malformed, or carries no usage at all.
+/// [readUsageReport] owns the read, so this is fail-safe for the same reason it
+/// is.
+///
+/// [modelPrices] is REQUIRED here, because a caller that forgets it silently
+/// drops every subscription-billed lane's cost — which is the defect bead
+/// `pow-zetn` closes. Every `result()` edge reads it off the ambient
+/// [AgentConfig]; the optional [flare] is that edge's
+/// `ExplorationTransport.flare`.
 Map<String, String> readUsageFields(
   String workspaceDir,
   String nodePath, {
   required ModelPriceTable modelPrices,
   UsageFlare? flare,
-}) {
-  try {
-    final file = File(p.join(workspaceDir, usageReportPath(nodePath)));
-    if (!file.existsSync()) return const {};
-    return UsageReport.tryParse(
-          file.readAsStringSync(),
-          modelPrices: modelPrices,
-          flare: flare,
-        )?.toResultFields() ??
-        const {};
-  } catch (_) {
-    return const {}; // any I/O surprise — fail-safe omit.
-  }
-}
+}) =>
+    readUsageReport(
+      workspaceDir,
+      nodePath,
+      modelPrices: modelPrices,
+      flare: flare,
+    )?.toResultFields() ??
+    const {};
 
 /// Reads the RAW `result` text field out of the harness's `--output-format
 /// json` envelope for the step at [nodePath] under [workspaceDir] — the
@@ -338,7 +439,10 @@ Object? _decode(String trimmed) {
 /// Normalizes [decoded] to the result-envelope object: the object itself, or —
 /// defensively, should a future flag emit an array of stream events — the last
 /// array member that looks like a result envelope (carries a usage/cost/turns/
-/// duration key). `null` when neither shape yields one.
+/// duration/api-error key). `null` when neither shape yields one.
+///
+/// `api_error_status` counts: a run the API refused can end with NO usage at
+/// all, and that envelope is exactly the one worth finding.
 Map<String, dynamic>? _resultObject(Object? decoded) {
   if (decoded is Map) return decoded.cast<String, dynamic>();
   if (decoded is List) {
@@ -348,7 +452,8 @@ Map<String, dynamic>? _resultObject(Object? decoded) {
               item.containsKey('modelUsage') ||
               item.containsKey('total_cost_usd') ||
               item.containsKey('num_turns') ||
-              item.containsKey('duration_ms'))) {
+              item.containsKey('duration_ms') ||
+              item.containsKey('api_error_status'))) {
         return item.cast<String, dynamic>();
       }
     }
