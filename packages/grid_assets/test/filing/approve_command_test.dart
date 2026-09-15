@@ -211,6 +211,41 @@ void main() {
     expect(armed.bd.updates, hasLength(1));
   });
 
+  test('AC-3: the receipt is stable across runs and moves with the '
+      'external row', () async {
+    _ScriptedBdRunner armedRow(String capability) => _ScriptedBdRunner({
+      'query': _beadReply(
+        description: 'Needs the native external reader.',
+        blockers: ['external:the_grid:$capability'],
+      ),
+    });
+
+    Future<String> approvedRev(_ScriptedBdRunner bd) async {
+      final h = _harness(bd, armed: const {'the_grid'});
+      expect(
+        await h.runner.run(['approve', '--actor', 'nico', 'pow-child']),
+        0,
+        reason: '${h.out}${h.err}',
+      );
+      expect(h.bd.updates, hasLength(1));
+      return callMetadata(h.bd.updates.single)[kApprovedRevKey] as String;
+    }
+
+    // Two runs of the verb over the SAME bead and the SAME armed row write
+    // ONE receipt value: re-approving an unedited bead is a no-op, so the
+    // governor's one-time re-approval sweep can be re-run without churning
+    // the beads it already swept.
+    final revision = await approvedRev(armedRow('tg-xh5d'));
+    expect(revision, startsWith('filing:v2:sha256:'));
+    expect(await approvedRev(armedRow('tg-xh5d')), revision);
+
+    // The ROW is basis. Re-pointing it at another capability of the same
+    // armed project is a different thing to have approved, so it is a
+    // different receipt — the cross-store shape the retired link-proof member
+    // used to claim to cover.
+    expect(await approvedRev(armedRow('tg-other')), isNot(revision));
+  });
+
   test('no roster refuses the external row fail-closed', () async {
     final h = _harness(
       _ScriptedBdRunner({
