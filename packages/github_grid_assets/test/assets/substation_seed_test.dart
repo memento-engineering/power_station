@@ -136,10 +136,10 @@ const EnvironmentRegistry _registry = EnvironmentRegistry(
   },
 );
 
-const AgentArming _stationArming = AgentArming(
-  build: BuildAgentEnvironment([_stationBuild]),
-  spec: SpecAgentEnvironment([_stationSpec]),
-);
+const List<SeatPreference> _stationSeats = <SeatPreference>[
+  BuildAgentEnvironment([_stationBuild]),
+  SpecAgentEnvironment([_stationSpec]),
+];
 
 /// Walks a mounted tree. `values` reads what the tree PROVIDES; `seeds` reads
 /// what it COMPOSES.
@@ -195,7 +195,7 @@ _Mounted _mount(Seed root) {
 /// projection every seat resolves its own assets through.
 Seed _station(
   List<Seed> seats, {
-  AgentArming? arming,
+  List<SeatPreference> stationSeats = const <SeatPreference>[],
   SubstationFactsRepository? facts,
 }) => sdk.ProviderScope(
   child: SubstationFactsAssets(
@@ -213,12 +213,10 @@ Seed _station(
         ),
     child: InheritedSeed<EnvironmentRegistry>(
       value: _registry,
-      child: arming == null
-          ? sdk.RawAssetGrid(root: '/home/me/station', assets: seats)
-          : TypedEnvironmentProvider(
-              arming: arming,
-              child: sdk.RawAssetGrid(root: '/home/me/station', assets: seats),
-            ),
+      child: Nest(
+        children: [for (final seat in stationSeats) seat.provider()],
+        child: sdk.RawAssetGrid(root: '/home/me/station', assets: seats),
+      ),
     ),
   ),
 );
@@ -524,9 +522,11 @@ void main() {
           name: 'armed',
           root: '../armed',
           assetRegistry: _assetRegistry,
-          arming: const AgentArming(build: BuildAgentEnvironment([_seatBuild])),
+          seatSeeds: [
+            const BuildAgentEnvironment([_seatBuild]).provider(),
+          ],
         ),
-      ], arming: _stationArming),
+      ], stationSeats: _stationSeats),
     );
     addTearDown(mounted.owner.dispose);
 
@@ -745,7 +745,9 @@ void main() {
             privateKeyVar: 'GITHUB_APP_KEY',
           ),
           githubPoll: spaceSeat,
-          arming: const AgentArming(build: BuildAgentEnvironment([_seatBuild])),
+          seatSeeds: [
+            const BuildAgentEnvironment([_seatBuild]).provider(),
+          ],
         ),
         SubstationSeed(
           name: 'radioactive_dart',
