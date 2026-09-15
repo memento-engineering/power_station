@@ -631,7 +631,17 @@ class DecisionSurfaceEvidence {
   /// are selected first.
   final bool truncated;
 
-  /// The failure detail — REQUIRED (non-empty) for [EvidenceState.failed].
+  /// The record's ONE detail line, read by [state]: for
+  /// [EvidenceState.failed] it is the failure detail and is REQUIRED
+  /// (non-empty); for a complete or truncated record it is a non-failing
+  /// REPORT about an answer that was still given.
+  ///
+  /// The report exists for the citation shape that must never hold a round: an
+  /// explicit legacy `ADR-<nnnn>` id no register answers — the register's own
+  /// file name among them. It names the bead field the token was read from and
+  /// quotes the prose around it, so a real misspelling is visible to the lens
+  /// instead of hidden behind a failed surface. One member carries both because
+  /// the schema-3 wire and its strict decoder are unchanged by this.
   final String error;
 
   /// REFERENCES to the entries governing this surface, in index order — each a
@@ -2009,7 +2019,14 @@ DiscoveryEvidenceProjection projectDiscoveryEvidence(
           )
           ..writeln('- state: ${lookup.state.name.toUpperCase()}')
           ..writeln('- id: `${lookup.id}`');
-        if (lookup.error.isNotEmpty) b.writeln('- error: ${lookup.error}');
+        // The one detail member, labelled by what this record's state makes
+        // it: a failure to act on, or a report to read past.
+        if (lookup.error.isNotEmpty) {
+          b.writeln(
+            '- ${lookup.state == EvidenceState.failed ? 'error' : 'report'}: '
+            '${lookup.error}',
+          );
+        }
         if (lookup.decisions.isEmpty &&
             lookup.state == EvidenceState.complete) {
           b.writeln(
@@ -3341,18 +3358,42 @@ class _IndexedDecision {
 /// would hold every bead in the org over a sentence that cites nothing. `A<n>`
 /// still ORDERS a returned entry ([_isNamedDecision]); it only never fails on
 /// absence.
+///
+/// Each request carries the [citation] it was READ from — the field and the
+/// prose around the token — so a request nobody can answer is reported with
+/// its own provenance instead of a bare name an operator must go re-find.
 class _DecisionRequest {
-  const _DecisionRequest.canonical(String identity)
+  const _DecisionRequest.canonical(String identity, this.citation)
     : _identity = identity,
       _alias = '';
 
-  const _DecisionRequest.legacy(String alias) : _identity = '', _alias = alias;
+  const _DecisionRequest.legacy(String alias, this.citation)
+    : _identity = '',
+      _alias = alias;
 
   final String _identity;
   final String _alias;
 
+  /// WHERE this citation was read: the bead field, and the source text around
+  /// the token, verbatim.
+  final BeadFieldCitation citation;
+
+  /// Whether this request is a LEGACY id rather than a canonical
+  /// `<register>#<slug>`.
+  ///
+  /// The two shapes answer differently when NOTHING resolves them: a canonical
+  /// token under an indexed register is unambiguous authorship of a citation
+  /// and still fails the surface, while a legacy id is only ever a `ADR-<nnnn>`
+  /// token in prose — including the register's OWN file name — and is reported.
+  bool get isLegacy => _identity.isEmpty;
+
   /// What the failure reason CALLS this citation.
   String get label => _identity.isEmpty ? _alias : _identity.split('#').last;
+
+  /// The non-failing report a legacy request nothing answered leaves behind.
+  String get unresolvedReport =>
+      'unresolved legacy decision citation $_alias reported from '
+      '${citation.field.wire}: “${citation.excerpt}”';
 
   /// Whether [candidate] is the entry this citation asked for.
   bool isAnsweredBy(_IndexedDecision candidate) => _identity.isEmpty
@@ -3364,15 +3405,26 @@ class _DecisionRequest {
 /// and start with a letter — what every authored slug looks like, and what
 /// keeps prose such as `pr#256` out of the explicit set, where a false citation
 /// would fail a surface that is perfectly answerable.
+///
+/// Matched CASE-INSENSITIVELY over the field's own text rather than over a
+/// lowercased copy: an excerpt is only quotable when the match offsets index
+/// the SOURCE, and lowercasing is not length-preserving for every code point.
 final RegExp _canonicalDecisionCitation = RegExp(
   r'(?<![a-z0-9_#-])([a-z0-9_]+)#([a-z][a-z0-9]*(?:-[a-z0-9]+)+)(?![a-z0-9_-])',
+  caseSensitive: false,
 );
 
-/// An ADR id (`ADR-0008`) — the one NON-canonical shape unambiguous enough to
-/// fail a surface on absence. A bare `A<n>` is deliberately out (see
-/// [_DecisionRequest]).
+/// An ADR id (`ADR-0008`) — the one NON-canonical shape explicit enough to
+/// resolve a legacy entry by. A bare `A<n>` is deliberately out (see
+/// [_DecisionRequest]), and an id nothing answers is REPORTED, never failed:
+/// the register's own file name is spelled `ADR-0000`, and no register can
+/// ever hold an entry for the log its amendments live in.
+///
+/// Case-insensitive over source text, for the reason
+/// [_canonicalDecisionCitation] states.
 final RegExp _explicitAdrCitation = RegExp(
   r'(?<![a-z0-9_#-])(adr-\d{4})(?![a-z0-9_-])',
+  caseSensitive: false,
 );
 
 /// The leading legacy id of [slug], or `''` when it carries none.
@@ -3382,41 +3434,97 @@ String _legacyDecisionAlias(String slug) =>
     ).firstMatch(slug.toLowerCase())?.group(1) ??
     '';
 
-/// The bead prose a decision citation can live in — description, design and
-/// notes, lowercased so every match is case-insensitive.
+/// The bead fields a decision citation is READ from, in the order a request
+/// list reports them.
 ///
 /// Title and acceptance criteria are deliberately OUT: a title is a summary
 /// whose words cite nothing, and acceptance criteria are the bead's own exit
 /// tests, so admitting either would pad the named set with prose that names no
 /// decision at all.
-String _decisionCitationText(Bead bead) =>
-    '${bead.description}\n${bead.design}\n${bead.notes}'.toLowerCase();
+///
+/// NOTES are out for a stronger reason: they are the operator's RECEIPT
+/// channel. A governor writing "reverted the ADR-0000 amendment" or quoting a
+/// hold reason into a note is recording history, not citing a decision, and
+/// every such receipt used to re-poison the very bead it explained (measured on
+/// lunar 2026-09-13/14: five beads held, seven rounds burned). Notes still
+/// reach every lens WHOLE through [boundedBeadFields]; they simply make no
+/// requests. A citation genuinely meant is restated in description or design.
+const List<BeadCitationField> _decisionCitationFields = [
+  BeadCitationField.description,
+  BeadCitationField.design,
+];
 
-/// Every decision [cited] names EXPLICITLY, deduplicated, in first-appearance
-/// order.
+/// The bead prose a decision citation can live in ([_decisionCitationFields]),
+/// lowercased so every match is case-insensitive.
+String _decisionCitationText(Bead bead) => [
+  for (final field in _decisionCitationFields) beadFieldValue(bead, field),
+].join('\n').toLowerCase();
+
+/// How much SOURCE text either side of a cited token a report quotes.
+const int _decisionCitationExcerptContextChars = 80;
+
+/// [match]'s own text plus at most [_decisionCitationExcerptContextChars]
+/// characters of [text] either side of it, VERBATIM — never normalized, so an
+/// operator can find the quotation in the bead by searching for it.
+String _decisionCitationExcerpt(String text, Match match) {
+  final from = match.start - _decisionCitationExcerptContextChars;
+  final to = match.end + _decisionCitationExcerptContextChars;
+  return text.substring(
+    from < 0 ? 0 : from,
+    to > text.length ? text.length : to,
+  );
+}
+
+/// Every decision [bead] cites EXPLICITLY, deduplicated, in first-appearance
+/// order — description before design, and by match offset inside each field.
 ///
 /// A canonical token counts only when [originRegisters] — the registers this
 /// index run actually ANSWERED with — holds its register half. `id#some-value`
 /// under a register nobody indexed is PROSE, and failing a surface on it would
 /// hold a bead over a hash in a sentence.
+///
+/// The FIELD is part of the answer, not a detail of the scan: a request that
+/// resolves to nothing is reported by where it was read, which is the whole
+/// difference between a report an operator can act on and a name they have to
+/// hunt for.
 List<_DecisionRequest> _explicitDecisionRequests(
-  String cited, {
+  Bead bead, {
   required Set<String> originRegisters,
 }) {
-  final found = <(int, String, _DecisionRequest)>[];
-  for (final match in _canonicalDecisionCitation.allMatches(cited)) {
-    if (!originRegisters.contains(match.group(1)!.toLowerCase())) continue;
-    final identity = match.group(0)!;
-    found.add((match.start, identity, _DecisionRequest.canonical(identity)));
+  final found = <(String, _DecisionRequest)>[];
+  for (final field in _decisionCitationFields) {
+    final text = beadFieldValue(bead, field);
+    BeadFieldCitation read(Match match) => BeadFieldCitation(
+      beadId: bead.id,
+      field: field,
+      excerpt: _decisionCitationExcerpt(text, match),
+    );
+    final inField = <(int, String, _DecisionRequest)>[];
+    for (final match in _canonicalDecisionCitation.allMatches(text)) {
+      if (!originRegisters.contains(match.group(1)!.toLowerCase())) continue;
+      final identity = match.group(0)!.toLowerCase();
+      inField.add((
+        match.start,
+        identity,
+        _DecisionRequest.canonical(identity, read(match)),
+      ));
+    }
+    for (final match in _explicitAdrCitation.allMatches(text)) {
+      final alias = match.group(0)!.toLowerCase();
+      inField.add((
+        match.start,
+        alias,
+        _DecisionRequest.legacy(alias, read(match)),
+      ));
+    }
+    inField.sort((a, b) => a.$1.compareTo(b.$1));
+    for (final (_, key, request) in inField) {
+      found.add((key, request));
+    }
   }
-  for (final match in _explicitAdrCitation.allMatches(cited)) {
-    final alias = match.group(0)!;
-    found.add((match.start, alias, _DecisionRequest.legacy(alias)));
-  }
-  found.sort((a, b) => a.$1.compareTo(b.$1));
   final seen = <String>{};
   return [
-    for (final (_, key, request) in found)
+    for (final (key, request) in found)
       if (seen.add(key)) request,
   ];
 }
@@ -3560,12 +3668,13 @@ typedef _RegisterWideDecisions = Future<_DecisionIndexAnswer> Function();
 ///    (it is prose only if the whole roster does not know that register
 ///    either, which only the unfiltered answer can say).
 bool _needsRegisterWideLookup(
-  String cited, {
+  Bead workBead, {
+  required String cited,
   required List<_IndexedDecision> indexed,
   required Set<String> onSurface,
 }) {
   for (final request in _explicitDecisionRequests(
-    cited,
+    workBead,
     originRegisters: onSurface,
   )) {
     if (!indexed.any(request.isAnsweredBy)) return true;
@@ -3672,9 +3781,18 @@ bool _needsRegisterWideLookup(
 /// complete/truncated.
 ///
 /// Two shapes remain loud failures rather than partial answers: a named set
-/// that does not fit the bound, and a citation absent from its whole REGISTER
-/// — the second is a defect in the bead's own citations, which TRUNCATED would
-/// have disguised as a clip nobody can act on.
+/// that does not fit the bound, and a CANONICAL citation absent from its whole
+/// REGISTER — the second is a defect in the bead's own citations, which
+/// TRUNCATED would have disguised as a clip nobody can act on.
+///
+/// A LEGACY id nothing answers is the third shape, and it is REPORTED instead:
+/// `ADR-0000` names the register FILE, whose amendments are indexed as `A<n>`
+/// entries while the log itself is no entry at all, so the request can never be
+/// satisfied and a failure over it holds the round forever (resolving the hold
+/// re-runs this gather over the same prose). The report names the field it was
+/// read from and quotes the prose around the token
+/// ([_DecisionRequest.unresolvedReport]), so a genuinely MISSPELLED legacy id
+/// is still visible to the lens — in evidence it can act on, not behind a hold.
 Future<DecisionSurfaceEvidence> _decisionLookup({
   required String workspaceDir,
   required String surface,
@@ -3700,7 +3818,12 @@ Future<DecisionSurfaceEvidence> _decisionLookup({
   final onSurface = answer.registers;
   var registers = onSurface;
   var union = const <_IndexedDecision>[];
-  if (_needsRegisterWideLookup(cited, indexed: indexed, onSurface: onSurface)) {
+  if (_needsRegisterWideLookup(
+    workBead,
+    cited: cited,
+    indexed: indexed,
+    onSurface: onSurface,
+  )) {
     final wide = await registerWide();
     if (!wide.ok) return failed(wide.error);
     union = wide.decisions;
@@ -3708,10 +3831,11 @@ Future<DecisionSurfaceEvidence> _decisionLookup({
   }
 
   final absent = <String>[];
+  final reports = <String>[];
   final elsewhere = <_IndexedDecision>[];
   final claimed = <String>{};
   for (final request in _explicitDecisionRequests(
-    cited,
+    workBead,
     originRegisters: registers,
   )) {
     if (indexed.any(request.isAnsweredBy)) continue;
@@ -3720,7 +3844,11 @@ Future<DecisionSurfaceEvidence> _decisionLookup({
         if (request.isAnsweredBy(candidate)) candidate,
     ];
     if (matched.isEmpty) {
-      absent.add(request.label);
+      if (request.isLegacy) {
+        reports.add(request.unresolvedReport);
+      } else {
+        absent.add(request.label);
+      }
       continue;
     }
     for (final candidate in matched) {
@@ -3778,11 +3906,16 @@ Future<DecisionSurfaceEvidence> _decisionLookup({
     entries: entries,
     namedElsewhere: notes,
     truncated: selected.length < indexed.length,
+    report: reports.join('\n'),
   );
 }
 
 /// Assembles ONE surface's lookup record — the shared shape every arm of
 /// [commandDecisionIndexSource] lands on.
+///
+/// [error] and [report] are the two things the record's ONE detail member can
+/// say, and they are mutually exclusive: an [error] is why this surface has no
+/// answer, a [report] rides an answer the surface DID give.
 DecisionSurfaceEvidence _decisionSurface({
   required String surface,
   required String command,
@@ -3790,36 +3923,53 @@ DecisionSurfaceEvidence _decisionSurface({
   List<DecisionEntryEvidence> namedElsewhere = const [],
   bool truncated = false,
   String error = '',
-}) => DecisionSurfaceEvidence(
-  id: boundDiscoveryEvidence(
-    kind: 'decision-surface',
-    subject: surface,
-    source: command,
-    // A named-elsewhere note is part of what this lookup ANSWERED, so it is
-    // part of the record's canonical identity — marked, never merged, so the
-    // same entry governing a surface and merely cited on it never digest to
-    // the same lookup.
-    fullText: [
-      for (final entry in entries) entry.identity,
-      for (final entry in namedElsewhere) 'named-elsewhere:${entry.identity}',
-    ].join('\n'),
-  ).id,
-  surface: surface,
-  command: command,
-  // Completeness is about the entry SET, never the entry BODIES: a decision
-  // doc longer than [kMaxDiscoverySnippetChars] keeps its OWN
-  // [EvidenceState.truncated] on `body`, where a lens that needs the whole
-  // text of ONE decision can name it by canonical id and the route can hold on
-  // THAT record. Folding a clipped body into the surface made every register
-  // with one long doc unanswerable (pow-jidn).
-  state: error.isNotEmpty
-      ? EvidenceState.failed
-      : (truncated ? EvidenceState.truncated : EvidenceState.complete),
-  truncated: truncated,
-  error: error,
-  decisions: [for (final entry in entries) entry.body.id],
-  namedElsewhere: [for (final entry in namedElsewhere) entry.body.id],
-);
+  String report = '',
+}) {
+  // GUARD (the named invariant: a surface record's detail has ONE meaning).
+  // Both arrive on the same wire member, read by state: a record claiming a
+  // failure AND a report would publish one of them under the other's meaning —
+  // a report read as a failure is exactly the false hold this reports instead
+  // of failing.
+  if (error.isNotEmpty && report.isNotEmpty) {
+    throw StateError(
+      'a decision surface carries a failure OR a report, never both '
+      '(surface `$surface`): error=$error; report=$report',
+    );
+  }
+  return DecisionSurfaceEvidence(
+    id: boundDiscoveryEvidence(
+      kind: 'decision-surface',
+      subject: surface,
+      source: command,
+      // A named-elsewhere note is part of what this lookup ANSWERED, so it is
+      // part of the record's canonical identity — marked, never merged, so the
+      // same entry governing a surface and merely cited on it never digest to
+      // the same lookup. A report is answered content too: the same entry set
+      // read with and without an unresolvable citation are two lookups.
+      fullText: [
+        for (final entry in entries) entry.identity,
+        for (final entry in namedElsewhere) 'named-elsewhere:${entry.identity}',
+        if (report.isNotEmpty) 'report:$report',
+      ].join('\n'),
+    ).id,
+    surface: surface,
+    command: command,
+    // Completeness is about the entry SET, never the entry BODIES: a decision
+    // doc longer than [kMaxDiscoverySnippetChars] keeps its OWN
+    // [EvidenceState.truncated] on `body`, where a lens that needs the whole
+    // text of ONE decision can name it by canonical id and the route can hold
+    // on THAT record. Folding a clipped body into the surface made every
+    // register with one long doc unanswerable (pow-jidn). A REPORT never moves
+    // the state either — the surface answered.
+    state: error.isNotEmpty
+        ? EvidenceState.failed
+        : (truncated ? EvidenceState.truncated : EvidenceState.complete),
+    truncated: truncated,
+    error: error.isEmpty ? report : error,
+    decisions: [for (final entry in entries) entry.body.id],
+    namedElsewhere: [for (final entry in namedElsewhere) entry.body.id],
+  );
+}
 
 /// The real [HistorySource]: ONE `git log` over every resolved surface, through
 /// the pack's existing [GitRunner] seam.

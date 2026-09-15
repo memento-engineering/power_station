@@ -29,6 +29,20 @@ const SessionHandle _session = SessionHandle('session-current');
 /// cites nothing, so selection is pure index order.
 final Bead _citesNothing = bead('pow-quiet');
 
+/// [id]'s bead carrying [text] in exactly ONE [field] — the fixture a probe
+/// about WHERE a citation lives varies, so the same sentence can be authored
+/// as a citation or as an operator's receipt.
+Bead _fieldBead(String id, BeadCitationField field, String text) =>
+    switch (field) {
+      BeadCitationField.title => bead(id).copyWith(title: text),
+      BeadCitationField.description => bead(id).copyWith(description: text),
+      BeadCitationField.design => bead(id).copyWith(design: text),
+      BeadCitationField.acceptanceCriteria => bead(
+        id,
+      ).copyWith(acceptanceCriteria: text),
+      BeadCitationField.notes => bead(id).copyWith(notes: text),
+    };
+
 /// A canned roster-mode `decisions index` answer over [count] records, with one
 /// VALID entry file written per record under [register] — the fixture
 /// name-first selection ranks.
@@ -2522,7 +2536,9 @@ void main() {
             )(
               dir.path,
               surfaces,
-              bead('lenny-dgp').copyWith(notes: 'Both follow `lenny#$slug`.'),
+              bead(
+                'lenny-dgp',
+              ).copyWith(description: 'Both follow `lenny#$slug`.'),
             );
 
         expect(records.decisionLookups, hasLength(2));
@@ -2615,7 +2631,7 @@ void main() {
       final proseGather = await lookup(
         bead(
           'pow-cite',
-        ).copyWith(notes: 'Tracked as `unknown_register#some-slug`.'),
+        ).copyWith(description: 'Tracked as `unknown_register#some-slug`.'),
       );
       final neutralGather = await lookup(_citesNothing);
       final prose = proseGather.decisionLookups.single;
@@ -2636,6 +2652,344 @@ void main() {
         reason: 'prose changes NOTHING about the projection',
       );
     });
+
+    // The phantom-citation regressions (bead pow-g4zh). The falsifying
+    // hyphenated tokens are constructed HERE, in Dart fixtures, and nowhere in
+    // prose a gather reads.
+    test('pow-g4zh phantom register token never fails decision evidence', () async {
+      // Measured on lunar 2026-09-13/14: `ADR-0000` is the register FILE's own
+      // name. Its amendments are indexed as `A<n>` entries; the log itself is
+      // no entry, so the request can never be satisfied — and the failure held
+      // the round forever, because resolving the hold re-ran this gather over
+      // the same sentence. Both operator sentences below are verbatim from the
+      // rounds that burned (pow-9g0o's design, pow-wbhb's notes).
+      final dir = Directory.systemTemp.createTempSync('decisions-phantom');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final register = Directory(p.join(dir.path, 'docs', 'decisions'))
+        ..createSync(recursive: true);
+      const surface = 'power_station/packages/grid_assets/lib/src/x.dart';
+      const sentences = [
+        'DO NOT AMEND ADR-0000 IN THIS BEAD',
+        'the description cited ADR-0000 (A9) in a form the gather could not '
+            'read, so it held',
+        'reverted the adr-0000 amendment, per the receipt above',
+        'the register is Adr-0000. It is an amendment log, never an entry.',
+        'see ADR-0000 for the log',
+      ];
+      for (final sentence in sentences) {
+        for (final field in const [
+          BeadCitationField.description,
+          BeadCitationField.design,
+          BeadCitationField.notes,
+        ]) {
+          final gathered = await commandDecisionIndexSource(
+            _fakeDecisionIndex(register, count: 3),
+            runnerInvocation: 'dart run lunar:lunar',
+            gridHome: '/grid/lunar',
+          )(dir.path, [surface], _fieldBead('pow-phantom', field, sentence));
+          final record = gathered.decisionLookups.single;
+          final where = '${field.wire}: $sentence';
+          expect(
+            record.state,
+            EvidenceState.complete,
+            reason:
+                'the register\'s own file name is not a citation any register '
+                'could ever answer, and a false HOLD is strictly worse than a '
+                'wasted round ($where): ${record.error}',
+          );
+          expect(record.truncated, isFalse, reason: where);
+          expect(
+            gathered.entriesOf(record.decisions).map((entry) => entry.slug),
+            ['a1-fake-decision-1', 'a2-fake-decision-2', 'a3-fake-decision-3'],
+            reason: 'and the surface still answers its whole union ($where)',
+          );
+        }
+      }
+    });
+
+    test('pow-g4zh notes are excluded from decision requests', () async {
+      // Notes are the OPERATOR's receipt channel: a governor explaining a cure
+      // is recording history, not citing a decision. A receipt now requests
+      // nothing — while the same words in description or design still do
+      // everything they did before.
+      final dir = Directory.systemTemp.createTempSync('decisions-receipts');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final register = Directory(p.join(dir.path, 'docs', 'decisions'))
+        ..createSync(recursive: true);
+      const surface = 'power_station/packages/grid_assets/lib/src/x.dart';
+      const named = 'a25-fake-decision-25';
+      Future<(DecisionGatherEvidence, List<String>)> gather(
+        Bead workBead,
+      ) async {
+        final shell = _fakeDecisionIndex(register, count: 30);
+        final gathered = await commandDecisionIndexSource(
+          shell,
+          runnerInvocation: 'dart run lunar:lunar',
+          gridHome: '/grid/lunar',
+        )(dir.path, [surface], workBead);
+        return (gathered, shell.commands);
+      }
+
+      const citations = [
+        'This bead is governed by `power_station#$named`.',
+        'This bead is governed by `A25`.',
+        'This holds ADR-0042 exactly.',
+      ];
+      final (neutral, neutralCommands) = await gather(_citesNothing);
+      final neutralRecord = neutral.decisionLookups.single;
+      for (final citation in citations) {
+        final (quiet, quietCommands) = await gather(
+          bead('pow-receipt').copyWith(notes: citation),
+        );
+        final record = quiet.decisionLookups.single;
+        expect(record.state, neutralRecord.state, reason: citation);
+        expect(record.truncated, neutralRecord.truncated, reason: citation);
+        expect(record.error, neutralRecord.error, reason: citation);
+        expect(
+          quiet.entriesOf(record.decisions).map((entry) => entry.slug),
+          neutral.entriesOf(neutralRecord.decisions).map((e) => e.slug),
+          reason: 'a receipt promotes nothing and reorders nothing: $citation',
+        );
+        expect(
+          quietCommands,
+          neutralCommands,
+          reason: 'and it never costs the register-wide lookup: $citation',
+        );
+      }
+
+      for (final field in const [
+        BeadCitationField.description,
+        BeadCitationField.design,
+      ]) {
+        for (final citation in citations.take(2)) {
+          final (promoted, _) = await gather(
+            _fieldBead('pow-cite', field, citation),
+          );
+          final record = promoted.decisionLookups.single;
+          expect(
+            promoted.entriesOf(record.decisions).first.slug,
+            named,
+            reason:
+                'the SAME citation authored where a citation belongs still '
+                'leads the surface (${field.wire}): $citation',
+          );
+          expect(record.state, EvidenceState.complete, reason: record.error);
+        }
+      }
+    });
+
+    test(
+      'pow-g4zh unresolved legacy request is a bounded source report',
+      () async {
+        final dir = Directory.systemTemp.createTempSync('decisions-report');
+        addTearDown(() => dir.deleteSync(recursive: true));
+        final register = Directory(p.join(dir.path, 'docs', 'decisions'))
+          ..createSync(recursive: true);
+        const surface = 'power_station/packages/grid_assets/lib/src/x.dart';
+        const token = 'ADR-0042';
+        // Enough prose either side that the 80-character context BITES.
+        final prefix = 'the governor wrote this receipt at length; ' * 4;
+        final suffix = ' and then explained the cure at length' * 4;
+        final prose = '$prefix$token$suffix';
+        final at = prose.indexOf(token);
+        final excerpt = prose.substring(at - 80, at + token.length + 80);
+
+        final gathered = await commandDecisionIndexSource(
+          _fakeDecisionIndex(register, count: 3),
+          runnerInvocation: 'dart run lunar:lunar',
+          gridHome: '/grid/lunar',
+        )(dir.path, [surface], bead('pow-report').copyWith(description: prose));
+        final record = gathered.decisionLookups.single;
+
+        expect(
+          record.state,
+          EvidenceState.complete,
+          reason:
+              'a legacy id nothing answers is a REPORT about an answer that was '
+              'still given: ${record.error}',
+        );
+        expect(record.truncated, isFalse);
+        expect(gathered.entriesOf(record.decisions), hasLength(3));
+        expect(
+          record.error,
+          'unresolved legacy decision citation adr-0042 reported from '
+          'description: “$excerpt”',
+          reason:
+              'the report NAMES the field and quotes the prose, so the next '
+              'operator never has to read the extractor to find the token',
+        );
+        final quoted = record.error.substring(
+          record.error.indexOf('“') + 1,
+          record.error.lastIndexOf('”'),
+        );
+        expect(
+          quoted,
+          contains(token),
+          reason: 'the excerpt is token-CENTERED',
+        );
+        expect(
+          quoted.length,
+          lessThanOrEqualTo(token.length + 2 * 80),
+          reason: 'and bounded at 80 source characters on each side',
+        );
+        expect(
+          record.error,
+          isNot(contains(prose)),
+          reason: 'a bounded excerpt, never the whole field',
+        );
+
+        // It survives the schema-3 wire on the record's one detail member.
+        final codec = DecisionReferenceCodec(gathered.decisionEntries.keys);
+        final back = DecisionSurfaceEvidence.fromJson(
+          jsonDecode(jsonEncode(record.toJson(codec))),
+          codec,
+        )!;
+        expect(back.error, record.error);
+        expect(back.state, EvidenceState.complete);
+
+        // And the lens READS it as a report, with no gap to regather on.
+        final projection = _project(
+          DiscoveryAnchors(
+            round: 7,
+            workBeadId: 'pow-x',
+            decisionEntries: gathered.decisionEntries,
+            decisionLookups: [record],
+          ),
+          kDecisionLens,
+        );
+        expect(projection.gaps, isEmpty, reason: 'a report is not a gap');
+        expect(projection.renderedEvidence, contains('- report: '));
+        expect(projection.renderedEvidence, contains(token.toLowerCase()));
+        expect(
+          projection.renderedEvidence,
+          isNot(contains('- error: ')),
+          reason: 'the detail is labelled by what the state makes it',
+        );
+
+        // The canonical miss keeps the FAILED rule: that shape is unambiguous
+        // authorship of a citation, not a token in prose.
+        final missed =
+            await commandDecisionIndexSource(
+              _fakeDecisionIndex(register, count: 3),
+              runnerInvocation: 'dart run lunar:lunar',
+              gridHome: '/grid/lunar',
+            )(
+              dir.path,
+              [surface],
+              bead('pow-report').copyWith(
+                description: 'This aligns with `power_station#no-such-slug`.',
+              ),
+            );
+        expect(
+          missed.decisionLookups.single.state,
+          EvidenceState.failed,
+          reason: 'a canonical citation under an indexed register still fails',
+        );
+        expect(
+          missed.decisionLookups.single.error,
+          'named decision absent from index: no-such-slug',
+        );
+      },
+    );
+
+    test(
+      'pow-g4zh migrated legacy aliases and decision bounds stay unchanged',
+      () async {
+        final dir = Directory.systemTemp.createTempSync('decisions-unchanged');
+        addTearDown(() => dir.deleteSync(recursive: true));
+        final register = Directory(p.join(dir.path, 'docs', 'decisions'))
+          ..createSync(recursive: true);
+        const surface = 'power_station/packages/grid_assets/lib/src/x.dart';
+
+        // A MIGRATED legacy entry keeps its id as the slug's leading segment,
+        // and the bead goes on citing the id — that resolution is untouched.
+        const slug = 'adr-0003-private-git-tag-releases-and-prerelease-gate';
+        final shell = _CannedShellRunner(
+          output: _emptySurfaceIndex,
+          answers: {
+            _unfilteredIndex: _registerWideAnswer(
+              register,
+              slug: slug,
+              originRegister: 'power_station',
+              surfaces: const ['power_station/tool/release.dart'],
+              body: 'a private tag release gates on its prerelease',
+            ),
+          },
+        );
+        final migrated =
+            await commandDecisionIndexSource(
+              shell,
+              runnerInvocation: 'dart run lunar:lunar',
+              gridHome: '/grid/lunar',
+            )(
+              dir.path,
+              [surface],
+              bead(
+                'pow-alias',
+              ).copyWith(design: 'The release wave is governed by ADR-0003.'),
+            );
+        final aliased = migrated.decisionLookups.single;
+        expect(aliased.state, EvidenceState.complete, reason: aliased.error);
+        expect(aliased.error, isEmpty, reason: 'a RESOLVED id reports nothing');
+        expect(
+          migrated.entriesOf(aliased.namedElsewhere).single.identity,
+          'power_station#$slug',
+        );
+
+        // The documented PATH form of the register's file name is not a
+        // citation, and never was: the trailing `-ai` fails the token lookahead.
+        final pathRunner = _fakeDecisionIndex(register, count: 3);
+        final safe =
+            await commandDecisionIndexSource(
+              pathRunner,
+              runnerInvocation: 'dart run lunar:lunar',
+              gridHome: '/grid/lunar',
+            )(
+              dir.path,
+              [surface],
+              bead('pow-path').copyWith(
+                description:
+                    'See docs/adr/ADR-0000-ai-decision-register.md for the log.',
+              ),
+            );
+        expect(safe.decisionLookups.single.state, EvidenceState.complete);
+        expect(safe.decisionLookups.single.error, isEmpty);
+        expect(
+          pathRunner.commands,
+          ['dart run lunar:lunar decisions index --surface $surface'],
+          reason: 'a path is prose — it never costs the register-wide lookup',
+        );
+
+        // NAMED-before-fill at the bound, and the clip receipt with it.
+        final bound =
+            await commandDecisionIndexSource(
+              _fakeDecisionIndex(
+                register,
+                count: kMaxDecisionEntriesPerSurface + 1,
+              ),
+              runnerInvocation: 'dart run lunar:lunar',
+              gridHome: '/grid/lunar',
+            )(
+              dir.path,
+              [surface],
+              bead('pow-bound').copyWith(
+                description:
+                    'This bead is governed by `A${kMaxDecisionEntriesPerSurface + 1}`.',
+              ),
+            );
+        final clipped = bound.decisionLookups.single;
+        expect(clipped.decisions, hasLength(kMaxDecisionEntriesPerSurface));
+        expect(
+          bound.entriesOf(clipped.decisions).first.slug,
+          'a${kMaxDecisionEntriesPerSurface + 1}-fake-decision-'
+          '${kMaxDecisionEntriesPerSurface + 1}',
+          reason: 'the NAMED entry still leads, whatever the index ordered',
+        );
+        expect(clipped.truncated, isTrue);
+        expect(clipped.state, EvidenceState.truncated);
+        expect(clipped.error, isEmpty);
+      },
+    );
 
     test('decision surface bound is 96 and clips the 97th entry', () async {
       expect(
