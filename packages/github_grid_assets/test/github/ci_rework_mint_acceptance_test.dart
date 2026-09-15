@@ -190,13 +190,17 @@ Future<void> _initializeStateStore(String stateRoot) async {
   await _runBd(stateRoot, const ['list', '--json']);
 }
 
-/// Every harness-owned store process still running out of [tempPath].
+/// Every harness-owned STORE process still running out of [tempPath].
 ///
 /// Matched on the process's own `--config` / `--root` arguments rather than on
 /// bd's PID files: bd re-spawns a proxy to serve the very command that stops
 /// the previous one, so a PID captured from `.beads/dolt/proxy.pid` names a
 /// process that is already gone while its successor is missed entirely. The
 /// process table is the only account that cannot go stale.
+///
+/// This is the census the fence is LOUD about, but it is not everything the
+/// harness leaves running — see [_workspaceResidents] for the clients that
+/// keep re-spawning what it kills.
 Future<List<({int pid, String command})>> _harnessStoreProcesses(
   String tempPath,
 ) async {
@@ -235,6 +239,51 @@ bool _namesTempPath(String command, RegExp pathArgument, String tempPrefix) {
   return false;
 }
 
+/// Every process still WORKING somewhere under [tempPath], by current
+/// directory.
+///
+/// bd forks detached children that outlive the command that spawned them —
+/// `bd send-metrics` is the one measured here, born after the test body
+/// finished and alive for ~25 seconds afterwards. They carry no `--config` or
+/// `--root`, so [_harnessStoreProcesses] cannot see them, and they inherit the
+/// workspace as their working directory, which is the only mark they leave in
+/// the process table.
+///
+/// They are why the SIGKILL fence below can run its full bound and still find
+/// a proxy: a live bd client re-spawns one to serve itself every time the
+/// fence kills the last. Killing them is also what stops a straggler from
+/// writing the store back into existence AFTER a delete that already reported
+/// success — measured, before this census, as a populated `.beads/dolt/`
+/// skeleton left in `/tmp` by runs that reported no failure at all.
+///
+/// `lsof` is the only account of a working directory on this platform. If it
+/// is absent or refuses, this degrades to the store census alone — the
+/// behaviour that shipped before — and the bounded delete below absorbs the
+/// difference.
+Future<List<int>> _workspaceResidents(String tempPath) async {
+  final ProcessResult result;
+  try {
+    result = await Process.run('lsof', [
+      '-w',
+      '-a',
+      '-d',
+      'cwd',
+      '-Fp',
+      '+D',
+      tempPath,
+    ]);
+  } on ProcessException {
+    return const [];
+  }
+  return [
+    for (final line in (result.stdout as String).split('\n'))
+      if (line.startsWith('p'))
+        // `pid` is this process: never in the kill set, whatever lsof says.
+        if (int.tryParse(line.substring(1)) case final resident?)
+          if (resident != pid) resident,
+  ];
+}
+
 /// Tears the proxied state store down: a SIGKILL fence driven by the process
 /// census, repeated until nothing the harness started still runs out of
 /// [tempPath].
@@ -244,14 +293,26 @@ bool _namesTempPath(String command, RegExp pathArgument, String tempPrefix) {
 /// be deleted anyway, and it re-spawns a proxy to serve its own command, so the
 /// process it leaves behind is never the one it reported stopping.
 ///
+/// The kill set is wider than the census: it takes the workspace's cwd-rooted
+/// residents too, because a store process killed while its client still runs
+/// simply comes back. The LOUD assertion stays on the store census, which
+/// names the invariant that matters — no process is left holding the Dolt data
+/// dir the delete is about to remove. A transient bd client that outlives its
+/// SIGKILL is not that, and the bounded delete already answers it.
+///
 /// The fence is LOUD because a survivor is not cosmetic: it holds a Dolt data
 /// dir that the temporary-directory delete is about to remove, and it outlives
 /// the test run.
 Future<void> _stopProxiedStateStore(String tempPath) async {
   var survivors = await _harnessStoreProcesses(tempPath);
-  for (var round = 0; round < 40 && survivors.isNotEmpty; round++) {
-    for (final survivor in survivors) {
-      Process.killPid(survivor.pid, ProcessSignal.sigkill);
+  for (var round = 0; round < 40; round++) {
+    final residents = await _workspaceResidents(tempPath);
+    if (survivors.isEmpty && residents.isEmpty) break;
+    for (final pid in [
+      for (final survivor in survivors) survivor.pid,
+      ...residents,
+    ]) {
+      Process.killPid(pid, ProcessSignal.sigkill);
     }
     await Future<void>.delayed(const Duration(milliseconds: 50));
     survivors = await _harnessStoreProcesses(tempPath);
@@ -262,6 +323,38 @@ Future<void> _stopProxiedStateStore(String tempPath) async {
     isEmpty,
     reason: 'harness-owned store processes survived under $tempPath',
   );
+}
+
+/// Removes [temporary] once nothing is writing inside it, retrying the delete
+/// across a proxy spawned AFTER an empty census.
+///
+/// The fence above cannot be the whole story: bd re-spawns a
+/// `db-proxy-child` to serve a command issued before the fence ran, so a store
+/// process can appear once the census has already come back clean and write
+/// into `.beads/dolt/` while the recursive delete is walking it. macOS answers
+/// that unlink race with `ENOTEMPTY` — Linux tolerates it, which is why CI
+/// stayed green while this teardown failed on most runs here, abandoning the
+/// tree AND its store processes on disk.
+///
+/// Every attempt re-censuses, so a late arrival is killed before the next
+/// delete. Only [FileSystemException] is caught, and only for as long as the
+/// bound allows: a surviving store process still fails the fence's own
+/// expectation, and a delete that never succeeds still throws its original
+/// error, LOUDLY.
+Future<void> _deleteTemporaryWorkspace(Directory temporary) async {
+  const attempts = 40;
+  for (var attempt = 1; attempt <= attempts; attempt++) {
+    if (!temporary.existsSync()) return;
+    await _stopProxiedStateStore(temporary.path);
+    try {
+      await temporary.delete(recursive: true);
+      return;
+    } on FileSystemException {
+      if (!temporary.existsSync()) return;
+      if (attempt == attempts) rethrow;
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+    }
+  }
 }
 
 Future<void> _seedStore({
@@ -368,8 +461,7 @@ void main() {
       // after the station teardown below — so a failure anywhere in the boot
       // still fences the proxied store before the tree is removed.
       addTearDown(() async {
-        await _stopProxiedStateStore(temporary.path);
-        await temporary.delete(recursive: true);
+        await _deleteTemporaryWorkspace(temporary);
       });
       await _seedStore(gridRoot: gridRoot, workRoot: workRoot);
       final stateStore = GridStateStore.forGridRoot(gridRoot);
@@ -523,8 +615,7 @@ void main() {
       // after the station teardown below — so a failure anywhere in the boot
       // still fences the proxied store before the tree is removed.
       addTearDown(() async {
-        await _stopProxiedStateStore(temporary.path);
-        await temporary.delete(recursive: true);
+        await _deleteTemporaryWorkspace(temporary);
       });
       await _seedStore(gridRoot: gridRoot, workRoot: workRoot);
       final stateStore = GridStateStore.forGridRoot(gridRoot);
