@@ -375,10 +375,11 @@ AgentBrief buildRelayBrief(
     ..writeln('## Your tools')
     ..writeln(
       'You may reach exactly these surfaces, and no others: '
-      '${tools.join(', ')}. The first four are READ-ONLY inspections of the '
-      'session, already performed for you — their complete results are the '
-      'evidence below. `$kRelayVerdictWriteTool` is the only thing you write, '
-      'and it is the JSON object you return.',
+      '${tools.join(', ')}. Every one of them except '
+      '`$kRelayVerdictWriteTool` is a READ-ONLY inspection of the session, '
+      'already performed for you — their complete results are the evidence '
+      'below. `$kRelayVerdictWriteTool` is the only thing you write, and it '
+      'is the JSON object you return.',
     )
     ..writeln()
     ..writeln('## Evidence')
