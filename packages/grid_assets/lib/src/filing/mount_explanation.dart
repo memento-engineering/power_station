@@ -587,16 +587,29 @@ MountPreconditionRow _acceptanceRow(
 
 MountPreconditionRow _approvalRow(Bead bead, List<String> findings) {
   final refused = _refusedOn(findings, 'approval:');
+  // The STALE arm is read back off the ONE predicate's own finding. This verb
+  // renders that classification; it never re-asks the question, because a
+  // second approval predicate here is exactly what the row set exists to
+  // avoid.
+  final stale = _refusedOn(findings, 'approval: stale');
   final stamp = ApprovalStamp.tryParse(bead);
   return MountPreconditionRow(
     precondition: MountPrecondition.approvalStamp,
     outcome: refused ? MountOutcome.blocked : MountOutcome.pass,
-    detail: refused
-        ? 'approval: not approved — the mount predicate reads the '
-              '$kApprovedByKey / $kApprovedAtKey / $kApprovedRevKey receipt '
-              'the approve verb writes, and the retired `grid.approved` label '
-              'is not read'
-        : 'approved by ${stamp?.by} at ${stamp?.at} against rev ${stamp?.rev}',
+    detail: switch ((stale: stale, refused: refused)) {
+      (stale: true, refused: _) =>
+        'approval: stale — the receipt names revision '
+            '${bead.metadata[kApprovedRevKey]}, minted under a RETIRED filing '
+            'basis scheme. Nothing re-derives it, so it is not read as an '
+            'approval; the bead needs ONE re-approval, not an edit.',
+      (stale: false, refused: true) =>
+        'approval: not approved — the mount predicate reads the '
+            '$kApprovedByKey / $kApprovedAtKey / $kApprovedRevKey receipt '
+            'the approve verb writes, and the retired `grid.approved` label '
+            'is not read',
+      (stale: false, refused: false) =>
+        'approved by ${stamp?.by} at ${stamp?.at} against rev ${stamp?.rev}',
+    },
     remedy: refused
         ? 'approve --actor <actor> --json ${bead.id} — the verb re-runs the '
               'four-row filing preflight and stamps only if it passes. '

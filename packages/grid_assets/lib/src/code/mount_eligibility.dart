@@ -23,6 +23,15 @@ import '../filing/approval_stamp.dart';
 /// pow-lr8n decides what the basis binds, a COMPLETE stamp of either form
 /// mounts; the revision stays on the stamp for the audit trail and for the
 /// approve verb's own staleness report.
+///
+/// The one thing the gate DOES read off the revision is its SCHEME VERSION.
+/// A receipt minted under a retired basis scheme ([isStaleFilingApprovalStamp])
+/// is complete in every part and unreproducible by construction, so it is
+/// refused — but as STALE, naming re-approval as the remedy, rather than as
+/// "not approved" about a bead a governor demonstrably approved. That is a
+/// version comparison, not a digest comparison: it cannot fire on an ordinary
+/// edit to the fields the basis hashes, so it does not reopen the failure the
+/// bridge above stopped.
 List<String> mountEligibilityFindings(
   Bead bead, {
   String? evaluatedApprovalRevision,
@@ -37,7 +46,11 @@ List<String> mountEligibilityFindings(
   }
   final stamp = ApprovalStamp.tryParse(bead);
   if (stamp == null) {
-    findings.add('approval: not approved - run the approve verb');
+    findings.add(
+      isStaleFilingApprovalStamp(bead)
+          ? 'approval: stale - rerun the approve verb'
+          : 'approval: not approved - run the approve verb',
+    );
   }
   return findings;
 }
