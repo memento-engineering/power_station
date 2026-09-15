@@ -121,10 +121,12 @@ void main() {
     Map<String, String> environment = const {},
     String payload = _startup,
     String executableName = 'space',
+    String runnerInvocation = '',
     String description = 'The power station CLI.',
   }) => CommandRunner<int>(executableName, description)
     ..addCommand(
       PrimeCommand(
+        runnerInvocation: runnerInvocation,
         runnerFor: (_) => bd ?? _FakeBd(bdStdout, exitCode: bdExitCode),
         environment: () => environment,
         cwd: () => home.path,
@@ -169,7 +171,7 @@ void main() {
 
       final context = out.toString();
       expect(context, startsWith('Station: space — The power station CLI.\n'));
-      expect(context, contains('\nInvoke: ${runner.invocation}\n'));
+      expect(context, contains('\nInvoke: space prime [--hook-json]\n'));
 
       // EXACTLY one pointer record per exposed key — no key unnamed, and no
       // record that is not a key.
@@ -179,6 +181,74 @@ void main() {
       ]);
       expect(_verbRecords(context), contains('- land — space help land'));
       expect(_verbRecords(context), contains('- search — space help search'));
+    });
+
+    test(
+      'configured runner invocation renders every prime command pointer',
+      () async {
+        final out = StringBuffer();
+        // A JIT station: `dart run lunar:lunar` is the verb that reaches THIS
+        // checkout, while the bare `lunar` resolves to whatever global
+        // snapshot was last activated — which nothing refreshes.
+        final runner =
+            station(
+                out: out,
+                bdStdout: _hook('BD'),
+                executableName: 'lunar',
+                runnerInvocation: 'dart run lunar:lunar',
+              )
+              ..addCommand(_StationVerb('land'))
+              ..addCommand(_StationVerb('search'));
+
+        expect(await runner.run(['prime']), 0);
+
+        final context = out.toString();
+        expect(
+          context,
+          contains('\nInvoke: dart run lunar:lunar prime [--hook-json]\n'),
+        );
+        expect(_verbRecords(context), [
+          for (final key in runner.commands.keys.toList()..sort())
+            '- $key — dart run lunar:lunar help $key',
+        ]);
+        expect(
+          context,
+          contains(
+            'Search with dart run lunar:lunar search; usage: dart run '
+            'lunar:lunar help search.',
+          ),
+        );
+        // The station's IDENTITY is still its name — it is the executable that
+        // stops being a POINTER, not the station.
+        expect(context, startsWith('Station: lunar — '));
+        expect(
+          _verbRecords(context),
+          isNot(contains('- land — lunar help land')),
+          reason: 'no pointer survives at the bare executable',
+        );
+      },
+    );
+
+    test('blank runner invocation falls back to executableName', () async {
+      final out = StringBuffer();
+      // A station that composed no invocation of its own: the attached
+      // runner's executable is all there is to point at, and whitespace is
+      // not an invocation.
+      final runner = station(
+        out: out,
+        bdStdout: _hook('BD'),
+        runnerInvocation: '   ',
+      )..addCommand(_StationVerb('land'));
+
+      expect(await runner.run(['prime']), 0);
+
+      final context = out.toString();
+      expect(context, contains('\nInvoke: space prime [--hook-json]\n'));
+      expect(_verbRecords(context), contains('- land — space help land'));
+      expect(
+        context,
+        contains('Search with space search; usage: space help search.'),
+      );
     });
 
     test('late-added command derives into prime', () async {

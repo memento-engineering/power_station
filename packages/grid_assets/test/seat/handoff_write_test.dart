@@ -469,6 +469,7 @@ void main() {
       final code =
           await (CommandRunner<int>('space', 'test')..addCommand(
                 PrimeCommand(
+                  runnerInvocation: 'dart run space:space',
                   runnerFor: (_) => _FakeBd(
                     jsonEncode({
                       'hookSpecificOutput': {

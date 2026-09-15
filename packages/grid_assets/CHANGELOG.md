@@ -1,5 +1,17 @@
 ## Unreleased
 
+- Breaking: `PrimeCommand` takes a required `runnerInvocation`, and prime renders its pointers with
+  it instead of the attached runner's `executableName`. The heading is now
+  `Invoke: <invocation> prime [--hook-json]`, and each verb record and both decision-search pointers
+  read `<invocation> help <verb>` / `<invocation> search`. A bare executable name is not a durable
+  pointer on a just-in-time station: it resolves to whatever global snapshot was last activated,
+  which nothing refreshes, while the invocation the station composed (`dart run lunar:lunar`) always
+  reaches the checkout the station is running from — so every seat was being pointed at a binary
+  that could be arbitrarily stale. The parameter has NO default, deliberately, so a station that
+  forgets to thread it fails to compile rather than silently pointing its seats at the wrong
+  executable; a blank string selects the old `executableName` rendering. The station IDENTITY line
+  still names the executable, and the withheld-verbs pointer is unchanged.
+
 - Breaking: approval receipts are cut to `filing:v2:sha256:`. The digest is taken over the bead's
   own filing fields (`id`, `title`, `description`, `design`, `acceptance_criteria`, `notes`,
   `spec_id`, `issue_type`, `priority`, `validation_plan`) plus the local and `external:` rows of
