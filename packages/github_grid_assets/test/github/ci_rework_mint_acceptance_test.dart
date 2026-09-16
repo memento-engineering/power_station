@@ -194,10 +194,12 @@ Future<void> _initializeStateStore(String stateRoot) async {
 /// Every harness-owned STORE process still running out of [tempPath].
 ///
 /// Matched on the process's own `--config` / `--root` arguments rather than on
-/// bd's PID files: bd re-spawns a proxy to serve the very command that stops
-/// the previous one, so a PID captured from `.beads/dolt/proxy.pid` names a
-/// process that is already gone while its successor is missed entirely. The
-/// process table is the only account that cannot go stale.
+/// bd's PID files ALONE: bd re-spawns a proxy to serve the very command that
+/// stops the previous one, so a PID captured from `.beads/dolt/proxy.pid` names
+/// a process that is already gone while its successor is missed entirely. The
+/// process table is the only account that cannot go stale — but it is also the
+/// one a freshly forked child is not yet in, which is what
+/// [proxiedStateStorePids] seeds alongside it.
 ///
 /// This is the census the fence is LOUD about, but it is not everything the
 /// harness leaves running — see [_workspaceResidents] for the clients that
@@ -302,6 +304,75 @@ List<int> parseLsofPids(String output, {required int selfPid}) => [
 Future<List<int>> _workspaceResidents(String tempPath) =>
     workspaceResidents(tempPath, selfPid: pid, runProcess: Process.run);
 
+/// The PID files bd's proxy pair writes while it is serving a store.
+///
+/// `proxy.pid` names the `db-proxy-child`; `proxy-child.pid` names the `dolt
+/// sql-server` that child supervises — the process that holds the data dir the
+/// delete is about to remove.
+const _proxyPidNames = ['proxy.pid', 'proxy-child.pid'];
+
+/// The store PIDs bd's own artifacts name under [tempPath].
+///
+/// The process census keys on a `--config`/`--root` argument, which a child
+/// only carries once it has exec'd; bd records both PIDs the moment it forks.
+/// These files are therefore the only account of a Dolt server that is already
+/// running but not yet recognisable, and they are read BEFORE the fence signals
+/// anything, because the first SIGKILL is what takes them away.
+///
+/// bd has written a PID both ways — bare decimal, and a JSON object carrying a
+/// `pid` — so both are read. An absent file is a store that is already down,
+/// which [readPidFile] reports as null. Anything else PRESENT is refused by
+/// name: a PID file this cannot read names a process the exit fence cannot
+/// wait out, and a teardown that assumes there is nothing to wait for is how
+/// this fixture leaked a live Dolt server into `/tmp` in the first place.
+Set<int> proxiedStateStorePids(
+  String tempPath, {
+  required String? Function(String path) readPidFile,
+}) {
+  final pids = <int>{};
+  for (final name in _proxyPidNames) {
+    final path = '$tempPath/grid/.grid/.beads/dolt/$name';
+    final contents = readPidFile(path);
+    if (contents == null) continue;
+    final recorded = _recordedPid(contents);
+    if (recorded == null) {
+      throw StateError('unreadable proxy pid file $path: ${contents.trim()}');
+    }
+    pids.add(recorded);
+  }
+  return pids;
+}
+
+/// The positive PID [contents] records, or null if it records none.
+int? _recordedPid(String contents) {
+  final trimmed = contents.trim();
+  if (int.tryParse(trimmed) case final bare?) return bare > 0 ? bare : null;
+  final Object? decoded;
+  try {
+    decoded = jsonDecode(trimmed);
+  } on FormatException {
+    return null;
+  }
+  if (decoded case {'pid': final int recorded} when recorded > 0) {
+    return recorded;
+  }
+  return null;
+}
+
+/// Reads a PID file that may not be there.
+///
+/// Null means ABSENT — never written, or removed by the proxy between the
+/// check and the read. Every other [FileSystemException] is a filesystem this
+/// teardown does not understand, and it travels rather than reading as an
+/// empty process table.
+String? _readPidFileIfPresent(String path) {
+  try {
+    return File(path).readAsStringSync();
+  } on PathNotFoundException {
+    return null;
+  }
+}
+
 /// Tears the proxied state store down: a SIGKILL fence driven by the process
 /// census, repeated until nothing the harness started still runs out of
 /// [tempPath], and returning every PID it named on the way.
@@ -313,25 +384,31 @@ Future<List<int>> _workspaceResidents(String tempPath) =>
 ///
 /// The kill set is wider than the census: it takes the workspace's cwd-rooted
 /// residents too, because a store process killed while its client still runs
-/// simply comes back. The LOUD assertion stays on the store census, which
-/// names the invariant that matters — no process is left holding the Dolt data
-/// dir the delete is about to remove. A transient bd client that outlives its
-/// SIGKILL is not that, and the awaited exit below already answers it.
+/// simply comes back, and it is SEEDED from [proxiedStateStorePids] so the Dolt
+/// server bd recorded is named directly rather than only once it looks like
+/// one. The LOUD assertion stays on the store census, which names the invariant
+/// that matters — no process is left holding the Dolt data dir the delete is
+/// about to remove. A transient bd client that outlives its SIGKILL is not
+/// that, and the awaited exit below already answers it.
 ///
 /// Signalling is all this does. The returned set is the account
 /// [_stopAndAwaitProxiedStateStore] then waits out: a fence that reports a
 /// clean census has proved the kernel accepted its signals, not that the
 /// processes are off the table with their files closed.
 Future<Set<int>> _stopProxiedStateStore(String tempPath) async {
-  final named = <int>{};
+  final named = proxiedStateStorePids(
+    tempPath,
+    readPidFile: _readPidFileIfPresent,
+  );
   var survivors = await _harnessStoreProcesses(tempPath);
   for (var round = 0; round < 40; round++) {
     final residents = await _workspaceResidents(tempPath);
     if (survivors.isEmpty && residents.isEmpty) break;
-    for (final target in [
+    for (final target in {
+      ...named,
       for (final survivor in survivors) survivor.pid,
       ...residents,
-    ]) {
+    }) {
       named.add(target);
       Process.killPid(target, ProcessSignal.sigkill);
     }
@@ -464,13 +541,13 @@ Future<void> waitForProxiedStateStoreExit({
 
 /// Removes [temporary] once the store inside it is gone.
 ///
-/// The awaited stop above is the mechanism; the retry behind it is a counted
+/// The awaited stop above is the mechanism; everything behind it is a counted
 /// fallback, not the fence. macOS answers an unlink that races a write with
 /// `ENOTEMPTY` — Linux tolerates it, which is why CI stayed green while this
 /// teardown failed here, abandoning the tree AND its store processes on disk —
-/// so a delete that still fails once the store is proven gone means the fence
-/// missed something, and [onDeleteFallback] counts every such miss for the
-/// case that asserts there are none.
+/// so a delete that fails, or a workspace that comes BACK, once the store is
+/// proven gone means the fence missed something, and [onDeleteFallback] counts
+/// every such miss for the case that asserts there are none.
 Future<void> _deleteTemporaryWorkspace(
   Directory temporary, {
   required void Function() onDeleteFallback,
@@ -484,33 +561,66 @@ Future<void> _deleteTemporaryWorkspace(
     stillPresent: temporary.existsSync,
     delay: (duration) => Future<void>.delayed(duration),
     onDeleteFallback: onDeleteFallback,
+    workspacePath: temporary.path,
   );
 }
 
-/// Runs [delete] until it succeeds, [attempts] times at most.
+/// Deletes the workspace at [workspacePath] and does not return until it has
+/// STAYED deleted.
+///
+/// A delete that reports success is not an empty `/tmp`: the leak measured here
+/// was a workspace whose every file the recursive delete removed, and whose
+/// `grid/.grid/.beads/dolt` chain a store process re-created on its way out —
+/// a directory nothing then owned, reported by a teardown that raised nothing.
+/// So a delete is only believed once [stillPresent] has come back false
+/// [absenceChecks] times in a row, one [between] apart. A workspace that
+/// reappears inside that window is a miss: [onDeleteFallback] counts it and the
+/// next attempt deletes it again.
 ///
 /// A [FileSystemException] that leaves the directory gone is a delete another
-/// hand completed, and returns. One that leaves it present spends an attempt:
-/// [onDeleteFallback] once, a [delay] of [between], and another try. The final
-/// attempt rethrows, so the error the teardown reports is the original object
-/// and stack — never a summary of it.
+/// hand completed, and goes on to the same absence window. One that leaves it
+/// present spends an attempt: [onDeleteFallback] once, a [delay] of [between],
+/// and another try. The final attempt rethrows, so the error the teardown
+/// reports is the original object and stack — never a summary of it; a
+/// workspace still coming back on the final attempt raises a [StateError]
+/// naming it, because a directory that survives [attempts] deletions is a live
+/// writer no retry count is going to outlast.
 Future<void> deleteTemporaryWorkspaceWithRetry({
   required Future<void> Function() delete,
   required bool Function() stillPresent,
   required Future<void> Function(Duration) delay,
   required void Function() onDeleteFallback,
+  required String workspacePath,
   int attempts = 5,
+  int absenceChecks = 5,
   Duration between = const Duration(milliseconds: 50),
 }) async {
   for (var attempt = 1; attempt <= attempts; attempt++) {
     try {
       await delete();
-      return;
     } on FileSystemException {
-      if (!stillPresent()) return;
-      if (attempt == attempts) rethrow;
-      onDeleteFallback();
+      if (stillPresent()) {
+        if (attempt == attempts) rethrow;
+        onDeleteFallback();
+        await delay(between);
+        continue;
+      }
+    }
+    var stayedGone = true;
+    for (var check = 0; check < absenceChecks; check++) {
       await delay(between);
+      if (stillPresent()) {
+        stayedGone = false;
+        break;
+      }
+    }
+    if (stayedGone) return;
+    onDeleteFallback();
+    if (attempt == attempts) {
+      throw StateError(
+        'the temporary workspace $workspacePath was re-created after '
+        '$attempts deletions',
+      );
     }
   }
 }

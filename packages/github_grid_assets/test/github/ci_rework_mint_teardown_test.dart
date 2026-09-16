@@ -8,9 +8,12 @@ import 'package:test/test.dart';
 // fakes, against no bd and no Dolt.
 import 'ci_rework_mint_acceptance_test.dart' as fixture;
 
-const _lockRoot = '/tmp/ci-rework-mint-fake/grid/.grid/.beads/dolt';
+const _workspace = '/tmp/ci-rework-mint-fake';
+const _lockRoot = '$_workspace/grid/.grid/.beads/dolt';
 const _proxyLock = '$_lockRoot/proxy.lock';
 const _proxyChildLock = '$_lockRoot/proxy-child.lock';
+const _proxyPid = '$_lockRoot/proxy.pid';
+const _proxyChildPid = '$_lockRoot/proxy-child.pid';
 
 void main() {
   test('the lsof census reads p records and drops this process', () {
@@ -37,12 +40,12 @@ void main() {
     var invoked = 0;
 
     final residents = await fixture.workspaceResidents(
-      '/tmp/ci-rework-mint-fake',
+      _workspace,
       selfPid: 4242,
       runProcess: (executable, arguments) async {
         invoked++;
         expect(executable, 'lsof');
-        expect(arguments, contains('/tmp/ci-rework-mint-fake'));
+        expect(arguments, contains(_workspace));
         throw const ProcessException('lsof', ['-Fp'], 'No such file', 2);
       },
     );
@@ -51,10 +54,108 @@ void main() {
     expect(residents, isEmpty);
   });
 
+  test('both proxy pid files seed the exit fence', () {
+    final read = <String>[];
+
+    // bd has written a PID both ways, and the two files name DIFFERENT
+    // processes: `proxy.pid` the bd proxy, `proxy-child.pid` the Dolt server it
+    // supervises. The fence waits out both or it waits out nothing.
+    final pids = fixture.proxiedStateStorePids(
+      _workspace,
+      readPidFile: (path) {
+        read.add(path);
+        return path.endsWith('proxy-child.pid')
+            ? '{"pid":68385,"port":63237}\n'
+            : '68187\n';
+      },
+    );
+
+    expect(read, orderedEquals(<String>[_proxyPid, _proxyChildPid]));
+    expect(pids, unorderedEquals(<int>[68187, 68385]));
+
+    expect(
+      fixture.proxiedStateStorePids(_workspace, readPidFile: (_) => null),
+      isEmpty,
+      reason: 'an absent pid file is a store that is already down',
+    );
+  });
+
+  test('a pid file present but unreadable refuses by name', () async {
+    expect(
+      () => fixture.proxiedStateStorePids(
+        _workspace,
+        readPidFile: (path) =>
+            path.endsWith('proxy-child.pid') ? '{"port":63237}' : '68187',
+      ),
+      throwsA(
+        isA<StateError>().having(
+          (error) => error.message,
+          'message',
+          contains(_proxyChildPid),
+        ),
+      ),
+    );
+  });
+
+  test('a re-created workspace is deleted again before absence '
+      'stabilizes', () async {
+    // The leak this fence was built for: the delete succeeds, and a store
+    // process re-creates the workspace on its way out. Every later poll finds
+    // it gone, so the second delete is the last one.
+    final presence = <bool>[true, false, false, false, false, false];
+    var polls = 0;
+    var deletes = 0;
+    var fallbacks = 0;
+    final waits = <Duration>[];
+
+    await fixture.deleteTemporaryWorkspaceWithRetry(
+      delete: () async {
+        deletes++;
+      },
+      stillPresent: () => presence[polls++],
+      delay: (duration) async => waits.add(duration),
+      onDeleteFallback: () => fallbacks++,
+      workspacePath: _workspace,
+    );
+
+    expect(deletes, 2);
+    expect(fallbacks, 1, reason: 'a workspace that comes back is a miss');
+    expect(polls, 6, reason: 'one poll, then the five that came back bare');
+    expect(waits, hasLength(6));
+    expect(waits, everyElement(const Duration(milliseconds: 50)));
+  });
+
+  test('a workspace that keeps coming back refuses loudly', () async {
+    var deletes = 0;
+    var fallbacks = 0;
+
+    await expectLater(
+      fixture.deleteTemporaryWorkspaceWithRetry(
+        delete: () async {
+          deletes++;
+        },
+        stillPresent: () => true,
+        delay: (_) async {},
+        onDeleteFallback: () => fallbacks++,
+        workspacePath: _workspace,
+      ),
+      throwsA(
+        isA<StateError>().having(
+          (error) => error.message,
+          'message',
+          contains(_workspace),
+        ),
+      ),
+    );
+
+    expect(deletes, 5);
+    expect(fallbacks, 5, reason: 'every reappearance counts, the last too');
+  });
+
   test('the last delete attempt rethrows the original failure', () async {
     final failure = FileSystemException(
       'Deletion failed',
-      '/tmp/ci-rework-mint-fake',
+      _workspace,
       const OSError('Directory not empty', 66),
     );
     var attempts = 0;
@@ -70,6 +171,7 @@ void main() {
         stillPresent: () => true,
         delay: (duration) async => waits.add(duration),
         onDeleteFallback: () => fallbacks++,
+        workspacePath: _workspace,
       ),
       throwsA(same(failure)),
     );
