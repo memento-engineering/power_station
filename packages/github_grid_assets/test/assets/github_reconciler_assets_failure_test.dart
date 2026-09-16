@@ -68,6 +68,32 @@ final class _StateBd implements BdRunner {
   };
 }
 
+/// The seat's OWN work store: the rail the landing mark rides. [result] is
+/// what it answers the `bd update` with.
+final class _WorkBd implements BdRunner {
+  _WorkBd({this.result = const BdResult(exitCode: 0, stdout: '', stderr: '')});
+
+  final BdResult result;
+  final argvs = <List<String>>[];
+
+  @override
+  Future<BdResult> run(
+    List<String> args, {
+    Duration? timeout,
+    String? stdin,
+  }) async {
+    argvs.add(List<String>.of(args));
+    return result;
+  }
+}
+
+/// The substation this seat is mounted under.
+const sdk.SubstationScope _scope = sdk.SubstationScope(
+  name: 'power_station',
+  root: '/work/power_station',
+  prefix: 'pow',
+);
+
 final class _Sender implements FeedbackCommandSender {
   @override
   Future<FeedbackCommandResult> rework({
@@ -144,13 +170,34 @@ final _check = NormalizedGitHubEvent.pullRequestFeedback(
   stalled: false,
 );
 
+/// The same pull request, GREEN: the only state that decides a landing mark.
+final _green = NormalizedGitHubEvent.pullRequestFeedback(
+  nodeId: 'PR_1',
+  actor: 'nico',
+  repository: 'memento/power_station',
+  substation: 'power_station',
+  observationId: 'poll:pull-feedback:PR_1:abc123:green',
+  number: 8,
+  body: 'A human digest.\n\nRefs: pow-2xmo\n',
+  headBranch: 'grid/pow-2xmo',
+  headSha: 'abc123',
+  checkState: PullRequestCheckState.green,
+  mergeability: PullRequestMergeability.mergeable,
+  openedAt: DateTime.utc(2026, 9, 3, 15),
+  updatedAt: DateTime.utc(2026, 9, 3, 16, 24),
+  greenSince: null,
+  observedAt: DateTime.utc(2026, 9, 3, 16, 30),
+  stalled: false,
+);
+
 /// A store holding NO session for the pull's bead — the ordinary shape of
 /// feedback that arrived after its PR landed and its session closed.
 CiFeedbackProjection _landedProjection() => CiFeedbackProjection(
   bd: _StateBd('{"schema_version":1,"data":[]}'),
+  workBd: _WorkBd(),
+  scope: _scope,
   commandSender: _Sender(),
   gridRoot: '/grid',
-  substation: 'power_station',
 );
 
 Seed _seatTree({
@@ -243,6 +290,51 @@ void main() {
     },
   );
 
+  test('the asset rail carries an unresolvable landing mark', () async {
+    // The SAME binding, a different flare name: the seat's transport is the
+    // one reporting path, so a new named degradation needs no second rail.
+    final flares = RecordingExplorationTransport();
+    final work = _WorkBd(
+      result: const BdResult(
+        exitCode: 1,
+        stdout: '',
+        stderr: 'get pow-2xmo: sql: no rows in result set',
+      ),
+    );
+    final projection = CiFeedbackProjection(
+      bd: _StateBd(
+        jsonEncode(<String, Object?>{
+          'schema_version': 1,
+          'data': <Object?>[
+            <String, Object?>{
+              'id': 'session-0',
+              'issue_type': 'session',
+              'metadata': <String, Object?>{'work_bead': 'pow-2xmo'},
+            },
+          ],
+        }),
+      ),
+      workBd: work,
+      scope: _scope,
+      commandSender: _Sender(),
+      gridRoot: '/grid',
+    );
+    final owner = TreeOwner();
+    addTearDown(owner.dispose);
+    owner.mountRoot(_seatTree(flares: flares, projection: projection));
+    owner.flush();
+
+    await projection(_green);
+
+    final flare = flares.named(kCiFeedbackLandingUnresolvedFlare).single;
+    expect(flare.data, containsPair('seat', 'power_station'));
+    expect(flare.data, containsPair('repository', 'memento/power_station'));
+    expect(flare.data['error'], contains('pow-2xmo'));
+    expect(flare.data['error'], contains('/work/power_station'));
+    expect(flare.data['error'], contains('sql: no rows in result set'));
+    expect(work.argvs.single.take(2), <String>['update', 'pow-2xmo']);
+  });
+
   test('the ignore flare names the shape the store held', () async {
     final flares = RecordingExplorationTransport();
     final projection = CiFeedbackProjection(
@@ -259,9 +351,10 @@ void main() {
           ],
         }),
       ),
+      workBd: _WorkBd(),
+      scope: _scope,
       commandSender: _Sender(),
       gridRoot: '/grid',
-      substation: 'power_station',
     );
     final owner = TreeOwner();
     addTearDown(owner.dispose);

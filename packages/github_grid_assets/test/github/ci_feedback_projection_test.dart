@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:beads_dart/beads_dart.dart';
 import 'package:github_grid_assets/github_grid_assets.dart';
+import 'package:grid_sdk/grid_sdk.dart' as sdk;
 import 'package:test/test.dart';
 
 /// The verbatim refusal a PROXIED-SERVER store answers `bd export` with. Every
@@ -55,6 +56,31 @@ final class FakeBdRunner implements BdRunner {
     return results.isEmpty
         ? const BdResult(exitCode: 0, stdout: '{}', stderr: '')
         : results.removeAt(0);
+  }
+}
+
+/// The scope's OWN work store: it records every argv and answers [result].
+///
+/// A DISTINCT fake from [FakeBdRunner] on purpose. The two rails are separate
+/// stores, and a shared fake would let a test pass while the landing mark went
+/// to the state store — the exact defect the split exists to close.
+final class FakeWorkBdRunner implements BdRunner {
+  FakeWorkBdRunner({
+    this.result = const BdResult(exitCode: 0, stdout: '', stderr: ''),
+  });
+
+  /// The result the landing-ready mutation answers with.
+  BdResult result;
+  final calls = <List<String>>[];
+
+  @override
+  Future<BdResult> run(
+    List<String> args, {
+    Duration? timeout,
+    String? stdin,
+  }) async {
+    calls.add(List.of(args));
+    return result;
   }
 }
 
@@ -136,13 +162,29 @@ String ledger(List<String> keys, {List<String>? ids}) => jsonEncode({
   ],
 });
 
-CiFeedbackProjection projection(FakeBdRunner bd, FakeSender sender) =>
-    CiFeedbackProjection(
-      bd: bd,
-      commandSender: sender,
-      gridRoot: '/grid',
-      substation: 'power',
-    );
+/// The substation every fixture here is mounted under: `tg-…` work beads in a
+/// store at `/work/power`.
+const sdk.SubstationScope kScope = sdk.SubstationScope(
+  name: 'power',
+  root: '/work/power',
+  prefix: 'tg',
+);
+
+/// A projection over an EXPLICIT pair of stores. There is no default work
+/// runner shared with [bd]: every fixture states which store it expects the
+/// landing mark to reach.
+CiFeedbackProjection projection(
+  FakeBdRunner bd,
+  FakeSender sender, {
+  FakeWorkBdRunner? workBd,
+  sdk.SubstationScope scope = kScope,
+}) => CiFeedbackProjection(
+  bd: bd,
+  workBd: workBd ?? FakeWorkBdRunner(),
+  scope: scope,
+  commandSender: sender,
+  gridRoot: '/grid',
+);
 
 void main() {
   test('a concluded workflow run never enters the feedback logic', () async {
@@ -153,9 +195,14 @@ void main() {
     final sender = FakeSender();
     final projection = CiFeedbackProjection(
       bd: bd,
+      workBd: FakeWorkBdRunner(),
+      scope: const sdk.SubstationScope(
+        name: 'seat',
+        root: '/work/seat',
+        prefix: 'tg',
+      ),
       commandSender: sender,
       gridRoot: '/grid',
-      substation: 'seat',
     );
 
     await projection(
@@ -187,7 +234,8 @@ void main() {
     // attributed from its ONE `Refs:` trailer, with no correlation read; a pull
     // with no trailer falls back to the ONE bead carrying `gh-<number>`.
     final trailered = FakeBdRunner(ledger(['tg-1']));
-    await projection(trailered, FakeSender())(
+    final trailerWork = FakeWorkBdRunner();
+    await projection(trailered, FakeSender(), workBd: trailerWork)(
       event(PullRequestCheckState.green),
     );
     expect(
@@ -204,7 +252,7 @@ void main() {
       '--limit',
       '0',
     ]);
-    expect(trailered.calls.last, <String>[
+    expect(trailerWork.calls.single, <String>[
       'update',
       'tg-1',
       '--actor',
@@ -217,7 +265,8 @@ void main() {
       ledger(['tg-1']),
       externalRefMatches: <String>['tg-1'],
     );
-    await projection(referenced, FakeSender())(
+    final referencedWork = FakeWorkBdRunner();
+    await projection(referenced, FakeSender(), workBd: referencedWork)(
       event(PullRequestCheckState.green, body: 'No trailer here.', number: 8),
     );
     expect(referenced.calls.first, <String>[
@@ -229,14 +278,15 @@ void main() {
       '--limit',
       '0',
     ]);
-    expect(referenced.calls.last.take(2), <String>['update', 'tg-1']);
+    expect(referencedWork.calls.single.take(2), <String>['update', 'tg-1']);
 
     // And the branch itself is inert: `grid/tg-2` cannot override the trailer.
     final misleading = FakeBdRunner(ledger(['tg-1']));
-    await projection(misleading, FakeSender())(
+    final misleadingWork = FakeWorkBdRunner();
+    await projection(misleading, FakeSender(), workBd: misleadingWork)(
       event(PullRequestCheckState.green, branch: 'grid/tg-2'),
     );
-    expect(misleading.calls.last.take(2), <String>['update', 'tg-1']);
+    expect(misleadingWork.calls.single.take(2), <String>['update', 'tg-1']);
   });
 
   test('unattributed pull feedback flares without effects', () async {
@@ -301,10 +351,11 @@ void main() {
     // the trailer now rather than from the branch it happens to share.
     const branch = 'grid/tg-1';
     final green = FakeBdRunner(ledger(['tg-1', 'tg-1#r1']));
-    await projection(green, FakeSender())(
+    final greenWork = FakeWorkBdRunner();
+    await projection(green, FakeSender(), workBd: greenWork)(
       event(PullRequestCheckState.green, branch: branch),
     );
-    expect(green.calls.last, <String>[
+    expect(greenWork.calls.single, <String>[
       'update',
       'tg-1',
       '--actor',
@@ -312,6 +363,11 @@ void main() {
       '--set-metadata',
       'grid.landing_ready=true',
     ]);
+    expect(
+      green.calls.map((call) => call.first),
+      everyElement('list'),
+      reason: 'the STATE store sees no work-bead mutation',
+    );
 
     final failing = FakeBdRunner(ledger(['tg-1', 'tg-1#r1']));
     final sender = FakeSender();
@@ -371,8 +427,9 @@ void main() {
     // AC-7's other half: the second, stalled observation shares the fresh
     // one's head and state, so it shares its idempotency key and does nothing.
     final bd = FakeBdRunner(ledger(['tg-1']));
+    final work = FakeWorkBdRunner();
     final sender = FakeSender();
-    final subject = projection(bd, sender);
+    final subject = projection(bd, sender, workBd: work);
     final greenSince = DateTime.utc(2026, 9, 12, 9);
     await subject(event(PullRequestCheckState.green, greenSince: greenSince));
     final afterFresh = bd.calls.length;
@@ -381,7 +438,7 @@ void main() {
     );
     expect(sender.calls, isEmpty);
     expect(
-      bd.calls.where((call) => call.first == 'update'),
+      work.calls.where((call) => call.first == 'update'),
       hasLength(1),
       reason: 'the crossing repeats no mutation',
     );
@@ -576,12 +633,160 @@ void main() {
     expect(theirs.flares, hasLength(1));
   });
 
+  test('the landing mark reaches the scoped work store, never the state '
+      'store', () async {
+    // The DEFECT, stated as a test: the landing-ready `update` used to run
+    // through the state-store runner, where no substation's work bead has ever
+    // lived. Every armed substation's prefix routes to its own store now.
+    for (final seat
+        in <({String bead, String name, String root, String prefix})>[
+          (
+            bead: 'butane_flutter-wmgt',
+            name: 'butane_flutter',
+            root: '/work/butane_flutter',
+            prefix: 'butane_flutter',
+          ),
+          (
+            bead: 'swift-infer-097',
+            name: 'swift-infer',
+            root: '/work/swift-infer',
+            prefix: 'swift-infer',
+          ),
+          (
+            bead: 'pow-5ljz',
+            name: 'power_station',
+            root: '/work/power_station',
+            prefix: 'pow',
+          ),
+        ]) {
+      final state = FakeBdRunner(ledger([seat.bead]));
+      final work = FakeWorkBdRunner();
+      final reporter = RecordingReporter();
+      final subject = projection(
+        state,
+        FakeSender(),
+        workBd: work,
+        scope: sdk.SubstationScope(
+          name: seat.name,
+          root: seat.root,
+          prefix: seat.prefix,
+        ),
+      )..bindReporter(reporter.report);
+
+      await subject(
+        event(PullRequestCheckState.green, body: 'Refs: ${seat.bead}\n'),
+      );
+
+      expect(work.calls.single, <String>[
+        'update',
+        seat.bead,
+        '--actor',
+        'github-feedback',
+        '--set-metadata',
+        'grid.landing_ready=true',
+      ], reason: seat.bead);
+      expect(
+        state.calls.map((call) => call.first),
+        everyElement('list'),
+        reason: '${seat.bead}: the state store answers reads only',
+      );
+      expect(reporter.flares, isEmpty, reason: seat.bead);
+    }
+  });
+
+  test(
+    'a bead the work store cannot resolve flares once, never throws',
+    () async {
+      // The store's OWN words, carried whole: a `sql: no rows` refusal is a
+      // shape a store legitimately holds, so it degrades instead of wedging the
+      // cycle before its poll.
+      const stderr =
+          'Error resolving tg-1: get tg-1: sql: no rows in result set';
+      final state = FakeBdRunner(ledger(['tg-1']));
+      final work = FakeWorkBdRunner(
+        result: const BdResult(exitCode: 1, stdout: '', stderr: stderr),
+      );
+      final reporter = RecordingReporter();
+      final subject = projection(state, FakeSender(), workBd: work)
+        ..bindReporter(reporter.report);
+
+      await expectLater(subject(event(PullRequestCheckState.green)), completes);
+
+      expect(reporter.flares, hasLength(1));
+      final flare = reporter.flares.single;
+      expect(flare.name, kCiFeedbackLandingUnresolvedFlare);
+      expect(flare.action, contains('tg-1'));
+      expect('${flare.error}', contains('tg-1'));
+      expect('${flare.error}', contains('/work/power'));
+      expect('${flare.error}', contains(stderr));
+      expect(
+        state.calls.map((call) => call.first),
+        everyElement('list'),
+        reason: 'the failed mark never falls back to the state store',
+      );
+
+      // ONE flare per idempotency key, not one per cycle: the key stays handled
+      // because the decision RETURNED rather than threw.
+      await subject(event(PullRequestCheckState.green));
+      expect(reporter.flares, hasLength(1));
+      expect(work.calls, hasLength(1));
+    },
+  );
+
+  test('a bead this scope does not own is refused before any update', () async {
+    // The mutation-ownership guard, LOUD: a `tg-…` bead under a `pow` seat is
+    // a wiring bug, and writing it into the wrong store would be silent.
+    final state = FakeBdRunner(ledger(['tg-1']));
+    final work = FakeWorkBdRunner();
+    final reporter = RecordingReporter();
+    final subject = projection(
+      state,
+      FakeSender(),
+      workBd: work,
+      scope: const sdk.SubstationScope(
+        name: 'power_station',
+        root: '/work/power_station',
+        prefix: 'pow',
+      ),
+    )..bindReporter(reporter.report);
+
+    await expectLater(subject(event(PullRequestCheckState.green)), completes);
+
+    expect(work.calls, isEmpty, reason: 'a foreign bead costs no write');
+    expect(state.calls.map((call) => call.first), everyElement('list'));
+    expect(reporter.flares.single.name, kCiFeedbackLandingUnresolvedFlare);
+    expect('${reporter.flares.single.error}', contains('tg-1'));
+    expect('${reporter.flares.single.error}', contains('/work/power_station'));
+    expect('${reporter.flares.single.error}', contains('prefix pow'));
+  });
+
+  test('an unresolvable landing mark without a bound reporter still '
+      'completes', () {
+    // Silence is the only thing a missing rail costs — never the
+    // acknowledgement the outbox needs to advance past this observation.
+    expect(
+      projection(
+        FakeBdRunner(ledger(['tg-1'])),
+        FakeSender(),
+        workBd: FakeWorkBdRunner(
+          result: const BdResult(exitCode: 1, stdout: '', stderr: 'no rows'),
+        ),
+      )(event(PullRequestCheckState.green)),
+      completes,
+    );
+  });
+
   test('a watched-issue observation is not this leg\'s work', () async {
     final projection = CiFeedbackProjection(
       bd: _RefusingRunner(),
+      workBd: _RefusingRunner(),
+      scope: const sdk.SubstationScope(
+        name: 'power_station',
+        root: '/unused',
+        prefix: 'pow',
+      ),
       commandSender: _RefusingCommandSender(),
       gridRoot: '/unused',
-      substation: 'power_station',
     );
 
     await projection(

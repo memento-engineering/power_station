@@ -1,7 +1,9 @@
 import 'dart:convert';
 
 import 'package:beads_dart/beads_dart.dart';
-import 'package:grid_runtime/grid_runtime.dart' show GridIssueTypes;
+import 'package:grid_runtime/grid_runtime.dart'
+    show BeadOwnershipPredicate, GridIssueTypes;
+import 'package:grid_sdk/grid_sdk.dart' show SubstationScope;
 
 import 'ci_feedback.dart';
 import 'reconciler_event.dart';
@@ -29,6 +31,19 @@ const String kCiFeedbackIgnoredFlare = 'reconciler.ciFeedbackIgnored';
 /// human can see it rather than discover it after `main` moved underneath it.
 const String kCiFeedbackUnattributedFlare = 'reconciler.ciFeedbackUnattributed';
 
+/// The flare name carried by a merged pull request whose work bead the scoped
+/// work store could not resolve.
+///
+/// The DEGRADED event, never a wedge. A bead the scoped store answers
+/// `sql: no rows in result set` for — or one whose id prefix that scope
+/// does not own at all — is a shape a store LEGITIMATELY holds, so by this
+/// file's own rule (see [CiFeedbackProjection._ignore]) it can never be a
+/// throw: a throw here aborts the cycle before the poll and re-drives the same
+/// observation forever. The landing mark is lost, loudly, and the cycle
+/// continues.
+const String kCiFeedbackLandingUnresolvedFlare =
+    'reconciler.ciFeedbackLandingUnresolved';
+
 /// Reports one CI-feedback outcome the leg declined to act on.
 ///
 /// The SAME shape the reconciler asset already reports a failed cycle and a
@@ -53,18 +68,54 @@ typedef CiFeedbackReporter =
 /// projection at all. It now reads exactly one EXPLICIT reference — a `Refs:`
 /// trailer in the pull body, else exactly one bead whose external ref is
 /// `gh-<number>` — and no branch value participates in any decision here.
+/// TWO STORES, NAMED SEPARATELY. A session bead and a rework-cap gate live in
+/// the grid STATE store; the WORK bead a merged pull is landing lives in its
+/// own substation's store, and no substation's work bead exists in the state
+/// store. Running the landing-ready mutation through [bd] therefore resolved
+/// every bead of every armed substation against a store that has never held
+/// it. The two rails are now distinct constructor inputs, so the wrong one is
+/// a compile error rather than a `sql: no rows in result set` on every tick.
 final class CiFeedbackProjection {
   CiFeedbackProjection({
     required this.bd,
+    required this.workBd,
+    required this.scope,
     required this.commandSender,
     required this.gridRoot,
-    required this.substation,
-  }) : _store = BdCliService(bd);
+  }) : _store = BdCliService(bd),
+       _ownership = BeadOwnershipPredicate(<String>[scope.prefix]);
 
+  /// The grid STATE store runner: the session correlation read and the
+  /// rework-cap gate, both of which ARE state-store beads.
   final BdRunner bd;
+
+  /// The runner for [scope]'s OWN work store: the landing-ready mutation, and
+  /// nothing else.
+  ///
+  /// There is no fallback to [bd]. A projection composed with one runner for
+  /// both rails is exactly the defect this pair exists to make unrepresentable.
+  final BdRunner workBd;
+
+  /// The substation this projection is mounted under.
+  ///
+  /// Delivered by TREE POSITION — the enclosing `SubstationScope` the binding
+  /// already watches — never by a bead-keyed roster lookup. It is the single
+  /// source of both [workBd]'s store identity ([SubstationScope.root]) and the
+  /// prefix a work bead must carry to be mutable from here.
+  final SubstationScope scope;
+
   final FeedbackCommandSender commandSender;
   final String gridRoot;
-  final String substation;
+
+  /// The substation name stamped on a minted cap gate.
+  ///
+  /// DERIVED from [scope], never passed beside it: a name that contradicted
+  /// the scope whose store is being written would be unnoticeable.
+  String get substation => scope.name;
+
+  /// The complete-prefix guard over [scope]: whether [workBd]'s store is the
+  /// one that mints a given bead id.
+  final BeadOwnershipPredicate _ownership;
 
   /// The TYPE-SCOPED session read this leg correlates a check against.
   ///
@@ -257,6 +308,19 @@ final class CiFeedbackProjection {
     'CI feedback ignored for $beadId: $reason',
   );
 
+  /// Flares that [beadId] could not be marked landing-ready, for [detail], and
+  /// returns.
+  ///
+  /// The message names all three facts a human needs to tell a lost landing
+  /// mark from a mis-scoped seat: the bead, the store root that was attempted,
+  /// and what that store said.
+  void _landingUnresolved(String beadId, String detail) => _flare(
+    kCiFeedbackLandingUnresolvedFlare,
+    'left $beadId unmarked after a landing-ready decision',
+    'landing-ready mutation for $beadId could not be resolved in the work '
+        'store at ${scope.root}: $detail',
+  );
+
   /// Flares that [event] names no bead, for [reason], and returns.
   void _unattributed(PullRequestFeedback event, String reason) => _flare(
     kCiFeedbackUnattributedFlare,
@@ -269,8 +333,22 @@ final class CiFeedbackProjection {
   void _flare(String flareName, String action, String message) => _reporter
       ?.call(flareName, action, StateError(message), StackTrace.current);
 
+  /// Marks [decision]'s work bead landing-ready in [scope]'s OWN store.
+  ///
+  /// A bead this scope does not own, and a bead its store cannot resolve, are
+  /// both FLARED and returned from — never thrown. Returning normally leaves
+  /// [CiFeedbackDecision.idempotencyKey] in `_handled`, so the flare fires once
+  /// per decision rather than once per cycle, and the cycle reaches its poll.
   Future<void> _markLandingReady(CiFeedbackDecision decision) async {
-    final result = await bd.run([
+    if (!_ownership.ownsTarget(id: decision.beadId)) {
+      _landingUnresolved(
+        decision.beadId,
+        'its id prefix is not owned by substation ${scope.name} '
+        '(prefix ${scope.prefix})',
+      );
+      return;
+    }
+    final result = await workBd.run([
       'update',
       decision.beadId,
       '--actor',
@@ -279,7 +357,7 @@ final class CiFeedbackProjection {
       'grid.landing_ready=true',
     ]);
     if (!result.ok) {
-      throw StateError('landing-ready mutation failed: ${result.stderr}');
+      _landingUnresolved(decision.beadId, result.stderr);
     }
   }
 
