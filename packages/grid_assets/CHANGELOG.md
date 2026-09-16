@@ -1,5 +1,23 @@
 ## Unreleased
 
+- Breaking: the readiness route JOINS on a published verdict instead of routing over
+  whatever the sibling view happened to hold. `decideReadiness` gains a third arm,
+  `ReadinessAbsent`, for a missing or blank grade — the state where the lane has
+  published nothing yet — so it no longer returns a `ReadinessHold` with rule
+  `no-verdict`. `ReadinessRouteCapability` consumes it as a JOIN: it waits
+  (`lanePoll`, default 15s) and re-reads until the lane publishes, bounded by
+  `laneWaitBudget` (default 20 minutes), rather than escalating a hold that parks the
+  bead at a human gate. A lane already at a positive terminal with nothing published,
+  or one still silent at the budget, throws `RouteFailure` naming the missing
+  invocation, the lane node path and the exact verdict path. `A`/`B`/`C` still drives
+  and `D`/`E`/`F` still holds with the refinement ask verbatim; both outcomes now also
+  carry the verdict's own source (`source-state`, `source-path`, `transport`). A live
+  workspace reads its candidate through `currentVerdictOnDisk`, so the one strict
+  parser and the node-path and round freshness fences are shared with the critics
+  rather than duplicated; an offline drive still joins on the lane's recorded result.
+  Migration: an exhaustive `switch` over `ReadinessVerdict` needs a `ReadinessAbsent()`
+  case, and a caller asserting a `no-verdict` hold should expect that arm instead.
+
 - Breaking: `AgentArming` and `TypedEnvironmentProvider` are removed. Every `SeatPreference` already
   vends its own provider seed, so the four-field record only named four members of an open set and
   the wrapper only spread those seeds into a `Nest` its consumer can author directly — neither

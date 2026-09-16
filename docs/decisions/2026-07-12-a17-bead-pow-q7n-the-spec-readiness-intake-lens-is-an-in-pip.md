@@ -12,7 +12,8 @@ register:
   obsoletes: []
   updates: []
   obsoleted-by: null
-  updated-by: []
+  updated-by:
+    - readiness-route-joins-on-a-published-verdict-never-on-absence
   bead: null
   legacy-id: "A17"
 ---
