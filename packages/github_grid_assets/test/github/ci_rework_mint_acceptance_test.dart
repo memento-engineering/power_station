@@ -8,6 +8,7 @@ import 'package:grid_cli/grid_cli.dart';
 import 'package:grid_engine/grid_engine.dart' hide Station, Substation;
 import 'package:grid_engine/testing.dart';
 import 'package:grid_sdk/grid_sdk.dart';
+import 'package:grid_sdk/grid_sdk.dart' as sdk;
 import 'package:test/test.dart';
 
 Circuit _leafCircuit(Bead _) =>
@@ -449,9 +450,16 @@ void main() {
       await _writeStationLock(gridRoot, control.url, 'feedback-token');
       final projection = CiFeedbackProjection(
         bd: stateBd,
+        // The REAL work store this seat mints `pow-…` beads in — the same one
+        // the substation is mounted over, never the state store beside it.
+        workBd: ProcessBdRunner(workspaceRoot: workRoot),
+        scope: sdk.SubstationScope(
+          name: 'power_station',
+          root: workRoot,
+          prefix: 'pow',
+        ),
         commandSender: ResidentFeedbackCommandSender(),
         gridRoot: gridRoot,
-        substation: 'power_station',
       );
       final reconcilerRuntime = GitHubReconcilerRuntime(
         installationId: 'installation',
@@ -597,9 +605,16 @@ void main() {
       await _writeStationLock(gridRoot, control.url, 'feedback-token');
       final projection = CiFeedbackProjection(
         bd: stateBd,
+        // The REAL work store this seat mints `pow-…` beads in — the same one
+        // the substation is mounted over, never the state store beside it.
+        workBd: ProcessBdRunner(workspaceRoot: workRoot),
+        scope: sdk.SubstationScope(
+          name: 'power_station',
+          root: workRoot,
+          prefix: 'pow',
+        ),
         commandSender: ResidentFeedbackCommandSender(),
         gridRoot: gridRoot,
-        substation: 'power_station',
       );
       final reconcilerRuntime = GitHubReconcilerRuntime(
         installationId: 'installation',

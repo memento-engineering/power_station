@@ -132,13 +132,20 @@ class GitHubReconcilerBindingAssets extends SingleChildStatelessSeed {
       child: wired,
     );
     if (gridRoot != null) {
+      // TWO RAILS, both already in hand. The session read and the cap gate are
+      // STATE-store beads, so they keep `stateRunner`; the landing-ready mark
+      // targets the WORK bead, which lives only in this seat's own store, so it
+      // rides the seat runner delivery already uses. `scope` carries that
+      // store's identity by TREE POSITION — no roster, no bead-keyed locator,
+      // and no second `bd` channel.
       wired = InheritedSeed<CiFeedbackProjection>(
         value: CiFeedbackProjection(
           bd: stateRunner!,
+          workBd: runner,
+          scope: scope,
           commandSender:
               feedbackCommandSender ?? ResidentFeedbackCommandSender(),
           gridRoot: gridRoot,
-          substation: config.substation,
         ),
         child: wired,
       );

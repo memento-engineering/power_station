@@ -144,6 +144,21 @@ final class _FeedbackBdRunner implements BdRunner {
   };
 }
 
+/// The seat's own work store: the landing mark's rail, and nothing else.
+final class _WorkBdRunner implements BdRunner {
+  final argvs = <List<String>>[];
+
+  @override
+  Future<BdResult> run(
+    List<String> args, {
+    Duration? timeout,
+    String? stdin,
+  }) async {
+    argvs.add(List<String>.of(args));
+    return const BdResult(exitCode: 0, stdout: '{}', stderr: '');
+  }
+}
+
 final class _FeedbackSender implements FeedbackCommandSender {
   final events = <String>[];
 
@@ -255,13 +270,23 @@ bool _legRegistered(GitHubReconcilerRuntime runtime, String leg) {
   return false;
 }
 
-CiFeedbackProjection _projection(_FeedbackSender sender) =>
-    CiFeedbackProjection(
-      bd: _FeedbackBdRunner(),
-      commandSender: sender,
-      gridRoot: '/grid',
-      substation: 'power_station',
-    );
+/// A projection over EXPLICIT rails: the state store answers the session read,
+/// and a separate work-store fake takes the landing mark. There is no fallback
+/// from one to the other.
+CiFeedbackProjection _projection(
+  _FeedbackSender sender, {
+  _WorkBdRunner? workBd,
+}) => CiFeedbackProjection(
+  bd: _FeedbackBdRunner(),
+  workBd: workBd ?? _WorkBdRunner(),
+  scope: const sdk.SubstationScope(
+    name: 'power_station',
+    root: '/work/power_station',
+    prefix: 'pow',
+  ),
+  commandSender: sender,
+  gridRoot: '/grid',
+);
 
 class _Host extends StatefulSeed {
   const _Host({required this.onCreate, required this.describe});

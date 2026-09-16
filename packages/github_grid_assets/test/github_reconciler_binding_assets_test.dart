@@ -5,8 +5,11 @@ import 'package:beads_dart/beads_dart.dart';
 import 'package:genesis_tree/genesis_tree.dart';
 import 'package:github_grid_assets/github_grid_assets.dart';
 import 'package:grid_engine/grid_engine.dart';
+import 'package:grid_runtime/grid_runtime.dart'
+    show StationTrajectoryRecorder, StuckObligationAccountant;
 import 'package:grid_sdk/grid_sdk.dart' show ObligationQuery, Provider;
 import 'package:grid_sdk/grid_sdk.dart' as sdk;
+import 'package:grid_trajectory/grid_trajectory.dart' as traj;
 import 'package:test/test.dart';
 
 class _Leaf extends MultiChildSeed {
@@ -218,13 +221,21 @@ String _sessionLedger(List<String> workBeads) => jsonEncode({
   ],
 });
 
-/// A transport serving one open self-authored issue, one `grid/pow-test` pull
-/// stating its bead in a `Refs:` trailer, its full resource, and one completed
-/// check with [conclusion].
+/// A transport serving one open self-authored issue, one pull request stating
+/// [bead] in a `Refs:` trailer, its full resource, and one completed check with
+/// [conclusion].
+///
+/// [bead] and [branch] are INPUTS: every armed substation — org and private —
+/// opens pulls through this same seat shape, and the branch takes no part in
+/// any decision, so a private seat differs from the org one only in the bead
+/// its body states.
 final class _SeatTransport implements GitHubHttpTransport {
-  _SeatTransport(this.conclusion);
+  _SeatTransport(this.conclusion, {this.bead = 'pow-test'})
+    : branch = 'grid/$bead';
 
   final String conclusion;
+  final String bead;
+  final String branch;
 
   @override
   Future<GitHubHttpResponse> send(GitHubHttpRequest request) async {
@@ -252,11 +263,11 @@ final class _SeatTransport implements GitHubHttpTransport {
           {
             'node_id': 'pr',
             'number': 8,
-            'body': 'A human digest.\n\nRefs: pow-test\n',
+            'body': 'A human digest.\n\nRefs: $bead\n',
             'user': {'login': 'nico'},
             'created_at': '2026-08-23T00:00:00Z',
             'updated_at': '2026-08-23T00:00:00Z',
-            'head': {'ref': 'grid/pow-test', 'sha': 'abc'},
+            'head': {'ref': branch, 'sha': 'abc'},
           },
         ]),
       );
@@ -318,6 +329,89 @@ final class _SeatFactory {
 
 int _verbCount(_StateBdRunner bd, String verb) =>
     bd.argvs.where((argv) => argv.first == verb).length;
+
+/// Every argv this runner saw whose verb is [verb].
+List<List<String>> _verbs(_StateBdRunner bd, String verb) =>
+    bd.argvs.where((argv) => argv.first == verb).toList();
+
+/// The landing-ready mutations [bd] received, whichever bead they name.
+List<List<String>> _landingMarks(_BdRunner bd) => bd.argvs
+    .where(
+      (argv) =>
+          argv.first == 'update' && argv.contains('grid.landing_ready=true'),
+    )
+    .toList();
+
+/// An appender that is neither fenced out nor halted and appends nothing.
+///
+/// The github obligation repairs GITHUB, never the log — a pass carrying it
+/// stays quiet — so an append reaching here is a contract break, not a fixture
+/// gap.
+final class _TickAppender implements traj.TickAppender {
+  @override
+  bool get isInert => false;
+
+  @override
+  bool get isHalted => false;
+
+  @override
+  Future<traj.AppendOutcome> append(
+    traj.TrajectoryRecord record, {
+    String? substation,
+    traj.TrajectoryProvenance provenance = traj.TrajectoryProvenance.observed,
+    String? provenanceBasis,
+    DateTime? occurredAt,
+  }) async => throw StateError('the github obligation appends nothing');
+
+  @override
+  Future<void> doltCommitIfDue() async {}
+}
+
+/// Answers the obligation's standing `SELECT 1` with its one constant row.
+final class _TickDb implements traj.TrajectoryDb {
+  @override
+  Future<traj.SqlResult> execute(
+    String sql, [
+    Map<String, dynamic>? params,
+  ]) async => const traj.SqlResult(
+    rows: <Map<String, String?>>[
+      <String, String?>{'github_reconciliation_due': '1'},
+    ],
+  );
+
+  @override
+  Future<void> close() async {}
+}
+
+/// One REFUSING pass against the github obligation — the shape the tick
+/// recorded every 30 s while the landing mark threw.
+traj.TrajectoryTickPass _refusingPass() => traj.TrajectoryTickPass(
+  startedAt: DateTime.utc(2026, 9, 14),
+  disposition: traj.TickPassDisposition.ran,
+  queriesRun: 1,
+  refusals: const <traj.TickRefusal>[
+    traj.TickRefusal(
+      kind: traj.TickRefusalKind.queryFailed,
+      query: 'github-reconciliation',
+      reason:
+          'Bad state: landing-ready mutation failed: Error resolving '
+          'pow-5ljz: get pow-5ljz: sql: no rows in result set',
+    ),
+  ],
+);
+
+/// An accountant already streaking at one short of its flare threshold — the
+/// station state a stuck seat leaves behind.
+StuckObligationAccountant _streakingAccountant() {
+  final accountant = StuckObligationAccountant(
+    recorder: StationTrajectoryRecorder.disabled(),
+    station: 'tranquility',
+  );
+  for (var pass = 0; pass < 4; pass++) {
+    accountant.observe(_refusingPass());
+  }
+  return accountant;
+}
 
 /// The FULL seat stack: binding -> GitHubReconcilerAssets -> GitHubGridAssets.
 ///
@@ -796,6 +890,7 @@ void main() {
   test('a live seat provides a state-store feedback projection', () {
     CiFeedbackProjection? projection;
     GitHubEventSink? sink;
+    final runner = _BdRunner();
     final owner = TreeOwner();
     addTearDown(owner.dispose);
     owner.mountRoot(
@@ -807,7 +902,7 @@ void main() {
           prefix: 'pow',
         ),
         config: _config(owner: 'memento', repository: 'power_station'),
-        runner: _BdRunner(),
+        runner: runner,
         runtimeFactory: _Factory().create,
         observe: (value, seam) {
           projection = value;
@@ -821,8 +916,21 @@ void main() {
     final value = projection;
     expect(value, isNotNull);
     expect(value!.gridRoot, '/grid');
-    expect(value.substation, 'seat');
+    expect(value.substation, 'seat', reason: 'derived from the scope name');
     expect((value.bd as ProcessBdRunner).workspaceRoot, '/grid/.grid');
+    expect(
+      value.workBd,
+      same(runner),
+      reason: 'the WORK rail is the seat runner, never a second bd channel',
+    );
+    expect(
+      value.scope,
+      const sdk.SubstationScope(
+        name: 'seat',
+        root: '/work/seat',
+        prefix: 'pow',
+      ),
+    );
     expect(value.commandSender, isA<ResidentFeedbackCommandSender>());
   });
 
@@ -897,21 +1005,126 @@ void main() {
     }
   });
 
+  for (final seat in <({String substation, String bead, String prefix})>[
+    // PRIVATE substations first: the defect was reported as theirs, and it
+    // never was — their only difference from the org seat is the prefix
+    // their store mints.
+    (
+      substation: 'butane_flutter',
+      bead: 'butane_flutter-wmgt',
+      prefix: 'butane_flutter',
+    ),
+    (substation: 'swift-infer', bead: 'swift-infer-097', prefix: 'swift-infer'),
+    (
+      substation: 'radioactive_dart',
+      bead: 'radioactive_dart-097',
+      prefix: 'radioactive_dart',
+    ),
+    (substation: 'power_station', bead: 'pow-test', prefix: 'pow'),
+  ]) {
+    test('a green check marks ${seat.bead} landing-ready in its OWN '
+        'store', () async {
+      final temporary = await Directory.systemTemp.createTemp('gh-seat-');
+      addTearDown(() => temporary.delete(recursive: true));
+      final stateBd = _StateBdRunner(_sessionLedger(<String>[seat.bead]));
+      final workBd = _BdRunner();
+      final sender = _RecordingFeedbackSender();
+      final factory = _SeatFactory();
+      final query = GitHubReconciliationQuery();
+      final owner = TreeOwner();
+      addTearDown(owner.dispose);
+      owner.mountRoot(
+        _seatTree(
+          query: query,
+          gridRoot: temporary.path,
+          scope: sdk.SubstationScope(
+            name: seat.substation,
+            root: temporary.path,
+            prefix: seat.prefix,
+          ),
+          config: _config(owner: 'memento', repository: 'power_station'),
+          runner: workBd,
+          stateBd: stateBd,
+          sender: sender,
+          client: GitHubAppClient(
+            config: _appConfig,
+            tokens: _Tokens(),
+            transport: _SeatTransport('success', bead: seat.bead),
+          ),
+          runtimeFactory: factory.create,
+          observe: (_, __) {},
+        ),
+      );
+      owner.flush();
+      expect(query.attached, <GitHubReconcilerRuntime>[
+        factory.runtimes.single,
+      ]);
+
+      // THE STATION'S OWN PASS, over the real tick: the obligation runs, the
+      // seat reconciles, and the accountant that was four refusals deep reads
+      // the result.
+      final accountant = _streakingAccountant();
+      expect(accountant.streaks['github-reconciliation'], 4);
+      final tick = traj.TrajectoryTick(
+        appender: _TickAppender(),
+        db: _TickDb(),
+        queries: <ObligationQuery>[query],
+        onPass: accountant.observe,
+      );
+      addTearDown(tick.dispose);
+      final pass = await tick.runPass();
+
+      expect(pass.ran, isTrue);
+      expect(
+        pass.queriesRun,
+        1,
+        reason: 'the obligation RAN — an empty refusal list is not a skip',
+      );
+      expect(pass.refusals, isEmpty, reason: 'the obligation no longer wedges');
+      expect(
+        accountant.streaks,
+        isEmpty,
+        reason: 'a clean pass resets the streak to 0',
+      );
+
+      // The mark landed in the SCOPED WORK store, exactly once...
+      expect(_landingMarks(workBd).single, <String>[
+        'update',
+        seat.bead,
+        '--actor',
+        'github-feedback',
+        '--set-metadata',
+        'grid.landing_ready=true',
+      ]);
+      // ...the state store answered reads and nothing else...
+      expect(
+        stateBd.argvs.map((argv) => argv.first),
+        everyElement('list'),
+        reason: 'no work-bead mutation reaches the grid state store',
+      );
+      // ...neither store was asked to CLOSE the bead (the governor's manual
+      // bridge is not what this leg does)...
+      expect(stateBd.argvs.map((argv) => argv.first), isNot(contains('close')));
+      expect(workBd.argvs.map((argv) => argv.first), isNot(contains('close')));
+      expect(sender.calls, isEmpty, reason: 'a green check reworks nothing');
+      // ...and the issue poll BEHIND the feedback still reached intake.
+      expect(
+        workBd.argvs.where((argv) => argv.first == 'create'),
+        hasLength(1),
+      );
+      expect(
+        workBd.argvs.firstWhere((argv) => argv.first == 'create'),
+        containsAllInOrder(<String>['--external-ref', 'github:I_1']),
+      );
+    });
+  }
+
   for (final seat in [
     (
       name: 'a red check on a grid branch reworks its bead exactly once',
       conclusion: 'failure',
       ledger: ['pow-test'],
       reworks: 1,
-      landingReady: 0,
-      gates: 0,
-    ),
-    (
-      name: 'a green check marks landing-ready and reworks nothing',
-      conclusion: 'success',
-      ledger: ['pow-test'],
-      reworks: 0,
-      landingReady: 1,
       gates: 0,
     ),
     (
@@ -919,7 +1132,6 @@ void main() {
       conclusion: 'failure',
       ledger: ['pow-test', 'pow-test#r3'],
       reworks: 0,
-      landingReady: 0,
       gates: 1,
     ),
   ]) {
@@ -972,26 +1184,19 @@ void main() {
       await query.repair(const <Map<String, String?>>[]);
 
       expect(sender.calls, hasLength(seat.reworks));
-      expect(_verbCount(stateBd, 'update'), seat.landingReady);
       expect(_verbCount(stateBd, 'create'), seat.gates);
+      // The CAP GATE is a state-store bead and stays one; the landing mark is
+      // the only rail that moved.
+      expect(_verbCount(stateBd, 'update'), 0);
+      expect(_landingMarks(workBd), isEmpty);
       if (seat.reworks == 1) {
         expect(sender.calls.single['beadId'], 'pow-test');
         expect(sender.calls.single['gridRoot'], temporary.path);
       }
-      if (seat.landingReady == 1) {
-        expect(
-          stateBd.argvs.firstWhere((argv) => argv.first == 'update'),
-          containsAllInOrder([
-            'pow-test',
-            '--set-metadata',
-            'grid.landing_ready=true',
-          ]),
-        );
-      }
       if (seat.gates == 1) {
         expect(
-          stateBd.argvs.firstWhere((argv) => argv.first == 'create'),
-          containsAllInOrder([
+          _verbs(stateBd, 'create').single,
+          containsAllInOrder(<String>[
             '--id',
             'pow-test-ci-rework-cap',
             '--type',
@@ -1007,7 +1212,7 @@ void main() {
       );
       expect(
         workBd.argvs.firstWhere((argv) => argv.first == 'create'),
-        containsAllInOrder(['--external-ref', 'github:I_1']),
+        containsAllInOrder(<String>['--external-ref', 'github:I_1']),
       );
     });
   }
