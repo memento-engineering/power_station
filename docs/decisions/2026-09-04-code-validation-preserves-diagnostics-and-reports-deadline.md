@@ -16,6 +16,7 @@ register:
   obsoleted-by: null
   updated-by:
     - code-validation-enforces-its-own-deadline-as-a-service-capability
+    - code-validation-hard-blocks-only-branch-regressions
   bead: pow-cbii
   legacy-id: null
 ---

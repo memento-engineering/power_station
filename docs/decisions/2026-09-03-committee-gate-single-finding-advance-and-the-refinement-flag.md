@@ -14,7 +14,8 @@ register:
     - a14-bead-pow-7nm-the-spec-route-auto-respecs-a-fixable-spec
     - a13-bead-pow-6ao-the-specify-stage-spec-readiness-committee
   obsoleted-by: null
-  updated-by: []
+  updated-by:
+    - code-validation-hard-blocks-only-branch-regressions
   bead: pow-bhm
   legacy-id: null
 ---

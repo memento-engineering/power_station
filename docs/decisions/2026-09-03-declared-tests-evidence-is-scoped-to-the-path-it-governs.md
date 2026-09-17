@@ -12,7 +12,8 @@ register:
   obsoletes: []
   updates: []
   obsoleted-by: null
-  updated-by: []
+  updated-by:
+    - code-validation-hard-blocks-only-branch-regressions
   bead: pow-26dd
   legacy-id: null
 ---

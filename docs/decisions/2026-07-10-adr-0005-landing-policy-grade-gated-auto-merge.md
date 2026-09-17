@@ -13,6 +13,7 @@ register:
   updates: []
   obsoleted-by: null
   updated-by:
+    - code-validation-hard-blocks-only-branch-regressions
     - pull-feedback-uses-explicit-references
   bead: null
   legacy-id: "ADR-0005"
