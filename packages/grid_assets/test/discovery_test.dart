@@ -352,7 +352,8 @@ class _CannedShellRunner implements ShellRunner {
   final int exitCode;
   final String output;
   final Map<String, ShellRunResult> answers;
-  final List<({String workingDirectory, String command})> calls = [];
+  final List<({String workingDirectory, String command, Duration? deadline})>
+  calls = [];
 
   /// The command text of every recorded call, in order.
   List<String> get commands => [for (final call in calls) call.command];
@@ -361,8 +362,13 @@ class _CannedShellRunner implements ShellRunner {
   Future<ShellRunResult> run({
     required String workingDirectory,
     required String command,
+    Duration? deadline,
   }) async {
-    calls.add((workingDirectory: workingDirectory, command: command));
+    calls.add((
+      workingDirectory: workingDirectory,
+      command: command,
+      deadline: deadline,
+    ));
     return answers[command] ??
         ShellRunResult(exitCode: exitCode, output: output);
   }

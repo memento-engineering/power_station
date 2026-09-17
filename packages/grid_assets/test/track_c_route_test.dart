@@ -36,10 +36,35 @@ final String _critics = kCommitteeRubrics.join(',');
 ({FakeTreeContext context, StepArgs args}) _routeCtx(
   Map<String, String> grades, {
   Map<String, String> rationales = const {},
-  Map<String, String> diagnosticHeads = const {},
+  List<String>? regressions,
+  List<String> preexisting = const [],
+  List<String>? missing,
+  bool omitValidationEvidence = false,
+  String? rawRegressions,
 }) {
   const parent = _parent;
   final effectiveGrades = {kDeclaredTestsRubric: 'A', ...grades};
+  // The two DETERMINISTIC lanes carry MACHINE-READABLE evidence now, and the
+  // route decides on that rather than on a letter: `code-validation` an F iff
+  // it names a regression, `declared-tests-present` an F iff it names a missing
+  // path. Unless a test says otherwise the evidence MATCHES the grade, so every
+  // pre-existing matrix probe keeps meaning exactly what it meant.
+  List<String> defaultRegressions(String grade) =>
+      grade == 'F' ? const ['test/gate_test.dart 1:1 the gate'] : const [];
+  List<String> defaultMissing(String grade) =>
+      grade == 'F' ? const ['test/declared_test.dart'] : const [];
+  Map<String, String> evidenceFor(String id, String grade) => switch (id) {
+    kGatingRubric when !omitValidationEvidence => {
+      'regressions':
+          rawRegressions ??
+          jsonEncode(regressions ?? defaultRegressions(grade)),
+      'preexisting': jsonEncode(preexisting),
+    },
+    kDeclaredTestsRubric => {
+      'missing': jsonEncode(missing ?? defaultMissing(grade)),
+    },
+    _ => const {},
+  };
   return (
     context: FakeTreeContext(
       values: {
@@ -52,10 +77,9 @@ final String _critics = kCommitteeRubrics.join(',');
             for (final entry in effectiveGrades.entries)
               '$parent/${entry.key}': {
                 'grade': entry.value,
+                ...evidenceFor(entry.key, entry.value),
                 if (rationales[entry.key] case final rationale?)
                   'rationale': rationale,
-                if (diagnosticHeads[entry.key] case final head?)
-                  'diagnostic_head': head,
               },
           },
         ),
@@ -72,12 +96,20 @@ final String _critics = kCommitteeRubrics.join(',');
 Future<RouteVerdict> _route(
   Map<String, String> grades, {
   Map<String, String> rationales = const {},
-  Map<String, String> diagnosticHeads = const {},
+  List<String>? regressions,
+  List<String> preexisting = const [],
+  List<String>? missing,
+  bool omitValidationEvidence = false,
+  String? rawRegressions,
 }) {
   final c = _routeCtx(
     grades,
     rationales: rationales,
-    diagnosticHeads: diagnosticHeads,
+    regressions: regressions,
+    preexisting: preexisting,
+    missing: missing,
+    omitValidationEvidence: omitValidationEvidence,
+    rawRegressions: rawRegressions,
   );
   return const CodeRouteCapability().route(c.context, c.args);
 }
@@ -114,7 +146,12 @@ void main() {
         'test-coverage': 'A',
       });
       expect(out, isA<Escalate>());
-      expect((out as Escalate).reason, 'code-validation failed: hard block');
+      expect(
+        (out as Escalate).reason,
+        'code-validation failed: hard block: '
+        'regressions: test/gate_test.dart 1:1 the gate; '
+        'full log: .grid/critique/code-validation.log',
+      );
     });
 
     test('declared test failures hard-block with every missing path', () async {
@@ -126,10 +163,7 @@ void main() {
           'regression-risk': 'A',
           'test-coverage': 'A',
         },
-        rationales: const {
-          kDeclaredTestsRubric:
-              'missing test/one_test.dart, test/two_test.dart',
-        },
+        missing: const ['test/one_test.dart', 'test/two_test.dart'],
       );
       final out = await const CodeRouteCapability().route(c.context, c.args);
       expect(out, isA<Escalate>());
@@ -138,28 +172,12 @@ void main() {
       expect(out.reason, contains('test/two_test.dart'));
     });
 
-    test('the gating critic appends an exit-127 candidate rationale', () async {
-      final c = _routeCtx(
-        const {
-          'code-validation': 'F',
-          'spec-adherence': 'A',
-          'regression-risk': 'A',
-          'test-coverage': 'A',
-        },
-        rationales: const {
-          'code-validation': 'exit 127 — candidate missing commands: rg',
-        },
-      );
-      final out = await const CodeRouteCapability().route(c.context, c.args);
-      expect(out, isA<Escalate>());
-      expect(
-        (out as Escalate).reason,
-        'code-validation failed: hard block: '
-        'exit 127 — candidate missing commands: rg',
-      );
-    });
-
-    test('diagnostic head precedes the code-validation hard block', () async {
+    // AC-1's route half: shared X rides the artifact as a note, branch-only Y
+    // is the sole hard-block cause. The reason is EXACTLY the regressions and
+    // the log — never the pre-existing names, and never an unfiltered tail.
+    test('shared X and branch-only Y: only Y reaches the hard block', () async {
+      const x = 'test/x_test.dart 3:1 the shared case';
+      const y = 'test/y_test.dart 9:2 the branch case';
       final out = await _route(
         const {
           'code-validation': 'F',
@@ -167,59 +185,152 @@ void main() {
           'regression-risk': 'A',
           'test-coverage': 'A',
         },
-        rationales: const {
-          'code-validation':
-              'validation plan failed (exit 1); full log: '
-              '.grid/critique/code-validation.log: Some tests failed.',
-        },
-        diagnosticHeads: const {
-          'code-validation':
-              'Failed to load "test/a_test.dart":\n'
-              'lib/a.dart:4:2: Error: Missing member.\n'
-              '[E] analyzer failed',
-        },
+        regressions: const [y],
+        preexisting: const [x],
       );
 
       expect(out, isA<Escalate>());
       final reason = (out as Escalate).reason;
       expect(
         reason,
-        startsWith(
-          'Failed to load "test/a_test.dart":\n'
-          'lib/a.dart:4:2: Error: Missing member.\n'
-          '[E] analyzer failed\n'
-          'code-validation failed: hard block: ',
-        ),
+        'code-validation failed: hard block: regressions: $y; '
+        'full log: .grid/critique/code-validation.log',
       );
-      expect(reason, contains('.grid/critique/code-validation.log'));
-      expect(reason, endsWith('Some tests failed.'));
+      expect(reason, isNot(contains(x)));
     });
 
-    test('deadline rationale remains explicit in the hard block', () async {
+    // AC-2's route half: every failure is the base's, so nothing gates.
+    test(
+      'pre-existing-only validation advances — the false block is gone',
+      () async {
+        final out = await _route(
+          const {
+            'code-validation': 'A',
+            'spec-adherence': 'A',
+            'regression-risk': 'A',
+            'test-coverage': 'A',
+          },
+          regressions: const [],
+          preexisting: const ['test/x_test.dart 3:1 the shared case'],
+        );
+        expect(out, isA<Advance>());
+        expect((out as Advance).payload!['rule'], 'all-approve');
+      },
+    );
+
+    // AC-5: a declared path the comparison proved already fails at the base is
+    // subtracted from the residual hard-block set; an UNMATCHED one still gates.
+    test(
+      'pre-existing declared test paths are suppressed, unmatched ones gate',
+      () async {
+        final suppressedOut = await _route(
+          const {
+            kDeclaredTestsRubric: 'F',
+            'code-validation': 'A',
+            'spec-adherence': 'A',
+            'regression-risk': 'A',
+            'test-coverage': 'A',
+          },
+          missing: const ['packages/p/test/one_test.dart'],
+          preexisting: const ['test/one_test.dart 4:2 the pre-existing case'],
+        );
+        expect(
+          suppressedOut,
+          isA<Advance>(),
+          reason: 'the ONE declared path is proven pre-existing at the base',
+        );
+
+        final unmatchedOut = await _route(
+          const {
+            kDeclaredTestsRubric: 'F',
+            'code-validation': 'A',
+            'spec-adherence': 'A',
+            'regression-risk': 'A',
+            'test-coverage': 'A',
+          },
+          missing: const ['packages/p/test/two_test.dart'],
+          preexisting: const ['test/one_test.dart 4:2 the pre-existing case'],
+        );
+        expect(unmatchedOut, isA<Escalate>());
+        expect(
+          (unmatchedOut as Escalate).reason,
+          'declared-tests-present failed: hard block: '
+          'Design-declared test files missing from pinned diff: '
+          'packages/p/test/two_test.dart',
+        );
+      },
+    );
+
+    test('a pre-existing declared test name that cannot identify ONE file '
+        'suppresses nothing', () async {
       final out = await _route(
         const {
-          'code-validation': 'F',
+          kDeclaredTestsRubric: 'F',
+          'code-validation': 'A',
           'spec-adherence': 'A',
           'regression-risk': 'A',
           'test-coverage': 'A',
         },
-        rationales: const {
-          'code-validation':
-              'validation plan exceeded the 10-minute kGatingDeadline; '
-              'full log: .grid/critique/code-validation.log: partial output',
-        },
+        missing: const ['test/one_test.dart'],
+        // TWO `_test.dart` tokens identify no single file, so the boundary
+        // matcher refuses to guess and the gate stands.
+        preexisting: const ['test/one_test.dart + test/two_test.dart 1:1 both'],
       );
-
       expect(out, isA<Escalate>());
-      expect(
-        (out as Escalate).reason,
-        allOf(
-          startsWith('code-validation failed: hard block: '),
-          contains('exceeded the 10-minute kGatingDeadline'),
-          contains('.grid/critique/code-validation.log'),
-        ),
-      );
+      expect((out as Escalate).reason, contains('test/one_test.dart'));
     });
+
+    test(
+      'a suffix that is not a PATH BOUNDARY never suppresses a gate',
+      () async {
+        final out = await _route(
+          const {
+            kDeclaredTestsRubric: 'F',
+            'code-validation': 'A',
+            'spec-adherence': 'A',
+            'regression-risk': 'A',
+            'test-coverage': 'A',
+          },
+          missing: const ['test/one_test.dart'],
+          preexisting: const ['test/none_test.dart 1:1 a different file'],
+        );
+        expect(out, isA<Escalate>());
+        expect((out as Escalate).reason, contains('test/one_test.dart'));
+      },
+    );
+
+    // Strict decoding, both directions of failure.
+    test(
+      'an undecodable code-validation delta is a NAMED lane non-result',
+      () async {
+        final absent = await _route(const {
+          'code-validation': 'A',
+          'spec-adherence': 'A',
+          'regression-risk': 'A',
+          'test-coverage': 'A',
+        }, omitValidationEvidence: true);
+        expect(absent, isA<Escalate>());
+        expect(
+          (absent as Escalate).reason,
+          allOf(
+            startsWith('code-validation returned no decodable delta'),
+            contains('regressions is missing'),
+          ),
+        );
+
+        final malformed = await _route(const {
+          'code-validation': 'A',
+          'spec-adherence': 'A',
+          'regression-risk': 'A',
+          'test-coverage': 'A',
+        }, rawRegressions: '{"not":"an array"}');
+        expect(malformed, isA<Escalate>());
+        expect(
+          (malformed as Escalate).reason,
+          contains('is not a JSON array of strings'),
+        );
+      },
+    );
 
     test('a single D (A + D, spread 3) ⇒ Advance carrying the finding — the '
         'spread rule is GONE', () async {
@@ -575,15 +686,15 @@ void main() {
           'regression-risk': 'A',
           'test-coverage': 'A',
         },
-        rationales: const {
-          'code-validation': 'validation plan failed (exit 1)',
-        },
+        regressions: const ['test/gate_test.dart 1:1 the gate'],
       );
 
       expect(out, isA<Escalate>());
       expect(
         (out as Escalate).reason,
-        'code-validation failed: hard block: validation plan failed (exit 1)',
+        'code-validation failed: hard block: '
+        'regressions: test/gate_test.dart 1:1 the gate; '
+        'full log: .grid/critique/code-validation.log',
       );
     });
   });
@@ -628,8 +739,29 @@ Future<RouteVerdict> _liveRoute(
   Directory workspace, {
   required Map<String, String> recorded,
   Map<String, String> rationales = const {},
+  List<String>? regressions,
 }) {
   final grades = {kDeclaredTestsRubric: 'A', ...recorded};
+  // The two DETERMINISTIC lanes join off their own step result even live (they
+  // write no verdict JSON), and they decide on EVIDENCE now — so the recorded
+  // result carries it, matching the grade unless a probe says otherwise.
+  Map<String, String> evidenceFor(String id, String grade) => switch (id) {
+    kGatingRubric => {
+      'regressions': jsonEncode(
+        regressions ??
+            (grade == 'F'
+                ? const ['test/gate_test.dart 1:1 the gate']
+                : const <String>[]),
+      ),
+      'preexisting': jsonEncode(const <String>[]),
+    },
+    kDeclaredTestsRubric => {
+      'missing': jsonEncode(
+        grade == 'F' ? const ['test/declared_test.dart'] : const <String>[],
+      ),
+    },
+    _ => const <String, String>{},
+  };
   final context = FakeTreeContext(
     values: {
       Workspace: Workspace(
@@ -646,6 +778,7 @@ Future<RouteVerdict> _liveRoute(
           for (final entry in grades.entries)
             '$_parent/${entry.key}': {
               'grade': entry.value,
+              ...evidenceFor(entry.key, entry.value),
               if (rationales[entry.key] case final rationale?)
                 'rationale': rationale,
             },

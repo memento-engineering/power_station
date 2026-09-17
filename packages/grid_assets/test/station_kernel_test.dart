@@ -256,7 +256,7 @@ void main() {
           },
         ),
       );
-      await settle(() => f.provider.started.length >= 6);
+      await settle(() => f.provider.started.length >= 5);
 
       expect(
         f.provider.stopped,
@@ -273,20 +273,19 @@ void main() {
       }
       expect(
         f.provider.started,
-        hasLength(6),
+        hasLength(5),
         reason:
-            'specify + the agent + the four critics started, nothing '
+            'specify + the agent + the three MODEL critics started, nothing '
             'else',
       );
-      // Both lanes spawn `sh` now (FT-2 wraps claude for usage capture): the
-      // gating lane runs the Validation Plan, an LLM lane exec's claude.
-      final gating = f.provider.started.firstWhere(
-        (s) => s.name == _step(kCriticNodes.first),
-      );
-      expect(gating.config.command, 'sh');
+      // The DETERMINISTIC validation lane starts NO process — it is a
+      // ServiceCapability that compares the plan against the merge base
+      // in-process. Each MODEL critic spawns `sh` (FT-2 wraps claude for usage
+      // capture).
       expect(
-        gating.config.args[1],
-        contains('.grid/critique/code-validation.rc'),
+        f.provider.started.any((s) => s.name == _step(kCriticNodes.first)),
+        isFalse,
+        reason: 'code-validation is a service, never a spawned job',
       );
       final llm = f.provider.started.firstWhere(
         (s) => s.name == _step(kProcessCriticNodes[1]),
@@ -323,7 +322,7 @@ void main() {
       );
       expect(
         f.provider.started,
-        hasLength(6),
+        hasLength(5),
         reason: 'the route is a ServiceCapability — it never spawns a process',
       );
 
@@ -343,7 +342,7 @@ void main() {
       await settle(() => false);
       expect(
         f.provider.started,
-        hasLength(6),
+        hasLength(5),
         reason: 'land does not spawn a process (it is git/PR orchestration)',
       );
 

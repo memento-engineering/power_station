@@ -52,7 +52,7 @@
 /// the standalone ACP bridge could share it.
 library;
 
-import 'dart:io';
+import 'dart:convert';
 
 import 'package:beads_dart/beads_dart.dart';
 import 'package:genesis_tree/genesis_tree.dart';
@@ -65,8 +65,25 @@ import '../agent/captured_output.dart';
 import '../agent/path_check.dart';
 import '../assets/asset_resolution.dart';
 import '../assets/overlay_materializer.dart';
-import 'committee.dart' show critiqueDirPath;
+import 'committee.dart' show critiqueDirPath, reviewBaseRef;
 import 'route_failure.dart';
+import 'validation.dart';
+
+// The shell-exec seam MOVED to `validation.dart` (it is now shared by the
+// deterministic `code-validation` service and this step, and carries the
+// bounded/process-group contract that lane's own deadline needs). Re-exported
+// here so every existing `landing.dart` import of [ShellRunner],
+// [ShellRunResult] and [SystemShellRunner] keeps resolving.
+export 'validation.dart'
+    show
+        ShellRunResult,
+        ShellRunner,
+        SystemShellRunner,
+        ValidationDelta,
+        ValidationDeltaRunner,
+        ValidationLaneFailure,
+        failingTestNames,
+        kValidationDeadline;
 
 /// The landing PREPARATION circuit (id `landing`) — `rebase → revalidate`, which
 /// `code`'s own `land` step inflates as a [SubCircuitStep]. Each step ESCALATES
@@ -302,27 +319,53 @@ bool _isUnderMaterializedHead(String path) {
 const String _revalidateLogRelativePath = '.grid/critique/revalidate.log';
 
 /// The REVALIDATE step — re-runs the bead's OWN Validation Plan (the SAME
-/// command the code-review committee's gating lane runs,
-/// `committee.dart`'s `kGatingRubric`) against the REBASED tree, closing the
-/// stale-base hole (a plan that passed pre-rebase may fail post-rebase).
+/// command the code-review committee's deterministic `code-validation` lane
+/// runs) against the REBASED tree, closing the stale-base hole (a plan that
+/// passed pre-rebase may fail post-rebase).
+///
+/// **It compares, exactly as the review lane does**
+/// (`power_station#code-validation-hard-blocks-only-branch-regressions`). The
+/// rebase MOVED the merge base, so a post-rebase run meets whatever the new
+/// base already holds; blocking on that is the same false gate the review lane
+/// retired. The step runs the plan on the rebased branch and at its merge-base
+/// through the registry's ONE shared [ValidationDeltaRunner], and only a named
+/// test that fails on the branch and passes at the base stops delivery. A
+/// failure present on BOTH sides rides the [Advance] as `preexisting`, which is
+/// what the PR's circuit receipt renders as `pre-existing on base: <test>`.
 ///
 /// A non-zero plan writes its full combined output to
-/// `.grid/critique/revalidate.log`, then [Escalate]s. `Error:`, `Failed to
-/// load`, and line-leading `[E]` diagnostics lead that reason before the tail
-/// ([validationDiagnosticLines], shared with the gating lane); all other tools
-/// retain the established tail-first reason byte-for-byte.
+/// `.grid/critique/revalidate.log`, then [Escalate]s when — and only when —
+/// there are regressions.
+///
+/// **The escalation's SHAPE is unchanged.** Naming the regressions does not
+/// make this a new kind of message: the reason still obeys
+/// `power_station#captured-process-output-escalates-tail-first` — the verb and
+/// its exit class FIRST, the diagnostic suffix next, the advice-stripped tail
+/// LAST, because an ordinary tool prints its fatal line last — and
+/// `power_station#revalidate-cfe-diagnostics-lead-before-tail` (the
+/// Dart front end is the measured exception: recognized `Error:` / `Failed to
+/// load` / `[E]` lines LEAD, inside the same one budget). The regression names
+/// are inserted as one more diagnostic clause between the exit class and the
+/// log path — they never REPLACE the diagnostic lead or the tail, so a
+/// regression that also produced CFE diagnostics still surfaces both.
+///
+/// A base- or branch-side outcome that cannot be compared at all (a compile
+/// error, a missing tool, a scratch-worktree failure) is a LANE failure with a
+/// named cause — a [RouteFailure], never a bead [Escalate].
 ///
 /// Offline-safe: mirrors [RebaseCapability] — with no delivery
 /// method bound, skips straight to [Advance] with NO shell exec at all (a plan
 /// re-run only matters when a rebase actually moved the tree to re-validate
 /// against).
 class RevalidateCapability extends RouteCapability {
-  /// Creates the capability, optionally over an injected [runner] (tests
-  /// inject a recording fake — Fakes, not mocks); defaults to the real
-  /// [SystemShellRunner].
-  const RevalidateCapability({ShellRunner? runner}) : _runner = runner;
+  /// Creates the capability over the registry's ONE shared merge-base
+  /// [comparison] runner (tests inject one built from recording fakes — Fakes,
+  /// not mocks); absent ⇒ a default [ValidationDeltaRunner] over the real git
+  /// and shell seams.
+  const RevalidateCapability({ValidationDeltaRunner? comparison})
+    : _comparison = comparison;
 
-  final ShellRunner? _runner;
+  final ValidationDeltaRunner? _comparison;
 
   @override
   Future<RouteVerdict> route(TreeContext context, StepArgs args) async {
@@ -335,33 +378,60 @@ class RevalidateCapability extends RouteCapability {
       return const Advance();
     }
 
-    final runner = _runner ?? const SystemShellRunner();
+    final comparison = _comparison ?? const ValidationDeltaRunner();
     final plan = _validationPlan(bead);
-    final result = await runner.run(
-      workingDirectory: workspace.workspaceDir,
-      command: plan,
+    final logPath = p.join(
+      critiqueDirPath(workspace.workspaceDir),
+      'revalidate.log',
     );
+    final ValidationDelta delta;
+    try {
+      // The FULL combined output lands on disk inside the comparison, in the
+      // critique dir the committee lanes already own, so no reason cap can hide
+      // the cause. A write failure is LOUD: an escalation must never claim
+      // provenance it failed to persist.
+      delta = await comparison.compare(
+        plan: plan,
+        workspace: workspace,
+        // The review base is resolved by its ONE owner — never re-derived here
+        // (A9's recorded-provisioner-SHA rule has exactly one home).
+        baseRef: reviewBaseRef(workspace),
+        branchLogPath: logPath,
+      );
+    } on ValidationLaneFailure catch (failure) {
+      throw RouteFailure(
+        'revalidate could not be compared: ${failure.message}',
+      );
+    }
     if (args.cancel.isCancelled) throw kRouteCancelled;
-    if (result.ok) return const Advance({'outcome': 'passed'});
-    final diagnostic = pathCheckDiagnostic(plan, result.exitCode);
+
+    if (delta.regressions.isEmpty) {
+      // A raw non-zero plan whose every failure is ALSO on the base advances:
+      // the EFFECTIVE rc is zero, and the raw exit rides along as evidence.
+      return Advance({
+        'outcome': 'passed',
+        'rc': '0',
+        'branchRc': '${delta.branchExitCode}',
+        'preexisting': jsonEncode(delta.preexisting),
+      });
+    }
+
+    final diagnostic = pathCheckDiagnostic(plan, delta.branchExitCode);
     final suffix = diagnostic == null ? '' : '; $diagnostic';
-    final cleanedOutput = planOutputWithoutPubAdvice(result.output);
-    // The FULL combined output lands on disk FIRST, in the critique dir the
-    // committee lanes already own, so no reason cap can hide the cause. A
-    // write failure is LOUD: an escalation must never claim provenance it
-    // failed to persist.
-    writeCapturedOutputLog(
-      path: p.join(critiqueDirPath(workspace.workspaceDir), 'revalidate.log'),
-      output: result.output,
+    final cleanedOutput = planOutputWithoutPubAdvice(
+      readCapturedOutputLogOrEmpty(logPath),
     );
     // The exit code LEADS (the class of failure), then the PATH diagnostic,
-    // then the log — advice-stripped and TAIL-cut, because the fatal line is
-    // LAST and the old head truncation cut exactly it (bead `pow-gy41`).
+    // then the regressions this round OWNS, then the log — advice-stripped and
+    // TAIL-cut, because the fatal line is LAST and the old head truncation cut
+    // exactly it (bead `pow-gy41`).
+    final prefix =
+        'revalidate failed (exit ${delta.branchExitCode})$suffix; '
+        'regressions: ${delta.regressions.join(', ')}';
     final cfeDiagnostics = validationDiagnosticLines(cleanedOutput);
-    final prefix = 'revalidate failed (exit ${result.exitCode})$suffix';
     if (cfeDiagnostics.isEmpty) {
       return Escalate(
-        '$prefix: '
+        '$prefix; full log: $_revalidateLogRelativePath: '
         '${landReasonTail(cleanedOutput, kRevalidateReasonTailChars)}',
       );
     }
@@ -382,59 +452,6 @@ class RevalidateCapability extends RouteCapability {
   }
 }
 
-/// The injectable shell-exec seam [RevalidateCapability] runs the bead's
-/// Validation Plan through — mirrors [GitRunner]'s shape (Fakes, not mocks),
-/// but for an arbitrary shell command rather than `git`.
-abstract interface class ShellRunner {
-  /// Runs [command] via `sh -c` with [workingDirectory] as the cwd. Never
-  /// throws — a launch failure is reported as a non-zero [ShellRunResult].
-  Future<ShellRunResult> run({
-    required String workingDirectory,
-    required String command,
-  });
-}
-
-/// The result of one [ShellRunner.run] — the exit code and combined
-/// stdout+stderr.
-class ShellRunResult {
-  /// Creates the result.
-  const ShellRunResult({required this.exitCode, required this.output});
-
-  /// The process exit code.
-  final int exitCode;
-
-  /// stdout and stderr combined.
-  final String output;
-
-  /// Whether the command succeeded (exit 0).
-  bool get ok => exitCode == 0;
-}
-
-/// The real [ShellRunner]: execs `sh -c <command>` via `dart:io`. Constructed
-/// as [RevalidateCapability]'s default; the offline test suite always injects
-/// a fake.
-class SystemShellRunner implements ShellRunner {
-  /// Creates the runner.
-  const SystemShellRunner();
-
-  @override
-  Future<ShellRunResult> run({
-    required String workingDirectory,
-    required String command,
-  }) async {
-    final result = await Process.run('sh', [
-      '-c',
-      command,
-    ], workingDirectory: workingDirectory);
-    final stdout = result.stdout.toString();
-    final stderr = result.stderr.toString();
-    return ShellRunResult(
-      exitCode: result.exitCode,
-      output: stderr.isEmpty ? stdout : '$stdout$stderr',
-    );
-  }
-}
-
 /// Assembles the landing circuit's OWN PR-body provenance section (`tg-rm5`):
 /// the rebase/revalidate outcomes, read via the ambient [SiblingView] at
 /// [beadId]'s absolute node paths. The code-review committee's grade line MOVED
@@ -442,9 +459,18 @@ class SystemShellRunner implements ShellRunner {
 /// lines are appended by that section's renderer (`pr_composition.dart`, bead
 /// `pow-8dx`) — this receipt now carries ONLY what the landing circuit itself
 /// did. Pure + deterministic (no I/O) so it is unit-testable in isolation.
+///
+/// [preexisting] names the tests that failed IDENTICALLY on the branch and at
+/// the merge-base — the evidence the delta ruling turned from a gate into a
+/// NOTE (`power_station#code-validation-hard-blocks-only-branch-regressions`:
+/// "reported as a NOTE — named in the critique artifact, carried into the PR
+/// body's circuit receipt as `pre-existing on base: <test>`"). One line per
+/// test, immediately after the revalidate line; an empty list emits none, so
+/// every receipt without pre-existing failures is byte-identical to before.
 String buildCircuitReceipt({
   required String beadId,
   required SiblingView siblings,
+  List<String> preexisting = const [],
 }) {
   final rebase = siblings.resultOf('$beadId/land/rebase');
   final revalidate = siblings.resultOf('$beadId/land/revalidate');
@@ -453,6 +479,9 @@ String buildCircuitReceipt({
     ..writeln()
     ..writeln('- rebase: ${rebase['outcome'] ?? 'clean'}')
     ..writeln('- revalidate: ${revalidate['outcome'] ?? 'passed'}');
+  for (final test in preexisting) {
+    b.writeln('- pre-existing on base: $test');
+  }
   return b.toString();
 }
 

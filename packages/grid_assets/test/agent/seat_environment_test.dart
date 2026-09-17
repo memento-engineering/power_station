@@ -9,7 +9,7 @@
 // stamps its Validation Plan to a file at spawn and so rides a temp dir. The
 // models below are deliberately NOT the tier defaults (opus/sonnet/haiku), so a
 // typed win is distinguishable from the tier floor by the `--model` argv alone.
-import 'dart:io';
+import 'dart:convert';
 
 import 'package:beads_dart/beads_dart.dart';
 import 'package:genesis_tree/genesis_tree.dart';
@@ -352,34 +352,63 @@ void main() {
       expect(_readiness(const {}, 'coherence'), kMidModelDefault);
     });
 
-    test('the gating lane is still an sh runner and names no model', () {
-      // A REAL workspace: unlike every seat probe above, this lane stamps the
-      // bead's Validation Plan to a file at spawn.
-      final dir = Directory.systemTemp.createTempSync('seat-gating-');
-      addTearDown(() => dir.deleteSync(recursive: true));
-      final gating = const CriticCapability().spawn(
-        FakeTreeContext(
-          values: {
-            Bead: bead(
-              'tg-1',
-            ).copyWith(metadata: const {'validation_plan': 'dart analyze'}),
-            Workspace: testWorkspace(
-              'tg-1',
-              workspaceDir: dir.path,
-              branch: 'grid/tg-1',
-            ),
-            AgentConfig: const AgentConfig(),
-            EnvironmentRegistry: _registry,
-            CriticAgentEnvironment: routed,
-          },
-        ),
-        stepArgs(
-          'tg-1/review/$kGatingRubric',
-          params: {'rubric': kGatingRubric},
-        ),
+    // The RUNNER-NOT-AGENT fence, in its only surviving form
+    // (`power_station#a20-…`: "The gating lanes are ... RUNNERS, not agents:
+    // they resolve no `AgentConfig` and name no model"). The deterministic
+    // validation lane no longer has a spawn edge to inspect, so the probe is a
+    // POLARITY one: mount a seat whose every ambient model answer is a
+    // recognisable poison, and prove the lane's result is identical with it and
+    // without it. A lane that read ANY of them could not be.
+    test('the code-validation lane reads no AgentConfig, model preference or '
+        'critic environment', () async {
+      final poisoned = FakeTreeContext(
+        values: {
+          Bead: bead(
+            'tg-1',
+          ).copyWith(metadata: const {'validation_plan': 'dart analyze'}),
+          Workspace: testWorkspace(
+            'tg-1',
+            workspaceDir: '/w/tg-1',
+            branch: 'grid/tg-1',
+          ),
+          AgentConfig: const AgentConfig(
+            harness: 'poison-harness',
+            params: {'model': 'poison-model'},
+          ),
+          EnvironmentRegistry: _registry,
+          CriticAgentEnvironment: routed,
+          ModelPreference: const ModelPreference([_strong]),
+        },
       );
-      expect(gating.command, 'sh');
-      expect(gating.args, isNot(contains('--model')));
+      final bare = FakeTreeContext(
+        values: {
+          Bead: bead(
+            'tg-1',
+          ).copyWith(metadata: const {'validation_plan': 'dart analyze'}),
+          Workspace: testWorkspace(
+            'tg-1',
+            workspaceDir: '/w/tg-1',
+            branch: 'grid/tg-1',
+          ),
+        },
+      );
+      final args = stepArgs(
+        'tg-1/review/$kGatingRubric',
+        params: {'rubric': kGatingRubric},
+      );
+
+      final withSeat = await const CodeValidationCapability().run(
+        poisoned,
+        args,
+      );
+      final withoutSeat = await const CodeValidationCapability().run(
+        bare,
+        args,
+      );
+
+      expect((withSeat as Ok).payload, (withoutSeat as Ok).payload);
+      expect(jsonEncode(withSeat.payload), isNot(contains('poison')));
+      expect(withSeat.payload!['transport'], 'validation-delta');
     });
   });
 

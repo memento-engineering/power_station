@@ -125,19 +125,30 @@ class _FakeDelivery implements DeliveryMethod {
   Future<StepOutcome> deliver(DeliveryRequest request) async => const Ok();
 }
 
+/// A [ShellRunner] answering one canned result everywhere, unless
+/// [resultsByDirectory] names the exact working directory — which is how the
+/// merge-base comparison's two sides (the branch worktree and the scratch
+/// checkout of the base) are given different answers by one runner.
 class _FixedShellRunner implements ShellRunner {
-  _FixedShellRunner(this.result);
+  _FixedShellRunner(this.result, {this.resultsByDirectory = const {}});
 
   final ShellRunResult result;
-  final calls = <({String workingDirectory, String command})>[];
+  final Map<String, ShellRunResult> resultsByDirectory;
+  final calls =
+      <({String workingDirectory, String command, Duration? deadline})>[];
 
   @override
   Future<ShellRunResult> run({
     required String workingDirectory,
     required String command,
+    Duration? deadline,
   }) async {
-    calls.add((workingDirectory: workingDirectory, command: command));
-    return result;
+    calls.add((
+      workingDirectory: workingDirectory,
+      command: command,
+      deadline: deadline,
+    ));
+    return resultsByDirectory[workingDirectory] ?? result;
   }
 }
 
@@ -636,12 +647,41 @@ void main() {
       if (workspace.existsSync()) workspace.deleteSync(recursive: true);
     });
 
+    /// The shared merge-base comparison over [shell], keyed to a FIXED host so
+    /// the (base sha, plan digest, host) cache tuple is deterministic, and
+    /// homed under the test's own workspace so no two tests share a cache.
+    ValidationDeltaRunner comparison(ShellRunner shell) =>
+        ValidationDeltaRunner(
+          gitRunner: CannedGitRunner(),
+          shellRunner: shell,
+          cacheHome: workspace.path,
+          hostIdentity: 'lunar-test-host',
+        );
+
+    /// A runner whose BASE side (the scratch merge-base checkout, at a
+    /// system-temporary path this test cannot predict) answers [base] and whose
+    /// BRANCH side (the workspace itself) answers [branch].
+    _FixedShellRunner sides({
+      required ShellRunResult base,
+      required ShellRunResult branch,
+    }) => _FixedShellRunner(base, resultsByDirectory: {workspace.path: branch});
+
+    /// One `dart test` report naming [failing] as its failing tests.
+    String report(
+      List<String> failing, {
+      String prose = 'Some tests failed.',
+    }) => [
+      prose,
+      'Failing tests:',
+      for (final name in failing) ' - $name',
+    ].join('\n');
+
     test('NO delivery bound → Advance, no shell exec at all (the commit-only '
         'arm)', () async {
       final runner = RecordingShellRunner();
       final c = _capCtx();
       final outcome = await RevalidateCapability(
-        runner: runner,
+        comparison: comparison(runner),
       ).route(c.context, c.args);
       expect(outcome, isA<Advance>());
       expect(runner.calls, isEmpty);
@@ -653,55 +693,153 @@ void main() {
       final richBead = bead(
         'tg-1',
       ).copyWith(metadata: const {'validation_plan': 'melos test'});
-      final c = _capCtx(delivery: _FakeDelivery(), beadOverride: richBead);
-      final outcome = await RevalidateCapability(
-        runner: runner,
-      ).route(c.context, c.args);
-      expect(outcome, isA<Advance>());
-      expect((outcome as Advance).payload, {'outcome': 'passed'});
-      expect(runner.calls.single.command, 'melos test');
-      expect(runner.calls.single.workingDirectory, '/w/tg-1');
-    });
-
-    test('a plan-less bead defaults to `false` (an explicit non-zero) — '
-        'ESCALATES rather than silently passing', () async {
-      // The recording fake doesn't actually EXEC the command — it just
-      // returns a canned result — so exitCode is set explicitly to model
-      // what a real `false` would do (never silently pass).
-      final runner = RecordingShellRunner()..exitCode = 1;
-      final c = _capCtx(
-        delivery: _FakeDelivery(),
-        workspaceDir: workspace.path,
-      );
-      final outcome = await RevalidateCapability(
-        runner: runner,
-      ).route(c.context, c.args);
-      expect(outcome, isA<Escalate>());
-      expect(runner.calls.single.command, 'false');
-    });
-
-    test('a non-zero validation_plan ESCALATES with the captured output as '
-        'provenance — never a silent advance', () async {
-      final runner = RecordingShellRunner()..exitCode = 1;
-      final richBead = bead(
-        'tg-1',
-      ).copyWith(metadata: const {'validation_plan': 'melos test'});
       final c = _capCtx(
         delivery: _FakeDelivery(),
         beadOverride: richBead,
         workspaceDir: workspace.path,
       );
       final outcome = await RevalidateCapability(
-        runner: runner,
+        comparison: comparison(runner),
       ).route(c.context, c.args);
+      expect(outcome, isA<Advance>());
+      expect((outcome as Advance).payload, {
+        'outcome': 'passed',
+        'rc': '0',
+        'branchRc': '0',
+        'preexisting': '[]',
+      });
+      // BOTH sides ran the bead's own plan, and both were given the lane's own
+      // ten-minute bound (the lane, not a provider watchdog, enforces it).
+      expect(runner.calls.map((call) => call.command), [
+        'melos test',
+        'melos test',
+      ]);
+      expect(runner.calls.map((call) => call.deadline), [
+        kGatingDeadline,
+        kGatingDeadline,
+      ]);
+      expect(runner.calls.last.workingDirectory, workspace.path);
+    });
+
+    // The delta ruling's post-rebase half: the rebase MOVED the merge base, so
+    // a plan that fails IDENTICALLY on the new base is not this bead's failure
+    // and must not stop delivery.
+    test('post-rebase delta: a failure shared with the new base ADVANCES with '
+        'an effective rc of 0', () async {
+      final shared = report(['test/leak_test.dart 3:1 it leaks']);
+      final runner = sides(
+        base: ShellRunResult(exitCode: 1, output: shared),
+        branch: ShellRunResult(exitCode: 1, output: shared),
+      );
+      final richBead = bead(
+        'tg-1',
+      ).copyWith(metadata: const {'validation_plan': 'dart test'});
+      final c = _capCtx(
+        delivery: _FakeDelivery(),
+        beadOverride: richBead,
+        workspaceDir: workspace.path,
+      );
+
+      final outcome = await RevalidateCapability(
+        comparison: comparison(runner),
+      ).route(c.context, c.args);
+
+      expect(outcome, isA<Advance>());
+      final payload = (outcome as Advance).payload!;
+      expect(payload['outcome'], 'passed');
+      expect(payload['rc'], '0', reason: 'the EFFECTIVE exit is the delta');
+      expect(payload['branchRc'], '1', reason: 'the RAW exit is preserved');
+      expect(payload['preexisting'], '["test/leak_test.dart 3:1 it leaks"]');
+      expect(
+        File(
+          p.join(workspace.path, '.grid', 'critique', 'revalidate.log'),
+        ).readAsStringSync(),
+        shared,
+      );
+    });
+
+    test('post-rebase delta: a branch-only failure STOPS delivery, naming only '
+        'the regression', () async {
+      final runner = sides(
+        base: ShellRunResult(
+          exitCode: 1,
+          output: report(['test/leak_test.dart 3:1 it leaks']),
+        ),
+        branch: ShellRunResult(
+          exitCode: 1,
+          output: report([
+            'test/leak_test.dart 3:1 it leaks',
+            'test/mine_test.dart 9:2 the new case',
+          ]),
+        ),
+      );
+      final richBead = bead(
+        'tg-1',
+      ).copyWith(metadata: const {'validation_plan': 'dart test'});
+      final c = _capCtx(
+        delivery: _FakeDelivery(),
+        beadOverride: richBead,
+        workspaceDir: workspace.path,
+      );
+
+      final outcome = await RevalidateCapability(
+        comparison: comparison(runner),
+      ).route(c.context, c.args);
+
       expect(outcome, isA<Escalate>());
-      expect((outcome as Escalate).reason, 'revalidate failed (exit 1): ');
-      expect((outcome).reason, isNot(contains('candidate missing commands')));
+      final reason = (outcome as Escalate).reason;
+      expect(
+        reason,
+        startsWith(
+          'revalidate failed (exit 1); '
+          'regressions: test/mine_test.dart 9:2 the new case; '
+          'full log: .grid/critique/revalidate.log: ',
+        ),
+      );
+      expect(
+        reason,
+        isNot(contains('it leaks; ')),
+        reason: 'a pre-existing failure is a NOTE, never a named regression',
+      );
+    });
+
+    // A run with no comparable named-test outcome is the LANE's failure, with a
+    // named cause — never a bead block. A plan-less bead's `false` is the
+    // simplest instance of it.
+    test('a plan-less bead defaults to `false` (an explicit non-zero) — a lane '
+        'failure, never a silent pass', () async {
+      final runner = RecordingShellRunner()..exitCode = 1;
+      final c = _capCtx(
+        delivery: _FakeDelivery(),
+        workspaceDir: workspace.path,
+      );
+      await expectLater(
+        RevalidateCapability(
+          comparison: comparison(runner),
+        ).route(c.context, c.args),
+        throwsA(
+          isA<RouteFailure>().having(
+            (failure) => failure.reason,
+            'reason',
+            allOf(
+              contains('revalidate could not be compared'),
+              contains('without naming a failing test'),
+            ),
+          ),
+        ),
+      );
+      expect(runner.calls.first.command, 'false');
     });
 
     test('exit 127 retains output and appends candidate commands', () async {
-      final runner = _FixedShellRunner(
-        const ShellRunResult(exitCode: 127, output: 'sh: rg: not found'),
+      final runner = sides(
+        base: ShellRunResult(exitCode: 0, output: ''),
+        branch: ShellRunResult(
+          exitCode: 127,
+          output:
+              'sh: rg: not found\n'
+              '${report(['test/a_test.dart 1:1 finds the needle'])}',
+        ),
       );
       final richBead = bead(
         'tg-1',
@@ -712,16 +850,21 @@ void main() {
         workspaceDir: workspace.path,
       );
       final outcome = await RevalidateCapability(
-        runner: runner,
+        comparison: comparison(runner),
       ).route(c.context, c.args);
       expect(outcome, isA<Escalate>());
       expect(
         (outcome as Escalate).reason,
-        'revalidate failed (exit 127); '
-        'exit 127 — candidate missing commands: rg: '
-        'sh: rg: not found',
+        allOf(
+          startsWith(
+            'revalidate failed (exit 127); '
+            'exit 127 — candidate missing commands: rg; '
+            'regressions: test/a_test.dart 1:1 finds the needle; ',
+          ),
+          endsWith('test/a_test.dart 1:1 finds the needle'),
+        ),
       );
-      expect(runner.calls.single.command, 'rg needle');
+      expect(runner.calls.last.command, 'rg needle');
     });
 
     test('CFE diagnostics lead once and persist the full combined log', () async {
@@ -739,10 +882,11 @@ void main() {
         for (var i = 0; i < 120; i++) '00:01 +0 -1: loading test/case_$i.dart',
         'Some tests failed.',
         'Failing tests:',
-        'test/a_test.dart: loading',
+        ' - test/a_test.dart: loading',
       ].join('\n');
-      final runner = _FixedShellRunner(
-        ShellRunResult(exitCode: 1, output: output),
+      final runner = sides(
+        base: const ShellRunResult(exitCode: 0, output: ''),
+        branch: ShellRunResult(exitCode: 1, output: output),
       );
       final richBead = bead(
         'tg-1',
@@ -754,14 +898,20 @@ void main() {
       );
 
       final outcome = await RevalidateCapability(
-        runner: runner,
+        comparison: comparison(runner),
       ).route(c.context, c.args);
 
       expect(outcome, isA<Escalate>());
       final reason = (outcome as Escalate).reason;
+      // The CFE lead survives the regression clause: naming what regressed does
+      // not REPLACE the diagnostic mechanism
+      // (`power_station#revalidate-cfe-diagnostics-lead-before-tail`), and the
+      // tail still ends the reason
+      // (`power_station#captured-process-output-escalates-tail-first`).
       const marker =
-          'revalidate failed (exit 1); full log: '
-          '.grid/critique/revalidate.log: ';
+          'revalidate failed (exit 1); '
+          'regressions: test/a_test.dart: loading; '
+          'full log: .grid/critique/revalidate.log: ';
       expect(
         reason,
         startsWith('$failedToLoad\n$error\n$bracketedError\n$marker'),
@@ -770,15 +920,11 @@ void main() {
       expect(reason.split(error), hasLength(2));
       expect(reason.split(bracketedError), hasLength(2));
       expect(
-        reason.length - marker.length,
-        lessThanOrEqualTo(kRevalidateReasonTailChars),
-      );
-      expect(
         reason,
         endsWith(
           'Some tests failed.\n'
           'Failing tests:\n'
-          'test/a_test.dart: loading',
+          ' - test/a_test.dart: loading',
         ),
       );
       expect(
@@ -794,8 +940,15 @@ void main() {
         '(pow-gy41)', () async {
       final noise = _pubAdviceBlock();
       expect(noise.length, greaterThan(3000), reason: 'the receipt shape');
-      final runner = _FixedShellRunner(
-        ShellRunResult(exitCode: 1, output: '$noise$_dartTestFailure'),
+      final runner = sides(
+        base: const ShellRunResult(exitCode: 0, output: ''),
+        branch: ShellRunResult(
+          exitCode: 1,
+          output:
+              '$noise$_dartTestFailure\n'
+              'Failing tests:\n'
+              ' - test/foo_test.dart 4:3 renders the widget',
+        ),
       );
       final richBead = bead('tg-1').copyWith(
         metadata: const {'validation_plan': 'dart pub get && dart test'},
@@ -806,25 +959,38 @@ void main() {
         workspaceDir: workspace.path,
       );
       final outcome = await RevalidateCapability(
-        runner: runner,
+        comparison: comparison(runner),
       ).route(c.context, c.args);
       expect(outcome, isA<Escalate>());
       final reason = (outcome as Escalate).reason;
-      expect(reason, startsWith('revalidate failed (exit 1): '));
+      expect(
+        reason,
+        startsWith(
+          'revalidate failed (exit 1); '
+          'regressions: test/foo_test.dart 4:3 renders the widget; '
+          'full log: .grid/critique/revalidate.log: ',
+        ),
+      );
       expect(reason, contains('test/foo_test.dart: renders the widget [E]'));
       expect(reason, contains('Some tests failed.'));
       expect(reason, isNot(contains(' available)')));
       expect(reason, isNot(contains('… (truncated)')));
-      expect(reason.length, lessThanOrEqualTo(1600));
+      expect(reason.length, lessThanOrEqualTo(1700));
     });
 
     test(
       'output still over the tail budget after stripping is cut at the '
       'START — landReasonTail\'s leading …, never the head (pow-gy41)',
       () async {
-        final long = '${'noise line\n' * 400}FATAL: the real error';
-        final runner = _FixedShellRunner(
-          ShellRunResult(exitCode: 2, output: long),
+        final long = [
+          'noise line\n' * 400,
+          'FATAL: the real error',
+          'Failing tests:',
+          ' - test/z_test.dart 1:1 the real case',
+        ].join('\n');
+        final runner = sides(
+          base: const ShellRunResult(exitCode: 0, output: ''),
+          branch: ShellRunResult(exitCode: 2, output: long),
         );
         final richBead = bead(
           'tg-1',
@@ -835,19 +1001,147 @@ void main() {
           workspaceDir: workspace.path,
         );
         final outcome = await RevalidateCapability(
-          runner: runner,
+          comparison: comparison(runner),
         ).route(c.context, c.args);
         expect(outcome, isA<Escalate>());
         final reason = (outcome as Escalate).reason;
-        expect(reason, startsWith('revalidate failed (exit 2): …'));
-        expect(reason, endsWith('FATAL: the real error'));
+        const prefix =
+            'revalidate failed (exit 2); '
+            'regressions: test/z_test.dart 1:1 the real case; '
+            'full log: .grid/critique/revalidate.log: ';
+        expect(reason, startsWith('$prefix…'));
+        expect(reason, endsWith(' - test/z_test.dart 1:1 the real case'));
         expect(
           reason.length,
-          kRevalidateReasonTailChars + 29,
-          reason: 'the 28-char prefix + the … cut marker + the last 1500 chars',
+          prefix.length + kRevalidateReasonTailChars + 1,
+          reason: 'the prefix + the … cut marker + the last 1500 chars',
         );
       },
     );
+
+    // The base side is the one the ruling names explicitly: a merge-base plan
+    // that fails for a reason other than a named test (a compile error, an
+    // exit 64, a missing tool) is the LANE's failure, with a named cause — it
+    // can never be attributed to the bead.
+    test('post-rebase delta: an uncomparable BASE is a lane failure, never a '
+        'bead block', () async {
+      final runner = sides(
+        base: const ShellRunResult(
+          exitCode: 64,
+          output: 'lib/a.dart:1:1: Error: Expected an identifier.',
+        ),
+        branch: const ShellRunResult(exitCode: 0, output: ''),
+      );
+      final richBead = bead(
+        'tg-1',
+      ).copyWith(metadata: const {'validation_plan': 'dart test'});
+      final c = _capCtx(
+        delivery: _FakeDelivery(),
+        beadOverride: richBead,
+        workspaceDir: workspace.path,
+      );
+
+      await expectLater(
+        RevalidateCapability(
+          comparison: comparison(runner),
+        ).route(c.context, c.args),
+        throwsA(
+          isA<RouteFailure>().having(
+            (failure) => failure.reason,
+            'reason',
+            allOf(
+              contains('validation base'),
+              contains('without naming a failing test'),
+              contains('basesha0000000000000000000000000000000000'),
+              contains('Expected an identifier'),
+            ),
+          ),
+        ),
+      );
+    });
+  });
+
+  // The lane enforces its OWN deadline now
+  // (`power_station#code-validation-enforces-its-own-deadline-as-a-service-capability`),
+  // so the real runner is exercised for real: a Fake could not prove that the
+  // plan's own CHILDREN are reaped, and a leaked test runner holding the
+  // worktree is exactly what the retired provider watchdog left behind.
+  group('the bounded validation runner (SystemShellRunner)', () {
+    late Directory dir;
+
+    setUp(() {
+      dir = Directory.systemTemp.createTempSync('bounded-runner-');
+    });
+
+    tearDown(() {
+      if (dir.existsSync()) dir.deleteSync(recursive: true);
+    });
+
+    test('an unbounded run keeps the established exit code and combined '
+        'output', () async {
+      final result = await const SystemShellRunner().run(
+        workingDirectory: dir.path,
+        command: 'printf "out\\n"; printf "err\\n" >&2; exit 7',
+      );
+      expect(result.exitCode, 7);
+      expect(result.ok, isFalse);
+      expect(result.timedOut, isFalse);
+      expect(result.output, 'out\nerr\n');
+    });
+
+    test('a bounded run captures the same combined output and rc, with no job '
+        'notification leaking into it', () async {
+      final result = await const SystemShellRunner().run(
+        workingDirectory: dir.path,
+        command: 'printf "out\\n"; printf "err\\n" >&2; exit 7',
+        deadline: const Duration(minutes: 5),
+      );
+      expect(result.exitCode, 7);
+      expect(result.timedOut, isFalse);
+      expect(result.output, 'out\nerr\n');
+      expect(result.output, isNot(contains('Done')));
+    });
+
+    test('an unparseable plan is the CHILD\'s non-zero exit, never a lost '
+        'result', () async {
+      final result = await const SystemShellRunner().run(
+        workingDirectory: dir.path,
+        // Balanced to Dart, UNBALANCED to sh — the plan text never reaches the
+        // wrapper's own parse.
+        command: 'ruby -e \'puts "the station lane\'s SDK"\'',
+        deadline: const Duration(minutes: 5),
+      );
+      expect(result.exitCode, isNot(0));
+      expect(result.output.toLowerCase(), contains('syntax error'));
+    });
+
+    test('a plan that outruns its deadline is reaped WITH the children it '
+        'spawned, and reports timedOut', () async {
+      final marker = p.join(dir.path, 'child-alive');
+      final result = await const SystemShellRunner().run(
+        workingDirectory: dir.path,
+        // A GRANDCHILD of the wrapper: killing the wrapper alone leaves this
+        // one running, which is the leak the process group exists to close.
+        command: 'sh -c "printf started > \'$marker\'; sleep 45"',
+        deadline: const Duration(milliseconds: 1200),
+      );
+      expect(result.timedOut, isTrue);
+      expect(result.ok, isFalse);
+      expect(
+        File(marker).existsSync(),
+        isTrue,
+        reason: 'the grandchild really did start',
+      );
+      final survivors = await Process.run('sh', [
+        '-c',
+        'ps -ax -o pid,command | grep "slee""p 45" | grep -v grep | wc -l',
+      ]);
+      expect(
+        int.parse(survivors.stdout.toString().trim()),
+        0,
+        reason: 'the whole process GROUP was terminated, not just the shell',
+      );
+    });
   });
 
   group('buildCircuitReceipt', () {

@@ -103,7 +103,6 @@ import '../agent/agent_harness.dart';
 import '../agent/captured_output.dart';
 import '../agent/environment_registry.dart';
 import '../agent/model_tier.dart';
-import '../agent/path_check.dart';
 import '../agent/seat_environments.dart';
 import '../agent/site_binding.dart';
 import '../agent/usage_report.dart';
@@ -111,6 +110,7 @@ import 'committee_selection.dart';
 import 'fix_in_flight.dart';
 import 'route_failure.dart';
 import 'specify.dart' show headingOffset, proseOnly, sectionBodyAt;
+import 'validation.dart';
 
 /// The gating rubric id — its grade `F` is a hard block (a non-zero Validation
 /// Plan command), decided by the route's matrix.
@@ -122,15 +122,23 @@ const String kDeclaredTestsRubric = 'declared-tests-present';
 /// Every deterministic hard gate in the code committee.
 const List<String> kCodeGatingRubrics = [kGatingRubric, kDeclaredTestsRubric];
 
-/// The gating lane's absolute-from-spawn deadline (the_grid audit §4,
+/// The gating lane's absolute-from-start deadline (the_grid audit §4,
 /// `tg-uad` follow-through): the deterministic `code-validation` lane runs the
 /// bead's OWN Validation Plan via `sh -c`, which is minutes-scale by
 /// definition — never the multi-hour agentic build/critic lanes — so it must
-/// NOT ride the runtime provider's 2-hour default watchdog. Ten minutes bounds
+/// NOT ride a runtime provider's 2-hour default watchdog. Ten minutes bounds
 /// every future validation-latched variant of this lane without crowding a
 /// legitimately slow (but still deterministic) plan. Deliberately NOT applied
 /// to the LLM critic/build lanes, which legitimately ride the long default.
-const Duration kGatingDeadline = Duration(minutes: 10);
+///
+/// **The lane enforces it ITSELF now**
+/// (`power_station#code-validation-enforces-its-own-deadline-as-a-service-capability`):
+/// `code-validation` is a [ServiceCapability], and the comparison's merge-base
+/// run stands in a scratch worktree OUTSIDE any per-bead `RuntimeProvider`, so
+/// no provider watchdog could bound it. [SystemShellRunner] terminates the
+/// plan's whole process group on this bound and reports `timedOut`. ONE value:
+/// this name and [kValidationDeadline] are the same ten minutes.
+const Duration kGatingDeadline = kValidationDeadline;
 
 /// The three LLM critic rubric ids (each graded in isolation by a `claude`
 /// critic; anti-anchoring).
@@ -156,50 +164,6 @@ const String _critiqueDir = '.grid/critique';
 /// Beside the `.rc` on purpose: they are the ONE run's two artifacts, written
 /// by the same script, and [sweepStaleCritique] retires them together.
 const String _gatingLogRelativePath = '$_critiqueDir/$kGatingRubric.log';
-
-/// The workspace-relative file [CriticCapability.spawn] writes the bead's OWN
-/// Validation Plan into — the CHILD script [_gatingScript]'s single statement
-/// runs. The wrapper's INPUT, where the log and the `.rc` are its OUTPUTS.
-///
-/// **Why a file and not an inline subshell.** `sh` parses a whole script before
-/// executing ANY of it, so a plan that merely fails to PARSE aborted the
-/// wrapper before its first statement — no log, no rc, no gate (the live
-/// finding: a single-quoted `ruby -e` program carrying an apostrophe stranded a
-/// session for 25 minutes, because an artifact-less exit is classified `infra`
-/// and backed off as if a deterministic runner could ever succeed on a retry).
-/// Handing the plan to a CHILD `sh` moves both parsing and execution below the
-/// wrapper's receipts, so every plan-level failure — parse error included — is
-/// an ordinary non-zero exit the rc records and the log explains.
-///
-/// Beside the log and the `.rc` on purpose: the ONE run's three artifacts,
-/// written for the same script, which [sweepStaleCritique] retires together. A
-/// sweep that lands MID-ROUND cannot break a running plan the way it could an
-/// armed deadline stamp: the child already holds the script open, and unlinking
-/// an open file leaves that descriptor readable.
-const String _gatingPlanRelativePath = '$_critiqueDir/$kGatingRubric.plan.sh';
-
-/// The workspace-relative ARMED-DEADLINE stamp — written before the Validation
-/// Plan starts and removed only after its rc lands, so a stamp that OUTLIVES
-/// the run is proof the lane was killed rather than finished.
-///
-/// Deliberately OUTSIDE [_critiqueDir], for exactly the reason
-/// [kCriticIncarnationDir] is: [sweepStaleCritique] empties the critique dir of
-/// everything except this round's `<rubric>.json`, and the derived auto-respec
-/// wave can land that sweep MID-ROUND (the tg-60t race). A stamp armed for the
-/// whole [kGatingDeadline] window inside the swept dir would be deleted under a
-/// still-running plan, and the timeout would then silently degrade into the
-/// unattributable hold this stamp exists to name. A stamp that survives an
-/// unrelated round is harmless by the same argument that makes the incarnation
-/// marker safe: only a [CriticCapability.spawn] can precede a probe, and every
-/// spawn rewrites it.
-const String _gatingDeadlineStampRelativePath =
-    '$kCriticIncarnationDir/$kGatingRubric.deadline';
-
-/// The gating lane's private result key carrying the BOUNDED diagnostic head
-/// ([validationDiagnosticLines]) the route puts AHEAD of its hard-block line.
-/// Private because it is a lane→route detail, and because no other gating lane
-/// emits it: their reasons stay byte-identical.
-const String _gatingDiagnosticHeadKey = 'diagnostic_head';
 
 /// The hygiene step id every critic lane transitively `dependsOn`
 /// (gate-integrity #3) — wipes [_critiqueDir] before any lane can read or
@@ -814,7 +778,12 @@ List<String> missingDeclaredTestFiles({
 ///
 /// A REVIEW base only. Landing still rebases onto `origin/<baseBranch>`: remote
 /// divergence is reconciled THERE, never in review.
-String _reviewBaseRef(Workspace workspace) =>
+/// PUBLIC because it has exactly ONE home: the declared-tests gate, the
+/// diff-pinning step and the two merge-base COMPARISON lanes
+/// ([CodeValidationCapability] and `RevalidateCapability`) all ask for the
+/// review base here rather than re-deriving `baseSha ?? origin/<base>` — a
+/// second derivation is how the two halves of a comparison drift apart.
+String reviewBaseRef(Workspace workspace) =>
     workspace.baseSha ?? 'origin/${workspace.baseBranch}';
 
 /// The repo-relative paths tracked at [baseRef] — the pinned base's own file
@@ -858,9 +827,10 @@ class DeclaredTestsCapability extends ServiceCapability {
     final bead = context.getInheritedSeedOfExactType<Bead>();
     final workspace = context.getInheritedSeedOfExactType<Workspace>();
     if (bead == null || workspace == null) {
-      return const Ok({
+      return Ok({
         'grade': 'F',
         'transport': 'structural',
+        'missing': jsonEncode(const <String>[]),
         'rationale': 'no ambient work Bead / Workspace to check — fail-closed',
       });
     }
@@ -869,6 +839,7 @@ class DeclaredTestsCapability extends ServiceCapability {
       return Ok({
         'grade': 'F',
         'transport': 'structural',
+        'missing': jsonEncode(const <String>[]),
         'rationale':
             'no pinned diff at ${pinned.path} — declared tests cannot be checked; fail-closed',
       });
@@ -886,21 +857,213 @@ class DeclaredTestsCapability extends ServiceCapability {
         : await baseTreeFiles(
             runner: _runner ?? SystemGitRunner(),
             workspaceDir: workspace.workspaceDir,
-            baseRef: _reviewBaseRef(workspace),
+            baseRef: reviewBaseRef(workspace),
           );
     final missing = missingDeclaredTestFiles(
       design: bead.design,
       changedFiles: changedFilesIn(await pinned.readAsString()),
       baseFiles: baseFiles,
     );
+    // The missing set rides the payload as MACHINE-READABLE evidence, sorted,
+    // beside the prose rationale: the route subtracts the paths the
+    // code-validation comparison proved already fail at the merge-base, and it
+    // can only do that from a set it can decode
+    // (`power_station#code-validation-hard-blocks-only-branch-regressions`
+    // extends the delta rule to this gate). The classification above is
+    // UNCHANGED — a declaration is still a promise whatever the base holds.
     return missing.isEmpty
-        ? const Ok({'grade': 'A', 'transport': 'structural'})
+        ? Ok({
+            'grade': 'A',
+            'transport': 'structural',
+            'missing': jsonEncode(const <String>[]),
+          })
         : Ok({
             'grade': 'F',
             'transport': 'structural',
+            'missing': jsonEncode(missing),
             'rationale':
                 'Design-declared test files missing from pinned diff: ${missing.join(', ')}',
           });
+  }
+}
+
+/// The DETERMINISTIC `code-validation` lane — the bead's own Validation Plan,
+/// run on the BRANCH and at its MERGE-BASE, gating only on the difference.
+///
+/// **Why a service and not a spawned job**
+/// (`power_station#code-validation-enforces-its-own-deadline-as-a-service-capability`).
+/// The comparison's base run stands in a detached scratch worktree, outside any
+/// per-bead `RuntimeProvider` — no provider watchdog could ever bound it, and
+/// no runtime event describes it. So the lane owns both runs and its own
+/// deadline: [ValidationDeltaRunner] hands each side [kGatingDeadline], and
+/// [SystemShellRunner] terminates the plan's whole process group when it
+/// elapses. The retired RuntimeProvider watchdog arm — the `Died(reason:
+/// 'watchdog: …')` completion and the armed `.grid/critique-incarnation/
+/// code-validation.deadline` stamp it graded off — is GONE with the job.
+///
+/// **Why a delta and not an exit code**
+/// (`power_station#code-validation-hard-blocks-only-branch-regressions`). A
+/// failure identical on the merge-base is NOT the bead's: it is a host-only
+/// flake, another bead's leak, or a pre-existing red. It is reported as a NOTE
+/// — named in this lane's artifact as `preexisting`, carried into the PR body's
+/// circuit receipt — and it never gates. Only a named test that PASSES at the
+/// base and FAILS on the branch is a `regression`, and only regressions grade
+/// `F`.
+///
+/// **The receipts**
+/// (`power_station#code-validation-preserves-diagnostics-and-reports-deadline`,
+/// as the delta ruling updated it). `.grid/critique/code-validation.log` still
+/// holds the branch plan's FULL combined stdout and stderr, and the ten-minute
+/// bound is unchanged. `.grid/critique/code-validation.rc` is now the EFFECTIVE
+/// delta exit — zero whenever the branch did not regress — because that file is
+/// what the landing policy reads as "this round validated"; the RAW branch exit
+/// is preserved verbatim as `branchRc` in the JSON artifact beside it, so
+/// nothing is lost, only re-homed.
+///
+/// A run that cannot be compared at all — a base that fails to compile, an
+/// `exit 64`, a missing tool, a scratch worktree that could not be made — is a
+/// LANE failure with a named cause ([Failed.noResult]), never a bead verdict.
+/// It is a RUNNER, not an agent (`power_station#a20-…`): it resolves no
+/// `AgentConfig`, names no model, and reads no critic environment.
+class CodeValidationCapability extends ServiceCapability {
+  /// Creates the lane over the registry's ONE shared merge-base [comparison]
+  /// runner (tests inject one built from recording fakes — Fakes, not mocks);
+  /// absent ⇒ a default [ValidationDeltaRunner] over the real git and shell
+  /// seams.
+  const CodeValidationCapability({ValidationDeltaRunner? comparison})
+    : _comparison = comparison;
+
+  final ValidationDeltaRunner? _comparison;
+
+  @override
+  Future<StepOutcome> run(TreeContext context, StepArgs args) async {
+    // Read the ambient values at ENTRY (synchronously, while mounted) with the
+    // non-binding effect verb — this is a `run` edge (ADR-0008 D3). No
+    // AgentConfig, no ModelPreference, no critic environment: a runner resolves
+    // none of them.
+    final bead = context.getInheritedSeedOfExactType<Bead>();
+    final workspace = context.getInheritedSeedOfExactType<Workspace>();
+    final round = verdictRound(args);
+    // The OFFLINE posture, identical to every other deterministic lane's: a
+    // synthetic workspace that does not exist on disk means there is nothing to
+    // compare, so the lane answers with NO process and NO filesystem IO. The
+    // arrays are still decodable, because the route decides on them.
+    if (bead == null ||
+        workspace == null ||
+        !Directory(workspace.workspaceDir).existsSync()) {
+      return Ok({
+        'grade': 'A',
+        'transport': _validationTransport,
+        'branchRc': '0',
+        'regressions': jsonEncode(const <String>[]),
+        'preexisting': jsonEncode(const <String>[]),
+        kVerdictRoundKey: '$round',
+      });
+    }
+
+    final workspaceDir = workspace.workspaceDir;
+    final comparison = _comparison ?? const ValidationDeltaRunner();
+    final logPath = p.join(workspaceDir, _gatingLogRelativePath);
+    final ValidationDelta delta;
+    try {
+      delta = await comparison.compare(
+        plan: _validationPlan(bead),
+        workspace: workspace,
+        // The review base has exactly ONE owner; this lane never re-derives it.
+        baseRef: reviewBaseRef(workspace),
+        branchLogPath: logPath,
+        effectiveRcPath: p.join(
+          workspaceDir,
+          _critiqueDir,
+          '$kGatingRubric.rc',
+        ),
+      );
+    } on ValidationLaneFailure catch (failure) {
+      // A base-side cause is persisted BESIDE the branch log, never over it:
+      // the two sides' outputs answer different questions.
+      if (failure.side != 'branch' && failure.outputTail.trim().isNotEmpty) {
+        writeCapturedOutputLog(
+          path: p.join(workspaceDir, _critiqueDir, '$kGatingRubric.base.log'),
+          output: failure.outputTail,
+        );
+      }
+      _writeValidationArtifact(workspaceDir, {
+        'transport': _validationTransport,
+        'laneFailure': failure.message,
+        'side': failure.side,
+        if (failure.baseSha != null) 'baseSha': failure.baseSha,
+        kVerdictRoundKey: round,
+      });
+      // NEVER a bead verdict: the lane could not decide, so it says so.
+      return Failed.noResult('code-validation: ${failure.message}');
+    }
+    if (args.cancel.isCancelled) {
+      return const Failed.noResult('code-validation: cancelled');
+    }
+
+    final grade = delta.regressions.isEmpty ? 'A' : 'F';
+    _writeValidationArtifact(workspaceDir, {
+      'grade': grade,
+      'transport': _validationTransport,
+      'baseSha': delta.baseSha,
+      'baseCache': delta.baseCacheHit ? 'hit' : 'miss',
+      'branchRc': delta.branchExitCode,
+      'regressions': delta.regressions,
+      'preexisting': delta.preexisting,
+      kVerdictRoundKey: round,
+    });
+    return Ok({
+      'grade': grade,
+      'transport': _validationTransport,
+      'baseSha': delta.baseSha,
+      'baseCache': delta.baseCacheHit ? 'hit' : 'miss',
+      'branchRc': '${delta.branchExitCode}',
+      'regressions': jsonEncode(delta.regressions),
+      'preexisting': jsonEncode(delta.preexisting),
+      kVerdictRoundKey: '$round',
+    });
+  }
+
+  /// Spends exactly ONE attempt on a lane that produced no comparable result,
+  /// then parks it at a gate.
+  ///
+  /// The reasoning the retired process lane recorded holds verbatim: this is a
+  /// DETERMINISTIC runner, so re-running it against an unchanged tree cannot
+  /// change a `noResult`, and the engine's `infra` backoff would otherwise
+  /// spend its whole harness-throttle ladder — the observed 5 + 15 + 30
+  /// minutes — before the node parks, leaving the session open with nothing for
+  /// the governor's watch to fire on. The engine tests exhaustion AFTER
+  /// bumping the restart cursor, so a budget of one makes the first attempt the
+  /// last.
+  @override
+  SupervisionPolicy supervisionPolicy(StepArgs args) => const SupervisionPolicy(
+    byKind: {
+      CapabilityFailureKind.noResult: RetryPolicy(
+        maxRestarts: 1,
+        onExhaustion: ExhaustionBehavior.parkAtGate,
+      ),
+    },
+  );
+}
+
+/// The transport every `code-validation` payload names — a DELTA against the
+/// merge base, not a captured exit code.
+const String _validationTransport = 'validation-delta';
+
+/// Writes the lane's JSON artifact atomically, so a reader never sees a
+/// half-written verdict.
+void _writeValidationArtifact(String workspaceDir, Map<String, Object?> body) {
+  final path = p.join(workspaceDir, _critiqueDir, '$kGatingRubric.json');
+  try {
+    final target = File(path);
+    target.parent.createSync(recursive: true);
+    File('$path.tmp')
+      ..writeAsStringSync(jsonEncode(body))
+      ..renameSync(path);
+  } on Object {
+    // Best-effort, exactly like every other critique-dir write in this file:
+    // the payload the route decides on is the STEP RESULT, and an artifact that
+    // could not land costs an operator a read, never a verdict.
   }
 }
 
@@ -1291,9 +1454,13 @@ const Circuit kCodeReviewCircuit = Circuit(
       capabilityId: kDeclaredTestsRubric,
       dependsOn: {kPinDiffStep},
     ),
+    // The DETERMINISTIC validation lane — bound to its OWN service capability
+    // (never the `critic` process family): it compares the bead's Validation
+    // Plan against the merge base and gates only on the difference. The step id
+    // is UNCHANGED (it is a persisted cursor key); only the binding moved.
     CapabilityStep(
       stepId: kGatingRubric,
-      capabilityId: 'critic',
+      capabilityId: kGatingRubric,
       params: {'rubric': kGatingRubric},
       dependsOn: {kFormatCleanStep, kDeclaredTestsRubric},
     ),
@@ -1487,7 +1654,7 @@ void sweepStaleCritique(
 /// spec-adherence A explicitly cited a months-old mainline commit). Nothing
 /// pinned the review to the branch's own delta.
 ///
-/// The base it measures against is [_reviewBaseRef] — the provisioner's
+/// The base it measures against is [reviewBaseRef] — the provisioner's
 /// recorded cut point when the workspace carries one, else `origin/<base>` —
 /// resolved ONCE and fed to every probe below and to the pinned header, so the
 /// artifact the critics read always names the base it was computed from.
@@ -1556,7 +1723,7 @@ class PinDiffCapability extends RouteCapability {
     if (!Directory(workspaceDir).existsSync()) return const Advance();
 
     final runner = _runner ?? SystemGitRunner();
-    final baseRef = _reviewBaseRef(workspace);
+    final baseRef = reviewBaseRef(workspace);
 
     // The checkout-root guard (bead pow-4pr): the dir EXISTS — before trusting
     // it as the diff scope, require it to BE the checkout root. `git` walks up
@@ -1811,31 +1978,13 @@ class CriticCapability extends ProcessCapability {
     if (workspace == null) return GateOutcome.probeError;
     // The out-of-band flare sink (D-8, emit-only). This is an EFFECT edge, so
     // the non-binding verb is correct (ADR-0008 D3); absent ⇒ no flares, never
-    // a failure. Read at ENTRY, before the gating branch's first `await`: the
-    // sink is captured while the context is provably mounted, so no read of it
-    // crosses an async gap.
+    // a failure. Read at ENTRY, before the first `await`: the sink is captured
+    // while the context is provably mounted, so no read of it crosses an async
+    // gap.
     final transport = context
         .getInheritedSeedOfExactType<ServiceBundle>()
         ?.transport;
     final workspaceDir = workspace.workspaceDir;
-    if (rubric == kGatingRubric) {
-      try {
-        // Both of the lane's DURABLE terminals: a plan that ran to completion
-        // left its rc; a plan the watchdog killed left its armed deadline
-        // stamp. Either one is enough evidence for `result()` to grade on.
-        final rcExists = await File(
-          p.join(workspaceDir, _critiqueDir, '$kGatingRubric.rc'),
-        ).exists();
-        final deadlineStampExists = await File(
-          p.join(workspaceDir, _gatingDeadlineStampRelativePath),
-        ).exists();
-        return rcExists || deadlineStampExists
-            ? GateOutcome.clear
-            : GateOutcome.present;
-      } on Object {
-        return GateOutcome.probeError;
-      }
-    }
     try {
       final round = verdictRound(args);
       // Nico, 2026-09-01 — keep the clause, change the writer: the round stamp
@@ -1936,50 +2085,25 @@ class CriticCapability extends ProcessCapability {
     onExhaustion: ExhaustionBehavior.parkAtGate,
   );
 
-  /// Gives an invalid critic artifact one repair restart before a visible gate,
-  /// and the DETERMINISTIC gating lane no restart budget at all.
+  /// Gives an invalid critic artifact one repair restart before a visible gate.
   ///
   /// The engine tests exhaustion after incrementing the restart cursor, so
   /// [RetryPolicy.maxRestarts] of two means one initial attempt plus one
   /// repair. This conservative bound and [Backoff.standard] remain in force
   /// until tg-5drf supplies retained invalid-output and retry distributions.
   ///
-  /// On an LLM rubric only `invalidResult` is declared: `work` (a real F) and
-  /// `noResult` (no artifact at all) keep the circuit's own budget, so a broken
-  /// completion CONTRACT is the only thing this narrows. A re-prompted model
-  /// legitimately might not repeat itself.
+  /// Only `invalidResult` is declared: `work` (a real F) and `noResult` (no
+  /// artifact at all) keep the circuit's own budget, so a broken completion
+  /// CONTRACT is the only thing this narrows. A re-prompted model legitimately
+  /// might not repeat itself.
   ///
-  /// **[kGatingRubric] additionally declares `noResult` — a budget of ONE, so
-  /// only the initial attempt is permitted.** This lane is `sh` running a
-  /// script, and a `noResult` here means the wrapper produced no rc for the
-  /// gate to read. Re-running an unchanged deterministic script cannot change
-  /// that, so the engine's `infra` backoff spends its whole harness-throttle
-  /// ladder — the observed 5 + 15 + 30 minutes — before parking the node at a
-  /// gate, and until that gate is minted the session sits open with nothing for
-  /// the governor's watch to fire on. Exhausting after the first attempt makes
-  /// the gate the FIRST thing an rc-less run produces. The failure CLASS stays
-  /// the engine's to decide, exactly as ratified; only the declared budget
-  /// changes, which the engine's clamp permits because it tightens.
+  /// The DETERMINISTIC `code-validation` lane's own tighter budget moved with
+  /// it to [CodeValidationCapability]: this family is now exclusively the three
+  /// model critics.
   @override
-  SupervisionPolicy supervisionPolicy(StepArgs args) {
-    return switch (_rubricOf(args)) {
-      kGatingRubric => const SupervisionPolicy(
-        byKind: {
-          CapabilityFailureKind.invalidResult: _criticInvalidResultRetry,
-          CapabilityFailureKind.noResult: RetryPolicy(
-            maxRestarts: 1,
-            backoff: Backoff.harnessThrottle,
-            onExhaustion: ExhaustionBehavior.parkAtGate,
-          ),
-        },
-      ),
-      _ => const SupervisionPolicy(
-        byKind: {
-          CapabilityFailureKind.invalidResult: _criticInvalidResultRetry,
-        },
-      ),
-    };
-  }
+  SupervisionPolicy supervisionPolicy(StepArgs args) => const SupervisionPolicy(
+    byKind: {CapabilityFailureKind.invalidResult: _criticInvalidResultRetry},
+  );
 
   /// Stamps THIS incarnation's spawn instant for [rubric] under [workspaceDir]
   /// — the marker [restampVerdictRound] reads as its freshness proof.
@@ -2021,26 +2145,6 @@ class CriticCapability extends ProcessCapability {
       throw StateError(
         'CriticCapability requires the ambient Bead + Workspace '
         '(WorkBead/SessionScope mount them)',
-      );
-    }
-    if (rubric == kGatingRubric) {
-      // The validation runner — a deterministic `sh -c`, NOT an agent.
-      //
-      // The plan is STAMPED TO A FILE the wrapper's child runs, never spliced
-      // into the wrapper itself: see [_gatingPlanRelativePath] for the parse
-      // error that otherwise takes the whole script — log, rc and gate — down
-      // with it. Written synchronously here, while the tree values are in
-      // hand, so the file is durable before the process can be started.
-      _writeGatingPlan(
-        workspaceDir: workspace.workspaceDir,
-        plan: _validationPlan(bead),
-      );
-      return RuntimeConfig(
-        workDir: workspace.workspaceDir,
-        command: 'sh',
-        args: ['-c', _gatingScript()],
-        lifecycle: Lifecycle.oneTurn,
-        deadline: kGatingDeadline,
       );
     }
     // Stamp THIS incarnation before the agent can write its verdict, so the
@@ -2158,29 +2262,11 @@ class CriticCapability extends ProcessCapability {
 
   @override
   StepSignal interpretEvent(RuntimeEvent event) {
-    // The lane is encoded in the event name (`$sessionId/.../$stepId`, and the
-    // step id IS the rubric id) — the only lane signal available to the
-    // ctx-free interpretEvent. The GATING lane `complete`s on ANY terminal exit
-    // (the grade rides result()); the LLM lanes use the standard job mapping (a
-    // clean exit completes, a non-zero exit / death fails).
-    final isGating = event.name.endsWith('/$kGatingRubric');
-    if (isGating) {
-      return switch (event) {
-        Exited() => StepSignal.complete,
-        // The WATCHDOG kill is the lane's other legitimate terminal: the
-        // provider shoots a plan that outran [kGatingDeadline] and reports a
-        // death carrying that exact reason. Completing it lets `result()` grade
-        // the timeout AS a timeout off the armed stamp, instead of failing the
-        // step with the deadline invisible. Matched on the provider's own
-        // wording, so no OTHER death can borrow this arm.
-        Died(:final reason)
-            when reason.startsWith('watchdog: session exceeded its ') &&
-                reason.contains(' deadline and was killed') =>
-          StepSignal.complete,
-        Died() => StepSignal.failed,
-        _ => StepSignal.none,
-      };
-    }
+    // Every lane in this family is an LLM critic now, so the standard job
+    // mapping is the whole rule: a clean exit completes, a non-zero exit or a
+    // death fails. (The deterministic `code-validation` lane's watchdog arm is
+    // GONE with the lane — it is a [ServiceCapability] that bounds its own
+    // plan, so no runtime event ever describes it.)
     return switch (event) {
       Exited(:final exitCode) when exitCode == 0 => StepSignal.complete,
       Exited() || Died() => StepSignal.failed,
@@ -2196,7 +2282,6 @@ class CriticCapability extends ProcessCapability {
     // Read ambient values at ENTRY (while mounted); only the captured values
     // are touched below.
     final rubric = _rubricOf(args);
-    final bead = context.getInheritedSeedOfExactType<Bead>();
     final workspace = context.getInheritedSeedOfExactType<Workspace>();
     if (workspace == null) {
       throw StateError(
@@ -2219,59 +2304,6 @@ class CriticCapability extends ProcessCapability {
     // Resolve the engine-injected circuit round once at entry so every
     // transport for this result carries the same freshness stamp.
     final round = verdictRound(args);
-    if (rubric == kGatingRubric) {
-      // The plan's exit code, captured by the spawn wrapper. Fail-closed: a
-      // missing rc (the plan never ran) grades F — a plan-less bead must NEVER
-      // silently pass. [ClearCritiqueCapability] wipes this file every round,
-      // so an rc found here is guaranteed fresh — no separate stamp needed.
-      final rc = File(p.join(workspaceDir, _critiqueDir, '$kGatingRubric.rc'));
-      final logPath = p.join(workspaceDir, _gatingLogRelativePath);
-      if (!rc.existsSync()) {
-        // A still-armed stamp with no rc is the watchdog terminal
-        // `interpretEvent` admitted: the plan never got to write its rc
-        // because it was killed. Say SO — a timeout must read as a timeout,
-        // not as a plan that mysteriously produced nothing.
-        if (File(
-          p.join(workspaceDir, _gatingDeadlineStampRelativePath),
-        ).existsSync()) {
-          return {
-            'grade': 'F',
-            'transport': 'file',
-            ..._gatingFailureDetails(
-              failure:
-                  'validation plan exceeded the '
-                  '${kGatingDeadline.inMinutes}-minute kGatingDeadline',
-              output: readCapturedOutputLogOrEmpty(logPath),
-            ),
-            kVerdictRoundKey: '$round',
-          };
-        }
-        return {
-          'grade': 'F',
-          'transport': 'fail-closed-default',
-          'rationale': 'no validation-plan rc file — fail-closed default',
-          kVerdictRoundKey: '$round',
-        };
-      }
-      final code = rc.readAsStringSync().trim();
-      if (code == '0') {
-        return {'grade': 'A', 'transport': 'file', kVerdictRoundKey: '$round'};
-      }
-      final exitCode = int.tryParse(code) ?? -1;
-      final diagnostic = bead == null
-          ? null
-          : pathCheckDiagnostic(_validationPlan(bead), exitCode);
-      final suffix = diagnostic == null ? '' : '; $diagnostic';
-      return {
-        'grade': 'F',
-        'transport': 'file',
-        ..._gatingFailureDetails(
-          failure: 'validation plan failed (exit $code)$suffix',
-          output: readCapturedOutputLogOrEmpty(logPath),
-        ),
-        kVerdictRoundKey: '$round',
-      };
-    }
     // The engine's artifact-durability contract withholds completion until a
     // fresh canonical or stray verdict is readable. This second read consumes
     // that same artifact; disappearance between probe and result is a loud
@@ -2594,40 +2626,116 @@ class CodeRouteCapability extends RouteCapability {
         entry.key: _normalizeGrade(entry.value),
     };
 
-    // 1. the gating lane failed (a non-zero Validation Plan / a structurally
-    // broken spec, or a missing gating grade) — a hard block. The reason names
-    // the gating LANE (this route serves both the code and the spec committee,
-    // bead `pow-6ao`), so the parked gate says which gate fired.
-    final failedGates = gating.where((id) => grades[id] == 'F').toList();
-    if (failedGates.isNotEmpty) {
-      final failedRationales = [
-        for (final id in failedGates)
-          if (siblings.resultOf('$parent/$id')['rationale'] case final value?
-              when value.trim().isNotEmpty)
-            value.trim(),
-      ];
-      // The gating lane's DIAGNOSTIC head (the failing file/tool line) leads
-      // the whole reason: the engine persists a head-first prefix of a
-      // `failureReason`, so an operator reading a parked gate must meet the
-      // cause BEFORE the lane name and the log path that explain it. Only the
-      // code-validation lane emits this key, so every other gate's reason is
-      // byte-identical — as is a code-validation failure with no recognized
-      // diagnostic line, whose tail-first rationale still leads.
-      final diagnosticHeads = [
-        for (final id in failedGates)
-          if (siblings.resultOf('$parent/$id')[_gatingDiagnosticHeadKey]
-              case final value? when value.trim().isNotEmpty)
-            value.trim(),
-      ];
-      final lead = diagnosticHeads.isEmpty
-          ? ''
-          : '${diagnosticHeads.join('\n')}\n';
-      final suffix = failedRationales.isEmpty
-          ? ''
-          : ': ${failedRationales.join('; ')}';
+    // 1. THE DELTA GATE. `code-validation` and `declared-tests-present` are
+    // MACHINE-READABLE now: each carries its own decided evidence (a JSON array
+    // of regression names; a JSON array of missing declared paths), and the
+    // route decides on THAT, not on a letter it would have to re-interpret
+    // (`power_station#code-validation-hard-blocks-only-branch-regressions`).
+    // Strict: a lane that is present but whose evidence cannot be decoded is a
+    // fail-closed lane NON-RESULT, never a silent advance.
+    //
+    // A lane that recorded NOTHING AT ALL is not an undecodable payload — it is
+    // the fail-closed MISSING grade the letter rule already gates on, and it
+    // keeps that gate's byte-identical reason.
+    final validationResult = siblings.resultOf('$parent/$kGatingRubric');
+    final _LaneEvidence? validation =
+        gating.contains(kGatingRubric) &&
+            rawGrades.containsKey(kGatingRubric) &&
+            validationResult.isNotEmpty
+        ? _validationEvidence(validationResult)
+        : null;
+    if (validation is _UndecodableEvidence) {
       return Escalate(
-        '$lead${failedGates.join(', ')} failed: hard block$suffix',
+        '$kGatingRubric returned no decodable delta '
+        '(${validation.detail}) — the route has no regression set to gate on. '
+        'Resolve the lane artifact.',
       );
+    }
+    final decodedValidation = validation is _DecodedValidation
+        ? validation
+        : null;
+
+    // A DECLARED test path the branch did not touch stops gating once the
+    // comparison PROVED that exact path already fails at the merge-base: the
+    // declaration policy is untouched
+    // (`power_station#declared-tests-evidence-is-scoped-to-the-path-it-governs`
+    // — an authored path is a promise whatever the base holds), and only
+    // runtime-confirmed pre-existing failure evidence removes a path from the
+    // route's residual hard-block set.
+    final declaredResult = siblings.resultOf('$parent/$kDeclaredTestsRubric');
+    final declaredMissing =
+        gating.contains(kDeclaredTestsRubric) &&
+            rawGrades.containsKey(kDeclaredTestsRubric) &&
+            declaredResult.isNotEmpty
+        ? _declaredMissingEvidence(declaredResult)
+        : null;
+    if (declaredMissing is _UndecodableEvidence) {
+      return Escalate(
+        '$kDeclaredTestsRubric returned no decodable missing-path set '
+        '(${declaredMissing.detail}) — the route has nothing to gate on. '
+        'Resolve the lane artifact.',
+      );
+    }
+    final residualMissing = declaredMissing is _DecodedDeclaredMissing
+        ? _missingAfterPreexisting(
+            missing: declaredMissing.missing,
+            preexisting: decodedValidation?.preexisting ?? const [],
+          )
+        : const <String>[];
+
+    // The gating lanes that actually gate. The two deterministic delta lanes
+    // gate on their EVIDENCE; every other gating lane (the spec committee's
+    // structural check, the docs committee's three) keeps its letter rule
+    // byte-for-byte. The fail-closed property is UNCHANGED throughout: a
+    // missing grade still normalises to `F`, and an `F` a delta lane cannot
+    // explain with evidence still gates.
+    final failedGates = [
+      for (final id in gating)
+        if (grades.containsKey(id))
+          if (switch (id) {
+            kGatingRubric when decodedValidation != null =>
+              grades[id] == 'F' || decodedValidation.regressions.isNotEmpty,
+            // A decided missing set that the comparison PROVED is entirely
+            // pre-existing stops gating; an `F` with NO missing paths at all is
+            // the lane's own fail-closed refusal and still does.
+            kDeclaredTestsRubric
+                when declaredMissing is _DecodedDeclaredMissing =>
+              grades[id] == 'F' &&
+                  (residualMissing.isNotEmpty ||
+                      declaredMissing.missing.isEmpty),
+            _ => grades[id] == 'F',
+          })
+            id,
+    ];
+    if (failedGates.isNotEmpty) {
+      final reasons = <String>[];
+      for (final id in failedGates) {
+        // EXACTLY the regressions, and the full log. Never the pre-existing
+        // names (they are a NOTE, and naming them here is the false-gate prose
+        // this bead retired) and never an unfiltered log tail.
+        if (id == kGatingRubric &&
+            decodedValidation != null &&
+            decodedValidation.regressions.isNotEmpty) {
+          reasons.add(
+            'regressions: ${decodedValidation.regressions.join(', ')}; '
+            'full log: $_gatingLogRelativePath',
+          );
+          continue;
+        }
+        if (id == kDeclaredTestsRubric && residualMissing.isNotEmpty) {
+          reasons.add(
+            'Design-declared test files missing from pinned diff: '
+            '${residualMissing.join(', ')}',
+          );
+          continue;
+        }
+        if (siblings.resultOf('$parent/$id')['rationale'] case final value?
+            when value.trim().isNotEmpty) {
+          reasons.add(value.trim());
+        }
+      }
+      final suffix = reasons.isEmpty ? '' : ': ${reasons.join('; ')}';
+      return Escalate('${failedGates.join(', ')} failed: hard block$suffix');
     }
 
     // 1b. an ARTIFACT fault on a judgement lane — HELD, never graded. The
@@ -2741,6 +2849,135 @@ class CodeRouteCapability extends RouteCapability {
   }
 }
 
+/// One deterministic gating lane's MACHINE-READABLE evidence, as the route
+/// decoded it — a decided set, or a named refusal to decide.
+///
+/// Strict on purpose. The two delta lanes decide on arrays, not letters, so a
+/// payload whose array is absent or malformed leaves the route with nothing to
+/// gate on; inventing an empty set there would silently advance exactly the
+/// round this bead exists to gate, and inventing a full one would reinstate the
+/// false block it exists to end.
+sealed class _LaneEvidence {
+  const _LaneEvidence();
+}
+
+/// The code-validation lane's decided delta.
+final class _DecodedValidation extends _LaneEvidence {
+  const _DecodedValidation({
+    required this.regressions,
+    required this.preexisting,
+  });
+
+  /// Named tests failing on the branch and passing at the merge-base — the
+  /// ONLY failures that gate.
+  final List<String> regressions;
+
+  /// Named tests failing identically on both sides — evidence, never a gate.
+  final List<String> preexisting;
+}
+
+/// The declared-tests lane's decided missing-path set.
+final class _DecodedDeclaredMissing extends _LaneEvidence {
+  const _DecodedDeclaredMissing(this.missing);
+
+  /// Declared test paths absent from the pinned diff.
+  final List<String> missing;
+}
+
+/// The lane's evidence could not be decoded — [detail] names which field and
+/// why, so the held gate is diagnosable from its text alone.
+final class _UndecodableEvidence extends _LaneEvidence {
+  const _UndecodableEvidence(this.detail);
+
+  /// The named decode failure.
+  final String detail;
+}
+
+/// Strictly decodes the code-validation lane's `regressions` + `preexisting`
+/// arrays out of its step result.
+_LaneEvidence _validationEvidence(Map<String, String> result) {
+  final regressions = _decodeStringList(result['regressions']);
+  if (regressions == null) {
+    return const _UndecodableEvidence(
+      'regressions is missing or is not a JSON array of strings',
+    );
+  }
+  final preexisting = _decodeStringList(result['preexisting']);
+  if (preexisting == null) {
+    return const _UndecodableEvidence(
+      'preexisting is missing or is not a JSON array of strings',
+    );
+  }
+  return _DecodedValidation(regressions: regressions, preexisting: preexisting);
+}
+
+/// Strictly decodes the declared-tests lane's `missing` array out of its step
+/// result.
+_LaneEvidence _declaredMissingEvidence(Map<String, String> result) {
+  final missing = _decodeStringList(result['missing']);
+  return missing == null
+      ? const _UndecodableEvidence(
+          'missing is absent or is not a JSON array of strings',
+        )
+      : _DecodedDeclaredMissing(missing);
+}
+
+/// [raw] decoded as a JSON array of strings, or null on ANY deviation —
+/// absent, unparseable, not an array, or an array carrying a non-string.
+List<String>? _decodeStringList(String? raw) {
+  if (raw == null) return null;
+  try {
+    final decoded = jsonDecode(raw);
+    if (decoded is! List) return null;
+    if (decoded.any((entry) => entry is! String)) return null;
+    return decoded.cast<String>().toList(growable: false);
+  } on FormatException {
+    return null;
+  }
+}
+
+/// [missing] minus every declared path a [preexisting] failure PROVES already
+/// fails at the merge-base.
+///
+/// A failing-test name carries its file (`test/x_test.dart 7:5 the case`), so
+/// the path it governs is the prefix ending at `_test.dart` — and only when
+/// the name carries EXACTLY ONE such token, because two would identify no
+/// single file and a guess here would suppress a real gate. The match itself is
+/// the gate's own [_endsWithPath] boundary matcher, in either direction: a
+/// declaration is repo-relative (`packages/p/test/x_test.dart`) where the
+/// runner names its path suite-relative (`test/x_test.dart`), and a boundary
+/// match is what makes those the same file without letting `ax_test.dart`
+/// answer for `x_test.dart`.
+List<String> _missingAfterPreexisting({
+  required List<String> missing,
+  required List<String> preexisting,
+}) {
+  final prefixes = [
+    for (final name in preexisting)
+      if (_failingTestPath(name) case final path?) path,
+  ];
+  if (prefixes.isEmpty) return List.unmodifiable(missing);
+  return List.unmodifiable([
+    for (final declared in missing)
+      if (!prefixes.any(
+        (prefix) =>
+            _endsWithPath(prefix, declared) || _endsWithPath(declared, prefix),
+      ))
+        declared,
+  ]);
+}
+
+/// The UNIQUE `_test.dart` path a failing-test [name] governs, or null when it
+/// names none or more than one.
+String? _failingTestPath(String name) {
+  const marker = '_test.dart';
+  final first = name.indexOf(marker);
+  if (first < 0) return null;
+  if (name.indexOf(marker, first + marker.length) >= 0) return null;
+  final path = name.substring(0, first + marker.length).trim();
+  return path.isEmpty ? null : path;
+}
+
 /// The default code-committee critic-id index of [grade] (A=0 … F=5); a grade
 /// outside `A..F` clamps to F (the fail-closed worst).
 int _gradeIndex(String grade) {
@@ -2762,84 +2999,6 @@ String _validationPlan(Bead bead) {
   if (plan is String && plan.trim().isNotEmpty) return plan.trim();
   return 'false';
 }
-
-/// The FAILED-GATING payload: the diagnostic head the route leads with (when
-/// the plan emitted a recognized line) plus the rationale it appends.
-///
-/// [failure] is the exit CLASS and LEADS the rationale (the ratified
-/// captured-output shape); the log path follows, then the advice-stripped TAIL
-/// — because the fatal line of an ordinary tool is LAST. The head and tail
-/// share the ONE [kRevalidateReasonTailChars] budget, exactly as the revalidate
-/// step spends it. Empty captured output renders `<no output captured>`, which
-/// is itself the diagnosis.
-Map<String, String> _gatingFailureDetails({
-  required String failure,
-  required String output,
-}) {
-  final cleanedOutput = planOutputWithoutPubAdvice(output);
-  final diagnostics = validationDiagnosticLines(cleanedOutput);
-  final head = boundedValidationDiagnosticHead(diagnostics);
-  final tailBudget =
-      kRevalidateReasonTailChars - (head.isEmpty ? 0 : head.length + 2);
-  final tail = landReasonTail(cleanedOutput, tailBudget);
-  return {
-    if (head.isNotEmpty) _gatingDiagnosticHeadKey: head,
-    'rationale':
-        '$failure; full log: $_gatingLogRelativePath: '
-        '${tail.isEmpty ? '<no output captured>' : tail}',
-  };
-}
-
-/// Stamps [plan] into [_gatingPlanRelativePath] under [workspaceDir] — the
-/// child script [_gatingScript]'s one statement runs.
-///
-/// BEST-EFFORT, exactly like [CriticCapability.recordCriticIncarnation] and the
-/// [ClearCritiqueCapability] sweep, and for a stronger reason than either: the
-/// invariant at stake is that **the gating lane always leaves an rc**, and an
-/// unwritten plan file does not dent it. [_gatingScript] carries no condition,
-/// so a child handed a file that is not there exits non-zero with `No such file
-/// or directory` on the log — an F whose rationale NAMES the missing plan, which
-/// is the loud terminal. Throwing here would instead produce the very thing
-/// these receipts exist to eliminate: an artifact-less exit, classified `infra`,
-/// carrying a stack trace where a gate reason belongs.
-///
-/// The offline suite's synthetic workspace dirs take this path, just as they do
-/// for the incarnation marker.
-void _writeGatingPlan({required String workspaceDir, required String plan}) {
-  try {
-    File(p.join(workspaceDir, _gatingPlanRelativePath))
-      ..createSync(recursive: true)
-      ..writeAsStringSync('$plan\n');
-  } on Object {
-    // See the doc comment above: the unconditional wrapper turns a missing
-    // plan file into a named, fail-closed F rather than a lost run.
-  }
-}
-
-/// The `sh -c` script the gating lane runs: ensure the artifact dirs, ARM the
-/// deadline stamp, run the CHILD plan script with its combined output TEED to
-/// the log, capture ITS exit code to the rc file `result()` reads, then disarm
-/// the stamp. The outer `sh` exits clean regardless, so the step always
-/// `complete`s and the route is the single decision point.
-///
-/// **Every statement here is UNCONDITIONAL, and that is the point.** The
-/// wrapper carries no bead text at all — the plan lives in
-/// [_gatingPlanRelativePath], written by [CriticCapability.spawn] — so nothing
-/// a bead can author decides whether the receipts get written. A plan that does
-/// not parse now fails in the child, where it is an ordinary non-zero exit.
-///
-/// The empty log is created BEFORE the stamp is armed, so a stamp always
-/// implies a readable log; the stamp is removed only AFTER the rc lands, so a
-/// surviving stamp always means the plan never finished. The rc line is
-/// unchanged, byte for byte — it is read by more than this lane.
-String _gatingScript() =>
-    'mkdir -p $_critiqueDir $kCriticIncarnationDir; '
-    ': > $_gatingLogRelativePath; '
-    'printf "${kGatingDeadline.inMinutes}m\\n" > '
-    '$_gatingDeadlineStampRelativePath; '
-    'sh $_gatingPlanRelativePath > $_gatingLogRelativePath 2>&1; '
-    'echo \$? > $_critiqueDir/$kGatingRubric.rc; '
-    'rm -f $_gatingDeadlineStampRelativePath';
 
 /// Renders the full work bead into a prompt block (title/description/design/
 /// acceptance/notes) — the load-bearing review input.
