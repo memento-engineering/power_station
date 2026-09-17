@@ -1,4 +1,6 @@
-## Unreleased
+## 0.2.0-dev.3
+
+> Note: This release has breaking changes.
 
 - Breaking: `CiFeedbackProjection` takes `workBd` and `scope` and no longer takes `substation`. Its
   landing-ready `bd update` ran through the grid STATE store runner it correlates sessions against,
@@ -24,6 +26,9 @@
   does not mount keeps resolving through the station; the selected-definition, Git, GitHub and
   mount-gate order is unchanged.
   Migration: replace `arming: AgentArming(build: BuildAgentEnvironment([…]))` with `seatSeeds: [const BuildAgentEnvironment([…]).provider()]` — one `seat.provider()` entry per preference, outermost first.
+
+ - **BREAKING** **REFACTOR**(agent): retire agent arming shim; mount seat provider seeds (#342).
+ - **BREAKING** **FIX**(github): route landing-ready updates to work stores (#344).
 
 ## 0.2.0-dev.2
 
