@@ -16,6 +16,12 @@ const _proxyChildLock = '$_lockRoot/proxy-child.lock';
 const _proxyPid = '$_lockRoot/proxy.pid';
 const _proxyChildPid = '$_lockRoot/proxy-child.pid';
 
+/// A [fixture.WorkspaceProcessCensus] with only the arm under test filled.
+fixture.WorkspaceProcessCensus _census({
+  List<({int pid, String command})> stores = const [],
+  List<int> residents = const [],
+}) => (stores: stores, residents: residents);
+
 void main() {
   test('the state runner drains every spawn it still owes', () async {
     // The fence no process census can supply: a bd client that has not been
@@ -152,6 +158,7 @@ void main() {
       workspacePath: _workspace,
       reappearanceCensus: () async =>
           fail('a recovered delete censuses nothing'),
+      absenceChecks: 5,
     );
 
     expect(deletes, 2);
@@ -237,6 +244,91 @@ void main() {
     expect(fallbacks, 4, reason: 'every non-final attempt counts a fallback');
     expect(waits, everyElement(const Duration(milliseconds: 50)));
     expect(waits, hasLength(4));
+  });
+
+  test('the default absence window is the measured one', () async {
+    // The window is a MEASUREMENT: a 20 Hz stat loop around ten consecutive
+    // deletes of the acceptance workspace saw none come back and every one
+    // stay gone through a 3,000 ms tail, so the default spends 6,000 ms —
+    // twice that — before it believes a delete. A caller that takes the
+    // default takes that bound, and shortening it is the regression this
+    // fixture was rewritten to stop.
+    var deletes = 0;
+    final waits = <Duration>[];
+
+    await fixture.deleteTemporaryWorkspaceWithRetry(
+      delete: () async {
+        deletes++;
+      },
+      stillPresent: () => false,
+      delay: (duration) async => waits.add(duration),
+      onDeleteFallback: () => fail('a workspace that stays gone is no miss'),
+      workspacePath: _workspace,
+      reappearanceCensus: () async => fail('a clean delete censuses nothing'),
+    );
+
+    expect(deletes, 1);
+    expect(waits, hasLength(120));
+    expect(waits, everyElement(const Duration(milliseconds: 50)));
+  });
+
+  test('an empty census clears the delete to run', () {
+    fixture.expectEmptyWorkspaceProcessCensus(
+      _census(),
+      workspacePath: _workspace,
+      phase: 'before delete',
+    );
+  });
+
+  test('a store still holding the workspace refuses by name', () {
+    // The arm the stop fence owns: a Dolt server the delete would race.
+    expect(
+      () => fixture.expectEmptyWorkspaceProcessCensus(
+        _census(
+          stores: [
+            (pid: 68187, command: 'dolt sql-server --config $_lockRoot'),
+          ],
+        ),
+        workspacePath: _workspace,
+        phase: 'before delete',
+      ),
+      throwsA(
+        isA<StateError>().having(
+          (error) => error.message,
+          'message',
+          allOf(
+            contains('before delete'),
+            contains(_workspace),
+            contains('68187'),
+            contains('dolt sql-server'),
+          ),
+        ),
+      ),
+    );
+  });
+
+  test('a resident working under the workspace refuses by name', () {
+    // The arm no window can outlast: a bd client whose cwd is the workspace,
+    // caught on the far side of the absence window, where the phase is the
+    // whole report — the same census reads clean before the delete.
+    expect(
+      () => fixture.expectEmptyWorkspaceProcessCensus(
+        _census(residents: const [68385]),
+        workspacePath: _workspace,
+        phase: 'after absence window',
+      ),
+      throwsA(
+        isA<StateError>().having(
+          (error) => error.message,
+          'message',
+          allOf(
+            contains('after absence window'),
+            contains(_workspace),
+            contains('68385'),
+          ),
+        ),
+      ),
+    );
   });
 
   test('the exit wait polls through pid and lock residue', () async {
