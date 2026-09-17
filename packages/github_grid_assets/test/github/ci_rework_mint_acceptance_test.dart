@@ -382,6 +382,30 @@ String _describeCensus(WorkspaceProcessCensus census) =>
     '[${[for (final s in census.stores) '${s.pid} ${s.command}'].join('; ')}], '
     'workspace residents [${census.residents.join(', ')}]';
 
+/// Refuses unless [census] is empty on BOTH arms, naming [phase] when it is
+/// not.
+///
+/// The delete below is bounded by a WINDOW, and a window only proves a tree
+/// stays gone while nothing is working under it. So the same census is read on
+/// either side of it — before the delete, where residue is a writer the stop
+/// fence did not reach, and after the absence window, where residue is a
+/// client that arrived while the window was running and can re-create the
+/// store the moment the test stops looking. Either one is the leak this
+/// fixture is measured by, and the only useful report of one names the
+/// process: a teardown that deletes around a live writer is how a Dolt server
+/// was abandoned in `/tmp` in the first place.
+void expectEmptyWorkspaceProcessCensus(
+  WorkspaceProcessCensus census, {
+  required String workspacePath,
+  required String phase,
+}) {
+  if (census.stores.isEmpty && census.residents.isEmpty) return;
+  throw StateError(
+    'the workspace $workspacePath was still held $phase: '
+    '${_describeCensus(census)}',
+  );
+}
+
 /// The PID files bd's proxy pair writes while it is serving a store.
 ///
 /// `proxy.pid` names the `db-proxy-child`; `proxy-child.pid` names the `dolt
@@ -625,6 +649,12 @@ Future<void> waitForProxiedStateStoreExit({
 /// so a delete that fails, or a workspace that comes BACK, once the store is
 /// proven gone means the fence missed something, and [onDeleteFallback] counts
 /// every such miss for the case that asserts there are none.
+///
+/// The process census is read on BOTH sides of that delete, because the two
+/// sides answer different questions: before it, whether the stop fence left a
+/// writer behind; after the absence window, whether one arrived while the
+/// window was running — the bd client that rebuilds a proxied store out of an
+/// empty path, which no window can outlast and only a census can name.
 Future<void> _deleteTemporaryWorkspace(
   Directory temporary, {
   required void Function() onDeleteFallback,
@@ -636,15 +666,10 @@ Future<void> _deleteTemporaryWorkspace(
   // working under this tree. A census that is not empty here is a writer the
   // stop above did not reach, and naming it beats deleting around it.
   final preDeleteCensus = await _workspaceProcessCensus(temporary.path);
-  expect(
-    [for (final store in preDeleteCensus.stores) store.command],
-    isEmpty,
-    reason: 'a store process still holds ${temporary.path}',
-  );
-  expect(
-    preDeleteCensus.residents,
-    isEmpty,
-    reason: 'a process still works under ${temporary.path}',
+  expectEmptyWorkspaceProcessCensus(
+    preDeleteCensus,
+    workspacePath: temporary.path,
+    phase: 'before delete',
   );
   await deleteTemporaryWorkspaceWithRetry(
     delete: () async {
@@ -655,6 +680,16 @@ Future<void> _deleteTemporaryWorkspace(
     onDeleteFallback: onDeleteFallback,
     workspacePath: temporary.path,
     reappearanceCensus: () => _workspaceProcessCensus(temporary.path),
+  );
+  // The other side of the window. An absence window that ran clean while a bd
+  // client was working under the path proves only that the client had not got
+  // round to re-creating the store yet — so the tree being gone is believed
+  // only once nothing is left to bring it back.
+  final postDeleteCensus = await _workspaceProcessCensus(temporary.path);
+  expectEmptyWorkspaceProcessCensus(
+    postDeleteCensus,
+    workspacePath: temporary.path,
+    phase: 'after absence window',
   );
 }
 
@@ -669,6 +704,15 @@ Future<void> _deleteTemporaryWorkspace(
 /// [absenceChecks] times in a row, one [between] apart. A workspace that
 /// reappears inside that window is a miss: [onDeleteFallback] counts it and the
 /// next attempt deletes it again.
+///
+/// [absenceChecks] and [between] are a MEASUREMENT, not a guess. A 20 Hz stat
+/// loop over `/tmp` around ten consecutive deletes of this fixture's workspace
+/// saw no workspace come back at all, and every one stay gone through a
+/// 3,000 ms tail past the run that made it; the leak that reached the station
+/// was a workspace present at the count assertion and gone again afterwards,
+/// which is the same tail seen from the wrong side. So the default window is
+/// 6,000 ms — twice the longest clean tail measured — and it is spent only on
+/// a teardown that is already done.
 ///
 /// A [FileSystemException] that leaves the directory gone is a delete another
 /// hand completed, and goes on to the same absence window. One that leaves it
@@ -688,7 +732,7 @@ Future<void> deleteTemporaryWorkspaceWithRetry({
   required String workspacePath,
   required Future<WorkspaceProcessCensus> Function() reappearanceCensus,
   int attempts = 5,
-  int absenceChecks = 5,
+  int absenceChecks = 120,
   Duration between = const Duration(milliseconds: 50),
 }) async {
   for (var attempt = 1; attempt <= attempts; attempt++) {
