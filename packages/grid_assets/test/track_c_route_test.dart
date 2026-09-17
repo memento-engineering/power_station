@@ -6,12 +6,25 @@
 //   (D/E) → Escalate · a single E → Escalate · a single rationale-less D →
 //   Escalate · a single D WITH a rationale → Advance carrying the finding ·
 //   else → Advance (bead `pow-bhm`; policy Nico-ratified 2026-07-18).
-// Fail-closed: a missing/forged grade is F, so it can NEVER advance. Zero I/O.
+// Fail-closed: a missing/forged grade is F, so it can NEVER advance.
+//
+// The LIVE join is the second group: in a real workspace a JUDGEMENT lane's
+// grade comes from the artifact the lane itself persisted
+// (`.grid/critique/<lane>.json`), never from a second channel — the fix for a
+// lane that wrote grade B and routed as `a critic returned F` seven seconds
+// later. Only the gating lanes (which persist no verdict JSON) and the offline
+// posture (no worktree, so no artifacts) read the recorded step result.
+import 'dart:convert';
+import 'dart:io';
+
 import 'package:grid_assets/grid_assets.dart';
 import 'package:grid_engine/grid_engine.dart';
+import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
 import 'support/asset_fakes.dart';
+
+const String _parent = 'tg-1/review';
 
 final String _critics = kCommitteeRubrics.join(',');
 
@@ -25,7 +38,7 @@ final String _critics = kCommitteeRubrics.join(',');
   Map<String, String> rationales = const {},
   Map<String, String> diagnosticHeads = const {},
 }) {
-  const parent = 'tg-1/review';
+  const parent = _parent;
   final effectiveGrades = {kDeclaredTestsRubric: 'A', ...grades};
   return (
     context: FakeTreeContext(
@@ -362,4 +375,293 @@ void main() {
       );
     });
   });
+
+  group('the LIVE join reads the lane\'s OWN persisted verdict', () {
+    late Directory workspace;
+
+    setUp(() {
+      workspace = Directory.systemTemp.createTempSync('route_verdict_');
+    });
+
+    tearDown(() {
+      if (workspace.existsSync()) workspace.deleteSync(recursive: true);
+    });
+
+    test('a persisted B overrides a conflicting recorded F — the false-F '
+        'incident', () async {
+      // The live shape, exactly: the lane WROTE grade B, and the recorded step
+      // result the route used to read says F. One source, one value — the
+      // artifact wins, and the round advances instead of being reworked.
+      _persistVerdict(workspace, 'spec-adherence', grade: 'A');
+      _persistVerdict(workspace, 'test-coverage', grade: 'A');
+      _persistVerdict(
+        workspace,
+        'regression-risk',
+        grade: 'B',
+        rationale:
+            'shared review-base path touched, contracts preserved, 65 tests '
+            'pass',
+      );
+
+      final out = await _liveRoute(
+        workspace,
+        recorded: const {
+          'code-validation': 'A',
+          'spec-adherence': 'A',
+          'regression-risk': 'F',
+          'test-coverage': 'A',
+        },
+      );
+
+      expect(out, isA<Advance>());
+      final payload = (out as Advance).payload!;
+      expect(payload['grades'], contains('regression-risk=B'));
+      expect(payload['rule'], 'all-approve');
+    });
+
+    test('a PRIOR-round artifact HOLDS, naming the round fence and the '
+        'path', () async {
+      _persistVerdict(workspace, 'spec-adherence', grade: 'A');
+      _persistVerdict(workspace, 'test-coverage', grade: 'A');
+      // The file the previous round left on the reused worktree. A4's nodePath
+      // fence cannot see it (a rework does not move the node path), so the
+      // round pin is the one that fires.
+      _persistVerdict(workspace, 'regression-risk', grade: 'A', round: 78);
+
+      final out = await _liveRoute(
+        workspace,
+        recorded: const {
+          'code-validation': 'A',
+          'spec-adherence': 'A',
+          'regression-risk': 'A',
+          'test-coverage': 'A',
+        },
+      );
+
+      expect(out, isA<Escalate>());
+      final reason = (out as Escalate).reason;
+      expect(reason, contains('regression-risk'));
+      expect(reason, contains(kVerdictRoundPinMismatch));
+      expect(reason, contains(_verdictPath(workspace, 'regression-risk')));
+      expect(
+        reason,
+        isNot(contains('a critic returned F')),
+        reason: 'a refused artifact is a HOLD, never a critic ruling',
+      );
+    });
+
+    test('an INVALID-shape artifact HOLDS, naming the shape check and the '
+        'path', () async {
+      _persistVerdict(workspace, 'spec-adherence', grade: 'A');
+      _persistVerdict(workspace, 'test-coverage', grade: 'A');
+      _writeVerdictJson(workspace, 'regression-risk', {
+        'grade': 'B',
+        // no rationale — the strict decoder's shape check refuses it.
+        'nodePath': '$_parent/regression-risk',
+        kVerdictRoundKey: _liveRound,
+      });
+
+      final out = await _liveRoute(
+        workspace,
+        recorded: const {
+          'code-validation': 'A',
+          'spec-adherence': 'A',
+          'regression-risk': 'A',
+          'test-coverage': 'A',
+        },
+      );
+
+      expect(out, isA<Escalate>());
+      final reason = (out as Escalate).reason;
+      expect(reason, contains(kVerdictShapeCheckFailed));
+      expect(reason, contains('rationale must be a non-empty string'));
+      expect(reason, contains(_verdictPath(workspace, 'regression-risk')));
+      expect(reason, isNot(contains('a critic returned F')));
+    });
+
+    test('an ABSENT artifact HOLDS on the canonical path, not on F', () async {
+      _persistVerdict(workspace, 'spec-adherence', grade: 'A');
+      _persistVerdict(workspace, 'test-coverage', grade: 'A');
+
+      final out = await _liveRoute(
+        workspace,
+        recorded: const {
+          'code-validation': 'A',
+          'spec-adherence': 'A',
+          'regression-risk': 'A',
+          'test-coverage': 'A',
+        },
+      );
+
+      expect(out, isA<Escalate>());
+      final reason = (out as Escalate).reason;
+      expect(reason, contains(kVerdictArtifactAbsent));
+      expect(reason, contains(_verdictPath(workspace, 'regression-risk')));
+      expect(reason, isNot(contains('a critic returned F')));
+    });
+
+    test(
+      'only a WRITTEN F routes as a critic F — and names its source',
+      () async {
+        _persistVerdict(workspace, 'spec-adherence', grade: 'A');
+        _persistVerdict(workspace, 'test-coverage', grade: 'A');
+        _persistVerdict(
+          workspace,
+          'regression-risk',
+          grade: 'F',
+          rationale: 'the migration drops rows on the null branch',
+        );
+
+        final out = await _liveRoute(
+          workspace,
+          recorded: const {
+            'code-validation': 'A',
+            'spec-adherence': 'A',
+            // The recorded channel says B; the ARTIFACT says F, and the artifact
+            // is the one that rules.
+            'regression-risk': 'B',
+            'test-coverage': 'A',
+          },
+        );
+
+        expect(out, isA<Escalate>());
+        final reason = (out as Escalate).reason;
+        expect(reason, contains('a critic returned F (regression-risk)'));
+        expect(reason, contains(_verdictPath(workspace, 'regression-risk')));
+      },
+    );
+
+    test('a single persisted D carries the ARTIFACT\'s rationale', () async {
+      _persistVerdict(workspace, 'spec-adherence', grade: 'A');
+      _persistVerdict(workspace, 'regression-risk', grade: 'A');
+      _persistVerdict(
+        workspace,
+        'test-coverage',
+        grade: 'D',
+        rationale: 'the new escalation arm has no test',
+      );
+
+      final out = await _liveRoute(
+        workspace,
+        recorded: const {
+          'code-validation': 'A',
+          'spec-adherence': 'A',
+          'regression-risk': 'A',
+          'test-coverage': 'A',
+        },
+      );
+
+      expect(out, isA<Advance>());
+      final payload = (out as Advance).payload!;
+      expect(payload['rule'], 'single-finding-advance');
+      expect(payload['fix_in_flight'], 'test-coverage=D');
+      expect(
+        payload['fix_in_flight_finding'],
+        'the new escalation arm has no test',
+      );
+    });
+
+    test('a GATING lane still joins off its own step result — it writes no '
+        'verdict JSON', () async {
+      _persistVerdict(workspace, 'spec-adherence', grade: 'A');
+      _persistVerdict(workspace, 'regression-risk', grade: 'A');
+      _persistVerdict(workspace, 'test-coverage', grade: 'A');
+
+      final out = await _liveRoute(
+        workspace,
+        recorded: const {
+          'code-validation': 'F',
+          'spec-adherence': 'A',
+          'regression-risk': 'A',
+          'test-coverage': 'A',
+        },
+        rationales: const {
+          'code-validation': 'validation plan failed (exit 1)',
+        },
+      );
+
+      expect(out, isA<Escalate>());
+      expect(
+        (out as Escalate).reason,
+        'code-validation failed: hard block: validation plan failed (exit 1)',
+      );
+    });
+  });
+}
+
+/// The circuit round the live probes pin every artifact to.
+const int _liveRound = 79;
+
+/// [lane]'s canonical verdict path under [workspace].
+String _verdictPath(Directory workspace, String lane) =>
+    p.join(workspace.path, '.grid', 'critique', '$lane.json');
+
+/// Writes [lane]'s verdict JSON verbatim — the shape-violation probe's writer.
+void _writeVerdictJson(
+  Directory workspace,
+  String lane,
+  Map<String, Object?> json,
+) => File(_verdictPath(workspace, lane))
+  ..createSync(recursive: true)
+  ..writeAsStringSync(jsonEncode(json));
+
+/// Persists [lane]'s verdict exactly as a critic does — both freshness stamps,
+/// pinned to [round] (defaulting to the live probes' current round).
+void _persistVerdict(
+  Directory workspace,
+  String lane, {
+  required String grade,
+  String rationale = 'the lane said so',
+  int round = _liveRound,
+}) => _writeVerdictJson(workspace, lane, {
+  'grade': grade,
+  'rationale': rationale,
+  'nodePath': '$_parent/$lane',
+  kVerdictRoundKey: round,
+});
+
+/// Runs the route in the LIVE posture: a REAL [workspace] directory mounted as
+/// the ambient [Workspace], so every non-gating lane joins through its own
+/// artifact while [recorded] supplies only the step-result channel the gating
+/// lanes (and the old, conflicting read) use.
+Future<RouteVerdict> _liveRoute(
+  Directory workspace, {
+  required Map<String, String> recorded,
+  Map<String, String> rationales = const {},
+}) {
+  final grades = {kDeclaredTestsRubric: 'A', ...recorded};
+  final context = FakeTreeContext(
+    values: {
+      Workspace: Workspace(
+        workspaceDir: workspace.path,
+        branch: 'grid/tg-1',
+        baseBranch: 'main',
+      ),
+      SiblingView: SiblingView(
+        cursor: {
+          for (final id in grades.keys)
+            '$_parent/$id': const NodeCursor(state: StepState.complete),
+        },
+        results: {
+          for (final entry in grades.entries)
+            '$_parent/${entry.key}': {
+              'grade': entry.value,
+              if (rationales[entry.key] case final rationale?)
+                'rationale': rationale,
+            },
+        },
+      ),
+    },
+  );
+  return const CodeRouteCapability().route(
+    context,
+    stepArgs(
+      '$_parent/route',
+      params: {
+        'critics': _critics,
+        'gating': kCodeGatingRubrics.join(','),
+        'grid.round': '$_liveRound',
+      },
+    ),
+  );
 }

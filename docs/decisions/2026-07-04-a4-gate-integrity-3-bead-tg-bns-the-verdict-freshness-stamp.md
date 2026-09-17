@@ -12,7 +12,8 @@ register:
   obsoletes: []
   updates: []
   obsoleted-by: null
-  updated-by: []
+  updated-by:
+    - review-route-uses-persisted-verdict-artifacts
   bead: null
   legacy-id: "A4"
 ---
