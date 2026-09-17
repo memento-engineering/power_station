@@ -1,4 +1,6 @@
-## Unreleased
+## 0.7.0-dev.3
+
+> Note: This release has breaking changes.
 
 - Breaking: the readiness route JOINS on a published verdict instead of routing over
   whatever the sibling view happened to hold. `decideReadiness` gains a third arm,
@@ -39,6 +41,7 @@
   forgets to thread it fails to compile rather than silently pointing its seats at the wrong
   executable; a blank string selects the old `executableName` rendering. The station IDENTITY line
   still names the executable, and the withheld-verbs pointer is unchanged.
+  Migration: construct `PrimeCommand(runnerInvocation: <the invocation the station composed>)` — a station built through `space_station_assets`' `buildRunner(runnerInvocation:)` threads it at that seam (space-cbc); nothing else changes.
 
 - Breaking: approval receipts are cut to `filing:v2:sha256:`. The digest is taken over the bead's
   own filing fields (`id`, `title`, `description`, `design`, `acceptance_criteria`, `notes`,
@@ -56,6 +59,7 @@
   reading rather than a digest comparison, so it cannot fire on an ordinary edit to a field the
   basis hashes. The one-time re-approval sweep over standing receipts is the governor's operational
   work at the boot checklist, outside this package.
+  Migration: after adopting, run the approve verb once per stamped bead (the one-time re-approval sweep, lunar_station-apm); no dual-basis path exists, so a v1 receipt refuses as `approval: stale` until re-stamped.
 
 - Added: the `mount` verb — the OFFLINE explainer for why one bead will not mount, vended as
   `MountCommand` over `MountExplanationService` / `MountExplanationContract`. It emits ten ordered
@@ -84,6 +88,18 @@
   "why will this bead not mount" question, and the governor-work sweep's hand-authored dependency,
   session, defer and cap query choreography is replaced by that one invocation. Both skills add
   `mount` to their authored `teaches` claim.
+
+ - **FIX**(agent): surface usage API errors in failure reasons (#340).
+ - **FIX**(discovery): window line-qualified code anchors (#338).
+ - **FIX**(committee): recognize pattern-source test citations (#326).
+ - **FIX**(discovery): stop phantom legacy citation holds (#335).
+ - **FIX**(committee): pin review diff to workspace base sha (#318).
+ - **FEAT**(agent): add the protective relay asset (#336).
+ - **FEAT**(filing): vend a mount explainer verb (#333).
+ - **BREAKING** **REFACTOR**(agent): retire agent arming shim; mount seat provider seeds (#342).
+ - **BREAKING** **FIX**(spec-review): wait for readiness verdict publication (#343).
+ - **BREAKING** **FIX**(seat): render prime with the runner invocation (#339).
+ - **BREAKING** **FEAT**(filing): cut approval revisions to v2 (#337).
 
 ## 0.7.0-dev.2
 
