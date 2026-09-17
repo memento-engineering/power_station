@@ -1803,6 +1803,12 @@ class GitSourceControl implements SourceControl {
 /// `pow-kzx`) — a station whose runner verb is not [kDefaultOverlayRunner], or
 /// which knows its real grid-home root, passes them here.
 ///
+/// [validationHost] overrides the HOST IDENTITY the merge-base validation cache
+/// keys on (absent ⇒ `Platform.localHostname`). A base run is only reusable on
+/// the host that produced it — a shared-runner p99 tail is a property of the
+/// machine, not the commit — so the identity is a cache KEY, and a suite pins
+/// it to keep the tuple deterministic.
+///
 /// [overlaySourceRef] overrides the provenance ref stamped into each
 /// materialized overlay file. Null resolves this package's own station overlay
 /// ref once while the code registry is composed, then threads that stable value
@@ -1853,6 +1859,7 @@ DefaultCapabilityRegistry buildCodeRegistry({
   CommitteeSelectionStore? committeeSelectionStore,
   ReleaseCommandInvoker? releaseCommands,
   String? overlaySourceRef,
+  String? validationHost,
   Map<String, String> overlayArgs = const {},
   AgentSessionAdapterRegistry sessionAdapters = kBuiltinAgentSessionAdapters,
   AgentSteerSource steers = const NoAgentSteerSource(),
@@ -1922,6 +1929,22 @@ DefaultCapabilityRegistry buildCodeRegistry({
   // Fake instead, and nothing in the offline path can reach a real publish.
   final releaseInvoker =
       releaseCommands ?? const InProcessReleaseCommandInvoker();
+  // The registry's ONE shell seam, resolved once: the discovery gather's
+  // decision index and the two merge-base comparison lanes ride the SAME
+  // instance, so a suite that injects a fake cannot silence one and leave the
+  // other reaching a real `sh`.
+  final resolvedShellRunner = shellRunner ?? const SystemShellRunner();
+  // ONE merge-base comparison for the whole composition: `code-validation` and
+  // the landing circuit's `revalidate` step ask the same runner, over the same
+  // git seam, against the same per-(base sha, plan digest, host) base cache —
+  // so a post-rebase re-validation of an unchanged base pays for it once.
+  final validationComparison = ValidationDeltaRunner(
+    gitRunner: gitRunner,
+    shellRunner: resolvedShellRunner,
+    cacheHome: decisionGridHome,
+    hostIdentity: validationHost,
+    deadline: kGatingDeadline,
+  );
   Future<({bool ok, String output})> classify(RuntimeConfig config) async {
     final run = await selectionInference.run(config);
     return (ok: run.ok, output: run.output);
@@ -1974,7 +1997,7 @@ DefaultCapabilityRegistry buildCodeRegistry({
         decisions:
             discoveryDecisions ??
             commandDecisionIndexSource(
-              shellRunner ?? const SystemShellRunner(),
+              resolvedShellRunner,
               runnerInvocation: overlayArgs['runner'],
               gridHome: decisionGridHome,
             ),
@@ -2043,7 +2066,14 @@ DefaultCapabilityRegistry buildCodeRegistry({
         gitRunner: gitRunner,
         inference: oneShotInference,
       ),
+      // The three MODEL critics. The deterministic `code-validation` lane is
+      // no longer one of them — it is a ServiceCapability below.
       'critic': CriticCapability(rubrics: rubricSource),
+      // The DETERMINISTIC validation lane and the post-rebase revalidate step
+      // share ONE merge-base comparison runner, built from the registry's
+      // EXISTING git and shell seams (A9(5)) — no second git or process seam,
+      // and one base-run cache for both.
+      kGatingRubric: CodeValidationCapability(comparison: validationComparison),
       // The declared-tests gate reads the PINNED BASE's file list to tell a
       // `Test:` run reference from a promise (bead `pow-0jc`), so it shares the
       // registry's one git seam ([gitRunner]) — the same fake `rebase` and
@@ -2080,7 +2110,7 @@ DefaultCapabilityRegistry buildCodeRegistry({
         assetRegistry: resolvedAssetRegistry,
         assetRosterOverride: assetRosterOverride,
       ),
-      'revalidate': RevalidateCapability(runner: shellRunner),
+      'revalidate': RevalidateCapability(comparison: validationComparison),
       kClearCritiqueStep: ClearCritiqueCapability(clearer: critiqueDirClearer),
       // The diff-pinning pre-critic step (bead `pow-6wo`) shares the `code`
       // registry's git seam ([gitRunner]) — the SAME recording fake `rebase`

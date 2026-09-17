@@ -344,6 +344,7 @@ export 'src/code/respec.dart';
 export 'src/code/route_failure.dart';
 export 'src/code/spec_contract_shadow.dart';
 export 'src/code/specify.dart';
+export 'src/code/validation.dart';
 export 'src/compute/bounded_use.dart';
 export 'src/compute/compute_command.dart';
 export 'src/compute/compute_commands.dart';

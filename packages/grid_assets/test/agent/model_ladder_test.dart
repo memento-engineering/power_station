@@ -302,32 +302,6 @@ void main() {
         );
       });
     }
-
-    test('the gating lane is a RUNNER, not an agent — it names no model', () {
-      // A REAL workspace: this lane stamps the bead's Validation Plan to a
-      // file at spawn, so the plan — not the wrapper argv — is where the
-      // command lives.
-      final dir = Directory.systemTemp.createTempSync('ladder-gating-');
-      addTearDown(() => dir.deleteSync(recursive: true));
-      final withPlan = bead('tg-1').copyWith(
-        metadata: const {'validation_plan': 'dart analyze && dart test'},
-      );
-      final cfg = const CriticCapability().spawn(
-        _ctx(withPlan, const AgentConfig(), workspaceDir: dir.path),
-        stepArgs(
-          'tg-1/review/$kGatingRubric',
-          params: {'rubric': kGatingRubric},
-        ),
-      );
-      expect(cfg.command, 'sh');
-      expect(cfg.args, isNot(contains('--model')));
-      expect(
-        File(
-          p.join(dir.path, '.grid/critique/$kGatingRubric.plan.sh'),
-        ).readAsStringSync().trim(),
-        'dart analyze && dart test',
-      );
-    });
   });
 
   group('the ROLE MAP is GONE (ADR-0006 D5)', () {

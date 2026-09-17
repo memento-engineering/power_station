@@ -284,7 +284,9 @@ void main() {
         addTearDown(() => tmp.deleteSync(recursive: true));
         _provisionCheckout(tmp.path, 'tg-1');
         _provisionCheckout(tmp.path, 'tg-2');
-        // The four tg-1 committee critic step names, in declaration order.
+        // The tg-1 committee critic step names a PROCESS is started for, in
+        // declaration order — the three MODEL critics. `code-validation` is a
+        // ServiceCapability: same frontier, no spawn.
         final tg1Critics = [
           for (final n in kProcessCriticNodes) 'tgdog-1/tg-1/$n',
         ];
@@ -316,7 +318,10 @@ void main() {
             // real process (`tg-rm5`).
             registry: buildCodeRegistry(
               rubrics: (id) => '($id rubric bands)',
-              gitRunner: f.git,
+              // Wrapped so the deterministic `code-validation` lane's
+              // merge-base comparison resolves a base and a scratch worktree
+              // without touching disk; every land op still rides `f.git`.
+              gitRunner: ValidationAwareGitRunner(f.git),
               shellRunner: shell,
               // A no-op clearer (gate-integrity #3): offline — never a real
               // filesystem touch.
@@ -442,7 +447,7 @@ void main() {
         // own signal rather than a single pump.
         await settle(
           () =>
-              f.provider.started.length >= 6 &&
+              f.provider.started.length >= 5 &&
               f.provider.stopped.contains('tgdog-1/tg-1/agent'),
         );
 
@@ -451,7 +456,7 @@ void main() {
         // PERSISTED.
         expect(
           f.provider.started,
-          hasLength(6),
+          hasLength(5),
           reason: 'the four committee critics fanned out (the swap)',
         );
         for (final critic in tg1Critics) {
@@ -566,7 +571,7 @@ void main() {
         );
         expect(
           f.provider.started,
-          hasLength(6),
+          hasLength(5),
           reason: 'the route does not spawn a process',
         );
 
@@ -643,7 +648,7 @@ void main() {
         // through the fakes; the WorkBead branch still persists.
         expect(
           f.provider.started,
-          hasLength(6),
+          hasLength(5),
           reason: 'land does not spawn a process',
         );
         expect(
