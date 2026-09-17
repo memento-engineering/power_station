@@ -14,7 +14,8 @@ register:
   obsoletes: []
   updates: ["revalidate-cfe-diagnostics-lead-before-tail"]
   obsoleted-by: null
-  updated-by: []
+  updated-by:
+    - code-validation-enforces-its-own-deadline-as-a-service-capability
   bead: pow-cbii
   legacy-id: null
 ---
