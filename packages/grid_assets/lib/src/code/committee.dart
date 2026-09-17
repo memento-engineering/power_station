@@ -1102,6 +1102,22 @@ const String kVerdictRefinementInstruction =
 /// (and in the `critic.verdictRoundRestamped` flare) instead of being erased.
 const String kVerdictModelRoundKey = 'model_round';
 
+/// A4's FOREIGN-NODE fence refused the artifact: its `nodePath` stamp names a
+/// step other than the one reading it (a stray or mis-keyed write).
+const String kVerdictNodePathMismatch = 'nodePath mismatch';
+
+/// A15(5) alt-A's ROUND fence refused the artifact: its `round` stamp names an
+/// EARLIER round than the one reading it (a file that survived a rework on the
+/// reused worktree).
+const String kVerdictRoundPinMismatch = 'round-pin mismatch';
+
+/// The strict decoder refused the artifact's SHAPE — the detail that follows is
+/// the parser's own.
+const String kVerdictShapeCheckFailed = 'shape check failed';
+
+/// No current-round artifact exists at the canonical path at all.
+const String kVerdictArtifactAbsent = 'no current-round verdict artifact';
+
 /// The directory holding each critic lane's INCARNATION MARKER — deliberately
 /// OUTSIDE `.grid/critique/`, which [sweepStaleCritique] empties at every round
 /// start. A marker that survives an unrelated round is harmless: only a
@@ -2418,10 +2434,25 @@ class CriticCapability extends ProcessCapability {
   }
 }
 
-/// The route/aggregate step — a [ServiceCapability] that reads its sibling
-/// critics' grades through the AMBIENT [SiblingView] (mounted by
-/// `SessionScope`; read with the effect verb — D-5, never a subscription/
-/// re-query) and applies the deterministic matrix (C3, asset policy):
+/// The route/aggregate step — a [ServiceCapability] that joins its sibling
+/// critics' grades and applies the deterministic matrix (C3, asset policy).
+///
+/// **The grade SOURCE (decision
+/// `review-route-uses-persisted-verdict-artifacts`).** A JUDGEMENT lane's
+/// grade is read from the artifact the lane itself persisted —
+/// `.grid/critique/<rubric>.json`, through [_reviewRouteVerdictOnDisk], the
+/// same [_verdictFromFile] parser and the same `nodePath` + `round` fences the
+/// lane wrote with — so the route and the lane are ONE value. A DETERMINISTIC
+/// gating lane writes no verdict JSON (`code-validation` leaves an rc; the
+/// docs committee's three are pure checks), so its grade rides its own step
+/// result through the AMBIENT [SiblingView] (mounted by `SessionScope`; read
+/// with the effect verb — D-5, never a subscription/re-query); so does every
+/// lane in the offline posture, where there is no real worktree and therefore
+/// no artifact to read. The live incident this closes: `regression-risk`
+/// persisted grade `B`, and the route escalated `a critic returned F` seven
+/// seconds later off a different channel.
+///
+/// The matrix:
 ///
 ///  - a GATING lane at grade `F` (a non-zero Validation Plan) → [Escalate]
 ///    (hard block). `gating` is a lane SET read as a CSV, so a committee whose
@@ -2456,8 +2487,15 @@ class CriticCapability extends ProcessCapability {
 /// the keep/kill export self-contained without changing the matrix. Escalations
 /// are UNCHANGED (their reason string already names the rule).
 ///
-/// Fail-closed: an unread / missing sibling grade is treated as `F`, so a forged
-/// or absent grade can NEVER advance (the mutation-tested property).
+/// Fail-closed, in two shapes. A missing grade on a lane joined through its
+/// step result is treated as `F`, so a forged or absent grade can NEVER advance
+/// (the mutation-tested property). A judgement lane whose own artifact is
+/// absent, malformed, unstamped, foreign-node or PRIOR-round is HELD instead:
+/// the route has no grade for it and refuses to invent one, so the gate reads
+/// as the artifact fault it is — naming the lane, the failed check and the
+/// exact path — rather than as a critic's `F`. Only a grade a critic actually
+/// wrote routes as `a critic returned F`, and that escalation NAMES the file it
+/// was read from.
 ///
 /// GENERIC over its `critics`/`gating` params (bead `pow-6ao`): the SAME
 /// capability joins the spec-readiness committee (`specify.dart`'s
@@ -2474,11 +2512,14 @@ class CodeRouteCapability extends RouteCapability {
 
   @override
   Future<RouteVerdict> route(TreeContext context, StepArgs args) async {
-    // Read the ambient sibling view at ENTRY (while mounted); the matrix below
-    // is pure over the captured values.
+    // Read the ambient values at ENTRY (while mounted); the matrix below is
+    // pure over the captured values. The [Workspace] joins the sibling view
+    // here because the LIVE join reads each judgement lane's own artifact off
+    // disk (see the class doc's grade-SOURCE contract).
     final siblings =
         context.getInheritedSeedOfExactType<SiblingView>() ??
         const SiblingView();
+    final workspace = context.getInheritedSeedOfExactType<Workspace>();
     final parent = parentPath(args.nodePath);
     // The GATING lane SET: the docs committee's gate is THREE deterministic
     // checks, so `gating` is a CSV exactly like `critics`. A single-id value
@@ -2494,11 +2535,60 @@ class CodeRouteCapability extends RouteCapability {
         .where((s) => s.isNotEmpty)
         .toList();
 
-    // Read each lane's RAW grade once (null/empty ⇒ missing), then the
-    // fail-closed grade used by the block rules (missing ⇒ F).
-    final rawGrades = <String, String?>{
-      for (final id in criticIds) id: siblings.resultOf('$parent/$id')['grade'],
-    };
+    final dir = workspace?.workspaceDir;
+    final live = dir != null && dir.isNotEmpty && Directory(dir).existsSync();
+    // The round is the ARTIFACT fence's input; offline there are no artifacts
+    // to fence, so the resolve (and its missing-key diagnostic) is live-only.
+    final round = live ? verdictRound(args) : 0;
+
+    // THE JOIN. Read each lane's RAW grade once (null/empty ⇒ missing), its
+    // rationale, and — for a lane read off disk — the artifact path that
+    // SOURCED the grade.
+    //
+    // A DETERMINISTIC gating lane writes no verdict JSON (`code-validation`
+    // leaves an rc; the docs committee's three are pure checks), so its grade
+    // rides its own step result, and a missing one still fail-closes to a hard
+    // block below. Every JUDGEMENT lane in a live workspace joins ONLY through
+    // its own current-round artifact, through the SAME single reader and the
+    // SAME two fences the lane wrote with. Offline (no real worktree) there are
+    // no artifacts at all, so every lane joins off the sibling view — the same
+    // no-op posture the ledger and critique I/O take.
+    final rawGrades = <String, String?>{};
+    final rationales = <String, String>{};
+    final sources = <String, String>{};
+    final unread = <String>[];
+    for (final id in criticIds) {
+      if (!live || gating.contains(id)) {
+        final recorded = siblings.resultOf('$parent/$id');
+        rawGrades[id] = recorded['grade'];
+        rationales[id] = (recorded['rationale'] ?? '').trim();
+        continue;
+      }
+      switch (_reviewRouteVerdictOnDisk(
+        workspaceDir: dir,
+        rubric: id,
+        nodePath: '$parent/$id',
+        round: round,
+      )) {
+        case _VerdictFileAccepted(:final path, :final payload):
+          rawGrades[id] = payload['grade'];
+          rationales[id] = (payload['rationale'] ?? '').trim();
+          sources[id] = path;
+        case _VerdictFileInvalid(:final path, :final detail):
+          unread.add('$id — $kVerdictShapeCheckFailed at $path: $detail');
+        case _VerdictFileUnstamped(:final path):
+          unread.add(
+            '$id — missing the freshness stamp (nodePath/round) at $path',
+          );
+        case _VerdictFileRejected(:final path, :final detail):
+          unread.add('$id — $detail at $path');
+        case _VerdictFileMissing():
+          unread.add(
+            '$id — $kVerdictArtifactAbsent at '
+            '${p.join(dir, _critiqueDir, '$id.json')}',
+          );
+      }
+    }
     final grades = <String, String>{
       for (final entry in rawGrades.entries)
         entry.key: _normalizeGrade(entry.value),
@@ -2540,6 +2630,24 @@ class CodeRouteCapability extends RouteCapability {
       );
     }
 
+    // 1b. an ARTIFACT fault on a judgement lane — HELD, never graded. The
+    // reader refused (or never found) the lane's own verdict file, so this
+    // route has no grade for it and will not invent one: defaulting to the
+    // fail-closed `F` here is exactly the false gate this arm exists to end
+    // (a lane whose critique JSON says `B` escalating as "a critic returned
+    // F"). The reason names the LANE, the failed CHECK, and the exact PATH, so
+    // a disagreement between the lane's artifact and the gate is diagnosable
+    // from the gate text alone. Still fail-closed — nothing advances — but the
+    // fault reads as what it is: an artifact to resolve, not a critic ruling.
+    if (unread.isNotEmpty) {
+      return Escalate(
+        'held: the review route could not read a current-round verdict '
+        'artifact for ${unread.length == 1 ? 'a lane' : '${unread.length} '
+                  'lanes'} (${unread.join('; ')}). No grade was routed for '
+        '${unread.length == 1 ? 'it' : 'them'} — resolve the artifact.',
+      );
+    }
+
     // The grade SPREAD across the PRESENT lanes. Missing grades are IGNORED
     // here (they are already caught by the fail-closed gating/F block rules).
     // PROVENANCE ONLY (FT-2) — no arm decides on it any more.
@@ -2562,7 +2670,19 @@ class CodeRouteCapability extends RouteCapability {
         if (!gating.contains(entry.key) && entry.value == 'F') entry.key,
     ];
     if (failed.isNotEmpty) {
-      return Escalate('a critic returned F (${failed.join(', ')}) — rework');
+      // NAME the source (AC-2 of the false-F fix): the grade came from THIS
+      // file, so a future disagreement between the gate and the lane's own
+      // artifact is settled by reading the path the gate printed.
+      final readFrom = [
+        for (final id in failed)
+          if (sources[id] case final path?) path,
+      ];
+      final source = readFrom.isEmpty
+          ? ''
+          : '; grade read from ${readFrom.join(', ')}';
+      return Escalate(
+        'a critic returned F (${failed.join(', ')}) — rework$source',
+      );
     }
 
     // 3. the ACTION set — every non-gating lane at D or E. TWO or more gate;
@@ -2594,9 +2714,7 @@ class CodeRouteCapability extends RouteCapability {
     // A carried finding is the RATIONALE, verbatim. A single D that says NOTHING
     // carries nothing, so it cannot advance: LOUD, the same posture the spec
     // route's `no-rationale` arm takes (A14(6)).
-    final carried = single == null
-        ? ''
-        : (siblings.resultOf('$parent/$single')['rationale'] ?? '').trim();
+    final carried = single == null ? '' : (rationales[single] ?? '');
     if (single != null && carried.isEmpty) {
       return Escalate(
         '$single returned D but NO rationale — there is nothing to carry into '
@@ -2885,7 +3003,11 @@ sealed class _VerdictFileRead {
 }
 
 final class _VerdictFileAccepted extends _VerdictFileRead {
-  const _VerdictFileAccepted(this.payload);
+  const _VerdictFileAccepted(this.path, this.payload);
+
+  /// The artifact this payload was decoded from — the route's grade SOURCE,
+  /// named in the gate text so a disagreement is diagnosable from it alone.
+  final String path;
 
   final Map<String, String> payload;
 }
@@ -2895,7 +3017,16 @@ final class _VerdictFileMissing extends _VerdictFileRead {
 }
 
 final class _VerdictFileRejected extends _VerdictFileRead {
-  const _VerdictFileRejected();
+  const _VerdictFileRejected(this.path, this.detail);
+
+  /// The refused artifact.
+  final String path;
+
+  /// WHICH freshness fence refused it — [kVerdictNodePathMismatch] (A4's
+  /// foreign-node fence) or [kVerdictRoundPinMismatch] (A15(5) alt-A's round
+  /// fence). A reader that only learns "rejected" cannot tell a stray write
+  /// from a surviving prior round.
+  final String detail;
 }
 
 final class _VerdictFileInvalid extends _VerdictFileRead {
@@ -3052,12 +3183,12 @@ _VerdictFileRead _verdictFromFile(
       );
     }
     if (stampedNodePath != expectedNodePath) {
-      return const _VerdictFileRejected(); // a FOREIGN node's.
+      return _VerdictFileRejected(verdict.path, kVerdictNodePathMismatch);
     }
     if (fileRound != expectedRound) {
-      return const _VerdictFileRejected(); // a STALE round's.
+      return _VerdictFileRejected(verdict.path, kVerdictRoundPinMismatch);
     }
-    return _VerdictFileAccepted({
+    return _VerdictFileAccepted(verdict.path, {
       'grade': grade,
       'transport': 'file',
       'rationale': rationale,
@@ -3133,6 +3264,38 @@ Map<String, String>? currentVerdictOnDisk({
       rubric: rubric,
     );
 
+/// The REVIEW ROUTE's view of [rubric]'s persisted verdict under
+/// [workspaceDir] — the same single parser ([_verdictFromFile]), the same two
+/// freshness fences, and the same round the lane itself wrote with, so the
+/// route and the lane can never hold two different values for one grade.
+///
+/// It differs from [currentVerdictOnDisk] in ONE way, and that difference is
+/// the whole point: a PRESENT canonical artifact is the answer, accepted or
+/// REFUSED. [currentVerdictOnDisk] flattens every refusal to `null` and lets
+/// the caller's fallback chain continue — which for the route meant a
+/// fail-closed `F` while a freshly written critique JSON sat on disk (the live
+/// incident this reader exists to end: `regression-risk` graded `B`, routed as
+/// `a critic returned F` seven seconds later). Only an ABSENT canonical
+/// artifact widens to the [_strayVerdict] belt (gate-integrity #4), because
+/// there is then nothing to be superseded.
+///
+/// The caller renders a refusal as a HELD gate naming the failed check and the
+/// path; it never converts one into a grade.
+_VerdictFileRead _reviewRouteVerdictOnDisk({
+  required String workspaceDir,
+  required String rubric,
+  required String nodePath,
+  required int round,
+}) {
+  final read = _verdictFromFile(
+    File(p.join(workspaceDir, _critiqueDir, '$rubric.json')),
+    expectedNodePath: nodePath,
+    expectedRound: round,
+  );
+  if (read is! _VerdictFileMissing) return read;
+  return _strayVerdict(workspaceDir, rubric, nodePath, round);
+}
+
 /// A round-fresh verdict a critic wrote to a STRAY
 /// `.../.grid/critique/<rubric>.json` somewhere OTHER than the canonical
 /// workspace-root path — the read-side belt for gate-integrity #4 (bead
@@ -3175,7 +3338,10 @@ _VerdictFileRead _strayVerdict(
     );
     switch (read) {
       case _VerdictFileAccepted(:final payload):
-        return _VerdictFileAccepted({...payload, 'transport': 'file-stray'});
+        return _VerdictFileAccepted(file.path, {
+          ...payload,
+          'transport': 'file-stray',
+        });
       case _VerdictFileUnstamped():
       case _VerdictFileInvalid():
         return read;

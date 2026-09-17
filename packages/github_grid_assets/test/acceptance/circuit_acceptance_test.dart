@@ -367,7 +367,10 @@ Future<void> _markStarted(Fakes f, String name) async {
 /// Plants the REAL critique artifacts an all-pass round would have written —
 /// the gating lane's `.rc` (`CriticCapability.result`, `committee.dart`: an
 /// exit-code text, `'0'` ⇒ grade A) and each LLM critic's verdict JSON
-/// (`grade`/`nodePath`/`round`, `verdictJsonTemplate`'s shape) — into the REAL
+/// (`grade`/`rationale`/`nodePath`/`round` — `verdictJsonTemplate`'s WHOLE
+/// shape, rationale included, because the route now joins each judgement lane
+/// through this very artifact and the strict decoder refuses an incomplete
+/// one) — into the REAL
 /// git checkout BEFORE this drive emits the matching `Exited`. The molecule
 /// model computes `result()` SYNCHRONOUSLY off the real workspace the instant
 /// the exit lands (no state-observation round-trip the retired flat model
@@ -386,6 +389,7 @@ void _plantAllPassVerdicts(String workspaceDir, String workBeadId) {
     File('${dir.path}/$rubric.json').writeAsStringSync(
       jsonEncode({
         'grade': 'A',
+        'rationale': 'the $rubric lane found nothing to fix',
         'nodePath': '$workBeadId/review/$rubric',
         'round': 0,
       }),
