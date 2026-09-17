@@ -42,6 +42,12 @@ void main() {
     await pumpEventQueue();
     expect(finished, isTrue);
     expect(drained, isTrue, reason: 'the drain waits the spawn out');
+
+    // And it RETURNS against an IDLE runner. The station teardown reaches this
+    // fence after the runtime is already down, so the common case owes no
+    // spawn at all — a drain that only ever completed behind an outstanding
+    // permit would hang exactly the teardown it was built for.
+    await fixture.drainStateBdRunner(runner);
   });
 
   test('the lsof census reads p records and drops this process', () {
