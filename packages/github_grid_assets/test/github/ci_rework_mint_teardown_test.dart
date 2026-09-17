@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:test/test.dart';
@@ -16,6 +17,33 @@ const _proxyPid = '$_lockRoot/proxy.pid';
 const _proxyChildPid = '$_lockRoot/proxy-child.pid';
 
 void main() {
+  test('the state runner drains every spawn it still owes', () async {
+    // The fence no process census can supply: a bd client that has not been
+    // spawned yet is in no process table, and it is a CLIENT — not a stray
+    // server — that rebuilds a proxied store after a delete. One permit turns
+    // the runner's FIFO semaphore into proof that it owes no more spawns.
+    final runner = fixture.seededStateBdRunner(_workspace);
+    expect(runner.workspaceRoot, _workspace);
+
+    final inFlight = Completer<void>();
+    var finished = false;
+    final spawn = runner.guarded(() async {
+      await inFlight.future;
+      finished = true;
+    });
+
+    var drained = false;
+    unawaited(fixture.drainStateBdRunner(runner).then((_) => drained = true));
+    await pumpEventQueue();
+    expect(drained, isFalse, reason: 'a spawn is still outstanding');
+
+    inFlight.complete();
+    await spawn;
+    await pumpEventQueue();
+    expect(finished, isTrue);
+    expect(drained, isTrue, reason: 'the drain waits the spawn out');
+  });
+
   test('the lsof census reads p records and drops this process', () {
     // `-Fp` output as lsof actually writes it: one tagged field per line, a
     // file-descriptor record between the process records, and a warning row
@@ -116,6 +144,8 @@ void main() {
       delay: (duration) async => waits.add(duration),
       onDeleteFallback: () => fallbacks++,
       workspacePath: _workspace,
+      reappearanceCensus: () async =>
+          fail('a recovered delete censuses nothing'),
     );
 
     expect(deletes, 2);
@@ -128,6 +158,19 @@ void main() {
   test('a workspace that keeps coming back refuses loudly', () async {
     var deletes = 0;
     var fallbacks = 0;
+    var censuses = 0;
+
+    // A workspace no number of deletions removes is a live writer, and the
+    // only useful report of one names it. The two arms carry DIFFERENT pids on
+    // purpose: a store the argv census caught, and a resident only a cwd
+    // names.
+    Future<fixture.WorkspaceProcessCensus> census() async {
+      censuses++;
+      return (
+        stores: [(pid: 68187, command: 'dolt sql-server --config $_lockRoot')],
+        residents: const [68385],
+      );
+    }
 
     await expectLater(
       fixture.deleteTemporaryWorkspaceWithRetry(
@@ -138,18 +181,24 @@ void main() {
         delay: (_) async {},
         onDeleteFallback: () => fallbacks++,
         workspacePath: _workspace,
+        reappearanceCensus: census,
       ),
       throwsA(
         isA<StateError>().having(
           (error) => error.message,
           'message',
-          contains(_workspace),
+          allOf(contains(_workspace), contains('68187'), contains('68385')),
         ),
       ),
     );
 
     expect(deletes, 5);
     expect(fallbacks, 5, reason: 'every reappearance counts, the last too');
+    expect(
+      censuses,
+      1,
+      reason: 'the census is taken once, at the final reappearance',
+    );
   });
 
   test('the last delete attempt rethrows the original failure', () async {
@@ -172,6 +221,8 @@ void main() {
         delay: (duration) async => waits.add(duration),
         onDeleteFallback: () => fallbacks++,
         workspacePath: _workspace,
+        reappearanceCensus: () async =>
+            fail('a delete that never succeeded censuses nothing'),
       ),
       throwsA(same(failure)),
     );

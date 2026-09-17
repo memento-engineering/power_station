@@ -191,6 +191,43 @@ Future<void> _initializeStateStore(String stateRoot) async {
   await _runBd(stateRoot, const ['list', '--json']);
 }
 
+/// The ONE `bd` runner every state write in a case goes through, held to a
+/// single concurrency permit so the teardown can prove it IDLE.
+///
+/// What re-creates this fixture's workspace after a delete that already
+/// reported success is not a stray server — it is a bd CLIENT. Measured
+/// against bd 1.1.0: a `bd` command run in a proxied-server workspace whose
+/// `.beads/dolt` has been removed rebuilds the whole chain and spawns a fresh
+/// proxy pair, and it does so under EVERY documented suppression —
+/// `BEADS_DOLT_AUTO_START=0`, `BEADS_DOLT_AUTO_START=false`, and
+/// `dolt.auto-start: false` in `.beads/config.yaml` alike (all four arms:
+/// directory back, two store pids, exit 0). Proxied mode simply does not
+/// consult them. So the capability cannot be taken away; the CLIENTS have to
+/// be gone.
+///
+/// The census below cannot do that on its own, because a command that has not
+/// been spawned yet is in no process table. Two things make it possible
+/// instead. This runner is the ONE state writer in the case — injected as
+/// `assembleStationWork`'s `stateBdOverride`, which otherwise builds a second
+/// `ProcessBdRunner` over the same store that the test never holds and
+/// therefore can never wait on. And one permit makes [drainStateBdRunner] a
+/// fence: the semaphore hands permits on in FIFO order, so acquiring it once
+/// is proof that every spawn this runner had queued or in flight has
+/// finished.
+ProcessBdRunner seededStateBdRunner(String workspaceRoot) =>
+    ProcessBdRunner(workspaceRoot: workspaceRoot, maxConcurrency: 1);
+
+/// Returns once [stateBd] has no `bd` spawn queued or in flight.
+///
+/// The station teardown awaits this AFTER the runtime is down and before the
+/// process fence starts counting, so the fence censuses a settled table rather
+/// than one a shutting-down sync loop is still adding to. A spawn that is
+/// merely FORKED is not yet in `ps` under its workspace, which is exactly the
+/// arrival the SIGKILL fence used to miss and the absence window used to
+/// outlast by a couple of hundred milliseconds.
+Future<void> drainStateBdRunner(ProcessBdRunner stateBd) =>
+    stateBd.guarded(() async {});
+
 /// Every harness-owned STORE process still running out of [tempPath].
 ///
 /// Matched on the process's own `--config` / `--root` arguments rather than on
@@ -210,7 +247,13 @@ Future<List<({int pid, String command})>> _harnessStoreProcesses(
   final result = await Process.run('ps', ['-axo', 'pid=,command=']);
   expect(result.exitCode, 0, reason: 'ps census failed: ${result.stderr}');
 
-  final resolvedTemp = Directory(tempPath).resolveSymbolicLinksSync();
+  // A census taken after a delete asks about a path that may be gone; an
+  // absolute path answers the same question without throwing over the error
+  // the caller is trying to report.
+  final directory = Directory(tempPath);
+  final resolvedTemp = directory.existsSync()
+      ? directory.resolveSymbolicLinksSync()
+      : p.absolute(tempPath);
   final tempPrefix = '$resolvedTemp${Platform.pathSeparator}';
   final row = RegExp(r'^\s*(\d+)\s+(.*)$');
   final pathArgument = RegExp(
@@ -303,6 +346,41 @@ List<int> parseLsofPids(String output, {required int selfPid}) => [
 /// [workspaceResidents] against the live process table.
 Future<List<int>> _workspaceResidents(String tempPath) =>
     workspaceResidents(tempPath, selfPid: pid, runProcess: Process.run);
+
+/// One account of everything the harness can still find working under a
+/// workspace: the STORE processes named by their own `--config`/`--root`, and
+/// the PIDs whose working directory is inside it.
+///
+/// Two arms because neither alone is complete — a Dolt server names its data
+/// dir and carries no useful cwd, a detached bd child names nothing and
+/// carries only a cwd — and because a teardown that reports residue owes the
+/// reader which kind it found.
+typedef WorkspaceProcessCensus = ({
+  List<({int pid, String command})> stores,
+  List<int> residents,
+});
+
+/// [WorkspaceProcessCensus] against the live process table.
+///
+/// The ONE census both the kill fence and the pre-delete gate read, so the set
+/// the teardown signals is exactly the set it then refuses to delete around.
+Future<WorkspaceProcessCensus> _workspaceProcessCensus(String tempPath) async =>
+    (
+      stores: await _harnessStoreProcesses(tempPath),
+      residents: await _workspaceResidents(tempPath),
+    );
+
+/// Every PID [census] names, from either arm.
+Set<int> _censusPids(WorkspaceProcessCensus census) => {
+  for (final store in census.stores) store.pid,
+  ...census.residents,
+};
+
+/// [census] as a line a failure can carry.
+String _describeCensus(WorkspaceProcessCensus census) =>
+    'store processes '
+    '[${[for (final s in census.stores) '${s.pid} ${s.command}'].join('; ')}], '
+    'workspace residents [${census.residents.join(', ')}]';
 
 /// The PID files bd's proxy pair writes while it is serving a store.
 ///
@@ -400,24 +478,24 @@ Future<Set<int>> _stopProxiedStateStore(String tempPath) async {
     tempPath,
     readPidFile: _readPidFileIfPresent,
   );
-  var survivors = await _harnessStoreProcesses(tempPath);
+  // bd's own record is signalled FIRST, before any census: a forked child is in
+  // these files a whole exec before it is recognisable in `ps`.
+  for (final target in named) {
+    Process.killPid(target, ProcessSignal.sigkill);
+  }
+  var census = await _workspaceProcessCensus(tempPath);
   for (var round = 0; round < 40; round++) {
-    final residents = await _workspaceResidents(tempPath);
-    if (survivors.isEmpty && residents.isEmpty) break;
-    for (final target in {
-      ...named,
-      for (final survivor in survivors) survivor.pid,
-      ...residents,
-    }) {
+    if (census.stores.isEmpty && census.residents.isEmpty) break;
+    for (final target in {...named, ..._censusPids(census)}) {
       named.add(target);
       Process.killPid(target, ProcessSignal.sigkill);
     }
     await Future<void>.delayed(const Duration(milliseconds: 50));
-    survivors = await _harnessStoreProcesses(tempPath);
+    census = await _workspaceProcessCensus(tempPath);
   }
 
   expect(
-    [for (final survivor in survivors) survivor.command],
+    [for (final survivor in census.stores) survivor.command],
     isEmpty,
     reason: 'harness-owned store processes survived under $tempPath',
   );
@@ -481,8 +559,7 @@ Future<Set<int>> _livePids(Set<int> pids) async {
 Future<Set<int>> _reapStoreResidue(String tempPath, Set<int> named) async {
   final alive = <int>{
     ...await _livePids(named),
-    for (final survivor in await _harnessStoreProcesses(tempPath)) survivor.pid,
-    ...await _workspaceResidents(tempPath),
+    ..._censusPids(await _workspaceProcessCensus(tempPath)),
   };
   for (final target in alive) {
     Process.killPid(target, ProcessSignal.sigkill);
@@ -554,6 +631,21 @@ Future<void> _deleteTemporaryWorkspace(
 }) async {
   if (!temporary.existsSync()) return;
   await _stopAndAwaitProxiedStateStore(temporary.path);
+  // The one state a recursive delete cannot race, re-read AFTER the fence
+  // rather than inferred from it: nothing the harness can account for is still
+  // working under this tree. A census that is not empty here is a writer the
+  // stop above did not reach, and naming it beats deleting around it.
+  final preDeleteCensus = await _workspaceProcessCensus(temporary.path);
+  expect(
+    [for (final store in preDeleteCensus.stores) store.command],
+    isEmpty,
+    reason: 'a store process still holds ${temporary.path}',
+  );
+  expect(
+    preDeleteCensus.residents,
+    isEmpty,
+    reason: 'a process still works under ${temporary.path}',
+  );
   await deleteTemporaryWorkspaceWithRetry(
     delete: () async {
       await temporary.delete(recursive: true);
@@ -562,6 +654,7 @@ Future<void> _deleteTemporaryWorkspace(
     delay: (duration) => Future<void>.delayed(duration),
     onDeleteFallback: onDeleteFallback,
     workspacePath: temporary.path,
+    reappearanceCensus: () => _workspaceProcessCensus(temporary.path),
   );
 }
 
@@ -583,14 +676,17 @@ Future<void> _deleteTemporaryWorkspace(
 /// and another try. The final attempt rethrows, so the error the teardown
 /// reports is the original object and stack — never a summary of it; a
 /// workspace still coming back on the final attempt raises a [StateError]
-/// naming it, because a directory that survives [attempts] deletions is a live
-/// writer no retry count is going to outlast.
+/// naming it — and a FRESH [reappearanceCensus], taken at the moment of the
+/// last reappearance — because a directory that survives [attempts] deletions
+/// is a live writer no retry count is going to outlast, and the only useful
+/// report of one is the one that says which process it was.
 Future<void> deleteTemporaryWorkspaceWithRetry({
   required Future<void> Function() delete,
   required bool Function() stillPresent,
   required Future<void> Function(Duration) delay,
   required void Function() onDeleteFallback,
   required String workspacePath,
+  required Future<WorkspaceProcessCensus> Function() reappearanceCensus,
   int attempts = 5,
   int absenceChecks = 5,
   Duration between = const Duration(milliseconds: 50),
@@ -619,7 +715,7 @@ Future<void> deleteTemporaryWorkspaceWithRetry({
     if (attempt == attempts) {
       throw StateError(
         'the temporary workspace $workspacePath was re-created after '
-        '$attempts deletions',
+        '$attempts deletions; ${_describeCensus(await reappearanceCensus())}',
       );
     }
   }
@@ -752,7 +848,7 @@ void main() {
       });
       await _seedStore(gridRoot: gridRoot, workRoot: workRoot);
       final stateStore = GridStateStore.forGridRoot(gridRoot);
-      final stateBd = ProcessBdRunner(workspaceRoot: stateStore.runtimeDir);
+      final stateBd = seededStateBdRunner(stateStore.runtimeDir);
       final transport = _RecordingTransport();
       final registry = RecordingCapabilityRegistry(circuits: const {});
       final runtime = await assembleStationWork(
@@ -768,6 +864,12 @@ void main() {
         resolver: CircuitResolver(_leafCircuit),
         dryRun: false,
         preferSql: false,
+        // The SAME runner the projection and the session helpers use, so the
+        // case has exactly ONE state writer and the teardown can drain it.
+        // Left to itself the assembly builds a second `ProcessBdRunner` over
+        // this store, and a late spawn from THAT one is a bd client nothing in
+        // the teardown holds a reference to.
+        stateBdOverride: BdCliService(stateBd),
         providerOverride: DryRunProvider(),
         gitOverride: buildDryStationGitService(),
         syncFloorInterval: const Duration(milliseconds: 20),
@@ -833,6 +935,11 @@ void main() {
         for (final store in stores) {
           await store.close();
         }
+        // Last, because `shutdown` cancels the sync loop's TIMERS but does not
+        // await the `bd` spawns already on their way out of it. Until this
+        // returns, the workspace teardown registered above would be counting
+        // processes against a store that is still being read.
+        await drainStateBdRunner(stateBd);
       });
       await _writeStationLock(gridRoot, control.url, 'feedback-token');
       final projection = CiFeedbackProjection(
@@ -924,7 +1031,7 @@ void main() {
       });
       await _seedStore(gridRoot: gridRoot, workRoot: workRoot);
       final stateStore = GridStateStore.forGridRoot(gridRoot);
-      final stateBd = ProcessBdRunner(workspaceRoot: stateStore.runtimeDir);
+      final stateBd = seededStateBdRunner(stateStore.runtimeDir);
       final transport = _RecordingTransport();
       final registry = RecordingCapabilityRegistry(circuits: const {});
       final runtime = await assembleStationWork(
@@ -940,6 +1047,12 @@ void main() {
         resolver: CircuitResolver(_leafCircuit),
         dryRun: false,
         preferSql: false,
+        // The SAME runner the projection and the session helpers use, so the
+        // case has exactly ONE state writer and the teardown can drain it.
+        // Left to itself the assembly builds a second `ProcessBdRunner` over
+        // this store, and a late spawn from THAT one is a bd client nothing in
+        // the teardown holds a reference to.
+        stateBdOverride: BdCliService(stateBd),
         providerOverride: DryRunProvider(),
         gitOverride: buildDryStationGitService(),
         syncFloorInterval: const Duration(milliseconds: 20),
@@ -1005,6 +1118,11 @@ void main() {
         for (final store in stores) {
           await store.close();
         }
+        // Last, because `shutdown` cancels the sync loop's TIMERS but does not
+        // await the `bd` spawns already on their way out of it. Until this
+        // returns, the workspace teardown registered above would be counting
+        // processes against a store that is still being read.
+        await drainStateBdRunner(stateBd);
       });
       await _writeStationLock(gridRoot, control.url, 'feedback-token');
       final projection = CiFeedbackProjection(
