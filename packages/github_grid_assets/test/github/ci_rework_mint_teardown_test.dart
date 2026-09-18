@@ -56,6 +56,31 @@ void main() {
     await fixture.drainStateBdRunner(runner);
   });
 
+  test('a closed state runner never spawns again', () async {
+    // What the drain alone cannot promise: the engine may still OWE a write
+    // after it returns. Closing waits out every spawn queued before it, then
+    // keeps the one permit, so a write queued AFTER it parks instead of
+    // spawning a bd client into a workspace the teardown is removing.
+    final runner = fixture.seededStateBdRunner(_workspace);
+    final inFlight = Completer<void>();
+    final spawn = runner.guarded(() => inFlight.future);
+
+    var closed = false;
+    unawaited(fixture.closeStateBdRunner(runner).then((_) => closed = true));
+    await pumpEventQueue();
+    expect(closed, isFalse, reason: 'a spawn is still outstanding');
+
+    inFlight.complete();
+    await spawn;
+    await pumpEventQueue();
+    expect(closed, isTrue, reason: 'the close waits the spawn out');
+
+    var lateSpawnRan = false;
+    unawaited(runner.guarded(() async => lateSpawnRan = true));
+    await pumpEventQueue();
+    expect(lateSpawnRan, isFalse, reason: 'the permit is never handed back');
+  });
+
   test('the lsof census reads p records and drops this process', () {
     // `-Fp` output as lsof actually writes it: one tagged field per line, a
     // file-descriptor record between the process records, and a warning row

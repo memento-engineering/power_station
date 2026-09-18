@@ -228,6 +228,31 @@ ProcessBdRunner seededStateBdRunner(String workspaceRoot) =>
 Future<void> drainStateBdRunner(ProcessBdRunner stateBd) =>
     stateBd.guarded(() async {});
 
+/// Returns once [stateBd] owes no spawn, and KEEPS its one permit so it never
+/// spawns again.
+///
+/// [drainStateBdRunner] proves the runner owed nothing at the moment it ran;
+/// the engine can still owe it more afterwards. A session scope unmounted
+/// mid-mint retires its abandoned session with one last state write, from an
+/// unawaited continuation the test holds no handle to — measured here as a
+/// `bd update` spawned between the drain and the stop fence, SIGKILLed by that
+/// fence as a workspace resident, and failing an otherwise clean case with the
+/// engine's `BdCommandFailed: bd exited -9`. Holding the permit closes that
+/// window instead of racing it: everything queued before this call has
+/// finished, and everything queued after it parks behind a permit that is
+/// never handed back — a write against a store the teardown is about to
+/// delete, which is exactly the write that must not run.
+Future<void> closeStateBdRunner(ProcessBdRunner stateBd) {
+  final held = Completer<void>();
+  unawaited(
+    stateBd.guarded(() {
+      held.complete();
+      return Completer<void>().future;
+    }),
+  );
+  return held.future;
+}
+
 /// Every harness-owned STORE process still running out of [tempPath].
 ///
 /// Matched on the process's own `--config` / `--root` arguments rather than on
@@ -1111,6 +1136,10 @@ void main() {
         // returns, the workspace teardown registered above would be counting
         // processes against a store that is still being read.
         await drainStateBdRunner(stateBd);
+        // Then CLOSED: the engine may still queue one more state write — an
+        // abandoned mint's retirement — from a continuation nothing here can
+        // await, and it must park rather than spawn into the fence below.
+        await closeStateBdRunner(stateBd);
       });
       await _writeStationLock(gridRoot, control.url, 'feedback-token');
       final projection = CiFeedbackProjection(
@@ -1299,6 +1328,10 @@ void main() {
         // returns, the workspace teardown registered above would be counting
         // processes against a store that is still being read.
         await drainStateBdRunner(stateBd);
+        // Then CLOSED: the engine may still queue one more state write — an
+        // abandoned mint's retirement — from a continuation nothing here can
+        // await, and it must park rather than spawn into the fence below.
+        await closeStateBdRunner(stateBd);
       });
       await _writeStationLock(gridRoot, control.url, 'feedback-token');
       final projection = CiFeedbackProjection(
