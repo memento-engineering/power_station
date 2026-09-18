@@ -765,16 +765,135 @@ Future<void> deleteTemporaryWorkspaceWithRetry({
   }
 }
 
+/// Every `ci-rework-mint-` entry in the system temp directory right now.
+List<FileSystemEntity> _temporaryWorkspaces() => [
+  for (final entry in Directory.systemTemp.listSync(followLinks: false))
+    if (p.basename(entry.path).startsWith('ci-rework-mint-')) entry,
+];
+
 /// The `ci-rework-mint-` workspaces on disk right now.
 ///
 /// The leak this fixture is measured by: a teardown that reported success
 /// while a proxy re-created the store under it left one of these behind, and
-/// nothing in the test noticed. Counted before the workspace is made and again
-/// after it is removed, it does.
-int _temporaryWorkspaceCount() => Directory.systemTemp
-    .listSync(followLinks: false)
-    .where((entry) => p.basename(entry.path).startsWith('ci-rework-mint-'))
-    .length;
+/// nothing in the test noticed. Counted before the workspace is made and polled
+/// after it is removed by [expectNoDurableTemporaryWorkspaceLeak], it does.
+int _temporaryWorkspaceCount() => _temporaryWorkspaces().length;
+
+/// Every `ci-rework-mint-` workspace on disk, as the evidence a durable leak
+/// carries: its absolute path, its UTC modification time, and a sorted
+/// recursive listing of what is inside it.
+///
+/// The listing is the part that tells a leak apart. The residue measured on
+/// this host was an empty `grid/.grid/.beads/dolt` skeleton re-created after
+/// the delete, and the mtime places it against the run that made it. Links are
+/// not followed. A workspace that vanishes while it is being described keeps
+/// its path and says so, because this runs only on the way to a failure, and
+/// a diagnosis that throws would replace the error it exists to explain.
+String _describeTemporaryWorkspaces() {
+  final workspaces = _temporaryWorkspaces()
+    ..sort((a, b) => a.path.compareTo(b.path));
+  if (workspaces.isEmpty) return 'no ci-rework-mint- workspace on disk';
+  return [for (final entry in workspaces) _describeWorkspace(entry)].join('\n');
+}
+
+/// One workspace for [_describeTemporaryWorkspaces].
+String _describeWorkspace(FileSystemEntity entry) {
+  final path = entry.absolute.path;
+  final stat = entry.statSync();
+  if (stat.type == FileSystemEntityType.notFound) {
+    return '$path (vanished during diagnosis)';
+  }
+  final modified = stat.modified.toUtc().toIso8601String();
+  final List<String> listing;
+  try {
+    listing = [
+      for (final child in Directory(
+        path,
+      ).listSync(recursive: true, followLinks: false))
+        child is Directory
+            ? '${p.relative(child.path, from: path)}/'
+            : p.relative(child.path, from: path),
+    ]..sort();
+  } on FileSystemException catch (error) {
+    return Directory(path).existsSync()
+        ? '$path (modified $modified; listing failed: $error)'
+        : '$path (modified $modified; vanished during diagnosis)';
+  }
+  return [
+    '$path (modified $modified)',
+    for (final relative in listing) '  $relative',
+  ].join('\n');
+}
+
+/// Refuses unless the `ci-rework-mint-` workspace count is back at
+/// [baselineCount] and the workspace's [processCensus] is empty — allowing a
+/// residue that CLEARS inside a bounded window, and naming one that does not.
+///
+/// The count is global and instantaneous, and the station measured it red
+/// with nothing durable behind it: a run whose workspace had stayed gone
+/// through the whole delete-absence window read one workspace over its
+/// baseline, and `/tmp` held no workspace of that run's afterwards. A single
+/// read cannot tell that residue from a leak. So [currentCount] and
+/// [processCensus] are sampled together, once immediately — a clean first
+/// sample returns without waiting, logging, or describing — and otherwise up
+/// to [checks] more times, [between] apart.
+///
+/// The first clean resample is a TRANSIENT: [reportTransient] carries one
+/// line naming the recovered count and the first sample's census, and the
+/// teardown passes. A final sample still above the baseline, or with either
+/// census arm occupied, is a DURABLE leak: a [StateError] carries the
+/// baseline and final counts, the final census, and [describeWorkspaces] —
+/// which is read on that branch alone, because it walks every workspace on
+/// disk.
+///
+/// [checks] and [between] are the same MEASUREMENT the delete-absence window
+/// uses: a 20 Hz stat loop over `/tmp` around ten consecutive deletes of this
+/// fixture's workspace saw every one stay gone through a 3,000 ms tail, so
+/// 120 checks 50 ms apart spend twice that before a residue is called
+/// durable. [delay] is injected so the bound can be proved without spending
+/// it.
+Future<void> expectNoDurableTemporaryWorkspaceLeak({
+  required int baselineCount,
+  required int Function() currentCount,
+  required Future<WorkspaceProcessCensus> Function() processCensus,
+  required String Function() describeWorkspaces,
+  required Future<void> Function(Duration) delay,
+  required void Function(String) reportTransient,
+  int checks = 120,
+  Duration between = const Duration(milliseconds: 50),
+}) async {
+  bool clean(int count, WorkspaceProcessCensus census) =>
+      count <= baselineCount &&
+      census.stores.isEmpty &&
+      census.residents.isEmpty;
+
+  final firstCount = currentCount();
+  final firstCensus = await processCensus();
+  if (clean(firstCount, firstCensus)) return;
+
+  var count = firstCount;
+  var census = firstCensus;
+  for (var check = 1; check <= checks; check++) {
+    await delay(between);
+    count = currentCount();
+    census = await processCensus();
+    if (clean(count, census)) {
+      reportTransient(
+        'ci-rework-mint teardown: transient workspace residue cleared after '
+        '$check of $checks checks ${between.inMilliseconds} ms apart; the '
+        'workspace count recovered to $count from $firstCount (baseline '
+        '$baselineCount); the first sample held ${_describeCensus(firstCensus)}',
+      );
+      return;
+    }
+  }
+  throw StateError(
+    'a ci-rework-mint- workspace leak outlasted $checks checks '
+    '${between.inMilliseconds} ms apart: $count workspaces on disk against a '
+    'baseline of $baselineCount; ${_describeCensus(census)}; on disk:\n'
+    '${describeWorkspaces()}',
+  );
+}
 
 Future<void> _seedStore({
   required String gridRoot,
@@ -882,12 +1001,20 @@ void main() {
       // Registered the moment the directory exists — and therefore run LAST,
       // after the station teardown below — so a failure anywhere in the boot
       // still fences the proxied store before the tree is removed. The two
-      // closing assertions are the teardown's own gate: a workspace left on
-      // disk is the leak, and a delete that needed a retry is a write the
-      // fence should have stopped before it started deleting.
+      // closing checks are the teardown's own gate: a workspace still on disk
+      // once the durable check's window has run out is the leak, and a delete
+      // that needed a retry is a write the fence should have stopped before it
+      // started deleting.
       addTearDown(() async {
         await _deleteTemporaryWorkspace(temporary, onDeleteFallback: onRetry);
-        expect(_temporaryWorkspaceCount(), lessThanOrEqualTo(leakedBefore));
+        await expectNoDurableTemporaryWorkspaceLeak(
+          baselineCount: leakedBefore,
+          currentCount: _temporaryWorkspaceCount,
+          processCensus: () => _workspaceProcessCensus(temporary.path),
+          describeWorkspaces: _describeTemporaryWorkspaces,
+          delay: Future<void>.delayed,
+          reportTransient: stderr.writeln,
+        );
         expect(fallbacks, 0, reason: 'the delete fell back to a retry');
       });
       await _seedStore(gridRoot: gridRoot, workRoot: workRoot);
@@ -1063,14 +1190,19 @@ void main() {
       // Registered the moment the directory exists — and therefore run LAST,
       // after the station teardown below — so a failure anywhere in the boot
       // still fences the proxied store before the tree is removed. A workspace
-      // left on disk is the leak; the retry count rides the failure so whoever
-      // un-skips this case reads why the delete had to race.
+      // still on disk once the durable check's window has run out is the leak;
+      // the retry count rides the failure so whoever un-skips this case reads
+      // why the delete had to race.
       addTearDown(() async {
         await _deleteTemporaryWorkspace(temporary, onDeleteFallback: onRetry);
-        expect(
-          _temporaryWorkspaceCount(),
-          lessThanOrEqualTo(leakedBefore),
-          reason: 'the delete fell back to a retry $fallbacks times',
+        printOnFailure('the delete fell back to a retry $fallbacks times');
+        await expectNoDurableTemporaryWorkspaceLeak(
+          baselineCount: leakedBefore,
+          currentCount: _temporaryWorkspaceCount,
+          processCensus: () => _workspaceProcessCensus(temporary.path),
+          describeWorkspaces: _describeTemporaryWorkspaces,
+          delay: Future<void>.delayed,
+          reportTransient: stderr.writeln,
         );
       });
       await _seedStore(gridRoot: gridRoot, workRoot: workRoot);
