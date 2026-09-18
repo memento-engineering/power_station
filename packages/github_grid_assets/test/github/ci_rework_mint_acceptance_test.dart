@@ -1202,7 +1202,18 @@ void main() {
         isEmpty,
       );
     },
-    timeout: const Timeout(Duration(minutes: 1)),
+    // A MEASURED budget, not a round number. This case boots a proxied bd
+    // store, serialises every state write through the ONE permit the teardown
+    // fence depends on, and spends the bounded absence and residue windows on
+    // its way out: 29 to 62 seconds of real work across eleven runs on the
+    // station host. The minute it used to carry sat UNDER that — one clean run
+    // measured 62 seconds, and a loaded one expired inside the projection, so
+    // the teardown SIGKILLed the `bd` it had parked and the case reported
+    // `bd exited -9`: a red that reads like a store failure and blocks the
+    // review of a diff that never touched this file. Three minutes is about
+    // three times the longest clean run, and still bounded — a genuine hang
+    // fails the case instead of parking the lane.
+    timeout: const Timeout(Duration(minutes: 3)),
   );
 
   test(
@@ -1426,7 +1437,9 @@ void main() {
         isEmpty,
       );
     },
-    timeout: const Timeout(Duration(minutes: 1)),
+    // The same measured budget as the case above: whoever un-skips this one
+    // boots the same store through the same single-permit writer.
+    timeout: const Timeout(Duration(minutes: 3)),
     skip:
         'blocked by tg-u4ml: resident-command rework does not self-mint replacement',
   );
