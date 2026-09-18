@@ -26,6 +26,7 @@ library;
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:isolate';
 
 import 'package:crypto/crypto.dart';
 import 'package:grid_engine/grid_engine.dart';
@@ -81,38 +82,41 @@ class ShellRunResult {
   bool get ok => exitCode == 0;
 }
 
-/// The real [ShellRunner]: execs `sh -c <command>` via `dart:io`.
+/// The real [ShellRunner]: execs `<shellExecutable> -c <command>` via
+/// `dart:io`.
 ///
 /// **The process group.** A bounded run must be able to kill what the plan
 /// SPAWNED, not just the shell that spawned it: `dart test` reaped at the top
 /// leaves its own child test runners alive, and those are what hold the
 /// worktree. A plain `Process.start` child inherits THIS process's group, so
-/// there is no group to signal. The bounded path therefore runs the plan as a
-/// JOB of a wrapper shell under job control (`set -m`), which makes the job a
-/// process-group LEADER; the wrapper records the job's pid — its pgid — and on
-/// the deadline the whole group is signalled through it.
+/// there is no group to signal. The bounded path therefore starts the
+/// `validation_process.dart` launcher, which makes itself a process-group
+/// LEADER before it starts the plan as its own attached child — so the plan
+/// and everything it spawns share the launcher's group, and on the deadline
+/// that whole group is signalled through the launcher's pid.
 ///
-/// The plan itself is NEVER spliced into the wrapper: it rides as an argv
-/// element the wrapper hands to a child `sh -c "$1"`, so a plan that merely
-/// fails to PARSE is an ordinary non-zero exit of the child rather than a
-/// syntax error that takes the wrapper (and its receipts) down with it.
+/// No shell job control is involved: `set -m` under dash (CI's `sh`) with no
+/// terminal prints a warning into the very output the lane captures, and the
+/// launcher's `setsid()` needs neither a terminal nor a word on stderr.
 class SystemShellRunner implements ShellRunner {
-  /// Creates the runner.
-  const SystemShellRunner();
+  /// Creates the runner. [shellExecutable] is the shell every plan runs
+  /// under; [dartExecutable] the VM the bounded path starts its launcher with.
+  const SystemShellRunner({
+    this.shellExecutable = 'sh',
+    this.dartExecutable = 'dart',
+  });
 
-  /// The wrapper script, a FIXED string — no plan text is ever interpolated.
-  ///
-  /// `$1` is the plan, `$2` the file the job's pgid is recorded in. Monitor
-  /// mode is enabled only long enough to put the job in its own group, then
-  /// disabled again so no `[1]+ Done` job notification can leak into the
-  /// captured output.
-  static const String _groupedWrapper =
-      'set -m\n'
-      '{ set +m; sh -c "\$1"; } &\n'
-      '__grid_plan=\$!\n'
-      'set +m\n'
-      'printf \'%s\\n\' "\$__grid_plan" > "\$2"\n'
-      'wait \$__grid_plan\n';
+  /// The shell a plan runs under, as `<shellExecutable> -c <plan>`.
+  final String shellExecutable;
+
+  /// The Dart executable the bounded path starts the process-group launcher
+  /// with.
+  final String dartExecutable;
+
+  /// The process-group launcher a bounded run starts in place of the shell.
+  static final Uri _launcherLibrary = Uri.parse(
+    'package:grid_assets/src/code/validation_process.dart',
+  );
 
   @override
   Future<ShellRunResult> run({
@@ -121,10 +125,15 @@ class SystemShellRunner implements ShellRunner {
     Duration? deadline,
   }) async {
     if (deadline == null) {
-      final result = await Process.run('sh', [
-        '-c',
-        command,
-      ], workingDirectory: workingDirectory);
+      final ProcessResult result;
+      try {
+        result = await Process.run(shellExecutable, [
+          '-c',
+          command,
+        ], workingDirectory: workingDirectory);
+      } on ProcessException catch (error) {
+        return _launchFailure('could not start $shellExecutable: $error');
+      }
       final stdout = result.stdout.toString();
       final stderr = result.stderr.toString();
       return ShellRunResult(
@@ -133,33 +142,73 @@ class SystemShellRunner implements ShellRunner {
       );
     }
 
-    final scratch = Directory.systemTemp.createTempSync('grid-plan-group-');
-    final pgidFile = p.join(scratch.path, 'pgid');
+    final Uri? launcher;
+    final Uri? packageConfig;
     try {
-      final process = await Process.start('sh', [
-        '-c',
-        _groupedWrapper,
-        'grid-validation',
-        command,
-        pgidFile,
-      ], workingDirectory: workingDirectory);
-      final out = StringBuffer();
-      final err = StringBuffer();
-      final drained = Future.wait([
-        process.stdout
-            .transform(const SystemEncoding().decoder)
-            .forEach(out.write),
-        process.stderr
-            .transform(const SystemEncoding().decoder)
-            .forEach(err.write),
-      ]);
-      var timedOut = false;
-      final timer = Timer(deadline, () {
-        timedOut = true;
-        _terminateGroup(pgidFile: pgidFile, wrapperPid: process.pid);
-      });
+      launcher = await Isolate.resolvePackageUri(_launcherLibrary);
+      packageConfig = Isolate.packageConfigSync;
+    } on Object catch (error) {
+      return _launchFailure('could not resolve $_launcherLibrary: $error');
+    }
+    if (launcher == null ||
+        !launcher.isScheme('file') ||
+        packageConfig == null ||
+        !packageConfig.isScheme('file')) {
+      return _launchFailure(
+        'the bounded runner needs file-backed package resolution to start '
+        '$_launcherLibrary (launcher: $launcher, package config: '
+        '$packageConfig)',
+      );
+    }
+
+    final Process process;
+    try {
+      process = await Process.start(
+        dartExecutable,
+        [
+          '--packages=${packageConfig.toFilePath()}',
+          launcher.toFilePath(),
+          shellExecutable,
+          command,
+        ],
+        workingDirectory: workingDirectory,
+        runInShell: false,
+      );
+    } on ProcessException catch (error) {
+      return _launchFailure('could not start $dartExecutable: $error');
+    }
+
+    final out = StringBuffer();
+    final err = StringBuffer();
+    final drained = Future.wait([
+      process.stdout
+          .transform(const SystemEncoding().decoder)
+          .forEach(out.write),
+      process.stderr
+          .transform(const SystemEncoding().decoder)
+          .forEach(err.write),
+    ]);
+    var timedOut = false;
+    var launcherExited = false;
+    // Armed until the output is DRAINED, not merely until the launcher exits:
+    // a descendant the plan backgrounded still holds the pipes, and the group
+    // signal is what releases them.
+    final timer = Timer(deadline, () {
+      timedOut = true;
+      final groupSignalled = Process.killPid(
+        -process.pid,
+        ProcessSignal.sigkill,
+      );
+      // No group yet means the launcher has not reached `setsid()` — it has
+      // started nothing, so the launcher alone is the whole run. Once it has
+      // EXITED its pid may be reused, so it is never signalled again.
+      if (!groupSignalled && !launcherExited) {
+        process.kill(ProcessSignal.sigkill);
+      }
+    });
+    try {
       final exitCode = await process.exitCode;
-      timer.cancel();
+      launcherExited = true;
       // The captured output is COMPLETE before the result is assembled: a
       // deadline that killed the group still yields everything the plan managed
       // to emit, which is the only diagnosis a timeout leaves behind.
@@ -170,35 +219,14 @@ class SystemShellRunner implements ShellRunner {
         timedOut: timedOut,
       );
     } finally {
-      try {
-        scratch.deleteSync(recursive: true);
-      } on Object {
-        // Best-effort: a scratch dir that outlives one bounded run costs
-        // nothing, and the run's own result is what the lane grades on.
-      }
+      timer.cancel();
     }
   }
 
-  /// Signals the plan's whole process group, falling back to the wrapper alone
-  /// when the job never recorded its pgid (a write that could not land).
-  static void _terminateGroup({
-    required String pgidFile,
-    required int wrapperPid,
-  }) {
-    int? pgid;
-    try {
-      final recorded = File(pgidFile);
-      if (recorded.existsSync()) {
-        pgid = int.tryParse(recorded.readAsStringSync().trim());
-      }
-    } on Object {
-      pgid = null;
-    }
-    if (pgid != null && pgid > 0) {
-      Process.killPid(-pgid, ProcessSignal.sigkill);
-    }
-    Process.killPid(wrapperPid, ProcessSignal.sigkill);
-  }
+  /// A run that never started: exit 127 (the shell's "command not found"),
+  /// with the cause named in the output the lane logs.
+  static ShellRunResult _launchFailure(String cause) =>
+      ShellRunResult(exitCode: 127, output: 'grid-validation: $cause\n');
 }
 
 /// A comparison that could not produce comparable named-test outcomes — a LANE

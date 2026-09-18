@@ -1066,7 +1066,12 @@ void main() {
   // so the real runner is exercised for real: a Fake could not prove that the
   // plan's own CHILDREN are reaped, and a leaked test runner holding the
   // worktree is exactly what the retired provider watchdog left behind.
+  //
+  // The bounded cases pin `/bin/dash`: it is CI's `sh`, and the shell under
+  // which a job-control wrapper wrote `can't access tty; job control turned
+  // off` into the captured output. A bash-only green proves nothing about it.
   group('the bounded validation runner (SystemShellRunner)', () {
+    const dash = SystemShellRunner(shellExecutable: '/bin/dash');
     late Directory dir;
 
     setUp(() {
@@ -1089,9 +1094,9 @@ void main() {
       expect(result.output, 'out\nerr\n');
     });
 
-    test('a bounded run captures the same combined output and rc, with no job '
-        'notification leaking into it', () async {
-      final result = await const SystemShellRunner().run(
+    test('a bounded run is byte-exact under dash: the rc and combined '
+        'output, with no job-control line leaking into it', () async {
+      final result = await dash.run(
         workingDirectory: dir.path,
         command: 'printf "out\\n"; printf "err\\n" >&2; exit 7',
         deadline: const Duration(minutes: 5),
@@ -1100,30 +1105,34 @@ void main() {
       expect(result.timedOut, isFalse);
       expect(result.output, 'out\nerr\n');
       expect(result.output, isNot(contains('Done')));
+      expect(result.output, isNot(contains('job control')));
     });
 
     test('an unparseable plan is the CHILD\'s non-zero exit, never a lost '
         'result', () async {
-      final result = await const SystemShellRunner().run(
+      final result = await dash.run(
         workingDirectory: dir.path,
-        // Balanced to Dart, UNBALANCED to sh — the plan text never reaches the
-        // wrapper's own parse.
+        // Balanced to Dart, UNBALANCED to sh — the plan rides as an argv
+        // element, so only the plan's own shell ever parses it.
         command: 'ruby -e \'puts "the station lane\'s SDK"\'',
         deadline: const Duration(minutes: 5),
       );
       expect(result.exitCode, isNot(0));
+      expect(result.timedOut, isFalse);
       expect(result.output.toLowerCase(), contains('syntax error'));
     });
 
-    test('a plan that outruns its deadline is reaped WITH the children it '
-        'spawned, and reports timedOut', () async {
+    test('a dash-bounded timeout reaps its child process group, and reports '
+        'timedOut', () async {
       final marker = p.join(dir.path, 'child-alive');
-      final result = await const SystemShellRunner().run(
+      final result = await dash.run(
         workingDirectory: dir.path,
-        // A GRANDCHILD of the wrapper: killing the wrapper alone leaves this
+        // A GRANDCHILD of the launcher: killing the launcher alone leaves this
         // one running, which is the leak the process group exists to close.
         command: 'sh -c "printf started > \'$marker\'; sleep 45"',
-        deadline: const Duration(milliseconds: 1200),
+        // Wide enough for the launcher's own VM start (about a second and a
+        // half cold, slower under a loaded full suite) to reach the plan.
+        deadline: const Duration(seconds: 10),
       );
       expect(result.timedOut, isTrue);
       expect(result.ok, isFalse);
