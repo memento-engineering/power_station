@@ -22,7 +22,8 @@
 /// all-status `bd query` — ONE spawn per store, a pure read. Never `bd show`
 /// (which writes `.beads/last-touched` and self-triggers the store's watcher),
 /// never a bd mutation, never SQL. (It shelled `bd export --all` until that
-/// read was retired upstream; `export` is refused in proxied-server mode.)
+/// read was retired; the amended mechanism is recorded as
+/// `power_station#the-per-store-bead-read-is-scoped-never-the-export-surface`.)
 library;
 
 import 'package:beads_dart/beads_dart.dart'
@@ -93,10 +94,13 @@ abstract interface class SubstationBeadSource {
 /// covering every status. A pure read: no `last-touched` write, no watcher
 /// self-trigger, no mutation (A37).
 ///
-/// This used to shell `bd export --all`, but `export` is REFUSED in
-/// proxied-server mode and `BdCliService.exportAll` was removed upstream in
-/// beads_dart 0.2.0. The all-status query below is the same read the engine's
-/// own `CliSnapshotReader` now performs, and it stays one spawn.
+/// This used to shell `bd export --all` — A11's ratified mechanism — but
+/// `export` is REFUSED in proxied-server mode and `BdCliService.exportAll` was
+/// removed upstream in beads_dart 0.2.0, surviving only as a refusal tombstone.
+/// The all-status query below is the same read the engine's own
+/// `CliSnapshotReader` now performs, and it stays one spawn. The amendment is
+/// recorded as
+/// `power_station#the-per-store-bead-read-is-scoped-never-the-export-surface`.
 class BdExportBeadSource implements SubstationBeadSource {
   /// Creates the source. [runnerFor] is the injectable spawn seam (tests
   /// record argv through it; the default spawns a real `bd` in the store

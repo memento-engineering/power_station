@@ -8,6 +8,7 @@ import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
 import '../support/asset_fakes.dart' show callMetadata;
+import 'filing_evidence_fakes.dart';
 
 /// Creates a REAL grid home — `<home>/.grid/.beads` — because the resolver
 /// probes the filesystem to tell a grid home from its own state store.
@@ -91,6 +92,19 @@ _harness(_ScriptedBdRunner bd, {Set<String>? armed}) {
               return bd;
             },
             now: () => DateTime.utc(2026, 9, 2, 14, 30),
+            // COMPLETE fake evidence, not absent evidence: the `pow` store
+            // ANSWERED with the ids these fixtures cite, so a passing
+            // `bead_references` row here is a resolution and not a vacuum.
+            // The stores are fakes at a path no shell can enter, so the plan
+            // probes are prepared too.
+            evidence: FakeFilingEvidenceSource(
+              parsedPlanEvidence(
+                beadCatalogs: const {
+                  'pow': {'pow-child', 'pow-n6n', 'pow-n6n.1'},
+                },
+                decisionRegisters: const {},
+              ),
+            ),
           ),
           storeRoot: () => '/work/power_station',
           armedSubstations: () => armed,

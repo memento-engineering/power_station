@@ -7,8 +7,11 @@ import 'package:beads_dart/beads_dart.dart';
 import 'package:grid_assets/grid_assets.dart';
 import 'package:grid_engine/grid_engine.dart';
 import 'package:grid_runtime/grid_runtime.dart';
+import 'package:grid_sdk/grid_sdk.dart' as sdk;
 import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
+
+import 'filing_evidence_fakes.dart';
 
 import '../support/asset_fakes.dart' show callMetadata;
 import '../support/package_root.dart';
@@ -180,6 +183,24 @@ final class _FakeProcesses implements ProcessGroupController {
   int currentGroupId() => throw StateError('park never reads its own group');
 }
 
+/// A [ShellRunner] answering every `decisions index` ask with one canned
+/// envelope — the roster the DEFAULT unpark composition executes through.
+final class _CannedIndexShell implements ShellRunner {
+  _CannedIndexShell(this.body);
+
+  final String body;
+  final List<String> commands = [];
+
+  @override
+  Future<ShellRunResult> run({
+    required String workingDirectory,
+    required String command,
+  }) async {
+    commands.add(command);
+    return ShellRunResult(exitCode: 0, output: body);
+  }
+}
+
 /// A [WorktreeActivityProbe] fake — the corroboration the verb reports but
 /// never decides on.
 final class _FakeWorktrees implements WorktreeActivityProbe {
@@ -308,6 +329,11 @@ _Harness _harness({
             approve: ApproveService(
               runnerFor: runnerFor,
               now: () => DateTime.utc(2026, 9, 9, 12),
+              // The ritual under test is undefer-then-stamp, over FAKE stores
+              // at paths no shell can chdir into. Prepared evidence keeps the
+              // preflight's viability rows out of this suite's way; their own
+              // refusals are pinned in `filing_viability_test.dart`.
+              evidence: FakeFilingEvidenceSource(completeEmptyEvidence),
             ),
             runnerFor: runnerFor,
           ),
@@ -755,6 +781,119 @@ void main() {
     expect(report['unparked'], isTrue);
     expect(report['undeferred'], isTrue);
     expect(report['by'], 'nico');
+  });
+
+  test('default unpark composition binds owning decision evidence', () async {
+    // NO ApproveService and NO FilingEvidenceSource: this exercises the very
+    // wiring the resident gets. Before the collaborators were threaded through,
+    // `UnparkService` composed its own evidence-free `ApproveService`, so the
+    // fail-closed viability rows refused every decision-citing bead with
+    // "restore complete evidence and rerun" — the bead the operator is
+    // unparking precisely because it is ready.
+    const slug = 'the-dependencies-row-is-a-projection-of-bd-dependency-rows';
+    final register = Directory.systemTemp.createTempSync('unpark-register-');
+    addTearDown(() => register.deleteSync(recursive: true));
+    File(p.join(register.path, 'a.md')).writeAsStringSync(
+      '---\nslug: $slug\nstatus: accepted\n---\n\nThe row is a projection.\n',
+    );
+
+    Future<Map<String, dynamic>> unpark(String description) async {
+      final out = StringBuffer();
+      final err = StringBuffer();
+      final work = _Store(_workRoot);
+      work.beads[_workBead] = {
+        ..._workBeadJson(approved: false, status: 'deferred'),
+        'description': description,
+        'defer_until': '2026-09-16T00:00:00.000Z',
+      };
+      final runner = CommandRunner<int>('space', 'test station')
+        ..addCommand(
+          UnparkCommand(
+            workStoreRoot: (_) => _workRoot,
+            runnerFor: (root) => _FakeBd(work),
+            owningScope: sdk.SubstationScope(
+              name: 'power_station',
+              root: _workRoot,
+              prefix: 'pow',
+            ),
+            // The plan never runs and no shell is spawned: filing PARSES.
+            validationPlanProbe: FakeValidationPlanProbe(),
+            decisionShell: _CannedIndexShell(
+              jsonEncode({
+                'spec': 2,
+                'decisions': [
+                  {
+                    'slug': slug,
+                    'originRegister': 'power_station',
+                    'originPath': register.path,
+                    'status': 'accepted',
+                    'surfaces': <String>['packages/grid_assets/**'],
+                  },
+                ],
+              }),
+            ),
+            decisionInvocation: 'space',
+            decisionGridHome: _gridHome(),
+            out: out,
+            err: err,
+          ),
+        );
+      final code = await runner.run([
+        'unpark',
+        '--json',
+        '--actor',
+        'nico',
+        _workBead,
+      ]);
+      return {
+        'code': code,
+        'report': _json(out),
+        'argvs': work.argvs,
+        'updates': work.callsTo('update'),
+      };
+    }
+
+    // A bead citing a decision the register HOLDS: undefer first, a passing
+    // ten-row preflight, then exactly one v2 stamp.
+    final stamped = await unpark('Follows power_station#$slug.');
+    expect(stamped['code'], 0, reason: '${stamped['report']}');
+    expect(
+      (stamped['argvs']! as List<List<String>>).map((argv) => argv.first),
+      containsAllInOrder(const ['undefer', 'update']),
+    );
+    final filing = (stamped['report']! as Map)['filing'] as Map;
+    expect((filing['requirements']! as List), hasLength(10));
+    expect(filing['passed'], isTrue);
+    final updates = stamped['updates']! as List<List<String>>;
+    expect(updates, hasLength(1));
+    expect(
+      callMetadata(updates.single)[kApprovedRevKey],
+      startsWith(kFilingApprovalRevisionPrefix),
+    );
+
+    // Change ONLY the cited slug to one the round would have to create: the
+    // same wiring refuses, names the row, and leaves the bead unstamped.
+    final refused = await unpark(
+      'Follows power_station#a-rule-this-round-creates.',
+    );
+    expect(refused['code'], 1);
+    final report = refused['report']! as Map<String, dynamic>;
+    expect(report['unparked'], isFalse);
+    expect(report['undeferred'], isTrue);
+    expect(refused['updates'], isEmpty);
+    final row =
+        (((report['filing']! as Map)['requirements']! as List)
+                .cast<Map<String, dynamic>>())
+            .singleWhere((row) => row['requirement'] == 'decision_references');
+    expect(row['passed'], isFalse);
+    expect(row['detail'], contains('a-rule-this-round-creates'));
+    expect(
+      row['detail'],
+      contains(
+        'a round may not cite a decision it creates; cite an existing entry '
+        'or describe the proposed entry without a citation',
+      ),
+    );
   });
 
   test('a refused approval leaves unpark honest about the stamp', () async {

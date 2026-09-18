@@ -62,10 +62,32 @@
 /// remains inference-free and write-free.
 ///
 /// The FILING pair is the front-door completeness counterpart: [FilingService]
-/// reads one bead through [ExactSubstationBeadSource], [FilingContract]
-/// deterministically evaluates its four mechanical authoring requirements,
-/// and [FilingCommand] is the thin CLI adapter the `discover` skill calls.
-/// Description and acceptance usefulness remain with the agentic half.
+/// reads one bead through [ExactSubstationBeadSource], gathers its
+/// [FilingEvidence], and [FilingContract] deterministically evaluates the ten
+/// mechanical authoring requirements over both; [FilingCommand] is the thin
+/// CLI adapter the `discover` skill calls. Description and acceptance
+/// usefulness remain with the agentic half.
+///
+/// Four of the ten rows are PRESENCE and six are VIABILITY: can the
+/// `validation_plan` be PARSED by the gating lane's shell and by CI's dash,
+/// are the bead's file anchors repository-relative, does every bead id it
+/// cites EXIST in the current or an attached store, is its acceptance free of
+/// pinned release versions, and is every decision it cites already RECORDED.
+/// The pure scanners those rows run are in `filing_text.dart` — one copy,
+/// shared with discovery's own anchor and citation gather.
+///
+/// The viability rows are judged against [FilingEvidence], which every leg
+/// reports in three states rather than two: answered, answered-negative, and
+/// NOT ANSWERED. An unavailable leg is never read as an empty one, so "no
+/// store holds this id" and "nobody asked a store" stay different facts and
+/// only the first refuses a bead. [FilingCommand] and [ApproveCommand] bind
+/// the live gather by default ([SystemFilingEvidenceSource] over
+/// [SystemValidationPlanProbe], [BdListAllStatusBeadSource] and the station's
+/// roster decision index); a test or an alternate station overrides it with a
+/// [FilingEvidenceSource] or a whole [FilingService]. The two checks that
+/// deliberately stay AGENT JUDGEMENT — whether the plan finishes inside the
+/// critic lane's cap, and whether it covers every affected consumer — are not
+/// decidable from bead text and are not requirements.
 /// The dependencies requirement is a [DependencyProjection] of the dependency
 /// rows bd holds for the bead — local targets and
 /// `external:<project>:<capability>` targets alike — and NOTHING in this
@@ -325,6 +347,7 @@ export 'src/filing/approval_stamp.dart';
 export 'src/filing/approve_command.dart';
 export 'src/filing/filing_command.dart';
 export 'src/filing/filing_contract.dart';
+export 'src/filing/filing_text.dart';
 export 'src/filing/mount_explanation.dart';
 export 'src/filing/park_command.dart';
 export 'src/filing/show_command.dart';

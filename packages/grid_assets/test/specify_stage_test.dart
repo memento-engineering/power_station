@@ -22,6 +22,7 @@ import 'package:grid_runtime/grid_runtime.dart';
 import 'package:grid_sdk/grid_sdk.dart' show SpecifyAuthoredSpecWriter;
 import 'package:test/test.dart';
 
+import 'filing/filing_evidence_fakes.dart';
 import 'support/asset_fakes.dart';
 
 ({FakeTreeContext context, StepArgs args}) _ctx({
@@ -866,6 +867,83 @@ void main() {
       // clear-and-rewrite still knows which text is specify's.
       expect(recorder.calls, hasLength(1));
       expect(recorder.calls.single.design, design);
+    });
+
+    // ONE seam, two consumers. The step that AUTHORS the plan and the front
+    // door that FILES the bead ask the same [ValidationPlanProbe] about the
+    // same shell, so they cannot disagree about whether a plan parses — and
+    // the architect's diagnostic is the operator's.
+    test('filing and specify consume one probe outcome', () async {
+      const plan = "echo 'station lane's SDK'";
+      const diagnostic =
+          'sh: -c: line 1: unexpected EOF while looking for matching `\'\'';
+      final probe = FakeValidationPlanProbe(
+        answers: {
+          kFilingLaneShell: const ValidationPlanParseResult(
+            shell: kFilingLaneShell,
+            exitCode: 2,
+            diagnostic: diagnostic,
+          ),
+        },
+      );
+
+      final dir = carriedEnvelope();
+      final c = _ctx(workspaceDir: dir.path);
+      await expectLater(
+        SpecifyCapability(
+          runnerFor: (_) => SpecifyReadbackBdRunner(
+            beads: [
+              durableSpecifiedBead(
+                'tg-1',
+              ).copyWith(metadata: const {'validation_plan': plan}),
+            ],
+          ),
+          validationPlanProbe: probe,
+        ).result(c.context, c.args),
+        throwsA(
+          isA<CapabilityFailure>()
+              .having(
+                (failure) => failure.kind,
+                'kind',
+                CapabilityFailureKind.invalidResult,
+              )
+              .having(
+                (failure) => failure.reason,
+                'reason',
+                'validation_plan does not parse: $diagnostic',
+              ),
+        ),
+      );
+
+      // The same probe, asked by the filing gather: the same refusal, with the
+      // offending text named for the operator.
+      final bead = Bead(
+        id: 'pow-filed',
+        title: 'a filed bead',
+        issueType: IssueType.task,
+        description: 'the work',
+        acceptanceCriteria: '- [ ] checked',
+        metadata: const {'validation_plan': plan},
+      );
+      final row = const FilingContract()
+          .evaluate(
+            bead,
+            const <BeadDependency>[],
+            evidence: await SystemFilingEvidenceSource(
+              probe: probe,
+            ).gather(storeRoot: dir.path, bead: bead),
+          )
+          .requirements
+          .singleWhere(
+            (row) => row.requirement == FilingRequirement.validationPlanSyntax,
+          );
+      expect(row.passed, isFalse);
+      expect(row.detail, contains(diagnostic));
+      expect(row.detail, contains('"lane\'s"'));
+      expect(probe.calls.map((call) => call.shell), [
+        kFilingLaneShell,
+        kFilingLaneShell,
+      ]);
     });
 
     test('a parseable validation_plan is syntax-checked without execution and '

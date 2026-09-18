@@ -2,11 +2,60 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:args/command_runner.dart';
+import 'package:beads_dart/beads_dart.dart' show BdRunner, ProcessBdRunner;
+import 'package:grid_sdk/grid_sdk.dart' as sdk;
 import 'package:path/path.dart' as p;
 
+import '../code/discovery.dart' show commandDecisionIndexSource;
+import '../code/landing.dart' show ShellRunner, SystemShellRunner;
+import '../search/station_search.dart';
 import 'filing_contract.dart';
 
 String _currentDirectory() => Directory.current.path;
+BdRunner _processBdRunnerFor(String storeRoot) =>
+    ProcessBdRunner(workspaceRoot: storeRoot);
+
+/// The DEFAULT filing service: the exact read, plus the LIVE viability
+/// evidence the six content rows are judged against.
+///
+/// It binds the real syntax probes ([SystemValidationPlanProbe] against the
+/// lane shell and dash), a COMPLETE current-plus-attached all-status id
+/// catalog ([BdListAllStatusBeadSource] — one scoped list read per core issue
+/// type, never `bd export`), and the station's roster-mode decision index
+/// ([commandDecisionIndexSource]). Each leg is asked only when the bead
+/// carries a token that needs it, and a leg that cannot answer is recorded
+/// UNAVAILABLE — never as an empty catalog. The scoped read is the ratified
+/// per-store mechanism, recorded as
+/// `power_station#the-per-store-bead-read-is-scoped-never-the-export-surface`.
+///
+/// A test or an alternate station overrides the whole thing by injecting its
+/// own `FilingService`, or just the gather by injecting a
+/// [FilingEvidenceSource].
+FilingService defaultFilingService({
+  required BdRunner Function(String storeRoot) runnerFor,
+  sdk.SubstationScope? owningScope,
+  List<sdk.SubstationScope> attachedScopes = const [],
+  ValidationPlanProbe validationPlanProbe = const SystemValidationPlanProbe(),
+  ShellRunner decisionShell = const SystemShellRunner(),
+  String? decisionInvocation,
+  String? decisionGridHome,
+  FilingEvidenceSource? evidence,
+}) => FilingService(
+  source: ExactSubstationBeadSource(runnerFor: runnerFor),
+  evidence:
+      evidence ??
+      SystemFilingEvidenceSource(
+        probe: validationPlanProbe,
+        catalog: BdListAllStatusBeadSource(runnerFor: runnerFor),
+        owning: owningScope,
+        attached: attachedScopes,
+        decisions: commandDecisionIndexSource(
+          decisionShell,
+          runnerInvocation: decisionInvocation,
+          gridHome: decisionGridHome,
+        ),
+      ),
+);
 
 /// The default roster seam: NONE. Until a station threads its coded roster in,
 /// an `external:<project>:<capability>` dependency row cannot be resolved to an
@@ -29,12 +78,31 @@ class FilingCommand extends Command<int> {
   /// second store to name. `park` and `show` keep it; they reach the state
   /// store's session-lifecycle beads.
   FilingCommand({
-    FilingService service = const FilingService(),
+    FilingService? service,
     String Function() storeRoot = _currentDirectory,
     Set<String>? Function() armedSubstations = noArmedSubstations,
+    BdRunner Function(String storeRoot) runnerFor = _processBdRunnerFor,
+    sdk.SubstationScope? owningScope,
+    List<sdk.SubstationScope> attachedScopes = const [],
+    ValidationPlanProbe validationPlanProbe = const SystemValidationPlanProbe(),
+    ShellRunner decisionShell = const SystemShellRunner(),
+    String? decisionInvocation,
+    String? decisionGridHome,
+    FilingEvidenceSource? evidence,
     StringSink? out,
     StringSink? err,
-  }) : _service = service,
+  }) : _service =
+           service ??
+           defaultFilingService(
+             runnerFor: runnerFor,
+             owningScope: owningScope,
+             attachedScopes: attachedScopes,
+             validationPlanProbe: validationPlanProbe,
+             decisionShell: decisionShell,
+             decisionInvocation: decisionInvocation,
+             decisionGridHome: decisionGridHome,
+             evidence: evidence,
+           ),
        _storeRoot = storeRoot,
        _armedSubstations = armedSubstations,
        _out = out ?? stdout,
@@ -57,7 +125,7 @@ class FilingCommand extends Command<int> {
 
   @override
   final String description =
-      'Check one bead against the four mechanical filing requirements.';
+      'Check one bead against the ten mechanical filing requirements.';
 
   @override
   String get invocation {

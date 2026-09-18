@@ -99,6 +99,8 @@ import '../agent/site_binding.dart';
 import '../agent/typed_environment.dart';
 import '../agent/usage_report.dart';
 import '../assets/overlay_materializer.dart' show kDefaultOverlayRunner;
+import '../filing/filing_contract.dart'
+    show SystemValidationPlanProbe, ValidationPlanProbe, kFilingLaneShell;
 import 'committee.dart';
 import 'committee_selection.dart';
 import 'conventional_commit.dart' show lintConventionalSubject;
@@ -616,6 +618,12 @@ class SpecifyCapability extends ProcessCapability {
   /// clear and which is the operator's to preserve. Absent (every builder that
   /// does not bind the extension) ⇒ no stamp and no extra bd call at all: this
   /// is an ADDITIVE seam, and an unbound station keeps today's behaviour.
+  ///
+  /// [validationPlanProbe] is the SHARED parse seam
+  /// ([SystemValidationPlanProbe] by default). Filing's
+  /// `validation_plan_syntax` row is judged on the same seam against the same
+  /// shell, so this step and the front-door contract can never disagree about
+  /// whether a plan parses.
   const SpecifyCapability({
     BdRunner Function(String workspaceRoot) runnerFor = _processRunnerFor,
     AgentSessionAdapterRegistry sessionAdapters = kBuiltinAgentSessionAdapters,
@@ -623,7 +631,9 @@ class SpecifyCapability extends ProcessCapability {
     String decisionRunner = kDefaultOverlayRunner,
     String? decisionGridHome,
     SpecifyAuthoredSpecWriter? writeSpecifyAuthoredSpec,
+    ValidationPlanProbe validationPlanProbe = const SystemValidationPlanProbe(),
   }) : _runnerFor = runnerFor,
+       _validationPlanProbe = validationPlanProbe,
        _sessionAdapters = sessionAdapters,
        _steers = steers,
        _decisionRunner = decisionRunner,
@@ -636,6 +646,7 @@ class SpecifyCapability extends ProcessCapability {
   final String _decisionRunner;
   final String? _decisionGridHome;
   final SpecifyAuthoredSpecWriter? _writeSpecifyAuthoredSpec;
+  final ValidationPlanProbe _validationPlanProbe;
 
   static BdRunner _processRunnerFor(String workspaceRoot) =>
       ProcessBdRunner(workspaceRoot: workspaceRoot);
@@ -902,6 +913,9 @@ class SpecifyCapability extends ProcessCapability {
   ///
   /// `sh -n` parses and NEVER executes, and the plan is wrapped in the exact
   /// group `_gatingScript` will wrap it in, so what is checked is what will run.
+  /// The parse rides the SHARED [ValidationPlanProbe] against
+  /// [kFilingLaneShell] — the same seam and the same shell the filing
+  /// contract's `validation_plan_syntax` row is judged on.
   ///
   /// The plan is read FRESH from bd, exactly as [probeCompletionArtifact] reads
   /// the durable spec: the agent's own `bd update --set-metadata` landed after
@@ -943,24 +957,15 @@ class SpecifyCapability extends ProcessCapability {
     }
     final plan = matches.single.metadata['validation_plan'];
     if (plan is! String || plan.trim().isEmpty) return;
-    final parse = await Process.run('sh', [
-      '-n',
-      '-c',
-      '( ${plan.trim()} )',
-    ], workingDirectory: workspaceDir);
-    if (parse.exitCode == 0) return;
-    throw CapabilityFailure.invalidResult(
-      'validation_plan does not parse: ${_shellParseDiagnostic(parse)}',
+    final parse = await _validationPlanProbe.parse(
+      shell: kFilingLaneShell,
+      plan: plan,
+      workingDirectory: workspaceDir,
     );
-  }
-
-  /// The shell's OWN first word on why it refused — the line an architect can
-  /// act on (`unexpected EOF while looking for matching …`). A silent `sh`
-  /// falls back to the exit code, so the reason is never empty.
-  static String _shellParseDiagnostic(ProcessResult parse) {
-    final complaint = '${parse.stderr}'.trim();
-    if (complaint.isEmpty) return 'sh -n exited ${parse.exitCode}';
-    return complaint.split('\n').first.trim();
+    if (parse.parsed) return;
+    throw CapabilityFailure.invalidResult(
+      'validation_plan does not parse: ${parse.diagnostic}',
+    );
   }
 
   /// Gives an unparseable machine gate ONE repair ride before a visible gate.

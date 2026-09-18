@@ -68,6 +68,13 @@ String _renderLeg(
   return rendered;
 }
 
+/// [body] with every whitespace run collapsed to one space.
+///
+/// A vended corpus is PROSE at 80 columns, so a clause the verb emits on one
+/// line is authored across two. Comparing collapsed text asserts what the
+/// corpus TEACHES rather than where markdown happened to wrap it.
+String _collapsed(String body) => body.replaceAll(RegExp(r'\s+'), ' ');
+
 /// The two PUSHED role definitions. A seat loads one at session open and
 /// carries it on EVERY turn after — the largest single instruction surface a
 /// seat pays for, and the only one nobody pulls deliberately.
@@ -923,13 +930,12 @@ void main() {
       );
       // The report contract the skill consumes, row for row.
       expect(template, contains('{id, passed, requirements, error?}'));
-      for (final row in const [
-        'driveable_type',
-        'validation_plan',
-        'acceptance_criteria',
-        'dependencies',
-      ]) {
-        expect(template, contains(row), reason: 'the corpus names $row');
+      for (final row in FilingRequirement.values) {
+        expect(
+          template,
+          contains(row.wire),
+          reason: 'the corpus names ${row.wire}',
+        );
       }
       expect(template, contains('"passed": false'));
       expect(template, contains('"passed": true'));
@@ -976,6 +982,123 @@ void main() {
       );
       expect(template, contains('CLOSE IT AS STALE WITH RECEIPTS'));
       expect(template, contains('<receipts: file paths, commit ids>'));
+    });
+
+    // A harness may carry its own instructions
+    // (`power_station#a-harness-may-carry-its-own-instructions`): each leg of
+    // the overlay is an INDEPENDENT instruction source. Every leg is asserted
+    // ALONE below — identical content between them is permitted and is the
+    // common case, but it is never required, and nothing here compares one
+    // leg's bytes to the other's.
+    test('each intake-refinement leg vends the ten-row oracle, its six '
+        'remedies and both judgement-only exclusions', () {
+      for (final leg in _skillLegs) {
+        final body = _renderLeg(root, leg, 'intake-refinement', {
+          'runner': 'space',
+        });
+
+        // The ordered ten-row contract, by wire name.
+        for (final requirement in FilingRequirement.values) {
+          expect(
+            body,
+            contains(requirement.wire),
+            reason: '$leg names ${requirement.wire}',
+          );
+        }
+        expect(
+          _collapsed(body),
+          contains('carries exactly ten rows, in order'),
+        );
+        expect(_collapsed(body), contains('apply its `detail` as the'));
+
+        // The six CORRECTION clauses, verbatim as the verb emits them. The
+        // corpus is prose and reflows at 80 columns, so the comparison is over
+        // collapsed whitespace: a clause is TAUGHT whether or not a line break
+        // fell inside it.
+        final flat = _collapsed(body);
+        for (final remedy in const [
+          'rewrite as one parseable POSIX-shell command',
+          'replace the Bash-only construct with POSIX sh syntax',
+          'use a repository-relative path',
+          'mint it before citing it or cite an existing attached-store id',
+          'use release-relative language or a version range',
+          'a round may not cite a decision it creates; cite an existing entry '
+              'or describe the proposed entry without a citation',
+        ]) {
+          expect(flat, contains(remedy), reason: '$leg teaches "$remedy"');
+        }
+
+        // The citation SCOPE and the one ANSWERED-but-unresolved shape. A
+        // decision request comes from description and design; the receipt
+        // channel makes none, and a legacy id nothing answers is reported on a
+        // row that still passes
+        // (`power_station#notes-are-receipts-and-a-phantom-legacy-token-is-
+        // reported-not-failed`).
+        expect(
+          flat,
+          contains('read from the **description and design only**'),
+          reason: '$leg scopes decision requests to description and design',
+        );
+        expect(
+          flat,
+          contains("notes are the operator's RECEIPT channel"),
+          reason: '$leg says WHY a note cites nothing',
+        );
+        expect(
+          flat,
+          contains('is reported rather than refused'),
+          reason: '$leg keeps an unresolved legacy ADR id non-failing',
+        );
+
+        // The two checks that stay JUDGEMENT, and WHY each one is not a row.
+        expect(
+          body,
+          contains('## Two checks the verb deliberately does NOT make'),
+          reason: '$leg keeps both exclusions explicit',
+        );
+        expect(flat, contains('~600 second cap'));
+        expect(flat, contains('Duration needs EXECUTION or an estimate'));
+        expect(flat, contains('cover every affected consumer'));
+        expect(flat, contains('judgement about the BLAST RADIUS'));
+      }
+    });
+
+    test('each discover leg names the ten-row report and what it enforces', () {
+      for (final leg in _skillLegs) {
+        final flat = _collapsed(
+          _renderLeg(root, leg, 'discover', {'runner': 'space'}),
+        );
+        expect(flat, contains('checks the ten mechanical rows'));
+        expect(flat, contains('re-runs the ten-row filing preflight'));
+        for (final enforced in const [
+          'lane-shell syntax',
+          'dash portability',
+          'repository-relative file anchors',
+          'current-plus-attached-store bead-id existence',
+          'release-relative acceptance',
+          'existing decision citations',
+        ]) {
+          expect(flat, contains(enforced), reason: '$leg names "$enforced"');
+        }
+        expect(
+          flat,
+          contains('read from the **description and design only**'),
+          reason: '$leg scopes decision citations to description and design',
+        );
+        expect(
+          flat,
+          contains(
+            'a round may not cite a decision it creates; cite an existing '
+            'entry or describe the proposed entry without a citation',
+          ),
+          reason: '$leg names the canonical-absence correction verbatim',
+        );
+        expect(
+          flat,
+          contains('is REPORTED on a row that still passes'),
+          reason: '$leg keeps an unresolved legacy ADR id non-failing',
+        );
+      }
     });
 
     test('the compose-do-not-reinvent pointer RESOLVES in the live tree — a '

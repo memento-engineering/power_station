@@ -435,6 +435,8 @@ void main() {
   group('BdExportBeadSource — the A37 read-only fence (at the spawn seam)', () {
     // tg-w478 retired `bd export` (JSONL) in favour of `bd query --json`,
     // which returns a schema-versioned envelope rather than a JSONL stream.
+    // This fence pins the amended mechanism, not A11's original export argv:
+    // power_station#the-per-store-bead-read-is-scoped-never-the-export-surface.
     const jsonl =
         '{"schema_version":1,"data":['
         '{"id":"al-1","title":"hello flux","status":"open",'

@@ -29,7 +29,12 @@ FilingRequirementRow _dependencies(
   List<BeadDependency> edges, {
   Set<String>? armed,
 }) => const FilingContract()
-    .evaluate(bead, edges, armedSubstations: armed)
+    .evaluate(
+      bead,
+      edges,
+      evidence: FilingEvidence.unavailable,
+      armedSubstations: armed,
+    )
     .requirements
     .singleWhere((row) => row.requirement == FilingRequirement.dependencies);
 
@@ -62,7 +67,12 @@ void main() {
       List<BeadDependency> edges, [
       Set<String>? armed,
     ]) => const FilingContract()
-        .evaluate(subject, edges, armedSubstations: armed)
+        .evaluate(
+          subject,
+          edges,
+          evidence: FilingEvidence.unavailable,
+          armedSubstations: armed,
+        )
         .approvalRevision;
 
     final baseline = rev(bead, const [one, two]);
@@ -189,7 +199,10 @@ void main() {
     // A report with no bead to evaluate carries no revision.
     expect(FilingReport.missing('pow-gone').approvalRevision, isEmpty);
     expect(
-      const FilingContract().evaluate(bead, const [one, two]).toJson(),
+      const FilingContract().evaluate(bead, const [
+        one,
+        two,
+      ], evidence: FilingEvidence.unavailable).toJson(),
       containsPair('approval_revision', baseline),
     );
   });
