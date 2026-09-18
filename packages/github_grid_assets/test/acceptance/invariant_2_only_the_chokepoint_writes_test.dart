@@ -259,10 +259,10 @@ void main() {
           },
         ),
       );
-      await settle(() => f.provider.started.length >= 6);
+      await settle(() => f.provider.started.length >= 5);
       expect(
         f.provider.started,
-        hasLength(6),
+        hasLength(5),
         reason:
             'the four committee critics fanned out after specify + '
             'the agent',
@@ -383,17 +383,16 @@ void main() {
       //      stamps at admission (the_grid tg-zlfu),
       //   3. `create --graph`, pouring the session's `type=step` beads (the
       //      molecule mint's second hop, tg-eli phase 2), and
-      //   4. ONE `gate` at the deterministic `code-validation` lane. NOTHING
-      //      runs in this offline drive, so that lane's `.rc` never lands and
-      //      its completion artifact is never durable — a `noResult`, which
-      //      the lane declares as a budget of ONE (see
-      //      `CriticCapability.supervisionPolicy`): re-running an unchanged
-      //      deterministic script cannot produce the rc it did not produce the
-      //      first time, so the gate is the FIRST thing an rc-less run yields
-      //      instead of arriving 25 minutes into a harness-throttle ladder.
-      //      Named HERE deliberately, and it is itself a chokepoint write —
-      //      `--actor grid-controller`, through the one writer, which is
-      //      exactly what this invariant is about.
+      //   4. ONE `gate` at the committee `route`. NOTHING runs in this
+      //      offline drive, so the three MODEL critics never write a verdict
+      //      and the route fail-closes on them. The deterministic
+      //      `code-validation` lane no longer parks here: it is a
+      //      ServiceCapability whose offline posture is an explicit clean
+      //      delta (no worktree ⇒ nothing to compare ⇒ no process and no
+      //      filesystem IO), so the park moved to the one lane that really did
+      //      produce nothing. Named HERE deliberately, and it is itself a
+      //      chokepoint write — `--actor grid-controller`, through the one
+      //      writer, which is exactly what this invariant is about.
       // Asserted by SHAPE, not by a bare count (power_station #119's idiom,
       // ported): a hard total flips between a published-dep run and a
       // path-override run, because the `mount-attempt` admission write only
@@ -410,11 +409,11 @@ void main() {
             'an unrecognised create means a NEW write reached the '
             'chokepoint — name it here deliberately, never let it in silently',
       );
-      // The gate is the GATING lane's, not a stray park elsewhere.
+      // The gate is the committee ROUTE's, not a stray park elsewhere.
       expect([
         for (final call in f.runner.callsFor('create'))
           if (call.contains('gate')) call.join(' '),
-      ], everyElement(contains('tg-1/review/$kGatingRubric')));
+      ], everyElement(contains('tg-1/review/route')));
       expect(f.runner.callsFor('update'), isNotEmpty);
       expect(f.runner.callsFor('close'), hasLength(1));
       // The land Service really ran its orchestration through the fakes.

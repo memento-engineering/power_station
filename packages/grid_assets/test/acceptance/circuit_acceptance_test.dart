@@ -95,7 +95,10 @@ List<Bead> _session({
 /// `SiblingView` actually reads (`session_scope.dart`'s `results =
 /// stepResults`), unlike [committeeSession]'s own `grades:` (session-bead
 /// only, the flat model's shape).
-List<Bead> _withGradedCritics(List<Bead> beads) {
+List<Bead> _withGradedCritics(
+  List<Bead> beads, {
+  Map<String, Map<String, String>> overrides = const {},
+}) {
   final criticIds = {
     for (final n in kCriticNodes) '$_sid-${n.replaceAll('/', '-')}': n,
   };
@@ -105,7 +108,21 @@ List<Bead> _withGradedCritics(List<Bead> beads) {
         b.copyWith(
           metadata: {
             ...b.metadata,
-            ...nodeResultMetadata('tg-1/${criticIds[b.id]}', {'grade': 'A'}),
+            ...nodeResultMetadata('tg-1/${criticIds[b.id]}', {
+              'grade': 'A',
+              // The two DETERMINISTIC lanes decide on MACHINE-READABLE
+              // evidence now, so the re-projection carries what they really
+              // wrote: an empty delta and an empty missing set.
+              ...switch (criticIds[b.id]!.split('/').last) {
+                kGatingRubric => const {
+                  'regressions': '[]',
+                  'preexisting': '[]',
+                },
+                kDeclaredTestsRubric => const {'missing': '[]'},
+                _ => const <String, String>{},
+              },
+              ...?overrides[criticIds[b.id]!.split('/').last],
+            }),
           },
         )
       else
@@ -275,6 +292,18 @@ class _ToplevelAwareGitRunner implements GitRunner {
     if (args.length >= 2 && args[0] == 'rev-list' && args[1] == '--count') {
       return const GitRunResult(exitCode: 0, output: '1\n');
     }
+    // The merge-base COMPARISON's two reads, answered the same way and for the
+    // same reason: a deterministic base commit and a scratch checkout that
+    // "succeeds" without touching disk, neither of which is a land op.
+    if (args.isNotEmpty && args[0] == 'merge-base') {
+      return const GitRunResult(
+        exitCode: 0,
+        output: 'basesha0000000000000000000000000000000000\n',
+      );
+    }
+    if (args.isNotEmpty && args[0] == 'worktree') {
+      return const GitRunResult(exitCode: 0, output: '');
+    }
     final result = await _inner.run(
       workingDirectory: workingDirectory,
       args: args,
@@ -409,11 +438,9 @@ Future<void> _markStarted(Fakes f, String name) async {
 void _plantAllPassVerdicts(String workspaceDir, String workBeadId) {
   final dir = Directory('$workspaceDir/.grid/critique')
     ..createSync(recursive: true);
-  File(
-    '${dir.path}/${kCriticNodes.first.split('/').last}.rc',
-  ).writeAsStringSync('0');
-  for (final rubric
-      in kProcessCriticNodes.skip(1).map((n) => n.split('/').last)) {
+  // The deterministic `code-validation` lane needs nothing planted: it writes
+  // its OWN delta receipts, and the injected shell fake makes both sides clean.
+  for (final rubric in kProcessCriticNodes.map((n) => n.split('/').last)) {
     File('${dir.path}/$rubric.json').writeAsStringSync(
       jsonEncode({
         'grade': 'A',
@@ -555,21 +582,21 @@ void main() {
           reason: 'critic $critic fanned out after the agent',
         );
       }
-      // Both lanes spawn `sh` (FT-2 wraps claude for usage capture): the
-      // gating lane runs the Validation Plan, an LLM lane exec's claude.
-      final gating = f.provider.started.firstWhere(
-        (s) => s.name == _step(kCriticNodes.first),
-      );
-      expect(gating.config.command, 'sh');
+      // The DETERMINISTIC validation lane spawns NOTHING: it is a
+      // ServiceCapability that compares the plan against the merge base
+      // in-process, so only the three MODEL critics reach the provider (each
+      // `sh`-wrapped for FT-2 usage capture around claude).
       expect(
-        gating.config.args[1],
-        contains('.grid/critique/code-validation.rc'),
+        f.provider.started.any((s) => s.name == _step(kCriticNodes.first)),
+        isFalse,
+        reason: 'code-validation is a service, never a spawned job',
       );
-      final llm = f.provider.started.firstWhere(
-        (s) => s.name == _step(kProcessCriticNodes[1]),
-      );
-      expect(llm.config.command, 'sh');
-      expect(llm.config.args, contains('claude'));
+      for (final critic in _criticSteps) {
+        final llm = f.provider.started.firstWhere((s) => s.name == critic);
+        expect(llm.config.command, 'sh');
+        expect(llm.config.args, contains('claude'));
+      }
+      expect(_criticSteps, hasLength(3));
 
       // 3) all four critics complete with PASSING grades → the route joins
       //    (await-all), reads the grades via the SiblingView, and advances (Ok).
@@ -735,12 +762,28 @@ void main() {
       final tmp = Directory.systemTemp.createTempSync('circuit-acc');
       addTearDown(() => tmp.deleteSync(recursive: true));
       _provisionCheckout(tmp.path, 'tg-1');
+      // The plan FAILS on the branch and PASSES at the merge base — a real
+      // regression, which is the ONLY thing that may hard-block now
+      // (`power_station#code-validation-hard-blocks-only-branch-regressions`).
+      final validationShell = RecordingShellRunner()
+        ..resultsByDirectory[WorktreeLayout.worktreePath(
+          tmp.path,
+          'tg',
+          'tg-1',
+        )] = const ShellRunResult(
+          exitCode: 1,
+          output:
+              'Some tests failed.\n'
+              'Failing tests:\n'
+              ' - test/regressed_test.dart 4:2 the branch case',
+        );
       final station = _buildStation(
         f,
         work,
         state,
         workspaceRoot: tmp.path,
         transport: transport,
+        shellRunner: validationShell,
       );
       addTearDown(station.dispose);
       addTearDown(f.provider.close);
@@ -782,21 +825,44 @@ void main() {
         ),
       );
       await _settle(f);
+      _plantAllPassVerdicts(
+        WorktreeLayout.worktreePath(tmp.path, 'tg', 'tg-1'),
+        'tg-1',
+      );
       for (final critic in _criticSteps) {
         await _markStarted(f, critic);
         f.provider.emit(Exited(name: critic, exitCode: 0));
       }
       await _settle(f);
 
-      // The gating lane (code-validation) graded F (a non-zero Validation Plan);
-      // the others passed → the route's matrix is a HARD BLOCK.
+      // The lane's OWN receipts: the branch's failure is absent at the base, so
+      // it is a REGRESSION and the effective rc is the raw one.
+      final critique =
+          '${WorktreeLayout.worktreePath(tmp.path, 'tg', 'tg-1')}/.grid/critique';
+      expect(
+        jsonDecode(File('$critique/code-validation.json').readAsStringSync()),
+        containsPair('regressions', [
+          'test/regressed_test.dart 4:2 the branch case',
+        ]),
+      );
+      expect(
+        File('$critique/code-validation.rc').readAsStringSync().trim(),
+        '1',
+      );
+
+      // The deterministic lane graded F on that regression; every model critic
+      // passed → the route's matrix is a HARD BLOCK.
       state.push(
         _state(
-          _session(
-            completed: {kAgentNode, ...kCriticNodes},
-            grades: {
-              kCriticNodes.first: 'F', // code-validation
-              for (final n in kCriticNodes.skip(1)) n: 'A',
+          _withGradedCritics(
+            _session(completed: {kAgentNode, ...kCriticNodes}),
+            overrides: const {
+              kGatingRubric: {
+                'grade': 'F',
+                'regressions':
+                    '["test/regressed_test.dart 4:2 the branch case"]',
+                'preexisting': '[]',
+              },
             },
           ),
         ),
@@ -825,12 +891,18 @@ void main() {
       // run + close when the route advances.)
       state.push(
         _state(
-          _session(
-            completed: {kAgentNode, ...kCriticNodes},
-            gated: {kRouteNode},
-            grades: {
-              kCriticNodes.first: 'F',
-              for (final n in kCriticNodes.skip(1)) n: 'A',
+          _withGradedCritics(
+            _session(
+              completed: {kAgentNode, ...kCriticNodes},
+              gated: {kRouteNode},
+            ),
+            overrides: const {
+              kGatingRubric: {
+                'grade': 'F',
+                'regressions':
+                    '["test/regressed_test.dart 4:2 the branch case"]',
+                'preexisting': '[]',
+              },
             },
           ),
         ),

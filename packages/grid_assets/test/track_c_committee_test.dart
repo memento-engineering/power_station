@@ -142,6 +142,11 @@ Branch _stepBranch(Branch root, String nodePath) => _allBranches(
 ).singleWhere((branch) => branch.seed.key == ValueKey(nodePath));
 
 String _c(String stepId) => 'critic(tgdog-s/tg-1/$stepId)';
+
+/// The DETERMINISTIC validation lane's mount label — bound to its OWN service
+/// capability, never the `critic` process family, so it records under its own
+/// capability id while still sitting in the same frontier.
+const String _codeValidation = 'code-validation(tgdog-s/tg-1/code-validation)';
 const _declared =
     'START declared-tests-present(tgdog-s/tg-1/declared-tests-present)';
 const _selector = 'START committee-selection(tgdog-s/tg-1/committee-selection)';
@@ -203,7 +208,9 @@ void main() {
       // this is what a `declared-tests-present` non-result withholds).
       c.advance({'tg-1/format-clean': _done()});
       expect(
-        c.events.any((e) => e.contains('critic(')),
+        c.events.any(
+          (e) => e.contains('critic(') || e.contains('code-validation('),
+        ),
         isFalse,
         reason: 'declared-tests-present still pending ⇒ every lane waits',
       );
@@ -217,7 +224,7 @@ void main() {
       expect(
         c.events,
         containsAll([
-          'START ${_c('code-validation')}',
+          'START $_codeValidation',
           'START ${_c('spec-adherence')}',
           'START ${_c('regression-risk')}',
           'START ${_c('test-coverage')}',

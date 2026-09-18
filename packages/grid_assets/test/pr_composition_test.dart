@@ -488,4 +488,75 @@ void main() {
       );
     },
   );
+
+  // The delta ruling's PR half: a failure the merge base already had is a NOTE
+  // in the receipt, never a gate
+  // (`power_station#code-validation-hard-blocks-only-branch-regressions`).
+  group('pre-existing-only validation notes ride the circuit receipt', () {
+    SiblingView siblingsWith(Map<String, String> validation) => SiblingView(
+      results: {
+        'tg-1/land/rebase': const {'outcome': 'clean'},
+        'tg-1/land/revalidate': const {'outcome': 'passed'},
+        'tg-1/review/code-validation': validation,
+      },
+    );
+
+    String bodyFor(Map<String, String> validation) =>
+        const PrComposition().bodyOf(
+          _context(
+            bead: const Bead(id: 'tg-1'),
+            siblings: siblingsWith(validation),
+          ),
+        );
+
+    test('pre-existing-only validation names each test once, after the '
+        'revalidate line', () {
+      final body = bodyFor(const {
+        'grade': 'A',
+        'regressions': '[]',
+        'preexisting':
+            '["test/b_test.dart 1:1 beta","test/a_test.dart 2:2 alpha",'
+            '"test/a_test.dart 2:2 alpha"]',
+      });
+      expect(
+        body,
+        contains(
+          '- revalidate: passed\n'
+          '- pre-existing on base: test/a_test.dart 2:2 alpha\n'
+          '- pre-existing on base: test/b_test.dart 1:1 beta\n',
+        ),
+      );
+      expect(
+        'test/a_test.dart 2:2 alpha'.allMatches(body).length,
+        1,
+        reason: 'deduplicated, and sorted',
+      );
+    });
+
+    test('an EMPTY or absent set emits no line at all', () {
+      expect(
+        bodyFor(const {'grade': 'A', 'regressions': '[]', 'preexisting': '[]'}),
+        isNot(contains('pre-existing on base')),
+      );
+      expect(
+        bodyFor(const {'grade': 'A'}),
+        isNot(contains('pre-existing on base')),
+      );
+    });
+
+    test('MALFORMED data emits no prose — a receipt never asserts provenance '
+        'it could not read', () {
+      for (final malformed in const [
+        'not json',
+        '{"not":"an array"}',
+        '[1,2,3]',
+      ]) {
+        expect(
+          bodyFor({'grade': 'A', 'preexisting': malformed}),
+          isNot(contains('pre-existing on base')),
+          reason: malformed,
+        );
+      }
+    });
+  });
 }

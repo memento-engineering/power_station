@@ -88,7 +88,20 @@ List<Bead> _withGradedCritics(List<Bead> beads) {
         b.copyWith(
           metadata: {
             ...b.metadata,
-            ...nodeResultMetadata('tg-1/${criticIds[b.id]}', {'grade': 'A'}),
+            ...nodeResultMetadata('tg-1/${criticIds[b.id]}', {
+              'grade': 'A',
+              // The two DETERMINISTIC lanes decide on MACHINE-READABLE
+              // evidence now, so the re-projection carries what they really
+              // wrote: an empty delta and an empty missing set.
+              ...switch (criticIds[b.id]!.split('/').last) {
+                kGatingRubric => const {
+                  'regressions': '[]',
+                  'preexisting': '[]',
+                },
+                kDeclaredTestsRubric => const {'missing': '[]'},
+                _ => const <String, String>{},
+              },
+            }),
           },
         )
       else
@@ -247,6 +260,15 @@ class _ToplevelAwareGitRunner implements GitRunner {
     required String workingDirectory,
     required List<String> args,
   }) async {
+    // The merge-base COMPARISON's two reads, answered WITHOUT delegating: a
+    // deterministic base commit and a scratch checkout that "succeeds" without
+    // touching disk, neither of which is a land op the suite asserts on.
+    if (args.isNotEmpty && args[0] == 'merge-base') {
+      return const GitRunResult(exitCode: 0, output: '$kFakeMergeBase\n');
+    }
+    if (args.isNotEmpty && args[0] == 'worktree') {
+      return const GitRunResult(exitCode: 0, output: '');
+    }
     final result = await _inner.run(
       workingDirectory: workingDirectory,
       args: args,
@@ -381,11 +403,9 @@ Future<void> _markStarted(Fakes f, String name) async {
 void _plantAllPassVerdicts(String workspaceDir, String workBeadId) {
   final dir = Directory('$workspaceDir/.grid/critique')
     ..createSync(recursive: true);
-  File(
-    '${dir.path}/${kCriticNodes.first.split('/').last}.rc',
-  ).writeAsStringSync('0');
-  for (final rubric
-      in kProcessCriticNodes.skip(1).map((n) => n.split('/').last)) {
+  // The deterministic `code-validation` lane needs nothing planted: it writes
+  // its OWN delta receipts, and the injected shell fake makes both sides clean.
+  for (final rubric in kProcessCriticNodes.map((n) => n.split('/').last)) {
     File('${dir.path}/$rubric.json').writeAsStringSync(
       jsonEncode({
         'grade': 'A',
@@ -527,21 +547,21 @@ void main() {
           reason: 'critic $critic fanned out after the agent',
         );
       }
-      // Both lanes spawn `sh` (FT-2 wraps claude for usage capture): the
-      // gating lane runs the Validation Plan, an LLM lane exec's claude.
-      final gating = f.provider.started.firstWhere(
-        (s) => s.name == _step(kCriticNodes.first),
-      );
-      expect(gating.config.command, 'sh');
+      // The DETERMINISTIC validation lane spawns NOTHING: it is a
+      // ServiceCapability that compares the plan against the merge base
+      // in-process, so only the three MODEL critics reach the provider (each
+      // `sh`-wrapped for FT-2 usage capture around claude).
       expect(
-        gating.config.args[1],
-        contains('.grid/critique/code-validation.rc'),
+        f.provider.started.any((s) => s.name == _step(kCriticNodes.first)),
+        isFalse,
+        reason: 'code-validation is a service, never a spawned job',
       );
-      final llm = f.provider.started.firstWhere(
-        (s) => s.name == _step(kProcessCriticNodes[1]),
-      );
-      expect(llm.config.command, 'sh');
-      expect(llm.config.args, contains('claude'));
+      for (final critic in _criticSteps) {
+        final llm = f.provider.started.firstWhere((s) => s.name == critic);
+        expect(llm.config.command, 'sh');
+        expect(llm.config.args, contains('claude'));
+      }
+      expect(_criticSteps, hasLength(3));
 
       // 3) all four critics complete with PASSING grades → the route joins
       //    (await-all), reads the grades via the SiblingView, and advances (Ok).

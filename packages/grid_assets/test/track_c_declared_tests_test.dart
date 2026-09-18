@@ -131,6 +131,7 @@ Future<void> _expectSelfReferenceAuthored(String design) async {
   expect(outcome.payload, {
     'grade': 'F',
     'transport': 'structural',
+    'missing': '["$_selfPath"]',
     'rationale':
         'Design-declared test files missing from pinned diff: $_selfPath',
   }, reason: design);
@@ -145,6 +146,7 @@ void main() {
     expect(outcome.payload, {
       'grade': 'F',
       'transport': 'structural',
+      'missing': '["test/two_test.dart"]',
       'rationale':
           'Design-declared test files missing from pinned diff: test/two_test.dart',
     });
@@ -191,6 +193,7 @@ Test: cd packages/grid_assets && dart test test/verdict_transport_test.dart
     expect(outcome.payload, {
       'grade': 'F',
       'transport': 'structural',
+      'missing': '["test/absent_test.dart"]',
       'rationale':
           'Design-declared test files missing from pinned diff: test/absent_test.dart',
     });
@@ -204,6 +207,7 @@ Test: cd packages/grid_assets && dart test test/verdict_transport_test.dart
     expect(outcome.payload, {
       'grade': 'F',
       'transport': 'structural',
+      'missing': '["test/respec_test.dart"]',
       'rationale':
           'Design-declared test files missing from pinned diff: test/respec_test.dart',
     });
@@ -285,6 +289,7 @@ unchanged after the revert.
     expect(outcome.payload, {
       'grade': 'F',
       'transport': 'structural',
+      'missing': '["test/new_gate_test.dart"]',
       'rationale':
           'Design-declared test files missing from pinned diff: test/new_gate_test.dart',
     });
@@ -300,6 +305,7 @@ unchanged after the revert.
     expect(outcome.payload, {
       'grade': 'F',
       'transport': 'structural',
+      'missing': '["$path"]',
       'rationale': 'Design-declared test files missing from pinned diff: $path',
     });
   });
@@ -348,6 +354,7 @@ create test/unquoted_test.dart
     expect(outcome.payload, {
       'grade': 'F',
       'transport': 'structural',
+      'missing': '["$path"]',
       'rationale': 'Design-declared test files missing from pinned diff: $path',
     });
   });
@@ -363,6 +370,7 @@ create test/unquoted_test.dart
     expect(outcome.payload, {
       'grade': 'F',
       'transport': 'structural',
+      'missing': '["$path"]',
       'rationale': 'Design-declared test files missing from pinned diff: $path',
     });
   });
@@ -382,6 +390,7 @@ Modify the authored regression test at
     expect(outcome.payload, {
       'grade': 'F',
       'transport': 'structural',
+      'missing': '["$path"]',
       'rationale': 'Design-declared test files missing from pinned diff: $path',
     });
   });
@@ -440,6 +449,7 @@ Modify the authored regression test at
     expect(outcome.payload, {
       'grade': 'F',
       'transport': 'structural',
+      'missing': '["$path"]',
       'rationale': 'Design-declared test files missing from pinned diff: $path',
     });
   });
@@ -553,6 +563,7 @@ Re-validated against the live tree: the fallback-link coverage lives in
     expect(outcome.payload, {
       'grade': 'F',
       'transport': 'structural',
+      'missing': '["$path"]',
       'rationale': 'Design-declared test files missing from pinned diff: $path',
     });
   });
@@ -571,6 +582,7 @@ Re-validated against the live tree: the fallback-link coverage lives in
     expect(outcome.payload, {
       'grade': 'F',
       'transport': 'structural',
+      'missing': '["$path"]',
       'rationale': 'Design-declared test files missing from pinned diff: $path',
     });
   });
@@ -769,6 +781,7 @@ The fake mirrors the shape already used in `test/roster_test.dart`.
     expect(outcome.payload, {
       'grade': 'F',
       'transport': 'structural',
+      'missing': '["test/pair_y_test.dart"]',
       'rationale':
           'Design-declared test files missing from pinned diff: '
           'test/pair_y_test.dart',
@@ -838,6 +851,7 @@ The regression coverage is listed under ## Declared Tests below.
     expect(outcome.payload, {
       'grade': 'F',
       'transport': 'structural',
+      'missing': '["$path"]',
       'rationale': 'Design-declared test files missing from pinned diff: $path',
     });
   });
@@ -925,6 +939,7 @@ package:leonard_contract/src/strike_counter.dart
     expect(outcome.payload, {
       'grade': 'F',
       'transport': 'structural',
+      'missing': '["$authored"]',
       'rationale':
           'Design-declared test files missing from pinned diff: $authored',
     });
@@ -1044,5 +1059,51 @@ Change: Create this authority-level regression file using the existing Recording
       existingFiles: const [liveCited],
     );
     expect(outcome.payload?['grade'], 'A');
+  });
+
+  // The gate's payload is MACHINE-READABLE now: the route subtracts the
+  // declared paths the code-validation comparison proved already fail at the
+  // merge base, and it can only do that from a set it can decode
+  // (`power_station#code-validation-hard-blocks-only-branch-regressions`). The
+  // CLASSIFICATION above is untouched — this gate still knows nothing about
+  // pre-existing failures, and says so by naming every missing path.
+  group('the machine-readable missing set', () {
+    test('a pre-existing declared test is still MISSING to this gate — the '
+        'subtraction is the route\'s, not the lane\'s', () async {
+      final outcome = await _runGate(
+        design: 'Create `test/one_test.dart`. Modify `test/two_test.dart`.',
+        diff: _diffFor(['test/one_test.dart']),
+      );
+      expect(outcome.payload?['grade'], 'F');
+      expect(
+        outcome.payload?['missing'],
+        '["test/two_test.dart"]',
+        reason: 'the set is sorted JSON the route decodes strictly',
+      );
+    });
+
+    test('a clean gate carries a decodable EMPTY set', () async {
+      final outcome = await _runGate(
+        design: 'Create `test/one_test.dart`.',
+        diff: _diffFor(['test/one_test.dart']),
+      );
+      expect(outcome.payload?['grade'], 'A');
+      expect(outcome.payload?['missing'], '[]');
+    });
+
+    test(
+      'the set is SORTED, whatever order the design named the paths in',
+      () async {
+        final outcome = await _runGate(
+          design:
+              'Create `test/zeta_test.dart`. Create `test/alpha_test.dart`.',
+          diff: _diffFor(['lib/x.dart']),
+        );
+        expect(
+          outcome.payload?['missing'],
+          '["test/alpha_test.dart","test/zeta_test.dart"]',
+        );
+      },
+    );
   });
 }
