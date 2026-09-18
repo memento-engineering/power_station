@@ -506,6 +506,16 @@ void main() {
   // `claude`-env successor unprimed, which is the whole defect class.
   group('the LAUNCHER\'s consumed handoff is the priming (pow-d5ol)', () {
     const seated = {'GRID_SEAT': 'governor'};
+    // The grid-home-relative archived copy the launcher declares beside the
+    // body — the shape a LOCAL archive writes.
+    final archived = p.join(
+      '.grid',
+      'seats',
+      'governor',
+      '.archive',
+      '20260915t101500z',
+      'handoff-20260915t101500z.md',
+    );
 
     test('an EMPTY disc still primes the successor — the shape the launcher '
         'leaves behind', () async {
@@ -542,6 +552,7 @@ void main() {
             ...seated,
             'GRID_HOME': home.path,
             'GRID_SEAT_HANDOFF': 'CONSUMED BODY',
+            'GRID_SEAT_HANDOFF_ARCHIVE': archived,
           },
         ),
       );
@@ -549,9 +560,9 @@ void main() {
       expect(
         context,
         contains(
-          'Handoff — CONSUMED by the launcher before this session started: it '
-          'archived the disc and deleted the note and its index line. Act on '
-          'Resume here; there is nothing on the disc and no verb to run.',
+          'Handoff — CONSUMED by the launcher before this session started: the '
+          'note was archived at $archived, then its live copy and index line '
+          'were deleted. Act on Resume here; no succession verb is owed.',
         ),
       );
       expect(
@@ -617,20 +628,133 @@ void main() {
       expect(context, isNot(contains('DISC BODY')));
     });
 
-    test('a withheld consumed body points at the ARCHIVE, never at a disc '
-        'that no longer holds it', () {
+    test('a withheld consumed body points at its ARCHIVED copy, one read '
+        'away', () {
+      final consumed = PrimeHandoff.consumed('BODY', archivePath: archived);
+      final withheld = consumed.withheld(4);
+      expect(
+        withheld.body,
+        'Withheld: 4 handoff-body bytes; read $archived from the Agent Disc.',
+      );
+      expect(
+        withheld.body,
+        isNot(contains('names the archive')),
+        reason: 'the pointer IS the path — it never defers to another line',
+      );
+      expect(
+        withheld.namingLine,
+        consumed.namingLine,
+        reason: 'the fact that a handoff exists is never the cut',
+      );
+    });
+
+    test('a withheld consumed body with no archive path says the path is '
+        'unknown rather than claiming it is named', () {
       final withheld = PrimeHandoff.consumed('BODY').withheld(4);
       expect(
         withheld.body,
-        'Withheld: 4 handoff-body bytes; the launcher archived this note '
-        'before deleting it — its CONSUMED line names the archive.',
+        'Withheld: 4 handoff-body bytes; the archive path is unknown.',
       );
+      expect(withheld.body, isNot(contains('names the archive')));
       expect(withheld.body, isNot(contains('from the Agent Disc')));
+    });
+
+    // The measured defect: every governor handoff runs 9.5–10.8 KB, so the
+    // body can never fit the 8000-byte bound. The naming line is what
+    // survives, and it must be enough to reach the body in ONE read.
+    test('an oversized consumed handoff keeps its archive path in the naming '
+        'line while the body is withheld', () async {
+      final body = List.filled(
+        300,
+        'Resume here — the governor brief, line after line.',
+      ).join('\n');
+      final bodyBytes = utf8.encode(body).length;
+      expect(bodyBytes, greaterThan(10000));
+      final out = StringBuffer();
       expect(
-        withheld.namingLine,
-        PrimeHandoff.consumed('BODY').namingLine,
-        reason: 'the fact that a handoff exists is never the cut',
+        await station(
+          out: out,
+          bdStdout: _hook('BD'),
+          environment: {
+            ...seated,
+            'GRID_HOME': home.path,
+            'GRID_SEAT_HANDOFF': body,
+            'GRID_SEAT_HANDOFF_ARCHIVE': '  $archived\n',
+          },
+        ).run(['prime', '--hook-json']),
+        0,
       );
+      expect(_bytes(out), lessThanOrEqualTo(kBoundedOutputCapBytes));
+      final context = contextOf(
+        jsonDecode(out.toString().trim()) as Map<String, Object?>,
+      );
+
+      expect(
+        context,
+        contains(
+          'Handoff — CONSUMED by the launcher before this session started: the '
+          'note was archived at $archived, then its live copy and index line '
+          'were deleted. Act on Resume here; no succession verb is owed.',
+        ),
+      );
+      expect(
+        context,
+        endsWith(
+          'Withheld: $bodyBytes handoff-body bytes; read $archived from the '
+          'Agent Disc.',
+        ),
+      );
+      expect(context, isNot(contains('Resume here — the governor brief')));
+      expect(context, isNot(contains('names the archive')));
+    });
+
+    test('a consumed handoff with no archive declaration says its archive '
+        'path is unknown', () async {
+      // Absent, and declared blank: neither names a path.
+      for (final declaration in <String?>[null, '   ']) {
+        final context = contextOf(
+          await prime(
+            bdStdout: _hook('BD'),
+            environment: {
+              ...seated,
+              'GRID_HOME': home.path,
+              'GRID_SEAT_HANDOFF': 'CONSUMED BODY',
+              'GRID_SEAT_HANDOFF_ARCHIVE': ?declaration,
+            },
+          ),
+        );
+        expect(
+          context,
+          contains(
+            'Handoff — CONSUMED by the launcher before this session started: '
+            'the note was archived, but the archive path is unknown; its live '
+            'copy and index line were deleted. Act on Resume here; no '
+            'succession verb is owed.',
+          ),
+          reason: '$declaration',
+        );
+        expect(context, isNot(contains('archived at')), reason: '$declaration');
+        expect(context, endsWith('CONSUMED BODY'), reason: '$declaration');
+      }
+    });
+
+    test('an archive declaration WITHOUT a consumed body cannot displace the '
+        'disc', () async {
+      writeNote('governor', 'handoff.md', 'DISC BODY');
+      final context = contextOf(
+        await prime(
+          bdStdout: _hook('BD'),
+          environment: {
+            ...seated,
+            'GRID_HOME': home.path,
+            'GRID_SEAT_HANDOFF_ARCHIVE': archived,
+          },
+        ),
+      );
+      expect(context, endsWith('DISC BODY'));
+      expect(context, contains('still on the disc'));
+      expect(context, isNot(contains('CONSUMED')));
+      expect(context, isNot(contains(archived)));
     });
   });
 

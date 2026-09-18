@@ -21,9 +21,12 @@
 /// segment or a channel's first message under `SeatPrimeMode.prompt`, and
 /// [kConsumedHandoffEnvironmentVariable] under `SeatPrimeMode.hook`, where the
 /// child's own SessionStart hook (`prime`) injects it — the note it would once
-/// have read off the disc is gone by then, because this loop consumed it. An
-/// environment that declares NEITHER transport refuses BEFORE the consume: the
-/// note stays on the disc rather than being destroyed on the way to nobody.
+/// have read off the disc is gone by then, because this loop consumed it. A
+/// locally archived note's path rides beside it in
+/// [kConsumedHandoffArchiveEnvironmentVariable], so a body `prime`'s bound
+/// withholds is one read away. An environment that declares NEITHER transport
+/// refuses BEFORE the consume: the note stays on the disc rather than being
+/// destroyed on the way to nobody.
 ///
 /// Harness-NEUTRAL by construction: this library reads only declarations
 /// (`seat_launch.dart`), and a fence in `test/seat/seat_command_test.dart`
@@ -430,6 +433,7 @@ class SeatCommand extends Command<int> {
           gridHome: gridHome,
           discDirectory: disc.directory,
           handoffBody: consumed.body,
+          handoffArchivePath: consumed.archivePath,
         ),
       );
       if (once || !disc.hasHandoffNewerThan(launchedAt)) return code;
@@ -444,7 +448,13 @@ class SeatCommand extends Command<int> {
   /// successor is primed with is the note that reached an archive. The two
   /// sinks are the disc's own business ([SeatSuccessionService]); the launcher
   /// only reports which one answered.
-  Future<({String? body, bool refused})> _consume({
+  ///
+  /// `archivePath` is the grid-home-relative path of the note's archived copy
+  /// — the one read that recovers a body `prime` withholds. Only the LOCAL sink
+  /// has one: it copies the note into its archive directory under the note's
+  /// own file name. A git-sink archive is a commit, not a path, and every other
+  /// disposition archived nothing, so each of those carries null.
+  Future<({String? body, String? archivePath, bool refused})> _consume({
     required String gridHome,
     required String seat,
   }) async {
@@ -456,7 +466,7 @@ class SeatCommand extends Command<int> {
     final head = 'seat: $seat';
     switch (report.disposition) {
       case SeatSuccessionDisposition.noHandoff:
-        return (body: null, refused: false);
+        return (body: null, archivePath: null, refused: false);
       case SeatSuccessionDisposition.consumed:
         _out.writeln(
           '$head — CONSUMED ${report.candidate} '
@@ -470,7 +480,19 @@ class SeatCommand extends Command<int> {
         if (pruneRefusal != null) {
           _err.writeln('$head — PRUNE INCOMPLETE: $pruneRefusal');
         }
-        return (body: report.body, refused: false);
+        return (
+          body: report.body,
+          archivePath: switch ((
+            report.sink,
+            report.archive,
+            report.candidate,
+          )) {
+            (SeatArchiveSink.local, final String archive, final String note) =>
+              p.join(archive, p.basename(note)),
+            _ => null,
+          },
+          refused: false,
+        );
       case SeatSuccessionDisposition.refused:
         _err.writeln('$head — HANDOFF NOT CONSUMED: ${report.refusal}');
         for (final path in report.handoffs) {
@@ -480,7 +502,7 @@ class SeatCommand extends Command<int> {
           '$head — nothing was launched: a successor that starts over an '
           'unresolved disc writes a second note beside the first.',
         );
-        return (body: null, refused: true);
+        return (body: null, archivePath: null, refused: true);
       case SeatSuccessionDisposition.preserved:
         // Unreachable by construction — the launcher always asks for the
         // destructive run — and reported rather than assumed away, because a
@@ -489,7 +511,7 @@ class SeatCommand extends Command<int> {
           '$head — HANDOFF NOT CONSUMED: the succession preserved '
           '${report.candidate} on a destructive run.',
         );
-        return (body: null, refused: true);
+        return (body: null, archivePath: null, refused: true);
     }
   }
 }

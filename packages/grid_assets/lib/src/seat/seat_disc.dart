@@ -149,7 +149,22 @@ const String kGridHomeEnvironmentVariable = 'GRID_HOME';
 /// starts — the launcher archived and deleted it — so the body travels in the
 /// process environment instead and `prime` injects it from there. ABSENT means
 /// this occupancy consumed nothing.
+///
+/// Its pair is [kConsumedHandoffArchiveEnvironmentVariable], which names where
+/// the note was archived.
 const String kConsumedHandoffEnvironmentVariable = 'GRID_SEAT_HANDOFF';
+
+/// The process env var naming the grid-home-relative path of the ARCHIVED copy
+/// of the handoff [kConsumedHandoffEnvironmentVariable] carries — the one read
+/// that recovers the body when `prime`'s bound withholds it.
+///
+/// Written only BESIDE a consumed body, by the same launcher, and only when
+/// the disc was archived under its own [kSeatArchiveSubdirectory]: a git-sink
+/// archive is a commit, not a path. `prime` reads it only beside a non-empty
+/// body, so on its own it declares nothing. ABSENT beside a body means the
+/// archive path is unknown, and `prime` says so rather than inventing one.
+const String kConsumedHandoffArchiveEnvironmentVariable =
+    'GRID_SEAT_HANDOFF_ARCHIVE';
 
 /// The ABSOLUTE disc directory of [seat] under [gridHome].
 String seatDiscPath(String gridHome, String seat) =>
