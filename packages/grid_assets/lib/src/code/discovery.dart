@@ -77,6 +77,7 @@ library;
 
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:beads_dart/beads_dart.dart';
 import 'package:crypto/crypto.dart';
@@ -345,6 +346,11 @@ class BoundedEvidence {
 /// text, clips the snippet at [kMaxDiscoverySnippetChars], and derives the
 /// state ([EvidenceState.truncated] on a clip) unless [state] forces one.
 ///
+/// The clip keeps the HEAD of the text, except for a recorded decision entry
+/// ([_kDecisionEntryKind]): its head is front matter and Context, the least
+/// load-bearing part, so a long MADR entry keeps its `## Decision Outcome`
+/// instead ([_clipDecisionEntrySnippet]).
+///
 /// [truncateSnippet] false carries the text whole and therefore records
 /// [EvidenceState.complete] — reserved for the WORK BEAD's own fields
 /// ([boundedBeadFields]), which are the round's primary input rather than
@@ -360,23 +366,137 @@ BoundedEvidence boundDiscoveryEvidence({
   bool truncateSnippet = true,
 }) {
   final digest = sha256.convert(utf8.encode(fullText)).toString();
+  final id = '$kind:${Uri.encodeComponent(subject)}@sha256:$digest';
   final wasTruncated =
       truncateSnippet && fullText.length > kMaxDiscoverySnippetChars;
   final resolvedState =
       state ??
       (wasTruncated ? EvidenceState.truncated : EvidenceState.complete);
+  final String snippet;
+  if (!wasTruncated) {
+    snippet = fullText;
+  } else {
+    final sectionAware = kind == _kDecisionEntryKind
+        ? _clipDecisionEntrySnippet(fullText, id: id, source: source)
+        : null;
+    snippet = sectionAware ?? fullText.substring(0, kMaxDiscoverySnippetChars);
+  }
   return BoundedEvidence(
-    id: '$kind:${Uri.encodeComponent(subject)}@sha256:$digest',
+    id: id,
     source: source,
-    snippet: wasTruncated
-        ? fullText.substring(0, kMaxDiscoverySnippetChars)
-        : fullText,
+    snippet: snippet,
     digest: digest,
     state: resolvedState,
     error: error.length > kMaxDiscoverySnippetChars
         ? error.substring(0, kMaxDiscoverySnippetChars)
         : error,
   );
+}
+
+/// The evidence kind of one recorded decision entry's body — the one kind
+/// [boundDiscoveryEvidence] clips around its load-bearing section.
+const String _kDecisionEntryKind = 'decision-entry';
+
+/// A YAML front-matter fence line, its line break included.
+final RegExp _frontMatterFence = RegExp(
+  r'^---[ \t]*(?:\r?\n|$)',
+  multiLine: true,
+);
+
+/// The exact MADR outcome heading, at a line start.
+final RegExp _decisionOutcomeHeading = RegExp(
+  r'^## Decision Outcome[ \t]*$',
+  multiLine: true,
+);
+
+/// Any level-two heading, at a line start — the end of the section before it.
+final RegExp _levelTwoHeading = RegExp(r'^## ', multiLine: true);
+
+/// [fullText], a decision entry over [kMaxDiscoverySnippetChars], clipped
+/// AROUND its load-bearing region — or null when the body does not carry both
+/// regions this recognizes, and the caller keeps the head clip rather than
+/// invent section boundaries.
+///
+/// The regions are the YAML front matter (the opening `---` line through the
+/// closing one: slug, status, surfaces, edges) and the `## Decision Outcome`
+/// section (through the next level-two heading, so an in-section
+/// `### Consequences` rides with it). A lens judges alignment against the
+/// Outcome; the head clip kept front matter and Context and cut the Outcome
+/// mid-clause, so a lens that needed a long entry's ruling never received it.
+///
+/// Both regions are kept whole when they fit. The spare budget is filled from
+/// the top of the text between them (title, Context, Considered Options), then
+/// from the top of any sections after the Outcome. When front matter plus the
+/// whole Outcome does not fit, the Outcome keeps its heading and prefix and
+/// only its tail is clipped — never the head of the file.
+///
+/// ONE marker sits directly above `## Decision Outcome` and names what was kept,
+/// what was withheld, and how to get the rest: the canonical [id] (whose digest
+/// is the complete body's) and the [source] file it was read from. The layout
+/// reserves room for the longest marker the case could need, so the snippet
+/// never exceeds the bound and the marker never names a clip that did not
+/// happen. A front matter too long to leave room for the Outcome heading is
+/// not a shape this recognizes either.
+String? _clipDecisionEntrySnippet(
+  String fullText, {
+  required String id,
+  required String source,
+}) {
+  final open = _frontMatterFence.matchAsPrefix(fullText);
+  if (open == null) return null;
+  final close = _frontMatterFence.allMatches(fullText, open.end).firstOrNull;
+  if (close == null) return null;
+  final heading = _decisionOutcomeHeading
+      .allMatches(fullText, close.end)
+      .firstOrNull;
+  if (heading == null) return null;
+  final outcomeEnd =
+      _levelTwoHeading.allMatches(fullText, heading.end).firstOrNull?.start ??
+      fullText.length;
+  final frontMatter = fullText.substring(0, close.end);
+  final middle = fullText.substring(close.end, heading.start);
+  final outcome = fullText.substring(heading.start, outcomeEnd);
+  final after = fullText.substring(outcomeEnd);
+
+  String marker(String kept, String withheld) =>
+      '\n[TRUNCATED: kept YAML front matter and $kept; $withheld. The complete '
+      'entry is $id; read it whole at $source.]\n\n';
+  const wholeOutcome =
+      'complete ## Decision Outcome (including ### Consequences when present)';
+  final middleElided = after.isEmpty
+      ? 'elided middle Context/Considered Options'
+      : 'elided middle Context/Considered Options and every section after '
+            '## Decision Outcome';
+  const afterClipped =
+      'elided the tail of the sections after ## Decision Outcome';
+  final outcomeTailMarker = marker(
+    'the head of ## Decision Outcome',
+    after.isEmpty
+        ? 'elided Context/Considered Options and clipped the Decision Outcome '
+              'tail'
+        : 'elided Context/Considered Options and every section after '
+              '## Decision Outcome, and clipped the Decision Outcome tail',
+  );
+  final reserve = [
+    marker(wholeOutcome, middleElided),
+    if (after.isNotEmpty) marker(wholeOutcome, afterClipped),
+    outcomeTailMarker,
+  ].map((candidate) => candidate.length).reduce(math.max);
+  final budget = kMaxDiscoverySnippetChars - reserve;
+
+  if (frontMatter.length + outcome.length <= budget) {
+    final spare = budget - frontMatter.length - outcome.length;
+    final keptMiddle = math.min(spare, middle.length);
+    final keptAfter = spare - keptMiddle;
+    // A whole middle means the clip landed after the Outcome instead.
+    final withheld = keptMiddle < middle.length ? middleElided : afterClipped;
+    return '$frontMatter${middle.substring(0, keptMiddle)}'
+        '${marker(wholeOutcome, withheld)}'
+        '$outcome${after.substring(0, keptAfter)}';
+  }
+  final keptOutcome = budget - frontMatter.length;
+  if (keptOutcome < heading.end - heading.start) return null;
+  return '$frontMatter$outcomeTailMarker${outcome.substring(0, keptOutcome)}';
 }
 
 /// ONE bead field — the work bead's own prose, resolved ONCE by the
@@ -3837,7 +3957,7 @@ bool _needsRegisterWideLookup(
       ],
       entryPath: entryPath,
       body: boundDiscoveryEvidence(
-        kind: 'decision-entry',
+        kind: _kDecisionEntryKind,
         subject: candidate.identity,
         source: entryPath,
         fullText: body,

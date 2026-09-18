@@ -18,7 +18,8 @@ register:
     - "a23-bead-pow-kzx-the-station-overlay-delivery-lib-renders-an"
   obsoleted-by: null
   updated-by:
-    - "decision-surface-evidence-selects-bead-names-before-index-order"
+    - a-clipped-decision-entry-keeps-its-front-matter-and-decision-outcome
+    - decision-surface-evidence-selects-bead-names-before-index-order
   bead: pow-ri9c
   legacy-id: null
 ---
