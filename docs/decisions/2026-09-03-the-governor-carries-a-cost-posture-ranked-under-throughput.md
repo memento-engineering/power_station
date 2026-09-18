@@ -15,7 +15,8 @@ register:
   obsoletes: []
   updates: []
   obsoleted-by: null
-  updated-by: []
+  updated-by:
+    - the-vended-seat-roles-carry-no-compaction-watermark
   bead: pow-8dwh
   legacy-id: null
 ---
@@ -69,3 +70,16 @@ into the codex leg and no test compares them.
   derived optimum; it will want re-measuring once the seat runs under it.
 * Bad, because the posture is prose the harness does not enforce — the test
   proves the document SAYS it, never that the seat DID it.
+
+**Updated by**
+`power_station#the-vended-seat-roles-carry-no-compaction-watermark` (accepted
+2026-09-18, bead `pow-ttwr`). Nico ruled on 2026-09-18, through the refiner
+seat's interview on bead `pow-pkme`: "If we were going to hand off at every
+150k we'd be handing off all of the time." That entry withdraws ONE clause of
+this one — "The watermark is 150k" — from both vended seat roles, rather than
+re-measuring it as the Consequences above anticipated. The rest stands
+verbatim: the `## Cost` section, its explicit rank under the mandate's
+throughput rules and the sentence a test pins about that rank, the measurement
+that tells posture from preference, and the clean-boundary handoff rule the
+watermark came to be mistaken for. The successor UPDATES this decision; it does
+not obsolete it, and this entry remains in force without its number.
