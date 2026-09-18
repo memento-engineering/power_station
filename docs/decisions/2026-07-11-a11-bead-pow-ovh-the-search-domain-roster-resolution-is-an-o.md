@@ -12,7 +12,8 @@ register:
   obsoletes: []
   updates: []
   obsoleted-by: null
-  updated-by: []
+  updated-by:
+    - the-per-store-bead-read-is-scoped-never-the-export-surface
   bead: null
   legacy-id: "A11"
 ---
