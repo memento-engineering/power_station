@@ -1,9 +1,15 @@
-// The governor's COST posture (bead `pow-8dwh`): the vended seat states the
-// cost of its own behaviour, with the measurement that produced it.
+// The vended seats' COST posture (bead `pow-8dwh`): a seat states the cost of
+// its own behaviour, and the governor states the measurement that produced it.
 //
-// Each of the four claims is pinned by its OWN marker, so an edit that keeps
-// three and silently drops the fourth fails HERE, by name — which is the whole
-// point of a posture document nobody re-measures.
+// Each of the three surviving claims is pinned by its OWN marker, so an edit
+// that keeps two and silently drops the third fails HERE, by name — which is
+// the whole point of a posture document nobody re-measures.
+//
+// A fourth claim named a NUMBER — compact at 150k — and Nico retired it from
+// both seats on 2026-09-18: it was measured on the governor alone, the refiner
+// carried an unmeasured copy, and a seat read it as a handoff trigger. That one
+// is pinned the other way round, by a test that fails if either role names the
+// figure again.
 //
 // SCOPE: this file reads the CLAUDE leg only. The codex leg is an INDEPENDENT
 // instruction source (`power_station#a-harness-may-carry-its-own-instructions`
@@ -30,16 +36,20 @@ String _extensionDir() => p.join(packageRoot(), 'extension');
 /// The section heading the cost posture lives under.
 const String kCostHeading = '## Cost — a request costs what the context costs';
 
-/// The four claims the posture must carry, each by the marker that pins it.
+/// The handoff-preference marker, pinned on BOTH seats: it is the rule the
+/// retired watermark was mistaken for, so it is named on its own rather than
+/// only as one claim among the governor's.
+const String kHandoffPreference =
+    '**Hand off by preference; compact only mid-thought.**';
+
+/// The three claims the posture must carry, each by the marker that pins it.
 const Map<String, String> kCostClaims = {
   'independent reads are batched into ONE message':
       '**Batch independent reads.**',
   'a tool call is billed the whole context whatever it returns':
       '**A tool call is billed the whole context.**',
-  'compaction happens at a NAMED watermark, not at the ceiling':
-      '**Compact at 150k, not at the ceiling.**',
   'a written handoff is preferred, with the one case compaction still wins':
-      '**Hand off by preference; compact only mid-thought.**',
+      kHandoffPreference,
 };
 
 /// The measurement that tells POSTURE from preference — a reader who doubts a
@@ -50,7 +60,28 @@ const Map<String, String> kCostMeasurement = {
   'the per-request cost': r'$0.52',
   "this seat's tool calls per message": '1.106',
   'the contrast seat that sustains more': '1.544',
-  'the measured compaction floor (p50)': '57,385',
+};
+
+/// The numeric compaction watermark Nico retired on 2026-09-18. Cost stays
+/// ranked under the work and the clean-boundary handoff rule stays; what goes
+/// is the NUMBER and the instruction to watch a context figure for it, on
+/// EVERY vended seat.
+const String kRetiredWatermark = '150k';
+
+/// The sentence each seat uses to rank its cost posture under the work it
+/// buys. Cost is never a reason to leave work undriven (ADR-0004), and the
+/// wording is the seat's own.
+const Map<String, String> kCostRank = {
+  'governor': 'it NEVER outranks the throughput rules in the mandate',
+  'refiner': 'none of them is a reason to refine less',
+};
+
+/// The clean-boundary handoff rule each seat states in its own words — the
+/// rule that survives the retired watermark, and the one a seat must not read
+/// a context figure into.
+const Map<String, String> kCleanBoundaryHandoff = {
+  'governor': 'At a clean boundary, write that handoff and then EXIT',
+  'refiner': 'At a clean boundary, write the handoff and then EXIT',
 };
 
 /// Verbs this bead deliberately does NOT name, because they do not exist yet:
@@ -58,34 +89,39 @@ const Map<String, String> kCostMeasurement = {
 /// the_grid, and the doc gets a follow-up amendment once they land.
 const List<String> kUnbornVerbs = ['bead board', 'bead round', 'watch --until'];
 
-void main() {
-  final governor = File(
-    p.join(
-      _extensionDir(),
-      'station_overlay',
-      'claude',
-      'agents',
-      'governor.md',
-    ),
-  ).readAsStringSync();
+/// A vended CLAUDE-leg seat role, read off the bundled `extension/` tree.
+String _roleFile(String name) => File(
+  p.join(_extensionDir(), 'station_overlay', 'claude', 'agents', name),
+).readAsStringSync();
 
-  /// The COST section's OWN body — its heading through to the next `## `
+void main() {
+  /// Both vended seat roles, keyed by the seat name a failure should name.
+  final Map<String, String> seatRoles = {
+    'governor': _roleFile('governor.md'),
+    'refiner': _roleFile('refiner.md'),
+  };
+  final governor = seatRoles['governor']!;
+
+  /// A role's COST section body — its heading through to the next `## `
   /// heading. Every assertion below reads this rather than the whole file, so
-  /// a marker that drifted into another section does not vacuously pass.
-  String costSection() {
-    final start = governor.indexOf(kCostHeading);
+  /// a marker that drifted into another section does not vacuously pass. The
+  /// watermark fence is the one exception: it reads the WHOLE file, because a
+  /// retired number is retired wherever it reappears.
+  String costSectionOf(String role) {
+    final start = role.indexOf(kCostHeading);
     expect(start, greaterThan(-1), reason: 'the cost section exists');
-    final end = governor.indexOf('\n## ', start + kCostHeading.length);
-    return end == -1
-        ? governor.substring(start)
-        : governor.substring(start, end);
+    final end = role.indexOf('\n## ', start + kCostHeading.length);
+    return end == -1 ? role.substring(start) : role.substring(start, end);
   }
 
-  /// [costSection] with every run of whitespace collapsed to one space, so a
-  /// PROSE assertion survives a re-wrap of the paragraph it lives in. Bold
-  /// MARKERS are matched against the raw body (they never span a line break);
+  /// [section] with every run of whitespace collapsed to one space, so a PROSE
+  /// assertion survives a re-wrap of the paragraph it lives in. Bold MARKERS
+  /// are matched against the raw body (they never span a line break);
   /// sentences are matched against this.
-  String flowedSection() => costSection().replaceAll(RegExp(r'\s+'), ' ');
+  String flowed(String section) => section.replaceAll(RegExp(r'\s+'), ' ');
+
+  String costSection() => costSectionOf(governor);
+  String flowedSection() => flowed(costSection());
 
   group('the vended governor states the cost of its own behaviour', () {
     test('the cost posture opens its own `## ` heading at a line start', () {
@@ -130,6 +166,56 @@ void main() {
         );
       }
       expect(section, isNot(contains('{{')));
+    });
+  });
+
+  group('the cost posture Nico ruled on 2026-09-18 holds on every seat', () {
+    // The surviving posture, seat by seat: what the retired watermark was
+    // never load-bearing for.
+    test('both vended seat roles keep the surviving cost posture', () {
+      seatRoles.forEach((seat, role) {
+        expect(
+          role,
+          contains('\n$kCostHeading\n'),
+          reason: 'the $seat role still opens a cost section of its own',
+        );
+        final section = costSectionOf(role);
+        expect(
+          flowed(section),
+          contains(kCostRank[seat]!),
+          reason:
+              'the $seat posture stays ranked under the work it buys — cost is '
+              'never a reason to leave work undriven',
+        );
+        expect(
+          section,
+          contains(kHandoffPreference),
+          reason: 'the $seat role keeps the handoff-preference marker',
+        );
+        expect(
+          flowed(section),
+          contains(kCleanBoundaryHandoff[seat]!),
+          reason:
+              'the $seat role keeps the clean-boundary handoff rule, which the '
+              'retired watermark was mistaken for',
+        );
+      });
+    });
+
+    // The whole file, not just the Cost section: a number retired for reading
+    // as a trigger is retired wherever a rewrite moves it.
+    test('neither vended seat role carries the retired compaction watermark', () {
+      seatRoles.forEach((seat, role) {
+        expect(
+          role,
+          isNot(contains(kRetiredWatermark)),
+          reason:
+              'the $kRetiredWatermark watermark was retired from BOTH seats on '
+              '2026-09-18: it was measured on one seat, was never the '
+              "refiner's, and read as a handoff trigger — the $seat role names "
+              'a context figure to watch again',
+        );
+      });
     });
   });
 }
