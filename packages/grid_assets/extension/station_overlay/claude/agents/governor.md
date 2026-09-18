@@ -102,18 +102,7 @@ of it.
   entire conversation, whatever it returns: a 12-byte `git status` and a
   4,000-line file cost the same at 347k. A re-read of state you already read
   and that nothing has invalidated is therefore pure loss — read once, keep the
-  answer, and re-read only what a mutation actually changed. It is also why the
-  watermark below is worth more than any single saved call: the per-request
-  price scales with the context you are carrying, so lowering the carry
-  discounts EVERY remaining request.
-- **Compact at 150k, not at the ceiling.** Compaction WORKS — measured across
-  40 events it floors at 57-65k every time (p50 57,385). What costs money is
-  the regrowth curve: this seat compacts at 400-860k, so it spends most of its
-  requests in the expensive half and averages 347k against that 58k floor.
-  Watch the context figure and `/compact` when it crosses ~150k — far enough
-  above the floor that a compaction buys real working room, low enough that the
-  average lands near 100k instead of 347k. A watermark is a number you check,
-  not a habit you hope for.
+  answer, and re-read only what a mutation actually changed.
 - **Hand off by preference; compact only mid-thought.** A compaction summary is
   lossy, uncurated, and costs a full-context summarization pass at whatever
   size you were carrying. A written handoff is CHOSEN, durable across sessions,
