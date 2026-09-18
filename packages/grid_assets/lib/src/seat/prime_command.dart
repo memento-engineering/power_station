@@ -123,8 +123,10 @@ String extractBdAdditionalContext(String stdout) {
 ///  - [PrimeHandoff.consumed] — the LAUNCHER archived this note, proved the
 ///    archive, deleted it and its one `MEMORY.md` pointer line, and handed the
 ///    body to this session through [kConsumedHandoffEnvironmentVariable]
-///    (`pow-d5ol`). There is nothing on the disc and no verb is owed — telling
-///    a successor to "run the succession verb in this turn" would send it after
+///    (`pow-d5ol`), with the archived copy's path beside it in
+///    [kConsumedHandoffArchiveEnvironmentVariable] when the archive has one.
+///    There is no live note on the disc and no verb is owed — telling a
+///    successor to "run the succession verb in this turn" would send it after
 ///    a note the launcher already destroyed;
 ///  - [PrimeHandoff.unconsumed] — a note is still ON the disc, which by
 ///    construction means no launcher consumed it: this session was started by
@@ -140,17 +142,35 @@ final class PrimeHandoff {
   });
 
   /// The note the launcher consumed for this occupancy, delivered in the
-  /// process environment.
-  factory PrimeHandoff.consumed(String body) => PrimeHandoff._(
-    namingLine:
-        'Handoff — CONSUMED by the launcher before this session started: it '
-        'archived the disc and deleted the note and its index line. Act on '
-        'Resume here; there is nothing on the disc and no verb to run.',
-    body: body,
-    recovery:
-        'the launcher archived this note before deleting it — its CONSUMED '
-        'line names the archive',
-  );
+  /// process environment beside the grid-home-relative [archivePath] of its
+  /// archived copy ([kConsumedHandoffArchiveEnvironmentVariable]).
+  ///
+  /// The path is named VERBATIM in the naming line, and it is the recovery:
+  /// the naming line survives every trim, so a withheld body is one read away
+  /// rather than a hunt through the disc's archives. A null or empty
+  /// [archivePath] is SAID to be unknown — a line that claimed to name an
+  /// archive it does not name would send the reader looking for it.
+  factory PrimeHandoff.consumed(String body, {String? archivePath}) {
+    if (archivePath == null || archivePath.isEmpty) {
+      return PrimeHandoff._(
+        namingLine:
+            'Handoff — CONSUMED by the launcher before this session started: '
+            'the note was archived, but the archive path is unknown; its live '
+            'copy and index line were deleted. Act on Resume here; no '
+            'succession verb is owed.',
+        body: body,
+        recovery: 'the archive path is unknown',
+      );
+    }
+    return PrimeHandoff._(
+      namingLine:
+          'Handoff — CONSUMED by the launcher before this session started: the '
+          'note was archived at $archivePath, then its live copy and index '
+          'line were deleted. Act on Resume here; no succession verb is owed.',
+      body: body,
+      recovery: 'read $archivePath from the Agent Disc',
+    );
+  }
 
   /// A note still live on the disc — no launcher consumed it.
   factory PrimeHandoff.unconsumed(SeatHandoff handoff) => PrimeHandoff._(
@@ -469,7 +489,8 @@ final class _PrimeMaterial {
 class PrimeCommand extends Command<int> {
   /// Creates the verb over its five injectable seams: [runnerFor] spawns `bd`
   /// in the cwd, [environment] reads `GRID_SEAT`, `GRID_HOME` and the
-  /// launcher's [kConsumedHandoffEnvironmentVariable], [cwd] is the fallback
+  /// launcher's [kConsumedHandoffEnvironmentVariable] with its
+  /// [kConsumedHandoffArchiveEnvironmentVariable], [cwd] is the fallback
   /// grid home, [readStdin] takes the hook payload, and [now] is the clock the
   /// unconsumed-handoff age is measured against. [out] is where the hook object
   /// is written.
@@ -702,6 +723,10 @@ class PrimeCommand extends Command<int> {
   /// hand-recovery path: a note that survived on the disc is one no launcher
   /// touched, which is exactly when the succession verb is owed.
   ///
+  /// The archive declaration is read ONLY beside a non-empty body: it names
+  /// where a consumed note went, so on its own it names nothing, and it can
+  /// never displace the disc fallback.
+  ///
   /// A consumed body carries no age: it was consumed at this launch, and the
   /// launcher reported the age it had when it did. The disc path resolves the
   /// note and its age in ONE read, so a note written between two reads can
@@ -716,7 +741,14 @@ class PrimeCommand extends Command<int> {
     final consumed =
         environment[kConsumedHandoffEnvironmentVariable]?.trim() ?? '';
     if (consumed.isNotEmpty) {
-      return (handoff: PrimeHandoff.consumed(consumed), diagnostic: null);
+      return (
+        handoff: PrimeHandoff.consumed(
+          consumed,
+          archivePath: environment[kConsumedHandoffArchiveEnvironmentVariable]
+              ?.trim(),
+        ),
+        diagnostic: null,
+      );
     }
     final state = _newestHandoffState(home: home, seat: seat);
     if (state == null) return null;

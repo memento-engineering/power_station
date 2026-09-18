@@ -126,6 +126,12 @@ String? seatHandoffDeliveryRefusal(AgentEnvironment environment) =>
 /// `prime` — injects it. A hook-primed child reads no disc for it: the
 /// launcher consumed the note before this plan existed.
 ///
+/// [handoffArchivePath] is the grid-home-relative path of that note's archived
+/// copy. It rides [kConsumedHandoffArchiveEnvironmentVariable] BESIDE the hook
+/// delivery and nowhere else: `prime` names it as the one read that recovers a
+/// body its bound withholds, and a prompt-primed child carries the whole body
+/// in its first message, so it has nothing withheld to recover.
+///
 /// [gridHome] is the working directory and [discDirectory] the ABSOLUTE disc
 /// the memory declaration is rendered against.
 ///
@@ -138,6 +144,7 @@ SeatLaunch planSeatLaunch({
   required String gridHome,
   required String discDirectory,
   String? handoffBody,
+  String? handoffArchivePath,
 }) {
   final command = environment.command;
   if (command == null || command.isEmpty) {
@@ -154,7 +161,11 @@ SeatLaunch planSeatLaunch({
     ...environment.env,
     kSeatEnvironmentVariable: seat,
     kGridHomeEnvironmentVariable: gridHome,
-    if (hookDelivery != null) kConsumedHandoffEnvironmentVariable: hookDelivery,
+    if (hookDelivery != null) ...{
+      kConsumedHandoffEnvironmentVariable: hookDelivery,
+      if (handoffArchivePath != null && handoffArchivePath.isNotEmpty)
+        kConsumedHandoffArchiveEnvironmentVariable: handoffArchivePath,
+    },
   };
   final adapter = environment.sessionAdapter;
   if (adapter != null) {

@@ -17,6 +17,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:args/command_runner.dart';
+import 'package:beads_dart/beads_dart.dart' show BdResult, BdRunner;
 import 'package:grid_assets/grid_assets.dart';
 import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
@@ -36,6 +37,17 @@ final class _RecordingRunner {
     onLaunch?.call(launches.length);
     return exitCode;
   }
+}
+
+/// A `bd` with nothing to say — `prime`'s tracker section is not under test
+/// here (Fakes, not mocks).
+final class _SilentBd implements BdRunner {
+  @override
+  Future<BdResult> run(
+    List<String> args, {
+    Duration? timeout,
+    String? stdin,
+  }) async => const BdResult(exitCode: 0, stdout: '', stderr: '');
 }
 
 /// A TTY environment with every seat declaration.
@@ -277,6 +289,159 @@ void main() {
       isFalse,
       reason: 'an empty disc consumed nothing, so nothing is declared',
     );
+    expect(
+      (run.runner.launches.single as SeatTtyLaunch).processEnvironment
+          .containsKey('GRID_SEAT_HANDOFF_ARCHIVE'),
+      isFalse,
+      reason: 'no body was consumed, so no archive is named',
+    );
+  });
+
+  group('a consumed handoff names its archived copy beside the body', () {
+    // The LOCAL archive the first consume of a test writes: the first tick of
+    // the archive clock, holding the note under its own file name.
+    final archivedNote = p.join(
+      '.grid',
+      'seats',
+      'governor',
+      '.archive',
+      '20260913t174501z',
+      'h.md',
+    );
+
+    test('a hook-primed consumed handoff archived LOCALLY declares the exact '
+        'archive-note path, and that path holds the note', () async {
+      authorSeat('governor');
+      final noteBytes = writeHandoff(
+        'governor',
+        'h.md',
+        'RESUME BODY',
+      ).readAsBytesSync();
+
+      final run = await occupy(['governor', '--env', 'declared', '--once']);
+
+      expect(run.code, 0, reason: run.err);
+      final launch = run.runner.launches.single as SeatTtyLaunch;
+      expect(launch.processEnvironment['GRID_SEAT_HANDOFF'], 'RESUME BODY');
+      expect(
+        launch.processEnvironment[kConsumedHandoffArchiveEnvironmentVariable],
+        archivedNote,
+      );
+      // Not a plausible string — the one file a successor reads to recover a
+      // withheld body.
+      expect(
+        File(p.join(home.path, archivedNote)).readAsBytesSync(),
+        noteBytes,
+      );
+    });
+
+    test('the declared path reaches prime: a consumed handoff is named by '
+        'its archive', () async {
+      authorSeat('governor');
+      writeHandoff('governor', 'h.md', 'RESUME BODY');
+      final run = await occupy(['governor', '--env', 'declared', '--once']);
+      final launch = run.runner.launches.single as SeatTtyLaunch;
+
+      // The child's own SessionStart hook, over the environment the launcher
+      // handed it.
+      final out = StringBuffer();
+      final code =
+          await (CommandRunner<int>('space', 'test')..addCommand(
+                PrimeCommand(
+                  runnerInvocation: '',
+                  runnerFor: (_) => _SilentBd(),
+                  environment: () => launch.processEnvironment,
+                  cwd: () => home.path,
+                  readStdin: () async =>
+                      '{"hook_event_name":"SessionStart","source":"startup"}',
+                  out: out,
+                ),
+              ))
+              .run(['prime', '--hook-json']);
+
+      expect(code, 0);
+      final context =
+          ((jsonDecode(out.toString())
+                      as Map<String, Object?>)['hookSpecificOutput']!
+                  as Map<String, Object?>)['additionalContext']!
+              as String;
+      expect(context, contains('the note was archived at $archivedNote,'));
+      expect(context, endsWith('RESUME BODY'));
+    });
+
+    test('a consumed handoff archived in GIT declares no archive path — a '
+        'commit is not a path', () async {
+      authorSeat('governor');
+      writeHandoff('governor', 'h.md', 'RESUME BODY');
+
+      final run = await occupy([
+        'governor',
+        '--env',
+        'declared',
+        '--once',
+      ], git: RecordingGitRunner(statusOutput: '?? .grid/\n'));
+
+      expect(run.code, 0, reason: run.err);
+      final launch = run.runner.launches.single as SeatTtyLaunch;
+      expect(launch.processEnvironment['GRID_SEAT_HANDOFF'], 'RESUME BODY');
+      expect(
+        launch.processEnvironment.containsKey(
+          kConsumedHandoffArchiveEnvironmentVariable,
+        ),
+        isFalse,
+      );
+    });
+
+    test('a prompt-primed consumed handoff declares neither — the body is '
+        'whole in its first message', () async {
+      authorSeat('governor');
+      writeHandoff('governor', 'h.md', 'RESUME BODY');
+
+      final run = await occupy(['governor', '--env', 'bare', '--once']);
+
+      final launch = run.runner.launches.single as SeatTtyLaunch;
+      expect(launch.args, ['-p', 'RESUME BODY']);
+      expect(launch.processEnvironment.containsKey('GRID_SEAT_HANDOFF'), false);
+      expect(
+        launch.processEnvironment.containsKey(
+          kConsumedHandoffArchiveEnvironmentVariable,
+        ),
+        isFalse,
+      );
+    });
+
+    test('planSeatLaunch writes an archive path only BESIDE a hook-delivered '
+        'consumed handoff body', () {
+      Map<String, String> planned(
+        AgentEnvironment environment, {
+        String? body,
+        String? archive,
+      }) => planSeatLaunch(
+        environment: environment,
+        seat: 'governor',
+        gridHome: home.path,
+        discDirectory: seatDiscPath(home.path, 'governor'),
+        handoffBody: body,
+        handoffArchivePath: archive,
+      ).processEnvironment;
+
+      expect(
+        planned(_declared, body: 'B', archive: archivedNote),
+        containsPair(kConsumedHandoffArchiveEnvironmentVariable, archivedNote),
+      );
+      for (final (label, environment) in [
+        ('no body', planned(_declared, archive: archivedNote)),
+        ('empty path', planned(_declared, body: 'B', archive: '')),
+        ('no path', planned(_declared, body: 'B')),
+        ('prompt mode', planned(_bare, body: 'B', archive: archivedNote)),
+      ]) {
+        expect(
+          environment.containsKey(kConsumedHandoffArchiveEnvironmentVariable),
+          isFalse,
+          reason: label,
+        );
+      }
+    });
   });
 
   test(
