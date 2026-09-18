@@ -272,6 +272,127 @@ void main() {
     expect(waits, everyElement(const Duration(milliseconds: 50)));
   });
 
+  test(
+    'the durable leak check returns immediately when count and census are clean',
+    () async {
+      // The common teardown: the workspace is gone, the count is back at the
+      // baseline, and nothing works under the path. It spends no window, says
+      // nothing, and never walks `/tmp` for evidence it does not need.
+      var counts = 0;
+      var censuses = 0;
+
+      await fixture.expectNoDurableTemporaryWorkspaceLeak(
+        baselineCount: 8,
+        currentCount: () {
+          counts++;
+          return 8;
+        },
+        processCensus: () async {
+          censuses++;
+          return _census();
+        },
+        describeWorkspaces: () => fail('a clean teardown describes nothing'),
+        delay: (_) async => fail('a clean teardown waits for nothing'),
+        reportTransient: (_) => fail('a clean teardown reports nothing'),
+      );
+
+      expect(counts, 1);
+      expect(censuses, 1);
+    },
+  );
+
+  test('a transient workspace count is reported once and accepted', () async {
+    // The residue the station measured red with nothing durable behind it: one
+    // workspace over the baseline and a bd client still working under the
+    // path, both gone a sample later. It is a line on stderr, not a failure.
+    final counts = <int>[9, 8];
+    final censuses = <fixture.WorkspaceProcessCensus>[
+      _census(residents: const [68385]),
+      _census(),
+    ];
+    var countSamples = 0;
+    var censusSamples = 0;
+    final waits = <Duration>[];
+    final reports = <String>[];
+
+    await fixture.expectNoDurableTemporaryWorkspaceLeak(
+      baselineCount: 8,
+      currentCount: () => counts[countSamples++],
+      processCensus: () async => censuses[censusSamples++],
+      describeWorkspaces: () => fail('a recovered transient describes nothing'),
+      delay: (duration) async => waits.add(duration),
+      reportTransient: reports.add,
+    );
+
+    expect(waits, orderedEquals(const [Duration(milliseconds: 50)]));
+    expect(countSamples, 2);
+    expect(censusSamples, 2);
+    expect(reports, hasLength(1));
+    expect(reports.single, isNot(contains('\n')));
+    expect(
+      reports.single,
+      allOf(contains('recovered to 8 from 9'), contains('68385')),
+    );
+  });
+
+  test(
+    'a durable workspace count refuses with process and directory evidence',
+    () async {
+      // A count that never comes back is a leak, and the only useful report of
+      // one names the process still holding it AND the directory it left: the
+      // path, when it was last written, and what is inside it.
+      const leaked = '/private/tmp/ci-rework-mint-ys7D8n';
+      const modified = '2026-09-15T19:19:02.000Z';
+      const listed = 'grid/.grid/.beads/dolt/proxy.lock';
+      var countSamples = 0;
+      var describes = 0;
+      final waits = <Duration>[];
+
+      await expectLater(
+        fixture.expectNoDurableTemporaryWorkspaceLeak(
+          baselineCount: 8,
+          currentCount: () {
+            countSamples++;
+            return 9;
+          },
+          processCensus: () async => (
+            stores: [
+              (pid: 68187, command: 'dolt sql-server --config $_lockRoot'),
+            ],
+            residents: const [68385],
+          ),
+          describeWorkspaces: () {
+            describes++;
+            return '$leaked (modified $modified)\n  $listed';
+          },
+          delay: (duration) async => waits.add(duration),
+          reportTransient: (_) => fail('a durable leak is no transient'),
+          checks: 3,
+        ),
+        throwsA(
+          isA<StateError>().having(
+            (error) => error.message,
+            'message',
+            allOf(
+              contains('9 workspaces on disk against a baseline of 8'),
+              contains(leaked),
+              contains(modified),
+              contains(listed),
+              contains('68187'),
+              contains('dolt sql-server'),
+              contains('68385'),
+            ),
+          ),
+        ),
+      );
+
+      expect(waits, hasLength(3));
+      expect(waits, everyElement(const Duration(milliseconds: 50)));
+      expect(countSamples, 4, reason: 'the first sample, then one per check');
+      expect(describes, 1, reason: 'evidence is read on the failure alone');
+    },
+  );
+
   test('an empty census clears the delete to run', () {
     fixture.expectEmptyWorkspaceProcessCensus(
       _census(),
