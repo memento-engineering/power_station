@@ -1,5 +1,7 @@
 ## Unreleased
 
+- Changed: Nico's 2026-09-18 ruling retires the 150k compaction watermark from both vended seat
+  roles while preserving the Cost posture's throughput rank and clean-boundary handoff rule.
 - Breaking: the filing contract is TEN rows, not four. The four PRESENCE rows are joined by six
   VIABILITY rows that ask whether what a field HOLDS can work: `validation_plan_syntax` (the
   gating lane's own `sh` parses the plan), `validation_plan_portability` (so does CI's `dash`),
