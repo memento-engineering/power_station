@@ -2065,14 +2065,10 @@ DiscoveryEvidenceProjection projectDiscoveryEvidence(
       // evidence-id profile is unchanged (pow-bvui counts the body once).
       final citationText = _projectedCitationText(anchors, workBeadId);
       final relations = <String, List<String>>{};
-      final citedAt = <String, int>{};
+      final citedBodyIds = <String>{};
       void relate(String bodyId, String line) =>
           (relations[bodyId] ??= <String>[]).add(line);
-      void markCited(String bodyId, int rank) {
-        final at = rank < 0 ? _unrankedDecisionCitation : rank;
-        final prior = citedAt[bodyId];
-        if (prior == null || at < prior) citedAt[bodyId] = at;
-      }
+      void markCited(String bodyId) => citedBodyIds.add(bodyId);
 
       for (final lookup in anchors.decisionLookups) {
         b
@@ -2115,8 +2111,9 @@ DiscoveryEvidenceProjection projectDiscoveryEvidence(
                 ? '- also governs this surface: `${lookup.surface}`'
                 : '- governs surface `${lookup.surface}`',
           );
-          final rank = _projectedDecisionRank(decision, citationText);
-          if (rank >= 0) markCited(decision.body.id, rank);
+          if (_isProjectedDecisionNamed(decision, citationText)) {
+            markCited(decision.body.id);
+          }
         }
         // The entries the bead CITED that this surface does not declare. They
         // are read exactly like the governing ones — the bead named them, and
@@ -2124,8 +2121,8 @@ DiscoveryEvidenceProjection projectDiscoveryEvidence(
         // are LABELLED, so the lens never reads one as governing this surface.
         // A named-elsewhere reference IS a citation by construction (the
         // gather re-asked the register for it by name), so it joins the cited
-        // group even when the rank its token was read at cannot be
-        // reconstructed from the bead prose alone.
+        // group even when the bead spelled the token under a name the entry's
+        // own slug, identity and alias do not reproduce.
         for (final reference in lookup.namedElsewhere) {
           final decision = anchors.decisionEntryFor(reference);
           relate(
@@ -2135,29 +2132,29 @@ DiscoveryEvidenceProjection projectDiscoveryEvidence(
             '`${lookup.surface}`; it governs '
             '${decision.surfaces.isEmpty ? 'no declared surface' : decision.surfaces.map((s) => '`$s`').join(', ')}.',
           );
-          markCited(
-            decision.body.id,
-            _projectedDecisionRank(decision, citationText),
-          );
+          markCited(decision.body.id);
         }
       }
 
-      // The two contiguous groups. CITED first, ranked by where the bead named
-      // them (description before design, then by offset, then by canonical
-      // identity); FILL after, lexically by canonical identity. A byte
-      // boundary is recorded past the cited group and past every fill record,
-      // so the assembly's clip is a decision about RECORDS rather than a cut
-      // through whatever the alphabet put last.
+      // The two contiguous groups, both in DECISION-INDEX order. `relations`
+      // is keyed in FIRST-ENCOUNTER order over the gather's own ordered
+      // references — each surface's `decisions` (its named entries ahead of
+      // the index-order fill, exactly as [_decisionLookup] banked them), then
+      // that surface's `namedElsewhere` — so filtering those keys by
+      // membership keeps the index's order inside each group with no sort of
+      // its own. Citation OFFSET is deliberately NOT an ordering key: the
+      // register decides the ORDER of its entries and the bead decides only
+      // WHICH of them are required, so where a bead happened to write a token
+      // can never reshuffle the entries a lens reads. A byte boundary is
+      // recorded past the cited group and past every fill record, so the
+      // assembly's clip is a decision about RECORDS rather than a cut through
+      // whatever the alphabet put last.
       String identityOf(String bodyId) =>
           anchors.decisionEntryFor(bodyId).identity;
-      final citedBodies = relations.keys.where(citedAt.containsKey).toList()
-        ..sort((x, y) {
-          final byRank = citedAt[x]!.compareTo(citedAt[y]!);
-          return byRank != 0 ? byRank : identityOf(x).compareTo(identityOf(y));
-        });
-      final fillBodies =
-          relations.keys.where((id) => !citedAt.containsKey(id)).toList()
-            ..sort((x, y) => identityOf(x).compareTo(identityOf(y)));
+      final citedBodies = relations.keys.where(citedBodyIds.contains).toList();
+      final fillBodies = relations.keys
+          .where((id) => !citedBodyIds.contains(id))
+          .toList();
 
       var at = utf8.encode(b.toString()).length;
       void emit(String chunk) {
@@ -2322,43 +2319,33 @@ DiscoveryEvidenceProjection projectDiscoveryEvidence(
   );
 }
 
-/// The rank a citation that cannot be reconstructed from the bead's own prose
-/// sorts at — LAST among the cited, and still ahead of every fill record.
-///
-/// A [DecisionSurfaceEvidence.namedElsewhere] reference is a citation by
-/// construction: the gather re-asked the register for a token it read off the
-/// bead. The projection reads the bead back through [DiscoveryAnchors
-/// .beadFields] rather than through the `Bead`, so an entry whose token the
-/// register answered under a spelling the entry's own slug/identity/alias do
-/// not reproduce is still CITED — it simply has no offset to rank by.
-const int _unrankedDecisionCitation = 1 << 30;
-
 /// The bead prose a decision citation can live in, read back off the GATHER's
-/// own bead-field records — the projection's copy of
-/// [_decisionCitationText]'s text.
+/// own bead-field records — the projection's copy of [decisionCitationText]'s
+/// text.
 ///
 /// Same fields, same order (description before design, joined by a newline and
-/// lowercased), so a match OFFSET here means what it means there. The fields
-/// are carried WHOLE by [boundedBeadFields], so nothing is ranked against a
-/// clipped copy of the bead.
+/// lowercased), so a token that NAMES an entry here names it there. The two
+/// field vocabularies are matched on their STABLE `wire` spellings rather than
+/// re-declared: [kDecisionCitationFields] is the shared scanner's and
+/// [BeadCitationField] is this bundle's, and the wire is the promise both
+/// keep. The fields are carried WHOLE by [boundedBeadFields], so no citation
+/// is read off a clipped copy of the bead.
 String _projectedCitationText(DiscoveryAnchors anchors, String workBeadId) => [
-  for (final field in _decisionCitationFields)
+  for (final field in kDecisionCitationFields)
     for (final record in anchors.beadFields)
-      if (record.beadId == workBeadId && record.field == field)
+      if (record.beadId == workBeadId && record.field.wire == field.wire)
         record.evidence.snippet,
 ].join('\n').toLowerCase();
 
-/// Where [cited] names [decision] — the same slug/identity/legacy-alias token
-/// rules [_isNamedDecision] selects with, resolved to an OFFSET so the cited
-/// group renders in the order the bead wrote it. -1 ⇒ the prose names none of
-/// them.
-int _projectedDecisionRank(DecisionEntryEvidence decision, String cited) =>
-    _decisionCitationRank(
-      cited: cited,
-      slug: decision.slug,
-      identity: decision.identity,
-      alias: _legacyDecisionAlias(decision.slug),
-    );
+/// Whether [cited] NAMES [decision] — the SAME slug/identity/legacy-alias
+/// token rules [_isNamedDecision] selects with, so the projection's cited
+/// group is exactly the gather's named set, read back through the bundle.
+bool _isProjectedDecisionNamed(DecisionEntryEvidence decision, String cited) {
+  final alias = legacyDecisionAlias(decision.slug);
+  return citesDecisionToken(cited, decision.slug.toLowerCase()) ||
+      citesDecisionToken(cited, decision.identity.toLowerCase()) ||
+      (alias.isNotEmpty && citesDecisionToken(cited, alias));
+}
 
 /// The UTF-8 size of [entries] rendered as the projection renders them — the
 /// floor a named decision set costs in an `explore-decision` prompt.
@@ -3545,7 +3532,7 @@ DecisionIndexSource commandDecisionIndexSource(
 const Set<int> _acceptedDecisionIndexSpecs = {1, 2};
 
 /// ONE validated `decisions index` record, before its body is read off disk —
-/// the shape name-first selection ranks, and the only place the producer's raw
+/// the shape name-first selection reads, and the only place the producer's raw
 /// map is carried past validation.
 class _IndexedDecision {
   const _IndexedDecision({
@@ -3655,66 +3642,17 @@ List<_DecisionRequest> _explicitDecisionRequests(
 
 /// Whether [cited] NAMES [candidate] — by slug, by canonical identity, or by
 /// the slug's legacy id.
+///
+/// One matcher, two readers: the gather SELECTS its named set here and the
+/// projection GROUPS the cited bodies with the same [citesDecisionToken] rule
+/// ([_isProjectedDecisionNamed]), so neither can read a citation the other
+/// does not. MEMBERSHIP is the whole answer — neither reader can recover WHERE
+/// the bead wrote a token, which is what keeps the rendered order the
+/// register's.
 bool _isNamedDecision(_IndexedDecision candidate, String cited) =>
-    _decisionCitationRank(
-      cited: cited,
-      slug: candidate.slug,
-      identity: candidate.identity,
-      alias: candidate.alias,
-    ) >=
-    0;
-
-/// The EARLIEST offset in [cited] at which an entry spelled [slug] / [identity]
-/// / [alias] is named as a whole token, or -1 for prose that names none of
-/// them.
-///
-/// One rule, two readers: [_isNamedDecision] asks only whether the answer is
-/// non-negative, while the projection ranks the cited group by it so the
-/// entries a bead named render in the order the bead wrote them.
-int _decisionCitationRank({
-  required String cited,
-  required String slug,
-  required String identity,
-  required String alias,
-}) {
-  var rank = -1;
-  for (final token in [slug.toLowerCase(), identity.toLowerCase(), alias]) {
-    final at = _citesTokenAt(cited, token);
-    if (at >= 0 && (rank < 0 || at < rank)) rank = at;
-  }
-  return rank;
-}
-
-/// The offset of [needle]'s first WHOLE-token occurrence in [haystack], or -1
-/// — never the head or the tail of a longer one, so `A2` can never claim the
-/// entry a bead cited as `A25`.
-///
-/// `-` and `_` count as token characters precisely BECAUSE a slug is
-/// hyphenated: without them `a21-bead-pow` would claim a hit inside
-/// `a21-bead-pow-96y-…`. [haystack] is already lowercased, so only lowercase
-/// letters need to continue a token.
-int _citesTokenAt(String haystack, String needle) {
-  if (needle.isEmpty) return -1;
-  for (
-    var at = haystack.indexOf(needle);
-    at >= 0;
-    at = haystack.indexOf(needle, at + 1)
-  ) {
-    final before = at == 0 ? null : haystack.codeUnitAt(at - 1);
-    final end = at + needle.length;
-    final after = end == haystack.length ? null : haystack.codeUnitAt(end);
-    if (!_isTokenChar(before) && !_isTokenChar(after)) return at;
-  }
-  return -1;
-}
-
-/// Whether [unit] CONTINUES a token (lowercase ASCII letter, digit, `-`, `_`).
-bool _isTokenChar(int? unit) =>
-    unit != null &&
-    ((unit >= 0x61 && unit <= 0x7a) ||
-        (unit >= 0x30 && unit <= 0x39) ||
-        unit == 0x2d ||
-        unit == 0x5f);
+    citesDecisionToken(cited, candidate.slug.toLowerCase()) ||
+    citesDecisionToken(cited, candidate.identity.toLowerCase()) ||
+    (candidate.alias.isNotEmpty && citesDecisionToken(cited, candidate.alias));
 
 /// ONE validated `decisions index` envelope — every record it answered, in
 /// index order, or the loud reason the answer is unreadable.

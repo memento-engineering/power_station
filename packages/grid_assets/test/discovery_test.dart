@@ -4035,10 +4035,17 @@ void main() {
         // with fewer touched surfaces") did not exist for it, and its cited
         // entry `the_grid#terminal-provenance-word-is-reconstructed` fell in the
         // alphabetical tail the clip dropped.
+        //
+        // The bead here cites its two on-surface entries in the REVERSE of the
+        // order the index answers them in, and its named-elsewhere entry first
+        // of all, so the assertion below can only pass when the cited group
+        // keeps DECISION-INDEX order: citation offset is not an ordering key.
         final register = registerDir('decisions-clipped-fill');
-        const citedSlug = 'zzzz-last-by-every-sort';
+        const citedSlug = 'zzzz-cited';
         const citedIdentity = 'zzzz#$citedSlug';
         const citedClause = 'the cited clause the architect must honour';
+        const firstNamed = 'power_station#a2-fake-decision-2';
+        const secondNamed = 'power_station#a10-fake-decision-10';
         final shell = _fakeDecisionIndex(
           register,
           count: kMaxDecisionEntriesPerSurface,
@@ -4053,9 +4060,11 @@ void main() {
             ),
           },
         );
-        final workBead = bead(
-          'pow-x',
-        ).copyWith(description: 'This route is governed by `$citedIdentity`.');
+        final workBead = bead('pow-x').copyWith(
+          description:
+              'Bound first of all by `$citedIdentity`, then by '
+              '`a10-fake-decision-10`, and last by `a2-fake-decision-2`.',
+        );
 
         final gathered = await gather(shell, register.parent.parent.path, [
           surface,
@@ -4068,12 +4077,35 @@ void main() {
           hasLength(kMaxDecisionEntriesPerSurface - 1),
           reason: 'the cited note spends one of the 96 slots',
         );
+        final onSurface = [
+          for (final reference in record.decisions)
+            gathered.decisionEntries[reference]!,
+        ];
+        expect(
+          onSurface.take(2).map((entry) => entry.identity),
+          const [firstNamed, secondNamed],
+          reason:
+              'the gather banks the named set in DECISION-INDEX order, not in '
+              'the order the bead happened to write the tokens',
+        );
+        final cited = [
+          ...onSurface.take(2),
+          gathered.decisionEntries[record.namedElsewhere.single]!,
+        ];
+        final fill = onSurface.skip(2).toList();
+        expect(fill, hasLength(kMaxDecisionEntriesPerSurface - 3));
 
         final projection = projectThroughWire(gathered, workBead);
-        expect(projection.citedDecisionIdentities, [citedIdentity]);
+        expect(
+          projection.citedDecisionIdentities,
+          const [firstNamed, secondNamed, citedIdentity],
+          reason:
+              'the bead wrote them zzzz, a10, a2 — the register decides the '
+              'ORDER, the bead decides only WHICH are required',
+        );
         expect(
           projection.fillRecordEndBytes,
-          hasLength(kMaxDecisionEntriesPerSurface - 1),
+          hasLength(kMaxDecisionEntriesPerSurface - 3),
         );
 
         final assembly = assemble(projection);
@@ -4084,18 +4116,31 @@ void main() {
         expect(assembly.evidenceTruncated, isTrue);
         expect(assembly.isFailed, isFalse);
 
-        // The CITED body is whole, and ahead of every fill record that survived.
-        const citedHeader = '##### `$citedIdentity`';
-        expect(assembly.prompt, contains(citedHeader));
+        // The three CITED bodies are whole, in index order, in their own group
+        // ahead of the fill.
+        final citedHeaders = [
+          for (final identity in projection.citedDecisionIdentities)
+            '##### `$identity`',
+        ];
         expect(
           assembly.prompt,
-          contains(citedClause),
-          reason: 'the bounded body is present in FULL, not by identity alone',
+          stringContainsInOrder([
+            '#### The entries this bead CITES',
+            ...citedHeaders,
+            '#### Further entries governing these surfaces',
+          ]),
         );
-        final fill = [
-          for (final reference in record.decisions)
-            gathered.decisionEntries[reference]!,
-        ];
+        for (final entry in cited) {
+          expect(entry.body.state, EvidenceState.complete);
+          expect(
+            assembly.prompt,
+            contains(entry.body.snippet),
+            reason:
+                'the bounded body is present in FULL, not by identity alone',
+          );
+        }
+        expect(assembly.prompt, contains(citedClause));
+
         final headers = [
           for (final entry in fill)
             if (assembly.prompt.contains('##### `${entry.identity}`')) entry,
@@ -4112,11 +4157,12 @@ void main() {
               'the clip snaps to a RECORD boundary — no half-rendered body the '
               'lens could not quote',
         );
+        final lastCited = assembly.prompt.indexOf(citedHeaders.last);
         for (final entry in whole) {
           expect(
-            assembly.prompt.indexOf(citedHeader),
+            lastCited,
             lessThan(assembly.prompt.indexOf('##### `${entry.identity}`')),
-            reason: 'last by slug, rendered FIRST because the bead cited it',
+            reason: 'every cited body renders ahead of every fill record',
           );
         }
         final omitted = fill.length - whole.length;
