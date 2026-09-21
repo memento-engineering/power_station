@@ -176,7 +176,10 @@ void main() {
       filing.invocation,
       'filing [--json] [--readiness=run|skip] <bead-id>',
     );
-    expect(approve.invocation, 'approve --actor <name> [--json] <bead-id>');
+    expect(
+      approve.invocation,
+      'approve --actor <name> [--json] [--readiness=run|skip] <bead-id>',
+    );
 
     final h = _harness(
       _ScriptedBdRunner({

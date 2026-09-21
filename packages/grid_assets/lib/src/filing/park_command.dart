@@ -9,11 +9,14 @@ import 'package:grid_sdk/grid_sdk.dart' as sdk;
 import 'package:path/path.dart' as p;
 
 import '../code/landing.dart' show ShellRunner, SystemShellRunner;
+import '../code/pr_describe.dart' show InferenceRunner;
 import '../search/station_search.dart';
 import 'approval_stamp.dart';
 import 'approve_command.dart';
-import 'filing_command.dart' show noArmedSubstations;
+import 'filing_command.dart'
+    show addReadinessOption, noArmedSubstations, readinessModeOf;
 import 'filing_contract.dart';
+import 'pre_stamp_advisory.dart';
 import 'state_root_option.dart';
 
 String _currentDirectory(String _) => Directory.current.path;
@@ -987,6 +990,8 @@ final class UnparkService {
     String? decisionInvocation,
     String? decisionGridHome,
     FilingEvidenceSource? evidence,
+    FilingAdvisory? advisory,
+    InferenceRunner? inference,
   }) : approve =
            approve ??
            ApproveService(
@@ -998,6 +1003,8 @@ final class UnparkService {
              decisionInvocation: decisionInvocation,
              decisionGridHome: decisionGridHome,
              evidence: evidence,
+             advisory: advisory,
+             inference: inference,
            ),
        _runnerFor = runnerFor,
        _source = source ?? ExactSubstationBeadSource(runnerFor: runnerFor);
@@ -1017,6 +1024,7 @@ final class UnparkService {
     required String workBeadId,
     required String actor,
     Set<String>? armedSubstations,
+    FilingAdvisoryMode advisoryMode = FilingAdvisoryMode.off,
   }) async {
     final read = await _source.readExact(
       storeRoot: workStoreRoot,
@@ -1043,6 +1051,7 @@ final class UnparkService {
       beadId: workBeadId,
       actor: actor,
       armedSubstations: armedSubstations,
+      advisoryMode: advisoryMode,
     );
     return switch (approval) {
       ApprovalStamped(:final stamp) => Unparked(
@@ -1091,6 +1100,8 @@ class UnparkCommand extends Command<int> {
     String? decisionInvocation,
     String? decisionGridHome,
     FilingEvidenceSource? evidence,
+    FilingAdvisory? advisory,
+    InferenceRunner? inference,
     StringSink? out,
     StringSink? err,
   }) : _service =
@@ -1104,6 +1115,8 @@ class UnparkCommand extends Command<int> {
              decisionInvocation: decisionInvocation,
              decisionGridHome: decisionGridHome,
              evidence: evidence,
+             advisory: advisory,
+             inference: inference,
            ),
        _workStoreRoot = workStoreRoot,
        _armedSubstations = armedSubstations,
@@ -1114,13 +1127,14 @@ class UnparkCommand extends Command<int> {
         'json',
         negatable: false,
         help:
-            'Emit {id, unparked, undeferred, by, at, rev, filing, reason?} as '
-            'one JSON object.',
+            'Emit {id, unparked, undeferred, by, at, rev, readiness_grade?, '
+            'readiness_skipped?, filing, reason?} as one JSON object.',
       )
       ..addOption(
         'actor',
         help: 'The operator unparking, recorded as grid.approved_by. Required.',
       );
+    addReadinessOption(argParser);
   }
 
   final UnparkService _service;
@@ -1139,7 +1153,8 @@ class UnparkCommand extends Command<int> {
   @override
   String get invocation {
     final executable = runner?.executableName;
-    const shape = 'unpark --actor <name> [--json] <work-bead-id>';
+    const shape =
+        'unpark --actor <name> [--json] [--readiness=run|skip] <work-bead-id>';
     return executable == null ? shape : '$executable $shape';
   }
 
@@ -1168,6 +1183,7 @@ class UnparkCommand extends Command<int> {
         workBeadId: workBeadId,
         actor: actor,
         armedSubstations: _armedSubstations(),
+        advisoryMode: readinessModeOf(argResults!),
       );
     } on Object catch (error) {
       _err.writeln('unpark: failed to unpark $workBeadId: $error');

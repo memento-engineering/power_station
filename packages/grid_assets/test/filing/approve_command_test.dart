@@ -78,7 +78,7 @@ String _beadReply({
   _ScriptedBdRunner bd,
   List<String> roots,
 })
-_harness(_ScriptedBdRunner bd, {Set<String>? armed}) {
+_harness(_ScriptedBdRunner bd, {Set<String>? armed, FilingAdvisory? advisory}) {
   final out = StringBuffer();
   final err = StringBuffer();
   final roots = <String>[];
@@ -105,6 +105,12 @@ _harness(_ScriptedBdRunner bd, {Set<String>? armed}) {
                 decisionRegisters: const {},
               ),
             ),
+            // The PRE-STAMP ADVISORY is a scripted Fake for the same reason
+            // the evidence is: these probes measure the STAMP, and an
+            // inference call between the rows and the receipt would put a
+            // model inside an argv assertion. Its own arms are pinned in
+            // `pre_stamp_advisory_test.dart`.
+            advisory: advisory ?? FakeFilingAdvisory(),
           ),
           storeRoot: () => '/work/power_station',
           armedSubstations: () => armed,
@@ -169,7 +175,9 @@ void main() {
     expect(argv.take(2), ['update', 'pow-child']);
     expect(argv, containsAllInOrder(['--actor', 'nico']));
     expect(argv, isNot(contains('--add-label')));
-    expect(argv.where((arg) => arg == '--set-metadata'), hasLength(3));
+    // THREE receipt keys plus the advisory's grade — one update, because a
+    // receipt and the account of what was judged to earn it land together.
+    expect(argv.where((arg) => arg == '--set-metadata'), hasLength(4));
 
     final report = jsonDecode(h.out.toString()) as Map<String, dynamic>;
     final filing = report['filing'] as Map<String, dynamic>;
@@ -181,6 +189,7 @@ void main() {
       'grid.approved_by': 'nico',
       'grid.approved_at': '2026-09-02T14:30:00.000Z',
       'grid.approved_rev': revision,
+      kReadinessGradeKey: 'B',
     });
     expect(report['approved'], isTrue);
     expect(report['by'], 'nico');
@@ -350,5 +359,188 @@ void main() {
     final report = jsonDecode(h.out.toString()) as Map<String, dynamic>;
     expect(report['approved'], isFalse);
     expect(report['reason'], contains('bd update refused'));
+  });
+
+  group('the pre-stamp advisory decides whether the stamp lands', () {
+    _ScriptedBdRunner ready() => _ScriptedBdRunner({
+      'query': _beadReply(description: 'A real brief with no ordering.'),
+    });
+
+    test('AC-1 — a D verdict refuses with the lens\'s exact FIX text and '
+        'issues NO bd update', () async {
+      final hold = renderRefinementAsk(
+        grade: 'D',
+        rationale: 'names no surface and no decision',
+      );
+      final h = _harness(
+        ready(),
+        advisory: FakeFilingAdvisory(
+          FilingAdvisoryRefused(rule: 'readiness', reason: hold),
+        ),
+      );
+
+      expect(
+        await h.runner.run(['approve', '--actor', 'nico', 'pow-child']),
+        1,
+      );
+      // VERBATIM: the refiner reads the identical hold a spec_review gate
+      // would have parked with, at the moment the bead text is open.
+      expect(h.out.toString(), contains(hold));
+      expect(h.out.toString(), contains('FAIL advisory (readiness)'));
+      expect(h.bd.updates, isEmpty);
+    });
+
+    test('AC-1 — an A-C verdict stamps once and records the grade', () async {
+      for (final grade in const ['A', 'B', 'C']) {
+        final h = _harness(
+          ready(),
+          advisory: FakeFilingAdvisory(
+            FilingAdvisoryPassed(readinessGrade: grade),
+          ),
+        );
+        expect(
+          await h.runner.run([
+            'approve',
+            '--json',
+            '--actor',
+            'nico',
+            'pow-child',
+          ]),
+          0,
+          reason: '${h.out}${h.err}',
+        );
+        expect(h.bd.updates, hasLength(1));
+        final written = callMetadata(h.bd.updates.single);
+        expect(written[kReadinessGradeKey], grade);
+        expect(written.containsKey(kReadinessSkippedKey), isFalse);
+        expect(written.containsKey(kApprovedAdvisoryKey), isFalse);
+        // The three-key receipt tuple is untouched — it is still the whole of
+        // what makes a stamp readable.
+        expect(
+          written.keys,
+          containsAll([kApprovedByKey, kApprovedAtKey, kApprovedRevKey]),
+        );
+        final report = jsonDecode(h.out.toString()) as Map<String, dynamic>;
+        expect(report['readiness_grade'], grade);
+        expect((report['filing'] as Map<String, dynamic>)['advisory'], {
+          'outcome': 'passed',
+          'readiness_grade': grade,
+        });
+      }
+    });
+
+    test('AC-4 — --readiness=skip stamps anyway, records the waiver and no '
+        'grade, and asks the advisory NOTHING', () async {
+      final advisory = FakeFilingAdvisory();
+      final h = _harness(ready(), advisory: advisory);
+
+      expect(
+        await h.runner.run([
+          'approve',
+          '--json',
+          '--readiness=skip',
+          '--actor',
+          'nico',
+          'pow-child',
+        ]),
+        0,
+        reason: '${h.out}${h.err}',
+      );
+      expect(advisory.calls, isEmpty, reason: 'a waiver spends no inference');
+      expect(h.bd.updates, hasLength(1));
+      final written = callMetadata(h.bd.updates.single);
+      expect(written[kReadinessSkippedKey], 'true');
+      expect(written[kApprovedAdvisoryKey], kApprovedAdvisorySkipped);
+      expect(written.containsKey(kReadinessGradeKey), isFalse);
+      final report = jsonDecode(h.out.toString()) as Map<String, dynamic>;
+      expect(report['readiness_skipped'], isTrue);
+      expect(report.containsKey('readiness_grade'), isFalse);
+    });
+
+    test(
+      'a MECHANICAL failure refuses before the advisory is ever asked',
+      () async {
+        final advisory = FakeFilingAdvisory();
+        final h = _harness(
+          _ScriptedBdRunner({
+            'query': _beadReply(
+              description: 'Needs the native external reader.',
+              blockers: const ['external:the_grid:tg-xh5d'],
+            ),
+          }),
+          advisory: advisory,
+        );
+
+        expect(
+          await h.runner.run(['approve', '--actor', 'nico', 'pow-child']),
+          1,
+        );
+        expect(h.out.toString(), contains('FAIL dependencies:'));
+        expect(h.out.toString(), isNot(contains('FAIL advisory')));
+        expect(advisory.calls, isEmpty);
+        expect(h.bd.updates, isEmpty);
+      },
+    );
+
+    test('the advisory provenance is NOT part of the receipt tuple — a stamp '
+        'carrying none of it still parses', () {
+      // `ApprovalStamp.tryParse` reads exactly three keys, so every receipt
+      // minted before the advisory existed is exactly as valid as one minted
+      // with it. Widening the tuple would strand them all.
+      Bead stamped(Map<String, Object?> extra) =>
+          const Bead(
+            id: 'pow-x',
+            title: 'x',
+            issueType: IssueType.task,
+          ).copyWith(
+            metadata: {
+              kApprovedByKey: 'nico',
+              kApprovedAtKey: '2026-09-02T14:30:00.000Z',
+              kApprovedRevKey: '$kFilingApprovalRevisionPrefix${'a' * 64}',
+              ...extra,
+            },
+          );
+
+      expect(isApprovalStamped(stamped(const {})), isTrue);
+      expect(
+        isApprovalStamped(stamped(const {kReadinessGradeKey: 'A'})),
+        isTrue,
+      );
+      expect(
+        isApprovalStamped(
+          stamped(const {
+            kReadinessSkippedKey: 'true',
+            kApprovedAdvisoryKey: kApprovedAdvisorySkipped,
+          }),
+        ),
+        isTrue,
+      );
+      // And the writer never emits both halves at once.
+      const graded = ApprovalStamp(
+        by: 'nico',
+        at: '2026-09-02T14:30:00.000Z',
+        rev: 'abcdef1',
+        readinessGrade: 'B',
+      );
+      const waived = ApprovalStamp(
+        by: 'nico',
+        at: '2026-09-02T14:30:00.000Z',
+        rev: 'abcdef1',
+        advisorySkipped: true,
+      );
+      expect(graded.metadata.keys, [
+        kApprovedByKey,
+        kApprovedAtKey,
+        kApprovedRevKey,
+        kReadinessGradeKey,
+      ]);
+      expect(waived.metadata.keys, [
+        kApprovedByKey,
+        kApprovedAtKey,
+        kApprovedRevKey,
+        kReadinessSkippedKey,
+        kApprovedAdvisoryKey,
+      ]);
+    });
   });
 }

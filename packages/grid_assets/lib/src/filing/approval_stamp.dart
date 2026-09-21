@@ -9,6 +9,26 @@ const String kApprovedAtKey = 'grid.approved_at';
 /// Metadata key: the revision the approval was granted AGAINST.
 const String kApprovedRevKey = 'grid.approved_rev';
 
+/// Metadata key: the `bead-readiness` letter the PRE-STAMP ADVISORY graded this
+/// filing, written only on a stamp whose advisory RAN and passed.
+///
+/// PROVENANCE, never validity. The three-key tuple below is still the whole of
+/// what makes a receipt readable; this says what was judged and how well, so a
+/// governor sweeping receipts can tell a `C` mount from an `A` one without
+/// re-running a lens.
+const String kReadinessGradeKey = 'grid.readiness_grade';
+
+/// Metadata key: `true` when the advisory was WAIVED on this stamp.
+const String kReadinessSkippedKey = 'grid.readiness_skipped';
+
+/// Metadata key: `skipped` when the advisory was waived — the operator-legible
+/// half of [kReadinessSkippedKey], so a receipt says WHY no grade is recorded
+/// rather than leaving its absence to be read as a lens that found nothing.
+const String kApprovedAdvisoryKey = 'grid.approved_advisory';
+
+/// The [kApprovedAdvisoryKey] value a waived advisory records.
+const String kApprovedAdvisorySkipped = 'skipped';
+
 /// The scheme + version prefix of an approval revision that binds the FILING
 /// BASIS — the digest `FilingContract.evaluate` derives from the bead's work
 /// fields, its validation plan and the dependency ROWS bd holds for it.
@@ -96,8 +116,20 @@ bool isStaleFilingApprovalStamp(Bead bead) =>
 /// bead's filing basis. The `grid.approved` label it used to sit beside is
 /// retired; a label any writer can add was the same act written twice.
 final class ApprovalStamp {
-  /// Creates a stamp.
-  const ApprovalStamp({required this.by, required this.at, required this.rev});
+  /// Creates a stamp, optionally carrying the PRE-STAMP ADVISORY's provenance.
+  ///
+  /// [readinessGrade] and [advisorySkipped] are mutually exclusive by
+  /// construction at the one writer (`ApproveService`): an advisory that RAN
+  /// records its letter, an advisory that was WAIVED records the waiver, and a
+  /// stamp written with the advisory off records neither. None of the three is
+  /// read by [tryParse] — see the class doc.
+  const ApprovalStamp({
+    required this.by,
+    required this.at,
+    required this.rev,
+    this.readinessGrade = '',
+    this.advisorySkipped = false,
+  });
 
   /// The COMPLETE receipt [bead] carries, or null when it carries none.
   ///
@@ -105,6 +137,14 @@ final class ApprovalStamp {
   /// writes them in ONE `bd update`, so a receipt missing an actor or a
   /// revision was not written by the verb. A hand-added timestamp parses to
   /// null exactly like a hand-added label.
+  ///
+  /// The PRE-STAMP ADVISORY's provenance keys ([kReadinessGradeKey],
+  /// [kReadinessSkippedKey], [kApprovedAdvisoryKey]) are deliberately NOT read
+  /// here, and a receipt carrying none of them is exactly as valid as one
+  /// carrying all of them. They record what was judged; the three-key tuple
+  /// records the approval, and it stays the only mount marker. Widening the
+  /// tuple would strand every receipt minted before the advisory existed and
+  /// would make a waiver un-writable.
   ///
   /// [kApprovedRevKey] is accepted in two shapes. The authoritative one is a
   /// [kFilingApprovalRevisionPrefix] digest, which names the very content the
@@ -140,20 +180,43 @@ final class ApprovalStamp {
   /// [kFilingApprovalRevisionPrefix] digest, or a legacy raw git sha.
   final String rev;
 
+  /// The `bead-readiness` letter the advisory graded, or `''` when it did not
+  /// run. PROVENANCE only.
+  final String readinessGrade;
+
+  /// Whether the advisory was WAIVED on this stamp. PROVENANCE only.
+  final bool advisorySkipped;
+
   /// Whether [rev] binds the FILING BASIS, and is therefore comparable with a
   /// fresh `FilingContract` evaluation. False for the legacy raw-sha arm,
   /// which names a store HEAD and says nothing about the bead's content.
   bool get bindsFilingBasis => rev.startsWith(kFilingApprovalRevisionPrefix);
 
-  /// The three metadata pairs, written in ONE `bd update`.
+  /// The metadata pairs, written in ONE `bd update`.
+  ///
+  /// The three RECEIPT keys are always present and always first; the advisory
+  /// provenance rides the SAME update when there is any, because a receipt and
+  /// the account of what was judged to earn it must land together or not at
+  /// all.
   Map<String, String> get metadata => {
     kApprovedByKey: by,
     kApprovedAtKey: at,
     kApprovedRevKey: rev,
+    if (readinessGrade.isNotEmpty) kReadinessGradeKey: readinessGrade,
+    if (advisorySkipped) ...{
+      kReadinessSkippedKey: 'true',
+      kApprovedAdvisoryKey: kApprovedAdvisorySkipped,
+    },
   };
 
   /// Structured command/UI representation.
-  Map<String, Object> toJson() => {'by': by, 'at': at, 'rev': rev};
+  Map<String, Object> toJson() => {
+    'by': by,
+    'at': at,
+    'rev': rev,
+    if (readinessGrade.isNotEmpty) 'readiness_grade': readinessGrade,
+    if (advisorySkipped) 'readiness_skipped': true,
+  };
 }
 
 /// Whether [bead] carries the verb-written stamp.
