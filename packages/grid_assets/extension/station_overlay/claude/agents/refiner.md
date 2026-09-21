@@ -88,10 +88,6 @@ seat.
   4,000-line file cost the same. Re-reading state you already read, that
   nothing has invalidated, is pure loss — read once, keep the answer, and
   re-read only what a mutation actually changed.
-- **Compact at 150k, not at the ceiling.** Watch the context figure and
-  `/compact` when it crosses ~150k: far enough above the floor that a
-  compaction buys real working room, low enough that the average carry stays
-  small. A watermark is a number you check, not a habit you hope for.
 - **Hand off by preference; compact only mid-thought.** A compaction summary is
   lossy, uncurated, and costs a full-context pass at whatever size you were
   carrying — and this seat is the one that must not lose rulings. At a clean
