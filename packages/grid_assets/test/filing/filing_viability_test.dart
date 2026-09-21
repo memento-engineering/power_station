@@ -1,6 +1,6 @@
-// The six VIABILITY rows of the filing contract: a bead passes filing only if
-// what its fields HOLD can actually work, not merely because the field is
-// there.
+// The six VIABILITY rows of the filing contract, and the schema the CONTENT
+// row joins them in: a bead passes filing only if what its fields HOLD can
+// actually work, not merely because the field is there.
 //
 // Each row here retires one remembered rule that cost a round — a plan the
 // gating lane cannot parse, a Bash-only plan that dies under CI's dash, an
@@ -488,7 +488,7 @@ void main() {
     expect(surfaces.last, ['power_station/lib/src/filing/filing_text.dart']);
   });
 
-  test('filing report keeps one ten-row JSON schema', () {
+  test('filing report keeps one eleven-row JSON schema', () {
     final report = _report(
       _bead(description: 'The receipt landed at /tmp/round-7/receipt.md.'),
       completeEmptyEvidence,
@@ -496,10 +496,24 @@ void main() {
     final json = report.toJson();
     final rows = (json['requirements']! as List).cast<Map<String, Object>>();
 
+    // The landed ten, in their order, and the appended CONTENT row last.
+    expect(rows.map((row) => row['requirement']), const [
+      'driveable_type',
+      'validation_plan',
+      'acceptance_criteria',
+      'dependencies',
+      'validation_plan_syntax',
+      'validation_plan_portability',
+      'repo_relative_paths',
+      'bead_references',
+      'release_versions',
+      'decision_references',
+      'no_corrupting_text',
+    ]);
     expect(rows.map((row) => row['requirement']), [
       for (final requirement in FilingRequirement.values) requirement.wire,
     ]);
-    expect(rows, hasLength(10));
+    expect(rows, hasLength(11));
     for (final row in rows) {
       expect(row.keys, ['requirement', 'passed', 'detail']);
     }
@@ -514,7 +528,8 @@ void main() {
     expect(report.passed, isFalse);
   });
 
-  test('filing compatibility corpus keeps three live beads passing', () {
+  test('filing compatibility corpus keeps the landed ten rows passing on '
+      'three live beads', () {
     final corpus =
         jsonDecode(
               File(
@@ -572,6 +587,12 @@ void main() {
       },
     );
 
+    // Two of the three snapshots write ordinary markdown code spans, so the
+    // CONTENT row refuses them — which is the point of the row and not a
+    // regression of the corpus. No fixture text is rewritten to manufacture a
+    // pass: the live text is the evidence.
+    const carriesBacktick = {'pow-p8il', 'pow-wtyb'};
+
     for (final record in beads) {
       final bead = Bead(
         id: record['id']! as String,
@@ -585,14 +606,49 @@ void main() {
         metadata: {'validation_plan': record['validation_plan']! as String},
       );
       final report = _report(bead, evidence);
+
+      // The ten LANDED rows still pass on every snapshot: this bead APPENDS a
+      // row, it does not move one.
       expect(
         report.requirements
+            .where(
+              (row) => row.requirement != FilingRequirement.noCorruptingText,
+            )
             .where((row) => !row.passed)
             .map((row) => '${row.requirement.wire}: ${row.detail}'),
         isEmpty,
         reason: bead.id,
       );
-      expect(report.passed, isTrue, reason: bead.id);
+
+      final content = report.requirements.singleWhere(
+        (row) => row.requirement == FilingRequirement.noCorruptingText,
+      );
+      if (carriesBacktick.contains(bead.id)) {
+        expect(content.passed, isFalse, reason: bead.id);
+        expect(content.detail, startsWith('corrupting bead text:'));
+        expect(content.detail, contains('backtick'));
+        expect(
+          content.detail,
+          endsWith('remove NUL bytes and backticks before filing'),
+        );
+        // BOUNDED. These snapshots carry over two hundred code spans each, and
+        // a refusal that named every one ran to tens of kilobytes — which made
+        // no correction clearer and overran the mount explainer's own byte
+        // budget, so the report the row rides out on could not be rendered at
+        // all. The refusal names the first sites and COUNTS the rest.
+        expect(
+          RegExp(r'\(\w+:\d+\)').allMatches(content.detail),
+          hasLength(12),
+          reason: bead.id,
+        );
+        expect(content.detail, contains(' more — '), reason: bead.id);
+        expect(content.detail.length, lessThan(800), reason: bead.id);
+        expect(report.passed, isFalse, reason: bead.id);
+      } else {
+        expect(content.passed, isTrue, reason: '${bead.id}: ${content.detail}');
+        expect(report.requirements, hasLength(11), reason: bead.id);
+        expect(report.passed, isTrue, reason: bead.id);
+      }
     }
   });
 }

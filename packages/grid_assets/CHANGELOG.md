@@ -51,6 +51,19 @@
   valid as one minted with it. New public surface: `kReadinessGradeKey`, `kReadinessSkippedKey`,
   `kApprovedAdvisoryKey`, `kApprovedAdvisorySkipped`, and the `ApprovalStamp.readinessGrade` /
   `ApprovalStamp.advisorySkipped` fields.
+- Added: the filing contract is ELEVEN rows. The four PRESENCE rows and six VIABILITY rows are
+  joined by one CONTENT row, `no_corrupting_text`: a bead's description, design, acceptance
+  criteria and notes carry no NUL byte and no backtick. Both corrupt at exec time — a NUL
+  truncates the write and a backtick is command-substituted — and `bd` reports success either way,
+  so the bead files clean and dies later without naming its own cause. The row reads no
+  `FilingEvidence` at all: it is a scan of the bead's own text, so it answers identically whether a
+  caller gathered everything or nothing. Each refusal names the offending code unit by a printable
+  escape plus its field and field-local offset, so the detail is never itself corrupting; it names
+  the first twelve sites and counts the rest, because a bead written in markdown carries hundreds
+  of code spans and a detail naming every one overran the `mount` explainer's render budget. The
+  title and the `validation_plan` are out of scope: a plan is a shell program, where a backtick is
+  the author's own command substitution and the two plan rows judge it. New public surface:
+  `FilingRequirement.noCorruptingText`.
 
 
 ## 0.7.0-dev.4

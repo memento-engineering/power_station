@@ -17,19 +17,21 @@ import 'approval_stamp.dart';
 import 'filing_text.dart';
 import 'pre_stamp_advisory.dart';
 
-/// The ten mechanical checks reported for a newly filed bead.
+/// The eleven mechanical checks reported for a newly filed bead.
 ///
 /// The first four are PRESENCE: is the field there at all. The six after them
-/// are VIABILITY: can what the field holds actually work. A bead used to pass
-/// filing with a validation plan the gating lane cannot parse, an absolute
-/// path that turns the anchor extractor's receipt into a FAILED record, an id
-/// nobody minted, an acceptance version that goes stale on the next release
-/// wave, or a citation of a decision the round itself creates. Each of those
-/// cost a round, and each was carried afterwards as a REMEMBERED rule — a rule
-/// that binds only the agent who reads it, and the agents most likely to skip
-/// it are the ones under the most context pressure. A rule a machine can
-/// enforce belongs in the machine — the ruling bead `org-gze` carries, which is
-/// what this enum is the machine half of.
+/// are VIABILITY: can what the field holds actually work. The last is CONTENT:
+/// does the text itself survive being written and read back. A bead used to
+/// pass filing with a validation plan the gating lane cannot parse, an
+/// absolute path that turns the anchor extractor's receipt into a FAILED
+/// record, an id nobody minted, an acceptance version that goes stale on the
+/// next release wave, a citation of a decision the round itself creates, or a
+/// code unit that corrupts the bead at exec time. Each of those cost a round,
+/// and each was carried afterwards as a REMEMBERED rule — a rule that binds
+/// only the agent who reads it, and the agents most likely to skip it are the
+/// ones under the most context pressure. A rule a machine can enforce belongs
+/// in the machine — the ruling bead `org-gze` carries, which is what this enum
+/// is the machine half of.
 ///
 /// The order is STABLE and the wire names are the contract: skills, UIs and
 /// the approval preflight all read rows by [wire], in
@@ -44,7 +46,8 @@ enum FilingRequirement {
   repoRelativePaths('repo_relative_paths'),
   beadReferences('bead_references'),
   releaseVersions('release_versions'),
-  decisionReferences('decision_references');
+  decisionReferences('decision_references'),
+  noCorruptingText('no_corrupting_text');
 
   const FilingRequirement(this.wire);
 
@@ -99,7 +102,7 @@ final class FilingReport {
   /// Bead id checked.
   final String beadId;
 
-  /// Ten rows for a found bead, in [FilingRequirement.values] order.
+  /// Eleven rows for a found bead, in [FilingRequirement.values] order.
   final List<FilingRequirementRow> requirements;
 
   /// The revision this filing WOULD be approved against — the deterministic
@@ -123,17 +126,19 @@ final class FilingReport {
   /// What the PRE-STAMP ADVISORY concluded, or null when it was not asked
   /// ([FilingAdvisoryMode.off], or a mechanical row that refused before it).
   ///
-  /// It is deliberately NOT an eleventh [FilingRequirement] row. The
-  /// completeness lane is exactly ten mechanical requirements with unchanged
-  /// wire names and order — the boundary
-  /// `power_station#the-dependencies-row-is-a-projection-of-bd-dependency-rows`
-  /// reaffirmed — and a judgement an LLM makes is not a mechanical row. It
-  /// rides beside them, in its own member, so a reader of `requirements` sees
-  /// exactly what it always saw.
+  /// It is deliberately NOT a [FilingRequirement] row, and the boundary
+  /// `power_station#pre-stamp-advisory-reuses-readiness-and-discovery` drew is
+  /// MECHANICAL-versus-JUDGEMENT, never a frozen row count: [requirements]
+  /// holds only checks a machine decides the same way every time, and a
+  /// judgement an LLM makes is not one of them. That a deterministic row was
+  /// minted beside the ten that decision counted — `no_corrupting_text` — moves
+  /// the count and not the boundary: it joined [requirements], in wire order,
+  /// as a pure scan of the bead's own text, and this member still carries the
+  /// only judgement in the report.
   final FilingAdvisoryVerdict? advisory;
 
-  /// True for a found bead with exactly ten passing rows AND, when the advisory
-  /// was asked, an advisory that did not refuse.
+  /// True for a found bead whose every mechanical row passed AND, when the
+  /// advisory was asked, an advisory that did not refuse.
   bool get passed =>
       error == null &&
       requirements.length == FilingRequirement.values.length &&
@@ -894,7 +899,7 @@ Set<String> _absentLabelsOf(String error) {
   };
 }
 
-/// Pure evaluator for the ten-row filing report.
+/// Pure evaluator for the eleven-row filing report.
 ///
 /// This is the FILING COMPLETENESS contract of
 /// `power_station#approval-is-the-stamp-the-grid-approved-label-retires` —
@@ -902,8 +907,9 @@ Set<String> _absentLabelsOf(String error) {
 /// `lib/src/code/`, neither subsuming the other, no third completeness
 /// predicate minted"*. The roster resolution of an `external:` row is a
 /// refinement of this contract's own dependency row, and the six VIABILITY
-/// rows are further requirements OF THIS CONTRACT — mount eligibility is
-/// untouched and no second checker is minted beside filing.
+/// rows and the one CONTENT row are further requirements OF THIS CONTRACT —
+/// mount eligibility is untouched and no second checker is minted beside
+/// filing.
 final class FilingContract {
   /// Creates the stateless evaluator.
   const FilingContract();
@@ -923,7 +929,9 @@ final class FilingContract {
   /// [evidence] is what the six VIABILITY rows are judged against. It is
   /// REQUIRED and never defaulted: a caller that gathered nothing passes
   /// [FilingEvidence.unavailable], which refuses a bead for the tokens nobody
-  /// could resolve rather than silently clearing them.
+  /// could resolve rather than silently clearing them. The CONTENT row reads
+  /// no evidence at all — the bead's own text is the whole question — so it
+  /// answers the same under either posture.
   FilingReport evaluate(
     Bead bead,
     Iterable<BeadDependency> dependencies, {
@@ -993,6 +1001,7 @@ final class FilingContract {
         _beadReferencesRow(bead, evidence),
         _releaseVersionsRow(bead),
         _decisionReferencesRow(bead, evidence),
+        _noCorruptingTextRow(bead),
       ],
     );
     return (dependencyProjection: projection, report: report);
@@ -1297,6 +1306,83 @@ FilingRequirementRow _decisionReferencesRow(
               '${_named([for (final reference in missing) reference.slice])} — '
               'a round may not cite a decision it creates; cite an existing '
               'entry or describe the proposed entry without a citation',
+  );
+}
+
+// ── the CONTENT row: text that corrupts the bead it is written into ─────────
+
+/// The BODY fields the content row scans, in the order a refusal names them.
+///
+/// `title` and `validation_plan` are deliberately OUT. The plan is a shell
+/// PROGRAM, where a backtick is the author's own command substitution and the
+/// two plan rows already judge whether it works. The title is the one-line
+/// summary the rule that cost the round never covered, and widening this row
+/// onto it is a ruling of its own rather than a silent extension of this one.
+const List<BeadTextField> _corruptibleFields = [
+  BeadTextField.description,
+  BeadTextField.design,
+  BeadTextField.acceptanceCriteria,
+  BeadTextField.notes,
+];
+
+/// The code units that corrupt a bead at EXEC time, by the name a refusal
+/// calls them.
+const Map<int, String> _corruptingUnits = {0x00: 'NUL', 0x60: 'backtick'};
+
+/// How many corrupting SITES one refusal names before it reports the rest as a
+/// count.
+///
+/// A bead that writes prose in markdown carries hundreds of backticks, and
+/// naming every one produced a detail tens of kilobytes long — which does not
+/// make the correction clearer and does blow the mount explainer's own byte
+/// budget, so the report it rides out on could not be rendered at all. The
+/// named sites are the ones an author edits first; the count is what tells
+/// them how much is left.
+const int _maxNamedCorruptingSites = 12;
+
+/// [unit] as the PRINTABLE escape a refusal quotes it BY, never as itself.
+///
+/// The escape is not decoration: a detail is written back onto a bead and read
+/// out of one, so a refusal that quoted the raw code unit would carry the very
+/// corruption it is refusing.
+String _printableUnit(int unit) =>
+    r'\u' + unit.toRadixString(16).padLeft(4, '0');
+
+/// The CONTENT row: the bead's own body text carries no NUL byte and no
+/// backtick.
+///
+/// Both corrupt at exec time — a NUL TRUNCATES the write, and a backtick is
+/// COMMAND-SUBSTITUTED by the shell that carries the field — and `bd` reports
+/// success either way. The bead then files clean, mounts, and dies later in a
+/// way that does not name its own cause, which is exactly the failure a
+/// remembered rule cannot catch: it is invisible at the moment it is made.
+///
+/// This row gathers NOTHING. It is a scan of the bead's own text, so it
+/// answers identically under [FilingEvidence.unavailable] and under a complete
+/// live gather — there is no world-fact for it to be judged against.
+FilingRequirementRow _noCorruptingTextRow(Bead bead) {
+  final found = <String>[];
+  for (final field in _corruptibleFields) {
+    final text = beadTextOf(bead, field);
+    for (var at = 0; at < text.length; at++) {
+      final name = _corruptingUnits[text.codeUnitAt(at)];
+      if (name == null) continue;
+      final slice = BeadTextSlice(field: field, offset: at, text: text[at]);
+      found.add(
+        '$name "${_printableUnit(text.codeUnitAt(at))}" (${slice.location})',
+      );
+    }
+  }
+  final named = found.take(_maxNamedCorruptingSites).join(', ');
+  final rest = found.length - _maxNamedCorruptingSites;
+  return FilingRequirementRow(
+    requirement: FilingRequirement.noCorruptingText,
+    passed: found.isEmpty,
+    detail: found.isEmpty
+        ? 'description, design, acceptance_criteria and notes contain no NUL '
+              'byte or backtick'
+        : 'corrupting bead text: $named${rest > 0 ? ', and $rest more' : ''} — '
+              'remove NUL bytes and backticks before filing',
   );
 }
 
