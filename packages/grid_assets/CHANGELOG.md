@@ -53,17 +53,18 @@
   `ApprovalStamp.advisorySkipped` fields.
 - Added: the filing contract is ELEVEN rows. The four PRESENCE rows and six VIABILITY rows are
   joined by one CONTENT row, `no_corrupting_text`: a bead's description, design, acceptance
-  criteria and notes carry no NUL byte and no backtick. Both corrupt at exec time — a NUL
-  truncates the write and a backtick is command-substituted — and `bd` reports success either way,
-  so the bead files clean and dies later without naming its own cause. The row reads no
-  `FilingEvidence` at all: it is a scan of the bead's own text, so it answers identically whether a
-  caller gathered everything or nothing. Each refusal names the offending code unit by a printable
-  escape plus its field and field-local offset, so the detail is never itself corrupting; it names
-  the first twelve sites and counts the rest, because a bead written in markdown carries hundreds
-  of code spans and a detail naming every one overran the `mount` explainer's render budget. The
-  title and the `validation_plan` are out of scope: a plan is a shell program, where a backtick is
-  the author's own command substitution and the two plan rows judge it. New public surface:
-  `FilingRequirement.noCorruptingText`.
+  criteria and notes carry no NUL byte. A NUL truncates the write that carries the field and `bd`
+  reports success anyway, so the bead files clean and dies later without naming its own cause. The
+  row refuses the NUL byte and NOTHING else — a backtick is legitimate bead text, because a code
+  span is how a reader tells a symbol from a word, and the hazard it once posed belonged to the
+  writer's own shell rather than to `bd`. The row reads no `FilingEvidence` at all: it is a scan of
+  the bead's own text, so it answers identically whether a caller gathered everything or nothing.
+  Each refusal names the offending byte by a printable escape plus its field and field-local
+  offset, so the detail is never itself corrupting; it names the first twelve sites and counts the
+  rest, because corruption arrives in runs and a detail naming every site overran the `mount`
+  explainer's render budget. The title and the `validation_plan` are out of scope: widening the
+  scan onto a one-line summary, or onto a plan the two plan rows already parse, is a ruling of its
+  own. New public surface: `FilingRequirement.noCorruptingText`.
 
 
 ## 0.7.0-dev.4

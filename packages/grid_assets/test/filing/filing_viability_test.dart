@@ -528,8 +528,7 @@ void main() {
     expect(report.passed, isFalse);
   });
 
-  test('filing compatibility corpus keeps the landed ten rows passing on '
-      'three live beads', () {
+  test('filing compatibility corpus keeps three live beads passing', () {
     final corpus =
         jsonDecode(
               File(
@@ -587,12 +586,6 @@ void main() {
       },
     );
 
-    // Two of the three snapshots write ordinary markdown code spans, so the
-    // CONTENT row refuses them — which is the point of the row and not a
-    // regression of the corpus. No fixture text is rewritten to manufacture a
-    // pass: the live text is the evidence.
-    const carriesBacktick = {'pow-p8il', 'pow-wtyb'};
-
     for (final record in beads) {
       final bead = Bead(
         id: record['id']! as String,
@@ -607,48 +600,20 @@ void main() {
       );
       final report = _report(bead, evidence);
 
-      // The ten LANDED rows still pass on every snapshot: this bead APPENDS a
-      // row, it does not move one.
+      // All ELEVEN rows pass on every snapshot. Two of the three write
+      // ordinary markdown code spans, and they stay clean: the CONTENT row
+      // refuses the NUL byte only, so this bead APPENDS a row without moving
+      // one. No fixture text is rewritten to manufacture a pass — the live
+      // text is the evidence.
       expect(
         report.requirements
-            .where(
-              (row) => row.requirement != FilingRequirement.noCorruptingText,
-            )
             .where((row) => !row.passed)
             .map((row) => '${row.requirement.wire}: ${row.detail}'),
         isEmpty,
         reason: bead.id,
       );
-
-      final content = report.requirements.singleWhere(
-        (row) => row.requirement == FilingRequirement.noCorruptingText,
-      );
-      if (carriesBacktick.contains(bead.id)) {
-        expect(content.passed, isFalse, reason: bead.id);
-        expect(content.detail, startsWith('corrupting bead text:'));
-        expect(content.detail, contains('backtick'));
-        expect(
-          content.detail,
-          endsWith('remove NUL bytes and backticks before filing'),
-        );
-        // BOUNDED. These snapshots carry over two hundred code spans each, and
-        // a refusal that named every one ran to tens of kilobytes — which made
-        // no correction clearer and overran the mount explainer's own byte
-        // budget, so the report the row rides out on could not be rendered at
-        // all. The refusal names the first sites and COUNTS the rest.
-        expect(
-          RegExp(r'\(\w+:\d+\)').allMatches(content.detail),
-          hasLength(12),
-          reason: bead.id,
-        );
-        expect(content.detail, contains(' more — '), reason: bead.id);
-        expect(content.detail.length, lessThan(800), reason: bead.id);
-        expect(report.passed, isFalse, reason: bead.id);
-      } else {
-        expect(content.passed, isTrue, reason: '${bead.id}: ${content.detail}');
-        expect(report.requirements, hasLength(11), reason: bead.id);
-        expect(report.passed, isTrue, reason: bead.id);
-      }
+      expect(report.requirements, hasLength(11), reason: bead.id);
+      expect(report.passed, isTrue, reason: bead.id);
     }
   });
 }

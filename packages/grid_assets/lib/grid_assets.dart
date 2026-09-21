@@ -75,9 +75,10 @@
 /// pinned release versions, and is every decision it cites already RECORDED.
 /// The pure scanners those rows run are in `filing_text.dart` — one copy,
 /// shared with discovery's own anchor and citation gather. The eleventh is
-/// CONTENT: `no_corrupting_text` refuses a NUL byte or a backtick in the
-/// bead's own body text, both of which corrupt it at exec time while `bd`
-/// reports success. It reads no evidence — the text is the whole question.
+/// CONTENT: `no_corrupting_text` refuses a NUL byte — and only a NUL byte — in
+/// the bead's own body text, because it truncates the write while `bd` reports
+/// success. A backtick is legitimate bead text and passes. The row reads no
+/// evidence — the text is the whole question.
 ///
 /// The viability rows are judged against [FilingEvidence], which every leg
 /// reports in three states rather than two: answered, answered-negative, and

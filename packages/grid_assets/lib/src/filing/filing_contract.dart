@@ -26,7 +26,7 @@ import 'pre_stamp_advisory.dart';
 /// absolute path that turns the anchor extractor's receipt into a FAILED
 /// record, an id nobody minted, an acceptance version that goes stale on the
 /// next release wave, a citation of a decision the round itself creates, or a
-/// code unit that corrupts the bead at exec time. Each of those cost a round,
+/// NUL byte that truncates the write carrying it. Each of those cost a round,
 /// and each was carried afterwards as a REMEMBERED rule — a rule that binds
 /// only the agent who reads it, and the agents most likely to skip it are the
 /// ones under the most context pressure. A rule a machine can enforce belongs
@@ -1313,11 +1313,11 @@ FilingRequirementRow _decisionReferencesRow(
 
 /// The BODY fields the content row scans, in the order a refusal names them.
 ///
-/// `title` and `validation_plan` are deliberately OUT. The plan is a shell
-/// PROGRAM, where a backtick is the author's own command substitution and the
-/// two plan rows already judge whether it works. The title is the one-line
-/// summary the rule that cost the round never covered, and widening this row
-/// onto it is a ruling of its own rather than a silent extension of this one.
+/// `title` and `validation_plan` are deliberately OUT. These four carry the
+/// long prose a refiner pastes in, which is where a truncated write hides;
+/// widening the scan onto the one-line title, or onto a plan the two plan rows
+/// already parse end to end, is a ruling of its own rather than a silent
+/// extension of this one.
 const List<BeadTextField> _corruptibleFields = [
   BeadTextField.description,
   BeadTextField.design,
@@ -1327,17 +1327,27 @@ const List<BeadTextField> _corruptibleFields = [
 
 /// The code units that corrupt a bead at EXEC time, by the name a refusal
 /// calls them.
-const Map<int, String> _corruptingUnits = {0x00: 'NUL', 0x60: 'backtick'};
+///
+/// Exactly ONE today, and the map shape is the point: the class is open, so a
+/// unit joins it when it is SHOWN to corrupt the write. The backtick is not in
+/// it and must not be added — Nico ruled it legitimate bead text on
+/// 2026-09-21, because a code span is how a reader tells a symbol from a word.
+/// The hazard a backtick once posed was the WRITER's own shell substituting it
+/// on the way in, never `bd` or the bead, and the cure for that is how the
+/// write is made.
+const Map<int, String> _corruptingUnits = {0x00: 'NUL'};
 
 /// How many corrupting SITES one refusal names before it reports the rest as a
 /// count.
 ///
-/// A bead that writes prose in markdown carries hundreds of backticks, and
-/// naming every one produced a detail tens of kilobytes long — which does not
-/// make the correction clearer and does blow the mount explainer's own byte
-/// budget, so the report it rides out on could not be rendered at all. The
-/// named sites are the ones an author edits first; the count is what tells
-/// them how much is left.
+/// Corruption arrives in RUNS — a field that took a truncated or binary paste
+/// carries many, and a detail naming every one runs to tens of kilobytes,
+/// which makes no correction clearer and does blow the `mount` explainer's own
+/// byte budget, leaving the report the row rides out on unrenderable. A vended
+/// lookup answers within a bound it declares
+/// (`power_station#a-mechanical-lookup-is-a-vended-command-with-a-bounded-output`);
+/// the named sites are the ones an author edits first, and the count is what
+/// tells them how much is left.
 const int _maxNamedCorruptingSites = 12;
 
 /// [unit] as the PRINTABLE escape a refusal quotes it BY, never as itself.
@@ -1348,14 +1358,18 @@ const int _maxNamedCorruptingSites = 12;
 String _printableUnit(int unit) =>
     r'\u' + unit.toRadixString(16).padLeft(4, '0');
 
-/// The CONTENT row: the bead's own body text carries no NUL byte and no
-/// backtick.
+/// The CONTENT row: the bead's own body text carries no NUL byte.
 ///
-/// Both corrupt at exec time — a NUL TRUNCATES the write, and a backtick is
-/// COMMAND-SUBSTITUTED by the shell that carries the field — and `bd` reports
-/// success either way. The bead then files clean, mounts, and dies later in a
-/// way that does not name its own cause, which is exactly the failure a
-/// remembered rule cannot catch: it is invisible at the moment it is made.
+/// A NUL TRUNCATES the write that carries the field and `bd` reports success
+/// anyway. The bead then files clean, mounts, and dies later in a way that does
+/// not name its own cause — exactly the failure a remembered rule cannot catch,
+/// because it is invisible at the moment it is made.
+///
+/// It refuses the NUL byte and NOTHING else. A backtick reads like the same
+/// hazard and is not one: bead prose is markdown, a code span is legitimate
+/// authoring, and refusing it would have held 7 of the 22 beads stamped when it
+/// was measured. What it would have caught is an unquoted heredoc — a property
+/// of the writer's shell, cured where the write is made.
 ///
 /// This row gathers NOTHING. It is a scan of the bead's own text, so it
 /// answers identically under [FilingEvidence.unavailable] and under a complete
@@ -1380,9 +1394,9 @@ FilingRequirementRow _noCorruptingTextRow(Bead bead) {
     passed: found.isEmpty,
     detail: found.isEmpty
         ? 'description, design, acceptance_criteria and notes contain no NUL '
-              'byte or backtick'
+              'byte'
         : 'corrupting bead text: $named${rest > 0 ? ', and $rest more' : ''} — '
-              'remove NUL bytes and backticks before filing',
+              'remove NUL bytes before filing',
   );
 }
 
