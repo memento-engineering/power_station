@@ -990,8 +990,8 @@ void main() {
     // ALONE below — identical content between them is permitted and is the
     // common case, but it is never required, and nothing here compares one
     // leg's bytes to the other's.
-    test('each intake-refinement leg vends the eleven-row oracle, its '
-        'corrupting-text remedy and both judgement-only exclusions', () {
+    test('each intake-refinement leg vends the eleven-row oracle, its NUL '
+        'remedy and both judgement-only exclusions', () {
       for (final leg in _skillLegs) {
         final body = _renderLeg(root, leg, 'intake-refinement', {
           'runner': 'space',
@@ -1024,7 +1024,7 @@ void main() {
           'use release-relative language or a version range',
           'a round may not cite a decision it creates; cite an existing entry '
               'or describe the proposed entry without a citation',
-          'remove NUL bytes and backticks before filing',
+          'remove NUL bytes before filing',
         ]) {
           expect(flat, contains(remedy), reason: '$leg teaches "$remedy"');
         }
@@ -1063,15 +1063,33 @@ void main() {
         expect(flat, contains('judgement about the BLAST RADIUS'));
 
         // The CONTENT row is taught as a REFUSAL with a correction, not as a
-        // rule the reader has to carry: the refusal the verb emits, and what
-        // each code unit does at exec time.
+        // rule the reader has to carry: the exact refusal the verb emits, the
+        // printable field-local site it names, its bound, and what the byte
+        // does at exec time.
         expect(
           flat,
-          contains('corrupting bead text: backtick'),
+          contains(r'corrupting bead text: NUL "\u0000" (<field>:<offset>)'),
           reason: '$leg quotes the refusal the verb emits',
         );
-        expect(flat, contains('COMMAND-SUBSTITUTED'));
         expect(flat, contains('TRUNCATES the write'));
+        expect(flat, contains('field-local offset'));
+        expect(
+          flat,
+          contains(
+            'names the first twelve sites and counts the '
+            'rest',
+          ),
+        );
+
+        // And the backtick is taught as LEGITIMATE. Nico ruled it bead text on
+        // 2026-09-21, so a leg that still asked for its removal would teach a
+        // refusal the verb does not make and hold correct beads.
+        expect(
+          flat,
+          contains('a backtick is legitimate bead text'),
+          reason: '$leg does not teach a refusal the verb never makes',
+        );
+        expect(flat, isNot(contains('remove NUL bytes and backticks')));
       }
     });
 
@@ -1090,7 +1108,7 @@ void main() {
           'current-plus-attached-store bead-id existence',
           'release-relative acceptance',
           'existing decision citations',
-          'no NUL byte or backtick in the bead text',
+          'no NUL byte in the bead text',
         ]) {
           expect(flat, contains(enforced), reason: '$leg names "$enforced"');
         }

@@ -51,9 +51,9 @@ Rows 1–4 are the PRESENCE half of the eleven rows the `filing` verb checks;
 the verb also checks six VIABILITY rows over the same text — can the plan
 parse, is it portable, are the paths repository-relative, do the cited ids and
 decisions exist, is acceptance free of pinned releases — and one CONTENT row,
-which refuses a NUL byte or a backtick anywhere in the bead's body text. Row 5
-is the judgement this skill's reader owns. Never re-derive a row by reading the bead — run the
-verb (**The exit check**).
+which refuses a NUL byte anywhere in the bead's body text. Row 5 is the
+judgement this skill's reader owns. Never re-derive a row by reading the bead —
+run the verb (**The exit check**).
 
 ## Search prior art BEFORE accepting a filing
 
@@ -177,7 +177,7 @@ When the work extends something the tree already owns, write the pointer into
 the bead body as `path:line` plus the relationship:
 
 ```
-COMPOSE: packages/grid_assets/lib/src/filing/filing_contract.dart:907 owns the
+COMPOSE: packages/grid_assets/lib/src/filing/filing_contract.dart:913 owns the
 eleven-row completeness contract — CALL it; do not add a second predicate.
 ```
 
@@ -290,15 +290,15 @@ correction:
   holds an entry for the log its amendments live in, so refusing there is a
   hold nothing can clear. Read the named slice anyway — a genuinely misspelled
   legacy id looks exactly like this.
-- `corrupting bead text: backtick "\u0060" (<field>:<offset>)` or `NUL
-  "\u0000" (<field>:<offset>)` — **remove NUL bytes and backticks before
-  filing**. A NUL TRUNCATES the write and a backtick is COMMAND-SUBSTITUTED by
-  the shell that carries the field, and `bd` reports success either way — so
-  the bead files clean and dies a build later without ever naming its own
-  cause. The row quotes each offending code unit by its printable escape and
-  names the exact field and offset to edit; it names the first twelve sites and
-  counts the rest, so fix the named ones and rerun. Write a quoted path or
-  symbol as plain words or an indented block, never as a code span.
+- `corrupting bead text: NUL "\u0000" (<field>:<offset>)` — **remove NUL bytes
+  before filing**. A NUL TRUNCATES the write that carries the field and `bd`
+  reports success anyway — so the bead files clean and dies a build later
+  without ever naming its own cause. The row quotes the byte by its printable
+  escape, never as itself, and names the exact field and field-local offset to
+  edit; it names the first twelve sites and counts the rest, so fix the named
+  ones and rerun. It refuses the NUL byte and NOTHING else: a backtick is
+  legitimate bead text — a code span is how a reader tells a symbol from a word
+  — so write paths, commands and symbols exactly as you mean them.
 - `… evidence is unavailable for <token>: <source> — restore complete evidence
   and rerun` — nobody could ANSWER, which is not the same as an answer of "no".
   This is a COMPOSITION gap, not a bead defect: the store or the decision index

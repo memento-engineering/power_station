@@ -181,9 +181,10 @@ it exits 0. The command checks the eleven mechanical rows — the four PRESENCE
 rows, six VIABILITY rows: lane-shell syntax, dash portability,
 repository-relative file anchors, current-plus-attached-store bead-id
 existence, release-relative acceptance, and existing decision citations — and
-one CONTENT row: no NUL byte or backtick in the bead text, both of which
-corrupt it at exec time while `bd` reports success. The agentic half still
-judges whether the description and acceptance are useful.
+one CONTENT row: no NUL byte in the bead text, which truncates the write that
+carries the field while `bd` reports success. A backtick is legitimate bead
+text and passes. The agentic half still judges whether the description and
+acceptance are useful.
 
 Decision citations are read from the **description and design only** — notes
 are the operator's receipt channel and make no citation, so quoting a hold
