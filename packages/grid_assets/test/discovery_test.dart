@@ -348,6 +348,48 @@ extension on DecisionGatherEvidence {
   ];
 }
 
+/// The YAML front matter of the long synthetic MADR entry ([_madrEntry]).
+const String _madrFrontMatter =
+    '---\nstatus: accepted\nregister:\n  spec: 1\n'
+    '  slug: a-long-fake-decision\n  surfaces:\n    - "packages/**"\n---\n';
+
+/// A MADR decision entry split into the regions the section-aware clip reads:
+/// [_madrFrontMatter], a title/Context/Considered Options middle of about
+/// [contextChars] characters, a `## Decision Outcome` of about [outcomeChars]
+/// characters that closes with `### Consequences`, and [after] verbatim.
+///
+/// Sentinels open and close each region (`CONTEXT-HEAD`/`CONTEXT-TAIL`,
+/// `OUTCOME-HEAD`/`OUTCOME-TAIL`), so a probe can assert which regions a clip
+/// kept and where it cut.
+({String middle, String outcome, String text}) _madrEntry({
+  required int contextChars,
+  required int outcomeChars,
+  String after = '',
+}) {
+  final middle =
+      '\n# A long fake decision\n\n## Context and Problem Statement\n\n'
+      'CONTEXT-HEAD ${'context prose. ' * (contextChars ~/ 15)}\n\n'
+      '## Considered Options\n\n* one\n* two CONTEXT-TAIL\n\n';
+  final outcome =
+      '## Decision Outcome\n\nOUTCOME-HEAD '
+      '${'the ruling holds. ' * (outcomeChars ~/ 18)}\n\n'
+      '### Consequences\n\n* Good, because OUTCOME-TAIL\n';
+  return (
+    middle: middle,
+    outcome: outcome,
+    text: '$_madrFrontMatter$middle$outcome$after',
+  );
+}
+
+/// [text] bounded as a recorded decision entry read from
+/// `docs/decisions/long.md`.
+BoundedEvidence _boundDecisionEntry(String text) => boundDiscoveryEvidence(
+  kind: 'decision-entry',
+  subject: 'power_station#a-long-fake-decision',
+  source: 'docs/decisions/long.md',
+  fullText: text,
+);
+
 /// A [ShellRunner] answering one canned (exitCode, output) for every call, and
 /// recording each (workingDirectory, command) — Fakes, not mocks.
 ///
@@ -2096,6 +2138,291 @@ void main() {
           reason: 'the digest is over the COMPLETE text, not the snippet',
         );
         expect(bounded.id, contains('sha256:${bounded.digest}'));
+      },
+    );
+
+    test('decision-entry clipping keeps the complete Decision Outcome', () {
+      // The Context alone outruns the old head window, so a head clip never
+      // reached the ruling a lens judges alignment against.
+      final entry = _madrEntry(contextChars: 6000, outcomeChars: 1500);
+      expect(entry.text.length, greaterThan(kMaxDiscoverySnippetChars));
+      expect(
+        entry.text.indexOf('## Decision Outcome'),
+        greaterThan(kMaxDiscoverySnippetChars),
+      );
+      final bounded = _boundDecisionEntry(entry.text);
+      final marker =
+          '[TRUNCATED: kept YAML front matter and complete ## Decision Outcome '
+          '(including ### Consequences when present); elided middle '
+          'Context/Considered Options. The complete entry is ${bounded.id}; '
+          'read it whole at docs/decisions/long.md.]';
+
+      expect(bounded.state, EvidenceState.truncated);
+      expect(bounded.snippet, hasLength(kMaxDiscoverySnippetChars));
+      final keptMiddle =
+          bounded.snippet.length -
+          _madrFrontMatter.length -
+          '\n$marker\n\n'.length -
+          entry.outcome.length;
+      expect(
+        bounded.snippet,
+        '$_madrFrontMatter${entry.middle.substring(0, keptMiddle)}'
+        '\n$marker\n\n${entry.outcome}',
+        reason:
+            'front matter whole, the TOP of the middle in the spare budget, '
+            'the marker directly above the Outcome, and the Outcome whole',
+      );
+      expect(bounded.snippet, contains('CONTEXT-HEAD'));
+      expect(bounded.snippet, isNot(contains('CONTEXT-TAIL')));
+      expect(bounded.snippet, contains('### Consequences'));
+      expect(bounded.snippet, contains('OUTCOME-TAIL'));
+      expect(
+        bounded.digest,
+        boundDiscoveryEvidence(
+          kind: 'other',
+          subject: 'elsewhere',
+          source: '',
+          fullText: entry.text,
+        ).digest,
+        reason: 'the digest still identifies the COMPLETE body',
+      );
+      expect(
+        bounded.id,
+        'decision-entry:power_station%23a-long-fake-decision'
+        '@sha256:${bounded.digest}',
+      );
+    });
+
+    test('short decision-entry evidence is untouched', () {
+      final entry = _madrEntry(contextChars: 300, outcomeChars: 300);
+      final atBound = entry.text.padRight(kMaxDiscoverySnippetChars, '.');
+      final bounded = _boundDecisionEntry(atBound);
+      expect(bounded.snippet, atBound);
+      expect(bounded.state, EvidenceState.complete);
+      expect(bounded.snippet, isNot(contains('[TRUNCATED')));
+
+      // One character past the bound is where the clip starts.
+      expect(_boundDecisionEntry('$atBound.').state, EvidenceState.truncated);
+    });
+
+    test('decision-entry clipping marks a clipped Outcome tail', () {
+      // Front matter plus the whole Outcome cannot fit: the Outcome keeps its
+      // heading and prefix, and only its tail is cut.
+      final entry = _madrEntry(contextChars: 2000, outcomeChars: 5000);
+      final bounded = _boundDecisionEntry(entry.text);
+      final marker =
+          '[TRUNCATED: kept YAML front matter and the head of ## Decision '
+          'Outcome; elided Context/Considered Options and clipped the Decision '
+          'Outcome tail. The complete entry is ${bounded.id}; read it whole at '
+          'docs/decisions/long.md.]';
+
+      expect(bounded.state, EvidenceState.truncated);
+      expect(
+        bounded.snippet.length,
+        lessThanOrEqualTo(kMaxDiscoverySnippetChars),
+      );
+      final keptOutcome =
+          bounded.snippet.length -
+          _madrFrontMatter.length -
+          '\n$marker\n\n'.length;
+      expect(keptOutcome, lessThan(entry.outcome.length));
+      expect(
+        bounded.snippet,
+        '$_madrFrontMatter\n$marker\n\n'
+        '${entry.outcome.substring(0, keptOutcome)}',
+        reason: 'the middle is gone and only the Outcome TAIL is clipped',
+      );
+      expect(
+        bounded.snippet,
+        contains('$marker\n\n## Decision Outcome\n\nOUTCOME-HEAD'),
+      );
+      expect(bounded.snippet, isNot(contains('CONTEXT-HEAD')));
+      expect(bounded.snippet, isNot(contains('OUTCOME-TAIL')));
+      expect(
+        bounded.digest,
+        boundDiscoveryEvidence(
+          kind: 'other',
+          subject: 'elsewhere',
+          source: '',
+          fullText: entry.text,
+        ).digest,
+      );
+    });
+
+    test('decision-entry clipping spends spare budget on sections after the '
+        'Outcome', () {
+      // A register entry that splits its ruling across level-two sections
+      // after `## Decision Outcome` keeps as much of them as fits, and the
+      // marker says those were clipped rather than the middle.
+      final after =
+          '## More Information\n\nAFTER-HEAD ${'more detail. ' * 300}'
+          'AFTER-TAIL\n';
+      final entry = _madrEntry(
+        contextChars: 300,
+        outcomeChars: 1200,
+        after: after,
+      );
+      final bounded = _boundDecisionEntry(entry.text);
+      final marker =
+          '[TRUNCATED: kept YAML front matter and complete ## Decision Outcome '
+          '(including ### Consequences when present); elided the tail of the '
+          'sections after ## Decision Outcome. The complete entry is '
+          '${bounded.id}; read it whole at docs/decisions/long.md.]';
+
+      expect(bounded.state, EvidenceState.truncated);
+      expect(
+        bounded.snippet.length,
+        lessThanOrEqualTo(kMaxDiscoverySnippetChars),
+      );
+      final keptAfter =
+          bounded.snippet.length -
+          _madrFrontMatter.length -
+          entry.middle.length -
+          '\n$marker\n\n'.length -
+          entry.outcome.length;
+      expect(keptAfter, greaterThan(0));
+      expect(
+        bounded.snippet,
+        '$_madrFrontMatter${entry.middle}\n$marker\n\n'
+        '${entry.outcome}${after.substring(0, keptAfter)}',
+      );
+      expect(bounded.snippet, contains('CONTEXT-TAIL'));
+      expect(bounded.snippet, contains('AFTER-HEAD'));
+      expect(bounded.snippet, isNot(contains('AFTER-TAIL')));
+    });
+
+    test('non-decision evidence retains the head clip', () {
+      final entry = _madrEntry(contextChars: 6000, outcomeChars: 1500);
+      for (final kind in ['code-anchor', 'prior-art-hit']) {
+        final bounded = boundDiscoveryEvidence(
+          kind: kind,
+          subject: 'the same text',
+          source: 'docs/decisions/long.md',
+          fullText: entry.text,
+        );
+        expect(bounded.state, EvidenceState.truncated, reason: kind);
+        expect(
+          bounded.snippet,
+          entry.text.substring(0, kMaxDiscoverySnippetChars),
+          reason: 'only a decision entry is clipped around its Outcome',
+        );
+        expect(bounded.snippet, isNot(contains('[TRUNCATED')), reason: kind);
+        expect(
+          bounded.digest,
+          _boundDecisionEntry(entry.text).digest,
+          reason: kind,
+        );
+      }
+    });
+
+    test('a long decision entry without both MADR regions keeps the head '
+        'clip', () {
+      // An amendment-style entry has no `## Decision Outcome`, and a body with
+      // no front matter has no identity block: neither has boundaries to keep.
+      final amendment =
+          '$_madrFrontMatter\n# A13 amendment\n\n'
+          '**Decision.** ${'an amendment clause. ' * 300}';
+      final noFrontMatter = _madrEntry(
+        contextChars: 6000,
+        outcomeChars: 1500,
+      ).text.substring(_madrFrontMatter.length);
+      for (final text in [amendment, noFrontMatter]) {
+        expect(text.length, greaterThan(kMaxDiscoverySnippetChars));
+        final bounded = _boundDecisionEntry(text);
+        expect(bounded.state, EvidenceState.truncated);
+        expect(bounded.snippet, text.substring(0, kMaxDiscoverySnippetChars));
+      }
+    });
+
+    test('a decision entry whose front matter crowds out the Outcome heading '
+        'keeps the head clip', () {
+      // Both regions ARE recognized here — unlike the shapes above — but an
+      // identity block that fills the whole budget leaves no room to so much
+      // as OPEN the Outcome. There is no load-bearing region left to clip
+      // around, so the head clip stands rather than a marker promising an
+      // Outcome the snippet does not carry.
+      final entry = _madrEntry(contextChars: 300, outcomeChars: 1500);
+      const surface = '    - "packages/a/deeply/nested/surface/glob/**"\n';
+      final crowded =
+          '---\nstatus: accepted\nregister:\n  spec: 1\n'
+          '  slug: a-long-fake-decision\n  surfaces:\n'
+          '${surface * 90}---\n${entry.middle}${entry.outcome}';
+      expect(
+        crowded.indexOf('\n---\n'),
+        greaterThan(kMaxDiscoverySnippetChars),
+        reason: 'the front matter alone outruns the entire budget',
+      );
+      expect(
+        crowded,
+        contains('\n## Decision Outcome\n'),
+        reason:
+            'the Outcome IS present — the head clip is not a missing region',
+      );
+
+      final bounded = _boundDecisionEntry(crowded);
+      expect(bounded.state, EvidenceState.truncated);
+      expect(
+        bounded.snippet,
+        crowded.substring(0, kMaxDiscoverySnippetChars),
+        reason: 'no section-aware candidate, so the head clip stands',
+      );
+      expect(bounded.snippet, isNot(contains('[TRUNCATED')));
+      expect(
+        bounded.digest,
+        boundDiscoveryEvidence(
+          kind: 'other',
+          subject: 'elsewhere',
+          source: '',
+          fullText: crowded,
+        ).digest,
+        reason: 'the digest still identifies the COMPLETE body',
+      );
+    });
+
+    test(
+      'the gather reads a long register entry with its Decision Outcome',
+      () async {
+        // The real roster-mode source, over a register file on disk: the body the
+        // gather resolves is bounded as a decision entry, so its Outcome survives
+        // and the marker points at the entry file it was read from.
+        final tmp = Directory.systemTemp.createTempSync('long-entry');
+        addTearDown(() => tmp.deleteSync(recursive: true));
+        final register = Directory(p.join(tmp.path, 'docs', 'decisions'))
+          ..createSync(recursive: true);
+        final entry = _madrEntry(contextChars: 6000, outcomeChars: 1500);
+        final answer = _registerWideAnswer(
+          register,
+          slug: 'a-long-fake-decision',
+          originRegister: 'power_station',
+          surfaces: const ['packages/grid_assets/lib/src/code/discovery.dart'],
+          // The fixture writes its own front matter; hand it the rest.
+          body: entry.text.substring(_madrFrontMatter.length),
+        );
+        final gathered =
+            await commandDecisionIndexSource(
+              _CannedShellRunner(output: answer.output),
+              runnerInvocation: 'dart run lunar:lunar',
+              gridHome: '/grid/lunar',
+            )(tmp.path, const [
+              'power_station/packages/grid_assets/lib/src/code/discovery.dart',
+            ], _citesNothing);
+
+        final lookup = gathered.decisionLookups.single;
+        expect(lookup.state, EvidenceState.complete, reason: lookup.error);
+        final body = gathered.entriesOf(lookup.decisions).single.body;
+        expect(body.state, EvidenceState.truncated);
+        expect(
+          body.snippet.length,
+          lessThanOrEqualTo(kMaxDiscoverySnippetChars),
+        );
+        expect(body.snippet, endsWith(entry.outcome));
+        expect(
+          body.snippet,
+          contains(
+            'The complete entry is ${body.id}; read it whole at '
+            '${p.join(register.path, 'a-long-fake-decision.md')}.]',
+          ),
+        );
       },
     );
 

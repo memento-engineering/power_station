@@ -201,6 +201,86 @@ class _RecordingDecisionIndex {
   }
 }
 
+/// The canonical identity of the long entry the explore-decision lens needed,
+/// and the head clip cut short.
+const String _longDecision =
+    'power_station#a-mechanical-lookup-is-a-vended-command-with-a-bounded-output';
+
+/// Clause 2 of [_longDecision]'s Decision Outcome — the clause the lens asked
+/// for.
+const String _clauseTwo =
+    '### 2. Every vended command carries a bounded output contract';
+
+/// The last words of [_longDecision]'s synthetic Outcome — past the bound, so
+/// the clip must cut them.
+const String _outcomeTail = 'THE-CLIPPED-OUTCOME-TAIL';
+
+/// A synthetic MADR body shaped like [_longDecision]'s: its Context alone
+/// outruns [kMaxDiscoverySnippetChars], and its Outcome outruns what is left
+/// beside the front matter, with [_clauseTwo] ahead of [_outcomeTail].
+final String _longDecisionBody =
+    '---\nstatus: accepted\ndate: 2026-09-11\nregister:\n  spec: 1\n'
+    '  slug: a-mechanical-lookup-is-a-vended-command-with-a-bounded-output\n'
+    '  surfaces:\n    - "packages/**"\n---\n\n'
+    '# A mechanical lookup is a vended command, and a vended command bounds '
+    'its output\n\n'
+    '## Context and Problem Statement\n\n'
+    '${'The largest mechanical lookup in the system was never vended. ' * 80}'
+    '\n\n## Considered Options\n\n'
+    '* Vend a read command and bind every vended command to an output '
+    'contract.\n\n'
+    '## Decision Outcome\n\n'
+    'Chosen option: the third. Two clauses.\n\n'
+    '### 1. Reading and searching source are lookups, and they are vended\n\n'
+    '${'A read command addresses by symbol, not by line range. ' * 20}\n\n'
+    '$_clauseTwo\n\n'
+    '* A hard output cap.\n'
+    '* An explicit truncation marker naming what was withheld and how to ask '
+    'for it.\n\n'
+    '### Consequences\n\n'
+    '${'* Bad, because a capped read can truncate the region that mattered.\n' * 60}'
+    '$_outcomeTail\n';
+
+/// A [DecisionIndexSource] answering every surface with the ONE long entry
+/// [_longDecision], bounded exactly as the real gather bounds a register file.
+Future<DecisionGatherEvidence> _longDecisionIndex(
+  String workspaceDir,
+  List<String> surfaces,
+  Bead workBead,
+) async {
+  const entryPath =
+      'docs/decisions/2026-09-11-a-mechanical-lookup-is-a-vended-command-with-'
+      'a-bounded-output.md';
+  final entry = DecisionEntryEvidence(
+    identity: _longDecision,
+    originRegister: 'power_station',
+    originPath: 'docs/decisions',
+    slug: 'a-mechanical-lookup-is-a-vended-command-with-a-bounded-output',
+    status: 'accepted',
+    surfaces: const ['packages/**'],
+    entryPath: entryPath,
+    body: boundDiscoveryEvidence(
+      kind: 'decision-entry',
+      subject: _longDecision,
+      source: entryPath,
+      fullText: _longDecisionBody,
+    ),
+  );
+  return DecisionGatherEvidence(
+    decisionEntries: {entry.body.id: entry},
+    decisionLookups: [
+      for (final surface in surfaces)
+        DecisionSurfaceEvidence(
+          id: 'decision-surface:$surface@sha256:fake',
+          surface: surface,
+          command: 'index',
+          state: EvidenceState.complete,
+          decisions: [entry.body.id],
+        ),
+    ],
+  );
+}
+
 /// A recording batch [HistorySource] over the real [GitRunner] argv shape.
 class _RecordingHistory {
   final List<List<String>> argv = [];
@@ -938,6 +1018,73 @@ void main() {
         _wroteCursor(f, kDiscoveryRouteNode, 'gated'),
         isFalse,
         reason: 'a long brief is not an offence — it can never hold a bead',
+      );
+    });
+
+    test('pow-07zx decision Outcome reaches explore-decision and the route '
+        'advances', () async {
+      // The measured hold: the lens needed clause 2 of a long entry's Decision
+      // Outcome, the head clip ended inside clause 1, and the re-gather cannot
+      // change a deterministic clip — so the round held on every attempt.
+      expect(
+        _longDecisionBody.indexOf(_clauseTwo),
+        greaterThan(kMaxDiscoverySnippetChars),
+        reason: 'the old head clip never reached the clause',
+      );
+      final work = workBead('tg-1').copyWith(
+        description: 'Extend `lib/src/code/discovery.dart`.',
+        metadata: const {'rig': 'power_station'},
+      );
+
+      final f = await driveToRoute(
+        {for (final lens in kDiscoveryLenses) lens: LensReport(lens: lens)},
+        workBeadOverride: work,
+        anchorResolver: _RecordingAnchorResolver().call,
+        decisions: _longDecisionIndex,
+        history: _RecordingHistory().call,
+      );
+
+      // The gather on disk: truncated, identified by the COMPLETE body, and
+      // carrying the Outcome clause the lens needs.
+      final entry = readDiscoveryAnchors(
+        tmp.path,
+      )!.decisionEntries.values.single;
+      expect(entry.identity, _longDecision);
+      expect(entry.body.state, EvidenceState.truncated);
+      expect(
+        entry.body.snippet.length,
+        lessThanOrEqualTo(kMaxDiscoverySnippetChars),
+      );
+      expect(entry.body.snippet, contains(_clauseTwo));
+      expect(entry.body.snippet, isNot(contains(_outcomeTail)));
+
+      // The prompt the decision lens was actually spawned with.
+      final prompt = f.provider.started
+          .singleWhere(
+            (spawn) =>
+                spawn.name == _step('spec_review/discovery/$kDecisionLens'),
+          )
+          .config
+          .args
+          .join('\n');
+      expect(prompt, contains(_longDecision));
+      expect(prompt, contains('## Decision Outcome'));
+      expect(prompt, contains(_clauseTwo));
+      expect(
+        prompt,
+        contains(
+          '[TRUNCATED: kept YAML front matter and the head of ## Decision '
+          'Outcome; elided Context/Considered Options and clipped the '
+          'Decision Outcome tail. The complete entry is ${entry.body.id}; '
+          'read it whole at ${entry.entryPath}.]',
+        ),
+      );
+
+      expect(_wroteCursor(f, kDiscoveryRouteNode, 'complete'), isTrue);
+      expect(
+        _wroteCursor(f, kDiscoveryRouteNode, 'gated'),
+        isFalse,
+        reason: 'a clipped decision body is context, never an evidence hold',
       );
     });
 
