@@ -24,6 +24,10 @@ import 'package:grid_assets/grid_assets.dart';
 import 'package:grid_runtime/grid_runtime.dart' show SystemGitRunner;
 import 'package:test/test.dart';
 
+import 'package:grid_engine/grid_engine.dart';
+
+import '../support/asset_fakes.dart'
+    show FakeTreeContext, stepArgs, testWorkspace;
 import '../support/package_root.dart';
 import 'filing_evidence_fakes.dart';
 
@@ -396,6 +400,64 @@ void main() {
         }
       },
     );
+
+    test('ONE fixture, BOTH call sites: the spec_review route and the '
+        'pre-stamp advisory reach the SAME verdict', () async {
+      // The literal parity pin. One bead, one lens answer, two call sites:
+      // the route reads it off the round artifact and escalates, the advisory
+      // reads it off the reply and refuses. The judgement must be the same
+      // text, or the advisory is a second lens wearing the first one's name.
+      const rationale = 'the approach is undecided: two forks, no ruling';
+      final reply = readinessReply('D', rationale: rationale);
+
+      // The ROUTE: the lens's answer, stamped as this round's artifact.
+      final worktree = Directory.systemTemp.createTempSync('route-parity-');
+      addTearDown(() => worktree.deleteSync(recursive: true));
+      const parent = 'pow-child/spec_review';
+      File(p.join(critiqueDirPath(worktree.path), '$kReadinessRubric.json'))
+        ..createSync(recursive: true)
+        ..writeAsStringSync(
+          jsonEncode({
+            'rubric': kReadinessRubric,
+            'version': 1,
+            'grade': 'D',
+            // The shared decoder stamps its own provenance onto a rationale it
+            // recovers from a reply, so the artifact carries what the route
+            // would have read had the lane written the same answer.
+            'rationale': '$rationale [from result envelope]',
+            'nodePath': '$parent/$kReadinessStep',
+            kVerdictRoundKey: 0,
+          }),
+          flush: true,
+        );
+      final routed = await const ReadinessRouteCapability().route(
+        FakeTreeContext(
+          values: {
+            Workspace: testWorkspace('pow-child', workspaceDir: worktree.path),
+          },
+        ),
+        stepArgs(
+          '$parent/$kReadinessRouteStep',
+          params: const {'lane': kReadinessStep, 'grid.round': '0'},
+        ),
+      );
+
+      // The ADVISORY: the same answer, off the same lens, with no artifact.
+      final advised = await _advisory(
+        ScriptedInferenceRunner([reply]),
+      ).evaluate(storeRoot: _storeRoot(), bead: _work());
+
+      expect(routed, isA<Escalate>());
+      expect(advised, isA<FilingAdvisoryRefused>());
+      // The route appends its own artifact provenance line; everything before
+      // it is byte-identical to what the advisory returns.
+      expect(
+        (routed as Escalate).reason,
+        startsWith((advised as FilingAdvisoryRefused).reason),
+      );
+      expect(advised.reason, contains(rationale));
+      expect(advised.reason, contains('SPEC-READINESS HOLD (grade D)'));
+    });
 
     test(
       'no usage capture is armed — the whole answer comes back on stdout',
