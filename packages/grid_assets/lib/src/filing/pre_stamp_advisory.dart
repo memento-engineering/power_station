@@ -33,10 +33,10 @@
 /// **It runs LAST before the stamp, and never before the mechanical rows.**
 /// `memento-engineering#approval-is-stamped-last-and-an-agent-stamps-its-own-bugs`
 /// fixes the order: file unapproved → dedupe → wire deps → every
-/// [FilingRequirement] row → THIS advisory → stamp. The ten rows are FREE and
-/// they already refuse a phantom canonical citation, an unparseable plan and an
-/// absolute path; spending inference to re-discover any of those would be the
-/// waste this advisory exists to remove. A failing row refuses on its own, and
+/// [FilingRequirement] row → THIS advisory → stamp. The mechanical rows are
+/// FREE and they already refuse a phantom canonical citation, an unparseable
+/// plan, an absolute path and a NUL byte; spending inference to re-discover
+/// any of those would be the waste this advisory exists to remove. A failing row refuses on its own, and
 /// the advisory never runs to mask it.
 library;
 
