@@ -285,9 +285,14 @@ final class PreStampAdvisory implements FilingAdvisory {
       case FilingAdvisoryPassed(:final readinessGrade):
         grade = readinessGrade;
       case FilingAdvisorySkipped():
-        // Unreachable: `_readiness` never waives. Named rather than defaulted
-        // so a new arm cannot slip through as a pass.
-        return const FilingAdvisorySkipped();
+        // GUARD (the named invariant: only the VERB waives, never a lens).
+        // Named rather than defaulted, and LOUD rather than passed through: a
+        // waiver arriving from here would stamp a bead nothing judged while
+        // recording that a lens had run.
+        throw StateError(
+          'pre-stamp advisory: the readiness half returned a WAIVER, which '
+          'only the verb may produce — a lens cannot waive itself',
+        );
     }
 
     // TIER 3 — the discovery gather + its three cheap lenses, re-gathered once

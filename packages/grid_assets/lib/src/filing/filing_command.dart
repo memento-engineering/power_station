@@ -216,7 +216,9 @@ class FilingCommand extends Command<int> {
         advisoryMode: readinessModeOf(argResults!),
       );
     } on Object catch (error) {
-      _err.writeln('filing: failed to read $beadId: $error');
+      // The check is a READ, a gather AND — unless waived — an advisory, so
+      // the failure names the bead rather than claiming which stage broke.
+      _err.writeln('filing: failed to check $beadId: $error');
       return 1;
     }
     if (argResults!.flag('json')) {
