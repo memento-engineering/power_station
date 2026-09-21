@@ -1158,6 +1158,10 @@ class GitSourceControl implements SourceControl {
         rootRepoPath: root.path,
         beadId: beadId,
       );
+      _writeBeadStoreRedirect(
+        workspaceDir: workspaceDir,
+        rootRepoPath: root.path,
+      );
       // …and re-read the BASE the provisioner pinned once, at cut time. Best
       // effort: never throws, so an unreachable remote costs a stale tree, not
       // a refused mount.
@@ -1174,6 +1178,10 @@ class GitSourceControl implements SourceControl {
     if (!workspace.existsSync()) {
       await provisioner.provisionWorktree(root: root, beadId: beadId);
       _assertGitCheckout(workspaceDir, beadId);
+      _writeBeadStoreRedirect(
+        workspaceDir: workspaceDir,
+        rootRepoPath: root.path,
+      );
       return;
     }
 
@@ -1202,6 +1210,10 @@ class GitSourceControl implements SourceControl {
         stash: stash,
         workspace: workspace,
         beadId: beadId,
+      );
+      _writeBeadStoreRedirect(
+        workspaceDir: workspaceDir,
+        rootRepoPath: root.path,
       );
     } catch (error, stackTrace) {
       // Unwind BEFORE the filesystem restore (git needs the worktree it
@@ -1247,9 +1259,10 @@ class GitSourceControl implements SourceControl {
   ///   anywhere but the root repo's `.beads/proxieddb`.
   ///
   /// Repair: best-effort SIGTERM of a still-running stranded sidecar (its
-  /// `dolt-server.pid`), then delete the self-hosted artifacts so the next
-  /// in-worktree `bd` invocation re-establishes the proxied redirect exactly
-  /// as it does on a FRESH worktree (the committed `.beads` scaffold —
+  /// `dolt-server.pid`), then delete the self-hosted artifacts so the
+  /// [_writeBeadStoreRedirect] that follows every provision — adopt and fresh
+  /// alike — binds the worktree back to the root store (the committed `.beads`
+  /// scaffold —
   /// `metadata.json`, `config.yaml`, `identity.toml` — is untouched). A
   /// receipt line is appended to `.beads/store-repair.log` so the repair is
   /// visible in the worktree the operator inspects.
@@ -1336,6 +1349,58 @@ class GitSourceControl implements SourceControl {
       're-establishes the proxied redirect to $rootProxy\n',
       mode: FileMode.append,
     );
+  }
+
+  /// Binds a provisioned worktree to the REPOSITORY's bead store by writing
+  /// `<workspace>/.beads/redirect` — bd's own documented worktree mechanism
+  /// (`.beads/.gitignore`: "Worktree redirect file (contains relative path to
+  /// main repo's `.beads/`)").
+  ///
+  /// The invariant is "A WORKTREE WRITES WHERE ITS REPOSITORY ROOT WRITES",
+  /// and without the redirect it does not hold. A per-bead worktree's `.beads`
+  /// carries only the committed scaffold (`config.yaml`, `metadata.json`,
+  /// hooks) — no database — so `bd` WALKS UP from
+  /// `<repo>/.grid/worktrees/<substation>/<bead>` and binds to the first
+  /// ancestor store it meets. When the repository is ALSO a grid home that
+  /// store is `<repo>/.grid/.beads` — the station's own STATE store — and
+  /// never the work store the round is about. The agent's writes then land in
+  /// the wrong database: every in-worktree `bd update` on the work bead fails
+  /// (`BdUpdatePartialFailure`, `sql: no rows in result set`) and the round
+  /// dies at readiness-route. A repository with no `.grid/.beads` happens to
+  /// fall through to `<repo>/.beads` and work, which is why the defect reads
+  /// as substation-specific — it is not, and this write is NOT conditioned on
+  /// `.grid/.beads`. Binding EVERY worktree is the fix; the grid home is only
+  /// what made the gap visible.
+  ///
+  /// The body is bd's shape exactly: ONE newline-terminated RELATIVE path to
+  /// the root's `.beads`, resolved against the WORKTREE ROOT (the directory
+  /// holding `.beads`) and not against the caller's cwd — so an agent running
+  /// `bd` from a nested package directory resolves the same store. Relative
+  /// and not absolute because the path is written into a tree that may be
+  /// inspected, archived or moved with its repository.
+  ///
+  /// A repository carrying NO `.beads` has no work store to bind to, and a
+  /// redirect at a path that does not exist is worse than none (bd warns on
+  /// every invocation and the walk that works today stops). That is the
+  /// operation's domain, not a swallowed failure: the next mount re-runs this
+  /// write, so a root that gains a store later is bound on adopt.
+  ///
+  /// Write failures PROPAGATE. Handing an agent a worktree that is silently
+  /// bound to another database is the defect being repaired here, so a
+  /// workspace this cannot bind is a refused provision, not a warning.
+  static void _writeBeadStoreRedirect({
+    required String workspaceDir,
+    required String rootRepoPath,
+  }) {
+    final rootBeads = Directory(p.join(rootRepoPath, '.beads'));
+    if (!rootBeads.existsSync()) return;
+
+    final beadsDir = Directory(p.join(workspaceDir, '.beads'));
+    if (!beadsDir.existsSync()) beadsDir.createSync(recursive: true);
+    final target = p.relative(rootBeads.path, from: workspaceDir);
+    File(
+      p.join(beadsDir.path, 'redirect'),
+    ).writeAsStringSync('$target\n', encoding: utf8);
   }
 
   /// Re-reads the BASE of an ADOPTED per-bead worktree and FAST-FORWARDS it
