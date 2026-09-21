@@ -19,10 +19,12 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:beads_dart/beads_dart.dart';
+import 'package:path/path.dart' as p;
 import 'package:grid_assets/grid_assets.dart';
 import 'package:grid_runtime/grid_runtime.dart' show SystemGitRunner;
 import 'package:test/test.dart';
 
+import '../support/package_root.dart';
 import 'filing_evidence_fakes.dart';
 
 /// A driveable bead carrying a real brief — the shape that reaches the lens.
@@ -607,5 +609,107 @@ void main() {
         );
       },
     );
+  });
+
+  group('the seam is RECORDED, and the record names what it extends', () {
+    /// The entry authored for this work, found by its slug rather than by a
+    /// guessed filename.
+    String entry() {
+      final register = Directory(
+        p.join(packageRoot(), '..', '..', 'docs', 'decisions'),
+      );
+      final matches = register
+          .listSync()
+          .whereType<File>()
+          .where((file) => file.path.endsWith('.md'))
+          .where(
+            (file) => file.readAsStringSync().contains(
+              'slug: pre-stamp-advisory-reuses-readiness-and-discovery',
+            ),
+          )
+          .toList();
+      expect(matches, hasLength(1), reason: 'exactly one entry owns the slug');
+      return matches.single.readAsStringSync();
+    }
+
+    test('it BINDS, and it is the accepted schema this register uses', () {
+      final text = entry();
+      expect(text, startsWith('---\n'));
+      expect(text, contains('status: accepted'));
+      expect(text, contains('date: 2026-09-21'));
+      expect(text, contains('spec: 1'));
+      expect(text, contains('bead: pow-v4xh'));
+      expect(text, contains('legacy-id: null'));
+      // The cached reciprocal fields are written by the verb that earns them,
+      // never by the entry that declares an edge.
+      expect(text, contains('obsoleted-by: null'));
+      expect(text, contains('updated-by: []'));
+    });
+
+    test('it names every decision it extends — including the one that owns '
+        'the signatures it edits', () {
+      final text = entry();
+      for (final slug in const [
+        'approval-is-the-stamp-the-grid-approved-label-retires',
+        'the-refiner-exit-oracle-is-the-filing-verb',
+        'readiness-route-joins-on-a-published-verdict-never-on-absence',
+        'discovery-evidence-is-gathered-once-and-projected',
+        // The currently-binding ruling on `FilingService.inspect`/`check` and
+        // `ApproveService.approve` — it authored `armedSubstations` and it
+        // reaffirmed the completeness-lane boundary, and this work extends
+        // exactly those signatures.
+        'the-dependencies-row-is-a-projection-of-bd-dependency-rows',
+      ]) {
+        expect(text, contains(slug), reason: 'cites $slug');
+      }
+    });
+
+    test('it records the three decided seams as outcomes', () {
+      final text = entry();
+      // (a) a call site, never a fourth predicate.
+      expect(text, contains('never a fourth predicate'));
+      // (b) nothing published, no node path.
+      expect(text, contains('No on-disk artifact and no node path'));
+      // (c) the fixed order, advisory last before the stamp.
+      expect(text, contains('the advisory is LAST before the stamp'));
+      // And the boundary the signatures' owning decision reaffirmed.
+      expect(text, contains('No fifth requirement and no second predicate'));
+      expect(text, contains('`armedSubstations` is UNTOUCHED'));
+      // The receipt tuple stays three keys.
+      expect(text, contains('sole required validity'));
+    });
+
+    test('the recorded claims are TRUE of the live tree', () {
+      // A record is only worth the invariant it names, so each one is checked
+      // against the code rather than trusted.
+      expect(
+        FilingRequirement.values.map((value) => value.wire),
+        const [
+          'driveable_type',
+          'validation_plan',
+          'acceptance_criteria',
+          'dependencies',
+          'validation_plan_syntax',
+          'validation_plan_portability',
+          'repo_relative_paths',
+          'bead_references',
+          'release_versions',
+          'decision_references',
+        ],
+        reason: 'no eleventh requirement is minted',
+      );
+      const stamp = ApprovalStamp(
+        by: 'nico',
+        at: '2026-09-02T14:30:00.000Z',
+        rev: 'abcdef1',
+        readinessGrade: 'A',
+        advisorySkipped: true,
+      );
+      expect(
+        stamp.metadata.keys.take(3),
+        [kApprovedByKey, kApprovedAtKey, kApprovedRevKey],
+        reason: 'the receipt tuple is first and whole',
+      );
+    });
   });
 }
