@@ -2104,12 +2104,24 @@ void main() {
 /// [WorktreeLayout] path carrying a `.git` entry (the adopt signal
 /// `provisionWorkspace` keys on) plus one tracked file, so a byte-for-byte
 /// snapshot has something to compare.
+///
+/// The root carries a `.beads` store and the worktree carries the CANONICAL
+/// bead-store redirect, because that is what a HEALTHY provisioned checkout
+/// looks like. Stated here as a literal rather than re-derived with
+/// `p.relative`, so the byte-untouched probe measures the adopt-time redirect
+/// write against an independent spelling of `<root>/.beads` seen from
+/// `<root>/.grid/worktrees/ps/<bead>` — a re-bind to any other target, or in
+/// any other shape, breaks the snapshot instead of passing silently.
 ({Directory root, String workspaceDir}) _adoptedWorktree(String beadId) {
   final rootDir = Directory.systemTemp.createTempSync('pow1g7-root-');
+  Directory(p.join(rootDir.path, '.beads')).createSync(recursive: true);
   final workspaceDir = WorktreeLayout.worktreePath(rootDir.path, 'ps', beadId);
   File(p.join(workspaceDir, '.git'))
     ..createSync(recursive: true)
     ..writeAsStringSync('gitdir: fake');
+  File(p.join(workspaceDir, '.beads', 'redirect'))
+    ..createSync(recursive: true)
+    ..writeAsStringSync('../../../../.beads\n');
   File(p.join(workspaceDir, 'lib', 'source.dart'))
     ..createSync(recursive: true)
     ..writeAsStringSync('void source() {}');

@@ -43,8 +43,15 @@ Future<void> runBd(Directory store, List<String> args) async {
 /// live stores run, so these tests exercise the shape production reads —
 /// including the one that refuses `bd export`
 /// (power_station#the-per-store-bead-read-is-scoped-never-the-export-surface).
-Future<Directory> bdStore({required String prefix}) async {
-  final store = Directory.systemTemp.createTempSync('filing-command-');
+///
+/// [at] places the store at a CHOSEN directory (created when absent) instead
+/// of a fresh temp one, for a suite whose subject is WHERE a store sits —
+/// a repository root against the grid home nested under it. Every such
+/// directory is still torn down here, so a caller never hand-rolls the
+/// process census.
+Future<Directory> bdStore({required String prefix, Directory? at}) async {
+  final store = at ?? Directory.systemTemp.createTempSync('filing-command-');
+  if (!store.existsSync()) store.createSync(recursive: true);
   addTearDown(() async {
     // Order matters: the proxy and its child sql-server hold the Dolt data dir
     // the delete below removes, and they outlive the test run if left.
