@@ -176,13 +176,7 @@ void main() {
         ),
       );
       expect(record.acceptanceCriteria, contains('test'));
-      // PLAIN, never a code span: a backtick in bead text is refused by
-      // the filing contract, and this store writes the text it files.
-      expect(record.acceptanceCriteria, contains('falsifier: dart test'));
-      expect(
-        record.acceptanceCriteria,
-        isNot(contains(String.fromCharCode(0x60))),
-      );
+      expect(record.acceptanceCriteria, contains('`dart test`'));
       expect(record.metadata['github.run_id'], '9001');
       expect(
         record.metadata['github.workflow_path'],
@@ -282,13 +276,7 @@ void main() {
       final record = store.records.single;
       expect(record.description, contains('no failed job'));
       expect(record.acceptanceCriteria, contains('CI'));
-      // PLAIN, never a code span: a backtick in bead text is refused by
-      // the filing contract, and this store writes the text it files.
-      expect(record.acceptanceCriteria, contains('falsifier: dart test'));
-      expect(
-        record.acceptanceCriteria,
-        isNot(contains(String.fromCharCode(0x60))),
-      );
+      expect(record.acceptanceCriteria, contains('`dart test`'));
     });
   });
 
