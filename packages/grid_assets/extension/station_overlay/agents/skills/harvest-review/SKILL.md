@@ -70,6 +70,15 @@ the validation command + test count, and anything a reviewer must know
 (rework rounds, quoted critic findings). End with the house attribution
 footer.
 
+A pull request opened by a seat must carry an explicit bead reference through
+the chore bead's external_ref and/or the bead id in the pull-request body, plus
+either a merge watcher or the handoff's awaiting-merge queue. A conflicting
+station-owned grid/<bead> delivery branch is governor work: rebase it and push
+that named branch with force-with-lease rather than handing it back; under
+memento-engineering#the-governor-force-pushes-its-own-station-branches, the
+grant is restricted to that per-bead branch, so a decisions/* branch or any
+other non-per-bead branch is OUT of scope and remains a hand-back.
+
 - **Merges are squash-only** (one commit per bead) and **stay with the human**
   unless explicitly delegated per-PR.
 - **`merge=human` outranks every delegation**: before ANY merge, read the
@@ -89,6 +98,9 @@ Lead with the verdict: what landed, what needs the human, what was stale.
 Per bead one line — delta, grades, plan result, disposition. Then the queues:
 PRs awaiting merge, beads awaiting approval, findings filed. The reader stepped
 away hours ago; write for them.
+
+The awaiting-merge queue contains every open pull request the station knows
+about, not only pull requests opened by this harvest.
 
 ## Gotchas
 
