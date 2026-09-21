@@ -615,7 +615,7 @@ void main() {
 
     test('GitHub intake approval binds owning decision evidence', () async {
       // The seat's auto-approval is an `ApproveService` like any other, so it
-      // runs the SAME ten-row preflight — including `decision_references`.
+      // runs the SAME eleven-row preflight — including `decision_references`.
       // Before this binding threaded the seat's own scope and the station's
       // runner in, every decision-citing workflow bug was refused on evidence
       // nobody had gathered.
@@ -659,7 +659,7 @@ void main() {
       expect(
         recorded.verb('update').last,
         contains('grid.approved_by=github-workflow'),
-        reason: 'the citation RESOLVES, so the ten-row preflight passes',
+        reason: 'the citation RESOLVES, so the eleven-row preflight passes',
       );
       expect(
         shell.commands,

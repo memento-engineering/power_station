@@ -938,7 +938,7 @@ void main() {
     }
 
     // A bead citing a decision the register HOLDS: undefer first, a passing
-    // ten-row preflight, then exactly one v2 stamp.
+    // eleven-row preflight, then exactly one v2 stamp.
     final stamped = await unpark('Follows power_station#$slug.');
     expect(stamped['code'], 0, reason: '${stamped['report']}');
     expect(
@@ -946,7 +946,7 @@ void main() {
       containsAllInOrder(const ['undefer', 'update']),
     );
     final filing = (stamped['report']! as Map)['filing'] as Map;
-    expect((filing['requirements']! as List), hasLength(10));
+    expect((filing['requirements']! as List), hasLength(11));
     expect(filing['passed'], isTrue);
     final updates = stamped['updates']! as List<List<String>>;
     expect(updates, hasLength(1));
