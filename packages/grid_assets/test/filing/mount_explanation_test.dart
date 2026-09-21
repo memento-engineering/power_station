@@ -316,6 +316,7 @@ final class _Harness {
           service: FilingService(
             source: ExactSubstationBeadSource(runnerFor: bd.runnerFor),
             evidence: evidence,
+            advisory: FakeFilingAdvisory(),
           ),
           storeRoot: () => _workRoot,
           armedSubstations: () => armed,
@@ -496,6 +497,12 @@ void main() {
 
       final embedded = h.report['filing'] as Map<String, dynamic>;
       final direct = jsonDecode(h.filingOut.toString()) as Map<String, dynamic>;
+      // The mount explainer is an EXPLAINER, not a stamp moment: it answers
+      // the TEN MECHANICAL ROWS and spends no inference, so its embedded
+      // report carries no advisory member at all. Strip the one member the
+      // `filing` VERB adds and the two reports are byte-identical.
+      expect(embedded.containsKey('advisory'), isFalse);
+      expect(direct.remove('advisory'), isNotNull);
       expect(jsonEncode(embedded), jsonEncode(direct));
       // WHOLE means all TEN: mount renders the four clauses it owns, and
       // carries the six VIABILITY rows out untouched rather than dropping the
@@ -1117,6 +1124,47 @@ void main() {
   });
 
   group('AC-6 — the shared seams', () {
+    test('--readiness is REACHABLE on all three stamping verbs, and on none '
+        'of the explainers', () {
+      // A vended option is done when a real runner carries it, so these are
+      // DEFAULT constructions driven through a real CommandRunner.
+      final runner = CommandRunner<int>('space', 'test station')
+        ..addCommand(FilingCommand(out: StringBuffer(), err: StringBuffer()))
+        ..addCommand(ApproveCommand(out: StringBuffer(), err: StringBuffer()))
+        ..addCommand(UnparkCommand(out: StringBuffer(), err: StringBuffer()))
+        ..addCommand(MountCommand(out: StringBuffer(), err: StringBuffer()))
+        ..addCommand(ShowCommand(out: StringBuffer(), err: StringBuffer()));
+
+      for (final verb in const ['filing', 'approve', 'unpark']) {
+        final option =
+            runner.commands[verb]!.argParser.options[kReadinessOption];
+        expect(option, isNotNull, reason: '$verb carries --$kReadinessOption');
+        expect(option!.defaultsTo, kReadinessRun);
+        expect(option.allowed, [kReadinessRun, kReadinessSkip]);
+        // A human can actually type it: the parser accepts both values and
+        // refuses anything else.
+        for (final value in const [kReadinessRun, kReadinessSkip]) {
+          expect(
+            runner.commands[verb]!.argParser
+                .parse(['--$kReadinessOption=$value'])
+                .option(kReadinessOption),
+            value,
+          );
+        }
+        expect(
+          runner.commands[verb]!.invocation,
+          contains('[--$kReadinessOption=$kReadinessRun|$kReadinessSkip]'),
+        );
+      }
+      // The EXPLAINERS are not stamp moments and spend nothing.
+      for (final verb in const ['mount', 'show']) {
+        expect(
+          runner.commands[verb]!.argParser.options.keys,
+          isNot(contains(kReadinessOption)),
+        );
+      }
+    });
+
     test('mount is the THIRD state-root consumer, and the option stayed '
         'retired on the other three', () {
       final mount = MountCommand(out: StringBuffer(), err: StringBuffer());

@@ -334,6 +334,9 @@ _Harness _harness({
               // preflight's viability rows out of this suite's way; their own
               // refusals are pinned in `filing_viability_test.dart`.
               evidence: FakeFilingEvidenceSource(completeEmptyEvidence),
+              // And the advisory for the same reason — the ritual is the
+              // subject here, not the judgement.
+              advisory: FakeFilingAdvisory(),
             ),
             runnerFor: runnerFor,
           ),
@@ -772,16 +775,94 @@ void main() {
     ]);
     expect(h.work.beads[_workBead]!['status'], 'open');
     expect(h.work.beads[_workBead]!['defer_until'], isNull);
+    // The three receipt keys, plus the advisory grade unpark's composed
+    // preflight earned — ONE update, exactly as approve writes it.
     expect(callMetadata(h.work.callsTo('update').single).keys, {
       kApprovedByKey,
       kApprovedAtKey,
       kApprovedRevKey,
+      kReadinessGradeKey,
     });
     final report = _json(h.out);
     expect(report['unparked'], isTrue);
     expect(report['undeferred'], isTrue);
     expect(report['by'], 'nico');
   });
+
+  test('unpark carries the SAME advisory refusal, and leaves the bead '
+      'undeferred but UNSTAMPED', () async {
+    // The composed approval verb is authoritative, so unpark gains the
+    // advisory by delegation rather than by a second preflight of its own.
+    final hold = renderRefinementAsk(grade: 'E', rationale: 'no decided fork');
+    final work = _Store(_workRoot);
+    work.beads[_workBead] = {
+      ..._workBeadJson(approved: false, status: 'deferred'),
+      'defer_until': '2026-09-16T00:00:00.000Z',
+    };
+    final out = StringBuffer();
+    final runner = CommandRunner<int>('space', 'test station')
+      ..addCommand(
+        UnparkCommand(
+          workStoreRoot: (_) => _workRoot,
+          runnerFor: (_) => _FakeBd(work),
+          evidence: FakeFilingEvidenceSource(completeEmptyEvidence),
+          advisory: FakeFilingAdvisory(
+            FilingAdvisoryRefused(rule: 'readiness', reason: hold),
+          ),
+          out: out,
+          err: StringBuffer(),
+        ),
+      );
+
+    expect(await runner.run(['unpark', '--actor', 'nico', _workBead]), 1);
+    expect(out.toString(), contains(hold));
+    // UNDEFER ran and the STAMP did not: the ordering is preserved, and a
+    // refused advisory never silently re-parks the bead it just reopened.
+    expect(work.callsTo('undefer'), hasLength(1));
+    expect(work.callsTo('update'), isEmpty);
+    expect(work.beads[_workBead]!['defer_until'], isNull);
+  });
+
+  test(
+    'unpark --readiness=skip waives it and stamps both waiver keys',
+    () async {
+      final advisory = FakeFilingAdvisory();
+      final work = _Store(_workRoot);
+      work.beads[_workBead] = {
+        ..._workBeadJson(approved: false, status: 'deferred'),
+        'defer_until': '2026-09-16T00:00:00.000Z',
+      };
+      final out = StringBuffer();
+      final runner = CommandRunner<int>('space', 'test station')
+        ..addCommand(
+          UnparkCommand(
+            workStoreRoot: (_) => _workRoot,
+            runnerFor: (_) => _FakeBd(work),
+            evidence: FakeFilingEvidenceSource(completeEmptyEvidence),
+            advisory: advisory,
+            out: out,
+            err: StringBuffer(),
+          ),
+        );
+
+      expect(
+        await runner.run([
+          'unpark',
+          '--readiness=skip',
+          '--actor',
+          'nico',
+          _workBead,
+        ]),
+        0,
+        reason: '$out',
+      );
+      expect(advisory.calls, isEmpty);
+      final written = callMetadata(work.callsTo('update').single);
+      expect(written[kReadinessSkippedKey], 'true');
+      expect(written[kApprovedAdvisoryKey], kApprovedAdvisorySkipped);
+      expect(written.containsKey(kReadinessGradeKey), isFalse);
+    },
+  );
 
   test('default unpark composition binds owning decision evidence', () async {
     // NO ApproveService and NO FilingEvidenceSource: this exercises the very
@@ -818,6 +899,9 @@ void main() {
             ),
             // The plan never runs and no shell is spawned: filing PARSES.
             validationPlanProbe: FakeValidationPlanProbe(),
+            // The advisory is scripted too — this probe measures the LIVE
+            // decision-evidence wiring, which is a mechanical row.
+            advisory: FakeFilingAdvisory(),
             decisionShell: _CannedIndexShell(
               jsonEncode({
                 'spec': 2,
@@ -1022,7 +1106,10 @@ void main() {
       'park --actor <name> --reason <text> --until <date> [--override-live] '
       '[--json] [--state-root <grid-home>] <work-bead-id>',
     );
-    expect(unpark.invocation, 'unpark --actor <name> [--json] <work-bead-id>');
+    expect(
+      unpark.invocation,
+      'unpark --actor <name> [--json] [--readiness=run|skip] <work-bead-id>',
+    );
   });
 
   test('park then unpark restores mount eligibility', () async {

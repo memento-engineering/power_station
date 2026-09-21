@@ -1,3 +1,48 @@
+## Unreleased
+
+- Breaking: `filing`, `approve` and `unpark` run a PRE-STAMP ADVISORY by default — the same
+  `bead-readiness` lens and the same discovery evidence gather the `spec_review` route runs,
+  against the filing as it will be mounted. Measured over one lunar epoch, roughly half of the
+  mounts that held, held on filing quality: a stale line citation, a phantom decision token, an
+  undecided fork, an undeclared departure. Each cost a mint, a gather, a lens run, a gate, an
+  operator cure round and a re-mint, and the lenses were right every time — they simply ran at the
+  most expensive point. A refusal now reaches the refiner in the interview, carrying the owning
+  lens's own fix text byte-for-byte. It is a new CALL SITE for shipped predicates, never a new
+  one: `intakeFindings`, `decideReadiness`, `gatherDiscoveryAnchors` and `decideDiscovery` do every
+  judgement, at the bounds they already declare, with the same one-round re-gather
+  (`power_station#pre-stamp-advisory-reuses-readiness-and-discovery`).
+  Migration: pass `--readiness=skip` to waive it; the waiver is recorded on the stamp. A verb
+  composed with no advisory REFUSES `--readiness=run` rather than passing silently, so a station
+  composing its own `FilingService` supplies a `FilingAdvisory` (or takes the default one
+  `defaultFilingService` now composes). The advisory publishes NOTHING — no critique file, no
+  discovery report, no dossier, no node path, no usage capture — so a pre-stamp run can neither
+  satisfy nor collide with a route's published verdict.
+  New public surface: `FilingAdvisoryMode`, `FilingAdvisory`, `FilingAdvisoryVerdict`,
+  `FilingAdvisoryPassed`, `FilingAdvisoryRefused`, `FilingAdvisorySkipped`, `PreStampAdvisory`,
+  `LensResultTransport`, `LensArtifactTransport`, `LensInProcessTransport`,
+  `kInProcessResultInstruction`, `verdictFromResultText`, `readinessLensPromptBody`,
+  `readinessLensPrompt`, `readinessRubricText`, `readinessLensRuntimeConfig`,
+  `gatherDiscoveryAnchors`, `assembleDiscoveryLensPrompt`, `discoveryLensPrompt`,
+  `discoveryLensRuntimeConfig`, `discoveryLensOutcomeFromResultText`, `addReadinessOption`,
+  `readinessModeOf`, `kReadinessOption`, `kReadinessRun` and `kReadinessSkip`.
+- Breaking: `FilingReport` gains an optional `advisory` member and an exact `refusalReason`, and
+  `FilingReport.passed` is now the conjunction of the ten rows AND — when one was asked for — the
+  advisory. The advisory is NOT an eleventh requirement: `FilingRequirement` still carries exactly
+  ten values with unchanged wire names and order, and `requirements` still holds exactly those
+  rows. `FilingService.inspect`/`check`, `ApproveService.approve` and `UnparkService.unpark` gain a
+  `FilingAdvisoryMode` parameter that defaults to `off`, so the mount explainer and every other
+  non-stamp consumer spends nothing and reads exactly what it always read. The ten mechanical rows
+  are evaluated first and a failing row refuses before any inference runs.
+- The approval stamp records what the advisory judged, in the SAME single `bd update` as the
+  receipt: `grid.readiness_grade=<A|B|C>` on a pass, or `grid.readiness_skipped=true` plus
+  `grid.approved_advisory=skipped` on a waiver, and neither when no advisory was asked. It is
+  PROVENANCE, not validity — `ApprovalStamp.tryParse` still reads exactly `grid.approved_by`,
+  `grid.approved_at` and `grid.approved_rev`, so every receipt minted before this is exactly as
+  valid as one minted with it. New public surface: `kReadinessGradeKey`, `kReadinessSkippedKey`,
+  `kApprovedAdvisoryKey`, `kApprovedAdvisorySkipped`, and the `ApprovalStamp.readinessGrade` /
+  `ApprovalStamp.advisorySkipped` fields.
+
+
 ## 0.7.0-dev.4
 
 - Breaking: the filing contract is TEN rows, not four. The four PRESENCE rows are joined by six

@@ -88,6 +88,7 @@ import 'package:grid_sdk/grid_sdk.dart' as sdk;
 import 'package:path/path.dart' as p;
 
 import '../agent/agent_domain.dart';
+import '../agent/agent_environment.dart';
 import '../agent/agent_harness.dart';
 import '../agent/environment_registry.dart';
 import '../agent/model_tier.dart';
@@ -4693,69 +4694,32 @@ class AnchorsCapability extends ServiceCapability {
     }
 
     // ONE deterministic pass per seam, per round — the whole point of this
-    // step. Every source is invoked EXACTLY once, in a fixed order, and the
-    // cancel token is checked between them.
+    // step, and the SHARED implementation the filing verbs' pre-stamp advisory
+    // gathers through. Every source is invoked EXACTLY once, in a fixed order,
+    // and the cancel token is checked between them.
     final round = verdictRound(args);
-    final extracted = beadAnchors(bead);
-    // The bead's own `metadata['rig']` stays an OVERRIDE (the operator bridge
-    // that stamps it in flight keeps working); the session config is the
-    // standing answer; neither ⇒ '' ⇒ [kUnknownSubstationPrefix], which the
-    // decision source records unavailable rather than shelling.
-    final rig = bead.metadata['rig'];
-    final surfaces = rosterQualifiedPaths(
-      paths: extracted.paths,
-      substation: [if (rig is String) rig, substation?.substationId ?? '']
-          .firstWhere(
-            (candidate) => candidate.trim().isNotEmpty,
-            orElse: () => '',
-          ),
-    );
-    final resolved = live
-        ? (_resolver ?? resolveAnchorsOnDisk)(workspaceDir, extracted.paths)
-        : [
-            for (final path in extracted.paths)
-              unresolvedAnchor(path, source: workspaceDir),
-          ];
-    final queries = priorArtQueries(bead, extracted.symbols);
-    final priorArt = await gatherPriorArt(_priorArt, queries);
-    if (args.cancel.isCancelled) return const Failed('cancelled');
-    final decisions = await gatherDecisions(
-      _decisions,
-      workspaceDir,
-      surfaces,
-      bead,
-    );
-    if (args.cancel.isCancelled) return const Failed('cancelled');
-    // A `git log` pathspec is a PATH: the cited-line qualifier is stripped, and
-    // two sites in one file are one surface.
-    final history = await gatherHistory(_history, workspaceDir, [
-      ...{
-        for (final anchor in resolved)
-          if (anchor.resolved) parseCodeAnchor(anchor.anchor).path,
-      },
-    ]);
-    if (args.cancel.isCancelled) return const Failed('cancelled');
-
-    final rubricSource = _rubrics;
-    final rubricBodies = {
-      if (rubricSource != null)
-        for (final rubric in _rubricIds) rubric: rubricSource(rubric),
-    };
-    final anchors = DiscoveryAnchors(
+    final anchors = await gatherDiscoveryAnchors(
+      bead: bead,
+      workspaceDir: workspaceDir,
       round: round,
-      workBeadId: bead.id,
-      beadFields: boundedBeadFields(bead),
-      rubrics: rubricBodies,
-      rubricEvidence: rubricEvidenceOf(rubricBodies),
-      anchors: resolved,
-      symbols: extracted.symbols,
-      anchorsTruncated: extracted.pathsTruncated,
-      symbolsTruncated: extracted.symbolsTruncated,
-      priorArtQueries: priorArt,
-      decisionEntries: decisions.decisionEntries,
-      decisionLookups: decisions.decisionLookups,
-      history: history,
+      // The bead's own `metadata['rig']` stays an OVERRIDE (the operator bridge
+      // that stamps it in flight keeps working); the session config is the
+      // standing answer; neither ⇒ '' ⇒ [kUnknownSubstationPrefix], which the
+      // decision source records unavailable rather than shelling.
+      substation: substation?.substationId ?? '',
+      live: live,
+      rubricIds: _rubricIds,
+      rubrics: _rubrics,
+      resolver: _resolver,
+      priorArt: _priorArt,
+      decisions: _decisions,
+      history: _history,
+      isCancelled: () => args.cancel.isCancelled,
     );
+    // The helper polls the SAME token between its seams; a null answer is a
+    // gather the cancel unwound, and it returns on this step's own channel.
+    if (anchors == null) return const Failed('cancelled');
+    final decisionLookupCount = anchors.decisionLookups.length;
 
     if (live) {
       try {
@@ -4773,17 +4737,122 @@ class AnchorsCapability extends ServiceCapability {
       kVerdictRoundKey: '$round',
       'anchors': '${anchors.anchors.length}',
       'resolved': '${anchors.anchors.where((a) => a.resolved).length}',
-      'symbols': '${extracted.symbols.length}',
+      'symbols': '${anchors.symbols.length}',
       'rubrics': '${anchors.rubrics.length}',
-      'decisions': '${decisions.decisionLookups.length}',
-      'decisionEntries': '${decisions.decisionEntries.length}',
-      'history': '${history.commits.length}',
+      'decisions': '$decisionLookupCount',
+      'decisionEntries': '${anchors.decisionEntries.length}',
+      'history': '${anchors.history?.commits.length ?? 0}',
       'evidence': '${anchors.evidenceIds.length}',
       'priorArt': _priorArt == null
           ? 'not-wired'
           : '${anchors.priorArt.length}',
     });
   }
+}
+
+/// The cancel predicate a gather with no token polls — never cancelled.
+bool _neverCancelled() => false;
+
+/// The DETERMINISTIC gather, as a pure-ish function over its injected seams —
+/// the SINGLE implementation of "what evidence does this bead get", shared by
+/// [AnchorsCapability] (which persists it as the round's artifact) and by the
+/// filing verbs' pre-stamp advisory (which never persists anything).
+///
+/// It owns everything the two call sites must not answer differently: anchor
+/// extraction and its [kMaxAnchors] bound, roster qualification of the
+/// surfaces, the fixed seam order, [kMaxNeighbors], [kMaxDiscoverySnippetChars],
+/// [kMaxDecisionEntriesPerSurface], [kMaxPriorArtHitsPerQuery],
+/// [kMaxHistoryCommits], section-aware decision clipping, and the
+/// [DiscoveryAnchors] assembly itself. A second gather beside it would be two
+/// answers to one question — the exact drift
+/// `power_station#discovery-evidence-is-gathered-once-and-projected` forbids.
+///
+/// What it deliberately does NOT own is the CIRCUIT's business: the
+/// generation-aware sweep, the artifact write and the step outcome all stay
+/// with [AnchorsCapability].
+///
+/// [live] says whether [workspaceDir] is a real checkout. Offline the anchors
+/// are recorded unresolved rather than probed, which is the posture every
+/// offline suite mounts a synthetic workspace under.
+///
+/// [substation] is the SESSION's own substation id — the value the engine
+/// stamps as a session bead's `metadata.rig`. A WORK bead carries no `rig` (it
+/// is a session-bead field), so the bead's own `metadata['rig']` is read here
+/// as an OVERRIDE and this argument is the standing answer; neither ⇒ `''` ⇒
+/// [kUnknownSubstationPrefix], which the decision source records unavailable
+/// rather than shelling.
+///
+/// Returns null when [isCancelled] answered true between two seams — the
+/// caller maps that onto its own cancellation channel, so this helper never
+/// invents one.
+Future<DiscoveryAnchors?> gatherDiscoveryAnchors({
+  required Bead bead,
+  required String workspaceDir,
+  required int round,
+  required String substation,
+  required bool live,
+  List<String> rubricIds = const [],
+  RubricSource? rubrics,
+  AnchorResolver? resolver,
+  PriorArtSource? priorArt,
+  DecisionIndexSource? decisions,
+  HistorySource? history,
+  bool Function() isCancelled = _neverCancelled,
+}) async {
+  final extracted = beadAnchors(bead);
+  final rig = bead.metadata['rig'];
+  final surfaces = rosterQualifiedPaths(
+    paths: extracted.paths,
+    substation: [
+      if (rig is String) rig,
+      substation,
+    ].firstWhere((candidate) => candidate.trim().isNotEmpty, orElse: () => ''),
+  );
+  final resolved = live
+      ? (resolver ?? resolveAnchorsOnDisk)(workspaceDir, extracted.paths)
+      : [
+          for (final path in extracted.paths)
+            unresolvedAnchor(path, source: workspaceDir),
+        ];
+  final queries = priorArtQueries(bead, extracted.symbols);
+  final priorArtCoverage = await gatherPriorArt(priorArt, queries);
+  if (isCancelled()) return null;
+  final decisionGather = await gatherDecisions(
+    decisions,
+    workspaceDir,
+    surfaces,
+    bead,
+  );
+  if (isCancelled()) return null;
+  // A `git log` pathspec is a PATH: the cited-line qualifier is stripped, and
+  // two sites in one file are one surface.
+  final historyEvidence = await gatherHistory(history, workspaceDir, [
+    ...{
+      for (final anchor in resolved)
+        if (anchor.resolved) parseCodeAnchor(anchor.anchor).path,
+    },
+  ]);
+  if (isCancelled()) return null;
+
+  final rubricBodies = {
+    if (rubrics != null)
+      for (final rubric in rubricIds) rubric: rubrics(rubric),
+  };
+  return DiscoveryAnchors(
+    round: round,
+    workBeadId: bead.id,
+    beadFields: boundedBeadFields(bead),
+    rubrics: rubricBodies,
+    rubricEvidence: rubricEvidenceOf(rubricBodies),
+    anchors: resolved,
+    symbols: extracted.symbols,
+    anchorsTruncated: extracted.pathsTruncated,
+    symbolsTruncated: extracted.symbolsTruncated,
+    priorArtQueries: priorArtCoverage,
+    decisionEntries: decisionGather.decisionEntries,
+    decisionLookups: decisionGather.decisionLookups,
+    history: historyEvidence,
+  );
 }
 
 /// The READ-ONLY working agreement every lens rides (A37, and the gather lane's
@@ -4876,57 +4945,34 @@ class DiscoveryLensCapability extends ProcessCapability {
         'SessionHandle (WorkBead/SessionScope mount them)',
       );
     }
-    final ambient =
-        context.getInheritedSeedOfExactType<AgentConfig>() ??
-        const AgentConfig();
-    final registry =
-        context.getInheritedSeedOfExactType<EnvironmentRegistry>() ??
-        buildBuiltinEnvironmentRegistry();
-    final siteBinding =
-        context.getInheritedSeedOfExactType<SiteBinding>() ?? SiteBinding.none;
-    // The GATHER lane — the ONLY read-only one. It declares the CHEAP tier, so
-    // this lane carries no model opinion of its own and a
-    // station that retunes `cheap` moves all three lenses with it.
-    final config = resolveAgentConfig(
-      tier: AgentTier.cheap,
-      ambient: ambient,
-      beadMetadata: bead.metadata,
-      stepParams: args.params,
-      registry: registry,
-      typedEnvironment: resolveEnvironment<GatherAgentEnvironment>(context),
-    );
-    final environment = registry.resolve(config.harness);
     final workspaceDir = workspace.workspaceDir;
     final round = verdictRound(args);
+    // The CANONICAL gather, read back off the round's artifact — the lane's
+    // own transport. The advisory holds its gather in memory instead and hands
+    // the SAME value to the SAME builder.
     final gather = Directory(workspaceDir).existsSync()
         ? readDiscoveryAnchors(workspaceDir)
         : null;
-    return spawnFor(
-      environment: environment,
-      model: config.params['model'],
-      endpoint: siteBinding.endpointFor(
-        name: config.harness,
-        environment: environment,
-      ),
-      brief: AgentBrief(
-        task: buildLensPrompt(
-          lens: lens,
-          sessionId: session.sessionId,
-          nodePath: args.nodePath,
-          round: round,
-          workspaceDir: workspaceDir,
-          projection: projectDiscoveryEvidence(
-            gather ?? const DiscoveryAnchors(),
-            lens: lens,
-            round: round,
-            workBeadId: bead.id,
-          ),
-        ),
-        workingAgreement: kLensWorkingAgreement,
-      ),
+    return discoveryLensRuntimeConfig(
+      bead: bead,
       workspace: workspace,
-      // CAPTURE-ONLY usage telemetry (FT-2), same as every other lane.
-      usageOut: usageReportPath(args.nodePath),
+      lens: lens,
+      sessionId: session.sessionId,
+      nodePath: args.nodePath,
+      round: round,
+      anchors: gather ?? const DiscoveryAnchors(),
+      transport: const LensArtifactTransport(),
+      ambient:
+          context.getInheritedSeedOfExactType<AgentConfig>() ??
+          const AgentConfig(),
+      registry:
+          context.getInheritedSeedOfExactType<EnvironmentRegistry>() ??
+          buildBuiltinEnvironmentRegistry(),
+      siteBinding:
+          context.getInheritedSeedOfExactType<SiteBinding>() ??
+          SiteBinding.none,
+      typedEnvironment: resolveEnvironment<GatherAgentEnvironment>(context),
+      stepParams: args.params,
     );
   }
 
@@ -5048,15 +5094,9 @@ class DiscoveryLensCapability extends ProcessCapability {
 
   /// The lens's prompt AND whether its evidence was clipped to fit.
   ///
-  /// The assembly is three parts: an exact PREFIX, the sole droppable value
-  /// ([DiscoveryEvidenceProjection.renderedEvidence]), and an exact SUFFIX that
-  /// ends with [kLensStampInstruction] and the absolute file-write instruction.
-  /// The suffix is RESERVED before the evidence is admitted, because a prompt
-  /// that loses its stamps or its write path produces a report the read fence
-  /// discards — a clipped bundle is recoverable, a stampless report is not.
-  ///
-  /// Only [kDecisionLens] is bounded ([kMaxDecisionLensPromptBytes]); the other
-  /// two lenses assemble exactly as before and report `false`.
+  /// A thin adapter over the shared [assembleDiscoveryLensPrompt] on the
+  /// ARTIFACT arm — the one this in-pipeline lane rides. Kept as a method
+  /// because it is the shape the suites already drive.
   DiscoveryLensPromptAssembly assembleLensPrompt({
     required String lens,
     required String sessionId,
@@ -5064,264 +5104,14 @@ class DiscoveryLensCapability extends ProcessCapability {
     required int round,
     required String workspaceDir,
     required DiscoveryEvidenceProjection projection,
-  }) {
-    final path = lensReportPath(workspaceDir, lens);
-    final b = StringBuffer()
-      ..writeln('# Discovery — lens: `$lens`')
-      ..writeln()
-      ..writeln(
-        'You are ONE read-only explorer in the discovery circuit, UPSTREAM of '
-        'the architect. This bead has NOT been specified and has NOT been built. '
-        'Your job is TWO things, and nothing else:',
-      )
-      ..writeln()
-      ..writeln(
-        '1. **SYNTHESIZE** the evidence below into the context the architect '
-        'will need through your lens.',
-      )
-      ..writeln(
-        '2. **CITE any OFFENCE** — anything in this bead that CONTRADICTS a '
-        'standard we have already ratified, using ONLY that evidence.',
-      )
-      ..writeln()
-      ..writeln('## Your lens')
-      ..writeln(lensBrief(lens))
-      ..writeln()
-      ..writeln('## Canonical evidence projection')
-      ..writeln(
-        'A DETERMINISTIC gather resolved all of this ONCE, for round $round, '
-        'and recorded how complete each record is. It is the whole of your '
-        'evidence. Do NOT inspect the tree, do NOT run a decision-index or '
-        'prior-art search, and do NOT read git history — those lookups already '
-        'ran, and re-running them is the waste this circuit exists to remove.',
-      )
-      ..writeln();
-    final prefix = b.toString();
-    // The RESERVED tail: every instruction after the evidence, ending with the
-    // stamp instruction and the absolute write path. It is never clipped.
-    final tail = StringBuffer()
-      ..writeln(
-        'Every record above carries its STATE. `COMPLETE` is a real answer, an '
-        'empty one included. `TRUNCATED` and `FAILED` are deterministic gaps: '
-        'do NOT compensate with a tool, and do NOT treat either as "nothing is '
-        'there". `UNAVAILABLE` means the optional source was absent: narrate '
-        'that limitation and continue with the supplied evidence.',
-      )
-      ..writeln()
-      ..writeln('## What counts as an OFFENCE (the gate is CITE-THE-OFFENCE)')
-      ..writeln(
-        'The citable standard is a RECORDED decision entry from the evidence '
-        'above — a sibling substation\'s entry binds exactly as a local one '
-        'does — or an applicable SKILL\'s instructions. Skills TEACH how; '
-        'decisions RATIFY the specific. Cite each decision by its canonical '
-        '`<repo>#<slug>` identity, for example '
-        '`the_grid#admission-authority-boundary`.',
-      )
-      ..writeln(
-        '- **A DECISION ENTRY BINDS.** A recorded entry is in force the moment '
-        'it is written — a `docs/decisions/` slug entry, or a legacy `A<n>` '
-        'amendment (converted with `status: accepted`). There is no advisory '
-        'tier and no serial to wait on: cite one and set `"ratified": true`. '
-        '**A BEAD IS NOT A DECISION** — a plan, a proposal, another bead\'s '
-        'design field, or your own reading of the tree is not a recorded '
-        'entry: set `"ratified": false` and it rides to the architect as a '
-        'flag for the `decision-alignment` lane, NEVER as a hold. (A `skill` or '
-        '`pattern` citation ignores this field.)',
-      )
-      ..writeln(
-        '- You MUST cite the STANDARD and the CLAUSE, and the clause MUST be in '
-        'the evidence above: quote it VERBATIM from the entry body you were '
-        'handed, INCLUDING its `status` line so the entry\'s force is grounded, '
-        'not guessed. A citation you cannot quote from that evidence is not a '
-        'citation — do not cite an `A<n>` you remember, and do not go looking '
-        'for one. A concern you cannot cite is NOT an offence: report it as a '
-        'violation with an EMPTY `standard` and it rides to the architect as a '
-        'flag, never held against the bead. Do not inflate a preference into a '
-        'citation.',
-      )
-      ..writeln(
-        '- **The departure clause**: if the bead ITSELF acknowledges the '
-        'departure ("this departs from X because Y"), set `"acknowledged": true`. '
-        'A considered departure is NOT an offence — it passes. Only an UNWITTING '
-        'contradiction holds the bead.',
-      )
-      ..writeln(
-        '- **INTENT, NOT PRESENCE**: a bead whose OWN plan/acceptance/description '
-        'REMOVES this cited offence IS the fix — set `"removesOffence": true` and '
-        'it passes. Discovery runs BEFORE the bead is built, so a '
-        'fix-the-violation bead still HAS the offending text present; grade the '
-        'bead\'s STANCE, not the text. Set it false when the bead LEAVES or ADDS '
-        'the offence.',
-      )
-      ..writeln(
-        '- A `pattern` deviation holds the bead ONLY if you NAME the precedent it '
-        'deviates from (`"precedent": "lib/src/code/committee.dart:'
-        'CriticCapability"`). Without a named precedent it is a flag, not a hold.',
-      )
-      ..writeln()
-      ..writeln(
-        'BEAD-FIELD SOURCES ARE STRUCTURED. If a context note quotes or '
-        'paraphrases a bead field, `source` is not evidence: include '
-        '`beadCitation` with the bead\'s actual `beadId`, the exact `field`, and '
-        'a non-empty VERBATIM `excerpt`. Copy a prior-art hit\'s '
-        'id/field/snippet exactly. A hit whose id differs from the work bead is '
-        'FOREIGN content and must never be attributed to the work bead. If you '
-        'cannot supply the structured quotation, omit the bead-field claim.',
-      )
-      ..writeln()
-      ..writeln('## Your report')
-      ..writeln(
-        'Your report is ONE of exactly two JSON shapes. The NORMAL report, when '
-        'the evidence above let you do your job:',
-      )
-      ..writeln(
-        '{"outcome":"report","lens":"$lens","version":2,'
-        '"sessionId":"$sessionId","nodePath":"$nodePath",'
-        '"$kVerdictRoundKey":$round,'
-        '"context":[{"note":"<what the architect needs to know>",'
-        '"source":"<the evidence id or source you read it from>",'
-        '"beadCitation":{"beadId":"<actual bead id>",'
-        '"field":"title|description|design|acceptance_criteria|notes",'
-        '"excerpt":"<verbatim field excerpt>"}}],'
-        '"violations":[{"kind":"decision|skill|pattern",'
-        '"standard":"<the_grid#admission-authority-boundary>",'
-        '"quote":"<the clause, verbatim, including its Status line>",'
-        '"contradiction":"<what this bead does that contradicts it>",'
-        '"contradicts":true,'
-        '"acknowledged":false,"ratified":false,"removesOffence":false,'
-        '"precedent":""}]}',
-      )
-      ..writeln()
-      ..writeln(
-        'Both arrays may be EMPTY — a clean bead with no findings is a real, '
-        'expected result. NEVER invent a violation to look useful: a false hold '
-        'stalls the work, and this gate exists to be trusted.',
-      )
-      ..writeln()
-      ..writeln(
-        'The INSUFFICIENT-EVIDENCE report is only for a record you NEEDED that '
-        'is marked TRUNCATED or FAILED. Name the record by its canonical id '
-        'and repeat its recorded reason — do NOT reach for a tool to fill the '
-        'hole, and do NOT report clean over it:',
-      )
-      ..writeln(
-        '{"outcome":"insufficient-evidence","lens":"$lens","version":2,'
-        '"sessionId":"$sessionId","nodePath":"$nodePath",'
-        '"$kVerdictRoundKey":$round,'
-        '"gaps":[{"evidenceId":"<the canonical id above>",'
-        '"reason":"<the recorded reason above>"}]}',
-      )
-      ..writeln()
-      ..writeln(kLensStampInstruction)
-      ..writeln()
-      ..writeln(
-        'You MUST write that JSON to the exact ABSOLUTE path `$path` before you '
-        'finish. It is an absolute path on purpose — write it there regardless of '
-        'your current working directory. This is REQUIRED even if you also state '
-        'your findings in your response text — stating them in prose alone does '
-        'NOT satisfy this instruction. Write the file at `$path`.',
-      );
-    final suffix = tail.toString();
-    final evidence = projection.renderedEvidence;
-    if (lens != kDecisionLens) {
-      return DiscoveryLensPromptAssembly(
-        prompt: '$prefix$evidence$suffix',
-        evidenceTruncated: false,
-      );
-    }
-
-    // The marker rides its OWN two newlines, so the reserve has to cover both.
-    // It is sized at its WIDEST rendering — every declared fill record
-    // withheld — because the reserve is paid for before the clip knows how
-    // many of them it will actually drop.
-    final fillEnds = projection.fillRecordEndBytes;
-    final markerBytes =
-        utf8.encode(_decisionLensOmissionMarker(fillEnds.length)).length + 2;
-    if (markerBytes > kDecisionLensPromptOmissionReserveBytes) {
-      throw StateError(
-        'discovery/$kDecisionLens: the omission marker is $markerBytes bytes '
-        'and its reserve is only '
-        '$kDecisionLensPromptOmissionReserveBytes — a clipped bundle could not '
-        'afford to SAY it was clipped',
-      );
-    }
-    const budget = BoundedTextBudget(
-      maxBytes: kMaxDecisionLensPromptBytes,
-      omissionReserveBytes: kDecisionLensPromptOmissionReserveBytes,
-    );
-    final available = budget.availableBytesAfter([prefix, suffix]);
-    if (available < 0) {
-      throw StateError(
-        'discovery/$kDecisionLens: the FIXED prompt scaffold plus its omission '
-        'reserve already exceed '
-        'kMaxDecisionLensPromptBytes=$kMaxDecisionLensPromptBytes by '
-        '${-available} bytes — no evidence would fit, so the template is the '
-        'defect and clipping cannot hide it',
-      );
-    }
-    final whole = '$prefix$evidence$suffix';
-    if (utf8.encode(whole).length <= kMaxDecisionLensPromptBytes) {
-      return DiscoveryLensPromptAssembly(
-        prompt: whole,
-        evidenceTruncated: false,
-      );
-    }
-    final clipped = budget.clampAtLineBoundary(
-      evidence,
-      ceilingBytes: available,
-    );
-    // `clampAtLineBoundary` keeps whole lines and JOINS them, so the kept text
-    // is one newline short of the boundary past its last kept record: a record
-    // ending at `end` survived exactly when `end <= kept + 1`.
-    final kept = utf8.encode(clipped).length;
-    bool survived(int end) => end <= kept + 1;
-    // GUARD (the named invariant: a clip never drops an entry the bead CITED).
-    // The required region is every surface record plus every cited entry. If
-    // the fixed scaffold leaves no room for it there is no prompt to give —
-    // clipping into a citation is the silent tail drop this bead exists to
-    // retire, and the SAME shape the gather refuses with.
-    if (!survived(projection.citedEvidenceBytes)) {
-      final identities = projection.citedDecisionIdentities;
-      return DiscoveryLensPromptAssembly(
-        prompt: '',
-        evidenceTruncated: false,
-        error:
-            'named decision set exceeds '
-            'kMaxDecisionLensPromptBytes=$kMaxDecisionLensPromptBytes bytes — '
-            'the required evidence ends at byte '
-            '${projection.citedEvidenceBytes} and only $available bytes '
-            'survive the fixed prompt scaffold: '
-            '${identities.isEmpty ? '<no cited entry — the bead fields and surface records alone exceed it>' : identities.join(', ')}',
-      );
-    }
-    final omitted = fillEnds.where((end) => !survived(end)).length;
-    final marker = _decisionLensOmissionMarker(omitted);
-    if (fillEnds.isEmpty) {
-      return DiscoveryLensPromptAssembly(
-        prompt: '$prefix$clipped\n$marker\n$suffix',
-        evidenceTruncated: true,
-      );
-    }
-    // SNAP back from the line boundary to the last whole FILL record. A line
-    // is the budget's boundary, but it is not a RECORD's: stopping mid-body
-    // leaves the lens a decision entry it cannot quote and makes the marker's
-    // count a half-truth. The floor is the required region, which `survived`
-    // has already proved fits.
-    var lastWholeRecord = projection.citedEvidenceBytes;
-    for (final end in fillEnds) {
-      if (survived(end) && end > lastWholeRecord) lastWholeRecord = end;
-    }
-    return DiscoveryLensPromptAssembly(
-      // Every boundary is a record END — just past a newline — so slicing the
-      // UTF-8 there can never split a rune, and the text already ends in the
-      // newline the marker needs.
-      prompt:
-          '$prefix'
-          '${utf8.decode(utf8.encode(evidence).sublist(0, lastWholeRecord))}'
-          '$marker\n$suffix',
-      evidenceTruncated: true,
-    );
-  }
+  }) => assembleDiscoveryLensPrompt(
+    lens: lens,
+    sessionId: sessionId,
+    nodePath: nodePath,
+    round: round,
+    workspaceDir: workspaceDir,
+    projection: projection,
+  );
 }
 
 /// ONE assembled lens prompt, and whether its evidence bundle was CLIPPED to
@@ -5355,6 +5145,445 @@ class DiscoveryLensPromptAssembly {
 
   /// Whether the assembly refused.
   bool get isFailed => error.isNotEmpty;
+}
+
+/// The lens's COMPLETE prompt for [transport], or a THROW when the assembly
+/// refuses.
+///
+/// THROWS [StateError] when [assembleDiscoveryLensPrompt] refuses: a prompt
+/// whose REQUIRED evidence did not fit is not a degraded prompt, it is a lens
+/// asked to judge a bead without the decision that bead cited. Both call sites
+/// want the same refusal, so the guard lives here rather than in either of
+/// them.
+String discoveryLensPrompt({
+  required String lens,
+  required String sessionId,
+  required String nodePath,
+  required int round,
+  required String workspaceDir,
+  required DiscoveryEvidenceProjection projection,
+  LensResultTransport transport = const LensArtifactTransport(),
+}) {
+  final assembly = assembleDiscoveryLensPrompt(
+    lens: lens,
+    sessionId: sessionId,
+    nodePath: nodePath,
+    round: round,
+    workspaceDir: workspaceDir,
+    projection: projection,
+    transport: transport,
+  );
+  // GUARD (the named invariant: a lens never reads a bundle that dropped a
+  // decision the bead CITED).
+  if (assembly.isFailed) {
+    throw StateError('discovery/$lens: ${assembly.error}');
+  }
+  return assembly.prompt;
+}
+
+/// Renders ONE lens's spawn for [transport] — the ONE place the lane's tier,
+/// environment resolution, site binding, working agreement, evidence
+/// projection and usage posture are settled.
+///
+/// The GATHER lane is the only read-only one, and it declares
+/// [AgentTier.cheap], so it carries no model opinion of its own and a station
+/// that retunes `cheap` moves all three lenses with it — at both call sites.
+///
+/// [anchors] is the canonical gather the projection is taken over: the circuit
+/// reads it back off the round's artifact, the pre-stamp advisory holds it in
+/// memory. Either way [projectDiscoveryEvidence] is the only thing that turns
+/// it into a lens's bundle, so the bounds cannot differ.
+///
+/// The transport also decides the USAGE posture: the artifact arm captures
+/// FT-2 telemetry to the node's usage file, the in-process arm passes no
+/// `usageOut` at all because capture would redirect the harness's whole JSON
+/// envelope to a file and the caller reads this answer from stdout.
+RuntimeConfig discoveryLensRuntimeConfig({
+  required Bead bead,
+  required Workspace workspace,
+  required String lens,
+  required String sessionId,
+  required String nodePath,
+  required int round,
+  required DiscoveryAnchors anchors,
+  required LensResultTransport transport,
+  required AgentConfig ambient,
+  required EnvironmentRegistry registry,
+  required SiteBinding siteBinding,
+  AgentEnvironment? typedEnvironment,
+  Map<String, String> stepParams = const {},
+}) {
+  final config = resolveAgentConfig(
+    tier: AgentTier.cheap,
+    ambient: ambient,
+    beadMetadata: bead.metadata,
+    stepParams: stepParams,
+    registry: registry,
+    typedEnvironment: typedEnvironment,
+  );
+  final environment = registry.resolve(config.harness);
+  return spawnFor(
+    environment: environment,
+    model: config.params['model'],
+    endpoint: siteBinding.endpointFor(
+      name: config.harness,
+      environment: environment,
+    ),
+    brief: AgentBrief(
+      task: discoveryLensPrompt(
+        lens: lens,
+        sessionId: sessionId,
+        nodePath: nodePath,
+        round: round,
+        workspaceDir: workspace.workspaceDir,
+        projection: projectDiscoveryEvidence(
+          anchors,
+          lens: lens,
+          round: round,
+          workBeadId: bead.id,
+        ),
+        transport: transport,
+      ),
+      workingAgreement: kLensWorkingAgreement,
+    ),
+    workspace: workspace,
+    usageOut: switch (transport) {
+      // CAPTURE-ONLY usage telemetry (FT-2), same as every other lane.
+      LensArtifactTransport() => usageReportPath(nodePath),
+      LensInProcessTransport() => null,
+    },
+  );
+}
+
+/// Recovers ONE lens outcome from a lens's captured REPLY — the
+/// [LensInProcessTransport] counterpart of [readLensReport].
+///
+/// It reads the LAST embedded JSON object the reply carries that decodes to a
+/// [DiscoveryLensOutcome] for [lens], which is the same last-wins scan the
+/// shared verdict decoder runs ([verdictFromResultText]): a model that thinks
+/// aloud and then answers must be read on its answer, not on its draft.
+///
+/// There are NO freshness stamps to check here, and that is deliberate rather
+/// than a weakening: an in-process run has no node path, no round and no
+/// session to be stale relative to — the reply came back from the very process
+/// this call started. A report naming another [lens] is still refused, because
+/// that one is a mis-addressed answer rather than a stale one.
+///
+/// Null for a reply carrying no usable report. The caller decides what that
+/// means; the advisory hands it to [decideDiscovery] as a MISSING lane, which
+/// regathers once and then names the miss — never a free pass.
+DiscoveryLensOutcome? discoveryLensOutcomeFromResultText(
+  String? text, {
+  required String lens,
+}) {
+  if (text == null) return null;
+  final trimmed = text.trim();
+  if (trimmed.isEmpty) return null;
+  DiscoveryLensOutcome? last;
+  for (var start = 0; start < trimmed.length; start++) {
+    if (trimmed[start] != '{') continue;
+    var depth = 0;
+    for (var end = start; end < trimmed.length; end++) {
+      if (trimmed[end] == '{') depth++;
+      if (trimmed[end] != '}') continue;
+      depth--;
+      if (depth != 0) continue;
+      try {
+        final decoded = DiscoveryLensOutcome.fromJson(
+          jsonDecode(trimmed.substring(start, end + 1)),
+        );
+        if (decoded != null && decoded.lens == lens) last = decoded;
+      } catch (_) {
+        // Not a decodable report at this brace; keep scanning.
+      }
+      break;
+    }
+  }
+  return last;
+}
+
+/// ONE assembled lens prompt and whether its evidence bundle was CLIPPED —
+/// the SHARED assembly both the in-pipeline lens lane
+/// ([DiscoveryLensCapability]) and the filing verbs' pre-stamp advisory ride.
+///
+/// The assembly is three parts: an exact PREFIX, the sole droppable value
+/// ([DiscoveryEvidenceProjection.renderedEvidence]), and an exact SUFFIX that
+/// ends with [kLensStampInstruction] and [transport]'s closing instruction.
+/// The suffix is RESERVED before the evidence is admitted, because a prompt
+/// that loses its stamps or its destination produces a report nothing reads —
+/// a clipped bundle is recoverable, a stampless report is not.
+///
+/// [transport] changes exactly ONE paragraph: the artifact arm names the
+/// absolute report path, the in-process arm says to write nothing and answer
+/// in the reply. Everything else — the report schema version, the
+/// cite-the-offence rules, the evidence projection and its bounds — is
+/// identical, which is what makes a route verdict and an advisory verdict the
+/// same judgement.
+///
+/// Only [kDecisionLens] is bounded ([kMaxDecisionLensPromptBytes]); the other
+/// two lenses assemble unbounded and report `false`.
+DiscoveryLensPromptAssembly assembleDiscoveryLensPrompt({
+  required String lens,
+  required String sessionId,
+  required String nodePath,
+  required int round,
+  required String workspaceDir,
+  required DiscoveryEvidenceProjection projection,
+  LensResultTransport transport = const LensArtifactTransport(),
+}) {
+  final path = lensReportPath(workspaceDir, lens);
+  final b = StringBuffer()
+    ..writeln('# Discovery — lens: `$lens`')
+    ..writeln()
+    ..writeln(
+      'You are ONE read-only explorer in the discovery circuit, UPSTREAM of '
+      'the architect. This bead has NOT been specified and has NOT been built. '
+      'Your job is TWO things, and nothing else:',
+    )
+    ..writeln()
+    ..writeln(
+      '1. **SYNTHESIZE** the evidence below into the context the architect '
+      'will need through your lens.',
+    )
+    ..writeln(
+      '2. **CITE any OFFENCE** — anything in this bead that CONTRADICTS a '
+      'standard we have already ratified, using ONLY that evidence.',
+    )
+    ..writeln()
+    ..writeln('## Your lens')
+    ..writeln(lensBrief(lens))
+    ..writeln()
+    ..writeln('## Canonical evidence projection')
+    ..writeln(
+      'A DETERMINISTIC gather resolved all of this ONCE, for round $round, '
+      'and recorded how complete each record is. It is the whole of your '
+      'evidence. Do NOT inspect the tree, do NOT run a decision-index or '
+      'prior-art search, and do NOT read git history — those lookups already '
+      'ran, and re-running them is the waste this circuit exists to remove.',
+    )
+    ..writeln();
+  final prefix = b.toString();
+  // The RESERVED tail: every instruction after the evidence, ending with the
+  // stamp instruction and the absolute write path. It is never clipped.
+  final tail = StringBuffer()
+    ..writeln(
+      'Every record above carries its STATE. `COMPLETE` is a real answer, an '
+      'empty one included. `TRUNCATED` and `FAILED` are deterministic gaps: '
+      'do NOT compensate with a tool, and do NOT treat either as "nothing is '
+      'there". `UNAVAILABLE` means the optional source was absent: narrate '
+      'that limitation and continue with the supplied evidence.',
+    )
+    ..writeln()
+    ..writeln('## What counts as an OFFENCE (the gate is CITE-THE-OFFENCE)')
+    ..writeln(
+      'The citable standard is a RECORDED decision entry from the evidence '
+      'above — a sibling substation\'s entry binds exactly as a local one '
+      'does — or an applicable SKILL\'s instructions. Skills TEACH how; '
+      'decisions RATIFY the specific. Cite each decision by its canonical '
+      '`<repo>#<slug>` identity, for example '
+      '`the_grid#admission-authority-boundary`.',
+    )
+    ..writeln(
+      '- **A DECISION ENTRY BINDS.** A recorded entry is in force the moment '
+      'it is written — a `docs/decisions/` slug entry, or a legacy `A<n>` '
+      'amendment (converted with `status: accepted`). There is no advisory '
+      'tier and no serial to wait on: cite one and set `"ratified": true`. '
+      '**A BEAD IS NOT A DECISION** — a plan, a proposal, another bead\'s '
+      'design field, or your own reading of the tree is not a recorded '
+      'entry: set `"ratified": false` and it rides to the architect as a '
+      'flag for the `decision-alignment` lane, NEVER as a hold. (A `skill` or '
+      '`pattern` citation ignores this field.)',
+    )
+    ..writeln(
+      '- You MUST cite the STANDARD and the CLAUSE, and the clause MUST be in '
+      'the evidence above: quote it VERBATIM from the entry body you were '
+      'handed, INCLUDING its `status` line so the entry\'s force is grounded, '
+      'not guessed. A citation you cannot quote from that evidence is not a '
+      'citation — do not cite an `A<n>` you remember, and do not go looking '
+      'for one. A concern you cannot cite is NOT an offence: report it as a '
+      'violation with an EMPTY `standard` and it rides to the architect as a '
+      'flag, never held against the bead. Do not inflate a preference into a '
+      'citation.',
+    )
+    ..writeln(
+      '- **The departure clause**: if the bead ITSELF acknowledges the '
+      'departure ("this departs from X because Y"), set `"acknowledged": true`. '
+      'A considered departure is NOT an offence — it passes. Only an UNWITTING '
+      'contradiction holds the bead.',
+    )
+    ..writeln(
+      '- **INTENT, NOT PRESENCE**: a bead whose OWN plan/acceptance/description '
+      'REMOVES this cited offence IS the fix — set `"removesOffence": true` and '
+      'it passes. Discovery runs BEFORE the bead is built, so a '
+      'fix-the-violation bead still HAS the offending text present; grade the '
+      'bead\'s STANCE, not the text. Set it false when the bead LEAVES or ADDS '
+      'the offence.',
+    )
+    ..writeln(
+      '- A `pattern` deviation holds the bead ONLY if you NAME the precedent it '
+      'deviates from (`"precedent": "lib/src/code/committee.dart:'
+      'CriticCapability"`). Without a named precedent it is a flag, not a hold.',
+    )
+    ..writeln()
+    ..writeln(
+      'BEAD-FIELD SOURCES ARE STRUCTURED. If a context note quotes or '
+      'paraphrases a bead field, `source` is not evidence: include '
+      '`beadCitation` with the bead\'s actual `beadId`, the exact `field`, and '
+      'a non-empty VERBATIM `excerpt`. Copy a prior-art hit\'s '
+      'id/field/snippet exactly. A hit whose id differs from the work bead is '
+      'FOREIGN content and must never be attributed to the work bead. If you '
+      'cannot supply the structured quotation, omit the bead-field claim.',
+    )
+    ..writeln()
+    ..writeln('## Your report')
+    ..writeln(
+      'Your report is ONE of exactly two JSON shapes. The NORMAL report, when '
+      'the evidence above let you do your job:',
+    )
+    ..writeln(
+      '{"outcome":"report","lens":"$lens","version":2,'
+      '"sessionId":"$sessionId","nodePath":"$nodePath",'
+      '"$kVerdictRoundKey":$round,'
+      '"context":[{"note":"<what the architect needs to know>",'
+      '"source":"<the evidence id or source you read it from>",'
+      '"beadCitation":{"beadId":"<actual bead id>",'
+      '"field":"title|description|design|acceptance_criteria|notes",'
+      '"excerpt":"<verbatim field excerpt>"}}],'
+      '"violations":[{"kind":"decision|skill|pattern",'
+      '"standard":"<the_grid#admission-authority-boundary>",'
+      '"quote":"<the clause, verbatim, including its Status line>",'
+      '"contradiction":"<what this bead does that contradicts it>",'
+      '"contradicts":true,'
+      '"acknowledged":false,"ratified":false,"removesOffence":false,'
+      '"precedent":""}]}',
+    )
+    ..writeln()
+    ..writeln(
+      'Both arrays may be EMPTY — a clean bead with no findings is a real, '
+      'expected result. NEVER invent a violation to look useful: a false hold '
+      'stalls the work, and this gate exists to be trusted.',
+    )
+    ..writeln()
+    ..writeln(
+      'The INSUFFICIENT-EVIDENCE report is only for a record you NEEDED that '
+      'is marked TRUNCATED or FAILED. Name the record by its canonical id '
+      'and repeat its recorded reason — do NOT reach for a tool to fill the '
+      'hole, and do NOT report clean over it:',
+    )
+    ..writeln(
+      '{"outcome":"insufficient-evidence","lens":"$lens","version":2,'
+      '"sessionId":"$sessionId","nodePath":"$nodePath",'
+      '"$kVerdictRoundKey":$round,'
+      '"gaps":[{"evidenceId":"<the canonical id above>",'
+      '"reason":"<the recorded reason above>"}]}',
+    )
+    ..writeln()
+    ..writeln(kLensStampInstruction)
+    ..writeln()
+    ..writeln(switch (transport) {
+      LensArtifactTransport() =>
+        'You MUST write that JSON to the exact ABSOLUTE path `$path` before '
+            'you finish. It is an absolute path on purpose — write it there '
+            'regardless of your current working directory. This is REQUIRED '
+            'even if you also state your findings in your response text — '
+            'stating them in prose alone does NOT satisfy this instruction. '
+            'Write the file at `$path`.',
+      LensInProcessTransport() => kInProcessResultInstruction,
+    });
+  final suffix = tail.toString();
+  final evidence = projection.renderedEvidence;
+  if (lens != kDecisionLens) {
+    return DiscoveryLensPromptAssembly(
+      prompt: '$prefix$evidence$suffix',
+      evidenceTruncated: false,
+    );
+  }
+
+  // The marker rides its OWN two newlines, so the reserve has to cover both.
+  // It is sized at its WIDEST rendering — every declared fill record
+  // withheld — because the reserve is paid for before the clip knows how
+  // many of them it will actually drop.
+  final fillEnds = projection.fillRecordEndBytes;
+  final markerBytes =
+      utf8.encode(_decisionLensOmissionMarker(fillEnds.length)).length + 2;
+  if (markerBytes > kDecisionLensPromptOmissionReserveBytes) {
+    throw StateError(
+      'discovery/$kDecisionLens: the omission marker is $markerBytes bytes '
+      'and its reserve is only '
+      '$kDecisionLensPromptOmissionReserveBytes — a clipped bundle could not '
+      'afford to SAY it was clipped',
+    );
+  }
+  const budget = BoundedTextBudget(
+    maxBytes: kMaxDecisionLensPromptBytes,
+    omissionReserveBytes: kDecisionLensPromptOmissionReserveBytes,
+  );
+  final available = budget.availableBytesAfter([prefix, suffix]);
+  if (available < 0) {
+    throw StateError(
+      'discovery/$kDecisionLens: the FIXED prompt scaffold plus its omission '
+      'reserve already exceed '
+      'kMaxDecisionLensPromptBytes=$kMaxDecisionLensPromptBytes by '
+      '${-available} bytes — no evidence would fit, so the template is the '
+      'defect and clipping cannot hide it',
+    );
+  }
+  final whole = '$prefix$evidence$suffix';
+  if (utf8.encode(whole).length <= kMaxDecisionLensPromptBytes) {
+    return DiscoveryLensPromptAssembly(prompt: whole, evidenceTruncated: false);
+  }
+  final clipped = budget.clampAtLineBoundary(evidence, ceilingBytes: available);
+  // `clampAtLineBoundary` keeps whole lines and JOINS them, so the kept text
+  // is one newline short of the boundary past its last kept record: a record
+  // ending at `end` survived exactly when `end <= kept + 1`.
+  final kept = utf8.encode(clipped).length;
+  bool survived(int end) => end <= kept + 1;
+  // GUARD (the named invariant: a clip never drops an entry the bead CITED).
+  // The required region is every surface record plus every cited entry. If
+  // the fixed scaffold leaves no room for it there is no prompt to give —
+  // clipping into a citation is the silent tail drop this bead exists to
+  // retire, and the SAME shape the gather refuses with.
+  if (!survived(projection.citedEvidenceBytes)) {
+    final identities = projection.citedDecisionIdentities;
+    return DiscoveryLensPromptAssembly(
+      prompt: '',
+      evidenceTruncated: false,
+      error:
+          'named decision set exceeds '
+          'kMaxDecisionLensPromptBytes=$kMaxDecisionLensPromptBytes bytes — '
+          'the required evidence ends at byte '
+          '${projection.citedEvidenceBytes} and only $available bytes '
+          'survive the fixed prompt scaffold: '
+          '${identities.isEmpty ? '<no cited entry — the bead fields and surface records alone exceed it>' : identities.join(', ')}',
+    );
+  }
+  final omitted = fillEnds.where((end) => !survived(end)).length;
+  final marker = _decisionLensOmissionMarker(omitted);
+  if (fillEnds.isEmpty) {
+    return DiscoveryLensPromptAssembly(
+      prompt: '$prefix$clipped\n$marker\n$suffix',
+      evidenceTruncated: true,
+    );
+  }
+  // SNAP back from the line boundary to the last whole FILL record. A line
+  // is the budget's boundary, but it is not a RECORD's: stopping mid-body
+  // leaves the lens a decision entry it cannot quote and makes the marker's
+  // count a half-truth. The floor is the required region, which `survived`
+  // has already proved fits.
+  var lastWholeRecord = projection.citedEvidenceBytes;
+  for (final end in fillEnds) {
+    if (survived(end) && end > lastWholeRecord) lastWholeRecord = end;
+  }
+  return DiscoveryLensPromptAssembly(
+    // Every boundary is a record END — just past a newline — so slicing the
+    // UTF-8 there can never split a rune, and the text already ends in the
+    // newline the marker needs.
+    prompt:
+        '$prefix'
+        '${utf8.decode(utf8.encode(evidence).sublist(0, lastWholeRecord))}'
+        '$marker\n$suffix',
+    evidenceTruncated: true,
+  );
 }
 
 /// The per-lens angle — the ONE thing that differs between the three lanes.

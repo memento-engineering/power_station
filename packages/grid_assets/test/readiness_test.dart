@@ -861,6 +861,83 @@ void main() {
       }
     });
 
+    test('ONE builder serves both call sites — the capability method IS the '
+        'shared artifact-arm prompt', () {
+      // The pin behind the pre-stamp advisory: the in-pipeline lane and the
+      // filing verbs reach the same text through the same function, so a
+      // hardening landed for one is landed for both.
+      expect(
+        const ReadinessCriticCapability().buildReadinessPrompt(
+          _refined(),
+          kReadinessRubric,
+          'pow-kzx/spec_review/readiness',
+          '/w/pow-kzx',
+          round: 0,
+        ),
+        readinessLensPrompt(
+          bead: _refined(),
+          rubric: kReadinessRubric,
+          nodePath: 'pow-kzx/spec_review/readiness',
+          workspaceDir: '/w/pow-kzx',
+          round: 0,
+          transport: const LensArtifactTransport(),
+        ),
+      );
+    });
+
+    test('the FILELESS arm shares the whole body and swaps ONLY the closing '
+        'destination paragraph', () {
+      const args = (
+        rubric: kReadinessRubric,
+        nodePath: 'pow-kzx/spec_review/readiness',
+        workspaceDir: '/w/pow-kzx',
+      );
+      final body = readinessLensPromptBody(
+        bead: _refined(),
+        rubric: args.rubric,
+        nodePath: args.nodePath,
+        round: 0,
+      );
+      String promptFor(LensResultTransport transport) => readinessLensPrompt(
+        bead: _refined(),
+        rubric: args.rubric,
+        nodePath: args.nodePath,
+        workspaceDir: args.workspaceDir,
+        round: 0,
+        transport: transport,
+      );
+      final artifact = promptFor(const LensArtifactTransport());
+      final inProcess = promptFor(const LensInProcessTransport());
+
+      // Same judgement, same rubric, same verdict schema — byte-for-byte.
+      expect(artifact, startsWith(body));
+      expect(inProcess, startsWith(body));
+      expect(body, contains('"nodePath":"${args.nodePath}","round":0}'));
+
+      // The ONE difference: the fileless arm names NO path and forbids a write,
+      // so an advisory run can never leave an artifact a route would read.
+      expect(
+        inProcess.substring(body.length).trim(),
+        kInProcessResultInstruction,
+      );
+      expect(inProcess, isNot(contains('mktemp')));
+      expect(inProcess, isNot(contains('.grid/critique')));
+      expect(inProcess, contains('write NO file'));
+      expect(artifact, contains('mktemp "/w/pow-kzx/.grid/critique/'));
+    });
+
+    test('verdictFromResultText recovers the grade a FILELESS lens replies '
+        'with — last answer wins', () {
+      final recovered = verdictFromResultText(
+        'Thinking: this might be {"grade":"B","rationale":"draft"} …\n'
+        'Final: {"grade":"D","rationale":"names no surface"}',
+      );
+      expect(recovered?['grade'], 'D');
+      expect(recovered?['rationale'], startsWith('names no surface'));
+      expect(verdictFromResultText('no verdict here'), isNull);
+      expect(verdictFromResultText(null), isNull);
+    });
+
     test('anti-anchoring: it names ONLY its own rubric, never a spec-committee '
         'lane', () {
       final prompt = const ReadinessCriticCapability().buildReadinessPrompt(

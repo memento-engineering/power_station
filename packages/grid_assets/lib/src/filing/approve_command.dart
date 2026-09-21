@@ -7,9 +7,16 @@ import 'package:grid_sdk/grid_sdk.dart' as sdk;
 import 'package:path/path.dart' as p;
 
 import '../code/landing.dart' show ShellRunner, SystemShellRunner;
+import '../code/pr_describe.dart' show InferenceRunner;
 import 'approval_stamp.dart';
-import 'filing_command.dart' show defaultFilingService, noArmedSubstations;
+import 'filing_command.dart'
+    show
+        addReadinessOption,
+        defaultFilingService,
+        noArmedSubstations,
+        readinessModeOf;
 import 'filing_contract.dart';
+import 'pre_stamp_advisory.dart';
 
 String _currentDirectory() => Directory.current.path;
 BdRunner _processRunnerFor(String storeRoot) =>
@@ -108,6 +115,8 @@ final class ApproveService {
     String? decisionInvocation,
     String? decisionGridHome,
     FilingEvidenceSource? evidence,
+    FilingAdvisory? advisory,
+    InferenceRunner? inference,
   }) : filing =
            filing ??
            defaultFilingService(
@@ -119,6 +128,8 @@ final class ApproveService {
              decisionInvocation: decisionInvocation,
              decisionGridHome: decisionGridHome,
              evidence: evidence,
+             advisory: advisory,
+             inference: inference,
            ),
        _runnerFor = runnerFor,
        _now = now;
@@ -141,26 +152,35 @@ final class ApproveService {
     required String beadId,
     required String actor,
     Set<String>? armedSubstations,
+    FilingAdvisoryMode advisoryMode = FilingAdvisoryMode.off,
   }) async {
     final report = await filing.check(
       storeRoot: storeRoot,
       beadId: beadId,
       armedSubstations: armedSubstations,
+      advisoryMode: advisoryMode,
     );
     if (!report.passed) {
+      // The report owns its own refusal text, so an advisory hold reaches the
+      // operator as the lens's own fix text rather than as a summary of one.
       return ApprovalRefused(
         beadId: beadId,
-        reason:
-            report.error ??
-            'the filing preflight has failing rows — correct the bead and '
-                'rerun approve',
+        reason: report.refusalReason,
         report: report,
       );
     }
+    // The stamp is written LAST, and it records what the advisory did: a letter
+    // when one ran, the waiver when one was declined, neither when nobody
+    // asked. All of it rides the SAME single update as the receipt.
     final stamp = ApprovalStamp(
       by: actor,
       at: _now().toUtc().toIso8601String(),
       rev: report.approvalRevision,
+      readinessGrade: switch (report.advisory) {
+        FilingAdvisoryPassed(:final readinessGrade) => readinessGrade,
+        _ => '',
+      },
+      advisorySkipped: report.advisory is FilingAdvisorySkipped,
     );
     final written = await _runnerFor(storeRoot).run([
       'update',
@@ -211,6 +231,8 @@ class ApproveCommand extends Command<int> {
     String? decisionInvocation,
     String? decisionGridHome,
     FilingEvidenceSource? evidence,
+    FilingAdvisory? advisory,
+    InferenceRunner? inference,
     StringSink? out,
     StringSink? err,
   }) : _service =
@@ -224,6 +246,8 @@ class ApproveCommand extends Command<int> {
              decisionInvocation: decisionInvocation,
              decisionGridHome: decisionGridHome,
              evidence: evidence,
+             advisory: advisory,
+             inference: inference,
            ),
        _storeRoot = storeRoot,
        _armedSubstations = armedSubstations,
@@ -234,13 +258,16 @@ class ApproveCommand extends Command<int> {
         'json',
         negatable: false,
         help:
-            'Emit {id, approved, by, at, rev, filing, reason?} as one JSON '
-            'object.',
+            'Emit {id, approved, by, at, rev, readiness_grade?, '
+            'readiness_skipped?, filing, reason?} as one JSON object. The '
+            'embedded filing report carries the advisory verdict under '
+            '`advisory`.',
       )
       ..addOption(
         'actor',
         help: 'The approver, recorded as grid.approved_by. Required.',
       );
+    addReadinessOption(argParser);
   }
 
   final ApproveService _service;
@@ -254,12 +281,14 @@ class ApproveCommand extends Command<int> {
 
   @override
   final String description =
-      'Stamp one bead approved once the ten filing requirements pass.';
+      'Stamp one bead approved once the ten filing requirements and the '
+      'pre-stamp advisory pass.';
 
   @override
   String get invocation {
     final executable = runner?.executableName;
-    const shape = 'approve --actor <name> [--json] <bead-id>';
+    const shape =
+        'approve --actor <name> [--json] [--readiness=run|skip] <bead-id>';
     return executable == null ? shape : '$executable $shape';
   }
 
@@ -285,6 +314,7 @@ class ApproveCommand extends Command<int> {
         beadId: beadId,
         actor: actor,
         armedSubstations: _armedSubstations(),
+        advisoryMode: readinessModeOf(argResults!),
       );
     } on Object catch (error) {
       _err.writeln('approve: failed to approve $beadId: $error');
@@ -296,7 +326,9 @@ class ApproveCommand extends Command<int> {
       switch (outcome) {
         case ApprovalStamped(:final stamp):
           _out.writeln(
-            'APPROVED $beadId by ${stamp.by} at ${stamp.at} rev ${stamp.rev}',
+            'APPROVED $beadId by ${stamp.by} at ${stamp.at} rev ${stamp.rev}'
+            '${stamp.readinessGrade.isEmpty ? '' : ' readiness ${stamp.readinessGrade}'}'
+            '${stamp.advisorySkipped ? ' readiness WAIVED' : ''}',
           );
         case ApprovalRefused(:final reason, :final report):
           _out.writeln('REFUSED $beadId: $reason');
@@ -305,6 +337,11 @@ class ApproveCommand extends Command<int> {
             if (!row.passed) {
               _out.writeln('FAIL ${row.requirement.wire}: ${row.detail}');
             }
+          }
+          // An advisory refusal already IS the reason above, verbatim; naming
+          // the arm that fired is what an operator needs beside it.
+          if (report?.advisory case FilingAdvisoryRefused(:final rule)) {
+            _out.writeln('FAIL advisory ($rule)');
           }
       }
     }

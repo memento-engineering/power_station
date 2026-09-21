@@ -15,6 +15,7 @@ import '../code/discovery.dart'
 import '../search/station_search.dart';
 import 'approval_stamp.dart';
 import 'filing_text.dart';
+import 'pre_stamp_advisory.dart';
 
 /// The ten mechanical checks reported for a newly filed bead.
 ///
@@ -84,6 +85,7 @@ final class FilingReport {
     required this.beadId,
     required this.requirements,
     this.approvalRevision = '',
+    this.advisory,
     this.error,
   });
 
@@ -118,11 +120,39 @@ final class FilingReport {
   /// Lookup-level refusal; non-null reports never pass.
   final String? error;
 
-  /// True only for a found bead with exactly ten passing rows.
+  /// What the PRE-STAMP ADVISORY concluded, or null when it was not asked
+  /// ([FilingAdvisoryMode.off], or a mechanical row that refused before it).
+  ///
+  /// It is deliberately NOT an eleventh [FilingRequirement] row. The
+  /// completeness lane is exactly ten mechanical requirements with unchanged
+  /// wire names and order — the boundary
+  /// `power_station#the-dependencies-row-is-a-projection-of-bd-dependency-rows`
+  /// reaffirmed — and a judgement an LLM makes is not a mechanical row. It
+  /// rides beside them, in its own member, so a reader of `requirements` sees
+  /// exactly what it always saw.
+  final FilingAdvisoryVerdict? advisory;
+
+  /// True for a found bead with exactly ten passing rows AND, when the advisory
+  /// was asked, an advisory that did not refuse.
   bool get passed =>
       error == null &&
       requirements.length == FilingRequirement.values.length &&
-      requirements.every((row) => row.passed);
+      requirements.every((row) => row.passed) &&
+      (advisory?.passed ?? true);
+
+  /// The EXACT reason this report refuses — the one text a verb prints and a
+  /// refused approval records.
+  ///
+  /// An advisory refusal answers with the owning lens's own fix text, verbatim:
+  /// that text IS the remedy, and paraphrasing it here would hand a refiner a
+  /// summary of a hold instead of the hold. Empty for a passing report.
+  String get refusalReason {
+    if (passed) return '';
+    if (error case final error?) return error;
+    if (advisory case FilingAdvisoryRefused(:final reason)) return reason;
+    return 'the filing preflight has failing rows — correct the bead and '
+        'rerun approve';
+  }
 
   /// Structured command/UI representation.
   Map<String, Object> toJson() => {
@@ -130,6 +160,7 @@ final class FilingReport {
     'passed': passed,
     'approval_revision': approvalRevision,
     'requirements': [for (final row in requirements) row.toJson()],
+    if (advisory case final advisory?) 'advisory': advisory.toJson(),
     if (error case final error?) 'error': error,
   };
 }
@@ -1281,10 +1312,17 @@ final class FilingService {
   /// are constructed (`FilingCommand`, `ApproveService`), so a test or an
   /// alternate station overrides it by injecting its own
   /// [FilingEvidenceSource] (or a whole [FilingService]).
+  ///
+  /// [advisory] is the PRE-STAMP ADVISORY, and it is nullable for the same
+  /// reason [evidence] is: composition is a fact, not a default. A caller that
+  /// composed none and then ASKS for one ([FilingAdvisoryMode.run]) is refused
+  /// naming the missing composition — never passed as though a lens had run and
+  /// found nothing.
   const FilingService({
     this.source = const ExactSubstationBeadSource(),
     this.contract = const FilingContract(),
     this.evidence,
+    this.advisory,
   });
 
   /// Exact read source.
@@ -1295,6 +1333,9 @@ final class FilingService {
 
   /// The viability-evidence gather, or null when none was composed.
   final FilingEvidenceSource? evidence;
+
+  /// The pre-stamp advisory, or null when none was composed.
+  final FilingAdvisory? advisory;
 
   /// Reads [beadId] in the store rooted at [storeRoot] and evaluates it,
   /// returning BOTH the exact bead read and its report.
@@ -1326,6 +1367,7 @@ final class FilingService {
     required String storeRoot,
     required String beadId,
     Set<String>? armedSubstations,
+    FilingAdvisoryMode advisoryMode = FilingAdvisoryMode.off,
   }) async {
     final read = await source.readExact(storeRoot: storeRoot, beadId: beadId);
     final bead = read.bead;
@@ -1347,10 +1389,60 @@ final class FilingService {
       evidence: gathered,
       armedSubstations: armedSubstations,
     );
+    // The ten MECHANICAL rows are answered FIRST and completely, and a report
+    // that already refuses returns here. They are free; the advisory is not,
+    // and running one over a bead a free check has already refused would spend
+    // inference to re-discover what a row just said — plus it would let a
+    // passing advisory sit beside a failing row and read as progress.
+    final advised = evaluated.report.passed
+        ? await _advise(
+            storeRoot: storeRoot,
+            bead: bead,
+            mode: advisoryMode,
+            report: evaluated.report,
+          )
+        : evaluated.report;
     return (
       bead: bead,
       dependencyProjection: evaluated.dependencyProjection,
-      report: evaluated.report,
+      report: advised,
+    );
+  }
+
+  /// [report] with [mode]'s advisory verdict attached — or [report] unchanged
+  /// when nobody asked for one.
+  ///
+  /// FAIL-CLOSED on composition: a caller that asks to RUN an advisory that was
+  /// never composed is refused naming what is missing, exactly as an unasked
+  /// decision index refuses a citation rather than clearing it.
+  Future<FilingReport> _advise({
+    required String storeRoot,
+    required Bead bead,
+    required FilingAdvisoryMode mode,
+    required FilingReport report,
+  }) async {
+    final verdict = switch (mode) {
+      FilingAdvisoryMode.off => null,
+      FilingAdvisoryMode.skip => const FilingAdvisorySkipped(),
+      FilingAdvisoryMode.run =>
+        await advisory?.evaluate(storeRoot: storeRoot, bead: bead) ??
+            const FilingAdvisoryRefused(
+              rule: 'composition',
+              reason:
+                  'PRE-STAMP ADVISORY UNAVAILABLE — this verb was composed with '
+                  'no advisory, so the bead-readiness lens and the discovery '
+                  'evidence gather did not run and nothing about this filing '
+                  'was judged. Compose one, or waive the advisory explicitly '
+                  'and own the waiver on the receipt.',
+            ),
+    };
+    if (verdict == null) return report;
+    return FilingReport(
+      beadId: report.beadId,
+      requirements: report.requirements,
+      approvalRevision: report.approvalRevision,
+      advisory: verdict,
+      error: report.error,
     );
   }
 
@@ -1360,9 +1452,11 @@ final class FilingService {
     required String storeRoot,
     required String beadId,
     Set<String>? armedSubstations,
+    FilingAdvisoryMode advisoryMode = FilingAdvisoryMode.off,
   }) async => (await inspect(
     storeRoot: storeRoot,
     beadId: beadId,
     armedSubstations: armedSubstations,
+    advisoryMode: advisoryMode,
   )).report;
 }
