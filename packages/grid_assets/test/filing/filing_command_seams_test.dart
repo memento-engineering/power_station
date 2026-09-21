@@ -88,6 +88,9 @@ _harness(_ScriptedBdRunner bd, {Set<String>? armed}) {
             // evidence keeps every viability row passing and silent, so a
             // failure here is the seam under test.
             evidence: FakeFilingEvidenceSource(completeEmptyEvidence),
+            // Same reasoning for the advisory: it is an inference call, and
+            // these fences measure the dependency projection.
+            advisory: FakeFilingAdvisory(),
           ),
           storeRoot: () => '/work/power_station',
           armedSubstations: () => armed,
@@ -169,7 +172,10 @@ void main() {
       // The option retired with the cross-store read that was its one reader.
       expect(parser.options.keys, isNot(contains(kStateRootOption)));
     }
-    expect(filing.invocation, 'filing [--json] <bead-id>');
+    expect(
+      filing.invocation,
+      'filing [--json] [--readiness=run|skip] <bead-id>',
+    );
     expect(approve.invocation, 'approve --actor <name> [--json] <bead-id>');
 
     final h = _harness(

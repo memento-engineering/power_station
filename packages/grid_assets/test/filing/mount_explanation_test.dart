@@ -316,6 +316,7 @@ final class _Harness {
           service: FilingService(
             source: ExactSubstationBeadSource(runnerFor: bd.runnerFor),
             evidence: evidence,
+            advisory: FakeFilingAdvisory(),
           ),
           storeRoot: () => _workRoot,
           armedSubstations: () => armed,
@@ -496,6 +497,12 @@ void main() {
 
       final embedded = h.report['filing'] as Map<String, dynamic>;
       final direct = jsonDecode(h.filingOut.toString()) as Map<String, dynamic>;
+      // The mount explainer is an EXPLAINER, not a stamp moment: it answers
+      // the TEN MECHANICAL ROWS and spends no inference, so its embedded
+      // report carries no advisory member at all. Strip the one member the
+      // `filing` VERB adds and the two reports are byte-identical.
+      expect(embedded.containsKey('advisory'), isFalse);
+      expect(direct.remove('advisory'), isNotNull);
       expect(jsonEncode(embedded), jsonEncode(direct));
       // WHOLE means all TEN: mount renders the four clauses it owns, and
       // carries the six VIABILITY rows out untouched rather than dropping the

@@ -5,6 +5,8 @@ import 'package:args/command_runner.dart';
 import 'package:grid_assets/grid_assets.dart';
 import 'package:test/test.dart';
 
+import 'filing_evidence_fakes.dart';
+
 /// The REAL `bd` harness the filing suites drive the verb against.
 ///
 /// These tests run the actual binary end to end; a fake would not prove the
@@ -142,9 +144,16 @@ Future<Directory> filingStore() => bdStore(prefix: 'filing');
 
 /// A runner carrying [FilingCommand] over [store], with [armed] as the
 /// station roster the `external:` rows resolve against (null = none supplied).
+///
+/// The PRE-STAMP ADVISORY is a scripted Fake, and [advisory] is how a suite
+/// scripts it. These suites measure the TEN MECHANICAL ROWS against a real bd
+/// store; the advisory is a live inference call, and letting the verb's default
+/// composition reach one here would put a model between the store and the row
+/// under test.
 ({CommandRunner<int> runner, StringBuffer out, StringBuffer err}) harness(
   Directory store, {
   Set<String>? armed,
+  FilingAdvisory? advisory,
 }) {
   final out = StringBuffer();
   final err = StringBuffer();
@@ -154,6 +163,7 @@ Future<Directory> filingStore() => bdStore(prefix: 'filing');
         FilingCommand(
           storeRoot: () => store.path,
           armedSubstations: () => armed,
+          advisory: advisory ?? FakeFilingAdvisory(),
           out: out,
           err: err,
         ),

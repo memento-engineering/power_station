@@ -350,6 +350,7 @@ export 'src/filing/filing_contract.dart';
 export 'src/filing/filing_text.dart';
 export 'src/filing/mount_explanation.dart';
 export 'src/filing/park_command.dart';
+export 'src/filing/pre_stamp_advisory.dart';
 export 'src/filing/show_command.dart';
 export 'src/filing/state_root_option.dart';
 export 'src/io/bounded_output.dart';

@@ -8,6 +8,7 @@ import 'package:grid_sdk/grid_sdk.dart' show SubstationScope;
 import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
+import 'filing_evidence_fakes.dart';
 import 'real_bd_store.dart';
 
 /// A recording [BdRunner] that answers every read with one enveloped list.
@@ -327,6 +328,10 @@ void main() {
             FilingCommand(
               storeRoot: () => work.path,
               runnerFor: (root) => ProcessBdRunner(workspaceRoot: root),
+              // This probe measures the LIVE mechanical evidence legs. The
+              // advisory is an inference call and is scripted, so nothing here
+              // reaches a model.
+              advisory: FakeFilingAdvisory(),
               owningScope: SubstationScope(
                 name: 'power_station',
                 root: work.path,
@@ -386,4 +391,102 @@ void main() {
       );
     },
   );
+
+  group('the filing verb runs the pre-stamp advisory after the ten rows', () {
+    ({CommandRunner<int> runner, StringBuffer out, FakeFilingAdvisory advisory})
+    verb(FilingAdvisoryVerdict verdict) {
+      final out = StringBuffer();
+      final advisory = FakeFilingAdvisory(verdict);
+      return (
+        runner: CommandRunner<int>('space', 'test station')
+          ..addCommand(
+            FilingCommand(
+              service: FilingService(
+                source: ExactSubstationBeadSource(
+                  runnerFor: (_) => FakeExactBeadRunner(
+                    const Bead(
+                      id: 'pow-child',
+                      title: 'child',
+                      issueType: IssueType.task,
+                    ).copyWith(
+                      description: 'A real brief.',
+                      acceptanceCriteria: '- [ ] checked',
+                    ),
+                  ),
+                ),
+                evidence: FakeFilingEvidenceSource(completeEmptyEvidence),
+                advisory: advisory,
+              ),
+              storeRoot: () => '/work/power_station',
+              out: out,
+              err: StringBuffer(),
+            ),
+          ),
+        out: out,
+        advisory: advisory,
+      );
+    }
+
+    test('--readiness defaults to run, and the advisory prints LAST', () async {
+      final h = verb(const FilingAdvisoryPassed(readinessGrade: 'B'));
+      expect(
+        await h.runner.run(['filing', 'pow-child']),
+        0,
+        reason: '${h.out}',
+      );
+      expect(h.advisory.calls, hasLength(1));
+      final plain = h.out.toString();
+      expect(plain, contains('PASS advisory: bead-readiness B'));
+      expect(
+        plain.indexOf('PASS advisory'),
+        greaterThan(plain.indexOf('decision_references')),
+        reason: 'the ten mechanical rows first, then the judgement',
+      );
+    });
+
+    test('an advisory refusal exits non-zero and prints the lens\'s OWN fix '
+        'text, unabridged', () async {
+      final hold = renderRefinementAsk(
+        grade: 'D',
+        rationale: 'names no surface',
+      );
+      final h = verb(FilingAdvisoryRefused(rule: 'readiness', reason: hold));
+
+      expect(await h.runner.run(['filing', 'pow-child']), 1);
+      expect(h.out.toString(), contains('FAIL advisory (readiness):'));
+      expect(h.out.toString(), contains(hold));
+    });
+
+    test(
+      '--readiness=skip waives it: no ask, and the report says so',
+      () async {
+        final h = verb(const FilingAdvisoryPassed(readinessGrade: 'B'));
+        expect(
+          await h.runner.run([
+            'filing',
+            '--json',
+            '--readiness=skip',
+            'pow-child',
+          ]),
+          0,
+          reason: '${h.out}',
+        );
+        expect(h.advisory.calls, isEmpty);
+        final report = jsonDecode(h.out.toString()) as Map<String, dynamic>;
+        expect(report['passed'], isTrue);
+        expect(report['advisory'], {'outcome': 'skipped'});
+        // The ten rows are untouched — the advisory is never an eleventh row.
+        expect((report['requirements'] as List), hasLength(10));
+      },
+    );
+
+    test('an unknown --readiness value is a usage refusal', () async {
+      final h = verb(const FilingAdvisoryPassed(readinessGrade: 'B'));
+      await expectLater(
+        h.runner.run(['filing', '--readiness=maybe', 'pow-child']),
+        throwsA(isA<UsageException>()),
+      );
+      expect(h.advisory.calls, isEmpty);
+    });
+  });
 }

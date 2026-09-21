@@ -176,7 +176,7 @@ When the work extends something the tree already owns, write the pointer into
 the bead body as `path:line` plus the relationship:
 
 ```
-COMPOSE: packages/grid_assets/lib/src/filing/filing_contract.dart:876 owns the
+COMPOSE: packages/grid_assets/lib/src/filing/filing_contract.dart:907 owns the
 ten-row completeness contract — CALL it; do not add a second predicate.
 ```
 

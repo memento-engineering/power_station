@@ -1,15 +1,20 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:args/args.dart' show ArgParser, ArgResults;
 import 'package:args/command_runner.dart';
 import 'package:beads_dart/beads_dart.dart' show BdRunner, ProcessBdRunner;
 import 'package:grid_sdk/grid_sdk.dart' as sdk;
 import 'package:path/path.dart' as p;
 
-import '../code/discovery.dart' show commandDecisionIndexSource;
+import '../code/discovery.dart'
+    show DecisionIndexSource, commandDecisionIndexSource;
 import '../code/landing.dart' show ShellRunner, SystemShellRunner;
+import '../assets/overlay_materializer.dart' show kDefaultOverlayRunner;
+import '../code/pr_describe.dart' show InferenceRunner;
 import '../search/station_search.dart';
 import 'filing_contract.dart';
+import 'pre_stamp_advisory.dart';
 
 String _currentDirectory() => Directory.current.path;
 BdRunner _processBdRunnerFor(String storeRoot) =>
@@ -28,9 +33,15 @@ BdRunner _processBdRunnerFor(String storeRoot) =>
 /// per-store mechanism, recorded as
 /// `power_station#the-per-store-bead-read-is-scoped-never-the-export-surface`.
 ///
+/// It also composes the PRE-STAMP ADVISORY over that SAME decision index. One
+/// `DecisionIndexSource` is built here and handed to both halves, so the
+/// mechanical `decision_references` row and the discovery lens the advisory
+/// runs ask the register one way — two index compositions in one verb would be
+/// two answers about the same citation.
+///
 /// A test or an alternate station overrides the whole thing by injecting its
-/// own `FilingService`, or just the gather by injecting a
-/// [FilingEvidenceSource].
+/// own `FilingService`, or just one collaborator by injecting a
+/// [FilingEvidenceSource] or a [FilingAdvisory].
 FilingService defaultFilingService({
   required BdRunner Function(String storeRoot) runnerFor,
   sdk.SubstationScope? owningScope,
@@ -40,22 +51,68 @@ FilingService defaultFilingService({
   String? decisionInvocation,
   String? decisionGridHome,
   FilingEvidenceSource? evidence,
-}) => FilingService(
-  source: ExactSubstationBeadSource(runnerFor: runnerFor),
-  evidence:
-      evidence ??
-      SystemFilingEvidenceSource(
-        probe: validationPlanProbe,
-        catalog: BdListAllStatusBeadSource(runnerFor: runnerFor),
-        owning: owningScope,
-        attached: attachedScopes,
-        decisions: commandDecisionIndexSource(
-          decisionShell,
-          runnerInvocation: decisionInvocation,
-          gridHome: decisionGridHome,
+  FilingAdvisory? advisory,
+  InferenceRunner? inference,
+}) {
+  final DecisionIndexSource decisions = commandDecisionIndexSource(
+    decisionShell,
+    runnerInvocation: decisionInvocation,
+    gridHome: decisionGridHome,
+  );
+  return FilingService(
+    source: ExactSubstationBeadSource(runnerFor: runnerFor),
+    evidence:
+        evidence ??
+        SystemFilingEvidenceSource(
+          probe: validationPlanProbe,
+          catalog: BdListAllStatusBeadSource(runnerFor: runnerFor),
+          owning: owningScope,
+          attached: attachedScopes,
+          decisions: decisions,
         ),
-      ),
+    advisory:
+        advisory ??
+        PreStampAdvisory(
+          inference: inference,
+          decisions: decisions,
+          decisionRunner: decisionInvocation ?? kDefaultOverlayRunner,
+          decisionGridHome: decisionGridHome,
+          substation: owningScope?.name ?? '',
+        ),
+  );
+}
+
+/// The `--readiness` option every filing verb carries, and its stable wire
+/// values.
+///
+/// `run` is the default and `skip` is the deliberate waiver; there is no
+/// spelling for [FilingAdvisoryMode.off] on the command line, because a verb
+/// silently not judging is exactly what this option exists to make visible.
+const String kReadinessOption = 'readiness';
+
+/// The `--readiness` wire value that RUNS the advisory.
+const String kReadinessRun = 'run';
+
+/// The `--readiness` wire value that WAIVES it.
+const String kReadinessSkip = 'skip';
+
+/// Declares `--readiness=run|skip` on [parser] — one declaration, so `filing`,
+/// `approve` and `unpark` cannot offer three spellings of one waiver.
+void addReadinessOption(ArgParser parser) => parser.addOption(
+  kReadinessOption,
+  allowed: const [kReadinessRun, kReadinessSkip],
+  defaultsTo: kReadinessRun,
+  help:
+      'Run the pre-stamp advisory (the same bead-readiness lens and discovery '
+      'evidence gather the spec_review route runs), or waive it. A waiver is '
+      'recorded on the stamp.',
 );
+
+/// The mode [results] selected. Absent or blank ⇒ [FilingAdvisoryMode.run].
+FilingAdvisoryMode readinessModeOf(ArgResults results) =>
+    results.option(kReadinessOption) == kReadinessSkip
+    ? FilingAdvisoryMode.skip
+    : FilingAdvisoryMode.run;
 
 /// The default roster seam: NONE. Until a station threads its coded roster in,
 /// an `external:<project>:<capability>` dependency row cannot be resolved to an
@@ -89,6 +146,8 @@ class FilingCommand extends Command<int> {
     String? decisionInvocation,
     String? decisionGridHome,
     FilingEvidenceSource? evidence,
+    FilingAdvisory? advisory,
+    InferenceRunner? inference,
     StringSink? out,
     StringSink? err,
   }) : _service =
@@ -102,6 +161,8 @@ class FilingCommand extends Command<int> {
              decisionInvocation: decisionInvocation,
              decisionGridHome: decisionGridHome,
              evidence: evidence,
+             advisory: advisory,
+             inference: inference,
            ),
        _storeRoot = storeRoot,
        _armedSubstations = armedSubstations,
@@ -110,8 +171,11 @@ class FilingCommand extends Command<int> {
     argParser.addFlag(
       'json',
       negatable: false,
-      help: 'Emit {id, passed, requirements, error?} as one JSON object.',
+      help:
+          'Emit {id, passed, requirements, advisory?, error?} as one JSON '
+          'object.',
     );
+    addReadinessOption(argParser);
   }
 
   final FilingService _service;
@@ -125,12 +189,13 @@ class FilingCommand extends Command<int> {
 
   @override
   final String description =
-      'Check one bead against the ten mechanical filing requirements.';
+      'Check one bead against the ten mechanical filing requirements, then '
+      'the pre-stamp advisory.';
 
   @override
   String get invocation {
     final executable = runner?.executableName;
-    const shape = 'filing [--json] <bead-id>';
+    const shape = 'filing [--json] [--readiness=run|skip] <bead-id>';
     return executable == null ? shape : '$executable $shape';
   }
 
@@ -148,6 +213,7 @@ class FilingCommand extends Command<int> {
         storeRoot: p.normalize(_storeRoot()),
         beadId: beadId,
         armedSubstations: _armedSubstations(),
+        advisoryMode: readinessModeOf(argResults!),
       );
     } on Object catch (error) {
       _err.writeln('filing: failed to read $beadId: $error');
@@ -163,6 +229,19 @@ class FilingCommand extends Command<int> {
           '${row.passed ? 'PASS' : 'FAIL'} '
           '${row.requirement.wire}: ${row.detail}',
         );
+      }
+      // AFTER the ten rows, in the same report: the advisory runs last and
+      // reads last. Its refusal carries the owning lens's own fix text.
+      switch (report.advisory) {
+        case null:
+          break;
+        case FilingAdvisoryPassed(:final readinessGrade):
+          _out.writeln('PASS advisory: bead-readiness $readinessGrade');
+        case FilingAdvisorySkipped():
+          _out.writeln('SKIP advisory: waived by --readiness=skip');
+        case FilingAdvisoryRefused(:final rule, :final reason):
+          _out.writeln('FAIL advisory ($rule):');
+          _out.writeln(reason);
       }
     }
     return report.passed ? 0 : 1;
