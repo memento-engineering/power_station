@@ -123,7 +123,7 @@ final class RecordingBdRunner implements BdRunner {
 Map<String, Object?> filedBug({
   String id = 'pow-run',
   String validationPlan = 'dart test',
-  String acceptance = '- [ ] AC-1 — CI is green; falsifier: `dart test`',
+  String acceptance = '- [ ] AC-1 — CI is green; falsifier: dart test',
   String description = 'The nightly failed.',
 }) => <String, Object?>{
   'id': id,
@@ -471,7 +471,7 @@ void main() {
         '--actor',
         'grid-controller',
         '--acceptance',
-        contains('`dart test`'),
+        contains('falsifier: dart test'),
         ...workflowMetadata,
       ]);
       expect(
@@ -543,7 +543,7 @@ void main() {
         '--body-file',
         '-',
         '--acceptance',
-        contains('`dart test`'),
+        contains('falsifier: dart test'),
         ...workflowMetadata,
       ]);
       expect(runner.stdins[1], contains('/actions/runs/9001'));
