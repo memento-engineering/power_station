@@ -399,7 +399,7 @@ abstract interface class GitHubIntakeStore {
 /// unstamped exactly as before. A workflow run of the seat's OWN repository is
 /// SELF authority (`power_station#own-workflow-failures-are-self-approved`),
 /// and when its rule says so this store CALLS [ApproveService] — the same verb
-/// a human runs, with the same ten-row filing preflight — under the actor
+/// a human runs, with the same eleven-row filing preflight — under the actor
 /// [kWorkflowRunActor]. `grid_assets`'s `lib/src/filing/approve_command.dart`
 /// remains the ONLY writer of `grid.approved_by` / `grid.approved_at` /
 /// `grid.approved_rev`; a bead whose preflight fails is left OPEN and

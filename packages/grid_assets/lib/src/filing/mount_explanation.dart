@@ -25,10 +25,11 @@
 /// [mountEligibilityFindings] — the one predicate the engine's mount boundary
 /// already calls — and four of these rows RENDER clauses of the [FilingReport]
 /// the `filing` verb emits, which rides out WHOLE and unabridged as the
-/// embedded `filing` member: all TEN filing requirements, the four presence
-/// rows and the six viability rows alike. Mount owns ten preconditions of its
-/// own and renders only the four filing clauses it names; there is no eleventh
-/// mount predicate and no second filing evaluation. The `dependencies` row is
+/// embedded `filing` member: all ELEVEN filing requirements — the four
+/// presence rows, the six viability rows and the one content row alike. Mount
+/// owns ten preconditions of its own and renders only the four filing clauses
+/// it names; there is no further mount predicate and no second filing
+/// evaluation. The `dependencies` row is
 /// the very [DependencyProjection] that report was rendered from
 /// ([FilingService.inspect] hands both back together), refined with each local
 /// target's open/closed state. No second completeness
@@ -445,10 +446,11 @@ final class _LinkedSessions {
 
 /// Pure evaluator for the ten-row mount explanation.
 ///
-/// It COMPOSES rather than re-derives: the retained ten-row [FilingReport]
+/// It COMPOSES rather than re-derives: the retained eleven-row [FilingReport]
 /// supplies the rendered detail of the four clauses mount names — type,
 /// validation plan, acceptance and dependencies — while its six VIABILITY rows
-/// ride out whole on the embedded report without a mount row of their own. The
+/// and its CONTENT row ride out whole on the embedded report without a mount
+/// row of their own. The
 /// retained [DependencyProjection] IS the `dependencies` row's content, and
 /// [mountEligibilityFindings] — called exactly once — supplies the mount-side
 /// classification of type, validation plan and approval. Nothing here evaluates filing again, and nothing here
@@ -620,7 +622,7 @@ MountPreconditionRow _approvalRow(Bead bead, List<String> findings) {
     },
     remedy: refused
         ? 'approve --actor <actor> --json ${bead.id} — the verb re-runs the '
-              'ten-row filing preflight and stamps only if it passes. '
+              'eleven-row filing preflight and stamps only if it passes. '
               'APPROVAL STAYS HUMAN: it runs on an explicit per-bead ruling.'
         : '',
   );

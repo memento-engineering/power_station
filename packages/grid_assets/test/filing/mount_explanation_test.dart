@@ -497,14 +497,15 @@ void main() {
       final embedded = h.report['filing'] as Map<String, dynamic>;
       final direct = jsonDecode(h.filingOut.toString()) as Map<String, dynamic>;
       expect(jsonEncode(embedded), jsonEncode(direct));
-      // WHOLE means all TEN: mount renders the four clauses it owns, and
-      // carries the six VIABILITY rows out untouched rather than dropping the
-      // half of the contract it has no precondition for.
+      // WHOLE means all ELEVEN: mount renders the four clauses it owns, and
+      // carries the six VIABILITY rows and the CONTENT row out untouched
+      // rather than dropping the half of the contract it has no precondition
+      // for.
       expect(
         (embedded['requirements'] as List).map((row) => row['requirement']),
         [for (final value in FilingRequirement.values) value.wire],
       );
-      expect((embedded['requirements'] as List), hasLength(10));
+      expect((embedded['requirements'] as List), hasLength(11));
       // And the first three mount rows RENDER those very details.
       for (final requirement in const [
         'driveable_type',
@@ -1445,7 +1446,7 @@ void main() {
         isEmpty,
         reason: '$embedded',
       );
-      expect(rows, hasLength(10));
+      expect(rows, hasLength(11));
       expect(embedded['passed'], isTrue);
 
       // ONE gather, not one per row: the two plan shells are asked exactly

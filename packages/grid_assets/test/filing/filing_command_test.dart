@@ -112,7 +112,7 @@ void main() {
       final rows = (report['requirements'] as List)
           .cast<Map<String, dynamic>>();
       expect(report['passed'], isTrue);
-      expect(rows, hasLength(10));
+      expect(rows, hasLength(11));
       expect(rows.every((row) => row['passed'] == true), isTrue);
     },
   );
@@ -154,10 +154,10 @@ void main() {
       final rows = (report['requirements'] as List)
           .cast<Map<String, dynamic>>();
       expect(report['passed'], isFalse);
-      expect(rows, hasLength(10));
+      expect(rows, hasLength(11));
       // The four PRESENCE rows are what this bead fails; the six VIABILITY
-      // rows have nothing to refuse, because a bead with no plan, no
-      // acceptance and no citations carries no unviable text.
+      // rows and the content row have nothing to refuse, because a bead with
+      // no plan, no acceptance and no citations carries no unviable text.
       expect(
         {
           for (final row in rows)

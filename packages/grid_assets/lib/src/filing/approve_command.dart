@@ -74,7 +74,7 @@ final class ApprovalRefused extends ApprovalOutcome {
   };
 }
 
-/// UI-drivable approval: the ten-row filing preflight, then ONE stamped
+/// UI-drivable approval: the eleven-row filing preflight, then ONE stamped
 /// `bd update`. Nothing is written unless every row passes.
 ///
 /// The receipt is bound to the preflight that earned it: the stamped revision
@@ -87,7 +87,8 @@ final class ApproveService {
   ///
   /// With no [filing] or [evidence] override the preflight is the SAME live
   /// composition the `filing` verb binds ([defaultFilingService]): both verbs
-  /// answer one contract one way, including the six viability rows. `unpark`
+  /// answer one contract one way, including the six viability rows and the
+  /// content row. `unpark`
   /// reuses this service, so it gains the same preflight and introduces no
   /// second one.
   ///

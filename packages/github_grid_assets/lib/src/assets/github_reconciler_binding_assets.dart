@@ -126,7 +126,7 @@ class GitHubReconcilerBindingAssets extends SingleChildStatelessSeed {
     final store = BdGitHubIntakeStore(
       runner,
       // The DEFAULT approval composition, bound to the values this seat ALREADY
-      // subscribes to. Auto-approval runs the same ten-row preflight the
+      // subscribes to. Auto-approval runs the same eleven-row preflight the
       // `approve` verb runs, so a decision-citing bead filed from a workflow
       // run is judged against live evidence instead of against an unasked
       // index, which refuses every one of them.
