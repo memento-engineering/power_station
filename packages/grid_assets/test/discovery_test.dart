@@ -54,10 +54,15 @@ Bead _fieldBead(String id, BeadCitationField field, String text) =>
 /// [bodyChars] pads each entry file to exactly that many characters, so a probe
 /// about SIZE can build the worst real register — every body at
 /// [kMaxDiscoverySnippetChars], and every one of them distinct.
+///
+/// [answers] rides straight through to [_CannedShellRunner.answers], which is
+/// how the same runner also answers the UNFILTERED register-wide verb
+/// ([_unfilteredIndex]) a named-elsewhere citation falls back to.
 _CannedShellRunner _fakeDecisionIndex(
   Directory register, {
   required int count,
   int bodyChars = 0,
+  Map<String, ShellRunResult> answers = const {},
 }) {
   for (var n = 1; n <= count; n++) {
     final text =
@@ -70,6 +75,7 @@ _CannedShellRunner _fakeDecisionIndex(
     );
   }
   return _CannedShellRunner(
+    answers: answers,
     output: jsonEncode({
       'spec': 2,
       'decisions': [
@@ -315,6 +321,12 @@ DiscoveryEvidenceProjection _project(DiscoveryAnchors anchors, String lens) =>
       round: 7,
       workBeadId: 'pow-x',
     );
+
+/// [kDecisionLensEvidenceOmissionMarker] as a clip that withheld [omitted]
+/// unnamed fill records renders it — the template's `{N}` resolved, exactly as
+/// the private renderer inside the assembly does it.
+String _marker(int omitted) =>
+    kDecisionLensEvidenceOmissionMarker.replaceFirst('{N}', '$omitted');
 
 String _promptFor(DiscoveryEvidenceProjection projection) =>
     const DiscoveryLensCapability().buildLensPrompt(
@@ -1236,13 +1248,19 @@ void main() {
           lessThanOrEqualTo(kMaxDecisionLensPromptBytes),
         );
         expect(oversize.evidenceTruncated, isTrue);
-        expect(oversize.prompt, contains(kDecisionLensEvidenceOmissionMarker));
+        // The marker is a TEMPLATE now: `{N}` resolves to the number of
+        // declared UNNAMED FILL records the clip withheld. This bundle is
+        // hand-rendered and declares none, so it renders zero — and says so
+        // rather than implying a citation may have gone with the tail.
+        expect(oversize.prompt, contains(_marker(0)));
         expect(
           kDecisionLensEvidenceOmissionMarker,
           allOf(
             contains('256 KiB'),
             contains('omitted'),
-            contains('Re-run discovery with fewer touched surfaces'),
+            contains('every cited entry is present'),
+            contains('{N} unnamed fill records'),
+            contains('Reduce touched surfaces'),
           ),
           reason: 'a bounded lookup NAMES what it withheld and how to ask',
         );
@@ -1257,7 +1275,7 @@ void main() {
           contains(lensReportPath('/w/pow-x', kDecisionLens)),
         );
         expect(
-          oversize.prompt.indexOf(kDecisionLensEvidenceOmissionMarker),
+          oversize.prompt.indexOf(_marker(0)),
           lessThan(oversize.prompt.indexOf(kLensStampInstruction)),
           reason: 'the marker sits where the evidence was, before the tail',
         );
@@ -1307,8 +1325,13 @@ void main() {
           ),
         ),
       );
+      // The reserve covers the marker at its WIDEST rendering — a count with
+      // as many digits as the per-surface bound can produce records.
       expect(
-        utf8.encode(kDecisionLensEvidenceOmissionMarker).length + 2,
+        utf8
+                .encode(_marker(kMaxDecisionEntriesPerSurface * kMaxAnchors))
+                .length +
+            2,
         lessThanOrEqualTo(kDecisionLensPromptOmissionReserveBytes),
         reason: 'the marker must always fit the bytes reserved for it',
       );
@@ -2025,10 +2048,22 @@ void main() {
         hasLength(1),
         reason: 'the body is rendered once, under the first surface',
       );
+      // The body sits in its OWN group below every surface record (pow-gi1u),
+      // so the surfaces it answers for are named on RELATION lines beside it
+      // rather than by a "rendered above, under surface X" back-reference.
       expect(text, contains('also governs this surface'));
       expect(
         text,
-        contains('under surface `power_station/lib/src/code/discovery.dart`'),
+        stringContainsInOrder([
+          '#### Surface `power_station/lib/src/code/discovery.dart`',
+          '#### Surface `power_station/test/discovery_test.dart`',
+          '##### `${base.decisionEntryFor(shared.decisions.single).identity}`',
+          '- governs surface `power_station/lib/src/code/discovery.dart`',
+          '- also governs this surface: '
+              '`power_station/test/discovery_test.dart`',
+          body.snippet,
+        ]),
+        reason: 'one body, after both surfaces, naming each of them once',
       );
       expect(projection.evidenceIds.where((id) => id == body.id), hasLength(1));
       // Both surface lookups still render as records (provenance is kept).
@@ -3929,6 +3964,420 @@ void main() {
         expect(failedText, contains('the search FAILED'));
         expect(failedText, contains('absent alpha'));
         expect(failedText, isNot(contains('searched, no hits')));
+      },
+    );
+  });
+
+  group('the explore-decision clip never drops a CITED entry', () {
+    Future<DecisionGatherEvidence> gather(
+      ShellRunner shell,
+      String workspaceDir,
+      List<String> surfaces,
+      Bead workBead,
+    ) => commandDecisionIndexSource(
+      shell,
+      runnerInvocation: 'dart run lunar:lunar',
+      gridHome: '/grid/lunar',
+    )(workspaceDir, surfaces, workBead);
+
+    /// [gathered] as the decision lens actually receives it — mounted on a
+    /// round-stamped gather, driven THROUGH the schema-3 wire, and projected.
+    DiscoveryEvidenceProjection projectThroughWire(
+      DecisionGatherEvidence gathered,
+      Bead workBead,
+    ) {
+      final anchors = DiscoveryAnchors(
+        round: 7,
+        workBeadId: workBead.id,
+        beadFields: boundedBeadFields(workBead),
+        decisionEntries: gathered.decisionEntries,
+        decisionLookups: gathered.decisionLookups,
+      );
+      final back = DiscoveryAnchors.fromJson(
+        jsonDecode(jsonEncode(anchors.toJson())),
+      );
+      expect(back, isNotNull, reason: 'the gather survives its own wire');
+      return projectDiscoveryEvidence(
+        back!,
+        lens: kDecisionLens,
+        round: 7,
+        workBeadId: workBead.id,
+      );
+    }
+
+    DiscoveryLensPromptAssembly assemble(
+      DiscoveryEvidenceProjection projection, {
+      String workspaceDir = '/w/pow-x',
+    }) => const DiscoveryLensCapability().assembleLensPrompt(
+      lens: kDecisionLens,
+      sessionId: _session.sessionId,
+      nodePath: 'pow-x/spec_review/discovery/$kDecisionLens',
+      round: 7,
+      workspaceDir: workspaceDir,
+      projection: projection,
+    );
+
+    /// A register directory under a fresh temp root — never the process cwd.
+    Directory registerDir(String prefix) {
+      final dir = Directory.systemTemp.createTempSync(prefix);
+      addTearDown(() => dir.deleteSync(recursive: true));
+      return Directory(p.join(dir.path, 'docs', 'decisions'))
+        ..createSync(recursive: true);
+    }
+
+    const surface = 'power_station/packages/grid_assets/lib/src/x.dart';
+
+    test(
+      'pow-gi1u cited decision bodies precede and survive clipped fill',
+      () async {
+        // Lunar epoch 86, round tranquility-4h8iq on the_grid `tg-d6xl`: the
+        // bead named exactly ONE surface, so the old marker's only exit ("re-run
+        // with fewer touched surfaces") did not exist for it, and its cited
+        // entry `the_grid#terminal-provenance-word-is-reconstructed` fell in the
+        // alphabetical tail the clip dropped.
+        //
+        // The bead here cites its two on-surface entries in the REVERSE of the
+        // order the index answers them in, and its named-elsewhere entry first
+        // of all, so the assertion below can only pass when the cited group
+        // keeps DECISION-INDEX order: citation offset is not an ordering key.
+        final register = registerDir('decisions-clipped-fill');
+        const citedSlug = 'zzzz-cited';
+        const citedIdentity = 'zzzz#$citedSlug';
+        const citedClause = 'the cited clause the architect must honour';
+        const firstNamed = 'power_station#a2-fake-decision-2';
+        const secondNamed = 'power_station#a10-fake-decision-10';
+        final shell = _fakeDecisionIndex(
+          register,
+          count: kMaxDecisionEntriesPerSurface,
+          bodyChars: kMaxDiscoverySnippetChars,
+          answers: {
+            _unfilteredIndex: _registerWideAnswer(
+              register,
+              slug: citedSlug,
+              originRegister: 'zzzz',
+              surfaces: const ['power_station/packages/grid_assets/lib/y.dart'],
+              body: citedClause,
+            ),
+          },
+        );
+        final workBead = bead('pow-x').copyWith(
+          description:
+              'Bound first of all by `$citedIdentity`, then by '
+              '`a10-fake-decision-10`, and last by `a2-fake-decision-2`.',
+        );
+
+        final gathered = await gather(shell, register.parent.parent.path, [
+          surface,
+        ], workBead);
+        final record = gathered.decisionLookups.single;
+        expect(record.state, EvidenceState.truncated);
+        expect(record.namedElsewhere, hasLength(1));
+        expect(
+          record.decisions,
+          hasLength(kMaxDecisionEntriesPerSurface - 1),
+          reason: 'the cited note spends one of the 96 slots',
+        );
+        final onSurface = [
+          for (final reference in record.decisions)
+            gathered.decisionEntries[reference]!,
+        ];
+        expect(
+          onSurface.take(2).map((entry) => entry.identity),
+          const [firstNamed, secondNamed],
+          reason:
+              'the gather banks the named set in DECISION-INDEX order, not in '
+              'the order the bead happened to write the tokens',
+        );
+        final cited = [
+          ...onSurface.take(2),
+          gathered.decisionEntries[record.namedElsewhere.single]!,
+        ];
+        final fill = onSurface.skip(2).toList();
+        expect(fill, hasLength(kMaxDecisionEntriesPerSurface - 3));
+
+        final projection = projectThroughWire(gathered, workBead);
+        expect(
+          projection.citedDecisionIdentities,
+          const [firstNamed, secondNamed, citedIdentity],
+          reason:
+              'the bead wrote them zzzz, a10, a2 — the register decides the '
+              'ORDER, the bead decides only WHICH are required',
+        );
+        expect(
+          projection.fillRecordEndBytes,
+          hasLength(kMaxDecisionEntriesPerSurface - 3),
+        );
+
+        final assembly = assemble(projection);
+        expect(
+          utf8.encode(assembly.prompt).length,
+          lessThanOrEqualTo(kMaxDecisionLensPromptBytes),
+        );
+        expect(assembly.evidenceTruncated, isTrue);
+        expect(assembly.isFailed, isFalse);
+
+        // The three CITED bodies are whole, in index order, in their own group
+        // ahead of the fill.
+        final citedHeaders = [
+          for (final identity in projection.citedDecisionIdentities)
+            '##### `$identity`',
+        ];
+        expect(
+          assembly.prompt,
+          stringContainsInOrder([
+            '#### The entries this bead CITES',
+            ...citedHeaders,
+            '#### Further entries governing these surfaces',
+          ]),
+        );
+        for (final entry in cited) {
+          expect(entry.body.state, EvidenceState.complete);
+          expect(
+            assembly.prompt,
+            contains(entry.body.snippet),
+            reason:
+                'the bounded body is present in FULL, not by identity alone',
+          );
+        }
+        expect(assembly.prompt, contains(citedClause));
+
+        final headers = [
+          for (final entry in fill)
+            if (assembly.prompt.contains('##### `${entry.identity}`')) entry,
+        ];
+        final whole = [
+          for (final entry in fill)
+            if (assembly.prompt.contains(entry.body.snippet)) entry,
+        ];
+        expect(whole, isNotEmpty, reason: 'the fill is clipped, not erased');
+        expect(
+          headers,
+          whole,
+          reason:
+              'the clip snaps to a RECORD boundary — no half-rendered body the '
+              'lens could not quote',
+        );
+        final lastCited = assembly.prompt.indexOf(citedHeaders.last);
+        for (final entry in whole) {
+          expect(
+            lastCited,
+            lessThan(assembly.prompt.indexOf('##### `${entry.identity}`')),
+            reason: 'every cited body renders ahead of every fill record',
+          );
+        }
+        final omitted = fill.length - whole.length;
+        expect(
+          omitted,
+          greaterThan(0),
+          reason: 'the fixture must actually overrun the cap',
+        );
+        expect(
+          assembly.prompt,
+          contains(_marker(omitted)),
+          reason: 'the marker counts the withheld FILL records exactly',
+        );
+      },
+    );
+
+    test(
+      'pow-gi1u oversized cited group fails gather and prompt boundary',
+      () async {
+        final register = registerDir('decisions-cited-overflow');
+        // Enough maximum-size entries that their BODIES alone outrun the 256 KiB
+        // prompt cap while the set stays inside the 96-entry COUNT bound — the
+        // shape the count guard structurally cannot see.
+        const count = 70;
+        final slugs = [for (var n = 1; n <= count; n++) 'a$n-fake-decision-$n'];
+        final overflowing = bead('pow-x').copyWith(
+          design: 'Governed by ${slugs.map((slug) => '`$slug`').join(', ')}.',
+        );
+        final gathered = await gather(
+          _fakeDecisionIndex(
+            register,
+            count: count,
+            bodyChars: kMaxDiscoverySnippetChars,
+          ),
+          register.parent.parent.path,
+          [surface],
+          overflowing,
+        );
+        final refusedSurface = gathered.decisionLookups.single;
+        expect(refusedSurface.state, EvidenceState.failed);
+        expect(refusedSurface.error, startsWith('named decision set exceeds'));
+        expect(
+          refusedSurface.error,
+          contains('kMaxDecisionLensPromptBytes=262144 bytes'),
+        );
+        for (final slug in slugs) {
+          expect(refusedSurface.error, contains('power_station#$slug'));
+        }
+        expect(refusedSurface.decisions, isEmpty);
+        expect(
+          gathered.decisionEntries,
+          isEmpty,
+          reason:
+              'a refused surface banks NO entry — an unreferenced index entry '
+              'would refuse the whole artifact on decode',
+        );
+
+        // The SAME refusal at the prompt boundary: a named set the gather admits
+        // can still be squeezed out by the FIXED scaffold, and the assembly
+        // refuses rather than clip into the citation.
+        final smaller = bead(
+          'pow-x',
+        ).copyWith(design: 'Governed by `a1-fake-decision-1`.');
+        final projection = projectThroughWire(
+          await gather(
+            _fakeDecisionIndex(
+              register,
+              count: 3,
+              bodyChars: kMaxDiscoverySnippetChars,
+            ),
+            register.parent.parent.path,
+            [surface],
+            smaller,
+          ),
+          smaller,
+        );
+        expect(projection.citedDecisionIdentities, [
+          'power_station#a1-fake-decision-1',
+        ]);
+        expect(projection.fillRecordEndBytes, hasLength(2));
+
+        // Measure the fixed scaffold at a normal workspace, then grow it — the
+        // absolute write path rides it twice — until the window left for
+        // evidence falls a record short of the required boundary.
+        const tiny = DiscoveryEvidenceProjection(
+          lens: kDecisionLens,
+          round: 7,
+          workBeadId: 'pow-x',
+          evidenceIds: [],
+          renderedEvidence: 'e\n',
+          gaps: [],
+        );
+        const home = '/w/pow-x';
+        final scaffold =
+            utf8.encode(assemble(tiny, workspaceDir: home).prompt).length -
+            utf8.encode(tiny.renderedEvidence).length;
+        final window =
+            kMaxDecisionLensPromptBytes -
+            kDecisionLensPromptOmissionReserveBytes -
+            scaffold;
+        final deep =
+            '$home${'d' * ((window - projection.citedEvidenceBytes + 64) / 2).ceil()}';
+
+        final refused = assemble(projection, workspaceDir: deep);
+        expect(refused.isFailed, isTrue);
+        expect(refused.prompt, isEmpty);
+        expect(
+          refused.evidenceTruncated,
+          isFalse,
+          reason: 'a refusal is not a clip',
+        );
+        expect(refused.error, startsWith('named decision set exceeds'));
+        expect(
+          refused.error,
+          contains('kMaxDecisionLensPromptBytes=262144 bytes'),
+        );
+        expect(refused.error, contains('power_station#a1-fake-decision-1'));
+        expect(
+          () => const DiscoveryLensCapability().buildLensPrompt(
+            lens: kDecisionLens,
+            sessionId: _session.sessionId,
+            nodePath: 'pow-x/spec_review/discovery/$kDecisionLens',
+            round: 7,
+            workspaceDir: deep,
+            projection: projection,
+          ),
+          throwsA(
+            isA<StateError>().having(
+              (e) => e.message,
+              'message',
+              contains('power_station#a1-fake-decision-1'),
+            ),
+          ),
+          reason: 'no lens spawns on a prompt that dropped a citation',
+        );
+        expect(
+          assemble(projection, workspaceDir: home).isFailed,
+          isFalse,
+          reason: 'the same bundle at a real scaffold still assembles',
+        );
+      },
+    );
+
+    test(
+      'pow-gi1u no-citation order and schema v3 wire stay unchanged',
+      () async {
+        final register = registerDir('decisions-lexical-order');
+        final gathered = await gather(
+          _fakeDecisionIndex(register, count: 5),
+          register.parent.parent.path,
+          [surface],
+          _citesNothing,
+        );
+        final record = gathered.decisionLookups.single;
+        final anchors = DiscoveryAnchors(
+          round: 7,
+          workBeadId: _citesNothing.id,
+          beadFields: boundedBeadFields(_citesNothing),
+          decisionEntries: gathered.decisionEntries,
+          decisionLookups: gathered.decisionLookups,
+        );
+        final projection = projectDiscoveryEvidence(
+          anchors,
+          lens: kDecisionLens,
+          round: 7,
+          workBeadId: _citesNothing.id,
+        );
+
+        // The bead cites nothing, so every body is FILL and renders in lexical
+        // canonical-identity order — the order this lane always had.
+        expect(projection.citedDecisionIdentities, isEmpty);
+        final identities = [
+          for (final reference in record.decisions)
+            gathered.decisionEntries[reference]!.identity,
+        ]..sort();
+        expect(identities, hasLength(5));
+        expect(
+          projection.renderedEvidence,
+          stringContainsInOrder([
+            for (final identity in identities) '##### `$identity`',
+          ]),
+        );
+        expect(projection.fillRecordEndBytes, hasLength(identities.length));
+        expect(
+          projection.citedEvidenceBytes,
+          lessThan(projection.fillRecordEndBytes.first),
+          reason: 'the required boundary sits ahead of every droppable record',
+        );
+        expect(
+          utf8.encode(projection.renderedEvidence).length,
+          projection.fillRecordEndBytes.last,
+          reason: 'the fill is the TAIL — nothing required rides after it',
+        );
+
+        // The schema-3 wire is untouched: ordinal references, and an
+        // encode → decode → encode that is byte-identical.
+        final codec = DecisionReferenceCodec(gathered.decisionEntries.keys);
+        expect(record.toJson(codec)['decisions'], [
+          for (var ordinal = 0; ordinal < identities.length; ordinal++)
+            '$ordinal',
+        ]);
+        final encoded = jsonEncode(anchors.toJson());
+        final back = DiscoveryAnchors.fromJson(jsonDecode(encoded));
+        expect(back, isNotNull);
+        expect(jsonEncode(back!.toJson()), encoded);
+        expect(
+          projectDiscoveryEvidence(
+            back,
+            lens: kDecisionLens,
+            round: 7,
+            workBeadId: _citesNothing.id,
+          ).renderedEvidence,
+          projection.renderedEvidence,
+          reason: 'the wire round trip renders the same bundle',
+        );
       },
     );
   });

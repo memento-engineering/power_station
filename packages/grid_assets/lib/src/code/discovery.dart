@@ -181,11 +181,27 @@ const int kDecisionLensPromptOmissionReserveBytes = 512;
 ///
 /// It names the bound, what was withheld, and how to ask for it, which is what
 /// separates a bounded lookup from a lossy one.
+///
+/// A TEMPLATE: `{N}` is substituted with the number of UNNAMED FILL records
+/// the clip withheld ([_decisionLensOmissionMarker]). The count is the whole
+/// point of the wording. The old marker said "trailing evidence records were
+/// omitted" and offered "re-run with fewer touched surfaces" as the exit — an
+/// exit a bead naming exactly ONE surface does not have, and a claim that gave
+/// the lens no way to tell a dropped fill record from a dropped CITATION. The
+/// clip can no longer drop a cited entry ([projectDiscoveryEvidence] renders
+/// them first, [DiscoveryLensCapability.assembleLensPrompt] refuses rather
+/// than clip into them), so the marker states that guarantee and quantifies
+/// what is actually missing.
 const String kDecisionLensEvidenceOmissionMarker =
     '[TRUNCATED: canonical decision evidence exceeded the 256 KiB '
-    'explore-decision prompt cap; trailing evidence records were omitted. '
-    'Re-run discovery with fewer touched surfaces to inspect the withheld '
-    'records.]';
+    'explore-decision prompt cap; every cited entry is present; {N} unnamed '
+    'fill records were omitted. Reduce touched surfaces only if the unnamed '
+    'fill context is needed.]';
+
+/// [kDecisionLensEvidenceOmissionMarker] with its `{N}` resolved to the number
+/// of unnamed fill records this clip actually withheld.
+String _decisionLensOmissionMarker(int omitted) =>
+    kDecisionLensEvidenceOmissionMarker.replaceFirst('{N}', '$omitted');
 
 /// The bound on the decision entries kept for ONE roster-qualified surface.
 ///
@@ -1828,6 +1844,12 @@ class EvidenceGap {
 /// lens is allowed to see, and NOTHING else.
 class DiscoveryEvidenceProjection {
   /// Creates a projection.
+  ///
+  /// The three clipping members are OPTIONAL and default to "this bundle
+  /// declares no droppable structure", which is exactly right for the two
+  /// UNBOUNDED lenses and for a hand-assembled bundle: an assembly that finds
+  /// no fill boundary drops nothing it was told about, and its required
+  /// boundary is satisfied by any clip.
   const DiscoveryEvidenceProjection({
     required this.lens,
     required this.round,
@@ -1835,6 +1857,9 @@ class DiscoveryEvidenceProjection {
     required this.evidenceIds,
     required this.renderedEvidence,
     required this.gaps,
+    this.citedEvidenceBytes = 0,
+    this.citedDecisionIdentities = const [],
+    this.fillRecordEndBytes = const [],
   });
 
   /// The lens this projection is for.
@@ -1855,6 +1880,22 @@ class DiscoveryEvidenceProjection {
 
   /// Every hole in the bundle. Empty ⇒ the lens may judge.
   final List<EvidenceGap> gaps;
+
+  /// The UTF-8 byte offset in [renderedEvidence] just past the last REQUIRED
+  /// record — every surface envelope, and every decision entry the bead
+  /// CITES. A clip that does not reach this offset has eaten a citation, and
+  /// the assembly refuses instead of returning that prompt.
+  final int citedEvidenceBytes;
+
+  /// The canonical identities of the cited decision entries, in RENDER order —
+  /// what a refusal names so an operator reads the set, not a byte count.
+  final List<String> citedDecisionIdentities;
+
+  /// The UTF-8 byte offset in [renderedEvidence] just past each UNNAMED FILL
+  /// decision record, in render order — every one of them beyond
+  /// [citedEvidenceBytes]. A clip counts the boundaries it did not reach and
+  /// says so in [kDecisionLensEvidenceOmissionMarker].
+  final List<int> fillRecordEndBytes;
 
   /// Whether the lens has everything it was promised.
   bool get isSufficient => gaps.isEmpty;
@@ -1889,6 +1930,12 @@ DiscoveryEvidenceProjection projectDiscoveryEvidence(
   final gaps = <EvidenceGap>[];
   final ids = <String>[];
   final b = StringBuffer();
+  // The DECISION lane's clipping metadata, measured as `b` is written and
+  // shifted past the manifest below. The other two lanes are unbounded and
+  // leave these at "no droppable structure declared".
+  final citedIdentities = <String>[];
+  final fillEnds = <int>[];
+  var citedBoundary = 0;
 
   if (anchors.round != round) {
     gaps.add(
@@ -2000,14 +2047,29 @@ DiscoveryEvidenceProjection projectDiscoveryEvidence(
           )
           ..writeln();
       }
+      b
+        ..writeln(
+          'Every surface\'s LOOKUP is recorded first; every entry BODY is '
+          'rendered ONCE below it, in two groups — the entries this bead '
+          'CITES, then the rest of the register\'s fill — and each body names '
+          'the surfaces it answers for. Only the FILL group is droppable: a '
+          'clip can never reach a cited entry.',
+        )
+        ..writeln();
       // ONE body per decision entry, however many surfaces cite it: the
       // register answers every roster-qualified surface of a repo with the
       // same entries, so a bead touching 12 surfaces carried 12 copies of
       // each — 550 KB for 12 distinct entries on pow-ed1c, and the cheap lens
-      // died `prompt_too_long` (pow-alwh). The first surface renders the
-      // body; every later one cites it by identity. The evidence-id profile is
-      // unchanged (pow-bvui counts the body once).
-      final renderedUnder = <String, String>{};
+      // died `prompt_too_long` (pow-alwh). The body is rendered once and every
+      // surface that answered with it is named on a RELATION line. The
+      // evidence-id profile is unchanged (pow-bvui counts the body once).
+      final citationText = _projectedCitationText(anchors, workBeadId);
+      final relations = <String, List<String>>{};
+      final citedBodyIds = <String>{};
+      void relate(String bodyId, String line) =>
+          (relations[bodyId] ??= <String>[]).add(line);
+      void markCited(String bodyId) => citedBodyIds.add(bodyId);
+
       for (final lookup in anchors.decisionLookups) {
         b
           ..writeln('#### Surface `${lookup.surface}`')
@@ -2043,50 +2105,103 @@ DiscoveryEvidenceProjection projectDiscoveryEvidence(
         }
         for (final reference in lookup.decisions) {
           final decision = anchors.decisionEntryFor(reference);
-          final under = renderedUnder[decision.body.id];
-          if (under != null) {
-            b
-              ..writeln(
-                '##### `${decision.identity}` — also governs this surface; '
-                'its body is rendered ONCE above, under surface `$under`.',
-              )
-              ..writeln();
-            continue;
-          }
-          renderedUnder[decision.body.id] = lookup.surface;
-          b.writeln(
-            '##### `${decision.identity}` (status: ${decision.status}, '
-            'entry: `${decision.entryPath}`)',
+          relate(
+            decision.body.id,
+            relations.containsKey(decision.body.id)
+                ? '- also governs this surface: `${lookup.surface}`'
+                : '- governs surface `${lookup.surface}`',
           );
-          take(decision.identity, decision.body);
+          if (_isProjectedDecisionNamed(decision, citationText)) {
+            markCited(decision.body.id);
+          }
         }
         // The entries the bead CITED that this surface does not declare. They
         // are read exactly like the governing ones — the bead named them, and
         // a lens that cannot read what the bead cites judges blind — but they
         // are LABELLED, so the lens never reads one as governing this surface.
+        // A named-elsewhere reference IS a citation by construction (the
+        // gather re-asked the register for it by name), so it joins the cited
+        // group even when the bead spelled the token under a name the entry's
+        // own slug, identity and alias do not reproduce.
         for (final reference in lookup.namedElsewhere) {
           final decision = anchors.decisionEntryFor(reference);
-          final under = renderedUnder[decision.body.id];
-          if (under != null) {
-            b
-              ..writeln(
-                '##### `${decision.identity}` — NAMED ELSEWHERE: this bead '
-                'cites it, and it does NOT declare this surface; its body is '
-                'rendered ONCE above, under surface `$under`.',
-              )
-              ..writeln();
-            continue;
-          }
-          renderedUnder[decision.body.id] = lookup.surface;
-          b.writeln(
-            '##### `${decision.identity}` — NAMED ELSEWHERE (status: '
-            '${decision.status}, entry: `${decision.entryPath}`): this bead '
-            'cites it and its register records it, but it does NOT declare '
-            'surface `${lookup.surface}`; it governs '
+          relate(
+            decision.body.id,
+            '- NAMED ELSEWHERE on this surface: this bead cites it and its '
+            'register records it, but it does NOT declare surface '
+            '`${lookup.surface}`; it governs '
             '${decision.surfaces.isEmpty ? 'no declared surface' : decision.surfaces.map((s) => '`$s`').join(', ')}.',
           );
-          take(decision.identity, decision.body);
+          markCited(decision.body.id);
         }
+      }
+
+      // The two contiguous groups, both in DECISION-INDEX order. `relations`
+      // is keyed in FIRST-ENCOUNTER order over the gather's own ordered
+      // references — each surface's `decisions` (its named entries ahead of
+      // the index-order fill, exactly as [_decisionLookup] banked them), then
+      // that surface's `namedElsewhere` — so filtering those keys by
+      // membership keeps the index's order inside each group with no sort of
+      // its own. Citation OFFSET is deliberately NOT an ordering key: the
+      // register decides the ORDER of its entries and the bead decides only
+      // WHICH of them are required, so where a bead happened to write a token
+      // can never reshuffle the entries a lens reads. A byte boundary is
+      // recorded past the cited group and past every fill record, so the
+      // assembly's clip is a decision about RECORDS rather than a cut through
+      // whatever the alphabet put last.
+      String identityOf(String bodyId) =>
+          anchors.decisionEntryFor(bodyId).identity;
+      final citedBodies = relations.keys.where(citedBodyIds.contains).toList();
+      final fillBodies = relations.keys
+          .where((id) => !citedBodyIds.contains(id))
+          .toList();
+
+      var at = utf8.encode(b.toString()).length;
+      void emit(String chunk) {
+        b.write(chunk);
+        at += utf8.encode(chunk).length;
+      }
+
+      void emitBody(String bodyId) {
+        final decision = anchors.decisionEntryFor(bodyId);
+        final record = StringBuffer()
+          ..writeln(
+            '##### `${decision.identity}` (status: ${decision.status}, '
+            'entry: `${decision.entryPath}`)',
+          );
+        for (final line in relations[bodyId]!) {
+          record.writeln(line);
+        }
+        _renderEvidence(record, decision.identity, decision.body);
+        emit(record.toString());
+        ids.add(decision.body.id);
+        if (_isDeterministicEvidenceGap(decision.body.state)) {
+          gaps.add(
+            EvidenceGap(
+              evidenceId: decision.body.id,
+              reason: _stateReason(decision.body.state, decision.body.error),
+            ),
+          );
+        }
+      }
+
+      if (citedBodies.isNotEmpty) {
+        emit('#### The entries this bead CITES\n\n');
+      }
+      for (final bodyId in citedBodies) {
+        emitBody(bodyId);
+        citedIdentities.add(identityOf(bodyId));
+      }
+      citedBoundary = at;
+      if (fillBodies.isNotEmpty) {
+        emit(
+          '#### Further entries governing these surfaces — NOT cited by this '
+          'bead\n\n',
+        );
+      }
+      for (final bodyId in fillBodies) {
+        emitBody(bodyId);
+        fillEnds.add(at);
       }
     case kPriorArtLens:
       beadFields();
@@ -2186,6 +2301,9 @@ DiscoveryEvidenceProjection projectDiscoveryEvidence(
     manifest.writeln('- `$id`');
   }
   manifest.writeln();
+  // The manifest is PREPENDED, so every boundary measured inside `b` shifts by
+  // its own byte length.
+  final shift = utf8.encode(manifest.toString()).length;
   return DiscoveryEvidenceProjection(
     lens: lens,
     round: round,
@@ -2193,7 +2311,55 @@ DiscoveryEvidenceProjection projectDiscoveryEvidence(
     evidenceIds: sorted,
     renderedEvidence: '$manifest$b',
     gaps: gaps,
+    citedEvidenceBytes: citedBoundary == 0 ? 0 : shift + citedBoundary,
+    citedDecisionIdentities: List.unmodifiable(citedIdentities),
+    fillRecordEndBytes: List.unmodifiable([
+      for (final end in fillEnds) shift + end,
+    ]),
   );
+}
+
+/// The bead prose a decision citation can live in, read back off the GATHER's
+/// own bead-field records — the projection's copy of [decisionCitationText]'s
+/// text.
+///
+/// Same fields, same order (description before design, joined by a newline and
+/// lowercased), so a token that NAMES an entry here names it there. The two
+/// field vocabularies are matched on their STABLE `wire` spellings rather than
+/// re-declared: [kDecisionCitationFields] is the shared scanner's and
+/// [BeadCitationField] is this bundle's, and the wire is the promise both
+/// keep. The fields are carried WHOLE by [boundedBeadFields], so no citation
+/// is read off a clipped copy of the bead.
+String _projectedCitationText(DiscoveryAnchors anchors, String workBeadId) => [
+  for (final field in kDecisionCitationFields)
+    for (final record in anchors.beadFields)
+      if (record.beadId == workBeadId && record.field.wire == field.wire)
+        record.evidence.snippet,
+].join('\n').toLowerCase();
+
+/// Whether [cited] NAMES [decision] — the SAME slug/identity/legacy-alias
+/// token rules [_isNamedDecision] selects with, so the projection's cited
+/// group is exactly the gather's named set, read back through the bundle.
+bool _isProjectedDecisionNamed(DecisionEntryEvidence decision, String cited) {
+  final alias = legacyDecisionAlias(decision.slug);
+  return citesDecisionToken(cited, decision.slug.toLowerCase()) ||
+      citesDecisionToken(cited, decision.identity.toLowerCase()) ||
+      (alias.isNotEmpty && citesDecisionToken(cited, alias));
+}
+
+/// The UTF-8 size of [entries] rendered as the projection renders them — the
+/// floor a named decision set costs in an `explore-decision` prompt.
+///
+/// A FLOOR, deliberately: the surface envelopes, the relation lines and the
+/// bead's own fields ride on top of it, so a set that already fails here can
+/// never fit, and one that passes is still checked against the assembled
+/// prompt ([DiscoveryLensCapability.assembleLensPrompt]).
+int _renderedDecisionRecordBytes(Iterable<DecisionEntryEvidence> entries) {
+  final b = StringBuffer();
+  for (final entry in entries) {
+    _renderEvidence(b, entry.identity, entry.body);
+  }
+  return utf8.encode(b.toString()).length;
 }
 
 /// Renders ONE bounded record with everything a lens needs to tell an empty
@@ -3366,7 +3532,7 @@ DecisionIndexSource commandDecisionIndexSource(
 const Set<int> _acceptedDecisionIndexSpecs = {1, 2};
 
 /// ONE validated `decisions index` record, before its body is read off disk —
-/// the shape name-first selection ranks, and the only place the producer's raw
+/// the shape name-first selection reads, and the only place the producer's raw
 /// map is carried past validation.
 class _IndexedDecision {
   const _IndexedDecision({
@@ -3476,6 +3642,13 @@ List<_DecisionRequest> _explicitDecisionRequests(
 
 /// Whether [cited] NAMES [candidate] — by slug, by canonical identity, or by
 /// the slug's legacy id.
+///
+/// One matcher, two readers: the gather SELECTS its named set here and the
+/// projection GROUPS the cited bodies with the same [citesDecisionToken] rule
+/// ([_isProjectedDecisionNamed]), so neither can read a citation the other
+/// does not. MEMBERSHIP is the whole answer — neither reader can recover WHERE
+/// the bead wrote a token, which is what keeps the rendered order the
+/// register's.
 bool _isNamedDecision(_IndexedDecision candidate, String cited) =>
     citesDecisionToken(cited, candidate.slug.toLowerCase()) ||
     citesDecisionToken(cited, candidate.identity.toLowerCase()) ||
@@ -3791,6 +3964,7 @@ Future<DecisionSurfaceEvidence> _decisionLookup({
       '${[...selected, ...elsewhere].map((entry) => entry.identity).join(', ')}',
     );
   }
+  final named = selected.length;
   selected.addAll(
     fill.take(
       kMaxDecisionEntriesPerSurface - selected.length - elsewhere.length,
@@ -3810,6 +3984,26 @@ Future<DecisionSurfaceEvidence> _decisionLookup({
       if (entry == null) return failed(resolved.error);
       into.add(entry);
     }
+  }
+  // GUARD (the named invariant: a clip never drops an entry the bead CITED).
+  // The second bound on the named set, and the one the count bound above
+  // cannot see: 96 entries at [kMaxDiscoverySnippetChars] render ~384 KiB
+  // against a 256 KiB prompt cap, so a named set can satisfy the COUNT and
+  // still be unassemblable. It fails LOUD with the identities here, before a
+  // single entry is banked, rather than letting the prompt clip decide which
+  // citation the lens never sees.
+  final citedRecords = <String, DecisionEntryEvidence>{
+    for (final entry in [...entries.take(named), ...notes])
+      entry.body.id: entry,
+  };
+  final citedBytes = _renderedDecisionRecordBytes(citedRecords.values);
+  if (citedBytes > kMaxDecisionLensPromptBytes) {
+    return failed(
+      'named decision set exceeds '
+      'kMaxDecisionLensPromptBytes=$kMaxDecisionLensPromptBytes bytes — its '
+      '${citedRecords.length} cited records render to $citedBytes bytes: '
+      '${citedRecords.values.map((entry) => entry.identity).join(', ')}',
+    );
   }
   // Published into the gather-level index ONLY once this surface ANSWERED: a
   // record that failed carries no reference, so an entry banked for it would
@@ -4692,6 +4886,22 @@ class DiscoveryLensCapability extends ProcessCapability {
   /// workspace-derived ABSOLUTE write path (gate-integrity #4 — cwd-invariant),
   /// and the file-write instruction LAST (recency). What differs is the JOB: it
   /// gathers, it cites, and it decides nothing.
+  ///
+  /// THROWS [StateError] when [assembleLensPrompt] refuses: a prompt whose
+  /// REQUIRED evidence did not fit is not a degraded prompt, it is a lens
+  /// asked to judge a bead without the decision that bead cited.
+  ///
+  /// Unaffected by that refusal:
+  /// `power_station#discovery-lens-reports-carry-the-round-and-the-wipe-sweeps`,
+  /// which names this method among the symbols it governs. Its mechanism is
+  /// the FRESHNESS half — "A lens report carries BOTH stamps and one fence
+  /// reads them: `_freshLensReport` refuses a foreign `nodePath` (A4) or a
+  /// non-current `round` (A15(5) alt-A)" — and both stamps are still written
+  /// into every prompt this method returns, still in the RESERVED tail that
+  /// no clip may touch. A refusal emits no prompt at all, so it produces no
+  /// report for that fence to read and cannot hand it a mis-stamped one;
+  /// `sweepStaleDiscovery` and the route's late-lane join are untouched.
+  /// Nothing here is a departure from that decision.
   String buildLensPrompt({
     required String lens,
     required String sessionId,
@@ -4699,14 +4909,22 @@ class DiscoveryLensCapability extends ProcessCapability {
     required int round,
     required String workspaceDir,
     required DiscoveryEvidenceProjection projection,
-  }) => assembleLensPrompt(
-    lens: lens,
-    sessionId: sessionId,
-    nodePath: nodePath,
-    round: round,
-    workspaceDir: workspaceDir,
-    projection: projection,
-  ).prompt;
+  }) {
+    final assembly = assembleLensPrompt(
+      lens: lens,
+      sessionId: sessionId,
+      nodePath: nodePath,
+      round: round,
+      workspaceDir: workspaceDir,
+      projection: projection,
+    );
+    // GUARD (the named invariant: a lens never reads a bundle that dropped a
+    // decision the bead CITED).
+    if (assembly.isFailed) {
+      throw StateError('discovery/$lens: ${assembly.error}');
+    }
+    return assembly.prompt;
+  }
 
   /// The lens's prompt AND whether its evidence was clipped to fit.
   ///
@@ -4893,8 +5111,12 @@ class DiscoveryLensCapability extends ProcessCapability {
     }
 
     // The marker rides its OWN two newlines, so the reserve has to cover both.
-    const marker = kDecisionLensEvidenceOmissionMarker;
-    final markerBytes = utf8.encode(marker).length + 2;
+    // It is sized at its WIDEST rendering — every declared fill record
+    // withheld — because the reserve is paid for before the clip knows how
+    // many of them it will actually drop.
+    final fillEnds = projection.fillRecordEndBytes;
+    final markerBytes =
+        utf8.encode(_decisionLensOmissionMarker(fillEnds.length)).length + 2;
     if (markerBytes > kDecisionLensPromptOmissionReserveBytes) {
       throw StateError(
         'discovery/$kDecisionLens: the omission marker is $markerBytes bytes '
@@ -4928,8 +5150,55 @@ class DiscoveryLensCapability extends ProcessCapability {
       evidence,
       ceilingBytes: available,
     );
+    // `clampAtLineBoundary` keeps whole lines and JOINS them, so the kept text
+    // is one newline short of the boundary past its last kept record: a record
+    // ending at `end` survived exactly when `end <= kept + 1`.
+    final kept = utf8.encode(clipped).length;
+    bool survived(int end) => end <= kept + 1;
+    // GUARD (the named invariant: a clip never drops an entry the bead CITED).
+    // The required region is every surface record plus every cited entry. If
+    // the fixed scaffold leaves no room for it there is no prompt to give —
+    // clipping into a citation is the silent tail drop this bead exists to
+    // retire, and the SAME shape the gather refuses with.
+    if (!survived(projection.citedEvidenceBytes)) {
+      final identities = projection.citedDecisionIdentities;
+      return DiscoveryLensPromptAssembly(
+        prompt: '',
+        evidenceTruncated: false,
+        error:
+            'named decision set exceeds '
+            'kMaxDecisionLensPromptBytes=$kMaxDecisionLensPromptBytes bytes — '
+            'the required evidence ends at byte '
+            '${projection.citedEvidenceBytes} and only $available bytes '
+            'survive the fixed prompt scaffold: '
+            '${identities.isEmpty ? '<no cited entry — the bead fields and surface records alone exceed it>' : identities.join(', ')}',
+      );
+    }
+    final omitted = fillEnds.where((end) => !survived(end)).length;
+    final marker = _decisionLensOmissionMarker(omitted);
+    if (fillEnds.isEmpty) {
+      return DiscoveryLensPromptAssembly(
+        prompt: '$prefix$clipped\n$marker\n$suffix',
+        evidenceTruncated: true,
+      );
+    }
+    // SNAP back from the line boundary to the last whole FILL record. A line
+    // is the budget's boundary, but it is not a RECORD's: stopping mid-body
+    // leaves the lens a decision entry it cannot quote and makes the marker's
+    // count a half-truth. The floor is the required region, which `survived`
+    // has already proved fits.
+    var lastWholeRecord = projection.citedEvidenceBytes;
+    for (final end in fillEnds) {
+      if (survived(end) && end > lastWholeRecord) lastWholeRecord = end;
+    }
     return DiscoveryLensPromptAssembly(
-      prompt: '$prefix$clipped\n$marker\n$suffix',
+      // Every boundary is a record END — just past a newline — so slicing the
+      // UTF-8 there can never split a rune, and the text already ends in the
+      // newline the marker needs.
+      prompt:
+          '$prefix'
+          '${utf8.decode(utf8.encode(evidence).sublist(0, lastWholeRecord))}'
+          '$marker\n$suffix',
       evidenceTruncated: true,
     );
   }
@@ -4946,13 +5215,26 @@ class DiscoveryLensPromptAssembly {
   const DiscoveryLensPromptAssembly({
     required this.prompt,
     required this.evidenceTruncated,
+    this.error = '',
   });
 
-  /// The assembled prompt.
+  /// The assembled prompt. EMPTY on a failed assembly — there is no degraded
+  /// prompt to fall back to, because the thing that did not fit is the
+  /// evidence the lens is being asked to judge on.
   final String prompt;
 
-  /// Whether trailing evidence records were omitted to fit the cap.
+  /// Whether droppable FILL evidence was omitted to fit the cap. Never true
+  /// for a failed assembly: a refusal is not a clip.
   final bool evidenceTruncated;
+
+  /// Why no prompt could be assembled, or `''`. A clipped bundle is a bounded
+  /// answer; a bundle whose REQUIRED evidence does not fit is not an answer at
+  /// all, and [DiscoveryLensCapability.buildLensPrompt] throws on it so no
+  /// lens spawns on a prompt that dropped a citation.
+  final String error;
+
+  /// Whether the assembly refused.
+  bool get isFailed => error.isNotEmpty;
 }
 
 /// The per-lens angle — the ONE thing that differs between the three lanes.
