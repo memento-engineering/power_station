@@ -22,7 +22,8 @@ register:
     - "discovery-evidence-is-gathered-once-and-projected"
     - "the-dependencies-row-is-a-projection-of-bd-dependency-rows"
   obsoleted-by: null
-  updated-by: []
+  updated-by:
+    - the-content-row-refuses-the-nul-byte-and-nothing-else
   bead: pow-v4xh
   legacy-id: null
 ---
