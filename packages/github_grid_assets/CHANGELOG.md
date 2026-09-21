@@ -1,3 +1,14 @@
+## Unreleased
+
+- Fixed: workflow-run intake auto-approval binds the SAME live filing evidence the `approve` verb
+  binds. `GitHubReconcilerBindingAssets` now hands its `ApproveService` the seat's own
+  `SubstationScope`, its ambient `GridRoot` path and a new nullable `decisionInvocation` — the
+  composing station's configured verb, threaded from `SubstationSeed.assetRenderArguments['runner']`
+  and never defaulted to a literal executable. Without it the ten-row preflight had no owning scope
+  and no index to ask, so every decision-citing bead the reconciler filed was refused on evidence
+  nobody had gathered. `attachedScopes` stays empty: this path receives no station roster, and its
+  approval runner serves the owning work-store root alone.
+
 ## 0.2.0-dev.3
 
 > Note: This release has breaking changes.

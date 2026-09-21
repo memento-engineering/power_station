@@ -5,8 +5,10 @@ import 'package:args/command_runner.dart';
 import 'package:beads_dart/beads_dart.dart';
 import 'package:grid_engine/grid_engine.dart';
 import 'package:grid_runtime/grid_runtime.dart';
+import 'package:grid_sdk/grid_sdk.dart' as sdk;
 import 'package:path/path.dart' as p;
 
+import '../code/landing.dart' show ShellRunner, SystemShellRunner;
 import '../search/station_search.dart';
 import 'approval_stamp.dart';
 import 'approve_command.dart';
@@ -958,14 +960,45 @@ final class UnparkFailed extends UnparkOutcome {
 /// the bead silently never mints, so the clear rides `bd undefer` — which
 /// resets status AND date together. And the re-stamp is [ApproveService] ITSELF,
 /// never a second expression of the filing preflight: one contract, answered
-/// one way (`power_station#filing-and-approve-share-one-state-root-seam`).
+/// one way — the rows, the roster resolution and the six viability checks
+/// alike (`the-dependencies-row-is-a-projection-of-bd-dependency-rows`).
 final class UnparkService {
   /// Creates the service over the approval verb and the store seam.
+  ///
+  /// With no [approve] supplied this constructs exactly ONE [ApproveService]
+  /// and hands it every evidence collaborator it was given, so the preflight
+  /// unpark runs is the same LIVE one `filing` and `approve` run. Forwarding
+  /// nothing is not a neutral default: the six viability rows are fail-closed,
+  /// so an [ApproveService] built with no scope, probe or decision index would
+  /// refuse every bead that cites a decision with *"restore complete evidence
+  /// and rerun"* — a bead the operator is unparking precisely because it is
+  /// ready.
+  ///
+  /// A supplied [approve] is authoritative and is reused UNCHANGED; a station
+  /// that already composed the approval verb is never second-guessed here.
   UnparkService({
     ApproveService? approve,
     BdRunner Function(String storeRoot) runnerFor = _processRunnerFor,
     ExactSubstationBeadSource? source,
-  }) : approve = approve ?? ApproveService(runnerFor: runnerFor),
+    sdk.SubstationScope? owningScope,
+    List<sdk.SubstationScope> attachedScopes = const [],
+    ValidationPlanProbe validationPlanProbe = const SystemValidationPlanProbe(),
+    ShellRunner decisionShell = const SystemShellRunner(),
+    String? decisionInvocation,
+    String? decisionGridHome,
+    FilingEvidenceSource? evidence,
+  }) : approve =
+           approve ??
+           ApproveService(
+             runnerFor: runnerFor,
+             owningScope: owningScope,
+             attachedScopes: attachedScopes,
+             validationPlanProbe: validationPlanProbe,
+             decisionShell: decisionShell,
+             decisionInvocation: decisionInvocation,
+             decisionGridHome: decisionGridHome,
+             evidence: evidence,
+           ),
        _runnerFor = runnerFor,
        _source = source ?? ExactSubstationBeadSource(runnerFor: runnerFor);
 
@@ -1041,13 +1074,37 @@ class UnparkCommand extends Command<int> {
   /// store and re-runs the approval preflight over that same store's bd rows.
   /// `park` keeps the option — it is the half that closes the SESSION bead in
   /// the grid home's state store.
+  ///
+  /// The evidence collaborators are the same values [FilingCommand] and
+  /// [ApproveCommand] take, and they are forwarded through [UnparkService] to
+  /// the one [ApproveService] it composes. A station that injects [service]
+  /// owns the composition instead.
   UnparkCommand({
     UnparkService? service,
     String Function(String workBeadId) workStoreRoot = _currentDirectory,
     Set<String>? Function() armedSubstations = noArmedSubstations,
+    BdRunner Function(String storeRoot) runnerFor = _processRunnerFor,
+    sdk.SubstationScope? owningScope,
+    List<sdk.SubstationScope> attachedScopes = const [],
+    ValidationPlanProbe validationPlanProbe = const SystemValidationPlanProbe(),
+    ShellRunner decisionShell = const SystemShellRunner(),
+    String? decisionInvocation,
+    String? decisionGridHome,
+    FilingEvidenceSource? evidence,
     StringSink? out,
     StringSink? err,
-  }) : _service = service ?? UnparkService(),
+  }) : _service =
+           service ??
+           UnparkService(
+             runnerFor: runnerFor,
+             owningScope: owningScope,
+             attachedScopes: attachedScopes,
+             validationPlanProbe: validationPlanProbe,
+             decisionShell: decisionShell,
+             decisionInvocation: decisionInvocation,
+             decisionGridHome: decisionGridHome,
+             evidence: evidence,
+           ),
        _workStoreRoot = workStoreRoot,
        _armedSubstations = armedSubstations,
        _out = out ?? stdout,

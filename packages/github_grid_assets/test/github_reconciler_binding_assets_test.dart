@@ -563,15 +563,21 @@ Seed _boundTree({
 
 void main() {
   test('the sink self-approves the seat\'s OWN workflow failure', () async {
+    // A REAL work root: the default approval composition binds a live parse
+    // probe, and that probe runs `sh -n -c` with the store root as its cwd — a
+    // fictional root fails the PROBE rather than the plan, which would grade
+    // the harness instead of the bead.
+    final root = Directory.systemTemp.createTempSync('seat-work');
+    addTearDown(() => root.deleteSync(recursive: true));
     final runner = _BdRunner(filed: _filedBug);
     GitHubEventSink? sink;
     final owner = TreeOwner();
     addTearDown(owner.dispose);
     owner.mountRoot(
       _boundTree(
-        scope: const sdk.SubstationScope(
+        scope: sdk.SubstationScope(
           name: 'seat',
-          root: '/work/seat',
+          root: root.path,
           prefix: 'pow',
         ),
         config: _config(

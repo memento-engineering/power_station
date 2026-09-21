@@ -5,6 +5,8 @@ import 'package:beads_dart/beads_dart.dart';
 import 'package:grid_assets/grid_assets.dart';
 import 'package:test/test.dart';
 
+import 'filing_evidence_fakes.dart';
+
 /// The filing verb's SEAMS: one store, one roster, and no prose.
 ///
 /// Scripted rather than real-bd, because what is asserted here is the argv the
@@ -80,6 +82,12 @@ _harness(_ScriptedBdRunner bd, {Set<String>? armed}) {
                 return bd;
               },
             ),
+            // The viability rows are NOT what these fences measure, and a live
+            // gather would spawn a shell and a second store read into an argv
+            // assertion about the dependency projection. Complete fake
+            // evidence keeps every viability row passing and silent, so a
+            // failure here is the seam under test.
+            evidence: FakeFilingEvidenceSource(completeEmptyEvidence),
           ),
           storeRoot: () => '/work/power_station',
           armedSubstations: () => armed,

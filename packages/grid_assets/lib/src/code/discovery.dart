@@ -94,6 +94,7 @@ import '../agent/seat_environments.dart';
 import '../agent/site_binding.dart';
 import '../agent/typed_environment.dart';
 import '../agent/usage_report.dart';
+import '../filing/filing_text.dart';
 import '../search/station_search.dart';
 import 'committee.dart';
 import 'decision_register.dart';
@@ -137,9 +138,6 @@ const int kMaxRegatherRounds = 1;
 /// The bound on the deterministic prior-art pull — each query is one read-only
 /// pass over every attached store.
 const int kMaxPriorArtQueries = 3;
-
-/// The bound on the anchors pulled out of one bead.
-const int kMaxAnchors = 12;
 
 /// The bound on a resolved anchor's SURROUNDING PATTERN (its directory's other
 /// files) — enough to show the architect what the neighborhood looks like.
@@ -2891,7 +2889,7 @@ typedef HistorySource =
 /// [EvidenceState.complete]; only a window that still overflows is clipped. An
 /// UNQUALIFIED anchor carries the whole file and keeps the head clip.
 ResolvedAnchor resolveAnchorOnDisk(String workspaceDir, String anchor) {
-  final cited = _parseCodeAnchor(anchor);
+  final cited = parseCodeAnchor(anchor);
   final path = p.join(workspaceDir, cited.path);
   final file = File(path);
   if (!file.existsSync()) {
@@ -2947,25 +2945,6 @@ ResolvedAnchor resolveAnchorOnDisk(String workspaceDir, String anchor) {
 /// neighbours that give it meaning, narrow enough that the bound is not spent
 /// before the cited line arrives.
 const int _kCodeAnchorWindowRadius = 60;
-
-/// The PATH half and the CITED LINE of one code anchor — `lib/src/x.dart:222`
-/// answers both; an anchor with no `:NNN` qualifier answers itself and null.
-///
-/// The qualifier is stripped for every PHYSICAL use (the filesystem read, the
-/// neighbour comparison, the `git log` pathspec) and kept everywhere the anchor
-/// is QUOTED, so a lens is always told WHICH site the bead named. A qualifier
-/// no [int] can hold is not a line: the token stays whole and resolves as the
-/// stale path it is, rather than silently becoming an unqualified anchor.
-({String path, int? line}) _parseCodeAnchor(String anchor) {
-  final qualifier = _pathAnchor.firstMatch(anchor)?.group(1);
-  if (qualifier == null) return (path: anchor, line: null);
-  final line = int.tryParse(qualifier);
-  if (line == null) return (path: anchor, line: null);
-  return (
-    path: anchor.substring(0, anchor.length - qualifier.length - 1),
-    line: line,
-  );
-}
 
 /// [text] as the WINDOW around [line] — [_kCodeAnchorWindowRadius] lines each
 /// side, clamped to the file, headed by the exact range it covers so the
@@ -3415,16 +3394,18 @@ class _IndexedDecision {
   /// The legacy `A<n>` / `ADR-<nnnn>` id this slug carries, or `''`. Promoting
   /// an ADR-0000 amendment into the register keeps its id as the slug's leading
   /// segment, and a bead goes on citing the ID long after the slug exists.
-  String get alias => _legacyDecisionAlias(slug);
+  String get alias => legacyDecisionAlias(slug);
 }
 
 /// ONE decision the bead cites EXPLICITLY — a canonical `<register>#<slug>`
 /// under a register the gathered index CONTAINS, or an `ADR-<nnnn>` id.
 ///
 /// A bare slug is only ever matched against what the index RETURNED (nothing
-/// can be concluded from hyphenated prose), but an explicit citation the index
+/// can be concluded from hyphenated prose), but a CANONICAL citation the index
 /// cannot answer is a defect in the bead's own citations, and it fails loud
-/// naming the citation rather than hiding inside a clip receipt.
+/// naming the citation rather than hiding inside a clip receipt. A LEGACY id
+/// nothing answers is REPORTED instead ([unresolvedReport]) — see
+/// [_decisionLookup] for why holding on one is a hold nothing can clear.
 ///
 /// A bare legacy `A<n>` token is NEVER one of these. Organic bead prose writes
 /// `A1`/`A2` as OPTION LABELS, so failing a surface on the absence of one
@@ -3432,41 +3413,36 @@ class _IndexedDecision {
 /// still ORDERS a returned entry ([_isNamedDecision]); it only never fails on
 /// absence.
 ///
-/// Each request carries the [citation] it was READ from — the field and the
-/// prose around the token — so a request nobody can answer is reported with
-/// its own provenance instead of a bare name an operator must go re-find.
+/// Each request carries the [reference] it was READ from — the field, the
+/// exact token and the prose around it — so a request nobody can answer is
+/// reported with its own provenance instead of a bare name an operator must
+/// go re-find.
 class _DecisionRequest {
-  const _DecisionRequest.canonical(String identity, this.citation)
-    : _identity = identity,
-      _alias = '';
+  const _DecisionRequest(this.reference);
 
-  const _DecisionRequest.legacy(String alias, this.citation)
-    : _identity = '',
-      _alias = alias;
+  /// The CITATION this request was read from — its field, its exact text and
+  /// the prose around it — so a request nobody can answer is reported with its
+  /// own provenance rather than as a bare name an operator must go re-find.
+  final DecisionReference reference;
 
-  final String _identity;
-  final String _alias;
-
-  /// WHERE this citation was read: the bead field, and the source text around
-  /// the token, verbatim.
-  final BeadFieldCitation citation;
+  String get _identity => reference.identity;
+  String get _alias => reference.alias;
 
   /// Whether this request is a LEGACY id rather than a canonical
   /// `<register>#<slug>`.
   ///
   /// The two shapes answer differently when NOTHING resolves them: a canonical
   /// token under an indexed register is unambiguous authorship of a citation
-  /// and still fails the surface, while a legacy id is only ever a `ADR-<nnnn>`
-  /// token in prose — including the register's OWN file name — and is reported.
-  bool get isLegacy => _identity.isEmpty;
+  /// and still fails the surface, while a legacy id is only ever an
+  /// `ADR-<nnnn>` token in prose — the register's OWN log file among them — and
+  /// is REPORTED.
+  bool get isLegacy => !reference.isCanonical;
 
   /// What the failure reason CALLS this citation.
-  String get label => _identity.isEmpty ? _alias : _identity.split('#').last;
+  String get label => reference.label;
 
   /// The non-failing report a legacy request nothing answered leaves behind.
-  String get unresolvedReport =>
-      'unresolved legacy decision citation $_alias reported from '
-      '${citation.field.wire}: “${citation.excerpt}”';
+  String get unresolvedReport => reference.unresolvedReport;
 
   /// Whether [candidate] is the entry this citation asked for.
   bool isAnsweredBy(_IndexedDecision candidate) => _identity.isEmpty
@@ -3474,82 +3450,9 @@ class _DecisionRequest {
       : candidate.identity.toLowerCase() == _identity;
 }
 
-/// A canonical `<register>#<slug>` citation. The slug half must be HYPHENATED
-/// and start with a letter — what every authored slug looks like, and what
-/// keeps prose such as `pr#256` out of the explicit set, where a false citation
-/// would fail a surface that is perfectly answerable.
-///
-/// Matched CASE-INSENSITIVELY over the field's own text rather than over a
-/// lowercased copy: an excerpt is only quotable when the match offsets index
-/// the SOURCE, and lowercasing is not length-preserving for every code point.
-final RegExp _canonicalDecisionCitation = RegExp(
-  r'(?<![a-z0-9_#-])([a-z0-9_]+)#([a-z][a-z0-9]*(?:-[a-z0-9]+)+)(?![a-z0-9_-])',
-  caseSensitive: false,
-);
-
-/// An ADR id (`ADR-0008`) — the one NON-canonical shape explicit enough to
-/// resolve a legacy entry by. A bare `A<n>` is deliberately out (see
-/// [_DecisionRequest]), and an id nothing answers is REPORTED, never failed:
-/// the register's own file name is spelled `ADR-0000`, and no register can
-/// ever hold an entry for the log its amendments live in.
-///
-/// Case-insensitive over source text, for the reason
-/// [_canonicalDecisionCitation] states.
-final RegExp _explicitAdrCitation = RegExp(
-  r'(?<![a-z0-9_#-])(adr-\d{4})(?![a-z0-9_-])',
-  caseSensitive: false,
-);
-
-/// The leading legacy id of [slug], or `''` when it carries none.
-String _legacyDecisionAlias(String slug) =>
-    RegExp(
-      r'^(a\d+|adr-\d{4})(?:-|$)',
-    ).firstMatch(slug.toLowerCase())?.group(1) ??
-    '';
-
-/// The bead fields a decision citation is READ from, in the order a request
-/// list reports them.
-///
-/// Title and acceptance criteria are deliberately OUT: a title is a summary
-/// whose words cite nothing, and acceptance criteria are the bead's own exit
-/// tests, so admitting either would pad the named set with prose that names no
-/// decision at all.
-///
-/// NOTES are out for a stronger reason: they are the operator's RECEIPT
-/// channel. A governor writing "reverted the ADR-0000 amendment" or quoting a
-/// hold reason into a note is recording history, not citing a decision, and
-/// every such receipt used to re-poison the very bead it explained (measured on
-/// lunar 2026-09-13/14: five beads held, seven rounds burned). Notes still
-/// reach every lens WHOLE through [boundedBeadFields]; they simply make no
-/// requests. A citation genuinely meant is restated in description or design.
-const List<BeadCitationField> _decisionCitationFields = [
-  BeadCitationField.description,
-  BeadCitationField.design,
-];
-
-/// The bead prose a decision citation can live in ([_decisionCitationFields]),
-/// lowercased so every match is case-insensitive.
-String _decisionCitationText(Bead bead) => [
-  for (final field in _decisionCitationFields) beadFieldValue(bead, field),
-].join('\n').toLowerCase();
-
-/// How much SOURCE text either side of a cited token a report quotes.
-const int _decisionCitationExcerptContextChars = 80;
-
-/// [match]'s own text plus at most [_decisionCitationExcerptContextChars]
-/// characters of [text] either side of it, VERBATIM — never normalized, so an
-/// operator can find the quotation in the bead by searching for it.
-String _decisionCitationExcerpt(String text, Match match) {
-  final from = match.start - _decisionCitationExcerptContextChars;
-  final to = match.end + _decisionCitationExcerptContextChars;
-  return text.substring(
-    from < 0 ? 0 : from,
-    to > text.length ? text.length : to,
-  );
-}
-
-/// Every decision [bead] cites EXPLICITLY, deduplicated, in first-appearance
-/// order — description before design, and by match offset inside each field.
+/// Every decision [workBead] names EXPLICITLY, deduplicated, in
+/// first-appearance order — the shared scanner ([decisionReferences]) typed
+/// into this consumer's request shape.
 ///
 /// A canonical token counts only when [originRegisters] — the registers this
 /// index run actually ANSWERED with — holds its register half. `id#some-value`
@@ -3561,84 +3464,22 @@ String _decisionCitationExcerpt(String text, Match match) {
 /// difference between a report an operator can act on and a name they have to
 /// hunt for.
 List<_DecisionRequest> _explicitDecisionRequests(
-  Bead bead, {
+  Bead workBead, {
   required Set<String> originRegisters,
-}) {
-  final found = <(String, _DecisionRequest)>[];
-  for (final field in _decisionCitationFields) {
-    final text = beadFieldValue(bead, field);
-    BeadFieldCitation read(Match match) => BeadFieldCitation(
-      beadId: bead.id,
-      field: field,
-      excerpt: _decisionCitationExcerpt(text, match),
-    );
-    final inField = <(int, String, _DecisionRequest)>[];
-    for (final match in _canonicalDecisionCitation.allMatches(text)) {
-      if (!originRegisters.contains(match.group(1)!.toLowerCase())) continue;
-      final identity = match.group(0)!.toLowerCase();
-      inField.add((
-        match.start,
-        identity,
-        _DecisionRequest.canonical(identity, read(match)),
-      ));
-    }
-    for (final match in _explicitAdrCitation.allMatches(text)) {
-      final alias = match.group(0)!.toLowerCase();
-      inField.add((
-        match.start,
-        alias,
-        _DecisionRequest.legacy(alias, read(match)),
-      ));
-    }
-    inField.sort((a, b) => a.$1.compareTo(b.$1));
-    for (final (_, key, request) in inField) {
-      found.add((key, request));
-    }
-  }
-  final seen = <String>{};
-  return [
-    for (final (key, request) in found)
-      if (seen.add(key)) request,
-  ];
-}
+}) => [
+  for (final reference in decisionReferences(
+    workBead,
+    knownRegisters: originRegisters,
+  ))
+    _DecisionRequest(reference),
+];
 
 /// Whether [cited] NAMES [candidate] — by slug, by canonical identity, or by
 /// the slug's legacy id.
 bool _isNamedDecision(_IndexedDecision candidate, String cited) =>
-    _citesToken(cited, candidate.slug.toLowerCase()) ||
-    _citesToken(cited, candidate.identity.toLowerCase()) ||
-    (candidate.alias.isNotEmpty && _citesToken(cited, candidate.alias));
-
-/// Whether [needle] occurs in [haystack] as a WHOLE token — never as the head
-/// or the tail of a longer one, so `A2` can never claim the entry a bead cited
-/// as `A25`.
-///
-/// `-` and `_` count as token characters precisely BECAUSE a slug is
-/// hyphenated: without them `a21-bead-pow` would claim a hit inside
-/// `a21-bead-pow-96y-…`. [haystack] is already lowercased, so only lowercase
-/// letters need to continue a token.
-bool _citesToken(String haystack, String needle) {
-  if (needle.isEmpty) return false;
-  for (
-    var at = haystack.indexOf(needle);
-    at >= 0;
-    at = haystack.indexOf(needle, at + 1)
-  ) {
-    final before = at == 0 ? null : haystack.codeUnitAt(at - 1);
-    final end = at + needle.length;
-    final after = end == haystack.length ? null : haystack.codeUnitAt(end);
-    if (!_isTokenChar(before) && !_isTokenChar(after)) return true;
-  }
-  return false;
-}
-
-/// Whether [unit] CONTINUES a token (lowercase ASCII letter, digit, `-`, `_`).
-bool _isTokenChar(int? unit) =>
-    unit != null &&
-    ((unit >= 0x61 && unit <= 0x7a) ||
-        (unit >= 0x30 && unit <= 0x39) ||
-        unit == 0x2d ||
-        unit == 0x5f);
+    citesDecisionToken(cited, candidate.slug.toLowerCase()) ||
+    citesDecisionToken(cited, candidate.identity.toLowerCase()) ||
+    (candidate.alias.isNotEmpty && citesDecisionToken(cited, candidate.alias));
 
 /// ONE validated `decisions index` envelope — every record it answered, in
 /// index order, or the loud reason the answer is unreadable.
@@ -3730,8 +3571,9 @@ _DecisionIndexAnswer _readDecisionIndex(String output) {
 /// batch, and only when a citation needs it ([_needsRegisterWideLookup]).
 typedef _RegisterWideDecisions = Future<_DecisionIndexAnswer> Function();
 
-/// Whether resolving [cited] needs the REGISTER-WIDE answer as well as this
-/// surface's.
+/// Whether resolving [workBead]'s citations needs the REGISTER-WIDE answer as
+/// well as this
+/// surface's own.
 ///
 /// Two shapes need it, and nothing else does — a bead that cites nothing never
 /// costs a second lookup:
@@ -3742,7 +3584,6 @@ typedef _RegisterWideDecisions = Future<_DecisionIndexAnswer> Function();
 ///    either, which only the unfiltered answer can say).
 bool _needsRegisterWideLookup(
   Bead workBead, {
-  required String cited,
   required List<_IndexedDecision> indexed,
   required Set<String> onSurface,
 }) {
@@ -3752,10 +3593,9 @@ bool _needsRegisterWideLookup(
   )) {
     if (!indexed.any(request.isAnsweredBy)) return true;
   }
-  for (final match in _canonicalDecisionCitation.allMatches(cited)) {
-    if (!onSurface.contains(match.group(1)!.toLowerCase())) return true;
-  }
-  return false;
+  return citedDecisionRegisters(
+    workBead,
+  ).any((register) => !onSurface.contains(register));
 }
 
 /// Resolves ONE selected index record to its entry file and bounded body — or
@@ -3858,14 +3698,16 @@ bool _needsRegisterWideLookup(
 /// REGISTER — the second is a defect in the bead's own citations, which
 /// TRUNCATED would have disguised as a clip nobody can act on.
 ///
-/// A LEGACY id nothing answers is the third shape, and it is REPORTED instead:
+/// A LEGACY id nothing answers is the third shape, and it is REPORTED instead
+/// (`power_station#notes-are-receipts-and-a-phantom-legacy-token-is-reported-not-failed`).
 /// `ADR-0000` names the register FILE, whose amendments are indexed as `A<n>`
 /// entries while the log itself is no entry at all, so the request can never be
-/// satisfied and a failure over it holds the round forever (resolving the hold
-/// re-runs this gather over the same prose). The report names the field it was
-/// read from and quotes the prose around the token
+/// satisfied and a failure over it holds the round FOREVER — resolving the hold
+/// re-runs this gather over the same prose. The report names the field the
+/// token was read from and quotes the prose around it
 /// ([_DecisionRequest.unresolvedReport]), so a genuinely MISSPELLED legacy id
-/// is still visible to the lens — in evidence it can act on, not behind a hold.
+/// stays visible to the lens, in evidence it can act on rather than behind a
+/// hold.
 Future<DecisionSurfaceEvidence> _decisionLookup({
   required String workspaceDir,
   required String surface,
@@ -3887,13 +3729,12 @@ Future<DecisionSurfaceEvidence> _decisionLookup({
   if (!answer.ok) return failed(answer.error);
   final indexed = answer.decisions;
 
-  final cited = _decisionCitationText(workBead);
+  final cited = decisionCitationText(workBead);
   final onSurface = answer.registers;
   var registers = onSurface;
   var union = const <_IndexedDecision>[];
   if (_needsRegisterWideLookup(
     workBead,
-    cited: cited,
     indexed: indexed,
     onSurface: onSurface,
   )) {
@@ -3917,6 +3758,9 @@ Future<DecisionSurfaceEvidence> _decisionLookup({
         if (request.isAnsweredBy(candidate)) candidate,
     ];
     if (matched.isEmpty) {
+      // The completed-negative answer SPLITS by citation shape: a canonical
+      // token is authorship nobody else could have written, a legacy id is a
+      // token in prose that may name no entry at all.
       if (request.isLegacy) {
         reports.add(request.unresolvedReport);
       } else {
@@ -3987,7 +3831,7 @@ Future<DecisionSurfaceEvidence> _decisionLookup({
 /// [commandDecisionIndexSource] lands on.
 ///
 /// [error] and [report] are the two things the record's ONE detail member can
-/// say, and they are mutually exclusive: an [error] is why this surface has no
+/// say, and they are mutually exclusive: an [error] is WHY this surface has no
 /// answer, a [report] rides an answer the surface DID give.
 DecisionSurfaceEvidence _decisionSurface({
   required String surface,
@@ -3999,10 +3843,10 @@ DecisionSurfaceEvidence _decisionSurface({
   String report = '',
 }) {
   // GUARD (the named invariant: a surface record's detail has ONE meaning).
-  // Both arrive on the same wire member, read by state: a record claiming a
+  // Both arrive on the same wire member, read by state, so a record claiming a
   // failure AND a report would publish one of them under the other's meaning —
-  // a report read as a failure is exactly the false hold this reports instead
-  // of failing.
+  // and a report read as a failure is exactly the false hold this reports
+  // instead of failing.
   if (error.isNotEmpty && report.isNotEmpty) {
     throw StateError(
       'a decision surface carries a failure OR a report, never both '
@@ -4033,7 +3877,7 @@ DecisionSurfaceEvidence _decisionSurface({
     // text of ONE decision can name it by canonical id and the route can hold
     // on THAT record. Folding a clipped body into the surface made every
     // register with one long doc unanswerable (pow-jidn). A REPORT never moves
-    // the state either — the surface answered.
+    // the state either — the surface ANSWERED.
     state: error.isNotEmpty
         ? EvidenceState.failed
         : (truncated ? EvidenceState.truncated : EvidenceState.complete),
@@ -4262,77 +4106,6 @@ Future<HistoryEvidence> gatherHistory(
     return _history(paths: paths, command: '', commits: const [], error: '$e');
   }
 }
-
-/// The PATH + SYMBOL anchors [bead] names — the round's ONLY tree-intake pass.
-/// Pure, deterministic (first-appearance order), bounded ([kMaxAnchors]), and
-/// exposed for unit tests.
-///
-/// A PATH is a known-extension repository-relative token, found either inside
-/// backticks OR as a plain path token in the prose (a bead that writes
-/// lib/src/x.dart without backticks names the same surface). It may carry the
-/// CITED LINE the bead named (`lib/src/x.dart:222`): the qualifier rides ON the
-/// anchor so [resolveAnchorOnDisk] can window the file at that site instead of
-/// clipping its head, and two sites in one file are two anchors. A SYMBOL is a
-/// BACKTICKED identifier carrying an inner capital (`buildSpecifyBrief`,
-/// `kSpecReviewCircuit`) or an initial one (`Heartbeat`) — which is what keeps
-/// ordinary backticked prose (`bd`, `main`, `haiku`) out of the set.
-///
-/// [pathsTruncated]/[symbolsTruncated] record a hit on [kMaxAnchors]: the bead
-/// names MORE surfaces than this profile carries, and a lens must be told that
-/// rather than shown a silently short list.
-({
-  List<String> paths,
-  List<String> symbols,
-  bool pathsTruncated,
-  bool symbolsTruncated,
-})
-beadAnchors(Bead bead) {
-  final text = [
-    bead.title,
-    bead.description,
-    bead.design,
-    bead.acceptanceCriteria,
-    bead.notes,
-  ].join('\n');
-  final paths = <String>{};
-  final symbols = <String>{};
-  for (final match in _anchorSpan.allMatches(text)) {
-    final backticked = match.group(1);
-    final span = (backticked ?? match.group(2)!).trim();
-    if (_isPathAnchor(span)) {
-      paths.add(span);
-    } else if (backticked != null && _isSymbolAnchor(span)) {
-      symbols.add(span);
-    }
-  }
-  return (
-    paths: paths.take(kMaxAnchors).toList(),
-    symbols: symbols.take(kMaxAnchors).toList(),
-    pathsTruncated: paths.length > kMaxAnchors,
-    symbolsTruncated: symbols.length > kMaxAnchors,
-  );
-}
-
-/// A backticked span (group 1) OR a bare repository-relative path token
-/// (group 2) — alternated in ONE scan so both sources keep first-appearance
-/// order and a backticked path is never re-matched as a bare one.
-final RegExp _anchorSpan = RegExp(
-  r'`([^`\n]+)`|([\w./-]+\.(?:dart|md|yaml|yml|json)(?::\d+)?)',
-);
-
-final RegExp _pathAnchor = RegExp(
-  r'^[\w./-]+\.(?:dart|md|yaml|yml|json)(?::(\d+))?$',
-);
-final RegExp _symbolChars = RegExp(r'^[A-Za-z][A-Za-z0-9_]*$');
-final RegExp _capital = RegExp('[A-Z]');
-
-bool _isPathAnchor(String span) =>
-    span.contains('/') && _pathAnchor.hasMatch(span);
-
-bool _isSymbolAnchor(String span) =>
-    _symbolChars.hasMatch(span) &&
-    span.length >= 4 &&
-    (_capital.hasMatch(span[0]) || _capital.hasMatch(span.substring(1)));
 
 /// The PRIOR-ART queries for [bead] — its SYMBOL anchors (a symbol is a
 /// high-signal substring query; a whole title is not), else its distinctive title
@@ -4644,7 +4417,7 @@ class AnchorsCapability extends ServiceCapability {
     final history = await gatherHistory(_history, workspaceDir, [
       ...{
         for (final anchor in resolved)
-          if (anchor.resolved) _parseCodeAnchor(anchor.anchor).path,
+          if (anchor.resolved) parseCodeAnchor(anchor.anchor).path,
       },
     ]);
     if (args.cancel.isCancelled) return const Failed('cancelled');

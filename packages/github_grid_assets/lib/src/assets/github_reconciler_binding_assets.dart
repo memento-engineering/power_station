@@ -50,6 +50,7 @@ class GitHubReconcilerBindingAssets extends SingleChildStatelessSeed {
     required this.runner,
     required this.trust,
     this.feedbackCommandSender,
+    this.decisionInvocation,
     this.stateRunnerFor = _processStateRunner,
     super.child,
     super.key,
@@ -69,6 +70,18 @@ class GitHubReconcilerBindingAssets extends SingleChildStatelessSeed {
   /// Null keeps the production [ResidentFeedbackCommandSender], which reaches
   /// the already-running station over the station lock's control endpoint.
   final FeedbackCommandSender? feedbackCommandSender;
+
+  /// The composing station's OWN verb invocation, as it configures it — the
+  /// `runner` render value, threaded here unchanged.
+  ///
+  /// It is what the approval preflight's decision index is EXECUTED with. There
+  /// is deliberately no literal fallback: a guessed executable would look up
+  /// decisions with a verb this station never runs, and an answer from the
+  /// wrong verb is worse than no answer. Null means the station configured
+  /// none, and a bead that CITES a decision is then refused on UNAVAILABLE
+  /// evidence naming the token and the source that did not answer — never
+  /// passed as though the register had been asked.
+  final String? decisionInvocation;
 
   /// Injectable `bd` runner factory for the GRID STATE store.
   ///
@@ -112,7 +125,24 @@ class GitHubReconcilerBindingAssets extends SingleChildStatelessSeed {
     );
     final store = BdGitHubIntakeStore(
       runner,
-      approvals: ApproveService(runnerFor: _approvalRunner(scope.root)),
+      // The DEFAULT approval composition, bound to the values this seat ALREADY
+      // subscribes to. Auto-approval runs the same ten-row preflight the
+      // `approve` verb runs, so a decision-citing bead filed from a workflow
+      // run is judged against live evidence instead of against an unasked
+      // index, which refuses every one of them.
+      //
+      // `attachedScopes` stays EMPTY on purpose: GitHub workflow-run intake
+      // receives no station roster
+      // (`power_station#the-dependencies-row-is-a-projection-of-bd-dependency-rows`),
+      // and `_approvalRunner` can serve only the owning work-store root.
+      // Synthesizing sibling scopes here would open a second `bd` channel onto
+      // stores this seat was never handed.
+      approvals: ApproveService(
+        runnerFor: _approvalRunner(scope.root),
+        owningScope: scope,
+        decisionInvocation: decisionInvocation,
+        decisionGridHome: gridRoot,
+      ),
       workRoot: scope.root,
     );
 

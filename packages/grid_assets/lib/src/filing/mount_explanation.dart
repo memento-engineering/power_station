@@ -23,11 +23,15 @@
 ///
 /// **COMPOSE, DO NOT REINVENT.** The field clauses are
 /// [mountEligibilityFindings] — the one predicate the engine's mount boundary
-/// already calls — and the first four rows RENDER the [FilingReport] the
-/// `filing` verb emits, which rides out whole under `filing`. The
-/// `dependencies` row is the very [DependencyProjection] that report was
-/// rendered from ([FilingService.inspect] hands both back together), refined
-/// with each local target's open/closed state. No second completeness
+/// already calls — and four of these rows RENDER clauses of the [FilingReport]
+/// the `filing` verb emits, which rides out WHOLE and unabridged as the
+/// embedded `filing` member: all TEN filing requirements, the four presence
+/// rows and the six viability rows alike. Mount owns ten preconditions of its
+/// own and renders only the four filing clauses it names; there is no eleventh
+/// mount predicate and no second filing evaluation. The `dependencies` row is
+/// the very [DependencyProjection] that report was rendered from
+/// ([FilingService.inspect] hands both back together), refined with each local
+/// target's open/closed state. No second completeness
 /// predicate is minted here
 /// (`power_station#approval-is-the-stamp-the-grid-approved-label-retires`), and
 /// bead PROSE is never read for blockers
@@ -78,13 +82,15 @@ import 'package:beads_dart/beads_dart.dart'
         ProcessBdRunner;
 import 'package:grid_engine/grid_engine.dart';
 import 'package:grid_runtime/grid_runtime.dart' show StationTrajectoryRecorder;
+import 'package:grid_sdk/grid_sdk.dart' as sdk;
 import 'package:path/path.dart' as p;
 
+import '../code/landing.dart' show ShellRunner, SystemShellRunner;
 import '../code/mount_eligibility.dart';
 import '../io/bounded_output.dart';
 import '../search/station_search.dart';
 import 'approval_stamp.dart';
-import 'filing_command.dart' show noArmedSubstations;
+import 'filing_command.dart' show defaultFilingService, noArmedSubstations;
 import 'filing_contract.dart';
 import 'state_root_option.dart';
 
@@ -439,11 +445,13 @@ final class _LinkedSessions {
 
 /// Pure evaluator for the ten-row mount explanation.
 ///
-/// It COMPOSES rather than re-derives: the retained [FilingReport] supplies the
-/// rendered detail of the first four rows, the retained [DependencyProjection]
-/// IS the `dependencies` row's content, and [mountEligibilityFindings] — called
-/// exactly once — supplies the mount-side classification of type, validation
-/// plan and approval. Nothing here evaluates filing again, and nothing here
+/// It COMPOSES rather than re-derives: the retained ten-row [FilingReport]
+/// supplies the rendered detail of the four clauses mount names — type,
+/// validation plan, acceptance and dependencies — while its six VIABILITY rows
+/// ride out whole on the embedded report without a mount row of their own. The
+/// retained [DependencyProjection] IS the `dependencies` row's content, and
+/// [mountEligibilityFindings] — called exactly once — supplies the mount-side
+/// classification of type, validation plan and approval. Nothing here evaluates filing again, and nothing here
 /// authors a second eligibility predicate.
 final class MountExplanationContract {
   /// Creates the stateless evaluator.
@@ -612,7 +620,7 @@ MountPreconditionRow _approvalRow(Bead bead, List<String> findings) {
     },
     remedy: refused
         ? 'approve --actor <actor> --json ${bead.id} — the verb re-runs the '
-              'four-row filing preflight and stamps only if it passes. '
+              'ten-row filing preflight and stamps only if it passes. '
               'APPROVAL STAYS HUMAN: it runs on an explicit per-bead ruling.'
         : '',
   );
@@ -1172,21 +1180,44 @@ String _readCommand(String root, List<String> argv) => [
 /// read, and the grid home's scoped session/step/attempt lists — then the pure
 /// contract and the pack's bound.
 final class MountExplanationService {
-  /// Creates the service over four injectable seams.
+  /// Creates the service over its injectable seams.
   ///
   /// [runnerFor] is the SAME per-store bd runner seam `ParkService` and
   /// `ShowService` take, so one Fake fences every spawn this verb makes.
-  /// [filing] defaults to a service built on that same seam, which is what
-  /// makes `mount` and `filing` answer one contract one way.
+  /// [filing] defaults to [defaultFilingService] over that same seam — the
+  /// very composition the `filing` and `approve` verbs bind, live viability
+  /// evidence included — which is what makes `mount` and `filing` answer one
+  /// contract one way.
+  ///
+  /// That default matters because the six viability rows are FAIL-CLOSED: a
+  /// filing service composed with no probe, no scope and no decision index
+  /// gathers nothing, and an embedded report would then refuse every
+  /// decision-citing bead with *"restore complete evidence and rerun"* — an
+  /// explanation about the explainer's own wiring rather than about the bead.
+  /// An injected [filing] is authoritative and is used unchanged.
   MountExplanationService({
     FilingService? filing,
     BdRunner Function(String storeRoot) runnerFor = _processRunnerFor,
     MountExplanationContract contract = const MountExplanationContract(),
     DateTime Function() now = _utcNow,
+    sdk.SubstationScope? owningScope,
+    List<sdk.SubstationScope> attachedScopes = const [],
+    ValidationPlanProbe validationPlanProbe = const SystemValidationPlanProbe(),
+    ShellRunner decisionShell = const SystemShellRunner(),
+    String? decisionInvocation,
+    String? decisionGridHome,
+    FilingEvidenceSource? evidence,
   }) : filing =
            filing ??
-           FilingService(
-             source: ExactSubstationBeadSource(runnerFor: runnerFor),
+           defaultFilingService(
+             runnerFor: runnerFor,
+             owningScope: owningScope,
+             attachedScopes: attachedScopes,
+             validationPlanProbe: validationPlanProbe,
+             decisionShell: decisionShell,
+             decisionInvocation: decisionInvocation,
+             decisionGridHome: decisionGridHome,
+             evidence: evidence,
            ),
        _runnerFor = runnerFor,
        _contract = contract,
@@ -1379,14 +1410,37 @@ class MountCommand extends Command<int> {
   /// [stateRoot] is the station-injected grid home; [armedSubstations] is the
   /// station-injected roster by NAME — the SAME seam `filing` and `approve`
   /// take, fail-closed by default ([noArmedSubstations]).
+  ///
+  /// The evidence collaborators are the same values [FilingCommand] and
+  /// [ApproveCommand] take, forwarded to the filing service this verb embeds.
+  /// A station that injects [service] owns the composition instead.
   MountCommand({
     MountExplanationService? service,
     String Function() storeRoot = _currentDirectory,
     String? Function() stateRoot = noStateRoot,
     Set<String>? Function() armedSubstations = noArmedSubstations,
+    BdRunner Function(String storeRoot) runnerFor = _processRunnerFor,
+    sdk.SubstationScope? owningScope,
+    List<sdk.SubstationScope> attachedScopes = const [],
+    ValidationPlanProbe validationPlanProbe = const SystemValidationPlanProbe(),
+    ShellRunner decisionShell = const SystemShellRunner(),
+    String? decisionInvocation,
+    String? decisionGridHome,
+    FilingEvidenceSource? evidence,
     StringSink? out,
     StringSink? err,
-  }) : _service = service ?? MountExplanationService(),
+  }) : _service =
+           service ??
+           MountExplanationService(
+             runnerFor: runnerFor,
+             owningScope: owningScope,
+             attachedScopes: attachedScopes,
+             validationPlanProbe: validationPlanProbe,
+             decisionShell: decisionShell,
+             decisionInvocation: decisionInvocation,
+             decisionGridHome: decisionGridHome,
+             evidence: evidence,
+           ),
        _storeRoot = storeRoot,
        _stateRoot = stateRoot,
        _armedSubstations = armedSubstations,

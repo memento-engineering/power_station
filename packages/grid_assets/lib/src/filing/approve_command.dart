@@ -3,11 +3,12 @@ import 'dart:io';
 
 import 'package:args/command_runner.dart';
 import 'package:beads_dart/beads_dart.dart' show BdRunner, ProcessBdRunner;
+import 'package:grid_sdk/grid_sdk.dart' as sdk;
 import 'package:path/path.dart' as p;
 
-import '../search/station_search.dart';
+import '../code/landing.dart' show ShellRunner, SystemShellRunner;
 import 'approval_stamp.dart';
-import 'filing_command.dart' show noArmedSubstations;
+import 'filing_command.dart' show defaultFilingService, noArmedSubstations;
 import 'filing_contract.dart';
 
 String _currentDirectory() => Directory.current.path;
@@ -73,7 +74,7 @@ final class ApprovalRefused extends ApprovalOutcome {
   };
 }
 
-/// UI-drivable approval: the four-row filing preflight, then ONE stamped
+/// UI-drivable approval: the ten-row filing preflight, then ONE stamped
 /// `bd update`. Nothing is written unless every row passes.
 ///
 /// The receipt is bound to the preflight that earned it: the stamped revision
@@ -82,15 +83,42 @@ final class ApprovalRefused extends ApprovalOutcome {
 /// not consulted at all — a store HEAD moves for reasons that have nothing to
 /// do with the bead, and never moves when the bead alone is edited.
 final class ApproveService {
-  /// Creates the service over the filing preflight and two injectable seams.
+  /// Creates the service over the filing preflight and its injectable seams.
+  ///
+  /// With no [filing] or [evidence] override the preflight is the SAME live
+  /// composition the `filing` verb binds ([defaultFilingService]): both verbs
+  /// answer one contract one way, including the six viability rows. `unpark`
+  /// reuses this service, so it gains the same preflight and introduces no
+  /// second one.
+  ///
+  /// FAIL-CLOSED on composition, never on faith: with no `owningScope` — or no
+  /// `decisionInvocation`/`decisionGridHome` to execute the index with — a bead
+  /// that CITES a decision has UNAVAILABLE evidence for that citation and is
+  /// REFUSED, naming the token and the source that did not answer. It is never
+  /// passed as though the register had been asked and had answered nothing. A
+  /// bead citing no decision needs no lookup and is unaffected.
   ApproveService({
     FilingService? filing,
     BdRunner Function(String storeRoot) runnerFor = _processRunnerFor,
     DateTime Function() now = DateTime.now,
+    sdk.SubstationScope? owningScope,
+    List<sdk.SubstationScope> attachedScopes = const [],
+    ValidationPlanProbe validationPlanProbe = const SystemValidationPlanProbe(),
+    ShellRunner decisionShell = const SystemShellRunner(),
+    String? decisionInvocation,
+    String? decisionGridHome,
+    FilingEvidenceSource? evidence,
   }) : filing =
            filing ??
-           FilingService(
-             source: ExactSubstationBeadSource(runnerFor: runnerFor),
+           defaultFilingService(
+             runnerFor: runnerFor,
+             owningScope: owningScope,
+             attachedScopes: attachedScopes,
+             validationPlanProbe: validationPlanProbe,
+             decisionShell: decisionShell,
+             decisionInvocation: decisionInvocation,
+             decisionGridHome: decisionGridHome,
+             evidence: evidence,
            ),
        _runnerFor = runnerFor,
        _now = now;
@@ -167,13 +195,36 @@ class ApproveCommand extends Command<int> {
   /// This verb takes NO `--state-root`, for the same reason `filing` does not:
   /// the preflight it runs projects the WORK store's own bd rows and reaches
   /// no second store.
+  ///
+  /// It FORWARDS its composition values to the default service, so the verb a
+  /// station composes and the verb an operator runs bind the same live
+  /// viability evidence.
   ApproveCommand({
     ApproveService? service,
     String Function() storeRoot = _currentDirectory,
     Set<String>? Function() armedSubstations = noArmedSubstations,
+    BdRunner Function(String storeRoot) runnerFor = _processRunnerFor,
+    sdk.SubstationScope? owningScope,
+    List<sdk.SubstationScope> attachedScopes = const [],
+    ValidationPlanProbe validationPlanProbe = const SystemValidationPlanProbe(),
+    ShellRunner decisionShell = const SystemShellRunner(),
+    String? decisionInvocation,
+    String? decisionGridHome,
+    FilingEvidenceSource? evidence,
     StringSink? out,
     StringSink? err,
-  }) : _service = service ?? ApproveService(),
+  }) : _service =
+           service ??
+           ApproveService(
+             runnerFor: runnerFor,
+             owningScope: owningScope,
+             attachedScopes: attachedScopes,
+             validationPlanProbe: validationPlanProbe,
+             decisionShell: decisionShell,
+             decisionInvocation: decisionInvocation,
+             decisionGridHome: decisionGridHome,
+             evidence: evidence,
+           ),
        _storeRoot = storeRoot,
        _armedSubstations = armedSubstations,
        _out = out ?? stdout,
@@ -203,7 +254,7 @@ class ApproveCommand extends Command<int> {
 
   @override
   final String description =
-      'Stamp one bead approved once the four filing requirements pass.';
+      'Stamp one bead approved once the ten filing requirements pass.';
 
   @override
   String get invocation {

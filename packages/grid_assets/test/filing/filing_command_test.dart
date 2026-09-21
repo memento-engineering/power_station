@@ -1,12 +1,65 @@
 import 'dart:convert';
+import 'dart:io';
 
+import 'package:args/command_runner.dart';
+import 'package:beads_dart/beads_dart.dart';
+import 'package:grid_assets/grid_assets.dart';
+import 'package:grid_sdk/grid_sdk.dart' show SubstationScope;
+import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
 import 'real_bd_store.dart';
 
+/// A recording [BdRunner] that answers every read with one enveloped list.
+final class _RecordingBdRunner implements BdRunner {
+  _RecordingBdRunner(this.rows);
+
+  final List<Map<String, Object?>> rows;
+  final List<List<String>> argvs = [];
+
+  @override
+  Future<BdResult> run(
+    List<String> args, {
+    Duration? timeout,
+    String? stdin,
+  }) async {
+    argvs.add(args);
+    final type = args.contains('-t') ? args[args.indexOf('-t') + 1] : '';
+    return BdResult(
+      exitCode: 0,
+      stdout: jsonEncode({
+        'schema_version': 1,
+        'data': [
+          for (final row in rows)
+            if (row['issue_type'] == type) row,
+        ],
+      }),
+      stderr: '',
+    );
+  }
+}
+
+/// A [ShellRunner] that answers every `decisions index` run with one canned
+/// roster-mode envelope, recording what it was asked.
+final class _CannedDecisionShell implements ShellRunner {
+  _CannedDecisionShell(this.body);
+
+  final String body;
+  final List<String> commands = [];
+
+  @override
+  Future<ShellRunResult> run({
+    required String workingDirectory,
+    required String command,
+  }) async {
+    commands.add(command);
+    return ShellRunResult(exitCode: 0, output: body);
+  }
+}
+
 void main() {
   test(
-    'real bd filing passes all four requirements',
+    'real bd filing passes all ten requirements',
     skip: skipWithoutBd,
     () async {
       final store = await filingStore();
@@ -59,7 +112,7 @@ void main() {
       final rows = (report['requirements'] as List)
           .cast<Map<String, dynamic>>();
       expect(report['passed'], isTrue);
-      expect(rows, hasLength(4));
+      expect(rows, hasLength(10));
       expect(rows.every((row) => row['passed'] == true), isTrue);
     },
   );
@@ -101,8 +154,22 @@ void main() {
       final rows = (report['requirements'] as List)
           .cast<Map<String, dynamic>>();
       expect(report['passed'], isFalse);
-      expect(rows, hasLength(4));
-      expect(rows.every((row) => row['passed'] == false), isTrue);
+      expect(rows, hasLength(10));
+      // The four PRESENCE rows are what this bead fails; the six VIABILITY
+      // rows have nothing to refuse, because a bead with no plan, no
+      // acceptance and no citations carries no unviable text.
+      expect(
+        {
+          for (final row in rows)
+            if (row['passed'] == false) row['requirement'],
+        },
+        {
+          'driveable_type',
+          'validation_plan',
+          'acceptance_criteria',
+          'dependencies',
+        },
+      );
       expect(
         dependencyRow(h.out)['detail'],
         contains('external:nowhere:cap names "nowhere"'),
@@ -164,4 +231,159 @@ void main() {
     expect(report['requirements'], isEmpty);
     expect(report['error'], 'bead not found');
   });
+
+  test('default bead catalog uses scoped all-status bd list reads', () async {
+    // The scoped read is the ratified per-store mechanism
+    // (power_station#the-per-store-bead-read-is-scoped-never-the-export-surface,
+    // amending A11 clause (3)). `bd export` cannot answer this: it is refused
+    // outright in proxied-server mode, and older bd builds returned an EMPTY
+    // export for a NON-empty store — "this store has no beads" is the one
+    // answer that must never reach the bead_references row, because an empty
+    // catalog refuses every cited id.
+    final bd = _RecordingBdRunner([
+      {'id': 'pow-one', 'title': 'one', 'issue_type': 'task'},
+      {'id': 'pow-two', 'title': 'two', 'issue_type': 'decision'},
+    ]);
+    final beads = await BdListAllStatusBeadSource(runnerFor: (_) => bd).read(
+      const SubstationScope(
+        name: 'power_station',
+        root: '/w/power_station',
+        prefix: 'pow',
+      ),
+    );
+
+    expect(beads.map((bead) => bead.id).toSet(), {'pow-one', 'pow-two'});
+    expect(bd.argvs, [
+      for (final type in IssueType.coreTypes)
+        ['list', '-t', type.wire, '--status', 'all', '--json', '--limit', '0'],
+    ]);
+    expect(bd.argvs.map((argv) => argv.first), everyElement(isNot('export')));
+  });
+
+  test(
+    'default filing wiring resolves live bead and decision evidence',
+    skip: skipWithoutBd,
+    () async {
+      final work = await bdStore(prefix: 'pow');
+      final attached = await bdStore(prefix: 'tg');
+      await runBd(attached, [
+        'create',
+        '--id',
+        'tg-0b64',
+        '--title',
+        'the attached bead',
+        '--type',
+        'task',
+        '--actor',
+        'test',
+      ]);
+
+      // A real register directory: the index answers with a slug, and the
+      // lookup resolves it to the entry file that carries it.
+      const slug = 'adr-0004-station-throughput-outranks-staging-ceremony';
+      final register = Directory.systemTemp.createTempSync('filing-register-');
+      addTearDown(() => register.deleteSync(recursive: true));
+      File(p.join(register.path, 'a.md')).writeAsStringSync(
+        '---\nslug: $slug\nstatus: accepted\n---\n\nThroughput outranks '
+        'ceremony.\n',
+      );
+      final shell = _CannedDecisionShell(
+        jsonEncode({
+          'spec': 2,
+          'decisions': [
+            {
+              'slug': slug,
+              'originRegister': 'power_station',
+              'originPath': register.path,
+              'status': 'accepted',
+              'surfaces': <String>['packages/grid_assets/**'],
+            },
+          ],
+        }),
+      );
+
+      Future<Map<String, dynamic>> file(String id, String description) async {
+        await runBd(work, [
+          'create',
+          '--id',
+          id,
+          '--title',
+          'wired filing',
+          '--type',
+          'task',
+          '--description',
+          description,
+          '--acceptance',
+          '- [ ] dart test passes',
+          '--metadata',
+          '{"validation_plan":"dart test"}',
+          '--actor',
+          'test',
+        ]);
+        final out = StringBuffer();
+        final err = StringBuffer();
+        final runner = CommandRunner<int>('space', 'test station')
+          ..addCommand(
+            FilingCommand(
+              storeRoot: () => work.path,
+              runnerFor: (root) => ProcessBdRunner(workspaceRoot: root),
+              owningScope: SubstationScope(
+                name: 'power_station',
+                root: work.path,
+                prefix: 'pow',
+              ),
+              attachedScopes: [
+                SubstationScope(
+                  name: 'the_grid',
+                  root: attached.path,
+                  prefix: 'tg',
+                ),
+              ],
+              decisionShell: shell,
+              decisionInvocation: 'space',
+              decisionGridHome: work.path,
+              out: out,
+              err: err,
+            ),
+          );
+        await runner.run(['filing', '--json', id]);
+        return jsonDecode(out.toString()) as Map<String, dynamic>;
+      }
+
+      // An id only the ATTACHED store holds, and a decision the register does.
+      final wired = await file(
+        'pow-wired',
+        'Follows tg-0b64 under power_station#$slug.',
+      );
+      expect(
+        ((wired['requirements']! as List).cast<Map<String, dynamic>>())
+            .where((row) => row['passed'] == false)
+            .map((row) => '${row['requirement']}: ${row['detail']}'),
+        isEmpty,
+      );
+      expect(wired['passed'], isTrue);
+      expect(shell.commands, isNotEmpty);
+
+      // Change ONLY the cited slug: the same wiring now refuses, and names it.
+      final invented = await file(
+        'pow-invents',
+        'Follows tg-0b64 under power_station#a-rule-this-round-creates.',
+      );
+      final row =
+          ((invented['requirements']! as List).cast<Map<String, dynamic>>())
+              .singleWhere(
+                (row) => row['requirement'] == 'decision_references',
+              );
+      expect(invented['passed'], isFalse);
+      expect(row['passed'], isFalse);
+      expect(row['detail'], contains('a-rule-this-round-creates'));
+      expect(
+        ((invented['requirements']! as List).cast<Map<String, dynamic>>())
+            .singleWhere(
+              (row) => row['requirement'] == 'bead_references',
+            )['passed'],
+        isTrue,
+      );
+    },
+  );
 }

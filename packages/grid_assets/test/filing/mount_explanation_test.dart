@@ -24,10 +24,12 @@ import 'package:args/command_runner.dart';
 import 'package:beads_dart/beads_dart.dart';
 import 'package:grid_assets/grid_assets.dart';
 import 'package:grid_engine/grid_engine.dart';
+import 'package:grid_sdk/grid_sdk.dart' as sdk;
 import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
 import '../support/package_root.dart';
+import 'filing_evidence_fakes.dart';
 import 'real_bd_store.dart';
 
 const String _beadId = 'pow-child';
@@ -90,6 +92,20 @@ final class _Runner implements BdRunner {
     }
     return BdResult(exitCode: 0, stdout: body, stderr: '');
   }
+}
+
+/// A [ShellRunner] answering every `decisions index` ask with one canned
+/// envelope — the roster the DEFAULT mount composition executes through.
+final class _CannedIndexShell implements ShellRunner {
+  _CannedIndexShell(this.body);
+
+  final String body;
+
+  @override
+  Future<ShellRunResult> run({
+    required String workingDirectory,
+    required String command,
+  }) async => ShellRunResult(exitCode: 0, output: body);
 }
 
 // ── fixtures ────────────────────────────────────────────────────────────────
@@ -272,9 +288,17 @@ final class _Harness {
         }
       };
     }
+    // These tests isolate MOUNT STATE, over fake stores at paths no shell can
+    // chdir into. ONE prepared gather is shared by both verbs, so the embedded
+    // report stays byte-identical to `filing --json` while the six viability
+    // rows stay out of this suite's way; their refusals are pinned in
+    // `filing_viability_test.dart`, and the LIVE default composition has its
+    // own test below.
+    final evidence = FakeFilingEvidenceSource(completeEmptyEvidence);
     final service = MountExplanationService(
       runnerFor: bd.runnerFor,
       now: () => now ?? _now,
+      evidence: evidence,
     );
     runner = CommandRunner<int>('space', 'test station')
       ..addCommand(
@@ -291,6 +315,7 @@ final class _Harness {
         FilingCommand(
           service: FilingService(
             source: ExactSubstationBeadSource(runnerFor: bd.runnerFor),
+            evidence: evidence,
           ),
           storeRoot: () => _workRoot,
           armedSubstations: () => armed,
@@ -472,15 +497,14 @@ void main() {
       final embedded = h.report['filing'] as Map<String, dynamic>;
       final direct = jsonDecode(h.filingOut.toString()) as Map<String, dynamic>;
       expect(jsonEncode(embedded), jsonEncode(direct));
+      // WHOLE means all TEN: mount renders the four clauses it owns, and
+      // carries the six VIABILITY rows out untouched rather than dropping the
+      // half of the contract it has no precondition for.
       expect(
         (embedded['requirements'] as List).map((row) => row['requirement']),
-        [
-          'driveable_type',
-          'validation_plan',
-          'acceptance_criteria',
-          'dependencies',
-        ],
+        [for (final value in FilingRequirement.values) value.wire],
       );
+      expect((embedded['requirements'] as List), hasLength(10));
       // And the first three mount rows RENDER those very details.
       for (final requirement in const [
         'driveable_type',
@@ -1343,6 +1367,135 @@ void main() {
         );
       }
     }, skip: skipWithoutBd);
+  });
+
+  group('AC-9 — the DEFAULT composition binds live filing evidence', () {
+    test('default mount composition binds owning decision evidence', () async {
+      // NO `filing` and NO `FilingEvidenceSource` override: this is the wiring
+      // a resident actually gets. Before it was threaded, `mount` composed an
+      // evidence-free `FilingService`, so the embedded report refused every
+      // decision-citing bead with "restore complete evidence and rerun" — an
+      // explanation about the explainer's own wiring, not about the bead.
+      const slug = 'the-dependencies-row-is-a-projection-of-bd-dependency-rows';
+      final register = Directory.systemTemp.createTempSync('mount-register-');
+      addTearDown(() => register.deleteSync(recursive: true));
+      File(p.join(register.path, 'a.md')).writeAsStringSync(
+        '---\nslug: $slug\nstatus: accepted\n---\n\nA projection.\n',
+      );
+
+      Future<({Map<String, dynamic> report, FakeValidationPlanProbe probe})>
+      explain(String description) async {
+        final bd = _Bd();
+        final record = {
+          ..._workBead(blockers: const ['pow-blocker']),
+          'description': description,
+        };
+        bd.replies[_workRoot] = (argv) {
+          if (argv.first != 'query') return _emptyEnvelope;
+          if (argv[1] == 'id=$_beadId') return _envelope([record]);
+          return _envelope([_target('pow-blocker')]);
+        };
+        final probe = FakeValidationPlanProbe();
+        final out = StringBuffer();
+        final runner = CommandRunner<int>('space', 'test station')
+          ..addCommand(
+            MountCommand(
+              storeRoot: () => _workRoot,
+              stateRoot: () => null,
+              runnerFor: bd.runnerFor,
+              owningScope: sdk.SubstationScope(
+                name: 'power_station',
+                root: _workRoot,
+                prefix: 'pow',
+              ),
+              validationPlanProbe: probe,
+              decisionShell: _CannedIndexShell(
+                jsonEncode({
+                  'spec': 2,
+                  'decisions': [
+                    {
+                      'slug': slug,
+                      'originRegister': 'power_station',
+                      'originPath': register.path,
+                      'status': 'accepted',
+                      'surfaces': <String>['packages/grid_assets/**'],
+                    },
+                  ],
+                }),
+              ),
+              decisionInvocation: 'space',
+              decisionGridHome: _gridHome(),
+              out: out,
+              err: StringBuffer(),
+            ),
+          );
+        await runner.run(['mount', '--json', _beadId]);
+        return (
+          report: jsonDecode(out.toString()) as Map<String, dynamic>,
+          probe: probe,
+        );
+      }
+
+      final cited = await explain('Follows power_station#$slug.');
+      final embedded = cited.report['filing']! as Map<String, dynamic>;
+      final rows = (embedded['requirements']! as List)
+          .cast<Map<String, dynamic>>();
+      expect(
+        rows.where((row) => row['passed'] == false),
+        isEmpty,
+        reason: '$embedded',
+      );
+      expect(rows, hasLength(10));
+      expect(embedded['passed'], isTrue);
+
+      // ONE gather, not one per row: the two plan shells are asked exactly
+      // once each, and the plan is PARSED rather than run.
+      expect(cited.probe.calls.map((call) => call.shell), [
+        kFilingLaneShell,
+        kFilingPortabilityShell,
+      ]);
+      expect(
+        cited.probe.calls.map((call) => call.plan),
+        everyElement('dart test'),
+      );
+
+      // The retained projection still rides through: the mount row reports the
+      // very rows the filing requirement was rendered from.
+      final dependencies = (cited.report['preconditions']! as List)
+          .cast<Map<String, dynamic>>()
+          .singleWhere(
+            (row) => row['precondition'] == MountPrecondition.dependencies.wire,
+          );
+      expect(dependencies['detail'], contains('pow-blocker'));
+      expect(
+        rows.singleWhere(
+          (row) => row['requirement'] == 'dependencies',
+        )['detail'],
+        contains('pow-blocker'),
+      );
+
+      // Change ONLY the cited slug to one this round would have to create: the
+      // same wiring refuses on the named row, with the exact correction.
+      final invented = await explain(
+        'Follows power_station#a-rule-this-round-creates.',
+      );
+      final refused =
+          ((invented.report['filing']! as Map<String, dynamic>)['requirements']!
+                  as List)
+              .cast<Map<String, dynamic>>()
+              .singleWhere(
+                (row) => row['requirement'] == 'decision_references',
+              );
+      expect(refused['passed'], isFalse);
+      expect(refused['detail'], contains('a-rule-this-round-creates'));
+      expect(
+        refused['detail'],
+        contains(
+          'a round may not cite a decision it creates; cite an existing entry '
+          'or describe the proposed entry without a citation',
+        ),
+      );
+    });
   });
 }
 

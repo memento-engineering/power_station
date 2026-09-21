@@ -286,7 +286,14 @@ class SubstationSeed extends StatelessSeed {
       // keeps its flare rail. GitGridAssets stays the forced ancestor of
       // GitHubGridAssets (A7) — their relative order is untouched.
       if (githubPoll != null && githubPoll.arm == GitHubReconcilerArm.live)
-        _SubstationGitHubReconcilerBindingAssets(config: githubPoll),
+        _SubstationGitHubReconcilerBindingAssets(
+          config: githubPoll,
+          // The ONE configured runner value this seat already renders its
+          // assets against, threaded — never re-derived, and never defaulted
+          // to a literal executable
+          // (`power_station#one-asset-resolution-defines-tree-and-writers`).
+          decisionInvocation: assetRenderArguments['runner'],
+        ),
       if (githubPoll != null) GitHubReconcilerAssets(config: githubPoll),
       const GitGridAssets(),
       GitHubGridAssets(policy: landingPolicy),
@@ -386,12 +393,17 @@ final class _SubstationGitHubReconcilerBindingAssets
     extends SingleChildStatelessSeed {
   const _SubstationGitHubReconcilerBindingAssets({
     required this.config,
+    this.decisionInvocation,
     // Nest supplies this fold child; direct call sites deliberately omit it.
     // ignore: unused_element_parameter
     super.child,
   });
 
   final GitHubReconcilerConfig config;
+
+  /// The composing station's own verb invocation, for the approval preflight's
+  /// decision lookup. Null when the station configured none.
+  final String? decisionInvocation;
 
   @override
   Seed buildWithChild(TreeContext context, Seed child) {
@@ -402,6 +414,7 @@ final class _SubstationGitHubReconcilerBindingAssets
       config: config,
       runner: ProcessBdRunner(workspaceRoot: scope.root),
       trust: trust,
+      decisionInvocation: decisionInvocation,
       child: child,
     );
   }

@@ -1,9 +1,18 @@
 import 'dart:convert';
+import 'dart:io';
+
+import 'package:path/path.dart' as p;
 
 import 'package:beads_dart/beads_dart.dart';
 import 'package:github_grid_assets/github_grid_assets.dart';
 import 'package:grid_assets/grid_assets.dart'
-    show ApproveService, kFilingApprovalRevisionPrefix;
+    show
+        ApproveService,
+        ShellRunner,
+        ShellRunResult,
+        SystemShellRunner,
+        kFilingApprovalRevisionPrefix;
+import 'package:grid_sdk/grid_sdk.dart' show SubstationScope;
 import 'package:test/test.dart';
 
 class FakeBdRunner implements BdRunner {
@@ -115,10 +124,11 @@ Map<String, Object?> filedBug({
   String id = 'pow-run',
   String validationPlan = 'dart test',
   String acceptance = '- [ ] AC-1 — CI is green; falsifier: `dart test`',
+  String description = 'The nightly failed.',
 }) => <String, Object?>{
   'id': id,
   'title': 'a red nightly',
-  'description': 'The nightly failed.',
+  'description': description,
   'acceptance_criteria': acceptance,
   'issue_type': 'bug',
   'priority': 1,
@@ -151,15 +161,66 @@ GitHubIntakeRecord workflowRecord({
   approve: approve,
 );
 
+/// The seat's WORK ROOT — a REAL directory, per test.
+///
+/// The default approval composition binds a live parse probe, and that probe
+/// runs `sh -n -c` with the store root as its cwd. A fictional root fails the
+/// PROBE rather than the plan, which would grade the harness instead of the
+/// bead.
+late Directory seatRoot;
+
+/// The seat's own substation — the scope `GitHubReconcilerBindingAssets` reads
+/// off the tree and hands the approve verb.
+SubstationScope get seatScope =>
+    SubstationScope(name: 'power_station', root: seatRoot.path, prefix: 'pow');
+
+/// A Fake [ShellRunner] answering every command with one canned envelope.
+///
+/// The decision index is a PROCESS on the live path; here it is a table, so the
+/// suite proves the wiring without a roster checkout or a `lunar` on PATH.
+final class CannedShellRunner implements ShellRunner {
+  CannedShellRunner(this.output);
+
+  /// What every lookup — surface-scoped and register-wide alike — answers.
+  final String output;
+
+  /// Every command asked, in order.
+  final List<String> commands = [];
+
+  @override
+  Future<ShellRunResult> run({
+    required String workingDirectory,
+    required String command,
+  }) async {
+    commands.add(command);
+    return ShellRunResult(exitCode: 0, output: output);
+  }
+}
+
 /// A store wired exactly as the seat binding wires it: one runner for the work
-/// root, and the approve VERB over it.
-BdGitHubIntakeStore seatStore(RecordingBdRunner runner) => BdGitHubIntakeStore(
+/// root, the seat's OWN scope, and the approve VERB over both.
+///
+/// [decisionShell]/[decisionInvocation]/[decisionGridHome] are the same three
+/// values the binding threads (its ambient `GridRoot` and the station's
+/// configured `runner` render value). Left unset they are what an UNCONFIGURED
+/// station has — no invocation, so the index never reaches a shell and a bead
+/// citing a decision is refused on unavailable evidence rather than passed.
+BdGitHubIntakeStore seatStore(
+  RecordingBdRunner runner, {
+  ShellRunner decisionShell = const SystemShellRunner(),
+  String? decisionInvocation,
+  String? decisionGridHome,
+}) => BdGitHubIntakeStore(
   runner,
   approvals: ApproveService(
     runnerFor: (_) => runner,
     now: () => DateTime.utc(2026, 9, 8, 12),
+    owningScope: seatScope,
+    decisionShell: decisionShell,
+    decisionInvocation: decisionInvocation,
+    decisionGridHome: decisionGridHome,
   ),
-  workRoot: '/work/seat',
+  workRoot: seatRoot.path,
 );
 
 const workflowMetadata = <String>[
@@ -186,6 +247,9 @@ const workflowMetadata = <String>[
 ];
 
 void main() {
+  setUp(() => seatRoot = Directory.systemTemp.createTempSync('seat-work'));
+  tearDown(() => seatRoot.deleteSync(recursive: true));
+
   group('BdGitHubIntakeStore', () {
     test('creates a durable OPEN core bead for a new node id', () async {
       final runner = FakeBdRunner([
@@ -548,6 +612,92 @@ void main() {
         );
       },
     );
+
+    test('GitHub intake approval binds owning decision evidence', () async {
+      // The seat's auto-approval is an `ApproveService` like any other, so it
+      // runs the SAME ten-row preflight — including `decision_references`.
+      // Before this binding threaded the seat's own scope and the station's
+      // runner in, every decision-citing workflow bug was refused on evidence
+      // nobody had gathered.
+      final home = Directory.systemTemp.createTempSync('seat-decisions');
+      addTearDown(() => home.deleteSync(recursive: true));
+      final register = Directory(p.join(home.path, 'docs', 'decisions'))
+        ..createSync(recursive: true);
+      const slug = 'ci-feedback-projection-is-a-value-the-binding-provides';
+      File(p.join(register.path, '$slug.md')).writeAsStringSync(
+        '---\nstatus: accepted\nregister:\n  spec: 1\n  slug: $slug\n---\n'
+        'The ambient GridRoot is read QUIET and SUBSCRIBING.',
+      );
+      final index = jsonEncode({
+        'spec': 2,
+        'decisions': [
+          {
+            'originRegister': 'power_station',
+            'originPath': register.path,
+            'slug': slug,
+            'status': 'accepted',
+            'surfaces': const ['README.md'],
+            'edges': const <Object?>[],
+          },
+        ],
+        'diagnostics': const <Object?>[],
+      });
+
+      // An EXISTING canonical citation is stamped.
+      final shell = CannedShellRunner(index);
+      final recorded = RecordingBdRunner(
+        filed: filedBug(
+          description: 'The nightly failed. Extends power_station#$slug.',
+        ),
+      );
+      await seatStore(
+        recorded,
+        decisionShell: shell,
+        decisionInvocation: 'dart run lunar:lunar',
+        decisionGridHome: home.path,
+      ).upsert(workflowRecord());
+      expect(
+        recorded.verb('update').last,
+        contains('grid.approved_by=github-workflow'),
+        reason: 'the citation RESOLVES, so the ten-row preflight passes',
+      );
+      expect(
+        shell.commands,
+        isNotEmpty,
+        reason: 'the index is executed with the station\'s OWN runner verb',
+      );
+
+      // Change ONLY the slug: the same lookup now proves it absent.
+      final missing = RecordingBdRunner(
+        filed: filedBug(
+          description:
+              'The nightly failed. Records power_station#a-rule-this-round-'
+              'creates.',
+        ),
+      );
+      await seatStore(
+        missing,
+        decisionShell: CannedShellRunner(index),
+        decisionInvocation: 'dart run lunar:lunar',
+        decisionGridHome: home.path,
+      ).upsert(workflowRecord());
+      expect(
+        missing.argvs
+            .expand((argv) => argv)
+            .where((arg) => arg.contains('grid.approved')),
+        isEmpty,
+        reason: 'a refused preflight writes NO approval key',
+      );
+      final note = missing.verb('update').last.last;
+      expect(note, contains('"power_station#a-rule-this-round-creates"'));
+      expect(
+        note,
+        contains(
+          'a round may not cite a decision it creates; cite an existing entry '
+          'or describe the proposed entry without a citation',
+        ),
+      );
+    });
 
     test('a store with no approve verb refuses an approving record', () async {
       final runner = RecordingBdRunner(filed: filedBug());

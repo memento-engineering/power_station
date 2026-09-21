@@ -795,6 +795,121 @@ void main() {
       expect(anchors.symbols, ['buildSpecifyBrief', 'Heartbeat']);
     });
 
+    // The anchor span and the decision-citation grammar are ONE copy, shared
+    // with the filing contract's viability rows (`filing_text.dart`). They
+    // MOVED there rather than being duplicated, so a bead cannot be read one
+    // way by discovery and another by the front door.
+    test('the shared scanner is the one discovery grades against', () {
+      final b = bead('tg-1').copyWith(
+        title: 'power_station#a-title-citation-is-not-one',
+        description:
+            'Extends power_station#the-refiner-exit-oracle-is-the-'
+            'filing-verb and ADR-0008.',
+        design:
+            'Again power_station#the-refiner-exit-oracle-is-the-filing-verb, '
+            'and unindexed registers stay prose: nobody#knows-this-one.',
+        acceptanceCriteria: 'power_station#an-acceptance-citation-is-not-one',
+        notes:
+            'RECEIPT: the governor reverted power_station#a-note-cites-nothing '
+            'and quoted ADR-0000 explaining the hold.',
+      );
+
+      // Description and design ONLY; deduplicated in first-appearance order; a
+      // canonical token under a register nobody indexed is prose.
+      expect(
+        decisionReferences(
+          b,
+          knownRegisters: const {'power_station', 'nobody'},
+        ).map((reference) => reference.key),
+        [
+          'power_station#the-refiner-exit-oracle-is-the-filing-verb',
+          'adr-0008',
+          'nobody#knows-this-one',
+        ],
+      );
+      expect(
+        decisionReferences(
+          b,
+          knownRegisters: const {'power_station'},
+        ).map((reference) => reference.key),
+        [
+          'power_station#the-refiner-exit-oracle-is-the-filing-verb',
+          'adr-0008',
+        ],
+      );
+      // The registers a bead NAMES, asked before any index has answered — what
+      // tells a lookup it must widen past this surface's own answer.
+      expect(citedDecisionRegisters(b), {'power_station', 'nobody'});
+      // A bare `A<n>` is an option label, never a citation that can fail.
+      expect(
+        decisionReferences(
+          bead('tg-2').copyWith(description: 'Option A2 beats option A1.'),
+          knownRegisters: const {'power_station'},
+        ),
+        isEmpty,
+      );
+
+      // NOTES make NO request
+      // (`power_station#notes-are-receipts-and-a-phantom-legacy-token-is-
+      // reported-not-failed`): a governor quoting a hold reason into the
+      // receipt channel used to re-poison the very bead it explained, and
+      // resolving the hold re-read the same prose.
+      expect(
+        decisionReferences(
+          bead('tg-3').copyWith(
+            notes: 'Reverted power_station#a-note-cites-nothing and ADR-0000.',
+          ),
+          knownRegisters: const {'power_station'},
+        ),
+        isEmpty,
+      );
+      expect(citedDecisionRegisters(b), isNot(contains('nothing')));
+
+      // The slice is CASE-PRESERVING and the excerpt is VERBATIM: both index
+      // the source field itself, which is the whole reason a report can be
+      // searched for in the bead.
+      final legacy = decisionReferences(
+        bead('tg-4').copyWith(design: 'See ADR-0042 for the ruling.'),
+        knownRegisters: const {},
+      ).single;
+      expect(legacy.slice.field, BeadTextField.design);
+      expect(legacy.slice.text, 'ADR-0042');
+      expect(legacy.alias, 'adr-0042');
+      expect(legacy.excerpt, 'See ADR-0042 for the ruling.');
+      expect(
+        legacy.unresolvedReport,
+        'unresolved legacy decision citation adr-0042 reported from design: '
+        '“See ADR-0042 for the ruling.”',
+      );
+
+      // ONE format, one producer, one consumer — and a strict parse: a line
+      // that is not a report clears nothing, because a malformed detail must
+      // never read as permission to pass a citation.
+      expect(reportedLegacyDecisionAliases(legacy.unresolvedReport), {
+        'adr-0042',
+      });
+      expect(reportedLegacyDecisionAliases('adr-0042 is missing'), isEmpty);
+      expect(
+        reportedLegacyDecisionAliases(
+          'unresolved legacy decision citation adr-0042',
+        ),
+        isEmpty,
+      );
+
+      // The excerpt is BOUNDED per side, so one enormous field cannot ride a
+      // report into the wire.
+      final padded = decisionReferences(
+        bead(
+          'tg-5',
+        ).copyWith(description: '${'x' * 200} ADR-0042 ${'y' * 200}'),
+        knownRegisters: const {},
+      ).single;
+      expect(
+        padded.excerpt.length,
+        'ADR-0042'.length + 2 * kDecisionCitationExcerptChars,
+      );
+    });
+
     test('the gather pulls the committee RUBRICS, resolves the anchors and runs '
         'the prior-art search through its seams', () async {
       final queried = <String>[];
@@ -2522,6 +2637,50 @@ void main() {
               'the register half IS one the index answered, so the missing '
               'name is the bead\'s own defect and it is named',
         );
+      },
+    );
+
+    test(
+      'a legacy ADR id absent from every register is REPORTED, never failed',
+      () async {
+        // Lunar 2026-09-13/14: five beads held, seven rounds burned. The
+        // register's own log file is spelled `ADR-0000`, and no register can
+        // hold an entry for the log its amendments live in — so failing on an
+        // unresolvable legacy token is a hold NOTHING can clear, because
+        // resolving it re-runs this gather over the same prose
+        // (`power_station#notes-are-receipts-and-a-phantom-legacy-token-is-
+        // reported-not-failed`).
+        final dir = Directory.systemTemp.createTempSync('decisions-phantom');
+        addTearDown(() => dir.deleteSync(recursive: true));
+        final register = Directory(p.join(dir.path, 'docs', 'decisions'))
+          ..createSync(recursive: true);
+        const surface = 'power_station/packages/grid_assets/lib/src/x.dart';
+        final records =
+            await commandDecisionIndexSource(
+              _fakeDecisionIndex(register, count: 3),
+              runnerInvocation: 'dart run lunar:lunar',
+              gridHome: '/grid/lunar',
+            )(
+              dir.path,
+              [surface],
+              bead('pow-cite').copyWith(design: 'This holds ADR-0042 exactly.'),
+            );
+        final record = records.decisionLookups.single;
+        expect(
+          record.state,
+          isNot(EvidenceState.failed),
+          reason: 'the surface ANSWERED; only the citation went unresolved',
+        );
+        expect(
+          record.error,
+          'unresolved legacy decision citation adr-0042 reported from design: '
+          '“This holds ADR-0042 exactly.”',
+          reason:
+              'the ONE detail member carries the report, named by field and '
+              'quoted verbatim, so a real misspelling stays visible to the '
+              'lens instead of hiding behind a hold',
+        );
+        expect(reportedLegacyDecisionAliases(record.error), {'adr-0042'});
       },
     );
 

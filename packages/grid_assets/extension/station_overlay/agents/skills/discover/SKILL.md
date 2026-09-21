@@ -177,8 +177,22 @@ bd dep add <new bead id> <local blocker bead id> --actor governor
 
 Then run `{{runner}} filing --json "<new bead id>"`. Do not leave Filing after
 a non-zero result: correct the bead, rerun the command, and continue only after
-it exits 0. The command checks the four mechanical rows; the agentic half still
-judges whether the description and acceptance are useful.
+it exits 0. The command checks the ten mechanical rows — the four PRESENCE rows
+plus six VIABILITY rows: lane-shell syntax, dash portability,
+repository-relative file anchors, current-plus-attached-store bead-id
+existence, release-relative acceptance, and existing decision citations. The
+agentic half still judges whether the description and acceptance are useful.
+
+Decision citations are read from the **description and design only** — notes
+are the operator's receipt channel and make no citation, so quoting a hold
+reason there can never poison the bead it explains. A canonical
+`<register>#<slug>` citation the index proves absent REFUSES the row with *a
+round may not cite a decision it creates; cite an existing entry or describe
+the proposed entry without a citation*. An `ADR-<nnnn>` id a completed lookup
+cannot answer is REPORTED on a row that still passes: the register's own
+retired log file carries such an id and no register holds an entry for it, so
+refusing there would be a hold nothing can clear. Read the reported slice
+regardless — a misspelled legacy id reads the same way.
 
 Immediately verify that the created bead is discoverable with `{{runner}}
 search --json "<new bead id>"` and require an `id`-field hit. Never use `bd show`
@@ -188,7 +202,7 @@ it is absent from list/search surfaces.
 The bead stays outside the mounted frontier until the human approves it: it
 carries no `grid.approved_*` stamp, and no label added by hand substitutes for
 one. Record the approved design first, then run the approve verb from the
-owning store root. The verb re-runs the four-row filing preflight and, only if
+owning store root. The verb re-runs the ten-row filing preflight and, only if
 every row passes, writes the STAMP in ONE `bd update`: `grid.approved_by` (the
 `--actor`), `grid.approved_at` (the UTC ISO-8601 instant) and
 `grid.approved_rev` (the digest of the FILING BASIS the preflight just

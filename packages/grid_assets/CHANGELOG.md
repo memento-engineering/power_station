@@ -1,3 +1,63 @@
+## Unreleased
+
+- Breaking: the filing contract is TEN rows, not four. The four PRESENCE rows are joined by six
+  VIABILITY rows that ask whether what a field HOLDS can work: `validation_plan_syntax` (the
+  gating lane's own `sh` parses the plan), `validation_plan_portability` (so does CI's `dash`),
+  `repo_relative_paths` (no absolute file anchor in the bead text), `bead_references` (every cited
+  bead id exists in the current or an attached store), `release_versions` (acceptance pins no exact
+  release) and `decision_references` (every cited decision is already recorded). Each refusal NAMES
+  the exact offending text and the correction. `FilingContract.evaluate` now takes a required
+  `evidence:`; `FilingService` takes an optional `FilingEvidenceSource`. New public surface:
+  `FilingEvidence`, `FilingEvidenceSource`, `SystemFilingEvidenceSource`, `ValidationPlanProbe`,
+  `SystemValidationPlanProbe`, `ValidationPlanParseResult`, `ValidationPlanShellMissing`,
+  `BdListAllStatusBeadSource`, `defaultFilingService`, and the pure scanners in
+  `src/filing/filing_text.dart` (`BeadTextField`, `BeadTextSlice`, `DecisionReference`,
+  `beadAnchors`, `absolutePathReferences`, `beadIdReferences`, `exactReleaseVersions`,
+  `decisionReferences`, `validationPlanOffendingSlice`). Migration: pass
+  `evidence: FilingEvidence.unavailable` at a direct `evaluate` call that gathers nothing — an
+  unavailable leg refuses only the tokens that need it, and never reads as an empty catalog.
+- Decision citations are read from a bead's DESCRIPTION and DESIGN only, and a legacy
+  `ADR-<nnnn>` id no completed lookup can answer is REPORTED rather than failed
+  (`power_station#notes-are-receipts-and-a-phantom-legacy-token-is-reported-not-failed`). Notes are
+  the operator's receipt channel: a governor quoting a hold reason into them used to re-poison the
+  very bead it explained, and resolving the hold re-read the same prose. No register holds an entry
+  for the log file its own amendments live in, yet that file's name IS a legacy id, so refusing on
+  absence was a hold nothing could clear. `decision_references` PASSES on a reported id and still names the exact slice, so a
+  genuine misspelling stays visible. A canonical `<register>#<slug>` proved absent keeps refusing.
+  Breaking: `DecisionReference` gains a required `excerpt`. New public surface:
+  `FilingEvidence.reportedDecisionAliases`, `kDecisionCitationExcerptChars`,
+  `kUnresolvedLegacyCitationPrefix`, `kUnresolvedLegacyCitationFrom` and
+  `reportedLegacyDecisionAliases`.
+- `filing` and `approve` bind the LIVE viability gather by default: the two parse probes, one
+  scoped all-status `bd list -t <type>` read per core issue type for each distinct store, and the
+  station's roster-mode decision index. `SpecifyCapability` takes the same injected
+  `ValidationPlanProbe`, so the step that authors a plan and the verb that files the bead cannot
+  disagree about whether it parses.
+- A per-store `SubstationBeadSource` read is SCOPED, and `bd export --all` — the mechanism the
+  search-domain roster entry ratified — is not issued by any source here
+  (`power_station#the-per-store-bead-read-is-scoped-never-the-export-surface`, which amends that
+  entry's third clause and permits the second implementation the id catalog needs). The export
+  surface is
+  refused outright in proxied-server mode, which is the only mode a CGO-free `bd` offers, and
+  `BdCliService.exportAll` survives upstream only as a refusal tombstone. Its failure mode is the
+  one a catalog cannot carry: an empty read that cannot be told apart from an unreachable store
+  would refuse every id a bead cites.
+- `unpark` and `mount` compose the same live filing evidence the `filing` and `approve` verbs do.
+  `UnparkService`/`UnparkCommand` and `MountExplanationService`/`MountCommand` take the owning and
+  attached substation scopes, the `ValidationPlanProbe`, the decision `ShellRunner` with its
+  invocation and grid home, and an optional `FilingEvidenceSource`, and forward every one of them
+  to the ONE `ApproveService` / `FilingService` they compose. Without this the two verbs inherited
+  an evidence-free preflight and the fail-closed viability rows refused every decision-citing bead
+  with `restore complete evidence and rerun`. An injected `approve` / `filing` / `service` stays
+  authoritative and is used unchanged, and the `mount` explainer's embedded `filing` member now
+  carries all TEN requirements rather than the first four.
+- Breaking: a portability shell that is NOT INSTALLED refuses `validation_plan_portability`
+  instead of passing it. A `dash` nobody installed and a `dash` that crashed are the same absence
+  of an answer, and neither says the plan is portable; the row names which absence it was.
+  `FilingEvidence.portabilityShellMissing` is removed. `SystemValidationPlanProbe` blames the
+  SHELL for an `ENOENT` spawn only when the working directory it was handed really exists, so a
+  missing store root is never reported as a missing shell.
+
 ## 0.7.0-dev.3
 
 > Note: This release has breaking changes.

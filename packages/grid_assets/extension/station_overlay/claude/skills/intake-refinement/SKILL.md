@@ -47,9 +47,12 @@ Every bead intended for the station needs:
 5. **A description an agent can act on alone** — the agent receives the bead
    text and a worktree, nothing else. Name packages and acceptance shape.
 
-Rows 1–4 are exactly the four rows the `filing` verb checks; row 5 is the
-judgement this skill's reader owns. Never re-derive rows 1–4 by reading the
-bead — run the verb (**The exit check**).
+Rows 1–4 are the PRESENCE half of the ten rows the `filing` verb checks; the
+verb also checks six VIABILITY rows over the same text — can the plan parse,
+is it portable, are the paths repository-relative, do the cited ids and
+decisions exist, is acceptance free of pinned releases. Row 5 is the judgement
+this skill's reader owns. Never re-derive a row by reading the bead — run the
+verb (**The exit check**).
 
 ## Search prior art BEFORE accepting a filing
 
@@ -173,14 +176,29 @@ When the work extends something the tree already owns, write the pointer into
 the bead body as `path:line` plus the relationship:
 
 ```
-COMPOSE: packages/grid_assets/lib/src/filing/filing_contract.dart:321 owns the
-four-row completeness contract — CALL it; do not add a second predicate.
+COMPOSE: packages/grid_assets/lib/src/filing/filing_contract.dart:876 owns the
+ten-row completeness contract — CALL it; do not add a second predicate.
 ```
 
 **Why:** without the pointer the build stage re-expresses the primitive beside
 the one that exists. That is the duplication the coherence lane F-grades, and
 it is why this skill CALLS the `filing` verb instead of carrying a completeness
 checker of its own.
+
+## Two checks the verb deliberately does NOT make
+
+Both stay YOURS, and both are real. They are not `filing` requirements because
+neither is decidable from the bead's text:
+
+- **The validation_plan must finish inside the critic lane's ~600 second cap.**
+  A plan that overruns latches failed, mints no gate, and strands the session
+  invisibly. Duration needs EXECUTION or an estimate — a lint that guessed it
+  would refuse legitimate work — so keep plans bounded (name the suites, never
+  a whole-repo sweep) and time a long one before filing.
+- **The validation_plan must cover every affected consumer.** See **Scope the
+  validation_plan to every consumer**. Identifying every consumer is a
+  judgement about the BLAST RADIUS of a change, not a mechanical lookup, so it
+  is the refiner's and not a lint's.
 
 ## The exit check — `filing` is the oracle, and it is a COMMAND
 
@@ -197,10 +215,16 @@ dependency rows the WORK store's own bd holds, and it reaches no second store.
 session-lifecycle beads.
 
 The report is one JSON object: `{id, passed, requirements, error?}`.
-`requirements` carries exactly four rows, in order — `driveable_type`,
-`validation_plan`, `acceptance_criteria`, `dependencies` — each
+`requirements` carries exactly ten rows, in order — `driveable_type`,
+`validation_plan`, `acceptance_criteria`, `dependencies`,
+`validation_plan_syntax`, `validation_plan_portability`, `repo_relative_paths`,
+`bead_references`, `release_versions`, `decision_references` — each
 `{requirement, passed, detail}`. `passed` is true only for a found bead whose
-four rows ALL pass.
+ten rows ALL pass.
+
+The first four are PRESENCE (is the field there); the six after them are
+VIABILITY (can what the field holds actually work). Each viability row retires
+a rule that used to be remembered and cost a round when it was not.
 
 For every row reporting `"passed": false`, apply its `detail` as the
 correction:
@@ -226,6 +250,48 @@ correction:
   the station that builds the verb, never in the bead. Say so on the bead,
   leave the row wired, and do not work around it by deleting the row or
   stamping the approval by hand.
+- `validation_plan does not parse under sh: <diagnostic>; offending text
+  "<slice>"` — **rewrite as one parseable POSIX-shell command**. The gating
+  lane runs the plan as `sh -c '( <plan> )'` a whole build later; a plan that
+  dies at PARSE burns the round with no log and no return code. The row names
+  the exact offending text: a `#` inside a quoted `$(…)` opens a comment that
+  swallows the closing paren, and an apostrophe carried out of design prose
+  into a single-quoted program closes the quote early.
+- `validation_plan parses under sh but not under dash: <diagnostic>; offending
+  text "<slice>"` — **replace the Bash-only construct with POSIX sh syntax**.
+  `sh` is bash on a developer's mac and dash on CI, and a Bash-only construct
+  such as `<(…)` dies at parse under dash — which surfaces as a harness
+  throttle rather than as a bad plan.
+- `absolute file path in bead text: "<path>" (<field>:<offset>)` — **use a
+  repository-relative path**. The anchor extractor resolves an absolute path
+  against the worktree, misses, and records a FAILED surface, which holds the
+  round without ever saying why.
+- `no attached store holds "<id>" (<field>:<offset>)` — **mint it before citing
+  it or cite an existing attached-store id**. Guessed ids have shipped three
+  times. Create the bead first and copy the id off the `Created` line.
+- `exact release version pinned in acceptance_criteria: "<version>"` — **use
+  release-relative language or a version range**. Specify copies the acceptance
+  list into a gating plan leg, so a pinned version fails on the next release
+  wave rather than on the work.
+- `no register holds "<citation>"` — **a round may not cite a decision it
+  creates; cite an existing entry or describe the proposed entry without a
+  citation**. Discovery holds every round on a citation that cannot exist until
+  the work lands. Decision requests are read from the **description and design
+  only**: notes are the operator's RECEIPT channel, so a governor quoting a
+  hold reason into them cites nothing and this row never sees it. A citation
+  genuinely meant is restated in the description or the design.
+- `no register holds "ADR-<nnnn>" (<field>:<offset>) — REPORTED, never
+  refused` — the row PASSED, and it is still telling you something. A legacy
+  `ADR-<nnnn>` id no completed lookup can answer is reported rather than
+  refused: the register's own log file is spelled `ADR-0000`, and no register
+  holds an entry for the log its amendments live in, so refusing there is a
+  hold nothing can clear. Read the named slice anyway — a genuinely misspelled
+  legacy id looks exactly like this.
+- `… evidence is unavailable for <token>: <source> — restore complete evidence
+  and rerun` — nobody could ANSWER, which is not the same as an answer of "no".
+  This is a COMPOSITION gap, not a bead defect: the store or the decision index
+  the verb was composed with did not reply. Fix the composition and rerun;
+  never edit the bead to route around it.
 
 Then RERUN the verb. Repeat until the report reads `"passed": true`; only then
 stage the bead for approval. Nothing else stages a bead — a reading of the
@@ -280,7 +346,7 @@ invocation answers both questions and neither is re-derived by reading fields.
 ## Staging: approve with the approve verb, only after refinement
 
 Drafts are created open and UNSTAMPED; the human's approval is the approve
-verb, which re-runs the same four-row filing preflight and then writes the
+verb, which re-runs the same ten-row filing preflight and then writes the
 `grid.approved_*` stamp in one `bd update`. Against a LIVE station, the
 mounted predicate refuses any unstamped bead with
 `approval: not approved - run the approve verb` — the retired `grid.approved`
