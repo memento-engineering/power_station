@@ -153,7 +153,7 @@ const _filedBug = <String, Object?>{
   'id': 'pow-intake',
   'title': 'a red nightly',
   'description': 'The nightly failed.',
-  'acceptance_criteria': '- [ ] AC-1 — CI is green; falsifier: `dart test`',
+  'acceptance_criteria': '- [ ] AC-1 — CI is green; falsifier: dart test',
   'issue_type': 'bug',
   'priority': 1,
   'metadata': <String, Object?>{'validation_plan': 'dart test'},

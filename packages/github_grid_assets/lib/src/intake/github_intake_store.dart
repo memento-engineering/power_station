@@ -127,9 +127,13 @@ class GitHubIntakeRecord {
         if (jobs.isNotEmpty) 'Failed jobs:',
         ...jobs,
       ].join('\n'),
+      // The falsifier rides as PLAIN text: a code span would put a backtick
+      // in the bead's acceptance criteria, which the filing contract's
+      // `no_corrupting_text` row refuses — so every run this store filed would
+      // stay open and unstamped on text this store wrote itself.
       acceptanceCriteria:
           '- [ ] AC-1 — $named succeeds again for $workflowName on '
-          '$headBranch; falsifier: `$validationPlan`',
+          '$headBranch; falsifier: $validationPlan',
       openDuplicateFilter: <String, String>{
         'github.workflow_path': workflowPath,
         'github.head_branch': headBranch,
