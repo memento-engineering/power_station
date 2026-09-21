@@ -78,6 +78,7 @@ import 'package:grid_runtime/grid_runtime.dart';
 import 'package:path/path.dart' as p;
 
 import '../agent/agent_domain.dart';
+import '../agent/agent_environment.dart';
 import '../agent/agent_harness.dart';
 import '../agent/environment_registry.dart';
 import '../agent/model_tier.dart';
@@ -407,77 +408,51 @@ class ReadinessCriticCapability extends CriticCapability {
       workspaceDir: workspace.workspaceDir,
       rubric: rubric,
     );
-    final ambient =
-        context.getInheritedSeedOfExactType<AgentConfig>() ??
-        const AgentConfig();
-    final registry =
-        context.getInheritedSeedOfExactType<EnvironmentRegistry>() ??
-        buildBuiltinEnvironmentRegistry();
-    final siteBinding =
-        context.getInheritedSeedOfExactType<SiteBinding>() ?? SiteBinding.none;
-    final config = resolveAgentConfig(
-      tier: AgentTier.mid,
-      ambient: ambient,
-      beadMetadata: bead.metadata,
-      stepParams: args.params,
-      registry: registry,
+    final round = verdictRound(args);
+    // ONE builder, two call sites (the other is the filing verbs' pre-stamp
+    // advisory): everything but the transport arm is settled in there, so a
+    // hardening landed for this lane holds for the advisory too.
+    return readinessLensRuntimeConfig(
+      bead: bead,
+      workspace: workspace,
+      rubric: rubric,
+      nodePath: args.nodePath,
+      round: round,
+      transport: const LensArtifactTransport(),
+      rubrics: rubricSource,
+      decisionRunner: _decisionRunner,
+      decisionGridHome: _decisionGridHome,
+      ambient:
+          context.getInheritedSeedOfExactType<AgentConfig>() ??
+          const AgentConfig(),
+      registry:
+          context.getInheritedSeedOfExactType<EnvironmentRegistry>() ??
+          buildBuiltinEnvironmentRegistry(),
+      siteBinding:
+          context.getInheritedSeedOfExactType<SiteBinding>() ??
+          SiteBinding.none,
       typedEnvironment: CriticAgentEnvironment.of(
         context,
         lane: CriticLane(rubric),
       ),
-    );
-    final environment = registry.resolve(config.harness);
-    return spawnFor(
-      environment: environment,
-      model: config.params['model'],
-      endpoint: siteBinding.endpointFor(
-        name: config.harness,
-        environment: environment,
+      stepParams: args.params,
+      // The repair carry is ARTIFACT-ONLY by construction: it is read off the
+      // refused artifact of a prior attempt, and the in-process arm has none.
+      promptSuffix: criticRepairInstruction(
+        workspaceDir: workspace.workspaceDir,
+        rubric: rubric,
+        nodePath: args.nodePath,
+        round: round,
       ),
-      brief: AgentBrief(
-        task:
-            buildReadinessPrompt(
-              bead,
-              rubric,
-              args.nodePath,
-              workspace.workspaceDir,
-              round: verdictRound(args),
-            ) +
-            criticRepairInstruction(
-              workspaceDir: workspace.workspaceDir,
-              rubric: rubric,
-              nodePath: args.nodePath,
-              round: verdictRound(args),
-            ),
-      ),
-      workspace: workspace,
-      // CAPTURE-ONLY usage telemetry (FT-2), same as every other lane.
-      usageOut: usageReportPath(args.nodePath),
     );
   }
 
-  /// The rubric prose embedded in the lens's prompt — the inherited injected
-  /// source (D-9), or an inline placeholder so the circuit is testable with no
-  /// assets.
-  String _rubricText(String rubric) =>
-      rubricSource?.call(rubric) ??
-      '(rubric `$rubric` — the Packaged-AI-Asset loader supplies the bands)';
-
   /// Assembles the readiness lens's prompt over the work [bead].
   ///
-  /// Carries the SAME hardening as [CriticCapability.buildCriticPrompt]: the
-  /// verdict JSON's `nodePath` stamp (the foreign-node fence, ADR-0000 A4 as
-  /// re-scoped by A15(5)) and the `round` stamp (A15(5) alt-A, re-sourced to
-  /// the respec ledger by A27(7)(a)'s follow-up) — this lane runs upstream of
-  /// `specify`, after [IntakeCapability]'s session-scoped ledger reset, so its
-  /// round is always 0, but it stamps because it shares ONE reader with the
-  /// lanes whose rounds do move; the
-  /// workspace-derived ABSOLUTE canonical write path
-  /// (gate-integrity #4 — cwd-invariant), and the file-write instruction as the
-  /// LAST thing the prompt says (tg-291 — recency). What differs is the SUBJECT
-  /// and the BUDGET: it grades the BEAD (there is no spec and no diff), and it
-  /// is told to stay CHEAP — one pass, bounded reads — because the whole point
-  /// of this lane is to cost a fraction of what it withholds.
+  /// A thin adapter over the shared [readinessLensPrompt] on the ARTIFACT arm
+  /// — the one this in-pipeline lane rides. Kept as a method because it is the
+  /// shape the suites already drive, and because the injected [rubricSource]
+  /// and decision-invocation values live on this capability.
   ///
   /// Exposed for unit tests.
   String buildReadinessPrompt(
@@ -486,77 +461,226 @@ class ReadinessCriticCapability extends CriticCapability {
     String nodePath,
     String workspaceDir, {
     required int round,
-  }) {
-    final path = p.join(critiqueDirPath(workspaceDir), '$rubric.json');
-    // The station's own verb, run FROM the grid home it resolves in. Unbound ⇒
-    // the shared unavailable rule: no invocation is named, and the lens reads
-    // the mounted registers directly.
-    final home = _decisionGridHome?.trim() ?? '';
-    final rosterIndex = rosterDecisionIndexCommand(
-      runner: _decisionRunner,
-      gridHome: home,
-    );
-    final lookupDirection = home.isEmpty
-        ? '. ${decisionLookupRule(runner: _decisionRunner)}'
-        : ': run `$rosterIndex` '
-              'ONCE to see what the roster union already decides. It takes NO '
-              'register-directory argument on purpose — the grid adapter '
-              'resolves the live mounted-substation roster, so a SIBLING '
-              'substation\'s decisions are in the answer too; the `cd` is what '
-              'makes it run at all, because the composing station\'s verb '
-              'resolves only where that station\'s own package is.';
-    final b = StringBuffer()
-      ..writeln('# Spec-readiness intake — rubric: `$rubric`')
-      ..writeln()
-      ..writeln(
-        'You are a CHEAP pre-flight lens, upstream of everything expensive. The '
-        'bead below has NOT been specified and has NOT been built: there is no '
-        'spec and no diff to grade. You are grading the WORK BEAD ITSELF, and '
-        'exactly one question: **does it carry enough that the `specify` '
-        'architect will PLAUSIBLY produce a spec the spec-readiness committee '
-        'passes?** If it does not, it is HELD for refinement — no specify agent '
-        'and no 4-critic committee will run, and a governor will refine it '
-        'against your rationale. Review ONLY against the `$rubric` rubric below.',
-      )
-      ..writeln()
-      ..writeln('## Rubric: $rubric')
-      ..writeln(_rubricText(rubric))
-      ..write(beadUnderIntake(bead))
-      ..writeln()
-      ..writeln('## Stay cheap — this is a lens, not a committee')
-      ..writeln(
-        'You are standing in the bead\'s worktree. Spend a BOUNDED look, not '
-        'an exploration$lookupDirection Grep ONLY the '
-        'surfaces the bead actually names. Do NOT design the change, do NOT '
-        'write a plan, do NOT read the tree broadly — that is the architect\'s '
-        'job downstream, and duplicating it here defeats this lane\'s purpose. '
-        'Judge the BRIEF, not the codebase.',
-      )
-      ..writeln()
-      ..writeln('## Your verdict')
-      ..writeln(
-        'Grade the BEAD A (best) through F (worst) against `$rubric` ONLY. '
-        'A, B or C ⇒ the bead DRIVES (it is specifiable). D, E or F ⇒ the bead '
-        'is HELD for refinement. Your rationale IS the refinement ask a governor '
-        'reads — so on a D or worse, say CONCRETELY what is missing and what '
-        'would fix it (a named surface, a decision to make, a constraint to '
-        'cite), never just that the bead is vague.',
-      )
-      ..writeln('Your verdict is JSON of this exact shape:')
-      ..writeln(
-        verdictJsonTemplate(
-          rubric: rubric,
-          nodePath: nodePath,
-          round: round,
-          rationaleHint: '<why + what would fix it>',
-        ),
-      )
-      ..writeln()
-      ..writeln(kVerdictStampInstruction)
-      ..writeln()
-      ..writeln(verdictWriteInstruction(path));
-    return b.toString();
-  }
+  }) => readinessLensPrompt(
+    bead: bead,
+    rubric: rubric,
+    nodePath: nodePath,
+    workspaceDir: workspaceDir,
+    round: round,
+    transport: const LensArtifactTransport(),
+    rubrics: rubricSource,
+    decisionRunner: _decisionRunner,
+    decisionGridHome: _decisionGridHome,
+  );
+}
+
+/// The rubric prose a readiness prompt embeds — the injected source (D-9), or
+/// an inline placeholder so the lane is testable with no real assets.
+String readinessRubricText(String rubric, RubricSource? rubrics) =>
+    rubrics?.call(rubric) ??
+    '(rubric `$rubric` — the Packaged-AI-Asset loader supplies the bands)';
+
+/// The TRANSPORT-INVARIANT body of the readiness lens's prompt — everything
+/// through [kVerdictStampInstruction], and the whole of what the lens is asked
+/// to JUDGE.
+///
+/// This is the byte-for-byte shared half of the two call sites: the
+/// spec-review lane ([ReadinessCriticCapability]) and the filing verbs'
+/// pre-stamp advisory. It carries the SAME hardening as
+/// [CriticCapability.buildCriticPrompt]: the verdict JSON's `nodePath` stamp
+/// (the foreign-node fence, ADR-0000 A4 as re-scoped by A15(5)) and the
+/// `round` stamp (A15(5) alt-A). What differs from a critic is the SUBJECT and
+/// the BUDGET: it grades the BEAD (there is no spec and no diff), and it is
+/// told to stay CHEAP — one pass, bounded reads — because the whole point of
+/// this lane is to cost a fraction of what it withholds.
+///
+/// It says nothing about WHERE the answer goes. That is
+/// [readinessLensPrompt]'s single added paragraph, and the only thing the two
+/// call sites do differently.
+String readinessLensPromptBody({
+  required Bead bead,
+  required String rubric,
+  required String nodePath,
+  required int round,
+  RubricSource? rubrics,
+  String decisionRunner = kDefaultOverlayRunner,
+  String? decisionGridHome,
+}) {
+  // The station's own verb, run FROM the grid home it resolves in. Unbound ⇒
+  // the shared unavailable rule: no invocation is named, and the lens reads
+  // the mounted registers directly.
+  final home = decisionGridHome?.trim() ?? '';
+  final rosterIndex = rosterDecisionIndexCommand(
+    runner: decisionRunner,
+    gridHome: home,
+  );
+  final lookupDirection = home.isEmpty
+      ? '. ${decisionLookupRule(runner: decisionRunner)}'
+      : ': run `$rosterIndex` '
+            'ONCE to see what the roster union already decides. It takes NO '
+            'register-directory argument on purpose — the grid adapter '
+            'resolves the live mounted-substation roster, so a SIBLING '
+            'substation\'s decisions are in the answer too; the `cd` is what '
+            'makes it run at all, because the composing station\'s verb '
+            'resolves only where that station\'s own package is.';
+  final b = StringBuffer()
+    ..writeln('# Spec-readiness intake — rubric: `$rubric`')
+    ..writeln()
+    ..writeln(
+      'You are a CHEAP pre-flight lens, upstream of everything expensive. The '
+      'bead below has NOT been specified and has NOT been built: there is no '
+      'spec and no diff to grade. You are grading the WORK BEAD ITSELF, and '
+      'exactly one question: **does it carry enough that the `specify` '
+      'architect will PLAUSIBLY produce a spec the spec-readiness committee '
+      'passes?** If it does not, it is HELD for refinement — no specify agent '
+      'and no 4-critic committee will run, and a governor will refine it '
+      'against your rationale. Review ONLY against the `$rubric` rubric below.',
+    )
+    ..writeln()
+    ..writeln('## Rubric: $rubric')
+    ..writeln(readinessRubricText(rubric, rubrics))
+    ..write(beadUnderIntake(bead))
+    ..writeln()
+    ..writeln('## Stay cheap — this is a lens, not a committee')
+    ..writeln(
+      'You are standing in the bead\'s worktree. Spend a BOUNDED look, not '
+      'an exploration$lookupDirection Grep ONLY the '
+      'surfaces the bead actually names. Do NOT design the change, do NOT '
+      'write a plan, do NOT read the tree broadly — that is the architect\'s '
+      'job downstream, and duplicating it here defeats this lane\'s purpose. '
+      'Judge the BRIEF, not the codebase.',
+    )
+    ..writeln()
+    ..writeln('## Your verdict')
+    ..writeln(
+      'Grade the BEAD A (best) through F (worst) against `$rubric` ONLY. '
+      'A, B or C ⇒ the bead DRIVES (it is specifiable). D, E or F ⇒ the bead '
+      'is HELD for refinement. Your rationale IS the refinement ask a governor '
+      'reads — so on a D or worse, say CONCRETELY what is missing and what '
+      'would fix it (a named surface, a decision to make, a constraint to '
+      'cite), never just that the bead is vague.',
+    )
+    ..writeln('Your verdict is JSON of this exact shape:')
+    ..writeln(
+      verdictJsonTemplate(
+        rubric: rubric,
+        nodePath: nodePath,
+        round: round,
+        rationaleHint: '<why + what would fix it>',
+      ),
+    )
+    ..writeln()
+    ..writeln(kVerdictStampInstruction);
+  return b.toString();
+}
+
+/// The COMPLETE readiness prompt: [readinessLensPromptBody] plus the one
+/// paragraph that names [transport]'s destination.
+///
+/// On [LensArtifactTransport] the tail is the workspace-derived ABSOLUTE
+/// canonical write path (gate-integrity #4 — cwd-invariant) with the
+/// file-write instruction as the LAST thing the prompt says (tg-291 —
+/// recency). On [LensInProcessTransport] it is [kInProcessResultInstruction],
+/// which is equally emphatic in the other direction: write NOTHING.
+String readinessLensPrompt({
+  required Bead bead,
+  required String rubric,
+  required String nodePath,
+  required String workspaceDir,
+  required int round,
+  required LensResultTransport transport,
+  RubricSource? rubrics,
+  String decisionRunner = kDefaultOverlayRunner,
+  String? decisionGridHome,
+}) {
+  final body = readinessLensPromptBody(
+    bead: bead,
+    rubric: rubric,
+    nodePath: nodePath,
+    round: round,
+    rubrics: rubrics,
+    decisionRunner: decisionRunner,
+    decisionGridHome: decisionGridHome,
+  );
+  final tail = switch (transport) {
+    LensArtifactTransport() => verdictWriteInstruction(
+      p.join(critiqueDirPath(workspaceDir), '$rubric.json'),
+    ),
+    LensInProcessTransport() => kInProcessResultInstruction,
+  };
+  return '$body\n$tail\n';
+}
+
+/// Renders the readiness lens's spawn for [transport] — the ONE place the
+/// lane's tier, environment resolution, site binding, usage posture and prompt
+/// are settled.
+///
+/// [AgentTier.mid] is the lane's declared rung (ADR-0000 A17(6)), pinned at the
+/// argv in `test/agent/model_tier_test.dart` so a flip is deliberate rather
+/// than drift. [promptSuffix] appends the artifact arm's verdict-contract
+/// repair carry; it is empty on the in-process arm, which has no prior
+/// artifact to have refused.
+///
+/// The transport also decides the USAGE posture. The artifact arm captures FT-2
+/// telemetry to the node's usage file exactly as every other lane does; the
+/// in-process arm passes no `usageOut` at all, because capture redirects the
+/// harness's whole JSON envelope to a file and the caller reads this answer
+/// from stdout.
+RuntimeConfig readinessLensRuntimeConfig({
+  required Bead bead,
+  required Workspace workspace,
+  required String rubric,
+  required String nodePath,
+  required int round,
+  required LensResultTransport transport,
+  required AgentConfig ambient,
+  required EnvironmentRegistry registry,
+  required SiteBinding siteBinding,
+  RubricSource? rubrics,
+  String decisionRunner = kDefaultOverlayRunner,
+  String? decisionGridHome,
+  AgentEnvironment? typedEnvironment,
+  Map<String, String> stepParams = const {},
+  String promptSuffix = '',
+}) {
+  final config = resolveAgentConfig(
+    tier: AgentTier.mid,
+    ambient: ambient,
+    beadMetadata: bead.metadata,
+    stepParams: stepParams,
+    registry: registry,
+    typedEnvironment: typedEnvironment,
+  );
+  final environment = registry.resolve(config.harness);
+  return spawnFor(
+    environment: environment,
+    model: config.params['model'],
+    endpoint: siteBinding.endpointFor(
+      name: config.harness,
+      environment: environment,
+    ),
+    brief: AgentBrief(
+      task:
+          readinessLensPrompt(
+            bead: bead,
+            rubric: rubric,
+            nodePath: nodePath,
+            workspaceDir: workspace.workspaceDir,
+            round: round,
+            transport: transport,
+            rubrics: rubrics,
+            decisionRunner: decisionRunner,
+            decisionGridHome: decisionGridHome,
+          ) +
+          promptSuffix,
+    ),
+    workspace: workspace,
+    usageOut: switch (transport) {
+      // CAPTURE-ONLY usage telemetry (FT-2), same as every other lane.
+      LensArtifactTransport() => usageReportPath(nodePath),
+      LensInProcessTransport() => null,
+    },
+  );
 }
 
 /// Renders the work bead into the readiness prompt — the same title/task/design/

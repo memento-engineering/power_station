@@ -1221,8 +1221,11 @@ void main() {
       // 1. It constructs NO process invocation of its own (unlike the gating
       //    critic's `sh -c`): every spawn is delegated to the resolved harness,
       //    which runs the read-only agent. So no bd/git argv can exist here.
+      //    The probe is the CONSTRUCTOR, word-bounded: `discoveryLensRuntimeConfig`
+      //    RETURNS one the harness built and is not an invocation of its own,
+      //    and an unanchored substring cannot tell the two apart.
       expect(
-        source.contains('RuntimeConfig('),
+        RegExp(r'\bRuntimeConfig\(').hasMatch(source),
         isFalse,
         reason:
             'the discovery circuit builds no invocation of its own — the '
@@ -1239,6 +1242,208 @@ void main() {
       //    this circuit's own derived paths under `.grid/`: its whole write
       //    surface is its own artifacts.
       expect(RegExp('writeAsStringSync').allMatches(source), hasLength(1));
+    });
+
+    test('ONE gather serves both call sites — the capability and the shared '
+        'helper answer the SAME profile and the SAME bounds', () async {
+      // The pin behind the pre-stamp advisory's evidence parity: the circuit
+      // step and the fileless advisory reach the deterministic gather through
+      // one function, so neither can grow its own bounds.
+      final work = bead('tg-1').copyWith(
+        description:
+            'Extend `buildSpecifyBrief` in `lib/src/code/specify.dart`.',
+      );
+      List<ResolvedAnchor> resolver(String dir, List<String> paths) => [
+        for (final anchor in paths)
+          ResolvedAnchor(
+            anchor: anchor,
+            resolved: true,
+            contents: boundDiscoveryEvidence(
+              kind: 'code-anchor',
+              subject: anchor,
+              source: anchor,
+              fullText: 'class Fake {}',
+            ),
+            neighbors: const ['lib/src/code/committee.dart'],
+          ),
+      ];
+
+      final direct = await gatherDiscoveryAnchors(
+        bead: work,
+        workspaceDir: '/w/tg-1',
+        round: 0,
+        substation: '',
+        live: true,
+        rubricIds: kSpecCommitteeRubrics,
+        rubrics: (id) => '($id bands)',
+        resolver: resolver,
+      );
+      final outcome =
+          await AnchorsCapability(
+            rubricIds: kSpecCommitteeRubrics,
+            rubrics: (id) => '($id bands)',
+            resolver: resolver,
+            clearer: (_) {},
+          ).run(
+            FakeTreeContext(
+              values: {
+                Bead: work,
+                Workspace: testWorkspace('tg-1', workspaceDir: '/w/tg-1'),
+                SessionHandle: _session,
+              },
+            ),
+            stepArgs('tg-1/spec_review/discovery/$kAnchorsStep'),
+          );
+
+      expect(outcome, isA<Ok>());
+      final payload = (outcome as Ok).payload!;
+      expect(direct, isNotNull);
+      // The WHOLE assembled profile, compared on its own wire form.
+      expect(payload['anchors'], '${direct!.anchors.length}');
+      expect(payload['rubrics'], '${direct.rubrics.length}');
+      expect(payload['evidence'], '${direct.evidenceIds.length}');
+      expect(
+        jsonEncode(direct.toJson()),
+        jsonEncode(
+          DiscoveryAnchors.fromJson(
+            jsonDecode(jsonEncode(direct.toJson())),
+          )!.toJson(),
+        ),
+      );
+      // And the bounds a lens is actually handed are the same projection.
+      for (final lens in kDiscoveryLenses) {
+        expect(
+          projectDiscoveryEvidence(
+            direct,
+            lens: lens,
+            round: 0,
+            workBeadId: work.id,
+          ).renderedEvidence,
+          isNotEmpty,
+        );
+      }
+    });
+
+    test(
+      'a CANCELLED gather returns null and never assembles a profile',
+      () async {
+        // The helper polls the caller's own token; it never invents a
+        // cancellation channel of its own.
+        expect(
+          await gatherDiscoveryAnchors(
+            bead: bead('tg-1'),
+            workspaceDir: '/w/tg-1',
+            round: 0,
+            substation: '',
+            live: false,
+            isCancelled: () => true,
+          ),
+          isNull,
+        );
+      },
+    );
+
+    test('the FILELESS lens arm shares prefix and evidence and swaps ONLY the '
+        'closing destination paragraph', () {
+      final projection = _project(_completeAnchors(), kDecisionLens);
+      DiscoveryLensPromptAssembly assemble(LensResultTransport transport) =>
+          assembleDiscoveryLensPrompt(
+            lens: kDecisionLens,
+            sessionId: _session.sessionId,
+            nodePath: 'pow-x/spec_review/discovery/$kDecisionLens',
+            round: 7,
+            workspaceDir: '/w/pow-x',
+            projection: projection,
+            transport: transport,
+          );
+      final artifact = assemble(const LensArtifactTransport());
+      final inProcess = assemble(const LensInProcessTransport());
+
+      // Everything up to the stamp instruction — the lens brief, the report
+      // schema, the cite-the-offence rules and the WHOLE evidence bundle — is
+      // byte-identical, which is what makes the two verdicts one judgement.
+      String head(String prompt) =>
+          prompt.substring(0, prompt.indexOf(kLensStampInstruction));
+      expect(head(inProcess.prompt), head(artifact.prompt));
+      expect(head(inProcess.prompt), contains(projection.renderedEvidence));
+
+      // The ONE difference: no report path, and an explicit write refusal.
+      expect(
+        artifact.prompt,
+        contains(lensReportPath('/w/pow-x', kDecisionLens)),
+      );
+      expect(
+        inProcess.prompt,
+        isNot(contains(lensReportPath('/w/pow-x', kDecisionLens))),
+      );
+      expect(inProcess.prompt, isNot(contains('.grid/discovery')));
+      expect(
+        inProcess.prompt.trimRight(),
+        endsWith(kInProcessResultInstruction),
+      );
+      // The fileless tail is RESERVED exactly as the artifact tail is, so a
+      // clipped bundle can never eat the stamps or the destination.
+      final oversize = assembleDiscoveryLensPrompt(
+        lens: kDecisionLens,
+        sessionId: _session.sessionId,
+        nodePath: 'pow-x/spec_review/discovery/$kDecisionLens',
+        round: 7,
+        workspaceDir: '/w/pow-x',
+        projection: DiscoveryEvidenceProjection(
+          lens: kDecisionLens,
+          round: 7,
+          workBeadId: 'pow-x',
+          evidenceIds: const [],
+          renderedEvidence: '${'x' * 200}\n' * 4000,
+          gaps: const [],
+        ),
+        transport: const LensInProcessTransport(),
+      );
+      expect(oversize.evidenceTruncated, isTrue);
+      expect(
+        utf8.encode(oversize.prompt).length,
+        lessThanOrEqualTo(kMaxDecisionLensPromptBytes),
+      );
+      expect(
+        oversize.prompt.trimRight(),
+        endsWith(kInProcessResultInstruction),
+      );
+    });
+
+    test('discoveryLensOutcomeFromResultText reads the LAST report and refuses '
+        'a mis-addressed one', () {
+      const report =
+          '{"outcome":"report","lens":"$kDecisionLens","version":2,'
+          '"context":[],"violations":[]}';
+      const foreign =
+          '{"outcome":"report","lens":"$kCodeLens","version":2,'
+          '"context":[],"violations":[]}';
+      final decoded = discoveryLensOutcomeFromResultText(
+        'draft $foreign then the answer: $report',
+        lens: kDecisionLens,
+      );
+      expect(decoded, isA<LensReport>());
+      expect(decoded!.lens, kDecisionLens);
+      // A report naming ANOTHER lane is a mis-addressed answer, not a verdict.
+      expect(
+        discoveryLensOutcomeFromResultText(foreign, lens: kDecisionLens),
+        isNull,
+      );
+      expect(
+        discoveryLensOutcomeFromResultText('prose only', lens: kDecisionLens),
+        isNull,
+      );
+      expect(discoveryLensOutcomeFromResultText(null, lens: kCodeLens), isNull);
+      // The typed non-answer decodes on this arm too — a lens that states an
+      // evidence hole is not a missing lane.
+      expect(
+        discoveryLensOutcomeFromResultText(
+          '{"outcome":"insufficient-evidence","lens":"$kCodeLens","version":2,'
+          '"gaps":[{"evidenceId":"code-anchor:x","reason":"TRUNCATED"}]}',
+          lens: kCodeLens,
+        ),
+        isA<InsufficientEvidenceReport>(),
+      );
     });
 
     test('explore-decision prompt assembly stays inside its byte budget', () {

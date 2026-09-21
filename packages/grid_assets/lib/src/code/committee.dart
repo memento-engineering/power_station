@@ -1235,6 +1235,59 @@ String verdictWriteInstruction(String path) {
 /// prompt embeds.
 typedef RubricSource = String Function(String rubricId);
 
+/// WHERE a lens is asked to leave its answer — the ONE axis that differs
+/// between the in-pipeline circuits and the filing verbs' pre-stamp advisory.
+///
+/// Sealed on purpose, and consumed with an exhaustive `switch`: a prompt
+/// builder that gained a third destination without answering for it would ship
+/// a lens that writes its verdict somewhere nobody reads. Everything ELSE about
+/// a lens — its rubric, its prompt body, its verdict schema version, its
+/// evidence bounds — is transport-invariant, which is what lets the spec-review
+/// route and the pre-stamp advisory share one implementation instead of
+/// growing a second lens apiece.
+sealed class LensResultTransport {
+  /// Creates a transport arm.
+  const LensResultTransport();
+}
+
+/// The CIRCUIT arm: the lens writes its answer to a stamped file in the
+/// worktree, and a route reads it back through the shared freshness fence.
+///
+/// This is the in-pipeline transport every committee, critic and discovery
+/// lens has always ridden. It is what makes a verdict durable across a lane
+/// restart, and what a round's join reads.
+final class LensArtifactTransport extends LensResultTransport {
+  /// Creates the artifact arm.
+  const LensArtifactTransport();
+}
+
+/// The IN-PROCESS arm: the lens writes NO file and returns its answer as the
+/// last JSON value in its reply, which the caller reads off captured stdout.
+///
+/// Used by the filing verbs' pre-stamp advisory, which runs OUTSIDE any
+/// session: it has no node path to key an artifact to, no round to stamp it
+/// for, and — deliberately — nothing a spec-review route could ever mistake
+/// for a published verdict. A lens spawned on this arm also runs with no usage
+/// capture, so its whole answer arrives on stdout.
+final class LensInProcessTransport extends LensResultTransport {
+  /// Creates the in-process arm.
+  const LensInProcessTransport();
+}
+
+/// The IN-PROCESS transport's closing instruction — the exact counterpart of
+/// [verdictWriteInstruction], and the one paragraph a pre-stamp prompt says
+/// differently from the circuit prompt it otherwise shares byte-for-byte.
+///
+/// It is as emphatic about writing NOTHING as the artifact arm is about
+/// writing the file: an advisory that left a verdict on disk could collide
+/// with the round artifact a later spec-review lane reads.
+const String kInProcessResultInstruction =
+    'Emit that JSON as the LAST thing in your reply, and write NO file. There '
+    'is no verdict path for this run: you are a PRE-FLIGHT advisory outside '
+    'any session, your answer is read from your reply text alone, and a file '
+    'you write here would be read by nothing. Do NOT create, move or replace '
+    'any file, and do NOT run any command that would.';
+
 /// The pluggable critique-dir hygiene seam [ClearCritiqueCapability] uses
 /// (D-9-style injection, mirrors [RubricSource]) — defaults to the real
 /// delete+recreate; tests inject a no-op so the offline suite never touches a
@@ -1864,7 +1917,7 @@ class CriticCapability extends ProcessCapability {
       );
       if (durable != null) return GateOutcome.clear;
 
-      final recovered = _verdictFromResultText(
+      final recovered = verdictFromResultText(
         readEnvelopeResultText(workspaceDir, args.nodePath),
       );
       if (recovered == null) {
@@ -3391,9 +3444,22 @@ bool _endsWithPath(String path, String suffix) {
   return boundary == p.separator || boundary == '/';
 }
 
-/// Recovers a verdict from the critic's captured stdout so the completion
-/// probe can persist it as the canonical durability artifact.
-Map<String, String>? _verdictFromResultText(String? text) {
+/// Recovers a verdict from a critic's captured output — the SHARED decoder for
+/// every caller that has the lane's answer as TEXT rather than as an artifact.
+///
+/// Two callers ride it today and they must never drift: the completion probe,
+/// which persists the recovery as the canonical durability artifact, and the
+/// filing verbs' in-process pre-stamp advisory
+/// ([LensInProcessTransport]), which has no artifact at all and reads the
+/// harness's stdout directly. A second grade parser beside this one would let
+/// the same lens answer two different grades depending on which call site read
+/// it, which is exactly the divergence the shared transport stack exists to
+/// prevent.
+///
+/// Returns null for text carrying no well-formed verdict; the caller decides
+/// what an unparseable answer means (the probe fails closed, the advisory
+/// refuses loudly).
+Map<String, String>? verdictFromResultText(String? text) {
   if (text == null) return null;
   final trimmed = text.trim();
   if (trimmed.isEmpty) return null;
