@@ -14,6 +14,12 @@
 /// the probe implementation is DI while the interval is a VALUE — both carried
 /// together as [EnvironmentProbeArming], an ambient value a nested
 /// `HarnessProvider` INHERITS (ADR-0002 D5 per-substation arming).
+///
+/// STALENESS IS THE TREE'S ANSWER, not a hand-kept counter. One probe pass is a
+/// VALUE mounted above a `LifecycleProvider`; replacing that value is what
+/// starts a pass, and the [TreeDependencyScope] the participant is handed is
+/// what an in-flight pass tests before it publishes. `_disposed` still answers
+/// REMOVAL — the two questions stay separate.
 library;
 
 import 'dart:async';
@@ -126,13 +132,49 @@ class AvailabilityAssets extends SingleChildStatefulSeed {
       _AvailabilityAssetsState();
 }
 
+/// ONE probe pass, as a tree VALUE — identity IS the pass.
+///
+/// The host replaces it when a watched dependency changes and on every bounded
+/// tick; mounting the replacement delivers a fresh dependency pass to
+/// [_AvailabilityLifecycle], which invalidates the previous pass's scope before
+/// the newer probe starts. That is the whole supersession mechanism: a slow
+/// pass cannot publish over a newer one, and nothing counts generations.
+final class _AvailabilityProbePass {
+  _AvailabilityProbePass();
+}
+
+/// Owns the probe pass's dependency callback without retaining a tree reader
+/// outside it (the `CapabilityHost` precedent in `grid_engine`'s
+/// `circuit/capability_host.dart`).
+///
+/// Its ONLY field is the host State, and its dependency callback does one
+/// thing: hand the call-scoped reader and this pass's [TreeDependencyScope] to
+/// a single host method, which watches there. The scope rides into the host's
+/// probe run as a PARAMETER and is stored nowhere.
+final class _AvailabilityLifecycle implements TreeLifecycleParticipant {
+  _AvailabilityLifecycle(this._host);
+
+  final _AvailabilityAssetsState _host;
+
+  @override
+  void initState(TreeSnapshotReader reader) {}
+
+  @override
+  void didChangeDependencies(
+    TreeWatchingReader reader,
+    TreeDependencyScope scope,
+  ) => _host._startProbePass(reader, scope);
+
+  @override
+  void dispose() {}
+}
+
 class _AvailabilityAssetsState extends SingleChildState<AvailabilityAssets> {
   EnvironmentRegistry? _registry;
   SiteBinding _siteBinding = SiteBinding.none;
-  EnvironmentProbe? _probe;
   AvailableEnvironments? _present;
   ProbeTicker? _ticker;
-  var _generation = 0;
+  var _pass = _AvailabilityProbePass();
   var _disposed = false;
 
   @override
@@ -145,49 +187,70 @@ class _AvailabilityAssetsState extends SingleChildState<AvailabilityAssets> {
     final siteBinding =
         context.dependOnInheritedSeedOfExactType<SiteBinding>() ??
         SiteBinding.none;
-    final probe = seed.probe;
-    // `==` for all three: `SiteBinding` has value equality, and
-    // `EnvironmentRegistry` declares no `==` so it compares by IDENTITY — which
-    // is exactly what `InheritedSeed.updateShouldNotify` already compares, and
+    // `==` for both: `SiteBinding` has value equality, and `EnvironmentRegistry`
+    // declares no `==` so it compares by IDENTITY — which is exactly what
+    // `InheritedSeed.updateShouldNotify` already compares, and
     // `buildBuiltinEnvironmentRegistry()` returns a canonical `const`.
     if (_ticker != null &&
         registry == _registry &&
-        probe == _probe &&
         siteBinding == _siteBinding) {
       return;
     }
 
     _registry = registry;
     _siteBinding = siteBinding;
-    _probe = probe;
     // Fall back to the boot-validated default while the new pass is in flight
     // (ADR-0000 A35(5)) rather than publishing a stale set.
     _present = null;
     _ticker?.cancel();
-    _ticker = seed.schedule(seed.interval, _reprobe);
-    _generation++;
-    unawaited(_runProbe(registry, siteBinding, probe, _generation));
+    _ticker = null;
+    _pass = _AvailabilityProbePass();
   }
 
+  /// Starts the pass [scope] qualifies: the bounded ticker (once per arming)
+  /// and ONE probe run. Called from the owning lifecycle's dependency callback
+  /// — the `CapabilityHost` shape, where the participant holds only its host
+  /// and every watch happens here — so the scope handed to the run is always
+  /// that pass's own.
+  ///
+  /// The marker is the participant's SUBSCRIPTION, not this pass's read: the
+  /// host's own `didChangeDependencies` already applied the registry and the
+  /// site binding (with their absent-value fallbacks) before the subtree
+  /// carrying the participant was built. Watching it is a COMPLETE
+  /// subscription, because the host mints a replacement marker on exactly the
+  /// changes that supersede a probe — and, mounting it directly above this
+  /// provider, can never let the lookup miss.
+  ///
+  /// Watching [EnvironmentRegistry] and [SiteBinding] here as well would be
+  /// worse than redundant. Both are OPTIONAL above this asset — the host falls
+  /// back to the builtin registry and to [SiteBinding.none] — and `watch` on a
+  /// MISS parks a pending registration, asserting that a `ProviderScope` exists
+  /// to park it with. A bare composition is supported here, so the subscription
+  /// stays on the one value this asset mounts itself.
+  void _startProbePass(TreeWatchingReader reader, TreeDependencyScope scope) {
+    reader.watch<_AvailabilityProbePass>();
+    _ticker ??= seed.schedule(seed.interval, _reprobe);
+    unawaited(_runProbe(scope));
+  }
+
+  /// The bounded tick. It starts no probe of its own: it replaces the pass
+  /// marker, and the dependency pass that lands invalidates the older scope
+  /// before the newer run begins — so a tick can never publish behind itself.
   void _reprobe() {
     if (_disposed) return;
-    final registry = _registry;
-    final probe = _probe;
-    if (registry == null || probe == null) return;
-    _generation++;
-    unawaited(_runProbe(registry, _siteBinding, probe, _generation));
+    setState(() => _pass = _AvailabilityProbePass());
   }
 
   /// ONE probe pass. Probes only [EnvironmentRegistry.validatedEnvironments],
   /// so the published set can only ever hold registry members that passed boot
   /// legality (ADR-0000 A35(1)) — presence NARROWS the legal set, never widens
   /// it.
-  Future<void> _runProbe(
-    EnvironmentRegistry registry,
-    SiteBinding siteBinding,
-    EnvironmentProbe probe,
-    int generation,
-  ) async {
+  Future<void> _runProbe(TreeDependencyScope scope) async {
+    // The host's own dependency callback stores the registry BEFORE the subtree
+    // that owns this pass is ever built, so a pass without one cannot exist.
+    final registry = _registry!;
+    final siteBinding = _siteBinding;
+    final probe = seed.probe;
     final present = <AgentEnvironment>{};
     for (final environment in registry.validatedEnvironments) {
       final name = registry.nameOf(environment);
@@ -219,7 +282,9 @@ class _AvailabilityAssetsState extends SingleChildState<AvailabilityAssets> {
       }
       if (reachable) present.add(environment);
     }
-    if (_disposed || generation != _generation) return;
+    // Two questions, two guards: `_disposed` answers REMOVAL and the scope
+    // answers STALENESS (a newer pass started while this one was in flight).
+    if (_disposed || !scope.isCurrent) return;
     final next = AvailableEnvironments(present);
     // Value equality: an unchanged presence set re-publishes nothing, so a
     // five-minute tick never churns a single dependent.
@@ -237,13 +302,21 @@ class _AvailabilityAssetsState extends SingleChildState<AvailabilityAssets> {
         (registry == null
             ? AvailableEnvironments.none
             : AvailableEnvironments.fromRegistry(registry));
-    return InheritedSeed<AvailableEnvironments>(value: present, child: child);
+    return InheritedSeed<_AvailabilityProbePass>(
+      value: _pass,
+      child: LifecycleProvider<_AvailabilityLifecycle>(
+        create: () => _AvailabilityLifecycle(this),
+        child: InheritedSeed<AvailableEnvironments>(
+          value: present,
+          child: child,
+        ),
+      ),
+    );
   }
 
   @override
   void dispose() {
     _disposed = true;
-    _generation++;
     _ticker?.cancel();
     _ticker = null;
   }

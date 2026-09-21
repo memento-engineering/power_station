@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -106,6 +107,29 @@ class _FakeRead {
   }
 }
 
+/// A Completer-controlled read seam: every key read SUSPENDS on its own gate,
+/// so a probe holds one request's load open across a request change and
+/// releases it in whatever order the race it is proving needs.
+///
+/// IO-free, like [_FakeRead]: it answers from the same in-memory fixture PEMs,
+/// so the only thing below the fake seam is a Completer this test completes.
+class _GatedRead {
+  /// Every path this fake was asked to read, in order.
+  final paths = <String>[];
+  final _gates = <Completer<void>>[];
+
+  Future<String> call(String path) async {
+    paths.add(path);
+    final gate = Completer<void>();
+    _gates.add(gate);
+    await gate.future;
+    return _pems[path] ?? (throw StateError('no fixture PEM for $path'));
+  }
+
+  /// Lets the [index]th suspended read finish.
+  void release(int index) => _gates[index].complete();
+}
+
 class _FakeTransport implements GitHubHttpTransport {
   final bearerTokens = <String>[];
   @override
@@ -133,11 +157,11 @@ GitHubAppConfig _config(String appId, {int installationId = 1}) =>
 GitHubAppCredentialLoader _loader(
   Map<String, String> environment,
   _FakeStat stat,
-  _FakeRead read,
+  Future<String> Function(String) read,
 ) => GitHubAppCredentialLoader(
   environment: () => environment,
   stat: stat.call,
-  read: read.call,
+  read: read,
 );
 
 Seed _assets({
@@ -197,7 +221,7 @@ void main() {
               child: _assets(
                 config: _config('one'),
                 privateKeyVar: _oneVar,
-                loader: _loader(values, stat, read),
+                loader: _loader(values, stat, read.call),
                 transportFactory: () {
                   factories++;
                   return _FakeTransport();
@@ -233,7 +257,7 @@ void main() {
             child: _assets(
               config: _config('one'),
               privateKeyVar: _oneVar,
-              loader: _loader(const {_oneVar: _onePath}, stat, read),
+              loader: _loader(const {_oneVar: _onePath}, stat, read.call),
               transportFactory: () => transport,
               observe: (value) => observed = value,
             ),
@@ -264,7 +288,7 @@ void main() {
               child: _assets(
                 config: _config('one'),
                 privateKeyVar: _oneVar,
-                loader: _loader(const {_oneVar: _onePath}, stat, read),
+                loader: _loader(const {_oneVar: _onePath}, stat, read.call),
                 transportFactory: () {
                   factories++;
                   return _FakeTransport();
@@ -298,7 +322,7 @@ void main() {
         final loader = _loader(
           const {_oneVar: _onePath, _twoVar: _twoPath},
           stat,
-          read,
+          read.call,
         );
         final observations = <GitHubAppClient?>[];
         var factories = 0;
@@ -360,7 +384,7 @@ void main() {
         });
         final read = _FakeRead();
         final environment = const {_oneVar: _onePath, _twoVar: _twoPath};
-        final loader = _loader(environment, stat, read);
+        final loader = _loader(environment, stat, read.call);
         final oneTransport = _FakeTransport();
         final twoTransport = _FakeTransport();
         GitHubAppClient? one;
@@ -424,7 +448,7 @@ void main() {
                 'GRID_GITHUB_APP_KEY_NICHOLAS': '/hostile/nicholas.pem',
               },
               stat,
-              read,
+              read.call,
             ),
             transportFactory: () => transport,
             observe: (value) => observed = value,
@@ -437,6 +461,75 @@ void main() {
       expect(read.paths, [_onePath]);
       await _send(observed!);
       _verify(transport, _onePublicKey);
+    });
+
+    test('dependency supersession drops an older key load while the asset '
+        'stays mounted', () async {
+      final stat = _FakeStat(const {
+        _onePath: GitHubKeyFileStat(
+          type: FileSystemEntityType.file,
+          mode: 0x180,
+        ),
+        _twoPath: GitHubKeyFileStat(
+          type: FileSystemEntityType.file,
+          mode: 0x180,
+        ),
+      });
+      final read = _GatedRead();
+      final loader = _loader(
+        const {_oneVar: _onePath, _twoVar: _twoPath},
+        stat,
+        read.call,
+      );
+      final observations = <GitHubAppClient?>[];
+      var factories = 0;
+      late _HostState host;
+      Seed describe(String privateKeyVar) => _assets(
+        config: _config('one'),
+        privateKeyVar: privateKeyVar,
+        loader: loader,
+        transportFactory: () {
+          factories++;
+          return _FakeTransport();
+        },
+        observe: observations.add,
+      );
+      final owner = TreeOwner();
+      addTearDown(owner.dispose);
+      owner.mountRoot(
+        sdk.ProviderScope(
+          child: _Host(
+            onCreate: (value) => host = value,
+            describe: () => describe(_oneVar),
+          ),
+        ),
+      );
+      owner.flush();
+      // Request N is SUSPENDED mid-load, holding the older continuation open.
+      await _settle(owner, () => read.paths.length == 1);
+      expect(read.paths, [_onePath]);
+      expect(factories, 0);
+
+      // The SAME asset stays mounted and its watched request is replaced:
+      // this is supersession, not removal.
+      host.swap(() => describe(_twoVar));
+      owner.flush();
+      await _settle(owner, () => read.paths.length == 2);
+      expect(read.paths, [_onePath, _twoPath]);
+
+      // N+1 lands: exactly one transport and one client are ever built.
+      read.release(1);
+      await _settle(owner, () => observations.last != null);
+      final current = observations.last;
+      expect(current, isNotNull);
+      expect(factories, 1);
+
+      // N is released LAST. Its continuation is current for nobody, so it
+      // builds no client and publishes nothing over N+1.
+      read.release(0);
+      await _settle(owner);
+      expect(factories, 1);
+      expect(observations.last, same(current));
     });
   });
 }

@@ -103,6 +103,31 @@ Future<BdResult> Function(List<String>) _freshFiling(
       _ => throw StateError('unscripted bd call: \$args'),
     };
 
+/// A Completer-controlled fresh-read seam over [_RecordingMountBdRunner]: every
+/// `query` SUSPENDS on its own gate (the dependency rows answer immediately),
+/// so a probe holds one read open across a dependency change and answers the
+/// gates in whatever order the race it is proving needs.
+///
+/// A Fake performs no IO: the only thing below this seam is a Completer.
+class _GatedMountReads {
+  final gates = <Completer<BdResult>>[];
+  late final _RecordingMountBdRunner runner = _RecordingMountBdRunner((args) {
+    if (args.first != 'query') {
+      return Future<BdResult>.value(_depListReply(const []));
+    }
+    final gate = Completer<BdResult>();
+    gates.add(gate);
+    return gate.future;
+  });
+
+  /// Answers the [index]th suspended read with a bead that mounts.
+  void answer(int index) => gates[index].complete(
+    _queryReply(
+      const Bead(id: 'pow-test', metadata: _legacyReceipt, labels: []),
+    ),
+  );
+}
+
 /// The two argv the fresh filing read spawns, in order.
 const List<List<String>> _freshFilingCalls = [
   ['query', 'id=pow-test', '--all', '--json', '--limit', '0'],
@@ -1022,6 +1047,111 @@ void main() {
       owner.flush();
     }, throwsStateError);
   });
+
+  test(
+    'dependency supersession and dispose drop stale mount-eligibility reads',
+    () async {
+      const snapshot = Bead(id: 'pow-test', metadata: {}, labels: []);
+      final reads = _GatedMountReads();
+      ServiceBundle? observed;
+      late _HostState host;
+      final probe = _Probe(
+        (context) => observed = context
+            .dependOnInheritedSeedOfExactType<ServiceBundle>(),
+      );
+      BdRunner runnerFor(String storeRoot) => reads.runner;
+      Seed describe(String root, {String gridRoot = '/work/grid'}) =>
+          InheritedSeed<sdk.GridRoot>(
+            value: sdk.GridRoot(path: gridRoot),
+            child: _underSubstation(
+              'power_station',
+              root,
+              MountEligibilityAssets(runnerFor: runnerFor, child: probe),
+            ),
+          );
+      final owner = TreeOwner();
+      addTearDown(owner.dispose);
+      owner.mountRoot(
+        _Host(
+          onCreate: (state) => host = state,
+          describe: () => describe('/work/ps'),
+        ),
+      );
+      owner.flush();
+
+      // Pass N's read is SUSPENDED, holding the older continuation open.
+      expect(
+        _refusalClause(observed!.mountEligibility!(snapshot)),
+        'fresh mount-eligibility read pending: pow-test',
+      );
+      expect(reads.gates, hasLength(1));
+
+      // The SAME asset stays mounted and its watched substation scope changes:
+      // this is supersession, not removal.
+      host.swap(() => describe('/work/other'));
+      owner.flush();
+
+      // The dependency reset cleared the in-flight set, so the same bead is
+      // read again under pass N+1.
+      expect(
+        _refusalClause(observed!.mountEligibility!(snapshot)),
+        'fresh mount-eligibility read pending: pow-test',
+      );
+      expect(reads.gates, hasLength(2));
+
+      // N answers first, and it is current for nobody: it neither applies its
+      // decision nor releases N+1's per-bead de-duplication, so no third read
+      // is ever spawned behind the pending one.
+      reads.answer(0);
+      await pumpEventQueue();
+      owner.flush();
+      expect(
+        _refusalClause(observed!.mountEligibility!(snapshot)),
+        'fresh mount-eligibility read pending: pow-test',
+      );
+      expect(reads.gates, hasLength(2));
+
+      // N+1 answers, and its decision is the only one ever projected.
+      reads.answer(1);
+      await pumpEventQueue();
+      owner.flush();
+      expect(observed!.mountEligibility!(snapshot), isA<MountEligible>());
+
+      // The GRID HOME is the other half of store identity, and it is watched
+      // on its own account: relocating the grid while the substation root
+      // stands still is a different set of stores from the one that answer was
+      // read out of, so it supersedes the cached decision exactly as a
+      // substation change does — and a pass N+2 read starts for the same bead.
+      host.swap(() => describe('/work/other', gridRoot: '/elsewhere/grid'));
+      owner.flush();
+      expect(
+        _refusalClause(observed!.mountEligibility!(snapshot)),
+        'fresh mount-eligibility read pending: pow-test',
+      );
+      expect(reads.gates, hasLength(3));
+      reads.answer(2);
+      await pumpEventQueue();
+      owner.flush();
+      expect(observed!.mountEligibility!(snapshot), isA<MountEligible>());
+
+      // DISPOSAL is the other half of the pair: a read begun under a live pass
+      // and answered after its owner unmounted applies nothing and raises
+      // nothing (an unhandled async error would fail this test here).
+      final afterDispose = _GatedMountReads();
+      final unmounted = _mountEligibilityAsset((_) => afterDispose.runner);
+      expect(
+        _refusalClause(unmounted.bundle()!.mountEligibility!(snapshot)),
+        'fresh mount-eligibility read pending: pow-test',
+      );
+      expect(afterDispose.gates, hasLength(1));
+      unmounted.owner.dispose();
+      afterDispose.answer(0);
+      await pumpEventQueue();
+      // The read really did run to completion below the seam; it simply landed
+      // nowhere.
+      expect(afterDispose.runner.calls, _freshFilingCalls);
+    },
+  );
 
   test('GitServices remains a subscribing compatibility carrier', () {
     const services = GitServices();

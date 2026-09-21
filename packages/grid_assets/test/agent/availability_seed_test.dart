@@ -1,6 +1,8 @@
 // Bead `pow-n6n.3` (epic `pow-n6n`) - the availability seed: presence in the
 // tree IS availability (ADR-0006 D3). Fakes only; nothing here touches a
 // machine.
+import 'dart:async';
+
 import 'package:genesis_tree/genesis_tree.dart';
 import 'package:grid_assets/grid_assets.dart';
 import 'package:test/test.dart';
@@ -72,6 +74,57 @@ class _FakeProbe {
   }
 }
 
+/// A Completer-controlled Fake probe: every environment probe SUSPENDS on its
+/// own gate, so a test holds one pass in flight across the start of the next
+/// one and answers them in whatever order the race it is proving needs.
+///
+/// IO-free like [_FakeProbe]: the only thing below the seam is a Completer.
+class _GatedProbe {
+  final List<String> calls = <String>[];
+  final _gates = <Completer<bool>>[];
+
+  Future<bool> call(EnvironmentProbeRequest request) {
+    calls.add(request.name);
+    final gate = Completer<bool>();
+    _gates.add(gate);
+    return gate.future;
+  }
+
+  /// Answers the [index]th suspended probe.
+  void answer(int index, {required bool reachable}) =>
+      _gates[index].complete(reachable);
+}
+
+/// A mutable `InheritedSeed<SiteBinding>`: the supersession probes REBIND the
+/// site while the availability seed below stays mounted, which is what makes
+/// the race a dependency change rather than a remount.
+class _SiteBindingHost extends SingleChildStatefulSeed {
+  const _SiteBindingHost({
+    required this.initial,
+    required this.onCreate,
+    super.child,
+  });
+
+  final SiteBinding initial;
+  final void Function(_SiteBindingHostState) onCreate;
+
+  @override
+  SingleChildState<_SiteBindingHost> createState() => _SiteBindingHostState();
+}
+
+class _SiteBindingHostState extends SingleChildState<_SiteBindingHost> {
+  late SiteBinding _binding = seed.initial;
+
+  @override
+  void initState() => seed.onCreate(this);
+
+  void rebind(SiteBinding binding) => setState(() => _binding = binding);
+
+  @override
+  Seed buildWithChild(TreeContext context, Seed child) =>
+      InheritedSeed<SiteBinding>(value: _binding, child: child);
+}
+
 /// A Fake schedule: captures the tick so the bounded re-probe FIRES on demand.
 class _FakeSchedule implements ProbeTicker {
   void Function()? _onTick;
@@ -107,6 +160,13 @@ const AgentEnvironment _seat = AgentEnvironment(
 
 const EnvironmentRegistry _registry = EnvironmentRegistry(
   custom: {'frontier': _frontier, 'local': _local},
+);
+
+/// ONE environment, so ONE probe is a whole pass: a race probe can suspend a
+/// pass, start the next one and answer them out of order without book-keeping
+/// which environment each gate belongs to.
+const EnvironmentRegistry _soloRegistry = EnvironmentRegistry(
+  custom: {'frontier': _frontier},
 );
 
 final SiteBinding _bound = SiteBinding({
@@ -151,7 +211,14 @@ Future<_Mounted> _mount(
 
 /// Drains the in-flight probe pass and flushes what it dirtied (the
 /// `track_f_composition_assets_test.dart` idiom).
+///
+/// TWO flushes, one pump, because a pass now BEGINS with a rebuild: the pass
+/// marker is a tree value, so the leading flush is what delivers the dependency
+/// pass that starts the probe, and the trailing one publishes what the probe's
+/// result dirtied. A bounded tick only replaces the marker, so without the
+/// leading flush it would never reach the probe at all.
 Future<void> _settle(TreeOwner owner) async {
+  owner.flush();
   await pumpEventQueue();
   owner.flush();
 }
@@ -292,6 +359,132 @@ void main() {
       expect(mounted.seen.length, builds);
       mounted.owner.dispose();
     });
+
+    test('dependency supersession drops an older probe result while the '
+        'seed stays mounted', () async {
+      final probe = _GatedProbe();
+      final schedule = _FakeSchedule();
+      final seen = <AvailableEnvironments>[];
+      late _SiteBindingHostState site;
+      final owner = TreeOwner();
+      addTearDown(owner.dispose);
+      owner.mountRoot(
+        InheritedSeed<EnvironmentRegistry>(
+          value: _soloRegistry,
+          child: _SiteBindingHost(
+            initial: _bound,
+            onCreate: (state) => site = state,
+            child: AvailabilityAssets(
+              probe: probe.call,
+              schedule: schedule.start,
+              child: _Watcher(seen),
+            ),
+          ),
+        ),
+      );
+      // Pass N is SUSPENDED mid-probe, holding the older continuation open.
+      owner.flush();
+      expect(probe.calls, ['frontier']);
+
+      // The SAME seed stays mounted and a watched dependency changes: this is
+      // supersession, not removal.
+      site.rebind(SiteBinding.none);
+      owner.flush();
+      expect(probe.calls, ['frontier', 'frontier']);
+
+      // N+1 lands first, and it is the projection.
+      probe.answer(1, reachable: false);
+      await _settle(owner);
+      expect(seen.last.contains(_frontier), isFalse);
+
+      // N is answered LAST, and with the OPPOSITE verdict. Its continuation is
+      // current for nobody, so the presence it found is never republished.
+      probe.answer(0, reachable: true);
+      await _settle(owner);
+      expect(seen.last.contains(_frontier), isFalse);
+      expect(seen.last, AvailableEnvironments.none);
+    });
+
+    test('a newer scheduled pass supersedes an older in-flight pass', () async {
+      final probe = _GatedProbe();
+      final schedule = _FakeSchedule();
+      final seen = <AvailableEnvironments>[];
+      final owner = TreeOwner();
+      addTearDown(owner.dispose);
+      owner.mountRoot(
+        InheritedSeed<EnvironmentRegistry>(
+          value: _soloRegistry,
+          child: InheritedSeed<SiteBinding>(
+            value: _bound,
+            child: AvailabilityAssets(
+              probe: probe.call,
+              schedule: schedule.start,
+              child: _Watcher(seen),
+            ),
+          ),
+        ),
+      );
+      owner.flush();
+      probe.answer(0, reachable: true);
+      await _settle(owner);
+      expect(seen.last.contains(_frontier), isTrue);
+
+      // One SCHEDULED pass, suspended: the bounded tick is the second way a
+      // pass starts, and it needs the same supersession answer.
+      schedule.fire();
+      owner.flush();
+      expect(probe.calls.length, 2);
+
+      // The next tick replaces the pass marker, which invalidates the older
+      // scheduled pass before the newer probe runs.
+      schedule.fire();
+      owner.flush();
+      expect(probe.calls.length, 3);
+
+      probe.answer(2, reachable: false);
+      await _settle(owner);
+      expect(seen.last.contains(_frontier), isFalse);
+
+      probe.answer(1, reachable: true);
+      await _settle(owner);
+      // The root never unmounted; only the LATEST pass is projected.
+      expect(seen.last.contains(_frontier), isFalse);
+      expect(seen.last, AvailableEnvironments.none);
+    });
+
+    test(
+      'the seed mounts with NEITHER ambient value and no ProviderScope',
+      () async {
+        // The host reads the registry and the site binding with `??` fallbacks,
+        // so a bare composition is SUPPORTED — and the supersession subscription
+        // must not quietly revoke it. A watch that missed here would park a
+        // pending registration with no `ProviderScope` to park it with, which
+        // asserts; the subscription therefore stays on the pass marker the asset
+        // mounts itself.
+        final probe = _FakeProbe();
+        final schedule = _FakeSchedule();
+        final seen = <AvailableEnvironments>[];
+        final owner = TreeOwner();
+        addTearDown(owner.dispose);
+        owner.mountRoot(
+          AvailabilityAssets(
+            probe: probe.call,
+            schedule: schedule.start,
+            child: _Watcher(seen),
+          ),
+        );
+        await _settle(owner);
+
+        // The builtin-registry fallback is what a bare mount probes, and its
+        // presence lands like any other pass.
+        final builtin = buildBuiltinEnvironmentRegistry();
+        expect(builtin.validatedEnvironments, isNotEmpty);
+        expect(probe.calls, isNotEmpty);
+        for (final name in probe.calls) {
+          expect(seen.last.contains(builtin.resolve(name)), isTrue);
+        }
+      },
+    );
 
     test('dispose cancels the tick and a later tick is a no-op', () async {
       final probe = _FakeProbe();

@@ -194,10 +194,73 @@ class _MountEligibilityReadFailure {
   final int consecutiveAttempts;
 }
 
+/// ONE dependency pass of the mount-eligibility asset, as a tree VALUE —
+/// identity IS the pass.
+///
+/// The host replaces it whenever the substation scope, the grid root or the
+/// read configuration changes; mounting the replacement delivers a fresh
+/// dependency pass to [_MountEligibilityLifecycle], which invalidates the
+/// previous pass's scope. That is the whole supersession mechanism: a read
+/// begun under an older configuration cannot apply, and nothing counts
+/// generations.
+final class _MountEligibilityDependencyPass {
+  _MountEligibilityDependencyPass();
+}
+
+/// Owns the asset's dependency pass without retaining a tree reader outside its
+/// own callback (the `CapabilityHost` precedent in `grid_engine`'s
+/// `circuit/capability_host.dart`).
+///
+/// This is the ONE participant in this repo that RETAINS its scope, because the
+/// consumer of the scope is the mount-eligibility predicate — a callback the
+/// engine invokes from BELOW this provider, off any build of its own. The
+/// provider is therefore mounted above the subtree that carries the predicate,
+/// which is what makes [scope] safe to read there and LOUD everywhere else.
+///
+/// Everything else is the `CapabilityHost` shape the other participants use:
+/// its only other field is the host State, and its dependency callback does
+/// one thing — hand the call-scoped reader and this pass's scope to a single
+/// host method, which watches and fills [_scope] there.
+final class _MountEligibilityLifecycle implements TreeLifecycleParticipant {
+  _MountEligibilityLifecycle(this._host);
+
+  final _MountEligibilityAssetsState _host;
+
+  TreeDependencyScope? _scope;
+
+  /// The current dependency pass's scope.
+  ///
+  /// LOUD, because provider-before-predicate is a NAMED structural invariant:
+  /// the predicate lives in the `ServiceBundle` this asset mounts BELOW this
+  /// participant, so a read that arrives before the dependency callback ran is
+  /// a composition the tree cannot produce.
+  TreeDependencyScope get scope =>
+      _scope ??
+      (throw StateError(
+        'MountEligibilityAssets read its dependency scope before the owning '
+        'LifecycleProvider delivered one. The provider is mounted ABOVE the '
+        'subtree that carries the mount-eligibility predicate, so the '
+        'dependency callback always runs first in a mounted tree.',
+      ));
+
+  @override
+  void initState(TreeSnapshotReader reader) {}
+
+  @override
+  void didChangeDependencies(
+    TreeWatchingReader reader,
+    TreeDependencyScope scope,
+  ) => _host._openDependencyPass(reader, scope);
+
+  @override
+  void dispose() {}
+}
+
 class _MountEligibilityAssetsState
     extends SingleChildState<MountEligibilityAssets> {
   ServiceBundle? _ambient;
   sdk.SubstationScope? _scope;
+  sdk.GridRoot? _gridRoot;
   BdRunner Function(String storeRoot)? _runnerFor;
   DateTime Function()? _clock;
   Duration? _readDeadline;
@@ -209,20 +272,34 @@ class _MountEligibilityAssetsState
       <String, MountEligibilityDecision>{};
   final Map<String, _MountEligibilityReadFailure> _readFailuresById =
       <String, _MountEligibilityReadFailure>{};
-  var _generation = 0;
+  var _pass = _MountEligibilityDependencyPass();
   var _revision = 0;
   var _disposed = false;
+  late final _MountEligibilityLifecycle _lifecycle;
 
   @override
   void didChangeDependencies() {
     _ambient = context.dependOnInheritedSeedOfExactType<ServiceBundle>();
     final scope = context
         .dependOnInheritedSeedOfExactType<sdk.SubstationScope>();
+    // WATCH the grid home too. A relocated grid is a different set of stores
+    // from the one every cached recheck was answered against — the substation
+    // root alone cannot tell the two apart, because a station may keep its
+    // substation layout across a move.
+    //
+    // `dependOnInheritedSeedOfExactType`, not `sdk.GridRoot.maybeOf`: the SDK's
+    // reader is the Provider `watch`, which on a MISS parks a pending
+    // registration and asserts that a `ProviderScope` exists to park it with.
+    // This asset mounts perfectly well with no grid root above it — a bare
+    // substation is a supported composition here — so absence must stay a quiet
+    // null, exactly as it is for the substation scope read above.
+    final gridRoot = context.dependOnInheritedSeedOfExactType<sdk.GridRoot>();
     final runnerFor = seed._runnerFor;
     final now = seed._now;
     final readDeadline = seed.readDeadline;
     final retryBackoff = seed.retryBackoff;
     if (scope == _scope &&
+        gridRoot == _gridRoot &&
         readDeadline == _readDeadline &&
         retryBackoff == _retryBackoff &&
         identical(now, _clock) &&
@@ -231,6 +308,7 @@ class _MountEligibilityAssetsState
     }
 
     _scope = scope;
+    _gridRoot = gridRoot;
     _runnerFor = runnerFor;
     _clock = now;
     _readDeadline = readDeadline;
@@ -240,9 +318,28 @@ class _MountEligibilityAssetsState
         : FilingService(
             source: ExactSubstationBeadSource(runnerFor: runnerFor),
           );
-    _generation++;
+    _pass = _MountEligibilityDependencyPass();
     _revision++;
     _resetRechecks();
+  }
+
+  /// Opens one dependency pass on behalf of the owning participant: SUBSCRIBES
+  /// it to the pass marker, then hands it the [scope] the predicate mounted
+  /// below the provider will run under.
+  ///
+  /// The marker IS the pass: the host mints it from the substation scope, the
+  /// grid root and the read configuration it watches above, so subscribing to
+  /// it subscribes to exactly the changes that supersede an in-flight read —
+  /// and, being mounted by the host directly above this provider, it can never
+  /// miss. The participant holds the scope rather than this State because the
+  /// tree hands a fresh one to the participant per pass and invalidates it on
+  /// teardown; the host only ever READS it, through the loud getter.
+  void _openDependencyPass(
+    TreeWatchingReader reader,
+    TreeDependencyScope scope,
+  ) {
+    reader.watch<_MountEligibilityDependencyPass>();
+    _lifecycle._scope = scope;
   }
 
   MountEligibilityDecision _decisionFor(Bead bead, sdk.SubstationScope scope) {
@@ -285,7 +382,13 @@ class _MountEligibilityAssetsState
             );
           }
           unawaited(
-            _readFresh(bead, scope, filing, seed.readDeadline, _generation),
+            _readFresh(
+              bead,
+              scope,
+              filing,
+              seed.readDeadline,
+              _lifecycle.scope,
+            ),
           );
         }
         return MountEligibilityDecision.refused(
@@ -320,7 +423,7 @@ class _MountEligibilityAssetsState
     sdk.SubstationScope scope,
     FilingService filing,
     Duration deadline,
-    int generation,
+    TreeDependencyScope pass,
   ) async {
     MountEligibilityDecision decision;
     try {
@@ -343,18 +446,18 @@ class _MountEligibilityAssetsState
         evaluatedApprovalRevision: inspected.report.approvalRevision,
       );
     } on Object catch (error) {
-      _completeFailure(snapshot, scope.root, generation, error);
+      _completeFailure(snapshot, scope.root, pass, error);
       return;
     }
-    _completeDecision(snapshot, generation, decision);
+    _completeDecision(snapshot, pass, decision);
   }
 
   void _completeDecision(
     Bead snapshot,
-    int generation,
+    TreeDependencyScope pass,
     MountEligibilityDecision decision,
   ) {
-    if (!_isCurrent(snapshot, generation)) return;
+    if (!_isCurrent(snapshot, pass)) return;
     setState(() {
       _readsInFlight.remove(snapshot.id);
       _readFailuresById.remove(snapshot.id);
@@ -366,10 +469,10 @@ class _MountEligibilityAssetsState
   void _completeFailure(
     Bead snapshot,
     String storeRoot,
-    int generation,
+    TreeDependencyScope pass,
     Object error,
   ) {
-    if (!_isCurrent(snapshot, generation)) return;
+    if (!_isCurrent(snapshot, pass)) return;
     final prior = _readFailuresById[snapshot.id];
     setState(() {
       _readsInFlight.remove(snapshot.id);
@@ -392,11 +495,19 @@ class _MountEligibilityAssetsState
     });
   }
 
-  bool _isCurrent(Bead snapshot, int generation) =>
-      !_disposed &&
-      generation == _generation &&
-      _snapshotsById[snapshot.id] == snapshot &&
-      _readsInFlight.contains(snapshot.id);
+  /// Whether a landed read may still be applied.
+  ///
+  /// THREE questions, deliberately kept apart. `_disposed` answers REMOVAL and
+  /// [TreeDependencyScope.isCurrent] answers STALENESS — a newer dependency
+  /// pass started while this read was in flight. The remaining two answer
+  /// per-bead identity: the snapshot this read was started for is still the one
+  /// in hand, and this bead's read has not already been answered (the
+  /// [_readsInFlight] de-duplication).
+  bool _isCurrent(Bead snapshot, TreeDependencyScope scope) {
+    if (_disposed || !scope.isCurrent) return false;
+    return _snapshotsById[snapshot.id] == snapshot &&
+        _readsInFlight.contains(snapshot.id);
+  }
 
   void _forget(String beadId) {
     _snapshotsById.remove(beadId);
@@ -423,29 +534,35 @@ class _MountEligibilityAssetsState
     }
 
     final ambient = _ambient;
-    return DerivedServiceBundleSeed(
-      value: ServiceBundle.derive(
-        ambient ?? const ServiceBundle(),
-        mountEligibility: predicate,
+    // The pass marker rides ABOVE the lifecycle that watches it, and the
+    // lifecycle above the bundle that carries the predicate: by the time a
+    // recheck can reach `_decisionFor`, this pass's scope has been delivered.
+    return InheritedSeed<_MountEligibilityDependencyPass>(
+      value: _pass,
+      child: LifecycleProvider<_MountEligibilityLifecycle>(
+        create: () => _lifecycle = _MountEligibilityLifecycle(this),
+        child: DerivedServiceBundleSeed(
+          value: ServiceBundle.derive(
+            ambient ?? const ServiceBundle(),
+            mountEligibility: predicate,
+          ),
+          derivedFrom: [
+            ambient,
+            scope,
+            seed._runnerFor,
+            seed._now,
+            seed.readDeadline,
+            seed.retryBackoff,
+            _revision,
+          ],
+          child: child,
+        ),
       ),
-      derivedFrom: [
-        ambient,
-        scope,
-        seed._runnerFor,
-        seed._now,
-        seed.readDeadline,
-        seed.retryBackoff,
-        _revision,
-      ],
-      child: child,
     );
   }
 
   @override
-  void dispose() {
-    _disposed = true;
-    _generation++;
-  }
+  void dispose() => _disposed = true;
 }
 
 /// **GitServices** — the station's git-execution machinery as ONE ambient
