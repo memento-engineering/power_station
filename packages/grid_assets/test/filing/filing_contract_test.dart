@@ -5,6 +5,8 @@ import 'package:crypto/crypto.dart';
 import 'package:grid_assets/grid_assets.dart';
 import 'package:test/test.dart';
 
+import 'filing_evidence_fakes.dart';
+
 class _RecordingBdRunner implements BdRunner {
   _RecordingBdRunner(this.replies);
 
@@ -37,6 +39,15 @@ FilingRequirementRow _dependencies(
     )
     .requirements
     .singleWhere((row) => row.requirement == FilingRequirement.dependencies);
+
+/// The content row of one evaluation, under whatever evidence a test hands it.
+FilingRequirementRow _row(Bead bead, FilingEvidence evidence) =>
+    const FilingContract()
+        .evaluate(bead, const <BeadDependency>[], evidence: evidence)
+        .requirements
+        .singleWhere(
+          (row) => row.requirement == FilingRequirement.noCorruptingText,
+        );
 
 BeadDependency _blocks(String from, String to) =>
     BeadDependency(issueId: from, dependsOnId: to);
@@ -334,6 +345,167 @@ void main() {
       _dependencies(bead, [_blocks('pow-filed', 'external:solo')]).detail,
       'bd dependency rows: external:solo',
     );
+  });
+
+  test('AC-1: no_corrupting_text is the eleventh stable filing row', () {
+    // The wire names are the contract: skills, UIs and the approval preflight
+    // read rows by name, in this order. Stated EXPLICITLY rather than derived
+    // from the enum, so a rename or a reorder of a landed row fails here
+    // instead of passing a tautology.
+    const wires = [
+      'driveable_type',
+      'validation_plan',
+      'acceptance_criteria',
+      'dependencies',
+      'validation_plan_syntax',
+      'validation_plan_portability',
+      'repo_relative_paths',
+      'bead_references',
+      'release_versions',
+      'decision_references',
+      'no_corrupting_text',
+    ];
+    expect([
+      for (final requirement in FilingRequirement.values) requirement.wire,
+    ], wires);
+    expect(FilingRequirement.values.last, FilingRequirement.noCorruptingText);
+    expect(FilingRequirement.noCorruptingText.wire, 'no_corrupting_text');
+
+    // The REPORT emits them in that same order, the new row appended last.
+    const bead = Bead(
+      id: 'pow-filed',
+      title: 'a filed bead',
+      issueType: IssueType.task,
+      description: 'the work',
+      acceptanceCriteria: '- [ ] checked',
+      metadata: {'validation_plan': 'dart test'},
+    );
+    final report = const FilingContract().evaluate(
+      bead,
+      const <BeadDependency>[],
+      evidence: FilingEvidence.unavailable,
+    );
+    expect(report.requirements.map((row) => row.requirement.wire), wires);
+    expect(
+      (report.toJson()['requirements']! as List)
+          .cast<Map<String, Object>>()
+          .map((row) => row['requirement']),
+      wires,
+    );
+  });
+
+  test('AC-2: no_corrupting_text scans all four fields under every evidence '
+      'posture', () {
+    // The refused unit, in every scanned field. The row is a pure scan, so
+    // BOTH evidence postures must answer identically — a gather it never reads
+    // can neither clear it nor refuse it.
+    for (final field in const [
+      'description',
+      'design',
+      'acceptance',
+      'notes',
+    ]) {
+      const unit = '\u0000';
+      final bead = Bead(
+        id: 'pow-filed',
+        title: 'a filed bead',
+        issueType: IssueType.task,
+        description: field == 'description' ? 'the ${unit}work' : 'the work',
+        design: field == 'design' ? 'the ${unit}approach' : 'the approach',
+        acceptanceCriteria: field == 'acceptance'
+            ? '- [ ] ${unit}checked'
+            : '- [ ] checked',
+        notes: field == 'notes' ? 'a ${unit}receipt' : 'a receipt',
+        metadata: const {'validation_plan': 'dart test'},
+      );
+      final reason = 'NUL in $field';
+      final unavailable = _row(bead, FilingEvidence.unavailable);
+      final gathered = _row(bead, completeEmptyEvidence);
+      expect(unavailable.passed, isFalse, reason: reason);
+      expect(unavailable.toJson(), gathered.toJson(), reason: reason);
+      expect(
+        unavailable.detail,
+        startsWith('corrupting bead text:'),
+        reason: reason,
+      );
+      expect(unavailable.detail, contains('NUL'), reason: reason);
+    }
+
+    // A markdown CODE SPAN in every scanned field passes, under both postures.
+    // Nico ruled the backtick legitimate bead text on 2026-09-21 — it is how a
+    // reader tells a symbol from a word — so this row refuses the NUL byte and
+    // nothing else. The title and the validation PLAN are out of scope too.
+    const clean = Bead(
+      id: 'pow-filed',
+      title: 'a `filed` bead',
+      issueType: IssueType.task,
+      description: 'run `bd show` first',
+      design: 'call `FilingContract.evaluate`',
+      acceptanceCriteria: '- [ ] `dart test` passes',
+      notes: 'the receipt named `grid.approved_rev`',
+      metadata: {'validation_plan': r'echo `date`'},
+    );
+    for (final evidence in [
+      FilingEvidence.unavailable,
+      completeEmptyEvidence,
+    ]) {
+      final row = _row(clean, evidence);
+      expect(row.passed, isTrue, reason: row.detail);
+      expect(
+        row.detail,
+        'description, design, acceptance_criteria and notes contain no NUL '
+        'byte',
+      );
+    }
+    expect(
+      _row(clean, FilingEvidence.unavailable).toJson(),
+      _row(clean, completeEmptyEvidence).toJson(),
+    );
+  });
+
+  test('AC-3: no_corrupting_text detail names the printable character and '
+      'field', () {
+    const bead = Bead(
+      id: 'pow-filed',
+      title: 'a filed bead',
+      issueType: IssueType.task,
+      description: 'a\u0000b\u0000c',
+      design: 'the approach',
+      acceptanceCriteria: '- [ ] checked',
+      notes: 'a\u0000receipt',
+      metadata: {'validation_plan': 'dart test'},
+    );
+    final row = _row(bead, FilingEvidence.unavailable);
+
+    // Every hit, in field order then field-local offset order, each naming the
+    // character PRINTABLY and the exact site to edit.
+    expect(
+      row.detail,
+      'corrupting bead text: NUL "\\u0000" (description:1), '
+      'NUL "\\u0000" (description:3), NUL "\\u0000" (notes:1) — '
+      'remove NUL bytes before filing',
+    );
+    // The refusal is itself written back onto a bead, so it never carries the
+    // code unit it is refusing.
+    expect(row.detail, isNot(contains('\u0000')));
+
+    // BOUNDED: corruption arrives in RUNS, and a detail naming every site of
+    // one blows the mount explainer's render budget. Thirteen sites are named
+    // twelve times, and the rest is a COUNT.
+    final many = Bead(
+      id: 'pow-filed',
+      title: 'a filed bead',
+      issueType: IssueType.task,
+      description: '\u0000' * 13,
+      acceptanceCriteria: '- [ ] checked',
+      metadata: const {'validation_plan': 'dart test'},
+    );
+    final bounded = _row(many, FilingEvidence.unavailable);
+    expect(bounded.passed, isFalse);
+    expect(RegExp(r'\(\w+:\d+\)').allMatches(bounded.detail), hasLength(12));
+    expect(bounded.detail, contains(', and 1 more — '));
+    expect(bounded.detail, endsWith('remove NUL bytes before filing'));
+    expect(bounded.detail, isNot(contains('\u0000')));
   });
 
   test('the projection exposes its rows for the explainer and the checks', () {

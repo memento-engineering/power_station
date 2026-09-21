@@ -113,7 +113,7 @@ void main() {
       final rows = (report['requirements'] as List)
           .cast<Map<String, dynamic>>();
       expect(report['passed'], isTrue);
-      expect(rows, hasLength(10));
+      expect(rows, hasLength(11));
       expect(rows.every((row) => row['passed'] == true), isTrue);
     },
   );
@@ -155,10 +155,10 @@ void main() {
       final rows = (report['requirements'] as List)
           .cast<Map<String, dynamic>>();
       expect(report['passed'], isFalse);
-      expect(rows, hasLength(10));
+      expect(rows, hasLength(11));
       // The four PRESENCE rows are what this bead fails; the six VIABILITY
-      // rows have nothing to refuse, because a bead with no plan, no
-      // acceptance and no citations carries no unviable text.
+      // rows and the content row have nothing to refuse, because a bead with
+      // no plan, no acceptance and no citations carries no unviable text.
       expect(
         {
           for (final row in rows)
@@ -392,7 +392,8 @@ void main() {
     },
   );
 
-  group('the filing verb runs the pre-stamp advisory after the ten rows', () {
+  group('the filing verb runs the pre-stamp advisory after the mechanical '
+      'rows', () {
     ({CommandRunner<int> runner, StringBuffer out, FakeFilingAdvisory advisory})
     verb(FilingAdvisoryVerdict verdict) {
       final out = StringBuffer();
@@ -440,7 +441,7 @@ void main() {
       expect(
         plain.indexOf('PASS advisory'),
         greaterThan(plain.indexOf('decision_references')),
-        reason: 'the ten mechanical rows first, then the judgement',
+        reason: 'every mechanical row first, then the judgement',
       );
     });
 
@@ -475,8 +476,10 @@ void main() {
         final report = jsonDecode(h.out.toString()) as Map<String, dynamic>;
         expect(report['passed'], isTrue);
         expect(report['advisory'], {'outcome': 'skipped'});
-        // The ten rows are untouched — the advisory is never an eleventh row.
-        expect((report['requirements'] as List), hasLength(10));
+        // The mechanical rows are untouched — the advisory is never one of
+        // them. It rides its own member, so the lane counts exactly what the
+        // contract evaluates and the waiver adds nothing to it.
+        expect((report['requirements'] as List), hasLength(11));
       },
     );
 

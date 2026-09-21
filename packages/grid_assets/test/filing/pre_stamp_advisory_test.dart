@@ -577,7 +577,7 @@ void main() {
         expect(
           advisory.calls,
           isEmpty,
-          reason: 'the ten rows are free; the advisory is not',
+          reason: 'the mechanical rows are free; the advisory is not',
         );
       },
     );
@@ -661,8 +661,8 @@ void main() {
 
         expect(report.passed, isFalse);
         expect(report.refusalReason, hold);
-        // The ten rows all PASSED — the refusal is the advisory's alone, and the
-        // completeness lane is untouched.
+        // Every mechanical row PASSED — the refusal is the advisory's alone,
+        // and the completeness lane is untouched.
         expect(report.requirements, hasLength(FilingRequirement.values.length));
         expect(report.requirements.every((row) => row.passed), isTrue);
         expect(
@@ -702,10 +702,19 @@ void main() {
       expect(text, contains('spec: 1'));
       expect(text, contains('bead: pow-v4xh'));
       expect(text, contains('legacy-id: null'));
-      // The cached reciprocal fields are written by the verb that earns them,
-      // never by the entry that declares an edge.
+      // The entry is still in force: it was AMENDED, never obsoleted.
       expect(text, contains('obsoleted-by: null'));
-      expect(text, contains('updated-by: []'));
+      // The cached reciprocal field is written by the verb that earns it,
+      // never by the entry that declares an edge — so it holds exactly the
+      // amendment `decisions update` recorded, and holding one is not a
+      // withdrawal of anything else this entry rules.
+      expect(
+        text,
+        contains(
+          'updated-by:\n'
+          '    - the-content-row-refuses-the-nul-byte-and-nothing-else',
+        ),
+      );
     });
 
     test('it names every decision it extends — including the one that owns '
@@ -744,8 +753,13 @@ void main() {
     test('the recorded claims are TRUE of the live tree', () {
       // A record is only worth the invariant it names, so each one is checked
       // against the code rather than trusted.
+      // The ten this entry counted keep their wire names and their ORDER,
+      // which is the claim it made; `no_corrupting_text` was minted after it
+      // and joined them last
+      // (`power_station#the-content-row-refuses-the-nul-byte-and-nothing-else`
+      // amends the count, not the boundary).
       expect(
-        FilingRequirement.values.map((value) => value.wire),
+        FilingRequirement.values.map((value) => value.wire).take(10),
         const [
           'driveable_type',
           'validation_plan',
@@ -758,7 +772,44 @@ void main() {
           'release_versions',
           'decision_references',
         ],
-        reason: 'no eleventh requirement is minted',
+        reason: 'the rows this entry counted are unmoved',
+      );
+      // The boundary itself: every row in the completeness lane is MECHANICAL.
+      // A judgement rides `FilingReport.advisory`, so no row may need a gather,
+      // and the one minted since answers identically with and without one.
+      const bead = Bead(
+        id: 'pow-child',
+        title: 'a filed bead',
+        issueType: IssueType.task,
+        description: 'the work',
+        acceptanceCriteria: '- [ ] checked',
+        metadata: {'validation_plan': 'dart test'},
+      );
+      const contract = FilingContract();
+      expect(
+        contract
+            .evaluate(
+              bead,
+              const <BeadDependency>[],
+              evidence: FilingEvidence.unavailable,
+            )
+            .requirements
+            .singleWhere(
+              (row) => row.requirement == FilingRequirement.noCorruptingText,
+            )
+            .toJson(),
+        contract
+            .evaluate(
+              bead,
+              const <BeadDependency>[],
+              evidence: completeEmptyEvidence,
+            )
+            .requirements
+            .singleWhere(
+              (row) => row.requirement == FilingRequirement.noCorruptingText,
+            )
+            .toJson(),
+        reason: 'the row minted after this entry judges nothing',
       );
       const stamp = ApprovalStamp(
         by: 'nico',

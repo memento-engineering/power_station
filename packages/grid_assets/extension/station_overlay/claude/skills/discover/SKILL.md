@@ -177,11 +177,14 @@ bd dep add <new bead id> <local blocker bead id> --actor governor
 
 Then run `{{runner}} filing --json "<new bead id>"`. Do not leave Filing after
 a non-zero result: correct the bead, rerun the command, and continue only after
-it exits 0. The command checks the ten mechanical rows — the four PRESENCE rows
-plus six VIABILITY rows: lane-shell syntax, dash portability,
+it exits 0. The command checks the eleven mechanical rows — the four PRESENCE
+rows, six VIABILITY rows: lane-shell syntax, dash portability,
 repository-relative file anchors, current-plus-attached-store bead-id
-existence, release-relative acceptance, and existing decision citations. The
-agentic half still judges whether the description and acceptance are useful.
+existence, release-relative acceptance, and existing decision citations — and
+one CONTENT row: no NUL byte in the bead text, which truncates the write that
+carries the field while `bd` reports success. A backtick is legitimate bead
+text and passes. The agentic half still judges whether the description and
+acceptance are useful.
 
 Decision citations are read from the **description and design only** — notes
 are the operator's receipt channel and make no citation, so quoting a hold
@@ -202,7 +205,7 @@ it is absent from list/search surfaces.
 The bead stays outside the mounted frontier until the human approves it: it
 carries no `grid.approved_*` stamp, and no label added by hand substitutes for
 one. Record the approved design first, then run the approve verb from the
-owning store root. The verb re-runs the ten-row filing preflight and, only if
+owning store root. The verb re-runs the eleven-row filing preflight and, only if
 every row passes, writes the STAMP in ONE `bd update`: `grid.approved_by` (the
 `--actor`), `grid.approved_at` (the UTC ISO-8601 instant) and
 `grid.approved_rev` (the digest of the FILING BASIS the preflight just

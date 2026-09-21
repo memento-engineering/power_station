@@ -1,6 +1,6 @@
-// The six VIABILITY rows of the filing contract: a bead passes filing only if
-// what its fields HOLD can actually work, not merely because the field is
-// there.
+// The six VIABILITY rows of the filing contract, and the schema the CONTENT
+// row joins them in: a bead passes filing only if what its fields HOLD can
+// actually work, not merely because the field is there.
 //
 // Each row here retires one remembered rule that cost a round — a plan the
 // gating lane cannot parse, a Bash-only plan that dies under CI's dash, an
@@ -488,7 +488,7 @@ void main() {
     expect(surfaces.last, ['power_station/lib/src/filing/filing_text.dart']);
   });
 
-  test('filing report keeps one ten-row JSON schema', () {
+  test('filing report keeps one eleven-row JSON schema', () {
     final report = _report(
       _bead(description: 'The receipt landed at /tmp/round-7/receipt.md.'),
       completeEmptyEvidence,
@@ -496,10 +496,24 @@ void main() {
     final json = report.toJson();
     final rows = (json['requirements']! as List).cast<Map<String, Object>>();
 
+    // The landed ten, in their order, and the appended CONTENT row last.
+    expect(rows.map((row) => row['requirement']), const [
+      'driveable_type',
+      'validation_plan',
+      'acceptance_criteria',
+      'dependencies',
+      'validation_plan_syntax',
+      'validation_plan_portability',
+      'repo_relative_paths',
+      'bead_references',
+      'release_versions',
+      'decision_references',
+      'no_corrupting_text',
+    ]);
     expect(rows.map((row) => row['requirement']), [
       for (final requirement in FilingRequirement.values) requirement.wire,
     ]);
-    expect(rows, hasLength(10));
+    expect(rows, hasLength(11));
     for (final row in rows) {
       expect(row.keys, ['requirement', 'passed', 'detail']);
     }
@@ -585,6 +599,12 @@ void main() {
         metadata: {'validation_plan': record['validation_plan']! as String},
       );
       final report = _report(bead, evidence);
+
+      // All ELEVEN rows pass on every snapshot. Two of the three write
+      // ordinary markdown code spans, and they stay clean: the CONTENT row
+      // refuses the NUL byte only, so this bead APPENDS a row without moving
+      // one. No fixture text is rewritten to manufacture a pass — the live
+      // text is the evidence.
       expect(
         report.requirements
             .where((row) => !row.passed)
@@ -592,6 +612,7 @@ void main() {
         isEmpty,
         reason: bead.id,
       );
+      expect(report.requirements, hasLength(11), reason: bead.id);
       expect(report.passed, isTrue, reason: bead.id);
     }
   });

@@ -47,12 +47,13 @@ Every bead intended for the station needs:
 5. **A description an agent can act on alone** — the agent receives the bead
    text and a worktree, nothing else. Name packages and acceptance shape.
 
-Rows 1–4 are the PRESENCE half of the ten rows the `filing` verb checks; the
-verb also checks six VIABILITY rows over the same text — can the plan parse,
-is it portable, are the paths repository-relative, do the cited ids and
-decisions exist, is acceptance free of pinned releases. Row 5 is the judgement
-this skill's reader owns. Never re-derive a row by reading the bead — run the
-verb (**The exit check**).
+Rows 1–4 are the PRESENCE half of the eleven rows the `filing` verb checks;
+the verb also checks six VIABILITY rows over the same text — can the plan
+parse, is it portable, are the paths repository-relative, do the cited ids and
+decisions exist, is acceptance free of pinned releases — and one CONTENT row,
+which refuses a NUL byte anywhere in the bead's body text. Row 5 is the
+judgement this skill's reader owns. Never re-derive a row by reading the bead —
+run the verb (**The exit check**).
 
 ## Search prior art BEFORE accepting a filing
 
@@ -176,8 +177,8 @@ When the work extends something the tree already owns, write the pointer into
 the bead body as `path:line` plus the relationship:
 
 ```
-COMPOSE: packages/grid_assets/lib/src/filing/filing_contract.dart:907 owns the
-ten-row completeness contract — CALL it; do not add a second predicate.
+COMPOSE: packages/grid_assets/lib/src/filing/filing_contract.dart:913 owns the
+eleven-row completeness contract — CALL it; do not add a second predicate.
 ```
 
 **Why:** without the pointer the build stage re-expresses the primitive beside
@@ -215,16 +216,18 @@ dependency rows the WORK store's own bd holds, and it reaches no second store.
 session-lifecycle beads.
 
 The report is one JSON object: `{id, passed, requirements, error?}`.
-`requirements` carries exactly ten rows, in order — `driveable_type`,
+`requirements` carries exactly eleven rows, in order — `driveable_type`,
 `validation_plan`, `acceptance_criteria`, `dependencies`,
 `validation_plan_syntax`, `validation_plan_portability`, `repo_relative_paths`,
-`bead_references`, `release_versions`, `decision_references` — each
-`{requirement, passed, detail}`. `passed` is true only for a found bead whose
-ten rows ALL pass.
+`bead_references`, `release_versions`, `decision_references`,
+`no_corrupting_text` — each `{requirement, passed, detail}`. `passed` is true
+only for a found bead whose eleven rows ALL pass.
 
 The first four are PRESENCE (is the field there); the six after them are
-VIABILITY (can what the field holds actually work). Each viability row retires
-a rule that used to be remembered and cost a round when it was not.
+VIABILITY (can what the field holds actually work); the last is CONTENT (does
+the text itself survive being written and read back). Each viability row and
+the content row retires a rule that used to be remembered and cost a round when
+it was not.
 
 For every row reporting `"passed": false`, apply its `detail` as the
 correction:
@@ -287,6 +290,15 @@ correction:
   holds an entry for the log its amendments live in, so refusing there is a
   hold nothing can clear. Read the named slice anyway — a genuinely misspelled
   legacy id looks exactly like this.
+- `corrupting bead text: NUL "\u0000" (<field>:<offset>)` — **remove NUL bytes
+  before filing**. A NUL TRUNCATES the write that carries the field and `bd`
+  reports success anyway — so the bead files clean and dies a build later
+  without ever naming its own cause. The row quotes the byte by its printable
+  escape, never as itself, and names the exact field and field-local offset to
+  edit; it names the first twelve sites and counts the rest, so fix the named
+  ones and rerun. It refuses the NUL byte and NOTHING else: a backtick is
+  legitimate bead text — a code span is how a reader tells a symbol from a word
+  — so write paths, commands and symbols exactly as you mean them.
 - `… evidence is unavailable for <token>: <source> — restore complete evidence
   and rerun` — nobody could ANSWER, which is not the same as an answer of "no".
   This is a COMPOSITION gap, not a bead defect: the store or the decision index
@@ -346,7 +358,7 @@ invocation answers both questions and neither is re-derived by reading fields.
 ## Staging: approve with the approve verb, only after refinement
 
 Drafts are created open and UNSTAMPED; the human's approval is the approve
-verb, which re-runs the same ten-row filing preflight and then writes the
+verb, which re-runs the same eleven-row filing preflight and then writes the
 `grid.approved_*` stamp in one `bd update`. Against a LIVE station, the
 mounted predicate refuses any unstamped bead with
 `approval: not approved - run the approve verb` — the retired `grid.approved`

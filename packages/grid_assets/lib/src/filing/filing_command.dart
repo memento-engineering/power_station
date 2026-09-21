@@ -189,8 +189,8 @@ class FilingCommand extends Command<int> {
 
   @override
   final String description =
-      'Check one bead against the ten mechanical filing requirements, then '
-      'the pre-stamp advisory.';
+      'Check one bead against the eleven mechanical filing requirements, '
+      'then the pre-stamp advisory.';
 
   @override
   String get invocation {
@@ -232,8 +232,9 @@ class FilingCommand extends Command<int> {
           '${row.requirement.wire}: ${row.detail}',
         );
       }
-      // AFTER the ten rows, in the same report: the advisory runs last and
-      // reads last. Its refusal carries the owning lens's own fix text.
+      // AFTER the mechanical rows, in the same report: the advisory runs
+      // last and reads last. Its refusal carries the owning lens's own fix
+      // text.
       switch (report.advisory) {
         case null:
           break;
