@@ -990,14 +990,14 @@ void main() {
     // ALONE below — identical content between them is permitted and is the
     // common case, but it is never required, and nothing here compares one
     // leg's bytes to the other's.
-    test('each intake-refinement leg vends the ten-row oracle, its six '
-        'remedies and both judgement-only exclusions', () {
+    test('each intake-refinement leg vends the eleven-row oracle, its '
+        'corrupting-text remedy and both judgement-only exclusions', () {
       for (final leg in _skillLegs) {
         final body = _renderLeg(root, leg, 'intake-refinement', {
           'runner': 'space',
         });
 
-        // The ordered ten-row contract, by wire name.
+        // The ordered eleven-row contract, by wire name.
         for (final requirement in FilingRequirement.values) {
           expect(
             body,
@@ -1007,11 +1007,11 @@ void main() {
         }
         expect(
           _collapsed(body),
-          contains('carries exactly ten rows, in order'),
+          contains('carries exactly eleven rows, in order'),
         );
         expect(_collapsed(body), contains('apply its `detail` as the'));
 
-        // The six CORRECTION clauses, verbatim as the verb emits them. The
+        // The seven CORRECTION clauses, verbatim as the verb emits them. The
         // corpus is prose and reflows at 80 columns, so the comparison is over
         // collapsed whitespace: a clause is TAUGHT whether or not a line break
         // fell inside it.
@@ -1024,6 +1024,7 @@ void main() {
           'use release-relative language or a version range',
           'a round may not cite a decision it creates; cite an existing entry '
               'or describe the proposed entry without a citation',
+          'remove NUL bytes and backticks before filing',
         ]) {
           expect(flat, contains(remedy), reason: '$leg teaches "$remedy"');
         }
@@ -1060,16 +1061,28 @@ void main() {
         expect(flat, contains('Duration needs EXECUTION or an estimate'));
         expect(flat, contains('cover every affected consumer'));
         expect(flat, contains('judgement about the BLAST RADIUS'));
+
+        // The CONTENT row is taught as a REFUSAL with a correction, not as a
+        // rule the reader has to carry: the refusal the verb emits, and what
+        // each code unit does at exec time.
+        expect(
+          flat,
+          contains('corrupting bead text: backtick'),
+          reason: '$leg quotes the refusal the verb emits',
+        );
+        expect(flat, contains('COMMAND-SUBSTITUTED'));
+        expect(flat, contains('TRUNCATES the write'));
       }
     });
 
-    test('each discover leg names the ten-row report and what it enforces', () {
+    test('each discover leg names the eleven-row report and what it '
+        'enforces', () {
       for (final leg in _skillLegs) {
         final flat = _collapsed(
           _renderLeg(root, leg, 'discover', {'runner': 'space'}),
         );
-        expect(flat, contains('checks the ten mechanical rows'));
-        expect(flat, contains('re-runs the ten-row filing preflight'));
+        expect(flat, contains('checks the eleven mechanical rows'));
+        expect(flat, contains('re-runs the eleven-row filing preflight'));
         for (final enforced in const [
           'lane-shell syntax',
           'dash portability',
@@ -1077,6 +1090,7 @@ void main() {
           'current-plus-attached-store bead-id existence',
           'release-relative acceptance',
           'existing decision citations',
+          'no NUL byte or backtick in the bead text',
         ]) {
           expect(flat, contains(enforced), reason: '$leg names "$enforced"');
         }
