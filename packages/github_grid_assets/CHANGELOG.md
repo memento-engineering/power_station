@@ -1,5 +1,7 @@
-## Unreleased
+## 0.2.0-dev.4
 
+- Changed: floors grid_assets at ^0.7.0-dev.4, the ten-row viability `FilingContract` (#323) and the
+  bounded explore-decision gather (#355, #356); no public API of this package breaks.
 - Fixed: workflow-run intake auto-approval binds the SAME live filing evidence the `approve` verb
   binds. `GitHubReconcilerBindingAssets` now hands its `ApproveService` the seat's own
   `SubstationScope`, its ambient `GridRoot` path and a new nullable `decisionInvocation` — the
@@ -8,6 +10,11 @@
   and no index to ask, so every decision-citing bead the reconciler filed was refused on evidence
   nobody had gathered. `attachedScopes` stays empty: this path receives no station roster, and its
   approval runner serves the owning work-store root alone.
+
+Commits: 
+ - **FIX**(github_grid_assets): fence proxied-store temp workspace teardown in ci_rework_mint_acceptance_test (#352).
+ - **FIX**(committee): route from persisted critic verdicts (#346).
+ - **BREAKING** **FEAT**(filing): check that bead text is viable, not merely present (#323).
 
 ## 0.2.0-dev.3
 

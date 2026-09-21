@@ -1,7 +1,5 @@
-## Unreleased
+## 0.7.0-dev.4
 
-- Changed: Nico's 2026-09-18 ruling retires the 150k compaction watermark from both vended seat
-  roles while preserving the Cost posture's throughput rank and clean-boundary handoff rule.
 - Breaking: the filing contract is TEN rows, not four. The four PRESENCE rows are joined by six
   VIABILITY rows that ask whether what a field HOLDS can work: `validation_plan_syntax` (the
   gating lane's own `sh` parses the plan), `validation_plan_portability` (so does CI's `dash`),
@@ -18,6 +16,39 @@
   `decisionReferences`, `validationPlanOffendingSlice`). Migration: pass
   `evidence: FilingEvidence.unavailable` at a direct `evaluate` call that gathers nothing — an
   unavailable leg refuses only the tokens that need it, and never reads as an empty catalog.
+- Breaking: a portability shell that is NOT INSTALLED refuses `validation_plan_portability`
+  instead of passing it. A `dash` nobody installed and a `dash` that crashed are the same absence
+  of an answer, and neither says the plan is portable; the row names which absence it was.
+  `FilingEvidence.portabilityShellMissing` is removed. `SystemValidationPlanProbe` blames the
+  SHELL for an `ENOENT` spawn only when the working directory it was handed really exists, so a
+  missing store root is never reported as a missing shell.
+- Breaking: the bounded `explore-decision` prompt can no longer clip away a decision entry the
+  work bead CITED. The bundle renders in two contiguous groups — every cited entry first,
+  then the unnamed fill, both of them in the decision index's own order — each body still
+  rendered ONCE with relation lines naming every surface it answers for, and the clip removes
+  fill only. Where a bead wrote a citation is NOT an ordering key: the bead decides which
+  entries are required, never the order a lens reads them in. It also snaps back to a whole
+  RECORD rather than a line, so a half body never reaches the lens and the withheld count is
+  exact.
+  `kDecisionLensEvidenceOmissionMarker` becomes a template whose `{N}` resolves to the number
+  of unnamed fill records withheld, and it now states that every cited entry is present.
+  `DiscoveryEvidenceProjection` carries three optional members — the byte boundary past the
+  required records, the cited identities in render order, and each fill record's end boundary.
+  `DiscoveryLensPromptAssembly` gains `error`/`isFailed`: when the required evidence cannot fit
+  the cap the assembly refuses with the cited identities instead of returning a prompt, and
+  `DiscoveryLensCapability.buildLensPrompt` throws `StateError` on that refusal so no lens
+  spawns on a bundle that dropped a citation. The surface gather refuses the same shape up
+  front when the cited bodies alone outrun `kMaxDecisionLensPromptBytes`. Before this, a bead
+  naming a SINGLE surface against a mature decisions index lost its cited entry to slug
+  alphabet with no exit — the old marker's advice to touch fewer surfaces does not exist for a
+  one-surface bead, and the operator's only bridge was a gate override.
+  `kMaxDiscoverySnippetChars`, `kMaxDecisionEntriesPerSurface`, `kMaxDecisionLensPromptBytes`,
+  the per-entry body clip and the schema-3 wire are all unchanged.
+  Migration: read the omission marker through its `{N}` substitution rather than as a literal,
+  and expect `buildLensPrompt` to throw where it previously returned a prompt that had silently
+  dropped evidence.
+- Changed: Nico's 2026-09-18 ruling retires the 150k compaction watermark from both vended seat
+  roles while preserving the Cost posture's throughput rank and clean-boundary handoff rule.
 - Decision citations are read from a bead's DESCRIPTION and DESIGN only, and a legacy
   `ADR-<nnnn>` id no completed lookup can answer is REPORTED rather than failed
   (`power_station#notes-are-receipts-and-a-phantom-legacy-token-is-reported-not-failed`). Notes are
@@ -53,37 +84,14 @@
   with `restore complete evidence and rerun`. An injected `approve` / `filing` / `service` stays
   authoritative and is used unchanged, and the `mount` explainer's embedded `filing` member now
   carries all TEN requirements rather than the first four.
-- Breaking: a portability shell that is NOT INSTALLED refuses `validation_plan_portability`
-  instead of passing it. A `dash` nobody installed and a `dash` that crashed are the same absence
-  of an answer, and neither says the plan is portable; the row names which absence it was.
-  `FilingEvidence.portabilityShellMissing` is removed. `SystemValidationPlanProbe` blames the
-  SHELL for an `ENOENT` spawn only when the working directory it was handed really exists, so a
-  missing store root is never reported as a missing shell.
-- Breaking: the bounded `explore-decision` prompt can no longer clip away a decision entry the
-  work bead CITED. The bundle renders in two contiguous groups — every cited entry first,
-  then the unnamed fill, both of them in the decision index's own order — each body still
-  rendered ONCE with relation lines naming every surface it answers for, and the clip removes
-  fill only. Where a bead wrote a citation is NOT an ordering key: the bead decides which
-  entries are required, never the order a lens reads them in. It also snaps back to a whole
-  RECORD rather than a line, so a half body never reaches the lens and the withheld count is
-  exact.
-  `kDecisionLensEvidenceOmissionMarker` becomes a template whose `{N}` resolves to the number
-  of unnamed fill records withheld, and it now states that every cited entry is present.
-  `DiscoveryEvidenceProjection` carries three optional members — the byte boundary past the
-  required records, the cited identities in render order, and each fill record's end boundary.
-  `DiscoveryLensPromptAssembly` gains `error`/`isFailed`: when the required evidence cannot fit
-  the cap the assembly refuses with the cited identities instead of returning a prompt, and
-  `DiscoveryLensCapability.buildLensPrompt` throws `StateError` on that refusal so no lens
-  spawns on a bundle that dropped a citation. The surface gather refuses the same shape up
-  front when the cited bodies alone outrun `kMaxDecisionLensPromptBytes`. Before this, a bead
-  naming a SINGLE surface against a mature decisions index lost its cited entry to slug
-  alphabet with no exit — the old marker's advice to touch fewer surfaces does not exist for a
-  one-surface bead, and the operator's only bridge was a gate override.
-  `kMaxDiscoverySnippetChars`, `kMaxDecisionEntriesPerSurface`, `kMaxDecisionLensPromptBytes`,
-  the per-entry body clip and the schema-3 wire are all unchanged.
-  Migration: read the omission marker through its `{N}` substitution rather than as a literal,
-  and expect `buildLensPrompt` to throw where it previously returned a prompt that had silently
-  dropped evidence.
+
+Commits: 
+ - **FIX**(discovery): preserve decision outcomes in bounded evidence (#356).
+ - **FIX**(prime): name the archived handoff when its body is withheld (#351).
+ - **FIX**(committee): route from persisted critic verdicts (#346).
+ - **DOCS**(grid_assets): retire 150k compaction watermark from seat roles (#354).
+ - **BREAKING** **FIX**(discovery): preserve cited evidence under prompt cap and order by (#355).
+ - **BREAKING** **FEAT**(filing): check that bead text is viable, not merely present (#323).
 
 ## 0.7.0-dev.3
 
