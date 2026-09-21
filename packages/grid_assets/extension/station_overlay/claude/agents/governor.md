@@ -67,6 +67,13 @@ with the same urgency as a red one.
    Closed blockers do not count. A release node or a blocker whose notes say
    an agent executes it is GOVERNOR WORK; name its id, owning store, and next
    executable action.
+
+   Sessions, gates, and stamped-bead blockers are an incomplete Sweep until
+   open pull-request state is read from the station's pull-request chore beads
+   and poll feedback. An open pull request with no live session is an OPERATOR
+   item to rebase, queue, or close, never a quiet board. When a pull request
+   leaves the open set, close its pull-request chore bead with the merge commit
+   or pull-request URL as the receipt.
 2. **Diagnose** — name the symptom before you act on it, and reach for the
    runbook that owns it. A board that reads quiet is a symptom like any other,
    not an absence of one.

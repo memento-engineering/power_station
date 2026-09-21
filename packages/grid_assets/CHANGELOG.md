@@ -1,5 +1,15 @@
 ## Unreleased
 
+- Changed: the vended governor role and both armed `harvest-review` legs now state who owns an
+  OPEN pull request. The governor's Sweep is incomplete until pull-request state is read from the
+  station's own pull-request chore beads and poll feedback, an open pull request with no live
+  session is operator work rather than a quiet board, and a chore bead closes with the merge commit
+  or pull-request URL as its receipt. `harvest-review` requires a seat-opened pull request to carry
+  an explicit bead reference plus a way to notice it merging, keeps the lease-guarded force-push
+  scoped to the station's own per-bead `grid/<bead>` delivery branch, and reports every open pull
+  request the station knows about rather than only this harvest's. Policy only: no repository
+  enumeration enters the prose.
+
 - Breaking: `filing`, `approve` and `unpark` run a PRE-STAMP ADVISORY by default — the same
   `bead-readiness` lens and the same discovery evidence gather the `spec_review` route runs,
   against the filing as it will be mounted. Measured over one lunar epoch, roughly half of the

@@ -23,11 +23,46 @@
 // the command answers six preconditions the dance never asked about at all.
 // One owner per sentence is what keeps them from drifting apart.
 //
-// SCOPE: this file reads the CLAUDE leg only. `governor.md` has no `agents/`
-// twin at all, and each per-harness leg of `station_overlay` is an INDEPENDENT
-// instruction source (`power_station#a-harness-may-carry-its-own-instructions`
-// — identical content between legs is permitted, never required, and nothing
-// tests for it), so nothing here reads or compares the agents leg.
+// OPEN PULL REQUESTS are the same omission one step later (bead `pow-07zx`).
+// The Sweep read sessions, gates and stamped-bead blockers — all questions
+// asked of work the station is still DOING — so a pull request that had left
+// the agents and sat unmerged appeared nowhere. Measured 2026-09-12: NINE
+// pull-request chore beads open across two stores, every one of their pull
+// requests already merged, by up to nine days. The stale rows did not merely
+// clutter the board: a genuinely stalled pull request — power_station#268,
+// three days CONFLICTING with its own chore bead already filed — was
+// INDISTINGUISHABLE from the nine that needed nothing.
+//
+// So the two policy owners state the OWNERSHIP RULE and point at the surfaces
+// the station already has (the pull-request chore beads the GitHub intake
+// mints, and the poll's own pull-request feedback). Neither enumerates
+// repositories by hand: anything a verb can answer is deleted from prose, not
+// duplicated into it
+// (`power_station#a-station-explains-itself-through-prime-and-bounded-help`),
+// and that enumeration is pinned ABSENT below.
+//
+// The Landing clause keeps force-with-lease inside the grant it was given:
+// `memento-engineering#the-governor-force-pushes-its-own-station-branches`
+// covers the station's own per-bead `grid/<bead>` delivery branches and
+// nothing else, so a `decisions/*` branch stays a hand-back.
+//
+// Two further decisions declare `governor.md` itself as a surface, and this
+// file disturbs neither:
+// `power_station#the-governor-carries-a-cost-posture-ranked-under-throughput`
+// and `power_station#the-vended-seat-roles-carry-no-compaction-watermark` own
+// the role's `## Cost` section — and the second claims the WHOLE file against
+// the retired 150k figure. The sentences pinned here live in the operating
+// loop's Sweep step, name no context figure and no compaction trigger, and
+// leave every Cost claim as it stands; `governor_posture_test.dart` remains
+// their sole owner.
+//
+// SCOPE: `governor.md` is read on the CLAUDE leg, because it has no `agents/`
+// twin at all. `harvest-review` is ARMED on both legs, so each leg is loaded
+// from its own path and checked on its own — never compared. Each per-harness
+// leg of `station_overlay` is an INDEPENDENT instruction source
+// (`power_station#a-harness-may-carry-its-own-instructions` — identical
+// content between legs is permitted, never required, and nothing tests for
+// it), so no assertion here relates one leg's body to the other's.
 //
 // Offline only — reads the bundled `extension/` files.
 import 'dart:io';
@@ -57,6 +92,25 @@ String _stationOperations() => File(
 /// The session-end ritual whose board section made the false claim.
 String _handoff() => File(
   p.join(_claudeLeg(), 'skills', 'handoff', 'SKILL.md'),
+).readAsStringSync();
+
+/// The authored agents leg of the station overlay, off the same shared
+/// cwd-independent package root. An independent instruction source, read here
+/// only so its OWN copy of an armed skill is checked on its own terms.
+String _agentsLeg() =>
+    p.join(packageRoot(), 'extension', 'station_overlay', 'agents');
+
+/// The Claude leg's harvest-review runbook — where a branch becomes a pull
+/// request, and therefore where the pull request's ownership is stated.
+String _claudeHarvestReview() => File(
+  p.join(_claudeLeg(), 'skills', 'harvest-review', 'SKILL.md'),
+).readAsStringSync();
+
+/// The agents leg's harvest-review runbook, loaded from its own path. Armed
+/// independently, so it carries its own copy of the policy or fails here by
+/// name — never by comparison with [_claudeHarvestReview].
+String _agentsHarvestReview() => File(
+  p.join(_agentsLeg(), 'skills', 'harvest-review', 'SKILL.md'),
 ).readAsStringSync();
 
 /// The four sentences the sweep PROCEDURE is made of, each keyed by the
@@ -152,6 +206,78 @@ const Map<String, String> _boardSentences = {
       'only genuine human blockers in human-gate rows.',
 };
 
+/// The three sentences that put OPEN PULL REQUESTS inside the governor's own
+/// Sweep, each keyed by the failure it prevents.
+///
+/// Policy only, at the altitude the seat pays for on every turn: WHAT a pull
+/// request obliges, and WHERE its state is read — the station's own chore
+/// beads and poll feedback. The reading itself has one owner, the station's
+/// loop, and a hand-rolled repository walk here would be the second copy
+/// ([_handRolledEnumeration]).
+const Map<String, String> _governorPullRequestPolicy = {
+  'sessions, gates and blockers are not a complete Sweep on their own':
+      'Sessions, gates, and stamped-bead blockers are an incomplete Sweep '
+      "until open pull-request state is read from the station's pull-request "
+      'chore beads and poll feedback.',
+  'an open pull request with no live session is operator work, not quiet':
+      'An open pull request with no live session is an OPERATOR item to '
+      'rebase, queue, or close, never a quiet board.',
+  'a chore bead closes when its pull request leaves the open set':
+      'When a pull request leaves the open set, close its pull-request chore '
+      'bead with the merge commit or pull-request URL as the receipt.',
+};
+
+/// The two sentences the LANDING step owes a pull request it just opened:
+/// attribution that is stated rather than inferred, and who owns the branch
+/// when it conflicts.
+///
+/// The force-push half is deliberately NARROW. The grant covers the station's
+/// own per-bead delivery branch and no other, so the sentence carries the
+/// restriction beside the grant — a reader who sees only "force-with-lease is
+/// allowed" is the reader that decision exists to prevent.
+const Map<String, String> _harvestLandingPullRequestPolicy = {
+  'a seat-opened pull request carries an explicit reference and a way to '
+          'notice it merging':
+      'A pull request opened by a seat must carry an explicit bead reference '
+      "through the chore bead's external_ref and/or the bead id in the "
+      'pull-request body, plus either a merge watcher or the '
+      "handoff's awaiting-merge queue.",
+  'a conflicting per-bead delivery branch is rebased, and ONLY that branch':
+      'A conflicting station-owned grid/<bead> delivery branch is governor '
+      'work: rebase it and push that named branch with force-with-lease '
+      'rather than handing it back; under '
+      'memento-engineering#the-governor-force-pushes-its-own-station-branches, '
+      'the grant is restricted to that per-bead branch, so a decisions/* '
+      'branch or any other non-per-bead branch is OUT of scope and remains a '
+      'hand-back.',
+};
+
+/// The sentence that makes the reported queue the STATION's queue rather than
+/// this harvest's — the nine stale rows were all opened by someone else's
+/// round, and a queue that only reports its own opens never showed them.
+const Map<String, String> _harvestReportingPullRequestPolicy = {
+  'the awaiting-merge queue is every open pull request, not just this '
+          "harvest's":
+      'The awaiting-merge queue contains every open pull request the station '
+      'knows about, not only pull requests opened by this harvest.',
+};
+
+/// The per-repository walk none of the three prose sources may grow.
+///
+/// A roster loop written into an instruction file is a second copy of
+/// discovery the station's own poll already owns: it starts accurate, drifts
+/// silently as the roster changes, and is exactly what obligation 3 of
+/// `power_station#a-station-explains-itself-through-prime-and-bounded-help`
+/// deletes from prose. Matched case-insensitively, against the WHOLE source —
+/// a shell loop is no better in a neighbouring section.
+const List<String> _handRolledEnumeration = [
+  'gh pr list',
+  'for repo in',
+  'for repository in',
+  'for each roster repo',
+  'for each roster repository',
+];
+
 /// The body of [source] from [start] up to (not including) [end], with every
 /// run of whitespace collapsed to one space.
 ///
@@ -241,6 +367,135 @@ void main() {
             'beside the command that answers it',
       );
     }
+  });
+
+  test('the governor Sweep owns open pull-request reconciliation policy', () {
+    final sweep = _section(
+      _governor(),
+      '1. **Sweep**',
+      '2. **Diagnose**',
+      of: 'agents/governor.md',
+    );
+
+    _governorPullRequestPolicy.forEach((guarantee, sentence) {
+      expect(
+        sweep,
+        contains(sentence),
+        reason:
+            'the governor def’s Sweep step must state, in its own body, that '
+            '$guarantee — without it a merged pull request and a stalled one '
+            'are the same open row, and the stalled one waits for a human to '
+            'happen to look',
+      );
+    });
+  });
+
+  /// Both armed legs answer the same two questions; each is asked of the leg
+  /// named in [of], and of nothing else. No assertion crosses the two.
+  void expectHarvestPullRequestPolicy(String source, {required String of}) {
+    final landing = _section(
+      source,
+      '## Landing',
+      '## Reporting the harvest',
+      of: of,
+    );
+
+    _harvestLandingPullRequestPolicy.forEach((guarantee, sentence) {
+      expect(
+        landing,
+        contains(sentence),
+        reason:
+            'the Landing section of $of must state that $guarantee — a pull '
+            'request opened without it is a row nobody owns once the session '
+            'that opened it is gone',
+      );
+    });
+
+    final reporting = _section(
+      source,
+      '## Reporting the harvest',
+      '## Gotchas',
+      of: of,
+    );
+
+    _harvestReportingPullRequestPolicy.forEach((guarantee, sentence) {
+      expect(
+        reporting,
+        contains(sentence),
+        reason:
+            'the Reporting section of $of must state that $guarantee — a '
+            'queue scoped to this harvest reports zero on the very run where '
+            'an older pull request has been sitting for days',
+      );
+    });
+  }
+
+  test('the Claude harvest-review owns open pull-request policy', () {
+    expectHarvestPullRequestPolicy(
+      _claudeHarvestReview(),
+      of: 'claude/skills/harvest-review/SKILL.md',
+    );
+  });
+
+  test('the agents harvest-review owns open pull-request policy', () {
+    expectHarvestPullRequestPolicy(
+      _agentsHarvestReview(),
+      of: 'agents/skills/harvest-review/SKILL.md',
+    );
+  });
+
+  test(
+    'pull-request policy contains no hand-rolled repository enumeration',
+    () {
+      final sources = <String, String>{
+        'agents/governor.md': _governor(),
+        'claude/skills/harvest-review/SKILL.md': _claudeHarvestReview(),
+        'agents/skills/harvest-review/SKILL.md': _agentsHarvestReview(),
+      };
+
+      sources.forEach((of, source) {
+        final lowered = source.toLowerCase();
+        for (final enumeration in _handRolledEnumeration) {
+          expect(
+            lowered,
+            isNot(contains(enumeration)),
+            reason:
+                '$of must not enumerate pull requests per repository with '
+                '`$enumeration` — the station owns that discovery in its own '
+                'poll, '
+                'and a copy in prose drifts the moment the roster changes',
+          );
+        }
+      });
+    },
+  );
+
+  test('the section extractor rejects either missing policy anchor', () {
+    expect(
+      () => _section(
+        _governor(),
+        '1. **Sweep of an absent heading**',
+        '2. **Diagnose**',
+        of: 'agents/governor.md',
+      ),
+      throwsA(isA<StateError>()),
+      reason:
+          'an extractor that returned nothing for a missing START would pass '
+          'every sentence above vacuously',
+    );
+
+    expect(
+      () => _section(
+        _claudeHarvestReview(),
+        '## Landing',
+        '## An absent closing heading',
+        of: 'claude/skills/harvest-review/SKILL.md',
+      ),
+      throwsA(isA<StateError>()),
+      reason:
+          'an extractor that ran to end-of-file for a missing END would let a '
+          'sentence in any later section pass as this one’s',
+    );
   });
 
   test(
