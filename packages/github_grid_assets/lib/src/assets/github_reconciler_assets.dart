@@ -284,14 +284,32 @@ GitHubReconcilerRuntime createGitHubReconcilerRuntime({
   );
 }
 
-/// Owns and provides a live reconciler runtime when the composition is armed.
+/// Describes one repository's resident reconciler subtree — and owns no effect
+/// of its own.
 ///
-/// It also binds the seat's flare rail onto the [CiFeedbackProjection] the
-/// binding above provides, so the CI-feedback delivery leg reports on the SAME
-/// transport a failed cycle does. This asset is where that transport is already
-/// resolved, so binding here adds no second observer, no second provider and no
-/// second reporting path.
-class GitHubReconcilerAssets extends SingleChildStatefulSeed {
+/// Everything with a LIFETIME belongs to [_GitHubReconcilerLifecycle]: the
+/// polling runtime, its attachment to the station-registered
+/// [GitHubReconciliationQuery], and the seat's flare rail on the ambient
+/// [CiFeedbackProjection]. This seed only describes the subtree and projects
+/// [_GitHubReconcilerInputs] — one immutable value carrying every input those
+/// resources are built from. The [LifecycleProvider] below creates the
+/// participant once per mount and hands it a dependency pass when, and only
+/// when, that value actually CHANGES. A rebuild describing the same inputs is
+/// therefore a no-op: no replacement runtime, no detach/attach churn, and no
+/// reporter mutation that would stamp over a binding another owner installed.
+///
+/// The flare rail is bound INDEPENDENTLY of the runtime, so the CI-feedback
+/// delivery leg reports on the SAME transport a failed cycle does and an absent
+/// App client never silently takes that visibility away. This asset is where
+/// the transport is already resolved, so binding here adds no second observer,
+/// no second provider and no second reporting path.
+///
+/// The station's [GitHubPollCoordinator] is an INPUT here, never an owned
+/// resource: it is mounted once by [GitHubPollCoordinatorAssets] above the
+/// repository fan-out, subscribed to like every other ambient dependency so a
+/// replacement reaches this seat, and refused by name when a live seat finds
+/// none.
+class GitHubReconcilerAssets extends SingleChildStatelessSeed {
   /// Creates an optionally armed reconciler provider.
   const GitHubReconcilerAssets({
     this.config,
@@ -323,104 +341,198 @@ class GitHubReconcilerAssets extends SingleChildStatefulSeed {
   final GitHubHttpTransportFactory foreignTransportFactory;
 
   @override
-  SingleChildState<GitHubReconcilerAssets> createState() =>
-      _GitHubReconcilerAssetsState();
-}
-
-final class _GitHubReconcilerAssetsState
-    extends SingleChildState<GitHubReconcilerAssets> {
-  GitHubReconcilerRuntime? _runtime;
-  GitHubReconciliationQuery? _builtQuery;
-  GitHubReconcilerConfig? _builtConfig;
-  GitHubAppClient? _builtClient;
-  GitHubCursorStore? _builtCursors;
-  GitHubEventSink? _builtEmit;
-  ExplorationTransport? _builtTransport;
-  GitHubPollCoordinator? _builtCoordinator;
-  CiFeedbackProjection? _reportingProjection;
-  CiFeedbackReporter? _boundReporter;
-  GitHubReconcilerConfig? _reporterConfig;
-  ExplorationTransport? _reporterTransport;
-
-  GitHubReconcilerAssets get _assets => seed;
-
-  @override
   Seed buildWithChild(TreeContext context, Seed child) {
+    // SUBSCRIBE to every ambient input (ADR-0008 D3: the build verb binds), so
+    // a re-provisioned station config, a replaced App client, a replaced store
+    // or a new feedback leg all reach this seat as a fresh projected value.
     final services = context.dependOnInheritedSeedOfExactType<ServiceBundle>();
-    final client = context.watch<GitHubAppClient>();
-    final cursors = context.watch<GitHubCursorStore>();
-    final emit = context.watch<GitHubEventSink>();
-    final feedback = context.watch<CiFeedbackProjection>();
-    // The STATION's shared installation budget, subscribed to unconditionally
-    // (ADR-0008 D3) so a replaced coordinator rebuilds this seat onto it rather
-    // than leaving it spending a budget nobody owns any more.
-    final coordinator = context.watch<GitHubPollCoordinator>();
-    final config = _assets.config;
-    final transport = services?.transport;
-    // Bound INDEPENDENTLY of the runtime: the leg's visibility is not something
-    // an absent App client should silently take away.
-    _bindReporter(feedback, config, transport);
-    final enabled =
-        config?.arm == GitHubReconcilerArm.live &&
-        client != null &&
-        cursors != null &&
-        emit != null;
-    if (!enabled) {
-      _replaceRuntime(null, null, null, null, null, null, null, null);
-      return child;
-    }
-    // THE STATION OWNS THE SCHEDULE: this seat contributes reconciliation
-    // work to the ratified service tick and adds no wake mechanism of its
-    // own. Resolved with the SUBSCRIBING build verb (ADR-0008 D3) so a
-    // re-provisioned station config moves this seat onto the new query.
-    final query = _registeredQuery(context, config!);
-    // LOUD OR GONE, and gone FIRST: the seat stops riding the tick before the
-    // refusal is raised, so a station missing the rung has no runtime left
-    // spending a budget on nobody's schedule.
-    if (coordinator == null) {
-      _replaceRuntime(null, null, null, null, null, null, null, null);
-      throw StateError(
-        'Seat ${config.substation} arms a live GitHub reconciler for '
-        'installation ${config.installationId}, whose request allowance is '
-        'shared by every repository on it: the station must mount exactly one '
-        'GitHubPollCoordinatorAssets above its repositories, and this tree '
-        'offers none. A coordinator per repository would serialize nothing '
-        'and spend the installation budget once per seat.',
-      );
-    }
-    if (config != _builtConfig ||
-        !identical(client, _builtClient) ||
-        !identical(cursors, _builtCursors) ||
-        !identical(emit, _builtEmit) ||
-        !identical(transport, _builtTransport) ||
-        !identical(coordinator, _builtCoordinator)) {
-      final replacement = _assets.runtimeFactory(
-        config: config,
-        client: client,
-        cursors: cursors,
-        emit: emit,
-        transport: transport,
-        foreignClient: _foreignClient(config),
-        coordinator: coordinator,
-      );
-      _replaceRuntime(
-        replacement,
-        query,
-        config,
-        client,
-        cursors,
-        emit,
-        transport,
-        coordinator,
-      );
-    } else if (!identical(query, _builtQuery)) {
-      _moveToQuery(query);
-    }
-    return InheritedSeed<GitHubReconcilerRuntime>(
-      value: _runtime!,
-      child: child,
+    final trajectory = context
+        .dependOnInheritedSeedOfExactType<TrajectoryConfig>();
+    final inputs = _GitHubReconcilerInputs(
+      config: _immutableConfig(config),
+      client: context.watch<GitHubAppClient>(),
+      cursors: context.watch<GitHubCursorStore>(),
+      emit: context.watch<GitHubEventSink>(),
+      feedback: context.watch<CiFeedbackProjection>(),
+      transport: services?.transport,
+      // The STATION's shared installation budget, subscribed to
+      // unconditionally (ADR-0008 D3) so a replaced coordinator reaches this
+      // seat as a changed value rather than leaving it spending a budget
+      // nobody owns any more. Whether an ABSENT one is legal is the
+      // lifecycle's refusal to make, not a silent arm-down here.
+      coordinator: context.watch<GitHubPollCoordinator>(),
+      // THE STATION OWNS THE SCHEDULE: this seat contributes reconciliation
+      // work to the ratified service tick and adds no wake mechanism of its
+      // own. The registered candidates are projected as a VALUE; which
+      // cardinality is legal is the lifecycle's refusal to make.
+      queries: List<GitHubReconciliationQuery>.unmodifiable(
+        (trajectory?.obligationQueryExtensions ?? const <ObligationQuery>[])
+            .whereType<GitHubReconciliationQuery>(),
+      ),
+      runtimeFactory: runtimeFactory,
+      environment: environment,
+      foreignTransportFactory: foreignTransportFactory,
+    );
+    return InheritedSeed<_GitHubReconcilerInputs>(
+      value: inputs,
+      child: LifecycleProvider<_GitHubReconcilerLifecycle>(
+        create: _GitHubReconcilerLifecycle.new,
+        child: _GitHubReconcilerRuntimeProjection(child: child),
+      ),
     );
   }
+}
+
+/// [config] with its two declared lists copied into unmodifiable ones.
+///
+/// The projected value has to be IMMUTABLE for input equality to mean
+/// anything: a caller that mutated the list it passed would otherwise change
+/// what the lifecycle already applied, underneath a value that still compares
+/// equal to it.
+GitHubReconcilerConfig? _immutableConfig(GitHubReconcilerConfig? config) =>
+    config == null
+    ? null
+    : GitHubReconcilerConfig(
+        owner: config.owner,
+        repository: config.repository,
+        substation: config.substation,
+        installationId: config.installationId,
+        minimumSpacing: config.minimumSpacing,
+        arm: config.arm,
+        defaultBranch: config.defaultBranch,
+        workflowRuns: List<WorkflowRunIntakeRule>.unmodifiable(
+          config.workflowRuns,
+        ),
+        issueWatches: List<GitHubIssueWatch>.unmodifiable(config.issueWatches),
+        foreignReadTokenVariable: config.foreignReadTokenVariable,
+        foreignMinimumSpacing: config.foreignMinimumSpacing,
+      );
+
+/// Whether two configurations state the same seat, field by field.
+bool _sameConfig(GitHubReconcilerConfig? a, GitHubReconcilerConfig? b) {
+  if (identical(a, b)) return true;
+  if (a == null || b == null) return false;
+  return a.owner == b.owner &&
+      a.repository == b.repository &&
+      a.substation == b.substation &&
+      a.installationId == b.installationId &&
+      a.minimumSpacing == b.minimumSpacing &&
+      a.arm == b.arm &&
+      a.defaultBranch == b.defaultBranch &&
+      a.foreignReadTokenVariable == b.foreignReadTokenVariable &&
+      a.foreignMinimumSpacing == b.foreignMinimumSpacing &&
+      _sameElements(a.workflowRuns, b.workflowRuns) &&
+      _sameElements(a.issueWatches, b.issueWatches);
+}
+
+/// One hash over everything [_sameConfig] compares.
+int _configHash(GitHubReconcilerConfig? config) => config == null
+    ? 0
+    : Object.hash(
+        config.owner,
+        config.repository,
+        config.substation,
+        config.installationId,
+        config.minimumSpacing,
+        config.arm,
+        config.defaultBranch,
+        config.foreignReadTokenVariable,
+        config.foreignMinimumSpacing,
+        Object.hashAll(config.workflowRuns),
+        Object.hashAll(config.issueWatches),
+      );
+
+/// Ordered element-wise equality — the declared lists are ORDERED policy, so a
+/// reordering is a different configuration.
+bool _sameElements<T extends Object>(List<T> a, List<T> b) {
+  if (identical(a, b)) return true;
+  if (a.length != b.length) return false;
+  for (var i = 0; i < a.length; i++) {
+    if (a[i] != b[i]) return false;
+  }
+  return true;
+}
+
+/// Ordered IDENTITY equality: a registered query is its attachment set, so two
+/// equal-looking queries are two different schedules.
+bool _sameQueries(
+  List<GitHubReconciliationQuery> a,
+  List<GitHubReconciliationQuery> b,
+) {
+  if (identical(a, b)) return true;
+  if (a.length != b.length) return false;
+  for (var i = 0; i < a.length; i++) {
+    if (!identical(a[i], b[i])) return false;
+  }
+  return true;
+}
+
+/// The complete answer to "what would this seat's reconciler be built from?",
+/// as one immutable tree VALUE.
+///
+/// Value equality IS the mechanism. The owning lifecycle is handed a dependency
+/// pass only when this value changes, so a rebuild that describes the same seat
+/// owns no effect at all. Configuration compares BY VALUE — every scalar, and
+/// both declared lists element by element; the registered query candidates
+/// compare by ordered IDENTITY; and implementations — client, cursor store,
+/// event sink, transport, factories and the environment reader — compare by
+/// identity, because two instances are two implementations even when they
+/// behave alike. Function-valued inputs use `==`, which for a Dart tear-off is
+/// that same identity (one method, one receiver) without punishing a caller who
+/// spells the tear-off twice.
+final class _GitHubReconcilerInputs {
+  const _GitHubReconcilerInputs({
+    required this.config,
+    required this.client,
+    required this.cursors,
+    required this.emit,
+    required this.feedback,
+    required this.transport,
+    required this.coordinator,
+    required this.queries,
+    required this.runtimeFactory,
+    required this.environment,
+    required this.foreignTransportFactory,
+  });
+
+  final GitHubReconcilerConfig? config;
+  final GitHubAppClient? client;
+  final GitHubCursorStore? cursors;
+  final GitHubEventSink? emit;
+  final CiFeedbackProjection? feedback;
+  final ExplorationTransport? transport;
+  final GitHubPollCoordinator? coordinator;
+  final List<GitHubReconciliationQuery> queries;
+  final GitHubReconcilerRuntimeFactory runtimeFactory;
+  final EnvironmentReader environment;
+  final GitHubHttpTransportFactory foreignTransportFactory;
+
+  /// Whether this seat both ARMS a runtime and has every dependency one needs.
+  bool get isLive =>
+      config?.arm == GitHubReconcilerArm.live &&
+      client != null &&
+      cursors != null &&
+      emit != null;
+
+  /// Whether [other] would bind the same flare rail: one projection, one
+  /// reported seat, one transport to report on.
+  bool sameReporting(_GitHubReconcilerInputs other) =>
+      identical(other.feedback, feedback) &&
+      identical(other.transport, transport) &&
+      _sameConfig(other.config, config);
+
+  /// Whether [other] would construct the same runtime from the same inputs —
+  /// which is what makes a live seat keep its cursor tail across a rebuild.
+  bool sameRuntime(_GitHubReconcilerInputs other) =>
+      _sameConfig(other.config, config) &&
+      identical(other.client, client) &&
+      identical(other.cursors, cursors) &&
+      other.emit == emit &&
+      identical(other.transport, transport) &&
+      identical(other.coordinator, coordinator) &&
+      other.runtimeFactory == runtimeFactory &&
+      other.environment == environment &&
+      other.foreignTransportFactory == foreignTransportFactory;
 
   /// THE ONE query this seat attaches to: the single
   /// [GitHubReconciliationQuery] the station registered in
@@ -428,43 +540,75 @@ final class _GitHubReconcilerAssetsState
   /// registration point the harness merges into the tick.
   ///
   /// LOUD OR GONE. A live seat with NO registered query would reconcile on
-  /// nobody's schedule — the exact silence this design exists to retire —
-  /// and a seat matching TWO would reconcile twice per pass under one
-  /// installation budget. Both are refusals naming the registration point
-  /// and the count observed, never a quiet fallback to a local loop.
-  GitHubReconciliationQuery _registeredQuery(
-    TreeContext context,
-    GitHubReconcilerConfig config,
-  ) {
-    final trajectory = context
-        .dependOnInheritedSeedOfExactType<TrajectoryConfig>();
-    final registered =
-        (trajectory?.obligationQueryExtensions ?? const <ObligationQuery>[])
-            .whereType<GitHubReconciliationQuery>()
-            .toList(growable: false);
-    if (registered.length != 1) {
+  /// nobody's schedule — the exact silence this design exists to retire — and a
+  /// seat matching TWO would reconcile twice per pass under one installation
+  /// budget. Both are refusals naming the registration point and the count
+  /// observed, never a quiet fallback to a local loop.
+  GitHubReconciliationQuery requireRegisteredQuery() {
+    if (queries.length != 1) {
       throw StateError(
-        'Seat ${config.substation} arms a live GitHub reconciler, which runs '
+        'Seat ${config!.substation} arms a live GitHub reconciler, which runs '
         'on the station tick: the station must register EXACTLY ONE '
         'GitHubReconciliationQuery in '
         'TrajectoryConfig.obligationQueryExtensions, and this tree offers '
-        '${registered.length}.',
+        '${queries.length}.',
       );
     }
-    return registered.first;
+    return queries.first;
   }
 
-  /// The token-less read client for [config]'s FOREIGN watches, or null when it
-  /// has none.
+  /// THE STATION's one poll coordinator, which every repository on this
+  /// installation spends its single request allowance through.
+  ///
+  /// LOUD OR GONE, and second in the refusal order on purpose: the seat has
+  /// already stopped riding the tick by the time this is asked, so a station
+  /// missing the rung is left with no runtime spending a budget on nobody's
+  /// schedule. A coordinator built here per repository would serialize nothing
+  /// and spend the installation budget once per seat — the exact defect
+  /// [GitHubPollCoordinatorAssets] exists to close — so an absent one is a
+  /// refusal naming that rung, never a locally constructed substitute.
+  GitHubPollCoordinator requireStationCoordinator() {
+    final coordinator = this.coordinator;
+    if (coordinator == null) {
+      throw StateError(
+        'Seat ${config!.substation} arms a live GitHub reconciler for '
+        'installation ${config!.installationId}, whose request allowance is '
+        'shared by every repository on it: the station must mount exactly one '
+        'GitHubPollCoordinatorAssets above its repositories, and this tree '
+        'offers none. A coordinator per repository would serialize nothing '
+        'and spend the installation budget once per seat.',
+      );
+    }
+    return coordinator;
+  }
+
+  /// Builds the runtime these inputs describe on the station's [coordinator].
+  /// Callable only for an [isLive] value whose coordinator has already been
+  /// required, where every dependency is present by construction.
+  GitHubReconcilerRuntime constructRuntime(GitHubPollCoordinator coordinator) =>
+      runtimeFactory(
+        config: config!,
+        client: client!,
+        cursors: cursors!,
+        emit: emit!,
+        transport: transport,
+        foreignClient: _foreignClient(),
+        coordinator: coordinator,
+      );
+
+  /// The token-less read client for the FOREIGN watches, or null when there are
+  /// none.
   ///
   /// Constructed here and nowhere else, so the feature-off posture costs no
   /// transport, no coordinator and no environment read. The foreign lane gets
   /// its OWN [GitHubPollCoordinator] under [kForeignIssueWatchRateKey]: sharing
   /// the installation's coordinator would let a 5000-per-hour lane spend a
-  /// 60-per-hour allowance. That stays true now the installation coordinator is
-  /// STATION-owned — this one is per seat, holds its own credential posture and
-  /// its own spacing state, and neither crosses into installation budgeting.
-  GitHubReadClient? _foreignClient(GitHubReconcilerConfig config) {
+  /// 60-per-hour allowance. That stays true now the installation coordinator
+  /// is STATION-owned — this one is per seat, holds its own credential
+  /// posture and its own spacing state, and neither crosses into installation
+  /// budgeting.
+  GitHubReadClient? _foreignClient() {
+    final config = this.config!;
     final foreign = config.issueWatches
         .where(
           (watch) => !watch.isInstalledRepository(
@@ -475,7 +619,7 @@ final class _GitHubReconcilerAssetsState
         .toList(growable: false);
     if (foreign.isEmpty) return null;
     final variable = config.foreignReadTokenVariable;
-    final token = variable == null ? null : _assets.environment()[variable];
+    final token = variable == null ? null : environment()[variable];
     final authenticated = token != null && token.trim().isNotEmpty;
     final spacing =
         authenticated ||
@@ -484,7 +628,7 @@ final class _GitHubReconcilerAssetsState
         : kUnauthenticatedGitHubMinimumSpacing;
     final coordinator = GitHubPollCoordinator(minimumSpacing: spacing);
     return GitHubReadClient(
-      transport: _assets.foreignTransportFactory(),
+      transport: foreignTransportFactory(),
       apiBaseUri: Uri.https('api.github.com', ''),
       personalToken: token,
       schedule: (request) =>
@@ -492,58 +636,129 @@ final class _GitHubReconcilerAssetsState
     );
   }
 
-  void _replaceRuntime(
-    GitHubReconcilerRuntime? replacement,
-    GitHubReconciliationQuery? query,
-    GitHubReconcilerConfig? config,
-    GitHubAppClient? client,
-    GitHubCursorStore? cursors,
-    GitHubEventSink? emit,
-    ExplorationTransport? transport,
-    GitHubPollCoordinator? coordinator,
+  @override
+  bool operator ==(Object other) =>
+      other is _GitHubReconcilerInputs &&
+      sameRuntime(other) &&
+      identical(other.feedback, feedback) &&
+      _sameQueries(other.queries, queries);
+
+  @override
+  int get hashCode => Object.hash(
+    _configHash(config),
+    identityHashCode(client),
+    identityHashCode(cursors),
+    emit,
+    identityHashCode(feedback),
+    identityHashCode(transport),
+    identityHashCode(coordinator),
+    Object.hashAll(queries.map(identityHashCode)),
+    runtimeFactory,
+    environment,
+    foreignTransportFactory,
+  );
+}
+
+/// OWNS the reconciler's effects for one mount: the runtime, the query
+/// attachment that schedules it, and the seat's reporter on the CI-feedback
+/// leg.
+///
+/// The participant holds NO tree capability. Every input arrives as the one
+/// [_GitHubReconcilerInputs] value it watches inside each synchronous
+/// dependency callback, and the call-scoped reader is used there and retained
+/// nowhere. What it remembers instead is the LAST APPLIED value plus the
+/// resources that value produced — one mirror rather than a field per input —
+/// so "did anything that matters change?" is a value comparison and not a
+/// hand-kept ledger.
+///
+/// Reconfiguration has ONE order, and it is the order that cannot leave a
+/// superseded seat riding the tick: rebind the rail, release the current
+/// attachment, refuse loudly if the station registration or its shared poll
+/// coordinator is missing, then construct and attach the replacement. Nothing
+/// is attached until it is fully constructed.
+final class _GitHubReconcilerLifecycle implements TreeLifecycleParticipant {
+  _GitHubReconcilerInputs? _applied;
+  GitHubReconcilerRuntime? _runtime;
+  GitHubReconciliationQuery? _query;
+  CiFeedbackProjection? _reportingProjection;
+  CiFeedbackReporter? _boundReporter;
+
+  /// The runtime this lifecycle owns right now, or null for the UNAVAILABLE
+  /// posture.
+  ///
+  /// Read in exactly one place: [_GitHubReconcilerRuntimeProjection]'s build,
+  /// mounted directly below the provider that carries this participant, where
+  /// the dependency pass that owns this value has already run.
+  GitHubReconcilerRuntime? get runtime => _runtime;
+
+  @override
+  void initState(TreeSnapshotReader reader) {}
+
+  @override
+  void didChangeDependencies(
+    TreeWatchingReader reader,
+    TreeDependencyScope scope,
   ) {
-    final previous = _runtime;
-    if (identical(previous, replacement)) return;
-    // SYNCHRONOUS detach, before the replacement is attached: a superseded
-    // runtime must not reconcile on one more pass.
-    if (previous != null) _builtQuery?.detach(previous);
-    _runtime = replacement;
-    _builtQuery = query;
-    _builtConfig = config;
-    _builtClient = client;
-    _builtCursors = cursors;
-    _builtEmit = emit;
-    _builtTransport = transport;
-    _builtCoordinator = coordinator;
-    if (replacement != null) query?.attach(replacement);
+    // WATCH the dep: the value is mounted by the asset directly above this
+    // provider, so the lookup can never miss and every replacement value lands
+    // here as a fresh pass. The reader is used HERE and kept nowhere; this pass
+    // is fully synchronous, so no [scope] survives it.
+    _apply(reader.watch<_GitHubReconcilerInputs>()!);
   }
 
-  /// Moves the LIVE runtime between registered queries without rebuilding
-  /// it: the station replaced its trajectory config, not this seat's
-  /// construction inputs, so the seat keeps its cursor tail and its
-  /// registered delivery legs.
-  void _moveToQuery(GitHubReconciliationQuery query) {
-    final runtime = _runtime;
-    if (runtime == null) return;
-    _builtQuery?.detach(runtime);
-    _builtQuery = query;
+  /// Reconfigures every owned resource for [inputs].
+  void _apply(_GitHubReconcilerInputs inputs) {
+    final previous = _applied;
+    _applied = inputs;
+    _bindReporter(inputs, previous);
+    // A runtime survives only when NOTHING it was constructed from moved: the
+    // seat then keeps its cursor tail and its registered delivery legs.
+    final reuse =
+        inputs.isLive &&
+        _runtime != null &&
+        previous != null &&
+        previous.sameRuntime(inputs);
+    // RELEASE FIRST, synchronously and unconditionally: a superseded runtime
+    // must not reconcile on one more pass, and the refusal below must not leave
+    // one riding a registration this tree no longer states.
+    _releaseAttachment();
+    if (!reuse) _runtime = null;
+    if (!inputs.isLive) return;
+    final query = inputs.requireRegisteredQuery();
+    // Both refusals throw PAST here having already given up the attachment and
+    // — unless every construction input survived — the runtime itself.
+    final coordinator = inputs.requireStationCoordinator();
+    // Construction throws PAST here with its own stack — and owns nothing yet,
+    // because the old runtime is already released and cleared.
+    final runtime = _runtime ?? inputs.constructRuntime(coordinator);
+    _runtime = runtime;
+    _query = query;
     query.attach(runtime);
   }
 
-  /// Binds THIS asset's reporter onto [projection] whenever the projection, the
-  /// config or the transport it closes over has changed.
+  /// Detaches the owned runtime from the query it rides, if any. Idempotent.
+  void _releaseAttachment() {
+    final runtime = _runtime;
+    final query = _query;
+    _query = null;
+    if (runtime != null) query?.detach(runtime);
+  }
+
+  /// Binds THIS lifecycle's reporter onto the projection whenever the
+  /// projection, the seat config or the transport it closes over has changed.
   void _bindReporter(
-    CiFeedbackProjection? projection,
-    GitHubReconcilerConfig? config,
-    ExplorationTransport? transport,
+    _GitHubReconcilerInputs inputs,
+    _GitHubReconcilerInputs? previous,
   ) {
-    if (identical(projection, _reportingProjection) &&
-        config == _reporterConfig &&
-        identical(transport, _reporterTransport)) {
-      return;
-    }
+    // The rail in hand still answers — including when it is deliberately no
+    // rail at all. Rebinding here would stamp over a binding another owner
+    // installed since, for no change.
+    if (previous != null && previous.sameReporting(inputs)) return;
     _unbindReporter();
+    final projection = inputs.feedback;
+    final config = inputs.config;
     if (projection == null || config == null) return;
+    final transport = inputs.transport;
     void reporter(
       String flareName,
       String action,
@@ -561,35 +776,69 @@ final class _GitHubReconcilerAssetsState
     projection.bindReporter(reporter);
     _reportingProjection = projection;
     _boundReporter = reporter;
-    _reporterConfig = config;
-    _reporterTransport = transport;
   }
 
-  /// Unbinds only the reporter THIS asset bound; a binding some other owner has
-  /// since installed on the same projection stands.
+  /// Unbinds only the reporter THIS lifecycle bound; a binding some other owner
+  /// has since installed on the same projection stands.
+  ///
+  /// Cleared BEFORE the call, so a repeated cleanup is inert.
   void _unbindReporter() {
     final projection = _reportingProjection;
     final reporter = _boundReporter;
+    _reportingProjection = null;
+    _boundReporter = null;
     if (projection != null && reporter != null) {
       projection.unbindReporter(reporter);
     }
-    _reportingProjection = null;
-    _boundReporter = null;
-    _reporterConfig = null;
-    _reporterTransport = null;
   }
 
   @override
   void dispose() {
-    _unbindReporter();
     final runtime = _runtime;
-    final query = _builtQuery;
+    final query = _query;
+    // Owned references are cleared BEFORE anything is released, so a repeated
+    // teardown — the failed-mount unwind runs this path too — finds nothing
+    // left to release.
+    _applied = null;
     _runtime = null;
-    _builtQuery = null;
-    // SYNCHRONOUS, like every other detach here: an unmounted seat must be
-    // gone from the station's next pass, not from some later microtask.
+    _query = null;
+    // SYNCHRONOUS, like every other detach here: an unmounted seat must be gone
+    // from the station's next pass, not from some later microtask.
     if (runtime != null) query?.detach(runtime);
-    super.dispose();
+    _unbindReporter();
+  }
+}
+
+/// Projects the lifecycle-owned runtime — and NOTHING while there is none.
+///
+/// Presence in the tree IS availability: an unavailable seat mounts no
+/// `Provider<GitHubReconcilerRuntime>` at all, so a descendant's `watch`
+/// answers null and, because a provider announces its own arrival and
+/// departure, learns the moment that changes. The value is ADOPTED, never
+/// owned: neither the factory result nor the foreign read client nor the
+/// injected foreign transport publishes a transfer-of-ownership disposal
+/// contract, and disposing them here would be this asset inventing one. The
+/// station's [GitHubPollCoordinator] is emphatically not this seat's to
+/// dispose — it is owned by [GitHubPollCoordinatorAssets] at station scope and
+/// outlives every repository that spends through it.
+final class _GitHubReconcilerRuntimeProjection
+    extends SingleChildStatelessSeed {
+  const _GitHubReconcilerRuntimeProjection({super.child});
+
+  @override
+  Seed buildWithChild(TreeContext context, Seed child) {
+    final lifecycle = context.watch<_GitHubReconcilerLifecycle>();
+    if (lifecycle == null) {
+      throw StateError(
+        'GitHubReconcilerAssets built its runtime projection outside the '
+        'LifecycleProvider that owns the reconciler. The provider is mounted '
+        'by this asset directly above this seed, so a miss is a composition '
+        'this library cannot produce.',
+      );
+    }
+    final runtime = lifecycle.runtime;
+    if (runtime == null) return child;
+    return Provider<GitHubReconcilerRuntime>.value(runtime, child: child);
   }
 }
 
