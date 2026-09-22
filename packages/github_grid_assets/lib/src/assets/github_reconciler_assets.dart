@@ -123,7 +123,56 @@ typedef GitHubReconcilerRuntimeFactory =
       required GitHubEventSink emit,
       required ExplorationTransport? transport,
       required GitHubReadClient? foreignClient,
+      required GitHubPollCoordinator coordinator,
     });
+
+/// Constructs the station's shared poll coordinator.
+///
+/// Must return a FRESH instance on every call: [GitHubPollCoordinatorAssets]
+/// hands the result to `Provider(create:)`, which assigns ownership to the
+/// tree, and a pre-built instance passed through that seam would claim an
+/// ownership the caller actually keeps. The seam exists so a test can supply a
+/// controllable clock and delay.
+typedef GitHubPollCoordinatorFactory = GitHubPollCoordinator Function();
+
+/// Owns the STATION's one GitHub poll coordinator and provides it to every
+/// repository beneath it.
+///
+/// A GitHub App installation has ONE request allowance, and the repositories
+/// polled under it spend it between them. [GitHubPollCoordinator] has always
+/// been written for that — its maps are keyed by an opaque quota identity — but
+/// a coordinator constructed per runtime holds a map with exactly one live key,
+/// so neither the serialization nor the start-spacing it implements could ever
+/// apply across the repositories that actually share the budget. This asset is
+/// where the single instance lives: mount it ONCE, above the station's
+/// repository fan-out, and the installation id partitions the budget inside it.
+///
+/// Deliberately NOT part of `SubstationSeed`: that seed is per repository, and
+/// mounting a coordinator there would reproduce the defect exactly.
+///
+/// The TREE owns the value — `Provider(create:)`, created once per station
+/// mount and gone with it — so there is no process-global budget surviving the
+/// station that spent it. It adds no scheduler: the coordinator spaces STARTS,
+/// a transport rate, and when reconciliation happens stays the station tick's
+/// through [GitHubReconciliationQuery].
+class GitHubPollCoordinatorAssets extends SingleChildStatelessSeed {
+  /// Creates the station's coordinator rung.
+  const GitHubPollCoordinatorAssets({
+    this.coordinatorFactory = GitHubPollCoordinator.new,
+    super.child,
+    super.key,
+  });
+
+  /// Injectable construction seam for the tree-owned coordinator.
+  final GitHubPollCoordinatorFactory coordinatorFactory;
+
+  @override
+  Seed buildWithChild(TreeContext context, Seed child) =>
+      Provider<GitHubPollCoordinator>(
+        create: (_) => coordinatorFactory(),
+        child: child,
+      );
+}
 
 /// Reports one reconciler failure for [config] on [transport].
 ///
@@ -172,7 +221,12 @@ void _reportGitHubReconciler({
   );
 }
 
-/// Creates the production polling runtime for [config].
+/// Creates the production polling runtime for [config] on the station's
+/// shared [coordinator].
+///
+/// [coordinator] is REQUIRED and never constructed here: one instance is owned
+/// by [GitHubPollCoordinatorAssets] at station scope, and this factory's job is
+/// to put this repository's installation id and configured rate onto it.
 GitHubReconcilerRuntime createGitHubReconcilerRuntime({
   required GitHubReconcilerConfig config,
   required GitHubAppClient client,
@@ -180,6 +234,7 @@ GitHubReconcilerRuntime createGitHubReconcilerRuntime({
   required GitHubEventSink emit,
   required ExplorationTransport? transport,
   required GitHubReadClient? foreignClient,
+  required GitHubPollCoordinator coordinator,
 }) {
   void report(
     String flareName,
@@ -222,7 +277,8 @@ GitHubReconcilerRuntime createGitHubReconcilerRuntime({
   return GitHubReconcilerRuntime(
     installationId: config.installationId,
     reconciler: reconciler,
-    coordinator: GitHubPollCoordinator(minimumSpacing: config.minimumSpacing),
+    coordinator: coordinator,
+    minimumSpacing: config.minimumSpacing,
     onError: (error, stackTrace) =>
         report('reconciler.cycleFailed', 'cycle failed', error, stackTrace),
   );
@@ -280,6 +336,7 @@ final class _GitHubReconcilerAssetsState
   GitHubCursorStore? _builtCursors;
   GitHubEventSink? _builtEmit;
   ExplorationTransport? _builtTransport;
+  GitHubPollCoordinator? _builtCoordinator;
   CiFeedbackProjection? _reportingProjection;
   CiFeedbackReporter? _boundReporter;
   GitHubReconcilerConfig? _reporterConfig;
@@ -294,6 +351,10 @@ final class _GitHubReconcilerAssetsState
     final cursors = context.watch<GitHubCursorStore>();
     final emit = context.watch<GitHubEventSink>();
     final feedback = context.watch<CiFeedbackProjection>();
+    // The STATION's shared installation budget, subscribed to unconditionally
+    // (ADR-0008 D3) so a replaced coordinator rebuilds this seat onto it rather
+    // than leaving it spending a budget nobody owns any more.
+    final coordinator = context.watch<GitHubPollCoordinator>();
     final config = _assets.config;
     final transport = services?.transport;
     // Bound INDEPENDENTLY of the runtime: the leg's visibility is not something
@@ -305,7 +366,7 @@ final class _GitHubReconcilerAssetsState
         cursors != null &&
         emit != null;
     if (!enabled) {
-      _replaceRuntime(null, null, null, null, null, null, null);
+      _replaceRuntime(null, null, null, null, null, null, null, null);
       return child;
     }
     // THE STATION OWNS THE SCHEDULE: this seat contributes reconciliation
@@ -313,11 +374,26 @@ final class _GitHubReconcilerAssetsState
     // own. Resolved with the SUBSCRIBING build verb (ADR-0008 D3) so a
     // re-provisioned station config moves this seat onto the new query.
     final query = _registeredQuery(context, config!);
+    // LOUD OR GONE, and gone FIRST: the seat stops riding the tick before the
+    // refusal is raised, so a station missing the rung has no runtime left
+    // spending a budget on nobody's schedule.
+    if (coordinator == null) {
+      _replaceRuntime(null, null, null, null, null, null, null, null);
+      throw StateError(
+        'Seat ${config.substation} arms a live GitHub reconciler for '
+        'installation ${config.installationId}, whose request allowance is '
+        'shared by every repository on it: the station must mount exactly one '
+        'GitHubPollCoordinatorAssets above its repositories, and this tree '
+        'offers none. A coordinator per repository would serialize nothing '
+        'and spend the installation budget once per seat.',
+      );
+    }
     if (config != _builtConfig ||
         !identical(client, _builtClient) ||
         !identical(cursors, _builtCursors) ||
         !identical(emit, _builtEmit) ||
-        !identical(transport, _builtTransport)) {
+        !identical(transport, _builtTransport) ||
+        !identical(coordinator, _builtCoordinator)) {
       final replacement = _assets.runtimeFactory(
         config: config,
         client: client,
@@ -325,6 +401,7 @@ final class _GitHubReconcilerAssetsState
         emit: emit,
         transport: transport,
         foreignClient: _foreignClient(config),
+        coordinator: coordinator,
       );
       _replaceRuntime(
         replacement,
@@ -334,6 +411,7 @@ final class _GitHubReconcilerAssetsState
         cursors,
         emit,
         transport,
+        coordinator,
       );
     } else if (!identical(query, _builtQuery)) {
       _moveToQuery(query);
@@ -383,7 +461,9 @@ final class _GitHubReconcilerAssetsState
   /// transport, no coordinator and no environment read. The foreign lane gets
   /// its OWN [GitHubPollCoordinator] under [kForeignIssueWatchRateKey]: sharing
   /// the installation's coordinator would let a 5000-per-hour lane spend a
-  /// 60-per-hour allowance.
+  /// 60-per-hour allowance. That stays true now the installation coordinator is
+  /// STATION-owned — this one is per seat, holds its own credential posture and
+  /// its own spacing state, and neither crosses into installation budgeting.
   GitHubReadClient? _foreignClient(GitHubReconcilerConfig config) {
     final foreign = config.issueWatches
         .where(
@@ -420,6 +500,7 @@ final class _GitHubReconcilerAssetsState
     GitHubCursorStore? cursors,
     GitHubEventSink? emit,
     ExplorationTransport? transport,
+    GitHubPollCoordinator? coordinator,
   ) {
     final previous = _runtime;
     if (identical(previous, replacement)) return;
@@ -433,6 +514,7 @@ final class _GitHubReconcilerAssetsState
     _builtCursors = cursors;
     _builtEmit = emit;
     _builtTransport = transport;
+    _builtCoordinator = coordinator;
     if (replacement != null) query?.attach(replacement);
   }
 

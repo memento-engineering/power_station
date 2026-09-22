@@ -57,6 +57,47 @@ final class _Transport implements GitHubHttpTransport {
       const GitHubHttpResponse(statusCode: 500, body: 'unused');
 }
 
+/// A transport that answers every request "nothing changed", counts what it
+/// was asked, and can HOLD a request open so a probe observes the tree while a
+/// cycle is genuinely in flight.
+final class _GatedTransport implements GitHubHttpTransport {
+  final requests = <GitHubHttpRequest>[];
+  Completer<void>? gate;
+
+  int get calls => requests.length;
+
+  @override
+  Future<GitHubHttpResponse> send(GitHubHttpRequest request) async {
+    requests.add(request);
+    if (gate case final open?) await open.future;
+    return const GitHubHttpResponse(statusCode: 304, body: '');
+  }
+}
+
+/// A transport answering a SCRIPT of responses in order — the foreign lane's
+/// two GETs (the issue resource, then its timeline).
+final class _ScriptedTransport implements GitHubHttpTransport {
+  _ScriptedTransport(this._responses);
+
+  final List<GitHubHttpResponse> _responses;
+  final requests = <GitHubHttpRequest>[];
+
+  /// Every `Authorization` value this transport was handed, so a probe can
+  /// prove which credential reached which lane.
+  List<String?> get authorizations => <String?>[
+    for (final request in requests) request.headers['Authorization'],
+  ];
+
+  @override
+  Future<GitHubHttpResponse> send(GitHubHttpRequest request) async {
+    requests.add(request);
+    if (_responses.isEmpty) {
+      throw StateError('unscripted foreign read: ${request.uri}');
+    }
+    return _responses.removeAt(0);
+  }
+}
+
 final class _Cursors implements GitHubCursorStore {
   @override
   Future<GitHubReconcilerCursor> load() async => const GitHubReconcilerCursor();
@@ -92,19 +133,20 @@ final class _AmbientOpener implements PrOpener {
 /// no lifecycle left to fake — whether this seat reconciles is now a fact about
 /// the station's query, which every probe below reads there.
 final class _RecordingRuntime extends GitHubReconcilerRuntime {
-  _RecordingRuntime({required GitHubAppClient client})
-    : super(
-        installationId: 'installation',
-        reconciler: GitHubReconciler(
-          owner: 'owner',
-          repository: 'repository',
-          substation: 'substation',
-          client: client,
-          cursors: _Cursors(),
-          emit: (_) async {},
-        ),
-        coordinator: GitHubPollCoordinator(minimumSpacing: Duration.zero),
-      );
+  _RecordingRuntime({
+    required GitHubAppClient client,
+    required super.coordinator,
+  }) : super(
+         installationId: 'installation',
+         reconciler: GitHubReconciler(
+           owner: 'owner',
+           repository: 'repository',
+           substation: 'substation',
+           client: client,
+           cursors: _Cursors(),
+           emit: (_) async {},
+         ),
+       );
 }
 
 final class _Factory {
@@ -112,6 +154,7 @@ final class _Factory {
   final transports = <ExplorationTransport?>[];
   final runtimes = <_RecordingRuntime>[];
   final foreignClients = <GitHubReadClient?>[];
+  final coordinators = <GitHubPollCoordinator>[];
 
   GitHubReconcilerRuntime create({
     required GitHubReconcilerConfig config,
@@ -120,11 +163,13 @@ final class _Factory {
     required GitHubEventSink emit,
     required ExplorationTransport? transport,
     required GitHubReadClient? foreignClient,
+    required GitHubPollCoordinator coordinator,
   }) {
     configs.add(config);
     transports.add(transport);
     foreignClients.add(foreignClient);
-    final runtime = _RecordingRuntime(client: client);
+    coordinators.add(coordinator);
+    final runtime = _RecordingRuntime(client: client, coordinator: coordinator);
     runtimes.add(runtime);
     return runtime;
   }
@@ -181,8 +226,20 @@ Seed _runtimeTree({
   ),
 );
 
+/// Wraps a seat in whatever rung owns the station's poll coordinator.
+typedef _CoordinatorRung = Seed Function(Seed child);
+
+/// The PRODUCTION rung: the station asset, which creates and owns the
+/// coordinator itself.
+Seed _stationCoordinator(Seed child) =>
+    GitHubPollCoordinatorAssets(child: child);
+
 /// The seat itself, WITHOUT the station rung — so a probe can mount it under a
 /// deliberately wrong registration.
+///
+/// [coordinatorRung] defaults to the production station asset. A probe hands
+/// its own to adopt a coordinator IT owns (`Provider.value`), or to mount the
+/// seat under no coordinator at all.
 Seed _seatTree({
   required GitHubReconcilerConfig? config,
   required _Factory factory,
@@ -190,23 +247,26 @@ Seed _seatTree({
   ExplorationTransport? transport,
   EnvironmentReader? environment,
   GitHubHttpTransportFactory? foreignTransportFactory,
-}) => InheritedSeed<ServiceBundle>(
-  value: ServiceBundle(transport: transport),
-  child: Provider<GitHubAppClient>.value(
-    _client,
-    child: Provider<GitHubCursorStore>.value(
-      _Cursors(),
-      child: Provider<GitHubEventSink>.value(
-        (_) async {},
-        child: GitHubReconcilerAssets(
-          config: config,
-          runtimeFactory: factory.create,
-          environment: environment ?? platformEnvironment,
-          foreignTransportFactory:
-              foreignTransportFactory ?? createGitHubHttpTransport,
-          child: GitHubGridAssets(
-            child: _Probe(
-              (context) => observe(context.watch<GitHubReconcilerRuntime>()),
+  _CoordinatorRung coordinatorRung = _stationCoordinator,
+}) => coordinatorRung(
+  InheritedSeed<ServiceBundle>(
+    value: ServiceBundle(transport: transport),
+    child: Provider<GitHubAppClient>.value(
+      _client,
+      child: Provider<GitHubCursorStore>.value(
+        _Cursors(),
+        child: Provider<GitHubEventSink>.value(
+          (_) async {},
+          child: GitHubReconcilerAssets(
+            config: config,
+            runtimeFactory: factory.create,
+            environment: environment ?? platformEnvironment,
+            foreignTransportFactory:
+                foreignTransportFactory ?? createGitHubHttpTransport,
+            child: GitHubGridAssets(
+              child: _Probe(
+                (context) => observe(context.watch<GitHubReconcilerRuntime>()),
+              ),
             ),
           ),
         ),
@@ -214,6 +274,84 @@ Seed _seatTree({
     ),
   ),
 );
+
+/// Reads from the tree and passes its child STRAIGHT THROUGH — a [Nest] link,
+/// so several production seats stack and each is observed at its own rung,
+/// above the next seat's providers.
+final class _Observer extends SingleChildStatelessSeed {
+  const _Observer(this.read);
+
+  final void Function(TreeContext) read;
+
+  @override
+  Seed buildWithChild(TreeContext context, Seed child) {
+    read(context);
+    return child;
+  }
+}
+
+/// ONE repository seat as production composes it: the REAL
+/// [createGitHubReconcilerRuntime], over this seat's own client, cursors and
+/// sink, and no coordinator of its own — it takes the station's.
+List<SingleChildSeed> _productionSeat({
+  required GitHubReconcilerConfig config,
+  required GitHubHttpTransport transport,
+  required void Function(GitHubReconcilerRuntime?) observe,
+  EnvironmentReader? environment,
+  GitHubHttpTransportFactory? foreignTransportFactory,
+}) => <SingleChildSeed>[
+  Provider<GitHubAppClient>.value(
+    GitHubAppClient(
+      config: _appConfig,
+      tokens: _Tokens(),
+      transport: transport,
+    ),
+  ),
+  Provider<GitHubCursorStore>.value(_Cursors()),
+  Provider<GitHubEventSink>.value((_) async {}),
+  GitHubReconcilerAssets(
+    config: config,
+    environment: environment ?? platformEnvironment,
+    foreignTransportFactory:
+        foreignTransportFactory ?? createGitHubHttpTransport,
+  ),
+  _Observer((context) => observe(context.watch<GitHubReconcilerRuntime>())),
+];
+
+/// A live repository value on [installation], spaced at zero so these probes
+/// measure SERIALIZATION and never a wall clock.
+GitHubReconcilerConfig _repository({
+  required String repository,
+  required String installation,
+  List<GitHubIssueWatch> watches = const <GitHubIssueWatch>[],
+  String? tokenVariable,
+}) => GitHubReconcilerConfig(
+  owner: 'memento',
+  repository: repository,
+  substation: repository,
+  installationId: installation,
+  minimumSpacing: Duration.zero,
+  issueWatches: watches,
+  foreignReadTokenVariable: tokenVariable,
+  foreignMinimumSpacing: Duration.zero,
+);
+
+Future<void> _settle() => Future<void>.delayed(Duration.zero);
+
+/// A watch on a repository this App is NOT installed on — the foreign lane's
+/// reason to exist.
+const GitHubIssueWatch _foreignWatch = GitHubIssueWatch(
+  originatingBeadId: 'pow-eup0',
+  owner: 'ricardoboss',
+  repository: 'radioactive_dart',
+  issueNumber: 1,
+);
+
+/// The minimum an open, unlocked issue resource answers with.
+const String _issueBody =
+    '{"node_id":"I_1","user":{"login":"ricardoboss"},"state":"open",'
+    '"locked":false,"updated_at":"2026-09-21T00:00:00Z",'
+    '"html_url":"https://github.test/issues/1"}';
 
 void main() {
   test('the config carries workflow-run policy into the reconciler', () {
@@ -244,6 +382,7 @@ void main() {
       emit: (_) async {},
       transport: null,
       foreignClient: null,
+      coordinator: GitHubPollCoordinator(minimumSpacing: Duration.zero),
     );
 
     expect(runtime.reconciler.workflowRuns, [same(rule)]);
@@ -256,9 +395,291 @@ void main() {
       emit: (_) async {},
       transport: null,
       foreignClient: null,
+      coordinator: GitHubPollCoordinator(minimumSpacing: Duration.zero),
     );
     expect(plain.reconciler.workflowRuns, isEmpty);
   });
+
+  test('station-owned coordinator serializes production runtimes sharing an '
+      'installation', () async {
+    // The DEFECT this bead retires: two production-created runtimes for one
+    // installation used to hold a coordinator each, so both spent the same
+    // allowance at once. The whole composition is production here — the real
+    // factory, one station rung, two repository seats — because a test that
+    // injects a coordinator it shared itself cannot see this at all.
+    final blocked = _GatedTransport()..gate = Completer<void>();
+    final waiting = _GatedTransport();
+    final query = GitHubReconciliationQuery();
+    var created = 0;
+    GitHubReconcilerRuntime? one;
+    GitHubReconcilerRuntime? two;
+
+    final owner = TreeOwner();
+    addTearDown(owner.dispose);
+    owner.mountRoot(
+      sdk.ProviderScope(
+        child: _station(
+          <sdk.ObligationQuery>[query],
+          child: Nest(
+            children: <SingleChildSeed>[
+              GitHubPollCoordinatorAssets(
+                coordinatorFactory: () {
+                  created++;
+                  return GitHubPollCoordinator(minimumSpacing: Duration.zero);
+                },
+              ),
+              ..._productionSeat(
+                config: _repository(
+                  repository: 'one',
+                  installation: 'installation',
+                ),
+                transport: blocked,
+                observe: (runtime) => one = runtime,
+              ),
+              ..._productionSeat(
+                config: _repository(
+                  repository: 'two',
+                  installation: 'installation',
+                ),
+                transport: waiting,
+                observe: (runtime) => two = runtime,
+              ),
+            ],
+            child: const _Leaf(),
+          ),
+        ),
+      ),
+    );
+    owner.flush();
+
+    expect(created, 1, reason: 'the station creates ONE, for both seats');
+    expect(one, isNotNull);
+    expect(two, isNotNull);
+    expect(
+      one!.coordinator,
+      same(two!.coordinator),
+      reason: 'the identical tree-created instance reaches both runtimes',
+    );
+    expect(query.attached, <GitHubReconcilerRuntime>[one!, two!]);
+
+    final cycles = Future.wait(<Future<void>>[one!.runOnce(), two!.runOnce()]);
+    await _settle();
+
+    expect(blocked.calls, 1, reason: 'the first cycle holds the budget');
+    expect(
+      waiting.calls,
+      0,
+      reason: 'the SECOND repository makes no request at all until it is free',
+    );
+
+    blocked.gate!.complete();
+    await cycles;
+    expect(waiting.calls, 2, reason: 'and then runs its own full cycle');
+  });
+
+  test('different installation and foreign quotas start independently', () async {
+    // The falsifier for the probe above, and the boundary the bead protects:
+    // serialization is BY KEY, so another installation is another budget — and
+    // the foreign issue-watch lane, which has its own 60-per-hour allowance and
+    // its own credential, is not installation budgeting at all.
+    final blocked = _GatedTransport()..gate = Completer<void>();
+    final elsewhere = _GatedTransport();
+    final foreign = _ScriptedTransport(<GitHubHttpResponse>[
+      GitHubHttpResponse(statusCode: 200, body: _issueBody, headers: const {}),
+      const GitHubHttpResponse(statusCode: 200, body: '[]'),
+    ]);
+    final query = GitHubReconciliationQuery();
+    GitHubReconcilerRuntime? held;
+    GitHubReconcilerRuntime? other;
+
+    final owner = TreeOwner();
+    addTearDown(owner.dispose);
+    owner.mountRoot(
+      sdk.ProviderScope(
+        child: _station(
+          <sdk.ObligationQuery>[query],
+          child: Nest(
+            children: <SingleChildSeed>[
+              const GitHubPollCoordinatorAssets(),
+              ..._productionSeat(
+                config: _repository(
+                  repository: 'one',
+                  installation: 'installation',
+                ),
+                transport: blocked,
+                observe: (runtime) => held = runtime,
+              ),
+              ..._productionSeat(
+                config: _repository(
+                  repository: 'watcher',
+                  installation: 'other',
+                  watches: const <GitHubIssueWatch>[_foreignWatch],
+                  tokenVariable: 'GITHUB_FOREIGN_READ_TOKEN',
+                ),
+                transport: elsewhere,
+                observe: (runtime) => other = runtime,
+                environment: () => const <String, String>{
+                  'GITHUB_FOREIGN_READ_TOKEN': 'personal',
+                },
+                foreignTransportFactory: () => foreign,
+              ),
+            ],
+            child: const _Leaf(),
+          ),
+        ),
+      ),
+    );
+    owner.flush();
+
+    expect(held!.coordinator, same(other!.coordinator));
+
+    final cycles = Future.wait(<Future<void>>[
+      held!.runOnce(),
+      other!.runOnce(),
+    ]);
+    await _settle();
+
+    expect(blocked.calls, 1, reason: 'installation one is still in flight');
+    expect(
+      elsewhere.calls,
+      2,
+      reason: 'another installation key is another budget entirely',
+    );
+    expect(
+      foreign.requests.map((request) => request.uri.path),
+      <String>[
+        '/repos/ricardoboss/radioactive_dart/issues/1',
+        '/repos/ricardoboss/radioactive_dart/issues/1/timeline',
+      ],
+      reason: 'the foreign lane ran while the installation lane was blocked',
+    );
+
+    // NO credential crosses the boundary in either direction.
+    expect(foreign.authorizations, everyElement('Bearer personal'));
+    expect(
+      elsewhere.requests.map((request) => request.headers['Authorization']),
+      everyElement('Bearer token'),
+    );
+
+    blocked.gate!.complete();
+    await cycles;
+  });
+
+  test(
+    'coordinator provider replacement removal and disposal detach exactly once',
+    () async {
+      final factory = _Factory();
+      final query = GitHubReconciliationQuery();
+      final first = GitHubPollCoordinator(minimumSpacing: Duration.zero);
+      final second = GitHubPollCoordinator(minimumSpacing: Duration.zero);
+      late _HostState host;
+      // ONE seat description under three coordinator postures: the only thing
+      // a swap changes is who owns the budget above it.
+      final seat = _seatTree(
+        config: _config('one'),
+        factory: factory,
+        observe: (_) {},
+        coordinatorRung: (child) => child,
+      );
+      Seed describe(GitHubPollCoordinator? coordinator) => _station(
+        <sdk.ObligationQuery>[query],
+        child: coordinator == null
+            ? seat
+            : Provider<GitHubPollCoordinator>.value(coordinator, child: seat),
+      );
+      final owner = TreeOwner();
+      owner.mountRoot(
+        sdk.ProviderScope(
+          child: _Host(
+            onCreate: (state) => host = state,
+            describe: () => describe(first),
+          ),
+        ),
+      );
+      owner.flush();
+
+      expect(factory.coordinators, <GitHubPollCoordinator>[first]);
+      expect(query.attached, <GitHubReconcilerRuntime>[
+        factory.runtimes.single,
+      ]);
+
+      // A REBUILD over the same coordinator is not a replacement: identity is
+      // what the seat compares, so the runtime and its cursor tail stand.
+      host.swap(() => describe(first));
+      owner.flush();
+      await _settle();
+      owner.flush();
+      expect(factory.runtimes, hasLength(1));
+      expect(query.attached, <GitHubReconcilerRuntime>[
+        factory.runtimes.single,
+      ]);
+
+      // A REPLACED coordinator is exactly one handover: the superseded runtime
+      // is off the tick before its successor is on it.
+      host.swap(() => describe(second));
+      owner.flush();
+      await _settle();
+      owner.flush();
+      expect(factory.coordinators, <GitHubPollCoordinator>[first, second]);
+      expect(factory.runtimes, hasLength(2));
+      expect(query.attached, <GitHubReconcilerRuntime>[factory.runtimes.last]);
+
+      // REMOVED: a live seat with no station rung REFUSES, by name — and it is
+      // already off the tick when it does, not left spending a budget nobody
+      // owns. Deliberately the LAST thing done to this owner and never
+      // disposed: a reconcile that threw leaves the substrate holding a child
+      // slot it already unmounted, so `dispose` would double-unmount it. There
+      // is nothing left attached to clean up, which is the assertion below.
+      host.swap(() => describe(null));
+      expect(
+        owner.flush,
+        throwsA(
+          isA<StateError>().having(
+            (error) => error.message,
+            'message',
+            allOf(
+              contains('GitHubPollCoordinatorAssets'),
+              contains('installation'),
+            ),
+          ),
+        ),
+      );
+      expect(query.attached, isEmpty, reason: 'detached BEFORE the refusal');
+      expect(
+        factory.runtimes,
+        hasLength(2),
+        reason: 'a refused seat builds none',
+      );
+
+      // DISPOSAL, and what a LATER station gets. The tree owns the value, so
+      // nothing rides the tick and no budget survives the station that spent
+      // it — every mount is handed an instance of its own.
+      final coordinators = <GitHubPollCoordinator>[];
+      for (var mount = 0; mount < 2; mount++) {
+        final station = TreeOwner();
+        final mounted = _Factory();
+        final stationQuery = GitHubReconciliationQuery();
+        station.mountRoot(
+          sdk.ProviderScope(
+            child: _runtimeTree(
+              config: _config('one'),
+              factory: mounted,
+              observe: (_) {},
+              query: stationQuery,
+            ),
+          ),
+        );
+        station.flush();
+        expect(stationQuery.attached, hasLength(1));
+        coordinators.add(mounted.coordinators.single);
+        station.dispose();
+        expect(stationQuery.attached, isEmpty, reason: 'disposal detaches');
+      }
+      expect(coordinators.first, isNot(same(coordinators.last)));
+      expect(coordinators, isNot(contains(same(first))));
+      expect(coordinators, isNot(contains(same(second))));
+    },
+  );
 
   test(
     'live assets attach only to the query registered in TrajectoryConfig',
@@ -410,6 +831,7 @@ void main() {
         emit: (_) async {},
         transport: flares,
         foreignClient: null,
+        coordinator: GitHubPollCoordinator(minimumSpacing: Duration.zero),
       );
 
       // The station's pass is what runs it, and the throw is what the pass
@@ -618,6 +1040,7 @@ void main() {
           emit: (_) async {},
           transport: null,
           foreignClient: null,
+          coordinator: GitHubPollCoordinator(minimumSpacing: Duration.zero),
         ).reconciler.issueWatches,
         isEmpty,
       );
