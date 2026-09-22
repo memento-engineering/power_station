@@ -489,12 +489,45 @@ void main() {
       expect(out.payload!['grade'], 'A');
       expect(out.payload!['lane'], kReadinessStep);
       expect(out.payload!['rule'], 'ready');
-      expect(out.payload!['source-state'], 'PRESENT');
+      expect(out.payload!['source_state'], 'PRESENT');
       expect(
         out.payload!['transport'],
         'sibling-view',
         reason: 'the offline posture joins on the lane\'s recorded result',
       );
+    });
+
+    // The FIELD segment of `grid.result.<node path>.<field>` is rendered RAW
+    // and `bd` refuses a metadata key carrying a hyphen — refusing the whole
+    // update, so one bad field name kills a session at its first advance. This
+    // pins the COMPLETE set: a new field must be enumerated here, and it
+    // cannot be spelled outside the identifier alphabet.
+    test('every readiness result field is a bd-safe identifier', () async {
+      final identifier = RegExp(r'^[a-z0-9_]+$');
+      final out = await _runRoute(grade: 'A');
+      final fields = (out as Advance).payload!.keys;
+      expect(
+        fields,
+        unorderedEquals({
+          'verdict',
+          'grade',
+          'lane',
+          'rule',
+          'source_state',
+          'source_path',
+          'transport',
+        }),
+      );
+      for (final field in fields) {
+        expect(
+          field,
+          matches(identifier),
+          reason: '`$field` is rendered into the bd metadata key RAW',
+        );
+      }
+      // The control: the spelling this route shipped with, and the one bd
+      // refuses. A matcher that accepts it fences nothing.
+      expect('source-state', isNot(matches(identifier)));
     });
 
     test('grade D ⇒ Gate carrying the lens rationale VERBATIM', () async {
@@ -561,8 +594,8 @@ void main() {
       final out = await routed;
       expect(out, isA<Advance>());
       expect((out as Advance).payload!['grade'], 'B');
-      expect(out.payload!['source-state'], 'PRESENT');
-      expect(out.payload!['source-path'], _verdictPath(dir.path));
+      expect(out.payload!['source_state'], 'PRESENT');
+      expect(out.payload!['source_path'], _verdictPath(dir.path));
       expect(out.payload!['transport'], 'file');
       expect(
         out,
@@ -603,8 +636,8 @@ void main() {
           'grade': grade,
           'lane': kReadinessStep,
           'rule': 'ready',
-          'source-state': 'PRESENT',
-          'source-path': _verdictPath(dir.path),
+          'source_state': 'PRESENT',
+          'source_path': _verdictPath(dir.path),
           'transport': 'file',
         });
       }

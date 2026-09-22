@@ -713,7 +713,7 @@ String beadUnderIntake(Bead bead) {
 ///
 ///  - **PRESENT and passing** (`A`–`C`) ⇒ [Advance], carrying the route-style
 ///    provenance the code and spec routes emit plus the verdict's own SOURCE
-///    (`source-state`, `source-path`, `transport`).
+///    (`source_state`, `source_path`, `transport`).
 ///  - **PRESENT and failing** (`D`–`F`, or an off-ladder letter) ⇒ [Escalate]
 ///    carrying the refinement ask. This is the ONLY hold this route mints.
 ///  - **ABSENT** ⇒ neither. Nothing has been published for this round, so there
@@ -721,6 +721,17 @@ String beadUnderIntake(Bead bead) {
 ///    positively terminal has finished without publishing — a broken LANE, not
 ///    a verdict — and that throws [RouteFailure] naming the missing invocation.
 ///    A lane still silent at [laneWaitBudget] throws too. Absence NEVER holds.
+///
+/// **Every field name in the payload is an IDENTIFIER** (`[a-z0-9_]+`). A step
+/// result persists through `ResultKeys.keyFor`, which renders
+/// `grid.result.<node path>.<field>` with the field segment RAW, and `bd`
+/// refuses a metadata key carrying a hyphen — it refuses the WHOLE update, not
+/// the offending key. The wave that first shipped these two fields spelled them
+/// `source-state`/`source-path`, and every session minted under it died at its
+/// first advance on `1 of 1 issues failed to update`; the older fields survived
+/// only because they were already identifiers. `readiness_test.dart` pins the
+/// COMPLETE field set against that alphabet, so a new field has to be spelled
+/// for the wire before it can be added.
 ///
 /// **Why absence stopped being a hold.** On 2026-09-14 twelve rounds across
 /// four substations escalated here on "no verdict" WITH the lens's grade
@@ -815,8 +826,8 @@ class ReadinessRouteCapability extends RouteCapability {
             'grade': grade,
             'lane': laneId,
             'rule': 'ready',
-            'source-state': 'PRESENT',
-            'source-path': sourcePath,
+            'source_state': 'PRESENT',
+            'source_path': sourcePath,
             'transport': transport,
           });
         case ReadinessHold(:final reason):

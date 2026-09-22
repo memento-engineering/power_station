@@ -15,7 +15,9 @@ register:
   updates:
     - "a17-bead-pow-q7n-the-spec-readiness-intake-lens-is-an-in-pip"
   obsoleted-by: null
-  updated-by: []
+  updated-by:
+    - pre-stamp-advisory-reuses-readiness-and-discovery
+    - readiness-result-fields-are-metadata-identifiers
   bead: null
   legacy-id: null
 ---
