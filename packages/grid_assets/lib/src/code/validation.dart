@@ -533,11 +533,26 @@ class ValidationDeltaRunner {
     return delta;
   }
 
-  /// Runs [plan] at [baseSha] in a DETACHED scratch worktree, then removes it.
+  /// Runs [plan] at [baseSha] in a DETACHED scratch worktree, then UNWINDS it.
   ///
-  /// The scratch checkout lives under a system-temporary parent that is deleted
-  /// in a LOUD `finally`: a comparison that leaks a worktree would poison the
-  /// repository's worktree list for every later round.
+  /// **Where the checkout lives.** Beneath the bead's OWN workspace
+  /// (`<workDir>/.grid/validation-base-*`), never a system-temporary sibling of
+  /// other beads' worktrees: the scratch checkout registers against the
+  /// substation's SHARED `.git`, which every bead's provisioning and unwind
+  /// also write, so a leaked checkout must at least be recognisably this bead's
+  /// and disappear with its workspace.
+  ///
+  /// **How it is unwound.** By the discipline
+  /// `power_station#scaffold-restore-merges-dirs-and-unwinds-its-provision`
+  /// already binds a DISCARDED PROVISION to, EXTENDED to this second call site:
+  /// "`git worktree remove --force` from the root repo, `git worktree prune`,
+  /// and `git branch -D` for a branch THIS call minted (never an adopted one),
+  /// then a verification pass that refuses LOUDLY, naming what survived, when
+  /// the registration or the minted branch is still there." Only the
+  /// `git branch -D` leg is absent, and only because it has no subject: the
+  /// merge base is checked out DETACHED, so this call mints no branch. A
+  /// comparison that leaked a registration would poison the shared worktree
+  /// list for every later round exactly as a half-deleted provision did.
   Future<_BaseRun> _runBase({
     required GitRunner git,
     required ShellRunner shell,
@@ -545,8 +560,11 @@ class ValidationDeltaRunner {
     required String baseSha,
     required String plan,
   }) async {
-    final parent = Directory.systemTemp.createTempSync('grid-validation-base-');
+    final parent = (Directory(
+      p.join(workDir, '.grid'),
+    )..createSync(recursive: true)).createTempSync('validation-base-');
     final checkout = p.join(parent.path, 'base');
+    var registered = false;
     try {
       final added = await git.run(
         workingDirectory: workDir,
@@ -561,24 +579,12 @@ class ValidationDeltaRunner {
           outputTail: _tail(added.output),
         );
       }
+      registered = true;
       final result = await shell.run(
         workingDirectory: checkout,
         command: plan,
         deadline: deadline,
       );
-      final removed = await git.run(
-        workingDirectory: workDir,
-        args: ['worktree', 'remove', '--force', checkout],
-      );
-      if (!removed.ok) {
-        throw ValidationLaneFailure(
-          side: 'worktree',
-          cause: 'could not remove the scratch merge-base worktree',
-          baseSha: baseSha,
-          exitCode: removed.exitCode,
-          outputTail: _tail(removed.output),
-        );
-      }
       final failures = failingTestNames(result.output);
       if (failures.isEmpty && (!result.ok || result.timedOut)) {
         throw ValidationLaneFailure(
@@ -594,16 +600,94 @@ class ValidationDeltaRunner {
       }
       return _BaseRun(exitCode: result.exitCode, failures: failures);
     } finally {
-      try {
-        if (parent.existsSync()) parent.deleteSync(recursive: true);
-      } on Object catch (error) {
+      // EVERY cleanup action runs before this answers, so no early refusal can
+      // skip the prune that clears a registration outliving its directory.
+      final survivor = await _unwindBaseCheckout(
+        git: git,
+        workDir: workDir,
+        parent: parent,
+        checkout: checkout,
+        registered: registered,
+      );
+      if (survivor != null) {
         throw ValidationLaneFailure(
           side: 'worktree',
-          cause: 'could not clean up the scratch worktree parent: $error',
+          cause: survivor,
           baseSha: baseSha,
         );
       }
     }
+  }
+
+  /// Unwinds the scratch merge-base checkout: `git worktree remove --force`
+  /// run from the bead's workspace (never from inside the checkout being
+  /// removed), the scratch parent deleted, `git worktree prune` for a
+  /// registration that outlived its directory, then a VERIFICATION read of
+  /// `git worktree list --porcelain`.
+  ///
+  /// A refused remove followed by a clean prune is RECOVERED — the lane does
+  /// not fail over it. What fails the lane is residue: an unreadable list, a
+  /// surviving registration, or a scratch parent that would not delete.
+  ///
+  /// Returns null when the unwind verifies clean, or the one-line cause the
+  /// caller refuses with. Never throws — [GitRunner] reports failure as a
+  /// result, and a deletion error is caught and carried.
+  Future<String?> _unwindBaseCheckout({
+    required GitRunner git,
+    required String workDir,
+    required Directory parent,
+    required String checkout,
+    required bool registered,
+  }) async {
+    final ops = GitOps(git);
+    // An `add` that never succeeded registered nothing: touch the shared `.git`
+    // no further, and drop only what this call made on disk.
+    final removed = registered
+        ? await ops.worktreeRemove(
+            rootRepo: workDir,
+            path: checkout,
+            force: true,
+          )
+        : null;
+    String? deleteError;
+    try {
+      if (parent.existsSync()) parent.deleteSync(recursive: true);
+    } on Object catch (error) {
+      deleteError = _oneLine('$error');
+    }
+    final deletionCause = deleteError == null
+        ? null
+        : 'could not delete the scratch worktree parent "${parent.path}": '
+              '$deleteError';
+    if (removed == null) return deletionCause;
+
+    // `remove` refuses once the directory is gone; prune drops exactly that
+    // stale registration. Both are best-effort — the verify below is the guard.
+    final pruned = await git.run(
+      workingDirectory: workDir,
+      args: const <String>['worktree', 'prune'],
+    );
+    final listed = await ops.worktreeList(workDir);
+    if (listed == null) {
+      return 'could not verify the scratch worktree unwind — '
+          '`git worktree list --porcelain` failed in "$workDir"';
+    }
+    // Compared by DIR NAME, not by path: git reports symlink-RESOLVED paths
+    // (macOS `/private/var` for a `/var` root), so a raw path compare would
+    // read clean on a surviving registration. The scratch parent's name is
+    // unique to this run, so the pair (parent name, `base`) identifies it.
+    final scratch = p.basename(parent.path);
+    final leaf = p.basename(checkout);
+    if (listed.any(
+      (wt) =>
+          p.basename(wt.path) == leaf &&
+          p.basename(p.dirname(wt.path)) == scratch,
+    )) {
+      return 'a worktree registration for "$checkout" survived the unwind '
+          '(remove exit ${removed.exitCode}: ${_oneLine(removed.output)}; '
+          'prune exit ${pruned.exitCode}: ${_oneLine(pruned.output)})';
+    }
+    return deletionCause;
   }
 
   /// Runs [body] holding an exclusive lock beside [cacheFile], so two rounds
@@ -737,6 +821,10 @@ class _BaseRun {
   final int exitCode;
   final List<String> failures;
 }
+
+/// Collapses [text] to one trimmed line, so a cause stays greppable in a
+/// single-line refusal.
+String _oneLine(String text) => text.trim().replaceAll(RegExp(r'\s+'), ' ');
 
 /// The last [max] characters of [output] — a bounded receipt for a lane
 /// failure's message, where the FULL output is on disk.

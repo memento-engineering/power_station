@@ -183,6 +183,116 @@ const _dartTestFailure = '''
 
 00:02 +512 -1: Some tests failed.''';
 
+/// A [GitRunner] that answers the merge-base comparison's git reads WITHOUT
+/// touching disk, and RECORDS the scratch worktree argv the unwind is judged
+/// on: which path was checked out, and which directory the removal ran from.
+///
+/// `worktree list --porcelain` answers with the main worktree ALONE, so a
+/// surviving scratch registration would be this fake's answer to give — the
+/// verification pass is exercised, not stubbed past.
+class _ScriptedWorktreeGitRunner implements GitRunner {
+  /// The path `worktree add --detach` checked the merge base out at.
+  String? addedPath;
+
+  /// The directory `worktree remove` was run FROM.
+  String? removedFrom;
+
+  @override
+  Future<GitRunResult> run({
+    required String workingDirectory,
+    required List<String> args,
+  }) async {
+    // The `GitOps` root guard: this fake's working directories ARE work-tree
+    // roots, so a removal must fail (or pass) on its own answer, never on the
+    // guard's refusal.
+    if (args.first == 'rev-parse' && args.contains('--show-toplevel')) {
+      return GitRunResult(exitCode: 0, output: '$workingDirectory\n\n');
+    }
+    if (args.first == 'merge-base') {
+      return const GitRunResult(exitCode: 0, output: '$kFakeMergeBase\n');
+    }
+    if (args.first == 'worktree') {
+      switch (args[1]) {
+        case 'add':
+          // `worktree add --detach <checkout> <baseSha>`.
+          addedPath = args[3];
+          return const GitRunResult(exitCode: 0, output: '');
+        case 'remove':
+          removedFrom = workingDirectory;
+          return const GitRunResult(exitCode: 0, output: '');
+        case 'list':
+          return GitRunResult(
+            exitCode: 0,
+            output:
+                'worktree $workingDirectory\n'
+                'HEAD $kFakeMergeBase\n'
+                'branch refs/heads/grid/tg-1\n\n',
+          );
+      }
+    }
+    return const GitRunResult(exitCode: 0, output: '');
+  }
+}
+
+/// Wraps a REAL [GitRunner] and fails exactly one `git worktree remove`, the
+/// way git itself fails it: the checkout directory is gone, so `remove`
+/// refuses and its registration under the shared `.git/worktrees` SURVIVES.
+/// Everything else — the add that created that registration, the prune that
+/// must clear it, the verification read — is real git.
+class _RefusingRemoveGitRunner implements GitRunner {
+  _RefusingRemoveGitRunner(this.inner);
+
+  final GitRunner inner;
+
+  /// How many removals were intercepted (never more than one).
+  int refused = 0;
+
+  /// The path the intercepted removal named.
+  String? removedPath;
+
+  @override
+  Future<GitRunResult> run({
+    required String workingDirectory,
+    required List<String> args,
+  }) async {
+    if (refused == 0 && args.first == 'worktree' && args[1] == 'remove') {
+      refused++;
+      removedPath = args[2];
+      final gone = Directory(args[2]);
+      if (gone.existsSync()) gone.deleteSync(recursive: true);
+      return GitRunResult(
+        exitCode: 128,
+        output: "fatal: validation fixture refused to remove '${args[2]}'",
+      );
+    }
+    return inner.run(workingDirectory: workingDirectory, args: args);
+  }
+}
+
+/// Runs `git` in [cwd], asserting success — real-git test setup only. Mirrors
+/// `track_c_pin_diff_test.dart`'s helper of the same name.
+void _git(List<String> args, String cwd) {
+  final r = Process.runSync('git', args, workingDirectory: cwd);
+  if (r.exitCode != 0) {
+    fail(
+      'git ${args.join(' ')} in $cwd failed (${r.exitCode}): '
+      '${r.stderr}\n${r.stdout}',
+    );
+  }
+}
+
+/// A commit with a fixed, config-independent identity.
+void _commit(String cwd, String message) => _git([
+  '-c',
+  'user.name=landing-circuit-test',
+  '-c',
+  'user.email=landing-circuit-test@memento.engineering',
+  'commit',
+  '-q',
+  '-m',
+  message,
+], cwd);
+
 void main() {
   group('RebaseCapability', () {
     test(
@@ -1059,6 +1169,159 @@ void main() {
         ),
       );
     });
+  });
+
+  // The scratch merge-base checkout registers against the SUBSTATION'S SHARED
+  // `.git` — the same admin area every bead's provisioning and unwind write —
+  // so this lane's cleanup is held to the discipline
+  // `power_station#scaffold-restore-merges-dirs-and-unwinds-its-provision`
+  // already binds a discarded provision to: remove, prune, then VERIFY, and
+  // refuse loudly naming what survived.
+  group('the merge-base scratch worktree unwind', () {
+    late Directory workspace;
+    late Directory cacheHome;
+
+    setUp(() {
+      workspace = Directory.systemTemp.createTempSync('validation-scratch-');
+      cacheHome = Directory.systemTemp.createTempSync('validation-cache-');
+    });
+
+    tearDown(() {
+      if (workspace.existsSync()) workspace.deleteSync(recursive: true);
+      if (cacheHome.existsSync()) cacheHome.deleteSync(recursive: true);
+    });
+
+    // CONTAINMENT. A scratch checkout under the system temp dir — or beside
+    // the OTHER beads' worktrees — leaks somewhere nobody attributes to this
+    // bead. It belongs inside the bead's own workspace, and both the directory
+    // and git's registration go away with it.
+    test('base scratch worktree stays under branch workspace', () async {
+      final git = _ScriptedWorktreeGitRunner();
+      final shell = RecordingShellRunner();
+
+      final delta =
+          await ValidationDeltaRunner(
+            gitRunner: git,
+            shellRunner: shell,
+            cacheHome: cacheHome.path,
+            hostIdentity: 'lunar-test-host',
+          ).compare(
+            plan: 'dart test',
+            workspace: Workspace(
+              workspaceDir: workspace.path,
+              branch: 'grid/tg-1',
+              baseBranch: 'main',
+            ),
+            baseRef: 'main',
+            branchLogPath: p.join(workspace.path, '.grid', 'critique', 'v.log'),
+          );
+
+      expect(delta.regressions, isEmpty);
+      final checkout = git.addedPath;
+      expect(
+        checkout,
+        isNotNull,
+        reason: 'the base side checked something out',
+      );
+      final grid = p.join(workspace.path, '.grid');
+      expect(
+        p.isWithin(grid, checkout!),
+        isTrue,
+        reason:
+            'the scratch checkout is the BEAD\'s, not a temp-dir sibling '
+            'of every other bead\'s worktree: $checkout',
+      );
+      expect(p.basename(checkout), 'base');
+      final scratchParent = p.dirname(checkout);
+      expect(p.dirname(scratchParent), grid);
+      expect(p.basename(scratchParent), startsWith('validation-base-'));
+      // Removed from the ROOT side, never from inside the worktree being
+      // removed (the `GitOps.worktreeRemove` contract).
+      expect(git.removedFrom, workspace.path);
+      expect(
+        Directory(scratchParent).existsSync(),
+        isFalse,
+        reason: 'the scratch parent is deleted, not just its checkout',
+      );
+      expect(
+        Directory(grid)
+            .listSync()
+            .map((e) => p.basename(e.path))
+            .where((name) => name.startsWith('validation-base-')),
+        isEmpty,
+      );
+    });
+
+    // REGRESSION-RISK CURE. `git worktree remove` REFUSES once the directory is
+    // gone, and the registration under the shared `.git/worktrees` outlives the
+    // refusal — the wedge no later round can clear. Real git, a real
+    // registration, and only the remove faked: the prune that clears it must be
+    // production's, not the test's.
+    test(
+      'failed worktree remove is pruned from shared git registration',
+      () async {
+        _git(const ['init', '-q', '-b', 'main'], workspace.path);
+        File(p.join(workspace.path, 'a.txt')).writeAsStringSync('one\n');
+        _git(const ['add', 'a.txt'], workspace.path);
+        _commit(workspace.path, 'init');
+
+        final git = _RefusingRemoveGitRunner(SystemGitRunner());
+        final shell = RecordingShellRunner();
+
+        final delta =
+            await ValidationDeltaRunner(
+              gitRunner: git,
+              shellRunner: shell,
+              cacheHome: cacheHome.path,
+              hostIdentity: 'lunar-test-host',
+            ).compare(
+              plan: 'dart test',
+              workspace: Workspace(
+                workspaceDir: workspace.path,
+                branch: 'main',
+                baseBranch: 'main',
+              ),
+              baseRef: 'main',
+              branchLogPath: p.join(
+                workspace.path,
+                '.grid',
+                'critique',
+                'v.log',
+              ),
+            );
+
+        // The refused remove is RECOVERED, not escalated: the comparison answers.
+        expect(delta.regressions, isEmpty);
+        expect(delta.baseSha, isNotEmpty);
+        expect(git.refused, 1, reason: 'exactly one remove was intercepted');
+        expect(
+          p.isWithin(p.join(workspace.path, '.grid'), git.removedPath!),
+          isTrue,
+        );
+
+        final listed = Process.runSync('git', const [
+          'worktree',
+          'list',
+          '--porcelain',
+        ], workingDirectory: workspace.path);
+        expect(listed.exitCode, 0);
+        final registered = (listed.stdout as String)
+            .split('\n')
+            .where((line) => line.startsWith('worktree '))
+            .toList();
+        expect(
+          registered,
+          hasLength(1),
+          reason: 'only the main worktree survives: $registered',
+        );
+        final admin = Directory(p.join(workspace.path, '.git', 'worktrees'));
+        expect(
+          !admin.existsSync() || admin.listSync().isEmpty,
+          isTrue,
+          reason: 'the shared .git carries no scratch registration',
+        );
+      },
+    );
   });
 
   // The lane enforces its OWN deadline now

@@ -515,6 +515,16 @@ class CannedGitRunner implements GitRunner {
     required String workingDirectory,
     required List<String> args,
   }) async {
+    // The `GitOps` root probe — answered as a work-tree ROOT and NOT recorded,
+    // so `calls` stays the argv a suite asserts on. Same carve-out the engine's
+    // own `RecordingGitRunner` makes, and for the same reason: a guarded call
+    // (`GitOps.worktreeRemove`, the validation lane's scratch unwind) must fail
+    // where the test scripted it, never at the guard.
+    if (args.length >= 2 &&
+        args.first == 'rev-parse' &&
+        args.contains('--show-toplevel')) {
+      return GitRunResult(exitCode: 0, output: '$workingDirectory\n\n');
+    }
     calls.add(List.unmodifiable(args));
     if (args.first == 'merge-base') {
       return GitRunResult(
