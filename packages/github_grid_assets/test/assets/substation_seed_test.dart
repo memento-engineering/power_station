@@ -248,11 +248,19 @@ GitHubAppClient _failingClient() => GitHubAppClient(
 /// The station-level rung the vended seat must preserve: an ambient
 /// [ServiceBundle] carrying the seat's flare transport, plus the two values a
 /// live reconciler leg is composed over — and the station's own
-/// [sdk.TrajectoryConfig], which is where reconciliation's SCHEDULE now lives.
+/// [sdk.TrajectoryConfig], which is where reconciliation's SCHEDULE now lives,
+/// and its one [GitHubPollCoordinatorAssets], which is where the installation's
+/// request BUDGET lives.
+///
+/// [seats] names every substation the facts projection must answer for; the
+/// coordinator rung is mounted ONCE above all of them, exactly as a downstream
+/// station composes its repository fan-out.
 Seed _stationWithTransport({
   required ExplorationTransport transport,
   required GitHubReconciliationQuery reconciliation,
   required Seed child,
+  List<String> seats = const <String>['mine'],
+  GitHubPollCoordinatorFactory? coordinatorFactory,
 }) => sdk.ProviderScope(
   child: InheritedSeed<sdk.TrajectoryConfig>(
     value: sdk.TrajectoryConfig(
@@ -265,10 +273,15 @@ Seed _stationWithTransport({
         child: Provider<GitHubAppClient>.value(
           _failingClient(),
           child: SubstationFactsAssets(
-            repository: _FakeFactsRepository(_facts(const <String>['mine'])),
+            repository: _FakeFactsRepository(_facts(seats)),
             child: InheritedSeed<EnvironmentRegistry>(
               value: _registry,
-              child: child,
+              child: coordinatorFactory == null
+                  ? GitHubPollCoordinatorAssets(child: child)
+                  : GitHubPollCoordinatorAssets(
+                      coordinatorFactory: coordinatorFactory,
+                      child: child,
+                    ),
             ),
           ),
         ),
@@ -681,6 +694,62 @@ void main() {
     // The A7 pairing is untouched: GitGridAssets is still the seat's source of
     // source control, behind the mount gate it derives.
     expect(_gated(mounted.walk).sourceControl, isA<GitSourceControl>());
+  });
+
+  test('two vended seats on one installation share the station coordinator', () {
+    // The composition claim, from the DOWNSTREAM side: a station mounts ONE
+    // GitHubPollCoordinatorAssets above its repository fan-out and every
+    // `SubstationSeed` under it takes that instance. The seed itself mounts no
+    // coordinator — it is per repository, and one there would be the defect.
+    final reconciliation = GitHubReconciliationQuery();
+    var created = 0;
+    final mounted = _mount(
+      _stationWithTransport(
+        transport: RecordingExplorationTransport(),
+        reconciliation: reconciliation,
+        seats: const <String>['mine', 'yours'],
+        coordinatorFactory: () {
+          created++;
+          return GitHubPollCoordinator(minimumSpacing: Duration.zero);
+        },
+        child: sdk.RawAssetGrid(
+          root: '/home/me/station',
+          assets: [
+            for (final seat in const <String>['mine', 'yours'])
+              SubstationSeed(
+                name: seat,
+                root: '../$seat',
+                assetRegistry: _assetRegistry,
+                githubPoll: GitHubReconcilerConfig(
+                  owner: 'memento',
+                  repository: seat,
+                  substation: seat,
+                  // ONE installation, two repositories — the shape whose
+                  // budget used to be spent twice over.
+                  installationId: 'installation',
+                  minimumSpacing: Duration.zero,
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+    addTearDown(mounted.owner.dispose);
+
+    final runtimes = mounted.walk.values<GitHubReconcilerRuntime>();
+    expect(runtimes, hasLength(2));
+    expect(created, 1, reason: 'the STATION owns one, above the fan-out');
+    expect(
+      runtimes.first.coordinator,
+      same(runtimes.last.coordinator),
+      reason: 'both repositories serialize on the one installation budget',
+    );
+    expect(reconciliation.attached, unorderedEquals(runtimes));
+    expect(
+      mounted.walk.seeds<GitHubPollCoordinatorAssets>(),
+      hasLength(1),
+      reason: 'the vended seed mounts no coordinator rung of its own',
+    );
   });
 
   test('SubstationAppIdentity is a VALUE: equality by value and nowhere to '
