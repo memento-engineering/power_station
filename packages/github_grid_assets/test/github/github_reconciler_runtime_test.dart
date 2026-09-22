@@ -13,9 +13,14 @@ class _Transport implements GitHubHttpTransport {
   var calls = 0;
   Object? error;
 
+  /// Holds every request open until completed — how a probe keeps one
+  /// repository's cycle IN FLIGHT while it observes another's.
+  Completer<void>? gate;
+
   @override
   Future<GitHubHttpResponse> send(GitHubHttpRequest request) async {
     calls++;
+    if (gate case final open?) await open.future;
     if (error case final failure?) throw failure;
     return const GitHubHttpResponse(statusCode: 304, body: '');
   }
@@ -52,11 +57,17 @@ final class _RecordingCoordinator extends GitHubPollCoordinator {
   _RecordingCoordinator() : super(minimumSpacing: Duration.zero);
 
   final scheduled = <String>[];
+  final requestedSpacings = <Duration?>[];
 
   @override
-  Future<T> schedule<T>(String key, Future<T> Function() request) {
+  Future<T> schedule<T>(
+    String key,
+    Future<T> Function() request, {
+    Duration? minimumSpacing,
+  }) {
     scheduled.add(key);
-    return super.schedule<T>(key, request);
+    requestedSpacings.add(minimumSpacing);
+    return super.schedule<T>(key, request, minimumSpacing: minimumSpacing);
   }
 }
 
@@ -165,6 +176,132 @@ void main() {
     expect(waits, <Duration>[const Duration(seconds: 3)]);
     await coordinator.schedule('other', () async {});
     expect(waits, hasLength(1));
+  });
+
+  test(
+    'conflicting spacing uses the adjacent-pair maximum and then relaxes',
+    () async {
+      // ONE key, two repositories, two configured rates. The interval between
+      // adjacent starts is the stricter of what the pair asked for, whichever
+      // way round they arrive.
+      var now = DateTime.utc(2026, 9, 21);
+      final waits = <Duration>[];
+      final coordinator = GitHubPollCoordinator(
+        minimumSpacing: const Duration(seconds: 5),
+        now: () => now,
+        delay: (duration) async {
+          waits.add(duration);
+          now = now.add(duration);
+        },
+      );
+      const strict = Duration(seconds: 30);
+      const loose = Duration(seconds: 2);
+      Future<void> cycle([Duration? spacing]) => coordinator.schedule(
+        'installation',
+        () async {},
+        minimumSpacing: spacing,
+      );
+
+      await cycle(loose);
+      expect(waits, isEmpty, reason: 'a first start spaces from nothing');
+
+      await cycle(strict);
+      expect(waits, <Duration>[strict], reason: 'loose then strict: the NEXT');
+
+      await cycle(loose);
+      expect(
+        waits,
+        <Duration>[strict, strict],
+        reason:
+            'strict then loose: the PREVIOUS — the ordering does not matter',
+      );
+
+      await cycle(loose);
+      expect(
+        waits,
+        <Duration>[strict, strict, loose],
+        reason: 'the strict repository has left the pair, so the rate relaxes',
+      );
+
+      await cycle();
+      expect(
+        waits,
+        <Duration>[strict, strict, loose, const Duration(seconds: 5)],
+        reason: 'no request means the coordinator default, as it always did',
+      );
+
+      await coordinator.schedule('other', () async {}, minimumSpacing: loose);
+      expect(waits, hasLength(4), reason: 'the conflict is per KEY');
+    },
+  );
+
+  test(
+    'one shared coordinator serializes two runtimes by installation',
+    () async {
+      // The quota partition, at the runtime seam: the coordinator instance is
+      // shared, and the INSTALLATION ID is what decides who waits for whom.
+      final coordinator = GitHubPollCoordinator(minimumSpacing: Duration.zero);
+      final blocked = _Transport()..gate = Completer<void>();
+      final waiting = _Transport();
+      final elsewhere = _Transport();
+      GitHubReconcilerRuntime runtime(
+        String installation,
+        _Transport transport,
+      ) => GitHubReconcilerRuntime(
+        installationId: installation,
+        reconciler: _reconciler(transport),
+        coordinator: coordinator,
+      );
+
+      final cycles = Future.wait(<Future<void>>[
+        runtime('installation', blocked).runOnce(),
+        runtime('installation', waiting).runOnce(),
+        runtime('other', elsewhere).runOnce(),
+      ]);
+      await _tick();
+
+      expect(blocked.calls, 1, reason: 'the first cycle holds the key open');
+      expect(waiting.calls, 0, reason: 'the SAME installation waits its turn');
+      expect(
+        elsewhere.calls,
+        2,
+        reason: 'another installation is another budget',
+      );
+
+      blocked.gate!.complete();
+      await cycles;
+      expect(waiting.calls, 2, reason: 'and runs once the key is free');
+    },
+  );
+
+  test('a runtime requests its OWN spacing on the shared key', () async {
+    final coordinator = _RecordingCoordinator();
+    final runtime = GitHubReconcilerRuntime(
+      installationId: 'configured',
+      reconciler: _reconciler(_Transport()),
+      coordinator: coordinator,
+      minimumSpacing: const Duration(seconds: 11),
+    );
+    expect(runtime.minimumSpacing, const Duration(seconds: 11));
+
+    await runtime.runOnce();
+    expect(coordinator.scheduled, <String>['configured']);
+    expect(coordinator.requestedSpacings, <Duration?>[
+      const Duration(seconds: 11),
+    ]);
+
+    // Unconfigured, a runtime means the coordinator's own value — exactly what
+    // a direct construction over a dedicated coordinator has always meant. A
+    // key of its own, so this probe reads the REQUEST and waits on nothing.
+    final inherited = GitHubReconcilerRuntime(
+      installationId: 'inherited',
+      reconciler: _reconciler(_Transport()),
+      coordinator: coordinator,
+    );
+    expect(inherited.minimumSpacing, coordinator.minimumSpacing);
+    await inherited.runOnce();
+    expect(coordinator.scheduled.last, 'inherited');
+    expect(coordinator.requestedSpacings.last, coordinator.minimumSpacing);
   });
 
   test('runOnce performs one coordinator-scheduled reconciliation', () async {

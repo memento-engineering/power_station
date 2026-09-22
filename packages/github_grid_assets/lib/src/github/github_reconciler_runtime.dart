@@ -18,12 +18,14 @@ class GitHubPollCoordinator {
   }) : _delay = delay ?? Future<void>.delayed,
        _now = now ?? DateTime.now;
 
-  /// Minimum time between starts under one installation.
+  /// The DEFAULT minimum time between starts under one key — what a caller
+  /// that requests no spacing of its own gets.
   final Duration minimumSpacing;
   final PollDelay _delay;
   final PollClock _now;
   final Map<String, Future<void>> _tails = <String, Future<void>>{};
   final Map<String, DateTime> _lastStarts = <String, DateTime>{};
+  final Map<String, Duration> _lastSpacings = <String, Duration>{};
 
   /// Schedules [request] behind work already queued under [key], and RETURNS
   /// its result.
@@ -35,11 +37,26 @@ class GitHubPollCoordinator {
   /// The result is returned so a scheduled REQUEST — not just a whole cycle —
   /// can ride the budget: a foreign GET has a response its caller needs.
   ///
+  /// [minimumSpacing] is THIS cycle's request, defaulting to the coordinator's
+  /// own. One key is now shared by every repository on an installation, and two
+  /// repositories may each configure their own rate, so the spacing cannot be a
+  /// property of the coordinator alone. The interval between two starts is the
+  /// MAXIMUM of what the previous start asked for and what the next one asks —
+  /// in either ordering — so the stricter of two adjacent cycles is honoured
+  /// and a loose repository can never spend a strict one's reserve. Once the
+  /// strict repository leaves the pair, only the one boundary from its last
+  /// start stays strict; later lower/lower pairs use the lower interval.
+  ///
   /// This spacing is a TRANSPORT RATE, not a schedule: it decides how closely
   /// two requests may follow one another, never when reconciliation happens.
   /// That decision belongs to the station tick (see
   /// [GitHubReconciliationQuery]).
-  Future<T> schedule<T>(String key, Future<T> Function() request) {
+  Future<T> schedule<T>(
+    String key,
+    Future<T> Function() request, {
+    Duration? minimumSpacing,
+  }) {
+    final requested = minimumSpacing ?? this.minimumSpacing;
     final prior = _tails[key] ?? Future<void>.value();
     late final Future<T> run;
     run = prior
@@ -47,10 +64,13 @@ class GitHubPollCoordinator {
         .then<T>((_) async {
           final last = _lastStarts[key];
           if (last != null) {
-            final wait = minimumSpacing - _now().difference(last);
+            final previous = _lastSpacings[key] ?? this.minimumSpacing;
+            final required = requested > previous ? requested : previous;
+            final wait = required - _now().difference(last);
             if (wait > Duration.zero) await _delay(wait);
           }
           _lastStarts[key] = _now();
+          _lastSpacings[key] = requested;
           return request();
         })
         .whenComplete(() {
@@ -75,8 +95,9 @@ class GitHubReconcilerRuntime {
     required this.installationId,
     required this.reconciler,
     required this.coordinator,
+    Duration? minimumSpacing,
     this.onError,
-  });
+  }) : minimumSpacing = minimumSpacing ?? coordinator.minimumSpacing;
 
   /// Quota-sharing installation identity.
   final String installationId;
@@ -85,7 +106,19 @@ class GitHubReconcilerRuntime {
   final GitHubReconciler reconciler;
 
   /// Shared installation coordinator.
+  ///
+  /// SHARED in production: one instance is owned at station scope and injected
+  /// into every repository's runtime, so [installationId] is what partitions
+  /// the budget rather than the instance.
   final GitHubPollCoordinator coordinator;
+
+  /// THIS seat's requested minimum time between starts on [installationId].
+  ///
+  /// Defaults to [coordinator]'s own, which is what a direct construction over
+  /// a dedicated coordinator has always meant. The production factory passes
+  /// the repository's configured value instead, because the shared coordinator
+  /// carries no single seat's rate.
+  final Duration minimumSpacing;
 
   /// Optional failure observer — the seat's own local report.
   final void Function(Object error, StackTrace stackTrace)? onError;
@@ -102,6 +135,7 @@ class GitHubReconcilerRuntime {
       await coordinator.schedule<void>(
         installationId,
         reconciler.reconcileOnce,
+        minimumSpacing: minimumSpacing,
       );
     } on Object catch (error, stackTrace) {
       onError?.call(error, stackTrace);
