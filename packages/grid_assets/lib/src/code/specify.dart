@@ -93,6 +93,7 @@ import '../agent/agent_environment.dart';
 import '../agent/agent_harness.dart';
 import '../agent/agent_session.dart';
 import '../agent/environment_registry.dart';
+import '../agent/lane_environment_health.dart';
 import '../agent/model_tier.dart';
 import '../agent/seat_environments.dart';
 import '../agent/site_binding.dart';
@@ -583,6 +584,10 @@ typedef _ResolvedSpecifyRun = ({
   String? model,
   Uri? endpoint,
   AgentTier tier,
+  // The LANE: the registry name the ladder selected, carried for lane health
+  // (bead `pow-u1bi`). The spec seat is the codex-armed one, so it is the seat
+  // the measured incident actually took down.
+  String lane,
 });
 
 class SpecifyCapability extends ProcessCapability {
@@ -753,6 +758,7 @@ class SpecifyCapability extends ProcessCapability {
         environment: environment,
       ),
       tier: tier,
+      lane: config.harness,
     );
   }
 
@@ -798,6 +804,7 @@ class SpecifyCapability extends ProcessCapability {
     final run = _resolveRun(context, args);
     final adapterId = run.environment.sessionAdapter;
     if (adapterId == null) return null;
+    final health = context.getInheritedSeedOfExactType<LaneEnvironmentHealth>();
     return ArtifactFencedSession(
       inner: AgentSession(
         runtime: runtime,
@@ -818,6 +825,17 @@ class SpecifyCapability extends ProcessCapability {
           context,
           seatId: kSpecSeatPolicyId,
         ),
+        // LANE HEALTH (bead `pow-u1bi`), read at the same effect edge: an
+        // unarmed station diagnoses nothing and behaves exactly as before.
+        laneHealth: health,
+        laneTarget: health == null
+            ? null
+            : LaneEnvironmentTarget(
+                lane: run.lane,
+                environment: run.environment,
+                tier: run.tier,
+                pin: run.model ?? run.environment.model,
+              ),
       ),
       probe: () => probeCompletionArtifact(context, args),
       resultFields: () => result(context, args),

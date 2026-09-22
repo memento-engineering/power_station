@@ -9,6 +9,7 @@ import 'package:grid_runtime/grid_runtime.dart';
 import 'agent_environment.dart';
 import 'agent_harness.dart';
 import 'captured_output.dart';
+import 'lane_environment_health.dart';
 import 'model_tier.dart';
 import 'permission_policy.dart';
 import 'usage_report.dart';
@@ -38,9 +39,17 @@ sealed class AgentProtocolEvent with _$AgentProtocolEvent {
   /// terminal can say so. It defaults to [CapabilityFailureKind.work], the
   /// historical untyped meaning, so an adapter that cannot tell reports
   /// exactly what it reported before.
+  ///
+  /// [fields] is the adapter's STRUCTURED evidence about this failure — the
+  /// phase it happened in ([kAgentFailurePhaseField]) and, for a setup refusal,
+  /// the pin, the offered catalog and the resolver's verdict. A reader consumes
+  /// these KEYS; nothing downstream parses [reason] prose. It defaults EMPTY,
+  /// so every adapter and every frame written before this seam existed reports
+  /// exactly what it reported before.
   const factory AgentProtocolEvent.failed({
     required String reason,
     @Default(CapabilityFailureKind.work) CapabilityFailureKind kind,
+    @Default(<String, String>{}) Map<String, String> fields,
   }) = AgentProtocolFailed;
 
   /// Reports that the harness bound a protocol session for [attemptId].
@@ -90,6 +99,58 @@ abstract interface class AgentAuthorizationAdapter {
 /// environment, so a supervised child can stamp its own asks with the attempt
 /// the grid already knows it by. ABSENT means unknown, never "any".
 const String kGridAttemptEnvironment = 'GRID_ATTEMPT_ID';
+
+/// The [AgentProtocolEvent.failed] field naming WHICH phase of the session a
+/// failure happened in.
+///
+/// Its only declared value is [kAgentSetupPhase]. An ABSENT phase is the
+/// ordinary mid-turn failure every adapter has always reported — never a
+/// silently-assumed setup.
+const String kAgentFailurePhaseField = 'phase';
+
+/// The [kAgentFailurePhaseField] value for a failure BEFORE the first turn:
+/// the handshake, the session open, the model selection.
+///
+/// A setup refusal produced no work, could not have, and says nothing about
+/// the bead — so it is the environment's fault by construction, and the reason
+/// `declared process-session non-results are infra` applies to it.
+const String kAgentSetupPhase = 'setup';
+
+/// The [AgentProtocolEvent.failed] field carrying the model pin a setup
+/// refusal named.
+const String kAgentFailurePinField = 'pin';
+
+/// The [AgentProtocolEvent.failed] field carrying the model ids the agent
+/// offered, JSON-encoded ([encodeOfferedField] / [decodeOfferedField]).
+///
+/// JSON, not a joined string: a model id is free text on the agent's side, and
+/// a separator convention is exactly the kind of thing a vendor breaks.
+const String kAgentFailureOfferedField = 'offered';
+
+/// The [AgentProtocolEvent.failed] field carrying the resolver's own verdict
+/// on the pin against the offered catalog.
+const String kAgentFailureResolverVerdictField = 'resolverVerdict';
+
+/// Encodes [offered] for [kAgentFailureOfferedField].
+String encodeOfferedField(List<String> offered) => jsonEncode(offered);
+
+/// Decodes [kAgentFailureOfferedField]; an absent or unparseable value is the
+/// EMPTY catalog, never a throw — diagnostic evidence may not break a failure
+/// report that is already on its way to the engine.
+List<String> decodeOfferedField(String? encoded) {
+  if (encoded == null || encoded.isEmpty) return const <String>[];
+  try {
+    final decoded = jsonDecode(encoded);
+    return decoded is List
+        ? <String>[
+            for (final id in decoded)
+              if (id is String) id,
+          ]
+        : const <String>[];
+  } on Object {
+    return const <String>[];
+  }
+}
 
 /// The out-of-band flare every policy-produced authorization is recorded on.
 ///
@@ -261,6 +322,11 @@ class BeadRoutedAgentSteerSource implements AgentSteerSource {
 /// Grid-side session joining one adapter, supervised child, and steer stream.
 class AgentSession implements ProcessSession {
   /// Creates a channel session for one live process incarnation.
+  ///
+  /// GUARD, LOUD: [laneHealth] and [laneTarget] are ALL OR NOTHING. A
+  /// coordinator with nothing to diagnose would silently record nothing, and a
+  /// target with no coordinator would silently diagnose nowhere — both are the
+  /// exact silence this session exists to end, so half a pair refuses.
   AgentSession({
     required this.runtime,
     required this.name,
@@ -271,7 +337,16 @@ class AgentSession implements ProcessSession {
     required this.instanceFence,
     this.transport,
     this.policy = const AgentPermissionPolicy.unavailable(),
-  });
+    this.laneHealth,
+    this.laneTarget,
+  }) {
+    if ((laneHealth == null) != (laneTarget == null)) {
+      throw ArgumentError(
+        'AgentSession takes a LaneEnvironmentHealth and a '
+        'LaneEnvironmentTarget together, or neither',
+      );
+    }
+  }
 
   /// The sole owner of the supervised child and its byte interaction surface.
   final RuntimeProvider runtime;
@@ -307,6 +382,23 @@ class AgentSession implements ProcessSession {
   /// resolve from — which grants nothing. A capability's channel gets its seat's
   /// derived policy instead; nothing is ever trusted by omission.
   final AgentPermissionPolicy policy;
+
+  /// The station's LANE-HEALTH coordinator, injected at the capability's effect
+  /// edge. Null ⇒ this composition diagnoses nothing, and a setup refusal is
+  /// forwarded exactly as it was before this seam existed.
+  ///
+  /// THE DECLARED DEPARTURE from `power_station#a38-…` clause 5 lives here: a
+  /// session-edge spawn failure is a THIRD failure signal that clause scoped
+  /// out, taken under Nico's recorded ruling of 2026-09-21 ("The station should
+  /// be able to debug this itself"). See `lane_environment_health.dart`'s
+  /// library docstring for the full statement. A38's own reason survives:
+  /// [transport] is still read OUTBOUND-ONLY — it carries the flare out and is
+  /// never treated as an inbound bus.
+  final LaneEnvironmentHealth? laneHealth;
+
+  /// WHICH lane this incarnation was spawned onto — required exactly when
+  /// [laneHealth] is supplied.
+  final LaneEnvironmentTarget? laneTarget;
 
   final StreamController<ProcessSessionUpdate> _updates =
       StreamController<ProcessSessionUpdate>();
@@ -360,7 +452,22 @@ class AgentSession implements ProcessSession {
             result: <String, String>{...result, ...usage.toResultFields()},
           ),
         );
-      case AgentProtocolFailed(:final reason, :final kind):
+      case AgentProtocolFailed(:final reason, :final kind, :final fields):
+        final health = laneHealth;
+        final target = laneTarget;
+        // ONLY the bridge-authored phase counts. Nothing here reads the reason
+        // prose, and nothing INFERS a setup from a fast failure: the adapter
+        // that watched the handshake is the only thing that can say so.
+        if (health != null &&
+            target != null &&
+            fields[kAgentFailurePhaseField] == kAgentSetupPhase) {
+          // Claim the terminal NOW, before the await: a second protocol frame
+          // or a runtime exit landing mid-diagnosis must not produce a second
+          // failure update.
+          _terminal = true;
+          unawaited(_diagnoseThenFail(health, target, fields, reason, kind));
+          return;
+        }
         _fail(reason, kind: kind);
       case AgentProtocolSessionBound(
         attemptId: final bound,
@@ -383,6 +490,42 @@ class AgentSession implements ProcessSession {
         // and write NOTHING — a second response would race the first.
         _audit(decision);
     }
+  }
+
+  /// Records the lane evidence FIRST, then forwards the harness's own declared
+  /// failure to the engine.
+  ///
+  /// THE ORDER IS THE POINT. Supervision asks for the next spawn off this
+  /// failure report, so a second correlated diagnosis must have removed the
+  /// lane from the presence set BEFORE that request can be served — otherwise
+  /// the station parks the lane on its third refusal instead of its second, and
+  /// burns one more bead's attempt to learn what it already knew.
+  ///
+  /// The diagnosis is EVIDENCE, never a gate: a probe that throws or hangs
+  /// leaves the harness's failure exactly as reported.
+  Future<void> _diagnoseThenFail(
+    LaneEnvironmentHealth health,
+    LaneEnvironmentTarget target,
+    Map<String, String> fields,
+    String reason,
+    CapabilityFailureKind kind,
+  ) async {
+    try {
+      await health.recordSetupFailure(
+        LaneEnvironmentSetupFailure(
+          target: target,
+          offered: decodeOfferedField(fields[kAgentFailureOfferedField]),
+          pin: fields[kAgentFailurePinField],
+          resolverVerdict: fields[kAgentFailureResolverVerdictField],
+        ),
+        // The ambient carrier, OUTBOUND-ONLY and optional: no transport means
+        // no flare, never a session failure (the `_audit` posture, D-8).
+        flare: transport?.flare,
+      );
+    } on Object {
+      // Swallowed on purpose — see above.
+    }
+    _emitFailure(reason, kind);
   }
 
   /// Decides one permission ask against the station's [policy], RECORDS the
@@ -496,6 +639,17 @@ class AgentSession implements ProcessSession {
   }) {
     if (_terminal) return;
     _terminal = true;
+    _emitFailure(reason, kind);
+  }
+
+  /// Publishes the failure update for a terminal ALREADY claimed.
+  ///
+  /// Split out for [_diagnoseThenFail], which claims the terminal before its
+  /// await so nothing races it, then emits after. A closed controller — the
+  /// session was disposed while the diagnosis ran — drops the update rather
+  /// than throwing into a dead branch.
+  void _emitFailure(String reason, CapabilityFailureKind kind) {
+    if (_updates.isClosed) return;
     _updates.add(ProcessSessionUpdate.failed(reason: reason, kind: kind));
   }
 

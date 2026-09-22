@@ -34,6 +34,7 @@ import '../agent/agent_harness.dart';
 import '../agent/agent_session.dart';
 import '../agent/captured_output.dart';
 import '../agent/environment_registry.dart';
+import '../agent/lane_environment_health.dart';
 import '../agent/model_tier.dart';
 import '../agent/seat_environments.dart';
 import '../agent/site_binding.dart';
@@ -172,6 +173,10 @@ typedef _ResolvedAgentSelection = ({
   String? model,
   Uri? endpoint,
   AgentTier tier,
+  // The LANE: the registry name the ladder actually selected. Carried rather
+  // than recovered by `nameOf` at the session edge, because the name is what
+  // the ladder decided and the environment value is only its consequence.
+  String lane,
 });
 
 /// What the ROUND-COMMIT fence captured at its effect edge, so the git await
@@ -190,6 +195,7 @@ typedef _ResolvedAgentRun = ({
   String? model,
   Uri? endpoint,
   AgentTier tier,
+  String lane,
 });
 
 /// The IMPLEMENT capability — spawn the coding agent in the bead's workspace,
@@ -329,6 +335,7 @@ class AgentCapability extends ProcessCapability {
         environment: environment,
       ),
       tier: tier,
+      lane: config.harness,
     );
   }
 
@@ -371,6 +378,7 @@ class AgentCapability extends ProcessCapability {
       model: selected.model,
       endpoint: selected.endpoint,
       tier: selected.tier,
+      lane: selected.lane,
     );
   }
 
@@ -515,6 +523,7 @@ class AgentCapability extends ProcessCapability {
     final adapterId = selection.environment.sessionAdapter;
     if (adapterId == null) return null;
     final run = _resolveRun(context, args, selection: selection);
+    final health = context.getInheritedSeedOfExactType<LaneEnvironmentHealth>();
     // The channel leg never reaches the engine's process dispatcher, so the
     // ROUND-COMMIT fence [result] applies on the argv leg has to be re-applied
     // here — the same decorator, the same probe, the same reason shape, so ONE
@@ -542,6 +551,19 @@ class AgentCapability extends ProcessCapability {
           context,
           seatId: kBuildSeatPolicyId,
         ),
+        // LANE HEALTH, read at the same EFFECT edge and by the same verb (bead
+        // `pow-u1bi`): a station that armed no coordinator diagnoses nothing
+        // and behaves exactly as before, and the target is what tells the
+        // coordinator WHICH lane this spawn was aimed at.
+        laneHealth: health,
+        laneTarget: health == null
+            ? null
+            : LaneEnvironmentTarget(
+                lane: run.lane,
+                environment: run.environment,
+                tier: run.tier,
+                pin: run.model ?? run.environment.model,
+              ),
       ),
       probe: () => _probeRoundCommit(context, args),
       // Reached only once the probe CLEARED, so this cannot double-refuse: the

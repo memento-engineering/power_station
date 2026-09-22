@@ -205,6 +205,25 @@ Future<_Run> _buildAcpRun({
   return run;
 }
 
+/// Every reported failure the engine would resolve to [StepFailureClass.work]
+/// — i.e. every one that WOULD charge the bead's attempt cursor.
+///
+/// The resolution is the engine's own [resolveFailureClass], not a local
+/// re-derivation: this asserts what the engine decides, never what this test
+/// believes it decides.
+List<AllocationFailed> _workClassed(List<AllocationReport> reports) => reports
+    .whereType<AllocationFailed>()
+    .where(
+      (failed) =>
+          resolveFailureClass(
+            kind: failed.kind,
+            ranFor: const Duration(minutes: 1),
+            kindDeclared: failed.kindDeclared,
+          ) ==
+          StepFailureClass.work,
+    )
+    .toList(growable: false);
+
 /// The ONE wall-clock bound on a real ACP fixture's progress.
 ///
 /// It is a LIVENESS tripwire, never a latency assertion: every wait below
@@ -642,6 +661,83 @@ void main() {
     expect(controlUsage?.tokensIn, 11);
     expect(controlUsage?.tokensOut, 7);
     expect(controlUsage?.numTurns, 1);
+  }, timeout: Timeout.none);
+
+  // Bead `pow-u1bi`: the codex 0.155.1 incident. The CLI moved at 23:22Z and
+  // from 23:3xZ every codex session setup refused the pinned model — and the
+  // station charged each refusal to the BEAD, one attempt at a time, while the
+  // wedge counter read `0 running`. A refusal that happens BEFORE the first
+  // turn cannot be the bead's fault: no brief was delivered, so no work was
+  // attempted and none could have failed.
+  test('ACP setup refusal is infra and does not charge a work attempt', () async {
+    // THE WIRE. The bridge DECLARES the kind and the evidence; nothing
+    // downstream parses the reason prose to recover either.
+    final refused = await _runBridge(
+      probePath: probePath,
+      probeArgs: const <String>[
+        '--identity=setup-refusal',
+        // The measured catalog shape: six effort variants of the pinned base,
+        // and a frontier seat needs `[high]`, which this agent does not offer.
+        '--models=gpt-5.6-sol[low],gpt-5.6-sol[medium]',
+        '--current=other',
+      ],
+    );
+    expect(refused.frame['kind'], 'failed', reason: '${refused.frame}');
+    expect(refused.frame['failureKind'], CapabilityFailureKind.noResult.name);
+    final fields = (refused.frame['fields']! as Map<String, dynamic>)
+        .cast<String, String>();
+    expect(fields[kAgentFailurePhaseField], kAgentSetupPhase);
+    expect(fields[kAgentFailurePinField], 'gpt-5.6-sol');
+    // STRUCTURE, not prose: the offered catalog decodes back to a list.
+    expect(decodeOfferedField(fields[kAgentFailureOfferedField]), <String>[
+      'gpt-5.6-sol[low]',
+      'gpt-5.6-sol[medium]',
+    ]);
+    expect(
+      fields[kAgentFailureResolverVerdictField],
+      allOf(contains('gpt-5.6-sol'), contains('frontier'), contains('[high]')),
+    );
+
+    // THE ENGINE'S RESOLUTION, over the DIRECT `ProcessAllocation` — the seam
+    // that carries a channel's declared kind onto its report.
+    final run = await _buildAcpRun(
+      probePath: probePath,
+      identity: 'setup-refusal-alloc',
+      probeArgs: const <String>[
+        '--models=gpt-5.6-sol[low],gpt-5.6-sol[medium]',
+        '--current=other',
+      ],
+      leased: false,
+    );
+    // The BEFORE half of the work-attempt claim: nothing has been charged yet.
+    expect(_workClassed(run.reports), isEmpty);
+    unawaited(run.allocation.startMounted(run.tree));
+    final failure = await _waitForFailure(run);
+    expect(failure.kind, CapabilityFailureKind.noResult);
+    expect(failure.kindDeclared, isTrue);
+    expect(
+      resolveFailureClass(
+        kind: failure.kind,
+        // IRRESPECTIVE OF THE CLOCK. A setup refusal is normally fast, but a
+        // slow handshake is still a handshake: the DECLARATION is what earns
+        // infra, never the elapsed-time floor. In the live incident the codex
+        // seats failed after a real npx fetch, well past any silence window.
+        ranFor: const Duration(minutes: 1),
+        kindDeclared: failure.kindDeclared,
+      ),
+      StepFailureClass.infra,
+    );
+    // THE AFTER half: the whole report stream still resolves to zero `work`
+    // failures, so the bead's attempt cursor saw nothing to advance on. The
+    // control below is what makes that load-bearing — the same kind, over the
+    // same long turn, UNDECLARED, is not infra.
+    expect(_workClassed(run.reports), isEmpty);
+    expect(
+      resolveFailureClass(kind: failure.kind, ranFor: const Duration(minutes: 1)),
+      StepFailureClass.noResult,
+    );
+    expect(run.reports.whereType<AllocationCompleted>(), isEmpty);
+    await run.close();
   }, timeout: Timeout.none);
 
   test('the capacity refusal reaches the engine as a DECLARED non-result '
@@ -1374,6 +1470,9 @@ void main() {
         promptMode: PromptMode.none,
         target: InferenceTarget.providerManaged,
         model: 'gpt-5.6-sol',
+        // The AGENT, not the launcher (bead `pow-u1bi`): `npx` is on every box
+        // with node, so it proves nothing about codex being installed.
+        pathCheck: 'codex',
         sessionAdapter: kAcpSessionAdapterId,
         roleAsset: '.agents/agents/$kSeatHole.md',
         primeMode: SeatPrimeMode.prompt,

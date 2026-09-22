@@ -30,6 +30,7 @@ import 'agent_environment.dart';
 import 'agent_harness.dart';
 import 'environment_probe.dart';
 import 'environment_registry.dart';
+import 'lane_environment_health.dart';
 import 'site_binding.dart';
 import 'typed_environment.dart';
 
@@ -73,10 +74,12 @@ class _TimerProbeTicker implements ProbeTicker {
 /// [AvailabilityAssets] over the INHERITED arming, so its subtree's presence
 /// set is computed against the registry actually in effect there.
 class EnvironmentProbeArming {
-  /// Arms [probe] on the bounded [interval].
+  /// Arms [probe] on the bounded [interval], with the station's optional
+  /// [laneHealth] coordinator.
   const EnvironmentProbeArming({
     required this.probe,
     this.interval = kEnvironmentProbeInterval,
+    this.laneHealth,
   });
 
   /// The injected probe implementation (impls are DI).
@@ -85,16 +88,27 @@ class EnvironmentProbeArming {
   /// The bounded re-probe interval (a VALUE, authored by the station).
   final Duration interval;
 
+  /// The station's LANE-HEALTH coordinator (bead `pow-u1bi`), or null when it
+  /// arms none — in which case a lane is exactly as available as the boolean
+  /// probe says, which is the pre-`pow-u1bi` behaviour.
+  ///
+  /// It rides the ARMING for the same reason the probe does (A38(4)): a nested
+  /// `HarnessProvider` that overrides only its registry must diagnose against
+  /// the SAME coordinator, or a lane parked above it would come back to life
+  /// one subtree down.
+  final LaneEnvironmentHealth? laneHealth;
+
   /// Value equality over the probe IDENTITY and the interval, so re-providing
   /// the same arming down a nested `HarnessProvider` notifies nobody.
   @override
   bool operator ==(Object other) =>
       other is EnvironmentProbeArming &&
       other.probe == probe &&
-      other.interval == interval;
+      other.interval == interval &&
+      identical(other.laneHealth, laneHealth);
 
   @override
-  int get hashCode => Object.hash(probe, interval);
+  int get hashCode => Object.hash(probe, interval, identityHashCode(laneHealth));
 
   @override
   String toString() => 'EnvironmentProbeArming($interval)';
@@ -114,6 +128,7 @@ class AvailabilityAssets extends SingleChildStatefulSeed {
     required this.probe,
     this.interval = kEnvironmentProbeInterval,
     this.schedule = timerProbeSchedule,
+    this.laneHealth,
     super.child,
     super.key,
   });
@@ -126,6 +141,14 @@ class AvailabilityAssets extends SingleChildStatefulSeed {
 
   /// The injected tick schedule.
   final ProbeSchedule schedule;
+
+  /// The station's LANE-HEALTH coordinator, or null when it arms none.
+  ///
+  /// This seed SUBSCRIBES to its condition stream and re-projects the answer as
+  /// a narrowing of the presence set — the D-H way round, because the
+  /// coordinator has no synchronous accessor to read and a `build` may only
+  /// observe tree values.
+  final LaneEnvironmentHealth? laneHealth;
 
   @override
   SingleChildState<AvailabilityAssets> createState() =>
@@ -174,8 +197,29 @@ class _AvailabilityAssetsState extends SingleChildState<AvailabilityAssets> {
   SiteBinding _siteBinding = SiteBinding.none;
   AvailableEnvironments? _present;
   ProbeTicker? _ticker;
+  LaneEnvironmentCondition _condition = LaneEnvironmentCondition.none;
+  StreamSubscription<LaneEnvironmentCondition>? _conditionSub;
   var _pass = _AvailabilityProbePass();
   var _disposed = false;
+
+  /// Subscribes to the armed coordinator's conditions ONCE, for this mount.
+  ///
+  /// The subscription starts a new probe PASS rather than editing the published
+  /// set directly: a lane going down or coming back is exactly the kind of
+  /// supersedable change the pass marker already sequences, so parking rides
+  /// the mechanism that is already there instead of a second one beside it.
+  @override
+  void initState() {
+    final health = seed.laneHealth;
+    if (health == null) return;
+    _conditionSub = health.conditions.listen((condition) {
+      if (_disposed || condition == _condition) return;
+      setState(() {
+        _condition = condition;
+        _pass = _AvailabilityProbePass();
+      });
+    });
+  }
 
   @override
   void didChangeDependencies() {
@@ -251,6 +295,7 @@ class _AvailabilityAssetsState extends SingleChildState<AvailabilityAssets> {
     final registry = _registry!;
     final siteBinding = _siteBinding;
     final probe = seed.probe;
+    final health = seed.laneHealth;
     final present = <AgentEnvironment>{};
     for (final environment in registry.validatedEnvironments) {
       final name = registry.nameOf(environment);
@@ -280,6 +325,25 @@ class _AvailabilityAssetsState extends SingleChildState<AvailabilityAssets> {
         // the pass still publishes.
         reachable = false;
       }
+      // THE PARK, applied here and nowhere else: a lane the coordinator holds
+      // down is absent no matter what the boolean probe says — in the measured
+      // incident the binary was present and the provider was reachable the
+      // whole time, which is precisely why presence alone could not see it.
+      //
+      // A conditioned lane gets ONE question per pass, and it is the
+      // coordinator's, not ours: this asset never reads a park back out of its
+      // own state to decide whether to lift it (guards LOUD or GONE — the
+      // coordinator owns the predicate, so there is exactly one of it).
+      if (health != null && _condition.isDown(name)) {
+        try {
+          reachable = await health.confirmScheduledRecovery(
+            lane: name,
+            present: reachable,
+          );
+        } on Object {
+          reachable = false;
+        }
+      }
       if (reachable) present.add(environment);
     }
     // Two questions, two guards: `_disposed` answers REMOVAL and the scope
@@ -292,16 +356,55 @@ class _AvailabilityAssetsState extends SingleChildState<AvailabilityAssets> {
     setState(() => _present = next);
   }
 
+  /// [probed] without the environments armed under a PARKED lane name.
+  ///
+  /// Resolving the name needs the registry, so a pass with none published yet
+  /// narrows nothing — there is no lane to name, and the boot-validated
+  /// fallback is the only set there is.
+  AvailableEnvironments _narrow(
+    AvailableEnvironments probed,
+    EnvironmentRegistry? registry,
+  ) {
+    if (_condition.down.isEmpty || registry == null) return probed;
+    final kept = <AgentEnvironment>{
+      for (final environment in probed.values)
+        if (!_condition.isDown(_laneOf(registry, environment))) environment,
+    };
+    return kept.length == probed.values.length
+        ? probed
+        : AvailableEnvironments(kept);
+  }
+
+  /// [registry]'s name for [environment], or the empty string when it arms no
+  /// such member.
+  ///
+  /// An unnameable environment is never a PARKED one: parking keys on a lane
+  /// name, so something the registry cannot name cannot be the lane that was
+  /// parked, and dropping it here would remove an environment nobody condemned.
+  String _laneOf(EnvironmentRegistry registry, AgentEnvironment environment) {
+    try {
+      return registry.nameOf(environment);
+    } on Object {
+      return '';
+    }
+  }
+
   @override
   Seed buildWithChild(TreeContext context, Seed child) {
     final registry = _registry;
     // Until the FIRST pass lands, the presence set is exactly the boot-
     // validated registry members (ADR-0000 A35(5)) — nothing regresses.
-    final present =
+    final probed =
         _present ??
         (registry == null
             ? AvailableEnvironments.none
             : AvailableEnvironments.fromRegistry(registry));
+    // THE PARK IS APPLIED AT PUBLICATION, not only inside a pass: a lane going
+    // down must leave the set on the build the condition arrives on, without
+    // waiting for the in-flight probe to finish agreeing. That is what stops
+    // the THIRD spawn — the one the live incident served while the second
+    // failure was still being classified.
+    final present = _narrow(probed, registry);
     return InheritedSeed<_AvailabilityProbePass>(
       value: _pass,
       child: LifecycleProvider<_AvailabilityLifecycle>(
@@ -319,5 +422,7 @@ class _AvailabilityAssetsState extends SingleChildState<AvailabilityAssets> {
     _disposed = true;
     _ticker?.cancel();
     _ticker = null;
+    unawaited(_conditionSub?.cancel());
+    _conditionSub = null;
   }
 }
