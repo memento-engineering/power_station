@@ -1,5 +1,18 @@
 ## Unreleased
 
+- Fixed: the readiness route's two verdict-source fields are named `source_state` and
+  `source_path`, the identifier spelling the wire requires. A step result persists as
+  `grid.result.<node path>.<field>` with the field segment rendered RAW, and `bd` refuses a
+  metadata key carrying a hyphen — it refuses the WHOLE update, not the offending key. Measured
+  over one lunar epoch, every session minted under `0.7.0-dev.4` failed its first advance with
+  `1 of 1 issues failed to update`, retried three times and gated; the fields earlier waves wrote
+  (`grade`, `pr_url`, `route_verdict`, `merged_sha`) are identifiers already, which is why only
+  these two broke. Values and routing are unchanged — `source_state` is still `PRESENT`,
+  `source_path` is still the canonical verdict path, and the three-state route (passing drives,
+  failing holds, absence waits or fails loudly) is untouched. No migration and no compatibility
+  read: the hyphenated spellings were refused on every write, so nothing ever persisted or read
+  them (`power_station#readiness-result-fields-are-metadata-identifiers`).
+
 - Breaking: an ACP agent that offers one model id per reasoning effort now resolves a BARE seat pin
   through the seat's own rung. codex-acp 0.155.1 began listing `gpt-5.6-sol[low]` through
   `gpt-5.6-sol[ultra]` where it had listed one variant per base; the pin is bare by design, because
