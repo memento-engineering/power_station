@@ -20,6 +20,30 @@ class _Leaf extends MultiChildSeed {
   const _Leaf() : super(children: const []);
 }
 
+/// Re-describes its subtree on demand, so a probe can rebuild the seat in
+/// place instead of remounting a fresh tree.
+class _Host extends StatefulSeed {
+  const _Host({required this.onCreate, required this.describe});
+
+  final void Function(_HostState) onCreate;
+  final Seed Function() describe;
+
+  @override
+  State<_Host> createState() => _HostState();
+}
+
+class _HostState extends State<_Host> {
+  Seed Function()? _next;
+
+  @override
+  void initState() => seed.onCreate(this);
+
+  void swap(Seed Function() describe) => setState(() => _next = describe);
+
+  @override
+  Seed build(TreeContext context) => (_next ?? seed.describe)();
+}
+
 final class _Tokens implements GitHubAppTokenProvider {
   @override
   Future<String> accessToken() async => 'token';
@@ -132,6 +156,21 @@ GitHubReconcilerRuntime _inert({
   required GitHubPollCoordinator coordinator,
 }) => _InertRuntime(client: client, coordinator: coordinator);
 
+/// The error a refusing construction throws — one object, so a probe can
+/// assert that THIS error reached the caller.
+final _refusal = StateError('this seat refuses to construct a runtime');
+
+/// A factory that cannot build: the construction-failure seam.
+GitHubReconcilerRuntime _refuse({
+  required GitHubReconcilerConfig config,
+  required GitHubAppClient client,
+  required GitHubCursorStore cursors,
+  required GitHubEventSink emit,
+  required ExplorationTransport? transport,
+  required GitHubReadClient? foreignClient,
+  required GitHubPollCoordinator coordinator,
+}) => throw _refusal;
+
 final _client = GitHubAppClient(
   config: GitHubAppConfig(
     appId: 'app',
@@ -200,33 +239,47 @@ CiFeedbackProjection _landedProjection() => CiFeedbackProjection(
   gridRoot: '/grid',
 );
 
+/// The seat under its station rung.
+///
+/// [query], [cursors] and [emit] default to a fresh instance per call; a probe
+/// that rebuilds this tree and needs the rebuild to be input-EQUAL passes its
+/// own and holds them stable.
 Seed _seatTree({
   required RecordingExplorationTransport flares,
   required CiFeedbackProjection projection,
-}) => sdk.ProviderScope(
-  // The station rung a live seat composes under: this file never runs the
-  // query, so the seat mounts, binds its rail, and reconciles nothing.
-  child: InheritedSeed<sdk.TrajectoryConfig>(
-    value: sdk.TrajectoryConfig(
-      obligationQueryExtensions: <ObligationQuery>[GitHubReconciliationQuery()],
-    ),
-    child: InheritedSeed<ServiceBundle>(
-      value: ServiceBundle(transport: flares),
-      // The station's ONE poll budget, mounted where a downstream station
-      // mounts it: above the repositories that share the installation.
-      child: GitHubPollCoordinatorAssets(
-        child: Provider<GitHubAppClient>.value(
-          _client,
-          child: Provider<GitHubCursorStore>.value(
-            _Cursors(),
-            child: Provider<GitHubEventSink>.value(
-              (_) async {},
-              child: Provider<CiFeedbackProjection>.value(
-                projection,
-                child: const GitHubReconcilerAssets(
-                  config: _config,
-                  runtimeFactory: _inert,
-                  child: _Leaf(),
+  GitHubReconciliationQuery? query,
+  GitHubCursorStore? cursors,
+  GitHubEventSink? emit,
+  GitHubReconcilerRuntimeFactory runtimeFactory = _inert,
+}) {
+  final GitHubEventSink sink = emit ?? (_) async {};
+  return sdk.ProviderScope(
+    // The station rung a live seat composes under: this file never runs the
+    // query, so the seat mounts, binds its rail, and reconciles nothing.
+    child: InheritedSeed<sdk.TrajectoryConfig>(
+      value: sdk.TrajectoryConfig(
+        obligationQueryExtensions: <ObligationQuery>[
+          query ?? GitHubReconciliationQuery(),
+        ],
+      ),
+      child: InheritedSeed<ServiceBundle>(
+        value: ServiceBundle(transport: flares),
+        // The station's ONE poll budget, mounted where a downstream station
+        // mounts it: above the repositories that share the installation.
+        child: GitHubPollCoordinatorAssets(
+          child: Provider<GitHubAppClient>.value(
+            _client,
+            child: Provider<GitHubCursorStore>.value(
+              cursors ?? _Cursors(),
+              child: Provider<GitHubEventSink>.value(
+                sink,
+                child: Provider<CiFeedbackProjection>.value(
+                  projection,
+                  child: GitHubReconcilerAssets(
+                    config: _config,
+                    runtimeFactory: runtimeFactory,
+                    child: const _Leaf(),
+                  ),
                 ),
               ),
             ),
@@ -234,8 +287,8 @@ Seed _seatTree({
         ),
       ),
     ),
-  ),
-);
+  );
+}
 
 void main() {
   test('a failed cycle flares locally AND refuses to the station', () async {
@@ -338,6 +391,166 @@ void main() {
     expect(flare.data['error'], contains('/work/power_station'));
     expect(flare.data['error'], contains('sql: no rows in result set'));
     expect(work.argvs.single.take(2), <String>['update', 'pow-2xmo']);
+  });
+
+  test('an input-equal rebuild keeps a foreign CI-feedback reporter', () async {
+    final flares = RecordingExplorationTransport();
+    final projection = _landedProjection();
+    final query = GitHubReconciliationQuery();
+    final cursors = _Cursors();
+    Future<void> sink(NormalizedGitHubEvent event) async {}
+    late _HostState host;
+    // ONE description, described twice: every implementation identity is held,
+    // and the config is the same `const` value, so the rebuild is input-EQUAL.
+    Seed describe() => _seatTree(
+      flares: flares,
+      projection: projection,
+      query: query,
+      cursors: cursors,
+      emit: sink,
+    );
+    final owner = TreeOwner();
+    addTearDown(owner.dispose);
+    owner.mountRoot(
+      _Host(onCreate: (state) => host = state, describe: describe),
+    );
+    owner.flush();
+
+    await projection(_check);
+    expect(
+      flares.named(kCiFeedbackIgnoredFlare),
+      hasLength(1),
+      reason: 'the asset bound the seat rail on mount',
+    );
+
+    // A FOREIGN owner takes the rail after this asset bound it.
+    final foreign = <String>[];
+    void foreignReporter(
+      String flareName,
+      String action,
+      Object error,
+      StackTrace stackTrace,
+    ) => foreign.add(flareName);
+    projection.bindReporter(foreignReporter);
+
+    host.swap(describe);
+    owner.flush();
+    await Future<void>.delayed(Duration.zero);
+    owner.flush();
+
+    await projection(_check);
+    expect(foreign, <String>[
+      kCiFeedbackIgnoredFlare,
+    ], reason: 'an input-equal rebuild mutates no binding');
+    expect(
+      flares.named(kCiFeedbackIgnoredFlare),
+      hasLength(1),
+      reason: 'the asset did not stamp its own reporter back over the rail',
+    );
+
+    // Teardown removes only what THIS asset bound, and it no longer holds the
+    // rail: the foreign binding outlives the seat that once had it.
+    owner.unmountRoot();
+    await projection(_check);
+    expect(foreign, hasLength(2));
+    expect(flares.named(kCiFeedbackIgnoredFlare), hasLength(1));
+  });
+
+  test('a runtime-only change leaves a foreign CI-feedback reporter '
+      'bound', () async {
+    final flares = RecordingExplorationTransport();
+    final projection = _landedProjection();
+    final query = GitHubReconciliationQuery();
+    Future<void> sink(NormalizedGitHubEvent event) async {}
+    late _HostState host;
+    Seed describe(GitHubCursorStore cursors) => _seatTree(
+      flares: flares,
+      projection: projection,
+      query: query,
+      cursors: cursors,
+      emit: sink,
+    );
+    final owner = TreeOwner();
+    addTearDown(owner.dispose);
+    owner.mountRoot(
+      _Host(
+        onCreate: (state) => host = state,
+        describe: () => describe(_Cursors()),
+      ),
+    );
+    owner.flush();
+
+    final foreign = <String>[];
+    void foreignReporter(
+      String flareName,
+      String action,
+      Object error,
+      StackTrace stackTrace,
+    ) => foreign.add(flareName);
+    projection.bindReporter(foreignReporter);
+
+    // The cursor store is a RUNTIME input and no part of the rail. Replacing it
+    // hands the lifecycle a real dependency pass — which must rebuild the
+    // runtime and leave the binding exactly as it found it.
+    host.swap(() => describe(_Cursors()));
+    owner.flush();
+    await Future<void>.delayed(Duration.zero);
+    owner.flush();
+
+    await projection(_check);
+    expect(
+      foreign,
+      <String>[kCiFeedbackIgnoredFlare],
+      reason: 'the rail is bound independently of the runtime it reports for',
+    );
+    expect(
+      flares.flares,
+      isEmpty,
+      reason: 'the asset did not take the rail back on an unrelated change',
+    );
+  });
+
+  test('an initial construction failure removes the asset reporter exactly '
+      'once', () async {
+    final flares = RecordingExplorationTransport();
+    final projection = _landedProjection();
+    final owner = TreeOwner();
+    addTearDown(owner.dispose);
+
+    expect(
+      () {
+        owner.mountRoot(
+          _seatTree(
+            flares: flares,
+            projection: projection,
+            runtimeFactory: _refuse,
+          ),
+        );
+        owner.flush();
+      },
+      throwsA(same(_refusal)),
+      reason: 'the construction error reaches the caller, unwrapped',
+    );
+
+    // The failed mount unwound its OWN binding: the leg now reports to nobody,
+    // not to a half-built seat.
+    await projection(_check);
+    expect(flares.flares, isEmpty);
+
+    // And the rail is free for the next owner — which is what "exactly once"
+    // buys: the unwind removed this asset's closure and left the slot empty
+    // rather than clearing it twice or clobbering somebody else's.
+    final foreign = <String>[];
+    void foreignReporter(
+      String flareName,
+      String action,
+      Object error,
+      StackTrace stackTrace,
+    ) => foreign.add(flareName);
+    projection.bindReporter(foreignReporter);
+    await projection(_check);
+    expect(foreign, <String>[kCiFeedbackIgnoredFlare]);
+    expect(flares.flares, isEmpty);
   });
 
   test('the ignore flare names the shape the store held', () async {

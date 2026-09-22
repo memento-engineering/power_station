@@ -150,6 +150,16 @@ final class _RecordingRuntime extends GitHubReconcilerRuntime {
 }
 
 final class _Factory {
+  _Factory({this.failOn = -1});
+
+  /// The zero-based construction that THROWS instead of returning a runtime.
+  /// -1 — the default — is a factory that always succeeds.
+  final int failOn;
+
+  /// The error a failing construction throws, held so a probe can assert the
+  /// SAME object reached the caller rather than a look-alike.
+  final failure = StateError('the replacement runtime refuses to be built');
+
   final configs = <GitHubReconcilerConfig>[];
   final transports = <ExplorationTransport?>[];
   final runtimes = <_RecordingRuntime>[];
@@ -169,10 +179,39 @@ final class _Factory {
     transports.add(transport);
     foreignClients.add(foreignClient);
     coordinators.add(coordinator);
+    // The ATTEMPT is recorded first: a construction that refuses is still a
+    // construction this seat asked for.
+    if (configs.length - 1 == failOn) throw failure;
     final runtime = _RecordingRuntime(client: client, coordinator: coordinator);
     runtimes.add(runtime);
     return runtime;
   }
+}
+
+/// A second App client identity, for the probes that REPLACE one.
+GitHubAppClient _otherClient() => GitHubAppClient(
+  config: _appConfig,
+  tokens: _Tokens(),
+  transport: _Transport(),
+);
+
+/// A stable event sink: one instance, so a rebuild that changes nothing else
+/// really does change nothing.
+Future<void> _sink(NormalizedGitHubEvent event) async {}
+
+/// The distinct consecutive values in [observations] — what a probe watching
+/// availability actually claims, with a repeated build of an unchanged posture
+/// collapsed away.
+List<GitHubReconcilerRuntime?> _sequence(
+  List<GitHubReconcilerRuntime?> observations,
+) {
+  final sequence = <GitHubReconcilerRuntime?>[];
+  for (final observation in observations) {
+    if (sequence.isEmpty || !identical(sequence.last, observation)) {
+      sequence.add(observation);
+    }
+  }
+  return sequence;
 }
 
 final _appConfig = GitHubAppConfig(
@@ -240,6 +279,12 @@ Seed _stationCoordinator(Seed child) =>
 /// [coordinatorRung] defaults to the production station asset. A probe hands
 /// its own to adopt a coordinator IT owns (`Provider.value`), or to mount the
 /// seat under no coordinator at all.
+///
+/// [appClient] false mounts NO `GitHubAppClient` provider at all — the seat's
+/// required dependency is ABSENT rather than merely different, which is the
+/// only way this substrate can state absence. [cursors] and [emit] default to a
+/// fresh instance each call; a probe that needs an input-EQUAL rebuild passes
+/// its own and holds them stable.
 Seed _seatTree({
   required GitHubReconcilerConfig? config,
   required _Factory factory,
@@ -247,33 +292,41 @@ Seed _seatTree({
   ExplorationTransport? transport,
   EnvironmentReader? environment,
   GitHubHttpTransportFactory? foreignTransportFactory,
+  GitHubAppClient? client,
+  GitHubCursorStore? cursors,
+  GitHubEventSink? emit,
+  bool appClient = true,
   _CoordinatorRung coordinatorRung = _stationCoordinator,
-}) => coordinatorRung(
-  InheritedSeed<ServiceBundle>(
-    value: ServiceBundle(transport: transport),
-    child: Provider<GitHubAppClient>.value(
-      _client,
-      child: Provider<GitHubCursorStore>.value(
-        _Cursors(),
-        child: Provider<GitHubEventSink>.value(
-          (_) async {},
-          child: GitHubReconcilerAssets(
-            config: config,
-            runtimeFactory: factory.create,
-            environment: environment ?? platformEnvironment,
-            foreignTransportFactory:
-                foreignTransportFactory ?? createGitHubHttpTransport,
-            child: GitHubGridAssets(
-              child: _Probe(
-                (context) => observe(context.watch<GitHubReconcilerRuntime>()),
-              ),
-            ),
+}) {
+  final GitHubEventSink sink = emit ?? (_) async {};
+  Seed seat = Provider<GitHubCursorStore>.value(
+    cursors ?? _Cursors(),
+    child: Provider<GitHubEventSink>.value(
+      sink,
+      child: GitHubReconcilerAssets(
+        config: config,
+        runtimeFactory: factory.create,
+        environment: environment ?? platformEnvironment,
+        foreignTransportFactory:
+            foreignTransportFactory ?? createGitHubHttpTransport,
+        child: GitHubGridAssets(
+          child: _Probe(
+            (context) => observe(context.watch<GitHubReconcilerRuntime>()),
           ),
         ),
       ),
     ),
-  ),
-);
+  );
+  if (appClient) {
+    seat = Provider<GitHubAppClient>.value(client ?? _client, child: seat);
+  }
+  return coordinatorRung(
+    InheritedSeed<ServiceBundle>(
+      value: ServiceBundle(transport: transport),
+      child: seat,
+    ),
+  );
+}
 
 /// Reads from the tree and passes its child STRAIGHT THROUGH — a [Nest] link,
 /// so several production seats stack and each is observed at its own rung,
@@ -941,6 +994,262 @@ void main() {
 
     owner.unmountRoot();
     expect(query.attached, isEmpty);
+  });
+
+  test('an input-equal rebuild owns no effect', () async {
+    // The whole point of projecting an immutable, value-equal input: a parent
+    // that re-describes this seat with a FRESH but equivalent configuration and
+    // the SAME implementations hands the lifecycle no dependency pass at all.
+    final factory = _Factory();
+    final query = GitHubReconciliationQuery();
+    final cursors = _Cursors();
+    final observations = <GitHubReconcilerRuntime?>[];
+    late _HostState host;
+    Seed describe() => _station(
+      <sdk.ObligationQuery>[query],
+      child: _seatTree(
+        // A NEW config object every time, equal to the last one by value.
+        config: _config('one'),
+        factory: factory,
+        observe: observations.add,
+        client: _client,
+        cursors: cursors,
+        emit: _sink,
+      ),
+    );
+    final owner = TreeOwner();
+    addTearDown(owner.dispose);
+    owner.mountRoot(
+      sdk.ProviderScope(
+        child: _Host(onCreate: (state) => host = state, describe: describe),
+      ),
+    );
+    owner.flush();
+    final runtime = factory.runtimes.single;
+    expect(query.attached, <GitHubReconcilerRuntime>[runtime]);
+    // A SECOND seat joins the same station query behind this one. The tick's
+    // set is insertion-ordered, so a release-and-reattach this seat never
+    // needed would show up here as a reordering.
+    final other = _RecordingRuntime(
+      client: _client,
+      coordinator: GitHubPollCoordinator(minimumSpacing: Duration.zero),
+    );
+    query.attach(other);
+
+    host.swap(describe);
+    owner.flush();
+    await Future<void>.delayed(Duration.zero);
+    owner.flush();
+
+    expect(
+      factory.configs,
+      hasLength(1),
+      reason: 'an equivalent description constructs nothing',
+    );
+    expect(
+      query.attached,
+      <GitHubReconcilerRuntime>[runtime, other],
+      reason:
+          'the SAME attachment stands, in place: an input-equal description '
+          'never reaches the lifecycle, so nothing is released or re-attached',
+    );
+    expect(observations.last, same(runtime));
+  });
+
+  test('dependency appearance, replacement, disappearance and unmount move '
+      'runtime availability', () async {
+    final factory = _Factory();
+    final query = GitHubReconciliationQuery();
+    final cursors = _Cursors();
+    final observations = <GitHubReconcilerRuntime?>[];
+    final second = _otherClient();
+    late _HostState host;
+    Seed describe(GitHubAppClient? client) => _station(
+      <sdk.ObligationQuery>[query],
+      child: _seatTree(
+        config: _config('one'),
+        factory: factory,
+        observe: observations.add,
+        client: client,
+        appClient: client != null,
+        cursors: cursors,
+        emit: _sink,
+      ),
+    );
+    final owner = TreeOwner();
+    addTearDown(owner.dispose);
+    Future<void> swap(GitHubAppClient? client) async {
+      host.swap(() => describe(client));
+      owner.flush();
+      await Future<void>.delayed(Duration.zero);
+      owner.flush();
+    }
+
+    // ABSENT: the App client this seat needs is not in the tree at all.
+    owner.mountRoot(
+      sdk.ProviderScope(
+        child: _Host(
+          onCreate: (state) => host = state,
+          describe: () => describe(null),
+        ),
+      ),
+    );
+    owner.flush();
+    expect(factory.configs, isEmpty);
+    expect(query.attached, isEmpty);
+
+    await swap(_client); // PRESENT
+    final first = factory.runtimes.single;
+    expect(query.attached, <GitHubReconcilerRuntime>[first]);
+
+    await swap(second); // REPLACED
+    expect(factory.runtimes, hasLength(2));
+    expect(
+      query.attached,
+      <GitHubReconcilerRuntime>[factory.runtimes.last],
+      reason: 'the superseded seat left the tick as the replacement joined',
+    );
+
+    await swap(null); // ABSENT again
+    expect(
+      query.attached,
+      isEmpty,
+      reason: 'a seat missing a required dependency rides no tick',
+    );
+    expect(factory.runtimes, hasLength(2), reason: 'losing one builds nothing');
+
+    await swap(_client); // PRESENT again
+    expect(factory.runtimes, hasLength(3));
+    expect(query.attached, <GitHubReconcilerRuntime>[factory.runtimes.last]);
+
+    expect(_sequence(observations), <GitHubReconcilerRuntime?>[
+      null,
+      factory.runtimes[0],
+      factory.runtimes[1],
+      null,
+      factory.runtimes[2],
+    ]);
+
+    owner.unmountRoot();
+    expect(query.attached, isEmpty);
+  });
+
+  test('a de-registered station query refuses and drops the seat from the '
+      'tick', () async {
+    final factory = _Factory();
+    final query = GitHubReconciliationQuery();
+    final cursors = _Cursors();
+    late _HostState host;
+    Seed describe(List<sdk.ObligationQuery> registration) => _station(
+      registration,
+      child: _seatTree(
+        config: _config('one'),
+        factory: factory,
+        observe: (_) {},
+        client: _client,
+        cursors: cursors,
+        emit: _sink,
+      ),
+    );
+    final owner = TreeOwner();
+    addTearDown(owner.dispose);
+    owner.mountRoot(
+      sdk.ProviderScope(
+        child: _Host(
+          onCreate: (state) => host = state,
+          describe: () => describe(<sdk.ObligationQuery>[query]),
+        ),
+      ),
+    );
+    owner.flush();
+    expect(query.attached, hasLength(1));
+
+    expect(
+      () {
+        host.swap(() => describe(const <sdk.ObligationQuery>[]));
+        owner.flush();
+      },
+      throwsA(
+        isA<StateError>().having(
+          (error) => error.message,
+          'message',
+          contains('offers 0'),
+        ),
+      ),
+    );
+    expect(
+      query.attached,
+      isEmpty,
+      reason:
+          'the refusal releases the old attachment BEFORE it throws: a seat '
+          'the station no longer schedules must ride no tick',
+    );
+  });
+
+  test('a replacement construction failure detaches the old runtime and '
+      'rethrows', () async {
+    final factory = _Factory(failOn: 1);
+    final query = GitHubReconciliationQuery();
+    final cursors = _Cursors();
+    final observations = <GitHubReconcilerRuntime?>[];
+    final second = _otherClient();
+    final third = _otherClient();
+    late _HostState host;
+    Seed describe(GitHubAppClient client) => _station(
+      <sdk.ObligationQuery>[query],
+      child: _seatTree(
+        config: _config('one'),
+        factory: factory,
+        observe: observations.add,
+        client: client,
+        cursors: cursors,
+        emit: _sink,
+      ),
+    );
+    final owner = TreeOwner();
+    addTearDown(owner.dispose);
+    owner.mountRoot(
+      sdk.ProviderScope(
+        child: _Host(
+          onCreate: (state) => host = state,
+          describe: () => describe(_client),
+        ),
+      ),
+    );
+    owner.flush();
+    final first = factory.runtimes.single;
+    expect(query.attached, <GitHubReconcilerRuntime>[first]);
+
+    expect(
+      () {
+        host.swap(() => describe(second));
+        owner.flush();
+      },
+      throwsA(same(factory.failure)),
+      reason: 'the construction error reaches the caller, unwrapped',
+    );
+    expect(
+      query.attached,
+      isEmpty,
+      reason:
+          'the superseded seat was released BEFORE the replacement was '
+          'attempted, so a failed construction leaves nothing riding the tick',
+    );
+    expect(
+      factory.runtimes,
+      <GitHubReconcilerRuntime>[first],
+      reason: 'a refused construction produces no runtime to attach',
+    );
+
+    // A later CHANGED dependency pass still attaches exactly ONE replacement.
+    host.swap(() => describe(third));
+    owner.flush();
+    await Future<void>.delayed(Duration.zero);
+    owner.flush();
+
+    expect(factory.runtimes, hasLength(2));
+    expect(query.attached, <GitHubReconcilerRuntime>[factory.runtimes.last]);
+    expect(observations.last, same(factory.runtimes.last));
   });
 
   test('app opener provider', () {
