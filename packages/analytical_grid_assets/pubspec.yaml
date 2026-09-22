@@ -1,5 +1,5 @@
 name: analytical_grid_assets
-version: 0.1.1-dev.4
+version: 0.1.1-dev.5
 description: >-
   The ANALYTICAL domain grid assets — station health and effectiveness
   reporting over the_grid's typed session-ledger metrics projection: pure view
@@ -13,7 +13,7 @@ environment:
 dependencies:
   args: ^2.6.0
   beads_dart: ^0.3.0-dev.2
-  grid_assets: ^0.7.0-dev.4
+  grid_assets: ^0.7.0-dev.5
   grid_engine: ^0.4.0-dev.3
   grid_runtime: ^0.2.1-dev.2
   grid_sdk: ^0.4.0-dev.3

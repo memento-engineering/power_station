@@ -1,17 +1,4 @@
-## Unreleased
-
-- Fixed: the readiness route's two verdict-source fields are named `source_state` and
-  `source_path`, the identifier spelling the wire requires. A step result persists as
-  `grid.result.<node path>.<field>` with the field segment rendered RAW, and `bd` refuses a
-  metadata key carrying a hyphen — it refuses the WHOLE update, not the offending key. Measured
-  over one lunar epoch, every session minted under `0.7.0-dev.4` failed its first advance with
-  `1 of 1 issues failed to update`, retried three times and gated; the fields earlier waves wrote
-  (`grade`, `pr_url`, `route_verdict`, `merged_sha`) are identifiers already, which is why only
-  these two broke. Values and routing are unchanged — `source_state` is still `PRESENT`,
-  `source_path` is still the canonical verdict path, and the three-state route (passing drives,
-  failing holds, absence waits or fails loudly) is untouched. No migration and no compatibility
-  read: the hyphenated spellings were refused on every write, so nothing ever persisted or read
-  them (`power_station#readiness-result-fields-are-metadata-identifiers`).
+## 0.7.0-dev.5
 
 - Breaking: an ACP agent that offers one model id per reasoning effort now resolves a BARE seat pin
   through the seat's own rung. codex-acp 0.155.1 began listing `gpt-5.6-sol[low]` through
@@ -31,16 +18,6 @@
   requires the tier its caller already declares to resolve its model.
   New public surface: `kAcpEffortSuffixByTier`, `acpEffortSuffix`, `acpModelRefusal` and
   `AcpBridgeSpec.tier`.
-
-- Changed: the vended governor role and both armed `harvest-review` legs now state who owns an
-  OPEN pull request. The governor's Sweep is incomplete until pull-request state is read from the
-  station's own pull-request chore beads and poll feedback, an open pull request with no live
-  session is operator work rather than a quiet board, and a chore bead closes with the merge commit
-  or pull-request URL as its receipt. `harvest-review` requires a seat-opened pull request to carry
-  an explicit bead reference plus a way to notice it merging, keeps the lease-guarded force-push
-  scoped to the station's own per-bead `grid/<bead>` delivery branch, and reports every open pull
-  request the station knows about rather than only this harvest's. Policy only: no repository
-  enumeration enters the prose.
 
 - Breaking: `filing`, `approve` and `unpark` run a PRE-STAMP ADVISORY by default — the same
   `bead-readiness` lens and the same discovery evidence gather the `spec_review` route runs,
@@ -75,6 +52,29 @@
   `FilingAdvisoryMode` parameter that defaults to `off`, so the mount explainer and every other
   non-stamp consumer spends nothing and reads exactly what it always read. The ten mechanical rows
   are evaluated first and a failing row refuses before any inference runs.
+- Fixed: the readiness route's two verdict-source fields are named `source_state` and
+  `source_path`, the identifier spelling the wire requires. A step result persists as
+  `grid.result.<node path>.<field>` with the field segment rendered RAW, and `bd` refuses a
+  metadata key carrying a hyphen — it refuses the WHOLE update, not the offending key. Measured
+  over one lunar epoch, every session minted under `0.7.0-dev.4` failed its first advance with
+  `1 of 1 issues failed to update`, retried three times and gated; the fields earlier waves wrote
+  (`grade`, `pr_url`, `route_verdict`, `merged_sha`) are identifiers already, which is why only
+  these two broke. Values and routing are unchanged — `source_state` is still `PRESENT`,
+  `source_path` is still the canonical verdict path, and the three-state route (passing drives,
+  failing holds, absence waits or fails loudly) is untouched. No migration and no compatibility
+  read: the hyphenated spellings were refused on every write, so nothing ever persisted or read
+  them (`power_station#readiness-result-fields-are-metadata-identifiers`).
+
+- Changed: the vended governor role and both armed `harvest-review` legs now state who owns an
+  OPEN pull request. The governor's Sweep is incomplete until pull-request state is read from the
+  station's own pull-request chore beads and poll feedback, an open pull request with no live
+  session is operator work rather than a quiet board, and a chore bead closes with the merge commit
+  or pull-request URL as its receipt. `harvest-review` requires a seat-opened pull request to carry
+  an explicit bead reference plus a way to notice it merging, keeps the lease-guarded force-push
+  scoped to the station's own per-bead `grid/<bead>` delivery branch, and reports every open pull
+  request the station knows about rather than only this harvest's. Policy only: no repository
+  enumeration enters the prose.
+
 - The approval stamp records what the advisory judged, in the SAME single `bd update` as the
   receipt: `grid.readiness_grade=<A|B|C>` on a pass, or `grid.readiness_skipped=true` plus
   `grid.approved_advisory=skipped` on a waiver, and neither when no advisory was asked. It is
@@ -98,6 +98,14 @@
   scan onto a one-line summary, or onto a plan the two plan rows already parse, is a ruling of its
   own. New public surface: `FilingRequirement.noCorruptingText`.
 
+Commits:
+ - **REFACTOR**(assets): retire the two hand-kept generation counters for the supersession scope (pow-jz93) (#360).
+ - **FIX**(readiness): name the result source fields as identifiers (pow-d7cy) (#365).
+ - **FIX**(agent): resolve ACP effort variants by seat tier (#364).
+ - **FIX**(grid_assets): route worktree beads to the root store (#363).
+ - **FEAT**(filing): refuse corrupting bead text - the eleventh FilingContract row refuses the NUL byte only (pow-2bkw) (#362).
+ - **DOCS**(governor): reconcile open pull requests in the sweep and harvest-review legs (pow-07zx) (#361).
+ - **BREAKING** **FEAT**(approval): run readiness and discovery lenses before approval (#358).
 
 ## 0.7.0-dev.4
 

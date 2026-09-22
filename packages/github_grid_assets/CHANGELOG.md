@@ -1,3 +1,8 @@
+## 0.2.0-dev.5
+
+ - **REFACTOR**(assets): retire the two hand-kept generation counters for the supersession scope (pow-jz93) (#360).
+ - **FEAT**(filing): refuse corrupting bead text - the eleventh FilingContract row refuses the NUL byte only (pow-2bkw) (#362).
+
 ## 0.2.0-dev.4
 
 - Changed: floors grid_assets at ^0.7.0-dev.4, the ten-row viability `FilingContract` (#323) and the
