@@ -1,3 +1,21 @@
+## Unreleased
+
+- Breaking: a station composing a LIVE GitHub reconciler must now mount exactly one
+  `GitHubPollCoordinatorAssets` above its repository fan-out, and a live repository without it
+  refuses at mount with a `StateError` naming the rung. `GitHubReconcilerRuntimeFactory` and
+  `createGitHubReconcilerRuntime` take a required `coordinator`; `GitHubPollCoordinator.schedule`
+  takes an optional per-cycle `minimumSpacing`, and `GitHubReconcilerRuntime` an optional
+  `minimumSpacing` defaulting to its coordinator's.
+- Fixed: repositories sharing one GitHub App installation now share one poll coordinator, so the
+  installation's request allowance is serialized and start-spaced across them. The production
+  factory built a coordinator per runtime, whose keyed maps therefore held a single live key each —
+  two repositories on one installation admitted both requests at once and spent the allowance once
+  per seat. The coordinator is now owned by the tree at station scope and injected into every
+  runtime, partitioned by installation id. When two repositories on one installation ask for
+  different minimum spacings, adjacent starts use the maximum of the pair. The foreign
+  issue-watch lane is untouched: it keeps its own per-seat coordinator, credential and spacing
+  state against its own 60-per-hour allowance.
+
 ## 0.2.0-dev.5
 
  - **REFACTOR**(assets): retire the two hand-kept generation counters for the supersession scope (pow-jz93) (#360).

@@ -108,7 +108,7 @@ final class _Sender implements FeedbackCommandSender {
 /// registered, and never polls — because nothing in this file ever asks the
 /// station's query to run it.
 final class _InertRuntime extends GitHubReconcilerRuntime {
-  _InertRuntime({required GitHubAppClient client})
+  _InertRuntime({required GitHubAppClient client, required super.coordinator})
     : super(
         installationId: 'installation',
         reconciler: GitHubReconciler(
@@ -119,7 +119,6 @@ final class _InertRuntime extends GitHubReconcilerRuntime {
           cursors: _Cursors(),
           emit: (_) async {},
         ),
-        coordinator: GitHubPollCoordinator(minimumSpacing: Duration.zero),
       );
 }
 
@@ -130,7 +129,8 @@ GitHubReconcilerRuntime _inert({
   required GitHubEventSink emit,
   required ExplorationTransport? transport,
   required GitHubReadClient? foreignClient,
-}) => _InertRuntime(client: client);
+  required GitHubPollCoordinator coordinator,
+}) => _InertRuntime(client: client, coordinator: coordinator);
 
 final _client = GitHubAppClient(
   config: GitHubAppConfig(
@@ -212,18 +212,22 @@ Seed _seatTree({
     ),
     child: InheritedSeed<ServiceBundle>(
       value: ServiceBundle(transport: flares),
-      child: Provider<GitHubAppClient>.value(
-        _client,
-        child: Provider<GitHubCursorStore>.value(
-          _Cursors(),
-          child: Provider<GitHubEventSink>.value(
-            (_) async {},
-            child: Provider<CiFeedbackProjection>.value(
-              projection,
-              child: const GitHubReconcilerAssets(
-                config: _config,
-                runtimeFactory: _inert,
-                child: _Leaf(),
+      // The station's ONE poll budget, mounted where a downstream station
+      // mounts it: above the repositories that share the installation.
+      child: GitHubPollCoordinatorAssets(
+        child: Provider<GitHubAppClient>.value(
+          _client,
+          child: Provider<GitHubCursorStore>.value(
+            _Cursors(),
+            child: Provider<GitHubEventSink>.value(
+              (_) async {},
+              child: Provider<CiFeedbackProjection>.value(
+                projection,
+                child: const GitHubReconcilerAssets(
+                  config: _config,
+                  runtimeFactory: _inert,
+                  child: _Leaf(),
+                ),
               ),
             ),
           ),
@@ -243,6 +247,7 @@ void main() {
       emit: (_) async {},
       transport: flares,
       foreignClient: null,
+      coordinator: GitHubPollCoordinator(minimumSpacing: Duration.zero),
     );
     runtime.reconciler.addObserver(
       kCiFeedbackDeliveryLeg,

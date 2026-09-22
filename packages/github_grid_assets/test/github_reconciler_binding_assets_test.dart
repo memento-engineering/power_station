@@ -48,19 +48,20 @@ final class _Cursors implements GitHubCursorStore {
 }
 
 final class _RecordingRuntime extends GitHubReconcilerRuntime {
-  _RecordingRuntime({required GitHubAppClient client})
-    : super(
-        installationId: 'installation',
-        reconciler: GitHubReconciler(
-          owner: 'owner',
-          repository: 'repository',
-          substation: 'substation',
-          client: client,
-          cursors: _Cursors(),
-          emit: (_) async {},
-        ),
-        coordinator: GitHubPollCoordinator(minimumSpacing: Duration.zero),
-      );
+  _RecordingRuntime({
+    required GitHubAppClient client,
+    required super.coordinator,
+  }) : super(
+         installationId: 'installation',
+         reconciler: GitHubReconciler(
+           owner: 'owner',
+           repository: 'repository',
+           substation: 'substation',
+           client: client,
+           cursors: _Cursors(),
+           emit: (_) async {},
+         ),
+       );
 }
 
 final class _Factory {
@@ -69,6 +70,7 @@ final class _Factory {
   final emits = <GitHubEventSink>[];
   final transports = <ExplorationTransport?>[];
   final runtimes = <_RecordingRuntime>[];
+  final coordinators = <GitHubPollCoordinator>[];
 
   GitHubReconcilerRuntime create({
     required GitHubReconcilerConfig config,
@@ -77,12 +79,14 @@ final class _Factory {
     required GitHubEventSink emit,
     required ExplorationTransport? transport,
     required GitHubReadClient? foreignClient,
+    required GitHubPollCoordinator coordinator,
   }) {
     configs.add(config);
     this.cursors.add(cursors);
     emits.add(emit);
     transports.add(transport);
-    final runtime = _RecordingRuntime(client: client);
+    coordinators.add(coordinator);
+    final runtime = _RecordingRuntime(client: client, coordinator: coordinator);
     runtimes.add(runtime);
     return runtime;
   }
@@ -309,6 +313,7 @@ final class _SeatFactory {
     required GitHubEventSink emit,
     required ExplorationTransport? transport,
     required GitHubReadClient? foreignClient,
+    required GitHubPollCoordinator coordinator,
   }) {
     final runtime = GitHubReconcilerRuntime(
       installationId: config.installationId,
@@ -320,7 +325,8 @@ final class _SeatFactory {
         cursors: cursors,
         emit: emit,
       ),
-      coordinator: GitHubPollCoordinator(minimumSpacing: Duration.zero),
+      coordinator: coordinator,
+      minimumSpacing: Duration.zero,
     );
     runtimes.add(runtime);
     return runtime;
@@ -493,7 +499,11 @@ Seed _registeredUnder(
       query ?? GitHubReconciliationQuery(),
     ],
   ),
-  child: child,
+  // The station's other live-seat rung: ONE poll coordinator over the
+  // repositories sharing an installation. Every tree in this file is a single
+  // seat, so it owns its own — a probe that wanted two would mount one rung
+  // over both, which is the point of putting it here and not in the seat.
+  child: GitHubPollCoordinatorAssets(child: child),
 );
 
 final _appConfig = GitHubAppConfig(

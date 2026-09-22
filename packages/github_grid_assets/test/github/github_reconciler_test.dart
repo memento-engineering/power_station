@@ -1156,6 +1156,7 @@ void main() {
         emit: (_) async {},
         transport: flares,
         foreignClient: null,
+        coordinator: GitHubPollCoordinator(minimumSpacing: Duration.zero),
       );
       await runtime.reconciler.reconcileOnce();
 
