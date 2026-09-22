@@ -160,6 +160,14 @@ once. The verb suites assert the rendering and that no stamp is written.
   not a passing row, so nothing reaches a stamp on a checker that went quiet.
 * Good, because the latent twin was fixed with the observed instance rather
   than left to surface later with no bead behind it.
+* Good, because an unevaluated row does not block a mount. Mount eligibility
+  carries only the re-derived approval revision out of a filing snapshot and
+  never its verdict, and it composes no evidence source at all — so the
+  validation-plan rows of every read it takes are unanswered by construction.
+  Filing completeness is the operator-side, pre-approval contract; mount
+  eligibility is the engine-side, pre-session one
+  (`power_station#the-refiner-exit-oracle-is-the-filing-verb`). Neither
+  subsumes the other, and no second admission predicate is added.
 * Bad, because it is a BREAKING change to a published type. Every consumer of a
   filing report — the filing verb, approve, unpark, the mount explainer, the
   GitHub self-approval note, and any station composing its own `FilingService`
