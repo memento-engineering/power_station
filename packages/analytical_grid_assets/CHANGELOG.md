@@ -1,3 +1,7 @@
+## 0.1.1-dev.6
+
+ - Bump "analytical_grid_assets" to `0.1.1-dev.6`.
+
 ## 0.1.1-dev.5
 
  - Bump "analytical_grid_assets" to `0.1.1-dev.5`.
