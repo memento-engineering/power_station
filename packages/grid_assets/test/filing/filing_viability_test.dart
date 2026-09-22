@@ -237,7 +237,7 @@ void main() {
     expect(cleanRow.passed, isTrue, reason: cleanRow.detail);
   });
 
-  test('filing viability resolves attached-store bead ids', () {
+  test('filing viability resolves only attached-store bead-id grammar', () {
     // `pow` is the current store, `tg` an attached one. `AC-3` and `ISO-8601`
     // are compounds under prefixes NOBODY holds a catalog for, so nothing can
     // resolve them and nothing may refuse them.
@@ -285,13 +285,55 @@ void main() {
     );
     final guessedRow = _row(guessed, FilingRequirement.beadReferences);
     expect(guessedRow.passed, isFalse);
-    expect(guessedRow.detail, contains('"pow-zzzz"'));
+    expect(guessedRow.detail, contains('"pow-zzzz" (description:8)'));
     expect(
       guessedRow.detail,
       contains(
         'mint it before citing it or cite an existing attached-store id',
       ),
     );
+
+    // The STORE's own grammar, not "prefix + any word". A lunar re-stamp
+    // sweep refused three beads over text that cites nothing: the `genesis`
+    // prefix in front of an English word, a fixture node path inside a code
+    // span, and a placeholder standing for "each child". Each refusal named
+    // its field and offset correctly, so the operator could reword — but
+    // rewording prose to dodge a scanner is the wrong cost. A store minting
+    // three-character roots never minted `genesis-derived`.
+    final prose = _report(
+      _bead(
+        description:
+            'The genesis prefix + genesis-derived downstream objects; the '
+            'fixture node path is `tg-1/agent`; tg-ersi.x is each child and '
+            'tg-ersi.4..9 is the range of them.',
+      ),
+      parsedPlanEvidence(
+        beadCatalogs: const {
+          'genesis': {'genesis-0p5'},
+          'tg': {'tg-ersi', 'tg-ersi.4'},
+        },
+        decisionRegisters: const {},
+      ),
+    );
+    final proseRow = _row(prose, FilingRequirement.beadReferences);
+    expect(proseRow.passed, isTrue, reason: proseRow.detail);
+    expect(proseRow.detail, contains('cites no bead id'));
+
+    // The same catalogs still RESOLVE what the store actually mints: a root at
+    // a length that store uses, and bd's decimal child of one.
+    final children = _report(
+      _bead(description: 'Follows tg-ersi and tg-ersi.4.'),
+      parsedPlanEvidence(
+        beadCatalogs: const {
+          'genesis': {'genesis-0p5'},
+          'tg': {'tg-ersi', 'tg-ersi.4'},
+        },
+        decisionRegisters: const {},
+      ),
+    );
+    final childrenRow = _row(children, FilingRequirement.beadReferences);
+    expect(childrenRow.passed, isTrue, reason: childrenRow.detail);
+    expect(childrenRow.detail, contains('tg-ersi.4'));
 
     // A store that could not answer is UNAVAILABLE, never proof of absence.
     final unavailable = _report(

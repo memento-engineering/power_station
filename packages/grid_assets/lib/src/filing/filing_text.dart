@@ -308,14 +308,33 @@ List<BeadTextSlice> absolutePathReferences(Bead bead) => [
 /// nothing may refuse it. That is also what excludes an `AC-3` acceptance
 /// record and a foreign compound such as `ISO-8601`.
 ///
+/// [catalogs] narrows the shape to the id grammar each store ACTUALLY mints,
+/// keyed by that same prefix. A prefix whose completed catalog is handed in
+/// accepts only a root spelled in lowercase ASCII alphanumerics AT A LENGTH
+/// THAT STORE USES, followed by bd's dotted child segments, which are decimal.
+/// That is what keeps a store prefix in front of an English word out of the
+/// set: a store minting three-character roots never minted `genesis-derived`,
+/// so the token is prose — and rewording prose to dodge a scanner is the wrong
+/// cost to charge an author.
+///
+/// A prefix with NO catalog keeps the BROAD shape, deliberately. The pre-read
+/// probe that decides whether a store must be read at all runs BEFORE any
+/// catalog exists, and a store that could not answer must stay LOUD rather
+/// than have its citations quietly cleared by a grammar nobody could derive.
+///
 /// Prefixes are matched longest-first so a store named `pow2` can never be
-/// claimed by `pow`, and a match continued by another hyphen is rejected
-/// outright — `pow-usbw-follow-up` is prose about a bead, not an id.
+/// claimed by `pow`. A candidate CONTINUED by a hyphen, a slash, an identifier
+/// character, or a dot opening anything but a child segment is rejected
+/// WHOLE: `pow-usbw-follow-up` is prose about a bead, `tg-1/agent` is a
+/// fixture node path, `tg-ersi.x` is a placeholder meaning each child, and
+/// `tg-ersi.4..9` is a range. A period that ends a sentence is still
+/// punctuation.
 List<BeadTextSlice> beadIdReferences(
   Bead bead, {
   required Set<String> prefixes,
+  Map<String, Set<String>> catalogs = const {},
 }) {
-  final pattern = _beadIdPattern(prefixes);
+  final pattern = _beadIdPattern(prefixes, catalogs);
   if (pattern == null) return const [];
   return [
     for (final field in kBeadWorkFields)
@@ -330,7 +349,40 @@ String beadIdPrefixOf(String id) {
   return hyphen <= 0 ? '' : id.substring(0, hyphen);
 }
 
-RegExp? _beadIdPattern(Set<String> prefixes) {
+/// The id body accepted under a prefix no catalog answered for.
+const String _broadBeadIdBody = r'[A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)*';
+
+/// A catalog root that can TEACH a length — bd mints lowercase ASCII
+/// alphanumerics, and a root spelled any other way is not evidence of a shape.
+final RegExp _catalogRootShape = RegExp(r'^[a-z0-9]+$');
+
+/// The id body [prefix] accepts, given whatever catalog answered for it.
+///
+/// An absent, empty or unusable catalog falls back to [_broadBeadIdBody]: a
+/// grammar derived from no ids at all would accept nothing, which reads as
+/// "this text cites nothing" and would clear every citation the store owns.
+String _beadIdBody(String prefix, Map<String, Set<String>> catalogs) {
+  final catalog = catalogs[prefix];
+  if (catalog == null || catalog.isEmpty) return _broadBeadIdBody;
+  final lengths = <int>{};
+  for (final id in catalog) {
+    if (beadIdPrefixOf(id) != prefix) continue;
+    final root = id.substring(prefix.length + 1).split('.').first;
+    if (_catalogRootShape.hasMatch(root)) lengths.add(root.length);
+  }
+  if (lengths.isEmpty) return _broadBeadIdBody;
+  // Longest first, for the reason the prefixes are: an ordered alternation
+  // must offer the widest root before a narrower one claims its head.
+  final ordered = lengths.toList()..sort((a, b) => b.compareTo(a));
+  final roots = ordered.map((length) => '[a-z0-9]{$length}').join('|');
+  return '(?:$roots)'
+      r'(?:\.\d+)*';
+}
+
+RegExp? _beadIdPattern(
+  Set<String> prefixes,
+  Map<String, Set<String>> catalogs,
+) {
   final usable = prefixes.where((prefix) => prefix.trim().isNotEmpty).toList();
   if (usable.isEmpty) return null;
   // Longest first: alternation is ordered, so `pow2` must be offered before
@@ -339,10 +391,13 @@ RegExp? _beadIdPattern(Set<String> prefixes) {
     final byLength = b.length.compareTo(a.length);
     return byLength != 0 ? byLength : a.compareTo(b);
   });
-  final alternation = usable.map(RegExp.escape).join('|');
+  final alternation = [
+    for (final prefix in usable)
+      '${RegExp.escape(prefix)}-${_beadIdBody(prefix, catalogs)}',
+  ].join('|');
   return RegExp(
     '(?<![A-Za-z0-9_-])(?:$alternation)'
-    r'-[A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)*(?![A-Za-z0-9_-])',
+    r'(?![A-Za-z0-9_/-])(?!\.[A-Za-z0-9_.])',
   );
 }
 
