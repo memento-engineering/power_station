@@ -1,5 +1,7 @@
 import 'dart:io';
 
+import 'package:beads_dart/beads_dart.dart';
+import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
 import 'real_bd_store.dart';
@@ -83,6 +85,19 @@ void main() {
           'test',
         ]);
 
+        // The READ is the other half of the proof. A write that landed
+        // somewhere else still exits zero; only reading the bead back out of
+        // THIS store's path — through the production client, not the fixture's
+        // own `bd` argv — shows the fresh store answering for itself.
+        final beads = await BdCliService(
+          ProcessBdRunner(workspaceRoot: fresh.path),
+        ).query('id=fresh-one');
+        expect(
+          [for (final bead in beads) bead.id],
+          ['fresh-one'],
+          reason: 'the fresh store answered for another store: $freshIdentity',
+        );
+
         expect(freshIdentity.storePath, isNot(staleIdentity.storePath));
         expect(freshIdentity.configPath, isNot(staleIdentity.configPath));
         expect(freshIdentity.rootPath, isNot(staleIdentity.rootPath));
@@ -108,6 +123,68 @@ void main() {
       },
       skip: skipWithoutBd,
     );
+
+    test('a store bd does not answer for is refused at creation', () async {
+      // The OTHER capture, and the one that cost this bead its rounds: not a
+      // stale server, but a `.beads/` REDIRECT stub in a git work tree above
+      // the store. That is a per-bead grid worktree exactly, and under one bd
+      // answers out of the redirect's target however the store is named —
+      // measured as `config get issue_prefix` saying `(not set)` and the next
+      // `create` refusing with `issue_prefix config is missing`, six filing
+      // tests at a time, naming neither store. Here it is built on purpose,
+      // so the refusal is measured rather than described.
+      final hostile = Directory.systemTemp.createTempSync('filing-captured-');
+      final hostilePath = hostile.resolveSymbolicLinksSync();
+      addTearDown(() {
+        if (hostile.existsSync()) hostile.deleteSync(recursive: true);
+      });
+
+      // The target has to be a store bd can actually resolve: bd falls
+      // through a redirect that names nothing, and then there is no capture
+      // to catch. It is minted BEFORE the stub exists, so it is not captured
+      // itself.
+      final decoy = await bdStore(
+        prefix: 'decoy',
+        at: Directory(p.join(hostile.path, 'decoy')),
+      );
+      final ambient = Directory(p.join(hostile.path, '.beads'))
+        ..createSync(recursive: true);
+      File(p.join(ambient.path, 'metadata.json')).writeAsStringSync(
+        File(p.join(decoy.path, '.beads', 'metadata.json')).readAsStringSync(),
+      );
+      File(
+        p.join(ambient.path, 'redirect'),
+      ).writeAsStringSync('decoy/.beads\n');
+      // The git work tree is load-bearing: without one the same stub is
+      // ignored and bd resolves the store correctly.
+      final git = await Process.run('git', const [
+        'init',
+        '--initial-branch=main',
+      ], workingDirectory: hostile.path);
+      expect(git.exitCode, 0, reason: '${git.stdout}${git.stderr}');
+
+      await expectLater(
+        bdStore(
+          prefix: 'captured',
+          at: Directory(p.join(hostile.path, 'store')),
+        ),
+        throwsA(
+          isA<StateError>().having(
+            (error) => error.message,
+            'message',
+            allOf(
+              contains('is not the store bd answers for'),
+              contains(p.join(hostilePath, 'store')),
+              contains('"captured"'),
+              contains('bd_version=bd version'),
+            ),
+          ),
+        ),
+        reason:
+            'a captured store must be refused where it is built, not six '
+            'filing failures later',
+      );
+    }, skip: skipWithoutBd);
 
     test(
       'AC-3 — runBd failures name bd and bound server identity',

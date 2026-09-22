@@ -361,9 +361,17 @@ _provisionedBdRepo({
 
 /// `bd show <work bead>` run from [workingDirectory], REPORTED rather than
 /// asserted — the absent-redirect leg is a control that must fail.
+///
+/// Spawned IN that directory as well as pointed at it: `-C` is the subject
+/// here — the walk it performs is what the redirect steers — but it is not the
+/// isolation it reads as. Measured on bd 1.1.0, a `.beads/` redirect above the
+/// SPAWNING process wins over `-C`, and this suite runs from a per-bead grid
+/// worktree that has exactly one, so without the working directory this probe
+/// answers out of the ambient checkout's store instead of the fixture's.
 Future<ProcessResult> _bdShow(String workingDirectory) => Process.run(
   'bd',
   ['-C', workingDirectory, 'show', _workBead, '--json'],
+  workingDirectory: workingDirectory,
   environment: {...Platform.environment, 'BD_NON_INTERACTIVE': '1'},
 );
 
@@ -376,6 +384,7 @@ Future<Map<String, Object?>> _bdInfo(String workingDirectory) async {
   final result = await Process.run(
     'bd',
     ['-C', workingDirectory, 'info', '--json'],
+    workingDirectory: workingDirectory,
     environment: {...Platform.environment, 'BD_NON_INTERACTIVE': '1'},
   );
   expect(

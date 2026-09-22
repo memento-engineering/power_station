@@ -8,6 +8,11 @@ import 'package:test/test.dart';
 // suite while every branch of the fence it depends on is proved here — with
 // fakes, against no bd and no Dolt.
 import 'ci_rework_mint_acceptance_test.dart' as fixture;
+// The census, the PID parse and the exit fence are no longer this fixture's —
+// they are the workspace's one proxied-bd harness, and they are proved here
+// against it directly so this suite cannot pass on a re-duplicated copy.
+import '../../../grid_assets/test/support/proxied_bd_test_support.dart'
+    as proxied_bd;
 
 const _workspace = '/tmp/ci-rework-mint-fake';
 const _lockRoot = '$_workspace/grid/.grid/.beads/dolt';
@@ -16,8 +21,8 @@ const _proxyChildLock = '$_lockRoot/proxy-child.lock';
 const _proxyPid = '$_lockRoot/proxy.pid';
 const _proxyChildPid = '$_lockRoot/proxy-child.pid';
 
-/// A [fixture.WorkspaceProcessCensus] with only the arm under test filled.
-fixture.WorkspaceProcessCensus _census({
+/// A [proxied_bd.WorkspaceProcessCensus] with only the arm under test filled.
+proxied_bd.WorkspaceProcessCensus _census({
   List<({int pid, String command})> stores = const [],
   List<int> residents = const [],
 }) => (stores: stores, residents: residents);
@@ -96,7 +101,7 @@ void main() {
         'p5678\n';
 
     expect(
-      fixture.parseLsofPids(output, selfPid: 4242),
+      proxied_bd.parseLsofPids(output, selfPid: 4242),
       orderedEquals(<int>[1234, 5678]),
     );
   });
@@ -104,7 +109,7 @@ void main() {
   test('a missing lsof censuses nothing rather than refusing', () async {
     var invoked = 0;
 
-    final residents = await fixture.workspaceResidents(
+    final residents = await proxied_bd.workspaceResidents(
       _workspace,
       selfPid: 4242,
       runProcess: (executable, arguments) async {
@@ -125,8 +130,8 @@ void main() {
     // bd has written a PID both ways, and the two files name DIFFERENT
     // processes: `proxy.pid` the bd proxy, `proxy-child.pid` the Dolt server it
     // supervises. The fence waits out both or it waits out nothing.
-    final pids = fixture.proxiedStateStorePids(
-      _workspace,
+    final pids = proxied_bd.proxiedStateStorePids(
+      pidRootPath: _lockRoot,
       readPidFile: (path) {
         read.add(path);
         return path.endsWith('proxy-child.pid')
@@ -139,7 +144,10 @@ void main() {
     expect(pids, unorderedEquals(<int>[68187, 68385]));
 
     expect(
-      fixture.proxiedStateStorePids(_workspace, readPidFile: (_) => null),
+      proxied_bd.proxiedStateStorePids(
+        pidRootPath: _lockRoot,
+        readPidFile: (_) => null,
+      ),
       isEmpty,
       reason: 'an absent pid file is a store that is already down',
     );
@@ -147,8 +155,8 @@ void main() {
 
   test('a pid file present but unreadable refuses by name', () async {
     expect(
-      () => fixture.proxiedStateStorePids(
-        _workspace,
+      () => proxied_bd.proxiedStateStorePids(
+        pidRootPath: _lockRoot,
         readPidFile: (path) =>
             path.endsWith('proxy-child.pid') ? '{"port":63237}' : '68187',
       ),
@@ -202,7 +210,7 @@ void main() {
     // only useful report of one names it. The two arms carry DIFFERENT pids on
     // purpose: a store the argv census caught, and a resident only a cwd
     // names.
-    Future<fixture.WorkspaceProcessCensus> census() async {
+    Future<proxied_bd.WorkspaceProcessCensus> census() async {
       censuses++;
       return (
         stores: [(pid: 68187, command: 'dolt sql-server --config $_lockRoot')],
@@ -331,7 +339,7 @@ void main() {
     // workspace over the baseline and a bd client still working under the
     // path, both gone a sample later. It is a line on stderr, not a failure.
     final counts = <int>[9, 8];
-    final censuses = <fixture.WorkspaceProcessCensus>[
+    final censuses = <proxied_bd.WorkspaceProcessCensus>[
       _census(residents: const [68385]),
       _census(),
     ];
@@ -419,7 +427,7 @@ void main() {
   );
 
   test('an empty census clears the delete to run', () {
-    fixture.expectEmptyWorkspaceProcessCensus(
+    proxied_bd.expectEmptyWorkspaceProcessCensus(
       _census(),
       workspacePath: _workspace,
       phase: 'before delete',
@@ -429,7 +437,7 @@ void main() {
   test('a store still holding the workspace refuses by name', () {
     // The arm the stop fence owns: a Dolt server the delete would race.
     expect(
-      () => fixture.expectEmptyWorkspaceProcessCensus(
+      () => proxied_bd.expectEmptyWorkspaceProcessCensus(
         _census(
           stores: [
             (pid: 68187, command: 'dolt sql-server --config $_lockRoot'),
@@ -458,7 +466,7 @@ void main() {
     // caught on the far side of the absence window, where the phase is the
     // whole report — the same census reads clean before the delete.
     expect(
-      () => fixture.expectEmptyWorkspaceProcessCensus(
+      () => proxied_bd.expectEmptyWorkspaceProcessCensus(
         _census(residents: const [68385]),
         workspacePath: _workspace,
         phase: 'after absence window',
@@ -494,7 +502,7 @@ void main() {
     var ticks = 0;
     final waits = <Duration>[];
 
-    await fixture.waitForProxiedStateStoreExit(
+    await proxied_bd.waitForProxiedStateStoreExit(
       survivingPids: () async => pidResidue[pidPolls++],
       heldLockPaths: () async => lockResidue[lockPolls++],
       now: () => start.add(Duration(milliseconds: 50 * ticks++)),
@@ -517,7 +525,7 @@ void main() {
     var ticks = 0;
 
     await expectLater(
-      fixture.waitForProxiedStateStoreExit(
+      proxied_bd.waitForProxiedStateStoreExit(
         survivingPids: () async => {68187},
         heldLockPaths: () async => {_proxyChildLock, _proxyLock},
         now: () => clock[ticks++],
