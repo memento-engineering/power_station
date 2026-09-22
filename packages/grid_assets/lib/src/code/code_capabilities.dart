@@ -171,6 +171,7 @@ typedef _ResolvedAgentSelection = ({
   AgentEnvironment environment,
   String? model,
   Uri? endpoint,
+  AgentTier tier,
 });
 
 /// What the ROUND-COMMIT fence captured at its effect edge, so the git await
@@ -188,6 +189,7 @@ typedef _ResolvedAgentRun = ({
   AgentBrief brief,
   String? model,
   Uri? endpoint,
+  AgentTier tier,
 });
 
 /// The IMPLEMENT capability — spawn the coding agent in the bead's workspace,
@@ -305,8 +307,12 @@ class AgentCapability extends ProcessCapability {
         buildBuiltinEnvironmentRegistry();
     final siteBinding =
         context.getInheritedSeedOfExactType<SiteBinding>() ?? SiteBinding.none;
+    // DECLARED ONCE, then carried: the rung that picks the model is the same
+    // rung a channel adapter picks a reasoning effort on, so it travels with
+    // the selection instead of being restated at the launch.
+    const tier = AgentTier.frontier;
     final config = resolveAgentConfig(
-      tier: AgentTier.frontier,
+      tier: tier,
       ambient: ambient,
       beadMetadata: bead.metadata,
       stepParams: args.params,
@@ -322,6 +328,7 @@ class AgentCapability extends ProcessCapability {
         name: config.harness,
         environment: environment,
       ),
+      tier: tier,
     );
   }
 
@@ -363,6 +370,7 @@ class AgentCapability extends ProcessCapability {
       ),
       model: selected.model,
       endpoint: selected.endpoint,
+      tier: selected.tier,
     );
   }
 
@@ -489,6 +497,7 @@ class AgentCapability extends ProcessCapability {
       workspace: run.workspace,
       model: run.model,
       endpoint: run.endpoint,
+      tier: run.tier,
       usageOut: usageReportPath(args.nodePath),
     );
   }

@@ -242,9 +242,33 @@ void main() {
     ]) {
       final source = _source(relative);
       expect(source, isNot(contains('AgentRole')), reason: relative);
-      expect(source, isNot(contains('AgentTier')), reason: relative);
       expect(source, isNot(contains('ModelTiers')), reason: relative);
     }
+    // The tier reaches `acp_session_adapter.dart` for ONE reason — an ACP agent
+    // may name the reasoning effort inside the model id, so MODEL SELECTION
+    // needs the seat's rung — and the whole-file grep can no longer tell that
+    // seam from this one. It is taken where it still says what it means: the
+    // files that select no model at all, plus, below, the adapter's own
+    // authorization half.
+    for (final relative in const <String>[
+      'lib/src/agent/permission_policy.dart',
+      'lib/src/agent/acp_bridge.dart',
+      'lib/src/agent/seat_environments.dart',
+    ]) {
+      expect(_source(relative), isNot(contains('AgentTier')), reason: relative);
+    }
+    final adapterSource = _source('lib/src/agent/acp_session_adapter.dart');
+    final opens = adapterSource.indexOf(
+      'AgentPermissionCapability acpPermissionCapability',
+    );
+    final closes = adapterSource.indexOf('class AcpSessionAdapter');
+    expect(opens, greaterThan(-1));
+    expect(closes, greaterThan(opens));
+    // The normalizer, the offered-outcome projection and the client that
+    // answers an ask: no rung, no effort, no spend axis of any kind.
+    final authorization = adapterSource.substring(opens, closes);
+    expect(authorization, isNot(contains('AgentTier')));
+    expect(authorization, isNot(contains('tier')));
 
     // The FENCE is deferred, not invented: Stage 3 (`tg-lt0s`) adds it to both
     // records and to the exact-match guard. Until then neither record carries

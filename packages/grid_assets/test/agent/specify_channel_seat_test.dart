@@ -35,6 +35,9 @@ class _RecordedCodexAdapter extends AcpSessionAdapter {
   /// The telemetry path the capability handed the adapter.
   String? capturedUsageOut;
 
+  /// The seat rung the capability handed the adapter.
+  AgentTier? capturedTier;
+
   @override
   RuntimeConfig launch({
     required AgentEnvironment environment,
@@ -42,8 +45,10 @@ class _RecordedCodexAdapter extends AcpSessionAdapter {
     String? model,
     Uri? endpoint,
     String? usageOut,
+    AgentTier tier = AgentTier.frontier,
   }) {
     capturedUsageOut = usageOut;
+    capturedTier = tier;
     return RuntimeConfig(
       workDir: workspace.workspaceDir,
       command: 'npx',
@@ -166,6 +171,10 @@ void main() {
     expect(spec.command, 'npx');
     expect(spec.args, contains('@agentclientprotocol/codex-acp@1.6.2'));
     expect(spec.cwd, '/w/tg-1');
+    // The seat's DECLARED rung crosses the process boundary with the pin: the
+    // pin is bare, so the bridge needs the tier to pick the effort variant a
+    // codex catalog actually offers.
+    expect(spec.tier, AgentTier.frontier);
     expect(
       spec.usageOut,
       '.grid/telemetry/tg-1_spec_review_specify.usage.json',
@@ -220,6 +229,9 @@ void main() {
       adapter.capturedUsageOut,
       '.grid/telemetry/tg-1_spec_review_specify.usage.json',
     );
+    // The launch seam carries the rung, not just the pin: a circuit launch
+    // cannot drop the seat-owned effort on the way to the adapter.
+    expect(adapter.capturedTier, AgentTier.frontier);
 
     // The bridge's own FT-2 write, stood in for here: the channel path must
     // recover usage AND the carried spec through the identical readers.

@@ -9,6 +9,7 @@ import 'package:grid_runtime/grid_runtime.dart';
 import 'agent_environment.dart';
 import 'agent_harness.dart';
 import 'captured_output.dart';
+import 'model_tier.dart';
 import 'permission_policy.dart';
 import 'usage_report.dart';
 
@@ -111,12 +112,20 @@ abstract interface class AgentSessionAdapter {
   /// argv transport gets this through its `sh -c` wrapper; a channel harness
   /// has no wrapper, so the adapter carries it to whatever writes the
   /// envelope. An adapter with no telemetry surface IGNORES it.
+  ///
+  /// [tier] is the rung the SPAWN SITE declares (`model_tier.dart`), carried
+  /// here because [model] alone cannot say it: a harness may name one model per
+  /// reasoning effort while a seat pins the bare id, and the effort belongs to
+  /// the seat, not to the pin. An adapter whose protocol has no effort axis
+  /// IGNORES it. It defaults to [AgentTier.frontier] — the rung a direct launch
+  /// (a terminal occupying a seat) has always ridden.
   RuntimeConfig launch({
     required AgentEnvironment environment,
     required Workspace workspace,
     String? model,
     Uri? endpoint,
     String? usageOut,
+    AgentTier tier = AgentTier.frontier,
   });
 
   /// Encodes the initial brief for delivery over the channel.
@@ -510,6 +519,11 @@ class AgentSession implements ProcessSession {
 /// spawned a channel harness as a one-turn process with an EMPTY prompt
 /// segment (`PromptMode.none`), so the brief was never delivered at all.
 ///
+/// [tier] is the seat's DECLARED rung, required here rather than defaulted: a
+/// spawn site already names the tier it resolves its model on, and a channel
+/// adapter that selects a reasoning effort needs the same fact rather than a
+/// second guess at it.
+///
 /// GUARD, LOUD: a channel adapter that does not launch [Lifecycle.longLived]
 /// throws — the brief arrives AFTER startup, so a one-turn channel launch can
 /// only ever produce a briefless run.
@@ -518,6 +532,7 @@ RuntimeConfig spawnThroughSessionAdapter({
   required AgentEnvironment environment,
   required AgentBrief brief,
   required Workspace workspace,
+  required AgentTier tier,
   String? model,
   String? usageOut,
   Uri? endpoint,
@@ -541,6 +556,7 @@ RuntimeConfig spawnThroughSessionAdapter({
         model: model,
         endpoint: endpoint,
         usageOut: usageOut,
+        tier: tier,
       );
   if (config.lifecycle != Lifecycle.longLived) {
     throw StateError('channel adapter "$adapterId" must launch longLived');

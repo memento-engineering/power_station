@@ -582,6 +582,7 @@ typedef _ResolvedSpecifyRun = ({
   AgentBrief brief,
   String? model,
   Uri? endpoint,
+  AgentTier tier,
 });
 
 class SpecifyCapability extends ProcessCapability {
@@ -706,8 +707,11 @@ class SpecifyCapability extends ProcessCapability {
         buildBuiltinEnvironmentRegistry();
     final siteBinding =
         context.getInheritedSeedOfExactType<SiteBinding>() ?? SiteBinding.none;
+    // DECLARED ONCE, then carried: the rung that picks the model is the same
+    // rung a channel adapter picks a reasoning effort on.
+    const tier = AgentTier.frontier;
     final config = resolveAgentConfig(
-      tier: AgentTier.frontier,
+      tier: tier,
       ambient: ambient,
       beadMetadata: bead.metadata,
       stepParams: args.params,
@@ -748,6 +752,7 @@ class SpecifyCapability extends ProcessCapability {
         name: config.harness,
         environment: environment,
       ),
+      tier: tier,
     );
   }
 
@@ -767,6 +772,7 @@ class SpecifyCapability extends ProcessCapability {
       workspace: run.workspace,
       model: run.model,
       endpoint: run.endpoint,
+      tier: run.tier,
       // CAPTURE-ONLY usage telemetry (FT-2), same as the build agent.
       usageOut: usageReportPath(args.nodePath),
     );

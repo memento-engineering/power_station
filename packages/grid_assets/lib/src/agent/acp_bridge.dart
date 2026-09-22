@@ -262,11 +262,13 @@ class _AcpBridgeDriver {
       want: want,
       available: offered,
       current: selectedModel,
+      // The SEAT's rung, carried from the launch: the pin is bare, so this is
+      // what picks the reasoning-effort variant the agent actually offers.
+      tier: spec.tier,
     );
     if (resolved == null) {
       throw StateError(
-        'ACP agent does not offer pinned model "$want" '
-        '(available: ${offered.join(', ')})',
+        acpModelRefusal(want: want, available: offered, tier: spec.tier),
       );
     }
     if (resolved != selectedModel) {

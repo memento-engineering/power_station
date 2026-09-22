@@ -273,6 +273,7 @@ Future<_BridgeResult> _runBridge({
   bool cancelOnProgress = false,
   String? usageOut,
   String attemptId = 'attempt-bridge',
+  AgentTier tier = AgentTier.frontier,
   AgentPermissionDecision? Function(AgentPermissionRequest) station =
       _headlessStation,
 }) async {
@@ -296,6 +297,7 @@ Future<_BridgeResult> _runBridge({
       baseBranch: 'main',
     ),
     usageOut: usageOut,
+    tier: tier,
   );
   final process = await Process.start(
     config.command,
@@ -511,7 +513,9 @@ void main() {
         expect(payload, containsPair('tokensIn', '22'));
         expect(payload, containsPair('tokensOut', '14'));
         expect(payload, containsPair('numTurns', '2'));
-        expect(payload, containsPair('model', 'gpt-5.6-sol[xhigh]'));
+        // The seat is the FRONTIER rung and the pin is bare, so the agent's own
+        // current selection (`[xhigh]`) loses to the rung's variant.
+        expect(payload, containsPair('model', 'gpt-5.6-sol[high]'));
         expect(run.reports.whereType<AllocationFailed>(), isEmpty);
         final permissions = run.trace
             .readAsLinesSync()
@@ -1068,27 +1072,79 @@ void main() {
         'gpt-5.6-sol[xhigh]',
         matches(RegExp(r'^gpt-5\.6-sol\[[a-z]+\]$')),
       );
+      // THE CATALOG codex 0.155.1 started offering, verbatim: six efforts of
+      // the pinned base plus efforts of two others. Before the seat's rung
+      // picked among them the bare pin resolved to nothing and every codex
+      // seat died at session setup.
+      const codex = <String>[
+        'gpt-5.6-sol[low]',
+        'gpt-5.6-sol[medium]',
+        'gpt-5.6-sol[high]',
+        'gpt-5.6-sol[xhigh]',
+        'gpt-5.6-sol[max]',
+        'gpt-5.6-sol[ultra]',
+        'gpt-5.6-terra[low]',
+        'gpt-5.6-terra[high]',
+        'gpt-5.6-luna[medium]',
+      ];
+      // The table is DECLARED and TOTAL: every rung names its effort, so no
+      // rung can fall through to a guess at the pin's own text.
+      expect(kAcpEffortSuffixByTier, <AgentTier, String>{
+        AgentTier.cheap: '[low]',
+        AgentTier.mid: '[medium]',
+        AgentTier.frontier: '[high]',
+      });
+      expect(kAcpEffortSuffixByTier.keys, AgentTier.values);
+      for (final (tier, expected) in const <(AgentTier, String)>[
+        (AgentTier.cheap, 'gpt-5.6-sol[low]'),
+        (AgentTier.mid, 'gpt-5.6-sol[medium]'),
+        (AgentTier.frontier, 'gpt-5.6-sol[high]'),
+      ]) {
+        expect(
+          resolveAcpModelId(want: 'gpt-5.6-sol', available: codex, tier: tier),
+          expected,
+          reason: tier.name,
+        );
+      }
+      // A base-matching `current` at the WRONG effort is the agent's default,
+      // not the seat's declaration, so the rung's variant wins over it.
+      expect(
+        resolveAcpModelId(
+          want: 'gpt-5.6-sol',
+          available: codex,
+          current: 'gpt-5.6-sol[ultra]',
+          tier: AgentTier.frontier,
+        ),
+        'gpt-5.6-sol[high]',
+      );
+      // Already satisfied — the bare pin itself, or the rung's own variant —
+      // keeps the agent where it is.
+      expect(
+        resolveAcpModelId(
+          want: 'gpt-5.6-sol',
+          available: codex,
+          current: 'gpt-5.6-sol[high]',
+          tier: AgentTier.frontier,
+        ),
+        'gpt-5.6-sol[high]',
+      );
+      // COMPATIBILITY, unchanged by the rung: an exact offered id, then a sole
+      // variant of the base.
       expect(
         resolveAcpModelId(
           want: 'model',
           available: const <String>['model', 'model[high]'],
           current: 'other',
+          tier: AgentTier.cheap,
         ),
         'model',
       );
       expect(
         resolveAcpModelId(
           want: 'model',
-          available: const <String>['model[low]', 'model[high]'],
-          current: 'model[high]',
-        ),
-        'model[high]',
-      );
-      expect(
-        resolveAcpModelId(
-          want: 'model',
           available: const <String>['model[low]'],
           current: 'other',
+          tier: AgentTier.frontier,
         ),
         'model[low]',
       );
@@ -1096,16 +1152,35 @@ void main() {
         resolveAcpModelId(
           want: 'missing',
           available: const <String>['model[low]'],
+          tier: AgentTier.frontier,
+        ),
+        isNull,
+      );
+      // AMBIGUOUS AND UNMATCHED: two efforts, neither this rung's. Riding one
+      // anyway would spend a rung the seat never declared, so it refuses — and
+      // says which rung asked, what that rung needs, and what was offered.
+      expect(
+        resolveAcpModelId(
+          want: 'model',
+          available: const <String>['model[low]', 'model[xhigh]'],
+          current: 'other',
+          tier: AgentTier.frontier,
         ),
         isNull,
       );
       expect(
-        resolveAcpModelId(
-          want: 'model',
-          available: const <String>['model[low]', 'model[high]'],
-          current: 'other',
+        acpModelRefusal(
+          want: 'gpt-5.6-sol',
+          available: const <String>['gpt-5.6-sol[low]', 'gpt-5.6-sol[medium]'],
+          tier: AgentTier.frontier,
         ),
-        isNull,
+        allOf(
+          contains('gpt-5.6-sol'),
+          contains('frontier'),
+          contains('[high]'),
+          contains('[low]'),
+          contains('[medium]'),
+        ),
       );
 
       final ordered = await _runBridge(
@@ -1152,18 +1227,38 @@ void main() {
         allOf(contains('gpt-5.6-sol'), contains('other')),
       );
 
+      // A LIVE cheap seat against the effort-suffixed catalog: the rung, not
+      // the agent's current selection, decides which variant the child is set
+      // to — proof the tier survives the spec handoff into the bridge process.
+      final cheap = await _runBridge(
+        probePath: probePath,
+        probeArgs: const <String>[
+          '--identity=model-cheap',
+          '--models=gpt-5.6-sol[low],gpt-5.6-sol[high]',
+          '--current=gpt-5.6-sol[high]',
+        ],
+        tier: AgentTier.cheap,
+      );
+      expect(cheap.frame, containsPair('kind', 'completed'));
+      expect(cheap.frame, containsPair('model', 'gpt-5.6-sol[low]'));
+
       final ambiguous = await _runBridge(
         probePath: probePath,
         probeArgs: const <String>[
           '--identity=model-ambiguous',
-          '--models=gpt-5.6-sol[low],gpt-5.6-sol[high]',
+          '--models=gpt-5.6-sol[low],gpt-5.6-sol[medium]',
           '--current=other',
         ],
       );
       expect(ambiguous.frame, containsPair('kind', 'failed'));
       expect(
         ambiguous.frame['reason'],
-        allOf(contains('[low]'), contains('[high]')),
+        allOf(
+          contains('frontier'),
+          contains('[high]'),
+          contains('[low]'),
+          contains('[medium]'),
+        ),
       );
     },
     // NO competing deadline: `_fixtureLivenessCeiling` is the only tripwire.
