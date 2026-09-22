@@ -1,4 +1,4 @@
-## Unreleased
+## 0.7.0-dev.6
 
 - The agent LANE is now the unit of environment diagnosis, and an environment fault is no longer
   charged to the work. A session-setup failure the harness declares BEFORE its first turn — a
@@ -26,6 +26,9 @@
   fields `kAgentFailurePhaseField`, `kAgentSetupPhase`, `kAgentFailurePinField`,
   `kAgentFailureOfferedField`, `kAgentFailureResolverVerdictField`, `encodeOfferedField` and
   `decodeOfferedField`.
+
+Commits:
+ - **FIX**(agent): classify pre-turn ACP exits as infra (#367).
 
 ## 0.7.0-dev.5
 

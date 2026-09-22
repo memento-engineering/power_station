@@ -1,4 +1,4 @@
-## Unreleased
+## 0.2.0-dev.6
 
 - Breaking: a station composing a LIVE GitHub reconciler must now mount exactly one
   `GitHubPollCoordinatorAssets` above its repository fan-out, and a live repository without it
@@ -15,6 +15,9 @@
   different minimum spacings, adjacent starts use the maximum of the pair. The foreign
   issue-watch lane is untouched: it keeps its own per-seat coordinator, credential and spacing
   state against its own 60-per-hour allowance.
+
+Commits:
+ - **FIX**(github): share poll coordinator at station scope (#368).
 
 ## 0.2.0-dev.5
 
