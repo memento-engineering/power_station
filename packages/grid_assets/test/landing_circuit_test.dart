@@ -1125,15 +1125,20 @@ void main() {
     test('a dash-bounded timeout reaps its child process group, and reports '
         'timedOut', () async {
       final marker = p.join(dir.path, 'child-alive');
-      final result = await dash.run(
-        workingDirectory: dir.path,
-        // A GRANDCHILD of the launcher: killing the launcher alone leaves this
-        // one running, which is the leak the process group exists to close.
-        command: 'sh -c "printf started > \'$marker\'; sleep 45"',
-        // Wide enough for the launcher's own VM start (about a second and a
-        // half cold, slower under a loaded full suite) to reach the plan.
-        deadline: const Duration(seconds: 10),
-      );
+      final groups = _RecordingGroups();
+      final result =
+          await SystemShellRunner(
+            shellExecutable: '/bin/dash',
+            groups: groups,
+          ).run(
+            workingDirectory: dir.path,
+            // A GRANDCHILD of the launcher: killing the launcher alone leaves this
+            // one running, which is the leak the process group exists to close.
+            command: 'sh -c "printf started > \'$marker\'; sleep 45"',
+            // Wide enough for the launcher's own VM start (about a second and a
+            // half cold, slower under a loaded full suite) to reach the plan.
+            deadline: const Duration(seconds: 10),
+          );
       expect(result.timedOut, isTrue);
       expect(result.ok, isFalse);
       expect(
@@ -1150,7 +1155,22 @@ void main() {
         0,
         reason: 'the whole process GROUP was terminated, not just the shell',
       );
-    });
+      // The kill went through grid_runtime's terminateGroup escalation, not a
+      // hand-rolled group SIGKILL: a hand-rolled one sends SIGKILL alone, so
+      // the SIGTERM rung is what distinguishes the seam.
+      expect(groups.resolved, hasLength(1));
+      expect(
+        groups.signals.map((signal) => signal.$2),
+        contains(ProcessSignal.sigterm),
+      );
+      expect(
+        groups.signals.every((signal) => signal.$1 == groups.resolved.single),
+        isTrue,
+        reason:
+            'every signal went to the launcher-LED pgid, never the '
+            'station\'s own group',
+      );
+    }, timeout: const Timeout(Duration(seconds: 90)));
   });
 
   group('buildCircuitReceipt', () {
@@ -1409,4 +1429,44 @@ class _ConflictingRebaseRunner implements GitRunner {
   List<String> get subcommands => [
     for (final c in calls) c.args.isNotEmpty ? c.args.first : '',
   ];
+}
+
+/// A [ProcessGroupController] that DELEGATES to the real system seam and
+/// records what the bounded runner's deadline asked of it.
+///
+/// Not a fake outcome: the reap under test is a REAL process-lifetime probe, so
+/// the recorder must really resolve and really signal. What it adds is
+/// observability — which pgid was resolved, and which signals reached it — so
+/// the probe can prove the deadline escalates through `terminateGroup` rather
+/// than re-deriving a group kill of its own.
+final class _RecordingGroups implements ProcessGroupController {
+  static const ProcessGroupController _real = SystemProcessGroupController();
+
+  /// Every pgid the runner resolved, in order.
+  final List<int?> resolved = [];
+
+  /// Every `(pgid, signal)` the runner sent to a GROUP, in order.
+  final List<(int, ProcessSignal)> signals = [];
+
+  @override
+  Future<int?> resolvePgid(int pid) async {
+    final pgid = await _real.resolvePgid(pid);
+    resolved.add(pgid);
+    return pgid;
+  }
+
+  @override
+  bool processAlive(int pid) => _real.processAlive(pid);
+
+  @override
+  Future<List<int>> groupMembers(int pgid) => _real.groupMembers(pgid);
+
+  @override
+  bool signalGroup(int pgid, ProcessSignal signal) {
+    signals.add((pgid, signal));
+    return _real.signalGroup(pgid, signal);
+  }
+
+  @override
+  int currentGroupId() => _real.currentGroupId();
 }

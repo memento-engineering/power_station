@@ -93,17 +93,28 @@ class ShellRunResult {
 /// `validation_process.dart` launcher, which makes itself a process-group
 /// LEADER before it starts the plan as its own attached child — so the plan
 /// and everything it spawns share the launcher's group, and on the deadline
-/// that whole group is signalled through the launcher's pid.
+/// that whole group is terminated through the launcher's pid.
 ///
 /// No shell job control is involved: `set -m` under dash (CI's `sh`) with no
 /// terminal prints a warning into the very output the lane captures, and the
 /// launcher's `setsid()` needs neither a terminal nor a word on stderr.
+///
+/// **One seam for both halves of the group.** `grid_runtime` ships the
+/// create-half and the kill-half of a process group as ONE pair over ONE
+/// [ProcessGroupController]: the launcher leads its group with
+/// [establishStationProcessGroup], and the deadline here ends that group with
+/// [terminateGroup] — the same SIGTERM → grace → SIGKILL escalation, the same
+/// [GroupTerminateResult.refusedUnsafe] fallback, and the same pgid resolution
+/// that `RuntimeProvider` and the compute bound already reap through. Nothing
+/// about process-group identity or signalling is re-derived here.
 class SystemShellRunner implements ShellRunner {
   /// Creates the runner. [shellExecutable] is the shell every plan runs
-  /// under; [dartExecutable] the VM the bounded path starts its launcher with.
+  /// under; [dartExecutable] the VM the bounded path starts its launcher with;
+  /// [groups] the process-group seam the deadline reaps through.
   const SystemShellRunner({
     this.shellExecutable = 'sh',
     this.dartExecutable = 'dart',
+    this.groups = const SystemProcessGroupController(),
   });
 
   /// The shell a plan runs under, as `<shellExecutable> -c <plan>`.
@@ -112,6 +123,11 @@ class SystemShellRunner implements ShellRunner {
   /// The Dart executable the bounded path starts the process-group launcher
   /// with.
   final String dartExecutable;
+
+  /// The process-group seam a bounded run's deadline resolves and signals the
+  /// plan's group through — the house `ProcessGroupController` (Fakes, not
+  /// mocks: a probe injects a recorder to observe the escalation).
+  final ProcessGroupController groups;
 
   /// The process-group launcher a bounded run starts in place of the shell.
   static final Uri _launcherLibrary = Uri.parse(
@@ -190,21 +206,13 @@ class SystemShellRunner implements ShellRunner {
     ]);
     var timedOut = false;
     var launcherExited = false;
+    var reaped = Future<void>.value();
     // Armed until the output is DRAINED, not merely until the launcher exits:
     // a descendant the plan backgrounded still holds the pipes, and the group
     // signal is what releases them.
     final timer = Timer(deadline, () {
       timedOut = true;
-      final groupSignalled = Process.killPid(
-        -process.pid,
-        ProcessSignal.sigkill,
-      );
-      // No group yet means the launcher has not reached `setsid()` — it has
-      // started nothing, so the launcher alone is the whole run. Once it has
-      // EXITED its pid may be reused, so it is never signalled again.
-      if (!groupSignalled && !launcherExited) {
-        process.kill(ProcessSignal.sigkill);
-      }
+      reaped = _reapPlanGroup(process, () => launcherExited);
     });
     try {
       final exitCode = await process.exitCode;
@@ -213,6 +221,10 @@ class SystemShellRunner implements ShellRunner {
       // deadline that killed the group still yields everything the plan managed
       // to emit, which is the only diagnosis a timeout leaves behind.
       await drained;
+      // And the GROUP is over before the result is assembled: the caller is
+      // told a run timed out only once nothing the plan spawned is left to hold
+      // the worktree it ran in.
+      await reaped;
       return ShellRunResult(
         exitCode: exitCode,
         output: err.isEmpty ? out.toString() : '$out$err',
@@ -221,6 +233,35 @@ class SystemShellRunner implements ShellRunner {
     } finally {
       timer.cancel();
     }
+  }
+
+  /// Ends the bounded plan's process group on the deadline, through the same
+  /// [ProcessGroupController] seam the launcher led that group with.
+  ///
+  /// **The invariant this signals on: the plan's pgid IS the launcher's pid.**
+  /// The launcher calls [establishStationProcessGroup] on ITSELF before it
+  /// starts the plan, so a group led by [launcher] resolves to exactly that
+  /// pid. A pgid that resolves to anything else has not been established yet
+  /// and still names the STATION's own group — negating it would signal the
+  /// station's whole process tree, so it is refused here and never passed to
+  /// [terminateGroup]. [GroupTerminateResult.refusedUnsafe] is the same refusal
+  /// from the primitive's own guard.
+  ///
+  /// Every refusal falls through to the launcher's own pid, which IS the whole
+  /// run when no group was established (it had started nothing) — never a
+  /// silent pass. Once the launcher has EXITED its pid may be reused, so
+  /// [exited] stops the fallback from signalling a stranger.
+  Future<void> _reapPlanGroup(Process launcher, bool Function() exited) async {
+    final pgid = await groups.resolvePgid(launcher.pid);
+    if (pgid != null && pgid == launcher.pid) {
+      final outcome = await terminateGroup(
+        controller: groups,
+        pgid: pgid,
+        leaderPid: launcher.pid,
+      );
+      if (outcome != GroupTerminateResult.refusedUnsafe) return;
+    }
+    if (!exited()) launcher.kill(ProcessSignal.sigkill);
   }
 
   /// A run that never started: exit 127 (the shell's "command not found"),
