@@ -1,3 +1,19 @@
+## Unreleased
+
+- Fixed: the filing contract's `bead_references` row reads each attached store's OWN id grammar
+  instead of "a store prefix plus any word". A completed all-status catalog teaches the root
+  LENGTHS that store mints, spelled in lowercase ASCII alphanumerics, plus bd's decimal dotted
+  child segments; a candidate continued by a slash, a hyphen, an identifier character or a dot
+  opening anything else is rejected whole. Measured over one lunar adoption bounce on
+  `0.7.0-dev.5`, the row refused three beads over text that cites nothing — a store prefix in
+  front of an English word, a `tg-1/agent` fixture node path inside a code span, and a
+  `tg-ersi.x` placeholder meaning each child. Every refusal named its field and offset correctly,
+  so an operator could reword and move on, but rewording prose to dodge a scanner is the wrong
+  cost to charge an author. A prefix with NO catalog keeps the broad shape, so the pre-read probe
+  still knows when a store must be read and a store that could not answer stays LOUD; a
+  well-formed id no attached store holds is refused exactly as it was. `beadIdReferences` takes an
+  optional `catalogs` argument, defaulting to the broad shape for every prefix.
+
 ## 0.7.0-dev.6
 
 - The agent LANE is now the unit of environment diagnosis, and an environment fault is no longer

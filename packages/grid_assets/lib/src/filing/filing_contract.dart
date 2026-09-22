@@ -1154,7 +1154,15 @@ FilingRequirementRow _beadReferencesRow(Bead bead, FilingEvidence evidence) {
           'answer',
     );
   }
-  final found = beadIdReferences(bead, prefixes: prefixes);
+  // The catalogs are the GRAMMAR as well as the answer: a store that told
+  // this row every id it holds also told it what an id of its own looks
+  // like, so `genesis-derived` is read as the English word it is rather
+  // than as a citation the author must reword.
+  final found = beadIdReferences(
+    bead,
+    prefixes: prefixes,
+    catalogs: evidence.beadCatalogs,
+  );
   if (found.isEmpty) {
     return const FilingRequirementRow(
       requirement: FilingRequirement.beadReferences,
