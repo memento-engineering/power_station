@@ -182,6 +182,7 @@ class _ProbeAdapter implements AgentSessionAdapter {
     String? model,
     Uri? endpoint,
     String? usageOut,
+    AgentTier tier = AgentTier.frontier,
   }) => RuntimeConfig(
     workDir: workspace.workspaceDir,
     command: 'probe',

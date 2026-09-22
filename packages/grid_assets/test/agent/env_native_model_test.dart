@@ -55,6 +55,9 @@ void main() {
       expect(spec.command, 'npx');
       expect(spec.args, ['-y', '@agentclientprotocol/codex-acp@1.6.2']);
       expect(spec.model, 'gpt-5.6-sol');
+      // The pin stays BARE and the effort rides the rung beside it — a direct
+      // launch declares none, so it keeps the frontier posture it always had.
+      expect(spec.tier, AgentTier.frontier);
       expect(cfg.args, isNot(contains('--model')));
     });
 

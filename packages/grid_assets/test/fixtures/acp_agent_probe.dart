@@ -17,10 +17,14 @@ Future<void> main(List<String> args) async {
   _identity = _arg(args, '--identity=') ?? 'probe';
   final tracePath = Platform.environment['GRID_ACP_PROBE_TRACE'];
   _trace = tracePath == null ? null : File(tracePath);
-  _models = (_arg(args, '--models=') ?? 'gpt-5.6-sol[low],gpt-5.6-sol[xhigh]')
-      .split(',')
-      .where((value) => value.isNotEmpty)
-      .toList(growable: false);
+  // The SHAPE codex 0.155.1 introduced: one id per reasoning effort for the
+  // same base model, so a bare pin only resolves through the seat's own rung.
+  _models =
+      (_arg(args, '--models=') ??
+              'gpt-5.6-sol[low],gpt-5.6-sol[high],gpt-5.6-sol[xhigh]')
+          .split(',')
+          .where((value) => value.isNotEmpty)
+          .toList(growable: false);
   _current = _arg(args, '--current=') ?? 'gpt-5.6-sol[xhigh]';
   _stopReason = _arg(args, '--stop-reason=') ?? 'end_turn';
   // The CAPACITY-REFUSAL arm: replaces the agent-message chunk this probe would

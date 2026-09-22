@@ -16,6 +16,7 @@ import 'package:grid_runtime/grid_runtime.dart';
 import 'agent_environment.dart';
 import 'agent_harness.dart';
 import 'agent_session.dart';
+import 'model_tier.dart';
 import 'permission_policy.dart';
 import 'usage_report.dart';
 
@@ -34,23 +35,82 @@ String baseAcpModelId(String id) {
   return bracket == -1 ? id : id.substring(0, bracket);
 }
 
-/// Resolves an environment pin against the model ids offered by an ACP agent.
+/// The reasoning-effort suffix each seat rung rides on an agent that names the
+/// effort INSIDE the model id.
 ///
-/// Exact wins first. A qualified current model with the requested base wins
-/// next so the agent's own effort default survives. A sole remaining variant
-/// is unambiguous; absent and ambiguous catalogs refuse by returning null.
+/// codex-acp 0.155.1 offers one id per effort for every base model
+/// (`gpt-5.6-sol[low]` … `gpt-5.6-sol[ultra]`) while a seat pins the BARE id,
+/// because the effort is a property of the SEAT — its declared rung — and not
+/// of the pin. This table is the one place those two vocabularies meet: it is
+/// DECLARED, never derived from the pin's own text.
+const Map<AgentTier, String> kAcpEffortSuffixByTier = <AgentTier, String>{
+  AgentTier.cheap: '[low]',
+  AgentTier.mid: '[medium]',
+  AgentTier.frontier: '[high]',
+};
+
+/// The effort suffix [tier] requires.
+///
+/// GUARD, LOUD: a rung missing from [kAcpEffortSuffixByTier] refuses instead of
+/// falling back to the bare id — an effort nobody declared is exactly the
+/// silent downgrade an explicit pin exists to prevent.
+String acpEffortSuffix(AgentTier tier) =>
+    kAcpEffortSuffixByTier[tier] ??
+    (throw StateError(
+      'no ACP effort suffix is declared for tier "${tier.name}"',
+    ));
+
+/// Resolves an environment pin against the model ids offered by an ACP agent,
+/// for a seat riding [tier].
+///
+/// Exact wins first. A [current] selection that already satisfies the pin —
+/// the bare id itself, or [tier]'s variant of it — wins next, because there is
+/// nothing left to set. Then [tier]'s own variant of the pin. A sole remaining
+/// variant is unambiguous; absent and ambiguous catalogs refuse by returning
+/// null ([acpModelRefusal] says why).
+///
+/// The effort is NEVER guessed off the catalog: a six-variant base with no
+/// variant at the seat's rung refuses, rather than riding an effort the seat
+/// did not declare.
 String? resolveAcpModelId({
   required String want,
   required List<String> available,
+  required AgentTier tier,
   String? current,
 }) {
   if (available.contains(want)) return want;
+  final qualified = '$want${acpEffortSuffix(tier)}';
+  if (current == want || current == qualified) return current;
+  if (available.contains(qualified)) return qualified;
   final variants = available
       .where((id) => baseAcpModelId(id) == want)
       .toList(growable: false);
-  if (current != null && baseAcpModelId(current) == want) return current;
   return variants.length == 1 ? variants.single : null;
 }
+
+/// The refusal a null [resolveAcpModelId] earns: the pin, the rung that asked
+/// for it, the variant that rung requires, and what the agent actually offered
+/// — the efforts it has for that base first, then the whole catalog.
+///
+/// An operator reads the CURE from it: arm a different pin, or a rung whose
+/// effort this agent has.
+String acpModelRefusal({
+  required String want,
+  required List<String> available,
+  required AgentTier tier,
+}) {
+  final efforts = <String>{
+    for (final id in available)
+      if (baseAcpModelId(id) == want && id != want) id.substring(want.length),
+  };
+  return 'ACP agent does not offer pinned model "$want" at the '
+      '"${tier.name}" tier (which requires "$want${acpEffortSuffix(tier)}"; '
+      'efforts offered for "$want": ${_listed(efforts)}; '
+      'available: ${_listed(available)})';
+}
+
+String _listed(Iterable<String> values) =>
+    values.isEmpty ? '<none>' : values.join(', ');
 
 /// Serializable description of one ACP-compatible agent child.
 ///
@@ -63,6 +123,7 @@ class AcpBridgeSpec {
     required this.args,
     required this.env,
     required this.cwd,
+    required this.tier,
     this.model,
     this.usageOut,
   });
@@ -79,8 +140,13 @@ class AcpBridgeSpec {
   /// ACP session and child working directory.
   final String cwd;
 
-  /// Optional environment-owned model pin.
+  /// Optional environment-owned model pin — the BARE id, never effort
+  /// qualified: [tier] carries the effort.
   final String? model;
+
+  /// The seat rung this child was launched for, resolved against the agent's
+  /// own catalog by [resolveAcpModelId] once the session reports one.
+  final AgentTier tier;
 
   /// Workspace-relative FT-2 telemetry path the bridge writes its usage
   /// envelope to ([usageReportPath]); null ⇒ this launch captures no usage.
@@ -92,6 +158,7 @@ class AcpBridgeSpec {
     'args': args,
     'env': env,
     'cwd': cwd,
+    'tier': tier.name,
     if (model case final model?) 'model': model,
     if (usageOut case final usageOut?) 'usageOut': usageOut,
   };
@@ -104,6 +171,7 @@ class AcpBridgeSpec {
       (key, value) => MapEntry(key, value! as String),
     ),
     cwd: json['cwd']! as String,
+    tier: AgentTier.values.byName(json['tier']! as String),
     model: json['model'] as String?,
     usageOut: json['usageOut'] as String?,
   );
@@ -349,6 +417,7 @@ class AcpSessionAdapter
     String? model,
     Uri? endpoint,
     String? usageOut,
+    AgentTier tier = AgentTier.frontier,
   }) {
     final command = environment.command;
     if (command == null || command.isEmpty) {
@@ -369,6 +438,7 @@ class AcpSessionAdapter
         endpoint: endpoint,
       ),
       cwd: workspace.workspaceDir,
+      tier: tier,
       model: environment.model == null ? null : model ?? environment.model,
       usageOut: usageOut,
     );

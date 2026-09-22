@@ -1,5 +1,24 @@
 ## Unreleased
 
+- Breaking: an ACP agent that offers one model id per reasoning effort now resolves a BARE seat pin
+  through the seat's own rung. codex-acp 0.155.1 began listing `gpt-5.6-sol[low]` through
+  `gpt-5.6-sol[ultra]` where it had listed one variant per base; the pin is bare by design, because
+  the effort belongs to the SEAT and not to the model string, so every codex seat died at session
+  setup with "ACP agent does not offer pinned model" and neither a build nor a spec ever started.
+  `kAcpEffortSuffixByTier` is the declared table joining the two vocabularies (`cheap` ->
+  `[low]`, `mid` -> `[medium]`, `frontier` -> `[high]`), `acpEffortSuffix` refuses a rung that has
+  no declared effort, and `resolveAcpModelId` takes the rung: an exact offered id, then a current
+  selection that already satisfies the pin, then the rung's own variant, then a sole variant of the
+  base. A catalog with several variants and none at the rung still REFUSES rather than spending an
+  effort nobody declared, and `acpModelRefusal` names the rung, the variant it required and what
+  was offered.
+  Migration: `resolveAcpModelId` and `AcpBridgeSpec` now require a tier, `AgentSessionAdapter.launch`
+  takes an `AgentTier` that defaults to `frontier` (so a direct launch is unchanged, and an
+  implementation outside this package accepts the parameter), and `spawnThroughSessionAdapter`
+  requires the tier its caller already declares to resolve its model.
+  New public surface: `kAcpEffortSuffixByTier`, `acpEffortSuffix`, `acpModelRefusal` and
+  `AcpBridgeSpec.tier`.
+
 - Changed: the vended governor role and both armed `harvest-review` legs now state who owns an
   OPEN pull request. The governor's Sweep is incomplete until pull-request state is read from the
   station's own pull-request chore beads and poll feedback, an open pull request with no live
