@@ -7,6 +7,7 @@ import 'package:grid_assets/grid_assets.dart'
         ApprovalStamped,
         ApproveService,
         FilingRequirementRow,
+        FilingRequirementStatus,
         kApprovedAtKey,
         kApprovedByKey,
         kApprovedRevKey;
@@ -551,11 +552,21 @@ final class BdGitHubIntakeStore implements GitHubIntakeStore {
         // The failing ROWS, not just the verb's summary: the note is what an
         // operator reads to know which field to correct, and "has failing
         // rows" names none of them.
-        final failing = <String>[
+        final failing = <String?>[
           for (final row
               in report?.requirements ?? const <FilingRequirementRow>[])
-            if (!row.passed) '${row.requirement.wire}: ${row.detail}',
-        ];
+            switch (row.status) {
+              FilingRequirementStatus.passed => null,
+              // A row the CHECKER could not answer is labelled as such in the
+              // note. An operator reading "could not evaluate" goes to the
+              // station; one reading a bare row name goes to the bead, which
+              // is the wrong place when nothing found fault with it.
+              FilingRequirementStatus.failed =>
+                '${row.requirement.wire}: ${row.detail}',
+              FilingRequirementStatus.couldNotEvaluate =>
+                'COULD NOT EVALUATE ${row.requirement.wire}: ${row.detail}',
+            },
+        ].nonNulls.toList();
         await _bd.update(
           beadId,
           appendNotes: <String>[

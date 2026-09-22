@@ -227,10 +227,15 @@ class FilingCommand extends Command<int> {
       _out.writeln('FAIL filing: $error');
     } else {
       for (final row in report.requirements) {
-        _out.writeln(
-          '${row.passed ? 'PASS' : 'FAIL'} '
-          '${row.requirement.wire}: ${row.detail}',
-        );
+        // THREE labels, because there are three answers. ERROR is not a
+        // softer FAIL: it says this row never judged the bead, so a reader
+        // does not go looking for a defect to correct.
+        final label = switch (row.status) {
+          FilingRequirementStatus.passed => 'PASS',
+          FilingRequirementStatus.failed => 'FAIL',
+          FilingRequirementStatus.couldNotEvaluate => 'ERROR',
+        };
+        _out.writeln('$label ${row.requirement.wire}: ${row.detail}');
       }
       // AFTER the mechanical rows, in the same report: the advisory runs
       // last and reads last. Its refusal carries the owning lens's own fix

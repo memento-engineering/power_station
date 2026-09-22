@@ -90,7 +90,7 @@ void main() {
         ),
       );
       final quotedRow = _row(quoted, FilingRequirement.validationPlanSyntax);
-      expect(quotedRow.passed, isFalse);
+      expect(quotedRow.status, FilingRequirementStatus.failed);
       expect(
         quotedRow.detail,
         contains(r"""$(grep -c '#' lib/src/filing/x.dart)"""),
@@ -117,7 +117,7 @@ void main() {
         await _gathered(_bead(validationPlan: apostrophe), probe: probe),
       );
       final carriedRow = _row(carried, FilingRequirement.validationPlanSyntax);
-      expect(carriedRow.passed, isFalse);
+      expect(carriedRow.status, FilingRequirementStatus.failed);
       expect(carriedRow.detail, contains('"lane\'s"'));
       expect(
         carriedRow.detail,
@@ -127,8 +127,8 @@ void main() {
       // plan no shell parses must not refuse twice over the same text.
       expect(probe.calls.map((call) => call.shell), [kFilingLaneShell]);
       expect(
-        _row(carried, FilingRequirement.validationPlanPortability).passed,
-        isTrue,
+        _row(carried, FilingRequirement.validationPlanPortability).status,
+        FilingRequirementStatus.passed,
       );
 
       // A blank plan is the PRESENCE row's business and probes nothing.
@@ -137,12 +137,12 @@ void main() {
       final blankReport = _report(empty, await _gathered(empty, probe: blank));
       expect(blank.calls, isEmpty);
       expect(
-        _row(blankReport, FilingRequirement.validationPlanSyntax).passed,
-        isTrue,
+        _row(blankReport, FilingRequirement.validationPlanSyntax).status,
+        FilingRequirementStatus.passed,
       );
       expect(
-        _row(blankReport, FilingRequirement.validationPlan).passed,
-        isFalse,
+        _row(blankReport, FilingRequirement.validationPlan).status,
+        FilingRequirementStatus.failed,
       );
     },
   );
@@ -163,9 +163,12 @@ void main() {
     final bead = _bead(validationPlan: plan);
     final report = _report(bead, await _gathered(bead, probe: probe));
 
-    expect(_row(report, FilingRequirement.validationPlanSyntax).passed, isTrue);
+    expect(
+      _row(report, FilingRequirement.validationPlanSyntax).status,
+      FilingRequirementStatus.passed,
+    );
     final row = _row(report, FilingRequirement.validationPlanPortability);
-    expect(row.passed, isFalse);
+    expect(row.status, FilingRequirementStatus.failed);
     expect(row.detail, contains('"<(printf x)"'));
     expect(
       row.detail,
@@ -177,7 +180,10 @@ void main() {
       kFilingPortabilityShell,
     ]);
 
-    // A probe that CRASHED is unavailable evidence, never a pass.
+    // A probe that CRASHED is unavailable evidence, never a pass — and never
+    // a filing failure either. It is the CHECKER that did not answer, so the
+    // row reports that and the report carries it separately from a bead a row
+    // actually refused.
     final crashed = FakeValidationPlanProbe(
       throwsFor: const {kFilingPortabilityShell: 'dash died mid-parse'},
     );
@@ -186,26 +192,207 @@ void main() {
       unavailable,
       FilingRequirement.validationPlanPortability,
     );
-    expect(unavailableRow.passed, isFalse);
+    expect(unavailableRow.status, FilingRequirementStatus.couldNotEvaluate);
+    expect(unavailable.passed, isFalse);
+    expect(unavailable.couldNotEvaluate, isTrue);
     expect(unavailableRow.detail, contains('dash died mid-parse'));
     expect(
       unavailableRow.detail,
       contains('restore complete evidence and rerun'),
     );
 
-    // A shell nobody INSTALLED is the same absence of an answer, and refuses
-    // for the same reason: CI's shell was never asked about this plan, so
-    // nothing here says it is portable. The row NAMES which absence it was.
+    // A shell nobody INSTALLED is a DIFFERENT absence, and the one that still
+    // decides something: CI's shell is a declared floor, so a plan this
+    // machine cannot check against it is not cleared for the lane that will
+    // run it. That refusal is pre-existing and deliberate, and it stays one.
     final missing = FakeValidationPlanProbe(
       missingShells: const {kFilingPortabilityShell},
     );
-    final absentRow = _row(
-      _report(bead, await _gathered(bead, probe: missing)),
-      FilingRequirement.validationPlanPortability,
-    );
-    expect(absentRow.passed, isFalse);
+    final absent = _report(bead, await _gathered(bead, probe: missing));
+    final absentRow = _row(absent, FilingRequirement.validationPlanPortability);
+    expect(absentRow.status, FilingRequirementStatus.failed);
+    expect(absent.couldNotEvaluate, isFalse);
     expect(absentRow.detail, contains('dash is not installed on this machine'));
     expect(absentRow.detail, contains('restore complete evidence and rerun'));
+  });
+
+  // ── the CHECKER's own three states ────────────────────────────────────────
+  //
+  // A row that cannot gather its evidence says nothing about the bead. The
+  // field incident these tests fence: over one window on the resident every
+  // bead checked came back with `validation_plan_syntax` refusing, held across
+  // three reruns minutes apart, across two stores and two plan shapes, and
+  // across a bead that had passed every row earlier the same day and had not
+  // been edited since. `/bin/sh` was installed and parsed those exact strings.
+  // The plans were never the variable; the GATHER was.
+
+  test(
+    'syntax probe failure is could-not-evaluate, never a filing failure',
+    () async {
+      // The installed lane shell was ASKED and threw before answering.
+      const plan = 'dart test';
+      final bead = _bead(validationPlan: plan);
+      final crashed = FakeValidationPlanProbe(
+        throwsFor: const {kFilingLaneShell: 'spawn failed under station load'},
+      );
+      final report = _report(bead, await _gathered(bead, probe: crashed));
+      final row = _row(report, FilingRequirement.validationPlanSyntax);
+
+      expect(row.status, FilingRequirementStatus.couldNotEvaluate);
+      expect(row.status, isNot(FilingRequirementStatus.failed));
+      // The underlying spawn error rides the row, so an operator reads WHAT
+      // failed instead of a bare "was not gathered".
+      expect(row.detail, contains('spawn failed under station load'));
+      expect(row.detail, contains('nothing here says the plan is wrong'));
+      expect(row.detail, contains('restore complete evidence and rerun'));
+      expect(report.passed, isFalse);
+      expect(report.couldNotEvaluate, isTrue);
+
+      // The gather does NOT retry: the report is the evidence SNAPSHOT, and a
+      // second spawn that happened to succeed would erase the checker failure
+      // the receipt has to carry. One ask, one answer, one row.
+      expect(crashed.calls.map((call) => call.shell), [kFilingLaneShell]);
+
+      // The other absence: nobody composed an evidence source at all. That is
+      // the shape the resident reported — a refusal with no reason attached —
+      // and the row now NAMES the composition gap rather than implying a plan
+      // defect.
+      final uncomposed = _row(
+        _report(bead, FilingEvidence.unavailable),
+        FilingRequirement.validationPlanSyntax,
+      );
+      expect(uncomposed.status, FilingRequirementStatus.couldNotEvaluate);
+      expect(
+        uncomposed.detail,
+        contains('composed with no filing evidence source'),
+      );
+    },
+  );
+
+  test(
+    'portability probe failure is could-not-evaluate after syntax passes',
+    () async {
+      // Syntax ANSWERED clean, so portability reached its own gather — and the
+      // installed dash threw there. The twin of the syntax defect, fixed with it.
+      const plan = 'dart test';
+      final bead = _bead(validationPlan: plan);
+      final crashed = FakeValidationPlanProbe(
+        throwsFor: const {kFilingPortabilityShell: 'dash died mid-spawn'},
+      );
+      final report = _report(bead, await _gathered(bead, probe: crashed));
+
+      expect(
+        _row(report, FilingRequirement.validationPlanSyntax).status,
+        FilingRequirementStatus.passed,
+      );
+      final row = _row(report, FilingRequirement.validationPlanPortability);
+      expect(row.status, FilingRequirementStatus.couldNotEvaluate);
+      expect(row.detail, contains('dash died mid-spawn'));
+      expect(row.detail, contains('nothing here says the plan is unportable'));
+      expect(report.passed, isFalse);
+      expect(report.couldNotEvaluate, isTrue);
+      expect(crashed.calls.map((call) => call.shell), [
+        kFilingLaneShell,
+        kFilingPortabilityShell,
+      ]);
+    },
+  );
+
+  test('portability stays not probed while syntax is unanswered', () async {
+    // The short-circuit is PRESERVED. Until syntax has a successful parse
+    // there is nothing portability can add, and a second gather failure over
+    // the same text would name one absence twice.
+    const plan = 'dart test';
+    final bead = _bead(validationPlan: plan);
+    final crashed = FakeValidationPlanProbe(
+      throwsFor: const {kFilingLaneShell: 'sh never answered'},
+    );
+    final report = _report(bead, await _gathered(bead, probe: crashed));
+    final row = _row(report, FilingRequirement.validationPlanPortability);
+
+    expect(row.status, FilingRequirementStatus.passed);
+    expect(
+      row.detail,
+      'not probed — the validation_plan_syntax row is answered first and '
+      'carries this plan',
+    );
+    expect(row.detail, isNot(contains('sh never answered')));
+    // Dash was never asked, so the report's ONE unevaluated row is syntax.
+    expect(crashed.calls.map((call) => call.shell), [kFilingLaneShell]);
+    expect(
+      report.requirements
+          .where(
+            (each) => each.status == FilingRequirementStatus.couldNotEvaluate,
+          )
+          .map((each) => each.requirement),
+      [FilingRequirement.validationPlanSyntax],
+    );
+  });
+
+  test('broken shell syntax remains failed for each shell', () async {
+    // The row EVALUATED and the bead lost. Nothing about the third state
+    // softens a plan a shell actually refused — that answer is about the bead.
+    const plan = 'echo "\$(grep -c \'#\' x.dart)"';
+    final bead = _bead(validationPlan: plan);
+    final laneRefused = FakeValidationPlanProbe(
+      answers: {
+        kFilingLaneShell: _refused(
+          kFilingLaneShell,
+          'sh: -c: line 1: unexpected EOF while looking for matching `)\'',
+        ),
+      },
+    );
+    final syntax = _row(
+      _report(bead, await _gathered(bead, probe: laneRefused)),
+      FilingRequirement.validationPlanSyntax,
+    );
+    expect(syntax.status, FilingRequirementStatus.failed);
+    expect(syntax.detail, contains('rewrite as one parseable POSIX-shell'));
+
+    final portableRefused = FakeValidationPlanProbe(
+      answers: {
+        kFilingPortabilityShell: _refused(
+          kFilingPortabilityShell,
+          'dash: 1: Syntax error: "(" unexpected',
+        ),
+      },
+    );
+    final refusedReport = _report(
+      bead,
+      await _gathered(bead, probe: portableRefused),
+    );
+    final portability = _row(
+      refusedReport,
+      FilingRequirement.validationPlanPortability,
+    );
+    expect(portability.status, FilingRequirementStatus.failed);
+    expect(portability.detail, contains('replace the Bash-only construct'));
+    // An evaluated refusal is NOT checker incompleteness: the report says the
+    // bead is wrong, and says nothing went unanswered.
+    expect(refusedReport.couldNotEvaluate, isFalse);
+    expect(
+      refusedReport.refusalReason,
+      contains('correct the bead and rerun approve'),
+    );
+  });
+
+  test('missing portability shell remains failed', () async {
+    // A dash nobody INSTALLED keeps its own named refusal: CI's shell is a
+    // declared floor, so a plan nothing here can check against it is not
+    // cleared for the lane that will run it. That is a decided outcome, and
+    // it stays apart from a dash that was asked and did not answer.
+    const plan = 'dart test';
+    final bead = _bead(validationPlan: plan);
+    final missing = FakeValidationPlanProbe(
+      missingShells: const {kFilingPortabilityShell},
+    );
+    final report = _report(bead, await _gathered(bead, probe: missing));
+    final row = _row(report, FilingRequirement.validationPlanPortability);
+
+    expect(row.status, FilingRequirementStatus.failed);
+    expect(row.detail, contains('dash is not installed on this machine'));
+    expect(report.passed, isFalse);
+    expect(report.couldNotEvaluate, isFalse);
   });
 
   test('filing viability refuses absolute anchors', () {
@@ -217,7 +404,7 @@ void main() {
       completeEmptyEvidence,
     );
     final row = _row(refused, FilingRequirement.repoRelativePaths);
-    expect(row.passed, isFalse);
+    expect(row.status, FilingRequirementStatus.failed);
     expect(row.detail, contains('"/tmp/round-7/receipt.md" (description:'));
     expect(row.detail, contains(r'"C:\Users\nico\work\notes.md" (notes:'));
     expect(row.detail, contains('use a repository-relative path'));
@@ -234,7 +421,11 @@ void main() {
       completeEmptyEvidence,
     );
     final cleanRow = _row(clean, FilingRequirement.repoRelativePaths);
-    expect(cleanRow.passed, isTrue, reason: cleanRow.detail);
+    expect(
+      cleanRow.status,
+      FilingRequirementStatus.passed,
+      reason: cleanRow.detail,
+    );
   });
 
   test('filing viability resolves only attached-store bead-id grammar', () {
@@ -256,7 +447,7 @@ void main() {
       ),
     );
     final row = _row(resolved, FilingRequirement.beadReferences);
-    expect(row.passed, isTrue, reason: row.detail);
+    expect(row.status, FilingRequirementStatus.passed, reason: row.detail);
     expect(row.detail, contains('pow-usbw'));
     expect(row.detail, contains('tg-0b64'));
 
@@ -271,7 +462,10 @@ void main() {
         decisionRegisters: const {},
       ),
     );
-    expect(_row(longest, FilingRequirement.beadReferences).passed, isTrue);
+    expect(
+      _row(longest, FilingRequirement.beadReferences).status,
+      FilingRequirementStatus.passed,
+    );
 
     // An id nobody minted. Guessed ids have shipped three times.
     final guessed = _report(
@@ -284,7 +478,7 @@ void main() {
       ),
     );
     final guessedRow = _row(guessed, FilingRequirement.beadReferences);
-    expect(guessedRow.passed, isFalse);
+    expect(guessedRow.status, FilingRequirementStatus.failed);
     expect(guessedRow.detail, contains('"pow-zzzz" (description:8)'));
     expect(
       guessedRow.detail,
@@ -316,7 +510,11 @@ void main() {
       ),
     );
     final proseRow = _row(prose, FilingRequirement.beadReferences);
-    expect(proseRow.passed, isTrue, reason: proseRow.detail);
+    expect(
+      proseRow.status,
+      FilingRequirementStatus.passed,
+      reason: proseRow.detail,
+    );
     expect(proseRow.detail, contains('cites no bead id'));
 
     // The same catalogs still RESOLVE what the store actually mints: a root at
@@ -332,7 +530,11 @@ void main() {
       ),
     );
     final childrenRow = _row(children, FilingRequirement.beadReferences);
-    expect(childrenRow.passed, isTrue, reason: childrenRow.detail);
+    expect(
+      childrenRow.status,
+      FilingRequirementStatus.passed,
+      reason: childrenRow.detail,
+    );
     expect(childrenRow.detail, contains('tg-ersi.4'));
 
     // A store that could not answer is UNAVAILABLE, never proof of absence.
@@ -347,7 +549,7 @@ void main() {
       ),
     );
     final unavailableRow = _row(unavailable, FilingRequirement.beadReferences);
-    expect(unavailableRow.passed, isFalse);
+    expect(unavailableRow.status, FilingRequirementStatus.failed);
     expect(unavailableRow.detail, contains('"tg-0b64"'));
     expect(unavailableRow.detail, contains('all-status read of the_grid'));
     expect(
@@ -365,7 +567,11 @@ void main() {
       parsedPlanEvidence(decisionRegisters: const {}),
     );
     final uncomposedRow = _row(uncomposed, FilingRequirement.beadReferences);
-    expect(uncomposedRow.passed, isTrue, reason: uncomposedRow.detail);
+    expect(
+      uncomposedRow.status,
+      FilingRequirementStatus.passed,
+      reason: uncomposedRow.detail,
+    );
     expect(uncomposedRow.detail, contains('not checked'));
     expect(uncomposedRow.detail, contains('no store catalog was composed'));
     expect(
@@ -383,7 +589,7 @@ void main() {
       completeEmptyEvidence,
     );
     final row = _row(pinned, FilingRequirement.releaseVersions);
-    expect(row.passed, isFalse);
+    expect(row.status, FilingRequirementStatus.failed);
     expect(row.detail, contains('"0.4.0-dev.3" (acceptance_criteria:'));
     expect(
       row.detail,
@@ -402,7 +608,11 @@ void main() {
       completeEmptyEvidence,
     );
     final cleanRow = _row(clean, FilingRequirement.releaseVersions);
-    expect(cleanRow.passed, isTrue, reason: cleanRow.detail);
+    expect(
+      cleanRow.status,
+      FilingRequirementStatus.passed,
+      reason: cleanRow.detail,
+    );
   });
 
   test('filing viability resolves recorded decisions', () async {
@@ -417,7 +627,7 @@ void main() {
       ),
     );
     final row = _row(recorded, FilingRequirement.decisionReferences);
-    expect(row.passed, isTrue, reason: row.detail);
+    expect(row.status, FilingRequirementStatus.passed, reason: row.detail);
 
     // A round may not cite the decision it is about to write: discovery holds
     // every round, because the entry cannot exist until the work lands.
@@ -429,7 +639,7 @@ void main() {
       ),
     );
     final createsRow = _row(creates, FilingRequirement.decisionReferences);
-    expect(createsRow.passed, isFalse);
+    expect(createsRow.status, FilingRequirementStatus.failed);
     expect(
       createsRow.detail,
       contains('"power_station#a-rule-this-round-creates"'),
@@ -456,7 +666,11 @@ void main() {
       ),
     );
     final phantomRow = _row(phantom, FilingRequirement.decisionReferences);
-    expect(phantomRow.passed, isTrue, reason: phantomRow.detail);
+    expect(
+      phantomRow.status,
+      FilingRequirementStatus.passed,
+      reason: phantomRow.detail,
+    );
     expect(phantomRow.detail, contains('"ADR-0042" (design:'));
     expect(phantomRow.detail, contains('REPORTED, never refused'));
 
@@ -467,8 +681,8 @@ void main() {
       parsedPlanEvidence(decisionRegisters: const {'power_station'}),
     );
     expect(
-      _row(unreported, FilingRequirement.decisionReferences).passed,
-      isFalse,
+      _row(unreported, FilingRequirement.decisionReferences).status,
+      FilingRequirementStatus.failed,
     );
 
     // NOTES are the operator's RECEIPT channel and make NO decision request —
@@ -486,7 +700,11 @@ void main() {
       ),
     );
     final receiptsRow = _row(receipts, FilingRequirement.decisionReferences);
-    expect(receiptsRow.passed, isTrue, reason: receiptsRow.detail);
+    expect(
+      receiptsRow.status,
+      FilingRequirementStatus.passed,
+      reason: receiptsRow.detail,
+    );
     expect(receiptsRow.detail, 'the bead text cites no decision');
 
     // A CRASHED index is unavailable evidence, never an empty register.
@@ -497,7 +715,7 @@ void main() {
       ),
     );
     final crashedRow = _row(crashed, FilingRequirement.decisionReferences);
-    expect(crashedRow.passed, isFalse);
+    expect(crashedRow.status, FilingRequirementStatus.failed);
     expect(crashedRow.detail, contains('exit 127'));
     expect(crashedRow.detail, contains('restore complete evidence and rerun'));
 
@@ -557,17 +775,28 @@ void main() {
     ]);
     expect(rows, hasLength(11));
     for (final row in rows) {
-      expect(row.keys, ['requirement', 'passed', 'detail']);
+      // The row wire is THREE fields, and the verdict one is `status`: a
+      // boolean `passed` key cannot carry a third state, which is why it is
+      // gone rather than kept beside the enum.
+      expect(row.keys, ['requirement', 'status', 'detail']);
+      expect(
+        row['status'],
+        isIn(const ['passed', 'failed', 'could_not_evaluate']),
+      );
     }
     // ONE failing viability row fails the whole report.
     expect(
       rows
-          .where((row) => row['passed'] == false)
+          .where((row) => row['status'] == 'failed')
           .map((row) => row['requirement']),
       ['repo_relative_paths'],
     );
     expect(json['passed'], isFalse);
+    // The bead FAILED a check; no checker went unanswered, and the report says
+    // so in its own field rather than leaving a caller to infer it.
+    expect(json['could_not_evaluate'], isFalse);
     expect(report.passed, isFalse);
+    expect(report.couldNotEvaluate, isFalse);
   });
 
   test('filing compatibility corpus keeps live beads and lunar non-citations '
@@ -650,7 +879,7 @@ void main() {
       // text is the evidence.
       expect(
         report.requirements
-            .where((row) => !row.passed)
+            .where((row) => row.status != FilingRequirementStatus.passed)
             .map((row) => '${row.requirement.wire}: ${row.detail}'),
         isEmpty,
         reason: bead.id,
@@ -712,7 +941,7 @@ void main() {
 
       expect(
         report.requirements
-            .where((row) => !row.passed)
+            .where((row) => row.status != FilingRequirementStatus.passed)
             .map((row) => '${row.requirement.wire}: ${row.detail}'),
         isEmpty,
         reason: '${record['source_bead']}: $token',

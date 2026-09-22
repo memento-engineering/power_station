@@ -662,9 +662,15 @@ void main() {
         expect(report.passed, isFalse);
         expect(report.refusalReason, hold);
         // Every mechanical row PASSED — the refusal is the advisory's alone,
-        // and the completeness lane is untouched.
+        // and the completeness lane is untouched. PASSED, not merely
+        // non-failing: the advisory is only reached when no row was left
+        // unevaluated either, so a quiet checker can never buy a bead a lens
+        // it has not earned.
         expect(report.requirements, hasLength(FilingRequirement.values.length));
-        expect(report.requirements.every((row) => row.passed), isTrue);
+        expect(report.requirements.map((row) => row.status).toSet(), {
+          FilingRequirementStatus.passed,
+        });
+        expect(report.couldNotEvaluate, isFalse);
         expect(
           (report.toJson()['advisory']! as Map<String, Object?>)['reason'],
           hold,

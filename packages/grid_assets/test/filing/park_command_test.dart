@@ -291,6 +291,7 @@ _Harness _harness({
   List<Map<String, Object?>> stateBeads = const [],
   _FakeProcesses? processes,
   WorktreeActivity? activity,
+  FilingEvidence? evidence,
 }) {
   final out = StringBuffer();
   final err = StringBuffer();
@@ -336,7 +337,11 @@ _Harness _harness({
               // at paths no shell can chdir into. Prepared evidence keeps the
               // preflight's viability rows out of this suite's way; their own
               // refusals are pinned in `filing_viability_test.dart`.
-              evidence: FakeFilingEvidenceSource(completeEmptyEvidence),
+              // [evidence] overrides it for the one probe that needs a
+              // checker which did NOT answer.
+              evidence: FakeFilingEvidenceSource(
+                evidence ?? completeEmptyEvidence,
+              ),
               // And the advisory for the same reason — the ritual is the
               // subject here, not the judgement.
               advisory: FakeFilingAdvisory(),
@@ -972,7 +977,7 @@ void main() {
         (((report['filing']! as Map)['requirements']! as List)
                 .cast<Map<String, dynamic>>())
             .singleWhere((row) => row['requirement'] == 'decision_references');
-    expect(row['passed'], isFalse);
+    expect(row['status'], 'failed');
     expect(row['detail'], contains('a-rule-this-round-creates'));
     expect(
       row['detail'],
@@ -1004,6 +1009,61 @@ void main() {
     expect(report['reason'], contains('remains UNSTAMPED'));
     expect(h.work.callsTo('undefer'), hasLength(1));
     expect(h.work.callsTo('update'), isEmpty);
+  });
+
+  test('could-not-evaluate preflight leaves unpark unstamped', () async {
+    // unpark DELEGATES its approval, so it inherits the distinction whole: the
+    // defer still clears first — that half never depended on the preflight —
+    // and then nothing is stamped, because the checker did not answer.
+    final home = _gridHome();
+    final h = _harness(
+      home: home,
+      workBead: _workBeadJson(approved: false, status: 'deferred'),
+      evidence: const FilingEvidence(
+        decisionRegisters: {},
+        lanePlanProbeFailure: 'sh probe failed: Bad state: no pty',
+      ),
+    );
+
+    expect(
+      await h.runner.run(['unpark', '--json', '--actor', 'nico', _workBead]),
+      1,
+    );
+    final report = _json(h.out);
+    expect(report['unparked'], isFalse);
+    // The ORDER is preserved: undefer ran, the stamp did not.
+    expect(report['undeferred'], isTrue);
+    expect(h.work.callsTo('undefer'), hasLength(1));
+    expect(h.work.callsTo('update'), isEmpty);
+
+    final filing = report['filing']! as Map<String, dynamic>;
+    expect(filing['passed'], isFalse);
+    expect(filing['could_not_evaluate'], isTrue);
+    expect(
+      (filing['requirements']! as List)
+          .cast<Map<String, dynamic>>()
+          .singleWhere(
+            (row) => row['requirement'] == 'validation_plan_syntax',
+          )['status'],
+      'could_not_evaluate',
+    );
+
+    // And the plain rendering says ERROR, never FAIL, on that row.
+    final plain = _harness(
+      home: _gridHome(),
+      workBead: _workBeadJson(approved: false, status: 'deferred'),
+      evidence: const FilingEvidence(
+        decisionRegisters: {},
+        lanePlanProbeFailure: 'sh probe failed: Bad state: no pty',
+      ),
+    );
+    expect(await plain.runner.run(['unpark', '--actor', 'nico', _workBead]), 1);
+    expect(plain.out.toString(), contains('ERROR validation_plan_syntax:'));
+    expect(
+      plain.out.toString(),
+      isNot(contains('FAIL validation_plan_syntax')),
+    );
+    expect(plain.work.callsTo('update'), isEmpty);
   });
 
   test('an unknown bead is refused before bd undefer runs', () async {

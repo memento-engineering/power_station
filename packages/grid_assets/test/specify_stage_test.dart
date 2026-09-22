@@ -937,7 +937,10 @@ void main() {
           .singleWhere(
             (row) => row.requirement == FilingRequirement.validationPlanSyntax,
           );
-      expect(row.passed, isFalse);
+      // The shell ANSWERED and refused the plan, so this is a statement about
+      // the bead: `failed`, never the could-not-evaluate state a shell that
+      // did not answer would have earned.
+      expect(row.status, FilingRequirementStatus.failed);
       expect(row.detail, contains(diagnostic));
       expect(row.detail, contains('"lane\'s"'));
       expect(probe.calls.map((call) => call.shell), [

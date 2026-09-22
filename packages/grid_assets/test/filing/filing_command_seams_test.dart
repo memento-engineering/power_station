@@ -190,7 +190,7 @@ void main() {
       }),
     );
     expect(await h.runner.run(['filing', '--json', 'pow-child']), 1);
-    expect(_dependencyRow(h.out)['passed'], isFalse);
+    expect(_dependencyRow(h.out)['status'], 'failed');
     expect(
       _dependencyRow(h.out)['detail'],
       contains('no station roster was supplied'),
