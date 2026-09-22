@@ -570,7 +570,8 @@ void main() {
     expect(report.passed, isFalse);
   });
 
-  test('filing compatibility corpus keeps three live beads passing', () {
+  test('filing compatibility corpus keeps live beads and lunar non-citations '
+      'passing', () {
     final corpus =
         jsonDecode(
               File(
@@ -656,6 +657,68 @@ void main() {
       );
       expect(report.requirements, hasLength(11), reason: bead.id);
       expect(report.passed, isTrue, reason: bead.id);
+    }
+
+    // The NEGATIVE half of the corpus: three tokens a lunar v2 re-stamp sweep
+    // refused as bead citations while the row read "prefix + any word" as an
+    // id. Each is prose — an English word behind a store prefix, a fixture
+    // node path inside a code span, and a placeholder standing for "each
+    // child" — and each refusal named its field and offset correctly, so the
+    // operator reworded a bead to get past a scanner. They are kept beside the
+    // live beads so a future grammar cannot re-acquire them quietly.
+    final nonCitations = (corpus['bead_reference_non_citations']! as List)
+        .cast<Map<String, dynamic>>();
+    expect(nonCitations, [
+      {
+        'source_bead': 'genesis-0p5',
+        'field': 'description',
+        'token': 'genesis-derived',
+        'captured': '2026-09-22',
+      },
+      {
+        'source_bead': 'tg-xtnf',
+        'field': 'design',
+        'token': '`tg-1/agent`',
+        'captured': '2026-09-22',
+      },
+      {
+        'source_bead': 'tg-ersi.4..9',
+        'field': 'notes',
+        'token': 'tg-ersi.x',
+        'captured': '2026-09-22',
+      },
+    ]);
+
+    // COMPLETE catalogs whose REAL ids establish each store's root length:
+    // `genesis` mints three-character roots, `tg` four-character ones with
+    // decimal children. Nothing here reads a live store either.
+    final proseEvidence = parsedPlanEvidence(
+      beadCatalogs: const {
+        'genesis': {'genesis-0p5'},
+        'tg': {'tg-ersi', 'tg-ersi.4', 'tg-xtnf'},
+      },
+      decisionRegisters: const {},
+    );
+    for (final record in nonCitations) {
+      final token = record['token']! as String;
+      final field = record['field']! as String;
+      final bead = switch (field) {
+        'description' => _bead(description: token),
+        'design' => _bead(design: token),
+        'notes' => _bead(notes: token),
+        _ => fail('no bead field is spelled "$field"'),
+      };
+      final report = _report(bead, proseEvidence);
+
+      expect(
+        report.requirements
+            .where((row) => !row.passed)
+            .map((row) => '${row.requirement.wire}: ${row.detail}'),
+        isEmpty,
+        reason: '${record['source_bead']}: $token',
+      );
+      expect(report.requirements, hasLength(11), reason: token);
+      expect(report.passed, isTrue, reason: token);
     }
   });
 }

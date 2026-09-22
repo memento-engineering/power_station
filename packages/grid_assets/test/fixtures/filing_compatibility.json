@@ -33,5 +33,25 @@
       "notes": "",
       "validation_plan": "cd packages/grid_assets && dart pub get && dart analyze && dart test"
     }
+  ],
+  "bead_reference_non_citations": [
+    {
+      "source_bead": "genesis-0p5",
+      "field": "description",
+      "token": "genesis-derived",
+      "captured": "2026-09-22"
+    },
+    {
+      "source_bead": "tg-xtnf",
+      "field": "design",
+      "token": "`tg-1/agent`",
+      "captured": "2026-09-22"
+    },
+    {
+      "source_bead": "tg-ersi.4..9",
+      "field": "notes",
+      "token": "tg-ersi.x",
+      "captured": "2026-09-22"
+    }
   ]
 }
