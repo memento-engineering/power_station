@@ -1056,9 +1056,10 @@ void main() {
           '--acceptance',
           '- [ ] the outcome',
         ]);
-        final created = await Process.run('bd', [
-          '-C',
-          store.path,
+        // Read through the fixture's own spawn: a hand-rolled `bd -C <store>`
+        // resolves whatever workspace the test process sits in, not this
+        // store.
+        final created = await bdOutput(store, const [
           'list',
           '-t',
           'task',
@@ -1066,7 +1067,7 @@ void main() {
           '--limit',
           '0',
         ]);
-        final beadId = _rowsOf(created.stdout as String).single['id'] as String;
+        final beadId = _rowsOf(created).single['id'] as String;
         await runBd(store, [
           'update',
           beadId,
