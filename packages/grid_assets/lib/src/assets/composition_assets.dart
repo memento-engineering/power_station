@@ -46,6 +46,7 @@ import '../agent/agent_harness.dart';
 import '../agent/availability_assets.dart';
 import '../agent/environment_probe.dart';
 import '../agent/environment_registry.dart';
+import '../agent/lane_environment_health.dart';
 import '../agent/permission_policy.dart';
 import '../agent/site_binding.dart';
 import '../code/code_capabilities.dart';
@@ -753,16 +754,31 @@ class HarnessProvider extends SingleChildStatelessSeed {
   /// conventional machine-local [kSiteBindingFile] — the one I/O this asset
   /// does, and it happens HERE rather than in `buildWithChild`, so a rebuild
   /// never re-reads the disc and the mounted value keeps its identity.
+  ///
+  /// [laneHealth] is the station's LANE-HEALTH coordinator (bead `pow-u1bi`).
+  /// It is captured ONCE, here, and only when a [probe] is armed: a station
+  /// that touches the machine is the one that can diagnose it, and capturing at
+  /// construction is what keeps the coordinator's correlation window alive
+  /// across rebuilds instead of resetting it on every build.
   HarnessProvider({
     this.registry,
     this.config = const AgentConfig(),
     this.permissionPolicy,
-    this.probe,
+    EnvironmentProbe? probe,
     this.probeInterval = kEnvironmentProbeInterval,
+    LaneEnvironmentHealth? laneHealth,
     SiteBinding? siteBinding,
     super.child,
     super.key,
-  }) : siteBinding = siteBinding ?? SiteBinding.loadJsonFile(kSiteBindingFile);
+  }) : probe = probe,
+       laneHealth =
+           laneHealth ??
+           (probe == null
+               ? null
+               : CorrelatingLaneEnvironmentHealth(
+                   probe: const ProcessLaneEnvironmentProbe().call,
+                 )),
+       siteBinding = siteBinding ?? SiteBinding.loadJsonFile(kSiteBindingFile);
 
   /// The station's environment registry; null ⇒ [buildBuiltinEnvironmentRegistry].
   final EnvironmentRegistry? registry;
@@ -800,6 +816,17 @@ class HarnessProvider extends SingleChildStatelessSeed {
   /// The bounded re-probe interval used when [probe] is armed (a VALUE).
   final Duration probeInterval;
 
+  /// The station's LANE-HEALTH coordinator — an IMPL, so it is DI, and it rides
+  /// [EnvironmentProbeArming] so a nested provider inherits the IDENTICAL one
+  /// (ADR-0002 D5 / A38(4)). It is ALSO mounted as an
+  /// `InheritedSeed<LaneEnvironmentHealth>` because the other half of this seam
+  /// is read at a capability's `createSession` EFFECT edge, which has no
+  /// arming to read.
+  ///
+  /// Null ⇒ this provider diagnoses nothing, and every lane is exactly as
+  /// available as the boolean probe says it is.
+  final LaneEnvironmentHealth? laneHealth;
+
   /// This box's MACHINE FACTS (ADR-0002 D3) — environment name → the inference
   /// endpoint it reaches here. A VALUE, mounted for the subtree; the endpoint
   /// url lives ONLY in the machine-local file, never in committed source, argv,
@@ -826,7 +853,11 @@ class HarnessProvider extends SingleChildStatelessSeed {
         .dependOnInheritedSeedOfExactType<EnvironmentProbeArming>();
     final arming = own == null
         ? inherited
-        : EnvironmentProbeArming(probe: own, interval: probeInterval);
+        : EnvironmentProbeArming(
+            probe: own,
+            interval: probeInterval,
+            laneHealth: laneHealth,
+          );
     // The availability seed sits BELOW the registry seed: it READS the registry
     // it probes, and its `AvailableEnvironments` must shadow nothing above it.
     // The `InheritedSeed<SiteBinding>` mounted below sits ABOVE this seed, which
@@ -838,9 +869,19 @@ class HarnessProvider extends SingleChildStatelessSeed {
             child: AvailabilityAssets(
               probe: arming.probe,
               interval: arming.interval,
+              laneHealth: arming.laneHealth,
               child: child,
             ),
           );
+    // The coordinator as an IMPL value, mounted ABOVE the availability seed and
+    // read at a capability's `createSession` effect edge — the one place that
+    // has no arming to inherit from. Re-mounting the same instance down a
+    // nested provider notifies nobody (`InheritedSeed` compares by identity for
+    // a type with no `==`), so inheritance stays free.
+    final health = arming?.laneHealth;
+    final diagnosed = health == null
+        ? armed
+        : InheritedSeed<LaneEnvironmentHealth>(value: health, child: armed);
     // The authorization boundary sits BELOW the config seeds and above the
     // arming pass, so every channel spawned in this subtree reads exactly the
     // policy this provider published — and a nested provider's own policy
@@ -849,8 +890,8 @@ class HarnessProvider extends SingleChildStatelessSeed {
     // that arms only its registry must keep inheriting the policy above it.
     final policy = permissionPolicy;
     final below = policy == null
-        ? armed
-        : InheritedSeed<AgentPermissionPolicy>(value: policy, child: armed);
+        ? diagnosed
+        : InheritedSeed<AgentPermissionPolicy>(value: policy, child: diagnosed);
     // The machine facts sit above the availability seed (which watches them) and
     // below the config seeds, so a nested provider's binding shadows this one by
     // exact type — the same rung ADR-0002 D5 gives arming.

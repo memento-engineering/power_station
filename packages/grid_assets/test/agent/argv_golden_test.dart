@@ -119,6 +119,8 @@ void main() {
           promptMode: PromptMode.none,
           target: InferenceTarget.providerManaged,
           model: 'gpt-5.6-sol',
+          // The PATH check names the agent, never the `npx` launcher.
+          pathCheck: 'codex',
           sessionAdapter: kAcpSessionAdapterId,
           roleAsset: '.agents/agents/$kSeatHole.md',
           primeMode: SeatPrimeMode.prompt,

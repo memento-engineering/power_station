@@ -205,6 +205,25 @@ Future<_Run> _buildAcpRun({
   return run;
 }
 
+/// Every reported failure the engine would resolve to [StepFailureClass.work]
+/// — i.e. every one that WOULD charge the bead's attempt cursor.
+///
+/// The resolution is the engine's own [resolveFailureClass], not a local
+/// re-derivation: this asserts what the engine decides, never what this test
+/// believes it decides.
+List<AllocationFailed> _workClassed(List<AllocationReport> reports) => reports
+    .whereType<AllocationFailed>()
+    .where(
+      (failed) =>
+          resolveFailureClass(
+            kind: failed.kind,
+            ranFor: const Duration(minutes: 1),
+            kindDeclared: failed.kindDeclared,
+          ) ==
+          StepFailureClass.work,
+    )
+    .toList(growable: false);
+
 /// The ONE wall-clock bound on a real ACP fixture's progress.
 ///
 /// It is a LIVENESS tripwire, never a latency assertion: every wait below
@@ -642,6 +661,154 @@ void main() {
     expect(controlUsage?.tokensIn, 11);
     expect(controlUsage?.tokensOut, 7);
     expect(controlUsage?.numTurns, 1);
+  }, timeout: Timeout.none);
+
+  // Bead `pow-u1bi`: the codex 0.155.1 incident. The CLI moved at 23:22Z and
+  // from 23:3xZ every codex session setup refused the pinned model — and the
+  // station charged each refusal to the BEAD, one attempt at a time, while the
+  // wedge counter read `0 running`. A failure that happens BEFORE the first
+  // turn cannot be the bead's fault: no brief was delivered, so no work was
+  // attempted and none could have failed.
+  //
+  // BOTH SHAPES, because the phase is a LINE and not a message: the typed
+  // pinned-model refusal the incident produced, and the child that simply
+  // vanishes during the handshake — which the setup catch cannot claim,
+  // because the exit reporter observes it first.
+  test('ACP failures before the first turn are infra and do not charge a work '
+      'attempt', () async {
+    // THE WIRE. The bridge DECLARES the kind and the evidence; nothing
+    // downstream parses the reason prose to recover either.
+    final refused = await _runBridge(
+      probePath: probePath,
+      probeArgs: const <String>[
+        '--identity=setup-refusal',
+        // The measured catalog shape: six effort variants of the pinned base,
+        // and a frontier seat needs `[high]`, which this agent does not offer.
+        '--models=gpt-5.6-sol[low],gpt-5.6-sol[medium]',
+        '--current=other',
+      ],
+    );
+    expect(refused.frame['kind'], 'failed', reason: '${refused.frame}');
+    expect(refused.frame['failureKind'], CapabilityFailureKind.noResult.name);
+    final fields = (refused.frame['fields']! as Map<String, dynamic>)
+        .cast<String, String>();
+    expect(fields[kAgentFailurePhaseField], kAgentSetupPhase);
+    expect(fields[kAgentFailurePinField], 'gpt-5.6-sol');
+    // STRUCTURE, not prose: the offered catalog decodes back to a list.
+    expect(decodeOfferedField(fields[kAgentFailureOfferedField]), <String>[
+      'gpt-5.6-sol[low]',
+      'gpt-5.6-sol[medium]',
+    ]);
+    expect(
+      fields[kAgentFailureResolverVerdictField],
+      allOf(contains('gpt-5.6-sol'), contains('frontier'), contains('[high]')),
+    );
+
+    // THE ENGINE'S RESOLUTION, over the DIRECT `ProcessAllocation` — the seam
+    // that carries a channel's declared kind onto its report.
+    final run = await _buildAcpRun(
+      probePath: probePath,
+      identity: 'setup-refusal-alloc',
+      probeArgs: const <String>[
+        '--models=gpt-5.6-sol[low],gpt-5.6-sol[medium]',
+        '--current=other',
+      ],
+      leased: false,
+    );
+    // The BEFORE half of the work-attempt claim: nothing has been charged yet.
+    expect(_workClassed(run.reports), isEmpty);
+    unawaited(run.allocation.startMounted(run.tree));
+    final failure = await _waitForFailure(run);
+    expect(failure.kind, CapabilityFailureKind.noResult);
+    expect(failure.kindDeclared, isTrue);
+    expect(
+      resolveFailureClass(
+        kind: failure.kind,
+        // IRRESPECTIVE OF THE CLOCK. A setup refusal is normally fast, but a
+        // slow handshake is still a handshake: the DECLARATION is what earns
+        // infra, never the elapsed-time floor. In the live incident the codex
+        // seats failed after a real npx fetch, well past any silence window.
+        ranFor: const Duration(minutes: 1),
+        kindDeclared: failure.kindDeclared,
+      ),
+      StepFailureClass.infra,
+    );
+    // THE AFTER half: the whole report stream still resolves to zero `work`
+    // failures, so the bead's attempt cursor saw nothing to advance on. The
+    // control below is what makes that load-bearing — the same kind, over the
+    // same long turn, UNDECLARED, is not infra.
+    expect(_workClassed(run.reports), isEmpty);
+    expect(
+      resolveFailureClass(
+        kind: failure.kind,
+        ranFor: const Duration(minutes: 1),
+      ),
+      StepFailureClass.noResult,
+    );
+    expect(run.reports.whereType<AllocationCompleted>(), isEmpty);
+    await run.close();
+
+    // THE SECOND SHAPE: the child DIES before the first turn — a binary that
+    // cannot authenticate, a launcher the upgrade broke. The setup catch never
+    // sees it (the exit reporter wins the race and claims the terminal), so
+    // without a declaration here the same pre-turn environment fault would
+    // reach the engine as the bead's own untyped work failure — the exact
+    // attribution the incident was made of.
+    final died = await _runBridge(
+      probePath: probePath,
+      probeArgs: const <String>[
+        '--identity=setup-exit',
+        '--die-with=9',
+        '--stderr=FATAL: codex-acp could not authenticate',
+      ],
+    );
+    expect(died.frame['kind'], 'failed', reason: '${died.frame}');
+    expect(died.frame['failureKind'], CapabilityFailureKind.noResult.name);
+    // The PHASE, and ONLY the phase: no catalog was ever observed, so none is
+    // invented — the reader learns the lane failed before the first turn
+    // without being handed evidence nobody took.
+    expect(died.frame['fields'], <String, String>{
+      kAgentFailurePhaseField: kAgentSetupPhase,
+    });
+    // ...and the child's own diagnosis still rides the reason, unchanged.
+    expect(died.frame['reason'], contains('FATAL: codex-acp could not '));
+
+    // THE CONTROL that makes the line above load-bearing: the SAME death, one
+    // turn later. The brief was delivered and the agent was working on it, so
+    // this one IS the bead's and keeps its historical undeclared meaning —
+    // the phase is a line, not a blanket amnesty for every dying child.
+    final midTurn = await _runBridge(
+      probePath: probePath,
+      probeArgs: const <String>['--identity=turn-exit', '--exit-on-prompt'],
+    );
+    expect(midTurn.frame['kind'], 'failed', reason: '${midTurn.frame}');
+    expect(midTurn.frame['failureKind'], isNull);
+    expect(midTurn.frame['fields'], isNull);
+
+    final exited = await _buildAcpRun(
+      probePath: probePath,
+      identity: 'setup-exit-alloc',
+      probeArgs: const <String>['--die-with=9'],
+      leased: false,
+    );
+    expect(_workClassed(exited.reports), isEmpty);
+    unawaited(exited.allocation.startMounted(exited.tree));
+    final vanished = await _waitForFailure(exited);
+    expect(vanished.kind, CapabilityFailureKind.noResult);
+    expect(vanished.kindDeclared, isTrue);
+    expect(
+      resolveFailureClass(
+        kind: vanished.kind,
+        // Same clock-independence: a child that dies after a slow npx fetch is
+        // still a child that never took a turn.
+        ranFor: const Duration(minutes: 1),
+        kindDeclared: vanished.kindDeclared,
+      ),
+      StepFailureClass.infra,
+    );
+    expect(_workClassed(exited.reports), isEmpty);
+    expect(exited.reports.whereType<AllocationCompleted>(), isEmpty);
+    await exited.close();
   }, timeout: Timeout.none);
 
   test('the capacity refusal reaches the engine as a DECLARED non-result '
@@ -1374,6 +1541,9 @@ void main() {
         promptMode: PromptMode.none,
         target: InferenceTarget.providerManaged,
         model: 'gpt-5.6-sol',
+        // The AGENT, not the launcher (bead `pow-u1bi`): `npx` is on every box
+        // with node, so it proves nothing about codex being installed.
+        pathCheck: 'codex',
         sessionAdapter: kAcpSessionAdapterId,
         roleAsset: '.agents/agents/$kSeatHole.md',
         primeMode: SeatPrimeMode.prompt,

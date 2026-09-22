@@ -112,6 +112,55 @@ String acpModelRefusal({
 String _listed(Iterable<String> values) =>
     values.isEmpty ? '<none>' : values.join(', ');
 
+/// The TYPED refusal a null [resolveAcpModelId] earns at session setup (bead
+/// `pow-u1bi`).
+///
+/// Thrown instead of a bare `StateError` so the bridge's setup catch can
+/// RECOGNIZE the shape rather than matching on its own refusal prose, and carry
+/// the three facts a diagnosis actually needs — the [pin], the [offered]
+/// catalog and the [tier] that asked — as STRUCTURE onto the failure frame.
+///
+/// Its [message] is exactly [acpModelRefusal]'s, unchanged: the operator-facing
+/// wording an existing test and an existing log line both already assert on.
+class AcpModelResolutionFailure implements Exception {
+  /// Creates the refusal for [pin] against [offered] at [tier].
+  AcpModelResolutionFailure({
+    required this.pin,
+    required this.offered,
+    required this.tier,
+  }) : message = acpModelRefusal(want: pin, available: offered, tier: tier);
+
+  /// The BARE model id the environment pinned.
+  final String pin;
+
+  /// Every model id the live session offered.
+  final List<String> offered;
+
+  /// The seat rung whose effort variant was required.
+  final AgentTier tier;
+
+  /// The human refusal prose — [acpModelRefusal]'s, verbatim.
+  final String message;
+
+  @override
+  String toString() => message;
+}
+
+/// The structured evidence a SETUP failure carries onto its `failed` frame.
+///
+/// Always the PHASE; plus the pin, the offered catalog and the resolver's own
+/// verdict when [error] is the bridge's typed [AcpModelResolutionFailure]. Any
+/// other setup error carries the phase alone — the reader then knows the lane
+/// failed before the first turn without being handed a catalog nobody observed.
+Map<String, String> setupFailureFields(Object error) => <String, String>{
+  kAgentFailurePhaseField: kAgentSetupPhase,
+  if (error case final AcpModelResolutionFailure refusal) ...<String, String>{
+    kAgentFailurePinField: refusal.pin,
+    kAgentFailureOfferedField: encodeOfferedField(refusal.offered),
+    kAgentFailureResolverVerdictField: refusal.message,
+  },
+};
+
 /// Serializable description of one ACP-compatible agent child.
 ///
 /// Harness identity remains data: adding another ACP agent is another command,
@@ -501,6 +550,7 @@ class AcpSessionAdapter
       'failed' => AgentProtocolEvent.failed(
         reason: frame['reason']! as String,
         kind: _decodeFailureKind(frame['failureKind']),
+        fields: _decodeFields(frame['fields']),
       ),
       // The AUTHORIZATION frames (bead `pow-ed1c`), all non-terminal.
       'session_bound' => AgentProtocolEvent.sessionBound(
@@ -528,6 +578,21 @@ class AcpSessionAdapter
   /// means. An UNRECOGNIZED value is a protocol error and is thrown over,
   /// never quietly downgraded to `work`: a kind nobody can read is exactly the
   /// misreport this seam exists to prevent.
+  /// Decodes the OPTIONAL structured evidence a `failed` frame may carry.
+  ///
+  /// ABSENT is the EMPTY map — every frame written before the bridge could
+  /// author evidence. A non-string value is dropped rather than thrown over:
+  /// unlike the failure KIND, a diagnostic field gates nothing, so a surprise
+  /// in it must never turn a real harness failure into a protocol error.
+  Map<String, String> _decodeFields(Object? declared) {
+    if (declared is! Map) return const <String, String>{};
+    return <String, String>{
+      for (final entry in declared.entries)
+        if (entry.key is String && entry.value is String)
+          entry.key! as String: entry.value! as String,
+    };
+  }
+
   CapabilityFailureKind _decodeFailureKind(Object? declared) {
     if (declared == null) return CapabilityFailureKind.work;
     for (final kind in CapabilityFailureKind.values) {

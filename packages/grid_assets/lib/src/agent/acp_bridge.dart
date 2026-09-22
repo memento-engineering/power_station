@@ -25,10 +25,15 @@ Future<void> main(List<String> args) => runZoned(
       await runAcpBridge();
     } on Object catch (error, stack) {
       stderr.writeln('ACP bridge setup failed: $error\n$stack');
+      // BEFORE THE FIRST TURN, and before a driver even exists: a spec that
+      // would not decode, a child that would not start. No work was attempted,
+      // so this is the environment's non-result, not the bead's.
       stdout.writeln(
         jsonEncode(<String, Object?>{
           'kind': 'failed',
           'reason': 'ACP bridge setup failed: $error',
+          'failureKind': CapabilityFailureKind.noResult.name,
+          'fields': setupFailureFields(error),
         }),
       );
     }
@@ -146,14 +151,32 @@ Future<void> runAcpBridge() async {
     } on TimeoutException {
       // A wedged pipe must never hold the failure open — report the tail so far.
     }
+    final reason = capturedOutputReason(
+      verb: 'acp agent',
+      adapter: kAcpSessionAdapterId,
+      output: stderrTail.text,
+      exitCode: code,
+      diagnostic: diagnostic,
+    );
+    // THE RACE the setup catch below cannot close (bead `pow-u1bi`). A child
+    // that dies during the handshake, or after it but before the brief's first
+    // turn, is reported HERE — this reporter observes the exit first and
+    // claims the terminal, so the catch never runs. Same fact, so the same
+    // declaration: no turn was ever requested, therefore no work was attempted
+    // and none could have failed. Once a turn HAS been requested the child's
+    // death is that turn's, and keeps its historical undeclared meaning.
+    //
+    // The fields come from the ONE author of them, handed the only error this
+    // path has: a vanished child left no exception behind, so the phase is all
+    // there is to declare — and no catalog nobody observed is invented.
+    if (driver.hasStartedTurn) {
+      driver.fail(reason);
+      return;
+    }
     driver.fail(
-      capturedOutputReason(
-        verb: 'acp agent',
-        adapter: kAcpSessionAdapterId,
-        output: stderrTail.text,
-        exitCode: code,
-        diagnostic: diagnostic,
-      ),
+      reason,
+      kind: CapabilityFailureKind.noResult,
+      fields: setupFailureFields(StateError(diagnostic)),
     );
   }
 
@@ -174,6 +197,11 @@ Future<void> runAcpBridge() async {
     await driver.initialize();
   } on Object catch (error, stack) {
     stderr.writeln('ACP session setup failed: $error\n$stack');
+    // The SETUP terminal (bead `pow-u1bi`): the handshake, `session/new` and
+    // the model selection all happen here, BEFORE the brief is ever delivered.
+    // Whatever refused, the bead's work never started — so the kind is the
+    // engine's own `noResult` and the phase is DECLARED, never inferred
+    // downstream from how fast this happened.
     driver.fail(
       capturedOutputReason(
         verb: 'acp session setup',
@@ -181,6 +209,8 @@ Future<void> runAcpBridge() async {
         output: stderrTail.text,
         diagnostic: '$error',
       ),
+      kind: CapabilityFailureKind.noResult,
+      fields: setupFailureFields(error),
     );
     await driver.consume(stdin);
     return;
@@ -229,6 +259,14 @@ class _AcpBridgeDriver {
   final StringBuffer text = StringBuffer();
   final StringBuffer thought = StringBuffer();
 
+  /// Whether the brief's FIRST TURN has been requested yet.
+  ///
+  /// [requestedGeneration] is the counter, and [enqueue] increments it BEFORE
+  /// the prompt is sent, so this flips the instant the bead's work is asked
+  /// for — never after it is answered. That is the line the setup phase ends
+  /// on: everything before it is the environment being made ready.
+  bool get hasStartedTurn => requestedGeneration > 0;
+
   Future<void> initialize() async {
     await connection.initialize(
       InitializeRequest(
@@ -267,8 +305,14 @@ class _AcpBridgeDriver {
       tier: spec.tier,
     );
     if (resolved == null) {
-      throw StateError(
-        acpModelRefusal(want: want, available: offered, tier: spec.tier),
+      // TYPED, so the setup catch above can carry the pin, the catalog and the
+      // rung as STRUCTURE — a station that has to re-read this sentence to
+      // learn which model was refused is the station that could not diagnose
+      // codex 0.155.1 for itself.
+      throw AcpModelResolutionFailure(
+        pin: want,
+        offered: offered,
+        tier: spec.tier,
       );
     }
     if (resolved != selectedModel) {
@@ -503,14 +547,23 @@ class _AcpBridgeDriver {
     );
   }
 
-  void fail(String reason) {
+  void fail(
+    String reason, {
+    CapabilityFailureKind? kind,
+    Map<String, String> fields = const <String, String>{},
+  }) {
     if (terminal) return;
     terminal = true;
     // No ask survives the terminal: each one is answered "no authorization"
     // and cancelled, never left hanging on a dead turn.
     clearPendingPermissions();
     writeUsage();
-    emit(<String, Object?>{'kind': 'failed', 'reason': reason});
+    emit(<String, Object?>{
+      'kind': 'failed',
+      'reason': reason,
+      if (kind != null) 'failureKind': kind.name,
+      if (fields.isNotEmpty) 'fields': fields,
+    });
   }
 }
 

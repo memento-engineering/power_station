@@ -380,6 +380,11 @@ const Map<String, AgentEnvironment> kBuiltinEnvironments = {
   'codex': AgentEnvironment(
     command: 'npx',
     args: ['-y', '@agentclientprotocol/codex-acp@1.6.2'],
+    // The AGENT, not the launcher (bead `pow-u1bi`). `npx` is present on every
+    // box with node, so PATH-checking the command proved nothing about codex —
+    // and codex is the binary that moved to 0.155.1 and started refusing every
+    // pinned model. gc's `path_check` field is exactly this case.
+    pathCheck: 'codex',
     env: {'INITIAL_AGENT_MODE': 'agent-full-access'},
     promptMode: PromptMode.none,
     target: InferenceTarget.providerManaged,

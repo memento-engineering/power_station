@@ -300,6 +300,7 @@ export 'src/agent/availability_assets.dart';
 export 'src/agent/captured_output.dart';
 export 'src/agent/environment_probe.dart';
 export 'src/agent/environment_registry.dart';
+export 'src/agent/lane_environment_health.dart';
 export 'src/agent/model_tier.dart';
 export 'src/agent/path_check.dart';
 export 'src/agent/permission_policy.dart';
