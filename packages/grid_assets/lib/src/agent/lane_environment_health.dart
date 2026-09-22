@@ -287,7 +287,8 @@ class LaneEnvironmentCondition {
     : down = const <String, LaneEnvironmentDiagnosis>{};
 
   /// Nothing is parked (mirrors `SiteBinding.none`).
-  static const LaneEnvironmentCondition none = LaneEnvironmentCondition._empty();
+  static const LaneEnvironmentCondition none =
+      LaneEnvironmentCondition._empty();
 
   /// The parked lanes, by registry name.
   final Map<String, LaneEnvironmentDiagnosis> down;
@@ -299,9 +300,7 @@ class LaneEnvironmentCondition {
   bool operator ==(Object other) =>
       other is LaneEnvironmentCondition &&
       other.down.length == down.length &&
-      other.down.keys.every(
-        (lane) => identical(other.down[lane], down[lane]),
-      );
+      other.down.keys.every((lane) => identical(other.down[lane], down[lane]));
 
   @override
   int get hashCode => Object.hashAllUnordered(down.keys);
@@ -320,6 +319,10 @@ abstract interface class LaneEnvironmentHealth {
   Stream<LaneEnvironmentCondition> get conditions;
 
   /// Records one session-edge setup refusal and correlates it.
+  ///
+  /// The diagnosis this takes decides BOTH directions: a failing one accrues
+  /// toward a park, and a passing one against a lane already parked un-parks
+  /// it there and then, without waiting for the bounded tick.
   ///
   /// Returns the diagnosis it took, so a caller that wants the evidence has it
   /// without reading state back. [flare] is the ambient transport's own emit
@@ -364,8 +367,16 @@ class CorrelatingLaneEnvironmentHealth implements LaneEnvironmentHealth {
       <String, LaneEnvironmentDiagnosis>{};
   final Map<String, LaneEnvironmentTarget> _targets =
       <String, LaneEnvironmentTarget>{};
+
+  /// SYNCHRONOUS on purpose. The park must be published BEFORE the command
+  /// that earned it completes, because supervision asks for the next spawn off
+  /// the very failure report [recordSetupFailure] is holding open — and an
+  /// asynchronous delivery lands one event-loop turn behind that request. That
+  /// is the third spawn the live incident served while the second failure was
+  /// still being classified. The subscriber's own work stays cheap and
+  /// re-entrancy-free: it mints a pass marker and returns.
   final StreamController<LaneEnvironmentCondition> _conditions =
-      StreamController<LaneEnvironmentCondition>.broadcast();
+      StreamController<LaneEnvironmentCondition>.broadcast(sync: true);
 
   static DateTime _systemNow() => DateTime.now().toUtc();
 
@@ -391,7 +402,18 @@ class CorrelatingLaneEnvironmentHealth implements LaneEnvironmentHealth {
       // The environment answers correctly RIGHT NOW, so whatever refused this
       // spawn was not the lane. Clear the correlation rather than accruing
       // toward a park the evidence does not support.
+      final wasDown = _down.containsKey(lane);
       _clear(lane);
+      // RECOVERY BY THE TARGETED LEG. A spawn already in flight when the lane
+      // went down answers the recovery question just as well as the bounded
+      // tick does — and sooner. Publishing here is what un-parks it; the tick
+      // ([confirmScheduledRecovery]) remains the path for a lane with no
+      // in-flight work left to ask on.
+      //
+      // Only on a real TRANSITION: a passing probe against a lane that was
+      // never down has nothing to say, and republishing an unchanged empty
+      // condition would churn every subscriber for it.
+      if (wasDown) _publish();
       return diagnosis;
     }
     final window = _correlated(lane)..add(diagnosis);

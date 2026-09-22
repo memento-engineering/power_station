@@ -151,14 +151,32 @@ Future<void> runAcpBridge() async {
     } on TimeoutException {
       // A wedged pipe must never hold the failure open — report the tail so far.
     }
+    final reason = capturedOutputReason(
+      verb: 'acp agent',
+      adapter: kAcpSessionAdapterId,
+      output: stderrTail.text,
+      exitCode: code,
+      diagnostic: diagnostic,
+    );
+    // THE RACE the setup catch below cannot close (bead `pow-u1bi`). A child
+    // that dies during the handshake, or after it but before the brief's first
+    // turn, is reported HERE — this reporter observes the exit first and
+    // claims the terminal, so the catch never runs. Same fact, so the same
+    // declaration: no turn was ever requested, therefore no work was attempted
+    // and none could have failed. Once a turn HAS been requested the child's
+    // death is that turn's, and keeps its historical undeclared meaning.
+    //
+    // The fields come from the ONE author of them, handed the only error this
+    // path has: a vanished child left no exception behind, so the phase is all
+    // there is to declare — and no catalog nobody observed is invented.
+    if (driver.hasStartedTurn) {
+      driver.fail(reason);
+      return;
+    }
     driver.fail(
-      capturedOutputReason(
-        verb: 'acp agent',
-        adapter: kAcpSessionAdapterId,
-        output: stderrTail.text,
-        exitCode: code,
-        diagnostic: diagnostic,
-      ),
+      reason,
+      kind: CapabilityFailureKind.noResult,
+      fields: setupFailureFields(StateError(diagnostic)),
     );
   }
 
@@ -240,6 +258,14 @@ class _AcpBridgeDriver {
   Future<void> tail = Future<void>.value();
   final StringBuffer text = StringBuffer();
   final StringBuffer thought = StringBuffer();
+
+  /// Whether the brief's FIRST TURN has been requested yet.
+  ///
+  /// [requestedGeneration] is the counter, and [enqueue] increments it BEFORE
+  /// the prompt is sent, so this flips the instant the bead's work is asked
+  /// for — never after it is answered. That is the line the setup phase ends
+  /// on: everything before it is the environment being made ready.
+  bool get hasStartedTurn => requestedGeneration > 0;
 
   Future<void> initialize() async {
     await connection.initialize(

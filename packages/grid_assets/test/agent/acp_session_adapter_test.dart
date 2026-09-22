@@ -666,10 +666,16 @@ void main() {
   // Bead `pow-u1bi`: the codex 0.155.1 incident. The CLI moved at 23:22Z and
   // from 23:3xZ every codex session setup refused the pinned model — and the
   // station charged each refusal to the BEAD, one attempt at a time, while the
-  // wedge counter read `0 running`. A refusal that happens BEFORE the first
+  // wedge counter read `0 running`. A failure that happens BEFORE the first
   // turn cannot be the bead's fault: no brief was delivered, so no work was
   // attempted and none could have failed.
-  test('ACP setup refusal is infra and does not charge a work attempt', () async {
+  //
+  // BOTH SHAPES, because the phase is a LINE and not a message: the typed
+  // pinned-model refusal the incident produced, and the child that simply
+  // vanishes during the handshake — which the setup catch cannot claim,
+  // because the exit reporter observes it first.
+  test('ACP failures before the first turn are infra and do not charge a work '
+      'attempt', () async {
     // THE WIRE. The bridge DECLARES the kind and the evidence; nothing
     // downstream parses the reason prose to recover either.
     final refused = await _runBridge(
@@ -733,11 +739,76 @@ void main() {
     // same long turn, UNDECLARED, is not infra.
     expect(_workClassed(run.reports), isEmpty);
     expect(
-      resolveFailureClass(kind: failure.kind, ranFor: const Duration(minutes: 1)),
+      resolveFailureClass(
+        kind: failure.kind,
+        ranFor: const Duration(minutes: 1),
+      ),
       StepFailureClass.noResult,
     );
     expect(run.reports.whereType<AllocationCompleted>(), isEmpty);
     await run.close();
+
+    // THE SECOND SHAPE: the child DIES before the first turn — a binary that
+    // cannot authenticate, a launcher the upgrade broke. The setup catch never
+    // sees it (the exit reporter wins the race and claims the terminal), so
+    // without a declaration here the same pre-turn environment fault would
+    // reach the engine as the bead's own untyped work failure — the exact
+    // attribution the incident was made of.
+    final died = await _runBridge(
+      probePath: probePath,
+      probeArgs: const <String>[
+        '--identity=setup-exit',
+        '--die-with=9',
+        '--stderr=FATAL: codex-acp could not authenticate',
+      ],
+    );
+    expect(died.frame['kind'], 'failed', reason: '${died.frame}');
+    expect(died.frame['failureKind'], CapabilityFailureKind.noResult.name);
+    // The PHASE, and ONLY the phase: no catalog was ever observed, so none is
+    // invented — the reader learns the lane failed before the first turn
+    // without being handed evidence nobody took.
+    expect(died.frame['fields'], <String, String>{
+      kAgentFailurePhaseField: kAgentSetupPhase,
+    });
+    // ...and the child's own diagnosis still rides the reason, unchanged.
+    expect(died.frame['reason'], contains('FATAL: codex-acp could not '));
+
+    // THE CONTROL that makes the line above load-bearing: the SAME death, one
+    // turn later. The brief was delivered and the agent was working on it, so
+    // this one IS the bead's and keeps its historical undeclared meaning —
+    // the phase is a line, not a blanket amnesty for every dying child.
+    final midTurn = await _runBridge(
+      probePath: probePath,
+      probeArgs: const <String>['--identity=turn-exit', '--exit-on-prompt'],
+    );
+    expect(midTurn.frame['kind'], 'failed', reason: '${midTurn.frame}');
+    expect(midTurn.frame['failureKind'], isNull);
+    expect(midTurn.frame['fields'], isNull);
+
+    final exited = await _buildAcpRun(
+      probePath: probePath,
+      identity: 'setup-exit-alloc',
+      probeArgs: const <String>['--die-with=9'],
+      leased: false,
+    );
+    expect(_workClassed(exited.reports), isEmpty);
+    unawaited(exited.allocation.startMounted(exited.tree));
+    final vanished = await _waitForFailure(exited);
+    expect(vanished.kind, CapabilityFailureKind.noResult);
+    expect(vanished.kindDeclared, isTrue);
+    expect(
+      resolveFailureClass(
+        kind: vanished.kind,
+        // Same clock-independence: a child that dies after a slow npx fetch is
+        // still a child that never took a turn.
+        ranFor: const Duration(minutes: 1),
+        kindDeclared: vanished.kindDeclared,
+      ),
+      StepFailureClass.infra,
+    );
+    expect(_workClassed(exited.reports), isEmpty);
+    expect(exited.reports.whereType<AllocationCompleted>(), isEmpty);
+    await exited.close();
   }, timeout: Timeout.none);
 
   test('the capacity refusal reaches the engine as a DECLARED non-result '

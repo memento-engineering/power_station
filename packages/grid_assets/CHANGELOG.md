@@ -1,3 +1,32 @@
+## Unreleased
+
+- The agent LANE is now the unit of environment diagnosis, and an environment fault is no longer
+  charged to the work. A session-setup failure the harness declares BEFORE its first turn — a
+  pinned model the bridge cannot resolve against the catalog the agent offered, or a child that
+  dies during the handshake — is reported with the engine's `noResult` kind and a declared `setup`
+  phase, which the engine resolves to an infra failure irrespective of how long the spawn took, so
+  the bead's attempt cursor is untouched. A crash during an actual turn keeps its previous untyped
+  meaning: the phase is a line, not an amnesty.
+  `LaneEnvironmentHealth` correlates those declarations per lane. Two inside thirty minutes PARK
+  the lane and publish one `lane.down` condition carrying the agent binary's path, version and
+  mtime, the pin, the catalog offered and the resolver's own verdict — enough for an operator to
+  read the cause in one line — and the parked lane leaves `AvailableEnvironments`, so no further
+  spawn is minted on it while it is down. The park is published before the failure that earned it
+  is reported, so the next supervision round cannot be served on a lane already known to be gone.
+  Recovery needs no operator: a passing diagnosis un-parks the lane, whether it comes from the
+  bounded re-probe tick (which also re-admits a REPLACED binary for one handshake) or from a
+  setup failure whose targeted probe now resolves, and work held behind the lane mints again.
+  New public surface: `LaneEnvironmentHealth`, `CorrelatingLaneEnvironmentHealth`,
+  `LaneEnvironmentTarget`, `LaneEnvironmentCondition`, `LaneEnvironmentDiagnosis`,
+  `LaneEnvironmentSetupFailure`, `LaneEnvironmentProbeRequest`, `LaneEnvironmentDiagnosticProbe`,
+  `LaneBinaryFingerprint`, `LaneFlare`, `kLaneDownFlare`, `kLaneFailureCorrelationWindow`,
+  `kLaneFactUnknown`, `laneDownFlareFields`, `laneDownSummary`, `ProcessLaneEnvironmentProbe`,
+  `AcpModelResolver`, `semanticVersionToken`, `AcpModelResolutionFailure`, `setupFailureFields`,
+  `EnvironmentProbeArming.laneHealth`, `AvailabilityAssets.laneHealth`, and the declared failure
+  fields `kAgentFailurePhaseField`, `kAgentSetupPhase`, `kAgentFailurePinField`,
+  `kAgentFailureOfferedField`, `kAgentFailureResolverVerdictField`, `encodeOfferedField` and
+  `decodeOfferedField`.
+
 ## 0.7.0-dev.5
 
 - Breaking: an ACP agent that offers one model id per reasoning effort now resolves a BARE seat pin

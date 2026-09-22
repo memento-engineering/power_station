@@ -17,10 +17,7 @@ import 'dart:convert';
 import 'package:genesis_tree/genesis_tree.dart';
 import 'package:grid_assets/grid_assets.dart';
 import 'package:grid_engine/grid_engine.dart'
-    show
-        CapabilityFailureKind,
-        ProcessSessionCommand,
-        ProcessSessionFailed;
+    show CapabilityFailureKind, ProcessSessionCommand, ProcessSessionFailed;
 import 'package:grid_engine/testing.dart';
 import 'package:grid_runtime/grid_runtime.dart' show Lifecycle, RuntimeConfig;
 import 'package:test/test.dart';
@@ -114,14 +111,15 @@ final LaneBinaryFingerprint _upgraded = LaneBinaryFingerprint(
   mtime: DateTime.utc(2026, 9, 21, 23, 22),
 );
 
-LaneEnvironmentSetupFailure _setupRefusal() => const LaneEnvironmentSetupFailure(
-  target: _codexLane,
-  offered: _offered,
-  pin: 'gpt-5.6-sol',
-  resolverVerdict:
-      'ACP agent does not offer pinned model "gpt-5.6-sol" at the '
-      '"frontier" tier',
-);
+LaneEnvironmentSetupFailure _setupRefusal() =>
+    const LaneEnvironmentSetupFailure(
+      target: _codexLane,
+      offered: _offered,
+      pin: 'gpt-5.6-sol',
+      resolverVerdict:
+          'ACP agent does not offer pinned model "gpt-5.6-sol" at the '
+          '"frontier" tier',
+    );
 
 /// A scripted diagnostic probe: it answers whatever the test has armed, and
 /// RECORDS every request so the targeted/scheduled split can be asserted.
@@ -315,6 +313,12 @@ void main() {
       final flares = <({String name, Map<String, String> data})>[];
       void flare(String name, Map<String, String> data) =>
           flares.add((name: name, data: data));
+      // SUBSCRIBED BEFORE the first refusal, so every transition this run
+      // publishes is observed — including one published before the command
+      // that earned it returns.
+      final published = <LaneEnvironmentCondition>[];
+      final watching = health.conditions.listen(published.add);
+      addTearDown(watching.cancel);
 
       // ROUND 1 minted, and the boolean probe is happy about BOTH lanes — the
       // live incident's starting state exactly.
@@ -327,16 +331,32 @@ void main() {
       await health.recordSetupFailure(_setupRefusal(), flare: flare);
       await _settle(mounted.owner);
       expect(flares, isEmpty);
+      expect(published, isEmpty, reason: 'one refusal publishes no condition');
       mounted.rounds.nextRound();
       await _settle(mounted.owner);
-      expect(
-        mounted.mints,
-        <int>[1, 2],
-        reason: 'the lane is still up, so round 2 still mints',
-      );
+      expect(mounted.mints, <int>[
+        1,
+        2,
+      ], reason: 'the lane is still up, so round 2 still mints');
 
-      // THE SECOND refusal, inside the window, IS the lane.
-      await health.recordSetupFailure(_setupRefusal(), flare: flare);
+      // THE SECOND refusal, inside the window, IS the lane — and the park is
+      // published BEFORE this command completes. That ordering is the whole
+      // defence against the third spawn: supervision asks for the next one off
+      // the very failure report this diagnosis is holding open, so a park that
+      // lands afterwards lands too late. Read AT the completion, with no await
+      // of the test's own in between — a test that settles first can no longer
+      // tell the difference.
+      var downAtCompletion = false;
+      await health
+          .recordSetupFailure(_setupRefusal(), flare: flare)
+          .then(
+            (_) => downAtCompletion = published.any(
+              (condition) => condition.isDown('codex'),
+            ),
+          );
+      expect(downAtCompletion, isTrue);
+      expect(published, hasLength(1), reason: 'ONE condition per transition');
+      expect(published.single.down.keys, <String>['codex']);
       await _settle(mounted.owner);
 
       // ONE flare, with the WHOLE record — exactly nine keys, every one of them
@@ -407,76 +427,152 @@ void main() {
       expect(targeted.first.pin, 'gpt-5.6-sol');
     });
 
-    test('a passing probe unparks the lane and remints held work', () async {
-      final probe = _FakeLaneProbe(binary: _upgraded);
-      final health = CorrelatingLaneEnvironmentHealth(
-        probe: probe.call,
-        now: () => DateTime.utc(2026, 9, 21, 23, 40),
-      );
-      addTearDown(health.dispose);
-      final presence = _PresentProbe();
-      final schedule = _FakeSchedule();
-      final mounted = await _mount(
-        presence: presence,
-        schedule: schedule,
-        health: health,
-      );
-      addTearDown(mounted.owner.dispose);
+    test(
+      'a passing scheduled probe unparks the lane and remints held work',
+      () async {
+        final probe = _FakeLaneProbe(binary: _upgraded);
+        final health = CorrelatingLaneEnvironmentHealth(
+          probe: probe.call,
+          now: () => DateTime.utc(2026, 9, 21, 23, 40),
+        );
+        addTearDown(health.dispose);
+        final presence = _PresentProbe();
+        final schedule = _FakeSchedule();
+        final mounted = await _mount(
+          presence: presence,
+          schedule: schedule,
+          health: health,
+        );
+        addTearDown(mounted.owner.dispose);
 
-      // TWO setup mints, each ending in a refusal — the live shape.
-      expect(mounted.mints, <int>[1]);
-      await health.recordSetupFailure(_setupRefusal());
-      await _settle(mounted.owner);
-      mounted.rounds.nextRound();
-      await _settle(mounted.owner);
-      expect(mounted.mints, <int>[1, 2]);
-      await health.recordSetupFailure(_setupRefusal());
-      await _settle(mounted.owner);
-      expect(mounted.observed.last, isNull);
+        // TWO setup mints, each ending in a refusal — the live shape.
+        expect(mounted.mints, <int>[1]);
+        await health.recordSetupFailure(_setupRefusal());
+        await _settle(mounted.owner);
+        mounted.rounds.nextRound();
+        await _settle(mounted.owner);
+        expect(mounted.mints, <int>[1, 2]);
+        await health.recordSetupFailure(_setupRefusal());
+        await _settle(mounted.owner);
+        expect(mounted.observed.last, isNull);
 
-      // NO MINT WHILE THE CONDITION IS DOWN. Supervision asks for round 3 and
-      // the seat resolves to nothing — the work is HELD, not failed: this is
-      // the one bead the live station would have burned an attempt on next.
-      mounted.rounds.nextRound();
-      await _settle(mounted.owner);
-      expect(mounted.mints, <int>[1, 2]);
-      expect(mounted.observed.last, isNull);
+        // NO MINT WHILE THE CONDITION IS DOWN. Supervision asks for round 3 and
+        // the seat resolves to nothing — the work is HELD, not failed: this is
+        // the one bead the live station would have burned an attempt on next.
+        mounted.rounds.nextRound();
+        await _settle(mounted.owner);
+        expect(mounted.mints, <int>[1, 2]);
+        expect(mounted.observed.last, isNull);
 
-      // ...and the bounded tick does not lift the park by itself while the
-      // environment still refuses.
-      schedule.fire();
-      await _settle(mounted.owner);
-      expect(mounted.observed.last, isNull);
-      expect(
-        mounted.mints,
-        <int>[1, 2],
-        reason: 'a failing recheck re-confirms the park; it never re-admits',
-      );
-      expect(probe.requests.last.scheduled, isTrue);
-      expect(
-        probe.requests.last.priorBinary,
-        _upgraded,
-        reason:
-            'the scheduled leg carries the down record so a REPLACED binary '
-            'is distinguishable from the same broken one',
-      );
+        // ...and the bounded tick does not lift the park by itself while the
+        // environment still refuses.
+        schedule.fire();
+        await _settle(mounted.owner);
+        expect(mounted.observed.last, isNull);
+        expect(
+          mounted.mints,
+          <int>[1, 2],
+          reason: 'a failing recheck re-confirms the park; it never re-admits',
+        );
+        expect(probe.requests.last.scheduled, isTrue);
+        expect(
+          probe.requests.last.priorBinary,
+          _upgraded,
+          reason:
+              'the scheduled leg carries the down record so a REPLACED binary '
+              'is distinguishable from the same broken one',
+        );
 
-      // RECOVERY. The environment answers correctly again — a config change, a
-      // rollback, or the resolver defect landing. Nothing an operator did to
-      // the bead.
-      probe.passes = true;
-      schedule.fire();
-      await _settle(mounted.owner);
+        // RECOVERY. The environment answers correctly again — a config change, a
+        // rollback, or the resolver defect landing. Nothing an operator did to
+        // the bead.
+        probe.passes = true;
+        schedule.fire();
+        await _settle(mounted.owner);
 
-      // The lane is back, and the round that was held mints its SUCCESSOR off
-      // the availability change alone — no operator edit, no rework round.
-      expect(mounted.observed.last, _codex);
-      expect(
-        mounted.mints,
-        <int>[1, 2, 3],
-        reason: 'the held round 3 mints the instant the lane returns',
-      );
-    });
+        // The lane is back, and the round that was held mints its SUCCESSOR off
+        // the availability change alone — no operator edit, no rework round.
+        expect(mounted.observed.last, _codex);
+        expect(
+          mounted.mints,
+          <int>[1, 2, 3],
+          reason: 'the held round 3 mints the instant the lane returns',
+        );
+      },
+    );
+
+    // THE OTHER RECOVERY LEG. A spawn that was already in flight when the lane
+    // went down comes back with its own targeted answer — and if the
+    // environment now resolves, that answer is as good as the tick's, and
+    // arrives sooner. The bounded tick stays the path for a parked lane with
+    // no in-flight work left to ask on; this is the path for one that has.
+    test(
+      'a passing targeted probe unparks the lane and remints held work',
+      () async {
+        final probe = _FakeLaneProbe(binary: _upgraded);
+        final health = CorrelatingLaneEnvironmentHealth(
+          probe: probe.call,
+          now: () => DateTime.utc(2026, 9, 21, 23, 40),
+        );
+        addTearDown(health.dispose);
+        final presence = _PresentProbe();
+        final schedule = _FakeSchedule();
+        final mounted = await _mount(
+          presence: presence,
+          schedule: schedule,
+          health: health,
+        );
+        addTearDown(mounted.owner.dispose);
+        final flares = <String>[];
+        void flare(String name, Map<String, String> data) => flares.add(name);
+        final published = <LaneEnvironmentCondition>[];
+        final watching = health.conditions.listen(published.add);
+        addTearDown(watching.cancel);
+
+        // PARKED, the measured way: two correlated refusals and one flare.
+        await health.recordSetupFailure(_setupRefusal(), flare: flare);
+        await _settle(mounted.owner);
+        mounted.rounds.nextRound();
+        await _settle(mounted.owner);
+        await health.recordSetupFailure(_setupRefusal(), flare: flare);
+        await _settle(mounted.owner);
+        expect(flares, <String>[kLaneDownFlare]);
+        expect(mounted.observed.last, isNull);
+        mounted.rounds.nextRound();
+        await _settle(mounted.owner);
+        expect(mounted.mints, <int>[1, 2], reason: 'round 3 is HELD');
+
+        // The environment answers correctly again, and the next thing to ask is
+        // the refusal of a session that was already running when it did.
+        probe.passes = true;
+        await health.recordSetupFailure(_setupRefusal(), flare: flare);
+        await _settle(mounted.owner);
+
+        // ONE recovered condition, and no second diagnosis flared: the lane went
+        // down once and came back once, which is two events and not three.
+        expect(published, hasLength(2));
+        expect(published.first.isDown('codex'), isTrue);
+        expect(published.last.down, isEmpty);
+        expect(flares, <String>[kLaneDownFlare]);
+
+        // The lane is back in the presence set and the HELD round mints its
+        // successor off that change alone — no bead, gate or operator touched.
+        expect(mounted.observed.last, _codex);
+        expect(
+          mounted.mints,
+          <int>[1, 2, 3],
+          reason: 'the held round 3 mints the instant the lane returns',
+        );
+
+        // ...and the correlation history went with it: the NEXT refusal is a
+        // first data point again, not the second half of a cured incident.
+        probe.passes = false;
+        await health.recordSetupFailure(_setupRefusal(), flare: flare);
+        await _settle(mounted.owner);
+        expect(flares, <String>[kLaneDownFlare]);
+        expect(mounted.observed.last, _codex);
+      },
+    );
 
     test('a passing TARGETED diagnosis never accrues toward a park', () async {
       final probe = _FakeLaneProbe(binary: _upgraded)..passes = true;
@@ -530,8 +626,7 @@ void main() {
     /// The probe's IO composed over Fakes: the composition is pure, only the
     /// defaults touch the box (A38(7)'s rule for the boolean probe, applied to
     /// this one).
-    ({ProcessLaneEnvironmentProbe probe, List<String> located})
-    build({
+    ({ProcessLaneEnvironmentProbe probe, List<String> located}) build({
       String? path = '/opt/homebrew/bin/codex',
       String? version = '0.155.1',
       DateTime? mtime,
@@ -544,8 +639,7 @@ void main() {
             return path;
           },
           readVersion: (_) async => version,
-          readMtime: (_) async =>
-              mtime ?? DateTime.utc(2026, 9, 21, 23, 22),
+          readMtime: (_) async => mtime ?? DateTime.utc(2026, 9, 21, 23, 22),
           now: () => DateTime.utc(2026, 9, 21, 23, 35),
         ),
         located: located,
@@ -703,18 +797,7 @@ void main() {
         runtime.emitInteraction(
           name,
           utf8.encode(
-            '${jsonEncode(<String, Object?>{
-              'kind': 'failed',
-              'reason': 'acp session setup failed [acp]: …',
-              'failureKind': CapabilityFailureKind.noResult.name,
-              'fields': setupFailureFields(
-                AcpModelResolutionFailure(
-                  pin: 'gpt-5.6-sol',
-                  offered: _offered,
-                  tier: AgentTier.frontier,
-                ),
-              ),
-            })}\n',
+            '${jsonEncode(<String, Object?>{'kind': 'failed', 'reason': 'acp session setup failed [acp]: …', 'failureKind': CapabilityFailureKind.noResult.name, 'fields': setupFailureFields(AcpModelResolutionFailure(pin: 'gpt-5.6-sol', offered: _offered, tier: AgentTier.frontier))})}\n',
           ),
         );
         final update = await terminal.timeout(const Duration(seconds: 5));
@@ -737,61 +820,55 @@ void main() {
       },
     );
 
-    test(
-      'an ORDINARY failure never reaches the coordinator',
-      () async {
-        final probe = _FakeLaneProbe(binary: _upgraded);
-        final health = _RecordingHealth(
-          CorrelatingLaneEnvironmentHealth(probe: probe.call),
-        );
-        addTearDown(health.inner.dispose);
-        const name = 'session-midturn/work-1/agent';
-        final runtime = FakeRuntimeProvider();
-        await runtime.start(
-          name,
-          const RuntimeConfig(
-            workDir: '.',
-            command: 'probe',
-            lifecycle: Lifecycle.longLived,
-          ),
-        );
-        final session = AgentSession(
-          runtime: runtime,
-          name: name,
-          adapter: const AcpSessionAdapter(),
-          brief: const AgentBrief(task: 'lane probe'),
-          commands: const Stream<ProcessSessionCommand>.empty(),
-          attemptId: 'attempt-1',
-          instanceFence: 'fence-1',
-          laneHealth: health,
-          laneTarget: _codexLane,
-        );
-        addTearDown(session.close);
-        final terminal = session.updates.first;
-        await session.start();
-        runtime.emitInteraction(
-          name,
-          utf8.encode(
-            '${jsonEncode(<String, Object?>{
-              'kind': 'failed',
-              'reason': 'prompt stopped with refusal',
-            })}\n',
-          ),
-        );
-        expect(
-          await terminal.timeout(const Duration(seconds: 5)),
-          isA<ProcessSessionFailed>().having(
-            (f) => f.kind,
-            'kind',
-            CapabilityFailureKind.work,
-          ),
-        );
-        // A mid-turn failure IS the bead's, and diagnosing the lane for it is
-        // the same over-attribution pointing the other way.
-        expect(health.recorded, isEmpty);
-        expect(probe.requests, isEmpty);
-      },
-    );
+    test('an ORDINARY failure never reaches the coordinator', () async {
+      final probe = _FakeLaneProbe(binary: _upgraded);
+      final health = _RecordingHealth(
+        CorrelatingLaneEnvironmentHealth(probe: probe.call),
+      );
+      addTearDown(health.inner.dispose);
+      const name = 'session-midturn/work-1/agent';
+      final runtime = FakeRuntimeProvider();
+      await runtime.start(
+        name,
+        const RuntimeConfig(
+          workDir: '.',
+          command: 'probe',
+          lifecycle: Lifecycle.longLived,
+        ),
+      );
+      final session = AgentSession(
+        runtime: runtime,
+        name: name,
+        adapter: const AcpSessionAdapter(),
+        brief: const AgentBrief(task: 'lane probe'),
+        commands: const Stream<ProcessSessionCommand>.empty(),
+        attemptId: 'attempt-1',
+        instanceFence: 'fence-1',
+        laneHealth: health,
+        laneTarget: _codexLane,
+      );
+      addTearDown(session.close);
+      final terminal = session.updates.first;
+      await session.start();
+      runtime.emitInteraction(
+        name,
+        utf8.encode(
+          '${jsonEncode(<String, Object?>{'kind': 'failed', 'reason': 'prompt stopped with refusal'})}\n',
+        ),
+      );
+      expect(
+        await terminal.timeout(const Duration(seconds: 5)),
+        isA<ProcessSessionFailed>().having(
+          (f) => f.kind,
+          'kind',
+          CapabilityFailureKind.work,
+        ),
+      );
+      // A mid-turn failure IS the bead's, and diagnosing the lane for it is
+      // the same over-attribution pointing the other way.
+      expect(health.recorded, isEmpty);
+      expect(probe.requests, isEmpty);
+    });
 
     test('the setup phase decodes off the FIELDS, never the prose', () {
       final refusal = AcpModelResolutionFailure(

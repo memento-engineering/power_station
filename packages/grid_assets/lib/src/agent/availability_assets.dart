@@ -108,7 +108,8 @@ class EnvironmentProbeArming {
       identical(other.laneHealth, laneHealth);
 
   @override
-  int get hashCode => Object.hash(probe, interval, identityHashCode(laneHealth));
+  int get hashCode =>
+      Object.hash(probe, interval, identityHashCode(laneHealth));
 
   @override
   String toString() => 'EnvironmentProbeArming($interval)';

@@ -339,10 +339,9 @@ Future<String?> resolveBinaryPath(String command) async {
 Future<String?> readBinaryVersion(String path) async {
   final ProcessResult result;
   try {
-    result = await Process.run(
-      path,
-      const <String>['--version'],
-    ).timeout(kEnvironmentProbeTimeout);
+    result = await Process.run(path, const <String>[
+      '--version',
+    ]).timeout(kEnvironmentProbeTimeout);
   } on Object {
     return null;
   }
