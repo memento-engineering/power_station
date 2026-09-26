@@ -1,5 +1,52 @@
 ## Unreleased
 
+- Breaking: the `code-validation` review lane hard-blocks only on a BRANCH REGRESSION
+  (`power_station#code-validation-hard-blocks-only-branch-regressions`, pow-5n53). It runs the
+  bead's Validation Plan on the branch AND in a detached scratch worktree at the branch's
+  merge-base with the review base (`reviewBaseRef`), on the same host, and gates only on a named
+  test that fails on the branch and passes at the base. A test failing identically on both is a
+  NOTE: named in `.grid/critique/code-validation.json` as `preexisting` and carried into the PR
+  body's circuit receipt as `pre-existing on base: <test>`, never a gate. A run that cannot be
+  compared — a base or branch plan that fails without naming a test, a plan the deadline cut, a
+  scratch worktree that could not be made or unwound — is a lane failure with a named cause
+  (`Failed.noResult`, one attempt, then parked at a gate), never a grade. The base run is cached
+  per (merge-base sha, plan digest, host) under the grid home's
+  `.grid/critique-cache/code-validation/`. The landing circuit's `revalidate` step asks the same
+  comparison. `declared-tests-present` stops gating a declared path the comparison proved already
+  fails at the merge base.
+  Contract changes a consumer can observe: `.grid/critique/code-validation.rc` now holds the
+  EFFECTIVE delta exit (`0` unless the branch regressed) — the raw branch exit moved to `branchRc`
+  in the lane's JSON artifact and payload; the lane's payload carries `regressions`,
+  `preexisting`, `baseSha` and `baseCache`; and `RevalidateCapability({ShellRunner? runner})` is
+  now `RevalidateCapability({ValidationDeltaRunner? comparison})`.
+- Breaking: `code-validation` enforces its OWN ten-minute deadline as a `ServiceCapability`
+  (`power_station#code-validation-enforces-its-own-deadline-as-a-service-capability`) instead of
+  riding a runtime provider's watchdog. `SystemShellRunner` starts a bounded plan under a
+  process-group launcher and terminates that whole group through `grid_runtime`'s
+  `terminateGroup` when the bound elapses, answering `ShellRunResult.timedOut`. Retired with the
+  spawned lane: the `kGatingRubric` branch of `CriticCapability.spawn`/`interpretEvent`/`result`,
+  the `.grid/critique/code-validation.plan.sh` wrapper, and the
+  `.grid/critique-incarnation/code-validation.deadline` stamp. The diagnostics-lead clause of
+  `power_station#code-validation-preserves-diagnostics-and-reports-deadline` stands: a regressed
+  branch run's `Error:`, `Failed to load` and line-leading `[E]` lines, deduplicated in encounter
+  order and bounded to 320 characters, lead the route's lane-named hard block, and a lane failure
+  leads with the same head, then the lane, the relative full-log path and the advice-stripped tail.
+- `ShellRunner.run` is UNCHANGED for implementors: a Fake declared `implements ShellRunner` with
+  only `workingDirectory` and `command` still compiles. The bound rides the new
+  `BoundedShellRunner` extension point (whose `run` adds an optional `Duration? deadline`), and
+  `runWithinDeadline` bounds a `BoundedShellRunner` while running any other `ShellRunner` exactly
+  as before — so a runner injected under the plain contract owns its own bounding. The default
+  `SystemShellRunner` is bounded. The shell seam moved to `src/code/validation.dart` and is still
+  re-exported from `landing.dart`.
+  New public surface: `BoundedShellRunner`, `runWithinDeadline`, `ValidationDeltaRunner`,
+  `ValidationDelta`, `ValidationLaneFailure`, `failingTestNames`, `kValidationDeadline`,
+  `reviewBaseRef`, `ShellRunResult.timedOut`, and `SystemShellRunner`'s `shellExecutable`,
+  `dartExecutable` and `groups` parameters.
+  Migration: a Fake that must OBSERVE the deadline the lanes pass implements `BoundedShellRunner`;
+  every other `ShellRunner` Fake needs no change. A consumer that built
+  `RevalidateCapability(runner: shell)` builds
+  `RevalidateCapability(comparison: ValidationDeltaRunner(shellRunner: shell))`.
+
 - Fixed: the filing contract's `bead_references` row reads each attached store's OWN id grammar
   instead of "a store prefix plus any word". A completed all-status catalog teaches the root
   LENGTHS that store mints, spelled in lowercase ASCII alphanumerics, plus bd's decimal dotted
