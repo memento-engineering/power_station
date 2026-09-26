@@ -44,6 +44,23 @@ const String kCiFeedbackUnattributedFlare = 'reconciler.ciFeedbackUnattributed';
 const String kCiFeedbackLandingUnresolvedFlare =
     'reconciler.ciFeedbackLandingUnresolved';
 
+/// The flare name carried by a capped work bead whose ci-rework cap gate the
+/// grid STATE store refused to mint.
+///
+/// The DEGRADED event, never a wedge. A cap-gate write is ONE bead's business:
+/// letting its failure throw out of the delivery leg aborted the WHOLE
+/// reconciliation cycle before the poll, and the shared obligation tick then
+/// failed on every cycle for every substation while one red pull kept refusing
+/// (observed on lunar epoch 98: `trajectory.obligationStuck` at streak 5 over
+/// a single bead). The gate is lost, loudly, naming the bead, and the cycle
+/// continues past it.
+const String kCiFeedbackCapGateUnresolvedFlare =
+    'reconciler.ciFeedbackCapGateUnresolved';
+
+/// The `node` a ci-rework cap gate blocks, for [beadId]: the same
+/// `<bead>/<leaf>` shape every engine-minted gate's `node` carries.
+String ciReworkCapGateNode(String beadId) => '$beadId/ci-feedback';
+
 /// Reports one CI-feedback outcome the leg declined to act on.
 ///
 /// The SAME shape the reconciler asset already reports a failed cycle and a
@@ -361,40 +378,122 @@ final class CiFeedbackProjection {
     }
   }
 
+  /// Flares that [beadId]'s ci-rework cap gate could not be minted, for
+  /// [detail], and returns.
+  ///
+  /// Names the bead, the store that was written (the grid STATE store, never
+  /// the work store) and what that store said, so a human can tell a lost gate
+  /// from a mis-composed seat.
+  void _capGateUnresolved(String beadId, String detail) => _flare(
+    kCiFeedbackCapGateUnresolvedFlare,
+    'left $beadId ungated after a rework-cap decision',
+    'ci-rework cap gate for $beadId could not be minted in the grid state '
+        'store: $detail',
+  );
+
+  /// Mints [decision]'s ci-rework cap gate in the grid STATE store, or refreshes
+  /// the one already open, and NEVER throws.
+  ///
+  /// THE ID IS THE STORE'S. The gate used to be created as
+  /// `--id <workBead>-ci-rework-cap`, which carries the WORK bead's prefix into
+  /// a store that mints its own: bd refuses every such create with `prefix
+  /// mismatch: database uses 'tranquility-' but ID 'tg-…-ci-rework-cap' doesn't
+  /// match (use --force to override)`. `--force` is NOT the fix — it would
+  /// write a foreign-prefixed id into the state store. The gate is minted the
+  /// way every engine gate and session bead is minted: `bd create -t gate` with
+  /// no `--id`, so the state store stamps its own prefix, and the work bead
+  /// rides in the title and in metadata (`work_bead`, and `node` as
+  /// `<bead>/ci-feedback`) exactly as a session bead carries its `work_bead`.
+  ///
+  /// DEDUP IS A READ, NOT A COLLISION. With no fixed id there is no
+  /// `already exists` to lean on, so this probes the state store for an OPEN
+  /// gate blocking the same session at the same node first — the engine's own
+  /// mint-dedup shape — and refreshes its `reason` instead of piling up a
+  /// duplicate. The probe is best-effort: a read error falls through to a
+  /// fresh mint, because a duplicate gate is inert and a missing one is not.
+  ///
+  /// A WRITE FAILURE IS ONE BEAD'S. It is flared under
+  /// [kCiFeedbackCapGateUnresolvedFlare] and returned from, never thrown, so
+  /// the delivery leg acknowledges the observation and the cycle reaches its
+  /// poll and every other bead's feedback. The decision's idempotency key is
+  /// released on failure so the NEXT observation of the same red head retries
+  /// the mint — unlike a landing mark the store cannot resolve, a refused write
+  /// is a store fault that may well have cleared by then.
   Future<void> createCapGate(
     CiFeedbackDecision decision,
     PullRequestFeedback event,
   ) async {
-    final result = await bd.run([
-      'create',
-      '--actor',
-      'github-feedback',
-      '--id',
-      '${decision.beadId}-ci-rework-cap',
-      '--title',
-      'CI rework cap reached for ${decision.beadId}',
-      '--type',
-      'gate',
-      '--metadata',
-      jsonEncode({
-        'rig': substation,
-        'blocks': decision.sessionId,
-        'node': '${decision.beadId}/ci-feedback',
-        'reason':
-            'CI rework cap reached after ${decision.round} retired rounds; '
-            'pull request #${event.number} (${event.headSha}) is '
-            '${event.checkState.name} and requires adjudication.',
-      }),
-    ]);
-    if (result.ok || _alreadyExists(result, decision.beadId)) return;
-    throw StateError('cap gate mutation failed: ${result.stderr}');
+    final beadId = decision.beadId;
+    final node = ciReworkCapGateNode(beadId);
+    final reason =
+        'CI rework cap reached after ${decision.round} retired rounds; '
+        'pull request #${event.number} (${event.headSha}) is '
+        '${event.checkState.name} and requires adjudication.';
+    final existing = await _findOpenCapGate(
+      sessionId: decision.sessionId,
+      node: node,
+    );
+    final BdResult result;
+    if (existing != null) {
+      result = await bd.run([
+        'update',
+        existing.id.trim(),
+        '--actor',
+        'github-feedback',
+        '--set-metadata',
+        'reason=$reason',
+      ]);
+    } else {
+      result = await bd.run([
+        'create',
+        '--actor',
+        'github-feedback',
+        '--title',
+        'CI rework cap reached for $beadId',
+        '--type',
+        'gate',
+        '--metadata',
+        jsonEncode({
+          'rig': substation,
+          'blocks': decision.sessionId,
+          'node': node,
+          'work_bead': beadId,
+          'reason': reason,
+        }),
+      ]);
+    }
+    if (result.ok) return;
+    _handled.remove(decision.idempotencyKey);
+    _capGateUnresolved(beadId, result.stderr);
   }
 
-  bool _alreadyExists(BdResult result, String beadId) {
-    final output = '${result.stdout}\n${result.stderr}'.toLowerCase();
-    final gateId = '$beadId-ci-rework-cap'.toLowerCase();
-    return output.contains(gateId) &&
-        (output.contains('already exists') ||
-            output.contains('issue_already_exists'));
+  /// The OPEN `type=gate` bead in the state store already blocking [sessionId]
+  /// at [node], or null when there is none or the probe could not read.
+  ///
+  /// The store is asked with a type scope AND the two metadata equalities; the
+  /// match is then re-checked HERE, because a store that ignored a filter would
+  /// otherwise hand back a foreign gate to refresh.
+  Future<Bead?> _findOpenCapGate({
+    required String sessionId,
+    required String node,
+  }) async {
+    final ({List<Bead> beads, List<BeadDependency> dependencies}) listed;
+    try {
+      listed = await _store.listScope(
+        type: GridIssueTypes.gate,
+        metadataFields: <String, String>{'blocks': sessionId, 'node': node},
+      );
+    } on Object {
+      return null;
+    }
+    for (final bead in listed.beads) {
+      if (bead.issueType != GridIssueTypes.gate) continue;
+      if (bead.isClosed) continue;
+      if (bead.metadata['blocks'] != sessionId) continue;
+      if (bead.metadata['node'] != node) continue;
+      if (bead.id.trim().isEmpty) continue;
+      return bead;
+    }
+    return null;
   }
 }

@@ -1210,15 +1210,18 @@ void main() {
         expect(sender.calls.single['gridRoot'], temporary.path);
       }
       if (seat.gates == 1) {
+        // Minted by the STATE store under ITS prefix: no `--id` may carry the
+        // work bead's prefix into a store that refuses every id but its own.
         expect(
           _verbs(stateBd, 'create').single,
           containsAllInOrder(<String>[
-            '--id',
-            'pow-test-ci-rework-cap',
+            '--title',
+            'CI rework cap reached for pow-test',
             '--type',
             'gate',
           ]),
         );
+        expect(_verbs(stateBd, 'create').single, isNot(contains('--id')));
       }
       // Intake is unchanged: the check produced no work-store bead, and the
       // open issue still projected exactly one deferred bead.

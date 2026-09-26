@@ -1,0 +1,39 @@
+# github_grid_assets test configuration.
+#
+# The offline unit suite (everything NOT tagged `integration`) runs with no bd
+# binary, no Dolt server and no credentials — `dart test` runs it by default.
+#
+# The `integration` tag marks the live-state-writer tier: tests that spawn the
+# real `bd` binary against a hermetic temp workspace AND drive a LIVE grid
+# state writer (`assembleStationWork(dryRun: false)`), which needs a resolvable
+# SQL endpoint — a bd PROXIED-SERVER store. On a machine whose bd seeds
+# embedded-mode stores that endpoint does not exist, so the tier is HELD OUT of
+# the default run here, by tag config — never by a `skip:` string in a test
+# source and never by a per-bead exclusion in a validation plan.
+#
+# Run the tier by name where bd and dolt are on PATH:
+#
+#   dart test -P integration
+#
+# The `integration` preset below selects the tier (`include_tags`) and lifts
+# THIS file's hold on it (`skip: false`), and nothing else: a test's own
+# `skip:` (a blocked case) stays in force. `--run-skipped` is deliberately NOT
+# the invocation — it would lift every per-test skip in the tier as well. (A
+# bare `-t integration` selects the tier but leaves the hold in place, so it
+# reports the suite skipped.)
+tags:
+  integration:
+    description: >-
+      Live-state-writer tier: spawns real bd against a hermetic temp workspace
+      and drives a live grid state writer over a proxied-server SQL endpoint.
+      Requires bd and dolt on PATH; never touches a live station store. Held
+      out of the default run; select it with `dart test -P integration`.
+    skip: >-
+      live-state-writer tier, held out of the default run by dart_test.yaml;
+      run it by name with `dart test -P integration`
+presets:
+  integration:
+    include_tags: integration
+    tags:
+      integration:
+        skip: false
