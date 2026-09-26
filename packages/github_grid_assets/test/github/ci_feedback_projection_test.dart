@@ -59,6 +59,100 @@ final class FakeBdRunner implements BdRunner {
   }
 }
 
+/// A minted gate as [PrefixedStateStoreRunner] holds it.
+final class MintedGate {
+  MintedGate(this.id, this.title, this.metadata);
+
+  final String id;
+  final String title;
+  final Map<String, Object?> metadata;
+}
+
+/// The grid STATE store as bd actually behaves about ids: it mints
+/// `<prefix>-<n>` when `create` states no `--id`, and REFUSES — verbatim — any
+/// `--id` that does not carry its own prefix. Sessions are answered from
+/// [sessions]; the type-scoped gate list is answered from what it minted.
+final class PrefixedStateStoreRunner implements BdRunner {
+  PrefixedStateStoreRunner(this.prefix, this.sessions);
+
+  final String prefix;
+  final String sessions;
+  final calls = <List<String>>[];
+  final gates = <MintedGate>[];
+
+  /// Every prefix-mismatch refusal this store answered.
+  final refusals = <String>[];
+
+  @override
+  Future<BdResult> run(
+    List<String> args, {
+    Duration? timeout,
+    String? stdin,
+  }) async {
+    calls.add(List.of(args));
+    switch (args.first) {
+      case 'list':
+        if (args.contains('gate')) {
+          return BdResult(
+            exitCode: 0,
+            stdout: jsonEncode(<String, Object?>{
+              'schema_version': 1,
+              'data': <Object?>[
+                for (final gate in gates)
+                  <String, Object?>{
+                    'id': gate.id,
+                    'title': gate.title,
+                    'issue_type': 'gate',
+                    'status': 'open',
+                    'metadata': gate.metadata,
+                  },
+              ],
+            }),
+            stderr: '',
+          );
+        }
+        return BdResult(exitCode: 0, stdout: sessions, stderr: '');
+      case 'create':
+        final idAt = args.indexOf('--id');
+        if (idAt != -1 && !args[idAt + 1].startsWith('$prefix-')) {
+          final refusal =
+              "Error: prefix mismatch: database uses '$prefix-' but ID "
+              "'${args[idAt + 1]}' doesn't match (use --force to override)";
+          refusals.add(refusal);
+          return BdResult(exitCode: 1, stdout: '', stderr: refusal);
+        }
+        final id = idAt != -1
+            ? args[idAt + 1]
+            : '$prefix-${(gates.length + 1).toString().padLeft(4, '0')}';
+        final metadataAt = args.indexOf('--metadata');
+        gates.add(
+          MintedGate(
+            id,
+            args[args.indexOf('--title') + 1],
+            metadataAt == -1
+                ? <String, Object?>{}
+                : (jsonDecode(args[metadataAt + 1]) as Map<String, Object?>),
+          ),
+        );
+        return BdResult(
+          exitCode: 0,
+          stdout: jsonEncode(<String, Object?>{'id': id}),
+          stderr: '',
+        );
+      case 'update':
+        final gate = gates.firstWhere((gate) => gate.id == args[1]);
+        final setAt = args.indexOf('--set-metadata');
+        if (setAt != -1) {
+          final pair = args[setAt + 1];
+          final eq = pair.indexOf('=');
+          gate.metadata[pair.substring(0, eq)] = pair.substring(eq + 1);
+        }
+        return const BdResult(exitCode: 0, stdout: '{}', stderr: '');
+    }
+    return const BdResult(exitCode: 0, stdout: '{}', stderr: '');
+  }
+}
+
 /// The scope's OWN work store: it records every argv and answers [result].
 ///
 /// A DISTINCT fake from [FakeBdRunner] on purpose. The two rails are separate
@@ -174,7 +268,7 @@ const sdk.SubstationScope kScope = sdk.SubstationScope(
 /// runner shared with [bd]: every fixture states which store it expects the
 /// landing mark to reach.
 CiFeedbackProjection projection(
-  FakeBdRunner bd,
+  BdRunner bd,
   FakeSender sender, {
   FakeWorkBdRunner? workBd,
   sdk.SubstationScope scope = kScope,
@@ -392,17 +486,19 @@ void main() {
       event(PullRequestCheckState.failing, branch: branch),
     );
     expect(capSender.calls, isEmpty);
+    final create = capped.calls.firstWhere((call) => call.first == 'create');
     expect(
-      capped.calls.firstWhere((call) => call.first == 'create'),
+      create,
       containsAllInOrder(<String>[
-        '--id',
-        'tg-1-ci-rework-cap',
         '--title',
         'CI rework cap reached for tg-1',
         '--type',
         'gate',
       ]),
     );
+    // The id is the STATE store's to mint: a `--id` here carried the work
+    // bead's prefix into a store that refuses every id but its own.
+    expect(create, isNot(contains('--id')));
   });
 
   test('no fact to act on performs no read past attribution', () async {
@@ -499,13 +595,135 @@ void main() {
     expect(
       creates.single,
       containsAllInOrder([
-        '--id',
-        'tg-1-ci-rework-cap',
         '--title',
         'CI rework cap reached for tg-1',
         '--type',
         'gate',
       ]),
+    );
+    expect(creates.single, isNot(contains('--id')));
+    final metadata =
+        jsonDecode(creates.single[creates.single.indexOf('--metadata') + 1])
+            as Map<String, Object?>;
+    expect(metadata['work_bead'], 'tg-1');
+    expect(metadata['node'], 'tg-1/ci-feedback');
+    expect(metadata['blocks'], 'session-0');
+    expect(metadata['rig'], 'power');
+  });
+
+  test('the cap gate is minted under the STATE store\'s prefix, never the '
+      'work bead\'s', () async {
+    // THE LIVE FAILURE, reproduced: lunar's state store mints `tranquility-`
+    // and the red work bead is `tg-…`. Every tick used to die on bd's
+    // `prefix mismatch` refusal of `--id tg-…-ci-rework-cap`, and the whole
+    // reconciliation obligation stuck behind that one bead.
+    final state = PrefixedStateStoreRunner('tranquility', ledger(['tg-1']));
+    final sender = FakeSender()
+      ..result = const FeedbackCommandRefused('rework_round_cap', 'cap');
+    final reporter = RecordingReporter();
+    final subject = projection(state, sender)..bindReporter(reporter.report);
+
+    await expectLater(subject(event(PullRequestCheckState.failing)), completes);
+
+    expect(state.gates, hasLength(1));
+    final gate = state.gates.single;
+    expect(gate.id, startsWith('tranquility-'));
+    expect(gate.id, isNot(contains('tg-1-ci-rework-cap')));
+    expect(gate.title, 'CI rework cap reached for tg-1');
+    expect(gate.metadata['work_bead'], 'tg-1');
+    expect(gate.metadata['node'], 'tg-1/ci-feedback');
+    expect(gate.metadata['blocks'], 'session-0');
+    expect(state.refusals, isEmpty, reason: 'no prefix-mismatch refusal');
+    expect(reporter.flares, isEmpty);
+    expect(
+      state.calls.where((call) => call.first == 'create').single,
+      isNot(contains('--id')),
+    );
+  });
+
+  test('an OPEN cap gate for the same session and node is refreshed, not '
+      'duplicated', () async {
+    // With no fixed id there is no `already exists` collision to lean on, so
+    // dedup is a READ: a restarted projection (empty in-memory guard) that
+    // meets the same red head finds the open gate and refreshes its reason.
+    final state = PrefixedStateStoreRunner('tranquility', ledger(['tg-1']));
+    final sender = FakeSender()
+      ..result = const FeedbackCommandRefused('rework_round_cap', 'cap');
+    await projection(state, sender)(event(PullRequestCheckState.failing));
+    expect(state.gates, hasLength(1));
+
+    final restarted = projection(state, sender);
+    await restarted(event(PullRequestCheckState.failing, headSha: 'def456'));
+
+    expect(state.gates, hasLength(1), reason: 'one stable gate, refreshed');
+    expect(state.gates.single.metadata['reason'], contains('def456'));
+    final probe = state.calls.where(
+      (call) => call.first == 'list' && call.contains('gate'),
+    );
+    expect(probe, isNotEmpty, reason: 'dedup is a type-scoped read');
+    expect(
+      state.calls.where((call) => call.first == 'update').single,
+      containsAllInOrder(<String>[state.gates.single.id, '--set-metadata']),
+    );
+  });
+
+  test('a cap gate the state store refuses is flared for THAT bead and '
+      'the next bead still gates', () async {
+    // The isolation half: one bead's refused write is one bead's flare. The
+    // leg returns normally, so the observation acks and the cycle reaches
+    // every other bead — instead of throwing the shared obligation tick.
+    const refusal =
+        "Error: prefix mismatch: database uses 'tranquility-' but ID "
+        "'tg-1-ci-rework-cap' doesn't match (use --force to override)";
+    final state = FakeBdRunner(ledger(['tg-1', 'tg-2']))
+      ..results.add(const BdResult(exitCode: 1, stdout: '', stderr: refusal));
+    final sender = FakeSender()
+      ..result = const FeedbackCommandRefused('rework_round_cap', 'cap');
+    final reporter = RecordingReporter();
+    final subject = projection(state, sender)..bindReporter(reporter.report);
+
+    await expectLater(subject(event(PullRequestCheckState.failing)), completes);
+    await expectLater(
+      subject(
+        event(
+          PullRequestCheckState.failing,
+          body: 'A human digest.\n\nRefs: tg-2\n',
+          number: 9,
+        ),
+      ),
+      completes,
+    );
+
+    final creates = state.calls.where((call) => call.first == 'create');
+    expect(creates, hasLength(2), reason: 'tg-2 was still gated');
+    expect(creates.last, contains('CI rework cap reached for tg-2'));
+    expect(reporter.flares, hasLength(1));
+    expect(reporter.flares.single.name, kCiFeedbackCapGateUnresolvedFlare);
+    expect('${reporter.flares.single.error}', contains('tg-1'));
+    expect('${reporter.flares.single.error}', isNot(contains('tg-2')));
+    expect('${reporter.flares.single.error}', contains(refusal));
+
+    // The refused decision's key is RELEASED: the next observation of the
+    // same red head retries the mint instead of staying silently ungated.
+    await subject(event(PullRequestCheckState.failing));
+    expect(
+      state.calls.where((call) => call.first == 'create'),
+      hasLength(3),
+      reason: 'the retry reaches the store',
+    );
+    expect(reporter.flares, hasLength(1), reason: 'the retry succeeded');
+  });
+
+  test('a refused cap gate without a bound reporter still completes', () {
+    final state = FakeBdRunner(ledger(['tg-1']))
+      ..results.add(
+        const BdResult(exitCode: 1, stdout: '', stderr: 'store refused'),
+      );
+    final sender = FakeSender()
+      ..result = const FeedbackCommandRefused('rework_round_cap', 'cap');
+    expect(
+      projection(state, sender)(event(PullRequestCheckState.failing)),
+      completes,
     );
   });
 

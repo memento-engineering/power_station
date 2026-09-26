@@ -139,10 +139,14 @@ final _issueEvent = NormalizedGitHubEvent.issueOpened(
 /// answered, and `export` is REFUSED. A leg that reached export here would fail
 /// on every cycle, which is exactly how five seats stopped polling.
 final class _StateBd implements BdRunner {
-  _StateBd(this.sessions);
+  _StateBd(this.sessions, {this.onWrite});
 
   /// The enveloped payload `bd list -t session --all --json` answers with.
   final String sessions;
+
+  /// Answers a write verb (`create`, `update`) in place of the default
+  /// success, when set; a store that refuses SOME writes is modelled here.
+  final BdResult Function(List<String> argv)? onWrite;
   final argvs = <List<String>>[];
 
   @override
@@ -159,7 +163,9 @@ final class _StateBd implements BdRunner {
         stderr: 'Error: export is not supported in proxied-server mode',
       ),
       'list' => BdResult(exitCode: 0, stdout: sessions, stderr: ''),
-      _ => const BdResult(exitCode: 0, stdout: '{}', stderr: ''),
+      _ =>
+        onWrite?.call(args) ??
+            const BdResult(exitCode: 0, stdout: '{}', stderr: ''),
     };
   }
 }
@@ -241,6 +247,29 @@ final _checkEvent = NormalizedGitHubEvent.pullRequestFeedback(
   observedAt: DateTime.utc(2026, 9, 3, 16, 30),
   stalled: false,
 );
+
+/// A RED pull request for [bead], as the feedback poll observes it.
+NormalizedGitHubEvent _redPull(String bead, int number) =>
+    NormalizedGitHubEvent.pullRequestFeedback(
+      nodeId: 'PR_$number',
+      actor: 'nico',
+      repository: 'memento/power',
+      substation: 'power',
+      observationId:
+          'poll:pull-feedback:PR_$number:abc123:2026-09-03T16:24:00.000Z:'
+          'failing:mergeable:never-green:fresh',
+      number: number,
+      body: 'A human digest.\n\nRefs: $bead\n',
+      headBranch: 'grid/$bead',
+      headSha: 'abc123',
+      checkState: PullRequestCheckState.failing,
+      mergeability: PullRequestMergeability.mergeable,
+      openedAt: DateTime.utc(2026, 9, 3, 15),
+      updatedAt: _checkCompletedAt,
+      greenSince: null,
+      observedAt: DateTime.utc(2026, 9, 3, 16, 30),
+      stalled: false,
+    );
 
 /// An intake row updated AFTER the wedged check — one of the 53 rows GitHub
 /// listed for power_station that the blocked poll never observed.
@@ -431,6 +460,86 @@ void main() {
     ]);
     expect(state.argvs.map((argv) => argv.first), everyElement('list'));
     expect(sender.calls, isEmpty);
+  });
+
+  test('a cap gate the state store refuses for ONE bead drains, flares that '
+      'bead, and the other bead in the cycle still gates', () async {
+    // THE OUTAGE, end to end. Two capped red pulls in one cycle; the state
+    // store refuses the first bead's gate the way lunar's did (a `tranquility-`
+    // store handed a `tg-` id). The refusal used to throw out of the leg,
+    // abort the cycle before the poll and fail the shared obligation tick on
+    // every cycle for every substation. It now costs ONE flare naming ONE
+    // bead: both observations ack, the second bead's gate is minted, and the
+    // poll behind them moves.
+    const refusal =
+        "Error: prefix mismatch: database uses 'grid_state-' but ID "
+        "'pow-1-ci-rework-cap' doesn't match (use --force to override)";
+    final state = _StateBd(
+      _sessions(<String>[
+        'pow-1',
+        'pow-1#r1',
+        'pow-1#r2',
+        'pow-1#r3',
+        'pow-2',
+        'pow-2#r1',
+        'pow-2#r2',
+        'pow-2#r3',
+      ]),
+      onWrite: (argv) =>
+          argv.first == 'create' &&
+              argv.contains('CI rework cap reached for pow-1')
+          ? const BdResult(exitCode: 1, stdout: '', stderr: refusal)
+          : const BdResult(exitCode: 0, stdout: '{}', stderr: ''),
+    );
+    final first = _redPull('pow-1', 11);
+    final second = _redPull('pow-2', 12);
+    final firstId = GitHubReconcilerCursor.observationIdOf(first);
+    final secondId = GitHubReconcilerCursor.observationIdOf(second);
+    final cursors = _Cursors(
+      const GitHubReconcilerCursor()
+          .enqueue(first)
+          .ack(firstId, kSinkDeliveryLeg)
+          .enqueue(second)
+          .ack(secondId, kSinkDeliveryLeg),
+    );
+    final sender = _Sender();
+    final flares = <({String name, String message})>[];
+    final projection = _feedback(state, sender, _WorkBd())
+      ..bindReporter(
+        (name, action, error, stackTrace) =>
+            flares.add((name: name, message: '$error')),
+      );
+    final reconciler = _reconciler(
+      transport: _Transport(<GitHubHttpResponse>[
+        _response(<Object?>[_rowUpdatedAfterCheck()]),
+        _response(const <Object?>[]),
+      ]),
+      cursors: cursors,
+      emit: (_) async {},
+    )..addObserver(kCiFeedbackDeliveryLeg, projection.call);
+
+    await expectLater(reconciler.reconcileOnce(), completes);
+
+    // Both observations ACKED and the queue drained...
+    expect(cursors.cursor.pending, isEmpty);
+    expect(cursors.cursor.hasObserved(firstId), isTrue);
+    expect(cursors.cursor.hasObserved(secondId), isTrue);
+    // ...the poll behind them MOVED...
+    expect(cursors.cursor.since, isNotNull);
+    expect(cursors.cursor.since!.isAfter(_checkCompletedAt), isTrue);
+    // ...ONE flare, naming the refused bead alone and the store's words...
+    expect(flares.map((flare) => flare.name), <String>[
+      kCiFeedbackCapGateUnresolvedFlare,
+    ]);
+    expect(flares.single.message, contains('pow-1'));
+    expect(flares.single.message, isNot(contains('pow-2')));
+    expect(flares.single.message, contains(refusal));
+    // ...and the other bead's gate was minted, with no `--id` on either.
+    final creates = state.argvs.where((argv) => argv.first == 'create');
+    expect(creates, hasLength(2));
+    expect(creates.last, contains('CI rework cap reached for pow-2'));
+    expect(creates, everyElement(isNot(contains('--id'))));
+    expect(sender.calls, isEmpty, reason: 'capped beads rework nothing');
   });
 
   for (final shape in <({String name, String sessions})>[

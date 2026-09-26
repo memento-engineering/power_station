@@ -801,6 +801,120 @@ void main() {
   });
 
   group('the gates are mandatory', () {
+    test(
+      'an unresolvable PUBLISHED baseline stops at classify with its own named '
+      'verdict and consequence, never as a diff failure',
+      () async {
+        // pow-pozp: the genesis_dialogue 0.1.2 specimen — the published
+        // baseline floors two incompatible sibling ranges (`genesis_taxonomy
+        // ^0.1.0`, whose every version floors `genesis_tree ^0.1.0`, and
+        // `genesis_tree ^0.3.1`), so no resolve of it can ever succeed and no
+        // candidate can clear the gate. The classify leg drives the REAL vended
+        // command over Fakes; dart-apitool answers as it did live.
+        const baseline = 'genesis_tree';
+        const candidate = 'genesis_dialogue';
+        final root = Directory.systemTemp.createTempSync('release-baseline-');
+        addTearDown(() => root.deleteSync(recursive: true));
+        final workspaceRoot = _workspaceFixture(
+          root,
+          base: baseline,
+          dependent: candidate,
+          declaredFloor: '^0.3.1',
+          version: '0.1.3',
+        );
+        final apiToolCalls = <List<String>>[];
+        Future<ProcessResult> apiTool(
+          String executable,
+          List<String> arguments, {
+          String? workingDirectory,
+        }) async {
+          expect(executable, 'dart-apitool', reason: 'only the diff runs');
+          apiToolCalls.add(arguments);
+          return ProcessResult(
+            1,
+            1,
+            'Preparing $candidate:0.1.2\nRunning pub get\n',
+            'Error: Exception: Because every version of $candidate from path '
+                'depends on genesis_taxonomy ^0.1.0 which depends on '
+                '$baseline ^0.1.0, every version of $candidate from path '
+                'requires $baseline ^0.1.0.\n'
+                'And because temp_package depends on $candidate from path '
+                'which depends on $baseline ^0.3.1, version solving failed.\n',
+          );
+        }
+
+        Future<HttpFetch> pubDev(Uri url) async => HttpFetch(
+          statusCode: 200,
+          body: jsonEncode(<String, Object?>{
+            'name': candidate,
+            'latest': <String, Object?>{'version': '0.1.2'},
+            'versions': <Object?>[
+              <String, Object?>{'version': '0.1.1'},
+              <String, Object?>{'version': '0.1.2'},
+            ],
+          }),
+        );
+        final request = ReleaseCircuitRequest(
+          workspaceRoot: workspaceRoot,
+          diff: _diffRef,
+          change: ReleaseChange.fix,
+          packages: const [
+            ReleasePackageTarget(
+              package: candidate,
+              directory: 'packages/$candidate',
+              targetRung: ReleaseRung.dev,
+            ),
+          ],
+        );
+        final invoker = _FakeReleaseCommandInvoker(
+          request: request,
+          ladder: const {
+            candidate: _LadderFact(
+              published: true,
+              version: '0.1.2',
+              rung: 'stable',
+            ),
+          },
+          delegate: InProcessReleaseCommandInvoker(
+            service: ReleaseService(
+              runProcess: apiTool,
+              httpGet: pubDev,
+              wait: _noWait,
+            ),
+          ),
+          delegateOperations: const <String>{'classify'},
+        );
+
+        final report = await _drive(request, invoker);
+
+        expect(report.ran.last, 'classify');
+        final stop = report.stop;
+        expect(stop, isA<Failed>());
+        final refusal = stop! as Failed;
+        // The stop names the VERDICT, the SYMBOL (the published baseline) and
+        // the CONSEQUENCE, not dart-apitool's generic diff failure.
+        expect(
+          refusal.reason,
+          allOf(
+            startsWith('release classify: $candidate is baselineUnresolvable'),
+            contains('published baseline 0.1.2 does not resolve'),
+            contains('cut at the most conservative class'),
+            contains('a breaking change off 0.1.2 requires 0.2.0-dev.1'),
+            isNot(contains('diff failed')),
+            isNot(contains('NOT classified')),
+          ),
+        );
+        expect(apiToolCalls, hasLength(1));
+        expect(apiToolCalls.single, contains('pub://$candidate/0.1.2'));
+
+        // Nothing irreversible ran.
+        final invoked = {for (final call in invoker.calls) call[1]};
+        expect(invoked, isNot(contains('order')));
+        expect(invoked, isNot(contains('publish')));
+        expect(invoked, isNot(contains('poll')));
+      },
+    );
+
     test('under-declared floor fails before publish', () async {
       final root = Directory.systemTemp.createTempSync('release-floors-');
       addTearDown(() => root.deleteSync(recursive: true));
