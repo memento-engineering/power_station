@@ -1,3 +1,16 @@
+## Unreleased
+
+- Fixed: the ci-rework cap gate is minted under the grid STATE store's own prefix. `CiFeedbackProjection`
+  created it as `--id <workBead>-ci-rework-cap`, carrying the WORK bead's prefix into a store that mints
+  its own, so bd refused every write with `prefix mismatch … (use --force to override)` and the shared
+  GitHub reconciliation obligation stuck behind one red pull for every substation. The gate is now
+  `bd create -t gate` with no `--id`, carrying the work bead in its title and in `work_bead`/`node`
+  metadata, and an OPEN gate for the same session and node is refreshed rather than duplicated.
+- Fixed: a cap-gate write the state store refuses is one bead's failure. It is reported under the new
+  `kCiFeedbackCapGateUnresolvedFlare` (`reconciler.ciFeedbackCapGateUnresolved`) naming that bead, the
+  observation acknowledges, and the cycle reaches its poll and every other bead; the refused decision's
+  idempotency key is released so the next observation of the same red head retries the mint.
+
 ## 0.2.0-dev.6
 
 - Breaking: a station composing a LIVE GitHub reconciler must now mount exactly one
