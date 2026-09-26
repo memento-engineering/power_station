@@ -76,7 +76,9 @@ final class PrefixedStateStoreRunner implements BdRunner {
   PrefixedStateStoreRunner(this.prefix, this.sessions);
 
   final String prefix;
-  final String sessions;
+
+  /// The enveloped session list; reassign it to model a re-key.
+  String sessions;
   final calls = <List<String>>[];
   final gates = <MintedGate>[];
 
@@ -141,9 +143,9 @@ final class PrefixedStateStoreRunner implements BdRunner {
         );
       case 'update':
         final gate = gates.firstWhere((gate) => gate.id == args[1]);
-        final setAt = args.indexOf('--set-metadata');
-        if (setAt != -1) {
-          final pair = args[setAt + 1];
+        for (var i = 0; i < args.length - 1; i++) {
+          if (args[i] != '--set-metadata') continue;
+          final pair = args[i + 1];
           final eq = pair.indexOf('=');
           gate.metadata[pair.substring(0, eq)] = pair.substring(eq + 1);
         }
@@ -667,6 +669,72 @@ void main() {
     );
   });
 
+  test('a RE-KEYED session on a capped bead refreshes the bead\'s one open '
+      'cap gate and never mints a second', () async {
+    // Dedup is per WORK BEAD, as the retired `<bead>-ci-rework-cap` id made
+    // it. The first session on tg-1 is gated; the operator then re-keys it
+    // (the old session retires to `tg-1#r1`, a NEW session takes `tg-1`) and
+    // the resident restarts. The same red head arriving for the new session
+    // must find the gate its predecessor left, not mint a second open one.
+    final state = PrefixedStateStoreRunner(
+      'tranquility',
+      ledger(['tg-1'], ids: ['tranquility-s1']),
+    );
+    final sender = FakeSender()
+      ..result = const FeedbackCommandRefused('rework_round_cap', 'cap');
+    await projection(state, sender)(event(PullRequestCheckState.failing));
+    expect(state.gates, hasLength(1));
+    expect(state.gates.single.metadata['blocks'], 'tranquility-s1');
+
+    state.sessions = ledger(
+      ['tg-1#r1', 'tg-1'],
+      ids: ['tranquility-s1', 'tranquility-s2'],
+    );
+    final restarted = projection(state, sender);
+    await restarted(event(PullRequestCheckState.failing));
+
+    expect(
+      state.gates,
+      hasLength(1),
+      reason: 'exactly ONE open cap gate for the capped work bead',
+    );
+    expect(state.calls.where((call) => call.first == 'create'), hasLength(1));
+    final gate = state.gates.single;
+    expect(gate.metadata['work_bead'], 'tg-1');
+    expect(gate.metadata['node'], 'tg-1/ci-feedback');
+    expect(
+      gate.metadata['blocks'],
+      'tranquility-s2',
+      reason: 'the gate follows the CURRENT session the engine joins through',
+    );
+  });
+
+  test('another bead\'s open cap gate is never refreshed in place of this '
+      'bead\'s', () async {
+    final state = PrefixedStateStoreRunner(
+      'tranquility',
+      ledger(['tg-1', 'tg-2'], ids: ['tranquility-s1', 'tranquility-s2']),
+    );
+    final sender = FakeSender()
+      ..result = const FeedbackCommandRefused('rework_round_cap', 'cap');
+    final subject = projection(state, sender);
+    await subject(event(PullRequestCheckState.failing));
+    await subject(
+      event(
+        PullRequestCheckState.failing,
+        body: 'A human digest.\n\nRefs: tg-2\n',
+        number: 9,
+      ),
+    );
+
+    expect(state.gates, hasLength(2));
+    expect(state.gates.map((gate) => gate.metadata['work_bead']), [
+      'tg-1',
+      'tg-2',
+    ]);
+    expect(state.calls.where((call) => call.first == 'update'), isEmpty);
+  });
+
   test('a cap gate the state store refuses is flared for THAT bead and '
       'the next bead still gates', () async {
     // The isolation half: one bead's refused write is one bead's flare. The
@@ -703,8 +771,10 @@ void main() {
     expect('${reporter.flares.single.error}', isNot(contains('tg-2')));
     expect('${reporter.flares.single.error}', contains(refusal));
 
-    // The refused decision's key is RELEASED: the next observation of the
-    // same red head retries the mint instead of staying silently ungated.
+    // The refused decision's key is RELEASED, so a DISTINCT later delivery of
+    // the same red head retries the mint. Whether the reconciler ever makes
+    // such a delivery is the cycle's business, pinned in
+    // reconciler_delivery_test.dart: only when the pull itself moves.
     await subject(event(PullRequestCheckState.failing));
     expect(
       state.calls.where((call) => call.first == 'create'),

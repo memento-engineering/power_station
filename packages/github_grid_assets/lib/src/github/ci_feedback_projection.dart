@@ -405,20 +405,31 @@ final class CiFeedbackProjection {
   /// rides in the title and in metadata (`work_bead`, and `node` as
   /// `<bead>/ci-feedback`) exactly as a session bead carries its `work_bead`.
   ///
-  /// DEDUP IS A READ, NOT A COLLISION. With no fixed id there is no
-  /// `already exists` to lean on, so this probes the state store for an OPEN
-  /// gate blocking the same session at the same node first — the engine's own
-  /// mint-dedup shape — and refreshes its `reason` instead of piling up a
-  /// duplicate. The probe is best-effort: a read error falls through to a
-  /// fresh mint, because a duplicate gate is inert and a missing one is not.
+  /// DEDUP IS A READ, NOT A COLLISION, AND IT IS PER WORK BEAD. With no fixed
+  /// id there is no `already exists` to lean on, so this probes the state store
+  /// for an OPEN cap gate at the work bead's own [ciReworkCapGateNode] first and
+  /// refreshes it instead of piling up a duplicate. The key is the WORK BEAD,
+  /// exactly as the retired `<beadId>-ci-rework-cap` id keyed it — never the
+  /// session: a re-keyed or superseded session on the same capped bead meets
+  /// the gate its predecessor left and refreshes THAT one, so one capped bead
+  /// holds at most one open cap gate. The refresh also re-points the gate's
+  /// `blocks` at the CURRENT session, because the engine's join resolves a
+  /// gate to its work bead only through the session that bead currently maps
+  /// to; a gate still blocking a superseded session would be open yet unseen.
+  /// The probe is best-effort: a read error falls through to a fresh mint,
+  /// because a duplicate gate is inert and a missing one is not.
   ///
   /// A WRITE FAILURE IS ONE BEAD'S. It is flared under
   /// [kCiFeedbackCapGateUnresolvedFlare] and returned from, never thrown, so
   /// the delivery leg acknowledges the observation and the cycle reaches its
   /// poll and every other bead's feedback. The decision's idempotency key is
-  /// released on failure so the NEXT observation of the same red head retries
-  /// the mint — unlike a landing mark the store cannot resolve, a refused write
-  /// is a store fault that may well have cleared by then.
+  /// released on failure, which is what lets a LATER, DISTINCT observation of
+  /// the same red head retry the mint. That is all it guarantees: the
+  /// acknowledged observation is never re-driven, and the reconciler
+  /// deduplicates observations by id — built from the pull's head, check
+  /// state, `updated_at` and mergeability — so an UNCHANGED red pull produces
+  /// no new observation and its refused gate stays unminted, reported by the
+  /// one flare, until something about that pull moves.
   Future<void> createCapGate(
     CiFeedbackDecision decision,
     PullRequestFeedback event,
@@ -429,10 +440,7 @@ final class CiFeedbackProjection {
         'CI rework cap reached after ${decision.round} retired rounds; '
         'pull request #${event.number} (${event.headSha}) is '
         '${event.checkState.name} and requires adjudication.';
-    final existing = await _findOpenCapGate(
-      sessionId: decision.sessionId,
-      node: node,
-    );
+    final existing = await _findOpenCapGate(beadId: beadId, node: node);
     final BdResult result;
     if (existing != null) {
       result = await bd.run([
@@ -440,6 +448,8 @@ final class CiFeedbackProjection {
         existing.id.trim(),
         '--actor',
         'github-feedback',
+        '--set-metadata',
+        'blocks=${decision.sessionId}',
         '--set-metadata',
         'reason=$reason',
       ]);
@@ -467,21 +477,24 @@ final class CiFeedbackProjection {
     _capGateUnresolved(beadId, result.stderr);
   }
 
-  /// The OPEN `type=gate` bead in the state store already blocking [sessionId]
-  /// at [node], or null when there is none or the probe could not read.
+  /// The OPEN ci-rework cap gate in the state store for work bead [beadId] —
+  /// the `type=gate` bead at [node] — whichever session it blocks, or null
+  /// when there is none or the probe could not read.
   ///
-  /// The store is asked with a type scope AND the two metadata equalities; the
-  /// match is then re-checked HERE, because a store that ignored a filter would
-  /// otherwise hand back a foreign gate to refresh.
+  /// The store is asked with a type scope AND the `node` equality; the match is
+  /// then re-checked HERE, because a store that ignored a filter would
+  /// otherwise hand back a foreign gate to refresh. A gate that states a
+  /// `work_bead` must state [beadId]; one that states none is matched on its
+  /// bead-derived [node] alone.
   Future<Bead?> _findOpenCapGate({
-    required String sessionId,
+    required String beadId,
     required String node,
   }) async {
     final ({List<Bead> beads, List<BeadDependency> dependencies}) listed;
     try {
       listed = await _store.listScope(
         type: GridIssueTypes.gate,
-        metadataFields: <String, String>{'blocks': sessionId, 'node': node},
+        metadataFields: <String, String>{'node': node},
       );
     } on Object {
       return null;
@@ -489,8 +502,9 @@ final class CiFeedbackProjection {
     for (final bead in listed.beads) {
       if (bead.issueType != GridIssueTypes.gate) continue;
       if (bead.isClosed) continue;
-      if (bead.metadata['blocks'] != sessionId) continue;
       if (bead.metadata['node'] != node) continue;
+      final workBead = bead.metadata['work_bead'];
+      if (workBead != null && workBead != beadId) continue;
       if (bead.id.trim().isEmpty) continue;
       return bead;
     }
