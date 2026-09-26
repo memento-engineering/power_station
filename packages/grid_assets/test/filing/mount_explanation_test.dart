@@ -101,10 +101,13 @@ final class _CannedIndexShell implements ShellRunner {
 
   final String body;
 
+  // The optional deadline is part of the `ShellRunner.run` contract; this
+  // decision-index Fake ignores the bound and answers its canned envelope.
   @override
   Future<ShellRunResult> run({
     required String workingDirectory,
     required String command,
+    Duration? deadline,
   }) async => ShellRunResult(exitCode: 0, output: body);
 }
 
