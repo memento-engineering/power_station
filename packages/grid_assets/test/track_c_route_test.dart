@@ -36,6 +36,7 @@ final String _critics = kCommitteeRubrics.join(',');
 ({FakeTreeContext context, StepArgs args}) _routeCtx(
   Map<String, String> grades, {
   Map<String, String> rationales = const {},
+  Map<String, String> diagnosticHeads = const {},
   List<String>? regressions,
   List<String> preexisting = const [],
   List<String>? missing,
@@ -80,6 +81,8 @@ final String _critics = kCommitteeRubrics.join(',');
                 ...evidenceFor(entry.key, entry.value),
                 if (rationales[entry.key] case final rationale?)
                   'rationale': rationale,
+                if (diagnosticHeads[entry.key] case final head?)
+                  'diagnostic_head': head,
               },
           },
         ),
@@ -96,6 +99,7 @@ final String _critics = kCommitteeRubrics.join(',');
 Future<RouteVerdict> _route(
   Map<String, String> grades, {
   Map<String, String> rationales = const {},
+  Map<String, String> diagnosticHeads = const {},
   List<String>? regressions,
   List<String> preexisting = const [],
   List<String>? missing,
@@ -105,6 +109,7 @@ Future<RouteVerdict> _route(
   final c = _routeCtx(
     grades,
     rationales: rationales,
+    diagnosticHeads: diagnosticHeads,
     regressions: regressions,
     preexisting: preexisting,
     missing: missing,
@@ -171,6 +176,62 @@ void main() {
       expect(out.reason, contains('test/one_test.dart'));
       expect(out.reason, contains('test/two_test.dart'));
     });
+
+    // `power_station#code-validation-preserves-diagnostics-and-reports-deadline`:
+    // the lane's bounded diagnostic head is placed BEFORE the lane-named hard
+    // block, so it survives the engine's head-first reason cap.
+    test('diagnostic head precedes the code-validation hard block', () async {
+      const y = 'test/y_test.dart 9:2 the branch case';
+      final out = await _route(
+        const {
+          'code-validation': 'F',
+          'spec-adherence': 'A',
+          'regression-risk': 'A',
+          'test-coverage': 'A',
+        },
+        regressions: const [y],
+        diagnosticHeads: const {
+          'code-validation':
+              'Failed to load "test/a_test.dart":\n'
+              'lib/a.dart:4:2: Error: Missing member.\n'
+              '[E] analyzer failed',
+        },
+      );
+
+      expect(out, isA<Escalate>());
+      expect(
+        (out as Escalate).reason,
+        'Failed to load "test/a_test.dart":\n'
+        'lib/a.dart:4:2: Error: Missing member.\n'
+        '[E] analyzer failed\n'
+        'code-validation failed: hard block: regressions: $y; '
+        'full log: .grid/critique/code-validation.log',
+      );
+    });
+
+    test(
+      'a diagnostic head on a lane that did NOT gate leads nothing',
+      () async {
+        final out = await _route(
+          const {
+            kDeclaredTestsRubric: 'F',
+            'code-validation': 'A',
+            'spec-adherence': 'A',
+            'regression-risk': 'A',
+            'test-coverage': 'A',
+          },
+          missing: const ['test/one_test.dart'],
+          diagnosticHeads: const {'code-validation': 'lib/a.dart: Error: x'},
+        );
+
+        expect(out, isA<Escalate>());
+        expect(
+          (out as Escalate).reason,
+          startsWith('$kDeclaredTestsRubric failed: hard block: '),
+        );
+        expect(out.reason, isNot(contains('lib/a.dart: Error: x')));
+      },
+    );
 
     // AC-1's route half: shared X rides the artifact as a note, branch-only Y
     // is the sole hard-block cause. The reason is EXACTLY the regressions and

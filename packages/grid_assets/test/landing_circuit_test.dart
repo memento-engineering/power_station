@@ -7,6 +7,7 @@
 // became "which delivery method did this substation bind?", and none is a valid
 // binding (M5 D-4a). So a bound `ServiceBundle.delivery` is what makes these two
 // steps do real git; unbound, both no-op with ZERO calls.
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:grid_assets/grid_assets.dart';
@@ -129,7 +130,7 @@ class _FakeDelivery implements DeliveryMethod {
 /// [resultsByDirectory] names the exact working directory — which is how the
 /// merge-base comparison's two sides (the branch worktree and the scratch
 /// checkout of the base) are given different answers by one runner.
-class _FixedShellRunner implements ShellRunner {
+class _FixedShellRunner implements BoundedShellRunner {
   _FixedShellRunner(this.result, {this.resultsByDirectory = const {}});
 
   final ShellRunResult result;
@@ -1169,6 +1170,60 @@ void main() {
         ),
       );
     });
+
+    // `power_station#code-validation-preserves-diagnostics-and-reports-deadline`
+    // (the diagnostics-LEAD clause, shared by both validation lanes): an
+    // uncomparable BRANCH run leads its lane failure with its recognized
+    // diagnostics, then the lane, the RELATIVE full log, and the
+    // advice-stripped tail.
+    test('an uncomparable branch run leads its lane failure with bounded '
+        'unique diagnostics and a relative full log', () async {
+      final runner = sides(
+        base: const ShellRunResult(exitCode: 0, output: ''),
+        branch: ShellRunResult(
+          exitCode: 1,
+          output: [
+            '  analyzer 10.2.0 (14.3.0 available)',
+            'Failed to load "test/a_test.dart":',
+            'lib/a.dart:4:2: Error: Missing member.',
+            'Failed to load "test/a_test.dart":',
+            'lib/a.dart:4:2: Error: Missing member.',
+            'Some tests failed.',
+          ].join('\n'),
+        ),
+      );
+      final richBead = bead(
+        'tg-1',
+      ).copyWith(metadata: const {'validation_plan': 'dart test'});
+      final c = _capCtx(
+        delivery: _FakeDelivery(),
+        beadOverride: richBead,
+        workspaceDir: workspace.path,
+      );
+
+      await expectLater(
+        RevalidateCapability(
+          comparison: comparison(runner),
+        ).route(c.context, c.args),
+        throwsA(
+          isA<RouteFailure>().having(
+            (failure) => failure.reason,
+            'reason',
+            allOf(
+              startsWith(
+                'Failed to load "test/a_test.dart":\n'
+                'lib/a.dart:4:2: Error: Missing member.\n'
+                'revalidate could not be compared: validation branch: ',
+              ),
+              contains('; full log: .grid/critique/revalidate.log: '),
+              isNot(contains(workspace.path)),
+              isNot(contains('available)')),
+              endsWith('Some tests failed.'),
+            ),
+          ),
+        ),
+      );
+    });
   });
 
   // The scratch merge-base checkout registers against the SUBSTATION'S SHARED
@@ -1333,6 +1388,55 @@ void main() {
   // The bounded cases pin `/bin/dash`: it is CI's `sh`, and the shell under
   // which a job-control wrapper wrote `can't access tty; job control turned
   // off` into the captured output. A bash-only green proves nothing about it.
+  group('the ShellRunner contract stays source-compatible (pow-5n53)', () {
+    // `ShellRunner` is implemented DOWNSTREAM — space_station_assets'
+    // filing-composition Fake and leonard_grid_assets' selfdrive-verify Fake
+    // both declare `run` with exactly two named parameters. Widening that
+    // member, even with an optional parameter, is an `invalid_override` in
+    // every one of them, so the deadline rides [BoundedShellRunner] instead.
+    // [_LegacyShellRunner] below is the pre-widening signature, verbatim: this
+    // file compiling under `dart analyze --fatal-infos` IS the proof.
+    test('an implementor WITHOUT a deadline parameter composes into every '
+        'shell seam and runs unbounded through runWithinDeadline', () async {
+      final legacy = _LegacyShellRunner();
+      expect(legacy, isNot(isA<BoundedShellRunner>()));
+
+      final result = await runWithinDeadline(
+        legacy,
+        workingDirectory: '/w/tg-1',
+        command: 'dart test',
+        deadline: kValidationDeadline,
+      );
+      expect(result.exitCode, 0);
+      expect(result.timedOut, isFalse);
+      expect(legacy.calls, [
+        (workingDirectory: '/w/tg-1', command: 'dart test'),
+      ]);
+
+      // Every public seam that accepted a ShellRunner before still does.
+      expect(buildCodeRegistry(shellRunner: legacy), isNotNull);
+      expect(
+        RevalidateCapability(
+          comparison: ValidationDeltaRunner(shellRunner: legacy),
+        ),
+        isNotNull,
+      );
+    });
+
+    test('a BoundedShellRunner is handed the caller\'s deadline', () async {
+      final bounded = _FixedShellRunner(
+        const ShellRunResult(exitCode: 0, output: ''),
+      );
+      await runWithinDeadline(
+        bounded,
+        workingDirectory: '/w/tg-1',
+        command: 'dart test',
+        deadline: const Duration(seconds: 42),
+      );
+      expect(bounded.calls.single.deadline, const Duration(seconds: 42));
+    });
+  });
+
   group('the bounded validation runner (SystemShellRunner)', () {
     const dash = SystemShellRunner(shellExecutable: '/bin/dash');
     late Directory dir;
@@ -1409,19 +1513,31 @@ void main() {
         isTrue,
         reason: 'the grandchild really did start',
       );
-      final survivors = await Process.run('sh', [
-        '-c',
-        'ps -ax -o pid,command | grep "slee""p 45" | grep -v grep | wc -l',
-      ]);
-      expect(
-        int.parse(survivors.stdout.toString().trim()),
-        0,
-        reason: 'the whole process GROUP was terminated, not just the shell',
-      );
       // The kill went through grid_runtime's terminateGroup escalation, not a
       // hand-rolled group SIGKILL: a hand-rolled one sends SIGKILL alone, so
       // the SIGTERM rung is what distinguishes the seam.
       expect(groups.resolved, hasLength(1));
+      final planGroup = groups.resolved.single;
+      expect(planGroup, isNotNull);
+      // Scoped to THIS run's own process group — the launcher-led pgid the
+      // runner resolved — so a `sleep 45` anywhere else on the host (a
+      // sibling suite, another lane running this same probe) cannot redden
+      // it. `ps` is an observer independent of the controller under test.
+      final listing = await Process.run('ps', ['-ax', '-o', 'pgid=,command=']);
+      expect(listing.exitCode, 0, reason: '${listing.stderr}');
+      final survivors = [
+        for (final line in const LineSplitter().convert(
+          listing.stdout.toString(),
+        ))
+          if (line.trim().split(RegExp(r'\s+')).first == '$planGroup' &&
+              line.contains('sleep 45'))
+            line.trim(),
+      ];
+      expect(
+        survivors,
+        isEmpty,
+        reason: 'the whole process GROUP was terminated, not just the shell',
+      );
       expect(
         groups.signals.map((signal) => signal.$2),
         contains(ProcessSignal.sigterm),
@@ -1732,4 +1848,21 @@ final class _RecordingGroups implements ProcessGroupController {
 
   @override
   int currentGroupId() => _real.currentGroupId();
+}
+
+/// A [ShellRunner] written against the PRE-WIDENING contract — two named
+/// parameters and no deadline — exactly as downstream implementors
+/// (`space_station_assets`' `_CannedDecisionShell`,
+/// `leonard_grid_assets`' `_RecordingShellRunner`) declare it.
+final class _LegacyShellRunner implements ShellRunner {
+  final List<({String workingDirectory, String command})> calls = [];
+
+  @override
+  Future<ShellRunResult> run({
+    required String workingDirectory,
+    required String command,
+  }) async {
+    calls.add((workingDirectory: workingDirectory, command: command));
+    return const ShellRunResult(exitCode: 0, output: '');
+  }
 }

@@ -33,6 +33,8 @@ import 'package:grid_engine/grid_engine.dart';
 import 'package:grid_runtime/grid_runtime.dart';
 import 'package:path/path.dart' as p;
 
+import '../agent/captured_output.dart';
+
 /// The Validation Plan's absolute-from-start deadline (the_grid audit §4,
 /// `tg-uad` follow-through): a plan is `sh` running a deterministic script,
 /// minutes-scale by definition — never the multi-hour agentic build/critic
@@ -44,18 +46,66 @@ const Duration kValidationDeadline = Duration(minutes: 10);
 /// The injectable shell-exec seam a Validation Plan runs through — mirrors
 /// [GitRunner]'s shape (Fakes, not mocks), but for an arbitrary shell command
 /// rather than `git`.
+///
+/// **This contract is frozen for implementors.** `ShellRunner` is public API
+/// that downstream packages implement with `implements ShellRunner` (their
+/// Fakes), and ANY change to this member's parameter list — even an optional
+/// named parameter — is an `invalid_override` in every one of them. The
+/// deadline a bounded run needs therefore lives on the [BoundedShellRunner]
+/// extension point, never here.
 abstract interface class ShellRunner {
   /// Runs [command] via `sh -c` with [workingDirectory] as the cwd. Never
   /// throws — a launch failure is reported as a non-zero [ShellRunResult].
-  ///
-  /// A non-null [deadline] BOUNDS the run: an implementation that exceeds it
-  /// terminates the command (and everything it spawned) and answers
-  /// [ShellRunResult.timedOut].
+  Future<ShellRunResult> run({
+    required String workingDirectory,
+    required String command,
+  });
+}
+
+/// A [ShellRunner] that can BOUND a run — the extension point the
+/// code-validation lane's own deadline
+/// (`power_station#code-validation-enforces-its-own-deadline-as-a-service-capability`)
+/// rides.
+///
+/// It WIDENS [ShellRunner.run] with an optional [deadline] rather than
+/// widening [ShellRunner] itself, so every existing `implements ShellRunner`
+/// keeps compiling unchanged. A caller that owns a deadline hands the runner
+/// to [runWithinDeadline], which bounds a [BoundedShellRunner] and runs any
+/// other [ShellRunner] exactly as before.
+abstract interface class BoundedShellRunner implements ShellRunner {
+  /// Runs [command] as [ShellRunner.run] does. A non-null [deadline] BOUNDS
+  /// the run: an implementation that exceeds it terminates the command (and
+  /// everything it spawned) and answers [ShellRunResult.timedOut].
+  @override
   Future<ShellRunResult> run({
     required String workingDirectory,
     required String command,
     Duration? deadline,
   });
+}
+
+/// Runs [command] through [runner], bounded by [deadline] when [runner] is a
+/// [BoundedShellRunner].
+///
+/// A plain [ShellRunner] cannot be told a deadline — its contract has no
+/// place for one — so it runs UNBOUNDED, exactly as it did before the bound
+/// existed: a runner injected under the plain contract owns its own bounding.
+/// The default [SystemShellRunner] is bounded, so the lane's ten-minute bound
+/// holds on every path that does not inject a runner of its own.
+Future<ShellRunResult> runWithinDeadline(
+  ShellRunner runner, {
+  required String workingDirectory,
+  required String command,
+  required Duration deadline,
+}) async {
+  if (runner is BoundedShellRunner) {
+    return runner.run(
+      workingDirectory: workingDirectory,
+      command: command,
+      deadline: deadline,
+    );
+  }
+  return runner.run(workingDirectory: workingDirectory, command: command);
 }
 
 /// The result of one [ShellRunner.run] — the exit code and combined
@@ -107,7 +157,7 @@ class ShellRunResult {
 /// [GroupTerminateResult.refusedUnsafe] fallback, and the same pgid resolution
 /// that `RuntimeProvider` and the compute bound already reap through. Nothing
 /// about process-group identity or signalling is re-derived here.
-class SystemShellRunner implements ShellRunner {
+class SystemShellRunner implements BoundedShellRunner {
   /// Creates the runner. [shellExecutable] is the shell every plan runs
   /// under; [dartExecutable] the VM the bounded path starts its launcher with;
   /// [groups] the process-group seam the deadline reaps through.
@@ -287,7 +337,7 @@ class ValidationLaneFailure implements Exception {
     this.baseSha,
     this.exitCode,
     this.timedOut = false,
-    this.outputTail = '',
+    this.output = '',
     this.logPath,
   });
 
@@ -307,15 +357,39 @@ class ValidationLaneFailure implements Exception {
   /// Whether the implicated run was terminated on its deadline.
   final bool timedOut;
 
-  /// A bounded tail of the implicated run's captured output.
-  final String outputTail;
+  /// The implicated run's FULL captured output — never a slice: the reason
+  /// shapes below cut it themselves, and a caller persisting it (the base-side
+  /// log) must get every byte.
+  final String output;
 
-  /// The durable log the implicated run's FULL output was written to.
+  /// The durable log the implicated run's FULL output was written to, as the
+  /// operator should read it — RELATIVE to the bead's workspace when it lives
+  /// there (`power_station#code-validation-preserves-diagnostics-and-reports-deadline`
+  /// names "the relative full-log path").
   final String? logPath;
 
-  /// The operator-facing message — the side and its cause lead, then the base
-  /// commit, the exit class, the durable log, and the captured tail.
-  String get message {
+  /// The recognized validation diagnostics of [output] — `Error:`,
+  /// `Failed to load`, and line-leading `[E]` lines, pub's advisory block
+  /// stripped first, deduplicated in encounter order and bounded to
+  /// [kValidationDiagnosticHeadChars] — or `''` when there are none.
+  ///
+  /// This is the diagnostics-LEAD clause of
+  /// `power_station#code-validation-preserves-diagnostics-and-reports-deadline`,
+  /// which the ruling that moved this lane onto its own deadline left standing
+  /// ("Everything else in code-validation-preserves-diagnostics-and-reports-deadline
+  /// stands"): a caller puts this head BEFORE its lane-named reason, so the
+  /// failing file or tool line survives the engine's head-first reason cap.
+  String get diagnosticHead => boundedValidationDiagnosticHead(
+    validationDiagnosticLines(planOutputWithoutPubAdvice(output)),
+  );
+
+  /// The lane-named reason WITHOUT the diagnostic head — the side and its
+  /// cause lead, then the base commit, the exit class, the durable log, and
+  /// the advice-stripped TAIL of [output] (the fatal line of an ordinary tool
+  /// is LAST). The head and the tail share the ONE
+  /// [kRevalidateReasonTailChars] budget, exactly as the revalidate step
+  /// spends it.
+  String get summary {
     final b = StringBuffer('validation $side: $cause');
     if (baseSha != null) b.write(' (merge-base $baseSha)');
     if (exitCode != null) {
@@ -324,8 +398,28 @@ class ValidationLaneFailure implements Exception {
       b.write('; timed out');
     }
     if (logPath != null) b.write('; full log: $logPath');
-    if (outputTail.trim().isNotEmpty) b.write(': ${outputTail.trim()}');
+    final head = diagnosticHead;
+    final tail = landReasonTail(
+      planOutputWithoutPubAdvice(output),
+      kRevalidateReasonTailChars - (head.isEmpty ? 0 : head.length + 2),
+    );
+    if (tail.isNotEmpty) b.write(': $tail');
     return b.toString();
+  }
+
+  /// The operator-facing message: the [diagnosticHead] (when the output
+  /// carried one) LEADS, then the [summary].
+  String get message {
+    final head = diagnosticHead;
+    return head.isEmpty ? summary : '$head\n$summary';
+  }
+
+  /// [message] with [lane] naming the lane that could not decide — the head
+  /// still LEADS, ahead of the lane name, exactly as it leads a route's
+  /// lane-named hard block.
+  String reasonFor(String lane) {
+    final head = diagnosticHead;
+    return head.isEmpty ? '$lane: $summary' : '$head\n$lane: $summary';
   }
 
   @override
@@ -444,7 +538,7 @@ class ValidationDeltaRunner {
         side: 'base',
         cause: 'could not resolve the merge base with $baseRef',
         exitCode: merged.exitCode,
-        outputTail: merged.output,
+        output: merged.output,
       );
     }
 
@@ -495,14 +589,18 @@ class ValidationDeltaRunner {
       return fresh;
     });
 
-    final branch = await shell.run(
+    final branch = await runWithinDeadline(
+      shell,
       workingDirectory: workDir,
       command: plan,
       deadline: deadline,
     );
     _writeAtomically(branchLogPath, branch.output);
     final branchFailures = failingTestNames(branch.output);
-    if (branchFailures.isEmpty && (!branch.ok || branch.timedOut)) {
+    // A run the deadline CUT is uncomparable however many failures it named
+    // before the kill: the tests it never reached have no outcome, so neither
+    // a regression nor a clean delta can be claimed from it.
+    if (branch.timedOut || (branchFailures.isEmpty && !branch.ok)) {
       throw ValidationLaneFailure(
         side: 'branch',
         cause: branch.timedOut
@@ -511,8 +609,8 @@ class ValidationDeltaRunner {
         baseSha: baseSha,
         exitCode: branch.exitCode,
         timedOut: branch.timedOut,
-        outputTail: _tail(branch.output),
-        logPath: branchLogPath,
+        output: branch.output,
+        logPath: _operatorPath(branchLogPath, workDir),
       );
     }
 
@@ -576,17 +674,20 @@ class ValidationDeltaRunner {
           cause: 'could not check the merge base out into a scratch worktree',
           baseSha: baseSha,
           exitCode: added.exitCode,
-          outputTail: _tail(added.output),
+          output: added.output,
         );
       }
       registered = true;
-      final result = await shell.run(
+      final result = await runWithinDeadline(
+        shell,
         workingDirectory: checkout,
         command: plan,
         deadline: deadline,
       );
       final failures = failingTestNames(result.output);
-      if (failures.isEmpty && (!result.ok || result.timedOut)) {
+      // A deadline-cut base is never a comparable (or cacheable) base: the
+      // tests it never reached would read as passing there.
+      if (result.timedOut || (failures.isEmpty && !result.ok)) {
         throw ValidationLaneFailure(
           side: 'base',
           cause: result.timedOut
@@ -595,7 +696,7 @@ class ValidationDeltaRunner {
           baseSha: baseSha,
           exitCode: result.exitCode,
           timedOut: result.timedOut,
-          outputTail: _tail(result.output),
+          output: result.output,
         );
       }
       return _BaseRun(exitCode: result.exitCode, failures: failures);
@@ -826,14 +927,11 @@ class _BaseRun {
 /// single-line refusal.
 String _oneLine(String text) => text.trim().replaceAll(RegExp(r'\s+'), ' ');
 
-/// The last [max] characters of [output] — a bounded receipt for a lane
-/// failure's message, where the FULL output is on disk.
-String _tail(String output, {int max = 600}) {
-  final trimmed = output.trimRight();
-  return trimmed.length <= max
-      ? trimmed
-      : trimmed.substring(trimmed.length - max);
-}
+/// [path] as an operator should read it in a reason: RELATIVE to the bead's
+/// [workDir] when it lives there (the reason is read against that worktree),
+/// otherwise unchanged.
+String _operatorPath(String path, String workDir) =>
+    p.isWithin(workDir, path) ? p.relative(path, from: workDir) : path;
 
 /// Writes [contents] to [path] through a temporary-file rename, creating the
 /// parent directory — so a reader never observes a partial artifact.

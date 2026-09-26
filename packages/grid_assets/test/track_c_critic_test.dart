@@ -684,6 +684,226 @@ void main() {
       },
     );
 
+    // `power_station#code-validation-preserves-diagnostics-and-reports-deadline`
+    // — the diagnostics-LEAD clause the deadline ruling left standing:
+    // `Error:`, `Failed to load`, and line-leading `[E]` lines, deduplicated in
+    // encounter order and bounded to 320 characters, placed before the lane's
+    // hard block; the advice-stripped tail and the RELATIVE full-log path
+    // follow.
+    const failedToLoad = 'Failed to load "test/a_test.dart":';
+    const error = 'lib/a.dart:4:2: Error: Missing member.';
+    const bracketed = '[E] analyzer failed';
+    List<String> diagnosticNoise() => [
+      'Resolving dependencies...',
+      for (var i = 0; i < 40; i++) '  pkg_$i 1.0.$i (2.0.$i available)',
+      '40 packages have newer versions incompatible with dependency '
+          'constraints.',
+      'Try `dart pub outdated` for more information.',
+      failedToLoad,
+      error,
+      bracketed,
+      failedToLoad,
+      error,
+      bracketed,
+      // A PROGRESS line carrying a trailing `[E]` is not a diagnostic.
+      '00:02 +5 -1: test/a_test.dart: renders it [E]',
+      for (var i = 0; i < 120; i++) 'loading test/case_$i.dart',
+    ];
+
+    test('non-zero code-validation reason leads bounded unique diagnostics: a '
+        'regressed branch run hands the route its diagnostic head', () async {
+      const y = 'test/y_test.dart 9:2 the branch case';
+      final runner = sides(
+        base: const ShellRunResult(exitCode: 0, output: 'All tests passed!'),
+        branch: ShellRunResult(
+          exitCode: 1,
+          output: [
+            ...diagnosticNoise(),
+            report([y]),
+          ].join('\n'),
+        ),
+      );
+      final c = laneCtx();
+
+      final payload =
+          ((await CodeValidationCapability(
+                    comparison: comparison(runner),
+                  ).run(c.context, c.args))
+                  as Ok)
+              .payload!;
+
+      expect(payload['grade'], 'F');
+      expect(payload['diagnostic_head'], '$failedToLoad\n$error\n$bracketed');
+      expect(
+        payload['diagnostic_head']!.length,
+        lessThanOrEqualTo(kValidationDiagnosticHeadChars),
+      );
+    });
+
+    test('the diagnostic head is bounded to 320 characters', () async {
+      const y = 'test/y_test.dart 9:2 the branch case';
+      final runner = sides(
+        base: const ShellRunResult(exitCode: 0, output: ''),
+        branch: ShellRunResult(
+          exitCode: 1,
+          output: [
+            for (var i = 0; i < 30; i++) 'lib/f$i.dart:1:1: Error: Missing $i.',
+            report([y]),
+          ].join('\n'),
+        ),
+      );
+      final c = laneCtx();
+
+      final payload =
+          ((await CodeValidationCapability(
+                    comparison: comparison(runner),
+                  ).run(c.context, c.args))
+                  as Ok)
+              .payload!;
+
+      final head = payload['diagnostic_head']!;
+      expect(head.length, kValidationDiagnosticHeadChars);
+      expect(head, startsWith('lib/f0.dart:1:1: Error: Missing 0.'));
+      expect(head, endsWith('…'));
+    });
+
+    test(
+      'a clean or pre-existing-only run carries NO diagnostic head',
+      () async {
+        const x = 'test/x_test.dart 3:1 the shared case';
+        final output = [
+          ...diagnosticNoise(),
+          report([x]),
+        ].join('\n');
+        final runner = sides(
+          base: ShellRunResult(exitCode: 1, output: output),
+          branch: ShellRunResult(exitCode: 1, output: output),
+        );
+        final c = laneCtx();
+
+        final payload =
+            ((await CodeValidationCapability(
+                      comparison: comparison(runner),
+                    ).run(c.context, c.args))
+                    as Ok)
+                .payload!;
+
+        expect(payload['grade'], 'A');
+        expect(payload.containsKey('diagnostic_head'), isFalse);
+      },
+    );
+
+    test('non-zero code-validation reason leads bounded unique diagnostics: a '
+        'branch lane failure leads with them, then the lane, the relative log, '
+        'and the advice-stripped tail', () async {
+      final runner = sides(
+        base: const ShellRunResult(exitCode: 0, output: ''),
+        branch: ShellRunResult(
+          exitCode: 1,
+          output: [...diagnosticNoise(), 'Some tests failed.'].join('\n'),
+        ),
+      );
+      final c = laneCtx();
+
+      final outcome = await CodeValidationCapability(
+        comparison: comparison(runner),
+      ).run(c.context, c.args);
+
+      expect(outcome, isA<Failed>());
+      final reason = (outcome as Failed).reason;
+      expect(
+        reason,
+        startsWith(
+          '$failedToLoad\n$error\n$bracketed\n'
+          'code-validation: validation branch: the plan failed without '
+          'naming a failing test',
+        ),
+      );
+      // The head survives the engine's 500-character persisted prefix.
+      expect(
+        reason.substring(0, 500),
+        contains('code-validation: validation branch'),
+      );
+      expect(
+        reason,
+        contains('; full log: .grid/critique/code-validation.log: '),
+      );
+      expect(
+        reason,
+        isNot(contains(workspace.path)),
+        reason: 'the full-log path is RELATIVE to the bead workspace',
+      );
+      expect(reason, endsWith('Some tests failed.'));
+      expect(
+        reason,
+        isNot(contains('available)')),
+        reason: "pub's advisory block is stripped before the tail is cut",
+      );
+    });
+
+    test(
+      'a timed-out branch plan that named a failure before the kill is still '
+      'a lane failure naming the deadline — never a delta',
+      () async {
+        const x = 'test/x_test.dart 3:1 the shared case';
+        final runner = sides(
+          base: ShellRunResult(exitCode: 1, output: report([x])),
+          branch: ShellRunResult(
+            exitCode: 137,
+            output: report([x]),
+            timedOut: true,
+          ),
+        );
+        final c = laneCtx();
+
+        final outcome = await CodeValidationCapability(
+          comparison: comparison(runner),
+        ).run(c.context, c.args);
+
+        expect(outcome, isA<Failed>());
+        expect(
+          (outcome as Failed).reason,
+          allOf(
+            contains('validation branch'),
+            contains('exceeded its 10-minute deadline'),
+            contains('timed out (exit 137)'),
+          ),
+        );
+        expect(artifact().containsKey('grade'), isFalse);
+      },
+    );
+
+    test('a timed-out base is a lane failure, and is never cached', () async {
+      const x = 'test/x_test.dart 3:1 the shared case';
+      final runner = sides(
+        base: ShellRunResult(
+          exitCode: 137,
+          output: report([x]),
+          timedOut: true,
+        ),
+        branch: ShellRunResult(exitCode: 1, output: report([x])),
+      );
+      final c = laneCtx();
+      final lane = CodeValidationCapability(comparison: comparison(runner));
+
+      for (var i = 0; i < 2; i++) {
+        final outcome = await lane.run(c.context, c.args);
+        expect(outcome, isA<Failed>());
+        expect(
+          (outcome as Failed).reason,
+          allOf(
+            contains('validation base'),
+            contains('exceeded its 10-minute deadline'),
+          ),
+        );
+      }
+      expect(
+        runner.calls.where((call) => call.workingDirectory != workspace.path),
+        hasLength(2),
+        reason: 'a deadline-cut base is re-attempted, never remembered',
+      );
+    });
+
     test(
       'the OFFLINE posture answers A with decodable empty arrays and NO IO',
       () async {

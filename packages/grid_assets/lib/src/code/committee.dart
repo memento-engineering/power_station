@@ -165,6 +165,15 @@ const String _critiqueDir = '.grid/critique';
 /// by the same script, and [sweepStaleCritique] retires them together.
 const String _gatingLogRelativePath = '$_critiqueDir/$kGatingRubric.log';
 
+/// The `code-validation` payload key carrying the branch plan's bounded
+/// DIAGNOSTIC head — the `Error:`, `Failed to load`, and line-leading `[E]`
+/// lines, deduplicated in encounter order and bounded to
+/// [kValidationDiagnosticHeadChars] — which the route places BEFORE its
+/// lane-named hard block
+/// (`power_station#code-validation-preserves-diagnostics-and-reports-deadline`).
+/// Only this lane emits it, so every other gate's reason is byte-identical.
+const String _gatingDiagnosticHeadKey = 'diagnostic_head';
+
 /// The hygiene step id every critic lane transitively `dependsOn`
 /// (gate-integrity #3) — wipes [_critiqueDir] before any lane can read or
 /// write this round.
@@ -980,11 +989,12 @@ class CodeValidationCapability extends ServiceCapability {
       );
     } on ValidationLaneFailure catch (failure) {
       // A base-side cause is persisted BESIDE the branch log, never over it:
-      // the two sides' outputs answer different questions.
-      if (failure.side != 'branch' && failure.outputTail.trim().isNotEmpty) {
+      // the two sides' outputs answer different questions. It is the FULL
+      // output, never a slice.
+      if (failure.side != 'branch' && failure.output.trim().isNotEmpty) {
         writeCapturedOutputLog(
           path: p.join(workspaceDir, _critiqueDir, '$kGatingRubric.base.log'),
-          output: failure.outputTail,
+          output: failure.output,
         );
       }
       _writeValidationArtifact(workspaceDir, {
@@ -994,14 +1004,26 @@ class CodeValidationCapability extends ServiceCapability {
         if (failure.baseSha != null) 'baseSha': failure.baseSha,
         kVerdictRoundKey: round,
       });
-      // NEVER a bead verdict: the lane could not decide, so it says so.
-      return Failed.noResult('code-validation: ${failure.message}');
+      // NEVER a bead verdict: the lane could not decide, so it says so — with
+      // the plan's recognized diagnostics LEADING the lane name, so the
+      // failing file or tool line survives the engine's head-first reason cap.
+      return Failed.noResult(failure.reasonFor(kGatingRubric));
     }
     if (args.cancel.isCancelled) {
       return const Failed.noResult('code-validation: cancelled');
     }
 
     final grade = delta.regressions.isEmpty ? 'A' : 'F';
+    // The DIAGNOSTICS LEAD a hard block: on a gating (non-zero, regressed)
+    // branch run, the recognized lines of its advice-stripped output ride the
+    // payload for the route to place BEFORE its lane-named reason.
+    final diagnosticHead = grade == 'F'
+        ? boundedValidationDiagnosticHead(
+            validationDiagnosticLines(
+              planOutputWithoutPubAdvice(readCapturedOutputLogOrEmpty(logPath)),
+            ),
+          )
+        : '';
     _writeValidationArtifact(workspaceDir, {
       'grade': grade,
       'transport': _validationTransport,
@@ -1020,6 +1042,7 @@ class CodeValidationCapability extends ServiceCapability {
       'branchRc': '${delta.branchExitCode}',
       'regressions': jsonEncode(delta.regressions),
       'preexisting': jsonEncode(delta.preexisting),
+      if (diagnosticHead.isNotEmpty) _gatingDiagnosticHeadKey: diagnosticHead,
       kVerdictRoundKey: '$round',
     });
   }
@@ -2788,7 +2811,26 @@ class CodeRouteCapability extends RouteCapability {
         }
       }
       final suffix = reasons.isEmpty ? '' : ': ${reasons.join('; ')}';
-      return Escalate('${failedGates.join(', ')} failed: hard block$suffix');
+      // The gating lane's DIAGNOSTIC head (the failing file/tool line) leads
+      // the whole reason: the engine persists a head-first prefix of a
+      // `failureReason`, so an operator reading a parked gate must meet the
+      // cause BEFORE the lane name and the log path that explain it
+      // (`power_station#code-validation-preserves-diagnostics-and-reports-deadline`).
+      // Only the code-validation lane emits this key, so every other gate's
+      // reason is byte-identical — as is a code-validation block whose output
+      // carried no recognized diagnostic line.
+      final diagnosticHeads = [
+        for (final id in failedGates)
+          if (siblings.resultOf('$parent/$id')[_gatingDiagnosticHeadKey]
+              case final value? when value.trim().isNotEmpty)
+            value.trim(),
+      ];
+      final lead = diagnosticHeads.isEmpty
+          ? ''
+          : '${diagnosticHeads.join('\n')}\n';
+      return Escalate(
+        '$lead${failedGates.join(', ')} failed: hard block$suffix',
+      );
     }
 
     // 1b. an ARTIFACT fault on a judgement lane — HELD, never graded. The

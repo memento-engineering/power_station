@@ -76,6 +76,7 @@ import 'validation.dart';
 // [ShellRunResult] and [SystemShellRunner] keeps resolving.
 export 'validation.dart'
     show
+        BoundedShellRunner,
         ShellRunResult,
         ShellRunner,
         SystemShellRunner,
@@ -83,7 +84,8 @@ export 'validation.dart'
         ValidationDeltaRunner,
         ValidationLaneFailure,
         failingTestNames,
-        kValidationDeadline;
+        kValidationDeadline,
+        runWithinDeadline;
 
 /// The landing PREPARATION circuit (id `landing`) — `rebase → revalidate`, which
 /// `code`'s own `land` step inflates as a [SubCircuitStep]. Each step ESCALATES
@@ -399,9 +401,9 @@ class RevalidateCapability extends RouteCapability {
         branchLogPath: logPath,
       );
     } on ValidationLaneFailure catch (failure) {
-      throw RouteFailure(
-        'revalidate could not be compared: ${failure.message}',
-      );
+      // The plan's recognized diagnostics LEAD, ahead of the lane name,
+      // exactly as they lead a regression's escalation below.
+      throw RouteFailure(failure.reasonFor('revalidate could not be compared'));
     }
     if (args.cancel.isCancelled) throw kRouteCancelled;
 

@@ -363,7 +363,7 @@ const Set<String> kAllCodeCircuitNodes = {
   kDeliverNode,
 };
 
-/// A recording [ShellRunner] (the validation-plan seam): records every
+/// A recording [BoundedShellRunner] (the validation-plan seam): records every
 /// (workingDirectory, command, deadline) call and returns a configurable
 /// answer — mirrors [RecordingGitRunner]'s shape/posture (Fakes, not mocks).
 ///
@@ -372,7 +372,7 @@ const Set<String> kAllCodeCircuitNodes = {
 /// worktree and once in the scratch checkout of the base, and the two sides
 /// must be able to differ. An unmatched directory falls back to [exitCode] /
 /// [output], so every pre-existing single-answer fixture is unchanged.
-class RecordingShellRunner implements ShellRunner {
+class RecordingShellRunner implements BoundedShellRunner {
   /// Every (workingDirectory, command, deadline) call, in call order.
   final List<({String workingDirectory, String command, Duration? deadline})>
   calls = [];
