@@ -24,3 +24,20 @@ they refresh before expiry.
 - `pow-1rn.3` owns reconciliation and polling.
 - `pow-1rn.4` and `pow-1rn.5` own bead projections.
 - `pow-1rn.6` owns webhooks.
+
+## Testing
+
+`dart test` runs the offline unit suite: no bd binary, no Dolt server, no
+credentials. The **live-state-writer tier** — `test/github/ci_rework_mint_acceptance_test.dart`,
+which spawns the real `bd` binary against a hermetic temp workspace and drives a live grid state
+writer over a bd proxied-server SQL endpoint — is tagged `integration` in `dart_test.yaml` and held
+out of that default run by the tag config, not by a `skip:` string in the test and not by a
+per-bead exclusion in a validation plan. Run it by name where `bd` and `dolt` are on `PATH`:
+
+```bash
+dart test -P integration
+```
+
+The `integration` preset in `dart_test.yaml` selects the tier and lifts only the tag's hold; a
+test's own `skip:` stays in force, so a blocked case in the tier stays blocked (`--run-skipped`
+would lift those too, and is not the invocation).

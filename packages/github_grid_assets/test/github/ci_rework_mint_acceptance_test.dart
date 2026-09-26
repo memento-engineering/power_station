@@ -1,3 +1,21 @@
+// The LIVE-STATE-WRITER tier. Every case here spawns the real `bd` binary
+// against a hermetic temp workspace and drives `assembleStationWork(dryRun:
+// false)`, whose state writer needs a resolvable SQL endpoint — a bd
+// PROXIED-SERVER store, which the fixture boots itself. That is an
+// out-of-process dependency, so this file rides the package's `integration`
+// tag (declared in `dart_test.yaml`) and is HELD OUT of a plain `dart test`
+// by that tag config. Run it by name:
+//
+//   dart test -P integration
+//
+// The `integration` preset selects the tier and lifts only the tag's hold; a
+// test's own skip reason stays in force, which is why `--run-skipped` is NOT
+// the invocation. The tag carries the tier; no test below carries a skip
+// reason for it. (The one skip reason in this file, on the self-mints case,
+// is pow-d1y7's and blocked by tg-u4ml — unrelated to the tier.)
+@Tags(['integration'])
+library;
+
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';

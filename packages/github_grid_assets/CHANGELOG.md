@@ -10,6 +10,9 @@
   `kCiFeedbackCapGateUnresolvedFlare` (`reconciler.ciFeedbackCapGateUnresolved`) naming that bead, the
   observation acknowledges, and the cycle reaches its poll and every other bead; the refused decision's
   idempotency key is released so the next observation of the same red head retries the mint.
+- Changed: the package gained a `dart_test.yaml` declaring the `integration` tag — the live-state-writer
+  tier (`ci_rework_mint_acceptance_test.dart`, real bd plus a proxied-server SQL endpoint) — and holds it
+  out of a plain `dart test` by tag config; run it by name with `dart test -P integration`.
 
 ## 0.2.0-dev.6
 
