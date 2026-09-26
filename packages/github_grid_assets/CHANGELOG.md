@@ -5,11 +5,14 @@
   its own, so bd refused every write with `prefix mismatch … (use --force to override)` and the shared
   GitHub reconciliation obligation stuck behind one red pull for every substation. The gate is now
   `bd create -t gate` with no `--id`, carrying the work bead in its title and in `work_bead`/`node`
-  metadata, and an OPEN gate for the same session and node is refreshed rather than duplicated.
+  metadata. Dedup is per WORK BEAD, as the retired fixed id made it: an OPEN cap gate at the bead's
+  `<bead>/ci-feedback` node is refreshed — and re-pointed at the bead's current session — rather than
+  duplicated, so a re-keyed or superseded session on a capped bead never leaves a second open gate.
 - Fixed: a cap-gate write the state store refuses is one bead's failure. It is reported under the new
   `kCiFeedbackCapGateUnresolvedFlare` (`reconciler.ciFeedbackCapGateUnresolved`) naming that bead, the
-  observation acknowledges, and the cycle reaches its poll and every other bead; the refused decision's
-  idempotency key is released so the next observation of the same red head retries the mint.
+  observation acknowledges, and the cycle reaches its poll and every other bead. The refused decision's
+  idempotency key is released, so a later DISTINCT observation of the same red head retries the mint; the
+  acknowledged observation is never re-driven, so an unchanged red pull retries nothing until it moves.
 - Changed: the package gained a `dart_test.yaml` declaring the `integration` tag — the live-state-writer
   tier (`ci_rework_mint_acceptance_test.dart`, real bd plus a proxied-server SQL endpoint) — and holds it
   out of a plain `dart test` by tag config; run it by name with `dart test -P integration`.

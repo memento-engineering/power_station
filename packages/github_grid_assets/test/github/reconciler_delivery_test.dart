@@ -542,6 +542,101 @@ void main() {
     expect(sender.calls, isEmpty, reason: 'capped beads rework nothing');
   });
 
+  test('a refused cap gate is retried ONLY by a later DISTINCT observation '
+      'of the same red head, never by re-driving the acked one', () async {
+    // What the released idempotency key actually buys, at CYCLE level under
+    // the per-leg outbox ack. Cycle 1 observes a capped red pull and the state
+    // store refuses its gate: one flare, the leg returns, the observation
+    // ACKS. Cycle 2 sees the pull UNCHANGED: its observation id deduplicates,
+    // nothing reaches the leg and no mint is retried. Cycle 3 sees the same
+    // head with a moved `updated_at`: a NEW observation, the same decision
+    // key — released — so the mint is retried and lands.
+    var refuse = true;
+    final state = _StateBd(
+      _sessions(<String>['pow-1', 'pow-1#r1', 'pow-1#r2', 'pow-1#r3']),
+      onWrite: (argv) {
+        if (argv.first == 'create' && refuse) {
+          refuse = false;
+          return const BdResult(
+            exitCode: 1,
+            stdout: '',
+            stderr: 'Error: store refused',
+          );
+        }
+        return const BdResult(exitCode: 0, stdout: '{}', stderr: '');
+      },
+    );
+    final cursors = _Cursors();
+    final sender = _Sender();
+    final flares = <String>[];
+    final projection = _feedback(state, sender, _WorkBd())
+      ..bindReporter((name, action, error, stackTrace) => flares.add(name));
+    Map<String, Object?> redPull(String updatedAt) => <String, Object?>{
+      'node_id': 'PR_11',
+      'number': 11,
+      'body': 'A human digest.\n\nRefs: pow-1\n',
+      'user': <String, Object?>{'login': 'nico'},
+      'created_at': '2026-09-03T15:00:00Z',
+      'updated_at': updatedAt,
+      'head': <String, Object?>{'ref': 'grid/pow-1', 'sha': 'abc123'},
+    };
+    List<GitHubHttpResponse> cycle(String updatedAt) => <GitHubHttpResponse>[
+      _response(const <Object?>[]),
+      _response(<Object?>[redPull(updatedAt)]),
+      _response(<String, Object?>{'mergeable': true}),
+      _response(<String, Object?>{
+        'check_runs': <Object?>[
+          <String, Object?>{
+            'node_id': 'CR_1',
+            'status': 'completed',
+            'conclusion': 'failure',
+            'completed_at': '2026-09-03T16:24:00Z',
+            'name': 'test',
+            'app': <String, Object?>{'slug': 'actions'},
+          },
+        ],
+      }),
+    ];
+    final transport = _Transport(<GitHubHttpResponse>[]);
+    final reconciler = _reconciler(
+      transport: transport,
+      cursors: cursors,
+      emit: (_) async {},
+    )..addObserver(kCiFeedbackDeliveryLeg, projection.call);
+    Iterable<List<String>> creates() =>
+        state.argvs.where((argv) => argv.first == 'create');
+
+    transport.responses.addAll(cycle('2026-09-03T16:25:00Z'));
+    await expectLater(reconciler.reconcileOnce(), completes);
+    expect(creates(), hasLength(1), reason: 'the first mint was attempted');
+    expect(flares, <String>[kCiFeedbackCapGateUnresolvedFlare]);
+    expect(cursors.cursor.pending, isEmpty, reason: 'the refusal still acks');
+    expect(cursors.cursor.observationIds, hasLength(1));
+
+    transport.responses.addAll(cycle('2026-09-03T16:25:00Z'));
+    await expectLater(reconciler.reconcileOnce(), completes);
+    expect(transport.responses, isEmpty, reason: 'the pull was re-polled');
+    expect(
+      creates(),
+      hasLength(1),
+      reason: 'an UNCHANGED red pull re-drives nothing: no retry',
+    );
+    expect(cursors.cursor.observationIds, hasLength(1));
+
+    transport.responses.addAll(cycle('2026-09-03T17:00:00Z'));
+    await expectLater(reconciler.reconcileOnce(), completes);
+    expect(
+      creates(),
+      hasLength(2),
+      reason: 'a DISTINCT observation of the same head retries the mint',
+    );
+    expect(creates().last, contains('CI rework cap reached for pow-1'));
+    expect(flares, hasLength(1), reason: 'the retry landed');
+    expect(cursors.cursor.pending, isEmpty);
+    expect(cursors.cursor.observationIds, hasLength(2));
+    expect(sender.calls, isEmpty, reason: 'a capped bead reworks nothing');
+  });
+
   for (final shape in <({String name, String sessions})>[
     (name: 'no live session', sessions: '{"schema_version":1,"data":[]}'),
     (
