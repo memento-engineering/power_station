@@ -1008,6 +1008,14 @@ enum ReleaseClassificationVerdict {
   /// The delta requires more than the declared bump gives — publishing this
   /// version would break consumers on a caret-compatible upgrade.
   understated,
+
+  /// The PUBLISHED baseline's own dependency closure does not solve against
+  /// pub.dev, so no delta can be measured against it — for this candidate or
+  /// any other. It is the baseline's defect, not the candidate's, and it is
+  /// distinct from an analyzer failure (which stays a refusal): the gate cannot
+  /// ratify the declared bump, and because it ratifies but never tightens, the
+  /// candidate must be cut at the most conservative class.
+  baselineUnresolvable,
 }
 
 /// The release CLASSIFICATION: the public API delta since the LAST PUBLISHED
@@ -1031,6 +1039,7 @@ class ReleaseClassification {
     required this.declaredChange,
     required this.verdict,
     required this.message,
+    this.solverReason,
   });
 
   /// The classified package.
@@ -1053,8 +1062,10 @@ class ReleaseClassification {
   /// Additions, `<symbol>: <change>` each, sorted.
   final List<String> added;
 
-  /// The change class the delta REQUIRES.
-  final ReleaseRequiredChange requiredChange;
+  /// The change class the delta REQUIRES — null when no delta could be
+  /// measured ([ReleaseClassificationVerdict.baselineUnresolvable]), never a
+  /// guessed class.
+  final ReleaseRequiredChange? requiredChange;
 
   /// The change class the authored version DECLARES.
   final ReleaseDeclaredChange declaredChange;
@@ -1066,6 +1077,12 @@ class ReleaseClassification {
   /// just "something changed".
   final String message;
 
+  /// The pub solver's own account of why the published baseline does not
+  /// resolve. Carried only by
+  /// [ReleaseClassificationVerdict.baselineUnresolvable]; null on every
+  /// measured verdict.
+  final String? solverReason;
+
   /// JSON form — the structured contract the release skill consumes.
   Map<String, dynamic> toJson() => {
     'package': package,
@@ -1074,10 +1091,11 @@ class ReleaseClassification {
     'removed': removed,
     'changed': changed,
     'added': added,
-    'requiredChange': requiredChange.name,
+    'requiredChange': requiredChange?.name,
     'declaredChange': declaredChange.name,
     'verdict': verdict.name,
     'message': message,
+    'solverReason': solverReason,
   };
 }
 
@@ -1364,6 +1382,13 @@ class ReleaseService {
   /// executable through the [ProcessRunner] seam and swapping it is one change
   /// at one seam.
   static const String _apiTool = 'dart-apitool';
+
+  /// The pub solver's terminal line on an unsolvable dependency closure.
+  static const String _solverFailed = 'version solving failed';
+
+  /// ANSI SGR colour sequences — `dart-apitool` colours its stderr, and the
+  /// solver reason the verdict carries is plain text.
+  static final RegExp _ansiSgr = RegExp('\x1B\\[[0-9;]*m');
 
   /// The activation every "analyzer missing" refusal carries, so the operator
   /// reads the fix in the failure rather than hunting for it.
@@ -2322,6 +2347,15 @@ class ReleaseService {
   /// tool, a missing report and a malformed report are all the same kind of
   /// refusal.
   ///
+  /// The one diff failure that is a VERDICT rather than a refusal is a
+  /// published baseline whose own dependency closure does not solve against
+  /// pub.dev: that is the baseline's defect, no candidate can clear it, and
+  /// reporting it as a generic diff failure made it indistinguishable from a
+  /// broken candidate. It returns
+  /// [ReleaseClassificationVerdict.baselineUnresolvable] with the solver's
+  /// reason and the operator consequence — the candidate is cut at the most
+  /// conservative class, because this gate ratifies and never tightens.
+  ///
   /// The seam ruling — shell out rather than depend on `package:dart_apitool`,
   /// and rather than owning the extraction in-house — is recorded as
   /// `release-classification-shells-out-to-dart-apitool`.
@@ -2357,11 +2391,21 @@ class ReleaseService {
     }
 
     final baseline = await _publishedBaseline(package: package, head: head);
-    final leaves = await _apiDelta(
-      package: package,
-      baseline: baseline,
-      packageDir: dir,
-    );
+    final List<_ApiDeltaLeaf> leaves;
+    try {
+      leaves = await _apiDelta(
+        package: package,
+        baseline: baseline,
+        packageDir: dir,
+      );
+    } on _BaselineUnresolvable catch (failure) {
+      return _unresolvableBaseline(
+        package: package,
+        baseline: baseline,
+        head: head,
+        solverReason: failure.reason,
+      );
+    }
 
     final removed = <String>[];
     final changed = <String>[];
@@ -2521,6 +2565,10 @@ class ReleaseService {
         );
       }
       if (result.exitCode != 0) {
+        final stderr = '${result.stderr}'.replaceAll(_ansiSgr, '');
+        if (_isBaselineSolverFailure(stderr, package: package)) {
+          throw _BaselineUnresolvable(stderr.trim());
+        }
         throw StateError(
           '$_apiTool diff failed for $package against $baseline (exit '
                   '${result.exitCode}); this release is NOT classified.\n'
@@ -2556,6 +2604,61 @@ class ReleaseService {
       'the release classification gate could not run $_apiTool ($detail). It '
       'refuses to pass a release it did not analyze: activate the tool with '
       '`$_apiToolActivation` and re-run.';
+
+  /// Whether a failing `$_apiTool diff` died resolving the PUBLISHED baseline
+  /// rather than the candidate. The tool resolves a `pub://` ref through a
+  /// generated `temp_package` wrapper that depends on the package from path,
+  /// while the candidate directory gets a direct `dart pub get` in place — and
+  /// gets it BEFORE the baseline is resolved — so a pub solver failure naming
+  /// `temp_package depends on <package> from path` is the baseline's own
+  /// closure failing to solve, whatever the candidate declares. This is a wire
+  /// contract with the external tool, like its JSON report shape.
+  bool _isBaselineSolverFailure(String stderr, {required String package}) =>
+      stderr.contains(_solverFailed) &&
+      stderr.contains('temp_package depends on $package from path');
+
+  /// The [ReleaseClassificationVerdict.baselineUnresolvable] result. The delta
+  /// is UNMEASURED — the lists are empty and `requiredChange` is null, never a
+  /// guessed class — and the message names the SYMBOL (the published baseline
+  /// that does not resolve) and the CONSEQUENCE: the candidate is cut at the
+  /// most conservative class. That follows from ratify-never-tighten — a
+  /// breaking bump off the baseline is the one declaration this gate would
+  /// have ratified whatever the delta turned out to be, and the required
+  /// version comes from the existing [planVersion] so no version math is
+  /// invented here either.
+  ReleaseClassification _unresolvableBaseline({
+    required String package,
+    required Version baseline,
+    required Version head,
+    required String solverReason,
+  }) {
+    final declaredChange = _declaredChange(baseline: baseline, head: head);
+    final devFirst = _devFirstFor(package: package, baseline: baseline);
+    final consequence = _core(head) >= _core(devFirst)
+        ? 'declared $head already is a breaking change off $baseline '
+              '($devFirst or above), the widest bump this gate could have '
+              'ratified'
+        : 'declared $head is a ${declaredChange.label}, a breaking change off '
+              '$baseline requires $devFirst';
+    return ReleaseClassification(
+      package: package,
+      baseline: baseline,
+      head: head,
+      removed: const [],
+      changed: const [],
+      added: const [],
+      requiredChange: null,
+      declaredChange: declaredChange,
+      verdict: ReleaseClassificationVerdict.baselineUnresolvable,
+      message:
+          '$package: the published baseline $baseline does not resolve '
+          'against pub.dev (its own dependency closure has no solution), so no '
+          'API delta can be measured for any candidate; the classifier '
+          'ratifies a declared bump but never tightens one, so cut at the most '
+          'conservative class: $consequence',
+      solverReason: solverReason,
+    );
+  }
 
   /// Flattens `report.breakingChanges` / `report.nonBreakingChanges` — each a
   /// tree of declaration nodes over change leaves — into one leaf list, each
@@ -3360,6 +3463,18 @@ class ReleaseService {
 }
 
 /// One publishable pub-workspace member, as authored on disk.
+/// Raised inside the delta run when `dart-apitool` could not resolve the
+/// PUBLISHED baseline — the one diff failure that is a verdict rather than a
+/// refusal, because it is the baseline's defect and no candidate can clear it.
+/// Private: [ReleaseService.classifyRelease] turns it into
+/// [ReleaseClassificationVerdict.baselineUnresolvable] and nothing else sees it.
+class _BaselineUnresolvable implements Exception {
+  const _BaselineUnresolvable(this.reason);
+
+  /// The pub solver's own account, ANSI-stripped and trimmed.
+  final String reason;
+}
+
 /// One flattened change from a `dart-apitool` JSON report: the nearest
 /// enclosing declaration, the change code, its description and whether the
 /// tool judged it breaking.

@@ -827,6 +827,60 @@ void main() {
       }
     });
 
+    test('EACH release leg names the unresolvable-baseline verdict and its '
+        'operator consequence', () {
+      // pow-pozp: a published baseline whose own floors do not co-resolve is
+      // the classifier's OWN verdict, not a diff failure to retry, and the
+      // consequence is fixed by ratify-never-tighten: cut at the most
+      // conservative class.
+      for (final leg in _skillLegs) {
+        final rendered = _renderLeg(root, leg, 'release', {'runner': 'space'});
+        String why(String what) => 'the $leg release leg $what';
+
+        expect(
+          rendered,
+          contains(
+            'space dart release classify --dir <package-dir> --package <name> '
+            '--json`\n  -> `{package, baseline, head, removed, changed, added, '
+            'requiredChange, declaredChange, verdict, message, solverReason}`',
+          ),
+          reason: why('names the classify JSON contract'),
+        );
+        expect(
+          rendered,
+          contains(
+            '`baselineUnresolvable` (exit 2 — the\n  PUBLISHED baseline\'s own '
+            'dependency closure does not solve against pub.dev',
+          ),
+          reason: why('names the verdict, its exit code and its meaning'),
+        );
+        expect(
+          rendered,
+          contains(
+            '`requiredChange` is null and\n  `solverReason` carries pub\'s own '
+            'account',
+          ),
+          reason: why('names the unmeasured delta and the solver reason'),
+        );
+        expect(
+          rendered,
+          contains(
+            'The classifier ratifies a\n   declared bump but never tightens '
+            'one, so cut the candidate at the most\n   conservative class',
+          ),
+          reason: why('states the most-conservative-class consequence'),
+        );
+        expect(
+          rendered,
+          contains(
+            'Never read it as a diff\n   failure to retry, and never loosen '
+            'the gate around it.',
+          ),
+          reason: why('refuses both the retry and the loosened gate'),
+        );
+      }
+    });
+
     test('EACH release leg keeps melos uploads RETIRED and tag-triggered '
         'trusted publishing as the upload path', () {
       for (final leg in _skillLegs) {

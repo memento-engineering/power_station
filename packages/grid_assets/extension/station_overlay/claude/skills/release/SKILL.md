@@ -44,6 +44,14 @@ Each op emits ONE JSON object under `--json`. Read the fields; never scrape.
   `declaredFloors.message` names the analyzed symbol diagnostics and every
   workspace sibling exact floor. This leg resolves pub.dev and belongs only to
   this release verb, never the offline workspace test command.
+- **Classification** — `{{runner}} dart release classify --dir <package-dir> --package <name> --json`
+  -> `{package, baseline, head, removed, changed, added, requiredChange, declaredChange, verdict, message, solverReason}`.
+  `verdict` is `ok` (exit 0), `understated` (exit 1 — the declared bump is
+  smaller than the delta requires), or `baselineUnresolvable` (exit 2 — the
+  PUBLISHED baseline's own dependency closure does not solve against pub.dev,
+  so no delta can be measured for ANY candidate; `requiredChange` is null and
+  `solverReason` carries pub's own account of the clash). A refusal — no
+  `dart-apitool`, a failing or malformed diff — exits 1 with NO JSON on stdout.
 - **Workspace discovery** — `{{runner}} dart release discover --workspace <workspace-dir> --diff <ref> --json`
   -> `{workspaceRoot, diff, candidates, changed}`. `candidates` is every
   publishable member whose AUTHORED version is not on pub.dev; `changed` is
@@ -247,6 +255,14 @@ Run them in sequence; a failure STOPS the release.
    --package <name> --json` for EVERY candidate; require `verdict: "ok"`. This
    is mandatory, and it does NOT become optional because melos authored the
    version — see the commit-message limit below.
+   `verdict: "baselineUnresolvable"` is the one verdict that is not the
+   candidate's fault: the PUBLISHED baseline itself does not resolve
+   (`solverReason` names the incompatible floors), so the gate cannot ratify
+   any bump and never will for that baseline. The classifier ratifies a
+   declared bump but never tightens one, so cut the candidate at the most
+   conservative class — the breaking dev-first version `message` names — and
+   state the classify departure on the release PR. Never read it as a diff
+   failure to retry, and never loosen the gate around it.
 6. **Dry-run** — `{{runner}} dart release dry-run --dir <package-dir> --package
    <name> --json`. Read `clean`; treat ANY warning as a stop. In particular,
    “N checked-in files are modified in git” means gate 4 is incomplete: COMMIT
