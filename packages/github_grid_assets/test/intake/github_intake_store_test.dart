@@ -187,10 +187,13 @@ final class CannedShellRunner implements ShellRunner {
   /// Every command asked, in order.
   final List<String> commands = [];
 
+  // The optional deadline is part of the `ShellRunner.run` contract; this
+  // decision-index Fake ignores the bound and answers its canned envelope.
   @override
   Future<ShellRunResult> run({
     required String workingDirectory,
     required String command,
+    Duration? deadline,
   }) async {
     commands.add(command);
     return ShellRunResult(exitCode: 0, output: output);
