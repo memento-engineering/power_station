@@ -928,8 +928,16 @@ void main() {
           '## The exit check — `filing` is the oracle, and it is a COMMAND',
         ),
       );
-      // The report contract the skill consumes, row for row.
-      expect(template, contains('{id, passed, requirements, error?}'));
+      // The report contract the skill consumes, row for row — the verb's
+      // WHOLE envelope (`FilingReport.toJson`), never the four-key shape that
+      // hid the advisory and its refusal reason (bead `pow-o9kg`).
+      expect(
+        template,
+        contains(
+          '{id, passed, approval_revision, requirements, advisory?, error?}',
+        ),
+      );
+      expect(template, isNot(contains('{id, passed, requirements, error?}')));
       for (final row in FilingRequirement.values) {
         expect(
           template,
@@ -1154,6 +1162,80 @@ void main() {
         contains('class FilingContract'),
         reason: 'the cited line declares the primitive the corpus names',
       );
+    });
+
+    // Each leg is asserted ALONE, on its own merits, and never compared to
+    // the other (`power_station#a-harness-may-carry-its-own-instructions`):
+    // both carried the same two false statements, so both are corrected, but
+    // identical content between them is permitted, not required.
+    test('each intake-refinement leg bans `bd export` with its reason and '
+        'names the scoped read, and documents the advisory that decides '
+        '`passed` (bead `pow-o9kg`)', () {
+      for (final leg in _skillLegs) {
+        final body = _renderLeg(root, leg, 'intake-refinement', {
+          'runner': 'space',
+        });
+        final flat = _collapsed(body);
+
+        // Defect 1: the bulk read is a SCOPED list, and the export surface is
+        // named only to be banned — with the failure mode a reader would
+        // otherwise misread as an empty store.
+        expect(
+          flat,
+          isNot(contains('Bulk reads: `bd export`')),
+          reason: '$leg no longer recommends the export surface',
+        );
+        expect(
+          flat,
+          contains('`bd list -t <type> --status all --json --limit 0`'),
+          reason: '$leg names the scoped replacement',
+        );
+        expect(
+          flat,
+          contains('exits clean and EMPTY'),
+          reason: '$leg states the proxied-store failure mode',
+        );
+        expect(
+          flat,
+          contains('reads as an empty store'),
+          reason: '$leg says what the empty answer is misread as',
+        );
+
+        // Defect 2: the whole report envelope, and the sentence that says the
+        // rows are not the only thing `passed` reads.
+        expect(
+          body,
+          contains(
+            '{id, passed, approval_revision, requirements, advisory?, error?}',
+          ),
+          reason: '$leg documents the whole envelope',
+        );
+        expect(
+          flat,
+          contains('All eleven rows can pass while `passed` is false'),
+          reason: '$leg says the rows alone do not decide the outcome',
+        );
+        expect(
+          flat,
+          contains('{outcome: refused, rule, reason}'),
+          reason: '$leg documents the refusal shape',
+        );
+        expect(
+          flat,
+          contains('readiness_grade'),
+          reason: '$leg documents the passing verdict\'s grade',
+        );
+        expect(
+          flat,
+          contains('grade `D` refuses'),
+          reason: '$leg names the grade that holds',
+        );
+        expect(
+          flat,
+          contains('`approve` stamps as `grid.approved_rev`'),
+          reason: '$leg says what approval_revision is',
+        );
+      }
     });
 
     test('intake-refinement teaches the projection details and the bd '
