@@ -645,6 +645,12 @@ class ReleaseScrubCommand extends Command<int> {
 /// class as an INPUT, `scrub` checks declared floors, `dry-run` checks
 /// packaging. None of them CLASSIFIES, so a breaking change mis-declared as a
 /// patch passes every gate. This op is the pairing they lack.
+///
+/// Exit codes: 0 `ok`; 1 `understated` (a decided negative, WITH its verdict
+/// on stdout) or a refusal (no verdict on stdout — the baseline, the analyzer
+/// or its report was unavailable); 2 `baselineUnresolvable` (a decided verdict
+/// WITH its JSON on stdout: the published baseline's own closure does not
+/// solve, so the candidate is cut at the most conservative class); 64 usage.
 class ReleaseClassifyCommand extends Command<int> {
   /// Creates the op over [service], rendering to [out]/[err].
   ReleaseClassifyCommand({
@@ -722,6 +728,9 @@ class ReleaseClassifyCommand extends Command<int> {
     return switch (result.verdict) {
       ReleaseClassificationVerdict.ok => 0,
       ReleaseClassificationVerdict.understated => 1,
+      // Distinct from BOTH the understated negative and the refusal exit: the
+      // gate could not run for this package, and not because of the candidate.
+      ReleaseClassificationVerdict.baselineUnresolvable => 2,
     };
   }
 }

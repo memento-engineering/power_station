@@ -178,6 +178,20 @@ String _apiToolReport({
   },
 });
 
+/// The stderr `dart-apitool diff` writes when the PUBLISHED baseline's own
+/// dependency closure does not solve — the genesis_dialogue 0.1.2 specimen
+/// (2026-09-22): the baseline floors two incompatible sibling ranges,
+/// `genesis_taxonomy ^0.1.0` (every version of which floors `genesis_tree
+/// ^0.1.0`) and `genesis_tree ^0.3.1`, so no resolve of it can ever succeed.
+/// The tool resolves a `pub://` ref through its generated `temp_package`
+/// wrapper, which is what marks the failure as the baseline's.
+String _unresolvableBaselineStderr({required String package}) =>
+    'Error: Exception: Because every version of $package from path depends '
+    'on genesis_taxonomy ^0.1.0 which depends on genesis_tree ^0.1.0, every '
+    'version of $package from path requires genesis_tree ^0.1.0.\n'
+    'And because temp_package depends on $package from path which depends on '
+    'genesis_tree ^0.3.1, version solving failed.\n';
+
 /// A report section root — its label is the banner, never a declaration.
 Map<String, Object?> _apiToolSection(
   String banner,
@@ -1792,6 +1806,213 @@ void main() {
         throwsA(isA<FormatException>()),
       );
     });
+
+    group('an unresolvable PUBLISHED baseline is its own verdict', () {
+      const specimen = 'genesis_dialogue';
+
+      _FakeHttp specimenHttp() => _FakeHttp(
+        HttpFetch(
+          statusCode: 200,
+          body: _pubVersionsBody(
+            name: specimen,
+            versions: ['0.1.1', '0.1.2'],
+            latest: '0.1.2',
+          ),
+        ),
+      );
+
+      test(
+        'a baseline flooring two incompatible sibling ranges names ITSELF, '
+        'carries the solver reason and the most-conservative-class consequence',
+        () async {
+          final dir = _writeClassifyPackage(name: specimen, version: '0.1.3');
+          addTearDown(() => dir.deleteSync(recursive: true));
+          final process = _FakeProcess(
+            ProcessResult(
+              1,
+              1,
+              'Preparing $specimen:0.1.2\nRunning pub get\n',
+              _unresolvableBaselineStderr(package: specimen),
+            ),
+          );
+
+          final result = await serviceFor(
+            process: process,
+            http: specimenHttp(),
+          ).classifyRelease(packageDir: dir.path, package: specimen);
+
+          expect(
+            result.verdict,
+            ReleaseClassificationVerdict.baselineUnresolvable,
+          );
+          expect(result.baseline.toString(), '0.1.2');
+          expect(result.head.toString(), '0.1.3');
+          // The delta is UNMEASURED — never a guessed class.
+          expect(result.requiredChange, isNull);
+          expect(result.removed, isEmpty);
+          expect(result.changed, isEmpty);
+          expect(result.added, isEmpty);
+          expect(result.declaredChange, ReleaseDeclaredChange.patch);
+          // The solver reason rides whole: both incompatible floors are in it.
+          expect(
+            result.solverReason,
+            allOf(
+              contains('genesis_taxonomy ^0.1.0'),
+              contains('genesis_tree ^0.1.0'),
+              contains('genesis_tree ^0.3.1'),
+              contains('version solving failed'),
+            ),
+          );
+          // The message names the SYMBOL (the published baseline) and the
+          // CONSEQUENCE (cut at the most conservative class), with the version
+          // the existing plan math derives.
+          expect(
+            result.message,
+            '$specimen: the published baseline 0.1.2 does not resolve against '
+            'pub.dev (its own dependency closure has no solution), so no API '
+            'delta can be measured for any candidate; the classifier ratifies '
+            'a declared bump but never tightens one, so cut at the most '
+            'conservative class: declared 0.1.3 is a patch, a breaking change '
+            'off 0.1.2 requires 0.2.0-dev.1',
+          );
+          // It was the real diff that failed, not a pre-check.
+          expect(process.executable, 'dart-apitool');
+        },
+      );
+
+      test('a candidate already at the most conservative class is told so — '
+          'the verdict still cannot ratify it', () async {
+        final dir = _writeClassifyPackage(
+          name: specimen,
+          version: '0.2.0-dev.1',
+        );
+        addTearDown(() => dir.deleteSync(recursive: true));
+
+        final result = await serviceFor(
+          process: _FakeProcess(
+            ProcessResult(
+              1,
+              1,
+              '',
+              _unresolvableBaselineStderr(package: specimen),
+            ),
+          ),
+          http: specimenHttp(),
+        ).classifyRelease(packageDir: dir.path, package: specimen);
+
+        expect(
+          result.verdict,
+          ReleaseClassificationVerdict.baselineUnresolvable,
+        );
+        expect(result.declaredChange, ReleaseDeclaredChange.prerelease);
+        expect(
+          result.message,
+          endsWith(
+            'cut at the most conservative class: declared 0.2.0-dev.1 already '
+            'is a breaking change off 0.1.2 (0.2.0-dev.1 or above), the widest '
+            'bump this gate could have ratified',
+          ),
+        );
+      });
+
+      test('the solver reason is carried PLAIN when the tool colours its '
+          'stderr', () async {
+        final dir = _writeClassifyPackage(name: specimen, version: '0.1.3');
+        addTearDown(() => dir.deleteSync(recursive: true));
+        final coloured =
+            '\x1B[1;31mError:\x1B[0m \x1B[31m'
+            '${_unresolvableBaselineStderr(package: specimen).substring(7)}'
+            '\x1B[0m';
+
+        final result = await serviceFor(
+          process: _FakeProcess(ProcessResult(1, 1, '', coloured)),
+          http: specimenHttp(),
+        ).classifyRelease(packageDir: dir.path, package: specimen);
+
+        expect(
+          result.verdict,
+          ReleaseClassificationVerdict.baselineUnresolvable,
+        );
+        expect(result.solverReason, isNot(contains('\x1B')));
+        expect(result.solverReason, startsWith('Error: Exception: Because'));
+        expect(result.solverReason, endsWith('version solving failed.'));
+      });
+
+      test('a CANDIDATE that does not resolve stays the generic diff refusal — '
+          'a solver failure alone does not implicate the baseline', () async {
+        final dir = _writeClassifyPackage(name: specimen, version: '0.1.3');
+        addTearDown(() => dir.deleteSync(recursive: true));
+        // dart-apitool resolves the candidate dir in place, so its solver text
+        // names the candidate itself and never the tool's temp_package wrapper.
+        const candidateFailure =
+            'Error: Exception: Because $specimen depends on genesis_tree '
+            '^9.0.0 which doesn\'t match any versions, version solving '
+            'failed.\n';
+
+        await expectLater(
+          serviceFor(
+            process: _FakeProcess(ProcessResult(1, 1, '', candidateFailure)),
+            http: specimenHttp(),
+          ).classifyRelease(packageDir: dir.path, package: specimen),
+          throwsA(
+            isA<StateError>().having(
+              (error) => error.message,
+              'message',
+              allOf(
+                contains('diff failed for $specimen against 0.1.2 (exit 1)'),
+                contains('NOT classified'),
+                contains('genesis_tree ^9.0.0'),
+              ),
+            ),
+          ),
+        );
+      });
+
+      test('a temp_package solver failure naming ANOTHER package is not this '
+          'baseline\'s verdict', () async {
+        final dir = _writeClassifyPackage(name: specimen, version: '0.1.3');
+        addTearDown(() => dir.deleteSync(recursive: true));
+
+        await expectLater(
+          serviceFor(
+            process: _FakeProcess(
+              ProcessResult(
+                1,
+                1,
+                '',
+                _unresolvableBaselineStderr(package: 'genesis_taxonomy'),
+              ),
+            ),
+            http: specimenHttp(),
+          ).classifyRelease(packageDir: dir.path, package: specimen),
+          throwsA(isA<StateError>()),
+        );
+      });
+
+      test('the verdict serializes with a null required change and the '
+          'solver reason', () async {
+        final dir = _writeClassifyPackage(name: specimen, version: '0.1.3');
+        addTearDown(() => dir.deleteSync(recursive: true));
+
+        final result = await serviceFor(
+          process: _FakeProcess(
+            ProcessResult(
+              1,
+              1,
+              '',
+              _unresolvableBaselineStderr(package: specimen),
+            ),
+          ),
+          http: specimenHttp(),
+        ).classifyRelease(packageDir: dir.path, package: specimen);
+
+        final json = result.toJson();
+        expect(json['verdict'], 'baselineUnresolvable');
+        expect(json['requiredChange'], isNull);
+        expect(json['declaredChange'], 'patch');
+        expect(json['solverReason'], contains('temp_package depends on'));
+      });
+    });
   });
 
   group('DartCommand / dart release — the THIN exported Command', () {
@@ -2323,8 +2544,10 @@ void main() {
         'declaredChange',
         'verdict',
         'message',
+        'solverReason',
       ]);
       expect(json['package'], 'leonard_flutter');
+      expect(json['solverReason'], isNull);
       expect(json['baseline'], '0.3.1');
       expect(json['head'], '0.3.2');
       expect(json['removed'], [
@@ -2449,6 +2672,133 @@ void main() {
         expect(err.toString(), startsWith('release classify:'));
       },
     );
+
+    test('an unresolvable published baseline exits 2 WITH its JSON verdict — '
+        'distinct from the understated 1 and the refusal 1', () async {
+      final dir = _writeClassifyPackage(
+        name: 'genesis_dialogue',
+        version: '0.1.3',
+      );
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final out = StringBuffer();
+      final err = StringBuffer();
+      final runner = CommandRunner<int>('t', 'test')
+        ..addCommand(
+          ReleaseCommand(
+            service: ReleaseService(
+              runProcess: _FakeProcess(
+                ProcessResult(
+                  1,
+                  1,
+                  '',
+                  _unresolvableBaselineStderr(package: 'genesis_dialogue'),
+                ),
+              ).call,
+              httpGet: _FakeHttp(
+                HttpFetch(
+                  statusCode: 200,
+                  body: _pubVersionsBody(
+                    name: 'genesis_dialogue',
+                    versions: ['0.1.1', '0.1.2'],
+                    latest: '0.1.2',
+                  ),
+                ),
+              ).call,
+            ),
+            out: out,
+            err: err,
+          ),
+        );
+
+      final code = await runner.run([
+        'release',
+        'classify',
+        '--dir',
+        dir.path,
+        '--package',
+        'genesis_dialogue',
+        '--json',
+      ]);
+
+      expect(code, 2);
+      expect(err.toString(), isEmpty);
+      final lines = const LineSplitter().convert(out.toString());
+      expect(lines, hasLength(1));
+      final json = jsonDecode(lines.single) as Map<String, dynamic>;
+      expect(json['verdict'], 'baselineUnresolvable');
+      expect(json['baseline'], '0.1.2');
+      expect(json['head'], '0.1.3');
+      expect(json['requiredChange'], isNull);
+      expect(json['declaredChange'], 'patch');
+      expect(json['removed'], isEmpty);
+      expect(json['changed'], isEmpty);
+      expect(json['added'], isEmpty);
+      expect(
+        json['solverReason'],
+        allOf(
+          contains('genesis_taxonomy ^0.1.0'),
+          contains('genesis_tree ^0.3.1'),
+          contains('version solving failed'),
+        ),
+      );
+      expect(
+        json['message'],
+        allOf(
+          contains('published baseline 0.1.2 does not resolve'),
+          contains('cut at the most conservative class'),
+          contains('a breaking change off 0.1.2 requires 0.2.0-dev.1'),
+        ),
+      );
+    });
+
+    test('an unresolvable published baseline renders its message prose-only '
+        'without --json', () async {
+      final dir = _writeClassifyPackage(
+        name: 'genesis_dialogue',
+        version: '0.1.3',
+      );
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final out = StringBuffer();
+      final runner = CommandRunner<int>('t', 'test')
+        ..addCommand(
+          ReleaseCommand(
+            service: ReleaseService(
+              runProcess: _FakeProcess(
+                ProcessResult(
+                  1,
+                  1,
+                  '',
+                  _unresolvableBaselineStderr(package: 'genesis_dialogue'),
+                ),
+              ).call,
+              httpGet: _FakeHttp(
+                HttpFetch(
+                  statusCode: 200,
+                  body: _pubVersionsBody(
+                    name: 'genesis_dialogue',
+                    versions: ['0.1.2'],
+                    latest: '0.1.2',
+                  ),
+                ),
+              ).call,
+            ),
+            out: out,
+          ),
+        );
+
+      final code = await runner.run([
+        'release',
+        'classify',
+        '--dir',
+        dir.path,
+        '--package',
+        'genesis_dialogue',
+      ]);
+
+      expect(code, 2);
+      expect(out.toString(), isNot(contains('{')));
+      expect(out.toString(), contains('cut at the most conservative class'));
+    });
 
     test('classify --dir on a missing dir exits 64 (usage)', () async {
       final err = StringBuffer();
