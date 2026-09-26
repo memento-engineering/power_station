@@ -215,13 +215,30 @@ dependency rows the WORK store's own bd holds, and it reaches no second store.
 `park` and `show` still take the option, because they reach the grid home's
 session-lifecycle beads.
 
-The report is one JSON object: `{id, passed, requirements, error?}`.
+The report is one JSON object:
+`{id, passed, approval_revision, requirements, advisory?, error?}`.
 `requirements` carries exactly eleven rows, in order — `driveable_type`,
 `validation_plan`, `acceptance_criteria`, `dependencies`,
 `validation_plan_syntax`, `validation_plan_portability`, `repo_relative_paths`,
 `bead_references`, `release_versions`, `decision_references`,
 `no_corrupting_text` — each `{requirement, passed, detail}`. `passed` is true
-only for a found bead whose eleven rows ALL pass.
+only for a found bead whose eleven rows ALL pass AND whose advisory, when it
+ran, did not refuse.
+
+All eleven rows can pass while `passed` is false: the pre-stamp advisory
+refused. The advisory is the bead-readiness and discovery-evidence lenses run
+BEFORE any stamp (the `--readiness` option, default `run`), so a filing that
+would hold at `spec_review` never mounts; it is a judgement, not a twelfth row,
+so grepping `requirements` for a failing row finds nothing. `advisory` carries
+the verdict and the reason: `{outcome: passed, readiness_grade}` (grade `A`–`C`
+passes), `{outcome: refused, rule, reason}` (`rule` names the arm — `intake`,
+`readiness`, `discovery`, `discovery-evidence`, or `transport` for a lens that
+did not complete — and `reason` is the owning lens's own fix text verbatim,
+carrying the readiness grade it held on; grade `D` refuses, and axis 3, cited
+constraints, is the axis that holds most beads), or `{outcome: skipped}` for a
+`--readiness=skip` waiver. When no row fails and `passed` is false, read
+`advisory.reason`. `approval_revision` is the digest of the filing basis the
+rows were evaluated over — the value `approve` stamps as `grid.approved_rev`.
 
 The first four are PRESENCE (is the field there); the six after them are
 VIABILITY (can what the field holds actually work); the last is CONTENT (does
@@ -422,6 +439,12 @@ staging.
   compound also re-routes the command through permission classifiers).
 - `bd create --deps 'blocks:X'` makes the NEW bead block X (inverted from the
   common intent) — wire with `bd dep add` after creating.
-- Grouped mutations: `bd batch` (one transaction). Bulk reads: `bd export`.
-  Never `bd show` from a polling path; never spawn bd per issue in a loop.
+- Grouped mutations: `bd batch` (one transaction). Bulk reads: a SCOPED
+  `bd list -t <type> --status all --json --limit 0` per core type — NEVER
+  `bd export`. Every store this station arms is a proxied-server store, and
+  against one `bd export` exits clean and EMPTY (a newer bd refuses outright;
+  neither answer is a read): a successful command with no rows reads as an
+  empty store, and a prior-art or staleness decision made on that reading says
+  "nothing here" when there is. Never `bd show` from a polling path; never
+  spawn bd per issue in a loop.
 - `--actor operator` on every mutation; reasons carry receipts.
