@@ -318,7 +318,9 @@ void main() {
         addTearDown(() => tmp.deleteSync(recursive: true));
         _provisionCheckout(tmp.path, 'tg-1');
         _provisionCheckout(tmp.path, 'tg-2');
-        // The four tg-1 committee critic step names, in declaration order.
+        // The tg-1 committee critic step names a PROCESS is started for, in
+        // declaration order — the three MODEL critics. `code-validation` is a
+        // ServiceCapability: same frontier, no spawn.
         final tg1Critics = [
           for (final n in kProcessCriticNodes) 'tgdog-1/tg-1/$n',
         ];
@@ -350,7 +352,10 @@ void main() {
             // real process (`tg-rm5`).
             registry: buildCodeRegistry(
               rubrics: (id) => '($id rubric bands)',
-              gitRunner: f.git,
+              // Wrapped so the deterministic `code-validation` lane's
+              // merge-base comparison resolves a base and a scratch worktree
+              // without touching disk; every land op still rides `f.git`.
+              gitRunner: ValidationAwareGitRunner(f.git),
               shellRunner: shell,
               // A no-op clearer (gate-integrity #3): offline — never a real
               // filesystem touch.
@@ -475,17 +480,18 @@ void main() {
         // own signal rather than a single pump.
         await settle(
           () =>
-              f.provider.started.length >= 6 &&
+              f.provider.started.length >= 5 &&
               f.provider.stopped.contains('tgdog-1/tg-1/agent'),
         );
 
-        // The running frontier SWAPPED: the agent step was killed and the four
-        // critics spawned; the WorkBead branch + its token-keyed subtree root
-        // PERSISTED.
+        // The running frontier SWAPPED: the agent step was killed and the three
+        // MODEL critics spawned; the WorkBead branch + its token-keyed subtree
+        // root PERSISTED. (`code-validation` is a ServiceCapability now — it
+        // joins the same frontier but starts no process.)
         expect(
           f.provider.started,
-          hasLength(6),
-          reason: 'the four committee critics fanned out (the swap)',
+          hasLength(5),
+          reason: 'the three model critics fanned out (the swap)',
         );
         for (final critic in tg1Critics) {
           expect(
@@ -494,18 +500,17 @@ void main() {
             reason: 'critic $critic fanned out IN PARALLEL',
           );
         }
-        // Both lanes spawn `sh` (FT-2 wraps claude for usage capture): the
-        // gating lane runs the Validation Plan, an LLM lane exec's claude.
+        // The DETERMINISTIC validation lane starts NO process; each MODEL
+        // critic spawns `sh` (FT-2 wraps claude for usage capture).
         expect(
-          f.provider.started
-              .firstWhere((s) => s.name == tg1Critics.first)
-              .config
-              .command,
-          'sh',
-          reason: 'the gating critic runs the bead\'s Validation Plan',
+          f.provider.started.any(
+            (s) => s.name == 'tgdog-1/tg-1/${kCriticNodes.first}',
+          ),
+          isFalse,
+          reason: 'code-validation is a service, never a spawned job',
         );
         final tg1Llm = f.provider.started
-            .firstWhere((s) => s.name == tg1Critics[1])
+            .firstWhere((s) => s.name == tg1Critics.first)
             .config;
         expect(tg1Llm.command, 'sh');
         expect(
@@ -592,7 +597,7 @@ void main() {
         owner.flush();
         await settle(() => tg1Critics.every(f.provider.stopped.contains));
 
-        // The four critic steps were killed on the swap; the route is a
+        // The three MODEL critic steps were killed on the swap; the route is a
         // ServiceCapability (no provider spawn), so no new start lands.
         expect(
           f.provider.stopped,
@@ -601,7 +606,7 @@ void main() {
         );
         expect(
           f.provider.started,
-          hasLength(6),
+          hasLength(5),
           reason: 'the route does not spawn a process',
         );
 
@@ -674,11 +679,11 @@ void main() {
         await pumpEventQueue();
 
         // land is a ServiceCapability (git/PR orchestration) — NOT a provider
-        // spawn (still 6 starts); the land Service ran its real orchestration
+        // spawn (still 5 starts); the land Service ran its real orchestration
         // through the fakes; the WorkBead branch still persists.
         expect(
           f.provider.started,
-          hasLength(6),
+          hasLength(5),
           reason: 'land does not spawn a process',
         );
         expect(

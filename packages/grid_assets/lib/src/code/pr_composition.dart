@@ -556,6 +556,7 @@ String _circuitReceipt(PrCompositionContext context) {
           buildCircuitReceipt(
             beadId: context.beadId,
             siblings: context.siblings,
+            preexisting: _preexistingOnBase(context),
           ).trimRight(),
         )
         ..writeln()
@@ -571,6 +572,31 @@ String _circuitReceipt(PrCompositionContext context) {
     }
   }
   return b.toString();
+}
+
+/// The tests the code-validation lane proved already fail at the merge base,
+/// read off the review lane's own sibling result and rendered as the receipt's
+/// `pre-existing on base:` notes.
+///
+/// STRICT: the value must decode as a JSON array of strings. Malformed data is
+/// omitted from the PR prose — a receipt must never assert provenance it could
+/// not read — while the ROUTE keeps its own fail-closed refusal of the same
+/// payload, so a lane that cannot say what it found still gates.
+List<String> _preexistingOnBase(PrCompositionContext context) {
+  final review = context.siblings.resultOf(
+    '${context.beadId}/review/code-validation',
+  );
+  final raw = review['preexisting'];
+  if (raw == null) return const [];
+  final Object? decoded;
+  try {
+    decoded = jsonDecode(raw);
+  } on FormatException {
+    return const [];
+  }
+  if (decoded is! List) return const [];
+  if (decoded.any((entry) => entry is! String)) return const [];
+  return decoded.cast<String>().toSet().toList()..sort();
 }
 
 String _committeeGrades(PrCompositionContext context) {

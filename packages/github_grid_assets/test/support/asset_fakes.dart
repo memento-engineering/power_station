@@ -200,8 +200,16 @@ const List<String> kCriticNodes = [
   'review/regression-risk',
   'review/test-coverage',
 ];
+
+/// The critic nodes a RUNTIME PROVIDER actually spawns — the three MODEL
+/// critics only.
+///
+/// `review/code-validation` is a member of [kCriticNodes] (it grades) but NOT
+/// of this set: the deterministic validation lane is a `ServiceCapability` that
+/// compares the bead's Validation Plan against the merge base in-process, so no
+/// process is ever started for it
+/// (`power_station#code-validation-enforces-its-own-deadline-as-a-service-capability`).
 const List<String> kProcessCriticNodes = [
-  'review/code-validation',
   'review/spec-adherence',
   'review/regression-risk',
   'review/test-coverage',
@@ -289,24 +297,46 @@ const Set<String> kAllCodeCircuitNodes = {
   kDeliverNode,
 };
 
-/// A recording [ShellRunner] (the `revalidate` seam, `tg-rm5`): records every
-/// (workingDirectory, command) call and returns a configurable [exitCode] (0
-/// ⇒ ok) — mirrors [RecordingGitRunner]'s shape/posture (Fakes, not mocks).
-class RecordingShellRunner implements ShellRunner {
-  /// Every (workingDirectory, command) call, in call order.
-  final List<({String workingDirectory, String command})> calls = [];
+/// A recording [BoundedShellRunner] (the validation-plan seam): records every
+/// (workingDirectory, command, deadline) call and returns a configurable
+/// answer — mirrors [RecordingGitRunner]'s shape/posture (Fakes, not mocks).
+///
+/// [resultsByDirectory] answers PER WORKING DIRECTORY, which is what a
+/// merge-base comparison needs: the SAME plan runs twice, once in the branch
+/// worktree and once in the scratch checkout of the base, and the two sides
+/// must be able to differ. An unmatched directory falls back to [exitCode] /
+/// [output], so every pre-existing single-answer fixture is unchanged.
+class RecordingShellRunner implements BoundedShellRunner {
+  /// Every (workingDirectory, command, deadline) call, in call order.
+  final List<({String workingDirectory, String command, Duration? deadline})>
+  calls = [];
 
-  /// The exit code the next runs return (0 ⇒ `ok`). Settable so a test can
-  /// make revalidate fail (Gate).
+  /// The exit code the next unmatched runs return (0 ⇒ `ok`). Settable so a
+  /// test can make a plan fail.
   int exitCode = 0;
+
+  /// The combined output the next unmatched runs return.
+  String output = '';
+
+  /// Whether the next unmatched runs report a deadline kill.
+  bool timedOut = false;
+
+  /// Per-working-directory answers, matched by exact path.
+  final Map<String, ShellRunResult> resultsByDirectory = {};
 
   @override
   Future<ShellRunResult> run({
     required String workingDirectory,
     required String command,
+    Duration? deadline,
   }) async {
-    calls.add((workingDirectory: workingDirectory, command: command));
-    return ShellRunResult(exitCode: exitCode, output: '');
+    calls.add((
+      workingDirectory: workingDirectory,
+      command: command,
+      deadline: deadline,
+    ));
+    return resultsByDirectory[workingDirectory] ??
+        ShellRunResult(exitCode: exitCode, output: output, timedOut: timedOut);
   }
 }
 
@@ -334,6 +364,46 @@ GitRunResult? gitRootProbeAnswer({
     ? GitRunResult(exitCode: 0, output: '$workingDirectory\n\n')
     : null;
 
+/// The merge-base commit every offline fixture's validation comparison
+/// resolves — a fixed, obviously-synthetic sha, so a receipt that names it is
+/// recognisably a fixture's.
+const String kFakeMergeBase = 'basesha0000000000000000000000000000000000';
+
+/// Wraps a [GitRunner] so the merge-base COMPARISON's two reads answer as a
+/// real repository would — [mergeBase] for `git merge-base`, and success for
+/// the scratch `git worktree add --detach` / `remove --force` pair — WITHOUT
+/// delegating, so neither reaches the wrapped recorder's `calls` (the land argv
+/// a suite asserts on) and neither touches disk.
+///
+/// Every OTHER subcommand delegates straight through, recorded identically to
+/// the unwrapped fake. The same carve-out shape the engine's own
+/// [RecordingGitRunner] already makes for the `rev-parse --show-toplevel` root
+/// probe, and for the same reason.
+class ValidationAwareGitRunner implements GitRunner {
+  /// Wraps [inner].
+  ValidationAwareGitRunner(this.inner, {this.mergeBase = kFakeMergeBase});
+
+  /// The delegate every non-comparison call rides.
+  final GitRunner inner;
+
+  /// The commit `git merge-base HEAD <baseRef>` answers.
+  final String mergeBase;
+
+  @override
+  Future<GitRunResult> run({
+    required String workingDirectory,
+    required List<String> args,
+  }) async {
+    if (args.isNotEmpty && args.first == 'merge-base') {
+      return GitRunResult(exitCode: 0, output: '$mergeBase\n');
+    }
+    if (args.isNotEmpty && args.first == 'worktree') {
+      return const GitRunResult(exitCode: 0, output: '');
+    }
+    return inner.run(workingDirectory: workingDirectory, args: args);
+  }
+}
+
 /// A [GitRunner] with canned per-subcommand answers (Fakes, not mocks) — the
 /// describe pass's branch-delta reads (bead `pow-8dx`): `git log` returns [log],
 /// `git diff --stat` a fixed one-file stat, and `git diff` returns [diff] with
@@ -357,7 +427,22 @@ class CannedGitRunner implements GitRunner {
     this.numstat = '2\t1\tlib/x.dart\x00',
     this.shortstat = ' 1 file changed, 2 insertions(+), 1 deletion(-)',
     this.nameStatusOk = true,
+    this.mergeBase = 'basesha0000000000000000000000000000000000',
+    this.mergeBaseOk = true,
+    this.worktreeOk = true,
   });
+
+  /// The `git merge-base HEAD <baseRef>` answer the validation comparison
+  /// resolves its base commit from.
+  final String mergeBase;
+
+  /// Whether the merge-base read succeeds (false ⇒ a non-zero git).
+  final bool mergeBaseOk;
+
+  /// Whether `git worktree add --detach` / `git worktree remove --force`
+  /// succeed — the scratch checkout the base run stands in. Deterministic and
+  /// process-free: nothing is written to disk for either answer.
+  final bool worktreeOk;
 
   /// The `git log --format=…%x00` body (NUL-separated commit records).
   final String log;
@@ -389,6 +474,18 @@ class CannedGitRunner implements GitRunner {
     required List<String> args,
   }) async {
     calls.add(List.unmodifiable(args));
+    if (args.first == 'merge-base') {
+      return GitRunResult(
+        exitCode: mergeBaseOk ? 0 : 128,
+        output: mergeBaseOk ? mergeBase : 'fatal: not a valid object name',
+      );
+    }
+    if (args.first == 'worktree') {
+      return GitRunResult(
+        exitCode: worktreeOk ? 0 : 128,
+        output: worktreeOk ? '' : 'fatal: could not create work tree',
+      );
+    }
     if (args.first == 'log') return GitRunResult(exitCode: 0, output: log);
     if (args.first == 'diff') {
       if (args.contains('--name-status')) {

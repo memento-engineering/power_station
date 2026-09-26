@@ -283,481 +283,668 @@ void main() {
         );
       },
     );
-
-    test('probes deterministic gating rc absence and presence', () async {
-      final dir = Directory.systemTemp.createTempSync('critic-gate-probe-');
-      addTearDown(() => dir.deleteSync(recursive: true));
-      final c = _ctx(rubric: kGatingRubric, workspaceDir: dir.path);
-      const cap = CriticCapability();
-      expect(
-        await cap.probeCompletionArtifact(c.context, c.args),
-        GateOutcome.present,
-      );
-      File('${dir.path}/.grid/critique/$kGatingRubric.rc')
-        ..createSync(recursive: true)
-        ..writeAsStringSync('0');
-      expect(
-        await cap.probeCompletionArtifact(c.context, c.args),
-        GateOutcome.clear,
-      );
-    });
-
-    test(
-      'an armed deadline stamp clears the gating probe with no rc',
-      () async {
-        final dir = Directory.systemTemp.createTempSync(
-          'critic-gate-deadline-',
-        );
-        addTearDown(() => dir.deleteSync(recursive: true));
-        final c = _ctx(rubric: kGatingRubric, workspaceDir: dir.path);
-        const cap = CriticCapability();
-        expect(
-          await cap.probeCompletionArtifact(c.context, c.args),
-          GateOutcome.present,
-        );
-        File('${dir.path}/.grid/critique-incarnation/$kGatingRubric.deadline')
-          ..createSync(recursive: true)
-          ..writeAsStringSync('10m\n');
-        expect(
-          await cap.probeCompletionArtifact(c.context, c.args),
-          GateOutcome.clear,
-          reason: 'a watchdog kill leaves no rc — the stamp is the evidence',
-        );
-      },
-    );
   });
 
-  group('Track C2 — code-validation (the GATING lane)', () {
+  group('Track C2 — code-validation (the DETERMINISTIC DELTA lane)', () {
+    late Directory workspace;
+
+    setUp(() {
+      workspace = Directory.systemTemp.createTempSync('code-validation-');
+    });
+
+    tearDown(() {
+      if (workspace.existsSync()) workspace.deleteSync(recursive: true);
+    });
+
+    /// The lane's (ambient tree, per-step args) pair, over a REAL workspace dir
+    /// (the lane's offline posture keys on the directory existing).
+    ({FakeTreeContext context, StepArgs args}) laneCtx({
+      String plan = 'dart test',
+      String? workspaceDir,
+    }) => _ctx(
+      rubric: kGatingRubric,
+      workspaceDir: workspaceDir ?? workspace.path,
+      beadOverride: bead('tg-1').copyWith(metadata: {'validation_plan': plan}),
+    );
+
+    ValidationDeltaRunner comparison(
+      ShellRunner shell, {
+      GitRunner? git,
+      String host = 'lunar-test-host',
+      String? cacheHome,
+    }) => ValidationDeltaRunner(
+      gitRunner: git ?? CannedGitRunner(),
+      shellRunner: shell,
+      cacheHome: cacheHome ?? workspace.path,
+      hostIdentity: host,
+    );
+
+    /// A runner whose BASE side (the scratch merge-base checkout, at a
+    /// system-temporary path this test cannot predict) answers [base] and
+    /// whose BRANCH side (the workspace itself) answers [branch].
+    RecordingShellRunner sides({
+      required ShellRunResult base,
+      required ShellRunResult branch,
+    }) => RecordingShellRunner()
+      ..exitCode = base.exitCode
+      ..output = base.output
+      ..timedOut = base.timedOut
+      ..resultsByDirectory[workspace.path] = branch;
+
+    /// One `dart test` report naming [failing] as its failing tests.
+    String report(List<String> failing) => [
+      'Some tests failed.',
+      'Failing tests:',
+      for (final name in failing) ' - $name',
+    ].join('\n');
+
+    Map<String, dynamic> artifact() => _readVerdictJson(
+      '${workspace.path}/.grid/critique/code-validation.json',
+    );
+
+    // AC-1: the whole ruling in one probe. X fails on BOTH sides, Y only on the
+    // branch — so Y is the regression and X is a note.
+    test('shared X and branch-only Y: only Y is a regression', () async {
+      const x = 'test/x_test.dart 3:1 the shared case';
+      const y = 'test/y_test.dart 9:2 the branch case';
+      final runner = sides(
+        base: ShellRunResult(exitCode: 1, output: report([x])),
+        branch: ShellRunResult(exitCode: 1, output: report([x, y])),
+      );
+      final c = laneCtx();
+
+      final outcome = await CodeValidationCapability(
+        comparison: comparison(runner),
+      ).run(c.context, c.args);
+
+      expect(outcome, isA<Ok>());
+      final payload = (outcome as Ok).payload!;
+      expect(payload['grade'], 'F');
+      expect(payload['transport'], 'validation-delta');
+      expect(payload['regressions'], '["$y"]');
+      expect(payload['preexisting'], '["$x"]');
+      expect(payload['branchRc'], '1', reason: 'the RAW branch exit survives');
+      expect(payload['baseCache'], 'miss');
+      expect(payload['baseSha'], 'basesha0000000000000000000000000000000000');
+
+      // The durable receipts: the JSON delta, the FULL branch output, and the
+      // EFFECTIVE rc (non-zero here — the branch really did regress).
+      final json = artifact();
+      expect(json['regressions'], [y]);
+      expect(json['preexisting'], [x]);
+      expect(json['branchRc'], 1);
+      expect(json['grade'], 'F');
+      expect(
+        File(
+          '${workspace.path}/.grid/critique/code-validation.log',
+        ).readAsStringSync(),
+        report([x, y]),
+      );
+      expect(
+        File(
+          '${workspace.path}/.grid/critique/code-validation.rc',
+        ).readAsStringSync().trim(),
+        '1',
+      );
+    });
+
+    // AC-2: the false gate this bead retired. Every failure is the base's, so
+    // the lane grades A and the effective rc is zero — with the raw exit and
+    // the pre-existing names preserved as evidence.
     test(
-      'spawns `sh -c` running the bead\'s Validation Plan, capturing its rc',
-      () {
-        final dir = Directory.systemTemp.createTempSync('critic-gate-spawn-');
-        addTearDown(() => dir.deleteSync(recursive: true));
-        final withPlan = bead('tg-1').copyWith(
-          metadata: const {'validation_plan': 'melos analyze && melos test'},
+      'pre-existing-only validation advances with an effective rc of 0',
+      () async {
+        const x = 'test/x_test.dart 3:1 the shared case';
+        final runner = sides(
+          base: ShellRunResult(exitCode: 1, output: report([x])),
+          branch: ShellRunResult(exitCode: 1, output: report([x])),
         );
-        final c = _ctx(
-          rubric: kGatingRubric,
-          workspaceDir: dir.path,
-          beadOverride: withPlan,
-        );
-        final cfg = const CriticCapability().spawn(c.context, c.args);
-        expect(cfg.command, 'sh');
-        expect(cfg.args[0], '-c');
-        expect(
-          cfg.args[1],
-          'mkdir -p .grid/critique .grid/critique-incarnation; '
-          ': > .grid/critique/code-validation.log; '
-          r'printf "10m\n" > '
-          '.grid/critique-incarnation/code-validation.deadline; '
-          'sh .grid/critique/code-validation.plan.sh '
-          '> .grid/critique/code-validation.log 2>&1; '
-          r'echo $? > .grid/critique/code-validation.rc; '
-          'rm -f .grid/critique-incarnation/code-validation.deadline',
-        );
-        expect(cfg.args[1], isNot(contains('command -v')));
-        // The bead's plan is the CHILD script's content, never spliced into the
-        // wrapper: a plan that does not even parse must not be able to abort
-        // the statements that write the receipts.
+        final c = laneCtx();
+
+        final outcome = await CodeValidationCapability(
+          comparison: comparison(runner),
+        ).run(c.context, c.args);
+
+        final payload = (outcome as Ok).payload!;
+        expect(payload['grade'], 'A');
+        expect(payload['regressions'], '[]');
+        expect(payload['preexisting'], '["$x"]');
+        expect(payload['branchRc'], '1');
         expect(
           File(
-            '${dir.path}/.grid/critique/code-validation.plan.sh',
+            '${workspace.path}/.grid/critique/code-validation.rc',
           ).readAsStringSync().trim(),
-          'melos analyze && melos test',
+          '0',
+          reason: 'the EFFECTIVE rc is the delta, and the delta is empty',
         );
-        expect(cfg.args[1], isNot(contains('melos analyze')));
-        // The rc is captured to the critique dir so result() can read the grade.
-        expect(cfg.args[1], contains('.grid/critique/code-validation.rc'));
-        expect(cfg.args[1], contains(r'echo $?'));
-        // The deadline stamp lives OUTSIDE the round-swept critique dir (A34's
-        // rule) — a mid-round sweep must not erase the timeout's evidence.
-        expect(
-          cfg.args[1],
-          isNot(contains('.grid/critique/code-validation.deadline')),
-        );
-        expect(cfg.workDir, dir.path);
-        expect(cfg.lifecycle, Lifecycle.oneTurn);
-        // tg-uad follow-through: the gating lane is minutes-scale by
-        // definition — it must NOT ride the runtime provider's 2-hour
-        // default watchdog.
-        expect(cfg.deadline, kGatingDeadline);
+        expect(artifact()['branchRc'], 1, reason: 'the raw exit is preserved');
       },
     );
 
-    test('a plan-less bead defaults to an explicit `false` (never silently '
-        'passes)', () {
-      final dir = Directory.systemTemp.createTempSync('critic-gate-planless-');
-      addTearDown(() => dir.deleteSync(recursive: true));
-      final c = _ctx(rubric: kGatingRubric, workspaceDir: dir.path);
-      const CriticCapability().spawn(c.context, c.args);
-      // `false` ⇒ a non-zero rc ⇒ result() grades F.
-      expect(
-        File(
-          '${dir.path}/.grid/critique/code-validation.plan.sh',
-        ).readAsStringSync().trim(),
-        'false',
-      );
-    });
+    test(
+      'a clean plan on both sides grades A with no failures at all',
+      () async {
+        final runner = sides(
+          base: const ShellRunResult(exitCode: 0, output: 'All tests passed!'),
+          branch: const ShellRunResult(
+            exitCode: 0,
+            output: 'All tests passed!',
+          ),
+        );
+        final c = laneCtx();
 
-    test('ANY terminal exit completes the gating step (the grade rides '
-        'result()); a death fails', () {
-      const cap = CriticCapability();
-      const name = 'tgdog-s/tg-1/review/code-validation';
-      expect(
-        cap.interpretEvent(const Exited(name: name, exitCode: 0)),
-        StepSignal.complete,
+        final payload =
+            ((await CodeValidationCapability(
+                      comparison: comparison(runner),
+                    ).run(c.context, c.args))
+                    as Ok)
+                .payload!;
+        expect(payload['grade'], 'A');
+        expect(payload['regressions'], '[]');
+        expect(payload['preexisting'], '[]');
+        expect(payload['branchRc'], '0');
+      },
+    );
+
+    // AC-3: the ruling's explicit carve-out — a base that fails for a reason
+    // other than a named test is the LANE's failure, with a named cause.
+    test(
+      'base non-test failure is a lane failure, never a bead grade',
+      () async {
+        final runner = sides(
+          base: const ShellRunResult(
+            exitCode: 64,
+            output: 'lib/a.dart:1:1: Error: Expected an identifier.',
+          ),
+          branch: const ShellRunResult(exitCode: 0, output: ''),
+        );
+        final c = laneCtx();
+
+        final outcome = await CodeValidationCapability(
+          comparison: comparison(runner),
+        ).run(c.context, c.args);
+
+        expect(outcome, isA<Failed>());
+        final failed = outcome as Failed;
+        expect(failed.kind, CapabilityFailureKind.noResult);
+        expect(
+          failed.reason,
+          allOf(
+            contains('validation base'),
+            contains('without naming a failing test'),
+            contains('basesha0000000000000000000000000000000000'),
+            contains('exit 64'),
+            contains('Expected an identifier'),
+          ),
+        );
+        // NO bead verdict is fabricated, and the base cause is persisted BESIDE
+        // the branch log rather than over it.
+        final json = artifact();
+        expect(json.containsKey('grade'), isFalse);
+        expect(json['side'], 'base');
+        expect(
+          File(
+            '${workspace.path}/.grid/critique/code-validation.base.log',
+          ).readAsStringSync(),
+          contains('Expected an identifier'),
+        );
+      },
+    );
+
+    test(
+      'base non-test failure caused by a scratch worktree is named as one',
+      () async {
+        final runner = sides(
+          base: const ShellRunResult(exitCode: 0, output: ''),
+          branch: const ShellRunResult(exitCode: 0, output: ''),
+        );
+        final c = laneCtx();
+
+        final outcome = await CodeValidationCapability(
+          comparison: comparison(
+            runner,
+            git: CannedGitRunner(worktreeOk: false),
+          ),
+        ).run(c.context, c.args);
+
+        expect(outcome, isA<Failed>());
+        expect(
+          (outcome as Failed).reason,
+          allOf(contains('validation worktree'), contains('scratch worktree')),
+        );
+        expect(
+          runner.calls,
+          isEmpty,
+          reason: 'no plan ran without a base tree',
+        );
+      },
+    );
+
+    test(
+      'a branch plan that names no failing test is a lane failure too',
+      () async {
+        final runner = sides(
+          base: const ShellRunResult(exitCode: 0, output: ''),
+          branch: const ShellRunResult(
+            exitCode: 127,
+            output: 'sh: rg: command not found',
+          ),
+        );
+        final c = laneCtx(plan: 'rg needle');
+
+        final outcome = await CodeValidationCapability(
+          comparison: comparison(runner),
+        ).run(c.context, c.args);
+
+        expect(outcome, isA<Failed>());
+        expect(
+          (outcome as Failed).reason,
+          allOf(
+            contains('validation branch'),
+            contains('exit 127'),
+            contains('.grid/critique/code-validation.log'),
+          ),
+        );
+        // The branch log is still durable — a lane failure is diagnosable.
+        expect(
+          File(
+            '${workspace.path}/.grid/critique/code-validation.log',
+          ).readAsStringSync(),
+          contains('command not found'),
+        );
+      },
+    );
+
+    // AC-4: one base run per (base sha, plan digest, host) — and a miss the
+    // moment any one of the three moves.
+    test(
+      'base cache tuple: an unchanged tuple runs the base exactly once',
+      () async {
+        final runner = sides(
+          base: const ShellRunResult(exitCode: 0, output: ''),
+          branch: const ShellRunResult(exitCode: 0, output: ''),
+        );
+        final c = laneCtx();
+        final lane = CodeValidationCapability(comparison: comparison(runner));
+
+        final first = ((await lane.run(c.context, c.args)) as Ok).payload!;
+        final second = ((await lane.run(c.context, c.args)) as Ok).payload!;
+
+        expect(first['baseCache'], 'miss');
+        expect(second['baseCache'], 'hit');
+        // Three runs total: base once, branch twice.
+        expect(runner.calls, hasLength(3));
+        expect(
+          runner.calls.where((call) => call.workingDirectory == workspace.path),
+          hasLength(2),
+        );
+      },
+    );
+
+    test('base cache tuple: a changed plan, base sha or host all MISS', () async {
+      final runner = sides(
+        base: const ShellRunResult(exitCode: 0, output: ''),
+        branch: const ShellRunResult(exitCode: 0, output: ''),
       );
-      // A non-zero plan still COMPLETES (the route decides via the F grade) —
-      // not `failed`, so there is no retry storm on a deterministic failure.
+      final baseline = laneCtx();
+      Future<String> cacheStateOf(
+        ({FakeTreeContext context, StepArgs args}) c,
+        ValidationDeltaRunner runner,
+      ) async =>
+          ((await CodeValidationCapability(
+                    comparison: runner,
+                  ).run(c.context, c.args))
+                  as Ok)
+              .payload!['baseCache']!;
+
+      expect(await cacheStateOf(baseline, comparison(runner)), 'miss');
+      expect(await cacheStateOf(baseline, comparison(runner)), 'hit');
+      // A different PLAN digest.
       expect(
-        cap.interpretEvent(const Exited(name: name, exitCode: 1)),
-        StepSignal.complete,
+        await cacheStateOf(laneCtx(plan: 'melos test'), comparison(runner)),
+        'miss',
       );
-      expect(cap.interpretEvent(const Died(name: name)), StepSignal.failed);
-      // ...except the WATCHDOG kill, which result() grades as a timeout off
-      // the armed deadline stamp.
+      // A different HOST identity — a base result is only reusable where it ran.
       expect(
-        cap.interpretEvent(
-          const Died(
-            name: name,
-            reason:
-                'watchdog: session exceeded its 10m deadline and was killed '
-                '(presumed hung)',
+        await cacheStateOf(baseline, comparison(runner, host: 'other-host')),
+        'miss',
+      );
+      // A different MERGE BASE.
+      expect(
+        await cacheStateOf(
+          baseline,
+          comparison(
+            runner,
+            git: CannedGitRunner(
+              mergeBase: 'feedfacedeadbeef000000000000000000000000',
+            ),
           ),
         ),
-        StepSignal.complete,
-      );
-      expect(
-        cap.interpretEvent(const Died(name: name, reason: 'process vanished')),
-        StepSignal.failed,
+        'miss',
       );
     });
 
-    test('result() grades A on rc 0, F on a non-zero rc, F when the rc is '
-        'absent (fail-closed)', () async {
-      final dir = Directory.systemTemp.createTempSync('critic-gate-');
-      addTearDown(() => dir.deleteSync(recursive: true));
-      const cap = CriticCapability();
-
-      final c = _ctx(rubric: kGatingRubric, workspaceDir: dir.path);
-
-      // Absent rc ⇒ fail-closed F, named transport + rationale (gate-integrity
-      // #3 — a fail-closed default must never be silently unexplained).
-      expect(await cap.result(c.context, c.args), {
-        'grade': 'F',
-        'transport': 'fail-closed-default',
-        'round': '0',
-        'rationale': 'no validation-plan rc file — fail-closed default',
-      });
-
-      // rc "0" ⇒ A.
-      final rcFile = File('${dir.path}/.grid/critique/code-validation.rc')
-        ..createSync(recursive: true)
-        ..writeAsStringSync('0\n');
-      expect(await cap.result(c.context, c.args), {
-        'grade': 'A',
-        'transport': 'file',
-        'round': '0',
-      });
-
-      // rc non-zero ⇒ F, carrying the exit class, the log path, and the tail.
-      File(
-        '${dir.path}/.grid/critique/code-validation.log',
-      ).writeAsStringSync('failure tail');
-      rcFile.writeAsStringSync('1\n');
-      expect(await cap.result(c.context, c.args), {
-        'grade': 'F',
-        'transport': 'file',
-        'round': '0',
-        'rationale':
-            'validation plan failed (exit 1); full log: '
-            '.grid/critique/code-validation.log: failure tail',
-      });
-    });
-
-    test('result() adds candidate commands only for rc 127', () async {
-      final dir = Directory.systemTemp.createTempSync('critic-gate-127-');
-      addTearDown(() => dir.deleteSync(recursive: true));
-      final withPlan = bead(
-        'tg-1',
-      ).copyWith(metadata: const {'validation_plan': 'rg needle'});
-      final c = _ctx(
-        rubric: kGatingRubric,
-        workspaceDir: dir.path,
-        beadOverride: withPlan,
+    test('base cache tuple: a lane failure is NEVER cached', () async {
+      final runner = sides(
+        base: const ShellRunResult(exitCode: 64, output: 'boom'),
+        branch: const ShellRunResult(exitCode: 0, output: ''),
       );
-      File('${dir.path}/.grid/critique/code-validation.rc')
-        ..createSync(recursive: true)
-        ..writeAsStringSync('127\n');
-      File(
-        '${dir.path}/.grid/critique/code-validation.log',
-      ).writeAsStringSync('rg: command not found');
+      final c = laneCtx();
+      final lane = CodeValidationCapability(comparison: comparison(runner));
 
-      expect(await const CriticCapability().result(c.context, c.args), {
-        'grade': 'F',
-        'transport': 'file',
-        'round': '0',
-        'rationale':
-            'validation plan failed (exit 127); '
-            'exit 127 — candidate missing commands: rg; full log: '
-            '.grid/critique/code-validation.log: rg: command not found',
-      });
-    });
-
-    // The live finding this lane's log exists for (gate `tranquility-x45iwr`):
-    // the script discarded the plan's stdout/stderr, so a gated operator read
-    // `code-validation failed: hard block` and had to re-derive the cause by
-    // hand. The script is exercised for real here — a fake shell could not
-    // prove the redirection or the rc BYTES.
-    test('gating script preserves combined output and rc bytes', () async {
-      final dir = Directory.systemTemp.createTempSync('critic-gate-script-');
-      addTearDown(() => dir.deleteSync(recursive: true));
-      final withPlan = bead('tg-1').copyWith(
-        metadata: const {
-          'validation_plan':
-              'printf "stdout-line\\n"; printf "stderr-line\\n" >&2; exit 1',
-        },
-      );
-      final c = _ctx(
-        rubric: kGatingRubric,
-        workspaceDir: dir.path,
-        beadOverride: withPlan,
-      );
-      final cfg = const CriticCapability().spawn(c.context, c.args);
-
-      final process = await Process.run(
-        cfg.command,
-        cfg.args,
-        workingDirectory: cfg.workDir,
-      );
-
-      // The outer sh still exits clean, so the step completes and the route
-      // stays the single decision point.
-      expect(process.exitCode, 0);
-      expect(process.stdout, isEmpty);
-      expect(process.stderr, isEmpty);
+      expect(await lane.run(c.context, c.args), isA<Failed>());
+      expect(await lane.run(c.context, c.args), isA<Failed>());
       expect(
-        File(
-          '${dir.path}/.grid/critique/code-validation.log',
-        ).readAsStringSync(),
-        'stdout-line\nstderr-line\n',
-      );
-      expect(
-        File(
-          '${dir.path}/.grid/critique/code-validation.rc',
-        ).readAsStringSync(),
-        '1\n',
-        reason: 'the rc bytes are read by more than this lane',
-      );
-      expect(
-        File(
-          '${dir.path}/.grid/critique-incarnation/code-validation.deadline',
-        ).existsSync(),
-        isFalse,
-        reason: 'a plan that FINISHED disarms the stamp',
+        runner.calls.where((call) => call.workingDirectory != workspace.path),
+        hasLength(2),
+        reason: 'an uncomparable base is re-attempted, never remembered',
       );
     });
 
-    // The live finding (session `tranquility-v85de3`, 2026-09-12): `specify`
-    // stamped a plan whose single-quoted `ruby -e` program carried an
-    // apostrophe. `sh` parses a whole script BEFORE running any of it, so
-    // splicing that plan into the wrapper aborted every statement — no log, no
-    // rc, no gate. The harness then read the artifact-less exit as `infra` and
-    // spent its 5 + 15 + 30-minute throttle re-running a DETERMINISTIC script,
-    // leaving the session open with nothing for the governor's watch to fire
-    // on for 25 minutes. Exercised for real: only a real `sh` parses.
-    test('an unparseable validation plan leaves durable F receipts', () async {
-      final dir = Directory.systemTemp.createTempSync('critic-gate-parse-');
-      addTearDown(() => dir.deleteSync(recursive: true));
-      final withPlan = bead('tg-1').copyWith(
-        metadata: const {
-          // Balanced to Dart, UNBALANCED to sh — the receipt's own shape.
-          'validation_plan': 'ruby -e \'puts "the station lane\'s SDK"\'',
-        },
+    test('both sides are given the lane\'s OWN ten-minute deadline', () async {
+      final runner = sides(
+        base: const ShellRunResult(exitCode: 0, output: ''),
+        branch: const ShellRunResult(exitCode: 0, output: ''),
       );
-      final c = _ctx(
-        rubric: kGatingRubric,
-        workspaceDir: dir.path,
-        beadOverride: withPlan,
-      );
-      final cfg = const CriticCapability().spawn(c.context, c.args);
-
-      final process = await Process.run(
-        cfg.command,
-        cfg.args,
-        workingDirectory: cfg.workDir,
-      );
-
-      // The wrapper is unaffected: it still exits clean with nothing escaping
-      // to the harness, so the step completes and the route decides.
-      expect(process.exitCode, 0);
-      expect(process.stdout, isEmpty);
-      expect(process.stderr, isEmpty);
-      final rc = File(
-        '${dir.path}/.grid/critique/code-validation.rc',
-      ).readAsStringSync();
-      expect(
-        int.parse(rc.trim()),
-        isNot(0),
-        reason: 'a parse error is the CHILD\'s non-zero exit, not a lost rc',
-      );
-      final log = File(
-        '${dir.path}/.grid/critique/code-validation.log',
-      ).readAsStringSync();
-      expect(log.toLowerCase(), contains('syntax error'));
-      expect(
-        File(
-          '${dir.path}/.grid/critique-incarnation/code-validation.deadline',
-        ).existsSync(),
-        isFalse,
-        reason: 'the plan FINISHED (badly) — the stamp must be disarmed',
-      );
-
-      // And the gate an operator actually reads carries that diagnostic.
-      final payload = await const CriticCapability().result(c.context, c.args);
-      expect(payload!['grade'], 'F');
-      expect(
-        (payload['rationale'] as String).toLowerCase(),
-        contains('syntax error'),
-      );
+      final c = laneCtx();
+      await CodeValidationCapability(
+        comparison: comparison(runner),
+      ).run(c.context, c.args);
+      expect(runner.calls.map((call) => call.deadline), [
+        kGatingDeadline,
+        kGatingDeadline,
+      ]);
+      expect(kGatingDeadline, kValidationDeadline);
+      expect(kGatingDeadline.inMinutes, 10);
     });
 
-    // The plan file is written BEST-EFFORT (the offline suite's synthetic
-    // workspace dirs take that path), which is only defensible because the
-    // wrapper is unconditional: a plan file that never landed is a NAMED
-    // fail-closed F, never the artifact-less exit this bead exists to end.
-    test('an unwritable plan file still leaves durable F receipts', () async {
-      final dir = Directory.systemTemp.createTempSync('critic-gate-unwrit-');
-      addTearDown(() => dir.deleteSync(recursive: true));
-      // A regular FILE where the artifact dir must go — the write cannot
-      // succeed on any platform.
-      File('${dir.path}/.grid').writeAsStringSync('not a directory');
-      final c = _ctx(rubric: kGatingRubric, workspaceDir: dir.path);
+    test(
+      'a timed-out branch plan is a lane failure naming the deadline',
+      () async {
+        final runner = sides(
+          base: const ShellRunResult(exitCode: 0, output: ''),
+          branch: const ShellRunResult(
+            exitCode: 137,
+            output: 'last output before the kill',
+            timedOut: true,
+          ),
+        );
+        final c = laneCtx();
+        final outcome = await CodeValidationCapability(
+          comparison: comparison(runner),
+        ).run(c.context, c.args);
+        expect(
+          (outcome as Failed).reason,
+          allOf(
+            contains('validation branch'),
+            contains('exceeded its 10-minute deadline'),
+            contains('timed out'),
+          ),
+        );
+      },
+    );
 
-      // Spawn still hands back the unconditional wrapper.
-      final cfg = const CriticCapability().spawn(c.context, c.args);
-      expect(
-        File('${dir.path}/.grid/critique/code-validation.plan.sh').existsSync(),
-        isFalse,
-      );
+    // `power_station#code-validation-preserves-diagnostics-and-reports-deadline`
+    // — the diagnostics-LEAD clause the deadline ruling left standing:
+    // `Error:`, `Failed to load`, and line-leading `[E]` lines, deduplicated in
+    // encounter order and bounded to 320 characters, placed before the lane's
+    // hard block; the advice-stripped tail and the RELATIVE full-log path
+    // follow.
+    const failedToLoad = 'Failed to load "test/a_test.dart":';
+    const error = 'lib/a.dart:4:2: Error: Missing member.';
+    const bracketed = '[E] analyzer failed';
+    List<String> diagnosticNoise() => [
+      'Resolving dependencies...',
+      for (var i = 0; i < 40; i++) '  pkg_$i 1.0.$i (2.0.$i available)',
+      '40 packages have newer versions incompatible with dependency '
+          'constraints.',
+      'Try `dart pub outdated` for more information.',
+      failedToLoad,
+      error,
+      bracketed,
+      failedToLoad,
+      error,
+      bracketed,
+      // A PROGRESS line carrying a trailing `[E]` is not a diagnostic.
+      '00:02 +5 -1: test/a_test.dart: renders it [E]',
+      for (var i = 0; i < 120; i++) 'loading test/case_$i.dart',
+    ];
 
-      // Re-point the wrapper at a workspace it CAN write, so the run proves
-      // what a missing plan file does rather than what an unwritable dir does.
-      final run = Directory.systemTemp.createTempSync('critic-gate-noplan-');
-      addTearDown(() => run.deleteSync(recursive: true));
-      final process = await Process.run(
-        cfg.command,
-        cfg.args,
-        workingDirectory: run.path,
-      );
-
-      expect(process.exitCode, 0);
-      expect(
-        int.parse(
-          File(
-            '${run.path}/.grid/critique/code-validation.rc',
-          ).readAsStringSync().trim(),
+    test('non-zero code-validation reason leads bounded unique diagnostics: a '
+        'regressed branch run hands the route its diagnostic head', () async {
+      const y = 'test/y_test.dart 9:2 the branch case';
+      final runner = sides(
+        base: const ShellRunResult(exitCode: 0, output: 'All tests passed!'),
+        branch: ShellRunResult(
+          exitCode: 1,
+          output: [
+            ...diagnosticNoise(),
+            report([y]),
+          ].join('\n'),
         ),
-        isNot(0),
       );
+      final c = laneCtx();
+
+      final payload =
+          ((await CodeValidationCapability(
+                    comparison: comparison(runner),
+                  ).run(c.context, c.args))
+                  as Ok)
+              .payload!;
+
+      expect(payload['grade'], 'F');
+      expect(payload['diagnostic_head'], '$failedToLoad\n$error\n$bracketed');
       expect(
-        File(
-          '${run.path}/.grid/critique/code-validation.log',
-        ).readAsStringSync(),
-        contains('code-validation.plan.sh'),
-        reason: 'the log NAMES the plan file that never landed',
-      );
-      final payload = await const CriticCapability().result(
-        _ctx(rubric: kGatingRubric, workspaceDir: run.path).context,
-        c.args,
-      );
-      expect(payload!['grade'], 'F');
-      expect(payload['rationale'], contains('code-validation.plan.sh'));
-    });
-
-    test('non-zero code-validation reason leads bounded unique diagnostics '
-        'and retains the tail', () async {
-      final dir = Directory.systemTemp.createTempSync('critic-gate-log-');
-      addTearDown(() => dir.deleteSync(recursive: true));
-      const failedToLoad = 'Failed to load "test/a_test.dart":';
-      const error = 'lib/a.dart:4:2: Error: Missing member.';
-      const bracketed = '[E] analyzer failed';
-      final output = [
-        failedToLoad,
-        error,
-        bracketed,
-        failedToLoad,
-        error,
-        bracketed,
-        for (var i = 0; i < 120; i++) 'loading test/case_$i.dart',
-        'Some tests failed.',
-      ].join('\n');
-      File('${dir.path}/.grid/critique/code-validation.log')
-        ..createSync(recursive: true)
-        ..writeAsStringSync(output);
-      File(
-        '${dir.path}/.grid/critique/code-validation.rc',
-      ).writeAsStringSync('1\n');
-      final c = _ctx(rubric: kGatingRubric, workspaceDir: dir.path);
-
-      final result = await const CriticCapability().result(c.context, c.args);
-
-      expect(result?['diagnostic_head'], '$failedToLoad\n$error\n$bracketed');
-      expect(
-        result?['diagnostic_head']?.length,
+        payload['diagnostic_head']!.length,
         lessThanOrEqualTo(kValidationDiagnosticHeadChars),
       );
-      expect(
-        result?['rationale'],
-        allOf(
-          startsWith('validation plan failed (exit 1); full log: '),
-          contains('.grid/critique/code-validation.log'),
-          endsWith('Some tests failed.'),
+    });
+
+    test('the diagnostic head is bounded to 320 characters', () async {
+      const y = 'test/y_test.dart 9:2 the branch case';
+      final runner = sides(
+        base: const ShellRunResult(exitCode: 0, output: ''),
+        branch: ShellRunResult(
+          exitCode: 1,
+          output: [
+            for (var i = 0; i < 30; i++) 'lib/f$i.dart:1:1: Error: Missing $i.',
+            report([y]),
+          ].join('\n'),
         ),
+      );
+      final c = laneCtx();
+
+      final payload =
+          ((await CodeValidationCapability(
+                    comparison: comparison(runner),
+                  ).run(c.context, c.args))
+                  as Ok)
+              .payload!;
+
+      final head = payload['diagnostic_head']!;
+      expect(head.length, kValidationDiagnosticHeadChars);
+      expect(head, startsWith('lib/f0.dart:1:1: Error: Missing 0.'));
+      expect(head, endsWith('…'));
+    });
+
+    test(
+      'a clean or pre-existing-only run carries NO diagnostic head',
+      () async {
+        const x = 'test/x_test.dart 3:1 the shared case';
+        final output = [
+          ...diagnosticNoise(),
+          report([x]),
+        ].join('\n');
+        final runner = sides(
+          base: ShellRunResult(exitCode: 1, output: output),
+          branch: ShellRunResult(exitCode: 1, output: output),
+        );
+        final c = laneCtx();
+
+        final payload =
+            ((await CodeValidationCapability(
+                      comparison: comparison(runner),
+                    ).run(c.context, c.args))
+                    as Ok)
+                .payload!;
+
+        expect(payload['grade'], 'A');
+        expect(payload.containsKey('diagnostic_head'), isFalse);
+      },
+    );
+
+    test('non-zero code-validation reason leads bounded unique diagnostics: a '
+        'branch lane failure leads with them, then the lane, the relative log, '
+        'and the advice-stripped tail', () async {
+      final runner = sides(
+        base: const ShellRunResult(exitCode: 0, output: ''),
+        branch: ShellRunResult(
+          exitCode: 1,
+          output: [...diagnosticNoise(), 'Some tests failed.'].join('\n'),
+        ),
+      );
+      final c = laneCtx();
+
+      final outcome = await CodeValidationCapability(
+        comparison: comparison(runner),
+      ).run(c.context, c.args);
+
+      expect(outcome, isA<Failed>());
+      final reason = (outcome as Failed).reason;
+      expect(
+        reason,
+        startsWith(
+          '$failedToLoad\n$error\n$bracketed\n'
+          'code-validation: validation branch: the plan failed without '
+          'naming a failing test',
+        ),
+      );
+      // The head survives the engine's 500-character persisted prefix.
+      expect(
+        reason.substring(0, 500),
+        contains('code-validation: validation branch'),
+      );
+      expect(
+        reason,
+        contains('; full log: .grid/critique/code-validation.log: '),
+      );
+      expect(
+        reason,
+        isNot(contains(workspace.path)),
+        reason: 'the full-log path is RELATIVE to the bead workspace',
+      );
+      expect(reason, endsWith('Some tests failed.'));
+      expect(
+        reason,
+        isNot(contains('available)')),
+        reason: "pub's advisory block is stripped before the tail is cut",
       );
     });
 
-    test('watchdog deadline becomes a durable gating failure', () async {
-      final dir = Directory.systemTemp.createTempSync('critic-gate-timeout-');
-      addTearDown(() => dir.deleteSync(recursive: true));
-      File('${dir.path}/.grid/critique/code-validation.log')
-        ..createSync(recursive: true)
-        ..writeAsStringSync('last output before the watchdog\n');
-      File('${dir.path}/.grid/critique-incarnation/code-validation.deadline')
-        ..createSync(recursive: true)
-        ..writeAsStringSync('10m\n');
-      final c = _ctx(rubric: kGatingRubric, workspaceDir: dir.path);
-      const cap = CriticCapability();
-      const node = 'tg-1/review/code-validation';
-
-      expect(
-        cap.interpretEvent(
-          const Died(
-            name: node,
-            reason:
-                'watchdog: session exceeded its 10m deadline and was killed '
-                '(presumed hung)',
+    test(
+      'a timed-out branch plan that named a failure before the kill is still '
+      'a lane failure naming the deadline — never a delta',
+      () async {
+        const x = 'test/x_test.dart 3:1 the shared case';
+        final runner = sides(
+          base: ShellRunResult(exitCode: 1, output: report([x])),
+          branch: ShellRunResult(
+            exitCode: 137,
+            output: report([x]),
+            timedOut: true,
           ),
+        );
+        final c = laneCtx();
+
+        final outcome = await CodeValidationCapability(
+          comparison: comparison(runner),
+        ).run(c.context, c.args);
+
+        expect(outcome, isA<Failed>());
+        expect(
+          (outcome as Failed).reason,
+          allOf(
+            contains('validation branch'),
+            contains('exceeded its 10-minute deadline'),
+            contains('timed out (exit 137)'),
+          ),
+        );
+        expect(artifact().containsKey('grade'), isFalse);
+      },
+    );
+
+    test('a timed-out base is a lane failure, and is never cached', () async {
+      const x = 'test/x_test.dart 3:1 the shared case';
+      final runner = sides(
+        base: ShellRunResult(
+          exitCode: 137,
+          output: report([x]),
+          timedOut: true,
         ),
-        StepSignal.complete,
+        branch: ShellRunResult(exitCode: 1, output: report([x])),
+      );
+      final c = laneCtx();
+      final lane = CodeValidationCapability(comparison: comparison(runner));
+
+      for (var i = 0; i < 2; i++) {
+        final outcome = await lane.run(c.context, c.args);
+        expect(outcome, isA<Failed>());
+        expect(
+          (outcome as Failed).reason,
+          allOf(
+            contains('validation base'),
+            contains('exceeded its 10-minute deadline'),
+          ),
+        );
+      }
+      expect(
+        runner.calls.where((call) => call.workingDirectory != workspace.path),
+        hasLength(2),
+        reason: 'a deadline-cut base is re-attempted, never remembered',
+      );
+    });
+
+    test(
+      'the OFFLINE posture answers A with decodable empty arrays and NO IO',
+      () async {
+        final runner = sides(
+          base: const ShellRunResult(exitCode: 0, output: ''),
+          branch: const ShellRunResult(exitCode: 0, output: ''),
+        );
+        final c = laneCtx(workspaceDir: '/w/tg-1');
+        final payload =
+            ((await CodeValidationCapability(
+                      comparison: comparison(runner),
+                    ).run(c.context, c.args))
+                    as Ok)
+                .payload!;
+        expect(payload, {
+          'grade': 'A',
+          'transport': 'validation-delta',
+          'branchRc': '0',
+          'regressions': '[]',
+          'preexisting': '[]',
+          'round': '0',
+        });
+        expect(runner.calls, isEmpty);
+      },
+    );
+
+    // A RUNNER, not an agent (`power_station#a20-…`): the lane resolves no
+    // AgentConfig, names no model, and reads no critic environment.
+    test('the lane spends exactly its initial attempt on a non-result', () {
+      final policy = const CodeValidationCapability().supervisionPolicy(
+        stepArgs('tg-1/review/$kGatingRubric'),
       );
       expect(
-        cap.interpretEvent(const Died(name: node, reason: 'process vanished')),
-        StepSignal.failed,
+        policy.policyFor(CapabilityFailureKind.noResult),
+        const RetryPolicy(
+          // The engine increments the restart cursor BEFORE testing
+          // exhaustion, so one permits the initial attempt and nothing more.
+          maxRestarts: 1,
+          onExhaustion: ExhaustionBehavior.parkAtGate,
+        ),
       );
-      expect(
-        await cap.probeCompletionArtifact(c.context, c.args),
-        GateOutcome.clear,
-      );
-      expect(await cap.result(c.context, c.args), {
-        'grade': 'F',
-        'transport': 'file',
-        'round': '0',
-        'rationale':
-            'validation plan exceeded the 10-minute kGatingDeadline; '
-            'full log: .grid/critique/code-validation.log: '
-            'last output before the watchdog',
-      });
     });
   });
 
@@ -1548,101 +1735,6 @@ void main() {
       );
       expect(Backoff.standard.delayFor(1), const Duration(seconds: 1));
     });
-
-    // The 25-minute strand: a gating run that produces no rc is an `infra`
-    // non-result the engine backs off on `Backoff.harnessThrottle` (5 + 15 +
-    // 30 minutes) before it parks the node at a gate. Nothing about re-running
-    // an unchanged deterministic script can change the outcome, so the gating
-    // lane spends only its initial attempt and the gate becomes the FIRST
-    // thing an rc-less run produces.
-    test('gating no-result policy exhausts after the initial attempt', () {
-      final gating = const CriticCapability().supervisionPolicy(
-        stepArgs(
-          'tg-1/review/$kGatingRubric',
-          params: const {'rubric': kGatingRubric},
-        ),
-      );
-      expect(
-        gating.policyFor(CapabilityFailureKind.noResult),
-        const RetryPolicy(
-          // The engine increments the restart cursor BEFORE testing
-          // exhaustion, so one permits the initial attempt and nothing more.
-          maxRestarts: 1,
-          backoff: Backoff.harnessThrottle,
-          onExhaustion: ExhaustionBehavior.parkAtGate,
-        ),
-      );
-      // The broken-artifact budget is shared, byte for byte, with every other
-      // lane — this bead tightens ONE kind on ONE rubric.
-      expect(
-        gating.policyFor(CapabilityFailureKind.invalidResult),
-        const RetryPolicy(
-          maxRestarts: 2,
-          backoff: Backoff.standard,
-          onExhaustion: ExhaustionBehavior.parkAtGate,
-        ),
-      );
-      expect(gating.policyFor(CapabilityFailureKind.work), const RetryPolicy());
-
-      // An LLM rubric is untouched: a re-prompted model legitimately might not
-      // repeat itself, so its missing artifact keeps the circuit's budget.
-      final llm = const CriticCapability().supervisionPolicy(
-        stepArgs(
-          'tg-1/review/regression-risk',
-          params: const {'rubric': 'regression-risk'},
-        ),
-      );
-      expect(
-        llm.policyFor(CapabilityFailureKind.invalidResult),
-        const RetryPolicy(
-          maxRestarts: 2,
-          backoff: Backoff.standard,
-          onExhaustion: ExhaustionBehavior.parkAtGate,
-        ),
-      );
-      expect(
-        llm.policyFor(CapabilityFailureKind.noResult),
-        const RetryPolicy(),
-      );
-      expect(llm.policyFor(CapabilityFailureKind.work), const RetryPolicy());
-    });
-
-    test('an injected rubric source replaces the inline placeholder', () {
-      final cap = CriticCapability(rubrics: (id) => 'CUSTOM BANDS for $id');
-      final prompt = cap.buildCriticPrompt(
-        bead('tg-1'),
-        'spec-adherence',
-        'tg-1/review/spec-adherence',
-        '/w/tg-1',
-        round: 0,
-      );
-      expect(prompt, contains('CUSTOM BANDS for spec-adherence'));
-      expect(prompt, isNot(contains('Packaged-AI-Asset loader')));
-    });
-
-    test('(tg-291 d) the file-write instruction is the LAST thing in the '
-        'prompt, imperative, exact ABSOLUTE path, and required even if a '
-        'verdict appears in prose', () {
-      final prompt = const CriticCapability().buildCriticPrompt(
-        bead('tg-1'),
-        'spec-adherence',
-        'tg-1/review/spec-adherence',
-        '/w/tg-1',
-        round: 0,
-      );
-      // The path is the workspace-derived ABSOLUTE canonical path
-      // (gate-integrity #4 — cwd-invariant), not a workspace-relative one.
-      expect(
-        prompt.trimRight(),
-        endsWith('never reuse one writer\'s temporary path in another writer.'),
-      );
-      expect(
-        prompt,
-        contains('mktemp "/w/tg-1/.grid/critique/.spec-adherence.json.XXXXXX"'),
-      );
-      expect(prompt, contains('mv -f -- "\$verdict_tmp"'));
-      expect(prompt, contains('Do NOT write JSON directly'));
-    });
   });
 
   group('Track C2 — the LLM critic result() merges usage telemetry (FT-2)', () {
@@ -1753,24 +1845,6 @@ void main() {
         });
       },
     );
-
-    test('the GATING lane never merges usage (it is not an agent)', () async {
-      final dir = Directory.systemTemp.createTempSync('critic-gate-usage-');
-      addTearDown(() => dir.deleteSync(recursive: true));
-      // A passing rc + a STRAY telemetry file at the gating nodePath: the gating
-      // result() must ignore it (the gating lane spawns `sh`, never the harness).
-      File('${dir.path}/.grid/critique/$kGatingRubric.rc')
-        ..createSync(recursive: true)
-        ..writeAsStringSync('0\n');
-      writeUsage(dir.path, kGatingRubric, '{"usage": {"input_tokens": 5}}');
-      final c = _ctx(rubric: kGatingRubric, workspaceDir: dir.path);
-      final out = await const CriticCapability().result(c.context, c.args);
-      expect(out, {
-        'grade': 'A',
-        'transport': 'file',
-        'round': '0',
-      }, reason: 'no usage merge on the gating lane');
-    });
   });
 
   group('stdout verdict recovery in the durability probe', () {
@@ -2526,8 +2600,7 @@ void main() {
       );
     });
 
-    test('spawn records the incarnation for an LLM lane and NOT for the '
-        'deterministic gating runner', () {
+    test('spawn records the incarnation for an LLM lane', () {
       final llm = _ctx(
         rubric: rubric,
         workspaceDir: dir.path,
@@ -2539,14 +2612,8 @@ void main() {
         File(criticIncarnationPath(dir.path, rubric)).existsSync(),
         isTrue,
       );
-
-      final gating = _ctx(
-        rubric: kGatingRubric,
-        workspaceDir: dir.path,
-        nodePath: 'tg-j9ac/review/$kGatingRubric',
-        round: 1,
-      );
-      const CriticCapability().spawn(gating.context, gating.args);
+      // The deterministic validation lane is NOT in this family any more — it
+      // is a ServiceCapability with no spawn edge to stamp.
       expect(
         File(criticIncarnationPath(dir.path, kGatingRubric)).existsSync(),
         isFalse,

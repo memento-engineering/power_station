@@ -7,6 +7,7 @@
 // became "which delivery method did this substation bind?", and none is a valid
 // binding (M5 D-4a). So a bound `ServiceBundle.delivery` is what makes these two
 // steps do real git; unbound, both no-op with ZERO calls.
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:grid_assets/grid_assets.dart';
@@ -125,19 +126,30 @@ class _FakeDelivery implements DeliveryMethod {
   Future<StepOutcome> deliver(DeliveryRequest request) async => const Ok();
 }
 
-class _FixedShellRunner implements ShellRunner {
-  _FixedShellRunner(this.result);
+/// A [ShellRunner] answering one canned result everywhere, unless
+/// [resultsByDirectory] names the exact working directory — which is how the
+/// merge-base comparison's two sides (the branch worktree and the scratch
+/// checkout of the base) are given different answers by one runner.
+class _FixedShellRunner implements BoundedShellRunner {
+  _FixedShellRunner(this.result, {this.resultsByDirectory = const {}});
 
   final ShellRunResult result;
-  final calls = <({String workingDirectory, String command})>[];
+  final Map<String, ShellRunResult> resultsByDirectory;
+  final calls =
+      <({String workingDirectory, String command, Duration? deadline})>[];
 
   @override
   Future<ShellRunResult> run({
     required String workingDirectory,
     required String command,
+    Duration? deadline,
   }) async {
-    calls.add((workingDirectory: workingDirectory, command: command));
-    return result;
+    calls.add((
+      workingDirectory: workingDirectory,
+      command: command,
+      deadline: deadline,
+    ));
+    return resultsByDirectory[workingDirectory] ?? result;
   }
 }
 
@@ -171,6 +183,116 @@ const _dartTestFailure = '''
   test/foo_test.dart 88:7              main.<fn>
 
 00:02 +512 -1: Some tests failed.''';
+
+/// A [GitRunner] that answers the merge-base comparison's git reads WITHOUT
+/// touching disk, and RECORDS the scratch worktree argv the unwind is judged
+/// on: which path was checked out, and which directory the removal ran from.
+///
+/// `worktree list --porcelain` answers with the main worktree ALONE, so a
+/// surviving scratch registration would be this fake's answer to give — the
+/// verification pass is exercised, not stubbed past.
+class _ScriptedWorktreeGitRunner implements GitRunner {
+  /// The path `worktree add --detach` checked the merge base out at.
+  String? addedPath;
+
+  /// The directory `worktree remove` was run FROM.
+  String? removedFrom;
+
+  @override
+  Future<GitRunResult> run({
+    required String workingDirectory,
+    required List<String> args,
+  }) async {
+    // The `GitOps` root guard: this fake's working directories ARE work-tree
+    // roots, so a removal must fail (or pass) on its own answer, never on the
+    // guard's refusal.
+    if (args.first == 'rev-parse' && args.contains('--show-toplevel')) {
+      return GitRunResult(exitCode: 0, output: '$workingDirectory\n\n');
+    }
+    if (args.first == 'merge-base') {
+      return const GitRunResult(exitCode: 0, output: '$kFakeMergeBase\n');
+    }
+    if (args.first == 'worktree') {
+      switch (args[1]) {
+        case 'add':
+          // `worktree add --detach <checkout> <baseSha>`.
+          addedPath = args[3];
+          return const GitRunResult(exitCode: 0, output: '');
+        case 'remove':
+          removedFrom = workingDirectory;
+          return const GitRunResult(exitCode: 0, output: '');
+        case 'list':
+          return GitRunResult(
+            exitCode: 0,
+            output:
+                'worktree $workingDirectory\n'
+                'HEAD $kFakeMergeBase\n'
+                'branch refs/heads/grid/tg-1\n\n',
+          );
+      }
+    }
+    return const GitRunResult(exitCode: 0, output: '');
+  }
+}
+
+/// Wraps a REAL [GitRunner] and fails exactly one `git worktree remove`, the
+/// way git itself fails it: the checkout directory is gone, so `remove`
+/// refuses and its registration under the shared `.git/worktrees` SURVIVES.
+/// Everything else — the add that created that registration, the prune that
+/// must clear it, the verification read — is real git.
+class _RefusingRemoveGitRunner implements GitRunner {
+  _RefusingRemoveGitRunner(this.inner);
+
+  final GitRunner inner;
+
+  /// How many removals were intercepted (never more than one).
+  int refused = 0;
+
+  /// The path the intercepted removal named.
+  String? removedPath;
+
+  @override
+  Future<GitRunResult> run({
+    required String workingDirectory,
+    required List<String> args,
+  }) async {
+    if (refused == 0 && args.first == 'worktree' && args[1] == 'remove') {
+      refused++;
+      removedPath = args[2];
+      final gone = Directory(args[2]);
+      if (gone.existsSync()) gone.deleteSync(recursive: true);
+      return GitRunResult(
+        exitCode: 128,
+        output: "fatal: validation fixture refused to remove '${args[2]}'",
+      );
+    }
+    return inner.run(workingDirectory: workingDirectory, args: args);
+  }
+}
+
+/// Runs `git` in [cwd], asserting success — real-git test setup only. Mirrors
+/// `track_c_pin_diff_test.dart`'s helper of the same name.
+void _git(List<String> args, String cwd) {
+  final r = Process.runSync('git', args, workingDirectory: cwd);
+  if (r.exitCode != 0) {
+    fail(
+      'git ${args.join(' ')} in $cwd failed (${r.exitCode}): '
+      '${r.stderr}\n${r.stdout}',
+    );
+  }
+}
+
+/// A commit with a fixed, config-independent identity.
+void _commit(String cwd, String message) => _git([
+  '-c',
+  'user.name=landing-circuit-test',
+  '-c',
+  'user.email=landing-circuit-test@memento.engineering',
+  'commit',
+  '-q',
+  '-m',
+  message,
+], cwd);
 
 void main() {
   group('RebaseCapability', () {
@@ -636,12 +758,41 @@ void main() {
       if (workspace.existsSync()) workspace.deleteSync(recursive: true);
     });
 
+    /// The shared merge-base comparison over [shell], keyed to a FIXED host so
+    /// the (base sha, plan digest, host) cache tuple is deterministic, and
+    /// homed under the test's own workspace so no two tests share a cache.
+    ValidationDeltaRunner comparison(ShellRunner shell) =>
+        ValidationDeltaRunner(
+          gitRunner: CannedGitRunner(),
+          shellRunner: shell,
+          cacheHome: workspace.path,
+          hostIdentity: 'lunar-test-host',
+        );
+
+    /// A runner whose BASE side (the scratch merge-base checkout, at a
+    /// system-temporary path this test cannot predict) answers [base] and whose
+    /// BRANCH side (the workspace itself) answers [branch].
+    _FixedShellRunner sides({
+      required ShellRunResult base,
+      required ShellRunResult branch,
+    }) => _FixedShellRunner(base, resultsByDirectory: {workspace.path: branch});
+
+    /// One `dart test` report naming [failing] as its failing tests.
+    String report(
+      List<String> failing, {
+      String prose = 'Some tests failed.',
+    }) => [
+      prose,
+      'Failing tests:',
+      for (final name in failing) ' - $name',
+    ].join('\n');
+
     test('NO delivery bound → Advance, no shell exec at all (the commit-only '
         'arm)', () async {
       final runner = RecordingShellRunner();
       final c = _capCtx();
       final outcome = await RevalidateCapability(
-        runner: runner,
+        comparison: comparison(runner),
       ).route(c.context, c.args);
       expect(outcome, isA<Advance>());
       expect(runner.calls, isEmpty);
@@ -653,55 +804,153 @@ void main() {
       final richBead = bead(
         'tg-1',
       ).copyWith(metadata: const {'validation_plan': 'melos test'});
-      final c = _capCtx(delivery: _FakeDelivery(), beadOverride: richBead);
-      final outcome = await RevalidateCapability(
-        runner: runner,
-      ).route(c.context, c.args);
-      expect(outcome, isA<Advance>());
-      expect((outcome as Advance).payload, {'outcome': 'passed'});
-      expect(runner.calls.single.command, 'melos test');
-      expect(runner.calls.single.workingDirectory, '/w/tg-1');
-    });
-
-    test('a plan-less bead defaults to `false` (an explicit non-zero) — '
-        'ESCALATES rather than silently passing', () async {
-      // The recording fake doesn't actually EXEC the command — it just
-      // returns a canned result — so exitCode is set explicitly to model
-      // what a real `false` would do (never silently pass).
-      final runner = RecordingShellRunner()..exitCode = 1;
-      final c = _capCtx(
-        delivery: _FakeDelivery(),
-        workspaceDir: workspace.path,
-      );
-      final outcome = await RevalidateCapability(
-        runner: runner,
-      ).route(c.context, c.args);
-      expect(outcome, isA<Escalate>());
-      expect(runner.calls.single.command, 'false');
-    });
-
-    test('a non-zero validation_plan ESCALATES with the captured output as '
-        'provenance — never a silent advance', () async {
-      final runner = RecordingShellRunner()..exitCode = 1;
-      final richBead = bead(
-        'tg-1',
-      ).copyWith(metadata: const {'validation_plan': 'melos test'});
       final c = _capCtx(
         delivery: _FakeDelivery(),
         beadOverride: richBead,
         workspaceDir: workspace.path,
       );
       final outcome = await RevalidateCapability(
-        runner: runner,
+        comparison: comparison(runner),
       ).route(c.context, c.args);
+      expect(outcome, isA<Advance>());
+      expect((outcome as Advance).payload, {
+        'outcome': 'passed',
+        'rc': '0',
+        'branchRc': '0',
+        'preexisting': '[]',
+      });
+      // BOTH sides ran the bead's own plan, and both were given the lane's own
+      // ten-minute bound (the lane, not a provider watchdog, enforces it).
+      expect(runner.calls.map((call) => call.command), [
+        'melos test',
+        'melos test',
+      ]);
+      expect(runner.calls.map((call) => call.deadline), [
+        kGatingDeadline,
+        kGatingDeadline,
+      ]);
+      expect(runner.calls.last.workingDirectory, workspace.path);
+    });
+
+    // The delta ruling's post-rebase half: the rebase MOVED the merge base, so
+    // a plan that fails IDENTICALLY on the new base is not this bead's failure
+    // and must not stop delivery.
+    test('post-rebase delta: a failure shared with the new base ADVANCES with '
+        'an effective rc of 0', () async {
+      final shared = report(['test/leak_test.dart 3:1 it leaks']);
+      final runner = sides(
+        base: ShellRunResult(exitCode: 1, output: shared),
+        branch: ShellRunResult(exitCode: 1, output: shared),
+      );
+      final richBead = bead(
+        'tg-1',
+      ).copyWith(metadata: const {'validation_plan': 'dart test'});
+      final c = _capCtx(
+        delivery: _FakeDelivery(),
+        beadOverride: richBead,
+        workspaceDir: workspace.path,
+      );
+
+      final outcome = await RevalidateCapability(
+        comparison: comparison(runner),
+      ).route(c.context, c.args);
+
+      expect(outcome, isA<Advance>());
+      final payload = (outcome as Advance).payload!;
+      expect(payload['outcome'], 'passed');
+      expect(payload['rc'], '0', reason: 'the EFFECTIVE exit is the delta');
+      expect(payload['branchRc'], '1', reason: 'the RAW exit is preserved');
+      expect(payload['preexisting'], '["test/leak_test.dart 3:1 it leaks"]');
+      expect(
+        File(
+          p.join(workspace.path, '.grid', 'critique', 'revalidate.log'),
+        ).readAsStringSync(),
+        shared,
+      );
+    });
+
+    test('post-rebase delta: a branch-only failure STOPS delivery, naming only '
+        'the regression', () async {
+      final runner = sides(
+        base: ShellRunResult(
+          exitCode: 1,
+          output: report(['test/leak_test.dart 3:1 it leaks']),
+        ),
+        branch: ShellRunResult(
+          exitCode: 1,
+          output: report([
+            'test/leak_test.dart 3:1 it leaks',
+            'test/mine_test.dart 9:2 the new case',
+          ]),
+        ),
+      );
+      final richBead = bead(
+        'tg-1',
+      ).copyWith(metadata: const {'validation_plan': 'dart test'});
+      final c = _capCtx(
+        delivery: _FakeDelivery(),
+        beadOverride: richBead,
+        workspaceDir: workspace.path,
+      );
+
+      final outcome = await RevalidateCapability(
+        comparison: comparison(runner),
+      ).route(c.context, c.args);
+
       expect(outcome, isA<Escalate>());
-      expect((outcome as Escalate).reason, 'revalidate failed (exit 1): ');
-      expect((outcome).reason, isNot(contains('candidate missing commands')));
+      final reason = (outcome as Escalate).reason;
+      expect(
+        reason,
+        startsWith(
+          'revalidate failed (exit 1); '
+          'regressions: test/mine_test.dart 9:2 the new case; '
+          'full log: .grid/critique/revalidate.log: ',
+        ),
+      );
+      expect(
+        reason,
+        isNot(contains('it leaks; ')),
+        reason: 'a pre-existing failure is a NOTE, never a named regression',
+      );
+    });
+
+    // A run with no comparable named-test outcome is the LANE's failure, with a
+    // named cause — never a bead block. A plan-less bead's `false` is the
+    // simplest instance of it.
+    test('a plan-less bead defaults to `false` (an explicit non-zero) — a lane '
+        'failure, never a silent pass', () async {
+      final runner = RecordingShellRunner()..exitCode = 1;
+      final c = _capCtx(
+        delivery: _FakeDelivery(),
+        workspaceDir: workspace.path,
+      );
+      await expectLater(
+        RevalidateCapability(
+          comparison: comparison(runner),
+        ).route(c.context, c.args),
+        throwsA(
+          isA<RouteFailure>().having(
+            (failure) => failure.reason,
+            'reason',
+            allOf(
+              contains('revalidate could not be compared'),
+              contains('without naming a failing test'),
+            ),
+          ),
+        ),
+      );
+      expect(runner.calls.first.command, 'false');
     });
 
     test('exit 127 retains output and appends candidate commands', () async {
-      final runner = _FixedShellRunner(
-        const ShellRunResult(exitCode: 127, output: 'sh: rg: not found'),
+      final runner = sides(
+        base: ShellRunResult(exitCode: 0, output: ''),
+        branch: ShellRunResult(
+          exitCode: 127,
+          output:
+              'sh: rg: not found\n'
+              '${report(['test/a_test.dart 1:1 finds the needle'])}',
+        ),
       );
       final richBead = bead(
         'tg-1',
@@ -712,16 +961,21 @@ void main() {
         workspaceDir: workspace.path,
       );
       final outcome = await RevalidateCapability(
-        runner: runner,
+        comparison: comparison(runner),
       ).route(c.context, c.args);
       expect(outcome, isA<Escalate>());
       expect(
         (outcome as Escalate).reason,
-        'revalidate failed (exit 127); '
-        'exit 127 — candidate missing commands: rg: '
-        'sh: rg: not found',
+        allOf(
+          startsWith(
+            'revalidate failed (exit 127); '
+            'exit 127 — candidate missing commands: rg; '
+            'regressions: test/a_test.dart 1:1 finds the needle; ',
+          ),
+          endsWith('test/a_test.dart 1:1 finds the needle'),
+        ),
       );
-      expect(runner.calls.single.command, 'rg needle');
+      expect(runner.calls.last.command, 'rg needle');
     });
 
     test('CFE diagnostics lead once and persist the full combined log', () async {
@@ -739,10 +993,11 @@ void main() {
         for (var i = 0; i < 120; i++) '00:01 +0 -1: loading test/case_$i.dart',
         'Some tests failed.',
         'Failing tests:',
-        'test/a_test.dart: loading',
+        ' - test/a_test.dart: loading',
       ].join('\n');
-      final runner = _FixedShellRunner(
-        ShellRunResult(exitCode: 1, output: output),
+      final runner = sides(
+        base: const ShellRunResult(exitCode: 0, output: ''),
+        branch: ShellRunResult(exitCode: 1, output: output),
       );
       final richBead = bead(
         'tg-1',
@@ -754,14 +1009,20 @@ void main() {
       );
 
       final outcome = await RevalidateCapability(
-        runner: runner,
+        comparison: comparison(runner),
       ).route(c.context, c.args);
 
       expect(outcome, isA<Escalate>());
       final reason = (outcome as Escalate).reason;
+      // The CFE lead survives the regression clause: naming what regressed does
+      // not REPLACE the diagnostic mechanism
+      // (`power_station#revalidate-cfe-diagnostics-lead-before-tail`), and the
+      // tail still ends the reason
+      // (`power_station#captured-process-output-escalates-tail-first`).
       const marker =
-          'revalidate failed (exit 1); full log: '
-          '.grid/critique/revalidate.log: ';
+          'revalidate failed (exit 1); '
+          'regressions: test/a_test.dart: loading; '
+          'full log: .grid/critique/revalidate.log: ';
       expect(
         reason,
         startsWith('$failedToLoad\n$error\n$bracketedError\n$marker'),
@@ -770,15 +1031,11 @@ void main() {
       expect(reason.split(error), hasLength(2));
       expect(reason.split(bracketedError), hasLength(2));
       expect(
-        reason.length - marker.length,
-        lessThanOrEqualTo(kRevalidateReasonTailChars),
-      );
-      expect(
         reason,
         endsWith(
           'Some tests failed.\n'
           'Failing tests:\n'
-          'test/a_test.dart: loading',
+          ' - test/a_test.dart: loading',
         ),
       );
       expect(
@@ -794,8 +1051,15 @@ void main() {
         '(pow-gy41)', () async {
       final noise = _pubAdviceBlock();
       expect(noise.length, greaterThan(3000), reason: 'the receipt shape');
-      final runner = _FixedShellRunner(
-        ShellRunResult(exitCode: 1, output: '$noise$_dartTestFailure'),
+      final runner = sides(
+        base: const ShellRunResult(exitCode: 0, output: ''),
+        branch: ShellRunResult(
+          exitCode: 1,
+          output:
+              '$noise$_dartTestFailure\n'
+              'Failing tests:\n'
+              ' - test/foo_test.dart 4:3 renders the widget',
+        ),
       );
       final richBead = bead('tg-1').copyWith(
         metadata: const {'validation_plan': 'dart pub get && dart test'},
@@ -806,25 +1070,38 @@ void main() {
         workspaceDir: workspace.path,
       );
       final outcome = await RevalidateCapability(
-        runner: runner,
+        comparison: comparison(runner),
       ).route(c.context, c.args);
       expect(outcome, isA<Escalate>());
       final reason = (outcome as Escalate).reason;
-      expect(reason, startsWith('revalidate failed (exit 1): '));
+      expect(
+        reason,
+        startsWith(
+          'revalidate failed (exit 1); '
+          'regressions: test/foo_test.dart 4:3 renders the widget; '
+          'full log: .grid/critique/revalidate.log: ',
+        ),
+      );
       expect(reason, contains('test/foo_test.dart: renders the widget [E]'));
       expect(reason, contains('Some tests failed.'));
       expect(reason, isNot(contains(' available)')));
       expect(reason, isNot(contains('… (truncated)')));
-      expect(reason.length, lessThanOrEqualTo(1600));
+      expect(reason.length, lessThanOrEqualTo(1700));
     });
 
     test(
       'output still over the tail budget after stripping is cut at the '
       'START — landReasonTail\'s leading …, never the head (pow-gy41)',
       () async {
-        final long = '${'noise line\n' * 400}FATAL: the real error';
-        final runner = _FixedShellRunner(
-          ShellRunResult(exitCode: 2, output: long),
+        final long = [
+          'noise line\n' * 400,
+          'FATAL: the real error',
+          'Failing tests:',
+          ' - test/z_test.dart 1:1 the real case',
+        ].join('\n');
+        final runner = sides(
+          base: const ShellRunResult(exitCode: 0, output: ''),
+          branch: ShellRunResult(exitCode: 2, output: long),
         );
         final richBead = bead(
           'tg-1',
@@ -835,19 +1112,444 @@ void main() {
           workspaceDir: workspace.path,
         );
         final outcome = await RevalidateCapability(
-          runner: runner,
+          comparison: comparison(runner),
         ).route(c.context, c.args);
         expect(outcome, isA<Escalate>());
         final reason = (outcome as Escalate).reason;
-        expect(reason, startsWith('revalidate failed (exit 2): …'));
-        expect(reason, endsWith('FATAL: the real error'));
+        const prefix =
+            'revalidate failed (exit 2); '
+            'regressions: test/z_test.dart 1:1 the real case; '
+            'full log: .grid/critique/revalidate.log: ';
+        expect(reason, startsWith('$prefix…'));
+        expect(reason, endsWith(' - test/z_test.dart 1:1 the real case'));
         expect(
           reason.length,
-          kRevalidateReasonTailChars + 29,
-          reason: 'the 28-char prefix + the … cut marker + the last 1500 chars',
+          prefix.length + kRevalidateReasonTailChars + 1,
+          reason: 'the prefix + the … cut marker + the last 1500 chars',
         );
       },
     );
+
+    // The base side is the one the ruling names explicitly: a merge-base plan
+    // that fails for a reason other than a named test (a compile error, an
+    // exit 64, a missing tool) is the LANE's failure, with a named cause — it
+    // can never be attributed to the bead.
+    test('post-rebase delta: an uncomparable BASE is a lane failure, never a '
+        'bead block', () async {
+      final runner = sides(
+        base: const ShellRunResult(
+          exitCode: 64,
+          output: 'lib/a.dart:1:1: Error: Expected an identifier.',
+        ),
+        branch: const ShellRunResult(exitCode: 0, output: ''),
+      );
+      final richBead = bead(
+        'tg-1',
+      ).copyWith(metadata: const {'validation_plan': 'dart test'});
+      final c = _capCtx(
+        delivery: _FakeDelivery(),
+        beadOverride: richBead,
+        workspaceDir: workspace.path,
+      );
+
+      await expectLater(
+        RevalidateCapability(
+          comparison: comparison(runner),
+        ).route(c.context, c.args),
+        throwsA(
+          isA<RouteFailure>().having(
+            (failure) => failure.reason,
+            'reason',
+            allOf(
+              contains('validation base'),
+              contains('without naming a failing test'),
+              contains('basesha0000000000000000000000000000000000'),
+              contains('Expected an identifier'),
+            ),
+          ),
+        ),
+      );
+    });
+
+    // `power_station#code-validation-preserves-diagnostics-and-reports-deadline`
+    // (the diagnostics-LEAD clause, shared by both validation lanes): an
+    // uncomparable BRANCH run leads its lane failure with its recognized
+    // diagnostics, then the lane, the RELATIVE full log, and the
+    // advice-stripped tail.
+    test('an uncomparable branch run leads its lane failure with bounded '
+        'unique diagnostics and a relative full log', () async {
+      final runner = sides(
+        base: const ShellRunResult(exitCode: 0, output: ''),
+        branch: ShellRunResult(
+          exitCode: 1,
+          output: [
+            '  analyzer 10.2.0 (14.3.0 available)',
+            'Failed to load "test/a_test.dart":',
+            'lib/a.dart:4:2: Error: Missing member.',
+            'Failed to load "test/a_test.dart":',
+            'lib/a.dart:4:2: Error: Missing member.',
+            'Some tests failed.',
+          ].join('\n'),
+        ),
+      );
+      final richBead = bead(
+        'tg-1',
+      ).copyWith(metadata: const {'validation_plan': 'dart test'});
+      final c = _capCtx(
+        delivery: _FakeDelivery(),
+        beadOverride: richBead,
+        workspaceDir: workspace.path,
+      );
+
+      await expectLater(
+        RevalidateCapability(
+          comparison: comparison(runner),
+        ).route(c.context, c.args),
+        throwsA(
+          isA<RouteFailure>().having(
+            (failure) => failure.reason,
+            'reason',
+            allOf(
+              startsWith(
+                'Failed to load "test/a_test.dart":\n'
+                'lib/a.dart:4:2: Error: Missing member.\n'
+                'revalidate could not be compared: validation branch: ',
+              ),
+              contains('; full log: .grid/critique/revalidate.log: '),
+              isNot(contains(workspace.path)),
+              isNot(contains('available)')),
+              endsWith('Some tests failed.'),
+            ),
+          ),
+        ),
+      );
+    });
+  });
+
+  // The scratch merge-base checkout registers against the SUBSTATION'S SHARED
+  // `.git` — the same admin area every bead's provisioning and unwind write —
+  // so this lane's cleanup is held to the discipline
+  // `power_station#scaffold-restore-merges-dirs-and-unwinds-its-provision`
+  // already binds a discarded provision to: remove, prune, then VERIFY, and
+  // refuse loudly naming what survived.
+  group('the merge-base scratch worktree unwind', () {
+    late Directory workspace;
+    late Directory cacheHome;
+
+    setUp(() {
+      workspace = Directory.systemTemp.createTempSync('validation-scratch-');
+      cacheHome = Directory.systemTemp.createTempSync('validation-cache-');
+    });
+
+    tearDown(() {
+      if (workspace.existsSync()) workspace.deleteSync(recursive: true);
+      if (cacheHome.existsSync()) cacheHome.deleteSync(recursive: true);
+    });
+
+    // CONTAINMENT. A scratch checkout under the system temp dir — or beside
+    // the OTHER beads' worktrees — leaks somewhere nobody attributes to this
+    // bead. It belongs inside the bead's own workspace, and both the directory
+    // and git's registration go away with it.
+    test('base scratch worktree stays under branch workspace', () async {
+      final git = _ScriptedWorktreeGitRunner();
+      final shell = RecordingShellRunner();
+
+      final delta =
+          await ValidationDeltaRunner(
+            gitRunner: git,
+            shellRunner: shell,
+            cacheHome: cacheHome.path,
+            hostIdentity: 'lunar-test-host',
+          ).compare(
+            plan: 'dart test',
+            workspace: Workspace(
+              workspaceDir: workspace.path,
+              branch: 'grid/tg-1',
+              baseBranch: 'main',
+            ),
+            baseRef: 'main',
+            branchLogPath: p.join(workspace.path, '.grid', 'critique', 'v.log'),
+          );
+
+      expect(delta.regressions, isEmpty);
+      final checkout = git.addedPath;
+      expect(
+        checkout,
+        isNotNull,
+        reason: 'the base side checked something out',
+      );
+      final grid = p.join(workspace.path, '.grid');
+      expect(
+        p.isWithin(grid, checkout!),
+        isTrue,
+        reason:
+            'the scratch checkout is the BEAD\'s, not a temp-dir sibling '
+            'of every other bead\'s worktree: $checkout',
+      );
+      expect(p.basename(checkout), 'base');
+      final scratchParent = p.dirname(checkout);
+      expect(p.dirname(scratchParent), grid);
+      expect(p.basename(scratchParent), startsWith('validation-base-'));
+      // Removed from the ROOT side, never from inside the worktree being
+      // removed (the `GitOps.worktreeRemove` contract).
+      expect(git.removedFrom, workspace.path);
+      expect(
+        Directory(scratchParent).existsSync(),
+        isFalse,
+        reason: 'the scratch parent is deleted, not just its checkout',
+      );
+      expect(
+        Directory(grid)
+            .listSync()
+            .map((e) => p.basename(e.path))
+            .where((name) => name.startsWith('validation-base-')),
+        isEmpty,
+      );
+    });
+
+    // REGRESSION-RISK CURE. `git worktree remove` REFUSES once the directory is
+    // gone, and the registration under the shared `.git/worktrees` outlives the
+    // refusal — the wedge no later round can clear. Real git, a real
+    // registration, and only the remove faked: the prune that clears it must be
+    // production's, not the test's.
+    test(
+      'failed worktree remove is pruned from shared git registration',
+      () async {
+        _git(const ['init', '-q', '-b', 'main'], workspace.path);
+        File(p.join(workspace.path, 'a.txt')).writeAsStringSync('one\n');
+        _git(const ['add', 'a.txt'], workspace.path);
+        _commit(workspace.path, 'init');
+
+        final git = _RefusingRemoveGitRunner(SystemGitRunner());
+        final shell = RecordingShellRunner();
+
+        final delta =
+            await ValidationDeltaRunner(
+              gitRunner: git,
+              shellRunner: shell,
+              cacheHome: cacheHome.path,
+              hostIdentity: 'lunar-test-host',
+            ).compare(
+              plan: 'dart test',
+              workspace: Workspace(
+                workspaceDir: workspace.path,
+                branch: 'main',
+                baseBranch: 'main',
+              ),
+              baseRef: 'main',
+              branchLogPath: p.join(
+                workspace.path,
+                '.grid',
+                'critique',
+                'v.log',
+              ),
+            );
+
+        // The refused remove is RECOVERED, not escalated: the comparison answers.
+        expect(delta.regressions, isEmpty);
+        expect(delta.baseSha, isNotEmpty);
+        expect(git.refused, 1, reason: 'exactly one remove was intercepted');
+        expect(
+          p.isWithin(p.join(workspace.path, '.grid'), git.removedPath!),
+          isTrue,
+        );
+
+        final listed = Process.runSync('git', const [
+          'worktree',
+          'list',
+          '--porcelain',
+        ], workingDirectory: workspace.path);
+        expect(listed.exitCode, 0);
+        final registered = (listed.stdout as String)
+            .split('\n')
+            .where((line) => line.startsWith('worktree '))
+            .toList();
+        expect(
+          registered,
+          hasLength(1),
+          reason: 'only the main worktree survives: $registered',
+        );
+        final admin = Directory(p.join(workspace.path, '.git', 'worktrees'));
+        expect(
+          !admin.existsSync() || admin.listSync().isEmpty,
+          isTrue,
+          reason: 'the shared .git carries no scratch registration',
+        );
+      },
+    );
+  });
+
+  // The lane enforces its OWN deadline now
+  // (`power_station#code-validation-enforces-its-own-deadline-as-a-service-capability`),
+  // so the real runner is exercised for real: a Fake could not prove that the
+  // plan's own CHILDREN are reaped, and a leaked test runner holding the
+  // worktree is exactly what the retired provider watchdog left behind.
+  //
+  // The bounded cases pin `/bin/dash`: it is CI's `sh`, and the shell under
+  // which a job-control wrapper wrote `can't access tty; job control turned
+  // off` into the captured output. A bash-only green proves nothing about it.
+  group('the ShellRunner contract stays source-compatible (pow-5n53)', () {
+    // `ShellRunner` is implemented DOWNSTREAM — space_station_assets'
+    // filing-composition Fake and leonard_grid_assets' selfdrive-verify Fake
+    // both declare `run` with exactly two named parameters. Widening that
+    // member, even with an optional parameter, is an `invalid_override` in
+    // every one of them, so the deadline rides [BoundedShellRunner] instead.
+    // [_LegacyShellRunner] below is the pre-widening signature, verbatim: this
+    // file compiling under `dart analyze --fatal-infos` IS the proof.
+    test('an implementor WITHOUT a deadline parameter composes into every '
+        'shell seam and runs unbounded through runWithinDeadline', () async {
+      final legacy = _LegacyShellRunner();
+      expect(legacy, isNot(isA<BoundedShellRunner>()));
+
+      final result = await runWithinDeadline(
+        legacy,
+        workingDirectory: '/w/tg-1',
+        command: 'dart test',
+        deadline: kValidationDeadline,
+      );
+      expect(result.exitCode, 0);
+      expect(result.timedOut, isFalse);
+      expect(legacy.calls, [
+        (workingDirectory: '/w/tg-1', command: 'dart test'),
+      ]);
+
+      // Every public seam that accepted a ShellRunner before still does.
+      expect(buildCodeRegistry(shellRunner: legacy), isNotNull);
+      expect(
+        RevalidateCapability(
+          comparison: ValidationDeltaRunner(shellRunner: legacy),
+        ),
+        isNotNull,
+      );
+    });
+
+    test('a BoundedShellRunner is handed the caller\'s deadline', () async {
+      final bounded = _FixedShellRunner(
+        const ShellRunResult(exitCode: 0, output: ''),
+      );
+      await runWithinDeadline(
+        bounded,
+        workingDirectory: '/w/tg-1',
+        command: 'dart test',
+        deadline: const Duration(seconds: 42),
+      );
+      expect(bounded.calls.single.deadline, const Duration(seconds: 42));
+    });
+  });
+
+  group('the bounded validation runner (SystemShellRunner)', () {
+    const dash = SystemShellRunner(shellExecutable: '/bin/dash');
+    late Directory dir;
+
+    setUp(() {
+      dir = Directory.systemTemp.createTempSync('bounded-runner-');
+    });
+
+    tearDown(() {
+      if (dir.existsSync()) dir.deleteSync(recursive: true);
+    });
+
+    test('an unbounded run keeps the established exit code and combined '
+        'output', () async {
+      final result = await const SystemShellRunner().run(
+        workingDirectory: dir.path,
+        command: 'printf "out\\n"; printf "err\\n" >&2; exit 7',
+      );
+      expect(result.exitCode, 7);
+      expect(result.ok, isFalse);
+      expect(result.timedOut, isFalse);
+      expect(result.output, 'out\nerr\n');
+    });
+
+    test('a bounded run is byte-exact under dash: the rc and combined '
+        'output, with no job-control line leaking into it', () async {
+      final result = await dash.run(
+        workingDirectory: dir.path,
+        command: 'printf "out\\n"; printf "err\\n" >&2; exit 7',
+        deadline: const Duration(minutes: 5),
+      );
+      expect(result.exitCode, 7);
+      expect(result.timedOut, isFalse);
+      expect(result.output, 'out\nerr\n');
+      expect(result.output, isNot(contains('Done')));
+      expect(result.output, isNot(contains('job control')));
+    });
+
+    test('an unparseable plan is the CHILD\'s non-zero exit, never a lost '
+        'result', () async {
+      final result = await dash.run(
+        workingDirectory: dir.path,
+        // Balanced to Dart, UNBALANCED to sh — the plan rides as an argv
+        // element, so only the plan's own shell ever parses it.
+        command: 'ruby -e \'puts "the station lane\'s SDK"\'',
+        deadline: const Duration(minutes: 5),
+      );
+      expect(result.exitCode, isNot(0));
+      expect(result.timedOut, isFalse);
+      expect(result.output.toLowerCase(), contains('syntax error'));
+    });
+
+    test('a dash-bounded timeout reaps its child process group, and reports '
+        'timedOut', () async {
+      final marker = p.join(dir.path, 'child-alive');
+      final groups = _RecordingGroups();
+      final result =
+          await SystemShellRunner(
+            shellExecutable: '/bin/dash',
+            groups: groups,
+          ).run(
+            workingDirectory: dir.path,
+            // A GRANDCHILD of the launcher: killing the launcher alone leaves this
+            // one running, which is the leak the process group exists to close.
+            command: 'sh -c "printf started > \'$marker\'; sleep 45"',
+            // Wide enough for the launcher's own VM start (about a second and a
+            // half cold, slower under a loaded full suite) to reach the plan.
+            deadline: const Duration(seconds: 10),
+          );
+      expect(result.timedOut, isTrue);
+      expect(result.ok, isFalse);
+      expect(
+        File(marker).existsSync(),
+        isTrue,
+        reason: 'the grandchild really did start',
+      );
+      // The kill went through grid_runtime's terminateGroup escalation, not a
+      // hand-rolled group SIGKILL: a hand-rolled one sends SIGKILL alone, so
+      // the SIGTERM rung is what distinguishes the seam.
+      expect(groups.resolved, hasLength(1));
+      final planGroup = groups.resolved.single;
+      expect(planGroup, isNotNull);
+      // Scoped to THIS run's own process group — the launcher-led pgid the
+      // runner resolved — so a `sleep 45` anywhere else on the host (a
+      // sibling suite, another lane running this same probe) cannot redden
+      // it. `ps` is an observer independent of the controller under test.
+      final listing = await Process.run('ps', ['-ax', '-o', 'pgid=,command=']);
+      expect(listing.exitCode, 0, reason: '${listing.stderr}');
+      final survivors = [
+        for (final line in const LineSplitter().convert(
+          listing.stdout.toString(),
+        ))
+          if (line.trim().split(RegExp(r'\s+')).first == '$planGroup' &&
+              line.contains('sleep 45'))
+            line.trim(),
+      ];
+      expect(
+        survivors,
+        isEmpty,
+        reason: 'the whole process GROUP was terminated, not just the shell',
+      );
+      expect(
+        groups.signals.map((signal) => signal.$2),
+        contains(ProcessSignal.sigterm),
+      );
+      expect(
+        groups.signals.every((signal) => signal.$1 == groups.resolved.single),
+        isTrue,
+        reason:
+            'every signal went to the launcher-LED pgid, never the '
+            'station\'s own group',
+      );
+    }, timeout: const Timeout(Duration(seconds: 90)));
   });
 
   group('buildCircuitReceipt', () {
@@ -1106,4 +1808,61 @@ class _ConflictingRebaseRunner implements GitRunner {
   List<String> get subcommands => [
     for (final c in calls) c.args.isNotEmpty ? c.args.first : '',
   ];
+}
+
+/// A [ProcessGroupController] that DELEGATES to the real system seam and
+/// records what the bounded runner's deadline asked of it.
+///
+/// Not a fake outcome: the reap under test is a REAL process-lifetime probe, so
+/// the recorder must really resolve and really signal. What it adds is
+/// observability — which pgid was resolved, and which signals reached it — so
+/// the probe can prove the deadline escalates through `terminateGroup` rather
+/// than re-deriving a group kill of its own.
+final class _RecordingGroups implements ProcessGroupController {
+  static const ProcessGroupController _real = SystemProcessGroupController();
+
+  /// Every pgid the runner resolved, in order.
+  final List<int?> resolved = [];
+
+  /// Every `(pgid, signal)` the runner sent to a GROUP, in order.
+  final List<(int, ProcessSignal)> signals = [];
+
+  @override
+  Future<int?> resolvePgid(int pid) async {
+    final pgid = await _real.resolvePgid(pid);
+    resolved.add(pgid);
+    return pgid;
+  }
+
+  @override
+  bool processAlive(int pid) => _real.processAlive(pid);
+
+  @override
+  Future<List<int>> groupMembers(int pgid) => _real.groupMembers(pgid);
+
+  @override
+  bool signalGroup(int pgid, ProcessSignal signal) {
+    signals.add((pgid, signal));
+    return _real.signalGroup(pgid, signal);
+  }
+
+  @override
+  int currentGroupId() => _real.currentGroupId();
+}
+
+/// A [ShellRunner] written against the PRE-WIDENING contract — two named
+/// parameters and no deadline — exactly as downstream implementors
+/// (`space_station_assets`' `_CannedDecisionShell`,
+/// `leonard_grid_assets`' `_RecordingShellRunner`) declare it.
+final class _LegacyShellRunner implements ShellRunner {
+  final List<({String workingDirectory, String command})> calls = [];
+
+  @override
+  Future<ShellRunResult> run({
+    required String workingDirectory,
+    required String command,
+  }) async {
+    calls.add((workingDirectory: workingDirectory, command: command));
+    return const ShellRunResult(exitCode: 0, output: '');
+  }
 }
