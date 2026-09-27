@@ -1,3 +1,7 @@
+## 0.1.1-dev.7
+
+ - Update a dependency to the latest release.
+
 ## 0.1.1-dev.6
 
  - Bump "analytical_grid_assets" to `0.1.1-dev.6`.
