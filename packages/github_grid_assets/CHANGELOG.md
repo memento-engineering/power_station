@@ -1,3 +1,13 @@
+## 0.2.0-dev.7
+
+> Note: This release has breaking changes.
+
+ - **REFACTOR**(github): move reconciler effects into lifecycle ownership (#369).
+ - **FIX**(github): restore per-work-bead cap-gate dedup under the state-store prefix (pow-gd63) (#377).
+ - **FIX**(github): mint the ci-rework cap gate under the state store's prefix (pow-gd63, pow-um97) (#374).
+ - **FIX**: grid_assets test: the real-bd fixture (#370).
+ - **BREAKING** **FEAT**(validation): hard-block code review only on merge-base regressions (pow-5n53) (#378).
+
 ## Unreleased
 
 - Fixed: the ci-rework cap gate is minted under the grid STATE store's own prefix. `CiFeedbackProjection`

@@ -1,3 +1,7 @@
+## 0.2.1-dev.3
+
+ - **FIX**(release): name an unresolvable published baseline as its own classify verdict (pow-pozp) (#375).
+
 # Changelog
 
 ## 0.2.1-dev.2

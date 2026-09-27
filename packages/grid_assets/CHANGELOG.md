@@ -1,3 +1,15 @@
+## 0.7.0-dev.7
+
+- **Breaking:** code-validation hard-blocks only on merge-base regressions (pow-5n53, #378): a failure that also fails at the merge base is a pre-existing NOTE, not a block. Migration: a validation plan that relied on any red test blocking must now assert the regression on the branch alone; `CodeValidation` consumers reading the old single-run verdict shape read the base/branch pair.
+
+> Note: This release has breaking changes.
+
+ - **FIX**(release): name an unresolvable published baseline as its own classify verdict (pow-pozp) (#375).
+ - **FIX**(grid_assets): correct the intake-refinement skill's bd read and report shape (pow-o9kg) (#376).
+ - **FIX**(filing): match bead references to store grammar (pow-vifz) (#372).
+ - **FIX**: grid_assets test: the real-bd fixture (#370).
+ - **BREAKING** **FEAT**(validation): hard-block code review only on merge-base regressions (pow-5n53) (#378).
+
 ## Unreleased
 
 - Breaking: the `code-validation` review lane hard-blocks only on a BRANCH REGRESSION
