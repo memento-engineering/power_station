@@ -11,8 +11,7 @@ import 'ci_rework_mint_acceptance_test.dart' as fixture;
 // The census, the PID parse and the exit fence are no longer this fixture's —
 // they are the workspace's one proxied-bd harness, and they are proved here
 // against it directly so this suite cannot pass on a re-duplicated copy.
-import '../../../grid_assets/test/support/proxied_bd_test_support.dart'
-    as proxied_bd;
+import 'package:grid_assets/testing/proxied_bd_test_support.dart' as proxied_bd;
 
 const _workspace = '/tmp/ci-rework-mint-fake';
 const _lockRoot = '$_workspace/grid/.grid/.beads/dolt';

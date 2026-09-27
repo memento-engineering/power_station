@@ -442,7 +442,7 @@ void main() {
       expect(
         source,
         contains(
-          "import '../../../grid_assets/test/support/"
+          "import 'package:grid_assets/testing/"
           "proxied_bd_test_support.dart'",
         ),
       );
