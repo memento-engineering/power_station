@@ -35,8 +35,7 @@ import 'package:test/test.dart';
 // same stop fence and the same PID parser. Another package's `test/` tree
 // carries no `package:` URI, so the workspace-relative path IS the import; the
 // production `grid_assets` dependency is unrelated and unchanged.
-import '../../../grid_assets/test/support/proxied_bd_test_support.dart'
-    as proxied_bd;
+import 'package:grid_assets/testing/proxied_bd_test_support.dart' as proxied_bd;
 
 Circuit _leafCircuit(Bead _) =>
     const Circuit(id: 'leaf', steps: [], terminalStepId: 'none');

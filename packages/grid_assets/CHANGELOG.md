@@ -1,3 +1,7 @@
+## 0.7.0-dev.8
+
+- Vend the shared proxied-bd test harness from `package:grid_assets/testing/proxied_bd_test_support.dart` so sibling packages consume it from the published archive; `test/support/proxied_bd_test_support.dart` re-exports it.
+
 ## 0.7.0-dev.7
 
 - **Breaking:** code-validation hard-blocks only on merge-base regressions (pow-5n53, #378): a failure that also fails at the merge base is a pre-existing NOTE, not a block. Migration: a validation plan that relied on any red test blocking must now assert the regression on the branch alone; `CodeValidation` consumers reading the old single-run verdict shape read the base/branch pair.
