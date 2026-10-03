@@ -1,3 +1,7 @@
+## 0.2.0-dev.8
+
+ - Coherence release, no code change: cut so space_station_assets 0.5.0-dev.8 can floor github_grid_assets at the dev.8 counter beside grid_assets 0.7.0-dev.8 (its test pins the three dev counters equal).
+
 ## 0.2.0-dev.7
 
 > Note: This release has breaking changes.
