@@ -558,5 +558,41 @@ void main() {
         );
       }
     });
+
+    // `power_station#acceptance-probe-base-failure-is-no-regression-evidence`.
+    test('no-evidence base note rides the passing receipt on one line', () {
+      const note =
+          'merge-base validation exited 1 without a named failing test; the '
+          'base gave no regression evidence, so the branch result decided';
+      final body = bodyFor(const {
+        'grade': 'A',
+        'regressions': '[]',
+        'preexisting': '["test/a_test.dart 2:2 alpha"]',
+        'baseRc': '1',
+        'baseNote': note,
+      });
+      expect(
+        body,
+        contains(
+          '- revalidate: passed\n'
+          '- base validation: $note\n'
+          '- pre-existing on base: test/a_test.dart 2:2 alpha\n',
+        ),
+      );
+      expect(
+        body.split('\n').where((line) => line.contains(note)),
+        hasLength(1),
+      );
+      // A value that would break the one-line bullet is omitted, never
+      // reflowed; an absent or blank note emits nothing.
+      for (final unfit in const [' ', 'two\nlines']) {
+        expect(
+          bodyFor({'grade': 'A', 'baseNote': unfit}),
+          isNot(contains('base validation')),
+          reason: unfit,
+        );
+      }
+      expect(bodyFor(const {'grade': 'A'}), isNot(contains('base validation')));
+    });
   });
 }

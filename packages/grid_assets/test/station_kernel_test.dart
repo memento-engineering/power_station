@@ -208,6 +208,11 @@ void main() {
       state.push(_stateAt());
       await settle(() => f.provider.started.length >= 2);
 
+      // Nothing about the FILING verdict reaches this spawn. No evidence
+      // source is composed anywhere on this path, so the validation-plan rows
+      // of any report taken over `tg-1` are unanswered — and the mount still
+      // admits, because admission reads the approval revision and never the
+      // verdict (fenced in track_f_composition_assets_test).
       expect(f.provider.started, hasLength(2), reason: 'the agent spawned');
       final agentStart = f.provider.started.last;
       // FT-2: the claude invocation is wrapped in `sh -c` for usage capture;

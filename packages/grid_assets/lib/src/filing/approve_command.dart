@@ -335,8 +335,17 @@ class ApproveCommand extends Command<int> {
           _out.writeln('REFUSED $beadId: $reason');
           for (final row
               in report?.requirements ?? const <FilingRequirementRow>[]) {
-            if (!row.passed) {
-              _out.writeln('FAIL ${row.requirement.wire}: ${row.detail}');
+            // A row that could not evaluate is printed too, under its OWN
+            // label: it is part of why this approval refused, and calling it
+            // a FAIL would send an operator to correct a bead nothing found
+            // fault with.
+            switch (row.status) {
+              case FilingRequirementStatus.passed:
+                break;
+              case FilingRequirementStatus.failed:
+                _out.writeln('FAIL ${row.requirement.wire}: ${row.detail}');
+              case FilingRequirementStatus.couldNotEvaluate:
+                _out.writeln('ERROR ${row.requirement.wire}: ${row.detail}');
             }
           }
           // An advisory refusal already IS the reason above, verbatim; naming

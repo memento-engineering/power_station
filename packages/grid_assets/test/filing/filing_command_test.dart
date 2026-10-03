@@ -117,7 +117,7 @@ void main() {
           .cast<Map<String, dynamic>>();
       expect(report['passed'], isTrue);
       expect(rows, hasLength(11));
-      expect(rows.every((row) => row['passed'] == true), isTrue);
+      expect(rows.every((row) => row['status'] == 'passed'), isTrue);
     },
   );
 
@@ -165,7 +165,7 @@ void main() {
       expect(
         {
           for (final row in rows)
-            if (row['passed'] == false) row['requirement'],
+            if (row['status'] == 'failed') row['requirement'],
         },
         {
           'driveable_type',
@@ -365,7 +365,7 @@ void main() {
       );
       expect(
         ((wired['requirements']! as List).cast<Map<String, dynamic>>())
-            .where((row) => row['passed'] == false)
+            .where((row) => row['status'] != 'passed')
             .map((row) => '${row['requirement']}: ${row['detail']}'),
         isEmpty,
       );
@@ -383,14 +383,14 @@ void main() {
                 (row) => row['requirement'] == 'decision_references',
               );
       expect(invented['passed'], isFalse);
-      expect(row['passed'], isFalse);
+      expect(row['status'], 'failed');
       expect(row['detail'], contains('a-rule-this-round-creates'));
       expect(
         ((invented['requirements']! as List).cast<Map<String, dynamic>>())
             .singleWhere(
               (row) => row['requirement'] == 'bead_references',
-            )['passed'],
-        isTrue,
+            )['status'],
+        'passed',
       );
     },
   );
@@ -494,5 +494,64 @@ void main() {
       );
       expect(h.advisory.calls, isEmpty);
     });
+  });
+
+  test('could-not-evaluate filing output is an error, not a failure', () async {
+    // The lane shell was asked and did not answer. The verb has to render a
+    // THIRD thing here: an operator who reads FAIL goes and edits the bead,
+    // which is the wrong place when no row found fault with it.
+    final out = StringBuffer();
+    FilingCommand command(FilingEvidence evidence) => FilingCommand(
+      service: FilingService(
+        source: ExactSubstationBeadSource(
+          runnerFor: (_) => FakeExactBeadRunner(
+            const Bead(
+              id: 'pow-child',
+              title: 'child',
+              issueType: IssueType.task,
+              description: 'A real brief.',
+              acceptanceCriteria: '- [ ] checked',
+            ),
+          ),
+        ),
+        evidence: FakeFilingEvidenceSource(evidence),
+        advisory: FakeFilingAdvisory(),
+      ),
+      storeRoot: () => '/work/power_station',
+      out: out,
+      err: StringBuffer(),
+    );
+    const unanswered = FilingEvidence(
+      decisionRegisters: {},
+      lanePlanProbeFailure: 'sh probe failed: Bad state: no pty',
+    );
+
+    final plain = CommandRunner<int>('space', 'test station')
+      ..addCommand(command(unanswered));
+    expect(await plain.run(['filing', 'pow-child']), 1);
+    expect(
+      out.toString(),
+      contains('ERROR validation_plan_syntax: '),
+      reason: '$out',
+    );
+    expect(out.toString(), contains('Bad state: no pty'));
+    // Only the unanswered row wears it; every other row still says PASS.
+    expect(out.toString(), isNot(contains('FAIL ')));
+    expect(out.toString(), contains('PASS validation_plan_portability'));
+
+    out.clear();
+    final json = CommandRunner<int>('space', 'test station')
+      ..addCommand(command(unanswered));
+    expect(await json.run(['filing', '--json', 'pow-child']), 1);
+    final report = jsonDecode(out.toString()) as Map<String, dynamic>;
+    expect(report['passed'], isFalse);
+    expect(report['could_not_evaluate'], isTrue);
+    expect(
+      (report['requirements']! as List)
+          .cast<Map<String, dynamic>>()
+          .where((row) => row['status'] == 'could_not_evaluate')
+          .map((row) => row['requirement']),
+      ['validation_plan_syntax'],
+    );
   });
 }

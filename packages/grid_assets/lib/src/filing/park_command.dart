@@ -1203,8 +1203,16 @@ class UnparkCommand extends Command<int> {
           for (final row
               in approval?.report?.requirements ??
                   const <FilingRequirementRow>[]) {
-            if (!row.passed) {
-              _out.writeln('FAIL ${row.requirement.wire}: ${row.detail}');
+            // The same three labels the approve verb prints: unpark DELEGATES
+            // its approval, so it must not render the delegated report in
+            // fewer states than the report has.
+            switch (row.status) {
+              case FilingRequirementStatus.passed:
+                break;
+              case FilingRequirementStatus.failed:
+                _out.writeln('FAIL ${row.requirement.wire}: ${row.detail}');
+              case FilingRequirementStatus.couldNotEvaluate:
+                _out.writeln('ERROR ${row.requirement.wire}: ${row.detail}');
             }
           }
         case UnparkFailed(:final detail):

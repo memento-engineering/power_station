@@ -557,6 +557,7 @@ String _circuitReceipt(PrCompositionContext context) {
             beadId: context.beadId,
             siblings: context.siblings,
             preexisting: _preexistingOnBase(context),
+            baseEvidenceNote: _baseEvidenceNote(context),
           ).trimRight(),
         )
         ..writeln()
@@ -597,6 +598,24 @@ List<String> _preexistingOnBase(PrCompositionContext context) {
   if (decoded is! List) return const [];
   if (decoded.any((entry) => entry is! String)) return const [];
   return decoded.cast<String>().toSet().toList()..sort();
+}
+
+/// The code-validation lane's one-line note that the merge base gave no
+/// regression evidence
+/// (`power_station#acceptance-probe-base-failure-is-no-regression-evidence`),
+/// read off the review lane's own sibling result.
+///
+/// Only a non-empty SINGLE line is accepted: the receipt renders it as one
+/// bullet, and a value that would break that line is omitted rather than
+/// reflowed.
+String? _baseEvidenceNote(PrCompositionContext context) {
+  final review = context.siblings.resultOf(
+    '${context.beadId}/review/code-validation',
+  );
+  final note = review['baseNote']?.trim();
+  if (note == null || note.isEmpty) return null;
+  if (note.contains('\n') || note.contains('\r')) return null;
+  return note;
 }
 
 String _committeeGrades(PrCompositionContext context) {

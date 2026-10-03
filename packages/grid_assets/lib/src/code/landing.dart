@@ -424,12 +424,19 @@ class RevalidateCapability extends RouteCapability {
 
     if (delta.regressions.isEmpty) {
       // A raw non-zero plan whose every failure is ALSO on the base advances:
-      // the EFFECTIVE rc is zero, and the raw exit rides along as evidence.
+      // the EFFECTIVE rc is zero, and the raw exit rides along as evidence —
+      // as do the base's exit and tail when it gave no regression evidence.
+      final baseNote = delta.baseNote;
       return Advance({
         'outcome': 'passed',
         'rc': '0',
         'branchRc': '${delta.branchExitCode}',
         'preexisting': jsonEncode(delta.preexisting),
+        if (baseNote != null) ...{
+          'baseRc': '${delta.baseExitCode}',
+          'baseOutputTail': delta.baseOutputTail,
+          'baseNote': baseNote,
+        },
       });
     }
 
@@ -484,10 +491,17 @@ class RevalidateCapability extends RouteCapability {
 /// body's circuit receipt as `pre-existing on base: <test>`"). One line per
 /// test, immediately after the revalidate line; an empty list emits none, so
 /// every receipt without pre-existing failures is byte-identical to before.
+///
+/// [baseEvidenceNote] is the code-validation lane's one-line note that the
+/// merge base gave no regression evidence
+/// (`power_station#acceptance-probe-base-failure-is-no-regression-evidence`),
+/// rendered as `- base validation: <note>` after the revalidate line and
+/// before any pre-existing lines; null emits nothing.
 String buildCircuitReceipt({
   required String beadId,
   required SiblingView siblings,
   List<String> preexisting = const [],
+  String? baseEvidenceNote,
 }) {
   final rebase = siblings.resultOf('$beadId/land/rebase');
   final revalidate = siblings.resultOf('$beadId/land/revalidate');
@@ -496,6 +510,9 @@ String buildCircuitReceipt({
     ..writeln()
     ..writeln('- rebase: ${rebase['outcome'] ?? 'clean'}')
     ..writeln('- revalidate: ${revalidate['outcome'] ?? 'passed'}');
+  if (baseEvidenceNote != null) {
+    b.writeln('- base validation: $baseEvidenceNote');
+  }
   for (final test in preexisting) {
     b.writeln('- pre-existing on base: $test');
   }

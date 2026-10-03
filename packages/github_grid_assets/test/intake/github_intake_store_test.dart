@@ -11,6 +11,9 @@ import 'package:grid_assets/grid_assets.dart'
         ShellRunner,
         ShellRunResult,
         SystemShellRunner,
+        SystemValidationPlanProbe,
+        ValidationPlanParseResult,
+        ValidationPlanProbe,
         kFilingApprovalRevisionPrefix;
 import 'package:grid_sdk/grid_sdk.dart' show SubstationScope;
 import 'package:test/test.dart';
@@ -213,6 +216,7 @@ BdGitHubIntakeStore seatStore(
   ShellRunner decisionShell = const SystemShellRunner(),
   String? decisionInvocation,
   String? decisionGridHome,
+  ValidationPlanProbe? validationPlanProbe,
 }) => BdGitHubIntakeStore(
   runner,
   approvals: ApproveService(
@@ -222,9 +226,24 @@ BdGitHubIntakeStore seatStore(
     decisionShell: decisionShell,
     decisionInvocation: decisionInvocation,
     decisionGridHome: decisionGridHome,
+    validationPlanProbe:
+        validationPlanProbe ?? const SystemValidationPlanProbe(),
   ),
   workRoot: seatRoot.path,
 );
+
+/// A parse seam that goes QUIET: the shell is installed, and it dies before
+/// returning a verdict. A Fake performs no IO — the throw IS the behaviour.
+final class SilentValidationPlanProbe implements ValidationPlanProbe {
+  const SilentValidationPlanProbe();
+
+  @override
+  Future<ValidationPlanParseResult> parse({
+    required String shell,
+    required String plan,
+    required String workingDirectory,
+  }) async => throw const ProcessException('sh', ['-n'], 'sh died mid-parse');
+}
 
 const workflowMetadata = <String>[
   '--set-metadata',
@@ -607,6 +626,49 @@ void main() {
               .where((arg) => arg.contains('grid.approved')),
           isEmpty,
           reason: 'a refused preflight writes NO approval key',
+        );
+        expect(
+          [...runner.verb('create'), ...updates].expand((argv) => argv),
+          isNot(contains('--status')),
+          reason: 'the bead stays OPEN — no write touches its status',
+        );
+      },
+    );
+
+    test(
+      'checker-incomplete self-approval stays open, unstamped, and names the '
+      'station failure',
+      () async {
+        // The plan is WELL FORMED and the shell is installed; it just never
+        // answered. Nothing here says the bead is wrong, so the note must not
+        // send an operator to the bead to correct a field.
+        final runner = RecordingBdRunner(filed: filedBug());
+
+        await seatStore(
+          runner,
+          validationPlanProbe: const SilentValidationPlanProbe(),
+        ).upsert(workflowRecord());
+
+        final updates = runner.verb('update');
+        final note = updates.last.last;
+        expect(
+          updates.last,
+          containsAllInOrder(['update', 'pow-run', '--json', '--append-notes']),
+        );
+        expect(
+          note,
+          contains('COULD NOT EVALUATE validation_plan_syntax'),
+          reason: 'the note names the CHECKER, not a field to correct',
+        );
+        expect(note, contains('sh died mid-parse'));
+
+        // Fail-closed all the same: an unanswered row is not a passing row.
+        expect(
+          runner.argvs
+              .expand((argv) => argv)
+              .where((arg) => arg.contains('grid.approved')),
+          isEmpty,
+          reason: 'a checker that went quiet writes NO approval key',
         );
         expect(
           [...runner.verb('create'), ...updates].expand((argv) => argv),

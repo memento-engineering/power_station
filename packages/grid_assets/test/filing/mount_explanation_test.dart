@@ -262,6 +262,7 @@ final class _Harness {
     bool stateRefuses = false,
     bool targetQueryRefuses = false,
     DateTime? now,
+    FilingEvidence? filingEvidence,
   }) {
     final record = bead ?? _workBead();
     home = stateStore ? _gridHome() : null;
@@ -297,7 +298,11 @@ final class _Harness {
     // rows stay out of this suite's way; their refusals are pinned in
     // `filing_viability_test.dart`, and the LIVE default composition has its
     // own test below.
-    final evidence = FakeFilingEvidenceSource(completeEmptyEvidence);
+    // [filingEvidence] overrides it for the one probe that needs a checker
+    // which did NOT answer.
+    final evidence = FakeFilingEvidenceSource(
+      filingEvidence ?? completeEmptyEvidence,
+    );
     final service = MountExplanationService(
       runnerFor: bd.runnerFor,
       now: () => now ?? _now,
@@ -1494,7 +1499,7 @@ void main() {
       final rows = (embedded['requirements']! as List)
           .cast<Map<String, dynamic>>();
       expect(
-        rows.where((row) => row['passed'] == false),
+        rows.where((row) => row['status'] != 'passed'),
         isEmpty,
         reason: '$embedded',
       );
@@ -1539,7 +1544,7 @@ void main() {
               .singleWhere(
                 (row) => row['requirement'] == 'decision_references',
               );
-      expect(refused['passed'], isFalse);
+      expect(refused['status'], 'failed');
       expect(refused['detail'], contains('a-rule-this-round-creates'));
       expect(
         refused['detail'],
@@ -1549,6 +1554,42 @@ void main() {
         ),
       );
     });
+  });
+
+  test('mount report preserves could-not-evaluate filing status', () async {
+    // The explainer COMPOSES the filing report whole, so the third state has
+    // to survive the trip: an unevaluated row stays unevaluated on the embedded
+    // report, and the mount ROW it feeds is never turned into a blocker the
+    // bead did not earn.
+    final h = _Harness(
+      filingEvidence: const FilingEvidence(
+        decisionRegisters: {},
+        lanePlanProbeFailure: 'sh probe failed: Bad state: no pty',
+      ),
+    );
+
+    // 2 is this fixture's ordinary not-eligible exit — the subject here is
+    // the EMBEDDED report, not the mount verdict.
+    expect(await h.mount(), 2, reason: '${h.out}${h.err}');
+    final embedded = h.report['filing']! as Map<String, dynamic>;
+    expect(embedded['passed'], isFalse);
+    expect(embedded['could_not_evaluate'], isTrue);
+    final rows = (embedded['requirements']! as List)
+        .cast<Map<String, dynamic>>();
+    expect(
+      rows
+          .where((row) => row['status'] == 'could_not_evaluate')
+          .map((row) => row['requirement']),
+      ['validation_plan_syntax'],
+    );
+    expect(rows.where((row) => row['status'] == 'failed'), isEmpty);
+
+    // The MOUNT rows the explainer renders off that report are unchanged: the
+    // plan rows are not mount preconditions, and the acceptance row — the one
+    // that reads a filing row's verdict directly — still passes, because its
+    // own row evaluated fine.
+    expect(h.outcomeOf(MountPrecondition.acceptanceCriteria), 'PASS');
+    expect(h.outcomeOf(MountPrecondition.validationPlan), 'PASS');
   });
 }
 

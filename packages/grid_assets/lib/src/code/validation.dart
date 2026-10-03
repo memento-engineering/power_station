@@ -323,12 +323,14 @@ class SystemShellRunner implements BoundedShellRunner {
 /// A comparison that could not produce comparable named-test outcomes — a LANE
 /// failure with a named cause, never a bead block.
 ///
-/// The ruling is explicit: "A plan that fails on the base for a reason other
-/// than a named test (compile error, exit 64, missing tool) is a lane failure
-/// with a named cause, not a bead block." The same holds for the branch side —
-/// a branch plan that exits non-zero with nothing the parser recognises as a
+/// A branch plan that exits non-zero with nothing the parser recognises as a
 /// failing test has no delta to compute, so the lane refuses rather than
-/// inventing a regression.
+/// inventing a regression. The BASE side no longer refuses on that shape
+/// (`power_station#acceptance-probe-base-failure-is-no-regression-evidence`):
+/// a completed base run naming no failing test gives no regression evidence and
+/// the branch decides. What still fails the base side is OPERATIONAL — a merge
+/// base that will not resolve, a scratch worktree that cannot be made or
+/// unwound, a deadline cut.
 class ValidationLaneFailure implements Exception {
   /// Creates the failure.
   const ValidationLaneFailure({
@@ -339,6 +341,7 @@ class ValidationLaneFailure implements Exception {
     this.timedOut = false,
     this.output = '',
     this.logPath,
+    this.planExited = false,
   });
 
   /// Which run could not be compared — `base`, `branch`, or `worktree` (the
@@ -356,6 +359,13 @@ class ValidationLaneFailure implements Exception {
 
   /// Whether the implicated run was terminated on its deadline.
   final bool timedOut;
+
+  /// Whether the failure is the plan's own COMPLETED, deterministic exit — the
+  /// plan ran to its end (no deadline cut) and answered a result the lane
+  /// cannot compare. False for every operational absence (a merge base or
+  /// scratch worktree git could not produce, a deadline cut), which produced
+  /// no plan result at all.
+  final bool planExited;
 
   /// The implicated run's FULL captured output — never a slice: the reason
   /// shapes below cut it themselves, and a caller persisting it (the base-side
@@ -429,7 +439,8 @@ class ValidationLaneFailure implements Exception {
 /// The answer one comparison produced: which named test failures are the
 /// BRANCH'S (a gate) and which the base already had (a note).
 class ValidationDelta {
-  /// Creates the delta.
+  /// Creates the delta. The base diagnostics default to a passing base, so a
+  /// construction that predates them is unchanged.
   ValidationDelta({
     required this.baseSha,
     required this.baseCacheHit,
@@ -437,6 +448,9 @@ class ValidationDelta {
     required this.branchTimedOut,
     required List<String> regressions,
     required List<String> preexisting,
+    this.baseExitCode = 0,
+    this.baseOutputTail = '',
+    this.baseGaveNoRegressionEvidence = false,
     List<String> baseDiagnostics = const <String>[],
   }) : regressions = List.unmodifiable(regressions),
        preexisting = List.unmodifiable(preexisting),
@@ -457,6 +471,21 @@ class ValidationDelta {
   /// Whether the branch run was terminated on its deadline.
   final bool branchTimedOut;
 
+  /// The merge-base plan's RAW exit code.
+  final int baseExitCode;
+
+  /// The merge-base plan's advice-stripped output TAIL, bounded to
+  /// [kRevalidateReasonTailChars] — recorded only when the base gave no
+  /// regression evidence ([baseGaveNoRegressionEvidence]), else empty.
+  final String baseOutputTail;
+
+  /// Whether the merge-base run COMPLETED non-zero without naming a failing
+  /// test — an acceptance probe for a feature the base does not have yet, or
+  /// a base that cannot build. It contributes NO regression evidence
+  /// (`power_station#acceptance-probe-base-failure-is-no-regression-evidence`):
+  /// its failure set is empty, so the branch result alone decides.
+  final bool baseGaveNoRegressionEvidence;
+
   /// Sorted named tests that FAIL on the branch and PASS at the merge-base —
   /// the only failures that gate.
   final List<String> regressions;
@@ -476,15 +505,24 @@ class ValidationDelta {
   /// The EFFECTIVE exit code: zero unless the branch regressed.
   int get effectiveExitCode =>
       regressions.isEmpty ? 0 : (branchExitCode == 0 ? 1 : branchExitCode);
+
+  /// The one-line receipt note for a base that gave no regression evidence,
+  /// or null for every comparable base.
+  String? get baseNote => baseGaveNoRegressionEvidence
+      ? 'merge-base validation exited $baseExitCode without a named failing '
+            'test; the base gave no regression evidence, so the branch result '
+            'decided'
+      : null;
 }
 
 /// Runs one Validation Plan on the branch AND at its merge-base, on the same
 /// host, and answers the [ValidationDelta] between them.
 ///
 /// The base side is CACHED per (base sha, plan digest, host identity), so a
-/// wave of rounds over one main commit pays for the base exactly once. A lane
-/// failure is never cached: an uncomparable base must be re-attempted, not
-/// remembered.
+/// wave of rounds over one main commit pays for the base exactly once — a
+/// completed base that named no failing test included, since re-running it
+/// against the same commit answers the same. A lane failure is never cached:
+/// an uncomparable base must be re-attempted, not remembered.
 class ValidationDeltaRunner {
   /// Creates the runner over the composing registry's EXISTING seams — no
   /// second git or process seam is introduced ([gitRunner] is the `code`
@@ -515,7 +553,7 @@ class ValidationDeltaRunner {
 
   /// The cache's schema version — a stored entry written by any other version
   /// is a MISS, never a misread.
-  static const int _cacheSchemaVersion = 2;
+  static const int _cacheSchemaVersion = 3;
 
   /// Compares [plan] on [workspace]'s branch against its merge-base with
   /// [baseRef].
@@ -631,15 +669,21 @@ class ValidationDeltaRunner {
         timedOut: branch.timedOut,
         output: branch.output,
         logPath: _operatorPath(branchLogPath, workDir),
+        planExited: !branch.timedOut,
       );
     }
 
+    // A base that named no failing test contributes an EMPTY set — exactly the
+    // empty set a passing base contributes — so the branch alone decides.
     final baseFailures = base.failures.toSet();
     final delta = ValidationDelta(
       baseSha: baseSha,
       baseCacheHit: cacheHit,
       branchExitCode: branch.exitCode,
       branchTimedOut: branch.timedOut,
+      baseExitCode: base.exitCode,
+      baseOutputTail: base.outputTail,
+      baseGaveNoRegressionEvidence: base.gaveNoEvidence,
       regressions:
           branchFailures.where((name) => !baseFailures.contains(name)).toList()
             ..sort(),
@@ -707,25 +751,34 @@ class ValidationDeltaRunner {
         command: plan,
         deadline: deadline,
       );
-      final failures = failingTestNames(result.output);
       // A deadline-cut base is never a comparable (or cacheable) base: the
       // tests it never reached would read as passing there.
-      if (result.timedOut || (failures.isEmpty && !result.ok)) {
+      if (result.timedOut) {
         throw ValidationLaneFailure(
           side: 'base',
-          cause: result.timedOut
-              ? 'the plan exceeded its ${deadline.inMinutes}-minute deadline'
-              : 'the plan failed without naming a failing test',
+          cause: 'the plan exceeded its ${deadline.inMinutes}-minute deadline',
           baseSha: baseSha,
           exitCode: result.exitCode,
-          timedOut: result.timedOut,
+          timedOut: true,
           output: result.output,
           logPath: _loggedAt(baseLogPath, result.output),
         );
       }
+      final failures = failingTestNames(result.output);
+      // A COMPLETED base that failed naming no test — an acceptance probe for
+      // a feature the base does not have yet — is no regression evidence
+      // (`power_station#acceptance-probe-base-failure-is-no-regression-evidence`):
+      // its failure set stays empty, and its exit and tail are kept as the
+      // verdict's diagnostics.
       return _BaseRun(
         exitCode: result.exitCode,
         failures: failures,
+        outputTail: failures.isEmpty && !result.ok
+            ? landReasonTail(
+                planOutputWithoutPubAdvice(result.output),
+                kRevalidateReasonTailChars,
+              )
+            : '',
         diagnostics: validationDiagnosticLines(
           planOutputWithoutPubAdvice(result.output),
         ),
@@ -875,14 +928,20 @@ class ValidationDeltaRunner {
       final failures = decoded['failures'];
       final diagnostics = decoded['diagnostics'];
       final exitCode = decoded['exitCode'];
-      if (failures is! List || diagnostics is! List || exitCode is! int) {
+      final outputTail = decoded['outputTail'];
+      if (failures is! List ||
+          diagnostics is! List ||
+          exitCode is! int ||
+          outputTail is! String) {
         return null;
       }
       if (failures.any((name) => name is! String)) return null;
       if (diagnostics.any((line) => line is! String)) return null;
+      if (outputTail.length > kRevalidateReasonTailChars) return null;
       return _BaseRun(
         exitCode: exitCode,
         failures: failures.cast<String>().toList(growable: false),
+        outputTail: outputTail,
         diagnostics: diagnostics.cast<String>().toList(growable: false),
       );
     } on Object {
@@ -910,6 +969,7 @@ class ValidationDeltaRunner {
             'host': host,
             'exitCode': result.exitCode,
             'failures': result.failures,
+            'outputTail': result.outputTail,
             'diagnostics': result.diagnostics,
           }),
         );
@@ -957,6 +1017,7 @@ class _BaseRun {
     required this.exitCode,
     required this.failures,
     required this.diagnostics,
+    this.outputTail = '',
   });
 
   final int exitCode;
@@ -964,6 +1025,13 @@ class _BaseRun {
 
   /// The run's recognized validation diagnostics, in encounter order.
   final List<String> diagnostics;
+
+  /// The bounded, advice-stripped output tail — kept only for a run that gave
+  /// no regression evidence.
+  final String outputTail;
+
+  /// Whether the run completed non-zero naming no failing test.
+  bool get gaveNoEvidence => exitCode != 0 && failures.isEmpty;
 }
 
 /// Collapses [text] to one trimmed line, so a cause stays greppable in a

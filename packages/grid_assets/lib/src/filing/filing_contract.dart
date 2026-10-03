@@ -55,20 +55,61 @@ enum FilingRequirement {
   final String wire;
 }
 
+/// What one requirement row CONCLUDED — three states, never two.
+///
+/// [passed] and [failed] are both statements about the BEAD: the row asked its
+/// question and the bead answered it. [couldNotEvaluate] is a statement about
+/// the CHECKER: the row never got an answer to judge, so it says nothing about
+/// the bead at all.
+///
+/// Collapsing the third state into [failed] is what this enum exists to
+/// prevent. A row that cannot gather its own evidence and reports a failure
+/// hands a refiner a well-formed bead described as defective, and no caller can
+/// tell that from a real filing defect — which is exactly what happened on the
+/// resident when the plan probes stopped answering: every bead checked was
+/// reported not-approvable for minutes at a time, none of them edited, and the
+/// condition cleared itself with no code change and no bead change.
+///
+/// The wire names are the contract, exactly as [FilingRequirement.wire] is.
+enum FilingRequirementStatus {
+  /// The row evaluated the bead and the bead satisfies it.
+  passed('passed'),
+
+  /// The row evaluated the bead and the bead does NOT satisfy it — the one
+  /// state that means "correct the bead".
+  failed('failed'),
+
+  /// The row could not evaluate anything: its own evidence never arrived.
+  ///
+  /// NEVER a softer way to fail a bead that WAS evaluated. A row that reached
+  /// a verdict reports [passed] or [failed] and nothing else.
+  couldNotEvaluate('could_not_evaluate');
+
+  const FilingRequirementStatus(this.wire);
+
+  /// Stable JSON name consumed by skills and UIs.
+  final String wire;
+}
+
 /// One deterministic filing requirement result.
 final class FilingRequirementRow {
   /// Creates one result row.
   const FilingRequirementRow({
     required this.requirement,
-    required this.passed,
+    required this.status,
     required this.detail,
   });
 
   /// Requirement evaluated by this row.
   final FilingRequirement requirement;
 
-  /// Whether the filed bead satisfies the requirement.
-  final bool passed;
+  /// What this row concluded — and, when it concluded nothing, that it did.
+  ///
+  /// There is deliberately NO boolean accessor over this. A `passed` getter
+  /// would let every caller keep reading two states out of three and silently
+  /// re-fold checker incompleteness back into a filing defect, which is the
+  /// defect this type was widened to remove.
+  final FilingRequirementStatus status;
 
   /// Human-readable evidence or correction.
   final String detail;
@@ -76,10 +117,17 @@ final class FilingRequirementRow {
   /// Structured command/UI representation.
   Map<String, Object> toJson() => {
     'requirement': requirement.wire,
-    'passed': passed,
+    'status': status.wire,
     'detail': detail,
   };
 }
+
+/// The status of a row that DID evaluate.
+///
+/// The two outcomes every row had before [FilingRequirementStatus] existed, and
+/// the only two a row that reached a verdict about the BEAD may report.
+FilingRequirementStatus _decided(bool satisfied) =>
+    satisfied ? FilingRequirementStatus.passed : FilingRequirementStatus.failed;
 
 /// The complete filing report for one bead id.
 final class FilingReport {
@@ -137,13 +185,43 @@ final class FilingReport {
   /// only judgement in the report.
   final FilingAdvisoryVerdict? advisory;
 
-  /// True for a found bead whose every mechanical row passed AND, when the
+  /// True for a found bead whose every mechanical row PASSED AND, when the
   /// advisory was asked, an advisory that did not refuse.
+  ///
+  /// This is the APPROVAL boolean and it stays fail-closed: a row that could
+  /// not evaluate is not a passing row, so checker incompleteness never
+  /// reaches a stamp. What it must not do is swallow WHY — [couldNotEvaluate]
+  /// and the row statuses beside it are how a caller tells a bead that failed
+  /// a check from a checker that answered nothing.
   bool get passed =>
       error == null &&
       requirements.length == FilingRequirement.values.length &&
-      requirements.every((row) => row.passed) &&
+      requirements.every(
+        (row) => row.status == FilingRequirementStatus.passed,
+      ) &&
       (advisory?.passed ?? true);
+
+  /// Whether any row COULD NOT EVALUATE — the checker did not answer.
+  ///
+  /// Read beside [passed], never instead of it: `passed == false` says this
+  /// filing is not approvable, and this says at least one row of the reason is
+  /// a gap in the evidence rather than a defect in the bead.
+  bool get couldNotEvaluate => requirements.any(
+    (row) => row.status == FilingRequirementStatus.couldNotEvaluate,
+  );
+
+  /// The wires of every row that could not evaluate, in report order.
+  List<String> get _unevaluated => [
+    for (final row in requirements)
+      if (row.status == FilingRequirementStatus.couldNotEvaluate)
+        row.requirement.wire,
+  ];
+
+  /// The wires of every row that evaluated the bead and refused it.
+  List<String> get _refused => [
+    for (final row in requirements)
+      if (row.status == FilingRequirementStatus.failed) row.requirement.wire,
+  ];
 
   /// The EXACT reason this report refuses — the one text a verb prints and a
   /// refused approval records.
@@ -151,18 +229,40 @@ final class FilingReport {
   /// An advisory refusal answers with the owning lens's own fix text, verbatim:
   /// that text IS the remedy, and paraphrasing it here would hand a refiner a
   /// summary of a hold instead of the hold. Empty for a passing report.
+  ///
+  /// A row that could not evaluate gets its OWN reason rather than the
+  /// correct-the-bead one. The two remedies are addressed to different people:
+  /// a failing row is the refiner's to fix, and a checker that did not answer
+  /// is the station's — telling a refiner to correct a bead nothing found
+  /// fault with is the confusion this text exists to end.
   String get refusalReason {
     if (passed) return '';
     if (error case final error?) return error;
     if (advisory case FilingAdvisoryRefused(:final reason)) return reason;
-    return 'the filing preflight has failing rows — correct the bead and '
-        'rerun approve';
+    final unevaluated = _unevaluated;
+    if (unevaluated.isEmpty) {
+      return 'the filing preflight has failing rows — correct the bead and '
+          'rerun approve';
+    }
+    final refused = _refused;
+    if (refused.isEmpty) {
+      return 'the filing preflight COULD NOT EVALUATE '
+          '${unevaluated.join(', ')} — this is the CHECKER failing to answer, '
+          'not the bead failing a check, and nothing here says this filing is '
+          'wrong. Read the named rows for what did not answer, restore it, '
+          'and rerun approve';
+    }
+    return 'the filing preflight has failing rows (${refused.join(', ')}) and '
+        'COULD NOT EVALUATE ${unevaluated.join(', ')} — correct the failing '
+        'rows; the unevaluated ones are a CHECKER gap and say nothing about '
+        'this bead';
   }
 
   /// Structured command/UI representation.
   Map<String, Object> toJson() => {
     'id': beadId,
     'passed': passed,
+    'could_not_evaluate': couldNotEvaluate,
     'approval_revision': approvalRevision,
     'requirements': [for (final row in requirements) row.toJson()],
     if (advisory case final advisory?) 'advisory': advisory.toJson(),
@@ -519,6 +619,7 @@ final class FilingEvidence {
     this.lanePlanProbeFailure = '',
     this.portablePlanParse,
     this.portablePlanProbeFailure = '',
+    this.missingValidationPlanShells = const {},
     this.beadCatalogs = const {},
     this.beadCatalogFailures = const {},
     this.decisionRegisters,
@@ -553,6 +654,17 @@ final class FilingEvidence {
 
   /// Why the portability probe did not answer — empty unless it failed.
   final String portablePlanProbeFailure;
+
+  /// The parse shells this machine does NOT have installed, as the gather
+  /// found them.
+  ///
+  /// A shell that is absent and a shell that crashed are both the absence of a
+  /// parse, and the failure TEXT already carries which — but a row has to
+  /// decide on the fact, not on a substring of a message. This is the fact.
+  /// It is populated only by a gather that caught [ValidationPlanShellMissing]
+  /// itself, so an evidence value a caller composed by hand never claims a
+  /// machine posture nobody probed.
+  final Set<String> missingValidationPlanShells;
 
   /// COMPLETE all-status id catalogs, keyed by the store PREFIX they were read
   /// under. A prefix present here was read whole, so an id under it that is
@@ -732,13 +844,23 @@ final class SystemFilingEvidenceSource implements FilingEvidenceSource {
     ValidationPlanParseResult? portable;
     var laneFailure = '';
     var portableFailure = '';
+    final missingShells = <String>{};
     if (plan.isNotEmpty) {
+      // ONE ask per shell, and no retry. This gather IS the evidence snapshot
+      // the report is a receipt for, so a second spawn that happened to
+      // succeed would erase the first one's failure and mint a receipt over a
+      // checker nobody can see broke. The retry is the OPERATOR's, made
+      // explicitly by rerunning the verb, and the row carries the spawn error
+      // that tells them to.
       try {
         lane = await probe.parse(
           shell: kFilingLaneShell,
           plan: plan,
           workingDirectory: storeRoot,
         );
+      } on ValidationPlanShellMissing catch (error) {
+        missingShells.add(kFilingLaneShell);
+        laneFailure = '$kFilingLaneShell probe failed: $error';
       } on Object catch (error) {
         laneFailure = '$kFilingLaneShell probe failed: $error';
       }
@@ -749,10 +871,17 @@ final class SystemFilingEvidenceSource implements FilingEvidenceSource {
             plan: plan,
             workingDirectory: storeRoot,
           );
+        } on ValidationPlanShellMissing catch (error) {
+          // A dash nobody installed is a DECIDED refusal: CI's shell is a
+          // declared floor of this station, so a machine without it cannot
+          // clear a plan for the lane that will run it. It is kept apart from
+          // a dash that crashed, which decided nothing at all.
+          missingShells.add(kFilingPortabilityShell);
+          portableFailure = '$kFilingPortabilityShell probe failed: $error';
         } on Object catch (error) {
-          // A dash nobody installed and a dash that crashed are both the
-          // ABSENCE of an answer, and neither says the plan is portable. The
-          // exception's own name carries which it was into the row.
+          // The probe was ASKED and did not answer. Whatever went wrong here
+          // is about this machine, never about the plan, so the whole error
+          // rides into the row that has to say so.
           portableFailure = '$kFilingPortabilityShell probe failed: $error';
         }
       }
@@ -868,6 +997,7 @@ final class SystemFilingEvidenceSource implements FilingEvidenceSource {
       lanePlanProbeFailure: laneFailure,
       portablePlanParse: portable,
       portablePlanProbeFailure: portableFailure,
+      missingValidationPlanShells: missingShells,
       beadCatalogs: catalogs,
       beadCatalogFailures: catalogFailures,
       decisionRegisters: registers,
@@ -971,28 +1101,30 @@ final class FilingContract {
       requirements: [
         FilingRequirementRow(
           requirement: FilingRequirement.driveableType,
-          passed: bead.issueType.isDriveable,
+          status: _decided(bead.issueType.isDriveable),
           detail: bead.issueType.isDriveable
               ? '${bead.issueType.wire} is driveable'
               : '${bead.issueType.wire} is not driveable',
         ),
         FilingRequirementRow(
           requirement: FilingRequirement.validationPlan,
-          passed: validationPlan is String && validationPlan.trim().isNotEmpty,
+          status: _decided(
+            validationPlan is String && validationPlan.trim().isNotEmpty,
+          ),
           detail: validationPlan is String && validationPlan.trim().isNotEmpty
               ? 'validation_plan is present'
               : 'validation_plan is blank',
         ),
         FilingRequirementRow(
           requirement: FilingRequirement.acceptanceCriteria,
-          passed: bead.acceptanceCriteria.trim().isNotEmpty,
+          status: _decided(bead.acceptanceCriteria.trim().isNotEmpty),
           detail: bead.acceptanceCriteria.trim().isNotEmpty
               ? 'acceptance_criteria is present'
               : 'acceptance_criteria is blank',
         ),
         FilingRequirementRow(
           requirement: FilingRequirement.dependencies,
-          passed: projection.passed,
+          status: _decided(projection.passed),
           detail: projection.detail,
         ),
         _validationPlanSyntaxRow(bead, evidence),
@@ -1018,6 +1150,20 @@ String _named(Iterable<BeadTextSlice> slices) =>
 String _planSlice(String plan, String diagnostic) =>
     validationPlanOffendingSlice(plan, diagnostic);
 
+/// Why a plan probe did not answer, in the words of whatever went wrong.
+///
+/// A gather that CAUGHT something names it. A gather that never ran the probe
+/// at all carries no failure text, and the honest report of that is the
+/// composition gap it is — not a vague "was not gathered" that reads as a
+/// finding about the plan. The field incident this row was rewritten for
+/// looked exactly like the second case: the same unedited beads were reported
+/// not-approvable, with no reason attached, and cleared themselves later.
+String _probeAbsence(String shell, String failure) => failure.isEmpty
+    ? 'no $shell probe ran and none reported a failure — this verb was '
+          'composed with no filing evidence source, or its gather never '
+          'reached the plan'
+    : failure;
+
 FilingRequirementRow _validationPlanSyntaxRow(
   Bead bead,
   FilingEvidence evidence,
@@ -1026,7 +1172,7 @@ FilingRequirementRow _validationPlanSyntaxRow(
   if (plan.isEmpty) {
     return const FilingRequirementRow(
       requirement: FilingRequirement.validationPlanSyntax,
-      passed: true,
+      status: FilingRequirementStatus.passed,
       detail:
           'no validation_plan to parse — the validation_plan row carries the '
           'blank',
@@ -1034,26 +1180,30 @@ FilingRequirementRow _validationPlanSyntaxRow(
   }
   final parse = evidence.lanePlanParse;
   if (parse == null) {
+    // NOTHING parsed this plan, so nothing here is a statement about it. The
+    // row says which absence it was and stops — a refusal minted here would
+    // describe a well-formed bead as defective, and no caller downstream could
+    // tell it from one.
     return FilingRequirementRow(
       requirement: FilingRequirement.validationPlanSyntax,
-      passed: false,
+      status: FilingRequirementStatus.couldNotEvaluate,
       detail:
-          'no $kFilingLaneShell parse of the validation_plan was gathered'
-          '${evidence.lanePlanProbeFailure.isEmpty ? '' : ' — '
-                    '${evidence.lanePlanProbeFailure}'}; the plan checked is '
-          '"${_planSlice(plan, '')}" — restore complete evidence and rerun',
+          'no $kFilingLaneShell parse of the validation_plan was gathered — '
+          '${_probeAbsence(kFilingLaneShell, evidence.lanePlanProbeFailure)}; '
+          'the plan checked is "${_planSlice(plan, '')}" — nothing here says '
+          'the plan is wrong; restore complete evidence and rerun',
     );
   }
   if (parse.parsed) {
     return FilingRequirementRow(
       requirement: FilingRequirement.validationPlanSyntax,
-      passed: true,
+      status: FilingRequirementStatus.passed,
       detail: 'validation_plan parses under ${parse.shell}',
     );
   }
   return FilingRequirementRow(
     requirement: FilingRequirement.validationPlanSyntax,
-    passed: false,
+    status: FilingRequirementStatus.failed,
     detail:
         'validation_plan does not parse under ${parse.shell}: '
         '${parse.diagnostic}; offending text '
@@ -1070,7 +1220,7 @@ FilingRequirementRow _validationPlanPortabilityRow(
   if (plan.isEmpty) {
     return const FilingRequirementRow(
       requirement: FilingRequirement.validationPlanPortability,
-      passed: true,
+      status: FilingRequirementStatus.passed,
       detail:
           'no validation_plan to parse — the validation_plan row carries the '
           'blank',
@@ -1082,7 +1232,7 @@ FilingRequirementRow _validationPlanPortabilityRow(
   if (lane == null || !lane.parsed) {
     return const FilingRequirementRow(
       requirement: FilingRequirement.validationPlanPortability,
-      passed: true,
+      status: FilingRequirementStatus.passed,
       detail:
           'not probed — the validation_plan_syntax row is answered first and '
           'carries this plan',
@@ -1090,27 +1240,37 @@ FilingRequirementRow _validationPlanPortabilityRow(
   }
   final parse = evidence.portablePlanParse;
   if (parse == null) {
+    // A shell this machine does not HAVE is the one absence that still decides
+    // something: CI's shell is a declared floor, and a plan nothing on this
+    // machine can check against it is not cleared for the lane that will run
+    // it. That refusal is pre-existing and deliberate, and it stays a refusal.
+    final absent = evidence.missingValidationPlanShells.contains(
+      kFilingPortabilityShell,
+    );
     return FilingRequirementRow(
       requirement: FilingRequirement.validationPlanPortability,
-      passed: false,
+      status: absent
+          ? FilingRequirementStatus.failed
+          : FilingRequirementStatus.couldNotEvaluate,
       detail:
           'no $kFilingPortabilityShell parse of the validation_plan was '
-          'gathered'
-          '${evidence.portablePlanProbeFailure.isEmpty ? '' : ' — '
-                    '${evidence.portablePlanProbeFailure}'}; the plan checked is '
-          '"${_planSlice(plan, '')}" — restore complete evidence and rerun',
+          'gathered — '
+          '${_probeAbsence(kFilingPortabilityShell, evidence.portablePlanProbeFailure)}; '
+          'the plan checked is "${_planSlice(plan, '')}"'
+          '${absent ? '' : ' — nothing here says the plan is unportable'}'
+          ' — restore complete evidence and rerun',
     );
   }
   if (parse.parsed) {
     return FilingRequirementRow(
       requirement: FilingRequirement.validationPlanPortability,
-      passed: true,
+      status: FilingRequirementStatus.passed,
       detail: 'validation_plan parses under ${parse.shell}',
     );
   }
   return FilingRequirementRow(
     requirement: FilingRequirement.validationPlanPortability,
-    passed: false,
+    status: FilingRequirementStatus.failed,
     detail:
         'validation_plan parses under ${lane.shell} but not under '
         '${parse.shell}: ${parse.diagnostic}; offending text '
@@ -1123,7 +1283,7 @@ FilingRequirementRow _repoRelativePathsRow(Bead bead) {
   final found = absolutePathReferences(bead);
   return FilingRequirementRow(
     requirement: FilingRequirement.repoRelativePaths,
-    passed: found.isEmpty,
+    status: _decided(found.isEmpty),
     detail: found.isEmpty
         ? 'every file anchor in the bead text is repository-relative'
         : 'absolute file path in bead text: ${_named(found)} — '
@@ -1147,7 +1307,7 @@ FilingRequirementRow _beadReferencesRow(Bead bead, FilingEvidence evidence) {
   if (prefixes.isEmpty) {
     return const FilingRequirementRow(
       requirement: FilingRequirement.beadReferences,
-      passed: true,
+      status: FilingRequirementStatus.passed,
       detail:
           'not checked — no store catalog was composed, so no bead-id grammar '
           'applies here; compose the owning substation scope to have this row '
@@ -1166,7 +1326,7 @@ FilingRequirementRow _beadReferencesRow(Bead bead, FilingEvidence evidence) {
   if (found.isEmpty) {
     return const FilingRequirementRow(
       requirement: FilingRequirement.beadReferences,
-      passed: true,
+      status: FilingRequirementStatus.passed,
       detail: 'the bead text cites no bead id',
     );
   }
@@ -1189,7 +1349,7 @@ FilingRequirementRow _beadReferencesRow(Bead bead, FilingEvidence evidence) {
   if (unavailable.isNotEmpty) {
     return FilingRequirementRow(
       requirement: FilingRequirement.beadReferences,
-      passed: false,
+      status: FilingRequirementStatus.failed,
       detail:
           'bead id evidence is unavailable for ${_named(unavailable)}: '
           '${(sources.toList()..sort()).join('; ')} — '
@@ -1198,7 +1358,7 @@ FilingRequirementRow _beadReferencesRow(Bead bead, FilingEvidence evidence) {
   }
   return FilingRequirementRow(
     requirement: FilingRequirement.beadReferences,
-    passed: unresolved.isEmpty,
+    status: _decided(unresolved.isEmpty),
     detail: unresolved.isEmpty
         ? 'every cited bead id exists: '
               '${found.map((slice) => slice.text).toSet().join(', ')}'
@@ -1211,7 +1371,7 @@ FilingRequirementRow _releaseVersionsRow(Bead bead) {
   final found = exactReleaseVersions(bead);
   return FilingRequirementRow(
     requirement: FilingRequirement.releaseVersions,
-    passed: found.isEmpty,
+    status: _decided(found.isEmpty),
     detail: found.isEmpty
         ? 'acceptance_criteria pins no exact release version'
         : 'exact release version pinned in acceptance_criteria: '
@@ -1253,7 +1413,7 @@ FilingRequirementRow _decisionReferencesRow(
   if (found.isEmpty) {
     return const FilingRequirementRow(
       requirement: FilingRequirement.decisionReferences,
-      passed: true,
+      status: FilingRequirementStatus.passed,
       detail: 'the bead text cites no decision',
     );
   }
@@ -1289,7 +1449,7 @@ FilingRequirementRow _decisionReferencesRow(
         : evidence.decisionIndexFailure;
     return FilingRequirementRow(
       requirement: FilingRequirement.decisionReferences,
-      passed: false,
+      status: FilingRequirementStatus.failed,
       detail:
           'decision evidence is unavailable for '
           '${_named([for (final reference in unavailable) reference.slice])}: '
@@ -1298,7 +1458,7 @@ FilingRequirementRow _decisionReferencesRow(
   }
   return FilingRequirementRow(
     requirement: FilingRequirement.decisionReferences,
-    passed: missing.isEmpty,
+    status: _decided(missing.isEmpty),
     detail: missing.isEmpty
         ? [
             if (recorded.isNotEmpty)
@@ -1399,7 +1559,7 @@ FilingRequirementRow _noCorruptingTextRow(Bead bead) {
   final rest = found.length - _maxNamedCorruptingSites;
   return FilingRequirementRow(
     requirement: FilingRequirement.noCorruptingText,
-    passed: found.isEmpty,
+    status: _decided(found.isEmpty),
     detail: found.isEmpty
         ? 'description, design, acceptance_criteria and notes contain no NUL '
               'byte'

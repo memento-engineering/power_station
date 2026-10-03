@@ -489,6 +489,49 @@ void main() {
   );
 
   test(
+    // A checker that could not answer is a fact about the CHECKER. Admission
+    // is a fact about the BEAD, and the gate reads only the re-derived
+    // approval revision out of the filing snapshot — never its verdict.
+    'checker incompleteness does not block mount eligibility',
+    () async {
+      final bound = _stamped(_approvedWork, _revisionOf(_approvedWork));
+
+      // The gate composes its FilingService with NO evidence source, so the
+      // two validation-plan rows of every read it takes are unanswered.
+      // Proved here, not assumed: a fence over a report that happened to be
+      // complete would pass vacuously and fence nothing.
+      final inspected = await FilingService(
+        source: ExactSubstationBeadSource(
+          runnerFor: (_) => _RecordingMountBdRunner(_freshFiling(bound)),
+        ),
+      ).inspect(storeRoot: '/work/ps', beadId: 'pow-test');
+      expect(inspected.report.couldNotEvaluate, isTrue);
+      expect(inspected.report.passed, isFalse);
+      FilingRequirementRow rowOf(FilingRequirement requirement) => inspected
+          .report
+          .requirements
+          .firstWhere((row) => row.requirement == requirement);
+      expect(
+        rowOf(FilingRequirement.validationPlanSyntax).status,
+        FilingRequirementStatus.couldNotEvaluate,
+      );
+      // Portability is NOT a second error here: it short-circuits to
+      // not-probed until syntax parses, so one silent gather reports one
+      // unanswered row, not two.
+      expect(
+        rowOf(FilingRequirement.validationPlanPortability).status,
+        FilingRequirementStatus.passed,
+      );
+
+      // And the gate admits it anyway. The receipt is BOUND, so this is the
+      // strong case: the decision is re-derived from that same unanswerable
+      // report and still mounts.
+      final result = await _runSuccessfulRefusalRecheck(bound);
+      expect(result.decision, isA<MountEligible>());
+    },
+  );
+
+  test(
     'MountEligibilityAssets eligible snapshot is synchronous and query-free',
     () {
       final runner = _RecordingMountBdRunner(
