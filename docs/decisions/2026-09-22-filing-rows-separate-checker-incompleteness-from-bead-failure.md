@@ -139,6 +139,45 @@ failed, and a gather that never ran at all says so as the composition gap it is,
 instead of the bare "was not gathered" the resident reported with no reason
 attached.
 
+### The unconsulted arm this does NOT move
+
+`power_station#state-root-takes-the-grid-home-and-unchecked-is-not-missing`
+binds this file and `approve_command.dart` by name, and it minted the FIRST
+"the checker did not look" condition in the contract: *"An unconsulted lookup
+is reported as unchecked, never as missing."* It carried that condition as
+nullable EVIDENCE rather than as a verdict value — then
+`FilingContract.evaluate`'s `Set<String>? linkedBlockers`, today the
+`armedSubstations` roster and the `ExternalResolution.unconsulted` arm
+`power_station#the-dependencies-row-is-a-projection-of-bd-dependency-rows`
+carried it forward into — and it left the ROW fail-closed.
+
+Its fence holds here. *"No fifth requirement and no second predicate is
+minted"*: `FilingRequirementStatus` mints neither. The report carries the same
+requirements in the same order, `FilingReport.passed` is still the ONE approval
+predicate, `mountEligibilityFindings` is still not read from this lane, and
+`approve` still writes only the three `grid.approved_*` stamp keys. A row's
+ANSWER got wider; the row set, the predicate and the verb did not move.
+
+The evidence half is that decision's own move rather than a replacement for it:
+`FilingEvidence.missingValidationPlanShells` is the typed fact the portability
+row now decides a missing shell on, exactly as a nullable roster is the typed
+fact the dependencies row decides an unresolved `external:` row on. The new
+status is only what a row reports once its evidence answers NOTHING.
+
+So the dependencies row keeps its shape: an unconsulted roster stays a
+fail-closed refusal, not `could_not_evaluate`. The two absences make different
+statements. An unresolved `external:` row refuses a PREREQUISITE the checker
+could not verify — a claim the evidence supports, because an unasked roster
+cannot clear a cross-project blocker — and that refusal is deterministic, names
+the composition that must supply the roster, and says the same thing on every
+rerun; both overlay legs of the corpus already teach a refiner to read it as
+the composition gap it is. An un-gathered shell parse refuses the bead's own
+TEXT, asserts a defect in a plan nothing observed, names nothing to fix, and
+clears itself on a rerun that changed nothing. Prose was enough to keep the
+first distinguishable and was not enough for the second. Moving that arm onto
+the new value is a judgement about the dependencies row's own contract, and it
+belongs to the bead that files it.
+
 ### Confirmation
 
 `packages/grid_assets/test/filing/filing_contract_test.dart` pins the three wire
@@ -176,4 +215,6 @@ once. The verb suites assert the rendering and that no stamp is written.
   `bead_references` and `decision_references`, each refusing when a catalog or
   the decision index did not answer — keep their old shape. They are the same
   CLASS of conflation, they were not in this bead's scope, and they now have a
-  named state to move to when one is filed.
+  named state to move to when one is filed. The `dependencies` row's
+  unconsulted arm is NOT one of them: it was ruled fail-closed on its own
+  merits, and it stays that way for the reasons above.
