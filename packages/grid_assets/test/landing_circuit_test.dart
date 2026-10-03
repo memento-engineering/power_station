@@ -1180,6 +1180,58 @@ void main() {
       },
     );
 
+    // An OPERATIONAL base failure — a deadline cut carrying a compile
+    // diagnostic — is the LANE's failure; its full output is persisted beside
+    // the branch log BEFORE the refusal names that relative path.
+    test('post-rebase delta: an uncomparable BASE persists and names its '
+        'relative full log', () async {
+      const output =
+          'lib/a.dart:1:1: Error: Expected an identifier.\n'
+          'last output before the kill';
+      final runner = sides(
+        base: const ShellRunResult(
+          exitCode: 137,
+          output: output,
+          timedOut: true,
+        ),
+        branch: const ShellRunResult(exitCode: 0, output: ''),
+      );
+      final richBead = bead(
+        'tg-1',
+      ).copyWith(metadata: const {'validation_plan': 'dart test'});
+      final c = _capCtx(
+        delivery: _FakeDelivery(),
+        beadOverride: richBead,
+        workspaceDir: workspace.path,
+      );
+
+      await expectLater(
+        RevalidateCapability(
+          comparison: comparison(runner),
+        ).route(c.context, c.args),
+        throwsA(
+          isA<RouteFailure>().having(
+            (failure) => failure.reason,
+            'reason',
+            allOf(
+              contains('validation base'),
+              contains('deadline'),
+              contains('basesha0000000000000000000000000000000000'),
+              contains('Expected an identifier'),
+              contains('full log: .grid/critique/revalidate.base.log'),
+              isNot(contains(workspace.path)),
+            ),
+          ),
+        ),
+      );
+      expect(
+        File(
+          '${workspace.path}/.grid/critique/revalidate.base.log',
+        ).readAsStringSync(),
+        output,
+      );
+    });
+
     test('post-rebase acceptance probe still escalates a branch that fails '
         'naming no test', () async {
       final runner = sides(

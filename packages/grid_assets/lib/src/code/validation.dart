@@ -451,8 +451,10 @@ class ValidationDelta {
     this.baseExitCode = 0,
     this.baseOutputTail = '',
     this.baseGaveNoRegressionEvidence = false,
+    List<String> baseDiagnostics = const <String>[],
   }) : regressions = List.unmodifiable(regressions),
-       preexisting = List.unmodifiable(preexisting);
+       preexisting = List.unmodifiable(preexisting),
+       baseDiagnostics = List.unmodifiable(baseDiagnostics);
 
   /// The merge-base commit both runs were compared across.
   final String baseSha;
@@ -491,6 +493,14 @@ class ValidationDelta {
   /// Sorted named tests that fail IDENTICALLY on both sides — evidence, never
   /// a gate.
   final List<String> preexisting;
+
+  /// The recognized validation diagnostics the MERGE-BASE run already printed
+  /// ([validationDiagnosticLines] of its advice-stripped output), in its
+  /// encounter order — the subtrahend a hard block's diagnostic head is
+  /// computed against, so a diagnostic present in both runs is never named as
+  /// the branch's (`power_station#code-validation-hard-blocks-only-branch-regressions`:
+  /// a failure in both runs "cannot gate").
+  final List<String> baseDiagnostics;
 
   /// The EFFECTIVE exit code: zero unless the branch regressed.
   int get effectiveExitCode =>
@@ -543,7 +553,7 @@ class ValidationDeltaRunner {
 
   /// The cache's schema version — a stored entry written by any other version
   /// is a MISS, never a misread.
-  static const int _cacheSchemaVersion = 2;
+  static const int _cacheSchemaVersion = 3;
 
   /// Compares [plan] on [workspace]'s branch against its merge-base with
   /// [baseRef].
@@ -555,6 +565,13 @@ class ValidationDeltaRunner {
   /// [branchLogPath] receives the branch run's FULL combined output;
   /// [effectiveRcPath], when given, receives the EFFECTIVE exit code (zero
   /// unless the branch regressed).
+  ///
+  /// A base- or worktree-side [ValidationLaneFailure] carrying output names
+  /// [branchLogPath]'s `.base` sibling (`code-validation.log` →
+  /// `code-validation.base.log`) as its [ValidationLaneFailure.logPath]. This
+  /// runner does not write that file: the CALLER persists
+  /// [ValidationLaneFailure.output] there before surfacing the reason, so the
+  /// path it names is the one it wrote.
   Future<ValidationDelta> compare({
     required String plan,
     required Workspace workspace,
@@ -565,6 +582,7 @@ class ValidationDeltaRunner {
     final git = _gitRunner ?? SystemGitRunner();
     final shell = _shellRunner ?? const SystemShellRunner();
     final workDir = workspace.workspaceDir;
+    final baseLogPath = _operatorPath(_baseLogPathFor(branchLogPath), workDir);
 
     final merged = await git.run(
       workingDirectory: workDir,
@@ -577,6 +595,7 @@ class ValidationDeltaRunner {
         cause: 'could not resolve the merge base with $baseRef',
         exitCode: merged.exitCode,
         output: merged.output,
+        logPath: _loggedAt(baseLogPath, merged.output),
       );
     }
 
@@ -616,6 +635,7 @@ class ValidationDeltaRunner {
         workDir: workDir,
         baseSha: baseSha,
         plan: plan,
+        baseLogPath: baseLogPath,
       );
       _publishCache(
         cacheFile,
@@ -668,6 +688,7 @@ class ValidationDeltaRunner {
           branchFailures.where((name) => !baseFailures.contains(name)).toList()
             ..sort(),
       preexisting: branchFailures.where(baseFailures.contains).toList()..sort(),
+      baseDiagnostics: base.diagnostics,
     );
     if (effectiveRcPath != null) {
       _writeAtomically(effectiveRcPath, '${delta.effectiveExitCode}\n');
@@ -701,6 +722,7 @@ class ValidationDeltaRunner {
     required String workDir,
     required String baseSha,
     required String plan,
+    required String baseLogPath,
   }) async {
     final parent = (Directory(
       p.join(workDir, '.grid'),
@@ -719,6 +741,7 @@ class ValidationDeltaRunner {
           baseSha: baseSha,
           exitCode: added.exitCode,
           output: added.output,
+          logPath: _loggedAt(baseLogPath, added.output),
         );
       }
       registered = true;
@@ -738,6 +761,7 @@ class ValidationDeltaRunner {
           exitCode: result.exitCode,
           timedOut: true,
           output: result.output,
+          logPath: _loggedAt(baseLogPath, result.output),
         );
       }
       final failures = failingTestNames(result.output);
@@ -755,6 +779,9 @@ class ValidationDeltaRunner {
                 kRevalidateReasonTailChars,
               )
             : '',
+        diagnostics: validationDiagnosticLines(
+          planOutputWithoutPubAdvice(result.output),
+        ),
       );
     } finally {
       // EVERY cleanup action runs before this answers, so no early refusal can
@@ -899,17 +926,23 @@ class ValidationDeltaRunner {
       if (decoded['planDigest'] != planDigest) return null;
       if (decoded['host'] != host) return null;
       final failures = decoded['failures'];
+      final diagnostics = decoded['diagnostics'];
       final exitCode = decoded['exitCode'];
       final outputTail = decoded['outputTail'];
-      if (failures is! List || exitCode is! int || outputTail is! String) {
+      if (failures is! List ||
+          diagnostics is! List ||
+          exitCode is! int ||
+          outputTail is! String) {
         return null;
       }
       if (failures.any((name) => name is! String)) return null;
+      if (diagnostics.any((line) => line is! String)) return null;
       if (outputTail.length > kRevalidateReasonTailChars) return null;
       return _BaseRun(
         exitCode: exitCode,
         failures: failures.cast<String>().toList(growable: false),
         outputTail: outputTail,
+        diagnostics: diagnostics.cast<String>().toList(growable: false),
       );
     } on Object {
       return null;
@@ -937,6 +970,7 @@ class ValidationDeltaRunner {
             'exitCode': result.exitCode,
             'failures': result.failures,
             'outputTail': result.outputTail,
+            'diagnostics': result.diagnostics,
           }),
         );
       staged.renameSync(cacheFile.path);
@@ -982,11 +1016,15 @@ class _BaseRun {
   const _BaseRun({
     required this.exitCode,
     required this.failures,
+    required this.diagnostics,
     this.outputTail = '',
   });
 
   final int exitCode;
   final List<String> failures;
+
+  /// The run's recognized validation diagnostics, in encounter order.
+  final List<String> diagnostics;
 
   /// The bounded, advice-stripped output tail — kept only for a run that gave
   /// no regression evidence.
@@ -1005,6 +1043,17 @@ String _oneLine(String text) => text.trim().replaceAll(RegExp(r'\s+'), ' ');
 /// otherwise unchanged.
 String _operatorPath(String path, String workDir) =>
     p.isWithin(workDir, path) ? p.relative(path, from: workDir) : path;
+
+/// The base-side sibling of [branchLogPath]: `.base` inserted before its
+/// extension, so `code-validation.log` → `code-validation.base.log` and
+/// `revalidate.log` → `revalidate.base.log`.
+String _baseLogPathFor(String branchLogPath) =>
+    '${p.withoutExtension(branchLogPath)}.base${p.extension(branchLogPath)}';
+
+/// [logPath] when [output] carries something a caller persists there, else
+/// null — a failure with no output writes no log, so it must name none.
+String? _loggedAt(String logPath, String output) =>
+    output.trim().isEmpty ? null : logPath;
 
 /// Writes [contents] to [path] through a temporary-file rename, creating the
 /// parent directory — so a reader never observes a partial artifact.

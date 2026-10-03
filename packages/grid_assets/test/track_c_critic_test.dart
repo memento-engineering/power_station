@@ -553,6 +553,103 @@ void main() {
       expect(artifact().containsKey('baseOutputTail'), isFalse);
     });
 
+    // `power_station#code-validation-preserves-diagnostics-and-reports-deadline`:
+    // an OPERATIONAL base failure — here a deadline cut carrying a compile
+    // diagnostic — is the LANE's failure, and names its full log RELATIVE to
+    // the workspace, beside the branch log rather than over it.
+    test(
+      'base non-test failure is a lane failure with a relative full log',
+      () async {
+        const output =
+            'lib/a.dart:1:1: Error: Expected an identifier.\n'
+            'last output before the kill';
+        final runner = sides(
+          base: const ShellRunResult(
+            exitCode: 137,
+            output: output,
+            timedOut: true,
+          ),
+          branch: const ShellRunResult(exitCode: 0, output: ''),
+        );
+        final c = laneCtx();
+
+        final outcome = await CodeValidationCapability(
+          comparison: comparison(runner),
+        ).run(c.context, c.args);
+
+        expect(outcome, isA<Failed>());
+        final failed = outcome as Failed;
+        expect(failed.kind, CapabilityFailureKind.noResult);
+        expect(
+          failed.reason,
+          allOf(
+            contains('validation base'),
+            contains('exceeded its 10-minute deadline'),
+            contains('basesha0000000000000000000000000000000000'),
+            contains('Expected an identifier'),
+            contains('full log: .grid/critique/code-validation.base.log'),
+          ),
+        );
+        expect(
+          failed.reason,
+          isNot(contains(workspace.path)),
+          reason: 'the operator reads the RELATIVE path, never the absolute',
+        );
+        // NO bead verdict is fabricated, and the base output is persisted —
+        // every byte of it.
+        expect(artifact().containsKey('grade'), isFalse);
+        expect(
+          File(
+            '${workspace.path}/.grid/critique/code-validation.base.log',
+          ).readAsStringSync(),
+          output,
+        );
+      },
+    );
+
+    // `power_station#code-validation-preserves-diagnostics-and-reports-deadline`
+    // under `power_station#code-validation-hard-blocks-only-branch-regressions`:
+    // the head that LEADS a hard block names only what the BRANCH introduced. A
+    // diagnostic the merge-base run already printed is pre-existing evidence.
+    test(
+      'regression diagnostic head subtracts pre-existing base diagnostics',
+      () async {
+        const preexisting = 'Failed to load "test/preexisting_test.dart":';
+        const regression = 'Failed to load "test/regression_test.dart":';
+        const x = 'test/preexisting_test.dart: loading';
+        const y = 'test/regression_test.dart: loading';
+        final runner = sides(
+          base: ShellRunResult(
+            exitCode: 1,
+            output: '$preexisting\n${report([x])}',
+          ),
+          branch: ShellRunResult(
+            exitCode: 1,
+            output: '$preexisting\n$regression\n${report([x, y])}',
+          ),
+        );
+
+        for (final expectedCache in ['miss', 'hit']) {
+          final c = laneCtx();
+          final outcome = await CodeValidationCapability(
+            comparison: comparison(runner),
+          ).run(c.context, c.args);
+
+          final payload = (outcome as Ok).payload!;
+          expect(payload['baseCache'], expectedCache);
+          expect(payload['grade'], 'F');
+          expect(payload['regressions'], '["$y"]');
+          expect(
+            payload['diagnostic_head'],
+            regression,
+            reason:
+                'the pre-existing base diagnostic never leads the hard '
+                'block, on a cache $expectedCache alike',
+          );
+        }
+      },
+    );
+
     test(
       'base non-test failure caused by a scratch worktree is named as one',
       () async {
