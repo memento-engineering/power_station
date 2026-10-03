@@ -65,7 +65,7 @@ void main() {
         await unarmed.runner.run(['filing', '--json', 'filing-consumer']),
         1,
       );
-      expect(dependencyRow(unarmed.out)['passed'], isFalse);
+      expect(dependencyRow(unarmed.out)['status'], 'failed');
       expect(
         dependencyRow(unarmed.out)['detail'],
         contains('external:the_grid:tg-xh5d names "the_grid"'),
@@ -109,7 +109,7 @@ void main() {
       // condition, because the correction is the STATION's and not the bead's.
       final h = harness(store);
       expect(await h.runner.run(['filing', '--json', 'filing-unconsulted']), 1);
-      expect(dependencyRow(h.out)['passed'], isFalse);
+      expect(dependencyRow(h.out)['status'], 'failed');
       expect(
         dependencyRow(h.out)['detail'],
         contains('no station roster was supplied'),

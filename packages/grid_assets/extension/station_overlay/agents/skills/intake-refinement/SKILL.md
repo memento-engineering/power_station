@@ -177,7 +177,7 @@ When the work extends something the tree already owns, write the pointer into
 the bead body as `path:line` plus the relationship:
 
 ```
-COMPOSE: packages/grid_assets/lib/src/filing/filing_contract.dart:913 owns the
+COMPOSE: packages/grid_assets/lib/src/filing/filing_contract.dart:1043 owns the
 eleven-row completeness contract — CALL it; do not add a second predicate.
 ```
 
@@ -216,22 +216,39 @@ dependency rows the WORK store's own bd holds, and it reaches no second store.
 session-lifecycle beads.
 
 The report is one JSON object:
-`{id, passed, approval_revision, requirements, advisory?, error?}`.
+`{id, passed, could_not_evaluate, approval_revision, requirements, advisory?, error?}`.
 `requirements` carries exactly eleven rows, in order — `driveable_type`,
 `validation_plan`, `acceptance_criteria`, `dependencies`,
 `validation_plan_syntax`, `validation_plan_portability`, `repo_relative_paths`,
 `bead_references`, `release_versions`, `decision_references`,
-`no_corrupting_text` — each `{requirement, passed, detail}`. `passed` is true
-only for a found bead whose eleven rows ALL pass AND whose advisory, when it
-ran, did not refuse.
+`no_corrupting_text` — each `{requirement, status, detail}`, where `status` is
+`passed`, `failed` or `could_not_evaluate`. The report's `passed` is true only
+for a found bead whose eleven rows ALL pass AND whose advisory, when it ran,
+did not refuse.
+
+A row's `status` is THREE-valued because two of those answers are about
+different things. `passed` and `failed` are about the BEAD: the row asked its
+question and your bead answered it. `could_not_evaluate` is about the CHECKER:
+the row never got the evidence it judges, so it says NOTHING about your bead
+and there is nothing in it for you to correct. The report's own
+`could_not_evaluate` is true when any row is in that state.
+
+Read it that way before you edit anything. A `could_not_evaluate` row is not a
+finding — it means the station could not answer, the `detail` names what did
+not answer (a shell that failed to spawn, or a verb composed with no evidence
+source), and the remedy is to rerun the verb or report the station fault. Do
+NOT rewrite a validation plan because the row that checks it went unanswered:
+the plan was never read.
 
 All eleven rows can pass while `passed` is false: the pre-stamp advisory
 refused. The advisory is the bead-readiness and discovery-evidence lenses run
 BEFORE any stamp (the `--readiness` option, default `run`), so a filing that
 would hold at `spec_review` never mounts; it is a judgement, not a twelfth row,
-so grepping `requirements` for a failing row finds nothing. `advisory` carries
-the verdict and the reason: `{outcome: passed, readiness_grade}` (grade `A`–`C`
-passes), `{outcome: refused, rule, reason}` (`rule` names the arm — `intake`,
+so grepping `requirements` for a failing row finds nothing. It runs only after
+every row is `passed`, so a `could_not_evaluate` row means no advisory ran.
+`advisory` carries the verdict and the reason:
+`{outcome: passed, readiness_grade}` (grade `A`–`C` passes),
+`{outcome: refused, rule, reason}` (`rule` names the arm — `intake`,
 `readiness`, `discovery`, `discovery-evidence`, or `transport` for a lens that
 did not complete — and `reason` is the owning lens's own fix text verbatim,
 carrying the readiness grade it held on; grade `D` refuses, and axis 3, cited
@@ -246,7 +263,7 @@ the text itself survive being written and read back). Each viability row and
 the content row retires a rule that used to be remembered and cost a round when
 it was not.
 
-For every row reporting `"passed": false`, apply its `detail` as the
+For every row reporting `"status": "failed"`, apply its `detail` as the
 correction:
 
 - `<type> is not driveable` — re-type the bead to `task`/`bug`/`feature`/
@@ -326,6 +343,15 @@ Then RERUN the verb. Repeat until the report reads `"passed": true`; only then
 stage the bead for approval. Nothing else stages a bead — a reading of the
 fields is not the check, and this skill deliberately owns no completeness
 predicate of its own.
+
+That loop is bounded by `could_not_evaluate`. A rerun is the right answer to a
+checker that went quiet ONCE — the report is one evidence snapshot, and the
+verb takes a fresh one. But if the report still reads
+`"could_not_evaluate": true` after a rerun, STOP: no edit you can make will
+turn that row green, because the row is not reading your bead. Report the
+station fault named in the row's `detail` and leave the bead alone. Editing
+against an unanswered row is how a well-formed bead gets rewritten to chase a
+checker that was never reading it.
 
 A report carrying `error` (`bead not found`) is a REFUSAL, not a pass: the id
 is wrong or the cwd is the wrong store. Correct the id or the store root and

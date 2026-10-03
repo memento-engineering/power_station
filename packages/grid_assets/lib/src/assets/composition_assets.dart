@@ -419,6 +419,15 @@ class _MountEligibilityAssetsState
   /// ROWS bd holds — never the roster's answer about them. Arming a substation
   /// therefore cannot stale a receipt, and an unarmed `external:` project is
   /// the frontier's fail-closed business, not this comparison's.
+  ///
+  /// It carries the revision ACROSS and the VERDICT never: admission does not
+  /// read [FilingReport.passed] or [FilingReport.couldNotEvaluate]. That is
+  /// load-bearing rather than incidental, because this service is composed
+  /// with no [FilingService.evidence], so the validation-plan rows of every
+  /// read taken here are unanswered by construction — a gate that read the
+  /// verdict would refuse every mount on the station. Filing completeness is
+  /// the operator-side, pre-approval contract; mount eligibility is the
+  /// engine-side, pre-session one, and neither subsumes the other.
   Future<void> _readFresh(
     Bead snapshot,
     sdk.SubstationScope scope,

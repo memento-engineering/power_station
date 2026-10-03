@@ -580,19 +580,38 @@ MountPreconditionRow _acceptanceRow(
   MountStateEvidence evidence,
 ) {
   final row = _filingRow(filing, FilingRequirement.acceptanceCriteria);
-  return MountPreconditionRow(
-    precondition: MountPrecondition.acceptanceCriteria,
-    outcome: row.passed ? MountOutcome.pass : MountOutcome.blocked,
-    detail: row.passed
-        ? row.detail
-        : '${row.detail} — the mount predicate does not read it, but the '
-              'approve verb does, so an unstamped or re-edited bead can never '
-              'be stamped back into the frontier',
-    remedy: row.passed
-        ? ''
-        : 'bd -C ${evidence.workStoreRoot} update ${bead.id} --acceptance '
-              "'- [ ] <outcome a named command can falsify>' --actor <actor>",
-  );
+  // A filing row that COULD NOT EVALUATE is the explainer's existing UNCHECKED
+  // outcome, never a BLOCKED one: this verb already draws that line for a
+  // condition nobody consulted, and a checker that did not answer is exactly
+  // that. Manufacturing a blocker here would put a bead defect on the screen
+  // that no row ever found.
+  return switch (row.status) {
+    FilingRequirementStatus.passed => MountPreconditionRow(
+      precondition: MountPrecondition.acceptanceCriteria,
+      outcome: MountOutcome.pass,
+      detail: row.detail,
+      remedy: '',
+    ),
+    FilingRequirementStatus.failed => MountPreconditionRow(
+      precondition: MountPrecondition.acceptanceCriteria,
+      outcome: MountOutcome.blocked,
+      detail:
+          '${row.detail} — the mount predicate does not read it, but the '
+          'approve verb does, so an unstamped or re-edited bead can never '
+          'be stamped back into the frontier',
+      remedy:
+          'bd -C ${evidence.workStoreRoot} update ${bead.id} --acceptance '
+          "'- [ ] <outcome a named command can falsify>' --actor <actor>",
+    ),
+    FilingRequirementStatus.couldNotEvaluate => MountPreconditionRow(
+      precondition: MountPrecondition.acceptanceCriteria,
+      outcome: MountOutcome.unchecked,
+      detail: row.detail,
+      remedy:
+          'rerun the filing preflight once the named evidence is back — this '
+          'row judged nothing about the bead',
+    ),
+  };
 }
 
 MountPreconditionRow _approvalRow(Bead bead, List<String> findings) {

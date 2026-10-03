@@ -78,7 +78,12 @@ String _beadReply({
   _ScriptedBdRunner bd,
   List<String> roots,
 })
-_harness(_ScriptedBdRunner bd, {Set<String>? armed, FilingAdvisory? advisory}) {
+_harness(
+  _ScriptedBdRunner bd, {
+  Set<String>? armed,
+  FilingAdvisory? advisory,
+  FilingEvidence? evidence,
+}) {
   final out = StringBuffer();
   final err = StringBuffer();
   final roots = <String>[];
@@ -97,13 +102,16 @@ _harness(_ScriptedBdRunner bd, {Set<String>? armed, FilingAdvisory? advisory}) {
             // `bead_references` row here is a resolution and not a vacuum.
             // The stores are fakes at a path no shell can enter, so the plan
             // probes are prepared too.
+            // [evidence] overrides it for the one probe that needs a
+            // checker which did NOT answer.
             evidence: FakeFilingEvidenceSource(
-              parsedPlanEvidence(
-                beadCatalogs: const {
-                  'pow': {'pow-child', 'pow-n6n', 'pow-n6n.1'},
-                },
-                decisionRegisters: const {},
-              ),
+              evidence ??
+                  parsedPlanEvidence(
+                    beadCatalogs: const {
+                      'pow': {'pow-child', 'pow-n6n', 'pow-n6n.1'},
+                    },
+                    decisionRegisters: const {},
+                  ),
             ),
             // The PRE-STAMP ADVISORY is a scripted Fake for the same reason
             // the evidence is: these probes measure the STAMP, and an
@@ -150,7 +158,7 @@ void main() {
     final dependencies = rows.singleWhere(
       (row) => row['requirement'] == 'dependencies',
     );
-    expect(dependencies['passed'], isTrue);
+    expect(dependencies['status'], 'passed');
     expect(dependencies['detail'], 'bd holds no blocking dependency rows');
     expect(h.bd.updates, hasLength(1));
   });
@@ -479,6 +487,82 @@ void main() {
         expect(h.out.toString(), isNot(contains('FAIL advisory')));
         expect(advisory.calls, isEmpty);
         expect(h.bd.updates, isEmpty);
+      },
+    );
+
+    test(
+      'could-not-evaluate preflight refuses approval without update',
+      () async {
+        // The CHECKER did not answer. The stamp must not be written — an
+        // unevaluated row is not a passing row — and the refusal must not read
+        // as a bead defect, because no row found one.
+        final advisory = FakeFilingAdvisory();
+        final h = _harness(
+          _ScriptedBdRunner({
+            'query': _beadReply(description: 'A real brief.'),
+          }),
+          advisory: advisory,
+          evidence: const FilingEvidence(
+            decisionRegisters: {},
+            beadCatalogs: {
+              'pow': {'pow-child'},
+            },
+            lanePlanProbeFailure: 'sh probe failed: Bad state: no pty',
+          ),
+        );
+
+        expect(
+          await h.runner.run(['approve', '--actor', 'nico', 'pow-child']),
+          1,
+        );
+        // NOTHING was written: not the receipt, not a partial one.
+        expect(h.bd.updates, isEmpty);
+        final plain = h.out.toString();
+        expect(plain, contains('ERROR validation_plan_syntax:'));
+        expect(plain, contains('Bad state: no pty'));
+        expect(plain, isNot(contains('FAIL validation_plan_syntax')));
+        expect(plain, contains('COULD NOT EVALUATE validation_plan_syntax'));
+        expect(plain, isNot(contains('correct the bead')));
+        // The advisory is never reached: an unevaluated mechanical row refuses
+        // first, so no inference is spent re-judging a bead nothing read.
+        expect(advisory.calls, isEmpty);
+
+        // And the JSON keeps the distinction a caller has to act on.
+        final json = _harness(
+          _ScriptedBdRunner({
+            'query': _beadReply(description: 'A real brief.'),
+          }),
+          evidence: const FilingEvidence(
+            decisionRegisters: {},
+            beadCatalogs: {
+              'pow': {'pow-child'},
+            },
+            lanePlanProbeFailure: 'sh probe failed: Bad state: no pty',
+          ),
+        );
+        expect(
+          await json.runner.run([
+            'approve',
+            '--json',
+            '--actor',
+            'nico',
+            'pow-child',
+          ]),
+          1,
+        );
+        final report = jsonDecode(json.out.toString()) as Map<String, dynamic>;
+        final filing = report['filing']! as Map<String, dynamic>;
+        expect(filing['passed'], isFalse);
+        expect(filing['could_not_evaluate'], isTrue);
+        expect(
+          (filing['requirements']! as List)
+              .cast<Map<String, dynamic>>()
+              .singleWhere(
+                (row) => row['requirement'] == 'validation_plan_syntax',
+              )['status'],
+          'could_not_evaluate',
+        );
+        expect(json.bd.updates, isEmpty);
       },
     );
 

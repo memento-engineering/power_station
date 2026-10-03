@@ -218,6 +218,133 @@ void main() {
     );
   });
 
+  test('filing rows expose a three-state JSON contract', () {
+    // THREE states, and the wire names are the contract exactly as the
+    // requirement names are: a skill or UI reading a row reads `status`.
+    expect(FilingRequirementStatus.values.map((each) => each.wire), const [
+      'passed',
+      'failed',
+      'could_not_evaluate',
+    ]);
+    expect(FilingRequirementStatus.values, hasLength(3));
+
+    for (final status in FilingRequirementStatus.values) {
+      final row = FilingRequirementRow(
+        requirement: FilingRequirement.validationPlanSyntax,
+        status: status,
+        detail: 'why',
+      );
+      expect(row.toJson(), {
+        'requirement': 'validation_plan_syntax',
+        'status': status.wire,
+        'detail': 'why',
+      });
+      // The boolean is GONE, not kept beside the enum: a `passed` key two
+      // readers interpret differently is how the third state gets folded back
+      // into a filing defect.
+      expect(row.toJson().containsKey('passed'), isFalse);
+    }
+  });
+
+  test('filing report separates checker incompleteness from filing failure', () {
+    const bead = Bead(
+      id: 'pow-filed',
+      title: 'a filed bead',
+      issueType: IssueType.task,
+      description: 'the work',
+      design: 'the approach',
+      acceptanceCriteria: '- [ ] checked',
+      metadata: {'validation_plan': 'dart test'},
+    );
+
+    // ONE bead, TWO checker postures. The lane shell refused the plan in the
+    // first and never answered in the second.
+    final refused = const FilingContract().evaluate(
+      bead,
+      const <BeadDependency>[],
+      evidence: const FilingEvidence(
+        decisionRegisters: {},
+        lanePlanParse: ValidationPlanParseResult(
+          shell: kFilingLaneShell,
+          exitCode: 2,
+          diagnostic: 'sh: -c: line 1: unexpected EOF',
+        ),
+      ),
+    );
+    final unanswered = const FilingContract().evaluate(
+      bead,
+      const <BeadDependency>[],
+      evidence: const FilingEvidence(
+        decisionRegisters: {},
+        lanePlanProbeFailure: 'sh probe failed: Bad state: no pty',
+      ),
+    );
+
+    // NEITHER is approvable — checker incompleteness is never a silent pass.
+    expect(refused.passed, isFalse);
+    expect(unanswered.passed, isFalse);
+
+    // And a caller can tell them apart, on the report, on the row, and on the
+    // wire — which is the whole point.
+    expect(refused.couldNotEvaluate, isFalse);
+    expect(unanswered.couldNotEvaluate, isTrue);
+    expect(refused.toJson()['could_not_evaluate'], isFalse);
+    expect(unanswered.toJson()['could_not_evaluate'], isTrue);
+
+    FilingRequirementRow syntaxOf(FilingReport report) =>
+        report.requirements.singleWhere(
+          (row) => row.requirement == FilingRequirement.validationPlanSyntax,
+        );
+    expect(syntaxOf(refused).status, FilingRequirementStatus.failed);
+    expect(
+      syntaxOf(unanswered).status,
+      FilingRequirementStatus.couldNotEvaluate,
+    );
+
+    // The refusal TEXT is addressed to different people. One says correct the
+    // bead; the other says the checker did not answer and the bead is not
+    // implicated.
+    expect(
+      refused.refusalReason,
+      'the filing preflight has failing rows — correct the bead and rerun '
+      'approve',
+    );
+    expect(
+      unanswered.refusalReason,
+      contains('COULD NOT EVALUATE validation_plan_syntax'),
+    );
+    expect(
+      unanswered.refusalReason,
+      contains('nothing here says this filing is wrong'),
+    );
+    expect(unanswered.refusalReason, isNot(contains('correct the bead')));
+
+    // A report carrying BOTH names both, and never hides one behind the other.
+    final mixed = const FilingContract().evaluate(
+      Bead(
+        id: 'pow-filed',
+        title: 'a filed bead',
+        issueType: IssueType.task,
+        description: 'the receipt landed at /tmp/round-7/receipt.md',
+        design: 'the approach',
+        acceptanceCriteria: '- [ ] checked',
+        metadata: const {'validation_plan': 'dart test'},
+      ),
+      const <BeadDependency>[],
+      evidence: const FilingEvidence(
+        decisionRegisters: {},
+        lanePlanProbeFailure: 'sh probe failed: Bad state: no pty',
+      ),
+    );
+    expect(mixed.passed, isFalse);
+    expect(mixed.couldNotEvaluate, isTrue);
+    expect(mixed.refusalReason, contains('failing rows (repo_relative_paths)'));
+    expect(
+      mixed.refusalReason,
+      contains('COULD NOT EVALUATE validation_plan_syntax'),
+    );
+  });
+
   test('the dependencies row projects bd rows, and only bd rows', () {
     const bead = Bead(
       id: 'pow-filed',
@@ -237,7 +364,7 @@ void main() {
     // Directional and type-exact: an incoming edge, another bead's edge and a
     // non-blocking edge are not this bead's blockers.
     final foreign = _dependencies(bead, [incoming, unrelated, wrongType]);
-    expect(foreign.passed, isTrue);
+    expect(foreign.status, FilingRequirementStatus.passed);
     expect(foreign.detail, 'bd holds no blocking dependency rows');
 
     // The bead's OWN outgoing blocking rows are the whole row, sorted.
@@ -246,7 +373,7 @@ void main() {
       _blocks('pow-filed', 'pow-one'),
       incoming,
     ]);
-    expect(held.passed, isTrue);
+    expect(held.status, FilingRequirementStatus.passed);
     expect(held.detail, 'bd dependency rows: pow-one, pow-two');
   });
 
@@ -268,7 +395,11 @@ void main() {
       // grammar that read one spelling and not the other is GONE.
       for (final subject in [hyphenated, spaced]) {
         final row = _dependencies(subject, const []);
-        expect(row.passed, isTrue, reason: subject.description);
+        expect(
+          row.status,
+          FilingRequirementStatus.passed,
+          reason: subject.description,
+        );
         expect(
           row.detail,
           'bd holds no blocking dependency rows',
@@ -294,7 +425,10 @@ void main() {
       final quoting = hyphenated.copyWith(
         description: "pow-pry0 carries a 'DEPENDS ON: tg-1n4y' receipt.",
       );
-      expect(_dependencies(quoting, const []).passed, isTrue);
+      expect(
+        _dependencies(quoting, const []).status,
+        FilingRequirementStatus.passed,
+      );
     },
   );
 
@@ -313,7 +447,7 @@ void main() {
 
     // ARMED: an ordinary prerequisite, reported beside the local rows.
     final armed = _dependencies(bead, rows, armed: {'the_grid', 'space'});
-    expect(armed.passed, isTrue);
+    expect(armed.status, FilingRequirementStatus.passed);
     expect(
       armed.detail,
       'bd dependency rows: pow-local, external:the_grid:tg-xh5d (armed)',
@@ -321,7 +455,7 @@ void main() {
 
     // NOT ARMED: the Q4 hard refusal — blocked, named, and told what to do.
     final unarmed = _dependencies(bead, rows, armed: {'space'});
-    expect(unarmed.passed, isFalse);
+    expect(unarmed.status, FilingRequirementStatus.failed);
     expect(
       unarmed.detail,
       contains('external:the_grid:tg-xh5d names "the_grid"'),
@@ -331,7 +465,7 @@ void main() {
 
     // NO ROSTER: fail-closed too, and the detail says WHICH condition it is.
     final unconsulted = _dependencies(bead, rows);
-    expect(unconsulted.passed, isFalse);
+    expect(unconsulted.status, FilingRequirementStatus.failed);
     expect(unconsulted.detail, contains('no station roster was supplied'));
     expect(unconsulted.detail, isNot(contains('does not arm')));
 
@@ -421,7 +555,11 @@ void main() {
       final reason = 'NUL in $field';
       final unavailable = _row(bead, FilingEvidence.unavailable);
       final gathered = _row(bead, completeEmptyEvidence);
-      expect(unavailable.passed, isFalse, reason: reason);
+      expect(
+        unavailable.status,
+        FilingRequirementStatus.failed,
+        reason: reason,
+      );
       expect(unavailable.toJson(), gathered.toJson(), reason: reason);
       expect(
         unavailable.detail,
@@ -450,7 +588,7 @@ void main() {
       completeEmptyEvidence,
     ]) {
       final row = _row(clean, evidence);
-      expect(row.passed, isTrue, reason: row.detail);
+      expect(row.status, FilingRequirementStatus.passed, reason: row.detail);
       expect(
         row.detail,
         'description, design, acceptance_criteria and notes contain no NUL '
@@ -501,7 +639,7 @@ void main() {
       metadata: const {'validation_plan': 'dart test'},
     );
     final bounded = _row(many, FilingEvidence.unavailable);
-    expect(bounded.passed, isFalse);
+    expect(bounded.status, FilingRequirementStatus.failed);
     expect(RegExp(r'\(\w+:\d+\)').allMatches(bounded.detail), hasLength(12));
     expect(bounded.detail, contains(', and 1 more — '));
     expect(bounded.detail, endsWith('remove NUL bytes before filing'));

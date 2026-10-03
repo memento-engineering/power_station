@@ -984,14 +984,24 @@ void main() {
       );
       // The report contract the skill consumes, row for row — the verb's
       // WHOLE envelope (`FilingReport.toJson`), never the four-key shape that
-      // hid the advisory and its refusal reason (bead `pow-o9kg`).
+      // hid the advisory and its refusal reason (bead `pow-o9kg`), and never
+      // an envelope missing the checker-incompleteness flag.
       expect(
         template,
         contains(
-          '{id, passed, approval_revision, requirements, advisory?, error?}',
+          '{id, passed, could_not_evaluate, approval_revision, requirements, '
+          'advisory?, error?}',
         ),
       );
       expect(template, isNot(contains('{id, passed, requirements, error?}')));
+      expect(
+        template,
+        isNot(
+          contains(
+            '{id, passed, approval_revision, requirements, advisory?, error?}',
+          ),
+        ),
+      );
       for (final row in FilingRequirement.values) {
         expect(
           template,
@@ -999,8 +1009,12 @@ void main() {
           reason: 'the corpus names ${row.wire}',
         );
       }
-      expect(template, contains('"passed": false'));
-      expect(template, contains('"passed": true'));
+      // The ROW verdict is three-valued, so the corpus teaches `status` and
+      // not a boolean — and it teaches the third state as a CHECKER fault the
+      // refiner must not try to correct on the bead.
+      expect(template, contains('"status": "failed"'));
+      expect(template, contains('`could_not_evaluate` is about the CHECKER'));
+      expect(template, isNot(contains('"passed": false')));
       expect(template, contains('bd holds no blocking dependency rows'));
       expect(template, contains('unresolvable external dependency rows:'));
       expect(template, contains('is a REFUSAL, not a pass'));
@@ -1258,11 +1272,27 @@ void main() {
         // Defect 2: the whole report envelope, and the sentence that says the
         // rows are not the only thing `passed` reads.
         expect(
-          body,
+          flat,
           contains(
-            '{id, passed, approval_revision, requirements, advisory?, error?}',
+            '{id, passed, could_not_evaluate, approval_revision, '
+            'requirements, advisory?, error?}',
           ),
           reason: '$leg documents the whole envelope',
+        );
+        expect(
+          flat,
+          contains('each `{requirement, status, detail}`'),
+          reason: '$leg teaches the tri-state row shape',
+        );
+        expect(
+          flat,
+          isNot(contains('`{requirement, passed, detail}`')),
+          reason: '$leg no longer teaches the retired boolean row',
+        );
+        expect(
+          flat,
+          contains('`could_not_evaluate` is about the CHECKER'),
+          reason: '$leg names checker incompleteness as a station fault',
         );
         expect(
           flat,

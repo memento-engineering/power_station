@@ -90,6 +90,43 @@
   well-formed id no attached store holds is refused exactly as it was. `beadIdReferences` takes an
   optional `catalogs` argument, defaulting to the broad shape for every prefix.
 
+- Breaking: a filing requirement row now reports THREE states, so a checker that could not answer
+  is no longer reported as a bead that failed a check. `FilingRequirementRow.passed` is replaced by
+  `FilingRequirementRow.status`, a `FilingRequirementStatus` of `passed`, `failed` or
+  `couldNotEvaluate`, and a row serializes as `{requirement, status, detail}` — the boolean
+  `passed` key is gone from row JSON. `FilingReport` grows `couldNotEvaluate` (wire
+  `could_not_evaluate`) beside its unchanged `passed`, and `FilingReport.refusalReason` answers a
+  checker gap with its own text instead of "correct the bead and rerun approve".
+  MIGRATION: switch exhaustively on `FilingRequirementStatus` wherever a row was read as a
+  boolean, and read `FilingReport.couldNotEvaluate` to tell "this bead is not approvable" from
+  "the checker could not answer". This binds every consumer of a filing report — a station
+  composing its own `FilingService`, and the `filing`, `approve`, `unpark` and `mount` verbs, all
+  of which are migrated here: `filing` prints a third `ERROR` label beside `PASS` and `FAIL`,
+  `approve` and `unpark` render an unevaluated row as `ERROR` and stamp nothing, and the mount
+  explainer maps one to its existing `UNCHECKED` outcome rather than manufacturing a blocker.
+  GitHub intake (`github_grid_assets`' `GitHubIntakeStore`) self-approves through the same
+  `ApproveService`, so a checker-incomplete filing stays open and unstamped there too, with a
+  note naming the station checker failure rather than a repository filing defect.
+  Approval itself is unchanged and still fail-closed: an unevaluated row is not a passing row, so
+  nothing reaches a stamp on a checker that went quiet
+  (`power_station#filing-rows-separate-checker-incompleteness-from-bead-failure`).
+
+- Fixed: the two validation-plan rows no longer refuse a bead when it is the PROBE that did not
+  answer. Over one window on the resident, every bead checked came back with
+  `validation_plan_syntax` reporting "no sh parse of the validation_plan was gathered" — across
+  three reruns minutes apart, two stores, two plan shapes, and a bead that had passed every row
+  earlier the same day and had not been edited since — and because `approve` re-runs the preflight
+  before stamping, that stopped every approval on the station. Both rows now report
+  `couldNotEvaluate` when their own parse is absent, and both name WHAT failed: the spawn error
+  when one was caught, or the composition gap when no evidence source was composed at all, in
+  place of the bare "was not gathered" the resident reported with no reason attached. The two
+  pre-existing behaviors are preserved exactly: portability stays `passed` and not-probed until
+  syntax parses, and a portability shell that is NOT INSTALLED stays an evaluated refusal, now
+  decided on `FilingEvidence.missingValidationPlanShells` rather than on the text of a message.
+  The gather asks each shell ONCE and does not retry — a filing report is the evidence snapshot
+  its approval revision is a receipt for, so the retry is the operator's, made by rerunning the
+  verb.
+
 ## 0.7.0-dev.6
 
 - The agent LANE is now the unit of environment diagnosis, and an environment fault is no longer

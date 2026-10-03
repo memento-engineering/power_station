@@ -84,7 +84,17 @@
 /// reports in three states rather than two: answered, answered-negative, and
 /// NOT ANSWERED. An unavailable leg is never read as an empty one, so "no
 /// store holds this id" and "nobody asked a store" stay different facts and
-/// only the first refuses a bead. [FilingCommand] and [ApproveCommand] bind
+/// only the first refuses a bead.
+///
+/// Each ROW answers in those same three states, as a
+/// [FilingRequirementStatus]: `passed` and `failed` are statements about the
+/// BEAD, and `could_not_evaluate` is a statement about the CHECKER — the row
+/// never got the evidence it judges and so says nothing about the bead. The
+/// two plan rows are the ones that reach for a shell and can therefore come
+/// back empty-handed. [FilingReport.passed] stays the fail-closed approval
+/// boolean over all three, so checker incompleteness never reaches a stamp,
+/// and [FilingReport.couldNotEvaluate] beside it is how a caller tells "this
+/// bead is not approvable" from "the checker could not answer". [FilingCommand] and [ApproveCommand] bind
 /// the live gather by default ([SystemFilingEvidenceSource] over
 /// [SystemValidationPlanProbe], [BdListAllStatusBeadSource] and the station's
 /// roster decision index); a test or an alternate station overrides it with a
