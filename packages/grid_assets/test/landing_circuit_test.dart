@@ -1130,22 +1130,65 @@ void main() {
       },
     );
 
-    // The base side is the one the ruling names explicitly: a merge-base plan
-    // that fails for a reason other than a named test (a compile error, an
-    // exit 64, a missing tool) is the LANE's failure, with a named cause — it
-    // can never be attributed to the bead.
-    test('post-rebase delta: an uncomparable BASE is a lane failure, never a '
-        'bead block', () async {
+    // `power_station#acceptance-probe-base-failure-is-no-regression-evidence`:
+    // a merge-base plan that COMPLETES non-zero naming no test — an acceptance
+    // probe for a feature the base does not have yet — is no regression
+    // evidence. The rebased branch's own result decides.
+    test(
+      'post-rebase acceptance probe advances from the branch result',
+      () async {
+        final runner = sides(
+          base: const ShellRunResult(
+            exitCode: 1,
+            output: 'Resolving dependencies...\nGot dependencies!',
+          ),
+          branch: const ShellRunResult(
+            exitCode: 0,
+            output: 'Got dependencies!',
+          ),
+        );
+        final richBead = bead('tg-1').copyWith(
+          metadata: const {
+            'validation_plan':
+                'flutter pub get && grep -q isConnectable test/porcelain_test.dart',
+          },
+        );
+        final c = _capCtx(
+          delivery: _FakeDelivery(),
+          beadOverride: richBead,
+          workspaceDir: workspace.path,
+        );
+
+        final outcome = await RevalidateCapability(
+          comparison: comparison(runner),
+        ).route(c.context, c.args);
+
+        expect(outcome, isA<Advance>());
+        final payload = (outcome as Advance).payload!;
+        expect(payload['outcome'], 'passed');
+        expect(payload['rc'], '0');
+        expect(payload['baseRc'], '1');
+        expect(
+          payload['baseNote'],
+          'merge-base validation exited 1 without a named failing test; the '
+          'base gave no regression evidence, so the branch result decided',
+        );
+        expect(
+          payload['baseOutputTail'],
+          endsWith('Resolving dependencies...\nGot dependencies!'),
+        );
+      },
+    );
+
+    test('post-rebase acceptance probe still escalates a branch that fails '
+        'naming no test', () async {
       final runner = sides(
-        base: const ShellRunResult(
-          exitCode: 64,
-          output: 'lib/a.dart:1:1: Error: Expected an identifier.',
-        ),
-        branch: const ShellRunResult(exitCode: 0, output: ''),
+        base: const ShellRunResult(exitCode: 1, output: ''),
+        branch: const ShellRunResult(exitCode: 1, output: ''),
       );
       final richBead = bead(
         'tg-1',
-      ).copyWith(metadata: const {'validation_plan': 'dart test'});
+      ).copyWith(metadata: const {'validation_plan': 'grep -q x y'});
       final c = _capCtx(
         delivery: _FakeDelivery(),
         beadOverride: richBead,
@@ -1161,10 +1204,8 @@ void main() {
             (failure) => failure.reason,
             'reason',
             allOf(
-              contains('validation base'),
+              contains('validation branch'),
               contains('without naming a failing test'),
-              contains('basesha0000000000000000000000000000000000'),
-              contains('Expected an identifier'),
             ),
           ),
         ),
@@ -1585,6 +1626,28 @@ void main() {
       );
       expect(receipt, contains('- rebase: clean'));
       expect(receipt, contains('- revalidate: passed'));
+    });
+
+    test('no-evidence base note rides the passing receipt: one line after the '
+        'revalidate line, before any pre-existing line', () {
+      final receipt = buildCircuitReceipt(
+        beadId: 'tg-1',
+        siblings: const SiblingView(),
+        preexisting: const ['test/a_test.dart 1:1 alpha'],
+        baseEvidenceNote: 'the base gave no regression evidence',
+      );
+      expect(
+        receipt,
+        contains(
+          '- revalidate: passed\n'
+          '- base validation: the base gave no regression evidence\n'
+          '- pre-existing on base: test/a_test.dart 1:1 alpha\n',
+        ),
+      );
+      expect(
+        buildCircuitReceipt(beadId: 'tg-1', siblings: const SiblingView()),
+        isNot(contains('base validation')),
+      );
     });
   });
 
