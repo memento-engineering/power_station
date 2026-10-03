@@ -1134,8 +1134,8 @@ void main() {
     // that fails for a reason other than a named test (a compile error, an
     // exit 64, a missing tool) is the LANE's failure, with a named cause — it
     // can never be attributed to the bead.
-    test('post-rebase delta: an uncomparable BASE is a lane failure, never a '
-        'bead block', () async {
+    test('post-rebase delta: an uncomparable BASE persists and names its '
+        'relative full log', () async {
       final runner = sides(
         base: const ShellRunResult(
           exitCode: 64,
@@ -1165,9 +1165,19 @@ void main() {
               contains('without naming a failing test'),
               contains('basesha0000000000000000000000000000000000'),
               contains('Expected an identifier'),
+              contains('full log: .grid/critique/revalidate.base.log'),
+              isNot(contains(workspace.path)),
             ),
           ),
         ),
+      );
+      // The FULL base output is durable before the route refuses — beside the
+      // branch's `revalidate.log`, never over it.
+      expect(
+        File(
+          p.join(workspace.path, '.grid', 'critique', 'revalidate.base.log'),
+        ).readAsStringSync(),
+        'lib/a.dart:1:1: Error: Expected an identifier.',
       );
     });
 

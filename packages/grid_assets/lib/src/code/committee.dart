@@ -990,7 +990,8 @@ class CodeValidationCapability extends ServiceCapability {
     } on ValidationLaneFailure catch (failure) {
       // A base-side cause is persisted BESIDE the branch log, never over it:
       // the two sides' outputs answer different questions. It is the FULL
-      // output, never a slice.
+      // output, never a slice — and it lands at exactly the relative path the
+      // failure's reason names (`failure.logPath`).
       if (failure.side != 'branch' && failure.output.trim().isNotEmpty) {
         writeCapturedOutputLog(
           path: p.join(workspaceDir, _critiqueDir, '$kGatingRubric.base.log'),
@@ -1016,12 +1017,20 @@ class CodeValidationCapability extends ServiceCapability {
     final grade = delta.regressions.isEmpty ? 'A' : 'F';
     // The DIAGNOSTICS LEAD a hard block: on a gating (non-zero, regressed)
     // branch run, the recognized lines of its advice-stripped output ride the
-    // payload for the route to place BEFORE its lane-named reason.
+    // payload for the route to place BEFORE its lane-named reason — MINUS every
+    // line the merge-base run already printed. A diagnostic present in both
+    // runs is pre-existing evidence that cannot gate, so leading the hard block
+    // with it would be the false-gate prose the delta ruling retired.
+    final baseDiagnostics = delta.baseDiagnostics.toSet();
     final diagnosticHead = grade == 'F'
         ? boundedValidationDiagnosticHead(
             validationDiagnosticLines(
-              planOutputWithoutPubAdvice(readCapturedOutputLogOrEmpty(logPath)),
-            ),
+                  planOutputWithoutPubAdvice(
+                    readCapturedOutputLogOrEmpty(logPath),
+                  ),
+                )
+                .where((line) => !baseDiagnostics.contains(line))
+                .toList(growable: false),
           )
         : '';
     _writeValidationArtifact(workspaceDir, {

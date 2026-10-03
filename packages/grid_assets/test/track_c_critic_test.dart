@@ -449,7 +449,7 @@ void main() {
     // AC-3: the ruling's explicit carve-out — a base that fails for a reason
     // other than a named test is the LANE's failure, with a named cause.
     test(
-      'base non-test failure is a lane failure, never a bead grade',
+      'base non-test failure is a lane failure with a relative full log',
       () async {
         final runner = sides(
           base: const ShellRunResult(
@@ -475,10 +475,16 @@ void main() {
             contains('basesha0000000000000000000000000000000000'),
             contains('exit 64'),
             contains('Expected an identifier'),
+            contains('full log: .grid/critique/code-validation.base.log'),
           ),
         );
+        expect(
+          failed.reason,
+          isNot(contains(workspace.path)),
+          reason: 'the operator reads the RELATIVE path, never the absolute',
+        );
         // NO bead verdict is fabricated, and the base cause is persisted BESIDE
-        // the branch log rather than over it.
+        // the branch log rather than over it — the FULL output, every byte.
         final json = artifact();
         expect(json.containsKey('grade'), isFalse);
         expect(json['side'], 'base');
@@ -486,8 +492,51 @@ void main() {
           File(
             '${workspace.path}/.grid/critique/code-validation.base.log',
           ).readAsStringSync(),
-          contains('Expected an identifier'),
+          'lib/a.dart:1:1: Error: Expected an identifier.',
         );
+      },
+    );
+
+    // `power_station#code-validation-preserves-diagnostics-and-reports-deadline`
+    // under `power_station#code-validation-hard-blocks-only-branch-regressions`:
+    // the head that LEADS a hard block names only what the BRANCH introduced. A
+    // diagnostic the merge-base run already printed is pre-existing evidence.
+    test(
+      'regression diagnostic head subtracts pre-existing base diagnostics',
+      () async {
+        const preexisting = 'Failed to load "test/preexisting_test.dart":';
+        const regression = 'Failed to load "test/regression_test.dart":';
+        const x = 'test/preexisting_test.dart: loading';
+        const y = 'test/regression_test.dart: loading';
+        final runner = sides(
+          base: ShellRunResult(
+            exitCode: 1,
+            output: '$preexisting\n${report([x])}',
+          ),
+          branch: ShellRunResult(
+            exitCode: 1,
+            output: '$preexisting\n$regression\n${report([x, y])}',
+          ),
+        );
+
+        for (final expectedCache in ['miss', 'hit']) {
+          final c = laneCtx();
+          final outcome = await CodeValidationCapability(
+            comparison: comparison(runner),
+          ).run(c.context, c.args);
+
+          final payload = (outcome as Ok).payload!;
+          expect(payload['baseCache'], expectedCache);
+          expect(payload['grade'], 'F');
+          expect(payload['regressions'], '["$y"]');
+          expect(
+            payload['diagnostic_head'],
+            regression,
+            reason:
+                'the pre-existing base diagnostic never leads the hard '
+                'block, on a cache $expectedCache alike',
+          );
+        }
       },
     );
 

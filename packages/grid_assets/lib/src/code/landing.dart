@@ -401,6 +401,21 @@ class RevalidateCapability extends RouteCapability {
         branchLogPath: logPath,
       );
     } on ValidationLaneFailure catch (failure) {
+      // A base-side cause is persisted BESIDE `revalidate.log`, never over it,
+      // as the FULL output — extending
+      // `power_station#revalidate-cfe-diagnostics-lead-before-tail`'s "every
+      // failed run also writes the full captured output" to the base run, so
+      // the relative `revalidate.base.log` the reason names exists. LOUD: a
+      // write failure throws rather than naming a log that is not there.
+      if (failure.side != 'branch' && failure.output.trim().isNotEmpty) {
+        writeCapturedOutputLog(
+          path: p.join(
+            critiqueDirPath(workspace.workspaceDir),
+            'revalidate.base.log',
+          ),
+          output: failure.output,
+        );
+      }
       // The plan's recognized diagnostics LEAD, ahead of the lane name,
       // exactly as they lead a regression's escalation below.
       throw RouteFailure(failure.reasonFor('revalidate could not be compared'));
