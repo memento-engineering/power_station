@@ -28,8 +28,15 @@
   moved (`acceptance-unchanged` for byte-identical criteria); a respec round re-runs only the
   lanes that returned an action grade and the receipt carries the prior verdicts of every
   omitted sibling (`CommitteeShadowReceipt.preservedLanes`, read through the new
-  `CommitteeSelectionStore.readPreviousReceipt`). Gates are always elected; uncertain evidence
-  elects the full committee. Selection stays shadow-only. Runs and receipts are written at wire
+  `CommitteeSelectionStore.readPreviousReceipt`). Prior-round comparison is session-local:
+  `grid.round` restarts at zero when a governor rework remounts the circuit, so
+  `acceptance-unchanged` and targeted respec preservation apply only to strictly later rounds
+  inside the same mounted session, and a rework starts a new series (corpus replay likewise
+  links a receipt to its predecessor only across a strictly lower round). Gates are always elected;
+  uncertain evidence elects the full committee. Measured over the twelve retained shadow
+  receipts now checked in as the corpus, policy version 2 is selective on 1 of 12 rounds
+  (8.3 percent, omitting `decision-alignment` under `no-cited-decision`) and elects the full
+  committee on 11 of 12. Selection stays shadow-only pending the activation beads. Runs and receipts are written at wire
   version 2 (version 1 still decodes), and the step results gain `laneDecisions`/`previousRound`
   and `committeeShadowLaneDecisions`/`committeeShadowPreviousRound`/
   `committeeShadowPreservedLane{Grades,Transports}`; every existing key is kept.

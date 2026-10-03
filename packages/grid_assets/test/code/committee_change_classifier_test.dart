@@ -16,9 +16,11 @@
 //                                            prior action lanes plus the gates,
 //                                            and its receipt carries the prior
 //                                            verdicts of every omitted sibling;
-//  - `retained corpus majority is selective` the checked-in shadow corpus,
-//                                            replayed chronologically, omits a
-//                                            lane on most rounds, each omission
+//  - `retained corpus measures selectivity`  the checked-in shadow corpus —
+//                                            twelve receipts retained verbatim
+//                                            from real rounds — replayed
+//                                            chronologically, is selective on
+//                                            exactly one round, each omission
 //                                            named, with no effect of any kind.
 //
 // Pure Dart over hand-built values and one checked-in fixture. Fakes, not
@@ -33,6 +35,12 @@ import 'package:test/test.dart';
 import '../support/package_root.dart';
 
 const _policy = kCommitteeSelectionPolicy;
+
+/// The retained shadow receipts checked in as the corpus fixture.
+const kRetainedCorpusRounds = 12;
+
+/// The retained rounds on which policy v2 omits at least one lane.
+const kRetainedCorpusSelectiveRounds = 1;
 
 const _cited = 'decision:decision-entry:power_station#a21@sha256:fake';
 const _emptyLookup = 'surface:power_station/lib|complete|decision-surface:x';
@@ -329,7 +337,7 @@ void main() {
     expect(decoded.toJson(), second.toJson());
   });
 
-  test('retained corpus majority is selective', () {
+  test('retained corpus measures selectivity', () {
     final rows =
         jsonDecode(
               File(
@@ -342,19 +350,63 @@ void main() {
               ).readAsStringSync(),
             )
             as List<Object?>;
-    expect(rows.length, greaterThanOrEqualTo(10));
+    expect(rows, hasLength(kRetainedCorpusRounds));
     final recorded = [
       for (final row in rows) CommitteeShadowReceipt.fromJson(row),
     ];
     expect(recorded, everyElement(isNotNull), reason: 'decodes STRICTLY');
     final corpus = recorded.cast<CommitteeShadowReceipt>();
-    // The corpus is observation data: every row recorded the FULL committee.
+    // Retained verbatim from two real beads' worktrees, in source order.
+    expect(
+      {for (final r in corpus) r.run.workBeadId},
+      {'pow-zqo1', 'pow-1d2x'},
+    );
+    expect(
+      [for (final r in corpus) r.sampleId],
+      [
+        '393dd65cce8fcd7031e0c5cd23ea06d7484ef5f749cb4502456eda95515659e1',
+        '4c5b67434b7c10a689995bc637dde03673983c5061dac9dbe957d016cd2b4330',
+        '4b2954fa2497a47a8076364128b6236c50faae444394e71afbde37957b4012c0',
+        '4c693f43f4514840bbefc40746098f99033c5206a9238b117bc247939c77eeab',
+        'c9bd217a48d990a021a341e9efefec82ecd1417f5da28e2684f7445232e78636',
+        '1ed05d126c120acb704dd511c5eaa5e9ede381f8f80a416d89c1ea11d851d83f',
+        '397ba721f5367696600397e396a6c38e9dadb9657df968b9611fdfd9348a4b08',
+        '98770152f692efce96a4a90265afaadfaffdbe4b20afd23421399a636ae11ee2',
+        '6d7ea6cb5704012f85ac7b9cd0bbc4db11412fb17f629d8d792a311e57d6b664',
+        'f2421796d3a38eef9464315d4ef8b0fbcc4446bbcc640a424184266928d8f11c',
+        '5232c44de931c55c39517a1270961df9834395c8f113a5fbb8e432362ececcf0',
+        '667d94799825242f606b20eab4c10b33f3c6eb3acee75bf060bab9c2940d1c42',
+      ],
+    );
+    // The corpus is observation data: every row recorded its stage's FULL
+    // committee, and every row spent a distinct cost vector (no row is a
+    // duplicated or authored copy of another).
     for (final receipt in corpus) {
       expect(
         receipt.lanes.map((lane) => lane.rubricId),
-        receipt.run.fullRubricIds,
+        switch (receipt.run.stage) {
+          CommitteeStage.specReview => kSpecCommitteeRubrics,
+          CommitteeStage.codeReview => kCommitteeRubrics,
+        },
       );
     }
+    String costVector(CommitteeShadowReceipt receipt) =>
+        canonicalCommitteeJson([
+          for (final lane in receipt.lanes)
+            [
+              lane.rubricId,
+              lane.costUsd,
+              lane.tokensIn,
+              lane.tokensOut,
+              lane.durationMs,
+            ],
+        ]);
+    // The cost vector is each row's identity across replay: the join id is
+    // shared by every round-zero receipt of one bead and stage.
+    final costVectors = {
+      for (final receipt in corpus) costVector(receipt): receipt,
+    };
+    expect(costVectors, hasLength(kRetainedCorpusRounds));
 
     // Replay is PURE: no filesystem effect is possible inside it.
     late List<CommitteeShadowReceipt> replayed;
@@ -374,12 +426,33 @@ void main() {
       reason: 'deterministic',
     );
 
-    final selective = replayed.where((r) => r.omittedRubricIds.isNotEmpty);
+    // One measurement per receipt: elected and omitted counts plus the rule
+    // that omitted each lane.
+    final measurements = [
+      for (final receipt in replayed)
+        (
+          sampleId: costVectors[costVector(receipt)]!.sampleId,
+          elected: receipt.selectedRubricIds.length,
+          omitted: receipt.omittedRubricIds.length,
+          rules: {
+            for (final decision in receipt.run.selection.laneDecisions)
+              if (!decision.elected) decision.rubricId: decision.rule.id,
+          },
+        ),
+    ];
+    final selective = measurements.where((m) => m.omitted > 0).toList();
+    expect(selective, hasLength(kRetainedCorpusSelectiveRounds));
     expect(
-      selective.length * 2,
-      greaterThan(replayed.length),
-      reason: 'strictly more than half of the rounds omit at least one lane',
+      selective.single.sampleId,
+      '98770152f692efce96a4a90265afaadfaffdbe4b20afd23421399a636ae11ee2',
     );
+    expect(selective.single.elected, 4);
+    expect(selective.single.rules, {'decision-alignment': 'no-cited-decision'});
+    for (final m in measurements.where((m) => m.omitted == 0)) {
+      final source = corpus.singleWhere((r) => r.sampleId == m.sampleId);
+      expect(m.elected, source.run.fullRubricIds.length, reason: m.sampleId);
+      expect(m.rules, isEmpty, reason: m.sampleId);
+    }
     for (final receipt in replayed) {
       final run = receipt.run;
       expect(run.policyVersion, kCommitteeSelectionPolicyVersion);
@@ -397,7 +470,7 @@ void main() {
       }
       // No routing, grading or rewind authority: the recorded route and the
       // recorded full-committee grades are carried, never produced.
-      final source = corpus.singleWhere((r) => r.joinId == receipt.joinId);
+      final source = costVectors[costVector(receipt)]!;
       expect(receipt.route.toJson(), source.route.toJson());
       expect(
         [for (final lane in receipt.lanes) lane.grade],

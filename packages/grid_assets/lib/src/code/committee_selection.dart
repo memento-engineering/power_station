@@ -232,6 +232,12 @@ String committeeDigest(Object? value) =>
 /// Reads the engine's own reserved `grid.round` param. It is deliberately
 /// SILENT on a miss: this is shadow telemetry, and a diagnostic on a step that
 /// can never gate would be noise on every offline fixture.
+///
+/// The round is SESSION-LOCAL: `grid.round` restarts at zero when a governor
+/// rework remounts the circuit. Prior-round comparison (the
+/// `acceptance-unchanged` rule and targeted respec preservation) is therefore
+/// delivered only for strictly later rounds inside the same mounted session; a
+/// rework starts a new series with no previous round.
 int committeeSelectionRound(StepArgs args) =>
     int.tryParse(
       (args.params['grid.round'] ?? kCommitteeSelectionStageParam).trim(),
@@ -2563,7 +2569,11 @@ CommitteeShadowReceipt reclassifyCommitteeShadowReceipt(
 /// and stage, ascending by round, each receipt classified against the RECORDED
 /// receipt of the round before it (the full committee always ran in shadow, so
 /// that is the previous round an activated selector would have seen). The
-/// first round of each group has no previous round. Pure, like
+/// first round of each group has no previous round, and — matching
+/// [CommitteeSelectionStore.readPreviousReceipt]'s strictly-lower-round lookup
+/// — neither does a receipt whose predecessor carries the SAME round: rounds
+/// are session-local ([committeeSelectionRound]), so two round-zero receipts
+/// are two rework sessions, not a series. Pure, like
 /// [reclassifyCommitteeShadowReceipt].
 List<CommitteeShadowReceipt> reclassifyCommitteeShadowCorpus(
   Iterable<CommitteeShadowReceipt> recorded, {
@@ -2580,14 +2590,15 @@ List<CommitteeShadowReceipt> reclassifyCommitteeShadowCorpus(
   final reclassified = <CommitteeShadowReceipt>[];
   CommitteeShadowReceipt? before;
   for (final receipt in ordered) {
-    final sameGroup =
+    final sameSeries =
         before != null &&
         before.run.workBeadId == receipt.run.workBeadId &&
-        before.run.stage == receipt.run.stage;
+        before.run.stage == receipt.run.stage &&
+        before.run.round < receipt.run.round;
     reclassified.add(
       reclassifyCommitteeShadowReceipt(
         receipt,
-        previous: sameGroup ? before : null,
+        previous: sameSeries ? before : null,
         policy: policy,
       ),
     );
@@ -2814,6 +2825,10 @@ abstract interface class CommitteeSelectionStore {
   /// The receipt of the PREVIOUS round of [workBeadId]'s [stage] — the greatest
   /// recorded round strictly below [round] — or null when there is none.
   /// Read-only.
+  ///
+  /// Rounds are session-local ([committeeSelectionRound]): a governor rework
+  /// remints round zero, so a rework's first round has no previous receipt and
+  /// prior-fact comparison resumes only within that rework's own session.
   CommitteeShadowReceipt? readPreviousReceipt(
     String workspaceDir, {
     required CommitteeStage stage,
@@ -2862,6 +2877,10 @@ class FileCommitteeSelectionStore implements CommitteeSelectionStore {
   /// keeps the greatest round below [round] for the same bead and stage. Two
   /// receipts of that round tie-break on the greater sample id, so the answer
   /// never depends on directory order.
+  ///
+  /// The comparison is session-local: a governor rework remints round zero,
+  /// so its first round finds nothing strictly below it and starts a new
+  /// series rather than comparing against the previous session's receipts.
   @override
   CommitteeShadowReceipt? readPreviousReceipt(
     String workspaceDir, {
