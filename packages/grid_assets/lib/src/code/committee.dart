@@ -929,9 +929,20 @@ class DeclaredTestsCapability extends ServiceCapability {
 /// is preserved verbatim as `branchRc` in the JSON artifact beside it, so
 /// nothing is lost, only re-homed.
 ///
-/// A run that cannot be compared at all — a base that fails to compile, an
-/// `exit 64`, a missing tool, a scratch worktree that could not be made — is a
-/// LANE failure with a named cause ([Failed.noResult]), never a bead verdict.
+/// **A base that names no failing test is no evidence**
+/// (`power_station#acceptance-probe-base-failure-is-no-regression-evidence`).
+/// An acceptance-probe plan (`grep`, `awk`) MUST fail at the merge base, where
+/// the feature it probes does not exist yet. Such a base contributes no
+/// regression evidence, so the branch result decides; the artifact records
+/// `baseRc`, `baseOutputTail` and `baseNote`, and the payload carries `baseRc`
+/// and the one-line `baseNote` the PR receipt renders.
+///
+/// A run that cannot be compared at all is a LANE failure with a named cause,
+/// never a bead verdict: a COMPLETED deterministic exit (a branch plan that
+/// fails naming no test, a missing tool) is [Failed.invalidResult] — a result
+/// the lane cannot read, never an artifact-less model step — and an
+/// OPERATIONAL absence (a deadline cut, a scratch worktree that could not be
+/// made) is [Failed.noResult].
 /// It is a RUNNER, not an agent (`power_station#a20-…`): it resolves no
 /// `AgentConfig`, names no model, and reads no critic environment.
 class CodeValidationCapability extends ServiceCapability {
@@ -1007,7 +1018,13 @@ class CodeValidationCapability extends ServiceCapability {
       // NEVER a bead verdict: the lane could not decide, so it says so — with
       // the plan's recognized diagnostics LEADING the lane name, so the
       // failing file or tool line survives the engine's head-first reason cap.
-      return Failed.noResult(failure.reasonFor(kGatingRubric));
+      // A completed plan exit is a result the lane could not read, never an
+      // artifact-less model step, so the engine must not count it as harness
+      // silence; only an operational absence is a non-result.
+      final reason = failure.reasonFor(kGatingRubric);
+      return failure.planExited
+          ? Failed.invalidResult(reason)
+          : Failed.noResult(reason);
     }
     if (args.cancel.isCancelled) {
       return const Failed.noResult('code-validation: cancelled');
@@ -1024,6 +1041,7 @@ class CodeValidationCapability extends ServiceCapability {
             ),
           )
         : '';
+    final baseNote = delta.baseNote;
     _writeValidationArtifact(workspaceDir, {
       'grade': grade,
       'transport': _validationTransport,
@@ -1032,6 +1050,11 @@ class CodeValidationCapability extends ServiceCapability {
       'branchRc': delta.branchExitCode,
       'regressions': delta.regressions,
       'preexisting': delta.preexisting,
+      if (baseNote != null) ...{
+        'baseRc': delta.baseExitCode,
+        'baseOutputTail': delta.baseOutputTail,
+        'baseNote': baseNote,
+      },
       kVerdictRoundKey: round,
     });
     return Ok({
@@ -1042,13 +1065,18 @@ class CodeValidationCapability extends ServiceCapability {
       'branchRc': '${delta.branchExitCode}',
       'regressions': jsonEncode(delta.regressions),
       'preexisting': jsonEncode(delta.preexisting),
+      if (baseNote != null) ...{
+        'baseRc': '${delta.baseExitCode}',
+        'baseNote': baseNote,
+      },
       if (diagnosticHead.isNotEmpty) _gatingDiagnosticHeadKey: diagnosticHead,
       kVerdictRoundKey: '$round',
     });
   }
 
-  /// Spends exactly ONE attempt on a lane that produced no comparable result,
-  /// then parks it at a gate.
+  /// Spends exactly ONE attempt on a lane that produced no comparable result —
+  /// an operational non-result or a completed exit it could not read — then
+  /// parks it at a gate.
   ///
   /// The reasoning the retired process lane recorded holds verbatim: this is a
   /// DETERMINISTIC runner, so re-running it against an unchanged tree cannot
@@ -1062,6 +1090,10 @@ class CodeValidationCapability extends ServiceCapability {
   SupervisionPolicy supervisionPolicy(StepArgs args) => const SupervisionPolicy(
     byKind: {
       CapabilityFailureKind.noResult: RetryPolicy(
+        maxRestarts: 1,
+        onExhaustion: ExhaustionBehavior.parkAtGate,
+      ),
+      CapabilityFailureKind.invalidResult: RetryPolicy(
         maxRestarts: 1,
         onExhaustion: ExhaustionBehavior.parkAtGate,
       ),

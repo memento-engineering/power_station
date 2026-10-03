@@ -23,9 +23,18 @@
   test that fails on the branch and passes at the base. A test failing identically on both is a
   NOTE: named in `.grid/critique/code-validation.json` as `preexisting` and carried into the PR
   body's circuit receipt as `pre-existing on base: <test>`, never a gate. A run that cannot be
-  compared — a base or branch plan that fails without naming a test, a plan the deadline cut, a
+  compared — a branch plan that fails without naming a test, a plan the deadline cut, a
   scratch worktree that could not be made or unwound — is a lane failure with a named cause
-  (`Failed.noResult`, one attempt, then parked at a gate), never a grade. The base run is cached
+  (one attempt, then parked at a gate), never a grade. The acceptance-probe exception
+  (`power_station#acceptance-probe-base-failure-is-no-regression-evidence`): a merge-base run that
+  completes non-zero WITHOUT naming a failing test (a `grep`/`awk` probe for a feature the base
+  does not have yet) gives no regression evidence, so the branch result decides; the lane's
+  artifact records `baseRc` and the advice-stripped `baseOutputTail`, its payload carries
+  `baseRc` and `baseNote`, and the PR circuit receipt adds one `- base validation: <note>` line.
+  A lane failure that is a completed deterministic process exit is now `Failed.invalidResult`;
+  `Failed.noResult` is kept for a deadline cut or an unavailable merge-base worktree, so a
+  deterministic exit is never counted as harness silence — a genuinely artifact-less model step
+  still is. The base run is cached
   per (merge-base sha, plan digest, host) under the grid home's
   `.grid/critique-cache/code-validation/`. The landing circuit's `revalidate` step asks the same
   comparison. `declared-tests-present` stops gating a declared path the comparison proved already

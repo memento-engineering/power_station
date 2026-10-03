@@ -446,50 +446,112 @@ void main() {
       },
     );
 
-    // AC-3: the ruling's explicit carve-out — a base that fails for a reason
-    // other than a named test is the LANE's failure, with a named cause.
+    // `power_station#acceptance-probe-base-failure-is-no-regression-evidence`:
+    // a base that COMPLETES non-zero naming no test (an acceptance probe, or a
+    // base that cannot build) is no regression evidence — the branch decides,
+    // the base's exit and tail are recorded, and the outcome is cached.
     test(
-      'base non-test failure is a lane failure, never a bead grade',
+      'base probe without named tests yields no evidence and is cached',
       () async {
+        const note =
+            'merge-base validation exited 64 without a named failing test; the '
+            'base gave no regression evidence, so the branch result decided';
         final runner = sides(
-          base: const ShellRunResult(
+          base: ShellRunResult(
             exitCode: 64,
-            output: 'lib/a.dart:1:1: Error: Expected an identifier.',
+            output: [
+              'Resolving dependencies...',
+              '  analyzer 10.2.0 (14.3.0 available)',
+              'lib/a.dart:1:1: Error: Expected an identifier.',
+            ].join('\n'),
           ),
-          branch: const ShellRunResult(exitCode: 0, output: ''),
+          branch: const ShellRunResult(
+            exitCode: 0,
+            output: 'All tests passed!',
+          ),
         );
         final c = laneCtx();
+        final lane = CodeValidationCapability(comparison: comparison(runner));
 
-        final outcome = await CodeValidationCapability(
-          comparison: comparison(runner),
-        ).run(c.context, c.args);
+        final first = await lane.run(c.context, c.args);
+        expect(first, isA<Ok>());
+        final payload = (first as Ok).payload!;
+        expect(payload['grade'], 'A');
+        expect(payload['regressions'], '[]');
+        expect(payload['baseRc'], '64');
+        expect(payload['baseNote'], note);
+        expect(payload['baseCache'], 'miss');
 
-        expect(outcome, isA<Failed>());
-        final failed = outcome as Failed;
-        expect(failed.kind, CapabilityFailureKind.noResult);
-        expect(
-          failed.reason,
-          allOf(
-            contains('validation base'),
-            contains('without naming a failing test'),
-            contains('basesha0000000000000000000000000000000000'),
-            contains('exit 64'),
-            contains('Expected an identifier'),
-          ),
-        );
-        // NO bead verdict is fabricated, and the base cause is persisted BESIDE
-        // the branch log rather than over it.
         final json = artifact();
-        expect(json.containsKey('grade'), isFalse);
-        expect(json['side'], 'base');
+        expect(json['grade'], 'A');
+        expect(json['baseRc'], 64);
+        expect(json['baseNote'], note);
+        expect(
+          json['baseOutputTail'],
+          allOf(
+            endsWith('lib/a.dart:1:1: Error: Expected an identifier.'),
+            isNot(contains('available)')),
+          ),
+          reason: "the tail is bounded and pub's advisory block is stripped",
+        );
         expect(
           File(
-            '${workspace.path}/.grid/critique/code-validation.base.log',
-          ).readAsStringSync(),
-          contains('Expected an identifier'),
+            '${workspace.path}/.grid/critique/code-validation.rc',
+          ).readAsStringSync().trim(),
+          '0',
+          reason: 'the branch passed, so the EFFECTIVE rc is zero',
+        );
+
+        // The completed no-evidence base is CACHED: the second round re-runs
+        // only the branch, and still carries the base's diagnostics.
+        final second = ((await lane.run(c.context, c.args)) as Ok).payload!;
+        expect(second['baseCache'], 'hit');
+        expect(second['baseRc'], '64');
+        expect(second['baseNote'], note);
+        expect(
+          runner.calls.where((call) => call.workingDirectory != workspace.path),
+          hasLength(1),
+          reason: 'a completed base is remembered, never re-run',
         );
       },
     );
+
+    test('a no-evidence base still lets a named branch failure gate', () async {
+      const y = 'test/y_test.dart 9:2 the branch case';
+      final runner = sides(
+        base: const ShellRunResult(exitCode: 1, output: 'grep exited 1'),
+        branch: ShellRunResult(exitCode: 1, output: report([y])),
+      );
+      final c = laneCtx();
+
+      final payload =
+          ((await CodeValidationCapability(
+                    comparison: comparison(runner),
+                  ).run(c.context, c.args))
+                  as Ok)
+              .payload!;
+      expect(payload['grade'], 'F');
+      expect(payload['regressions'], '["$y"]');
+      expect(payload['baseRc'], '1');
+    });
+
+    test('a comparable base carries no base note at all', () async {
+      final runner = sides(
+        base: const ShellRunResult(exitCode: 0, output: 'All tests passed!'),
+        branch: const ShellRunResult(exitCode: 0, output: 'All tests passed!'),
+      );
+      final c = laneCtx();
+
+      final payload =
+          ((await CodeValidationCapability(
+                    comparison: comparison(runner),
+                  ).run(c.context, c.args))
+                  as Ok)
+              .payload!;
+      expect(payload.containsKey('baseNote'), isFalse);
+      expect(payload.containsKey('baseRc'), isFalse);
+      expect(artifact().containsKey('baseOutputTail'), isFalse);
+    });
 
     test(
       'base non-test failure caused by a scratch worktree is named as one',
@@ -517,43 +579,49 @@ void main() {
           isEmpty,
           reason: 'no plan ran without a base tree',
         );
+        expect(
+          outcome.kind,
+          CapabilityFailureKind.noResult,
+          reason: 'an unavailable worktree is an operational non-result',
+        );
       },
     );
 
-    test(
-      'a branch plan that names no failing test is a lane failure too',
-      () async {
-        final runner = sides(
-          base: const ShellRunResult(exitCode: 0, output: ''),
-          branch: const ShellRunResult(
-            exitCode: 127,
-            output: 'sh: rg: command not found',
-          ),
-        );
-        final c = laneCtx(plan: 'rg needle');
+    test('deterministic exit is invalid result, not harness silence: a branch '
+        'plan that names no failing test is a lane failure too', () async {
+      final runner = sides(
+        base: const ShellRunResult(exitCode: 0, output: ''),
+        branch: const ShellRunResult(
+          exitCode: 127,
+          output: 'sh: rg: command not found',
+        ),
+      );
+      final c = laneCtx(plan: 'rg needle');
 
-        final outcome = await CodeValidationCapability(
-          comparison: comparison(runner),
-        ).run(c.context, c.args);
+      final outcome = await CodeValidationCapability(
+        comparison: comparison(runner),
+      ).run(c.context, c.args);
 
-        expect(outcome, isA<Failed>());
-        expect(
-          (outcome as Failed).reason,
-          allOf(
-            contains('validation branch'),
-            contains('exit 127'),
-            contains('.grid/critique/code-validation.log'),
-          ),
-        );
-        // The branch log is still durable — a lane failure is diagnosable.
-        expect(
-          File(
-            '${workspace.path}/.grid/critique/code-validation.log',
-          ).readAsStringSync(),
-          contains('command not found'),
-        );
-      },
-    );
+      expect(outcome, isA<Failed>());
+      expect(
+        (outcome as Failed).reason,
+        allOf(
+          contains('validation branch'),
+          contains('exit 127'),
+          contains('.grid/critique/code-validation.log'),
+        ),
+      );
+      // A COMPLETED deterministic exit is a result the lane could not read,
+      // never an artifact-less model step the engine counts as silence.
+      expect(outcome.kind, CapabilityFailureKind.invalidResult);
+      // The branch log is still durable — a lane failure is diagnosable.
+      expect(
+        File(
+          '${workspace.path}/.grid/critique/code-validation.log',
+        ).readAsStringSync(),
+        contains('command not found'),
+      );
+    });
 
     // AC-4: one base run per (base sha, plan digest, host) — and a miss the
     // moment any one of the three moves.
@@ -624,23 +692,6 @@ void main() {
       );
     });
 
-    test('base cache tuple: a lane failure is NEVER cached', () async {
-      final runner = sides(
-        base: const ShellRunResult(exitCode: 64, output: 'boom'),
-        branch: const ShellRunResult(exitCode: 0, output: ''),
-      );
-      final c = laneCtx();
-      final lane = CodeValidationCapability(comparison: comparison(runner));
-
-      expect(await lane.run(c.context, c.args), isA<Failed>());
-      expect(await lane.run(c.context, c.args), isA<Failed>());
-      expect(
-        runner.calls.where((call) => call.workingDirectory != workspace.path),
-        hasLength(2),
-        reason: 'an uncomparable base is re-attempted, never remembered',
-      );
-    });
-
     test('both sides are given the lane\'s OWN ten-minute deadline', () async {
       final runner = sides(
         base: const ShellRunResult(exitCode: 0, output: ''),
@@ -680,6 +731,11 @@ void main() {
             contains('exceeded its 10-minute deadline'),
             contains('timed out'),
           ),
+        );
+        expect(
+          outcome.kind,
+          CapabilityFailureKind.noResult,
+          reason: 'a deadline cut produced no plan result at all',
         );
       },
     );
@@ -936,15 +992,21 @@ void main() {
       final policy = const CodeValidationCapability().supervisionPolicy(
         stepArgs('tg-1/review/$kGatingRubric'),
       );
-      expect(
-        policy.policyFor(CapabilityFailureKind.noResult),
-        const RetryPolicy(
-          // The engine increments the restart cursor BEFORE testing
-          // exhaustion, so one permits the initial attempt and nothing more.
-          maxRestarts: 1,
-          onExhaustion: ExhaustionBehavior.parkAtGate,
-        ),
-      );
+      for (final kind in const [
+        CapabilityFailureKind.noResult,
+        CapabilityFailureKind.invalidResult,
+      ]) {
+        expect(
+          policy.policyFor(kind),
+          const RetryPolicy(
+            // The engine increments the restart cursor BEFORE testing
+            // exhaustion, so one permits the initial attempt and nothing more.
+            maxRestarts: 1,
+            onExhaustion: ExhaustionBehavior.parkAtGate,
+          ),
+          reason: '$kind',
+        );
+      }
     });
   });
 

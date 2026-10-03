@@ -21,7 +21,8 @@ register:
     - "declared-tests-evidence-is-scoped-to-the-path-it-governs"
     - "adr-0005-landing-policy-grade-gated-auto-merge"
   obsoleted-by: null
-  updated-by: []
+  updated-by:
+    - acceptance-probe-base-failure-is-no-regression-evidence
   bead: pow-8010
   legacy-id: null
 ---
