@@ -1,20 +1,23 @@
-// The SHADOW committee-selection policy (bead `pow-1nl.1.1`) — the PURE half.
+// The SHADOW committee-selection policy (beads `pow-1nl.1.1`, `pow-1d2x`) — the
+// PURE half.
 //
 // Five named tables, each addressable with `--plain-name`:
 //
-//  - `policy tables`        the eight deterministic rules, their additive union,
-//                           the unconditional gates, the roster ordering and the
-//                           closed classifier allowlist;
+//  - `change-shape classifier tables` every policy-2 lane rule, the code
+//                           diff-shape table, the first-round spec table, the
+//                           unconditional gates, the uncertain-evidence full
+//                           fallback and the shared path vocabulary;
 //  - `stage evidence`       the two stages' independent evidence, their digests
 //                           and every lane's input digest;
 //  - `shadow receipt`       the strict codecs over trajectory's own value types,
-//                           null-versus-zero, and the counterfactual accounting;
-//  - `retained corpus replay` the retained typed samples, replayed through pure
-//                           Dart with the inference and source Fakes untouched;
+//                           null-versus-zero, the counterfactual accounting and
+//                           the store's previous-round read;
+//  - `replay`               re-classification as a pure function of the receipt,
+//                           and the retained version-1 shape;
 //  - `source shape`         the architecture fences.
 //
 // Fakes, not mocks. Zero inference; the only I/O is a temp dir for the evidence
-// source's own read path and the source-shape test's file reads.
+// source's and the store's own read paths and the source-shape test's reads.
 import 'dart:convert';
 import 'dart:io';
 
@@ -82,19 +85,34 @@ CommitteeSelectionEvidence _code({
   truncated: truncated,
 );
 
-CommitteeSelection _selectSpec(CommitteeSelectionEvidence evidence) =>
-    _policy.selectDeterministic(
-      evidence: evidence,
-      fullRubricIds: kSpecCommitteeRubrics,
-      gatingRubricIds: const [kSpecGatingRubric],
-    );
+CommitteeSelection _selectSpec(
+  CommitteeSelectionEvidence evidence, {
+  CommitteePreviousRound? previous,
+}) => _policy.classify(
+  evidence: evidence,
+  fullRubricIds: kSpecCommitteeRubrics,
+  gatingRubricIds: const [kSpecGatingRubric],
+  previous: previous,
+);
 
 CommitteeSelection _selectCode(CommitteeSelectionEvidence evidence) =>
-    _policy.selectDeterministic(
+    _policy.classify(
       evidence: evidence,
       fullRubricIds: kCommitteeRubrics,
       gatingRubricIds: kCodeGatingRubrics,
     );
+
+/// `rubric id -> rule id` over every lane decision — the table's cell.
+Map<String, String> _rules(CommitteeSelection selection) => {
+  for (final decision in selection.laneDecisions)
+    decision.rubricId: decision.rule.id,
+};
+
+/// A complete decision lookup that found NOTHING — a real empty result.
+const _emptyLookup = 'surface:power_station/lib|complete|decision-surface:x';
+
+/// A resolved decision citation.
+const _cited = 'decision:decision-entry:power_station#a21@sha256:fake';
 
 /// The source of `grid_assets/lib/<relative>`, off the shared cwd-independent
 /// package root — never a cwd-relative read, which a concurrently scheduled
@@ -103,185 +121,318 @@ String _libSource(String relative) =>
     File(p.join(packageRoot(), 'lib', relative)).readAsStringSync();
 
 void main() {
-  group('policy tables', () {
-    test('every authored rule id is reachable and stage-scoped', () {
-      expect(CommitteeSelectionRule.values.map((r) => r.id), [
-        'spec-intent',
-        'spec-decisions',
-        'spec-acceptance',
-        'spec-surface',
-        'code-runtime',
-        'code-tests',
-        'code-docs-metadata',
-        'code-decision-sensitive',
+  group('change-shape classifier tables', () {
+    test('every lane rule id is stable, fixes its disposition and '
+        'round-trips', () {
+      expect(CommitteeLaneRule.values.map((r) => r.id), [
+        'gate-always',
+        'full-fallback',
+        'unrecognized-lane',
+        'runtime-change',
+        'metadata-change',
+        'test-change',
+        'no-runtime-change',
+        'no-test-change',
+        'test-only-change',
+        'first-round',
+        'cited-decision',
+        'no-cited-decision',
+        'facts-changed',
+        'no-prior-verdict',
+        'facts-unchanged',
+        'acceptance-unchanged',
+        'targeted-respec-action',
+        'targeted-respec-preserved',
       ]);
-      expect(_policy.rulesFor(CommitteeStage.specReview).map((r) => r.id), [
-        'spec-intent',
-        'spec-decisions',
-        'spec-acceptance',
-        'spec-surface',
-      ]);
-      expect(_policy.rulesFor(CommitteeStage.codeReview).map((r) => r.id), [
-        'code-runtime',
-        'code-tests',
-        'code-docs-metadata',
-        'code-decision-sensitive',
-      ]);
-      // Every rule id round-trips, so a persisted match is decodable.
-      for (final rule in CommitteeSelectionRule.values) {
-        expect(CommitteeSelectionRule.fromId(rule.id), rule);
+      for (final rule in CommitteeLaneRule.values) {
+        expect(CommitteeLaneRule.fromId(rule.id), rule);
+        final decision = CommitteeLaneDecision(rubricId: 'lane', rule: rule);
+        expect(decision.disposition, rule.disposition);
+        expect(
+          CommitteeLaneDecision.fromJson(
+            jsonDecode(jsonEncode(decision.toJson())),
+          )!.toJson(),
+          decision.toJson(),
+        );
       }
-      expect(CommitteeSelectionRule.fromId('no-such-rule'), isNull);
+      expect(CommitteeLaneRule.fromId('no-such-rule'), isNull);
+      // A disposition that disagrees with its rule is refused, never coerced.
+      expect(
+        CommitteeLaneDecision.fromJson({
+          'rubricId': 'regression-risk',
+          'disposition': 'elected',
+          'rule': 'no-runtime-change',
+        }),
+        isNull,
+      );
+      expect(
+        CommitteeLaneDecision.fromJson({
+          'rubricId': ' ',
+          'disposition': 'elected',
+          'rule': 'gate-always',
+        }),
+        isNull,
+      );
+      expect(
+        {
+          for (final rule in CommitteeLaneRule.values)
+            if (rule.preservesPriorVerdict) rule.id,
+        },
+        {
+          'facts-unchanged',
+          'acceptance-unchanged',
+          'targeted-respec-preserved',
+        },
+      );
     });
 
-    test('each spec rule fires ALONE on exactly its own evidence', () {
-      final table =
-          <({String rule, CommitteeSelectionEvidence evidence, String lane})>[
-            (
-              rule: 'spec-intent',
-              evidence: _spec(intent: ['i']),
-              lane: 'coherence',
-            ),
-            (
-              rule: 'spec-acceptance',
-              evidence: _spec(acceptance: ['a']),
-              lane: 'acceptance-testability',
-            ),
-            (
-              rule: 'spec-surface',
-              evidence: _spec(paths: ['lib/a.dart|true|d']),
-              lane: 'plan-completeness',
-            ),
-            (
-              rule: 'spec-surface',
-              evidence: _spec(priorArt: ['hit:x']),
-              lane: 'plan-completeness',
-            ),
-          ];
+    test('the code diff-shape table elects only the lanes a change can '
+        'exercise', () {
+      const docs = {
+        'spec-adherence': 'metadata-change',
+        'regression-risk': 'no-runtime-change',
+        'test-coverage': 'no-test-change',
+      };
+      const testOnly = {
+        'spec-adherence': 'test-only-change',
+        'regression-risk': 'no-runtime-change',
+        'test-coverage': 'test-change',
+      };
+      const runtime = {
+        'spec-adherence': 'runtime-change',
+        'regression-risk': 'runtime-change',
+        'test-coverage': 'runtime-change',
+      };
+      final table = <({List<String> paths, Map<String, String> lanes})>[
+        (paths: const ['docs/a.md', 'README.md'], lanes: docs),
+        (paths: const ['pubspec.yaml', 'CHANGELOG.md', 'LICENSE'], lanes: docs),
+        (
+          paths: const ['test/a_test.dart', 'packages/x/test/b.dart'],
+          lanes: testOnly,
+        ),
+        (paths: const ['test/fixtures/corpus.json'], lanes: testOnly),
+        (
+          paths: const ['README.md', 'test/a_test.dart'],
+          lanes: const {
+            'spec-adherence': 'metadata-change',
+            'regression-risk': 'no-runtime-change',
+            'test-coverage': 'test-change',
+          },
+        ),
+        (paths: const ['lib/src/code/committee.dart'], lanes: runtime),
+        (
+          paths: const ['README.md', 'lib/a.dart', 'test/a_test.dart'],
+          lanes: runtime,
+        ),
+        // An UNLISTED surface fails to code: it elects everything.
+        (paths: const ['tool/release.sh'], lanes: runtime),
+      ];
       for (final row in table) {
-        final selection = _selectSpec(row.evidence);
-        expect(selection.matchedRuleIds, [row.rule], reason: row.rule);
+        final selection = _selectCode(_code(changedPaths: row.paths));
+        expect(_rules(selection), {
+          for (final gate in kCodeGatingRubrics) gate: 'gate-always',
+          ...row.lanes,
+        }, reason: '${row.paths}');
+        expect(selection.source, CommitteeSelectionSource.deterministic);
         expect(
           selection.selectedRubricIds,
-          [kSpecGatingRubric, row.lane],
-          reason: '${row.rule} selects its lane plus the unconditional gate',
-        );
-        expect(selection.source, CommitteeSelectionSource.deterministic);
-      }
-      // `spec-decisions` fires on decision evidence and selects its own lane.
-      final decisions = _selectSpec(_spec(decisions: ['surface:x|complete|1']));
-      expect(decisions.matchedRuleIds, ['spec-decisions']);
-      expect(decisions.selectedRubricIds, [
-        kSpecGatingRubric,
-        'decision-alignment',
-      ]);
-    });
-
-    test('spec matches are ADDITIVE and return in ROSTER order', () {
-      final selection = _selectSpec(
-        _spec(
-          intent: ['i'],
-          acceptance: ['a'],
-          decisions: ['d'],
-          paths: ['lib/a.dart|true|x'],
-        ),
-      );
-      expect(selection.matchedRuleIds, [
-        'spec-intent',
-        'spec-decisions',
-        'spec-acceptance',
-        'spec-surface',
-      ]);
-      expect(
-        selection.selectedRubricIds,
-        kSpecCommitteeRubrics,
-        reason: 'four matches union to the whole roster, in DECLARATION order',
-      );
-    });
-
-    test('code rules read the change SHAPE, additively', () {
-      final runtime = _selectCode(
-        _code(changedPaths: const ['lib/src/code/committee.dart']),
-      );
-      expect(runtime.matchedRuleIds, ['code-runtime']);
-      expect(runtime.selectedRubricIds, [
-        ...kCodeGatingRubrics,
-        'spec-adherence',
-        'regression-risk',
-        'test-coverage',
-      ]);
-
-      final tests = _selectCode(
-        _code(changedPaths: const ['test/committee_selection_test.dart']),
-      );
-      expect(
-        tests.matchedRuleIds,
-        ['code-tests'],
-        reason: 'a test-only diff has no runtime behaviour to regress',
-      );
-      expect(tests.selectedRubricIds, [
-        ...kCodeGatingRubrics,
-        'spec-adherence',
-        'test-coverage',
-      ]);
-
-      final prose = _selectCode(
-        _code(
-          changedPaths: const ['README.md', 'pubspec.yaml', 'CHANGELOG.md'],
-        ),
-      );
-      expect(prose.matchedRuleIds, ['code-docs-metadata']);
-      expect(prose.selectedRubricIds, [
-        ...kCodeGatingRubrics,
-        'spec-adherence',
-      ]);
-
-      // ONE runtime path among prose defeats the all-prose rule and adds the
-      // full semantic set beside the test lane.
-      final mixed = _selectCode(
-        _code(
-          changedPaths: const [
-            'README.md',
-            'lib/src/code/committee.dart',
-            'test/committee_test.dart',
+          [
+            for (final id in kCommitteeRubrics)
+              if (selection.decisionFor(id)!.elected) id,
           ],
-        ),
+          reason: 'elected lanes return in ROSTER order',
+        );
+        expect(
+          selection.matchedRuleIds,
+          {for (final rule in _rules(selection).values) rule}.toList(),
+          reason: 'the per-rule fold key is the distinct rule ids',
+        );
+      }
+      // The DOCS committee runs one semantic lane, and a docs diff elects it.
+      final docsCommittee = _policy.classify(
+        evidence: _code(changedPaths: const ['docs/guide.md']),
+        fullRubricIds: kDocsCommitteeRubrics,
+        gatingRubricIds: kDocsGatingRubrics,
       );
-      expect(mixed.matchedRuleIds, ['code-runtime', 'code-tests']);
-      expect(mixed.selectedRubricIds, kCommitteeRubrics);
-
-      // Decision evidence widens the blast radius of an otherwise prose diff.
-      final sensitive = _selectCode(
-        _code(changedPaths: const ['docs/x.md'], decisions: const ['d']),
+      expect(docsCommittee.selectedRubricIds, kDocsCommitteeRubrics);
+      expect(
+        docsCommittee.decisionFor('spec-adherence')!.rule,
+        CommitteeLaneRule.metadataChange,
       );
-      expect(sensitive.matchedRuleIds, [
-        'code-docs-metadata',
-        'code-decision-sensitive',
-      ]);
-      expect(sensitive.selectedRubricIds, [
-        ...kCodeGatingRubrics,
-        'spec-adherence',
-        'regression-risk',
-      ]);
     });
 
-    test('the path predicates classify nested and extension-free shapes', () {
-      expect(isCommitteeTestPath('test/a_test.dart'), isTrue);
-      expect(isCommitteeTestPath('packages/x/test/a.dart'), isTrue);
-      expect(isCommitteeTestPath('lib/src/a_test.dart'), isTrue);
-      expect(isCommitteeTestPath('lib/src/a.dart'), isFalse);
-      expect(isCommitteeProseOrMetadataPath('LICENSE'), isTrue);
-      expect(isCommitteeProseOrMetadataPath('packages/x/CHANGELOG.md'), isTrue);
-      expect(isCommitteeProseOrMetadataPath('packages/x/pubspec.yaml'), isTrue);
-      expect(isCommitteeProseOrMetadataPath('tool/config.json'), isTrue);
-      expect(isCommitteeProseOrMetadataPath('lib/a.dart'), isFalse);
-      expect(isCommitteeRuntimePath('lib/a.dart'), isTrue);
-      expect(isCommitteeRuntimePath('test/a_test.dart'), isFalse);
-      expect(isCommitteeRuntimePath('README.md'), isFalse);
+    test('the first-round spec table elects decision-alignment only on a '
+        'cited decision', () {
+      const firstRound = {
+        kSpecGatingRubric: 'gate-always',
+        'coherence': 'first-round',
+        'acceptance-testability': 'first-round',
+        'plan-completeness': 'first-round',
+      };
+      final table = <({List<String> decisions, String rule})>[
+        (decisions: const [], rule: 'no-cited-decision'),
+        (decisions: const [_emptyLookup], rule: 'no-cited-decision'),
+        (decisions: const [_emptyLookup, _cited], rule: 'cited-decision'),
+        (decisions: const ['departure:abc'], rule: 'cited-decision'),
+      ];
+      for (final row in table) {
+        final selection = _selectSpec(
+          _spec(
+            intent: const ['title:i'],
+            acceptance: const ['acceptance_criteria:a'],
+            decisions: row.decisions,
+          ),
+        );
+        expect(_rules(selection), {
+          ...firstRound,
+          'decision-alignment': row.rule,
+        }, reason: '${row.decisions}');
+      }
+    });
+
+    test('later spec rounds re-run only the lanes whose facts moved', () {
+      final base = _spec(
+        intent: const ['title:i'],
+        acceptance: const ['acceptance_criteria:a'],
+        decisions: const [_cited],
+      );
+      expect(_rules(_selectSpec(base, previous: _previous(base))), {
+        kSpecGatingRubric: 'gate-always',
+        'coherence': 'facts-unchanged',
+        'decision-alignment': 'facts-unchanged',
+        'acceptance-testability': 'acceptance-unchanged',
+        'plan-completeness': 'facts-unchanged',
+      });
+      final redesigned = _spec(
+        intent: const ['title:i', 'design:d2'],
+        acceptance: const ['acceptance_criteria:a'],
+        decisions: const [_cited],
+      );
+      expect(_rules(_selectSpec(redesigned, previous: _previous(base))), {
+        kSpecGatingRubric: 'gate-always',
+        'coherence': 'facts-changed',
+        'decision-alignment': 'facts-changed',
+        'acceptance-testability': 'acceptance-unchanged',
+        'plan-completeness': 'facts-changed',
+      });
+      // An unchanged lane the previous round never GRADED has no verdict to
+      // carry forward, so it runs.
+      expect(
+        _rules(
+          _selectSpec(
+            base,
+            previous: _previous(base, grades: {'coherence': null}),
+          ),
+        )['coherence'],
+        'no-prior-verdict',
+      );
+    });
+
+    test('a respec round re-runs only its action lanes', () {
+      final base = _spec(
+        intent: const ['title:i'],
+        acceptance: const ['acceptance_criteria:a'],
+        decisions: const [_emptyLookup],
+      );
+      final respecced = _previous(
+        base,
+        grades: {'plan-completeness': 'D', 'coherence': null},
+        respec: true,
+      );
+      expect(_rules(_selectSpec(base, previous: respecced)), {
+        kSpecGatingRubric: 'gate-always',
+        'coherence': 'no-prior-verdict',
+        'decision-alignment': 'targeted-respec-preserved',
+        'acceptance-testability': 'targeted-respec-preserved',
+        'plan-completeness': 'targeted-respec-action',
+      });
+      // A respec whose only action lane was the GATE targets no semantic lane,
+      // so the round falls back to the fact comparison.
+      final gateOnly = _previous(
+        base,
+        grades: {kSpecGatingRubric: 'F'},
+        respec: true,
+      );
+      expect(
+        _rules(_selectSpec(base, previous: gateOnly))['plan-completeness'],
+        'facts-unchanged',
+      );
+      // An unknown semantic lane is elected, never silently dropped.
+      final unknown = _policy.classify(
+        evidence: base,
+        fullRubricIds: const [kSpecGatingRubric, 'coherence', 'a-new-lane'],
+        gatingRubricIds: const [kSpecGatingRubric],
+        previous: respecced,
+      );
+      expect(
+        unknown.decisionFor('a-new-lane')!.rule,
+        CommitteeLaneRule.unrecognizedLane,
+      );
+    });
+
+    test('uncertain evidence elects the FULL committee, loudly', () {
+      final uncertainCode = <CommitteeSelectionEvidence>[
+        _code(changedPaths: const [], missing: const ['pinned-diff']),
+        _code(
+          changedPaths: const [],
+          missing: const ['pinned-diff:no-targets'],
+        ),
+        _code(
+          changedPaths: const ['docs/a.md'],
+          missing: const ['pinned-diff:clipped'],
+        ),
+        _code(changedPaths: const ['docs/a.md'], pinnedDiffDigest: ''),
+        _code(changedPaths: const ['docs/a.md'], missing: const ['workspace']),
+        CommitteeSelectionEvidence(
+          stage: CommitteeStage.codeReview,
+          workBeadId: 'pow-1',
+          round: 1,
+          missingEvidenceIds: const ['evidence-source'],
+        ),
+      ];
+      for (final evidence in uncertainCode) {
+        expect(committeeEvidenceIsUncertain(evidence), isTrue);
+        final selection = _selectCode(evidence);
+        expect(selection.source, CommitteeSelectionSource.fullFallback);
+        expect(selection.selectedRubricIds, kCommitteeRubrics);
+        expect(_rules(selection), {
+          for (final gate in kCodeGatingRubrics) gate: 'gate-always',
+          'spec-adherence': 'full-fallback',
+          'regression-risk': 'full-fallback',
+          'test-coverage': 'full-fallback',
+        });
+      }
+      final uncertainSpec = <CommitteeSelectionEvidence>[
+        _spec(
+          intent: const ['title:i'],
+          missing: const ['decisions:power_station/lib'],
+        ),
+        _spec(missing: const ['anchors', 'round']),
+        _spec(
+          intent: const ['title:i'],
+          missing: const ['anchors:work-bead-mismatch'],
+        ),
+        _spec(),
+      ];
+      for (final evidence in uncertainSpec) {
+        final selection = _selectSpec(evidence);
+        expect(selection.source, CommitteeSelectionSource.fullFallback);
+        expect(selection.selectedRubricIds, kSpecCommitteeRubrics);
+      }
+      // A gap the code classification never reads is NOT uncertainty: the
+      // diff alone decides a code round.
+      final noDossier = _code(
+        changedPaths: const ['docs/a.md'],
+        missing: const ['anchors', 'dossier'],
+      );
+      expect(committeeEvidenceIsUncertain(noDossier), isFalse);
+      expect(
+        _selectCode(noDossier).source,
+        CommitteeSelectionSource.deterministic,
+      );
     });
 
     test('EVERY gate set is unconditional, in all three committees', () {
-      // No rule can fire on empty evidence, yet the gates are still selected.
       for (final row in <({List<String> full, List<String> gating})>[
         (full: kSpecCommitteeRubrics, gating: const [kSpecGatingRubric]),
         (full: kCommitteeRubrics, gating: kCodeGatingRubrics),
@@ -290,23 +441,56 @@ void main() {
         final stage = row.full == kSpecCommitteeRubrics
             ? CommitteeStage.specReview
             : CommitteeStage.codeReview;
-        final evidence = CommitteeSelectionEvidence(
-          stage: stage,
-          workBeadId: 'pow-1',
-          round: 1,
-        );
-        final selection = _policy.selectDeterministic(
-          evidence: evidence,
-          fullRubricIds: row.full,
-          gatingRubricIds: row.gating,
-        );
-        expect(selection.matchedRuleIds, isEmpty);
-        expect(selection.selectedRubricIds, row.gating);
+        for (final evidence in <CommitteeSelectionEvidence>[
+          CommitteeSelectionEvidence(
+            stage: stage,
+            workBeadId: 'pow-1',
+            round: 1,
+          ),
+          CommitteeSelectionEvidence(
+            stage: stage,
+            workBeadId: 'pow-1',
+            round: 1,
+            intent: const ['title:i'],
+            changedPaths: const ['docs/a.md'],
+            pinnedDiffDigest: 'sha',
+          ),
+          CommitteeSelectionEvidence(
+            stage: stage,
+            workBeadId: 'pow-1',
+            round: 1,
+            intent: const ['title:i'],
+            changedPaths: const ['lib/a.dart'],
+            pinnedDiffDigest: 'sha',
+          ),
+        ]) {
+          final selection = _policy.classify(
+            evidence: evidence,
+            fullRubricIds: row.full,
+            gatingRubricIds: row.gating,
+          );
+          for (final gate in row.gating) {
+            expect(selection.selectedRubricIds, contains(gate));
+            expect(
+              selection.decisionFor(gate)!.rule,
+              CommitteeLaneRule.gateAlways,
+            );
+          }
+          expect(
+            selection.laneDecisions.map((d) => d.rubricId),
+            row.full,
+            reason: 'ONE decision per active lane, in roster order',
+          );
+        }
         // The FULL FALLBACK is the whole roster, in declaration order.
         expect(
           _policy
               .selectFullFallback(
-                evidence: evidence,
+                evidence: CommitteeSelectionEvidence(
+                  stage: stage,
+                  workBeadId: 'pow-1',
+                  round: 1,
+                ),
                 fullRubricIds: row.full,
                 gatingRubricIds: row.gating,
               )
@@ -314,6 +498,53 @@ void main() {
           row.full,
         );
       }
+    });
+
+    test('every lane rule is reachable from a real classification', () {
+      final base = _spec(
+        intent: const ['title:i'],
+        acceptance: const ['acceptance_criteria:a'],
+        decisions: const [_cited],
+      );
+      final selections = [
+        for (final paths in const [
+          ['docs/a.md'],
+          ['test/a_test.dart'],
+          ['lib/a.dart'],
+        ])
+          _selectCode(_code(changedPaths: paths)),
+        _selectCode(
+          _code(changedPaths: const [], missing: const ['pinned-diff']),
+        ),
+        _selectSpec(_spec(intent: const ['title:i'])),
+        _selectSpec(base),
+        _selectSpec(base, previous: _previous(base)),
+        _selectSpec(
+          _spec(
+            intent: const ['title:i2'],
+            acceptance: const ['acceptance_criteria:a'],
+            decisions: const [_cited],
+          ),
+          previous: _previous(base, grades: {'coherence': null}),
+        ),
+        _selectSpec(
+          base,
+          previous: _previous(
+            base,
+            grades: {'coherence': 'E', 'plan-completeness': null},
+            respec: true,
+          ),
+        ),
+        _policy.classify(
+          evidence: base,
+          fullRubricIds: const ['a-new-lane'],
+          gatingRubricIds: const [],
+        ),
+      ];
+      expect({
+        for (final selection in selections)
+          for (final decision in selection.laneDecisions) decision.rule,
+      }, CommitteeLaneRule.values.toSet());
     });
 
     test('the semantic set is the roster minus the gates, in roster order', () {
@@ -333,82 +564,51 @@ void main() {
       );
     });
 
-    test('the classifier allowlist is CLOSED and rejection is WHOLE', () {
-      const active = ['spec-adherence', 'regression-risk', 'test-coverage'];
-
-      final ok = parseCommitteeClassifierResult(
-        '{"rubricIds":["test-coverage","spec-adherence","spec-adherence"]}',
-        activeSemanticRubricIds: active,
-      );
-      expect(ok.kind, CommitteeClassifierResultKind.selected);
-      expect(ok.rubricIds, [
-        'spec-adherence',
-        'test-coverage',
-      ], reason: 'deduplicated and reordered by the ACTIVE committee');
-
-      // An id outside the allowlist rejects the WHOLE answer — the legal ids in
-      // it are NOT quietly kept.
-      final unknown = parseCommitteeClassifierResult(
-        '{"rubricIds":["spec-adherence","vibes"]}',
-        activeSemanticRubricIds: active,
-      );
-      expect(unknown.kind, CommitteeClassifierResultKind.unknown);
-      expect(unknown.rubricIds, isEmpty);
-      expect(unknown.rejectedRubricIds, ['spec-adherence', 'vibes']);
-
-      // An allowlisted id that this committee does not run is equally unknown.
-      final offRoster = parseCommitteeClassifierResult(
-        '{"rubricIds":["coherence"]}',
-        activeSemanticRubricIds: active,
-      );
-      expect(offRoster.kind, CommitteeClassifierResultKind.unknown);
-
-      for (final blank in <String?>[null, '', '   ']) {
-        expect(
-          parseCommitteeClassifierResult(
-            blank,
-            activeSemanticRubricIds: active,
-          ).kind,
-          CommitteeClassifierResultKind.missing,
-        );
-      }
-      for (final bad in const [
-        'not json',
-        '[]',
-        '{"rubricIds":[]}',
-        '{"rubricIds":"spec-adherence"}',
-        '{"rubricIds":["spec-adherence"],"extra":1}',
-        '{"rubricIds":["  "]}',
-        '{"rubricIds":[7]}',
+    test('the shared path vocabulary has ONE owner', () {
+      expect(isCommitteeTestPath('test/a_test.dart'), isTrue);
+      expect(isCommitteeTestPath('packages/x/test/a.dart'), isTrue);
+      expect(isCommitteeTestPath('lib/src/a_test.dart'), isTrue);
+      expect(isCommitteeTestPath('lib/src/a.dart'), isFalse);
+      for (final row in <(String, CommitteeDiffPathKind)>[
+        ('LICENSE', CommitteeDiffPathKind.metadata),
+        ('packages/x/CHANGELOG.md', CommitteeDiffPathKind.metadata),
+        ('packages/x/pubspec.yaml', CommitteeDiffPathKind.metadata),
+        ('tool/config.toml', CommitteeDiffPathKind.metadata),
+        ('test/README.md', CommitteeDiffPathKind.metadata),
+        ('test/fixtures/x.json', CommitteeDiffPathKind.test),
+        ('test/a_test.dart', CommitteeDiffPathKind.test),
+        ('lib/a.dart', CommitteeDiffPathKind.runtime),
+        ('tool/release.sh', CommitteeDiffPathKind.runtime),
       ]) {
-        expect(
-          parseCommitteeClassifierResult(
-            bad,
-            activeSemanticRubricIds: active,
-          ).kind,
-          CommitteeClassifierResultKind.malformed,
-          reason: bad,
-        );
+        expect(committeeDiffPathKindOf(row.$1), row.$2, reason: row.$1);
       }
-      // NO arm is ever a grade.
-      expect(
-        kCommitteeClassifierAllowlist.intersection(const {'A', 'D', 'F'}),
-        isEmpty,
+      // The predicates the classifier reads ARE the docs committee's: one
+      // neutral library owns them, the docs library re-exports them.
+      final owner = _libSource(p.join('src', 'code', 'review_path.dart'));
+      final docs = _libSource(p.join('src', 'code', 'docs_committee.dart'));
+      final policy = _libSource(
+        p.join('src', 'code', 'committee_selection.dart'),
       );
-    });
-
-    test('a classifier answer never invents a lane the committee lacks', () {
-      final selection = _policy.selectFromClassifier(
-        evidence: _code(changedPaths: const []),
-        fullRubricIds: kDocsCommitteeRubrics,
-        gatingRubricIds: kDocsGatingRubrics,
-        // `regression-risk` is allowlisted but the DOCS committee does not run
-        // it, so composition drops it while the gates stay.
-        classifierRubricIds: const ['spec-adherence', 'regression-risk'],
-      );
-      expect(selection.source, CommitteeSelectionSource.classifier);
-      expect(selection.selectedRubricIds, kDocsCommitteeRubrics);
-      expect(selection.matchedRuleIds, isEmpty);
+      for (final declaration in const [
+        'bool isDocsPath(',
+        'bool isMetadataPath(',
+        'const Set<String> kMetadataPathExtensions',
+        'const Set<String> kMetadataPathFilenames',
+      ]) {
+        expect(owner, contains(declaration), reason: declaration);
+        expect(docs, isNot(contains(declaration)), reason: declaration);
+        expect(policy, isNot(contains(declaration)), reason: declaration);
+      }
+      expect(docs, contains("export 'review_path.dart'"));
+      expect(policy, contains("import 'review_path.dart';"));
+      for (final retired in const [
+        'kCommitteeProseExtensions',
+        'kCommitteeMetadataExtensions',
+        'kCommitteeMetadataBasenames',
+        'isCommitteeProseOrMetadataPath',
+      ]) {
+        expect(policy, isNot(contains(retired)), reason: retired);
+      }
     });
   });
 
@@ -670,12 +870,15 @@ diff --git a/test/committee_test.dart b/test/committee_test.dart
           ),
         ),
         [
-          'acceptance-testability',
           'coherence',
+          'decision-alignment',
           'plan-completeness',
           'spec-adherence',
           'spec-validation',
         ],
+        reason:
+            'acceptance-testability reads the criteria ALONE; '
+            'decision-alignment reads the design beside the decisions',
       );
       expect(
         moved(
@@ -778,13 +981,23 @@ diff --git a/test/committee_test.dart b/test/committee_test.dart
       expect(decoded!.toJson(), run.toJson());
 
       for (final mutate in <void Function(Map<String, Object?>)>[
-        (json) => json['version'] = 2,
+        (json) => json['version'] = 3,
         (json) => json['stage'] = 'design_review',
         (json) => json['round'] = -1,
         (json) => (json['selection']! as Map)['source'] = 'guessing',
         (json) => (json['evidence']! as Map)['stage'] = 'nope',
-        (json) => (json['attempts']! as List)[0] = {'attempt': 1},
+        (json) => json['attempts'] = [
+          {'attempt': 1},
+        ],
         (json) => json['policyVersion'] = '',
+        // A version-2 run decides EVERY roster lane exactly once.
+        (json) => (json['selection']! as Map)['laneDecisions'] = <Object?>[],
+        (json) => ((json['selection']! as Map)['laneDecisions']! as List)[0] = {
+          'rubricId': kGatingRubric,
+          'disposition': 'omitted',
+          'rule': 'gate-always',
+        },
+        (json) => json['previous'] = {'round': -1},
       ]) {
         final json =
             jsonDecode(jsonEncode(run.toJson())) as Map<String, Object?>;
@@ -903,15 +1116,25 @@ diff --git a/test/committee_test.dart b/test/committee_test.dart
         final receipt = _receipt();
         expect(receipt.selectedRubricIds, [
           ...kCodeGatingRubrics,
-          'spec-adherence',
           'test-coverage',
         ]);
         expect(
           receipt.omittedRubricIds,
-          ['regression-risk'],
+          ['spec-adherence', 'regression-risk'],
           reason: 'the hypothetical omission is the whole point of the sample',
         );
         expect(receipt.actionLaneIds, ['regression-risk']);
+        expect(
+          receipt.run.selection.decisionFor('regression-risk')!.rule,
+          CommitteeLaneRule.noRuntimeChange,
+        );
+        expect(
+          receipt.preservedLanes,
+          isEmpty,
+          reason:
+              'a code omission declares the lane irrelevant; it carries '
+              'no prior verdict',
+        );
         expect(receipt.route.type, 'advance');
         expect(receipt.gateDisposition, GateDisposition.overridden);
         expect(receipt.lanes, hasLength(kCommitteeRubrics.length));
@@ -921,16 +1144,17 @@ diff --git a/test/committee_test.dart b/test/committee_test.dart
         expect(receipt.sampleId, hasLength(64));
         expect(receipt.joinId, hasLength(64));
 
-        // The counterfactual EXCLUDES the omitted lane and INCLUDES the
-        // classifier attempts; the actual excludes the classifier.
+        // The counterfactual EXCLUDES the omitted lanes; policy 2 spends
+        // nothing on selection, so the classifier block is empty.
         expect(receipt.actual.contributingRunIds, kCommitteeRubrics);
-        expect(receipt.counterfactual.contributingRunIds, [
-          ...receipt.selectedRubricIds,
-          'classifier-attempt-1',
-        ]);
-        expect(receipt.classifier.contributingRunIds, ['classifier-attempt-1']);
+        expect(
+          receipt.counterfactual.contributingRunIds,
+          receipt.selectedRubricIds,
+        );
+        expect(receipt.classifier.contributingRunIds, isEmpty);
+        expect(receipt.classifier.costUsd, 0);
         expect(receipt.actual.costUsd, closeTo(1.5, 1e-9));
-        expect(receipt.counterfactual.costUsd, closeTo(1.02, 1e-9));
+        expect(receipt.counterfactual.costUsd, closeTo(0.51, 1e-9));
         expect(
           receipt.counterfactual.costUsd! < receipt.actual.costUsd!,
           isTrue,
@@ -953,6 +1177,10 @@ diff --git a/test/committee_test.dart b/test/committee_test.dart
           ],
           (json) => json['sampleId'] = '',
           (json) => (json['route']! as Map)['type'] = '',
+          (json) => json['version'] = 1,
+          (json) => json['preservedLanes'] = [
+            {'rubricId': 'x'},
+          ],
         ]) {
           final json =
               jsonDecode(jsonEncode(receipt.toJson())) as Map<String, Object?>;
@@ -1029,10 +1257,150 @@ diff --git a/test/committee_test.dart b/test/committee_test.dart
       ).writeAsStringSync('{');
       expect(store.readRun(dir.path, CommitteeStage.codeReview), isNull);
     });
+
+    test('the file store reads the PREVIOUS round, strictly and read-only', () {
+      final dir = Directory.systemTemp.createTempSync('committee-previous-');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      const store = FileCommitteeSelectionStore();
+      CommitteeShadowReceipt? previous(int round, {String bead = 'pow-1'}) =>
+          store.readPreviousReceipt(
+            dir.path,
+            stage: CommitteeStage.codeReview,
+            workBeadId: bead,
+            round: round,
+          );
+
+      expect(previous(3), isNull, reason: 'no receipt directory yet');
+      for (final round in const [1, 2, 4]) {
+        store.writeReceipt(dir.path, _receipt(round: round));
+      }
+      store.writeReceipt(dir.path, _receipt(round: 3, bead: 'pow-other'));
+      // An unreadable and a version-skewed artifact are skipped, not half-read.
+      final receipts = p.dirname(committeeShadowReceiptPath(dir.path, 'x'));
+      File(p.join(receipts, 'corrupt.json')).writeAsStringSync('{');
+      File(p.join(receipts, 'skewed.json')).writeAsStringSync(
+        jsonEncode({..._receipt(round: 2).toJson(), 'version': 9}),
+      );
+      final before = Directory(receipts).listSync().length;
+
+      expect(previous(3)!.run.round, 2, reason: 'greatest round BELOW 3');
+      expect(previous(5)!.run.round, 4);
+      expect(previous(1), isNull, reason: 'nothing precedes the first round');
+      expect(previous(4, bead: 'pow-other')!.run.workBeadId, 'pow-other');
+      expect(
+        store.readPreviousReceipt(
+          dir.path,
+          stage: CommitteeStage.specReview,
+          workBeadId: 'pow-1',
+          round: 5,
+        ),
+        isNull,
+        reason: 'another stage is another chain',
+      );
+      expect(
+        Directory(receipts).listSync(),
+        hasLength(before),
+        reason: 'the read writes nothing',
+      );
+    });
   });
 
-  group('retained corpus replay', () {
-    test('every retained sample reproduces itself, source-free', () {
+  group('replay', () {
+    test('a version-2 receipt reclassifies to ITSELF, source-free', () {
+      final base = _spec(
+        intent: const ['title:i'],
+        acceptance: const ['acceptance_criteria:a'],
+        decisions: const [_emptyLookup],
+      );
+      final previous = _previous(
+        base,
+        grades: {'coherence': 'D'},
+        respec: true,
+      );
+      final run = CommitteeSelectionRun(
+        policyVersion: kCommitteeSelectionPolicyVersion,
+        stage: CommitteeStage.specReview,
+        workBeadId: 'pow-1',
+        round: 3,
+        nodePath: 'pow-1/spec_review/committee-selection',
+        selection: _selectSpec(base, previous: previous),
+        evidence: base,
+        fullRubricIds: kSpecCommitteeRubrics,
+        gatingRubricIds: const [kSpecGatingRubric],
+        previous: previous,
+      );
+      final recorded = buildCommitteeShadowReceipt(
+        run: run,
+        route: CommitteeRouteObservation(
+          nodePath: 'pow-1/spec_review/route',
+          type: 'advance',
+          payload: const {'verdict': 'advance'},
+        ),
+        lanes: [
+          for (final id in kSpecCommitteeRubrics)
+            CommitteeLaneReceipt.derive(
+              rubricId: id,
+              nodePath: 'pow-1/spec_review/$id',
+              workBeadId: 'pow-1',
+              routeType: 'advance',
+              gating: id == kSpecGatingRubric,
+              grade: 'B',
+              transport: 'file',
+            ),
+        ],
+      );
+      expect(recorded.preservedLanes.map((lane) => lane.rubricId), [
+        'decision-alignment',
+        'acceptance-testability',
+        'plan-completeness',
+      ]);
+      final decoded = CommitteeShadowReceipt.fromJson(
+        jsonDecode(jsonEncode(recorded.toJson())),
+      )!;
+      expect(decoded.toJson(), recorded.toJson());
+      expect(
+        reclassifyCommitteeShadowReceipt(decoded).toJson(),
+        recorded.toJson(),
+      );
+    });
+
+    test(
+      'reclassification re-derives the selection rather than trusting it',
+      () {
+        // A run whose recorded selection DISAGREES with its own evidence is
+        // corrected — that is what makes drift visible.
+        final honest = _receipt();
+        final lying = buildCommitteeShadowReceipt(
+          run: CommitteeSelectionRun(
+            policyVersion: honest.run.policyVersion,
+            stage: honest.run.stage,
+            workBeadId: honest.run.workBeadId,
+            round: honest.run.round,
+            nodePath: honest.run.nodePath,
+            evidence: honest.run.evidence,
+            selection: kCommitteeSelectionPolicy.selectFullFallback(
+              evidence: honest.run.evidence,
+              fullRubricIds: honest.run.fullRubricIds,
+              gatingRubricIds: honest.run.gatingRubricIds,
+            ),
+            fullRubricIds: honest.run.fullRubricIds,
+            gatingRubricIds: honest.run.gatingRubricIds,
+          ),
+          route: honest.route,
+          lanes: honest.lanes,
+        );
+        final corrected = reclassifyCommitteeShadowReceipt(lying);
+        expect(corrected.selectedRubricIds, honest.selectedRubricIds);
+        expect(
+          corrected.run.selection.source,
+          CommitteeSelectionSource.deterministic,
+        );
+        // The route observation is carried, never re-ruled.
+        expect(corrected.route.toJson(), honest.route.toJson());
+      },
+    );
+
+    test('a version-1 receipt still decodes and keeps its version-1 shape', () {
       final rows =
           jsonDecode(
                 File(
@@ -1045,112 +1413,27 @@ diff --git a/test/committee_test.dart b/test/committee_test.dart
                 ).readAsStringSync(),
               )
               as List<Object?>;
-      expect(rows, hasLength(2));
-      for (final row in rows) {
-        final recorded = CommitteeShadowReceipt.fromJson(row);
-        expect(recorded, isNotNull, reason: 'the corpus decodes STRICTLY');
-        final replayed = replayCommitteeShadowReceipt(recorded!);
-        expect(replayed.toJson(), recorded.toJson());
-        expect(replayed.sampleId, recorded.sampleId);
-        expect(replayed.joinId, recorded.joinId);
+      final v1 = [
+        for (final row in rows)
+          if ((row! as Map)['version'] == 1) row,
+      ];
+      expect(v1, isNotEmpty);
+      for (final row in v1) {
+        final decoded = CommitteeShadowReceipt.fromJson(row);
+        expect(decoded, isNotNull, reason: 'the corpus decodes STRICTLY');
+        expect(decoded!.run.wireVersion, 1);
+        expect(decoded.run.previous, isNull);
+        expect(decoded.preservedLanes, isEmpty);
+        expect(decoded.toJson(), row, reason: 'no version-2 field is invented');
+        // Re-classification lifts it to policy 2 at the CURRENT wire version.
+        final lifted = reclassifyCommitteeShadowReceipt(decoded);
+        expect(lifted.run.wireVersion, kCommitteeSelectionWireVersion);
+        expect(lifted.run.policyVersion, kCommitteeSelectionPolicyVersion);
         expect(
-          replayed.run.selection.selectedRubricIds,
-          recorded.run.selection.selectedRubricIds,
-        );
-        expect(replayed.omittedRubricIds, recorded.omittedRubricIds);
-        expect(
-          replayed.counterfactual.costUsd,
-          recorded.counterfactual.costUsd,
+          lifted.run.selection.laneDecisions.map((d) => d.rubricId),
+          decoded.run.fullRubricIds,
         );
       }
-      // The corpus covers BOTH provenances, and the fallback sample omits
-      // nothing (that is what a full fallback means).
-      final sources = [
-        for (final row in rows)
-          CommitteeShadowReceipt.fromJson(row)!.run.selection.source,
-      ];
-      expect(sources, [
-        CommitteeSelectionSource.deterministic,
-        CommitteeSelectionSource.fullFallback,
-      ]);
-      final fallback = CommitteeShadowReceipt.fromJson(rows.last)!;
-      expect(fallback.omittedRubricIds, isEmpty);
-      expect(fallback.run.attempts, hasLength(2));
-      expect(fallback.run.attempts.map((a) => a.kind), [
-        CommitteeClassifierResultKind.malformed,
-        CommitteeClassifierResultKind.unknown,
-      ]);
-      // Replay is a PURE function of the receipt: it takes no evidence source
-      // and no classifier, so there is nothing for it to read. The control is
-      // that MUTATING the recorded evidence moves the replayed selection —
-      // which it could not do if replay consulted anything else.
-      final recorded = CommitteeShadowReceipt.fromJson(rows.first)!;
-      final rewritten = CommitteeSelectionRun(
-        policyVersion: recorded.run.policyVersion,
-        stage: recorded.run.stage,
-        workBeadId: recorded.run.workBeadId,
-        round: recorded.run.round,
-        nodePath: recorded.run.nodePath,
-        // Add DECISION evidence the sample did not have: `spec-decisions` must
-        // now fire and `decision-alignment` must stop being omitted.
-        evidence: CommitteeSelectionEvidence(
-          stage: recorded.run.evidence.stage,
-          workBeadId: recorded.run.evidence.workBeadId,
-          round: recorded.run.evidence.round,
-          intent: recorded.run.evidence.intent,
-          acceptance: recorded.run.evidence.acceptance,
-          decisions: const ['surface:power_station/lib|complete|1'],
-        ),
-        selection: recorded.run.selection,
-        fullRubricIds: recorded.run.fullRubricIds,
-        gatingRubricIds: recorded.run.gatingRubricIds,
-        attempts: recorded.run.attempts,
-      );
-      expect(replayCommitteeSelectionRun(rewritten).selection.matchedRuleIds, [
-        'spec-intent',
-        'spec-decisions',
-        'spec-acceptance',
-      ]);
-      expect(
-        replayCommitteeSelectionRun(rewritten).selection.selectedRubricIds,
-        contains('decision-alignment'),
-      );
-      expect(
-        recorded.omittedRubricIds,
-        contains('decision-alignment'),
-        reason:
-            'the RECORDED sample omitted it — the mutation is what moved it',
-      );
-    });
-
-    test('replay re-derives the selection rather than trusting it', () {
-      // A run whose recorded selection DISAGREES with its own evidence is
-      // corrected by replay — that is what makes drift visible.
-      final honest = _run();
-      final lying = CommitteeSelectionRun(
-        policyVersion: honest.policyVersion,
-        stage: honest.stage,
-        workBeadId: honest.workBeadId,
-        round: honest.round,
-        nodePath: honest.nodePath,
-        evidence: honest.evidence,
-        selection: kCommitteeSelectionPolicy.selectFullFallback(
-          evidence: honest.evidence,
-          fullRubricIds: honest.fullRubricIds,
-          gatingRubricIds: honest.gatingRubricIds,
-        ),
-        fullRubricIds: honest.fullRubricIds,
-        gatingRubricIds: honest.gatingRubricIds,
-        attempts: honest.attempts,
-      );
-      expect(
-        replayCommitteeSelectionRun(lying).selection.selectedRubricIds,
-        honest.selection.selectedRubricIds,
-      );
-      expect(
-        replayCommitteeSelectionRun(lying).selection.source,
-        CommitteeSelectionSource.deterministic,
-      );
     });
   });
 
@@ -1239,16 +1522,28 @@ diff --git a/test/committee_test.dart b/test/committee_test.dart
             reason: 'the policy source of truth is the Dart library alone',
           );
         }
-        // The rules and the constants live in the POLICY library, not elsewhere.
-        for (final rule in CommitteeSelectionRule.values) {
+        // The rules live in the POLICY library, not elsewhere.
+        for (final rule in CommitteeLaneRule.values) {
           expect(policySource, contains("'${rule.id}'"), reason: rule.id);
         }
-        expect(policySource, contains('kCommitteeClassifierAllowlist'));
         expect(
           evidenceSource,
-          isNot(contains('CommitteeSelectionRule')),
+          isNot(contains('CommitteeLaneRule')),
           reason: 'the adapter adapts facts; it never carries policy',
         );
+        // Selection is DETERMINISTIC: no inference seam survives in it.
+        for (final inference in const [
+          'InferenceRunner',
+          'RuntimeConfig',
+          'spawnFor(',
+          'resolveAgentConfig(',
+          'AgentBrief(',
+          'kCommitteeClassifierAllowlist',
+          'parseCommitteeClassifierResult',
+          'buildCommitteeClassifierPrompt',
+        ]) {
+          expect(policySource, isNot(contains(inference)), reason: inference);
+        }
         // The policy library knows no committee: those arrive as VALUES.
         for (final coupling in const [
           "import 'discovery.dart'",
@@ -1429,53 +1724,71 @@ DiscoveryDossier _dossier() => DiscoveryDossier(
   ],
 );
 
-CommitteeSelectionRun _run() {
-  // A TEST-ONLY diff: `code-tests` fires and `code-runtime` does not, so
-  // `regression-risk` is the OMITTED lane the sample exists to measure.
+CommitteeSelectionRun _run({int round = 3, String bead = 'pow-1'}) {
+  // A TEST-ONLY diff: `regression-risk` (no runtime change) and
+  // `spec-adherence` (test-only change) are the OMITTED lanes the sample
+  // exists to measure.
   final evidence = _code(
     changedPaths: const ['test/a_test.dart'],
     intent: const ['title:i'],
     acceptance: const ['acceptance_criteria:a'],
     truncated: true,
+    round: round,
   );
   return CommitteeSelectionRun(
     policyVersion: kCommitteeSelectionPolicyVersion,
     stage: CommitteeStage.codeReview,
-    workBeadId: 'pow-1',
-    round: 3,
+    workBeadId: bead,
+    round: round,
     nodePath: 'pow-1/review/committee-selection',
     evidence: evidence,
     selection: _selectCode(evidence),
     fullRubricIds: kCommitteeRubrics,
     gatingRubricIds: kCodeGatingRubrics,
-    attempts: [
-      CommitteeClassifierAttempt(
-        attempt: 1,
-        kind: CommitteeClassifierResultKind.selected,
-        usage: const UsageSample(
-          lane: kCommitteeSelectionStep,
-          beadId: 'pow-1',
-          fromFallback: false,
-          costUsd: 0.01,
-          durationMs: 400,
-        ),
-        acceptedRubricIds: const ['spec-adherence'],
-        outputDigest: 'a' * 64,
-        launched: true,
-        model: 'haiku',
-        tokensIn: 900,
-        tokensOut: 40,
-        costUsd: 0.01,
-        premiumRequests: 0,
-        numTurns: 1,
-        harnessDurationMs: 400,
-      ),
-    ],
   );
 }
 
-CommitteeShadowReceipt _receipt() {
-  final run = _run();
+/// A previous spec round over [evidence]: every lane graded `A` unless
+/// [grades] says otherwise (a null grade is a lane that recorded none), and a
+/// respec stamp on the route when [respec].
+CommitteePreviousRound _previous(
+  CommitteeSelectionEvidence evidence, {
+  Map<String, String?> grades = const {},
+  bool respec = false,
+}) {
+  final route = CommitteeRouteObservation(
+    nodePath: 'pow-1/spec_review/route',
+    type: 'advance',
+    payload: respec
+        ? const {'verdict': 'respec', 'grade': 'F', 'rule': 'respec'}
+        : const {'verdict': 'advance'},
+  );
+  final lanes = [
+    for (final id in kSpecCommitteeRubrics)
+      CommitteeLaneReceipt.derive(
+        rubricId: id,
+        nodePath: 'pow-1/spec_review/$id',
+        workBeadId: 'pow-1',
+        routeType: route.type,
+        gating: id == kSpecGatingRubric,
+        grade: grades.containsKey(id) ? grades[id] : 'A',
+        transport: 'file',
+      ),
+  ];
+  return CommitteePreviousRound(
+    round: 2,
+    evidence: evidence,
+    route: route,
+    actionLaneIds: [
+      for (final lane in lanes)
+        if (kCommitteeActionGrades.contains(lane.grade)) lane.rubricId,
+    ],
+    lanes: lanes,
+  );
+}
+
+CommitteeShadowReceipt _receipt({int round = 3, String bead = 'pow-1'}) {
+  final run = _run(round: round, bead: bead);
   final observation = committeeRouteObservationOf(
     const Advance({'verdict': 'advance', 'fix_in_flight_finding': 'name it'}),
     nodePath: 'pow-1/review/route',

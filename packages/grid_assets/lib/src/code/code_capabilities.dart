@@ -1855,7 +1855,6 @@ DefaultCapabilityRegistry buildCodeRegistry({
   sdk.SpecifyAuthoredSpecWriter? writeSpecifyAuthoredSpec,
   sdk.GridAssetRegistry? assetRegistry,
   GridAssetRosterOverride? assetRosterOverride,
-  InferenceRunner? committeeClassifier,
   CommitteeSelectionStore? committeeSelectionStore,
   ReleaseCommandInvoker? releaseCommands,
   String? overlaySourceRef,
@@ -1913,12 +1912,11 @@ DefaultCapabilityRegistry buildCodeRegistry({
   // composes the generated closure, it never builds a second catalog.
   final resolvedAssetRegistry =
       assetRegistry ?? GeneratedGridAssetRegistrant.registry;
-  // The SHADOW committee selector's three seams (bead `pow-1nl.1.1`), composed
-  // ONCE so the selector and both wrapped routes share one store.
+  // The SHADOW committee selector's store (bead `pow-1nl.1.1`), composed ONCE
+  // so the selector and both wrapped routes share one store. Selection is a
+  // deterministic classification, so the selector composes no inference seam.
   final selectionStore =
       committeeSelectionStore ?? const FileCommitteeSelectionStore();
-  final selectionInference =
-      committeeClassifier ?? const SystemInferenceRunner();
   // The registry's ONE one-shot inference seam: the landing describe pass and
   // the design verifier resolve to the SAME instance, so a suite that injects
   // a fake cannot silence one and leave the other reaching for a real `claude`.
@@ -1945,11 +1943,6 @@ DefaultCapabilityRegistry buildCodeRegistry({
     hostIdentity: validationHost,
     deadline: kGatingDeadline,
   );
-  Future<({bool ok, String output})> classify(RuntimeConfig config) async {
-    final run = await selectionInference.run(config);
-    return (ok: run.ok, output: run.output);
-  }
-
   return DefaultCapabilityRegistry(
     capabilities: {
       // The SPEC-READINESS INTAKE LENS (bead `pow-q7n`) — the cheap ladder at
@@ -2099,7 +2092,6 @@ DefaultCapabilityRegistry buildCodeRegistry({
       // by `params['committeeStage']`. It depends on nothing priced and
       // nothing depends on it.
       kCommitteeSelectionStep: CommitteeSelectionCapability(
-        classifier: classify,
         evidenceSource: const DiscoveryCommitteeSelectionEvidenceSource(
           pinnedDiffPathFor: pinnedDiffPath,
         ),

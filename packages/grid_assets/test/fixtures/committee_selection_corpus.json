@@ -971,5 +971,5037 @@
     "missingFields": [
       "selection-run:stale"
     ]
+  },
+  {
+    "version": 1,
+    "sampleId": "07d3a9e4d1eb5b15f27a4c0c80b039e4af816d80be036dd404b79ac195f38e82",
+    "joinId": "f3dd1cfe759e6abe552b5678074a2357486a9245bc2ef510406727f5475e5749",
+    "run": {
+      "version": 1,
+      "policyVersion": "1",
+      "stage": "spec_review",
+      "workBeadId": "pow-3kq8",
+      "round": 1,
+      "nodePath": "pow-3kq8/spec_review/committee-selection",
+      "selection": {
+        "policyVersion": "1",
+        "evidenceDigest": "660a95b24279986b73d581e12e48bfa2c8e372e307fbe631064b9901f7691921",
+        "matchedRuleIds": [
+          "spec-intent",
+          "spec-decisions",
+          "spec-acceptance",
+          "spec-surface"
+        ],
+        "selectedRubricIds": [
+          "spec-validation",
+          "coherence",
+          "decision-alignment",
+          "acceptance-testability",
+          "plan-completeness"
+        ],
+        "source": "deterministic",
+        "laneInputDigests": {
+          "spec-validation": "10f2f09a6837f851e5fe36662a6349f78f62a72439e1e9ae0a3940ecf74b1642",
+          "coherence": "9f2951b118ba921e25fb994af3a4cab08d54b5744b976c94c577df824d886c93",
+          "decision-alignment": "796b843c9373003e2505b8d5d84777a137426d146edf21081d8d84d914167c8f",
+          "acceptance-testability": "d6c21ae31b2705dd282747ad838a1665b0ebc835cf56d3a0e90e7917d6e15fce",
+          "plan-completeness": "df912448fc581e6c600e9c0e69a40e64c8ba3e0367e776d1bcab98cdf2bfe429"
+        }
+      },
+      "evidence": {
+        "stage": "spec_review",
+        "workBeadId": "pow-3kq8",
+        "round": 1,
+        "intent": [
+          "description:bead-field:pow-3kq8.description@sha256:ecbe765a78959bc3",
+          "design:bead-field:pow-3kq8.design@sha256:5b0ac177c9f81af1",
+          "title:bead-field:pow-3kq8.title@sha256:dfc16c5db3f7142f"
+        ],
+        "acceptance": [
+          "acceptance_criteria:bead-field:pow-3kq8.acceptance_criteria@sha256:66f173bb0a57d4ea"
+        ],
+        "paths": [
+          "packages/grid_assets/lib/src/code/committee_selection.dart|true|sha256:745122b879b4460d"
+        ],
+        "decisions": [
+          "decision:decision-entry:power_station#committee-selection-activates-on-one-owner-ruling@sha256:75c2212afb6f3847",
+          "surface:power_station/packages/grid_assets/lib/src/code/committee_selection.dart|complete|decision-surface:power_station/packages/grid_assets/lib/src/code/committee_selection.dart@sha256:6695e0eb86180e2a"
+        ],
+        "priorArt": [
+          "hit:prior-art-hit:pow-1nl.1.1@sha256:c8b044f9d703ebaf",
+          "query:CommitteeSelectionPolicy|complete|prior-art-query:CommitteeSelectionPolicy@sha256:bd43623b3970336a"
+        ],
+        "context": [],
+        "flags": [],
+        "changedPaths": [],
+        "pinnedDiffDigest": "",
+        "missingEvidenceIds": [],
+        "truncated": false
+      },
+      "fullRubricIds": [
+        "spec-validation",
+        "coherence",
+        "decision-alignment",
+        "acceptance-testability",
+        "plan-completeness"
+      ],
+      "gatingRubricIds": [
+        "spec-validation"
+      ],
+      "attempts": [],
+      "missingFields": []
+    },
+    "route": {
+      "nodePath": "pow-3kq8/spec_review/route",
+      "type": "advance",
+      "reason": "",
+      "payload": {
+        "verdict": "respec",
+        "grade": "F",
+        "rule": "respec",
+        "round": "1",
+        "rationale": "plan-completeness=F: the plan omits the store read"
+      }
+    },
+    "selectedRubricIds": [
+      "spec-validation",
+      "coherence",
+      "decision-alignment",
+      "acceptance-testability",
+      "plan-completeness"
+    ],
+    "omittedRubricIds": [],
+    "lanes": [
+      {
+        "report": {
+          "lane": "spec-validation",
+          "gradeCounts": {
+            "A": 1
+          },
+          "adverseVerdicts": 0,
+          "gateCausing": 0,
+          "overridden": 0,
+          "upheld": 0,
+          "unresolved": 0,
+          "respecConverged": 0,
+          "respecUnconverged": 0,
+          "respecNoFollowUp": 0,
+          "runs": 1,
+          "runsFromFallback": 0,
+          "meanCostUsd": 0.0,
+          "meanDurationMs": 21000
+        },
+        "usage": {
+          "lane": "spec-validation",
+          "beadId": "pow-3kq8",
+          "fromFallback": false,
+          "costUsd": 0.0,
+          "durationMs": 21000
+        },
+        "gateDisposition": null,
+        "rubricId": "spec-validation",
+        "nodePath": "pow-3kq8/spec_review/spec-validation",
+        "gating": true,
+        "grade": "A",
+        "transport": "file",
+        "rationale": "the spec-validation lane said so",
+        "finding": null,
+        "owner": null,
+        "refinement": null,
+        "model": null,
+        "tokensIn": 0,
+        "tokensOut": 0,
+        "costUsd": 0.0,
+        "premiumRequests": 0,
+        "numTurns": 0,
+        "durationMs": 21000,
+        "truncated": false,
+        "missingFields": []
+      },
+      {
+        "report": {
+          "lane": "coherence",
+          "gradeCounts": {
+            "B": 1
+          },
+          "adverseVerdicts": 0,
+          "gateCausing": 0,
+          "overridden": 0,
+          "upheld": 0,
+          "unresolved": 0,
+          "respecConverged": 0,
+          "respecUnconverged": 0,
+          "respecNoFollowUp": 0,
+          "runs": 1,
+          "runsFromFallback": 0,
+          "meanCostUsd": 0.39,
+          "meanDurationMs": 90000
+        },
+        "usage": {
+          "lane": "coherence",
+          "beadId": "pow-3kq8",
+          "fromFallback": false,
+          "costUsd": 0.39,
+          "durationMs": 90000
+        },
+        "gateDisposition": null,
+        "rubricId": "coherence",
+        "nodePath": "pow-3kq8/spec_review/coherence",
+        "gating": false,
+        "grade": "B",
+        "transport": "file",
+        "rationale": "the coherence lane said so",
+        "finding": null,
+        "owner": null,
+        "refinement": null,
+        "model": "sonnet",
+        "tokensIn": 34300,
+        "tokensOut": 474,
+        "costUsd": 0.39,
+        "premiumRequests": 0,
+        "numTurns": 6,
+        "durationMs": 90000,
+        "truncated": false,
+        "missingFields": []
+      },
+      {
+        "report": {
+          "lane": "decision-alignment",
+          "gradeCounts": {
+            "A": 1
+          },
+          "adverseVerdicts": 0,
+          "gateCausing": 0,
+          "overridden": 0,
+          "upheld": 0,
+          "unresolved": 0,
+          "respecConverged": 0,
+          "respecUnconverged": 0,
+          "respecNoFollowUp": 0,
+          "runs": 1,
+          "runsFromFallback": 0,
+          "meanCostUsd": 0.46,
+          "meanDurationMs": 105000
+        },
+        "usage": {
+          "lane": "decision-alignment",
+          "beadId": "pow-3kq8",
+          "fromFallback": false,
+          "costUsd": 0.46,
+          "durationMs": 105000
+        },
+        "gateDisposition": null,
+        "rubricId": "decision-alignment",
+        "nodePath": "pow-3kq8/spec_review/decision-alignment",
+        "gating": false,
+        "grade": "A",
+        "transport": "file",
+        "rationale": "the decision-alignment lane said so",
+        "finding": null,
+        "owner": null,
+        "refinement": null,
+        "model": "sonnet",
+        "tokensIn": 36000,
+        "tokensOut": 511,
+        "costUsd": 0.46,
+        "premiumRequests": 0,
+        "numTurns": 7,
+        "durationMs": 105000,
+        "truncated": false,
+        "missingFields": []
+      },
+      {
+        "report": {
+          "lane": "acceptance-testability",
+          "gradeCounts": {
+            "B": 1
+          },
+          "adverseVerdicts": 0,
+          "gateCausing": 0,
+          "overridden": 0,
+          "upheld": 0,
+          "unresolved": 0,
+          "respecConverged": 0,
+          "respecUnconverged": 0,
+          "respecNoFollowUp": 0,
+          "runs": 1,
+          "runsFromFallback": 0,
+          "meanCostUsd": 0.53,
+          "meanDurationMs": 120000
+        },
+        "usage": {
+          "lane": "acceptance-testability",
+          "beadId": "pow-3kq8",
+          "fromFallback": false,
+          "costUsd": 0.53,
+          "durationMs": 120000
+        },
+        "gateDisposition": null,
+        "rubricId": "acceptance-testability",
+        "nodePath": "pow-3kq8/spec_review/acceptance-testability",
+        "gating": false,
+        "grade": "B",
+        "transport": "file",
+        "rationale": "the acceptance-testability lane said so",
+        "finding": null,
+        "owner": null,
+        "refinement": null,
+        "model": "sonnet",
+        "tokensIn": 37700,
+        "tokensOut": 548,
+        "costUsd": 0.53,
+        "premiumRequests": 0,
+        "numTurns": 8,
+        "durationMs": 120000,
+        "truncated": false,
+        "missingFields": []
+      },
+      {
+        "report": {
+          "lane": "plan-completeness",
+          "gradeCounts": {
+            "F": 1
+          },
+          "adverseVerdicts": 1,
+          "gateCausing": 1,
+          "overridden": 1,
+          "upheld": 0,
+          "unresolved": 0,
+          "respecConverged": 0,
+          "respecUnconverged": 0,
+          "respecNoFollowUp": 1,
+          "runs": 1,
+          "runsFromFallback": 0,
+          "meanCostUsd": 0.6,
+          "meanDurationMs": 135000
+        },
+        "usage": {
+          "lane": "plan-completeness",
+          "beadId": "pow-3kq8",
+          "fromFallback": false,
+          "costUsd": 0.6,
+          "durationMs": 135000
+        },
+        "gateDisposition": "overridden",
+        "rubricId": "plan-completeness",
+        "nodePath": "pow-3kq8/spec_review/plan-completeness",
+        "gating": false,
+        "grade": "F",
+        "transport": "file",
+        "rationale": "the plan-completeness lane said so",
+        "finding": null,
+        "owner": null,
+        "refinement": null,
+        "model": "sonnet",
+        "tokensIn": 39400,
+        "tokensOut": 585,
+        "costUsd": 0.6,
+        "premiumRequests": 0,
+        "numTurns": 9,
+        "durationMs": 135000,
+        "truncated": false,
+        "missingFields": []
+      }
+    ],
+    "actionLaneIds": [
+      "plan-completeness"
+    ],
+    "gateDisposition": "overridden",
+    "downstreamJoinKeys": {
+      "workBeadId": "pow-3kq8",
+      "round": "1",
+      "stage": "spec_review",
+      "routeNodePath": "pow-3kq8/spec_review/route",
+      "siblingScope": "pow-3kq8/spec_review/"
+    },
+    "actual": {
+      "samples": [
+        {
+          "lane": "spec-validation",
+          "beadId": "pow-3kq8",
+          "fromFallback": false,
+          "costUsd": 0.0,
+          "durationMs": 21000
+        },
+        {
+          "lane": "coherence",
+          "beadId": "pow-3kq8",
+          "fromFallback": false,
+          "costUsd": 0.39,
+          "durationMs": 90000
+        },
+        {
+          "lane": "decision-alignment",
+          "beadId": "pow-3kq8",
+          "fromFallback": false,
+          "costUsd": 0.46,
+          "durationMs": 105000
+        },
+        {
+          "lane": "acceptance-testability",
+          "beadId": "pow-3kq8",
+          "fromFallback": false,
+          "costUsd": 0.53,
+          "durationMs": 120000
+        },
+        {
+          "lane": "plan-completeness",
+          "beadId": "pow-3kq8",
+          "fromFallback": false,
+          "costUsd": 0.6,
+          "durationMs": 135000
+        }
+      ],
+      "contributingRunIds": [
+        "spec-validation",
+        "coherence",
+        "decision-alignment",
+        "acceptance-testability",
+        "plan-completeness"
+      ],
+      "missingLaneIds": [],
+      "tokensIn": 147400,
+      "tokensOut": 2118,
+      "costUsd": 1.98,
+      "premiumRequests": 0,
+      "numTurns": 30,
+      "durationMs": 471000
+    },
+    "classifier": {
+      "samples": [],
+      "contributingRunIds": [],
+      "missingLaneIds": [],
+      "tokensIn": 0,
+      "tokensOut": 0,
+      "costUsd": 0.0,
+      "premiumRequests": 0,
+      "numTurns": 0,
+      "durationMs": 0
+    },
+    "counterfactual": {
+      "samples": [
+        {
+          "lane": "spec-validation",
+          "beadId": "pow-3kq8",
+          "fromFallback": false,
+          "costUsd": 0.0,
+          "durationMs": 21000
+        },
+        {
+          "lane": "coherence",
+          "beadId": "pow-3kq8",
+          "fromFallback": false,
+          "costUsd": 0.39,
+          "durationMs": 90000
+        },
+        {
+          "lane": "decision-alignment",
+          "beadId": "pow-3kq8",
+          "fromFallback": false,
+          "costUsd": 0.46,
+          "durationMs": 105000
+        },
+        {
+          "lane": "acceptance-testability",
+          "beadId": "pow-3kq8",
+          "fromFallback": false,
+          "costUsd": 0.53,
+          "durationMs": 120000
+        },
+        {
+          "lane": "plan-completeness",
+          "beadId": "pow-3kq8",
+          "fromFallback": false,
+          "costUsd": 0.6,
+          "durationMs": 135000
+        }
+      ],
+      "contributingRunIds": [
+        "spec-validation",
+        "coherence",
+        "decision-alignment",
+        "acceptance-testability",
+        "plan-completeness"
+      ],
+      "missingLaneIds": [],
+      "tokensIn": 147400,
+      "tokensOut": 2118,
+      "costUsd": 1.98,
+      "premiumRequests": 0,
+      "numTurns": 30,
+      "durationMs": 471000
+    },
+    "truncated": false,
+    "missingFields": []
+  },
+  {
+    "version": 1,
+    "sampleId": "7828415b4fef4aa69fbe47daeffdcc4e7f564890b2cee77f2edb53e7afae0420",
+    "joinId": "f060f290f327bf9c44a390a61208a6c8961ec8edb154f4e553d4c4e6ef6fb0f5",
+    "run": {
+      "version": 1,
+      "policyVersion": "1",
+      "stage": "spec_review",
+      "workBeadId": "pow-3kq8",
+      "round": 2,
+      "nodePath": "pow-3kq8/spec_review/committee-selection",
+      "selection": {
+        "policyVersion": "1",
+        "evidenceDigest": "0404caee8e7037456404f09455a994c9bf4af1d2f8a4762c5cdd994447db4d6b",
+        "matchedRuleIds": [
+          "spec-intent",
+          "spec-decisions",
+          "spec-acceptance",
+          "spec-surface"
+        ],
+        "selectedRubricIds": [
+          "spec-validation",
+          "coherence",
+          "decision-alignment",
+          "acceptance-testability",
+          "plan-completeness"
+        ],
+        "source": "deterministic",
+        "laneInputDigests": {
+          "spec-validation": "6fdfccb3ca4c260959f9f502693deb00a5033e92b519e7ebfc3e7d4231d153ba",
+          "coherence": "20ba5e4c85fcbc6bce29a93f64251a9f36dadb01142ea7326e2136066091c269",
+          "decision-alignment": "177c493373d6fba997b635b93e522eff2a6916152286fb52b644f855046ade2d",
+          "acceptance-testability": "d6c21ae31b2705dd282747ad838a1665b0ebc835cf56d3a0e90e7917d6e15fce",
+          "plan-completeness": "4fa2d9c7a9ba99d4ea843a7b39762914a333bc6fe50c50d9ee08d7f1ee47991a"
+        }
+      },
+      "evidence": {
+        "stage": "spec_review",
+        "workBeadId": "pow-3kq8",
+        "round": 2,
+        "intent": [
+          "description:bead-field:pow-3kq8.description@sha256:ecbe765a78959bc3",
+          "design:bead-field:pow-3kq8.design@sha256:481d187d356c99df",
+          "title:bead-field:pow-3kq8.title@sha256:dfc16c5db3f7142f"
+        ],
+        "acceptance": [
+          "acceptance_criteria:bead-field:pow-3kq8.acceptance_criteria@sha256:66f173bb0a57d4ea"
+        ],
+        "paths": [
+          "packages/grid_assets/lib/src/code/committee_selection.dart|true|sha256:745122b879b4460d"
+        ],
+        "decisions": [
+          "decision:decision-entry:power_station#committee-selection-activates-on-one-owner-ruling@sha256:75c2212afb6f3847",
+          "surface:power_station/packages/grid_assets/lib/src/code/committee_selection.dart|complete|decision-surface:power_station/packages/grid_assets/lib/src/code/committee_selection.dart@sha256:6695e0eb86180e2a"
+        ],
+        "priorArt": [
+          "hit:prior-art-hit:pow-1nl.1.1@sha256:c8b044f9d703ebaf",
+          "query:CommitteeSelectionPolicy|complete|prior-art-query:CommitteeSelectionPolicy@sha256:bd43623b3970336a"
+        ],
+        "context": [],
+        "flags": [],
+        "changedPaths": [],
+        "pinnedDiffDigest": "",
+        "missingEvidenceIds": [],
+        "truncated": false
+      },
+      "fullRubricIds": [
+        "spec-validation",
+        "coherence",
+        "decision-alignment",
+        "acceptance-testability",
+        "plan-completeness"
+      ],
+      "gatingRubricIds": [
+        "spec-validation"
+      ],
+      "attempts": [],
+      "missingFields": []
+    },
+    "route": {
+      "nodePath": "pow-3kq8/spec_review/route",
+      "type": "advance",
+      "reason": "",
+      "payload": {
+        "verdict": "advance",
+        "grades": "spec-validation=A,coherence=B,decision-alignment=A,acceptance-testability=A,plan-completeness=A",
+        "spread": "1",
+        "rule": "all-approve",
+        "round": "2"
+      }
+    },
+    "selectedRubricIds": [
+      "spec-validation",
+      "coherence",
+      "decision-alignment",
+      "acceptance-testability",
+      "plan-completeness"
+    ],
+    "omittedRubricIds": [],
+    "lanes": [
+      {
+        "report": {
+          "lane": "spec-validation",
+          "gradeCounts": {
+            "A": 1
+          },
+          "adverseVerdicts": 0,
+          "gateCausing": 0,
+          "overridden": 0,
+          "upheld": 0,
+          "unresolved": 0,
+          "respecConverged": 0,
+          "respecUnconverged": 0,
+          "respecNoFollowUp": 0,
+          "runs": 1,
+          "runsFromFallback": 0,
+          "meanCostUsd": 0.0,
+          "meanDurationMs": 21000
+        },
+        "usage": {
+          "lane": "spec-validation",
+          "beadId": "pow-3kq8",
+          "fromFallback": false,
+          "costUsd": 0.0,
+          "durationMs": 21000
+        },
+        "gateDisposition": null,
+        "rubricId": "spec-validation",
+        "nodePath": "pow-3kq8/spec_review/spec-validation",
+        "gating": true,
+        "grade": "A",
+        "transport": "file",
+        "rationale": "the spec-validation lane said so",
+        "finding": null,
+        "owner": null,
+        "refinement": null,
+        "model": null,
+        "tokensIn": 0,
+        "tokensOut": 0,
+        "costUsd": 0.0,
+        "premiumRequests": 0,
+        "numTurns": 0,
+        "durationMs": 21000,
+        "truncated": false,
+        "missingFields": []
+      },
+      {
+        "report": {
+          "lane": "coherence",
+          "gradeCounts": {
+            "B": 1
+          },
+          "adverseVerdicts": 0,
+          "gateCausing": 0,
+          "overridden": 0,
+          "upheld": 0,
+          "unresolved": 0,
+          "respecConverged": 0,
+          "respecUnconverged": 0,
+          "respecNoFollowUp": 0,
+          "runs": 1,
+          "runsFromFallback": 0,
+          "meanCostUsd": 0.42,
+          "meanDurationMs": 90000
+        },
+        "usage": {
+          "lane": "coherence",
+          "beadId": "pow-3kq8",
+          "fromFallback": false,
+          "costUsd": 0.42,
+          "durationMs": 90000
+        },
+        "gateDisposition": null,
+        "rubricId": "coherence",
+        "nodePath": "pow-3kq8/spec_review/coherence",
+        "gating": false,
+        "grade": "B",
+        "transport": "file",
+        "rationale": "the coherence lane said so",
+        "finding": null,
+        "owner": null,
+        "refinement": null,
+        "model": "sonnet",
+        "tokensIn": 35200,
+        "tokensOut": 474,
+        "costUsd": 0.42,
+        "premiumRequests": 0,
+        "numTurns": 6,
+        "durationMs": 90000,
+        "truncated": false,
+        "missingFields": []
+      },
+      {
+        "report": {
+          "lane": "decision-alignment",
+          "gradeCounts": {
+            "A": 1
+          },
+          "adverseVerdicts": 0,
+          "gateCausing": 0,
+          "overridden": 0,
+          "upheld": 0,
+          "unresolved": 0,
+          "respecConverged": 0,
+          "respecUnconverged": 0,
+          "respecNoFollowUp": 0,
+          "runs": 1,
+          "runsFromFallback": 0,
+          "meanCostUsd": 0.49,
+          "meanDurationMs": 105000
+        },
+        "usage": {
+          "lane": "decision-alignment",
+          "beadId": "pow-3kq8",
+          "fromFallback": false,
+          "costUsd": 0.49,
+          "durationMs": 105000
+        },
+        "gateDisposition": null,
+        "rubricId": "decision-alignment",
+        "nodePath": "pow-3kq8/spec_review/decision-alignment",
+        "gating": false,
+        "grade": "A",
+        "transport": "file",
+        "rationale": "the decision-alignment lane said so",
+        "finding": null,
+        "owner": null,
+        "refinement": null,
+        "model": "sonnet",
+        "tokensIn": 36900,
+        "tokensOut": 511,
+        "costUsd": 0.49,
+        "premiumRequests": 0,
+        "numTurns": 7,
+        "durationMs": 105000,
+        "truncated": false,
+        "missingFields": []
+      },
+      {
+        "report": {
+          "lane": "acceptance-testability",
+          "gradeCounts": {
+            "A": 1
+          },
+          "adverseVerdicts": 0,
+          "gateCausing": 0,
+          "overridden": 0,
+          "upheld": 0,
+          "unresolved": 0,
+          "respecConverged": 0,
+          "respecUnconverged": 0,
+          "respecNoFollowUp": 0,
+          "runs": 1,
+          "runsFromFallback": 0,
+          "meanCostUsd": 0.56,
+          "meanDurationMs": 120000
+        },
+        "usage": {
+          "lane": "acceptance-testability",
+          "beadId": "pow-3kq8",
+          "fromFallback": false,
+          "costUsd": 0.56,
+          "durationMs": 120000
+        },
+        "gateDisposition": null,
+        "rubricId": "acceptance-testability",
+        "nodePath": "pow-3kq8/spec_review/acceptance-testability",
+        "gating": false,
+        "grade": "A",
+        "transport": "file",
+        "rationale": "the acceptance-testability lane said so",
+        "finding": null,
+        "owner": null,
+        "refinement": null,
+        "model": "sonnet",
+        "tokensIn": 38600,
+        "tokensOut": 548,
+        "costUsd": 0.56,
+        "premiumRequests": 0,
+        "numTurns": 8,
+        "durationMs": 120000,
+        "truncated": false,
+        "missingFields": []
+      },
+      {
+        "report": {
+          "lane": "plan-completeness",
+          "gradeCounts": {
+            "A": 1
+          },
+          "adverseVerdicts": 0,
+          "gateCausing": 0,
+          "overridden": 0,
+          "upheld": 0,
+          "unresolved": 0,
+          "respecConverged": 0,
+          "respecUnconverged": 0,
+          "respecNoFollowUp": 0,
+          "runs": 1,
+          "runsFromFallback": 0,
+          "meanCostUsd": 0.63,
+          "meanDurationMs": 135000
+        },
+        "usage": {
+          "lane": "plan-completeness",
+          "beadId": "pow-3kq8",
+          "fromFallback": false,
+          "costUsd": 0.63,
+          "durationMs": 135000
+        },
+        "gateDisposition": null,
+        "rubricId": "plan-completeness",
+        "nodePath": "pow-3kq8/spec_review/plan-completeness",
+        "gating": false,
+        "grade": "A",
+        "transport": "file",
+        "rationale": "the plan-completeness lane said so",
+        "finding": null,
+        "owner": null,
+        "refinement": null,
+        "model": "sonnet",
+        "tokensIn": 40300,
+        "tokensOut": 585,
+        "costUsd": 0.63,
+        "premiumRequests": 0,
+        "numTurns": 9,
+        "durationMs": 135000,
+        "truncated": false,
+        "missingFields": []
+      }
+    ],
+    "actionLaneIds": [],
+    "gateDisposition": null,
+    "downstreamJoinKeys": {
+      "workBeadId": "pow-3kq8",
+      "round": "2",
+      "stage": "spec_review",
+      "routeNodePath": "pow-3kq8/spec_review/route",
+      "siblingScope": "pow-3kq8/spec_review/"
+    },
+    "actual": {
+      "samples": [
+        {
+          "lane": "spec-validation",
+          "beadId": "pow-3kq8",
+          "fromFallback": false,
+          "costUsd": 0.0,
+          "durationMs": 21000
+        },
+        {
+          "lane": "coherence",
+          "beadId": "pow-3kq8",
+          "fromFallback": false,
+          "costUsd": 0.42,
+          "durationMs": 90000
+        },
+        {
+          "lane": "decision-alignment",
+          "beadId": "pow-3kq8",
+          "fromFallback": false,
+          "costUsd": 0.49,
+          "durationMs": 105000
+        },
+        {
+          "lane": "acceptance-testability",
+          "beadId": "pow-3kq8",
+          "fromFallback": false,
+          "costUsd": 0.56,
+          "durationMs": 120000
+        },
+        {
+          "lane": "plan-completeness",
+          "beadId": "pow-3kq8",
+          "fromFallback": false,
+          "costUsd": 0.63,
+          "durationMs": 135000
+        }
+      ],
+      "contributingRunIds": [
+        "spec-validation",
+        "coherence",
+        "decision-alignment",
+        "acceptance-testability",
+        "plan-completeness"
+      ],
+      "missingLaneIds": [],
+      "tokensIn": 151000,
+      "tokensOut": 2118,
+      "costUsd": 2.1,
+      "premiumRequests": 0,
+      "numTurns": 30,
+      "durationMs": 471000
+    },
+    "classifier": {
+      "samples": [],
+      "contributingRunIds": [],
+      "missingLaneIds": [],
+      "tokensIn": 0,
+      "tokensOut": 0,
+      "costUsd": 0.0,
+      "premiumRequests": 0,
+      "numTurns": 0,
+      "durationMs": 0
+    },
+    "counterfactual": {
+      "samples": [
+        {
+          "lane": "spec-validation",
+          "beadId": "pow-3kq8",
+          "fromFallback": false,
+          "costUsd": 0.0,
+          "durationMs": 21000
+        },
+        {
+          "lane": "coherence",
+          "beadId": "pow-3kq8",
+          "fromFallback": false,
+          "costUsd": 0.42,
+          "durationMs": 90000
+        },
+        {
+          "lane": "decision-alignment",
+          "beadId": "pow-3kq8",
+          "fromFallback": false,
+          "costUsd": 0.49,
+          "durationMs": 105000
+        },
+        {
+          "lane": "acceptance-testability",
+          "beadId": "pow-3kq8",
+          "fromFallback": false,
+          "costUsd": 0.56,
+          "durationMs": 120000
+        },
+        {
+          "lane": "plan-completeness",
+          "beadId": "pow-3kq8",
+          "fromFallback": false,
+          "costUsd": 0.63,
+          "durationMs": 135000
+        }
+      ],
+      "contributingRunIds": [
+        "spec-validation",
+        "coherence",
+        "decision-alignment",
+        "acceptance-testability",
+        "plan-completeness"
+      ],
+      "missingLaneIds": [],
+      "tokensIn": 151000,
+      "tokensOut": 2118,
+      "costUsd": 2.1,
+      "premiumRequests": 0,
+      "numTurns": 30,
+      "durationMs": 471000
+    },
+    "truncated": false,
+    "missingFields": []
+  },
+  {
+    "version": 1,
+    "sampleId": "7a8fd484429889c651cf814ae7ecac74463e39f1a99e1e51dd3e7fe20f340e90",
+    "joinId": "2ba258ecabcbe8b689f8f2b794cc06d96da8bd017b3049ea5d5434605dc51b2e",
+    "run": {
+      "version": 1,
+      "policyVersion": "1",
+      "stage": "spec_review",
+      "workBeadId": "pow-7hzw",
+      "round": 1,
+      "nodePath": "pow-7hzw/spec_review/committee-selection",
+      "selection": {
+        "policyVersion": "1",
+        "evidenceDigest": "e2770ade2b2ca5aefe0f249f2c25d33d433449b043bcd29cff00c9e99c639b52",
+        "matchedRuleIds": [
+          "spec-intent",
+          "spec-decisions",
+          "spec-acceptance",
+          "spec-surface"
+        ],
+        "selectedRubricIds": [
+          "spec-validation",
+          "coherence",
+          "decision-alignment",
+          "acceptance-testability",
+          "plan-completeness"
+        ],
+        "source": "deterministic",
+        "laneInputDigests": {
+          "spec-validation": "f2256aa0e3edfac4be64f41bfaa4830300bba4fa5e75becc77892515a799d175",
+          "coherence": "3e9564f35887b9a5ef3c1fc6c592d556341fccc8eb28c013cd30d3b3944e6bbf",
+          "decision-alignment": "ab4e5c342c25a0042a0e9bc6e3b13ea2438dd96fc97df1b58b1aeba2b6d6b33c",
+          "acceptance-testability": "9deffe07b50a0cc2bfc0569fe66ddf34318b78eaf9d88fd6fddef089fa4ea483",
+          "plan-completeness": "f1eabfa9a9af350737bbbd1c49b19038b3835f3ccf0153a43af446f50fcb9c40"
+        }
+      },
+      "evidence": {
+        "stage": "spec_review",
+        "workBeadId": "pow-7hzw",
+        "round": 1,
+        "intent": [
+          "description:bead-field:pow-7hzw.description@sha256:d16c2da67583bdf1",
+          "design:bead-field:pow-7hzw.design@sha256:962a3e93baf30c6a",
+          "title:bead-field:pow-7hzw.title@sha256:5fce9c94593d65b5"
+        ],
+        "acceptance": [
+          "acceptance_criteria:bead-field:pow-7hzw.acceptance_criteria@sha256:a59782b61eba6264"
+        ],
+        "paths": [
+          "packages/grid_assets/lib/src/code/committee_selection.dart|true|sha256:ea8755d6a0f03220"
+        ],
+        "decisions": [
+          "surface:power_station/packages/grid_assets/lib/src/code/committee_selection.dart|complete|decision-surface:power_station/packages/grid_assets/lib/src/code/committee_selection.dart@sha256:97dc828bd200bd5e"
+        ],
+        "priorArt": [
+          "hit:prior-art-hit:pow-1nl.1.1@sha256:c8b044f9d703ebaf",
+          "query:CommitteeSelectionPolicy|complete|prior-art-query:CommitteeSelectionPolicy@sha256:a0fd161505aff520"
+        ],
+        "context": [],
+        "flags": [],
+        "changedPaths": [],
+        "pinnedDiffDigest": "",
+        "missingEvidenceIds": [],
+        "truncated": false
+      },
+      "fullRubricIds": [
+        "spec-validation",
+        "coherence",
+        "decision-alignment",
+        "acceptance-testability",
+        "plan-completeness"
+      ],
+      "gatingRubricIds": [
+        "spec-validation"
+      ],
+      "attempts": [],
+      "missingFields": []
+    },
+    "route": {
+      "nodePath": "pow-7hzw/spec_review/route",
+      "type": "advance",
+      "reason": "",
+      "payload": {
+        "verdict": "respec",
+        "grade": "F",
+        "rule": "respec",
+        "round": "1",
+        "rationale": "coherence=D, acceptance-testability=D"
+      }
+    },
+    "selectedRubricIds": [
+      "spec-validation",
+      "coherence",
+      "decision-alignment",
+      "acceptance-testability",
+      "plan-completeness"
+    ],
+    "omittedRubricIds": [],
+    "lanes": [
+      {
+        "report": {
+          "lane": "spec-validation",
+          "gradeCounts": {
+            "A": 1
+          },
+          "adverseVerdicts": 0,
+          "gateCausing": 0,
+          "overridden": 0,
+          "upheld": 0,
+          "unresolved": 0,
+          "respecConverged": 0,
+          "respecUnconverged": 0,
+          "respecNoFollowUp": 0,
+          "runs": 1,
+          "runsFromFallback": 0,
+          "meanCostUsd": 0.0,
+          "meanDurationMs": 21000
+        },
+        "usage": {
+          "lane": "spec-validation",
+          "beadId": "pow-7hzw",
+          "fromFallback": false,
+          "costUsd": 0.0,
+          "durationMs": 21000
+        },
+        "gateDisposition": null,
+        "rubricId": "spec-validation",
+        "nodePath": "pow-7hzw/spec_review/spec-validation",
+        "gating": true,
+        "grade": "A",
+        "transport": "file",
+        "rationale": "the spec-validation lane said so",
+        "finding": null,
+        "owner": null,
+        "refinement": null,
+        "model": null,
+        "tokensIn": 0,
+        "tokensOut": 0,
+        "costUsd": 0.0,
+        "premiumRequests": 0,
+        "numTurns": 0,
+        "durationMs": 21000,
+        "truncated": false,
+        "missingFields": []
+      },
+      {
+        "report": {
+          "lane": "coherence",
+          "gradeCounts": {
+            "D": 1
+          },
+          "adverseVerdicts": 1,
+          "gateCausing": 1,
+          "overridden": 1,
+          "upheld": 0,
+          "unresolved": 0,
+          "respecConverged": 0,
+          "respecUnconverged": 0,
+          "respecNoFollowUp": 1,
+          "runs": 1,
+          "runsFromFallback": 0,
+          "meanCostUsd": 0.39,
+          "meanDurationMs": 90000
+        },
+        "usage": {
+          "lane": "coherence",
+          "beadId": "pow-7hzw",
+          "fromFallback": false,
+          "costUsd": 0.39,
+          "durationMs": 90000
+        },
+        "gateDisposition": "overridden",
+        "rubricId": "coherence",
+        "nodePath": "pow-7hzw/spec_review/coherence",
+        "gating": false,
+        "grade": "D",
+        "transport": "file",
+        "rationale": "the coherence lane said so",
+        "finding": null,
+        "owner": null,
+        "refinement": null,
+        "model": "sonnet",
+        "tokensIn": 34300,
+        "tokensOut": 474,
+        "costUsd": 0.39,
+        "premiumRequests": 0,
+        "numTurns": 6,
+        "durationMs": 90000,
+        "truncated": false,
+        "missingFields": []
+      },
+      {
+        "report": {
+          "lane": "decision-alignment",
+          "gradeCounts": {
+            "A": 1
+          },
+          "adverseVerdicts": 0,
+          "gateCausing": 0,
+          "overridden": 0,
+          "upheld": 0,
+          "unresolved": 0,
+          "respecConverged": 0,
+          "respecUnconverged": 0,
+          "respecNoFollowUp": 0,
+          "runs": 1,
+          "runsFromFallback": 0,
+          "meanCostUsd": 0.46,
+          "meanDurationMs": 105000
+        },
+        "usage": {
+          "lane": "decision-alignment",
+          "beadId": "pow-7hzw",
+          "fromFallback": false,
+          "costUsd": 0.46,
+          "durationMs": 105000
+        },
+        "gateDisposition": null,
+        "rubricId": "decision-alignment",
+        "nodePath": "pow-7hzw/spec_review/decision-alignment",
+        "gating": false,
+        "grade": "A",
+        "transport": "file",
+        "rationale": "the decision-alignment lane said so",
+        "finding": null,
+        "owner": null,
+        "refinement": null,
+        "model": "sonnet",
+        "tokensIn": 36000,
+        "tokensOut": 511,
+        "costUsd": 0.46,
+        "premiumRequests": 0,
+        "numTurns": 7,
+        "durationMs": 105000,
+        "truncated": false,
+        "missingFields": []
+      },
+      {
+        "report": {
+          "lane": "acceptance-testability",
+          "gradeCounts": {
+            "D": 1
+          },
+          "adverseVerdicts": 1,
+          "gateCausing": 1,
+          "overridden": 1,
+          "upheld": 0,
+          "unresolved": 0,
+          "respecConverged": 0,
+          "respecUnconverged": 0,
+          "respecNoFollowUp": 1,
+          "runs": 1,
+          "runsFromFallback": 0,
+          "meanCostUsd": 0.53,
+          "meanDurationMs": 120000
+        },
+        "usage": {
+          "lane": "acceptance-testability",
+          "beadId": "pow-7hzw",
+          "fromFallback": false,
+          "costUsd": 0.53,
+          "durationMs": 120000
+        },
+        "gateDisposition": "overridden",
+        "rubricId": "acceptance-testability",
+        "nodePath": "pow-7hzw/spec_review/acceptance-testability",
+        "gating": false,
+        "grade": "D",
+        "transport": "file",
+        "rationale": "the acceptance-testability lane said so",
+        "finding": null,
+        "owner": null,
+        "refinement": null,
+        "model": "sonnet",
+        "tokensIn": 37700,
+        "tokensOut": 548,
+        "costUsd": 0.53,
+        "premiumRequests": 0,
+        "numTurns": 8,
+        "durationMs": 120000,
+        "truncated": false,
+        "missingFields": []
+      },
+      {
+        "report": {
+          "lane": "plan-completeness",
+          "gradeCounts": {
+            "A": 1
+          },
+          "adverseVerdicts": 0,
+          "gateCausing": 0,
+          "overridden": 0,
+          "upheld": 0,
+          "unresolved": 0,
+          "respecConverged": 0,
+          "respecUnconverged": 0,
+          "respecNoFollowUp": 0,
+          "runs": 1,
+          "runsFromFallback": 0,
+          "meanCostUsd": 0.6,
+          "meanDurationMs": 135000
+        },
+        "usage": {
+          "lane": "plan-completeness",
+          "beadId": "pow-7hzw",
+          "fromFallback": false,
+          "costUsd": 0.6,
+          "durationMs": 135000
+        },
+        "gateDisposition": null,
+        "rubricId": "plan-completeness",
+        "nodePath": "pow-7hzw/spec_review/plan-completeness",
+        "gating": false,
+        "grade": "A",
+        "transport": "file",
+        "rationale": "the plan-completeness lane said so",
+        "finding": null,
+        "owner": null,
+        "refinement": null,
+        "model": "sonnet",
+        "tokensIn": 39400,
+        "tokensOut": 585,
+        "costUsd": 0.6,
+        "premiumRequests": 0,
+        "numTurns": 9,
+        "durationMs": 135000,
+        "truncated": false,
+        "missingFields": []
+      }
+    ],
+    "actionLaneIds": [
+      "coherence",
+      "acceptance-testability"
+    ],
+    "gateDisposition": "overridden",
+    "downstreamJoinKeys": {
+      "workBeadId": "pow-7hzw",
+      "round": "1",
+      "stage": "spec_review",
+      "routeNodePath": "pow-7hzw/spec_review/route",
+      "siblingScope": "pow-7hzw/spec_review/"
+    },
+    "actual": {
+      "samples": [
+        {
+          "lane": "spec-validation",
+          "beadId": "pow-7hzw",
+          "fromFallback": false,
+          "costUsd": 0.0,
+          "durationMs": 21000
+        },
+        {
+          "lane": "coherence",
+          "beadId": "pow-7hzw",
+          "fromFallback": false,
+          "costUsd": 0.39,
+          "durationMs": 90000
+        },
+        {
+          "lane": "decision-alignment",
+          "beadId": "pow-7hzw",
+          "fromFallback": false,
+          "costUsd": 0.46,
+          "durationMs": 105000
+        },
+        {
+          "lane": "acceptance-testability",
+          "beadId": "pow-7hzw",
+          "fromFallback": false,
+          "costUsd": 0.53,
+          "durationMs": 120000
+        },
+        {
+          "lane": "plan-completeness",
+          "beadId": "pow-7hzw",
+          "fromFallback": false,
+          "costUsd": 0.6,
+          "durationMs": 135000
+        }
+      ],
+      "contributingRunIds": [
+        "spec-validation",
+        "coherence",
+        "decision-alignment",
+        "acceptance-testability",
+        "plan-completeness"
+      ],
+      "missingLaneIds": [],
+      "tokensIn": 147400,
+      "tokensOut": 2118,
+      "costUsd": 1.98,
+      "premiumRequests": 0,
+      "numTurns": 30,
+      "durationMs": 471000
+    },
+    "classifier": {
+      "samples": [],
+      "contributingRunIds": [],
+      "missingLaneIds": [],
+      "tokensIn": 0,
+      "tokensOut": 0,
+      "costUsd": 0.0,
+      "premiumRequests": 0,
+      "numTurns": 0,
+      "durationMs": 0
+    },
+    "counterfactual": {
+      "samples": [
+        {
+          "lane": "spec-validation",
+          "beadId": "pow-7hzw",
+          "fromFallback": false,
+          "costUsd": 0.0,
+          "durationMs": 21000
+        },
+        {
+          "lane": "coherence",
+          "beadId": "pow-7hzw",
+          "fromFallback": false,
+          "costUsd": 0.39,
+          "durationMs": 90000
+        },
+        {
+          "lane": "decision-alignment",
+          "beadId": "pow-7hzw",
+          "fromFallback": false,
+          "costUsd": 0.46,
+          "durationMs": 105000
+        },
+        {
+          "lane": "acceptance-testability",
+          "beadId": "pow-7hzw",
+          "fromFallback": false,
+          "costUsd": 0.53,
+          "durationMs": 120000
+        },
+        {
+          "lane": "plan-completeness",
+          "beadId": "pow-7hzw",
+          "fromFallback": false,
+          "costUsd": 0.6,
+          "durationMs": 135000
+        }
+      ],
+      "contributingRunIds": [
+        "spec-validation",
+        "coherence",
+        "decision-alignment",
+        "acceptance-testability",
+        "plan-completeness"
+      ],
+      "missingLaneIds": [],
+      "tokensIn": 147400,
+      "tokensOut": 2118,
+      "costUsd": 1.98,
+      "premiumRequests": 0,
+      "numTurns": 30,
+      "durationMs": 471000
+    },
+    "truncated": false,
+    "missingFields": []
+  },
+  {
+    "version": 1,
+    "sampleId": "de4942fa36bd56d1883158e7ff0a87e092c07ba67ce3c58e0ef4f41c605d28b9",
+    "joinId": "15ad7dc36dffe1ce39e1cba7ae9f87b19233abf8612d49b9d80af7c64c6005cd",
+    "run": {
+      "version": 1,
+      "policyVersion": "1",
+      "stage": "spec_review",
+      "workBeadId": "pow-7hzw",
+      "round": 2,
+      "nodePath": "pow-7hzw/spec_review/committee-selection",
+      "selection": {
+        "policyVersion": "1",
+        "evidenceDigest": "1e2d7e7874d4ea21bc75ca5721ec26c236487355a9c2f46c2611c9d0ed7fcd4e",
+        "matchedRuleIds": [
+          "spec-intent",
+          "spec-decisions",
+          "spec-acceptance",
+          "spec-surface"
+        ],
+        "selectedRubricIds": [
+          "spec-validation",
+          "coherence",
+          "decision-alignment",
+          "acceptance-testability",
+          "plan-completeness"
+        ],
+        "source": "deterministic",
+        "laneInputDigests": {
+          "spec-validation": "d20997babe13a4519fccaf1cb738a5520ce3fda26fdccf4429b341758a2debb5",
+          "coherence": "4cdb3d13b7b05ab5e265ce147fff39de4803bb732a5e0e867adf0c6f51f6e3b2",
+          "decision-alignment": "80166e587b12f2737064e3f4f26e427c204b9a519c5b4bc0551176106f4b6445",
+          "acceptance-testability": "409975ce782e8e82a5bd9dcf5f9a5d5235ecc9085da0e5195e657bbaf294b286",
+          "plan-completeness": "535b01259084fd2ff7a0a094ad6eab0cd072b2f14136aad179ecf78c5eaa09c8"
+        }
+      },
+      "evidence": {
+        "stage": "spec_review",
+        "workBeadId": "pow-7hzw",
+        "round": 2,
+        "intent": [
+          "description:bead-field:pow-7hzw.description@sha256:d16c2da67583bdf1",
+          "design:bead-field:pow-7hzw.design@sha256:cc05d8ad49725198",
+          "title:bead-field:pow-7hzw.title@sha256:5fce9c94593d65b5"
+        ],
+        "acceptance": [
+          "acceptance_criteria:bead-field:pow-7hzw.acceptance_criteria@sha256:624b2afb5244d726"
+        ],
+        "paths": [
+          "packages/grid_assets/lib/src/code/committee_selection.dart|true|sha256:ea8755d6a0f03220"
+        ],
+        "decisions": [
+          "surface:power_station/packages/grid_assets/lib/src/code/committee_selection.dart|complete|decision-surface:power_station/packages/grid_assets/lib/src/code/committee_selection.dart@sha256:97dc828bd200bd5e"
+        ],
+        "priorArt": [
+          "hit:prior-art-hit:pow-1nl.1.1@sha256:c8b044f9d703ebaf",
+          "query:CommitteeSelectionPolicy|complete|prior-art-query:CommitteeSelectionPolicy@sha256:a0fd161505aff520"
+        ],
+        "context": [],
+        "flags": [],
+        "changedPaths": [],
+        "pinnedDiffDigest": "",
+        "missingEvidenceIds": [],
+        "truncated": false
+      },
+      "fullRubricIds": [
+        "spec-validation",
+        "coherence",
+        "decision-alignment",
+        "acceptance-testability",
+        "plan-completeness"
+      ],
+      "gatingRubricIds": [
+        "spec-validation"
+      ],
+      "attempts": [],
+      "missingFields": []
+    },
+    "route": {
+      "nodePath": "pow-7hzw/spec_review/route",
+      "type": "escalate",
+      "reason": "respec budget spent: coherence=D, plan-completeness=E",
+      "payload": {}
+    },
+    "selectedRubricIds": [
+      "spec-validation",
+      "coherence",
+      "decision-alignment",
+      "acceptance-testability",
+      "plan-completeness"
+    ],
+    "omittedRubricIds": [],
+    "lanes": [
+      {
+        "report": {
+          "lane": "spec-validation",
+          "gradeCounts": {
+            "A": 1
+          },
+          "adverseVerdicts": 0,
+          "gateCausing": 0,
+          "overridden": 0,
+          "upheld": 0,
+          "unresolved": 0,
+          "respecConverged": 0,
+          "respecUnconverged": 0,
+          "respecNoFollowUp": 0,
+          "runs": 1,
+          "runsFromFallback": 0,
+          "meanCostUsd": 0.0,
+          "meanDurationMs": 21000
+        },
+        "usage": {
+          "lane": "spec-validation",
+          "beadId": "pow-7hzw",
+          "fromFallback": false,
+          "costUsd": 0.0,
+          "durationMs": 21000
+        },
+        "gateDisposition": null,
+        "rubricId": "spec-validation",
+        "nodePath": "pow-7hzw/spec_review/spec-validation",
+        "gating": true,
+        "grade": "A",
+        "transport": "file",
+        "rationale": "the spec-validation lane said so",
+        "finding": null,
+        "owner": null,
+        "refinement": null,
+        "model": null,
+        "tokensIn": 0,
+        "tokensOut": 0,
+        "costUsd": 0.0,
+        "premiumRequests": 0,
+        "numTurns": 0,
+        "durationMs": 21000,
+        "truncated": false,
+        "missingFields": []
+      },
+      {
+        "report": {
+          "lane": "coherence",
+          "gradeCounts": {
+            "D": 1
+          },
+          "adverseVerdicts": 1,
+          "gateCausing": 1,
+          "overridden": 0,
+          "upheld": 1,
+          "unresolved": 0,
+          "respecConverged": 0,
+          "respecUnconverged": 0,
+          "respecNoFollowUp": 1,
+          "runs": 1,
+          "runsFromFallback": 0,
+          "meanCostUsd": 0.42,
+          "meanDurationMs": 90000
+        },
+        "usage": {
+          "lane": "coherence",
+          "beadId": "pow-7hzw",
+          "fromFallback": false,
+          "costUsd": 0.42,
+          "durationMs": 90000
+        },
+        "gateDisposition": "upheld",
+        "rubricId": "coherence",
+        "nodePath": "pow-7hzw/spec_review/coherence",
+        "gating": false,
+        "grade": "D",
+        "transport": "file",
+        "rationale": "the coherence lane said so",
+        "finding": null,
+        "owner": null,
+        "refinement": null,
+        "model": "sonnet",
+        "tokensIn": 35200,
+        "tokensOut": 474,
+        "costUsd": 0.42,
+        "premiumRequests": 0,
+        "numTurns": 6,
+        "durationMs": 90000,
+        "truncated": false,
+        "missingFields": []
+      },
+      {
+        "report": {
+          "lane": "decision-alignment",
+          "gradeCounts": {
+            "A": 1
+          },
+          "adverseVerdicts": 0,
+          "gateCausing": 0,
+          "overridden": 0,
+          "upheld": 0,
+          "unresolved": 0,
+          "respecConverged": 0,
+          "respecUnconverged": 0,
+          "respecNoFollowUp": 0,
+          "runs": 1,
+          "runsFromFallback": 0,
+          "meanCostUsd": 0.49,
+          "meanDurationMs": 105000
+        },
+        "usage": {
+          "lane": "decision-alignment",
+          "beadId": "pow-7hzw",
+          "fromFallback": false,
+          "costUsd": 0.49,
+          "durationMs": 105000
+        },
+        "gateDisposition": null,
+        "rubricId": "decision-alignment",
+        "nodePath": "pow-7hzw/spec_review/decision-alignment",
+        "gating": false,
+        "grade": "A",
+        "transport": "file",
+        "rationale": "the decision-alignment lane said so",
+        "finding": null,
+        "owner": null,
+        "refinement": null,
+        "model": "sonnet",
+        "tokensIn": 36900,
+        "tokensOut": 511,
+        "costUsd": 0.49,
+        "premiumRequests": 0,
+        "numTurns": 7,
+        "durationMs": 105000,
+        "truncated": false,
+        "missingFields": []
+      },
+      {
+        "report": {
+          "lane": "acceptance-testability",
+          "gradeCounts": {
+            "A": 1
+          },
+          "adverseVerdicts": 0,
+          "gateCausing": 0,
+          "overridden": 0,
+          "upheld": 0,
+          "unresolved": 0,
+          "respecConverged": 0,
+          "respecUnconverged": 0,
+          "respecNoFollowUp": 0,
+          "runs": 1,
+          "runsFromFallback": 0,
+          "meanCostUsd": 0.56,
+          "meanDurationMs": 120000
+        },
+        "usage": {
+          "lane": "acceptance-testability",
+          "beadId": "pow-7hzw",
+          "fromFallback": false,
+          "costUsd": 0.56,
+          "durationMs": 120000
+        },
+        "gateDisposition": null,
+        "rubricId": "acceptance-testability",
+        "nodePath": "pow-7hzw/spec_review/acceptance-testability",
+        "gating": false,
+        "grade": "A",
+        "transport": "file",
+        "rationale": "the acceptance-testability lane said so",
+        "finding": null,
+        "owner": null,
+        "refinement": null,
+        "model": "sonnet",
+        "tokensIn": 38600,
+        "tokensOut": 548,
+        "costUsd": 0.56,
+        "premiumRequests": 0,
+        "numTurns": 8,
+        "durationMs": 120000,
+        "truncated": false,
+        "missingFields": []
+      },
+      {
+        "report": {
+          "lane": "plan-completeness",
+          "gradeCounts": {
+            "E": 1
+          },
+          "adverseVerdicts": 0,
+          "gateCausing": 0,
+          "overridden": 0,
+          "upheld": 0,
+          "unresolved": 0,
+          "respecConverged": 0,
+          "respecUnconverged": 0,
+          "respecNoFollowUp": 0,
+          "runs": 1,
+          "runsFromFallback": 0,
+          "meanCostUsd": 0.63,
+          "meanDurationMs": 135000
+        },
+        "usage": {
+          "lane": "plan-completeness",
+          "beadId": "pow-7hzw",
+          "fromFallback": false,
+          "costUsd": 0.63,
+          "durationMs": 135000
+        },
+        "gateDisposition": null,
+        "rubricId": "plan-completeness",
+        "nodePath": "pow-7hzw/spec_review/plan-completeness",
+        "gating": false,
+        "grade": "E",
+        "transport": "file",
+        "rationale": "the plan-completeness lane said so",
+        "finding": null,
+        "owner": null,
+        "refinement": null,
+        "model": "sonnet",
+        "tokensIn": 40300,
+        "tokensOut": 585,
+        "costUsd": 0.63,
+        "premiumRequests": 0,
+        "numTurns": 9,
+        "durationMs": 135000,
+        "truncated": false,
+        "missingFields": []
+      }
+    ],
+    "actionLaneIds": [
+      "coherence",
+      "plan-completeness"
+    ],
+    "gateDisposition": "upheld",
+    "downstreamJoinKeys": {
+      "workBeadId": "pow-7hzw",
+      "round": "2",
+      "stage": "spec_review",
+      "routeNodePath": "pow-7hzw/spec_review/route",
+      "siblingScope": "pow-7hzw/spec_review/"
+    },
+    "actual": {
+      "samples": [
+        {
+          "lane": "spec-validation",
+          "beadId": "pow-7hzw",
+          "fromFallback": false,
+          "costUsd": 0.0,
+          "durationMs": 21000
+        },
+        {
+          "lane": "coherence",
+          "beadId": "pow-7hzw",
+          "fromFallback": false,
+          "costUsd": 0.42,
+          "durationMs": 90000
+        },
+        {
+          "lane": "decision-alignment",
+          "beadId": "pow-7hzw",
+          "fromFallback": false,
+          "costUsd": 0.49,
+          "durationMs": 105000
+        },
+        {
+          "lane": "acceptance-testability",
+          "beadId": "pow-7hzw",
+          "fromFallback": false,
+          "costUsd": 0.56,
+          "durationMs": 120000
+        },
+        {
+          "lane": "plan-completeness",
+          "beadId": "pow-7hzw",
+          "fromFallback": false,
+          "costUsd": 0.63,
+          "durationMs": 135000
+        }
+      ],
+      "contributingRunIds": [
+        "spec-validation",
+        "coherence",
+        "decision-alignment",
+        "acceptance-testability",
+        "plan-completeness"
+      ],
+      "missingLaneIds": [],
+      "tokensIn": 151000,
+      "tokensOut": 2118,
+      "costUsd": 2.1,
+      "premiumRequests": 0,
+      "numTurns": 30,
+      "durationMs": 471000
+    },
+    "classifier": {
+      "samples": [],
+      "contributingRunIds": [],
+      "missingLaneIds": [],
+      "tokensIn": 0,
+      "tokensOut": 0,
+      "costUsd": 0.0,
+      "premiumRequests": 0,
+      "numTurns": 0,
+      "durationMs": 0
+    },
+    "counterfactual": {
+      "samples": [
+        {
+          "lane": "spec-validation",
+          "beadId": "pow-7hzw",
+          "fromFallback": false,
+          "costUsd": 0.0,
+          "durationMs": 21000
+        },
+        {
+          "lane": "coherence",
+          "beadId": "pow-7hzw",
+          "fromFallback": false,
+          "costUsd": 0.42,
+          "durationMs": 90000
+        },
+        {
+          "lane": "decision-alignment",
+          "beadId": "pow-7hzw",
+          "fromFallback": false,
+          "costUsd": 0.49,
+          "durationMs": 105000
+        },
+        {
+          "lane": "acceptance-testability",
+          "beadId": "pow-7hzw",
+          "fromFallback": false,
+          "costUsd": 0.56,
+          "durationMs": 120000
+        },
+        {
+          "lane": "plan-completeness",
+          "beadId": "pow-7hzw",
+          "fromFallback": false,
+          "costUsd": 0.63,
+          "durationMs": 135000
+        }
+      ],
+      "contributingRunIds": [
+        "spec-validation",
+        "coherence",
+        "decision-alignment",
+        "acceptance-testability",
+        "plan-completeness"
+      ],
+      "missingLaneIds": [],
+      "tokensIn": 151000,
+      "tokensOut": 2118,
+      "costUsd": 2.1,
+      "premiumRequests": 0,
+      "numTurns": 30,
+      "durationMs": 471000
+    },
+    "truncated": false,
+    "missingFields": []
+  },
+  {
+    "version": 1,
+    "sampleId": "b34b695324ddd42a92bb33aba62882e313781892dcca0058e23e862b91ddc794",
+    "joinId": "7ccc2cef4f03dfc921ea14a42fa47687704bbe4f5383736f3d9d468697dbbfd1",
+    "run": {
+      "version": 1,
+      "policyVersion": "1",
+      "stage": "spec_review",
+      "workBeadId": "pow-7hzw",
+      "round": 3,
+      "nodePath": "pow-7hzw/spec_review/committee-selection",
+      "selection": {
+        "policyVersion": "1",
+        "evidenceDigest": "0cdb714cba168bd797ba8d529931980a28e6c3aecc470fbc39309b35f5a3db77",
+        "matchedRuleIds": [
+          "spec-intent",
+          "spec-decisions",
+          "spec-acceptance",
+          "spec-surface"
+        ],
+        "selectedRubricIds": [
+          "spec-validation",
+          "coherence",
+          "decision-alignment",
+          "acceptance-testability",
+          "plan-completeness"
+        ],
+        "source": "deterministic",
+        "laneInputDigests": {
+          "spec-validation": "431ccf482c949ad9f664fdcbe0f1a6e31fbc065b2fc0a1d07e50dee5596cdd71",
+          "coherence": "9f9b5a47775dccf05140843bf625db54692e4f540ffeb4ae0b026d3c60796d58",
+          "decision-alignment": "aea005d54e2036305960e4991bb5873c9e9d922a4f37f9a50b65a2b19c3b55a1",
+          "acceptance-testability": "409975ce782e8e82a5bd9dcf5f9a5d5235ecc9085da0e5195e657bbaf294b286",
+          "plan-completeness": "304d775b63149c33d4de55c7a44fbaa22bdd94a2371a91322e6d86430099d6a0"
+        }
+      },
+      "evidence": {
+        "stage": "spec_review",
+        "workBeadId": "pow-7hzw",
+        "round": 3,
+        "intent": [
+          "description:bead-field:pow-7hzw.description@sha256:d16c2da67583bdf1",
+          "design:bead-field:pow-7hzw.design@sha256:24576dcdfc7d7d1e",
+          "title:bead-field:pow-7hzw.title@sha256:5fce9c94593d65b5"
+        ],
+        "acceptance": [
+          "acceptance_criteria:bead-field:pow-7hzw.acceptance_criteria@sha256:624b2afb5244d726"
+        ],
+        "paths": [
+          "packages/grid_assets/lib/src/code/committee_selection.dart|true|sha256:ea8755d6a0f03220"
+        ],
+        "decisions": [
+          "surface:power_station/packages/grid_assets/lib/src/code/committee_selection.dart|complete|decision-surface:power_station/packages/grid_assets/lib/src/code/committee_selection.dart@sha256:97dc828bd200bd5e"
+        ],
+        "priorArt": [
+          "hit:prior-art-hit:pow-1nl.1.1@sha256:c8b044f9d703ebaf",
+          "query:CommitteeSelectionPolicy|complete|prior-art-query:CommitteeSelectionPolicy@sha256:a0fd161505aff520"
+        ],
+        "context": [],
+        "flags": [],
+        "changedPaths": [],
+        "pinnedDiffDigest": "",
+        "missingEvidenceIds": [],
+        "truncated": false
+      },
+      "fullRubricIds": [
+        "spec-validation",
+        "coherence",
+        "decision-alignment",
+        "acceptance-testability",
+        "plan-completeness"
+      ],
+      "gatingRubricIds": [
+        "spec-validation"
+      ],
+      "attempts": [],
+      "missingFields": []
+    },
+    "route": {
+      "nodePath": "pow-7hzw/spec_review/route",
+      "type": "advance",
+      "reason": "",
+      "payload": {
+        "verdict": "advance",
+        "grades": "spec-validation=A,coherence=B,decision-alignment=A,acceptance-testability=A,plan-completeness=A",
+        "spread": "1",
+        "rule": "all-approve",
+        "round": "3"
+      }
+    },
+    "selectedRubricIds": [
+      "spec-validation",
+      "coherence",
+      "decision-alignment",
+      "acceptance-testability",
+      "plan-completeness"
+    ],
+    "omittedRubricIds": [],
+    "lanes": [
+      {
+        "report": {
+          "lane": "spec-validation",
+          "gradeCounts": {
+            "A": 1
+          },
+          "adverseVerdicts": 0,
+          "gateCausing": 0,
+          "overridden": 0,
+          "upheld": 0,
+          "unresolved": 0,
+          "respecConverged": 0,
+          "respecUnconverged": 0,
+          "respecNoFollowUp": 0,
+          "runs": 1,
+          "runsFromFallback": 0,
+          "meanCostUsd": 0.0,
+          "meanDurationMs": 21000
+        },
+        "usage": {
+          "lane": "spec-validation",
+          "beadId": "pow-7hzw",
+          "fromFallback": false,
+          "costUsd": 0.0,
+          "durationMs": 21000
+        },
+        "gateDisposition": null,
+        "rubricId": "spec-validation",
+        "nodePath": "pow-7hzw/spec_review/spec-validation",
+        "gating": true,
+        "grade": "A",
+        "transport": "file",
+        "rationale": "the spec-validation lane said so",
+        "finding": null,
+        "owner": null,
+        "refinement": null,
+        "model": null,
+        "tokensIn": 0,
+        "tokensOut": 0,
+        "costUsd": 0.0,
+        "premiumRequests": 0,
+        "numTurns": 0,
+        "durationMs": 21000,
+        "truncated": false,
+        "missingFields": []
+      },
+      {
+        "report": {
+          "lane": "coherence",
+          "gradeCounts": {
+            "B": 1
+          },
+          "adverseVerdicts": 0,
+          "gateCausing": 0,
+          "overridden": 0,
+          "upheld": 0,
+          "unresolved": 0,
+          "respecConverged": 0,
+          "respecUnconverged": 0,
+          "respecNoFollowUp": 0,
+          "runs": 1,
+          "runsFromFallback": 0,
+          "meanCostUsd": 0.45,
+          "meanDurationMs": 90000
+        },
+        "usage": {
+          "lane": "coherence",
+          "beadId": "pow-7hzw",
+          "fromFallback": false,
+          "costUsd": 0.45,
+          "durationMs": 90000
+        },
+        "gateDisposition": null,
+        "rubricId": "coherence",
+        "nodePath": "pow-7hzw/spec_review/coherence",
+        "gating": false,
+        "grade": "B",
+        "transport": "file",
+        "rationale": "the coherence lane said so",
+        "finding": null,
+        "owner": null,
+        "refinement": null,
+        "model": "sonnet",
+        "tokensIn": 36100,
+        "tokensOut": 474,
+        "costUsd": 0.45,
+        "premiumRequests": 0,
+        "numTurns": 6,
+        "durationMs": 90000,
+        "truncated": false,
+        "missingFields": []
+      },
+      {
+        "report": {
+          "lane": "decision-alignment",
+          "gradeCounts": {
+            "A": 1
+          },
+          "adverseVerdicts": 0,
+          "gateCausing": 0,
+          "overridden": 0,
+          "upheld": 0,
+          "unresolved": 0,
+          "respecConverged": 0,
+          "respecUnconverged": 0,
+          "respecNoFollowUp": 0,
+          "runs": 1,
+          "runsFromFallback": 0,
+          "meanCostUsd": 0.52,
+          "meanDurationMs": 105000
+        },
+        "usage": {
+          "lane": "decision-alignment",
+          "beadId": "pow-7hzw",
+          "fromFallback": false,
+          "costUsd": 0.52,
+          "durationMs": 105000
+        },
+        "gateDisposition": null,
+        "rubricId": "decision-alignment",
+        "nodePath": "pow-7hzw/spec_review/decision-alignment",
+        "gating": false,
+        "grade": "A",
+        "transport": "file",
+        "rationale": "the decision-alignment lane said so",
+        "finding": null,
+        "owner": null,
+        "refinement": null,
+        "model": "sonnet",
+        "tokensIn": 37800,
+        "tokensOut": 511,
+        "costUsd": 0.52,
+        "premiumRequests": 0,
+        "numTurns": 7,
+        "durationMs": 105000,
+        "truncated": false,
+        "missingFields": []
+      },
+      {
+        "report": {
+          "lane": "acceptance-testability",
+          "gradeCounts": {
+            "A": 1
+          },
+          "adverseVerdicts": 0,
+          "gateCausing": 0,
+          "overridden": 0,
+          "upheld": 0,
+          "unresolved": 0,
+          "respecConverged": 0,
+          "respecUnconverged": 0,
+          "respecNoFollowUp": 0,
+          "runs": 1,
+          "runsFromFallback": 0,
+          "meanCostUsd": 0.59,
+          "meanDurationMs": 120000
+        },
+        "usage": {
+          "lane": "acceptance-testability",
+          "beadId": "pow-7hzw",
+          "fromFallback": false,
+          "costUsd": 0.59,
+          "durationMs": 120000
+        },
+        "gateDisposition": null,
+        "rubricId": "acceptance-testability",
+        "nodePath": "pow-7hzw/spec_review/acceptance-testability",
+        "gating": false,
+        "grade": "A",
+        "transport": "file",
+        "rationale": "the acceptance-testability lane said so",
+        "finding": null,
+        "owner": null,
+        "refinement": null,
+        "model": "sonnet",
+        "tokensIn": 39500,
+        "tokensOut": 548,
+        "costUsd": 0.59,
+        "premiumRequests": 0,
+        "numTurns": 8,
+        "durationMs": 120000,
+        "truncated": false,
+        "missingFields": []
+      },
+      {
+        "report": {
+          "lane": "plan-completeness",
+          "gradeCounts": {
+            "A": 1
+          },
+          "adverseVerdicts": 0,
+          "gateCausing": 0,
+          "overridden": 0,
+          "upheld": 0,
+          "unresolved": 0,
+          "respecConverged": 0,
+          "respecUnconverged": 0,
+          "respecNoFollowUp": 0,
+          "runs": 1,
+          "runsFromFallback": 0,
+          "meanCostUsd": 0.66,
+          "meanDurationMs": 135000
+        },
+        "usage": {
+          "lane": "plan-completeness",
+          "beadId": "pow-7hzw",
+          "fromFallback": false,
+          "costUsd": 0.66,
+          "durationMs": 135000
+        },
+        "gateDisposition": null,
+        "rubricId": "plan-completeness",
+        "nodePath": "pow-7hzw/spec_review/plan-completeness",
+        "gating": false,
+        "grade": "A",
+        "transport": "file",
+        "rationale": "the plan-completeness lane said so",
+        "finding": null,
+        "owner": null,
+        "refinement": null,
+        "model": "sonnet",
+        "tokensIn": 41200,
+        "tokensOut": 585,
+        "costUsd": 0.66,
+        "premiumRequests": 0,
+        "numTurns": 9,
+        "durationMs": 135000,
+        "truncated": false,
+        "missingFields": []
+      }
+    ],
+    "actionLaneIds": [],
+    "gateDisposition": null,
+    "downstreamJoinKeys": {
+      "workBeadId": "pow-7hzw",
+      "round": "3",
+      "stage": "spec_review",
+      "routeNodePath": "pow-7hzw/spec_review/route",
+      "siblingScope": "pow-7hzw/spec_review/"
+    },
+    "actual": {
+      "samples": [
+        {
+          "lane": "spec-validation",
+          "beadId": "pow-7hzw",
+          "fromFallback": false,
+          "costUsd": 0.0,
+          "durationMs": 21000
+        },
+        {
+          "lane": "coherence",
+          "beadId": "pow-7hzw",
+          "fromFallback": false,
+          "costUsd": 0.45,
+          "durationMs": 90000
+        },
+        {
+          "lane": "decision-alignment",
+          "beadId": "pow-7hzw",
+          "fromFallback": false,
+          "costUsd": 0.52,
+          "durationMs": 105000
+        },
+        {
+          "lane": "acceptance-testability",
+          "beadId": "pow-7hzw",
+          "fromFallback": false,
+          "costUsd": 0.59,
+          "durationMs": 120000
+        },
+        {
+          "lane": "plan-completeness",
+          "beadId": "pow-7hzw",
+          "fromFallback": false,
+          "costUsd": 0.66,
+          "durationMs": 135000
+        }
+      ],
+      "contributingRunIds": [
+        "spec-validation",
+        "coherence",
+        "decision-alignment",
+        "acceptance-testability",
+        "plan-completeness"
+      ],
+      "missingLaneIds": [],
+      "tokensIn": 154600,
+      "tokensOut": 2118,
+      "costUsd": 2.22,
+      "premiumRequests": 0,
+      "numTurns": 30,
+      "durationMs": 471000
+    },
+    "classifier": {
+      "samples": [],
+      "contributingRunIds": [],
+      "missingLaneIds": [],
+      "tokensIn": 0,
+      "tokensOut": 0,
+      "costUsd": 0.0,
+      "premiumRequests": 0,
+      "numTurns": 0,
+      "durationMs": 0
+    },
+    "counterfactual": {
+      "samples": [
+        {
+          "lane": "spec-validation",
+          "beadId": "pow-7hzw",
+          "fromFallback": false,
+          "costUsd": 0.0,
+          "durationMs": 21000
+        },
+        {
+          "lane": "coherence",
+          "beadId": "pow-7hzw",
+          "fromFallback": false,
+          "costUsd": 0.45,
+          "durationMs": 90000
+        },
+        {
+          "lane": "decision-alignment",
+          "beadId": "pow-7hzw",
+          "fromFallback": false,
+          "costUsd": 0.52,
+          "durationMs": 105000
+        },
+        {
+          "lane": "acceptance-testability",
+          "beadId": "pow-7hzw",
+          "fromFallback": false,
+          "costUsd": 0.59,
+          "durationMs": 120000
+        },
+        {
+          "lane": "plan-completeness",
+          "beadId": "pow-7hzw",
+          "fromFallback": false,
+          "costUsd": 0.66,
+          "durationMs": 135000
+        }
+      ],
+      "contributingRunIds": [
+        "spec-validation",
+        "coherence",
+        "decision-alignment",
+        "acceptance-testability",
+        "plan-completeness"
+      ],
+      "missingLaneIds": [],
+      "tokensIn": 154600,
+      "tokensOut": 2118,
+      "costUsd": 2.22,
+      "premiumRequests": 0,
+      "numTurns": 30,
+      "durationMs": 471000
+    },
+    "truncated": false,
+    "missingFields": []
+  },
+  {
+    "version": 1,
+    "sampleId": "f68ef577177fb5ed8ea6222d6f3c38462c1d4255b2d9d5b2d24447add11c0d47",
+    "joinId": "f7146ea44337c9478733135a9c018409ae7bd925ac3823344df580dc85a9b0ae",
+    "run": {
+      "version": 1,
+      "policyVersion": "1",
+      "stage": "spec_review",
+      "workBeadId": "pow-c19m",
+      "round": 1,
+      "nodePath": "pow-c19m/spec_review/committee-selection",
+      "selection": {
+        "policyVersion": "1",
+        "evidenceDigest": "88b9af9d137ab9329d691568c9561675c97fe0c2e4f6d54da338a228b8bf70c0",
+        "matchedRuleIds": [
+          "spec-intent",
+          "spec-decisions",
+          "spec-acceptance",
+          "spec-surface"
+        ],
+        "selectedRubricIds": [
+          "spec-validation",
+          "coherence",
+          "decision-alignment",
+          "acceptance-testability",
+          "plan-completeness"
+        ],
+        "source": "deterministic",
+        "laneInputDigests": {
+          "spec-validation": "3bca5cea029ca6b7172460de4f78e634762b09bfc9849a928c0a84d4787c1086",
+          "coherence": "a3de3e82e2342d53ae589102d1ea52a7f606ef062a7c81809f2ec747a5bed996",
+          "decision-alignment": "8efecb0b0b9261189a3f7605be6eb22fbbec74564f0e7a447d4feae40066cf53",
+          "acceptance-testability": "298ae61ab2fbf6854d76963a6e41512cf9ae9a79b21784f8f0ebbf078d59b3dd",
+          "plan-completeness": "78419954f0580e2e4f23717fe4977780a1a10345567c20b08d54e62fa471cabb"
+        }
+      },
+      "evidence": {
+        "stage": "spec_review",
+        "workBeadId": "pow-c19m",
+        "round": 1,
+        "intent": [
+          "description:bead-field:pow-c19m.description@sha256:1962eea2fa47dc45",
+          "design:bead-field:pow-c19m.design@sha256:5950703f7636aeed",
+          "title:bead-field:pow-c19m.title@sha256:af68633a21101091"
+        ],
+        "acceptance": [
+          "acceptance_criteria:bead-field:pow-c19m.acceptance_criteria@sha256:91ef1fa7ecd14d54"
+        ],
+        "paths": [
+          "packages/grid_assets/lib/src/code/committee_selection.dart|true|sha256:152b53600a475810"
+        ],
+        "decisions": [
+          "decision:decision-entry:power_station#committee-selection-activates-on-one-owner-ruling@sha256:75c2212afb6f3847",
+          "surface:power_station/packages/grid_assets/lib/src/code/committee_selection.dart|complete|decision-surface:power_station/packages/grid_assets/lib/src/code/committee_selection.dart@sha256:4c96dc15c19a4e57"
+        ],
+        "priorArt": [
+          "hit:prior-art-hit:pow-1nl.1.1@sha256:c8b044f9d703ebaf",
+          "query:CommitteeSelectionPolicy|complete|prior-art-query:CommitteeSelectionPolicy@sha256:f579d319c8049919"
+        ],
+        "context": [],
+        "flags": [],
+        "changedPaths": [],
+        "pinnedDiffDigest": "",
+        "missingEvidenceIds": [],
+        "truncated": false
+      },
+      "fullRubricIds": [
+        "spec-validation",
+        "coherence",
+        "decision-alignment",
+        "acceptance-testability",
+        "plan-completeness"
+      ],
+      "gatingRubricIds": [
+        "spec-validation"
+      ],
+      "attempts": [],
+      "missingFields": []
+    },
+    "route": {
+      "nodePath": "pow-c19m/spec_review/route",
+      "type": "advance",
+      "reason": "",
+      "payload": {
+        "verdict": "respec",
+        "grade": "F",
+        "rule": "respec",
+        "round": "1",
+        "rationale": "coherence=F, decision-alignment=D"
+      }
+    },
+    "selectedRubricIds": [
+      "spec-validation",
+      "coherence",
+      "decision-alignment",
+      "acceptance-testability",
+      "plan-completeness"
+    ],
+    "omittedRubricIds": [],
+    "lanes": [
+      {
+        "report": {
+          "lane": "spec-validation",
+          "gradeCounts": {
+            "A": 1
+          },
+          "adverseVerdicts": 0,
+          "gateCausing": 0,
+          "overridden": 0,
+          "upheld": 0,
+          "unresolved": 0,
+          "respecConverged": 0,
+          "respecUnconverged": 0,
+          "respecNoFollowUp": 0,
+          "runs": 1,
+          "runsFromFallback": 0,
+          "meanCostUsd": 0.0,
+          "meanDurationMs": 21000
+        },
+        "usage": {
+          "lane": "spec-validation",
+          "beadId": "pow-c19m",
+          "fromFallback": false,
+          "costUsd": 0.0,
+          "durationMs": 21000
+        },
+        "gateDisposition": null,
+        "rubricId": "spec-validation",
+        "nodePath": "pow-c19m/spec_review/spec-validation",
+        "gating": true,
+        "grade": "A",
+        "transport": "file",
+        "rationale": "the spec-validation lane said so",
+        "finding": null,
+        "owner": null,
+        "refinement": null,
+        "model": null,
+        "tokensIn": 0,
+        "tokensOut": 0,
+        "costUsd": 0.0,
+        "premiumRequests": 0,
+        "numTurns": 0,
+        "durationMs": 21000,
+        "truncated": false,
+        "missingFields": []
+      },
+      {
+        "report": {
+          "lane": "coherence",
+          "gradeCounts": {
+            "F": 1
+          },
+          "adverseVerdicts": 1,
+          "gateCausing": 1,
+          "overridden": 1,
+          "upheld": 0,
+          "unresolved": 0,
+          "respecConverged": 0,
+          "respecUnconverged": 0,
+          "respecNoFollowUp": 1,
+          "runs": 1,
+          "runsFromFallback": 0,
+          "meanCostUsd": 0.39,
+          "meanDurationMs": 90000
+        },
+        "usage": {
+          "lane": "coherence",
+          "beadId": "pow-c19m",
+          "fromFallback": false,
+          "costUsd": 0.39,
+          "durationMs": 90000
+        },
+        "gateDisposition": "overridden",
+        "rubricId": "coherence",
+        "nodePath": "pow-c19m/spec_review/coherence",
+        "gating": false,
+        "grade": "F",
+        "transport": "file",
+        "rationale": "the coherence lane said so",
+        "finding": null,
+        "owner": null,
+        "refinement": null,
+        "model": "sonnet",
+        "tokensIn": 34300,
+        "tokensOut": 474,
+        "costUsd": 0.39,
+        "premiumRequests": 0,
+        "numTurns": 6,
+        "durationMs": 90000,
+        "truncated": false,
+        "missingFields": []
+      },
+      {
+        "report": {
+          "lane": "decision-alignment",
+          "gradeCounts": {
+            "D": 1
+          },
+          "adverseVerdicts": 1,
+          "gateCausing": 1,
+          "overridden": 1,
+          "upheld": 0,
+          "unresolved": 0,
+          "respecConverged": 0,
+          "respecUnconverged": 0,
+          "respecNoFollowUp": 1,
+          "runs": 1,
+          "runsFromFallback": 0,
+          "meanCostUsd": 0.46,
+          "meanDurationMs": 105000
+        },
+        "usage": {
+          "lane": "decision-alignment",
+          "beadId": "pow-c19m",
+          "fromFallback": false,
+          "costUsd": 0.46,
+          "durationMs": 105000
+        },
+        "gateDisposition": "overridden",
+        "rubricId": "decision-alignment",
+        "nodePath": "pow-c19m/spec_review/decision-alignment",
+        "gating": false,
+        "grade": "D",
+        "transport": "file",
+        "rationale": "the decision-alignment lane said so",
+        "finding": null,
+        "owner": null,
+        "refinement": null,
+        "model": "sonnet",
+        "tokensIn": 36000,
+        "tokensOut": 511,
+        "costUsd": 0.46,
+        "premiumRequests": 0,
+        "numTurns": 7,
+        "durationMs": 105000,
+        "truncated": false,
+        "missingFields": []
+      },
+      {
+        "report": {
+          "lane": "acceptance-testability",
+          "gradeCounts": {
+            "A": 1
+          },
+          "adverseVerdicts": 0,
+          "gateCausing": 0,
+          "overridden": 0,
+          "upheld": 0,
+          "unresolved": 0,
+          "respecConverged": 0,
+          "respecUnconverged": 0,
+          "respecNoFollowUp": 0,
+          "runs": 1,
+          "runsFromFallback": 0,
+          "meanCostUsd": 0.53,
+          "meanDurationMs": 120000
+        },
+        "usage": {
+          "lane": "acceptance-testability",
+          "beadId": "pow-c19m",
+          "fromFallback": false,
+          "costUsd": 0.53,
+          "durationMs": 120000
+        },
+        "gateDisposition": null,
+        "rubricId": "acceptance-testability",
+        "nodePath": "pow-c19m/spec_review/acceptance-testability",
+        "gating": false,
+        "grade": "A",
+        "transport": "file",
+        "rationale": "the acceptance-testability lane said so",
+        "finding": null,
+        "owner": null,
+        "refinement": null,
+        "model": "sonnet",
+        "tokensIn": 37700,
+        "tokensOut": 548,
+        "costUsd": 0.53,
+        "premiumRequests": 0,
+        "numTurns": 8,
+        "durationMs": 120000,
+        "truncated": false,
+        "missingFields": []
+      },
+      {
+        "report": {
+          "lane": "plan-completeness",
+          "gradeCounts": {
+            "A": 1
+          },
+          "adverseVerdicts": 0,
+          "gateCausing": 0,
+          "overridden": 0,
+          "upheld": 0,
+          "unresolved": 0,
+          "respecConverged": 0,
+          "respecUnconverged": 0,
+          "respecNoFollowUp": 0,
+          "runs": 1,
+          "runsFromFallback": 0,
+          "meanCostUsd": 0.6,
+          "meanDurationMs": 135000
+        },
+        "usage": {
+          "lane": "plan-completeness",
+          "beadId": "pow-c19m",
+          "fromFallback": false,
+          "costUsd": 0.6,
+          "durationMs": 135000
+        },
+        "gateDisposition": null,
+        "rubricId": "plan-completeness",
+        "nodePath": "pow-c19m/spec_review/plan-completeness",
+        "gating": false,
+        "grade": "A",
+        "transport": "file",
+        "rationale": "the plan-completeness lane said so",
+        "finding": null,
+        "owner": null,
+        "refinement": null,
+        "model": "sonnet",
+        "tokensIn": 39400,
+        "tokensOut": 585,
+        "costUsd": 0.6,
+        "premiumRequests": 0,
+        "numTurns": 9,
+        "durationMs": 135000,
+        "truncated": false,
+        "missingFields": []
+      }
+    ],
+    "actionLaneIds": [
+      "coherence",
+      "decision-alignment"
+    ],
+    "gateDisposition": "overridden",
+    "downstreamJoinKeys": {
+      "workBeadId": "pow-c19m",
+      "round": "1",
+      "stage": "spec_review",
+      "routeNodePath": "pow-c19m/spec_review/route",
+      "siblingScope": "pow-c19m/spec_review/"
+    },
+    "actual": {
+      "samples": [
+        {
+          "lane": "spec-validation",
+          "beadId": "pow-c19m",
+          "fromFallback": false,
+          "costUsd": 0.0,
+          "durationMs": 21000
+        },
+        {
+          "lane": "coherence",
+          "beadId": "pow-c19m",
+          "fromFallback": false,
+          "costUsd": 0.39,
+          "durationMs": 90000
+        },
+        {
+          "lane": "decision-alignment",
+          "beadId": "pow-c19m",
+          "fromFallback": false,
+          "costUsd": 0.46,
+          "durationMs": 105000
+        },
+        {
+          "lane": "acceptance-testability",
+          "beadId": "pow-c19m",
+          "fromFallback": false,
+          "costUsd": 0.53,
+          "durationMs": 120000
+        },
+        {
+          "lane": "plan-completeness",
+          "beadId": "pow-c19m",
+          "fromFallback": false,
+          "costUsd": 0.6,
+          "durationMs": 135000
+        }
+      ],
+      "contributingRunIds": [
+        "spec-validation",
+        "coherence",
+        "decision-alignment",
+        "acceptance-testability",
+        "plan-completeness"
+      ],
+      "missingLaneIds": [],
+      "tokensIn": 147400,
+      "tokensOut": 2118,
+      "costUsd": 1.98,
+      "premiumRequests": 0,
+      "numTurns": 30,
+      "durationMs": 471000
+    },
+    "classifier": {
+      "samples": [],
+      "contributingRunIds": [],
+      "missingLaneIds": [],
+      "tokensIn": 0,
+      "tokensOut": 0,
+      "costUsd": 0.0,
+      "premiumRequests": 0,
+      "numTurns": 0,
+      "durationMs": 0
+    },
+    "counterfactual": {
+      "samples": [
+        {
+          "lane": "spec-validation",
+          "beadId": "pow-c19m",
+          "fromFallback": false,
+          "costUsd": 0.0,
+          "durationMs": 21000
+        },
+        {
+          "lane": "coherence",
+          "beadId": "pow-c19m",
+          "fromFallback": false,
+          "costUsd": 0.39,
+          "durationMs": 90000
+        },
+        {
+          "lane": "decision-alignment",
+          "beadId": "pow-c19m",
+          "fromFallback": false,
+          "costUsd": 0.46,
+          "durationMs": 105000
+        },
+        {
+          "lane": "acceptance-testability",
+          "beadId": "pow-c19m",
+          "fromFallback": false,
+          "costUsd": 0.53,
+          "durationMs": 120000
+        },
+        {
+          "lane": "plan-completeness",
+          "beadId": "pow-c19m",
+          "fromFallback": false,
+          "costUsd": 0.6,
+          "durationMs": 135000
+        }
+      ],
+      "contributingRunIds": [
+        "spec-validation",
+        "coherence",
+        "decision-alignment",
+        "acceptance-testability",
+        "plan-completeness"
+      ],
+      "missingLaneIds": [],
+      "tokensIn": 147400,
+      "tokensOut": 2118,
+      "costUsd": 1.98,
+      "premiumRequests": 0,
+      "numTurns": 30,
+      "durationMs": 471000
+    },
+    "truncated": false,
+    "missingFields": []
+  },
+  {
+    "version": 1,
+    "sampleId": "1337a7c2309884ce920e1d635d711ce5863b0c842fae82861b51952c415f2e6c",
+    "joinId": "000dfc9a75faa45de20c90041c42cf73be6ddcdae29fc97f1cad7b3dc3e64ead",
+    "run": {
+      "version": 1,
+      "policyVersion": "1",
+      "stage": "spec_review",
+      "workBeadId": "pow-c19m",
+      "round": 2,
+      "nodePath": "pow-c19m/spec_review/committee-selection",
+      "selection": {
+        "policyVersion": "1",
+        "evidenceDigest": "581e17681a7d2f922f3e5e3e490f635f0bb0b65584424fee8c67b28b059cd479",
+        "matchedRuleIds": [
+          "spec-intent",
+          "spec-decisions",
+          "spec-acceptance",
+          "spec-surface"
+        ],
+        "selectedRubricIds": [
+          "spec-validation",
+          "coherence",
+          "decision-alignment",
+          "acceptance-testability",
+          "plan-completeness"
+        ],
+        "source": "deterministic",
+        "laneInputDigests": {
+          "spec-validation": "9b1f719928dea4954f042933593fea8dd37cb532ba06cf2f789a6208d1031983",
+          "coherence": "10522e8ddfe14e6c52ad3c23750b8e127b9359ecc78d65eed411b740610c116a",
+          "decision-alignment": "d5d641568594bd6538f153020d668892a83b19dbca1e749a7ae6bf42572c478e",
+          "acceptance-testability": "298ae61ab2fbf6854d76963a6e41512cf9ae9a79b21784f8f0ebbf078d59b3dd",
+          "plan-completeness": "03d927e7f41531bd9bdad66aa6d1ab7ce8e37ef72461d94713d890f500928889"
+        }
+      },
+      "evidence": {
+        "stage": "spec_review",
+        "workBeadId": "pow-c19m",
+        "round": 2,
+        "intent": [
+          "description:bead-field:pow-c19m.description@sha256:1962eea2fa47dc45",
+          "design:bead-field:pow-c19m.design@sha256:2e595d1f08e5b900",
+          "title:bead-field:pow-c19m.title@sha256:af68633a21101091"
+        ],
+        "acceptance": [
+          "acceptance_criteria:bead-field:pow-c19m.acceptance_criteria@sha256:91ef1fa7ecd14d54"
+        ],
+        "paths": [
+          "packages/grid_assets/lib/src/code/committee_selection.dart|true|sha256:152b53600a475810"
+        ],
+        "decisions": [
+          "decision:decision-entry:power_station#committee-selection-activates-on-one-owner-ruling@sha256:75c2212afb6f3847",
+          "surface:power_station/packages/grid_assets/lib/src/code/committee_selection.dart|complete|decision-surface:power_station/packages/grid_assets/lib/src/code/committee_selection.dart@sha256:4c96dc15c19a4e57"
+        ],
+        "priorArt": [
+          "hit:prior-art-hit:pow-1nl.1.1@sha256:c8b044f9d703ebaf",
+          "query:CommitteeSelectionPolicy|complete|prior-art-query:CommitteeSelectionPolicy@sha256:f579d319c8049919"
+        ],
+        "context": [],
+        "flags": [],
+        "changedPaths": [],
+        "pinnedDiffDigest": "",
+        "missingEvidenceIds": [],
+        "truncated": false
+      },
+      "fullRubricIds": [
+        "spec-validation",
+        "coherence",
+        "decision-alignment",
+        "acceptance-testability",
+        "plan-completeness"
+      ],
+      "gatingRubricIds": [
+        "spec-validation"
+      ],
+      "attempts": [],
+      "missingFields": []
+    },
+    "route": {
+      "nodePath": "pow-c19m/spec_review/route",
+      "type": "advance",
+      "reason": "",
+      "payload": {
+        "verdict": "advance",
+        "grades": "spec-validation=A,coherence=A,decision-alignment=A,acceptance-testability=A,plan-completeness=B",
+        "spread": "1",
+        "rule": "all-approve",
+        "round": "2"
+      }
+    },
+    "selectedRubricIds": [
+      "spec-validation",
+      "coherence",
+      "decision-alignment",
+      "acceptance-testability",
+      "plan-completeness"
+    ],
+    "omittedRubricIds": [],
+    "lanes": [
+      {
+        "report": {
+          "lane": "spec-validation",
+          "gradeCounts": {
+            "A": 1
+          },
+          "adverseVerdicts": 0,
+          "gateCausing": 0,
+          "overridden": 0,
+          "upheld": 0,
+          "unresolved": 0,
+          "respecConverged": 0,
+          "respecUnconverged": 0,
+          "respecNoFollowUp": 0,
+          "runs": 1,
+          "runsFromFallback": 0,
+          "meanCostUsd": 0.0,
+          "meanDurationMs": 21000
+        },
+        "usage": {
+          "lane": "spec-validation",
+          "beadId": "pow-c19m",
+          "fromFallback": false,
+          "costUsd": 0.0,
+          "durationMs": 21000
+        },
+        "gateDisposition": null,
+        "rubricId": "spec-validation",
+        "nodePath": "pow-c19m/spec_review/spec-validation",
+        "gating": true,
+        "grade": "A",
+        "transport": "file",
+        "rationale": "the spec-validation lane said so",
+        "finding": null,
+        "owner": null,
+        "refinement": null,
+        "model": null,
+        "tokensIn": 0,
+        "tokensOut": 0,
+        "costUsd": 0.0,
+        "premiumRequests": 0,
+        "numTurns": 0,
+        "durationMs": 21000,
+        "truncated": false,
+        "missingFields": []
+      },
+      {
+        "report": {
+          "lane": "coherence",
+          "gradeCounts": {
+            "A": 1
+          },
+          "adverseVerdicts": 0,
+          "gateCausing": 0,
+          "overridden": 0,
+          "upheld": 0,
+          "unresolved": 0,
+          "respecConverged": 0,
+          "respecUnconverged": 0,
+          "respecNoFollowUp": 0,
+          "runs": 1,
+          "runsFromFallback": 0,
+          "meanCostUsd": 0.42,
+          "meanDurationMs": 90000
+        },
+        "usage": {
+          "lane": "coherence",
+          "beadId": "pow-c19m",
+          "fromFallback": false,
+          "costUsd": 0.42,
+          "durationMs": 90000
+        },
+        "gateDisposition": null,
+        "rubricId": "coherence",
+        "nodePath": "pow-c19m/spec_review/coherence",
+        "gating": false,
+        "grade": "A",
+        "transport": "file",
+        "rationale": "the coherence lane said so",
+        "finding": null,
+        "owner": null,
+        "refinement": null,
+        "model": "sonnet",
+        "tokensIn": 35200,
+        "tokensOut": 474,
+        "costUsd": 0.42,
+        "premiumRequests": 0,
+        "numTurns": 6,
+        "durationMs": 90000,
+        "truncated": false,
+        "missingFields": []
+      },
+      {
+        "report": {
+          "lane": "decision-alignment",
+          "gradeCounts": {
+            "A": 1
+          },
+          "adverseVerdicts": 0,
+          "gateCausing": 0,
+          "overridden": 0,
+          "upheld": 0,
+          "unresolved": 0,
+          "respecConverged": 0,
+          "respecUnconverged": 0,
+          "respecNoFollowUp": 0,
+          "runs": 1,
+          "runsFromFallback": 0,
+          "meanCostUsd": 0.49,
+          "meanDurationMs": 105000
+        },
+        "usage": {
+          "lane": "decision-alignment",
+          "beadId": "pow-c19m",
+          "fromFallback": false,
+          "costUsd": 0.49,
+          "durationMs": 105000
+        },
+        "gateDisposition": null,
+        "rubricId": "decision-alignment",
+        "nodePath": "pow-c19m/spec_review/decision-alignment",
+        "gating": false,
+        "grade": "A",
+        "transport": "file",
+        "rationale": "the decision-alignment lane said so",
+        "finding": null,
+        "owner": null,
+        "refinement": null,
+        "model": "sonnet",
+        "tokensIn": 36900,
+        "tokensOut": 511,
+        "costUsd": 0.49,
+        "premiumRequests": 0,
+        "numTurns": 7,
+        "durationMs": 105000,
+        "truncated": false,
+        "missingFields": []
+      },
+      {
+        "report": {
+          "lane": "acceptance-testability",
+          "gradeCounts": {
+            "A": 1
+          },
+          "adverseVerdicts": 0,
+          "gateCausing": 0,
+          "overridden": 0,
+          "upheld": 0,
+          "unresolved": 0,
+          "respecConverged": 0,
+          "respecUnconverged": 0,
+          "respecNoFollowUp": 0,
+          "runs": 1,
+          "runsFromFallback": 0,
+          "meanCostUsd": 0.56,
+          "meanDurationMs": 120000
+        },
+        "usage": {
+          "lane": "acceptance-testability",
+          "beadId": "pow-c19m",
+          "fromFallback": false,
+          "costUsd": 0.56,
+          "durationMs": 120000
+        },
+        "gateDisposition": null,
+        "rubricId": "acceptance-testability",
+        "nodePath": "pow-c19m/spec_review/acceptance-testability",
+        "gating": false,
+        "grade": "A",
+        "transport": "file",
+        "rationale": "the acceptance-testability lane said so",
+        "finding": null,
+        "owner": null,
+        "refinement": null,
+        "model": "sonnet",
+        "tokensIn": 38600,
+        "tokensOut": 548,
+        "costUsd": 0.56,
+        "premiumRequests": 0,
+        "numTurns": 8,
+        "durationMs": 120000,
+        "truncated": false,
+        "missingFields": []
+      },
+      {
+        "report": {
+          "lane": "plan-completeness",
+          "gradeCounts": {
+            "B": 1
+          },
+          "adverseVerdicts": 0,
+          "gateCausing": 0,
+          "overridden": 0,
+          "upheld": 0,
+          "unresolved": 0,
+          "respecConverged": 0,
+          "respecUnconverged": 0,
+          "respecNoFollowUp": 0,
+          "runs": 1,
+          "runsFromFallback": 0,
+          "meanCostUsd": 0.63,
+          "meanDurationMs": 135000
+        },
+        "usage": {
+          "lane": "plan-completeness",
+          "beadId": "pow-c19m",
+          "fromFallback": false,
+          "costUsd": 0.63,
+          "durationMs": 135000
+        },
+        "gateDisposition": null,
+        "rubricId": "plan-completeness",
+        "nodePath": "pow-c19m/spec_review/plan-completeness",
+        "gating": false,
+        "grade": "B",
+        "transport": "file",
+        "rationale": "the plan-completeness lane said so",
+        "finding": null,
+        "owner": null,
+        "refinement": null,
+        "model": "sonnet",
+        "tokensIn": 40300,
+        "tokensOut": 585,
+        "costUsd": 0.63,
+        "premiumRequests": 0,
+        "numTurns": 9,
+        "durationMs": 135000,
+        "truncated": false,
+        "missingFields": []
+      }
+    ],
+    "actionLaneIds": [],
+    "gateDisposition": null,
+    "downstreamJoinKeys": {
+      "workBeadId": "pow-c19m",
+      "round": "2",
+      "stage": "spec_review",
+      "routeNodePath": "pow-c19m/spec_review/route",
+      "siblingScope": "pow-c19m/spec_review/"
+    },
+    "actual": {
+      "samples": [
+        {
+          "lane": "spec-validation",
+          "beadId": "pow-c19m",
+          "fromFallback": false,
+          "costUsd": 0.0,
+          "durationMs": 21000
+        },
+        {
+          "lane": "coherence",
+          "beadId": "pow-c19m",
+          "fromFallback": false,
+          "costUsd": 0.42,
+          "durationMs": 90000
+        },
+        {
+          "lane": "decision-alignment",
+          "beadId": "pow-c19m",
+          "fromFallback": false,
+          "costUsd": 0.49,
+          "durationMs": 105000
+        },
+        {
+          "lane": "acceptance-testability",
+          "beadId": "pow-c19m",
+          "fromFallback": false,
+          "costUsd": 0.56,
+          "durationMs": 120000
+        },
+        {
+          "lane": "plan-completeness",
+          "beadId": "pow-c19m",
+          "fromFallback": false,
+          "costUsd": 0.63,
+          "durationMs": 135000
+        }
+      ],
+      "contributingRunIds": [
+        "spec-validation",
+        "coherence",
+        "decision-alignment",
+        "acceptance-testability",
+        "plan-completeness"
+      ],
+      "missingLaneIds": [],
+      "tokensIn": 151000,
+      "tokensOut": 2118,
+      "costUsd": 2.1,
+      "premiumRequests": 0,
+      "numTurns": 30,
+      "durationMs": 471000
+    },
+    "classifier": {
+      "samples": [],
+      "contributingRunIds": [],
+      "missingLaneIds": [],
+      "tokensIn": 0,
+      "tokensOut": 0,
+      "costUsd": 0.0,
+      "premiumRequests": 0,
+      "numTurns": 0,
+      "durationMs": 0
+    },
+    "counterfactual": {
+      "samples": [
+        {
+          "lane": "spec-validation",
+          "beadId": "pow-c19m",
+          "fromFallback": false,
+          "costUsd": 0.0,
+          "durationMs": 21000
+        },
+        {
+          "lane": "coherence",
+          "beadId": "pow-c19m",
+          "fromFallback": false,
+          "costUsd": 0.42,
+          "durationMs": 90000
+        },
+        {
+          "lane": "decision-alignment",
+          "beadId": "pow-c19m",
+          "fromFallback": false,
+          "costUsd": 0.49,
+          "durationMs": 105000
+        },
+        {
+          "lane": "acceptance-testability",
+          "beadId": "pow-c19m",
+          "fromFallback": false,
+          "costUsd": 0.56,
+          "durationMs": 120000
+        },
+        {
+          "lane": "plan-completeness",
+          "beadId": "pow-c19m",
+          "fromFallback": false,
+          "costUsd": 0.63,
+          "durationMs": 135000
+        }
+      ],
+      "contributingRunIds": [
+        "spec-validation",
+        "coherence",
+        "decision-alignment",
+        "acceptance-testability",
+        "plan-completeness"
+      ],
+      "missingLaneIds": [],
+      "tokensIn": 151000,
+      "tokensOut": 2118,
+      "costUsd": 2.1,
+      "premiumRequests": 0,
+      "numTurns": 30,
+      "durationMs": 471000
+    },
+    "truncated": false,
+    "missingFields": []
+  },
+  {
+    "version": 1,
+    "sampleId": "76dc04ad1a552f17307d9843f50c258aa32fdcc35d9c7550c41a1e7a43405ac9",
+    "joinId": "bc6b0156dc446788c24c34cfbc38581bd3c0522628229379cc7ee919abf3552c",
+    "run": {
+      "version": 1,
+      "policyVersion": "1",
+      "stage": "code_review",
+      "workBeadId": "pow-e2rd",
+      "round": 1,
+      "nodePath": "pow-e2rd/review/committee-selection",
+      "selection": {
+        "policyVersion": "1",
+        "evidenceDigest": "75c4c8bf7ec0537e62b98f0b0b1cbf91149fa752350c761d6446582444e562fb",
+        "matchedRuleIds": [
+          "code-docs-metadata",
+          "code-decision-sensitive"
+        ],
+        "selectedRubricIds": [
+          "code-validation",
+          "declared-tests-present",
+          "spec-adherence",
+          "regression-risk"
+        ],
+        "source": "deterministic",
+        "laneInputDigests": {
+          "code-validation": "5470d6fc5c0a20d3628f5032cef814387de461c421d996ee8ea0f937ede08a4a",
+          "declared-tests-present": "53a0c551758b14b73e8331f643fbd79251f7a52f039069bd4141c939573ec38a",
+          "spec-adherence": "85d77985830188e0f9f18d2bd6d426fc676d235fa5989ced951b0b65b3db07c9",
+          "regression-risk": "8ec028dfddb8de4f39ff1472738f6c43ab4b609ed01230b9b9dfa61ce280236f",
+          "test-coverage": "5789f7da65fa2a1bdee971c468d40d930395b027b75aaf77593910f89cfeb0e0"
+        }
+      },
+      "evidence": {
+        "stage": "code_review",
+        "workBeadId": "pow-e2rd",
+        "round": 1,
+        "intent": [
+          "design:bead-field:pow-e2rd.design@sha256:e8f3a189127c39f3",
+          "title:bead-field:pow-e2rd.title@sha256:f51c65b33c890be6"
+        ],
+        "acceptance": [
+          "acceptance_criteria:bead-field:pow-e2rd.acceptance_criteria@sha256:1a67a1728bd39235"
+        ],
+        "paths": [],
+        "decisions": [
+          "surface:power_station/packages/grid_assets|complete|decision-surface:power_station/packages/grid_assets@sha256:136c178eea82fd4a"
+        ],
+        "priorArt": [],
+        "context": [],
+        "flags": [],
+        "changedPaths": [
+          "README.md",
+          "docs/decisions/committee-selection-activates-on-one-owner-ruling.md"
+        ],
+        "pinnedDiffDigest": "9addf902d66c3d5ef4b23845ef0a14bf2aef15251eb6eaa056af3f70a70ec1f9",
+        "missingEvidenceIds": [],
+        "truncated": false
+      },
+      "fullRubricIds": [
+        "code-validation",
+        "declared-tests-present",
+        "spec-adherence",
+        "regression-risk",
+        "test-coverage"
+      ],
+      "gatingRubricIds": [
+        "code-validation",
+        "declared-tests-present"
+      ],
+      "attempts": [],
+      "missingFields": []
+    },
+    "route": {
+      "nodePath": "pow-e2rd/review/route",
+      "type": "advance",
+      "reason": "",
+      "payload": {
+        "verdict": "advance",
+        "grades": "code-validation=A,declared-tests-present=A,spec-adherence=B,regression-risk=A,test-coverage=A",
+        "spread": "1",
+        "rule": "all-approve",
+        "round": "1"
+      }
+    },
+    "selectedRubricIds": [
+      "code-validation",
+      "declared-tests-present",
+      "spec-adherence",
+      "regression-risk"
+    ],
+    "omittedRubricIds": [
+      "test-coverage"
+    ],
+    "lanes": [
+      {
+        "report": {
+          "lane": "code-validation",
+          "gradeCounts": {
+            "A": 1
+          },
+          "adverseVerdicts": 0,
+          "gateCausing": 0,
+          "overridden": 0,
+          "upheld": 0,
+          "unresolved": 0,
+          "respecConverged": 0,
+          "respecUnconverged": 0,
+          "respecNoFollowUp": 0,
+          "runs": 1,
+          "runsFromFallback": 0,
+          "meanCostUsd": 0.0,
+          "meanDurationMs": 21000
+        },
+        "usage": {
+          "lane": "code-validation",
+          "beadId": "pow-e2rd",
+          "fromFallback": false,
+          "costUsd": 0.0,
+          "durationMs": 21000
+        },
+        "gateDisposition": null,
+        "rubricId": "code-validation",
+        "nodePath": "pow-e2rd/review/code-validation",
+        "gating": true,
+        "grade": "A",
+        "transport": "file",
+        "rationale": "the code-validation lane said so",
+        "finding": null,
+        "owner": null,
+        "refinement": null,
+        "model": null,
+        "tokensIn": 0,
+        "tokensOut": 0,
+        "costUsd": 0.0,
+        "premiumRequests": 0,
+        "numTurns": 0,
+        "durationMs": 21000,
+        "truncated": false,
+        "missingFields": []
+      },
+      {
+        "report": {
+          "lane": "declared-tests-present",
+          "gradeCounts": {
+            "A": 1
+          },
+          "adverseVerdicts": 0,
+          "gateCausing": 0,
+          "overridden": 0,
+          "upheld": 0,
+          "unresolved": 0,
+          "respecConverged": 0,
+          "respecUnconverged": 0,
+          "respecNoFollowUp": 0,
+          "runs": 1,
+          "runsFromFallback": 0,
+          "meanCostUsd": 0.0,
+          "meanDurationMs": 22000
+        },
+        "usage": {
+          "lane": "declared-tests-present",
+          "beadId": "pow-e2rd",
+          "fromFallback": false,
+          "costUsd": 0.0,
+          "durationMs": 22000
+        },
+        "gateDisposition": null,
+        "rubricId": "declared-tests-present",
+        "nodePath": "pow-e2rd/review/declared-tests-present",
+        "gating": true,
+        "grade": "A",
+        "transport": "file",
+        "rationale": "the declared-tests-present lane said so",
+        "finding": null,
+        "owner": null,
+        "refinement": null,
+        "model": null,
+        "tokensIn": 0,
+        "tokensOut": 0,
+        "costUsd": 0.0,
+        "premiumRequests": 0,
+        "numTurns": 0,
+        "durationMs": 22000,
+        "truncated": false,
+        "missingFields": []
+      },
+      {
+        "report": {
+          "lane": "spec-adherence",
+          "gradeCounts": {
+            "B": 1
+          },
+          "adverseVerdicts": 0,
+          "gateCausing": 0,
+          "overridden": 0,
+          "upheld": 0,
+          "unresolved": 0,
+          "respecConverged": 0,
+          "respecUnconverged": 0,
+          "respecNoFollowUp": 0,
+          "runs": 1,
+          "runsFromFallback": 0,
+          "meanCostUsd": 0.46,
+          "meanDurationMs": 105000
+        },
+        "usage": {
+          "lane": "spec-adherence",
+          "beadId": "pow-e2rd",
+          "fromFallback": false,
+          "costUsd": 0.46,
+          "durationMs": 105000
+        },
+        "gateDisposition": null,
+        "rubricId": "spec-adherence",
+        "nodePath": "pow-e2rd/review/spec-adherence",
+        "gating": false,
+        "grade": "B",
+        "transport": "file",
+        "rationale": "the spec-adherence lane said so",
+        "finding": null,
+        "owner": null,
+        "refinement": null,
+        "model": "sonnet",
+        "tokensIn": 36000,
+        "tokensOut": 511,
+        "costUsd": 0.46,
+        "premiumRequests": 0,
+        "numTurns": 7,
+        "durationMs": 105000,
+        "truncated": false,
+        "missingFields": []
+      },
+      {
+        "report": {
+          "lane": "regression-risk",
+          "gradeCounts": {
+            "A": 1
+          },
+          "adverseVerdicts": 0,
+          "gateCausing": 0,
+          "overridden": 0,
+          "upheld": 0,
+          "unresolved": 0,
+          "respecConverged": 0,
+          "respecUnconverged": 0,
+          "respecNoFollowUp": 0,
+          "runs": 1,
+          "runsFromFallback": 0,
+          "meanCostUsd": 0.53,
+          "meanDurationMs": 120000
+        },
+        "usage": {
+          "lane": "regression-risk",
+          "beadId": "pow-e2rd",
+          "fromFallback": false,
+          "costUsd": 0.53,
+          "durationMs": 120000
+        },
+        "gateDisposition": null,
+        "rubricId": "regression-risk",
+        "nodePath": "pow-e2rd/review/regression-risk",
+        "gating": false,
+        "grade": "A",
+        "transport": "file",
+        "rationale": "the regression-risk lane said so",
+        "finding": null,
+        "owner": null,
+        "refinement": null,
+        "model": "sonnet",
+        "tokensIn": 37700,
+        "tokensOut": 548,
+        "costUsd": 0.53,
+        "premiumRequests": 0,
+        "numTurns": 8,
+        "durationMs": 120000,
+        "truncated": false,
+        "missingFields": []
+      },
+      {
+        "report": {
+          "lane": "test-coverage",
+          "gradeCounts": {
+            "A": 1
+          },
+          "adverseVerdicts": 0,
+          "gateCausing": 0,
+          "overridden": 0,
+          "upheld": 0,
+          "unresolved": 0,
+          "respecConverged": 0,
+          "respecUnconverged": 0,
+          "respecNoFollowUp": 0,
+          "runs": 1,
+          "runsFromFallback": 0,
+          "meanCostUsd": 0.6,
+          "meanDurationMs": 135000
+        },
+        "usage": {
+          "lane": "test-coverage",
+          "beadId": "pow-e2rd",
+          "fromFallback": false,
+          "costUsd": 0.6,
+          "durationMs": 135000
+        },
+        "gateDisposition": null,
+        "rubricId": "test-coverage",
+        "nodePath": "pow-e2rd/review/test-coverage",
+        "gating": false,
+        "grade": "A",
+        "transport": "file",
+        "rationale": "the test-coverage lane said so",
+        "finding": null,
+        "owner": null,
+        "refinement": null,
+        "model": "sonnet",
+        "tokensIn": 39400,
+        "tokensOut": 585,
+        "costUsd": 0.6,
+        "premiumRequests": 0,
+        "numTurns": 9,
+        "durationMs": 135000,
+        "truncated": false,
+        "missingFields": []
+      }
+    ],
+    "actionLaneIds": [],
+    "gateDisposition": null,
+    "downstreamJoinKeys": {
+      "workBeadId": "pow-e2rd",
+      "round": "1",
+      "stage": "code_review",
+      "routeNodePath": "pow-e2rd/review/route",
+      "siblingScope": "pow-e2rd/review/"
+    },
+    "actual": {
+      "samples": [
+        {
+          "lane": "code-validation",
+          "beadId": "pow-e2rd",
+          "fromFallback": false,
+          "costUsd": 0.0,
+          "durationMs": 21000
+        },
+        {
+          "lane": "declared-tests-present",
+          "beadId": "pow-e2rd",
+          "fromFallback": false,
+          "costUsd": 0.0,
+          "durationMs": 22000
+        },
+        {
+          "lane": "spec-adherence",
+          "beadId": "pow-e2rd",
+          "fromFallback": false,
+          "costUsd": 0.46,
+          "durationMs": 105000
+        },
+        {
+          "lane": "regression-risk",
+          "beadId": "pow-e2rd",
+          "fromFallback": false,
+          "costUsd": 0.53,
+          "durationMs": 120000
+        },
+        {
+          "lane": "test-coverage",
+          "beadId": "pow-e2rd",
+          "fromFallback": false,
+          "costUsd": 0.6,
+          "durationMs": 135000
+        }
+      ],
+      "contributingRunIds": [
+        "code-validation",
+        "declared-tests-present",
+        "spec-adherence",
+        "regression-risk",
+        "test-coverage"
+      ],
+      "missingLaneIds": [],
+      "tokensIn": 113100,
+      "tokensOut": 1644,
+      "costUsd": 1.5899999999999999,
+      "premiumRequests": 0,
+      "numTurns": 24,
+      "durationMs": 403000
+    },
+    "classifier": {
+      "samples": [],
+      "contributingRunIds": [],
+      "missingLaneIds": [],
+      "tokensIn": 0,
+      "tokensOut": 0,
+      "costUsd": 0.0,
+      "premiumRequests": 0,
+      "numTurns": 0,
+      "durationMs": 0
+    },
+    "counterfactual": {
+      "samples": [
+        {
+          "lane": "code-validation",
+          "beadId": "pow-e2rd",
+          "fromFallback": false,
+          "costUsd": 0.0,
+          "durationMs": 21000
+        },
+        {
+          "lane": "declared-tests-present",
+          "beadId": "pow-e2rd",
+          "fromFallback": false,
+          "costUsd": 0.0,
+          "durationMs": 22000
+        },
+        {
+          "lane": "spec-adherence",
+          "beadId": "pow-e2rd",
+          "fromFallback": false,
+          "costUsd": 0.46,
+          "durationMs": 105000
+        },
+        {
+          "lane": "regression-risk",
+          "beadId": "pow-e2rd",
+          "fromFallback": false,
+          "costUsd": 0.53,
+          "durationMs": 120000
+        }
+      ],
+      "contributingRunIds": [
+        "code-validation",
+        "declared-tests-present",
+        "spec-adherence",
+        "regression-risk"
+      ],
+      "missingLaneIds": [],
+      "tokensIn": 73700,
+      "tokensOut": 1059,
+      "costUsd": 0.99,
+      "premiumRequests": 0,
+      "numTurns": 15,
+      "durationMs": 268000
+    },
+    "truncated": false,
+    "missingFields": []
+  },
+  {
+    "version": 1,
+    "sampleId": "d93b80fb454ede0e679c0b07e14c5d683f2519bea53f4536e6a9d54db5d2492f",
+    "joinId": "cb76bc805c9462e95a0ba35c70f19ce229774b57aa67b80466f4b82fca38921b",
+    "run": {
+      "version": 1,
+      "policyVersion": "1",
+      "stage": "code_review",
+      "workBeadId": "pow-f4tc",
+      "round": 1,
+      "nodePath": "pow-f4tc/review/committee-selection",
+      "selection": {
+        "policyVersion": "1",
+        "evidenceDigest": "b4a5446792f0afe558f8514197768118e9a30df6cf315f922bf0e009ec262367",
+        "matchedRuleIds": [
+          "code-tests",
+          "code-decision-sensitive"
+        ],
+        "selectedRubricIds": [
+          "code-validation",
+          "declared-tests-present",
+          "spec-adherence",
+          "regression-risk",
+          "test-coverage"
+        ],
+        "source": "deterministic",
+        "laneInputDigests": {
+          "code-validation": "99632846e8c2af2577f66ff883de40b09261857086810a88cb88d5663b6aa7a2",
+          "declared-tests-present": "26623574c81882f2868adb5e0207147f945ba0be3714aad958bfface53eb454f",
+          "spec-adherence": "9caa33ac9d5b0017f38767ea3cef5aa9ed426f9b252264e05a0152c46c7f905e",
+          "regression-risk": "deb43b5bc483180e841ebd67e34517d3f0c9bfdfb0026aaf1b49ff4bb4f897c4",
+          "test-coverage": "7371b6131a8f7c479845596c6f526d4b0e528e781b6e10e4ab13870e9321949b"
+        }
+      },
+      "evidence": {
+        "stage": "code_review",
+        "workBeadId": "pow-f4tc",
+        "round": 1,
+        "intent": [
+          "design:bead-field:pow-f4tc.design@sha256:24f90fd4c236319b",
+          "title:bead-field:pow-f4tc.title@sha256:c934ea59b1e29213"
+        ],
+        "acceptance": [
+          "acceptance_criteria:bead-field:pow-f4tc.acceptance_criteria@sha256:56ffcb3208452b24"
+        ],
+        "paths": [],
+        "decisions": [
+          "surface:power_station/packages/grid_assets|complete|decision-surface:power_station/packages/grid_assets@sha256:72a4eaec3daf51f5"
+        ],
+        "priorArt": [],
+        "context": [],
+        "flags": [],
+        "changedPaths": [
+          "packages/grid_assets/test/committee_selection_test.dart"
+        ],
+        "pinnedDiffDigest": "a3acb7abb38ca0b69f58fe114278d5bd4b1b67a12f6e6ddbf1b05197d1a2317e",
+        "missingEvidenceIds": [],
+        "truncated": false
+      },
+      "fullRubricIds": [
+        "code-validation",
+        "declared-tests-present",
+        "spec-adherence",
+        "regression-risk",
+        "test-coverage"
+      ],
+      "gatingRubricIds": [
+        "code-validation",
+        "declared-tests-present"
+      ],
+      "attempts": [],
+      "missingFields": []
+    },
+    "route": {
+      "nodePath": "pow-f4tc/review/route",
+      "type": "advance",
+      "reason": "",
+      "payload": {
+        "verdict": "advance",
+        "grades": "code-validation=A,declared-tests-present=A,spec-adherence=A,regression-risk=A,test-coverage=B",
+        "spread": "1",
+        "rule": "all-approve",
+        "round": "1"
+      }
+    },
+    "selectedRubricIds": [
+      "code-validation",
+      "declared-tests-present",
+      "spec-adherence",
+      "regression-risk",
+      "test-coverage"
+    ],
+    "omittedRubricIds": [],
+    "lanes": [
+      {
+        "report": {
+          "lane": "code-validation",
+          "gradeCounts": {
+            "A": 1
+          },
+          "adverseVerdicts": 0,
+          "gateCausing": 0,
+          "overridden": 0,
+          "upheld": 0,
+          "unresolved": 0,
+          "respecConverged": 0,
+          "respecUnconverged": 0,
+          "respecNoFollowUp": 0,
+          "runs": 1,
+          "runsFromFallback": 0,
+          "meanCostUsd": 0.0,
+          "meanDurationMs": 21000
+        },
+        "usage": {
+          "lane": "code-validation",
+          "beadId": "pow-f4tc",
+          "fromFallback": false,
+          "costUsd": 0.0,
+          "durationMs": 21000
+        },
+        "gateDisposition": null,
+        "rubricId": "code-validation",
+        "nodePath": "pow-f4tc/review/code-validation",
+        "gating": true,
+        "grade": "A",
+        "transport": "file",
+        "rationale": "the code-validation lane said so",
+        "finding": null,
+        "owner": null,
+        "refinement": null,
+        "model": null,
+        "tokensIn": 0,
+        "tokensOut": 0,
+        "costUsd": 0.0,
+        "premiumRequests": 0,
+        "numTurns": 0,
+        "durationMs": 21000,
+        "truncated": false,
+        "missingFields": []
+      },
+      {
+        "report": {
+          "lane": "declared-tests-present",
+          "gradeCounts": {
+            "A": 1
+          },
+          "adverseVerdicts": 0,
+          "gateCausing": 0,
+          "overridden": 0,
+          "upheld": 0,
+          "unresolved": 0,
+          "respecConverged": 0,
+          "respecUnconverged": 0,
+          "respecNoFollowUp": 0,
+          "runs": 1,
+          "runsFromFallback": 0,
+          "meanCostUsd": 0.0,
+          "meanDurationMs": 22000
+        },
+        "usage": {
+          "lane": "declared-tests-present",
+          "beadId": "pow-f4tc",
+          "fromFallback": false,
+          "costUsd": 0.0,
+          "durationMs": 22000
+        },
+        "gateDisposition": null,
+        "rubricId": "declared-tests-present",
+        "nodePath": "pow-f4tc/review/declared-tests-present",
+        "gating": true,
+        "grade": "A",
+        "transport": "file",
+        "rationale": "the declared-tests-present lane said so",
+        "finding": null,
+        "owner": null,
+        "refinement": null,
+        "model": null,
+        "tokensIn": 0,
+        "tokensOut": 0,
+        "costUsd": 0.0,
+        "premiumRequests": 0,
+        "numTurns": 0,
+        "durationMs": 22000,
+        "truncated": false,
+        "missingFields": []
+      },
+      {
+        "report": {
+          "lane": "spec-adherence",
+          "gradeCounts": {
+            "A": 1
+          },
+          "adverseVerdicts": 0,
+          "gateCausing": 0,
+          "overridden": 0,
+          "upheld": 0,
+          "unresolved": 0,
+          "respecConverged": 0,
+          "respecUnconverged": 0,
+          "respecNoFollowUp": 0,
+          "runs": 1,
+          "runsFromFallback": 0,
+          "meanCostUsd": 0.46,
+          "meanDurationMs": 105000
+        },
+        "usage": {
+          "lane": "spec-adherence",
+          "beadId": "pow-f4tc",
+          "fromFallback": false,
+          "costUsd": 0.46,
+          "durationMs": 105000
+        },
+        "gateDisposition": null,
+        "rubricId": "spec-adherence",
+        "nodePath": "pow-f4tc/review/spec-adherence",
+        "gating": false,
+        "grade": "A",
+        "transport": "file",
+        "rationale": "the spec-adherence lane said so",
+        "finding": null,
+        "owner": null,
+        "refinement": null,
+        "model": "sonnet",
+        "tokensIn": 36000,
+        "tokensOut": 511,
+        "costUsd": 0.46,
+        "premiumRequests": 0,
+        "numTurns": 7,
+        "durationMs": 105000,
+        "truncated": false,
+        "missingFields": []
+      },
+      {
+        "report": {
+          "lane": "regression-risk",
+          "gradeCounts": {
+            "A": 1
+          },
+          "adverseVerdicts": 0,
+          "gateCausing": 0,
+          "overridden": 0,
+          "upheld": 0,
+          "unresolved": 0,
+          "respecConverged": 0,
+          "respecUnconverged": 0,
+          "respecNoFollowUp": 0,
+          "runs": 1,
+          "runsFromFallback": 0,
+          "meanCostUsd": 0.53,
+          "meanDurationMs": 120000
+        },
+        "usage": {
+          "lane": "regression-risk",
+          "beadId": "pow-f4tc",
+          "fromFallback": false,
+          "costUsd": 0.53,
+          "durationMs": 120000
+        },
+        "gateDisposition": null,
+        "rubricId": "regression-risk",
+        "nodePath": "pow-f4tc/review/regression-risk",
+        "gating": false,
+        "grade": "A",
+        "transport": "file",
+        "rationale": "the regression-risk lane said so",
+        "finding": null,
+        "owner": null,
+        "refinement": null,
+        "model": "sonnet",
+        "tokensIn": 37700,
+        "tokensOut": 548,
+        "costUsd": 0.53,
+        "premiumRequests": 0,
+        "numTurns": 8,
+        "durationMs": 120000,
+        "truncated": false,
+        "missingFields": []
+      },
+      {
+        "report": {
+          "lane": "test-coverage",
+          "gradeCounts": {
+            "B": 1
+          },
+          "adverseVerdicts": 0,
+          "gateCausing": 0,
+          "overridden": 0,
+          "upheld": 0,
+          "unresolved": 0,
+          "respecConverged": 0,
+          "respecUnconverged": 0,
+          "respecNoFollowUp": 0,
+          "runs": 1,
+          "runsFromFallback": 0,
+          "meanCostUsd": 0.6,
+          "meanDurationMs": 135000
+        },
+        "usage": {
+          "lane": "test-coverage",
+          "beadId": "pow-f4tc",
+          "fromFallback": false,
+          "costUsd": 0.6,
+          "durationMs": 135000
+        },
+        "gateDisposition": null,
+        "rubricId": "test-coverage",
+        "nodePath": "pow-f4tc/review/test-coverage",
+        "gating": false,
+        "grade": "B",
+        "transport": "file",
+        "rationale": "the test-coverage lane said so",
+        "finding": null,
+        "owner": null,
+        "refinement": null,
+        "model": "sonnet",
+        "tokensIn": 39400,
+        "tokensOut": 585,
+        "costUsd": 0.6,
+        "premiumRequests": 0,
+        "numTurns": 9,
+        "durationMs": 135000,
+        "truncated": false,
+        "missingFields": []
+      }
+    ],
+    "actionLaneIds": [],
+    "gateDisposition": null,
+    "downstreamJoinKeys": {
+      "workBeadId": "pow-f4tc",
+      "round": "1",
+      "stage": "code_review",
+      "routeNodePath": "pow-f4tc/review/route",
+      "siblingScope": "pow-f4tc/review/"
+    },
+    "actual": {
+      "samples": [
+        {
+          "lane": "code-validation",
+          "beadId": "pow-f4tc",
+          "fromFallback": false,
+          "costUsd": 0.0,
+          "durationMs": 21000
+        },
+        {
+          "lane": "declared-tests-present",
+          "beadId": "pow-f4tc",
+          "fromFallback": false,
+          "costUsd": 0.0,
+          "durationMs": 22000
+        },
+        {
+          "lane": "spec-adherence",
+          "beadId": "pow-f4tc",
+          "fromFallback": false,
+          "costUsd": 0.46,
+          "durationMs": 105000
+        },
+        {
+          "lane": "regression-risk",
+          "beadId": "pow-f4tc",
+          "fromFallback": false,
+          "costUsd": 0.53,
+          "durationMs": 120000
+        },
+        {
+          "lane": "test-coverage",
+          "beadId": "pow-f4tc",
+          "fromFallback": false,
+          "costUsd": 0.6,
+          "durationMs": 135000
+        }
+      ],
+      "contributingRunIds": [
+        "code-validation",
+        "declared-tests-present",
+        "spec-adherence",
+        "regression-risk",
+        "test-coverage"
+      ],
+      "missingLaneIds": [],
+      "tokensIn": 113100,
+      "tokensOut": 1644,
+      "costUsd": 1.5899999999999999,
+      "premiumRequests": 0,
+      "numTurns": 24,
+      "durationMs": 403000
+    },
+    "classifier": {
+      "samples": [],
+      "contributingRunIds": [],
+      "missingLaneIds": [],
+      "tokensIn": 0,
+      "tokensOut": 0,
+      "costUsd": 0.0,
+      "premiumRequests": 0,
+      "numTurns": 0,
+      "durationMs": 0
+    },
+    "counterfactual": {
+      "samples": [
+        {
+          "lane": "code-validation",
+          "beadId": "pow-f4tc",
+          "fromFallback": false,
+          "costUsd": 0.0,
+          "durationMs": 21000
+        },
+        {
+          "lane": "declared-tests-present",
+          "beadId": "pow-f4tc",
+          "fromFallback": false,
+          "costUsd": 0.0,
+          "durationMs": 22000
+        },
+        {
+          "lane": "spec-adherence",
+          "beadId": "pow-f4tc",
+          "fromFallback": false,
+          "costUsd": 0.46,
+          "durationMs": 105000
+        },
+        {
+          "lane": "regression-risk",
+          "beadId": "pow-f4tc",
+          "fromFallback": false,
+          "costUsd": 0.53,
+          "durationMs": 120000
+        },
+        {
+          "lane": "test-coverage",
+          "beadId": "pow-f4tc",
+          "fromFallback": false,
+          "costUsd": 0.6,
+          "durationMs": 135000
+        }
+      ],
+      "contributingRunIds": [
+        "code-validation",
+        "declared-tests-present",
+        "spec-adherence",
+        "regression-risk",
+        "test-coverage"
+      ],
+      "missingLaneIds": [],
+      "tokensIn": 113100,
+      "tokensOut": 1644,
+      "costUsd": 1.5899999999999999,
+      "premiumRequests": 0,
+      "numTurns": 24,
+      "durationMs": 403000
+    },
+    "truncated": false,
+    "missingFields": []
+  },
+  {
+    "version": 1,
+    "sampleId": "9a8065bd5bc3ec7d315d0140e56ebbb505e37f22164c68ef30d07b89cb8b4482",
+    "joinId": "ebdf0bacbb45c675a1a91764ad66d2e9ad22f2d4b78e79450002e0775ccc318e",
+    "run": {
+      "version": 1,
+      "policyVersion": "1",
+      "stage": "code_review",
+      "workBeadId": "pow-g8vn",
+      "round": 1,
+      "nodePath": "pow-g8vn/review/committee-selection",
+      "selection": {
+        "policyVersion": "1",
+        "evidenceDigest": "6d997376241b43a44a35168dfd6eec9e242b696209d8d7e108448b0cd08766cb",
+        "matchedRuleIds": [
+          "code-runtime",
+          "code-tests",
+          "code-decision-sensitive"
+        ],
+        "selectedRubricIds": [
+          "code-validation",
+          "declared-tests-present",
+          "spec-adherence",
+          "regression-risk",
+          "test-coverage"
+        ],
+        "source": "deterministic",
+        "laneInputDigests": {
+          "code-validation": "614d8ad24debfc7d785581da7d9c5dd10035337e4f0dbfc78c9ae3a139ec0978",
+          "declared-tests-present": "e9da74a27f84f6603cf0acb5377407fbef79278361a60d0484d8194f75eddf88",
+          "spec-adherence": "42dfdf02a34f820a83b6fcb53eec25a2abb322b2277be1257723551b6e006244",
+          "regression-risk": "1dad78d69498b89702bda6719c7d030308ef08ec351187c8eeaca2319436208b",
+          "test-coverage": "a12c66e1da779731e308d5cdaa77fbceca8b427af85ceb464c4e26a2319ff287"
+        }
+      },
+      "evidence": {
+        "stage": "code_review",
+        "workBeadId": "pow-g8vn",
+        "round": 1,
+        "intent": [
+          "design:bead-field:pow-g8vn.design@sha256:ef76de98ea095bc3",
+          "title:bead-field:pow-g8vn.title@sha256:3ba1c11fda84afa8"
+        ],
+        "acceptance": [
+          "acceptance_criteria:bead-field:pow-g8vn.acceptance_criteria@sha256:e8cc284f3a9b329f"
+        ],
+        "paths": [],
+        "decisions": [
+          "surface:power_station/packages/grid_assets|complete|decision-surface:power_station/packages/grid_assets@sha256:d9294166acb65fef"
+        ],
+        "priorArt": [],
+        "context": [],
+        "flags": [],
+        "changedPaths": [
+          "packages/grid_assets/lib/src/code/committee_selection.dart",
+          "packages/grid_assets/test/committee_selection_test.dart"
+        ],
+        "pinnedDiffDigest": "37891a5afcd2598c92d83031ce967facf5fe676bff25b1237b21f07db601ba19",
+        "missingEvidenceIds": [],
+        "truncated": false
+      },
+      "fullRubricIds": [
+        "code-validation",
+        "declared-tests-present",
+        "spec-adherence",
+        "regression-risk",
+        "test-coverage"
+      ],
+      "gatingRubricIds": [
+        "code-validation",
+        "declared-tests-present"
+      ],
+      "attempts": [],
+      "missingFields": []
+    },
+    "route": {
+      "nodePath": "pow-g8vn/review/route",
+      "type": "escalate",
+      "reason": "a critic returned F (regression-risk) — rework",
+      "payload": {}
+    },
+    "selectedRubricIds": [
+      "code-validation",
+      "declared-tests-present",
+      "spec-adherence",
+      "regression-risk",
+      "test-coverage"
+    ],
+    "omittedRubricIds": [],
+    "lanes": [
+      {
+        "report": {
+          "lane": "code-validation",
+          "gradeCounts": {
+            "A": 1
+          },
+          "adverseVerdicts": 0,
+          "gateCausing": 0,
+          "overridden": 0,
+          "upheld": 0,
+          "unresolved": 0,
+          "respecConverged": 0,
+          "respecUnconverged": 0,
+          "respecNoFollowUp": 0,
+          "runs": 1,
+          "runsFromFallback": 0,
+          "meanCostUsd": 0.0,
+          "meanDurationMs": 21000
+        },
+        "usage": {
+          "lane": "code-validation",
+          "beadId": "pow-g8vn",
+          "fromFallback": false,
+          "costUsd": 0.0,
+          "durationMs": 21000
+        },
+        "gateDisposition": null,
+        "rubricId": "code-validation",
+        "nodePath": "pow-g8vn/review/code-validation",
+        "gating": true,
+        "grade": "A",
+        "transport": "file",
+        "rationale": "the code-validation lane said so",
+        "finding": null,
+        "owner": null,
+        "refinement": null,
+        "model": null,
+        "tokensIn": 0,
+        "tokensOut": 0,
+        "costUsd": 0.0,
+        "premiumRequests": 0,
+        "numTurns": 0,
+        "durationMs": 21000,
+        "truncated": false,
+        "missingFields": []
+      },
+      {
+        "report": {
+          "lane": "declared-tests-present",
+          "gradeCounts": {
+            "A": 1
+          },
+          "adverseVerdicts": 0,
+          "gateCausing": 0,
+          "overridden": 0,
+          "upheld": 0,
+          "unresolved": 0,
+          "respecConverged": 0,
+          "respecUnconverged": 0,
+          "respecNoFollowUp": 0,
+          "runs": 1,
+          "runsFromFallback": 0,
+          "meanCostUsd": 0.0,
+          "meanDurationMs": 22000
+        },
+        "usage": {
+          "lane": "declared-tests-present",
+          "beadId": "pow-g8vn",
+          "fromFallback": false,
+          "costUsd": 0.0,
+          "durationMs": 22000
+        },
+        "gateDisposition": null,
+        "rubricId": "declared-tests-present",
+        "nodePath": "pow-g8vn/review/declared-tests-present",
+        "gating": true,
+        "grade": "A",
+        "transport": "file",
+        "rationale": "the declared-tests-present lane said so",
+        "finding": null,
+        "owner": null,
+        "refinement": null,
+        "model": null,
+        "tokensIn": 0,
+        "tokensOut": 0,
+        "costUsd": 0.0,
+        "premiumRequests": 0,
+        "numTurns": 0,
+        "durationMs": 22000,
+        "truncated": false,
+        "missingFields": []
+      },
+      {
+        "report": {
+          "lane": "spec-adherence",
+          "gradeCounts": {
+            "A": 1
+          },
+          "adverseVerdicts": 0,
+          "gateCausing": 0,
+          "overridden": 0,
+          "upheld": 0,
+          "unresolved": 0,
+          "respecConverged": 0,
+          "respecUnconverged": 0,
+          "respecNoFollowUp": 0,
+          "runs": 1,
+          "runsFromFallback": 0,
+          "meanCostUsd": 0.46,
+          "meanDurationMs": 105000
+        },
+        "usage": {
+          "lane": "spec-adherence",
+          "beadId": "pow-g8vn",
+          "fromFallback": false,
+          "costUsd": 0.46,
+          "durationMs": 105000
+        },
+        "gateDisposition": null,
+        "rubricId": "spec-adherence",
+        "nodePath": "pow-g8vn/review/spec-adherence",
+        "gating": false,
+        "grade": "A",
+        "transport": "file",
+        "rationale": "the spec-adherence lane said so",
+        "finding": null,
+        "owner": null,
+        "refinement": null,
+        "model": "sonnet",
+        "tokensIn": 36000,
+        "tokensOut": 511,
+        "costUsd": 0.46,
+        "premiumRequests": 0,
+        "numTurns": 7,
+        "durationMs": 105000,
+        "truncated": false,
+        "missingFields": []
+      },
+      {
+        "report": {
+          "lane": "regression-risk",
+          "gradeCounts": {
+            "F": 1
+          },
+          "adverseVerdicts": 1,
+          "gateCausing": 1,
+          "overridden": 0,
+          "upheld": 1,
+          "unresolved": 0,
+          "respecConverged": 0,
+          "respecUnconverged": 0,
+          "respecNoFollowUp": 1,
+          "runs": 1,
+          "runsFromFallback": 0,
+          "meanCostUsd": 0.53,
+          "meanDurationMs": 120000
+        },
+        "usage": {
+          "lane": "regression-risk",
+          "beadId": "pow-g8vn",
+          "fromFallback": false,
+          "costUsd": 0.53,
+          "durationMs": 120000
+        },
+        "gateDisposition": "upheld",
+        "rubricId": "regression-risk",
+        "nodePath": "pow-g8vn/review/regression-risk",
+        "gating": false,
+        "grade": "F",
+        "transport": "file",
+        "rationale": "the regression-risk lane said so",
+        "finding": null,
+        "owner": null,
+        "refinement": null,
+        "model": "sonnet",
+        "tokensIn": 37700,
+        "tokensOut": 548,
+        "costUsd": 0.53,
+        "premiumRequests": 0,
+        "numTurns": 8,
+        "durationMs": 120000,
+        "truncated": false,
+        "missingFields": []
+      },
+      {
+        "report": {
+          "lane": "test-coverage",
+          "gradeCounts": {
+            "A": 1
+          },
+          "adverseVerdicts": 0,
+          "gateCausing": 0,
+          "overridden": 0,
+          "upheld": 0,
+          "unresolved": 0,
+          "respecConverged": 0,
+          "respecUnconverged": 0,
+          "respecNoFollowUp": 0,
+          "runs": 1,
+          "runsFromFallback": 0,
+          "meanCostUsd": 0.6,
+          "meanDurationMs": 135000
+        },
+        "usage": {
+          "lane": "test-coverage",
+          "beadId": "pow-g8vn",
+          "fromFallback": false,
+          "costUsd": 0.6,
+          "durationMs": 135000
+        },
+        "gateDisposition": null,
+        "rubricId": "test-coverage",
+        "nodePath": "pow-g8vn/review/test-coverage",
+        "gating": false,
+        "grade": "A",
+        "transport": "file",
+        "rationale": "the test-coverage lane said so",
+        "finding": null,
+        "owner": null,
+        "refinement": null,
+        "model": "sonnet",
+        "tokensIn": 39400,
+        "tokensOut": 585,
+        "costUsd": 0.6,
+        "premiumRequests": 0,
+        "numTurns": 9,
+        "durationMs": 135000,
+        "truncated": false,
+        "missingFields": []
+      }
+    ],
+    "actionLaneIds": [
+      "regression-risk"
+    ],
+    "gateDisposition": "upheld",
+    "downstreamJoinKeys": {
+      "workBeadId": "pow-g8vn",
+      "round": "1",
+      "stage": "code_review",
+      "routeNodePath": "pow-g8vn/review/route",
+      "siblingScope": "pow-g8vn/review/"
+    },
+    "actual": {
+      "samples": [
+        {
+          "lane": "code-validation",
+          "beadId": "pow-g8vn",
+          "fromFallback": false,
+          "costUsd": 0.0,
+          "durationMs": 21000
+        },
+        {
+          "lane": "declared-tests-present",
+          "beadId": "pow-g8vn",
+          "fromFallback": false,
+          "costUsd": 0.0,
+          "durationMs": 22000
+        },
+        {
+          "lane": "spec-adherence",
+          "beadId": "pow-g8vn",
+          "fromFallback": false,
+          "costUsd": 0.46,
+          "durationMs": 105000
+        },
+        {
+          "lane": "regression-risk",
+          "beadId": "pow-g8vn",
+          "fromFallback": false,
+          "costUsd": 0.53,
+          "durationMs": 120000
+        },
+        {
+          "lane": "test-coverage",
+          "beadId": "pow-g8vn",
+          "fromFallback": false,
+          "costUsd": 0.6,
+          "durationMs": 135000
+        }
+      ],
+      "contributingRunIds": [
+        "code-validation",
+        "declared-tests-present",
+        "spec-adherence",
+        "regression-risk",
+        "test-coverage"
+      ],
+      "missingLaneIds": [],
+      "tokensIn": 113100,
+      "tokensOut": 1644,
+      "costUsd": 1.5899999999999999,
+      "premiumRequests": 0,
+      "numTurns": 24,
+      "durationMs": 403000
+    },
+    "classifier": {
+      "samples": [],
+      "contributingRunIds": [],
+      "missingLaneIds": [],
+      "tokensIn": 0,
+      "tokensOut": 0,
+      "costUsd": 0.0,
+      "premiumRequests": 0,
+      "numTurns": 0,
+      "durationMs": 0
+    },
+    "counterfactual": {
+      "samples": [
+        {
+          "lane": "code-validation",
+          "beadId": "pow-g8vn",
+          "fromFallback": false,
+          "costUsd": 0.0,
+          "durationMs": 21000
+        },
+        {
+          "lane": "declared-tests-present",
+          "beadId": "pow-g8vn",
+          "fromFallback": false,
+          "costUsd": 0.0,
+          "durationMs": 22000
+        },
+        {
+          "lane": "spec-adherence",
+          "beadId": "pow-g8vn",
+          "fromFallback": false,
+          "costUsd": 0.46,
+          "durationMs": 105000
+        },
+        {
+          "lane": "regression-risk",
+          "beadId": "pow-g8vn",
+          "fromFallback": false,
+          "costUsd": 0.53,
+          "durationMs": 120000
+        },
+        {
+          "lane": "test-coverage",
+          "beadId": "pow-g8vn",
+          "fromFallback": false,
+          "costUsd": 0.6,
+          "durationMs": 135000
+        }
+      ],
+      "contributingRunIds": [
+        "code-validation",
+        "declared-tests-present",
+        "spec-adherence",
+        "regression-risk",
+        "test-coverage"
+      ],
+      "missingLaneIds": [],
+      "tokensIn": 113100,
+      "tokensOut": 1644,
+      "costUsd": 1.5899999999999999,
+      "premiumRequests": 0,
+      "numTurns": 24,
+      "durationMs": 403000
+    },
+    "truncated": false,
+    "missingFields": []
+  },
+  {
+    "version": 1,
+    "sampleId": "35527c35d821bf4e88e3e557d5f8b7f7b5fb1dc2057cdc4112b73640734e46ca",
+    "joinId": "1993da8bb46944cfd741c9d394d8ea29aff3a288e8c5ea86edc4f74569c02a90",
+    "run": {
+      "version": 1,
+      "policyVersion": "1",
+      "stage": "code_review",
+      "workBeadId": "pow-h1qp",
+      "round": 1,
+      "nodePath": "pow-h1qp/review/committee-selection",
+      "selection": {
+        "policyVersion": "1",
+        "evidenceDigest": "75a3b1b8c4a2c892952ea0da12527bdc9d6b3e0abec5769285d13c669af793df",
+        "matchedRuleIds": [
+          "code-tests",
+          "code-docs-metadata",
+          "code-decision-sensitive"
+        ],
+        "selectedRubricIds": [
+          "code-validation",
+          "declared-tests-present",
+          "spec-adherence",
+          "regression-risk",
+          "test-coverage"
+        ],
+        "source": "deterministic",
+        "laneInputDigests": {
+          "code-validation": "70c53e50377a992f134607ba82655b15b458a1df20f65589f225a4b7a472bcd0",
+          "declared-tests-present": "523536e873072f024bd5895b01f3473a1141672ce777771a197832f3b5f605e3",
+          "spec-adherence": "7c788d6c1bb3d7c9acf31a77fc0e3628f1d97679a629535b6b24c3883ce8309d",
+          "regression-risk": "297cd138b0b5b8332a5f5a6f18d8a8a63b6fedaf5fb51ef21f8d20c24d99b396",
+          "test-coverage": "eea945cf2939b2f1803ed2ef4ce2deb22a1042ed1eb5474104b41e122ec31aff"
+        }
+      },
+      "evidence": {
+        "stage": "code_review",
+        "workBeadId": "pow-h1qp",
+        "round": 1,
+        "intent": [
+          "design:bead-field:pow-h1qp.design@sha256:659bd77197c1e431",
+          "title:bead-field:pow-h1qp.title@sha256:71b86fe4a874d3c2"
+        ],
+        "acceptance": [
+          "acceptance_criteria:bead-field:pow-h1qp.acceptance_criteria@sha256:70ab5677861a8bd4"
+        ],
+        "paths": [],
+        "decisions": [
+          "surface:power_station/packages/grid_assets|complete|decision-surface:power_station/packages/grid_assets@sha256:de4fe24629e6644e"
+        ],
+        "priorArt": [],
+        "context": [],
+        "flags": [],
+        "changedPaths": [
+          "packages/grid_assets/CHANGELOG.md",
+          "packages/grid_assets/pubspec.yaml",
+          "packages/grid_assets/test/fixtures/committee_selection_corpus.json"
+        ],
+        "pinnedDiffDigest": "2a4394397411c256b7ecbb23e3c8abdbc28254e277854dea52f28c4a47424a3e",
+        "missingEvidenceIds": [],
+        "truncated": false
+      },
+      "fullRubricIds": [
+        "code-validation",
+        "declared-tests-present",
+        "spec-adherence",
+        "regression-risk",
+        "test-coverage"
+      ],
+      "gatingRubricIds": [
+        "code-validation",
+        "declared-tests-present"
+      ],
+      "attempts": [],
+      "missingFields": []
+    },
+    "route": {
+      "nodePath": "pow-h1qp/review/route",
+      "type": "advance",
+      "reason": "",
+      "payload": {
+        "verdict": "advance",
+        "grades": "code-validation=A,declared-tests-present=A,spec-adherence=A,regression-risk=A,test-coverage=B",
+        "spread": "1",
+        "rule": "all-approve",
+        "round": "1"
+      }
+    },
+    "selectedRubricIds": [
+      "code-validation",
+      "declared-tests-present",
+      "spec-adherence",
+      "regression-risk",
+      "test-coverage"
+    ],
+    "omittedRubricIds": [],
+    "lanes": [
+      {
+        "report": {
+          "lane": "code-validation",
+          "gradeCounts": {
+            "A": 1
+          },
+          "adverseVerdicts": 0,
+          "gateCausing": 0,
+          "overridden": 0,
+          "upheld": 0,
+          "unresolved": 0,
+          "respecConverged": 0,
+          "respecUnconverged": 0,
+          "respecNoFollowUp": 0,
+          "runs": 1,
+          "runsFromFallback": 0,
+          "meanCostUsd": 0.0,
+          "meanDurationMs": 21000
+        },
+        "usage": {
+          "lane": "code-validation",
+          "beadId": "pow-h1qp",
+          "fromFallback": false,
+          "costUsd": 0.0,
+          "durationMs": 21000
+        },
+        "gateDisposition": null,
+        "rubricId": "code-validation",
+        "nodePath": "pow-h1qp/review/code-validation",
+        "gating": true,
+        "grade": "A",
+        "transport": "file",
+        "rationale": "the code-validation lane said so",
+        "finding": null,
+        "owner": null,
+        "refinement": null,
+        "model": null,
+        "tokensIn": 0,
+        "tokensOut": 0,
+        "costUsd": 0.0,
+        "premiumRequests": 0,
+        "numTurns": 0,
+        "durationMs": 21000,
+        "truncated": false,
+        "missingFields": []
+      },
+      {
+        "report": {
+          "lane": "declared-tests-present",
+          "gradeCounts": {
+            "A": 1
+          },
+          "adverseVerdicts": 0,
+          "gateCausing": 0,
+          "overridden": 0,
+          "upheld": 0,
+          "unresolved": 0,
+          "respecConverged": 0,
+          "respecUnconverged": 0,
+          "respecNoFollowUp": 0,
+          "runs": 1,
+          "runsFromFallback": 0,
+          "meanCostUsd": 0.0,
+          "meanDurationMs": 22000
+        },
+        "usage": {
+          "lane": "declared-tests-present",
+          "beadId": "pow-h1qp",
+          "fromFallback": false,
+          "costUsd": 0.0,
+          "durationMs": 22000
+        },
+        "gateDisposition": null,
+        "rubricId": "declared-tests-present",
+        "nodePath": "pow-h1qp/review/declared-tests-present",
+        "gating": true,
+        "grade": "A",
+        "transport": "file",
+        "rationale": "the declared-tests-present lane said so",
+        "finding": null,
+        "owner": null,
+        "refinement": null,
+        "model": null,
+        "tokensIn": 0,
+        "tokensOut": 0,
+        "costUsd": 0.0,
+        "premiumRequests": 0,
+        "numTurns": 0,
+        "durationMs": 22000,
+        "truncated": false,
+        "missingFields": []
+      },
+      {
+        "report": {
+          "lane": "spec-adherence",
+          "gradeCounts": {
+            "A": 1
+          },
+          "adverseVerdicts": 0,
+          "gateCausing": 0,
+          "overridden": 0,
+          "upheld": 0,
+          "unresolved": 0,
+          "respecConverged": 0,
+          "respecUnconverged": 0,
+          "respecNoFollowUp": 0,
+          "runs": 1,
+          "runsFromFallback": 0,
+          "meanCostUsd": 0.46,
+          "meanDurationMs": 105000
+        },
+        "usage": {
+          "lane": "spec-adherence",
+          "beadId": "pow-h1qp",
+          "fromFallback": false,
+          "costUsd": 0.46,
+          "durationMs": 105000
+        },
+        "gateDisposition": null,
+        "rubricId": "spec-adherence",
+        "nodePath": "pow-h1qp/review/spec-adherence",
+        "gating": false,
+        "grade": "A",
+        "transport": "file",
+        "rationale": "the spec-adherence lane said so",
+        "finding": null,
+        "owner": null,
+        "refinement": null,
+        "model": "sonnet",
+        "tokensIn": 36000,
+        "tokensOut": 511,
+        "costUsd": 0.46,
+        "premiumRequests": 0,
+        "numTurns": 7,
+        "durationMs": 105000,
+        "truncated": false,
+        "missingFields": []
+      },
+      {
+        "report": {
+          "lane": "regression-risk",
+          "gradeCounts": {
+            "A": 1
+          },
+          "adverseVerdicts": 0,
+          "gateCausing": 0,
+          "overridden": 0,
+          "upheld": 0,
+          "unresolved": 0,
+          "respecConverged": 0,
+          "respecUnconverged": 0,
+          "respecNoFollowUp": 0,
+          "runs": 1,
+          "runsFromFallback": 0,
+          "meanCostUsd": 0.53,
+          "meanDurationMs": 120000
+        },
+        "usage": {
+          "lane": "regression-risk",
+          "beadId": "pow-h1qp",
+          "fromFallback": false,
+          "costUsd": 0.53,
+          "durationMs": 120000
+        },
+        "gateDisposition": null,
+        "rubricId": "regression-risk",
+        "nodePath": "pow-h1qp/review/regression-risk",
+        "gating": false,
+        "grade": "A",
+        "transport": "file",
+        "rationale": "the regression-risk lane said so",
+        "finding": null,
+        "owner": null,
+        "refinement": null,
+        "model": "sonnet",
+        "tokensIn": 37700,
+        "tokensOut": 548,
+        "costUsd": 0.53,
+        "premiumRequests": 0,
+        "numTurns": 8,
+        "durationMs": 120000,
+        "truncated": false,
+        "missingFields": []
+      },
+      {
+        "report": {
+          "lane": "test-coverage",
+          "gradeCounts": {
+            "B": 1
+          },
+          "adverseVerdicts": 0,
+          "gateCausing": 0,
+          "overridden": 0,
+          "upheld": 0,
+          "unresolved": 0,
+          "respecConverged": 0,
+          "respecUnconverged": 0,
+          "respecNoFollowUp": 0,
+          "runs": 1,
+          "runsFromFallback": 0,
+          "meanCostUsd": 0.6,
+          "meanDurationMs": 135000
+        },
+        "usage": {
+          "lane": "test-coverage",
+          "beadId": "pow-h1qp",
+          "fromFallback": false,
+          "costUsd": 0.6,
+          "durationMs": 135000
+        },
+        "gateDisposition": null,
+        "rubricId": "test-coverage",
+        "nodePath": "pow-h1qp/review/test-coverage",
+        "gating": false,
+        "grade": "B",
+        "transport": "file",
+        "rationale": "the test-coverage lane said so",
+        "finding": null,
+        "owner": null,
+        "refinement": null,
+        "model": "sonnet",
+        "tokensIn": 39400,
+        "tokensOut": 585,
+        "costUsd": 0.6,
+        "premiumRequests": 0,
+        "numTurns": 9,
+        "durationMs": 135000,
+        "truncated": false,
+        "missingFields": []
+      }
+    ],
+    "actionLaneIds": [],
+    "gateDisposition": null,
+    "downstreamJoinKeys": {
+      "workBeadId": "pow-h1qp",
+      "round": "1",
+      "stage": "code_review",
+      "routeNodePath": "pow-h1qp/review/route",
+      "siblingScope": "pow-h1qp/review/"
+    },
+    "actual": {
+      "samples": [
+        {
+          "lane": "code-validation",
+          "beadId": "pow-h1qp",
+          "fromFallback": false,
+          "costUsd": 0.0,
+          "durationMs": 21000
+        },
+        {
+          "lane": "declared-tests-present",
+          "beadId": "pow-h1qp",
+          "fromFallback": false,
+          "costUsd": 0.0,
+          "durationMs": 22000
+        },
+        {
+          "lane": "spec-adherence",
+          "beadId": "pow-h1qp",
+          "fromFallback": false,
+          "costUsd": 0.46,
+          "durationMs": 105000
+        },
+        {
+          "lane": "regression-risk",
+          "beadId": "pow-h1qp",
+          "fromFallback": false,
+          "costUsd": 0.53,
+          "durationMs": 120000
+        },
+        {
+          "lane": "test-coverage",
+          "beadId": "pow-h1qp",
+          "fromFallback": false,
+          "costUsd": 0.6,
+          "durationMs": 135000
+        }
+      ],
+      "contributingRunIds": [
+        "code-validation",
+        "declared-tests-present",
+        "spec-adherence",
+        "regression-risk",
+        "test-coverage"
+      ],
+      "missingLaneIds": [],
+      "tokensIn": 113100,
+      "tokensOut": 1644,
+      "costUsd": 1.5899999999999999,
+      "premiumRequests": 0,
+      "numTurns": 24,
+      "durationMs": 403000
+    },
+    "classifier": {
+      "samples": [],
+      "contributingRunIds": [],
+      "missingLaneIds": [],
+      "tokensIn": 0,
+      "tokensOut": 0,
+      "costUsd": 0.0,
+      "premiumRequests": 0,
+      "numTurns": 0,
+      "durationMs": 0
+    },
+    "counterfactual": {
+      "samples": [
+        {
+          "lane": "code-validation",
+          "beadId": "pow-h1qp",
+          "fromFallback": false,
+          "costUsd": 0.0,
+          "durationMs": 21000
+        },
+        {
+          "lane": "declared-tests-present",
+          "beadId": "pow-h1qp",
+          "fromFallback": false,
+          "costUsd": 0.0,
+          "durationMs": 22000
+        },
+        {
+          "lane": "spec-adherence",
+          "beadId": "pow-h1qp",
+          "fromFallback": false,
+          "costUsd": 0.46,
+          "durationMs": 105000
+        },
+        {
+          "lane": "regression-risk",
+          "beadId": "pow-h1qp",
+          "fromFallback": false,
+          "costUsd": 0.53,
+          "durationMs": 120000
+        },
+        {
+          "lane": "test-coverage",
+          "beadId": "pow-h1qp",
+          "fromFallback": false,
+          "costUsd": 0.6,
+          "durationMs": 135000
+        }
+      ],
+      "contributingRunIds": [
+        "code-validation",
+        "declared-tests-present",
+        "spec-adherence",
+        "regression-risk",
+        "test-coverage"
+      ],
+      "missingLaneIds": [],
+      "tokensIn": 113100,
+      "tokensOut": 1644,
+      "costUsd": 1.5899999999999999,
+      "premiumRequests": 0,
+      "numTurns": 24,
+      "durationMs": 403000
+    },
+    "truncated": false,
+    "missingFields": []
   }
 ]

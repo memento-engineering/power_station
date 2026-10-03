@@ -25,14 +25,19 @@
 /// ([CommitteeSelectionPolicy.evidenceDigestOf]) and the two digests can never
 /// collide, because the stage wire value is hashed in.
 ///
-/// **Deterministic rules are ADDITIVE.** Every rule of the stage is evaluated,
-/// every match unions its semantic lanes, and the required deterministic gates
-/// are always added back. Only a change no rule recognises — an UNKNOWN shape —
-/// reaches the bounded classifier, which may pick only from the closed
-/// [kCommitteeClassifierAllowlist]. Missing, malformed, unsuccessful or unknown
-/// classifier output is a TYPED NON-RESULT ([CommitteeClassifierResultKind]),
-/// never a grade: it retries that one lane once, and a second non-result records
-/// [CommitteeSelectionSource.fullFallback] over the current full committee.
+/// **Classification is DETERMINISTIC and PER LANE.** One pure pass
+/// ([CommitteeSelectionPolicy.classify]) emits exactly one
+/// [CommitteeLaneDecision] for every active roster lane: elected or omitted,
+/// with the stable [CommitteeLaneRule] that decided it. The change shape and
+/// the evidence shape select the lanes — a docs-only or test-only diff elects
+/// no regression-risk lane, a spec citing no decision elects no
+/// decision-alignment lane, a later spec round re-runs only the lanes whose
+/// facts moved, and a respec round re-runs ONLY the lanes that returned an
+/// action grade while their siblings' verdicts are preserved
+/// ([CommitteeShadowReceipt.preservedLanes]). The deterministic gates are
+/// always elected. Uncertain evidence — a missing, empty or failed critical
+/// input — elects the FULL committee as [CommitteeSelectionSource.fullFallback].
+/// No inference runs anywhere in selection.
 ///
 /// **The report vocabulary is REUSED, not re-minted** (Nico, 2026-09-04, gate
 /// `tranquility-er3o99` D1/D2): [GateDisposition], [LaneReport] and
@@ -68,28 +73,23 @@ import 'package:beads_dart/beads_dart.dart';
 import 'package:crypto/crypto.dart';
 import 'package:genesis_tree/genesis_tree.dart';
 import 'package:grid_engine/grid_engine.dart';
-import 'package:grid_runtime/grid_runtime.dart';
 import 'package:grid_trajectory/grid_trajectory.dart'
     show GateDisposition, LaneReport, UsageSample;
 import 'package:meta/meta.dart';
 import 'package:path/path.dart' as p;
 
-import '../agent/agent_domain.dart';
-import '../agent/agent_environment.dart';
-import '../agent/agent_harness.dart';
-import '../agent/environment_registry.dart';
-import '../agent/model_tier.dart';
-import '../agent/seat_environments.dart';
-import '../agent/site_binding.dart';
-import '../agent/typed_environment.dart';
-import '../agent/usage_report.dart';
+import 'review_path.dart';
 
 // ── identity ────────────────────────────────────────────────────────────────
 
-/// This policy's version stamp — every persisted artifact carries it, and a
-/// decoder refuses any other value rather than reading an older shape as if it
-/// were this one.
-const String kCommitteeSelectionPolicyVersion = '1';
+/// This policy's version stamp — every selection carries it and every digest
+/// hashes it in, so a policy-2 selection is never mistaken for a policy-1 one.
+const String kCommitteeSelectionPolicyVersion = '2';
+
+/// The wire version a run or receipt is WRITTEN at. Version 1 (the retained
+/// pre-classifier corpus) still decodes; it carries no lane decisions, no
+/// previous-round snapshot and no preserved lanes.
+const int kCommitteeSelectionWireVersion = 2;
 
 /// The step AND capability id the shadow selector mounts under, in all three
 /// review circuits.
@@ -105,7 +105,7 @@ const String kCommitteeSelectionStageParam = 'committeeStage';
 const String kCommitteeFullRubricsParam = 'committeeFullRubrics';
 
 /// The step param carrying the ACTIVE deterministic gate ids, as a CSV. These
-/// lanes are ALWAYS selected, whatever the rules or the classifier say.
+/// lanes are ALWAYS elected, whatever the rest of the classification says.
 const String kCommitteeGatingRubricsParam = 'committeeGatingRubrics';
 
 /// The workspace-relative directory the shadow artifacts live in — deliberately
@@ -113,24 +113,12 @@ const String kCommitteeGatingRubricsParam = 'committeeGatingRubrics';
 /// (`power_station#a4-gate-integrity-3-bead-tg-bns-the-verdict-freshness-stamp`).
 const String kCommitteeSelectionDir = '.grid/committee-selection';
 
-/// How many times ONE unknown-shape classification may run in a single
-/// capability invocation: the first call, plus exactly one retry.
-const int kCommitteeClassifierAttempts = 2;
+/// The route payload key a respec stamps its invalidating grade under.
+const String kCommitteeRouteGradeKey = 'grade';
 
-/// The CLOSED set of semantic rubric ids a classifier may name. An answer
-/// carrying anything else is rejected WHOLE
-/// ([CommitteeClassifierResultKind.unknown]) rather than filtered down to the
-/// legal subset — a model that named an id we do not run did not understand the
-/// question, and half-believing it would launder that.
-const Set<String> kCommitteeClassifierAllowlist = {
-  'coherence',
-  'decision-alignment',
-  'acceptance-testability',
-  'plan-completeness',
-  'spec-adherence',
-  'regression-risk',
-  'test-coverage',
-};
+/// The grade a spec route stamps when it RESPECS — the invalidating verdict
+/// that makes the next round a targeted rewind.
+const String kCommitteeRespecGrade = 'F';
 
 // ── closed vocabularies ─────────────────────────────────────────────────────
 
@@ -161,14 +149,15 @@ enum CommitteeStage {
 
 /// WHICH channel produced a selection.
 enum CommitteeSelectionSource {
-  /// One or more deterministic rules matched; no inference ran.
+  /// The per-lane classification decided every lane; no inference ran.
   deterministic,
 
-  /// No rule matched and the bounded classifier answered inside the allowlist.
+  /// A policy-1 selection the retired bounded classifier answered. Decoded for
+  /// the retained corpus only — policy 2 never produces it.
   classifier,
 
-  /// No rule matched and the classifier produced two non-results — the current
-  /// FULL committee is selected, unchanged.
+  /// The evidence was too uncertain to omit anything — the current FULL
+  /// committee is elected, unchanged.
   fullFallback;
 
   /// The stable JSON spelling.
@@ -183,9 +172,10 @@ enum CommitteeSelectionSource {
   };
 }
 
-/// What one classifier call produced. Three of the four arms are NON-RESULTS:
-/// they are facts about the call, never a judgement about the work, and none of
-/// them is ever a letter grade.
+/// What one policy-1 classifier call produced — retained so the version-1
+/// corpus still decodes. Three of the four arms are NON-RESULTS: they are facts
+/// about the call, never a judgement about the work, and none of them is ever a
+/// letter grade.
 enum CommitteeClassifierResultKind {
   /// A well-formed answer, entirely inside the allowlist and the active roster.
   selected,
@@ -344,8 +334,8 @@ final class CommitteeSelectionEvidence {
   /// Whether any contributing artifact reported itself clipped.
   final bool truncated;
 
-  /// True when nothing at all was resolved — the shape a rule cannot recognise
-  /// and the classifier exists for.
+  /// True when nothing at all was resolved — an unknown ROUND, which elects the
+  /// full committee ([committeeEvidenceIsUncertain]).
   bool get isEmpty =>
       intent.isEmpty &&
       acceptance.isEmpty &&
@@ -442,16 +432,6 @@ typedef CommitteePinnedDiffPath = String Function(String workspaceDir);
 
 // ── the change-shape predicates ─────────────────────────────────────────────
 
-/// File extensions (without the separator) that make a changed path PROSE.
-const Set<String> kCommitteeProseExtensions = {'md', 'markdown'};
-
-/// File extensions (without the separator) that make a changed path METADATA —
-/// a manifest, a lock, a config. A pubspec is covered by the first of these.
-const Set<String> kCommitteeMetadataExtensions = {'yaml', 'yml', 'json'};
-
-/// Extension-free basenames that make a changed path METADATA.
-const Set<String> kCommitteeMetadataBasenames = {'CHANGELOG', 'LICENSE'};
-
 /// Whether [path] is a TEST surface — a `test` root, a nested `test` directory,
 /// or a Dart test file.
 bool isCommitteeTestPath(String path) {
@@ -461,132 +441,261 @@ bool isCommitteeTestPath(String path) {
       _basename(normalized).endsWith('_test.dart');
 }
 
-/// Whether [path] is prose or metadata — the shapes with no runtime behaviour
-/// to regress and no test to cover.
-bool isCommitteeProseOrMetadataPath(String path) {
-  final extension = _extension(path);
-  if (kCommitteeProseExtensions.contains(extension)) return true;
-  if (kCommitteeMetadataExtensions.contains(extension)) return true;
-  final base = _basename(path);
-  final dot = base.indexOf('.');
-  final stem = dot < 0 ? base : base.substring(0, dot);
-  return kCommitteeMetadataBasenames.contains(stem.toUpperCase());
-}
-
-/// Whether [path] carries RUNTIME behaviour — anything that is neither a test
-/// surface nor prose/metadata.
-bool isCommitteeRuntimePath(String path) =>
-    !isCommitteeTestPath(path) && !isCommitteeProseOrMetadataPath(path);
-
 String _basename(String path) => path.split('/').last;
 
-String _extension(String path) {
-  final base = _basename(path);
-  final dot = base.lastIndexOf('.');
-  return dot <= 0 ? '' : base.substring(dot + 1).toLowerCase();
+/// What ONE changed path is, for lane election.
+enum CommitteeDiffPathKind {
+  /// Prose or configuration ([isMetadataPath]) — nothing runs, nothing to
+  /// cover.
+  metadata,
+
+  /// A test surface ([isCommitteeTestPath]) that is not prose.
+  test,
+
+  /// Anything else — the fail-to-code default, so an unlisted surface always
+  /// elects the full semantic code committee.
+  runtime,
 }
 
-// ── the rules ───────────────────────────────────────────────────────────────
+/// [path]'s kind. Prose wins over the test predicate (a `test/README.md`
+/// documents, it does not test); a test surface wins over configuration (a
+/// `test/fixtures/x.json` is test data); everything else unlisted is runtime.
+CommitteeDiffPathKind committeeDiffPathKindOf(String path) {
+  if (isDocsPath(path)) return CommitteeDiffPathKind.metadata;
+  if (isCommitteeTestPath(path)) return CommitteeDiffPathKind.test;
+  if (isMetadataPath(path)) return CommitteeDiffPathKind.metadata;
+  return CommitteeDiffPathKind.runtime;
+}
 
-/// The EIGHT deterministic selection rules — the whole policy, as const values.
+/// Whether one normalized decision fact NAMES a decision — a resolved
+/// `decision:` body or a declared `departure:`. A `surface:` lookup record is
+/// not a citation: a completed lookup that found nothing is a real empty
+/// result.
+bool isCommitteeCitedDecision(String fact) =>
+    fact.startsWith('decision:') || fact.startsWith('departure:');
+
+/// The missing-evidence ids that make ANY stage's facts too uncertain to omit
+/// a lane.
+const Set<String> kCommitteeCriticalEvidenceIds = {
+  'workspace',
+  'evidence-source',
+  'selection-run',
+};
+
+/// The missing-evidence ids that additionally make `spec_review` facts
+/// uncertain: without the gather there is no decision lookup to trust.
+const Set<String> kCommitteeSpecCriticalEvidenceIds = {
+  'anchors',
+  'anchors:work-bead-mismatch',
+  'round',
+};
+
+/// Whether [evidence] is too uncertain to omit any lane — the loud FULL
+/// FALLBACK trigger.
 ///
-/// Rules are ADDITIVE: every rule of the stage is evaluated and every match
-/// unions its lanes. There is no precedence and no first-match-wins, because a
-/// change that is both a runtime change and a decision-sensitive one needs both
-/// answers.
-enum CommitteeSelectionRule {
-  /// The bead states an intent, so COHERENCE has something to judge.
-  specIntent('spec-intent', CommitteeStage.specReview, ['coherence']),
+/// Every stage: nothing resolved at all, or a critical input
+/// ([kCommitteeCriticalEvidenceIds]) missing. `spec_review`: the gather is
+/// absent or foreign ([kCommitteeSpecCriticalEvidenceIds]), or any decision
+/// lookup failed or was unavailable (`decisions:<surface>`) — an empty union is
+/// a real result, a crashed lookup is not. `code_review`: the pinned diff is
+/// missing, clipped or names no target (`pinned-diff…`), or there is no diff
+/// digest or changed path to classify.
+bool committeeEvidenceIsUncertain(CommitteeSelectionEvidence evidence) {
+  if (evidence.isEmpty) return true;
+  for (final id in evidence.missingEvidenceIds) {
+    if (kCommitteeCriticalEvidenceIds.contains(id)) return true;
+    final stageCritical = switch (evidence.stage) {
+      CommitteeStage.specReview =>
+        kCommitteeSpecCriticalEvidenceIds.contains(id) ||
+            id.startsWith('decisions:'),
+      CommitteeStage.codeReview => id.startsWith('pinned-diff'),
+    };
+    if (stageCritical) return true;
+  }
+  return switch (evidence.stage) {
+    CommitteeStage.specReview => false,
+    CommitteeStage.codeReview =>
+      evidence.pinnedDiffDigest.isEmpty || evidence.changedPaths.isEmpty,
+  };
+}
 
-  /// Recorded decisions govern the touched surfaces.
-  specDecisions('spec-decisions', CommitteeStage.specReview, [
-    'decision-alignment',
-  ]),
+// ── the lane rules ──────────────────────────────────────────────────────────
 
-  /// The bead states acceptance criteria to test for testability.
-  specAcceptance('spec-acceptance', CommitteeStage.specReview, [
-    'acceptance-testability',
-  ]),
+/// Whether a lane would run.
+enum CommitteeLaneDisposition {
+  /// The lane runs.
+  elected,
 
-  /// The bead names surfaces (path anchors or prior art), so the PLAN can be
-  /// checked for completeness against them.
-  specSurface('spec-surface', CommitteeStage.specReview, ['plan-completeness']),
+  /// The lane does not run — its rule names why.
+  omitted;
 
-  /// The diff touches runtime behaviour — the full semantic code committee.
-  codeRuntime('code-runtime', CommitteeStage.codeReview, [
-    'spec-adherence',
-    'regression-risk',
-    'test-coverage',
-  ]),
+  /// The stable JSON spelling.
+  String get wire => name;
 
-  /// The diff touches test surfaces.
-  codeTests('code-tests', CommitteeStage.codeReview, [
-    'spec-adherence',
-    'test-coverage',
-  ]),
+  /// The disposition [wire] names, or null when it names none.
+  static CommitteeLaneDisposition? fromWire(Object? wire) => switch (wire) {
+    'elected' => CommitteeLaneDisposition.elected,
+    'omitted' => CommitteeLaneDisposition.omitted,
+    _ => null,
+  };
+}
 
-  /// EVERY changed path is prose or metadata — nothing to regress, nothing to
-  /// cover, so only adherence remains.
-  codeDocsMetadata('code-docs-metadata', CommitteeStage.codeReview, [
-    'spec-adherence',
-  ]),
+/// The CLOSED set of reasons one lane is elected or omitted — the whole
+/// policy, as const values. A rule FIXES its disposition, so a decision can
+/// never be "omitted because the change is runtime".
+enum CommitteeLaneRule {
+  /// A deterministic gate: always elected.
+  gateAlways('gate-always', CommitteeLaneDisposition.elected),
 
-  /// Recorded decisions govern the touched surfaces — the blast radius is
-  /// wider than the diff looks.
-  codeDecisionSensitive('code-decision-sensitive', CommitteeStage.codeReview, [
-    'regression-risk',
-  ]);
+  /// The evidence was uncertain ([committeeEvidenceIsUncertain]): every lane
+  /// is elected.
+  fullFallback('full-fallback', CommitteeLaneDisposition.elected),
 
-  const CommitteeSelectionRule(this.id, this.stage, this.rubricIds);
+  /// A lane this policy has no rule for: elected, never silently dropped.
+  unrecognizedLane('unrecognized-lane', CommitteeLaneDisposition.elected),
 
-  /// This rule's stable id — persisted in every selection.
+  /// `code_review`: the diff touches runtime behaviour — every semantic code
+  /// lane runs.
+  runtimeChange('runtime-change', CommitteeLaneDisposition.elected),
+
+  /// `code_review`: a non-runtime diff that touches prose or configuration —
+  /// adherence still has something to judge.
+  metadataChange('metadata-change', CommitteeLaneDisposition.elected),
+
+  /// `code_review`: a non-runtime diff that touches tests — coverage still has
+  /// something to judge.
+  testChange('test-change', CommitteeLaneDisposition.elected),
+
+  /// `code_review`: no runtime path changed, so there is nothing to regress.
+  noRuntimeChange('no-runtime-change', CommitteeLaneDisposition.omitted),
+
+  /// `code_review`: a non-runtime diff with no test path, so there is no
+  /// coverage to grade.
+  noTestChange('no-test-change', CommitteeLaneDisposition.omitted),
+
+  /// `code_review`: every changed path is a test surface, so there is no
+  /// specified behaviour for adherence to judge.
+  testOnlyChange('test-only-change', CommitteeLaneDisposition.omitted),
+
+  /// `spec_review`: the first graded round of a spec — the lane has never
+  /// judged it.
+  firstRound('first-round', CommitteeLaneDisposition.elected),
+
+  /// `spec_review`: the evidence names a decision or a declared departure.
+  citedDecision('cited-decision', CommitteeLaneDisposition.elected),
+
+  /// `spec_review`: the complete decision lookup names no decision.
+  noCitedDecision('no-cited-decision', CommitteeLaneDisposition.omitted),
+
+  /// `spec_review`: a later round whose facts for this lane moved since the
+  /// previous graded round.
+  factsChanged('facts-changed', CommitteeLaneDisposition.elected),
+
+  /// `spec_review`: the lane's facts did not move, but the previous round
+  /// recorded no verdict for it to carry forward.
+  noPriorVerdict('no-prior-verdict', CommitteeLaneDisposition.elected),
+
+  /// `spec_review`: a later round whose facts for this lane are identical to
+  /// the previous graded round — its verdict is preserved.
+  factsUnchanged('facts-unchanged', CommitteeLaneDisposition.omitted),
+
+  /// `spec_review`: the acceptance evidence is byte-identical to the previous
+  /// graded round — the testability verdict is preserved.
+  acceptanceUnchanged('acceptance-unchanged', CommitteeLaneDisposition.omitted),
+
+  /// `spec_review`: a respec round, and this lane returned an action grade in
+  /// the round that respecced — it re-runs.
+  targetedRespecAction(
+    'targeted-respec-action',
+    CommitteeLaneDisposition.elected,
+  ),
+
+  /// `spec_review`: a respec round, and this lane did NOT return an action
+  /// grade — its verdict is preserved.
+  targetedRespecPreserved(
+    'targeted-respec-preserved',
+    CommitteeLaneDisposition.omitted,
+  );
+
+  const CommitteeLaneRule(this.id, this.disposition);
+
+  /// This rule's stable id — persisted in every lane decision.
   final String id;
 
-  /// The stage this rule belongs to; a rule never fires for the other stage.
-  final CommitteeStage stage;
+  /// What this rule does to its lane.
+  final CommitteeLaneDisposition disposition;
 
-  /// The SEMANTIC lanes this rule selects when it matches.
-  final List<String> rubricIds;
-
-  /// Whether [evidence] matches this rule. Pure over the normalized facts.
-  bool matches(CommitteeSelectionEvidence evidence) {
-    if (evidence.stage != stage) return false;
-    return switch (this) {
-      CommitteeSelectionRule.specIntent => evidence.intent.isNotEmpty,
-      CommitteeSelectionRule.specDecisions => evidence.decisions.isNotEmpty,
-      CommitteeSelectionRule.specAcceptance => evidence.acceptance.isNotEmpty,
-      CommitteeSelectionRule.specSurface =>
-        evidence.paths.isNotEmpty || evidence.priorArt.isNotEmpty,
-      CommitteeSelectionRule.codeRuntime => evidence.changedPaths.any(
-        isCommitteeRuntimePath,
-      ),
-      CommitteeSelectionRule.codeTests => evidence.changedPaths.any(
-        isCommitteeTestPath,
-      ),
-      CommitteeSelectionRule.codeDocsMetadata =>
-        evidence.changedPaths.isNotEmpty &&
-            evidence.changedPaths.every(isCommitteeProseOrMetadataPath),
-      CommitteeSelectionRule.codeDecisionSensitive =>
-        evidence.decisions.isNotEmpty,
-    };
-  }
+  /// Whether an omission under this rule CARRIES the previous round's verdict
+  /// forward rather than declaring the lane irrelevant.
+  bool get preservesPriorVerdict => switch (this) {
+    CommitteeLaneRule.factsUnchanged ||
+    CommitteeLaneRule.acceptanceUnchanged ||
+    CommitteeLaneRule.targetedRespecPreserved => true,
+    CommitteeLaneRule.gateAlways ||
+    CommitteeLaneRule.fullFallback ||
+    CommitteeLaneRule.unrecognizedLane ||
+    CommitteeLaneRule.runtimeChange ||
+    CommitteeLaneRule.metadataChange ||
+    CommitteeLaneRule.testChange ||
+    CommitteeLaneRule.noRuntimeChange ||
+    CommitteeLaneRule.noTestChange ||
+    CommitteeLaneRule.testOnlyChange ||
+    CommitteeLaneRule.firstRound ||
+    CommitteeLaneRule.citedDecision ||
+    CommitteeLaneRule.noCitedDecision ||
+    CommitteeLaneRule.factsChanged ||
+    CommitteeLaneRule.noPriorVerdict ||
+    CommitteeLaneRule.targetedRespecAction => false,
+  };
 
   /// The rule [id] names, or null when it names none.
-  static CommitteeSelectionRule? fromId(Object? id) {
-    for (final rule in CommitteeSelectionRule.values) {
+  static CommitteeLaneRule? fromId(Object? id) {
+    for (final rule in CommitteeLaneRule.values) {
       if (rule.id == id) return rule;
     }
     return null;
   }
 }
 
-/// What the deterministic half of the policy concluded: which rules fired and
-/// which SEMANTIC lanes they union to. Empty [ruleIds] is the UNKNOWN shape —
-/// the only case a classifier is ever reached for.
-typedef CommitteeDeterministicMatch = ({
-  List<String> ruleIds,
-  List<String> rubricIds,
-});
+/// ONE active lane's election — its rubric id, its disposition, and the rule
+/// that decided it.
+@immutable
+final class CommitteeLaneDecision {
+  /// Creates the decision; the disposition follows from [rule].
+  const CommitteeLaneDecision({required this.rubricId, required this.rule});
+
+  /// The lane.
+  final String rubricId;
+
+  /// The rule that decided it.
+  final CommitteeLaneRule rule;
+
+  /// Whether the lane runs.
+  CommitteeLaneDisposition get disposition => rule.disposition;
+
+  /// Whether the lane runs, as a bool.
+  bool get elected => disposition == CommitteeLaneDisposition.elected;
+
+  /// The wire shape.
+  Map<String, Object?> toJson() => {
+    'rubricId': rubricId,
+    'disposition': disposition.wire,
+    'rule': rule.id,
+  };
+
+  /// Decodes a decision STRICTLY: a blank rubric id, an unknown rule, or a
+  /// disposition that disagrees with its rule yields null.
+  static CommitteeLaneDecision? fromJson(Object? json) {
+    if (json is! Map) return null;
+    final rubricId = (json['rubricId'] as String?)?.trim() ?? '';
+    final rule = CommitteeLaneRule.fromId(json['rule']);
+    final disposition = CommitteeLaneDisposition.fromWire(json['disposition']);
+    if (rubricId.isEmpty || rule == null || disposition != rule.disposition) {
+      return null;
+    }
+    return CommitteeLaneDecision(rubricId: rubricId, rule: rule);
+  }
+}
 
 // ── the selection ───────────────────────────────────────────────────────────
 
@@ -601,9 +710,11 @@ final class CommitteeSelection {
     required Iterable<String> selectedRubricIds,
     required this.source,
     required Map<String, String> laneInputDigests,
+    Iterable<CommitteeLaneDecision> laneDecisions = const [],
   }) : matchedRuleIds = List.unmodifiable(matchedRuleIds),
        selectedRubricIds = List.unmodifiable(selectedRubricIds),
-       laneInputDigests = Map.unmodifiable(laneInputDigests);
+       laneInputDigests = Map.unmodifiable(laneInputDigests),
+       laneDecisions = List.unmodifiable(laneDecisions);
 
   /// The policy version that produced this selection.
   final String policyVersion;
@@ -611,8 +722,8 @@ final class CommitteeSelection {
   /// The digest of the stage evidence it was computed over.
   final String evidenceDigest;
 
-  /// Which deterministic rules fired, in declaration order. Empty for a
-  /// classifier or full-fallback selection.
+  /// The distinct rule ids that decided a lane, in roster order — the per-rule
+  /// fold key. (A policy-1 selection recorded its additive rule ids here.)
   final List<String> matchedRuleIds;
 
   /// The hypothetical roster, in the ACTIVE committee's declaration order.
@@ -625,6 +736,18 @@ final class CommitteeSelection {
   /// comparison can tell a lane whose inputs changed from one whose did not.
   final Map<String, String> laneInputDigests;
 
+  /// ONE decision per active roster lane, in roster order: elected or omitted,
+  /// and the rule that decided it. Empty only for a policy-1 selection.
+  final List<CommitteeLaneDecision> laneDecisions;
+
+  /// The decision for [rubricId], or null when this selection has none.
+  CommitteeLaneDecision? decisionFor(String rubricId) {
+    for (final decision in laneDecisions) {
+      if (decision.rubricId == rubricId) return decision;
+    }
+    return null;
+  }
+
   /// The wire shape.
   Map<String, Object?> toJson() => {
     'policyVersion': policyVersion,
@@ -633,10 +756,16 @@ final class CommitteeSelection {
     'selectedRubricIds': selectedRubricIds,
     'source': source.wire,
     'laneInputDigests': laneInputDigests,
+    // A policy-1 selection decided no lanes and keeps its policy-1 shape.
+    if (laneDecisions.isNotEmpty)
+      'laneDecisions': [
+        for (final decision in laneDecisions) decision.toJson(),
+      ],
   };
 
   /// Decodes a selection STRICTLY; an unknown source wire, a non-string lane
-  /// digest, or a missing digest yields null.
+  /// digest, a missing digest, or any malformed lane decision yields null. An
+  /// absent `laneDecisions` list is the policy-1 shape and decodes empty.
   static CommitteeSelection? fromJson(Object? json) {
     if (json is! Map) return null;
     final source = CommitteeSelectionSource.fromWire(json['source']);
@@ -653,6 +782,14 @@ final class CommitteeSelection {
         evidenceDigest.isEmpty) {
       return null;
     }
+    final rawDecisions = json['laneDecisions'] ?? const <Object?>[];
+    if (rawDecisions is! List) return null;
+    final decisions = <CommitteeLaneDecision>[];
+    for (final entry in rawDecisions) {
+      final decision = CommitteeLaneDecision.fromJson(entry);
+      if (decision == null) return null;
+      decisions.add(decision);
+    }
     return CommitteeSelection(
       policyVersion: policyVersion,
       evidenceDigest: evidenceDigest,
@@ -660,13 +797,15 @@ final class CommitteeSelection {
       selectedRubricIds: selected,
       source: source,
       laneInputDigests: digests,
+      laneDecisions: decisions,
     );
   }
 }
 
-/// The pure policy: the rules, the digests and the composition of a
-/// [CommitteeSelection]. Immutable, const-constructible and cache-free — it is a
-/// VALUE the tree carries, re-read on every build (ADR-0008 D-H).
+/// The pure policy: the per-lane classification, the digests and the
+/// composition of a [CommitteeSelection]. Immutable, const-constructible and
+/// cache-free — it is a VALUE the tree carries, re-read on every build
+/// (ADR-0008 D-H).
 @immutable
 final class CommitteeSelectionPolicy {
   /// Creates the policy at [policyVersion].
@@ -676,25 +815,6 @@ final class CommitteeSelectionPolicy {
 
   /// The version stamped into every selection and hashed into every digest.
   final String policyVersion;
-
-  /// The rules that belong to [stage], in declaration order.
-  List<CommitteeSelectionRule> rulesFor(CommitteeStage stage) => [
-    for (final rule in CommitteeSelectionRule.values)
-      if (rule.stage == stage) rule,
-  ];
-
-  /// Evaluates EVERY rule of the evidence's stage and unions the lanes of every
-  /// match. Additive by construction: no rule shadows another.
-  CommitteeDeterministicMatch match(CommitteeSelectionEvidence evidence) {
-    final ruleIds = <String>[];
-    final rubricIds = <String>{};
-    for (final rule in rulesFor(evidence.stage)) {
-      if (!rule.matches(evidence)) continue;
-      ruleIds.add(rule.id);
-      rubricIds.addAll(rule.rubricIds);
-    }
-    return (ruleIds: ruleIds, rubricIds: rubricIds.toList()..sort());
-  }
 
   /// The ACTIVE semantic lanes — the full roster minus the deterministic gates,
   /// in the roster's declaration order.
@@ -727,46 +847,157 @@ final class CommitteeSelectionPolicy {
         'policyVersion': policyVersion,
         'stage': evidence.stage.wire,
         'rubric': id,
-        'facts': _laneFacts(id, evidence, gatingRubricIds),
+        'facts': committeeLaneFacts(id, evidence, gatingRubricIds),
       }),
   };
 
-  /// The DETERMINISTIC selection for [evidence]. An empty
-  /// [CommitteeSelection.matchedRuleIds] means no rule recognised the shape —
-  /// the caller may then classify.
-  CommitteeSelection selectDeterministic({
+  /// ONE decision per active roster lane, in roster order — the whole
+  /// classification, PURE over its arguments.
+  ///
+  /// Precedence, per lane: a gate is `gate-always`; uncertain evidence
+  /// ([committeeEvidenceIsUncertain]) is `full-fallback`; otherwise the stage
+  /// decides. `code_review` reads the pinned diff's path kinds
+  /// ([committeeDiffPathKindOf]). `spec_review` reads [previous]: a respec
+  /// round (the previous route stamped [kCommitteeRespecGrade] and some
+  /// semantic lane returned an action grade) re-runs only those action lanes;
+  /// a first round elects every lane but decision-alignment, which needs a
+  /// cited decision; a later round re-runs only the lanes whose facts moved.
+  /// An omission that carries a verdict forward needs that verdict to exist —
+  /// a lane the previous round never graded is elected `no-prior-verdict`.
+  List<CommitteeLaneDecision> classifyLanes({
     required CommitteeSelectionEvidence evidence,
     required List<String> fullRubricIds,
     required List<String> gatingRubricIds,
+    CommitteePreviousRound? previous,
   }) {
-    final matched = match(evidence);
+    final uncertain = committeeEvidenceIsUncertain(evidence);
+    final kinds = {
+      for (final path in evidence.changedPaths) committeeDiffPathKindOf(path),
+    };
+    final semantic = semanticRubricIds(
+      fullRubricIds: fullRubricIds,
+      gatingRubricIds: gatingRubricIds,
+    );
+    final respec =
+        previous != null &&
+        previous.isRespec &&
+        previous.actionLaneIds.any(semantic.contains);
+    return [
+      for (final id in fullRubricIds)
+        CommitteeLaneDecision(
+          rubricId: id,
+          rule: gatingRubricIds.contains(id)
+              ? CommitteeLaneRule.gateAlways
+              : uncertain
+              ? CommitteeLaneRule.fullFallback
+              : switch (evidence.stage) {
+                  CommitteeStage.codeReview => _codeRule(id, kinds),
+                  CommitteeStage.specReview => _specRule(
+                    id,
+                    evidence: evidence,
+                    gatingRubricIds: gatingRubricIds,
+                    previous: previous,
+                    targetedRespec: respec,
+                  ),
+                },
+        ),
+    ];
+  }
+
+  CommitteeLaneRule _codeRule(String id, Set<CommitteeDiffPathKind> kinds) {
+    final runtime = kinds.contains(CommitteeDiffPathKind.runtime);
+    return switch (id) {
+      'spec-adherence' =>
+        runtime
+            ? CommitteeLaneRule.runtimeChange
+            : kinds.contains(CommitteeDiffPathKind.metadata)
+            ? CommitteeLaneRule.metadataChange
+            : CommitteeLaneRule.testOnlyChange,
+      'regression-risk' =>
+        runtime
+            ? CommitteeLaneRule.runtimeChange
+            : CommitteeLaneRule.noRuntimeChange,
+      'test-coverage' =>
+        runtime
+            ? CommitteeLaneRule.runtimeChange
+            : kinds.contains(CommitteeDiffPathKind.test)
+            ? CommitteeLaneRule.testChange
+            : CommitteeLaneRule.noTestChange,
+      _ => CommitteeLaneRule.unrecognizedLane,
+    };
+  }
+
+  CommitteeLaneRule _specRule(
+    String id, {
+    required CommitteeSelectionEvidence evidence,
+    required List<String> gatingRubricIds,
+    required CommitteePreviousRound? previous,
+    required bool targetedRespec,
+  }) {
+    if (!_kSpecSemanticLanes.contains(id)) {
+      return CommitteeLaneRule.unrecognizedLane;
+    }
+    // A preserving omission is only honest when there is a verdict to carry.
+    CommitteeLaneRule preserving(CommitteeLaneRule rule) =>
+        previous!.hasVerdictFor(id) ? rule : CommitteeLaneRule.noPriorVerdict;
+
+    if (previous != null && targetedRespec) {
+      return previous.actionLaneIds.contains(id)
+          ? CommitteeLaneRule.targetedRespecAction
+          : preserving(CommitteeLaneRule.targetedRespecPreserved);
+    }
+    final cited = evidence.decisions.any(isCommitteeCitedDecision);
+    if (id == 'decision-alignment' && !cited) {
+      return CommitteeLaneRule.noCitedDecision;
+    }
+    if (previous == null) {
+      return id == 'decision-alignment'
+          ? CommitteeLaneRule.citedDecision
+          : CommitteeLaneRule.firstRound;
+    }
+    final unchanged =
+        canonicalCommitteeJson(
+          committeeLaneFacts(id, evidence, gatingRubricIds),
+        ) ==
+        canonicalCommitteeJson(
+          committeeLaneFacts(id, previous.evidence, gatingRubricIds),
+        );
+    if (!unchanged) return CommitteeLaneRule.factsChanged;
+    return preserving(
+      id == 'acceptance-testability'
+          ? CommitteeLaneRule.acceptanceUnchanged
+          : CommitteeLaneRule.factsUnchanged,
+    );
+  }
+
+  /// The selection for [evidence] — [classifyLanes], composed. Every lane is
+  /// decided, so the source is [CommitteeSelectionSource.deterministic] unless
+  /// the evidence was uncertain.
+  CommitteeSelection classify({
+    required CommitteeSelectionEvidence evidence,
+    required List<String> fullRubricIds,
+    required List<String> gatingRubricIds,
+    CommitteePreviousRound? previous,
+  }) {
+    final decisions = classifyLanes(
+      evidence: evidence,
+      fullRubricIds: fullRubricIds,
+      gatingRubricIds: gatingRubricIds,
+      previous: previous,
+    );
     return _compose(
       evidence: evidence,
       fullRubricIds: fullRubricIds,
       gatingRubricIds: gatingRubricIds,
-      source: CommitteeSelectionSource.deterministic,
-      matchedRuleIds: matched.ruleIds,
-      requestedRubricIds: matched.rubricIds,
+      source: committeeEvidenceIsUncertain(evidence)
+          ? CommitteeSelectionSource.fullFallback
+          : CommitteeSelectionSource.deterministic,
+      decisions: decisions,
     );
   }
 
-  /// The selection for an ACCEPTED classifier answer.
-  CommitteeSelection selectFromClassifier({
-    required CommitteeSelectionEvidence evidence,
-    required List<String> fullRubricIds,
-    required List<String> gatingRubricIds,
-    required List<String> classifierRubricIds,
-  }) => _compose(
-    evidence: evidence,
-    fullRubricIds: fullRubricIds,
-    gatingRubricIds: gatingRubricIds,
-    source: CommitteeSelectionSource.classifier,
-    matchedRuleIds: const [],
-    requestedRubricIds: classifierRubricIds,
-  );
-
-  /// The FULL current committee — what a second classifier non-result falls
-  /// back to, and what an unreadable selection run means downstream.
+  /// The FULL current committee — what an absent, stale or unreadable selection
+  /// run means when the route joins.
   CommitteeSelection selectFullFallback({
     required CommitteeSelectionEvidence evidence,
     required List<String> fullRubricIds,
@@ -776,8 +1007,15 @@ final class CommitteeSelectionPolicy {
     fullRubricIds: fullRubricIds,
     gatingRubricIds: gatingRubricIds,
     source: CommitteeSelectionSource.fullFallback,
-    matchedRuleIds: const [],
-    requestedRubricIds: fullRubricIds,
+    decisions: [
+      for (final id in fullRubricIds)
+        CommitteeLaneDecision(
+          rubricId: id,
+          rule: gatingRubricIds.contains(id)
+              ? CommitteeLaneRule.gateAlways
+              : CommitteeLaneRule.fullFallback,
+        ),
+    ],
   );
 
   CommitteeSelection _compose({
@@ -785,189 +1023,100 @@ final class CommitteeSelectionPolicy {
     required List<String> fullRubricIds,
     required List<String> gatingRubricIds,
     required CommitteeSelectionSource source,
-    required List<String> matchedRuleIds,
-    required List<String> requestedRubricIds,
-  }) {
-    // The gates are UNCONDITIONAL, and an id outside the active roster is
-    // dropped: this policy may never invent a lane the committee does not run.
-    final wanted = <String>{...requestedRubricIds, ...gatingRubricIds};
-    return CommitteeSelection(
-      policyVersion: policyVersion,
-      evidenceDigest: evidenceDigestOf(evidence),
-      matchedRuleIds: matchedRuleIds,
-      selectedRubricIds: [
-        for (final id in fullRubricIds)
-          if (wanted.contains(id)) id,
-      ],
-      source: source,
-      laneInputDigests: laneInputDigests(
-        evidence: evidence,
-        fullRubricIds: fullRubricIds,
-        gatingRubricIds: gatingRubricIds,
-      ),
-    );
-  }
-
-  /// The FACTS one lane actually reads. An unrecognised ACTIVE lane hashes the
-  /// COMPLETE stage evidence, so a lane somebody adds is explicit rather than
-  /// silently digested over nothing.
-  Map<String, Object?> _laneFacts(
-    String rubricId,
-    CommitteeSelectionEvidence evidence,
-    List<String> gatingRubricIds,
-  ) => switch (rubricId) {
-    'spec-validation' => {
-      'intent': evidence.intent,
-      'acceptance': evidence.acceptance,
-      'paths': evidence.paths,
-    },
-    'coherence' => {
-      'intent': evidence.intent,
-      'paths': evidence.paths,
-      'priorArt': evidence.priorArt,
-    },
-    'decision-alignment' => {
-      'decisions': evidence.decisions,
-      'paths': evidence.paths,
-    },
-    'acceptance-testability' => {
-      'intent': evidence.intent,
-      'acceptance': evidence.acceptance,
-    },
-    'plan-completeness' => {
-      'intent': evidence.intent,
-      'paths': evidence.paths,
-      'priorArt': evidence.priorArt,
-    },
-    'spec-adherence' => {
-      'pinnedDiffDigest': evidence.pinnedDiffDigest,
-      'intent': evidence.intent,
-      'acceptance': evidence.acceptance,
-    },
-    'regression-risk' => {
-      'pinnedDiffDigest': evidence.pinnedDiffDigest,
-      'paths': evidence.paths,
-      'decisions': evidence.decisions,
-      'priorArt': evidence.priorArt,
-    },
-    'test-coverage' => {
-      'pinnedDiffDigest': evidence.pinnedDiffDigest,
-      'changedPaths': evidence.changedPaths,
-      'acceptance': evidence.acceptance,
-    },
-    _ when gatingRubricIds.contains(rubricId) => {
-      'pinnedDiffDigest': evidence.pinnedDiffDigest,
-      'changedPaths': evidence.changedPaths,
-    },
-    _ => {'evidence': evidence.toJson()},
-  };
+    required List<CommitteeLaneDecision> decisions,
+  }) => CommitteeSelection(
+    policyVersion: policyVersion,
+    evidenceDigest: evidenceDigestOf(evidence),
+    matchedRuleIds: {for (final decision in decisions) decision.rule.id},
+    selectedRubricIds: [
+      for (final decision in decisions)
+        if (decision.elected) decision.rubricId,
+    ],
+    source: source,
+    laneInputDigests: laneInputDigests(
+      evidence: evidence,
+      fullRubricIds: fullRubricIds,
+      gatingRubricIds: gatingRubricIds,
+    ),
+    laneDecisions: decisions,
+  );
 }
+
+/// The spec committee's semantic lanes this policy has rules for.
+const Set<String> _kSpecSemanticLanes = {
+  'coherence',
+  'decision-alignment',
+  'acceptance-testability',
+  'plan-completeness',
+};
+
+/// The FACTS one lane actually reads — what its input digest hashes and what a
+/// later spec round compares against the previous one. An unrecognised ACTIVE
+/// lane hashes the COMPLETE stage evidence, so a lane somebody adds is explicit
+/// rather than silently digested over nothing.
+///
+/// `acceptance-testability` reads the acceptance criteria ALONE: an unchanged
+/// criteria set carries its testability verdict forward even when the design
+/// around it moved. `decision-alignment` reads the intent beside the decisions,
+/// because a rewritten design can depart from a decision that did not change.
+Map<String, Object?> committeeLaneFacts(
+  String rubricId,
+  CommitteeSelectionEvidence evidence,
+  List<String> gatingRubricIds,
+) => switch (rubricId) {
+  'spec-validation' => {
+    'intent': evidence.intent,
+    'acceptance': evidence.acceptance,
+    'paths': evidence.paths,
+  },
+  'coherence' => {
+    'intent': evidence.intent,
+    'paths': evidence.paths,
+    'priorArt': evidence.priorArt,
+  },
+  'decision-alignment' => {
+    'intent': evidence.intent,
+    'decisions': evidence.decisions,
+    'paths': evidence.paths,
+  },
+  'acceptance-testability' => {'acceptance': evidence.acceptance},
+  'plan-completeness' => {
+    'intent': evidence.intent,
+    'paths': evidence.paths,
+    'priorArt': evidence.priorArt,
+  },
+  'spec-adherence' => {
+    'pinnedDiffDigest': evidence.pinnedDiffDigest,
+    'intent': evidence.intent,
+    'acceptance': evidence.acceptance,
+  },
+  'regression-risk' => {
+    'pinnedDiffDigest': evidence.pinnedDiffDigest,
+    'paths': evidence.paths,
+    'decisions': evidence.decisions,
+    'priorArt': evidence.priorArt,
+  },
+  'test-coverage' => {
+    'pinnedDiffDigest': evidence.pinnedDiffDigest,
+    'changedPaths': evidence.changedPaths,
+    'acceptance': evidence.acceptance,
+  },
+  _ when gatingRubricIds.contains(rubricId) => {
+    'pinnedDiffDigest': evidence.pinnedDiffDigest,
+    'changedPaths': evidence.changedPaths,
+  },
+  _ => {'evidence': evidence.toJson()},
+};
 
 /// The policy every circuit mounts by default.
 const CommitteeSelectionPolicy kCommitteeSelectionPolicy =
     CommitteeSelectionPolicy();
 
-// ── the bounded classifier ──────────────────────────────────────────────────
+// ── the policy-1 classifier provenance ──────────────────────────────────────
 
-/// ONE classifier call's outcome. Three of the four kinds are NON-RESULTS.
-@immutable
-final class CommitteeClassifierResult {
-  const CommitteeClassifierResult._(
-    this.kind, {
-    this.rubricIds = const [],
-    this.rejectedRubricIds = const [],
-  });
-
-  /// A well-formed, entirely-legal answer over [rubricIds].
-  factory CommitteeClassifierResult.selected(Iterable<String> rubricIds) =>
-      CommitteeClassifierResult._(
-        CommitteeClassifierResultKind.selected,
-        rubricIds: List.unmodifiable(rubricIds),
-      );
-
-  /// No output at all.
-  const CommitteeClassifierResult.missing()
-    : this._(CommitteeClassifierResultKind.missing);
-
-  /// Output that does not decode into the one legal shape.
-  const CommitteeClassifierResult.malformed()
-    : this._(CommitteeClassifierResultKind.malformed);
-
-  /// Output naming at least one rubric id we do not run — refused WHOLE, with
-  /// the offending ids preserved as provenance.
-  factory CommitteeClassifierResult.unknown(Iterable<String> rejected) =>
-      CommitteeClassifierResult._(
-        CommitteeClassifierResultKind.unknown,
-        rejectedRubricIds: List.unmodifiable(rejected),
-      );
-
-  /// What this call produced.
-  final CommitteeClassifierResultKind kind;
-
-  /// The accepted lanes (empty for every non-result).
-  final List<String> rubricIds;
-
-  /// The ids that made the answer [CommitteeClassifierResultKind.unknown].
-  final List<String> rejectedRubricIds;
-
-  /// Whether this is the one kind that ends the retry loop.
-  bool get isSelected => kind == CommitteeClassifierResultKind.selected;
-}
-
-/// Decodes ONE classifier answer STRICTLY.
-///
-/// The legal shape is a single JSON object with EXACTLY a `rubricIds` list of
-/// non-empty strings. Null/blank output maps to
-/// [CommitteeClassifierResultKind.missing]; a decode failure, a non-object, a
-/// non-list, an empty list or an extra key maps to
-/// [CommitteeClassifierResultKind.malformed]; any id outside
-/// [kCommitteeClassifierAllowlist] or outside [activeSemanticRubricIds] rejects
-/// the WHOLE answer as [CommitteeClassifierResultKind.unknown]. A valid answer
-/// is deduplicated and reordered by the active committee. No arm is a grade.
-CommitteeClassifierResult parseCommitteeClassifierResult(
-  String? output, {
-  required List<String> activeSemanticRubricIds,
-}) {
-  if (output == null || output.trim().isEmpty) {
-    return const CommitteeClassifierResult.missing();
-  }
-  final Object? decoded;
-  try {
-    decoded = jsonDecode(output.trim());
-  } on Object {
-    return const CommitteeClassifierResult.malformed();
-  }
-  if (decoded is! Map ||
-      decoded.keys.map((key) => '$key').toSet().difference({
-        'rubricIds',
-      }).isNotEmpty) {
-    return const CommitteeClassifierResult.malformed();
-  }
-  final raw = decoded['rubricIds'];
-  if (raw is! List ||
-      raw.isEmpty ||
-      raw.any((id) => id is! String || id.trim().isEmpty)) {
-    return const CommitteeClassifierResult.malformed();
-  }
-  final requested = {for (final id in raw) (id as String).trim()};
-  final active = activeSemanticRubricIds.toSet();
-  if (!kCommitteeClassifierAllowlist.containsAll(requested) ||
-      !active.containsAll(requested)) {
-    return CommitteeClassifierResult.unknown(requested.toList()..sort());
-  }
-  return CommitteeClassifierResult.selected([
-    for (final id in activeSemanticRubricIds)
-      if (requested.contains(id)) id,
-  ]);
-}
-
-/// The injected one-shot classifier seam — the SAME shape the delivery
-/// describe pass's runner answers with, so `buildCodeRegistry` adapts the
-/// existing [InferenceRunner] rather than growing a second process abstraction.
-typedef CommitteeClassifier =
-    Future<({bool ok, String output})> Function(RuntimeConfig config);
-
-/// ONE classifier call, recorded — including the ones that produced nothing.
+/// ONE policy-1 classifier call, recorded — including the ones that produced
+/// nothing. Policy 2 runs no classifier, so a current run carries none; the
+/// type remains so the retained version-1 corpus still decodes and accounts.
 @immutable
 final class CommitteeClassifierAttempt {
   /// Creates the record.
@@ -1092,8 +1241,8 @@ final class CommitteeClassifierAttempt {
 // ── the persisted run ───────────────────────────────────────────────────────
 
 /// ONE selector invocation's whole durable state — the selection, the evidence
-/// it was computed over, and every classifier attempt (including the ones that
-/// produced nothing).
+/// it was computed over, the previous round it was compared against, and (for
+/// a policy-1 run) every classifier attempt.
 @immutable
 final class CommitteeSelectionRun {
   /// Creates the run; every collection is copied.
@@ -1109,6 +1258,8 @@ final class CommitteeSelectionRun {
     required Iterable<String> gatingRubricIds,
     Iterable<CommitteeClassifierAttempt> attempts = const [],
     Iterable<String> missingFields = const [],
+    this.previous,
+    this.wireVersion = kCommitteeSelectionWireVersion,
   }) : fullRubricIds = List.unmodifiable(fullRubricIds),
        gatingRubricIds = List.unmodifiable(gatingRubricIds),
        attempts = List.unmodifiable(attempts),
@@ -1141,11 +1292,19 @@ final class CommitteeSelectionRun {
   /// The ACTIVE deterministic gates.
   final List<String> gatingRubricIds;
 
-  /// Every classifier attempt, in call order. Empty for a deterministic match.
+  /// Every policy-1 classifier attempt, in call order. Always empty for a
+  /// policy-2 run.
   final List<CommitteeClassifierAttempt> attempts;
 
   /// Everything this run could not do, named. Shadow-only: it never gates.
   final List<String> missingFields;
+
+  /// The previous round of the same bead and stage this run was classified
+  /// against, captured BEFORE the run was written — null on a first round.
+  final CommitteePreviousRound? previous;
+
+  /// The wire version this run was recorded at (1 for the retained corpus).
+  final int wireVersion;
 
   /// Whether [workBeadId]/[round]/[stage] match the joining route's.
   bool isFreshFor({
@@ -1157,9 +1316,9 @@ final class CommitteeSelectionRun {
       this.workBeadId == workBeadId &&
       this.round == round;
 
-  /// The wire shape.
+  /// The wire shape. A version-1 run keeps its version-1 shape.
   Map<String, Object?> toJson() => {
-    'version': 1,
+    'version': wireVersion,
     'policyVersion': policyVersion,
     'stage': stage.wire,
     'workBeadId': workBeadId,
@@ -1171,12 +1330,17 @@ final class CommitteeSelectionRun {
     'gatingRubricIds': gatingRubricIds,
     'attempts': [for (final attempt in attempts) attempt.toJson()],
     'missingFields': missingFields,
+    if (wireVersion >= 2) 'previous': previous?.toJson(),
   };
 
-  /// Decodes a run STRICTLY: any `version` but 1, an unknown stage, a negative
-  /// round, a refused selection/evidence, or ANY malformed attempt yields null.
+  /// Decodes a run STRICTLY: any `version` but 1 or 2, an unknown stage, a
+  /// negative round, a refused selection/evidence/previous round, or ANY
+  /// malformed attempt yields null. A version-2 run must decide every roster
+  /// lane exactly once, in roster order.
   static CommitteeSelectionRun? fromJson(Object? json) {
-    if (json is! Map || json['version'] != 1) return null;
+    if (json is! Map) return null;
+    final version = json['version'];
+    if (version != 1 && version != 2) return null;
     final stage = CommitteeStage.fromWire(json['stage']);
     final round = json['round'];
     final selection = CommitteeSelection.fromJson(json['selection']);
@@ -1196,6 +1360,13 @@ final class CommitteeSelectionRun {
         policyVersion.isEmpty) {
       return null;
     }
+    if (version == 2 &&
+        canonicalCommitteeJson([
+              for (final decision in selection.laneDecisions) decision.rubricId,
+            ]) !=
+            canonicalCommitteeJson(full)) {
+      return null;
+    }
     final rawAttempts = json['attempts'];
     if (rawAttempts is! List) return null;
     final attempts = <CommitteeClassifierAttempt>[];
@@ -1204,6 +1375,9 @@ final class CommitteeSelectionRun {
       if (attempt == null) return null;
       attempts.add(attempt);
     }
+    final rawPrevious = version == 2 ? json['previous'] : null;
+    final previous = CommitteePreviousRound.fromJson(rawPrevious);
+    if (rawPrevious != null && previous == null) return null;
     return CommitteeSelectionRun(
       policyVersion: policyVersion,
       stage: stage,
@@ -1216,6 +1390,111 @@ final class CommitteeSelectionRun {
       gatingRubricIds: gating,
       attempts: attempts,
       missingFields: missing,
+      previous: previous,
+      wireVersion: version as int,
+    );
+  }
+}
+
+/// The PREVIOUS round of the same bead and stage, as a selection input — what
+/// the full committee saw and ruled, frozen from that round's receipt.
+///
+/// It snapshots the receipt's facts, never its own previous round, so a chain
+/// of respecs stays one level deep on disk.
+@immutable
+final class CommitteePreviousRound {
+  /// Creates the snapshot; every collection is copied.
+  CommitteePreviousRound({
+    required this.round,
+    required this.evidence,
+    required this.route,
+    required Iterable<String> actionLaneIds,
+    required Iterable<CommitteeLaneReceipt> lanes,
+  }) : actionLaneIds = List.unmodifiable(actionLaneIds),
+       lanes = List.unmodifiable(lanes);
+
+  /// [receipt] as the next round's previous-round input.
+  factory CommitteePreviousRound.fromReceipt(CommitteeShadowReceipt receipt) =>
+      CommitteePreviousRound(
+        round: receipt.run.round,
+        evidence: receipt.run.evidence,
+        route: receipt.route,
+        actionLaneIds: receipt.actionLaneIds,
+        lanes: receipt.lanes,
+      );
+
+  /// The previous round's circuit round.
+  final int round;
+
+  /// The evidence it was classified over.
+  final CommitteeSelectionEvidence evidence;
+
+  /// The authoritative route's ruling on it.
+  final CommitteeRouteObservation route;
+
+  /// Its lanes that graded `D`, `E` or `F`.
+  final List<String> actionLaneIds;
+
+  /// Every full-committee lane it observed, verdicts included.
+  final List<CommitteeLaneReceipt> lanes;
+
+  /// Whether that round RESPECCED — its route stamped the invalidating
+  /// [kCommitteeRespecGrade] under [kCommitteeRouteGradeKey].
+  bool get isRespec =>
+      route.payload[kCommitteeRouteGradeKey]?.trim().toUpperCase() ==
+      kCommitteeRespecGrade;
+
+  /// The observed lane [rubricId], or null when the round observed none.
+  CommitteeLaneReceipt? laneOf(String rubricId) {
+    for (final lane in lanes) {
+      if (lane.rubricId == rubricId) return lane;
+    }
+    return null;
+  }
+
+  /// Whether the round recorded a letter grade for [rubricId] — the verdict a
+  /// preserving omission carries forward.
+  bool hasVerdictFor(String rubricId) =>
+      (laneOf(rubricId)?.grade ?? '').trim().isNotEmpty;
+
+  /// The wire shape.
+  Map<String, Object?> toJson() => {
+    'round': round,
+    'evidence': evidence.toJson(),
+    'route': route.toJson(),
+    'actionLaneIds': actionLaneIds,
+    'lanes': [for (final lane in lanes) lane.toJson()],
+  };
+
+  /// Decodes a snapshot STRICTLY: a negative or non-integer round, refused
+  /// evidence/route, a non-list action set or ANY malformed lane yields null.
+  static CommitteePreviousRound? fromJson(Object? json) {
+    if (json is! Map) return null;
+    final round = json['round'];
+    final evidence = CommitteeSelectionEvidence.fromJson(json['evidence']);
+    final route = CommitteeRouteObservation.fromJson(json['route']);
+    final action = _stringList(json['actionLaneIds']);
+    final rawLanes = json['lanes'];
+    if (round is! int ||
+        round < 0 ||
+        evidence == null ||
+        route == null ||
+        action == null ||
+        rawLanes is! List) {
+      return null;
+    }
+    final lanes = <CommitteeLaneReceipt>[];
+    for (final entry in rawLanes) {
+      final lane = CommitteeLaneReceipt.fromJson(entry);
+      if (lane == null) return null;
+      lanes.add(lane);
+    }
+    return CommitteePreviousRound(
+      round: round,
+      evidence: evidence,
+      route: route,
+      actionLaneIds: action,
+      lanes: lanes,
     );
   }
 }
@@ -1940,9 +2219,11 @@ final class CommitteeShadowReceipt {
     this.gateDisposition,
     this.truncated = false,
     Iterable<String> missingFields = const [],
+    Iterable<CommitteeLaneReceipt> preservedLanes = const [],
   }) : selectedRubricIds = List.unmodifiable(selectedRubricIds),
        omittedRubricIds = List.unmodifiable(omittedRubricIds),
        lanes = List.unmodifiable(lanes),
+       preservedLanes = List.unmodifiable(preservedLanes),
        actionLaneIds = List.unmodifiable(actionLaneIds),
        downstreamJoinKeys = Map.unmodifiable(downstreamJoinKeys),
        missingFields = List.unmodifiable(missingFields);
@@ -1969,6 +2250,12 @@ final class CommitteeShadowReceipt {
   /// Every FULL-committee lane, observed.
   final List<CommitteeLaneReceipt> lanes;
 
+  /// The PREVIOUS round's verdict for every omitted lane whose rule carries a
+  /// verdict forward ([CommitteeLaneRule.preservesPriorVerdict]) — what an
+  /// activated selector would hand the route in place of a re-run. The full
+  /// [lanes] stay the authoritative observation; this is the counterfactual.
+  final List<CommitteeLaneReceipt> preservedLanes;
+
   /// The lanes that graded `D`, `E` or `F` — this pack's action set.
   final List<String> actionLaneIds;
 
@@ -1981,10 +2268,11 @@ final class CommitteeShadowReceipt {
   /// What the FULL committee actually spent.
   final CommitteeUsageAccounting actual;
 
-  /// What the CLASSIFIER spent (empty for a deterministic match).
+  /// What the policy-1 CLASSIFIER spent (always empty under policy 2).
   final CommitteeUsageAccounting classifier;
 
-  /// What the SELECTED committee plus the classifier WOULD have spent.
+  /// What the SELECTED committee (plus any policy-1 classifier) WOULD have
+  /// spent.
   final CommitteeUsageAccounting counterfactual;
 
   /// Whether any contributing artifact reported itself clipped.
@@ -1993,9 +2281,10 @@ final class CommitteeShadowReceipt {
   /// Everything this receipt could not resolve, named.
   final List<String> missingFields;
 
-  /// The wire shape.
+  /// The wire shape — at the run's own wire version, so a version-1 receipt
+  /// keeps its version-1 shape.
   Map<String, Object?> toJson() => {
-    'version': 1,
+    'version': run.wireVersion,
     'sampleId': sampleId,
     'joinId': joinId,
     'run': run.toJson(),
@@ -2013,13 +2302,17 @@ final class CommitteeShadowReceipt {
     'counterfactual': counterfactual.toJson(),
     'truncated': truncated,
     'missingFields': missingFields,
+    if (run.wireVersion >= 2)
+      'preservedLanes': [for (final lane in preservedLanes) lane.toJson()],
   };
 
-  /// Decodes a receipt STRICTLY: any `version` but 1, a refused run/route/lane/
-  /// accounting block, or a present-but-unknown gate disposition yields null.
+  /// Decodes a receipt STRICTLY: any `version` but 1 or 2 (or one that
+  /// disagrees with its run's), a refused run/route/lane/accounting block, or a
+  /// present-but-unknown gate disposition yields null.
   static CommitteeShadowReceipt? fromJson(Object? json) {
-    if (json is! Map || json['version'] != 1) return null;
+    if (json is! Map) return null;
     final run = CommitteeSelectionRun.fromJson(json['run']);
+    if (run == null || json['version'] != run.wireVersion) return null;
     final route = CommitteeRouteObservation.fromJson(json['route']);
     final actual = CommitteeUsageAccounting.fromJson(json['actual']);
     final classifier = CommitteeUsageAccounting.fromJson(json['classifier']);
@@ -2033,8 +2326,7 @@ final class CommitteeShadowReceipt {
     final missing = _stringList(json['missingFields']);
     final sampleId = (json['sampleId'] as String?)?.trim() ?? '';
     final joinId = (json['joinId'] as String?)?.trim() ?? '';
-    if (run == null ||
-        route == null ||
+    if (route == null ||
         actual == null ||
         classifier == null ||
         counterfactual == null ||
@@ -2047,14 +2339,11 @@ final class CommitteeShadowReceipt {
         joinId.isEmpty) {
       return null;
     }
-    final rawLanes = json['lanes'];
-    if (rawLanes is! List) return null;
-    final lanes = <CommitteeLaneReceipt>[];
-    for (final entry in rawLanes) {
-      final lane = CommitteeLaneReceipt.fromJson(entry);
-      if (lane == null) return null;
-      lanes.add(lane);
-    }
+    final lanes = _laneReceipts(json['lanes']);
+    final preserved = _laneReceipts(
+      run.wireVersion >= 2 ? json['preservedLanes'] : const <Object?>[],
+    );
+    if (lanes == null || preserved == null) return null;
     final rawDisposition = json['gateDisposition'];
     final disposition = _gateDispositionFromWire(rawDisposition);
     if (rawDisposition != null && disposition == null) return null;
@@ -2074,8 +2363,20 @@ final class CommitteeShadowReceipt {
       counterfactual: counterfactual,
       truncated: json['truncated'] == true,
       missingFields: missing,
+      preservedLanes: preserved,
     );
   }
+}
+
+List<CommitteeLaneReceipt>? _laneReceipts(Object? json) {
+  if (json is! List) return null;
+  final lanes = <CommitteeLaneReceipt>[];
+  for (final entry in json) {
+    final lane = CommitteeLaneReceipt.fromJson(entry);
+    if (lane == null) return null;
+    lanes.add(lane);
+  }
+  return lanes;
 }
 
 /// The stable SAMPLE identity for one selection.
@@ -2110,8 +2411,9 @@ String committeeJoinId({
 /// inference, no tree.
 ///
 /// [lanes] arrive derived ([CommitteeLaneReceipt.derive]); every identity,
-/// omission set and accounting block below is computed here, so a replay over
-/// the recorded columns reproduces the receipt byte for byte.
+/// omission set, preserved verdict and accounting block below is computed here,
+/// so a replay over the recorded columns reproduces the receipt byte for byte.
+/// The preserved verdicts come from the run's own previous-round snapshot.
 CommitteeShadowReceipt buildCommitteeShadowReceipt({
   required CommitteeSelectionRun run,
   required CommitteeRouteObservation route,
@@ -2131,6 +2433,13 @@ CommitteeShadowReceipt buildCommitteeShadowReceipt({
   final selectedLanes = [
     for (final lane in lanes)
       if (selected.contains(lane.rubricId)) lane,
+  ];
+  final previous = run.previous;
+  final preservedLanes = [
+    if (previous != null)
+      for (final decision in run.selection.laneDecisions)
+        if (decision.rule.preservesPriorVerdict)
+          ?previous.laneOf(decision.rubricId),
   ];
   return CommitteeShadowReceipt(
     sampleId: committeeSampleId(
@@ -2176,95 +2485,116 @@ CommitteeShadowReceipt buildCommitteeShadowReceipt({
     ),
     truncated: truncated || run.evidence.truncated,
     missingFields: missingFields,
+    preservedLanes: preservedLanes,
   );
 }
 
-/// Re-derives [recorded]'s selection from its OWN retained evidence and
-/// attempts — the pure half of replay.
-CommitteeSelectionRun replayCommitteeSelectionRun(
-  CommitteeSelectionRun recorded,
-) {
-  final policy = CommitteeSelectionPolicy(
-    policyVersion: recorded.policyVersion,
-  );
-  final matched = policy.match(recorded.evidence);
-  final accepted = [
-    for (final attempt in recorded.attempts)
-      if (attempt.kind == CommitteeClassifierResultKind.selected) attempt,
-  ];
-  final CommitteeSelection selection;
-  if (matched.ruleIds.isNotEmpty) {
-    selection = policy.selectDeterministic(
-      evidence: recorded.evidence,
-      fullRubricIds: recorded.fullRubricIds,
-      gatingRubricIds: recorded.gatingRubricIds,
-    );
-  } else if (accepted.isEmpty) {
-    selection = policy.selectFullFallback(
-      evidence: recorded.evidence,
-      fullRubricIds: recorded.fullRubricIds,
-      gatingRubricIds: recorded.gatingRubricIds,
-    );
-  } else {
-    selection = policy.selectFromClassifier(
-      evidence: recorded.evidence,
-      fullRubricIds: recorded.fullRubricIds,
-      gatingRubricIds: recorded.gatingRubricIds,
-      classifierRubricIds: accepted.first.acceptedRubricIds,
-    );
-  }
-  return CommitteeSelectionRun(
-    policyVersion: recorded.policyVersion,
-    stage: recorded.stage,
-    workBeadId: recorded.workBeadId,
-    round: recorded.round,
-    nodePath: recorded.nodePath,
-    selection: selection,
-    evidence: recorded.evidence,
-    fullRubricIds: recorded.fullRubricIds,
-    gatingRubricIds: recorded.gatingRubricIds,
-    attempts: recorded.attempts,
-    missingFields: recorded.missingFields,
-  );
-}
-
-/// Replays [recorded] through the PURE policy over its own recorded facts.
+/// Re-classifies [recorded] under [policy] over its OWN retained evidence — the
+/// pure half of replay, and how a policy-1 receipt is measured under policy 2.
 ///
-/// It reads no discovery artifact, no diff, no telemetry file and calls no
-/// inference: every input is a column of the receipt itself. A reproduced
-/// receipt that differs from the recorded one is the policy having drifted.
-CommitteeShadowReceipt replayCommitteeShadowReceipt(
-  CommitteeShadowReceipt recorded,
-) => buildCommitteeShadowReceipt(
-  run: replayCommitteeSelectionRun(recorded.run),
-  route: recorded.route,
-  lanes: [
-    for (final lane in recorded.lanes)
-      CommitteeLaneReceipt.derive(
-        rubricId: lane.rubricId,
-        nodePath: lane.nodePath,
-        workBeadId: recorded.run.workBeadId,
-        routeType: recorded.route.type,
-        gating: lane.gating,
-        grade: lane.grade,
-        transport: lane.transport,
-        rationale: lane.rationale,
-        finding: lane.finding,
-        owner: lane.owner,
-        refinement: lane.refinement,
-        model: lane.model,
-        tokensIn: lane.tokensIn,
-        tokensOut: lane.tokensOut,
-        costUsd: lane.costUsd,
-        premiumRequests: lane.premiumRequests,
-        numTurns: lane.numTurns,
-        durationMs: lane.durationMs,
-        truncated: lane.truncated,
+/// [previous] is the recorded receipt of the preceding round of the same bead
+/// and stage; when it is null the run's own previous-round snapshot (a
+/// version-2 receipt carries one) is used. It reads no discovery artifact, no
+/// diff, no telemetry file and calls no inference: every input is a column of
+/// the receipts themselves, and the route observation is carried verbatim — a
+/// re-classification never rules, grades or rewinds anything. A version-2
+/// receipt re-classified over its own snapshot reproduces itself; one that
+/// differs is the policy having drifted.
+CommitteeShadowReceipt reclassifyCommitteeShadowReceipt(
+  CommitteeShadowReceipt recorded, {
+  CommitteeShadowReceipt? previous,
+  CommitteeSelectionPolicy policy = kCommitteeSelectionPolicy,
+}) {
+  final source = recorded.run;
+  final prior = previous == null
+      ? source.previous
+      : CommitteePreviousRound.fromReceipt(previous);
+  final run = CommitteeSelectionRun(
+    policyVersion: policy.policyVersion,
+    stage: source.stage,
+    workBeadId: source.workBeadId,
+    round: source.round,
+    nodePath: source.nodePath,
+    selection: policy.classify(
+      evidence: source.evidence,
+      fullRubricIds: source.fullRubricIds,
+      gatingRubricIds: source.gatingRubricIds,
+      previous: prior,
+    ),
+    evidence: source.evidence,
+    fullRubricIds: source.fullRubricIds,
+    gatingRubricIds: source.gatingRubricIds,
+    missingFields: source.missingFields,
+    previous: prior,
+  );
+  return buildCommitteeShadowReceipt(
+    run: run,
+    route: recorded.route,
+    lanes: [
+      for (final lane in recorded.lanes)
+        CommitteeLaneReceipt.derive(
+          rubricId: lane.rubricId,
+          nodePath: lane.nodePath,
+          workBeadId: source.workBeadId,
+          routeType: recorded.route.type,
+          gating: lane.gating,
+          grade: lane.grade,
+          transport: lane.transport,
+          rationale: lane.rationale,
+          finding: lane.finding,
+          owner: lane.owner,
+          refinement: lane.refinement,
+          model: lane.model,
+          tokensIn: lane.tokensIn,
+          tokensOut: lane.tokensOut,
+          costUsd: lane.costUsd,
+          premiumRequests: lane.premiumRequests,
+          numTurns: lane.numTurns,
+          durationMs: lane.durationMs,
+          truncated: lane.truncated,
+        ),
+    ],
+    missingFields: recorded.missingFields,
+    truncated: recorded.truncated,
+  );
+}
+
+/// Re-classifies a retained corpus in CHRONOLOGICAL order: grouped by work bead
+/// and stage, ascending by round, each receipt classified against the RECORDED
+/// receipt of the round before it (the full committee always ran in shadow, so
+/// that is the previous round an activated selector would have seen). The
+/// first round of each group has no previous round. Pure, like
+/// [reclassifyCommitteeShadowReceipt].
+List<CommitteeShadowReceipt> reclassifyCommitteeShadowCorpus(
+  Iterable<CommitteeShadowReceipt> recorded, {
+  CommitteeSelectionPolicy policy = kCommitteeSelectionPolicy,
+}) {
+  final ordered = recorded.toList()
+    ..sort((a, b) {
+      final bead = a.run.workBeadId.compareTo(b.run.workBeadId);
+      if (bead != 0) return bead;
+      final stage = a.run.stage.wire.compareTo(b.run.stage.wire);
+      if (stage != 0) return stage;
+      return a.run.round.compareTo(b.run.round);
+    });
+  final reclassified = <CommitteeShadowReceipt>[];
+  CommitteeShadowReceipt? before;
+  for (final receipt in ordered) {
+    final sameGroup =
+        before != null &&
+        before.run.workBeadId == receipt.run.workBeadId &&
+        before.run.stage == receipt.run.stage;
+    reclassified.add(
+      reclassifyCommitteeShadowReceipt(
+        receipt,
+        previous: sameGroup ? before : null,
+        policy: policy,
       ),
-  ],
-  missingFields: recorded.missingFields,
-  truncated: recorded.truncated,
-);
+    );
+    before = receipt;
+  }
+  return reclassified;
+}
 
 // ── the durable step-result projections ─────────────────────────────────────
 
@@ -2281,6 +2611,8 @@ CommitteeShadowReceipt replayCommitteeShadowReceipt(
 /// prose, no raw evidence, no rationale: [CommitteeSelectionEvidence]'s fact
 /// lanes, a classifier's reason and its output text are all excluded, and the
 /// only evidence that crosses is its digest and the NAMES of what was missing.
+/// Each lane's decision crosses as `rubric id -> rule id` (`laneDecisions`),
+/// and the previous round it was compared against as its round number.
 ///
 /// The `sampleId`/`joinId` here are derived exactly as
 /// [buildCommitteeShadowReceipt] derives them, so the selector entry and the
@@ -2325,8 +2657,17 @@ Map<String, String> committeeSelectionResultProjection(
     'classifierAttemptKinds': [
       for (final attempt in run.attempts) attempt.kind.wire,
     ].join(','),
+    'laneDecisions': _laneDecisionsColumn(selection),
+    'previousRound': canonicalCommitteeJson(run.previous?.round),
   };
 }
+
+/// One `rubric id -> rule id` map over every lane decision, canonical.
+String _laneDecisionsColumn(CommitteeSelection selection) =>
+    canonicalCommitteeJson({
+      for (final decision in selection.laneDecisions)
+        decision.rubricId: decision.rule.id,
+    });
 
 /// [receipt]'s evidence packet as the RESERVED `committeeShadow*` step-result
 /// entries a shadowed advance carries — the durable half of the receipt the
@@ -2338,8 +2679,10 @@ Map<String, String> committeeSelectionResultProjection(
 ///
 /// Same bound as [committeeSelectionResultProjection], applied to the receipt's
 /// wider surface: the omitted lanes cross as their rubric ids mapped to a
-/// grade, a transport and a gate disposition; the accounting crosses as
-/// contributor ids and totals. A lane's rationale, finding, owner, refinement
+/// grade, a transport and a gate disposition; every lane's decision crosses as
+/// its rule id; the preserved prior verdicts cross as their rubric ids mapped
+/// to a grade and a transport; the accounting crosses as contributor ids and
+/// totals. A lane's rationale, finding, owner, refinement
 /// and model, the route's own reason and payload, and every raw evidence lane
 /// are all excluded.
 Map<String, String> committeeShadowResultProjection(
@@ -2435,6 +2778,14 @@ Map<String, String> committeeShadowResultProjection(
     ),
     'committeeShadowTruncated': canonicalCommitteeJson(receipt.truncated),
     'committeeShadowMissingFields': receipt.missingFields.join(','),
+    'committeeShadowLaneDecisions': _laneDecisionsColumn(selection),
+    'committeeShadowPreviousRound': canonicalCommitteeJson(run.previous?.round),
+    'committeeShadowPreservedLaneGrades': canonicalCommitteeJson({
+      for (final lane in receipt.preservedLanes) lane.rubricId: lane.grade,
+    }),
+    'committeeShadowPreservedLaneTransports': canonicalCommitteeJson({
+      for (final lane in receipt.preservedLanes) lane.rubricId: lane.transport,
+    }),
   };
 }
 
@@ -2459,6 +2810,16 @@ abstract interface class CommitteeSelectionStore {
 
   /// Persists one shadow receipt.
   void writeReceipt(String workspaceDir, CommitteeShadowReceipt receipt);
+
+  /// The receipt of the PREVIOUS round of [workBeadId]'s [stage] — the greatest
+  /// recorded round strictly below [round] — or null when there is none.
+  /// Read-only.
+  CommitteeShadowReceipt? readPreviousReceipt(
+    String workspaceDir, {
+    required CommitteeStage stage,
+    required String workBeadId,
+    required int round,
+  });
 }
 
 /// The real [CommitteeSelectionStore]: strict versioned JSON under
@@ -2496,6 +2857,51 @@ class FileCommitteeSelectionStore implements CommitteeSelectionStore {
         receipt.toJson(),
       );
 
+  /// Scans the receipt directory, STRICTLY decoding every `*.json` artifact
+  /// (an unreadable or version-skewed one is skipped, never half-read), and
+  /// keeps the greatest round below [round] for the same bead and stage. Two
+  /// receipts of that round tie-break on the greater sample id, so the answer
+  /// never depends on directory order.
+  @override
+  CommitteeShadowReceipt? readPreviousReceipt(
+    String workspaceDir, {
+    required CommitteeStage stage,
+    required String workBeadId,
+    required int round,
+  }) {
+    final dir = Directory(
+      p.dirname(committeeShadowReceiptPath(workspaceDir, '_')),
+    );
+    if (!dir.existsSync()) return null;
+    CommitteeShadowReceipt? best;
+    for (final entity in dir.listSync()) {
+      if (entity is! File || p.extension(entity.path) != '.json') continue;
+      final CommitteeShadowReceipt? receipt;
+      try {
+        receipt = CommitteeShadowReceipt.fromJson(
+          jsonDecode(entity.readAsStringSync()),
+        );
+      } on Object {
+        continue;
+      }
+      if (receipt == null) continue;
+      final run = receipt.run;
+      if (run.stage != stage ||
+          run.workBeadId != workBeadId ||
+          run.round >= round) {
+        continue;
+      }
+      final current = best;
+      if (current == null ||
+          run.round > current.run.round ||
+          (run.round == current.run.round &&
+              receipt.sampleId.compareTo(current.sampleId) > 0)) {
+        best = receipt;
+      }
+    }
+    return best;
+  }
+
   void _write(String path, Map<String, Object?> json) {
     final file = File(path);
     file.parent.createSync(recursive: true);
@@ -2509,85 +2915,29 @@ int _writeToken = 0;
 
 // ── the shadow selector capability ──────────────────────────────────────────
 
-/// The prompt ONE unknown-shape classifier call receives.
-///
-/// A bounded FACT sheet, never a diff and never a worktree: the shape counts,
-/// the changed paths (clipped), and the closed menu it may answer from. The
-/// answer must be one JSON object and nothing else.
-String buildCommitteeClassifierPrompt({
-  required CommitteeSelectionEvidence evidence,
-  required List<String> allowedRubricIds,
-  int maxChangedPaths = 40,
-}) {
-  final paths = evidence.changedPaths.take(maxChangedPaths).toList();
-  final buffer = StringBuffer()
-    ..writeln(
-      'Pick the review lanes this change actually needs. Answer with ONE JSON '
-      'object and nothing else: {"rubricIds": ["<id>", ...]}.',
-    )
-    ..writeln()
-    ..writeln(
-      'Legal ids (the ONLY ones accepted, naming any other id voids '
-      'the whole answer): ${allowedRubricIds.join(', ')}.',
-    )
-    ..writeln()
-    ..writeln('## Facts')
-    ..writeln('- stage: ${evidence.stage.wire}')
-    ..writeln('- intent records: ${evidence.intent.length}')
-    ..writeln('- acceptance records: ${evidence.acceptance.length}')
-    ..writeln('- resolved path anchors: ${evidence.paths.length}')
-    ..writeln('- governing decisions: ${evidence.decisions.length}')
-    ..writeln('- prior-art records: ${evidence.priorArt.length}')
-    ..writeln('- changed paths: ${evidence.changedPaths.length}')
-    ..writeln(
-      '- pinned diff: ${evidence.pinnedDiffDigest.isEmpty ? 'none' : 'present'}',
-    );
-  if (evidence.missingEvidenceIds.isNotEmpty) {
-    buffer.writeln(
-      '- unresolved evidence: ${evidence.missingEvidenceIds.join(', ')}',
-    );
-  }
-  if (paths.isNotEmpty) {
-    buffer
-      ..writeln()
-      ..writeln('## Changed paths');
-    for (final path in paths) {
-      buffer.writeln('- $path');
-    }
-    if (paths.length < evidence.changedPaths.length) {
-      buffer.writeln(
-        '- … ${evidence.changedPaths.length - paths.length} more (clipped)',
-      );
-    }
-  }
-  return buffer.toString();
-}
-
 /// The SHADOW selector — one [ServiceCapability] per review circuit, mounted
 /// BESIDE the full committee and depended on by nothing.
 ///
-/// It always resolves to [Ok] and never carries a `grade`: it cannot [Escalate],
-/// cannot [Rewind], cannot report [Failed], and never invokes another circuit
-/// node. Every failure it meets — an unreadable artifact, an unresolvable agent
-/// config, a throwing adapter, a refused write — becomes typed provenance in
-/// the persisted run.
+/// It classifies DETERMINISTICALLY ([CommitteeSelectionPolicy.classify]) and
+/// launches no process: no classifier, no model, no sibling. It always
+/// resolves to [Ok] and never carries a `grade`: it cannot [Escalate], cannot
+/// [Rewind], cannot report [Failed], and never invokes another circuit node.
+/// Every failure it meets — an unreadable artifact, an unreadable previous
+/// receipt, a refused write — becomes typed provenance in the persisted run.
 class CommitteeSelectionCapability extends ServiceCapability {
-  /// Creates the selector over its three injected seams and a defaulted policy
+  /// Creates the selector over its two injected seams and a defaulted policy
   /// (the ambient `InheritedSeed<CommitteeSelectionPolicy>` wins when mounted).
   const CommitteeSelectionCapability({
-    required this.classifier,
     required this.evidenceSource,
     required this.store,
     this.policy = kCommitteeSelectionPolicy,
   });
 
-  /// The bounded one-shot classifier seam.
-  final CommitteeClassifier classifier;
-
   /// The stage-evidence adapter.
   final CommitteeSelectionEvidenceSource evidenceSource;
 
-  /// The durable shadow store.
+  /// The durable shadow store — written for this run, read for the previous
+  /// round's receipt.
   final CommitteeSelectionStore store;
 
   /// The policy used when the tree mounts none.
@@ -2595,24 +2945,13 @@ class CommitteeSelectionCapability extends ServiceCapability {
 
   @override
   Future<StepOutcome> run(TreeContext context, StepArgs args) async {
-    // Read EVERY ambient value at entry (synchronously, while mounted); after
-    // the first await only the captured values and the cancel token are used.
+    // The EFFECT verb (ADR-0008 D3): read every ambient value once, at the run
+    // edge, while mounted.
     final bead = context.getInheritedSeedOfExactType<Bead>();
     final workspace = context.getInheritedSeedOfExactType<Workspace>();
-    final ambient =
-        context.getInheritedSeedOfExactType<AgentConfig>() ??
-        const AgentConfig();
-    final registry =
-        context.getInheritedSeedOfExactType<EnvironmentRegistry>() ??
-        buildBuiltinEnvironmentRegistry();
-    final siteBinding =
-        context.getInheritedSeedOfExactType<SiteBinding>() ?? SiteBinding.none;
     final activePolicy =
         context.getInheritedSeedOfExactType<CommitteeSelectionPolicy>() ??
         policy;
-    final typedEnvironment = resolveEnvironment<GatherAgentEnvironment>(
-      context,
-    );
 
     final stage = CommitteeStage.fromWire(
       args.params[kCommitteeSelectionStageParam],
@@ -2654,61 +2993,23 @@ class CommitteeSelectionCapability extends ServiceCapability {
       );
     }
 
-    final attempts = <CommitteeClassifierAttempt>[];
-    var selection = activePolicy.selectDeterministic(
-      evidence: evidence,
-      fullRubricIds: fullRubricIds,
-      gatingRubricIds: gatingRubricIds,
-    );
-
-    // Only an UNKNOWN shape — zero rule matches — is eligible for inference.
-    if (selection.matchedRuleIds.isEmpty) {
-      final semantic = activePolicy.semanticRubricIds(
-        fullRubricIds: fullRubricIds,
-        gatingRubricIds: gatingRubricIds,
-      );
-      CommitteeClassifierAttempt? accepted;
-      for (
-        var attempt = 1;
-        attempt <= kCommitteeClassifierAttempts;
-        attempt++
-      ) {
-        final recorded = await _classifyOnce(
-          attempt: attempt,
-          args: args,
-          evidence: evidence,
-          semanticRubricIds: semantic,
-          bead: bead,
-          workspace: workspace,
-          workspaceDir: workspaceDir,
+    // The previous round is captured BEFORE this run is written, and rides the
+    // run itself so a replay needs no store.
+    CommitteePreviousRound? previous;
+    if (workspaceDir.isNotEmpty) {
+      try {
+        final receipt = store.readPreviousReceipt(
+          workspaceDir,
+          stage: stage,
           workBeadId: workBeadId,
-          ambient: ambient,
-          registry: registry,
-          siteBinding: siteBinding,
-          typedEnvironment: typedEnvironment,
+          round: round,
         );
-        attempts.add(recorded);
-        if (recorded.kind == CommitteeClassifierResultKind.selected) {
-          accepted = recorded;
-          break;
+        if (receipt != null) {
+          previous = CommitteePreviousRound.fromReceipt(receipt);
         }
-        if (args.cancel.isCancelled) {
-          missingFields.add('classifier:cancelled');
-          break;
-        }
+      } on Object catch (error) {
+        missingFields.add('previous-receipt:$error');
       }
-      selection = accepted == null
-          ? activePolicy.selectFullFallback(
-              evidence: evidence,
-              fullRubricIds: fullRubricIds,
-              gatingRubricIds: gatingRubricIds,
-            )
-          : activePolicy.selectFromClassifier(
-              evidence: evidence,
-              fullRubricIds: fullRubricIds,
-              gatingRubricIds: gatingRubricIds,
-              classifierRubricIds: accepted.acceptedRubricIds,
-            );
     }
 
     final run = CommitteeSelectionRun(
@@ -2717,12 +3018,17 @@ class CommitteeSelectionCapability extends ServiceCapability {
       workBeadId: workBeadId,
       round: round,
       nodePath: args.nodePath,
-      selection: selection,
+      selection: activePolicy.classify(
+        evidence: evidence,
+        fullRubricIds: fullRubricIds,
+        gatingRubricIds: gatingRubricIds,
+        previous: previous,
+      ),
       evidence: evidence,
       fullRubricIds: fullRubricIds,
       gatingRubricIds: gatingRubricIds,
-      attempts: attempts,
       missingFields: missingFields,
+      previous: previous,
     );
 
     // The DURABLE copy: the store write below lands in the per-round worktree
@@ -2740,177 +3046,6 @@ class CommitteeSelectionCapability extends ServiceCapability {
     if (missingFields.isEmpty) return Ok(payload);
     return Ok({...payload, 'missingFields': missingFields.join('; ')});
   }
-
-  Future<CommitteeClassifierAttempt> _classifyOnce({
-    required int attempt,
-    required StepArgs args,
-    required CommitteeSelectionEvidence evidence,
-    required List<String> semanticRubricIds,
-    required Bead? bead,
-    required Workspace? workspace,
-    required String workspaceDir,
-    required String workBeadId,
-    required AgentConfig ambient,
-    required EnvironmentRegistry registry,
-    required SiteBinding siteBinding,
-    required AgentEnvironment? typedEnvironment,
-  }) async {
-    CommitteeClassifierAttempt refused(String reason) =>
-        CommitteeClassifierAttempt(
-          attempt: attempt,
-          kind: CommitteeClassifierResultKind.missing,
-          usage: UsageSample(
-            lane: kCommitteeSelectionStep,
-            beadId: workBeadId.isEmpty ? null : workBeadId,
-            fromFallback: false,
-            costUsd: 0,
-            durationMs: 0,
-          ),
-          reason: reason,
-        );
-
-    if (workspace == null ||
-        workspaceDir.isEmpty ||
-        !Directory(workspaceDir).existsSync()) {
-      return refused('no-live-workspace');
-    }
-    if (semanticRubricIds.isEmpty) return refused('no-semantic-lanes');
-    // NOTHING resolved at all is not an unknown SHAPE — it is an unknown ROUND.
-    // A classifier handed zero facts can only guess, and guessing is the one
-    // thing this lane must not pay for; the full committee is the honest
-    // answer. This is also what keeps the offline suite process-free when a
-    // fixture mounts a real directory with no artifacts in it.
-    if (evidence.isEmpty) return refused('no-evidence');
-
-    final AgentConfig config;
-    try {
-      config = resolveAgentConfig(
-        // The CHEAP tier: a triage question, never a grading one. The ladder
-        // ALWAYS stamps an explicit model into `params['model']`, so this spawn
-        // is pinned by construction — there is no unpinned classifier call.
-        tier: AgentTier.cheap,
-        ambient: ambient,
-        beadMetadata: bead?.metadata ?? const {},
-        stepParams: args.params,
-        registry: registry,
-        typedEnvironment: typedEnvironment,
-      );
-    } on Object catch (error) {
-      return refused('agent-config:$error');
-    }
-    final AgentEnvironment environment;
-    try {
-      environment = registry.resolve(config.harness);
-    } on Object catch (error) {
-      return refused('environment:$error');
-    }
-
-    final model = config.params['model'];
-    final telemetryNode = '${args.nodePath}/classifier-$attempt';
-    final RuntimeConfig spawn;
-    try {
-      spawn = spawnFor(
-        environment: environment,
-        model: model,
-        endpoint: siteBinding.endpointFor(
-          name: config.harness,
-          environment: environment,
-        ),
-        brief: AgentBrief(
-          task: buildCommitteeClassifierPrompt(
-            evidence: evidence,
-            allowedRubricIds: semanticRubricIds,
-          ),
-        ),
-        workspace: workspace,
-        usageOut: usageReportPath(telemetryNode),
-      );
-    } on Object catch (error) {
-      return refused('spawn:$error');
-    }
-
-    ({bool ok, String output}) answer;
-    try {
-      answer = await classifier(spawn);
-    } on Object catch (error) {
-      answer = (ok: false, output: '');
-      return _attemptFor(
-        attempt: attempt,
-        result: const CommitteeClassifierResult.missing(),
-        answer: answer,
-        workspaceDir: workspaceDir,
-        telemetryNode: telemetryNode,
-        workBeadId: workBeadId,
-        model: model,
-        reason: 'classifier:$error',
-      );
-    }
-
-    final text = _envelopeOrStdout(workspaceDir, telemetryNode, answer.output);
-    final result = parseCommitteeClassifierResult(
-      answer.ok ? text : null,
-      activeSemanticRubricIds: semanticRubricIds,
-    );
-    return _attemptFor(
-      attempt: attempt,
-      result: result,
-      answer: answer,
-      workspaceDir: workspaceDir,
-      telemetryNode: telemetryNode,
-      workBeadId: workBeadId,
-      model: model,
-      reason: answer.ok ? '' : 'classifier:not-ok',
-    );
-  }
-
-  CommitteeClassifierAttempt _attemptFor({
-    required int attempt,
-    required CommitteeClassifierResult result,
-    required ({bool ok, String output}) answer,
-    required String workspaceDir,
-    required String telemetryNode,
-    required String workBeadId,
-    required String? model,
-    required String reason,
-  }) {
-    final report = readUsageReport(workspaceDir, telemetryNode);
-    final text = answer.output.trim();
-    return CommitteeClassifierAttempt(
-      attempt: attempt,
-      kind: result.kind,
-      usage: UsageSample(
-        lane: kCommitteeSelectionStep,
-        beadId: workBeadId.isEmpty ? null : workBeadId,
-        fromFallback: false,
-        costUsd: report?.costUsd?.toDouble(),
-        durationMs: report?.harnessDurationMs,
-      ),
-      acceptedRubricIds: result.rubricIds,
-      rejectedRubricIds: result.rejectedRubricIds,
-      outputDigest: text.isEmpty
-          ? ''
-          : sha256.convert(utf8.encode(text)).toString(),
-      reason: reason,
-      launched: true,
-      model: report?.model ?? model,
-      tokensIn: report?.tokensIn,
-      tokensOut: report?.tokensOut,
-      costUsd: report?.costUsd,
-      premiumRequests: report?.premiumRequests,
-      numTurns: report?.numTurns,
-      harnessDurationMs: report?.harnessDurationMs,
-    );
-  }
-}
-
-String? _envelopeOrStdout(
-  String workspaceDir,
-  String nodePath,
-  String stdoutText,
-) {
-  final envelope = readEnvelopeResultText(workspaceDir, nodePath);
-  if (envelope != null && envelope.trim().isNotEmpty) return envelope;
-  return stdoutText.trim().isEmpty ? null : stdoutText;
 }
 
 // ── the shadow route wrapper ────────────────────────────────────────────────
@@ -3110,7 +3245,7 @@ class _CommitteeShadowRouteInput {
 
     // A run that is absent, stale or unreadable when the route joins is an
     // explicit FULL FALLBACK — the route never waits for, or launches,
-    // classifier work of its own.
+    // selection work of its own.
     final run = fresh
         ? persisted
         : CommitteeSelectionRun(
