@@ -1,3 +1,7 @@
+## 0.7.0-dev.9
+
+ - **FIX**(validation): treat failed base probes as no regression evidence (#383).
+
 ## 0.7.0-dev.8
 
 - Vend the shared proxied-bd test harness from `package:grid_assets/testing/proxied_bd_test_support.dart` so sibling packages consume it from the published archive; `test/support/proxied_bd_test_support.dart` re-exports it.
