@@ -51,7 +51,15 @@ import 'package:path/path.dart' as p;
 import 'circuit_migration.dart';
 import 'committee.dart';
 import 'committee_selection.dart';
+import 'review_path.dart';
 import 'specify.dart';
+
+export 'review_path.dart'
+    show
+        isDocsPath,
+        isMetadataPath,
+        kMetadataPathExtensions,
+        kMetadataPathFilenames;
 
 /// The lane whose every CITED file path must resolve in the tree.
 const String kCitationPathsRubric = 'citation-paths-resolve';
@@ -123,15 +131,6 @@ enum ChangeShape {
   code,
 }
 
-/// Whether [path] is a DOCS path — any `.md` file anywhere, or any path with a
-/// segment that is exactly `docs`.
-bool isDocsPath(String path) {
-  final normalized = p.posix.normalize(path.trim());
-  if (normalized.isEmpty || normalized == '.') return false;
-  if (normalized.toLowerCase().endsWith('.md')) return true;
-  return p.posix.split(normalized).contains('docs');
-}
-
 /// The SOLE allow-listed design-round prefix — the repo-ROOT `docs/design`
 /// tree. A design round's document lives here; no other location is admitted.
 const String kDesignPathPrefix = 'docs/design';
@@ -165,42 +164,6 @@ bool isDesignPath(String path) {
   if (segments.length < 3) return false;
   if (segments[0] != 'docs' || segments[1] != 'design') return false;
   return !segments.contains('..');
-}
-
-/// The file extensions a METADATA path may carry — prose and configuration,
-/// never source.
-const Set<String> kMetadataPathExtensions = {
-  '.md',
-  '.yaml',
-  '.yml',
-  '.json',
-  '.toml',
-};
-
-/// The extension-less file NAMES a metadata path may carry.
-const Set<String> kMetadataPathFilenames = {'LICENSE'};
-
-/// Whether [path] is a METADATA path — prose or configuration, never source.
-///
-/// A strict SUPERSET of [isDocsPath]: every docs path is metadata, plus any
-/// file whose extension is in [kMetadataPathExtensions] (`CHANGELOG.md`,
-/// `pubspec.yaml`, `example-config.json`, `Cargo.toml`) and any file whose
-/// name is in [kMetadataPathFilenames] (`LICENSE`).
-///
-/// An ALLOW-list, never a deny-list of source extensions: a `.dart` / `.swift`
-/// / `.kt` / `.go` / `.py` / `.js` / `.ts` file is not metadata because it is
-/// not LISTED — and neither is an unlisted surface nobody thought of (a
-/// `tool/release.sh`, a template, an extension-less script). That keeps
-/// [changeShapeOf]'s fail-to-code posture: an unknown surface meets the CODE
-/// committee rather than sneaking past a prose one.
-bool isMetadataPath(String path) {
-  if (isDocsPath(path)) return true;
-  final normalized = p.posix.normalize(path.trim());
-  if (normalized.isEmpty || normalized == '.') return false;
-  final name = p.posix.basename(normalized);
-  if (kMetadataPathFilenames.contains(name)) return true;
-  final extension = p.posix.extension(name).toLowerCase();
-  return extension.isNotEmpty && kMetadataPathExtensions.contains(extension);
 }
 
 /// [raw] as a citable repo-relative path, or null when it is not one.

@@ -20,6 +20,36 @@
 
 ## Unreleased
 
+- Breaking: shadow committee selection is a DETERMINISTIC per-run change classifier (policy
+  version 2). `CommitteeSelectionPolicy.classify` emits one `CommitteeLaneDecision` per active
+  lane, elected or omitted under a named `CommitteeLaneRule`: a docs-only, metadata-only or
+  test-only diff elects no `regression-risk`; a spec whose complete decision lookup cites no
+  decision elects no `decision-alignment`; a later spec round re-runs only the lanes whose facts
+  moved (`acceptance-unchanged` for byte-identical criteria); a respec round re-runs only the
+  lanes that returned an action grade and the receipt carries the prior verdicts of every
+  omitted sibling (`CommitteeShadowReceipt.preservedLanes`, read through the new
+  `CommitteeSelectionStore.readPreviousReceipt`). Prior-round comparison is session-local:
+  `grid.round` restarts at zero when a governor rework remounts the circuit, so
+  `acceptance-unchanged` and targeted respec preservation apply only to strictly later rounds
+  inside the same mounted session, and a rework starts a new series (corpus replay likewise
+  links a receipt to its predecessor only across a strictly lower round). Gates are always elected;
+  uncertain evidence elects the full committee. Measured over the twelve retained shadow
+  receipts now checked in as the corpus, policy version 2 is selective on 1 of 12 rounds
+  (8.3 percent, omitting `decision-alignment` under `no-cited-decision`) and elects the full
+  committee on 11 of 12. Selection stays shadow-only pending the activation beads. Runs and receipts are written at wire
+  version 2 (version 1 still decodes), and the step results gain `laneDecisions`/`previousRound`
+  and `committeeShadowLaneDecisions`/`committeeShadowPreviousRound`/
+  `committeeShadowPreservedLane{Grades,Transports}`; every existing key is kept.
+  `reclassifyCommitteeShadowReceipt`/`reclassifyCommitteeShadowCorpus` replace the replay
+  functions. The docs path vocabulary (`isDocsPath`, `isMetadataPath`, `kMetadataPath*`) moves to
+  `review_path.dart` and is re-exported unchanged. Migration: drop
+  `buildCodeRegistry(committeeClassifier:)` and `CommitteeSelectionCapability(classifier:)`;
+  `CommitteeSelectionRule`, `selectDeterministic`/`selectFromClassifier`,
+  `parseCommitteeClassifierResult`, `buildCommitteeClassifierPrompt`,
+  `kCommitteeClassifierAllowlist`/`kCommitteeClassifierAttempts` and the
+  `isCommitteeProseOrMetadataPath`/`isCommitteeRuntimePath` predicates are removed — use
+  `classify`, `committeeDiffPathKindOf` and `isMetadataPath`; a custom
+  `CommitteeSelectionStore` must implement `readPreviousReceipt`.
 - Breaking: the `code-validation` review lane hard-blocks only on a BRANCH REGRESSION
   (`power_station#code-validation-hard-blocks-only-branch-regressions`, pow-5n53). It runs the
   bead's Validation Plan on the branch AND in a detached scratch worktree at the branch's

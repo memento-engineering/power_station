@@ -1,25 +1,27 @@
-// The SHADOW committee selector in composition (bead `pow-1nl.1.1`).
+// The SHADOW committee selector in composition (beads `pow-1nl.1.1`,
+// `pow-1d2x`).
 //
-// Two named tables, each addressable with `--plain-name`:
+// Three named tables, each addressable with `--plain-name`:
 //
 //  - `shadow authority`  the full committee still runs, its route join is
 //                        unchanged, its node paths are stable, and the
 //                        authoritative verdict comes back BYTE-FOR-BYTE — under
 //                        selector success, store success, and every failure of
 //                        both;
-//  - `classifier retry`  an unknown shape retries the classifier lane exactly
-//                        once, a second non-result records `fullFallback`, a
-//                        deterministic match spends nothing, and no sibling is
-//                        ever replayed;
+//  - `deterministic shadow capability`
+//                        the selector classifies with no inference seam at
+//                        all, reads the previous round's receipt before it
+//                        writes, preserves a targeted respec's sibling verdicts
+//                        in the receipt, and never replays a sibling;
 //  - `durable step results`
 //                        the selection run and the shadow receipt are promoted
 //                        onto the step-result maps, bounded to identities,
 //                        digests, ids and counts, and still reconstruct after
 //                        the per-round worktree is reaped.
 //
-// Fakes, not mocks: the inference seam, the store, the evidence source and the
-// authoritative route are all hand-written recorders. No process is ever
-// spawned and no model is ever called.
+// Fakes, not mocks: the store, the evidence source and the authoritative route
+// are all hand-written recorders. No process is ever spawned and no model is
+// ever called.
 import 'dart:convert';
 import 'dart:io';
 
@@ -27,10 +29,8 @@ import 'package:genesis_tree/genesis_tree.dart';
 import 'package:grid_assets/grid_assets.dart';
 import 'package:beads_dart/beads_dart.dart';
 import 'package:grid_engine/grid_engine.dart';
-import 'package:grid_runtime/grid_runtime.dart' show RuntimeConfig;
 import 'package:path/path.dart' as p;
-import 'package:grid_trajectory/grid_trajectory.dart'
-    show GateDisposition, UsageSample;
+import 'package:grid_trajectory/grid_trajectory.dart' show GateDisposition;
 import 'package:test/test.dart';
 
 import 'support/asset_fakes.dart';
@@ -38,26 +38,11 @@ import 'support/package_root.dart';
 
 // ── Fakes ───────────────────────────────────────────────────────────────────
 
-/// A counting classifier: answers the next scripted output and records the
-/// [RuntimeConfig] it was handed (so the model stamp is inspectable).
-class _CountingClassifier {
-  _CountingClassifier(this.answers);
-
-  final List<({bool ok, String output})> answers;
-  final List<RuntimeConfig> calls = [];
-
-  Future<({bool ok, String output})> call(RuntimeConfig config) async {
-    calls.add(config);
-    return calls.length <= answers.length
-        ? answers[calls.length - 1]
-        : (ok: false, output: '');
-  }
-}
-
 /// An in-memory [CommitteeSelectionStore] that can be made to throw.
 class _RecordingStore implements CommitteeSelectionStore {
   final Map<String, CommitteeSelectionRun> runs = {};
   final List<CommitteeShadowReceipt> receipts = [];
+  final List<int> previousReads = [];
   bool throwOnRead = false;
   bool throwOnWrite = false;
 
@@ -77,6 +62,28 @@ class _RecordingStore implements CommitteeSelectionStore {
   void writeReceipt(String workspaceDir, CommitteeShadowReceipt receipt) {
     if (throwOnWrite) throw StateError('write exploded');
     receipts.add(receipt);
+  }
+
+  @override
+  CommitteeShadowReceipt? readPreviousReceipt(
+    String workspaceDir, {
+    required CommitteeStage stage,
+    required String workBeadId,
+    required int round,
+  }) {
+    previousReads.add(round);
+    if (throwOnRead) throw StateError('read exploded');
+    CommitteeShadowReceipt? best;
+    for (final receipt in receipts) {
+      final run = receipt.run;
+      if (run.stage != stage ||
+          run.workBeadId != workBeadId ||
+          run.round >= round) {
+        continue;
+      }
+      if (best == null || run.round > best.run.round) best = receipt;
+    }
+    return best;
   }
 }
 
@@ -145,6 +152,8 @@ const Set<String> _kSelectorKeys = {
   'missingEvidenceIds',
   'laneInputDigests',
   'classifierAttemptKinds',
+  'laneDecisions',
+  'previousRound',
 };
 
 /// EXACTLY the reserved entries a shadowed advance promotes.
@@ -183,6 +192,10 @@ const Set<String> _kShadowKeys = {
   'committeeShadowCounterfactualCostUsd',
   'committeeShadowTruncated',
   'committeeShadowMissingFields',
+  'committeeShadowLaneDecisions',
+  'committeeShadowPreviousRound',
+  'committeeShadowPreservedLaneGrades',
+  'committeeShadowPreservedLaneTransports',
 };
 
 // ── helpers ─────────────────────────────────────────────────────────────────
@@ -195,9 +208,9 @@ Directory _tempDir(String prefix) {
   return dir;
 }
 
-/// An UNKNOWN code shape: real evidence, but no rule recognises it (no changed
-/// paths, no governing decisions) — the ONLY shape a classifier is reached for.
-CommitteeSelectionEvidence _unknownCode() => CommitteeSelectionEvidence(
+/// An UNCERTAIN code shape: real evidence, but the pinned diff names no target
+/// — the shape that elects the FULL committee.
+CommitteeSelectionEvidence _uncertainCode() => CommitteeSelectionEvidence(
   stage: CommitteeStage.codeReview,
   workBeadId: 'tg-1',
   round: 1,
@@ -205,7 +218,17 @@ CommitteeSelectionEvidence _unknownCode() => CommitteeSelectionEvidence(
   missingEvidenceIds: const ['pinned-diff:no-targets'],
 );
 
-/// A DETERMINISTIC code shape: one runtime path, three rules' worth of lanes.
+/// A TEST-ONLY code shape: it elects the gates and `test-coverage` alone.
+CommitteeSelectionEvidence _testOnlyCode() => CommitteeSelectionEvidence(
+  stage: CommitteeStage.codeReview,
+  workBeadId: 'tg-1',
+  round: 1,
+  intent: const ['title:bead-field:tg-1.title@sha256:aa'],
+  changedPaths: const ['test/committee_test.dart'],
+  pinnedDiffDigest: 'b' * 64,
+);
+
+/// A RUNTIME code shape: one runtime path elects every semantic lane.
 CommitteeSelectionEvidence _knownCode() => CommitteeSelectionEvidence(
   stage: CommitteeStage.codeReview,
   workBeadId: 'tg-1',
@@ -244,14 +267,9 @@ CommitteeSelectionEvidence _knownCode() => CommitteeSelectionEvidence(
 );
 
 CommitteeSelectionCapability _selector({
-  required _CountingClassifier classifier,
   required _CannedEvidence evidence,
   required _RecordingStore store,
-}) => CommitteeSelectionCapability(
-  classifier: classifier.call,
-  evidenceSource: evidence,
-  store: store,
-);
+}) => CommitteeSelectionCapability(evidenceSource: evidence, store: store);
 
 /// The ONE route-shaped context both wrapper tables share.
 ({FakeTreeContext context, StepArgs args}) _routeContext(
@@ -299,6 +317,78 @@ Map<String, Map<String, String>> _fullCommitteeResults() => {
       },
     },
 };
+
+({FakeTreeContext context, StepArgs args}) _specSelectorContext(
+  String workspaceDir, {
+  required int round,
+}) => (
+  context: FakeTreeContext(
+    values: {
+      Bead: bead('tg-1'),
+      Workspace: testWorkspace(
+        'tg-1',
+        workspaceDir: workspaceDir,
+        branch: 'grid/tg-1',
+      ),
+    },
+  ),
+  args: stepArgs(
+    'tg-1/spec_review/committee-selection',
+    params: {
+      kCommitteeSelectionStageParam: 'spec_review',
+      kCommitteeFullRubricsParam: kSpecCommitteeRubrics.join(','),
+      kCommitteeGatingRubricsParam: kSpecGatingRubric,
+      'grid.round': '$round',
+    },
+  ),
+);
+
+({FakeTreeContext context, StepArgs args}) _specRouteContext(
+  String workspaceDir, {
+  required int round,
+  required Map<String, Map<String, String>> results,
+}) => (
+  context: FakeTreeContext(
+    values: {
+      Bead: bead('tg-1'),
+      Workspace: testWorkspace(
+        'tg-1',
+        workspaceDir: workspaceDir,
+        branch: 'grid/tg-1',
+      ),
+      SiblingView: SiblingView(results: results),
+    },
+  ),
+  args: stepArgs(
+    'tg-1/spec_review/route',
+    params: {
+      'critics': kSpecCommitteeRubrics.join(','),
+      'gating': kSpecGatingRubric,
+      kCommitteeSelectionStageParam: 'spec_review',
+      'grid.round': '$round',
+    },
+  ),
+);
+
+/// The spec committee's lane results: every lane `A` unless [grades] says
+/// otherwise, all over one [transport].
+Map<String, Map<String, String>> _specResults(
+  Map<String, String> grades, {
+  required String transport,
+}) => {
+  for (final id in kSpecCommitteeRubrics)
+    'tg-1/spec_review/$id': {
+      'grade': grades[id] ?? 'A',
+      'transport': transport,
+      'rationale': 'lane $id',
+    },
+};
+
+/// [run]'s lane decisions as the canonical `rubric id -> rule id` column.
+String _laneDecisionsOf(CommitteeSelectionRun run) => canonicalCommitteeJson({
+  for (final decision in run.selection.laneDecisions)
+    decision.rubricId: decision.rule.id,
+});
 
 // ── the in-process committee fixture ────────────────────────────────────────
 
@@ -514,7 +604,7 @@ void main() {
     });
 
     test('a fresh run is joined; an absent or stale one is an explicit FULL '
-        'FALLBACK and never waits for the classifier', () async {
+        'FALLBACK and never waits for selection work', () async {
       final dir = _tempDir('shadow-route-join-');
       final store = _RecordingStore();
       final ctx = _routeContext(dir.path, results: _fullCommitteeResults());
@@ -540,7 +630,6 @@ void main() {
       // 2. A run from ANOTHER round is stale — same posture, named.
       final selectorCtx = _selectorContext(dir.path);
       await _selector(
-        classifier: _CountingClassifier(const []),
         evidence: _CannedEvidence((_) => _knownCode()),
         store: store,
       ).run(selectorCtx.context, selectorCtx.args);
@@ -596,10 +685,9 @@ void main() {
     test('the selector NEVER grades, gates, rewinds or fails', () async {
       final dir = _tempDir('shadow-selector-ok-');
       final store = _RecordingStore();
-      for (final evidence in [_knownCode(), _unknownCode()]) {
+      for (final evidence in [_knownCode(), _uncertainCode()]) {
         final ctx = _selectorContext(dir.path);
         final outcome = await _selector(
-          classifier: _CountingClassifier(const []),
           evidence: _CannedEvidence((_) => evidence),
           store: store,
         ).run(ctx.context, ctx.args);
@@ -612,7 +700,6 @@ void main() {
       // A THROWING evidence source is typed provenance, still an Ok.
       final ctx = _selectorContext(dir.path);
       final outcome = await _selector(
-        classifier: _CountingClassifier(const []),
         evidence: _CannedEvidence(
           (_) => _knownCode(),
           error: StateError('gather exploded'),
@@ -629,7 +716,6 @@ void main() {
       final failing = _RecordingStore()..throwOnWrite = true;
       final third = _selectorContext(dir.path);
       final result = await _selector(
-        classifier: _CountingClassifier(const []),
         evidence: _CannedEvidence((_) => _knownCode()),
         store: failing,
       ).run(third.context, third.args);
@@ -685,213 +771,256 @@ void main() {
     });
   });
 
-  group('classifier retry', () {
-    test('an unknown shape retries ONCE, then records fullFallback', () async {
-      final dir = _tempDir('classifier-retry-');
-      final classifier = _CountingClassifier(const [
-        (ok: true, output: 'not json at all'),
-        (ok: true, output: '{"rubricIds":["adr-alignment"]}'),
-      ]);
+  group('deterministic shadow capability', () {
+    test('uncertain evidence records a FULL FALLBACK with no inference seam '
+        'to call', () async {
+      final dir = _tempDir('deterministic-fallback-');
+      final store = _RecordingStore();
+      for (final evidence in <CommitteeSelectionEvidence>[
+        _uncertainCode(),
+        CommitteeSelectionEvidence(
+          stage: CommitteeStage.codeReview,
+          workBeadId: 'tg-1',
+          round: 1,
+          missingEvidenceIds: const ['anchors', 'dossier', 'pinned-diff'],
+        ),
+      ]) {
+        final ctx = _selectorContext(dir.path);
+        final outcome = await _selector(
+          evidence: _CannedEvidence((_) => evidence),
+          store: store,
+        ).run(ctx.context, ctx.args);
+        final run = store.runs.values.single;
+        expect(run.selection.source, CommitteeSelectionSource.fullFallback);
+        expect(run.selection.selectedRubricIds, kCommitteeRubrics);
+        expect(run.attempts, isEmpty, reason: 'there is no classifier at all');
+        expect(
+          {
+            for (final decision in run.selection.laneDecisions)
+              decision.rubricId: decision.rule.id,
+          },
+          {
+            for (final gate in kCodeGatingRubrics) gate: 'gate-always',
+            'spec-adherence': 'full-fallback',
+            'regression-risk': 'full-fallback',
+            'test-coverage': 'full-fallback',
+          },
+        );
+        final payload = (outcome as Ok).payload!;
+        expect(payload['classifierAttempts'], '0');
+        expect(payload['matchedRules'], 'gate-always,full-fallback');
+      }
+    });
+
+    test('a change shape elects per lane with a named rule', () async {
+      final dir = _tempDir('deterministic-shape-');
       final store = _RecordingStore();
       final ctx = _selectorContext(dir.path);
       final outcome = await _selector(
-        classifier: classifier,
-        evidence: _CannedEvidence((_) => _unknownCode()),
+        evidence: _CannedEvidence((_) => _testOnlyCode()),
         store: store,
       ).run(ctx.context, ctx.args);
-
-      expect(
-        classifier.calls,
-        hasLength(kCommitteeClassifierAttempts),
-        reason: 'the first call plus EXACTLY one retry',
-      );
-      final run = store.runs.values.single;
-      expect(run.selection.source, CommitteeSelectionSource.fullFallback);
-      expect(run.selection.selectedRubricIds, kCommitteeRubrics);
-      expect(run.selection.matchedRuleIds, isEmpty);
-      expect(run.attempts.map((a) => a.kind), [
-        CommitteeClassifierResultKind.malformed,
-        CommitteeClassifierResultKind.unknown,
-      ]);
-      expect(run.attempts.last.rejectedRubricIds, ['adr-alignment']);
-      // A20(3): the ladder ALWAYS stamps an explicit model, so no classifier
-      // spawn is ever unpinned.
-      for (final config in classifier.calls) {
-        expect(config.args, contains('--model'));
-        expect(
-          config.args[config.args.indexOf('--model') + 1],
-          kCheapModelDefault,
-        );
-      }
-      expect(outcome, isA<Ok>());
-      expect((outcome as Ok).payload!['classifierAttempts'], '2');
-    });
-
-    test('the FIRST legal answer ends the loop', () async {
-      final dir = _tempDir('classifier-accept-');
-      final classifier = _CountingClassifier(const [
-        (ok: true, output: '{"rubricIds":["test-coverage","spec-adherence"]}'),
-        (ok: true, output: '{"rubricIds":["regression-risk"]}'),
-      ]);
-      final store = _RecordingStore();
-      final ctx = _selectorContext(dir.path);
-      await _selector(
-        classifier: classifier,
-        evidence: _CannedEvidence((_) => _unknownCode()),
-        store: store,
-      ).run(ctx.context, ctx.args);
-      expect(classifier.calls, hasLength(1));
-      final run = store.runs.values.single;
-      expect(run.selection.source, CommitteeSelectionSource.classifier);
-      expect(run.selection.selectedRubricIds, [
-        ...kCodeGatingRubrics,
-        'spec-adherence',
-        'test-coverage',
-      ]);
-      expect(run.attempts.single.acceptedRubricIds, [
-        'spec-adherence',
-        'test-coverage',
-      ]);
-      expect(run.attempts.single.launched, isTrue);
-      expect(run.attempts.single.outputDigest, hasLength(64));
-    });
-
-    test('a non-successful run and a blank answer are typed MISSING, not a '
-        'grade', () async {
-      final dir = _tempDir('classifier-missing-');
-      final classifier = _CountingClassifier(const [
-        (ok: false, output: '{"rubricIds":["spec-adherence"]}'),
-        (ok: true, output: '   '),
-      ]);
-      final store = _RecordingStore();
-      final ctx = _selectorContext(dir.path);
-      await _selector(
-        classifier: classifier,
-        evidence: _CannedEvidence((_) => _unknownCode()),
-        store: store,
-      ).run(ctx.context, ctx.args);
-      expect(classifier.calls, hasLength(2));
-      final run = store.runs.values.single;
-      expect(run.attempts.map((a) => a.kind), [
-        CommitteeClassifierResultKind.missing,
-        CommitteeClassifierResultKind.missing,
-      ]);
-      expect(run.attempts.first.reason, 'classifier:not-ok');
-      expect(run.selection.source, CommitteeSelectionSource.fullFallback);
-    });
-
-    test('a DETERMINISTIC match spends nothing at all', () async {
-      final dir = _tempDir('classifier-skipped-');
-      final classifier = _CountingClassifier(const [
-        (ok: true, output: '{"rubricIds":["spec-adherence"]}'),
-      ]);
-      final store = _RecordingStore();
-      final ctx = _selectorContext(dir.path);
-      await _selector(
-        classifier: classifier,
-        evidence: _CannedEvidence((_) => _knownCode()),
-        store: store,
-      ).run(ctx.context, ctx.args);
-      expect(classifier.calls, isEmpty);
       final run = store.runs.values.single;
       expect(run.selection.source, CommitteeSelectionSource.deterministic);
-      expect(run.selection.matchedRuleIds, ['code-runtime']);
-      expect(run.attempts, isEmpty);
+      expect(run.selection.selectedRubricIds, [
+        ...kCodeGatingRubrics,
+        'test-coverage',
+      ]);
+      final payload = (outcome as Ok).payload!;
+      expect(jsonDecode(payload['laneDecisions']!), {
+        for (final gate in kCodeGatingRubrics) gate: 'gate-always',
+        'spec-adherence': 'test-only-change',
+        'regression-risk': 'no-runtime-change',
+        'test-coverage': 'test-change',
+      });
+      expect(payload['omitted'], 'spec-adherence,regression-risk');
+      expect(payload['previousRound'], 'null');
+      expect(store.previousReads, [1], reason: 'read BEFORE the write');
     });
 
-    test('no live workspace records two MISSING attempts and launches no '
-        'process (the offline fixture posture)', () async {
-      final classifier = _CountingClassifier(const [
-        (ok: true, output: '{"rubricIds":["spec-adherence"]}'),
-      ]);
+    test('a targeted respec preserves sibling verdicts and stays '
+        'observational', () async {
+      final dir = _tempDir('deterministic-respec-');
       final store = _RecordingStore();
-      final ctx = _selectorContext('/grid/worktrees/does-not-exist/tg-1');
-      final outcome = await _selector(
-        classifier: classifier,
-        evidence: _CannedEvidence((_) => _unknownCode()),
-        store: store,
-      ).run(ctx.context, ctx.args);
-      expect(classifier.calls, isEmpty);
-      final run = store.runs.values.single;
-      expect(run.attempts, hasLength(kCommitteeClassifierAttempts));
-      expect(run.attempts.map((a) => a.reason), [
-        'no-live-workspace',
-        'no-live-workspace',
-      ]);
-      expect(run.attempts.every((a) => a.launched), isFalse);
-      expect(run.selection.source, CommitteeSelectionSource.fullFallback);
-      expect(outcome, isA<Ok>());
-    });
-
-    test('a shape with NO evidence at all falls back without paying for a '
-        'guess', () async {
-      final dir = _tempDir('classifier-no-evidence-');
-      final classifier = _CountingClassifier(const []);
-      final store = _RecordingStore();
-      final ctx = _selectorContext(dir.path);
-      await _selector(
-        classifier: classifier,
-        evidence: _CannedEvidence(
-          (stage) => CommitteeSelectionEvidence(
-            stage: stage,
-            workBeadId: 'tg-1',
-            round: 1,
-            missingEvidenceIds: const ['anchors', 'dossier', 'pinned-diff'],
-          ),
+      final evidence = _CannedEvidence(
+        (stage) => CommitteeSelectionEvidence(
+          stage: stage,
+          workBeadId: 'tg-1',
+          round: 0,
+          intent: const ['title:bead-field:tg-1.title@sha256:aa'],
+          acceptance: const [
+            'acceptance_criteria:bead-field:tg-1.ac@sha256:bb',
+          ],
+          decisions: const [
+            'surface:power_station/lib|complete|decision-surface:x',
+            'decision:decision-entry:power_station#a21@sha256:cc',
+          ],
         ),
+      );
+      final selector = _selector(evidence: evidence, store: store);
+
+      // ROUND 1: the first graded round elects the whole spec committee; the
+      // route RESPECS on plan-completeness and stamps the invalidating grade.
+      final first = _specSelectorContext(dir.path, round: 1);
+      await selector.run(first.context, first.args);
+      expect(
+        store.runs.values.single.selection.selectedRubricIds,
+        kSpecCommitteeRubrics,
+      );
+      const respec = Advance({
+        'verdict': 'respec',
+        'grade': 'F',
+        'rule': 'respec',
+        'round': '1',
+      });
+      final firstRoute = _specRouteContext(
+        dir.path,
+        round: 1,
+        results: _specResults({'plan-completeness': 'D'}, transport: 'file'),
+      );
+      await CommitteeShadowRouteCapability(
+        delegate: _FakeRoute(respec),
         store: store,
-      ).run(ctx.context, ctx.args);
-      expect(classifier.calls, isEmpty);
-      expect(store.runs.values.single.attempts.map((a) => a.reason), [
-        'no-evidence',
-        'no-evidence',
+      ).route(firstRoute.context, firstRoute.args);
+      expect(store.receipts.single.actionLaneIds, ['plan-completeness']);
+
+      // ROUND 2: the selector reads round 1's receipt and elects the gate plus
+      // the ONE action lane; every sibling is preserved, not re-run.
+      final second = _specSelectorContext(dir.path, round: 2);
+      await selector.run(second.context, second.args);
+      final run = store.runs.values.single;
+      expect(run.previous!.round, 1);
+      expect(run.selection.selectedRubricIds, [
+        kSpecGatingRubric,
+        'plan-completeness',
       ]);
+      expect(
+        run.selection.decisionFor('coherence')!.rule,
+        CommitteeLaneRule.targetedRespecPreserved,
+      );
+      expect(evidence.reads, 2, reason: 'one gather read per invocation');
+
+      // The FULL committee still ran round 2 and the delegate still rules: each
+      // arm comes back as the delegate ruled it.
+      for (final verdict in <RouteVerdict>[
+        const Advance({'verdict': 'advance'}),
+        const Rewind({'specify'}, 'respec'),
+        const Escalate('hard block'),
+      ]) {
+        store.receipts.removeWhere((receipt) => receipt.run.round == 2);
+        final secondRoute = _specRouteContext(
+          dir.path,
+          round: 2,
+          results: _specResults(const {}, transport: 'envelope'),
+        );
+        final delegate = _FakeRoute(verdict);
+        final returned = await CommitteeShadowRouteCapability(
+          delegate: delegate,
+          store: store,
+        ).route(secondRoute.context, secondRoute.args);
+        expect(delegate.calls, 1);
+        final receipt = store.receipts.last;
+        expect(receipt.run.round, 2);
+        expect(
+          receipt.lanes.map((lane) => lane.rubricId),
+          kSpecCommitteeRubrics,
+          reason: 'the current full run is the authoritative observation',
+        );
+        expect(
+          {
+            for (final lane in receipt.preservedLanes)
+              lane.rubricId: lane.grade,
+          },
+          {
+            'coherence': 'A',
+            'decision-alignment': 'A',
+            'acceptance-testability': 'A',
+          },
+          reason: 'the ROUND-1 verdicts, not the round-2 observation',
+        );
+        expect(receipt.preservedLanes.map((lane) => lane.transport).toSet(), {
+          'file',
+        });
+        switch (verdict) {
+          case Advance(:final payload):
+            final promoted = (returned as Advance).payload!;
+            expect({
+              for (final entry in promoted.entries)
+                if (!entry.key.startsWith('committeeShadow'))
+                  entry.key: entry.value,
+            }, payload);
+            expect(
+              jsonDecode(promoted['committeeShadowPreservedLaneGrades']!),
+              {
+                'coherence': 'A',
+                'decision-alignment': 'A',
+                'acceptance-testability': 'A',
+              },
+            );
+            expect(promoted['committeeShadowPreviousRound'], '1');
+          case Rewind() || Escalate():
+            expect(identical(returned, verdict), isTrue);
+        }
+      }
     });
 
-    test('a retry replays NO sibling: the selector reads evidence once per '
-        'invocation and touches no other node', () async {
-      final dir = _tempDir('classifier-isolation-');
-      // FOUR scripted answers: two per invocation, so the second run is an
-      // exact repeat rather than a differently-starved one.
-      final classifier = _CountingClassifier(const [
-        (ok: true, output: 'garbage'),
-        (ok: true, output: 'garbage'),
-        (ok: true, output: 'garbage'),
-        (ok: true, output: 'garbage'),
-      ]);
-      final evidence = _CannedEvidence((_) => _unknownCode());
+    test(
+      'a throwing previous-receipt read is provenance, never a throw',
+      () async {
+        final dir = _tempDir('deterministic-previous-throws-');
+        final store = _RecordingStore()..throwOnRead = true;
+        final ctx = _selectorContext(dir.path);
+        final outcome = await _selector(
+          evidence: _CannedEvidence((_) => _knownCode()),
+          store: store,
+        ).run(ctx.context, ctx.args);
+        expect(outcome, isA<Ok>());
+        final payload = (outcome as Ok).payload!;
+        expect(payload.containsKey('grade'), isFalse);
+        expect(payload['missingFields'], contains('previous-receipt:'));
+        expect(store.runs.values.single.previous, isNull);
+      },
+    );
+
+    test('selection replays NO sibling: one gather read per invocation, no '
+        'receipt, byte-identical on re-run', () async {
+      final dir = _tempDir('deterministic-isolation-');
+      final evidence = _CannedEvidence((_) => _testOnlyCode());
       final store = _RecordingStore();
-      final selector = _selector(
-        classifier: classifier,
-        evidence: evidence,
-        store: store,
-      );
+      final selector = _selector(evidence: evidence, store: store);
       final ctx = _selectorContext(dir.path);
       await selector.run(ctx.context, ctx.args);
-      expect(
-        evidence.reads,
-        1,
-        reason: 'the retry re-runs the CLASSIFIER lane, not the gather',
-      );
+      expect(evidence.reads, 1);
       final first = store.runs.values.single.toJson();
-
-      // Re-running ONLY the selection capability, with the same evidence, is
-      // byte-identical: nothing about the committee siblings moved.
       final again = _selectorContext(dir.path);
       await selector.run(again.context, again.args);
       expect(evidence.reads, 2);
       expect(store.runs.values.single.toJson(), first);
-      expect(classifier.calls, hasLength(4));
       expect(store.receipts, isEmpty, reason: 'the selector writes no receipt');
     });
+
+    test('the registry composes NO classifier inference seam', () {
+      final registry = File(
+        p.join(packageRoot(), 'lib', 'src', 'code', 'code_capabilities.dart'),
+      ).readAsStringSync();
+      expect(registry, isNot(contains('committeeClassifier')));
+      final mount = registry.substring(
+        registry.indexOf(
+          'kCommitteeSelectionStep: CommitteeSelectionCapability(',
+        ),
+      );
+      final args = mount.substring(0, mount.indexOf('store: selectionStore'));
+      expect(args, isNot(contains('classifier')));
+      expect(args, isNot(contains('inference')));
+    });
   });
+
   group('durable step results', () {
     test('selector result promotes durable run fields', () async {
       final dir = _tempDir('durable-selector-');
       final store = _RecordingStore();
       final ctx = _selectorContext(dir.path);
       final outcome = await _selector(
-        classifier: _CountingClassifier(const []),
         evidence: _CannedEvidence((_) => _knownCode()),
         store: store,
       ).run(ctx.context, ctx.args);
@@ -902,7 +1031,7 @@ void main() {
       expect(payload['source'], 'deterministic');
       expect(payload['stage'], 'code_review');
       expect(payload['selected'], kCommitteeRubrics.join(','));
-      expect(payload['matchedRules'], 'code-runtime');
+      expect(payload['matchedRules'], 'gate-always,runtime-change');
       expect(payload['classifierAttempts'], '0');
 
       // …and the evidence packet that used to die with the worktree.
@@ -941,27 +1070,26 @@ void main() {
       );
       expect(payload, committeeSelectionResultProjection(run));
 
-      // A two-attempt classifier run pins the attempt ORDER, not just a count.
-      final retryStore = _RecordingStore();
-      final retry = _selectorContext(dir.path);
-      final retried = await _selector(
-        classifier: _CountingClassifier(const [
-          (ok: true, output: 'not json at all'),
-          (ok: true, output: '{"rubricIds":["adr-alignment"]}'),
-        ]),
-        evidence: _CannedEvidence((_) => _unknownCode()),
-        store: retryStore,
-      ).run(retry.context, retry.args);
-      final second = (retried as Ok).payload!;
-      expect(second['classifierAttempts'], '2');
-      expect(second['classifierAttemptKinds'], 'malformed,unknown');
+      expect(payload['laneDecisions'], _laneDecisionsOf(run));
+      expect(payload['previousRound'], 'null');
+
+      // An UNCERTAIN round records its full fallback and the gap that caused
+      // it — and spends no classifier attempt, because there is none.
+      final fallbackStore = _RecordingStore();
+      final fallback = _selectorContext(dir.path);
+      final fellBack = await _selector(
+        evidence: _CannedEvidence((_) => _uncertainCode()),
+        store: fallbackStore,
+      ).run(fallback.context, fallback.args);
+      final second = (fellBack as Ok).payload!;
+      expect(second['classifierAttempts'], '0');
+      expect(second['classifierAttemptKinds'], '');
       expect(second['source'], 'fullFallback');
       expect(second['missingEvidenceIds'], 'pinned-diff:no-targets');
       expect(second['omitted'], '');
 
       // An unusable step declaration still records the SAME thin skip.
       final skipped = await _selector(
-        classifier: _CountingClassifier(const []),
         evidence: _CannedEvidence((_) => _knownCode()),
         store: _RecordingStore(),
       ).run(ctx.context, stepArgs('tg-1/review/committee-selection'));
@@ -975,14 +1103,11 @@ void main() {
       final dir = _tempDir('durable-route-');
       final store = _RecordingStore();
 
-      // A CLASSIFIER selection, so the OMISSION set — the whole point of the
+      // A TEST-ONLY selection, so the OMISSION set — the whole point of the
       // sample — is non-empty.
       final selectorCtx = _selectorContext(dir.path);
       final selected = await _selector(
-        classifier: _CountingClassifier(const [
-          (ok: true, output: '{"rubricIds":["test-coverage"]}'),
-        ]),
-        evidence: _CannedEvidence((_) => _unknownCode()),
+        evidence: _CannedEvidence((_) => _testOnlyCode()),
         store: store,
       ).run(selectorCtx.context, selectorCtx.args);
       final selectorPayload = (selected as Ok).payload!;
@@ -1015,8 +1140,13 @@ void main() {
         'tg-1/review/committee-selection',
       );
       expect(payload['committeeShadowRouteNodePath'], 'tg-1/review/route');
-      expect(payload['committeeShadowSource'], 'classifier');
-      expect(payload['committeeShadowClassifierAttemptKinds'], 'selected');
+      expect(payload['committeeShadowSource'], 'deterministic');
+      expect(payload['committeeShadowClassifierAttemptKinds'], '');
+      expect(
+        payload['committeeShadowLaneDecisions'],
+        selectorPayload['laneDecisions'],
+      );
+      expect(payload['committeeShadowPreservedLaneGrades'], '{}');
       expect(
         payload['committeeShadowOmitted'],
         'spec-adherence,regression-risk',
@@ -1047,15 +1177,15 @@ void main() {
         committeeCsv(payload['committeeShadowActualContributingRunIds']),
         kCommitteeRubrics,
       );
-      expect(receipt.counterfactual.tokensIn, isNull);
-      expect(payload['committeeShadowCounterfactualTokensIn'], 'null');
-      expect(payload['committeeShadowCounterfactualTokensOut'], 'null');
-      expect(payload['committeeShadowCounterfactualCostUsd'], 'null');
+      expect(receipt.counterfactual.tokensIn, 1000);
+      expect(payload['committeeShadowCounterfactualTokensIn'], '1000');
+      expect(payload['committeeShadowCounterfactualTokensOut'], '100');
+      expect(payload['committeeShadowCounterfactualCostUsd'], '0.5');
       expect(
         committeeCsv(
           payload['committeeShadowCounterfactualContributingRunIds'],
         ),
-        [...kCodeGatingRubrics, 'test-coverage', 'classifier-attempt-1'],
+        [...kCodeGatingRubrics, 'test-coverage'],
       );
 
       // A failed IN-ROUND artifact write never discards the durable copy.
@@ -1084,9 +1214,9 @@ void main() {
         priorArt: ['prior-art-$prose'],
         context: ['context-$prose'],
         flags: ['flags-$prose'],
-        changedPaths: ['lib/src/$prose.dart'],
+        changedPaths: ['test/${prose}_test.dart'],
         pinnedDiffDigest: 'a' * 64,
-        missingEvidenceIds: const ['pinned-diff:no-targets'],
+        missingEvidenceIds: const ['dossier'],
       );
       final run = CommitteeSelectionRun(
         policyVersion: policy.policyVersion,
@@ -1094,30 +1224,14 @@ void main() {
         workBeadId: 'tg-1',
         round: 4,
         nodePath: 'tg-1/review/committee-selection',
-        selection: policy.selectFromClassifier(
+        selection: policy.classify(
           evidence: evidence,
           fullRubricIds: kCommitteeRubrics,
           gatingRubricIds: kCodeGatingRubrics,
-          classifierRubricIds: const ['test-coverage'],
         ),
         evidence: evidence,
         fullRubricIds: kCommitteeRubrics,
         gatingRubricIds: kCodeGatingRubrics,
-        attempts: [
-          CommitteeClassifierAttempt(
-            attempt: 1,
-            kind: CommitteeClassifierResultKind.selected,
-            usage: const UsageSample(
-              lane: kCommitteeSelectionStep,
-              beadId: 'tg-1',
-              fromFallback: false,
-            ),
-            acceptedRubricIds: const ['test-coverage'],
-            outputDigest: 'b' * 64,
-            reason: 'classifier-$prose',
-            launched: true,
-          ),
-        ],
       );
       final receipt = buildCommitteeShadowReceipt(
         run: run,
@@ -1155,9 +1269,9 @@ void main() {
       final selector = committeeSelectionResultProjection(run);
       final shadow = committeeShadowResultProjection(receipt);
       expect(selector.keys.toSet(), _kSelectorKeys);
-      expect(selector, hasLength(17));
+      expect(selector, hasLength(19));
       expect(shadow.keys.toSet(), _kShadowKeys);
-      expect(shadow, hasLength(34));
+      expect(shadow, hasLength(38));
       for (final key in shadow.keys) {
         expect(
           key,
@@ -1196,10 +1310,7 @@ void main() {
       const store = FileCommitteeSelectionStore();
       final selectorCtx = _selectorContext(dir.path);
       final selected = await CommitteeSelectionCapability(
-        classifier: _CountingClassifier(const [
-          (ok: true, output: '{"rubricIds":["test-coverage"]}'),
-        ]).call,
-        evidenceSource: _CannedEvidence((_) => _unknownCode()),
+        evidenceSource: _CannedEvidence((_) => _testOnlyCode()),
         store: store,
       ).run(selectorCtx.context, selectorCtx.args);
       final selectorPayload = (selected as Ok).payload!;
@@ -1319,8 +1430,12 @@ void main() {
         jsonDecode(routePayload['committeeShadowActualCostUsd']!),
         receipt.actual.costUsd,
       );
-      expect(receipt.counterfactual.costUsd, isNull);
-      expect(routePayload['committeeShadowCounterfactualCostUsd'], 'null');
+      expect(receipt.counterfactual.costUsd, 0.5);
+      expect(routePayload['committeeShadowCounterfactualCostUsd'], '0.5');
+      expect(
+        jsonDecode(routePayload['committeeShadowLaneDecisions']!),
+        jsonDecode(selectorPayload['laneDecisions']!),
+      );
       expect(
         routePayload['committeeShadowTruncated'],
         canonicalCommitteeJson(receipt.truncated),
@@ -1338,12 +1453,11 @@ void main() {
       });
     });
 
-    test('file store schema remains version 1', () async {
+    test('file store schema is version 2', () async {
       final dir = _tempDir('durable-schema-');
       const store = FileCommitteeSelectionStore();
       final selectorCtx = _selectorContext(dir.path);
       final selected = await CommitteeSelectionCapability(
-        classifier: _CountingClassifier(const []).call,
         evidenceSource: _CannedEvidence((_) => _knownCode()),
         store: store,
       ).run(selectorCtx.context, selectorCtx.args);
@@ -1378,9 +1492,11 @@ void main() {
       expect(
         runJson.keys.join(','),
         'version,policyVersion,stage,workBeadId,round,nodePath,selection,'
-        'evidence,fullRubricIds,gatingRubricIds,attempts,missingFields',
+        'evidence,fullRubricIds,gatingRubricIds,attempts,missingFields,'
+        'previous',
       );
-      expect(runJson['version'], 1);
+      expect(runJson['version'], kCommitteeSelectionWireVersion);
+      expect(runJson['version'], 2);
 
       final receiptJson =
           jsonDecode(File(receiptPath).readAsStringSync())
@@ -1389,9 +1505,9 @@ void main() {
         receiptJson.keys.join(','),
         'version,sampleId,joinId,run,route,selectedRubricIds,omittedRubricIds,'
         'lanes,actionLaneIds,gateDisposition,downstreamJoinKeys,actual,'
-        'classifier,counterfactual,truncated,missingFields',
+        'classifier,counterfactual,truncated,missingFields,preservedLanes',
       );
-      expect(receiptJson['version'], 1);
+      expect(receiptJson['version'], 2);
     });
 
     test('durable carrier source-shape fence', () {
