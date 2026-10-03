@@ -104,6 +104,9 @@
   of which are migrated here: `filing` prints a third `ERROR` label beside `PASS` and `FAIL`,
   `approve` and `unpark` render an unevaluated row as `ERROR` and stamp nothing, and the mount
   explainer maps one to its existing `UNCHECKED` outcome rather than manufacturing a blocker.
+  GitHub intake (`github_grid_assets`' `GitHubIntakeStore`) self-approves through the same
+  `ApproveService`, so a checker-incomplete filing stays open and unstamped there too, with a
+  note naming the station checker failure rather than a repository filing defect.
   Approval itself is unchanged and still fail-closed: an unevaluated row is not a passing row, so
   nothing reaches a stamp on a checker that went quiet
   (`power_station#filing-rows-separate-checker-incompleteness-from-bead-failure`).
